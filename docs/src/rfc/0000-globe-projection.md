@@ -5,10 +5,13 @@
 
 # Summary
 
-Add a globe projection to maplibre-rs with the same observable style, camera, rendering, query,
-and terrain behavior as MapLibre GL JS. The implementation keeps Web Mercator as the default,
+Add a globe projection to maplibre-rs with the same observable style, camera, rendering, and query
+behavior as MapLibre GL JS. The implementation keeps Web Mercator as the default,
 uses projection-specific camera and GPU data, subdivides flat tile geometry before projecting it
 onto a sphere, and treats the MapLibre GL JS globe test corpus as the compatibility contract.
+
+Terrain is a follow-up RFC and implementation. This RFC keeps elevation-aware interfaces and radial
+geometry semantics so terrain can be added without replacing the globe projection contract.
 
 # Motivation
 
@@ -17,16 +20,39 @@ wrong spatial relationship, duplicates the world, or cannot represent the poles.
 with MapLibre GL JS matters because applications should be able to share styles and expected camera
 behavior across the JavaScript and Rust renderers.
 
-The expected outcome is not a globe-shaped demonstration. A completed implementation supports the
-same functional areas as MapLibre GL JS:
+The expected outcome is not a globe-shaped demonstration. Globe completion supports these
+functional areas for layer types that maplibre-rs renders:
 
 - projection selection and animated globe-to-Mercator transition;
 - camera projection, unprojection, bounds fitting, panning, zooming, and inertia;
 - globe-aware tile covering, wrapping, culling, level of detail, and pole geometry;
-- vector, raster, image, symbol, background, hillshade, heatmap, and extrusion rendering;
-- antimeridian clipping, horizon occlusion, queries, markers, popups, and custom layers;
+- vector fill and line, raster, symbol, and background rendering;
+- antimeridian clipping, horizon occlusion, desktop queries, and cursor interaction;
 - atmosphere and sky rendering;
-- terrain sampling, radial elevation, picking, and globe-with-terrain rendering.
+
+Circle, heatmap, hillshade, fill-extrusion, image-source, custom-layer, marker, and popup parity are
+blocked by missing or incomplete projection-independent renderer/API support. They remain in the
+compatibility inventory and become globe requirements when their flat-renderer counterparts land.
+
+## Implementation status
+
+The private-fork implementation establishes the following reviewable stack:
+
+| Area | Status | Evidence |
+| --- | --- | --- |
+| Style projection model | Complete | Mercator, globe, vertical perspective, explicit transitions, interpolate, and step tests |
+| Globe mathematics and camera | Complete | Coordinate, orientation, horizon, ray/sphere, screen round-trip, and precision tests |
+| Tile covering and LOD | Complete | Frustum, wrap, antimeridian, pitch, rotation, and elevation-bound fixtures |
+| Raster/background meshes | Complete | Subdivided grids, borders, poles, stencil ordering, and z0 background mesh tests |
+| Fill and line projection | Complete for supported paint paths | Shared WGSL projection and CPU subdivision tests |
+| Symbols | Partial | Anchor projection, horizon culling, collision opacity, and antimeridian tests; tangent-aligned line labels remain |
+| Atmosphere | Partial | Style blend and pass ordering are implemented; physical raymarch and configurable light parity remain |
+| Interaction and queries | Partial | Versor pan, zoom-around-cursor, surface hit queries, and horizon continuation are wired; inertia/ease/fly/bounds remain |
+| GL JS render corpus | Blocked locally | CPU and WGSL checks pass; the available host exposes no wgpu adapter for golden-image rendering |
+| Terrain | Deferred | Elevation-aware math exists; DEM sampling, depth, picking, and render integration are outside this RFC |
+
+The detailed compatibility matrix is maintained in
+[`globe-projection-parity.md`](globe-projection-parity.md).
 
 # Guide-level explanation
 
@@ -49,9 +75,9 @@ At world scale, tiles are curved over a sphere and geometry behind the horizon i
 configured transition zoom, the renderer blends to the flat Mercator path. This preserves familiar
 street-level behavior and permits the flat path to remain the optimized high-zoom implementation.
 
-Terrain elevation extends radially from the globe center. A positive elevation therefore increases
-the sphere radius at a location instead of adding to a planar Z axis. Screen-to-location queries
-intersect the elevated terrain when terrain is enabled and the base sphere otherwise.
+Future terrain elevation extends radially from the globe center. A positive elevation therefore
+increases the sphere radius at a location instead of adding to a planar Z axis. This RFC implements
+the radial math and elevation-aware bounds, not DEM sampling or terrain picking.
 
 Projection selection is a style concern, while projection state is renderer-owned. Plugins and
 custom layers receive explicit projection data for the current frame instead of reading mutable
@@ -172,9 +198,8 @@ The globe transform delegates to Mercator or vertical perspective according to t
 keeps the two transforms synchronized. Terrain-driven center and zoom recalculation must not change
 the geographic center merely because terrain becomes available.
 
-Screen picking uses ray-sphere intersection. With terrain enabled it searches the ray against
-renderable DEM tiles, treats absent DEM data as zero elevation, caps the poles at zero elevation,
-and returns no location when the ray misses the globe or all renderable terrain.
+Screen picking uses ray-sphere intersection. Pixels outside the planet are rejected for feature
+queries and clamped to the visible horizon for continuous drag panning.
 
 ## Camera interaction
 
@@ -228,12 +253,12 @@ Atmosphere renders around the globe using camera position, globe radius, inverse
 light direction, and atmosphere blend. It composes with sky, background opacity, and terrain. The
 atmosphere pass runs only while globe rendering is active.
 
-## Terrain integration
+## Terrain integration boundary
 
-Globe and terrain share the same subdivided surface. DEM elevation is sampled before radial
-projection. Terrain provides globe-aware picking, tile bounds, depth, fog/sky composition, and pole
-handling. Globe depth prepass behavior changes when terrain supplies the depth surface, preventing
-two competing globe depth representations.
+Globe and terrain will share the same subdivided surface. DEM elevation is sampled before radial
+projection. A terrain implementation must provide globe-aware picking, tile bounds, depth,
+fog/sky composition, and pole handling. Globe depth-prepass behavior must change when terrain
+supplies the depth surface, preventing two competing globe depth representations.
 
 The initial globe implementation must preserve a projection-independent terrain interface so a
 terrain implementation is not embedded in the globe transform.
@@ -264,13 +289,14 @@ The compatibility gate has four levels:
    camera operations, and terrain picking.
 3. Shader and mesh tests cover subdivision, shared edges, poles, antimeridian clipping, radial
    elevation, transition endpoints, and GPU precision-sensitive coordinates.
-4. Render tests run every MapLibre GL JS `projection/globe` case, including the terrain subtree,
-   through the maplibre-rs headless renderer and compare images with platform-specific tolerances.
+4. Render tests run compatible MapLibre GL JS `projection/globe` cases through the maplibre-rs
+   headless renderer and compare images with platform-specific tolerances. Terrain fixtures belong
+   to the terrain follow-up.
 
-Every imported render case has a manifest entry recording support, expected outcome, required
-assets, and the maplibre-rs test that proves it. Unsupported cases fail the parity gate; they are not
-silently skipped. The harness applies test camera metadata, projection transitions, source loading,
-terrain setup, and all style operations used by the corpus.
+Every audited render case has a matrix entry recording support, required renderer capability, and
+the maplibre-rs evidence or blocker. A case marked implemented must run in the parity gate; blocked
+cases cannot be silently relabeled as passing. The harness must apply test camera metadata,
+projection transitions, source loading, and all style operations used by the selected corpus.
 
 Mercator render tests run in the same CI job to guard the default path. Native and WebAssembly builds
 must exercise the shared WGSL projection code.
@@ -289,8 +315,10 @@ Implementation is split into independently reviewable changes:
 8. Symbols, collision placement, queries, markers, and popups.
 9. Camera controls, jump/ease/fly, bounds fitting, and transition events.
 10. Extrusions, custom layers, atmosphere, and sky.
-11. Terrain sampling, picking, radial elevation, depth, and globe-with-terrain render parity.
-12. Full native/WebAssembly performance and regression audit.
+11. Full native/WebAssembly performance and regression audit.
+
+Terrain sampling, picking, radial elevation, depth, and globe-with-terrain render parity are planned
+in the terrain RFC rather than this delivery sequence.
 
 Each change includes the guardrail test that proves its behavior. A later change may depend on an
 earlier one, but must not combine unrelated cleanup or resolve pre-existing repository warnings.
