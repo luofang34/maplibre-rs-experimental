@@ -7,6 +7,7 @@ use cgmath::{InnerSpace, Quaternion, Vector3, Vector4};
 use crate::coords::{LatLon, EXTENT};
 
 pub mod camera;
+pub mod covering;
 pub mod tile_mesh;
 
 /// Mean Earth radius used to convert elevation in metres to globe radius.
