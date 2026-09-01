@@ -3,6 +3,7 @@ struct FragmentInput {
     @location(1) v_normal: vec2<f32>,
     @location(2) v_width2: vec2<f32>,
     @location(3) v_gamma_scale: f32,
+    @location(4) horizon_distance: f32,
 };
 
 struct Output {
@@ -11,6 +12,9 @@ struct Output {
 
 @fragment
 fn main(in: FragmentInput) -> Output {
+    if in.horizon_distance < 0.0 {
+        discard;
+    }
     // Calculate the distance of the pixel from the line in pixels
     let dist = length(in.v_normal) * in.v_width2.x;
 

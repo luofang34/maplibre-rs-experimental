@@ -1,16 +1,8 @@
-struct ShaderCamera {
-    view_proj: mat4x4<f32>,
-    view_position: vec4<f32>,
-};
-
-struct ShaderGlobals {
-    camera: ShaderCamera,
-};
-
-@group(0) @binding(0) var<uniform> globals: ShaderGlobals;
+// @include projection.vertex.wgsl
 
 struct VertexOutput {
     @location(0)  v_color: vec4<f32>,
+    @location(4) horizon_distance: f32,
     @builtin(position) position: vec4<f32>,
 };
 
@@ -18,6 +10,7 @@ struct VertexOutput {
 fn main(
     @location(0) position: vec2<f32>,
     @location(1) normal: vec2<f32>,
+    @location(2) tile_mercator_coords: vec4<f32>,
     @location(4) translate1: vec4<f32>,
     @location(5) translate2: vec4<f32>,
     @location(6) translate3: vec4<f32>,
@@ -35,8 +28,13 @@ fn main(
     //   return VertexOutput(color, vec4<f32>(0.0, 0.0, 0.0, 1.0));
     //}
 
-    var final_position = mat4x4<f32>(translate1, translate2, translate3, translate4) * vec4<f32>(position + normal * width, z, 1.0);
+    let projected = project_tile_position(
+        vec3<f32>(position + normal * width, z),
+        mat4x4<f32>(translate1, translate2, translate3, translate4),
+        tile_mercator_coords,
+    );
+    var final_position = projected.clip_position;
     final_position.z = z_index;
 
-    return VertexOutput(color, final_position);
+    return VertexOutput(color, projected.horizon_distance, final_position);
 }

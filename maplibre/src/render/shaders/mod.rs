@@ -100,7 +100,10 @@ pub struct FillShader {
 impl Shader for FillShader {
     fn describe_vertex(&self) -> VertexState {
         VertexState {
-            source: include_str!("fill.vertex.wgsl"),
+            source: concat!(
+                include_str!("projection.vertex.wgsl"),
+                include_str!("fill.vertex.wgsl")
+            ),
             entry_point: "main",
             buffers: vec![
                 // vertex data
@@ -154,6 +157,13 @@ impl Shader for FillShader {
                             format: wgpu::VertexFormat::Float32,
                             shader_location: 9,
                         },
+                        // tile_mercator_coords
+                        wgpu::VertexAttribute {
+                            offset: 4 * wgpu::VertexFormat::Float32x4.size()
+                                + 3 * wgpu::VertexFormat::Float32.size(),
+                            format: wgpu::VertexFormat::Float32x4,
+                            shader_location: 2,
+                        },
                     ],
                 },
                 // layer metadata
@@ -206,7 +216,10 @@ pub struct LineShader {
 impl Shader for LineShader {
     fn describe_vertex(&self) -> VertexState {
         VertexState {
-            source: include_str!("line.vertex.wgsl"),
+            source: concat!(
+                include_str!("projection.vertex.wgsl"),
+                include_str!("line.vertex.wgsl")
+            ),
             entry_point: "main",
             buffers: vec![
                 // vertex data
@@ -273,6 +286,13 @@ impl Shader for LineShader {
                                 + 2 * wgpu::VertexFormat::Float32.size(),
                             format: wgpu::VertexFormat::Float32,
                             shader_location: 12,
+                        },
+                        // tile_mercator_coords
+                        wgpu::VertexAttribute {
+                            offset: 4 * wgpu::VertexFormat::Float32x4.size()
+                                + 3 * wgpu::VertexFormat::Float32.size(),
+                            format: wgpu::VertexFormat::Float32x4,
+                            shader_location: 2,
                         },
                     ],
                 },
