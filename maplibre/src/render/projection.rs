@@ -6,9 +6,16 @@ use thiserror::Error;
 use wgpu::util::DeviceExt;
 
 use crate::{
-    coords::{LatLon, TILE_SIZE},
+    coords::{LatLon, ViewRegion, ZoomLevel, TILE_SIZE},
     projection::{
-        globe::camera::{GlobeCameraError, GlobeCameraOptions, GlobeCameraState},
+        globe::{
+            camera::{GlobeCameraError, GlobeCameraOptions, GlobeCameraState},
+            covering::TileElevationRange,
+            covering_tiles::{
+                covering_tiles, elevation_for_tile_culling, GlobeCoveringError,
+                GlobeCoveringOptions,
+            },
+        },
         renderer_data::{
             compose_projection_data, ProjectionDataParams, ProjectionMatrices,
             RendererProjectionData,
@@ -17,7 +24,7 @@ use crate::{
     },
     render::{
         shaders::{Mat4x4f32, Vec4f32},
-        view_state::ViewState,
+        view_state::{ViewState, ViewStatePadding},
     },
     style::Style,
 };
@@ -133,6 +140,13 @@ pub enum ProjectionStateError {
     /// A globe matrix or clipping plane cannot be represented as 32-bit floats.
     #[error("globe projection state cannot be represented as f32")]
     FloatConversion,
+    /// Globe tile traversal failed.
+    #[error("failed to select visible globe tiles")]
+    GlobeCovering {
+        /// Underlying covering error.
+        #[source]
+        source: GlobeCoveringError,
+    },
 }
 
 /// Derives the view-wide projection uniform from style and camera state.
@@ -144,21 +158,7 @@ pub fn projection_data_for_view(
         return Ok(ShaderProjectionData::default());
     }
 
-    let world_size = TILE_SIZE * 2.0_f64.powf(view_state.zoom().value());
-    let camera_position = view_state.camera().position();
-    let center = mercator_world_to_lat_lon(camera_position.x, camera_position.y, world_size);
-    let globe = GlobeCameraState::new(GlobeCameraOptions {
-        width: view_state.width(),
-        height: view_state.height(),
-        field_of_view_degrees: view_state.field_of_view().0.to_degrees(),
-        center,
-        world_size,
-        bearing_degrees: view_state.camera().get_roll().0.to_degrees(),
-        pitch_degrees: view_state.camera().get_pitch().0.to_degrees(),
-        roll_degrees: 0.0,
-        center_offset: view_state.center_offset(),
-    })
-    .map_err(|source| ProjectionStateError::GlobeCamera { source })?;
+    let globe = globe_camera_for_view(view_state)?;
     let globe_matrix = globe
         .wgpu_view_projection()
         .cast::<f32>()
@@ -180,6 +180,59 @@ pub fn projection_data_for_view(
         },
     );
     Ok(ShaderProjectionData::from_renderer_data(data))
+}
+
+/// Selects the visible region using the projection declared by the current style.
+pub fn view_region_for_projection(
+    style: &Style,
+    view_state: &ViewState,
+    visible_level: ZoomLevel,
+    padding: ViewStatePadding,
+) -> Result<Option<ViewRegion>, ProjectionStateError> {
+    if style.projection.unwrap_or_default().projection_type == ProjectionType::Mercator {
+        return Ok(view_state.create_view_region(visible_level, padding));
+    }
+    let camera = globe_camera_for_view(view_state)?;
+    let tiles = covering_tiles(
+        &camera,
+        GlobeCoveringOptions {
+            zoom: visible_level,
+            requested_zoom: view_state.zoom().value(),
+            variable_zoom: u8::from(visible_level) > 4,
+            padding: match padding {
+                ViewStatePadding::Loose => 1,
+                ViewStatePadding::Tight => 0,
+            },
+            max_tiles: 512,
+            elevation: TileElevationRange {
+                min_meters: 0.0,
+                max_meters: elevation_for_tile_culling(&camera, 0.0),
+            },
+        },
+    )
+    .map_err(|source| ProjectionStateError::GlobeCovering { source })?;
+    Ok(Some(ViewRegion::from_tiles(tiles, visible_level, 512)))
+}
+
+/// Constructs the vertical-perspective camera matching the current map view.
+pub fn globe_camera_for_view(
+    view_state: &ViewState,
+) -> Result<GlobeCameraState, ProjectionStateError> {
+    let world_size = TILE_SIZE * 2.0_f64.powf(view_state.zoom().value());
+    let camera_position = view_state.camera().position();
+    let center = mercator_world_to_lat_lon(camera_position.x, camera_position.y, world_size);
+    GlobeCameraState::new(GlobeCameraOptions {
+        width: view_state.width(),
+        height: view_state.height(),
+        field_of_view_degrees: view_state.field_of_view().0.to_degrees(),
+        center,
+        world_size,
+        bearing_degrees: view_state.camera().get_roll().0.to_degrees(),
+        pitch_degrees: view_state.camera().get_pitch().0.to_degrees(),
+        roll_degrees: 0.0,
+        center_offset: view_state.center_offset(),
+    })
+    .map_err(|source| ProjectionStateError::GlobeCamera { source })
 }
 
 fn mercator_world_to_lat_lon(x: f64, y: f64, world_size: f64) -> LatLon {

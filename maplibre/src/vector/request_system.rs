@@ -10,7 +10,10 @@ use crate::{
         source_type::{SourceType, TessellateSource},
     },
     kernel::Kernel,
-    render::{tile_view_pattern::DEFAULT_TILE_SIZE, view_state::ViewStatePadding},
+    render::{
+        projection::view_region_for_projection, tile_view_pattern::DEFAULT_TILE_SIZE,
+        view_state::ViewStatePadding,
+    },
     sdf::SymbolLayersDataComponent,
     style::layer::StyleLayer,
     tcs::system::{System, SystemResult},
@@ -50,10 +53,16 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
         }: &mut MapContext,
     ) -> SystemResult {
         let _tiles = &mut world.tiles;
-        let view_region = view_state.create_view_region(
+        let view_region = view_region_for_projection(
+            style,
+            view_state,
             view_state.zoom().zoom_level(DEFAULT_TILE_SIZE),
             ViewStatePadding::Loose,
-        );
+        )
+        .map_err(|error| {
+            tracing::error!(%error, "unable to select vector request tiles");
+            crate::tcs::system::SystemError::Setup
+        })?;
 
         if view_state.did_camera_change() || view_state.did_zoom_change() {
             if let Some(view_region) = &view_region {

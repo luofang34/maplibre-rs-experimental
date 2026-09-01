@@ -33,7 +33,6 @@ fn renderer_projection_data_preserves_shader_values() {
     assert_eq!(shader.clipping_plane, expected_plane);
     assert_eq!(shader.transition, 0.75);
 }
-
 #[test]
 fn mercator_projection_uses_inert_shader_state() {
     let style = crate::style::Style::default();
@@ -75,7 +74,46 @@ fn globe_projection_builds_active_shader_state() {
     assert!(shader.main_matrix.into_iter().flatten().all(f32::is_finite));
     assert!(shader.clipping_plane.into_iter().all(f32::is_finite));
 }
+#[test]
+fn globe_view_region_uses_reference_covering_tiles() {
+    let style = crate::style::Style {
+        projection: Some(crate::projection::ProjectionSpecification {
+            projection_type: crate::projection::ProjectionType::Globe,
+        }),
+        ..Default::default()
+    };
+    let zoom_level = crate::coords::ZoomLevel::new(3);
+    let world_size = crate::coords::TILE_SIZE * 8.0;
+    let longitude = -0.02_f64;
+    let latitude = 0.01_f64.to_radians();
+    let view = crate::render::view_state::ViewState::new(
+        crate::window::PhysicalSize::new(128, 128).expect("test viewport should be valid"),
+        crate::coords::WorldCoords::from((
+            (longitude / 360.0 + 0.5) * world_size,
+            (1.0 - latitude.tan().asinh() / std::f64::consts::PI) * 0.5 * world_size,
+        )),
+        crate::coords::Zoom::from(zoom_level),
+        cgmath::Deg(0.0),
+        cgmath::Deg(36.869_897_645_844_02),
+    );
 
+    let region = super::view_region_for_projection(
+        &style,
+        &view,
+        zoom_level,
+        crate::render::view_state::ViewStatePadding::Tight,
+    )
+    .expect("globe covering should succeed")
+    .expect("globe covering always produces an explicit region");
+    let expected = vec![
+        (3, 3, zoom_level).into(),
+        (3, 4, zoom_level).into(),
+        (4, 3, zoom_level).into(),
+        (4, 4, zoom_level).into(),
+    ];
+
+    assert_eq!(region.iter().collect::<Vec<_>>(), expected);
+}
 #[cfg(not(target_arch = "wasm32"))]
 #[tokio::test]
 async fn projection_aware_tile_pipelines_compile() {

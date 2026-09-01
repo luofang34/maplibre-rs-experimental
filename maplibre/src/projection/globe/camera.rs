@@ -183,6 +183,36 @@ impl GlobeCameraState {
         self.camera_position
     }
 
+    /// Returns the geographic center used to orient the globe.
+    pub fn center(&self) -> LatLon {
+        self.options.center
+    }
+
+    /// Returns the vertical field of view in degrees.
+    pub fn field_of_view_degrees(&self) -> f64 {
+        self.options.field_of_view_degrees
+    }
+
+    /// Returns the clockwise map bearing in degrees.
+    pub fn bearing_degrees(&self) -> f64 {
+        self.options.bearing_degrees
+    }
+
+    /// Returns the camera pitch in degrees.
+    pub fn pitch_degrees(&self) -> f64 {
+        self.options.pitch_degrees
+    }
+
+    /// Returns the Mercator world width used to scale the camera.
+    pub fn world_size(&self) -> f64 {
+        self.options.world_size
+    }
+
+    /// Returns the camera distance to the map center in screen pixels.
+    pub fn camera_to_center_distance(&self) -> f64 {
+        camera_to_center_distance(self.options)
+    }
+
     /// Returns the normalized horizon plane in unit-globe coordinates.
     pub fn clipping_plane(&self) -> Vector4<f64> {
         self.clipping_plane

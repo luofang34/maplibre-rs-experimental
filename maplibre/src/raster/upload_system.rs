@@ -8,6 +8,7 @@ use crate::{
     },
     render::{
         eventually::{Eventually, Eventually::Initialized},
+        projection::view_region_for_projection,
         tile_view_pattern::DEFAULT_TILE_SIZE,
         view_state::ViewStatePadding,
         Renderer,
@@ -34,10 +35,16 @@ pub fn upload_system(
     else {
         return Err(SystemError::Dependencies);
     };
-    let view_region = view_state.create_view_region(
+    let view_region = view_region_for_projection(
+        style,
+        view_state,
         view_state.zoom().zoom_level(DEFAULT_TILE_SIZE),
         ViewStatePadding::Loose,
-    );
+    )
+    .map_err(|error| {
+        tracing::error!(%error, "unable to select raster upload tiles");
+        SystemError::Setup
+    })?;
 
     if let Some(view_region) = &view_region {
         upload_raster_layer(
