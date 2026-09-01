@@ -74,7 +74,7 @@ fn step_stops(default: f32, values: &[serde_json::Value], zoom: f64) -> Option<f
 }
 
 fn numeric_stops(values: &[serde_json::Value]) -> Option<Vec<(f64, f32)>> {
-    if values.len() < 4 || values.len() % 2 != 0 {
+    if values.len() < 4 || !values.len().is_multiple_of(2) {
         return None;
     }
     let stops = values

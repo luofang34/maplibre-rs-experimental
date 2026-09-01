@@ -50,8 +50,6 @@ pub fn queue_system(
             return Err(SystemError::Dependencies);
         };
 
-        // Note: Background layer is uniquely not tied to any tiles.
-        // We just iterate through the style layers and issue a single quad draw for each background layer.
         for layer in &style.layers {
             if layer.type_ != "background" {
                 continue;
@@ -63,9 +61,8 @@ pub fn queue_system(
                     .unwrap_or([0.0, 0.0, 0.0, 1.0]),
                 _ => [0.0, 0.0, 0.0, 1.0],
             };
-            let color = [c[0] as f32, c[1] as f32, c[2] as f32, c[3] as f32];
             let z_index = layer.index as f32;
-            metadatas.push(BackgroundLayerMetadata { color, z_index });
+            metadatas.push(BackgroundLayerMetadata { color: c, z_index });
 
             let draw_function: Box<dyn crate::render::render_phase::Draw<LayerItem>> = if uses_globe
             {
