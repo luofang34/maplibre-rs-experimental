@@ -25,11 +25,17 @@ fn tile_position_on_unit_sphere(
     let denominator = tangent_half_latitude_squared + 1.0;
     let sin_latitude = (tangent_half_latitude_squared - 1.0) / denominator;
     let cos_latitude = 2.0 * tangent_half_latitude / denominator;
-    return vec3<f32>(
+    var surface = vec3<f32>(
         sin(longitude) * cos_latitude,
         sin_latitude,
         cos(longitude) * cos_latitude,
     );
+    if tile_position.y < -32767.5 {
+        surface = vec3<f32>(0.0, 1.0, 0.0);
+    } else if tile_position.y > 32766.5 {
+        surface = vec3<f32>(0.0, -1.0, 0.0);
+    }
+    return surface;
 }
 
 fn project_tile_position(

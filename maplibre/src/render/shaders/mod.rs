@@ -324,6 +324,13 @@ impl Shader for LineShader {
                             format: wgpu::VertexFormat::Float32x4,
                             shader_location: 2,
                         },
+                        // clip_antimeridian
+                        wgpu::VertexAttribute {
+                            offset: 5 * wgpu::VertexFormat::Float32x4.size()
+                                + 3 * wgpu::VertexFormat::Float32.size(),
+                            format: wgpu::VertexFormat::Uint32,
+                            shader_location: 14,
+                        },
                     ],
                 },
                 // layer metadata

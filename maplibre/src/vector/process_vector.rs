@@ -16,6 +16,7 @@ use crate::{
         apc::{Context, SendError},
         geometry_index::{IndexProcessor, IndexedGeometry, TileIndex},
     },
+    projection::{globe::subdivision::granularity_for_zoom, ProjectionType},
     render::{
         shaders::{ShaderSymbolVertex, ShaderSymbolVertexNew},
         ShaderVertex,
@@ -45,6 +46,7 @@ pub enum ProcessVectorError {
 pub struct VectorTileRequest {
     pub coords: WorldTileCoords,
     pub layers: HashSet<StyleLayer>,
+    pub projection: ProjectionType,
 }
 
 /// Resolve the properties of an MVT feature into a HashMap of string key-value pairs,
@@ -200,7 +202,27 @@ pub fn process_vector_tile<T: VectorTransferables, C: Context>(
 
                 match paint {
                     LayerPaint::Line(_) | LayerPaint::Fill(_) => {
-                        let mut tessellator = ZeroTessellator::<IndexDataType>::default();
+                        let granularity = match paint {
+                            LayerPaint::Fill(_) => {
+                                granularity_for_zoom(128, 2, u8::from(tile_request.coords.z))
+                            }
+                            LayerPaint::Line(_) => {
+                                granularity_for_zoom(512, 0, u8::from(tile_request.coords.z))
+                            }
+                            _ => 1,
+                        };
+                        let mut tessellator = if tile_request.projection == ProjectionType::Globe {
+                            let zoom = usize::from(u8::from(tile_request.coords.z));
+                            let last_tile = i64::from(crate::coords::ZOOM_BOUNDS[zoom]) - 1;
+                            ZeroTessellator::<IndexDataType>::default().with_globe_subdivision(
+                                granularity,
+                                u8::from(tile_request.coords.z) == 0,
+                                tile_request.coords.y == 0,
+                                i64::from(tile_request.coords.y) == last_tile,
+                            )
+                        } else {
+                            ZeroTessellator::<IndexDataType>::default()
+                        };
                         match paint {
                             LayerPaint::Fill(p) => {
                                 tessellator.style_property = p.fill_color.clone()
@@ -412,6 +434,7 @@ mod tests {
             VectorTileRequest {
                 coords: (0, 0, ZoomLevel::default()).into(),
                 layers: Default::default(),
+                projection: crate::projection::ProjectionType::Mercator,
             },
             &mut ProcessVectorContext::<DefaultVectorTransferables, _>::new(DummyContext),
         );

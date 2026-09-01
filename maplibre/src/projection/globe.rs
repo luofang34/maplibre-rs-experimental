@@ -9,6 +9,7 @@ use crate::coords::{LatLon, EXTENT};
 pub mod camera;
 pub mod covering;
 pub mod covering_tiles;
+pub mod subdivision;
 pub mod tile_mesh;
 
 /// Mean Earth radius used to convert elevation in metres to globe radius.

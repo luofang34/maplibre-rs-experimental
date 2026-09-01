@@ -142,6 +142,7 @@ pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context +
                         VectorTileRequest {
                             coords,
                             layers: requested_layers,
+                            projection: style.projection.unwrap_or_default().projection_type,
                         },
                         &mut pipeline_context,
                     )

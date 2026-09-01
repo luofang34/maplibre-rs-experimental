@@ -141,6 +141,7 @@ impl HeadlessMap {
             VectorTileRequest {
                 coords: target_coords,
                 layers: [layer].into_iter().cloned().collect(),
+                projection: crate::projection::ProjectionType::Mercator,
             },
             &mut processor,
         )

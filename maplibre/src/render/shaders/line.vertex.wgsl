@@ -7,6 +7,8 @@ struct VertexOutput {
     @location(2) v_width2: vec2<f32>,
     @location(3) v_gamma_scale: f32,
     @location(4) horizon_distance: f32,
+    @location(5) tile_x: f32,
+    @location(6) @interpolate(flat) clip_antimeridian: u32,
 };
 
 @vertex
@@ -24,6 +26,7 @@ fn main(
     @location(11) viewport_width: f32,
     @location(12) viewport_height: f32,
     @location(13) line_width: f32,
+    @location(14) clip_antimeridian: u32,
 ) -> VertexOutput {
     let line_width_px = line_width;
     let blur = 0.0;
@@ -70,5 +73,7 @@ fn main(
         vec2<f32>(outset, inset),
         1.0,
         projected_center.horizon_distance,
+        position.x,
+        clip_antimeridian,
     );
 }
