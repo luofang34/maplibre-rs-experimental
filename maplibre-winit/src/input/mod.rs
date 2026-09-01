@@ -16,6 +16,7 @@ mod camera_handler;
 mod debug_handler;
 mod pan_handler;
 mod pinch_handler;
+mod projection;
 mod query_handler;
 mod shift_handler;
 mod zoom_handler;

@@ -4,7 +4,7 @@ use cgmath::{EuclideanSpace, Point2, Vector2, Zero};
 use maplibre::context::MapContext;
 use winit::event::{ElementState, MouseButton};
 
-use super::UpdateState;
+use super::{projection::pan_globe_between_pixels, UpdateState};
 
 #[derive(Default)]
 pub struct PanHandler {
@@ -15,7 +15,13 @@ pub struct PanHandler {
 }
 
 impl UpdateState for PanHandler {
-    fn update_state(&mut self, MapContext { view_state, .. }: &mut MapContext, _dt: Duration) {
+    fn update_state(
+        &mut self,
+        MapContext {
+            style, view_state, ..
+        }: &mut MapContext,
+        _dt: Duration,
+    ) {
         if !self.is_panning {
             return;
         }
@@ -23,6 +29,10 @@ impl UpdateState for PanHandler {
         if let (Some(window_position), Some(start_window_position)) =
             (self.window_position, self.start_window_position)
         {
+            if pan_globe_between_pixels(style, view_state, start_window_position, window_position) {
+                self.start_window_position = Some(window_position);
+                return;
+            }
             let view_proj = view_state.view_projection();
             let inverted_view_proj = view_proj.invert();
 

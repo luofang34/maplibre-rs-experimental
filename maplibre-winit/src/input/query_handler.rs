@@ -7,6 +7,7 @@ use maplibre::{
 };
 use winit::event::{ElementState, MouseButton};
 
+use crate::input::projection::{globe_world_at_screen, uses_globe};
 use crate::input::UpdateState;
 
 pub struct QueryHandler {
@@ -59,7 +60,10 @@ impl UpdateState for QueryHandler {
     fn update_state(
         &mut self,
         MapContext {
-            view_state, world, ..
+            style,
+            view_state,
+            world,
+            ..
         }: &mut MapContext,
         _dt: Duration,
     ) {
@@ -71,11 +75,17 @@ impl UpdateState for QueryHandler {
                 let z = view_state.zoom().zoom_level(DEFAULT_TILE_SIZE); // FIXME: can be wrong, if tiles of different z are visible
                 let zoom = view_state.zoom();
 
-                if let Some(coordinates) = view_state.window_to_world_at_ground(
-                    &window_position,
-                    &inverted_view_proj,
-                    false,
-                ) {
+                let coordinates = if uses_globe(style, view_state) {
+                    globe_world_at_screen(style, view_state, window_position)
+                        .map(|coordinates| Vector2::new(coordinates.x, coordinates.y))
+                } else {
+                    view_state.window_to_world_at_ground(
+                        &window_position,
+                        &inverted_view_proj,
+                        false,
+                    )
+                };
+                if let Some(coordinates) = coordinates {
                     if let Some(geometries) = world
                         .tiles
                         .geometry_index
