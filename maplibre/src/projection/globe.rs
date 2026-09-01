@@ -6,6 +6,8 @@ use cgmath::{InnerSpace, Quaternion, Vector3, Vector4};
 
 use crate::coords::{LatLon, EXTENT};
 
+pub mod tile_mesh;
+
 /// Mean Earth radius used to convert elevation in metres to globe radius.
 pub const EARTH_RADIUS_METERS: f64 = 6_371_008.8;
 
