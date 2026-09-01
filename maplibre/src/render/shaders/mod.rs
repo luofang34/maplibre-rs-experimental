@@ -420,6 +420,8 @@ pub struct ShaderTileMetadata {
     pub zoom_factor: f32,
     pub viewport_width: f32,
     pub viewport_height: f32,
+    pub tile_mercator_coords: Vec4f32,
+    pub clip_antimeridian: u32,
 }
 
 impl ShaderTileMetadata {
@@ -429,6 +431,8 @@ impl ShaderTileMetadata {
             zoom_factor,
             viewport_width: 512.0,
             viewport_height: 512.0,
+            tile_mercator_coords: [0.0, 0.0, 1.0 / 4096.0, 1.0 / 4096.0],
+            clip_antimeridian: 0,
         }
     }
 }
