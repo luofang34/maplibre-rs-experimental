@@ -14,6 +14,17 @@ pub mod tile_mesh;
 
 /// Mean Earth radius used to convert elevation in metres to globe radius.
 pub const EARTH_RADIUS_METERS: f64 = 6_371_008.8;
+const GLOBE_TRANSITION_START_ZOOM: f64 = 10.0;
+const GLOBE_TRANSITION_END_ZOOM: f64 = 12.0;
+
+/// Returns the GL JS globe shorthand's vertical-perspective weight.
+pub fn transition_for_zoom(zoom: f64) -> f32 {
+    if !zoom.is_finite() {
+        return 0.0;
+    }
+    ((GLOBE_TRANSITION_END_ZOOM - zoom) / (GLOBE_TRANSITION_END_ZOOM - GLOBE_TRANSITION_START_ZOOM))
+        .clamp(0.0, 1.0) as f32
+}
 
 const MIN_HORIZONTAL_LENGTH: f64 = 1e-6;
 const MIN_VECTOR_LENGTH_SQUARED: f64 = 1e-24;

@@ -211,7 +211,10 @@ pub fn process_vector_tile<T: VectorTransferables, C: Context>(
                             }
                             _ => 1,
                         };
-                        let mut tessellator = if tile_request.projection == ProjectionType::Globe {
+                        let use_globe_geometry = tile_request
+                            .projection
+                            .uses_globe_rendering(f64::from(u8::from(tile_request.coords.z)));
+                        let mut tessellator = if use_globe_geometry {
                             let zoom = usize::from(u8::from(tile_request.coords.z));
                             let last_tile = i64::from(crate::coords::ZOOM_BOUNDS[zoom]) - 1;
                             ZeroTessellator::<IndexDataType>::default().with_globe_subdivision(

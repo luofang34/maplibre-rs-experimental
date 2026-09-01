@@ -16,6 +16,47 @@ fn parses_globe_projection_specification() {
 }
 
 #[test]
+fn parses_vertical_perspective_projection_specification() {
+    let specification: ProjectionSpecification =
+        serde_json::from_str(r#"{"type":"vertical-perspective"}"#)
+            .expect("vertical-perspective projection should deserialize");
+
+    assert_eq!(
+        specification.projection_type,
+        ProjectionType::VerticalPerspective
+    );
+    assert_eq!(specification.projection_type.globe_transition(30.0), 1.0);
+}
+
+#[test]
+fn projection_expression_interpolates_and_round_trips() {
+    let json =
+        r#"{"type":["interpolate",["linear"],["zoom"],10,"vertical-perspective",12,"mercator"]}"#;
+    let specification: ProjectionSpecification =
+        serde_json::from_str(json).expect("projection expression should deserialize");
+
+    assert_eq!(specification.projection_type.globe_transition(9.0), 1.0);
+    assert_eq!(specification.projection_type.globe_transition(11.0), 0.5);
+    assert_eq!(specification.projection_type.globe_transition(13.0), 0.0);
+    assert_eq!(
+        serde_json::from_str::<ProjectionSpecification>(
+            &serde_json::to_string(&specification).expect("projection should serialize"),
+        )
+        .expect("serialized projection should deserialize"),
+        specification
+    );
+}
+
+#[test]
+fn projection_expression_rejects_invalid_zoom_stops() {
+    let result = serde_json::from_str::<ProjectionSpecification>(
+        r#"{"type":["interpolate",["linear"],["zoom"],12,"vertical-perspective",10,"mercator"]}"#,
+    );
+
+    assert!(result.is_err());
+}
+
+#[test]
 fn defaults_to_mercator_projection() {
     assert_eq!(ProjectionType::default(), ProjectionType::Mercator);
 }

@@ -20,7 +20,6 @@ use crate::{
             compose_projection_data, ProjectionDataParams, ProjectionMatrices,
             RendererProjectionData,
         },
-        ProjectionType,
     },
     render::{
         shaders::{Mat4x4f32, Vec4f32},
@@ -154,7 +153,12 @@ pub fn projection_data_for_view(
     style: &Style,
     view_state: &ViewState,
 ) -> Result<ShaderProjectionData, ProjectionStateError> {
-    if style.projection.unwrap_or_default().projection_type == ProjectionType::Mercator {
+    let transition = style.projection.as_ref().map_or(0.0, |specification| {
+        specification
+            .projection_type
+            .globe_transition(view_state.zoom().value())
+    });
+    if transition == 0.0 {
         return Ok(ShaderProjectionData::default());
     }
 
@@ -173,7 +177,7 @@ pub fn projection_data_for_view(
             globe: globe_matrix,
         },
         clipping_plane,
-        1.0,
+        transition,
         ProjectionDataParams {
             apply_globe_matrix: true,
             ..ProjectionDataParams::default()
@@ -189,7 +193,12 @@ pub fn view_region_for_projection(
     visible_level: ZoomLevel,
     padding: ViewStatePadding,
 ) -> Result<Option<ViewRegion>, ProjectionStateError> {
-    if style.projection.unwrap_or_default().projection_type == ProjectionType::Mercator {
+    let uses_globe = style.projection.as_ref().is_some_and(|specification| {
+        specification
+            .projection_type
+            .uses_globe_rendering(view_state.zoom().value())
+    });
+    if !uses_globe {
         return Ok(view_state.create_view_region(visible_level, padding));
     }
     let camera = globe_camera_for_view(view_state)?;

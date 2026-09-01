@@ -74,6 +74,40 @@ fn globe_projection_builds_active_shader_state() {
     assert!(shader.main_matrix.into_iter().flatten().all(f32::is_finite));
     assert!(shader.clipping_plane.into_iter().all(f32::is_finite));
 }
+
+#[test]
+fn globe_shorthand_transitions_to_mercator_at_high_zoom() {
+    let style = crate::style::Style {
+        projection: Some(crate::projection::ProjectionSpecification {
+            projection_type: crate::projection::ProjectionType::Globe,
+        }),
+        ..Default::default()
+    };
+    let transition_view = crate::render::view_state::ViewState::new(
+        crate::window::PhysicalSize::new(800, 600).expect("test viewport should be valid"),
+        crate::coords::WorldCoords::from((1_048_576.0, 1_048_576.0)),
+        crate::coords::Zoom::new(11.0),
+        cgmath::Deg(0.0),
+        cgmath::Deg(45.0),
+    );
+    let mercator_view = crate::render::view_state::ViewState::new(
+        crate::window::PhysicalSize::new(800, 600).expect("test viewport should be valid"),
+        crate::coords::WorldCoords::from((2_097_152.0, 2_097_152.0)),
+        crate::coords::Zoom::new(12.0),
+        cgmath::Deg(0.0),
+        cgmath::Deg(45.0),
+    );
+
+    let transition = super::projection_data_for_view(&style, &transition_view)
+        .expect("transition projection should be valid");
+    let mercator = super::projection_data_for_view(&style, &mercator_view)
+        .expect("high-zoom projection should be valid");
+    let identity: [[f32; 4]; 4] = cgmath::Matrix4::from_scale(1.0).into();
+
+    assert_eq!(transition.transition, 0.5);
+    assert_eq!(mercator.transition, 0.0);
+    assert_eq!(mercator.main_matrix, identity);
+}
 #[test]
 fn globe_view_region_uses_reference_covering_tiles() {
     let style = crate::style::Style {

@@ -2,7 +2,6 @@
 
 use crate::{
     context::MapContext,
-    projection::ProjectionType,
     raster::render_commands::DrawRasterTiles,
     render::{
         eventually::{Eventually, Eventually::Initialized},
@@ -16,7 +15,14 @@ use crate::{
     },
 };
 
-pub fn queue_system(MapContext { style, world, .. }: &mut MapContext) -> SystemResult {
+pub fn queue_system(
+    MapContext {
+        style,
+        view_state,
+        world,
+        ..
+    }: &mut MapContext,
+) -> SystemResult {
     let Some((Initialized(tile_view_pattern),)) = world
         .resources
         .query::<(&Eventually<WgpuTileViewPattern>,)>()
@@ -25,6 +31,11 @@ pub fn queue_system(MapContext { style, world, .. }: &mut MapContext) -> SystemR
     };
 
     let mut items = Vec::new();
+    let uses_globe = style.projection.as_ref().is_some_and(|specification| {
+        specification
+            .projection_type
+            .uses_globe_rendering(view_state.zoom().value())
+    });
 
     for view_tile in tile_view_pattern.iter() {
         let coords = &view_tile.coords();
@@ -44,7 +55,7 @@ pub fn queue_system(MapContext { style, world, .. }: &mut MapContext) -> SystemR
                 source_shape: source_shape.clone(),
             };
             let mut masks = Vec::with_capacity(2);
-            if style.projection.unwrap_or_default().projection_type == ProjectionType::Globe {
+            if uses_globe {
                 masks.push(TileMaskItem {
                     draw_function: Box::new(DrawState::<TileMaskItem, DrawMasks>::new()),
                     source_shape: source_shape.clone(),

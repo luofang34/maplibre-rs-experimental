@@ -12,6 +12,16 @@ use super::{
     orientation_from_lat_lon_bearing, ray_sphere_intersection, unit_sphere_to_lat_lon,
     EARTH_RADIUS_METERS,
 };
+
+#[test]
+fn globe_shorthand_transitions_between_zoom_ten_and_twelve() {
+    assert_eq!(super::transition_for_zoom(9.0), 1.0);
+    assert_eq!(super::transition_for_zoom(10.0), 1.0);
+    assert_eq!(super::transition_for_zoom(11.0), 0.5);
+    assert_eq!(super::transition_for_zoom(12.0), 0.0);
+    assert_eq!(super::transition_for_zoom(16.0), 0.0);
+    assert_eq!(super::transition_for_zoom(f64::NAN), 0.0);
+}
 use crate::coords::LatLon;
 
 fn assert_close(left: f64, right: f64) {

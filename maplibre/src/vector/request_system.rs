@@ -142,7 +142,12 @@ pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context +
                         VectorTileRequest {
                             coords,
                             layers: requested_layers,
-                            projection: style.projection.unwrap_or_default().projection_type,
+                            projection: style
+                                .projection
+                                .as_ref()
+                                .map_or_else(Default::default, |specification| {
+                                    specification.projection_type.clone()
+                                }),
                         },
                         &mut pipeline_context,
                     )
