@@ -675,7 +675,10 @@ pub struct SymbolShader {
 impl Shader for SymbolShader {
     fn describe_vertex(&self) -> VertexState {
         VertexState {
-            source: include_str!("sdf_new.vertex.wgsl"),
+            source: concat!(
+                include_str!("projection.vertex.wgsl"),
+                include_str!("sdf_new.vertex.wgsl")
+            ),
             entry_point: "main",
             buffers: vec![
                 // vertex data
@@ -736,6 +739,13 @@ impl Shader for SymbolShader {
                             format: wgpu::VertexFormat::Float32,
                             shader_location: 9,
                         },
+                        // tile_mercator_coords
+                        wgpu::VertexAttribute {
+                            offset: 4 * wgpu::VertexFormat::Float32x4.size()
+                                + 3 * wgpu::VertexFormat::Float32.size(),
+                            format: wgpu::VertexFormat::Float32x4,
+                            shader_location: 3,
+                        },
                     ],
                 },
                 // layer metadata
@@ -758,18 +768,15 @@ impl Shader for SymbolShader {
                     ],
                 },
                 // features
-                //VertexBufferLayout {
-                //    array_stride: std::mem::size_of::<SDFShaderFeatureMetadata>() as u64,
-                //    step_mode: wgpu::VertexStepMode::Vertex,
-                //    attributes: vec![
-                //        // opacity
-                //        wgpu::VertexAttribute {
-                //            offset: 0,
-                //            format: wgpu::VertexFormat::Float32,
-                //            shader_location: 12,
-                //        },
-                //    ],
-                //},
+                VertexBufferLayout {
+                    array_stride: std::mem::size_of::<SDFShaderFeatureMetadata>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: vec![wgpu::VertexAttribute {
+                        offset: 0,
+                        format: wgpu::VertexFormat::Float32,
+                        shader_location: 12,
+                    }],
+                },
             ],
         }
     }

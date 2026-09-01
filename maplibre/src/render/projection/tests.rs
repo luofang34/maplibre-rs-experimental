@@ -154,7 +154,7 @@ async fn projection_aware_tile_pipelines_compile() {
     use crate::render::{
         resource::{RenderPipeline, TilePipeline},
         settings::RendererSettings,
-        shaders::{FillShader, LineShader, RasterShader, Shader, TileMaskShader},
+        shaders::{FillShader, LineShader, RasterShader, Shader, SymbolShader, TileMaskShader},
     };
 
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
@@ -167,9 +167,9 @@ async fn projection_aware_tile_pipelines_compile() {
         .expect("GPU device should be available");
     let projection = super::ProjectionGpuResources::new(&device);
     let format = wgpu::TextureFormat::Rgba8Unorm;
-    let shaders: [(&str, Box<dyn Shader>, bool); 4] = [
-        ("test fill", Box::new(FillShader { format }), false),
-        ("test line", Box::new(LineShader { format }), false),
+    let shaders: [(&str, Box<dyn Shader>, bool, bool); 5] = [
+        ("test fill", Box::new(FillShader { format }), false, false),
+        ("test line", Box::new(LineShader { format }), false, false),
         (
             "test mask",
             Box::new(TileMaskShader {
@@ -178,11 +178,23 @@ async fn projection_aware_tile_pipelines_compile() {
                 debug_lines: false,
             }),
             false,
+            false,
         ),
-        ("test raster", Box::new(RasterShader { format }), true),
+        (
+            "test raster",
+            Box::new(RasterShader { format }),
+            true,
+            false,
+        ),
+        (
+            "test symbol",
+            Box::new(SymbolShader { format }),
+            false,
+            true,
+        ),
     ];
 
-    for (name, shader, raster) in shaders {
+    for (name, shader, raster, glyph) in shaders {
         TilePipeline::new(
             name.into(),
             RendererSettings::default(),
@@ -194,7 +206,7 @@ async fn projection_aware_tile_pipelines_compile() {
             false,
             false,
             raster,
-            false,
+            glyph,
         )
         .describe_render_pipeline()
         .initialize_with_prefix_layouts(&device, &[projection.bind_group_layout()]);

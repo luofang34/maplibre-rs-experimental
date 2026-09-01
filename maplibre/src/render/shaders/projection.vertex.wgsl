@@ -40,6 +40,24 @@ fn tile_position_on_unit_sphere(
     return surface;
 }
 
+fn globe_circumference_ratio_at_tile_y(
+    tile_y: f32,
+    tile_mercator_coords: vec4<f32>,
+) -> f32 {
+    let mercator_y = tile_mercator_coords.y + tile_mercator_coords.w * tile_y;
+    let tangent_half_latitude = exp(PROJECTION_PI - mercator_y * PROJECTION_TWO_PI);
+    return (2.0 * tangent_half_latitude) /
+        (tangent_half_latitude * tangent_half_latitude + 1.0);
+}
+
+fn project_symbol_scale(tile_y: f32, tile_mercator_coords: vec4<f32>) -> f32 {
+    let circumference = max(
+        globe_circumference_ratio_at_tile_y(tile_y, tile_mercator_coords),
+        1e-6,
+    );
+    return mix(1.0, 1.0 / circumference, projection.transition_and_padding.x);
+}
+
 fn globe_horizon_distance(
     surface: vec3<f32>,
     transition: f32,
