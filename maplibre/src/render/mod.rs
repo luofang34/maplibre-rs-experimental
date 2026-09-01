@@ -611,6 +611,7 @@ impl<E: Environment> Plugin<E> for RenderPlugin {
         resources.init::<RenderPhase<TranslucentItem>>();
         // tile_view_pattern:
         resources.insert(Eventually::<WgpuTileViewPattern>::Uninitialized);
+        resources.insert(Eventually::<projection::ProjectionGpuResources>::Uninitialized);
         resources.init::<ViewTileSources>();
         // masks
         resources.insert(Eventually::<MaskPipeline>::Uninitialized);

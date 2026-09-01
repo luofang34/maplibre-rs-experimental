@@ -4,8 +4,7 @@ use cgmath::{Matrix4, Vector4};
 
 use super::ShaderProjectionData;
 use crate::{
-    projection::renderer_data::RendererProjectionData,
-    render::shaders::ShaderTileMetadata,
+    projection::renderer_data::RendererProjectionData, render::shaders::ShaderTileMetadata,
 };
 
 #[test]
@@ -33,4 +32,44 @@ fn renderer_projection_data_preserves_shader_values() {
     assert_eq!(shader.main_matrix, expected_matrix);
     assert_eq!(shader.clipping_plane, expected_plane);
     assert_eq!(shader.transition, 0.75);
+}
+
+#[test]
+fn mercator_projection_uses_inert_shader_state() {
+    let style = crate::style::Style::default();
+    let view = crate::render::view_state::ViewState::new(
+        crate::window::PhysicalSize::new(512, 512).expect("test viewport should be valid"),
+        crate::coords::WorldCoords::from((256.0, 256.0)),
+        crate::coords::Zoom::default(),
+        cgmath::Deg(0.0),
+        cgmath::Deg(45.0),
+    );
+
+    let shader = super::projection_data_for_view(&style, &view)
+        .expect("Mercator projection state should be valid");
+
+    assert_eq!(shader.transition, 0.0);
+    assert_eq!(shader.clipping_plane, [0.0, 0.0, 0.0, 1.0]);
+}
+
+#[test]
+fn globe_projection_builds_active_shader_state() {
+    let mut style = crate::style::Style::default();
+    style.projection = Some(crate::projection::ProjectionSpecification {
+        projection_type: crate::projection::ProjectionType::Globe,
+    });
+    let view = crate::render::view_state::ViewState::new(
+        crate::window::PhysicalSize::new(800, 600).expect("test viewport should be valid"),
+        crate::coords::WorldCoords::from((256.0, 256.0)),
+        crate::coords::Zoom::default(),
+        cgmath::Deg(0.0),
+        cgmath::Deg(45.0),
+    );
+
+    let shader = super::projection_data_for_view(&style, &view)
+        .expect("globe projection state should be valid");
+
+    assert_eq!(shader.transition, 1.0);
+    assert!(shader.main_matrix.into_iter().flatten().all(f32::is_finite));
+    assert!(shader.clipping_plane.into_iter().all(f32::is_finite));
 }

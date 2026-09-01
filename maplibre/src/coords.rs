@@ -202,6 +202,11 @@ impl Zoom {
         Zoom(zoom)
     }
 
+    /// Returns the continuous zoom value.
+    pub fn value(self) -> f64 {
+        self.0
+    }
+
     pub fn level(&self) -> f32 {
         self.0 as f32
     }

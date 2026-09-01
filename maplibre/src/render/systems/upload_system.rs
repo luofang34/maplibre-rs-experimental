@@ -3,6 +3,7 @@ use crate::{
     context::MapContext,
     render::{
         eventually::{Eventually, Eventually::Initialized},
+        projection::{projection_data_for_view, ProjectionGpuResources},
         tile_view_pattern::WgpuTileViewPattern,
         Renderer,
     },
@@ -12,14 +13,17 @@ use crate::{
 pub fn upload_system(
     MapContext {
         world,
+        style,
         view_state,
         renderer: Renderer { queue, .. },
         ..
     }: &mut MapContext,
 ) -> SystemResult {
-    let Some(Initialized(tile_view_pattern)) = world
-        .resources
-        .query_mut::<&mut Eventually<WgpuTileViewPattern>>()
+    let Some((Initialized(tile_view_pattern), Initialized(projection_resources))) =
+        world.resources.query_mut::<(
+            &mut Eventually<WgpuTileViewPattern>,
+            &mut Eventually<ProjectionGpuResources>,
+        )>()
     else {
         return Err(SystemError::Dependencies);
     };
@@ -31,6 +35,11 @@ pub fn upload_system(
         view_state.width() as f32,
         view_state.height() as f32,
     );
+    let projection_data = projection_data_for_view(style, view_state).map_err(|error| {
+        tracing::error!(%error, "unable to prepare projection state");
+        SystemError::Setup
+    })?;
+    projection_resources.upload(queue, projection_data);
 
     Ok(())
 }
