@@ -154,7 +154,10 @@ async fn projection_aware_tile_pipelines_compile() {
     use crate::render::{
         resource::{RenderPipeline, TilePipeline},
         settings::RendererSettings,
-        shaders::{FillShader, LineShader, RasterShader, Shader, SymbolShader, TileMaskShader},
+        shaders::{
+            AtmosphereShader, FillShader, GlobeBackgroundShader, LineShader, RasterShader, Shader,
+            SymbolShader, TileMaskShader,
+        },
     };
 
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
@@ -167,7 +170,7 @@ async fn projection_aware_tile_pipelines_compile() {
         .expect("GPU device should be available");
     let projection = super::ProjectionGpuResources::new(&device);
     let format = wgpu::TextureFormat::Rgba8Unorm;
-    let shaders: [(&str, Box<dyn Shader>, bool, bool); 5] = [
+    let shaders: [(&str, Box<dyn Shader>, bool, bool); 7] = [
         ("test fill", Box::new(FillShader { format }), false, false),
         ("test line", Box::new(LineShader { format }), false, false),
         (
@@ -191,6 +194,18 @@ async fn projection_aware_tile_pipelines_compile() {
             Box::new(SymbolShader { format }),
             false,
             true,
+        ),
+        (
+            "test globe background",
+            Box::new(GlobeBackgroundShader { format }),
+            false,
+            false,
+        ),
+        (
+            "test atmosphere",
+            Box::new(AtmosphereShader { format }),
+            false,
+            false,
         ),
     ];
 

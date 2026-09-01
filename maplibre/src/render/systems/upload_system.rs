@@ -43,6 +43,16 @@ pub fn upload_system(
     })?;
     projection_resources.upload(queue, projection_data);
 
+    if projection_data.transition > 0.0 {
+        let coords = crate::coords::WorldTileCoords::default();
+        tile_mesh_cache
+            .prepare(device, coords, TileMeshUsage::Raster, false)
+            .map_err(|error| {
+                tracing::error!(%error, "unable to prepare globe background mesh");
+                SystemError::Setup
+            })?;
+    }
+
     let mut visible_tiles = Vec::new();
     for view_tile in tile_view_pattern.iter() {
         view_tile.render(|shape| visible_tiles.push(shape.coords()));
