@@ -2,6 +2,7 @@
 
 use crate::{
     context::MapContext,
+    projection::ProjectionType,
     raster::render_commands::DrawRasterTiles,
     render::{
         eventually::{Eventually, Eventually::Initialized},
@@ -15,7 +16,7 @@ use crate::{
     },
 };
 
-pub fn queue_system(MapContext { world, .. }: &mut MapContext) -> SystemResult {
+pub fn queue_system(MapContext { style, world, .. }: &mut MapContext) -> SystemResult {
     let Some((Initialized(tile_view_pattern),)) = world
         .resources
         .query::<(&Eventually<WgpuTileViewPattern>,)>()
@@ -32,23 +33,30 @@ pub fn queue_system(MapContext { world, .. }: &mut MapContext) -> SystemResult {
         // draw tile normal or the source e.g. parent or children
         view_tile.render(|source_shape| {
             // FIXME if raster_resources.has_tile(source_shape.coords(), world) {
-            items.push((
-                LayerItem {
-                    draw_function: Box::new(DrawState::<LayerItem, DrawRasterTiles>::new()),
-                    index: 0,
-                    is_line: false,
-                    style_layer: "raster".to_string(),
-                    tile: Tile {
-                        coords: source_shape.coords(),
-                    },
-                    source_shape: source_shape.clone(),
+            let layer = LayerItem {
+                draw_function: Box::new(DrawState::<LayerItem, DrawRasterTiles>::new()),
+                index: 0,
+                is_line: false,
+                style_layer: "raster".to_string(),
+                tile: Tile {
+                    coords: source_shape.coords(),
                 },
-                // FIXME tsc: Tile masks are currently drawn twice by each plugin
-                TileMaskItem {
+                source_shape: source_shape.clone(),
+            };
+            let mut masks = Vec::with_capacity(2);
+            if style.projection.unwrap_or_default().projection_type == ProjectionType::Globe {
+                masks.push(TileMaskItem {
                     draw_function: Box::new(DrawState::<TileMaskItem, DrawMasks>::new()),
                     source_shape: source_shape.clone(),
-                },
-            ));
+                    generate_borders: true,
+                });
+            }
+            masks.push(TileMaskItem {
+                draw_function: Box::new(DrawState::<TileMaskItem, DrawMasks>::new()),
+                source_shape: source_shape.clone(),
+                generate_borders: false,
+            });
+            items.push((layer, masks));
         });
     }
 
@@ -59,9 +67,11 @@ pub fn queue_system(MapContext { world, .. }: &mut MapContext) -> SystemResult {
         return Err(SystemError::Dependencies);
     };
 
-    for (layer, mask) in items {
+    for (layer, masks) in items {
         layer_item_phase.add(layer);
-        tile_mask_phase.add(mask);
+        for mask in masks {
+            tile_mask_phase.add(mask);
+        }
     }
 
     Ok(())

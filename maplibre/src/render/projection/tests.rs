@@ -54,10 +54,12 @@ fn mercator_projection_uses_inert_shader_state() {
 
 #[test]
 fn globe_projection_builds_active_shader_state() {
-    let mut style = crate::style::Style::default();
-    style.projection = Some(crate::projection::ProjectionSpecification {
-        projection_type: crate::projection::ProjectionType::Globe,
-    });
+    let style = crate::style::Style {
+        projection: Some(crate::projection::ProjectionSpecification {
+            projection_type: crate::projection::ProjectionType::Globe,
+        }),
+        ..Default::default()
+    };
     let view = crate::render::view_state::ViewState::new(
         crate::window::PhysicalSize::new(800, 600).expect("test viewport should be valid"),
         crate::coords::WorldCoords::from((256.0, 256.0)),
@@ -72,4 +74,57 @@ fn globe_projection_builds_active_shader_state() {
     assert_eq!(shader.transition, 1.0);
     assert!(shader.main_matrix.into_iter().flatten().all(f32::is_finite));
     assert!(shader.clipping_plane.into_iter().all(f32::is_finite));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[tokio::test]
+async fn projection_aware_tile_pipelines_compile() {
+    use crate::render::{
+        resource::{RenderPipeline, TilePipeline},
+        settings::RendererSettings,
+        shaders::{FillShader, LineShader, RasterShader, Shader, TileMaskShader},
+    };
+
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
+    let adapter = wgpu::util::initialize_adapter_from_env_or_default(&instance, None)
+        .await
+        .expect("GPU adapter should be available");
+    let (device, _) = adapter
+        .request_device(&wgpu::DeviceDescriptor::default(), None)
+        .await
+        .expect("GPU device should be available");
+    let projection = super::ProjectionGpuResources::new(&device);
+    let format = wgpu::TextureFormat::Rgba8Unorm;
+    let shaders: [(&str, Box<dyn Shader>, bool); 4] = [
+        ("test fill", Box::new(FillShader { format }), false),
+        ("test line", Box::new(LineShader { format }), false),
+        (
+            "test mask",
+            Box::new(TileMaskShader {
+                format,
+                draw_colors: false,
+                debug_lines: false,
+            }),
+            false,
+        ),
+        ("test raster", Box::new(RasterShader { format }), true),
+    ];
+
+    for (name, shader, raster) in shaders {
+        TilePipeline::new(
+            name.into(),
+            RendererSettings::default(),
+            shader.describe_vertex(),
+            shader.describe_fragment(),
+            true,
+            false,
+            false,
+            false,
+            false,
+            raster,
+            false,
+        )
+        .describe_render_pipeline()
+        .initialize_with_prefix_layouts(&device, &[projection.bind_group_layout()]);
+    }
 }

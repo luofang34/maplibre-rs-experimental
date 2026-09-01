@@ -3,7 +3,8 @@ use crate::{
     context::MapContext,
     raster::resource::RasterResources,
     render::{
-        eventually::Eventually,
+        eventually::{Eventually, Eventually::Initialized},
+        projection::ProjectionGpuResources,
         resource::{RenderPipeline, TilePipeline},
         settings::Msaa,
         shaders,
@@ -26,10 +27,10 @@ pub fn resource_system(
         ..
     }: &mut MapContext,
 ) -> SystemResult {
-    let Some(raster_resources) = world
-        .resources
-        .query_mut::<&mut Eventually<RasterResources>>()
-    else {
+    let Some((raster_resources, Initialized(projection_resources))) = world.resources.query_mut::<(
+        &mut Eventually<RasterResources>,
+        &mut Eventually<ProjectionGpuResources>,
+    )>() else {
         return Err(SystemError::Dependencies);
     };
 
@@ -55,7 +56,7 @@ pub fn resource_system(
                 false,
             )
             .describe_render_pipeline()
-            .initialize(device),
+            .initialize_with_prefix_layouts(device, &[projection_resources.bind_group_layout()]),
         )
     });
     Ok(())

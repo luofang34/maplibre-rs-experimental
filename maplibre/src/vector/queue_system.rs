@@ -1,6 +1,7 @@
 //! Queues [PhaseItems](crate::render::render_phase::PhaseItem) for rendering.
 use crate::{
     context::MapContext,
+    projection::ProjectionType,
     render::{
         eventually::{Eventually, Eventually::Initialized},
         render_commands::DrawMasks,
@@ -17,7 +18,7 @@ use crate::{
     },
 };
 
-pub fn queue_system(MapContext { world, .. }: &mut MapContext) -> SystemResult {
+pub fn queue_system(MapContext { style, world, .. }: &mut MapContext) -> SystemResult {
     let Some((
         Initialized(tile_view_pattern),
         Initialized(buffer_pool),
@@ -41,10 +42,17 @@ pub fn queue_system(MapContext { world, .. }: &mut MapContext) -> SystemResult {
 
         // draw tile normal or the source e.g. parent or children
         view_tile.render(|source_shape| {
-            // Draw masks for all source_shapes
+            if style.projection.unwrap_or_default().projection_type == ProjectionType::Globe {
+                mask_phase.add(TileMaskItem {
+                    draw_function: Box::new(DrawState::<TileMaskItem, DrawMasks>::new()),
+                    source_shape: source_shape.clone(),
+                    generate_borders: true,
+                });
+            }
             mask_phase.add(TileMaskItem {
                 draw_function: Box::new(DrawState::<TileMaskItem, DrawMasks>::new()),
                 source_shape: source_shape.clone(),
+                generate_borders: false,
             });
 
             if let Some(layer_entries) = buffer_pool_index.get_layers(source_shape.coords()) {

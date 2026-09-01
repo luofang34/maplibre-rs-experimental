@@ -33,52 +33,82 @@ pub struct TileMaskShader {
 
 impl Shader for TileMaskShader {
     fn describe_vertex(&self) -> VertexState {
+        let metadata = VertexBufferLayout {
+            array_stride: std::mem::size_of::<ShaderTileMetadata>() as u64,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: vec![
+                wgpu::VertexAttribute {
+                    offset: 0,
+                    format: wgpu::VertexFormat::Float32x4,
+                    shader_location: 4,
+                },
+                wgpu::VertexAttribute {
+                    offset: wgpu::VertexFormat::Float32x4.size(),
+                    format: wgpu::VertexFormat::Float32x4,
+                    shader_location: 5,
+                },
+                wgpu::VertexAttribute {
+                    offset: 2 * wgpu::VertexFormat::Float32x4.size(),
+                    format: wgpu::VertexFormat::Float32x4,
+                    shader_location: 6,
+                },
+                wgpu::VertexAttribute {
+                    offset: 3 * wgpu::VertexFormat::Float32x4.size(),
+                    format: wgpu::VertexFormat::Float32x4,
+                    shader_location: 7,
+                },
+                wgpu::VertexAttribute {
+                    offset: 4 * wgpu::VertexFormat::Float32x4.size(),
+                    format: wgpu::VertexFormat::Float32,
+                    shader_location: 9,
+                },
+                wgpu::VertexAttribute {
+                    offset: 4 * wgpu::VertexFormat::Float32x4.size()
+                        + 3 * wgpu::VertexFormat::Float32.size(),
+                    format: wgpu::VertexFormat::Float32x4,
+                    shader_location: 2,
+                },
+            ],
+        };
+        let buffers = if self.debug_lines {
+            vec![metadata]
+        } else {
+            vec![
+                VertexBufferLayout {
+                    array_stride: std::mem::size_of::<
+                        crate::projection::globe::tile_mesh::TileMeshVertex,
+                    >() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: vec![wgpu::VertexAttribute {
+                        offset: 0,
+                        format: wgpu::VertexFormat::Sint16x2,
+                        shader_location: 0,
+                    }],
+                },
+                metadata,
+            ]
+        };
         VertexState {
             source: if self.debug_lines {
                 include_str!("tile_debug.vertex.wgsl")
             } else {
-                include_str!("tile_mask.vertex.wgsl")
+                concat!(
+                    include_str!("projection.vertex.wgsl"),
+                    include_str!("tile_mask.vertex.wgsl")
+                )
             },
             entry_point: "main",
-            buffers: vec![VertexBufferLayout {
-                array_stride: std::mem::size_of::<ShaderTileMetadata>() as u64,
-                step_mode: wgpu::VertexStepMode::Instance,
-                attributes: vec![
-                    // translate
-                    wgpu::VertexAttribute {
-                        offset: 0,
-                        format: wgpu::VertexFormat::Float32x4,
-                        shader_location: 4,
-                    },
-                    wgpu::VertexAttribute {
-                        offset: 1 * wgpu::VertexFormat::Float32x4.size(),
-                        format: wgpu::VertexFormat::Float32x4,
-                        shader_location: 5,
-                    },
-                    wgpu::VertexAttribute {
-                        offset: 2 * wgpu::VertexFormat::Float32x4.size(),
-                        format: wgpu::VertexFormat::Float32x4,
-                        shader_location: 6,
-                    },
-                    wgpu::VertexAttribute {
-                        offset: 3 * wgpu::VertexFormat::Float32x4.size(),
-                        format: wgpu::VertexFormat::Float32x4,
-                        shader_location: 7,
-                    },
-                    // zoom factor
-                    wgpu::VertexAttribute {
-                        offset: 4 * wgpu::VertexFormat::Float32x4.size(),
-                        format: wgpu::VertexFormat::Float32,
-                        shader_location: 9,
-                    },
-                ],
-            }],
+            buffers,
         }
     }
 
     fn describe_fragment(&self) -> FragmentState {
         FragmentState {
-            source: include_str!("basic.fragment.wgsl"),
+            source: if self.debug_lines {
+                include_str!("basic.fragment.wgsl")
+            } else {
+                include_str!("tile_mask.fragment.wgsl")
+            },
             entry_point: "main",
             targets: vec![Some(wgpu::ColorTargetState {
                 format: self.format,
@@ -486,9 +516,24 @@ pub struct RasterShader {
 impl Shader for RasterShader {
     fn describe_vertex(&self) -> VertexState {
         VertexState {
-            source: include_str!("raster.vertex.wgsl"),
+            source: concat!(
+                include_str!("projection.vertex.wgsl"),
+                include_str!("raster.vertex.wgsl")
+            ),
             entry_point: "main",
             buffers: vec![
+                // subdivided tile mesh
+                VertexBufferLayout {
+                    array_stride: std::mem::size_of::<
+                        crate::projection::globe::tile_mesh::TileMeshVertex,
+                    >() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: vec![wgpu::VertexAttribute {
+                        offset: 0,
+                        format: wgpu::VertexFormat::Sint16x2,
+                        shader_location: 0,
+                    }],
+                },
                 // tile metadata
                 VertexBufferLayout {
                     array_stride: std::mem::size_of::<ShaderTileMetadata>() as u64,
@@ -520,6 +565,13 @@ impl Shader for RasterShader {
                             offset: 4 * wgpu::VertexFormat::Float32x4.size(),
                             format: wgpu::VertexFormat::Float32,
                             shader_location: 9,
+                        },
+                        // tile_mercator_coords
+                        wgpu::VertexAttribute {
+                            offset: 4 * wgpu::VertexFormat::Float32x4.size()
+                                + 3 * wgpu::VertexFormat::Float32.size(),
+                            format: wgpu::VertexFormat::Float32x4,
+                            shader_location: 2,
                         },
                     ],
                 },

@@ -64,6 +64,7 @@ pub mod projection;
 pub mod render_commands;
 pub mod render_phase;
 pub mod settings;
+pub mod tile_mesh;
 pub mod tile_view_pattern;
 pub mod view_state;
 
@@ -612,6 +613,7 @@ impl<E: Environment> Plugin<E> for RenderPlugin {
         // tile_view_pattern:
         resources.insert(Eventually::<WgpuTileViewPattern>::Uninitialized);
         resources.insert(Eventually::<projection::ProjectionGpuResources>::Uninitialized);
+        resources.init::<tile_mesh::GlobeTileMeshCache>();
         resources.init::<ViewTileSources>();
         // masks
         resources.insert(Eventually::<MaskPipeline>::Uninitialized);

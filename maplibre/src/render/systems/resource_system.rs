@@ -55,7 +55,8 @@ impl System for ResourceSystem {
 
         surface.reconfigure(device);
 
-        projection_resources.initialize(|| ProjectionGpuResources::new(device));
+        let projection_resources =
+            projection_resources.initialize(|| ProjectionGpuResources::new(device));
 
         state
             .render_target
@@ -137,7 +138,7 @@ impl System for ResourceSystem {
                 false,
             )
             .describe_render_pipeline()
-            .initialize(device);
+            .initialize_with_prefix_layouts(device, &[projection_resources.bind_group_layout()]);
             MaskPipeline(pipeline)
         });
 

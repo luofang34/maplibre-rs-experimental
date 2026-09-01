@@ -51,3 +51,29 @@ fn project_tile_position(
         horizon_distance,
     );
 }
+
+fn project_tile_mesh_position(
+    tile_position: vec3<f32>,
+    raw_position: vec2<i32>,
+    fallback_matrix: mat4x4<f32>,
+    tile_mercator_coords: vec4<f32>,
+) -> ProjectedTilePosition {
+    var surface = tile_position_on_unit_sphere(tile_position.xy, tile_mercator_coords);
+    if raw_position.y < -32767 {
+        surface = vec3<f32>(0.0, 1.0, 0.0);
+    } else if raw_position.y > 32766 {
+        surface = vec3<f32>(0.0, -1.0, 0.0);
+    }
+    let transition = projection.transition_and_padding.x;
+    let mercator_clip = fallback_matrix * vec4<f32>(tile_position, 1.0);
+    let globe_clip = projection.main_matrix * vec4<f32>(surface, 1.0);
+    let horizon_distance = mix(
+        1.0,
+        dot(projection.clipping_plane, vec4<f32>(surface, 1.0)),
+        transition,
+    );
+    return ProjectedTilePosition(
+        mix(mercator_clip, globe_clip, transition),
+        horizon_distance,
+    );
+}
