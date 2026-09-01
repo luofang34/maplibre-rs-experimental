@@ -61,5 +61,6 @@ The local gate covers:
 - atmosphere style evaluation;
 - versor interaction stability at poles and the antimeridian.
 
-Golden-image acceptance requires a host with a supported wgpu adapter. Absence of an adapter is an
-environment limitation, not a passing render result.
+The local Metal/wgpu backend runs the headless harness and the globe pipeline successfully.
+Golden-image acceptance still requires importing the corresponding GL JS styles, assets, camera
+operations, and expected images; a successful pipeline probe is not a golden parity result.

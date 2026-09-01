@@ -48,7 +48,7 @@ The private-fork implementation establishes the following reviewable stack:
 | Symbols | Partial | Anchor projection, horizon culling, collision opacity, and antimeridian tests; tangent-aligned line labels remain |
 | Atmosphere | Partial | Style blend and pass ordering are implemented; physical raymarch and configurable light parity remain |
 | Interaction and queries | Partial | Versor pan, zoom-around-cursor, surface hit queries, and horizon continuation are wired; inertia/ease/fly/bounds remain |
-| GL JS render corpus | Blocked locally | CPU and WGSL checks pass; the available host exposes no wgpu adapter for golden-image rendering |
+| GL JS render corpus | Partial | Metal/wgpu baseline and globe pipeline probes pass; GL JS fixture assets and expected images are not integrated into the Rust harness |
 | Terrain | Deferred | Elevation-aware math exists; DEM sampling, depth, picking, and render integration are outside this RFC |
 
 The detailed compatibility matrix is maintained in
