@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 pub mod globe;
+pub mod renderer_data;
 
 pub use globe::project_tile_coordinates_to_unit_sphere;
 
