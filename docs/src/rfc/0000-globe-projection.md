@@ -44,11 +44,13 @@ The private-fork implementation establishes the following reviewable stack:
 | Globe mathematics and camera | Complete | Coordinate, orientation, horizon, ray/sphere, screen round-trip, and precision tests |
 | Tile covering and LOD | Complete | Frustum, wrap, antimeridian, pitch, rotation, and elevation-bound fixtures |
 | Raster/background meshes | Complete | Subdivided grids, borders, poles, stencil ordering, and z0 background mesh tests |
-| Fill and line projection | Complete for supported paint paths | Shared WGSL projection and CPU subdivision tests |
+| Fill and line projection | Complete for supported paint paths | Seven imported fill/line goldens plus shared WGSL and CPU subdivision tests |
+| Raster projection | Complete | Three imported goldens, homogeneous sampling, poles, and two-pass seam ownership |
 | Symbols | Partial | Anchor projection, horizon culling, collision opacity, and antimeridian tests; tangent-aligned line labels remain |
-| Atmosphere | Partial | Style blend and pass ordering are implemented; physical raymarch and configurable light parity remain |
-| Interaction and queries | Partial | Versor pan, zoom-around-cursor, surface hit queries, and horizon continuation are wired; inertia/ease/fly/bounds remain |
-| GL JS render corpus | Partial | Metal/wgpu baseline and globe pipeline probes pass; GL JS fixture assets and expected images are not integrated into the Rust harness |
+| Atmosphere | Complete for the active style model | Eight imported goldens cover physical scattering, blend, zoom, map/viewport lights, and graph-ordered headless capture |
+| Interaction and queries | Complete projection core | GL JS pan scenarios, silhouette fallback, pole dial, inertia, pointer zoom, jump/ease/fly, bounds solver, hit and horizon queries |
+| GL JS render corpus | 19 Golden | Exact upstream styles, local assets, camera metadata, and expected images run in one Metal/wgpu suite |
+| Host UI/custom-layer integration | Baseline blocker | maplibre-rs lacks the projection-independent map camera/event/custom-layer API to wire these results |
 | Terrain | Deferred | Elevation-aware math exists; DEM sampling, depth, picking, and render integration are outside this RFC |
 
 The detailed compatibility matrix is maintained in
@@ -199,7 +201,8 @@ keeps the two transforms synchronized. Terrain-driven center and zoom recalculat
 the geographic center merely because terrain becomes available.
 
 Screen picking uses ray-sphere intersection. Pixels outside the planet are rejected for feature
-queries and clamped to the visible horizon for continuous drag panning.
+queries. Drag panning switches before the silhouette to a slope-matched virtual trackball curve
+that saturates short of the far side; ordinary screen-to-location queries clamp to the horizon.
 
 ## Camera interaction
 
@@ -208,9 +211,9 @@ helper covers pan inertia, drag pan, combined roll/pitch/bearing/zoom controls, 
 bounds fitting.
 
 Dragging keeps the grabbed surface location under the pointer while a ray intersects the globe. A
-bounded fallback takes over near and outside the silhouette so panning remains continuous. Fixed-
-bearing interaction preserves bearing away from the poles and avoids sudden longitude changes at
-the poles.
+bounded fallback takes over near and outside the silhouette so panning remains continuous. A smooth
+pole dial blends longitude from the quaternion swing to the cursor sweep within the last latitude
+band, preserving bearing without stalling or reversing at a pole.
 
 Zoom compensates for the latitude-dependent globe scale. Ease and fly interpolation use a globe
 path whose apparent angular velocity is stable across latitude and the antimeridian.
@@ -251,7 +254,8 @@ faded according to the corresponding public API behavior.
 
 Atmosphere renders around the globe using camera position, globe radius, inverse projection, sun or
 light direction, and atmosphere blend. It composes with sky, background opacity, and terrain. The
-atmosphere pass runs only while globe rendering is active.
+atmosphere pass runs only while globe rendering is active. Headless surface capture depends on the
+translucent pass so golden images cannot be read before atmosphere composition completes.
 
 ## Terrain integration boundary
 
@@ -289,9 +293,10 @@ The compatibility gate has four levels:
    camera operations, and terrain picking.
 3. Shader and mesh tests cover subdivision, shared edges, poles, antimeridian clipping, radial
    elevation, transition endpoints, and GPU precision-sensitive coordinates.
-4. Render tests run compatible MapLibre GL JS `projection/globe` cases through the maplibre-rs
-   headless renderer and compare images with platform-specific tolerances. Terrain fixtures belong
-   to the terrain follow-up.
+4. Render tests run 19 MapLibre GL JS `projection/globe` styles and exact expected images
+   through the maplibre-rs headless renderer. The default normalized mean-channel tolerance is
+   `0.02`; any exception is fixture-local and documents the upstream invariant. Terrain fixtures
+   belong to the terrain follow-up.
 
 Every audited render case has a matrix entry recording support, required renderer capability, and
 the maplibre-rs evidence or blocker. A case marked implemented must run in the parity gate; blocked
@@ -306,16 +311,14 @@ must exercise the shared WGSL projection code.
 Implementation is split into independently reviewable changes:
 
 1. RFC and executable parity manifest.
-2. Style projection model and pure globe mathematics.
-3. Projection contract and per-frame/per-tile renderer data with a Mercator no-op implementation.
-4. Subdivided tile meshes, pole geometry, antimeridian clipping, and mesh tests.
-5. Vertical-perspective transform, matrices, projection/unprojection, and occlusion.
-6. Globe covering tiles, culling, wrap selection, and level of detail.
-7. Fill, line, circle, raster, image, stencil, and background rendering.
-8. Symbols, collision placement, queries, markers, and popups.
-9. Camera controls, jump/ease/fly, bounds fitting, and transition events.
-10. Extrusions, custom layers, atmosphere, and sky.
-11. Full native/WebAssembly performance and regression audit.
+2. Style projection model, pure globe mathematics, and vertical-perspective camera.
+3. Subdivided meshes, covering tiles, poles, antimeridian clipping, and projection GPU data.
+4. Active renderer integration for background, fill, line, raster, and atmosphere.
+5. Camera-helper projection core and transform queries.
+6. Imported GL JS golden harness and fixture-local comparison policy.
+7. Symbol completion when the flat renderer supports the required placement behavior.
+8. Runtime projection events, markers/popups, and custom layers when host APIs exist.
+9. Native/WebAssembly performance and regression audit.
 
 Terrain sampling, picking, radial elevation, depth, and globe-with-terrain render parity are planned
 in the terrain RFC rather than this delivery sequence.
@@ -394,10 +397,11 @@ details, shared projection shaders, mesh subdivision, and layer integrations. It
 for understanding why precision workarounds, pole meshes, antimeridian clipping, transition depth,
 and terrain-specific paths exist.
 
-Relevant references include:
+The implementation and fixture audit are pinned to GL JS commit
+`f9a40a5c4462abafd6823d9b6fc623246f31e787`. Relevant references include:
 
 - [globe developer guide](https://maplibre.org/maplibre-gl-js/docs/book/developer-guides/globe/)
-- [globe projection source](https://github.com/maplibre/maplibre-gl-js/tree/main/src/geo/projection)
+- [pinned globe projection source](https://github.com/maplibre/maplibre-gl-js/tree/f9a40a5c4462abafd6823d9b6fc623246f31e787/src/geo/projection)
 - [globe shader source](https://github.com/maplibre/maplibre-gl-js/blob/main/src/shaders/glsl/_projection_globe.vertex.glsl)
 - [tile subdivision source](https://github.com/maplibre/maplibre-gl-js/blob/main/src/render/subdivision.ts)
 - [globe render tests](https://github.com/maplibre/maplibre-gl-js/tree/main/test/integration/render/tests/projection/globe)
@@ -410,8 +414,6 @@ current invariants rather than historical pull request numbers.
 # Unresolved questions
 
 - Should runtime projection changes be part of the first stable Rust API or initially style-only?
-- Which image-difference metric and backend-specific thresholds are strict enough to catch seams
-  without making the suite flaky?
 - Should the projection contract be public for plugins immediately or remain crate-private until
   globe parity stabilizes?
 - What cache budget should projection-specific meshes use on mobile and WebAssembly?
