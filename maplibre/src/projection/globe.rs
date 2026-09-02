@@ -15,7 +15,7 @@ pub mod tile_mesh;
 
 /// Mean Earth radius used to convert elevation in metres to globe radius.
 pub const EARTH_RADIUS_METERS: f64 = 6_371_008.8;
-const GLOBE_TRANSITION_START_ZOOM: f64 = 10.0;
+const GLOBE_TRANSITION_START_ZOOM: f64 = 11.0;
 const GLOBE_TRANSITION_END_ZOOM: f64 = 12.0;
 
 /// Returns the GL JS globe shorthand's vertical-perspective weight.

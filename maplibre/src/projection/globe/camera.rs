@@ -16,7 +16,7 @@ use crate::{
         globe::globe_radius_pixels,
         renderer_data::{compute_globe_clipping_plane, GlobeViewGeometry, ProjectionDataError},
     },
-    render::camera::{FLIP_Y, OPENGL_TO_WGPU_MATRIX},
+    render::camera::OPENGL_TO_WGPU_MATRIX,
 };
 
 const NEAR_Z: f64 = 0.5;
@@ -113,6 +113,8 @@ pub enum GlobeCameraError {
 pub struct GlobeCameraState {
     options: GlobeCameraOptions,
     projection: Matrix4<f64>,
+    inverse_projection: Matrix4<f64>,
+    view: Matrix4<f64>,
     view_projection: Matrix4<f64>,
     inverse_view_projection: Matrix4<f64>,
     camera_position: Vector3<f64>,
@@ -130,8 +132,11 @@ impl GlobeCameraState {
         let radius = globe_radius_pixels(options.world_size, options.center.latitude);
         let far_z = camera_to_center_distance + radius * 2.0;
         let projection = projection_matrix(options, far_z);
-        let view_projection =
-            globe_view_projection(projection, options, camera_to_center_distance, radius);
+        let inverse_projection = projection
+            .invert()
+            .ok_or(GlobeCameraError::NonInvertibleViewProjection)?;
+        let view = globe_view_matrix(options, camera_to_center_distance, radius);
+        let view_projection = projection * view;
         let inverse_view_projection = view_projection
             .invert()
             .ok_or(GlobeCameraError::NonInvertibleViewProjection)?;
@@ -148,6 +153,8 @@ impl GlobeCameraState {
         Ok(Self {
             options,
             projection,
+            inverse_projection,
+            view,
             view_projection,
             inverse_view_projection,
             camera_position,
@@ -163,6 +170,16 @@ impl GlobeCameraState {
         self.projection
     }
 
+    /// Returns the inverse perspective matrix in OpenGL clip-space conventions.
+    pub fn inverse_projection(&self) -> Matrix4<f64> {
+        self.inverse_projection
+    }
+
+    /// Returns the globe-to-view transform without perspective projection.
+    pub fn view(&self) -> Matrix4<f64> {
+        self.view
+    }
+
     /// Returns the OpenGL-convention matrix projecting the unit globe to clip space.
     pub fn view_projection(&self) -> Matrix4<f64> {
         self.view_projection
@@ -170,7 +187,7 @@ impl GlobeCameraState {
 
     /// Returns the matrix converted to WebGPU clip-space conventions.
     pub fn wgpu_view_projection(&self) -> Matrix4<f64> {
-        FLIP_Y * OPENGL_TO_WGPU_MATRIX * self.view_projection
+        OPENGL_TO_WGPU_MATRIX * self.view_projection
     }
 
     /// Returns the inverse OpenGL-convention globe view-projection matrix.
@@ -257,6 +274,23 @@ impl GlobeCameraState {
         let down = right.cross(sphere).normalize();
         let transformed = right * direction.x + down * direction.y + sphere * direction.z;
         (transformed.magnitude2() > MIN_DIRECTION_LENGTH_SQUARED).then(|| transformed.normalize())
+    }
+
+    /// Transforms a globe-world direction into view axes without applying translation.
+    pub fn world_direction_to_view(&self, direction: Vector3<f64>) -> Option<Vector3<f64>> {
+        let linear = Matrix3::from_cols(
+            self.view.x.truncate(),
+            self.view.y.truncate(),
+            self.view.z.truncate(),
+        );
+        let transformed = linear * direction;
+        (transformed.magnitude2() > MIN_DIRECTION_LENGTH_SQUARED).then(|| transformed.normalize())
+    }
+
+    /// Returns the globe center in view coordinates.
+    pub fn globe_center_in_view(&self) -> Vector3<f64> {
+        let center = self.view * Vector4::unit_w();
+        center.truncate() / center.w
     }
 
     /// Projects a tile-local coordinate onto the globe and then to clip space.
@@ -429,14 +463,12 @@ fn projection_matrix(options: GlobeCameraOptions, far_z: f64) -> Matrix4<f64> {
     projection
 }
 
-fn globe_view_projection(
-    projection: Matrix4<f64>,
+fn globe_view_matrix(
     options: GlobeCameraOptions,
     camera_distance: f64,
     radius: f64,
 ) -> Matrix4<f64> {
-    projection
-        * Matrix4::from_translation(Vector3::new(0.0, 0.0, -camera_distance))
+    Matrix4::from_translation(Vector3::new(0.0, 0.0, -camera_distance))
         * Matrix4::from_angle_z(Deg(options.roll_degrees))
         * Matrix4::from_angle_x(Deg(-options.pitch_degrees))
         * Matrix4::from_angle_z(Deg(options.bearing_degrees))
