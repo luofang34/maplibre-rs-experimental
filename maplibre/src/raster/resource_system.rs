@@ -49,7 +49,7 @@ pub fn resource_system(
                 shader.describe_fragment(),
                 true,
                 false,
-                false,
+                true,
                 false,
                 surface.is_multisampling_supported(settings.msaa),
                 true,

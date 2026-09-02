@@ -70,8 +70,11 @@ impl RenderCommand<LayerItem> for DrawRasterTile {
         };
 
         let source_shape = &item.source_shape;
-        let Some(mesh) = tile_mesh_cache.get(source_shape.coords(), TileMeshUsage::Raster, true)
-        else {
+        let Some(mesh) = tile_mesh_cache.get(
+            source_shape.coords(),
+            TileMeshUsage::Raster,
+            item.generate_borders,
+        ) else {
             return RenderCommandResult::Failure;
         };
 

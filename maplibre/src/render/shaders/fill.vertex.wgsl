@@ -18,6 +18,7 @@ fn main(
     @location(8) color: vec4<f32>,
     @location(9) zoom_factor: f32,
     @location(10) z_index: f32,
+    @location(15) layer_translate: vec2<f32>,
     @builtin(instance_index) instance_idx: u32 // instance_index is used when we have multiple instances of the same "object"
 ) -> VertexOutput {
     let z = -z_index;
@@ -29,7 +30,7 @@ fn main(
     //}
 
     let projected = project_tile_position(
-        vec3<f32>(position + normal * width, z),
+        vec3<f32>(position + layer_translate + normal * width, z),
         mat4x4<f32>(translate1, translate2, translate3, translate4),
         tile_mercator_coords,
     );

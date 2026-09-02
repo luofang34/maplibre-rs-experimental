@@ -3,6 +3,7 @@ use wgpu::util::DeviceExt;
 use crate::{
     context::MapContext,
     render::{
+        projection::globe_camera_for_view,
         render_phase::{DrawState, LayerItem, RenderPhase, TranslucentItem},
         shaders::{AtmosphereLayerMetadata, BackgroundLayerMetadata, ShaderTileMetadata},
     },
@@ -38,9 +39,10 @@ pub fn queue_system(
             .globe_transition(view_state.zoom().value())
     });
     let uses_globe = projection_transition > 0.0;
-    let atmosphere_blend = style.sky.as_ref().map_or(0.0, |sky| {
+    let sky_blend = style.sky.as_ref().map_or(0.0, |sky| {
         sky.atmosphere_blend_at_zoom(view_state.zoom().value())
-    }) * projection_transition;
+    });
+    let atmosphere_blend = sky_blend * projection_transition;
 
     {
         let Some((layer_item_phase, translucent_phase)) = world.resources.query_mut::<(
@@ -74,6 +76,7 @@ pub fn queue_system(
                 draw_function,
                 index: layer.index,
                 is_line: false,
+                generate_borders: false,
                 style_layer: layer.id.clone(),
                 source_shape: crate::render::tile_view_pattern::TileShape::default(),
 
@@ -135,7 +138,25 @@ pub fn queue_system(
                     contents: bytemuck::bytes_of(&tile_metadata),
                     usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
                 });
-        let atmosphere_metadata = AtmosphereLayerMetadata::new(atmosphere_blend);
+        let atmosphere_metadata = if atmosphere_blend > 0.0 {
+            let camera = globe_camera_for_view(view_state).map_err(|error| {
+                tracing::error!(?error, "failed to build atmosphere globe camera");
+                SystemError::Setup
+            })?;
+            let light = style.light.clone().unwrap_or_default();
+            AtmosphereLayerMetadata::from_view(
+                &camera,
+                &light,
+                view_state.zoom().value(),
+                atmosphere_blend,
+            )
+            .map_err(|error| {
+                tracing::error!(?error, "failed to build atmosphere shader metadata");
+                SystemError::Setup
+            })?
+        } else {
+            AtmosphereLayerMetadata::disabled()
+        };
         let atmosphere_metadata_buffer =
             renderer
                 .device

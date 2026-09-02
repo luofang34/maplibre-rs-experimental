@@ -85,8 +85,11 @@ fn globe_shorthand_transitions_to_mercator_at_high_zoom() {
     };
     let transition_view = crate::render::view_state::ViewState::new(
         crate::window::PhysicalSize::new(800, 600).expect("test viewport should be valid"),
-        crate::coords::WorldCoords::from((1_048_576.0, 1_048_576.0)),
-        crate::coords::Zoom::new(11.0),
+        crate::coords::WorldCoords::from((
+            crate::coords::TILE_SIZE * 2.0_f64.powf(11.5) * 0.5,
+            crate::coords::TILE_SIZE * 2.0_f64.powf(11.5) * 0.5,
+        )),
+        crate::coords::Zoom::new(11.5),
         cgmath::Deg(0.0),
         cgmath::Deg(45.0),
     );

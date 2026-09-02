@@ -27,6 +27,7 @@ fn main(
     @location(12) viewport_height: f32,
     @location(13) line_width: f32,
     @location(14) clip_antimeridian: u32,
+    @location(15) layer_translate: vec2<f32>,
 ) -> VertexOutput {
     let line_width_px = line_width;
     let blur = 0.0;
@@ -43,12 +44,12 @@ fn main(
     let transform = mat4x4<f32>(translate1, translate2, translate3, translate4);
 
     let projected_center = project_tile_position(
-        vec3<f32>(position, 0.0),
+        vec3<f32>(position + layer_translate, 0.0),
         transform,
         tile_mercator_coords,
     );
     let projected_normal = project_tile_position(
-        vec3<f32>(position + normal, 0.0),
+        vec3<f32>(position + layer_translate + normal, 0.0),
         transform,
         tile_mercator_coords,
     );

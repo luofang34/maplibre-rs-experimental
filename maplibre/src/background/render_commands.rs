@@ -125,33 +125,26 @@ impl<P: PhaseItem> RenderCommand<P> for SetAtmospherePipeline {
     }
 }
 
-pub struct DrawAtmosphereMesh;
-impl<P: PhaseItem> RenderCommand<P> for DrawAtmosphereMesh {
+pub struct DrawAtmosphereFullscreen;
+impl<P: PhaseItem> RenderCommand<P> for DrawAtmosphereFullscreen {
     fn render<'w>(
         world: &'w World,
         _item: &P,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let Some((buffers, mesh_cache)) = world.resources.query::<(
-            &crate::background::queue_system::BackgroundBuffers,
-            &GlobeTileMeshCache,
-        )>() else {
+        let Some(buffers) = world
+            .resources
+            .get::<crate::background::queue_system::BackgroundBuffers>()
+        else {
             return RenderCommandResult::Failure;
         };
-        let coords = crate::coords::WorldTileCoords::default();
-        let Some(mesh) = mesh_cache.get(coords, TileMeshUsage::Raster, false) else {
-            return RenderCommandResult::Failure;
-        };
-        pass.set_vertex_buffer(0, mesh.vertex_buffer().slice(..));
-        pass.set_vertex_buffer(1, buffers.tile_metadata_buffer.slice(..));
-        pass.set_vertex_buffer(2, buffers.atmosphere_metadata_buffer.slice(..));
-        pass.set_index_buffer(mesh.index_buffer().slice(..), mesh.index_format());
-        pass.draw_indexed(0..mesh.index_count(), 0, 0..1);
+        pass.set_vertex_buffer(0, buffers.atmosphere_metadata_buffer.slice(..));
+        pass.draw(0..3, 0..1);
         RenderCommandResult::Success
     }
 }
 
-pub type DrawAtmosphere = (SetAtmospherePipeline, DrawAtmosphereMesh);
+pub type DrawAtmosphere = (SetAtmospherePipeline, DrawAtmosphereFullscreen);
 
 pub struct DrawBackground;
 impl<P: PhaseItem> RenderCommand<P> for DrawBackground {

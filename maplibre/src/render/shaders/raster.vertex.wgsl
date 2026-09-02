@@ -1,7 +1,7 @@
 // @include projection.vertex.wgsl
 
 struct VertexOutput {
-    @location(0) tex_coords: vec2<f32>,
+    @location(0) tex_coords: vec3<f32>,
     @location(1) horizon_distance: f32,
     @builtin(position) clip_position: vec4<f32>,
 };
@@ -34,5 +34,9 @@ fn main(
     } else if raw_position.y > 32766 {
         tex_coords.y = 1.0;
     }
-    return VertexOutput(tex_coords, projected.horizon_distance, projected.clip_position);
+    return VertexOutput(
+        vec3<f32>(tex_coords, 1.0),
+        projected.horizon_distance,
+        projected.clip_position,
+    );
 }

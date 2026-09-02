@@ -214,6 +214,11 @@ impl Shader for FillShader {
                             format: wgpu::VertexFormat::Float32,
                             shader_location: 10,
                         },
+                        wgpu::VertexAttribute {
+                            offset: 2 * wgpu::VertexFormat::Float32.size(),
+                            format: wgpu::VertexFormat::Float32x2,
+                            shader_location: 15,
+                        },
                     ],
                 },
                 // features
@@ -357,6 +362,11 @@ impl Shader for LineShader {
                             format: wgpu::VertexFormat::Float32,
                             shader_location: 13,
                         },
+                        wgpu::VertexAttribute {
+                            offset: 2 * wgpu::VertexFormat::Float32.size(),
+                            format: wgpu::VertexFormat::Float32x2,
+                            shader_location: 15,
+                        },
                     ],
                 },
                 // features
@@ -475,6 +485,7 @@ pub struct SDFShaderFeatureMetadata {
 pub struct ShaderLayerMetadata {
     pub z_index: f32,
     pub line_width: f32,
+    pub translate: Vec2f32,
 }
 
 #[repr(C)]

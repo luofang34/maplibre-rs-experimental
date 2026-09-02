@@ -81,6 +81,7 @@ pub fn queue_system(
                         draw_function,
                         index: layer_entry.style_layer.index,
                         is_line,
+                        generate_borders: false,
                         style_layer: layer_entry.style_layer.id.clone(),
                         tile: Tile {
                             coords: layer_entry.coords,

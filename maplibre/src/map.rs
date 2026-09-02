@@ -103,13 +103,16 @@ where
 
                 let center = style.center.unwrap_or_default();
                 let initial_zoom = style.zoom.map(Zoom::new).unwrap_or_default();
-                let view_state = ViewState::new(
+                let mut view_state = ViewState::new(
                     window_size,
-                    WorldCoords::from_lat_lon(LatLon::new(center[0], center[1]), initial_zoom),
+                    WorldCoords::from_lat_lon(LatLon::new(center[1], center[0]), initial_zoom),
                     initial_zoom,
                     cgmath::Deg::<f64>(style.pitch.unwrap_or_default()),
                     cgmath::Rad(0.6435011087932844),
                 );
+                view_state
+                    .camera_mut()
+                    .set_roll(cgmath::Deg(style.bearing.unwrap_or_default()));
 
                 let mut world = World::default();
 

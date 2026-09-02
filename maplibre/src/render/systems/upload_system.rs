@@ -62,6 +62,7 @@ pub fn upload_system(
             (TileMeshUsage::Stencil, true),
             (TileMeshUsage::Stencil, false),
             (TileMeshUsage::Raster, true),
+            (TileMeshUsage::Raster, false),
         ] {
             tile_mesh_cache
                 .prepare(device, coords, usage, generate_borders)

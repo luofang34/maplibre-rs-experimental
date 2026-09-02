@@ -150,6 +150,7 @@ fn upload_symbol_layer(
                 ShaderLayerMetadata {
                     z_index: style_layer.index as f32,
                     line_width: text_size, // repurposed as text_size for SDF pipeline
+                    translate: [0.0; 2],
                 },
                 &feature_metadata,
             );
