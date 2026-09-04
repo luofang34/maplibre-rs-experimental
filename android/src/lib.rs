@@ -3,7 +3,7 @@
 use jni::{objects::JClass, JNIEnv};
 use log::Level;
 use maplibre::{render::settings::WgpuSettings, style::Style};
-use maplibre_winit::{android_activity, run_headed_map, WinitMapWindowConfig};
+use maplibre_winit::{android_activity, run_headed_map, HeadedMapOptions, WinitMapWindowConfig};
 
 #[cfg(not(any(no_pendantic_os_check, target_os = "android")))]
 compile_error!("android works only on android.");
@@ -22,7 +22,7 @@ pub fn android_main(app: android_activity::AndroidApp) {
             ..WgpuSettings::default()
         },
         Style::default(),
-        None,
+        HeadedMapOptions::default(),
     );
 }
 

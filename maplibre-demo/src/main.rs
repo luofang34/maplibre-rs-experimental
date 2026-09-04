@@ -9,7 +9,7 @@ use maplibre::{
     render::settings::WgpuSettings,
     style::Style,
 };
-use maplibre_winit::{run_headed_map, WinitMapWindowConfig};
+use maplibre_winit::{run_headed_map, HeadedMapOptions, WinitMapWindowConfig};
 
 #[cfg(feature = "headless")]
 mod headless;
@@ -157,7 +157,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ..WgpuSettings::default()
                 },
                 style,
-                *frames,
+                HeadedMapOptions {
+                    max_frames: *frames,
+                    ..HeadedMapOptions::default()
+                },
             );
         }
         #[cfg(feature = "headless")]

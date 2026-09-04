@@ -86,7 +86,8 @@ impl ModelViewProjection {
 }
 
 const MIN_PITCH: Deg<f64> = Deg(-30.0);
-const MAX_PITCH: Deg<f64> = Deg(30.0);
+/// Default upper pitch bound, matching the GL JS `maxPitch` map option.
+pub const DEFAULT_MAX_PITCH: Deg<f64> = Deg(60.0);
 
 const MIN_YAW: Deg<f64> = Deg(-30.0);
 const MAX_YAW: Deg<f64> = Deg(30.0);
@@ -97,6 +98,7 @@ pub struct Camera {
     yaw: Rad<f64>,
     pitch: Rad<f64>,
     roll: Rad<f64>,
+    max_pitch: Rad<f64>,
 }
 
 impl SignificantlyDifferent for Camera {
@@ -116,12 +118,25 @@ impl Camera {
         yaw: Y,
         pitch: P,
     ) -> Self {
+        let max_pitch: Rad<f64> = DEFAULT_MAX_PITCH.into();
         Self {
             position: position.into(),
             yaw: yaw.into(),
-            pitch: pitch.into(),
+            pitch: Rad(pitch.into().0.clamp(Rad::from(MIN_PITCH).0, max_pitch.0)),
             roll: Rad::zero(), // TODO: initialize
+            max_pitch,
         }
+    }
+
+    /// Returns the largest pitch the camera accepts.
+    pub fn max_pitch(&self) -> Rad<f64> {
+        self.max_pitch
+    }
+
+    /// Sets the largest pitch the camera accepts and clamps the current pitch to it.
+    pub fn set_max_pitch<P: Into<Rad<f64>>>(&mut self, max_pitch: P) {
+        self.max_pitch = max_pitch.into();
+        self.set_pitch(self.pitch);
     }
 
     pub fn calc_matrix(&self, camera_height: f64) -> Matrix4<f64> {
@@ -163,7 +178,7 @@ impl Camera {
     pub fn pitch<P: Into<Rad<f64>>>(&mut self, delta: P) {
         let new_pitch = self.pitch + delta.into();
 
-        if new_pitch <= MAX_PITCH.into() && new_pitch >= MIN_PITCH.into() {
+        if new_pitch <= self.max_pitch && new_pitch >= MIN_PITCH.into() {
             self.pitch = new_pitch;
         }
     }
@@ -191,9 +206,8 @@ impl Camera {
     }
     pub fn set_pitch<P: Into<Rad<f64>>>(&mut self, pitch: P) {
         let new_pitch = pitch.into();
-        let max: Rad<_> = MAX_PITCH.into();
         let min: Rad<_> = MIN_PITCH.into();
-        self.pitch = Rad(new_pitch.0.min(max.0).max(min.0))
+        self.pitch = Rad(new_pitch.0.min(self.max_pitch.0).max(min.0))
     }
     pub fn set_roll<P: Into<Rad<f64>>>(&mut self, roll: P) {
         self.roll = roll.into();

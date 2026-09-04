@@ -6,7 +6,8 @@ use std::{
 use cgmath::{prelude::*, *};
 
 use crate::{
-    coords::{ViewRegion, WorldCoords, Zoom, ZoomLevel},
+    coords::{ViewRegion, WorldCoords, Zoom, ZoomLevel, TILE_SIZE},
+    projection::globe::EARTH_RADIUS_METERS,
     render::camera::{
         Camera, EdgeInsets, InvertedViewProjection, Perspective, ViewProjection, FLIP_Y,
         OPENGL_TO_WGPU_MATRIX, REVERSED_Z,
@@ -20,6 +21,10 @@ use crate::{
 
 const VIEW_REGION_PADDING: i32 = 1;
 const MAX_N_TILES: usize = 512;
+/// Pitch beyond which the Mercator plane has no usable horizon.
+const MAX_MERCATOR_HORIZON_ANGLE: Rad<f64> = Rad(89.25 * f64::consts::PI / 180.0);
+/// Keeps some scene below the camera renderable when terrain dips under it.
+const MIN_RENDER_DISTANCE_BELOW_CAMERA_METERS: f64 = 100.0;
 
 pub enum ViewStatePadding {
     // This is helpful for loading a set of tiles.
@@ -37,6 +42,10 @@ pub struct ViewState {
     width: f64,
     height: f64,
     edge_insets: EdgeInsets,
+    /// Terrain elevation in metres at the map center; the camera orbits this point.
+    center_elevation: f64,
+    /// Lowest terrain elevation in metres among visible tiles, used for the far plane.
+    min_elevation: f64,
 }
 
 impl ViewState {
@@ -63,7 +72,42 @@ impl ViewState {
                 left: 0.0,
                 right: 0.0,
             },
+            center_elevation: 0.0,
+            min_elevation: 0.0,
         }
+    }
+
+    /// Terrain elevation in metres at the map center.
+    pub fn center_elevation(&self) -> f64 {
+        self.center_elevation
+    }
+
+    /// Sets the terrain elevation at the map center; the camera keeps its distance to it.
+    pub fn set_center_elevation(&mut self, meters: f64) {
+        if meters.is_finite() {
+            self.center_elevation = meters;
+        }
+    }
+
+    /// Sets the lowest visible terrain elevation, which extends the far plane below sea level.
+    pub fn set_min_elevation(&mut self, meters: f64) {
+        if meters.is_finite() {
+            self.min_elevation = meters;
+        }
+    }
+
+    /// Sets the largest pitch the camera accepts.
+    pub fn set_max_pitch<P: Into<Rad<f64>>>(&mut self, max_pitch: P) {
+        self.camera.set_max_pitch(max_pitch);
+    }
+
+    /// Pixels per metre at the map center, so elevation in metres maps onto world pixels.
+    pub fn pixels_per_meter(&self) -> f64 {
+        let world_size = TILE_SIZE * 2.0_f64.powf(self.zoom.value());
+        let latitude = (f64::consts::PI * (1.0 - 2.0 * self.camera.position().y / world_size))
+            .sinh()
+            .atan();
+        world_size / (2.0 * f64::consts::PI * EARTH_RADIUS_METERS * latitude.cos())
     }
     pub fn set_edge_insets(&mut self, edge_insets: EdgeInsets) {
         self.edge_insets = edge_insets;
@@ -98,57 +142,55 @@ impl ViewState {
             })
     }
 
-    fn get_intersection_time(
-        ray_origin: Vector3<f64>,
-        ray_direction: Vector3<f64>,
-        plane_origin: Vector3<f64>,
-        plane_normal: Vector3<f64>,
-    ) -> f64 {
-        let m = plane_origin - ray_origin;
-        let distance = (m).dot(plane_normal);
+    /// Near and far clip distances in pixels, following GL JS `_calculateNearFarZIfNeeded`.
+    ///
+    /// The far plane reaches the top of the screen on the lowest visible plane, capped at the
+    /// Mercator horizon so a pitched camera never asks for an infinite range.
+    pub fn depth_range(&self, center_offset: Point2<f64>) -> (f64, f64) {
+        let distance = self.camera_to_center_distance();
+        let pixels_per_meter = self.pixels_per_meter();
+        let pitch = self.camera.get_pitch().0.abs();
+        let limited_pitch = pitch.min(MAX_MERCATOR_HORIZON_ANGLE.0);
+        let camera_to_sea_level = (distance / 2.0)
+            .max(distance + self.center_elevation * pixels_per_meter / limited_pitch.cos());
+        let camera_altitude = pitch.cos() * distance / pixels_per_meter + self.center_elevation;
+        let min_elevation = self
+            .center_elevation
+            .min(self.min_elevation)
+            .min(camera_altitude - MIN_RENDER_DISTANCE_BELOW_CAMERA_METERS);
+        let lowest_plane = if min_elevation < 0.0 {
+            camera_to_sea_level - min_elevation * pixels_per_meter / limited_pitch.cos()
+        } else {
+            camera_to_sea_level
+        };
 
-        let approach_speed = ray_direction.dot(plane_normal);
+        let ground_angle = f64::consts::FRAC_PI_2 + pitch;
+        let fov_above_center = self.perspective.fovy().0 * (0.5 + center_offset.y / self.height);
+        let surface_distance = |fov: f64| {
+            fov.sin() * lowest_plane
+                / (f64::consts::PI - ground_angle - fov)
+                    .clamp(0.01, f64::consts::PI - 0.01)
+                    .sin()
+        };
+        let top_half_surface_distance = surface_distance(fov_above_center);
 
-        // Returns an infinity if the ray is
-        // parallel to the plane and never intersects,
-        // or NaN if the ray is in the plane
-        // and intersects everywhere.
-        return distance / approach_speed;
+        let horizon = distance
+            * ((f64::consts::FRAC_PI_2 - pitch).tan() * 0.85)
+                .min((MAX_MERCATOR_HORIZON_ANGLE.0 - pitch).tan());
+        let horizon_angle = (horizon / distance).atan();
+        let min_fov_center_to_horizon = f64::consts::FRAC_PI_2 - MAX_MERCATOR_HORIZON_ANGLE.0;
+        let fov_center_to_horizon = if horizon_angle > min_fov_center_to_horizon {
+            2.0 * horizon_angle * (0.5 + center_offset.y / (horizon * 2.0))
+        } else {
+            min_fov_center_to_horizon
+        };
+        let top_half_horizon_distance = surface_distance(fov_center_to_horizon);
 
-        // Otherwise returns t such that
-        // ray_origin + t * rayDirection
-        // is in the plane, to within rounding error.
-    }
-
-    fn furthest_distance(&self, camera_height: f64, center_offset: Point2<f64>) -> f64 {
-        let perspective = &self.perspective;
-        let width = self.width;
-        let height = self.height;
-        let camera = self.camera.position();
-
-        let y = perspective.y_tan();
-        let x = perspective.x_tan(width, height);
-        let offset_x = perspective.offset_x(center_offset, width);
-        let offset_y = perspective.offset_y(center_offset, height);
-
-        let rotation = Matrix4::from_angle_x(self.camera.get_pitch())
-            * Matrix4::from_angle_y(self.camera.get_yaw())
-            * Matrix4::from_angle_z(self.camera.get_roll());
-
-        let rays = [
-            Vector3::new(x * (1.0 - offset_x), y * (1.0 - offset_y), 1.0),
-            Vector3::new(x * (-1.0 - offset_x), y * (1.0 - offset_y), 1.0),
-            Vector3::new(x * (1.0 - offset_x), y * (-1.0 - offset_y), 1.0),
-            Vector3::new(x * (-1.0 - offset_x), y * (-1.0 - offset_y), 1.0),
-        ];
-        let ray_origin = Vector3::new(-camera.x, -camera.y, -camera_height);
-
-        let plane_origin = Vector3::new(-camera.x, -camera.y, 0.0);
-        let plane_normal = (rotation * Vector4::new(0.0, 0.0, 1.0, 1.0)).truncate();
-
-        rays.iter()
-            .map(|ray| Self::get_intersection_time(ray_origin, *ray, plane_origin, plane_normal))
-            .fold(0. / 0., f64::max)
+        let top_half = top_half_surface_distance.min(top_half_horizon_distance);
+        let far_z =
+            ((f64::consts::FRAC_PI_2 - limited_pitch).cos() * top_half + lowest_plane) * 1.01;
+        let near_z = self.height / 50.0;
+        (near_z, far_z)
     }
 
     pub fn camera_to_center_distance(&self) -> f64 {
@@ -185,14 +227,15 @@ impl ViewState {
         let center_offset = center - Vector2::new(width, height) / 2.0;
 
         let camera_to_center_distance = self.camera_to_center_distance();
+        let pixels_per_meter = self.pixels_per_meter();
 
-        let camera_matrix = self.camera.calc_matrix(camera_to_center_distance);
+        // World z is metres above sea level: shift the center elevation to the orbit point,
+        // then scale metres to pixels before the camera transform, as GL JS does.
+        let camera_matrix = self.camera.calc_matrix(camera_to_center_distance)
+            * Matrix4::from_nonuniform_scale(1.0, 1.0, pixels_per_meter)
+            * Matrix4::from_translation(Vector3::new(0.0, 0.0, -self.center_elevation));
 
-        // Add a bit extra to avoid precision problems when a fragment's distance is exactly `furthest_distance`
-        let furthest = self.furthest_distance(camera_to_center_distance, center_offset);
-        let far_z = furthest * 1.01;
-
-        let near_z = height / 50.0;
+        let (near_z, far_z) = self.depth_range(center_offset);
 
         let perspective =
             self.perspective
@@ -535,6 +578,71 @@ mod tests {
         //state.camera.set_yaw(Deg(-30.0));
 
         // TODO: verify far distance plane calculation
+    }
+
+    fn state_at(zoom: f64, pitch: Deg<f64>) -> ViewState {
+        ViewState::new(
+            PhysicalSize::new(800, 600).unwrap(),
+            WorldCoords::at_ground(256.0 * 2.0_f64.powf(zoom), 256.0 * 2.0_f64.powf(zoom)),
+            Zoom::new(zoom),
+            pitch,
+            Deg(36.87),
+        )
+    }
+
+    #[test]
+    fn pixels_per_meter_follows_world_size_at_the_equator() {
+        let state = state_at(0.0, Deg(0.0));
+        let expected = 512.0 / (2.0 * std::f64::consts::PI * 6_371_008.8);
+
+        assert!((state.pixels_per_meter() - expected).abs() < 1e-12);
+        assert!((state_at(3.0, Deg(0.0)).pixels_per_meter() - expected * 8.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn center_elevation_keeps_the_elevated_center_on_screen_center() {
+        let mut state = state_at(12.0, Deg(45.0));
+        state.set_center_elevation(570.0);
+        let center = state.camera.position();
+
+        let clip = state
+            .view_projection()
+            .project(Vector4::new(center.x, center.y, 570.0, 1.0));
+        let window = state.clip_to_window(&clip);
+
+        assert!((window.x - 400.0).abs() < 1e-6);
+        assert!((window.y - 300.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn far_plane_stays_finite_at_high_pitch() {
+        let mut state = state_at(12.0, Deg(0.0));
+        state.set_max_pitch(Deg(85.0));
+        state.camera_mut().set_pitch(Deg(85.0));
+        let (near, far) = state.depth_range(cgmath::Point2::new(0.0, 0.0));
+
+        assert!(near > 0.0);
+        assert!(far.is_finite());
+        assert!(far > state.camera_to_center_distance());
+        assert!((state.camera.get_pitch().0 - 85.0_f64.to_radians()).abs() < 1e-9);
+    }
+
+    #[test]
+    fn far_plane_matches_the_camera_distance_when_flat() {
+        let state = state_at(5.0, Deg(0.0));
+        let (_, far) = state.depth_range(cgmath::Point2::new(0.0, 0.0));
+
+        assert!((far - state.camera_to_center_distance() * 1.01).abs() < 1e-6);
+    }
+
+    #[test]
+    fn max_pitch_clamps_pitch_changes() {
+        let mut state = state_at(5.0, Deg(70.0));
+        assert!((state.camera.get_pitch().0 - 60.0_f64.to_radians()).abs() < 1e-9);
+
+        state.set_max_pitch(Deg(85.0));
+        state.camera_mut().set_pitch(Deg(90.0));
+        assert!((state.camera.get_pitch().0 - 85.0_f64.to_radians()).abs() < 1e-9);
     }
 
     #[test]

@@ -1,7 +1,7 @@
 #![deny(unused_imports)]
 
 use maplibre::{render::settings::WgpuSettings, style::Style};
-use maplibre_winit::{run_headed_map, WinitMapWindowConfig};
+use maplibre_winit::{run_headed_map, HeadedMapOptions, WinitMapWindowConfig};
 
 #[cfg(not(any(no_pendantic_os_check, target_os = "macos", target_os = "ios")))]
 compile_error!("apple works only on macOS and iOS.");
@@ -18,6 +18,6 @@ pub fn maplibre_apple_main() {
             ..WgpuSettings::default()
         },
         Style::default(),
-        None,
+        HeadedMapOptions::default(),
     );
 }

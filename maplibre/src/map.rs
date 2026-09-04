@@ -13,6 +13,7 @@ use crate::{
         builder::{
             InitializationResult, InitializedRenderer, RendererBuilder, UninitializedRenderer,
         },
+        camera::DEFAULT_MAX_PITCH,
         error::RenderError,
         graph::RenderGraphError,
         view_state::ViewState,
@@ -55,6 +56,7 @@ pub struct Map<E: Environment> {
     window: <E::MapWindowConfig as MapWindowConfig>::MapWindow,
 
     plugins: Vec<Box<dyn Plugin<E>>>,
+    max_pitch: cgmath::Deg<f64>,
 }
 
 impl<E: Environment> Map<E>
@@ -82,8 +84,16 @@ where
             },
             window,
             plugins,
+            max_pitch: DEFAULT_MAX_PITCH,
         };
         Ok(map)
+    }
+
+    /// Sets the largest pitch the camera accepts, matching the GL JS `maxPitch` map option.
+    ///
+    /// Takes effect when the renderer initializes the view state from the style.
+    pub fn set_max_pitch(&mut self, max_pitch: cgmath::Deg<f64>) {
+        self.max_pitch = max_pitch;
     }
 
     pub async fn initialize_renderer(&mut self) -> Result<(), MapError> {
@@ -113,6 +123,10 @@ where
                     cgmath::Deg::<f64>(style.pitch.unwrap_or_default()),
                     cgmath::Rad(0.6435011087932844),
                 );
+                view_state.set_max_pitch(self.max_pitch);
+                view_state
+                    .camera_mut()
+                    .set_pitch(cgmath::Deg::<f64>(style.pitch.unwrap_or_default()));
                 view_state
                     .camera_mut()
                     .set_roll(cgmath::Deg(style.bearing.unwrap_or_default()));

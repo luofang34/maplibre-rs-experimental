@@ -104,16 +104,32 @@ impl<ET: 'static + Clone> MapWindowConfig for WinitMapWindowConfig<ET> {
     }
 }
 
+/// Runtime options of a windowed map that the style does not carry.
+#[derive(Clone, Copy, Debug)]
+pub struct HeadedMapOptions {
+    /// Ends the event loop after this many rendered frames, so a smoke test can drive the real
+    /// windowed pipeline without input.
+    pub max_frames: Option<u64>,
+    /// Largest camera pitch in degrees, matching the GL JS `maxPitch` map option.
+    pub max_pitch_degrees: f64,
+}
+
+impl Default for HeadedMapOptions {
+    fn default() -> Self {
+        Self {
+            max_frames: None,
+            max_pitch_degrees: maplibre::render::camera::DEFAULT_MAX_PITCH.0,
+        }
+    }
+}
+
 /// Opens a window and runs the map event loop until the window closes.
-///
-/// `max_frames` ends the loop after that many rendered frames, which lets a smoke test drive
-/// the real windowed pipeline without input.
 pub fn run_headed_map<P>(
     cache_path: Option<P>,
     window_config: WinitMapWindowConfig<()>,
     wgpu_settings: WgpuSettings,
     style: Style,
-    max_frames: Option<u64>,
+    options: HeadedMapOptions,
 ) where
     P: Into<PathBuf>,
 {
@@ -159,6 +175,7 @@ pub fn run_headed_map<P>(
             ],
         )
         .unwrap();
+        map.set_max_pitch(cgmath::Deg(options.max_pitch_degrees));
 
         #[cfg(not(target_os = "android"))]
         {
@@ -168,7 +185,7 @@ pub fn run_headed_map<P>(
         map.window_mut()
             .take_event_loop()
             .expect("event loop is not available")
-            .run(map, max_frames)
+            .run(map, options.max_frames)
             .expect("event loop creation failed")
     })
 }
