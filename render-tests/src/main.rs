@@ -57,6 +57,8 @@ struct TestMeta {
     height: u32,
     comparison_background: Option<[u8; 3]>,
     max_diff: f64,
+    /// Largest pitch the fixture may request, as GL JS passes `maxPitch` to the map.
+    max_pitch: Option<f64>,
 }
 
 impl Default for TestMeta {
@@ -66,6 +68,7 @@ impl Default for TestMeta {
             height: 512,
             comparison_background: None,
             max_diff: 0.02,
+            max_pitch: None,
         }
     }
 }
@@ -94,6 +97,7 @@ fn parse_test_meta(style_value: &Value) -> TestMeta {
                 _ => None,
             }),
         max_diff: test.get("max-diff").and_then(Value::as_f64).unwrap_or(0.02),
+        max_pitch: test.get("maxPitch").and_then(Value::as_f64),
     }
 }
 
@@ -205,6 +209,9 @@ async fn run_test_inner(test_dir: &Path) -> TestResult {
         Ok(m) => m,
         Err(e) => return TestResult::Error(format!("HeadlessMap creation failed: {e:?}")),
     };
+    if let Some(max_pitch) = meta.max_pitch {
+        map.set_max_pitch(cgmath::Deg(max_pitch));
+    }
 
     // ---- Process GeoJSON sources ----
     let target_coords = match map.required_tile_coords() {

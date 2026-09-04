@@ -16,6 +16,7 @@ name = "render-tests"
 path = "src/main.rs"
 
 [dependencies]
+cgmath.workspace = true
 maplibre = { path = "../maplibre", features = ["headless", "geojson", "thread-safe-futures"] }
 serde_json.workspace = true
 image.workspace = true
