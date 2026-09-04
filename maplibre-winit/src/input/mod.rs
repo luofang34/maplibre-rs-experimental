@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use cgmath::Vector2;
-use maplibre::context::MapContext;
+use maplibre::{context::MapContext, terrain::interaction::keep_camera_above_terrain};
 use winit::event::{DeviceEvent, KeyEvent, TouchPhase, WindowEvent};
 
 use crate::input::{
@@ -129,6 +129,7 @@ pub trait UpdateState {
 
 impl UpdateState for InputController {
     fn update_state(&mut self, map_context: &mut MapContext, dt: Duration) {
+        let before = view_snapshot(map_context);
         self.pan_handler.update_state(map_context, dt);
         self.pinch_handler.update_state(map_context, dt);
         self.zoom_handler.update_state(map_context, dt);
@@ -136,5 +137,30 @@ impl UpdateState for InputController {
         self.shift_handler.update_state(map_context, dt);
         self.query_handler.update_state(map_context, dt);
         self.debug_handler.update_state(map_context, dt);
+
+        // Only a view the handlers moved is lifted out of the terrain, as GL JS applies its
+        // camera update after a handler changed the transform; elevation data arriving under a
+        // resting camera leaves it where it is.
+        if view_snapshot(map_context) != before {
+            let MapContext {
+                style,
+                view_state,
+                world,
+                ..
+            } = map_context;
+            keep_camera_above_terrain(style, view_state, world);
+        }
     }
+}
+
+/// The parts of the view the input handlers change.
+fn view_snapshot(map_context: &MapContext) -> (Vector2<f64>, f64, f64, f64) {
+    let camera = map_context.view_state.camera();
+    let position = camera.position();
+    (
+        Vector2::new(position.x, position.y),
+        camera.get_pitch().0,
+        camera.get_roll().0,
+        map_context.view_state.zoom().value(),
+    )
 }

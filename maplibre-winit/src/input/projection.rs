@@ -6,13 +6,14 @@ use maplibre::{
     projection::globe::{
         camera::GlobeCameraState,
         interaction::{
-            pan_camera_by_pixels, pan_center_to_anchor, pan_surface_location,
+            pan_camera_by_pixels, pan_center_to_anchor,
             zoom::{zoom_around_globe, GlobeZoomInput},
             GlobePanUpdate,
         },
     },
     render::{projection::globe_camera_for_view, view_state::ViewState},
     style::Style,
+    terrain::interaction::pan_mercator_by_pixels,
 };
 
 pub fn active_globe_camera(style: &Style, view_state: &ViewState) -> Option<GlobeCameraState> {
@@ -74,25 +75,27 @@ pub fn pan_globe_by_pixels(
     true
 }
 
-/// Pans the Mercator plane so the ground under `cursor - delta` moves under `cursor`.
-pub fn pan_plane_by_pixels(view_state: &mut ViewState, cursor: Vector2<f64>, delta: Vector2<f64>) {
-    let inverted_view_proj = view_state.view_projection().invert();
-    let previous = cursor - delta;
-    let (Some(previous), Some(current)) = (
-        view_state.window_to_world_at_ground(&previous, &inverted_view_proj, false),
-        view_state.window_to_world_at_ground(&cursor, &inverted_view_proj, false),
-    ) else {
-        return;
-    };
-    let shift = previous - current;
-    view_state
-        .camera_mut()
-        .move_relative(Vector2::new(shift.x, shift.y));
+/// Pans the Mercator plane so the point on the plane `elevation` metres up that was under
+/// `cursor - delta` moves under `cursor`.
+pub fn pan_plane_by_pixels(
+    view_state: &mut ViewState,
+    cursor: Vector2<f64>,
+    delta: Vector2<f64>,
+    elevation: f64,
+) {
+    pan_mercator_by_pixels(
+        view_state,
+        Point2::new(cursor.x, cursor.y),
+        delta,
+        elevation,
+    );
 }
 
 /// Zooms the globe around a screen point with GL JS's horizon-safe pointer anchoring.
 ///
-/// Returns `false` when the globe is not active so the caller zooms the Mercator plane instead.
+/// A pointer off the planet zooms around the view center, as the GL JS handler manager does
+/// for globe controls. Returns `false` when the globe is not active so the caller zooms the
+/// Mercator plane instead.
 pub fn zoom_globe_around_pixel(
     style: &Style,
     view_state: &mut ViewState,
@@ -102,12 +105,18 @@ pub fn zoom_globe_around_pixel(
     let Some(before) = active_globe_camera(style, view_state) else {
         return false;
     };
-    let pixel = Point2::new(screen.x, screen.y);
+    let mut pixel = Point2::new(screen.x, screen.y);
+    if !before.is_point_on_map_surface(pixel) {
+        let center = center_pixel(view_state);
+        pixel = Point2::new(center.x, center.y);
+    }
     let start_center = before.center();
-    let pointer_location = pan_surface_location(&before, pixel).unwrap_or(start_center);
     let anchor = before.screen_point_to_location(pixel);
+    let pointer_location = anchor.unwrap_or(start_center);
     let previous_zoom = view_state.zoom().value();
-    view_state.update_zoom(next_zoom);
+    // The camera position is stored in world pixels, so it must scale with the zoom for the
+    // camera built next to look at the same center.
+    view_state.zoom_to(next_zoom);
     let Some(after) = active_globe_camera(style, view_state) else {
         return true;
     };

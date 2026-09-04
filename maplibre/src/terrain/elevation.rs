@@ -64,7 +64,7 @@ pub fn center_elevation_system(
     let world_size = TILE_SIZE * 2_f64.powf(zoom.value());
     let sample = index.sample(&world.tiles, center.x / world_size, center.y / world_size);
     tracing::trace!(?sample, "center elevation");
-    if sample.dem_loaded {
+    if sample.dem_loaded && !view_state.center_elevation_frozen() {
         view_state.set_center_elevation(sample.elevation);
     }
     let center_tile = WorldCoords::at_ground(center.x, center.y)

@@ -46,6 +46,8 @@ pub struct ViewState {
     center_elevation: f64,
     /// Lowest terrain elevation in metres among visible tiles, used for the far plane.
     min_elevation: f64,
+    /// Whether a gesture holds the center elevation still, as GL JS `elevationFreeze` does.
+    center_elevation_frozen: bool,
 }
 
 impl ViewState {
@@ -74,6 +76,7 @@ impl ViewState {
             },
             center_elevation: 0.0,
             min_elevation: 0.0,
+            center_elevation_frozen: false,
         }
     }
 
@@ -87,6 +90,24 @@ impl ViewState {
         if meters.is_finite() {
             self.center_elevation = meters;
         }
+    }
+
+    /// Holds the center elevation still until [`thaw_center_elevation`](Self::thaw_center_elevation).
+    ///
+    /// The camera would otherwise bob with every change of the terrain under the center while a
+    /// drag or zoom is in progress.
+    pub fn freeze_center_elevation(&mut self) {
+        self.center_elevation_frozen = true;
+    }
+
+    /// Lets the center elevation follow the terrain again.
+    pub fn thaw_center_elevation(&mut self) {
+        self.center_elevation_frozen = false;
+    }
+
+    /// Whether a gesture currently holds the center elevation still.
+    pub fn center_elevation_frozen(&self) -> bool {
+        self.center_elevation_frozen
     }
 
     /// Sets the lowest visible terrain elevation, which extends the far plane below sea level.
@@ -284,6 +305,17 @@ impl ViewState {
         log::info!("zoom: {new_zoom}");
     }
 
+    /// Changes the zoom while the map center stays on the same geographic location.
+    ///
+    /// The camera position is stored in world pixels of the current zoom, so it scales with
+    /// the zoom change; [`update_zoom`](Self::update_zoom) leaves it as it is.
+    pub fn zoom_to(&mut self, new_zoom: Zoom) {
+        let scale = self.zoom.scale_delta(&new_zoom);
+        let position = self.camera.position().to_vec() * scale;
+        self.camera.move_to(Point2::from_vec(position));
+        self.update_zoom(new_zoom);
+    }
+
     pub fn camera(&self) -> &Camera {
         self.camera.deref()
     }
@@ -426,6 +458,36 @@ impl ViewState {
             unprojected.y / unprojected.w,
             unprojected.z / unprojected.w,
         )
+    }
+
+    /// Unprojects a window position at a clip depth in `0..=1` into world pixels with metres of
+    /// elevation on `z`.
+    pub fn window_to_world_at_depth(
+        &self,
+        window: &Vector2<f64>,
+        depth: f64,
+        inverted_view_proj: &InvertedViewProjection,
+    ) -> Vector3<f64> {
+        self.window_to_world(&Vector3::new(window.x, window.y, depth), inverted_view_proj)
+    }
+
+    /// Gets the world coordinates for the specified `window` coordinates on the horizontal plane
+    /// `elevation` metres above sea level.
+    pub fn window_to_world_at_elevation(
+        &self,
+        window: &Vector2<f64>,
+        inverted_view_proj: &InvertedViewProjection,
+        elevation: f64,
+    ) -> Option<Vector2<f64>> {
+        let near_world = self.window_to_world_at_depth(window, 0.0, inverted_view_proj);
+        let far_world = self.window_to_world_at_depth(window, 1.0, inverted_view_proj);
+        let dz = far_world.z - near_world.z;
+        if dz.abs() <= f64::EPSILON {
+            return None;
+        }
+        let u = (elevation - near_world.z) / dz;
+        let result = near_world + u * (far_world - near_world);
+        (result.x.is_finite() && result.y.is_finite()).then_some(Vector2::new(result.x, result.y))
     }
 
     /// Gets the world coordinates for the specified `window` coordinates on the `z=0` plane.

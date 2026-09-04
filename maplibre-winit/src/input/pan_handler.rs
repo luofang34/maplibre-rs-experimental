@@ -1,8 +1,11 @@
 use std::time::Duration;
 
-use cgmath::{EuclideanSpace, Point2, Vector2, Zero};
+use cgmath::{Point2, Vector2};
 use instant::Instant;
-use maplibre::context::MapContext;
+use maplibre::{
+    context::MapContext,
+    terrain::interaction::{begin_gesture, finish_gesture, resolve_gesture_anchor},
+};
 use winit::event::{ElementState, MouseButton};
 
 use super::{
@@ -16,16 +19,20 @@ pub struct PanHandler {
     window_position: Option<Vector2<f64>>,
     last_window_position: Option<Vector2<f64>>,
     start_window_position: Option<Vector2<f64>>,
-    start_camera_position: Option<Vector2<f64>>,
     is_panning: bool,
     inertia: PanInertia,
+    /// Elevation of the plane the running gesture drags, captured when it starts.
+    gesture_plane: Option<f64>,
 }
 
 impl UpdateState for PanHandler {
     fn update_state(
         &mut self,
         MapContext {
-            style, view_state, ..
+            style,
+            view_state,
+            world,
+            ..
         }: &mut MapContext,
         _dt: Duration,
     ) {
@@ -33,13 +40,17 @@ impl UpdateState for PanHandler {
         if !self.is_panning {
             if let Some(delta) = self.inertia.step(now) {
                 let center = center_pixel(view_state);
+                let plane = self
+                    .gesture_plane
+                    .unwrap_or_else(|| view_state.center_elevation());
                 if !pan_globe_by_pixels(style, view_state, center, delta) {
-                    pan_plane_by_pixels(view_state, center, delta);
+                    pan_plane_by_pixels(view_state, center, delta, plane);
                 }
+            } else if self.gesture_plane.take().is_some() {
+                finish_gesture(style, view_state, world);
             }
             return;
         }
-
         let (Some(window_position), Some(start_window_position)) =
             (self.window_position, self.start_window_position)
         else {
@@ -48,36 +59,22 @@ impl UpdateState for PanHandler {
         let delta = window_position - self.last_window_position.unwrap_or(window_position);
         self.last_window_position = Some(window_position);
         self.inertia.record(now, delta);
-
+        let plane = *self.gesture_plane.get_or_insert_with(|| {
+            let anchor = resolve_gesture_anchor(
+                style,
+                view_state,
+                world,
+                Point2::new(start_window_position.x, start_window_position.y),
+            );
+            begin_gesture(view_state);
+            anchor
+                .elevation
+                .unwrap_or_else(|| view_state.center_elevation())
+        });
         if pan_globe_by_pixels(style, view_state, window_position, delta) {
             return;
         }
-
-        let view_proj = view_state.view_projection();
-        let inverted_view_proj = view_proj.invert();
-
-        let delta = if let (Some(start), Some(current)) = (
-            view_state.window_to_world_at_ground(
-                &start_window_position,
-                &inverted_view_proj,
-                false,
-            ),
-            view_state.window_to_world_at_ground(&window_position, &inverted_view_proj, false),
-        ) {
-            start - current
-        } else {
-            Vector2::zero()
-        };
-
-        if self.start_camera_position.is_none() {
-            self.start_camera_position = Some(view_state.camera().position().to_vec());
-        }
-
-        if let Some(start_camera_position) = self.start_camera_position {
-            view_state.camera_mut().move_to(Point2::from_vec(
-                start_camera_position + Vector2::new(delta.x, delta.y),
-            ));
-        }
+        pan_plane_by_pixels(view_state, window_position, delta, plane);
     }
 }
 
@@ -100,7 +97,6 @@ impl PanHandler {
         } else {
             self.window_position = Some(*window_position);
         }
-
         true
     }
 
@@ -108,7 +104,6 @@ impl PanHandler {
         if *key != MouseButton::Left {
             return false;
         }
-
         if *state == ElementState::Pressed {
             self.begin(None);
         } else {
@@ -129,7 +124,6 @@ impl PanHandler {
 
     fn end(&mut self) {
         self.inertia.release(Instant::now());
-        self.start_camera_position = None;
         self.start_window_position = None;
         self.last_window_position = None;
         self.window_position = None;

@@ -194,6 +194,35 @@ impl TerrainCoverageIndex {
         let sample = self.sample(tiles, mercator_x, mercator_y);
         sample.dem_loaded.then_some(sample.elevation)
     }
+
+    /// Exaggerated elevation at Mercator coordinates from any loaded DEM, rendered or not, as
+    /// the tile at `zoom` would sample it; `None` where nothing covering it has loaded.
+    pub fn elevation_at_zoom(
+        &self,
+        tiles: &Tiles,
+        mercator_x: f64,
+        mercator_y: f64,
+        zoom: u8,
+    ) -> Option<f64> {
+        if !(0.0..1.0).contains(&mercator_y) {
+            return None;
+        }
+        let wrapped_x = mercator_x - mercator_x.floor();
+        let scale = 2_f64.powi(i32::from(zoom));
+        let coords = WorldTileCoords {
+            x: (wrapped_x * scale).floor() as i32,
+            y: (mercator_y * scale).floor() as i32,
+            z: ZoomLevel::new(zoom),
+        };
+        let dem_coords = self.loaded_dem_for(coords)?;
+        let DemTileComponent::Loaded(dem) = tiles.query::<&DemTileComponent>(dem_coords)? else {
+            return None;
+        };
+        let dem_scale = 2_f64.powi(i32::from(u8::from(dem_coords.z)));
+        let x = ((wrapped_x * dem_scale - f64::from(dem_coords.x)) * EXTENT).min(MAX_TILE_COORD);
+        let y = ((mercator_y * dem_scale - f64::from(dem_coords.y)) * EXTENT).min(MAX_TILE_COORD);
+        Some(dem.tile.elevation_at_tile_coords(x, y) * self.exaggeration)
+    }
 }
 
 /// Per-tile culling bounds from the index, with a wide fallback where no DEM has loaded yet.
