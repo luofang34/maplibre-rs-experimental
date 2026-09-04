@@ -63,3 +63,4 @@ pub mod vector;
 
 mod legacy;
 pub mod sdf;
+pub mod terrain;
