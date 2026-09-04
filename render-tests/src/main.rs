@@ -21,6 +21,7 @@ use std::{
 };
 
 use maplibre::{
+    coords::WorldTileCoords,
     headless::{create_headless_renderer, map::HeadlessMap, HeadlessPlugin},
     platform::run_multithreaded,
     plugin::Plugin,
@@ -31,6 +32,7 @@ use maplibre::{
         source::{GeoJsonData, Source},
         Style,
     },
+    terrain::{dem_tile_coords, DefaultDemTransferables, TerrainPlugin},
     vector::{DefaultVectorTransferables, VectorPlugin},
 };
 use serde_json::Value;
@@ -132,16 +134,37 @@ async fn run_test(test_dir: PathBuf) -> TestOutcome {
         .to_string_lossy()
         .into_owned();
 
-    let mut result = run_test_inner(&test_dir).await;
+    let mut result = run_test_isolated(&test_dir);
     let mut attempts = 1_u8;
     while matches!(result, TestResult::Fail { .. }) && attempts < 3 {
         attempts = attempts.wrapping_add(1);
-        result = run_test_inner(&test_dir).await;
+        result = run_test_isolated(&test_dir);
     }
     TestOutcome {
         id,
         result,
         attempts,
+    }
+}
+
+/// Runs one test on the current runtime and turns a panic into an error result, so one bad
+/// fixture cannot abort the whole corpus.
+fn run_test_isolated(test_dir: &Path) -> TestResult {
+    let outcome = tokio::task::block_in_place(|| {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            tokio::runtime::Handle::current().block_on(run_test_inner(test_dir))
+        }))
+    });
+    match outcome {
+        Ok(result) => result,
+        Err(payload) => {
+            let message = payload
+                .downcast_ref::<&str>()
+                .map(|s| (*s).to_string())
+                .or_else(|| payload.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "unknown panic".to_string());
+            TestResult::Error(format!("panicked: {message}"))
+        }
     }
 }
 
@@ -202,6 +225,9 @@ async fn run_test_inner(test_dir: &Path) -> TestResult {
         plugins.push(Box::new(
             RasterPlugin::<DefaultRasterTransferables>::default(),
         ));
+    }
+    if style.terrain.is_some() {
+        plugins.push(Box::new(TerrainPlugin::<DefaultDemTransferables>::default()));
     }
     plugins.push(Box::new(HeadlessPlugin::new(true).preserve_tile_sources()));
 
@@ -383,7 +409,12 @@ async fn run_test_inner(test_dir: &Path) -> TestResult {
             }
         }
     }
-    if let Err(error) = map.render_source_frames(all_layers, all_raster_layers, 2) {
+    let dem_tiles = match load_dem_tiles(&style, &target_coords) {
+        Ok(tiles) => tiles,
+        Err(error) => return TestResult::Error(error),
+    };
+    if let Err(error) = map.render_frames_with_terrain(all_layers, all_raster_layers, dem_tiles, 2)
+    {
         return TestResult::Error(format!("Cannot render source tiles: {error}"));
     }
 
@@ -415,6 +446,49 @@ async fn run_test_inner(test_dir: &Path) -> TestResult {
         Ok(diff) => TestResult::Fail { diff },
         Err(e) => TestResult::Error(format!("Image comparison failed: {e}")),
     }
+}
+
+/// Reads the DEM tiles the terrain needs for the target tiles from the local asset tree.
+///
+/// Fixtures only ship the tiles their own view needs, so a tile that is missing on disk is
+/// skipped and the mesh falls back to an ancestor or to sea level.
+fn load_dem_tiles(
+    style: &Style,
+    target_coords: &[WorldTileCoords],
+) -> Result<Vec<(WorldTileCoords, image::RgbaImage)>, String> {
+    let Some(terrain) = &style.terrain else {
+        return Ok(Vec::new());
+    };
+    let Some(Source::RasterDem(dem)) = style.sources.get(&terrain.source) else {
+        return Err(format!(
+            "Terrain source '{}' is not a raster-dem source",
+            terrain.source
+        ));
+    };
+    let Some(template) = dem.tiles.as_ref().and_then(|templates| templates.first()) else {
+        return Err(format!(
+            "Terrain source '{}' has no tile template",
+            terrain.source
+        ));
+    };
+    let minzoom = dem.minzoom.unwrap_or(0);
+    let maxzoom = dem.maxzoom.unwrap_or(22);
+    let mut seen = std::collections::BTreeSet::new();
+    let mut tiles = Vec::new();
+    for coords in target_coords {
+        let Some(coords) = dem_tile_coords(*coords, minzoom, maxzoom) else {
+            continue;
+        };
+        if !seen.insert(coords) {
+            continue;
+        }
+        let path = local_tile_path(template, coords)?;
+        match image::open(&path) {
+            Ok(image) => tiles.push((coords, image.to_rgba8())),
+            Err(error) => tracing::debug!(%coords, path = %path.display(), %error, "no DEM tile"),
+        }
+    }
+    Ok(tiles)
 }
 
 fn crate_projection_default() -> maplibre::projection::ProjectionType {

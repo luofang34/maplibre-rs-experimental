@@ -543,7 +543,7 @@ pub mod main_graph {
 }
 
 /// Labels for the "draw" graph
-mod draw_graph {
+pub mod draw_graph {
     pub const NAME: &str = "draw";
     // Labels for input nodes
     pub mod input {}

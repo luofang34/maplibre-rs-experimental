@@ -1,0 +1,390 @@
+//! GPU resources shared by the drape pass and the terrain draw.
+
+use std::{
+    collections::{HashMap, HashSet},
+    num::NonZeroU64,
+};
+
+use bytemuck_derive::{Pod, Zeroable};
+use wgpu::util::DeviceExt;
+
+use crate::{
+    coords::WorldTileCoords,
+    render::{resource::Texture, settings::Msaa},
+    terrain::{
+        dem::DemTile,
+        mesh::{create_terrain_mesh, TERRAIN_MESH_SIZE},
+    },
+};
+
+/// Edge length in pixels of one drape texture; twice the tile size, as GL JS `qualityFactor`.
+pub const DRAPE_SIZE: u32 = 1024;
+/// Byte stride between per-tile uniform blocks, the WebGPU dynamic offset alignment.
+pub const UNIFORM_STRIDE: u64 = 256;
+/// Largest number of terrain tiles drawn in one frame.
+const UNIFORM_CAPACITY: u64 = 1024;
+
+/// Per-tile inputs of the terrain shaders, one block per drawn tile.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+pub struct TerrainTileUniforms {
+    /// GPU view projection times the tile transform.
+    pub transform: [[f32; 4]; 4],
+    /// Maps tile coordinates to unit coordinates of the sampled DEM tile.
+    pub dem_matrix: [[f32; 4]; 4],
+    /// Mercator offset and scale of the tile for the globe path.
+    pub tile_mercator_coords: [f32; 4],
+    /// Channel factors and base shift decoding DEM pixels to metres.
+    pub dem_unpack: [f32; 4],
+    /// Samples per DEM tile edge without the border.
+    pub dem_dim: f32,
+    /// Elevation multiplier.
+    pub exaggeration: f32,
+    /// Distance in metres the skirt vertices drop below the surface.
+    pub skirt_length: f32,
+    /// Keeps the block a multiple of sixteen bytes.
+    pub padding: f32,
+}
+
+/// One terrain tile ready to draw.
+pub struct TerrainDraw {
+    /// Uniform block, DEM texture and drape texture of the tile.
+    pub bind_group: wgpu::BindGroup,
+    /// Dynamic offset of the tile's uniform block.
+    pub uniform_offset: u32,
+}
+
+/// Attachments every drape pass renders into before resolving to a tile texture.
+pub struct DrapeScratch {
+    /// Multisampled color target, or `None` when the layer pipelines are single-sampled.
+    pub color: Option<Texture>,
+    /// Depth-stencil target matching the layer pipelines.
+    pub depth_stencil: Texture,
+}
+
+/// Pipeline, mesh, textures and per-frame draws of the terrain.
+pub struct TerrainResources {
+    pipeline: wgpu::RenderPipeline,
+    sampler: wgpu::Sampler,
+    vertex_buffer: wgpu::Buffer,
+    index_buffer: wgpu::Buffer,
+    index_count: u32,
+    uniform_buffer: wgpu::Buffer,
+    dem_textures: HashMap<WorldTileCoords, Texture>,
+    empty_dem: Texture,
+    drape_textures: HashMap<WorldTileCoords, Texture>,
+    drape_scratch: Option<DrapeScratch>,
+    draws: Vec<TerrainDraw>,
+    msaa: Msaa,
+    color_format: wgpu::TextureFormat,
+    depth_format: wgpu::TextureFormat,
+}
+
+impl TerrainResources {
+    /// Bind group layout of group one: uniforms, DEM texture, drape texture, sampler.
+    pub fn bind_group_layout_entries() -> Vec<wgpu::BindGroupLayoutEntry> {
+        vec![
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: true,
+                    min_binding_size: NonZeroU64::new(
+                        std::mem::size_of::<TerrainTileUniforms>() as u64
+                    ),
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Texture {
+                    multisampled: false,
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    multisampled: false,
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 3,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+        ]
+    }
+
+    /// Creates the shared mesh, sampler and uniform storage for an initialized pipeline.
+    pub fn new(
+        device: &wgpu::Device,
+        pipeline: wgpu::RenderPipeline,
+        color_format: wgpu::TextureFormat,
+        depth_format: wgpu::TextureFormat,
+        msaa: Msaa,
+    ) -> Self {
+        let mesh = create_terrain_mesh(TERRAIN_MESH_SIZE);
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("terrain mesh vertices"),
+            contents: bytemuck::cast_slice(&mesh.vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("terrain mesh indices"),
+            contents: bytemuck::cast_slice(&mesh.indices),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("terrain tile uniforms"),
+            size: UNIFORM_STRIDE * UNIFORM_CAPACITY,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        // A fresh texture reads as zero, which decodes to sea level with a zero unpack vector.
+        let empty_dem = Texture::new(
+            Some("empty DEM"),
+            device,
+            wgpu::TextureFormat::Rgba8Unorm,
+            1,
+            1,
+            Msaa { samples: 1 },
+            wgpu::TextureUsages::TEXTURE_BINDING,
+        );
+        Self {
+            pipeline,
+            sampler,
+            vertex_buffer,
+            index_buffer,
+            index_count: mesh.indices.len() as u32,
+            uniform_buffer,
+            dem_textures: HashMap::new(),
+            empty_dem,
+            drape_textures: HashMap::new(),
+            drape_scratch: None,
+            draws: Vec::new(),
+            msaa,
+            color_format,
+            depth_format,
+        }
+    }
+
+    /// Terrain render pipeline.
+    pub fn pipeline(&self) -> &wgpu::RenderPipeline {
+        &self.pipeline
+    }
+
+    /// Shared grid vertex buffer.
+    pub fn vertex_buffer(&self) -> &wgpu::Buffer {
+        &self.vertex_buffer
+    }
+
+    /// Shared grid index buffer, 32-bit indices.
+    pub fn index_buffer(&self) -> &wgpu::Buffer {
+        &self.index_buffer
+    }
+
+    /// Number of indices in the shared grid.
+    pub fn index_count(&self) -> u32 {
+        self.index_count
+    }
+
+    /// Sample count the drape passes and terrain pipeline were built for.
+    pub fn msaa(&self) -> Msaa {
+        self.msaa
+    }
+
+    /// Whether a DEM tile has been uploaded.
+    pub fn has_dem_texture(&self, coords: WorldTileCoords) -> bool {
+        self.dem_textures.contains_key(&coords)
+    }
+
+    /// Uploads the bordered pixels of a decoded DEM tile.
+    pub fn upload_dem(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        coords: WorldTileCoords,
+        dem: &DemTile,
+    ) {
+        let texture = Texture::new(
+            Some("DEM tile"),
+            device,
+            wgpu::TextureFormat::Rgba8Unorm,
+            dem.stride(),
+            dem.stride(),
+            Msaa { samples: 1 },
+            wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        );
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &texture.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            dem.pixels(),
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * dem.stride()),
+                rows_per_image: Some(dem.stride()),
+            },
+            texture.size,
+        );
+        self.dem_textures.insert(coords, texture);
+    }
+
+    /// DEM texture of a tile, or the flat stand-in while it loads.
+    pub fn dem_texture(&self, coords: Option<WorldTileCoords>) -> &Texture {
+        coords
+            .and_then(|coords| self.dem_textures.get(&coords))
+            .unwrap_or(&self.empty_dem)
+    }
+
+    /// Creates the drape texture of a view tile if it does not exist yet.
+    pub fn ensure_drape_texture(&mut self, device: &wgpu::Device, coords: WorldTileCoords) {
+        if self.drape_textures.contains_key(&coords) {
+            return;
+        }
+        let texture = Texture::new(
+            Some("drape texture"),
+            device,
+            self.color_format,
+            DRAPE_SIZE,
+            DRAPE_SIZE,
+            Msaa { samples: 1 },
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        );
+        self.drape_textures.insert(coords, texture);
+    }
+
+    /// Drops drape textures of tiles that left the view.
+    pub fn retain_drape_textures(&mut self, keep: &HashSet<WorldTileCoords>) {
+        self.drape_textures
+            .retain(|coords, _| keep.contains(coords));
+    }
+
+    /// Drape texture of a view tile.
+    pub fn drape_texture(&self, coords: WorldTileCoords) -> Option<&Texture> {
+        self.drape_textures.get(&coords)
+    }
+
+    /// Creates the scratch attachments used by every drape pass.
+    pub fn ensure_scratch(&mut self, device: &wgpu::Device) {
+        if self.drape_scratch.is_some() {
+            return;
+        }
+        let color = self.msaa.is_multisampling().then(|| {
+            Texture::new(
+                Some("drape multisampled color"),
+                device,
+                self.color_format,
+                DRAPE_SIZE,
+                DRAPE_SIZE,
+                self.msaa,
+                wgpu::TextureUsages::RENDER_ATTACHMENT,
+            )
+        });
+        let depth_stencil = Texture::new(
+            Some("drape depth stencil"),
+            device,
+            self.depth_format,
+            DRAPE_SIZE,
+            DRAPE_SIZE,
+            self.msaa,
+            wgpu::TextureUsages::RENDER_ATTACHMENT,
+        );
+        self.drape_scratch = Some(DrapeScratch {
+            color,
+            depth_stencil,
+        });
+    }
+
+    /// Scratch attachments of the drape passes.
+    pub fn scratch(&self) -> Option<&DrapeScratch> {
+        self.drape_scratch.as_ref()
+    }
+
+    /// Writes the per-tile uniform blocks and returns how many fit.
+    pub fn write_uniforms(&self, queue: &wgpu::Queue, uniforms: &[TerrainTileUniforms]) -> usize {
+        let count = uniforms.len().min(UNIFORM_CAPACITY as usize);
+        if count < uniforms.len() {
+            tracing::warn!(
+                requested = uniforms.len(),
+                capacity = UNIFORM_CAPACITY,
+                "more terrain tiles than uniform blocks; distant tiles are skipped"
+            );
+        }
+        let mut bytes = vec![0_u8; count * UNIFORM_STRIDE as usize];
+        for (index, block) in uniforms.iter().take(count).enumerate() {
+            let start = index * UNIFORM_STRIDE as usize;
+            let raw = bytemuck::bytes_of(block);
+            bytes[start..start + raw.len()].copy_from_slice(raw);
+        }
+        queue.write_buffer(&self.uniform_buffer, 0, &bytes);
+        count
+    }
+
+    /// Binds the uniform block window, a DEM texture and a drape texture for one tile.
+    pub fn create_bind_group(
+        &self,
+        device: &wgpu::Device,
+        dem: &Texture,
+        drape: &Texture,
+    ) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("terrain tile"),
+            layout: &self.pipeline.get_bind_group_layout(1),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &self.uniform_buffer,
+                        offset: 0,
+                        size: NonZeroU64::new(std::mem::size_of::<TerrainTileUniforms>() as u64),
+                    }),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&dem.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&drape.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                },
+            ],
+        })
+    }
+
+    /// Replaces this frame's terrain draws.
+    pub fn set_draws(&mut self, draws: Vec<TerrainDraw>) {
+        self.draws = draws;
+    }
+
+    /// Terrain draws of the current frame.
+    pub fn draws(&self) -> &[TerrainDraw] {
+        &self.draws
+    }
+}

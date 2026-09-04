@@ -22,6 +22,7 @@ use crate::{
         },
     },
     render::{
+        render_phase::ProjectionBinding,
         shaders::{Mat4x4f32, Vec4f32},
         view_state::{ViewState, ViewStatePadding},
     },
@@ -69,6 +70,8 @@ pub struct ProjectionGpuResources {
     bind_group_layout: wgpu::BindGroupLayout,
     bind_group: wgpu::BindGroup,
     buffer: wgpu::Buffer,
+    /// Never-updated default projection for draws into drape textures.
+    flat_bind_group: wgpu::BindGroup,
 }
 
 impl ProjectionGpuResources {
@@ -103,10 +106,32 @@ impl ProjectionGpuResources {
                 resource: buffer.as_entire_binding(),
             }],
         });
+        let flat_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("flat projection uniform buffer"),
+            contents: bytemuck::bytes_of(&initial_data),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let flat_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("flat projection uniform bind group"),
+            layout: &bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: flat_buffer.as_entire_binding(),
+            }],
+        });
         Self {
             bind_group_layout,
             bind_group,
             buffer,
+            flat_bind_group,
+        }
+    }
+
+    /// Returns the bind group a draw asks for: the camera's projection or the flat default.
+    pub fn bind_group_for(&self, binding: ProjectionBinding) -> &wgpu::BindGroup {
+        match binding {
+            ProjectionBinding::View => &self.bind_group,
+            ProjectionBinding::Flat => &self.flat_bind_group,
         }
     }
 

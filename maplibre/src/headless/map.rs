@@ -1,5 +1,6 @@
 use std::{cell::RefCell, collections::BTreeMap, ops::Deref, rc::Rc};
 
+use image::RgbaImage;
 use thiserror::Error;
 
 use crate::{
@@ -26,6 +27,7 @@ use crate::{
     schedule::{Schedule, Stage, StageError},
     style::{layer::StyleLayer, Style},
     tcs::world::World,
+    terrain::{dem::DemTile, source::dem_source, DemTileComponent},
     vector::{
         process_vector_tile, AvailableVectorLayerBucket, DefaultVectorTransferables,
         LayerTessellated, ProcessVectorContext, ProcessVectorError, VectorBufferPool,
@@ -133,11 +135,42 @@ impl HeadlessMap {
         raster_layers: Vec<AvailableRasterLayerData>,
         frame_count: u8,
     ) -> Result<(), HeadlessMapOperationError> {
+        self.render_frames_with_terrain(layers, raster_layers, Vec::new(), frame_count)
+    }
+
+    /// Renders decoded source tiles together with DEM tiles for the style's terrain.
+    ///
+    /// DEM images are decoded with the terrain source's encoding; images that cannot be decoded
+    /// are skipped so the mesh falls back to an ancestor tile or sea level.
+    pub fn render_frames_with_terrain(
+        &mut self,
+        layers: Vec<Box<<DefaultVectorTransferables as VectorTransferables>::LayerTessellated>>,
+        raster_layers: Vec<AvailableRasterLayerData>,
+        dem_tiles: Vec<(WorldTileCoords, RgbaImage)>,
+        frame_count: u8,
+    ) -> Result<(), HeadlessMapOperationError> {
         if frame_count == 0 {
             return Err(HeadlessMapOperationError::InvalidFrameCount);
         }
         let context = &mut self.map_context;
+        let unpack = dem_source(&context.style).map(|dem| dem.unpack);
         let tiles = &mut context.world.tiles;
+        for (coords, image) in dem_tiles {
+            let Some(unpack) = unpack else {
+                break;
+            };
+            let component = match DemTile::from_image(&image, unpack) {
+                Ok(tile) => DemTileComponent::Loaded(tile),
+                Err(error) => {
+                    tracing::warn!(%coords, %error, "DEM tile image is unusable");
+                    DemTileComponent::Missing
+                }
+            };
+            tiles
+                .spawn_mut(coords)
+                .ok_or(HeadlessMapOperationError::InvalidTile { coords })?
+                .insert(component);
+        }
 
         let mut layers_by_tile = BTreeMap::new();
         for layer in layers {

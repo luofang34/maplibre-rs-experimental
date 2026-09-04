@@ -23,6 +23,11 @@ pub trait PhaseItem {
     fn sort_key(&self) -> Self::SortKey;
 
     fn draw_function(&self) -> &dyn Draw<Self>;
+
+    /// Projection uniform bound at group zero when drawing this item.
+    fn projection_binding(&self) -> super::ProjectionBinding {
+        super::ProjectionBinding::View
+    }
 }
 
 /// [`RenderCommand`] is a trait that runs an ECS query and produces one or more

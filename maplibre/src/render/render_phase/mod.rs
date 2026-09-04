@@ -6,6 +6,16 @@ use crate::{render::tile_view_pattern::TileShape, tcs::tiles::Tile};
 
 mod draw;
 
+/// Which projection uniform a draw binds at group zero.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ProjectionBinding {
+    /// The camera's projection for drawing to the screen.
+    #[default]
+    View,
+    /// A flat identity projection for drawing into a drape texture.
+    Flat,
+}
+
 /// A resource to collect and sort draw requests for specific [`PhaseItems`](PhaseItem).
 pub struct RenderPhase<I: PhaseItem> {
     items: Vec<I>,
@@ -41,6 +51,11 @@ impl<I: PhaseItem> RenderPhase<I> {
         self.items.clear();
     }
 
+    /// Keeps only the items the predicate accepts.
+    pub fn retain(&mut self, keep: impl FnMut(&I) -> bool) {
+        self.items.retain(keep);
+    }
+
     pub fn size(&self) -> usize {
         self.items.len()
     }
@@ -58,6 +73,8 @@ pub struct LayerItem {
 
     pub tile: Tile,
     pub source_shape: TileShape, // FIXME tcs: TileShape contains buffer ranges. This is bad, move them to a component?
+    /// Projection uniform the draw binds; drape draws use the flat one.
+    pub projection: ProjectionBinding,
 }
 
 impl PhaseItem for LayerItem {
@@ -69,6 +86,10 @@ impl PhaseItem for LayerItem {
 
     fn draw_function(&self) -> &dyn Draw<LayerItem> {
         self.draw_function.as_ref()
+    }
+
+    fn projection_binding(&self) -> ProjectionBinding {
+        self.projection
     }
 }
 
@@ -98,6 +119,8 @@ pub struct TileMaskItem {
     pub draw_function: Box<dyn Draw<TileMaskItem>>,
     pub source_shape: TileShape,
     pub generate_borders: bool,
+    /// Projection uniform the draw binds; drape draws use the flat one.
+    pub projection: ProjectionBinding,
 }
 
 impl PhaseItem for TileMaskItem {
@@ -109,6 +132,10 @@ impl PhaseItem for TileMaskItem {
 
     fn draw_function(&self) -> &dyn Draw<TileMaskItem> {
         self.draw_function.as_ref()
+    }
+
+    fn projection_binding(&self) -> ProjectionBinding {
+        self.projection
     }
 }
 

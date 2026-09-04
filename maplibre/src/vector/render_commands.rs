@@ -17,7 +17,7 @@ pub struct SetVectorTilePipeline;
 impl<P: PhaseItem> RenderCommand<P> for SetVectorTilePipeline {
     fn render<'w>(
         world: &'w World,
-        _item: &P,
+        item: &P,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some((Initialized(pipeline), Initialized(projection_resources))) =
@@ -30,7 +30,11 @@ impl<P: PhaseItem> RenderCommand<P> for SetVectorTilePipeline {
         };
 
         pass.set_render_pipeline(pipeline);
-        pass.set_bind_group(0, projection_resources.bind_group(), &[]);
+        pass.set_bind_group(
+            0,
+            projection_resources.bind_group_for(item.projection_binding()),
+            &[],
+        );
         RenderCommandResult::Success
     }
 }
@@ -116,7 +120,7 @@ pub struct SetLineTilePipeline;
 impl<P: PhaseItem> RenderCommand<P> for SetLineTilePipeline {
     fn render<'w>(
         world: &'w World,
-        _item: &P,
+        item: &P,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some((Initialized(pipeline), Initialized(projection_resources))) =
@@ -129,7 +133,11 @@ impl<P: PhaseItem> RenderCommand<P> for SetLineTilePipeline {
         };
 
         pass.set_render_pipeline(pipeline);
-        pass.set_bind_group(0, projection_resources.bind_group(), &[]);
+        pass.set_bind_group(
+            0,
+            projection_resources.bind_group_for(item.projection_binding()),
+            &[],
+        );
         RenderCommandResult::Success
     }
 }

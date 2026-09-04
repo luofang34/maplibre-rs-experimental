@@ -1,0 +1,41 @@
+//! Uploads decoded DEM tiles to the GPU.
+
+use crate::{
+    context::MapContext,
+    render::{
+        eventually::{Eventually, Eventually::Initialized},
+        Renderer,
+    },
+    tcs::system::SystemResult,
+    terrain::{resources::TerrainResources, DemTileComponent},
+};
+
+pub fn upload_system(
+    MapContext {
+        style,
+        world,
+        renderer: Renderer { device, queue, .. },
+        ..
+    }: &mut MapContext,
+) -> SystemResult {
+    if style.terrain.is_none() {
+        return Ok(());
+    }
+    let Some(Initialized(terrain_resources)) =
+        world.resources.get_mut::<Eventually<TerrainResources>>()
+    else {
+        return Ok(());
+    };
+    let tiles = &world.tiles;
+    for tile in tiles.tiles.values() {
+        let coords = tile.coords;
+        if terrain_resources.has_dem_texture(coords) {
+            continue;
+        }
+        let Some(DemTileComponent::Loaded(dem)) = tiles.query::<&DemTileComponent>(coords) else {
+            continue;
+        };
+        terrain_resources.upload_dem(device, queue, coords, dem);
+    }
+    Ok(())
+}

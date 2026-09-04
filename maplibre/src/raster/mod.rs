@@ -24,9 +24,9 @@ use crate::{
 mod populate_world_system;
 mod process_raster;
 mod queue_system;
-mod render_commands;
+pub mod render_commands;
 mod request_system;
-mod resource;
+pub mod resource;
 mod resource_system;
 mod transferables;
 mod upload_system;

@@ -4,7 +4,7 @@ use crate::{
     context::MapContext,
     render::{
         projection::globe_camera_for_view,
-        render_phase::{DrawState, LayerItem, RenderPhase, TranslucentItem},
+        render_phase::{DrawState, LayerItem, ProjectionBinding, RenderPhase, TranslucentItem},
         shaders::{AtmosphereLayerMetadata, BackgroundLayerMetadata, ShaderTileMetadata},
     },
     style::layer::LayerPaint,
@@ -73,6 +73,7 @@ pub fn queue_system(
                 Box::new(DrawState::<LayerItem, DrawBackground>::new())
             };
             layer_item_phase.add(LayerItem {
+                projection: ProjectionBinding::View,
                 draw_function,
                 index: layer.index,
                 is_line: false,

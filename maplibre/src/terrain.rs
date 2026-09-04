@@ -3,24 +3,45 @@
 use std::{marker::PhantomData, rc::Rc};
 
 use crate::{
+    coords::WorldTileCoords,
     environment::Environment,
     kernel::Kernel,
     plugin::Plugin,
-    render::{graph::RenderGraph, RenderStageLabel},
+    render::{
+        draw_graph,
+        eventually::Eventually,
+        graph::{NodeLabel, RenderGraph},
+        render_phase::{LayerItem, TileMaskItem},
+        RenderStageLabel,
+    },
     schedule::Schedule,
     tcs::{system::SystemContainer, tiles::TileComponent, world::World},
 };
 
 pub mod dem;
+mod drape_pass;
+mod draw;
+pub mod elevation;
+pub mod mesh;
 mod populate_world_system;
+mod queue_system;
 mod request_system;
+mod resource_system;
+pub mod resources;
+pub mod rtt;
 pub mod source;
 mod transferables;
+mod upload_system;
 
 pub use dem::{DemError, DemTile};
+use drape_pass::{DrapePassNode, DRAPE_PASS};
+pub use draw::draw_terrain;
+pub use elevation::elevation_at_world;
 use populate_world_system::PopulateWorldSystem;
+pub use queue_system::is_drapeable;
 use request_system::RequestSystem;
 pub use request_system::{dem_tile_coords, fetch_dem_apc};
+use resources::TerrainResources;
 pub use transferables::{
     DefaultDemTransferables, DefaultLayerDem, DefaultLayerDemMissing, DemMessageTag,
     DemTransferables, LayerDem, LayerDemMissing,
@@ -41,7 +62,35 @@ pub enum DemTileComponent {
 
 impl TileComponent for DemTileComponent {}
 
-/// Requests and stores the DEM tiles of a style that declares `terrain`.
+/// Layers of one view tile rendered into that tile's drape texture.
+pub struct DrapeTarget {
+    /// View tile the texture belongs to.
+    pub coords: WorldTileCoords,
+    /// Color the texture is cleared to before drawing.
+    pub clear_color: wgpu::Color,
+    /// Stencil masks of the source shapes.
+    pub masks: Vec<TileMaskItem>,
+    /// Drapeable layer draws in style order.
+    pub layers: Vec<LayerItem>,
+}
+
+/// Drape targets of the current frame.
+#[derive(Default)]
+pub struct DrapePhase {
+    /// One entry per view tile with drape content.
+    pub targets: Vec<DrapeTarget>,
+}
+
+/// Where the main pass draws the terrain this frame.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TerrainFrame {
+    /// Whether terrain tiles are queued at all.
+    pub active: bool,
+    /// Layer index after which the terrain is drawn, so backgrounds stay beneath it.
+    pub draw_after_layer_index: u32,
+}
+
+/// Requests, stores, drapes and draws the DEM tiles of a style that declares `terrain`.
 pub struct TerrainPlugin<T>(PhantomData<T>);
 
 impl<T: DemTransferables> Default for TerrainPlugin<T> {
@@ -55,9 +104,15 @@ impl<E: Environment, T: DemTransferables> Plugin<E> for TerrainPlugin<T> {
         &self,
         schedule: &mut Schedule,
         kernel: Rc<Kernel<E>>,
-        _world: &mut World,
-        _graph: &mut RenderGraph,
+        world: &mut World,
+        graph: &mut RenderGraph,
     ) {
+        world
+            .resources
+            .insert(Eventually::<TerrainResources>::Uninitialized);
+        world.resources.init::<DrapePhase>();
+        world.resources.init::<TerrainFrame>();
+
         schedule.add_system_to_stage(
             RenderStageLabel::Extract,
             SystemContainer::new(RequestSystem::<E, T>::new(&kernel)),
@@ -66,5 +121,33 @@ impl<E: Environment, T: DemTransferables> Plugin<E> for TerrainPlugin<T> {
             RenderStageLabel::Extract,
             SystemContainer::new(PopulateWorldSystem::<E, T>::new(&kernel)),
         );
+        // Prepare rather than Extract: headless rendering drops the Extract stage, and the
+        // elevation must be known before the Queue stage builds the view pattern.
+        schedule.add_system_to_stage(
+            RenderStageLabel::Prepare,
+            elevation::center_elevation_system,
+        );
+        schedule.add_system_to_stage(RenderStageLabel::Prepare, resource_system::resource_system);
+        schedule.add_system_to_stage(RenderStageLabel::Queue, upload_system::upload_system);
+        schedule.add_system_to_stage(RenderStageLabel::Queue, queue_system::queue_system);
+
+        let Some(draw_graph) = graph.get_sub_graph_mut(draw_graph::NAME) else {
+            tracing::error!("draw graph is missing; terrain will not be drawn");
+            return;
+        };
+        draw_graph.add_node(DRAPE_PASS, DrapePassNode);
+        let input = draw_graph.input_node().map(|node| node.id);
+        let edges = [
+            input.map(|input| draw_graph.add_node_edge(NodeLabel::Id(input), DRAPE_PASS)),
+            Some(draw_graph.add_node_edge(DRAPE_PASS, draw_graph::node::MAIN_PASS)),
+        ];
+        for edge in edges.into_iter().flatten() {
+            if let Err(error) = edge {
+                tracing::error!(
+                    ?error,
+                    "unable to order the drape pass before the main pass"
+                );
+            }
+        }
     }
 }

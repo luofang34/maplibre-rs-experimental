@@ -111,8 +111,6 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
             }
         }
 
-        view_state.update_references();
-
         Ok(())
     }
 }

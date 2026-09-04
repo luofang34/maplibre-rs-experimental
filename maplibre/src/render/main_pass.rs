@@ -17,6 +17,7 @@ use crate::{
         RenderResources,
     },
     tcs::world::World,
+    terrain::{draw_terrain, TerrainFrame},
 };
 
 pub struct MainPassNode {}
@@ -113,6 +114,13 @@ impl Node for MainPassNode {
             }
         }
 
+        // Terrain writes depth and sits above the background but under screen-space layers.
+        let terrain = world
+            .resources
+            .get::<TerrainFrame>()
+            .filter(|frame| frame.active)
+            .copied();
+        let mut terrain_pending = terrain.is_some();
         if let Some(layer_items) = world.resources.get::<RenderPhase<LayerItem>>() {
             log::trace!("RenderPhase<LayerItem>::size() = {}", layer_items.size());
 
@@ -121,8 +129,17 @@ impl Node for MainPassNode {
             // coastline (line) → countries-fill (fill) → countries-boundary (line)
             // ensures fill covers inland portions of coastline.
             for item in layer_items {
+                if terrain_pending
+                    && terrain.is_some_and(|frame| item.index > frame.draw_after_layer_index)
+                {
+                    draw_terrain(&mut tracked_pass, world);
+                    terrain_pending = false;
+                }
                 item.draw_function.draw(&mut tracked_pass, world, item);
             }
+        }
+        if terrain_pending {
+            draw_terrain(&mut tracked_pass, world);
         }
 
         Ok(())

@@ -4,7 +4,7 @@ use crate::{
     render::{
         eventually::{Eventually, Eventually::Initialized},
         render_commands::DrawMasks,
-        render_phase::{DrawState, LayerItem, RenderPhase, TileMaskItem},
+        render_phase::{DrawState, LayerItem, ProjectionBinding, RenderPhase, TileMaskItem},
         tile_view_pattern::WgpuTileViewPattern,
     },
     tcs::{
@@ -55,12 +55,14 @@ pub fn queue_system(
         view_tile.render(|source_shape| {
             if uses_globe {
                 mask_phase.add(TileMaskItem {
+                    projection: ProjectionBinding::View,
                     draw_function: Box::new(DrawState::<TileMaskItem, DrawMasks>::new()),
                     source_shape: source_shape.clone(),
                     generate_borders: true,
                 });
             }
             mask_phase.add(TileMaskItem {
+                projection: ProjectionBinding::View,
                 draw_function: Box::new(DrawState::<TileMaskItem, DrawMasks>::new()),
                 source_shape: source_shape.clone(),
                 generate_borders: false,
@@ -81,6 +83,7 @@ pub fn queue_system(
                         };
 
                     layer_item_phase.add(LayerItem {
+                        projection: ProjectionBinding::View,
                         draw_function,
                         index: layer_entry.style_layer.index,
                         is_line,

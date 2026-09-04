@@ -6,7 +6,7 @@ use crate::{
     render::{
         eventually::{Eventually, Eventually::Initialized},
         render_commands::DrawMasks,
-        render_phase::{DrawState, LayerItem, RenderPhase, TileMaskItem},
+        render_phase::{DrawState, LayerItem, ProjectionBinding, RenderPhase, TileMaskItem},
         tile_view_pattern::WgpuTileViewPattern,
     },
     tcs::{
@@ -57,12 +57,14 @@ pub fn queue_system(
                 let mut masks = Vec::with_capacity(2);
                 if uses_globe {
                     masks.push(TileMaskItem {
+                        projection: ProjectionBinding::View,
                         draw_function: Box::new(DrawState::<TileMaskItem, DrawMasks>::new()),
                         source_shape: source_shape.clone(),
                         generate_borders: true,
                     });
                 }
                 masks.push(TileMaskItem {
+                    projection: ProjectionBinding::View,
                     draw_function: Box::new(DrawState::<TileMaskItem, DrawMasks>::new()),
                     source_shape: source_shape.clone(),
                     generate_borders: false,
@@ -70,6 +72,7 @@ pub fn queue_system(
                 let mut layers = Vec::with_capacity(if uses_globe { 2 } else { 1 });
                 if uses_globe {
                     layers.push(LayerItem {
+                        projection: ProjectionBinding::View,
                         draw_function: Box::new(DrawState::<LayerItem, DrawRasterTiles>::new()),
                         index: style_layer.index,
                         is_line: false,
@@ -82,6 +85,7 @@ pub fn queue_system(
                     });
                 }
                 layers.push(LayerItem {
+                    projection: ProjectionBinding::View,
                     draw_function: Box::new(DrawState::<LayerItem, DrawRasterTiles>::new()),
                     index: style_layer.index,
                     is_line: false,

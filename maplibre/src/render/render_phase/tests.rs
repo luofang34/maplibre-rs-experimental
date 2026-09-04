@@ -1,12 +1,15 @@
 use super::{DrawState, LayerItem, PhaseItem, RenderPhase, TileMaskItem};
 use crate::{
     background::render_commands::{DrawBackgroundQuad, SetBackgroundPipeline},
-    render::{render_commands::DrawMasks, tile_view_pattern::TileShape},
+    render::{
+        render_commands::DrawMasks, render_phase::ProjectionBinding, tile_view_pattern::TileShape,
+    },
     tcs::tiles::Tile,
 };
 
 fn mask(generate_borders: bool) -> TileMaskItem {
     TileMaskItem {
+        projection: ProjectionBinding::View,
         draw_function: Box::new(DrawState::<TileMaskItem, DrawMasks>::new()),
         source_shape: Default::default(),
         generate_borders,
@@ -15,6 +18,7 @@ fn mask(generate_borders: bool) -> TileMaskItem {
 
 fn raster(index: u32, generate_borders: bool) -> LayerItem {
     LayerItem {
+        projection: ProjectionBinding::View,
         draw_function: Box::new(DrawState::<
             LayerItem,
             (SetBackgroundPipeline, DrawBackgroundQuad),

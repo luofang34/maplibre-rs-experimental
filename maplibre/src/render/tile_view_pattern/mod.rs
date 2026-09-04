@@ -91,6 +91,17 @@ impl TileShape {
         }
     }
 
+    /// Creates a shape whose metadata lives at an explicit buffer range, such as a drape entry.
+    pub(crate) fn with_buffer_range(
+        coords: WorldTileCoords,
+        zoom: Zoom,
+        buffer_range: Range<wgpu::BufferAddress>,
+    ) -> Self {
+        let mut shape = Self::new(coords, zoom);
+        shape.buffer_range = Some(buffer_range);
+        shape
+    }
+
     fn set_buffer_range(&mut self, index: u64) {
         const STRIDE: u64 = size_of::<ShaderTileMetadata>() as u64;
         self.buffer_range = Some(index * STRIDE..(index + 1) * STRIDE);

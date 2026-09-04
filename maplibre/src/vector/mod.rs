@@ -34,7 +34,7 @@ use crate::{
 mod populate_world_system;
 mod process_vector;
 mod queue_system;
-mod render_commands;
+pub mod render_commands;
 mod request_system;
 pub(crate) mod resource;
 mod resource_system;

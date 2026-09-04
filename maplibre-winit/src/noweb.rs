@@ -15,8 +15,9 @@ use maplibre::{
         http_client::ReqwestHttpClient, run_multithreaded, scheduler::TokioScheduler,
         ReqwestOffscreenKernelEnvironment,
     },
+    plugin::Plugin,
     render::{builder::RendererBuilder, settings::WgpuSettings, RenderPlugin},
-    style::Style,
+    style::{source::Source, Style},
     window::{MapWindow, MapWindowConfig, PhysicalSize, WindowCreateError},
 };
 use winit::{dpi::Size, window::WindowAttributes};
@@ -154,27 +155,43 @@ pub fn run_headed_map<P>(
 
         let renderer_builder = RendererBuilder::new().with_wgpu_settings(wgpu_settings);
 
-        let mut map = Map::new(
-            style,
-            kernel,
-            renderer_builder,
-            vec![
-                Box::new(RenderPlugin::default()),
-                Box::new(maplibre::background::BackgroundPlugin::default()),
-                Box::new(maplibre::vector::VectorPlugin::<
-                    maplibre::vector::DefaultVectorTransferables,
-                >::default()),
-                Box::new(maplibre::sdf::SdfPlugin::<
-                    maplibre::vector::DefaultVectorTransferables,
-                >::default()),
-                // Box::new(maplibre::raster::RasterPlugin::<
-                //     maplibre::raster::DefaultRasterTransferables,
-                // >::default()),
-                #[cfg(debug_assertions)]
-                Box::new(maplibre::debug::DebugPlugin::default()),
-            ],
-        )
-        .unwrap();
+        // Every registered tile plugin must supply data before a tile counts as ready, so only
+        // the plugins whose sources the style declares are registered.
+        let has_vector_sources = style
+            .sources
+            .values()
+            .any(|source| matches!(source, Source::Vector(_) | Source::GeoJson(_)))
+            || style.sources.is_empty();
+        let has_raster_sources = style
+            .sources
+            .values()
+            .any(|source| matches!(source, Source::Raster(_)));
+        let has_terrain = style.terrain.is_some();
+        let mut plugins: Vec<Box<dyn Plugin<Environment<_, _, _>>>> = vec![
+            Box::new(RenderPlugin::default()),
+            Box::new(maplibre::background::BackgroundPlugin::default()),
+        ];
+        if has_vector_sources {
+            plugins.push(Box::new(maplibre::vector::VectorPlugin::<
+                maplibre::vector::DefaultVectorTransferables,
+            >::default()));
+            plugins.push(Box::new(maplibre::sdf::SdfPlugin::<
+                maplibre::vector::DefaultVectorTransferables,
+            >::default()));
+        }
+        if has_raster_sources {
+            plugins.push(Box::new(maplibre::raster::RasterPlugin::<
+                maplibre::raster::DefaultRasterTransferables,
+            >::default()));
+        }
+        #[cfg(debug_assertions)]
+        plugins.push(Box::new(maplibre::debug::DebugPlugin::default()));
+        if has_terrain {
+            plugins.push(Box::new(maplibre::terrain::TerrainPlugin::<
+                maplibre::terrain::DefaultDemTransferables,
+            >::default()));
+        }
+        let mut map = Map::new(style, kernel, renderer_builder, plugins).unwrap();
         map.set_max_pitch(cgmath::Deg(options.max_pitch_degrees));
 
         #[cfg(not(target_os = "android"))]

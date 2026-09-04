@@ -37,7 +37,19 @@ impl<B> BackingBuffer<B> {
 pub struct TileViewPattern<Q, B> {
     view_tiles: Vec<ViewTile>,
     view_tiles_buffer: BackingBuffer<B>,
+    /// Metadata entries written by the last `upload_pattern`; extra entries follow them.
+    uploaded: u64,
     phantom_q: PhantomData<Q>,
+}
+
+/// The metadata buffer cannot hold every requested entry.
+#[derive(Clone, Copy, Debug, thiserror::Error, PartialEq, Eq)]
+#[error("tile metadata buffer holds {capacity} entries, {requested} were requested")]
+pub struct TileMetadataOverflow {
+    /// Entries the buffer can hold.
+    pub capacity: u64,
+    /// Entries needed this frame.
+    pub requested: u64,
 }
 
 impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
@@ -48,8 +60,41 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
                 view_tiles_buffer.buffer,
                 view_tiles_buffer.inner_size,
             ),
+            uploaded: 0,
             phantom_q: Default::default(),
         }
+    }
+
+    /// Appends metadata entries after this frame's view tiles and returns their buffer ranges.
+    ///
+    /// Drape draws use these entries to place source shapes inside a tile texture instead of on
+    /// the screen; call after [`Self::upload_pattern`] so the view entries stay intact.
+    pub fn upload_extra_metadata(
+        &mut self,
+        queue: &Q,
+        entries: &[ShaderTileMetadata],
+    ) -> Result<Vec<std::ops::Range<wgpu::BufferAddress>>, TileMetadataOverflow> {
+        const STRIDE: u64 = size_of::<ShaderTileMetadata>() as u64;
+        let capacity = self.view_tiles_buffer.inner_size / STRIDE;
+        let requested = self.uploaded + entries.len() as u64;
+        if requested > capacity {
+            return Err(TileMetadataOverflow {
+                capacity,
+                requested,
+            });
+        }
+        if entries.is_empty() {
+            return Ok(Vec::new());
+        }
+        let offset = self.uploaded * STRIDE;
+        queue.write_buffer(
+            &self.view_tiles_buffer.inner,
+            offset,
+            bytemuck::cast_slice(entries),
+        );
+        Ok((0..entries.len() as u64)
+            .map(|index| offset + index * STRIDE..offset + (index + 1) * STRIDE)
+            .collect())
     }
 
     #[tracing::instrument(skip_all)]
@@ -175,6 +220,7 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
             }
         }
 
+        self.uploaded = buffer.len() as u64;
         let raw_buffer = bytemuck::cast_slice(buffer.as_slice());
         if raw_buffer.len() as wgpu::BufferAddress > self.view_tiles_buffer.inner_size {
             /* TODO: We need to avoid this case by either choosing a proper size
