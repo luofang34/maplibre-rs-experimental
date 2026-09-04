@@ -9,10 +9,11 @@ use crate::{
     kernel::Kernel,
     tcs::system::{System, SystemResult},
     terrain::{
+        backfill_neighbours,
         dem::DemTile,
         source::dem_source,
         transferables::{DemTransferables, LayerDem, LayerDemMissing},
-        DemTileComponent,
+        DemTileComponent, LoadedDem,
     },
 };
 
@@ -47,7 +48,7 @@ impl<E: Environment, T: DemTransferables> System for PopulateWorldSystem<E, T> {
                 let coords = message.coords();
                 let state =
                     match unpack.map(|unpack| DemTile::from_image(&message.into_image(), unpack)) {
-                        Some(Ok(tile)) => DemTileComponent::Loaded(tile),
+                        Some(Ok(tile)) => DemTileComponent::Loaded(LoadedDem::new(tile)),
                         Some(Err(error)) => {
                             tracing::warn!(%coords, %error, "DEM tile image is unusable");
                             DemTileComponent::Missing
@@ -59,8 +60,12 @@ impl<E: Environment, T: DemTransferables> System for PopulateWorldSystem<E, T> {
                 let message = message.into_transferable::<T::LayerDemMissing>();
                 (message.coords(), DemTileComponent::Missing)
             };
+            let loaded = matches!(state, DemTileComponent::Loaded(_));
             if let Some(component) = world.tiles.query_mut::<&mut DemTileComponent>(coords) {
                 *component = state;
+            }
+            if loaded {
+                backfill_neighbours(&mut world.tiles, coords);
             }
         }
         Ok(())

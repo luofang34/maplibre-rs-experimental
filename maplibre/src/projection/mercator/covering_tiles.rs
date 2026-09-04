@@ -1,8 +1,9 @@
 //! Visible-tile traversal for the flat Mercator projection with frustum culling and LOD.
 //!
 //! Mirrors GL JS `coveringTiles` with its Mercator details provider: tiles are axis-aligned
-//! boxes in world pixels whose height is the elevation range, tested against the camera frustum,
-//! and far tiles get a lower zoom from the same distance rule as the globe.
+//! boxes spanning world pixels horizontally and metres of elevation vertically, the space the
+//! view projection unprojects into, tested against the camera frustum; far tiles get a lower
+//! zoom from the same distance rule as the globe.
 
 use cgmath::{Point2, Vector3};
 use thiserror::Error;
@@ -10,7 +11,7 @@ use thiserror::Error;
 use crate::{
     coords::{TileCoords, WorldTileCoords, ZoomLevel, MAX_ZOOM, TILE_SIZE},
     projection::globe::{
-        covering::{aabb_volume, TileElevationRange},
+        covering::{aabb_volume, TileElevationProvider},
         covering_tiles::{
             add_padding, frustum::GlobeFrustum, lod::LodContext, push_children, sort_by_center,
             Intersection, StackEntry,
@@ -32,8 +33,6 @@ pub struct MercatorCoveringOptions {
     pub padding: i32,
     /// Maximum number of returned tiles after padding.
     pub max_tiles: usize,
-    /// Elevation range included in the tile boxes.
-    pub elevation: TileElevationRange,
 }
 
 /// Failure while selecting visible Mercator tiles.
@@ -48,9 +47,12 @@ pub enum MercatorCoveringError {
 }
 
 /// Selects canonical tiles whose elevated box intersects the camera frustum.
+///
+/// `elevation` supplies the height of each tile's box.
 pub fn covering_tiles(
     view_state: &ViewState,
     options: MercatorCoveringOptions,
+    elevation: &dyn TileElevationProvider,
 ) -> Result<Vec<WorldTileCoords>, MercatorCoveringError> {
     if usize::from(u8::from(options.zoom)) >= MAX_ZOOM {
         return Err(MercatorCoveringError::UnsupportedZoom {
@@ -59,7 +61,6 @@ pub fn covering_tiles(
     }
     let frustum = GlobeFrustum::from_points_oriented(view_state.frustum_corners());
     let world_size = TILE_SIZE * 2_f64.powf(view_state.zoom().value());
-    let pixels_per_meter = view_state.pixels_per_meter();
     let center = view_state.camera().position();
     let lod = LodContext::from_view(
         Point2::new(center.x / world_size, center.y / world_size),
@@ -69,9 +70,6 @@ pub fn covering_tiles(
         view_state.field_of_view().0.to_degrees(),
         options.requested_zoom,
     );
-    let min_z = options.elevation.min_meters.min(0.0) * pixels_per_meter;
-    let max_z = options.elevation.max_meters.max(0.0) * pixels_per_meter;
-
     let mut stack = vec![StackEntry {
         tile: TileCoords::from((0, 0, ZoomLevel::new(0))),
         fully_visible: false,
@@ -82,12 +80,13 @@ pub fn covering_tiles(
             Intersection::Full
         } else {
             let size = world_size / 2_f64.powi(i32::from(u8::from(entry.tile.z)));
+            let range = elevation.elevation_range(entry.tile);
             let min = Vector3::new(
                 f64::from(entry.tile.x) * size,
                 f64::from(entry.tile.y) * size,
-                min_z,
+                range.min_meters.min(0.0),
             );
-            let max = Vector3::new(min.x + size, min.y + size, max_z);
+            let max = Vector3::new(min.x + size, min.y + size, range.max_meters.max(0.0));
             frustum.intersects(&aabb_volume(min, max))
         };
         if intersection == Intersection::None {

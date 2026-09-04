@@ -89,3 +89,70 @@ fn rejects_non_square_and_empty_images() {
         Err(DemError::Empty)
     );
 }
+
+/// A 4x4 tile whose samples read `base + 100 * x + 10 * y`.
+fn gradient_tile(base: f64) -> DemTile {
+    let mut image = RgbaImage::new(4, 4);
+    for y in 0..4 {
+        for x in 0..4 {
+            image.put_pixel(
+                x,
+                y,
+                terrarium_pixel(base + 100.0 * f64::from(x) + 10.0 * f64::from(y)),
+            );
+        }
+    }
+    DemTile::from_image(&image, TERRARIUM).expect("square image decodes")
+}
+
+#[test]
+fn backfill_border_populates_borders_with_neighbouring_data() {
+    let mut dem0 = gradient_tile(0.0);
+    let dem1 = gradient_tile(5000.0);
+
+    dem0.backfill_border(&dem1, -1, 0).expect("same size");
+    for y in 0..4 {
+        assert_eq!(
+            dem0.get(-1, y),
+            dem1.get(3, y),
+            "left border takes the right edge"
+        );
+    }
+    dem0.backfill_border(&dem1, 0, -1).expect("same size");
+    for x in 0..4 {
+        assert_eq!(dem0.get(x, -1), dem1.get(x, 3));
+    }
+    dem0.backfill_border(&dem1, 1, 0).expect("same size");
+    for y in 0..4 {
+        assert_eq!(dem0.get(4, y), dem1.get(0, y));
+    }
+    dem0.backfill_border(&dem1, 0, 1).expect("same size");
+    for x in 0..4 {
+        assert_eq!(dem0.get(x, 4), dem1.get(x, 0));
+    }
+    dem0.backfill_border(&dem1, -1, 1).expect("same size");
+    assert_eq!(dem0.get(-1, 4), dem1.get(3, 0));
+    dem0.backfill_border(&dem1, 1, 1).expect("same size");
+    assert_eq!(dem0.get(4, 4), dem1.get(0, 0));
+    dem0.backfill_border(&dem1, -1, -1).expect("same size");
+    assert_eq!(dem0.get(-1, -1), dem1.get(3, 3));
+    dem0.backfill_border(&dem1, 1, -1).expect("same size");
+    assert_eq!(dem0.get(4, -1), dem1.get(0, 3));
+    // The interior and the min/max are untouched.
+    assert_eq!(dem0.get(0, 0), 0.0);
+    assert_eq!(dem0.max(), 330.0);
+}
+
+#[test]
+fn backfill_border_rejects_a_neighbour_of_another_size() {
+    let mut dem = gradient_tile(0.0);
+    let other = tile(&[[1.0, 2.0], [3.0, 4.0]]);
+
+    assert_eq!(
+        dem.backfill_border(&other, 1, 0),
+        Err(DemError::DimensionMismatch {
+            expected: 4,
+            actual: 2
+        })
+    );
+}

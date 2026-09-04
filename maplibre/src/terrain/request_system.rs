@@ -22,6 +22,9 @@ use crate::{
 
 /// Zoom levels between a draped tile and the DEM tile it samples, as in GL JS `deltaZoom`.
 const DELTA_ZOOM: u8 = 1;
+/// Zoom of the coarse ancestor loaded alongside every DEM tile so tile culling knows the
+/// elevation range of an area before its own tiles arrive, as in GL JS `_addTerrainIdealTiles`.
+const ANCESTOR_ZOOM: u8 = 5;
 
 /// Returns the DEM tile a view tile samples: one zoom level up, clamped to the source range.
 pub fn dem_tile_coords(
@@ -35,6 +38,19 @@ pub fn dem_tile_coords(
     }
     let mut current = coords;
     while u8::from(current.z) > zoom {
+        current = current.get_parent()?;
+    }
+    Some(current)
+}
+
+/// Returns the coarse ancestor requested together with a DEM tile, if it differs from it.
+pub fn dem_ancestor_coords(coords: WorldTileCoords, minzoom: u8) -> Option<WorldTileCoords> {
+    let target = u8::from(coords.z).min(ANCESTOR_ZOOM).max(minzoom);
+    if target >= u8::from(coords.z) {
+        return None;
+    }
+    let mut current = coords;
+    while u8::from(current.z) > target {
         current = current.get_parent()?;
     }
     Some(current)
@@ -74,6 +90,7 @@ impl<E: Environment, T: DemTransferables> System for RequestSystem<E, T> {
         let Some(view_region) = view_region_for_projection(
             style,
             view_state,
+            world,
             view_state.zoom().zoom_level(DEFAULT_TILE_SIZE),
             ViewStatePadding::Loose,
         )
@@ -86,10 +103,16 @@ impl<E: Environment, T: DemTransferables> System for RequestSystem<E, T> {
         };
 
         let mut requested = HashSet::new();
-        for coords in view_region.iter() {
-            let Some(coords) = dem_tile_coords(coords, dem.minzoom, dem.maxzoom) else {
-                continue;
-            };
+        let wanted: Vec<WorldTileCoords> = view_region
+            .iter()
+            .filter_map(|coords| dem_tile_coords(coords, dem.minzoom, dem.maxzoom))
+            .flat_map(|coords| {
+                [Some(coords), dem_ancestor_coords(coords, dem.minzoom)]
+                    .into_iter()
+                    .flatten()
+            })
+            .collect();
+        for coords in wanted {
             if coords.build_quad_key().is_none() || !requested.insert(coords) {
                 continue;
             }

@@ -5,8 +5,7 @@ use crate::{
     coords::{WorldCoords, WorldTileCoords, Zoom, EXTENT, TILE_SIZE},
     tcs::{system::SystemResult, tiles::Tiles},
     terrain::{
-        request_system::dem_tile_coords,
-        source::{dem_source, DemSource},
+        coverage::TerrainCoverageIndex, request_system::dem_tile_coords, source::DemSource,
         DemTileComponent,
     },
 };
@@ -24,9 +23,11 @@ pub fn elevation_at_world(
     let view_tile = position.into_world_tile(zoom.zoom_level(TILE_SIZE), zoom);
     let mut coords = dem_tile_coords(view_tile, dem.minzoom, dem.maxzoom)?;
     loop {
-        if let Some(DemTileComponent::Loaded(tile)) = tiles.query::<&DemTileComponent>(coords) {
+        if let Some(DemTileComponent::Loaded(dem_tile)) = tiles.query::<&DemTileComponent>(coords) {
             let (x, y) = tile_local(position, coords, zoom);
-            return Some(tile.elevation_at_tile_coords(x, y) * f64::from(dem.exaggeration));
+            return Some(
+                dem_tile.tile.elevation_at_tile_coords(x, y) * f64::from(dem.exaggeration),
+            );
         }
         coords = coords.get_parent()?;
     }
@@ -40,7 +41,8 @@ fn tile_local(position: WorldCoords, coords: WorldTileCoords, zoom: Zoom) -> (f6
     (x.clamp(0.0, EXTENT), y.clamp(0.0, EXTENT))
 }
 
-/// Lifts the camera's orbit point onto the terrain under the map center every frame.
+/// Lifts the camera's orbit point onto the terrain under the map center every frame, and
+/// records the lowest elevation of the tile under it for the far plane.
 pub fn center_elevation_system(
     MapContext {
         style,
@@ -49,20 +51,26 @@ pub fn center_elevation_system(
         ..
     }: &mut MapContext,
 ) -> SystemResult {
-    let Some(dem) = dem_source(style) else {
+    if style.terrain.is_none() {
         view_state.set_center_elevation(0.0);
+        view_state.set_min_elevation(0.0);
+        return Ok(());
+    }
+    let Some(index) = world.resources.get::<TerrainCoverageIndex>() else {
         return Ok(());
     };
+    let zoom = view_state.zoom();
     let center = view_state.camera().position();
-    let elevation = elevation_at_world(
-        &world.tiles,
-        &dem,
-        view_state.zoom(),
-        WorldCoords::at_ground(center.x, center.y),
-    );
-    tracing::trace!(?elevation, "center elevation");
-    if let Some(elevation) = elevation {
-        view_state.set_center_elevation(elevation);
+    let world_size = TILE_SIZE * 2_f64.powf(zoom.value());
+    let sample = index.sample(&world.tiles, center.x / world_size, center.y / world_size);
+    tracing::trace!(?sample, "center elevation");
+    if sample.dem_loaded {
+        view_state.set_center_elevation(sample.elevation);
+    }
+    let center_tile = WorldCoords::at_ground(center.x, center.y)
+        .into_world_tile(zoom.zoom_level(TILE_SIZE), zoom);
+    if let Some(range) = index.tile_elevation_range(center_tile) {
+        view_state.set_min_elevation(range.min_meters);
     }
     Ok(())
 }

@@ -1,6 +1,6 @@
 //! Terrain: elevation tiles from `raster-dem` sources, draped rendering, and elevation queries.
 
-use std::{marker::PhantomData, rc::Rc};
+use std::{collections::HashSet, marker::PhantomData, rc::Rc};
 
 use crate::{
     coords::WorldTileCoords,
@@ -18,6 +18,8 @@ use crate::{
     tcs::{system::SystemContainer, tiles::TileComponent, world::World},
 };
 
+pub mod backfill;
+pub mod coverage;
 pub mod dem;
 mod drape_pass;
 mod draw;
@@ -33,6 +35,8 @@ pub mod source;
 mod transferables;
 mod upload_system;
 
+pub use backfill::backfill_neighbours;
+pub use coverage::{TerrainCoverageIndex, TerrainSample};
 pub use dem::{DemError, DemTile};
 use drape_pass::{DrapePassNode, DRAPE_PASS};
 pub use draw::draw_terrain;
@@ -40,12 +44,34 @@ pub use elevation::elevation_at_world;
 use populate_world_system::PopulateWorldSystem;
 pub use queue_system::is_drapeable;
 use request_system::RequestSystem;
-pub use request_system::{dem_tile_coords, fetch_dem_apc};
+pub use request_system::{dem_ancestor_coords, dem_tile_coords, fetch_dem_apc};
 use resources::TerrainResources;
 pub use transferables::{
     DefaultDemTransferables, DefaultLayerDem, DefaultLayerDemMissing, DemMessageTag,
     DemTransferables, LayerDem, LayerDemMissing,
 };
+
+/// A decoded DEM tile together with its neighbour bookkeeping.
+#[derive(Debug)]
+pub struct LoadedDem {
+    /// Decoded samples.
+    pub tile: DemTile,
+    /// Neighbours whose edge samples already replaced this tile's replicated border.
+    pub backfilled: HashSet<WorldTileCoords>,
+    /// Advances whenever the samples change, so the GPU copy can follow.
+    pub revision: u32,
+}
+
+impl LoadedDem {
+    /// Wraps a freshly decoded tile with no neighbours filled in yet.
+    pub fn new(tile: DemTile) -> Self {
+        Self {
+            tile,
+            backfilled: HashSet::new(),
+            revision: 0,
+        }
+    }
+}
 
 /// Elevation data of one `raster-dem` tile as it moves through the pipeline.
 ///
@@ -55,7 +81,7 @@ pub enum DemTileComponent {
     /// The tile has been requested and is being fetched or decoded.
     Pending,
     /// The tile is available for rendering and elevation queries.
-    Loaded(DemTile),
+    Loaded(LoadedDem),
     /// The tile could not be fetched or decoded; ancestors stand in for it.
     Missing,
 }
@@ -112,6 +138,7 @@ impl<E: Environment, T: DemTransferables> Plugin<E> for TerrainPlugin<T> {
             .insert(Eventually::<TerrainResources>::Uninitialized);
         world.resources.init::<DrapePhase>();
         world.resources.init::<TerrainFrame>();
+        world.resources.init::<TerrainCoverageIndex>();
 
         schedule.add_system_to_stage(
             RenderStageLabel::Extract,
@@ -122,7 +149,9 @@ impl<E: Environment, T: DemTransferables> Plugin<E> for TerrainPlugin<T> {
             SystemContainer::new(PopulateWorldSystem::<E, T>::new(&kernel)),
         );
         // Prepare rather than Extract: headless rendering drops the Extract stage, and the
-        // elevation must be known before the Queue stage builds the view pattern.
+        // elevation must be known before the Queue stage builds the view pattern. The index
+        // runs first so the center elevation samples this frame's tiles.
+        schedule.add_system_to_stage(RenderStageLabel::Prepare, coverage::coverage_system);
         schedule.add_system_to_stage(
             RenderStageLabel::Prepare,
             elevation::center_elevation_system,

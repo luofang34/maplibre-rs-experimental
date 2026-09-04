@@ -89,6 +89,7 @@ pub fn queue_system(
     let Some(view_region) = view_region_for_projection(
         style,
         view_state,
+        world,
         zoom.zoom_level(DEFAULT_TILE_SIZE),
         ViewStatePadding::Tight,
     )

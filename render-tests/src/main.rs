@@ -246,6 +246,24 @@ async fn run_test_inner(test_dir: &Path) -> TestResult {
             return TestResult::Error(format!("Cannot select source tiles: {error}"));
         }
     };
+    // Elevation tiles first: the elevations they hold change which tiles the view covers.
+    let dem_tiles = match load_dem_tiles(&style, &target_coords) {
+        Ok(tiles) => tiles,
+        Err(error) => return TestResult::Error(error),
+    };
+    let target_coords = if dem_tiles.is_empty() {
+        target_coords
+    } else {
+        if let Err(error) = map.load_dem_tiles(dem_tiles) {
+            return TestResult::Error(format!("Cannot load DEM tiles: {error}"));
+        }
+        match map.required_tile_coords() {
+            Ok(coords) => coords,
+            Err(error) => {
+                return TestResult::Error(format!("Cannot select source tiles: {error}"));
+            }
+        }
+    };
     let mut all_layers = Vec::new();
     let mut all_raster_layers = Vec::new();
 
@@ -409,11 +427,7 @@ async fn run_test_inner(test_dir: &Path) -> TestResult {
             }
         }
     }
-    let dem_tiles = match load_dem_tiles(&style, &target_coords) {
-        Ok(tiles) => tiles,
-        Err(error) => return TestResult::Error(error),
-    };
-    if let Err(error) = map.render_frames_with_terrain(all_layers, all_raster_layers, dem_tiles, 2)
+    if let Err(error) = map.render_frames_with_terrain(all_layers, all_raster_layers, Vec::new(), 2)
     {
         return TestResult::Error(format!("Cannot render source tiles: {error}"));
     }

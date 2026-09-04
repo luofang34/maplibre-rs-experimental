@@ -137,6 +137,7 @@ fn globe_view_region_uses_reference_covering_tiles() {
     let region = super::view_region_for_projection(
         &style,
         &view,
+        &crate::tcs::world::World::default(),
         zoom_level,
         crate::render::view_state::ViewStatePadding::Tight,
     )

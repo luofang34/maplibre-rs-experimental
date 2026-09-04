@@ -30,6 +30,7 @@ pub fn tile_view_pattern_system(
     let view_region = view_region_for_projection(
         style,
         view_state,
+        world,
         view_state.zoom().zoom_level(DEFAULT_TILE_SIZE),
         ViewStatePadding::Tight,
     )

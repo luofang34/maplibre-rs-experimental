@@ -29,13 +29,13 @@ pub fn upload_system(
     let tiles = &world.tiles;
     for tile in tiles.tiles.values() {
         let coords = tile.coords;
-        if terrain_resources.has_dem_texture(coords) {
-            continue;
-        }
         let Some(DemTileComponent::Loaded(dem)) = tiles.query::<&DemTileComponent>(coords) else {
             continue;
         };
-        terrain_resources.upload_dem(device, queue, coords, dem);
+        if terrain_resources.dem_revision(coords) == Some(dem.revision) {
+            continue;
+        }
+        terrain_resources.upload_dem(device, queue, coords, &dem.tile, dem.revision);
     }
     Ok(())
 }

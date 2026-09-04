@@ -70,7 +70,7 @@ pub struct TerrainResources {
     index_buffer: wgpu::Buffer,
     index_count: u32,
     uniform_buffer: wgpu::Buffer,
-    dem_textures: HashMap<WorldTileCoords, Texture>,
+    dem_textures: HashMap<WorldTileCoords, (Texture, u32)>,
     empty_dem: Texture,
     drape_textures: HashMap<WorldTileCoords, Texture>,
     drape_scratch: Option<DrapeScratch>,
@@ -217,23 +217,38 @@ impl TerrainResources {
         self.dem_textures.contains_key(&coords)
     }
 
-    /// Uploads the bordered pixels of a decoded DEM tile.
+    /// Revision of the uploaded copy of a DEM tile, if any.
+    pub fn dem_revision(&self, coords: WorldTileCoords) -> Option<u32> {
+        self.dem_textures
+            .get(&coords)
+            .map(|(_, revision)| *revision)
+    }
+
+    /// Uploads the bordered pixels of a decoded DEM tile, reusing its texture across revisions.
     pub fn upload_dem(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         coords: WorldTileCoords,
         dem: &DemTile,
+        revision: u32,
     ) {
-        let texture = Texture::new(
-            Some("DEM tile"),
-            device,
-            wgpu::TextureFormat::Rgba8Unorm,
-            dem.stride(),
-            dem.stride(),
-            Msaa { samples: 1 },
-            wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        );
+        let reusable = self
+            .dem_textures
+            .remove(&coords)
+            .map(|(texture, _)| texture)
+            .filter(|texture| texture.size.width == dem.stride());
+        let texture = reusable.unwrap_or_else(|| {
+            Texture::new(
+                Some("DEM tile"),
+                device,
+                wgpu::TextureFormat::Rgba8Unorm,
+                dem.stride(),
+                dem.stride(),
+                Msaa { samples: 1 },
+                wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            )
+        });
         queue.write_texture(
             wgpu::ImageCopyTexture {
                 texture: &texture.texture,
@@ -249,14 +264,14 @@ impl TerrainResources {
             },
             texture.size,
         );
-        self.dem_textures.insert(coords, texture);
+        self.dem_textures.insert(coords, (texture, revision));
     }
 
     /// DEM texture of a tile, or the flat stand-in while it loads.
     pub fn dem_texture(&self, coords: Option<WorldTileCoords>) -> &Texture {
         coords
             .and_then(|coords| self.dem_textures.get(&coords))
-            .unwrap_or(&self.empty_dem)
+            .map_or(&self.empty_dem, |(texture, _)| texture)
     }
 
     /// Creates the drape texture of a view tile if it does not exist yet.

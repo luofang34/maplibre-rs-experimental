@@ -28,8 +28,11 @@ fn options(zoom: u8) -> GlobeCoveringOptions {
         variable_zoom: false,
         padding: 0,
         max_tiles: 512,
-        elevation: TileElevationRange::default(),
     }
+}
+
+fn flat() -> TileElevationRange {
+    TileElevationRange::default()
 }
 
 #[test]
@@ -37,6 +40,7 @@ fn zoomed_out_matches_gl_js_reference() {
     let tiles = covering_tiles(
         &camera(128.0, 128.0, LatLon::new(0.0, 0.0), -1.0),
         options(0),
+        &flat(),
     )
     .expect("covering should succeed");
 
@@ -48,6 +52,7 @@ fn zoom_three_matches_gl_js_reference() {
     let tiles = covering_tiles(
         &camera(128.0, 128.0, LatLon::new(0.01, -0.02), 3.0),
         options(3),
+        &flat(),
     )
     .expect("covering should succeed");
     let expected = [
@@ -68,6 +73,7 @@ fn loose_padding_wraps_across_antimeridian_without_world_copies() {
     let tiles = covering_tiles(
         &camera(64.0, 64.0, LatLon::new(0.0, 179.99), 3.0),
         covering_options,
+        &flat(),
     )
     .expect("covering should succeed");
 
@@ -81,6 +87,7 @@ fn unsupported_zoom_is_rejected_before_traversal() {
     let error = covering_tiles(
         &camera(128.0, 128.0, LatLon::new(0.0, 0.0), 3.0),
         options(32),
+        &flat(),
     )
     .expect_err("zoom 32 is not representable by world tile coordinates");
 
@@ -103,8 +110,12 @@ fn pitched_view_matches_gl_js_variable_lod_reference() {
     .expect("pitched reference camera should be valid");
     let mut covering_options = options(8);
     covering_options.variable_zoom = true;
-    covering_options.elevation.max_meters = super::elevation_for_tile_culling(&globe, 0.0);
-    let tiles = covering_tiles(&globe, covering_options).expect("covering should succeed");
+    let elevation = TileElevationRange {
+        min_meters: 0.0,
+        max_meters: super::elevation_for_tile_culling(&globe, 0.0),
+    };
+    let tiles =
+        covering_tiles(&globe, covering_options, &elevation).expect("covering should succeed");
     let expected = [
         (32, 31, ZoomLevel::new(6)).into(),
         (31, 31, ZoomLevel::new(6)).into(),
@@ -133,8 +144,12 @@ fn pitched_rotated_view_matches_gl_js_variable_lod_reference() {
     .expect("rotated reference camera should be valid");
     let mut covering_options = options(8);
     covering_options.variable_zoom = true;
-    covering_options.elevation.max_meters = super::elevation_for_tile_culling(&globe, 0.0);
-    let tiles = covering_tiles(&globe, covering_options).expect("covering should succeed");
+    let elevation = TileElevationRange {
+        min_meters: 0.0,
+        max_meters: super::elevation_for_tile_culling(&globe, 0.0),
+    };
+    let tiles =
+        covering_tiles(&globe, covering_options, &elevation).expect("covering should succeed");
     let expected = [
         (64, 64, ZoomLevel::new(7)).into(),
         (64, 63, ZoomLevel::new(7)).into(),
@@ -152,7 +167,7 @@ fn antimeridian_view_selects_both_canonical_edges() {
     let globe = camera(128.0, 128.0, LatLon::new(-0.001, 179.99), 5.0);
     let mut covering_options = options(5);
     covering_options.variable_zoom = true;
-    let tiles = covering_tiles(&globe, covering_options).expect("covering should succeed");
+    let tiles = covering_tiles(&globe, covering_options, &flat()).expect("covering should succeed");
     let expected = [
         (31, 16, ZoomLevel::new(5)).into(),
         (31, 15, ZoomLevel::new(5)).into(),

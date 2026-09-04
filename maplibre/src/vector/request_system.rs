@@ -56,6 +56,7 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
         let view_region = view_region_for_projection(
             style,
             view_state,
+            world,
             view_state.zoom().zoom_level(DEFAULT_TILE_SIZE),
             ViewStatePadding::Loose,
         )

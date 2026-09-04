@@ -10,7 +10,7 @@ use crate::{
     projection::{
         globe::{
             camera::{GlobeCameraError, GlobeCameraOptions, GlobeCameraState},
-            covering::TileElevationRange,
+            covering::{TileElevationProvider, TileElevationRange},
             covering_tiles::{
                 covering_tiles, elevation_for_tile_culling, GlobeCoveringError,
                 GlobeCoveringOptions,
@@ -31,15 +31,14 @@ use crate::{
         view_state::{ViewState, ViewStatePadding},
     },
     style::Style,
+    tcs::world::World,
+    terrain::coverage::{IndexedTileElevation, TerrainCoverageIndex},
 };
 
 /// GL JS's feature-height allowance for tiles near the horizon.
 const ASSUMED_MAX_FEATURE_HEIGHT_METERS: f64 = 500.0;
 const MAX_MERCATOR_HORIZON_DEGREES: f64 = 89.25;
 const TILE_CULLING_HORIZON_ONSET_DEGREES: f64 = 15.0;
-/// Elevation range assumed for terrain tiles until DEM minima and maxima feed the covering.
-const TERRAIN_MIN_ELEVATION_METERS: f64 = -500.0;
-const TERRAIN_MAX_ELEVATION_METERS: f64 = 9000.0;
 
 /// View-wide globe projection values uploaded as a uniform buffer.
 #[repr(C)]
@@ -234,6 +233,7 @@ pub fn projection_data_for_view(
 pub fn view_region_for_projection(
     style: &Style,
     view_state: &ViewState,
+    world: &World,
     visible_level: ZoomLevel,
     padding: ViewStatePadding,
 ) -> Result<Option<ViewRegion>, ProjectionStateError> {
@@ -243,28 +243,42 @@ pub fn view_region_for_projection(
             .uses_globe_rendering(view_state.zoom().value())
     });
     if !uses_globe {
-        return mercator_view_region(style, view_state, visible_level, padding);
+        return mercator_view_region(style, view_state, world, visible_level, padding);
     }
     let camera = globe_camera_for_view(view_state)?;
-    let tiles = covering_tiles(
-        &camera,
-        GlobeCoveringOptions {
-            zoom: visible_level,
-            requested_zoom: view_state.zoom().value(),
-            variable_zoom: u8::from(visible_level) > 4,
-            padding: match padding {
-                ViewStatePadding::Loose => 1,
-                ViewStatePadding::Tight => 0,
-            },
-            max_tiles: 512,
-            elevation: TileElevationRange {
-                min_meters: 0.0,
-                max_meters: elevation_for_tile_culling(&camera, 0.0),
-            },
+    let options = GlobeCoveringOptions {
+        zoom: visible_level,
+        requested_zoom: view_state.zoom().value(),
+        variable_zoom: u8::from(visible_level) > 4,
+        padding: match padding {
+            ViewStatePadding::Loose => 1,
+            ViewStatePadding::Tight => 0,
         },
-    )
-    .map_err(|source| ProjectionStateError::GlobeCovering { source })?;
+        max_tiles: 512,
+    };
+    let fallback = TileElevationRange {
+        min_meters: 0.0,
+        max_meters: elevation_for_tile_culling(&camera, view_state.center_elevation()),
+    };
+    let elevation = tile_elevation(style, world, fallback);
+    let tiles = covering_tiles(&camera, options, elevation.as_ref())
+        .map_err(|source| ProjectionStateError::GlobeCovering { source })?;
     Ok(Some(ViewRegion::from_tiles(tiles, visible_level, 512)))
+}
+
+/// Culling bounds per tile: the loaded DEM's range where terrain has one, else `fallback`,
+/// the range GL JS assumes for tiles without elevation data.
+fn tile_elevation<'a>(
+    style: &Style,
+    world: &'a World,
+    fallback: TileElevationRange,
+) -> Box<dyn TileElevationProvider + 'a> {
+    match world.resources.get::<TerrainCoverageIndex>() {
+        Some(index) if style.terrain.is_some() => {
+            Box::new(IndexedTileElevation { index, fallback })
+        }
+        _ => Box::new(fallback),
+    }
 }
 
 /// Selects Mercator tiles: the ground-plane bounding box for flat views, or frustum culling
@@ -272,6 +286,7 @@ pub fn view_region_for_projection(
 fn mercator_view_region(
     style: &Style,
     view_state: &ViewState,
+    world: &World,
     visible_level: ZoomLevel,
     padding: ViewStatePadding,
 ) -> Result<Option<ViewRegion>, ProjectionStateError> {
@@ -282,6 +297,11 @@ fn mercator_view_region(
     if !needs_frustum {
         return Ok(view_state.create_view_region(visible_level, padding));
     }
+    let elevation = tile_elevation(
+        style,
+        world,
+        mercator_elevation_range(view_state, pitch_degrees, fov_degrees),
+    );
     let tiles = mercator_covering_tiles(
         view_state,
         MercatorCoveringOptions {
@@ -293,8 +313,8 @@ fn mercator_view_region(
                 ViewStatePadding::Tight => 0,
             },
             max_tiles: 512,
-            elevation: mercator_elevation_range(style, view_state, pitch_degrees, fov_degrees),
         },
+        elevation.as_ref(),
     )
     .map_err(|source| ProjectionStateError::MercatorCovering { source })?;
     Ok(Some(ViewRegion::from_tiles(tiles, visible_level, 512)))
@@ -306,20 +326,13 @@ fn max_constant_zoom_pitch(fov_degrees: f64) -> f64 {
     (78.5 - fov_degrees / 2.0).clamp(0.0, 60.0)
 }
 
-/// Elevation range of the tile boxes: the whole plausible range while terrain is on, else the
-/// center elevation plus GL JS's feature-height allowance near the horizon.
+/// Elevation range of the tile boxes without terrain: the center elevation plus GL JS's
+/// feature-height allowance near the horizon.
 fn mercator_elevation_range(
-    style: &Style,
     view_state: &ViewState,
     pitch_degrees: f64,
     fov_degrees: f64,
 ) -> TileElevationRange {
-    if style.terrain.is_some() {
-        return TileElevationRange {
-            min_meters: TERRAIN_MIN_ELEVATION_METERS,
-            max_meters: TERRAIN_MAX_ELEVATION_METERS,
-        };
-    }
     let bottom_edge_above_horizontal =
         MAX_MERCATOR_HORIZON_DEGREES - pitch_degrees - fov_degrees * 0.5;
     let proximity = ((TILE_CULLING_HORIZON_ONSET_DEGREES - bottom_edge_above_horizontal)

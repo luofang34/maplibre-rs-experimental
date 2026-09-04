@@ -15,6 +15,18 @@ pub struct TileElevationRange {
     pub max_meters: f64,
 }
 
+/// Elevation bounds of individual tiles for culling volumes.
+pub trait TileElevationProvider {
+    /// Bounds of one canonical tile.
+    fn elevation_range(&self, tile: TileCoords) -> TileElevationRange;
+}
+
+impl TileElevationProvider for TileElevationRange {
+    fn elevation_range(&self, _tile: TileCoords) -> TileElevationRange {
+        *self
+    }
+}
+
 /// Convex volume approximating a curved globe tile and its elevation range.
 #[derive(Clone, Debug, PartialEq)]
 pub struct GlobeTileBoundingVolume {

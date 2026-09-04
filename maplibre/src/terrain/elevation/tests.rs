@@ -8,7 +8,7 @@ use crate::{
     io::source_type::{RasterSource, SourceType},
     style::source::TileAddressingScheme,
     tcs::tiles::Tiles,
-    terrain::{dem::DemTile, source::DemSource, DemTileComponent},
+    terrain::{dem::DemTile, source::DemSource, DemTileComponent, LoadedDem},
 };
 
 const TERRARIUM: [f64; 4] = [256.0, 1.0, 1.0 / 256.0, 32768.0];
@@ -51,7 +51,7 @@ fn samples_the_dem_tile_under_the_position_with_exaggeration() {
     tiles
         .spawn_mut(dem_coords)
         .expect("valid coords")
-        .insert(DemTileComponent::Loaded(flat_tile(1500.0)));
+        .insert(DemTileComponent::Loaded(LoadedDem::new(flat_tile(1500.0))));
     let zoom = Zoom::new(5.0);
     let tile_pixels = TILE_SIZE * 2.0; // a z4 tile spans two z5 tiles
     let position = WorldCoords::at_ground(3.5 * tile_pixels, 2.25 * tile_pixels);
@@ -72,7 +72,7 @@ fn falls_back_to_a_loaded_ancestor_and_reports_no_coverage() {
     tiles
         .spawn_mut(ancestor)
         .expect("valid coords")
-        .insert(DemTileComponent::Loaded(flat_tile(-100.0)));
+        .insert(DemTileComponent::Loaded(LoadedDem::new(flat_tile(-100.0))));
     let zoom = Zoom::new(5.0);
     let inside = WorldCoords::at_ground(10.0, 10.0);
     let outside = WorldCoords::at_ground(TILE_SIZE * 20.0, TILE_SIZE * 20.0);

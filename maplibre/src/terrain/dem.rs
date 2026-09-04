@@ -19,6 +19,14 @@ pub enum DemError {
     /// Elevation tiles must contain at least one sample.
     #[error("DEM tiles must not be empty")]
     Empty,
+    /// Neighbouring tiles must have the same number of samples to share borders.
+    #[error("DEM neighbour has {actual} samples per edge, expected {expected}")]
+    DimensionMismatch {
+        /// Samples per edge of this tile.
+        expected: u32,
+        /// Samples per edge of the neighbour.
+        actual: u32,
+    },
 }
 
 /// Elevation samples of one tile with a one-pixel border, following GL JS `DEMData`.
@@ -133,6 +141,68 @@ impl DemTile {
     pub fn elevation_at_tile_coords(&self, x: f64, y: f64) -> f64 {
         let scale = f64::from(self.dim) / EXTENT;
         self.sample_bilinear(x * scale, y * scale)
+    }
+
+    /// Replaces the border facing a neighbour at `(dx, dy)` with that neighbour's edge samples.
+    pub fn backfill_border(
+        &mut self,
+        neighbour: &DemTile,
+        dx: i32,
+        dy: i32,
+    ) -> Result<(), DemError> {
+        if neighbour.dim != self.dim {
+            return Err(DemError::DimensionMismatch {
+                expected: self.dim,
+                actual: neighbour.dim,
+            });
+        }
+        self.fill_border(dx, dy, &neighbour.edge_samples(dx, dy));
+        Ok(())
+    }
+
+    /// Samples of this tile that a neighbour at `(-dx, -dy)` stores in its border facing us.
+    ///
+    /// Row-major over that neighbour's border region: a column for `dx != 0`, a row for
+    /// `dy != 0`, a single corner sample when both are set.
+    pub fn edge_samples(&self, dx: i32, dy: i32) -> Vec<u8> {
+        let dim = i64::from(self.dim);
+        let (x_range, y_range) = Self::border_region(dim, dx, dy);
+        let count = (x_range.end - x_range.start) * (y_range.end - y_range.start);
+        let mut samples = Vec::with_capacity(count.max(0) as usize * 4);
+        for y in y_range {
+            for x in x_range.clone() {
+                let index = self.byte_index(x - i64::from(dx) * dim, y - i64::from(dy) * dim);
+                samples.extend_from_slice(&self.pixels[index..index + 4]);
+            }
+        }
+        samples
+    }
+
+    /// Writes samples produced by a neighbour's [`edge_samples`](Self::edge_samples) into the
+    /// border facing that neighbour at `(dx, dy)`.
+    pub fn fill_border(&mut self, dx: i32, dy: i32, samples: &[u8]) {
+        let dim = i64::from(self.dim);
+        let (x_range, y_range) = Self::border_region(dim, dx, dy);
+        let mut source = samples.chunks_exact(4);
+        for y in y_range {
+            for x in x_range.clone() {
+                let Some(pixel) = source.next() else {
+                    return;
+                };
+                let index = self.byte_index(x, y);
+                self.pixels[index..index + 4].copy_from_slice(pixel);
+            }
+        }
+    }
+
+    /// Border cells facing a neighbour at `(dx, dy)`, as in GL JS `backfillBorder`.
+    fn border_region(dim: i64, dx: i32, dy: i32) -> (std::ops::Range<i64>, std::ops::Range<i64>) {
+        let axis = |delta: i32| match delta {
+            -1 => -1..0,
+            1 => dim..dim + 1,
+            _ => 0..dim,
+        };
+        (axis(dx), axis(dy))
     }
 
     /// Number of samples along one edge, excluding the border.

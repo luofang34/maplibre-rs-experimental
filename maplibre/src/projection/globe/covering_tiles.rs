@@ -9,7 +9,7 @@ use super::{
     camera::GlobeCameraState,
     covering::{
         globe_tile_bounding_volume, GlobeTileBoundingVolume, GlobeTileBoundsError,
-        TileElevationRange,
+        TileElevationProvider,
     },
 };
 use crate::coords::{LatLon, TileCoords, WorldTileCoords, ZoomLevel, MAX_ZOOM};
@@ -36,8 +36,6 @@ pub struct GlobeCoveringOptions {
     pub padding: i32,
     /// Maximum number of returned tiles after padding.
     pub max_tiles: usize,
-    /// Elevation range included in culling volumes.
-    pub elevation: TileElevationRange,
 }
 
 /// Failure while selecting visible globe tiles.
@@ -72,9 +70,12 @@ pub(crate) struct StackEntry {
 }
 
 /// Selects canonical tiles intersecting both the camera frustum and visible globe hemisphere.
+///
+/// `elevation` supplies the elevation range of each tile's culling volume.
 pub fn covering_tiles(
     camera: &GlobeCameraState,
     options: GlobeCoveringOptions,
+    elevation: &dyn TileElevationProvider,
 ) -> Result<Vec<WorldTileCoords>, GlobeCoveringError> {
     if usize::from(u8::from(options.zoom)) >= MAX_ZOOM {
         return Err(GlobeCoveringError::UnsupportedZoom {
@@ -90,7 +91,7 @@ pub fn covering_tiles(
     let frustum = GlobeFrustum::from_camera(camera);
 
     while let Some(entry) = stack.pop() {
-        let bounds = globe_tile_bounding_volume(entry.tile, options.elevation)
+        let bounds = globe_tile_bounding_volume(entry.tile, elevation.elevation_range(entry.tile))
             .map_err(|source| GlobeCoveringError::TileBounds { source })?;
         let intersection = if entry.fully_visible {
             Intersection::Full

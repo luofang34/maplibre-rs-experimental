@@ -30,16 +30,10 @@ pub fn upload_system(
         ..
     }: &mut MapContext,
 ) -> SystemResult {
-    let Some(Initialized(symbol_buffer_pool)) = world
-        .resources
-        .query_mut::<&mut Eventually<SymbolBufferPool>>()
-    else {
-        return Err(SystemError::Dependencies);
-    };
-
     let view_region = view_region_for_projection(
         style,
         view_state,
+        world,
         view_state.zoom().zoom_level(DEFAULT_TILE_SIZE),
         ViewStatePadding::Loose,
     )
@@ -47,6 +41,13 @@ pub fn upload_system(
         tracing::error!(%error, "unable to select symbol upload tiles");
         SystemError::Setup
     })?;
+
+    let Some(Initialized(symbol_buffer_pool)) = world
+        .resources
+        .query_mut::<&mut Eventually<SymbolBufferPool>>()
+    else {
+        return Err(SystemError::Dependencies);
+    };
 
     let zoom = view_state.zoom().level();
 

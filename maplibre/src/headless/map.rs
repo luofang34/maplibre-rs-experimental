@@ -27,7 +27,7 @@ use crate::{
     schedule::{Schedule, Stage, StageError},
     style::{layer::StyleLayer, Style},
     tcs::world::World,
-    terrain::{dem::DemTile, source::dem_source, DemTileComponent},
+    terrain::{backfill_neighbours, dem::DemTile, source::dem_source, DemTileComponent, LoadedDem},
     vector::{
         process_vector_tile, AvailableVectorLayerBucket, DefaultVectorTransferables,
         LayerTessellated, ProcessVectorContext, ProcessVectorError, VectorBufferPool,
@@ -142,6 +142,42 @@ impl HeadlessMap {
     ///
     /// DEM images are decoded with the terrain source's encoding; images that cannot be decoded
     /// are skipped so the mesh falls back to an ancestor tile or sea level.
+    /// Inserts decoded DEM tiles, fills the borders between neighbours and settles the terrain
+    /// index with one schedule pass, so later tile selection sees the elevations they reveal.
+    pub fn load_dem_tiles(
+        &mut self,
+        dem_tiles: Vec<(WorldTileCoords, RgbaImage)>,
+    ) -> Result<(), HeadlessMapOperationError> {
+        let context = &mut self.map_context;
+        let unpack = dem_source(&context.style).map(|dem| dem.unpack);
+        let tiles = &mut context.world.tiles;
+        let mut dem_coords = Vec::new();
+        for (coords, image) in dem_tiles {
+            let Some(unpack) = unpack else {
+                break;
+            };
+            let component = match DemTile::from_image(&image, unpack) {
+                Ok(tile) => DemTileComponent::Loaded(LoadedDem::new(tile)),
+                Err(error) => {
+                    tracing::warn!(%coords, %error, "DEM tile image is unusable");
+                    DemTileComponent::Missing
+                }
+            };
+            tiles
+                .spawn_mut(coords)
+                .ok_or(HeadlessMapOperationError::InvalidTile { coords })?
+                .insert(component);
+            dem_coords.push(coords);
+        }
+        for coords in dem_coords {
+            backfill_neighbours(tiles, coords);
+        }
+        if let Err(error) = self.schedule.run(context) {
+            tracing::warn!(?error, "terrain index warm-up frame failed");
+        }
+        Ok(())
+    }
+
     pub fn render_frames_with_terrain(
         &mut self,
         layers: Vec<Box<<DefaultVectorTransferables as VectorTransferables>::LayerTessellated>>,
@@ -152,25 +188,11 @@ impl HeadlessMap {
         if frame_count == 0 {
             return Err(HeadlessMapOperationError::InvalidFrameCount);
         }
-        let context = &mut self.map_context;
-        let unpack = dem_source(&context.style).map(|dem| dem.unpack);
-        let tiles = &mut context.world.tiles;
-        for (coords, image) in dem_tiles {
-            let Some(unpack) = unpack else {
-                break;
-            };
-            let component = match DemTile::from_image(&image, unpack) {
-                Ok(tile) => DemTileComponent::Loaded(tile),
-                Err(error) => {
-                    tracing::warn!(%coords, %error, "DEM tile image is unusable");
-                    DemTileComponent::Missing
-                }
-            };
-            tiles
-                .spawn_mut(coords)
-                .ok_or(HeadlessMapOperationError::InvalidTile { coords })?
-                .insert(component);
+        if !dem_tiles.is_empty() {
+            self.load_dem_tiles(dem_tiles)?;
         }
+        let context = &mut self.map_context;
+        let tiles = &mut context.world.tiles;
 
         let mut layers_by_tile = BTreeMap::new();
         for layer in layers {
@@ -236,6 +258,7 @@ impl HeadlessMap {
         Ok(view_region_for_projection(
             &context.style,
             &context.view_state,
+            &context.world,
             visible_level,
             ViewStatePadding::Loose,
         )?
