@@ -91,9 +91,9 @@ impl RenderCommand<LayerItem> for DrawVectorTile {
             0,
             buffer_pool.vertices().slice(entry.vertices_buffer_range()),
         );
-        let tile_view_pattern_buffer = source_shape
-            .buffer_range()
-            .expect("tile_view_pattern needs to be uploaded first"); // FIXME tcs
+        let Some(tile_view_pattern_buffer) = source_shape.buffer_range() else {
+            return RenderCommandResult::Failure;
+        };
         pass.set_vertex_buffer(
             1,
             tile_view_pattern.buffer().slice(tile_view_pattern_buffer),

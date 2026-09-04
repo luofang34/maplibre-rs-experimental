@@ -7,7 +7,10 @@ use crate::{
     environment::{Environment, OffscreenKernel},
     io::{
         apc::{AsyncProcedureCall, AsyncProcedureFuture, Context, Input, ProcedureError},
-        tile_sources::{clamp_to_max_zoom, source_layer_groups, source_max_zoom, TileKind},
+        tile_sources::{
+            raster_zoom_delta, source_layer_groups, source_max_zoom, source_min_zoom,
+            source_tiles_for, TileKind,
+        },
     },
     kernel::Kernel,
     raster::{
@@ -65,12 +68,16 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
         if view_state.did_camera_change() || view_state.did_zoom_change() {
             if let Some(view_region) = &view_region {
                 let max_zoom = source_max_zoom(style, TileKind::Raster);
+                let min_zoom = source_min_zoom(style, TileKind::Raster);
+                let zoom_delta = raster_zoom_delta(style, view_state.zoom().value());
                 let mut requested = HashSet::new();
 
-                for coords in view_region.iter() {
-                    // Above the source maximum zoom the ancestor tile is fetched once and the
-                    // view pattern scales it into every descendant in view.
-                    let coords = clamp_to_max_zoom(coords, max_zoom);
+                // Raster tiles sit at the zoom GL JS picks for the source's tile size: 256-pixel
+                // tiles one level below each view tile, and never past the source zoom range.
+                for coords in view_region
+                    .iter()
+                    .flat_map(|coords| source_tiles_for(coords, zoom_delta, min_zoom, max_zoom))
+                {
                     if coords.build_quad_key().is_none() || !requested.insert(coords) {
                         continue;
                     }

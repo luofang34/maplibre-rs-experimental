@@ -63,6 +63,9 @@ pub struct VectorSource {
     /// Array of URLs which can contain place holders like {x}, {y}, {z}.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tiles: Option<Vec<TileUrl>>,
+    /// Edge length in pixels of one tile; raster sources are often 256, the default is 512.
+    #[serde(rename = "tileSize", skip_serializing_if = "Option::is_none")]
+    pub tile_size: Option<u32>,
     /// URL of a TileJSON document that supplies the tile URLs and zoom range.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<TileJSONUrl>,

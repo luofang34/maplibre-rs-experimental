@@ -1,31 +1,20 @@
 use std::collections::BTreeSet;
 
-use maplibre::coords::WorldTileCoords;
+use maplibre::{coords::WorldTileCoords, io::tile_sources::source_tiles_for};
 
+/// Source tiles the harness loads for the view tiles a map requires, following the same zoom
+/// rules as the request systems: `zoom_delta` levels away from each view tile, within the
+/// source zoom range, and nothing below the source minimum zoom.
 pub(crate) fn source_tile_coords(
     required: &[WorldTileCoords],
+    zoom_delta: i32,
     min_zoom: Option<u8>,
     max_zoom: Option<u8>,
 ) -> BTreeSet<WorldTileCoords> {
-    let mut pending = required.to_vec();
-    let mut selected = BTreeSet::new();
-
-    while let Some(mut coords) = pending.pop() {
-        while max_zoom.is_some_and(|zoom| u8::from(coords.z) > zoom) {
-            let Some(parent) = coords.get_parent() else {
-                break;
-            };
-            coords = parent;
-        }
-
-        if min_zoom.is_some_and(|zoom| u8::from(coords.z) < zoom) {
-            pending.extend(coords.get_children());
-        } else {
-            selected.insert(coords);
-        }
-    }
-
-    selected
+    required
+        .iter()
+        .flat_map(|coords| source_tiles_for(*coords, zoom_delta, min_zoom, max_zoom))
+        .collect()
 }
 
 #[cfg(test)]
@@ -35,9 +24,17 @@ mod tests {
     use super::source_tile_coords;
 
     #[test]
-    fn expands_visible_parent_to_source_minimum_zoom() {
+    fn skips_tiles_below_the_source_minimum_zoom() {
         let root = WorldTileCoords::default();
-        let selected = source_tile_coords(&[root], Some(1), Some(1));
+        let selected = source_tile_coords(&[root], 0, Some(1), Some(1));
+
+        assert!(selected.is_empty());
+    }
+
+    #[test]
+    fn raster_tiles_one_level_down_cover_each_view_tile() {
+        let root = WorldTileCoords::default();
+        let selected = source_tile_coords(&[root], 1, Some(1), Some(1));
 
         assert_eq!(selected, root.get_children().into_iter().collect());
     }
@@ -49,7 +46,7 @@ mod tests {
             y: 2,
             z: ZoomLevel::new(2),
         };
-        let selected = source_tile_coords(&[child], None, Some(1));
+        let selected = source_tile_coords(&[child], 0, None, Some(1));
 
         assert_eq!(
             selected,

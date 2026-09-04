@@ -7,7 +7,9 @@ use crate::{
     environment::{Environment, OffscreenKernel},
     io::{
         apc::{AsyncProcedureCall, AsyncProcedureFuture, Context, Input, ProcedureError},
-        tile_sources::{clamp_to_max_zoom, source_layer_groups, source_max_zoom, TileKind},
+        tile_sources::{
+            clamp_to_max_zoom, source_layer_groups, source_max_zoom, source_min_zoom, TileKind,
+        },
     },
     kernel::Kernel,
     render::{
@@ -68,11 +70,15 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
         if view_state.did_camera_change() || view_state.did_zoom_change() {
             if let Some(view_region) = &view_region {
                 let max_zoom = source_max_zoom(style, TileKind::Vector);
+                let min_zoom = source_min_zoom(style, TileKind::Vector);
                 let mut requested = HashSet::new();
 
                 for coords in view_region.iter() {
                     // Above the source maximum zoom the ancestor tile is fetched once and the
                     // view pattern scales it into every descendant in view.
+                    if min_zoom.is_some_and(|min_zoom| u8::from(coords.z) < min_zoom) {
+                        continue;
+                    }
                     let coords = clamp_to_max_zoom(coords, max_zoom);
                     if coords.build_quad_key().is_none() || !requested.insert(coords) {
                         continue;

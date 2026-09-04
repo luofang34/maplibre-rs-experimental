@@ -12,6 +12,7 @@ fn source(tiles: Option<Vec<String>>, maxzoom: Option<u8>) -> VectorSource {
         scheme: None,
         tiles,
         url: Some("https://tiles.example/tiles.json".to_string()),
+        tile_size: None,
     }
 }
 

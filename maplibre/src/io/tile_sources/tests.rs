@@ -1,6 +1,9 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
-use super::{clamp_to_max_zoom, source_layer_groups, source_max_zoom, TileKind};
+use super::{
+    clamp_to_max_zoom, covering_zoom, raster_zoom_delta, source_layer_groups, source_max_zoom,
+    source_tile_size, source_tiles_for, TileKind,
+};
 use crate::{
     coords::{WorldTileCoords, ZoomLevel},
     io::source_type::SourceType,
@@ -132,5 +135,64 @@ fn clamping_walks_to_the_ancestor_at_max_zoom() {
     assert_eq!(
         clamp_to_max_zoom(coords(37, 21, 6), None),
         coords(37, 21, 6)
+    );
+}
+
+#[test]
+fn covering_zoom_rounds_raster_sources_after_the_tile_size_adjustment() {
+    assert_eq!(covering_zoom(12.0, TileKind::Raster, 256.0), 13);
+    assert_eq!(covering_zoom(12.4, TileKind::Raster, 256.0), 13);
+    assert_eq!(covering_zoom(12.6, TileKind::Raster, 256.0), 14);
+    assert_eq!(covering_zoom(12.6, TileKind::Raster, 512.0), 13);
+    assert_eq!(covering_zoom(-0.5, TileKind::Raster, 256.0), 1);
+    assert_eq!(covering_zoom(12.6, TileKind::Vector, 512.0), 12);
+}
+
+#[test]
+fn source_tiles_follow_the_zoom_delta_within_the_source_range() {
+    let view = coords(6, 4, 5);
+    let children = source_tiles_for(view, 1, None, None);
+    assert_eq!(children, view.get_children().to_vec());
+    assert_eq!(source_tiles_for(view, 0, None, None), vec![view]);
+    assert_eq!(
+        source_tiles_for(view, -1, None, None),
+        vec![coords(3, 2, 4)]
+    );
+    assert_eq!(
+        source_tiles_for(view, 1, None, Some(5)),
+        vec![view],
+        "capped at max zoom"
+    );
+    assert!(
+        source_tiles_for(view, 0, Some(6), None).is_empty(),
+        "nothing below min zoom"
+    );
+    assert_eq!(source_tiles_for(view, 2, None, None).len(), 16);
+    assert_eq!(
+        source_tiles_for(view, 3, None, None).len(),
+        16,
+        "descent is bounded"
+    );
+}
+
+#[test]
+fn raster_zoom_delta_follows_the_smallest_raster_tile_size_unless_vectors_share_the_view() {
+    let raster_only: Style = serde_json::from_value(serde_json::json!({
+        "version": 8,
+        "sources": {
+            "photo": {"type": "raster", "tiles": ["https://p.example/{z}/{x}/{y}.jpg"], "tileSize": 256}
+        },
+        "layers": [{"id": "sat", "type": "raster", "source": "photo"}]
+    }))
+    .expect("style parses");
+
+    assert_eq!(source_tile_size(&raster_only, TileKind::Raster), 256.0);
+    assert_eq!(raster_zoom_delta(&raster_only, 12.0), 1);
+    assert_eq!(raster_zoom_delta(&raster_only, 12.6), 2);
+    assert_eq!(source_tile_size(&style(), TileKind::Raster), 512.0);
+    assert_eq!(
+        raster_zoom_delta(&style(), 12.6),
+        0,
+        "vector tiles share the view"
     );
 }

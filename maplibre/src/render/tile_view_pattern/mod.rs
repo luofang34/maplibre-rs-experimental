@@ -5,7 +5,9 @@ mod pattern;
 use std::{marker::PhantomData, mem::size_of, ops::Range};
 
 use cgmath::Matrix4;
-pub use pattern::{TileViewPattern, DEFAULT_TILE_VIEW_PATTERN_SIZE};
+pub use pattern::{
+    TileViewPattern, COMPLETE_CHILDREN_SEARCH_DEPTH, DEFAULT_TILE_VIEW_PATTERN_SIZE,
+};
 
 use crate::{
     coords::{WorldTileCoords, Zoom},
@@ -107,6 +109,10 @@ impl TileShape {
         self.buffer_range = Some(index * STRIDE..(index + 1) * STRIDE);
     }
 
+    fn clear_buffer_range(&mut self) {
+        self.buffer_range = None;
+    }
+
     pub fn buffer_range(&self) -> Option<Range<wgpu::BufferAddress>> {
         self.buffer_range.clone()
     }
@@ -143,6 +149,30 @@ pub trait HasTile {
                 return None;
             }
         }
+    }
+
+    /// Loaded descendants that cover `coords` completely, at most `search_depth` levels down.
+    ///
+    /// Finer tiles are preferred over a coarser parent, as GL JS retains loaded children
+    /// first; a raster source of 256-pixel tiles covers each 512-pixel view tile this way.
+    fn get_complete_children(
+        &self,
+        coords: WorldTileCoords,
+        world: &World,
+        search_depth: usize,
+    ) -> Option<Vec<WorldTileCoords>> {
+        if search_depth == 0 {
+            return None;
+        }
+        let mut output = Vec::with_capacity(4);
+        for child in coords.get_children() {
+            if self.has_tile(child, world) {
+                output.push(child);
+            } else {
+                output.extend(self.get_complete_children(child, world, search_depth - 1)?);
+            }
+        }
+        Some(output)
     }
 
     fn get_available_children(
@@ -254,3 +284,6 @@ impl HasTile for ViewTileSources {
         self.items.iter().all(|item| item.has_tile(coords, world))
     }
 }
+
+#[cfg(test)]
+mod tests;

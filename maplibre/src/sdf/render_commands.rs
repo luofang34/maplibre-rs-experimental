@@ -67,9 +67,9 @@ impl RenderCommand<TranslucentItem> for DrawSymbol {
 
         let source_shape = &item.source_shape;
 
-        let tile_view_pattern_buffer = source_shape
-            .buffer_range()
-            .expect("tile_view_pattern needs to be uploaded first"); // FIXME tcs
+        let Some(tile_view_pattern_buffer) = source_shape.buffer_range() else {
+            return RenderCommandResult::Failure;
+        };
 
         // Uses stencil value of requested tile and the shape of the requested tile
         let reference = source_shape.coords().stencil_reference_value_3d() as u32;

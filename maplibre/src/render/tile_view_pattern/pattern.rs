@@ -18,6 +18,8 @@ use crate::{
 // when completely zoomed out.
 pub const DEFAULT_TILE_VIEW_PATTERN_SIZE: wgpu::BufferAddress = 512;
 pub const CHILDREN_SEARCH_DEPTH: usize = 4;
+/// How many zoom levels down a complete set of finer tiles is preferred over a coarser parent.
+pub const COMPLETE_CHILDREN_SEARCH_DEPTH: usize = 2;
 
 #[derive(Debug)]
 struct BackingBuffer<B> {
@@ -69,6 +71,12 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
     ///
     /// Drape draws use these entries to place source shapes inside a tile texture instead of on
     /// the screen; call after [`Self::upload_pattern`] so the view entries stay intact.
+    /// Number of extra metadata entries that still fit behind the uploaded pattern.
+    pub fn remaining_metadata_capacity(&self) -> usize {
+        let capacity = self.view_tiles_buffer.inner_size / size_of::<ShaderTileMetadata>() as u64;
+        capacity.saturating_sub(self.uploaded) as usize
+    }
+
     pub fn upload_extra_metadata(
         &mut self,
         queue: &Q,
@@ -117,6 +125,15 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
             let source_shapes = {
                 if container.has_tile(coords, world) {
                     SourceShapes::SourceEqTarget(TileShape::new(coords, zoom))
+                } else if let Some(children_coords) =
+                    container.get_complete_children(coords, world, COMPLETE_CHILDREN_SEARCH_DEPTH)
+                {
+                    SourceShapes::Children(
+                        children_coords
+                            .iter()
+                            .map(|child_coord| TileShape::new(*child_coord, zoom))
+                            .collect(),
+                    )
                 } else if let Some(parent_coords) = container.get_available_parent(coords, world) {
                     log::debug!("Could not find data at {coords}. Falling back to {parent_coords}");
 
@@ -179,9 +196,20 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
         viewport_width: f32,
         viewport_height: f32,
     ) {
+        let capacity = (self.view_tiles_buffer.inner_size
+            / std::mem::size_of::<ShaderTileMetadata>() as wgpu::BufferAddress)
+            as usize;
         let mut buffer = Vec::with_capacity(self.view_tiles.len());
+        let mut skipped = 0_usize;
 
         let mut add_to_buffer = |shape: &mut TileShape| {
+            if buffer.len() >= capacity {
+                // A pitched view falling back to many small child tiles can exceed the
+                // buffer; shapes past the end stay unrendered until their own tiles load.
+                shape.clear_buffer_range();
+                skipped += 1;
+                return;
+            }
             shape.set_buffer_range(buffer.len() as u64);
             // TODO: Name `ShaderTileMetadata` is unfortunate here, because for raster rendering it actually is a layer
             let transform = view_proj
@@ -220,13 +248,15 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
             }
         }
 
+        if skipped > 0 {
+            tracing::warn!(
+                skipped,
+                capacity,
+                "tile pattern exceeds its buffer; distant shapes are skipped this frame"
+            );
+        }
         self.uploaded = buffer.len() as u64;
         let raw_buffer = bytemuck::cast_slice(buffer.as_slice());
-        if raw_buffer.len() as wgpu::BufferAddress > self.view_tiles_buffer.inner_size {
-            /* TODO: We need to avoid this case by either choosing a proper size
-            TODO: (DEFAULT_TILE_VIEW_PATTERN_SIZE), or resizing the buffer */
-            panic!("Buffer is too small to store the tile pattern!");
-        }
         queue.write_buffer(&self.view_tiles_buffer.inner, 0, raw_buffer);
     }
 }

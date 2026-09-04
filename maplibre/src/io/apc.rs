@@ -267,9 +267,11 @@ impl<K: OffscreenKernel, S: Scheduler> AsyncProcedureCall<K> for SchedulerAsyncP
                 log::info!("Processing on thread: {:?}", std::thread::current().name());
 
                 let kernel = K::create(offscreen_kernel_config);
-                procedure(input, SchedulerContext { sender }, kernel)
-                    .await
-                    .unwrap();
+                // A result that cannot be delivered, because the map already shut down, must
+                // not take the worker thread down with it.
+                if let Err(error) = procedure(input, SchedulerContext { sender }, kernel).await {
+                    log::warn!("procedure failed: {error:?}");
+                }
             })
             .map_err(|_e| CallError::Schedule)
     }

@@ -43,6 +43,7 @@ mod report;
 mod source_tiles;
 
 use comparison::{compare_and_diff, composite_opaque_background};
+use maplibre::io::tile_sources::raster_zoom_delta;
 use paths::{
     collect_tests, local_data_path, local_tile_path, workspace_templates_dir, workspace_tests_dir,
 };
@@ -344,20 +345,23 @@ async fn run_test_inner(test_dir: &Path) -> TestResult {
                         "Vector source '{source_name}' has no tile template"
                     ));
                 };
-                for coords in
-                    source_tile_coords(&target_coords, vector_source.minzoom, vector_source.maxzoom)
-                {
+                for coords in source_tile_coords(
+                    &target_coords,
+                    0,
+                    vector_source.minzoom,
+                    vector_source.maxzoom,
+                ) {
                     let path = match local_tile_path(template, coords) {
                         Ok(path) => path,
                         Err(error) => return TestResult::Error(error),
                     };
+                    // A missing tile is a 404 in GL JS: the tile stays empty and the map
+                    // falls back to its neighbours in the pyramid.
                     let tile_data = match std::fs::read(&path) {
                         Ok(data) => data.into_boxed_slice(),
                         Err(error) => {
-                            return TestResult::Error(format!(
-                                "Cannot read vector tile {}: {error}",
-                                path.display()
-                            ));
+                            tracing::warn!(path = %path.display(), %error, "vector tile unavailable");
+                            continue;
                         }
                     };
                     for layer in &matching_layers {
@@ -388,9 +392,12 @@ async fn run_test_inner(test_dir: &Path) -> TestResult {
                         "Raster source '{source_name}' has no tile template"
                     ));
                 };
-                for coords in
-                    source_tile_coords(&target_coords, raster_source.minzoom, raster_source.maxzoom)
-                {
+                for coords in source_tile_coords(
+                    &target_coords,
+                    raster_zoom_delta(&style, style.zoom.unwrap_or_default()),
+                    raster_source.minzoom,
+                    raster_source.maxzoom,
+                ) {
                     let path = match local_tile_path(template, coords) {
                         Ok(path) => path,
                         Err(error) => return TestResult::Error(error),
@@ -398,10 +405,8 @@ async fn run_test_inner(test_dir: &Path) -> TestResult {
                     let image = match image::open(&path) {
                         Ok(image) => image.to_rgba8(),
                         Err(error) => {
-                            return TestResult::Error(format!(
-                                "Cannot read raster tile {}: {error}",
-                                path.display()
-                            ));
+                            tracing::warn!(path = %path.display(), %error, "raster tile unavailable");
+                            continue;
                         }
                     };
                     all_raster_layers.push(AvailableRasterLayerData {

@@ -103,7 +103,11 @@ pub fn queue_system(
 
     let targets = select_targets(view_region.iter(), world);
     let specs = collect_layer_specs(targets, style, world, zoom.value());
-    let (metadata, slots) = drape_metadata(&specs);
+    let capacity = match world.resources.get::<Eventually<WgpuTileViewPattern>>() {
+        Some(Initialized(pattern)) => pattern.remaining_metadata_capacity(),
+        _ => return Err(SystemError::Dependencies),
+    };
+    let (metadata, slots) = drape_metadata(&specs, capacity);
     let ranges = {
         let Some(Initialized(pattern)) =
             world.resources.get_mut::<Eventually<WgpuTileViewPattern>>()
@@ -288,9 +292,16 @@ fn collect_layer_specs(
 }
 
 /// Instance metadata placing each source shape inside its target's drape texture.
-fn drape_metadata(specs: &[TargetSpec]) -> (Vec<ShaderTileMetadata>, Vec<Option<usize>>) {
+///
+/// Shapes past `capacity` get no slot: a view falling back to many small child tiles can ask
+/// for more than the metadata buffer holds, and those shapes wait for their own tiles.
+fn drape_metadata(
+    specs: &[TargetSpec],
+    capacity: usize,
+) -> (Vec<ShaderTileMetadata>, Vec<Option<usize>>) {
     let mut metadata = Vec::new();
     let mut slots = Vec::new();
+    let mut skipped = 0_usize;
     for spec in specs {
         let texture_zoom = Zoom::new(
             f64::from(u8::from(spec.coords.z)) + (f64::from(DRAPE_SIZE) / TILE_SIZE).log2(),
@@ -302,6 +313,11 @@ fn drape_metadata(specs: &[TargetSpec]) -> (Vec<ShaderTileMetadata>, Vec<Option<
                 slots.push(None);
                 continue;
             };
+            if metadata.len() >= capacity {
+                slots.push(None);
+                skipped += 1;
+                continue;
+            }
             slots.push(Some(metadata.len()));
             metadata.push(ShaderTileMetadata {
                 transform: transform.into(),
@@ -315,6 +331,13 @@ fn drape_metadata(specs: &[TargetSpec]) -> (Vec<ShaderTileMetadata>, Vec<Option<
                 clip_antimeridian: 0,
             });
         }
+    }
+    if skipped > 0 {
+        tracing::warn!(
+            skipped,
+            capacity,
+            "drape shapes exceed the metadata buffer; some tiles drape without them this frame"
+        );
     }
     (metadata, slots)
 }

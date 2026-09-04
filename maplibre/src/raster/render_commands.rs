@@ -86,18 +86,18 @@ impl RenderCommand<LayerItem> for DrawRasterTile {
 
         pass.set_stencil_reference(reference);
 
-        let tile_view_pattern_buffer = source_shape
-            .buffer_range()
-            .expect("tile_view_pattern needs to be uploaded first"); // FIXME tcs
+        let Some(tile_view_pattern_buffer) = source_shape.buffer_range() else {
+            return RenderCommandResult::Failure;
+        };
         pass.set_vertex_buffer(0, mesh.vertex_buffer().slice(..));
         pass.set_vertex_buffer(
             1,
             tile_view_pattern.buffer().slice(tile_view_pattern_buffer),
         );
 
-        let tile_view_pattern_buffer = source_shape
-            .buffer_range()
-            .expect("tile_view_pattern needs to be uploaded first"); // FIXME tcs
+        let Some(tile_view_pattern_buffer) = source_shape.buffer_range() else {
+            return RenderCommandResult::Failure;
+        };
 
         // FIXME tcs: I passing random data here right now, but instead we need the correct metadata here
         pass.set_vertex_buffer(
