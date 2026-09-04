@@ -25,13 +25,32 @@ const PLANE_POINT_INDICES: [[usize; 3]; 6] = [
     [0, 4, 5],
 ];
 
-pub(super) struct GlobeFrustum {
+pub(crate) struct GlobeFrustum {
     points: [Vector3<f64>; 8],
     planes: [Vector4<f64>; 6],
 }
 
 impl GlobeFrustum {
-    pub(super) fn from_camera(camera: &GlobeCameraState) -> Self {
+    /// Builds a frustum from eight corners, four on the far plane then four on the near plane,
+    /// each set ordered top-left, top-right, bottom-right, bottom-left; every plane is oriented
+    /// towards the centroid so the caller's winding does not matter.
+    pub(crate) fn from_points_oriented(points: [Vector3<f64>; 8]) -> Self {
+        let centroid = points
+            .iter()
+            .fold(Vector3::new(0.0, 0.0, 0.0), |sum, point| sum + *point)
+            / 8.0;
+        let planes = std::array::from_fn(|index| {
+            let plane = plane_from_points(points, index);
+            if plane.dot(centroid.extend(1.0)) < 0.0 {
+                -plane
+            } else {
+                plane
+            }
+        });
+        Self { points, planes }
+    }
+
+    pub(crate) fn from_camera(camera: &GlobeCameraState) -> Self {
         let inverse = camera.inverse_view_projection();
         let mut points = std::array::from_fn(|index| {
             let corner = CLIP_CORNERS[index];
@@ -43,7 +62,7 @@ impl GlobeFrustum {
         Self { points, planes }
     }
 
-    pub(super) fn intersects(&self, bounds: &GlobeTileBoundingVolume) -> Intersection {
+    pub(crate) fn intersects(&self, bounds: &GlobeTileBoundingVolume) -> Intersection {
         let mut result = Intersection::Full;
         for plane in self.planes {
             let classification =

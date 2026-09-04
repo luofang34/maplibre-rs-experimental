@@ -14,8 +14,8 @@ use super::{
 };
 use crate::coords::{LatLon, TileCoords, WorldTileCoords, ZoomLevel, MAX_ZOOM};
 
-mod frustum;
-mod lod;
+pub(crate) mod frustum;
+pub(crate) mod lod;
 
 use frustum::GlobeFrustum;
 
@@ -59,16 +59,16 @@ pub enum GlobeCoveringError {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum Intersection {
+pub(crate) enum Intersection {
     None,
     Partial,
     Full,
 }
 
 #[derive(Clone, Copy)]
-struct StackEntry {
-    tile: TileCoords,
-    fully_visible: bool,
+pub(crate) struct StackEntry {
+    pub(crate) tile: TileCoords,
+    pub(crate) fully_visible: bool,
 }
 
 /// Selects canonical tiles intersecting both the camera frustum and visible globe hemisphere.
@@ -117,7 +117,7 @@ pub fn covering_tiles(
     }
 
     sort_by_center(&mut visible, camera.center(), options.zoom);
-    Ok(add_padding(visible, options))
+    Ok(add_padding(visible, options.padding, options.max_tiles))
 }
 
 /// Returns the conservative elevation used to retain features near the frustum horizon.
@@ -148,7 +148,7 @@ fn tile_intersection(
     )
 }
 
-fn classify_points<T>(points: &[T], distance: impl Fn(&T) -> f64) -> Intersection {
+pub(crate) fn classify_points<T>(points: &[T], distance: impl Fn(&T) -> f64) -> Intersection {
     let inside = points.iter().filter(|point| distance(point) >= 0.0).count();
     if inside == 0 {
         Intersection::None
@@ -167,7 +167,7 @@ fn combine_intersections(left: Intersection, right: Intersection) -> Intersectio
     }
 }
 
-fn push_children(stack: &mut Vec<StackEntry>, tile: TileCoords, fully_visible: bool) {
+pub(crate) fn push_children(stack: &mut Vec<StackEntry>, tile: TileCoords, fully_visible: bool) {
     let child_zoom = ZoomLevel::new(u8::from(tile.z).saturating_add(1));
     for index in 0..4 {
         stack.push(StackEntry {
@@ -177,7 +177,11 @@ fn push_children(stack: &mut Vec<StackEntry>, tile: TileCoords, fully_visible: b
     }
 }
 
-fn sort_by_center(tiles: &mut [WorldTileCoords], center: LatLon, nominal_zoom: ZoomLevel) {
+pub(crate) fn sort_by_center(
+    tiles: &mut [WorldTileCoords],
+    center: LatLon,
+    nominal_zoom: ZoomLevel,
+) {
     let center_x = center.longitude / 360.0 + 0.5;
     let latitude = center.latitude.to_radians();
     let center_y = (1.0 - latitude.tan().asinh() / std::f64::consts::PI) * 0.5;
@@ -203,22 +207,23 @@ fn distance_squared(
     dx * dx + dy * dy
 }
 
-fn add_padding(
+pub(crate) fn add_padding(
     visible: Vec<WorldTileCoords>,
-    options: GlobeCoveringOptions,
+    padding: i32,
+    max_tiles: usize,
 ) -> Vec<WorldTileCoords> {
-    if options.max_tiles == 0 {
+    if max_tiles == 0 {
         return Vec::new();
     }
-    if options.padding <= 0 {
-        return visible.into_iter().take(options.max_tiles).collect();
+    if padding <= 0 {
+        return visible.into_iter().take(max_tiles).collect();
     }
     let mut seen = HashSet::new();
     let mut padded = Vec::new();
     for tile in visible {
         let count = 1_i64 << u8::from(tile.z);
-        for delta_x in -options.padding..=options.padding {
-            for delta_y in -options.padding..=options.padding {
+        for delta_x in -padding..=padding {
+            for delta_y in -padding..=padding {
                 let y = i64::from(tile.y) + i64::from(delta_y);
                 if !(0..count).contains(&y) {
                     continue;
@@ -230,7 +235,7 @@ fn add_padding(
                 };
                 if seen.insert(candidate) {
                     padded.push(candidate);
-                    if padded.len() == options.max_tiles {
+                    if padded.len() == max_tiles {
                         return padded;
                     }
                 }

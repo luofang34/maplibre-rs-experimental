@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 mod expression;
 pub mod globe;
+pub mod mercator;
 pub mod renderer_data;
 
 pub use expression::{

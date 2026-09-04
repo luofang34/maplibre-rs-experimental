@@ -154,7 +154,7 @@ fn zoom_one_volume(tile: TileCoords, radius: f64) -> GlobeTileBoundingVolume {
     aabb_volume(min, max)
 }
 
-fn aabb_volume(min: Vector3<f64>, max: Vector3<f64>) -> GlobeTileBoundingVolume {
+pub(crate) fn aabb_volume(min: Vector3<f64>, max: Vector3<f64>) -> GlobeTileBoundingVolume {
     let mut points = Vec::with_capacity(8);
     for index in 0..8 {
         points.push(Vector3::new(

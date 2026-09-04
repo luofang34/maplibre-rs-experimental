@@ -8,7 +8,7 @@ const MAX_ZOOM_LEVELS_ON_SCREEN: f64 = 9.314;
 const TILE_COUNT_MAX_MIN_RATIO: f64 = 3.0;
 const INTEGRATION_POINTS: usize = 10;
 
-pub(super) struct LodContext {
+pub(crate) struct LodContext {
     camera: Point2<f64>,
     distance_z: f64,
     distance_to_center_3d: f64,
@@ -17,11 +17,29 @@ pub(super) struct LodContext {
 }
 
 impl LodContext {
-    pub(super) fn new(camera: &GlobeCameraState, requested_zoom: f64) -> Self {
-        let center = mercator_center(camera);
-        let distance = camera.camera_to_center_distance() / camera.world_size();
-        let pitch = camera.pitch_degrees().to_radians();
-        let bearing = camera.bearing_degrees().to_radians();
+    pub(crate) fn new(camera: &GlobeCameraState, requested_zoom: f64) -> Self {
+        Self::from_view(
+            mercator_center(camera),
+            camera.camera_to_center_distance() / camera.world_size(),
+            camera.pitch_degrees(),
+            camera.bearing_degrees(),
+            camera.field_of_view_degrees(),
+            requested_zoom,
+        )
+    }
+
+    /// Builds the context from the map center in Mercator `0..1` units, the camera distance to
+    /// it in the same units, and the camera angles in degrees; shared by both projections.
+    pub(crate) fn from_view(
+        center: Point2<f64>,
+        distance: f64,
+        pitch_degrees: f64,
+        bearing_degrees: f64,
+        field_of_view_degrees: f64,
+        requested_zoom: f64,
+    ) -> Self {
+        let pitch = pitch_degrees.to_radians();
+        let bearing = bearing_degrees.to_radians();
         let horizontal = pitch.sin();
         let direction_x = horizontal * bearing.sin();
         let direction_y = -horizontal * bearing.cos();
@@ -36,11 +54,11 @@ impl LodContext {
             distance_z,
             distance_to_center_3d: distance_to_center_2d.hypot(distance_z),
             requested_zoom,
-            field_of_view_degrees: camera.field_of_view_degrees(),
+            field_of_view_degrees,
         }
     }
 
-    pub(super) fn zoom_for_tile(&self, tile: TileCoords) -> ZoomLevel {
+    pub(crate) fn zoom_for_tile(&self, tile: TileCoords) -> ZoomLevel {
         let distance_2d = distance_to_tile_2d(self.camera, tile);
         let desired = calculate_tile_zoom(
             self.requested_zoom,

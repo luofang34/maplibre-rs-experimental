@@ -16,6 +16,10 @@ use crate::{
                 GlobeCoveringOptions,
             },
         },
+        mercator::{
+            covering_tiles as mercator_covering_tiles, MercatorCoveringError,
+            MercatorCoveringOptions,
+        },
         renderer_data::{
             compose_projection_data, ProjectionDataParams, ProjectionMatrices,
             RendererProjectionData,
@@ -28,6 +32,14 @@ use crate::{
     },
     style::Style,
 };
+
+/// GL JS's feature-height allowance for tiles near the horizon.
+const ASSUMED_MAX_FEATURE_HEIGHT_METERS: f64 = 500.0;
+const MAX_MERCATOR_HORIZON_DEGREES: f64 = 89.25;
+const TILE_CULLING_HORIZON_ONSET_DEGREES: f64 = 15.0;
+/// Elevation range assumed for terrain tiles until DEM minima and maxima feed the covering.
+const TERRAIN_MIN_ELEVATION_METERS: f64 = -500.0;
+const TERRAIN_MAX_ELEVATION_METERS: f64 = 9000.0;
 
 /// View-wide globe projection values uploaded as a uniform buffer.
 #[repr(C)]
@@ -154,6 +166,13 @@ impl ProjectionGpuResources {
 /// Failure while deriving projection state from the current map view.
 #[derive(Debug, Error)]
 pub enum ProjectionStateError {
+    /// Mercator tile selection failed.
+    #[error("failed to select mercator tiles")]
+    MercatorCovering {
+        /// Underlying covering error.
+        #[source]
+        source: MercatorCoveringError,
+    },
     /// Globe camera state could not be constructed.
     #[error("failed to construct globe camera state")]
     GlobeCamera {
@@ -224,7 +243,7 @@ pub fn view_region_for_projection(
             .uses_globe_rendering(view_state.zoom().value())
     });
     if !uses_globe {
-        return Ok(view_state.create_view_region(visible_level, padding));
+        return mercator_view_region(style, view_state, visible_level, padding);
     }
     let camera = globe_camera_for_view(view_state)?;
     let tiles = covering_tiles(
@@ -248,6 +267,71 @@ pub fn view_region_for_projection(
     Ok(Some(ViewRegion::from_tiles(tiles, visible_level, 512)))
 }
 
+/// Selects Mercator tiles: the ground-plane bounding box for flat views, or frustum culling
+/// with distance-based zoom once terrain is on or the pitch exceeds GL JS's constant-zoom limit.
+fn mercator_view_region(
+    style: &Style,
+    view_state: &ViewState,
+    visible_level: ZoomLevel,
+    padding: ViewStatePadding,
+) -> Result<Option<ViewRegion>, ProjectionStateError> {
+    let pitch_degrees = view_state.camera().get_pitch().0.to_degrees().abs();
+    let fov_degrees = view_state.field_of_view().0.to_degrees();
+    let needs_frustum =
+        style.terrain.is_some() || pitch_degrees > max_constant_zoom_pitch(fov_degrees);
+    if !needs_frustum {
+        return Ok(view_state.create_view_region(visible_level, padding));
+    }
+    let tiles = mercator_covering_tiles(
+        view_state,
+        MercatorCoveringOptions {
+            zoom: visible_level,
+            requested_zoom: view_state.zoom().value(),
+            variable_zoom: true,
+            padding: match padding {
+                ViewStatePadding::Loose => 1,
+                ViewStatePadding::Tight => 0,
+            },
+            max_tiles: 512,
+            elevation: mercator_elevation_range(style, view_state, pitch_degrees, fov_degrees),
+        },
+    )
+    .map_err(|source| ProjectionStateError::MercatorCovering { source })?;
+    Ok(Some(ViewRegion::from_tiles(tiles, visible_level, 512)))
+}
+
+/// Pitch above which GL JS varies zoom per tile: 78.5 degrees minus half the field of view,
+/// clamped to 60 degrees.
+fn max_constant_zoom_pitch(fov_degrees: f64) -> f64 {
+    (78.5 - fov_degrees / 2.0).clamp(0.0, 60.0)
+}
+
+/// Elevation range of the tile boxes: the whole plausible range while terrain is on, else the
+/// center elevation plus GL JS's feature-height allowance near the horizon.
+fn mercator_elevation_range(
+    style: &Style,
+    view_state: &ViewState,
+    pitch_degrees: f64,
+    fov_degrees: f64,
+) -> TileElevationRange {
+    if style.terrain.is_some() {
+        return TileElevationRange {
+            min_meters: TERRAIN_MIN_ELEVATION_METERS,
+            max_meters: TERRAIN_MAX_ELEVATION_METERS,
+        };
+    }
+    let bottom_edge_above_horizontal =
+        MAX_MERCATOR_HORIZON_DEGREES - pitch_degrees - fov_degrees * 0.5;
+    let proximity = ((TILE_CULLING_HORIZON_ONSET_DEGREES - bottom_edge_above_horizontal)
+        / TILE_CULLING_HORIZON_ONSET_DEGREES)
+        .clamp(0.0, 1.0);
+    let elevation = view_state.center_elevation() + proximity * ASSUMED_MAX_FEATURE_HEIGHT_METERS;
+    TileElevationRange {
+        min_meters: elevation.min(0.0),
+        max_meters: elevation.max(0.0),
+    }
+}
+
 /// Constructs the vertical-perspective camera matching the current map view.
 pub fn globe_camera_for_view(
     view_state: &ViewState,
@@ -269,7 +353,7 @@ pub fn globe_camera_for_view(
     .map_err(|source| ProjectionStateError::GlobeCamera { source })
 }
 
-fn mercator_world_to_lat_lon(x: f64, y: f64, world_size: f64) -> LatLon {
+pub(crate) fn mercator_world_to_lat_lon(x: f64, y: f64, world_size: f64) -> LatLon {
     let longitude = x / world_size * 360.0 - 180.0;
     let latitude = (std::f64::consts::PI * (1.0 - 2.0 * y / world_size))
         .sinh()
