@@ -5,7 +5,7 @@ use serde::Deserialize;
 use crate::{
     io::source_client::{HttpClient, SourceClient},
     style::{
-        source::{Source, VectorSource},
+        source::{RasterDemSource, Source, VectorSource},
         Style,
     },
 };
@@ -26,28 +26,68 @@ pub struct TileJson {
     pub bounds: Option<(f64, f64, f64, f64)>,
 }
 
-/// Fills the tile URLs and zoom range a source leaves unspecified from its TileJSON document.
-pub fn apply_tile_json(source: &mut VectorSource, tile_json: TileJson) {
-    if source.tiles.is_none() {
-        source.tiles = Some(tile_json.tiles);
-    }
-    if source.minzoom.is_none() {
-        source.minzoom = tile_json.minzoom;
-    }
-    if source.maxzoom.is_none() {
-        source.maxzoom = tile_json.maxzoom;
-    }
-    if source.bounds.is_none() {
-        source.bounds = tile_json.bounds;
+/// The addressing fields a TileJSON document can fill in, shared by tile and DEM sources.
+struct TileJsonFields<'a> {
+    tiles: &'a mut Option<Vec<String>>,
+    minzoom: &'a mut Option<u8>,
+    maxzoom: &'a mut Option<u8>,
+    bounds: &'a mut Option<(f64, f64, f64, f64)>,
+}
+
+impl TileJsonFields<'_> {
+    fn apply(self, tile_json: TileJson) {
+        if self.tiles.is_none() {
+            *self.tiles = Some(tile_json.tiles);
+        }
+        if self.minzoom.is_none() {
+            *self.minzoom = tile_json.minzoom;
+        }
+        if self.maxzoom.is_none() {
+            *self.maxzoom = tile_json.maxzoom;
+        }
+        if self.bounds.is_none() {
+            *self.bounds = tile_json.bounds;
+        }
     }
 }
 
-fn pending_tile_json(source: &mut Source) -> Option<&mut VectorSource> {
+/// Fills the tile URLs and zoom range a source leaves unspecified from its TileJSON document.
+pub fn apply_tile_json(source: &mut VectorSource, tile_json: TileJson) {
+    TileJsonFields {
+        tiles: &mut source.tiles,
+        minzoom: &mut source.minzoom,
+        maxzoom: &mut source.maxzoom,
+        bounds: &mut source.bounds,
+    }
+    .apply(tile_json);
+}
+
+/// Fills the tile URLs and zoom range of a DEM source from its TileJSON document.
+pub fn apply_tile_json_to_dem(source: &mut RasterDemSource, tile_json: TileJson) {
+    TileJsonFields {
+        tiles: &mut source.tiles,
+        minzoom: &mut source.minzoom,
+        maxzoom: &mut source.maxzoom,
+        bounds: &mut source.bounds,
+    }
+    .apply(tile_json);
+}
+
+/// Returns the TileJSON URL of a source that declares `url` but no `tiles`.
+fn pending_tile_json_url(source: &Source) -> Option<String> {
+    let (tiles, url) = match source {
+        Source::Vector(vector) | Source::Raster(vector) => (&vector.tiles, &vector.url),
+        Source::RasterDem(dem) => (&dem.tiles, &dem.url),
+        Source::GeoJson(_) => return None,
+    };
+    tiles.is_none().then(|| url.clone()).flatten()
+}
+
+fn apply_tile_json_to_source(source: &mut Source, tile_json: TileJson) {
     match source {
-        Source::Vector(vector) | Source::Raster(vector) => {
-            (vector.tiles.is_none() && vector.url.is_some()).then_some(vector)
-        }
-        Source::GeoJson(_) => None,
+        Source::Vector(vector) | Source::Raster(vector) => apply_tile_json(vector, tile_json),
+        Source::RasterDem(dem) => apply_tile_json_to_dem(dem, tile_json),
+        Source::GeoJson(_) => {}
     }
 }
 
@@ -60,17 +100,14 @@ pub async fn resolve_tile_json_sources<HC: HttpClient>(
     client: &SourceClient<HC>,
 ) {
     for (name, source) in &mut style.sources {
-        let Some(vector) = pending_tile_json(source) else {
-            continue;
-        };
-        let Some(url) = vector.url.clone() else {
+        let Some(url) = pending_tile_json_url(source) else {
             continue;
         };
         match client.fetch_url(&url).await {
             Ok(bytes) => match serde_json::from_slice::<TileJson>(&bytes) {
                 Ok(tile_json) => {
                     tracing::info!(source = %name, %url, "resolved TileJSON source");
-                    apply_tile_json(vector, tile_json);
+                    apply_tile_json_to_source(source, tile_json);
                 }
                 Err(error) => {
                     tracing::warn!(source = %name, %url, %error, "TileJSON document is invalid");

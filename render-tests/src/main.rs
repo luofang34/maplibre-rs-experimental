@@ -360,6 +360,8 @@ async fn run_test_inner(test_dir: &Path) -> TestResult {
                     });
                 }
             }
+            // DEM tiles are fetched by the terrain pipeline, not as layer sources.
+            Source::RasterDem(_) => {}
         }
     }
 

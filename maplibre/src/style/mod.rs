@@ -28,6 +28,7 @@ pub mod layer;
 pub mod light;
 pub mod sky;
 pub mod source;
+pub mod terrain;
 
 use crate::{
     projection::ProjectionSpecification,
@@ -61,6 +62,8 @@ pub struct Style {
     pub light: Option<light::LightSpecification>,
     #[serde(default)]
     pub sky: Option<sky::SkySpecification>,
+    #[serde(default)]
+    pub terrain: Option<terrain::TerrainSpecification>,
 }
 
 /// Default style for https://openmaptiles.org/schema/
@@ -95,6 +98,7 @@ impl Default for Style {
             projection: None,
             light: None,
             sky: None,
+            terrain: None,
             zoom: Some(13.0),
             layers: vec![
                 StyleLayer {
@@ -372,6 +376,36 @@ mod tests {
                 "layer types must match after round-trip for {}",
                 orig.id
             );
+        }
+    }
+
+    #[test]
+    fn parses_the_gl_js_3d_terrain_example() {
+        // language=JSON
+        let style_json_str = r##"
+        {
+          "version": 8,
+          "sources": {
+            "osm": {"type": "raster", "tiles": ["https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"], "tileSize": 256, "maxzoom": 19},
+            "terrainSource": {"type": "raster-dem", "url": "https://demotiles.maplibre.org/terrain-tiles/tiles.json", "tileSize": 256},
+            "hillshadeSource": {"type": "raster-dem", "url": "https://demotiles.maplibre.org/terrain-tiles/tiles.json", "tileSize": 256}
+          },
+          "layers": [
+            {"id": "osm", "type": "raster", "source": "osm"},
+            {"id": "hills", "type": "hillshade", "source": "hillshadeSource", "paint": {"hillshade-shadow-color": "#473B24"}}
+          ],
+          "terrain": {"source": "terrainSource", "exaggeration": 1},
+          "sky": {}
+        }
+        "##;
+        let style: Style = serde_json::from_str(style_json_str).unwrap();
+
+        let terrain = style.terrain.expect("terrain root property");
+        assert_eq!(terrain.source, "terrainSource");
+        assert_eq!(terrain.exaggeration, 1.0);
+        match style.sources.get("terrainSource") {
+            Some(Source::RasterDem(source)) => assert_eq!(source.tile_size, 256),
+            other => panic!("expected raster-dem source, got {other:?}"),
         }
     }
 }
