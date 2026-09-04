@@ -251,6 +251,17 @@ impl HeadlessMap {
         Ok(())
     }
 
+    /// Raises the pitch limit and re-applies the style's pitch, which the default limit clamps.
+    pub fn set_max_pitch(&mut self, max_pitch: cgmath::Deg<f64>) {
+        let context = &mut self.map_context;
+        context.view_state.set_max_pitch(max_pitch);
+        let pitch = context.style.pitch.unwrap_or_default();
+        context
+            .view_state
+            .camera_mut()
+            .set_pitch(cgmath::Deg::<f64>(pitch));
+    }
+
     /// Returns the tile coordinates the source pipeline must make available for this view.
     pub fn required_tile_coords(&self) -> Result<Vec<WorldTileCoords>, ProjectionStateError> {
         let context = &self.map_context;

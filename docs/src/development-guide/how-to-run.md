@@ -31,10 +31,22 @@ To view the bundled world style on a globe, or your own style, use the `headed` 
 ```bash
 cargo run -p maplibre-demo -- headed --globe
 cargo run -p maplibre-demo -- headed --style path/to/style.json --projection globe
+cargo run -p maplibre-demo -- headed --terrain
 ```
 
 Left-drag pans, the mouse wheel or `+`/`-` zooms around the pointer, right-drag rotates and tilts,
 and `W`/`A`/`S`/`D` or the arrow keys pan. `--frames <n>` closes the window after `n` frames.
+
+`--terrain` opens the bundled 3D terrain style: OpenStreetMap imagery draped over the MapLibre
+demo elevation tiles around Innsbruck at pitch 70, the scene of the GL JS `3d-terrain` example,
+on the globe projection. As in GL JS the globe renders as Mercator from zoom 12 up, so the
+curvature appears when zooming out. Scrolling zooms around the terrain under the pointer, or
+around the center when the pointer is in the sky; dragging keeps the grabbed ground point under
+the cursor; the camera is kept above the terrain.
+Any style with a `terrain` root property and a `raster-dem` source renders the same way; the
+pitch limit follows `--max-pitch` (85 degrees for `--terrain`, 60 otherwise, as in GL JS).
+Hillshade layers are parsed but not drawn yet, and 256-pixel raster tiles render one zoom level
+softer than in GL JS because `tileSize` does not shift the request zoom.
 
 The web demo (`just web-lib build`, then `just web-demo start`) shows the MapLibre demotiles style
 on the globe by default. `?style=<url>` loads another style and `?projection=mercator` overrides

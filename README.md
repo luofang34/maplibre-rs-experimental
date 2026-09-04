@@ -109,6 +109,7 @@ Render the world on a globe instead of the flat default style
 
 ```bash
 cargo run -p maplibre-demo -- headed --globe
+cargo run -p maplibre-demo -- headed --terrain
 ```
 
 More information about running the demos on different platforms can be

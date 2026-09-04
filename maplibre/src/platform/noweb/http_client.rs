@@ -7,6 +7,12 @@ use reqwest_middleware::ClientWithMiddleware;
 
 use crate::io::source_client::{HttpClient, SourceFetchError};
 
+const USER_AGENT: &str = concat!(
+    "maplibre-rs/",
+    env!("CARGO_PKG_VERSION"),
+    " (+https://github.com/maplibre/maplibre-rs)"
+);
+
 #[derive(Clone)]
 pub struct ReqwestHttpClient {
     client: ClientWithMiddleware,
@@ -30,7 +36,15 @@ impl ReqwestHttpClient {
     where
         P: Into<PathBuf>,
     {
-        let mut builder = reqwest_middleware::ClientBuilder::new(Client::new());
+        // Public tile servers such as OpenStreetMap reject requests without a User-Agent.
+        let client = match Client::builder().user_agent(USER_AGENT).build() {
+            Ok(client) => client,
+            Err(error) => {
+                tracing::warn!(%error, "cannot build the HTTP client with a user agent");
+                Client::new()
+            }
+        };
+        let mut builder = reqwest_middleware::ClientBuilder::new(client);
 
         if let Some(cache_path) = cache_path {
             builder = builder.with(Cache(HttpCache {

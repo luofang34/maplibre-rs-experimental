@@ -16,6 +16,9 @@ mod headless;
 
 /// World-scale style rendered on the globe, bundled so the demo works without any arguments.
 const GLOBE_STYLE: &str = include_str!("../res/globe.json");
+const TERRAIN_STYLE: &str = include_str!("../res/terrain.json");
+/// Pitch limit of the terrain demo, matching the GL JS 3d-terrain example's `maxPitch`.
+const TERRAIN_MAX_PITCH_DEGREES: f64 = 85.0;
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -72,6 +75,12 @@ enum Commands {
         /// Use the bundled world style rendered on the globe.
         #[clap(long)]
         globe: bool,
+        /// Use the bundled 3D terrain style: OpenStreetMap imagery draped over elevation tiles.
+        #[clap(long, conflicts_with_all = ["globe", "style"])]
+        terrain: bool,
+        /// Largest camera pitch in degrees. Defaults to 60, or 85 with `--terrain`.
+        #[clap(long)]
+        max_pitch: Option<f64>,
         /// Override the projection declared by the style.
         #[clap(long, value_enum)]
         projection: Option<ProjectionArg>,
@@ -96,22 +105,31 @@ enum Commands {
     },
 }
 
+/// Which bundled style a run starts from when no style path is given.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BundledStyle {
+    Default,
+    Globe,
+    Terrain,
+}
+
 fn load_style(
     path: Option<&PathBuf>,
-    globe: bool,
+    bundled: BundledStyle,
     projection: Option<ProjectionArg>,
 ) -> Result<Style, Box<dyn std::error::Error>> {
-    let mut style = match (path, globe) {
+    let mut style = match (path, bundled) {
         (Some(path), _) => {
             let json = std::fs::read_to_string(path)
                 .map_err(|error| format!("cannot read style {}: {error}", path.display()))?;
             serde_json::from_str::<Style>(&json)
                 .map_err(|error| format!("cannot parse style {}: {error}", path.display()))?
         }
-        (None, true) => serde_json::from_str::<Style>(GLOBE_STYLE)?,
-        (None, false) => Style::default(),
+        (None, BundledStyle::Globe) => serde_json::from_str::<Style>(GLOBE_STYLE)?,
+        (None, BundledStyle::Terrain) => serde_json::from_str::<Style>(TERRAIN_STYLE)?,
+        (None, BundledStyle::Default) => Style::default(),
     };
-    if path.is_some() || globe {
+    if path.is_some() || bundled != BundledStyle::Default {
         // Layer order becomes render order; index 0 is reserved for the depth clear.
         for (index, layer) in style.layers.iter_mut().enumerate() {
             layer.index = index as u32 + 1;
@@ -145,10 +163,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Headed {
             style,
             globe,
+            terrain,
+            max_pitch,
             projection,
             frames,
         } => {
-            let style = load_style(style.as_ref(), *globe, *projection)?;
+            let bundled = if *terrain {
+                BundledStyle::Terrain
+            } else if *globe {
+                BundledStyle::Globe
+            } else {
+                BundledStyle::Default
+            };
+            let style = load_style(style.as_ref(), bundled, *projection)?;
+            let default_max_pitch = if *terrain {
+                TERRAIN_MAX_PITCH_DEGREES
+            } else {
+                HeadedMapOptions::default().max_pitch_degrees
+            };
             run_headed_map(
                 Some(PathBuf::from("./maplibre-cache".to_string())),
                 WinitMapWindowConfig::new("maplibre".to_string()),
@@ -159,7 +191,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 style,
                 HeadedMapOptions {
                     max_frames: *frames,
-                    ..HeadedMapOptions::default()
+                    max_pitch_degrees: max_pitch.unwrap_or(default_max_pitch),
                 },
             );
         }
