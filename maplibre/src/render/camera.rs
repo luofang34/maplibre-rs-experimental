@@ -20,6 +20,20 @@ pub const FLIP_Y: Matrix4<f64> = Matrix4::new(
     0.0, 0.0, 0.0, 1.0,
 );
 
+/// Maps WebGPU depth `[0, 1]` to reversed-Z, so the near plane lands at 1 and the far plane at 0.
+///
+/// Float depth spacing then cancels the perspective divide, which keeps metre-scale geometry
+/// near the camera and terrain hundreds of kilometres away from fighting in one depth buffer.
+/// Depth-writing pipelines compare with `GreaterEqual` and the depth attachment clears to 0.
+/// CPU-side unprojection keeps the OpenGL-style matrices where the far plane sits at depth 1.
+#[rustfmt::skip]
+pub const REVERSED_Z: Matrix4<f64> = Matrix4::new(
+    1.0, 0.0, 0.0, 0.0,
+    0.0, 1.0, 0.0, 0.0,
+    0.0, 0.0, -1.0, 0.0,
+    0.0, 0.0, 1.0, 1.0,
+);
+
 #[derive(Debug, Clone, Copy)]
 pub struct ViewProjection(pub Matrix4<f64>);
 
@@ -284,3 +298,6 @@ impl Perspective {
         )
     }
 }
+
+#[cfg(test)]
+mod tests;

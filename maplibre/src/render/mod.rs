@@ -195,6 +195,7 @@ impl Renderer {
         )
         .await?;
 
+        let settings = settings.with_float_depth_if_supported(device.features());
         let surface = Surface::from_surface(surface, &adapter, window, &settings);
 
         match surface.head() {
@@ -240,6 +241,7 @@ impl Renderer {
         )
         .await?;
 
+        let settings = settings.with_float_depth_if_supported(device.features());
         let surface = Surface::from_image(&device, window, &settings);
 
         Ok(Self {

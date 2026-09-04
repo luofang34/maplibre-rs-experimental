@@ -171,3 +171,17 @@ fn invalid_options_return_typed_errors() {
         GlobeCameraError::InvalidFieldOfView { .. }
     ));
 }
+
+#[test]
+fn wgpu_view_projection_maps_near_to_one_and_far_to_zero() {
+    let camera = GlobeCameraState::new(options()).expect("default globe camera is valid");
+    let (near, far) = camera.depth_range();
+    let gpu = camera.wgpu_view_projection() * camera.view().invert().expect("view is invertible");
+    let depth_of = |view_z: f64| {
+        let clip = gpu * cgmath::Vector4::new(0.0, 0.0, view_z, 1.0);
+        clip.z / clip.w
+    };
+
+    assert!((depth_of(-near) - 1.0).abs() < 1e-9);
+    assert!(depth_of(-far).abs() < 1e-9);
+}

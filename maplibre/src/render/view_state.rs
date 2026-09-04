@@ -9,7 +9,7 @@ use crate::{
     coords::{ViewRegion, WorldCoords, Zoom, ZoomLevel},
     render::camera::{
         Camera, EdgeInsets, InvertedViewProjection, Perspective, ViewProjection, FLIP_Y,
-        OPENGL_TO_WGPU_MATRIX,
+        OPENGL_TO_WGPU_MATRIX, REVERSED_Z,
     },
     util::{
         math::{bounds_from_points, Aabb2, Aabb3, Plane},
@@ -202,6 +202,13 @@ impl ViewState {
         let view_projection = perspective * camera_matrix;
 
         ViewProjection(FLIP_Y * OPENGL_TO_WGPU_MATRIX * view_projection)
+    }
+
+    /// Returns the view projection in GPU clip conventions, which adds reversed-Z depth.
+    ///
+    /// CPU unprojection keeps [`Self::view_projection`], whose far plane sits at depth one.
+    pub fn gpu_view_projection(&self) -> ViewProjection {
+        ViewProjection(REVERSED_Z * self.view_projection().0)
     }
 
     pub fn zoom(&self) -> Zoom {
@@ -528,5 +535,25 @@ mod tests {
         //state.camera.set_yaw(Deg(-30.0));
 
         // TODO: verify far distance plane calculation
+    }
+
+    #[test]
+    fn gpu_view_projection_reverses_depth_only() {
+        let state = ViewState::new(
+            PhysicalSize::new(800, 600).unwrap(),
+            WorldCoords::at_ground(1024.0, 2048.0),
+            Zoom::new(10.0),
+            Deg(25.0),
+            Deg(60.0),
+        );
+        let point = Vector4::new(1000.0, 2100.0, 0.0, 1.0);
+
+        let cpu = state.view_projection().project(point);
+        let gpu = state.gpu_view_projection().project(point);
+
+        assert!((cpu.x - gpu.x).abs() < 1e-9);
+        assert!((cpu.y - gpu.y).abs() < 1e-9);
+        assert!((cpu.w - gpu.w).abs() < 1e-9);
+        assert!((gpu.z / gpu.w - (1.0 - cpu.z / cpu.w)).abs() < 1e-9);
     }
 }

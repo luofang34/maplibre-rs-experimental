@@ -19,6 +19,8 @@ pub struct TilePipeline {
     msaa: bool,
     raster: bool,
     glyph_rendering: bool,
+    /// Writes and tests depth with the reversed-Z convention instead of painter's order.
+    depth_write: bool,
     settings: RendererSettings,
 
     vertex_state: VertexState,
@@ -48,10 +50,17 @@ impl TilePipeline {
             msaa: multisampling,
             raster,
             glyph_rendering,
+            depth_write: false,
             settings,
             vertex_state,
             fragment_state,
         }
+    }
+
+    /// Enables depth writes for 3D geometry such as terrain; painter's order no longer applies.
+    pub fn with_depth_write(mut self) -> Self {
+        self.depth_write = true;
+        self
     }
 }
 
@@ -142,10 +151,15 @@ impl RenderPipeline for TilePipeline {
             } else {
                 Some(wgpu::DepthStencilState {
                     format: self.settings.depth_texture_format,
-                    // Depth writes disabled: layers use painter's algorithm (draw order),
-                    // matching MapLibre GL behavior. Stencil handles tile masking.
-                    depth_write_enabled: false,
-                    depth_compare: wgpu::CompareFunction::Always,
+                    // Layers use painter's algorithm (draw order), matching MapLibre GL
+                    // behavior, and stencil handles tile masking. Only 3D geometry writes
+                    // depth, using reversed-Z where nearer fragments have greater depth.
+                    depth_write_enabled: self.depth_write,
+                    depth_compare: if self.depth_write {
+                        wgpu::CompareFunction::GreaterEqual
+                    } else {
+                        wgpu::CompareFunction::Always
+                    },
                     stencil: wgpu::StencilState {
                         front: stencil_state,
                         back: stencil_state,

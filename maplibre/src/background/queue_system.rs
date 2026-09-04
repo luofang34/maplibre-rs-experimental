@@ -115,7 +115,7 @@ pub fn queue_system(
             });
         let coords = crate::coords::WorldTileCoords::default();
         let transform = view_state
-            .view_projection()
+            .gpu_view_projection()
             .to_model_view_projection(coords.transform_for_zoom(view_state.zoom()))
             .downcast()
             .into();

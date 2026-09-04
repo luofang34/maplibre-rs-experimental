@@ -15,6 +15,7 @@ const PROJECTION_PI: f32 = 3.141592653589793;
 const PROJECTION_TWO_PI: f32 = 6.283185307179586;
 const GLOBE_Z_CLIPPING_START: f32 = 0.2;
 const POLE_TRANSITION_START: f32 = 0.98;
+const GLOBE_RADIUS_METERS: f32 = 6371008.8;
 
 fn tile_position_on_unit_sphere(
     tile_position: vec2<f32>,
@@ -148,4 +149,22 @@ fn project_tile_mesh_position(
         interpolate_clip_position(mercator_clip, globe_clip, transition),
         horizon_distance,
     );
+}
+
+// Projects a tile position with elevation in metres while keeping the clip-space depth of the
+// active projection, so 3D geometry such as terrain can write and test depth. The 2D variants
+// replace depth with the globe clipping value instead.
+fn project_tile_position_3d(
+    tile_position: vec3<f32>,
+    fallback_matrix: mat4x4<f32>,
+    tile_mercator_coords: vec4<f32>,
+) -> ProjectedTilePosition {
+    let transition = projection.transition_and_padding.x;
+    let surface = tile_position_on_unit_sphere(tile_position.xy, tile_mercator_coords);
+    let elevated = surface * (1.0 + tile_position.z / GLOBE_RADIUS_METERS);
+    let mercator_clip = fallback_matrix * vec4<f32>(tile_position, 1.0);
+    let globe_clip = projection.main_matrix * vec4<f32>(elevated, 1.0);
+    let is_pole = tile_position.y < -32767.5 || tile_position.y > 32766.5;
+    let horizon_distance = globe_horizon_distance(surface, transition, is_pole);
+    return ProjectedTilePosition(mix(mercator_clip, globe_clip, transition), horizon_distance);
 }

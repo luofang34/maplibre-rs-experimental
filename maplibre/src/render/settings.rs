@@ -111,6 +111,19 @@ pub struct RendererSettings {
     pub present_mode: PresentMode,
 }
 
+impl RendererSettings {
+    /// Selects 32-bit float depth when the device offers it.
+    ///
+    /// Reversed-Z only recovers precision on a float depth buffer; the 24-bit fallback keeps
+    /// rendering correct but leaves depth precision at fixed-point levels.
+    pub fn with_float_depth_if_supported(mut self, features: Features) -> Self {
+        if features.contains(Features::DEPTH32FLOAT_STENCIL8) {
+            self.depth_texture_format = TextureFormat::Depth32FloatStencil8;
+        }
+        self
+    }
+}
+
 impl Default for RendererSettings {
     fn default() -> Self {
         Self {

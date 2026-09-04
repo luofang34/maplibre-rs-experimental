@@ -30,7 +30,7 @@ pub fn upload_system(
         return Err(SystemError::Dependencies);
     };
 
-    let view_proj = view_state.view_projection();
+    let view_proj = view_state.gpu_view_projection();
     tile_view_pattern.upload_pattern(
         queue,
         &view_proj,

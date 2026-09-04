@@ -16,7 +16,7 @@ use crate::{
         globe::globe_radius_pixels,
         renderer_data::{compute_globe_clipping_plane, GlobeViewGeometry, ProjectionDataError},
     },
-    render::camera::OPENGL_TO_WGPU_MATRIX,
+    render::camera::{OPENGL_TO_WGPU_MATRIX, REVERSED_Z},
 };
 
 const NEAR_Z: f64 = 0.5;
@@ -185,9 +185,9 @@ impl GlobeCameraState {
         self.view_projection
     }
 
-    /// Returns the matrix converted to WebGPU clip-space conventions.
+    /// Returns the matrix in GPU clip conventions: WebGPU depth range with reversed-Z.
     pub fn wgpu_view_projection(&self) -> Matrix4<f64> {
-        OPENGL_TO_WGPU_MATRIX * self.view_projection
+        REVERSED_Z * OPENGL_TO_WGPU_MATRIX * self.view_projection
     }
 
     /// Returns the inverse OpenGL-convention globe view-projection matrix.
