@@ -13,6 +13,7 @@ use crate::{
     render::{resource::Texture, settings::Msaa},
     terrain::{
         dem::DemTile,
+        drape_cache::DrapeCache,
         mesh::{create_terrain_mesh, TERRAIN_MESH_SIZE},
     },
 };
@@ -72,7 +73,7 @@ pub struct TerrainResources {
     uniform_buffer: wgpu::Buffer,
     dem_textures: HashMap<WorldTileCoords, (Texture, u32)>,
     empty_dem: Texture,
-    drape_textures: HashMap<WorldTileCoords, Texture>,
+    drapes: DrapeCache<Texture>,
     drape_scratch: Option<DrapeScratch>,
     draws: Vec<TerrainDraw>,
     msaa: Msaa,
@@ -178,7 +179,7 @@ impl TerrainResources {
             uniform_buffer,
             dem_textures: HashMap::new(),
             empty_dem,
-            drape_textures: HashMap::new(),
+            drapes: DrapeCache::default(),
             drape_scratch: None,
             draws: Vec::new(),
             msaa,
@@ -274,32 +275,35 @@ impl TerrainResources {
             .map_or(&self.empty_dem, |(texture, _)| texture)
     }
 
-    /// Creates the drape texture of a view tile if it does not exist yet.
-    pub fn ensure_drape_texture(&mut self, device: &wgpu::Device, coords: WorldTileCoords) {
-        if self.drape_textures.contains_key(&coords) {
-            return;
-        }
-        let texture = Texture::new(
-            Some("drape texture"),
-            device,
-            self.color_format,
-            DRAPE_SIZE,
-            DRAPE_SIZE,
-            Msaa { samples: 1 },
-            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-        );
-        self.drape_textures.insert(coords, texture);
+    /// Gives a view tile a drape texture and reports whether it must be redrawn this frame.
+    pub fn acquire_drape(
+        &mut self,
+        device: &wgpu::Device,
+        coords: WorldTileCoords,
+        fingerprint: u64,
+    ) -> bool {
+        let format = self.color_format;
+        self.drapes.acquire(coords, fingerprint, || {
+            Texture::new(
+                Some("drape texture"),
+                device,
+                format,
+                DRAPE_SIZE,
+                DRAPE_SIZE,
+                Msaa { samples: 1 },
+                wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            )
+        })
     }
 
-    /// Drops drape textures of tiles that left the view.
-    pub fn retain_drape_textures(&mut self, keep: &HashSet<WorldTileCoords>) {
-        self.drape_textures
-            .retain(|coords, _| keep.contains(coords));
+    /// Releases the drape textures of tiles that left the view for reuse.
+    pub fn retain_drapes(&mut self, keep: &HashSet<WorldTileCoords>) {
+        self.drapes.retain(keep);
     }
 
     /// Drape texture of a view tile.
     pub fn drape_texture(&self, coords: WorldTileCoords) -> Option<&Texture> {
-        self.drape_textures.get(&coords)
+        self.drapes.get(coords)
     }
 
     /// Creates the scratch attachments used by every drape pass.

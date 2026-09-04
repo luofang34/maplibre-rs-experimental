@@ -15,9 +15,7 @@ use crate::{
         render_commands::DrawMasks,
         render_phase::{Draw, DrawState, LayerItem, ProjectionBinding, RenderPhase, TileMaskItem},
         shaders::ShaderTileMetadata,
-        tile_view_pattern::{
-            HasTile, TileShape, ViewTileSources, WgpuTileViewPattern, DEFAULT_TILE_SIZE,
-        },
+        tile_view_pattern::{TileShape, WgpuTileViewPattern, DEFAULT_TILE_SIZE},
         view_state::ViewStatePadding,
         Renderer,
     },
@@ -28,6 +26,8 @@ use crate::{
         world::World,
     },
     terrain::{
+        drape_cache::{fingerprint, SourceRevisions},
+        drape_targets::{collect_layer_specs, is_drapeable, select_targets, TargetSpec},
         request_system::dem_tile_coords,
         resources::{
             TerrainDraw, TerrainResources, TerrainTileUniforms, DRAPE_SIZE, UNIFORM_STRIDE,
@@ -44,32 +44,9 @@ use crate::{
 
 /// Divisor of the tile circumference giving the skirt drop, as in GL JS `getSkirtLength`.
 const SKIRT_DIVISOR: f64 = 5.0;
-/// How many zoom levels below a target tile children are searched for source data.
-const CHILDREN_SEARCH_DEPTH: usize = 4;
-const DRAPEABLE_LAYER_TYPES: [&str; 3] = ["fill", "line", "raster"];
 
-/// Whether a style layer renders into drape textures rather than straight to the screen.
-pub fn is_drapeable(layer_type: &str) -> bool {
-    DRAPEABLE_LAYER_TYPES.contains(&layer_type)
-}
-
-struct VectorLayerSpec {
-    id: String,
-    index: u32,
-    is_line: bool,
-    coords: WorldTileCoords,
-}
-
-struct ShapeSpec {
-    source: WorldTileCoords,
-    vector_layers: Vec<VectorLayerSpec>,
-    raster_layers: Vec<(String, u32)>,
-}
-
-struct TargetSpec {
-    coords: WorldTileCoords,
-    shapes: Vec<ShapeSpec>,
-}
+/// Metadata slots of the shapes of one target, `None` where a shape gets no slot.
+type TargetSlots = Vec<Option<usize>>;
 
 pub fn queue_system(
     MapContext {
@@ -103,11 +80,34 @@ pub fn queue_system(
 
     let targets = select_targets(view_region.iter(), world);
     let specs = collect_layer_specs(targets, style, world, zoom.value());
+    let revisions = source_revisions(world);
+    let clear_color = background_clear_color(style);
     let capacity = match world.resources.get::<Eventually<WgpuTileViewPattern>>() {
         Some(Initialized(pattern)) => pattern.remaining_metadata_capacity(),
         _ => return Err(SystemError::Dependencies),
     };
-    let (metadata, slots) = drape_metadata(&specs, capacity);
+
+    // Textures whose fingerprint is unchanged keep their content; only the rest are redrawn.
+    let redraw: Vec<bool> = {
+        let Some(Initialized(terrain)) = world.resources.get_mut::<Eventually<TerrainResources>>()
+        else {
+            return Err(SystemError::Dependencies);
+        };
+        terrain.ensure_scratch(device);
+        let keep: HashSet<WorldTileCoords> = specs.iter().map(|spec| spec.coords).collect();
+        terrain.retain_drapes(&keep);
+        specs
+            .iter()
+            .map(|spec| {
+                terrain.acquire_drape(
+                    device,
+                    spec.coords,
+                    fingerprint(spec, revisions, clear_color),
+                )
+            })
+            .collect()
+    };
+    let (metadata, slots) = drape_metadata(&specs, &redraw, capacity);
     let ranges = {
         let Some(Initialized(pattern)) =
             world.resources.get_mut::<Eventually<WgpuTileViewPattern>>()
@@ -121,7 +121,7 @@ pub fn queue_system(
                 SystemError::Setup
             })?
     };
-    let phase = build_drape_phase(specs, &slots, &ranges, zoom, background_clear_color(style));
+    let phase = build_drape_phase(&specs, &redraw, &slots, &ranges, zoom, clear_color);
 
     let gpu_view_projection = view_state.gpu_view_projection();
     let skirt_length = 2.0 * std::f64::consts::PI * EARTH_RADIUS_METERS
@@ -132,32 +132,29 @@ pub fn queue_system(
         else {
             return Err(SystemError::Dependencies);
         };
-        terrain.ensure_scratch(device);
-        let keep: HashSet<WorldTileCoords> = phase.targets.iter().map(|t| t.coords).collect();
-        terrain.retain_drape_textures(&keep);
-        let mut uniforms = Vec::with_capacity(phase.targets.len());
-        let mut sources = Vec::with_capacity(phase.targets.len());
-        for target in &phase.targets {
-            terrain.ensure_drape_texture(device, target.coords);
-            let dem_coords = loaded_dem_tile(target.coords, &dem, terrain);
+        let mut uniforms = Vec::with_capacity(specs.len());
+        let mut sources = Vec::with_capacity(specs.len());
+        for spec in &specs {
+            let dem_coords = loaded_dem_tile(spec.coords, &dem, terrain);
             let Some(block) = tile_uniforms(
-                target.coords,
+                spec.coords,
                 dem_coords,
                 terrain,
                 &dem,
                 &gpu_view_projection
-                    .to_model_view_projection(target.coords.transform_for_zoom(zoom))
+                    .to_model_view_projection(spec.coords.transform_for_zoom(zoom))
                     .downcast(),
                 skirt_length as f32,
             ) else {
                 continue;
             };
             uniforms.push(block);
-            sources.push((dem_coords, target.coords));
+            sources.push((dem_coords, spec.coords));
         }
         let written = terrain.write_uniforms(queue, &uniforms);
         tracing::debug!(
-            targets = phase.targets.len(),
+            targets = specs.len(),
+            redrawn = phase.targets.len(),
             masks = phase.targets.iter().map(|t| t.masks.len()).sum::<usize>(),
             layers = phase.targets.iter().map(|t| t.layers.len()).sum::<usize>(),
             metadata = metadata.len(),
@@ -208,117 +205,52 @@ pub fn queue_system(
     Ok(())
 }
 
-/// Pairs every view tile with the source tiles that hold its data, without the screen path's
-/// parent de-duplication: each drape texture needs its own copy of an ancestor's content.
-fn select_targets(
-    coords: impl Iterator<Item = WorldTileCoords>,
-    world: &World,
-) -> Vec<(WorldTileCoords, Vec<WorldTileCoords>)> {
-    let Some(sources) = world.resources.get::<ViewTileSources>() else {
-        return Vec::new();
-    };
-    coords
-        .filter(|coords| coords.build_quad_key().is_some())
-        .map(|coords| {
-            let shapes = if sources.has_tile(coords, world) {
-                vec![coords]
-            } else if let Some(parent) = sources.get_available_parent(coords, world) {
-                vec![parent]
-            } else {
-                sources
-                    .get_available_children(coords, world, CHILDREN_SEARCH_DEPTH)
-                    .unwrap_or_default()
-            };
-            (coords, shapes)
-        })
-        .collect()
+/// Revisions of the sources drawn into drape textures.
+fn source_revisions(world: &World) -> SourceRevisions {
+    SourceRevisions {
+        raster: match world.resources.get::<Eventually<RasterResources>>() {
+            Some(Initialized(resources)) => resources.revision(),
+            _ => 0,
+        },
+        vector: match world.resources.get::<Eventually<VectorBufferPool>>() {
+            Some(Initialized(pool)) => pool.revision(),
+            _ => 0,
+        },
+    }
 }
 
-fn collect_layer_specs(
-    targets: Vec<(WorldTileCoords, Vec<WorldTileCoords>)>,
-    style: &Style,
-    world: &World,
-    zoom: f64,
-) -> Vec<TargetSpec> {
-    let vector = world.resources.get::<Eventually<VectorBufferPool>>();
-    let raster = world.resources.get::<Eventually<RasterResources>>();
-    let raster_layers: Vec<(String, u32)> = style
-        .layers
-        .iter()
-        .filter(|layer| layer.type_ == "raster" && layer.is_visible_at(zoom))
-        .map(|layer| (layer.id.clone(), layer.index))
-        .collect();
-    targets
-        .into_iter()
-        .map(|(coords, shapes)| TargetSpec {
-            coords,
-            shapes: shapes
-                .into_iter()
-                .map(|source| {
-                    let vector_layers = match vector {
-                        Some(Initialized(pool)) => pool
-                            .index()
-                            .get_layers(source)
-                            .into_iter()
-                            .flatten()
-                            .filter(|entry| {
-                                entry.style_layer.is_visible_at(zoom)
-                                    && is_drapeable(&entry.style_layer.type_)
-                            })
-                            .map(|entry| VectorLayerSpec {
-                                id: entry.style_layer.id.clone(),
-                                index: entry.style_layer.index,
-                                is_line: entry.style_layer.type_ == "line",
-                                coords: entry.coords,
-                            })
-                            .collect(),
-                        _ => Vec::new(),
-                    };
-                    let has_raster = matches!(raster, Some(Initialized(resources))
-                        if resources.get_bound_texture(&source).is_some());
-                    ShapeSpec {
-                        source,
-                        vector_layers,
-                        raster_layers: if has_raster {
-                            raster_layers.clone()
-                        } else {
-                            Vec::new()
-                        },
-                    }
-                })
-                .collect(),
-        })
-        .collect()
-}
-
-/// Instance metadata placing each source shape inside its target's drape texture.
+/// Instance metadata placing each redrawn target's source shapes inside its drape texture.
 ///
 /// Shapes past `capacity` get no slot: a view falling back to many small child tiles can ask
 /// for more than the metadata buffer holds, and those shapes wait for their own tiles.
 fn drape_metadata(
     specs: &[TargetSpec],
+    redraw: &[bool],
     capacity: usize,
-) -> (Vec<ShaderTileMetadata>, Vec<Option<usize>>) {
+) -> (Vec<ShaderTileMetadata>, Vec<TargetSlots>) {
     let mut metadata = Vec::new();
-    let mut slots = Vec::new();
+    let mut slots = Vec::with_capacity(specs.len());
     let mut skipped = 0_usize;
-    for spec in specs {
+    for (spec, redraw) in specs.iter().zip(redraw) {
         let texture_zoom = Zoom::new(
             f64::from(u8::from(spec.coords.z)) + (f64::from(DRAPE_SIZE) / TILE_SIZE).log2(),
         );
+        let mut target_slots = Vec::with_capacity(spec.shapes.len());
         for shape in &spec.shapes {
-            let transform = drape_transform(spec.coords, shape.source)
+            let transform = redraw
+                .then(|| drape_transform(spec.coords, shape.source))
+                .flatten()
                 .and_then(|transform| transform.cast::<f32>());
             let Some(transform) = transform else {
-                slots.push(None);
+                target_slots.push(None);
                 continue;
             };
             if metadata.len() >= capacity {
-                slots.push(None);
+                target_slots.push(None);
                 skipped += 1;
                 continue;
             }
-            slots.push(Some(metadata.len()));
+            target_slots.push(Some(metadata.len()));
             metadata.push(ShaderTileMetadata {
                 transform: transform.into(),
                 zoom_factor: texture_zoom.scale_to_tile(&shape.source) as f32,
@@ -331,6 +263,7 @@ fn drape_metadata(
                 clip_antimeridian: 0,
             });
         }
+        slots.push(target_slots);
     }
     if skipped > 0 {
         tracing::warn!(
@@ -343,26 +276,26 @@ fn drape_metadata(
 }
 
 fn build_drape_phase(
-    specs: Vec<TargetSpec>,
-    slots: &[Option<usize>],
+    specs: &[TargetSpec],
+    redraw: &[bool],
+    slots: &[TargetSlots],
     ranges: &[std::ops::Range<wgpu::BufferAddress>],
     zoom: Zoom,
     clear_color: wgpu::Color,
 ) -> DrapePhase {
     let mut phase = DrapePhase::default();
-    let mut slot = slots.iter();
-    for spec in specs {
+    for ((spec, redraw), target_slots) in specs.iter().zip(redraw).zip(slots) {
+        if !redraw {
+            continue;
+        }
         let mut target = DrapeTarget {
             coords: spec.coords,
             clear_color,
             masks: Vec::new(),
             layers: Vec::new(),
         };
-        for shape in spec.shapes {
-            let Some(Some(index)) = slot.next() else {
-                continue;
-            };
-            let Some(range) = ranges.get(*index) else {
+        for (shape, slot) in spec.shapes.iter().zip(target_slots) {
+            let Some(range) = slot.and_then(|index| ranges.get(index)) else {
                 continue;
             };
             let source_shape = TileShape::with_buffer_range(shape.source, zoom, range.clone());
@@ -372,7 +305,7 @@ fn build_drape_phase(
                 generate_borders: false,
                 projection: ProjectionBinding::Flat,
             });
-            for layer in shape.vector_layers {
+            for layer in &shape.vector_layers {
                 let draw_function: Box<dyn Draw<LayerItem>> = if layer.is_line {
                     Box::new(DrawState::<LayerItem, DrawLineTiles>::new())
                 } else {
@@ -383,7 +316,7 @@ fn build_drape_phase(
                     index: layer.index,
                     is_line: layer.is_line,
                     generate_borders: false,
-                    style_layer: layer.id,
+                    style_layer: layer.id.clone(),
                     tile: Tile {
                         coords: layer.coords,
                     },
@@ -391,13 +324,13 @@ fn build_drape_phase(
                     projection: ProjectionBinding::Flat,
                 });
             }
-            for (id, index) in shape.raster_layers {
+            for (id, index) in &shape.raster_layers {
                 target.layers.push(LayerItem {
                     draw_function: Box::new(DrawState::<LayerItem, DrawRasterTiles>::new()),
-                    index,
+                    index: *index,
                     is_line: false,
                     generate_borders: false,
-                    style_layer: id,
+                    style_layer: id.clone(),
                     tile: Tile {
                         coords: shape.source,
                     },

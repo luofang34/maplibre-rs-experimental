@@ -16,6 +16,8 @@ pub struct RasterResources {
     msaa: Msaa,
     pipeline: wgpu::RenderPipeline,
     bound_textures: HashMap<WorldTileCoords, wgpu::BindGroup>,
+    /// Advances whenever a texture is bound, so cached renders of raster tiles can refresh.
+    revision: u64,
 }
 
 impl RasterResources {
@@ -34,7 +36,13 @@ impl RasterResources {
             msaa,
             pipeline,
             bound_textures: Default::default(),
+            revision: 0,
         }
+    }
+
+    /// Number of texture bindings so far; changes whenever a raster tile becomes drawable.
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
     pub fn create_texture(
@@ -60,6 +68,7 @@ impl RasterResources {
         coords: &WorldTileCoords,
         texture: Texture,
     ) {
+        self.revision = self.revision.wrapping_add(1);
         self.bound_textures.insert(
             *coords,
             device.create_bind_group(&wgpu::BindGroupDescriptor {

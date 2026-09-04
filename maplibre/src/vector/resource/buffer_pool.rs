@@ -38,6 +38,8 @@ pub struct BufferPool<Q, B, V, I, TM, FM> {
     feature_metadata: BackingBuffer<B>,
 
     index: RingIndex,
+    /// Advances whenever geometry is allocated or evicted, so cached renders can refresh.
+    revision: u64,
     phantom_v: PhantomData<V>,
     phantom_i: PhantomData<I>,
     phantom_q: PhantomData<Q>,
@@ -151,6 +153,7 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
                 BackingBufferType::FeatureMetadata,
             ),
             index: RingIndex::new(),
+            revision: 0,
             phantom_v: Default::default(),
             phantom_i: Default::default(),
             phantom_q: Default::default(),
@@ -214,6 +217,11 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         (bytes, aligned_bytes)
     }
 
+    /// Number of allocations so far; changes whenever the geometry held changes.
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
     pub fn get_loaded_style_layers_at(&self, coords: WorldTileCoords) -> Option<HashSet<&str>> {
         self.index.get_layers(coords).map(|layers| {
             layers
@@ -238,6 +246,7 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         layer_metadata: TM,
         feature_metadata: &[FM],
     ) {
+        self.revision = self.revision.wrapping_add(1);
         let vertices_stride = size_of::<V>() as wgpu::BufferAddress;
         let indices_stride = size_of::<I>() as wgpu::BufferAddress;
         let layer_metadata_stride = size_of::<TM>() as wgpu::BufferAddress;

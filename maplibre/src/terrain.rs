@@ -21,7 +21,9 @@ use crate::{
 pub mod backfill;
 pub mod coverage;
 pub mod dem;
+mod drape_cache;
 mod drape_pass;
+mod drape_targets;
 mod draw;
 pub mod elevation;
 pub mod interaction;
@@ -40,11 +42,11 @@ pub use backfill::backfill_neighbours;
 pub use coverage::{TerrainCoverageIndex, TerrainSample};
 pub use dem::{DemError, DemTile};
 use drape_pass::{DrapePassNode, DRAPE_PASS};
+pub use drape_targets::is_drapeable;
 pub use draw::draw_terrain;
 pub use elevation::elevation_at_world;
 pub use interaction::{GestureAnchor, TerrainHit};
 use populate_world_system::PopulateWorldSystem;
-pub use queue_system::is_drapeable;
 use request_system::RequestSystem;
 pub use request_system::{dem_ancestor_coords, dem_tile_coords, fetch_dem_apc};
 use resources::TerrainResources;
@@ -105,7 +107,7 @@ pub struct DrapeTarget {
 /// Drape targets of the current frame.
 #[derive(Default)]
 pub struct DrapePhase {
-    /// One entry per view tile with drape content.
+    /// One entry per view tile whose texture is redrawn this frame.
     pub targets: Vec<DrapeTarget>,
 }
 
