@@ -74,32 +74,47 @@ impl<B> BackingBuffer<B> {
     }
 }
 
+/// Bytes for `count` elements of `element` bytes, cut down to whole elements of the largest
+/// buffer the device creates; the pool is sized for desktop GPUs and a simulator allows less.
+fn fitting_buffer_size(
+    element: usize,
+    count: wgpu::BufferAddress,
+    largest: wgpu::BufferAddress,
+) -> wgpu::BufferAddress {
+    let element = element as wgpu::BufferAddress;
+    (element * count).min(largest) / element * element
+}
+
 impl<V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<wgpu::Queue, wgpu::Buffer, V, I, TM, FM> {
     pub fn from_device(device: &wgpu::Device) -> Self {
+        let largest = device.limits().max_buffer_size;
+        let fitting = |element: usize, count: wgpu::BufferAddress| {
+            fitting_buffer_size(element, count, largest)
+        };
         let vertex_buffer_desc = wgpu::BufferDescriptor {
             label: Some("vertex buffer"),
-            size: size_of::<V>() as wgpu::BufferAddress * VERTEX_SIZE,
+            size: fitting(size_of::<V>(), VERTEX_SIZE),
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         };
 
         let indices_buffer_desc = wgpu::BufferDescriptor {
             label: Some("indices buffer"),
-            size: size_of::<I>() as wgpu::BufferAddress * INDICES_SIZE,
+            size: fitting(size_of::<I>(), INDICES_SIZE),
             usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         };
 
         let feature_metadata_desc = wgpu::BufferDescriptor {
             label: Some("feature metadata buffer"),
-            size: size_of::<FM>() as wgpu::BufferAddress * FEATURE_METADATA_SIZE,
+            size: fitting(size_of::<FM>(), FEATURE_METADATA_SIZE),
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         };
 
         let layer_metadata_desc = wgpu::BufferDescriptor {
             label: Some("layer metadata buffer"),
-            size: size_of::<TM>() as wgpu::BufferAddress * LAYER_METADATA_SIZE,
+            size: fitting(size_of::<TM>(), LAYER_METADATA_SIZE),
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         };
@@ -602,6 +617,23 @@ impl Default for RingIndex {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_pool_larger_than_the_device_allows_keeps_whole_elements() {
+        assert_eq!(
+            super::fitting_buffer_size(48, 10_000_000, u64::MAX),
+            480_000_000
+        );
+        assert_eq!(
+            super::fitting_buffer_size(48, 10_000_000, 268_435_456),
+            268_435_440
+        );
+        assert_eq!(
+            super::fitting_buffer_size(48, 10_000_000, 268_435_440) % 48,
+            0
+        );
+        assert_eq!(super::fitting_buffer_size(4, 10, 100), 40);
+    }
+
     use lyon::tessellation::VertexBuffers;
 
     use std::collections::HashSet;
