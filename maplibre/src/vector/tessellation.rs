@@ -478,7 +478,7 @@ where
 mod tests;
 
 /// The typed value of a feature property, as an expression sees it.
-fn property_value(value: &ColumnValue) -> Option<Value> {
+pub(crate) fn property_value(value: &ColumnValue) -> Option<Value> {
     Some(match value {
         ColumnValue::Bool(flag) => Value::Bool(*flag),
         ColumnValue::Byte(number) => Value::Number(f64::from(*number)),

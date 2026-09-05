@@ -21,7 +21,7 @@ use crate::{
     style::{
         expression::{FeatureProperties, Value},
         filter::{FeatureContext, Filter, GeometryType},
-        layer::{LayerPaint, StyleLayer},
+        layer::{LayerPaint, StyleLayer, StyleProperty, TextField},
     },
     vector::{
         tessellation::{CircleOptions, IndexDataType, OverAlignedVertexBuffer, ZeroTessellator},
@@ -238,8 +238,9 @@ pub fn process_vector_tile<T: VectorTransferables, C: Context>(
                         let text_field = symbol_paint
                             .text_field
                             .clone()
-                            .unwrap_or_else(|| "name".to_string());
-                        let mut tessellator_new = TextTessellatorNew::new(text_field);
+                            .unwrap_or_else(|| StyleProperty::Constant(TextField::default()));
+                        let zoom = f64::from(u8::from(tile_request.coords.z));
+                        let mut tessellator_new = TextTessellatorNew::new(text_field, zoom);
                         tessellator_new.coordinate_scale = coordinate_scale;
 
                         if let Err(e) = layer.process(&mut tessellator_new) {

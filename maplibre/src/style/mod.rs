@@ -295,7 +295,7 @@ impl Default for Style {
                     minzoom: None,
                     metadata: None,
                     paint: Some(LayerPaint::Symbol(SymbolPaint {
-                        text_field: Some("name".to_string()),
+                        text_field: Some(StyleProperty::parse(&serde_json::json!("{name}"))),
                         text_size: None,
                     })),
                     source: None,
@@ -311,7 +311,7 @@ impl Default for Style {
                     minzoom: None,
                     metadata: None,
                     paint: Some(LayerPaint::Symbol(SymbolPaint {
-                        text_field: Some("name".to_string()),
+                        text_field: Some(StyleProperty::parse(&serde_json::json!("{name}"))),
                         text_size: None,
                     })),
                     source: None,

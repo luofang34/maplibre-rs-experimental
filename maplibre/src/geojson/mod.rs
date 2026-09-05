@@ -14,7 +14,7 @@ use crate::{
     style::{
         expression::Value,
         filter::{properties_from_json, FeatureContext, Filter, GeometryType},
-        layer::{LayerPaint, StyleLayer},
+        layer::{LayerPaint, StyleLayer, StyleProperty, TextField},
     },
     vector::{
         tessellation::{CircleOptions, IndexDataType, ZeroTessellator},
@@ -380,8 +380,9 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
                 let text_field = symbol_paint
                     .text_field
                     .clone()
-                    .unwrap_or_else(|| "name".to_string());
-                let tessellator_new = TextTessellatorNew::new(text_field);
+                    .unwrap_or_else(|| StyleProperty::Constant(TextField::default()));
+                let zoom = f64::from(u8::from(coords.z));
+                let tessellator_new = TextTessellatorNew::new(text_field, zoom);
                 let mut projecting = ProjectingTessellator::new(coords, tessellator_new);
 
                 let mut geojson_src = geozero::geojson::GeoJson(json_str.as_str());

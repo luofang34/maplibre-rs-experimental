@@ -15,8 +15,8 @@ use crate::{
     style::layer::StyleLayer,
     vector::{
         transferables::{
-            DefaultLayerIndexed, DefaultLayerMissing, DefaultLayerTessellated, LayerIndexed,
-            LayerMissing,
+            DefaultLayerIndexed, DefaultLayerMissing, DefaultLayerTessellated,
+            DefaultSymbolLayerTessellated, LayerIndexed, LayerMissing, SymbolLayerTessellated,
         },
         DefaultVectorTransferables, LayerTessellated,
     },
@@ -240,6 +240,150 @@ fn a_point_in_a_larger_extent_becomes_one_circle_quad_on_the_4096_grid() {
             vertex.normal,
             [4.0, 1.0],
             "radius and stroke width ride along"
+        );
+    }
+}
+
+/// One point at the tile centre named `FALLBACK` and labelled `V12`, so a label that reads
+/// the wrong property is told apart from one that reads the right property, with the
+/// altitude, course and distance a chart annotates.
+fn labelled_point_tile() -> Vec<u8> {
+    let string = |text: &str| tile::Value {
+        string_value: Some(text.to_string()),
+        ..Default::default()
+    };
+    let double = |number: f64| tile::Value {
+        double_value: Some(number),
+        ..Default::default()
+    };
+    let layer = tile::Layer {
+        version: 2,
+        name: "route_points".to_string(),
+        features: vec![tile::Feature {
+            id: Some(1),
+            tags: vec![0, 0, 1, 1, 2, 2, 3, 3, 4, 4],
+            r#type: Some(tile::GeomType::Point as i32),
+            geometry: vec![9, zigzag(2048), zigzag(2048)],
+        }],
+        keys: ["name", "label", "alt", "course", "dist"]
+            .map(str::to_string)
+            .to_vec(),
+        values: vec![
+            string("FALLBACK"),
+            string("V12"),
+            tile::Value {
+                int_value: Some(5000),
+                ..Default::default()
+            },
+            double(270.5),
+            double(12.34),
+        ],
+        extent: Some(4096),
+    };
+    Tile {
+        layers: vec![layer],
+    }
+    .encode_to_vec()
+}
+
+fn symbol_layer(layout: Option<serde_json::Value>) -> StyleLayer {
+    let mut layer = serde_json::json!({
+        "id": "label", "type": "symbol", "source": "chart", "source-layer": "route_points"
+    });
+    if let Some(layout) = layout {
+        layer["layout"] = layout;
+    }
+    serde_json::from_value(layer).expect("valid style layer")
+}
+
+/// The text of every label a symbol layer produced for the labelled point.
+fn label_texts(layout: Option<serde_json::Value>) -> Vec<String> {
+    process(&labelled_point_tile(), symbol_layer(layout))
+        .into_iter()
+        .filter(|message| message.has_tag(DefaultSymbolLayerTessellated::message_tag()))
+        .map(|message| *message.into_transferable::<DefaultSymbolLayerTessellated>())
+        .flat_map(|layer| layer.features.into_iter().map(|feature| feature.str))
+        .collect()
+}
+
+#[test]
+fn a_text_field_template_reads_the_named_property() {
+    assert_eq!(
+        label_texts(Some(serde_json::json!({"text-field": "{label}"}))),
+        ["V12"]
+    );
+}
+
+#[test]
+fn text_field_expressions_read_the_property_they_name() {
+    assert_eq!(
+        label_texts(Some(serde_json::json!({"text-field": ["get", "label"]}))),
+        ["V12"]
+    );
+    assert_eq!(
+        label_texts(Some(
+            serde_json::json!({"text-field": ["coalesce", ["get", "label"], ""]})
+        )),
+        ["V12"]
+    );
+}
+
+#[test]
+fn a_literal_text_field_labels_every_feature_with_the_literal() {
+    assert_eq!(
+        label_texts(Some(serde_json::json!({"text-field": "FIX"}))),
+        ["FIX"]
+    );
+}
+
+#[test]
+fn a_missing_property_or_absent_text_field_draws_no_label() {
+    assert!(label_texts(Some(serde_json::json!({"text-field": "{missing}"}))).is_empty());
+    assert!(label_texts(None).is_empty());
+}
+
+#[test]
+fn a_zoom_dependent_text_field_evaluates_at_the_tile_zoom() {
+    let layout = serde_json::json!({
+        "text-field": {"stops": [[2, "{name}"], [4, "{label}"]]}
+    });
+    assert_eq!(
+        label_texts(Some(layout)),
+        ["FALLBACK"],
+        "the tile is at zoom 0"
+    );
+}
+
+#[test]
+fn chart_annotation_expressions_read_text_and_numbers() {
+    for (text_field, expected) in [
+        (
+            serde_json::json!(["concat", ["get", "label"], " ", ["get", "alt"]]),
+            "V12 5000",
+        ),
+        (
+            serde_json::json!([
+                "case",
+                ["has", "course"],
+                ["concat", ["to-string", ["get", "course"]], " deg"],
+                "n/a"
+            ]),
+            "270.5 deg",
+        ),
+        (
+            serde_json::json!(["concat", ["get", "dist"], " nm"]),
+            "12.34 nm",
+        ),
+        (
+            serde_json::json!(["coalesce", ["get", "missing"], ["get", "label"]]),
+            "V12",
+        ),
+        (serde_json::json!(["to-string", ["get", "alt"]]), "5000"),
+    ] {
+        assert_eq!(
+            label_texts(Some(serde_json::json!({"text-field": text_field}))),
+            [expected],
+            "{text_field}"
         );
     }
 }

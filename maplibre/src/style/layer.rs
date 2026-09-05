@@ -14,7 +14,7 @@ use crate::style::{
     hillshade::{ColorReliefPaint, HillshadePaint},
 };
 
-pub use crate::style::property::{PropertyValue, StyleProperty};
+pub use crate::style::property::{PropertyValue, StyleProperty, TextField};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct BackgroundPaint {
@@ -153,9 +153,15 @@ impl Default for RasterPaint {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SymbolPaint {
+    /// Text of each symbol: a `{token}` template, a literal, or an expression; `None` draws
+    /// no text.
     #[serde(rename = "text-field")]
+    #[serde(
+        default,
+        deserialize_with = "StyleProperty::<TextField>::deserialize_or_none"
+    )]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub text_field: Option<String>,
+    pub text_field: Option<StyleProperty<TextField>>,
 
     #[serde(rename = "text-size")]
     #[serde(
@@ -167,35 +173,10 @@ pub struct SymbolPaint {
     // TODO a lot
 }
 
-/// Extract the property name from a text-field template string like "{NAME}" → "NAME".
-/// If no braces, returns the string as-is.
-fn extract_text_field_property(template: &str) -> String {
-    let trimmed = template.trim();
-    if trimmed.starts_with('{') && trimmed.ends_with('}') {
-        trimmed[1..trimmed.len() - 1].to_string()
-    } else {
-        trimmed.to_string()
-    }
-}
-
-/// Extract a text-field property name from a layout JSON value.
-/// Handles both:
-///   - `"text-field": "{NAME}"` (constant string)
-///   - `"text-field": {"stops": [[2, "{ABBREV}"], [4, "{NAME}"]]}` (zoom-dependent)
-fn parse_text_field_from_layout(layout: &serde_json::Value) -> Option<String> {
-    let tf = layout.get("text-field")?;
-    if let Some(s) = tf.as_str() {
-        return Some(extract_text_field_property(s));
-    }
-    // Zoom-dependent: use the last stop's value (highest zoom = most detailed)
-    if let Some(stops) = tf.get("stops").and_then(|v| v.as_array()) {
-        if let Some(last_stop) = stops.last() {
-            if let Some(s) = last_stop.get(1).and_then(|v| v.as_str()) {
-                return Some(extract_text_field_property(s));
-            }
-        }
-    }
-    None
+/// The `text-field` of a layout: a `{token}` template, a literal, a legacy function or an
+/// expression.
+fn parse_text_field_from_layout(layout: &serde_json::Value) -> Option<StyleProperty<TextField>> {
+    Some(StyleProperty::parse(layout.get("text-field")?))
 }
 
 /// The `text-size` of a layout: a constant, a legacy function or an expression.
@@ -678,10 +659,23 @@ mod tests {
         assert_eq!(layer.type_, "symbol");
         match &layer.paint {
             Some(LayerPaint::Symbol(sp)) => {
-                assert_eq!(sp.text_field.as_deref(), Some("NAME"));
+                assert_eq!(text_of(sp, 3.0).as_deref(), Some("Berlin"));
             }
             other => panic!("expected Symbol paint, got {:?}", other),
         }
+    }
+
+    /// The text a symbol paint produces for a feature named `Berlin` and abbreviated `BER`.
+    fn text_of(paint: &SymbolPaint, zoom: f64) -> Option<String> {
+        let properties = crate::style::expression::FeatureProperties::from([
+            ("NAME".to_string(), Value::String("Berlin".to_string())),
+            ("ABBREV".to_string(), Value::String("BER".to_string())),
+        ]);
+        paint
+            .text_field
+            .as_ref()?
+            .evaluate_for(&properties, zoom)
+            .map(|text| text.0)
     }
 
     #[test]
@@ -699,8 +693,8 @@ mod tests {
         let layer: StyleLayer = serde_json::from_str(json).unwrap();
         match &layer.paint {
             Some(LayerPaint::Symbol(sp)) => {
-                // Should pick the last stop (highest zoom) → NAME
-                assert_eq!(sp.text_field.as_deref(), Some("NAME"));
+                assert_eq!(text_of(sp, 3.0).as_deref(), Some("BER"));
+                assert_eq!(text_of(sp, 5.0).as_deref(), Some("Berlin"));
             }
             other => panic!("expected Symbol paint, got {:?}", other),
         }

@@ -103,10 +103,16 @@ impl<E: Environment, T: VectorTransferables> Plugin<E> for SdfPlugin<T> {
     }
 }
 
+/// One label of a symbol bucket.
 pub struct Feature {
+    /// Extent of the label in tile space.
     pub bbox: Box2D<f32, TileSpace>,
+    /// Positions in the bucket's index buffer that draw the label; empty when the layout does
+    /// not attribute quads to labels.
     pub indices: Range<usize>,
+    /// Where the label is anchored in tile space.
     pub text_anchor: Point2D<f32, TileSpace>,
+    /// The text of the label.
     pub str: String,
 }
 

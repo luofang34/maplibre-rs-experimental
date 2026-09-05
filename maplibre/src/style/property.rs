@@ -5,7 +5,8 @@ use std::sync::Arc;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::style::expression::{
-    EvaluationContext, Expression, FeatureProperties, LegacyPropertySpec, PropertyKind, Value,
+    convert_token_string, EvaluationContext, Expression, FeatureProperties, LegacyPropertySpec,
+    PropertyKind, Value,
 };
 
 /// A type a style property can hold, with the specification the expression engine needs to
@@ -137,6 +138,25 @@ impl PropertyValue for String {
     }
 }
 
+/// The text of a symbol: a `{token}` template, a literal, or an expression producing text.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct TextField(pub String);
+
+impl PropertyValue for TextField {
+    fn spec() -> LegacyPropertySpec {
+        LegacyPropertySpec {
+            kind: PropertyKind::String,
+            interpolated: false,
+            default: None,
+            tokens: true,
+        }
+    }
+
+    fn from_value(value: &Value) -> Option<Self> {
+        value.as_str().map(|text| Self(text.to_string()))
+    }
+}
+
 impl PropertyValue for csscolorparser::Color {
     fn spec() -> LegacyPropertySpec {
         LegacyPropertySpec::interpolated(PropertyKind::Color)
@@ -218,7 +238,13 @@ impl<T: PropertyValue> StyleProperty<T> {
         if let Some(constant) = T::from_literal(json) {
             return Self::Constant(constant);
         }
-        match Expression::parse_property(json, &T::spec()) {
+        let spec = T::spec();
+        // A `{token}` string reads feature properties, as GL JS lowers it before parsing.
+        let lowered = match json.as_str() {
+            Some(text) if spec.tokens => convert_token_string(text),
+            _ => json.clone(),
+        };
+        match Expression::parse_property(&lowered, &spec) {
             Ok(Expression::Literal(value)) | Ok(Expression::Folded { value, .. }) => {
                 match T::from_value(&value) {
                     Some(constant) => Self::Constant(constant),
@@ -226,7 +252,7 @@ impl<T: PropertyValue> StyleProperty<T> {
                         source: json.clone(),
                         error: format!(
                             "expected {}, found {}",
-                            T::spec().expected_type(),
+                            spec.expected_type(),
                             value.type_of()
                         ),
                     })),

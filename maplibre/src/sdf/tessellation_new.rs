@@ -34,6 +34,11 @@ use crate::{
     },
     render::shaders::ShaderSymbolVertexNew,
     sdf::{tessellation::IndexDataType, text::GlyphSet, Feature},
+    style::{
+        expression::FeatureProperties,
+        layer::{StyleProperty, TextField},
+    },
+    vector::tessellation::property_value,
 };
 
 type GeoResult<T> = geozero::error::Result<T>;
@@ -43,7 +48,9 @@ pub struct TextTessellatorNew {
     geo_writer: GeoWriter,
 
     // configuration
-    text_field: String,
+    text_field: StyleProperty<TextField>,
+    /// Zoom of the tile, at which zoom-driven text is evaluated.
+    zoom: f64,
 
     // output
     pub quad_buffer: VertexBuffers<ShaderSymbolVertexNew, IndexDataType>,
@@ -54,7 +61,7 @@ pub struct TextTessellatorNew {
 
     // iteration variables
     current_index: usize,
-    current_text: Option<String>,
+    feature_properties: FeatureProperties,
     current_origin: Option<Box2D<f32, TileSpace>>,
     current_point: Option<(f64, f64)>,
     /// Factor from the source layer's coordinate extent to the 4096 tile grid.
@@ -224,15 +231,40 @@ impl TextTessellatorNew {
         buffer.indices = triangles.indices.iter().map(|i| *i as u32).collect();
 
         self.quad_buffer = buffer;
+        // The layout does not attribute quads to features, so each label records only its
+        // text and anchor.
+        self.features = self
+            .collected_features
+            .iter()
+            .map(|(text, x, y)| {
+                let anchor = Point2D::new(*x as f32, *y as f32);
+                Feature {
+                    bbox: Box2D::new(anchor, anchor),
+                    indices: 0..0,
+                    text_anchor: anchor,
+                    str: text.clone(),
+                }
+            })
+            .collect();
     }
 }
 
 impl TextTessellatorNew {
-    pub fn new(text_field: String) -> Self {
+    /// A tessellator labelling features with `text_field` evaluated at the tile's `zoom`.
+    pub fn new(text_field: StyleProperty<TextField>, zoom: f64) -> Self {
         Self {
             text_field,
+            zoom,
             ..Default::default()
         }
+    }
+
+    /// The label of the feature whose properties were collected; empty text draws nothing.
+    fn current_text(&self) -> Option<String> {
+        self.text_field
+            .evaluate_for(&self.feature_properties, self.zoom)
+            .map(|text| text.0)
+            .filter(|text| !text.is_empty())
     }
 }
 
@@ -240,12 +272,13 @@ impl Default for TextTessellatorNew {
     fn default() -> Self {
         Self {
             geo_writer: Default::default(),
-            text_field: "name".to_string(),
+            text_field: StyleProperty::Constant(TextField::default()),
+            zoom: 0.0,
             quad_buffer: VertexBuffers::new(),
             features: vec![],
             collected_features: vec![],
             current_index: 0,
-            current_text: None,
+            feature_properties: FeatureProperties::default(),
             current_origin: None,
             current_point: None,
             coordinate_scale: 1.0,
@@ -301,15 +334,10 @@ impl PropertyProcessor for TextTessellatorNew {
         name: &str,
         value: &ColumnValue,
     ) -> geozero::error::Result<bool> {
-        if name == self.text_field {
-            match value {
-                ColumnValue::String(str) => {
-                    self.current_text = Some(str.to_string());
-                }
-                _ => {}
-            }
+        if let Some(value) = property_value(value) {
+            self.feature_properties.insert(name.to_string(), value);
         }
-        Ok(true)
+        Ok(false)
     }
 }
 
@@ -317,12 +345,11 @@ impl FeatureProcessor for TextTessellatorNew {
     fn feature_end(&mut self, _idx: u64) -> geozero::error::Result<()> {
         let geometry = self.geo_writer.take_geometry();
 
-        // Collect features that have both a name and a point geometry
-        if let (Some(text), Some((x, y))) = (self.current_text.take(), self.current_point.take()) {
+        // Only features with text and a point geometry become labels.
+        let text = self.current_text();
+        self.feature_properties.clear();
+        if let (Some(text), Some((x, y))) = (text, self.current_point.take()) {
             self.collected_features.push((text, x, y));
-        } else {
-            self.current_text = None;
-            self.current_point = None;
         }
 
         match geometry {

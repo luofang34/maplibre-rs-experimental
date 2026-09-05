@@ -20,7 +20,8 @@ pub use ast::{
 pub use evaluate::{EvaluationContext, EvaluationError, FeatureProperties};
 pub use interpolation::{interpolate_number, ColorSpace, Interpolation};
 pub use legacy::{
-    convert_filter, convert_function, is_expression_filter, LegacyPropertySpec, PropertyKind,
+    convert_filter, convert_function, convert_token_string, is_expression_filter,
+    LegacyPropertySpec, PropertyKind,
 };
 pub use parse::{is_expression, ParseError};
 pub use value::{js_number, Color, Type, Value};
