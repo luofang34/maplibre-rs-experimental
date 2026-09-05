@@ -10,6 +10,8 @@ use geozero::{
 };
 use thiserror::Error;
 
+use serde_json::Value;
+
 use crate::{
     coords::{WorldTileCoords, EXTENT},
     io::{
@@ -22,7 +24,10 @@ use crate::{
         ShaderVertex,
     },
     sdf::{tessellation::TextTessellator, tessellation_new::TextTessellatorNew, Feature},
-    style::layer::{LayerPaint, StyleLayer},
+    style::{
+        filter::{FeatureContext, Filter, GeometryType},
+        layer::{LayerPaint, StyleLayer},
+    },
     vector::{
         tessellation::{IndexDataType, OverAlignedVertexBuffer, ZeroTessellator},
         transferables::{
@@ -58,124 +63,59 @@ pub struct VectorTileRequest {
     pub projection: ProjectionType,
 }
 
-/// Resolve the properties of an MVT feature into a HashMap of string key-value pairs,
-/// using the layer's keys/values dictionaries.
-fn resolve_feature_properties(
-    layer: &tile::Layer,
-    feature: &tile::Feature,
-) -> HashMap<String, String> {
-    let mut props = HashMap::new();
+/// Reads an MVT feature's tags into typed filter values through the layer's key and value
+/// tables.
+fn feature_properties(layer: &tile::Layer, feature: &tile::Feature) -> HashMap<String, Value> {
+    let mut properties = HashMap::new();
     for pair in feature.tags.chunks(2) {
-        let [key_idx, value_idx] = [pair[0], pair[1]];
-        let Some(key) = layer.keys.get(key_idx as usize) else {
+        let [key_index, value_index] = pair else {
             continue;
         };
-        let Some(value) = layer.values.get(value_idx as usize) else {
+        let (Some(key), Some(value)) = (
+            layer.keys.get(*key_index as usize),
+            layer.values.get(*value_index as usize),
+        ) else {
             continue;
         };
-        let val_str = if let Some(ref v) = value.string_value {
-            v.clone()
-        } else if let Some(v) = value.float_value {
-            v.to_string()
-        } else if let Some(v) = value.double_value {
-            v.to_string()
-        } else if let Some(v) = value.int_value {
-            v.to_string()
-        } else if let Some(v) = value.uint_value {
-            v.to_string()
-        } else if let Some(v) = value.sint_value {
-            v.to_string()
-        } else if let Some(v) = value.bool_value {
-            v.to_string()
+        let value = if let Some(text) = &value.string_value {
+            Value::String(text.clone())
+        } else if let Some(number) = value.float_value {
+            Value::from(number)
+        } else if let Some(number) = value.double_value {
+            Value::from(number)
+        } else if let Some(number) = value.int_value {
+            Value::from(number)
+        } else if let Some(number) = value.uint_value {
+            Value::from(number)
+        } else if let Some(number) = value.sint_value {
+            Value::from(number)
+        } else if let Some(flag) = value.bool_value {
+            Value::Bool(flag)
         } else {
             continue;
         };
-        props.insert(key.clone(), val_str);
+        properties.insert(key.clone(), value);
     }
-    props
+    properties
 }
 
-/// Evaluate a MapLibre GL JS legacy filter expression against feature properties.
-/// Supports: ["all", ...], ["any", ...], ["==", key, val], ["!=", key, val],
-/// ["has", key], ["!has", key], ["in", key, v1, v2, ...], ["!in", key, v1, v2, ...]
-fn evaluate_filter(filter: &serde_json::Value, props: &HashMap<String, String>) -> bool {
-    let Some(arr) = filter.as_array() else {
-        return true; // non-array filter passes everything
-    };
-    let Some(op) = arr.first().and_then(|v| v.as_str()) else {
-        return true;
-    };
-    match op {
-        "all" => arr[1..].iter().all(|f| evaluate_filter(f, props)),
-        "any" => arr[1..].iter().any(|f| evaluate_filter(f, props)),
-        "none" => !arr[1..].iter().any(|f| evaluate_filter(f, props)),
-        "==" if arr.len() >= 3 => {
-            let key = arr[1].as_str().unwrap_or("");
-            let expected = arr[2].as_str().map(|s| s.to_string()).unwrap_or_else(|| {
-                // Handle numeric comparisons
-                arr[2].as_f64().map(|n| n.to_string()).unwrap_or_default()
-            });
-            props.get(key).map(|v| v == &expected).unwrap_or(false)
-        }
-        "!=" if arr.len() >= 3 => {
-            let key = arr[1].as_str().unwrap_or("");
-            let expected = arr[2]
-                .as_str()
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| arr[2].as_f64().map(|n| n.to_string()).unwrap_or_default());
-            props.get(key).map(|v| v != &expected).unwrap_or(true)
-        }
-        "has" if arr.len() >= 2 => {
-            let key = arr[1].as_str().unwrap_or("");
-            props.contains_key(key)
-        }
-        "!has" if arr.len() >= 2 => {
-            let key = arr[1].as_str().unwrap_or("");
-            !props.contains_key(key)
-        }
-        "in" if arr.len() >= 3 => {
-            let key = arr[1].as_str().unwrap_or("");
-            let Some(val) = props.get(key) else {
-                return false;
-            };
-            arr[2..]
-                .iter()
-                .any(|v| v.as_str().map(|s| s == val).unwrap_or(false))
-        }
-        "!in" if arr.len() >= 3 => {
-            let key = arr[1].as_str().unwrap_or("");
-            let Some(val) = props.get(key) else {
-                return true;
-            };
-            !arr[2..]
-                .iter()
-                .any(|v| v.as_str().map(|s| s == val).unwrap_or(false))
-        }
-        _ => {
-            log::warn!("unsupported filter operator: {op}");
-            true
-        }
-    }
-}
-
-/// Filter an MVT layer's features in-place according to a style filter expression.
-fn apply_filter_to_layer(layer: &mut tile::Layer, filter: &serde_json::Value) {
-    // Collect which features pass the filter (can't borrow layer immutably
-    // inside retain because retain borrows features mutably).
+/// Keeps only the features of an MVT layer that pass the filter.
+fn apply_filter_to_layer(layer: &mut tile::Layer, filter: &Filter, zoom: f64) {
     let keep: Vec<bool> = layer
         .features
         .iter()
         .map(|feature| {
-            let props = resolve_feature_properties(layer, feature);
-            evaluate_filter(filter, &props)
+            let properties = feature_properties(layer, feature);
+            filter.evaluate(&FeatureContext {
+                properties: &properties,
+                geometry_type: GeometryType::from_mvt(feature.r#type.unwrap_or_default()),
+                id: feature.id.map(Value::from),
+                zoom,
+            })
         })
         .collect();
-    let mut idx = 0;
-    layer.features.retain(|_| {
-        let pass = keep[idx];
-        idx += 1;
-        pass
-    });
+    let mut keep = keep.into_iter();
+    layer.features.retain(|_| keep.next().unwrap_or(false));
 }
 
 pub fn process_vector_tile<T: VectorTransferables, C: Context>(
@@ -201,9 +141,25 @@ pub fn process_vector_tile<T: VectorTransferables, C: Context>(
                 // that reference the same source layer.
                 let mut filtered_layer = layer.clone();
 
-                // Apply style filter to exclude non-matching features
                 if let Some(filter) = &style_layer.filter {
-                    apply_filter_to_layer(&mut filtered_layer, filter);
+                    match Filter::parse(filter) {
+                        Ok(filter) => apply_filter_to_layer(
+                            &mut filtered_layer,
+                            &filter,
+                            f64::from(u8::from(coords.z)),
+                        ),
+                        Err(error) => {
+                            // Rendering every feature or none would both be wrong; nothing
+                            // plus a loud error is the one a style author can act on.
+                            tracing::error!(
+                                layer = %id,
+                                %error,
+                                "unsupported filter; the layer renders nothing"
+                            );
+                            context.layer_missing(coords, source_layer)?;
+                            continue;
+                        }
+                    }
                 }
 
                 let original_layer = filtered_layer.clone();

@@ -69,6 +69,7 @@ where
         renderer_builder: RendererBuilder,
         plugins: Vec<Box<dyn Plugin<E>>>,
     ) -> Result<Self, MapError> {
+        style.log_validation_errors();
         let schedule = Schedule::default();
 
         let window = kernel.map_window_config().create()?;

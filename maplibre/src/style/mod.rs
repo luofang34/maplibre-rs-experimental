@@ -24,11 +24,13 @@ pub use cint::*;
 use csscolorparser::Color;
 use serde::{Deserialize, Serialize};
 
+pub mod filter;
 pub mod layer;
 pub mod light;
 pub mod sky;
 pub mod source;
 pub mod terrain;
+pub mod validation;
 
 use crate::{
     projection::ProjectionSpecification,
@@ -40,6 +42,9 @@ use crate::{
         source::Source,
     },
 };
+
+pub mod filter;
+pub mod validation;
 
 /// Stores the style for a multi-layered map.
 #[derive(Serialize, Deserialize, Debug, Clone)]

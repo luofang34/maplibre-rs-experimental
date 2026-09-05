@@ -83,6 +83,7 @@ impl HeadlessMap {
         kernel: Kernel<HeadlessEnvironment>,
         plugins: Vec<Box<dyn Plugin<HeadlessEnvironment>>>,
     ) -> Result<Self, MapError> {
+        style.log_validation_errors();
         let window_size = renderer.state().surface().size();
 
         let view_state = initial_view_state(window_size, &style);

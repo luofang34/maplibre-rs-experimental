@@ -11,7 +11,10 @@ use crate::{
     io::apc::{Context, SendError},
     projection::{globe::subdivision::granularity_for_zoom, ProjectionType},
     sdf::{tessellation::TextTessellator, tessellation_new::TextTessellatorNew},
-    style::layer::{LayerPaint, StyleLayer},
+    style::{
+        filter::{properties_from_json, FeatureContext, Filter, GeometryType},
+        layer::{LayerPaint, StyleLayer},
+    },
     vector::{
         tessellation::{IndexDataType, ZeroTessellator},
         transferables::{
@@ -187,6 +190,59 @@ pub struct GeoJsonTileRequest {
     pub projection: ProjectionType,
 }
 
+/// Whether one GeoJSON feature passes a layer filter.
+fn feature_passes(feature: &serde_json::Value, filter: &Filter, zoom: f64) -> bool {
+    let properties = properties_from_json(feature.get("properties"));
+    let geometry_type = feature
+        .get("geometry")
+        .and_then(|geometry| geometry.get("type"))
+        .and_then(serde_json::Value::as_str)
+        .map_or(GeometryType::Unknown, GeometryType::from_geojson);
+    filter.evaluate(&FeatureContext {
+        properties: &properties,
+        geometry_type,
+        id: feature.get("id").cloned(),
+        zoom,
+    })
+}
+
+/// The GeoJSON a layer sees after its filter: a collection keeps the passing features, a lone
+/// feature or geometry either stays or becomes an empty collection.
+pub fn filter_geojson(
+    geojson: &serde_json::Value,
+    filter: &Filter,
+    zoom: f64,
+) -> serde_json::Value {
+    let empty = serde_json::json!({"type": "FeatureCollection", "features": []});
+    match geojson.get("type").and_then(serde_json::Value::as_str) {
+        Some("FeatureCollection") => {
+            let features: Vec<serde_json::Value> = geojson
+                .get("features")
+                .and_then(serde_json::Value::as_array)
+                .map(|features| {
+                    features
+                        .iter()
+                        .filter(|feature| feature_passes(feature, filter, zoom))
+                        .cloned()
+                        .collect()
+                })
+                .unwrap_or_default();
+            serde_json::json!({"type": "FeatureCollection", "features": features})
+        }
+        Some("Feature") if feature_passes(geojson, filter, zoom) => geojson.clone(),
+        Some("Feature") => empty,
+        Some(_) => {
+            let feature = serde_json::json!({"type": "Feature", "geometry": geojson});
+            if feature_passes(&feature, filter, zoom) {
+                geojson.clone()
+            } else {
+                empty
+            }
+        }
+        None => geojson.clone(),
+    }
+}
+
 /// Process inline GeoJSON data and tessellate features for each matching style layer.
 ///
 /// This mirrors [`crate::vector::process_vector_tile`] but works with geographic
@@ -202,7 +258,7 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
     context: &C,
 ) -> Result<(), ProcessGeoJsonError> {
     let coords = request.coords;
-    let json_str = geojson_value.to_string();
+    let unfiltered = geojson_value.to_string();
 
     for style_layer in &request.layers {
         let matches_source = style_layer
@@ -216,6 +272,25 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
         let Some(paint) = &style_layer.paint else {
             log::warn!("GeoJSON style layer {} has no paint", style_layer.id);
             continue;
+        };
+
+        let json_str = match &style_layer.filter {
+            Some(filter) => match Filter::parse(filter) {
+                Ok(filter) => filter_geojson(geojson_value, &filter, f64::from(u8::from(coords.z)))
+                    .to_string(),
+                Err(error) => {
+                    tracing::error!(
+                        layer = %style_layer.id,
+                        %error,
+                        "unsupported filter; the layer renders nothing"
+                    );
+                    context
+                        .send_back(T::LayerMissing::build_from(coords, style_layer.id.clone()))
+                        .map_err(ProcessGeoJsonError::SendError)?;
+                    continue;
+                }
+            },
+            None => unfiltered.clone(),
         };
 
         match paint {
