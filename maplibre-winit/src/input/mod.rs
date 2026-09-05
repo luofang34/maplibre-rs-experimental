@@ -160,7 +160,7 @@ fn view_snapshot(map_context: &MapContext) -> (Vector2<f64>, f64, f64, f64) {
     (
         Vector2::new(position.x, position.y),
         camera.get_pitch().0,
-        camera.get_roll().0,
+        camera.get_bearing().0,
         map_context.view_state.zoom().value(),
     )
 }

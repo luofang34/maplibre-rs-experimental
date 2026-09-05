@@ -200,7 +200,13 @@ impl ViewState {
         };
 
         let ground_angle = f64::consts::FRAC_PI_2 + pitch;
-        let fov_above_center = self.perspective.fovy().0 * (0.5 + center_offset.y / self.height);
+        // A rolled view reaches further along the screen diagonal than the vertical field of
+        // view alone, so the far plane widens the field of view with the roll as GL JS does.
+        let roll = self.camera.get_roll().0;
+        let rolled_fov = self.perspective.fovy().0
+            * (roll.cos().abs() * self.height + roll.sin().abs() * self.width)
+            / self.height;
+        let fov_above_center = rolled_fov * (0.5 + center_offset.y / self.height);
         let surface_distance = |fov: f64| {
             fov.sin() * lowest_plane
                 / (f64::consts::PI - ground_angle - fov)
@@ -639,6 +645,10 @@ impl ViewState {
     }
 }
 
+mod pose;
+
+pub use pose::CameraPose;
+
 #[cfg(test)]
 mod tests {
     use cgmath::{Deg, Matrix4, Vector2, Vector4};
@@ -725,7 +735,7 @@ mod tests {
     #[test]
     fn a_bearing_of_ninety_degrees_puts_east_at_the_top_of_the_screen() {
         let mut state = state_at(2.0, Deg(0.0));
-        state.camera_mut().set_roll(Deg(90.0));
+        state.camera_mut().set_bearing(Deg(90.0));
         let center = state.camera().position();
 
         let clip =

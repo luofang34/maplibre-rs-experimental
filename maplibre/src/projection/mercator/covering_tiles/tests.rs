@@ -142,7 +142,7 @@ fn tile_bounds_are_metres_like_the_unprojected_frustum() {
 #[test]
 fn the_finest_tiles_sit_on_the_cameras_side_under_any_bearing() {
     let mut view = view(16.25, Deg(60.0));
-    view.camera_mut().set_roll(Deg(81.6));
+    view.camera_mut().set_bearing(Deg(81.6));
     let tiles = covering_tiles(
         &view,
         options(16, 16.25, true),

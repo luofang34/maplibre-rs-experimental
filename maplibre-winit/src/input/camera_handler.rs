@@ -34,15 +34,15 @@ impl UpdateState for CameraHandler {
                     * start_window_position.distance(window_position))
                 .into();
 
-                let previous = *self.start_delta_roll.get_or_insert(camera.get_roll());
-                camera.set_roll(previous + delta);
+                let previous = *self.start_delta_roll.get_or_insert(camera.get_bearing());
+                camera.set_bearing(previous + delta);
             } else {
                 // Horizontal drag turns the bearing, as GL JS drag rotation does.
                 let delta: Rad<_> = (Deg(0.001 * self.sensitivity)
                     * (start_window_position.x - window_position.x))
                     .into();
-                let previous = *self.start_delta_roll.get_or_insert(camera.get_roll());
-                camera.set_roll(previous + delta);
+                let previous = *self.start_delta_roll.get_or_insert(camera.get_bearing());
+                camera.set_bearing(previous + delta);
 
                 let delta: Rad<_> = (Deg(0.001 * self.sensitivity)
                     * (start_window_position.y - window_position.y))

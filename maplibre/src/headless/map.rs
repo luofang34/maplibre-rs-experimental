@@ -422,7 +422,10 @@ fn initial_view_state(window_size: crate::window::PhysicalSize, style: &Style) -
     );
     view_state
         .camera_mut()
-        .set_roll(cgmath::Deg(style.bearing.unwrap_or_default()));
+        .set_bearing(cgmath::Deg(style.bearing.unwrap_or_default()));
+    view_state
+        .camera_mut()
+        .set_roll(cgmath::Deg(style.roll.unwrap_or_default()));
     view_state
 }
 

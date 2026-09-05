@@ -60,6 +60,8 @@ pub struct Style {
     pub zoom: Option<f64>,
     pub bearing: Option<f64>,
     pub pitch: Option<f64>,
+    /// Roll of the view about its axis in degrees, as the GL JS `roll` map option.
+    pub roll: Option<f64>,
     #[serde(default)]
     pub projection: Option<ProjectionSpecification>,
     #[serde(default)]
@@ -99,6 +101,7 @@ impl Default for Style {
             center: Some([50.85045, 4.34878]),
             bearing: Some(0.0),
             pitch: Some(0.0),
+            roll: Some(0.0),
             projection: None,
             light: None,
             sky: None,
@@ -320,7 +323,22 @@ impl Default for Style {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used)]
+
     use super::*;
+
+    #[test]
+    fn the_roll_of_the_view_is_read_from_the_style() {
+        let style: Style = serde_json::from_value(serde_json::json!({
+            "version": 8, "sources": {}, "layers": [], "bearing": 30, "pitch": 40, "roll": 15
+        }))
+        .expect("style parses");
+        assert_eq!(style.roll, Some(15.0));
+        let plain: Style =
+            serde_json::from_value(serde_json::json!({"version": 8, "sources": {}, "layers": []}))
+                .expect("style parses");
+        assert_eq!(plain.roll, None);
+    }
 
     #[test]
     fn test_reading() {

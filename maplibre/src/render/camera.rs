@@ -97,6 +97,7 @@ pub struct Camera {
     position: Point2<f64>,
     yaw: Rad<f64>,
     pitch: Rad<f64>,
+    bearing: Rad<f64>,
     roll: Rad<f64>,
     max_pitch: Rad<f64>,
 }
@@ -108,6 +109,7 @@ impl SignificantlyDifferent for Camera {
         self.position.abs_diff_ne(&other.position, epsilon)
             || self.yaw.abs_diff_ne(&other.yaw, epsilon)
             || self.pitch.abs_diff_ne(&other.pitch, epsilon)
+            || self.bearing.abs_diff_ne(&other.bearing, epsilon)
             || self.roll.abs_diff_ne(&other.roll, epsilon)
     }
 }
@@ -123,7 +125,8 @@ impl Camera {
             position: position.into(),
             yaw: yaw.into(),
             pitch: Rad(pitch.into().0.clamp(Rad::from(MIN_PITCH).0, max_pitch.0)),
-            roll: Rad::zero(), // TODO: initialize
+            bearing: Rad::zero(),
+            roll: Rad::zero(),
             max_pitch,
         }
     }
@@ -140,12 +143,13 @@ impl Camera {
     }
 
     pub fn calc_matrix(&self, camera_height: f64) -> Matrix4<f64> {
-        // Roll carries the map bearing. GL JS turns the world by minus the bearing so that a
-        // bearing of 90 degrees puts east at the top of the screen.
+        // GL JS turns the world by minus the bearing, so a bearing of 90 degrees puts east at the
+        // top of the screen, and then turns the view by minus the roll about the view axis.
         Matrix4::from_translation(Vector3::new(0.0, 0.0, -camera_height))
+            * Matrix4::from_angle_z(-self.roll)
             * Matrix4::from_angle_x(self.pitch)
             * Matrix4::from_angle_y(self.yaw)
-            * Matrix4::from_angle_z(-self.roll)
+            * Matrix4::from_angle_z(-self.bearing)
             * Matrix4::from_translation(Vector3::new(-self.position.x, -self.position.y, 0.0))
     }
 
@@ -165,12 +169,14 @@ impl Camera {
         }
     }
 
-    pub fn get_roll(&self) -> Rad<f64> {
-        self.roll
+    /// Bearing of the map, clockwise from north.
+    pub fn get_bearing(&self) -> Rad<f64> {
+        self.bearing
     }
 
-    pub fn roll<P: Into<Rad<f64>>>(&mut self, delta: P) {
-        self.roll += delta.into();
+    /// Roll of the view about its own axis.
+    pub fn get_roll(&self) -> Rad<f64> {
+        self.roll
     }
 
     pub fn get_pitch(&self) -> Rad<f64> {
@@ -210,6 +216,9 @@ impl Camera {
         let new_pitch = pitch.into();
         let min: Rad<_> = MIN_PITCH.into();
         self.pitch = Rad(new_pitch.0.min(self.max_pitch.0).max(min.0))
+    }
+    pub fn set_bearing<P: Into<Rad<f64>>>(&mut self, bearing: P) {
+        self.bearing = bearing.into();
     }
     pub fn set_roll<P: Into<Rad<f64>>>(&mut self, roll: P) {
         self.roll = roll.into();

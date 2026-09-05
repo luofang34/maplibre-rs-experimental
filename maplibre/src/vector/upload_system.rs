@@ -44,7 +44,7 @@ pub fn upload_system(
     };
 
     let zoom = view_state.zoom().level();
-    let bearing = view_state.camera().get_roll().0 as f32;
+    let bearing = view_state.camera().get_bearing().0 as f32;
     let mut source_tiles = BTreeSet::new();
     for view_tile in tile_view_pattern.iter() {
         view_tile.render_kind(TileKind::Vector, |shape| {

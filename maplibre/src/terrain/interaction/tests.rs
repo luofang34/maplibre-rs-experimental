@@ -301,6 +301,21 @@ fn finishing_a_gesture_thaws_the_elevation_and_reconciles_the_view() {
 }
 
 #[test]
+fn the_camera_ground_position_is_the_eye_of_the_view_matrix() {
+    let mut view = view(12.0, 60.0);
+    view.set_center_elevation(700.0);
+    view.camera_mut().set_bearing(Deg(35.0));
+    view.camera_mut().set_roll(Deg(20.0));
+
+    let (position, altitude) = camera_ground_position(&view);
+    let eye = view.eye_position();
+
+    assert_close(position.x, eye.x, 1e-6, "camera x");
+    assert_close(position.y, eye.y, 1e-6, "camera y");
+    assert_close(altitude, eye.z, 1e-6, "camera altitude");
+}
+
+#[test]
 fn a_camera_inside_the_terrain_is_lifted_above_it() {
     let style = style(false);
     let mut view = view(14.0, 80.0);

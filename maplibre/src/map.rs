@@ -130,7 +130,10 @@ where
                     .set_pitch(cgmath::Deg::<f64>(style.pitch.unwrap_or_default()));
                 view_state
                     .camera_mut()
-                    .set_roll(cgmath::Deg(style.bearing.unwrap_or_default()));
+                    .set_bearing(cgmath::Deg(style.bearing.unwrap_or_default()));
+                view_state
+                    .camera_mut()
+                    .set_roll(cgmath::Deg(style.roll.unwrap_or_default()));
 
                 let mut world = World::default();
 

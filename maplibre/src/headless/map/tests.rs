@@ -27,7 +27,7 @@ fn initial_view_uses_style_camera_options() {
     );
 
     assert_eq!(view.zoom().value(), Zoom::new(3.5).value());
-    assert!((view.camera().get_roll().0.to_degrees() - 45.0).abs() <= 1e-12);
+    assert!((view.camera().get_bearing().0.to_degrees() - 45.0).abs() <= 1e-12);
     assert!((view.camera().get_pitch().0.to_degrees() - 30.0).abs() <= 1e-12);
 
     let camera_center = crate::render::projection::globe_camera_for_view(&view)

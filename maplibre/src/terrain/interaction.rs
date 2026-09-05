@@ -256,9 +256,13 @@ pub fn screen_point_to_terrain(
 }
 
 /// Camera position in world pixels and its altitude in metres above sea level.
+///
+/// Computed from the center, pitch and bearing as GL JS `getCameraAltitude` does rather than
+/// by inverting the view matrix, so a camera placed exactly on the terrain is not judged to
+/// be inside it by a rounding error.
 pub fn camera_ground_position(view_state: &ViewState) -> (Vector2<f64>, f64) {
     let pitch = view_state.camera().get_pitch().0;
-    let bearing = view_state.camera().get_roll().0;
+    let bearing = view_state.camera().get_bearing().0;
     let distance = view_state.camera_to_center_distance();
     let (x, y, z) = camera_direction(pitch, bearing);
     let center = view_state.camera().position().to_vec();
@@ -268,7 +272,7 @@ pub fn camera_ground_position(view_state: &ViewState) -> (Vector2<f64>, f64) {
 }
 
 /// Unit direction from the center towards the camera, as GL JS `cameraDirectionFromPitchBearing`.
-fn camera_direction(pitch: f64, bearing: f64) -> (f64, f64, f64) {
+pub(crate) fn camera_direction(pitch: f64, bearing: f64) -> (f64, f64, f64) {
     let horizontal = pitch.sin();
     (
         horizontal * bearing.sin(),
@@ -395,7 +399,11 @@ pub fn finish_gesture(style: &Style, view_state: &mut ViewState, world: &World) 
 
 /// Distance from a camera at `altitude` to the center at `elevation` along its pitch, and the
 /// elevation the center ends up at when the camera looks away from the ground.
-fn distance_to_center_from_altitude(altitude: f64, elevation: f64, pitch: f64) -> (f64, f64) {
+pub(crate) fn distance_to_center_from_altitude(
+    altitude: f64,
+    elevation: f64,
+    pitch: f64,
+) -> (f64, f64) {
     let dz = -pitch.cos();
     let above_ground = altitude - elevation;
     if dz * above_ground >= 0.0 || dz.abs() < 0.1 {
@@ -417,7 +425,7 @@ pub fn recalculate_zoom_and_center(view_state: &mut ViewState, elevation: f64) {
     let world_size = TILE_SIZE * 2_f64.powf(view_state.zoom().value());
     let pixels_per_meter = view_state.pixels_per_meter();
     let pitch = view_state.camera().get_pitch().0;
-    let bearing = view_state.camera().get_roll().0;
+    let bearing = view_state.camera().get_bearing().0;
     let (x, y, z) = camera_direction(pitch, bearing);
     let distance = view_state.camera_to_center_distance();
     let center = view_state.camera().position().to_vec();

@@ -494,7 +494,7 @@ pub fn globe_camera_for_view(
         field_of_view_degrees: view_state.field_of_view().0.to_degrees(),
         center,
         world_size,
-        bearing_degrees: view_state.camera().get_roll().0.to_degrees(),
+        bearing_degrees: view_state.camera().get_bearing().0.to_degrees(),
         pitch_degrees: view_state.camera().get_pitch().0.to_degrees(),
         roll_degrees: 0.0,
         center_offset: view_state.center_offset(),
