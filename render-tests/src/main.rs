@@ -43,7 +43,7 @@ mod paths;
 mod report;
 mod source_tiles;
 
-use comparison::{compare_and_diff, composite_opaque_background};
+use comparison::{compare_and_diff, composite_opaque_background, unpremultiply};
 use paths::{
     collect_tests, local_data_path, local_tile_path, workspace_templates_dir, workspace_tests_dir,
 };
@@ -467,6 +467,9 @@ async fn run_test_inner(test_dir: &Path) -> TestResult {
         return TestResult::Error(format!(
             "Cannot move rendered frame into test output: {error}"
         ));
+    }
+    if let Err(error) = unpremultiply(&actual_path) {
+        return TestResult::Error(error);
     }
     if let Some(background) = meta.comparison_background {
         if let Err(error) = composite_opaque_background(&actual_path, background) {

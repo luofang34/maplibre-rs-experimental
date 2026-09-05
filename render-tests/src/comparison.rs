@@ -23,6 +23,26 @@ pub(super) fn composite_opaque_background(path: &Path, background: [u8; 3]) -> R
         .map_err(|error| format!("Cannot save composited actual: {error}"))
 }
 
+/// Turns the premultiplied frame into straight colours, the form a browser exports a canvas
+/// in and therefore the form the expected images hold.
+pub(super) fn unpremultiply(path: &Path) -> Result<(), String> {
+    let mut image = image::open(path)
+        .map_err(|error| format!("Cannot open actual for unpremultiplying: {error}"))?
+        .to_rgba8();
+    for pixel in image.pixels_mut() {
+        let alpha = u32::from(pixel.0[3]);
+        if alpha == 0 || alpha == 255 {
+            continue;
+        }
+        for channel in &mut pixel.0[..3] {
+            *channel = ((u32::from(*channel) * 255 + alpha / 2) / alpha).min(255) as u8;
+        }
+    }
+    image
+        .save(path)
+        .map_err(|error| format!("Cannot save unpremultiplied actual: {error}"))
+}
+
 /// Writes a diff PNG and returns normalized mean channel difference in `[0, 1]`.
 pub(super) fn compare_and_diff(
     actual_path: &Path,
