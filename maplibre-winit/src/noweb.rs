@@ -113,6 +113,8 @@ pub struct HeadedMapOptions {
     pub max_frames: Option<u64>,
     /// Largest camera pitch in degrees, matching the GL JS `maxPitch` map option.
     pub max_pitch_degrees: f64,
+    /// Outlines every tile of the view pattern in red, to inspect tile selection.
+    pub debug_tiles: bool,
 }
 
 impl Default for HeadedMapOptions {
@@ -120,6 +122,7 @@ impl Default for HeadedMapOptions {
         Self {
             max_frames: None,
             max_pitch_degrees: maplibre::render::camera::DEFAULT_MAX_PITCH.0,
+            debug_tiles: false,
         }
     }
 }
@@ -185,8 +188,9 @@ pub fn run_headed_map<P>(
             >::default()));
             plugins.push(Box::new(maplibre::hillshade::HillshadePlugin));
         }
-        #[cfg(debug_assertions)]
-        plugins.push(Box::new(maplibre::debug::DebugPlugin::default()));
+        if options.debug_tiles {
+            plugins.push(Box::new(maplibre::debug::DebugPlugin::default()));
+        }
         if has_terrain {
             plugins.push(Box::new(maplibre::terrain::TerrainPlugin::<
                 maplibre::terrain::DefaultDemTransferables,

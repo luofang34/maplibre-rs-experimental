@@ -87,6 +87,9 @@ enum Commands {
         /// Exit after rendering this many frames.
         #[clap(long)]
         frames: Option<u64>,
+        /// Outline every tile of the view pattern in red, to inspect tile selection.
+        #[clap(long)]
+        debug_tiles: bool,
     },
     #[cfg(feature = "headless")]
     Headless {
@@ -167,6 +170,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             max_pitch,
             projection,
             frames,
+            debug_tiles,
         } => {
             let bundled = if *terrain {
                 BundledStyle::Terrain
@@ -192,6 +196,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 HeadedMapOptions {
                     max_frames: *frames,
                     max_pitch_degrees: max_pitch.unwrap_or(default_max_pitch),
+                    debug_tiles: *debug_tiles,
                 },
             );
         }
