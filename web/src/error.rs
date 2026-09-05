@@ -22,6 +22,9 @@ pub enum WebError {
     TypeError(Cow<'static, str>),
     #[error("fetching data failed")]
     FetchError(Cow<'static, str>),
+    /// The server has no resource at the URL.
+    #[error("no resource at {0}")]
+    NotFound(String),
     /// Any other Error
     #[error("Error from JS")]
     GenericError(Cow<'static, str>),

@@ -34,6 +34,9 @@ impl WHATWGFetchHttpClient {
             .dyn_into()
             .map_err(|_e| WebError::TypeError("Unable to cast to Response".into()))?;
 
+        if response.status() == 404 {
+            return Err(WebError::NotFound(url.to_string()));
+        }
         if !response.ok() {
             return Err(WebError::GenericError(
                 format!("failed to fetch {}", response.status()).into(),
@@ -70,8 +73,11 @@ impl Clone for WHATWGFetchHttpClient {
 #[async_trait(?Send)]
 impl HttpClient for WHATWGFetchHttpClient {
     async fn fetch(&self, url: &str) -> Result<Vec<u8>, SourceFetchError> {
-        self.fetch_bytes(url)
-            .await
-            .map_err(|e| SourceFetchError(Box::new(e)))
+        // A source that has no tile at a coordinate answers 404, which the request paths
+        // treat as an empty tile rather than a failure.
+        self.fetch_bytes(url).await.map_err(|error| match error {
+            WebError::NotFound(url) => SourceFetchError::not_found(&url),
+            other => SourceFetchError(Box::new(other)),
+        })
     }
 }
