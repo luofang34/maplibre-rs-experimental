@@ -3,13 +3,13 @@ use std::collections::BTreeSet;
 
 use crate::{
     context::MapContext,
+    coords::WorldTileCoords,
     raster::{
         resource::RasterResources, AvailableRasterLayerData, RasterLayerData,
         RasterLayersDataComponent,
     },
     render::{
         eventually::{Eventually, Eventually::Initialized},
-        tile_view_pattern::WgpuTileViewPattern,
         Renderer,
     },
     tcs::{
@@ -25,21 +25,17 @@ pub fn upload_system(
         ..
     }: &mut MapContext,
 ) -> SystemResult {
-    let Some((Initialized(raster_resources), Initialized(tile_view_pattern))) =
-        world.resources.query_mut::<(
-            &mut Eventually<RasterResources>,
-            &Eventually<WgpuTileViewPattern>,
-        )>()
+    let Some(Initialized(raster_resources)) = world
+        .resources
+        .query_mut::<&mut Eventually<RasterResources>>()
     else {
         return Err(SystemError::Dependencies);
     };
 
-    let mut source_tiles = BTreeSet::new();
-    for view_tile in tile_view_pattern.iter() {
-        view_tile.render(|shape| {
-            source_tiles.insert(shape.coords());
-        });
-    }
+    // Every loaded tile gets its texture, as GL JS uploads a raster tile when it arrives; the
+    // retention system bounds the set by evicting tiles that left the view.
+    let source_tiles: BTreeSet<WorldTileCoords> =
+        world.tiles.tiles.values().map(|tile| tile.coords).collect();
     upload_raster_layer(raster_resources, device, queue, &world.tiles, source_tiles);
 
     Ok(())
@@ -51,7 +47,7 @@ fn upload_raster_layer(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     tiles: &Tiles,
-    source_tiles: BTreeSet<crate::coords::WorldTileCoords>,
+    source_tiles: BTreeSet<WorldTileCoords>,
 ) {
     for coords in source_tiles {
         if raster_resources.get_bound_texture(&coords).is_some() {

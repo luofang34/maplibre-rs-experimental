@@ -6,11 +6,13 @@ use std::{marker::PhantomData, mem::size_of, ops::Range};
 
 use cgmath::Matrix4;
 pub use pattern::{
-    TileViewPattern, COMPLETE_CHILDREN_SEARCH_DEPTH, DEFAULT_TILE_VIEW_PATTERN_SIZE,
+    covering_shapes_for, RasterCoverings, TileViewPattern, COMPLETE_CHILDREN_SEARCH_DEPTH,
+    DEFAULT_TILE_VIEW_PATTERN_SIZE,
 };
 
 use crate::{
     coords::{WorldTileCoords, Zoom},
+    io::tile_sources::TileKind,
     render::shaders::ShaderTileMetadata,
     tcs::{resources::ResourceQuery, world::World},
 };
@@ -41,11 +43,45 @@ pub enum SourceShapes {
     None,
 }
 
-/// Defines the `target` tile and its `source` from which data tile data comes.
+impl SourceShapes {
+    fn for_each(&self, callback: &mut impl FnMut(&TileShape)) {
+        match self {
+            Self::Parent(source_shape) | Self::SourceEqTarget(source_shape) => {
+                callback(source_shape)
+            }
+            Self::Children(source_shapes) => {
+                for shape in source_shapes {
+                    callback(shape)
+                }
+            }
+            Self::None => {}
+        }
+    }
+
+    fn for_each_mut(&mut self, callback: &mut impl FnMut(&mut TileShape)) {
+        match self {
+            Self::Parent(source_shape) | Self::SourceEqTarget(source_shape) => {
+                callback(source_shape)
+            }
+            Self::Children(source_shapes) => {
+                for shape in source_shapes {
+                    callback(shape)
+                }
+            }
+            Self::None => {}
+        }
+    }
+}
+
+/// Defines the `target` tile and the sources its data comes from. Vector and raster sources
+/// have shapes of their own, as GL JS gives every source its own tile manager: a 256-pixel
+/// raster source draws its four children into a view tile whose vector tile is the tile
+/// itself.
 #[derive(Debug, Clone)]
 pub struct ViewTile {
     target: WorldTileCoords,
-    source: SourceShapes,
+    vector: SourceShapes,
+    raster: SourceShapes,
 }
 
 impl ViewTile {
@@ -53,19 +89,27 @@ impl ViewTile {
         self.target
     }
 
+    /// Visits the shapes of every kind; a tile serving both kinds is visited once per kind.
     pub fn render<F>(&self, mut callback: F)
     where
         F: FnMut(&TileShape),
     {
-        match &self.source {
-            SourceShapes::Parent(source_shape) => callback(source_shape),
-            SourceShapes::Children(source_shapes) => {
-                for shape in source_shapes {
-                    callback(shape)
-                }
-            }
-            SourceShapes::SourceEqTarget(source_shape) => callback(source_shape),
-            SourceShapes::None => {}
+        self.vector.for_each(&mut callback);
+        self.raster.for_each(&mut callback);
+    }
+
+    /// Visits the shapes drawn for one kind of source.
+    pub fn render_kind<F>(&self, kind: TileKind, mut callback: F)
+    where
+        F: FnMut(&TileShape),
+    {
+        self.shapes(kind).for_each(&mut callback);
+    }
+
+    fn shapes(&self, kind: TileKind) -> &SourceShapes {
+        match kind {
+            TileKind::Vector => &self.vector,
+            TileKind::Raster => &self.raster,
         }
     }
 }
@@ -255,33 +299,59 @@ where
     }
 }
 
+/// The providers that know whether a tile of each kind is loaded.
 #[derive(Default)]
 pub struct ViewTileSources {
-    items: Vec<Box<dyn HasTile>>,
+    vector: Vec<Box<dyn HasTile>>,
+    raster: Vec<Box<dyn HasTile>>,
 }
 
 impl ViewTileSources {
-    pub fn add<H: HasTile + 'static + Default>(&mut self) -> &mut Self {
-        self.items.push(Box::<H>::default());
+    /// Registers a provider for one kind of tile.
+    pub fn add<H: HasTile + 'static + Default>(&mut self, kind: TileKind) -> &mut Self {
+        self.items_mut(kind).push(Box::<H>::default());
         self
     }
 
-    pub fn add_resource_query<Q: ResourceQuery + 'static>(&mut self) -> &mut Self
+    /// Registers a resource-backed provider for one kind of tile.
+    pub fn add_resource_query<Q: ResourceQuery + 'static>(&mut self, kind: TileKind) -> &mut Self
     where
         for<'a> Q::Item<'a>: HasTile,
     {
-        self.items.push(Box::new(QueryHasTile::<Q>::default()));
+        self.items_mut(kind)
+            .push(Box::new(QueryHasTile::<Q>::default()));
         self
     }
 
+    /// Forgets every provider, so every tile counts as loaded.
     pub fn clear(&mut self) {
-        self.items.clear()
+        self.vector.clear();
+        self.raster.clear();
+    }
+
+    /// The providers of one kind, answering as one: a tile is loaded when every provider of
+    /// the kind has it, and everything counts as loaded while no provider is registered.
+    pub fn of_kind(&self, kind: TileKind) -> KindSources<'_> {
+        KindSources(match kind {
+            TileKind::Vector => &self.vector,
+            TileKind::Raster => &self.raster,
+        })
+    }
+
+    fn items_mut(&mut self, kind: TileKind) -> &mut Vec<Box<dyn HasTile>> {
+        match kind {
+            TileKind::Vector => &mut self.vector,
+            TileKind::Raster => &mut self.raster,
+        }
     }
 }
 
-impl HasTile for ViewTileSources {
+/// The providers of one tile kind.
+pub struct KindSources<'a>(&'a [Box<dyn HasTile>]);
+
+impl HasTile for KindSources<'_> {
     fn has_tile(&self, coords: WorldTileCoords, world: &World) -> bool {
-        self.items.iter().all(|item| item.has_tile(coords, world))
+        self.0.iter().all(|item| item.has_tile(coords, world))
     }
 }
 

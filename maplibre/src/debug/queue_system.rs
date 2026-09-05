@@ -2,6 +2,7 @@
 use crate::{
     context::MapContext,
     debug::{render_commands::DrawDebugOutlines, TileDebugItem},
+    io::tile_sources::TileKind,
     render::{
         eventually::{Eventually, Eventually::Initialized},
         render_phase::{DrawState, RenderPhase},
@@ -23,7 +24,7 @@ pub fn queue_system(MapContext { world, .. }: &mut MapContext) -> SystemResult {
         tracing::trace!("Drawing debug at {coords}");
 
         // draw tile normal or the source e.g. parent or children
-        view_tile.render(|source_shape| {
+        view_tile.render_kind(TileKind::Vector, |source_shape| {
             // Draw masks for all source_shapes
             tile_debug_phase.add(TileDebugItem {
                 draw_function: Box::new(DrawState::<TileDebugItem, DrawDebugOutlines>::new()),

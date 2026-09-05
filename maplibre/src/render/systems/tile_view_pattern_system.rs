@@ -4,7 +4,7 @@ use crate::{
     context::MapContext,
     render::{
         eventually::{Eventually, Eventually::Initialized},
-        projection::view_region_for_projection,
+        projection::{raster_source_regions, view_region_for_projection},
         tile_view_pattern::{ViewTileSources, WgpuTileViewPattern, DEFAULT_TILE_SIZE},
         view_state::ViewStatePadding,
     },
@@ -41,9 +41,21 @@ pub fn tile_view_pattern_system(
 
     if let Some(view_region) = &view_region {
         let zoom = view_state.zoom();
+        let raster_coverings =
+            raster_source_regions(style, view_state, world, ViewStatePadding::Tight).map_err(
+                |error| {
+                    tracing::error!(%error, "unable to select raster tiles for rendering");
+                    SystemError::Setup
+                },
+            )?;
 
-        let view_tiles =
-            tile_view_pattern.generate_pattern(view_region, view_tile_sources, zoom, world);
+        let view_tiles = tile_view_pattern.generate_pattern(
+            view_region,
+            view_tile_sources,
+            &raster_coverings,
+            zoom,
+            world,
+        );
 
         // TODO: Can we &mut borrow initially somehow instead of here?
         let Some(Initialized(tile_view_pattern)) = world

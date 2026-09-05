@@ -20,6 +20,7 @@ use std::{
     time::Instant,
 };
 
+use maplibre::io::tile_sources::MAX_OVERZOOMING;
 use maplibre::{
     coords::WorldTileCoords,
     headless::{create_headless_renderer, map::HeadlessMap, HeadlessPlugin},
@@ -43,7 +44,6 @@ mod report;
 mod source_tiles;
 
 use comparison::{compare_and_diff, composite_opaque_background};
-use maplibre::io::tile_sources::raster_zoom_delta;
 use paths::{
     collect_tests, local_data_path, local_tile_path, workspace_templates_dir, workspace_tests_dir,
 };
@@ -392,28 +392,50 @@ async fn run_test_inner(test_dir: &Path) -> TestResult {
                         "Raster source '{source_name}' has no tile template"
                     ));
                 };
-                for coords in source_tile_coords(
-                    &target_coords,
-                    raster_zoom_delta(&style, style.zoom.unwrap_or_default()),
-                    raster_source.minzoom,
-                    raster_source.maxzoom,
-                ) {
-                    let path = match local_tile_path(template, coords) {
-                        Ok(path) => path,
-                        Err(error) => return TestResult::Error(error),
-                    };
-                    let image = match image::open(&path) {
-                        Ok(image) => image.to_rgba8(),
-                        Err(error) => {
-                            tracing::warn!(path = %path.display(), %error, "raster tile unavailable");
-                            continue;
+                let raster_coords = match map.required_raster_tile_coords(source_name) {
+                    Ok(coords) => coords,
+                    Err(error) => {
+                        return TestResult::Error(format!("Cannot select raster tiles: {error}"));
+                    }
+                };
+                // A tile the fixture does not ship answers 404 in GL JS, which then loads the
+                // parent; the nearest ancestor on disk stands in the same way.
+                let minzoom = raster_source.minzoom.unwrap_or(0);
+                let mut seen = std::collections::BTreeSet::new();
+                for ideal in raster_coords {
+                    let mut coords = ideal;
+                    loop {
+                        if !seen.insert(coords) {
+                            break;
                         }
-                    };
-                    all_raster_layers.push(AvailableRasterLayerData {
-                        coords,
-                        source_layer: source_name.clone(),
-                        image,
-                    });
+                        let path = match local_tile_path(template, coords) {
+                            Ok(path) => path,
+                            Err(error) => return TestResult::Error(error),
+                        };
+                        match image::open(&path) {
+                            Ok(image) => {
+                                all_raster_layers.push(AvailableRasterLayerData {
+                                    coords,
+                                    source_layer: source_name.clone(),
+                                    image: image.to_rgba8(),
+                                });
+                                break;
+                            }
+                            Err(error) => {
+                                tracing::debug!(path = %path.display(), %error, "no raster tile");
+                            }
+                        }
+                        match coords.get_parent() {
+                            Some(parent)
+                                if u8::from(parent.z) >= minzoom
+                                    && u8::from(ideal.z) - u8::from(parent.z)
+                                        <= MAX_OVERZOOMING =>
+                            {
+                                coords = parent;
+                            }
+                            _ => break,
+                        }
+                    }
                 }
             }
             // DEM tiles are fetched by the terrain pipeline, not as layer sources.
@@ -495,16 +517,35 @@ fn load_dem_tiles(
     let mut seen = std::collections::BTreeSet::new();
     let mut tiles = Vec::new();
     for coords in target_coords {
-        let Some(coords) = dem_tile_coords(*coords, minzoom, maxzoom) else {
+        let Some(ideal) = dem_tile_coords(*coords, minzoom, maxzoom) else {
             continue;
         };
-        if !seen.insert(coords) {
-            continue;
-        }
-        let path = local_tile_path(template, coords)?;
-        match image::open(&path) {
-            Ok(image) => tiles.push((coords, image.to_rgba8())),
-            Err(error) => tracing::debug!(%coords, path = %path.display(), %error, "no DEM tile"),
+        // A tile the fixture does not ship answers 404 in GL JS, which then loads the parent;
+        // the nearest ancestor on disk stands in the same way.
+        let mut coords = ideal;
+        loop {
+            if !seen.insert(coords) {
+                break;
+            }
+            let path = local_tile_path(template, coords)?;
+            match image::open(&path) {
+                Ok(image) => {
+                    tiles.push((coords, image.to_rgba8()));
+                    break;
+                }
+                Err(error) => {
+                    tracing::debug!(%coords, path = %path.display(), %error, "no DEM tile");
+                }
+            }
+            match coords.get_parent() {
+                Some(parent)
+                    if u8::from(parent.z) >= minzoom
+                        && u8::from(ideal.z) - u8::from(parent.z) <= MAX_OVERZOOMING =>
+                {
+                    coords = parent;
+                }
+                _ => break,
+            }
         }
     }
     Ok(tiles)

@@ -2,6 +2,7 @@
 
 use crate::{
     context::MapContext,
+    io::tile_sources::TileKind,
     raster::{render_commands::DrawRasterTiles, resource::RasterResources},
     render::{
         eventually::{Eventually, Eventually::Initialized},
@@ -44,7 +45,7 @@ pub fn queue_system(
         tracing::trace!("Drawing tile at {coords}");
 
         // draw tile normal or the source e.g. parent or children
-        view_tile.render(|source_shape| {
+        view_tile.render_kind(TileKind::Raster, |source_shape| {
             if raster_resources
                 .get_bound_texture(&source_shape.coords())
                 .is_none()

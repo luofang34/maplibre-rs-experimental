@@ -9,6 +9,7 @@ pub use transferables::{
 use crate::{
     coords::WorldTileCoords,
     environment::Environment,
+    io::tile_sources::TileKind,
     kernel::Kernel,
     plugin::Plugin,
     render::{
@@ -120,7 +121,7 @@ impl<E: Environment, T: VectorTransferables> Plugin<E> for VectorPlugin<T> {
 
         resources
             .get_or_init_mut::<ViewTileSources>()
-            .add::<VectorTilesDone>();
+            .add::<VectorTilesDone>(TileKind::Vector);
 
         schedule.add_system_to_stage(
             RenderStageLabel::Extract,

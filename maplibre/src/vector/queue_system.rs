@@ -1,6 +1,7 @@
 //! Queues [PhaseItems](crate::render::render_phase::PhaseItem) for rendering.
 use crate::{
     context::MapContext,
+    io::tile_sources::TileKind,
     render::{
         eventually::{Eventually, Eventually::Initialized},
         render_commands::DrawMasks,
@@ -52,7 +53,7 @@ pub fn queue_system(
         tracing::trace!("Drawing tile at {coords}");
 
         // draw tile normal or the source e.g. parent or children
-        view_tile.render(|source_shape| {
+        view_tile.render_kind(TileKind::Vector, |source_shape| {
             if uses_globe {
                 mask_phase.add(TileMaskItem {
                     projection: ProjectionBinding::View,

@@ -26,6 +26,7 @@ const MAX_MERCATOR_HORIZON_ANGLE: Rad<f64> = Rad(89.25 * f64::consts::PI / 180.0
 /// Keeps some scene below the camera renderable when terrain dips under it.
 const MIN_RENDER_DISTANCE_BELOW_CAMERA_METERS: f64 = 100.0;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ViewStatePadding {
     // This is helpful for loading a set of tiles.
     Loose,
@@ -266,6 +267,21 @@ impl ViewState {
         let view_projection = perspective * camera_matrix;
 
         ViewProjection(FLIP_Y * OPENGL_TO_WGPU_MATRIX * view_projection)
+    }
+
+    /// The camera's position in world space: x and y in world pixels, z in metres above sea
+    /// level, taken from the same transform that projects the scene so it agrees with the
+    /// frustum whatever the camera's angles are.
+    pub fn eye_position(&self) -> Vector3<f64> {
+        let camera_matrix = self.camera.calc_matrix(self.camera_to_center_distance())
+            * Matrix4::from_nonuniform_scale(1.0, 1.0, self.pixels_per_meter())
+            * Matrix4::from_translation(Vector3::new(0.0, 0.0, -self.center_elevation));
+        let eye = camera_matrix
+            .invert()
+            .map_or(Vector4::new(0.0, 0.0, 0.0, 1.0), |inverse| {
+                inverse * Vector4::new(0.0, 0.0, 0.0, 1.0)
+            });
+        Vector3::new(eye.x / eye.w, eye.y / eye.w, eye.z / eye.w)
     }
 
     /// Corners of the view frustum in world space: four on the far plane, then four on the

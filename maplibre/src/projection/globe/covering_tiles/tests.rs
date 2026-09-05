@@ -1,6 +1,8 @@
 use cgmath::Point2;
 
-use super::{covering_tiles, GlobeCoveringError, GlobeCoveringOptions};
+use super::{
+    covering_tiles, GlobeCoveringError, GlobeCoveringOptions, SourceZoomRange, ZoomRounding,
+};
 use crate::{
     coords::{LatLon, ZoomLevel, TILE_SIZE},
     projection::globe::{camera::GlobeCameraOptions, covering::TileElevationRange},
@@ -26,6 +28,8 @@ fn options(zoom: u8) -> GlobeCoveringOptions {
         zoom: ZoomLevel::new(zoom),
         requested_zoom: f64::from(zoom),
         variable_zoom: false,
+        rounding: ZoomRounding::Floor,
+        zoom_range: SourceZoomRange::default(),
         padding: 0,
         max_tiles: 512,
     }

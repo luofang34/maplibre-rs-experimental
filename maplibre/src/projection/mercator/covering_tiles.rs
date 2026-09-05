@@ -14,7 +14,7 @@ use crate::{
         covering::{aabb_volume, TileElevationProvider},
         covering_tiles::{
             add_padding, frustum::GlobeFrustum, lod::LodContext, push_children, sort_by_center,
-            Intersection, StackEntry,
+            Intersection, SourceZoomRange, StackEntry, ZoomRounding,
         },
     },
     render::{projection::mercator_world_to_lat_lon, view_state::ViewState},
@@ -29,6 +29,10 @@ pub struct MercatorCoveringOptions {
     pub requested_zoom: f64,
     /// Lowers the zoom of distant tiles, as GL JS does for pitched or terrain views.
     pub variable_zoom: bool,
+    /// How the per-tile zoom becomes a level.
+    pub rounding: ZoomRounding,
+    /// Levels the source serves.
+    pub zoom_range: SourceZoomRange,
     /// Number of canonical neighbors to add around visible tiles.
     pub padding: i32,
     /// Maximum number of returned tiles after padding.
@@ -62,11 +66,13 @@ pub fn covering_tiles(
     let frustum = GlobeFrustum::from_points_oriented(view_state.frustum_corners());
     let world_size = TILE_SIZE * 2_f64.powf(view_state.zoom().value());
     let center = view_state.camera().position();
-    let lod = LodContext::from_view(
+    // The camera position comes from the view transform itself, so the distance rule sees
+    // the camera where the frustum has it under any bearing.
+    let eye = view_state.eye_position();
+    let lod = LodContext::from_positions(
+        Point2::new(eye.x / world_size, eye.y / world_size),
         Point2::new(center.x / world_size, center.y / world_size),
-        view_state.camera_to_center_distance() / world_size,
-        view_state.camera().get_pitch().0.to_degrees().abs(),
-        view_state.camera().get_roll().0.to_degrees(),
+        (eye.z - view_state.center_elevation()) * view_state.pixels_per_meter() / world_size,
         view_state.field_of_view().0.to_degrees(),
         options.requested_zoom,
     );
@@ -92,17 +98,19 @@ pub fn covering_tiles(
         if intersection == Intersection::None {
             continue;
         }
-        let target_zoom = if options.variable_zoom {
-            lod.zoom_for_tile(entry.tile)
+        let target_zoom = options.zoom_range.cap(if options.variable_zoom {
+            lod.zoom_for_tile(entry.tile, options.rounding)
         } else {
             options.zoom
-        };
+        });
         if entry.tile.z >= target_zoom {
-            visible.push(WorldTileCoords {
-                x: entry.tile.x as i32,
-                y: entry.tile.y as i32,
-                z: entry.tile.z,
-            });
+            if options.zoom_range.serves(entry.tile.z) {
+                visible.push(WorldTileCoords {
+                    x: entry.tile.x as i32,
+                    y: entry.tile.y as i32,
+                    z: entry.tile.z,
+                });
+            }
             continue;
         }
         push_children(&mut stack, entry.tile, intersection == Intersection::Full);

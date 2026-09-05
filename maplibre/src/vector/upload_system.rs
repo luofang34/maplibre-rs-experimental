@@ -4,6 +4,7 @@ use std::collections::BTreeSet;
 
 use crate::{
     context::MapContext,
+    io::tile_sources::TileKind,
     render::{
         eventually::{Eventually, Eventually::Initialized},
         shaders::{FillShaderFeatureMetadata, ShaderLayerMetadata, Vec4f32},
@@ -46,7 +47,7 @@ pub fn upload_system(
     let bearing = view_state.camera().get_roll().0 as f32;
     let mut source_tiles = BTreeSet::new();
     for view_tile in tile_view_pattern.iter() {
-        view_tile.render(|shape| {
+        view_tile.render_kind(TileKind::Vector, |shape| {
             source_tiles.insert(shape.coords());
         });
     }

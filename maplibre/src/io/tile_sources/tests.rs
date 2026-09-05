@@ -1,8 +1,8 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 use super::{
-    clamp_to_max_zoom, covering_zoom, raster_zoom_delta, source_layer_groups, source_max_zoom,
-    source_tile_size, source_tiles_for, TileKind,
+    clamp_to_max_zoom, covering_zoom, missing_tile_fallback, source_layer_groups, source_max_zoom,
+    source_tiles_for, TileKind,
 };
 use crate::{
     coords::{WorldTileCoords, ZoomLevel},
@@ -176,23 +176,35 @@ fn source_tiles_follow_the_zoom_delta_within_the_source_range() {
 }
 
 #[test]
-fn raster_zoom_delta_follows_the_smallest_raster_tile_size_unless_vectors_share_the_view() {
-    let raster_only: Style = serde_json::from_value(serde_json::json!({
-        "version": 8,
-        "sources": {
-            "photo": {"type": "raster", "tiles": ["https://p.example/{z}/{x}/{y}.jpg"], "tileSize": 256}
-        },
-        "layers": [{"id": "sat", "type": "raster", "source": "photo"}]
-    }))
-    .expect("style parses");
+fn a_missing_tile_falls_back_to_the_nearest_ancestor_that_may_exist() {
+    let ideal = coords(2201, 1453, 12);
+    let parent = coords(1100, 726, 11);
+    let grandparent = coords(550, 363, 10);
+    let missing = |tile: WorldTileCoords| tile == ideal || tile == parent;
 
-    assert_eq!(source_tile_size(&raster_only, TileKind::Raster), 256.0);
-    assert_eq!(raster_zoom_delta(&raster_only, 12.0), 1);
-    assert_eq!(raster_zoom_delta(&raster_only, 12.6), 2);
-    assert_eq!(source_tile_size(&style(), TileKind::Raster), 512.0);
     assert_eq!(
-        raster_zoom_delta(&style(), 12.6),
-        0,
-        "vector tiles share the view"
+        missing_tile_fallback(ideal, 7, missing),
+        Some(grandparent),
+        "the walk skips ancestors already known to be missing"
+    );
+    assert_eq!(
+        missing_tile_fallback(ideal, 12, missing),
+        None,
+        "nothing below the source minimum zoom"
+    );
+    assert_eq!(
+        missing_tile_fallback(grandparent, 7, missing),
+        None,
+        "a tile not known to be missing needs no fallback"
+    );
+    assert_eq!(
+        missing_tile_fallback(coords(0, 0, 16), 0, |tile| u8::from(tile.z) > 6),
+        Some(coords(0, 0, 6)),
+        "the walk stops ten levels up, as GL JS's parent retention does"
+    );
+    assert_eq!(
+        missing_tile_fallback(coords(0, 0, 16), 0, |tile| u8::from(tile.z) > 5),
+        None,
+        "nothing beyond ten levels up"
     );
 }

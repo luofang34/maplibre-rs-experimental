@@ -137,46 +137,6 @@ pub fn covering_zoom(zoom: f64, kind: TileKind, tile_size: f64) -> u8 {
     level.clamp(0.0, f64::from(u8::MAX)) as u8
 }
 
-/// Smallest tile size in pixels among the tile sources of a kind, or the default of 512.
-pub fn source_tile_size(style: &Style, kind: TileKind) -> f64 {
-    style
-        .layers
-        .iter()
-        .filter(|layer| kind.accepts_layer(layer))
-        .filter_map(|layer| style.sources.get(layer.source.as_ref()?))
-        .filter_map(|source| kind.matches_source(source)?.tile_size)
-        .min()
-        .map_or(TILE_SIZE, f64::from)
-}
-
-/// Zoom levels between the view tiles and the raster tiles that cover them at `zoom`.
-///
-/// Raster sources of 256 pixels cover a 512-pixel view tile with four children, as they do in
-/// GL JS. The shared view pattern cannot follow different zooms for different sources, so the
-/// delta stays zero while vector tiles share the view.
-pub fn raster_zoom_delta(style: &Style, zoom: f64) -> i32 {
-    let has_vector = style
-        .layers
-        .iter()
-        .filter(|layer| TileKind::Vector.accepts_layer(layer))
-        .any(|layer| {
-            layer
-                .source
-                .as_ref()
-                .and_then(|name| style.sources.get(name))
-                .is_some_and(|source| matches!(source, Source::Vector(_)))
-        });
-    if has_vector {
-        return 0;
-    }
-    let view_level = zoom.floor().max(0.0) as i32;
-    i32::from(covering_zoom(
-        zoom,
-        TileKind::Raster,
-        source_tile_size(style, TileKind::Raster),
-    )) - view_level
-}
-
 /// Source tiles covering a view tile: itself, its ancestor, or its descendants `zoom_delta`
 /// levels away, kept within the source zoom range. Nothing below the minimum zoom, as in GL JS.
 pub fn source_tiles_for(
@@ -244,3 +204,29 @@ pub fn clamp_to_max_zoom(coords: WorldTileCoords, max_zoom: Option<u8>) -> World
 
 #[cfg(test)]
 mod tests;
+
+/// How many levels above a wanted tile GL JS looks for a parent to stand in for it.
+pub const MAX_OVERZOOMING: u8 = 10;
+
+/// The nearest ancestor to request when the source has no tile at `coords`, as GL JS retains
+/// and loads parents for a tile that answered 404: the walk stops at the first ancestor not
+/// known to be missing, and never goes below the source minimum zoom or more than
+/// [`MAX_OVERZOOMING`] levels up.
+pub fn missing_tile_fallback(
+    coords: WorldTileCoords,
+    minzoom: u8,
+    is_missing: impl Fn(WorldTileCoords) -> bool,
+) -> Option<WorldTileCoords> {
+    let lowest = u8::from(coords.z)
+        .saturating_sub(MAX_OVERZOOMING)
+        .max(minzoom);
+    let mut current = coords;
+    while is_missing(current) {
+        let parent = current.get_parent()?;
+        if u8::from(parent.z) < lowest {
+            return None;
+        }
+        current = parent;
+    }
+    (current != coords).then_some(current)
+}

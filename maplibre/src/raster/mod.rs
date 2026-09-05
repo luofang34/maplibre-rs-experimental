@@ -5,6 +5,7 @@ use image::RgbaImage;
 use crate::{
     coords::WorldTileCoords,
     environment::Environment,
+    io::tile_sources::TileKind,
     kernel::Kernel,
     plugin::Plugin,
     raster::{
@@ -60,7 +61,7 @@ impl<E: Environment, T: RasterTransferables> Plugin<E> for RasterPlugin<T> {
         world
             .resources
             .get_or_init_mut::<ViewTileSources>()
-            .add::<RasterTilesDone>();
+            .add::<RasterTilesDone>(TileKind::Raster);
 
         schedule.add_system_to_stage(
             RenderStageLabel::Extract,
@@ -90,6 +91,20 @@ pub struct MissingRasterLayerData {
 pub enum RasterLayerData {
     Available(AvailableRasterLayerData),
     Missing(MissingRasterLayerData),
+}
+
+impl RasterLayersDataComponent {
+    /// Whether any source delivered an image for the tile.
+    pub fn has_image(&self) -> bool {
+        self.layers
+            .iter()
+            .any(|layer| matches!(layer, RasterLayerData::Available(_)))
+    }
+
+    /// Whether every source answered that it has no tile here.
+    pub fn is_missing(&self) -> bool {
+        !self.layers.is_empty() && !self.has_image()
+    }
 }
 
 #[derive(Default)]

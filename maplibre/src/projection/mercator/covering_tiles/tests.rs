@@ -7,7 +7,10 @@ use cgmath::Deg;
 use super::{covering_tiles, MercatorCoveringOptions};
 use crate::{
     coords::{WorldCoords, WorldTileCoords, Zoom, ZoomLevel, TILE_SIZE},
-    projection::globe::covering::TileElevationRange,
+    projection::globe::{
+        covering::TileElevationRange,
+        covering_tiles::{SourceZoomRange, ZoomRounding},
+    },
     render::view_state::{ViewState, ViewStatePadding},
     window::PhysicalSize,
 };
@@ -31,6 +34,8 @@ fn options(zoom: u8, requested_zoom: f64, variable_zoom: bool) -> MercatorCoveri
         zoom: ZoomLevel::new(zoom),
         requested_zoom,
         variable_zoom,
+        rounding: ZoomRounding::Floor,
+        zoom_range: SourceZoomRange::default(),
         padding: 0,
         max_tiles: 512,
     }
@@ -131,5 +136,40 @@ fn tile_bounds_are_metres_like_the_unprojected_frustum() {
     assert!(
         tiles.contains(&center_tile),
         "center tile {center_tile} missing from {tiles:?}"
+    );
+}
+
+#[test]
+fn the_finest_tiles_sit_on_the_cameras_side_under_any_bearing() {
+    let mut view = view(16.25, Deg(60.0));
+    view.camera_mut().set_roll(Deg(81.6));
+    let tiles = covering_tiles(
+        &view,
+        options(16, 16.25, true),
+        &TileElevationRange::default(),
+    )
+    .expect("covering succeeds");
+    let eye = view.eye_position();
+    let world_size = TILE_SIZE * 2_f64.powf(16.25);
+    let finest = tiles.iter().map(|tile| tile.z).max().expect("tiles");
+    let coarsest = tiles.iter().map(|tile| tile.z).min().expect("tiles");
+    assert!(finest > coarsest, "the pitched view mixes zoom levels");
+    let distance = |level: ZoomLevel| {
+        let selected: Vec<f64> = tiles
+            .iter()
+            .filter(|tile| tile.z == level)
+            .map(|tile| {
+                let size = world_size / 2_f64.powi(i32::from(u8::from(tile.z)));
+                let x = (f64::from(tile.x) + 0.5) * size;
+                let y = (f64::from(tile.y) + 0.5) * size;
+                (x - eye.x).hypot(y - eye.y)
+            })
+            .collect();
+        selected.iter().sum::<f64>() / selected.len() as f64
+    };
+
+    assert!(
+        distance(finest) < distance(coarsest),
+        "finest tiles are nearest to the camera"
     );
 }

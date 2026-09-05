@@ -23,6 +23,67 @@ const ASSUMED_MAX_FEATURE_HEIGHT_METERS: f64 = 500.0;
 const MAX_MERCATOR_HORIZON_DEGREES: f64 = 89.25;
 const TILE_CULLING_HORIZON_ONSET_DEGREES: f64 = 15.0;
 
+/// How a fractional per-tile zoom becomes a tile level: floored for the view and for vector
+/// sources, rounded for raster sources, as GL JS `roundZoom`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ZoomRounding {
+    /// Take the level at or below the zoom.
+    #[default]
+    Floor,
+    /// Take the nearest level.
+    Round,
+}
+
+impl ZoomRounding {
+    /// Applies the rounding to a fractional zoom.
+    pub fn apply(self, zoom: f64) -> f64 {
+        match self {
+            Self::Floor => zoom.floor(),
+            Self::Round => zoom.round(),
+        }
+    }
+}
+
+/// Zoom levels a source serves. The covering never descends past `max`, and drops tiles it
+/// would select below `min`, as GL JS does with a source's `minzoom` and `maxzoom`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SourceZoomRange {
+    /// Lowest level with tiles.
+    pub min: u8,
+    /// Highest level with tiles; the covering stops descending here.
+    pub max: u8,
+}
+
+impl Default for SourceZoomRange {
+    fn default() -> Self {
+        Self {
+            min: 0,
+            max: (MAX_ZOOM - 1) as u8,
+        }
+    }
+}
+
+impl SourceZoomRange {
+    /// The range a style source declares, with the crate limits where it declares none.
+    pub fn from_style(minzoom: Option<u8>, maxzoom: Option<u8>) -> Self {
+        let default = Self::default();
+        Self {
+            min: minzoom.unwrap_or(default.min),
+            max: maxzoom.unwrap_or(default.max).min(default.max),
+        }
+    }
+
+    /// The level to descend to for a tile whose desired level is `desired`.
+    pub fn cap(self, desired: ZoomLevel) -> ZoomLevel {
+        ZoomLevel::new(u8::from(desired).min(self.max))
+    }
+
+    /// Whether a selected tile at `level` exists in the source.
+    pub fn serves(self, level: ZoomLevel) -> bool {
+        u8::from(level) >= self.min
+    }
+}
+
 /// Inputs controlling fixed-level globe tile selection.
 #[derive(Clone, Copy, Debug)]
 pub struct GlobeCoveringOptions {
@@ -32,6 +93,10 @@ pub struct GlobeCoveringOptions {
     pub requested_zoom: f64,
     /// Enables per-tile zoom variation at high map zooms.
     pub variable_zoom: bool,
+    /// How the per-tile zoom becomes a level.
+    pub rounding: ZoomRounding,
+    /// Levels the source serves.
+    pub zoom_range: SourceZoomRange,
     /// Number of canonical neighbors to add around visible tiles.
     pub padding: i32,
     /// Maximum number of returned tiles after padding.
@@ -101,17 +166,19 @@ pub fn covering_tiles(
         if intersection == Intersection::None {
             continue;
         }
-        let target_zoom = if options.variable_zoom {
-            lod.zoom_for_tile(entry.tile)
+        let target_zoom = options.zoom_range.cap(if options.variable_zoom {
+            lod.zoom_for_tile(entry.tile, options.rounding)
         } else {
             options.zoom
-        };
+        });
         if entry.tile.z >= target_zoom {
-            visible.push(WorldTileCoords {
-                x: entry.tile.x as i32,
-                y: entry.tile.y as i32,
-                z: entry.tile.z,
-            });
+            if options.zoom_range.serves(entry.tile.z) {
+                visible.push(WorldTileCoords {
+                    x: entry.tile.x as i32,
+                    y: entry.tile.y as i32,
+                    z: entry.tile.z,
+                });
+            }
             continue;
         }
         push_children(&mut stack, entry.tile, intersection == Intersection::Full);

@@ -6,14 +6,15 @@ use thiserror::Error;
 use wgpu::util::DeviceExt;
 
 use crate::{
-    coords::{LatLon, ViewRegion, ZoomLevel, TILE_SIZE},
+    coords::{LatLon, ViewRegion, WorldTileCoords, ZoomLevel, TILE_SIZE},
+    io::tile_sources::{covering_zoom, TileKind},
     projection::{
         globe::{
             camera::{GlobeCameraError, GlobeCameraOptions, GlobeCameraState},
             covering::{TileElevationProvider, TileElevationRange},
             covering_tiles::{
                 covering_tiles, elevation_for_tile_culling, GlobeCoveringError,
-                GlobeCoveringOptions,
+                GlobeCoveringOptions, SourceZoomRange, ZoomRounding,
             },
             lat_lon_to_unit_sphere,
         },
@@ -31,7 +32,7 @@ use crate::{
         shaders::{Mat4x4f32, Vec4f32},
         view_state::{ViewState, ViewStatePadding},
     },
-    style::Style,
+    style::{source::Source, Style},
     tcs::world::World,
     terrain::coverage::{IndexedTileElevation, TerrainCoverageIndex},
 };
@@ -245,6 +246,52 @@ pub fn projection_data_for_view(
     })
 }
 
+/// Which tiles a covering asks for: the nominal level, the fractional zoom the distance rule
+/// starts from, and the rounding and zoom range of the source the tiles come from. The view
+/// and vector sources use the map zoom floored; a raster source adjusts the zoom for its tile
+/// size and rounds, as GL JS gives every source its own tile manager.
+#[derive(Clone, Copy, Debug)]
+pub struct CoveringRequest {
+    /// Level selected where the zoom does not vary per tile.
+    pub level: ZoomLevel,
+    /// Fractional zoom at the view center, already adjusted for the source tile size.
+    pub requested_zoom: f64,
+    /// How a per-tile zoom becomes a level.
+    pub rounding: ZoomRounding,
+    /// Levels the source serves.
+    pub zoom_range: SourceZoomRange,
+}
+
+impl CoveringRequest {
+    /// The request for the view tiles at `level`.
+    pub fn view(level: ZoomLevel, zoom: f64) -> Self {
+        Self {
+            level,
+            requested_zoom: zoom,
+            rounding: ZoomRounding::Floor,
+            zoom_range: SourceZoomRange::default(),
+        }
+    }
+
+    /// The request for a raster source of `tile_size` pixels: 256-pixel tiles sit one level
+    /// below the 512-pixel view tiles, and the level is rounded rather than floored.
+    pub fn raster_source(
+        zoom: f64,
+        tile_size: f64,
+        minzoom: Option<u8>,
+        maxzoom: Option<u8>,
+    ) -> Self {
+        let zoom_range = SourceZoomRange::from_style(minzoom, maxzoom);
+        let level = ZoomLevel::new(covering_zoom(zoom, TileKind::Raster, tile_size));
+        Self {
+            level: zoom_range.cap(level),
+            requested_zoom: zoom + (TILE_SIZE / tile_size).log2(),
+            rounding: ZoomRounding::Round,
+            zoom_range,
+        }
+    }
+}
+
 /// Selects the visible region using the projection declared by the current style.
 pub fn view_region_for_projection(
     style: &Style,
@@ -253,19 +300,80 @@ pub fn view_region_for_projection(
     visible_level: ZoomLevel,
     padding: ViewStatePadding,
 ) -> Result<Option<ViewRegion>, ProjectionStateError> {
+    covering_region(
+        style,
+        view_state,
+        world,
+        CoveringRequest::view(visible_level, view_state.zoom().value()),
+        padding,
+    )
+}
+
+/// The tiles each raster source used by a visible layer covers, following that source's tile
+/// size, rounding and zoom range through the same covering as the view.
+pub fn raster_source_regions(
+    style: &Style,
+    view_state: &ViewState,
+    world: &World,
+    padding: ViewStatePadding,
+) -> Result<Vec<(String, Vec<WorldTileCoords>)>, ProjectionStateError> {
+    let zoom = view_state.zoom().value();
+    let mut regions = Vec::new();
+    for (name, source) in &style.sources {
+        let Source::Raster(raster) = source else {
+            continue;
+        };
+        let used = style
+            .layers
+            .iter()
+            .any(|layer| layer.type_ == "raster" && layer.source.as_deref() == Some(name));
+        if !used {
+            continue;
+        }
+        let tile_size = raster.tile_size.map_or(TILE_SIZE, f64::from);
+        let request =
+            CoveringRequest::raster_source(zoom, tile_size, raster.minzoom, raster.maxzoom);
+        let tiles = covering_region(style, view_state, world, request, padding)?.map_or_else(
+            Vec::new,
+            |region| {
+                region
+                    .iter()
+                    .filter(|coords| coords.build_quad_key().is_some())
+                    .collect()
+            },
+        );
+        regions.push((name.clone(), tiles));
+    }
+    Ok(regions)
+}
+
+/// Selects the tiles of a request under the projection declared by the current style.
+pub fn covering_region(
+    style: &Style,
+    view_state: &ViewState,
+    world: &World,
+    request: CoveringRequest,
+    padding: ViewStatePadding,
+) -> Result<Option<ViewRegion>, ProjectionStateError> {
+    if !request.zoom_range.serves(request.level) {
+        return Ok(None);
+    }
     let uses_globe = style.projection.as_ref().is_some_and(|specification| {
         specification
             .projection_type
             .uses_globe_rendering(view_state.zoom().value())
     });
     if !uses_globe {
-        return mercator_view_region(style, view_state, world, visible_level, padding);
+        return mercator_view_region(style, view_state, world, request, padding);
     }
+    let visible_level = request.level;
     let camera = globe_camera_for_view(view_state)?;
     let options = GlobeCoveringOptions {
         zoom: visible_level,
-        requested_zoom: view_state.zoom().value(),
+        requested_zoom: request.requested_zoom,
         variable_zoom: u8::from(visible_level) > 4,
+        rounding: request.rounding,
+        zoom_range: request.zoom_range,
         padding: match padding {
             ViewStatePadding::Loose => 1,
             ViewStatePadding::Tight => 0,
@@ -303,9 +411,10 @@ fn mercator_view_region(
     style: &Style,
     view_state: &ViewState,
     world: &World,
-    visible_level: ZoomLevel,
+    request: CoveringRequest,
     padding: ViewStatePadding,
 ) -> Result<Option<ViewRegion>, ProjectionStateError> {
+    let visible_level = request.level;
     let pitch_degrees = view_state.camera().get_pitch().0.to_degrees().abs();
     let fov_degrees = view_state.field_of_view().0.to_degrees();
     let needs_frustum =
@@ -322,8 +431,10 @@ fn mercator_view_region(
         view_state,
         MercatorCoveringOptions {
             zoom: visible_level,
-            requested_zoom: view_state.zoom().value(),
+            requested_zoom: request.requested_zoom,
             variable_zoom: true,
+            rounding: request.rounding,
+            zoom_range: request.zoom_range,
             padding: match padding {
                 ViewStatePadding::Loose => 1,
                 ViewStatePadding::Tight => 0,

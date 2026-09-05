@@ -19,7 +19,7 @@ use crate::{
     raster::{AvailableRasterLayerData, RasterLayerData, RasterLayersDataComponent},
     render::{
         eventually::Eventually,
-        projection::{view_region_for_projection, ProjectionStateError},
+        projection::{raster_source_regions, view_region_for_projection, ProjectionStateError},
         tile_view_pattern::DEFAULT_TILE_SIZE,
         view_state::{ViewState, ViewStatePadding},
         Renderer,
@@ -280,6 +280,24 @@ impl HeadlessMap {
                 .filter(|coords| coords.build_quad_key().is_some())
                 .collect()
         }))
+    }
+
+    /// Returns the tiles a raster source must make available for this view: its own covering
+    /// at its tile size and rounding, as the request system asks for them.
+    pub fn required_raster_tile_coords(
+        &self,
+        source_name: &str,
+    ) -> Result<Vec<WorldTileCoords>, ProjectionStateError> {
+        let context = &self.map_context;
+        Ok(raster_source_regions(
+            &context.style,
+            &context.view_state,
+            &context.world,
+            ViewStatePadding::Loose,
+        )?
+        .into_iter()
+        .find(|(name, _)| name == source_name)
+        .map_or_else(Vec::new, |(_, tiles)| tiles))
     }
 
     pub async fn fetch_tile(&self, coords: WorldTileCoords) -> Result<Box<[u8]>, SourceFetchError> {

@@ -11,7 +11,7 @@ use crate::{
     raster::{render_commands::DrawRasterTiles, resource::RasterResources},
     render::{
         eventually::{Eventually, Eventually::Initialized},
-        projection::view_region_for_projection,
+        projection::{raster_source_regions, view_region_for_projection},
         render_commands::DrawMasks,
         render_phase::{Draw, DrawState, LayerItem, ProjectionBinding, RenderPhase, TileMaskItem},
         shaders::ShaderTileMetadata,
@@ -78,7 +78,12 @@ pub fn queue_system(
         return Ok(());
     };
 
-    let targets = select_targets(view_region.iter(), world);
+    let raster_coverings = raster_source_regions(style, view_state, world, ViewStatePadding::Tight)
+        .map_err(|error| {
+            tracing::error!(%error, "unable to select terrain raster tiles");
+            SystemError::Setup
+        })?;
+    let targets = select_targets(view_region.iter(), world, &raster_coverings);
     let specs = collect_layer_specs(targets, style, world, zoom.value());
     let revisions = source_revisions(world);
     let clear_color = background_clear_color(style);

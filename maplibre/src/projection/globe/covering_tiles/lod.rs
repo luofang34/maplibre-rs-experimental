@@ -1,6 +1,9 @@
 use cgmath::Point2;
 
-use super::super::{camera::GlobeCameraState, covering::distance_to_tile_2d};
+use super::{
+    super::{camera::GlobeCameraState, covering::distance_to_tile_2d},
+    ZoomRounding,
+};
 use crate::coords::{TileCoords, ZoomLevel, MAX_ZOOM};
 
 const MAX_MERCATOR_HORIZON_DEGREES: f64 = 89.25;
@@ -29,7 +32,7 @@ impl LodContext {
     }
 
     /// Builds the context from the map center in Mercator `0..1` units, the camera distance to
-    /// it in the same units, and the camera angles in degrees; shared by both projections.
+    /// it in the same units, and the camera angles in GL JS's conventions.
     pub(crate) fn from_view(
         center: Point2<f64>,
         distance: f64,
@@ -47,10 +50,27 @@ impl LodContext {
             center.x - distance * direction_x,
             center.y - distance * direction_y,
         );
-        let distance_z = distance * pitch.cos();
-        let distance_to_center_2d = (center.x - camera_point.x).hypot(center.y - camera_point.y);
+        Self::from_positions(
+            camera_point,
+            center,
+            distance * pitch.cos(),
+            field_of_view_degrees,
+            requested_zoom,
+        )
+    }
+
+    /// Builds the context from the camera's and the center's positions in Mercator `0..1`
+    /// units and the camera's height above the center in the same units.
+    pub(crate) fn from_positions(
+        camera: Point2<f64>,
+        center: Point2<f64>,
+        distance_z: f64,
+        field_of_view_degrees: f64,
+        requested_zoom: f64,
+    ) -> Self {
+        let distance_to_center_2d = (center.x - camera.x).hypot(center.y - camera.y);
         Self {
-            camera: camera_point,
+            camera,
             distance_z,
             distance_to_center_3d: distance_to_center_2d.hypot(distance_z),
             requested_zoom,
@@ -58,17 +78,17 @@ impl LodContext {
         }
     }
 
-    pub(crate) fn zoom_for_tile(&self, tile: TileCoords) -> ZoomLevel {
+    pub(crate) fn zoom_for_tile(&self, tile: TileCoords, rounding: ZoomRounding) -> ZoomLevel {
         let distance_2d = distance_to_tile_2d(self.camera, tile);
-        let desired = calculate_tile_zoom(
-            self.requested_zoom,
-            distance_2d,
-            self.distance_z,
-            self.distance_to_center_3d,
-            self.field_of_view_degrees,
-        )
-        .floor()
-        .clamp(0.0, (MAX_ZOOM - 1) as f64);
+        let desired = rounding
+            .apply(calculate_tile_zoom(
+                self.requested_zoom,
+                distance_2d,
+                self.distance_z,
+                self.distance_to_center_3d,
+                self.field_of_view_degrees,
+            ))
+            .clamp(0.0, (MAX_ZOOM - 1) as f64);
         ZoomLevel::new(desired as u8)
     }
 }

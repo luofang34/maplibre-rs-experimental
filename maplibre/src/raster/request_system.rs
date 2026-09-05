@@ -4,13 +4,11 @@ use std::{borrow::Cow, collections::HashSet, marker::PhantomData, rc::Rc};
 
 use crate::{
     context::MapContext,
+    coords::WorldTileCoords,
     environment::{Environment, OffscreenKernel},
     io::{
         apc::{AsyncProcedureCall, AsyncProcedureFuture, Context, Input, ProcedureError},
-        tile_sources::{
-            raster_zoom_delta, source_layer_groups, source_max_zoom, source_min_zoom,
-            source_tiles_for, TileKind,
-        },
+        tile_sources::{missing_tile_fallback, source_layer_groups, source_min_zoom, TileKind},
     },
     kernel::Kernel,
     raster::{
@@ -18,10 +16,7 @@ use crate::{
         transferables::{LayerRasterMissing, RasterTransferables},
         RasterLayersDataComponent,
     },
-    render::{
-        projection::view_region_for_projection, tile_view_pattern::DEFAULT_TILE_SIZE,
-        view_state::ViewStatePadding,
-    },
+    render::{projection::raster_source_regions, view_state::ViewStatePadding},
     tcs::system::{System, SystemResult},
 };
 
@@ -53,32 +48,34 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
             ..
         }: &mut MapContext,
     ) -> SystemResult {
-        let view_region = view_region_for_projection(
-            style,
-            view_state,
-            world,
-            view_state.zoom().zoom_level(DEFAULT_TILE_SIZE),
-            ViewStatePadding::Loose,
-        )
-        .map_err(|error| {
-            tracing::error!(%error, "unable to select raster request tiles");
-            crate::tcs::system::SystemError::Setup
-        })?;
-
         if view_state.did_camera_change() || view_state.did_zoom_change() {
-            if let Some(view_region) = &view_region {
-                let max_zoom = source_max_zoom(style, TileKind::Raster);
-                let min_zoom = source_min_zoom(style, TileKind::Raster);
-                let zoom_delta = raster_zoom_delta(style, view_state.zoom().value());
+            // Each raster source covers the view at its own tile size and rounding, as GL JS's
+            // per-source tile managers do; the tiles of every source are requested together.
+            let regions = raster_source_regions(style, view_state, world, ViewStatePadding::Loose)
+                .map_err(|error| {
+                    tracing::error!(%error, "unable to select raster request tiles");
+                    crate::tcs::system::SystemError::Setup
+                })?;
+            {
                 let mut requested = HashSet::new();
-
-                // Raster tiles sit at the zoom GL JS picks for the source's tile size: 256-pixel
-                // tiles one level below each view tile, and never past the source zoom range.
-                for coords in view_region
-                    .iter()
-                    .flat_map(|coords| source_tiles_for(coords, zoom_delta, min_zoom, max_zoom))
-                {
-                    if coords.build_quad_key().is_none() || !requested.insert(coords) {
+                let minzoom = source_min_zoom(style, TileKind::Raster).unwrap_or(0);
+                // A tile the source answered 404 for is stood in for by its nearest ancestor,
+                // as GL JS retains and loads parents for it.
+                let wanted: Vec<WorldTileCoords> = regions
+                    .into_iter()
+                    .flat_map(|(_, tiles)| tiles)
+                    .flat_map(|coords| {
+                        let fallback = missing_tile_fallback(coords, minzoom, |coords| {
+                            world
+                                .tiles
+                                .query::<&RasterLayersDataComponent>(coords)
+                                .is_some_and(RasterLayersDataComponent::is_missing)
+                        });
+                        [Some(coords), fallback].into_iter().flatten()
+                    })
+                    .collect();
+                for coords in wanted {
+                    if !requested.insert(coords) {
                         continue;
                     }
 
