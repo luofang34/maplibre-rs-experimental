@@ -244,7 +244,10 @@ impl Shader for FillShader {
             entry_point: "main",
             targets: vec![Some(wgpu::ColorTargetState {
                 format: self.format,
-                blend: None,
+                // Fill colours arrive premultiplied; blending them over what is already drawn
+                // keeps translucent fills composited and the target's alpha at one where the
+                // background covers, which the terrain drape relies on to stay opaque.
+                blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
                 write_mask: wgpu::ColorWrites::ALL,
             })],
         }
