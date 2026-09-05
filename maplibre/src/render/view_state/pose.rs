@@ -106,14 +106,14 @@ impl ViewState {
 }
 
 /// Position on the unit Mercator square, with y pointing south.
-fn mercator_from_lat_lon(position: LatLon) -> Point2<f64> {
+pub(super) fn mercator_from_lat_lon(position: LatLon) -> Point2<f64> {
     let x = (position.longitude + 180.0) / 360.0;
     let latitude = position.latitude.to_radians();
     let y = 0.5 - (PI / 4.0 + latitude / 2.0).tan().ln() / (2.0 * PI);
     Point2::new(x, y)
 }
 
-fn lat_lon_at_mercator(point: Point2<f64>) -> LatLon {
+pub(super) fn lat_lon_at_mercator(point: Point2<f64>) -> LatLon {
     LatLon::new(
         latitude_at_mercator_y(point.y).to_degrees(),
         point.x * 360.0 - 180.0,

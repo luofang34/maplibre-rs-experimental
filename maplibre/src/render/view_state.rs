@@ -51,6 +51,8 @@ pub struct ViewState {
     center_elevation_frozen: bool,
     /// The body the map is drawn on; its radius turns metres into pixels.
     body: Body,
+    /// Projection supplied by the host with an external view, used in place of the perspective.
+    external_projection: Option<Matrix4<f64>>,
 }
 
 impl ViewState {
@@ -81,6 +83,7 @@ impl ViewState {
             min_elevation: 0.0,
             center_elevation_frozen: false,
             body: Body::default(),
+            external_projection: None,
         }
     }
 
@@ -260,42 +263,49 @@ impl ViewState {
     /// of the mapbox -> maplibre fork: [src/geo/transform.ts#L680](https://github.com/maplibre/maplibre-gl-js/blob/e78ad7944ef768e67416daa4af86b0464bd0f617/src/geo/transform.ts#L680)
     #[tracing::instrument(skip_all)]
     pub fn view_projection(&self) -> ViewProjection {
-        let width = self.width;
-        let height = self.height;
+        let camera_matrix = self.camera_matrix();
+        match self.external_projection {
+            // The host's projection expects a camera space with y up; the map's camera space
+            // has y down and flips the clip space afterwards instead.
+            Some(projection) => {
+                ViewProjection(OPENGL_TO_WGPU_MATRIX * projection * FLIP_Y * camera_matrix)
+            }
+            None => ViewProjection(
+                FLIP_Y * OPENGL_TO_WGPU_MATRIX * self.perspective_matrix() * camera_matrix,
+            ),
+        }
+    }
 
-        let center = self.edge_insets.center(width, height);
-        // Offset between wanted center and usual/normal center
-        let center_offset = center - Vector2::new(width, height) / 2.0;
+    /// World to camera space: world x and y in pixels, z in metres above sea level.
+    ///
+    /// World z is metres above sea level: shift the center elevation to the orbit point, then
+    /// scale metres to pixels before the camera transform, as GL JS does.
+    fn camera_matrix(&self) -> Matrix4<f64> {
+        self.camera.calc_matrix(self.camera_to_center_distance())
+            * Matrix4::from_nonuniform_scale(1.0, 1.0, self.pixels_per_meter())
+            * Matrix4::from_translation(Vector3::new(0.0, 0.0, -self.center_elevation))
+    }
 
-        let camera_to_center_distance = self.camera_to_center_distance();
-        let pixels_per_meter = self.pixels_per_meter();
-
-        // World z is metres above sea level: shift the center elevation to the orbit point,
-        // then scale metres to pixels before the camera transform, as GL JS does.
-        let camera_matrix = self.camera.calc_matrix(camera_to_center_distance)
-            * Matrix4::from_nonuniform_scale(1.0, 1.0, pixels_per_meter)
-            * Matrix4::from_translation(Vector3::new(0.0, 0.0, -self.center_elevation));
-
+    /// The map's own perspective in OpenGL clip conventions, its vanishing point moved by the
+    /// edge insets.
+    fn perspective_matrix(&self) -> Matrix4<f64> {
+        let center_offset = self.center_offset();
         let (near_z, far_z) = self.depth_range(center_offset);
-
-        let perspective =
-            self.perspective
-                .calc_matrix_with_center(width, height, near_z, far_z, center_offset);
-
-        // Apply camera and move camera away from ground
-        let view_projection = perspective * camera_matrix;
-
-        ViewProjection(FLIP_Y * OPENGL_TO_WGPU_MATRIX * view_projection)
+        self.perspective.calc_matrix_with_center(
+            self.width,
+            self.height,
+            near_z,
+            far_z,
+            center_offset,
+        )
     }
 
     /// The camera's position in world space: x and y in world pixels, z in metres above sea
     /// level, taken from the same transform that projects the scene so it agrees with the
     /// frustum whatever the camera's angles are.
     pub fn eye_position(&self) -> Vector3<f64> {
-        let camera_matrix = self.camera.calc_matrix(self.camera_to_center_distance())
-            * Matrix4::from_nonuniform_scale(1.0, 1.0, self.pixels_per_meter())
-            * Matrix4::from_translation(Vector3::new(0.0, 0.0, -self.center_elevation));
-        let eye = camera_matrix
+        let eye = self
+            .camera_matrix()
             .invert()
             .map_or(Vector4::new(0.0, 0.0, 0.0, 1.0), |inverse| {
                 inverse * Vector4::new(0.0, 0.0, 0.0, 1.0)
@@ -337,7 +347,7 @@ impl ViewState {
 
     pub fn update_zoom(&mut self, new_zoom: Zoom) {
         *self.zoom = new_zoom;
-        log::info!("zoom: {new_zoom}");
+        tracing::debug!(zoom = new_zoom.value(), "zoom changed");
     }
 
     /// Changes the zoom while the map center stays on the same geographic location.
@@ -645,8 +655,10 @@ impl ViewState {
     }
 }
 
+mod external;
 mod pose;
 
+pub use external::{ExternalAnchor, ExternalView, ExternalViewError};
 pub use pose::CameraPose;
 
 #[cfg(test)]
