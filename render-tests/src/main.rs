@@ -23,7 +23,11 @@ use std::{
 use maplibre::io::tile_sources::MAX_OVERZOOMING;
 use maplibre::{
     coords::WorldTileCoords,
-    headless::{create_headless_renderer, map::HeadlessMap, HeadlessPlugin},
+    headless::{
+        create_headless_renderer,
+        map::{HeadlessMap, ProcessedLayers},
+        HeadlessPlugin,
+    },
     platform::run_multithreaded,
     plugin::Plugin,
     raster::{AvailableRasterLayerData, DefaultRasterTransferables, RasterPlugin},
@@ -266,7 +270,7 @@ async fn run_test_inner(test_dir: &Path) -> TestResult {
             }
         }
     };
-    let mut all_layers = Vec::new();
+    let mut all_layers = ProcessedLayers::default();
     let mut all_raster_layers = Vec::new();
 
     let projection = style

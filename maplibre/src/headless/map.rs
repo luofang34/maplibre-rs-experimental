@@ -6,7 +6,7 @@ use thiserror::Error;
 use crate::{
     context::MapContext,
     coords::{LatLon, WorldCoords, WorldTileCoords, Zoom, TILE_SIZE},
-    geojson::{process_geojson_features, GeoJsonTileRequest, ProcessGeoJsonError},
+    geojson::ProcessGeoJsonError,
     headless::environment::HeadlessEnvironment,
     io::{
         apc::{Context, IntoMessage, Message, SendError},
@@ -26,14 +26,20 @@ use crate::{
         Renderer,
     },
     schedule::{Schedule, Stage, StageError},
+    sdf::{SymbolBufferPool, SymbolLayersDataComponent},
     style::{layer::StyleLayer, Style},
     tcs::world::World,
     terrain::{backfill_neighbours, dem::DemTile, source::dem_source, DemTileComponent, LoadedDem},
     vector::{
-        process_vector_tile, AvailableVectorLayerBucket, DefaultVectorTransferables,
-        LayerTessellated, ProcessVectorContext, ProcessVectorError, VectorBufferPool,
-        VectorLayerBucket, VectorLayerBucketComponent, VectorTileRequest, VectorTransferables,
+        transferables::SymbolLayerTessellated, AvailableVectorLayerBucket, ProcessVectorError,
+        VectorBufferPool, VectorLayerBucket, VectorLayerBucketComponent,
     },
+};
+
+mod processed;
+
+pub use processed::{
+    process_geojson_layers, process_tile_layers, ProcessedLayers, SymbolLayer, VectorLayer,
 };
 
 /// Failure while processing or rendering data through a [`HeadlessMap`].
@@ -118,9 +124,10 @@ impl HeadlessMap {
         })
     }
 
+    /// Renders processed vector and symbol layers in one frame.
     pub fn render_tile(
         &mut self,
-        layers: Vec<Box<<DefaultVectorTransferables as VectorTransferables>::LayerTessellated>>,
+        layers: ProcessedLayers,
     ) -> Result<(), HeadlessMapOperationError> {
         self.render_sources(layers, Vec::new())
     }
@@ -128,7 +135,7 @@ impl HeadlessMap {
     /// Renders already-decoded vector and raster source tiles in one frame.
     pub fn render_sources(
         &mut self,
-        layers: Vec<Box<<DefaultVectorTransferables as VectorTransferables>::LayerTessellated>>,
+        layers: ProcessedLayers,
         raster_layers: Vec<AvailableRasterLayerData>,
     ) -> Result<(), HeadlessMapOperationError> {
         self.render_source_frames(layers, raster_layers, 1)
@@ -137,7 +144,7 @@ impl HeadlessMap {
     /// Renders the same decoded source tiles for a fixed number of consecutive frames.
     pub fn render_source_frames(
         &mut self,
-        layers: Vec<Box<<DefaultVectorTransferables as VectorTransferables>::LayerTessellated>>,
+        layers: ProcessedLayers,
         raster_layers: Vec<AvailableRasterLayerData>,
         frame_count: u8,
     ) -> Result<(), HeadlessMapOperationError> {
@@ -186,7 +193,7 @@ impl HeadlessMap {
 
     pub fn render_frames_with_terrain(
         &mut self,
-        layers: Vec<Box<<DefaultVectorTransferables as VectorTransferables>::LayerTessellated>>,
+        layers: ProcessedLayers,
         raster_layers: Vec<AvailableRasterLayerData>,
         dem_tiles: Vec<(WorldTileCoords, RgbaImage)>,
         frame_count: u8,
@@ -199,9 +206,10 @@ impl HeadlessMap {
         }
         let context = &mut self.map_context;
         let tiles = &mut context.world.tiles;
+        let ProcessedLayers { vector, symbols } = layers;
 
         let mut layers_by_tile = BTreeMap::new();
-        for layer in layers {
+        for layer in vector {
             layers_by_tile
                 .entry(layer.coords)
                 .or_insert_with(Vec::new)
@@ -222,6 +230,20 @@ impl HeadlessMap {
                 .spawn_mut(coords)
                 .ok_or(HeadlessMapOperationError::InvalidTile { coords })?
                 .insert(VectorLayerBucketComponent { done: true, layers });
+        }
+
+        let mut symbols_by_tile = BTreeMap::new();
+        for layer in symbols {
+            symbols_by_tile
+                .entry(layer.coords())
+                .or_insert_with(Vec::new)
+                .push((*layer).to_bucket());
+        }
+        for (coords, layers) in symbols_by_tile {
+            tiles
+                .spawn_mut(coords)
+                .ok_or(HeadlessMapOperationError::InvalidTile { coords })?
+                .insert(SymbolLayersDataComponent { layers });
         }
 
         let mut rasters_by_tile = BTreeMap::new();
@@ -256,6 +278,11 @@ impl HeadlessMap {
 
         if let Some(Eventually::Initialized(pool)) =
             resources.query_mut::<&mut Eventually<VectorBufferPool>>()
+        {
+            pool.clear();
+        }
+        if let Some(Eventually::Initialized(pool)) =
+            resources.query_mut::<&mut Eventually<SymbolBufferPool>>()
         {
             pool.clear();
         }
@@ -322,14 +349,12 @@ impl HeadlessMap {
         Ok(data)
     }
 
+    /// Processes one vector source tile for a style layer at the origin tile in Mercator.
     pub async fn process_tile(
         &self,
         tile_data: Box<[u8]>,
         layer: &StyleLayer,
-    ) -> Result<
-        Vec<Box<<DefaultVectorTransferables as VectorTransferables>::LayerTessellated>>,
-        HeadlessMapOperationError,
-    > {
+    ) -> Result<ProcessedLayers, HeadlessMapOperationError> {
         self.process_tile_at(
             tile_data,
             layer,
@@ -345,32 +370,8 @@ impl HeadlessMap {
         layer: &StyleLayer,
         target_coords: WorldTileCoords,
         projection: crate::projection::ProjectionType,
-    ) -> Result<
-        Vec<Box<<DefaultVectorTransferables as VectorTransferables>::LayerTessellated>>,
-        HeadlessMapOperationError,
-    > {
-        let context = HeadlessContext::default();
-        let mut processor =
-            ProcessVectorContext::<DefaultVectorTransferables, HeadlessContext>::new(context);
-
-        process_vector_tile(
-            &tile_data,
-            VectorTileRequest {
-                coords: target_coords,
-                layers: [layer].into_iter().cloned().collect(),
-                projection,
-            },
-            &mut processor,
-        )
-        .map_err(|source| HeadlessMapOperationError::Vector { source })?;
-
-        let messages = processor.take_context().messages.deref().take();
-        let layers = messages.into_iter()
-            .filter(|message| message.tag() == <DefaultVectorTransferables as VectorTransferables>::LayerTessellated::message_tag())
-            .map(|message| message.into_transferable::<<DefaultVectorTransferables as VectorTransferables>::LayerTessellated>())
-            .collect::<Vec<_>>();
-
-        Ok(layers)
+    ) -> Result<ProcessedLayers, HeadlessMapOperationError> {
+        process_tile_layers(&tile_data, layer, target_coords, projection)
     }
 
     /// Process inline GeoJSON data for the given style layers and tile coordinates.
@@ -383,37 +384,14 @@ impl HeadlessMap {
         matching_layers: Vec<StyleLayer>,
         target_coords: WorldTileCoords,
         projection: crate::projection::ProjectionType,
-    ) -> Result<
-        Vec<Box<<DefaultVectorTransferables as VectorTransferables>::LayerTessellated>>,
-        HeadlessMapOperationError,
-    > {
-        let context = HeadlessContext::default();
-
-        process_geojson_features::<DefaultVectorTransferables, HeadlessContext>(
+    ) -> Result<ProcessedLayers, HeadlessMapOperationError> {
+        process_geojson_layers(
             geojson_value,
-            GeoJsonTileRequest {
-                coords: target_coords,
-                layers: matching_layers,
-                source_name: source_name.to_owned(),
-                projection,
-            },
-            &context,
+            source_name,
+            matching_layers,
+            target_coords,
+            projection,
         )
-        .map_err(|source| HeadlessMapOperationError::GeoJson { source })?;
-
-        let messages = context.messages.deref().take();
-        Ok(messages
-            .into_iter()
-            .filter(|message| {
-                message.tag()
-                    == <DefaultVectorTransferables as VectorTransferables>::LayerTessellated::message_tag()
-            })
-            .map(|message| {
-                message.into_transferable::<
-                    <DefaultVectorTransferables as VectorTransferables>::LayerTessellated,
-                >()
-            })
-            .collect())
     }
 }
 

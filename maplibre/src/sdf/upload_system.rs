@@ -1,6 +1,6 @@
 //! Uploads data to the GPU which is needed for rendering.
 
-use std::{collections::HashSet, iter};
+use std::collections::HashSet;
 
 use crate::{
     context::MapContext,
@@ -93,7 +93,6 @@ fn upload_symbol_layer(
         for style_layer in &style.layers {
             let Some(SymbolLayerData {
                 coords,
-                features,
                 new_buffer: buffer,
                 ..
             }) = pending_layer_data(&vector_layers.layers, &loaded_layers, style_layer)
@@ -101,19 +100,11 @@ fn upload_symbol_layer(
                 continue;
             };
 
-            // Per-vertex opacity metadata. Default to 1.0 (visible) so text renders
-            // even when collision detection features are not yet populated.
-            let metadata_count = if features.is_empty() {
-                buffer.buffer.vertices.len()
-            } else {
-                features
-                    .last()
-                    .map(|feature| feature.indices.end)
-                    .unwrap_or_default()
-            };
-            let feature_metadata = iter::repeat(SDFShaderFeatureMetadata { opacity: 1.0 })
-                .take(metadata_count)
-                .collect::<Vec<_>>();
+            // One opacity entry per vertex, visible until collision detection hides a label;
+            // the features of a layout that does not attribute quads to labels cover no
+            // vertices, so the vertex count is the only reliable size.
+            let feature_metadata =
+                vec![SDFShaderFeatureMetadata { opacity: 1.0 }; buffer.buffer.vertices.len()];
 
             // FIXME avoid uploading empty indices
             if buffer.buffer.indices.is_empty() {

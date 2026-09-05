@@ -85,17 +85,12 @@ impl System for CollisionSystem {
             let coords = view_tile.coords();
             if let Some(component) = world.tiles.query::<&SymbolLayersDataComponent>(coords) {
                 for layer in &component.layers {
-                    let metadata_count = if layer.features.is_empty() {
+                    // One opacity entry per vertex; labels whose index ranges are empty
+                    // leave every vertex visible.
+                    let mut feature_metadata = vec![
+                        SDFShaderFeatureMetadata { opacity: 1.0 };
                         layer.new_buffer.buffer.vertices.len()
-                    } else {
-                        layer
-                            .features
-                            .last()
-                            .map(|feature| feature.indices.end)
-                            .unwrap_or_default()
-                    };
-                    let mut feature_metadata =
-                        vec![SDFShaderFeatureMetadata { opacity: 1.0 }; metadata_count];
+                    ];
 
                     for feature in &layer.features {
                         let is_occluded = globe_camera.as_ref().is_some_and(|camera| {
