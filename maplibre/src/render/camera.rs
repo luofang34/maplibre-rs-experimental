@@ -140,10 +140,12 @@ impl Camera {
     }
 
     pub fn calc_matrix(&self, camera_height: f64) -> Matrix4<f64> {
+        // Roll carries the map bearing. GL JS turns the world by minus the bearing so that a
+        // bearing of 90 degrees puts east at the top of the screen.
         Matrix4::from_translation(Vector3::new(0.0, 0.0, -camera_height))
             * Matrix4::from_angle_x(self.pitch)
             * Matrix4::from_angle_y(self.yaw)
-            * Matrix4::from_angle_z(self.roll)
+            * Matrix4::from_angle_z(-self.roll)
             * Matrix4::from_translation(Vector3::new(-self.position.x, -self.position.y, 0.0))
     }
 

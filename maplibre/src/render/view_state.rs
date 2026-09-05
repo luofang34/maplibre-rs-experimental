@@ -694,6 +694,25 @@ mod tests {
     }
 
     #[test]
+    fn a_bearing_of_ninety_degrees_puts_east_at_the_top_of_the_screen() {
+        let mut state = state_at(2.0, Deg(0.0));
+        state.camera_mut().set_roll(Deg(90.0));
+        let center = state.camera().position();
+
+        let clip =
+            state
+                .view_projection()
+                .project(Vector4::new(center.x + 100.0, center.y, 0.0, 1.0));
+        let window = state.clip_to_window(&clip);
+
+        assert!(
+            (window.x - 400.0).abs() < 1e-6,
+            "east stays centred: {window:?}"
+        );
+        assert!(window.y < 300.0, "east is above the centre: {window:?}");
+    }
+
+    #[test]
     fn far_plane_stays_finite_at_high_pitch() {
         let mut state = state_at(12.0, Deg(0.0));
         state.set_max_pitch(Deg(85.0));
