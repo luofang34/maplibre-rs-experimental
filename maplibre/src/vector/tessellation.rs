@@ -144,6 +144,9 @@ pub struct ZeroTessellator<I: std::ops::Add + From<lyon::tessellation::VertexId>
     pub coordinate_scale: f64,
     /// When set, every coordinate becomes a circle quad and no path is built.
     circle: Option<CircleOptions>,
+    /// The layer's opacity property and the zoom it is evaluated at, multiplied into every
+    /// feature's colour alpha.
+    feature_opacity: Option<(crate::style::layer::StyleProperty<f32>, f64)>,
 
     pub buffer: VertexBuffers<ShaderVertex, I>,
 
@@ -182,6 +185,7 @@ impl<I: std::ops::Add + From<lyon::tessellation::VertexId> + MaxIndex> Default
             extend_to_south_pole: false,
             coordinate_scale: 1.0,
             circle: None,
+            feature_opacity: None,
         }
     }
 }
@@ -190,6 +194,17 @@ impl<I> ZeroTessellator<I>
 where
     I: std::ops::Add + From<lyon::tessellation::VertexId> + MaxIndex + Copy + Into<u32>,
 {
+    /// Multiplies the layer's opacity property, evaluated per feature at `zoom`, into every
+    /// feature colour, as GL JS folds `fill-opacity`, `line-opacity` and `circle-opacity`.
+    pub fn with_feature_opacity(
+        mut self,
+        opacity: Option<crate::style::layer::StyleProperty<f32>>,
+        zoom: f64,
+    ) -> Self {
+        self.feature_opacity = opacity.map(|opacity| (opacity, zoom));
+        self
+    }
+
     /// Configures geometry subdivision for a globe tile.
     pub fn with_globe_subdivision(
         mut self,
@@ -440,8 +455,11 @@ where
         } else {
             self.fallback_color
         };
-        if let Some(circle) = &self.circle {
-            color[3] *= circle.opacity_for(&self.feature_properties);
+        if let Some((opacity, zoom)) = &self.feature_opacity {
+            color[3] *= opacity
+                .evaluate_number(&self.feature_properties, *zoom)
+                .unwrap_or(1.0)
+                .clamp(0.0, 1.0);
         }
 
         self.feature_colors.push(color);

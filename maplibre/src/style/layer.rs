@@ -264,6 +264,14 @@ pub struct FillPaint {
     )]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fill_color: Option<StyleProperty<Color>>,
+    /// Opacity multiplied into the fill colour, per feature where data driven.
+    #[serde(rename = "fill-opacity")]
+    #[serde(
+        default,
+        deserialize_with = "StyleProperty::<f32>::deserialize_f32_or_none"
+    )]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fill_opacity: Option<StyleProperty<f32>>,
     /// Translation in screen pixels before conversion to tile units.
     #[serde(rename = "fill-translate", default)]
     pub fill_translate: Option<[f32; 2]>,
@@ -289,6 +297,14 @@ pub struct LinePaint {
         deserialize_with = "StyleProperty::<f32>::deserialize_f32_or_none"
     )]
     pub line_width: Option<StyleProperty<f32>>,
+    /// Opacity multiplied into the line colour, per feature where data driven.
+    #[serde(rename = "line-opacity")]
+    #[serde(
+        default,
+        deserialize_with = "StyleProperty::<f32>::deserialize_f32_or_none"
+    )]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line_opacity: Option<StyleProperty<f32>>,
     /// Translation in screen pixels before conversion to tile units.
     #[serde(rename = "line-translate", default)]
     pub line_translate: Option<[f32; 2]>,
@@ -430,6 +446,16 @@ pub enum LayerPaint {
 }
 
 impl LayerPaint {
+    /// The opacity property multiplied into the layer's colour, when the layer type has one.
+    pub fn opacity(&self) -> Option<StyleProperty<f32>> {
+        match self {
+            LayerPaint::Fill(paint) => paint.fill_opacity.clone(),
+            LayerPaint::Line(paint) => paint.line_opacity.clone(),
+            LayerPaint::Circle(paint) => paint.circle_opacity.clone(),
+            LayerPaint::Background(_) | LayerPaint::Raster(_) | LayerPaint::Symbol(_) => None,
+        }
+    }
+
     pub fn get_color(&self) -> Option<Alpha<EncodedSrgb<f32>>> {
         match self {
             LayerPaint::Background(paint) => paint.background_color.as_ref().and_then(|property| {
@@ -725,6 +751,35 @@ mod tests {
         let empty_props = HashMap::new();
         let color = prop.evaluate(&empty_props).unwrap();
         assert_eq!(color.to_rgba8(), [9, 9, 9, 255]);
+    }
+
+    #[test]
+    fn fill_and_line_layers_carry_their_opacity_property() {
+        let fill: StyleLayer = serde_json::from_value(serde_json::json!({
+            "id": "water", "type": "fill", "source": "s",
+            "paint": {"fill-color": "#0000ff", "fill-opacity": 0.3}
+        }))
+        .expect("layer parses");
+        let line: StyleLayer = serde_json::from_value(serde_json::json!({
+            "id": "road", "type": "line", "source": "s",
+            "paint": {"line-opacity": {"stops": [[0, 0.5], [1, 0.6]]}}
+        }))
+        .expect("layer parses");
+        let plain: StyleLayer = serde_json::from_value(serde_json::json!({
+            "id": "land", "type": "fill", "source": "s", "paint": {"fill-color": "#00ff00"}
+        }))
+        .expect("layer parses");
+
+        let opacity = |layer: &StyleLayer| layer.paint.as_ref().and_then(LayerPaint::opacity);
+        assert!(matches!(opacity(&fill), Some(StyleProperty::Constant(value)) if value == 0.3));
+        assert!(
+            opacity(&line)
+                .expect("line opacity")
+                .evaluate_number(&Default::default(), 0.5)
+                .is_some_and(|value| (value - 0.55).abs() < 1e-6),
+            "zoom functions evaluate at the zoom"
+        );
+        assert!(opacity(&plain).is_none());
     }
 
     #[test]

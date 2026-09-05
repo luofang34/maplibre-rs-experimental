@@ -84,12 +84,18 @@ mod circles {
         radius: StyleProperty<f32>,
         stroke_width: f32,
     ) -> ZeroTessellator<IndexDataType> {
-        ZeroTessellator::<IndexDataType>::default().with_circles(CircleOptions {
-            radius,
-            stroke_width: StyleProperty::Constant(stroke_width),
-            opacity: StyleProperty::Expression(serde_json::json!(["get", "alpha"])),
-            zoom: 3.0,
-        })
+        ZeroTessellator::<IndexDataType>::default()
+            .with_circles(CircleOptions {
+                radius,
+                stroke_width: StyleProperty::Constant(stroke_width),
+                zoom: 3.0,
+            })
+            .with_feature_opacity(
+                Some(StyleProperty::Expression(serde_json::json!([
+                    "get", "alpha"
+                ]))),
+                3.0,
+            )
     }
 
     #[test]

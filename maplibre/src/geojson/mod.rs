@@ -319,7 +319,8 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
                         )
                     }
                     _ => ZeroTessellator::<IndexDataType>::default(),
-                };
+                }
+                .with_feature_opacity(paint.opacity(), f64::from(zoom));
                 match paint {
                     LayerPaint::Fill(p) => tessellator.style_property = p.fill_color.clone(),
                     LayerPaint::Circle(p) => tessellator.style_property = p.circle_color.clone(),

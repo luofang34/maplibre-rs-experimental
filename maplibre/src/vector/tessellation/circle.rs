@@ -24,8 +24,6 @@ pub struct CircleOptions {
     pub radius: StyleProperty<f32>,
     /// Stroke width in screen pixels, evaluated per feature.
     pub stroke_width: StyleProperty<f32>,
-    /// Folded into each feature's colour alpha, so it can be data driven.
-    pub opacity: StyleProperty<f32>,
     /// Zoom of the tile, at which zoom-driven properties are evaluated.
     pub zoom: f64,
 }
@@ -36,23 +34,8 @@ impl CircleOptions {
         Self {
             radius: paint.radius(),
             stroke_width: paint.stroke_width(),
-            opacity: paint
-                .circle_opacity
-                .clone()
-                .unwrap_or(StyleProperty::Constant(1.0)),
             zoom,
         }
-    }
-
-    /// Fill opacity of the feature whose properties the tessellator holds.
-    pub(super) fn opacity_for(
-        &self,
-        properties: &std::collections::HashMap<String, String>,
-    ) -> f32 {
-        self.opacity
-            .evaluate_number(properties, self.zoom)
-            .unwrap_or(1.0)
-            .clamp(0.0, 1.0)
     }
 }
 

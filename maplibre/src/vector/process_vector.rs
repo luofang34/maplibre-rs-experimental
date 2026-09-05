@@ -200,7 +200,11 @@ pub fn process_vector_tile<T: VectorTransferables, C: Context>(
                                 )
                             }
                             _ => ZeroTessellator::<IndexDataType>::default(),
-                        };
+                        }
+                        .with_feature_opacity(
+                            paint.opacity(),
+                            f64::from(u8::from(tile_request.coords.z)),
+                        );
                         tessellator.coordinate_scale = coordinate_scale;
                         match paint {
                             LayerPaint::Fill(p) => {
