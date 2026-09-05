@@ -1,5 +1,6 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
+use crate::projection::body::Body;
 use cgmath::{InnerSpace, Point2, SquareMatrix, Vector3};
 
 use super::{GlobeCameraError, GlobeCameraOptions, GlobeCameraState};
@@ -16,6 +17,8 @@ fn options() -> GlobeCameraOptions {
         pitch_degrees: 0.0,
         roll_degrees: 0.0,
         center_offset: Point2::new(0.0, 0.0),
+
+        body: Body::EARTH,
     }
 }
 

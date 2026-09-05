@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod body;
 mod expression;
 pub mod globe;
 pub mod mercator;

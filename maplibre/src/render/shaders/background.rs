@@ -5,6 +5,7 @@ use thiserror::Error;
 
 use super::{Mat4x4f32, Shader, ShaderTileMetadata};
 use crate::{
+    projection::body::Body,
     projection::globe::camera::GlobeCameraState,
     render::resource::{FragmentState, VertexBufferLayout, VertexState},
     style::light::{LightError, LightSpecification},
@@ -44,7 +45,7 @@ impl AtmosphereLayerMetadata {
             inverse_projection: cgmath::Matrix4::from_scale(1.0).into(),
             globe_position: [0.0; 4],
             sun_direction: [0.0, 0.0, 1.0, 0.0],
-            radius_blend_padding: [1.0, 0.0, 0.0, 0.0],
+            radius_blend_padding: [1.0, 0.0, Body::EARTH.radius_meters as f32, 0.0],
         }
     }
 
@@ -76,7 +77,12 @@ impl AtmosphereLayerMetadata {
             inverse_projection: inverse_projection.into(),
             globe_position: [globe_position.x, globe_position.y, globe_position.z, 0.0],
             sun_direction: [sun_direction.x, sun_direction.y, sun_direction.z, 0.0],
-            radius_blend_padding: [radius, blend.clamp(0.0, 1.0), 0.0, 0.0],
+            radius_blend_padding: [
+                radius,
+                blend.clamp(0.0, 1.0),
+                camera.body().radius_meters as f32,
+                0.0,
+            ],
         })
     }
 }

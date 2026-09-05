@@ -3,8 +3,9 @@
 use cgmath::{InnerSpace, Point2, Vector3, Vector4};
 use thiserror::Error;
 
-use super::{project_tile_coordinates_to_unit_sphere, EARTH_RADIUS_METERS};
+use super::project_tile_coordinates_to_unit_sphere;
 use crate::coords::{TileCoords, EXTENT};
+use crate::projection::body::Body;
 
 /// Minimum and maximum elevation included in a tile bounding volume.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -107,10 +108,11 @@ pub const fn allows_world_copies() -> bool {
 pub fn globe_tile_bounding_volume(
     tile: TileCoords,
     elevation: TileElevationRange,
+    body: Body,
 ) -> Result<GlobeTileBoundingVolume, GlobeTileBoundsError> {
     validate_elevation(elevation)?;
-    let min_radius = 1.0 + elevation.min_meters.min(0.0) / EARTH_RADIUS_METERS;
-    let max_radius = 1.0 + elevation.max_meters.max(0.0) / EARTH_RADIUS_METERS;
+    let min_radius = body.unit_radius_at(elevation.min_meters.min(0.0));
+    let max_radius = body.unit_radius_at(elevation.max_meters.max(0.0));
     match u8::from(tile.z) {
         0 => Ok(aabb_volume(
             Vector3::new(-max_radius, -max_radius, -max_radius),

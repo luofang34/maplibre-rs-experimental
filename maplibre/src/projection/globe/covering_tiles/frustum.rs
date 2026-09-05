@@ -163,6 +163,7 @@ mod tests {
     use super::GlobeFrustum;
     use crate::{
         coords::{LatLon, TileCoords, ZoomLevel, TILE_SIZE},
+        projection::body::Body,
         projection::globe::{
             camera::{GlobeCameraOptions, GlobeCameraState},
             covering::{globe_tile_bounding_volume, TileElevationRange},
@@ -181,6 +182,8 @@ mod tests {
             pitch_degrees: 80.0,
             roll_degrees: 0.0,
             center_offset: Point2::new(0.0, 0.0),
+
+            body: Body::EARTH,
         })
         .expect("reference camera should be valid");
         let frustum = GlobeFrustum::from_camera(&camera);
@@ -190,6 +193,7 @@ mod tests {
                 min_meters: 0.0,
                 max_meters: 500.0,
             },
+            Body::EARTH,
         )
         .expect("reference tile bounds should be valid");
 

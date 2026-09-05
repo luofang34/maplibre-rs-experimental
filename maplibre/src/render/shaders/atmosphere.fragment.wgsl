@@ -4,13 +4,14 @@ struct VertexInput {
     @location(2) @interpolate(flat) sun_direction: vec3<f32>,
     @location(3) @interpolate(flat) globe_radius: f32,
     @location(4) @interpolate(flat) atmosphere_blend: f32,
+    @location(5) @interpolate(flat) body_radius: f32,
 };
 
 const ATMOSPHERE_PI: f32 = 3.141592653589793;
 const PRIMARY_STEPS: u32 = 5u;
 const SECONDARY_STEPS: u32 = 3u;
-const EARTH_RADIUS: f32 = 6371000.0;
-const ATMOSPHERE_RADIUS: f32 = 6471000.0;
+// Height of the scattering atmosphere above the body's surface.
+const ATMOSPHERE_THICKNESS: f32 = 100000.0;
 const RAYLEIGH_COEFFICIENT: vec3<f32> = vec3<f32>(5.5e-6, 13.0e-6, 22.4e-6);
 const MIE_COEFFICIENT: f32 = 21.0e-6;
 const RAYLEIGH_SCALE_HEIGHT: f32 = 8000.0;
@@ -37,19 +38,21 @@ fn scattering(
     raw_ray_direction: vec3<f32>,
     ray_origin: vec3<f32>,
     raw_sun_direction: vec3<f32>,
+    body_radius: f32,
 ) -> vec4<f32> {
+    let atmosphere_radius = body_radius + ATMOSPHERE_THICKNESS;
     let sun_direction = normalize(raw_sun_direction);
     let ray_direction = normalize(raw_ray_direction);
     var primary_range = ray_sphere_intersection(
         ray_origin,
         ray_direction,
-        ATMOSPHERE_RADIUS,
+        atmosphere_radius,
     );
     if primary_range.x > primary_range.y {
         return vec4<f32>(0.0, 0.0, 0.0, 1.0);
     }
     primary_range.x = max(primary_range.x, 0.0);
-    let planet_range = ray_sphere_intersection(ray_origin, ray_direction, EARTH_RADIUS);
+    let planet_range = ray_sphere_intersection(ray_origin, ray_direction, body_radius);
     if planet_range.x <= planet_range.y && planet_range.x > 0.0 {
         primary_range.y = min(primary_range.y, planet_range.x);
     }
@@ -72,7 +75,7 @@ fn scattering(
 
     for (var primary_index = 0u; primary_index < PRIMARY_STEPS; primary_index++) {
         let primary_position = ray_origin + ray_direction * primary_time;
-        let primary_height = length(primary_position) - EARTH_RADIUS;
+        let primary_height = length(primary_position) - body_radius;
         let depth_step_rayleigh = exp(-primary_height / RAYLEIGH_SCALE_HEIGHT)
             * primary_step_size;
         let depth_step_mie = exp(-primary_height / MIE_SCALE_HEIGHT) * primary_step_size;
@@ -82,7 +85,7 @@ fn scattering(
         let secondary_step_size = ray_sphere_intersection(
             primary_position,
             sun_direction,
-            ATMOSPHERE_RADIUS,
+            atmosphere_radius,
         ).y / f32(SECONDARY_STEPS);
         var secondary_time = secondary_step_size * 0.5;
         var secondary_depth_rayleigh = 0.0;
@@ -91,7 +94,7 @@ fn scattering(
             secondary_index < SECONDARY_STEPS;
             secondary_index++) {
             let secondary_position = primary_position + sun_direction * secondary_time;
-            let secondary_height = length(secondary_position) - EARTH_RADIUS;
+            let secondary_height = length(secondary_position) - body_radius;
             secondary_depth_rayleigh += exp(-secondary_height / RAYLEIGH_SCALE_HEIGHT)
                 * secondary_step_size;
             secondary_depth_mie += exp(-secondary_height / MIE_SCALE_HEIGHT)
@@ -122,11 +125,12 @@ fn scattering(
 
 @fragment
 fn main(in: VertexInput) -> @location(0) vec4<f32> {
-    let camera_relative_to_globe = -in.globe_position * EARTH_RADIUS / in.globe_radius;
+    let camera_relative_to_globe = -in.globe_position * in.body_radius / in.globe_radius;
     let raw_color = scattering(
         normalize(in.view_direction),
         camera_relative_to_globe,
         in.sun_direction,
+        in.body_radius,
     );
     let exposed = vec3<f32>(1.0) - exp(-raw_color.rgb);
     let gamma = 1.0 / 2.2;

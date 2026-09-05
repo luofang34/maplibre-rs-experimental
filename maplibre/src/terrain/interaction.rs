@@ -9,9 +9,9 @@ use cgmath::{EuclideanSpace, InnerSpace, Point2, Vector2, Vector3};
 
 use crate::{
     coords::{LatLon, Zoom, TILE_SIZE},
+    projection::body::Body,
     projection::globe::{
         camera::GlobeCameraState, ray_sphere_intersection, unit_sphere_to_lat_lon,
-        EARTH_RADIUS_METERS,
     },
     render::{
         projection::{globe_camera_for_view, mercator_world_to_lat_lon},
@@ -195,12 +195,12 @@ pub fn screen_point_to_terrain_globe(
     let outer = ray_sphere_intersection(
         origin,
         direction,
-        1.0 + index.max_elevation() / EARTH_RADIUS_METERS,
+        camera.body().unit_radius_at(index.max_elevation()),
     )?;
     let inner = ray_sphere_intersection(
         origin,
         direction,
-        1.0 + index.min_elevation() / EARTH_RADIUS_METERS,
+        camera.body().unit_radius_at(index.min_elevation()),
     );
     let t_start = outer.t_min.max(0.0);
     let t_end = inner.map_or(outer.t_max, |inner| inner.t_min);
@@ -220,7 +220,7 @@ pub fn screen_point_to_terrain_globe(
     };
     let below = |t: f64| {
         let (sample, radius, _) = sample_at(t);
-        is_below_terrain(sample, (radius - 1.0) * EARTH_RADIUS_METERS)
+        is_below_terrain(sample, (radius - 1.0) * camera.body().radius_meters)
     };
     let mut previous = 0.0;
     for step in 0..=GLOBE_SAMPLES {
@@ -427,11 +427,8 @@ pub fn recalculate_zoom_and_center(view_state: &mut ViewState, elevation: f64) {
         distance_to_center_from_altitude(camera_altitude, elevation, pitch);
     let new_center = camera + Vector2::new(x, y) * (distance_meters * pixels_per_meter);
     let latitude = mercator_world_to_lat_lon(new_center.x, new_center.y, world_size).latitude;
-    let new_world_size = distance / distance_meters
-        * 2.0
-        * std::f64::consts::PI
-        * EARTH_RADIUS_METERS
-        * latitude.to_radians().cos();
+    let new_world_size =
+        distance / distance_meters * view_state.body().circumference_at_latitude(latitude);
     if !new_world_size.is_finite() || new_world_size <= 0.0 {
         return;
     }
@@ -478,6 +475,7 @@ pub fn keep_camera_above_terrain(style: &Style, view_state: &mut ViewState, worl
     // Both altitudes use the Mercator scale at the center, the scale the camera altitude is
     // measured with, so the lifted camera lands on the surface rather than a few metres off.
     let circumference = circumference_at_latitude(
+        view_state.body(),
         mercator_world_to_lat_lon(center.x, center.y, world_size).latitude,
     );
     let from = Vector3::new(
@@ -509,8 +507,8 @@ pub fn keep_camera_above_terrain(style: &Style, view_state: &mut ViewState, worl
 }
 
 /// Metres around the parallel at a latitude, the length one Mercator unit covers there.
-fn circumference_at_latitude(latitude_degrees: f64) -> f64 {
-    2.0 * std::f64::consts::PI * EARTH_RADIUS_METERS * latitude_degrees.to_radians().cos()
+fn circumference_at_latitude(body: Body, latitude_degrees: f64) -> f64 {
+    body.circumference_at_latitude(latitude_degrees)
 }
 
 #[cfg(test)]

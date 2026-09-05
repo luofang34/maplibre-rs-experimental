@@ -12,6 +12,7 @@ use super::{
 };
 use crate::{
     coords::{LatLon, TileCoords, EXTENT},
+    projection::body::Body,
     projection::{
         globe::globe_radius_pixels,
         renderer_data::{compute_globe_clipping_plane, GlobeViewGeometry, ProjectionDataError},
@@ -44,6 +45,8 @@ pub struct GlobeCameraOptions {
     pub roll_degrees: f64,
     /// Offset of the perspective center from viewport center, in pixels.
     pub center_offset: Point2<f64>,
+    /// The body the globe stands for; its radius scales elevations onto the unit sphere.
+    pub body: Body,
 }
 
 /// Screen projection of a globe point.
@@ -303,14 +306,24 @@ impl GlobeCameraState {
     ) -> GlobePointProjection {
         let surface =
             project_tile_coordinates_to_unit_sphere(tile.x, tile.y, u8::from(tile.z), x, y);
-        self.project_surface_point(elevate_surface_point(surface, elevation_meters), surface)
+        self.project_surface_point(
+            elevate_surface_point(surface, elevation_meters, self.options.body),
+            surface,
+        )
+    }
+
+    /// The body the globe stands for.
+    pub fn body(&self) -> Body {
+        self.options.body
     }
 
     /// Projects a geographic location to viewport pixels.
     pub fn location_to_screen(&self, location: LatLon, elevation_meters: f64) -> Point2<f64> {
         let surface = lat_lon_to_unit_sphere(location);
-        let projected =
-            self.project_surface_point(elevate_surface_point(surface, elevation_meters), surface);
+        let projected = self.project_surface_point(
+            elevate_surface_point(surface, elevation_meters, self.options.body),
+            surface,
+        );
         Point2::new(
             (projected.point.x * 0.5 + 0.5) * self.options.width,
             (-projected.point.y * 0.5 + 0.5) * self.options.height,

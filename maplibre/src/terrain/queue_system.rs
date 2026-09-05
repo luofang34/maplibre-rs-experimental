@@ -7,7 +7,7 @@ use cgmath::{Matrix4, SquareMatrix, Vector3};
 use crate::{
     context::MapContext,
     coords::{WorldTileCoords, Zoom, EXTENT, TILE_SIZE},
-    projection::{globe::EARTH_RADIUS_METERS, renderer_data::tile_mercator_coordinates},
+    projection::renderer_data::tile_mercator_coordinates,
     raster::{render_commands::DrawRasterTiles, resource::RasterResources},
     render::{
         eventually::{Eventually, Eventually::Initialized},
@@ -129,7 +129,7 @@ pub fn queue_system(
     let phase = build_drape_phase(&specs, &redraw, &slots, &ranges, zoom, clear_color);
 
     let gpu_view_projection = view_state.gpu_view_projection();
-    let skirt_length = 2.0 * std::f64::consts::PI * EARTH_RADIUS_METERS
+    let skirt_length = view_state.body().circumference_meters()
         / 2_f64.powf(zoom.value().max(0.0))
         / SKIRT_DIVISOR;
     {

@@ -7,7 +7,7 @@ use cgmath::{prelude::*, *};
 
 use crate::{
     coords::{ViewRegion, WorldCoords, Zoom, ZoomLevel, TILE_SIZE},
-    projection::globe::EARTH_RADIUS_METERS,
+    projection::body::Body,
     render::camera::{
         Camera, EdgeInsets, InvertedViewProjection, Perspective, ViewProjection, FLIP_Y,
         OPENGL_TO_WGPU_MATRIX, REVERSED_Z,
@@ -49,6 +49,8 @@ pub struct ViewState {
     min_elevation: f64,
     /// Whether a gesture holds the center elevation still, as GL JS `elevationFreeze` does.
     center_elevation_frozen: bool,
+    /// The body the map is drawn on; its radius turns metres into pixels.
+    body: Body,
 }
 
 impl ViewState {
@@ -78,7 +80,18 @@ impl ViewState {
             center_elevation: 0.0,
             min_elevation: 0.0,
             center_elevation_frozen: false,
+            body: Body::default(),
         }
+    }
+
+    /// The body the map is drawn on.
+    pub fn body(&self) -> Body {
+        self.body
+    }
+
+    /// Draws the map on another body; every metre-to-pixel conversion follows its radius.
+    pub fn set_body(&mut self, body: Body) {
+        self.body = body;
     }
 
     /// Terrain elevation in metres at the map center.
@@ -129,7 +142,7 @@ impl ViewState {
         let latitude = (f64::consts::PI * (1.0 - 2.0 * self.camera.position().y / world_size))
             .sinh()
             .atan();
-        world_size / (2.0 * f64::consts::PI * EARTH_RADIUS_METERS * latitude.cos())
+        world_size / (self.body.circumference_meters() * latitude.cos())
     }
     pub fn set_edge_insets(&mut self, edge_insets: EdgeInsets) {
         self.edge_insets = edge_insets;

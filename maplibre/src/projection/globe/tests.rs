@@ -1,5 +1,6 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
+use crate::projection::body::Body;
 use std::f64::consts::SQRT_2;
 
 use cgmath::{InnerSpace, Vector3, Vector4};
@@ -146,7 +147,7 @@ fn globe_interpolation_preserves_endpoints() {
 
 #[test]
 fn elevation_extends_radially() {
-    let elevated = elevate_surface_point(Vector3::unit_z(), EARTH_RADIUS_METERS);
+    let elevated = elevate_surface_point(Vector3::unit_z(), EARTH_RADIUS_METERS, Body::EARTH);
     assert_vector_close(elevated, Vector3::new(0.0, 0.0, 2.0));
 }
 

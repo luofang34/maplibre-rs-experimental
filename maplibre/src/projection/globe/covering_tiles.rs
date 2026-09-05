@@ -156,8 +156,12 @@ pub fn covering_tiles(
     let frustum = GlobeFrustum::from_camera(camera);
 
     while let Some(entry) = stack.pop() {
-        let bounds = globe_tile_bounding_volume(entry.tile, elevation.elevation_range(entry.tile))
-            .map_err(|source| GlobeCoveringError::TileBounds { source })?;
+        let bounds = globe_tile_bounding_volume(
+            entry.tile,
+            elevation.elevation_range(entry.tile),
+            camera.body(),
+        )
+        .map_err(|source| GlobeCoveringError::TileBounds { source })?;
         let intersection = if entry.fully_visible {
             Intersection::Full
         } else {

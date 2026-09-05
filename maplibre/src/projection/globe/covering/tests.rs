@@ -1,5 +1,6 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
+use crate::projection::body::Body;
 use cgmath::{Point2, Vector3, Vector4};
 
 use super::{
@@ -35,8 +36,9 @@ fn assert_plane_close(left: Vector4<f64>, right: Vector4<f64>) {
 
 #[test]
 fn zoom_zero_volume_covers_unit_sphere() {
-    let volume = globe_tile_bounding_volume(tile(0, 0, 0), TileElevationRange::default())
-        .expect("zoom-zero bounds are valid");
+    let volume =
+        globe_tile_bounding_volume(tile(0, 0, 0), TileElevationRange::default(), Body::EARTH)
+            .expect("zoom-zero bounds are valid");
 
     assert_eq!(volume.min, Vector3::new(-1.0, -1.0, -1.0));
     assert_eq!(volume.max, Vector3::new(1.0, 1.0, 1.0));
@@ -45,10 +47,12 @@ fn zoom_zero_volume_covers_unit_sphere() {
 
 #[test]
 fn zoom_one_volumes_match_gl_js_quadrants() {
-    let west = globe_tile_bounding_volume(tile(0, 0, 1), TileElevationRange::default())
-        .expect("western quadrant bounds are valid");
-    let east = globe_tile_bounding_volume(tile(1, 0, 1), TileElevationRange::default())
-        .expect("eastern quadrant bounds are valid");
+    let west =
+        globe_tile_bounding_volume(tile(0, 0, 1), TileElevationRange::default(), Body::EARTH)
+            .expect("western quadrant bounds are valid");
+    let east =
+        globe_tile_bounding_volume(tile(1, 0, 1), TileElevationRange::default(), Body::EARTH)
+            .expect("eastern quadrant bounds are valid");
 
     assert_eq!(west.min, Vector3::new(-1.0, 0.0, -1.0));
     assert_eq!(west.max, Vector3::new(0.0, 1.0, 1.0));
@@ -58,8 +62,9 @@ fn zoom_one_volumes_match_gl_js_quadrants() {
 
 #[test]
 fn curved_volume_matches_gl_js_reference_fixture() {
-    let volume = globe_tile_bounding_volume(tile(1, 1, 5), TileElevationRange::default())
-        .expect("curved tile bounds are valid");
+    let volume =
+        globe_tile_bounding_volume(tile(1, 1, 5), TileElevationRange::default(), Body::EARTH)
+            .expect("curved tile bounds are valid");
 
     assert_vector_close(
         volume.min,
@@ -114,6 +119,7 @@ fn elevation_expands_radial_bounds() {
             min_meters: -100.0,
             max_meters: 1_000.0,
         },
+        Body::EARTH,
     )
     .expect("finite elevation range is valid");
 
@@ -129,6 +135,7 @@ fn invalid_elevation_is_rejected() {
             min_meters: f64::NAN,
             max_meters: 0.0,
         },
+        Body::EARTH,
     )
     .expect_err("non-finite elevation is invalid");
 

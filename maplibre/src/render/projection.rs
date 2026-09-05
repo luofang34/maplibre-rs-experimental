@@ -8,6 +8,7 @@ use wgpu::util::DeviceExt;
 use crate::{
     coords::{LatLon, ViewRegion, WorldTileCoords, ZoomLevel, TILE_SIZE},
     io::tile_sources::{covering_zoom, TileKind},
+    projection::body::Body,
     projection::{
         globe::{
             camera::{GlobeCameraError, GlobeCameraOptions, GlobeCameraState},
@@ -55,7 +56,9 @@ pub struct ShaderProjectionData {
     /// Clip-space w of the view center: the camera-to-center distance in Mercator pixels,
     /// blended with the globe's value, so screen-space sizes can scale with distance.
     pub center_clip_w: f32,
-    padding: [f32; 2],
+    /// Radius of the body in metres, which scales elevations onto the unit sphere.
+    pub radius_meters: f32,
+    padding: f32,
 }
 
 impl ShaderProjectionData {
@@ -66,7 +69,8 @@ impl ShaderProjectionData {
             clipping_plane: data.clipping_plane.into(),
             transition: data.projection_transition,
             center_clip_w: 1.0,
-            padding: [0.0; 2],
+            radius_meters: Body::EARTH.radius_meters as f32,
+            padding: 0.0,
         }
     }
 }
@@ -78,7 +82,8 @@ impl Default for ShaderProjectionData {
             clipping_plane: [0.0, 0.0, 0.0, 1.0],
             transition: 0.0,
             center_clip_w: 1.0,
-            padding: [0.0; 2],
+            radius_meters: Body::EARTH.radius_meters as f32,
+            padding: 0.0,
         }
     }
 }
@@ -209,9 +214,11 @@ pub fn projection_data_for_view(
             .globe_transition(view_state.zoom().value())
     });
     let mercator_center_w = view_state.camera_to_center_distance() as f32;
+    let radius_meters = view_state.body().radius_meters as f32;
     if transition == 0.0 {
         return Ok(ShaderProjectionData {
             center_clip_w: mercator_center_w,
+            radius_meters,
             ..ShaderProjectionData::default()
         });
     }
@@ -242,6 +249,7 @@ pub fn projection_data_for_view(
     );
     Ok(ShaderProjectionData {
         center_clip_w: mercator_center_w + (globe_center_w - mercator_center_w) * transition,
+        radius_meters,
         ..ShaderProjectionData::from_renderer_data(data)
     })
 }
@@ -489,6 +497,8 @@ pub fn globe_camera_for_view(
         pitch_degrees: view_state.camera().get_pitch().0.to_degrees(),
         roll_degrees: 0.0,
         center_offset: view_state.center_offset(),
+
+        body: view_state.body(),
     })
     .map_err(|source| ProjectionStateError::GlobeCamera { source })
 }

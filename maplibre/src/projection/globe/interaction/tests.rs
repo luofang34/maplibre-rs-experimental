@@ -5,6 +5,7 @@ use cgmath::{Point2, Vector2};
 use super::{clamp_pan_inertia_center, pan_camera_by_pixels, pan_center_to_anchor};
 use crate::{
     coords::LatLon,
+    projection::body::Body,
     projection::globe::camera::{GlobeCameraOptions, GlobeCameraState},
 };
 
@@ -23,6 +24,7 @@ fn camera(center: LatLon, zoom: f64) -> GlobeCameraState {
         pitch_degrees: 0.0,
         roll_degrees: 0.0,
         center_offset: Point2::new(0.0, 0.0),
+        body: Body::EARTH,
     })
     .unwrap_or_else(|error| panic!("camera must be valid: {error}"))
 }

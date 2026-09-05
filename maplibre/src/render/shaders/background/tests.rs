@@ -3,6 +3,7 @@ use cgmath::Point2;
 use super::AtmosphereLayerMetadata;
 use crate::{
     coords::LatLon,
+    projection::body::Body,
     projection::globe::camera::{GlobeCameraOptions, GlobeCameraState},
     style::light::LightSpecification,
 };
@@ -18,6 +19,8 @@ fn camera() -> GlobeCameraState {
         pitch_degrees: 30.0,
         roll_degrees: 0.0,
         center_offset: Point2::new(0.0, 0.0),
+
+        body: Body::EARTH,
     })
     .expect("camera should be valid")
 }
@@ -50,5 +53,8 @@ fn atmosphere_metadata_matches_gpu_vertex_layout() {
 #[test]
 fn disabled_metadata_cannot_contribute_color() {
     let metadata = AtmosphereLayerMetadata::disabled();
-    assert_eq!(metadata.radius_blend_padding, [1.0, 0.0, 0.0, 0.0]);
+    assert_eq!(
+        metadata.radius_blend_padding,
+        [1.0, 0.0, Body::EARTH.radius_meters as f32, 0.0]
+    );
 }

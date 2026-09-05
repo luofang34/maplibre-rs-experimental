@@ -231,3 +231,23 @@ async fn projection_aware_tile_pipelines_compile() {
         .initialize_with_prefix_layouts(&device, &[projection.bind_group_layout()]);
     }
 }
+
+#[test]
+fn the_projection_uniform_carries_the_body_radius() {
+    let style = crate::style::Style::default();
+    let mut view = crate::render::view_state::ViewState::new(
+        crate::window::PhysicalSize::new(512, 512).expect("test viewport should be valid"),
+        crate::coords::WorldCoords::from((256.0, 256.0)),
+        crate::coords::Zoom::default(),
+        cgmath::Deg(0.0),
+        cgmath::Deg(45.0),
+    );
+    let earth = super::projection_data_for_view(&style, &view).expect("valid state");
+    view.set_body(crate::projection::body::Body {
+        radius_meters: 1_737_400.0,
+    });
+    let moon = super::projection_data_for_view(&style, &view).expect("valid state");
+
+    assert_eq!(earth.radius_meters, 6_371_008.8_f32);
+    assert_eq!(moon.radius_meters, 1_737_400.0);
+}

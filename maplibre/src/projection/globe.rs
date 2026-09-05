@@ -4,7 +4,10 @@ use std::f64::consts::PI;
 
 use cgmath::{InnerSpace, Quaternion, Vector3, Vector4};
 
-use crate::coords::{LatLon, EXTENT};
+use crate::{
+    coords::{LatLon, EXTENT},
+    projection::body::Body,
+};
 
 pub mod camera;
 pub mod covering;
@@ -14,7 +17,7 @@ pub mod subdivision;
 pub mod tile_mesh;
 
 /// Mean Earth radius used to convert elevation in metres to globe radius.
-pub const EARTH_RADIUS_METERS: f64 = 6_371_008.8;
+pub const EARTH_RADIUS_METERS: f64 = Body::EARTH.radius_meters;
 /// GL JS implements the `globe` preset as a blend from vertical perspective at zoom 11 to
 /// Mercator at zoom 12, and its render goldens at zoom 11 expect a full globe. The style
 /// specification's documentation shows the same blend starting at zoom 10; the renderer follows
@@ -238,9 +241,13 @@ pub fn interpolate_lat_lon(
     )
 }
 
-/// Applies elevation in metres radially to a unit-sphere surface point.
-pub fn elevate_surface_point(surface: Vector3<f64>, elevation_meters: f64) -> Vector3<f64> {
-    surface * (1.0 + elevation_meters / EARTH_RADIUS_METERS)
+/// Applies elevation in metres radially to a unit-sphere surface point of a body.
+pub fn elevate_surface_point(
+    surface: Vector3<f64>,
+    elevation_meters: f64,
+    body: Body,
+) -> Vector3<f64> {
+    surface * body.unit_radius_at(elevation_meters)
 }
 
 /// Returns latitude circumference relative to the equator for normalized Mercator Y.
