@@ -91,9 +91,7 @@ mod circles {
                 zoom: 3.0,
             })
             .with_feature_opacity(
-                Some(StyleProperty::Expression(serde_json::json!([
-                    "get", "alpha"
-                ]))),
+                Some(StyleProperty::parse(&serde_json::json!(["get", "alpha"]))),
                 3.0,
             )
     }
@@ -154,7 +152,7 @@ mod circles {
     #[test]
     fn the_radius_follows_feature_properties() {
         let mut tessellator = circle_tessellator(
-            StyleProperty::Expression(serde_json::json!(["get", "size"])),
+            StyleProperty::parse(&serde_json::json!(["get", "size"])),
             0.0,
         );
         tessellator

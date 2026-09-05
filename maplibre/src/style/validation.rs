@@ -74,14 +74,14 @@ mod tests {
         )
         .expect("style parses");
 
-        assert_eq!(
-            style.validate(),
-            Err(vec![StyleValidationError::Filter {
-                layer: "bad".to_string(),
-                source: FilterError::UnsupportedOperator {
-                    operator: "within".to_string()
-                }
-            }])
+        let errors = style.validate().expect_err("the within filter is rejected");
+        assert_eq!(errors.len(), 1);
+        assert!(
+            matches!(
+                &errors[0],
+                StyleValidationError::Filter { layer, source: FilterError::Invalid { .. } } if layer == "bad"
+            ),
+            "{errors:?}"
         );
     }
 

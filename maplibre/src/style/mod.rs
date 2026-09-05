@@ -29,6 +29,7 @@ pub mod expression;
 pub mod filter;
 pub mod layer;
 pub mod light;
+pub mod property;
 pub mod sky;
 pub mod source;
 pub mod terrain;

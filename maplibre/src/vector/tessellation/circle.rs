@@ -59,12 +59,12 @@ where
         }
         let radius = options
             .radius
-            .evaluate_number(&self.feature_properties, options.zoom)
+            .evaluate_for(&self.feature_properties, options.zoom)
             .unwrap_or(CirclePaint::DEFAULT_RADIUS)
             .max(0.0);
         let stroke_width = options
             .stroke_width
-            .evaluate_number(&self.feature_properties, options.zoom)
+            .evaluate_for(&self.feature_properties, options.zoom)
             .unwrap_or(0.0)
             .max(0.0);
 

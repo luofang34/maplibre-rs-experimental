@@ -151,7 +151,7 @@ impl CirclePaint {
 
 fn number_at(property: Option<&StyleProperty<f32>>, zoom: f64, default: f32) -> f32 {
     property
-        .and_then(|property| property.evaluate_number(&Default::default(), zoom))
+        .and_then(|property| property.evaluate_at_zoom(zoom))
         .unwrap_or(default)
 }
 
@@ -217,7 +217,7 @@ mod tests {
         assert!(
             (paint
                 .radius()
-                .evaluate_number(&Default::default(), 5.0)
+                .evaluate_at_zoom(5.0)
                 .expect("radius evaluates")
                 - 7.0)
                 .abs()

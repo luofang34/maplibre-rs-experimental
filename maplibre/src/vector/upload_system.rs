@@ -137,7 +137,7 @@ fn upload_tessellated_layer(
                 Some(LayerPaint::Line(paint)) => paint
                     .line_width
                     .as_ref()
-                    .map(|w| w.evaluate_at_zoom(zoom))
+                    .and_then(|w| w.evaluate_at_zoom(f64::from(zoom)))
                     .unwrap_or(1.0),
                 _ => 1.0,
             };

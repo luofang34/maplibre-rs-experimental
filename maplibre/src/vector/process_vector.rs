@@ -1,16 +1,10 @@
-use std::{
-    borrow::Cow,
-    collections::{HashMap, HashSet},
-    marker::PhantomData,
-};
+use std::{borrow::Cow, collections::HashSet, marker::PhantomData};
 
 use geozero::{
     mvt::{tile, Message},
     GeozeroDatasource,
 };
 use thiserror::Error;
-
-use serde_json::Value;
 
 use crate::{
     coords::{WorldTileCoords, EXTENT},
@@ -25,6 +19,7 @@ use crate::{
     },
     sdf::{tessellation::TextTessellator, tessellation_new::TextTessellatorNew, Feature},
     style::{
+        expression::{FeatureProperties, Value},
         filter::{FeatureContext, Filter, GeometryType},
         layer::{LayerPaint, StyleLayer},
     },
@@ -65,8 +60,8 @@ pub struct VectorTileRequest {
 
 /// Reads an MVT feature's tags into typed filter values through the layer's key and value
 /// tables.
-fn feature_properties(layer: &tile::Layer, feature: &tile::Feature) -> HashMap<String, Value> {
-    let mut properties = HashMap::new();
+fn feature_properties(layer: &tile::Layer, feature: &tile::Feature) -> FeatureProperties {
+    let mut properties = FeatureProperties::new();
     for pair in feature.tags.chunks(2) {
         let [key_index, value_index] = pair else {
             continue;
@@ -80,15 +75,15 @@ fn feature_properties(layer: &tile::Layer, feature: &tile::Feature) -> HashMap<S
         let value = if let Some(text) = &value.string_value {
             Value::String(text.clone())
         } else if let Some(number) = value.float_value {
-            Value::from(number)
+            Value::Number(f64::from(number))
         } else if let Some(number) = value.double_value {
-            Value::from(number)
+            Value::Number(number)
         } else if let Some(number) = value.int_value {
-            Value::from(number)
+            Value::Number(number as f64)
         } else if let Some(number) = value.uint_value {
-            Value::from(number)
+            Value::Number(number as f64)
         } else if let Some(number) = value.sint_value {
-            Value::from(number)
+            Value::Number(number as f64)
         } else if let Some(flag) = value.bool_value {
             Value::Bool(flag)
         } else {
@@ -109,7 +104,7 @@ fn apply_filter_to_layer(layer: &mut tile::Layer, filter: &Filter, zoom: f64) {
             filter.evaluate(&FeatureContext {
                 properties: &properties,
                 geometry_type: GeometryType::from_mvt(feature.r#type.unwrap_or_default()),
-                id: feature.id.map(Value::from),
+                id: feature.id.map(|id| Value::Number(id as f64)),
                 zoom,
             })
         })

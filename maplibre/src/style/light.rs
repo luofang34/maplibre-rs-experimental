@@ -85,54 +85,9 @@ fn evaluate_position(
     property: &StyleProperty<[f64; 3]>,
     zoom: f64,
 ) -> Result<[f64; 3], LightError> {
-    match property {
-        StyleProperty::Constant(position) => Ok(*position),
-        StyleProperty::Expression(expression) => evaluate_position_expression(expression, zoom)
-            .ok_or(LightError::UnsupportedPositionExpression { zoom }),
-    }
-}
-
-fn evaluate_position_expression(value: &serde_json::Value, zoom: f64) -> Option<[f64; 3]> {
-    let stops = value.get("stops")?.as_array()?;
-    let parsed = stops
-        .iter()
-        .map(|stop| {
-            let pair = stop.as_array()?;
-            Some((pair.first()?.as_f64()?, parse_position(pair.get(1)?)?))
-        })
-        .collect::<Option<Vec<_>>>()?;
-    if parsed.is_empty() || !parsed.windows(2).all(|pair| pair[0].0 < pair[1].0) {
-        return None;
-    }
-    if zoom <= parsed[0].0 {
-        return Some(parsed[0].1);
-    }
-    for pair in parsed.windows(2) {
-        if zoom <= pair[1].0 {
-            let amount = (zoom - pair[0].0) / (pair[1].0 - pair[0].0);
-            return Some(interpolate_position(pair[0].1, pair[1].1, amount));
-        }
-    }
-    parsed.last().map(|stop| stop.1)
-}
-
-fn parse_position(value: &serde_json::Value) -> Option<[f64; 3]> {
-    let values = value.as_array()?;
-    (values.len() == 3).then(|| {
-        Some([
-            values[0].as_f64()?,
-            values[1].as_f64()?,
-            values[2].as_f64()?,
-        ])
-    })?
-}
-
-fn interpolate_position(from: [f64; 3], to: [f64; 3], amount: f64) -> [f64; 3] {
-    [
-        from[0] + (to[0] - from[0]) * amount,
-        from[1] + (to[1] - from[1]) * amount,
-        from[2] + (to[2] - from[2]) * amount,
-    ]
+    property
+        .evaluate_at_zoom(zoom)
+        .ok_or(LightError::UnsupportedPositionExpression { zoom })
 }
 
 fn spherical_to_cartesian(position: [f64; 3]) -> Result<Vector3<f64>, LightError> {

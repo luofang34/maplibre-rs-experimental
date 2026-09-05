@@ -137,7 +137,7 @@ fn upload_symbol_layer(
                 Some(LayerPaint::Symbol(paint)) => paint
                     .text_size
                     .as_ref()
-                    .map(|s| s.evaluate_at_zoom(zoom))
+                    .and_then(|s| s.evaluate_at_zoom(f64::from(zoom)))
                     .unwrap_or(16.0),
                 _ => 16.0,
             };

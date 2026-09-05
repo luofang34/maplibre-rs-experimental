@@ -7,229 +7,11 @@ use std::{
 
 use cint::{Alpha, EncodedSrgb};
 use csscolorparser::Color;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 
-use crate::style::{circle::CirclePaint, expression::evaluate_number};
+use crate::style::circle::CirclePaint;
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(untagged)]
-pub enum StyleProperty<T> {
-    Constant(T),
-    Expression(serde_json::Value),
-}
-
-impl<T: std::str::FromStr + Clone> StyleProperty<T> {
-    pub fn evaluate(&self, feature_properties: &HashMap<String, String>) -> Option<T> {
-        match self {
-            StyleProperty::Constant(value) => Some(value.clone()),
-            StyleProperty::Expression(expr) => {
-                if let Some(function) = expr.as_object() {
-                    return evaluate_property_function(function, feature_properties);
-                }
-                if let Some(arr) = expr.as_array() {
-                    if let Some(op) = arr.get(0).and_then(|v| v.as_str()) {
-                        if op == "get" {
-                            let key = arr.get(1).and_then(|v| v.as_str())?;
-                            return feature_properties.get(key)?.parse::<T>().ok();
-                        }
-                        if op == "match" && arr.len() > 3 {
-                            // Extract the getter e.g. ["get", "ADM0_A3"]
-                            if let Some(get_arr) = arr.get(1).and_then(|v| v.as_array()) {
-                                if get_arr.get(0).and_then(|v| v.as_str()) == Some("get") {
-                                    if let Some(prop_name) = get_arr.get(1).and_then(|v| v.as_str())
-                                    {
-                                        let feature_val_opt = feature_properties.get(prop_name);
-
-                                        // If property is missing, skip match pairs and return fallback
-                                        if feature_val_opt.is_none() {
-                                            if let Some(fallback) =
-                                                arr.last().and_then(|v| v.as_str())
-                                            {
-                                                return fallback.parse::<T>().ok();
-                                            }
-                                            return None;
-                                        }
-
-                                        let feature_val = feature_val_opt.unwrap();
-
-                                        // Search the match array pairs
-                                        let mut i = 2;
-                                        while i < arr.len() - 1 {
-                                            if let Some(match_keys) =
-                                                arr.get(i).and_then(|v| v.as_array())
-                                            {
-                                                // Does this feature_val exist in the match keys?
-                                                let matches = match_keys.iter().any(|k| {
-                                                    k.as_str() == Some(feature_val.as_str())
-                                                });
-                                                if matches {
-                                                    if let Some(color_str) =
-                                                        arr.get(i + 1).and_then(|v| v.as_str())
-                                                    {
-                                                        return color_str.parse::<T>().ok();
-                                                    }
-                                                }
-                                            }
-                                            i += 2;
-                                        }
-                                        // Fallback (last element)
-                                        if i == arr.len() - 1 {
-                                            if let Some(fallback) =
-                                                arr.get(i).and_then(|v| v.as_str())
-                                            {
-                                                return fallback.parse::<T>().ok();
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                None
-            }
-        }
-    }
-
-    pub fn deserialize_color_or_none<'de, D>(
-        deserializer: D,
-    ) -> Result<Option<StyleProperty<T>>, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        // For Color types, allow either a raw color string, or an expression value.
-        let v = serde_json::Value::deserialize(deserializer).map_err(serde::de::Error::custom)?;
-        if let Some(s) = v.as_str() {
-            if let Ok(color) = s.parse::<T>() {
-                return Ok(Some(StyleProperty::Constant(color)));
-            }
-        }
-        // Expression arrays and legacy property functions are evaluated per feature.
-        if v.is_array() || v.is_object() {
-            return Ok(Some(StyleProperty::Expression(v)));
-        }
-        Ok(None)
-    }
-}
-
-/// Legacy `{"property": ..., "type": "identity" | "categorical"}` functions for non-numeric
-/// values; zoom-driven stops have no zoom here and fall back to the default.
-fn evaluate_property_function<T: std::str::FromStr>(
-    function: &serde_json::Map<String, serde_json::Value>,
-    feature_properties: &HashMap<String, String>,
-) -> Option<T> {
-    let fallback = || function.get("default")?.as_str()?.parse::<T>().ok();
-    let Some(key) = function.get("property").and_then(|v| v.as_str()) else {
-        return fallback();
-    };
-    let Some(value) = feature_properties.get(key) else {
-        return fallback();
-    };
-    match function.get("type").and_then(|v| v.as_str()) {
-        Some("categorical") => function
-            .get("stops")
-            .and_then(|stops| stops.as_array())
-            .and_then(|stops| {
-                stops.iter().find_map(|stop| {
-                    let stop = stop.as_array()?;
-                    let label = match stop.first()? {
-                        serde_json::Value::String(label) => label.clone(),
-                        serde_json::Value::Number(number) => number.to_string(),
-                        serde_json::Value::Bool(flag) => flag.to_string(),
-                        _ => return None,
-                    };
-                    (&label == value).then(|| stop.get(1)?.as_str()?.parse::<T>().ok())?
-                })
-            })
-            .or_else(fallback),
-        Some("identity") | None => value.parse::<T>().ok().or_else(fallback),
-        _ => fallback(),
-    }
-}
-
-impl StyleProperty<f32> {
-    /// Evaluates a number for a feature at a zoom: constants, legacy zoom and property
-    /// functions, and the expression subset of [`crate::style::expression`].
-    pub fn evaluate_number(
-        &self,
-        feature_properties: &HashMap<String, String>,
-        zoom: f64,
-    ) -> Option<f32> {
-        match self {
-            StyleProperty::Constant(value) => Some(*value),
-            StyleProperty::Expression(expression) => {
-                evaluate_number(expression, feature_properties, zoom).map(|value| value as f32)
-            }
-        }
-    }
-
-    pub fn deserialize_f32_or_none<'de, D>(
-        deserializer: D,
-    ) -> Result<Option<StyleProperty<f32>>, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let v = serde_json::Value::deserialize(deserializer).map_err(serde::de::Error::custom)?;
-        if let Some(f) = v.as_f64() {
-            return Ok(Some(StyleProperty::Constant(f as f32)));
-        }
-        if v.is_array() {
-            return Ok(Some(StyleProperty::Expression(v)));
-        }
-        // Handle {"stops": [[zoom, value], ...]} format
-        if v.is_object() {
-            return Ok(Some(StyleProperty::Expression(v)));
-        }
-        Ok(None)
-    }
-
-    /// Evaluate a zoom-dependent f32 property at the given zoom level.
-    /// Supports constants and `{"stops": [[z0, v0], [z1, v1], ...]}`.
-    pub fn evaluate_at_zoom(&self, zoom: f32) -> f32 {
-        match self {
-            StyleProperty::Constant(v) => *v,
-            StyleProperty::Expression(expr) => {
-                let stops = expr
-                    .get("stops")
-                    .and_then(|s| s.as_array())
-                    .or_else(|| expr.as_array());
-                let Some(stops) = stops else {
-                    return 1.0;
-                };
-                // Parse stops as [(zoom, value), ...]
-                let parsed: Vec<(f32, f32)> = stops
-                    .iter()
-                    .filter_map(|stop| {
-                        let arr = stop.as_array()?;
-                        let z = arr.first()?.as_f64()? as f32;
-                        let v = arr.get(1)?.as_f64()? as f32;
-                        Some((z, v))
-                    })
-                    .collect();
-
-                if parsed.is_empty() {
-                    return 1.0;
-                }
-                if zoom <= parsed[0].0 {
-                    return parsed[0].1;
-                }
-                if zoom >= parsed[parsed.len() - 1].0 {
-                    return parsed[parsed.len() - 1].1;
-                }
-                // Linear interpolation between stops
-                for window in parsed.windows(2) {
-                    let (z0, v0) = window[0];
-                    let (z1, v1) = window[1];
-                    if zoom >= z0 && zoom <= z1 {
-                        let t = (zoom - z0) / (z1 - z0);
-                        return v0 + t * (v1 - v0);
-                    }
-                }
-                parsed[parsed.len() - 1].1
-            }
-        }
-    }
-}
+pub use crate::style::property::{PropertyValue, StyleProperty};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct BackgroundPaint {
@@ -413,18 +195,9 @@ fn parse_text_field_from_layout(layout: &serde_json::Value) -> Option<String> {
     None
 }
 
-/// Extract text-size from a layout JSON value.
-/// Handles constant numbers and zoom-dependent `{"stops": [[z, size], ...]}`.
+/// The `text-size` of a layout: a constant, a legacy function or an expression.
 fn parse_text_size_from_layout(layout: &serde_json::Value) -> Option<StyleProperty<f32>> {
-    let ts = layout.get("text-size")?;
-    if let Some(f) = ts.as_f64() {
-        return Some(StyleProperty::Constant(f as f32));
-    }
-    // Object with stops or array
-    if ts.is_object() || ts.is_array() {
-        return Some(StyleProperty::Expression(ts.clone()));
-    }
-    None
+    Some(StyleProperty::parse(layout.get("text-size")?))
 }
 
 /// The different types of paints.
@@ -734,6 +507,8 @@ impl Default for StyleLayer {
 
 #[cfg(test)]
 mod tests {
+    use crate::style::expression::{FeatureProperties, Value};
+
     #[test]
     fn zoom_range_is_min_inclusive_max_exclusive() {
         let mut layer = super::StyleLayer {
@@ -799,11 +574,11 @@ mod tests {
         ]
         "#;
         let expr: serde_json::Value = serde_json::from_str(json).unwrap();
-        let prop: StyleProperty<csscolorparser::Color> = StyleProperty::Expression(expr);
+        let prop: StyleProperty<csscolorparser::Color> = StyleProperty::parse(&expr);
 
         // Feature that does NOT have the property → should return the JSON fallback color
-        let empty_props = HashMap::new();
-        let color = prop.evaluate(&empty_props).unwrap();
+        let empty_props = FeatureProperties::new();
+        let color = prop.evaluate_for(&empty_props, 0.0).unwrap();
         assert_eq!(color.to_rgba8(), [9, 9, 9, 255]);
     }
 
@@ -829,7 +604,7 @@ mod tests {
         assert!(
             opacity(&line)
                 .expect("line opacity")
-                .evaluate_number(&Default::default(), 0.5)
+                .evaluate_at_zoom(0.5)
                 .is_some_and(|value| (value - 0.55).abs() < 1e-6),
             "zoom functions evaluate at the zoom"
         );
@@ -848,12 +623,12 @@ mod tests {
         ]
         "#;
         let expr: serde_json::Value = serde_json::from_str(json).unwrap();
-        let prop: StyleProperty<csscolorparser::Color> = StyleProperty::Expression(expr);
+        let prop: StyleProperty<csscolorparser::Color> = StyleProperty::parse(&expr);
 
-        let mut feature_properties = HashMap::new();
-        feature_properties.insert("ADM0_A3".to_string(), "ARM".to_string());
+        let mut feature_properties = FeatureProperties::new();
+        feature_properties.insert("ADM0_A3".to_string(), Value::from("ARM"));
 
-        let color = prop.evaluate(&feature_properties).unwrap();
+        let color = prop.evaluate_for(&feature_properties, 0.0).unwrap();
         assert_eq!(color.to_rgba8(), [1, 2, 3, 255]);
     }
 

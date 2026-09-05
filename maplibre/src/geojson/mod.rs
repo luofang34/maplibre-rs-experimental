@@ -12,6 +12,7 @@ use crate::{
     projection::{globe::subdivision::granularity_for_zoom, ProjectionType},
     sdf::{tessellation::TextTessellator, tessellation_new::TextTessellatorNew},
     style::{
+        expression::Value,
         filter::{properties_from_json, FeatureContext, Filter, GeometryType},
         layer::{LayerPaint, StyleLayer},
     },
@@ -201,7 +202,7 @@ fn feature_passes(feature: &serde_json::Value, filter: &Filter, zoom: f64) -> bo
     filter.evaluate(&FeatureContext {
         properties: &properties,
         geometry_type,
-        id: feature.get("id").cloned(),
+        id: feature.get("id").map(Value::from_json),
         zoom,
     })
 }

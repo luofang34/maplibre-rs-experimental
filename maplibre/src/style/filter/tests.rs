@@ -1,45 +1,33 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
-use std::collections::HashMap;
+use serde_json::{json, Value as Json};
 
-use serde_json::{json, Value};
+use super::{properties_from_json, FeatureContext, Filter, FilterError, GeometryType};
+use crate::style::expression::{FeatureProperties, Value};
 
-use super::{Comparison, FeatureContext, Filter, FilterError, GeometryType, Operand};
-
-fn low_airway() -> HashMap<String, Value> {
-    HashMap::from([
-        ("level".to_string(), json!("low")),
-        ("altitude".to_string(), json!(18000)),
-        ("name".to_string(), json!("V-12")),
-    ])
+fn low_airway() -> FeatureProperties {
+    properties_from_json(Some(
+        &json!({"level": "low", "altitude": 18000, "name": "V-12"}),
+    ))
 }
 
-fn passes(filter: Value, properties: &HashMap<String, Value>) -> bool {
+fn passes(filter: Json, properties: &FeatureProperties) -> bool {
     Filter::parse(&filter)
         .expect("filter parses")
         .evaluate(&FeatureContext {
             properties,
             geometry_type: GeometryType::LineString,
-            id: Some(json!(7)),
+            id: Some(Value::Number(7.0)),
             zoom: 8.0,
         })
 }
 
 #[test]
 fn legacy_and_expression_forms_parse_to_the_same_comparison() {
-    let expected = Filter::Compare {
-        operator: Comparison::Equal,
-        left: Operand::Get("level".to_string()),
-        right: Operand::Literal(json!("low")),
-    };
-    assert_eq!(
-        Filter::parse(&json!(["==", "level", "low"])),
-        Ok(expected.clone())
-    );
-    assert_eq!(
-        Filter::parse(&json!(["==", ["get", "level"], "low"])),
-        Ok(expected)
-    );
+    let legacy = Filter::parse(&json!(["==", "level", "low"])).expect("legacy filter parses");
+    let expression =
+        Filter::parse(&json!(["==", ["get", "level"], "low"])).expect("expression filter parses");
+    assert_eq!(legacy, expression);
 }
 
 #[test]
@@ -58,7 +46,7 @@ fn equality_selects_the_same_features_in_both_forms() {
 
 #[test]
 fn a_missing_property_is_unequal_to_everything() {
-    let properties = HashMap::new();
+    let properties = FeatureProperties::new();
     assert!(!passes(json!(["==", "level", "low"]), &properties));
     assert!(passes(json!(["!=", "level", "low"]), &properties));
     assert!(passes(json!(["!=", ["get", "level"], "low"]), &properties));
@@ -143,7 +131,7 @@ fn legacy_combinators() {
     assert!(passes(json!(["all"]), &properties));
     assert!(!passes(json!(["any"]), &properties));
     assert!(passes(json!([]), &properties));
-    assert!(passes(Value::Null, &properties));
+    assert!(passes(json!(null), &properties));
 }
 
 #[test]
@@ -189,35 +177,23 @@ fn expression_operators() {
 
 #[test]
 fn unsupported_operators_are_errors_not_guesses() {
-    assert_eq!(
-        Filter::parse(&json!(["within", {"type": "Polygon", "coordinates": []}])),
-        Err(FilterError::UnsupportedOperator {
-            operator: "within".to_string()
-        })
-    );
-    assert_eq!(
-        Filter::parse(&json!(["==", ["global-state", "level"], "low"])),
-        Err(FilterError::UnsupportedOperator {
-            operator: "global-state".to_string()
-        })
-    );
-    assert_eq!(
-        Filter::parse(&json!(["==", ["get", "a"], ["get", "b"], ["collator", {}]])),
-        Err(FilterError::Malformed {
-            operator: "==".to_string(),
-            expected: "two operands"
-        })
-    );
+    for filter in [
+        json!(["within", {"type": "Polygon", "coordinates": []}]),
+        json!(["==", ["feature-state", "level"], "low"]),
+        json!(["==", ["get", "a"], ["get", "b"], ["collator", {}]]),
+        json!(["match", ["get", "level"], "low"]),
+    ] {
+        assert!(
+            matches!(Filter::parse(&filter), Err(FilterError::Invalid { .. })),
+            "{filter} must be rejected"
+        );
+    }
     assert_eq!(
         Filter::parse(&json!({"type": "identity"})),
         Err(FilterError::NotAFilter {
             found: "object".to_string()
         })
     );
-    assert!(matches!(
-        Filter::parse(&json!(["match", ["get", "level"], "low"])),
-        Err(FilterError::Malformed { .. })
-    ));
 }
 
 #[test]

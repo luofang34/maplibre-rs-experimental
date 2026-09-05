@@ -1,6 +1,6 @@
 //! Tessellation for lines and polygons is implemented here.
 
-use std::{cell::RefCell, collections::HashMap};
+use std::cell::RefCell;
 
 use bytemuck::Pod;
 use geozero::{
@@ -21,6 +21,7 @@ pub use circle::{CircleOptions, CIRCLE_QUAD_INDICES};
 use crate::{
     projection::globe::subdivision::{subdivide_line_segment, subdivide_triangles},
     render::ShaderVertex,
+    style::expression::{FeatureProperties, Value},
 };
 
 mod circle;
@@ -151,7 +152,9 @@ pub struct ZeroTessellator<I: std::ops::Add + From<lyon::tessellation::VertexId>
     pub buffer: VertexBuffers<ShaderVertex, I>,
 
     pub feature_indices: Vec<u32>,
-    pub feature_properties: HashMap<String, String>,
+    pub feature_properties: FeatureProperties,
+    /// Zoom of the tile, at which zoom-driven properties are evaluated.
+    pub zoom: f64,
     pub feature_colors: Vec<[f32; 4]>,
     pub fallback_color: [f32; 4],
     pub style_property: Option<crate::style::layer::StyleProperty<csscolorparser::Color>>,
@@ -169,7 +172,8 @@ impl<I: std::ops::Add + From<lyon::tessellation::VertexId> + MaxIndex> Default
             path_builder: RefCell::new(Path::builder()),
             buffer: VertexBuffers::new(),
             feature_indices: Vec::new(),
-            feature_properties: HashMap::new(),
+            feature_properties: FeatureProperties::new(),
+            zoom: 0.0,
             feature_colors: Vec::new(),
             fallback_color: [0.0, 0.0, 0.0, 1.0],
             style_property: None,
@@ -202,6 +206,7 @@ where
         zoom: f64,
     ) -> Self {
         self.feature_opacity = opacity.map(|opacity| (opacity, zoom));
+        self.zoom = zoom;
         self
     }
 
@@ -429,8 +434,9 @@ impl<I: std::ops::Add + From<lyon::tessellation::VertexId> + MaxIndex> PropertyP
         name: &str,
         value: &ColumnValue,
     ) -> geozero::error::Result<bool> {
-        self.feature_properties
-            .insert(name.to_string(), value.to_string());
+        if let Some(value) = property_value(value) {
+            self.feature_properties.insert(name.to_string(), value);
+        }
         Ok(false)
     }
 }
@@ -442,7 +448,7 @@ where
     fn feature_end(&mut self, _idx: u64) -> geozero::error::Result<()> {
         self.update_feature_indices();
         let mut color = if let Some(style) = &self.style_property {
-            if let Some(c) = style.evaluate(&self.feature_properties) {
+            if let Some(c) = style.evaluate_for(&self.feature_properties, self.zoom) {
                 [c.r as f32, c.g as f32, c.b as f32, c.a as f32]
             } else {
                 tracing::debug!(
@@ -457,7 +463,7 @@ where
         };
         if let Some((opacity, zoom)) = &self.feature_opacity {
             color[3] *= opacity
-                .evaluate_number(&self.feature_properties, *zoom)
+                .evaluate_for(&self.feature_properties, *zoom)
                 .unwrap_or(1.0)
                 .clamp(0.0, 1.0);
         }
@@ -470,3 +476,27 @@ where
 
 #[cfg(test)]
 mod tests;
+
+/// The typed value of a feature property, as an expression sees it.
+fn property_value(value: &ColumnValue) -> Option<Value> {
+    Some(match value {
+        ColumnValue::Bool(flag) => Value::Bool(*flag),
+        ColumnValue::Byte(number) => Value::Number(f64::from(*number)),
+        ColumnValue::UByte(number) => Value::Number(f64::from(*number)),
+        ColumnValue::Short(number) => Value::Number(f64::from(*number)),
+        ColumnValue::UShort(number) => Value::Number(f64::from(*number)),
+        ColumnValue::Int(number) => Value::Number(f64::from(*number)),
+        ColumnValue::UInt(number) => Value::Number(f64::from(*number)),
+        ColumnValue::Long(number) => Value::Number(*number as f64),
+        ColumnValue::ULong(number) => Value::Number(*number as f64),
+        ColumnValue::Float(number) => Value::Number(f64::from(*number)),
+        ColumnValue::Double(number) => Value::Number(*number),
+        ColumnValue::String(text) | ColumnValue::DateTime(text) => {
+            Value::String((*text).to_string())
+        }
+        ColumnValue::Json(text) => serde_json::from_str::<serde_json::Value>(text)
+            .map(|json| Value::from_json(&json))
+            .unwrap_or_else(|_| Value::String((*text).to_string())),
+        ColumnValue::Binary(_) => return None,
+    })
+}
