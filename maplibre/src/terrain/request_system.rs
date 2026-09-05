@@ -169,8 +169,17 @@ pub fn fetch_dem_apc<K: OffscreenKernel, T: DemTransferables, C: Context + Clone
                     None
                 }
             },
+            Err(error) if error.is_not_found() => {
+                tracing::debug!(%coords, source = %dem.name, "no DEM tile at the source; flat");
+                None
+            }
             Err(error) => {
-                tracing::error!(%coords, source = %dem.name, %error, "DEM tile fetch failed");
+                tracing::error!(
+                    %coords,
+                    source = %dem.name,
+                    error = %error.describe(),
+                    "DEM tile fetch failed"
+                );
                 None
             }
         };

@@ -166,12 +166,20 @@ pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context +
                     .map_err(|e| ProcedureError::Execution(Box::new(e)))?;
                 }
                 Err(error) => {
-                    tracing::error!(
-                        %coords,
-                        source = ?group.source_name,
-                        %error,
-                        "vector tile fetch failed"
-                    );
+                    if error.is_not_found() {
+                        tracing::debug!(
+                            %coords,
+                            source = ?group.source_name,
+                            "no vector tile at the source; its layers are empty"
+                        );
+                    } else {
+                        tracing::error!(
+                            %coords,
+                            source = ?group.source_name,
+                            error = %error.describe(),
+                            "vector tile fetch failed"
+                        );
+                    }
                     for to_load in &requested_layers {
                         context
                             .send_back(<T as VectorTransferables>::LayerMissing::build_from(

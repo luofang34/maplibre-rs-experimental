@@ -66,6 +66,9 @@ impl ReqwestHttpClient {
 impl HttpClient for ReqwestHttpClient {
     async fn fetch(&self, url: &str) -> Result<Vec<u8>, SourceFetchError> {
         let response = self.client.get(url).send().await?;
+        if response.status() == StatusCode::NOT_FOUND {
+            return Err(SourceFetchError::not_found(url));
+        }
         match response.error_for_status() {
             Ok(response) => {
                 if response.status() == StatusCode::NOT_MODIFIED {

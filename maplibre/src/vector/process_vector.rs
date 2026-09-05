@@ -264,7 +264,8 @@ pub fn process_vector_tile<T: VectorTransferables, C: Context>(
                     }
                 }
             } else {
-                log::warn!("layer source {source_layer} not found in vector tile");
+                // A tile without the layer is routine: producers omit empty layers.
+                tracing::debug!(%coords, layer = %source_layer, "source layer absent from the tile");
             }
         } else {
             log::error!("vector style layer {id} misses a required attribute");

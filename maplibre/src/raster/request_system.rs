@@ -146,12 +146,20 @@ pub fn fetch_raster_apc<K: OffscreenKernel, T: RasterTransferables, C: Context +
                         .map_err(|e| ProcedureError::Execution(Box::new(e)))?;
                 }
                 Err(error) => {
-                    tracing::error!(
-                        %coords,
-                        source = ?group.source_name,
-                        %error,
-                        "raster tile fetch failed"
-                    );
+                    if error.is_not_found() {
+                        tracing::debug!(
+                            %coords,
+                            source = ?group.source_name,
+                            "no raster tile at the source; the layer is empty"
+                        );
+                    } else {
+                        tracing::error!(
+                            %coords,
+                            source = ?group.source_name,
+                            error = %error.describe(),
+                            "raster tile fetch failed"
+                        );
+                    }
 
                     context
                         .send_back(<T as RasterTransferables>::LayerRasterMissing::build_from(

@@ -37,6 +37,43 @@ where
 #[error("failed to fetch from source")]
 pub struct SourceFetchError(#[source] pub Box<dyn std::error::Error>);
 
+/// The server has no tile at the URL. Sources routinely omit tiles that hold no data, so a
+/// request for one is answered like an empty tile rather than reported as a failure.
+#[derive(Error, Debug)]
+#[error("no tile at {url}")]
+pub struct TileNotFound {
+    /// The URL that answered 404.
+    pub url: String,
+}
+
+impl SourceFetchError {
+    /// The error for a URL the server answered with 404.
+    pub fn not_found(url: &str) -> Self {
+        Self(Box::new(TileNotFound {
+            url: url.to_string(),
+        }))
+    }
+
+    /// Whether the server answered that it has no such tile, which callers treat as an empty
+    /// tile rather than a failure.
+    pub fn is_not_found(&self) -> bool {
+        self.0.downcast_ref::<TileNotFound>().is_some()
+    }
+
+    /// The message with every underlying cause appended, for single-line logs that would
+    /// otherwise hide the HTTP status or connection failure behind the generic message.
+    pub fn describe(&self) -> String {
+        let mut text = self.to_string();
+        let mut cause = std::error::Error::source(self);
+        while let Some(error) = cause {
+            text.push_str(": ");
+            text.push_str(&error.to_string());
+            cause = error.source();
+        }
+        text
+    }
+}
+
 /// Defines the different types of HTTP clients such as basic HTTP and Mbtiles.
 /// More types might be coming such as S3 and other cloud http clients.
 #[derive(Clone)]
@@ -96,3 +133,6 @@ where
         self.inner_client.fetch(url).await
     }
 }
+
+#[cfg(test)]
+mod tests;
