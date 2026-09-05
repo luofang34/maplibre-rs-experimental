@@ -1,7 +1,11 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
-use super::{dem_ancestor_coords, dem_tile_coords};
-use crate::coords::{WorldTileCoords, ZoomLevel};
+use super::{dem_ancestor_coords, dem_tile_coords, missing_dem_fallback};
+use crate::{
+    coords::{WorldTileCoords, ZoomLevel},
+    tcs::world::World,
+    terrain::DemTileComponent,
+};
 
 fn tile(x: i32, y: i32, z: u8) -> WorldTileCoords {
     WorldTileCoords {
@@ -41,5 +45,36 @@ fn a_coarse_ancestor_accompanies_every_dem_tile_for_culling() {
         dem_ancestor_coords(tile(1100, 726, 11), 8),
         Some(tile(137, 90, 8)),
         "the ancestor never drops below the source minimum zoom"
+    );
+}
+
+#[test]
+fn a_missing_dem_tile_falls_back_to_the_nearest_ancestor_that_may_exist() {
+    let mut world = World::default();
+    let ideal = tile(2201, 1453, 12);
+    let parent = tile(1100, 726, 11);
+    let grandparent = tile(550, 363, 10);
+    for coords in [ideal, parent] {
+        world
+            .tiles
+            .spawn_mut(coords)
+            .expect("valid coordinates")
+            .insert(DemTileComponent::Missing);
+    }
+
+    assert_eq!(
+        missing_dem_fallback(&world.tiles, ideal, 7),
+        Some(grandparent),
+        "the walk skips ancestors already known to be missing"
+    );
+    assert_eq!(
+        missing_dem_fallback(&world.tiles, ideal, 12),
+        None,
+        "nothing below the source minimum zoom"
+    );
+    assert_eq!(
+        missing_dem_fallback(&world.tiles, grandparent, 7),
+        None,
+        "a tile not known to be missing needs no fallback"
     );
 }

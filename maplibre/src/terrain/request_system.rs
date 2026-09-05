@@ -6,13 +6,19 @@ use crate::{
     context::MapContext,
     coords::WorldTileCoords,
     environment::{Environment, OffscreenKernel},
-    io::apc::{AsyncProcedureCall, AsyncProcedureFuture, Context, Input, ProcedureError},
+    io::{
+        apc::{AsyncProcedureCall, AsyncProcedureFuture, Context, Input, ProcedureError},
+        tile_sources::missing_tile_fallback,
+    },
     kernel::Kernel,
     render::{
         projection::view_region_for_projection, tile_view_pattern::DEFAULT_TILE_SIZE,
         view_state::ViewStatePadding,
     },
-    tcs::system::{System, SystemError, SystemResult},
+    tcs::{
+        system::{System, SystemError, SystemResult},
+        tiles::Tiles,
+    },
     terrain::{
         source::dem_source,
         transferables::{DemTransferables, LayerDem, LayerDemMissing},
@@ -54,6 +60,20 @@ pub fn dem_ancestor_coords(coords: WorldTileCoords, minzoom: u8) -> Option<World
         current = current.get_parent()?;
     }
     Some(current)
+}
+
+/// The ancestor to request for a DEM tile the source does not have.
+pub fn missing_dem_fallback(
+    tiles: &Tiles,
+    coords: WorldTileCoords,
+    minzoom: u8,
+) -> Option<WorldTileCoords> {
+    missing_tile_fallback(coords, minzoom, |coords| {
+        matches!(
+            tiles.query::<&DemTileComponent>(coords),
+            Some(DemTileComponent::Missing)
+        )
+    })
 }
 
 pub struct RequestSystem<E: Environment, T: DemTransferables> {
@@ -107,9 +127,13 @@ impl<E: Environment, T: DemTransferables> System for RequestSystem<E, T> {
             .iter()
             .filter_map(|coords| dem_tile_coords(coords, dem.minzoom, dem.maxzoom))
             .flat_map(|coords| {
-                [Some(coords), dem_ancestor_coords(coords, dem.minzoom)]
-                    .into_iter()
-                    .flatten()
+                [
+                    Some(coords),
+                    dem_ancestor_coords(coords, dem.minzoom),
+                    missing_dem_fallback(&world.tiles, coords, dem.minzoom),
+                ]
+                .into_iter()
+                .flatten()
             })
             .collect();
         for coords in wanted {

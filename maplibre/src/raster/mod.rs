@@ -122,6 +122,6 @@ impl HasTile for RasterTilesDone {
         world
             .tiles
             .query::<&RasterLayersDataComponent>(coords)
-            .is_some_and(|component| !component.layers.is_empty())
+            .is_some_and(RasterLayersDataComponent::has_image)
     }
 }
