@@ -14,6 +14,11 @@ pub type UsedRasterTransferables = maplibre::raster::DefaultRasterTransferables;
 pub type UsedRasterTransferables = singlethreaded::transferables::FlatTransferables;
 
 #[cfg(target_feature = "atomics")]
+pub type UsedDemTransferables = maplibre::terrain::DefaultDemTransferables;
+#[cfg(not(target_feature = "atomics"))]
+pub type UsedDemTransferables = singlethreaded::transferables::FlatTransferables;
+
+#[cfg(target_feature = "atomics")]
 pub type UsedVectorTransferables = maplibre::vector::DefaultVectorTransferables;
 #[cfg(not(target_feature = "atomics"))]
 pub type UsedVectorTransferables = singlethreaded::transferables::FlatTransferables;

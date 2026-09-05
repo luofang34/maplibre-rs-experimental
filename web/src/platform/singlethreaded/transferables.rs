@@ -19,6 +19,7 @@ use maplibre::{
         ShaderVertex,
     },
     sdf::{Feature, SymbolLayerData},
+    terrain::transferables::{DemTransferables, LayerDem, LayerDemMissing},
     tile::Layer,
     vector::{
         AvailableVectorLayerBucket, LayerIndexed, LayerMissing, LayerTessellated,
@@ -29,9 +30,10 @@ use maplibre::{
 use crate::platform::singlethreaded::{
     apc::WebMessageTag,
     transferables::{
-        basic_generated::*, layer_indexed_generated::*, layer_missing_generated::*,
-        layer_raster_generated::*, layer_tessellated_generated::*,
-        symbol_layer_tessellated_generated::*, tile_tessellated_generated::*,
+        basic_generated::*, layer_dem_generated::*, layer_dem_missing_generated::*,
+        layer_indexed_generated::*, layer_missing_generated::*, layer_raster_generated::*,
+        layer_tessellated_generated::*, symbol_layer_tessellated_generated::*,
+        tile_tessellated_generated::*,
     },
 };
 
@@ -71,6 +73,16 @@ pub mod tile_tessellated_generated {
 pub mod layer_raster_generated {
     #![allow(unused, unused_imports, clippy::all)]
     include!(concat!(env!("OUT_DIR"), "/layer_raster_generated.rs"));
+}
+
+pub mod layer_dem_generated {
+    #![allow(unused, unused_imports, clippy::all)]
+    include!(concat!(env!("OUT_DIR"), "/layer_dem_generated.rs"));
+}
+
+pub mod layer_dem_missing_generated {
+    #![allow(unused, unused_imports, clippy::all)]
+    include!(concat!(env!("OUT_DIR"), "/layer_dem_missing_generated.rs"));
 }
 
 pub mod symbol_layer_tessellated_generated {
@@ -587,4 +599,79 @@ impl VectorTransferables for FlatTransferables {
 impl RasterTransferables for FlatTransferables {
     type LayerRaster = FlatBufferTransferable;
     type LayerRasterMissing = FlatBufferTransferable;
+}
+
+impl LayerDem for FlatBufferTransferable {
+    fn message_tag() -> &'static dyn MessageTag {
+        &WebMessageTag::LayerDem
+    }
+
+    fn build_from(coords: WorldTileCoords, image: RgbaImage) -> Self {
+        let mut inner_builder = FlatBufferBuilder::with_capacity(1024);
+        let width = image.width();
+        let height = image.height();
+        let image_data = inner_builder.create_vector(&image.into_vec());
+        let mut builder = FlatLayerDemBuilder::new(&mut inner_builder);
+        builder.add_coords(&FlatWorldTileCoords::new(
+            coords.x,
+            coords.y,
+            coords.z.into(),
+        ));
+        builder.add_image_data(image_data);
+        builder.add_width(width);
+        builder.add_height(height);
+        let root = builder.finish();
+        inner_builder.finish(root, None);
+        let (data, start) = inner_builder.collapse();
+        FlatBufferTransferable {
+            tag: WebMessageTag::LayerDem,
+            data,
+            start,
+        }
+    }
+
+    fn coords(&self) -> WorldTileCoords {
+        let data = root_as_flat_layer_dem(&self.data[self.start..]).unwrap();
+        data.coords().unwrap().into()
+    }
+
+    fn into_image(self) -> RgbaImage {
+        let data = root_as_flat_layer_dem(&self.data[self.start..]).unwrap();
+        let image_data = data.image_data().unwrap().iter().collect();
+        RgbaImage::from_vec(data.width(), data.height(), image_data).unwrap()
+    }
+}
+
+impl LayerDemMissing for FlatBufferTransferable {
+    fn message_tag() -> &'static dyn MessageTag {
+        &WebMessageTag::LayerDemMissing
+    }
+
+    fn build_from(coords: WorldTileCoords) -> Self {
+        let mut inner_builder = FlatBufferBuilder::with_capacity(1024);
+        let mut builder = FlatLayerDemMissingBuilder::new(&mut inner_builder);
+        builder.add_coords(&FlatWorldTileCoords::new(
+            coords.x,
+            coords.y,
+            coords.z.into(),
+        ));
+        let root = builder.finish();
+        inner_builder.finish(root, None);
+        let (data, start) = inner_builder.collapse();
+        FlatBufferTransferable {
+            tag: WebMessageTag::LayerDemMissing,
+            data,
+            start,
+        }
+    }
+
+    fn coords(&self) -> WorldTileCoords {
+        let data = root_as_flat_layer_dem_missing(&self.data[self.start..]).unwrap();
+        data.coords().unwrap().into()
+    }
+}
+
+impl DemTransferables for FlatTransferables {
+    type LayerDem = FlatBufferTransferable;
+    type LayerDemMissing = FlatBufferTransferable;
 }

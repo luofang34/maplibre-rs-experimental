@@ -144,21 +144,34 @@ pub async fn run_maplibre(
     let kernel: Kernel<WinitEnvironment<_, _, UsedOffscreenKernelEnvironment, _, ()>> =
         kernel_builder.build();
 
-    let mut map: MapType = Map::new(
-        style,
-        kernel,
-        RendererBuilder::new(),
-        vec![
-            Box::<maplibre::render::RenderPlugin>::default(),
-            Box::<maplibre::background::BackgroundPlugin>::default(),
-            Box::<maplibre::vector::VectorPlugin<platform::UsedVectorTransferables>>::default(),
-            Box::new(maplibre::sdf::SdfPlugin::<platform::UsedVectorTransferables>::default()),
-            // Box::new(RasterPlugin::<platform::UsedRasterTransferables>::default()),
-            #[cfg(debug_assertions)]
-            Box::<maplibre::debug::DebugPlugin>::default(),
-        ],
-    )
-    .unwrap();
+    let has_raster_sources = style.sources.values().any(|source| {
+        matches!(
+            source,
+            maplibre::style::source::Source::Raster(_)
+                | maplibre::style::source::Source::RasterDem(_)
+        )
+    });
+    let has_terrain = style.terrain.is_some();
+    let mut plugins: Vec<Box<dyn maplibre::plugin::Plugin<CurrentEnvironment>>> = vec![
+        Box::<maplibre::render::RenderPlugin>::default(),
+        Box::<maplibre::background::BackgroundPlugin>::default(),
+        Box::<maplibre::vector::VectorPlugin<platform::UsedVectorTransferables>>::default(),
+        Box::new(maplibre::sdf::SdfPlugin::<platform::UsedVectorTransferables>::default()),
+    ];
+    if has_raster_sources {
+        plugins.push(Box::new(maplibre::raster::RasterPlugin::<
+            platform::UsedRasterTransferables,
+        >::default()));
+        plugins.push(Box::new(maplibre::hillshade::HillshadePlugin));
+    }
+    if has_terrain {
+        plugins.push(Box::new(maplibre::terrain::TerrainPlugin::<
+            platform::UsedDemTransferables,
+        >::default()));
+    }
+    #[cfg(debug_assertions)]
+    plugins.push(Box::<maplibre::debug::DebugPlugin>::default());
+    let mut map: MapType = Map::new(style, kernel, RendererBuilder::new(), plugins).unwrap();
     map.initialize_renderer().await.unwrap();
 
     map.window_mut()

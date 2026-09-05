@@ -35,7 +35,7 @@ mod resource_system;
 pub mod resources;
 pub mod rtt;
 pub mod source;
-mod transferables;
+pub mod transferables;
 mod upload_system;
 
 pub use backfill::backfill_neighbours;

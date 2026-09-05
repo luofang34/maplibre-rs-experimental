@@ -1,0 +1,11 @@
+include "basic.fbs";
+
+table FlatLayerDem {
+    coords: FlatWorldTileCoords;
+
+    image_data: [ubyte];
+    width: uint;
+    height: uint;
+}
+
+root_type FlatLayerDem;

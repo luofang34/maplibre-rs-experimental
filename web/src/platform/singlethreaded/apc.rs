@@ -43,6 +43,8 @@ pub enum WebMessageTag {
     LayerRaster = 5,
     LayerRasterMissing = 6,
     SymbolLayerTessellated = 7,
+    LayerDem = 8,
+    LayerDemMissing = 9,
 }
 
 impl WebMessageTag {
@@ -55,6 +57,8 @@ impl WebMessageTag {
             WebMessageTag::LayerTessellated => &WebMessageTag::LayerTessellated,
             WebMessageTag::LayerRasterMissing => &WebMessageTag::LayerRasterMissing,
             WebMessageTag::SymbolLayerTessellated => &WebMessageTag::SymbolLayerTessellated,
+            WebMessageTag::LayerDem => &WebMessageTag::LayerDem,
+            WebMessageTag::LayerDemMissing => &WebMessageTag::LayerDemMissing,
         }
     }
 
@@ -71,6 +75,8 @@ impl WebMessageTag {
             x if x == WebMessageTag::SymbolLayerTessellated as u32 => {
                 Ok(WebMessageTag::SymbolLayerTessellated)
             }
+            x if x == WebMessageTag::LayerDem as u32 => Ok(WebMessageTag::LayerDem),
+            x if x == WebMessageTag::LayerDemMissing as u32 => Ok(WebMessageTag::LayerDemMissing),
             _ => Err(MessageTagDeserializeError),
         }
     }
