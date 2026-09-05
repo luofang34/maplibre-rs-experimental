@@ -33,7 +33,7 @@ use crate::{
         settings::{RendererSettings, WgpuSettings},
         systems::{
             cleanup_system::cleanup_system, resource_system::ResourceSystem,
-            sort_phase_system::sort_phase_system,
+            retention_system::retention_system, sort_phase_system::sort_phase_system,
             tile_view_pattern_system::tile_view_pattern_system,
         },
     },
@@ -641,7 +641,9 @@ impl<E: Environment> Plugin<E> for RenderPlugin {
         );
         schedule.add_stage(
             RenderStageLabel::Cleanup,
-            SystemStage::default().with_system(cleanup_system),
+            SystemStage::default()
+                .with_system(cleanup_system)
+                .with_system(retention_system),
         );
     }
 }

@@ -73,6 +73,16 @@ impl Tiles {
         self.tiles.clear();
         self.components.clear();
     }
+
+    /// Drops a tile with its components and query index; `false` when it was not present.
+    pub fn remove(&mut self, coords: WorldTileCoords) -> bool {
+        let Some(key) = coords.build_quad_key() else {
+            return false;
+        };
+        self.components.remove(&key);
+        self.geometry_index.remove(&coords);
+        self.tiles.remove(&key).is_some()
+    }
 }
 
 pub struct TileSpawnResult<'t> {

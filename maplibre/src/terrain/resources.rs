@@ -268,6 +268,11 @@ impl TerrainResources {
         self.dem_textures.insert(coords, (texture, revision));
     }
 
+    /// Releases the DEM texture of a tile that left the store.
+    pub fn drop_dem(&mut self, coords: WorldTileCoords) {
+        self.dem_textures.remove(&coords);
+    }
+
     /// DEM texture of a tile, or the flat stand-in while it loads.
     pub fn dem_texture(&self, coords: Option<WorldTileCoords>) -> &Texture {
         coords

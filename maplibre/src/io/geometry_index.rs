@@ -36,6 +36,13 @@ impl GeometryIndex {
             .and_then(|key| self.index.insert(key, tile_index));
     }
 
+    /// Forgets a tile's index when the tile leaves the store.
+    pub fn remove(&mut self, coords: &WorldTileCoords) {
+        if let Some(key) = coords.build_quad_key() {
+            self.index.remove(&key);
+        }
+    }
+
     pub fn query_point(
         &self,
         world_coords: &WorldCoords,

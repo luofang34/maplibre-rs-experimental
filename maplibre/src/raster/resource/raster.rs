@@ -61,6 +61,12 @@ impl RasterResources {
         self.bound_textures.get(coords)
     }
 
+    /// Releases the texture of a tile that left the store. The revision stays put: no drape
+    /// in view drew from it, so nothing needs redrawing.
+    pub fn remove_texture(&mut self, coords: WorldTileCoords) {
+        self.bound_textures.remove(&coords);
+    }
+
     /// Creates a bind group for each fetched raster tile and store it inside a hashmap.
     pub fn bind_texture(
         &mut self,
