@@ -264,6 +264,9 @@ impl GeomProcessor for TextTessellatorNew {
     fn multipoint_begin(&mut self, size: usize, idx: usize) -> GeoResult<()> {
         self.geo_writer.multipoint_begin(size, idx)
     }
+    fn multipoint_end(&mut self, idx: usize) -> GeoResult<()> {
+        self.geo_writer.multipoint_end(idx)
+    }
     fn linestring_begin(&mut self, tagged: bool, size: usize, idx: usize) -> GeoResult<()> {
         self.geo_writer.linestring_begin(tagged, size, idx)
     }

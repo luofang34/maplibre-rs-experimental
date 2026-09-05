@@ -223,6 +223,10 @@ impl GeomProcessor for IndexProcessor {
     fn multipoint_begin(&mut self, size: usize, idx: usize) -> Result<(), GeozeroError> {
         self.geo_writer.multipoint_begin(size, idx)
     }
+    fn multipoint_end(&mut self, idx: usize) -> Result<(), GeozeroError> {
+        // Without this the writer keeps the points and the next geometry starts inside them.
+        self.geo_writer.multipoint_end(idx)
+    }
     fn linestring_begin(
         &mut self,
         tagged: bool,
@@ -329,3 +333,6 @@ impl FeatureProcessor for IndexProcessor {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests;
