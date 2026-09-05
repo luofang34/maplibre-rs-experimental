@@ -136,6 +136,8 @@ pub struct ZeroTessellator<I: std::ops::Add + From<lyon::tessellation::VertexId>
     clip_x_to_tile: bool,
     extend_to_north_pole: bool,
     extend_to_south_pole: bool,
+    /// Factor from the source layer's coordinate extent to the 4096 tile grid.
+    pub coordinate_scale: f64,
 
     pub buffer: VertexBuffers<ShaderVertex, I>,
 
@@ -172,6 +174,7 @@ impl<I: std::ops::Add + From<lyon::tessellation::VertexId> + MaxIndex> Default
             clip_x_to_tile: false,
             extend_to_north_pole: false,
             extend_to_south_pole: false,
+            coordinate_scale: 1.0,
         }
     }
 }
@@ -300,7 +303,8 @@ where
         if self.is_point {
             // log::info!("point");
         } else {
-            self.append_coordinate([x as f32, y as f32])?;
+            let scale = self.coordinate_scale;
+            self.append_coordinate([(x * scale) as f32, (y * scale) as f32])?;
         }
         Ok(())
     }

@@ -184,6 +184,7 @@ pub struct IndexProcessor {
     geo_writer: GeoWriter,
     geometries: Vec<IndexedGeometry<f64>>,
     properties: Option<HashMap<String, String>>,
+    coordinate_scale: f64,
 }
 
 impl IndexProcessor {
@@ -192,7 +193,13 @@ impl IndexProcessor {
             geo_writer: GeoWriter::new(),
             geometries: Vec::new(),
             properties: None,
+            coordinate_scale: 1.0,
         }
+    }
+
+    /// Sets the factor from the next layer's coordinate extent to the 4096 tile grid.
+    pub fn set_coordinate_scale(&mut self, scale: f64) {
+        self.coordinate_scale = scale;
     }
 
     pub fn build_tree(self) -> RTree<IndexedGeometry<f64>> {
@@ -212,7 +219,8 @@ impl Default for IndexProcessor {
 
 impl GeomProcessor for IndexProcessor {
     fn xy(&mut self, x: f64, y: f64, idx: usize) -> Result<(), GeozeroError> {
-        self.geo_writer.xy(x, y, idx)
+        self.geo_writer
+            .xy(x * self.coordinate_scale, y * self.coordinate_scale, idx)
     }
     fn point_begin(&mut self, idx: usize) -> Result<(), GeozeroError> {
         self.geo_writer.point_begin(idx)

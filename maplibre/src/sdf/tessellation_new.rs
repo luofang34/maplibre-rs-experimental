@@ -57,6 +57,8 @@ pub struct TextTessellatorNew {
     current_text: Option<String>,
     current_origin: Option<Box2D<f32, TileSpace>>,
     current_point: Option<(f64, f64)>,
+    /// Factor from the source layer's coordinate extent to the 4096 tile grid.
+    pub coordinate_scale: f64,
 }
 
 impl TextTessellatorNew {
@@ -246,12 +248,14 @@ impl Default for TextTessellatorNew {
             current_text: None,
             current_origin: None,
             current_point: None,
+            coordinate_scale: 1.0,
         }
     }
 }
 
 impl GeomProcessor for TextTessellatorNew {
     fn xy(&mut self, x: f64, y: f64, idx: usize) -> GeoResult<()> {
+        let (x, y) = (x * self.coordinate_scale, y * self.coordinate_scale);
         self.current_point = Some((x, y));
         self.geo_writer.xy(x, y, idx)
     }

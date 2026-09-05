@@ -11,7 +11,7 @@ use geozero::{
 use thiserror::Error;
 
 use crate::{
-    coords::WorldTileCoords,
+    coords::{WorldTileCoords, EXTENT},
     io::{
         apc::{Context, SendError},
         geometry_index::{IndexProcessor, IndexedGeometry, TileIndex},
@@ -40,6 +40,15 @@ pub enum ProcessVectorError {
     /// Error when decoding e.g. the protobuf file
     #[error("decoding failed")]
     Decoding(Cow<'static, str>),
+}
+
+/// Scale from a layer's declared coordinate extent to the 4096 grid the shaders expect, so a
+/// producer emitting 8192 keeps its precision instead of landing twice as far from the origin.
+pub fn extent_scale(layer: &tile::Layer) -> f64 {
+    match layer.extent {
+        Some(extent) if extent > 0 => EXTENT / f64::from(extent),
+        _ => 1.0,
+    }
 }
 
 /// A request for a tile at the given coordinates and in the given layers.
@@ -199,6 +208,7 @@ pub fn process_vector_tile<T: VectorTransferables, C: Context>(
 
                 let original_layer = filtered_layer.clone();
                 let layer = &mut filtered_layer;
+                let coordinate_scale = extent_scale(layer);
 
                 match paint {
                     LayerPaint::Line(_) | LayerPaint::Fill(_) => {
@@ -226,6 +236,7 @@ pub fn process_vector_tile<T: VectorTransferables, C: Context>(
                         } else {
                             ZeroTessellator::<IndexDataType>::default()
                         };
+                        tessellator.coordinate_scale = coordinate_scale;
                         match paint {
                             LayerPaint::Fill(p) => {
                                 tessellator.style_property = p.fill_color.clone()
@@ -262,6 +273,7 @@ pub fn process_vector_tile<T: VectorTransferables, C: Context>(
                             .clone()
                             .unwrap_or_else(|| "name".to_string());
                         let mut tessellator_new = TextTessellatorNew::new(text_field);
+                        tessellator_new.coordinate_scale = coordinate_scale;
 
                         if let Err(e) = layer.process(&mut tessellator_new) {
                             context.layer_missing(coords, &source_layer)?;
@@ -314,6 +326,7 @@ pub fn process_vector_tile<T: VectorTransferables, C: Context>(
     let mut index = IndexProcessor::new();
 
     for layer in &mut tile.layers {
+        index.set_coordinate_scale(extent_scale(layer));
         // A layer that the index cannot decode still rendered above; losing its query index is
         // better than losing the worker.
         if let Err(error) = layer.process(&mut index) {
@@ -422,28 +435,4 @@ impl<T: VectorTransferables, C: Context> ProcessVectorContext<T, C> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::ProcessVectorContext;
-    use crate::{
-        coords::ZoomLevel,
-        io::apc::tests::DummyContext,
-        vector::{
-            process_vector::{process_vector_tile, VectorTileRequest},
-            DefaultVectorTransferables,
-        },
-    };
-
-    #[test] // TODO: Add proper tile byte array
-    #[ignore]
-    fn test() {
-        let _output = process_vector_tile(
-            &[0],
-            VectorTileRequest {
-                coords: (0, 0, ZoomLevel::default()).into(),
-                layers: Default::default(),
-                projection: crate::projection::ProjectionType::Mercator,
-            },
-            &mut ProcessVectorContext::<DefaultVectorTransferables, _>::new(DummyContext),
-        );
-    }
-}
+mod tests;

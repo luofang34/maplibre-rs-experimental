@@ -35,6 +35,8 @@ pub struct TextTessellator<I: std::ops::Add + From<lyon::tessellation::VertexId>
     current_index: usize,
     current_text: Option<String>,
     current_origin: Option<Box2D<f32, TileSpace>>,
+    /// Factor from the source layer's coordinate extent to the 4096 tile grid.
+    pub coordinate_scale: f64,
 }
 
 impl<I: std::ops::Add + From<lyon::tessellation::VertexId> + MaxIndex> Default
@@ -50,6 +52,7 @@ impl<I: std::ops::Add + From<lyon::tessellation::VertexId> + MaxIndex> Default
             current_index: 0,
             current_text: None,
             current_origin: None,
+            coordinate_scale: 1.0,
         }
     }
 }
@@ -157,10 +160,9 @@ impl<I: std::ops::Add + From<lyon::tessellation::VertexId> + MaxIndex> GeomProce
             //FIXME
             unreachable!("Text labels have only a single origin point")
         } else {
-            self.current_origin = Some(Box2D::new(
-                Point2D::new(x as f32, y as f32),
-                Point2D::new(x as f32, y as f32),
-            ))
+            let x = (x * self.coordinate_scale) as f32;
+            let y = (y * self.coordinate_scale) as f32;
+            self.current_origin = Some(Box2D::new(Point2D::new(x, y), Point2D::new(x, y)))
         }
 
         Ok(())
