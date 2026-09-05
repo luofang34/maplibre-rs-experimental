@@ -416,7 +416,7 @@ fn background_clear_color(style: &Style) -> wgpu::Color {
     style
         .layers
         .iter()
-        .find(|layer| layer.type_ == "background")
+        .find(|layer| layer.type_ == "background" && !layer.is_hidden())
         .and_then(|layer| layer.paint.as_ref()?.get_color())
         .map(|color| wgpu::Color {
             r: f64::from(color.color.r),

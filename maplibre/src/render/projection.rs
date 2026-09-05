@@ -331,10 +331,11 @@ pub fn raster_source_regions(
         let Source::Raster(raster) = source else {
             continue;
         };
-        let used = style
-            .layers
-            .iter()
-            .any(|layer| layer.type_ == "raster" && layer.source.as_deref() == Some(name));
+        let used = style.layers.iter().any(|layer| {
+            layer.type_ == "raster"
+                && layer.source.as_deref() == Some(name)
+                && layer.is_visible_at(zoom)
+        });
         if !used {
             continue;
         }

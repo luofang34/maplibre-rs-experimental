@@ -67,6 +67,38 @@ fn vector_layers_group_by_source_template() {
 }
 
 #[test]
+fn hidden_layers_are_left_out_of_every_group() {
+    let style: Style = serde_json::from_value(serde_json::json!({
+        "version": 8,
+        "sources": {
+            "world": {"type": "vector", "tiles": ["https://w.example/{z}/{x}/{y}.pbf"]},
+            "photo": {"type": "raster", "tiles": ["https://p.example/{z}/{x}/{y}.jpg"]}
+        },
+        "layers": [
+            {"id": "land", "type": "fill", "source": "world", "source-layer": "countries",
+             "layout": {"visibility": "none"}, "paint": {"fill-color": "red"}},
+            {"id": "water", "type": "fill", "source": "world", "source-layer": "water",
+             "paint": {"fill-color": "blue"}},
+            {"id": "photo", "type": "raster", "source": "photo", "layout": {"visibility": "none"}}
+        ]
+    }))
+    .expect("style parses");
+
+    let vector: Vec<_> = source_layer_groups(&style, TileKind::Vector)
+        .into_iter()
+        .flat_map(|group| group.layers)
+        .map(|layer| layer.id)
+        .collect();
+    assert_eq!(vector, vec!["water"]);
+    assert!(
+        source_layer_groups(&style, TileKind::Raster)
+            .iter()
+            .all(|group| group.layers.is_empty()),
+        "a hidden raster layer requests no tiles"
+    );
+}
+
+#[test]
 fn tms_scheme_reaches_the_template_source() {
     let groups = source_layer_groups(&style(), TileKind::Vector);
     let detail = groups

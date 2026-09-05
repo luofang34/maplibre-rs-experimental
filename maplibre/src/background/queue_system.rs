@@ -53,7 +53,7 @@ pub fn queue_system(
         };
 
         for layer in &style.layers {
-            if layer.type_ != "background" {
+            if layer.type_ != "background" || !layer.is_visible_at(view_state.zoom().value()) {
                 continue;
             }
             let c: [f32; 4] = match &layer.paint {

@@ -82,7 +82,7 @@ pub fn source_layer_groups(style: &Style, kind: TileKind) -> Vec<SourceLayerGrou
     for layer in style
         .layers
         .iter()
-        .filter(|layer| kind.accepts_layer(layer))
+        .filter(|layer| kind.accepts_layer(layer) && !layer.is_hidden())
     {
         let named = layer
             .source

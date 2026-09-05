@@ -492,6 +492,18 @@ impl LayerPaint {
     }
 }
 
+/// Whether a layer is drawn at all, the `layout.visibility` property.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, Eq, PartialEq)]
+pub enum LayerVisibility {
+    /// The layer is drawn.
+    #[default]
+    #[serde(rename = "visible")]
+    Visible,
+    /// The layer is neither laid out nor drawn.
+    #[serde(rename = "none")]
+    None,
+}
+
 /// Stores all the styles for a specific layer.
 #[derive(Debug, Clone)]
 pub struct StyleLayer {
@@ -505,14 +517,24 @@ pub struct StyleLayer {
     pub paint: Option<LayerPaint>,
     pub source: Option<String>,
     pub source_layer: Option<String>,
+    /// Whether the layer is drawn at all.
+    pub visibility: LayerVisibility,
 }
 
 impl StyleLayer {
-    /// Returns whether the layer is drawn at a continuous zoom, using the style-spec rule that
-    /// `minzoom` is inclusive and `maxzoom` exclusive.
+    /// Whether the layer is switched off by its `layout.visibility`, at every zoom.
+    pub fn is_hidden(&self) -> bool {
+        self.visibility == LayerVisibility::None
+    }
+
+    /// Returns whether the layer is drawn at a continuous zoom: it is not hidden and the zoom
+    /// lies in its range, using the style-spec rule that `minzoom` is inclusive and `maxzoom`
+    /// exclusive.
     pub fn is_visible_at(&self, zoom: f64) -> bool {
-        self.minzoom
-            .is_none_or(|minzoom| zoom >= f64::from(minzoom))
+        !self.is_hidden()
+            && self
+                .minzoom
+                .is_none_or(|minzoom| zoom >= f64::from(minzoom))
             && self.maxzoom.is_none_or(|maxzoom| zoom < f64::from(maxzoom))
     }
 }
@@ -669,6 +691,12 @@ impl<'de> serde::Deserialize<'de> for StyleLayer {
             paint,
             source: def.source,
             source_layer: def.source_layer,
+            visibility: def
+                .layout
+                .as_ref()
+                .and_then(|layout| layout.get("visibility"))
+                .and_then(|visibility| serde_json::from_value(visibility.clone()).ok())
+                .unwrap_or_default(),
         })
     }
 }
@@ -699,6 +727,7 @@ impl Default for StyleLayer {
             paint: None,
             source: None,
             source_layer: Some("does not exist".to_string()),
+            visibility: LayerVisibility::Visible,
         }
     }
 }
@@ -718,6 +747,7 @@ mod tests {
             paint: None,
             source: None,
             source_layer: None,
+            visibility: super::LayerVisibility::Visible,
         };
 
         assert!(!layer.is_visible_at(1.99));
@@ -729,6 +759,30 @@ mod tests {
         layer.maxzoom = None;
         assert!(layer.is_visible_at(0.0));
         assert!(layer.is_visible_at(24.0));
+    }
+
+    #[test]
+    fn a_layer_with_visibility_none_is_hidden_at_every_zoom() {
+        let hidden: super::StyleLayer = serde_json::from_value(serde_json::json!({
+            "id": "water", "type": "fill", "source": "s", "source-layer": "water",
+            "layout": {"visibility": "none"}
+        }))
+        .expect("layer parses");
+        assert!(hidden.is_hidden());
+        assert!(!hidden.is_visible_at(0.0) && !hidden.is_visible_at(12.0));
+
+        for layout in [
+            serde_json::json!({"visibility": "visible"}),
+            serde_json::json!({}),
+        ] {
+            let visible: super::StyleLayer = serde_json::from_value(serde_json::json!({
+                "id": "water", "type": "fill", "source": "s", "source-layer": "water",
+                "layout": layout
+            }))
+            .expect("layer parses");
+            assert!(!visible.is_hidden());
+            assert!(visible.is_visible_at(0.0));
+        }
     }
 
     use super::*;
