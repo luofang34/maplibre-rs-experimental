@@ -16,10 +16,14 @@ use lyon::{
     },
 };
 
+pub use circle::{CircleOptions, CIRCLE_QUAD_INDICES};
+
 use crate::{
     projection::globe::subdivision::{subdivide_line_segment, subdivide_triangles},
     render::ShaderVertex,
 };
+
+mod circle;
 
 const DEFAULT_TOLERANCE: f32 = 0.02;
 
@@ -138,6 +142,8 @@ pub struct ZeroTessellator<I: std::ops::Add + From<lyon::tessellation::VertexId>
     extend_to_south_pole: bool,
     /// Factor from the source layer's coordinate extent to the 4096 tile grid.
     pub coordinate_scale: f64,
+    /// When set, every coordinate becomes a circle quad and no path is built.
+    circle: Option<CircleOptions>,
 
     pub buffer: VertexBuffers<ShaderVertex, I>,
 
@@ -175,6 +181,7 @@ impl<I: std::ops::Add + From<lyon::tessellation::VertexId> + MaxIndex> Default
             extend_to_north_pole: false,
             extend_to_south_pole: false,
             coordinate_scale: 1.0,
+            circle: None,
         }
     }
 }
@@ -298,13 +305,12 @@ where
     I: std::ops::Add + From<lyon::tessellation::VertexId> + MaxIndex + Copy + Into<u32>,
 {
     fn xy(&mut self, x: f64, y: f64, _idx: usize) -> GeoResult<()> {
-        // log::info!("xy");
-
-        if self.is_point {
-            // log::info!("point");
-        } else {
-            let scale = self.coordinate_scale;
-            self.append_coordinate([(x * scale) as f32, (y * scale) as f32])?;
+        let scale = self.coordinate_scale;
+        let coordinate = [(x * scale) as f32, (y * scale) as f32];
+        if self.circle.is_some() {
+            self.emit_circle(coordinate[0], coordinate[1]);
+        } else if !self.is_point {
+            self.append_coordinate(coordinate)?;
         }
         Ok(())
     }
@@ -337,8 +343,9 @@ where
     }
 
     fn linestring_end(&mut self, tagged: bool, _idx: usize) -> GeoResult<()> {
-        // log::info!("linestring_end");
-
+        if self.circle.is_some() {
+            return Ok(());
+        }
         self.end(false)?;
 
         if tagged {
@@ -353,7 +360,9 @@ where
     }
 
     fn multilinestring_end(&mut self, _idx: usize) -> GeoResult<()> {
-        // log::info!("multilinestring_end");
+        if self.circle.is_some() {
+            return Ok(());
+        }
         self.tessellate_strokes()?;
         Ok(())
     }
@@ -364,8 +373,9 @@ where
     }
 
     fn polygon_end(&mut self, tagged: bool, _idx: usize) -> GeoResult<()> {
-        // log::info!("polygon_end");
-
+        if self.circle.is_some() {
+            return Ok(());
+        }
         self.end(true)?;
         if tagged {
             if self.is_line_layer {
@@ -383,8 +393,9 @@ where
     }
 
     fn multipolygon_end(&mut self, _idx: usize) -> GeoResult<()> {
-        // log::info!("multipolygon_end");
-
+        if self.circle.is_some() {
+            return Ok(());
+        }
         if self.is_line_layer {
             self.tessellate_strokes()?;
         } else {
@@ -415,7 +426,7 @@ where
 {
     fn feature_end(&mut self, _idx: u64) -> geozero::error::Result<()> {
         self.update_feature_indices();
-        let color = if let Some(style) = &self.style_property {
+        let mut color = if let Some(style) = &self.style_property {
             if let Some(c) = style.evaluate(&self.feature_properties) {
                 [c.r as f32, c.g as f32, c.b as f32, c.a as f32]
             } else {
@@ -429,6 +440,9 @@ where
         } else {
             self.fallback_color
         };
+        if let Some(circle) = &self.circle {
+            color[3] *= circle.opacity_for(&self.feature_properties);
+        }
 
         self.feature_colors.push(color);
         self.feature_properties.clear();

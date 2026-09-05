@@ -62,6 +62,15 @@ impl Deref for LinePipeline {
     }
 }
 
+struct CirclePipeline(wgpu::RenderPipeline);
+impl Deref for CirclePipeline {
+    type Target = wgpu::RenderPipeline;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 pub type VectorBufferPool = BufferPool<
     wgpu::Queue,
     wgpu::Buffer,
@@ -107,6 +116,7 @@ impl<E: Environment, T: VectorTransferables> Plugin<E> for VectorPlugin<T> {
         resources.insert(Eventually::<VectorBufferPool>::Uninitialized);
         resources.insert(Eventually::<VectorPipeline>::Uninitialized);
         resources.insert(Eventually::<LinePipeline>::Uninitialized);
+        resources.insert(Eventually::<CirclePipeline>::Uninitialized);
 
         resources
             .get_or_init_mut::<ViewTileSources>()

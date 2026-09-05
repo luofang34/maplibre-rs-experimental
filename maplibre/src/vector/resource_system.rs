@@ -10,7 +10,9 @@ use crate::{
         RenderResources, Renderer,
     },
     tcs::system::{SystemError, SystemResult},
-    vector::{resource::BufferPool, LinePipeline, VectorBufferPool, VectorPipeline},
+    vector::{
+        resource::BufferPool, CirclePipeline, LinePipeline, VectorBufferPool, VectorPipeline,
+    },
 };
 
 pub fn resource_system(
@@ -26,13 +28,19 @@ pub fn resource_system(
         ..
     }: &mut MapContext,
 ) -> SystemResult {
-    let Some((buffer_pool, vector_pipeline, line_pipeline, Initialized(projection_resources))) =
-        world.resources.query_mut::<(
-            &mut Eventually<VectorBufferPool>,
-            &mut Eventually<VectorPipeline>,
-            &mut Eventually<LinePipeline>,
-            &mut Eventually<ProjectionGpuResources>,
-        )>()
+    let Some((
+        buffer_pool,
+        vector_pipeline,
+        line_pipeline,
+        circle_pipeline,
+        Initialized(projection_resources),
+    )) = world.resources.query_mut::<(
+        &mut Eventually<VectorBufferPool>,
+        &mut Eventually<VectorPipeline>,
+        &mut Eventually<LinePipeline>,
+        &mut Eventually<CirclePipeline>,
+        &mut Eventually<ProjectionGpuResources>,
+    )>()
     else {
         return Err(SystemError::Dependencies);
     };
@@ -85,6 +93,30 @@ pub fn resource_system(
         .initialize_with_prefix_layouts(device, &[projection_resources.bind_group_layout()]);
 
         LinePipeline(pipeline)
+    });
+
+    circle_pipeline.initialize(|| {
+        let circle_shader = shaders::CircleShader {
+            format: surface.surface_format(),
+        };
+
+        let pipeline = TilePipeline::new(
+            "circle_pipeline".into(),
+            *settings,
+            circle_shader.describe_vertex(),
+            circle_shader.describe_fragment(),
+            true,
+            false,
+            false,
+            false,
+            surface.is_multisampling_supported(settings.msaa),
+            false,
+            false,
+        )
+        .describe_render_pipeline()
+        .initialize_with_prefix_layouts(device, &[projection_resources.bind_group_layout()]);
+
+        CirclePipeline(pipeline)
     });
 
     Ok(())

@@ -1,6 +1,7 @@
 struct ShaderProjectionData {
     main_matrix: mat4x4<f32>,
     clipping_plane: vec4<f32>,
+    // x: Mercator-to-globe transition, y: clip-space w of the view center.
     transition_and_padding: vec4<f32>,
 };
 

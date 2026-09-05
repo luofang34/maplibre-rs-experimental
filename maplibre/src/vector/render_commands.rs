@@ -10,7 +10,7 @@ use crate::{
         INDEX_FORMAT,
     },
     tcs::world::World,
-    vector::{LinePipeline, VectorBufferPool, VectorPipeline},
+    vector::{CirclePipeline, LinePipeline, VectorBufferPool, VectorPipeline},
 };
 
 pub struct SetVectorTilePipeline;
@@ -142,5 +142,32 @@ impl<P: PhaseItem> RenderCommand<P> for SetLineTilePipeline {
     }
 }
 
+pub struct SetCircleTilePipeline;
+impl<P: PhaseItem> RenderCommand<P> for SetCircleTilePipeline {
+    fn render<'w>(
+        world: &'w World,
+        item: &P,
+        pass: &mut TrackedRenderPass<'w>,
+    ) -> RenderCommandResult {
+        let Some((Initialized(pipeline), Initialized(projection_resources))) =
+            world.resources.query::<(
+                &Eventually<CirclePipeline>,
+                &Eventually<ProjectionGpuResources>,
+            )>()
+        else {
+            return RenderCommandResult::Failure;
+        };
+
+        pass.set_render_pipeline(pipeline);
+        pass.set_bind_group(
+            0,
+            projection_resources.bind_group_for(item.projection_binding()),
+            &[],
+        );
+        RenderCommandResult::Success
+    }
+}
+
 pub type DrawVectorTiles = (SetVectorTilePipeline, DrawVectorTile);
 pub type DrawLineTiles = (SetLineTilePipeline, DrawVectorTile);
+pub type DrawCircleTiles = (SetCircleTilePipeline, DrawVectorTile);

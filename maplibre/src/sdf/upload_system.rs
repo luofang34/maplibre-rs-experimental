@@ -148,11 +148,8 @@ fn upload_symbol_layer(
                 *coords,
                 style_layer.clone(),
                 buffer,
-                ShaderLayerMetadata {
-                    z_index: style_layer.index as f32,
-                    line_width: text_size, // repurposed as text_size for SDF pipeline
-                    translate: [0.0; 2],
-                },
+                // The line width slot carries the text size for the SDF pipeline.
+                ShaderLayerMetadata::new(style_layer.index as f32, text_size, [0.0; 2]),
                 &feature_metadata,
             );
         }

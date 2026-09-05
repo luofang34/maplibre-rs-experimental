@@ -16,7 +16,7 @@ use crate::{
         layer::{LayerPaint, StyleLayer},
     },
     vector::{
-        tessellation::{IndexDataType, ZeroTessellator},
+        tessellation::{CircleOptions, IndexDataType, ZeroTessellator},
         transferables::{
             LayerMissing, LayerTessellated, SymbolLayerTessellated, TileTessellated,
             VectorTransferables,
@@ -294,7 +294,10 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
         };
 
         match paint {
-            LayerPaint::Fill(_) | LayerPaint::Line(_) | LayerPaint::Background(_) => {
+            LayerPaint::Fill(_)
+            | LayerPaint::Line(_)
+            | LayerPaint::Background(_)
+            | LayerPaint::Circle(_) => {
                 let zoom = u8::from(coords.z);
                 let granularity = match paint {
                     LayerPaint::Fill(_) => granularity_for_zoom(128, 2, zoom),
@@ -302,19 +305,24 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
                     _ => 1,
                 };
                 let use_globe_geometry = request.projection.uses_globe_rendering(f64::from(zoom));
-                let mut tessellator = if use_globe_geometry {
-                    let last_tile = i64::from(crate::coords::ZOOM_BOUNDS[usize::from(zoom)]) - 1;
-                    ZeroTessellator::<IndexDataType>::default().with_globe_subdivision(
-                        granularity,
-                        zoom == 0,
-                        coords.y == 0,
-                        i64::from(coords.y) == last_tile,
-                    )
-                } else {
-                    ZeroTessellator::<IndexDataType>::default()
+                let mut tessellator = match paint {
+                    LayerPaint::Circle(circle) => ZeroTessellator::<IndexDataType>::default()
+                        .with_circles(CircleOptions::for_paint(circle, f64::from(zoom))),
+                    _ if use_globe_geometry => {
+                        let last_tile =
+                            i64::from(crate::coords::ZOOM_BOUNDS[usize::from(zoom)]) - 1;
+                        ZeroTessellator::<IndexDataType>::default().with_globe_subdivision(
+                            granularity,
+                            zoom == 0,
+                            coords.y == 0,
+                            i64::from(coords.y) == last_tile,
+                        )
+                    }
+                    _ => ZeroTessellator::<IndexDataType>::default(),
                 };
                 match paint {
                     LayerPaint::Fill(p) => tessellator.style_property = p.fill_color.clone(),
+                    LayerPaint::Circle(p) => tessellator.style_property = p.circle_color.clone(),
                     LayerPaint::Line(p) => {
                         tessellator.style_property = p.line_color.clone();
                         tessellator.is_line_layer = true;

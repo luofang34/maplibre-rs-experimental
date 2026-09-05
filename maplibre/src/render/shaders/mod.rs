@@ -1,6 +1,7 @@
 #![allow(clippy::identity_op)]
 
 mod background;
+mod circle;
 
 pub use background::{
     AtmosphereLayerMetadata, AtmosphereShader, BackgroundLayerMetadata, BackgroundShader,
@@ -8,6 +9,7 @@ pub use background::{
 };
 use bytemuck_derive::{Pod, Zeroable};
 use cgmath::SquareMatrix;
+pub use circle::CircleShader;
 
 use crate::{
     coords::WorldCoords,
@@ -484,6 +486,26 @@ pub struct ShaderLayerMetadata {
     pub z_index: f32,
     pub line_width: f32,
     pub translate: Vec2f32,
+    /// Circle stroke colour as straight RGBA; other layers leave it black.
+    pub stroke_color: Vec4f32,
+    /// Circle opacity, stroke opacity and blur ratio; the last slot is padding.
+    pub circle_params: Vec4f32,
+    /// Circle pitch-scale (x) and pitch-alignment (y), 1.0 for `map`; the rest is padding.
+    pub circle_flags: Vec4f32,
+}
+
+impl ShaderLayerMetadata {
+    /// Metadata for a layer without circle paint.
+    pub fn new(z_index: f32, line_width: f32, translate: Vec2f32) -> Self {
+        Self {
+            z_index,
+            line_width,
+            translate,
+            stroke_color: [0.0, 0.0, 0.0, 1.0],
+            circle_params: [1.0, 1.0, 0.0, 0.0],
+            circle_flags: [0.0; 4],
+        }
+    }
 }
 
 #[repr(C)]

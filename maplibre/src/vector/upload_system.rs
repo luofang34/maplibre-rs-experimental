@@ -11,6 +11,7 @@ use crate::{
         Renderer,
     },
     style::{
+        circle::{CirclePitchAlignment, CirclePitchScale},
         layer::{LayerPaint, TranslateAnchor},
         Style,
     },
@@ -141,6 +142,21 @@ fn upload_tessellated_layer(
             };
             let translate =
                 layer_translate_tile_units(style_layer.paint.as_ref(), coords.z, zoom, bearing);
+            let mut layer_metadata =
+                ShaderLayerMetadata::new(style_layer.index as f32, line_width, translate);
+            if let Some(LayerPaint::Circle(paint)) = &style_layer.paint {
+                let zoom = f64::from(zoom);
+                layer_metadata.stroke_color = paint.stroke_color_rgba();
+                // Fill opacity is already folded into each feature's colour alpha.
+                layer_metadata.circle_params =
+                    [1.0, paint.stroke_opacity_at(zoom), paint.blur_at(zoom), 0.0];
+                layer_metadata.circle_flags = [
+                    f32::from(paint.circle_pitch_scale == CirclePitchScale::Map),
+                    f32::from(paint.circle_pitch_alignment == CirclePitchAlignment::Map),
+                    0.0,
+                    0.0,
+                ];
+            }
 
             log::debug!("Allocating geometry at {coords}");
             buffer_pool.allocate_layer_geometry(
@@ -148,11 +164,7 @@ fn upload_tessellated_layer(
                 *coords,
                 style_layer.clone(),
                 buffer,
-                ShaderLayerMetadata {
-                    z_index: style_layer.index as f32,
-                    line_width,
-                    translate,
-                },
+                layer_metadata,
                 &feature_metadata,
             );
         }
@@ -173,6 +185,10 @@ fn layer_translate_tile_units(
         Some(LayerPaint::Line(paint)) => (
             paint.line_translate.unwrap_or([0.0; 2]),
             paint.line_translate_anchor,
+        ),
+        Some(LayerPaint::Circle(paint)) => (
+            paint.circle_translate.unwrap_or([0.0; 2]),
+            paint.circle_translate_anchor,
         ),
         _ => return [0.0; 2],
     };

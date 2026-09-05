@@ -62,6 +62,34 @@ fn diagonal_line_tile(extent: u32) -> Vec<u8> {
     .encode_to_vec()
 }
 
+/// One point feature in a layer declaring `extent`.
+fn point_tile(extent: u32, x: i64, y: i64) -> Vec<u8> {
+    let layer = tile::Layer {
+        version: 2,
+        name: "airports".to_string(),
+        features: vec![tile::Feature {
+            id: Some(1),
+            tags: Vec::new(),
+            r#type: Some(tile::GeomType::Point as i32),
+            geometry: vec![9, zigzag(x), zigzag(y)],
+        }],
+        extent: Some(extent),
+        ..Default::default()
+    };
+    Tile {
+        layers: vec![layer],
+    }
+    .encode_to_vec()
+}
+
+fn circle_layer() -> StyleLayer {
+    serde_json::from_value(serde_json::json!({
+        "id": "airports", "type": "circle", "source": "chart", "source-layer": "airports",
+        "paint": {"circle-radius": 4, "circle-stroke-width": 1}
+    }))
+    .expect("valid style layer")
+}
+
 fn line_layer(filter: Option<serde_json::Value>) -> StyleLayer {
     let mut layer = serde_json::json!({
         "id": "airways", "type": "line", "source": "chart", "source-layer": "airways",
@@ -194,4 +222,24 @@ fn an_unsupported_filter_reports_the_layer_missing_instead_of_guessing() {
         })
         .collect();
     assert_eq!(missing, vec!["airways".to_string()]);
+}
+
+#[test]
+fn a_point_in_a_larger_extent_becomes_one_circle_quad_on_the_4096_grid() {
+    let layers = tessellated(process(&point_tile(8192, 4096, 2048), circle_layer()));
+    let [layer] = layers.as_slice() else {
+        panic!("one tessellated layer, got {}", layers.len());
+    };
+    let buffer = &layer.buffer.buffer;
+
+    assert_eq!(buffer.indices.len(), 6, "one quad per point");
+    assert_eq!(buffer.vertices.len(), 4);
+    for vertex in &buffer.vertices {
+        assert_eq!(vertex.position, [2048.0, 1024.0]);
+        assert_eq!(
+            vertex.normal,
+            [4.0, 1.0],
+            "radius and stroke width ride along"
+        );
+    }
 }

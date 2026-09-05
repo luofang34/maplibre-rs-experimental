@@ -9,6 +9,8 @@ use cint::{Alpha, EncodedSrgb};
 use csscolorparser::Color;
 use serde::{Deserialize, Deserializer, Serialize};
 
+use crate::style::{circle::CirclePaint, expression::evaluate_number};
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(untagged)]
 pub enum StyleProperty<T> {
@@ -21,8 +23,15 @@ impl<T: std::str::FromStr + Clone> StyleProperty<T> {
         match self {
             StyleProperty::Constant(value) => Some(value.clone()),
             StyleProperty::Expression(expr) => {
+                if let Some(function) = expr.as_object() {
+                    return evaluate_property_function(function, feature_properties);
+                }
                 if let Some(arr) = expr.as_array() {
                     if let Some(op) = arr.get(0).and_then(|v| v.as_str()) {
+                        if op == "get" {
+                            let key = arr.get(1).and_then(|v| v.as_str())?;
+                            return feature_properties.get(key)?.parse::<T>().ok();
+                        }
                         if op == "match" && arr.len() > 3 {
                             // Extract the getter e.g. ["get", "ADM0_A3"]
                             if let Some(get_arr) = arr.get(1).and_then(|v| v.as_array()) {
@@ -95,15 +104,65 @@ impl<T: std::str::FromStr + Clone> StyleProperty<T> {
                 return Ok(Some(StyleProperty::Constant(color)));
             }
         }
-        // If it's a structural generic expression like match arrays
-        if v.is_array() {
+        // Expression arrays and legacy property functions are evaluated per feature.
+        if v.is_array() || v.is_object() {
             return Ok(Some(StyleProperty::Expression(v)));
         }
         Ok(None)
     }
 }
 
+/// Legacy `{"property": ..., "type": "identity" | "categorical"}` functions for non-numeric
+/// values; zoom-driven stops have no zoom here and fall back to the default.
+fn evaluate_property_function<T: std::str::FromStr>(
+    function: &serde_json::Map<String, serde_json::Value>,
+    feature_properties: &HashMap<String, String>,
+) -> Option<T> {
+    let fallback = || function.get("default")?.as_str()?.parse::<T>().ok();
+    let Some(key) = function.get("property").and_then(|v| v.as_str()) else {
+        return fallback();
+    };
+    let Some(value) = feature_properties.get(key) else {
+        return fallback();
+    };
+    match function.get("type").and_then(|v| v.as_str()) {
+        Some("categorical") => function
+            .get("stops")
+            .and_then(|stops| stops.as_array())
+            .and_then(|stops| {
+                stops.iter().find_map(|stop| {
+                    let stop = stop.as_array()?;
+                    let label = match stop.first()? {
+                        serde_json::Value::String(label) => label.clone(),
+                        serde_json::Value::Number(number) => number.to_string(),
+                        serde_json::Value::Bool(flag) => flag.to_string(),
+                        _ => return None,
+                    };
+                    (&label == value).then(|| stop.get(1)?.as_str()?.parse::<T>().ok())?
+                })
+            })
+            .or_else(fallback),
+        Some("identity") | None => value.parse::<T>().ok().or_else(fallback),
+        _ => fallback(),
+    }
+}
+
 impl StyleProperty<f32> {
+    /// Evaluates a number for a feature at a zoom: constants, legacy zoom and property
+    /// functions, and the expression subset of [`crate::style::expression`].
+    pub fn evaluate_number(
+        &self,
+        feature_properties: &HashMap<String, String>,
+        zoom: f64,
+    ) -> Option<f32> {
+        match self {
+            StyleProperty::Constant(value) => Some(*value),
+            StyleProperty::Expression(expression) => {
+                evaluate_number(expression, feature_properties, zoom).map(|value| value as f32)
+            }
+        }
+    }
+
     pub fn deserialize_f32_or_none<'de, D>(
         deserializer: D,
     ) -> Result<Option<StyleProperty<f32>>, D::Error>
@@ -366,6 +425,8 @@ pub enum LayerPaint {
     Raster(RasterPaint),
     #[serde(rename = "symbol")]
     Symbol(SymbolPaint),
+    #[serde(rename = "circle")]
+    Circle(CirclePaint),
 }
 
 impl LayerPaint {
@@ -386,6 +447,13 @@ impl LayerPaint {
                 }
             }),
             LayerPaint::Fill(paint) => paint.fill_color.as_ref().and_then(|property| {
+                if let StyleProperty::Constant(color) = property {
+                    Some(color.clone().into())
+                } else {
+                    None
+                }
+            }),
+            LayerPaint::Circle(paint) => paint.circle_color.as_ref().and_then(|property| {
                 if let StyleProperty::Constant(color) = property {
                     Some(color.clone().into())
                 } else {
@@ -475,6 +543,7 @@ impl Serialize for StyleLayer {
                 LayerPaint::Fill(p) => map.serialize_entry("paint", p)?,
                 LayerPaint::Raster(p) => map.serialize_entry("paint", p)?,
                 LayerPaint::Symbol(p) => map.serialize_entry("paint", p)?,
+                LayerPaint::Circle(p) => map.serialize_entry("paint", p)?,
             }
         }
         if let Some(ref source) = self.source {
@@ -526,6 +595,10 @@ impl<'de> serde::Deserialize<'de> for StyleLayer {
                 "raster" => serde_json::from_value(p.clone())
                     .map(LayerPaint::Raster)
                     .ok(),
+                "circle" => serde_json::from_value(p.clone())
+                    .map(LayerPaint::Circle)
+                    .map_err(|e| log::error!("circle paint failed {}: {:?}", def.id, e))
+                    .ok(),
                 "symbol" => {
                     let mut paint: Option<SymbolPaint> = serde_json::from_value(p.clone())
                         .map_err(|e| log::error!("symbol paint failed {}: {:?}", def.id, e))
@@ -543,6 +616,10 @@ impl<'de> serde::Deserialize<'de> for StyleLayer {
                 }
                 _ => None,
             }
+        } else if def.type_ == "circle" {
+            // Every circle paint property has a specification default, so a layer without
+            // paint still draws.
+            Some(LayerPaint::Circle(CirclePaint::default()))
         } else if def.type_ == "symbol" {
             // Symbol layers may have no paint but still have layout with text-field/text-size
             let text_field = def.layout.as_ref().and_then(parse_text_field_from_layout);

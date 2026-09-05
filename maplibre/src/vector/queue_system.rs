@@ -12,7 +12,7 @@ use crate::{
         tiles::Tile,
     },
     vector::{
-        render_commands::{DrawLineTiles, DrawVectorTiles},
+        render_commands::{DrawCircleTiles, DrawLineTiles, DrawVectorTiles},
         VectorBufferPool,
     },
 };
@@ -73,13 +73,12 @@ pub fn queue_system(
                     if !layer_entry.style_layer.is_visible_at(zoom) {
                         continue;
                     }
-                    // Choose fill vs line pipeline based on layer type
                     let is_line = layer_entry.style_layer.type_ == "line";
                     let draw_function: Box<dyn crate::render::render_phase::Draw<LayerItem>> =
-                        if is_line {
-                            Box::new(DrawState::<LayerItem, DrawLineTiles>::new())
-                        } else {
-                            Box::new(DrawState::<LayerItem, DrawVectorTiles>::new())
+                        match layer_entry.style_layer.type_.as_str() {
+                            "line" => Box::new(DrawState::<LayerItem, DrawLineTiles>::new()),
+                            "circle" => Box::new(DrawState::<LayerItem, DrawCircleTiles>::new()),
+                            _ => Box::new(DrawState::<LayerItem, DrawVectorTiles>::new()),
                         };
 
                     layer_item_phase.add(LayerItem {

@@ -24,6 +24,8 @@ pub use cint::*;
 use csscolorparser::Color;
 use serde::{Deserialize, Serialize};
 
+pub mod circle;
+pub mod expression;
 pub mod filter;
 pub mod layer;
 pub mod light;
@@ -42,9 +44,6 @@ use crate::{
         source::Source,
     },
 };
-
-pub mod filter;
-pub mod validation;
 
 /// Stores the style for a multi-layered map.
 #[derive(Serialize, Deserialize, Debug, Clone)]

@@ -15,6 +15,7 @@ use crate::{
                 covering_tiles, elevation_for_tile_culling, GlobeCoveringError,
                 GlobeCoveringOptions,
             },
+            lat_lon_to_unit_sphere,
         },
         mercator::{
             covering_tiles as mercator_covering_tiles, MercatorCoveringError,
@@ -50,7 +51,10 @@ pub struct ShaderProjectionData {
     pub clipping_plane: Vec4f32,
     /// Mercator-to-globe interpolation factor.
     pub transition: f32,
-    padding: [f32; 3],
+    /// Clip-space w of the view center: the camera-to-center distance in Mercator pixels,
+    /// blended with the globe's value, so screen-space sizes can scale with distance.
+    pub center_clip_w: f32,
+    padding: [f32; 2],
 }
 
 impl ShaderProjectionData {
@@ -60,7 +64,8 @@ impl ShaderProjectionData {
             main_matrix: data.main_matrix.into(),
             clipping_plane: data.clipping_plane.into(),
             transition: data.projection_transition,
-            padding: [0.0; 3],
+            center_clip_w: 1.0,
+            padding: [0.0; 2],
         }
     }
 }
@@ -71,7 +76,8 @@ impl Default for ShaderProjectionData {
             main_matrix: Matrix4::from_scale(1.0).into(),
             clipping_plane: [0.0, 0.0, 0.0, 1.0],
             transition: 0.0,
-            padding: [0.0; 3],
+            center_clip_w: 1.0,
+            padding: [0.0; 2],
         }
     }
 }
@@ -201,11 +207,18 @@ pub fn projection_data_for_view(
             .projection_type
             .globe_transition(view_state.zoom().value())
     });
+    let mercator_center_w = view_state.camera_to_center_distance() as f32;
     if transition == 0.0 {
-        return Ok(ShaderProjectionData::default());
+        return Ok(ShaderProjectionData {
+            center_clip_w: mercator_center_w,
+            ..ShaderProjectionData::default()
+        });
     }
 
     let globe = globe_camera_for_view(view_state)?;
+    let globe_center_clip =
+        globe.wgpu_view_projection() * lat_lon_to_unit_sphere(globe.center()).extend(1.0);
+    let globe_center_w = globe_center_clip.w as f32;
     let globe_matrix = globe
         .wgpu_view_projection()
         .cast::<f32>()
@@ -226,7 +239,10 @@ pub fn projection_data_for_view(
             ..ProjectionDataParams::default()
         },
     );
-    Ok(ShaderProjectionData::from_renderer_data(data))
+    Ok(ShaderProjectionData {
+        center_clip_w: mercator_center_w + (globe_center_w - mercator_center_w) * transition,
+        ..ShaderProjectionData::from_renderer_data(data)
+    })
 }
 
 /// Selects the visible region using the projection declared by the current style.
