@@ -289,6 +289,42 @@ impl HeadlessMap {
         Ok(())
     }
 
+    /// Runs one frame of the schedule: requests, uploads and the render graph.
+    ///
+    /// A map built without the headless plugin keeps its request systems, so this is the
+    /// frame step of a host that renders into the offscreen texture continuously.
+    pub fn run_frame(&mut self) -> Result<(), HeadlessMapOperationError> {
+        self.schedule
+            .run(&mut self.map_context)
+            .map_err(|source| HeadlessMapOperationError::Schedule { source })
+    }
+
+    /// The frame clock and view source the next frame applies.
+    pub fn frame_input_mut(&mut self) -> &mut FrameInput {
+        self.map_context
+            .world
+            .resources
+            .get_or_init_mut::<FrameInput>()
+    }
+
+    /// The view the map renders from.
+    pub fn view_state(&self) -> &ViewState {
+        &self.map_context.view_state
+    }
+
+    /// The texture the offscreen head renders into, in the surface format.
+    pub fn head_texture(&self) -> Option<&wgpu::Texture> {
+        match self.map_context.renderer.resources.surface.head() {
+            crate::render::resource::Head::Headless(head) => Some(head.texture()),
+            crate::render::resource::Head::Headed(_) => None,
+        }
+    }
+
+    /// The device the renderer draws with.
+    pub fn device(&self) -> &wgpu::Device {
+        &self.map_context.renderer.device
+    }
+
     /// Raises the pitch limit and re-applies the style's pitch, which the default limit clamps.
     pub fn set_max_pitch(&mut self, max_pitch: cgmath::Deg<f64>) {
         let context = &mut self.map_context;

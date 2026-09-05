@@ -169,6 +169,11 @@ impl BufferedTextureHead {
         Ok(())
     }
 
+    /// The texture frames are rendered into.
+    pub fn texture(&self) -> &wgpu::Texture {
+        &self.texture
+    }
+
     pub fn copy_texture(&self) -> wgpu::ImageCopyTexture<'_> {
         self.texture.as_image_copy()
     }
