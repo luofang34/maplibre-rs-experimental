@@ -27,15 +27,9 @@ pub type GlyphIDs = BTreeSet<GlyphID>;
 // Note: this only works for the BMP
 /// maplibre/maplibre-native#4add9ea original name: getGlyphRange
 pub fn get_glyph_range(glyph: GlyphID) -> GlyphRange {
-    let mut start: u16 = (glyph / 256) * 256;
-    let mut end = start + 255;
-    if start > 65280 {
-        start = 65280;
-    }
-    if end > 65535 {
-        end = 65535;
-    }
-    start..end
+    // The range start is a multiple of 256 below u16::MAX, so the end never overflows.
+    let start: u16 = (glyph / 256) * 256;
+    start..start + 255
 }
 
 /// maplibre/maplibre-native#4add9ea original name: GlyphMetrics

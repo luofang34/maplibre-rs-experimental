@@ -213,8 +213,7 @@ fn evaluate_radial_offset(anchor: SymbolAnchorType, mut radial_offset: f64) -> [
         radial_offset = 0.0; // Ignore negative offset.
     }
     // solve for r where r^2 + r^2 = radialOffset^2
-    let sqrt2 = 1.41421356237;
-    let hypotenuse = radial_offset / sqrt2;
+    let hypotenuse = radial_offset / std::f64::consts::SQRT_2;
 
     match anchor {
         SymbolAnchorType::TopRight | SymbolAnchorType::TopLeft => {
