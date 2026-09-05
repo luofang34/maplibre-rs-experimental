@@ -1,0 +1,17 @@
+# wgpu 22 and naga compile their Metal backends for macOS and iOS only; the vendored copies made by
+# vendor-wgpu.sh widen those gates to visionOS. Drop the patch once the fork is on a wgpu
+# release that supports visionOS itself.
+[patch.crates-io]
+wgpu = { path = "vendor/wgpu-22.1.0" }
+wgpu-core = { path = "vendor/wgpu-core-22.1.0" }
+wgpu-hal = { path = "vendor/wgpu-hal-22.0.0" }
+naga = { path = "vendor/naga-22.1.0" }
+metal = { path = "vendor/metal-0.29.0" }
+objc = { path = "vendor/objc-0.2.7" }
+block = { path = "vendor/block-0.1.6" }
+
+[build]
+target = "aarch64-apple-visionos-sim"
+
+[unstable]
+build-std = ["std", "panic_abort"]

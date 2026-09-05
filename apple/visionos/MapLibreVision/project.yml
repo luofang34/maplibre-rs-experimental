@@ -1,0 +1,52 @@
+# xcodegen spec: `xcodegen generate` here writes MapLibreVision.xcodeproj.
+# Build the Rust library first from apple/visionos: `cargo build --release`.
+name: MapLibreVision
+options:
+  bundleIdPrefix: com.sokolysystems.maplibre
+  deploymentTarget:
+    visionOS: "2.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.10"
+    ENABLE_USER_SCRIPT_SANDBOXING: "NO"
+targets:
+  MapLibreVision:
+    type: application
+    platform: visionOS
+    sources:
+      - path: MapLibreVision
+      - path: ../maplibre_visionos.h
+        buildPhase: none
+    info:
+      path: MapLibreVision/Info.plist
+      properties:
+        CFBundleDisplayName: MapLibre Vision
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: true
+          UIApplicationPreferredDefaultSceneSessionRole: UIWindowSceneSessionRoleApplication
+        UILaunchScreen: {}
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.sokolysystems.maplibre.vision
+        SWIFT_OBJC_BRIDGING_HEADER: ../maplibre_visionos.h
+        "LIBRARY_SEARCH_PATHS[sdk=xrsimulator*]": "$(SRCROOT)/../target/aarch64-apple-visionos-sim/release"
+        "LIBRARY_SEARCH_PATHS[sdk=xros*]": "$(SRCROOT)/../target/aarch64-apple-visionos/release"
+        OTHER_LDFLAGS:
+          - "-lmaplibre_visionos"
+          - "-lobjc"
+        CODE_SIGN_STYLE: Automatic
+        # The Rust library is built for arm64 only.
+        "EXCLUDED_ARCHS[sdk=xrsimulator*]": x86_64
+        TARGETED_DEVICE_FAMILY: "7"
+    dependencies:
+      - sdk: Metal.framework
+      - sdk: CompositorServices.framework
+      - sdk: ARKit.framework
+      - sdk: Security.framework
+      - sdk: SystemConfiguration.framework
+      - sdk: CoreGraphics.framework
+      - sdk: QuartzCore.framework
+      - sdk: CoreFoundation.framework

@@ -1,0 +1,23 @@
+[package]
+name = "maplibre-visionos"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "C ABI of the maplibre-rs renderer for the visionOS host app"
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+maplibre = { path = "../../maplibre", features = ["headless", "thread-safe-futures"] }
+tokio = { version = "1", features = ["rt-multi-thread"] }
+wgpu = "22.1.0"
+wgpu-hal = { version = "22.0.0", features = ["metal"] }
+metal = "0.29.0"
+cgmath = "0.18"
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+# Its own workspace: the wgpu patch below must not rewrite the main workspace's lock file.
+[workspace]

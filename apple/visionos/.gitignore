@@ -1,0 +1,4 @@
+vendor/
+target/
+MapLibreVision/build/
+MapLibreVision/MapLibreVision.xcodeproj/
