@@ -9,7 +9,10 @@ use cint::{Alpha, EncodedSrgb};
 use csscolorparser::Color;
 use serde::{Deserialize, Serialize};
 
-use crate::style::circle::CirclePaint;
+use crate::style::{
+    circle::CirclePaint,
+    hillshade::{ColorReliefPaint, HillshadePaint},
+};
 
 pub use crate::style::property::{PropertyValue, StyleProperty};
 
@@ -212,6 +215,10 @@ pub enum LayerPaint {
     Fill(FillPaint),
     #[serde(rename = "raster")]
     Raster(RasterPaint),
+    #[serde(rename = "hillshade")]
+    Hillshade(HillshadePaint),
+    #[serde(rename = "color-relief")]
+    ColorRelief(ColorReliefPaint),
     #[serde(rename = "symbol")]
     Symbol(SymbolPaint),
     #[serde(rename = "circle")]
@@ -225,7 +232,11 @@ impl LayerPaint {
             LayerPaint::Fill(paint) => paint.fill_opacity.clone(),
             LayerPaint::Line(paint) => paint.line_opacity.clone(),
             LayerPaint::Circle(paint) => paint.circle_opacity.clone(),
-            LayerPaint::Background(_) | LayerPaint::Raster(_) | LayerPaint::Symbol(_) => None,
+            LayerPaint::ColorRelief(paint) => paint.color_relief_opacity.clone(),
+            LayerPaint::Background(_)
+            | LayerPaint::Raster(_)
+            | LayerPaint::Hillshade(_)
+            | LayerPaint::Symbol(_) => None,
         }
     }
 
@@ -259,8 +270,10 @@ impl LayerPaint {
                     None
                 }
             }),
-            LayerPaint::Raster(_) => None,
-            LayerPaint::Symbol(_) => None,
+            LayerPaint::Raster(_)
+            | LayerPaint::Hillshade(_)
+            | LayerPaint::ColorRelief(_)
+            | LayerPaint::Symbol(_) => None,
         }
     }
 }
@@ -363,6 +376,8 @@ impl Serialize for StyleLayer {
                 LayerPaint::Line(p) => map.serialize_entry("paint", p)?,
                 LayerPaint::Fill(p) => map.serialize_entry("paint", p)?,
                 LayerPaint::Raster(p) => map.serialize_entry("paint", p)?,
+                LayerPaint::Hillshade(p) => map.serialize_entry("paint", p)?,
+                LayerPaint::ColorRelief(p) => map.serialize_entry("paint", p)?,
                 LayerPaint::Symbol(p) => map.serialize_entry("paint", p)?,
                 LayerPaint::Circle(p) => map.serialize_entry("paint", p)?,
             }
@@ -416,6 +431,14 @@ impl<'de> serde::Deserialize<'de> for StyleLayer {
                 "raster" => serde_json::from_value(p.clone())
                     .map(LayerPaint::Raster)
                     .ok(),
+                "hillshade" => serde_json::from_value(p.clone())
+                    .map(LayerPaint::Hillshade)
+                    .map_err(|e| log::error!("hillshade paint failed {}: {:?}", def.id, e))
+                    .ok(),
+                "color-relief" => serde_json::from_value(p.clone())
+                    .map(LayerPaint::ColorRelief)
+                    .map_err(|e| log::error!("color-relief paint failed {}: {:?}", def.id, e))
+                    .ok(),
                 "circle" => serde_json::from_value(p.clone())
                     .map(LayerPaint::Circle)
                     .map_err(|e| log::error!("circle paint failed {}: {:?}", def.id, e))
@@ -441,6 +464,10 @@ impl<'de> serde::Deserialize<'de> for StyleLayer {
             // Every circle paint property has a specification default, so a layer without
             // paint still draws.
             Some(LayerPaint::Circle(CirclePaint::default()))
+        } else if def.type_ == "hillshade" {
+            Some(LayerPaint::Hillshade(HillshadePaint::default()))
+        } else if def.type_ == "color-relief" {
+            Some(LayerPaint::ColorRelief(ColorReliefPaint::default()))
         } else if def.type_ == "symbol" {
             // Symbol layers may have no paint but still have layout with text-field/text-size
             let text_field = def.layout.as_ref().and_then(parse_text_field_from_layout);

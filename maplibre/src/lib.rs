@@ -58,6 +58,7 @@ pub mod tcs;
 // Plugins
 pub mod debug;
 pub mod geojson;
+pub mod hillshade;
 pub mod raster;
 pub mod vector;
 

@@ -42,7 +42,7 @@ pub fn fingerprint(spec: &TargetSpec, revisions: SourceRevisions, clear: wgpu::C
             layer.index.hash(&mut hasher);
             layer.coords.hash(&mut hasher);
         }
-        for (id, index) in &shape.raster_layers {
+        for (id, index, _) in &shape.raster_layers {
             id.hash(&mut hasher);
             index.hash(&mut hasher);
         }

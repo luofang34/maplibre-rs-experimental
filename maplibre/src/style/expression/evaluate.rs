@@ -343,6 +343,9 @@ impl Expression {
                     return stops[0].1.evaluate(context);
                 }
                 let input = expect_number(input.evaluate(context)?)?;
+                if input.is_nan() {
+                    return Err(EvaluationError::InputNotANumber);
+                }
                 if input <= stops[0].0 {
                     return stops[0].1.evaluate(context);
                 }
@@ -362,6 +365,9 @@ impl Expression {
                     return stops[0].1.evaluate(context);
                 }
                 let input = expect_number(input.evaluate(context)?)?;
+                if input.is_nan() {
+                    return Err(EvaluationError::InputNotANumber);
+                }
                 if input <= stops[0].0 {
                     return stops[0].1.evaluate(context);
                 }

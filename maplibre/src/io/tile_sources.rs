@@ -21,20 +21,51 @@ pub enum TileKind {
     Raster,
 }
 
+/// Layer types drawn from image tiles: plain raster imagery and the DEM-shaded layers.
+pub const RASTER_LAYER_TYPES: [&str; 3] = ["raster", "hillshade", "color-relief"];
+
 impl TileKind {
     fn accepts_layer(self, layer: &StyleLayer) -> bool {
-        let is_raster = layer.type_ == "raster";
+        let is_raster = RASTER_LAYER_TYPES.contains(&layer.type_.as_str());
         match self {
             Self::Vector => !is_raster && layer.type_ != "background",
             Self::Raster => is_raster,
         }
     }
 
-    fn matches_source(self, source: &Source) -> Option<&VectorSource> {
+    /// The smallest zoom a source of this kind has tiles for.
+    fn min_zoom_of(self, source: &Source) -> Option<u8> {
         match (self, source) {
             (Self::Vector, Source::Vector(vector)) | (Self::Raster, Source::Raster(vector)) => {
-                Some(vector)
+                vector.minzoom
             }
+            (Self::Raster, Source::RasterDem(dem)) => dem.minzoom,
+            _ => None,
+        }
+    }
+
+    /// The largest zoom a source of this kind has tiles for.
+    fn max_zoom_of(self, source: &Source) -> Option<u8> {
+        match (self, source) {
+            (Self::Vector, Source::Vector(vector)) | (Self::Raster, Source::Raster(vector)) => {
+                vector.maxzoom
+            }
+            (Self::Raster, Source::RasterDem(dem)) => dem.maxzoom,
+            _ => None,
+        }
+    }
+
+    /// The tile URL template and scheme of a source this kind can fetch from.
+    fn template_of(self, source: &Source) -> Option<(String, TileAddressingScheme)> {
+        match (self, source) {
+            (Self::Vector, Source::Vector(vector)) | (Self::Raster, Source::Raster(vector)) => {
+                template_of(vector).map(|(template, scheme)| (template.to_string(), scheme))
+            }
+            (Self::Raster, Source::RasterDem(dem)) => dem
+                .tiles
+                .as_ref()?
+                .first()
+                .map(|template| (template.to_string(), TileAddressingScheme::XYZ)),
             _ => None,
         }
     }
@@ -89,14 +120,19 @@ pub fn source_layer_groups(style: &Style, kind: TileKind) -> Vec<SourceLayerGrou
             .as_ref()
             .map(|name| (name, style.sources.get(name)));
         let (key, source) = match named {
-            Some((name, Some(source))) => match kind.matches_source(source) {
-                Some(vector) => match template_of(vector) {
-                    Some((template, scheme)) => (
-                        Some(name.clone()),
-                        kind.source_from_template(template, scheme),
-                    ),
-                    None => (None, kind.default_source()),
-                },
+            Some((name, Some(source))) => match kind.template_of(source) {
+                Some((template, scheme)) => (
+                    Some(name.clone()),
+                    kind.source_from_template(&template, scheme),
+                ),
+                None if matches!(
+                    (kind, source),
+                    (TileKind::Vector, Source::Vector(_))
+                        | (TileKind::Raster, Source::Raster(_) | Source::RasterDem(_))
+                ) =>
+                {
+                    (None, kind.default_source())
+                }
                 None => continue,
             },
             Some((_, None)) | None => (None, kind.default_source()),
@@ -121,7 +157,7 @@ pub fn source_max_zoom(style: &Style, kind: TileKind) -> Option<u8> {
         .iter()
         .filter(|layer| kind.accepts_layer(layer))
         .filter_map(|layer| style.sources.get(layer.source.as_ref()?))
-        .filter_map(|source| kind.matches_source(source)?.maxzoom)
+        .filter_map(|source| kind.max_zoom_of(source))
         .min()
 }
 
@@ -183,7 +219,7 @@ pub fn source_min_zoom(style: &Style, kind: TileKind) -> Option<u8> {
         .iter()
         .filter(|layer| kind.accepts_layer(layer))
         .filter_map(|layer| style.sources.get(layer.source.as_ref()?))
-        .filter_map(|source| kind.matches_source(source)?.minzoom)
+        .filter_map(|source| kind.min_zoom_of(source))
         .max()
 }
 

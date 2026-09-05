@@ -212,7 +212,7 @@ async fn run_test_inner(test_dir: &Path) -> TestResult {
     let has_raster_sources = style
         .sources
         .values()
-        .any(|source| matches!(source, Source::Raster(_)));
+        .any(|source| matches!(source, Source::Raster(_) | Source::RasterDem(_)));
     let mut plugins: Vec<Box<dyn Plugin<_>>> = vec![
         Box::new(RenderPlugin),
         Box::new(maplibre::background::BackgroundPlugin),
@@ -226,6 +226,7 @@ async fn run_test_inner(test_dir: &Path) -> TestResult {
         plugins.push(Box::new(
             RasterPlugin::<DefaultRasterTransferables>::default(),
         ));
+        plugins.push(Box::new(maplibre::hillshade::HillshadePlugin));
     }
     if style.terrain.is_some() {
         plugins.push(Box::new(TerrainPlugin::<DefaultDemTransferables>::default()));
@@ -382,12 +383,24 @@ async fn run_test_inner(test_dir: &Path) -> TestResult {
                     }
                 }
             }
-            Source::Raster(raster_source) => {
-                let Some(template) = raster_source
-                    .tiles
-                    .as_ref()
-                    .and_then(|templates| templates.first())
-                else {
+            // Imagery feeds raster layers; DEM tiles feed hillshade and colour relief layers the
+            // same way, while the terrain pipeline reads its DEM tiles separately.
+            Source::Raster(_) | Source::RasterDem(_) => {
+                let (template, minzoom) = match source {
+                    Source::Raster(raster) => (
+                        raster
+                            .tiles
+                            .as_ref()
+                            .and_then(|templates| templates.first()),
+                        raster.minzoom.unwrap_or(0),
+                    ),
+                    Source::RasterDem(dem) => (
+                        dem.tiles.as_ref().and_then(|templates| templates.first()),
+                        dem.minzoom.unwrap_or(0),
+                    ),
+                    _ => (None, 0),
+                };
+                let Some(template) = template else {
                     return TestResult::Error(format!(
                         "Raster source '{source_name}' has no tile template"
                     ));
@@ -400,7 +413,6 @@ async fn run_test_inner(test_dir: &Path) -> TestResult {
                 };
                 // A tile the fixture does not ship answers 404 in GL JS, which then loads the
                 // parent; the nearest ancestor on disk stands in the same way.
-                let minzoom = raster_source.minzoom.unwrap_or(0);
                 let mut seen = std::collections::BTreeSet::new();
                 for ideal in raster_coords {
                     let mut coords = ideal;
@@ -438,8 +450,6 @@ async fn run_test_inner(test_dir: &Path) -> TestResult {
                     }
                 }
             }
-            // DEM tiles are fetched by the terrain pipeline, not as layer sources.
-            Source::RasterDem(_) => {}
         }
     }
 

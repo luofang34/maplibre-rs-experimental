@@ -7,6 +7,7 @@ use cgmath::{Matrix4, SquareMatrix, Vector3};
 use crate::{
     context::MapContext,
     coords::{WorldTileCoords, Zoom, EXTENT, TILE_SIZE},
+    hillshade::render_commands::DrawDemTiles,
     projection::renderer_data::tile_mercator_coordinates,
     raster::{render_commands::DrawRasterTiles, resource::RasterResources},
     render::{
@@ -329,9 +330,14 @@ fn build_drape_phase(
                     projection: ProjectionBinding::Flat,
                 });
             }
-            for (id, index) in &shape.raster_layers {
+            for (id, index, dem) in &shape.raster_layers {
+                let draw_function: Box<dyn Draw<LayerItem>> = if *dem {
+                    Box::new(DrawState::<LayerItem, DrawDemTiles>::new())
+                } else {
+                    Box::new(DrawState::<LayerItem, DrawRasterTiles>::new())
+                };
                 target.layers.push(LayerItem {
-                    draw_function: Box::new(DrawState::<LayerItem, DrawRasterTiles>::new()),
+                    draw_function,
                     index: *index,
                     is_line: false,
                     generate_borders: false,

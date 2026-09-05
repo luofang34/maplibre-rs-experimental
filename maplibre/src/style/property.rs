@@ -16,6 +16,85 @@ pub trait PropertyValue: Clone + Sized {
 
     /// The value an expression produced, if it fits this type.
     fn from_value(value: &Value) -> Option<Self>;
+
+    /// A constant written directly in the style that the expression engine would not accept
+    /// as this type, such as an array of colour strings; `None` hands the JSON to the engine.
+    fn from_literal(_json: &serde_json::Value) -> Option<Self> {
+        None
+    }
+}
+
+/// One number or several, what a `numberArray` property such as a light direction holds.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct NumberList(pub Vec<f64>);
+
+impl PropertyValue for NumberList {
+    fn spec() -> LegacyPropertySpec {
+        LegacyPropertySpec::interpolated(PropertyKind::Number)
+    }
+
+    fn from_value(value: &Value) -> Option<Self> {
+        match value {
+            Value::Number(number) => Some(Self(vec![*number])),
+            Value::Array(items) => items
+                .iter()
+                .map(Value::as_number)
+                .collect::<Option<Vec<f64>>>()
+                .map(Self),
+            _ => None,
+        }
+    }
+
+    fn from_literal(json: &serde_json::Value) -> Option<Self> {
+        json.as_array()?
+            .iter()
+            .map(serde_json::Value::as_f64)
+            .collect::<Option<Vec<f64>>>()
+            .map(Self)
+    }
+}
+
+/// One colour or several, what a `colorArray` property such as a shadow colour holds.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ColorList(pub Vec<crate::style::expression::Color>);
+
+impl Serialize for ColorList {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_seq(self.0.iter().map(crate::style::expression::Color::css))
+    }
+}
+
+impl PropertyValue for ColorList {
+    fn spec() -> LegacyPropertySpec {
+        LegacyPropertySpec::interpolated(PropertyKind::Color)
+    }
+
+    fn from_value(value: &Value) -> Option<Self> {
+        match value {
+            Value::Color(color) => Some(Self(vec![*color])),
+            Value::String(text) => {
+                crate::style::expression::Color::parse(text).map(|color| Self(vec![color]))
+            }
+            Value::Array(items) => items
+                .iter()
+                .map(|item| match item {
+                    Value::Color(color) => Some(*color),
+                    Value::String(text) => crate::style::expression::Color::parse(text),
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>()
+                .map(Self),
+            _ => None,
+        }
+    }
+
+    fn from_literal(json: &serde_json::Value) -> Option<Self> {
+        json.as_array()?
+            .iter()
+            .map(|item| crate::style::expression::Color::parse(item.as_str()?))
+            .collect::<Option<Vec<_>>>()
+            .map(Self)
+    }
 }
 
 impl PropertyValue for f32 {
@@ -136,6 +215,9 @@ pub enum StyleProperty<T> {
 impl<T: PropertyValue> StyleProperty<T> {
     /// Parses a property value: a constant, a legacy function object or an expression.
     pub fn parse(json: &serde_json::Value) -> Self {
+        if let Some(constant) = T::from_literal(json) {
+            return Self::Constant(constant);
+        }
         match Expression::parse_property(json, &T::spec()) {
             Ok(Expression::Literal(value)) | Ok(Expression::Folded { value, .. }) => {
                 match T::from_value(&value) {

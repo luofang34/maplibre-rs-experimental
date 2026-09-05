@@ -2,7 +2,9 @@
 
 use crate::{
     coords::WorldTileCoords,
+    hillshade::dem_layer_kind,
     io::tile_sources::TileKind,
+    io::tile_sources::RASTER_LAYER_TYPES,
     raster::resource::RasterResources,
     render::{
         eventually::{Eventually, Eventually::Initialized},
@@ -18,7 +20,7 @@ use crate::{
 
 /// How many zoom levels below a target tile children are searched for source data.
 const CHILDREN_SEARCH_DEPTH: usize = 4;
-const DRAPEABLE_LAYER_TYPES: [&str; 3] = ["fill", "line", "raster"];
+const DRAPEABLE_LAYER_TYPES: [&str; 5] = ["fill", "line", "raster", "hillshade", "color-relief"];
 
 /// Whether a style layer renders into drape textures rather than straight to the screen.
 pub fn is_drapeable(layer_type: &str) -> bool {
@@ -39,7 +41,8 @@ pub(crate) struct VectorLayerSpec {
 pub(crate) struct ShapeSpec {
     pub(crate) source: WorldTileCoords,
     pub(crate) vector_layers: Vec<VectorLayerSpec>,
-    pub(crate) raster_layers: Vec<(String, u32)>,
+    /// Raster and DEM-shaded layers as id, style index and whether the DEM shaders draw it.
+    pub(crate) raster_layers: Vec<(String, u32, bool)>,
 }
 
 /// A terrain tile and the source tiles drawn into its texture.
@@ -130,11 +133,20 @@ pub(crate) fn collect_layer_specs(
 ) -> Vec<TargetSpec> {
     let vector = world.resources.get::<Eventually<VectorBufferPool>>();
     let raster = world.resources.get::<Eventually<RasterResources>>();
-    let raster_layers: Vec<(String, u32, Option<String>)> = style
+    let raster_layers: Vec<(String, u32, Option<String>, bool)> = style
         .layers
         .iter()
-        .filter(|layer| layer.type_ == "raster" && layer.is_visible_at(zoom))
-        .map(|layer| (layer.id.clone(), layer.index, layer.source.clone()))
+        .filter(|layer| {
+            RASTER_LAYER_TYPES.contains(&layer.type_.as_str()) && layer.is_visible_at(zoom)
+        })
+        .map(|layer| {
+            (
+                layer.id.clone(),
+                layer.index,
+                layer.source.clone(),
+                dem_layer_kind(&layer.type_).is_some(),
+            )
+        })
         .collect();
     let covered_sources: Vec<String> = targets
         .iter()
@@ -160,13 +172,13 @@ pub(crate) fn collect_layer_specs(
                     } else {
                         raster_layers
                             .iter()
-                            .filter(|(_, _, source)| match &shape.raster_source {
+                            .filter(|(_, _, source, _)| match &shape.raster_source {
                                 Some(name) => source.as_deref() == Some(name.as_str()),
                                 None => !source
                                     .as_ref()
                                     .is_some_and(|source| covered_sources.contains(source)),
                             })
-                            .map(|(id, index, _)| (id.clone(), *index))
+                            .map(|(id, index, _, dem)| (id.clone(), *index, *dem))
                             .collect()
                     };
                     ShapeSpec {

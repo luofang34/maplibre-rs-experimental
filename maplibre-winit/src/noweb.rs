@@ -165,7 +165,7 @@ pub fn run_headed_map<P>(
         let has_raster_sources = style
             .sources
             .values()
-            .any(|source| matches!(source, Source::Raster(_)));
+            .any(|source| matches!(source, Source::Raster(_) | Source::RasterDem(_)));
         let has_terrain = style.terrain.is_some();
         let mut plugins: Vec<Box<dyn Plugin<Environment<_, _, _>>>> = vec![
             Box::new(RenderPlugin::default()),
@@ -183,6 +183,7 @@ pub fn run_headed_map<P>(
             plugins.push(Box::new(maplibre::raster::RasterPlugin::<
                 maplibre::raster::DefaultRasterTransferables,
             >::default()));
+            plugins.push(Box::new(maplibre::hillshade::HillshadePlugin));
         }
         #[cfg(debug_assertions)]
         plugins.push(Box::new(maplibre::debug::DebugPlugin::default()));

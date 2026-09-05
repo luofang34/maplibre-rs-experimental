@@ -29,7 +29,7 @@ fn spec(coords: WorldTileCoords, sources: &[WorldTileCoords]) -> TargetSpec {
                     is_line: false,
                     coords: *source,
                 }],
-                raster_layers: vec![("osm".to_string(), 1)],
+                raster_layers: vec![("osm".to_string(), 1, false)],
             })
             .collect(),
     }

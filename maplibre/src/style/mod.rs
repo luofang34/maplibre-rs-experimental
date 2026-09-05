@@ -27,6 +27,7 @@ use serde::{Deserialize, Serialize};
 pub mod circle;
 pub mod expression;
 pub mod filter;
+pub mod hillshade;
 pub mod layer;
 pub mod light;
 pub mod property;

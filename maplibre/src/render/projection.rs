@@ -328,20 +328,31 @@ pub fn raster_source_regions(
     let zoom = view_state.zoom().value();
     let mut regions = Vec::new();
     for (name, source) in &style.sources {
-        let Source::Raster(raster) = source else {
-            continue;
+        // Imagery is read by raster layers, elevation tiles by the DEM-shaded layers.
+        let (tile_size, minzoom, maxzoom, layer_types): (f64, _, _, &[&str]) = match source {
+            Source::Raster(raster) => (
+                raster.tile_size.map_or(TILE_SIZE, f64::from),
+                raster.minzoom,
+                raster.maxzoom,
+                &["raster"],
+            ),
+            Source::RasterDem(dem) => (
+                f64::from(dem.tile_size),
+                dem.minzoom,
+                dem.maxzoom,
+                &["hillshade", "color-relief"],
+            ),
+            _ => continue,
         };
         let used = style.layers.iter().any(|layer| {
-            layer.type_ == "raster"
+            layer_types.contains(&layer.type_.as_str())
                 && layer.source.as_deref() == Some(name)
                 && layer.is_visible_at(zoom)
         });
         if !used {
             continue;
         }
-        let tile_size = raster.tile_size.map_or(TILE_SIZE, f64::from);
-        let request =
-            CoveringRequest::raster_source(zoom, tile_size, raster.minzoom, raster.maxzoom);
+        let request = CoveringRequest::raster_source(zoom, tile_size, minzoom, maxzoom);
         let tiles = covering_region(style, view_state, world, request, padding)?.map_or_else(
             Vec::new,
             |region| {
