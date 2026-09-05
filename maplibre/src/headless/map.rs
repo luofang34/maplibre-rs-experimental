@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::BTreeMap, ops::Deref, rc::Rc};
+use std::{cell::RefCell, collections::BTreeMap, ops::Deref, rc::Rc, time::Duration};
 
 use image::RgbaImage;
 use thiserror::Error;
@@ -19,6 +19,7 @@ use crate::{
     raster::{AvailableRasterLayerData, RasterLayerData, RasterLayersDataComponent},
     render::{
         eventually::Eventually,
+        frame_input::FrameInput,
         projection::{raster_source_regions, view_region_for_projection, ProjectionStateError},
         tile_view_pattern::DEFAULT_TILE_SIZE,
         view_state::{ViewState, ViewStatePadding},
@@ -69,6 +70,10 @@ pub enum HeadlessMapOperationError {
         source: StageError,
     },
 }
+
+/// A headless frame advances the frame clock by a nominal 60 Hz interval, so animated
+/// properties progress the same way in every run.
+const HEADLESS_FRAME_INTERVAL: Duration = Duration::from_millis(16);
 
 pub struct HeadlessMap {
     kernel: Rc<Kernel<HeadlessEnvironment>>,
@@ -234,6 +239,11 @@ impl HeadlessMap {
         }
 
         for _ in 0..frame_count {
+            context
+                .world
+                .resources
+                .get_or_init_mut::<FrameInput>()
+                .advance(HEADLESS_FRAME_INTERVAL);
             self.schedule
                 .run(context)
                 .map_err(|source| HeadlessMapOperationError::Schedule { source })?;

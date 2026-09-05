@@ -3,6 +3,7 @@
 use std::{fmt::Debug, marker::PhantomData};
 
 use instant::Instant;
+use maplibre::render::frame_input::FrameInput;
 use maplibre::{
     environment::{Environment, OffscreenKernel},
     event_loop::{EventLoop, EventLoopProxy, SendEventError},
@@ -82,7 +83,8 @@ impl<ET: 'static + PartialEq + Debug> EventLoop<ET> for WinitEventLoop<ET> {
         E: Environment,
         <E::MapWindowConfig as MapWindowConfig>::MapWindow: HeadedMapWindow,
     {
-        let mut last_render_time = Instant::now();
+        let start_time = Instant::now();
+        let mut last_render_time = start_time;
         let mut current_frame: u64 = 0;
 
         let mut input_controller = InputController::new(0.2, 100.0, 0.1);
@@ -123,7 +125,12 @@ impl<ET: 'static + PartialEq + Debug> EventLoop<ET> for WinitEventLoop<ET> {
                                 let dt = now - last_render_time;
                                 last_render_time = now;
 
-                                if let Ok(map_context) =  map.context_mut() {
+                                if let Ok(map_context) = map.context_mut() {
+                                    map_context
+                                        .world
+                                        .resources
+                                        .get_or_init_mut::<FrameInput>()
+                                        .timestamp = now - start_time;
                                     input_controller.update_state(map_context, dt);
                                 }
 

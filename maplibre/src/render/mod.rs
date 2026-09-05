@@ -60,6 +60,7 @@ pub mod builder;
 pub mod camera;
 pub mod error;
 pub mod eventually;
+pub mod frame_input;
 pub mod projection;
 pub mod render_commands;
 pub mod render_phase;
@@ -620,7 +621,12 @@ impl<E: Environment> Plugin<E> for RenderPlugin {
         // masks
         resources.insert(Eventually::<MaskPipeline>::Uninitialized);
 
-        schedule.add_stage(RenderStageLabel::Extract, SystemStage::default());
+        // The frame input comes first: the request systems the plugins add to Extract must
+        // already see the frame's view.
+        schedule.add_stage(
+            RenderStageLabel::Extract,
+            SystemStage::default().with_system(frame_input::frame_input_system),
+        );
         schedule.add_stage(
             RenderStageLabel::Prepare,
             SystemStage::default().with_system(SystemContainer::new(ResourceSystem)),

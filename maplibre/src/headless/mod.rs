@@ -15,11 +15,14 @@ use crate::{
     platform::{http_client::ReqwestHttpClient, scheduler::TokioScheduler},
     plugin::Plugin,
     render::{
-        builder::RendererBuilder, graph::RenderGraph, tile_view_pattern::ViewTileSources,
-        RenderStageLabel, Renderer,
+        builder::RendererBuilder, frame_input::frame_input_system, graph::RenderGraph,
+        tile_view_pattern::ViewTileSources, RenderStageLabel, Renderer,
     },
     schedule::Schedule,
-    tcs::{system::SystemContainer, world::World},
+    tcs::{
+        system::{stage::SystemStage, SystemContainer},
+        world::World,
+    },
     window::{MapWindowConfig, PhysicalSize},
 };
 
@@ -156,6 +159,13 @@ impl Plugin<HeadlessEnvironment> for HeadlessPlugin {
 
         // FIXME tcs: Is this good style?
         schedule.remove_stage(RenderStageLabel::Extract);
+        // The headless map gets its tiles handed in, so nothing is requested, but the frame
+        // input still has to be applied before anything reads the view.
+        schedule.add_stage_before(
+            RenderStageLabel::Prepare,
+            RenderStageLabel::Extract,
+            SystemStage::default().with_system(frame_input_system),
+        );
         if !self.preserve_tile_sources {
             resources.get_mut::<ViewTileSources>().unwrap().clear();
         }

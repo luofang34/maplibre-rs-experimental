@@ -1,1 +1,1 @@
-tests/terrain/default
+tests/fill-visibility/none
