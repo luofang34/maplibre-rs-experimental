@@ -338,10 +338,16 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         let (layer_metadata_bytes, aligned_layer_metadata_bytes) =
             Self::align(layer_metadata_stride, 1, 1);
 
-        if entry.buffer_layer_metadata.end - entry.buffer_layer_metadata.start
-            != layer_metadata_bytes
-        {
-            panic!("Updated layer metadata has wrong size!");
+        let allocated = entry.buffer_layer_metadata.end - entry.buffer_layer_metadata.start;
+        if allocated != layer_metadata_bytes {
+            tracing::error!(
+                coords = %entry.coords,
+                layer = %entry.style_layer.id,
+                allocated,
+                offered = layer_metadata_bytes,
+                "layer metadata update skipped: size differs from the allocation"
+            );
+            return;
         }
 
         queue.write_buffer(
@@ -361,17 +367,20 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
             feature_metadata.len() as wgpu::BufferAddress,
         );
 
-        if entry.buffer_feature_metadata.end - entry.buffer_feature_metadata.start
-            != feature_metadata_bytes
+        let allocated = entry.buffer_feature_metadata.end - entry.buffer_feature_metadata.start;
+        if allocated != feature_metadata_bytes
+            || feature_metadata_bytes != aligned_feature_metadata_bytes
         {
-            panic!("Updated feature metadata has wrong size!");
-        }
-
-        if feature_metadata_bytes != aligned_feature_metadata_bytes {
-            // FIXME: align if not aligned?
-            panic!(
-                "feature_metadata is not aligned. This should not happen as long as size_of::<FM>() is a multiple of the alignment."
-            )
+            // Writing past the allocation would corrupt a neighbouring layer's metadata.
+            tracing::error!(
+                coords = %entry.coords,
+                layer = %entry.style_layer.id,
+                allocated,
+                offered = feature_metadata_bytes,
+                aligned = aligned_feature_metadata_bytes,
+                "feature metadata update skipped: size differs from the allocation"
+            );
+            return;
         }
 
         queue.write_buffer(
@@ -595,11 +604,16 @@ impl Default for RingIndex {
 mod tests {
     use lyon::tessellation::VertexBuffers;
 
+    use std::collections::HashSet;
+
     use crate::{
-        coords::ZoomLevel,
+        coords::{WorldTileCoords, ZoomLevel},
         render::resource::{BackingBufferDescriptor, Queue},
         style::layer::StyleLayer,
-        vector::resource::{BackingBufferType, BufferPool},
+        vector::{
+            resource::{BackingBufferType, BufferPool},
+            tessellation::OverAlignedVertexBuffer,
+        },
     };
 
     #[derive(Debug)]
@@ -628,6 +642,67 @@ mod tests {
 
     fn create_24byte() -> Vec<TestVertex> {
         vec![TestVertex::default()]
+    }
+
+    fn pool() -> BufferPool<TestQueue, TestBuffer, TestVertex, u32, u32, u32> {
+        BufferPool::new(
+            BackingBufferDescriptor::new(TestBuffer { size: 1024 }, 1024),
+            BackingBufferDescriptor::new(TestBuffer { size: 1024 }, 1024),
+            BackingBufferDescriptor::new(TestBuffer { size: 1024 }, 1024),
+            BackingBufferDescriptor::new(TestBuffer { size: 1024 }, 1024),
+        )
+    }
+
+    fn style_layer(id: &str) -> StyleLayer {
+        serde_json::from_value(serde_json::json!({
+            "id": id, "type": "symbol", "source": "s", "source-layer": "place"
+        }))
+        .expect("valid style layer")
+    }
+
+    fn geometry(vertex_count: usize) -> OverAlignedVertexBuffer<TestVertex, u32> {
+        let mut buffer = VertexBuffers::new();
+        buffer.vertices = vec![TestVertex::default(); vertex_count];
+        buffer.indices = (0..vertex_count as u32).collect();
+        OverAlignedVertexBuffer::from(buffer)
+    }
+
+    #[test]
+    fn a_metadata_update_of_the_wrong_size_is_refused_instead_of_written() {
+        let mut pool = pool();
+        let coords = WorldTileCoords::default();
+        pool.allocate_layer_geometry(
+            &TestQueue,
+            coords,
+            style_layer("place_city"),
+            &geometry(2),
+            0u32,
+            &[0u32; 2],
+        );
+        pool.allocate_layer_geometry(
+            &TestQueue,
+            coords,
+            style_layer("place_town"),
+            &geometry(4),
+            0u32,
+            &[0u32; 4],
+        );
+        let entries = pool
+            .index()
+            .get_layers(coords)
+            .expect("both layers are allocated");
+        let town = entries
+            .iter()
+            .find(|entry| entry.style_layer.id == "place_town")
+            .expect("town entry");
+
+        pool.update_feature_metadata(&TestQueue, town, &[1u32; 2]);
+        pool.update_feature_metadata(&TestQueue, town, &[1u32; 4]);
+
+        assert_eq!(
+            pool.get_loaded_style_layers_at(coords),
+            Some(HashSet::from(["place_city", "place_town"]))
+        );
     }
 
     #[test]

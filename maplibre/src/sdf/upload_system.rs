@@ -1,6 +1,6 @@
 //! Uploads data to the GPU which is needed for rendering.
 
-use std::iter;
+use std::{collections::HashSet, iter};
 
 use crate::{
     context::MapContext,
@@ -14,7 +14,10 @@ use crate::{
         Renderer,
     },
     sdf::{SymbolBufferPool, SymbolLayerData, SymbolLayersDataComponent},
-    style::{layer::LayerPaint, Style},
+    style::{
+        layer::{LayerPaint, StyleLayer},
+        Style,
+    },
     tcs::{
         system::{SystemError, SystemResult},
         tiles::Tiles,
@@ -80,35 +83,20 @@ fn upload_symbol_layer(
             continue;
         };
 
-        let loaded_layers = symbol_buffer_pool
+        let loaded_layers: HashSet<String> = symbol_buffer_pool
             .get_loaded_style_layers_at(coords)
-            .unwrap_or_default();
-
-        let available_layers = vector_layers
-            .layers
-            .iter()
-            .filter(|data| !loaded_layers.contains(data.source_layer.as_str()))
-            .collect::<Vec<_>>();
+            .unwrap_or_default()
+            .into_iter()
+            .map(str::to_string)
+            .collect();
 
         for style_layer in &style.layers {
-            let layer_id = &style_layer.id;
-            let source_layer = match style_layer.source_layer.as_ref() {
-                Some(layer) => layer,
-                None => {
-                    log::trace!("style layer {layer_id} does not have a source layer");
-                    continue;
-                }
-            };
-
             let Some(SymbolLayerData {
                 coords,
                 features,
-                //buffer,
                 new_buffer: buffer,
                 ..
-            }) = available_layers
-                .iter()
-                .find(|layer| source_layer.as_str() == layer.source_layer)
+            }) = pending_layer_data(&vector_layers.layers, &loaded_layers, style_layer)
             else {
                 continue;
             };
@@ -155,3 +143,22 @@ fn upload_symbol_layer(
         }
     }
 }
+
+/// The tessellated data of a style layer that is not in the pool yet. Style layers sharing a
+/// source layer each have their own data, so the match is on the style layer id: matching on
+/// the source layer would upload one layer's geometry under every sibling's name.
+fn pending_layer_data<'a>(
+    layers: &'a [SymbolLayerData],
+    loaded_style_layers: &HashSet<String>,
+    style_layer: &StyleLayer,
+) -> Option<&'a SymbolLayerData> {
+    if loaded_style_layers.contains(&style_layer.id) {
+        return None;
+    }
+    layers
+        .iter()
+        .find(|layer| layer.style_layer_id == style_layer.id)
+}
+
+#[cfg(test)]
+mod tests;

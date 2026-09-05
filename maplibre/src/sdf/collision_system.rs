@@ -211,10 +211,8 @@ impl System for CollisionSystem {
                     if let Some(layer_at_coords) = symbol_buffer_pool.index().get_layers(coords) {
                         for entry in layer_at_coords {
                             debug_assert_eq!(entry.coords, coords);
-
-                            let source_layer = entry.style_layer.source_layer.as_ref().unwrap();
-
-                            if source_layer != &layer.source_layer {
+                            // Siblings on the same source layer have their own vertex counts.
+                            if entry.style_layer.id != layer.style_layer_id {
                                 continue;
                             }
 
