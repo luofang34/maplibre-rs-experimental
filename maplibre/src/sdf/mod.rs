@@ -21,7 +21,7 @@ use crate::{
         RenderStageLabel,
     },
     schedule::Schedule,
-    sdf::resource::GlyphTexture,
+    sdf::resource::{GlyphTexture, SymbolTerrainFallback},
     tcs::{system::SystemContainer, tiles::TileComponent, world::World},
     vector::{
         resource::BufferPool,
@@ -82,6 +82,7 @@ impl<E: Environment, T: VectorTransferables> Plugin<E> for SdfPlugin<T> {
         resources.insert(Eventually::<SymbolPipeline>::Uninitialized);
         resources.insert(Eventually::<SymbolBufferPool>::Uninitialized);
         resources.insert(Eventually::<GlyphTexture>::Uninitialized);
+        resources.insert(Eventually::<SymbolTerrainFallback>::Uninitialized);
         resources.insert(Eventually::<(wgpu::Texture, wgpu::Sampler)>::Uninitialized);
 
         schedule.add_system_to_stage(

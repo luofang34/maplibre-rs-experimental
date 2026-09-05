@@ -11,8 +11,10 @@ use crate::{
         shaders::Shader,
         RenderResources, Renderer,
     },
+    sdf::resource::SymbolTerrainFallback,
     sdf::{resource::GlyphTexture, text::GlyphSet, SymbolBufferPool, SymbolPipeline},
     tcs::system::{SystemError, SystemResult},
+    terrain::resources::TerrainResources,
     vector::resource::BufferPool,
 };
 
@@ -35,12 +37,14 @@ pub fn resource_system(
         symbol_pipeline,
         glyph_texture_sampler,
         glyph_texture_bind_group,
+        symbol_terrain_fallback,
         Initialized(projection_resources),
     )) = world.resources.query_mut::<(
         &mut Eventually<SymbolBufferPool>,
         &mut Eventually<SymbolPipeline>,
         &mut Eventually<(wgpu::Texture, wgpu::Sampler)>,
         &mut Eventually<GlyphTexture>,
+        &mut Eventually<SymbolTerrainFallback>,
         &mut Eventually<ProjectionGpuResources>,
     )>()
     else {
@@ -54,7 +58,7 @@ pub fn resource_system(
             format: surface.surface_format(),
         };
 
-        let pipeline = TilePipeline::new(
+        let mut descriptor = TilePipeline::new(
             "symbol_pipeline".into(),
             *settings,
             tile_shader.describe_vertex(),
@@ -67,8 +71,16 @@ pub fn resource_system(
             false,
             true,
         )
-        .describe_render_pipeline()
-        .initialize_with_prefix_layouts(device, &[projection_resources.bind_group_layout()]);
+        .describe_render_pipeline();
+        // Group 2 is the terrain tile the symbols stand on, so the vertex shader can lift
+        // their anchors onto the surface as GL JS `get_elevation` does.
+        descriptor
+            .layout
+            .get_or_insert_with(Vec::new)
+            .push(TerrainResources::bind_group_layout_entries());
+        let pipeline = descriptor
+            .initialize_with_prefix_layouts(device, &[projection_resources.bind_group_layout()]);
+        symbol_terrain_fallback.initialize(|| SymbolTerrainFallback::new(device, &pipeline));
 
         let (texture, sampler) = glyph_texture_sampler.initialize(|| {
             let data = include_bytes!("../../../data/0-255.pbf");

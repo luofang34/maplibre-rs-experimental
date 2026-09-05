@@ -214,7 +214,7 @@ async fn projection_aware_tile_pipelines_compile() {
     ];
 
     for (name, shader, raster, glyph) in shaders {
-        TilePipeline::new(
+        let mut descriptor = TilePipeline::new(
             name.into(),
             RendererSettings::default(),
             shader.describe_vertex(),
@@ -227,8 +227,15 @@ async fn projection_aware_tile_pipelines_compile() {
             raster,
             glyph,
         )
-        .describe_render_pipeline()
-        .initialize_with_prefix_layouts(&device, &[projection.bind_group_layout()]);
+        .describe_render_pipeline();
+        if glyph {
+            // Symbols take the terrain tile they stand on at group 2.
+            descriptor
+                .layout
+                .get_or_insert_with(Vec::new)
+                .push(crate::terrain::resources::TerrainResources::bind_group_layout_entries());
+        }
+        descriptor.initialize_with_prefix_layouts(&device, &[projection.bind_group_layout()]);
     }
 }
 

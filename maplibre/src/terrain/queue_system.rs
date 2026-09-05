@@ -178,6 +178,7 @@ pub fn queue_system(
             .filter_map(|(index, (dem_coords, coords))| {
                 let drape = terrain.drape_texture(*coords)?;
                 Some(TerrainDraw {
+                    coords: *coords,
                     bind_group: terrain.create_bind_group(
                         device,
                         terrain.dem_texture(*dem_coords),

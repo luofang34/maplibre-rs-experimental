@@ -78,6 +78,8 @@ pub struct TerrainFog {
 
 /// One terrain tile ready to draw.
 pub struct TerrainDraw {
+    /// The terrain tile drawn.
+    pub coords: WorldTileCoords,
     /// Uniform block, DEM texture and drape texture of the tile.
     pub bind_group: wgpu::BindGroup,
     /// Dynamic offset of the tile's uniform block.
@@ -439,5 +441,10 @@ impl TerrainResources {
     /// Terrain draws of the current frame.
     pub fn draws(&self) -> &[TerrainDraw] {
         &self.draws
+    }
+
+    /// The draw of a terrain tile this frame, whose bind group also elevates symbols on it.
+    pub fn draw_for(&self, coords: WorldTileCoords) -> Option<&TerrainDraw> {
+        self.draws.iter().find(|draw| draw.coords == coords)
     }
 }
