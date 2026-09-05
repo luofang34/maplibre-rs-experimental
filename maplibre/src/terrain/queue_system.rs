@@ -17,7 +17,7 @@ use crate::{
         render_phase::{Draw, DrawState, LayerItem, ProjectionBinding, RenderPhase, TileMaskItem},
         shaders::ShaderTileMetadata,
         tile_view_pattern::{TileShape, WgpuTileViewPattern, DEFAULT_TILE_SIZE},
-        view_state::ViewStatePadding,
+        view_state::{ViewState, ViewStatePadding},
         Renderer,
     },
     style::{source::TileAddressingScheme, Style},
@@ -30,6 +30,7 @@ use crate::{
         drape_cache::{fingerprint, SourceRevisions},
         drape_targets::{collect_layer_specs, is_drapeable, select_targets, TargetSpec},
         request_system::dem_tile_coords,
+        resources::TerrainFog,
         resources::{
             TerrainDraw, TerrainResources, TerrainTileUniforms, DRAPE_SIZE, UNIFORM_STRIDE,
         },
@@ -130,6 +131,7 @@ pub fn queue_system(
     let phase = build_drape_phase(&specs, &redraw, &slots, &ranges, zoom, clear_color);
 
     let gpu_view_projection = view_state.gpu_view_projection();
+    let fog = terrain_fog(style, view_state);
     let skirt_length = view_state.body().circumference_meters()
         / 2_f64.powf(zoom.value().max(0.0))
         / SKIRT_DIVISOR;
@@ -151,6 +153,7 @@ pub fn queue_system(
                     .to_model_view_projection(spec.coords.transform_for_zoom(zoom))
                     .downcast(),
                 skirt_length as f32,
+                &fog,
             ) else {
                 continue;
             };
@@ -388,6 +391,7 @@ fn tile_uniforms(
     dem: &DemSource,
     transform: &Matrix4<f32>,
     skirt_length: f32,
+    fog: &TerrainFog,
 ) -> Option<TerrainTileUniforms> {
     let (dem_matrix, dem_unpack, dem_dim) = match dem_coords {
         Some(dem_coords) => (
@@ -414,7 +418,36 @@ fn tile_uniforms(
         exaggeration: dem.exaggeration,
         skirt_length,
         padding: 0.0,
+        fog_color: fog.fog_color,
+        horizon_color: fog.horizon_color,
+        fog_range: [fog.near, fog.far, fog.ground_blend, fog.horizon_blend],
+        fog_opacity: [fog.opacity, if fog.globe { 1.0 } else { 0.0 }, 0.0, 0.0],
     })
+}
+
+/// The fog of the frame from the style's sky and the view, as GL JS `terrainUniformValues`.
+fn terrain_fog(style: &Style, view_state: &ViewState) -> TerrainFog {
+    let Some(sky) = &style.sky else {
+        return TerrainFog::default();
+    };
+    let colors = sky.colors_at(view_state.zoom().value());
+    let (near, far) = view_state.fog_depth_range();
+    let pitch = view_state.camera().get_pitch().0.to_degrees();
+    let globe = style.projection.as_ref().is_some_and(|specification| {
+        specification
+            .projection_type
+            .uses_globe_rendering(view_state.zoom().value())
+    });
+    TerrainFog {
+        fog_color: colors.fog,
+        horizon_color: colors.horizon,
+        near: near as f32,
+        far: far as f32,
+        ground_blend: colors.fog_ground_blend,
+        horizon_blend: colors.horizon_fog_blend,
+        opacity: crate::style::sky::SkySpecification::fog_blend_opacity(pitch),
+        globe,
+    }
 }
 
 /// Color the drape textures start from: the constant background paint, or transparent.

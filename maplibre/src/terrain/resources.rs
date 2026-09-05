@@ -45,6 +45,35 @@ pub struct TerrainTileUniforms {
     pub skirt_length: f32,
     /// Keeps the block a multiple of sixteen bytes.
     pub padding: f32,
+    /// Premultiplied fog colour.
+    pub fog_color: [f32; 4],
+    /// Premultiplied horizon colour the fog blends into.
+    pub horizon_color: [f32; 4],
+    /// Fog depth range in pixels, then the ground blend and the horizon blend.
+    pub fog_range: [f32; 4],
+    /// Fog opacity at the current pitch and whether the map is a globe.
+    pub fog_opacity: [f32; 4],
+}
+
+/// The fog of a frame, shared by every terrain tile, as GL JS `terrainUniformValues` takes it.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TerrainFog {
+    /// Premultiplied fog colour.
+    pub fog_color: [f32; 4],
+    /// Premultiplied horizon colour.
+    pub horizon_color: [f32; 4],
+    /// Distances in pixels the fog depth runs between.
+    pub near: f32,
+    /// Far end of the fog depth in pixels.
+    pub far: f32,
+    /// Fog depth at which the ground starts to take the fog colour.
+    pub ground_blend: f32,
+    /// Fog depth at which the fog colour turns into the horizon colour.
+    pub horizon_blend: f32,
+    /// Opacity of the fog at the current pitch.
+    pub opacity: f32,
+    /// Whether the map is drawn as a globe, where GL JS draws no fog.
+    pub globe: bool,
 }
 
 /// One terrain tile ready to draw.
@@ -87,7 +116,7 @@ impl TerrainResources {
         vec![
             wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: true,

@@ -16,6 +16,13 @@ use crate::{
 pub struct BackgroundLayerMetadata {
     pub color: [f32; 4],
     pub z_index: f32,
+    /// Keeps the horizon sixteen-byte aligned.
+    pub padding: [f32; 3],
+    /// Horizon point in screen pixels with y up, then the unit normal pointing into the sky;
+    /// the flat map ends there, as the tiles GL JS draws the background on do.
+    pub horizon: [f32; 4],
+    /// Viewport height in pixels.
+    pub viewport: [f32; 4],
 }
 
 pub struct BackgroundShader {
@@ -108,6 +115,58 @@ pub enum AtmosphereMetadataError {
         /// Evaluated atmosphere blend.
         blend: f32,
     },
+}
+
+/// Per-frame values of the sky draw: colours, the horizon line on screen and the blends.
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Pod, Zeroable)]
+pub struct SkyLayerMetadata {
+    /// Premultiplied sky colour.
+    pub sky_color: [f32; 4],
+    /// Premultiplied horizon colour.
+    pub horizon_color: [f32; 4],
+    /// Horizon point in screen pixels with y up, then the unit normal pointing into the sky.
+    pub horizon: [f32; 4],
+    /// Blend width above the horizon in pixels, the globe transition, the viewport height.
+    pub blend: [f32; 4],
+}
+
+/// Shader filling the screen above the horizon with the sky, as GL JS `drawSky` does.
+pub struct SkyShader {
+    /// Render-target format.
+    pub format: wgpu::TextureFormat,
+}
+
+impl Shader for SkyShader {
+    fn describe_vertex(&self) -> VertexState {
+        VertexState {
+            source: include_str!("sky.vertex.wgsl"),
+            entry_point: "main",
+            buffers: vec![VertexBufferLayout {
+                array_stride: std::mem::size_of::<SkyLayerMetadata>() as u64,
+                step_mode: wgpu::VertexStepMode::Instance,
+                attributes: (0..4)
+                    .map(|index| wgpu::VertexAttribute {
+                        offset: index * wgpu::VertexFormat::Float32x4.size(),
+                        format: wgpu::VertexFormat::Float32x4,
+                        shader_location: 8 + index as u32,
+                    })
+                    .collect(),
+            }],
+        }
+    }
+
+    fn describe_fragment(&self) -> FragmentState {
+        FragmentState {
+            source: include_str!("sky.fragment.wgsl"),
+            entry_point: "main",
+            targets: vec![Some(wgpu::ColorTargetState {
+                format: self.format,
+                blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }
+    }
 }
 
 /// Shader drawing a translucent atmospheric shell.
@@ -274,6 +333,16 @@ impl Shader for BackgroundShader {
                         format: wgpu::VertexFormat::Float32,
                         shader_location: 1,
                     },
+                    wgpu::VertexAttribute {
+                        offset: 32,
+                        format: wgpu::VertexFormat::Float32x4,
+                        shader_location: 2,
+                    },
+                    wgpu::VertexAttribute {
+                        offset: 48,
+                        format: wgpu::VertexFormat::Float32x4,
+                        shader_location: 3,
+                    },
                 ],
             }],
         }
@@ -281,7 +350,7 @@ impl Shader for BackgroundShader {
 
     fn describe_fragment(&self) -> FragmentState {
         FragmentState {
-            source: include_str!("basic.fragment.wgsl"),
+            source: include_str!("background.fragment.wgsl"),
             entry_point: "main",
             targets: vec![Some(wgpu::ColorTargetState {
                 format: self.format,

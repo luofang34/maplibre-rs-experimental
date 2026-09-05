@@ -5,7 +5,7 @@ mod circle;
 
 pub use background::{
     AtmosphereLayerMetadata, AtmosphereShader, BackgroundLayerMetadata, BackgroundShader,
-    GlobeBackgroundShader,
+    GlobeBackgroundShader, SkyLayerMetadata, SkyShader,
 };
 use bytemuck_derive::{Pod, Zeroable};
 use cgmath::SquareMatrix;

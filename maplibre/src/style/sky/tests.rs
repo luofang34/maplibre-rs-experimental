@@ -46,3 +46,24 @@ fn atmosphere_blend_step_uses_latest_stop() {
     assert_eq!(sky.atmosphere_blend_at_zoom(3.0), 0.5);
     assert_eq!(sky.atmosphere_blend_at_zoom(7.0), 1.0);
 }
+
+#[test]
+fn sky_colours_take_the_specification_defaults_and_zoom_functions() {
+    let sky: SkySpecification = serde_json::from_str(
+        r##"{"sky-color": "#199EF3", "fog-ground-blend": {"stops": [[10, 0], [12, 1]]}}"##,
+    )
+    .expect("sky parses");
+    let colors = sky.colors_at(11.0);
+    assert!(
+        (colors.sky[0] - 0x19 as f32 / 255.0).abs() < 1e-6,
+        "{colors:?}"
+    );
+    assert_eq!(colors.horizon, [1.0, 1.0, 1.0, 1.0]);
+    assert_eq!(colors.fog, [1.0, 1.0, 1.0, 1.0]);
+    assert!((colors.fog_ground_blend - 0.5).abs() < 1e-6, "{colors:?}");
+    assert_eq!(colors.horizon_fog_blend, 0.8);
+    assert_eq!(colors.sky_horizon_blend, 0.8);
+    assert_eq!(SkySpecification::fog_blend_opacity(59.0), 0.0);
+    assert!((SkySpecification::fog_blend_opacity(65.0) - 0.5).abs() < 1e-6);
+    assert_eq!(SkySpecification::fog_blend_opacity(85.0), 1.0);
+}

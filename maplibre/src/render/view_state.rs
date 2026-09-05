@@ -180,6 +180,31 @@ impl ViewState {
             })
     }
 
+    /// Distance in pixels from the screen center to the Mercator horizon, positive above the
+    /// center, as GL JS `getMercatorHorizon`.
+    pub fn mercator_horizon(&self) -> f64 {
+        let pitch = self.camera.get_pitch().0.abs();
+        self.camera_to_center_distance()
+            * ((f64::consts::FRAC_PI_2 - pitch).tan() * 0.85)
+                .min((MAX_MERCATOR_HORIZON_ANGLE.0 - pitch).tan())
+    }
+
+    /// Distances in pixels the fog depth spans: from the camera's distance to sea level, where
+    /// the map center sits, to the far plane, as the GL JS fog matrix takes them.
+    pub fn fog_depth_range(&self) -> (f64, f64) {
+        let distance = self.camera_to_center_distance();
+        let limited_pitch = self
+            .camera
+            .get_pitch()
+            .0
+            .abs()
+            .min(MAX_MERCATOR_HORIZON_ANGLE.0);
+        let camera_to_sea_level = (distance / 2.0)
+            .max(distance + self.center_elevation * self.pixels_per_meter() / limited_pitch.cos());
+        let (_, far_z) = self.depth_range(self.center_offset());
+        (camera_to_sea_level, far_z)
+    }
+
     /// Near and far clip distances in pixels, following GL JS `_calculateNearFarZIfNeeded`.
     ///
     /// The far plane reaches the top of the screen on the lowest visible plane, capped at the

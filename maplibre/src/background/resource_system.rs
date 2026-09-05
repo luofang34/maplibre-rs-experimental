@@ -4,7 +4,7 @@ use crate::{
         eventually::{Eventually, Eventually::Initialized},
         projection::ProjectionGpuResources,
         resource::{RenderPipeline, TilePipeline},
-        shaders::{AtmosphereShader, BackgroundShader, GlobeBackgroundShader, Shader},
+        shaders::{AtmosphereShader, BackgroundShader, GlobeBackgroundShader, Shader, SkyShader},
     },
 };
 
@@ -25,11 +25,13 @@ pub fn resource_system(
         background_pipeline,
         globe_background_pipeline,
         atmosphere_pipeline,
+        sky_pipeline,
         Initialized(projection_resources),
     )) = world.resources.query_mut::<(
         &mut Eventually<BackgroundRenderPipeline>,
         &mut Eventually<GlobeBackgroundRenderPipeline>,
         &mut Eventually<AtmosphereRenderPipeline>,
+        &mut Eventually<SkyRenderPipeline>,
         &mut Eventually<ProjectionGpuResources>,
     )>()
     else {
@@ -104,6 +106,30 @@ pub fn resource_system(
         AtmosphereRenderPipeline(pipeline)
     });
 
+    sky_pipeline.initialize(|| {
+        let shader = SkyShader {
+            format: surface.surface_format(),
+        };
+        // The sky draws in the main pass, so it carries the depth-stencil state of that pass
+        // without testing or writing either.
+        let pipeline = TilePipeline::new(
+            "sky_pipeline".into(),
+            *settings,
+            shader.describe_vertex(),
+            shader.describe_fragment(),
+            true,
+            false,
+            true,
+            false,
+            surface.is_multisampling_supported(settings.msaa),
+            false,
+            false,
+        )
+        .describe_render_pipeline()
+        .initialize_with_prefix_layouts(device, &[projection_resources.bind_group_layout()]);
+        SkyRenderPipeline(pipeline)
+    });
+
     Ok(())
 }
 
@@ -115,3 +141,6 @@ pub struct GlobeBackgroundRenderPipeline(pub wgpu::RenderPipeline);
 
 /// Pipeline drawing optional atmospheric scattering.
 pub struct AtmosphereRenderPipeline(pub wgpu::RenderPipeline);
+
+/// Pipeline filling the screen above the horizon with the sky.
+pub struct SkyRenderPipeline(pub wgpu::RenderPipeline);

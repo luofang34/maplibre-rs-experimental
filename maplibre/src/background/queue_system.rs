@@ -19,9 +19,11 @@ pub struct BackgroundBuffers {
     pub tile_metadata_buffer: wgpu::Buffer,
     /// Evaluated atmosphere opacity.
     pub atmosphere_metadata_buffer: wgpu::Buffer,
+    /// Sky colours and horizon, when the style has a sky and the map is not a globe.
+    pub sky_metadata_buffer: Option<wgpu::Buffer>,
 }
 
-use super::render_commands::{DrawAtmosphere, DrawBackground, DrawGlobeBackground};
+use super::render_commands::{DrawAtmosphere, DrawBackground, DrawGlobeBackground, DrawSky};
 
 pub fn queue_system(
     MapContext {
@@ -43,6 +45,11 @@ pub fn queue_system(
         sky.atmosphere_blend_at_zoom(view_state.zoom().value())
     });
     let atmosphere_blend = sky_blend * projection_transition;
+    let sky_metadata = style
+        .sky
+        .as_ref()
+        .filter(|_| projection_transition < 1.0)
+        .map(|sky| sky_metadata(sky, view_state, projection_transition));
 
     {
         let Some((layer_item_phase, translucent_phase)) = world.resources.query_mut::<(
@@ -52,10 +59,12 @@ pub fn queue_system(
             return Err(SystemError::Dependencies);
         };
 
+        let mut background_index = 0;
         for layer in &style.layers {
             if layer.type_ != "background" || !layer.is_visible_at(view_state.zoom().value()) {
                 continue;
             }
+            background_index = background_index.max(layer.index);
             let c: [f32; 4] = match &layer.paint {
                 Some(paint @ LayerPaint::Background(_)) => paint
                     .get_color()
@@ -64,7 +73,13 @@ pub fn queue_system(
                 _ => [0.0, 0.0, 0.0, 1.0],
             };
             let z_index = layer.index as f32;
-            metadatas.push(BackgroundLayerMetadata { color: c, z_index });
+            metadatas.push(BackgroundLayerMetadata {
+                color: c,
+                z_index,
+                padding: [0.0; 3],
+                horizon: horizon_line(view_state),
+                viewport: [view_state.height() as f32, 0.0, 0.0, 0.0],
+            });
 
             let draw_function: Box<dyn crate::render::render_phase::Draw<LayerItem>> = if uses_globe
             {
@@ -87,6 +102,22 @@ pub fn queue_system(
                 },
             });
         }
+        // The sky follows the background layers and precedes everything else, as GL JS draws it
+        // under the map; the flat map covers it below the horizon.
+        if sky_metadata.is_some() {
+            layer_item_phase.add(LayerItem {
+                projection: ProjectionBinding::View,
+                draw_function: Box::new(DrawState::<LayerItem, DrawSky>::new()),
+                index: background_index,
+                is_line: false,
+                generate_borders: false,
+                style_layer: "sky".to_string(),
+                source_shape: crate::render::tile_view_pattern::TileShape::default(),
+                tile: crate::tcs::tiles::Tile {
+                    coords: crate::coords::WorldTileCoords::default(),
+                },
+            });
+        }
         if atmosphere_blend > 0.0 {
             translucent_phase.add(TranslucentItem {
                 draw_function: Box::new(DrawState::<TranslucentItem, DrawAtmosphere>::new()),
@@ -100,11 +131,14 @@ pub fn queue_system(
         }
     }
 
-    if !metadatas.is_empty() || atmosphere_blend > 0.0 {
+    if !metadatas.is_empty() || atmosphere_blend > 0.0 || sky_metadata.is_some() {
         if metadatas.is_empty() {
             metadatas.push(BackgroundLayerMetadata {
                 color: [0.0; 4],
                 z_index: 0.0,
+                padding: [0.0; 3],
+                horizon: horizon_line(view_state),
+                viewport: [view_state.height() as f32, 0.0, 0.0, 0.0],
             });
         }
         let buffer = renderer
@@ -166,12 +200,58 @@ pub fn queue_system(
                     contents: bytemuck::bytes_of(&atmosphere_metadata),
                     usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
                 });
+        let sky_metadata_buffer = sky_metadata.map(|sky| {
+            renderer
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Sky Metadata Buffer"),
+                    contents: bytemuck::bytes_of(&sky),
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                })
+        });
         world.resources.insert(BackgroundBuffers {
             metadata_buffer: buffer,
             tile_metadata_buffer,
             atmosphere_metadata_buffer,
+            sky_metadata_buffer,
         });
     }
 
     Ok(())
+}
+
+/// The sky draw's values for the frame: colours at the zoom and the horizon line on screen,
+/// as GL JS `skyUniformValues` computes them.
+fn sky_metadata(
+    sky: &crate::style::sky::SkySpecification,
+    view_state: &crate::render::view_state::ViewState,
+    projection_transition: f32,
+) -> crate::render::shaders::SkyLayerMetadata {
+    let colors = sky.colors_at(view_state.zoom().value());
+    let height = view_state.height();
+    crate::render::shaders::SkyLayerMetadata {
+        sky_color: colors.sky,
+        horizon_color: colors.horizon,
+        horizon: horizon_line(view_state),
+        blend: [
+            (f64::from(colors.sky_horizon_blend) * height / 2.0) as f32,
+            projection_transition,
+            height as f32,
+            0.0,
+        ],
+    }
+}
+
+/// The horizon on screen: a point in pixels with y up and the unit normal pointing into the
+/// sky, turned with the roll as GL JS `skyUniformValues` computes them.
+fn horizon_line(view_state: &crate::render::view_state::ViewState) -> [f32; 4] {
+    let roll = view_state.camera().get_roll().0;
+    let (width, height) = (view_state.width(), view_state.height());
+    let horizon = view_state.mercator_horizon();
+    [
+        (width / 2.0 - horizon * roll.sin()) as f32,
+        (height / 2.0 + horizon * roll.cos()) as f32,
+        -roll.sin() as f32,
+        roll.cos() as f32,
+    ]
 }

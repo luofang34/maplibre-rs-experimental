@@ -9,11 +9,17 @@ struct TerrainTileUniforms {
     exaggeration: f32,
     skirt_length: f32,
     padding: f32,
+    fog_color: vec4<f32>,
+    horizon_color: vec4<f32>,
+    fog_range: vec4<f32>,
+    fog_opacity: vec4<f32>,
 };
 
 struct VertexOutput {
     @location(0) tex_coords: vec2<f32>,
     @location(1) horizon_distance: f32,
+    // Depth in the fog's range: 0 at the map center's distance, 1 at the far plane.
+    @location(2) fog_depth: f32,
     @builtin(position) clip_position: vec4<f32>,
 };
 
@@ -55,9 +61,16 @@ fn main(
         terrain_tile.transform,
         terrain_tile.tile_mercator_coords,
     );
+    // GL JS projects the vertex with a near plane at the map center's distance and reads the
+    // depth; the same value follows from the eye depth, which is the clip w.
+    let near = terrain_tile.fog_range.x;
+    let far = terrain_tile.fog_range.y;
+    let eye_depth = max(projected.clip_position.w, 1e-6);
+    let fog_depth = far * (eye_depth - near) / (eye_depth * max(far - near, 1e-6));
     return VertexOutput(
         position / TERRAIN_EXTENT,
         projected.horizon_distance,
+        fog_depth,
         projected.clip_position,
     );
 }

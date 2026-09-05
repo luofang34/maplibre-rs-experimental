@@ -1,6 +1,7 @@
 use crate::{
     background::resource_system::{
         AtmosphereRenderPipeline, BackgroundRenderPipeline, GlobeBackgroundRenderPipeline,
+        SkyRenderPipeline,
     },
     render::{
         eventually::Eventually::{self, Initialized},
@@ -145,6 +146,52 @@ impl<P: PhaseItem> RenderCommand<P> for DrawAtmosphereFullscreen {
 }
 
 pub type DrawAtmosphere = (SetAtmospherePipeline, DrawAtmosphereFullscreen);
+
+pub struct SetSkyPipeline;
+impl<P: PhaseItem> RenderCommand<P> for SetSkyPipeline {
+    fn render<'w>(
+        world: &'w World,
+        _item: &P,
+        pass: &mut TrackedRenderPass<'w>,
+    ) -> RenderCommandResult {
+        let Some((Initialized(SkyRenderPipeline(pipeline)), Initialized(projection_resources))) =
+            world.resources.query::<(
+                &Eventually<SkyRenderPipeline>,
+                &Eventually<ProjectionGpuResources>,
+            )>()
+        else {
+            return RenderCommandResult::Failure;
+        };
+        pass.set_render_pipeline(pipeline);
+        pass.set_bind_group(0, projection_resources.bind_group(), &[]);
+        RenderCommandResult::Success
+    }
+}
+
+pub struct DrawSkyFullscreen;
+impl<P: PhaseItem> RenderCommand<P> for DrawSkyFullscreen {
+    fn render<'w>(
+        world: &'w World,
+        _item: &P,
+        pass: &mut TrackedRenderPass<'w>,
+    ) -> RenderCommandResult {
+        let Some(buffers) = world
+            .resources
+            .get::<crate::background::queue_system::BackgroundBuffers>()
+        else {
+            return RenderCommandResult::Failure;
+        };
+        let Some(sky) = &buffers.sky_metadata_buffer else {
+            return RenderCommandResult::Failure;
+        };
+        pass.set_vertex_buffer(0, sky.slice(..));
+        pass.draw(0..3, 0..1);
+        RenderCommandResult::Success
+    }
+}
+
+/// Fills the screen above the horizon with the sky.
+pub type DrawSky = (SetSkyPipeline, DrawSkyFullscreen);
 
 pub struct DrawBackground;
 impl<P: PhaseItem> RenderCommand<P> for DrawBackground {
