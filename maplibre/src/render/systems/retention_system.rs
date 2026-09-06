@@ -26,13 +26,27 @@ use crate::{
     style::Style,
     tcs::{system::SystemResult, tiles::Tiles, world::World},
     terrain::{dem_tile_coords, resources::TerrainResources, source::dem_source, DemTileComponent},
-    vector::VectorLayerBucketComponent,
+    vector::{VectorBufferPool, VectorLayerBucket, VectorLayerBucketComponent},
 };
 
 /// Out-of-view tiles kept per tile in use, as GL JS `MAX_TILE_CACHE_ZOOM_LEVELS`.
 const CACHE_TILES_PER_VIEW_TILE: usize = 5;
 /// Smallest cache, so a tiny viewport still keeps some history for panning back.
 const MIN_CACHE_TILES: usize = 64;
+/// Tessellated geometry the out-of-view cache may hold. The tile count is GL JS's, sized for
+/// a flat viewport of a few dozen tiles; an eye on terrain draws hundreds, and a planet tile
+/// at low zoom weighs tens of megabytes, so the cache is bounded in bytes as well.
+const CACHE_BYTES: usize = 384 << 20;
+/// Frames between resident-memory summaries for hosts driving the map from an eye, which
+/// run on devices with a memory limit.
+const SUMMARY_EVERY_FRAMES: u64 = 90;
+
+/// What the out-of-view cache may hold.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct CacheBudget {
+    pub tiles: usize,
+    pub bytes: usize,
+}
 
 /// Last frame each tile was needed by the view pattern.
 #[derive(Default)]
@@ -57,7 +71,82 @@ pub fn retention_system(
         tracing::debug!(count = evicted.len(), "evicted tiles that left the view");
         drop_gpu_data(world, &evicted);
     }
+    if view_state.has_external_view() {
+        summarize_residency(world, drawn, in_use.len());
+    }
     Ok(())
+}
+
+fn summarize_residency(world: &World, drawn: usize, in_use: usize) {
+    let frame = world
+        .resources
+        .get::<TileRetention>()
+        .map_or(0, |retention| retention.frame);
+    if !frame.is_multiple_of(SUMMARY_EVERY_FRAMES) {
+        return;
+    }
+    let tiles = world.tiles.tiles.len();
+    let bytes: usize = world
+        .tiles
+        .tiles
+        .values()
+        .map(|tile| tile_bytes(&world.tiles, tile.coords))
+        .sum();
+    let index_bytes = world.tiles.geometry_index.approximate_bytes();
+    let pool_revision = match world.resources.get::<Eventually<VectorBufferPool>>() {
+        Some(Initialized(pool)) => pool.revision(),
+        _ => 0,
+    };
+    let (drapes, free_drapes, drape_bytes, dem_textures, dem_bytes) =
+        match world.resources.get::<Eventually<TerrainResources>>() {
+            Some(Initialized(terrain)) => {
+                let (held, free) = terrain.drape_counts();
+                let (drape_bytes, dem_bytes) = terrain.texture_bytes();
+                (
+                    held,
+                    free,
+                    drape_bytes,
+                    terrain.dem_texture_count(),
+                    dem_bytes,
+                )
+            }
+            _ => (0, 0, 0, 0, 0),
+        };
+    tracing::info!(
+        tiles,
+        geometry_mb = bytes >> 20,
+        index_mb = index_bytes >> 20,
+        pool_revision,
+        drawn,
+        in_use,
+        drapes,
+        free_drapes,
+        drape_mb = drape_bytes >> 20,
+        dem_textures,
+        dem_mb = dem_bytes >> 20,
+        "resident tiles"
+    );
+}
+
+/// Bytes of tessellated geometry the tile holds on the CPU.
+fn tile_bytes(tiles: &Tiles, coords: WorldTileCoords) -> usize {
+    tiles
+        .query::<&VectorLayerBucketComponent>(coords)
+        .map_or(0, |component| {
+            component
+                .layers
+                .iter()
+                .map(|layer| match layer {
+                    VectorLayerBucket::AvailableLayer(bucket) => {
+                        std::mem::size_of_val(bucket.buffer.buffer.vertices.as_slice())
+                            + std::mem::size_of_val(bucket.buffer.buffer.indices.as_slice())
+                            + std::mem::size_of_val(bucket.feature_indices.as_slice())
+                            + std::mem::size_of_val(bucket.feature_colors.as_slice())
+                    }
+                    VectorLayerBucket::Missing(_) => 0,
+                })
+                .sum()
+        })
 }
 
 /// The tiles the frame draws from, with the tiles whose shapes stand in for them.
@@ -121,11 +210,25 @@ pub(crate) fn tiles_in_use(
 }
 
 /// Removes the least recently used settled tiles beyond the cache budget and returns them;
-/// the budget follows `view_tiles`, the tiles the frame draws.
+/// the tile budget follows `view_tiles`, the tiles the frame draws.
 pub(crate) fn evict_stale_tiles(
     world: &mut World,
     in_use: &HashSet<WorldTileCoords>,
     view_tiles: usize,
+) -> Vec<WorldTileCoords> {
+    let budget = CacheBudget {
+        tiles: (view_tiles * CACHE_TILES_PER_VIEW_TILE).max(MIN_CACHE_TILES),
+        bytes: CACHE_BYTES,
+    };
+    evict_beyond(world, in_use, budget)
+}
+
+/// Removes the least recently used settled tiles until the rest fit `budget`, in tiles and
+/// in bytes of geometry, and returns them.
+pub(crate) fn evict_beyond(
+    world: &mut World,
+    in_use: &HashSet<WorldTileCoords>,
+    budget: CacheBudget,
 ) -> Vec<WorldTileCoords> {
     let World { resources, tiles } = world;
     let retention = resources.get_or_init_mut::<TileRetention>();
@@ -135,7 +238,7 @@ pub(crate) fn evict_stale_tiles(
         retention.last_used.insert(*coords, frame);
     }
 
-    let mut candidates: Vec<(u64, WorldTileCoords)> = tiles
+    let mut candidates: Vec<(u64, WorldTileCoords, usize)> = tiles
         .tiles
         .values()
         .map(|tile| tile.coords)
@@ -144,18 +247,25 @@ pub(crate) fn evict_stale_tiles(
             (
                 retention.last_used.get(&coords).copied().unwrap_or(0),
                 coords,
+                tile_bytes(tiles, coords),
             )
         })
         .collect();
-    let budget = (view_tiles * CACHE_TILES_PER_VIEW_TILE).max(MIN_CACHE_TILES);
-    if candidates.len() <= budget {
+    let mut kept = candidates.len();
+    let mut kept_bytes: usize = candidates.iter().map(|(_, _, bytes)| bytes).sum();
+    if kept <= budget.tiles && kept_bytes <= budget.bytes {
         return Vec::new();
     }
-    candidates.sort_by_key(|(used, _)| *used);
-    let evicted: Vec<WorldTileCoords> = candidates[..candidates.len() - budget]
-        .iter()
-        .map(|(_, coords)| *coords)
-        .collect();
+    candidates.sort_by_key(|(used, _, _)| *used);
+    let mut evicted = Vec::new();
+    for (_, coords, bytes) in candidates {
+        if kept <= budget.tiles && kept_bytes <= budget.bytes {
+            break;
+        }
+        kept -= 1;
+        kept_bytes -= bytes;
+        evicted.push(coords);
+    }
     for coords in &evicted {
         tiles.remove(*coords);
         retention.last_used.remove(coords);

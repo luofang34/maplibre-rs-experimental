@@ -2,12 +2,12 @@
 
 use std::collections::HashSet;
 
-use super::{evict_stale_tiles, MIN_CACHE_TILES};
+use super::{evict_beyond, evict_stale_tiles, CacheBudget, MIN_CACHE_TILES};
 use crate::{
     coords::{WorldTileCoords, ZoomLevel},
     tcs::world::World,
     terrain::DemTileComponent,
-    vector::VectorLayerBucketComponent,
+    vector::{VectorLayerBucket, VectorLayerBucketComponent},
 };
 
 fn tile(index: i32) -> WorldTileCoords {
@@ -214,4 +214,51 @@ fn the_cache_is_sized_from_drawn_tiles_rather_than_requested_ones() {
 
     assert_eq!(evicted.len(), 100 - MIN_CACHE_TILES);
     assert!(requested.iter().all(|coords| world.tiles.exists(*coords)));
+}
+
+#[test]
+fn the_cache_is_bounded_in_bytes_as_well_as_tiles() {
+    use crate::{
+        render::ShaderVertex,
+        vector::{tessellation::OverAlignedVertexBuffer, AvailableVectorLayerBucket},
+    };
+
+    let mut world = World::default();
+    let vertex_bytes = std::mem::size_of::<ShaderVertex>();
+    for index in 0..10 {
+        let coords = tile(index);
+        world
+            .tiles
+            .spawn_mut(coords)
+            .expect("valid coordinates")
+            .insert(VectorLayerBucketComponent {
+                done: true,
+                layers: vec![VectorLayerBucket::AvailableLayer(
+                    AvailableVectorLayerBucket {
+                        coords,
+                        source_layer: "water".to_string(),
+                        style_layer_id: "water".to_string(),
+                        buffer: OverAlignedVertexBuffer {
+                            buffer: lyon::tessellation::VertexBuffers {
+                                vertices: vec![ShaderVertex::new([0.0, 0.0], [0.0, 0.0]); 1000],
+                                indices: Vec::new(),
+                            },
+                            usable_indices: 0,
+                        },
+                        feature_indices: Vec::new(),
+                        feature_colors: Vec::new(),
+                    },
+                )],
+            });
+    }
+
+    // Ten tiles are within the tile budget; three of them fill the byte budget.
+    let budget = CacheBudget {
+        tiles: 64,
+        bytes: 3 * 1000 * vertex_bytes,
+    };
+    let evicted = evict_beyond(&mut world, &HashSet::new(), budget);
+
+    assert_eq!(evicted.len(), 7);
+    assert_eq!(world.tiles.tiles.len(), 3);
 }

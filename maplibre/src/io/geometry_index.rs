@@ -43,6 +43,11 @@ impl GeometryIndex {
         }
     }
 
+    /// Memory the index holds, estimated from its geometries and properties.
+    pub fn approximate_bytes(&self) -> usize {
+        self.index.values().map(TileIndex::approximate_bytes).sum()
+    }
+
     pub fn query_point(
         &self,
         world_coords: &WorldCoords,
@@ -86,6 +91,16 @@ pub enum TileIndex {
 }
 
 impl TileIndex {
+    /// Memory the tile's index holds, estimated from its geometries and properties.
+    pub fn approximate_bytes(&self) -> usize {
+        match self {
+            TileIndex::Spatial { tree } => {
+                tree.iter().map(IndexedGeometry::approximate_bytes).sum()
+            }
+            TileIndex::Linear { list } => list.iter().map(IndexedGeometry::approximate_bytes).sum(),
+        }
+    }
+
     pub fn point_query(&self, inner_coords: InnerCoords) -> Vec<&IndexedGeometry<f64>> {
         let point = Point::new(inner_coords.x, inner_coords.y);
         let coordinate: Coord<_> = point.into();
@@ -136,6 +151,33 @@ impl<T> IndexedGeometry<T>
 where
     T: CoordFloat + Bounded + Signed + PartialOrd,
 {
+    /// Memory the geometry holds: its coordinates, its property strings and the map and
+    /// tree entries that carry them.
+    pub fn approximate_bytes(&self) -> usize {
+        const ENTRY_OVERHEAD: usize = 2 * std::mem::size_of::<String>() + 16;
+        const TREE_OVERHEAD: usize = 32;
+        let coordinates = match &self.exact {
+            ExactGeometry::Polygon(polygon) => {
+                polygon.exterior().0.len()
+                    + polygon
+                        .interiors()
+                        .iter()
+                        .map(|ring| ring.0.len())
+                        .sum::<usize>()
+            }
+            ExactGeometry::LineString(line) => line.0.len(),
+        };
+        let properties: usize = self
+            .properties
+            .iter()
+            .map(|(key, value)| key.capacity() + value.capacity() + ENTRY_OVERHEAD)
+            .sum();
+        std::mem::size_of::<Self>()
+            + coordinates * std::mem::size_of::<Coord<T>>()
+            + properties
+            + TREE_OVERHEAD
+    }
+
     fn from_polygon(polygon: Polygon<T>, properties: HashMap<String, String>) -> Option<Self> {
         let (min, max) = bounds_from_points(polygon.exterior().points())?;
 

@@ -142,13 +142,11 @@ impl<T> DrapeCache<T> {
     }
 
     /// Number of tiles holding a texture.
-    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
     /// Number of released textures waiting for reuse.
-    #[cfg(test)]
     pub fn free_len(&self) -> usize {
         self.free.len()
     }

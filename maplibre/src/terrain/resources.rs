@@ -356,6 +356,29 @@ impl TerrainResources {
     }
 
     /// Releases the drape textures of tiles that left the view for reuse.
+    /// Drape textures held for tiles and waiting in the free list.
+    pub fn drape_counts(&self) -> (usize, usize) {
+        (self.drapes.len(), self.drapes.free_len())
+    }
+
+    /// DEM textures resident on the GPU.
+    pub fn dem_texture_count(&self) -> usize {
+        self.dem_textures.len()
+    }
+
+    /// Bytes of drape textures, held and free, and of DEM textures.
+    pub fn texture_bytes(&self) -> (usize, usize) {
+        let (held, free) = self.drape_counts();
+        // Four bytes a texel, and a mip chain adds a third.
+        let drape = (DRAPE_SIZE as usize).pow(2) * 4 * 4 / 3;
+        let dem = self
+            .dem_textures
+            .values()
+            .map(|(texture, _)| (texture.size.width * texture.size.height * 4) as usize)
+            .sum();
+        ((held + free) * drape, dem)
+    }
+
     pub fn retain_drapes(&mut self, keep: &HashSet<WorldTileCoords>) {
         self.drapes.retain(keep);
     }
