@@ -250,7 +250,7 @@ impl Renderer {
         .await?;
 
         let settings = settings.with_float_depth_if_supported(device.features());
-        let surface = Surface::from_image(&device, window, &settings);
+        let surface = Surface::from_image(&device, &adapter, window, &settings);
 
         Ok(Self {
             instance,
@@ -524,6 +524,7 @@ mod tests {
 
         let render_state = RenderResources::new(Surface::from_image(
             &device,
+            &adapter,
             &HeadlessMapWindow {
                 size: PhysicalSize::new(100, 100).expect("invalid headless map size"),
             },

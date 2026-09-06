@@ -209,8 +209,13 @@ impl ViewState {
     }
 
     /// Distances in pixels the fog depth spans: from the camera's distance to sea level, where
-    /// the map center sits, to the far plane, as the GL JS fog matrix takes them.
+    /// the map center sits, to the far plane, as the GL JS fog matrix takes them. An external
+    /// eye's fog is fixed by its height instead, see
+    /// [`eye_fog_depth_range`](Self::eye_fog_depth_range).
     pub fn fog_depth_range(&self) -> (f64, f64) {
+        if let Some(range) = self.eye_fog_depth_range() {
+            return range;
+        }
         let distance = self.camera_to_center_distance();
         let limited_pitch = self
             .camera
@@ -222,6 +227,18 @@ impl ViewState {
             .max(distance + self.center_elevation * self.pixels_per_meter() / limited_pitch.cos());
         let (_, far_z) = self.depth_range(self.center_offset());
         (camera_to_sea_level, far_z)
+    }
+
+    /// How much of the fog shows: GL JS fades it in as the horizon comes into view between 60
+    /// and 70 degrees of pitch, while an external eye's wide frame has the horizon in view at
+    /// almost any pitch, so its fog is always on.
+    pub fn fog_opacity(&self) -> f32 {
+        if self.external_eye.is_some() {
+            return 1.0;
+        }
+        crate::style::sky::SkySpecification::fog_blend_opacity(
+            self.camera.get_pitch().0.to_degrees(),
+        )
     }
 
     /// Near and far clip distances in pixels, following GL JS `_calculateNearFarZIfNeeded`.
@@ -703,10 +720,12 @@ impl ViewState {
 }
 
 mod external;
+mod horizon;
 mod pose;
 
 use external::ExternalEye;
 pub use external::{ExternalAnchor, ExternalView, ExternalViewError};
+pub use horizon::HorizonLine;
 pub use pose::CameraPose;
 
 #[cfg(test)]

@@ -153,7 +153,7 @@ impl ViewState {
     }
 
     /// The external eye's frustum with clip distances in world pixels at the anchor.
-    fn external_frustum(&self) -> Option<EyeFrustum> {
+    pub(super) fn external_frustum(&self) -> Option<EyeFrustum> {
         self.external_eye
             .map(|eye| eye.frustum.scaled(self.anchor_pixels_per_meter(eye.anchor)))
     }
@@ -214,6 +214,25 @@ impl ViewState {
         Some(widened)
     }
 
+    /// Fog distances for an external eye, in world pixels at the anchor: fixed by the eye's
+    /// height above the anchor's ground rather than by where it looks, so the haze on a
+    /// distant ridge does not change as the head turns. The far distance is the geometric horizon of the
+    /// body seen from that height; the fog starts a share of the way there.
+    pub(super) fn eye_fog_depth_range(&self) -> Option<(f64, f64)> {
+        let eye = self.external_eye?;
+        let position = eye.eye_from_local.invert()? * Vector4::new(0.0, 0.0, 0.0, 1.0);
+        let height = (position.z / position.w).max(MIN_FOG_HEIGHT_METERS);
+        let radius = self.body().circumference_meters() / std::f64::consts::TAU;
+        let far = (2.0 * radius * height)
+            .sqrt()
+            .clamp(MIN_FOG_FAR_METERS, MAX_FOG_FAR_METERS);
+        let pixels_per_meter = self.anchor_pixels_per_meter(eye.anchor);
+        Some((
+            far / FOG_FAR_TO_NEAR * pixels_per_meter,
+            far * pixels_per_meter,
+        ))
+    }
+
     /// The external eye as the globe camera takes it, if an external view is in effect.
     pub fn external_globe_eye(&self) -> Option<ExternalGlobeEye> {
         let eye = self.external_eye?;
@@ -260,6 +279,13 @@ impl ViewState {
 
 /// Sine of the pitch below which a view counts as looking straight down.
 const LEVEL_PITCH_THRESHOLD: f64 = 1e-6;
+/// An eye on the ground still sees this far into the haze.
+const MIN_FOG_HEIGHT_METERS: f64 = 100.0;
+/// Bounds on the far fog distance, so the haze neither closes in nor vanishes at odd heights.
+const MIN_FOG_FAR_METERS: f64 = 20_000.0;
+const MAX_FOG_FAR_METERS: f64 = 600_000.0;
+/// The near fog distance is the far one over this.
+const FOG_FAR_TO_NEAR: f64 = 16.0;
 
 /// Where an eye is and which way it faces, in the local frame of an [`ExternalView`].
 #[derive(Clone, Copy, Debug)]

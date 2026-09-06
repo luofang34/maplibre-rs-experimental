@@ -112,6 +112,7 @@ impl WindowHead {
 pub struct BufferedTextureHead {
     texture: wgpu::Texture,
     texture_format: wgpu::TextureFormat,
+    texture_format_features: TextureFormatFeatures,
     output_buffer: wgpu::Buffer,
     buffer_dimensions: BufferDimensions,
 }
@@ -236,7 +237,12 @@ impl Surface {
     }
 
     // TODO: Give better name
-    pub fn from_image<MW>(device: &wgpu::Device, window: &MW, settings: &RendererSettings) -> Self
+    pub fn from_image<MW>(
+        device: &wgpu::Device,
+        adapter: &wgpu::Adapter,
+        window: &MW,
+        settings: &RendererSettings,
+    ) -> Self
     where
         MW: MapWindow,
     {
@@ -276,12 +282,14 @@ impl Surface {
             view_formats: &[format],
         };
         let texture = device.create_texture(&texture_descriptor);
+        let texture_format_features = adapter.get_texture_format_features(format);
 
         Self {
             size,
             head: Head::Headless(Arc::new(BufferedTextureHead {
                 texture,
                 texture_format: format,
+                texture_format_features,
                 output_buffer,
                 buffer_dimensions,
             })),
@@ -378,29 +386,27 @@ impl Surface {
         &mut self.head
     }
 
+    /// Whether the surface's format can be drawn with `msaa` samples; a headless surface
+    /// multisamples like a window would, its texture resolving the samples.
     pub fn is_multisampling_supported(&self, msaa: Msaa) -> bool {
-        match &self.head {
-            Head::Headed(headed) => {
-                let max_sample_count = {
-                    let flags = headed.texture_format_features.flags;
-                    if flags.contains(wgpu::TextureFormatFeatureFlags::MULTISAMPLE_X8) {
-                        8
-                    } else if flags.contains(wgpu::TextureFormatFeatureFlags::MULTISAMPLE_X4) {
-                        4
-                    } else if flags.contains(wgpu::TextureFormatFeatureFlags::MULTISAMPLE_X2) {
-                        2
-                    } else {
-                        1
-                    }
-                };
-                let is_supported = msaa.samples <= max_sample_count;
-                if !is_supported {
-                    log::debug!("Multisampling is not supported on surface");
-                }
-                is_supported
-            }
-            Head::Headless(_) => false, // TODO: support multisampling on headless
+        let flags = match &self.head {
+            Head::Headed(headed) => headed.texture_format_features.flags,
+            Head::Headless(headless) => headless.texture_format_features.flags,
+        };
+        let max_sample_count = if flags.contains(wgpu::TextureFormatFeatureFlags::MULTISAMPLE_X8) {
+            8
+        } else if flags.contains(wgpu::TextureFormatFeatureFlags::MULTISAMPLE_X4) {
+            4
+        } else if flags.contains(wgpu::TextureFormatFeatureFlags::MULTISAMPLE_X2) {
+            2
+        } else {
+            1
+        };
+        let is_supported = msaa.samples <= max_sample_count;
+        if !is_supported {
+            log::debug!("Multisampling is not supported on surface");
         }
+        is_supported
     }
 }
 

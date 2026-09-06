@@ -163,3 +163,31 @@ async fn each_eye_draws_into_its_own_targets() {
     let pose = map.view_state().camera_pose();
     assert!((pose.altitude_meters - 3000.0).abs() < 1e-6, "{pose:?}");
 }
+
+#[tokio::test]
+async fn a_headless_surface_multisamples_like_a_window() {
+    use crate::render::{eventually::Eventually, settings::Msaa};
+
+    let style: Style = serde_json::from_str(r#"{"version": 8, "sources": {}, "layers": []}"#)
+        .expect("an empty style parses");
+    let (kernel, renderer) = create_headless_renderer(SIZE, SIZE, None)
+        .await
+        .expect("a headless renderer");
+    assert!(
+        renderer
+            .state()
+            .surface()
+            .is_multisampling_supported(Msaa { samples: 4 }),
+        "the adapter multisamples the surface format"
+    );
+    let mut map =
+        HeadlessMap::new(style, renderer, kernel, vec![Box::new(RenderPlugin)]).expect("a map");
+    map.run_frame().expect("a frame renders");
+    assert!(
+        matches!(
+            map.map_context.renderer.resources.multisampling_texture,
+            Eventually::Initialized(Some(_))
+        ),
+        "the frame resolves from a multisampled texture"
+    );
+}

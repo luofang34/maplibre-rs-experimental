@@ -24,14 +24,17 @@ use maplibre::io::tile_sources::MAX_OVERZOOMING;
 use maplibre::{
     coords::WorldTileCoords,
     headless::{
-        create_headless_renderer,
+        create_headless_renderer_with_settings,
         map::{HeadlessMap, ProcessedLayers},
         HeadlessPlugin,
     },
     platform::run_multithreaded,
     plugin::Plugin,
     raster::{AvailableRasterLayerData, DefaultRasterTransferables, RasterPlugin},
-    render::RenderPlugin,
+    render::{
+        settings::{Msaa, RendererSettings},
+        RenderPlugin,
+    },
     style::{
         layer::StyleLayer,
         source::{GeoJsonData, Source},
@@ -202,12 +205,20 @@ async fn run_test_inner(test_dir: &Path) -> TestResult {
     }
 
     // ---- Set up headless renderer ----
-    let (kernel, renderer) = match create_headless_renderer(meta.width, meta.height, None).await {
-        Ok(renderer) => renderer,
-        Err(error) => {
-            return TestResult::Error(format!("Cannot create headless renderer: {error}"));
-        }
+    // GL JS draws the expected images without multisampling, so fill and line edges must
+    // stay aliased for the pixel comparison.
+    let settings = RendererSettings {
+        msaa: Msaa { samples: 1 },
+        ..RendererSettings::default()
     };
+    let (kernel, renderer) =
+        match create_headless_renderer_with_settings(meta.width, meta.height, None, settings).await
+        {
+            Ok(renderer) => renderer,
+            Err(error) => {
+                return TestResult::Error(format!("Cannot create headless renderer: {error}"));
+            }
+        };
 
     let has_vector_sources = style
         .sources

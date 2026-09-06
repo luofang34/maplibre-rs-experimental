@@ -433,7 +433,6 @@ fn terrain_fog(style: &Style, view_state: &ViewState) -> TerrainFog {
     };
     let colors = sky.colors_at(view_state.zoom().value());
     let (near, far) = view_state.fog_depth_range();
-    let pitch = view_state.camera().get_pitch().0.to_degrees();
     let globe = style.projection.as_ref().is_some_and(|specification| {
         specification
             .projection_type
@@ -446,7 +445,7 @@ fn terrain_fog(style: &Style, view_state: &ViewState) -> TerrainFog {
         far: far as f32,
         ground_blend: colors.fog_ground_blend,
         horizon_blend: colors.horizon_fog_blend,
-        opacity: crate::style::sky::SkySpecification::fog_blend_opacity(pitch),
+        opacity: view_state.fog_opacity(),
         globe,
     }
 }

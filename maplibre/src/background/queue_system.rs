@@ -77,7 +77,7 @@ pub fn queue_system(
                 color: c,
                 z_index,
                 padding: [0.0; 3],
-                horizon: horizon_line(view_state),
+                horizon: view_state.horizon_line().to_shader(),
                 viewport: [view_state.height() as f32, 0.0, 0.0, 0.0],
             });
 
@@ -137,7 +137,7 @@ pub fn queue_system(
                 color: [0.0; 4],
                 z_index: 0.0,
                 padding: [0.0; 3],
-                horizon: horizon_line(view_state),
+                horizon: view_state.horizon_line().to_shader(),
                 viewport: [view_state.height() as f32, 0.0, 0.0, 0.0],
             });
         }
@@ -232,7 +232,7 @@ fn sky_metadata(
     crate::render::shaders::SkyLayerMetadata {
         sky_color: colors.sky,
         horizon_color: colors.horizon,
-        horizon: horizon_line(view_state),
+        horizon: view_state.horizon_line().to_shader(),
         blend: [
             (f64::from(colors.sky_horizon_blend) * height / 2.0) as f32,
             projection_transition,
@@ -240,18 +240,4 @@ fn sky_metadata(
             0.0,
         ],
     }
-}
-
-/// The horizon on screen: a point in pixels with y up and the unit normal pointing into the
-/// sky, turned with the roll as GL JS `skyUniformValues` computes them.
-fn horizon_line(view_state: &crate::render::view_state::ViewState) -> [f32; 4] {
-    let roll = view_state.camera().get_roll().0;
-    let (width, height) = (view_state.width(), view_state.height());
-    let horizon = view_state.mercator_horizon();
-    [
-        (width / 2.0 - horizon * roll.sin()) as f32,
-        (height / 2.0 + horizon * roll.cos()) as f32,
-        -roll.sin() as f32,
-        roll.cos() as f32,
-    ]
 }
