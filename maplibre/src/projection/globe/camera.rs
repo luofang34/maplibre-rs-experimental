@@ -99,6 +99,12 @@ pub enum GlobeCameraError {
         /// Invalid vertical offset.
         y: f64,
     },
+    /// An external eye sits on or under the surface, where no horizon exists.
+    #[error("the eye is {distance} radii from the globe center, on or below the surface")]
+    EyeBelowSurface {
+        /// Distance of the eye from the globe center in radii.
+        distance: f64,
+    },
     /// The derived projection matrix cannot be inverted.
     #[error("globe view-projection matrix is not invertible")]
     NonInvertibleViewProjection,
@@ -123,6 +129,7 @@ pub struct GlobeCameraState {
     camera_position: Vector3<f64>,
     clipping_plane: Vector4<f64>,
     globe_radius_pixels: f64,
+    camera_to_center_distance: f64,
     near_z: f64,
     far_z: f64,
 }
@@ -163,6 +170,7 @@ impl GlobeCameraState {
             camera_position,
             clipping_plane,
             globe_radius_pixels: radius,
+            camera_to_center_distance,
             near_z: NEAR_Z,
             far_z,
         })
@@ -230,7 +238,7 @@ impl GlobeCameraState {
 
     /// Returns the camera distance to the map center in screen pixels.
     pub fn camera_to_center_distance(&self) -> f64 {
-        camera_to_center_distance(self.options)
+        self.camera_to_center_distance
     }
 
     /// Returns the normalized horizon plane in unit-globe coordinates.
@@ -500,6 +508,10 @@ fn camera_position(options: GlobeCameraOptions, camera_distance: f64, radius: f6
     position = Matrix3::from_angle_x(Deg(-options.center.latitude)) * position;
     Matrix3::from_angle_y(Rad(options.center.longitude.to_radians())) * position
 }
+
+mod external;
+
+pub use external::ExternalGlobeEye;
 
 #[cfg(test)]
 mod tests;

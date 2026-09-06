@@ -1,7 +1,7 @@
 //! GPU-facing projection data shared by tile shaders.
 
 use bytemuck_derive::{Pod, Zeroable};
-use cgmath::Matrix4;
+use cgmath::{Matrix4, Point2};
 use thiserror::Error;
 use wgpu::util::DeviceExt;
 
@@ -378,6 +378,13 @@ pub fn covering_region(
     if !request.zoom_range.serves(request.level) {
         return Ok(None);
     }
+    // A loose covering is a request for tiles; an external eye may ask for it to reach beyond
+    // the frame so tiles are ready where the head turns next.
+    let widened = match padding {
+        ViewStatePadding::Loose => view_state.overscanned(view_state.request_overscan()),
+        ViewStatePadding::Tight => None,
+    };
+    let view_state = widened.as_ref().unwrap_or(view_state);
     let uses_globe = style.projection.as_ref().is_some_and(|specification| {
         specification
             .projection_type
@@ -499,19 +506,27 @@ pub fn globe_camera_for_view(
     let world_size = TILE_SIZE * 2.0_f64.powf(view_state.zoom().value());
     let camera_position = view_state.camera().position();
     let center = mercator_world_to_lat_lon(camera_position.x, camera_position.y, world_size);
-    GlobeCameraState::new(GlobeCameraOptions {
+    let external_eye = view_state.external_globe_eye();
+    let options = GlobeCameraOptions {
         width: view_state.width(),
         height: view_state.height(),
-        field_of_view_degrees: view_state.field_of_view().0.to_degrees(),
+        field_of_view_degrees: external_eye.map_or_else(
+            || view_state.field_of_view().0.to_degrees(),
+            |eye| eye.frustum.vertical_field_of_view().0.to_degrees(),
+        ),
         center,
         world_size,
         bearing_degrees: view_state.camera().get_bearing().0.to_degrees(),
         pitch_degrees: view_state.camera().get_pitch().0.to_degrees(),
-        roll_degrees: 0.0,
-        center_offset: view_state.center_offset(),
-
+        roll_degrees: external_eye.map_or(0.0, |_| view_state.camera().get_roll().0.to_degrees()),
+        center_offset: external_eye
+            .map_or_else(|| view_state.center_offset(), |_| Point2::new(0.0, 0.0)),
         body: view_state.body(),
-    })
+    };
+    match external_eye {
+        Some(eye) => GlobeCameraState::from_external_eye(options, eye),
+        None => GlobeCameraState::new(options),
+    }
     .map_err(|source| ProjectionStateError::GlobeCamera { source })
 }
 

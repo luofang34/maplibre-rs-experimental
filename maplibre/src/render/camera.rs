@@ -324,5 +324,9 @@ impl Perspective {
     }
 }
 
+mod frustum;
+
+pub use frustum::EyeFrustum;
+
 #[cfg(test)]
 mod tests;

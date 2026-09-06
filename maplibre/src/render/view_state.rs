@@ -51,8 +51,11 @@ pub struct ViewState {
     center_elevation_frozen: bool,
     /// The body the map is drawn on; its radius turns metres into pixels.
     body: Body,
-    /// Projection supplied by the host with an external view, used in place of the perspective.
-    external_projection: Option<Matrix4<f64>>,
+    /// The eye a host supplied, which replaces the map's perspective and, on the globe, its
+    /// camera.
+    external_eye: Option<ExternalEye>,
+    /// Factor on the external eye's frustum tangents for tile requests.
+    request_overscan: f64,
 }
 
 impl ViewState {
@@ -83,8 +86,24 @@ impl ViewState {
             min_elevation: 0.0,
             center_elevation_frozen: false,
             body: Body::default(),
-            external_projection: None,
+            external_eye: None,
+            request_overscan: 1.0,
         }
+    }
+
+    /// Sets how far beyond an external eye's frustum tiles are requested, as a factor on its
+    /// tangents; one requests what the frame shows.
+    pub fn set_request_overscan(&mut self, factor: f64) {
+        self.request_overscan = if factor.is_finite() && factor >= 1.0 {
+            factor
+        } else {
+            1.0
+        };
+    }
+
+    /// How far beyond an external eye's frustum tiles are requested.
+    pub fn request_overscan(&self) -> f64 {
+        self.request_overscan
     }
 
     /// The body the map is drawn on.
@@ -289,7 +308,7 @@ impl ViewState {
     #[tracing::instrument(skip_all)]
     pub fn view_projection(&self) -> ViewProjection {
         let camera_matrix = self.camera_matrix();
-        match self.external_projection {
+        match self.external_projection() {
             // The host's projection expects a camera space with y up; the map's camera space
             // has y down and flips the clip space afterwards instead.
             Some(projection) => {
@@ -306,6 +325,9 @@ impl ViewState {
     /// World z is metres above sea level: shift the center elevation to the orbit point, then
     /// scale metres to pixels before the camera transform, as GL JS does.
     fn camera_matrix(&self) -> Matrix4<f64> {
+        if let Some(external) = self.external_camera_matrix() {
+            return external;
+        }
         self.camera.calc_matrix(self.camera_to_center_distance())
             * Matrix4::from_nonuniform_scale(1.0, 1.0, self.pixels_per_meter())
             * Matrix4::from_translation(Vector3::new(0.0, 0.0, -self.center_elevation))
@@ -683,6 +705,7 @@ impl ViewState {
 mod external;
 mod pose;
 
+use external::ExternalEye;
 pub use external::{ExternalAnchor, ExternalView, ExternalViewError};
 pub use pose::CameraPose;
 

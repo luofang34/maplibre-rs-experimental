@@ -69,22 +69,54 @@ impl ViewState {
                 break;
             }
         }
-        let zoom = Zoom::new(
+        let zoom = self.zoom_for_center_distance_units(distance_units);
+        self.set_center_elevation(elevation);
+        self.set_center_and_angles(
+            lat_lon_at_mercator(center),
+            zoom,
+            pose.bearing,
+            pose.pitch,
+            pose.roll,
+        );
+    }
+
+    /// The zoom at which the camera sits `distance_meters` from a center at `center`, the
+    /// definition a pose and an external eye share.
+    pub(super) fn zoom_for_center_distance(&self, distance_meters: f64, center: LatLon) -> Zoom {
+        let meters_per_unit =
+            self.body().circumference_meters() * center.latitude.to_radians().cos();
+        self.zoom_for_center_distance_units(distance_meters / meters_per_unit)
+    }
+
+    /// The zoom at which the camera sits `distance_units` Mercator units from the center.
+    fn zoom_for_center_distance_units(&self, distance_units: f64) -> Zoom {
+        Zoom::new(
             (self.height()
                 / 2.0
                 / (self.field_of_view().0 / 2.0).tan()
                 / distance_units
                 / TILE_SIZE)
                 .log2(),
-        );
+        )
+    }
+
+    /// Moves the map center and the camera angles, leaving the center elevation as it is.
+    pub(super) fn set_center_and_angles(
+        &mut self,
+        center: LatLon,
+        zoom: Zoom,
+        bearing: Deg<f64>,
+        pitch: Deg<f64>,
+        roll: Deg<f64>,
+    ) {
         let world_size = TILE_SIZE * 2f64.powf(zoom.value());
+        let center = mercator_from_lat_lon(center);
         self.update_zoom(zoom);
-        self.set_center_elevation(elevation);
         let camera = self.camera_mut();
         camera.move_to(Point2::new(center.x * world_size, center.y * world_size));
-        camera.set_bearing(pose.bearing);
-        camera.set_pitch(pose.pitch);
-        camera.set_roll(pose.roll);
+        camera.set_bearing(bearing);
+        camera.set_pitch(pitch);
+        camera.set_roll(roll);
     }
 
     /// Where the camera stands and where it looks.

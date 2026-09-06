@@ -4,12 +4,15 @@ use std::time::Duration;
 
 use cgmath::{Deg, Matrix4, Rad};
 
-use super::{apply_frame_input, FrameInput, ViewSource};
+use super::{apply_frame_input, FrameInput, FrameInputError, ViewSource};
 use crate::{
     coords::{LatLon, WorldCoords, Zoom},
+    projection::ProjectionType,
     render::view_state::{CameraPose, ExternalView, ExternalViewError, ViewState},
     window::PhysicalSize,
 };
+
+const MERCATOR: ProjectionType = ProjectionType::Mercator;
 
 fn view_state(zoom: f64, position: LatLon) -> ViewState {
     let zoom = Zoom::new(zoom);
@@ -52,7 +55,8 @@ fn a_map_view_frame_renders_what_the_handlers_set() {
     let mut view_state = handled_view_state();
     let direct = view_state.view_projection().0;
 
-    apply_frame_input(&FrameInput::default(), &mut view_state).expect("a map view always applies");
+    apply_frame_input(&FrameInput::default(), &mut view_state, &MERCATOR)
+        .expect("a map view always applies");
 
     assert_eq!(view_state.view_projection().0, direct);
 }
@@ -64,14 +68,16 @@ fn an_external_frame_drives_the_view_state_and_a_map_view_frame_releases_it() {
     let external = FrameInput {
         timestamp: Duration::from_millis(16),
         view: ViewSource::External(original.external_view()),
+        ..FrameInput::default()
     };
 
-    apply_frame_input(&external, &mut driven).expect("the map's own view applies");
+    apply_frame_input(&external, &mut driven, &MERCATOR).expect("the map's own view applies");
 
     assert_matrices_close(driven.view_projection().0, original.view_projection().0);
     assert!(driven.external_projection().is_some());
 
-    apply_frame_input(&FrameInput::default(), &mut driven).expect("a map view always applies");
+    apply_frame_input(&FrameInput::default(), &mut driven, &MERCATOR)
+        .expect("a map view always applies");
 
     assert!(driven.external_projection().is_none());
     let pose = driven.camera_pose();
@@ -91,11 +97,12 @@ fn a_rejected_external_view_leaves_the_view_state_alone() {
             view: Matrix4::from_scale(0.0),
             ..view_state.external_view()
         }),
+        ..FrameInput::default()
     };
 
     assert_eq!(
-        apply_frame_input(&broken, &mut view_state),
-        Err(ExternalViewError::SingularView)
+        apply_frame_input(&broken, &mut view_state, &MERCATOR),
+        Err(FrameInputError::External(ExternalViewError::SingularView))
     );
     assert_eq!(view_state.view_projection().0, direct);
 }
