@@ -587,3 +587,41 @@ fn an_eyes_fog_stays_put_as_the_gaze_moves() {
     // The map's own camera keeps the GL JS pitch ramp.
     assert_eq!(posed_view_state().fog_opacity(), 0.0);
 }
+
+#[test]
+fn the_surround_waits_until_the_eyes_zoom_settles() {
+    let mut injected = view_state(4.0, LatLon::new(0.0, 0.0));
+    injected.set_center_elevation(650.0);
+    let resting = posed_view_state().external_view();
+    injected
+        .set_external_view(resting, &MERCATOR)
+        .expect("invertible");
+    assert!(
+        injected.surround(2.0, &MERCATOR).is_some(),
+        "a first eye counts as settled"
+    );
+    injected
+        .set_external_view(resting, &MERCATOR)
+        .expect("invertible");
+    assert!(
+        injected.surround(2.0, &MERCATOR).is_some(),
+        "an eye that stayed put is settled"
+    );
+
+    // The eye climbed a zoom level within a frame, as on a flight.
+    let climbed = view_state(3.0, LatLon::new(0.0, 0.0)).external_view();
+    injected
+        .set_external_view(climbed, &MERCATOR)
+        .expect("invertible");
+    assert!(
+        injected.surround(2.0, &MERCATOR).is_none(),
+        "no surround while the zoom moves"
+    );
+    injected
+        .set_external_view(climbed, &MERCATOR)
+        .expect("invertible");
+    assert!(
+        injected.surround(2.0, &MERCATOR).is_some(),
+        "the surround returns once the eye rests"
+    );
+}

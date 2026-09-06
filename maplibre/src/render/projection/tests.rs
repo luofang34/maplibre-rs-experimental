@@ -258,3 +258,97 @@ fn the_projection_uniform_carries_the_body_radius() {
     assert_eq!(earth.radius_meters, 6_371_008.8_f32);
     assert_eq!(moon.radius_meters, 1_737_400.0);
 }
+
+/// Whether `tile`, at its own level, contains `point_tile` at a finer or equal level.
+fn tile_covers(
+    tile: crate::coords::WorldTileCoords,
+    point_tile: crate::coords::WorldTileCoords,
+) -> bool {
+    let (z, point_z) = (u8::from(tile.z), u8::from(point_tile.z));
+    if z > point_z {
+        return false;
+    }
+    let shift = point_z - z;
+    tile.x == point_tile.x >> shift && tile.y == point_tile.y >> shift
+}
+
+#[test]
+fn an_eyes_requests_cover_the_ground_behind_it() {
+    use crate::{
+        coords::{LatLon, WorldCoords, Zoom},
+        render::view_state::{CameraPose, ViewState, ViewStatePadding},
+    };
+
+    let style: crate::style::Style = serde_json::from_str(
+        r#"{"version":8,"sources":{"dem":{"type":"raster-dem","tiles":["https://dem.example/{z}/{x}/{y}.png"],"tileSize":256,"maxzoom":12,"encoding":"terrarium"}},"layers":[],"terrain":{"source":"dem","exaggeration":1}}"#,
+    )
+    .expect("a terrain style parses");
+    let zoom = Zoom::new(13.0);
+    let eye_at = LatLon::new(47.26, 11.39);
+    let mut own = ViewState::new(
+        crate::window::PhysicalSize::new(800, 600).expect("a viewport"),
+        WorldCoords::from_lat_lon(eye_at, zoom),
+        zoom,
+        cgmath::Deg(0.0),
+        cgmath::Rad(0.6435011087932844),
+    );
+    own.set_max_pitch(cgmath::Deg(180.0));
+    // Looking north, sixty degrees down from level, two kilometres up.
+    own.set_camera_pose(CameraPose {
+        position: eye_at,
+        altitude_meters: 2000.0,
+        bearing: cgmath::Deg(0.0),
+        pitch: cgmath::Deg(60.0),
+        roll: cgmath::Deg(0.0),
+    });
+    let mut eyed = ViewState::new(
+        crate::window::PhysicalSize::new(800, 600).expect("a viewport"),
+        WorldCoords::from_lat_lon(eye_at, zoom),
+        zoom,
+        cgmath::Deg(0.0),
+        cgmath::Rad(0.6435011087932844),
+    );
+    eyed.set_external_view(
+        own.external_view(),
+        &crate::projection::ProjectionType::Mercator,
+    )
+    .expect("the eye is accepted");
+    let level = eyed.zoom().zoom_level(crate::coords::TILE_SIZE);
+    let world = crate::tcs::world::World::default();
+    let region = |padding| {
+        super::view_region_for_projection(&style, &eyed, &world, level, padding)
+            .expect("the covering succeeds")
+            .expect("a frustum covering is explicit")
+            .iter()
+            .collect::<Vec<_>>()
+    };
+
+    // Three kilometres south of the eye, behind its back.
+    let behind = LatLon::new(eye_at.latitude - 0.027, eye_at.longitude);
+    let behind_tile = WorldCoords::from_lat_lon(behind, zoom).into_world_tile(level, zoom);
+    let drawn = region(ViewStatePadding::Tight);
+    let requested = region(ViewStatePadding::Loose);
+    assert!(
+        !drawn.iter().any(|tile| tile_covers(*tile, behind_tile)),
+        "the frame does not show what is behind the eye"
+    );
+    assert!(
+        requested.iter().any(|tile| tile_covers(*tile, behind_tile)),
+        "the requests reach behind the eye: {} tiles, none covers {behind_tile}",
+        requested.len()
+    );
+    assert!(
+        requested.len() <= 1024,
+        "the surround stays within the request cap: {}",
+        requested.len()
+    );
+    // The requests hold everything the frame draws.
+    for tile in &drawn {
+        assert!(
+            requested
+                .iter()
+                .any(|candidate| tile_covers(*candidate, *tile)),
+            "{tile} is drawn but not requested"
+        );
+    }
+}

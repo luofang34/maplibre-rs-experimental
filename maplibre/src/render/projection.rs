@@ -1,5 +1,7 @@
 //! GPU-facing projection data shared by tile shaders.
 
+use std::collections::HashSet;
+
 use bytemuck_derive::{Pod, Zeroable};
 use cgmath::{Matrix4, Point2};
 use thiserror::Error;
@@ -27,6 +29,7 @@ use crate::{
             compose_projection_data, ProjectionDataParams, ProjectionMatrices,
             RendererProjectionData,
         },
+        ProjectionType,
     },
     render::{
         render_phase::ProjectionBinding,
@@ -367,6 +370,15 @@ pub fn raster_source_regions(
     Ok(regions)
 }
 
+const MERCATOR: ProjectionType = ProjectionType::Mercator;
+/// How far an eye's surround covering reaches to every side, as a multiple of its height:
+/// the ground a head turn reveals nearby. Farther ground comes as coarse tiles the frame
+/// shares between directions.
+const SURROUND_REACH: f64 = 2.0;
+/// Tiles a request may hold once the surround is added to what the eye sees; a flight
+/// through several zoom levels lands every level's request, so each stays small.
+const SURROUND_MAX_TILES: usize = 128;
+
 /// Selects the tiles of a request under the projection declared by the current style.
 pub fn covering_region(
     style: &Style,
@@ -379,19 +391,32 @@ pub fn covering_region(
         return Ok(None);
     }
     // A loose covering is a request for tiles; an external eye may ask for it to reach beyond
-    // the frame so tiles are ready where the head turns next.
+    // the frame so tiles are ready where the head turns next, once the eye has settled.
     let widened = match padding {
-        ViewStatePadding::Loose => view_state.overscanned(view_state.request_overscan()),
-        ViewStatePadding::Tight => None,
+        ViewStatePadding::Loose if view_state.eye_settled() => {
+            view_state.overscanned(view_state.request_overscan())
+        }
+        ViewStatePadding::Loose | ViewStatePadding::Tight => None,
     };
     let view_state = widened.as_ref().unwrap_or(view_state);
-    let uses_globe = style.projection.as_ref().is_some_and(|specification| {
-        specification
-            .projection_type
-            .uses_globe_rendering(view_state.zoom().value())
-    });
+    let projection_type = style
+        .projection
+        .as_ref()
+        .map_or(&MERCATOR, |specification| &specification.projection_type);
+    let uses_globe = projection_type.uses_globe_rendering(view_state.zoom().value());
     if !uses_globe {
-        return mercator_view_region(style, view_state, world, request, padding);
+        let region = mercator_view_region(style, view_state, world, request, padding)?;
+        // A head turns faster than tiles arrive, so an eye's requests also cover what
+        // surrounds it on the ground.
+        let surround = match padding {
+            ViewStatePadding::Loose => view_state.surround(SURROUND_REACH, projection_type),
+            ViewStatePadding::Tight => None,
+        };
+        let Some(surround) = surround else {
+            return Ok(region);
+        };
+        let around = mercator_view_region(style, &surround, world, request, padding)?;
+        return Ok(union_regions(region, around, request.level));
     }
     let visible_level = request.level;
     let camera = globe_camera_for_view(view_state)?;
@@ -415,6 +440,26 @@ pub fn covering_region(
     let tiles = covering_tiles(&camera, options, elevation.as_ref())
         .map_err(|source| ProjectionStateError::GlobeCovering { source })?;
     Ok(Some(ViewRegion::from_tiles(tiles, visible_level, 512)))
+}
+
+/// The tiles of both regions, those of `primary` first, as one region at `level`.
+fn union_regions(
+    primary: Option<ViewRegion>,
+    secondary: Option<ViewRegion>,
+    level: ZoomLevel,
+) -> Option<ViewRegion> {
+    match (primary, secondary) {
+        (None, other) | (other, None) => other,
+        (Some(primary), Some(secondary)) => {
+            let mut seen = HashSet::new();
+            let tiles: Vec<WorldTileCoords> = primary
+                .iter()
+                .chain(secondary.iter())
+                .filter(|coords| seen.insert(*coords))
+                .collect();
+            Some(ViewRegion::from_tiles(tiles, level, SURROUND_MAX_TILES))
+        }
+    }
 }
 
 /// Culling bounds per tile: the loaded DEM's range where terrain has one, else `fallback`,

@@ -79,7 +79,15 @@ pub(super) struct ExternalEye {
     frustum: EyeFrustum,
     /// The eye in unit-sphere coordinates, for the globe camera.
     sphere: SphereEye,
+    /// The map zoom the eye implies.
+    zoom: f64,
+    /// How much that zoom moved since the previous eye: a flight or a hand zoom in progress.
+    zoom_rate: f64,
 }
+
+/// Zoom change between consecutive eyes below which the eye counts as settled. A six second
+/// flight across seven zoom levels moves about 0.013 per frame at ninety frames a second.
+const SETTLED_ZOOM_RATE: f64 = 0.002;
 
 impl ViewState {
     /// Drives the map from a host-supplied eye.
@@ -131,14 +139,33 @@ impl ViewState {
         } else {
             self.set_camera_pose(flat_pose_of(&frame, external.anchor, body));
         }
+        let zoom = self.zoom().value();
+        let zoom_rate = self
+            .external_eye
+            .map_or(0.0, |previous| (zoom - previous.zoom).abs());
         self.external_eye = Some(ExternalEye {
             anchor: external.anchor,
             eye_from_local: external.view,
             scale: frame.scale,
             frustum: external.frustum.scaled(1.0 / frame.scale),
             sphere,
+            zoom,
+            zoom_rate,
         });
         Ok(())
+    }
+
+    /// Whether a host-supplied eye drives the map.
+    pub fn has_external_view(&self) -> bool {
+        self.external_eye.is_some()
+    }
+
+    /// Whether the eye's zoom has come to rest; the map's own camera always counts as
+    /// settled. While the zoom moves, every level passed would get requests for ground that
+    /// is never looked at.
+    pub fn eye_settled(&self) -> bool {
+        self.external_eye
+            .is_none_or(|eye| eye.zoom_rate <= SETTLED_ZOOM_RATE)
     }
 
     /// Returns to the map's own perspective; the pose the external view left stays.
@@ -231,6 +258,41 @@ impl ViewState {
             far / FOG_FAR_TO_NEAR * pixels_per_meter,
             far * pixels_per_meter,
         ))
+    }
+
+    /// The view state of an eye at the same place looking straight down over a frame that
+    /// reaches `reach` times its height to every side; `None` without an external eye. A tile
+    /// covering taken from it holds what surrounds the eye, so a turn of the head finds the
+    /// tiles loaded.
+    pub fn surround(&self, reach: f64, projection: &ProjectionType) -> Option<Self> {
+        let eye = self.external_eye?;
+        if !self.eye_settled() {
+            return None;
+        }
+        let local_from_eye = eye.eye_from_local.invert()?;
+        let position = local_from_eye * Vector4::new(0.0, 0.0, 0.0, 1.0);
+        let position = position.truncate() / position.w;
+        // Local east, north and up map onto the eye's right, up and back: the eye faces down.
+        let view = Matrix4::from_scale(eye.scale) * Matrix4::from_translation(-position);
+        let frustum = EyeFrustum {
+            left: reach,
+            right: reach,
+            top: reach,
+            bottom: reach,
+            ..eye.frustum.scaled(eye.scale)
+        };
+        let mut below = self.clone();
+        below
+            .set_external_view(
+                ExternalView {
+                    anchor: eye.anchor,
+                    view,
+                    frustum,
+                },
+                projection,
+            )
+            .ok()?;
+        Some(below)
     }
 
     /// The external eye as the globe camera takes it, if an external view is in effect.

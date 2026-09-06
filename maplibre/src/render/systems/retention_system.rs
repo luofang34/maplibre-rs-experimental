@@ -4,17 +4,24 @@
 //! covering needs plus a cache of `MAX_TILE_CACHE_ZOOM_LEVELS` times the tiles in view and
 //! unloads the rest; this system does the same once per frame in the Cleanup stage. A tile
 //! whose worker request is still in flight is never evicted, so its result cannot land on a
-//! re-requested tile and duplicate its layers.
+//! re-requested tile and duplicate its layers. Tiles the frame requests but does not draw,
+//! such as those around an external eye, count as in use too: evicting one would only have
+//! the request systems fetch it again on the next frame. Only drawn tiles size the cache,
+//! as GL JS sizes it from the viewport; a wide request would otherwise keep every tile a
+//! flight passes resident.
 
 use std::collections::{HashMap, HashSet};
 
 use crate::{
     context::MapContext,
     coords::WorldTileCoords,
+    io::tile_sources::{clamp_to_max_zoom, source_max_zoom, TileKind},
     raster::{resource::RasterResources, RasterLayersDataComponent},
     render::{
         eventually::{Eventually, Eventually::Initialized},
-        tile_view_pattern::WgpuTileViewPattern,
+        projection::view_region_for_projection,
+        tile_view_pattern::{WgpuTileViewPattern, DEFAULT_TILE_SIZE},
+        view_state::{ViewState, ViewStatePadding},
     },
     style::Style,
     tcs::{system::SystemResult, tiles::Tiles, world::World},
@@ -35,9 +42,17 @@ pub struct TileRetention {
 }
 
 /// Drops the least recently used tiles beyond the cache budget and releases their GPU data.
-pub fn retention_system(MapContext { world, style, .. }: &mut MapContext) -> SystemResult {
-    let in_use = tiles_in_use(world, style);
-    let evicted = evict_stale_tiles(world, &in_use);
+pub fn retention_system(
+    MapContext {
+        world,
+        style,
+        view_state,
+        ..
+    }: &mut MapContext,
+) -> SystemResult {
+    let drawn = drawn_tiles(world).len();
+    let in_use = tiles_in_use(world, style, view_state);
+    let evicted = evict_stale_tiles(world, &in_use, drawn);
     if !evicted.is_empty() {
         tracing::debug!(count = evicted.len(), "evicted tiles that left the view");
         drop_gpu_data(world, &evicted);
@@ -45,18 +60,46 @@ pub fn retention_system(MapContext { world, style, .. }: &mut MapContext) -> Sys
     Ok(())
 }
 
-/// Every tile the current frame draws from, with the DEM tiles and ancestors terrain reads.
-fn tiles_in_use(world: &World, style: &Style) -> HashSet<WorldTileCoords> {
-    let mut in_use = HashSet::new();
-    let Some(Initialized(pattern)) = world.resources.get::<Eventually<WgpuTileViewPattern>>()
-    else {
-        return in_use;
-    };
-    for view_tile in pattern.iter() {
-        in_use.insert(view_tile.coords());
-        view_tile.render(|shape| {
-            in_use.insert(shape.coords());
-        });
+/// The tiles the frame draws from, with the tiles whose shapes stand in for them.
+pub(crate) fn drawn_tiles(world: &World) -> HashSet<WorldTileCoords> {
+    let mut drawn = HashSet::new();
+    if let Some(Initialized(pattern)) = world.resources.get::<Eventually<WgpuTileViewPattern>>() {
+        for view_tile in pattern.iter() {
+            drawn.insert(view_tile.coords());
+            view_tile.render(|shape| {
+                drawn.insert(shape.coords());
+            });
+        }
+    }
+    drawn
+}
+
+/// Every tile the current frame draws from or requests, with the DEM tiles and ancestors
+/// terrain reads.
+pub(crate) fn tiles_in_use(
+    world: &World,
+    style: &Style,
+    view_state: &ViewState,
+) -> HashSet<WorldTileCoords> {
+    let mut in_use = drawn_tiles(world);
+    match view_region_for_projection(
+        style,
+        view_state,
+        world,
+        view_state.zoom().zoom_level(DEFAULT_TILE_SIZE),
+        ViewStatePadding::Loose,
+    ) {
+        Ok(Some(requested)) => {
+            // The request systems fetch the ancestor at the source's maximum zoom in place of
+            // a finer tile, so that is the tile to keep.
+            let max_zoom = source_max_zoom(style, TileKind::Vector);
+            for coords in requested.iter() {
+                in_use.insert(coords);
+                in_use.insert(clamp_to_max_zoom(coords, max_zoom));
+            }
+        }
+        Ok(None) => {}
+        Err(error) => tracing::warn!(%error, "cannot select the requested tiles to keep"),
     }
     if let Some(dem) = dem_source(style) {
         let view: Vec<WorldTileCoords> = in_use.iter().copied().collect();
@@ -77,10 +120,12 @@ fn tiles_in_use(world: &World, style: &Style) -> HashSet<WorldTileCoords> {
     in_use
 }
 
-/// Removes the least recently used settled tiles beyond the cache budget and returns them.
+/// Removes the least recently used settled tiles beyond the cache budget and returns them;
+/// the budget follows `view_tiles`, the tiles the frame draws.
 pub(crate) fn evict_stale_tiles(
     world: &mut World,
     in_use: &HashSet<WorldTileCoords>,
+    view_tiles: usize,
 ) -> Vec<WorldTileCoords> {
     let World { resources, tiles } = world;
     let retention = resources.get_or_init_mut::<TileRetention>();
@@ -102,7 +147,7 @@ pub(crate) fn evict_stale_tiles(
             )
         })
         .collect();
-    let budget = (in_use.len() * CACHE_TILES_PER_VIEW_TILE).max(MIN_CACHE_TILES);
+    let budget = (view_tiles * CACHE_TILES_PER_VIEW_TILE).max(MIN_CACHE_TILES);
     if candidates.len() <= budget {
         return Vec::new();
     }
