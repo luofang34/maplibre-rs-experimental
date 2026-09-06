@@ -2,6 +2,7 @@
 //! buffers or textures simpler.
 
 pub use buffer::*;
+pub use mipmap::*;
 pub use pipeline::*;
 pub use shader::*;
 pub use surface::*;
@@ -10,6 +11,7 @@ pub use tile_pipeline::*;
 pub use tracked_render_pass::*;
 
 mod buffer;
+mod mipmap;
 mod pipeline;
 mod shader;
 mod surface;

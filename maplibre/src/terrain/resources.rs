@@ -10,10 +10,13 @@ use wgpu::util::DeviceExt;
 
 use crate::{
     coords::WorldTileCoords,
-    render::{resource::Texture, settings::Msaa},
+    render::{
+        resource::{MipmapGenerator, Texture},
+        settings::Msaa,
+    },
     terrain::{
         dem::DemTile,
-        drape_cache::DrapeCache,
+        drape_cache::{DrapeCache, DrapeState},
         mesh::{create_terrain_mesh, TERRAIN_MESH_SIZE},
     },
 };
@@ -98,6 +101,7 @@ pub struct DrapeScratch {
 pub struct TerrainResources {
     pipeline: wgpu::RenderPipeline,
     sampler: wgpu::Sampler,
+    mipmaps: MipmapGenerator,
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     index_count: u32,
@@ -189,8 +193,12 @@ impl TerrainResources {
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
             mipmap_filter: wgpu::FilterMode::Linear,
+            // Drapes are seen at grazing angles at the horizon; anisotropy keeps their
+            // detail along the view direction while the mip levels stop the shimmer.
+            anisotropy_clamp: 16,
             ..Default::default()
         });
+        let mipmaps = MipmapGenerator::new(device, color_format);
         // A fresh texture reads as zero, which decodes to sea level with a zero unpack vector.
         let empty_dem = Texture::new(
             Some("empty DEM"),
@@ -204,6 +212,7 @@ impl TerrainResources {
         Self {
             pipeline,
             sampler,
+            mipmaps,
             vertex_buffer,
             index_buffer,
             index_count: mesh.indices.len() as u32,
@@ -311,25 +320,39 @@ impl TerrainResources {
             .map_or(&self.empty_dem, |(texture, _)| texture)
     }
 
-    /// Gives a view tile a drape texture and reports whether it must be redrawn this frame.
+    /// Gives a view tile a drape texture and reports what it holds.
     pub fn acquire_drape(
         &mut self,
         device: &wgpu::Device,
         coords: WorldTileCoords,
         fingerprint: u64,
-    ) -> bool {
+    ) -> DrapeState {
         let format = self.color_format;
         self.drapes.acquire(coords, fingerprint, || {
-            Texture::new(
+            Texture::new_mipmapped(
                 Some("drape texture"),
                 device,
                 format,
                 DRAPE_SIZE,
                 DRAPE_SIZE,
-                Msaa { samples: 1 },
                 wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             )
         })
+    }
+
+    /// Leaves a drape acquired this frame undrawn, to be drawn on the next.
+    pub fn defer_drape(&mut self, coords: WorldTileCoords) {
+        self.drapes.defer(coords);
+    }
+
+    /// Fills the mip levels of a drape texture after its layers were drawn into it.
+    pub fn generate_drape_mipmaps(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        texture: &Texture,
+    ) {
+        self.mipmaps.generate(device, encoder, &texture.texture);
     }
 
     /// Releases the drape textures of tiles that left the view for reuse.

@@ -46,14 +46,22 @@ impl Node for DrapePassNode {
                 load: wgpu::LoadOp::Clear(target.clear_color),
                 store: StoreOp::Store,
             };
+            // The layers are drawn into the first level alone; the sampled view spans every
+            // level, which an attachment may not.
+            let top_level = texture.texture.create_view(&wgpu::TextureViewDescriptor {
+                label: Some("drape top level"),
+                base_mip_level: 0,
+                mip_level_count: Some(1),
+                ..Default::default()
+            });
             let color_attachment = match &scratch.color {
                 Some(multisampled) => wgpu::RenderPassColorAttachment {
                     view: &multisampled.view,
-                    resolve_target: Some(&texture.view),
+                    resolve_target: Some(&top_level),
                     ops,
                 },
                 None => wgpu::RenderPassColorAttachment {
-                    view: &texture.view,
+                    view: &top_level,
                     resolve_target: None,
                     ops,
                 },
@@ -78,13 +86,20 @@ impl Node for DrapePassNode {
                         timestamp_writes: None,
                         occlusion_query_set: None,
                     });
-            let mut tracked_pass = TrackedRenderPass::new(pass);
-            for mask in &target.masks {
-                mask.draw_function.draw(&mut tracked_pass, world, mask);
+            {
+                let mut tracked_pass = TrackedRenderPass::new(pass);
+                for mask in &target.masks {
+                    mask.draw_function.draw(&mut tracked_pass, world, mask);
+                }
+                for layer in &target.layers {
+                    layer.draw_function.draw(&mut tracked_pass, world, layer);
+                }
             }
-            for layer in &target.layers {
-                layer.draw_function.draw(&mut tracked_pass, world, layer);
-            }
+            terrain.generate_drape_mipmaps(
+                render_context.device,
+                &mut render_context.command_encoder,
+                texture,
+            );
         }
         Ok(())
     }

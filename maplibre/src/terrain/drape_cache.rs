@@ -70,20 +70,32 @@ impl<T> Default for DrapeCache<T> {
     }
 }
 
+/// What a tile's texture holds when it is acquired for a frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DrapeState {
+    /// The content of the same sources; nothing to draw.
+    Unchanged,
+    /// Older content of the tile, to be drawn again.
+    Changed,
+    /// Whatever the texture held before, another tile's content or nothing; to be drawn
+    /// before it shows.
+    New,
+}
+
 impl<T> DrapeCache<T> {
-    /// Ensures `coords` has a texture and reports whether it must be drawn this frame: a
-    /// tile with an unchanged fingerprint keeps its content.
+    /// Ensures `coords` has a texture and reports what it holds: a tile with an unchanged
+    /// fingerprint keeps its content.
     pub fn acquire(
         &mut self,
         coords: WorldTileCoords,
         fingerprint: u64,
         create: impl FnOnce() -> T,
-    ) -> bool {
+    ) -> DrapeState {
         match self.entries.get_mut(&coords) {
-            Some(entry) if entry.fingerprint == fingerprint => false,
+            Some(entry) if entry.fingerprint == fingerprint => DrapeState::Unchanged,
             Some(entry) => {
                 entry.fingerprint = fingerprint;
-                true
+                DrapeState::Changed
             }
             None => {
                 let texture = self.free.pop().unwrap_or_else(create);
@@ -94,8 +106,16 @@ impl<T> DrapeCache<T> {
                         fingerprint,
                     },
                 );
-                true
+                DrapeState::New
             }
+        }
+    }
+
+    /// Marks a tile acquired this frame as not drawn after all, so the next frame acquires
+    /// it as changed again.
+    pub fn defer(&mut self, coords: WorldTileCoords) {
+        if let Some(entry) = self.entries.get_mut(&coords) {
+            entry.fingerprint = entry.fingerprint.wrapping_add(1);
         }
     }
 

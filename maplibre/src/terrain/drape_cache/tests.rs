@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use super::{fingerprint, DrapeCache, SourceRevisions};
+use super::{fingerprint, DrapeCache, DrapeState, SourceRevisions};
 use crate::{
     coords::{WorldTileCoords, ZoomLevel},
     terrain::drape_targets::{ShapeSpec, TargetSpec, VectorLayerSpec},
@@ -47,8 +47,14 @@ fn cache_hit_reuses_the_texture_and_skips_rendering() {
     let mut cache = DrapeCache::<u32>::default();
     let mut created = 0;
 
-    assert!(cache.acquire(tile(1, 1, 3), 7, counting_create(&mut created)));
-    assert!(!cache.acquire(tile(1, 1, 3), 7, counting_create(&mut created)));
+    assert_eq!(
+        cache.acquire(tile(1, 1, 3), 7, counting_create(&mut created)),
+        DrapeState::New
+    );
+    assert_eq!(
+        cache.acquire(tile(1, 1, 3), 7, counting_create(&mut created)),
+        DrapeState::Unchanged
+    );
 
     assert_eq!(created, 1);
     assert_eq!(cache.get(tile(1, 1, 3)), Some(&1));
@@ -60,7 +66,10 @@ fn a_changed_fingerprint_redraws_into_the_same_texture() {
     let mut created = 0;
     cache.acquire(tile(1, 1, 3), 7, counting_create(&mut created));
 
-    assert!(cache.acquire(tile(1, 1, 3), 8, counting_create(&mut created)));
+    assert_eq!(
+        cache.acquire(tile(1, 1, 3), 8, counting_create(&mut created)),
+        DrapeState::Changed
+    );
 
     assert_eq!(created, 1, "no new texture");
     assert_eq!(cache.get(tile(1, 1, 3)), Some(&1));
@@ -78,7 +87,10 @@ fn tiles_leaving_the_view_hand_their_textures_to_new_tiles() {
     assert_eq!(cache.free_len(), 1);
     assert_eq!(cache.get(tile(1, 1, 3)), None);
 
-    assert!(cache.acquire(tile(3, 1, 3), 3, counting_create(&mut created)));
+    assert_eq!(
+        cache.acquire(tile(3, 1, 3), 3, counting_create(&mut created)),
+        DrapeState::New
+    );
     assert_eq!(created, 2, "the released texture is reused");
     assert_eq!(cache.get(tile(3, 1, 3)), Some(&1));
     assert_eq!(cache.free_len(), 0);
@@ -121,4 +133,20 @@ fn fingerprint_follows_sources_layers_and_revisions_but_not_shape_order() {
         ),
         base
     );
+}
+
+#[test]
+fn a_deferred_tile_is_acquired_as_changed_on_the_next_frame() {
+    let mut cache: DrapeCache<u32> = DrapeCache::default();
+    let coords = WorldTileCoords {
+        x: 1,
+        y: 2,
+        z: crate::coords::ZoomLevel::new(3),
+    };
+    assert_eq!(cache.acquire(coords, 7, || 0), DrapeState::New);
+    assert_eq!(cache.acquire(coords, 7, || 0), DrapeState::Unchanged);
+    cache.defer(coords);
+    assert_eq!(cache.acquire(coords, 7, || 0), DrapeState::Changed);
+    assert_eq!(cache.acquire(coords, 7, || 0), DrapeState::Unchanged);
+    assert_eq!(cache.acquire(coords, 8, || 0), DrapeState::Changed);
 }

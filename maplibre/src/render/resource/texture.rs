@@ -103,6 +103,40 @@ impl Texture {
             view: TextureView::TextureView(view),
         }
     }
+
+    /// A single-sample texture with a full mip chain, its view spanning every level, for
+    /// textures sampled far smaller than they are drawn. The levels below the first are
+    /// filled by a [`MipmapGenerator`](super::MipmapGenerator).
+    pub fn new_mipmapped(
+        label: wgpu::Label,
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        width: u32,
+        height: u32,
+        usage: wgpu::TextureUsages,
+    ) -> Texture {
+        let size = wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        };
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label,
+            size,
+            mip_level_count: super::mip_level_count(width, height),
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage,
+            view_formats: &[format],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        Self {
+            size,
+            texture,
+            view: TextureView::TextureView(view),
+        }
+    }
 }
 
 impl HasChanged for Texture {

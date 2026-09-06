@@ -27,7 +27,7 @@ use crate::{
         world::World,
     },
     terrain::{
-        drape_cache::{fingerprint, SourceRevisions},
+        drape_cache::{fingerprint, DrapeState, SourceRevisions},
         drape_targets::{collect_layer_specs, is_drapeable, select_targets, TargetSpec},
         request_system::dem_tile_coords,
         resources::TerrainFog,
@@ -46,6 +46,14 @@ use crate::{
 
 /// Divisor of the tile circumference giving the skirt drop, as in GL JS `getSkirtLength`.
 const SKIRT_DIVISOR: f64 = 5.0;
+/// Drape textures drawn in one frame. Every level of a drape's mip chain is a render pass,
+/// and the Metal backend closes a command buffer per pass that stays open until the frame is
+/// submitted, so a burst of arriving tiles must not open more than the queue holds; it also
+/// keeps the frame's GPU time bounded while the rest wait a frame.
+const MAX_DRAPES_PER_FRAME: usize = 24;
+/// Drape textures drawn per frame while a host's eye drives the map. A flight lands hundreds
+/// of tiles within a few frames, and a display's frame budget holds only a few drapes.
+const EYE_DRAPES_PER_FRAME: usize = 8;
 
 /// Metadata slots of the shapes of one target, `None` where a shape gets no slot.
 type TargetSlots = Vec<Option<usize>>;
@@ -94,8 +102,9 @@ pub fn queue_system(
         _ => return Err(SystemError::Dependencies),
     };
 
-    // Textures whose fingerprint is unchanged keep their content; only the rest are redrawn.
-    let redraw: Vec<bool> = {
+    // Textures whose fingerprint is unchanged keep their content; only the rest are redrawn,
+    // and only so many per frame.
+    let (redraw, hidden): (Vec<bool>, Vec<bool>) = {
         let Some(Initialized(terrain)) = world.resources.get_mut::<Eventually<TerrainResources>>()
         else {
             return Err(SystemError::Dependencies);
@@ -103,7 +112,7 @@ pub fn queue_system(
         terrain.ensure_scratch(device);
         let keep: HashSet<WorldTileCoords> = specs.iter().map(|spec| spec.coords).collect();
         terrain.retain_drapes(&keep);
-        specs
+        let states: Vec<DrapeState> = specs
             .iter()
             .map(|spec| {
                 terrain.acquire_drape(
@@ -112,7 +121,20 @@ pub fn queue_system(
                     fingerprint(spec, revisions, clear_color),
                 )
             })
-            .collect()
+            .collect();
+        let budget = if view_state.has_external_view() {
+            EYE_DRAPES_PER_FRAME
+        } else {
+            MAX_DRAPES_PER_FRAME
+        };
+        let redraw = budget_redraws(&states, budget);
+        for ((spec, state), drawn) in specs.iter().zip(&states).zip(&redraw) {
+            if *state != DrapeState::Unchanged && !drawn {
+                terrain.defer_drape(spec.coords);
+            }
+        }
+        let hidden = awaiting_first_draw(&states, &redraw);
+        (redraw, hidden)
     };
     let (metadata, slots) = drape_metadata(&specs, &redraw, capacity);
     let ranges = {
@@ -142,7 +164,10 @@ pub fn queue_system(
         };
         let mut uniforms = Vec::with_capacity(specs.len());
         let mut sources = Vec::with_capacity(specs.len());
-        for spec in &specs {
+        for (spec, hidden) in specs.iter().zip(&hidden) {
+            if *hidden {
+                continue;
+            }
             let dem_coords = loaded_dem_tile(spec.coords, &dem, terrain);
             let Some(block) = tile_uniforms(
                 spec.coords,
@@ -213,6 +238,37 @@ pub fn queue_system(
         draw_after_layer_index,
     });
     Ok(())
+}
+
+/// Which of the acquired drapes to draw this frame, at most `budget`: tiles never drawn
+/// first, since a reused texture shows another tile's content until they are, then tiles
+/// whose content changed.
+fn budget_redraws(states: &[DrapeState], budget: usize) -> Vec<bool> {
+    let mut redraw = vec![false; states.len()];
+    let mut drawn = 0;
+    for wanted in [DrapeState::New, DrapeState::Changed] {
+        for (index, state) in states.iter().enumerate() {
+            if drawn >= budget {
+                return redraw;
+            }
+            if *state == wanted {
+                redraw[index] = true;
+                drawn += 1;
+            }
+        }
+    }
+    redraw
+}
+
+/// Tiles whose texture holds no content of their own yet. A new drape the budget deferred
+/// would show whatever tile last used the texture, so the tile is left out of this frame's
+/// draws and appears once drawn.
+fn awaiting_first_draw(states: &[DrapeState], redraw: &[bool]) -> Vec<bool> {
+    states
+        .iter()
+        .zip(redraw)
+        .map(|(state, drawn)| *state == DrapeState::New && !drawn)
+        .collect()
 }
 
 /// Revisions of the sources drawn into drape textures.
@@ -464,4 +520,39 @@ fn background_clear_color(style: &Style) -> wgpu::Color {
             a: f64::from(color.alpha),
         })
         .unwrap_or(wgpu::Color::TRANSPARENT)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{awaiting_first_draw, budget_redraws, DrapeState};
+
+    #[test]
+    fn a_frame_draws_new_tiles_first_and_at_most_the_budget() {
+        use DrapeState::{Changed, New, Unchanged};
+        let states = [Changed, New, Unchanged, New, Changed, New];
+        assert_eq!(
+            budget_redraws(&states, 4),
+            [true, true, false, true, false, true],
+            "three new tiles and the first changed one"
+        );
+        assert_eq!(
+            budget_redraws(&states, 10),
+            [true, true, false, true, true, true],
+            "everything but the unchanged tile fits"
+        );
+        assert_eq!(budget_redraws(&states, 0), [false; 6]);
+    }
+
+    #[test]
+    fn a_new_tile_the_budget_deferred_is_not_drawn_with_borrowed_content() {
+        use DrapeState::{Changed, New, Unchanged};
+        let states = [New, Changed, New, Unchanged, New];
+        let redraw = budget_redraws(&states, 2);
+        assert_eq!(redraw, [true, false, true, false, false]);
+        assert_eq!(
+            awaiting_first_draw(&states, &redraw),
+            [false, false, false, false, true],
+            "only the undrawn new tile waits; a changed tile keeps showing its last content"
+        );
+    }
 }
