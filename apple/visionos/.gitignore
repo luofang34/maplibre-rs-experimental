@@ -1,4 +1,5 @@
 vendor/
 target/
 MapLibreVision/build/
+MapLibreVision/build-sim/
 MapLibreVision/MapLibreVision.xcodeproj/

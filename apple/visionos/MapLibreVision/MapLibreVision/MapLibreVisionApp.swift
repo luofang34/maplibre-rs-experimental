@@ -2,7 +2,8 @@ import CompositorServices
 import SwiftUI
 
 /// Compositor settings for the map: one colour texture per eye in the renderer's format, so
-/// the map's frame can be copied into the drawable without conversion.
+/// the map's frame can be copied into the drawable without conversion, and a depth texture
+/// the map writes for reprojection and for blending the globe with the room.
 struct MapLayerConfiguration: CompositorLayerConfiguration {
     func makeConfiguration(
         capabilities: LayerRenderer.Capabilities,
@@ -17,7 +18,7 @@ struct MapLayerConfiguration: CompositorLayerConfiguration {
 
 @main
 struct MapLibreVisionApp: App {
-    @State private var immersionStyle: ImmersionStyle = .full
+    @ObservedObject private var modeStore = MapModeStore.shared
 
     var body: some Scene {
         WindowGroup {
@@ -30,6 +31,8 @@ struct MapLibreVisionApp: App {
                 MapRenderer(layerRenderer: layerRenderer).start()
             }
         }
-        .immersionStyle(selection: $immersionStyle, in: .full)
+        // The table globe sits in the room; the immersive view replaces it. Changing the
+        // mode moves the scene and the immersion together.
+        .immersionStyle(selection: $modeStore.immersionStyle, in: .mixed, .full)
     }
 }
