@@ -45,6 +45,7 @@ use crate::{
     window::{HeadedMapWindow, MapWindow},
 };
 
+mod depth_copy;
 pub mod graph;
 pub mod resource;
 mod systems;
@@ -68,11 +69,13 @@ pub mod settings;
 pub mod tile_mesh;
 pub mod tile_view_pattern;
 pub mod view_state;
+pub mod xr;
 
 pub use shaders::ShaderVertex;
 
 use crate::{
     render::{
+        depth_copy::{DepthCopyNode, DepthCopyPipeline},
         render_phase::{LayerItem, RenderPhase, TileMaskItem, TranslucentItem},
         systems::{graph_runner_system::GraphRunnerSystem, upload_system::upload_system},
         tile_view_pattern::{ViewTileSources, WgpuTileViewPattern},
@@ -121,6 +124,9 @@ pub struct RenderResources {
     pub render_target: Eventually<TextureView>,
     pub depth_texture: Eventually<Texture>,
     pub multisampling_texture: Eventually<Option<Texture>>,
+    /// A host's `Depth32Float` texture the frame's depth is copied into after everything is
+    /// drawn, for a compositor that reprojects the frame.
+    pub eye_depth_target: Option<wgpu::TextureView>,
 }
 
 impl RenderResources {
@@ -129,6 +135,7 @@ impl RenderResources {
             render_target: Default::default(),
             depth_texture: Default::default(),
             multisampling_texture: Default::default(),
+            eye_depth_target: None,
             surface,
         }
     }
@@ -552,6 +559,7 @@ pub mod draw_graph {
     pub mod node {
         pub const MAIN_PASS: &str = "main_pass";
         pub const TRANSLUCENT_PASS: &str = "translucent_pass";
+        pub const DEPTH_COPY: &str = "depth_copy";
     }
 }
 
@@ -598,6 +606,13 @@ impl<E: Environment> Plugin<E> for RenderPlugin {
                 draw_graph::node::TRANSLUCENT_PASS,
             )
             .expect("main pass or draw node does not exist");
+        draw_graph.add_node(draw_graph::node::DEPTH_COPY, DepthCopyNode);
+        draw_graph
+            .add_node_edge(
+                draw_graph::node::TRANSLUCENT_PASS,
+                draw_graph::node::DEPTH_COPY,
+            )
+            .expect("translucent pass or depth copy node does not exist");
 
         graph.add_sub_graph(draw_graph::NAME, draw_graph);
         graph.add_node(main_graph::node::MAIN_PASS_DEPENDENCIES, EmptyNode);
@@ -620,6 +635,7 @@ impl<E: Environment> Plugin<E> for RenderPlugin {
         resources.init::<ViewTileSources>();
         // masks
         resources.insert(Eventually::<MaskPipeline>::Uninitialized);
+        resources.insert(Eventually::<DepthCopyPipeline>::Uninitialized);
 
         // The frame input comes first: the request systems the plugins add to Extract must
         // already see the frame's view.

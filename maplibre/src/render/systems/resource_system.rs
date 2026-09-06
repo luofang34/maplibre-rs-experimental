@@ -5,6 +5,7 @@ use std::{borrow::Cow, mem};
 use crate::{
     context::MapContext,
     render::{
+        depth_copy::DepthCopyPipeline,
         eventually::Eventually,
         projection::ProjectionGpuResources,
         resource::{BackingBufferDescriptor, RenderPipeline, Texture, TilePipeline},
@@ -39,11 +40,12 @@ impl System for ResourceSystem {
             ..
         }: &mut MapContext,
     ) -> SystemResult {
-        let Some((tile_view_pattern, mask_pipeline, projection_resources)) =
+        let Some((tile_view_pattern, mask_pipeline, projection_resources, depth_copy)) =
             world.resources.query_mut::<(
                 &mut Eventually<WgpuTileViewPattern>,
                 &mut Eventually<MaskPipeline>,
                 &mut Eventually<ProjectionGpuResources>,
+                &mut Eventually<DepthCopyPipeline>,
             )>()
         else {
             return Err(SystemError::Dependencies);
@@ -62,6 +64,11 @@ impl System for ResourceSystem {
             .render_target
             .initialize(|| surface.create_view(device));
 
+        let depth_msaa = if surface.is_multisampling_supported(settings.msaa) {
+            settings.msaa
+        } else {
+            Msaa { samples: 1 }
+        };
         state.depth_texture.reinitialize(
             || {
                 Texture::new(
@@ -70,16 +77,16 @@ impl System for ResourceSystem {
                     settings.depth_texture_format,
                     size.width(),
                     size.height(),
-                    if surface.is_multisampling_supported(settings.msaa) {
-                        settings.msaa
-                    } else {
-                        Msaa { samples: 1 }
-                    },
-                    wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    depth_msaa,
+                    // A host compositor reads the depth back through the depth copy pass.
+                    wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
                 )
             },
             &(size.width(), size.height()),
         );
+        if state.eye_depth_target.is_some() {
+            depth_copy.initialize(|| DepthCopyPipeline::new(device, depth_msaa.samples));
+        }
 
         state.multisampling_texture.reinitialize(
             || {

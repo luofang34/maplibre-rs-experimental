@@ -37,6 +37,9 @@ use crate::{
 };
 
 mod processed;
+mod xr;
+
+pub use xr::XrFrameError;
 
 pub use processed::{
     process_geojson_layers, process_tile_layers, ProcessedLayers, SymbolLayer, VectorLayer,
@@ -323,6 +326,11 @@ impl HeadlessMap {
     /// The device the renderer draws with.
     pub fn device(&self) -> &wgpu::Device {
         &self.map_context.renderer.device
+    }
+
+    /// The queue the renderer submits to.
+    pub fn queue(&self) -> &wgpu::Queue {
+        &self.map_context.renderer.queue
     }
 
     /// Raises the pitch limit and re-applies the style's pitch, which the default limit clamps.

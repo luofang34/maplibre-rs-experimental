@@ -14,6 +14,7 @@ use crate::{
     kernel::{Kernel, KernelBuilder},
     platform::{http_client::ReqwestHttpClient, scheduler::TokioScheduler},
     plugin::Plugin,
+    render::settings::RendererSettings,
     render::{
         builder::RendererBuilder, frame_input::frame_input_system, graph::RenderGraph,
         tile_view_pattern::ViewTileSources, RenderStageLabel, Renderer,
@@ -65,6 +66,18 @@ pub async fn create_headless_renderer(
     height: u32,
     cache_path: Option<String>,
 ) -> Result<(Kernel<HeadlessEnvironment>, Renderer), HeadlessRendererError> {
+    create_headless_renderer_with_settings(width, height, cache_path, RendererSettings::default())
+        .await
+}
+
+/// Creates a headless renderer with the given settings, for a host whose target texture
+/// format or sample count the defaults would not match.
+pub async fn create_headless_renderer_with_settings(
+    width: u32,
+    height: u32,
+    cache_path: Option<String>,
+    settings: RendererSettings,
+) -> Result<(Kernel<HeadlessEnvironment>, Renderer), HeadlessRendererError> {
     let size = PhysicalSize::new(width, height)
         .ok_or(HeadlessRendererError::InvalidSize { width, height })?;
     let client = ReqwestHttpClient::new(cache_path);
@@ -86,6 +99,7 @@ pub async fn create_headless_renderer(
         .map_err(|source| HeadlessRendererError::Window { source })?;
 
     let renderer = RendererBuilder::new()
+        .with_renderer_settings(settings)
         .build()
         .initialize_headless::<HeadlessMapWindowConfig>(&window)
         .await
