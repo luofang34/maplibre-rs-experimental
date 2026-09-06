@@ -3,9 +3,11 @@
 use thiserror::Error;
 
 use crate::{
+    coords::{LatLon, WorldCoords, Zoom, TILE_SIZE},
     headless::map::HeadlessMap,
     render::{eventually::Eventually, frame_input::ViewSource, resource::TextureView, xr::XrFrame},
     schedule::StageError,
+    terrain::coverage::TerrainCoverageIndex,
 };
 
 /// Why a frame for a head-mounted display could not be drawn.
@@ -60,6 +62,16 @@ impl HeadlessMap {
             result.map_err(|source| XrFrameError::Eye { index, source })?;
         }
         Ok(())
+    }
+
+    /// Terrain elevation in metres at a location, from the DEM tiles loaded so far; `None`
+    /// without terrain or before a tile covering the location arrived. A host stands its
+    /// scene on it, so a height above the anchor is a height above the ground.
+    pub fn terrain_elevation_at(&self, position: LatLon) -> Option<f64> {
+        let world = &self.map_context.world;
+        let index = world.resources.get::<TerrainCoverageIndex>()?;
+        let mercator = WorldCoords::from_lat_lon(position, Zoom::new(0.0));
+        index.elevation_at(&world.tiles, mercator.x / TILE_SIZE, mercator.y / TILE_SIZE)
     }
 }
 

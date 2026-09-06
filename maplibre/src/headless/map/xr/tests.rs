@@ -191,3 +191,16 @@ async fn a_headless_surface_multisamples_like_a_window() {
         "the frame resolves from a multisampled texture"
     );
 }
+
+#[tokio::test]
+async fn without_terrain_no_elevation_is_known() {
+    let style: Style = serde_json::from_str(r#"{"version": 8, "sources": {}, "layers": []}"#)
+        .expect("an empty style parses");
+    let (kernel, renderer) = create_headless_renderer(SIZE, SIZE, None)
+        .await
+        .expect("a headless renderer");
+    let mut map =
+        HeadlessMap::new(style, renderer, kernel, vec![Box::new(RenderPlugin)]).expect("a map");
+    map.run_frame().expect("a frame renders");
+    assert_eq!(map.terrain_elevation_at(LatLon::new(47.26, 11.39)), None);
+}
