@@ -31,10 +31,19 @@ impl Resources {
         }
     }
 
+    /// Stores a resource, dropping the one of the same type stored before. Systems store
+    /// per-frame resources this way, so appending instead of replacing would keep every
+    /// frame's value, and its GPU buffers, for the life of the map.
     pub fn insert<R: Resource>(&mut self, resource: R) {
-        let index = self.resources.len();
-        self.resources.push(UnsafeCell::new(Box::new(resource)));
-        self.index.insert(TypeId::of::<R>(), index);
+        let cell = UnsafeCell::new(Box::new(resource) as Box<dyn Resource>);
+        match self.index.get(&TypeId::of::<R>()) {
+            Some(index) => self.resources[*index] = cell,
+            None => {
+                let index = self.resources.len();
+                self.resources.push(cell);
+                self.index.insert(TypeId::of::<R>(), index);
+            }
+        }
     }
 
     pub fn exists<R: Resource>(&self) -> bool {
@@ -235,3 +244,6 @@ impl_resource_query!(R1, R2, R3);
 impl_resource_query!(R1, R2, R3, R4);
 impl_resource_query!(R1, R2, R3, R4, R5);
 impl_resource_query!(R1, R2, R3, R4, R5, R6);
+
+#[cfg(test)]
+mod tests;
