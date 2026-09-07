@@ -28,7 +28,7 @@ use crate::{
     },
     style::Style,
     tcs::{
-        system::{timings::FrameTimings, SystemResult},
+        system::{heap::live_bytes, timings::FrameTimings, SystemResult},
         tiles::Tiles,
         world::World,
     },
@@ -68,6 +68,7 @@ pub fn retention_system(
         world,
         style,
         view_state,
+        renderer,
         ..
     }: &mut MapContext,
 ) -> SystemResult {
@@ -80,9 +81,36 @@ pub fn retention_system(
     }
     if view_state.has_external_view() {
         summarize_residency(world, drawn, in_use.len());
+        summarize_gpu_objects(world, renderer);
         summarize_timings(world);
     }
     Ok(())
+}
+
+/// Once a second, how many GPU objects the frame keeps alive, for a host whose footprint
+/// climbs while nothing loads: the kind whose count climbs with it is the one leaking.
+fn summarize_gpu_objects(world: &World, renderer: &crate::render::Renderer) {
+    let frame = world
+        .resources
+        .get::<TileRetention>()
+        .map_or(0, |retention| retention.frame);
+    if !frame.is_multiple_of(SUMMARY_EVERY_FRAMES) {
+        return;
+    }
+    let Some(report) = renderer.instance.generate_report() else {
+        return;
+    };
+    let hub = report.hub_report(renderer.adapter.get_info().backend);
+    tracing::info!(
+        buffers = hub.buffers.num_allocated,
+        textures = hub.textures.num_allocated,
+        texture_views = hub.texture_views.num_allocated,
+        bind_groups = hub.bind_groups.num_allocated,
+        samplers = hub.samplers.num_allocated,
+        command_buffers = hub.command_buffers.num_allocated,
+        pipelines = hub.render_pipelines.num_allocated,
+        "gpu objects"
+    );
 }
 
 /// Once a second, the costliest systems and stages of the frame, for a host that cannot
@@ -95,15 +123,26 @@ fn summarize_timings(world: &mut World) {
     if !frame.is_multiple_of(SUMMARY_EVERY_FRAMES) {
         return;
     }
-    let top = world
-        .resources
-        .get_or_init_mut::<FrameTimings>()
-        .take_top(8);
+    let timings = world.resources.get_or_init_mut::<FrameTimings>();
+    let growers: Vec<String> = timings
+        .top_growth(6)
+        .iter()
+        .filter(|(_, kb)| *kb > 0.5)
+        .map(|(name, kb)| format!("{name}={kb:.1}"))
+        .collect();
+    let top = timings.take_top(8);
     let costliest: Vec<String> = top
         .iter()
         .map(|(name, ms)| format!("{name}={ms:.2}"))
         .collect();
     tracing::info!(ms_per_frame = %costliest.join(" "), "frame time by system");
+    if !growers.is_empty() {
+        tracing::info!(
+            kb_per_frame = %growers.join(" "),
+            rust_heap_mb = live_bytes() >> 20,
+            "heap growth by system"
+        );
+    }
 }
 
 fn summarize_residency(world: &World, drawn: usize, in_use: usize) {

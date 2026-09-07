@@ -215,6 +215,27 @@ async fn without_terrain_no_elevation_is_known() {
     assert_eq!(map.terrain_elevation_at(LatLon::new(47.26, 11.39)), None);
 }
 
+/// The plugins the visionOS host builds its map with, terrain included.
+fn device_plugins() -> Vec<Box<dyn crate::plugin::Plugin<crate::headless::HeadlessEnvironment>>> {
+    vec![
+        Box::new(RenderPlugin),
+        Box::new(crate::background::BackgroundPlugin),
+        Box::new(crate::vector::VectorPlugin::<
+            crate::vector::DefaultVectorTransferables,
+        >::default()),
+        Box::new(crate::sdf::SdfPlugin::<
+            crate::vector::DefaultVectorTransferables,
+        >::default()),
+        Box::new(crate::raster::RasterPlugin::<
+            crate::raster::DefaultRasterTransferables,
+        >::default()),
+        Box::new(crate::hillshade::HillshadePlugin),
+        Box::new(crate::terrain::TerrainPlugin::<
+            crate::terrain::DefaultDemTransferables,
+        >::default()),
+    ]
+}
+
 /// A globe style with terrain and a vector source, as the device draws.
 fn terrain_globe_style() -> Style {
     serde_json::from_str(
@@ -233,13 +254,8 @@ async fn both_eyes_of_a_frame_draw_the_same_tiles_over_terrain() {
         .await
         .expect("a headless renderer");
     let format = renderer.state().surface().surface_format();
-    let mut map = HeadlessMap::new(
-        terrain_globe_style(),
-        renderer,
-        kernel,
-        vec![Box::new(RenderPlugin)],
-    )
-    .expect("a map");
+    let mut map =
+        HeadlessMap::new(terrain_globe_style(), renderer, kernel, device_plugins()).expect("a map");
     map.set_max_pitch(cgmath::Deg(89.0));
     let colors = [
         texture_sized(map.device(), format, width, height),
@@ -325,13 +341,8 @@ async fn a_globe_on_a_table_requests_only_the_levels_it_shows() {
         .await
         .expect("a headless renderer");
     let format = renderer.state().surface().surface_format();
-    let mut map = HeadlessMap::new(
-        terrain_globe_style(),
-        renderer,
-        kernel,
-        vec![Box::new(RenderPlugin)],
-    )
-    .expect("a map");
+    let mut map =
+        HeadlessMap::new(terrain_globe_style(), renderer, kernel, device_plugins()).expect("a map");
     map.set_max_pitch(cgmath::Deg(89.0));
     let colors = [
         texture_sized(map.device(), format, width, height),
@@ -422,13 +433,8 @@ async fn a_flight_from_the_table_requests_tiles_a_few_at_a_time() {
         .await
         .expect("a headless renderer");
     let format = renderer.state().surface().surface_format();
-    let mut map = HeadlessMap::new(
-        terrain_globe_style(),
-        renderer,
-        kernel,
-        vec![Box::new(RenderPlugin)],
-    )
-    .expect("a map");
+    let mut map =
+        HeadlessMap::new(terrain_globe_style(), renderer, kernel, device_plugins()).expect("a map");
     map.set_max_pitch(cgmath::Deg(89.0));
     let colors = [
         texture_sized(map.device(), format, width, height),
@@ -513,13 +519,8 @@ async fn a_flights_prefetch_is_built_once_and_does_not_follow_the_head() {
         .await
         .expect("a headless renderer");
     let format = renderer.state().surface().surface_format();
-    let mut map = HeadlessMap::new(
-        terrain_globe_style(),
-        renderer,
-        kernel,
-        vec![Box::new(RenderPlugin)],
-    )
-    .expect("a map");
+    let mut map =
+        HeadlessMap::new(terrain_globe_style(), renderer, kernel, device_plugins()).expect("a map");
     map.set_max_pitch(cgmath::Deg(89.0));
     let colors = [
         texture_sized(map.device(), format, width, height),
@@ -607,5 +608,100 @@ async fn a_flights_prefetch_is_built_once_and_does_not_follow_the_head() {
     assert!(
         centers.windows(2).all(|pair| pair[0] == pair[1]),
         "the prefetch view followed the head: {centers:?}"
+    );
+}
+
+#[tokio::test]
+async fn terrain_draws_reuse_their_bind_groups_from_frame_to_frame() {
+    use crate::{
+        render::eventually::{Eventually, Eventually::Initialized},
+        terrain::resources::TerrainResources,
+    };
+    use cgmath::Matrix3;
+
+    let (width, height) = (1888, 1792);
+    let (kernel, renderer) = create_headless_renderer(width, height, None)
+        .await
+        .expect("a headless renderer");
+    let format = renderer.state().surface().surface_format();
+    let mut map =
+        HeadlessMap::new(terrain_globe_style(), renderer, kernel, device_plugins()).expect("a map");
+    let colors = [
+        texture_sized(map.device(), format, width, height),
+        texture_sized(map.device(), format, width, height),
+    ];
+    let depths = [
+        texture_sized(
+            map.device(),
+            wgpu::TextureFormat::Depth32Float,
+            width,
+            height,
+        ),
+        texture_sized(
+            map.device(),
+            wgpu::TextureFormat::Depth32Float,
+            width,
+            height,
+        ),
+    ];
+    let radius_meters = 6_371_008.8;
+    let latitude = 47.26_f64.to_radians();
+    let rotation = Matrix3::from_cols(
+        Vector3::new(1.0, 0.0, 0.0),
+        Vector3::new(0.0, latitude.cos(), -latitude.sin()),
+        Vector3::new(0.0, latitude.sin(), latitude.cos()),
+    );
+    let table = Matrix4::from_translation(Vector3::new(0.0, -0.15, -1.0))
+        * Matrix4::from(rotation)
+        * Matrix4::from_scale(0.15 / radius_meters);
+    let mut groups_per_frame = Vec::new();
+    for frame_number in 0..3_u64 {
+        let frame = XrFrame {
+            timestamp: Duration::from_millis(16 * (frame_number + 1)),
+            placement: ScenePlacement {
+                anchor: ExternalAnchor {
+                    position: LatLon::new(47.26, 11.39),
+                    altitude_meters: 0.0,
+                },
+                world_from_scene: table,
+            },
+            eyes: (0..2_u32)
+                .map(|index| XrEye {
+                    world_from_eye: Matrix4::from_translation(Vector3::new(
+                        f64::from(index) * 0.064,
+                        0.0,
+                        0.0,
+                    )),
+                    frustum: EyeFrustum::symmetric(Rad(1.4), 1.05, 0.05, 100.0),
+                    target: EyeTarget {
+                        color: Some(colors[index as usize].create_view(&Default::default())),
+                        depth: Some(depths[index as usize].create_view(&Default::default())),
+                    },
+                })
+                .collect(),
+            request_overscan: 1.2,
+            prefetch: None,
+        };
+        map.run_xr_frame(frame).expect("the frame renders");
+        let Some(Initialized(terrain)) =
+            map.world().resources.get::<Eventually<TerrainResources>>()
+        else {
+            panic!("terrain resources exist");
+        };
+        let mut groups: Vec<_> = terrain
+            .draws()
+            .iter()
+            .map(|draw| (draw.coords, draw.bind_group.global_id()))
+            .collect();
+        groups.sort_by_key(|(coords, _)| (u8::from(coords.z), coords.x, coords.y));
+        groups_per_frame.push(groups);
+    }
+    assert!(
+        !groups_per_frame[2].is_empty(),
+        "the table globe draws terrain tiles"
+    );
+    assert_eq!(
+        groups_per_frame[1], groups_per_frame[2],
+        "a frame at rest recreated its terrain bind groups"
     );
 }

@@ -1,7 +1,7 @@
 use crate::{
     context::MapContext,
     schedule::{Stage, StageResult},
-    tcs::system::{timings::FrameTimings, IntoSystemContainer, SystemContainer},
+    tcs::system::{heap::live_bytes, timings::FrameTimings, IntoSystemContainer, SystemContainer},
 };
 
 #[derive(Default)]
@@ -29,13 +29,13 @@ impl Stage for SystemStage {
             let _span =
                 tracing::info_span!("system", name = container.system.name().as_ref()).entered();
             let started = instant::Instant::now();
+            let heap_before = live_bytes();
             container.system.run(context)?;
             let spent = started.elapsed();
-            context
-                .world
-                .resources
-                .get_or_init_mut::<FrameTimings>()
-                .record(container.system.name(), spent);
+            let grown = live_bytes() - heap_before;
+            let timings = context.world.resources.get_or_init_mut::<FrameTimings>();
+            timings.record(container.system.name(), spent);
+            timings.record_growth(container.system.name(), grown);
         }
         Ok(())
     }

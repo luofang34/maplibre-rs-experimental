@@ -7,7 +7,7 @@ use thiserror::Error;
 use crate::{
     context::MapContext,
     define_label,
-    tcs::system::timings::FrameTimings,
+    tcs::system::{heap::live_bytes, timings::FrameTimings},
     tcs::system::{stage::SystemStage, IntoSystemContainer, SystemError},
 };
 
@@ -278,13 +278,13 @@ impl Schedule {
             let _stage_span = tracing::info_span!("stage", name = ?label).entered();
             let stage = self.stages.get_mut(label).unwrap(); // TODO: Remove unwrap
             let started = instant::Instant::now();
+            let heap_before = live_bytes();
             stage.run(context)?;
             let spent = started.elapsed();
-            context
-                .world
-                .resources
-                .get_or_init_mut::<FrameTimings>()
-                .record(Cow::Owned(format!("stage {label:?}")), spent);
+            let grown = live_bytes() - heap_before;
+            let timings = context.world.resources.get_or_init_mut::<FrameTimings>();
+            timings.record(Cow::Owned(format!("stage {label:?}")), spent);
+            timings.record_growth(Cow::Owned(format!("stage {label:?}")), grown);
         }
         context
             .world
