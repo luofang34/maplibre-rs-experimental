@@ -243,14 +243,9 @@ pub fn queue_system(
             .take(written)
             .enumerate()
             .filter_map(|(index, (dem_coords, coords, drape_source))| {
-                let drape = terrain.drape_texture(*drape_source)?;
                 Some(TerrainDraw {
                     coords: *coords,
-                    bind_group: terrain.create_bind_group(
-                        device,
-                        terrain.dem_texture(*dem_coords),
-                        drape,
-                    ),
+                    bind_group: terrain.tile_bind_group(device, *dem_coords, *drape_source)?,
                     uniform_offset: (index as u64 * UNIFORM_STRIDE) as u32,
                 })
             })

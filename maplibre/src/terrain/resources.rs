@@ -3,6 +3,7 @@
 use std::{
     collections::{HashMap, HashSet},
     num::NonZeroU64,
+    sync::Arc,
 };
 
 use bytemuck_derive::{Pod, Zeroable};
@@ -89,8 +90,9 @@ pub struct TerrainFog {
 pub struct TerrainDraw {
     /// The terrain tile drawn.
     pub coords: WorldTileCoords,
-    /// Uniform block, DEM texture and drape texture of the tile.
-    pub bind_group: wgpu::BindGroup,
+    /// Uniform block, DEM texture and drape texture of the tile, shared with the cache that
+    /// keeps it for the next frame.
+    pub bind_group: Arc<wgpu::BindGroup>,
     /// Dynamic offset of the tile's uniform block.
     pub uniform_offset: u32,
 }
@@ -117,6 +119,10 @@ pub struct TerrainResources {
     drapes: DrapeCache<Texture>,
     drape_scratch: Option<DrapeScratch>,
     draws: Vec<TerrainDraw>,
+    /// Bind groups by DEM and drape texture, kept across frames: creating one per tile per
+    /// frame is a hundred a frame, and on Metal the memory behind them is returned only
+    /// slowly, so the footprint climbs for as long as the map is looked at.
+    bind_groups: HashMap<(wgpu::Id<wgpu::Texture>, wgpu::Id<wgpu::Texture>), Arc<wgpu::BindGroup>>,
     msaa: Msaa,
     color_format: wgpu::TextureFormat,
     depth_format: wgpu::TextureFormat,
@@ -228,6 +234,7 @@ impl TerrainResources {
             drapes: DrapeCache::default(),
             drape_scratch: None,
             draws: Vec::new(),
+            bind_groups: HashMap::new(),
             msaa,
             color_format,
             depth_format,
@@ -491,6 +498,40 @@ impl TerrainResources {
     /// Replaces this frame's terrain draws.
     pub fn set_draws(&mut self, draws: Vec<TerrainDraw>) {
         self.draws = draws;
+        // A bind group keeps its textures alive; only the ones this frame draws with stay.
+        let used: HashSet<wgpu::Id<wgpu::BindGroup>> = self
+            .draws
+            .iter()
+            .map(|draw| draw.bind_group.global_id())
+            .collect();
+        self.bind_groups
+            .retain(|_, group| used.contains(&group.global_id()));
+    }
+
+    /// The bind group drawing a tile with the DEM texture of `dem` and the drape texture of
+    /// `drape_source`, the one from the last frame when both textures are the same; `None`
+    /// while the drape has no texture.
+    pub fn tile_bind_group(
+        &mut self,
+        device: &wgpu::Device,
+        dem: Option<WorldTileCoords>,
+        drape_source: WorldTileCoords,
+    ) -> Option<Arc<wgpu::BindGroup>> {
+        let key = {
+            let dem = self.dem_texture(dem);
+            let drape = self.drape_texture(drape_source)?;
+            (dem.texture.global_id(), drape.texture.global_id())
+        };
+        if let Some(group) = self.bind_groups.get(&key) {
+            return Some(Arc::clone(group));
+        }
+        let group = {
+            let dem = self.dem_texture(dem);
+            let drape = self.drape_texture(drape_source)?;
+            Arc::new(self.create_bind_group(device, dem, drape))
+        };
+        self.bind_groups.insert(key, Arc::clone(&group));
+        Some(group)
     }
 
     /// Terrain draws of the current frame.
