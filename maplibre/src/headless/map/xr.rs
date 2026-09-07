@@ -85,6 +85,23 @@ impl HeadlessMap {
     /// Keeps the view the frame's first eye would have from `placement`, so the request
     /// systems can cover it, or clears it.
     fn set_prefetch(&mut self, placement: Option<&ScenePlacement>, eye: Option<&XrEye>) {
+        // The anchor's altitude follows the terrain as DEM tiles arrive; a destination
+        // whose only change is that is the same destination.
+        let same_destination = |kept: &ScenePlacement, wanted: &ScenePlacement| {
+            kept.world_from_scene == wanted.world_from_scene
+                && kept.anchor.position == wanted.anchor.position
+        };
+        let resources = &mut self.map_context.world.resources;
+        let kept = resources.get::<PrefetchView>().is_some_and(|prefetch| {
+            match (prefetch.placement.as_ref(), placement) {
+                (Some(kept), Some(wanted)) => same_destination(kept, wanted),
+                (None, None) => true,
+                _ => false,
+            }
+        });
+        if kept {
+            return;
+        }
         let view = placement
             .zip(eye)
             .and_then(|(placement, eye)| placement.view_from(eye.world_from_eye, eye.frustum));
@@ -101,10 +118,10 @@ impl HeadlessMap {
             ahead.set_external_view(view, &projection).ok()?;
             Some(ahead)
         });
-        self.map_context
-            .world
-            .resources
-            .insert(PrefetchView { view_state });
+        self.map_context.world.resources.insert(PrefetchView {
+            view_state,
+            placement: placement.copied(),
+        });
     }
 
     /// Terrain elevation in metres at a location, from the DEM tiles loaded so far; `None`

@@ -502,3 +502,110 @@ async fn a_flight_from_the_table_requests_tiles_a_few_at_a_time() {
         );
     }
 }
+
+#[tokio::test]
+async fn a_flights_prefetch_is_built_once_and_does_not_follow_the_head() {
+    use crate::render::xr::PrefetchView;
+    use cgmath::Matrix3;
+
+    let (width, height) = (1888, 1792);
+    let (kernel, renderer) = create_headless_renderer(width, height, None)
+        .await
+        .expect("a headless renderer");
+    let format = renderer.state().surface().surface_format();
+    let mut map = HeadlessMap::new(
+        terrain_globe_style(),
+        renderer,
+        kernel,
+        vec![Box::new(RenderPlugin)],
+    )
+    .expect("a map");
+    map.set_max_pitch(cgmath::Deg(89.0));
+    let colors = [
+        texture_sized(map.device(), format, width, height),
+        texture_sized(map.device(), format, width, height),
+    ];
+    let depths = [
+        texture_sized(
+            map.device(),
+            wgpu::TextureFormat::Depth32Float,
+            width,
+            height,
+        ),
+        texture_sized(
+            map.device(),
+            wgpu::TextureFormat::Depth32Float,
+            width,
+            height,
+        ),
+    ];
+    let radius_meters = 6_371_008.8;
+    let latitude = 47.26_f64.to_radians();
+    let rotation = Matrix3::from_cols(
+        Vector3::new(1.0, 0.0, 0.0),
+        Vector3::new(0.0, latitude.cos(), -latitude.sin()),
+        Vector3::new(0.0, latitude.sin(), latitude.cos()),
+    );
+    let table = Matrix4::from_translation(Vector3::new(0.0, -0.15, -1.0))
+        * Matrix4::from(rotation)
+        * Matrix4::from_scale(0.15 / radius_meters);
+    let ground =
+        Matrix4::from_translation(Vector3::new(0.0, -2000.0, 0.0)) * Matrix4::from(rotation);
+    let anchor = ExternalAnchor {
+        position: LatLon::new(47.26, 11.39),
+        altitude_meters: 0.0,
+    };
+    let mut centers = Vec::new();
+    for (frame_number, yaw) in [0.0_f64, 25.0, -40.0].into_iter().enumerate() {
+        // The anchor's altitude follows the terrain as it loads during the flight.
+        let anchor = ExternalAnchor {
+            altitude_meters: 100.0 * frame_number as f64,
+            ..anchor
+        };
+        let frame = XrFrame {
+            timestamp: Duration::from_millis(16 * (frame_number as u64 + 1)),
+            placement: ScenePlacement {
+                anchor,
+                world_from_scene: table,
+            },
+            eyes: (0..2_u32)
+                .map(|index| XrEye {
+                    // The head turns from frame to frame while the flight runs.
+                    world_from_eye: Matrix4::from_angle_y(cgmath::Deg(yaw))
+                        * Matrix4::from_translation(Vector3::new(
+                            f64::from(index) * 0.064,
+                            0.0,
+                            0.0,
+                        )),
+                    frustum: EyeFrustum::symmetric(Rad(1.4), 1.05, 0.05, 1.0e8),
+                    target: EyeTarget {
+                        color: Some(colors[index as usize].create_view(&Default::default())),
+                        depth: Some(depths[index as usize].create_view(&Default::default())),
+                    },
+                })
+                .collect(),
+            request_overscan: 1.2,
+            prefetch: Some(ScenePlacement {
+                anchor,
+                world_from_scene: ground,
+            }),
+        };
+        map.run_xr_frame(frame).expect("the frame renders");
+        let prefetch = map
+            .world()
+            .resources
+            .get::<PrefetchView>()
+            .and_then(|prefetch| prefetch.view_state.as_ref())
+            .expect("a flight keeps its prefetch view");
+        let view = prefetch.external_view();
+        centers.push((
+            view.anchor.position.latitude,
+            view.anchor.position.longitude,
+            prefetch.zoom().value(),
+        ));
+    }
+    assert!(
+        centers.windows(2).all(|pair| pair[0] == pair[1]),
+        "the prefetch view followed the head: {centers:?}"
+    );
+}

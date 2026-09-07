@@ -17,7 +17,7 @@ use crate::render::{
 };
 
 /// Where the host put the scene in its world.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ScenePlacement {
     /// The geographic point and altitude the scene's origin stands for.
     pub anchor: ExternalAnchor,
@@ -69,9 +69,17 @@ pub struct XrFrame {
 }
 
 /// The view a flight is heading for, kept by the frame so tile requests can cover it.
+///
+/// The view is built once per destination, from the eye's pose when the flight begins, and
+/// kept while the destination stands: rebuilding it from every frame's head pose would move
+/// its covering a little each frame and, over a flight, request many times the tiles any one
+/// frame needs.
+#[derive(Default)]
 pub struct PrefetchView {
     /// The view, or none while no flight is in progress.
     pub view_state: Option<ViewState>,
+    /// The destination the view was built for.
+    pub placement: Option<ScenePlacement>,
 }
 
 impl ScenePlacement {

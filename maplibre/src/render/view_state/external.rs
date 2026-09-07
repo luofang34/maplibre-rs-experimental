@@ -26,7 +26,7 @@ use crate::{
 mod sphere;
 
 /// Where the local frame of an [`ExternalView`] is anchored.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ExternalAnchor {
     /// Ground position of the frame origin.
     pub position: LatLon,

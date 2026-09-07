@@ -136,7 +136,7 @@ impl From<ZoomLevel> for u8 {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub struct LatLon {
     pub latitude: f64,
     pub longitude: f64,
