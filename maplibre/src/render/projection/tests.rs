@@ -352,3 +352,68 @@ fn an_eyes_requests_cover_the_ground_behind_it() {
         );
     }
 }
+
+#[test]
+fn a_level_gaze_covers_the_ground_to_the_horizon_at_every_height() {
+    use crate::{
+        coords::{LatLon, WorldCoords, Zoom},
+        render::view_state::{CameraPose, ViewState, ViewStatePadding},
+    };
+
+    let style: crate::style::Style = serde_json::from_str(
+        r#"{"version":8,"sources":{"dem":{"type":"raster-dem","tiles":["https://dem.example/{z}/{x}/{y}.png"],"tileSize":256,"maxzoom":12,"encoding":"terrarium"}},"layers":[],"terrain":{"source":"dem","exaggeration":1}}"#,
+    )
+    .expect("a terrain style parses");
+    let eye_at = LatLon::new(47.26, 11.39);
+    let world = crate::tcs::world::World::default();
+    let mut counts = Vec::new();
+    for altitude in [150.0, 4000.0, 1.0e6] {
+        let zoom = Zoom::new(13.0);
+        let mut own = ViewState::new(
+            crate::window::PhysicalSize::new(1888, 1792).expect("a viewport"),
+            WorldCoords::from_lat_lon(eye_at, zoom),
+            zoom,
+            cgmath::Deg(0.0),
+            cgmath::Rad(1.4),
+        );
+        own.set_max_pitch(cgmath::Deg(180.0));
+        // Half a degree below level, as a head looking at the horizon.
+        own.set_camera_pose(CameraPose {
+            position: eye_at,
+            altitude_meters: altitude,
+            bearing: cgmath::Deg(0.0),
+            pitch: cgmath::Deg(89.5),
+            roll: cgmath::Deg(0.0),
+        });
+        let mut eyed = ViewState::new(
+            crate::window::PhysicalSize::new(1888, 1792).expect("a viewport"),
+            WorldCoords::from_lat_lon(eye_at, zoom),
+            zoom,
+            cgmath::Deg(0.0),
+            cgmath::Rad(1.4),
+        );
+        eyed.set_max_pitch(cgmath::Deg(89.0));
+        eyed.set_external_view(
+            own.external_view(),
+            &crate::projection::ProjectionType::Mercator,
+        )
+        .expect("the eye is accepted");
+        let level = eyed.zoom().zoom_level(crate::coords::TILE_SIZE);
+        let drawn = super::view_region_for_projection(
+            &style,
+            &eyed,
+            &world,
+            level,
+            ViewStatePadding::Tight,
+        )
+        .expect("the covering succeeds")
+        .map_or(0, |region| region.iter().count());
+        counts.push((altitude, eyed.zoom().value(), drawn));
+    }
+    for (altitude, zoom, drawn) in &counts {
+        assert!(
+            *drawn >= 30,
+            "a level gaze at {altitude} m (zoom {zoom:.1}) draws only {drawn} tiles: {counts:?}"
+        );
+    }
+}

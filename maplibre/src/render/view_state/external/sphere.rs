@@ -57,8 +57,11 @@ impl SphereEye {
     /// north and up frame as the globe camera measures them.
     pub(crate) fn pose(&self, body: Body) -> SpherePose {
         let forward = -self.axes.z;
+        // A gaze past the limb starts from the limb point nearest to it, which the surface hit
+        // becomes as the gaze grazes the sphere, and settles on the point beneath the eye as
+        // the gaze moves further away, so the center never jumps.
         let center = first_surface_hit(self.position, forward)
-            .unwrap_or_else(|| self.position / self.position.magnitude());
+            .unwrap_or_else(|| missed_center(self.position, forward));
         let location = unit_sphere_to_lat_lon(center);
         let (east, north, up) = local_axes(location);
         let in_local = |v: Vector3<f64>| Vector3::new(v.dot(east), v.dot(north), v.dot(up));
@@ -85,6 +88,31 @@ fn local_axes(location: LatLon) -> (Vector3<f64>, Vector3<f64>, Vector3<f64>) {
         -longitude.cos() * latitude.sin(),
     );
     (east, north, up)
+}
+
+/// Radii past the limb over which a missing gaze's center moves from the limb point to the
+/// point beneath the eye.
+const MISS_BLEND_RADII: f64 = 0.25;
+
+/// The center for a ray from `origin` along `direction` that misses the unit sphere: the
+/// limb point under the ray's closest approach when the ray just misses, the point beneath
+/// the eye once it misses by more than a quarter radius, and a blend between.
+fn missed_center(origin: Vector3<f64>, direction: Vector3<f64>) -> Vector3<f64> {
+    let beneath = origin / origin.magnitude();
+    let closest = origin - direction * origin.dot(direction);
+    let length = closest.magnitude();
+    if length <= 0.0 {
+        return beneath;
+    }
+    let limb = closest / length;
+    let share = ((length - 1.0) / MISS_BLEND_RADII).clamp(0.0, 1.0);
+    let blended = limb * (1.0 - share) + beneath * share;
+    let magnitude = blended.magnitude();
+    if magnitude > 0.0 {
+        blended / magnitude
+    } else {
+        beneath
+    }
 }
 
 /// Where a ray from `origin` along `direction` first meets the unit sphere.

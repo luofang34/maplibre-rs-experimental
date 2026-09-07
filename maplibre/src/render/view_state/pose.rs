@@ -38,6 +38,16 @@ const MAX_CENTER_ITERATIONS: usize = 10;
 /// Distance error in metres below which the center search stops.
 const CENTER_TOLERANCE_METERS: f64 = 1e-12;
 
+/// How many heights ahead an eye's center may lie; beyond that the ground near the horizon
+/// would sling the center and the zoom by kilometres per degree of head pitch, and a glance
+/// up would request tiles at a wildly different zoom.
+const EYE_CENTER_REACH_HEIGHTS: f64 = 5.0;
+/// The reach in metres is kept within these bounds: near the ground the center stays far
+/// enough ahead that the covering reaches the horizon, and from high up it stays near enough
+/// that the center's latitude remains on the map.
+const MIN_EYE_CENTER_REACH_METERS: f64 = 10_000.0;
+const MAX_EYE_CENTER_REACH_METERS: f64 = 50_000.0;
+
 impl ViewState {
     /// Places the camera at `pose`.
     ///
@@ -45,9 +55,34 @@ impl ViewState {
     /// follows the camera's distance to it, so a pose beyond the pitch limit is clamped to it.
     pub fn set_camera_pose(&mut self, pose: CameraPose) {
         let pitch = Rad::from(pose.pitch).0;
-        let bearing = Rad::from(pose.bearing).0;
         let (distance_meters, elevation) =
             distance_to_center_from_altitude(pose.altitude_meters, self.center_elevation(), pitch);
+        self.place_camera(pose, distance_meters, elevation);
+    }
+
+    /// Places a host's eye at `pose`. The center is where the gaze meets the center elevation,
+    /// at most `EYE_CENTER_REACH_HEIGHTS` heights ahead; a gaze nearer the horizon than that
+    /// keeps the center at that reach and leaves the center elevation alone, so a head
+    /// turning up to the horizon moves the center smoothly instead of snapping it to a fixed
+    /// distance in the air.
+    pub(super) fn set_eye_pose(&mut self, pose: CameraPose) {
+        let pitch = Rad::from(pose.pitch).0;
+        let dz = -pitch.cos();
+        let elevation = self.center_elevation();
+        let above_ground = pose.altitude_meters - elevation;
+        let reach = (EYE_CENTER_REACH_HEIGHTS * above_ground.abs())
+            .clamp(MIN_EYE_CENTER_REACH_METERS, MAX_EYE_CENTER_REACH_METERS);
+        let distance_meters = if dz * above_ground < 0.0 {
+            (-above_ground / dz).min(reach)
+        } else {
+            reach
+        };
+        self.place_camera(pose, distance_meters, elevation);
+    }
+
+    fn place_camera(&mut self, pose: CameraPose, distance_meters: f64, elevation: f64) {
+        let pitch = Rad::from(pose.pitch).0;
+        let bearing = Rad::from(pose.bearing).0;
         let (dx, dy, _) = camera_direction(pitch, bearing);
         let camera = mercator_from_lat_lon(pose.position);
         let circumference = self.body().circumference_meters();

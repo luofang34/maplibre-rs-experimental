@@ -137,7 +137,7 @@ impl ViewState {
                 on_sphere.roll,
             );
         } else {
-            self.set_camera_pose(flat_pose_of(&frame, external.anchor, body));
+            self.set_eye_pose(flat_pose_of(&frame, external.anchor, body));
         }
         let zoom = self.zoom().value();
         let zoom_rate = self

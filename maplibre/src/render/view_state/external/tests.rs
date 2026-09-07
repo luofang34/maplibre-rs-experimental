@@ -511,8 +511,9 @@ fn the_horizon_follows_the_eye_rather_than_the_clamped_pose() {
     let focal_length = (down.height() / 2.0) / (FOVY.0 / 2.0).tan();
     let expected = focal_length * 20.0_f64.to_radians().tan();
     let climbed = -down.horizon_line().sky_distance(center) + overlap;
+    // The two eyes' overlaps over the plane's edge differ by a few parts per million.
     assert!(
-        (climbed - expected).abs() < 1e-6 * expected,
+        (climbed - expected).abs() < 1e-5 * expected,
         "the horizon is {climbed} pixels above the center, expected {expected}"
     );
 
