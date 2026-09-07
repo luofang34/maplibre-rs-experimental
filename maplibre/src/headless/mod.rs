@@ -80,14 +80,15 @@ pub async fn create_headless_renderer_with_settings(
 ) -> Result<(Kernel<HeadlessEnvironment>, Renderer), HeadlessRendererError> {
     let size = PhysicalSize::new(width, height)
         .ok_or(HeadlessRendererError::InvalidSize { width, height })?;
-    let client = ReqwestHttpClient::new(cache_path);
+    let client = ReqwestHttpClient::new(cache_path.clone());
     let kernel = KernelBuilder::new()
         .with_map_window_config(HeadlessMapWindowConfig::new(size))
         .with_http_client(client.clone())
+        // Tiles are fetched by the offscreen kernel, so it is the one that needs the cache.
         .with_apc(SchedulerAsyncProcedureCall::new(
             TokioScheduler::new(),
             OffscreenKernelConfig {
-                cache_directory: None,
+                cache_directory: cache_path,
             },
         ))
         .with_scheduler(TokioScheduler::new())
