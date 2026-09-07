@@ -27,7 +27,7 @@ use crate::{
         world::World,
     },
     terrain::{
-        drape_cache::{fingerprint, DrapeState, SourceRevisions},
+        drape_cache::{fingerprint, DrapeState, SourceContent},
         drape_targets::{collect_layer_specs, is_drapeable, select_targets, TargetSpec},
         request_system::dem_tile_coords,
         resources::TerrainFog,
@@ -95,8 +95,14 @@ pub fn queue_system(
         })?;
     let targets = select_targets(view_region.iter(), world, &raster_coverings);
     let specs = collect_layer_specs(targets, style, world, zoom.value());
-    let revisions = source_revisions(world);
     let clear_color = background_clear_color(style);
+    let prints: Vec<u64> = {
+        let content = loaded_content(world);
+        specs
+            .iter()
+            .map(|spec| fingerprint(spec, &content, clear_color))
+            .collect()
+    };
     let capacity = match world.resources.get::<Eventually<WgpuTileViewPattern>>() {
         Some(Initialized(pattern)) => pattern.remaining_metadata_capacity(),
         _ => return Err(SystemError::Dependencies),
@@ -114,13 +120,8 @@ pub fn queue_system(
         terrain.retain_drapes(&keep);
         let states: Vec<DrapeState> = specs
             .iter()
-            .map(|spec| {
-                terrain.acquire_drape(
-                    device,
-                    spec.coords,
-                    fingerprint(spec, revisions, clear_color),
-                )
-            })
+            .zip(&prints)
+            .map(|(spec, print)| terrain.acquire_drape(device, spec.coords, *print))
             .collect();
         let budget = if view_state.has_external_view() {
             EYE_DRAPES_PER_FRAME
@@ -271,16 +272,35 @@ fn awaiting_first_draw(states: &[DrapeState], redraw: &[bool]) -> Vec<bool> {
         .collect()
 }
 
-/// Revisions of the sources drawn into drape textures.
-fn source_revisions(world: &World) -> SourceRevisions {
-    SourceRevisions {
-        raster: match world.resources.get::<Eventually<RasterResources>>() {
-            Some(Initialized(resources)) => resources.revision(),
-            _ => 0,
+/// The GPU content of source tiles, read from the vector pool and the raster textures.
+struct LoadedContent<'a> {
+    pool: Option<&'a VectorBufferPool>,
+    raster: Option<&'a RasterResources>,
+}
+
+impl SourceContent for LoadedContent<'_> {
+    fn vector_layer_loaded(&self, coords: WorldTileCoords, layer_id: &str) -> bool {
+        self.pool.is_some_and(|pool| {
+            pool.get_loaded_style_layers_at(coords)
+                .is_some_and(|layers| layers.contains(layer_id))
+        })
+    }
+
+    fn raster_loaded(&self, coords: WorldTileCoords) -> bool {
+        self.raster
+            .is_some_and(|raster| raster.get_bound_texture(&coords).is_some())
+    }
+}
+
+fn loaded_content(world: &World) -> LoadedContent<'_> {
+    LoadedContent {
+        pool: match world.resources.get::<Eventually<VectorBufferPool>>() {
+            Some(Initialized(pool)) => Some(pool),
+            _ => None,
         },
-        vector: match world.resources.get::<Eventually<VectorBufferPool>>() {
-            Some(Initialized(pool)) => pool.revision(),
-            _ => 0,
+        raster: match world.resources.get::<Eventually<RasterResources>>() {
+            Some(Initialized(raster)) => Some(raster),
+            _ => None,
         },
     }
 }

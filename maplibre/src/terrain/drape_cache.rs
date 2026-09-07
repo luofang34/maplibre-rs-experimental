@@ -14,22 +14,25 @@ use std::{
 use crate::{coords::WorldTileCoords, terrain::drape_targets::TargetSpec};
 
 /// Largest number of released textures kept for reuse.
-const MAX_FREE_TEXTURES: usize = 64;
+const MAX_FREE_TEXTURES: usize = 16;
 
-/// Revisions of the sources drawn into drape textures; any change redraws every texture.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub struct SourceRevisions {
-    /// Advances whenever a raster tile texture is bound.
-    pub raster: u64,
-    /// Advances whenever vector geometry is allocated or evicted.
-    pub vector: u64,
+/// What of a source tile is on the GPU right now, so a drape redraws when its own tile's
+/// content arrives or leaves and not when any other tile's does.
+pub(crate) trait SourceContent {
+    /// Whether the style layer's geometry of the tile is in the vector buffer pool.
+    fn vector_layer_loaded(&self, coords: WorldTileCoords, layer_id: &str) -> bool;
+    /// Whether the raster tile has a texture bound.
+    fn raster_loaded(&self, coords: WorldTileCoords) -> bool;
 }
 
 /// Fingerprint of everything that decides a drape texture's content.
-pub fn fingerprint(spec: &TargetSpec, revisions: SourceRevisions, clear: wgpu::Color) -> u64 {
+pub(crate) fn fingerprint(
+    spec: &TargetSpec,
+    content: &impl SourceContent,
+    clear: wgpu::Color,
+) -> u64 {
     let mut hasher = std::hash::DefaultHasher::new();
     spec.coords.hash(&mut hasher);
-    revisions.hash(&mut hasher);
     for component in [clear.r, clear.g, clear.b, clear.a] {
         component.to_bits().hash(&mut hasher);
     }
@@ -41,10 +44,14 @@ pub fn fingerprint(spec: &TargetSpec, revisions: SourceRevisions, clear: wgpu::C
             layer.id.hash(&mut hasher);
             layer.index.hash(&mut hasher);
             layer.coords.hash(&mut hasher);
+            content
+                .vector_layer_loaded(layer.coords, &layer.id)
+                .hash(&mut hasher);
         }
         for (id, index, _) in &shape.raster_layers {
             id.hash(&mut hasher);
             index.hash(&mut hasher);
+            content.raster_loaded(shape.source).hash(&mut hasher);
         }
     }
     hasher.finish()

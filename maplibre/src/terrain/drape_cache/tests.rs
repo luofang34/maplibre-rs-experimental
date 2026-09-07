@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use super::{fingerprint, DrapeCache, DrapeState, SourceRevisions};
+use super::{fingerprint, DrapeCache, DrapeState, SourceContent};
 use crate::{
     coords::{WorldTileCoords, ZoomLevel},
     terrain::drape_targets::{ShapeSpec, TargetSpec, VectorLayerSpec},
@@ -96,12 +96,21 @@ fn tiles_leaving_the_view_hand_their_textures_to_new_tiles() {
     assert_eq!(cache.free_len(), 0);
 }
 
+/// Every layer loaded, or none.
+struct Loaded(bool);
+
+impl SourceContent for Loaded {
+    fn vector_layer_loaded(&self, _: WorldTileCoords, _: &str) -> bool {
+        self.0
+    }
+
+    fn raster_loaded(&self, _: WorldTileCoords) -> bool {
+        self.0
+    }
+}
+
 #[test]
-fn fingerprint_follows_sources_layers_and_revisions_but_not_shape_order() {
-    let revisions = SourceRevisions {
-        raster: 3,
-        vector: 5,
-    };
+fn fingerprint_follows_sources_layers_and_loaded_content_but_not_shape_order() {
     let clear = wgpu::Color::WHITE;
     let a = spec(tile(4, 4, 5), &[tile(8, 8, 6), tile(9, 8, 6)]);
     let reordered = spec(tile(4, 4, 5), &[tile(9, 8, 6), tile(8, 8, 6)]);
@@ -109,26 +118,20 @@ fn fingerprint_follows_sources_layers_and_revisions_but_not_shape_order() {
     let mut other_layer = spec(tile(4, 4, 5), &[tile(8, 8, 6), tile(9, 8, 6)]);
     other_layer.shapes[0].raster_layers.clear();
 
-    let base = fingerprint(&a, revisions, clear);
-    assert_eq!(fingerprint(&reordered, revisions, clear), base);
-    assert_ne!(fingerprint(&other_source, revisions, clear), base);
-    assert_ne!(fingerprint(&other_layer, revisions, clear), base);
+    let base = fingerprint(&a, &Loaded(true), clear);
+    assert_eq!(fingerprint(&reordered, &Loaded(true), clear), base);
+    assert_ne!(fingerprint(&other_source, &Loaded(true), clear), base);
+    assert_ne!(fingerprint(&other_layer, &Loaded(true), clear), base);
     assert_ne!(
-        fingerprint(
-            &a,
-            SourceRevisions {
-                raster: 4,
-                ..revisions
-            },
-            clear
-        ),
-        base
+        fingerprint(&a, &Loaded(false), clear),
+        base,
+        "content arriving on the GPU changes the drape"
     );
-    assert_ne!(fingerprint(&a, revisions, wgpu::Color::BLACK), base);
+    assert_ne!(fingerprint(&a, &Loaded(true), wgpu::Color::BLACK), base);
     assert_ne!(
         fingerprint(
             &spec(tile(5, 4, 5), &[tile(8, 8, 6), tile(9, 8, 6)]),
-            revisions,
+            &Loaded(true),
             clear
         ),
         base
