@@ -1,4 +1,8 @@
-use std::borrow::Cow;
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet},
+    hash::{DefaultHasher, Hash, Hasher},
+};
 
 use crate::{
     context::MapContext,
@@ -23,7 +27,17 @@ use crate::{
     tcs::system::{System, SystemError, SystemResult},
 };
 
-pub struct CollisionSystem {}
+/// Runs between which the placement is kept: placing every label of every drawn tile costs
+/// milliseconds, and labels need not move faster than a few times a second. A host drawing
+/// two eyes per frame gets the same placement for both, since the count is even.
+const PLACE_EVERY_RUNS: u32 = 8;
+
+pub struct CollisionSystem {
+    runs: u32,
+    /// Fingerprint of the opacities last uploaded per layer of a tile, so a placement that
+    /// did not change uploads nothing.
+    uploaded: HashMap<(WorldTileCoords, String), u64>,
+}
 
 impl Default for CollisionSystem {
     fn default() -> Self {
@@ -33,13 +47,24 @@ impl Default for CollisionSystem {
 
 impl CollisionSystem {
     pub fn new() -> Self {
-        Self {}
+        Self {
+            runs: 0,
+            uploaded: HashMap::new(),
+        }
     }
+}
+
+fn opacity_fingerprint(metadata: &[SDFShaderFeatureMetadata]) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    for entry in metadata {
+        entry.opacity.to_bits().hash(&mut hasher);
+    }
+    hasher.finish()
 }
 
 impl System for CollisionSystem {
     fn name(&self) -> Cow<'static, str> {
-        "sdf_populate_world_system".into()
+        "sdf_collision_system".into()
     }
 
     fn run(
@@ -74,12 +99,13 @@ impl System for CollisionSystem {
             return Err(SystemError::Dependencies);
         };
 
-        if !view_state.did_camera_change() {
-            // TODO
-            // return Ok(());
+        self.runs = self.runs.wrapping_add(1);
+        if !self.runs.is_multiple_of(PLACE_EVERY_RUNS) {
+            return Ok(());
         }
 
         let mut collision_index = CollisionIndex::new(view_state, MapMode::Continuous);
+        let mut seen = HashSet::new();
 
         for view_tile in tile_view_pattern.iter() {
             let coords = view_tile.coords();
@@ -203,6 +229,12 @@ impl System for CollisionSystem {
                         }
                     }
 
+                    let key = (coords, layer.style_layer_id.clone());
+                    let fingerprint = opacity_fingerprint(&feature_metadata);
+                    seen.insert(key.clone());
+                    if self.uploaded.get(&key) == Some(&fingerprint) {
+                        continue;
+                    }
                     if let Some(layer_at_coords) = symbol_buffer_pool.index().get_layers(coords) {
                         for entry in layer_at_coords {
                             debug_assert_eq!(entry.coords, coords);
@@ -218,9 +250,13 @@ impl System for CollisionSystem {
                             );
                         }
                     }
+                    self.uploaded.insert(key, fingerprint);
                 }
             }
         }
+        // A tile that left the view uploads afresh when it returns, since its pool entry
+        // may be new.
+        self.uploaded.retain(|key, _| seen.contains(key));
         Ok(())
     }
 }
