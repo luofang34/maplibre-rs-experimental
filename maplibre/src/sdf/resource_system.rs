@@ -51,7 +51,8 @@ pub fn resource_system(
         return Err(SystemError::Dependencies);
     };
 
-    symbol_buffer_pool.initialize(|| BufferPool::from_device(device));
+    symbol_buffer_pool
+        .initialize(|| BufferPool::from_device_with_sizes(device, settings.symbol_pools));
 
     symbol_pipeline.initialize(|| {
         let tile_shader = shaders::SymbolShader {

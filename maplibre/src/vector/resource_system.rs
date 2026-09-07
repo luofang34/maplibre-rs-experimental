@@ -45,7 +45,7 @@ pub fn resource_system(
         return Err(SystemError::Dependencies);
     };
 
-    buffer_pool.initialize(|| BufferPool::from_device(device));
+    buffer_pool.initialize(|| BufferPool::from_device_with_sizes(device, settings.buffer_pools));
 
     vector_pipeline.initialize(|| {
         let tile_shader = shaders::FillShader {

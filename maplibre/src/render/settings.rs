@@ -101,9 +101,35 @@ impl Default for Msaa {
     }
 }
 
+/// Capacity of the GPU buffer pools tiles are uploaded into, in elements. The defaults suit a
+/// desktop; a device with a memory limit wants smaller pools, since two pools of ten million
+/// vertices hold close to a gigabyte before a tile is drawn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BufferPoolSizes {
+    pub vertices: u64,
+    pub indices: u64,
+    pub feature_metadata: u64,
+    pub layer_metadata: u64,
+}
+
+impl Default for BufferPoolSizes {
+    fn default() -> Self {
+        Self {
+            vertices: 10 * 1_000_000,
+            indices: 10 * 1_000_000,
+            feature_metadata: 10 * 1024 * 1000,
+            layer_metadata: 10 * 1024,
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct RendererSettings {
     pub msaa: Msaa,
+    /// Capacity of the vector buffer pool.
+    pub buffer_pools: BufferPoolSizes,
+    /// Capacity of the symbol buffer pool, whose vertices are three times the size.
+    pub symbol_pools: BufferPoolSizes,
     /// Explicitly set a texture format or let the renderer automatically choose one
     pub texture_format: Option<TextureFormat>,
     pub depth_texture_format: TextureFormat,
@@ -128,6 +154,8 @@ impl Default for RendererSettings {
     fn default() -> Self {
         Self {
             msaa: Msaa::default(),
+            buffer_pools: BufferPoolSizes::default(),
+            symbol_pools: BufferPoolSizes::default(),
             texture_format: None,
 
             depth_texture_format: TextureFormat::Depth24PlusStencil8,

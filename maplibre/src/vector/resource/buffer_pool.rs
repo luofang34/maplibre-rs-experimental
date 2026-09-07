@@ -12,6 +12,7 @@ use bytemuck::Pod;
 
 use crate::{
     coords::{Quadkey, WorldTileCoords},
+    render::settings::BufferPoolSizes,
     render::{
         resource::{BackingBufferDescriptor, Queue},
         tile_view_pattern::HasTile,
@@ -20,13 +21,6 @@ use crate::{
     tcs::world::World,
     vector::tessellation::OverAlignedVertexBuffer,
 };
-
-// TODO: Too low values can cause a back-and-forth between unloading and loading layers
-pub const VERTEX_SIZE: wgpu::BufferAddress = 10 * 1_000_000;
-pub const INDICES_SIZE: wgpu::BufferAddress = 10 * 1_000_000;
-
-pub const FEATURE_METADATA_SIZE: wgpu::BufferAddress = 10 * 1024 * 1000;
-pub const LAYER_METADATA_SIZE: wgpu::BufferAddress = 10 * 1024;
 
 /// This is inspired by the memory pool in Vulkan documented
 /// [here](https://gpuopen-librariesandsdks.github.io/VulkanMemoryAllocator/html/custom_memory_pools.html).
@@ -87,34 +81,40 @@ fn fitting_buffer_size(
 
 impl<V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<wgpu::Queue, wgpu::Buffer, V, I, TM, FM> {
     pub fn from_device(device: &wgpu::Device) -> Self {
+        Self::from_device_with_sizes(device, BufferPoolSizes::default())
+    }
+
+    /// A pool whose buffers hold `sizes` elements, each clipped to the device's largest buffer.
+    /// Too small a pool has tiles unloaded and reloaded from frame to frame.
+    pub fn from_device_with_sizes(device: &wgpu::Device, sizes: BufferPoolSizes) -> Self {
         let largest = device.limits().max_buffer_size;
         let fitting = |element: usize, count: wgpu::BufferAddress| {
             fitting_buffer_size(element, count, largest)
         };
         let vertex_buffer_desc = wgpu::BufferDescriptor {
             label: Some("vertex buffer"),
-            size: fitting(size_of::<V>(), VERTEX_SIZE),
+            size: fitting(size_of::<V>(), sizes.vertices),
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         };
 
         let indices_buffer_desc = wgpu::BufferDescriptor {
             label: Some("indices buffer"),
-            size: fitting(size_of::<I>(), INDICES_SIZE),
+            size: fitting(size_of::<I>(), sizes.indices),
             usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         };
 
         let feature_metadata_desc = wgpu::BufferDescriptor {
             label: Some("feature metadata buffer"),
-            size: fitting(size_of::<FM>(), FEATURE_METADATA_SIZE),
+            size: fitting(size_of::<FM>(), sizes.feature_metadata),
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         };
 
         let layer_metadata_desc = wgpu::BufferDescriptor {
             label: Some("layer metadata buffer"),
-            size: fitting(size_of::<TM>(), LAYER_METADATA_SIZE),
+            size: fitting(size_of::<TM>(), sizes.layer_metadata),
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         };
