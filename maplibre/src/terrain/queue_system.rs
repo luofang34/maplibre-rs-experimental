@@ -13,6 +13,7 @@ use crate::{
     render::{
         eventually::{Eventually, Eventually::Initialized},
         eye_covering::drawn_covering,
+        memory_budget::MemoryBudget,
         render_commands::DrawMasks,
         render_phase::{Draw, DrawState, LayerItem, ProjectionBinding, RenderPhase, TileMaskItem},
         shaders::ShaderTileMetadata,
@@ -109,6 +110,11 @@ pub fn queue_system(
             })
         })
         .collect();
+    let memory = world
+        .resources
+        .get::<MemoryBudget>()
+        .copied()
+        .unwrap_or_default();
     // Textures whose fingerprint is unchanged keep their content; only the rest are redrawn,
     // and only so many per frame.
     let (redraw, drape_sources): (Vec<bool>, Vec<Option<WorldTileCoords>>) = {
@@ -126,13 +132,19 @@ pub fn queue_system(
         terrain.retain_drapes(&keep);
         // An unready tile acquires nothing and counts as unchanged for the budget, so it is
         // neither drawn nor deferred; it is hidden below.
+        if memory.is_tight() {
+            terrain.shed_spare_drapes();
+        }
+        // Targets come nearest first, so when textures run out it is the far tiles that
+        // draw with an ancestor's drape.
         let states: Vec<DrapeState> = specs
             .iter()
             .zip(&prints)
             .zip(&ready)
             .map(|((spec, print), ready)| {
                 if *ready {
-                    terrain.acquire_drape(device, spec.coords, *print)
+                    let may_create = memory.allows_drape_texture(terrain.drape_texture_total());
+                    terrain.acquire_drape(device, spec.coords, *print, may_create)
                 } else {
                     DrapeState::Unchanged
                 }
@@ -145,14 +157,15 @@ pub fn queue_system(
         };
         let redraw = budget_redraws(&states, budget);
         for ((spec, state), drawn) in specs.iter().zip(&states).zip(&redraw) {
-            if *state != DrapeState::Unchanged && !drawn {
+            if !matches!(state, DrapeState::Unchanged | DrapeState::Withheld) && !drawn {
                 terrain.defer_drape(spec.coords);
             }
         }
         let hidden: Vec<bool> = awaiting_first_draw(&states, &redraw)
             .into_iter()
             .zip(&ready)
-            .map(|(hidden, ready)| hidden || !ready)
+            .zip(&states)
+            .map(|((hidden, ready), state)| hidden || !ready || *state == DrapeState::Withheld)
             .collect();
         let undrawn: HashSet<WorldTileCoords> = specs
             .iter()

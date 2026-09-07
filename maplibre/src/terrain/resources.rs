@@ -339,9 +339,10 @@ impl TerrainResources {
         device: &wgpu::Device,
         coords: WorldTileCoords,
         fingerprint: u64,
+        may_create: bool,
     ) -> DrapeState {
         let format = self.color_format;
-        self.drapes.acquire(coords, fingerprint, || {
+        self.drapes.acquire(coords, fingerprint, may_create, || {
             Texture::new_mipmapped(
                 Some("drape texture"),
                 device,
@@ -356,6 +357,16 @@ impl TerrainResources {
     /// Leaves a drape acquired this frame undrawn, to be drawn on the next.
     pub fn defer_drape(&mut self, coords: WorldTileCoords) {
         self.drapes.defer(coords);
+    }
+
+    /// Drape textures held, parked and spare together.
+    pub fn drape_texture_total(&self) -> usize {
+        self.drapes.total_textures()
+    }
+
+    /// Drops the parked and spare drape textures.
+    pub fn shed_spare_drapes(&mut self) {
+        self.drapes.shed_spares();
     }
 
     /// Fills the mip levels of a drape texture after its layers were drawn into it.

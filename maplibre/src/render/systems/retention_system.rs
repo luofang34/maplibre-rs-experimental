@@ -22,6 +22,7 @@ use crate::{
     raster::resource::RasterResources,
     render::{
         eventually::{Eventually, Eventually::Initialized},
+        memory_budget::{MemoryBudget, MemoryPressure},
         projection::view_region_for_projection,
         tile_view_pattern::{WgpuTileViewPattern, DEFAULT_TILE_SIZE},
         view_state::{ViewState, ViewStatePadding},
@@ -284,9 +285,18 @@ pub(crate) fn evict_stale_tiles(
     in_use: &HashSet<WorldTileCoords>,
     view_tiles: usize,
 ) -> Vec<WorldTileCoords> {
-    let budget = CacheBudget {
-        tiles: (view_tiles * CACHE_TILES_PER_VIEW_TILE).max(MIN_CACHE_TILES),
-        bytes: CACHE_BYTES,
+    // A host nearly out of memory keeps nothing beyond what the frame draws from.
+    let critical = world
+        .resources
+        .get::<MemoryBudget>()
+        .is_some_and(|budget| budget.pressure() == MemoryPressure::Critical);
+    let budget = if critical {
+        CacheBudget { tiles: 0, bytes: 0 }
+    } else {
+        CacheBudget {
+            tiles: (view_tiles * CACHE_TILES_PER_VIEW_TILE).max(MIN_CACHE_TILES),
+            bytes: CACHE_BYTES,
+        }
     };
     evict_beyond(world, in_use, budget)
 }

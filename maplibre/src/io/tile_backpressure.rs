@@ -8,8 +8,12 @@
 //! flight, so a burst becomes a stream the frame loop drains.
 
 use crate::{
-    coords::WorldTileCoords, raster::RasterLayersDataComponent, tcs::tiles::Tiles,
-    terrain::DemTileComponent, vector::VectorLayerBucketComponent,
+    coords::WorldTileCoords,
+    raster::RasterLayersDataComponent,
+    render::memory_budget::MemoryBudget,
+    tcs::{tiles::Tiles, world::World},
+    terrain::DemTileComponent,
+    vector::VectorLayerBucketComponent,
 };
 
 /// Tiles that may be fetched or processed at the same time across every source.
@@ -39,9 +43,16 @@ pub fn tiles_in_flight(tiles: &Tiles) -> usize {
         .count()
 }
 
-/// How many more tiles may be requested this frame.
-pub fn request_budget(tiles: &Tiles) -> usize {
-    MAX_TILES_IN_FLIGHT.saturating_sub(tiles_in_flight(tiles))
+/// How many more tiles may be requested this frame: up to the in-flight bound, fewer
+/// while the host is short of memory and none while it is nearly out.
+pub fn request_budget(world: &World) -> usize {
+    let allowed = world
+        .resources
+        .get::<MemoryBudget>()
+        .copied()
+        .unwrap_or_default()
+        .tiles_in_flight_allowed(MAX_TILES_IN_FLIGHT);
+    allowed.saturating_sub(tiles_in_flight(&world.tiles))
 }
 
 #[cfg(test)]

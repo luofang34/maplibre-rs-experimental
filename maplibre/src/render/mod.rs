@@ -62,6 +62,7 @@ pub mod camera;
 pub mod error;
 pub mod eventually;
 pub mod eye_covering;
+pub mod memory_budget;
 #[cfg(all(test, feature = "headless"))]
 pub(crate) use systems::retention_system::drawn_tiles;
 pub mod frame_input;

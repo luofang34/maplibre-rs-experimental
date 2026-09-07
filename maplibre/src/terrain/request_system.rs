@@ -124,7 +124,7 @@ impl<E: Environment, T: DemTransferables> System for RequestSystem<E, T> {
         };
 
         let mut requested = HashSet::new();
-        let mut budget = request_budget(&world.tiles);
+        let mut budget = request_budget(world);
         let wanted: Vec<WorldTileCoords> = view_region
             .iter()
             .filter_map(|coords| dem_tile_coords(coords, dem.minzoom, dem.maxzoom))

@@ -63,7 +63,7 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
                 })?;
             {
                 let mut requested = HashSet::new();
-                let mut budget = request_budget(&world.tiles);
+                let mut budget = request_budget(world);
                 let minzoom = source_min_zoom(style, TileKind::Raster).unwrap_or(0);
                 // A tile the source answered 404 for is stood in for by its nearest ancestor,
                 // as GL JS retains and loads parents for it.

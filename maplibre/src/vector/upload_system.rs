@@ -7,6 +7,7 @@ use crate::{
     io::tile_sources::TileKind,
     render::{
         eventually::{Eventually, Eventually::Initialized},
+        memory_budget::UPLOADS_PER_FRAME,
         shaders::{FillShaderFeatureMetadata, ShaderLayerMetadata, Vec4f32},
         tile_view_pattern::WgpuTileViewPattern,
         Renderer,
@@ -77,8 +78,13 @@ fn upload_tessellated_layer(
     zoom: f32,
     bearing: f32,
 ) {
-    // Upload all tessellated layers which are in view
+    // Upload the tessellated layers in view, a few tiles a frame; the rest follow next
+    // frame rather than staging a whole burst of arrivals at once.
+    let mut uploaded_tiles = 0;
     for coords in source_tiles {
+        if uploaded_tiles >= UPLOADS_PER_FRAME {
+            break;
+        }
         let Some(vector_layers) = tiles.query_mut::<&VectorLayerBucketComponent>(coords) else {
             continue;
         };
@@ -172,6 +178,9 @@ fn upload_tessellated_layer(
                 layer_metadata,
                 &feature_metadata,
             );
+        }
+        if !available_layers.is_empty() {
+            uploaded_tiles += 1;
         }
     }
 }

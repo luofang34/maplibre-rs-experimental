@@ -94,6 +94,9 @@ pub enum DrapeState {
     /// Whatever the texture held before, another tile's content or nothing; to be drawn
     /// before it shows.
     New,
+    /// No texture: none is spare and the memory budget allows no new one. The tile draws
+    /// with an ancestor's drape until one frees up.
+    Withheld,
 }
 
 impl<T> DrapeCache<T> {
@@ -103,6 +106,7 @@ impl<T> DrapeCache<T> {
         &mut self,
         coords: WorldTileCoords,
         fingerprint: u64,
+        may_create: bool,
         create: impl FnOnce() -> T,
     ) -> DrapeState {
         match self.entries.get_mut(&coords) {
@@ -126,7 +130,17 @@ impl<T> DrapeCache<T> {
                     self.entries.insert(coords, entry);
                     return state;
                 }
-                let texture = self.free.pop().unwrap_or_else(create);
+                // A spare texture first, then a new one while the budget allows; past the
+                // budget the texture parked longest ago gives up its content, and with none
+                // parked the tile goes without.
+                let texture = match self.free.pop() {
+                    Some(texture) => texture,
+                    None if may_create => create(),
+                    None => match self.parked.pop_back() {
+                        Some((_, entry)) => entry.texture,
+                        None => return DrapeState::Withheld,
+                    },
+                };
                 self.entries.insert(
                     coords,
                     Entry {
@@ -137,6 +151,17 @@ impl<T> DrapeCache<T> {
                 DrapeState::New
             }
         }
+    }
+
+    /// Textures held, parked and spare together.
+    pub fn total_textures(&self) -> usize {
+        self.entries.len() + self.parked.len() + self.free.len()
+    }
+
+    /// Drops every parked and spare texture, for a host short of memory.
+    pub fn shed_spares(&mut self) {
+        self.parked.clear();
+        self.free.clear();
     }
 
     /// Marks a tile acquired this frame as not drawn after all, so the next frame acquires

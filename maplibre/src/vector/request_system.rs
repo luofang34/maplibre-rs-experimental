@@ -77,7 +77,7 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                 let max_zoom = source_max_zoom(style, TileKind::Vector);
                 let min_zoom = source_min_zoom(style, TileKind::Vector);
                 let mut requested = HashSet::new();
-                let mut budget = request_budget(&world.tiles);
+                let mut budget = request_budget(world);
 
                 for coords in view_region.iter() {
                     // Above the source maximum zoom the ancestor tile is fetched once and the

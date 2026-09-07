@@ -339,6 +339,15 @@ impl HeadlessMap {
         &self.map_context.renderer.queue
     }
 
+    /// Tells the map how much memory the host still has, or `None` when it cannot tell, so
+    /// the frame takes nothing new on when little is left.
+    pub fn set_available_memory(&mut self, available_bytes: Option<u64>) {
+        self.map_context
+            .world
+            .resources
+            .insert(crate::render::memory_budget::MemoryBudget { available_bytes });
+    }
+
     /// Raises the pitch limit and re-applies the style's pitch, which the default limit clamps.
     pub fn set_max_pitch(&mut self, max_pitch: cgmath::Deg<f64>) {
         let context = &mut self.map_context;
