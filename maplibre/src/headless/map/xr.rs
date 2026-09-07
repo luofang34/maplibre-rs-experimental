@@ -5,7 +5,13 @@ use thiserror::Error;
 use crate::{
     coords::{LatLon, WorldCoords, Zoom, TILE_SIZE},
     headless::map::HeadlessMap,
-    render::{eventually::Eventually, frame_input::ViewSource, resource::TextureView, xr::XrFrame},
+    projection::ProjectionType,
+    render::{
+        eventually::Eventually,
+        frame_input::ViewSource,
+        resource::TextureView,
+        xr::{PrefetchView, ScenePlacement, XrEye, XrFrame},
+    },
     schedule::StageError,
     terrain::coverage::TerrainCoverageIndex,
 };
@@ -38,6 +44,7 @@ impl HeadlessMap {
     /// An eye without a colour target draws into the map's own texture, which then holds
     /// the last such eye.
     pub fn run_xr_frame(&mut self, frame: XrFrame) -> Result<(), XrFrameError> {
+        self.set_prefetch(frame.prefetch.as_ref(), frame.eyes.first());
         for (index, eye) in frame.eyes.into_iter().enumerate() {
             let view = frame
                 .placement
@@ -62,6 +69,31 @@ impl HeadlessMap {
             result.map_err(|source| XrFrameError::Eye { index, source })?;
         }
         Ok(())
+    }
+
+    /// Keeps the view the frame's first eye would have from `placement`, so the request
+    /// systems can cover it, or clears it.
+    fn set_prefetch(&mut self, placement: Option<&ScenePlacement>, eye: Option<&XrEye>) {
+        let view = placement
+            .zip(eye)
+            .and_then(|(placement, eye)| placement.view_from(eye.world_from_eye, eye.frustum));
+        let view_state = view.and_then(|view| {
+            let projection = self
+                .map_context
+                .style
+                .projection
+                .as_ref()
+                .map_or(ProjectionType::Mercator, |specification| {
+                    specification.projection_type.clone()
+                });
+            let mut ahead = self.map_context.view_state.clone();
+            ahead.set_external_view(view, &projection).ok()?;
+            Some(ahead)
+        });
+        self.map_context
+            .world
+            .resources
+            .insert(PrefetchView { view_state });
     }
 
     /// Terrain elevation in metres at a location, from the DEM tiles loaded so far; `None`

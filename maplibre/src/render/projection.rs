@@ -31,6 +31,8 @@ use crate::{
         },
         ProjectionType,
     },
+    render::tile_view_pattern::DEFAULT_TILE_SIZE,
+    render::xr::PrefetchView,
     render::{
         render_phase::ProjectionBinding,
         shaders::{Mat4x4f32, Vec4f32},
@@ -311,13 +313,38 @@ pub fn view_region_for_projection(
     visible_level: ZoomLevel,
     padding: ViewStatePadding,
 ) -> Result<Option<ViewRegion>, ProjectionStateError> {
-    covering_region(
+    let region = covering_region(
         style,
         view_state,
         world,
         CoveringRequest::view(visible_level, view_state.zoom().value()),
         padding,
-    )
+    )?;
+    if padding != ViewStatePadding::Loose {
+        return Ok(region);
+    }
+    // A flight in progress requests the frame it is heading for, at that frame's own level.
+    let Some(ahead) = world
+        .resources
+        .get::<PrefetchView>()
+        .and_then(|prefetch| prefetch.view_state.as_ref())
+    else {
+        return Ok(region);
+    };
+    let level = ahead.zoom().zoom_level(DEFAULT_TILE_SIZE);
+    let destination = covering_region(
+        style,
+        ahead,
+        world,
+        CoveringRequest::view(level, ahead.zoom().value()),
+        ViewStatePadding::Tight,
+    )?;
+    Ok(union_regions(
+        region,
+        destination,
+        visible_level,
+        PREFETCH_MAX_TILES,
+    ))
 }
 
 /// The tiles each raster source used by a visible layer covers, following that source's tile
@@ -390,6 +417,11 @@ pub fn covering_region(
     if !request.zoom_range.serves(request.level) {
         return Ok(None);
     }
+    // While an eye's zoom is moving, the levels it passes are not requested at all: a flight
+    // requests its destination instead, and a hand zoom loads once the hands rest.
+    if padding == ViewStatePadding::Loose && !view_state.eye_settled() {
+        return Ok(None);
+    }
     // A loose covering is a request for tiles; an external eye may ask for it to reach beyond
     // the frame so tiles are ready where the head turns next, once the eye has settled.
     let widened = match padding {
@@ -416,7 +448,12 @@ pub fn covering_region(
             return Ok(region);
         };
         let around = mercator_view_region(style, &surround, world, request, padding)?;
-        return Ok(union_regions(region, around, request.level));
+        return Ok(union_regions(
+            region,
+            around,
+            request.level,
+            SURROUND_MAX_TILES,
+        ));
     }
     let visible_level = request.level;
     let camera = globe_camera_for_view(view_state)?;
@@ -442,11 +479,16 @@ pub fn covering_region(
     Ok(Some(ViewRegion::from_tiles(tiles, visible_level, 512)))
 }
 
-/// The tiles of both regions, those of `primary` first, as one region at `level`.
+/// Tiles a request may hold once a flight's destination is added to what the eye sees.
+const PREFETCH_MAX_TILES: usize = 512;
+
+/// The tiles of both regions, those of `primary` first, as one region at `level`, at most
+/// `max_tiles` of them.
 fn union_regions(
     primary: Option<ViewRegion>,
     secondary: Option<ViewRegion>,
     level: ZoomLevel,
+    max_tiles: usize,
 ) -> Option<ViewRegion> {
     match (primary, secondary) {
         (None, other) | (other, None) => other,
@@ -457,7 +499,7 @@ fn union_regions(
                 .chain(secondary.iter())
                 .filter(|coords| seen.insert(*coords))
                 .collect();
-            Some(ViewRegion::from_tiles(tiles, level, SURROUND_MAX_TILES))
+            Some(ViewRegion::from_tiles(tiles, level, max_tiles))
         }
     }
 }

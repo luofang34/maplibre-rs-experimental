@@ -13,7 +13,7 @@ use cgmath::{Matrix4, SquareMatrix};
 
 use crate::render::{
     camera::EyeFrustum,
-    view_state::{ExternalAnchor, ExternalView},
+    view_state::{ExternalAnchor, ExternalView, ViewState},
 };
 
 /// Where the host put the scene in its world.
@@ -62,6 +62,16 @@ pub struct XrFrame {
     /// How far beyond each eye's frustum tiles are requested, as a factor on its tangents;
     /// one requests what the frame shows.
     pub request_overscan: f64,
+    /// Where the scene will stand when a flight in progress ends; the tiles that frame needs
+    /// are requested now, so they are there when it arrives, and the levels passed on the
+    /// way are not requested at all.
+    pub prefetch: Option<ScenePlacement>,
+}
+
+/// The view a flight is heading for, kept by the frame so tile requests can cover it.
+pub struct PrefetchView {
+    /// The view, or none while no flight is in progress.
+    pub view_state: Option<ViewState>,
 }
 
 impl ScenePlacement {
