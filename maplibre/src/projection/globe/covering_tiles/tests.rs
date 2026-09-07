@@ -1,12 +1,18 @@
-use cgmath::Point2;
+use cgmath::{InnerSpace, Matrix3, Point2, Rad, Vector3};
 
 use super::{
-    covering_tiles, GlobeCoveringError, GlobeCoveringOptions, SourceZoomRange, ZoomRounding,
+    covering_tiles, lod::LodContext, GlobeCoveringError, GlobeCoveringOptions, SourceZoomRange,
+    ZoomRounding,
 };
 use crate::{
-    coords::{LatLon, ZoomLevel, TILE_SIZE},
+    coords::{LatLon, TileCoords, ZoomLevel, TILE_SIZE},
     projection::body::Body,
-    projection::globe::{camera::GlobeCameraOptions, covering::TileElevationRange},
+    projection::globe::{
+        camera::{ExternalGlobeEye, GlobeCameraOptions, GlobeCameraState},
+        covering::TileElevationRange,
+        globe_radius_pixels, lat_lon_to_unit_sphere,
+    },
+    render::camera::EyeFrustum,
 };
 
 fn camera(width: f64, height: f64, center: LatLon, zoom: f64) -> super::GlobeCameraState {
@@ -187,4 +193,76 @@ fn antimeridian_view_selects_both_canonical_edges() {
     ];
 
     assert_eq!(tiles, expected);
+}
+
+/// An eye `height_meters` above `at`, looking north and level with an 80 degree field of
+/// view, as the camera an external eye derives to: its center two heights ahead, which a
+/// level gaze is brought back to, and its distance the slant range to that center.
+fn level_eye_looking_north(at: LatLon, height_meters: f64) -> (GlobeCameraState, f64) {
+    let body = Body::EARTH;
+    let height_radii = height_meters / body.radius_meters;
+    let up = lat_lon_to_unit_sphere(at);
+    let position = up * (1.0 + height_radii);
+    let east = Vector3::new(
+        at.longitude.to_radians().cos(),
+        0.0,
+        -at.longitude.to_radians().sin(),
+    );
+    let north = up.cross(east).normalize();
+    let axes = Matrix3::from_cols(east, up, -north);
+    let center_ahead_degrees = (2.0 * height_radii).to_degrees();
+    let center = LatLon::new(at.latitude + center_ahead_degrees, at.longitude);
+    let zoom = 5.8;
+    let world_size = TILE_SIZE * 2_f64.powf(zoom);
+    let radius_pixels = globe_radius_pixels(world_size, center.latitude);
+    let camera_to_center_distance =
+        (position - lat_lon_to_unit_sphere(center)).magnitude() * radius_pixels;
+    let options = GlobeCameraOptions {
+        width: 1888.0,
+        height: 1792.0,
+        field_of_view_degrees: 80.0,
+        center,
+        world_size,
+        bearing_degrees: 0.0,
+        pitch_degrees: 63.4,
+        roll_degrees: 0.0,
+        center_offset: Point2::new(0.0, 0.0),
+        body,
+    };
+    let eye = ExternalGlobeEye {
+        position,
+        axes,
+        frustum: EyeFrustum::symmetric(
+            Rad(80_f64.to_radians()),
+            1888.0 / 1792.0,
+            0.5,
+            f64::INFINITY,
+        ),
+        camera_to_center_distance,
+    };
+    (
+        GlobeCameraState::from_external_eye(options, eye).expect("the eye is above the surface"),
+        zoom,
+    )
+}
+
+#[test]
+fn an_external_eyes_lod_follows_its_own_height_rather_than_its_derived_pitch() {
+    let at = LatLon::new(47.26, 11.39);
+    let (camera, zoom) = level_eye_looking_north(at, 1.0e6);
+    let lod = LodContext::new(&camera, zoom);
+    // Level 5 tiles: the one under the eye and the one 1500 km north, on the ground the
+    // level gaze meets.
+    let beneath = TileCoords::from((17, 11, ZoomLevel::new(5)));
+    let ahead = TileCoords::from((17, 8, ZoomLevel::new(5)));
+    let beneath_zoom = u8::from(lod.zoom_for_tile(beneath, ZoomRounding::Floor));
+    let ahead_zoom = u8::from(lod.zoom_for_tile(ahead, ZoomRounding::Floor));
+    assert!(
+        (5..=7).contains(&beneath_zoom),
+        "the tile under an eye 1000 km up at zoom {zoom} is scored at level {beneath_zoom}"
+    );
+    assert!(
+        ahead_zoom >= 4,
+        "the ground 1500 km ahead of an eye 1000 km up at zoom {zoom} is scored at level {ahead_zoom}"
+    );
 }

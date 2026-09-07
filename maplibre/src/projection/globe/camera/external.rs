@@ -103,6 +103,7 @@ impl GlobeCameraState {
             camera_to_center_distance: eye.camera_to_center_distance,
             near_z: frustum.near,
             far_z,
+            external_eye: true,
         })
     }
 }

@@ -57,11 +57,7 @@ impl SphereEye {
     /// north and up frame as the globe camera measures them.
     pub(crate) fn pose(&self, body: Body) -> SpherePose {
         let forward = -self.axes.z;
-        // A gaze past the limb starts from the limb point nearest to it, which the surface hit
-        // becomes as the gaze grazes the sphere, and settles on the point beneath the eye as
-        // the gaze moves further away, so the center never jumps.
-        let center = first_surface_hit(self.position, forward)
-            .unwrap_or_else(|| missed_center(self.position, forward));
+        let center = gaze_center(self.position, forward);
         let location = unit_sphere_to_lat_lon(center);
         let (east, north, up) = local_axes(location);
         let in_local = |v: Vector3<f64>| Vector3::new(v.dot(east), v.dot(north), v.dot(up));
@@ -90,9 +86,34 @@ fn local_axes(location: LatLon) -> (Vector3<f64>, Vector3<f64>, Vector3<f64>) {
     (east, north, up)
 }
 
+/// How far along the gaze the center may lie, as a multiple of the eye's height above the
+/// surface. A grazing gaze meets the surface near the horizon, and a center there would
+/// have the covering keep tiles near the horizon and drop the ground beneath the eye.
+const GAZE_REACH_HEIGHTS: f64 = 2.0;
 /// Radii past the limb over which a missing gaze's center moves from the limb point to the
 /// point beneath the eye.
 const MISS_BLEND_RADII: f64 = 0.25;
+
+/// The center of an eye at `origin` looking along `direction`: where the gaze meets the unit
+/// sphere, brought back to within reach along the gaze when it meets it further away, and
+/// for a gaze that misses the sphere the limb point nearest to it, settling on the point
+/// beneath the eye a quarter radius further out.
+fn gaze_center(origin: Vector3<f64>, direction: Vector3<f64>) -> Vector3<f64> {
+    let reach = GAZE_REACH_HEIGHTS * (origin.magnitude() - 1.0).max(0.0);
+    match first_surface_hit(origin, direction) {
+        Some(hit) if (hit - origin).magnitude() <= reach => hit,
+        Some(_) => {
+            let ahead = origin + direction * reach;
+            let length = ahead.magnitude();
+            if length > 0.0 {
+                ahead / length
+            } else {
+                origin / origin.magnitude()
+            }
+        }
+        None => missed_center(origin, direction),
+    }
+}
 
 /// The center for a ray from `origin` along `direction` that misses the unit sphere: the
 /// limb point under the ray's closest approach when the ray just misses, the point beneath

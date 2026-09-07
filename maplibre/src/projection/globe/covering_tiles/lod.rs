@@ -1,12 +1,14 @@
-use cgmath::Point2;
+use cgmath::{InnerSpace, Point2};
 
 use super::{
-    super::{camera::GlobeCameraState, covering::distance_to_tile_2d},
+    super::{camera::GlobeCameraState, covering::distance_to_tile_2d, unit_sphere_to_lat_lon},
     ZoomRounding,
 };
-use crate::coords::{TileCoords, ZoomLevel, MAX_ZOOM};
+use crate::coords::{LatLon, TileCoords, ZoomLevel, MAX_ZOOM};
 
 const MAX_MERCATOR_HORIZON_DEGREES: f64 = 89.25;
+/// Latitude beyond which Mercator has no coordinates.
+const MAX_MERCATOR_LATITUDE_DEGREES: f64 = 85.051_129;
 const MAX_ZOOM_LEVELS_ON_SCREEN: f64 = 9.314;
 const TILE_COUNT_MAX_MIN_RATIO: f64 = 3.0;
 const INTEGRATION_POINTS: usize = 10;
@@ -21,6 +23,22 @@ pub(crate) struct LodContext {
 
 impl LodContext {
     pub(crate) fn new(camera: &GlobeCameraState, requested_zoom: f64) -> Self {
+        if camera.is_external_eye() {
+            // The center, pitch and distance an eye derives to describe where it looks, not
+            // where it is: a level gaze derives to a pitch near ninety degrees, which would
+            // put the camera a few percent of its height above the ground and have every
+            // tile counted as seen at grazing incidence, levels coarser than the eye sees.
+            let position = camera.camera_position();
+            let beneath = unit_sphere_to_lat_lon(position);
+            let height_radii = (position.magnitude() - 1.0).max(0.0);
+            return Self::from_positions(
+                mercator_point(beneath),
+                mercator_center(camera),
+                height_radii * radius_world_units(beneath.latitude),
+                camera.field_of_view_degrees(),
+                requested_zoom,
+            );
+        }
         Self::from_view(
             mercator_center(camera),
             camera.camera_to_center_distance() / camera.world_size(),
@@ -94,11 +112,33 @@ impl LodContext {
 }
 
 fn mercator_center(camera: &GlobeCameraState) -> Point2<f64> {
-    let center = camera.center();
-    let x = center.longitude / 360.0 + 0.5;
-    let latitude = center.latitude.to_radians();
+    mercator_point(camera.center())
+}
+
+/// A location in Mercator `0..1` units.
+fn mercator_point(location: LatLon) -> Point2<f64> {
+    let x = location.longitude / 360.0 + 0.5;
+    let latitude = location
+        .latitude
+        .clamp(
+            -MAX_MERCATOR_LATITUDE_DEGREES,
+            MAX_MERCATOR_LATITUDE_DEGREES,
+        )
+        .to_radians();
     let y = (1.0 - latitude.tan().asinh() / std::f64::consts::PI) * 0.5;
     Point2::new(x, y)
+}
+
+/// The globe's radius in Mercator `0..1` units at a latitude, where a world unit spans the
+/// circumference scaled by the Mercator stretch there.
+fn radius_world_units(latitude_degrees: f64) -> f64 {
+    let latitude = latitude_degrees
+        .clamp(
+            -MAX_MERCATOR_LATITUDE_DEGREES,
+            MAX_MERCATOR_LATITUDE_DEGREES,
+        )
+        .to_radians();
+    1.0 / (2.0 * std::f64::consts::PI * latitude.cos())
 }
 
 fn calculate_tile_zoom(

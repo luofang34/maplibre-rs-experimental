@@ -132,6 +132,8 @@ pub struct GlobeCameraState {
     camera_to_center_distance: f64,
     near_z: f64,
     far_z: f64,
+    /// Whether the camera is an eye a host placed rather than one derived from map angles.
+    external_eye: bool,
 }
 
 impl GlobeCameraState {
@@ -173,6 +175,7 @@ impl GlobeCameraState {
             camera_to_center_distance,
             near_z: NEAR_Z,
             far_z,
+            external_eye: false,
         })
     }
 
@@ -209,6 +212,12 @@ impl GlobeCameraState {
     /// Returns the camera position in unit-globe coordinates.
     pub fn camera_position(&self) -> Vector3<f64> {
         self.camera_position
+    }
+
+    /// Whether the camera is an eye a host placed, whose position and height are its own
+    /// rather than derived from the map center, pitch and distance.
+    pub fn is_external_eye(&self) -> bool {
+        self.external_eye
     }
 
     /// Returns the geographic center used to orient the globe.
