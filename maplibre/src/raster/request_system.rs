@@ -8,6 +8,7 @@ use crate::{
     environment::{Environment, OffscreenKernel},
     io::{
         apc::{AsyncProcedureCall, AsyncProcedureFuture, Context, Input, ProcedureError},
+        tile_backpressure::request_budget,
         tile_sources::{missing_tile_fallback, source_layer_groups, source_min_zoom, TileKind},
     },
     kernel::Kernel,
@@ -22,6 +23,8 @@ use crate::{
 
 pub struct RequestSystem<E: Environment, T: RasterTransferables> {
     kernel: Rc<Kernel<E>>,
+    /// Whether the last run left tiles unrequested for want of budget.
+    deferred: bool,
     phantom_t: PhantomData<T>,
 }
 
@@ -29,6 +32,7 @@ impl<E: Environment, T: RasterTransferables> RequestSystem<E, T> {
     pub fn new(kernel: &Rc<Kernel<E>>) -> Self {
         Self {
             kernel: kernel.clone(),
+            deferred: false,
             phantom_t: Default::default(),
         }
     }
@@ -48,7 +52,8 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
             ..
         }: &mut MapContext,
     ) -> SystemResult {
-        if view_state.did_camera_change() || view_state.did_zoom_change() {
+        if view_state.did_camera_change() || view_state.did_zoom_change() || self.deferred {
+            self.deferred = false;
             // Each raster source covers the view at its own tile size and rounding, as GL JS's
             // per-source tile managers do; the tiles of every source are requested together.
             let regions = raster_source_regions(style, view_state, world, ViewStatePadding::Loose)
@@ -58,6 +63,7 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
                 })?;
             {
                 let mut requested = HashSet::new();
+                let mut budget = request_budget(&world.tiles);
                 let minzoom = source_min_zoom(style, TileKind::Raster).unwrap_or(0);
                 // A tile the source answered 404 for is stood in for by its nearest ancestor,
                 // as GL JS retains and loads parents for it.
@@ -87,6 +93,12 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
                     {
                         continue;
                     }
+                    // The rest wait for a later frame, once tiles in flight have landed.
+                    if budget == 0 {
+                        self.deferred = true;
+                        break;
+                    }
+                    budget -= 1;
 
                     world
                         .tiles

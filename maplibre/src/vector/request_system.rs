@@ -7,6 +7,7 @@ use crate::{
     environment::{Environment, OffscreenKernel},
     io::{
         apc::{AsyncProcedureCall, AsyncProcedureFuture, Context, Input, ProcedureError},
+        tile_backpressure::request_budget,
         tile_sources::{
             clamp_to_max_zoom, source_layer_groups, source_max_zoom, source_min_zoom, TileKind,
         },
@@ -28,6 +29,8 @@ use crate::{
 
 pub struct RequestSystem<E: Environment, T> {
     kernel: Rc<Kernel<E>>,
+    /// Whether the last run left tiles unrequested for want of budget.
+    deferred: bool,
     phantom_t: PhantomData<T>,
 }
 
@@ -35,6 +38,7 @@ impl<E: Environment, T> RequestSystem<E, T> {
     pub fn new(kernel: &Rc<Kernel<E>>) -> Self {
         Self {
             kernel: kernel.clone(),
+            deferred: false,
             phantom_t: Default::default(),
         }
     }
@@ -67,11 +71,13 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
             crate::tcs::system::SystemError::Setup
         })?;
 
-        if view_state.did_camera_change() || view_state.did_zoom_change() {
+        if view_state.did_camera_change() || view_state.did_zoom_change() || self.deferred {
+            self.deferred = false;
             if let Some(view_region) = &view_region {
                 let max_zoom = source_max_zoom(style, TileKind::Vector);
                 let min_zoom = source_min_zoom(style, TileKind::Vector);
                 let mut requested = HashSet::new();
+                let mut budget = request_budget(&world.tiles);
 
                 for coords in view_region.iter() {
                     // Above the source maximum zoom the ancestor tile is fetched once and the
@@ -92,6 +98,12 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                     {
                         continue;
                     }
+                    // The rest wait for a later frame, once tiles in flight have landed.
+                    if budget == 0 {
+                        self.deferred = true;
+                        break;
+                    }
+                    budget -= 1;
 
                     world
                         .tiles

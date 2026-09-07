@@ -8,6 +8,7 @@ use crate::{
     environment::{Environment, OffscreenKernel},
     io::{
         apc::{AsyncProcedureCall, AsyncProcedureFuture, Context, Input, ProcedureError},
+        tile_backpressure::request_budget,
         tile_sources::missing_tile_fallback,
     },
     kernel::Kernel,
@@ -123,6 +124,7 @@ impl<E: Environment, T: DemTransferables> System for RequestSystem<E, T> {
         };
 
         let mut requested = HashSet::new();
+        let mut budget = request_budget(&world.tiles);
         let wanted: Vec<WorldTileCoords> = view_region
             .iter()
             .filter_map(|coords| dem_tile_coords(coords, dem.minzoom, dem.maxzoom))
@@ -143,6 +145,11 @@ impl<E: Environment, T: DemTransferables> System for RequestSystem<E, T> {
             if world.tiles.query::<&DemTileComponent>(coords).is_some() {
                 continue;
             }
+            // The rest wait for a later frame, once tiles in flight have landed.
+            if budget == 0 {
+                break;
+            }
+            budget -= 1;
             let Some(mut tile) = world.tiles.spawn_mut(coords) else {
                 continue;
             };

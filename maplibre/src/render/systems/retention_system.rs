@@ -15,8 +15,11 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     context::MapContext,
     coords::WorldTileCoords,
-    io::tile_sources::{clamp_to_max_zoom, source_max_zoom, TileKind},
-    raster::{resource::RasterResources, RasterLayersDataComponent},
+    io::{
+        tile_backpressure::is_settled,
+        tile_sources::{clamp_to_max_zoom, source_max_zoom, TileKind},
+    },
+    raster::resource::RasterResources,
     render::{
         eventually::{Eventually, Eventually::Initialized},
         projection::view_region_for_projection,
@@ -29,7 +32,7 @@ use crate::{
         tiles::Tiles,
         world::World,
     },
-    terrain::{dem_tile_coords, resources::TerrainResources, source::dem_source, DemTileComponent},
+    terrain::{dem_tile_coords, resources::TerrainResources, source::dem_source},
     vector::{VectorBufferPool, VectorLayerBucket, VectorLayerBucketComponent},
 };
 
@@ -297,21 +300,6 @@ pub(crate) fn evict_beyond(
         retention.last_used.remove(coords);
     }
     evicted
-}
-
-/// Whether every request for the tile has produced a result.
-fn is_settled(tiles: &Tiles, coords: WorldTileCoords) -> bool {
-    let vector_loading = tiles
-        .query::<&VectorLayerBucketComponent>(coords)
-        .is_some_and(|component| !component.done);
-    let raster_loading = tiles
-        .query::<&RasterLayersDataComponent>(coords)
-        .is_some_and(|component| component.layers.is_empty());
-    let dem_loading = matches!(
-        tiles.query::<&DemTileComponent>(coords),
-        Some(DemTileComponent::Pending)
-    );
-    !(vector_loading || raster_loading || dem_loading)
 }
 
 fn drop_gpu_data(world: &mut World, evicted: &[WorldTileCoords]) {

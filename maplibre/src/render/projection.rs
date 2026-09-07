@@ -479,8 +479,10 @@ pub fn covering_region(
     Ok(Some(ViewRegion::from_tiles(tiles, visible_level, 512)))
 }
 
-/// Tiles a request may hold once a flight's destination is added to what the eye sees.
-const PREFETCH_MAX_TILES: usize = 512;
+/// Tiles a request may hold once a flight's destination is added to what the eye sees. The
+/// destination's covering comes nearest first, so this many tiles are the ground around
+/// the arrival gaze; the rest load after landing, when they can be drawn.
+const PREFETCH_MAX_TILES: usize = 96;
 
 /// The tiles of both regions, those of `primary` first, as one region at `level`, at most
 /// `max_tiles` of them.
