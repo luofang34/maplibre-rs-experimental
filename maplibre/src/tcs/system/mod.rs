@@ -6,6 +6,7 @@ use crate::{context::MapContext, tcs::system::function::IntoSystem};
 
 mod function;
 pub mod stage;
+pub mod timings;
 
 #[derive(Error, Debug)]
 pub enum SystemError {

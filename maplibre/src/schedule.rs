@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use downcast_rs::{impl_downcast, Downcast};
@@ -6,6 +7,7 @@ use thiserror::Error;
 use crate::{
     context::MapContext,
     define_label,
+    tcs::system::timings::FrameTimings,
     tcs::system::{stage::SystemStage, IntoSystemContainer, SystemError},
 };
 
@@ -275,8 +277,20 @@ impl Schedule {
             #[cfg(feature = "trace")]
             let _stage_span = tracing::info_span!("stage", name = ?label).entered();
             let stage = self.stages.get_mut(label).unwrap(); // TODO: Remove unwrap
+            let started = instant::Instant::now();
             stage.run(context)?;
+            let spent = started.elapsed();
+            context
+                .world
+                .resources
+                .get_or_init_mut::<FrameTimings>()
+                .record(Cow::Owned(format!("stage {label:?}")), spent);
         }
+        context
+            .world
+            .resources
+            .get_or_init_mut::<FrameTimings>()
+            .end_frame();
         Ok(())
     }
 

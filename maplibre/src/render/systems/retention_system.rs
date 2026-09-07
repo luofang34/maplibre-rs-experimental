@@ -24,7 +24,11 @@ use crate::{
         view_state::{ViewState, ViewStatePadding},
     },
     style::Style,
-    tcs::{system::SystemResult, tiles::Tiles, world::World},
+    tcs::{
+        system::{timings::FrameTimings, SystemResult},
+        tiles::Tiles,
+        world::World,
+    },
     terrain::{dem_tile_coords, resources::TerrainResources, source::dem_source, DemTileComponent},
     vector::{VectorBufferPool, VectorLayerBucket, VectorLayerBucketComponent},
 };
@@ -73,8 +77,30 @@ pub fn retention_system(
     }
     if view_state.has_external_view() {
         summarize_residency(world, drawn, in_use.len());
+        summarize_timings(world);
     }
     Ok(())
+}
+
+/// Once a second, the costliest systems and stages of the frame, for a host that cannot
+/// attach a profiler.
+fn summarize_timings(world: &mut World) {
+    let frame = world
+        .resources
+        .get::<TileRetention>()
+        .map_or(0, |retention| retention.frame);
+    if !frame.is_multiple_of(SUMMARY_EVERY_FRAMES) {
+        return;
+    }
+    let top = world
+        .resources
+        .get_or_init_mut::<FrameTimings>()
+        .take_top(8);
+    let costliest: Vec<String> = top
+        .iter()
+        .map(|(name, ms)| format!("{name}={ms:.2}"))
+        .collect();
+    tracing::info!(ms_per_frame = %costliest.join(" "), "frame time by system");
 }
 
 fn summarize_residency(world: &World, drawn: usize, in_use: usize) {

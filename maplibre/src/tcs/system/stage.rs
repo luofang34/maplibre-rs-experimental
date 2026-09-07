@@ -1,7 +1,7 @@
 use crate::{
     context::MapContext,
     schedule::{Stage, StageResult},
-    tcs::system::{IntoSystemContainer, SystemContainer},
+    tcs::system::{timings::FrameTimings, IntoSystemContainer, SystemContainer},
 };
 
 #[derive(Default)]
@@ -28,7 +28,14 @@ impl Stage for SystemStage {
             #[cfg(feature = "trace")]
             let _span =
                 tracing::info_span!("system", name = container.system.name().as_ref()).entered();
-            container.system.run(context)?
+            let started = instant::Instant::now();
+            container.system.run(context)?;
+            let spent = started.elapsed();
+            context
+                .world
+                .resources
+                .get_or_init_mut::<FrameTimings>()
+                .record(container.system.name(), spent);
         }
         Ok(())
     }
