@@ -7,14 +7,14 @@
 //! for the next tile that needs one.
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     hash::{Hash, Hasher},
 };
 
 use crate::{coords::WorldTileCoords, terrain::drape_targets::TargetSpec};
 
 /// Largest number of released textures kept for reuse.
-const MAX_FREE_TEXTURES: usize = 16;
+const MAX_FREE_TEXTURES: usize = 8;
 
 /// What of a source tile is on the GPU right now, so a drape redraws when its own tile's
 /// content arrives or leaves and not when any other tile's does.
@@ -62,9 +62,15 @@ struct Entry<T> {
     fingerprint: u64,
 }
 
-/// Drape textures by view tile, with a free list of released ones.
+/// Released textures kept with their content, newest first, so a tile that leaves the view
+/// and returns, as tiles do when the head turns, is not drawn again.
+const PARKED_TEXTURES: usize = 8;
+
+/// Drape textures by view tile, with the textures of tiles that left the view parked with
+/// their content and a free list of blank ones.
 pub struct DrapeCache<T> {
     entries: HashMap<WorldTileCoords, Entry<T>>,
+    parked: VecDeque<(WorldTileCoords, Entry<T>)>,
     free: Vec<T>,
 }
 
@@ -72,6 +78,7 @@ impl<T> Default for DrapeCache<T> {
     fn default() -> Self {
         Self {
             entries: HashMap::new(),
+            parked: VecDeque::new(),
             free: Vec::new(),
         }
     }
@@ -105,6 +112,20 @@ impl<T> DrapeCache<T> {
                 DrapeState::Changed
             }
             None => {
+                if let Some(index) = self.parked.iter().position(|(parked, _)| *parked == coords) {
+                    let (_, mut entry) = self
+                        .parked
+                        .remove(index)
+                        .unwrap_or_else(|| unreachable!("the parked index was just found"));
+                    let state = if entry.fingerprint == fingerprint {
+                        DrapeState::Unchanged
+                    } else {
+                        entry.fingerprint = fingerprint;
+                        DrapeState::Changed
+                    };
+                    self.entries.insert(coords, entry);
+                    return state;
+                }
                 let texture = self.free.pop().unwrap_or_else(create);
                 self.entries.insert(
                     coords,
@@ -126,7 +147,8 @@ impl<T> DrapeCache<T> {
         }
     }
 
-    /// Releases the textures of tiles not in `keep` into the free list.
+    /// Parks the textures of tiles not in `keep` with their content; the oldest parked ones
+    /// go to the free list, and beyond that are dropped.
     pub fn retain(&mut self, keep: &HashSet<WorldTileCoords>) {
         let dropped: Vec<WorldTileCoords> = self
             .entries
@@ -136,6 +158,11 @@ impl<T> DrapeCache<T> {
             .collect();
         for coords in dropped {
             if let Some(entry) = self.entries.remove(&coords) {
+                self.parked.push_front((coords, entry));
+            }
+        }
+        while self.parked.len() > PARKED_TEXTURES {
+            if let Some((_, entry)) = self.parked.pop_back() {
                 if self.free.len() < MAX_FREE_TEXTURES {
                     self.free.push(entry.texture);
                 }
@@ -156,6 +183,11 @@ impl<T> DrapeCache<T> {
     /// Number of released textures waiting for reuse.
     pub fn free_len(&self) -> usize {
         self.free.len()
+    }
+
+    /// Number of textures parked with the content of tiles that left the view.
+    pub fn parked_len(&self) -> usize {
+        self.parked.len()
     }
 }
 

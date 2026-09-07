@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use super::{fingerprint, DrapeCache, DrapeState, SourceContent};
+use super::{fingerprint, DrapeCache, DrapeState, SourceContent, PARKED_TEXTURES};
 use crate::{
     coords::{WorldTileCoords, ZoomLevel},
     terrain::drape_targets::{ShapeSpec, TargetSpec, VectorLayerSpec},
@@ -76,7 +76,7 @@ fn a_changed_fingerprint_redraws_into_the_same_texture() {
 }
 
 #[test]
-fn tiles_leaving_the_view_hand_their_textures_to_new_tiles() {
+fn tiles_leaving_the_view_are_parked_and_hand_their_textures_on_once_parking_is_full() {
     let mut cache = DrapeCache::<u32>::default();
     let mut created = 0;
     cache.acquire(tile(1, 1, 3), 1, counting_create(&mut created));
@@ -84,16 +84,32 @@ fn tiles_leaving_the_view_hand_their_textures_to_new_tiles() {
 
     cache.retain(&HashSet::from([tile(2, 1, 3)]));
     assert_eq!(cache.len(), 1);
-    assert_eq!(cache.free_len(), 1);
+    assert_eq!(cache.parked_len(), 1, "the leaving tile keeps its texture");
+    assert_eq!(cache.free_len(), 0);
     assert_eq!(cache.get(tile(1, 1, 3)), None);
 
     assert_eq!(
         cache.acquire(tile(3, 1, 3), 3, counting_create(&mut created)),
         DrapeState::New
     );
-    assert_eq!(created, 2, "the released texture is reused");
-    assert_eq!(cache.get(tile(3, 1, 3)), Some(&1));
-    assert_eq!(cache.free_len(), 0);
+    assert_eq!(
+        created, 3,
+        "a new tile gets a new texture while parking has room"
+    );
+
+    // Enough leaving tiles to fill the parking; the oldest hands its texture on.
+    for x in 4..(4 + PARKED_TEXTURES as i32) {
+        cache.acquire(tile(x, 1, 3), 1, counting_create(&mut created));
+    }
+    cache.retain(&HashSet::new());
+    assert_eq!(cache.parked_len(), PARKED_TEXTURES);
+    assert_eq!(cache.free_len(), 3);
+    let before = created;
+    assert_eq!(
+        cache.acquire(tile(1, 2, 3), 9, counting_create(&mut created)),
+        DrapeState::New
+    );
+    assert_eq!(created, before, "the freed texture is reused");
 }
 
 /// Every layer loaded, or none.
@@ -152,4 +168,31 @@ fn a_deferred_tile_is_acquired_as_changed_on_the_next_frame() {
     assert_eq!(cache.acquire(coords, 7, || 0), DrapeState::Changed);
     assert_eq!(cache.acquire(coords, 7, || 0), DrapeState::Unchanged);
     assert_eq!(cache.acquire(coords, 8, || 0), DrapeState::Changed);
+}
+
+#[test]
+fn a_tile_that_leaves_the_view_and_returns_keeps_its_content() {
+    let mut counter = 0;
+    let mut cache = DrapeCache::default();
+    assert_eq!(
+        cache.acquire(tile(1, 1, 3), 7, counting_create(&mut counter)),
+        DrapeState::New
+    );
+    cache.retain(&HashSet::new());
+    assert_eq!(cache.len(), 0);
+    assert_eq!(cache.parked_len(), 1);
+
+    assert_eq!(
+        cache.acquire(tile(1, 1, 3), 7, counting_create(&mut counter)),
+        DrapeState::Unchanged,
+        "the parked texture still holds the tile's content"
+    );
+    assert_eq!(counter, 1, "no texture was created for the return");
+    cache.retain(&HashSet::new());
+    assert_eq!(
+        cache.acquire(tile(1, 1, 3), 8, counting_create(&mut counter)),
+        DrapeState::Changed,
+        "content that changed while parked is drawn again into the same texture"
+    );
+    assert_eq!(counter, 1);
 }

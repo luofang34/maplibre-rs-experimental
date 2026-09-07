@@ -362,9 +362,12 @@ impl TerrainResources {
     }
 
     /// Releases the drape textures of tiles that left the view for reuse.
-    /// Drape textures held for tiles and waiting in the free list.
+    /// Drape textures held for tiles, and parked or waiting in the free list.
     pub fn drape_counts(&self) -> (usize, usize) {
-        (self.drapes.len(), self.drapes.free_len())
+        (
+            self.drapes.len(),
+            self.drapes.parked_len() + self.drapes.free_len(),
+        )
     }
 
     /// DEM textures resident on the GPU.
