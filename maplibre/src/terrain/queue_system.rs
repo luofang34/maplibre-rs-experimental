@@ -39,6 +39,7 @@ use crate::{
         DrapePhase, DrapeTarget, TerrainFrame,
     },
     vector::{
+        geometry_uploaded,
         render_commands::{DrawLineTiles, DrawVectorTiles},
         VectorBufferPool,
     },
@@ -108,20 +109,44 @@ pub fn queue_system(
         _ => return Err(SystemError::Dependencies),
     };
 
+    // A tile whose vector sources are finished but not yet in the buffer pool would drape
+    // blank; it shows an ancestor's drape until they are.
+    let ready: Vec<bool> = specs
+        .iter()
+        .map(|spec| {
+            spec.shapes.iter().all(|shape| {
+                !shape.raster_layers.is_empty() || geometry_uploaded(shape.source, world)
+            })
+        })
+        .collect();
     // Textures whose fingerprint is unchanged keep their content; only the rest are redrawn,
     // and only so many per frame.
-    let (redraw, hidden): (Vec<bool>, Vec<bool>) = {
+    let (redraw, drape_sources): (Vec<bool>, Vec<Option<WorldTileCoords>>) = {
         let Some(Initialized(terrain)) = world.resources.get_mut::<Eventually<TerrainResources>>()
         else {
             return Err(SystemError::Dependencies);
         };
         terrain.ensure_scratch(device);
-        let keep: HashSet<WorldTileCoords> = specs.iter().map(|spec| spec.coords).collect();
+        // Ancestors that still hold a texture stand in for tiles not drawn yet, so they stay
+        // until every tile under them is drawn.
+        let mut keep: HashSet<WorldTileCoords> = specs.iter().map(|spec| spec.coords).collect();
+        for spec in &specs {
+            keep.extend(present_ancestors(spec.coords, terrain));
+        }
         terrain.retain_drapes(&keep);
+        // An unready tile acquires nothing and counts as unchanged for the budget, so it is
+        // neither drawn nor deferred; it is hidden below.
         let states: Vec<DrapeState> = specs
             .iter()
             .zip(&prints)
-            .map(|(spec, print)| terrain.acquire_drape(device, spec.coords, *print))
+            .zip(&ready)
+            .map(|((spec, print), ready)| {
+                if *ready {
+                    terrain.acquire_drape(device, spec.coords, *print)
+                } else {
+                    DrapeState::Unchanged
+                }
+            })
             .collect();
         let budget = if view_state.has_external_view() {
             EYE_DRAPES_PER_FRAME
@@ -134,8 +159,31 @@ pub fn queue_system(
                 terrain.defer_drape(spec.coords);
             }
         }
-        let hidden = awaiting_first_draw(&states, &redraw);
-        (redraw, hidden)
+        let hidden: Vec<bool> = awaiting_first_draw(&states, &redraw)
+            .into_iter()
+            .zip(&ready)
+            .map(|(hidden, ready)| hidden || !ready)
+            .collect();
+        let undrawn: HashSet<WorldTileCoords> = specs
+            .iter()
+            .zip(&hidden)
+            .filter(|(_, hidden)| **hidden)
+            .map(|(spec, _)| spec.coords)
+            .collect();
+        let drape_sources = specs
+            .iter()
+            .zip(&hidden)
+            .map(|(spec, hidden)| {
+                if *hidden {
+                    present_ancestors(spec.coords, terrain)
+                        .into_iter()
+                        .find(|ancestor| !undrawn.contains(ancestor))
+                } else {
+                    Some(spec.coords)
+                }
+            })
+            .collect();
+        (redraw, drape_sources)
     };
     let (metadata, slots) = drape_metadata(&specs, &redraw, capacity);
     let ranges = {
@@ -165,14 +213,17 @@ pub fn queue_system(
         };
         let mut uniforms = Vec::with_capacity(specs.len());
         let mut sources = Vec::with_capacity(specs.len());
-        for (spec, hidden) in specs.iter().zip(&hidden) {
-            if *hidden {
+        for (spec, drape_source) in specs.iter().zip(&drape_sources) {
+            let Some(drape_source) = *drape_source else {
                 continue;
-            }
+            };
             let dem_coords = loaded_dem_tile(spec.coords, &dem, terrain);
             let Some(block) = tile_uniforms(
                 spec.coords,
-                dem_coords,
+                TileTextures {
+                    dem: dem_coords,
+                    drape: drape_source,
+                },
                 terrain,
                 &dem,
                 &gpu_view_projection
@@ -184,7 +235,7 @@ pub fn queue_system(
                 continue;
             };
             uniforms.push(block);
-            sources.push((dem_coords, spec.coords));
+            sources.push((dem_coords, spec.coords, drape_source));
         }
         let written = terrain.write_uniforms(queue, &uniforms);
         tracing::debug!(
@@ -193,7 +244,7 @@ pub fn queue_system(
             masks = phase.targets.iter().map(|t| t.masks.len()).sum::<usize>(),
             layers = phase.targets.iter().map(|t| t.layers.len()).sum::<usize>(),
             metadata = metadata.len(),
-            dem_hits = sources.iter().filter(|(dem, _)| dem.is_some()).count(),
+            dem_hits = sources.iter().filter(|(dem, _, _)| dem.is_some()).count(),
             written,
             "terrain frame queued"
         );
@@ -201,8 +252,8 @@ pub fn queue_system(
             .iter()
             .take(written)
             .enumerate()
-            .filter_map(|(index, (dem_coords, coords))| {
-                let drape = terrain.drape_texture(*coords)?;
+            .filter_map(|(index, (dem_coords, coords, drape_source))| {
+                let drape = terrain.drape_texture(*drape_source)?;
                 Some(TerrainDraw {
                     coords: *coords,
                     bind_group: terrain.create_bind_group(
@@ -461,16 +512,47 @@ fn dem_matrix(coords: WorldTileCoords, dem: WorldTileCoords) -> Matrix4<f64> {
         * Matrix4::from_nonuniform_scale(1.0 / (EXTENT * scale), 1.0 / (EXTENT * scale), 1.0)
 }
 
+/// The ancestors of a tile, nearest first, that hold a drape texture.
+fn present_ancestors(coords: WorldTileCoords, terrain: &TerrainResources) -> Vec<WorldTileCoords> {
+    let mut ancestors = Vec::new();
+    let mut current = coords;
+    while let Some(parent) = current.get_parent() {
+        if terrain.drape_texture(parent).is_some() {
+            ancestors.push(parent);
+        }
+        current = parent;
+    }
+    ancestors
+}
+
+/// Maps unit coordinates of `coords` into the unit coordinates of its ancestor `source`.
+fn drape_matrix(coords: WorldTileCoords, source: WorldTileCoords) -> Matrix4<f64> {
+    let delta = i32::from(u8::from(coords.z)) - i32::from(u8::from(source.z));
+    let scale = 2_f64.powi(delta);
+    let origin_x = f64::from(coords.x - (source.x << delta)) / scale;
+    let origin_y = f64::from(coords.y - (source.y << delta)) / scale;
+    Matrix4::from_translation(Vector3::new(origin_x, origin_y, 0.0))
+        * Matrix4::from_nonuniform_scale(1.0 / scale, 1.0 / scale, 1.0)
+}
+
+/// The tiles whose textures a terrain tile samples.
+struct TileTextures {
+    /// The DEM tile, or none while no DEM covers the tile.
+    dem: Option<WorldTileCoords>,
+    /// The tile whose drape is shown, an ancestor's until the tile's own is drawn.
+    drape: WorldTileCoords,
+}
+
 fn tile_uniforms(
     coords: WorldTileCoords,
-    dem_coords: Option<WorldTileCoords>,
+    textures: TileTextures,
     terrain: &TerrainResources,
     dem: &DemSource,
     transform: &Matrix4<f32>,
     skirt_length: f32,
     fog: &TerrainFog,
 ) -> Option<TerrainTileUniforms> {
-    let (dem_matrix, dem_unpack, dem_dim) = match dem_coords {
+    let (dem_matrix, dem_unpack, dem_dim) = match textures.dem {
         Some(dem_coords) => (
             dem_matrix(coords, dem_coords).cast::<f32>()?,
             dem.unpack.map(|value| value as f32),
@@ -486,6 +568,7 @@ fn tile_uniforms(
     Some(TerrainTileUniforms {
         transform: (*transform).into(),
         dem_matrix: dem_matrix.into(),
+        drape_matrix: drape_matrix(coords, textures.drape).cast::<f32>()?.into(),
         tile_mercator_coords: tile_mercator_coordinates(
             coords.into_tile(TileAddressingScheme::XYZ),
         )

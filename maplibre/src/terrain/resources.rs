@@ -24,7 +24,10 @@ use crate::{
 /// Edge length in pixels of one drape texture; twice the tile size, as GL JS `qualityFactor`.
 pub const DRAPE_SIZE: u32 = 1024;
 /// Byte stride between per-tile uniform blocks, the WebGPU dynamic offset alignment.
-pub const UNIFORM_STRIDE: u64 = 256;
+pub const UNIFORM_STRIDE: u64 = 512;
+// A block that outgrows its stride would overwrite the next tile's; the stride is a
+// multiple of the 256-byte offset alignment every backend accepts.
+const _: () = assert!(std::mem::size_of::<TerrainTileUniforms>() as u64 <= UNIFORM_STRIDE);
 /// Largest number of terrain tiles drawn in one frame.
 const UNIFORM_CAPACITY: u64 = 1024;
 
@@ -36,6 +39,9 @@ pub struct TerrainTileUniforms {
     pub transform: [[f32; 4]; 4],
     /// Maps tile coordinates to unit coordinates of the sampled DEM tile.
     pub dem_matrix: [[f32; 4]; 4],
+    /// Maps the tile's unit coordinates into the drape texture drawn for it, which is an
+    /// ancestor's while the tile's own is not drawn yet.
+    pub drape_matrix: [[f32; 4]; 4],
     /// Mercator offset and scale of the tile for the globe path.
     pub tile_mercator_coords: [f32; 4],
     /// Channel factors and base shift decoding DEM pixels to metres.

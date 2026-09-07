@@ -89,18 +89,43 @@ impl<T: VectorTransferables> Default for VectorPlugin<T> {
     }
 }
 
-// FIXME: Is this the correct way to do this? Ideally we want to wait until all layers are uploaded to the gpu?
+/// A vector tile counts as available once the worker has finished it; the frame's own tiles
+/// and their stand-ins are chosen from these, and uploaded from there.
 #[derive(Default)]
 struct VectorTilesDone;
 
 impl HasTile for VectorTilesDone {
     fn has_tile(&self, coords: WorldTileCoords, world: &World) -> bool {
-        let Some(vector_layers_indices) = world.tiles.query::<&VectorLayerBucketComponent>(coords)
-        else {
-            return false;
-        };
+        world
+            .tiles
+            .query::<&VectorLayerBucketComponent>(coords)
+            .is_some_and(|buckets| buckets.done)
+    }
+}
 
-        vector_layers_indices.done
+/// Whether a tile's geometry has reached the buffer pool, which the upload system fills in
+/// one pass per tile, or the tile has nothing to upload: no vector data at all, or none with
+/// geometry. A drape drawn from a finished tile before its upload would miss every layer.
+pub fn geometry_uploaded(coords: WorldTileCoords, world: &World) -> bool {
+    let Some(buckets) = world.tiles.query::<&VectorLayerBucketComponent>(coords) else {
+        return true;
+    };
+    if !buckets.done {
+        return false;
+    }
+    let has_geometry = buckets.layers.iter().any(|layer| match layer {
+        VectorLayerBucket::AvailableLayer(bucket) => !bucket.buffer.buffer.indices.is_empty(),
+        VectorLayerBucket::Missing(_) => false,
+    });
+    if !has_geometry {
+        return true;
+    }
+    match world.resources.get::<Eventually<VectorBufferPool>>() {
+        Some(Eventually::Initialized(pool)) => pool
+            .index()
+            .get_layers(coords)
+            .is_some_and(|layers| !layers.is_empty()),
+        _ => false,
     }
 }
 

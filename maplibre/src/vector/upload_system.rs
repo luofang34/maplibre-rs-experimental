@@ -47,6 +47,10 @@ pub fn upload_system(
     let bearing = view_state.camera().get_bearing().0 as f32;
     let mut source_tiles = BTreeSet::new();
     for view_tile in tile_view_pattern.iter() {
+        // The view tile itself is uploaded whether or not the frame draws it yet: a tile
+        // counts as available only once it is in the pool, so the frame draws a stand-in
+        // until this upload has happened.
+        source_tiles.insert(view_tile.coords());
         view_tile.render_kind(TileKind::Vector, |shape| {
             source_tiles.insert(shape.coords());
         });

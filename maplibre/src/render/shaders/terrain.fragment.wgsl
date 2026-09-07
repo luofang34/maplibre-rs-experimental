@@ -1,6 +1,7 @@
 struct TerrainTileUniforms {
     transform: mat4x4<f32>,
     dem_matrix: mat4x4<f32>,
+    drape_matrix: mat4x4<f32>,
     tile_mercator_coords: vec4<f32>,
     dem_unpack: vec4<f32>,
     dem_dim: f32,
@@ -37,7 +38,8 @@ fn main(in: VertexOutput) -> @location(0) vec4<f32> {
     if in.horizon_distance < 0.0 {
         discard;
     }
-    let surface = textureSample(drape_texture, drape_sampler, in.tex_coords);
+    let drape_uv = (terrain_tile.drape_matrix * vec4<f32>(in.tex_coords, 0.0, 1.0)).xy;
+    let surface = textureSample(drape_texture, drape_sampler, drape_uv);
     let ground_blend = terrain_tile.fog_range.z;
     let horizon_blend = terrain_tile.fog_range.w;
     let opacity = terrain_tile.fog_opacity.x;
