@@ -61,6 +61,9 @@ pub mod builder;
 pub mod camera;
 pub mod error;
 pub mod eventually;
+pub mod eye_covering;
+#[cfg(all(test, feature = "headless"))]
+pub(crate) use systems::retention_system::drawn_tiles;
 pub mod frame_input;
 pub mod projection;
 pub mod render_commands;

@@ -311,6 +311,12 @@ impl HeadlessMap {
     }
 
     /// The view the map renders from.
+    /// The map's world, for tests that read what a frame left behind.
+    #[cfg(test)]
+    pub(crate) fn world(&self) -> &crate::tcs::world::World {
+        &self.map_context.world
+    }
+
     pub fn view_state(&self) -> &ViewState {
         &self.map_context.view_state
     }

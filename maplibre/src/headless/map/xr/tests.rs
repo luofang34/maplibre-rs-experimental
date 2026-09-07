@@ -19,11 +19,20 @@ use crate::{
 const SIZE: u32 = 64;
 
 fn texture(device: &wgpu::Device, format: wgpu::TextureFormat) -> wgpu::Texture {
+    texture_sized(device, format, SIZE, SIZE)
+}
+
+fn texture_sized(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+    width: u32,
+    height: u32,
+) -> wgpu::Texture {
     device.create_texture(&wgpu::TextureDescriptor {
         label: None,
         size: wgpu::Extent3d {
-            width: SIZE,
-            height: SIZE,
+            width,
+            height,
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
@@ -128,7 +137,7 @@ async fn each_eye_draws_into_its_own_targets() {
             },
             world_from_scene: Matrix4::identity(),
         },
-        eyes: (0..2)
+        eyes: (0..2_u32)
             .map(|index| XrEye {
                 // Two eyes a little apart, three kilometres up, looking straight down.
                 world_from_eye: Matrix4::from_translation(Vector3::new(
@@ -144,6 +153,7 @@ async fn each_eye_draws_into_its_own_targets() {
             })
             .collect(),
         request_overscan: 1.0,
+        prefetch: None,
     };
 
     map.run_xr_frame(frame).expect("both eyes render");
@@ -203,4 +213,105 @@ async fn without_terrain_no_elevation_is_known() {
         HeadlessMap::new(style, renderer, kernel, vec![Box::new(RenderPlugin)]).expect("a map");
     map.run_frame().expect("a frame renders");
     assert_eq!(map.terrain_elevation_at(LatLon::new(47.26, 11.39)), None);
+}
+
+/// A globe style with terrain and a vector source, as the device draws.
+fn terrain_globe_style() -> Style {
+    serde_json::from_str(
+        r##"{"version":8,"sources":{"osm":{"type":"vector","tiles":["https://osm.example/{z}/{x}/{y}.pbf"],"maxzoom":14},"dem":{"type":"raster-dem","tiles":["https://dem.example/{z}/{x}/{y}.png"],"tileSize":256,"maxzoom":12,"encoding":"terrarium"}},"layers":[{"id":"land","type":"fill","source":"osm","source-layer":"land","paint":{"fill-color":"#ccc"}}],"terrain":{"source":"dem","exaggeration":1},"projection":{"type":"globe"}}"##,
+    )
+    .expect("a globe terrain style parses")
+}
+
+#[tokio::test]
+async fn both_eyes_of_a_frame_draw_the_same_tiles_over_terrain() {
+    use crate::render::eye_covering::SharedCovering;
+
+    // The zoom an eye derives to counts tiles per pixel, so the surface is the headset's.
+    let (width, height) = (1888, 1792);
+    let (kernel, renderer) = create_headless_renderer(width, height, None)
+        .await
+        .expect("a headless renderer");
+    let format = renderer.state().surface().surface_format();
+    let mut map = HeadlessMap::new(
+        terrain_globe_style(),
+        renderer,
+        kernel,
+        vec![Box::new(RenderPlugin)],
+    )
+    .expect("a map");
+    map.set_max_pitch(cgmath::Deg(89.0));
+    let colors = [
+        texture_sized(map.device(), format, width, height),
+        texture_sized(map.device(), format, width, height),
+    ];
+    let depths = [
+        texture_sized(
+            map.device(),
+            wgpu::TextureFormat::Depth32Float,
+            width,
+            height,
+        ),
+        texture_sized(
+            map.device(),
+            wgpu::TextureFormat::Depth32Float,
+            width,
+            height,
+        ),
+    ];
+    for frame_number in 0..3_u64 {
+        // Two eyes 1000 km up, looking north and nearly level, a pupil apart.
+        let level_gaze = Matrix4::from_angle_x(Rad(89.5_f64.to_radians()));
+        let frame = XrFrame {
+            timestamp: Duration::from_millis(16 * (frame_number + 1)),
+            placement: ScenePlacement {
+                anchor: ExternalAnchor {
+                    position: LatLon::new(47.26, 11.39),
+                    altitude_meters: 0.0,
+                },
+                world_from_scene: Matrix4::identity(),
+            },
+            eyes: (0..2_u32)
+                .map(|index| XrEye {
+                    world_from_eye: Matrix4::from_translation(Vector3::new(
+                        f64::from(index) * 0.064,
+                        0.0,
+                        1.0e6,
+                    )) * level_gaze,
+                    frustum: EyeFrustum::symmetric(Rad(1.4), 1.05, 0.5, 1.0e8),
+                    target: EyeTarget {
+                        color: Some(colors[index as usize].create_view(&Default::default())),
+                        depth: Some(depths[index as usize].create_view(&Default::default())),
+                    },
+                })
+                .collect(),
+            request_overscan: 1.2,
+            prefetch: None,
+        };
+        map.run_xr_frame(frame)
+            .expect("both eyes render over terrain");
+
+        let world = map.world();
+        let shared = world
+            .resources
+            .get::<SharedCovering>()
+            .expect("the first eye kept its selection");
+        let first_eye: Vec<_> = shared.tiles().expect("the first eye saw tiles").to_vec();
+        let second_eye = crate::render::drawn_tiles(world);
+        let view = map.view_state();
+        assert!(
+            first_eye.len() >= 25,
+            "frame {frame_number}: a level gaze from 1000 km draws {} tiles at zoom {:.2} pitch {:?} center {:?}: {first_eye:?}",
+            first_eye.len(),
+            view.zoom().value(),
+            view.camera().get_pitch(),
+            view.external_view().anchor,
+        );
+        for coords in &first_eye {
+            assert!(
+                second_eye.contains(coords),
+                "frame {frame_number}: the second eye does not draw {coords:?} the first eye selected"
+            );
+        }
+    }
 }

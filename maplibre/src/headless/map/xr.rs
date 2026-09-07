@@ -8,6 +8,7 @@ use crate::{
     projection::ProjectionType,
     render::{
         eventually::Eventually,
+        eye_covering::EyeInFrame,
         frame_input::ViewSource,
         resource::TextureView,
         xr::{PrefetchView, ScenePlacement, XrEye, XrFrame},
@@ -39,17 +40,27 @@ pub enum XrFrameError {
 impl HeadlessMap {
     /// Draws every eye of the frame into its own target, from the placement the host chose.
     ///
-    /// Each eye runs the whole schedule with its own view, so tile requests, terrain coverage
-    /// and the tile covering follow that eye's frustum rather than an average of the pair.
+    /// Each eye runs the whole schedule with its own view, so tile requests and terrain
+    /// coverage follow that eye's frustum rather than an average of the pair, while the tiles
+    /// drawn are the ones the first eye selects, so both eyes show each tile at one level.
     /// An eye without a colour target draws into the map's own texture, which then holds
     /// the last such eye.
     pub fn run_xr_frame(&mut self, frame: XrFrame) -> Result<(), XrFrameError> {
         self.set_prefetch(frame.prefetch.as_ref(), frame.eyes.first());
+        let resources = &mut self.map_context.world.resources;
+        let frame_number = resources
+            .get::<EyeInFrame>()
+            .map_or(0, |eye| eye.frame.wrapping_add(1));
         for (index, eye) in frame.eyes.into_iter().enumerate() {
             let view = frame
                 .placement
                 .view_from(eye.world_from_eye, eye.frustum)
                 .ok_or(XrFrameError::SingularEye { index })?;
+            // The first eye selects the frame's tiles; the others draw the same ones.
+            self.map_context.world.resources.insert(EyeInFrame {
+                index,
+                frame: frame_number,
+            });
             let input = self.frame_input_mut();
             input.timestamp = frame.timestamp;
             input.view = ViewSource::External(view);

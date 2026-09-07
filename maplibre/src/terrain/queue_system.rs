@@ -12,12 +12,12 @@ use crate::{
     raster::{render_commands::DrawRasterTiles, resource::RasterResources},
     render::{
         eventually::{Eventually, Eventually::Initialized},
-        projection::{raster_source_regions, view_region_for_projection},
+        eye_covering::drawn_covering,
         render_commands::DrawMasks,
         render_phase::{Draw, DrawState, LayerItem, ProjectionBinding, RenderPhase, TileMaskItem},
         shaders::ShaderTileMetadata,
         tile_view_pattern::{TileShape, WgpuTileViewPattern, DEFAULT_TILE_SIZE},
-        view_state::{ViewState, ViewStatePadding},
+        view_state::ViewState,
         Renderer,
     },
     style::{source::TileAddressingScheme, Style},
@@ -74,26 +74,16 @@ pub fn queue_system(
         return Ok(());
     };
     let zoom = view_state.zoom();
-    let Some(view_region) = view_region_for_projection(
-        style,
-        view_state,
-        world,
-        zoom.zoom_level(DEFAULT_TILE_SIZE),
-        ViewStatePadding::Tight,
-    )
-    .map_err(|error| {
-        tracing::error!(%error, "unable to select terrain tiles");
-        SystemError::Setup
-    })?
-    else {
+    let (view_region, raster_coverings) =
+        drawn_covering(style, view_state, world, zoom.zoom_level(DEFAULT_TILE_SIZE)).map_err(
+            |error| {
+                tracing::error!(%error, "unable to select terrain tiles");
+                SystemError::Setup
+            },
+        )?;
+    let Some(view_region) = view_region else {
         return Ok(());
     };
-
-    let raster_coverings = raster_source_regions(style, view_state, world, ViewStatePadding::Tight)
-        .map_err(|error| {
-            tracing::error!(%error, "unable to select terrain raster tiles");
-            SystemError::Setup
-        })?;
     let targets = select_targets(view_region.iter(), world, &raster_coverings);
     let specs = collect_layer_specs(targets, style, world, zoom.value());
     let clear_color = background_clear_color(style);

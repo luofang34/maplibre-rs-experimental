@@ -4,9 +4,8 @@ use crate::{
     context::MapContext,
     render::{
         eventually::{Eventually, Eventually::Initialized},
-        projection::{raster_source_regions, view_region_for_projection},
+        eye_covering::drawn_covering,
         tile_view_pattern::{ViewTileSources, WgpuTileViewPattern, DEFAULT_TILE_SIZE},
-        view_state::ViewStatePadding,
     },
     tcs::system::{SystemError, SystemResult},
 };
@@ -19,6 +18,17 @@ pub fn tile_view_pattern_system(
         ..
     }: &mut MapContext,
 ) -> SystemResult {
+    // Create the tile view pattern only for tiles in view -> Tight
+    let (view_region, raster_coverings) = drawn_covering(
+        style,
+        view_state,
+        world,
+        view_state.zoom().zoom_level(DEFAULT_TILE_SIZE),
+    )
+    .map_err(|error| {
+        tracing::error!(%error, "unable to select tiles for rendering");
+        SystemError::Setup
+    })?;
     let Some((Initialized(tile_view_pattern), view_tile_sources)) = world
         .resources
         .query::<(&Eventually<WgpuTileViewPattern>, &ViewTileSources)>()
@@ -26,28 +36,8 @@ pub fn tile_view_pattern_system(
         return Err(SystemError::Dependencies);
     };
 
-    // Create the tile view pattern only for tiles in view -> Tight
-    let view_region = view_region_for_projection(
-        style,
-        view_state,
-        world,
-        view_state.zoom().zoom_level(DEFAULT_TILE_SIZE),
-        ViewStatePadding::Tight,
-    )
-    .map_err(|error| {
-        tracing::error!(%error, "unable to select tiles for rendering");
-        SystemError::Setup
-    })?;
-
     if let Some(view_region) = &view_region {
         let zoom = view_state.zoom();
-        let raster_coverings =
-            raster_source_regions(style, view_state, world, ViewStatePadding::Tight).map_err(
-                |error| {
-                    tracing::error!(%error, "unable to select raster tiles for rendering");
-                    SystemError::Setup
-                },
-            )?;
 
         let view_tiles = tile_view_pattern.generate_pattern(
             view_region,
