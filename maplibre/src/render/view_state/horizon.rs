@@ -1,6 +1,6 @@
 //! The horizon on screen: where the flat map ends and the sky begins.
 
-use cgmath::{EuclideanSpace, InnerSpace, Point2, Vector2, Vector3, Vector4};
+use cgmath::{EuclideanSpace, InnerSpace, Point2, SquareMatrix, Vector2, Vector4};
 
 use super::ViewState;
 
@@ -75,38 +75,26 @@ impl ViewState {
 
     fn eye_horizon_line(&self) -> Option<HorizonLine> {
         self.external_eye?;
-        let view_projection = self.view_projection().0;
-        let at_infinity = |direction: Vector3<f64>| view_projection * direction.extend(0.0);
-        let east = at_infinity(Vector3::unit_x());
-        let north = at_infinity(Vector3::unit_y());
-        // The horizon passes through the images of the ground directions at infinity. As
-        // homogeneous screen points (x, y, w) the line through two of them is their cross
-        // product; in pixels with y up, x_ndc = 2 x / width - 1.
-        let line =
-            Vector3::new(east.x, east.y, east.w).cross(Vector3::new(north.x, north.y, north.w));
-        let normal = Vector2::new(2.0 * line.x / self.width, 2.0 * line.y / self.height);
-        let offset = line.z - line.x - line.y;
-        let center = self.camera.position();
-        let ground = view_projection * Vector4::new(center.x, center.y, self.center_elevation, 1.0);
+        let inverse = self.view_projection().0.invert()?;
+        let eye_height = self.eye_position().z;
+        // A ray's vertical component chooses the sky side even when the bookkeeping
+        // center is behind the eye. Projecting that center would flip the gradient.
+        let vertical = |clip: Vector4<f64>| {
+            let point = inverse * clip;
+            point.z - eye_height * point.w
+        };
+        let x = vertical(Vector4::new(1.0, 0.0, 0.0, 0.0));
+        let y = vertical(Vector4::new(0.0, 1.0, 0.0, 0.0));
+        let center = vertical(Vector4::new(0.0, 0.0, 0.0, 1.0));
+        let normal = Vector2::new(2.0 * x / self.width, 2.0 * y / self.height);
+        let offset = center - x - y;
         let length = normal.magnitude();
         if length < 1e-12 {
             // Looking straight down or up: the horizon is off every screen.
-            return Some(HorizonLine::out_of_sight(ground.w <= 0.0));
+            return Some(HorizonLine::out_of_sight(center > 0.0));
         }
-        let mut normal = normal / length;
-        let mut offset = offset / length;
-        // The map center lies on the ground in front of the eye, so the sky is on the other
-        // side of the line.
-        if ground.w > 0.0 {
-            let pixel = Vector2::new(
-                (ground.x / ground.w + 1.0) / 2.0 * self.width,
-                (ground.y / ground.w + 1.0) / 2.0 * self.height,
-            );
-            if pixel.dot(normal) + offset > 0.0 {
-                normal = -normal;
-                offset = -offset;
-            }
-        }
+        let normal = normal / length;
+        let offset = offset / length;
         // The Mercator plane ends at the poles' latitude. Between its nearest edge and the
         // horizon nothing is drawn, so the sky reaches down to cover that void, as the GL JS
         // horizon sits below the true one; the ground is drawn over it where there is any.
@@ -136,3 +124,6 @@ impl ViewState {
         focal_length * height / edge_distance
     }
 }
+
+#[cfg(test)]
+mod tests;
