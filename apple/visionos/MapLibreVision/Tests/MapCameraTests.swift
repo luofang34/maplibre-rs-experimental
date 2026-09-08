@@ -43,3 +43,69 @@ final class MapCameraTests: XCTestCase {
         XCTAssertLessThan(simd_length(placement.current.translation - target), 1e-6)
     }
 }
+
+final class MapScaleCameraTests: XCTestCase {
+    func testPairSurfacePivotRemainsFixedAtEveryScale() {
+        for height in [4000.0, 60_000, 100_000, 1_000_000, 8_000_000, 40_000_000] {
+            var placement = MapPlacement(viewpoint: .above(.innsbruck, height: height))
+            placement.tableCenter = SIMD3<Double>(0, 0, -1)
+            placement.place(viewer: .zero)
+            let radius = MapPlacement.earthRadiusMeters
+            let local = SIMD3<Double>(radius * sin(0.001), 0, radius * (cos(0.001) - 1))
+            let target = placement.current.translation + placement.current.rotation.act(local * exp(placement.current.logScale))
+            placement.updateViewRay(origin: .zero, direction: SIMD3<Double>(0, 1, 0))
+            let before = placement.current.rotation
+            placement.apply(.init(turn: 0.2, pitch: 0.1, beginsOrbit: true,
+                                  orbitAnchor: (.zero, simd_normalize(target))))
+            let moved = placement.current.translation + placement.current.rotation.act(local * exp(placement.current.logScale))
+            XCTAssertLessThan(simd_length(moved - target), 1e-5, "pivot at height \(height)")
+            XCTAssertGreaterThan(abs((placement.current.rotation * before.inverse).angle), 0.19)
+        }
+    }
+
+    func testCarryMatchesRoomDistanceAndOrientationAtIntermediateScales() {
+        for height in [100_000.0, 1_000_000, 8_000_000, 40_000_000] {
+            var placement = MapPlacement(viewpoint: .above(.innsbruck, height: height))
+            placement.tableCenter = SIMD3<Double>(0, 0, -1)
+            placement.place(viewer: .zero)
+            let before = placement.current
+            let travel = SIMD3<Double>(0.1, 0.05, 0.07)
+            placement.apply(.init(translation: travel))
+            XCTAssertLessThan(simd_length(placement.current.translation - before.translation - travel), 1e-6)
+            XCTAssertLessThan(abs((placement.current.rotation * before.rotation.inverse).angle), 1e-6)
+        }
+    }
+
+    func testFlightCapturesActualPoseAndArrivesWithoutSnap() {
+        var placement = MapPlacement(viewpoint: .above(.innsbruck, height: 4_000))
+        placement.place(viewer: .zero)
+        placement.apply(.init(turn: 0.5, pitch: 0.4, beginsOrbit: true))
+        let before = placement.current
+        placement.fly(to: MapPlacement.tableHeight, at: 1, viewer: SIMD3<Double>(0.2, 0, 0))
+        _ = placement.advance(at: 1)
+        XCTAssertLessThan(simd_length(placement.current.translation - before.translation), 1e-6)
+        XCTAssertLessThan(abs((placement.current.rotation * before.rotation.inverse).angle), 1e-6)
+        _ = placement.advance(at: 1 + MapPlacement.transitionSeconds - 1e-5)
+        let almost = placement.current
+        _ = placement.advance(at: 1 + MapPlacement.transitionSeconds)
+        XCTAssertLessThan(simd_length(placement.current.translation - almost.translation), 1e-5)
+        XCTAssertLessThan(abs((placement.current.rotation * almost.rotation.inverse).angle), 1e-5)
+        XCTAssertEqual(placement.viewpoint.tilt, 0)
+        XCTAssertEqual(placement.viewpoint.globeRoll, 0)
+    }
+}
+
+final class TableTwistTests: XCTestCase {
+    func testCentralTwistSpinsGlobeAroundItsVisibleNormalWithoutSwingingCenter() {
+        var placement = MapPlacement(viewpoint: .above(.innsbruck, height: MapPlacement.tableHeight))
+        placement.tableCenter = SIMD3<Double>(0, 0, -1)
+        placement.place(viewer: .zero)
+        let before = placement.current
+        let target = before.translation
+        placement.apply(.init(turn: 0.3, beginsOrbit: true, orbitAnchor: (.zero, simd_normalize(target))))
+        let radius = MapPlacement.earthRadiusMeters * exp(before.logScale)
+        let center = placement.current.translation - placement.current.rotation.act(SIMD3<Double>(0, 0, radius))
+        XCTAssertLessThan(simd_length(center - placement.tableCenter), 1e-6)
+        XCTAssertLessThan(simd_length(placement.current.translation - target), 1e-6)
+    }
+}

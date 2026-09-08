@@ -24,6 +24,7 @@ enum MapGestureInput {
         var turn = 0.0
         var pitch = 0.0
         var beginsOrbit = false
+        var orbitAnchor: (origin: SIMD3<Double>, direction: SIMD3<Double>)?
         /// The ray the first hand of a pair grabbed, which a zoom keeps its point under.
         var zoomAnchor: (origin: SIMD3<Double>, direction: SIMD3<Double>)?
         /// A short stationary pinch selects the rendered label under its ray.

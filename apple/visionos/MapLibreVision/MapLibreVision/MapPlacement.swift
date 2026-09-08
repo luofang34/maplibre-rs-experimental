@@ -133,8 +133,10 @@ struct MapPlacement {
     static let latitudeLimit = 84.0
 
     private struct Flight {
-        let fromHeight: Double
-        let toHeight: Double
+        let from: Viewpoint
+        let to: Viewpoint
+        let fromPose: ScenePose
+        let toPose: ScenePose
         let start: Double
     }
 
@@ -150,7 +152,12 @@ struct MapPlacement {
     let cameraPolicy: MapCameraPolicy
     private var viewRay: (origin: SIMD3<Double>, direction: SIMD3<Double>)?
     private var orbitTarget: (local: SIMD3<Double>, world: SIMD3<Double>)?
-    private var orbitOffsetPerHeight = SIMD3<Double>.zero
+    private var sceneOffset = SIMD3<Double>.zero
+    private var sceneRotation = simd_quatd(angle: 0, axis: SIMD3<Double>(0, 1, 0))
+    private var tableRotation: simd_quatd?
+    private var immersiveTilt = Double.pi / 4
+    private var orbitRight = SIMD3<Double>(1, 0, 0)
+    private var orbitUp = SIMD3<Double>(0, 1, 0)
     /// Terrain elevation at the focus, metres, as the map last reported it.
     var focusElevation = 0.0
 
@@ -186,6 +193,8 @@ struct MapPlacement {
     /// Places the scene about `viewer`; the world stays put about that place afterwards.
     mutating func place(viewer: SIMD3<Double>) {
         viewerReference = viewer
+        tableRotation = nil
+        tableRotation = tablePose().rotation
         orbitTarget = nil
         current = pose(for: viewpoint)
     }
@@ -199,28 +208,45 @@ struct MapPlacement {
         rotate(bearing: 0, pitch: radians - viewpoint.tilt, begins: false)
     }
 
-    private mutating func rotate(bearing: Double, pitch: Double, begins: Bool) {
-        if cameraPolicy == .freeOrbit, orbitTarget == nil || begins { captureOrbitTarget() }
+    private mutating func rotate(
+        bearing: Double, pitch: Double, begins: Bool,
+        anchor: (origin: SIMD3<Double>, direction: SIMD3<Double>)? = nil
+    ) {
+        if orbitTarget == nil || begins { captureOrbitTarget(anchor: anchor) }
+        let before = current
+        let nextTilt = min(max(viewpoint.tilt + pitch, 0), 70 * .pi / 180)
+        let appliedPitch = nextTilt - viewpoint.tilt
         viewpoint.bearing += bearing
-        viewpoint.tilt = min(max(viewpoint.tilt + pitch, 0), 70 * .pi / 180)
+        viewpoint.tilt = nextTilt
+        let yaw = simd_quatd(angle: bearing, axis: orbitUp)
+        let pitchTurn = simd_quatd(angle: appliedPitch, axis: orbitRight)
+        let posed = pose(for: viewpoint)
+        sceneRotation = pitchTurn * yaw * before.rotation * posed.rotation.inverse * sceneRotation
         current = pose(for: viewpoint)
-        if cameraPolicy == .freeOrbit, let target = orbitTarget {
-            let moved = current.translation + current.rotation.act(target.local)
-            orbitOffsetPerHeight += (target.world - moved) / viewpoint.height
+        if let target = orbitTarget {
+            let moved = current.translation + current.rotation.act(target.local * exp(current.logScale))
+            sceneOffset += target.world - moved
             current = pose(for: viewpoint)
         }
     }
 
-    private mutating func captureOrbitTarget() {
-        guard viewpoint.height <= MapPlacement.groundHeightLimit else { return }
+    private mutating func captureOrbitTarget(
+        anchor: (origin: SIMD3<Double>, direction: SIMD3<Double>)?
+    ) {
+        let scale = exp(current.logScale)
+        let radius = MapPlacement.earthRadiusMeters * scale
         let up = current.rotation.act(SIMD3<Double>(0, 0, 1))
-        let center = current.translation - up * MapPlacement.earthRadiusMeters
-        let target = viewRay.flatMap {
+        let center = current.translation - up * radius
+        let ray = anchor ?? viewRay
+        let surface = ray.flatMap {
             hit(origin: $0.origin, direction: $0.direction, center: center,
-                radius: MapPlacement.earthRadiusMeters,
-                reach: MapPlacement.maxGrabDistanceInHeights * viewpoint.height)
+                radius: radius, reach: MapPlacement.maxGrabDistanceInHeights * viewpoint.height * scale)
         } ?? current.translation
-        orbitTarget = (current.rotation.inverse.act(target - current.translation), target)
+        orbitUp = simd_normalize(surface - center)
+        let right = simd_cross(ray?.direction ?? SIMD3<Double>(0, 0, -1), orbitUp)
+        orbitRight = simd_length(right) > 1e-6 ? simd_normalize(right) : current.rotation.act(SIMD3<Double>(1, 0, 0))
+        let target = cameraPolicy == .fixedViewpoint ? (viewRay?.origin ?? viewerReference) : surface
+        orbitTarget = (current.rotation.inverse.act(target - current.translation) / scale, target)
     }
 
     mutating func levelView() {
@@ -228,40 +254,52 @@ struct MapPlacement {
         viewpoint.bearing = 0
         viewpoint.globeRoll = 0
         orbitTarget = nil
-        orbitOffsetPerHeight = .zero
+        sceneOffset = .zero
+        sceneRotation = simd_quatd(angle: 0, axis: SIMD3<Double>(0, 1, 0))
         current = pose(for: viewpoint)
     }
 
     /// Starts a flight to `height` from wherever the viewpoint is.
     mutating func fly(to height: Double, at time: Double, viewer: SIMD3<Double>) {
+        let from = viewpoint
+        let fromPose = current
+        if viewpoint.height <= MapPlacement.groundHeightLimit { immersiveTilt = viewpoint.tilt }
         viewerReference = viewer
         orbitTarget = nil
-        flight = Flight(fromHeight: viewpoint.height, toHeight: height, start: time)
-    }
-
-    /// The pose the scene will have when the flight in progress ends, for the tiles that
-    /// frame needs to be requested before it arrives; none while not flying.
-    func destination() -> ScenePose? {
-        guard let flight else {
-            return nil
-        }
+        sceneOffset = .zero
+        sceneRotation = simd_quatd(angle: 0, axis: SIMD3<Double>(0, 1, 0))
         var arrival = viewpoint
-        arrival.height = flight.toHeight
-        return pose(for: arrival)
+        arrival.height = height
+        arrival.globeRoll = 0
+        arrival.tilt = height <= MapPlacement.groundHeightLimit ? immersiveTilt : 0
+        let heading = viewRay.flatMap { ray -> Double? in
+            guard simd_length(SIMD2<Double>(ray.direction.x, ray.direction.z)) > 1e-4 else { return nil }
+            return atan2(-ray.direction.x, -ray.direction.z)
+        } ?? viewpoint.bearing
+        arrival.bearing = height <= MapPlacement.groundHeightLimit ? heading : 0
+        flight = Flight(from: from, to: arrival, fromPose: fromPose,
+                        toPose: pose(for: arrival), start: time)
     }
 
-    /// Moves the flight on and re-poses the scene; returns the immersion the room should
-    /// show when it changed.
+    func destination() -> ScenePose? { flight?.toPose }
+
     mutating func advance(at time: Double) -> MapImmersion? {
         if let flight {
             let t = min(max((time - flight.start) / MapPlacement.transitionSeconds, 0), 1)
             let eased = t * t * (3 - 2 * t)
-            viewpoint.height = exp(log(flight.fromHeight) + (log(flight.toHeight) - log(flight.fromHeight)) * eased)
+            viewpoint.height = exp(log(flight.from.height) + (log(flight.to.height) - log(flight.from.height)) * eased)
+            viewpoint.tilt = flight.from.tilt + (flight.to.tilt - flight.from.tilt) * eased
+            viewpoint.bearing = flight.from.bearing + (flight.to.bearing - flight.from.bearing) * eased
+            viewpoint.globeRoll = flight.from.globeRoll * (1 - eased)
+            current = ScenePose.flight(from: flight.fromPose, to: flight.toPose, eased, viewer: viewerReference)
             if t >= 1 {
+                viewpoint = flight.to
                 self.flight = nil
+                current = pose(for: viewpoint)
             }
+        } else {
+            current = pose(for: viewpoint)
         }
-        current = pose(for: viewpoint)
         let share = bridgeShare(viewpoint.height)
         let wanted: MapImmersion? = share < MapPlacement.fullImmersionBelowShare
             ? .full : share > MapPlacement.mixedImmersionAboveShare ? .mixed : nil
@@ -285,10 +323,11 @@ struct MapPlacement {
         let onGround = viewpoint.height <= MapPlacement.groundHeightLimit
         if !input.moves.isEmpty || input.logScale != 0 { orbitTarget = nil }
         if !onGround {
-            tableCenter += input.translation
-            for move in input.moves where move.rayOrigin == nil {
-                tableCenter += move.travel
-            }
+            var travel = input.translation
+            for move in input.moves where move.rayOrigin == nil { travel += move.travel }
+            let before = current.translation
+            tableCenter += travel
+            sceneOffset += before + travel - pose(for: viewpoint).translation
         }
         let scale = exp(current.logScale)
         let up = current.rotation.act(SIMD3<Double>(0, 0, 1))
@@ -347,12 +386,8 @@ struct MapPlacement {
             viewpoint.longitude = focus.longitude
             viewpoint.globeRoll = focus.roll
         }
-        if onGround {
-            if input.turn != 0 || input.pitch != 0 {
-                rotate(bearing: input.turn, pitch: input.pitch, begins: input.beginsOrbit)
-            }
-        } else {
-            viewpoint.globeRoll += input.turn
+        if input.turn != 0 || input.pitch != 0 {
+            rotate(bearing: input.turn, pitch: input.pitch, begins: input.beginsOrbit, anchor: input.orbitAnchor)
         }
         let heightBefore = viewpoint.height
         viewpoint.height = min(
@@ -468,14 +503,13 @@ struct MapPlacement {
     /// The scene's pose for a viewpoint: level under the viewer near the ground, the globe on
     /// the table at the top, and the flight between them by height in between.
     func pose(for viewpoint: Viewpoint) -> ScenePose {
-        var ground = groundPose(
+        let ground = groundPose(
             height: min(viewpoint.height, MapPlacement.groundHeightLimit), bearing: viewpoint.bearing, tilt: viewpoint.tilt)
-        if viewpoint.height <= MapPlacement.groundHeightLimit {
-            ground.rotation = ground.rotation * simd_quatd(angle: viewpoint.globeRoll, axis: SIMD3<Double>(0, 0, 1))
-            return ground
-        }
-        var pose = ScenePose.flight(from: ground, to: tablePose(), bridgeShare(viewpoint.height), viewer: viewerReference)
-        pose.rotation = pose.rotation * simd_quatd(angle: viewpoint.globeRoll, axis: SIMD3<Double>(0, 0, 1))
+        var pose = viewpoint.height <= MapPlacement.groundHeightLimit ? ground :
+            ScenePose.flight(from: ground, to: tablePose(), bridgeShare(viewpoint.height), viewer: viewerReference)
+        pose.rotation = sceneRotation * pose.rotation
+            * simd_quatd(angle: viewpoint.globeRoll, axis: SIMD3<Double>(0, 0, 1))
+        pose.translation += sceneOffset
         return pose
     }
 
@@ -489,8 +523,7 @@ struct MapPlacement {
         let turn = simd_quatd(angle: bearing, axis: up)
         let pitch = simd_quatd(angle: tilt, axis: SIMD3<Double>(1, 0, 0))
         return ScenePose(rotation: pitch * turn * level,
-                         translation: viewerReference + pitch.act(-up * height)
-                            + orbitOffsetPerHeight * height, logScale: 0)
+                         translation: viewerReference + pitch.act(-up * height), logScale: 0)
     }
 
     /// A globe of the table's radius centred on the table, the focus facing the viewer with
@@ -506,10 +539,10 @@ struct MapPlacement {
         }
         north = simd_normalize(north)
         let east = simd_cross(north, facing)
-        let rotation = simd_quatd(simd_double3x3(east, north, facing))
+        let rotation = tableRotation ?? simd_quatd(simd_double3x3(east, north, facing))
         return ScenePose(
             rotation: rotation,
-            translation: tableCenter + facing * MapPlacement.tableRadius,
+            translation: tableCenter + rotation.act(SIMD3<Double>(0, 0, MapPlacement.tableRadius)),
             logScale: log(MapPlacement.tableRadius / MapPlacement.earthRadiusMeters))
     }
 }

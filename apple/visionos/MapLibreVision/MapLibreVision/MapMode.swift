@@ -53,6 +53,7 @@ final class MapModeStore: ObservableObject {
     private var requestedTilt: Double?
     private var requestedLevel = false
     private var reportedGlobe: Bool?
+    private var reportedTilt: Double?
     /// `--height N` starts the viewer N metres above the focus, for scripted runs.
     let initialHeight: Double
 
@@ -81,12 +82,15 @@ final class MapModeStore: ObservableObject {
         lock.withLock { requestedLevel = true }
     }
 
-    func takeControls(isGlobe: Bool) -> (Double?, Bool) {
+    func takeControls(isGlobe: Bool, tilt: Double) -> (Double?, Bool) {
         lock.withLock {
-            if reportedGlobe != isGlobe {
+            let degrees = (tilt * 180 / .pi * 10).rounded() / 10
+            if reportedGlobe != isGlobe || reportedTilt != degrees, requestedTilt == nil {
                 reportedGlobe = isGlobe
+                reportedTilt = degrees
                 Task { @MainActor in
                     self.isGlobe = isGlobe
+                    self.tiltDegrees = degrees
                 }
             }
             defer { requestedTilt = nil; requestedLevel = false }

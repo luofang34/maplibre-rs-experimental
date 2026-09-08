@@ -10,9 +10,15 @@ The rotation threshold is three degrees. Common motion starts at 15 mm in immers
 
 ## Free camera and vehicle viewpoint
 
-Free camera captures the ground point under the center of the view when orbit starts. The point stays at the same room position while the scene rotates around it. Zoom changes the camera-to-target distance. If the center looks into sky, use the existing surface focus rather than inventing an intersection behind the viewer. A new orbit can acquire a new target; head motion during an orbit cannot move it.
+Free camera captures the surface point under the midpoint of the two initial selection rays when orbit starts, with the center head ray as fallback. The same rule applies at table, intermediate and immersive scales. The point stays at the same room position while the scene rotates around it. Zoom changes the camera-to-target distance. If the center looks into sky, use the existing surface focus rather than inventing an intersection behind the viewer. A new orbit can acquire a new target; head motion during an orbit cannot move it.
 
 A fixed viewpoint, such as an airplane camera mount, keeps its scene-space eye position. Artificial look offsets rotate about that position, while aircraft pose and physical head pose remain separate transforms. The host explicitly chooses this camera policy; camera behavior must never switch merely because the view crosses the horizon. Vehicle following and aircraft pose input are future integrations. The current application uses free camera.
+
+## Placement and mode flights
+
+Common two-hand motion carries the globe by the same room distance at table and intermediate scales. Carrying preserves its orientation. Twist captures the local surface normal and a pitch axis once per gesture, so later head motion cannot change the rotation axes. A twist at the center of the table globe spins it about its visible normal without swinging the globe around the room.
+
+A mode flight starts from the complete rendered pose, including user placement, orbit corrections and head-relative orientation. The table destination uses the retained room placement, north up and zero tilt. The immersive destination uses horizontal head heading and the remembered immersive tilt; a nearly vertical head direction retains the map bearing. Position, rotation and scale interpolate together, with exact start and end poses. Physical head motion continues to affect the view independently. The tilt control reflects gesture and flight results.
 
 ## Measurement, reserved interaction
 

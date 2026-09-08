@@ -170,21 +170,30 @@ struct MapGestureRecognizer<ID: Hashable> {
         }
         switch pairMode {
         case .zoom:
-            let anchor = order.first.flatMap { pinches[$0] }.flatMap { pinch in
-                pinch.origin.flatMap { origin in pinch.firstDirection.map { (origin, $0) } }
-            }
-            return .init(logScale: log(now.distance / was.distance), zoomAnchor: anchor)
+            return .init(logScale: log(now.distance / was.distance), zoomAnchor: pairAnchor())
         case .rotate:
-            return .init(turn: wrapped(now.angle - was.angle), beginsOrbit: beginsOrbit)
+            return .init(turn: wrapped(now.angle - was.angle), beginsOrbit: beginsOrbit, orbitAnchor: pairAnchor())
         case .orbit:
             let travel = now.center - was.center
             return .init(turn: simd_dot(travel, pairRight) * 2.5,
-                         pitch: simd_dot(travel, pairUp) * 2.5, beginsOrbit: beginsOrbit)
+                         pitch: simd_dot(travel, pairUp) * 2.5, beginsOrbit: beginsOrbit, orbitAnchor: pairAnchor())
         case .translate:
             return .init(translation: now.center - was.center)
         case .undecided:
             return .init()
         }
+    }
+
+    private func pairAnchor() -> (origin: SIMD3<Double>, direction: SIMD3<Double>)? {
+        let rays = order.compactMap { id -> (SIMD3<Double>, SIMD3<Double>)? in
+            guard let pinch = pinches[id], let origin = pinch.origin,
+                  let direction = pinch.firstDirection else { return nil }
+            return (origin, direction)
+        }
+        guard rays.count == 2 else { return nil }
+        let direction = rays[0].1 + rays[1].1
+        guard simd_length(direction) > 1e-6 else { return nil }
+        return ((rays[0].0 + rays[1].0) / 2, simd_normalize(direction))
     }
 
     private func wrapped(_ angle: Double) -> Double { atan2(sin(angle), cos(angle)) }

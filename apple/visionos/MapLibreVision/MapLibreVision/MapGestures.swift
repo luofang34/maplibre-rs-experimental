@@ -39,6 +39,7 @@ final class MapGestures {
             pending.turn += delta.turn
             pending.pitch += delta.pitch
             pending.beginsOrbit = pending.beginsOrbit || delta.beginsOrbit
+            if let anchor = delta.orbitAnchor { pending.orbitAnchor = anchor }
             if let selection = delta.selection { pending.selection = selection }
             if let anchor = delta.zoomAnchor { pending.zoomAnchor = anchor }
         }
