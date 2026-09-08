@@ -22,6 +22,8 @@ struct Viewpoint {
     var height: Double
     /// The world's turn about the viewer's vertical, radians, counterclockwise from above.
     var bearing: Double
+    var globeRoll = 0.0
+    var tilt = 0.0
 
     static func above(_ anchor: MapAnchor, height: Double) -> Viewpoint {
         Viewpoint(latitude: anchor.latitude, longitude: anchor.longitude, height: height, bearing: 0)
@@ -32,6 +34,11 @@ struct Viewpoint {
 enum MapImmersion {
     case mixed
     case full
+}
+
+enum MapCameraPolicy {
+    case freeOrbit
+    case fixedViewpoint
 }
 
 /// Where the scene stands in the room: a rotation, a position and a scale, kept apart so a
@@ -135,9 +142,15 @@ struct MapPlacement {
     private(set) var current: ScenePose
     private(set) var immersion: MapImmersion
     private var flight: Flight?
+    /// Whether this pinch began on the rendered sphere; crossing its edge keeps the mode.
+    private var globeGrabbed: Bool?
     /// Where the viewer stood when the scene was last placed about them; the world keeps to
     /// that place while they move about the room.
     private var viewerReference = SIMD3<Double>(0, 0, 0)
+    let cameraPolicy: MapCameraPolicy
+    private var viewRay: (origin: SIMD3<Double>, direction: SIMD3<Double>)?
+    private var orbitTarget: (local: SIMD3<Double>, world: SIMD3<Double>)?
+    private var orbitOffsetPerHeight = SIMD3<Double>.zero
     /// Terrain elevation at the focus, metres, as the map last reported it.
     var focusElevation = 0.0
 
@@ -145,8 +158,9 @@ struct MapPlacement {
     /// eyes, set once the head is tracked.
     var tableCenter = SIMD3<Double>(0, 1.1, -1.0)
 
-    init(viewpoint: Viewpoint) {
+    init(viewpoint: Viewpoint, cameraPolicy: MapCameraPolicy = .freeOrbit) {
         self.viewpoint = viewpoint
+        self.cameraPolicy = cameraPolicy
         current = ScenePose(rotation: simd_quatd(angle: 0, axis: SIMD3<Double>(0, 1, 0)), translation: .zero, logScale: 0)
         immersion = MapPlacement.immersion(forHeight: viewpoint.height)
         current = pose(for: viewpoint)
@@ -172,12 +186,56 @@ struct MapPlacement {
     /// Places the scene about `viewer`; the world stays put about that place afterwards.
     mutating func place(viewer: SIMD3<Double>) {
         viewerReference = viewer
+        orbitTarget = nil
+        current = pose(for: viewpoint)
+    }
+
+    mutating func updateViewRay(origin: SIMD3<Double>, direction: SIMD3<Double>) {
+        guard simd_length(direction) > 0.5 else { return }
+        viewRay = (origin, simd_normalize(direction))
+    }
+
+    mutating func setTilt(_ radians: Double) {
+        rotate(bearing: 0, pitch: radians - viewpoint.tilt, begins: false)
+    }
+
+    private mutating func rotate(bearing: Double, pitch: Double, begins: Bool) {
+        if cameraPolicy == .freeOrbit, orbitTarget == nil || begins { captureOrbitTarget() }
+        viewpoint.bearing += bearing
+        viewpoint.tilt = min(max(viewpoint.tilt + pitch, 0), 70 * .pi / 180)
+        current = pose(for: viewpoint)
+        if cameraPolicy == .freeOrbit, let target = orbitTarget {
+            let moved = current.translation + current.rotation.act(target.local)
+            orbitOffsetPerHeight += (target.world - moved) / viewpoint.height
+            current = pose(for: viewpoint)
+        }
+    }
+
+    private mutating func captureOrbitTarget() {
+        guard viewpoint.height <= MapPlacement.groundHeightLimit else { return }
+        let up = current.rotation.act(SIMD3<Double>(0, 0, 1))
+        let center = current.translation - up * MapPlacement.earthRadiusMeters
+        let target = viewRay.flatMap {
+            hit(origin: $0.origin, direction: $0.direction, center: center,
+                radius: MapPlacement.earthRadiusMeters,
+                reach: MapPlacement.maxGrabDistanceInHeights * viewpoint.height)
+        } ?? current.translation
+        orbitTarget = (current.rotation.inverse.act(target - current.translation), target)
+    }
+
+    mutating func levelView() {
+        viewpoint.tilt = 0
+        viewpoint.bearing = 0
+        viewpoint.globeRoll = 0
+        orbitTarget = nil
+        orbitOffsetPerHeight = .zero
         current = pose(for: viewpoint)
     }
 
     /// Starts a flight to `height` from wherever the viewpoint is.
     mutating func fly(to height: Double, at time: Double, viewer: SIMD3<Double>) {
         viewerReference = viewer
+        orbitTarget = nil
         flight = Flight(fromHeight: viewpoint.height, toHeight: height, start: time)
     }
 
@@ -217,17 +275,17 @@ struct MapPlacement {
     /// Applies hand input to the viewpoint; input during a flight is dropped.
     /// The rendered surface follows the hand: the point a pinch's ray grabbed keeps to the ray
     /// while the hand moves, whether that surface is the ground under the viewer or the globe
-    /// at its rendered size, so a hand movement moves what the eye sees by the same amount at
-    /// every height. Where the ray reaches no surface within reach, the pull is applied as if
-    /// it had grabbed a point at that reach. Two hands sliding together carry the globe with
-    /// them through the room, as a held object would move; turned about each other they turn
-    /// the ground about the viewer, or spin the globe about its axis.
-    mutating func apply(_ input: MapGestures.Delta) {
+    /// at its rendered size. A pinch begun outside the globe keeps the table globe's angular
+    /// speed as its size changes. Ground drags beyond reach pull at the reach limit.
+    /// Explicit placement input carries the globe; paired navigation input zooms or rotates it.
+    mutating func apply(_ input: MapGestureInput.Delta) {
         guard flight == nil else {
             return
         }
         let onGround = viewpoint.height <= MapPlacement.groundHeightLimit
+        if !input.moves.isEmpty || input.logScale != 0 { orbitTarget = nil }
         if !onGround {
+            tableCenter += input.translation
             for move in input.moves where move.rayOrigin == nil {
                 tableCenter += move.travel
             }
@@ -241,19 +299,12 @@ struct MapPlacement {
         var slide = SIMD3<Double>(repeating: 0)
         for move in input.moves {
             if let origin = move.rayOrigin, let from = move.rayFrom, let to = move.rayTo {
-                // Off the ground the globe turns with the hand as a held globe would: the
-                // surface keeps pace with the hand's travel, east and west about the polar
-                // axis and north and south towards the poles, and never rolls. Keeping the
-                // surface point under the pinch ray instead spins a small globe far faster
-                // than the hand moves, and tips it over onto a pole.
                 if !onGround {
-                    // A globe grown past the table's turns further per hand travel, by the
-                    // square root of its size: one-to-one with the hand, a large globe took
-                    // several drags to turn; one-to-one with the ray, a small one span.
-                    let gain = max(1, (radius / MapPlacement.tableRadius).squareRoot())
-                    slide += move.travel * gain
+                    slide += dragGlobe(move, origin: origin, from: from, to: to,
+                                       center: center, radius: radius, reach: reach)
                     continue
                 }
+                globeGrabbed = nil
                 if let grabbed = hit(origin: origin, direction: from, center: center, radius: radius, reach: reach),
                    let pulled = hit(origin: origin, direction: to, center: center, radius: radius, reach: reach)
                 {
@@ -277,17 +328,31 @@ struct MapPlacement {
             }
         }
         // The surface point the turn brought under the focus is the new focus.
-        let focusWas = turn.inverse.act(up)
-        moveFocus(toLocalDirection: current.rotation.inverse.act(focusWas))
+        if onGround {
+            let focusWas = turn.inverse.act(up)
+            moveFocus(toLocalDirection: current.rotation.inverse.act(focusWas))
+        }
         // The surface moving east under the viewer puts the focus further west.
         let localSlide = current.rotation.inverse.act(slide) / scale
         let earth = MapPlacement.earthRadiusMeters
-        viewpoint.latitude -= localSlide.y / earth * 180 / .pi
-        viewpoint.longitude -= localSlide.x / (earth * max(cos(viewpoint.latitude * .pi / 180), 0.1)) * 180 / .pi
         if onGround {
-            viewpoint.bearing += input.turn
+            viewpoint.latitude -= localSlide.y / earth * 180 / .pi
+            viewpoint.longitude -= localSlide.x / (earth * max(cos(viewpoint.latitude * .pi / 180), 0.1)) * 180 / .pi
+        } else if simd_length(localSlide) > 1e-9,
+                  let focus = GlobeDrag.focus(
+                    grabbed: offGlobeDirection(localSlide / earth),
+                    pulled: SIMD3<Double>(0, 0, 1), latitude: viewpoint.latitude,
+                    longitude: viewpoint.longitude, roll: viewpoint.globeRoll) {
+            viewpoint.latitude = focus.latitude
+            viewpoint.longitude = focus.longitude
+            viewpoint.globeRoll = focus.roll
+        }
+        if onGround {
+            if input.turn != 0 || input.pitch != 0 {
+                rotate(bearing: input.turn, pitch: input.pitch, begins: input.beginsOrbit)
+            }
         } else {
-            viewpoint.longitude -= input.turn * 180 / .pi
+            viewpoint.globeRoll += input.turn
         }
         let heightBefore = viewpoint.height
         viewpoint.height = min(
@@ -305,9 +370,41 @@ struct MapPlacement {
             viewpoint.latitude = gazed.latitude + (viewpoint.latitude - gazed.latitude) * share
             viewpoint.longitude = gazed.longitude + eastward * share
         }
-        viewpoint.latitude = min(max(viewpoint.latitude, -MapPlacement.latitudeLimit), MapPlacement.latitudeLimit)
+        let limit = onGround ? MapPlacement.latitudeLimit : 89.999999
+        viewpoint.latitude = min(max(viewpoint.latitude, -limit), limit)
         viewpoint.longitude = (viewpoint.longitude + 540).truncatingRemainder(dividingBy: 360) - 180
         current = pose(for: viewpoint)
+    }
+
+    private func offGlobeDirection(_ travel: SIMD3<Double>) -> SIMD3<Double> {
+        let tangent = SIMD3<Double>(-travel.x, -travel.y, 0)
+        let angle = simd_length(tangent)
+        guard angle > 1e-9 else { return SIMD3<Double>(0, 0, 1) }
+        return tangent / angle * sin(angle) + SIMD3<Double>(0, 0, cos(angle))
+    }
+
+    private mutating func dragGlobe(
+        _ move: MapGestureInput.Move, origin: SIMD3<Double>, from: SIMD3<Double>,
+        to: SIMD3<Double>, center: SIMD3<Double>, radius: Double, reach: Double
+    ) -> SIMD3<Double> {
+        let grabbed = hit(origin: origin, direction: from, center: center, radius: radius, reach: reach)
+        if move.beginsGesture || globeGrabbed == nil { globeGrabbed = grabbed != nil }
+        if globeGrabbed == true, let grabbed,
+           let pulled = hit(origin: origin, direction: to, center: center, radius: radius, reach: reach),
+           let focus = GlobeDrag.focus(
+               grabbed: current.rotation.inverse.act(simd_normalize(grabbed - center)),
+               pulled: current.rotation.inverse.act(simd_normalize(pulled - center)),
+               latitude: viewpoint.latitude, longitude: viewpoint.longitude,
+               roll: viewpoint.globeRoll)
+        {
+            viewpoint.latitude = focus.latitude
+            viewpoint.longitude = focus.longitude
+            viewpoint.globeRoll = focus.roll
+            current = pose(for: viewpoint)
+            return .zero
+        }
+        // Off-sphere navigation keeps the table globe's angular speed at every size.
+        return move.travel * (radius / MapPlacement.tableRadius)
     }
 
     /// Where a ray meets the rendered globe, unless it misses or the point is beyond reach.
@@ -371,23 +468,29 @@ struct MapPlacement {
     /// The scene's pose for a viewpoint: level under the viewer near the ground, the globe on
     /// the table at the top, and the flight between them by height in between.
     func pose(for viewpoint: Viewpoint) -> ScenePose {
-        let ground = groundPose(
-            height: min(viewpoint.height, MapPlacement.groundHeightLimit), bearing: viewpoint.bearing)
+        var ground = groundPose(
+            height: min(viewpoint.height, MapPlacement.groundHeightLimit), bearing: viewpoint.bearing, tilt: viewpoint.tilt)
         if viewpoint.height <= MapPlacement.groundHeightLimit {
+            ground.rotation = ground.rotation * simd_quatd(angle: viewpoint.globeRoll, axis: SIMD3<Double>(0, 0, 1))
             return ground
         }
-        return ScenePose.flight(from: ground, to: tablePose(), bridgeShare(viewpoint.height), viewer: viewerReference)
+        var pose = ScenePose.flight(from: ground, to: tablePose(), bridgeShare(viewpoint.height), viewer: viewerReference)
+        pose.rotation = pose.rotation * simd_quatd(angle: viewpoint.globeRoll, axis: SIMD3<Double>(0, 0, 1))
+        return pose
     }
 
     /// The world at full size and level with the room, the focus `height` below the viewer,
     /// north away from them unless the world is turned.
-    private func groundPose(height: Double, bearing: Double) -> ScenePose {
+    private func groundPose(height: Double, bearing: Double, tilt: Double) -> ScenePose {
         let east = SIMD3<Double>(1, 0, 0)
         let north = SIMD3<Double>(0, 0, -1)
         let up = SIMD3<Double>(0, 1, 0)
         let level = simd_quatd(simd_double3x3(east, north, up))
         let turn = simd_quatd(angle: bearing, axis: up)
-        return ScenePose(rotation: turn * level, translation: viewerReference - up * height, logScale: 0)
+        let pitch = simd_quatd(angle: tilt, axis: SIMD3<Double>(1, 0, 0))
+        return ScenePose(rotation: pitch * turn * level,
+                         translation: viewerReference + pitch.act(-up * height)
+                            + orbitOffsetPerHeight * height, logScale: 0)
     }
 
     /// A globe of the table's radius centred on the table, the focus facing the viewer with

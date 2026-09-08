@@ -44,9 +44,15 @@ final class MapModeStore: ObservableObject {
     /// The mode last flown to, for the launcher's buttons.
     @Published var mode: MapMode
     @Published var immersionStyle: any ImmersionStyle
+    @Published var tiltDegrees = 0.0
+    @Published var isGlobe = true
+    @Published var selectedFeature: MapSelection?
 
     private let lock = NSLock()
     private var requested: MapMode?
+    private var requestedTilt: Double?
+    private var requestedLevel = false
+    private var reportedGlobe: Bool?
     /// `--height N` starts the viewer N metres above the focus, for scripted runs.
     let initialHeight: Double
 
@@ -63,6 +69,33 @@ final class MapModeStore: ObservableObject {
         self.mode = mode
         maplibre_visionos_note("flight requested to \(mode.rawValue)")
         lock.withLock { requested = mode }
+    }
+
+    func setTilt(_ degrees: Double) {
+        tiltDegrees = degrees
+        lock.withLock { requestedTilt = degrees * .pi / 180 }
+    }
+
+    func resetLevel() {
+        tiltDegrees = 0
+        lock.withLock { requestedLevel = true }
+    }
+
+    func takeControls(isGlobe: Bool) -> (Double?, Bool) {
+        lock.withLock {
+            if reportedGlobe != isGlobe {
+                reportedGlobe = isGlobe
+                Task { @MainActor in
+                    self.isGlobe = isGlobe
+                }
+            }
+            defer { requestedTilt = nil; requestedLevel = false }
+            return (requestedTilt, requestedLevel)
+        }
+    }
+
+    func showSelection(_ selection: MapSelection?) {
+        Task { @MainActor in self.selectedFeature = selection }
     }
 
     /// The mode a button asked for since the last call, for the render thread.

@@ -7,13 +7,12 @@ import SwiftUI
 import simd
 
 /// Drives the compositor frame loop: per frame it places the scene for the current mode and,
-/// per eye, hands the eye's pose to the map and copies the map's texture into the drawable.
+/// hands all eye poses to the map together and presents their completed textures.
 final class MapRenderer {
     static let spaceID = "map"
 
     private let layerRenderer: LayerRenderer
     private let device: MTLDevice
-    private let commandQueue: MTLCommandQueue
     private let arSession = ARKitSession()
     private let worldTracking = WorldTrackingProvider()
     private let modeStore = MapModeStore.shared
@@ -30,6 +29,7 @@ final class MapRenderer {
     /// The map's own queue; copies and presentation committed on it run after the map's
     /// draws without a wait on the CPU.
     private var mapQueue: MTLCommandQueue?
+    private let eyeTargets = MapEyeTargets()
     private static var loggedProjection = false
     private var placedFromHead = false
     private var stats = FrameStats()
@@ -57,10 +57,6 @@ final class MapRenderer {
     init(layerRenderer: LayerRenderer) {
         self.layerRenderer = layerRenderer
         device = layerRenderer.device
-        guard let queue = device.makeCommandQueue() else {
-            fatalError("Metal command queue unavailable")
-        }
-        commandQueue = queue
         if let parked = MapRenderer.parked {
             placement = parked.placement
         } else {
@@ -152,19 +148,21 @@ final class MapRenderer {
             mapQueue = Unmanaged<AnyObject>.fromOpaque(raw).takeUnretainedValue() as? MTLCommandQueue
         }
         if mapQueue == nil {
-            print("the map's command queue is unavailable; copies will wait on the CPU")
+            maplibre_visionos_note("the map's command queue is unavailable")
         }
         return map
     }
 
     /// Whether the map can draw straight into the drawable: every view owns a whole texture
     /// (no layered layout, whose slices the map's import does not address) and the texture
-    /// allows a view in the map's linear format. Otherwise each eye is drawn into the map's
-    /// texture and copied into its slice.
+    /// allows a view in the map's linear format. Otherwise each eye has a separate
+    /// intermediate texture copied into its slice.
     private static func drawsDirectly(_ drawable: LayerRenderer.Drawable) -> Bool {
         let dedicated = drawable.views.allSatisfy { $0.textureMap.sliceIndex == 0 }
             && Set(drawable.views.map { $0.textureMap.textureIndex }).count == drawable.views.count
-        return dedicated && drawable.colorTextures.allSatisfy { $0.usage.contains(.pixelFormatView) }
+        return dedicated && drawable.colorTextures.allSatisfy {
+            $0.textureType == .type2D && $0.usage.contains(.pixelFormatView)
+        }
     }
 
     /// Wall-clock cost of the frames since the last report, to tell a CPU-bound frame loop
@@ -232,6 +230,11 @@ final class MapRenderer {
             }
             return
         }
+        framesInFlight.wait()
+        var completionOwnsPermit = false
+        defer {
+            if !completionOwnsPermit { framesInFlight.signal() }
+        }
         var renderSeconds = 0.0
         var copySeconds = 0.0
         frame.startUpdate()
@@ -250,7 +253,7 @@ final class MapRenderer {
             return
         }
         let presentation = MapRenderer.seconds(
-            LayerRenderer.Clock.Instant.epoch.duration(to: timing.presentationTime))
+            LayerRenderer.Clock.Instant.epoch.duration(to: drawable.frameTiming.presentationTime))
         let deviceAnchor = worldTracking.queryDeviceAnchor(atTimestamp: presentation)
         drawable.deviceAnchor = deviceAnchor
 
@@ -259,7 +262,11 @@ final class MapRenderer {
             frame.endSubmission()
             return
         }
-        let queue = mapQueue ?? commandQueue
+        guard let queue = mapQueue else {
+            maplibre_visionos_note("map queue unavailable; stereo frame skipped")
+            frame.endSubmission()
+            return
+        }
         guard let commandBuffer = queue.makeCommandBuffer() else {
             frame.endSubmission()
             return
@@ -268,7 +275,15 @@ final class MapRenderer {
             let column = anchor.originFromAnchorTransform.columns.3
             return SIMD3<Double>(Double(column.x), Double(column.y), Double(column.z))
         } ?? SIMD3<Double>(0, 0, 0)
-        gestures.updateHead(head)
+        let controls = modeStore.takeControls(isGlobe: placement.viewpoint.height > MapPlacement.groundHeightLimit)
+        let headMatrix = deviceAnchor?.originFromAnchorTransform ?? matrix_identity_float4x4
+        placement.updateViewRay(origin: head, direction: -SIMD3<Double>(
+            Double(headMatrix.columns.2.x), Double(headMatrix.columns.2.y), Double(headMatrix.columns.2.z)))
+        gestures.updateContext(
+            head: head, right: SIMD3<Double>(SIMD3<Float>(headMatrix.columns.0.x, headMatrix.columns.0.y, headMatrix.columns.0.z)),
+            up: SIMD3<Double>(SIMD3<Float>(headMatrix.columns.1.x, headMatrix.columns.1.y, headMatrix.columns.1.z)), isGlobe: placement.viewpoint.height > MapPlacement.groundHeightLimit)
+        if let tilt = controls.0 { placement.setTilt(tilt) }
+        if controls.1 { placement.levelView() }
         if !placedFromHead, let deviceAnchor {
             // The globe sits a metre ahead of where the viewer first looks, a little below
             // the eyes, whatever height the tracker's origin has; the world lies under them.
@@ -295,12 +310,14 @@ final class MapRenderer {
         // requests within it. `--memory-cap N` pretends only N megabytes are left, so the
         // simulator can show the map living within a headset's limit.
         let reported = UInt64(os_proc_available_memory())
-        // The simulator reports nothing; under a cap it stands in for the headset's limit.
-        let available = reported == 0 && MapRenderer.memoryCap != UInt64.max
-            ? MapRenderer.memoryCap : min(reported, MapRenderer.memoryCap)
+        let footprintMB = FrameStats.memoryMB().footprint
+        let footprint = footprintMB.isFinite ? UInt64(max(0, footprintMB) * 1_048_576) : 0
+        let available = min(MapMemoryBudget.available(reported: reported, footprint: footprint), MapRenderer.memoryCap)
         maplibre_visionos_set_available_memory(map, available)
         lastAvailableMemory = available
-        placement.apply(gestures.take())
+        maplibre_visionos_set_opaque_environment(map, placement.immersion == .full)
+        let input = gestures.take()
+        placement.apply(input)
         let scenePose = placement.current.worldFromScene()
         var worldFromScene = simd_float4x4(columns: (
             SIMD4<Float>(scenePose.columns.0), SIMD4<Float>(scenePose.columns.1),
@@ -347,92 +364,76 @@ final class MapRenderer {
             }
         }
         let direct = MapRenderer.drawsDirectly(drawable)
-        let eyeRange = direct ? [Array(drawable.views.indices)] : drawable.views.indices.map { [$0] }
-        framesInFlight.wait()
+        guard let colors = eyeTargets.colors(for: drawable, device: device, direct: direct) else {
+            frame.endSubmission()
+            return
+        }
+        let depths = eyeTargets.depths(for: drawable)
         commandBuffer.addCompletedHandler { [framesInFlight] _ in
             framesInFlight.signal()
         }
-        for group in eyeRange {
-            let renderStart = CACurrentMediaTime()
-            let result: UnsafeRawPointer? = withUnsafePointer(to: &worldFromScene) { scenePointer in
-                scenePointer.withMemoryRebound(to: Float.self, capacity: 16) { sceneFloats in
-                  withUnsafePointer(to: &prefetchFromScene) { prefetchPointer in
-                   prefetchPointer.withMemoryRebound(to: Float.self, capacity: 16) { prefetchFloats in
-                    matrices.withUnsafeBufferPointer { matrixBuffer in
-                        tangents.withUnsafeBufferPointer { tangentBuffer in
-                            var placementC = MaplibreVisionOSPlacement(
-                                anchor_latitude: anchor.latitude,
-                                anchor_longitude: anchor.longitude,
-                                anchor_altitude_meters: anchor.altitudeMeters,
-                                world_from_scene: sceneFloats)
-                            var prefetchC = MaplibreVisionOSPlacement(
-                                anchor_latitude: anchor.latitude,
-                                anchor_longitude: anchor.longitude,
-                                anchor_altitude_meters: anchor.altitudeMeters,
-                                world_from_scene: prefetchFloats)
-                            var eyes = group.map { index -> MaplibreVisionOSEye in
-                                let map = drawable.views[index].textureMap
-                                let color = direct ? drawable.colorTextures[map.textureIndex] : nil
-                                let depth = map.textureIndex < drawable.depthTextures.count
-                                    ? drawable.depthTextures[map.textureIndex] : nil
-                                return MaplibreVisionOSEye(
-                                    world_from_eye: matrixBuffer.baseAddress! + 16 * index,
-                                    tangents: tangentBuffer.baseAddress! + 4 * index,
-                                    near: near,
-                                    far: far,
-                                    color_texture: color.map { UnsafeRawPointer(Unmanaged.passUnretained($0 as AnyObject).toOpaque()) },
-                                    depth_texture: depth.map { UnsafeRawPointer(Unmanaged.passUnretained($0 as AnyObject).toOpaque()) })
-                            }
-                            return eyes.withUnsafeMutableBufferPointer { eyeBuffer in
-                                withUnsafePointer(to: &prefetchC) { prefetchPlacement in
-                                    maplibre_visionos_render_frame(
-                                        map, &placementC, hasPrefetch ? prefetchPlacement : nil,
-                                        eyeBuffer.baseAddress, UInt32(eyeBuffer.count),
-                                        MapRenderer.requestOverscan, presentation)
-                                }
+        completionOwnsPermit = true
+        let group = Array(drawable.views.indices)
+        let renderStart = CACurrentMediaTime()
+        let result: UnsafeRawPointer? = withUnsafePointer(to: &worldFromScene) { scenePointer in
+            scenePointer.withMemoryRebound(to: Float.self, capacity: 16) { sceneFloats in
+              withUnsafePointer(to: &prefetchFromScene) { prefetchPointer in
+               prefetchPointer.withMemoryRebound(to: Float.self, capacity: 16) { prefetchFloats in
+                matrices.withUnsafeBufferPointer { matrixBuffer in
+                    tangents.withUnsafeBufferPointer { tangentBuffer in
+                        var placementC = MaplibreVisionOSPlacement(
+                            anchor_latitude: anchor.latitude,
+                            anchor_longitude: anchor.longitude,
+                            anchor_altitude_meters: anchor.altitudeMeters,
+                            world_from_scene: sceneFloats)
+                        var prefetchC = MaplibreVisionOSPlacement(
+                            anchor_latitude: anchor.latitude,
+                            anchor_longitude: anchor.longitude,
+                            anchor_altitude_meters: anchor.altitudeMeters,
+                            world_from_scene: prefetchFloats)
+                        var eyes = group.map { index -> MaplibreVisionOSEye in
+                            let color: MTLTexture? = colors[index]
+                            let depth = depths[index]
+                            return MaplibreVisionOSEye(
+                                world_from_eye: matrixBuffer.baseAddress! + 16 * index,
+                                tangents: tangentBuffer.baseAddress! + 4 * index,
+                                near: near,
+                                far: far,
+                                color_texture: color.map { UnsafeRawPointer(Unmanaged.passUnretained($0 as AnyObject).toOpaque()) },
+                                depth_texture: depth.map { UnsafeRawPointer(Unmanaged.passUnretained($0 as AnyObject).toOpaque()) })
+                        }
+                        return eyes.withUnsafeMutableBufferPointer { eyeBuffer in
+                            withUnsafePointer(to: &prefetchC) { prefetchPlacement in
+                                maplibre_visionos_render_frame(
+                                    map, &placementC, hasPrefetch ? prefetchPlacement : nil,
+                                    eyeBuffer.baseAddress, UInt32(eyeBuffer.count),
+                                    MapRenderer.requestOverscan, presentation)
                             }
                         }
                     }
-                   }
-                  }
                 }
+               }
+              }
             }
-            renderSeconds += CACurrentMediaTime() - renderStart
-            if result == nil {
-                print("the map drew no frame for eyes \(group)")
-            }
-            guard !direct, let result, let index = group.first else {
-                continue
-            }
-            let copyStart = CACurrentMediaTime()
-            // The map's texture holds this eye only until the next eye is drawn. On the
-            // map's own queue the copy is ordered before that draw; on any other queue it
-            // has to finish first.
-            let source = Unmanaged<AnyObject>.fromOpaque(result).takeUnretainedValue()
-            guard let sourceTexture = source as? MTLTexture,
-                  let copyBuffer = queue.makeCommandBuffer(),
-                  let blit = copyBuffer.makeBlitCommandEncoder()
-            else {
-                continue
-            }
-            let map = drawable.views[index].textureMap
-            let destination = drawable.colorTextures[map.textureIndex]
-            let size = MTLSize(
-                width: min(sourceTexture.width, destination.width),
-                height: min(sourceTexture.height, destination.height),
-                depth: 1)
-            blit.copy(
-                from: sourceTexture, sourceSlice: 0, sourceLevel: 0,
-                sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0), sourceSize: size,
-                to: destination, destinationSlice: map.sliceIndex, destinationLevel: 0,
-                destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0))
-            blit.endEncoding()
-            copyBuffer.commit()
-            if mapQueue == nil {
-                copyBuffer.waitUntilCompleted()
-            }
-            copySeconds += CACurrentMediaTime() - copyStart
         }
+        if let selection = input.selection, let eye = drawable.views.first {
+            modeStore.showSelection(selectLabel(selection, worldFromEye: originFromDevice * eye.transform,
+                projection: drawable.computeProjection(viewIndex: 0), map: map))
+        }
+        renderSeconds += CACurrentMediaTime() - renderStart
+        guard result != nil else {
+            maplibre_visionos_note("stereo frame failed")
+            commandBuffer.commit()
+            frame.endSubmission()
+            return
+        }
+        let copyStart = CACurrentMediaTime()
+        if !direct, !eyeTargets.copy(to: drawable, commandBuffer: commandBuffer) {
+            commandBuffer.commit()
+            frame.endSubmission()
+            return
+        }
+        copySeconds = CACurrentMediaTime() - copyStart
 
         drawable.encodePresent(commandBuffer: commandBuffer)
         commandBuffer.commit()

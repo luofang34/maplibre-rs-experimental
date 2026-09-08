@@ -31,11 +31,31 @@ struct ContentView: View {
                     .tint(modeStore.mode == mode ? .accentColor : .secondary)
                 }
             }
-            Text("Pinch and drag to turn the globe or move the world. Pinch with both hands and pull them apart to zoom in, all the way from the globe to the street and back; turn them to rotate. The buttons only fly you there.")
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 420)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            if modeStore.isGlobe {
+                Text("Drag with one pinch to turn. Move two pinched hands together to place the globe; spread to zoom or twist to rotate.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center).frame(maxWidth: 420)
+            } else {
+                VStack {
+                    Text("View tilt: \(Int(modeStore.tiltDegrees))°")
+                    Slider(value: Binding(get: { modeStore.tiltDegrees }, set: { modeStore.setTilt($0) }), in: 0...70)
+                        .accessibilityLabel("View tilt")
+                    Text("Drag to move. Spread two pinches to zoom. Move both pinched hands sideways to orbit or vertically to tilt; twist also turns. Look around naturally.")
+                        .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                }.frame(maxWidth: 420)
+            }
+            if let selection = modeStore.selectedFeature {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(selection.title).font(.headline)
+                    if selection.coordinates.count == 2 {
+                        Text(String(format: "%.4f°, %.4f°", selection.coordinates[1], selection.coordinates[0]))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+                Button("Clear selection") { modeStore.selectedFeature = nil }
+            }
+            Button(modeStore.isGlobe ? "North up" : "Level view") { modeStore.resetLevel() }
             Button(isImmersed ? "Leave the map" : "Enter the map") {
                 Task {
                     if isImmersed {
