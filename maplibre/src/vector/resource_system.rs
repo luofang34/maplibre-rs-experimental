@@ -67,80 +67,101 @@ pub fn resource_system(
 
     buffer_pool.initialize(|| BufferPool::from_device_with_sizes(device, settings.buffer_pools));
 
-    vector_pipeline.initialize(|| {
-        let tile_shader = shaders::FillShader {
-            format: surface.surface_format(),
-        };
-
-        let pipeline = TilePipeline::new(
-            "vector_pipeline".into(),
-            *settings,
-            tile_shader.describe_vertex(),
-            tile_shader.describe_fragment(),
-            true,
-            false,
-            false,
-            false,
-            surface.is_multisampling_supported(settings.msaa),
-            false,
-            false,
-        )
-        .describe_render_pipeline()
-        .initialize_with_prefix_layouts(device, &[projection_resources.bind_group_layout()]);
-
-        VectorPipeline(pipeline)
-    });
-
-    line_pipeline.initialize(|| {
-        let line_shader = shaders::LineShader {
-            format: surface.surface_format(),
-        };
-
-        let pipeline = TilePipeline::new(
-            "line_pipeline".into(),
-            *settings,
-            line_shader.describe_vertex(),
-            line_shader.describe_fragment(),
-            true,
-            false,
-            false,
-            false,
-            surface.is_multisampling_supported(settings.msaa),
-            false,
-            false,
-        )
-        .describe_render_pipeline()
-        .initialize_with_prefix_layouts(
-            device,
-            &[projection_resources.bind_group_layout(), &dashes.layout],
-        );
-
-        LinePipeline(pipeline)
-    });
-
-    circle_pipeline.initialize(|| {
-        let circle_shader = shaders::CircleShader {
-            format: surface.surface_format(),
-        };
-
-        let pipeline = TilePipeline::new(
-            "circle_pipeline".into(),
-            *settings,
-            circle_shader.describe_vertex(),
-            circle_shader.describe_fragment(),
-            true,
-            false,
-            false,
-            false,
-            surface.is_multisampling_supported(settings.msaa),
-            false,
-            false,
-        )
-        .describe_render_pipeline()
-        .initialize_with_prefix_layouts(device, &[projection_resources.bind_group_layout()]);
-
-        CirclePipeline(pipeline)
-    });
-
+    let setup = PipelineSetup {
+        device,
+        settings: *settings,
+        format: surface.surface_format(),
+        multisampling: surface.is_multisampling_supported(settings.msaa),
+        projection: projection_resources.bind_group_layout(),
+    };
+    setup.initialize(
+        vector_pipeline,
+        line_pipeline,
+        circle_pipeline,
+        &dashes.layout,
+    );
     Ok(())
+}
+
+struct PipelineSetup<'a> {
+    device: &'a wgpu::Device,
+    settings: crate::render::settings::RendererSettings,
+    format: wgpu::TextureFormat,
+    multisampling: bool,
+    projection: &'a wgpu::BindGroupLayout,
+}
+
+impl PipelineSetup<'_> {
+    fn create(
+        &self,
+        name: &'static str,
+        shader: &impl Shader,
+        layouts: &[&wgpu::BindGroupLayout],
+        depth: bool,
+    ) -> wgpu::RenderPipeline {
+        let pipeline = TilePipeline::new(
+            name.into(),
+            self.settings,
+            shader.describe_vertex(),
+            shader.describe_fragment(),
+            true,
+            false,
+            false,
+            false,
+            self.multisampling,
+            false,
+            false,
+        );
+        let pipeline = if depth {
+            pipeline.with_depth_write()
+        } else {
+            pipeline
+        };
+        pipeline
+            .describe_render_pipeline()
+            .initialize_with_prefix_layouts(self.device, layouts)
+    }
+
+    fn initialize(
+        &self,
+        vector: &mut Eventually<VectorPipeline>,
+        line: &mut Eventually<LinePipeline>,
+        circle: &mut Eventually<CirclePipeline>,
+        dashes: &wgpu::BindGroupLayout,
+    ) {
+        vector.initialize(|| {
+            VectorPipeline(self.create(
+                "vector_pipeline",
+                &shaders::FillShader {
+                    format: self.format,
+                },
+                &[self.projection],
+                false,
+            ))
+        });
+        line.initialize(|| {
+            let shader = shaders::LineShader {
+                format: self.format,
+            };
+            LinePipeline(
+                self.create("line_pipeline", &shader, &[self.projection, dashes], false),
+                self.create(
+                    "spatial_line_pipeline",
+                    &shader,
+                    &[self.projection, dashes],
+                    true,
+                ),
+            )
+        });
+        circle.initialize(|| {
+            CirclePipeline(self.create(
+                "circle_pipeline",
+                &shaders::CircleShader {
+                    format: self.format,
+                },
+                &[self.projection],
+                false,
+            ))
+        });
+    }
 }

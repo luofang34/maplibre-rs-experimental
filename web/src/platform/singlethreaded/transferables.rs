@@ -234,6 +234,14 @@ impl LayerTessellated for FlatBufferTransferable {
             .flat_map(|c| c.iter().copied())
             .collect();
         let feature_colors_fb = inner_builder.create_vector(&flat_colors);
+        let distances = inner_builder.create_vector(
+            &buffer
+                .buffer
+                .vertices
+                .iter()
+                .map(|v| v.distance)
+                .collect::<Vec<_>>(),
+        );
 
         let mut builder = FlatLayerTessellatedBuilder::new(&mut inner_builder);
 
@@ -249,6 +257,7 @@ impl LayerTessellated for FlatBufferTransferable {
         builder.add_usable_indices(buffer.usable_indices);
         builder.add_style_layer_id(style_layer_id_fb);
         builder.add_feature_colors(feature_colors_fb);
+        builder.add_vertex_distances(distances);
         let root = builder.finish();
 
         inner_builder.finish(root, None);
@@ -276,7 +285,16 @@ impl LayerTessellated for FlatBufferTransferable {
             .vertices()
             .unwrap()
             .iter()
-            .map(|vertex| ShaderVertex::new(vertex.position().into(), vertex.normal().into()));
+            .enumerate()
+            .map(|(index, vertex)| {
+                let mut result =
+                    ShaderVertex::new(vertex.position().into(), vertex.normal().into());
+                result.distance = data
+                    .vertex_distances()
+                    .and_then(|values| (index < values.len()).then(|| values.get(index)))
+                    .unwrap_or(0.0);
+                result
+            });
 
         let indices = data.indices().unwrap();
         let feature_indices: Vec<u32> = data.feature_indices().unwrap().iter().collect();

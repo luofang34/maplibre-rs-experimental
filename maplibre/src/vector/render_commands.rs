@@ -132,7 +132,24 @@ impl RenderCommand<LayerItem> for SetLineTilePipeline {
             return RenderCommandResult::Failure;
         };
 
-        pass.set_render_pipeline(pipeline);
+        let spatial = world
+            .resources
+            .get::<crate::terrain::TerrainFrame>()
+            .is_some_and(|frame| frame.active)
+            && world
+                .resources
+                .get::<Eventually<VectorBufferPool>>()
+                .and_then(|pool| match pool {
+                    Initialized(pool) => pool.index().get_layers(item.tile.coords),
+                    _ => None,
+                })
+                .and_then(|layers| {
+                    layers
+                        .iter()
+                        .find(|entry| entry.style_layer.id == item.style_layer)
+                })
+                .is_some_and(|entry| super::structures::kind(&entry.style_layer).is_some());
+        pass.set_render_pipeline(if spatial { &pipeline.1 } else { &pipeline.0 });
         pass.set_bind_group(
             0,
             projection_resources.bind_group_for(item.projection_binding()),

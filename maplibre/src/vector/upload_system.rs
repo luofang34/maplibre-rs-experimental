@@ -26,6 +26,12 @@ use crate::{
     },
 };
 
+mod paint;
+
+pub(crate) fn drape_paint_zoom(zoom: f64) -> f64 {
+    (zoom * 8.0).round() / 8.0
+}
+
 #[derive(Clone, Copy, PartialEq)]
 struct VectorPaintFrame {
     zoom: f32,
@@ -44,20 +50,47 @@ pub fn upload_system(
     if crate::render::eye_covering::EyeInFrame::reuses_content(world) {
         return Ok(());
     }
-    let zoom = view_state.zoom().level();
+    let zoom = if style.terrain.is_some() {
+        drape_paint_zoom(view_state.zoom().value()) as f32
+    } else {
+        view_state.zoom().level()
+    };
     let bearing = view_state.camera().get_bearing().0 as f32;
     let paint_frame = VectorPaintFrame { zoom, bearing };
     let refresh_paint = world.resources.get::<VectorPaintFrame>() != Some(&paint_frame);
     world.resources.insert(paint_frame);
-    let Some((Initialized(buffer_pool), Initialized(tile_view_pattern))) =
-        world.resources.query_mut::<(
-            &mut Eventually<VectorBufferPool>,
-            &Eventually<WgpuTileViewPattern>,
-        )>()
+    let Some(Initialized(pattern)) = world.resources.get::<Eventually<WgpuTileViewPattern>>()
     else {
         return Err(SystemError::Dependencies);
     };
+    let source_tiles = sources_for_upload(pattern);
+    let (spatial, changed) = super::structures::for_frame(world, style, &source_tiles);
+    let Some(Initialized(buffer_pool)) = world.resources.get_mut::<Eventually<VectorBufferPool>>()
+    else {
+        return Err(SystemError::Dependencies);
+    };
+    if refresh_paint {
+        refresh_layer_paint(buffer_pool, queue, &source_tiles, zoom, bearing);
+    }
+    if changed {
+        super::structures::refresh_gpu(buffer_pool, queue, &spatial);
+    }
+    upload_tessellated_layer(
+        buffer_pool,
+        queue,
+        &mut world.tiles,
+        style,
+        source_tiles,
+        &spatial,
+        zoom,
+        bearing,
+    );
+    Ok(())
+}
 
+fn sources_for_upload(
+    tile_view_pattern: &WgpuTileViewPattern,
+) -> Vec<crate::coords::WorldTileCoords> {
     let mut source_tiles = Vec::new();
     let mut seen = HashSet::new();
     for view_tile in tile_view_pattern.iter() {
@@ -73,30 +106,50 @@ pub fn upload_system(
             }
         });
     }
-    if refresh_paint {
-        for coords in &source_tiles {
-            for entry in buffer_pool
-                .index()
-                .get_layers(*coords)
-                .into_iter()
-                .flatten()
-            {
-                let metadata = metadata_for_layer(&entry.style_layer, *coords, zoom, bearing);
-                buffer_pool.update_layer_metadata(queue, entry, metadata);
+    // Coarsened terrain targets and their stand-ins need GPU geometry even when the
+    // screen covering consists entirely of finer tiles.
+    let mut parents = Vec::new();
+    for coords in &source_tiles {
+        let mut current = *coords;
+        while let Some(parent) = current.get_parent() {
+            if seen.insert(parent) {
+                parents.push(parent);
+            }
+            current = parent;
+        }
+    }
+    parents.sort_by_key(|coords| coords.z);
+    parents.extend(source_tiles);
+    let source_tiles = parents;
+    source_tiles
+}
+
+fn refresh_layer_paint(
+    buffer_pool: &VectorBufferPool,
+    queue: &wgpu::Queue,
+    source_tiles: &[crate::coords::WorldTileCoords],
+    zoom: f32,
+    bearing: f32,
+) {
+    for coords in source_tiles {
+        for entry in buffer_pool
+            .index()
+            .get_layers(*coords)
+            .into_iter()
+            .flatten()
+        {
+            let metadata = metadata_for_layer(&entry.style_layer, *coords, zoom, bearing);
+            buffer_pool.update_layer_metadata(queue, entry, metadata);
+            if let Some(color) = paint::uniform_color(&entry.style_layer, f64::from(zoom)) {
+                let count = (entry.feature_metadata_buffer_range().end
+                    - entry.feature_metadata_buffer_range().start)
+                    as usize
+                    / std::mem::size_of::<FillShaderFeatureMetadata>();
+                let colors = vec![FillShaderFeatureMetadata { color }; count];
+                buffer_pool.update_feature_metadata(queue, entry, &colors);
             }
         }
     }
-    upload_tessellated_layer(
-        buffer_pool,
-        queue,
-        &mut world.tiles,
-        style,
-        source_tiles,
-        zoom,
-        bearing,
-    );
-
-    Ok(())
 }
 
 fn upload_tessellated_layer(
@@ -105,6 +158,7 @@ fn upload_tessellated_layer(
     tiles: &mut Tiles,
     style: &Style,
     source_tiles: Vec<crate::coords::WorldTileCoords>,
+    spatial: &[super::structures::SpatialBuffer],
     zoom: f32,
     bearing: f32,
 ) {
@@ -149,34 +203,67 @@ fn upload_tessellated_layer(
                 continue;
             };
 
-            let color: Option<Vec4f32> = style_layer
-                .paint
-                .as_ref()
-                .and_then(|paint| paint.get_color())
-                .map(|color| color.into());
-
-            // Assign every feature in the layer the color from the style if no parsed feature_color exist.
-            let fallback_color = color.unwrap_or([0.0, 0.0, 0.0, 1.0]);
-
-            let feature_metadata =
-                feature_metadata(feature_indices, feature_colors, fallback_color);
-
-            let layer_metadata = metadata_for_layer(style_layer, *coords, zoom, bearing);
-
-            log::debug!("Allocating geometry at {coords}");
-            buffer_pool.allocate_layer_geometry(
+            upload_bucket(
+                buffer_pool,
                 queue,
-                *coords,
-                style_layer.clone(),
-                buffer,
-                layer_metadata,
-                &feature_metadata,
+                style_layer,
+                (*coords, buffer, feature_indices, feature_colors),
+                spatial,
+                zoom,
+                bearing,
             );
         }
         if !available_layers.is_empty() {
             uploaded_tiles += 1;
         }
     }
+}
+
+fn upload_bucket(
+    buffer_pool: &mut VectorBufferPool,
+    queue: &wgpu::Queue,
+    style_layer: &crate::style::layer::StyleLayer,
+    data: (
+        crate::coords::WorldTileCoords,
+        &crate::vector::tessellation::OverAlignedVertexBuffer<crate::render::ShaderVertex, u32>,
+        &[u32],
+        &[[f32; 4]],
+    ),
+    spatial: &[super::structures::SpatialBuffer],
+    zoom: f32,
+    bearing: f32,
+) {
+    let (coords, buffer, feature_indices, feature_colors) = data;
+    let color: Option<Vec4f32> = style_layer
+        .paint
+        .as_ref()
+        .and_then(|paint| paint.get_color())
+        .map(|color| color.into());
+
+    // Assign every feature in the layer the color from the style if no parsed feature_color exist.
+    let fallback_color = color.unwrap_or([0.0, 0.0, 0.0, 1.0]);
+
+    let feature_metadata = if let Some(color) = paint::uniform_color(style_layer, f64::from(zoom)) {
+        feature_metadata(feature_indices, &[], color)
+    } else {
+        feature_metadata(feature_indices, feature_colors, fallback_color)
+    };
+
+    let buffer = spatial
+        .iter()
+        .find(|(tile, id, _)| *tile == coords && *id == style_layer.id)
+        .map_or(buffer, |(_, _, spatial)| spatial);
+    let layer_metadata = metadata_for_layer(style_layer, coords, zoom, bearing);
+
+    log::debug!("Allocating geometry at {coords}");
+    buffer_pool.allocate_layer_geometry(
+        queue,
+        coords,
+        style_layer.clone(),
+        buffer,
+        layer_metadata,
+        &feature_metadata,
+    );
 }
 
 fn layer_translate_tile_units(

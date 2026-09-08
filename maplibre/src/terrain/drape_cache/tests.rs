@@ -134,21 +134,25 @@ fn fingerprint_follows_sources_layers_and_loaded_content_but_not_shape_order() {
     let mut other_layer = spec(tile(4, 4, 5), &[tile(8, 8, 6), tile(9, 8, 6)]);
     other_layer.shapes[0].raster_layers.clear();
 
-    let base = fingerprint(&a, &Loaded(true), clear);
-    assert_eq!(fingerprint(&reordered, &Loaded(true), clear), base);
-    assert_ne!(fingerprint(&other_source, &Loaded(true), clear), base);
-    assert_ne!(fingerprint(&other_layer, &Loaded(true), clear), base);
+    let base = fingerprint(&a, &Loaded(true), clear, 8.0);
+    assert_eq!(fingerprint(&reordered, &Loaded(true), clear, 8.0), base);
+    assert_ne!(fingerprint(&other_source, &Loaded(true), clear, 8.0), base);
+    assert_ne!(fingerprint(&other_layer, &Loaded(true), clear, 8.0), base);
     assert_ne!(
-        fingerprint(&a, &Loaded(false), clear),
+        fingerprint(&a, &Loaded(false), clear, 8.0),
         base,
         "content arriving on the GPU changes the drape"
     );
-    assert_ne!(fingerprint(&a, &Loaded(true), wgpu::Color::BLACK), base);
+    assert_ne!(
+        fingerprint(&a, &Loaded(true), wgpu::Color::BLACK, 8.0),
+        base
+    );
     assert_ne!(
         fingerprint(
             &spec(tile(5, 4, 5), &[tile(8, 8, 6), tile(9, 8, 6)]),
             &Loaded(true),
-            clear
+            clear,
+            8.0,
         ),
         base
     );
@@ -266,4 +270,12 @@ fn deferred_redraw_does_not_alias_a_different_fingerprint() {
     cache.defer(coords, state);
     assert_eq!(cache.get(coords), Some(&123));
     assert_eq!(cache.acquire(coords, 9, true, || 456), DrapeState::Changed);
+}
+
+#[test]
+fn paint_changes_invalidate_cached_drapes_without_head_jitter_redraws() {
+    let target = spec(tile(4, 4, 5), &[tile(4, 4, 5)]);
+    let key = |zoom| fingerprint(&target, &Loaded(true), wgpu::Color::WHITE, zoom);
+    assert_eq!(key(8.0), key(8.01));
+    assert_ne!(key(8.0), key(8.5));
 }

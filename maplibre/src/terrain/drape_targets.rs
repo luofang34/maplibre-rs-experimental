@@ -18,8 +18,6 @@ use crate::{
     vector::VectorBufferPool,
 };
 
-/// How many zoom levels below a target tile children are searched for source data.
-const CHILDREN_SEARCH_DEPTH: usize = 4;
 const DRAPEABLE_LAYER_TYPES: [&str; 5] = ["fill", "line", "raster", "hillshade", "color-relief"];
 
 /// Whether a style layer renders into drape textures rather than straight to the screen.
@@ -103,7 +101,7 @@ pub(crate) fn select_targets(
 }
 
 /// The loaded tiles nearest to `coords` in the pyramid: itself, complete children, the parent,
-/// or whatever children exist.
+/// or no shape until complete coverage is available.
 fn loaded_shapes(
     sources: &KindSources<'_>,
     coords: WorldTileCoords,
@@ -118,9 +116,7 @@ fn loaded_shapes(
     } else if let Some(parent) = sources.get_available_parent(coords, world) {
         vec![parent]
     } else {
-        sources
-            .get_available_children(coords, world, CHILDREN_SEARCH_DEPTH)
-            .unwrap_or_default()
+        Vec::new()
     }
 }
 
@@ -207,7 +203,9 @@ fn vector_layer_specs(
         .into_iter()
         .flatten()
         .filter(|entry| {
-            entry.style_layer.is_visible_at(zoom) && is_drapeable(&entry.style_layer.type_)
+            entry.style_layer.is_visible_at(zoom)
+                && is_drapeable(&entry.style_layer.type_)
+                && crate::vector::structures::kind(&entry.style_layer).is_none()
         })
         .map(|entry| VectorLayerSpec {
             id: entry.style_layer.id.clone(),

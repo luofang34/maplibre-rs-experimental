@@ -40,8 +40,9 @@ pub mod render_commands;
 mod request_system;
 pub(crate) mod resource;
 mod resource_system;
+pub(crate) mod structures;
 pub(crate) mod transferables;
-mod upload_system;
+pub(crate) mod upload_system;
 
 // Public due to benchmarks
 pub mod tessellation;
@@ -55,7 +56,7 @@ impl Deref for VectorPipeline {
     }
 }
 
-struct LinePipeline(wgpu::RenderPipeline);
+struct LinePipeline(wgpu::RenderPipeline, wgpu::RenderPipeline);
 impl Deref for LinePipeline {
     type Target = wgpu::RenderPipeline;
 
@@ -122,10 +123,16 @@ pub fn geometry_uploaded(coords: WorldTileCoords, world: &World) -> bool {
         return true;
     }
     match world.resources.get::<Eventually<VectorBufferPool>>() {
-        Some(Eventually::Initialized(pool)) => pool
-            .index()
-            .get_layers(coords)
-            .is_some_and(|layers| !layers.is_empty()),
+        Some(Eventually::Initialized(pool)) => {
+            let loaded = pool.get_loaded_style_layers_at(coords).unwrap_or_default();
+            buckets.layers.iter().all(|layer| match layer {
+                VectorLayerBucket::AvailableLayer(bucket) => {
+                    bucket.buffer.buffer.indices.is_empty()
+                        || loaded.contains(bucket.style_layer_id.as_str())
+                }
+                VectorLayerBucket::Missing(_) => true,
+            })
+        }
         _ => false,
     }
 }

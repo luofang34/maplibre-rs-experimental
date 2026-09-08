@@ -92,6 +92,7 @@ async fn empty_tiles_do_not_starve_later_geometry_uploads() {
         &mut tiles,
         &style,
         coords,
+        &[],
         8.0,
         0.0,
     );

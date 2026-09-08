@@ -30,9 +30,13 @@ pub(crate) fn fingerprint(
     spec: &TargetSpec,
     content: &impl SourceContent,
     clear: wgpu::Color,
+    paint_zoom: f64,
 ) -> u64 {
     let mut hasher = std::hash::DefaultHasher::new();
     spec.coords.hash(&mut hasher);
+    crate::vector::upload_system::drape_paint_zoom(paint_zoom)
+        .to_bits()
+        .hash(&mut hasher);
     for component in [clear.r, clear.g, clear.b, clear.a] {
         component.to_bits().hash(&mut hasher);
     }

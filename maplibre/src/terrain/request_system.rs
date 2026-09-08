@@ -27,6 +27,10 @@ use crate::{
     },
 };
 
+/// The terrain coverage queued for drawing; requests must include these coarsened tiles.
+#[derive(Default)]
+pub(crate) struct DrapeRequests(pub(crate) Vec<WorldTileCoords>);
+
 /// Zoom levels between a draped tile and the DEM tile it samples, as in GL JS `deltaZoom`.
 const DELTA_ZOOM: u8 = 1;
 /// Zoom of the coarse ancestor loaded alongside every DEM tile so tile culling knows the
@@ -125,8 +129,14 @@ impl<E: Environment, T: DemTransferables> System for RequestSystem<E, T> {
 
         let mut requested = HashSet::new();
         let mut budget = request_budget(world);
-        let wanted: Vec<WorldTileCoords> = view_region
-            .iter()
+        let drapes = world
+            .resources
+            .get::<DrapeRequests>()
+            .map(|requests| requests.0.clone())
+            .unwrap_or_default();
+        let wanted: Vec<WorldTileCoords> = drapes
+            .into_iter()
+            .chain(view_region.iter())
             .filter_map(|coords| dem_tile_coords(coords, dem.minzoom, dem.maxzoom))
             .flat_map(|coords| {
                 [
@@ -150,13 +160,27 @@ impl<E: Environment, T: DemTransferables> System for RequestSystem<E, T> {
                 break;
             }
             budget -= 1;
-            let Some(mut tile) = world.tiles.spawn_mut(coords) else {
-                continue;
-            };
-            tile.insert(DemTileComponent::Pending);
-            tracing::debug!(%coords, "DEM tile request started");
+            self.request(coords, style, world);
+        }
 
-            if let Err(error) =
+        Ok(())
+    }
+}
+
+impl<E: Environment, T: DemTransferables> RequestSystem<E, T> {
+    fn request(
+        &self,
+        coords: WorldTileCoords,
+        style: &crate::style::Style,
+        world: &mut crate::tcs::world::World,
+    ) {
+        let Some(mut tile) = world.tiles.spawn_mut(coords) else {
+            return;
+        };
+        tile.insert(DemTileComponent::Pending);
+        tracing::debug!(%coords, "DEM tile request started");
+
+        if let Err(error) =
                 self.kernel.apc().call(
                     Input::TileRequest {
                         coords,
@@ -173,9 +197,6 @@ impl<E: Environment, T: DemTransferables> System for RequestSystem<E, T> {
             {
                 tracing::error!(%coords, ?error, "unable to schedule DEM tile request");
             }
-        }
-
-        Ok(())
     }
 }
 

@@ -48,6 +48,8 @@ pub struct ShaderVertex {
     pub normal: Vec2f32,
     /// Distance along a stroked path, in tile units.
     pub distance: f32,
+    /// Height above the body datum for spatial lines; a negative sentinel keeps cartographic draping.
+    pub elevation: f32,
 }
 
 impl ShaderVertex {
@@ -56,6 +58,7 @@ impl ShaderVertex {
             position,
             normal,
             distance: 0.0,
+            elevation: -1e30,
         }
     }
 }

@@ -30,7 +30,7 @@ pub mod interaction;
 pub mod mesh;
 mod populate_world_system;
 mod queue_system;
-mod request_system;
+pub(crate) mod request_system;
 mod resource_system;
 pub mod resources;
 pub mod rtt;

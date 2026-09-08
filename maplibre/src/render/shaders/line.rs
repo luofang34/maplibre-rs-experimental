@@ -25,63 +25,12 @@ impl Shader for LineShader {
                         attribute(0, wgpu::VertexFormat::Float32x2, 0),
                         attribute(
                             wgpu::VertexFormat::Float32x2.size(),
-                            wgpu::VertexFormat::Float32x3,
+                            wgpu::VertexFormat::Float32x4,
                             1,
                         ),
                     ],
                 },
-                // tile metadata
-                VertexBufferLayout {
-                    array_stride: std::mem::size_of::<ShaderTileMetadata>() as u64,
-                    step_mode: wgpu::VertexStepMode::Instance,
-                    attributes: vec![
-                        attribute(0, wgpu::VertexFormat::Float32x4, 4),
-                        attribute(
-                            1 * wgpu::VertexFormat::Float32x4.size(),
-                            wgpu::VertexFormat::Float32x4,
-                            5,
-                        ),
-                        attribute(
-                            2 * wgpu::VertexFormat::Float32x4.size(),
-                            wgpu::VertexFormat::Float32x4,
-                            6,
-                        ),
-                        attribute(
-                            3 * wgpu::VertexFormat::Float32x4.size(),
-                            wgpu::VertexFormat::Float32x4,
-                            7,
-                        ),
-                        attribute(
-                            std::mem::offset_of!(ShaderTileMetadata, line_width_scale) as u64,
-                            wgpu::VertexFormat::Float32x2,
-                            9,
-                        ),
-                        attribute(
-                            4 * wgpu::VertexFormat::Float32x4.size()
-                                + wgpu::VertexFormat::Float32.size(),
-                            wgpu::VertexFormat::Float32,
-                            11,
-                        ),
-                        attribute(
-                            4 * wgpu::VertexFormat::Float32x4.size()
-                                + 2 * wgpu::VertexFormat::Float32.size(),
-                            wgpu::VertexFormat::Float32,
-                            12,
-                        ),
-                        attribute(
-                            4 * wgpu::VertexFormat::Float32x4.size()
-                                + 3 * wgpu::VertexFormat::Float32.size(),
-                            wgpu::VertexFormat::Float32x4,
-                            2,
-                        ),
-                        attribute(
-                            5 * wgpu::VertexFormat::Float32x4.size()
-                                + 3 * wgpu::VertexFormat::Float32.size(),
-                            wgpu::VertexFormat::Uint32,
-                            14,
-                        ),
-                    ],
-                },
+                tile_layout(),
                 // layer metadata
                 VertexBufferLayout {
                     array_stride: std::mem::size_of::<ShaderLayerMetadata>() as u64,
@@ -131,5 +80,55 @@ impl Shader for LineShader {
                 write_mask: wgpu::ColorWrites::ALL,
             })],
         }
+    }
+}
+
+fn tile_layout() -> VertexBufferLayout {
+    VertexBufferLayout {
+        array_stride: std::mem::size_of::<ShaderTileMetadata>() as u64,
+        step_mode: wgpu::VertexStepMode::Instance,
+        attributes: vec![
+            attribute(0, wgpu::VertexFormat::Float32x4, 4),
+            attribute(
+                1 * wgpu::VertexFormat::Float32x4.size(),
+                wgpu::VertexFormat::Float32x4,
+                5,
+            ),
+            attribute(
+                2 * wgpu::VertexFormat::Float32x4.size(),
+                wgpu::VertexFormat::Float32x4,
+                6,
+            ),
+            attribute(
+                3 * wgpu::VertexFormat::Float32x4.size(),
+                wgpu::VertexFormat::Float32x4,
+                7,
+            ),
+            attribute(
+                std::mem::offset_of!(ShaderTileMetadata, line_width_scale) as u64,
+                wgpu::VertexFormat::Float32x2,
+                9,
+            ),
+            attribute(
+                4 * wgpu::VertexFormat::Float32x4.size() + wgpu::VertexFormat::Float32.size(),
+                wgpu::VertexFormat::Float32,
+                11,
+            ),
+            attribute(
+                4 * wgpu::VertexFormat::Float32x4.size() + 2 * wgpu::VertexFormat::Float32.size(),
+                wgpu::VertexFormat::Float32,
+                12,
+            ),
+            attribute(
+                4 * wgpu::VertexFormat::Float32x4.size() + 3 * wgpu::VertexFormat::Float32.size(),
+                wgpu::VertexFormat::Float32x4,
+                2,
+            ),
+            attribute(
+                5 * wgpu::VertexFormat::Float32x4.size() + 3 * wgpu::VertexFormat::Float32.size(),
+                wgpu::VertexFormat::Uint32,
+                14,
+            ),
+        ],
     }
 }

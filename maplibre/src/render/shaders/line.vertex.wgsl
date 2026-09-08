@@ -15,7 +15,7 @@ struct VertexOutput {
 @vertex
 fn main(
     @location(0) position: vec2<f32>,
-    @location(1) path: vec3<f32>,
+    @location(1) path: vec4<f32>,
     @location(2) tile_mercator_coords: vec4<f32>,
     @location(4) translate1: vec4<f32>,
     @location(5) translate2: vec4<f32>,
@@ -45,13 +45,15 @@ fn main(
 
     let transform = mat4x4<f32>(translate1, translate2, translate3, translate4);
 
-    let projected_center = project_tile_position(
-        vec3<f32>(position + layer_translate, 0.0),
+    let spatial = path.w > -1e20;
+    let elevation = select(0.0, path.w, spatial);
+    let projected_center = project_tile_position_3d(
+        vec3<f32>(position + layer_translate, elevation),
         transform,
         tile_mercator_coords,
     );
-    let projected_normal = project_tile_position(
-        vec3<f32>(position + layer_translate + normal, 0.0),
+    let projected_normal = project_tile_position_3d(
+        vec3<f32>(position + layer_translate + normal, elevation),
         transform,
         tile_mercator_coords,
     );
@@ -67,7 +69,8 @@ fn main(
     let px_to_clip_x = (2.0 / viewport_width) * center.w;
     let px_to_clip_y = (2.0 / viewport_height) * center.w;
     let clip_offset = vec2<f32>(dir.x * outset * px_to_clip_x, dir.y * outset * px_to_clip_y);
-    center = vec4<f32>(center.x + clip_offset.x, center.y + clip_offset.y, 0.0, center.w);
+    let depth = select(0.0, center.z + max(abs(center.z) * 2e-5, 1e-10), spatial);
+    center = vec4<f32>(center.x + clip_offset.x, center.y + clip_offset.y, depth, center.w);
 
     return VertexOutput(
         center,

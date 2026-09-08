@@ -80,7 +80,20 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                 budget = budget.saturating_sub(4);
             }
 
-            for coords in view_region.iter() {
+            let drapes = world
+                .resources
+                .get::<crate::terrain::request_system::DrapeRequests>()
+                .map(|requests| requests.0.clone())
+                .unwrap_or_default();
+            let overview = style
+                .terrain
+                .is_some()
+                .then_some(crate::coords::WorldTileCoords {
+                    x: 0,
+                    y: 0,
+                    z: crate::coords::ZoomLevel::new(0),
+                });
+            for coords in overview.into_iter().chain(drapes).chain(view_region.iter()) {
                 // Above the source maximum zoom the ancestor tile is fetched once and the
                 // view pattern scales it into every descendant in view.
                 if min_zoom.is_some_and(|min_zoom| u8::from(coords.z) < min_zoom) {
@@ -147,28 +160,18 @@ pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context +
                     continue;
                 }
             };
-            let (symbols, base): (HashSet<_>, HashSet<_>) =
-                requested_layers.into_iter().partition(|layer| {
-                    matches!(
-                        layer.paint,
-                        Some(crate::style::layer::LayerPaint::Symbol(_))
-                    )
-                });
-            {
-                let mut processor =
-                    ProcessVectorContext::<T, C>::new(context.clone()).with_pending_symbols();
-                process_vector_tile_with_assets(
-                    &data,
-                    VectorTileRequest {
-                        coords,
-                        layers: base,
-                        projection: projection.clone(),
-                    },
-                    &mut processor,
-                    std::sync::Arc::new(crate::sdf::assets::SymbolAtlas::default()),
-                )
-                .map_err(|error| ProcedureError::Execution(Box::new(error)))?;
-            }
+            let (symbols, base): (HashSet<_>, HashSet<_>) = requested_layers
+                .into_iter()
+                .partition(|layer| layer.type_ == "symbol");
+            process_base::<T, C>(
+                &data,
+                VectorTileRequest {
+                    coords,
+                    layers: base,
+                    projection: projection.clone(),
+                },
+                context.clone(),
+            )?;
             if symbols.is_empty() {
                 continue;
             }
@@ -199,6 +202,21 @@ pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context +
             .map_err(ProcedureError::Send)?;
         Ok(())
     })
+}
+
+fn process_base<T: VectorTransferables, C: Context>(
+    data: &[u8],
+    request: VectorTileRequest,
+    context: C,
+) -> Result<(), ProcedureError> {
+    let mut processor = ProcessVectorContext::<T, C>::new(context).with_pending_symbols();
+    process_vector_tile_with_assets(
+        data,
+        request,
+        &mut processor,
+        std::sync::Arc::new(crate::sdf::assets::SymbolAtlas::default()),
+    )
+    .map_err(|error| ProcedureError::Execution(Box::new(error)))
 }
 
 impl<E: Environment, T: VectorTransferables> RequestSystem<E, T> {

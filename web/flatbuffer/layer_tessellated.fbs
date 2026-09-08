@@ -17,6 +17,7 @@ table FlatLayerTessellated {
     style_layer_id: string;
     // Per-feature RGBA colors (4 floats per feature, flattened).
     feature_colors: [float];
+    vertex_distances: [float];
 }
 
 root_type FlatLayerTessellated;

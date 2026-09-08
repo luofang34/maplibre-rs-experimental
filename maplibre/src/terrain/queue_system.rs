@@ -107,7 +107,9 @@ fn hide_draped_layers(world: &mut World, style: &Style) {
     let drapeable: HashSet<&str> = style
         .layers
         .iter()
-        .filter(|layer| is_drapeable(&layer.type_))
+        .filter(|layer| {
+            is_drapeable(&layer.type_) && crate::vector::structures::kind(layer).is_none()
+        })
         .map(|layer| layer.id.as_str())
         .collect();
     if let Some(layer_phase) = world.resources.get_mut::<RenderPhase<LayerItem>>() {
@@ -344,6 +346,9 @@ fn target_specs(
     } else {
         view_region.iter().collect()
     };
+    world
+        .resources
+        .insert(crate::terrain::request_system::DrapeRequests(tiles.clone()));
     let targets = select_targets(tiles.into_iter(), world, &raster_coverings);
     Ok(collect_layer_specs(targets, style, world, zoom.value()))
 }
@@ -371,7 +376,7 @@ fn prepare_drapes(
         let content = loaded_content(world);
         specs
             .iter()
-            .map(|spec| fingerprint(spec, &content, clear_color))
+            .map(|spec| fingerprint(spec, &content, clear_color, view_state.zoom().value()))
             .collect()
     };
     // A tile whose vector sources are finished but not yet in the buffer pool would drape
@@ -379,9 +384,10 @@ fn prepare_drapes(
     let ready: Vec<bool> = specs
         .iter()
         .map(|spec| {
-            spec.shapes.iter().all(|shape| {
-                !shape.raster_layers.is_empty() || geometry_uploaded(shape.source, world)
-            })
+            !spec.shapes.is_empty()
+                && spec.shapes.iter().all(|shape| {
+                    !shape.raster_layers.is_empty() || geometry_uploaded(shape.source, world)
+                })
         })
         .collect();
     let (redraw, drape_sources) = {
