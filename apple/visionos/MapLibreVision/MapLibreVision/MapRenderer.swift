@@ -30,6 +30,10 @@ final class MapRenderer {
     /// draws without a wait on the CPU.
     private var mapQueue: MTLCommandQueue?
     private let eyeTargets = MapEyeTargets()
+    private let recoveryQueue: MTLCommandQueue?
+    #if DEBUG
+    private var simulateRenderFailure = ProcessInfo.processInfo.arguments.contains("--simulate-render-failure-once")
+    #endif
     private static var loggedProjection = false
     private var placedFromHead = false
     private var stats = FrameStats()
@@ -57,6 +61,7 @@ final class MapRenderer {
     init(layerRenderer: LayerRenderer) {
         self.layerRenderer = layerRenderer
         device = layerRenderer.device
+        recoveryQueue = layerRenderer.device.makeCommandQueue()
         if let parked = MapRenderer.parked {
             placement = parked.placement
         } else {
@@ -153,18 +158,6 @@ final class MapRenderer {
         return map
     }
 
-    /// Whether the map can draw straight into the drawable: every view owns a whole texture
-    /// (no layered layout, whose slices the map's import does not address) and the texture
-    /// allows a view in the map's linear format. Otherwise each eye has a separate
-    /// intermediate texture copied into its slice.
-    private static func drawsDirectly(_ drawable: LayerRenderer.Drawable) -> Bool {
-        let dedicated = drawable.views.allSatisfy { $0.textureMap.sliceIndex == 0 }
-            && Set(drawable.views.map { $0.textureMap.textureIndex }).count == drawable.views.count
-        return dedicated && drawable.colorTextures.allSatisfy {
-            $0.textureType == .type2D && $0.usage.contains(.pixelFormatView)
-        }
-    }
-
     /// Wall-clock cost of the frames since the last report, to tell a CPU-bound frame loop
     /// from tiles that arrive late.
     private struct FrameStats {
@@ -258,17 +251,15 @@ final class MapRenderer {
         drawable.deviceAnchor = deviceAnchor
 
         let firstTexture = drawable.colorTextures[0]
-        guard let map = ensureMap(width: firstTexture.width, height: firstTexture.height) else {
-            frame.endSubmission()
+        let candidate = ensureMap(width: firstTexture.width, height: firstTexture.height)
+        guard let queue = mapQueue ?? recoveryQueue, let commandBuffer = queue.makeCommandBuffer() else {
+            maplibre_visionos_note("no command buffer available; compositor frame skipped")
             return
         }
-        guard let queue = mapQueue else {
-            maplibre_visionos_note("map queue unavailable; stereo frame skipped")
-            frame.endSubmission()
-            return
-        }
-        guard let commandBuffer = queue.makeCommandBuffer() else {
-            frame.endSubmission()
+        commandBuffer.addCompletedHandler { [framesInFlight] _ in framesInFlight.signal() }
+        completionOwnsPermit = true
+        guard let map = candidate else {
+            present(drawable, on: commandBuffer, frame: frame)
             return
         }
         let head = deviceAnchor.map { anchor -> SIMD3<Double> in
@@ -303,9 +294,7 @@ final class MapRenderer {
         if let request = modeStore.takeFlightRequest() {
             placement.fly(to: request.height, at: presentation, viewer: head)
         }
-        if let immersion = placement.advance(at: presentation) {
-            modeStore.showImmersion(immersion)
-        }
+        let immersionChange = placement.advance(at: presentation)
         // What the system would still let the process take; the map keeps its drapes and
         // requests within it. `--memory-cap N` pretends only N megabytes are left, so the
         // simulator can show the map living within a headset's limit.
@@ -360,19 +349,14 @@ final class MapRenderer {
                 let usage = drawable.colorTextures[index].usage
                 let depthUsage = drawable.depthTextures.first?.usage.rawValue ?? 0
                 print("drawable \(firstTexture.width)x\(firstTexture.height) depth usage \(depthUsage)")
-                print("compositor views \(drawable.views.count) colour textures \(drawable.colorTextures.count) depth textures \(drawable.depthTextures.count) texture/slice \(maps) depthRange \(depthRange) projection z row \(projection.columns.2.z) \(projection.columns.3.z) colour usage \(usage.rawValue) direct \(MapRenderer.drawsDirectly(drawable))")
+                print("compositor views \(drawable.views.count) colour textures \(drawable.colorTextures.count) depth textures \(drawable.depthTextures.count) texture/slice \(maps) depthRange \(depthRange) projection z row \(projection.columns.2.z) \(projection.columns.3.z) colour usage \(usage.rawValue) stereo recovery enabled")
             }
         }
-        let direct = MapRenderer.drawsDirectly(drawable)
-        guard let colors = eyeTargets.colors(for: drawable, device: device, direct: direct) else {
-            frame.endSubmission()
+        guard let colors = eyeTargets.colors(for: drawable, device: device) else {
+            present(drawable, on: commandBuffer, frame: frame)
             return
         }
-        let depths = eyeTargets.depths(for: drawable)
-        commandBuffer.addCompletedHandler { [framesInFlight] _ in
-            framesInFlight.signal()
-        }
-        completionOwnsPermit = true
+        let depths = eyeTargets.depths()
         let group = Array(drawable.views.indices)
         let renderStart = CACurrentMediaTime()
         let result: UnsafeRawPointer? = withUnsafePointer(to: &worldFromScene) { scenePointer in
@@ -403,8 +387,15 @@ final class MapRenderer {
                                 depth_texture: depth.map { UnsafeRawPointer(Unmanaged.passUnretained($0 as AnyObject).toOpaque()) })
                         }
                         return eyes.withUnsafeMutableBufferPointer { eyeBuffer in
-                            withUnsafePointer(to: &prefetchC) { prefetchPlacement in
-                                maplibre_visionos_render_frame(
+                            withUnsafePointer(to: &prefetchC) { prefetchPlacement -> UnsafeRawPointer? in
+                                #if DEBUG
+                                if simulateRenderFailure && eyeTargets.hasPresentedFrame {
+                                    simulateRenderFailure = false
+                                    maplibre_visionos_note("simulated renderer failure; preserving stereo frame")
+                                    return nil
+                                }
+                                #endif
+                                return maplibre_visionos_render_frame(
                                     map, &placementC, hasPrefetch ? prefetchPlacement : nil,
                                     eyeBuffer.baseAddress, UInt32(eyeBuffer.count),
                                     MapRenderer.requestOverscan, presentation)
@@ -421,23 +412,15 @@ final class MapRenderer {
                 projection: drawable.computeProjection(viewIndex: 0), map: map))
         }
         renderSeconds += CACurrentMediaTime() - renderStart
-        guard result != nil else {
-            maplibre_visionos_note("stereo frame failed")
-            commandBuffer.commit()
-            frame.endSubmission()
-            return
+        if result != nil {
+            eyeTargets.publish()
+        } else {
+            maplibre_visionos_note("stereo frame failed; presenting the last complete frame")
         }
         let copyStart = CACurrentMediaTime()
-        if !direct, !eyeTargets.copy(to: drawable, commandBuffer: commandBuffer) {
-            commandBuffer.commit()
-            frame.endSubmission()
-            return
-        }
+        present(drawable, on: commandBuffer, frame: frame)
         copySeconds = CACurrentMediaTime() - copyStart
-
-        drawable.encodePresent(commandBuffer: commandBuffer)
-        commandBuffer.commit()
-        frame.endSubmission()
+        if let immersionChange { modeStore.showImmersion(immersionChange) }
         // The map knows the terrain under the focus; the viewer stands that much higher, so
         // a height is a height above the ground. The ground eases to a newly loaded DEM
         // rather than jumping to it.
@@ -455,6 +438,13 @@ final class MapRenderer {
         stats.add(
             total: CACurrentMediaTime() - frameStart, render: renderSeconds, copy: copySeconds,
             gpuAllocated: device.currentAllocatedSize, availableMB: lastAvailableMemory >> 20)
+    }
+
+    private func present(_ drawable: LayerRenderer.Drawable, on commandBuffer: MTLCommandBuffer, frame: LayerRenderer.Frame) {
+        eyeTargets.copy(to: drawable, commandBuffer: commandBuffer, opaque: placement.immersion == .full)
+        drawable.encodePresent(commandBuffer: commandBuffer)
+        commandBuffer.commit()
+        frame.endSubmission()
     }
 
     private static func seconds(_ duration: Duration) -> TimeInterval {

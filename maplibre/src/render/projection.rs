@@ -173,7 +173,7 @@ pub enum ProjectionStateError {
         source: MercatorCoveringError,
     },
     /// Globe camera state could not be constructed.
-    #[error("failed to construct globe camera state")]
+    #[error("failed to construct globe camera state: {source}")]
     GlobeCamera {
         /// Underlying camera error.
         #[source]
