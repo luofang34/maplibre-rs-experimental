@@ -26,9 +26,9 @@ fn main(
     );
     var position = projected.clip_position;
     // Background paint cannot occlude bathymetry or land below the reference ellipsoid.
-    // Keep a positive compositor depth, behind terrain and ahead of the sky.
+    // A relative depth stays behind terrain at every scene scale and above the sky.
     if viewport.y > 0.5 {
-        position.z = 1.0e-7 * position.w;
+        position.z = max(position.z, 0.0) * 1.0e-6;
     }
     return VertexOutput(color, projected.horizon_distance, position);
 }

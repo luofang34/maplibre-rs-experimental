@@ -67,6 +67,7 @@ pub fn create_terrain_mesh(mesh_size: u32) -> TerrainMesh {
         }
     }
     build_skirts(&mut mesh, n, delta);
+    build_polar_caps(&mut mesh, n, delta);
     mesh
 }
 
@@ -125,6 +126,23 @@ fn build_skirts(mesh: &mut TerrainMesh, n: u32, delta: i32) {
             right + y + 2,
             right + y + 3,
         ]);
+    }
+}
+
+fn build_polar_caps(mesh: &mut TerrainMesh, n: u32, delta: i32) {
+    for (edge, marker) in [(0, i16::MIN), (n * (n + 1), i16::MAX)] {
+        let start = mesh.vertices.len() as u32;
+        for x in 0..=n {
+            mesh.vertices
+                .push(TerrainVertex::new(x as i32 * delta, i32::from(marker), 0));
+        }
+        for x in 0..n {
+            let mut triangle = [edge + x, edge + x + 1, start + x];
+            if marker == i16::MIN {
+                triangle.swap(0, 1);
+            }
+            mesh.indices.extend(triangle);
+        }
     }
 }
 

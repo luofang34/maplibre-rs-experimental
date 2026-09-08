@@ -59,10 +59,17 @@ fn main(
     @location(0) raw_position: vec2<i32>,
     @location(1) skirt: vec2<u32>,
 ) -> VertexOutput {
-    let position = vec2<f32>(raw_position);
-    let elevation = terrain_elevation(position) - f32(skirt.x) * terrain_tile.skirt_length;
+    let position = clamp(vec2<f32>(raw_position), vec2<f32>(0.0), vec2<f32>(TERRAIN_EXTENT));
+    var surface_position_2d = position;
+    let north_cap = raw_position.y == -32768 && terrain_tile.tile_mercator_coords.y == 0.0;
+    let south_cap = raw_position.y == 32767 &&
+        terrain_tile.tile_mercator_coords.y + TERRAIN_EXTENT * terrain_tile.tile_mercator_coords.w >= 1.0;
+    if north_cap || south_cap { surface_position_2d.y = f32(raw_position.y); }
+    // Every longitude meets at the same altitude; unknown polar DEM samples cannot split the fan.
+    let elevation = select(terrain_elevation(position), 0.0, north_cap || south_cap)
+        - f32(skirt.x) * terrain_tile.skirt_length;
     let projected = project_tile_position_3d(
-        vec3<f32>(position, elevation),
+        vec3<f32>(surface_position_2d, elevation),
         terrain_tile.transform,
         terrain_tile.tile_mercator_coords,
     );
@@ -73,7 +80,11 @@ fn main(
     let metres_per_unit = PROJECTION_TWO_PI * projection.transition_and_padding.z
         * terrain_tile.tile_mercator_coords.z
         * globe_circumference_ratio_at_tile_y(TERRAIN_EXTENT * 0.5, terrain_tile.tile_mercator_coords);
-    let surface_position = vec3<f32>(position.x * metres_per_unit, -position.y * metres_per_unit, elevation);
+    var surface_position = vec3<f32>(position.x * metres_per_unit, -position.y * metres_per_unit, elevation);
+    // The cap spans the angular gap beyond Mercator; a collapsed UV row has no usable lighting normal.
+    let cap_metres = projection.transition_and_padding.z * (PROJECTION_PI - 2.0 * atan(exp(PROJECTION_PI)));
+    if north_cap { surface_position.y += cap_metres; }
+    if south_cap { surface_position.y -= cap_metres; }
     return VertexOutput(
         position / TERRAIN_EXTENT,
         projected.horizon_distance,

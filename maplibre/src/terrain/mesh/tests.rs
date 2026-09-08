@@ -10,8 +10,11 @@ fn grid_and_skirts_have_the_expected_sizes() {
 
     let grid = (n + 1) * (n + 1);
     let skirts = 2 * (n + 1) + 4 * (n + 1);
-    assert_eq!(mesh.vertices.len() as u32, grid + skirts);
-    assert_eq!(mesh.indices.len() as u32, n * n * 6 + n * 12 + n * 12);
+    assert_eq!(mesh.vertices.len() as u32, grid + skirts + 2 * (n + 1));
+    assert_eq!(
+        mesh.indices.len() as u32,
+        n * n * 6 + n * 12 + n * 12 + n * 6
+    );
     assert_eq!(mesh.indices.len() % 3, 0);
 }
 
