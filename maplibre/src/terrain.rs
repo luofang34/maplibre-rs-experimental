@@ -30,6 +30,7 @@ pub mod interaction;
 pub mod mesh;
 mod populate_world_system;
 mod queue_system;
+pub(crate) use queue_system::uses_uniform_texture_covering;
 pub(crate) mod request_system;
 mod resource_system;
 pub mod resources;

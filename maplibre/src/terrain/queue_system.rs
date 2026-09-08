@@ -29,7 +29,17 @@ use crate::{
     },
     vector::{geometry_uploaded, VectorBufferPool},
 };
+mod cohort;
 mod covering;
+mod targets;
+use targets::target_specs;
+
+pub(crate) fn uses_uniform_texture_covering(view_state: &ViewState) -> bool {
+    use cgmath::InnerSpace;
+    view_state.external_globe_eye().is_some_and(|eye| {
+        (eye.position.magnitude() - 1.0) * view_state.body().radius_meters >= 60_000.0
+    })
+}
 mod drape_phase;
 mod surface_covering;
 mod uniforms;
@@ -321,46 +331,6 @@ fn queue_tiles(
     Ok(())
 }
 
-fn target_specs(
-    style: &Style,
-    view_state: &ViewState,
-    world: &mut World,
-) -> Result<Vec<TargetSpec>, SystemError> {
-    let zoom = view_state.zoom();
-    let (view_region, raster_coverings) =
-        drawn_covering(style, view_state, world, zoom.zoom_level(DEFAULT_TILE_SIZE)).map_err(
-            |error| {
-                tracing::error!(%error, "unable to select terrain tiles");
-                SystemError::Setup
-            },
-        )?;
-    let Some(view_region) = view_region else {
-        return Ok(Vec::new());
-    };
-    let memory = world
-        .resources
-        .get::<MemoryBudget>()
-        .copied()
-        .unwrap_or_default();
-    world
-        .resources
-        .insert(surface_covering::SurfaceTiles(view_region.iter().collect()));
-    let tiles: Vec<_> = if view_state.has_external_view() {
-        covering::for_frame(
-            world,
-            view_region.iter().collect(),
-            memory.drape_textures_allowed(),
-        )
-    } else {
-        view_region.iter().collect()
-    };
-    world
-        .resources
-        .insert(crate::terrain::request_system::DrapeRequests(tiles.clone()));
-    let targets = select_targets(tiles.into_iter(), world, &raster_coverings);
-    Ok(collect_layer_specs(targets, style, world, zoom.value()))
-}
-
 struct PreparedDrapes {
     redraw: Vec<bool>,
     sources: Vec<Option<WorldTileCoords>>,
@@ -389,12 +359,18 @@ fn prepare_drapes(
     };
     // A tile whose vector sources are finished but not yet in the buffer pool would drape
     // blank; it shows an ancestor's drape until they are.
+    let strict = world
+        .resources
+        .get::<cohort::TextureCohort>()
+        .is_some_and(|state| state.enabled);
     let mut ready: Vec<bool> = specs
         .iter()
         .map(|spec| {
             !spec.shapes.is_empty()
                 && spec.shapes.iter().all(|shape| {
-                    !shape.raster_layers.is_empty() || geometry_uploaded(shape.source, world)
+                    !shape.raster_layers.is_empty()
+                        || ((!strict || shape.source == spec.coords)
+                            && geometry_uploaded(shape.source, world))
                 })
         })
         .collect();

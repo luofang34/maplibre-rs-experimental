@@ -18,7 +18,7 @@ fn reducing_texture_budget_preserves_every_mesh_coordinate_and_dem_zoom() {
         coords: coarse,
         shapes: Vec::new(),
     }];
-    let (surfaces, sources) = for_frame(&world, &drapes, &[Some(coarse)]);
+    let (surfaces, sources) = for_frame(&mut world, &drapes, &[Some(coarse)]);
     assert_eq!(
         surfaces.iter().map(|spec| spec.coords).collect::<Vec<_>>(),
         fine

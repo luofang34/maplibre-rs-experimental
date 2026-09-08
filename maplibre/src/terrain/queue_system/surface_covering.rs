@@ -5,22 +5,30 @@ use crate::{coords::WorldTileCoords, tcs::world::World, terrain::drape_targets::
 pub(super) struct SurfaceTiles(pub Vec<WorldTileCoords>);
 
 pub(super) fn for_frame(
-    world: &World,
+    world: &mut World,
     drapes: &[TargetSpec],
     sources: &[Option<WorldTileCoords>],
 ) -> (Vec<TargetSpec>, Vec<Option<WorldTileCoords>>) {
-    let Some(surface) = world.resources.get::<SurfaceTiles>() else {
-        return (Vec::new(), Vec::new());
-    };
-    let specs = surface
-        .0
-        .iter()
+    let surfaces = world
+        .resources
+        .get::<SurfaceTiles>()
+        .map(|surface| surface.0.clone())
+        .unwrap_or_default();
+    let coordinates: Vec<_> = drapes.iter().map(|drape| drape.coords).collect();
+    let (surfaces, mapped) =
+        if let Some(active) = super::cohort::active_sources(world, &coordinates, sources) {
+            super::cohort::surface_pieces(&surfaces, &active)
+        } else {
+            let mapped = map_sources(&surfaces, drapes, sources);
+            (surfaces, mapped)
+        };
+    let specs = surfaces
+        .into_iter()
         .map(|coords| TargetSpec {
-            coords: *coords,
+            coords,
             shapes: Vec::new(),
         })
         .collect();
-    let mapped = map_sources(&surface.0, drapes, sources);
     (specs, mapped)
 }
 

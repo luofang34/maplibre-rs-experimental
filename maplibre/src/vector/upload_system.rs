@@ -64,7 +64,19 @@ pub fn upload_system(
     else {
         return Err(SystemError::Dependencies);
     };
-    let source_tiles = sources_for_upload(pattern);
+    let mut source_tiles =
+        if style.terrain.is_some() && crate::terrain::uses_uniform_texture_covering(view_state) {
+            Vec::new()
+        } else {
+            sources_for_upload(pattern)
+        };
+    if let Some(requests) = world
+        .resources
+        .get::<crate::terrain::request_system::DrapeRequests>()
+    {
+        let mut seen: HashSet<_> = source_tiles.iter().copied().collect();
+        source_tiles.extend(requests.0.iter().copied().filter(|tile| seen.insert(*tile)));
+    }
     let (spatial, changed) = super::structures::for_frame(world, style, &source_tiles);
     let Some(Initialized(buffer_pool)) = world.resources.get_mut::<Eventually<VectorBufferPool>>()
     else {
