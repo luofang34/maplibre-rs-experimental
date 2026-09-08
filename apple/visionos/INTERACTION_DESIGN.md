@@ -2,7 +2,7 @@
 
 ## Navigation contract
 
-One short pinch selects the visible feature at the system-provided selection ray. A held pinch that moves pans the immersive map or turns the globe under the grabbed point. Head motion changes the view through the scene; it does not generate navigation input.
+One short pinch selects the visible feature at the system-provided selection ray. A held pinch that moves pans the immersive map or turns the globe under the grabbed point. A globe grab translates its initial surface aim by the hand’s room-space displacement, independent of how close the hand is to the head. Leaving the silhouette holds the last valid surface point until the hand returns; it cannot switch into faster off-globe navigation. Head motion changes the view through the scene; it does not generate navigation input.
 
 Two pinches start an undecided interaction. Relative separation zooms, relative twist rotates, and coherent common hand motion carries the table globe. Carry accepts modest differences between the two hands and starts after 12 mm of shared movement. In immersive free camera, common horizontal and vertical motion orbit and pitch around the ground target instead. Each interaction locks its intent until a hand releases. Translation, scale and rotation therefore cannot accidentally accumulate together. The hand count changing consumes that event and rebases the surviving hand.
 
@@ -16,7 +16,7 @@ A fixed viewpoint, such as an airplane camera mount, keeps its scene-space eye p
 
 ## Zoom anchor
 
-At the start of a zoom, capture the surface under the primary system selection ray. If it misses, try the midpoint of the two selection rays, then the head ray and the existing surface focus. Preserve that scene point under the captured ray as height and scene scale change. Physical head motion cannot reacquire a different zoom point midway through the gesture. This uses confirmed system selection input rather than continuous eye tracking.
+At the start of a zoom, capture the surface under the primary system selection ray. If it misses, try the midpoint of the two selection rays, then the head ray and the existing surface focus. Preserve that scene point under the captured ray as height and scene scale change. Zoom preserves the scene orientation and solves the target distance from positive eye-to-surface clearance; orientation changes belong to orbit and mode flights. Physical head motion cannot reacquire a different zoom point midway through the gesture. This uses confirmed system selection input rather than continuous eye tracking.
 
 ## Placement and mode flights
 

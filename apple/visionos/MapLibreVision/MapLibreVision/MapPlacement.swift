@@ -146,6 +146,7 @@ struct MapPlacement {
     private var flight: Flight?
     /// Whether this pinch began on the rendered sphere; crossing its edge keeps the mode.
     private var globeGrabbed: Bool?
+    private var globeDragPoint: (surface: SIMD3<Double>, aim: SIMD3<Double>)?
     /// Where the viewer stood when the scene was last placed about them; the world keeps to
     /// that place while they move about the room.
     private var viewerReference = SIMD3<Double>(0, 0, 0)
@@ -156,6 +157,7 @@ struct MapPlacement {
         var origin: SIMD3<Double>
         var direction: SIMD3<Double>
         var distance: Double
+        var clearance: Double
     }
     private var zoomTarget: ZoomTarget?
     private var orbitTarget: (local: SIMD3<Double>, world: SIMD3<Double>)?
@@ -318,9 +320,8 @@ struct MapPlacement {
     }
 
     /// Applies hand input to the viewpoint; input during a flight is dropped.
-    /// The rendered surface follows the hand: the point a pinch's ray grabbed keeps to the ray
-    /// while the hand moves, whether that surface is the ground under the viewer or the globe
-    /// at its rendered size. A pinch begun outside the globe keeps the table globe's angular
+    /// A grabbed globe point follows room-space hand travel; ground navigation follows
+    /// the pinch ray. A pinch begun outside the globe keeps the table globe's angular
     /// speed as its size changes. Ground drags beyond reach pull at the reach limit.
     /// Explicit placement input carries the globe; paired navigation input zooms or rotates it.
     mutating func apply(_ input: MapGestureInput.Delta) {
@@ -349,7 +350,7 @@ struct MapPlacement {
         for move in input.moves {
             if let origin = move.rayOrigin, let from = move.rayFrom, let to = move.rayTo {
                 if !onGround {
-                    slide += dragGlobe(move, origin: origin, from: from, to: to,
+                    slide += dragGlobe(move, origin: origin, from: from,
                                        center: center, radius: radius, reach: reach)
                     continue
                 }
@@ -410,12 +411,26 @@ struct MapPlacement {
         guard input.logScale != 0 else { return }
         if input.beginsZoom || zoomTarget == nil { captureZoomTarget(input) }
         let height = viewpoint.height
-        let scale = exp(current.logScale)
+        let orientation = current.rotation
         viewpoint.height = min(max(height / exp(input.logScale), MapPlacement.minHeight), MapPlacement.tableHeight)
+        current = pose(for: viewpoint)
+        // Zoom changes distance and scale; rotating the surface underneath a held
+        // point can send the eye through it. Mode flights own orientation changes.
+        sceneRotation = orientation * current.rotation.inverse * sceneRotation
         current = pose(for: viewpoint)
         guard var target = zoomTarget else { return }
         let nextScale = exp(current.logScale)
-        target.distance *= (viewpoint.height / height) * (nextScale / scale)
+        target.clearance *= viewpoint.height / height
+        let normal = simd_normalize(target.local + SIMD3<Double>(0, 0, MapPlacement.earthRadiusMeters))
+        let facing = simd_dot(current.rotation.act(normal), target.direction)
+        let radius = MapPlacement.earthRadiusMeters * nextScale
+        let clearance = max(target.clearance * nextScale, 1e-6)
+        let along = radius * facing
+        let heightTerm = clearance * (2 * radius + clearance)
+        let root = sqrt(along * along + heightTerm)
+        // The positive intersection keeps the eye outside the surface as its normal
+        // rotates between table and ground, while the captured point stays on its ray.
+        target.distance = along < 0 ? heightTerm / (root - along) : along + root
         let wanted = target.origin + target.direction * target.distance
         let actual = current.translation + current.rotation.act(target.local * nextScale)
         sceneOffset += wanted - actual
@@ -433,14 +448,16 @@ struct MapPlacement {
                                   center: center, radius: radius, reach: reach) else { continue }
             zoomTarget = ZoomTarget(local: current.rotation.inverse.act(point - current.translation) / scale,
                                     origin: ray.origin, direction: ray.direction,
-                                    distance: simd_length(point - ray.origin))
+                                    distance: simd_length(point - ray.origin),
+                                    clearance: max((simd_length(ray.origin - center) - radius) / scale, 1))
             return
         }
         let origin = viewRay?.origin ?? viewerReference
         let delta = current.translation - origin
         guard simd_length(delta) > 1e-6 else { return }
         zoomTarget = ZoomTarget(local: .zero, origin: origin, direction: simd_normalize(delta),
-                                distance: simd_length(delta))
+                                distance: simd_length(delta),
+                                clearance: max((simd_length(origin - center) - radius) / scale, 1))
     }
 
     private func offGlobeDirection(_ travel: SIMD3<Double>) -> SIMD3<Double> {
@@ -452,26 +469,36 @@ struct MapPlacement {
 
     private mutating func dragGlobe(
         _ move: MapGestureInput.Move, origin: SIMD3<Double>, from: SIMD3<Double>,
-        to: SIMD3<Double>, center: SIMD3<Double>, radius: Double, reach: Double
+        center: SIMD3<Double>, radius: Double, reach: Double
     ) -> SIMD3<Double> {
-        let grabbed = hit(origin: origin, direction: from, center: center, radius: radius, reach: reach)
-        if move.beginsGesture || globeGrabbed == nil { globeGrabbed = grabbed != nil }
-        if globeGrabbed == true, let grabbed,
-           let pulled = hit(origin: origin, direction: to, center: center, radius: radius, reach: reach),
-           let focus = GlobeDrag.focus(
-               grabbed: current.rotation.inverse.act(simd_normalize(grabbed - center)),
-               pulled: current.rotation.inverse.act(simd_normalize(pulled - center)),
-               latitude: viewpoint.latitude, longitude: viewpoint.longitude,
-               roll: viewpoint.globeRoll)
-        {
-            viewpoint.latitude = focus.latitude
-            viewpoint.longitude = focus.longitude
-            viewpoint.globeRoll = focus.roll
-            current = pose(for: viewpoint)
-            return .zero
+        if move.beginsGesture || globeGrabbed == nil {
+            let point = hit(origin: origin, direction: from, center: center, radius: radius, reach: reach)
+            globeGrabbed = point != nil
+            globeDragPoint = point.map { (surface: $0, aim: $0) }
         }
-        // Off-sphere navigation keeps the table globe's angular speed at every size.
-        return move.travel * (radius / MapPlacement.tableRadius)
+        guard globeGrabbed == true else {
+            return move.travel * (radius / MapPlacement.tableRadius)
+        }
+        guard var target = globeDragPoint else { return .zero }
+        // Translate the grabbed point by room-space hand travel. Turning a ray about
+        // the head instead multiplies travel by the ratio of surface and hand depths.
+        target.aim += move.travel
+        defer { globeDragPoint = target }
+        let delta = target.aim - origin
+        guard simd_length(delta) > 1e-6,
+              let pulled = hit(origin: origin, direction: simd_normalize(delta),
+                               center: center, radius: radius, reach: reach),
+              let focus = GlobeDrag.focus(
+                grabbed: current.rotation.inverse.act(simd_normalize(target.surface - center)),
+                pulled: current.rotation.inverse.act(simd_normalize(pulled - center)),
+                latitude: viewpoint.latitude, longitude: viewpoint.longitude, roll: viewpoint.globeRoll)
+        else { return .zero }
+        viewpoint.latitude = focus.latitude
+        viewpoint.longitude = focus.longitude
+        viewpoint.globeRoll = focus.roll
+        current = pose(for: viewpoint)
+        target.surface = pulled
+        return .zero
     }
 
     /// Where a ray meets the rendered globe, unless it misses or the point is beyond reach.

@@ -111,6 +111,28 @@ final class TableTwistTests: XCTestCase {
 }
 
 final class MapZoomAnchorTests: XCTestCase {
+    func testZoomIntoGroundCannotCarryEitherEyeInsideTheGlobe() {
+        for tilt in [-0.25, 0.0, 0.25] {
+            var placement = MapPlacement(viewpoint: .above(.innsbruck, height: MapPlacement.tableHeight))
+            placement.tableCenter = SIMD3<Double>(0, tilt, -1)
+            placement.place(viewer: .zero)
+            let target = placement.current.translation
+            let ray = simd_normalize(target)
+            let orientation = placement.current.rotation
+            for step in 0..<160 {
+                placement.apply(.init(logScale: 0.08, beginsZoom: step == 0, focusAnchor: (.zero, ray)))
+                let scale = exp(placement.current.logScale)
+                let radius = MapPlacement.earthRadiusMeters * scale
+                XCTAssertLessThan(abs((placement.current.rotation * orientation.inverse).angle), 1e-7)
+                let center = placement.current.translation - placement.current.rotation.act(SIMD3<Double>(0, 0, radius))
+                for offset in [-0.035, 0.035] {
+                    XCTAssertGreaterThan(simd_length(SIMD3<Double>(offset, 0, 0) - center), radius,
+                                         "tilt \(tilt), height \(placement.viewpoint.height)")
+                }
+            }
+        }
+    }
+
     func testZoomKeepsCapturedSurfaceUnderRayAcrossScalesAndHeadMotion() {
         for height in [4000.0, 60_000, 100_000, 1_000_000, 8_000_000, 40_000_000] {
             var placement = MapPlacement(viewpoint: .above(.innsbruck, height: height))
