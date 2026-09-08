@@ -4,15 +4,19 @@
 
 One short pinch selects the visible feature at the system-provided selection ray. A held pinch that moves pans the immersive map or turns the globe under the grabbed point. Head motion changes the view through the scene; it does not generate navigation input.
 
-Two pinches start an undecided interaction. Relative separation zooms, relative twist rotates, and common hand motion carries the table globe. In immersive free camera, common horizontal and vertical motion orbit and pitch around the ground target instead. Each interaction locks its intent until a hand releases. Translation, scale and rotation therefore cannot accidentally accumulate together. The hand count changing consumes that event and rebases the surviving hand.
+Two pinches start an undecided interaction. Relative separation zooms, relative twist rotates, and coherent common hand motion carries the table globe. Carry accepts modest differences between the two hands and starts after 12 mm of shared movement. In immersive free camera, common horizontal and vertical motion orbit and pitch around the ground target instead. Each interaction locks its intent until a hand releases. Translation, scale and rotation therefore cannot accidentally accumulate together. The hand count changing consumes that event and rebases the surviving hand.
 
-The rotation threshold is three degrees. Common motion starts at 15 mm in immersive mode and 25 mm for globe placement. Thresholds apply to net motion from the beginning, so stationary tracking noise cannot accumulate. A separate threshold and a modest dominance margin distinguish spread from twist. A short pinch cannot select after any two-hand interaction, cancellation or drag.
+The rotation threshold is three degrees. Common motion starts at 15 mm in immersive mode and 25 mm for globe placement. A two-hand zoom continues across the immersion boundary without requiring release. Thresholds apply to net motion from the beginning, so stationary tracking noise cannot accumulate. A separate threshold and a modest dominance margin distinguish spread from twist. A short pinch cannot select after any two-hand interaction, cancellation or drag.
 
 ## Free camera and vehicle viewpoint
 
 Free camera captures the surface point under the midpoint of the two initial selection rays when orbit starts, with the center head ray as fallback. The same rule applies at table, intermediate and immersive scales. The point stays at the same room position while the scene rotates around it. Zoom changes the camera-to-target distance. If the center looks into sky, use the existing surface focus rather than inventing an intersection behind the viewer. A new orbit can acquire a new target; head motion during an orbit cannot move it.
 
 A fixed viewpoint, such as an airplane camera mount, keeps its scene-space eye position. Artificial look offsets rotate about that position, while aircraft pose and physical head pose remain separate transforms. The host explicitly chooses this camera policy; camera behavior must never switch merely because the view crosses the horizon. Vehicle following and aircraft pose input are future integrations. The current application uses free camera.
+
+## Zoom anchor
+
+At the start of a zoom, capture the surface under the primary system selection ray. If it misses, try the midpoint of the two selection rays, then the head ray and the existing surface focus. Preserve that scene point under the captured ray as height and scene scale change. Physical head motion cannot reacquire a different zoom point midway through the gesture. This uses confirmed system selection input rather than continuous eye tracking.
 
 ## Placement and mode flights
 

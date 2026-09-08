@@ -39,6 +39,7 @@ struct MapGestureRecognizer<ID: Hashable> {
     private var pairUp = SIMD3<Double>(0, 1, 0)
     private var isGlobe = true
     private var suppressUntilReleased = false
+    private var beginsZoom = false
     var head = SIMD3<Double>.zero
     var right = SIMD3<Double>(1, 0, 0)
     var up = SIMD3<Double>(0, 1, 0)
@@ -47,8 +48,8 @@ struct MapGestureRecognizer<ID: Hashable> {
     mutating func setGlobe(_ wanted: Bool) -> Bool {
         guard isGlobe != wanted else { return false }
         isGlobe = wanted
-        suppressUntilReleased = !pinches.isEmpty
-        return true
+        suppressUntilReleased = !pinches.isEmpty && pairMode != .zoom && pairMode != .translate
+        return suppressUntilReleased
     }
 
     mutating func handle(_ samples: [Sample]) -> MapGestureInput.Delta {
@@ -108,6 +109,7 @@ struct MapGestureRecognizer<ID: Hashable> {
         baseline = pair()
         previous = baseline
         pairMode = .undecided
+        beginsZoom = false
     }
 
     private func turned(_ pinch: Pinch) -> SIMD3<Double>? {
@@ -144,7 +146,7 @@ struct MapGestureRecognizer<ID: Hashable> {
     private mutating func paired() -> MapGestureInput.Delta {
         guard let now = pair(), let initial = baseline, let was = previous else { return .init() }
         defer { previous = now }
-        guard min(now.distance, initial.distance, was.distance) >= 0.05 else {
+        guard min(now.distance, initial.distance, was.distance) >= 0.02 else {
             baseline = now
             pairMode = .undecided
             return .init()
@@ -159,9 +161,14 @@ struct MapGestureRecognizer<ID: Hashable> {
             let travel = now.center - initial.center
             let planar = SIMD2<Double>(simd_dot(travel, pairRight), simd_dot(travel, pairUp))
             let moveScore = isGlobe ? simd_length(travel) / 0.025 : simd_length(planar) / 0.015
-            if zoomScore >= 1, zoomScore > max(turnScore, moveScore) * 1.15 { pairMode = .zoom }
-            if turnScore >= 1, turnScore > max(zoomScore, moveScore) * 1.15 { pairMode = .rotate }
-            if moveScore >= 1, moveScore > max(zoomScore, turnScore) * 1.15 {
+            if isGlobe && coherentCarry() {
+                pairMode = .translate
+            } else if zoomScore >= 1, zoomScore > max(turnScore, moveScore) * 1.15 {
+                pairMode = .zoom
+                beginsZoom = true
+            }
+            if pairMode == .undecided, turnScore >= 1, turnScore > max(zoomScore, moveScore) * 1.15 { pairMode = .rotate }
+            if pairMode == .undecided, moveScore >= 1, moveScore > max(zoomScore, turnScore) * 1.15 {
                 pairMode = isGlobe ? .translate : .orbit
             }
             beginsOrbit = pairMode == .rotate || pairMode == .orbit
@@ -170,7 +177,9 @@ struct MapGestureRecognizer<ID: Hashable> {
         }
         switch pairMode {
         case .zoom:
-            return .init(logScale: log(now.distance / was.distance), zoomAnchor: pairAnchor())
+            defer { beginsZoom = false }
+            return .init(logScale: log(now.distance / was.distance), beginsZoom: beginsZoom,
+                         focusAnchor: primaryAnchor(), zoomAnchor: pairAnchor())
         case .rotate:
             return .init(turn: wrapped(now.angle - was.angle), beginsOrbit: beginsOrbit, orbitAnchor: pairAnchor())
         case .orbit:
@@ -182,6 +191,23 @@ struct MapGestureRecognizer<ID: Hashable> {
         case .undecided:
             return .init()
         }
+    }
+
+    private func coherentCarry() -> Bool {
+        guard order.count == 2, let a = pinches[order[0]], let b = pinches[order[1]] else { return false }
+        let first = a.hand - a.firstHand
+        let second = b.hand - b.firstHand
+        let common = (first + second) / 2
+        let differential = (second - first) / 2
+        return min(simd_length(first), simd_length(second)) >= 0.012
+            && simd_dot(first, second) > 0
+            && simd_length(common) > 2 * simd_length(differential)
+    }
+
+    private func primaryAnchor() -> (origin: SIMD3<Double>, direction: SIMD3<Double>)? {
+        guard let id = order.first, let pinch = pinches[id],
+              let origin = pinch.origin, let direction = pinch.firstDirection else { return nil }
+        return (origin, direction)
     }
 
     private func pairAnchor() -> (origin: SIMD3<Double>, direction: SIMD3<Double>)? {

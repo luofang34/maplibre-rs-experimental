@@ -36,6 +36,8 @@ final class MapGestures {
             pending.moves.append(contentsOf: delta.moves)
             pending.translation += delta.translation
             pending.logScale += delta.logScale
+            pending.beginsZoom = pending.beginsZoom || delta.beginsZoom
+            if let focus = delta.focusAnchor { pending.focusAnchor = focus }
             pending.turn += delta.turn
             pending.pitch += delta.pitch
             pending.beginsOrbit = pending.beginsOrbit || delta.beginsOrbit

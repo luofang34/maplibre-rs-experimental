@@ -109,3 +109,35 @@ final class TableTwistTests: XCTestCase {
         XCTAssertLessThan(simd_length(placement.current.translation - target), 1e-6)
     }
 }
+
+final class MapZoomAnchorTests: XCTestCase {
+    func testZoomKeepsCapturedSurfaceUnderRayAcrossScalesAndHeadMotion() {
+        for height in [4000.0, 60_000, 100_000, 1_000_000, 8_000_000, 40_000_000] {
+            var placement = MapPlacement(viewpoint: .above(.innsbruck, height: height))
+            placement.tableCenter = SIMD3<Double>(0, 0, -1)
+            placement.place(viewer: .zero)
+            let r = MapPlacement.earthRadiusMeters
+            let local = SIMD3<Double>(r * sin(0.0001), 0, r * (cos(0.0001) - 1))
+            let point = placement.current.translation + placement.current.rotation.act(local * exp(placement.current.logScale))
+            let ray = simd_normalize(point)
+            for step in 0..<20 {
+                placement.updateViewRay(origin: SIMD3<Double>(0.2, 0.1, 0), direction: SIMD3<Double>(0, 1, 0))
+                placement.apply(.init(logScale: step < 10 ? 0.08 : -0.08, beginsZoom: step == 0,
+                                      focusAnchor: (.zero, ray)))
+                let result = placement.current.translation + placement.current.rotation.act(local * exp(placement.current.logScale))
+                XCTAssertLessThan(simd_length(simd_cross(simd_normalize(result), ray)), 1e-7,
+                                  "height \(height), step \(step)")
+            }
+        }
+    }
+
+    func testTwoHandAnchorBacksUpSkyFacingFocus() {
+        var placement = MapPlacement(viewpoint: .above(.innsbruck, height: 4000))
+        placement.place(viewer: .zero)
+        let ray = simd_normalize(placement.current.translation)
+        placement.apply(.init(logScale: 0.4, beginsZoom: true,
+                              focusAnchor: (.zero, SIMD3<Double>(0, 1, 0)), zoomAnchor: (.zero, ray)))
+        XCTAssertLessThan(simd_length(simd_cross(simd_normalize(placement.current.translation), ray)), 1e-9)
+        XCTAssertLessThan(placement.viewpoint.height, 4000)
+    }
+}

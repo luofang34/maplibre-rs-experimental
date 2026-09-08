@@ -151,6 +151,13 @@ struct MapPlacement {
     private var viewerReference = SIMD3<Double>(0, 0, 0)
     let cameraPolicy: MapCameraPolicy
     private var viewRay: (origin: SIMD3<Double>, direction: SIMD3<Double>)?
+    private struct ZoomTarget {
+        var local: SIMD3<Double>
+        var origin: SIMD3<Double>
+        var direction: SIMD3<Double>
+        var distance: Double
+    }
+    private var zoomTarget: ZoomTarget?
     private var orbitTarget: (local: SIMD3<Double>, world: SIMD3<Double>)?
     private var sceneOffset = SIMD3<Double>.zero
     private var sceneRotation = simd_quatd(angle: 0, axis: SIMD3<Double>(0, 1, 0))
@@ -322,6 +329,9 @@ struct MapPlacement {
         }
         let onGround = viewpoint.height <= MapPlacement.groundHeightLimit
         if !input.moves.isEmpty || input.logScale != 0 { orbitTarget = nil }
+        if !input.moves.isEmpty || input.turn != 0 || input.pitch != 0 || input.translation != .zero {
+            zoomTarget = nil
+        }
         if !onGround {
             var travel = input.translation
             for move in input.moves where move.rayOrigin == nil { travel += move.travel }
@@ -389,26 +399,48 @@ struct MapPlacement {
         if input.turn != 0 || input.pitch != 0 {
             rotate(bearing: input.turn, pitch: input.pitch, begins: input.beginsOrbit, anchor: input.orbitAnchor)
         }
-        let heightBefore = viewpoint.height
-        viewpoint.height = min(
-            max(viewpoint.height / exp(input.logScale), MapPlacement.minHeight),
-            MapPlacement.tableHeight)
-        // A zoom keeps the point the eyes grabbed where it is: the focus moves toward it by
-        // the share the height shrank, and away from it as the height grows.
-        if let anchor = input.zoomAnchor, viewpoint.height != heightBefore,
-           let grabbed = hit(origin: anchor.origin, direction: anchor.direction, center: center, radius: radius, reach: reach),
-           let gazed = geographic(ofLocalDirection: current.rotation.inverse.act(simd_normalize(grabbed - center)))
-        {
-            let share = viewpoint.height / heightBefore
-            var eastward = viewpoint.longitude - gazed.longitude
-            eastward = (eastward + 540).truncatingRemainder(dividingBy: 360) - 180
-            viewpoint.latitude = gazed.latitude + (viewpoint.latitude - gazed.latitude) * share
-            viewpoint.longitude = gazed.longitude + eastward * share
-        }
+        applyZoom(input)
         let limit = onGround ? MapPlacement.latitudeLimit : 89.999999
         viewpoint.latitude = min(max(viewpoint.latitude, -limit), limit)
         viewpoint.longitude = (viewpoint.longitude + 540).truncatingRemainder(dividingBy: 360) - 180
         current = pose(for: viewpoint)
+    }
+
+    private mutating func applyZoom(_ input: MapGestureInput.Delta) {
+        guard input.logScale != 0 else { return }
+        if input.beginsZoom || zoomTarget == nil { captureZoomTarget(input) }
+        let height = viewpoint.height
+        let scale = exp(current.logScale)
+        viewpoint.height = min(max(height / exp(input.logScale), MapPlacement.minHeight), MapPlacement.tableHeight)
+        current = pose(for: viewpoint)
+        guard var target = zoomTarget else { return }
+        let nextScale = exp(current.logScale)
+        target.distance *= (viewpoint.height / height) * (nextScale / scale)
+        let wanted = target.origin + target.direction * target.distance
+        let actual = current.translation + current.rotation.act(target.local * nextScale)
+        sceneOffset += wanted - actual
+        current = pose(for: viewpoint)
+        zoomTarget = target
+    }
+
+    private mutating func captureZoomTarget(_ input: MapGestureInput.Delta) {
+        let scale = exp(current.logScale)
+        let radius = MapPlacement.earthRadiusMeters * scale
+        let center = current.translation - current.rotation.act(SIMD3<Double>(0, 0, radius))
+        let reach = MapPlacement.maxGrabDistanceInHeights * viewpoint.height * scale
+        for ray in [input.focusAnchor, input.zoomAnchor, viewRay].compactMap({ $0 }) {
+            guard let point = hit(origin: ray.origin, direction: ray.direction,
+                                  center: center, radius: radius, reach: reach) else { continue }
+            zoomTarget = ZoomTarget(local: current.rotation.inverse.act(point - current.translation) / scale,
+                                    origin: ray.origin, direction: ray.direction,
+                                    distance: simd_length(point - ray.origin))
+            return
+        }
+        let origin = viewRay?.origin ?? viewerReference
+        let delta = current.translation - origin
+        guard simd_length(delta) > 1e-6 else { return }
+        zoomTarget = ZoomTarget(local: .zero, origin: origin, direction: simd_normalize(delta),
+                                distance: simd_length(delta))
     }
 
     private func offGlobeDirection(_ travel: SIMD3<Double>) -> SIMD3<Double> {

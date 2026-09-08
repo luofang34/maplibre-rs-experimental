@@ -131,4 +131,25 @@ final class MapGestureRecognizerTests: XCTestCase {
         }
     }
 
+    func testNaturalUnevenCarryWinsBeforeSmallAccidentalTwist() {
+        var engine = Recognizer()
+        _ = engine.handle([hand(1, -0.15), hand(2, 0.15)])
+        _ = engine.handle([hand(1, -0.133, 0.006), hand(2, 0.164, -0.002)])
+        let delta = engine.handle([hand(1, -0.123, 0.012), hand(2, 0.174, 0.004)])
+        XCTAssertEqual(delta.translation.x, 0.01, accuracy: 1e-9)
+        XCTAssertEqual(delta.turn, 0)
+        XCTAssertEqual(delta.logScale, 0)
+    }
+
+    func testZoomContinuesAcrossImmersionBoundaryWithoutRelease() {
+        var engine = Recognizer()
+        _ = engine.handle([hand(1, -0.15), hand(2, 0.15)])
+        _ = engine.handle([hand(1, -0.20), hand(2, 0.20)])
+        XCTAssertTrue(engine.handle([hand(1, -0.21), hand(2, 0.21)]).beginsZoom)
+        XCTAssertFalse(engine.setGlobe(false))
+        let delta = engine.handle([hand(1, -0.22), hand(2, 0.22)])
+        XCTAssertGreaterThan(delta.logScale, 0)
+        XCTAssertFalse(delta.beginsZoom)
+    }
+
 }

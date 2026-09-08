@@ -20,12 +20,14 @@ enum MapGestureInput {
         var translation = SIMD3<Double>.zero
         /// Natural log of how much two pinches moved apart; negative when together.
         var logScale = 0.0
+        var beginsZoom = false
+        var focusAnchor: (origin: SIMD3<Double>, direction: SIMD3<Double>)?
         /// Turn of two pinches about the vertical, radians, counterclockwise seen from above.
         var turn = 0.0
         var pitch = 0.0
         var beginsOrbit = false
         var orbitAnchor: (origin: SIMD3<Double>, direction: SIMD3<Double>)?
-        /// The ray the first hand of a pair grabbed, which a zoom keeps its point under.
+        /// Midpoint of the selection rays, used when the primary focus misses the surface.
         var zoomAnchor: (origin: SIMD3<Double>, direction: SIMD3<Double>)?
         /// A short stationary pinch selects the rendered label under its ray.
         var selection: (origin: SIMD3<Double>, direction: SIMD3<Double>)?
