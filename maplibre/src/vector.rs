@@ -34,6 +34,7 @@ use crate::{
 
 mod populate_world_system;
 mod process_vector;
+pub(crate) use process_vector::feature_properties;
 mod queue_system;
 pub mod render_commands;
 mod request_system;
@@ -190,3 +191,5 @@ pub struct VectorLayerBucketComponent {
 }
 
 impl TileComponent for VectorLayerBucketComponent {}
+
+pub(crate) mod line_dash;

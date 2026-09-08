@@ -13,15 +13,12 @@ use crate::{
         geometry_index::{IndexProcessor, IndexedGeometry, TileIndex},
     },
     projection::{globe::subdivision::granularity_for_zoom, ProjectionType},
-    render::{
-        shaders::{ShaderSymbolVertex, ShaderSymbolVertexNew},
-        ShaderVertex,
-    },
-    sdf::{tessellation::TextTessellator, tessellation_new::TextTessellatorNew, Feature},
+    render::ShaderVertex,
+    sdf::tessellation_new::TextTessellatorNew,
     style::{
         expression::{FeatureProperties, Value},
         filter::{FeatureContext, Filter, GeometryType},
-        layer::{LayerPaint, StyleLayer, StyleProperty, TextField},
+        layer::{LayerPaint, StyleLayer},
     },
     vector::{
         tessellation::{CircleOptions, IndexDataType, OverAlignedVertexBuffer, ZeroTessellator},
@@ -36,7 +33,7 @@ use crate::{
 pub enum ProcessVectorError {
     /// Sending of results failed
     #[error("sending data back through context failed")]
-    SendError(SendError),
+    SendError(#[source] SendError),
     /// Error when decoding e.g. the protobuf file
     #[error("decoding failed")]
     Decoding(Cow<'static, str>),
@@ -60,7 +57,10 @@ pub struct VectorTileRequest {
 
 /// Reads an MVT feature's tags into typed filter values through the layer's key and value
 /// tables.
-fn feature_properties(layer: &tile::Layer, feature: &tile::Feature) -> FeatureProperties {
+pub(crate) fn feature_properties(
+    layer: &tile::Layer,
+    feature: &tile::Feature,
+) -> FeatureProperties {
     let mut properties = FeatureProperties::new();
     for pair in feature.tags.chunks(2) {
         let [key_index, value_index] = pair else {
@@ -117,6 +117,20 @@ pub fn process_vector_tile<T: VectorTransferables, C: Context>(
     data: &[u8],
     tile_request: VectorTileRequest,
     context: &mut ProcessVectorContext<T, C>,
+) -> Result<(), ProcessVectorError> {
+    process_vector_tile_with_assets(
+        data,
+        tile_request,
+        context,
+        crate::sdf::assets::fallback_atlas(),
+    )
+}
+
+pub(crate) fn process_vector_tile_with_assets<T: VectorTransferables, C: Context>(
+    data: &[u8],
+    tile_request: VectorTileRequest,
+    context: &mut ProcessVectorContext<T, C>,
+    atlas: std::sync::Arc<crate::sdf::assets::SymbolAtlas>,
 ) -> Result<(), ProcessVectorError> {
     let mut tile = geozero::mvt::Tile::decode(data)
         .map_err(|e| ProcessVectorError::Decoding(e.to_string().into()))?;
@@ -219,7 +233,7 @@ pub fn process_vector_tile<T: VectorTransferables, C: Context>(
                         }
 
                         if let Err(e) = layer.process(&mut tessellator) {
-                            context.layer_missing(coords, &source_layer)?;
+                            context.layer_missing(coords, source_layer)?;
 
                             tracing::error!("tessellation for layer source {source_layer} at {coords} failed {e:?}");
                         } else {
@@ -234,28 +248,32 @@ pub fn process_vector_tile<T: VectorTransferables, C: Context>(
                         }
                     }
                     LayerPaint::Symbol(symbol_paint) => {
-                        let mut tessellator = TextTessellator::<IndexDataType>::default();
-                        let text_field = symbol_paint
-                            .text_field
-                            .clone()
-                            .unwrap_or_else(|| StyleProperty::Constant(TextField::default()));
                         let zoom = f64::from(u8::from(tile_request.coords.z));
-                        let mut tessellator_new = TextTessellatorNew::new(text_field, zoom);
+                        let mut tessellator_new = TextTessellatorNew::with_assets(
+                            symbol_paint.clone(),
+                            zoom,
+                            atlas.clone(),
+                        );
                         tessellator_new.coordinate_scale = coordinate_scale;
+                        tessellator_new.source_ids =
+                            layer.features.iter().map(|feature| feature.id).collect();
 
                         if let Err(e) = layer.process(&mut tessellator_new) {
-                            context.layer_missing(coords, &source_layer)?;
+                            context.layer_missing(coords, source_layer)?;
 
                             tracing::error!("tessellation for layer source {source_layer} at {coords} failed {e:?}");
                         } else {
                             tessellator_new.finish();
                             context.symbol_layer_tessellation_finished(
-                                coords,
-                                tessellator.quad_buffer.into(),
-                                tessellator_new.quad_buffer.into(),
-                                tessellator_new.features,
-                                original_layer,
-                                id.clone(),
+                                crate::vector::transferables::DefaultSymbolLayerTessellated {
+                                    coords: *coords,
+                                    buffer: OverAlignedVertexBuffer::empty(),
+                                    new_buffer: tessellator_new.quad_buffer.into(),
+                                    features: tessellator_new.features,
+                                    atlas: Some(atlas.clone()),
+                                    layer_data: original_layer,
+                                    style_layer_id: id.clone(),
+                                },
                             )?;
                         }
                     }
@@ -314,6 +332,7 @@ pub fn process_vector_tile<T: VectorTransferables, C: Context>(
 
 pub struct ProcessVectorContext<T: VectorTransferables, C: Context> {
     context: C,
+    pending_symbols: bool,
     phantom_t: PhantomData<T>,
 }
 
@@ -321,20 +340,30 @@ impl<T: VectorTransferables, C: Context> ProcessVectorContext<T, C> {
     pub fn new(context: C) -> Self {
         Self {
             context,
+            pending_symbols: false,
             phantom_t: Default::default(),
         }
     }
 }
 
 impl<T: VectorTransferables, C: Context> ProcessVectorContext<T, C> {
+    pub(crate) fn with_pending_symbols(mut self) -> Self {
+        self.pending_symbols = true;
+        self
+    }
+
     pub fn take_context(self) -> C {
         self.context
     }
 
     fn tile_finished(&mut self, coords: &WorldTileCoords) -> Result<(), ProcessVectorError> {
         self.context
-            .send_back(T::TileTessellated::build_from(*coords))
-            .map_err(|e| ProcessVectorError::SendError(e))
+            .send_back(if self.pending_symbols {
+                T::TileTessellated::build_partial(*coords)
+            } else {
+                T::TileTessellated::build_from(*coords)
+            })
+            .map_err(ProcessVectorError::SendError)
     }
 
     fn layer_missing(
@@ -344,7 +373,7 @@ impl<T: VectorTransferables, C: Context> ProcessVectorContext<T, C> {
     ) -> Result<(), ProcessVectorError> {
         self.context
             .send_back(T::LayerMissing::build_from(*coords, layer_name.to_owned()))
-            .map_err(|e| ProcessVectorError::SendError(e))
+            .map_err(ProcessVectorError::SendError)
     }
 
     fn layer_tessellation_finished(
@@ -365,28 +394,24 @@ impl<T: VectorTransferables, C: Context> ProcessVectorContext<T, C> {
                 layer_data,
                 style_layer_id,
             ))
-            .map_err(|e| ProcessVectorError::SendError(e))
+            .map_err(ProcessVectorError::SendError)
     }
 
     fn symbol_layer_tessellation_finished(
         &mut self,
-        coords: &WorldTileCoords,
-        buffer: OverAlignedVertexBuffer<ShaderSymbolVertex, IndexDataType>,
-        new_buffer: OverAlignedVertexBuffer<ShaderSymbolVertexNew, IndexDataType>,
-        features: Vec<Feature>,
-        layer_data: tile::Layer,
-        style_layer_id: String,
+        layer: crate::vector::transferables::DefaultSymbolLayerTessellated,
     ) -> Result<(), ProcessVectorError> {
         self.context
             .send_back(T::SymbolLayerTessellated::build_from(
-                *coords,
-                buffer,
-                new_buffer,
-                features,
-                layer_data,
-                style_layer_id,
+                layer.coords,
+                layer.buffer,
+                layer.new_buffer,
+                layer.features,
+                layer.atlas,
+                layer.layer_data,
+                layer.style_layer_id,
             ))
-            .map_err(|e| ProcessVectorError::SendError(e))
+            .map_err(ProcessVectorError::SendError)
     }
 
     fn layer_indexing_finished(
@@ -399,7 +424,7 @@ impl<T: VectorTransferables, C: Context> ProcessVectorContext<T, C> {
                 *coords,
                 TileIndex::Linear { list: geometries },
             ))
-            .map_err(|e| ProcessVectorError::SendError(e))
+            .map_err(ProcessVectorError::SendError)
     }
 }
 

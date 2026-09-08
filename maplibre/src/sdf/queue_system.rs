@@ -20,6 +20,7 @@ pub fn queue_system(
         world, view_state, ..
     }: &mut MapContext,
 ) -> SystemResult {
+    let mut seen = std::collections::HashSet::new();
     let zoom = view_state.zoom().value();
     let Some((Initialized(tile_view_pattern), translucent_phase, Initialized(symbol_buffer_pool))) =
         world.resources.query_mut::<(
@@ -42,6 +43,9 @@ pub fn queue_system(
             {
                 for layer_entry in layer_entries {
                     if !layer_entry.style_layer.is_visible_at(zoom) {
+                        continue;
+                    }
+                    if !seen.insert((layer_entry.coords, layer_entry.style_layer.id.clone())) {
                         continue;
                     }
                     translucent_phase.add(TranslucentItem {

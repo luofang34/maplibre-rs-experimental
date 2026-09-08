@@ -37,7 +37,7 @@ fn main(
         tile_mercator_coords,
     );
     var final_position = projected.clip_position;
-    final_position.z = z_index;
+    final_position.z = 0.0;
 
     return VertexOutput(color, projected.horizon_distance, final_position);
 }

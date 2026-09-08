@@ -37,7 +37,7 @@ fn main(
     let pos = positions[vertex_idx % 6u];
     
     // Position z in vulkan normalized device coordinates mapping:
-    let z = z_index;
+    let z = 0.0;
 
     // Output raw clip space coordinates (identity mapping)
     var out: VertexOutput;

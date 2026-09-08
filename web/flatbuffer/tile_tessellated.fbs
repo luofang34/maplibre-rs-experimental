@@ -4,6 +4,7 @@ include "basic.fbs";
 
 table FlatTileTessellated {
     coords: FlatWorldTileCoords;
+    pending_symbols: bool = false;
 }
 
 root_type FlatTileTessellated;

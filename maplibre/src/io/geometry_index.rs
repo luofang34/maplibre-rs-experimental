@@ -48,6 +48,14 @@ impl GeometryIndex {
         self.index.values().map(TileIndex::approximate_bytes).sum()
     }
 
+    /// Estimated memory retained by one tile's geometries and query properties.
+    pub(crate) fn tile_bytes(&self, coords: WorldTileCoords) -> usize {
+        coords
+            .build_quad_key()
+            .and_then(|key| self.index.get(&key))
+            .map_or(0, TileIndex::approximate_bytes)
+    }
+
     pub fn query_point(
         &self,
         world_coords: &WorldCoords,

@@ -1,65 +1,52 @@
+//! Places elevated text and icons once for both eyes and uploads only changed metadata.
+#[cfg(test)]
+use super::placement::canonical_tile;
+use super::{
+    collision_grid::CollisionGrid,
+    paint::SymbolUniforms,
+    placement::{elevation, screen_boxes},
+    query::{PlacedSymbol, PlacedSymbols},
+};
+use crate::{
+    context::MapContext,
+    coords::WorldTileCoords,
+    io::tile_sources::TileKind,
+    render::{
+        eventually::{Eventually, Eventually::Initialized},
+        projection::projection_data_for_view,
+        shaders::SDFShaderFeatureMetadata,
+        tile_view_pattern::WgpuTileViewPattern,
+    },
+    sdf::{SymbolBufferPool, SymbolLayersDataComponent},
+    style::layer::LayerPaint,
+    tcs::system::{System, SystemError, SystemResult},
+};
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
     hash::{DefaultHasher, Hash, Hasher},
 };
 
-use crate::{
-    context::MapContext,
-    coords::{TileCoords, WorldTileCoords, ZOOM_BOUNDS},
-    euclid::Point2D,
-    legacy::{
-        buckets::symbol_bucket::PlacedSymbol,
-        collision_feature::{CollisionBox, CollisionFeature},
-        collision_index::CollisionIndex,
-        geometry::feature_index::{IndexedSubfeature, RefIndexedSubfeature},
-        geometry_tile_data::GeometryCoordinates,
-        MapMode,
-    },
-    render::{
-        eventually::{Eventually, Eventually::Initialized},
-        projection::globe_camera_for_view,
-        shaders::SDFShaderFeatureMetadata,
-        tile_view_pattern::WgpuTileViewPattern,
-        Renderer,
-    },
-    sdf::{Feature, SymbolBufferPool, SymbolLayersDataComponent},
-    tcs::system::{System, SystemError, SystemResult},
-};
-
-/// Runs between which the placement is kept: placing every label of every drawn tile costs
-/// milliseconds, and labels need not move faster than a few times a second. A host drawing
-/// two eyes per frame gets the same placement for both, since the count is even.
-const PLACE_EVERY_RUNS: u32 = 8;
-
+#[derive(Default)]
 pub struct CollisionSystem {
     runs: u32,
-    /// Fingerprint of the opacities last uploaded per layer of a tile, so a placement that
-    /// did not change uploads nothing.
+    pool_revision: Option<u64>,
     uploaded: HashMap<(WorldTileCoords, String), u64>,
-}
-
-impl Default for CollisionSystem {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 impl CollisionSystem {
     pub fn new() -> Self {
-        Self {
-            runs: 0,
-            uploaded: HashMap::new(),
-        }
+        Self::default()
     }
 }
 
 fn opacity_fingerprint(metadata: &[SDFShaderFeatureMetadata]) -> u64 {
-    let mut hasher = DefaultHasher::new();
+    let mut hash = DefaultHasher::new();
     for entry in metadata {
-        entry.opacity.to_bits().hash(&mut hasher);
+        entry.opacity.to_bits().hash(&mut hash);
+        entry.elevation.to_bits().hash(&mut hash);
     }
-    hasher.finish()
+    hash.finish()
 }
 
 impl System for CollisionSystem {
@@ -73,219 +60,231 @@ impl System for CollisionSystem {
             world,
             style,
             view_state,
-            renderer: Renderer { queue, .. },
+            renderer,
             ..
         }: &mut MapContext,
     ) -> SystemResult {
-        let uses_globe = style.projection.as_ref().is_some_and(|specification| {
-            specification
-                .projection_type
-                .uses_globe_rendering(view_state.zoom().value())
-        });
-        let globe_camera = if uses_globe {
-            Some(globe_camera_for_view(view_state).map_err(|error| {
-                tracing::error!(%error, "unable to project globe symbol collisions");
-                SystemError::Setup
-            })?)
-        } else {
-            None
-        };
-        let Some((Initialized(tile_view_pattern), Initialized(symbol_buffer_pool))) =
-            world.resources.query_mut::<(
-                &mut Eventually<WgpuTileViewPattern>,
-                &mut Eventually<SymbolBufferPool>,
-            )>()
+        if crate::render::eye_covering::EyeInFrame::reuses_content(world) {
+            return Ok(());
+        }
+        self.runs = self.runs.wrapping_add(1);
+        if let Some(Initialized(pool)) = world.resources.get::<Eventually<SymbolBufferPool>>() {
+            if self.pool_revision != Some(pool.revision()) {
+                self.pool_revision = Some(pool.revision());
+                self.uploaded.clear();
+            }
+        }
+        let Some(Initialized(pattern)) = world.resources.get::<Eventually<WgpuTileViewPattern>>()
         else {
             return Err(SystemError::Dependencies);
         };
-
-        self.runs = self.runs.wrapping_add(1);
-        if !self.runs.is_multiple_of(PLACE_EVERY_RUNS) {
+        let mut seen = HashSet::new();
+        for tile in pattern.iter() {
+            tile.render_kind(TileKind::Vector, |shape| {
+                seen.insert(shape.coords());
+            });
+        }
+        let mut layers = visible_layers(world, style, view_state.zoom().value(), &seen);
+        let new_content = layers.iter().any(|(_, layer, _)| {
+            !self
+                .uploaded
+                .contains_key(&(layer.coords, layer.style_layer_id.clone()))
+        });
+        if !new_content && !self.runs.is_multiple_of(8) {
             return Ok(());
         }
-
-        let mut collision_index = CollisionIndex::new(view_state, MapMode::Continuous);
-        let mut seen = HashSet::new();
-
-        for view_tile in tile_view_pattern.iter() {
-            let coords = view_tile.coords();
-            if let Some(component) = world.tiles.query::<&SymbolLayersDataComponent>(coords) {
-                for layer in &component.layers {
-                    // One opacity entry per vertex; labels whose index ranges are empty
-                    // leave every vertex visible.
-                    let mut feature_metadata = vec![
-                        SDFShaderFeatureMetadata { opacity: 1.0 };
-                        layer.new_buffer.buffer.vertices.len()
-                    ];
-
-                    for feature in &layer.features {
-                        let is_occluded = globe_camera.as_ref().is_some_and(|camera| {
-                            canonical_tile(coords).is_none_or(|tile| {
-                                camera
-                                    .project_tile_coordinates(
-                                        f64::from(feature.text_anchor.x),
-                                        f64::from(feature.text_anchor.y),
-                                        tile,
-                                        0.0,
-                                    )
-                                    .is_occluded
-                            })
-                        });
-                        if is_occluded {
-                            set_feature_opacity(feature, layer, &mut feature_metadata, 0.0);
-                            continue;
-                        }
-                        // calculate where tile is
-
-                        let transform = coords.transform_for_zoom(view_state.zoom());
-
-                        let pos_matrix = view_state
-                            .view_projection()
-                            .to_model_view_projection(transform);
-
-                        let anchor_point =
-                            Point2D::new(feature.bbox.min.x as f64, feature.bbox.min.y as f64); // TODO
-
-                        let boxes = vec![CollisionBox {
-                            anchor: anchor_point,
-                            x1: 0.0,
-                            y1: 0.0,
-                            x2: (feature.bbox.max.x - feature.bbox.min.x) as f64, //* (EXTENT / TILE_SIZE),
-                            y2: (feature.bbox.max.y - feature.bbox.min.y) as f64, // * (EXTENT / TILE_SIZE),
-                            signed_distance_from_anchor: 0.0,
-                        }]; // TODO
-
-                        let mut projected_boxes = vec![];
-                        let collision_feature = CollisionFeature {
-                            boxes,
-                            indexed_feature: IndexedSubfeature {
-                                ref_: RefIndexedSubfeature {
-                                    index: 0,
-                                    sort_index: 0,
-                                    source_layer_name: "".to_string(),
-                                    bucket_leader_id: "".to_string(),
-                                    bucket_instance_id: 0,
-                                    collision_group_id: 0,
-                                },
-                                source_layer_name_copy: "".to_string(),
-                                bucket_leader_idcopy: "".to_string(),
-                            },
-                            along_line: false, // false if point, else true
-                        };
-                        let (placed_text, _is_offscreen) = collision_index.place_feature(
-                            &collision_feature,
-                            Point2D::zero(), // shift
-                            &pos_matrix,
-                            &pos_matrix.get(), // TODO
-                            //TILE_SIZE / EXTENT,
-                            1.0,
-                            &PlacedSymbol {
-                                anchor_point,
-                                segment: 0,
-                                lower_size: 0.0,
-                                upper_size: 0.0,
-                                line_offset: [0., 0.],
-                                writing_modes: Default::default(),
-                                line: GeometryCoordinates(vec![anchor_point.cast()]), // TODO can be linestring or just a single point
-                                tile_distances: vec![],                               // TODO
-                                glyph_offsets: vec![0., 0.],                          // TODO
-                                hidden: false,
-                                vertex_start_index: 0,
-                                cross_tile_id: 0,
-                                placed_orientation: None,
-                                angle: 0.0,
-
-                                placed_icon_index: None,
-                            },
-                            view_state.zoom().scale_to_zoom_level(coords.z),
-                            6.0,
-                            false,
-                            false,
-                            false,
-                            None,                                      // avoidEdges
-                            Some(|_feature: &IndexedSubfeature| true), // collisionGroupPredicate
-                            &mut projected_boxes,                      // output
-                        );
-                        if feature.str.starts_with("Ette") {
-                            //println!("{}", feature.str);
-                            //println!("{:?}", &collision_feature.boxes);
-                            //println!("proj {:?}", &projected_boxes.get(0));
-                        }
-
-                        if placed_text {
-                            collision_index.insert_feature(
-                                collision_feature,
-                                &projected_boxes,
-                                false,
-                                55,
-                                66,
-                            );
-
-                            set_feature_opacity(feature, layer, &mut feature_metadata, 1.0);
-                        } else {
-                            set_feature_opacity(feature, layer, &mut feature_metadata, 0.0);
-
-                            //feature_metadata.extend(iter::repeat(SDFShaderFeatureMetadata { opacity: 0.0 }).take(feature.indices.len()))
-                        }
-                    }
-
-                    let key = (coords, layer.style_layer_id.clone());
-                    let fingerprint = opacity_fingerprint(&feature_metadata);
-                    seen.insert(key.clone());
-                    if self.uploaded.get(&key) == Some(&fingerprint) {
-                        continue;
-                    }
-                    if let Some(layer_at_coords) = symbol_buffer_pool.index().get_layers(coords) {
-                        for entry in layer_at_coords {
-                            debug_assert_eq!(entry.coords, coords);
-                            // Siblings on the same source layer have their own vertex counts.
-                            if entry.style_layer.id != layer.style_layer_id {
-                                continue;
-                            }
-
-                            symbol_buffer_pool.update_feature_metadata(
-                                queue,
-                                entry,
-                                &feature_metadata,
-                            );
-                        }
-                    }
-                    self.uploaded.insert(key, fingerprint);
+        layers.sort_by_key(|(index, layer, _)| {
+            (
+                std::cmp::Reverse(*index),
+                std::cmp::Reverse(u8::from(layer.coords.z)),
+                layer.coords.y,
+                layer.coords.x,
+            )
+        });
+        let projection = projection_data_for_view(style, view_state).map_err(|error| {
+            tracing::error!(%error, "symbol projection failed");
+            SystemError::Setup
+        })?;
+        let mut boxes = CollisionGrid::new(view_state.width(), view_state.height());
+        let mut updates = Vec::new();
+        let mut placed = PlacedSymbols::default();
+        for (_, layer, paint) in layers {
+            let limits = style
+                .layers
+                .iter()
+                .find(|style| style.id == layer.style_layer_id)
+                .map(|layer| {
+                    [
+                        f64::from(layer.minzoom.unwrap_or(0)),
+                        f64::from(layer.maxzoom.unwrap_or(24)),
+                    ]
+                })
+                .unwrap_or([0.0, 24.0]);
+            let metadata = place_layer(
+                world,
+                view_state,
+                &projection,
+                layer,
+                paint,
+                limits,
+                &mut boxes,
+                &mut placed,
+            );
+            let key = (layer.coords, layer.style_layer_id.clone());
+            let fingerprint = opacity_fingerprint(&metadata);
+            if self.uploaded.get(&key) != Some(&fingerprint) {
+                updates.push((key.clone(), metadata));
+                self.uploaded.insert(key, fingerprint);
+            }
+        }
+        self.uploaded.retain(|(coords, _), _| seen.contains(coords));
+        if let Some(Initialized(pool)) = world.resources.get::<Eventually<SymbolBufferPool>>() {
+            for ((coords, id), metadata) in updates {
+                if let Some(entry) = pool
+                    .index()
+                    .get_layers(coords)
+                    .and_then(|entries| entries.iter().find(|entry| entry.style_layer.id == id))
+                {
+                    pool.update_feature_metadata(&renderer.queue, entry, &metadata);
                 }
             }
         }
-        // A tile that left the view uploads afresh when it returns, since its pool entry
-        // may be new.
-        self.uploaded.retain(|key, _| seen.contains(key));
+        world.resources.insert(placed);
         Ok(())
     }
 }
 
-fn canonical_tile(coords: WorldTileCoords) -> Option<TileCoords> {
-    let tile_count = i32::try_from(ZOOM_BOUNDS[usize::from(u8::from(coords.z))]).ok()?;
-    if coords.y < 0 || coords.y >= tile_count {
-        return None;
-    }
-    Some(TileCoords {
-        x: coords.x.rem_euclid(tile_count) as u32,
-        y: coords.y as u32,
-        z: coords.z,
-    })
-}
-
-fn set_feature_opacity(
-    feature: &Feature,
-    layer: &crate::sdf::SymbolLayerData,
-    metadata: &mut [SDFShaderFeatureMetadata],
-    opacity: f32,
-) {
-    for index in feature.indices.clone() {
-        let vertex_index = layer.new_buffer.buffer.indices[index] as usize;
-        if let Some(vertex) = metadata.get_mut(vertex_index) {
-            vertex.opacity = opacity;
-        }
-    }
-}
+mod rules;
 
 #[cfg(test)]
 mod tests;
+
+fn visible_layers<'a>(
+    world: &'a crate::tcs::world::World,
+    style: &'a crate::style::Style,
+    zoom: f64,
+    seen: &HashSet<WorldTileCoords>,
+) -> Vec<(
+    u32,
+    &'a crate::sdf::SymbolLayerData,
+    &'a crate::style::layer::SymbolPaint,
+)> {
+    let mut layers = Vec::new();
+    for coords in seen {
+        if let Some(component) = world.tiles.query::<&SymbolLayersDataComponent>(*coords) {
+            for layer in &component.layers {
+                if let Some(style_layer) = style
+                    .layers
+                    .iter()
+                    .find(|style| style.id == layer.style_layer_id && style.is_visible_at(zoom))
+                {
+                    if let Some(LayerPaint::Symbol(paint)) = &style_layer.paint {
+                        layers.push((style_layer.index, layer, paint));
+                    }
+                }
+            }
+        }
+    }
+    layers
+}
+
+fn place_layer(
+    world: &crate::tcs::world::World,
+    view_state: &crate::render::view_state::ViewState,
+    projection: &crate::render::projection::ShaderProjectionData,
+    layer: &crate::sdf::SymbolLayerData,
+    paint: &crate::style::layer::SymbolPaint,
+    zoom_limits: [f64; 2],
+    boxes: &mut CollisionGrid,
+    placed: &mut PlacedSymbols,
+) -> Vec<SDFShaderFeatureMetadata> {
+    let mut metadata = vec![
+        SDFShaderFeatureMetadata {
+            opacity: 0.0,
+            elevation: 0.0
+        };
+        layer.new_buffer.buffer.vertices.len()
+    ];
+    let uniforms = SymbolUniforms::new(paint, view_state.zoom().value(), [1, 1]);
+    for (feature_index, feature) in layer.features.iter().enumerate() {
+        let ground = elevation(world, layer, feature);
+        let rectangles = local_zoom_visible(
+            layer.coords,
+            feature,
+            ground,
+            view_state,
+            projection,
+            zoom_limits,
+        )
+        .then(|| screen_boxes(layer, feature, ground, view_state, projection, &uniforms))
+        .flatten()
+        .unwrap_or([None, None]);
+        let rules =
+            rules::PlacementRules::new(paint, &feature.data.properties, view_state.zoom().value());
+        let visible = rules.place(rectangles, boxes, [view_state.width(), view_state.height()]);
+        if visible.iter().any(|v| *v) {
+            placed.0.push(PlacedSymbol {
+                coords: layer.coords,
+                layer: layer.style_layer_id.clone(),
+                feature: feature_index,
+                rectangles: [0, 1].map(|i| if visible[i] { rectangles[i] } else { None }),
+            });
+        }
+        for index in feature.indices.clone() {
+            let kind = layer
+                .new_buffer
+                .buffer
+                .indices
+                .get(index)
+                .and_then(|index| layer.new_buffer.buffer.vertices.get(*index as usize))
+                .map_or(0, |vertex| usize::from(vertex.a_data[2] != 0));
+            if let Some(vertex) = layer
+                .new_buffer
+                .buffer
+                .indices
+                .get(index)
+                .and_then(|index| metadata.get_mut(*index as usize))
+            {
+                *vertex = SDFShaderFeatureMetadata {
+                    opacity: if visible[kind] { 1.0 } else { 0.0 },
+                    elevation: ground,
+                };
+            }
+        }
+    }
+    metadata
+}
+
+fn local_zoom_visible(
+    coords: WorldTileCoords,
+    feature: &crate::sdf::Feature,
+    ground: f32,
+    view: &crate::render::view_state::ViewState,
+    projection: &crate::render::projection::ShaderProjectionData,
+    limits: [f64; 2],
+) -> bool {
+    let Some(clip) = super::placement::project(
+        coords,
+        [
+            f64::from(feature.text_anchor.x),
+            f64::from(feature.text_anchor.y),
+        ],
+        f64::from(ground),
+        view,
+        projection,
+    ) else {
+        return false;
+    };
+    if clip.w <= 0.0 {
+        return false;
+    }
+    let zoom = view.zoom().value()
+        + if view.has_external_view() {
+            (f64::from(projection.center_clip_w) / clip.w)
+                .log2()
+                .min(0.0)
+        } else {
+            0.0
+        };
+    zoom >= limits[0] && zoom < limits[1]
+}

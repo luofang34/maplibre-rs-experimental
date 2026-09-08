@@ -18,9 +18,12 @@ use crate::{
 pub fn resource_system(
     MapContext {
         world,
+        style,
+        view_state,
         renderer:
             Renderer {
                 device,
+                queue,
                 resources: RenderResources { surface, .. },
                 settings,
                 ..
@@ -28,18 +31,35 @@ pub fn resource_system(
         ..
     }: &mut MapContext,
 ) -> SystemResult {
+    if world
+        .resources
+        .get::<super::line_dash::LineDashResources>()
+        .is_none()
+    {
+        world
+            .resources
+            .insert(super::line_dash::LineDashResources::new(device, queue));
+    }
+    if let Some(dashes) = world
+        .resources
+        .get_mut::<super::line_dash::LineDashResources>()
+    {
+        dashes.update(device, queue, style, view_state.zoom().value());
+    }
     let Some((
         buffer_pool,
         vector_pipeline,
         line_pipeline,
         circle_pipeline,
         Initialized(projection_resources),
+        dashes,
     )) = world.resources.query_mut::<(
         &mut Eventually<VectorBufferPool>,
         &mut Eventually<VectorPipeline>,
         &mut Eventually<LinePipeline>,
         &mut Eventually<CirclePipeline>,
         &mut Eventually<ProjectionGpuResources>,
+        &super::line_dash::LineDashResources,
     )>()
     else {
         return Err(SystemError::Dependencies);
@@ -90,7 +110,10 @@ pub fn resource_system(
             false,
         )
         .describe_render_pipeline()
-        .initialize_with_prefix_layouts(device, &[projection_resources.bind_group_layout()]);
+        .initialize_with_prefix_layouts(
+            device,
+            &[projection_resources.bind_group_layout(), &dashes.layout],
+        );
 
         LinePipeline(pipeline)
     });

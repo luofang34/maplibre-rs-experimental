@@ -56,9 +56,20 @@ pub struct ViewState {
     external_eye: Option<ExternalEye>,
     /// Factor on the external eye's frustum tangents for tile requests.
     request_overscan: f64,
+    opaque_environment: bool,
 }
 
 impl ViewState {
+    /// Whether an external view replaces its surroundings and needs continuous sky coverage.
+    pub fn opaque_environment(&self) -> bool {
+        self.has_external_view() && self.opaque_environment
+    }
+
+    /// Sets the host's background coverage intent independently of the map projection.
+    pub fn set_opaque_environment(&mut self, opaque: bool) {
+        self.opaque_environment = opaque;
+    }
+
     pub fn new<F: Into<Rad<f64>>, P: Into<Deg<f64>>>(
         window_size: PhysicalSize,
         position: WorldCoords,
@@ -88,6 +99,7 @@ impl ViewState {
             body: Body::default(),
             external_eye: None,
             request_overscan: 1.0,
+            opaque_environment: false,
         }
     }
 
@@ -442,275 +454,6 @@ impl ViewState {
         self.zoom.update_reference();
     }
 
-    /// A transform which can be used to transform between clip and window space.
-    /// Adopted from [here](https://docs.microsoft.com/en-us/windows/win32/direct3d9/viewports-and-clipping#viewport-rectangle) (Direct3D).
-    pub(crate) fn clip_to_window_transform(&self) -> Matrix4<f64> {
-        let min_depth = 0.0;
-        let max_depth = 1.0;
-        let x = 0.0;
-        let y = 0.0;
-        let ox = x + self.width / 2.0;
-        let oy = y + self.height / 2.0;
-        let oz = min_depth;
-        let pz = max_depth - min_depth;
-        Matrix4::from_cols(
-            Vector4::new(self.width / 2.0, 0.0, 0.0, 0.0),
-            Vector4::new(0.0, -self.height / 2.0, 0.0, 0.0),
-            Vector4::new(0.0, 0.0, pz, 0.0),
-            Vector4::new(ox, oy, oz, 1.0),
-        )
-    }
-
-    /// Transforms coordinates in clip space to window coordinates.
-    ///
-    /// Adopted from [here](https://docs.microsoft.com/en-us/windows/win32/dxtecharts/the-direct3d-transformation-pipeline) (Direct3D).
-    pub(crate) fn clip_to_window(&self, clip: &Vector4<f64>) -> Vector4<f64> {
-        #[rustfmt::skip]
-        let ndc = Vector4::new(
-            clip.x / clip.w,
-            clip.y / clip.w,
-            clip.z / clip.w,
-            1.0
-        );
-
-        self.clip_to_window_transform() * ndc
-    }
-
-    /// The way how maplibre converts from clip to window space: https://github.com/maplibre/maplibre-native/blob/4add9ead08799577a37c465b8cb1266676b6c41e/src/mbgl/text/collision_index.cpp/#L437-L438
-    pub(crate) fn clip_to_window_maplibre(&self, clip: &Vector4<f64>) -> Vector4<f64> {
-        assert_eq!(clip.z, 0.0);
-        return Vector4::new(
-            ((clip.x / clip.w + 1.) / 2.) * self.width,
-            ((-clip.y / clip.w + 1.) / 2.) * self.height,
-            0.0,
-            1.0,
-        );
-    }
-
-    /// Alternative implementation to `clip_to_window`. Transforms coordinates in clip space to
-    /// window coordinates.
-    ///
-    /// Adopted from [here](https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/VkViewport.html)
-    /// and [here](https://matthewwellings.com/blog/the-new-vulkan-coordinate-system/) (Vulkan).
-    fn clip_to_window_vulkan(&self, clip: &Vector4<f64>) -> Vector3<f64> {
-        #[rustfmt::skip]
-            let ndc = Vector4::new(
-            clip.x / clip.w,
-            clip.y / clip.w,
-            clip.z / clip.w,
-            1.0
-        );
-
-        let min_depth = 0.0;
-        let max_depth = 1.0;
-
-        let x = 0.0;
-        let y = 0.0;
-        let ox = x + self.width / 2.0;
-        let oy = y + self.height / 2.0;
-        let oz = min_depth;
-        let px = self.width;
-        let py = self.height;
-        let pz = max_depth - min_depth;
-        let xd = ndc.x;
-        let yd = ndc.y;
-        let zd = ndc.z;
-        Vector3::new(px / 2.0 * xd + ox, py / 2.0 * yd + oy, pz * zd + oz)
-    }
-
-    /// Order of transformations reversed: https://computergraphics.stackexchange.com/questions/6087/screen-space-coordinates-to-eye-space-conversion/6093
-    /// `w` is lost.
-    ///
-    /// OpenGL explanation: https://www.khronos.org/opengl/wiki/Compute_eye_space_from_window_space#From_window_to_ndc
-    fn window_to_world(
-        &self,
-        window: &Vector3<f64>,
-        inverted_view_proj: &InvertedViewProjection,
-    ) -> Vector3<f64> {
-        #[rustfmt::skip]
-            let fixed_window = Vector4::new(
-            window.x,
-            window.y,
-            window.z,
-            1.0
-        );
-
-        let ndc = self.clip_to_window_transform().invert().unwrap() * fixed_window;
-        let unprojected = inverted_view_proj.project(ndc);
-
-        Vector3::new(
-            unprojected.x / unprojected.w,
-            unprojected.y / unprojected.w,
-            unprojected.z / unprojected.w,
-        )
-    }
-
-    /// Alternative implementation to `window_to_world`
-    ///
-    /// Adopted from [here](https://docs.rs/nalgebra-glm/latest/src/nalgebra_glm/ext/matrix_projection.rs.html#164-181).
-    fn window_to_world_nalgebra(
-        window: &Vector3<f64>,
-        inverted_view_proj: &InvertedViewProjection,
-        width: f64,
-        height: f64,
-    ) -> Vector3<f64> {
-        let pt = Vector4::new(
-            2.0 * (window.x - 0.0) / width - 1.0,
-            2.0 * (height - window.y - 0.0) / height - 1.0,
-            window.z,
-            1.0,
-        );
-        let unprojected = inverted_view_proj.project(pt);
-
-        Vector3::new(
-            unprojected.x / unprojected.w,
-            unprojected.y / unprojected.w,
-            unprojected.z / unprojected.w,
-        )
-    }
-
-    /// Unprojects a window position at a clip depth in `0..=1` into world pixels with metres of
-    /// elevation on `z`.
-    pub fn window_to_world_at_depth(
-        &self,
-        window: &Vector2<f64>,
-        depth: f64,
-        inverted_view_proj: &InvertedViewProjection,
-    ) -> Vector3<f64> {
-        self.window_to_world(&Vector3::new(window.x, window.y, depth), inverted_view_proj)
-    }
-
-    /// Gets the world coordinates for the specified `window` coordinates on the horizontal plane
-    /// `elevation` metres above sea level.
-    pub fn window_to_world_at_elevation(
-        &self,
-        window: &Vector2<f64>,
-        inverted_view_proj: &InvertedViewProjection,
-        elevation: f64,
-    ) -> Option<Vector2<f64>> {
-        let near_world = self.window_to_world_at_depth(window, 0.0, inverted_view_proj);
-        let far_world = self.window_to_world_at_depth(window, 1.0, inverted_view_proj);
-        let dz = far_world.z - near_world.z;
-        if dz.abs() <= f64::EPSILON {
-            return None;
-        }
-        let u = (elevation - near_world.z) / dz;
-        let result = near_world + u * (far_world - near_world);
-        (result.x.is_finite() && result.y.is_finite()).then_some(Vector2::new(result.x, result.y))
-    }
-
-    /// Gets the world coordinates for the specified `window` coordinates on the `z=0` plane.
-    pub fn window_to_world_at_ground(
-        &self,
-        window: &Vector2<f64>,
-        inverted_view_proj: &InvertedViewProjection,
-        bound: bool,
-    ) -> Option<Vector2<f64>> {
-        let near_world =
-            self.window_to_world(&Vector3::new(window.x, window.y, 0.0), inverted_view_proj);
-
-        let far_world =
-            self.window_to_world(&Vector3::new(window.x, window.y, 1.0), inverted_view_proj);
-
-        // for z = 0 in world coordinates
-        // Idea comes from: https://dondi.lmu.build/share/cg/unproject-explained.pdf
-        let u = -near_world.z / (far_world.z - near_world.z);
-        if !bound || (0.0..=1.01).contains(&u) {
-            let result = near_world + u * (far_world - near_world);
-            Some(Vector2::new(result.x, result.y))
-        } else {
-            None
-        }
-    }
-
-    /// Calculates an [`Aabb2`] bounding box which contains at least the visible area on the `z=0`
-    /// plane. One can think of it as being the bounding box of the geometry which forms the
-    /// intersection between the viewing frustum and the `z=0` plane.
-    ///
-    /// This implementation works in the world 3D space. It casts rays from the corners of the
-    /// window to calculate intersections points with the `z=0` plane. Then a bounding box is
-    /// calculated.
-    ///
-    /// *Note:* It is possible that no such bounding box exists. This is the case if the `z=0` plane
-    /// is not in view.
-    pub fn view_region_bounding_box(
-        &self,
-        inverted_view_proj: &InvertedViewProjection,
-    ) -> Option<Aabb2<f64>> {
-        let screen_bounding_box = [
-            Vector2::new(0.0, 0.0),
-            Vector2::new(self.width, 0.0),
-            Vector2::new(self.width, self.height),
-            Vector2::new(0.0, self.height),
-        ]
-        .map(|point| self.window_to_world_at_ground(&point, inverted_view_proj, false));
-
-        let (min, max) = bounds_from_points(
-            screen_bounding_box
-                .into_iter()
-                .flatten()
-                .map(|point| [point.x, point.y]),
-        )?;
-
-        Some(Aabb2::new(Point2::from(min), Point2::from(max)))
-    }
-    /// An alternative implementation for `view_region_bounding_box`.
-    ///
-    /// This implementation works in the NDC space. We are creating a plane in the world 3D space.
-    /// Then we are transforming it to the NDC space. In NDC space it is easy to calculate
-    /// the intersection points between an Aabb3 and a plane. The resulting Aabb2 is returned.
-    pub fn view_region_bounding_box_ndc(&self) -> Option<Aabb2<f64>> {
-        let view_proj = self.view_projection();
-        let a = view_proj.project(Vector4::new(0.0, 0.0, 0.0, 1.0));
-        let b = view_proj.project(Vector4::new(1.0, 0.0, 0.0, 1.0));
-        let c = view_proj.project(Vector4::new(1.0, 1.0, 0.0, 1.0));
-
-        let a_ndc = self.clip_to_window(&a).truncate();
-        let b_ndc = self.clip_to_window(&b).truncate();
-        let c_ndc = self.clip_to_window(&c).truncate();
-        let to_ndc = Vector3::new(1.0 / self.width, 1.0 / self.height, 1.0);
-        let plane: Plane<f64> = Plane::from_points(
-            Point3::from_vec(a_ndc.mul_element_wise(to_ndc)),
-            Point3::from_vec(b_ndc.mul_element_wise(to_ndc)),
-            Point3::from_vec(c_ndc.mul_element_wise(to_ndc)),
-        )?;
-
-        let points = plane.intersection_points_aabb3(&Aabb3::new(
-            Point3::new(0.0, 0.0, 0.0),
-            Point3::new(1.0, 1.0, 1.0),
-        ));
-
-        let inverted_view_proj = view_proj.invert();
-
-        let from_ndc = Vector3::new(self.width, self.height, 1.0);
-        let vec = points
-            .iter()
-            .map(|point| {
-                self.window_to_world(&point.mul_element_wise(from_ndc), &inverted_view_proj)
-            })
-            .collect::<Vec<_>>();
-
-        let min_x = vec
-            .iter()
-            .map(|point| point.x)
-            .min_by(|a, b| a.partial_cmp(b).unwrap())?;
-        let min_y = vec
-            .iter()
-            .map(|point| point.y)
-            .min_by(|a, b| a.partial_cmp(b).unwrap())?;
-        let max_x = vec
-            .iter()
-            .map(|point| point.x)
-            .max_by(|a, b| a.partial_cmp(b).unwrap())?;
-        let max_y = vec
-            .iter()
-            .map(|point| point.y)
-            .max_by(|a, b| a.partial_cmp(b).unwrap())?;
-        Some(Aabb2::new(
-            Point2::new(min_x, min_y),
-            Point2::new(max_x, max_y),
-        ))
-    }
     pub fn height(&self) -> f64 {
         self.height
     }
@@ -722,6 +465,7 @@ impl ViewState {
 mod external;
 mod horizon;
 mod pose;
+mod screen;
 
 use external::ExternalEye;
 pub use external::{ExternalAnchor, ExternalView, ExternalViewError};
@@ -729,155 +473,4 @@ pub use horizon::HorizonLine;
 pub use pose::CameraPose;
 
 #[cfg(test)]
-mod tests {
-    use cgmath::{Deg, Matrix4, Vector2, Vector4};
-
-    use crate::{
-        coords::{WorldCoords, Zoom},
-        render::view_state::ViewState,
-        window::PhysicalSize,
-    };
-
-    #[test]
-    fn conform_transformation() {
-        let fov = Deg(60.0);
-        let mut state = ViewState::new(
-            PhysicalSize::new(800, 600).unwrap(),
-            WorldCoords::at_ground(0.0, 0.0),
-            Zoom::new(10.0),
-            Deg(0.0),
-            fov,
-        );
-
-        //state.furthest_distance(state.camera_to_center_distance(), Point2::new(0.0, 0.0));
-
-        let projection = state.view_projection().invert();
-
-        let bottom_left = state
-            .window_to_world_at_ground(&Vector2::new(0.0, 0.0), &projection, true)
-            .unwrap();
-        println!("bottom left on ground {:?}", bottom_left);
-        let top_right = state
-            .window_to_world_at_ground(&Vector2::new(state.width, state.height), &projection, true)
-            .unwrap();
-        println!("top right on ground {:?}", top_right);
-
-        let mut rotated = Matrix4::from_angle_x(Deg(-30.0))
-            * Vector4::new(bottom_left.x, bottom_left.y, 0.0, 0.0);
-
-        println!("bottom left rotated around x axis {:?}", rotated);
-
-        rotated = Matrix4::from_angle_y(Deg(-30.0)) * rotated;
-
-        println!("bottom left rotated around x and y axis {:?}", rotated);
-
-        state.camera.set_pitch(Deg(30.0));
-        //state.camera.set_yaw(Deg(-30.0));
-
-        // TODO: verify far distance plane calculation
-    }
-
-    fn state_at(zoom: f64, pitch: Deg<f64>) -> ViewState {
-        ViewState::new(
-            PhysicalSize::new(800, 600).unwrap(),
-            WorldCoords::at_ground(256.0 * 2.0_f64.powf(zoom), 256.0 * 2.0_f64.powf(zoom)),
-            Zoom::new(zoom),
-            pitch,
-            Deg(36.87),
-        )
-    }
-
-    #[test]
-    fn pixels_per_meter_follows_world_size_at_the_equator() {
-        let state = state_at(0.0, Deg(0.0));
-        let expected = 512.0 / (2.0 * std::f64::consts::PI * 6_371_008.8);
-
-        assert!((state.pixels_per_meter() - expected).abs() < 1e-12);
-        assert!((state_at(3.0, Deg(0.0)).pixels_per_meter() - expected * 8.0).abs() < 1e-12);
-    }
-
-    #[test]
-    fn center_elevation_keeps_the_elevated_center_on_screen_center() {
-        let mut state = state_at(12.0, Deg(45.0));
-        state.set_center_elevation(570.0);
-        let center = state.camera.position();
-
-        let clip = state
-            .view_projection()
-            .project(Vector4::new(center.x, center.y, 570.0, 1.0));
-        let window = state.clip_to_window(&clip);
-
-        assert!((window.x - 400.0).abs() < 1e-6);
-        assert!((window.y - 300.0).abs() < 1e-6);
-    }
-
-    #[test]
-    fn a_bearing_of_ninety_degrees_puts_east_at_the_top_of_the_screen() {
-        let mut state = state_at(2.0, Deg(0.0));
-        state.camera_mut().set_bearing(Deg(90.0));
-        let center = state.camera().position();
-
-        let clip =
-            state
-                .view_projection()
-                .project(Vector4::new(center.x + 100.0, center.y, 0.0, 1.0));
-        let window = state.clip_to_window(&clip);
-
-        assert!(
-            (window.x - 400.0).abs() < 1e-6,
-            "east stays centred: {window:?}"
-        );
-        assert!(window.y < 300.0, "east is above the centre: {window:?}");
-    }
-
-    #[test]
-    fn far_plane_stays_finite_at_high_pitch() {
-        let mut state = state_at(12.0, Deg(0.0));
-        state.set_max_pitch(Deg(85.0));
-        state.camera_mut().set_pitch(Deg(85.0));
-        let (near, far) = state.depth_range(cgmath::Point2::new(0.0, 0.0));
-
-        assert!(near > 0.0);
-        assert!(far.is_finite());
-        assert!(far > state.camera_to_center_distance());
-        assert!((state.camera.get_pitch().0 - 85.0_f64.to_radians()).abs() < 1e-9);
-    }
-
-    #[test]
-    fn far_plane_matches_the_camera_distance_when_flat() {
-        let state = state_at(5.0, Deg(0.0));
-        let (_, far) = state.depth_range(cgmath::Point2::new(0.0, 0.0));
-
-        assert!((far - state.camera_to_center_distance() * 1.01).abs() < 1e-6);
-    }
-
-    #[test]
-    fn max_pitch_clamps_pitch_changes() {
-        let mut state = state_at(5.0, Deg(70.0));
-        assert!((state.camera.get_pitch().0 - 60.0_f64.to_radians()).abs() < 1e-9);
-
-        state.set_max_pitch(Deg(85.0));
-        state.camera_mut().set_pitch(Deg(90.0));
-        assert!((state.camera.get_pitch().0 - 85.0_f64.to_radians()).abs() < 1e-9);
-    }
-
-    #[test]
-    fn gpu_view_projection_reverses_depth_only() {
-        let state = ViewState::new(
-            PhysicalSize::new(800, 600).unwrap(),
-            WorldCoords::at_ground(1024.0, 2048.0),
-            Zoom::new(10.0),
-            Deg(25.0),
-            Deg(60.0),
-        );
-        let point = Vector4::new(1000.0, 2100.0, 0.0, 1.0);
-
-        let cpu = state.view_projection().project(point);
-        let gpu = state.gpu_view_projection().project(point);
-
-        assert!((cpu.x - gpu.x).abs() < 1e-9);
-        assert!((cpu.y - gpu.y).abs() < 1e-9);
-        assert!((cpu.w - gpu.w).abs() < 1e-9);
-        assert!((gpu.z / gpu.w - (1.0 - cpu.z / cpu.w)).abs() < 1e-9);
-    }
-}
+mod tests;

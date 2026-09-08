@@ -117,10 +117,10 @@ impl RenderCommand<LayerItem> for DrawVectorTile {
 }
 
 pub struct SetLineTilePipeline;
-impl<P: PhaseItem> RenderCommand<P> for SetLineTilePipeline {
+impl RenderCommand<LayerItem> for SetLineTilePipeline {
     fn render<'w>(
         world: &'w World,
-        item: &P,
+        item: &LayerItem,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some((Initialized(pipeline), Initialized(projection_resources))) =
@@ -138,6 +138,10 @@ impl<P: PhaseItem> RenderCommand<P> for SetLineTilePipeline {
             projection_resources.bind_group_for(item.projection_binding()),
             &[],
         );
+        let Some(dashes) = world.resources.get::<super::line_dash::LineDashResources>() else {
+            return RenderCommandResult::Failure;
+        };
+        pass.set_bind_group(1, dashes.binding(&item.style_layer), &[]);
         RenderCommandResult::Success
     }
 }

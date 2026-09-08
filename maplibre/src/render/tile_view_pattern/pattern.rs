@@ -216,6 +216,8 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
                         .into_tile(crate::style::source::TileAddressingScheme::XYZ),
                 )
                 .into(),
+                line_width_scale: 1.0,
+                line_units_per_pixel: 8.0 * shape.zoom_factor as f32,
                 clip_antimeridian: u32::from(u8::from(shape.coords().z) == 0),
             });
         };

@@ -24,8 +24,7 @@ pub(crate) struct SphereEye {
 /// The map center and angles an eye on the sphere stands for.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct SpherePose {
-    /// Where the eye's view axis meets the sphere, or the point beneath the eye when it
-    /// misses.
+    /// Surface point along the gaze within the eye's loading reach.
     pub center: LatLon,
     /// Distance from the eye to the center in metres.
     pub distance_meters: f64,
@@ -90,30 +89,27 @@ fn local_axes(location: LatLon) -> (Vector3<f64>, Vector3<f64>, Vector3<f64>) {
 /// surface. A grazing gaze meets the surface near the horizon, and a center there would
 /// have the covering keep tiles near the horizon and drop the ground beneath the eye.
 const GAZE_REACH_HEIGHTS: f64 = 2.0;
-/// Radii past the limb over which a missing gaze's center moves from the limb point to the
-/// point beneath the eye.
-const MISS_BLEND_RADII: f64 = 0.25;
-
-/// The center of an eye at `origin` looking along `direction`: where the gaze meets the unit
-/// sphere, brought back to within reach along the gaze when it meets it further away, and
-/// for a gaze that misses the sphere the limb point nearest to it, settling on the point
-/// beneath the eye a quarter radius further out.
+/// Angular reach applies equally to hits and misses, so crossing the limb cannot move
+/// the loading center from nearby ground to the distant geometric horizon.
 fn gaze_center(origin: Vector3<f64>, direction: Vector3<f64>) -> Vector3<f64> {
-    let reach = GAZE_REACH_HEIGHTS * (origin.magnitude() - 1.0).max(0.0);
-    match first_surface_hit(origin, direction) {
-        Some(hit) if (hit - origin).magnitude() <= reach => hit,
-        Some(_) => {
-            let ahead = origin + direction * reach;
-            let length = ahead.magnitude();
-            if length > 0.0 {
-                ahead / length
-            } else {
-                origin / origin.magnitude()
-            }
-        }
-        None => missed_center(origin, direction),
+    let center =
+        first_surface_hit(origin, direction).unwrap_or_else(|| missed_center(origin, direction));
+    let distance = origin.magnitude();
+    let beneath = origin / distance;
+    let cosine = beneath.dot(center).clamp(-1.0, 1.0);
+    let reach = (GAZE_REACH_HEIGHTS * (distance - 1.0).max(0.0) / distance).atan();
+    if cosine.acos() <= reach {
+        return center;
     }
+    let tangent = center - beneath * cosine;
+    if tangent.magnitude2() <= f64::EPSILON {
+        return beneath;
+    }
+    beneath * reach.cos() + tangent.normalize() * reach.sin()
 }
+
+/// Radii past the limb over which the center settles onto the point beneath the eye.
+const MISS_BLEND_RADII: f64 = 0.25;
 
 /// The center for a ray from `origin` along `direction` that misses the unit sphere: the
 /// limb point under the ray's closest approach when the ray just misses, the point beneath

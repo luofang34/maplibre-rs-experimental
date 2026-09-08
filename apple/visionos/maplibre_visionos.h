@@ -3,6 +3,8 @@
 #define MAPLIBRE_VISIONOS_H
 
 #include <stdint.h>
+#include <stddef.h>
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -41,6 +43,12 @@ const char *maplibre_visionos_version(void);
 MaplibreVisionOSMap *maplibre_visionos_create(const char *style_json, uint32_t width,
                                               uint32_t height, const char *cache_dir);
 
+/** Fill the full immersive environment while preserving passthrough around a table globe. */
+void maplibre_visionos_set_opaque_environment(MaplibreVisionOSMap *map, bool opaque);
+/** Query placed labels/icons at a pixel (y down). Returns required bytes including NUL.
+ * Only writes when buffer is non-null and capacity is sufficient. */
+size_t maplibre_visionos_query_symbols(const MaplibreVisionOSMap *map, double x, double y,
+                                     char *buffer, size_t capacity);
 uint32_t maplibre_visionos_width(const MaplibreVisionOSMap *map);
 uint32_t maplibre_visionos_height(const MaplibreVisionOSMap *map);
 

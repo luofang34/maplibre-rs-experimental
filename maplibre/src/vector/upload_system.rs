@@ -1,6 +1,6 @@
 //! Uploads data to the GPU which is needed for rendering.
 
-use std::collections::BTreeSet;
+use std::collections::HashSet;
 
 use crate::{
     context::MapContext,
@@ -26,6 +26,12 @@ use crate::{
     },
 };
 
+#[derive(Clone, Copy, PartialEq)]
+struct VectorPaintFrame {
+    zoom: f32,
+    bearing: f32,
+}
+
 pub fn upload_system(
     MapContext {
         world,
@@ -35,6 +41,14 @@ pub fn upload_system(
         ..
     }: &mut MapContext,
 ) -> SystemResult {
+    if crate::render::eye_covering::EyeInFrame::reuses_content(world) {
+        return Ok(());
+    }
+    let zoom = view_state.zoom().level();
+    let bearing = view_state.camera().get_bearing().0 as f32;
+    let paint_frame = VectorPaintFrame { zoom, bearing };
+    let refresh_paint = world.resources.get::<VectorPaintFrame>() != Some(&paint_frame);
+    world.resources.insert(paint_frame);
     let Some((Initialized(buffer_pool), Initialized(tile_view_pattern))) =
         world.resources.query_mut::<(
             &mut Eventually<VectorBufferPool>,
@@ -44,17 +58,33 @@ pub fn upload_system(
         return Err(SystemError::Dependencies);
     };
 
-    let zoom = view_state.zoom().level();
-    let bearing = view_state.camera().get_bearing().0 as f32;
-    let mut source_tiles = BTreeSet::new();
+    let mut source_tiles = Vec::new();
+    let mut seen = HashSet::new();
     for view_tile in tile_view_pattern.iter() {
         // The view tile itself is uploaded whether or not the frame draws it yet: a tile
         // counts as available only once it is in the pool, so the frame draws a stand-in
         // until this upload has happened.
-        source_tiles.insert(view_tile.coords());
+        if seen.insert(view_tile.coords()) {
+            source_tiles.push(view_tile.coords());
+        }
         view_tile.render_kind(TileKind::Vector, |shape| {
-            source_tiles.insert(shape.coords());
+            if seen.insert(shape.coords()) {
+                source_tiles.push(shape.coords());
+            }
         });
+    }
+    if refresh_paint {
+        for coords in &source_tiles {
+            for entry in buffer_pool
+                .index()
+                .get_layers(*coords)
+                .into_iter()
+                .flatten()
+            {
+                let metadata = metadata_for_layer(&entry.style_layer, *coords, zoom, bearing);
+                buffer_pool.update_layer_metadata(queue, entry, metadata);
+            }
+        }
     }
     upload_tessellated_layer(
         buffer_pool,
@@ -74,7 +104,7 @@ fn upload_tessellated_layer(
     queue: &wgpu::Queue,
     tiles: &mut Tiles,
     style: &Style,
-    source_tiles: BTreeSet<crate::coords::WorldTileCoords>,
+    source_tiles: Vec<crate::coords::WorldTileCoords>,
     zoom: f32,
     bearing: f32,
 ) {
@@ -101,6 +131,8 @@ fn upload_tessellated_layer(
                 VectorLayerBucket::Missing(_) => None,
             })
             .filter(|data| !loaded_layers.contains(data.style_layer_id.as_str()))
+            // Empty buckets never enter the pool and must not consume a slot every frame.
+            .filter(|data| !data.buffer.buffer.indices.is_empty())
             .collect::<Vec<_>>();
 
         for style_layer in &style.layers {
@@ -126,48 +158,10 @@ fn upload_tessellated_layer(
             // Assign every feature in the layer the color from the style if no parsed feature_color exist.
             let fallback_color = color.unwrap_or([0.0, 0.0, 0.0, 1.0]);
 
-            let mut feature_metadata =
-                Vec::with_capacity(feature_indices.iter().sum::<u32>() as usize);
-            for (idx, &count) in feature_indices.iter().enumerate() {
-                let current_color = feature_colors.get(idx).copied().unwrap_or(fallback_color);
-                for _ in 0..count {
-                    feature_metadata.push(FillShaderFeatureMetadata {
-                        color: current_color,
-                    });
-                }
-            }
+            let feature_metadata =
+                feature_metadata(feature_indices, feature_colors, fallback_color);
 
-            // FIXME avoid uploading empty indices
-            if buffer.buffer.indices.is_empty() {
-                continue;
-            }
-
-            // Extract line-width from style paint (default 1.0px)
-            let line_width = match &style_layer.paint {
-                Some(LayerPaint::Line(paint)) => paint
-                    .line_width
-                    .as_ref()
-                    .and_then(|w| w.evaluate_at_zoom(f64::from(zoom)))
-                    .unwrap_or(1.0),
-                _ => 1.0,
-            };
-            let translate =
-                layer_translate_tile_units(style_layer.paint.as_ref(), coords.z, zoom, bearing);
-            let mut layer_metadata =
-                ShaderLayerMetadata::new(style_layer.index as f32, line_width, translate);
-            if let Some(LayerPaint::Circle(paint)) = &style_layer.paint {
-                let zoom = f64::from(zoom);
-                layer_metadata.stroke_color = paint.stroke_color_rgba();
-                // Fill opacity is already folded into each feature's colour alpha.
-                layer_metadata.circle_params =
-                    [1.0, paint.stroke_opacity_at(zoom), paint.blur_at(zoom), 0.0];
-                layer_metadata.circle_flags = [
-                    f32::from(paint.circle_pitch_scale == CirclePitchScale::Map),
-                    f32::from(paint.circle_pitch_alignment == CirclePitchAlignment::Map),
-                    0.0,
-                    0.0,
-                ];
-            }
+            let layer_metadata = metadata_for_layer(style_layer, *coords, zoom, bearing);
 
             log::debug!("Allocating geometry at {coords}");
             buffer_pool.allocate_layer_geometry(
@@ -224,3 +218,56 @@ fn layer_translate_tile_units(
 
 #[cfg(test)]
 mod tests;
+
+fn metadata_for_layer(
+    style_layer: &crate::style::layer::StyleLayer,
+    coords: crate::coords::WorldTileCoords,
+    zoom: f32,
+    bearing: f32,
+) -> ShaderLayerMetadata {
+    // Extract line-width from style paint (default 1.0px)
+    let line_width = match &style_layer.paint {
+        Some(LayerPaint::Line(paint)) => paint
+            .line_width
+            .as_ref()
+            .and_then(|w| w.evaluate_at_zoom(f64::from(zoom)))
+            .unwrap_or(1.0),
+        _ => 1.0,
+    };
+    let translate = layer_translate_tile_units(style_layer.paint.as_ref(), coords.z, zoom, bearing);
+    let mut layer_metadata =
+        ShaderLayerMetadata::new(style_layer.index as f32, line_width, translate);
+    if let Some(LayerPaint::Circle(paint)) = &style_layer.paint {
+        let zoom = f64::from(zoom);
+        layer_metadata.stroke_color = paint.stroke_color_rgba();
+        // Fill opacity is already folded into each feature's colour alpha.
+        layer_metadata.circle_params =
+            [1.0, paint.stroke_opacity_at(zoom), paint.blur_at(zoom), 0.0];
+        layer_metadata.circle_flags = [
+            f32::from(paint.circle_pitch_scale == CirclePitchScale::Map),
+            f32::from(paint.circle_pitch_alignment == CirclePitchAlignment::Map),
+            0.0,
+            0.0,
+        ];
+    }
+
+    layer_metadata
+}
+
+fn feature_metadata(
+    feature_indices: &[u32],
+    feature_colors: &[[f32; 4]],
+    fallback_color: [f32; 4],
+) -> Vec<FillShaderFeatureMetadata> {
+    let mut feature_metadata = Vec::with_capacity(feature_indices.iter().sum::<u32>() as usize);
+    for (idx, &count) in feature_indices.iter().enumerate() {
+        let current_color = feature_colors.get(idx).copied().unwrap_or(fallback_color);
+        for _ in 0..count {
+            feature_metadata.push(FillShaderFeatureMetadata {
+                color: current_color,
+            });
+        }
+    }
+
+    feature_metadata
+}

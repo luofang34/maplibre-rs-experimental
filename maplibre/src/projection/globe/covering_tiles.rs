@@ -142,6 +142,15 @@ pub fn covering_tiles(
     options: GlobeCoveringOptions,
     elevation: &dyn TileElevationProvider,
 ) -> Result<Vec<WorldTileCoords>, GlobeCoveringError> {
+    covering_tiles_with_history(camera, options, elevation, None)
+}
+
+pub(crate) fn covering_tiles_with_history(
+    camera: &GlobeCameraState,
+    options: GlobeCoveringOptions,
+    elevation: &dyn TileElevationProvider,
+    history: Option<&crate::projection::lod_history::LodHistory>,
+) -> Result<Vec<WorldTileCoords>, GlobeCoveringError> {
     if usize::from(u8::from(options.zoom)) >= MAX_ZOOM {
         return Err(GlobeCoveringError::UnsupportedZoom {
             zoom: u8::from(options.zoom),
@@ -171,7 +180,7 @@ pub fn covering_tiles(
             continue;
         }
         let target_zoom = options.zoom_range.cap(if options.variable_zoom {
-            lod.zoom_for_tile(entry.tile, options.rounding)
+            lod.stable_zoom_for_tile(entry.tile, options.rounding, history)
         } else {
             options.zoom
         });
@@ -188,7 +197,19 @@ pub fn covering_tiles(
         push_children(&mut stack, entry.tile, intersection == Intersection::Full);
     }
 
-    sort_by_center(&mut visible, camera.center(), options.zoom);
+    let priority = if camera.is_external_eye() {
+        super::unit_sphere_to_lat_lon(camera.camera_position())
+    } else {
+        camera.center()
+    };
+    sort_by_center(&mut visible, priority, options.zoom);
+    if camera.is_external_eye() {
+        visible = crate::projection::tile_covering::coarsen(
+            visible.into_iter(),
+            options.max_tiles,
+            options.zoom_range.min,
+        );
+    }
     Ok(add_padding(visible, options.padding, options.max_tiles))
 }
 
@@ -252,30 +273,22 @@ pub(crate) fn push_children(stack: &mut Vec<StackEntry>, tile: TileCoords, fully
 pub(crate) fn sort_by_center(
     tiles: &mut [WorldTileCoords],
     center: LatLon,
-    nominal_zoom: ZoomLevel,
+    _nominal_zoom: ZoomLevel,
 ) {
     let center_x = center.longitude / 360.0 + 0.5;
     let latitude = center.latitude.to_radians();
     let center_y = (1.0 - latitude.tan().asinh() / std::f64::consts::PI) * 0.5;
     tiles.sort_by(|left, right| {
-        distance_squared(*left, center_x, center_y, nominal_zoom).total_cmp(&distance_squared(
-            *right,
-            center_x,
-            center_y,
-            nominal_zoom,
-        ))
+        distance_squared(*left, center_x, center_y)
+            .total_cmp(&distance_squared(*right, center_x, center_y))
+            .then_with(|| left.cmp(right))
     });
 }
 
-fn distance_squared(
-    tile: WorldTileCoords,
-    center_x: f64,
-    center_y: f64,
-    nominal_zoom: ZoomLevel,
-) -> f64 {
-    let count = 2_f64.powi(i32::from(u8::from(nominal_zoom)));
-    let dx = center_x * count - 0.5 - f64::from(tile.x);
-    let dy = center_y * count - 0.5 - f64::from(tile.y);
+fn distance_squared(tile: WorldTileCoords, center_x: f64, center_y: f64) -> f64 {
+    let count = 2_f64.powi(i32::from(u8::from(tile.z)));
+    let dx = center_x - (f64::from(tile.x) + 0.5) / count;
+    let dy = center_y - (f64::from(tile.y) + 0.5) / count;
     dx * dx + dy * dy
 }
 
@@ -290,8 +303,11 @@ pub(crate) fn add_padding(
     if padding <= 0 {
         return visible.into_iter().take(max_tiles).collect();
     }
-    let mut seen = HashSet::new();
-    let mut padded = Vec::new();
+    let mut padded: Vec<_> = visible.iter().take(max_tiles).copied().collect();
+    let mut seen: HashSet<_> = padded.iter().copied().collect();
+    if padded.len() == max_tiles {
+        return padded;
+    }
     for tile in visible {
         let count = 1_i64 << u8::from(tile.z);
         for delta_x in -padding..=padding {
@@ -319,3 +335,7 @@ pub(crate) fn add_padding(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "covering_tiles/priority/tests.rs"]
+mod priority_tests;

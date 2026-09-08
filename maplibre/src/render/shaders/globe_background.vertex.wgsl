@@ -16,15 +16,19 @@ fn main(
     @location(7) translate4: vec4<f32>,
     @location(8) color: vec4<f32>,
     @location(10) z_index: f32,
+    @location(11) viewport: vec4<f32>,
 ) -> VertexOutput {
     let tile_position = vec3<f32>(vec2<f32>(raw_position), 0.0);
-    let projected = project_tile_mesh_position(
+    let projected = project_tile_position_3d(
         tile_position,
-        raw_position,
         mat4x4<f32>(translate1, translate2, translate3, translate4),
         tile_mercator_coords,
     );
     var position = projected.clip_position;
-    position.z = z_index;
+    // Background paint cannot occlude bathymetry or land below the reference ellipsoid.
+    // Keep a positive compositor depth, behind terrain and ahead of the sky.
+    if viewport.y > 0.5 {
+        position.z = 1.0e-7 * position.w;
+    }
     return VertexOutput(color, projected.horizon_distance, position);
 }

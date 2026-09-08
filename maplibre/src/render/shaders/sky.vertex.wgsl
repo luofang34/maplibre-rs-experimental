@@ -3,7 +3,7 @@ struct VertexOutput {
     @location(1) @interpolate(flat) horizon_color: vec4<f32>,
     // Horizon point on screen in GL coordinates (y up) and the normal pointing into the sky.
     @location(2) @interpolate(flat) horizon: vec4<f32>,
-    // Sky-horizon blend width in pixels, the globe transition, the viewport height.
+    // Sky-horizon blend width in pixels, the globe transition, the viewport height, and sky depth.
     @location(3) @interpolate(flat) blend: vec4<f32>,
     @builtin(position) position: vec4<f32>,
 };
@@ -22,5 +22,5 @@ fn main(
     } else if vertex_index == 2u {
         position = vec2<f32>(-1.0, 3.0);
     }
-    return VertexOutput(sky_color, horizon_color, horizon, blend, vec4<f32>(position, 0.0, 1.0));
+    return VertexOutput(sky_color, horizon_color, horizon, blend, vec4<f32>(position, blend.w, 1.0));
 }

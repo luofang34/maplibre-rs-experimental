@@ -10,6 +10,7 @@
 //! as GL JS sizes it from the viewport; a wide request would otherwise keep every tile a
 //! flight passes resident.
 
+use crate::render::tile_memory::tile_bytes;
 use std::collections::{HashMap, HashSet};
 
 use crate::{
@@ -30,11 +31,10 @@ use crate::{
     style::Style,
     tcs::{
         system::{heap::live_bytes, timings::FrameTimings, SystemResult},
-        tiles::Tiles,
         world::World,
     },
     terrain::{dem_tile_coords, resources::TerrainResources, source::dem_source},
-    vector::{VectorBufferPool, VectorLayerBucket, VectorLayerBucketComponent},
+    vector::VectorBufferPool,
 };
 
 /// Out-of-view tiles kept per tile in use, as GL JS `MAX_TILE_CACHE_ZOOM_LEVELS`.
@@ -44,7 +44,7 @@ const MIN_CACHE_TILES: usize = 64;
 /// Tessellated geometry the out-of-view cache may hold. The tile count is GL JS's, sized for
 /// a flat viewport of a few dozen tiles; an eye on terrain draws hundreds, and a planet tile
 /// at low zoom weighs tens of megabytes, so the cache is bounded in bytes as well.
-const CACHE_BYTES: usize = 384 << 20;
+const CACHE_BYTES: usize = 128 << 20;
 /// Frames between resident-memory summaries for hosts driving the map from an eye, which
 /// run on devices with a memory limit.
 const SUMMARY_EVERY_FRAMES: u64 = 90;
@@ -73,6 +73,9 @@ pub fn retention_system(
         ..
     }: &mut MapContext,
 ) -> SystemResult {
+    if crate::render::eye_covering::EyeInFrame::reuses_content(world) {
+        return Ok(());
+    }
     let drawn = drawn_tiles(world).len();
     let in_use = tiles_in_use(world, style, view_state);
     let evicted = evict_stale_tiles(world, &in_use, drawn);
@@ -81,7 +84,7 @@ pub fn retention_system(
         drop_gpu_data(world, &evicted);
     }
     if view_state.has_external_view() {
-        summarize_residency(world, drawn, in_use.len());
+        summarize_residency(world, drawn, in_use.len(), view_state.eye_settled());
         summarize_gpu_objects(world, renderer);
         summarize_timings(world);
     }
@@ -146,7 +149,7 @@ fn summarize_timings(world: &mut World) {
     }
 }
 
-fn summarize_residency(world: &World, drawn: usize, in_use: usize) {
+fn summarize_residency(world: &World, drawn: usize, in_use: usize, settled: bool) {
     let frame = world
         .resources
         .get::<TileRetention>()
@@ -183,6 +186,8 @@ fn summarize_residency(world: &World, drawn: usize, in_use: usize) {
         };
     tracing::info!(
         tiles,
+        pending = crate::io::tile_backpressure::tiles_in_flight(&world.tiles),
+        settled,
         geometry_mb = bytes >> 20,
         index_mb = index_bytes >> 20,
         pool_revision,
@@ -195,27 +200,6 @@ fn summarize_residency(world: &World, drawn: usize, in_use: usize) {
         dem_mb = dem_bytes >> 20,
         "resident tiles"
     );
-}
-
-/// Bytes of tessellated geometry the tile holds on the CPU.
-fn tile_bytes(tiles: &Tiles, coords: WorldTileCoords) -> usize {
-    tiles
-        .query::<&VectorLayerBucketComponent>(coords)
-        .map_or(0, |component| {
-            component
-                .layers
-                .iter()
-                .map(|layer| match layer {
-                    VectorLayerBucket::AvailableLayer(bucket) => {
-                        std::mem::size_of_val(bucket.buffer.buffer.vertices.as_slice())
-                            + std::mem::size_of_val(bucket.buffer.buffer.indices.as_slice())
-                            + std::mem::size_of_val(bucket.feature_indices.as_slice())
-                            + std::mem::size_of_val(bucket.feature_colors.as_slice())
-                    }
-                    VectorLayerBucket::Missing(_) => 0,
-                })
-                .sum()
-        })
 }
 
 /// The tiles the frame draws from, with the tiles whose shapes stand in for them.

@@ -7,6 +7,7 @@ mod expression;
 pub mod globe;
 pub mod mercator;
 pub mod renderer_data;
+pub(crate) mod tile_covering;
 
 pub use expression::{
     InterpolationCurve, NamedProjection, ProjectionExpression, ProjectionExpressionError,
@@ -84,3 +85,5 @@ pub struct ProjectionSpecification {
 
 #[cfg(test)]
 mod tests;
+
+pub(crate) mod lod_history;

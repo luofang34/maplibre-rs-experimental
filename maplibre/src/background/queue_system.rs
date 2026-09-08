@@ -48,7 +48,7 @@ pub fn queue_system(
     let sky_metadata = style
         .sky
         .as_ref()
-        .filter(|_| projection_transition < 1.0)
+        .filter(|_| projection_transition < 1.0 || view_state.opaque_environment())
         .map(|sky| sky_metadata(sky, view_state, projection_transition));
 
     {
@@ -78,7 +78,12 @@ pub fn queue_system(
                 z_index,
                 padding: [0.0; 3],
                 horizon: view_state.horizon_line().to_shader(),
-                viewport: [view_state.height() as f32, 0.0, 0.0, 0.0],
+                viewport: [
+                    view_state.height() as f32,
+                    f32::from(style.terrain.is_some()),
+                    0.0,
+                    0.0,
+                ],
             });
 
             let draw_function: Box<dyn crate::render::render_phase::Draw<LayerItem>> = if uses_globe
@@ -138,7 +143,12 @@ pub fn queue_system(
                 z_index: 0.0,
                 padding: [0.0; 3],
                 horizon: view_state.horizon_line().to_shader(),
-                viewport: [view_state.height() as f32, 0.0, 0.0, 0.0],
+                viewport: [
+                    view_state.height() as f32,
+                    f32::from(style.terrain.is_some()),
+                    0.0,
+                    0.0,
+                ],
             });
         }
         let buffer = renderer
@@ -164,6 +174,8 @@ pub fn queue_system(
             )
             .into(),
             clip_antimeridian: 1,
+            line_width_scale: 1.0,
+            line_units_per_pixel: 8.0 * view_state.zoom().scale_to_tile(&coords) as f32,
         };
         let tile_metadata_buffer =
             renderer
@@ -229,15 +241,25 @@ fn sky_metadata(
 ) -> crate::render::shaders::SkyLayerMetadata {
     let colors = sky.colors_at(view_state.zoom().value());
     let height = view_state.height();
+    // Zero depth denotes absent content to the host compositor. This distant positive
+    // depth keeps sky coverage valid without visible parallax at the headset near plane.
     crate::render::shaders::SkyLayerMetadata {
         sky_color: colors.sky,
         horizon_color: colors.horizon,
         horizon: view_state.horizon_line().to_shader(),
         blend: [
             (f64::from(colors.sky_horizon_blend) * height / 2.0) as f32,
-            projection_transition,
+            if view_state.opaque_environment() {
+                0.0
+            } else {
+                projection_transition
+            },
             height as f32,
-            0.0,
+            if view_state.has_external_view() {
+                1.0e-8
+            } else {
+                0.0
+            },
         ],
     }
 }

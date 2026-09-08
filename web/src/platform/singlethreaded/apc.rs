@@ -217,27 +217,15 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
 
     fn receive<F: FnMut(&Message) -> bool>(&self, mut filter: F) -> Self::ReceiveIterator<F> {
         let mut buffer = self.buffer.borrow_mut();
-        let mut ret = Vec::new();
-
-        // FIXME tcs: Verify this!
-        let mut index = 0usize;
-        let mut max_len = buffer.len();
-        while index < max_len {
-            if filter(&buffer[index]) {
-                ret.push(buffer.swap_remove(index));
-                max_len -= 1;
-            }
-            index += 1;
-        }
+        // Partial and final tile completions must retain the worker's delivery order.
+        let mut ret: Vec<_> = buffer.extract_if(.., |message| filter(message)).collect();
 
         // TODO: (optimize) Using while instead of if means that we are processing all that is
         // TODO available this might cause frame drops.
-        while let Some(message) = self
-            .received
-            .try_borrow_mut()
-            .expect("Failed to borrow in receive of APC")
-            .pop()
-        {
+        let Ok(mut received) = self.received.try_borrow_mut() else {
+            return ret.into_iter();
+        };
+        for message in received.drain(..) {
             log::debug!("Data reached main thread: {message:?}");
 
             if filter(&message) {

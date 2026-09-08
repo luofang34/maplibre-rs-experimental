@@ -1,10 +1,13 @@
 //! Uploads data to the GPU which is needed for rendering.
 
+use super::{
+    textures::{SymbolTextures, TextureContext},
+    SymbolPipeline,
+};
 use std::collections::HashSet;
 
 use crate::{
     context::MapContext,
-    coords::ViewRegion,
     render::{
         eventually::{Eventually, Eventually::Initialized},
         projection::view_region_for_projection,
@@ -29,10 +32,13 @@ pub fn upload_system(
         world,
         style,
         view_state,
-        renderer: Renderer { queue, .. },
+        renderer: Renderer { device, queue, .. },
         ..
     }: &mut MapContext,
 ) -> SystemResult {
+    if crate::render::eye_covering::EyeInFrame::reuses_content(world) {
+        return Ok(());
+    }
     let view_region = view_region_for_projection(
         style,
         view_state,
@@ -45,22 +51,47 @@ pub fn upload_system(
         SystemError::Setup
     })?;
 
-    let Some(Initialized(symbol_buffer_pool)) = world
+    let mut visible = std::collections::HashSet::new();
+    if let Some(region) = &view_region {
+        visible.extend(region.iter());
+    }
+    if let Some(Initialized(pattern)) = world
         .resources
-        .query_mut::<&mut Eventually<SymbolBufferPool>>()
+        .get::<Eventually<crate::render::tile_view_pattern::WgpuTileViewPattern>>()
+    {
+        for tile in pattern.iter() {
+            tile.render_kind(crate::io::tile_sources::TileKind::Vector, |shape| {
+                visible.insert(shape.coords());
+            });
+        }
+    }
+    let mut visible: Vec<_> = visible.into_iter().collect();
+    visible.sort_by_key(|coords| (u8::from(coords.z), coords.y, coords.x));
+    let Some((Initialized(symbol_buffer_pool), textures, Initialized(pipeline))) =
+        world.resources.query_mut::<(
+            &mut Eventually<SymbolBufferPool>,
+            &mut SymbolTextures,
+            &Eventually<SymbolPipeline>,
+        )>()
     else {
         return Err(SystemError::Dependencies);
     };
 
+    textures.retain(&world.tiles);
     let zoom = view_state.zoom().level();
 
-    if let Some(view_region) = &view_region {
+    {
         upload_symbol_layer(
             symbol_buffer_pool,
-            queue,
+            textures,
+            &TextureContext {
+                device,
+                queue,
+                pipeline,
+            },
             &mut world.tiles,
             style,
-            view_region,
+            &visible,
             zoom,
         );
     }
@@ -71,14 +102,15 @@ pub fn upload_system(
 // TODO cleanup, duplicated
 fn upload_symbol_layer(
     symbol_buffer_pool: &mut SymbolBufferPool,
-    queue: &wgpu::Queue,
+    textures: &mut SymbolTextures,
+    gpu: &TextureContext<'_>,
     tiles: &mut Tiles,
     style: &Style,
-    view_region: &ViewRegion,
+    visible: &[crate::coords::WorldTileCoords],
     zoom: f32,
 ) {
     // Upload all tessellated layers which are in view
-    for coords in view_region.iter() {
+    for &coords in visible {
         let Some(vector_layers) = tiles.query_mut::<&SymbolLayersDataComponent>(coords) else {
             continue;
         };
@@ -91,6 +123,23 @@ fn upload_symbol_layer(
             .collect();
 
         for style_layer in &style.layers {
+            if let Some(LayerPaint::Symbol(paint)) = &style_layer.paint {
+                if let Some(layer) = vector_layers
+                    .layers
+                    .iter()
+                    .find(|layer| layer.style_layer_id == style_layer.id)
+                {
+                    if let Some(atlas) = &layer.atlas {
+                        textures.prepare(
+                            gpu,
+                            (coords, style_layer.id.clone()),
+                            atlas,
+                            paint,
+                            f64::from(zoom),
+                        );
+                    }
+                }
+            }
             let Some(SymbolLayerData {
                 coords,
                 new_buffer: buffer,
@@ -103,32 +152,26 @@ fn upload_symbol_layer(
             // One opacity entry per vertex, visible until collision detection hides a label;
             // the features of a layout that does not attribute quads to labels cover no
             // vertices, so the vertex count is the only reliable size.
-            let feature_metadata =
-                vec![SDFShaderFeatureMetadata { opacity: 1.0 }; buffer.buffer.vertices.len()];
+            let feature_metadata = vec![
+                SDFShaderFeatureMetadata {
+                    opacity: 1.0,
+                    elevation: 0.0
+                };
+                buffer.buffer.vertices.len()
+            ];
 
             // FIXME avoid uploading empty indices
             if buffer.buffer.indices.is_empty() {
                 continue;
             }
 
-            // Extract text-size from style (default 16.0 per MapLibre GL JS spec)
-            let text_size = match &style_layer.paint {
-                Some(LayerPaint::Symbol(paint)) => paint
-                    .text_size
-                    .as_ref()
-                    .and_then(|s| s.evaluate_at_zoom(f64::from(zoom)))
-                    .unwrap_or(16.0),
-                _ => 16.0,
-            };
-
             log::debug!("Allocating geometry at {coords}");
             symbol_buffer_pool.allocate_layer_geometry(
-                queue,
+                gpu.queue,
                 *coords,
                 style_layer.clone(),
                 buffer,
-                // The line width slot carries the text size for the SDF pipeline.
-                ShaderLayerMetadata::new(style_layer.index as f32, text_size, [0.0; 2]),
+                ShaderLayerMetadata::new(style_layer.index as f32, 0.0, [0.0; 2]),
                 &feature_metadata,
             );
         }

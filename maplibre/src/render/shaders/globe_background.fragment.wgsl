@@ -7,7 +7,7 @@ fn main(
     @location(0) color: vec4<f32>,
     @location(4) horizon_distance: f32,
 ) -> Output {
-    if horizon_distance < 0.0 {
+    if horizon_distance < 0.0 || color.a <= 0.0 {
         discard;
     }
     return Output(color);

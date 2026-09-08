@@ -23,8 +23,6 @@ use crate::{
 
 pub struct RequestSystem<E: Environment, T: RasterTransferables> {
     kernel: Rc<Kernel<E>>,
-    /// Whether the last run left tiles unrequested for want of budget.
-    deferred: bool,
     phantom_t: PhantomData<T>,
 }
 
@@ -32,7 +30,6 @@ impl<E: Environment, T: RasterTransferables> RequestSystem<E, T> {
     pub fn new(kernel: &Rc<Kernel<E>>) -> Self {
         Self {
             kernel: kernel.clone(),
-            deferred: false,
             phantom_t: Default::default(),
         }
     }
@@ -52,80 +49,52 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
             ..
         }: &mut MapContext,
     ) -> SystemResult {
-        if view_state.did_camera_change() || view_state.did_zoom_change() || self.deferred {
-            self.deferred = false;
-            // Each raster source covers the view at its own tile size and rounding, as GL JS's
-            // per-source tile managers do; the tiles of every source are requested together.
-            let regions = raster_source_regions(style, view_state, world, ViewStatePadding::Loose)
-                .map_err(|error| {
-                    tracing::error!(%error, "unable to select raster request tiles");
-                    crate::tcs::system::SystemError::Setup
-                })?;
-            {
-                let mut requested = HashSet::new();
-                let mut budget = request_budget(world);
-                let minzoom = source_min_zoom(style, TileKind::Raster).unwrap_or(0);
-                // A tile the source answered 404 for is stood in for by its nearest ancestor,
-                // as GL JS retains and loads parents for it.
-                let wanted: Vec<WorldTileCoords> = regions
-                    .into_iter()
-                    .flat_map(|(_, tiles)| tiles)
-                    .flat_map(|coords| {
-                        let fallback = missing_tile_fallback(coords, minzoom, |coords| {
-                            world
-                                .tiles
-                                .query::<&RasterLayersDataComponent>(coords)
-                                .is_some_and(RasterLayersDataComponent::is_missing)
-                        });
-                        [Some(coords), fallback].into_iter().flatten()
-                    })
-                    .collect();
-                for coords in wanted {
-                    if !requested.insert(coords) {
-                        continue;
-                    }
-
-                    // TODO: Make tessellation depend on style? So maybe we need to request even if it exists
-                    if world
-                        .tiles
-                        .query::<&RasterLayersDataComponent>(coords)
-                        .is_some()
-                    {
-                        continue;
-                    }
-                    // The rest wait for a later frame, once tiles in flight have landed.
-                    if budget == 0 {
-                        self.deferred = true;
-                        break;
-                    }
-                    budget -= 1;
-
+        // Missing ancestors and deferred tiles must progress while the camera is stationary.
+        // Each raster source covers the view at its own tile size and rounding, as GL JS's
+        // per-source tile managers do; the tiles of every source are requested together.
+        let regions = raster_source_regions(style, view_state, world, ViewStatePadding::Loose)
+            .map_err(|error| {
+                tracing::error!(%error, "unable to select raster request tiles");
+                crate::tcs::system::SystemError::Setup
+            })?;
+        let mut requested = HashSet::new();
+        let mut budget = request_budget(world);
+        let minzoom = source_min_zoom(style, TileKind::Raster).unwrap_or(0);
+        // A tile the source answered 404 for is stood in for by its nearest ancestor,
+        // as GL JS retains and loads parents for it.
+        let wanted: Vec<WorldTileCoords> = regions
+            .into_iter()
+            .flat_map(|(_, tiles)| tiles)
+            .flat_map(|coords| {
+                let fallback = missing_tile_fallback(coords, minzoom, |coords| {
                     world
                         .tiles
-                        .spawn_mut(coords)
-                        .expect("unable to spawn a raster tile")
-                        .insert(RasterLayersDataComponent::default());
-
-                    tracing::debug!(%coords, "tile request started");
-
-                    self.kernel
-                        .apc()
-                        .call(
-                            Input::TileRequest {
-                                coords,
-                                style: style.clone(), // TODO: Avoid cloning whole style
-                            },
-                            fetch_raster_apc::<
-                                E::OffscreenKernelEnvironment,
-                                T,
-                                <E::AsyncProcedureCall as AsyncProcedureCall<
-                                    E::OffscreenKernelEnvironment,
-                                >>::Context,
-                            >,
-                        )
-                        .expect("unable to call APC"); // TODO: Remove unwrap
-                }
+                        .query::<&RasterLayersDataComponent>(coords)
+                        .is_some_and(RasterLayersDataComponent::is_missing)
+                });
+                [Some(coords), fallback].into_iter().flatten()
+            })
+            .collect();
+        for coords in wanted {
+            if !requested.insert(coords) {
+                continue;
             }
+
+            // TODO: Make tessellation depend on style? So maybe we need to request even if it exists
+            if world
+                .tiles
+                .query::<&RasterLayersDataComponent>(coords)
+                .is_some()
+            {
+                continue;
+            }
+            // The rest wait for a later frame, once tiles in flight have landed.
+            if budget == 0 {
+                break;
+            }
+            budget -= 1;
+
+            self.request(coords, style, world)?;
         }
 
         Ok(())
@@ -181,4 +150,25 @@ pub fn fetch_raster_apc<K: OffscreenKernel, T: RasterTransferables, C: Context +
 
         Ok(())
     })
+}
+
+impl<E: Environment, T: RasterTransferables> RequestSystem<E, T> {
+    fn request(
+        &self,
+        coords: crate::coords::WorldTileCoords,
+        style: &crate::style::Style,
+        world: &mut crate::tcs::world::World,
+    ) -> SystemResult {
+        let Some(mut tile) = world.tiles.spawn_mut(coords) else {
+            return Err(crate::tcs::system::SystemError::Setup);
+        };
+        tile.insert(RasterLayersDataComponent::default());
+        tracing::debug!(%coords, "tile request started");
+        self.kernel.apc().call(Input::TileRequest { coords, style: style.clone() },
+            fetch_raster_apc::<E::OffscreenKernelEnvironment, T, <E::AsyncProcedureCall as AsyncProcedureCall<E::OffscreenKernelEnvironment>>::Context>)
+            .map_err(|error| {
+                tracing::error!(%coords, ?error, "unable to schedule tile request");
+                crate::tcs::system::SystemError::Setup
+            })
+    }
 }

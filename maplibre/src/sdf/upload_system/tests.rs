@@ -10,6 +10,7 @@ use crate::{
 
 fn layer_data(style_layer_id: &str) -> SymbolLayerData {
     SymbolLayerData {
+        atlas: None,
         coords: WorldTileCoords::default(),
         source_layer: "place".to_string(),
         style_layer_id: style_layer_id.to_string(),

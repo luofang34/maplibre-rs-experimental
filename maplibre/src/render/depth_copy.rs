@@ -91,6 +91,45 @@ impl DepthCopyPipeline {
         });
         Self { pipeline, layout }
     }
+    /// Resolves the rendered depth into a single-sample target.
+    pub(crate) fn copy(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        source_texture: &wgpu::Texture,
+        target: &wgpu::TextureView,
+    ) {
+        // The map's depth texture carries a stencil; a depth texture binding sees one aspect.
+        let source = source_texture.create_view(&wgpu::TextureViewDescriptor {
+            aspect: wgpu::TextureAspect::DepthOnly,
+            ..Default::default()
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("depth copy"),
+            layout: &self.layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&source),
+            }],
+        });
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("depth_copy"),
+            color_attachments: &[],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: target,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(0.0),
+                    store: StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+        pass.set_pipeline(&self.pipeline);
+        pass.set_bind_group(0, &bind_group, &[]);
+        pass.draw(0..3, 0..1);
+    }
 }
 
 /// Copies the frame's depth into the host's depth texture, when the frame has one.
@@ -114,43 +153,12 @@ impl Node for DepthCopyNode {
         else {
             return Ok(());
         };
-        // The map's depth texture carries a stencil; a depth texture binding sees one aspect.
-        let source = depth_texture
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor {
-                aspect: wgpu::TextureAspect::DepthOnly,
-                ..Default::default()
-            });
-        let bind_group = render_context
-            .device
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("depth copy"),
-                layout: &pipeline.layout,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&source),
-                }],
-            });
-        let mut pass =
-            render_context
-                .command_encoder
-                .begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("depth_copy"),
-                    color_attachments: &[],
-                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                        view: target,
-                        depth_ops: Some(wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(0.0),
-                            store: StoreOp::Store,
-                        }),
-                        stencil_ops: None,
-                    }),
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                });
-        pass.set_pipeline(&pipeline.pipeline);
-        pass.set_bind_group(0, &bind_group, &[]);
-        pass.draw(0..3, 0..1);
+        pipeline.copy(
+            render_context.device,
+            &mut render_context.command_encoder,
+            &depth_texture.texture,
+            target,
+        );
         Ok(())
     }
 }

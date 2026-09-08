@@ -266,6 +266,8 @@ impl<I: std::ops::Add + From<lyon::tessellation::VertexId> + MaxIndex> FeaturePr
             self.current_index = next_index;
 
             self.features.push(Feature {
+                data: Default::default(),
+                parts: [None; 3],
                 bbox: bbox.unwrap_or(Box2D::new(origin, origin)),
                 indices: start..end,
                 text_anchor: origin.cast(),

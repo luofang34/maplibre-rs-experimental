@@ -1,14 +1,12 @@
 //! One tile covering for both eyes of a frame.
 //!
-//! Each eye of a stereo pair runs the whole schedule on its own view. Selecting the drawn
-//! tiles per eye lets the two eyes disagree about a tile's level where the per-tile level
-//! changes, which the viewer sees as one tile at two resolutions, and costs a covering per
-//! eye. The first eye's selection is kept for the frame and the other eyes draw the same
-//! tiles with their own matrices; the loose padding of the request systems covers the few
-//! centimetres between the eyes.
+//! Tile selection and content ingestion happen once per stereo frame. Each eye then draws
+//! that selection with its own projection, so a tile cannot change level or content between
+//! the left and right images.
 
 use crate::{
     coords::{ViewRegion, WorldTileCoords, ZoomLevel},
+    projection::lod_history::LodHistory,
     render::{
         projection::{raster_source_regions, view_region_for_projection, ProjectionStateError},
         view_state::{ViewState, ViewStatePadding},
@@ -26,8 +24,49 @@ pub struct EyeInFrame {
     pub frame: u64,
 }
 
+impl EyeInFrame {
+    /// Whether this eye must reuse the content selected for an earlier eye of the frame.
+    pub(crate) fn reuses_content(world: &World) -> bool {
+        world
+            .resources
+            .get::<Self>()
+            .is_some_and(|eye| eye.index > 0)
+    }
+}
+
 /// Tiles per raster source, as [`raster_source_regions`] selects them.
 pub type RasterCoverings = Vec<(String, Vec<WorldTileCoords>)>;
+
+/// An immutable snapshot used by every request and draw in the stereo frame.
+#[derive(Default)]
+pub(crate) struct FrameLodHistory {
+    pub(crate) view: LodHistory,
+    pub(crate) raster: std::collections::HashMap<String, LodHistory>,
+}
+
+pub(crate) fn snapshot_lod_history(world: &mut World) {
+    if EyeInFrame::reuses_content(world) {
+        return;
+    }
+    let history = world
+        .resources
+        .get::<SharedCovering>()
+        .map(|shared| FrameLodHistory {
+            view: LodHistory::new(
+                shared
+                    .tiles
+                    .as_ref()
+                    .map_or(&[], |(tiles, _)| tiles.as_slice()),
+            ),
+            raster: shared
+                .raster
+                .iter()
+                .map(|(name, tiles)| (name.clone(), LodHistory::new(tiles)))
+                .collect(),
+        })
+        .unwrap_or_default();
+    world.resources.insert(history);
+}
 
 /// The drawn tiles the first eye of a frame selected.
 #[derive(Debug)]

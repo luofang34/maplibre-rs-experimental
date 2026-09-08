@@ -7,12 +7,8 @@ use crate::{
         tile_view_pattern::WgpuTileViewPattern,
         INDEX_FORMAT,
     },
-    sdf::{
-        resource::{GlyphTexture, SymbolTerrainFallback},
-        SymbolBufferPool, SymbolPipeline,
-    },
+    sdf::{textures::SymbolTextures, SymbolBufferPool, SymbolPipeline},
     tcs::world::World,
-    terrain::resources::TerrainResources,
 };
 
 pub struct SetSymbolPipeline;
@@ -22,22 +18,24 @@ impl<P: PhaseItem> RenderCommand<P> for SetSymbolPipeline {
         _item: &P,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let Some((
-            Initialized(GlyphTexture { ref bind_group, .. }),
-            Initialized(symbol_pipeline),
-            Initialized(projection_resources),
-        )) = world.resources.query::<(
-            &Eventually<GlyphTexture>,
-            &Eventually<SymbolPipeline>,
-            &Eventually<ProjectionGpuResources>,
-        )>()
+        let Some((Initialized(symbol_pipeline), Initialized(projection_resources))) =
+            world.resources.query::<(
+                &Eventually<SymbolPipeline>,
+                &Eventually<ProjectionGpuResources>,
+            )>()
         else {
             return RenderCommandResult::Failure;
         };
 
         pass.set_render_pipeline(symbol_pipeline);
         pass.set_bind_group(0, projection_resources.bind_group(), &[]);
-        pass.set_bind_group(1, bind_group, &[]);
+        let Some(Initialized(depth)) = world
+            .resources
+            .get::<Eventually<super::depth::SymbolDepth>>()
+        else {
+            return RenderCommandResult::Failure;
+        };
+        pass.set_bind_group(2, &depth.binding, &[]);
         RenderCommandResult::Success
     }
 }
@@ -68,6 +66,15 @@ impl RenderCommand<TranslucentItem> for DrawSymbol {
         else {
             return RenderCommandResult::Failure;
         };
+
+        let Some(binding) = world
+            .resources
+            .get::<SymbolTextures>()
+            .and_then(|textures| textures.binding(item.tile.coords, &item.style_layer))
+        else {
+            return RenderCommandResult::Failure;
+        };
+        pass.set_bind_group(1, binding, &[]);
 
         let source_shape = &item.source_shape;
 
@@ -125,33 +132,4 @@ impl RenderCommand<TranslucentItem> for DrawSymbol {
     }
 }
 
-/// Binds the terrain tile the symbols stand on at group 2, or the flat stand-in.
-pub struct SetSymbolTerrain;
-impl RenderCommand<TranslucentItem> for SetSymbolTerrain {
-    fn render<'w>(
-        world: &'w World,
-        item: &TranslucentItem,
-        pass: &mut TrackedRenderPass<'w>,
-    ) -> RenderCommandResult {
-        let terrain_draw = world
-            .resources
-            .get::<Eventually<TerrainResources>>()
-            .and_then(|terrain| match terrain {
-                Initialized(terrain) => terrain.draw_for(item.tile.coords),
-                _ => None,
-            });
-        if let Some(draw) = terrain_draw {
-            pass.set_bind_group(2, &draw.bind_group, &[draw.uniform_offset]);
-            return RenderCommandResult::Success;
-        }
-        let Some(Initialized(fallback)) =
-            world.resources.get::<Eventually<SymbolTerrainFallback>>()
-        else {
-            return RenderCommandResult::Failure;
-        };
-        pass.set_bind_group(2, fallback.bind_group(), &[0]);
-        RenderCommandResult::Success
-    }
-}
-
-pub type DrawSymbols = (SetSymbolPipeline, SetSymbolTerrain, DrawSymbol);
+pub type DrawSymbols = (SetSymbolPipeline, DrawSymbol);

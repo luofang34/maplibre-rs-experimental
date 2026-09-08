@@ -33,6 +33,7 @@ pub mod light;
 pub mod property;
 pub mod sky;
 pub mod source;
+pub mod symbol;
 pub mod terrain;
 pub mod validation;
 
@@ -57,7 +58,14 @@ pub struct Style {
     pub metadata: HashMap<String, serde_json::Value>,
     #[serde(default)]
     pub sources: HashMap<String, Source>,
+    #[serde(deserialize_with = "layer_order::deserialize_layers")]
     pub layers: Vec<StyleLayer>,
+    /// URL template for font glyph ranges.
+    #[serde(default)]
+    pub glyphs: Option<String>,
+    /// Sprite URL or named sprite sources.
+    #[serde(default)]
+    pub sprite: Option<serde_json::Value>,
     pub center: Option<[f64; 2]>, // TODO: Use LatLon type here
     pub zoom: Option<f64>,
     pub bearing: Option<f64>,
@@ -97,6 +105,8 @@ impl Default for Style {
 
         Style {
             version: 8,
+            glyphs: None,
+            sprite: None,
             name: Some("Default Style".to_string()),
             metadata: Default::default(),
             sources: Default::default(),
@@ -297,6 +307,7 @@ impl Default for Style {
                     paint: Some(LayerPaint::Symbol(SymbolPaint {
                         text_field: Some(StyleProperty::parse(&serde_json::json!("{name}"))),
                         text_size: None,
+                        ..Default::default()
                     })),
                     source: None,
                     source_layer: Some("place".to_string()),
@@ -313,6 +324,7 @@ impl Default for Style {
                     paint: Some(LayerPaint::Symbol(SymbolPaint {
                         text_field: Some(StyleProperty::parse(&serde_json::json!("{name}"))),
                         text_size: None,
+                        ..Default::default()
                     })),
                     source: None,
                     source_layer: Some("transportation_name-disabled".to_string()),
@@ -445,3 +457,5 @@ mod tests {
         }
     }
 }
+
+mod layer_order;

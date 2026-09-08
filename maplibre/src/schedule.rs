@@ -273,7 +273,19 @@ impl Schedule {
 
     /// Executes each [`Stage`] contained in the schedule, one at a time.
     pub fn run_once(&mut self, context: &mut MapContext) -> StageResult {
+        self.run_stages(context, |_| true)
+    }
+
+    /// Runs the selected stages, preserving their declared order.
+    pub(crate) fn run_stages(
+        &mut self,
+        context: &mut MapContext,
+        include: impl Fn(&dyn StageLabel) -> bool,
+    ) -> StageResult {
         for label in &self.stage_order {
+            if !include(&**label) {
+                continue;
+            }
             #[cfg(feature = "trace")]
             let _stage_span = tracing::info_span!("stage", name = ?label).entered();
             let stage = self.stages.get_mut(label).unwrap(); // TODO: Remove unwrap

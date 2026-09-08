@@ -53,6 +53,8 @@ pub struct XrEye {
 /// A frame for a head-mounted display.
 #[derive(Debug)]
 pub struct XrFrame {
+    /// Draw continuous sky for full immersion; false preserves passthrough around a globe.
+    pub opaque_environment: bool,
     /// Time since the host started; animated properties read it.
     pub timestamp: Duration,
     /// Where the scene stands in the host's world.

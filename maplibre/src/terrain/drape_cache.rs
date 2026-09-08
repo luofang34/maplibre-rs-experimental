@@ -59,7 +59,23 @@ pub(crate) fn fingerprint(
 
 struct Entry<T> {
     texture: T,
-    fingerprint: u64,
+    fingerprint: Option<u64>,
+    has_content: bool,
+}
+
+impl<T> Entry<T> {
+    fn acquire(&mut self, fingerprint: u64) -> DrapeState {
+        let state = if !self.has_content {
+            DrapeState::New
+        } else if self.fingerprint == Some(fingerprint) {
+            DrapeState::Unchanged
+        } else {
+            DrapeState::Changed
+        };
+        self.fingerprint = Some(fingerprint);
+        self.has_content = true;
+        state
+    }
 }
 
 /// Released textures kept with their content, newest first, so a tile that leaves the view
@@ -110,25 +126,14 @@ impl<T> DrapeCache<T> {
         create: impl FnOnce() -> T,
     ) -> DrapeState {
         match self.entries.get_mut(&coords) {
-            Some(entry) if entry.fingerprint == fingerprint => DrapeState::Unchanged,
-            Some(entry) => {
-                entry.fingerprint = fingerprint;
-                DrapeState::Changed
-            }
+            Some(entry) => entry.acquire(fingerprint),
             None => {
                 if let Some(index) = self.parked.iter().position(|(parked, _)| *parked == coords) {
-                    let (_, mut entry) = self
-                        .parked
-                        .remove(index)
-                        .unwrap_or_else(|| unreachable!("the parked index was just found"));
-                    let state = if entry.fingerprint == fingerprint {
-                        DrapeState::Unchanged
-                    } else {
-                        entry.fingerprint = fingerprint;
-                        DrapeState::Changed
-                    };
-                    self.entries.insert(coords, entry);
-                    return state;
+                    if let Some((_, mut entry)) = self.parked.remove(index) {
+                        let state = entry.acquire(fingerprint);
+                        self.entries.insert(coords, entry);
+                        return state;
+                    }
                 }
                 // A spare texture first, then a new one while the budget allows; past the
                 // budget the texture parked longest ago gives up its content, and with none
@@ -145,7 +150,8 @@ impl<T> DrapeCache<T> {
                     coords,
                     Entry {
                         texture,
-                        fingerprint,
+                        fingerprint: Some(fingerprint),
+                        has_content: true,
                     },
                 );
                 DrapeState::New
@@ -164,11 +170,11 @@ impl<T> DrapeCache<T> {
         self.free.clear();
     }
 
-    /// Marks a tile acquired this frame as not drawn after all, so the next frame acquires
-    /// it as changed again.
-    pub fn defer(&mut self, coords: WorldTileCoords) {
+    /// Cancels an acquired draw, preserving whether the texture has valid tile content.
+    pub fn defer(&mut self, coords: WorldTileCoords, state: DrapeState) {
         if let Some(entry) = self.entries.get_mut(&coords) {
-            entry.fingerprint = entry.fingerprint.wrapping_add(1);
+            entry.fingerprint = None;
+            entry.has_content = state != DrapeState::New;
         }
     }
 
@@ -197,7 +203,10 @@ impl<T> DrapeCache<T> {
 
     /// Texture of a view tile, if it has one.
     pub fn get(&self, coords: WorldTileCoords) -> Option<&T> {
-        self.entries.get(&coords).map(|entry| &entry.texture)
+        self.entries
+            .get(&coords)
+            .filter(|entry| entry.has_content)
+            .map(|entry| &entry.texture)
     }
 
     /// Number of tiles holding a texture.

@@ -9,19 +9,20 @@ struct VertexOutput {
     @location(4) horizon_distance: f32,
     @location(5) tile_x: f32,
     @location(6) @interpolate(flat) clip_antimeridian: u32,
+    @location(7) dash: vec2<f32>,
 };
 
 @vertex
 fn main(
     @location(0) position: vec2<f32>,
-    @location(1) normal: vec2<f32>,
+    @location(1) path: vec3<f32>,
     @location(2) tile_mercator_coords: vec4<f32>,
     @location(4) translate1: vec4<f32>,
     @location(5) translate2: vec4<f32>,
     @location(6) translate3: vec4<f32>,
     @location(7) translate4: vec4<f32>,
     @location(8) color: vec4<f32>,
-    @location(9) zoom_factor: f32,
+    @location(9) line_scale: vec2<f32>,
     @location(10) z_index: f32,
     @location(11) viewport_width: f32,
     @location(12) viewport_height: f32,
@@ -29,7 +30,8 @@ fn main(
     @location(14) clip_antimeridian: u32,
     @location(15) layer_translate: vec2<f32>,
 ) -> VertexOutput {
-    let line_width_px = line_width;
+    let normal = path.xy;
+    let line_width_px = line_width * line_scale.x;
     let blur = 0.0;
     let gapwidth = 0.0;
 
@@ -65,7 +67,7 @@ fn main(
     let px_to_clip_x = (2.0 / viewport_width) * center.w;
     let px_to_clip_y = (2.0 / viewport_height) * center.w;
     let clip_offset = vec2<f32>(dir.x * outset * px_to_clip_x, dir.y * outset * px_to_clip_y);
-    center = vec4<f32>(center.x + clip_offset.x, center.y + clip_offset.y, z_index, center.w);
+    center = vec4<f32>(center.x + clip_offset.x, center.y + clip_offset.y, 0.0, center.w);
 
     return VertexOutput(
         center,
@@ -76,5 +78,6 @@ fn main(
         projected_center.horizon_distance,
         position.x,
         clip_antimeridian,
+        vec2<f32>(path.z / max(line_scale.y * line_width_px, 1e-6), line_width_px),
     );
 }

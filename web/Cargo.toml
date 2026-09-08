@@ -24,6 +24,7 @@ wasm-opt = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+tracing.workspace = true
 async-trait.workspace = true
 maplibre = { path = "../maplibre" }
 maplibre-winit = { path = "../maplibre-winit", version = "0.1.0" }

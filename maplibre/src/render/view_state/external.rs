@@ -23,6 +23,7 @@ use crate::{
     },
 };
 
+mod spatial;
 mod sphere;
 
 /// Where the local frame of an [`ExternalView`] is anchored.
@@ -79,6 +80,8 @@ pub(super) struct ExternalEye {
     frustum: EyeFrustum,
     /// The eye in unit-sphere coordinates, for the globe camera.
     sphere: SphereEye,
+    /// Pixel focal length of the host frustum, unaffected by request overscan.
+    lod_focal_pixels: f64,
     /// The map zoom the eye implies.
     zoom: f64,
     /// How much that zoom moved since the previous eye: a flight or a hand zoom in progress.
@@ -137,7 +140,10 @@ impl ViewState {
                 on_sphere.roll,
             );
         } else {
-            self.set_eye_pose(flat_pose_of(&frame, external.anchor, body));
+            self.set_eye_pose(
+                flat_pose_of(&frame, external.anchor, body),
+                external.anchor.altitude_meters,
+            );
         }
         let zoom = self.zoom().value();
         let zoom_rate = self
@@ -149,6 +155,7 @@ impl ViewState {
             scale: frame.scale,
             frustum: external.frustum.scaled(1.0 / frame.scale),
             sphere,
+            lod_focal_pixels: self.height / (frustum.top + frustum.bottom),
             zoom,
             zoom_rate,
         });
@@ -436,3 +443,7 @@ fn flat_pose_of(frame: &EyeFrame, anchor: ExternalAnchor, body: Body) -> CameraP
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "external/regression/tests.rs"]
+mod regression;

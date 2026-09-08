@@ -41,6 +41,10 @@ pub trait TileTessellated: IntoMessage + Debug + Send {
     where
         Self: Sized;
 
+    fn build_partial(coords: WorldTileCoords) -> Self
+    where
+        Self: Sized;
+    fn pending_symbols(&self) -> bool;
     fn coords(&self) -> WorldTileCoords;
 }
 
@@ -89,11 +93,14 @@ pub trait SymbolLayerTessellated: IntoMessage + Debug + Send {
         buffer: OverAlignedVertexBuffer<ShaderSymbolVertex, IndexDataType>,
         new_buffer: OverAlignedVertexBuffer<ShaderSymbolVertexNew, IndexDataType>,
         features: Vec<Feature>,
+        atlas: Option<std::sync::Arc<crate::sdf::assets::SymbolAtlas>>,
         layer_data: Layer,
         style_layer_id: String,
     ) -> Self
     where
         Self: Sized;
+
+    /// Attaches the tile's glyph and sprite pixels to the worker result.
 
     fn coords(&self) -> WorldTileCoords;
 
@@ -116,6 +123,7 @@ pub trait LayerIndexed: IntoMessage + Debug + Send {
 
 pub struct DefaultTileTessellated {
     coords: WorldTileCoords,
+    pending_symbols: bool,
 }
 
 impl Debug for DefaultTileTessellated {
@@ -136,7 +144,20 @@ impl TileTessellated for DefaultTileTessellated {
     }
 
     fn build_from(coords: WorldTileCoords) -> Self {
-        Self { coords }
+        Self {
+            coords,
+            pending_symbols: false,
+        }
+    }
+
+    fn build_partial(coords: WorldTileCoords) -> Self {
+        Self {
+            coords,
+            pending_symbols: true,
+        }
+    }
+    fn pending_symbols(&self) -> bool {
+        self.pending_symbols
     }
 
     fn coords(&self) -> WorldTileCoords {
@@ -257,6 +278,7 @@ impl LayerTessellated for DefaultLayerTessellated {
 }
 
 pub struct DefaultSymbolLayerTessellated {
+    pub atlas: Option<std::sync::Arc<crate::sdf::assets::SymbolAtlas>>,
     pub coords: WorldTileCoords,
     pub buffer: OverAlignedVertexBuffer<ShaderSymbolVertex, IndexDataType>,
     pub new_buffer: OverAlignedVertexBuffer<ShaderSymbolVertexNew, IndexDataType>,
@@ -287,10 +309,12 @@ impl SymbolLayerTessellated for crate::vector::transferables::DefaultSymbolLayer
         buffer: OverAlignedVertexBuffer<ShaderSymbolVertex, IndexDataType>,
         new_buffer: OverAlignedVertexBuffer<ShaderSymbolVertexNew, IndexDataType>,
         features: Vec<Feature>,
+        atlas: Option<std::sync::Arc<crate::sdf::assets::SymbolAtlas>>,
         layer_data: Layer,
         style_layer_id: String,
     ) -> Self {
         Self {
+            atlas,
             coords,
             buffer,
             new_buffer,
@@ -310,6 +334,7 @@ impl SymbolLayerTessellated for crate::vector::transferables::DefaultSymbolLayer
 
     fn to_bucket(self) -> SymbolLayerData {
         SymbolLayerData {
+            atlas: self.atlas,
             coords: self.coords,
             source_layer: self.layer_data.name,
             style_layer_id: self.style_layer_id,

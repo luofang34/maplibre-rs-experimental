@@ -17,7 +17,7 @@ use crate::{
 };
 
 /// Tiles that may be fetched or processed at the same time across every source.
-pub const MAX_TILES_IN_FLIGHT: usize = 24;
+pub const MAX_TILES_IN_FLIGHT: usize = 12;
 
 /// Whether every request for the tile has produced a result.
 pub(crate) fn is_settled(tiles: &Tiles, coords: WorldTileCoords) -> bool {
@@ -31,7 +31,10 @@ pub(crate) fn is_settled(tiles: &Tiles, coords: WorldTileCoords) -> bool {
         tiles.query::<&DemTileComponent>(coords),
         Some(DemTileComponent::Pending)
     );
-    !(vector_loading || raster_loading || dem_loading)
+    let symbol_loading = tiles
+        .query::<&crate::sdf::SymbolLayersDataComponent>(coords)
+        .is_some_and(|component| component.pending_assets);
+    !(vector_loading || raster_loading || dem_loading || symbol_loading)
 }
 
 /// Tiles with a request that has not produced its result yet.

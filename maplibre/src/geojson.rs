@@ -10,11 +10,11 @@ use crate::{
     coords::{WorldTileCoords, EXTENT},
     io::apc::{Context, SendError},
     projection::{globe::subdivision::granularity_for_zoom, ProjectionType},
-    sdf::{tessellation::TextTessellator, tessellation_new::TextTessellatorNew},
+    sdf::tessellation_new::TextTessellatorNew,
     style::{
         expression::Value,
         filter::{properties_from_json, FeatureContext, Filter, GeometryType},
-        layer::{LayerPaint, StyleLayer, StyleProperty, TextField},
+        layer::{LayerPaint, StyleLayer},
     },
     vector::{
         tessellation::{CircleOptions, IndexDataType, ZeroTessellator},
@@ -376,13 +376,10 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
                     .map_err(ProcessGeoJsonError::SendError)?;
             }
             LayerPaint::Symbol(symbol_paint) => {
-                let tessellator = TextTessellator::<IndexDataType>::default();
-                let text_field = symbol_paint
-                    .text_field
-                    .clone()
-                    .unwrap_or_else(|| StyleProperty::Constant(TextField::default()));
                 let zoom = f64::from(u8::from(coords.z));
-                let tessellator_new = TextTessellatorNew::new(text_field, zoom);
+                let atlas = crate::sdf::assets::fallback_atlas();
+                let tessellator_new =
+                    TextTessellatorNew::with_assets(symbol_paint.clone(), zoom, atlas.clone());
                 let mut projecting = ProjectingTessellator::new(coords, tessellator_new);
 
                 let mut geojson_src = geozero::geojson::GeoJson(json_str.as_str());
@@ -409,9 +406,10 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
                 context
                     .send_back(T::SymbolLayerTessellated::build_from(
                         coords,
-                        tessellator.quad_buffer.into(),
+                        crate::vector::tessellation::OverAlignedVertexBuffer::empty(),
                         inner.quad_buffer.into(),
                         inner.features,
+                        Some(atlas),
                         synthetic_layer,
                         style_layer.id.clone(),
                     ))

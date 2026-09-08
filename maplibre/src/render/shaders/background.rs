@@ -127,7 +127,7 @@ pub struct SkyLayerMetadata {
     pub horizon_color: [f32; 4],
     /// Horizon point in screen pixels with y up, then the unit normal pointing into the sky.
     pub horizon: [f32; 4],
-    /// Blend width above the horizon in pixels, the globe transition, the viewport height.
+    /// Blend width in pixels, globe transition, viewport height, and reversed sky depth.
     pub blend: [f32; 4],
 }
 
@@ -287,6 +287,11 @@ fn globe_background_buffers() -> Vec<VertexBufferLayout> {
                     offset: wgpu::VertexFormat::Float32x4.size(),
                     format: wgpu::VertexFormat::Float32,
                     shader_location: 10,
+                },
+                wgpu::VertexAttribute {
+                    offset: std::mem::offset_of!(BackgroundLayerMetadata, viewport) as u64,
+                    format: wgpu::VertexFormat::Float32x4,
+                    shader_location: 11,
                 },
             ],
         },

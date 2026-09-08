@@ -15,6 +15,7 @@ const INTEGRATION_POINTS: usize = 10;
 
 pub(crate) struct LodContext {
     camera: Point2<f64>,
+    eye_focal_pixels: Option<f64>,
     distance_z: f64,
     distance_to_center_3d: f64,
     requested_zoom: f64,
@@ -89,6 +90,7 @@ impl LodContext {
         let distance_to_center_2d = (center.x - camera.x).hypot(center.y - camera.y);
         Self {
             camera,
+            eye_focal_pixels: None,
             distance_z,
             distance_to_center_3d: distance_to_center_2d.hypot(distance_z),
             requested_zoom,
@@ -96,16 +98,45 @@ impl LodContext {
         }
     }
 
+    pub(crate) fn from_eye(camera: Point2<f64>, height: f64, focal_pixels: f64) -> Self {
+        Self {
+            camera,
+            distance_z: height,
+            eye_focal_pixels: Some(focal_pixels),
+            distance_to_center_3d: height,
+            requested_zoom: 0.0,
+            field_of_view_degrees: 0.0,
+        }
+    }
+
+    #[cfg(test)]
     pub(crate) fn zoom_for_tile(&self, tile: TileCoords, rounding: ZoomRounding) -> ZoomLevel {
+        self.stable_zoom_for_tile(tile, rounding, None)
+    }
+
+    pub(crate) fn stable_zoom_for_tile(
+        &self,
+        tile: TileCoords,
+        rounding: ZoomRounding,
+        history: Option<&crate::projection::lod_history::LodHistory>,
+    ) -> ZoomLevel {
         let distance_2d = distance_to_tile_2d(self.camera, tile);
-        let desired = rounding
-            .apply(calculate_tile_zoom(
+        let desired = if let Some(focal) = self.eye_focal_pixels {
+            let distance = distance_2d.hypot(self.distance_z).max(f64::EPSILON);
+            // Projected texel size falls with distance and with grazing incidence.
+            (focal / (crate::coords::TILE_SIZE * distance)).log2()
+                + 0.5 * (self.distance_z / distance).log2()
+        } else {
+            calculate_tile_zoom(
                 self.requested_zoom,
                 distance_2d,
                 self.distance_z,
                 self.distance_to_center_3d,
                 self.field_of_view_degrees,
-            ))
+            )
+        };
+        let desired = rounding
+            .apply(desired + history.map_or(0.0, |h| h.bias(tile)))
             .clamp(0.0, (MAX_ZOOM - 1) as f64);
         ZoomLevel::new(desired as u8)
     }

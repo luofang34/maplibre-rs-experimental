@@ -9,9 +9,10 @@ use crate::{
     render::{
         eventually::Eventually,
         eye_covering::EyeInFrame,
-        frame_input::ViewSource,
+        frame_input::{frame_input_system, ViewSource},
         resource::TextureView,
         xr::{PrefetchView, ScenePlacement, XrEye, XrFrame},
+        RenderStageLabel,
     },
     schedule::StageError,
     terrain::coverage::TerrainCoverageIndex,
@@ -40,22 +41,31 @@ pub enum XrFrameError {
 impl HeadlessMap {
     /// Draws every eye of the frame into its own target, from the placement the host chose.
     ///
-    /// Each eye runs the whole schedule with its own view, so tile requests and terrain
-    /// coverage follow that eye's frustum rather than an average of the pair, while the tiles
-    /// drawn are the ones the first eye selects, so both eyes show each tile at one level.
+    /// Tile ingestion runs once, before the first eye. Later eyes keep its tile content and
+    /// terrain refinement while updating their own projection and render targets.
     /// An eye without a colour target draws into the map's own texture, which then holds
     /// the last such eye.
     pub fn run_xr_frame(&mut self, frame: XrFrame) -> Result<(), XrFrameError> {
+        self.map_context
+            .view_state
+            .set_opaque_environment(frame.opaque_environment);
         self.set_prefetch(frame.prefetch.as_ref(), frame.eyes.first());
         let resources = &mut self.map_context.world.resources;
         let frame_number = resources
             .get::<EyeInFrame>()
             .map_or(0, |eye| eye.frame.wrapping_add(1));
-        for (index, eye) in frame.eyes.into_iter().enumerate() {
-            let view = frame
-                .placement
-                .view_from(eye.world_from_eye, eye.frustum)
-                .ok_or(XrFrameError::SingularEye { index })?;
+        let views = frame
+            .eyes
+            .iter()
+            .enumerate()
+            .map(|(index, eye)| {
+                frame
+                    .placement
+                    .view_from(eye.world_from_eye, eye.frustum)
+                    .ok_or(XrFrameError::SingularEye { index })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        for (index, (eye, view)) in frame.eyes.into_iter().zip(views).enumerate() {
             // The first eye selects the frame's tiles; the others draw the same ones.
             self.map_context.world.resources.insert(EyeInFrame {
                 index,
@@ -71,14 +81,34 @@ impl HeadlessMap {
                 resources.render_target = Eventually::Initialized(TextureView::from(color));
             }
             resources.eye_depth_target = eye.target.depth;
-            let result = self.schedule.run_once(&mut self.map_context);
+            let result = if index == 0 {
+                self.schedule.run_once(&mut self.map_context)
+            } else {
+                frame_input_system(&mut self.map_context)
+                    .map_err(StageError::from)
+                    .and_then(|()| {
+                        self.schedule.run_stages(&mut self.map_context, |label| {
+                            label != &RenderStageLabel::Extract as &dyn crate::schedule::StageLabel
+                        })
+                    })
+            };
             let resources = &mut self.map_context.renderer.resources;
             resources.eye_depth_target = None;
             // The graph runner takes the target after a frame; a failed frame must not leave
             // the eye's texture behind for the next one.
             resources.render_target.take();
-            result.map_err(|source| XrFrameError::Eye { index, source })?;
+            if let Err(source) = result {
+                self.map_context.world.resources.insert(EyeInFrame {
+                    index: 0,
+                    frame: frame_number,
+                });
+                return Err(XrFrameError::Eye { index, source });
+            }
         }
+        self.map_context.world.resources.insert(EyeInFrame {
+            index: 0,
+            frame: frame_number,
+        });
         Ok(())
     }
 
@@ -137,3 +167,15 @@ impl HeadlessMap {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "xr/regression/tests.rs"]
+mod regression;
+
+#[cfg(test)]
+#[path = "xr/surface/tests.rs"]
+mod surface;
+
+#[cfg(test)]
+#[path = "xr/poles/tests.rs"]
+mod poles;

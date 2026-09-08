@@ -26,6 +26,8 @@ table FlatSymbolLayerTessellated {
     new_indices: [uint];
     new_usable_indices: uint;
     style_layer_id: string;
+    symbol_features: [ubyte];
+    symbol_atlas: [ubyte];
 }
 
 root_type FlatSymbolLayerTessellated;

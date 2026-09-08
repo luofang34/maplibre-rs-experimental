@@ -18,7 +18,6 @@ use crate::{
     plugin::Plugin,
     raster::{AvailableRasterLayerData, RasterLayerData, RasterLayersDataComponent},
     render::{
-        eventually::Eventually,
         frame_input::FrameInput,
         projection::{raster_source_regions, view_region_for_projection, ProjectionStateError},
         tile_view_pattern::DEFAULT_TILE_SIZE,
@@ -26,13 +25,13 @@ use crate::{
         Renderer,
     },
     schedule::{Schedule, Stage, StageError},
-    sdf::{SymbolBufferPool, SymbolLayersDataComponent},
+    sdf::SymbolLayersDataComponent,
     style::{layer::StyleLayer, Style},
     tcs::world::World,
     terrain::{backfill_neighbours, dem::DemTile, source::dem_source, DemTileComponent, LoadedDem},
     vector::{
         transferables::SymbolLayerTessellated, AvailableVectorLayerBucket, ProcessVectorError,
-        VectorBufferPool, VectorLayerBucket, VectorLayerBucketComponent,
+        VectorLayerBucket, VectorLayerBucketComponent,
     },
 };
 
@@ -246,7 +245,10 @@ impl HeadlessMap {
             tiles
                 .spawn_mut(coords)
                 .ok_or(HeadlessMapOperationError::InvalidTile { coords })?
-                .insert(SymbolLayersDataComponent { layers });
+                .insert(SymbolLayersDataComponent {
+                    layers,
+                    pending_assets: false,
+                });
         }
 
         let mut rasters_by_tile = BTreeMap::new();
@@ -274,21 +276,6 @@ impl HeadlessMap {
                 .map_err(|source| HeadlessMapOperationError::Schedule { source })?;
         }
 
-        let resources = &mut context.world.resources;
-        let tiles = &mut context.world.tiles;
-
-        tiles.clear();
-
-        if let Some(Eventually::Initialized(pool)) =
-            resources.query_mut::<&mut Eventually<VectorBufferPool>>()
-        {
-            pool.clear();
-        }
-        if let Some(Eventually::Initialized(pool)) =
-            resources.query_mut::<&mut Eventually<SymbolBufferPool>>()
-        {
-            pool.clear();
-        }
         Ok(())
     }
 
@@ -310,13 +297,27 @@ impl HeadlessMap {
             .get_or_init_mut::<FrameInput>()
     }
 
-    /// The view the map renders from.
+    /// Symbols accepted by placement at a screen point, optionally restricted to style layers.
+    pub fn query_rendered_symbols(
+        &self,
+        point: [f64; 2],
+        layers: Option<&[&str]>,
+    ) -> Vec<crate::sdf::query::RenderedSymbol> {
+        crate::sdf::query::query_rendered_symbols(
+            &self.map_context.world,
+            &self.map_context.style,
+            point,
+            layers,
+        )
+    }
+
     /// The map's world, for tests that read what a frame left behind.
     #[cfg(test)]
     pub(crate) fn world(&self) -> &crate::tcs::world::World {
         &self.map_context.world
     }
 
+    /// The view the map renders from.
     pub fn view_state(&self) -> &ViewState {
         &self.map_context.view_state
     }

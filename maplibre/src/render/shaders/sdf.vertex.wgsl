@@ -30,7 +30,7 @@ fn main(
     );
 
     var final_position = mat4x4<f32>(translate1, translate2, translate3, translate4) * vec4<f32>((scaling * (position - text_anchor) + text_anchor), 1.0);
-    final_position.z = z_index;
+    final_position.z = 0.0;
 
     let white = vec4<f32>(1.0, 1.0, 1.0, 1.0);
     return VertexOutput(tex_coords, white, opacity, final_position);

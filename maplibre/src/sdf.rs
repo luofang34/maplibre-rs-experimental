@@ -21,7 +21,6 @@ use crate::{
         RenderStageLabel,
     },
     schedule::Schedule,
-    sdf::resource::{GlyphTexture, SymbolTerrainFallback},
     tcs::{system::SystemContainer, tiles::TileComponent, world::World},
     vector::{
         resource::BufferPool,
@@ -30,12 +29,17 @@ use crate::{
     },
 };
 
+pub mod assets;
+mod collision_grid;
 pub mod collision_system;
+pub(crate) mod depth;
+mod paint;
+mod placement;
 mod populate_world_system;
 mod queue_system;
 mod render_commands;
-mod resource;
 mod resource_system;
+mod textures;
 mod upload_system;
 
 pub mod tessellation;
@@ -81,9 +85,8 @@ impl<E: Environment, T: VectorTransferables> Plugin<E> for SdfPlugin<T> {
 
         resources.insert(Eventually::<SymbolPipeline>::Uninitialized);
         resources.insert(Eventually::<SymbolBufferPool>::Uninitialized);
-        resources.insert(Eventually::<GlyphTexture>::Uninitialized);
-        resources.insert(Eventually::<SymbolTerrainFallback>::Uninitialized);
-        resources.insert(Eventually::<(wgpu::Texture, wgpu::Sampler)>::Uninitialized);
+        resources.insert(textures::SymbolTextures::default());
+        resources.insert(Eventually::<depth::SymbolDepth>::Uninitialized);
 
         schedule.add_system_to_stage(
             RenderStageLabel::Extract,
@@ -103,9 +106,24 @@ impl<E: Environment, T: VectorTransferables> Plugin<E> for SdfPlugin<T> {
     }
 }
 
+/// Source attributes retained for feature queries and placement ordering.
+#[derive(Clone, Default)]
+pub struct SymbolFeatureData {
+    /// Source feature ID, when the data provides one.
+    pub id: Option<u64>,
+    /// Typed source attributes.
+    pub properties: crate::style::expression::FeatureProperties,
+    /// Evaluated symbol-sort-key; smaller keys have collision priority.
+    pub sort_key: f32,
+}
+
 /// One label of a symbol bucket.
 pub struct Feature {
-    /// Extent of the label in tile space.
+    /// Layout bounds for text, RGBA icon and SDF icon, respectively.
+    pub parts: [Option<placement_geometry::SymbolBounds>; 3],
+    /// Source identity and placement priority.
+    pub data: SymbolFeatureData,
+    /// Pixel bounds relative to the anchor at the layout zoom.
     pub bbox: Box2D<f32, TileSpace>,
     /// Positions in the bucket's index buffer that draw the label; empty when the layout does
     /// not attribute quads to labels.
@@ -117,6 +135,8 @@ pub struct Feature {
 }
 
 pub struct SymbolLayerData {
+    /// Shared glyph and sprite atlas for this tile.
+    pub atlas: Option<std::sync::Arc<assets::SymbolAtlas>>,
     pub coords: WorldTileCoords,
     pub source_layer: String,
     pub style_layer_id: String,
@@ -127,6 +147,8 @@ pub struct SymbolLayerData {
 
 #[derive(Default)]
 pub struct SymbolLayersDataComponent {
+    /// Keeps the worker in the request budget while its visible base geometry is ready.
+    pub pending_assets: bool,
     pub layers: Vec<SymbolLayerData>,
 }
 
@@ -246,3 +268,11 @@ mod tests {
         println!("{:#?}", output)
     }
 }
+
+#[cfg(all(test, feature = "headless"))]
+#[path = "sdf/pixels/tests.rs"]
+mod pixels;
+
+pub mod query;
+
+pub mod placement_geometry;

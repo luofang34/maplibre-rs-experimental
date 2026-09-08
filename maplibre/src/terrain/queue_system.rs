@@ -2,49 +2,38 @@
 
 use std::collections::HashSet;
 
-use cgmath::{Matrix4, SquareMatrix, Vector3};
-
 use crate::{
     context::MapContext,
-    coords::{WorldTileCoords, Zoom, EXTENT, TILE_SIZE},
-    hillshade::render_commands::DrawDemTiles,
-    projection::renderer_data::tile_mercator_coordinates,
-    raster::{render_commands::DrawRasterTiles, resource::RasterResources},
+    coords::WorldTileCoords,
+    raster::resource::RasterResources,
     render::{
         eventually::{Eventually, Eventually::Initialized},
-        eye_covering::drawn_covering,
+        eye_covering::{drawn_covering, EyeInFrame},
         memory_budget::MemoryBudget,
-        render_commands::DrawMasks,
-        render_phase::{Draw, DrawState, LayerItem, ProjectionBinding, RenderPhase, TileMaskItem},
-        shaders::ShaderTileMetadata,
-        tile_view_pattern::{TileShape, WgpuTileViewPattern, DEFAULT_TILE_SIZE},
+        render_phase::{LayerItem, RenderPhase},
+        tile_view_pattern::{WgpuTileViewPattern, DEFAULT_TILE_SIZE},
         view_state::ViewState,
         Renderer,
     },
-    style::{source::TileAddressingScheme, Style},
+    style::Style,
     tcs::{
         system::{SystemError, SystemResult},
-        tiles::Tile,
         world::World,
     },
     terrain::{
         drape_cache::{fingerprint, DrapeState, SourceContent},
         drape_targets::{collect_layer_specs, is_drapeable, select_targets, TargetSpec},
-        request_system::dem_tile_coords,
-        resources::TerrainFog,
-        resources::{
-            TerrainDraw, TerrainResources, TerrainTileUniforms, DRAPE_SIZE, UNIFORM_STRIDE,
-        },
-        rtt::drape_transform,
+        resources::{TerrainDraw, TerrainResources, UNIFORM_STRIDE},
         source::{dem_source, DemSource},
-        DrapePhase, DrapeTarget, TerrainFrame,
+        DrapePhase, TerrainFrame,
     },
-    vector::{
-        geometry_uploaded,
-        render_commands::{DrawLineTiles, DrawVectorTiles},
-        VectorBufferPool,
-    },
+    vector::{geometry_uploaded, VectorBufferPool},
 };
+mod covering;
+mod drape_phase;
+mod uniforms;
+use drape_phase::{background_clear_color, build_drape_phase, drape_metadata};
+use uniforms::{present_ancestors, TerrainEyeFrame};
 
 /// Divisor of the tile circumference giving the skirt drop, as in GL JS `getSkirtLength`.
 const SKIRT_DIVISOR: f64 = 5.0;
@@ -57,9 +46,6 @@ const MAX_DRAPES_PER_FRAME: usize = 24;
 /// of tiles within a few frames, and a display's frame budget holds only a few drapes.
 const EYE_DRAPES_PER_FRAME: usize = 8;
 
-/// Metadata slots of the shapes of one target, `None` where a shape gets no slot.
-type TargetSlots = Vec<Option<usize>>;
-
 pub fn queue_system(
     MapContext {
         style,
@@ -69,212 +55,39 @@ pub fn queue_system(
         ..
     }: &mut MapContext,
 ) -> SystemResult {
+    if EyeInFrame::reuses_content(world) {
+        return uniforms::replay(world, style, view_state, queue);
+    }
+    world.resources.insert(TerrainEyeFrame::default());
     let Some(dem) = dem_source(style) else {
         world.resources.insert(DrapePhase::default());
         world.resources.insert(TerrainFrame::default());
         return Ok(());
     };
-    let zoom = view_state.zoom();
-    let (view_region, raster_coverings) =
-        drawn_covering(style, view_state, world, zoom.zoom_level(DEFAULT_TILE_SIZE)).map_err(
-            |error| {
-                tracing::error!(%error, "unable to select terrain tiles");
-                SystemError::Setup
-            },
-        )?;
-    let Some(view_region) = view_region else {
-        return Ok(());
-    };
-    let targets = select_targets(view_region.iter(), world, &raster_coverings);
-    let specs = collect_layer_specs(targets, style, world, zoom.value());
-    let clear_color = background_clear_color(style);
-    let prints: Vec<u64> = {
-        let content = loaded_content(world);
-        specs
-            .iter()
-            .map(|spec| fingerprint(spec, &content, clear_color))
-            .collect()
-    };
-    let capacity = match world.resources.get::<Eventually<WgpuTileViewPattern>>() {
-        Some(Initialized(pattern)) => pattern.remaining_metadata_capacity(),
-        _ => return Err(SystemError::Dependencies),
-    };
-
-    // A tile whose vector sources are finished but not yet in the buffer pool would drape
-    // blank; it shows an ancestor's drape until they are.
-    let ready: Vec<bool> = specs
-        .iter()
-        .map(|spec| {
-            spec.shapes.iter().all(|shape| {
-                !shape.raster_layers.is_empty() || geometry_uploaded(shape.source, world)
-            })
-        })
-        .collect();
-    let memory = world
-        .resources
-        .get::<MemoryBudget>()
-        .copied()
-        .unwrap_or_default();
-    // Textures whose fingerprint is unchanged keep their content; only the rest are redrawn,
-    // and only so many per frame.
-    let (redraw, drape_sources): (Vec<bool>, Vec<Option<WorldTileCoords>>) = {
-        let Some(Initialized(terrain)) = world.resources.get_mut::<Eventually<TerrainResources>>()
-        else {
-            return Err(SystemError::Dependencies);
-        };
-        terrain.ensure_scratch(device);
-        // Ancestors that still hold a texture stand in for tiles not drawn yet, so they stay
-        // until every tile under them is drawn.
-        let mut keep: HashSet<WorldTileCoords> = specs.iter().map(|spec| spec.coords).collect();
-        for spec in &specs {
-            keep.extend(present_ancestors(spec.coords, terrain));
-        }
-        terrain.retain_drapes(&keep);
-        // An unready tile acquires nothing and counts as unchanged for the budget, so it is
-        // neither drawn nor deferred; it is hidden below.
-        if memory.is_tight() {
-            terrain.shed_spare_drapes();
-        }
-        // Targets come nearest first, so when textures run out it is the far tiles that
-        // draw with an ancestor's drape.
-        let states: Vec<DrapeState> = specs
-            .iter()
-            .zip(&prints)
-            .zip(&ready)
-            .map(|((spec, print), ready)| {
-                if *ready {
-                    let may_create = memory.allows_drape_texture(terrain.drape_texture_total());
-                    terrain.acquire_drape(device, spec.coords, *print, may_create)
-                } else {
-                    DrapeState::Unchanged
-                }
-            })
-            .collect();
-        let budget = if view_state.has_external_view() {
-            EYE_DRAPES_PER_FRAME
-        } else {
-            MAX_DRAPES_PER_FRAME
-        };
-        let redraw = budget_redraws(&states, budget);
-        for ((spec, state), drawn) in specs.iter().zip(&states).zip(&redraw) {
-            if !matches!(state, DrapeState::Unchanged | DrapeState::Withheld) && !drawn {
-                terrain.defer_drape(spec.coords);
-            }
-        }
-        let hidden: Vec<bool> = awaiting_first_draw(&states, &redraw)
-            .into_iter()
-            .zip(&ready)
-            .zip(&states)
-            .map(|((hidden, ready), state)| hidden || !ready || *state == DrapeState::Withheld)
-            .collect();
-        let undrawn: HashSet<WorldTileCoords> = specs
-            .iter()
-            .zip(&hidden)
-            .filter(|(_, hidden)| **hidden)
-            .map(|(spec, _)| spec.coords)
-            .collect();
-        let drape_sources = specs
-            .iter()
-            .zip(&hidden)
-            .map(|(spec, hidden)| {
-                if *hidden {
-                    present_ancestors(spec.coords, terrain)
-                        .into_iter()
-                        .find(|ancestor| !undrawn.contains(ancestor))
-                } else {
-                    Some(spec.coords)
-                }
-            })
-            .collect();
-        (redraw, drape_sources)
-    };
-    let (metadata, slots) = drape_metadata(&specs, &redraw, capacity);
-    let ranges = {
-        let Some(Initialized(pattern)) =
-            world.resources.get_mut::<Eventually<WgpuTileViewPattern>>()
-        else {
-            return Err(SystemError::Dependencies);
-        };
-        pattern
-            .upload_extra_metadata(queue, &metadata)
-            .map_err(|error| {
-                tracing::error!(%error, "unable to upload drape metadata");
-                SystemError::Setup
-            })?
-    };
-    let phase = build_drape_phase(&specs, &redraw, &slots, &ranges, zoom, clear_color);
-
-    let gpu_view_projection = view_state.gpu_view_projection();
-    let fog = terrain_fog(style, view_state);
-    let skirt_length = view_state.body().circumference_meters()
-        / 2_f64.powf(zoom.value().max(0.0))
-        / SKIRT_DIVISOR;
-    {
-        let Some(Initialized(terrain)) = world.resources.get_mut::<Eventually<TerrainResources>>()
-        else {
-            return Err(SystemError::Dependencies);
-        };
-        let mut uniforms = Vec::with_capacity(specs.len());
-        let mut sources = Vec::with_capacity(specs.len());
-        for (spec, drape_source) in specs.iter().zip(&drape_sources) {
-            let Some(drape_source) = *drape_source else {
-                continue;
-            };
-            let dem_coords = loaded_dem_tile(spec.coords, &dem, terrain);
-            let Some(block) = tile_uniforms(
-                spec.coords,
-                TileTextures {
-                    dem: dem_coords,
-                    drape: drape_source,
-                },
-                terrain,
-                &dem,
-                &gpu_view_projection
-                    .to_model_view_projection(spec.coords.transform_for_zoom(zoom))
-                    .downcast(),
-                skirt_length as f32,
-                &fog,
-            ) else {
-                continue;
-            };
-            uniforms.push(block);
-            sources.push((dem_coords, spec.coords, drape_source));
-        }
-        let written = terrain.write_uniforms(queue, &uniforms);
-        tracing::debug!(
-            targets = specs.len(),
-            redrawn = phase.targets.len(),
-            masks = phase.targets.iter().map(|t| t.masks.len()).sum::<usize>(),
-            layers = phase.targets.iter().map(|t| t.layers.len()).sum::<usize>(),
-            metadata = metadata.len(),
-            dem_hits = sources.iter().filter(|(dem, _, _)| dem.is_some()).count(),
-            written,
-            "terrain frame queued"
-        );
-        let draws = sources
-            .iter()
-            .take(written)
-            .enumerate()
-            .filter_map(|(index, (dem_coords, coords, drape_source))| {
-                Some(TerrainDraw {
-                    coords: *coords,
-                    bind_group: terrain.tile_bind_group(device, *dem_coords, *drape_source)?,
-                    uniform_offset: (index as u64 * UNIFORM_STRIDE) as u32,
-                })
-            })
-            .collect();
-        terrain.set_draws(draws);
-    }
-
-    let drapeable: HashSet<&str> = style
-        .layers
-        .iter()
-        .filter(|layer| is_drapeable(&layer.type_))
-        .map(|layer| layer.id.as_str())
-        .collect();
-    if let Some(layer_phase) = world.resources.get_mut::<RenderPhase<LayerItem>>() {
-        layer_phase.retain(|item| !drapeable.contains(item.style_layer.as_str()));
-    }
+    let specs = target_specs(style, view_state, world)?;
+    let PreparedDrapes {
+        redraw,
+        sources,
+        clear_color,
+    } = prepare_drapes(&specs, style, view_state, world, device)?;
+    let phase = encode_drapes(
+        &specs,
+        &redraw,
+        clear_color,
+        world,
+        view_state.zoom(),
+        queue,
+    )?;
+    queue_tiles(
+        world,
+        style,
+        view_state,
+        device,
+        queue,
+        &dem,
+        (&specs, &sources),
+    )?;
+    hide_draped_layers(world, style);
     let draw_after_layer_index = style
         .layers
         .iter()
@@ -288,6 +101,18 @@ pub fn queue_system(
         draw_after_layer_index,
     });
     Ok(())
+}
+
+fn hide_draped_layers(world: &mut World, style: &Style) {
+    let drapeable: HashSet<&str> = style
+        .layers
+        .iter()
+        .filter(|layer| is_drapeable(&layer.type_))
+        .map(|layer| layer.id.as_str())
+        .collect();
+    if let Some(layer_phase) = world.resources.get_mut::<RenderPhase<LayerItem>>() {
+        layer_phase.retain(|item| !drapeable.contains(item.style_layer.as_str()));
+    }
 }
 
 /// Which of the acquired drapes to draw this frame, at most `budget`: tiles never drawn
@@ -311,8 +136,8 @@ fn budget_redraws(states: &[DrapeState], budget: usize) -> Vec<bool> {
 }
 
 /// Tiles whose texture holds no content of their own yet. A new drape the budget deferred
-/// would show whatever tile last used the texture, so the tile is left out of this frame's
-/// draws and appears once drawn.
+/// would show whatever tile last used the texture, so its surface uses an ancestor or the
+/// background color until its own texture is drawn.
 fn awaiting_first_draw(states: &[DrapeState], redraw: &[bool]) -> Vec<bool> {
     states
         .iter()
@@ -354,306 +179,267 @@ fn loaded_content(world: &World) -> LoadedContent<'_> {
     }
 }
 
-/// Instance metadata placing each redrawn target's source shapes inside its drape texture.
-///
-/// Shapes past `capacity` get no slot: a view falling back to many small child tiles can ask
-/// for more than the metadata buffer holds, and those shapes wait for their own tiles.
-fn drape_metadata(
+#[cfg(test)]
+mod tests;
+
+fn acquire_drapes(
     specs: &[TargetSpec],
-    redraw: &[bool],
-    capacity: usize,
-) -> (Vec<ShaderTileMetadata>, Vec<TargetSlots>) {
-    let mut metadata = Vec::new();
-    let mut slots = Vec::with_capacity(specs.len());
-    let mut skipped = 0_usize;
-    for (spec, redraw) in specs.iter().zip(redraw) {
-        let texture_zoom = Zoom::new(
-            f64::from(u8::from(spec.coords.z)) + (f64::from(DRAPE_SIZE) / TILE_SIZE).log2(),
-        );
-        let mut target_slots = Vec::with_capacity(spec.shapes.len());
-        for shape in &spec.shapes {
-            let transform = redraw
-                .then(|| drape_transform(spec.coords, shape.source))
-                .flatten()
-                .and_then(|transform| transform.cast::<f32>());
-            let Some(transform) = transform else {
-                target_slots.push(None);
-                continue;
-            };
-            if metadata.len() >= capacity {
-                target_slots.push(None);
-                skipped += 1;
-                continue;
+    prints: &[u64],
+    ready: &[bool],
+    memory: MemoryBudget,
+    external: bool,
+    terrain: &mut TerrainResources,
+    device: &wgpu::Device,
+) -> (Vec<bool>, Vec<Option<WorldTileCoords>>) {
+    // Ancestors that still hold a texture stand in for tiles not drawn yet, so they stay
+    // until every tile under them is drawn.
+    let mut keep: HashSet<WorldTileCoords> = specs.iter().map(|spec| spec.coords).collect();
+    for spec in specs {
+        keep.extend(present_ancestors(spec.coords, terrain));
+    }
+    terrain.retain_drapes(&keep);
+    // Unready tiles keep their last valid texture or a background surface.
+    if memory.is_tight() {
+        terrain.shed_spare_drapes();
+    }
+    // Targets come nearest first, so when textures run out it is the far tiles that
+    // draw with an ancestor's drape.
+    let states: Vec<DrapeState> = specs
+        .iter()
+        .zip(prints)
+        .zip(ready)
+        .map(|((spec, print), ready)| {
+            if *ready {
+                let may_create = memory.allows_drape_texture(terrain.drape_texture_total());
+                terrain.acquire_drape(device, spec.coords, *print, may_create)
+            } else {
+                DrapeState::Unchanged
             }
-            target_slots.push(Some(metadata.len()));
-            metadata.push(ShaderTileMetadata {
-                transform: transform.into(),
-                zoom_factor: texture_zoom.scale_to_tile(&shape.source) as f32,
-                viewport_width: DRAPE_SIZE as f32,
-                viewport_height: DRAPE_SIZE as f32,
-                tile_mercator_coords: tile_mercator_coordinates(
-                    shape.source.into_tile(TileAddressingScheme::XYZ),
-                )
-                .into(),
-                clip_antimeridian: 0,
-            });
-        }
-        slots.push(target_slots);
-    }
-    if skipped > 0 {
-        tracing::warn!(
-            skipped,
-            capacity,
-            "drape shapes exceed the metadata buffer; some tiles drape without them this frame"
-        );
-    }
-    (metadata, slots)
-}
-
-fn build_drape_phase(
-    specs: &[TargetSpec],
-    redraw: &[bool],
-    slots: &[TargetSlots],
-    ranges: &[std::ops::Range<wgpu::BufferAddress>],
-    zoom: Zoom,
-    clear_color: wgpu::Color,
-) -> DrapePhase {
-    let mut phase = DrapePhase::default();
-    for ((spec, redraw), target_slots) in specs.iter().zip(redraw).zip(slots) {
-        if !redraw {
-            continue;
-        }
-        let mut target = DrapeTarget {
-            coords: spec.coords,
-            clear_color,
-            masks: Vec::new(),
-            layers: Vec::new(),
-        };
-        for (shape, slot) in spec.shapes.iter().zip(target_slots) {
-            let Some(range) = slot.and_then(|index| ranges.get(index)) else {
-                continue;
-            };
-            let source_shape = TileShape::with_buffer_range(shape.source, zoom, range.clone());
-            target.masks.push(TileMaskItem {
-                draw_function: Box::new(DrawState::<TileMaskItem, DrawMasks>::new()),
-                source_shape: source_shape.clone(),
-                generate_borders: false,
-                projection: ProjectionBinding::Flat,
-            });
-            for layer in &shape.vector_layers {
-                let draw_function: Box<dyn Draw<LayerItem>> = if layer.is_line {
-                    Box::new(DrawState::<LayerItem, DrawLineTiles>::new())
-                } else {
-                    Box::new(DrawState::<LayerItem, DrawVectorTiles>::new())
-                };
-                target.layers.push(LayerItem {
-                    draw_function,
-                    index: layer.index,
-                    is_line: layer.is_line,
-                    generate_borders: false,
-                    style_layer: layer.id.clone(),
-                    tile: Tile {
-                        coords: layer.coords,
-                    },
-                    source_shape: source_shape.clone(),
-                    projection: ProjectionBinding::Flat,
-                });
-            }
-            for (id, index, dem) in &shape.raster_layers {
-                let draw_function: Box<dyn Draw<LayerItem>> = if *dem {
-                    Box::new(DrawState::<LayerItem, DrawDemTiles>::new())
-                } else {
-                    Box::new(DrawState::<LayerItem, DrawRasterTiles>::new())
-                };
-                target.layers.push(LayerItem {
-                    draw_function,
-                    index: *index,
-                    is_line: false,
-                    generate_borders: false,
-                    style_layer: id.clone(),
-                    tile: Tile {
-                        coords: shape.source,
-                    },
-                    source_shape: source_shape.clone(),
-                    projection: ProjectionBinding::Flat,
-                });
-            }
-        }
-        target.layers.sort_by_key(|item| item.index);
-        phase.targets.push(target);
-    }
-    phase
-}
-
-/// The nearest uploaded DEM tile at or above the DEM zoom of a view tile.
-fn loaded_dem_tile(
-    coords: WorldTileCoords,
-    dem: &DemSource,
-    terrain: &TerrainResources,
-) -> Option<WorldTileCoords> {
-    let mut current = dem_tile_coords(coords, dem.minzoom, dem.maxzoom)?;
-    loop {
-        if terrain.has_dem_texture(current) {
-            return Some(current);
-        }
-        current = current.get_parent()?;
-    }
-}
-
-/// Maps tile coordinates in `0..EXTENT` of `coords` to unit coordinates inside its DEM tile.
-fn dem_matrix(coords: WorldTileCoords, dem: WorldTileCoords) -> Matrix4<f64> {
-    let delta = i32::from(u8::from(coords.z)) - i32::from(u8::from(dem.z));
-    let scale = 2_f64.powi(delta);
-    let origin_x = f64::from(coords.x - (dem.x << delta)) / scale;
-    let origin_y = f64::from(coords.y - (dem.y << delta)) / scale;
-    Matrix4::from_translation(Vector3::new(origin_x, origin_y, 0.0))
-        * Matrix4::from_nonuniform_scale(1.0 / (EXTENT * scale), 1.0 / (EXTENT * scale), 1.0)
-}
-
-/// The ancestors of a tile, nearest first, that hold a drape texture.
-fn present_ancestors(coords: WorldTileCoords, terrain: &TerrainResources) -> Vec<WorldTileCoords> {
-    let mut ancestors = Vec::new();
-    let mut current = coords;
-    while let Some(parent) = current.get_parent() {
-        if terrain.drape_texture(parent).is_some() {
-            ancestors.push(parent);
-        }
-        current = parent;
-    }
-    ancestors
-}
-
-/// Maps unit coordinates of `coords` into the unit coordinates of its ancestor `source`.
-fn drape_matrix(coords: WorldTileCoords, source: WorldTileCoords) -> Matrix4<f64> {
-    let delta = i32::from(u8::from(coords.z)) - i32::from(u8::from(source.z));
-    let scale = 2_f64.powi(delta);
-    let origin_x = f64::from(coords.x - (source.x << delta)) / scale;
-    let origin_y = f64::from(coords.y - (source.y << delta)) / scale;
-    Matrix4::from_translation(Vector3::new(origin_x, origin_y, 0.0))
-        * Matrix4::from_nonuniform_scale(1.0 / scale, 1.0 / scale, 1.0)
-}
-
-/// The tiles whose textures a terrain tile samples.
-struct TileTextures {
-    /// The DEM tile, or none while no DEM covers the tile.
-    dem: Option<WorldTileCoords>,
-    /// The tile whose drape is shown, an ancestor's until the tile's own is drawn.
-    drape: WorldTileCoords,
-}
-
-fn tile_uniforms(
-    coords: WorldTileCoords,
-    textures: TileTextures,
-    terrain: &TerrainResources,
-    dem: &DemSource,
-    transform: &Matrix4<f32>,
-    skirt_length: f32,
-    fog: &TerrainFog,
-) -> Option<TerrainTileUniforms> {
-    let (dem_matrix, dem_unpack, dem_dim) = match textures.dem {
-        Some(dem_coords) => (
-            dem_matrix(coords, dem_coords).cast::<f32>()?,
-            dem.unpack.map(|value| value as f32),
-            (terrain
-                .dem_texture(Some(dem_coords))
-                .size
-                .width
-                .saturating_sub(2))
-            .max(1) as f32,
-        ),
-        None => (Matrix4::identity(), [0.0; 4], 1.0),
+        })
+        .collect();
+    let budget = if external {
+        EYE_DRAPES_PER_FRAME
+    } else {
+        MAX_DRAPES_PER_FRAME
     };
-    Some(TerrainTileUniforms {
-        transform: (*transform).into(),
-        dem_matrix: dem_matrix.into(),
-        drape_matrix: drape_matrix(coords, textures.drape).cast::<f32>()?.into(),
-        tile_mercator_coords: tile_mercator_coordinates(
-            coords.into_tile(TileAddressingScheme::XYZ),
+    let redraw = budget_redraws(&states, budget);
+    for ((spec, state), drawn) in specs.iter().zip(&states).zip(&redraw) {
+        if !matches!(state, DrapeState::Unchanged | DrapeState::Withheld) && !drawn {
+            terrain.defer_drape(spec.coords, *state);
+        }
+    }
+    let sources = drape_sources(specs, &states, &redraw, ready, terrain);
+    (redraw, sources)
+}
+
+fn drape_sources(
+    specs: &[TargetSpec],
+    states: &[DrapeState],
+    redraw: &[bool],
+    ready: &[bool],
+    terrain: &TerrainResources,
+) -> Vec<Option<WorldTileCoords>> {
+    let hidden: Vec<bool> = awaiting_first_draw(states, redraw)
+        .into_iter()
+        .zip(ready)
+        .zip(states)
+        .map(|((hidden, ready), state)| hidden || !ready || *state == DrapeState::Withheld)
+        .collect();
+    let undrawn: HashSet<WorldTileCoords> = specs
+        .iter()
+        .zip(&hidden)
+        .filter(|(_, hidden)| **hidden)
+        .map(|(spec, _)| spec.coords)
+        .collect();
+    specs
+        .iter()
+        .zip(&hidden)
+        .map(|(spec, hidden)| {
+            if *hidden && terrain.drape_texture(spec.coords).is_none() {
+                present_ancestors(spec.coords, terrain)
+                    .into_iter()
+                    .find(|ancestor| !undrawn.contains(ancestor))
+            } else {
+                Some(spec.coords)
+            }
+        })
+        .collect()
+}
+
+fn queue_tiles(
+    world: &mut World,
+    style: &Style,
+    view_state: &ViewState,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    dem: &DemSource,
+    targets: (&[TargetSpec], &[Option<WorldTileCoords>]),
+) -> SystemResult {
+    {
+        let Some(Initialized(terrain)) = world.resources.get_mut::<Eventually<TerrainResources>>()
+        else {
+            return Err(SystemError::Dependencies);
+        };
+        let uniforms::PreparedTerrain { uniforms, sources } =
+            uniforms::prepare_tiles(targets, style, view_state, terrain, dem);
+        let written = terrain.write_uniforms(queue, &uniforms);
+        tracing::debug!(
+            targets = targets.0.len(),
+            dem_hits = sources.iter().filter(|(dem, _, _)| dem.is_some()).count(),
+            written,
+            "terrain frame queued"
+        );
+        let draws = sources
+            .iter()
+            .take(written)
+            .enumerate()
+            .filter_map(|(index, (dem_coords, coords, drape_source))| {
+                Some(TerrainDraw {
+                    coords: *coords,
+                    bind_group: terrain.tile_bind_group(device, *dem_coords, *drape_source)?,
+                    uniform_offset: (index as u64 * UNIFORM_STRIDE) as u32,
+                })
+            })
+            .collect();
+        terrain.set_draws(draws);
+        let kept = sources
+            .iter()
+            .zip(uniforms)
+            .take(written)
+            .map(|((_, coords, _), uniform)| (*coords, uniform))
+            .collect();
+        world.resources.insert(TerrainEyeFrame(kept));
+    }
+
+    Ok(())
+}
+
+fn target_specs(
+    style: &Style,
+    view_state: &ViewState,
+    world: &mut World,
+) -> Result<Vec<TargetSpec>, SystemError> {
+    let zoom = view_state.zoom();
+    let (view_region, raster_coverings) =
+        drawn_covering(style, view_state, world, zoom.zoom_level(DEFAULT_TILE_SIZE)).map_err(
+            |error| {
+                tracing::error!(%error, "unable to select terrain tiles");
+                SystemError::Setup
+            },
+        )?;
+    let Some(view_region) = view_region else {
+        return Ok(Vec::new());
+    };
+    let memory = world
+        .resources
+        .get::<MemoryBudget>()
+        .copied()
+        .unwrap_or_default();
+    let tiles: Vec<_> = if view_state.has_external_view() {
+        covering::for_frame(
+            world,
+            view_region.iter().collect(),
+            memory.drape_textures_allowed(),
         )
-        .into(),
-        dem_unpack,
-        dem_dim,
-        exaggeration: dem.exaggeration,
-        skirt_length,
-        padding: 0.0,
-        fog_color: fog.fog_color,
-        horizon_color: fog.horizon_color,
-        fog_range: [fog.near, fog.far, fog.ground_blend, fog.horizon_blend],
-        fog_opacity: [fog.opacity, if fog.globe { 1.0 } else { 0.0 }, 0.0, 0.0],
+    } else {
+        view_region.iter().collect()
+    };
+    let targets = select_targets(tiles.into_iter(), world, &raster_coverings);
+    Ok(collect_layer_specs(targets, style, world, zoom.value()))
+}
+
+struct PreparedDrapes {
+    redraw: Vec<bool>,
+    sources: Vec<Option<WorldTileCoords>>,
+    clear_color: wgpu::Color,
+}
+
+fn prepare_drapes(
+    specs: &[TargetSpec],
+    style: &Style,
+    view_state: &ViewState,
+    world: &mut World,
+    device: &wgpu::Device,
+) -> Result<PreparedDrapes, SystemError> {
+    let memory = world
+        .resources
+        .get::<MemoryBudget>()
+        .copied()
+        .unwrap_or_default();
+    let clear_color = background_clear_color(style);
+    let prints: Vec<u64> = {
+        let content = loaded_content(world);
+        specs
+            .iter()
+            .map(|spec| fingerprint(spec, &content, clear_color))
+            .collect()
+    };
+    // A tile whose vector sources are finished but not yet in the buffer pool would drape
+    // blank; it shows an ancestor's drape until they are.
+    let ready: Vec<bool> = specs
+        .iter()
+        .map(|spec| {
+            spec.shapes.iter().all(|shape| {
+                !shape.raster_layers.is_empty() || geometry_uploaded(shape.source, world)
+            })
+        })
+        .collect();
+    let (redraw, drape_sources) = {
+        let Some(Initialized(terrain)) = world.resources.get_mut::<Eventually<TerrainResources>>()
+        else {
+            return Err(SystemError::Dependencies);
+        };
+        terrain.ensure_scratch(device);
+        acquire_drapes(
+            specs,
+            &prints,
+            &ready,
+            memory,
+            view_state.has_external_view(),
+            terrain,
+            device,
+        )
+    };
+    Ok(PreparedDrapes {
+        redraw,
+        sources: drape_sources,
+        clear_color,
     })
 }
 
-/// The fog of the frame from the style's sky and the view, as GL JS `terrainUniformValues`.
-fn terrain_fog(style: &Style, view_state: &ViewState) -> TerrainFog {
-    let Some(sky) = &style.sky else {
-        return TerrainFog::default();
+fn encode_drapes(
+    specs: &[TargetSpec],
+    redraw: &[bool],
+    clear_color: wgpu::Color,
+    world: &mut World,
+    zoom: crate::coords::Zoom,
+    queue: &wgpu::Queue,
+) -> Result<DrapePhase, SystemError> {
+    let capacity = match world.resources.get::<Eventually<WgpuTileViewPattern>>() {
+        Some(Initialized(pattern)) => pattern.remaining_metadata_capacity(),
+        _ => return Err(SystemError::Dependencies),
     };
-    let colors = sky.colors_at(view_state.zoom().value());
-    let (near, far) = view_state.fog_depth_range();
-    let globe = style.projection.as_ref().is_some_and(|specification| {
-        specification
-            .projection_type
-            .uses_globe_rendering(view_state.zoom().value())
-    });
-    TerrainFog {
-        fog_color: colors.fog,
-        horizon_color: colors.horizon,
-        near: near as f32,
-        far: far as f32,
-        ground_blend: colors.fog_ground_blend,
-        horizon_blend: colors.horizon_fog_blend,
-        opacity: view_state.fog_opacity(),
-        globe,
-    }
-}
 
-/// Color the drape textures start from: the constant background paint, or transparent.
-fn background_clear_color(style: &Style) -> wgpu::Color {
-    style
-        .layers
-        .iter()
-        .find(|layer| layer.type_ == "background" && !layer.is_hidden())
-        .and_then(|layer| layer.paint.as_ref()?.get_color())
-        .map(|color| wgpu::Color {
-            r: f64::from(color.color.r),
-            g: f64::from(color.color.g),
-            b: f64::from(color.color.b),
-            a: f64::from(color.alpha),
-        })
-        .unwrap_or(wgpu::Color::TRANSPARENT)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{awaiting_first_draw, budget_redraws, DrapeState};
-
-    #[test]
-    fn a_frame_draws_new_tiles_first_and_at_most_the_budget() {
-        use DrapeState::{Changed, New, Unchanged};
-        let states = [Changed, New, Unchanged, New, Changed, New];
-        assert_eq!(
-            budget_redraws(&states, 4),
-            [true, true, false, true, false, true],
-            "three new tiles and the first changed one"
-        );
-        assert_eq!(
-            budget_redraws(&states, 10),
-            [true, true, false, true, true, true],
-            "everything but the unchanged tile fits"
-        );
-        assert_eq!(budget_redraws(&states, 0), [false; 6]);
-    }
-
-    #[test]
-    fn a_new_tile_the_budget_deferred_is_not_drawn_with_borrowed_content() {
-        use DrapeState::{Changed, New, Unchanged};
-        let states = [New, Changed, New, Unchanged, New];
-        let redraw = budget_redraws(&states, 2);
-        assert_eq!(redraw, [true, false, true, false, false]);
-        assert_eq!(
-            awaiting_first_draw(&states, &redraw),
-            [false, false, false, false, true],
-            "only the undrawn new tile waits; a changed tile keeps showing its last content"
-        );
-    }
+    let (metadata, slots) = drape_metadata(specs, redraw, capacity, zoom);
+    let ranges = {
+        let Some(Initialized(pattern)) =
+            world.resources.get_mut::<Eventually<WgpuTileViewPattern>>()
+        else {
+            return Err(SystemError::Dependencies);
+        };
+        pattern
+            .upload_extra_metadata(queue, &metadata)
+            .map_err(|error| {
+                tracing::error!(%error, "unable to upload drape metadata");
+                SystemError::Setup
+            })?
+    };
+    Ok(build_drape_phase(
+        specs,
+        redraw,
+        &slots,
+        &ranges,
+        zoom,
+        clear_color,
+    ))
 }

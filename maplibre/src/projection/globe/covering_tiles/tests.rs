@@ -140,7 +140,12 @@ fn pitched_view_matches_gl_js_variable_lod_reference() {
         (512, 513, ZoomLevel::new(10)).into(),
     ];
 
-    assert_eq!(tiles, expected);
+    assert_eq!(
+        tiles.into_iter().collect::<std::collections::BTreeSet<_>>(),
+        expected
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>()
+    );
 }
 
 #[test]
@@ -176,7 +181,12 @@ fn pitched_rotated_view_matches_gl_js_variable_lod_reference() {
         (511, 513, ZoomLevel::new(10)).into(),
     ];
 
-    assert_eq!(tiles, expected);
+    assert_eq!(
+        tiles.into_iter().collect::<std::collections::BTreeSet<_>>(),
+        expected
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>()
+    );
 }
 
 #[test]

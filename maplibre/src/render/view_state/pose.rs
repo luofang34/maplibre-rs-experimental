@@ -60,16 +60,18 @@ impl ViewState {
         self.place_camera(pose, distance_meters, elevation);
     }
 
-    /// Places a host's eye at `pose`. The center is where the gaze meets the center elevation,
+    /// Places a host's eye at `pose`. The center is where the gaze meets the anchor elevation,
     /// at most `EYE_CENTER_REACH_HEIGHTS` heights ahead; a gaze nearer the horizon than that
     /// keeps the center at that reach and leaves the center elevation alone, so a head
     /// turning up to the horizon moves the center smoothly instead of snapping it to a fixed
     /// distance in the air.
-    pub(super) fn set_eye_pose(&mut self, pose: CameraPose) {
+    pub(super) fn set_eye_pose(&mut self, pose: CameraPose, anchor_elevation: f64) {
         let pitch = Rad::from(pose.pitch).0;
         let dz = -pitch.cos();
-        let elevation = self.center_elevation();
-        let above_ground = pose.altitude_meters - elevation;
+        let elevation = anchor_elevation;
+        // Sampled terrain at the gaze center must not feed back into the next frame's
+        // center search: steep slopes can make a stationary eye oscillate between LODs.
+        let above_ground = pose.altitude_meters - anchor_elevation;
         let reach = (EYE_CENTER_REACH_HEIGHTS * above_ground.abs())
             .clamp(MIN_EYE_CENTER_REACH_METERS, MAX_EYE_CENTER_REACH_METERS);
         let distance_meters = if dz * above_ground < 0.0 {

@@ -38,14 +38,7 @@ impl<E: Environment, T: VectorTransferables> System for PopulateWorldSystem<E, T
             let message: Message = message;
             if message.has_tag(T::TileTessellated::message_tag()) {
                 let message = message.into_transferable::<T::TileTessellated>();
-                let Some(component) = world
-                    .tiles
-                    .query_mut::<&mut VectorLayerBucketComponent>(message.coords())
-                else {
-                    continue;
-                };
-
-                component.done = true;
+                finish_tile(world, &*message);
             } else if message.has_tag(T::LayerMissing::message_tag()) {
                 let message = message.into_transferable::<T::LayerMissing>();
                 let Some(component) = world
@@ -86,3 +79,21 @@ impl<E: Environment, T: VectorTransferables> System for PopulateWorldSystem<E, T
         Ok(())
     }
 }
+
+fn finish_tile<T: TileTessellated>(world: &mut crate::tcs::world::World, message: &T) {
+    if let Some(component) = world
+        .tiles
+        .query_mut::<&mut VectorLayerBucketComponent>(message.coords())
+    {
+        component.done = true;
+    }
+    if let Some(component) = world
+        .tiles
+        .query_mut::<&mut crate::sdf::SymbolLayersDataComponent>(message.coords())
+    {
+        component.pending_assets = message.pending_symbols();
+    }
+}
+
+#[cfg(test)]
+mod tests;

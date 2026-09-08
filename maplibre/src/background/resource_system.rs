@@ -79,6 +79,7 @@ pub fn resource_system(
             false,
             false,
         )
+        .with_depth_write()
         .describe_render_pipeline()
         .initialize_with_prefix_layouts(device, &[projection_resources.bind_group_layout()]);
         GlobeBackgroundRenderPipeline(pipeline)
@@ -93,7 +94,7 @@ pub fn resource_system(
             *settings,
             shader.describe_vertex(),
             shader.describe_fragment(),
-            false,
+            true,
             false,
             true,
             false,
@@ -110,8 +111,7 @@ pub fn resource_system(
         let shader = SkyShader {
             format: surface.surface_format(),
         };
-        // The sky draws in the main pass, so it carries the depth-stencil state of that pass
-        // without testing or writing either.
+        // The host compositor needs depth for the opaque sky as well as terrain.
         let pipeline = TilePipeline::new(
             "sky_pipeline".into(),
             *settings,
@@ -125,6 +125,7 @@ pub fn resource_system(
             false,
             false,
         )
+        .with_depth_write()
         .describe_render_pipeline()
         .initialize_with_prefix_layouts(device, &[projection_resources.bind_group_layout()]);
         SkyRenderPipeline(pipeline)

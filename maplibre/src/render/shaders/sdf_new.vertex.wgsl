@@ -1,53 +1,31 @@
 // @include projection.vertex.wgsl
+// @include symbol_uniforms.wgsl
 
 struct VertexOutput {
-    @location(1) v_data0: vec2<f32>,
-    @location(2) v_data1: vec3<f32>,
+    @location(0) uv: vec2<f32>,
+    @location(1) @interpolate(flat) kind: u32,
+    @location(2) size: f32,
+    @location(3) opacity: f32,
     @location(4) horizon_distance: f32,
     @builtin(position) position: vec4<f32>,
 };
 
-// The terrain tile the symbols stand on; zeroed when the map has no terrain.
-struct TerrainTileUniforms {
-    transform: mat4x4<f32>,
-    dem_matrix: mat4x4<f32>,
-    tile_mercator_coords: vec4<f32>,
-    dem_unpack: vec4<f32>,
-    dem_dim: f32,
-    exaggeration: f32,
-    skirt_length: f32,
-    padding: f32,
-    fog_color: vec4<f32>,
-    horizon_color: vec4<f32>,
-    fog_range: vec4<f32>,
-    fog_opacity: vec4<f32>,
-};
+@group(2) @binding(0) var scene_depth: texture_depth_2d;
 
-@group(2) @binding(0) var<uniform> terrain_tile: TerrainTileUniforms;
-@group(2) @binding(1) var dem_texture: texture_2d<f32>;
-
-fn dem_sample(texel: vec2<i32>) -> f32 {
-    let last = vec2<i32>(textureDimensions(dem_texture)) - vec2<i32>(1, 1);
-    let rgb = textureLoad(dem_texture, clamp(texel, vec2<i32>(0, 0), last), 0).rgb * 255.0;
-    return dot(rgb, terrain_tile.dem_unpack.xyz) - terrain_tile.dem_unpack.w;
-}
-
-// Bilinear elevation in metres at a tile position, as the terrain mesh samples it, so a symbol
-// anchor lands on the drawn surface.
-fn terrain_elevation(position: vec2<f32>) -> f32 {
-    if terrain_tile.exaggeration == 0.0 {
-        return 0.0;
+fn anchor_visibility(clip: vec4<f32>, viewport: vec2<f32>) -> f32 {
+    if clip.w <= 0.0 { return 0.0; }
+    let screen = (clip.xy / clip.w * vec2<f32>(0.5,-0.5) + vec2<f32>(0.5)) * viewport;
+    let pixel = clamp(vec2<i32>(screen),vec2<i32>(0),vec2<i32>(textureDimensions(scene_depth))-vec2<i32>(1));
+    // A pixel covers a footprint; the farthest adjacent sample avoids self-occluding a ground anchor.
+    var surface = textureLoad(scene_depth,pixel,0);
+    let limit = vec2<i32>(textureDimensions(scene_depth))-vec2<i32>(1);
+    for (var y = -1; y <= 1; y++) {
+        for (var x = -1; x <= 1; x++) {
+            surface = min(surface,textureLoad(scene_depth,clamp(pixel+vec2<i32>(x,y),vec2<i32>(0),limit),0));
+        }
     }
-    let coord = (terrain_tile.dem_matrix * vec4<f32>(position, 0.0, 1.0)).xy * terrain_tile.dem_dim + 1.0;
-    let fraction = fract(coord);
-    let corner = vec2<i32>(floor(coord));
-    let top = mix(dem_sample(corner), dem_sample(corner + vec2<i32>(1, 0)), fraction.x);
-    let bottom = mix(
-        dem_sample(corner + vec2<i32>(0, 1)),
-        dem_sample(corner + vec2<i32>(1, 1)),
-        fraction.x,
-    );
-    return mix(top, bottom, fraction.y) * terrain_tile.exaggeration;
+    let anchor = clip.z / clip.w;
+    return select(0.0,1.0,anchor + max(abs(anchor)*2e-3,1e-8) >= surface);
 }
 
 @vertex
@@ -60,43 +38,56 @@ fn main(
     @location(5) translate2: vec4<f32>,
     @location(6) translate3: vec4<f32>,
     @location(7) translate4: vec4<f32>,
+    @location(8) viewport_width: f32,
     @location(9) zoom_factor: f32,
-    @location(10) z_index: f32,
-    @location(12) opacity: f32,
-    @location(13) text_size: f32,
-    @builtin(instance_index) instance_idx: u32,
+    @location(11) viewport_height: f32,
+    @location(12) feature: vec2<f32>,
 ) -> VertexOutput {
+    let is_text = a_data.z == 0u;
+    let metrics = select(symbol.icon, symbol.text, is_text);
+    let alignment = select(symbol.icon_layout, symbol.text_layout, is_text);
     let anchor = vec2<f32>(a_pos_offset.xy);
-    let glyph_offset = vec2<f32>(a_pos_offset.zw) / 32.0;
-    let pixel_offset = vec2<f32>(a_pixeloffset.xy) / 16.0;
-    let size = select(16.0, text_size, text_size > 0.0);
-    let font_scale = size / 24.0;
-    let latitude_scale = project_symbol_scale(anchor.y, tile_mercator_coords);
-    let tile_position = anchor + (glyph_offset * font_scale + pixel_offset) * latitude_scale;
+    let elevation = feature.y * alignment.w + bitcast<f32>(a_pixeloffset.z);
     let transform = mat4x4<f32>(translate1, translate2, translate3, translate4);
-    let elevation = terrain_elevation(anchor);
-    var projected = project_tile_position(
-        vec3<f32>(tile_position, 0.0),
-        transform,
-        tile_mercator_coords,
-    );
-    if elevation != 0.0 {
-        projected = project_tile_position_3d(
-            vec3<f32>(tile_position, elevation),
-            transform,
-            tile_mercator_coords,
-        );
+    let projected = project_tile_position_3d(vec3<f32>(anchor, elevation), transform, tile_mercator_coords);
+    let distance_ratio = select(projection.transition_and_padding.y / max(projected.clip_position.w, 1e-6),
+        projected.clip_position.w / max(projection.transition_and_padding.y, 1e-6), alignment.x > 0.5);
+    let perspective_ratio = clamp(0.5 + 0.5 * distance_ratio, 0.0, 4.0);
+    let size = metrics.x * perspective_ratio;
+    let scale = select(size, size / 24.0, is_text);
+    var angle = alignment.z + bitcast<f32>(a_pixeloffset.w);
+    if alignment.y > 0.5 {
+        let tangent = project_tile_position_3d(vec3<f32>(anchor + vec2<f32>(cos(angle), sin(angle)) * 16.0, elevation), transform, tile_mercator_coords).clip_position;
+        let delta = (tangent.xy / tangent.w - projected.clip_position.xy / projected.clip_position.w)
+            * vec2<f32>(viewport_width, -viewport_height);
+        if alignment.x < 0.5 { angle = atan2(delta.y, delta.x); }
+        let keep_upright = select(symbol.placement.w, symbol.placement.z, is_text);
+        if keep_upright > 0.5 && delta.x < 0.0 { angle += PROJECTION_PI; }
     }
-    var final_position = projected.clip_position;
-    final_position.z = z_index;
-
-    let tex_size = vec2<f32>(3178.0, 30.0);
-    let texture_coordinates = vec2<f32>(a_data.xy) / tex_size;
-    let gamma_scale = max(abs(final_position.w), 1e-6);
-    return VertexOutput(
-        texture_coordinates,
-        vec3<f32>(gamma_scale, size, opacity),
-        projected.horizon_distance,
-        final_position,
-    );
+    let rotation = mat2x2<f32>(cos(angle), sin(angle), -sin(angle), cos(angle));
+    let offset = rotation * (vec2<f32>(a_pos_offset.zw) / 32.0 * scale + vec2<f32>(a_pixeloffset.xy) / 16.0);
+    var position = projected.clip_position;
+    if alignment.x > 0.5 {
+        let tile_offset = offset * 8.0 * zoom_factor * project_symbol_scale(anchor.y, tile_mercator_coords);
+        position = project_tile_position_3d(vec3<f32>(anchor + tile_offset, elevation), transform, tile_mercator_coords).clip_position;
+    } else {
+        position.x += offset.x * 2.0 / viewport_width * position.w;
+        position.y -= offset.y * 2.0 / viewport_height * position.w;
+    }
+    // A small relative bias resolves coplanar labels without lifting them above unrelated hills.
+    position.z += max(abs(position.z) * 2e-5, 1e-10);
+    var near_visibility = 1.0;
+    if alignment.x > 0.5 {
+        let radius = bitcast<f32>(a_data.w) * scale * 8.0 * zoom_factor
+            * project_symbol_scale(anchor.y, tile_mercator_coords);
+        let x = project_tile_position_3d(vec3<f32>(anchor + vec2<f32>(radius,0.0),elevation),transform,tile_mercator_coords).clip_position;
+        let y = project_tile_position_3d(vec3<f32>(anchor + vec2<f32>(0.0,radius),elevation),transform,tile_mercator_coords).clip_position;
+        let depth_radius = abs(x.w - projected.clip_position.w) + abs(y.w - projected.clip_position.w);
+        near_visibility = select(0.0,1.0,projected.clip_position.w - depth_radius > 0.0);
+    }
+    let visibility = feature.x * metrics.w * near_visibility * anchor_visibility(projected.clip_position,vec2<f32>(viewport_width,viewport_height));
+    // Hidden geometry must not cross the eye plane and produce unbounded clipped triangles.
+    if visibility <= 0.0 || projected.clip_position.w <= 0.0 { position = vec4<f32>(0.0, 0.0, 0.0, 1.0); }
+    return VertexOutput(vec2<f32>(a_data.xy) / symbol.atlas.xy, a_data.z, size,
+        visibility, projected.horizon_distance, position);
 }

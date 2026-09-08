@@ -37,7 +37,7 @@ fn spec(coords: WorldTileCoords, sources: &[WorldTileCoords]) -> TargetSpec {
 
 fn counting_create(counter: &mut u32) -> impl FnOnce() -> u32 + '_ {
     move || {
-        *counter += 1;
+        *counter = counter.wrapping_add(1);
         *counter
     }
 }
@@ -45,7 +45,7 @@ fn counting_create(counter: &mut u32) -> impl FnOnce() -> u32 + '_ {
 #[test]
 fn cache_hit_reuses_the_texture_and_skips_rendering() {
     let mut cache = DrapeCache::<u32>::default();
-    let mut created = 0;
+    let mut created = 0_u32;
 
     assert_eq!(
         cache.acquire(tile(1, 1, 3), 7, true, counting_create(&mut created)),
@@ -63,7 +63,7 @@ fn cache_hit_reuses_the_texture_and_skips_rendering() {
 #[test]
 fn a_changed_fingerprint_redraws_into_the_same_texture() {
     let mut cache = DrapeCache::<u32>::default();
-    let mut created = 0;
+    let mut created = 0_u32;
     cache.acquire(tile(1, 1, 3), 7, true, counting_create(&mut created));
 
     assert_eq!(
@@ -78,7 +78,7 @@ fn a_changed_fingerprint_redraws_into_the_same_texture() {
 #[test]
 fn tiles_leaving_the_view_are_parked_and_hand_their_textures_on_once_parking_is_full() {
     let mut cache = DrapeCache::<u32>::default();
-    let mut created = 0;
+    let mut created = 0_u32;
     cache.acquire(tile(1, 1, 3), 1, true, counting_create(&mut created));
     cache.acquire(tile(2, 1, 3), 2, true, counting_create(&mut created));
 
@@ -164,7 +164,7 @@ fn a_deferred_tile_is_acquired_as_changed_on_the_next_frame() {
     };
     assert_eq!(cache.acquire(coords, 7, true, || 0), DrapeState::New);
     assert_eq!(cache.acquire(coords, 7, true, || 0), DrapeState::Unchanged);
-    cache.defer(coords);
+    cache.defer(coords, DrapeState::Changed);
     assert_eq!(cache.acquire(coords, 7, true, || 0), DrapeState::Changed);
     assert_eq!(cache.acquire(coords, 7, true, || 0), DrapeState::Unchanged);
     assert_eq!(cache.acquire(coords, 8, true, || 0), DrapeState::Changed);
@@ -200,9 +200,9 @@ fn a_tile_that_leaves_the_view_and_returns_keeps_its_content() {
 #[test]
 fn a_texture_is_withheld_when_none_is_spare_and_the_budget_allows_no_new_one() {
     let mut cache: DrapeCache<u32> = DrapeCache::default();
-    let mut created = 0;
+    let mut created = 0_u32;
     let mut create = || {
-        created += 1;
+        created = created.wrapping_add(1);
         created
     };
     assert_eq!(
@@ -233,4 +233,37 @@ fn a_texture_is_withheld_when_none_is_spare_and_the_budget_allows_no_new_one() {
     cache.retain(&HashSet::new());
     cache.shed_spares();
     assert_eq!(cache.total_textures(), 0);
+}
+
+#[test]
+fn deferred_new_textures_stay_hidden_across_frames_and_parking() {
+    let mut cache = DrapeCache::<u32>::default();
+    let coords = tile(1, 1, 3);
+    for _ in 0..3 {
+        let state = cache.acquire(coords, u64::MAX, true, || 123);
+        assert_eq!(state, DrapeState::New);
+        cache.defer(coords, state);
+        assert!(cache.get(coords).is_none());
+        cache.retain(&HashSet::new());
+    }
+    assert_eq!(
+        cache.acquire(coords, u64::MAX, true, || 456),
+        DrapeState::New
+    );
+    assert_eq!(cache.get(coords), Some(&123));
+    assert_eq!(
+        cache.acquire(coords, u64::MAX, true, || 456),
+        DrapeState::Unchanged
+    );
+}
+
+#[test]
+fn deferred_redraw_does_not_alias_a_different_fingerprint() {
+    let mut cache = DrapeCache::<u32>::default();
+    let coords = tile(1, 1, 3);
+    cache.acquire(coords, 7, true, || 123);
+    let state = cache.acquire(coords, 8, true, || 456);
+    cache.defer(coords, state);
+    assert_eq!(cache.get(coords), Some(&123));
+    assert_eq!(cache.acquire(coords, 9, true, || 456), DrapeState::Changed);
 }

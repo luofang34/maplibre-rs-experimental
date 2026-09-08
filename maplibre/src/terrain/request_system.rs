@@ -130,8 +130,8 @@ impl<E: Environment, T: DemTransferables> System for RequestSystem<E, T> {
             .filter_map(|coords| dem_tile_coords(coords, dem.minzoom, dem.maxzoom))
             .flat_map(|coords| {
                 [
-                    Some(coords),
                     dem_ancestor_coords(coords, dem.minzoom),
+                    Some(coords),
                     missing_dem_fallback(&world.tiles, coords, dem.minzoom),
                 ]
                 .into_iter()

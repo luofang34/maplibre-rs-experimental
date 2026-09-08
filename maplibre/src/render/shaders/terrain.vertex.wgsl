@@ -9,11 +9,13 @@ struct TerrainTileUniforms {
     dem_dim: f32,
     exaggeration: f32,
     skirt_length: f32,
-    padding: f32,
+    relief_strength: f32,
     fog_color: vec4<f32>,
     horizon_color: vec4<f32>,
     fog_range: vec4<f32>,
     fog_opacity: vec4<f32>,
+    surface_color: vec4<f32>,
+    fog_position: vec4<f32>,
 };
 
 struct VertexOutput {
@@ -21,6 +23,8 @@ struct VertexOutput {
     @location(1) horizon_distance: f32,
     // Distance along the view axis, the clip w, from which the fragment takes its fog.
     @location(2) eye_depth: f32,
+    @location(3) surface_position: vec3<f32>,
+    @location(4) camera_relative_position: vec3<f32>,
     @builtin(position) clip_position: vec4<f32>,
 };
 
@@ -65,10 +69,18 @@ fn main(
     // The fog follows from the eye depth per fragment: it is not linear in depth, and the
     // triangles of a far tile span hundreds of kilometres, so a value found per vertex
     // would step at every tile edge.
+    // Tile-relative metres keep slope lighting independent of zoom and eye orientation.
+    let metres_per_unit = PROJECTION_TWO_PI * projection.transition_and_padding.z
+        * terrain_tile.tile_mercator_coords.z
+        * globe_circumference_ratio_at_tile_y(TERRAIN_EXTENT * 0.5, terrain_tile.tile_mercator_coords);
+    let surface_position = vec3<f32>(position.x * metres_per_unit, -position.y * metres_per_unit, elevation);
     return VertexOutput(
         position / TERRAIN_EXTENT,
         projected.horizon_distance,
         projected.clip_position.w,
+        surface_position,
+        terrain_tile.fog_position.xyz + vec3<f32>(position.x * terrain_tile.fog_position.w,
+            -position.y * terrain_tile.fog_position.w, elevation),
         projected.clip_position,
     );
 }

@@ -17,10 +17,13 @@ use crate::{
     },
     terrain::{
         dem::DemTile,
-        drape_cache::{DrapeCache, DrapeState},
+        drape_cache::DrapeCache,
         mesh::{create_terrain_mesh, TERRAIN_MESH_SIZE},
     },
 };
+
+mod bindings;
+mod drapes;
 
 /// Edge length in pixels of one drape texture; twice the tile size, as GL JS `qualityFactor`.
 pub const DRAPE_SIZE: u32 = 1024;
@@ -53,16 +56,20 @@ pub struct TerrainTileUniforms {
     pub exaggeration: f32,
     /// Distance in metres the skirt vertices drop below the surface.
     pub skirt_length: f32,
-    /// Keeps the block a multiple of sixteen bytes.
-    pub padding: f32,
+    /// Strength of directional relief lighting, zero for unlit map styles.
+    pub relief_strength: f32,
     /// Premultiplied fog colour.
     pub fog_color: [f32; 4],
     /// Premultiplied horizon colour the fog blends into.
     pub horizon_color: [f32; 4],
-    /// Fog depth range in pixels, then the ground blend and the horizon blend.
+    /// Fog depth range (metres for external eyes, otherwise pixels), then blend thresholds.
     pub fog_range: [f32; 4],
-    /// Fog opacity at the current pitch and whether the map is a globe.
+    /// Fog opacity, globe flag, fallback surface flag, and radial fog flag.
     pub fog_opacity: [f32; 4],
+    /// Background color while a tile has no valid drape texture.
+    pub surface_color: [f32; 4],
+    /// Tile origin relative to the eye in metres, and metres per tile coordinate.
+    pub fog_position: [f32; 4],
 }
 
 /// The fog of a frame, shared by every terrain tile, as GL JS `terrainUniformValues` takes it.
@@ -72,9 +79,9 @@ pub struct TerrainFog {
     pub fog_color: [f32; 4],
     /// Premultiplied horizon colour.
     pub horizon_color: [f32; 4],
-    /// Distances in pixels the fog depth runs between.
+    /// Near fog distance in metres for external eyes, otherwise pixels.
     pub near: f32,
-    /// Far end of the fog depth in pixels.
+    /// Far fog distance in the same units as `near`.
     pub far: f32,
     /// Fog depth at which the ground starts to take the fog colour.
     pub ground_blend: f32,
@@ -333,61 +340,6 @@ impl TerrainResources {
             .map_or(&self.empty_dem, |(texture, _)| texture)
     }
 
-    /// Gives a view tile a drape texture and reports what it holds.
-    pub fn acquire_drape(
-        &mut self,
-        device: &wgpu::Device,
-        coords: WorldTileCoords,
-        fingerprint: u64,
-        may_create: bool,
-    ) -> DrapeState {
-        let format = self.color_format;
-        self.drapes.acquire(coords, fingerprint, may_create, || {
-            Texture::new_mipmapped(
-                Some("drape texture"),
-                device,
-                format,
-                DRAPE_SIZE,
-                DRAPE_SIZE,
-                wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            )
-        })
-    }
-
-    /// Leaves a drape acquired this frame undrawn, to be drawn on the next.
-    pub fn defer_drape(&mut self, coords: WorldTileCoords) {
-        self.drapes.defer(coords);
-    }
-
-    /// Drape textures held, parked and spare together.
-    pub fn drape_texture_total(&self) -> usize {
-        self.drapes.total_textures()
-    }
-
-    /// Drops the parked and spare drape textures.
-    pub fn shed_spare_drapes(&mut self) {
-        self.drapes.shed_spares();
-    }
-
-    /// Fills the mip levels of a drape texture after its layers were drawn into it.
-    pub fn generate_drape_mipmaps(
-        &self,
-        device: &wgpu::Device,
-        encoder: &mut wgpu::CommandEncoder,
-        texture: &Texture,
-    ) {
-        self.mipmaps.generate(device, encoder, &texture.texture);
-    }
-
-    /// Releases the drape textures of tiles that left the view for reuse.
-    /// Drape textures held for tiles, and parked or waiting in the free list.
-    pub fn drape_counts(&self) -> (usize, usize) {
-        (
-            self.drapes.len(),
-            self.drapes.parked_len() + self.drapes.free_len(),
-        )
-    }
-
     /// DEM textures resident on the GPU.
     pub fn dem_texture_count(&self) -> usize {
         self.dem_textures.len()
@@ -404,15 +356,6 @@ impl TerrainResources {
             .map(|(texture, _)| (texture.size.width * texture.size.height * 4) as usize)
             .sum();
         ((held + free) * drape, dem)
-    }
-
-    pub fn retain_drapes(&mut self, keep: &HashSet<WorldTileCoords>) {
-        self.drapes.retain(keep);
-    }
-
-    /// Drape texture of a view tile.
-    pub fn drape_texture(&self, coords: WorldTileCoords) -> Option<&Texture> {
-        self.drapes.get(coords)
     }
 
     /// Creates the scratch attachments used by every drape pass.
@@ -471,41 +414,6 @@ impl TerrainResources {
         count
     }
 
-    /// Binds the uniform block window, a DEM texture and a drape texture for one tile.
-    pub fn create_bind_group(
-        &self,
-        device: &wgpu::Device,
-        dem: &Texture,
-        drape: &Texture,
-    ) -> wgpu::BindGroup {
-        device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("terrain tile"),
-            layout: &self.pipeline.get_bind_group_layout(1),
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                        buffer: &self.uniform_buffer,
-                        offset: 0,
-                        size: NonZeroU64::new(std::mem::size_of::<TerrainTileUniforms>() as u64),
-                    }),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&dem.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&drape.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: wgpu::BindingResource::Sampler(&self.sampler),
-                },
-            ],
-        })
-    }
-
     /// Replaces this frame's terrain draws.
     pub fn set_draws(&mut self, draws: Vec<TerrainDraw>) {
         self.draws = draws;
@@ -517,32 +425,6 @@ impl TerrainResources {
             .collect();
         self.bind_groups
             .retain(|_, group| used.contains(&group.global_id()));
-    }
-
-    /// The bind group drawing a tile with the DEM texture of `dem` and the drape texture of
-    /// `drape_source`, the one from the last frame when both textures are the same; `None`
-    /// while the drape has no texture.
-    pub fn tile_bind_group(
-        &mut self,
-        device: &wgpu::Device,
-        dem: Option<WorldTileCoords>,
-        drape_source: WorldTileCoords,
-    ) -> Option<Arc<wgpu::BindGroup>> {
-        let key = {
-            let dem = self.dem_texture(dem);
-            let drape = self.drape_texture(drape_source)?;
-            (dem.texture.global_id(), drape.texture.global_id())
-        };
-        if let Some(group) = self.bind_groups.get(&key) {
-            return Some(Arc::clone(group));
-        }
-        let group = {
-            let dem = self.dem_texture(dem);
-            let drape = self.drape_texture(drape_source)?;
-            Arc::new(self.create_bind_group(device, dem, drape))
-        };
-        self.bind_groups.insert(key, Arc::clone(&group));
-        Some(group)
     }
 
     /// Terrain draws of the current frame.

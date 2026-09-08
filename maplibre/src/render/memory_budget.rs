@@ -16,7 +16,7 @@ pub const LOW_MEMORY_BYTES: u64 = 1 << 30;
 /// out of view, so memory comes back.
 pub const CRITICAL_MEMORY_BYTES: u64 = 512 << 20;
 /// Drape textures the terrain may hold, spares included, whatever the host reports.
-pub const DRAPE_TEXTURE_LIMIT: usize = 96;
+pub const DRAPE_TEXTURE_LIMIT: usize = 64;
 /// Drape textures the terrain may still hold while memory is low: the nearest tiles keep
 /// their own, the rest draw with an ancestor's.
 pub const DRAPE_TEXTURES_WHEN_LOW: usize = 32;

@@ -83,7 +83,7 @@ fn main(
         let px_to_clip = vec2<f32>(2.0 / viewport_width, 2.0 / viewport_height);
         clip = vec4<f32>(clip.xy + extrude * total * px_to_clip * depth_scale, clip.z, clip.w);
     }
-    clip.z = z_index;
+    clip.z = 0.0;
 
     // Roughly one pixel of blur keeps the edge antialiased whatever the radius.
     let antialiasblur = -max(1.0 / total, circle_params.z);
