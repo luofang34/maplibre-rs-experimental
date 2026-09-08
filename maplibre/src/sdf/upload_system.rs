@@ -166,14 +166,16 @@ fn upload_symbol_layer(
             }
 
             log::debug!("Allocating geometry at {coords}");
-            symbol_buffer_pool.allocate_layer_geometry(
+            if let Err(error) = symbol_buffer_pool.allocate_layer_geometry(
                 gpu.queue,
                 *coords,
                 style_layer.clone(),
                 buffer,
                 ShaderLayerMetadata::new(style_layer.index as f32, 0.0, [0.0; 2]),
                 &feature_metadata,
-            );
+            ) {
+                tracing::error!(%coords, %error, "tile geometry upload failed");
+            }
         }
     }
 }

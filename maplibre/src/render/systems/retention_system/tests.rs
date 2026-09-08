@@ -97,67 +97,15 @@ fn nothing_is_evicted_within_the_budget() {
 
 #[test]
 fn tiles_requested_around_an_eye_are_kept() {
-    use cgmath::{Deg, Matrix4, Rad};
-
-    use super::tiles_in_use;
     use crate::{
-        coords::{LatLon, WorldCoords, Zoom, TILE_SIZE},
-        projection::ProjectionType,
-        render::{
-            camera::EyeFrustum,
-            projection::view_region_for_projection,
-            view_state::{CameraPose, ExternalView, ViewState, ViewStatePadding},
-        },
-        window::PhysicalSize,
+        coords::TILE_SIZE,
+        render::{projection::view_region_for_projection, view_state::ViewStatePadding},
     };
-
     let style: crate::style::Style = serde_json::from_str(
         r#"{"version":8,"sources":{"dem":{"type":"raster-dem","tiles":["https://dem.example/{z}/{x}/{y}.png"],"tileSize":256,"maxzoom":12,"encoding":"terrarium"}},"layers":[],"terrain":{"source":"dem","exaggeration":1}}"#,
     )
     .expect("a terrain style parses");
-    let zoom = Zoom::new(14.0);
-    let eye_at = LatLon::new(47.26, 11.39);
-    let size = PhysicalSize::new(3840, 2160).expect("a viewport");
-    let fovy = Rad(1.2);
-    let mut own = ViewState::new(
-        size,
-        WorldCoords::from_lat_lon(eye_at, zoom),
-        zoom,
-        Deg(0.0),
-        fovy,
-    );
-    own.set_max_pitch(Deg(180.0));
-    own.set_camera_pose(CameraPose {
-        position: eye_at,
-        altitude_meters: 4000.0,
-        bearing: Deg(0.0),
-        pitch: Deg(60.0),
-        roll: Deg(0.0),
-    });
-    // A wide level gaze, four kilometres up: what a headset sees from the immersive placement.
-    let base = own.external_view();
-    let level = ExternalView {
-        view: Matrix4::from_angle_x(Deg(-30.0)) * base.view,
-        frustum: EyeFrustum {
-            left: 1.2,
-            right: 1.2,
-            top: 0.9,
-            bottom: 0.9,
-            near: 0.1,
-            far: 1.0e9,
-        },
-        ..base
-    };
-    let mut eyed = ViewState::new(
-        size,
-        WorldCoords::from_lat_lon(eye_at, zoom),
-        zoom,
-        Deg(0.0),
-        fovy,
-    );
-    eyed.set_external_view(level, &ProjectionType::Mercator)
-        .expect("the eye is accepted");
-
+    let eyed = wide_eye_view();
     let mut world = World::default();
     let requested: Vec<WorldTileCoords> = view_region_for_projection(
         &style,
@@ -185,7 +133,7 @@ fn tiles_requested_around_an_eye_are_kept() {
         spawn_vector(&mut world, *coords, true);
     }
 
-    let in_use = tiles_in_use(&world, &style, &eyed);
+    let in_use = super::tiles_in_use(&world, &style, &eyed);
     let evicted = evict_stale_tiles(&mut world, &in_use, 0);
 
     assert!(
@@ -261,4 +209,140 @@ fn the_cache_is_bounded_in_bytes_as_well_as_tiles() {
 
     assert_eq!(evicted.len(), 7);
     assert_eq!(world.tiles.tiles.len(), 3);
+}
+
+#[cfg(all(feature = "headless", feature = "thread-safe-futures"))]
+#[tokio::test]
+async fn tile_eviction_clears_vector_and_symbol_gpu_geometry_together() {
+    use crate::{
+        headless::create_headless_renderer,
+        render::{eventually::Eventually, settings::BufferPoolSizes},
+        sdf::SymbolBufferPool,
+        vector::VectorBufferPool,
+    };
+    let (_, renderer) = create_headless_renderer(64, 64, None)
+        .await
+        .expect("renderer");
+    let sizes = BufferPoolSizes {
+        vertices: 8,
+        indices: 16,
+        feature_metadata: 8,
+        layer_metadata: 2,
+    };
+    let mut vectors = VectorBufferPool::from_device_with_sizes(&renderer.device, sizes);
+    let mut symbols = SymbolBufferPool::from_device_with_sizes(&renderer.device, sizes);
+    let coords = WorldTileCoords::default();
+    insert_gpu_layer(&mut vectors, &renderer.queue, coords);
+    insert_gpu_layer(&mut symbols, &renderer.queue, coords);
+    let mut world = World::default();
+    spawn_vector(&mut world, coords, true);
+    world.resources.insert(Eventually::Initialized(vectors));
+    world.resources.insert(Eventually::Initialized(symbols));
+    let evicted = evict_beyond(
+        &mut world,
+        &HashSet::new(),
+        CacheBudget { tiles: 0, bytes: 0 },
+    );
+    assert_eq!(evicted, vec![coords]);
+    super::drop_gpu_data(&mut world, &evicted);
+    let Some(Eventually::Initialized(vectors)) =
+        world.resources.get::<Eventually<VectorBufferPool>>()
+    else {
+        panic!("vector pool")
+    };
+    let Some(Eventually::Initialized(symbols)) =
+        world.resources.get::<Eventually<SymbolBufferPool>>()
+    else {
+        panic!("symbol pool")
+    };
+    assert!(vectors.get_loaded_style_layers_at(coords).is_none());
+    assert!(symbols.get_loaded_style_layers_at(coords).is_none());
+}
+
+#[cfg(all(feature = "headless", feature = "thread-safe-futures"))]
+fn insert_gpu_layer<V: bytemuck::Pod, FM: bytemuck::Pod>(
+    pool: &mut crate::vector::resource::BufferPool<
+        wgpu::Queue,
+        wgpu::Buffer,
+        V,
+        u32,
+        crate::render::shaders::ShaderLayerMetadata,
+        FM,
+    >,
+    queue: &wgpu::Queue,
+    coords: WorldTileCoords,
+) {
+    let geometry = crate::vector::tessellation::OverAlignedVertexBuffer::from_iters(
+        [V::zeroed(); 4],
+        [0, 1, 2, 2, 1, 3],
+        6,
+    );
+    pool.allocate_layer_geometry(
+        queue,
+        coords,
+        crate::style::layer::StyleLayer::default(),
+        &geometry,
+        crate::render::shaders::ShaderLayerMetadata::new(0.0, 0.0, [0.0; 2]),
+        &[FM::zeroed(); 4],
+    )
+    .expect("fits");
+}
+
+fn wide_eye_view() -> crate::render::view_state::ViewState {
+    use cgmath::{Deg, Matrix4, Rad};
+
+    use crate::{
+        coords::{LatLon, WorldCoords, Zoom},
+        projection::ProjectionType,
+        render::{
+            camera::EyeFrustum,
+            view_state::{CameraPose, ExternalView, ViewState},
+        },
+        window::PhysicalSize,
+    };
+
+    let zoom = Zoom::new(14.0);
+    let eye_at = LatLon::new(47.26, 11.39);
+    let size = PhysicalSize::new(3840, 2160).expect("a viewport");
+    let fovy = Rad(1.2);
+    let mut own = ViewState::new(
+        size,
+        WorldCoords::from_lat_lon(eye_at, zoom),
+        zoom,
+        Deg(0.0),
+        fovy,
+    );
+    own.set_max_pitch(Deg(180.0));
+    own.set_camera_pose(CameraPose {
+        position: eye_at,
+        altitude_meters: 4000.0,
+        bearing: Deg(0.0),
+        pitch: Deg(60.0),
+        roll: Deg(0.0),
+    });
+    // A wide level gaze, four kilometres up: what a headset sees from the immersive placement.
+    let base = own.external_view();
+    let level = ExternalView {
+        view: Matrix4::from_angle_x(Deg(-30.0)) * base.view,
+        frustum: EyeFrustum {
+            left: 1.2,
+            right: 1.2,
+            top: 0.9,
+            bottom: 0.9,
+            near: 0.1,
+            far: 1.0e9,
+        },
+        ..base
+    };
+    let mut eyed = ViewState::new(
+        size,
+        WorldCoords::from_lat_lon(eye_at, zoom),
+        zoom,
+        Deg(0.0),
+        fovy,
+    );
+    eyed.set_external_view(level, &ProjectionType::Mercator)
+        .expect("the eye is accepted");
+
+    eyed
 }

@@ -57,7 +57,8 @@ pub fn upload_system(
     };
     let bearing = view_state.camera().get_bearing().0 as f32;
     let paint_frame = VectorPaintFrame { zoom, bearing };
-    let refresh_paint = world.resources.get::<VectorPaintFrame>() != Some(&paint_frame);
+    let previous_paint = world.resources.get::<VectorPaintFrame>().copied();
+    let refresh_paint = previous_paint != Some(paint_frame);
     world.resources.insert(paint_frame);
     let Some(Initialized(pattern)) = world.resources.get::<Eventually<WgpuTileViewPattern>>()
     else {
@@ -70,7 +71,14 @@ pub fn upload_system(
         return Err(SystemError::Dependencies);
     };
     if refresh_paint {
-        refresh_layer_paint(buffer_pool, queue, &source_tiles, zoom, bearing);
+        refresh_layer_paint(
+            buffer_pool,
+            queue,
+            &source_tiles,
+            zoom,
+            bearing,
+            previous_paint.map(|frame| frame.zoom),
+        );
     }
     if changed {
         super::structures::refresh_gpu(buffer_pool, queue, &spatial);
@@ -130,6 +138,7 @@ fn refresh_layer_paint(
     source_tiles: &[crate::coords::WorldTileCoords],
     zoom: f32,
     bearing: f32,
+    previous_zoom: Option<f32>,
 ) {
     for coords in source_tiles {
         for entry in buffer_pool
@@ -141,6 +150,12 @@ fn refresh_layer_paint(
             let metadata = metadata_for_layer(&entry.style_layer, *coords, zoom, bearing);
             buffer_pool.update_layer_metadata(queue, entry, metadata);
             if let Some(color) = paint::uniform_color(&entry.style_layer, f64::from(zoom)) {
+                if previous_zoom
+                    .and_then(|zoom| paint::uniform_color(&entry.style_layer, f64::from(zoom)))
+                    == Some(color)
+                {
+                    continue;
+                }
                 let count = (entry.feature_metadata_buffer_range().end
                     - entry.feature_metadata_buffer_range().start)
                     as usize
@@ -256,14 +271,16 @@ fn upload_bucket(
     let layer_metadata = metadata_for_layer(style_layer, coords, zoom, bearing);
 
     log::debug!("Allocating geometry at {coords}");
-    buffer_pool.allocate_layer_geometry(
+    if let Err(error) = buffer_pool.allocate_layer_geometry(
         queue,
         coords,
         style_layer.clone(),
         buffer,
         layer_metadata,
         &feature_metadata,
-    );
+    ) {
+        tracing::error!(%coords, %error, "tile geometry upload failed");
+    }
 }
 
 fn layer_translate_tile_units(

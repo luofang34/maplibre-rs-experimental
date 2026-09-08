@@ -243,6 +243,12 @@ pub(crate) fn tiles_in_use(
         Ok(None) => {}
         Err(error) => tracing::warn!(%error, "cannot select the requested tiles to keep"),
     }
+    if let Some(requests) = world
+        .resources
+        .get::<crate::terrain::request_system::DrapeRequests>()
+    {
+        in_use.extend(requests.0.iter().copied());
+    }
     if let Some(dem) = dem_source(style) {
         let view: Vec<WorldTileCoords> = in_use.iter().copied().collect();
         for coords in view {
@@ -336,6 +342,19 @@ pub(crate) fn evict_beyond(
 }
 
 fn drop_gpu_data(world: &mut World, evicted: &[WorldTileCoords]) {
+    if let Some(Initialized(pool)) = world.resources.get_mut::<Eventually<VectorBufferPool>>() {
+        for coords in evicted {
+            pool.remove_tile(*coords);
+        }
+    }
+    if let Some(Initialized(pool)) = world
+        .resources
+        .get_mut::<Eventually<crate::sdf::SymbolBufferPool>>()
+    {
+        for coords in evicted {
+            pool.remove_tile(*coords);
+        }
+    }
     if let Some(Initialized(raster)) = world.resources.get_mut::<Eventually<RasterResources>>() {
         for coords in evicted {
             raster.remove_texture(*coords);
