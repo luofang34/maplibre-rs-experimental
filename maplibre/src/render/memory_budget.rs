@@ -85,47 +85,44 @@ impl MemoryBudget {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{
-        MemoryBudget, MemoryPressure, CRITICAL_MEMORY_BYTES, DRAPE_TEXTURES_WHEN_CRITICAL,
-        DRAPE_TEXTURES_WHEN_LOW, DRAPE_TEXTURE_LIMIT, LOW_MEMORY_BYTES, TILES_IN_FLIGHT_WHEN_LOW,
-    };
+/// Applies immediate reductions and delayed recovery to noisy host memory reports.
+#[derive(Default)]
+pub struct MemoryBudgetTracker {
+    pressure: Option<MemoryPressure>,
+}
 
-    #[test]
-    fn an_unknown_budget_only_holds_the_texture_cap() {
-        let budget = MemoryBudget::default();
-        assert!(!budget.is_tight());
-        assert!(budget.allows_drape_texture(DRAPE_TEXTURE_LIMIT - 1));
-        assert!(!budget.allows_drape_texture(DRAPE_TEXTURE_LIMIT));
-    }
-
-    #[test]
-    fn a_low_budget_allows_no_new_texture_and_a_few_tiles_in_flight() {
-        let budget = MemoryBudget {
-            available_bytes: Some(LOW_MEMORY_BYTES - 1),
+impl MemoryBudgetTracker {
+    /// Keeps reduced resource limits until enough reserve exists to restore them safely.
+    pub fn update(&mut self, available_bytes: Option<u64>) -> MemoryBudget {
+        let measured = MemoryBudget { available_bytes };
+        let next = match (self.pressure, available_bytes) {
+            (Some(MemoryPressure::Critical), Some(bytes))
+                if bytes < CRITICAL_MEMORY_BYTES + (256 << 20) =>
+            {
+                MemoryPressure::Critical
+            }
+            (Some(MemoryPressure::Critical | MemoryPressure::Low), Some(bytes))
+                if bytes < LOW_MEMORY_BYTES + (512 << 20) =>
+            {
+                if bytes < CRITICAL_MEMORY_BYTES {
+                    MemoryPressure::Critical
+                } else {
+                    MemoryPressure::Low
+                }
+            }
+            _ => measured.pressure(),
         };
-        assert_eq!(budget.pressure(), MemoryPressure::Low);
-        assert!(budget.is_tight());
-        assert!(budget.allows_drape_texture(DRAPE_TEXTURES_WHEN_LOW - 1));
-        assert!(!budget.allows_drape_texture(DRAPE_TEXTURES_WHEN_LOW));
-        assert_eq!(budget.tiles_in_flight_allowed(24), TILES_IN_FLIGHT_WHEN_LOW);
-        let roomy = MemoryBudget {
-            available_bytes: Some(LOW_MEMORY_BYTES),
+        self.pressure = Some(next);
+        let ceiling = match next {
+            MemoryPressure::Comfortable => u64::MAX,
+            MemoryPressure::Low => LOW_MEMORY_BYTES - 1,
+            MemoryPressure::Critical => CRITICAL_MEMORY_BYTES - 1,
         };
-        assert_eq!(roomy.pressure(), MemoryPressure::Comfortable);
-        assert!(roomy.allows_drape_texture(0));
-        assert_eq!(roomy.tiles_in_flight_allowed(24), 24);
-    }
-
-    #[test]
-    fn a_critical_budget_allows_nothing_in_flight() {
-        let budget = MemoryBudget {
-            available_bytes: Some(CRITICAL_MEMORY_BYTES - 1),
-        };
-        assert_eq!(budget.pressure(), MemoryPressure::Critical);
-        assert_eq!(budget.tiles_in_flight_allowed(24), 0);
-        assert!(budget.allows_drape_texture(DRAPE_TEXTURES_WHEN_CRITICAL - 1));
-        assert!(!budget.allows_drape_texture(DRAPE_TEXTURES_WHEN_CRITICAL));
+        MemoryBudget {
+            available_bytes: available_bytes.map(|bytes| bytes.min(ceiling)),
+        }
     }
 }
+
+#[cfg(test)]
+mod tests;

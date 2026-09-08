@@ -265,17 +265,20 @@ impl HeadlessMap {
                 .insert(RasterLayersDataComponent { layers });
         }
 
+        self.advance_frames(frame_count)
+    }
+
+    fn advance_frames(&mut self, frame_count: u8) -> Result<(), HeadlessMapOperationError> {
         for _ in 0..frame_count {
-            context
+            self.map_context
                 .world
                 .resources
                 .get_or_init_mut::<FrameInput>()
                 .advance(HEADLESS_FRAME_INTERVAL);
             self.schedule
-                .run(context)
+                .run(&mut self.map_context)
                 .map_err(|source| HeadlessMapOperationError::Schedule { source })?;
         }
-
         Ok(())
     }
 
@@ -343,10 +346,11 @@ impl HeadlessMap {
     /// Tells the map how much memory the host still has, or `None` when it cannot tell, so
     /// the frame takes nothing new on when little is left.
     pub fn set_available_memory(&mut self, available_bytes: Option<u64>) {
-        self.map_context
-            .world
-            .resources
-            .insert(crate::render::memory_budget::MemoryBudget { available_bytes });
+        let resources = &mut self.map_context.world.resources;
+        let budget = resources
+            .get_or_init_mut::<crate::render::memory_budget::MemoryBudgetTracker>()
+            .update(available_bytes);
+        resources.insert(budget);
     }
 
     /// Raises the pitch limit and re-applies the style's pitch, which the default limit clamps.

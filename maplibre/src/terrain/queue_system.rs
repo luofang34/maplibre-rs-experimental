@@ -31,6 +31,7 @@ use crate::{
 };
 mod covering;
 mod drape_phase;
+mod surface_covering;
 mod uniforms;
 use drape_phase::{background_clear_color, build_drape_phase, drape_metadata};
 use uniforms::{present_ancestors, TerrainEyeFrame};
@@ -59,6 +60,9 @@ pub fn queue_system(
         return uniforms::replay(world, style, view_state, queue);
     }
     world.resources.insert(TerrainEyeFrame::default());
+    world
+        .resources
+        .insert(surface_covering::SurfaceTiles::default());
     let Some(dem) = dem_source(style) else {
         world.resources.insert(DrapePhase::default());
         world.resources.insert(TerrainFrame::default());
@@ -78,6 +82,7 @@ pub fn queue_system(
         view_state.zoom(),
         queue,
     )?;
+    let (surface_specs, surface_sources) = surface_covering::for_frame(world, &specs, &sources);
     queue_tiles(
         world,
         style,
@@ -85,7 +90,7 @@ pub fn queue_system(
         device,
         queue,
         &dem,
-        (&specs, &sources),
+        (&surface_specs, &surface_sources),
     )?;
     hide_draped_layers(world, style);
     let draw_after_layer_index = style
@@ -337,6 +342,9 @@ fn target_specs(
         .get::<MemoryBudget>()
         .copied()
         .unwrap_or_default();
+    world
+        .resources
+        .insert(surface_covering::SurfaceTiles(view_region.iter().collect()));
     let tiles: Vec<_> = if view_state.has_external_view() {
         covering::for_frame(
             world,
@@ -381,7 +389,7 @@ fn prepare_drapes(
     };
     // A tile whose vector sources are finished but not yet in the buffer pool would drape
     // blank; it shows an ancestor's drape until they are.
-    let ready: Vec<bool> = specs
+    let mut ready: Vec<bool> = specs
         .iter()
         .map(|spec| {
             !spec.shapes.is_empty()
@@ -390,6 +398,11 @@ fn prepare_drapes(
                 })
         })
         .collect();
+    let capacity = match world.resources.get::<Eventually<WgpuTileViewPattern>>() {
+        Some(Initialized(pattern)) => pattern.remaining_metadata_capacity(),
+        _ => 0,
+    };
+    surface_covering::fit_metadata(specs, &mut ready, capacity);
     let (redraw, drape_sources) = {
         let Some(Initialized(terrain)) = world.resources.get_mut::<Eventually<TerrainResources>>()
         else {

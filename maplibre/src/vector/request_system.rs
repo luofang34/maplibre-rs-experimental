@@ -7,7 +7,7 @@ use crate::{
     environment::{Environment, OffscreenKernel},
     io::{
         apc::{AsyncProcedureCall, AsyncProcedureFuture, Context, Input, ProcedureError},
-        tile_backpressure::request_budget,
+        tile_backpressure::vector_request_budget,
         tile_sources::{
             clamp_to_max_zoom, source_layer_groups, source_max_zoom, source_min_zoom, TileKind,
         },
@@ -74,11 +74,7 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
             let max_zoom = source_max_zoom(style, TileKind::Vector);
             let min_zoom = source_min_zoom(style, TileKind::Vector);
             let mut requested = HashSet::new();
-            let mut budget = request_budget(world);
-            if style.terrain.is_some() {
-                // DEM requests run later in Extract and need slots to load the surface.
-                budget = budget.saturating_sub(4);
-            }
+            let mut budget = vector_request_budget(world, style.terrain.is_some());
 
             let drapes = world
                 .resources

@@ -58,5 +58,16 @@ pub fn request_budget(world: &World) -> usize {
     allowed.saturating_sub(tiles_in_flight(&world.tiles))
 }
 
+/// Shares available requests with the DEM pass without starving vector tiles under pressure.
+pub(crate) fn vector_request_budget(world: &World, has_terrain: bool) -> usize {
+    let available = request_budget(world);
+    let reserved = if has_terrain {
+        (available / 2).min(4)
+    } else {
+        0
+    };
+    available - reserved
+}
+
 #[cfg(test)]
 mod tests;
