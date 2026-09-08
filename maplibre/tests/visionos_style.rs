@@ -69,3 +69,77 @@ fn higher_bridge_layers_paint_after_both_lower_bridge_strokes() {
             < upper.iter().map(|l| l.index).min().expect("upper bridge")
     );
 }
+
+#[test]
+fn surface_palette_remains_constant_across_source_zoom_levels() {
+    use maplibre::style::layer::LayerPaint;
+    let style = style();
+    for id in [
+        "landcover_wood",
+        "landcover_glacier",
+        "landcover_ice_shelf",
+        "landuse_residential",
+    ] {
+        let layer = style
+            .layers
+            .iter()
+            .find(|layer| layer.id == id)
+            .expect("surface layer");
+        let Some(LayerPaint::Fill(paint)) = &layer.paint else {
+            panic!("fill required")
+        };
+        let color = paint.fill_color.as_ref().expect("surface color");
+        let opacity = paint.fill_opacity.as_ref().expect("surface opacity");
+        for zoom in [0.0, 4.0, 8.0, 12.0, 16.0, 20.0] {
+            assert!(layer.is_visible_at(zoom), "{id} disappears at {zoom}");
+            assert_eq!(color.evaluate_at_zoom(zoom), color.evaluate_at_zoom(8.0));
+            assert_eq!(
+                opacity.evaluate_at_zoom(zoom),
+                opacity.evaluate_at_zoom(8.0)
+            );
+        }
+    }
+}
+
+#[test]
+fn place_detail_enters_progressively_and_keeps_major_places_larger() {
+    use maplibre::style::layer::LayerPaint;
+    let style = style();
+    let mut previous_zoom = 0.0;
+    let mut previous_size = f32::MAX;
+    for id in [
+        "place_city_large",
+        "place_city",
+        "place_town",
+        "place_village",
+        "place_suburb",
+    ] {
+        let layer = style
+            .layers
+            .iter()
+            .find(|layer| layer.id == id)
+            .expect("place layer");
+        let zoom = layer.minzoom.expect("entry zoom") as f64;
+        assert!(
+            zoom > previous_zoom,
+            "{id} must enter later than larger places"
+        );
+        assert!(!layer.is_visible_at(zoom - 0.01));
+        assert!(layer.is_visible_at(zoom));
+        let Some(LayerPaint::Symbol(paint)) = &layer.paint else {
+            panic!("symbol required")
+        };
+        let size = paint
+            .text_size
+            .as_ref()
+            .expect("size")
+            .evaluate_at_zoom(zoom)
+            .expect("value");
+        assert!(
+            size < previous_size,
+            "{id} must be smaller than larger places"
+        );
+        previous_zoom = zoom;
+        previous_size = size;
+    }
+}

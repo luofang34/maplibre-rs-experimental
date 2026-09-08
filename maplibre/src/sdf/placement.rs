@@ -51,6 +51,14 @@ pub(super) fn screen_boxes(
             uniforms,
         };
         let bounds = placement.bounds(&part)?;
+        let padding = f64::from(if part.text {
+            uniforms.placement[0]
+        } else {
+            uniforms.placement[1]
+        });
+        if view.has_external_view() && part.text && bounds[3] - bounds[1] - 2.0 * padding < 7.0 {
+            continue;
+        }
         let slot = &mut result[usize::from(!part.text)];
         *slot = Some(slot.map_or(bounds, |previous| {
             [
@@ -95,32 +103,7 @@ impl Placement<'_> {
             f64::from(self.projection.center_clip_w) / clip.w
         };
         let scale = (0.5 + 0.5 * ratio).clamp(0.0, 4.0) * f64::from(size);
-        let mut angle = f64::from(alignment[2]) + part.angle;
-        let upright = if part.text {
-            self.uniforms.placement[2]
-        } else {
-            self.uniforms.placement[3]
-        };
-        if alignment[1] > 0.5 {
-            let tangent = project(
-                self.coords,
-                [
-                    self.anchor[0] + angle.cos() * 16.0,
-                    self.anchor[1] + angle.sin() * 16.0,
-                ],
-                height,
-                self.view,
-                self.projection,
-            )?;
-            let dx = (tangent.x / tangent.w - clip.x / clip.w) * self.view.width();
-            let dy = -(tangent.y / tangent.w - clip.y / clip.w) * self.view.height();
-            if alignment[0] < 0.5 {
-                angle = dy.atan2(dx);
-            }
-            if upright > 0.5 && dx < 0.0 {
-                angle += std::f64::consts::PI;
-            }
-        }
+        let angle = self.angle(part, alignment, height, clip)?;
         let padding = f64::from(if part.text {
             self.uniforms.placement[0]
         } else {
@@ -160,6 +143,42 @@ impl Placement<'_> {
             }
         }
         Some(result)
+    }
+
+    fn angle(
+        &self,
+        part: &SymbolBounds,
+        alignment: [f32; 4],
+        height: f64,
+        clip: Vector4<f64>,
+    ) -> Option<f64> {
+        let mut angle = f64::from(alignment[2]) + part.angle;
+        let upright = if part.text {
+            self.uniforms.placement[2]
+        } else {
+            self.uniforms.placement[3]
+        };
+        if alignment[1] > 0.5 {
+            let tangent = project(
+                self.coords,
+                [
+                    self.anchor[0] + angle.cos() * 16.0,
+                    self.anchor[1] + angle.sin() * 16.0,
+                ],
+                height,
+                self.view,
+                self.projection,
+            )?;
+            let dx = (tangent.x / tangent.w - clip.x / clip.w) * self.view.width();
+            let dy = -(tangent.y / tangent.w - clip.y / clip.w) * self.view.height();
+            if alignment[0] < 0.5 {
+                angle = dy.atan2(dx);
+            }
+            if upright > 0.5 && dx < 0.0 {
+                angle += std::f64::consts::PI;
+            }
+        }
+        Some(angle)
     }
 
     fn screen(&self, clip: Vector4<f64>) -> [f64; 2] {
