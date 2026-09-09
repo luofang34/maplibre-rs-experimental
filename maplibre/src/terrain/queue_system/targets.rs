@@ -40,7 +40,8 @@ pub(super) fn target_specs(
         covering::for_frame(
             world,
             view_region.iter().collect(),
-            memory.drape_textures_allowed(),
+            // A complete replacement must fit beside the presented coverage.
+            (memory.drape_textures_allowed() / 2).max(1),
         )
     } else {
         view_region.iter().collect()

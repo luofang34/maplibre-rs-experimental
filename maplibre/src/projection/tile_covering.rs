@@ -14,6 +14,7 @@ struct Candidate {
     tile: WorldTileCoords,
     refinement: Refinement,
     distance: f64,
+    rank: usize,
 }
 
 impl Candidate {
@@ -35,8 +36,8 @@ impl PartialOrd for Candidate {
 }
 impl Ord for Candidate {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.priority()
-            .cmp(&other.priority())
+        self.rank
+            .cmp(&other.rank)
             .then_with(|| other.distance.total_cmp(&self.distance))
             .then_with(|| self.tile.cmp(&other.tile))
     }
@@ -50,6 +51,18 @@ pub(crate) fn bounded<E>(
     center: LatLon,
     mut inspect: impl FnMut(WorldTileCoords, bool) -> Result<Option<Refinement>, E>,
 ) -> Result<Vec<WorldTileCoords>, E> {
+    bounded_by(limit, min_zoom, center, &mut inspect, |tile, refinement| {
+        usize::from(u8::from(refinement.target).saturating_sub(u8::from(tile.z)))
+    })
+}
+
+fn bounded_by<E>(
+    limit: usize,
+    min_zoom: u8,
+    center: LatLon,
+    mut inspect: impl FnMut(WorldTileCoords, bool) -> Result<Option<Refinement>, E>,
+    rank: impl Fn(WorldTileCoords, &Refinement) -> usize,
+) -> Result<Vec<WorldTileCoords>, E> {
     if limit == 0 {
         return Ok(Vec::new());
     }
@@ -57,7 +70,7 @@ pub(crate) fn bounded<E>(
     let Some(refinement) = inspect(root, false)? else {
         return Ok(Vec::new());
     };
-    let mut pending = BinaryHeap::from([candidate(root, refinement, center)]);
+    let mut pending = BinaryHeap::from([candidate(root, refinement, center, &rank)]);
     let mut visible = Vec::new();
     // Conservative bounds may expose parents whose children all cull away. Count those
     // splits too, so freeing a frontier slot cannot turn an empty view into unbounded work.
@@ -71,7 +84,7 @@ pub(crate) fn bounded<E>(
         let mut children = Vec::with_capacity(4);
         for tile in parent.tile.get_children() {
             if let Some(refinement) = inspect(tile, parent.refinement.fully_visible)? {
-                children.push(candidate(tile, refinement, center));
+                children.push(candidate(tile, refinement, center, &rank));
             }
         }
         if visible.len() + pending.len() + children.len() <= limit {
@@ -86,7 +99,12 @@ pub(crate) fn bounded<E>(
         .collect())
 }
 
-fn candidate(tile: WorldTileCoords, refinement: Refinement, center: LatLon) -> Candidate {
+fn candidate(
+    tile: WorldTileCoords,
+    refinement: Refinement,
+    center: LatLon,
+    rank: &impl Fn(WorldTileCoords, &Refinement) -> usize,
+) -> Candidate {
     let count = 2_f64.powi(i32::from(u8::from(tile.z)));
     let center_x = center.longitude / 360.0 + 0.5;
     let latitude = center.latitude.clamp(-85.051_129, 85.051_129).to_radians();
@@ -95,6 +113,7 @@ fn candidate(tile: WorldTileCoords, refinement: Refinement, center: LatLon) -> C
     let dx = dx.min((1.0 - dx).abs());
     let dy = center_y - (f64::from(tile.y) + 0.5) / count;
     Candidate {
+        rank: rank(tile, &refinement),
         tile,
         refinement,
         distance: dx * dx + dy * dy,
@@ -130,13 +149,18 @@ pub(crate) fn coarsen(
             .to_degrees(),
         (f64::from(first.x) + 0.5) / count * 360.0 - 180.0,
     );
-    let result: Result<_, std::convert::Infallible> =
-        bounded(limit, min_zoom, center, |tile, _| {
+    let result: Result<_, std::convert::Infallible> = bounded_by(
+        limit,
+        min_zoom,
+        center,
+        |tile, _| {
             Ok(ancestors.get(&tile).map(|(target, _)| Refinement {
                 target: *target,
                 fully_visible: false,
             }))
-        });
+        },
+        |tile, _| usize::MAX - ancestors.get(&tile).map_or(usize::MAX, |(_, index)| *index),
+    );
     let mut result = match result {
         Ok(tiles) => tiles,
         Err(never) => match never {},

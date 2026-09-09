@@ -26,7 +26,7 @@ use crate::{
     },
 };
 
-mod paint;
+pub(crate) mod paint;
 
 pub(crate) fn drape_paint_zoom(zoom: f64) -> f64 {
     (zoom * 8.0).round() / 8.0
@@ -50,16 +50,9 @@ pub fn upload_system(
     if crate::render::eye_covering::EyeInFrame::reuses_content(world) {
         return Ok(());
     }
-    let zoom = if style.terrain.is_some() {
-        drape_paint_zoom(view_state.zoom().value()) as f32
-    } else {
-        view_state.zoom().level()
-    };
-    let bearing = view_state.camera().get_bearing().0 as f32;
-    let paint_frame = VectorPaintFrame { zoom, bearing };
-    let previous_paint = world.resources.get::<VectorPaintFrame>().copied();
+    let (paint_frame, previous_paint) = frame_paint(world, style, view_state);
+    let VectorPaintFrame { zoom, bearing } = paint_frame;
     let refresh_paint = previous_paint != Some(paint_frame);
-    world.resources.insert(paint_frame);
     let Some(Initialized(pattern)) = world.resources.get::<Eventually<WgpuTileViewPattern>>()
     else {
         return Err(SystemError::Dependencies);
@@ -76,7 +69,8 @@ pub fn upload_system(
         let mut seen: HashSet<_> = source_tiles.iter().copied().collect();
         source_tiles.extend(requests.0.iter().copied().filter(|tile| seen.insert(*tile)));
     }
-    let (spatial, changed) = super::structures::for_frame(world, style, &source_tiles);
+    let painted_tiles = painted_tiles(pattern, &source_tiles);
+    let (spatial, changed) = super::structures::for_frame(world, style, &painted_tiles);
     let Some(Initialized(buffer_pool)) = world.resources.get_mut::<Eventually<VectorBufferPool>>()
     else {
         return Err(SystemError::Dependencies);
@@ -85,7 +79,7 @@ pub fn upload_system(
         refresh_layer_paint(
             buffer_pool,
             queue,
-            &source_tiles,
+            &painted_tiles,
             zoom,
             bearing,
             previous_paint,
@@ -105,6 +99,39 @@ pub fn upload_system(
         bearing,
     );
     Ok(())
+}
+
+fn frame_paint(
+    world: &mut crate::tcs::world::World,
+    style: &Style,
+    view_state: &crate::render::view_state::ViewState,
+) -> (VectorPaintFrame, Option<VectorPaintFrame>) {
+    let zoom = if style.terrain.is_some() {
+        paint::stabilize_zoom(world, view_state.zoom().value()) as f32
+    } else {
+        view_state.zoom().level()
+    };
+    let bearing = view_state.camera().get_bearing().0 as f32;
+    let paint_frame = VectorPaintFrame { zoom, bearing };
+    let previous_paint = world.resources.get::<VectorPaintFrame>().copied();
+    world.resources.insert(paint_frame);
+    (paint_frame, previous_paint)
+}
+
+fn painted_tiles(
+    pattern: &WgpuTileViewPattern,
+    source_tiles: &[crate::coords::WorldTileCoords],
+) -> Vec<crate::coords::WorldTileCoords> {
+    let mut painted_tiles = source_tiles.to_vec();
+    let mut seen: HashSet<_> = painted_tiles.iter().copied().collect();
+    for tile in pattern.iter() {
+        tile.render_kind(TileKind::Vector, |shape| {
+            if seen.insert(shape.coords()) {
+                painted_tiles.push(shape.coords());
+            }
+        });
+    }
+    painted_tiles
 }
 
 fn sources_for_upload(

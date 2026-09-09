@@ -31,3 +31,27 @@ pub(super) fn uniform_color(layer: &StyleLayer, zoom: f64) -> Option<[f32; 4]> {
 
 #[cfg(test)]
 mod tests;
+
+#[derive(Default)]
+struct PaintZoom(Option<f64>);
+
+pub(super) fn stabilize_zoom(world: &mut crate::tcs::world::World, requested: f64) -> f64 {
+    let state = world.resources.get_or_init_mut::<PaintZoom>();
+    let zoom = next_zoom(state.0, requested);
+    state.0 = Some(zoom);
+    zoom
+}
+
+fn next_zoom(previous: Option<f64>, requested: f64) -> f64 {
+    previous
+        .filter(|previous| (requested - previous).abs() < 0.125)
+        .unwrap_or_else(|| super::drape_paint_zoom(requested))
+}
+
+pub(crate) fn current_zoom(world: &crate::tcs::world::World, fallback: f64) -> f64 {
+    world
+        .resources
+        .get::<PaintZoom>()
+        .and_then(|state| state.0)
+        .unwrap_or_else(|| super::drape_paint_zoom(fallback))
+}

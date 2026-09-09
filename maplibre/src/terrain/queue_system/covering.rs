@@ -33,3 +33,29 @@ pub(super) fn for_frame(
 
 #[cfg(test)]
 mod tests;
+
+/// Keep only the nearest presented fallback for a target awaiting its first draw.
+pub(super) fn retained_textures(
+    targets: impl Iterator<Item = WorldTileCoords>,
+    present: impl Fn(WorldTileCoords) -> bool,
+) -> std::collections::HashSet<WorldTileCoords> {
+    let targets: Vec<_> = targets.collect();
+    let mut kept = targets
+        .iter()
+        .copied()
+        .collect::<std::collections::HashSet<_>>();
+    for target in targets {
+        if present(target) {
+            continue;
+        }
+        let mut current = target;
+        while let Some(parent) = current.get_parent() {
+            if present(parent) {
+                kept.insert(parent);
+                break;
+            }
+            current = parent;
+        }
+    }
+    kept
+}

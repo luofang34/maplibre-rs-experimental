@@ -84,12 +84,14 @@ pub fn queue_system(
         sources,
         clear_color,
     } = prepare_drapes(&specs, style, view_state, world, device)?;
+    let paint_zoom =
+        crate::vector::upload_system::paint::current_zoom(world, view_state.zoom().value());
     let phase = encode_drapes(
         &specs,
         &redraw,
         clear_color,
         world,
-        view_state.zoom(),
+        crate::coords::Zoom::new(paint_zoom),
         queue,
     )?;
     let (surface_specs, surface_sources) = surface_covering::for_frame(world, &specs, &sources);
@@ -208,12 +210,9 @@ fn acquire_drapes(
     terrain: &mut TerrainResources,
     device: &wgpu::Device,
 ) -> (Vec<bool>, Vec<Option<WorldTileCoords>>) {
-    // Ancestors that still hold a texture stand in for tiles not drawn yet, so they stay
-    // until every tile under them is drawn.
-    let mut keep: HashSet<WorldTileCoords> = specs.iter().map(|spec| spec.coords).collect();
-    for spec in specs {
-        keep.extend(present_ancestors(spec.coords, terrain));
-    }
+    let keep = covering::retained_textures(specs.iter().map(|spec| spec.coords), |coords| {
+        terrain.drape_texture(coords).is_some()
+    });
     terrain.retain_drapes(&keep);
     // Unready tiles keep their last valid texture or a background surface.
     if memory.is_tight() {
@@ -350,11 +349,13 @@ fn prepare_drapes(
         .copied()
         .unwrap_or_default();
     let clear_color = background_clear_color(style);
+    let paint_zoom =
+        crate::vector::upload_system::paint::current_zoom(world, view_state.zoom().value());
     let prints: Vec<u64> = {
         let content = loaded_content(world);
         specs
             .iter()
-            .map(|spec| fingerprint(spec, &content, clear_color, view_state.zoom().value()))
+            .map(|spec| fingerprint(spec, &content, clear_color, paint_zoom))
             .collect()
     };
     // A tile whose vector sources are finished but not yet in the buffer pool would drape
