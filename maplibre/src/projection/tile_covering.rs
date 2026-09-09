@@ -120,8 +120,8 @@ fn candidate(
     }
 }
 
-/// Fits an existing nearest-first covering to a smaller drape budget using one ancestor
-/// index. Rebuilding the entire parent histogram for each merge would stall the frame.
+/// Fits a covering to the drape budget by refining the largest remaining detail deficit.
+/// Distance breaks ties; a single nearby tile cannot consume every refinement slot.
 pub(crate) fn coarsen(
     tiles: impl Iterator<Item = WorldTileCoords>,
     limit: usize,
@@ -159,7 +159,9 @@ pub(crate) fn coarsen(
                 fully_visible: false,
             }))
         },
-        |tile, _| usize::MAX - ancestors.get(&tile).map_or(usize::MAX, |(_, index)| *index),
+        |tile, refinement| {
+            usize::from(u8::from(refinement.target).saturating_sub(u8::from(tile.z)))
+        },
     );
     let mut result = match result {
         Ok(tiles) => tiles,

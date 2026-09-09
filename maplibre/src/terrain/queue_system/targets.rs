@@ -40,12 +40,13 @@ pub(super) fn target_specs(
         covering::for_frame(
             world,
             view_region.iter().collect(),
-            // A complete replacement must fit beside the presented coverage.
-            (memory.drape_textures_allowed() / 2).max(1),
+            // Reserve room for two sibling groups while their parents remain visible.
+            memory.drape_textures_allowed().saturating_sub(8).max(1),
         )
     } else {
         view_region.iter().collect()
     };
+    super::prefetch::prepare(style, view_state, world, &tiles, memory);
     world
         .resources
         .insert(crate::terrain::request_system::DrapeRequests(tiles.clone()));

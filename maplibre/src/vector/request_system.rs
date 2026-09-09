@@ -81,6 +81,11 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                 .get::<crate::terrain::request_system::DrapeRequests>()
                 .map(|requests| requests.0.clone())
                 .unwrap_or_default();
+            let prefetch = world
+                .resources
+                .get::<crate::terrain::request_system::DrapePrefetchRequests>()
+                .map(|requests| requests.0.clone())
+                .unwrap_or_default();
             let overview = style
                 .terrain
                 .is_some()
@@ -94,6 +99,7 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                 .into_iter()
                 .chain(drapes)
                 .chain(view_region.iter().filter(|_| !draped))
+                .chain(prefetch)
             {
                 // Above the source maximum zoom the ancestor tile is fetched once and the
                 // view pattern scales it into every descendant in view.

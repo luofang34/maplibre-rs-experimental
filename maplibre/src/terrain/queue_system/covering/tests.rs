@@ -28,11 +28,10 @@ fn distant_tiles_coarsen_without_losing_ground_coverage() {
                 .any(|other| covers(*tile, *other) || covers(*other, *tile)));
         }
     }
-    assert_eq!(bounded_covering(tiles.iter().copied(), 96)[0], tiles[0]);
 }
 
 #[test]
-fn foreground_reaches_requested_detail_with_a_small_texture_budget() {
+fn equal_detail_demand_is_balanced_across_the_entire_visible_area() {
     let foreground = WorldTileCoords::from((8708, 5741, ZoomLevel::new(14)));
     let mut tiles = vec![foreground];
     tiles.extend(
@@ -46,9 +45,19 @@ fn foreground_reaches_requested_detail_with_a_small_texture_budget() {
     for budget in [16, 32] {
         let covering = bounded_covering(tiles.iter().copied(), budget);
         assert!(covering.len() <= budget);
+        let finest = covering
+            .iter()
+            .map(|tile| u8::from(tile.z))
+            .max()
+            .unwrap_or(0);
+        let coarsest = covering
+            .iter()
+            .map(|tile| u8::from(tile.z))
+            .min()
+            .unwrap_or(0);
         assert!(
-            covering.contains(&foreground),
-            "foreground must not wait for distant detail: {budget}, {covering:?}"
+            finest <= coarsest + 1,
+            "detail must not concentrate in one patch: {covering:?}"
         );
         for tile in &tiles {
             assert_eq!(

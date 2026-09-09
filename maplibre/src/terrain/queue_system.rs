@@ -31,6 +31,7 @@ use crate::{
 };
 mod cohort;
 mod covering;
+mod prefetch;
 mod targets;
 use targets::target_specs;
 

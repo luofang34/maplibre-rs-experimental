@@ -257,6 +257,12 @@ pub(crate) fn tiles_in_use(
     {
         in_use.extend(requests.0.iter().copied());
     }
+    if let Some(prefetch) = world
+        .resources
+        .get::<crate::terrain::request_system::DrapePrefetchRequests>()
+    {
+        in_use.extend(prefetch.0.iter().copied());
+    }
     if let Some(dem) = dem_source(style) {
         let view: Vec<WorldTileCoords> = in_use.iter().copied().collect();
         for coords in view {

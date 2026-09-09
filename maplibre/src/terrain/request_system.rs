@@ -31,6 +31,10 @@ use crate::{
 #[derive(Default)]
 pub(crate) struct DrapeRequests(pub(crate) Vec<WorldTileCoords>);
 
+/// Tiles prepared just outside the displayed covering, after visible requests.
+#[derive(Default)]
+pub(crate) struct DrapePrefetchRequests(pub(crate) Vec<WorldTileCoords>);
+
 /// Zoom levels between a draped tile and the DEM tile it samples, as in GL JS `deltaZoom`.
 const DELTA_ZOOM: u8 = 1;
 /// Zoom of the coarse ancestor loaded alongside every DEM tile so tile culling knows the
@@ -134,12 +138,23 @@ impl<E: Environment, T: DemTransferables> System for RequestSystem<E, T> {
             .get::<DrapeRequests>()
             .map(|requests| requests.0.clone())
             .unwrap_or_default();
-        let wanted = request_order(
+        let prefetch = world
+            .resources
+            .get::<DrapePrefetchRequests>()
+            .map(|requests| requests.0.clone())
+            .unwrap_or_default();
+        let mut wanted = request_order(
             view_region.iter().chain(drapes),
             &world.tiles,
             dem.minzoom,
             dem.maxzoom,
         );
+        wanted.extend(request_order(
+            prefetch.into_iter(),
+            &world.tiles,
+            dem.minzoom,
+            dem.maxzoom,
+        ));
         for coords in wanted {
             if coords.build_quad_key().is_none() || !requested.insert(coords) {
                 continue;

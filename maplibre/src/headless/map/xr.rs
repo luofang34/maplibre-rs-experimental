@@ -2,6 +2,8 @@
 
 use thiserror::Error;
 
+mod motion;
+
 use crate::{
     coords::{LatLon, WorldCoords, Zoom, TILE_SIZE},
     headless::map::HeadlessMap,
@@ -59,7 +61,7 @@ impl HeadlessMap {
         self.map_context
             .view_state
             .set_opaque_environment(frame.opaque_environment);
-        self.set_prefetch(frame.prefetch.as_ref(), frame.eyes.first());
+        self.set_motion_prefetch(&frame, views.first().copied());
         let resources = &mut self.map_context.world.resources;
         let frame_number = resources
             .get::<EyeInFrame>()
@@ -139,6 +141,46 @@ impl HeadlessMap {
                 Ok(view)
             })
             .collect()
+    }
+
+    fn set_motion_prefetch(
+        &mut self,
+        frame: &XrFrame,
+        view: Option<crate::render::view_state::ExternalView>,
+    ) {
+        if frame.prefetch.is_some() {
+            self.map_context
+                .world
+                .resources
+                .insert(motion::MotionPrefetch::default());
+            self.set_prefetch(frame.prefetch.as_ref(), frame.eyes.first());
+            return;
+        }
+        let projection = self
+            .map_context
+            .style
+            .projection
+            .as_ref()
+            .map_or(ProjectionType::Mercator, |spec| {
+                spec.projection_type.clone()
+            });
+        let motion = self
+            .map_context
+            .world
+            .resources
+            .get_or_init_mut::<motion::MotionPrefetch>();
+        let ahead = view.and_then(|view| {
+            motion.update(
+                frame.timestamp,
+                view,
+                &self.map_context.view_state,
+                &projection,
+            )
+        });
+        self.map_context.world.resources.insert(PrefetchView {
+            view_state: ahead,
+            placement: None,
+        });
     }
 
     /// Keeps the view the frame's first eye would have from `placement`, so the request
