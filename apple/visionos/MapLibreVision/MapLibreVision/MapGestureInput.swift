@@ -14,10 +14,16 @@ enum MapGestureInput {
         var rayTo: SIMD3<Double>?
     }
 
+    struct CarryReference {
+        var origin: SIMD3<Double>
+        var handDepth: Double
+    }
+
     /// Input gathered since the last frame.
     struct Delta {
         var moves: [Move] = []
         var translation = SIMD3<Double>.zero
+        var carryReference: CarryReference?
         /// Natural log of how much two pinches moved apart; negative when together.
         var logScale = 0.0
         var beginsZoom = false

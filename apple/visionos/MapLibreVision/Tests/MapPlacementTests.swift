@@ -202,3 +202,24 @@ final class GlobeOrientationTests: XCTestCase {
         XCTAssertEqual(placement.current.translation, viewer - SIMD3<Double>(0, 4000, 0))
     }
 }
+
+extension MapPlacementTests {
+    func testIndirectCarryMatchesPointerDepthWithoutAcceleratingOrChangingZoom() {
+        for distance in [0.4, 1.2, 2.4, 6.0] {
+            var placement = placed(MapPlacement.tableHeight)
+            placement.tableCenter = SIMD3<Double>(0, 0, -distance)
+            placement.place(viewer: .zero)
+            let before = placement.current
+            let gain = min(max(distance / 0.6, 1), 4)
+            placement.apply(.init(translation: SIMD3<Double>(0.03, 0.02, -0.04),
+                                  carryReference: .init(origin: .zero, handDepth: 0.6)))
+            let expected = SIMD3<Double>(0.03 * gain, 0.02 * gain, -0.04)
+            XCTAssertLessThan(simd_length(placement.current.translation - before.translation - expected), 1e-8)
+            let next = placement.current
+            placement.apply(.init(translation: SIMD3<Double>(0.03, 0.02, -0.04)))
+            XCTAssertLessThan(simd_length(placement.current.translation - next.translation - expected), 1e-8)
+            XCTAssertEqual(placement.current.logScale, before.logScale)
+            XCTAssertEqual(placement.viewpoint.bearing, 0)
+        }
+    }
+}

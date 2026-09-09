@@ -53,7 +53,7 @@ At the start of a zoom, capture the surface under the primary system selection r
 
 ## Placement and mode flights
 
-Common two-hand motion carries the globe by the same room distance at table and intermediate scales. Carrying preserves its orientation. Twist captures the local surface normal and a pitch axis once per gesture, so later head motion cannot change the rotation axes. A twist at the center of the table globe spins it about its visible normal without swinging the globe around the room.
+Common two-hand motion carries the globe. Sideways and vertical travel use the globe-center distance divided by the initial hand depth (with a 0.6 m reference floor and gain limited to 1–4), while push/pull stays at room scale. The gain and depth axis are captured at carry start, so head motion or carrying the object away cannot accelerate it. Carrying preserves orientation and zoom. Twist captures the local surface normal and a pitch axis once per gesture, so later head motion cannot change the rotation axes. A twist at the center of the table globe spins it about its visible normal without swinging the globe around the room.
 
 A mode flight starts from the complete rendered pose, including user placement, orbit corrections and head-relative orientation. The table destination uses the retained room placement, north up and zero tilt. The immersive destination uses horizontal head heading and the remembered immersive tilt; a nearly vertical head direction retains the map bearing. Position, rotation and scale interpolate together, with exact start and end poses. Physical head motion continues to affect the view independently. The tilt control reflects gesture and flight results.
 

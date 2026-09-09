@@ -40,6 +40,7 @@ struct MapGestureRecognizer<ID: Hashable> {
     private var isGlobe = true
     private var suppressUntilReleased = false
     private var beginsZoom = false
+    private var beginsCarry = false
     var head = SIMD3<Double>.zero
     var right = SIMD3<Double>(1, 0, 0)
     var up = SIMD3<Double>(0, 1, 0)
@@ -110,6 +111,7 @@ struct MapGestureRecognizer<ID: Hashable> {
         previous = baseline
         pairMode = .undecided
         beginsZoom = false
+        beginsCarry = false
     }
 
     private func turned(_ pinch: Pinch) -> SIMD3<Double>? {
@@ -173,6 +175,7 @@ struct MapGestureRecognizer<ID: Hashable> {
             if pairMode == .undecided, moveScore >= 1, moveScore > max(zoomScore, turnScore) * 1.15 {
                 pairMode = isGlobe ? .translate : .orbit
             }
+            beginsCarry = pairMode == .translate
             beginsOrbit = pairMode == .rotate || pairMode == .orbit
             // Zoom and carry consume their threshold to avoid a placement jump.
             if !beginsOrbit { return .init() }
@@ -189,10 +192,18 @@ struct MapGestureRecognizer<ID: Hashable> {
             return .init(turn: simd_dot(travel, pairRight) * 2.5,
                          pitch: simd_dot(travel, pairUp) * 2.5, beginsOrbit: beginsOrbit, orbitAnchor: pairAnchor())
         case .translate:
-            return .init(translation: now.center - was.center)
+            defer { beginsCarry = false }
+            return .init(translation: now.center - was.center,
+                         carryReference: beginsCarry ? carryReference() : nil)
         case .undecided:
             return .init()
         }
+    }
+
+    private func carryReference() -> MapGestureInput.CarryReference? {
+        guard let id = order.first, let pinch = pinches[id], let initial = baseline else { return nil }
+        return .init(origin: pinch.referenceHead,
+                     handDepth: max(simd_length(initial.center - pinch.referenceHead), 0.6))
     }
 
     private func coherentCarry() -> Bool {

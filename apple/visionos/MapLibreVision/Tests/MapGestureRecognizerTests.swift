@@ -174,3 +174,19 @@ final class MapGestureRecognizerTests: XCTestCase {
     }
 
 }
+
+extension MapGestureRecognizerTests {
+    func testCarryCapturesReferenceOnceAndDoesNotFollowHeadMotion() throws {
+        var engine = Recognizer()
+        _ = engine.handle([hand(1, -0.15), hand(2, 0.15)])
+        _ = engine.handle([hand(1, -0.10), hand(2, 0.20)])
+        let first = engine.handle([hand(1, -0.08), hand(2, 0.22)])
+        let reference = try XCTUnwrap(first.carryReference)
+        XCTAssertEqual(reference.origin, .zero)
+        XCTAssertEqual(reference.handDepth, 0.6, accuracy: 1e-9)
+        engine.head = SIMD3<Double>(0.4, 0.2, 0.3)
+        let still = engine.handle([hand(1, -0.08), hand(2, 0.22)])
+        XCTAssertEqual(still.translation, .zero)
+        XCTAssertNil(still.carryReference)
+    }
+}

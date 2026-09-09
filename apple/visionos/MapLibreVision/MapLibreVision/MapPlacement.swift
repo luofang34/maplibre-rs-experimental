@@ -144,6 +144,7 @@ struct MapPlacement {
     /// Whether this pinch began on the rendered sphere; crossing its edge keeps the mode.
     private var globeGrabbed: Bool?
     private var groundDrag: MapDragPlane?
+    private var carryMapping: (axis: SIMD3<Double>, gain: Double)?
     /// Where the viewer stood when the scene was last placed about them; the world keeps to
     /// that place while they move about the room.
     private var viewerReference = SIMD3<Double>(0, 0, 0)
@@ -364,10 +365,6 @@ struct MapPlacement {
     }
 
     /// Applies hand input to the viewpoint; input during a flight is dropped.
-    /// A grabbed globe point follows room-space hand travel; ground navigation follows
-    /// the pinch ray. A pinch begun outside the globe keeps the table globe's angular
-    /// speed as its size changes. Ground drags beyond reach pull at the reach limit.
-    /// Explicit placement input carries the globe; paired navigation input zooms or rotates it.
     mutating func apply(_ input: MapGestureInput.Delta) {
         guard flight == nil else {
             return
@@ -378,7 +375,7 @@ struct MapPlacement {
             zoomTarget = nil
         }
         if !onGround {
-            var travel = input.translation
+            var travel = carryTravel(input)
             for move in input.moves where move.rayOrigin == nil { travel += move.travel }
             let before = current.translation
             tableCenter += travel
@@ -487,6 +484,23 @@ struct MapPlacement {
         zoomTarget = ZoomTarget(local: .zero, origin: origin, direction: simd_normalize(delta),
                                 distance: simd_length(delta),
                                 clearance: max((simd_length(origin - center) - radius) / scale, 1))
+    }
+
+    private mutating func carryTravel(_ input: MapGestureInput.Delta) -> SIMD3<Double> {
+        if let reference = input.carryReference {
+            let radius = MapPlacement.earthRadiusMeters * exp(current.logScale)
+            let center = current.translation - current.rotation.act(SIMD3<Double>(0, 0, radius))
+            let offset = center - reference.origin
+            let depth = simd_length(offset)
+            if depth > 1e-6, reference.handDepth.isFinite {
+                carryMapping = (offset / depth, min(max(depth / max(reference.handDepth, 0.6), 1), 4))
+            }
+        }
+        guard let mapping = carryMapping else { return input.translation }
+        // Carry at a distance follows the same virtual pointer as a surface drag. Keep
+        // push/pull at room scale and latch the gain so carrying away cannot accelerate it.
+        let along = mapping.axis * simd_dot(input.translation, mapping.axis)
+        return along + (input.translation - along) * mapping.gain
     }
 
     private func offGlobeDirection(_ travel: SIMD3<Double>) -> SIMD3<Double> {

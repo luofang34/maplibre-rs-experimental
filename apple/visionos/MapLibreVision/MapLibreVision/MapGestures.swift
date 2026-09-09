@@ -35,6 +35,7 @@ final class MapGestures {
             let delta = recognizer.handle(samples)
             pending.moves.append(contentsOf: delta.moves)
             pending.translation += delta.translation
+            if let reference = delta.carryReference { pending.carryReference = reference }
             pending.logScale += delta.logScale
             pending.beginsZoom = pending.beginsZoom || delta.beginsZoom
             if let focus = delta.focusAnchor { pending.focusAnchor = focus }
