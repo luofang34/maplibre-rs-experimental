@@ -18,6 +18,9 @@ final class MapRenderer {
     private let modeStore = MapModeStore.shared
     private let gestures = MapGestures()
     private var placement: MapPlacement
+    #if DEBUG
+    private var zoomStress: MapZoomStress? = ProcessInfo.processInfo.arguments.contains("--zoom-stress-nyc") ? .init() : nil
+    #endif
     private var map: OpaquePointer?
     /// Size the map was created at, so a later layer of the same size can take it over.
     private var mapSize = (width: 0, height: 0)
@@ -65,8 +68,12 @@ final class MapRenderer {
         if let parked = MapRenderer.parked {
             placement = parked.placement
         } else {
+            var anchor = MapAnchor.innsbruck
+            #if DEBUG
+            if zoomStress != nil { anchor = MapZoomStress.anchor }
+            #endif
             placement = MapPlacement(
-                viewpoint: Viewpoint.above(MapAnchor.innsbruck, height: modeStore.initialHeight))
+                viewpoint: Viewpoint.above(anchor, height: modeStore.initialHeight))
         }
     }
 
@@ -307,6 +314,12 @@ final class MapRenderer {
         maplibre_visionos_set_opaque_environment(map, placement.immersion == .full)
         let input = gestures.take()
         placement.apply(input)
+        #if DEBUG
+        if let stressInput = zoomStress?.input(at: presentation, height: placement.viewpoint.height,
+                                               origin: head, focus: placement.current.translation) {
+            placement.apply(stressInput)
+        }
+        #endif
         let eyePositions = drawable.views.map { view -> SIMD3<Double> in
             let transform = headMatrix * view.transform
             return SIMD3<Double>(SIMD3<Float>(transform.columns.3.x, transform.columns.3.y, transform.columns.3.z))

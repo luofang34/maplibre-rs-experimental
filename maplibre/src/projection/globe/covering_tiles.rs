@@ -128,12 +128,6 @@ pub(crate) enum Intersection {
     Full,
 }
 
-#[derive(Clone, Copy)]
-pub(crate) struct StackEntry {
-    pub(crate) tile: TileCoords,
-    pub(crate) fully_visible: bool,
-}
-
 /// Selects canonical tiles intersecting both the camera frustum and visible globe hemisphere.
 ///
 /// `elevation` supplies the elevation range of each tile's culling volume.
@@ -156,61 +150,75 @@ pub(crate) fn covering_tiles_with_history(
             zoom: u8::from(options.zoom),
         });
     }
-    let mut stack = vec![StackEntry {
-        tile: TileCoords::from((0, 0, ZoomLevel::new(0))),
-        fully_visible: false,
-    }];
-    let mut visible = Vec::new();
     let lod = lod::LodContext::new(camera, options.requested_zoom);
     let frustum = GlobeFrustum::from_camera(camera);
-
-    while let Some(entry) = stack.pop() {
-        let bounds = globe_tile_bounding_volume(
-            entry.tile,
-            elevation.elevation_range(entry.tile),
-            camera.body(),
-        )
-        .map_err(|source| GlobeCoveringError::TileBounds { source })?;
-        let intersection = if entry.fully_visible {
-            Intersection::Full
-        } else {
-            tile_intersection(&frustum, camera.clipping_plane(), &bounds)
-        };
-        if intersection == Intersection::None {
-            continue;
-        }
-        let target_zoom = options.zoom_range.cap(if options.variable_zoom {
-            lod.stable_zoom_for_tile(entry.tile, options.rounding, history)
-        } else {
-            options.zoom
-        });
-        if entry.tile.z >= target_zoom {
-            if options.zoom_range.serves(entry.tile.z) {
-                visible.push(WorldTileCoords {
-                    x: entry.tile.x as i32,
-                    y: entry.tile.y as i32,
-                    z: entry.tile.z,
-                });
-            }
-            continue;
-        }
-        push_children(&mut stack, entry.tile, intersection == Intersection::Full);
-    }
-
     let priority = if camera.is_external_eye() {
         super::unit_sphere_to_lat_lon(camera.camera_position())
     } else {
         camera.center()
     };
-    sort_by_center(&mut visible, priority, options.zoom);
-    if camera.is_external_eye() {
-        visible = crate::projection::tile_covering::coarsen(
-            visible.into_iter(),
+    let inspect = |tile: WorldTileCoords, fully_visible| -> Result<_, GlobeCoveringError> {
+        let tile = TileCoords::from((tile.x as u32, tile.y as u32, tile.z));
+        let bounds =
+            globe_tile_bounding_volume(tile, elevation.elevation_range(tile), camera.body())
+                .map_err(|source| GlobeCoveringError::TileBounds { source })?;
+        let intersection = if fully_visible {
+            Intersection::Full
+        } else {
+            tile_intersection(&frustum, camera.clipping_plane(), &bounds)
+        };
+        if intersection == Intersection::None {
+            return Ok(None);
+        }
+        let target = options.zoom_range.cap(if options.variable_zoom {
+            lod.stable_zoom_for_tile(tile, options.rounding, history)
+        } else {
+            options.zoom
+        });
+        Ok(Some(crate::projection::tile_covering::Refinement {
+            target,
+            fully_visible: intersection == Intersection::Full,
+        }))
+    };
+    let mut visible = if camera.is_external_eye() {
+        crate::projection::tile_covering::bounded(
             options.max_tiles,
             options.zoom_range.min,
-        );
-    }
+            priority,
+            inspect,
+        )?
+    } else {
+        unbounded_covering(options.zoom_range.min, inspect)?
+    };
+    sort_by_center(&mut visible, priority, options.zoom);
     Ok(add_padding(visible, options.padding, options.max_tiles))
+}
+
+pub(crate) fn unbounded_covering<E>(
+    min_zoom: u8,
+    mut inspect: impl FnMut(
+        WorldTileCoords,
+        bool,
+    ) -> Result<Option<crate::projection::tile_covering::Refinement>, E>,
+) -> Result<Vec<WorldTileCoords>, E> {
+    let mut stack = vec![(WorldTileCoords::from((0, 0, ZoomLevel::new(0))), false)];
+    let mut visible = Vec::new();
+    while let Some((tile, fully_visible)) = stack.pop() {
+        let Some(refinement) = inspect(tile, fully_visible)? else {
+            continue;
+        };
+        if tile.z >= refinement.target {
+            if u8::from(tile.z) >= min_zoom {
+                visible.push(tile);
+            }
+        } else {
+            stack.extend(
+                tile.get_children()
+                    .map(|child| (child, refinement.fully_visible)),
+            );
+        }
+    }
+    Ok(visible)
 }
 
 /// Returns the conservative elevation used to retain features near the frustum horizon.
@@ -257,16 +265,6 @@ fn combine_intersections(left: Intersection, right: Intersection) -> Intersectio
         (Intersection::None, _) | (_, Intersection::None) => Intersection::None,
         (Intersection::Full, Intersection::Full) => Intersection::Full,
         _ => Intersection::Partial,
-    }
-}
-
-pub(crate) fn push_children(stack: &mut Vec<StackEntry>, tile: TileCoords, fully_visible: bool) {
-    let child_zoom = ZoomLevel::new(u8::from(tile.z).saturating_add(1));
-    for index in 0..4 {
-        stack.push(StackEntry {
-            tile: TileCoords::from((tile.x * 2 + index % 2, tile.y * 2 + index / 2, child_zoom)),
-            fully_visible,
-        });
     }
 }
 
@@ -339,3 +337,7 @@ mod tests;
 #[cfg(test)]
 #[path = "covering_tiles/priority/tests.rs"]
 mod priority_tests;
+
+#[cfg(test)]
+#[path = "covering_tiles/budget/tests.rs"]
+mod budget_tests;

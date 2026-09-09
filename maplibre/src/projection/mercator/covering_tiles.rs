@@ -13,8 +13,8 @@ use crate::{
     projection::globe::{
         covering::{aabb_volume, TileElevationProvider},
         covering_tiles::{
-            add_padding, frustum::GlobeFrustum, lod::LodContext, push_children, sort_by_center,
-            Intersection, SourceZoomRange, StackEntry, ZoomRounding,
+            add_padding, frustum::GlobeFrustum, lod::LodContext, sort_by_center,
+            unbounded_covering, Intersection, SourceZoomRange, ZoomRounding,
         },
     },
     render::{projection::mercator_world_to_lat_lon, view_state::ViewState},
@@ -77,55 +77,43 @@ pub(crate) fn covering_tiles_with_history(
     let center = view_state.camera().position();
     let eye = view_state.eye_position();
     let lod = lod_context(view_state, options.requested_zoom, world_size);
-    let mut stack = vec![StackEntry {
-        tile: TileCoords::from((0, 0, ZoomLevel::new(0))),
-        fully_visible: false,
-    }];
-    let mut visible = Vec::new();
-    while let Some(entry) = stack.pop() {
-        let intersection = if entry.fully_visible {
-            Intersection::Full
-        } else {
-            tile_intersection(&frustum, entry.tile, world_size, elevation)
-        };
-        if intersection == Intersection::None {
-            continue;
-        }
-        let target_zoom = options.zoom_range.cap(if options.variable_zoom {
-            lod.stable_zoom_for_tile(entry.tile, options.rounding, history)
-        } else {
-            options.zoom
-        });
-        if entry.tile.z >= target_zoom {
-            if options.zoom_range.serves(entry.tile.z) {
-                visible.push(WorldTileCoords {
-                    x: entry.tile.x as i32,
-                    y: entry.tile.y as i32,
-                    z: entry.tile.z,
-                });
-            }
-            continue;
-        }
-        push_children(&mut stack, entry.tile, intersection == Intersection::Full);
-    }
-
     let priority = if view_state.has_external_view() {
         Point2::new(eye.x, eye.y)
     } else {
         center
     };
-    sort_by_center(
-        &mut visible,
-        mercator_world_to_lat_lon(priority.x, priority.y, world_size),
-        options.zoom,
-    );
-    if view_state.has_external_view() {
-        visible = crate::projection::tile_covering::coarsen(
-            visible.into_iter(),
+    let priority = mercator_world_to_lat_lon(priority.x, priority.y, world_size);
+    let inspect = |tile: WorldTileCoords, fully_visible| -> Result<_, MercatorCoveringError> {
+        let tile = TileCoords::from((tile.x as u32, tile.y as u32, tile.z));
+        let intersection = if fully_visible {
+            Intersection::Full
+        } else {
+            tile_intersection(&frustum, tile, world_size, elevation)
+        };
+        if intersection == Intersection::None {
+            return Ok(None);
+        }
+        let target = options.zoom_range.cap(if options.variable_zoom {
+            lod.stable_zoom_for_tile(tile, options.rounding, history)
+        } else {
+            options.zoom
+        });
+        Ok(Some(crate::projection::tile_covering::Refinement {
+            target,
+            fully_visible: intersection == Intersection::Full,
+        }))
+    };
+    let mut visible = if view_state.has_external_view() {
+        crate::projection::tile_covering::bounded(
             options.max_tiles,
             options.zoom_range.min,
-        );
-    }
+            priority,
+            inspect,
+        )?
+    } else {
+        unbounded_covering(options.zoom_range.min, inspect)?
+    };
+    sort_by_center(&mut visible, priority, options.zoom);
     Ok(add_padding(visible, options.padding, options.max_tiles))
 }
 
