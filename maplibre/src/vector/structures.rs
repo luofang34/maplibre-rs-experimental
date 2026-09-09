@@ -151,11 +151,10 @@ fn prepare(tiles: &Tiles, style: &Style, sources: &[WorldTileCoords]) -> Vec<Spa
                 absolute,
                 |position| {
                     let scale = 2_f64.powi(i32::from(u8::from(coords.z)));
-                    index.elevation_at_zoom(
+                    index.elevation_cached(
                         tiles,
                         (f64::from(coords.x) + f64::from(position[0]) / 4096.0) / scale,
                         (f64::from(coords.y) + f64::from(position[1]) / 4096.0) / scale,
-                        u8::from(coords.z),
                     )
                 },
             );

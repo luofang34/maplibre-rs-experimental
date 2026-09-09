@@ -17,27 +17,10 @@ use std::time::Duration;
 async fn elevated_bridge_draws_over_terrain_and_buried_tunnel_is_occluded() {
     for (kind, elevation, visible) in [("bridge", "1000", true), ("tunnel", "-1000", false)] {
         let mut map = structure_map(kind, elevation).await;
-        for timestamp in [0, 16, 32] {
-            map.run_xr_frame(XrFrame {
-                opaque_environment: true,
-                timestamp: Duration::from_millis(timestamp),
-                placement: ScenePlacement {
-                    anchor: ExternalAnchor {
-                        position: LatLon::new(0.0, 0.0),
-                        altitude_meters: 0.0,
-                    },
-                    world_from_scene: Matrix4::identity(),
-                },
-                eyes: vec![XrEye {
-                    world_from_eye: Matrix4::from_translation(Vector3::new(0.0, 0.0, 4000.0)),
-                    frustum: EyeFrustum::symmetric(Rad(1.0), 1.0, 0.05, 1e9),
-                    target: EyeTarget::default(),
-                }],
-                request_overscan: 1.0,
-                prefetch: None,
-            })
-            .expect("structure frame");
-        }
+        render_at(
+            &mut map,
+            Matrix4::from_translation(Vector3::new(0.0, 0.0, 4000.0)),
+        );
         let pixels = read_blocking(&map);
         let green = pixels
             .chunks_exact(4)
@@ -51,7 +34,98 @@ async fn elevated_bridge_draws_over_terrain_and_buried_tunnel_is_occluded() {
     }
 }
 
+fn render_at(map: &mut HeadlessMap, camera: Matrix4<f64>) {
+    for timestamp in [0, 16, 32] {
+        map.run_xr_frame(XrFrame {
+            opaque_environment: true,
+            timestamp: Duration::from_millis(timestamp),
+            placement: ScenePlacement {
+                anchor: ExternalAnchor {
+                    position: LatLon::new(0.0, 0.0),
+                    altitude_meters: 0.0,
+                },
+                world_from_scene: Matrix4::identity(),
+            },
+            eyes: vec![XrEye {
+                world_from_eye: camera,
+                frustum: EyeFrustum::symmetric(Rad(1.0), 1.0, 0.05, 1e9),
+                target: EyeTarget::default(),
+            }],
+            request_overscan: 1.0,
+            prefetch: None,
+        })
+        .expect("structure frame");
+    }
+}
+
+#[tokio::test]
+async fn bridge_width_foreshortens_with_the_terrain_in_perspective() {
+    let lines = serde_json::json!({"type":"Feature", "properties":{}, "geometry":{
+        "type":"MultiLineString", "coordinates":[[[-0.1,0],[0.1,0]],[[-0.1,0.036],[0.1,0.036]]]
+    }});
+    let mut map = map_with_lines("bridge", "10", lines).await;
+    let camera = Matrix4::from_translation(Vector3::new(0.0, -2000.0, 4000.0))
+        * Matrix4::from_angle_x(Rad(std::f64::consts::FRAC_PI_4));
+    render_at(&mut map, camera);
+    let pixels = read_blocking(&map);
+    let mut runs = Vec::<usize>::new();
+    let mut length = 0;
+    for y in 0..64 {
+        let pixel = &pixels[(y * 64 + 32) * 4..][..4];
+        if pixel[1] > 180 && pixel[0] < 80 && pixel[2] < 80 {
+            length += 1;
+        } else if length > 0 {
+            runs.push(length);
+            length = 0;
+        }
+    }
+    if length > 0 {
+        runs.push(length);
+    }
+    assert_eq!(runs.len(), 2, "two visible decks: {runs:?}");
+    assert!(
+        runs[1] > runs[0],
+        "near deck must be wider than far deck: {runs:?}"
+    );
+}
+
+#[tokio::test]
+async fn parent_road_uses_finer_terrain_when_the_dem_refines() {
+    let mut map = structure_map("bridge", "").await;
+    let fine = (0..2)
+        .map(|x| {
+            (
+                WorldTileCoords::from((x, 1, crate::coords::ZoomLevel::new(1))),
+                image::RgbaImage::from_pixel(2, 2, image::Rgba([129, 244, 0, 255])),
+            )
+        })
+        .collect();
+    map.load_dem_tiles(fine).expect("refined 500 metre terrain");
+    render_at(
+        &mut map,
+        Matrix4::from_translation(Vector3::new(0.0, 0.0, 4000.0)),
+    );
+    let green = read_blocking(&map)
+        .chunks_exact(4)
+        .filter(|p| p[1] > 180 && p[0] < 80 && p[2] < 80)
+        .count();
+    assert!(
+        green > 20,
+        "parent road must stay above the finer terrain: {green}"
+    );
+}
+
 async fn structure_map(kind: &str, elevation: &str) -> HeadlessMap {
+    map_with_lines(
+        kind,
+        elevation,
+        serde_json::json!({"type":"Feature","properties":{},
+        "geometry":{"type":"LineString","coordinates":[[-0.1,0],[0.1,0]]}}),
+    )
+    .await
+}
+
+async fn map_with_lines(kind: &str, elevation: &str, line: serde_json::Value) -> HeadlessMap {
     let style: Style = serde_json::from_value(serde_json::json!({
             "version": 8, "projection": {"type":"globe"}, "terrain":{"source":"dem"},
             "sources": {
@@ -92,7 +166,6 @@ async fn structure_map(kind: &str, elevation: &str) -> HeadlessMap {
         image::RgbaImage::from_pixel(2, 2, image::Rgba([128, 0, 0, 255])),
     )])
     .expect("DEM");
-    let line = serde_json::json!({"type":"Feature","properties":{},"geometry":{"type":"LineString","coordinates":[[-0.1,0],[0.1,0]]}});
     let layers = map
         .process_geojson(
             &line,

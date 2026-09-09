@@ -82,8 +82,8 @@ pub fn subdivide_line_segment(
         .filter(|fraction| *fraction > 0.0 && *fraction < 1.0)
         .map(|fraction| {
             [
-                (start[0] + delta[0] * fraction).round(),
-                (start[1] + delta[1] * fraction).round(),
+                start[0] + delta[0] * fraction,
+                start[1] + delta[1] * fraction,
             ]
         })
         .collect::<Vec<_>>();

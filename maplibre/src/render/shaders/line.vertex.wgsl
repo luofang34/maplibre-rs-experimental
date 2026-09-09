@@ -60,7 +60,8 @@ fn main(
     var center = projected_center.clip_position;
     let center_ndc = center.xy / center.w;
     let normal_ndc = projected_normal.clip_position.xy / projected_normal.clip_position.w;
-    let dir = normalize(normal_ndc - center_ndc);
+    let direction = (normal_ndc - center_ndc) * vec2<f32>(viewport_width, viewport_height);
+    let dir = direction / max(length(direction), 1e-12);
 
     // Apply pixel-width offset in clip space.
     // NDC spans 2 units across the viewport, so 1 pixel = 2/viewport_px in NDC.
@@ -69,8 +70,17 @@ fn main(
     let px_to_clip_x = (2.0 / viewport_width) * center.w;
     let px_to_clip_y = (2.0 / viewport_height) * center.w;
     let clip_offset = vec2<f32>(dir.x * outset * px_to_clip_x, dir.y * outset * px_to_clip_y);
-    let depth = select(0.0, center.z + max(abs(center.z) * 2e-5, 1e-10), spatial);
-    center = vec4<f32>(center.x + clip_offset.x, center.y + clip_offset.y, depth, center.w);
+    if spatial {
+        // Decks share the map-space width of adjoining draped roads, including foreshortening.
+        let edge = project_tile_position_3d(
+            vec3<f32>(position + layer_translate + normal * outset * line_scale.y, elevation),
+            transform, tile_mercator_coords,
+        );
+        center = edge.clip_position;
+        center.z += max(abs(center.z) * 2e-5, 1e-10);
+    } else {
+        center = vec4<f32>(center.xy + clip_offset, 0.0, center.w);
+    }
 
     return VertexOutput(
         center,

@@ -115,3 +115,12 @@ fn options(granularity: u32) -> FillSubdivisionOptions {
         extend_to_south_pole: false,
     }
 }
+
+#[test]
+fn subdivision_preserves_fractional_road_alignment() {
+    let start = [2046.8622, 2047.5905];
+    let end = [2049.1377, 2047.5905];
+    let points = subdivide_line_segment(start, end, 512).expect("subdivide road");
+    assert!(points.len() > 1);
+    assert!(points.iter().all(|point| point[1] == start[1]));
+}
