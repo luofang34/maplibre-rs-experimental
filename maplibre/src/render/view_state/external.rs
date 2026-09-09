@@ -447,3 +447,7 @@ mod tests;
 #[cfg(test)]
 #[path = "external/regression/tests.rs"]
 mod regression;
+
+#[cfg(test)]
+#[path = "external/unprojection/tests.rs"]
+mod unprojection_tests;

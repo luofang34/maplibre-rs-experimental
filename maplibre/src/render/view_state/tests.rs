@@ -1,3 +1,4 @@
+#![allow(clippy::expect_used, clippy::panic)]
 use cgmath::{Deg, Matrix4, Vector2, Vector4};
 
 use crate::{
@@ -10,7 +11,7 @@ use crate::{
 fn conform_transformation() {
     let fov = Deg(60.0);
     let mut state = ViewState::new(
-        PhysicalSize::new(800, 600).unwrap(),
+        PhysicalSize::new(800, 600).expect("valid test view"),
         WorldCoords::at_ground(0.0, 0.0),
         Zoom::new(10.0),
         Deg(0.0),
@@ -19,25 +20,25 @@ fn conform_transformation() {
 
     //state.furthest_distance(state.camera_to_center_distance(), Point2::new(0.0, 0.0));
 
-    let projection = state.view_projection().invert();
+    let projection = state.inverted_view_projection().expect("valid view");
 
     let bottom_left = state
         .window_to_world_at_ground(&Vector2::new(0.0, 0.0), &projection, true)
-        .unwrap();
-    println!("bottom left on ground {:?}", bottom_left);
+        .expect("valid test view");
+    tracing::debug!("bottom left on ground {:?}", bottom_left);
     let top_right = state
         .window_to_world_at_ground(&Vector2::new(state.width, state.height), &projection, true)
-        .unwrap();
-    println!("top right on ground {:?}", top_right);
+        .expect("valid test view");
+    tracing::debug!("top right on ground {:?}", top_right);
 
     let mut rotated =
         Matrix4::from_angle_x(Deg(-30.0)) * Vector4::new(bottom_left.x, bottom_left.y, 0.0, 0.0);
 
-    println!("bottom left rotated around x axis {:?}", rotated);
+    tracing::debug!("bottom left rotated around x axis {:?}", rotated);
 
     rotated = Matrix4::from_angle_y(Deg(-30.0)) * rotated;
 
-    println!("bottom left rotated around x and y axis {:?}", rotated);
+    tracing::debug!("bottom left rotated around x and y axis {:?}", rotated);
 
     state.camera.set_pitch(Deg(30.0));
     //state.camera.set_yaw(Deg(-30.0));
@@ -47,7 +48,7 @@ fn conform_transformation() {
 
 fn state_at(zoom: f64, pitch: Deg<f64>) -> ViewState {
     ViewState::new(
-        PhysicalSize::new(800, 600).unwrap(),
+        PhysicalSize::new(800, 600).expect("valid test view"),
         WorldCoords::at_ground(256.0 * 2.0_f64.powf(zoom), 256.0 * 2.0_f64.powf(zoom)),
         Zoom::new(zoom),
         pitch,
@@ -131,7 +132,7 @@ fn max_pitch_clamps_pitch_changes() {
 #[test]
 fn gpu_view_projection_reverses_depth_only() {
     let state = ViewState::new(
-        PhysicalSize::new(800, 600).unwrap(),
+        PhysicalSize::new(800, 600).expect("valid test view"),
         WorldCoords::at_ground(1024.0, 2048.0),
         Zoom::new(10.0),
         Deg(25.0),

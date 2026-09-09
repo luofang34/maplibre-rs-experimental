@@ -9,6 +9,7 @@ use crate::{
     },
     window::PhysicalSize,
 };
+use cgmath::SquareMatrix;
 use cgmath::{Deg, Matrix4, Rad, Vector3};
 
 #[test]

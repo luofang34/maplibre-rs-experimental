@@ -95,7 +95,12 @@ impl ViewState {
             1.0
         );
 
-        let ndc = self.clip_to_window_transform().invert().unwrap() * fixed_window;
+        let ndc = Vector4::new(
+            2.0 * fixed_window.x / self.width - 1.0,
+            1.0 - 2.0 * fixed_window.y / self.height,
+            fixed_window.z,
+            1.0,
+        );
         let unprojected = inverted_view_proj.project(ndc);
 
         Vector3::new(
@@ -240,7 +245,7 @@ impl ViewState {
             Point3::new(1.0, 1.0, 1.0),
         ));
 
-        let inverted_view_proj = view_proj.invert();
+        let inverted_view_proj = self.inverted_view_projection().ok()?;
 
         let from_ndc = Vector3::new(self.width, self.height, 1.0);
         let vec = points
@@ -253,19 +258,19 @@ impl ViewState {
         let min_x = vec
             .iter()
             .map(|point| point.x)
-            .min_by(|a, b| a.partial_cmp(b).unwrap())?;
+            .min_by(|a, b| a.total_cmp(b))?;
         let min_y = vec
             .iter()
             .map(|point| point.y)
-            .min_by(|a, b| a.partial_cmp(b).unwrap())?;
+            .min_by(|a, b| a.total_cmp(b))?;
         let max_x = vec
             .iter()
             .map(|point| point.x)
-            .max_by(|a, b| a.partial_cmp(b).unwrap())?;
+            .max_by(|a, b| a.total_cmp(b))?;
         let max_y = vec
             .iter()
             .map(|point| point.y)
-            .max_by(|a, b| a.partial_cmp(b).unwrap())?;
+            .max_by(|a, b| a.total_cmp(b))?;
         Some(Aabb2::new(
             Point2::new(min_x, min_y),
             Point2::new(max_x, max_y),

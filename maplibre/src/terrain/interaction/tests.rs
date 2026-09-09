@@ -188,14 +188,14 @@ fn zooming_keeps_the_anchored_ground_point_under_the_pointer() {
         let pixel = Point2::new(pixel.0, pixel.1);
         let anchor = resolve_gesture_anchor(&style, &view, &world, pixel);
         let plane = anchor.elevation.expect("terrain anchor");
-        let inverted = view.view_projection().invert();
+        let inverted = view.inverted_view_projection().expect("valid view");
         let before = view
             .window_to_world_at_elevation(&pixel.to_vec(), &inverted, plane)
             .expect("anchor unprojects");
 
         zoom_mercator_around(&mut view, anchor, Zoom::new(12.3));
 
-        let inverted = view.view_projection().invert();
+        let inverted = view.inverted_view_projection().expect("valid view");
         let after = view
             .window_to_world_at_elevation(&pixel.to_vec(), &inverted, plane)
             .expect("anchor unprojects");
@@ -209,7 +209,7 @@ fn zooming_keeps_the_anchored_ground_point_under_the_pointer() {
 fn zooming_without_terrain_anchors_on_the_ground_plane() {
     let mut view = view(12.0, 0.0);
     let pixel = Point2::new(600.0, 300.0);
-    let inverted = view.view_projection().invert();
+    let inverted = view.inverted_view_projection().expect("valid view");
     let before = view
         .window_to_world_at_ground(&pixel.to_vec(), &inverted, false)
         .expect("ground unprojects");
@@ -223,7 +223,7 @@ fn zooming_without_terrain_anchors_on_the_ground_plane() {
         Zoom::new(13.0),
     );
 
-    let inverted = view.view_projection().invert();
+    let inverted = view.inverted_view_projection().expect("valid view");
     let after = view
         .window_to_world_at_ground(&pixel.to_vec(), &inverted, false)
         .expect("ground unprojects");
@@ -237,14 +237,14 @@ fn panning_moves_the_plane_point_with_the_cursor() {
     view.set_center_elevation(800.0);
     let cursor = Point2::new(700.0, 300.0);
     let delta = Vector2::new(40.0, -25.0);
-    let inverted = view.view_projection().invert();
+    let inverted = view.inverted_view_projection().expect("valid view");
     let grabbed = view
         .window_to_world_at_elevation(&(cursor.to_vec() - delta), &inverted, 800.0)
         .expect("plane unprojects");
 
     pan_mercator_by_pixels(&mut view, cursor, delta, 800.0);
 
-    let inverted = view.view_projection().invert();
+    let inverted = view.inverted_view_projection().expect("valid view");
     let under_cursor = view
         .window_to_world_at_elevation(&cursor.to_vec(), &inverted, 800.0)
         .expect("plane unprojects");

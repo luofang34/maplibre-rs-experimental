@@ -23,7 +23,7 @@ fn a_level_gaze_covers_the_ground_to_the_horizon_at_every_height() {
         .expect("ground region");
         let tiles: Vec<_> = region.iter().collect();
         let eye = eyed.eye_position();
-        let corners = eyed.frustum_corners();
+        let corners = eyed.frustum_corners().expect("valid frustum");
         let world_size = crate::coords::TILE_SIZE * 2_f64.powf(eyed.zoom().value());
         for sample in 0..=20 {
             let share = f64::from(sample) / 20.0;

@@ -114,7 +114,7 @@ pub fn screen_point_to_terrain_mercator(
     if index.is_empty() {
         return None;
     }
-    let inverted = view_state.view_projection().invert();
+    let inverted = view_state.inverted_view_projection().ok()?;
     let window = pixel.to_vec();
     let near = view_state.window_to_world_at_depth(&window, 0.0, &inverted);
     let far = view_state.window_to_world_at_depth(&window, 1.0, &inverted);
@@ -321,55 +321,8 @@ pub fn resolve_gesture_anchor(
     }
 }
 
-/// Moves the center so the world position `target` (pixels at the current zoom) at `elevation`
-/// metres sits under `pixel`, as GL JS `setLocationAtPoint` does on the flat map.
-pub fn set_location_at_pixel(
-    view_state: &mut ViewState,
-    target: Vector2<f64>,
-    elevation: f64,
-    pixel: Point2<f64>,
-) {
-    let inverted = view_state.view_projection().invert();
-    let Some(under_pixel) =
-        view_state.window_to_world_at_elevation(&pixel.to_vec(), &inverted, elevation)
-    else {
-        return;
-    };
-    view_state.camera_mut().move_relative(target - under_pixel);
-}
-
-/// Zooms the flat map around a gesture anchor, keeping its ground point under its pixel.
-pub fn zoom_mercator_around(view_state: &mut ViewState, anchor: GestureAnchor, next_zoom: Zoom) {
-    let plane = anchor
-        .elevation
-        .unwrap_or_else(|| view_state.center_elevation());
-    let inverted = view_state.view_projection().invert();
-    let scale = view_state.zoom().scale_delta(&next_zoom);
-    let before = view_state.window_to_world_at_elevation(&anchor.pixel.to_vec(), &inverted, plane);
-    view_state.zoom_to(next_zoom);
-    if let Some(before) = before {
-        set_location_at_pixel(view_state, before * scale, plane, anchor.pixel);
-    }
-}
-
-/// Pans the flat map so the point on the plane `elevation` metres up that was under
-/// `cursor - delta` moves under `cursor`.
-pub fn pan_mercator_by_pixels(
-    view_state: &mut ViewState,
-    cursor: Point2<f64>,
-    delta: Vector2<f64>,
-    elevation: f64,
-) {
-    let inverted = view_state.view_projection().invert();
-    let previous = cursor.to_vec() - delta;
-    let (Some(previous), Some(current)) = (
-        view_state.window_to_world_at_elevation(&previous, &inverted, elevation),
-        view_state.window_to_world_at_elevation(&cursor.to_vec(), &inverted, elevation),
-    ) else {
-        return;
-    };
-    view_state.camera_mut().move_relative(previous - current);
-}
+mod flat_gestures;
+pub use flat_gestures::{pan_mercator_by_pixels, set_location_at_pixel, zoom_mercator_around};
 
 /// Holds the center elevation still for the duration of a gesture.
 pub fn begin_gesture(view_state: &mut ViewState) {

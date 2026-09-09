@@ -196,7 +196,7 @@ impl ViewState {
         visible_level: ZoomLevel,
         padding: ViewStatePadding,
     ) -> Option<ViewRegion> {
-        self.view_region_bounding_box(&self.view_projection().invert())
+        self.view_region_bounding_box(&self.inverted_view_projection().ok()?)
             .map(|bounding_box| {
                 ViewRegion::new(
                     bounding_box,
@@ -389,23 +389,6 @@ impl ViewState {
         Vector3::new(eye.x / eye.w, eye.y / eye.w, eye.z / eye.w)
     }
 
-    /// Corners of the view frustum in world space: four on the far plane, then four on the
-    /// near plane, each ordered top-left, top-right, bottom-right, bottom-left on screen.
-    pub fn frustum_corners(&self) -> [Vector3<f64>; 8] {
-        let inverted = self.view_projection().invert();
-        let corners = [
-            (0.0, 0.0),
-            (self.width, 0.0),
-            (self.width, self.height),
-            (0.0, self.height),
-        ];
-        std::array::from_fn(|index| {
-            let (x, y) = corners[index % 4];
-            let depth = if index < 4 { 1.0 } else { 0.0 };
-            self.window_to_world(&Vector3::new(x, y, depth), &inverted)
-        })
-    }
-
     /// Returns the view projection in GPU clip conventions, which adds reversed-Z depth.
     ///
     /// CPU unprojection keeps [`Self::view_projection`], whose far plane sits at depth one.
@@ -466,6 +449,7 @@ mod external;
 mod horizon;
 mod pose;
 mod screen;
+mod unprojection;
 
 use external::ExternalEye;
 pub use external::{ExternalAnchor, ExternalView, ExternalViewError};

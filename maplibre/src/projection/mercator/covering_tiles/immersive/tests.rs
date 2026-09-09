@@ -55,7 +55,7 @@ fn bottom_frustum_ground_stays_covered_when_the_tile_budget_is_small() {
             let tiles =
                 covering_tiles(&view, options, &TileElevationRange::default()).expect("coverage");
             assert!(tiles.len() <= 12);
-            let corners = view.frustum_corners();
+            let corners = view.frustum_corners().expect("valid frustum");
             let origin = view.eye_position();
             let world_size = TILE_SIZE * 2_f64.powf(view.zoom().value());
             for sample in 0..=20 {

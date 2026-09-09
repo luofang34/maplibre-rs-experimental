@@ -71,8 +71,9 @@ impl UpdateState for QueryHandler {
     ) {
         if self.clicking {
             if let Some(window_position) = self.window_position {
-                let view_proj = view_state.view_projection();
-                let inverted_view_proj = view_proj.invert();
+                let Ok(inverted_view_proj) = view_state.inverted_view_projection() else {
+                    return;
+                };
 
                 let z = view_state.zoom().zoom_level(DEFAULT_TILE_SIZE); // FIXME: can be wrong, if tiles of different z are visible
                 let zoom = view_state.zoom();

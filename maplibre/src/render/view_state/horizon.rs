@@ -1,6 +1,6 @@
 //! The horizon on screen: where the flat map ends and the sky begins.
 
-use cgmath::{EuclideanSpace, InnerSpace, Point2, SquareMatrix, Vector2, Vector4};
+use cgmath::{EuclideanSpace, InnerSpace, Point2, Vector2, Vector4};
 
 use super::ViewState;
 
@@ -75,12 +75,12 @@ impl ViewState {
 
     fn eye_horizon_line(&self) -> Option<HorizonLine> {
         self.external_eye?;
-        let inverse = self.view_projection().0.invert()?;
+        let inverse = self.inverted_view_projection().ok()?;
         let eye_height = self.eye_position().z;
         // A ray's vertical component chooses the sky side even when the bookkeeping
         // center is behind the eye. Projecting that center would flip the gradient.
         let vertical = |clip: Vector4<f64>| {
-            let point = inverse * clip;
+            let point = inverse.project(clip);
             point.z - eye_height * point.w
         };
         let x = vertical(Vector4::new(1.0, 0.0, 0.0, 0.0));

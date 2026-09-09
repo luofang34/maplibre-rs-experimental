@@ -37,10 +37,24 @@ pub const REVERSED_Z: Matrix4<f64> = Matrix4::new(
 #[derive(Debug, Clone, Copy)]
 pub struct ViewProjection(pub Matrix4<f64>);
 
+/// A projection cannot be unprojected into finite world coordinates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("view projection is singular or non-finite")]
+pub struct ViewProjectionError;
+
 impl ViewProjection {
+    /// Inverts a projection, rejecting singular or non-finite transforms.
     #[tracing::instrument(skip_all)]
-    pub fn invert(&self) -> InvertedViewProjection {
-        InvertedViewProjection(self.0.invert().expect("Unable to invert view projection"))
+    pub fn invert(&self) -> Result<InvertedViewProjection, ViewProjectionError> {
+        let inverse = self.0.invert().ok_or(ViewProjectionError)?;
+        let columns: &[[f64; 4]; 4] = inverse.as_ref();
+        if !columns.iter().flatten().all(|value| value.is_finite()) {
+            return Err(ViewProjectionError);
+        }
+        Ok(InvertedViewProjection {
+            clip_to_camera: inverse,
+            camera_to_world: Matrix4::identity(),
+        })
     }
 
     pub fn project(&self, vector: Vector4<f64>) -> Vector4<f64> {
@@ -53,17 +67,21 @@ impl ViewProjection {
     }
 
     pub fn downcast(&self) -> Matrix4<f32> {
-        self.0
-            .cast::<f32>()
-            .expect("Unable to cast view projection to f32")
+        let columns: [[f64; 4]; 4] = self.0.into();
+        Matrix4::from(columns.map(|column| column.map(|value| value as f32)))
     }
 }
 
-pub struct InvertedViewProjection(Matrix4<f64>);
+pub struct InvertedViewProjection {
+    pub(crate) clip_to_camera: Matrix4<f64>,
+    pub(crate) camera_to_world: Matrix4<f64>,
+}
 
 impl InvertedViewProjection {
     pub fn project(&self, vector: Vector4<f64>) -> Vector4<f64> {
-        self.0 * vector
+        // Form the camera ray before adding the world translation. Multiplying these
+        // matrices first would cancel the small homogeneous depth at the far plane.
+        self.camera_to_world * (self.clip_to_camera * vector)
     }
 }
 
@@ -71,9 +89,8 @@ pub struct ModelViewProjection(Matrix4<f64>);
 
 impl ModelViewProjection {
     pub fn downcast(&self) -> Matrix4<f32> {
-        self.0
-            .cast::<f32>()
-            .expect("Unable to cast view projection to f32")
+        let columns: [[f64; 4]; 4] = self.0.into();
+        Matrix4::from(columns.map(|column| column.map(|value| value as f32)))
     }
 
     pub fn get(&self) -> Matrix4<f64> {
@@ -330,3 +347,7 @@ pub use frustum::EyeFrustum;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "camera/inversion/tests.rs"]
+mod inversion_tests;

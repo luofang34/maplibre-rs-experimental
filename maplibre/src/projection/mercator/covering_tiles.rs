@@ -42,6 +42,13 @@ pub struct MercatorCoveringOptions {
 /// Failure while selecting visible Mercator tiles.
 #[derive(Clone, Copy, Debug, Error, PartialEq, Eq)]
 pub enum MercatorCoveringError {
+    /// The current camera cannot produce finite frustum coordinates.
+    #[error("cannot unproject the Mercator covering frustum")]
+    ViewProjection {
+        /// Invalid projection supplied by the view.
+        #[from]
+        source: crate::render::camera::ViewProjectionError,
+    },
     /// The coordinate model only supports canonical zoom levels through 31.
     #[error("mercator covering zoom {zoom} exceeds the supported maximum")]
     UnsupportedZoom {
@@ -72,7 +79,7 @@ pub(crate) fn covering_tiles_with_history(
             zoom: u8::from(options.zoom),
         });
     }
-    let frustum = GlobeFrustum::from_points_oriented(view_state.frustum_corners());
+    let frustum = GlobeFrustum::from_points_oriented(view_state.frustum_corners()?);
     let world_size = TILE_SIZE * 2_f64.powf(view_state.zoom().value());
     let center = view_state.camera().position();
     let eye = view_state.eye_position();

@@ -13,6 +13,9 @@ use cgmath::{Deg, Matrix4};
 
 const SIZE: u32 = 1024;
 
+#[path = "leveling/tests.rs"]
+mod leveling;
+
 fn read_back_blocking(map: &HeadlessMap) -> Vec<u8> {
     texture_bytes_blocking(map, map.head_texture().expect("head texture"))
 }
