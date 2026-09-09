@@ -1,89 +1,71 @@
 import SwiftUI
 
-/// The launcher window: shows the renderer version, picks the mode and opens the map.
 struct ContentView: View {
     @Environment(\.openImmersiveSpace) private var openImmersiveSpace
     @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
     @ObservedObject private var modeStore = MapModeStore.shared
     @State private var isImmersed = false
+    @State private var isOpening = false
     @State private var status = ""
 
-    private var rendererVersion: String {
-        String(cString: maplibre_visionos_version())
-    }
-
     var body: some View {
-        VStack(spacing: 24) {
-            Text("MapLibre Vision")
-                .font(.largeTitle)
-            Text("Renderer \(rendererVersion)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text("Globe and worldwide terrain, drawn by maplibre-rs into the compositor.")
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 420)
-            HStack(spacing: 16) {
-                ForEach(MapMode.allCases) { mode in
-                    Button(mode.title) {
-                        modeStore.fly(to: mode)
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(modeStore.mode == mode ? .accentColor : .secondary)
-                }
-            }
-            if modeStore.isGlobe {
-                Text("Drag with one pinch to turn. Move two pinched hands together to place the globe; spread to zoom or twist to rotate.")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center).frame(maxWidth: 420)
-            } else {
-                VStack {
-                    Text("View tilt: \(Int(modeStore.tiltDegrees))°")
-                    Slider(value: Binding(get: { modeStore.tiltDegrees }, set: { modeStore.setTilt($0) }), in: 0...70)
-                        .accessibilityLabel("View tilt")
-                    Text("Drag to move. Spread two pinches to zoom. Move both pinched hands sideways to orbit or vertically to tilt; twist also turns. Look around naturally.")
-                        .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                }.frame(maxWidth: 420)
-            }
-            if let selection = modeStore.selectedFeature {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(selection.title).font(.headline)
-                    if selection.coordinates.count == 2 {
-                        Text(String(format: "%.4f°, %.4f°", selection.coordinates[1], selection.coordinates[0]))
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                .accessibilityElement(children: .combine)
-                Button("Clear selection") { modeStore.selectedFeature = nil }
-            }
-            Button(modeStore.isGlobe ? "North up" : "Level view") { modeStore.resetLevel() }
-            Button(isImmersed ? "Leave the map" : "Enter the map") {
-                Task {
-                    if isImmersed {
-                        await dismissImmersiveSpace()
-                        maplibre_visionos_note("immersive space dismissed by the launcher")
-                        isImmersed = false
+        VStack(spacing: 16) {
+            Text("MapLibre Vision").font(.title2.bold())
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    Picker("View", selection: Binding(
+                        get: { modeStore.mode }, set: { modeStore.fly(to: $0) })) {
+                        ForEach(MapMode.allCases) { mode in Text(mode.title).tag(mode) }
+                    }.pickerStyle(.segmented)
+                    if modeStore.isGlobe {
+                        Label("Drag with one pinch to turn the globe.", systemImage: "hand.draw")
+                        Text("Move two pinched hands together to place it. Spread to zoom; twist to turn.")
+                            .foregroundStyle(.secondary)
                     } else {
-                        let result = await openImmersiveSpace(id: MapRenderer.spaceID)
-                        maplibre_visionos_note("immersive space open result: \(result)")
-                        switch result {
-                        case .opened:
-                            isImmersed = true
-                        case .userCancelled:
-                            status = "Cancelled"
-                        case .error:
-                            status = "The immersive space could not open"
-                        @unknown default:
-                            status = "Unknown result"
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack {
+                                Text("Map tilt")
+                                Spacer()
+                                Text("\(Int(modeStore.tiltDegrees))°").monospacedDigit()
+                            }
+                            Slider(value: Binding(get: { modeStore.tiltDegrees }, set: { modeStore.setTilt($0) }), in: 0...90)
+                                .accessibilityLabel("Map tilt")
+                            Text("0° aligns the map with the room. Your head remains free to look around.")
+                                .font(.caption).foregroundStyle(.secondary)
                         }
+                        Text("Drag to move. Spread two pinches to zoom. Move both hands sideways to orbit or vertically to tilt.")
+                            .foregroundStyle(.secondary)
                     }
+                    if let selection = modeStore.selectedFeature {
+                        Divider()
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(selection.title).font(.headline)
+                            if selection.coordinates.count == 2 {
+                                Text(String(format: "%.4f°, %.4f°", selection.coordinates[1], selection.coordinates[0]))
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            Button("Clear selection") { modeStore.selectedFeature = nil }
+                        }.accessibilityElement(children: .contain)
+                    }
+                    if !status.isEmpty { Text(status).foregroundStyle(.red) }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 4)
             }
-            if !status.isEmpty {
-                Text(status).foregroundStyle(.red)
+            Divider()
+            HStack {
+                Button(modeStore.isGlobe ? "North up" : "Level map") { modeStore.resetLevel() }
+                Spacer()
+                Button(isImmersed ? "Leave the map" : "Enter the map") {
+                    Task { await toggleMap() }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(isOpening)
             }
         }
-        .padding(48)
-        .glassBackgroundEffect()
+        .padding(24)
+        .frame(minWidth: 360, idealWidth: 420, maxWidth: 520,
+               minHeight: 360, idealHeight: 460, maxHeight: 640)
         .task {
             // `--enter` opens the map straight away, for scripted runs in the simulator.
             if ProcessInfo.processInfo.arguments.contains("--enter"), !isImmersed,
@@ -99,6 +81,25 @@ struct ContentView: View {
             {
                 try? await Task.sleep(for: .seconds(seconds))
                 modeStore.fly(to: modeStore.mode == .tableGlobe ? .immersive : .tableGlobe)
+            }
+        }
+    }
+
+    private func toggleMap() async {
+        isOpening = true
+        defer { isOpening = false }
+        status = ""
+        if isImmersed {
+            await dismissImmersiveSpace()
+            isImmersed = false
+        } else {
+            let result = await openImmersiveSpace(id: MapRenderer.spaceID)
+            maplibre_visionos_note("immersive space open result: \(result)")
+            switch result {
+            case .opened: isImmersed = true
+            case .userCancelled: break
+            case .error: status = "The map could not open. Please try again."
+            @unknown default: status = "The map could not open. Please try again."
             }
         }
     }
