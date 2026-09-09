@@ -96,7 +96,7 @@ fn layout(paint: &SymbolPaint, prefix: &str, zoom: f64) -> [f32; 4] {
                 0.0,
             )
             .to_radians(),
-        u32::from(read("height-anchor").unwrap_or("ground") == "ground") as f32,
+        u32::from(paint.uses_shared_height() || paint.height_follows_ground(prefix)) as f32,
     ]
 }
 

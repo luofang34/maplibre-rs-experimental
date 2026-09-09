@@ -34,6 +34,31 @@ impl SymbolPaint {
             .map(|text| text.0)
     }
 
+    /// Whether shared symbol height is evaluated during placement rather than tile layout.
+    pub fn uses_shared_height(&self) -> bool {
+        self.properties.contains_key("symbol-height-offset")
+    }
+
+    /// Evaluates the shared point-symbol height, accepting component offsets as a fallback.
+    pub fn height_offset(&self, component: &str, properties: &FeatureProperties, zoom: f64) -> f32 {
+        let name = if self.properties.contains_key("symbol-height-offset") {
+            "symbol-height-offset".to_string()
+        } else {
+            format!("{component}-height-offset")
+        };
+        self.number(&name, properties, zoom, 0.0)
+    }
+
+    /// Whether a symbol's height includes the terrain elevation below its anchor.
+    pub fn height_follows_ground(&self, component: &str) -> bool {
+        self.properties
+            .get("symbol-height-anchor")
+            .or_else(|| self.properties.get(&format!("{component}-height-anchor")))
+            .and_then(|value| value.as_str())
+            .unwrap_or("ground")
+            == "ground"
+    }
+
     /// Font stack requested by the style.
     pub fn font_stack(&self) -> String {
         self.properties
@@ -68,3 +93,7 @@ impl SymbolPaint {
         (!text.trim().is_empty()).then_some(text)
     }
 }
+
+#[cfg(test)]
+#[path = "symbol/tests.rs"]
+mod tests;

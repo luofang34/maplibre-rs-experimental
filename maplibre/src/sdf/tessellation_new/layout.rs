@@ -67,7 +67,11 @@ pub(super) fn append(
                 .text("icon-anchor", &symbol.properties, zoom)
                 .unwrap_or_else(|| "center".into()),
         );
-        let height_offset = paint.number("icon-height-offset", &symbol.properties, zoom, 0.0);
+        let height_offset = if paint.uses_shared_height() {
+            0.0
+        } else {
+            paint.height_offset("icon", &symbol.properties, zoom)
+        };
         quad(
             buffer,
             symbol.anchor,

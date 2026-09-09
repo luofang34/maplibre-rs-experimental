@@ -35,8 +35,8 @@ fn style(offset: f32, anchor: &str) -> Style {
             {"id":"background","type":"background","paint":{"background-color":"#334455"}},
             {"id":"point","type":"circle","source":"map","source-layer":"places","paint":{"circle-radius":0.1}},
             {"id":"label","type":"symbol","source":"map","source-layer":"places",
-                "layout":{"text-field":"Alps","text-size":28,"text-height-offset":offset,
-                    "text-height-anchor":anchor,"text-allow-overlap":true,
+                "layout":{"text-field":"Alps","text-size":28,"symbol-height-offset":offset,
+                    "symbol-height-anchor":anchor,"text-allow-overlap":true,
                     "icon-image":"marker","icon-size":1,"icon-offset":[55,0]},
                 "paint":{"text-color":"#ff0000","text-halo-color":"#ffffff","text-halo-width":1}}
         ]
@@ -214,13 +214,23 @@ async fn elevated_text_and_sprite_render_over_an_ancestor_dem() {
         "text squashed: {text:?}"
     );
     let raised = render(700., "ground", 12., 4).await;
+    let (_, raised_icon) = colored_bounds(&raised, 1);
     let (_, raised) = colored_bounds(&raised, 0);
+    assert!(
+        raised_icon[1] + 8 < icon[1],
+        "shared height must lift the icon with its text"
+    );
     assert!(
         raised[1] + 8 < text[1],
         "height offset did not lift text: {text:?} {raised:?}"
     );
-    let sea = render(0., "sea", 12., 4).await;
+    let sea = render(0., "absolute", 12., 4).await;
     let (red, _) = colored_bounds(&sea, 0);
+    assert_eq!(
+        colored_bounds(&sea, 1).0,
+        0,
+        "absolute icon below terrain must be hidden"
+    );
     assert_eq!(
         red, 0,
         "terrain must occlude a sea-level label below 1200 m ground"
@@ -293,3 +303,6 @@ async fn fixture_map(
 mod navigation;
 
 mod stability;
+
+#[path = "styling/tests.rs"]
+mod styling;

@@ -26,12 +26,7 @@ pub(super) fn append(
         return;
     };
     let spacing = paint.number("text-letter-spacing", &symbol.properties, zoom, 0.0) * 24.0;
-    let width = |text: &str| {
-        text.chars()
-            .filter_map(|c| glyphs.get(&(c as u32)))
-            .map(|glyph| glyph.metrics[2] + spacing)
-            .sum::<f32>()
-    };
+    let width = |text: &str| line_width(text, glyphs, spacing);
     let max_width = paint.number("text-max-width", &symbol.properties, zoom, 10.0) * 24.0;
     let lines = wrap(&text, max_width, glyphs, spacing);
     let line_height = paint.number("text-line-height", &symbol.properties, zoom, 1.2) * 24.0;
@@ -52,7 +47,11 @@ pub(super) fn append(
         _ => 0.5,
     };
     let offset = offset(paint, "text-offset", 24.0);
-    let elevation = paint.number("text-height-offset", &symbol.properties, zoom, 0.0);
+    let elevation = if paint.uses_shared_height() {
+        0.0
+    } else {
+        paint.height_offset("text", &symbol.properties, zoom)
+    };
     for (row, line) in lines.iter().enumerate() {
         let baseline = -height * fractions[1] - 5.0 + row as f32 * line_height + offset[1];
         let mut pen = -max_line * fractions[0] + (max_line - width(line)) * justify + offset[0];
@@ -76,18 +75,23 @@ pub(super) fn append(
     }
 }
 
+fn line_width(text: &str, glyphs: &HashMap<u32, AtlasEntry>, spacing: f32) -> f32 {
+    (text
+        .chars()
+        .filter_map(|c| glyphs.get(&(c as u32)))
+        .map(|glyph| glyph.metrics[2] + spacing)
+        .sum::<f32>()
+        - spacing)
+        .max(0.0)
+}
+
 fn wrap(
     text: &str,
     max_width: f32,
     glyphs: &HashMap<u32, AtlasEntry>,
     spacing: f32,
 ) -> Vec<String> {
-    let measure = |text: &str| {
-        text.chars()
-            .filter_map(|c| glyphs.get(&(c as u32)))
-            .map(|g| g.metrics[2] + spacing)
-            .sum::<f32>()
-    };
+    let measure = |text: &str| line_width(text, glyphs, spacing);
     let mut result = Vec::new();
     for paragraph in text.split('\n') {
         let mut line = String::new();
@@ -109,3 +113,7 @@ fn wrap(
     }
     result
 }
+
+#[cfg(test)]
+#[path = "text_layout/tests.rs"]
+mod tests;

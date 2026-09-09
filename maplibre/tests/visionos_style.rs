@@ -143,3 +143,37 @@ fn place_detail_enters_progressively_and_keeps_major_places_larger() {
         previous_size = size;
     }
 }
+
+#[test]
+fn labels_grow_continuously_and_keep_halos_subordinate_to_type() {
+    use maplibre::style::layer::LayerPaint;
+    let style = style();
+    for layer in style.layers.iter().filter(|l| l.id.starts_with("place_")) {
+        let Some(LayerPaint::Symbol(paint)) = &layer.paint else {
+            panic!("place symbol")
+        };
+        let start = f64::from(layer.minzoom.unwrap_or(0));
+        let end = f64::from(layer.maxzoom.unwrap_or(24)) - 0.1;
+        let size = |z| {
+            paint
+                .text_size
+                .as_ref()
+                .expect("size")
+                .evaluate_at_zoom(z)
+                .expect("evaluated size")
+        };
+        assert!(size(end) > size(start), "{} lacks zoom hierarchy", layer.id);
+        for step in 0..100 {
+            let zoom = start + (end - start) * f64::from(step) / 100.0;
+            assert!(
+                (size(zoom + 0.001) - size(zoom)).abs() < 0.02,
+                "size jumped"
+            );
+            let halo = paint.number("text-halo-width", &FeatureProperties::new(), zoom, 0.0);
+            assert!(
+                halo > 0.0 && halo < size(zoom) / 10.0,
+                "heavy halo hides letter shape"
+            );
+        }
+    }
+}

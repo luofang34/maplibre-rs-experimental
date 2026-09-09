@@ -240,8 +240,20 @@
           "Noto Sans Italic"
         ],
         "text-rotation-alignment": "map",
-        "text-size": 12,
-        "text-padding": 14,
+        "text-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          9,
+          11,
+          14,
+          15
+        ],
+        "text-padding": 16,
         "icon-padding": 6,
         "symbol-sort-key": [
           "coalesce",
@@ -252,13 +264,18 @@
           0
         ],
         "text-keep-upright": true,
-        "text-pitch-alignment": "viewport"
+        "text-pitch-alignment": "viewport",
+        "text-letter-spacing": 0.015,
+        "text-line-height": 1.25,
+        "text-max-width": 12,
+        "text-allow-overlap": false,
+        "text-ignore-placement": false
       },
       "paint": {
         "text-color": "#b9dce9",
-        "text-halo-color": "rgba(12, 20, 30, 0.9)",
-        "text-halo-width": 1,
-        "text-halo-blur": 0.25
+        "text-halo-color": "rgba(12, 22, 30, 0.85)",
+        "text-halo-width": 0.75,
+        "text-halo-blur": 0.2
       },
       "minzoom": 9
     },
@@ -1968,7 +1985,19 @@
         "text-max-angle": 30,
         "text-pitch-alignment": "viewport",
         "text-rotation-alignment": "map",
-        "text-size": 13,
+        "text-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          14,
+          12,
+          19,
+          14
+        ],
         "visibility": "visible",
         "text-padding": 14,
         "icon-padding": 6,
@@ -1980,13 +2009,18 @@
           ],
           0
         ],
-        "text-keep-upright": true
+        "text-keep-upright": true,
+        "text-letter-spacing": 0.01,
+        "text-line-height": 1.25,
+        "text-max-width": 12,
+        "text-allow-overlap": false,
+        "text-ignore-placement": false
       },
       "paint": {
         "text-color": "#c8d7e2",
-        "text-halo-blur": 0.25,
-        "text-halo-color": "rgba(12, 20, 30, 0.9)",
-        "text-halo-width": 1,
+        "text-halo-blur": 0.2,
+        "text-halo-color": "rgba(12, 22, 30, 0.85)",
+        "text-halo-width": 0.75,
         "text-translate": [
           0,
           0
@@ -2024,7 +2058,19 @@
         ],
         "text-pitch-alignment": "viewport",
         "text-rotation-alignment": "viewport",
-        "text-size": 13,
+        "text-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          12,
+          12,
+          17,
+          14
+        ],
         "visibility": "visible",
         "text-padding": 14,
         "icon-padding": 6,
@@ -2036,7 +2082,12 @@
           ],
           0
         ],
-        "text-keep-upright": true
+        "text-keep-upright": true,
+        "text-letter-spacing": 0.025,
+        "text-line-height": 1.25,
+        "text-max-width": 12,
+        "text-allow-overlap": false,
+        "text-ignore-placement": false
       },
       "paint": {
         "text-color": "#c8d7e2",
@@ -2044,9 +2095,9 @@
           0,
           2
         ],
-        "text-halo-color": "rgba(12, 20, 30, 0.9)",
-        "text-halo-width": 1,
-        "text-halo-blur": 0.25
+        "text-halo-color": "rgba(12, 22, 30, 0.85)",
+        "text-halo-width": 0.75,
+        "text-halo-blur": 0.2
       },
       "minzoom": 12
     },
@@ -10300,9 +10351,21 @@
           0,
           0
         ],
-        "text-size": 13,
+        "text-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          14,
+          12,
+          19,
+          14
+        ],
         "visibility": "visible",
-        "text-padding": 16,
+        "text-padding": 18,
         "icon-padding": 6,
         "symbol-sort-key": [
           "coalesce",
@@ -10314,13 +10377,20 @@
         ],
         "text-keep-upright": true,
         "text-pitch-alignment": "viewport",
-        "symbol-spacing": 600
+        "symbol-spacing": 600,
+        "text-letter-spacing": 0.01,
+        "text-line-height": 1.25,
+        "text-max-width": 9,
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+        "symbol-height-offset": 0,
+        "symbol-height-anchor": "ground"
       },
       "paint": {
         "text-color": "#a8bdcc",
-        "text-halo-blur": 0.25,
-        "text-halo-color": "rgba(12, 20, 30, 0.9)",
-        "text-halo-width": 1
+        "text-halo-blur": 0.2,
+        "text-halo-color": "rgba(12, 22, 30, 0.85)",
+        "text-halo-width": 0.75
       },
       "minzoom": 14
     },
@@ -10367,9 +10437,21 @@
           0,
           0
         ],
-        "text-size": 13,
+        "text-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          14,
+          12.5,
+          19,
+          14.5
+        ],
         "visibility": "visible",
-        "text-padding": 16,
+        "text-padding": 18,
         "icon-padding": 6,
         "symbol-sort-key": [
           "coalesce",
@@ -10381,13 +10463,20 @@
         ],
         "text-keep-upright": true,
         "text-pitch-alignment": "viewport",
-        "symbol-spacing": 600
+        "symbol-spacing": 600,
+        "text-letter-spacing": 0.015,
+        "text-line-height": 1.25,
+        "text-max-width": 9,
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+        "symbol-height-offset": 0,
+        "symbol-height-anchor": "ground"
       },
       "paint": {
         "text-color": "#a8bdcc",
-        "text-halo-blur": 0.25,
-        "text-halo-color": "rgba(12, 20, 30, 0.9)",
-        "text-halo-width": 1
+        "text-halo-blur": 0.2,
+        "text-halo-color": "rgba(12, 22, 30, 0.85)",
+        "text-halo-width": 0.75
       },
       "minzoom": 14
     },
@@ -10435,9 +10524,21 @@
           0,
           0
         ],
-        "text-size": 14,
+        "text-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          12,
+          13,
+          17,
+          16
+        ],
         "visibility": "visible",
-        "text-padding": 18,
+        "text-padding": 20,
         "icon-padding": 6,
         "symbol-sort-key": [
           "coalesce",
@@ -10449,14 +10550,21 @@
         ],
         "text-keep-upright": true,
         "text-pitch-alignment": "viewport",
-        "symbol-spacing": 600
+        "symbol-spacing": 600,
+        "text-letter-spacing": 0.01,
+        "text-line-height": 1.25,
+        "text-max-width": 9,
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+        "symbol-height-offset": 0,
+        "symbol-height-anchor": "ground"
       },
       "paint": {
         "icon-opacity": 0.7,
         "text-color": "#b1c5d3",
-        "text-halo-blur": 0.25,
-        "text-halo-color": "rgba(12, 20, 30, 0.9)",
-        "text-halo-width": 1
+        "text-halo-blur": 0.2,
+        "text-halo-color": "rgba(12, 22, 30, 0.85)",
+        "text-halo-width": 0.75
       },
       "minzoom": 12
     },
@@ -10504,9 +10612,21 @@
           0,
           0
         ],
-        "text-size": 15,
+        "text-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          10,
+          14,
+          15,
+          18
+        ],
         "visibility": "visible",
-        "text-padding": 18,
+        "text-padding": 22,
         "icon-padding": 6,
         "symbol-sort-key": [
           "coalesce",
@@ -10518,14 +10638,21 @@
         ],
         "text-keep-upright": true,
         "text-pitch-alignment": "viewport",
-        "symbol-spacing": 600
+        "symbol-spacing": 600,
+        "text-letter-spacing": 0.015,
+        "text-line-height": 1.25,
+        "text-max-width": 9,
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+        "symbol-height-offset": 0,
+        "symbol-height-anchor": "ground"
       },
       "paint": {
         "icon-opacity": 0.7,
         "text-color": "#cbd9e3",
-        "text-halo-blur": 0.25,
-        "text-halo-color": "rgba(12, 20, 30, 0.9)",
-        "text-halo-width": 1
+        "text-halo-blur": 0.2,
+        "text-halo-color": "rgba(12, 22, 30, 0.85)",
+        "text-halo-width": 0.75
       },
       "minzoom": 10
     },
@@ -10578,9 +10705,21 @@
           0,
           0
         ],
-        "text-size": 17,
+        "text-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          7,
+          16,
+          12,
+          21
+        ],
         "visibility": "visible",
-        "text-padding": 20,
+        "text-padding": 25,
         "icon-padding": 6,
         "symbol-sort-key": [
           "coalesce",
@@ -10592,14 +10731,21 @@
         ],
         "text-keep-upright": true,
         "text-pitch-alignment": "viewport",
-        "symbol-spacing": 600
+        "symbol-spacing": 600,
+        "text-letter-spacing": 0.01,
+        "text-line-height": 1.25,
+        "text-max-width": 9,
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+        "symbol-height-offset": 0,
+        "symbol-height-anchor": "ground"
       },
       "paint": {
         "icon-opacity": 0.7,
         "text-color": "#e0e9ef",
-        "text-halo-blur": 0.25,
-        "text-halo-color": "rgba(12, 20, 30, 0.9)",
-        "text-halo-width": 1
+        "text-halo-blur": 0.2,
+        "text-halo-color": "rgba(12, 22, 30, 0.85)",
+        "text-halo-width": 0.75
       },
       "minzoom": 7
     },
@@ -10645,16 +10791,28 @@
           ]
         ],
         "text-font": [
-          "Noto Sans Regular"
+          "Noto Sans Bold"
         ],
         "text-justify": "center",
         "text-offset": [
           0,
           0
         ],
-        "text-size": 20,
+        "text-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          5,
+          19,
+          10,
+          25
+        ],
         "visibility": "visible",
-        "text-padding": 22,
+        "text-padding": 28,
         "icon-padding": 6,
         "symbol-sort-key": [
           "coalesce",
@@ -10666,14 +10824,21 @@
         ],
         "text-keep-upright": true,
         "text-pitch-alignment": "viewport",
-        "symbol-spacing": 600
+        "symbol-spacing": 600,
+        "text-letter-spacing": 0.01,
+        "text-line-height": 1.25,
+        "text-max-width": 9,
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+        "symbol-height-offset": 0,
+        "symbol-height-anchor": "ground"
       },
       "paint": {
         "icon-opacity": 0.7,
         "text-color": "#f0f4f7",
-        "text-halo-blur": 0.25,
-        "text-halo-color": "rgba(12, 20, 30, 0.9)",
-        "text-halo-width": 1
+        "text-halo-blur": 0.2,
+        "text-halo-color": "rgba(12, 22, 30, 0.85)",
+        "text-halo-width": 0.75
       },
       "minzoom": 5
     },
@@ -10714,9 +10879,21 @@
         "text-font": [
           "Noto Sans Regular"
         ],
-        "text-size": 16,
+        "text-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          4,
+          13,
+          8,
+          17
+        ],
         "visibility": "visible",
-        "text-padding": 24,
+        "text-padding": 28,
         "icon-padding": 6,
         "symbol-sort-key": [
           "coalesce",
@@ -10734,13 +10911,20 @@
         "text-offset": [
           0,
           0
-        ]
+        ],
+        "text-letter-spacing": 0.08,
+        "text-line-height": 1.25,
+        "text-max-width": 9,
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+        "symbol-height-offset": 0,
+        "symbol-height-anchor": "ground"
       },
       "paint": {
         "text-color": "#a8bdcc",
-        "text-halo-blur": 0.25,
-        "text-halo-color": "rgba(12, 20, 30, 0.9)",
-        "text-halo-width": 1
+        "text-halo-blur": 0.2,
+        "text-halo-color": "rgba(12, 22, 30, 0.85)",
+        "text-halo-width": 0.75
       },
       "minzoom": 4
     },
@@ -10785,9 +10969,21 @@
         "text-font": [
           "Noto Sans Italic"
         ],
-        "text-size": 20,
+        "text-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          2,
+          14,
+          5,
+          18
+        ],
         "visibility": "visible",
-        "text-padding": 28,
+        "text-padding": 32,
         "icon-padding": 6,
         "symbol-sort-key": [
           "coalesce",
@@ -10805,13 +11001,20 @@
         "text-offset": [
           0,
           0
-        ]
+        ],
+        "text-letter-spacing": 0.08,
+        "text-line-height": 1.25,
+        "text-max-width": 9,
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+        "symbol-height-offset": 0,
+        "symbol-height-anchor": "ground"
       },
       "paint": {
         "text-color": "#c5d5df",
-        "text-halo-color": "rgba(12, 20, 30, 0.9)",
-        "text-halo-width": 1,
-        "text-halo-blur": 0.25
+        "text-halo-color": "rgba(12, 22, 30, 0.85)",
+        "text-halo-width": 1.0,
+        "text-halo-blur": 0.2
       },
       "minzoom": 2
     },
@@ -10861,9 +11064,21 @@
         "text-font": [
           "Noto Sans Regular"
         ],
-        "text-size": 20,
+        "text-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          2,
+          16,
+          5,
+          21
+        ],
         "visibility": "visible",
-        "text-padding": 28,
+        "text-padding": 32,
         "icon-padding": 6,
         "symbol-sort-key": [
           "coalesce",
@@ -10881,13 +11096,20 @@
         "text-offset": [
           0,
           0
-        ]
+        ],
+        "text-letter-spacing": 0.08,
+        "text-line-height": 1.25,
+        "text-max-width": 9,
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+        "symbol-height-offset": 0,
+        "symbol-height-anchor": "ground"
       },
       "paint": {
         "text-color": "#c5d5df",
-        "text-halo-color": "rgba(12, 20, 30, 0.9)",
-        "text-halo-width": 1,
-        "text-halo-blur": 0.25
+        "text-halo-color": "rgba(12, 22, 30, 0.85)",
+        "text-halo-width": 1.0,
+        "text-halo-blur": 0.2
       },
       "minzoom": 2
     },
@@ -10936,11 +11158,23 @@
           ]
         ],
         "text-font": [
-          "Noto Sans Regular"
+          "Noto Sans Bold"
         ],
-        "text-size": 20,
+        "text-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          0,
+          19,
+          5,
+          25
+        ],
         "visibility": "visible",
-        "text-padding": 28,
+        "text-padding": 36,
         "icon-padding": 6,
         "symbol-sort-key": [
           "coalesce",
@@ -10957,13 +11191,20 @@
         "text-offset": [
           0,
           0
-        ]
+        ],
+        "text-letter-spacing": 0.1,
+        "text-line-height": 1.25,
+        "text-max-width": 9,
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+        "symbol-height-offset": 0,
+        "symbol-height-anchor": "ground"
       },
       "paint": {
         "text-color": "#c5d5df",
-        "text-halo-color": "rgba(12, 20, 30, 0.9)",
-        "text-halo-width": 1,
-        "text-halo-blur": 0.25
+        "text-halo-color": "rgba(12, 22, 30, 0.85)",
+        "text-halo-width": 1.0,
+        "text-halo-blur": 0.2
       },
       "minzoom": 0
     }

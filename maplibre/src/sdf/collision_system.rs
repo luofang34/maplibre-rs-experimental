@@ -10,7 +10,7 @@ use super::placement::canonical_tile;
 use super::{
     collision_grid::CollisionGrid,
     paint::SymbolUniforms,
-    placement::{elevation, screen_boxes},
+    placement::{screen_boxes, symbol_elevation},
     query::{PlacedSymbol, PlacedSymbols},
 };
 use crate::{
@@ -161,7 +161,7 @@ fn place_layer(
     ];
     let uniforms = SymbolUniforms::new(paint, view_state.zoom().value(), [1, 1]);
     for (feature_index, feature) in layer.features.iter().enumerate() {
-        let ground = elevation(world, layer, feature);
+        let ground = symbol_elevation(world, layer, feature, paint, view_state.zoom().value());
         let rectangles = local_zoom_visible(
             layer.coords,
             feature,

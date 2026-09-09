@@ -19,6 +19,25 @@ pub(super) fn canonical_tile(coords: WorldTileCoords) -> Option<TileCoords> {
     })
 }
 
+pub(super) fn symbol_elevation(
+    world: &World,
+    layer: &SymbolLayerData,
+    feature: &Feature,
+    paint: &crate::style::layer::SymbolPaint,
+    zoom: f64,
+) -> f32 {
+    let terrain = elevation(world, layer, feature);
+    if !paint.uses_shared_height() {
+        return terrain;
+    }
+    let base = if paint.height_follows_ground("text") {
+        terrain
+    } else {
+        0.0
+    };
+    base + paint.height_offset("text", &feature.data.properties, zoom)
+}
+
 pub(super) fn elevation(world: &World, layer: &SymbolLayerData, feature: &Feature) -> f32 {
     let scale = 2_f64.powi(i32::from(u8::from(layer.coords.z)));
     let x = (f64::from(layer.coords.x) + f64::from(feature.text_anchor.x) / 4096.0) / scale;
