@@ -45,7 +45,7 @@ final class MapCameraTests: XCTestCase {
 }
 
 final class MapScaleCameraTests: XCTestCase {
-    func testPairSurfacePivotRemainsFixedAtEveryScale() {
+    func testPairUsesSurfaceForExplorationAndCenterForTableObject() {
         for height in [4000.0, 60_000, 100_000, 1_000_000, 8_000_000, 40_000_000] {
             var placement = MapPlacement(viewpoint: .above(.innsbruck, height: height))
             placement.tableCenter = SIMD3<Double>(0, 0, -1)
@@ -58,7 +58,12 @@ final class MapScaleCameraTests: XCTestCase {
             placement.apply(.init(turn: 0.2, pitch: 0.1, beginsOrbit: true,
                                   orbitAnchor: (.zero, simd_normalize(target))))
             let moved = placement.current.translation + placement.current.rotation.act(local * exp(placement.current.logScale))
-            XCTAssertLessThan(simd_length(moved - target), 1e-5, "pivot at height \(height)")
+            if height == MapPlacement.tableHeight {
+                let center = placement.current.translation - placement.current.rotation.act(SIMD3<Double>(0, 0, radius * exp(placement.current.logScale)))
+                XCTAssertLessThan(simd_length(center - placement.tableCenter), 1e-8)
+            } else {
+                XCTAssertLessThan(simd_length(moved - target), 1e-5, "pivot at height \(height)")
+            }
             XCTAssertGreaterThan(abs((placement.current.rotation * before.inverse).angle), 0.19)
         }
     }
@@ -142,11 +147,12 @@ final class MapZoomAnchorTests: XCTestCase {
             let local = SIMD3<Double>(r * sin(0.0001), 0, r * (cos(0.0001) - 1))
             let point = placement.current.translation + placement.current.rotation.act(local * exp(placement.current.logScale))
             let ray = simd_normalize(point)
+            let coordinate = placement.geographicPosition(ofRoomPoint: point)
             for step in 0..<20 {
                 placement.updateViewRay(origin: SIMD3<Double>(0.2, 0.1, 0), direction: SIMD3<Double>(0, 1, 0))
                 placement.apply(.init(logScale: step < 10 ? 0.08 : -0.08, beginsZoom: step == 0,
                                       focusAnchor: (.zero, ray)))
-                let result = placement.current.translation + placement.current.rotation.act(local * exp(placement.current.logScale))
+                let result = placement.roomPoint(for: coordinate)
                 XCTAssertLessThan(simd_length(simd_cross(simd_normalize(result), ray)), 1e-7,
                                   "height \(height), step \(step)")
             }

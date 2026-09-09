@@ -26,6 +26,7 @@ struct MapLibreVisionApp: App {
         }
         .defaultSize(width: 420, height: 460)
         .windowResizability(.contentSize)
+        .defaultWindowPlacement { _, _ in WindowPlacement(.utilityPanel) }
 
         ImmersiveSpace(id: MapRenderer.spaceID) {
             CompositorLayer(configuration: MapLayerConfiguration()) { layerRenderer in

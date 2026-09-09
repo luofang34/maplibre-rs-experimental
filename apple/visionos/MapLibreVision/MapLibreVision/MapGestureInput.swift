@@ -37,6 +37,26 @@ enum MapGestureInput {
         var zoomAnchor: (origin: SIMD3<Double>, direction: SIMD3<Double>)?
         /// A short stationary pinch selects the rendered label under its ray.
         var selection: (origin: SIMD3<Double>, direction: SIMD3<Double>)?
+
+        var isEmpty: Bool {
+            moves.isEmpty && translation == .zero && logScale == 0 && turn == 0 && pitch == 0 && selection == nil
+        }
+    }
+
+    struct Buffer {
+        private var events: [Delta] = []
+
+        mutating func append(_ input: Delta) -> Bool {
+            guard !input.isEmpty else { return true }
+            guard events.count < 64 else { events.removeAll(keepingCapacity: true); return false }
+            events.append(input)
+            return true
+        }
+
+        mutating func take() -> [Delta] {
+            defer { events.removeAll(keepingCapacity: true) }
+            return events
+        }
     }
 
 }

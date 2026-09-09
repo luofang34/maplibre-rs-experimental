@@ -63,8 +63,8 @@ final class MapGestureRecognizerTests: XCTestCase {
         _ = engine.handle([hand(1, -0.15), hand(2, 0.15)])
         let delta = engine.handle([hand(1, -0.12, 0.03), hand(2, 0.18, 0.03)])
         XCTAssertTrue(delta.beginsOrbit)
-        XCTAssertEqual(delta.turn, 0.075, accuracy: 1e-9)
-        XCTAssertEqual(delta.pitch, 0.075, accuracy: 1e-9)
+        XCTAssertEqual(delta.turn, atan2(0.03, 0.6), accuracy: 1e-9)
+        XCTAssertEqual(delta.pitch, atan2(0.03, 0.6), accuracy: 1e-9)
         XCTAssertEqual(delta.logScale, 0)
         XCTAssertEqual(delta.translation, .zero)
     }
@@ -188,5 +188,47 @@ extension MapGestureRecognizerTests {
         let still = engine.handle([hand(1, -0.08), hand(2, 0.22)])
         XCTAssertEqual(still.translation, .zero)
         XCTAssertNil(still.carryReference)
+    }
+}
+
+extension MapGestureRecognizerTests {
+    func testZoomUsesTheTwoSelectionRaysMidpoint() throws {
+        var engine = Recognizer()
+        _ = engine.handle([hand(1, -0.15), hand(2, 0.15)])
+        _ = engine.handle([hand(1, -0.20), hand(2, 0.20)])
+        let delta = engine.handle([hand(1, -0.21), hand(2, 0.21)])
+        let anchor = try XCTUnwrap(delta.focusAnchor)
+        XCTAssertEqual(anchor.direction.x, 0, accuracy: 1e-9)
+        XCTAssertEqual(anchor.direction.z, -1, accuracy: 1e-9)
+    }
+
+    func testTrackingJumpCancelsUntilBothHandsRelease() {
+        var engine = Recognizer()
+        _ = engine.handle([hand(1, -0.15), hand(2, 0.15)])
+        _ = engine.handle([hand(1, -0.20), hand(2, 0.20)])
+        XCTAssertTrue(engine.handle([hand(1, -0.8), hand(2, 0.8)]).isEmpty)
+        XCTAssertTrue(engine.handle([hand(1, -0.81), hand(2, 0.81)]).isEmpty)
+        _ = engine.handle([.init(id: 1)])
+        XCTAssertTrue(engine.handle([hand(2, 0.82)]).isEmpty)
+        _ = engine.handle([.init(id: 2)])
+        _ = engine.handle([hand(1, 0)])
+        XCTAssertFalse(engine.handle([hand(1, 0.02)]).moves.isEmpty)
+    }
+
+    func testMissingRayCannotTurnPanIntoObjectPlacement() {
+        var engine = Recognizer()
+        _ = engine.handle([.init(id: 1, position: SIMD3<Double>(0, 0, -0.5))])
+        let input = engine.handle([.init(id: 1, position: SIMD3<Double>(0.03, 0, -0.5))])
+        XCTAssertTrue(input.isEmpty)
+    }
+
+    func testVeryCloseHandsDoNotMultiplySmallSeparationNoise() {
+        var engine = Recognizer()
+        _ = engine.handle([hand(1, -0.015), hand(2, 0.015)])
+        for distance in [0.02, 0.03, 0.04, 0.05] {
+            let input = engine.handle([hand(1, -distance), hand(2, distance)])
+            XCTAssertEqual(input.logScale, 0)
+            XCTAssertEqual(input.translation, .zero)
+        }
     }
 }

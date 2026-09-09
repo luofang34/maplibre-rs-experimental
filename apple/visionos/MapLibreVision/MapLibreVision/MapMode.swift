@@ -45,15 +45,21 @@ final class MapModeStore: ObservableObject {
     @Published var mode: MapMode
     @Published var immersionStyle: any ImmersionStyle
     @Published var tiltDegrees = 0.0
+    @Published var tiltLimited = false
     @Published var isGlobe = true
     @Published var selectedFeature: MapSelection?
 
     private let lock = NSLock()
     private var requested: MapMode?
     private var requestedTilt: Double?
+    private var beginsTilt = false
+    private var endsTilt = false
+    private var tiltIsEditing = false
     private var requestedLevel = false
     private var reportedGlobe: Bool?
     private var reportedTilt: Double?
+    private var reportedLimited: Bool?
+    private var automaticEntryAttempted = false
     /// `--height N` starts the viewer N metres above the focus, for scripted runs.
     let initialHeight: Double
 
@@ -63,6 +69,14 @@ final class MapModeStore: ObservableObject {
         let height = MapModeStore.heightFromArguments() ?? initial.height
         initialHeight = height
         immersionStyle = MapPlacement.immersion(forHeight: height).style
+    }
+
+    func claimAutomaticEntry() -> Bool {
+        lock.withLock {
+            guard !automaticEntryAttempted else { return false }
+            automaticEntryAttempted = true
+            return !ProcessInfo.processInfo.arguments.contains("--menu-only")
+        }
     }
 
     /// Flies to a mode's viewpoint.
@@ -79,24 +93,34 @@ final class MapModeStore: ObservableObject {
         lock.withLock { requestedTilt = bounded * .pi / 180 }
     }
 
+    func editTilt(_ editing: Bool) {
+        lock.withLock {
+            tiltIsEditing = editing
+            if editing { beginsTilt = true } else { endsTilt = true }
+        }
+    }
+
     func resetLevel() {
         tiltDegrees = 0
         lock.withLock { requestedLevel = true }
     }
 
-    func takeControls(isGlobe: Bool, tilt: Double) -> (Double?, Bool) {
+    func takeControls(isGlobe: Bool, tilt: Double, limited: Bool) -> (tilt: Double?, level: Bool, begin: Bool, end: Bool) {
         lock.withLock {
             let degrees = (tilt * 180 / .pi * 10).rounded() / 10
-            if degrees.isFinite, reportedGlobe != isGlobe || reportedTilt != degrees, requestedTilt == nil {
+            if degrees.isFinite, reportedGlobe != isGlobe || reportedTilt != degrees || reportedLimited != limited,
+               requestedTilt == nil, !tiltIsEditing || limited {
                 reportedGlobe = isGlobe
                 reportedTilt = degrees
+                reportedLimited = limited
                 Task { @MainActor in
                     self.isGlobe = isGlobe
                     self.tiltDegrees = degrees
+                    self.tiltLimited = limited
                 }
             }
-            defer { requestedTilt = nil; requestedLevel = false }
-            return (requestedTilt, requestedLevel)
+            defer { requestedTilt = nil; requestedLevel = false; beginsTilt = false; endsTilt = false }
+            return (requestedTilt, requestedLevel, beginsTilt, endsTilt)
         }
     }
 

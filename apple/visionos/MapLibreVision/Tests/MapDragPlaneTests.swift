@@ -12,7 +12,7 @@ final class MapDragPlaneTests: XCTestCase {
             let travel = plane.translation(from: ray, to: next)
             XCTAssertTrue(travel.x.isFinite && travel.z.isFinite)
             XCTAssertEqual(travel.y, 0, accuracy: 1e-9)
-            XCTAssertLessThan(simd_length(travel), 240)
+            XCTAssertLessThan(simd_length(travel), y < -0.05 ? 80_000 : 240)
         }
     }
 

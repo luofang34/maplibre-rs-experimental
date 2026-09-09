@@ -67,6 +67,7 @@ final class MapRenderer {
         recoveryQueue = layerRenderer.device.makeCommandQueue()
         if let parked = MapRenderer.parked {
             placement = parked.placement
+            placedFromHead = true
         } else {
             var anchor = MapAnchor.innsbruck
             #if DEBUG
@@ -273,30 +274,33 @@ final class MapRenderer {
             let column = anchor.originFromAnchorTransform.columns.3
             return SIMD3<Double>(Double(column.x), Double(column.y), Double(column.z))
         } ?? SIMD3<Double>(0, 0, 0)
-        let controls = modeStore.takeControls(isGlobe: placement.viewpoint.height > MapPlacement.groundHeightLimit, tilt: placement.sceneTilt)
+        let elevationAt: (MapAnchor) -> Double? = { position in
+            let value = Double(maplibre_visionos_terrain_elevation(map, position.latitude, position.longitude))
+            return value.isFinite && (-500...9000).contains(value) ? value : nil
+        }
+        let controls = modeStore.takeControls(isGlobe: placement.isTableObject,
+                                              tilt: placement.sceneTilt, limited: placement.tiltWasLimited)
         let headMatrix = deviceAnchor?.originFromAnchorTransform ?? matrix_identity_float4x4
         placement.updateViewRay(origin: head, direction: -SIMD3<Double>(
             Double(headMatrix.columns.2.x), Double(headMatrix.columns.2.y), Double(headMatrix.columns.2.z)))
+        let eyePositions = drawable.views.map { view -> SIMD3<Double> in
+            let transform = headMatrix * view.transform
+            return SIMD3<Double>(SIMD3<Float>(transform.columns.3.x, transform.columns.3.y, transform.columns.3.z))
+        }
+        placement.updateEyes(eyePositions)
         gestures.updateContext(
             head: head, right: SIMD3<Double>(SIMD3<Float>(headMatrix.columns.0.x, headMatrix.columns.0.y, headMatrix.columns.0.z)),
-            up: SIMD3<Double>(SIMD3<Float>(headMatrix.columns.1.x, headMatrix.columns.1.y, headMatrix.columns.1.z)), isGlobe: placement.viewpoint.height > MapPlacement.groundHeightLimit)
-        if let tilt = controls.0 { placement.setTilt(tilt) }
-        if controls.1 { placement.levelView() }
+            up: SIMD3<Double>(SIMD3<Float>(headMatrix.columns.1.x, headMatrix.columns.1.y, headMatrix.columns.1.z)), isGlobe: placement.isTableObject)
+        if controls.begin { placement.beginTilt(elevation: elevationAt) }
+        if let tilt = controls.tilt { placement.setTilt(tilt, elevation: elevationAt) }
+        if controls.end { placement.endTilt() }
+        if controls.level { placement.levelView(elevation: elevationAt) }
         if !placedFromHead, let deviceAnchor {
-            // The globe sits a metre ahead of where the viewer first looks, a little below
-            // the eyes, whatever height the tracker's origin has; the world lies under them.
             placedFromHead = true
             let transform = deviceAnchor.originFromAnchorTransform
-            var forward = -SIMD3<Double>(SIMD3<Float>(transform.columns.2.x, transform.columns.2.y, transform.columns.2.z))
-            forward.y = 0
-            if simd_length(forward) > 1e-3 {
-                forward = simd_normalize(forward)
-            } else {
-                forward = SIMD3<Double>(0, 0, -1)
-            }
-            placement.tableCenter = head + forward * 1.0 - SIMD3<Double>(0, 0.3, 0)
-            placement.place(viewer: head)
-            print("table globe centred at \(placement.tableCenter) from head at \(head)")
+            let forward = -SIMD3<Double>(SIMD3<Float>(transform.columns.2.x, transform.columns.2.y, transform.columns.2.z))
+            placement.placeInView(origin: head, direction: forward)
+            maplibre_visionos_note("globe placed at the initial viewing center")
         }
         if let request = modeStore.takeFlightRequest() {
             placement.fly(to: request.height, at: presentation, viewer: head)
@@ -312,22 +316,15 @@ final class MapRenderer {
         maplibre_visionos_set_available_memory(map, available)
         lastAvailableMemory = available
         maplibre_visionos_set_opaque_environment(map, placement.immersion == .full)
-        let input = gestures.take()
-        placement.apply(input)
+        let inputs = gestures.take()
+        for input in inputs { placement.apply(input, elevation: elevationAt) }
         #if DEBUG
         if let stressInput = zoomStress?.input(at: presentation, height: placement.viewpoint.height,
                                                origin: head, focus: placement.current.translation) {
             placement.apply(stressInput)
         }
         #endif
-        let eyePositions = drawable.views.map { view -> SIMD3<Double> in
-            let transform = headMatrix * view.transform
-            return SIMD3<Double>(SIMD3<Float>(transform.columns.3.x, transform.columns.3.y, transform.columns.3.z))
-        }
-        placement.constrainCamera(eyes: eyePositions) { position in
-            let value = Double(maplibre_visionos_terrain_elevation(map, position.latitude, position.longitude))
-            return value.isFinite ? value : nil
-        }
+        placement.constrainCamera(eyes: eyePositions, elevation: elevationAt)
         let scenePose = placement.current.worldFromScene()
         var worldFromScene = simd_float4x4(columns: (
             SIMD4<Float>(scenePose.columns.0), SIMD4<Float>(scenePose.columns.1),
@@ -428,7 +425,7 @@ final class MapRenderer {
               }
             }
         }
-        if let selection = input.selection, let eye = drawable.views.first {
+        if let selection = inputs.compactMap(\.selection).last, let eye = drawable.views.first {
             modeStore.showSelection(selectLabel(selection, worldFromEye: originFromDevice * eye.transform,
                 projection: drawable.computeProjection(viewIndex: 0), map: map))
         }

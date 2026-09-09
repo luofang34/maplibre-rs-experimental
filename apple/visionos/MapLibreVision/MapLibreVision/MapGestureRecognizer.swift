@@ -57,6 +57,7 @@ struct MapGestureRecognizer<ID: Hashable> {
         let before = pinches
         var selection: (origin: SIMD3<Double>, direction: SIMD3<Double>)?
         for sample in samples {
+            if sample.cancelled { suppressUntilReleased = true }
             guard let hand = sample.position else {
                 if before.count == 1, let pinch = before[sample.id], pinch.tapEligible,
                    !pinch.hasMoved, !sample.cancelled, !suppressUntilReleased,
@@ -68,7 +69,12 @@ struct MapGestureRecognizer<ID: Hashable> {
                 order.removeAll { $0 == sample.id }
                 continue
             }
+            guard hand.x.isFinite, hand.y.isFinite, hand.z.isFinite else {
+                suppressUntilReleased = true
+                continue
+            }
             if var pinch = pinches[sample.id] {
+                if simd_length(hand - pinch.hand) > 0.3 { suppressUntilReleased = true }
                 pinch.hand = hand
                 pinches[sample.id] = pinch
             } else {
@@ -93,6 +99,8 @@ struct MapGestureRecognizer<ID: Hashable> {
         }
         return paired()
     }
+
+    mutating func cancel() { suppressUntilReleased = !pinches.isEmpty }
 
     private mutating func rebase() {
         // A surviving hand starts from its current ray when the other hand releases.
@@ -126,6 +134,9 @@ struct MapGestureRecognizer<ID: Hashable> {
 
     private mutating func single(_ id: ID, was: Pinch) -> MapGestureInput.Delta {
         guard var pinch = pinches[id] else { return .init() }
+        guard let ray = pinch.firstDirection, let origin = pinch.origin,
+              ray.x.isFinite, ray.y.isFinite, ray.z.isFinite, simd_length(ray) > 0.5,
+              origin.x.isFinite, origin.y.isFinite, origin.z.isFinite else { return .init() }
         let travel = pinch.hand - (pinch.hasMoved ? was.hand : pinch.firstHand)
         guard pinch.hasMoved || simd_length(travel) >= 0.004 else { return .init() }
         let direction = turned(pinch)
@@ -155,7 +166,7 @@ struct MapGestureRecognizer<ID: Hashable> {
             pairMode = .undecided
             return .init()
         }
-        let zoom = log(now.distance / initial.distance)
+        let zoom = log(max(now.distance, 0.12) / max(initial.distance, 0.12))
         let twist = wrapped(now.angle - initial.angle)
         var beginsOrbit = false
         if pairMode == .undecided {
@@ -183,14 +194,19 @@ struct MapGestureRecognizer<ID: Hashable> {
         switch pairMode {
         case .zoom:
             defer { beginsZoom = false }
-            return .init(logScale: log(now.distance / was.distance), beginsZoom: beginsZoom,
-                         focusAnchor: primaryAnchor(), zoomAnchor: pairAnchor())
+            let change = log(max(now.distance, 0.12) / max(was.distance, 0.12))
+            guard abs(change) < 0.4 else { cancel(); return .init() }
+            return .init(logScale: change, beginsZoom: beginsZoom,
+                         focusAnchor: pairAnchor(), zoomAnchor: primaryAnchor())
         case .rotate:
             return .init(turn: wrapped(now.angle - was.angle), beginsOrbit: beginsOrbit, orbitAnchor: pairAnchor())
         case .orbit:
-            let travel = now.center - was.center
-            return .init(turn: simd_dot(travel, pairRight) * 2.5,
-                         pitch: simd_dot(travel, pairUp) * 2.5, beginsOrbit: beginsOrbit, orbitAnchor: pairAnchor())
+            let depth = carryReference()?.handDepth ?? 0.6
+            let a = was.center - initial.center
+            let b = now.center - initial.center
+            return .init(turn: atan2(simd_dot(b, pairRight), depth) - atan2(simd_dot(a, pairRight), depth),
+                         pitch: atan2(simd_dot(b, pairUp), depth) - atan2(simd_dot(a, pairUp), depth),
+                         beginsOrbit: beginsOrbit, orbitAnchor: pairAnchor())
         case .translate:
             defer { beginsCarry = false }
             return .init(translation: now.center - was.center,

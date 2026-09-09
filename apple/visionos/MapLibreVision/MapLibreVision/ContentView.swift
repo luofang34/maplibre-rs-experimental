@@ -28,10 +28,14 @@ struct ContentView: View {
                                 Spacer()
                                 Text("\(modeStore.tiltDegrees.formatted(.number.precision(.fractionLength(0))))°").monospacedDigit()
                             }
-                            Slider(value: Binding(get: { modeStore.tiltDegrees }, set: { modeStore.setTilt($0) }), in: 0...90)
+                            Slider(value: Binding(get: { modeStore.tiltDegrees }, set: { modeStore.setTilt($0) }),
+                                   in: 0...90, onEditingChanged: { modeStore.editTilt($0) })
                                 .accessibilityLabel("Map tilt")
                             Text("0° aligns the map with the room. Your head remains free to look around.")
                                 .font(.caption).foregroundStyle(.secondary)
+                            if modeStore.tiltLimited {
+                                Text("Tilt limited to stay above terrain.").font(.caption)
+                            }
                         }
                         Text("Drag to move. Spread two pinches to zoom. Move both hands sideways to orbit or vertically to tilt.")
                             .foregroundStyle(.secondary)
@@ -67,11 +71,8 @@ struct ContentView: View {
         .frame(minWidth: 360, idealWidth: 420, maxWidth: 520,
                minHeight: 360, idealHeight: 460, maxHeight: 640)
         .task {
-            // `--enter` opens the map straight away, for scripted runs in the simulator.
-            if ProcessInfo.processInfo.arguments.contains("--enter"), !isImmersed,
-               case .opened = await openImmersiveSpace(id: MapRenderer.spaceID)
-            {
-                isImmersed = true
+            if modeStore.claimAutomaticEntry(), !isImmersed, !isOpening {
+                await toggleMap()
             }
             // `--switch-after N` flips the mode N seconds later, so a scripted run can show
             // the move between the two placements without a hand on the picker.
