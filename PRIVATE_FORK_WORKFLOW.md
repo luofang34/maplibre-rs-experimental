@@ -11,12 +11,15 @@ The current review topics are:
 
 | Branch | Scope |
 | --- | --- |
+| `fix/stable-view-unprojection` | Checked and factored CPU unprojection for level views, terrain selection, and gestures |
 | `fix/foreground-terrain-refinement` | Foreground priority, bounded replacement textures, fallback retirement, stable paint |
 | `fix/terrain-road-perspective` | Road alignment, perspective width, bridge elevation, tunnel occlusion |
 | `fix/visionos-absolute-tilt` | Room-relative map tilt with independent head tracking |
 | `fix/visionos-map-panel` | Resizable controls with persistent Level and Leave actions |
 
 These branches form a dependency stack above the integrated globe/terrain work.
+The stable unprojection change builds on the integrated `8d5b79e4` baseline; use
+that commit as its review base to exclude the preceding validation documentation.
 Their parent branch is the review base; comparing every branch directly with
 upstream `main` would include unrelated prerequisites. Renderer topics can be
 prepared for MapLibre review as their dependencies become available upstream.
