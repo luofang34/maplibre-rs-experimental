@@ -35,8 +35,9 @@ xcrun simctl install booted build/Build/Products/Debug-xrsimulator/MapLibreVisio
 xcrun simctl launch --console-pty booted com.sokolysystems.maplibre.vision --enter
 ```
 
-`--enter` opens the immersive space at launch; without it the launcher window shows a
-button. A device build needs the `aarch64-apple-visionos` target in `.cargo/config.toml`
+A fresh launch opens the globe at the initial viewing center. `--menu-only` keeps the
+control window open without entering the map; `--enter` remains compatible with scripts.
+A device build needs the `aarch64-apple-visionos` target in `.cargo/config.toml`
 and a signing team in the project.
 
 ## Viewpoint
@@ -67,8 +68,11 @@ globe or pans terrain under the grabbed point. Spread two pinches to zoom, or tw
 to rotate. Moving both hands together carries the table globe. In immersive mode, move
 both hands sideways to orbit and vertically to pitch around the center ground target.
 Each two-hand interaction locks its intent until a hand releases. Head movement remains
-independent of navigation. The View tilt slider and Level view button provide explicit
-pitch and reset controls. Free-camera orbit preserves its target; a fixed-viewpoint policy
+independent of navigation. The Map tilt slider captures one terrain point for the complete
+adjustment and reports
+when clearance limits the angle. Zoom rebases the geographic frame at its target before
+crossing into terrain. Input batches preserve gesture order and cancel excessive backlogs.
+Free-camera orbit preserves its target; a fixed-viewpoint policy
 preserves the eye for future vehicle-mounted cameras.
 
 See [the interaction design](INTERACTION_DESIGN.md) for gesture ownership, the planned

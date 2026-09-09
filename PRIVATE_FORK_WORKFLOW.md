@@ -11,6 +11,7 @@ The current review topics are:
 
 | Branch | Scope |
 | --- | --- |
+| `fix/visionos-surface-controls` | Geographic drag and zoom anchors, focus-preserving tilt, gesture intent, first-view placement |
 | `fix/visionos-rotation-stability` | Normalized gesture rotations and finite tilt reporting |
 | `fix/xr-pose-validation` | Validate every eye before starting a frame; preserve the last valid view |
 | `fix/terrain-detail-streaming` | Balance visible texture detail and bound movement prefetch |
@@ -25,6 +26,7 @@ The stable unprojection change builds on the integrated `8d5b79e4` baseline; use
 that commit as its review base to exclude the preceding validation documentation.
 The rotation stability change uses integrated `cc7d163b` as its review base.
 The XR validation and terrain streaming topics build on that stack.
+The surface controls topic uses integrated `735b6f27` as its review base.
 Their parent branch is the review base; comparing every branch directly with
 upstream `main` would include unrelated prerequisites. Renderer topics can be
 prepared for MapLibre review as their dependencies become available upstream.
