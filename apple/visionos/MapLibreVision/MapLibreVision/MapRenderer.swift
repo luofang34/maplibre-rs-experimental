@@ -17,6 +17,10 @@ final class MapRenderer {
     private let worldTracking = WorldTrackingProvider()
     private let modeStore = MapModeStore.shared
     private let gestures = MapGestures()
+    private let replay: FlightReplay
+    private var flightCamera = FlightCamera()
+    private var trackOverlay: TrackOverlayRenderer?
+    private var replayEnded = false
     private var placement: MapPlacement
     #if DEBUG
     private var zoomStress: MapZoomStress? = ProcessInfo.processInfo.arguments.contains("--zoom-stress-nyc") ? .init() : nil
@@ -61,11 +65,16 @@ final class MapRenderer {
     }()
     private var lastAvailableMemory: UInt64 = 0
 
-    init(layerRenderer: LayerRenderer) {
+    init(layerRenderer: LayerRenderer, replay: FlightReplay) {
+        self.replay = replay
         self.layerRenderer = layerRenderer
         device = layerRenderer.device
         recoveryQueue = layerRenderer.device.makeCommandQueue()
-        if let parked = MapRenderer.parked {
+        do { trackOverlay = try TrackOverlayRenderer(device: layerRenderer.device) }
+        catch { maplibre_visionos_note("Flight overlay unavailable: \(error)") }
+        if let entry = modeStore.takeEntry() {
+            placement = MapPlacement(viewpoint: .above(entry.anchor, height: entry.height))
+        } else if let parked = MapRenderer.parked {
             placement = parked.placement
             placedFromHead = true
         } else {
@@ -317,6 +326,17 @@ final class MapRenderer {
         lastAvailableMemory = available
         maplibre_visionos_set_opaque_environment(map, placement.immersion == .full)
         let inputs = gestures.take()
+        if !inputs.isEmpty || controls.begin || controls.level { replay.follow(false) }
+        let replayFrame = replay.frame()
+        let atEnd = replay.track.map { replayFrame.elapsed >= $0.duration } ?? false
+        if atEnd, !replayEnded {
+            maplibre_visionos_note("ADS-B playback reached the final recorded observation at \(replayFrame.elapsed) seconds")
+        }
+        replayEnded = atEnd
+        if replayFrame.following, let observation = replayFrame.observation {
+            flightCamera.update(observation, placement: &placement, head: head,
+                forward: -SIMD3<Double>(SIMD3<Float>(headMatrix.columns.2.x, headMatrix.columns.2.y, headMatrix.columns.2.z)))
+        } else { flightCamera.detach() }
         for input in inputs { placement.apply(input, elevation: elevationAt) }
         #if DEBUG
         if let stressInput = zoomStress?.input(at: presentation, height: placement.viewpoint.height,
@@ -330,7 +350,16 @@ final class MapRenderer {
             SIMD4<Float>(scenePose.columns.0), SIMD4<Float>(scenePose.columns.1),
             SIMD4<Float>(scenePose.columns.2), SIMD4<Float>(scenePose.columns.3)))
         let anchor = placement.anchor
-        let destination = placement.destination()?.worldFromScene()
+        var replayDestination: MapPlacement?
+        if replayFrame.following, replayFrame.playing,
+           let future = replay.track?.sample(at: replayFrame.elapsed + 3 * replayFrame.rate) {
+            var camera = flightCamera
+            var destinationPlacement = placement
+            camera.update(future, placement: &destinationPlacement, head: head, forward: [0, 0, -1])
+            replayDestination = destinationPlacement
+        }
+        let destination = replayDestination?.current.worldFromScene() ?? placement.destination()?.worldFromScene()
+        let prefetchAnchor = replayDestination?.anchor ?? anchor
         var prefetchFromScene = simd_float4x4(columns: (
             SIMD4<Float>(destination?.columns.0 ?? SIMD4<Double>(1, 0, 0, 0)),
             SIMD4<Float>(destination?.columns.1 ?? SIMD4<Double>(0, 1, 0, 0)),
@@ -389,9 +418,9 @@ final class MapRenderer {
                             anchor_altitude_meters: anchor.altitudeMeters,
                             world_from_scene: sceneFloats)
                         var prefetchC = MaplibreVisionOSPlacement(
-                            anchor_latitude: anchor.latitude,
-                            anchor_longitude: anchor.longitude,
-                            anchor_altitude_meters: anchor.altitudeMeters,
+                            anchor_latitude: prefetchAnchor.latitude,
+                            anchor_longitude: prefetchAnchor.longitude,
+                            anchor_altitude_meters: prefetchAnchor.altitudeMeters,
                             world_from_scene: prefetchFloats)
                         var eyes = group.map { index -> MaplibreVisionOSEye in
                             let color: MTLTexture? = colors[index]
@@ -431,6 +460,10 @@ final class MapRenderer {
         }
         renderSeconds += CACurrentMediaTime() - renderStart
         if result != nil {
+            if let track = replay.track {
+                trackOverlay?.draw(track: track, observation: replayFrame.observation, placement: placement,
+                    drawable: drawable, head: originFromDevice, colors: colors, depths: depths, command: commandBuffer)
+            }
             eyeTargets.publish()
         } else {
             maplibre_visionos_note("stereo frame failed; presenting the last complete frame")

@@ -51,6 +51,7 @@ final class MapModeStore: ObservableObject {
 
     private let lock = NSLock()
     private var requested: MapMode?
+    private var entry: (anchor: MapAnchor, height: Double)?
     private var requestedTilt: Double?
     private var beginsTilt = false
     private var endsTilt = false
@@ -59,7 +60,6 @@ final class MapModeStore: ObservableObject {
     private var reportedGlobe: Bool?
     private var reportedTilt: Double?
     private var reportedLimited: Bool?
-    private var automaticEntryAttempted = false
     /// `--height N` starts the viewer N metres above the focus, for scripted runs.
     let initialHeight: Double
 
@@ -71,11 +71,20 @@ final class MapModeStore: ObservableObject {
         immersionStyle = MapPlacement.immersion(forHeight: height).style
     }
 
-    func claimAutomaticEntry() -> Bool {
+    func enter(at coordinate: MapAnchor, height: Double = MapPlacement.flyToHeight) {
+        mode = height > MapPlacement.groundHeightLimit ? .tableGlobe : .immersive
+        immersionStyle = MapPlacement.immersion(forHeight: height).style
         lock.withLock {
-            guard !automaticEntryAttempted else { return false }
-            automaticEntryAttempted = true
-            return !ProcessInfo.processInfo.arguments.contains("--menu-only")
+            entry = (MapAnchor(latitude: min(max(coordinate.latitude, -MapPlacement.latitudeLimit), MapPlacement.latitudeLimit),
+                              longitude: coordinate.longitude, altitudeMeters: coordinate.altitudeMeters), height)
+            requested = nil
+        }
+    }
+
+    func takeEntry() -> (anchor: MapAnchor, height: Double)? {
+        lock.withLock {
+            defer { entry = nil }
+            return entry
         }
     }
 

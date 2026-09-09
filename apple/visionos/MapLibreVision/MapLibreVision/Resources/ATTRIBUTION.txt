@@ -1,0 +1,15 @@
+Innsbruck approach replay
+Copyright ADSB.lol contributors and contributing feeder networks. ODbL 1.0.
+https://github.com/adsblol/globe_history_2025#license
+https://opendatacommons.org/licenses/odbl/1-0/
+Source: https://globe.adsb.lol/globe_history/2026/09/08/traces/20/trace_full_440820.json
+The bundled innsbruck-approach.json is a derivative database of 55 observed ADS-B positions.
+Its source checksum, coverage, and altitude conversion are included in that file.
+No landing is invented. Replay ends at the end of available receiver coverage.
+Altitude conversion grid: https://cdn.proj.org/us_nga_egm96_15.tif (NGA EGM96, public domain).
+Trace format: https://github.com/wiedehopf/readsb/blob/dev/README-json.md
+
+Desk globe overview
+Natural Earth 1:50m land, public domain. https://www.naturalearthdata.com/about/terms-of-use/
+Rendered by maplibre-rs, then downsampled to a bounded 2048 x 2048 overview texture.
+Detailed terrain is rendered separately by maplibre-rs in the immersive view.

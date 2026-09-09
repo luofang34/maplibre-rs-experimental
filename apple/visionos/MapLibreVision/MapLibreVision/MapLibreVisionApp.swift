@@ -20,21 +20,41 @@ struct MapLayerConfiguration: CompositorLayerConfiguration {
 struct MapLibreVisionApp: App {
     @ObservedObject private var modeStore = MapModeStore.shared
 
+    @StateObject private var session = GlobeSession()
+
     var body: some Scene {
-        WindowGroup {
-            ContentView()
-        }
-        .defaultSize(width: 420, height: 460)
+        WindowGroup(id: GlobeSession.homeID, for: String.self) { _ in
+            DeskGlobeView().environmentObject(session)
+        } defaultValue: { GlobeSession.homeID }
+        .windowStyle(.volumetric)
+        .defaultSize(width: 0.55, height: 0.65, depth: 0.60, in: .meters)
+        .defaultLaunchBehavior(.presented)
+
+        WindowGroup(id: GlobeSession.controlsID, for: String.self) { _ in
+            ContentView().environmentObject(session)
+        } defaultValue: { GlobeSession.controlsID }
+        .defaultSize(width: 440, height: 620)
         .windowResizability(.contentSize)
-        .defaultWindowPlacement { _, _ in WindowPlacement(.utilityPanel) }
+        .defaultLaunchBehavior(.suppressed)
+        .restorationBehavior(.disabled)
+        .defaultWindowPlacement { _, context in
+            if let home = context.windows.first(where: { $0.id == GlobeSession.homeID }) {
+                return WindowPlacement(.trailing(home))
+            }
+            return WindowPlacement(.utilityPanel)
+        }
 
         ImmersiveSpace(id: MapRenderer.spaceID) {
             CompositorLayer(configuration: MapLayerConfiguration()) { layerRenderer in
-                MapRenderer(layerRenderer: layerRenderer).start()
+                MapRenderer(layerRenderer: layerRenderer, replay: session.replay).start()
+            }
+            .onAppear { session.immersed = true }
+            .onDisappear {
+                session.immersed = false
+                session.replay.pause()
+                session.save()
             }
         }
-        // The table globe sits in the room; the immersive view replaces it. Changing the
-        // mode moves the scene and the immersion together.
         .immersionStyle(selection: $modeStore.immersionStyle, in: .mixed, .full)
     }
 }

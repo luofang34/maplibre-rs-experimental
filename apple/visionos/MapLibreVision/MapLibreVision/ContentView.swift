@@ -4,7 +4,9 @@ struct ContentView: View {
     @Environment(\.openImmersiveSpace) private var openImmersiveSpace
     @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
     @ObservedObject private var modeStore = MapModeStore.shared
-    @State private var isImmersed = false
+    @EnvironmentObject private var session: GlobeSession
+    @Environment(\.dismissWindow) private var dismissWindow
+    @Environment(\.openWindow) private var openWindow
     @State private var isOpening = false
     @State private var status = ""
 
@@ -13,10 +15,8 @@ struct ContentView: View {
             Text("MapLibre Vision").font(.title2.bold())
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    Picker("View", selection: Binding(
-                        get: { modeStore.mode }, set: { modeStore.fly(to: $0) })) {
-                        ForEach(MapMode.allCases) { mode in Text(mode.title).tag(mode) }
-                    }.pickerStyle(.segmented)
+                    ReplayControls()
+                    Divider()
                     if modeStore.isGlobe {
                         Label("Drag with one pinch to turn the globe.", systemImage: "hand.draw")
                         Text("Move two pinched hands together to place it. Spread to zoom; twist to turn.")
@@ -60,7 +60,7 @@ struct ContentView: View {
             HStack {
                 Button(modeStore.isGlobe ? "North up" : "Level map") { modeStore.resetLevel() }
                 Spacer()
-                Button(isImmersed ? "Leave the map" : "Enter the map") {
+                Button(session.immersed ? "Return to desk" : "Enter the map") {
                     Task { await toggleMap() }
                 }
                 .buttonStyle(.borderedProminent)
@@ -69,10 +69,11 @@ struct ContentView: View {
         }
         .padding(24)
         .frame(minWidth: 360, idealWidth: 420, maxWidth: 520,
-               minHeight: 360, idealHeight: 460, maxHeight: 640)
+               minHeight: 360, idealHeight: 620, maxHeight: 800)
         .task {
-            if modeStore.claimAutomaticEntry(), !isImmersed, !isOpening {
-                await toggleMap()
+            if !session.immersed {
+                openWindow(id: GlobeSession.homeID, value: GlobeSession.homeID)
+                dismissWindow()
             }
             // `--switch-after N` flips the mode N seconds later, so a scripted run can show
             // the move between the two placements without a hand on the picker.
@@ -90,14 +91,17 @@ struct ContentView: View {
         isOpening = true
         defer { isOpening = false }
         status = ""
-        if isImmersed {
+        if session.immersed {
             await dismissImmersiveSpace()
-            isImmersed = false
+            session.immersed = false
+            session.replay.pause()
+            session.save()
+            dismissWindow()
         } else {
             let result = await openImmersiveSpace(id: MapRenderer.spaceID)
             maplibre_visionos_note("immersive space open result: \(result)")
             switch result {
-            case .opened: isImmersed = true
+            case .opened: session.immersed = true
             case .userCancelled: break
             case .error: status = "The map could not open. Please try again."
             @unknown default: status = "The map could not open. Please try again."

@@ -4,7 +4,7 @@ name: MapLibreVision
 options:
   bundleIdPrefix: com.sokolysystems.maplibre
   deploymentTarget:
-    visionOS: "2.0"
+    visionOS: "26.0"
   createIntermediateGroups: true
 settings:
   base:
@@ -24,7 +24,7 @@ targets:
         CFBundleDisplayName: MapLibre Vision
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: true
-          UIApplicationPreferredDefaultSceneSessionRole: UIWindowSceneSessionRoleApplication
+          UIApplicationPreferredDefaultSceneSessionRole: UIWindowSceneSessionRoleVolumetricApplication
         UILaunchScreen: {}
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
@@ -44,6 +44,7 @@ targets:
     dependencies:
       - sdk: Metal.framework
       - sdk: CompositorServices.framework
+      - sdk: RealityKit.framework
       - sdk: ARKit.framework
       - sdk: Security.framework
       - sdk: SystemConfiguration.framework

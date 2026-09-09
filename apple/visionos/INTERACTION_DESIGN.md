@@ -4,13 +4,13 @@ The executable navigation rules live in `MapGestureRecognizer`, `MapNavigation`,
 `MapOrbit` and their Swift tests. This file keeps only cross-platform decisions and
 integration boundaries.
 
-| Input | Table object | Terrain exploration |
+| Input | Persistent desk Volume | Terrain / expanded map |
 | --- | --- | --- |
-| Short pinch / tap / click | Select | Select |
-| One held pinch / primary drag | Turn the grabbed geographic point | Pan the grabbed geographic point |
-| Two hands spreading / pinch / wheel | Geographic zoom at the captured focus | Same |
-| Two hands twisting | Rotate the object about its center | Orbit the terrain focus |
-| Common two-hand movement | Place the globe in the room | Horizontal orbit; vertical tilt |
+| One held pinch | Native object rotation | Pan the grabbed geographic point |
+| Two hands spreading | Physical size, bounded to 20–44 cm diameter | Geographic zoom at the captured focus |
+| Two hands twisting | Native object rotation | Orbit the terrain focus |
+| Move the system window handle | Place, snap and lock the whole Volume | Move the control panel |
+| Common two-hand movement | Rotation and scale stay independent of placement | Horizontal orbit; vertical tilt |
 | Tilt slider | Not shown | Hold one terrain focus until editing ends |
 
 Recognition locks one intent until release. Hand-count changes rebase input;
@@ -19,9 +19,19 @@ captured gesture. Ray motion uses a fixed reference depth; projected zoom scale
 follows the hand separation ratio. Terrain and geographic coordinates survive tile
 replacement and the globe-to-plane transition. Clearance can limit a requested tilt.
 
-A fresh launch opens a globe at the initial viewing center. The controls use system
-utility-panel placement. Layer recreation retains the scene pose. `--menu-only`
-opens just the control window for diagnostics.
+A fresh launch opens a restorable desk Volume. visionOS owns its room placement;
+orientation, bounded physical size and paused replay position are saved separately.
+The Volume stays open with its contents hidden during terrain exploration. Returning
+to the desk reveals it in place. Detailed map controls open beside the Volume.
+The native globe uses a bounded, MapLibre-rendered Natural Earth overview; detailed
+terrain remains in the Metal compositor. Physical size does not change geographic zoom.
+
+The bundled AUA10A approach contains observed ADS-B positions with GNSS altitude
+converted to EGM96 mean sea level. Playback shares one monotonic clock across views,
+ends at receiver coverage, and does not invent touchdown or aircraft attitude. The
+follow camera stays behind and above the aircraft with independent head tracking;
+map gestures detach it. Recorded positions ahead of playback feed bounded prefetch.
+`--replay --replay-rate 16` exercises accelerated playback in a debug build.
 
 ## Integration boundaries
 
@@ -32,10 +42,9 @@ opens just the control window for diagnostics.
   at presentation time and preload their visible corridor. Returning to a saved map is
   separate from detaching into free exploration at the current position.
 - Keep headset compositor projection; magnification can use a separate instrument panel.
-- A persistent home Volume needs a RealityKit rendering adapter. The current Metal
-  `CompositorLayer` is immersive-space content, not a RealityKit entity. Do not treat
-  its room coordinates as system-restored Volume placement. Retain geographic state
-  independently of physical placement; restore placement through the system's scene APIs.
+- The Metal `CompositorLayer` is immersive-space content, not a RealityKit entity.
+  Terrain entry retains the desk's geographic focus. Its room transform is not a
+  substitute for RealityKit coordinate-space conversion during a spatial handoff.
 - Reserve stationary two-finger hold for a ruler. Store endpoints geographically;
   compute great-circle distance in metres and display NM. Airport selection uses stable
   feature IDs and confirmed system selection input, not continuous raw eye tracking.

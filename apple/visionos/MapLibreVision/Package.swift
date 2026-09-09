@@ -8,8 +8,8 @@ let package = Package(
         .target(
             name: "MapInteraction", path: "MapLibreVision",
             exclude: ["ContentView.swift", "Info.plist", "MapEyeTargets.swift", "MapGestures.swift",
-                      "MapLibreVisionApp.swift", "MapMode.swift", "MapSelection.swift", "MapRenderer.swift", "style.json"],
-            sources: ["MapPlacement.swift", "MapPose.swift", "MapOrbit.swift", "MapNavigation.swift", "MapGestureInput.swift", "GlobeDrag.swift", "MapDragPlane.swift", "MapGestureRecognizer.swift", "MapMemoryBudget.swift", "MapZoomStress.swift"]),
+                      "MapLibreVisionApp.swift", "MapMode.swift", "MapSelection.swift", "MapRenderer.swift", "style.json", "Resources", "FlightTrack.metal", "DeskGlobeView.swift", "GlobeSession.swift", "ReplayControls.swift", "TrackOverlayRenderer.swift"],
+            sources: ["MapPlacement.swift", "MapPose.swift", "MapOrbit.swift", "MapNavigation.swift", "MapGestureInput.swift", "GlobeDrag.swift", "MapDragPlane.swift", "MapGestureRecognizer.swift", "MapMemoryBudget.swift", "MapZoomStress.swift", "FlightTrack.swift", "FlightReplay.swift", "FlightCamera.swift", "GlobeGeometry.swift", "DeskGlobeState.swift"]),
         .testTarget(name: "MapInteractionTests", dependencies: ["MapInteraction"], path: "Tests",
                     exclude: ["check-frame-recovery.py"])
     ])
