@@ -259,7 +259,7 @@ struct MapPlacement {
     }
 
     mutating func setTilt(_ radians: Double) {
-        guard !inFlight else { return }
+        guard !inFlight, radians.isFinite else { return }
         captureOrbitTarget(anchor: nil)
         applyAbsoluteTilt(radians)
     }
@@ -274,14 +274,14 @@ struct MapPlacement {
         }
         if simd_length(slope) < 1e-6 { slope = SIMD3<Double>(0, 0, 1) }
         let wanted = SIMD3<Double>(0, cos(requested), 0) + simd_normalize(slope) * sin(requested)
-        let rotation = simd_quatd(from: up, to: wanted) * current.rotation
+        let rotation = simd_normalize(simd_quatd(from: simd_normalize(up), to: simd_normalize(wanted)) * current.rotation)
         viewpoint.tilt = requested
         setOrbitRotation(rotation)
     }
 
     private mutating func setOrbitRotation(_ rotation: simd_quatd) {
         let posed = pose(for: viewpoint)
-        sceneRotation = rotation * posed.rotation.inverse * sceneRotation
+        sceneRotation = simd_normalize(rotation * posed.rotation.inverse * sceneRotation)
         current = pose(for: viewpoint)
         if let target = orbitTarget {
             let moved = current.translation + current.rotation.act(target.local * exp(current.logScale))
@@ -476,7 +476,7 @@ struct MapPlacement {
         current = pose(for: viewpoint)
         // Zoom changes distance and scale; rotating the surface underneath a held
         // point can send the eye through it. Mode flights own orientation changes.
-        sceneRotation = orientation * current.rotation.inverse * sceneRotation
+        sceneRotation = simd_normalize(orientation * current.rotation.inverse * sceneRotation)
         current = pose(for: viewpoint)
         guard var target = zoomTarget else { return }
         let nextScale = exp(current.logScale)
@@ -636,8 +636,8 @@ struct MapPlacement {
             height: min(viewpoint.height, MapPlacement.groundHeightLimit), bearing: viewpoint.bearing, tilt: viewpoint.tilt)
         var pose = viewpoint.height <= MapPlacement.groundHeightLimit ? ground :
             ScenePose.flight(from: ground, to: tablePose(), bridgeShare(viewpoint.height), viewer: viewerReference)
-        pose.rotation = sceneRotation * pose.rotation
-            * simd_quatd(angle: viewpoint.globeRoll, axis: SIMD3<Double>(0, 0, 1))
+        pose.rotation = simd_normalize(sceneRotation * pose.rotation
+            * simd_quatd(angle: viewpoint.globeRoll, axis: SIMD3<Double>(0, 0, 1)))
         pose.translation += sceneOffset
         return pose
     }

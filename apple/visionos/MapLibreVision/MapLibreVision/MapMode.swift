@@ -73,8 +73,10 @@ final class MapModeStore: ObservableObject {
     }
 
     func setTilt(_ degrees: Double) {
-        tiltDegrees = degrees
-        lock.withLock { requestedTilt = degrees * .pi / 180 }
+        guard degrees.isFinite else { return }
+        let bounded = min(max(degrees, 0), 90)
+        tiltDegrees = bounded
+        lock.withLock { requestedTilt = bounded * .pi / 180 }
     }
 
     func resetLevel() {
@@ -85,7 +87,7 @@ final class MapModeStore: ObservableObject {
     func takeControls(isGlobe: Bool, tilt: Double) -> (Double?, Bool) {
         lock.withLock {
             let degrees = (tilt * 180 / .pi * 10).rounded() / 10
-            if reportedGlobe != isGlobe || reportedTilt != degrees, requestedTilt == nil {
+            if degrees.isFinite, reportedGlobe != isGlobe || reportedTilt != degrees, requestedTilt == nil {
                 reportedGlobe = isGlobe
                 reportedTilt = degrees
                 Task { @MainActor in

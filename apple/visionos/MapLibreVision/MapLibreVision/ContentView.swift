@@ -26,7 +26,7 @@ struct ContentView: View {
                             HStack {
                                 Text("Map tilt")
                                 Spacer()
-                                Text("\(Int(modeStore.tiltDegrees))°").monospacedDigit()
+                                Text("\(modeStore.tiltDegrees.formatted(.number.precision(.fractionLength(0))))°").monospacedDigit()
                             }
                             Slider(value: Binding(get: { modeStore.tiltDegrees }, set: { modeStore.setTilt($0) }), in: 0...90)
                                 .accessibilityLabel("Map tilt")

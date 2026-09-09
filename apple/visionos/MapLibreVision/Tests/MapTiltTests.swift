@@ -49,3 +49,35 @@ final class MapTiltTests: XCTestCase {
         }
     }
 }
+
+extension MapTiltTests {
+    func testRepeatedTiltAndOrbitRemainFiniteAndRigid() {
+        var placement = MapPlacement(viewpoint: .above(.innsbruck, height: 4000))
+        placement.place(viewer: .zero)
+        placement.updateViewRay(origin: .zero, direction: simd_normalize(SIMD3<Double>(0.2, -0.8, -1)))
+        for step in 0..<10_000 {
+            placement.setTilt(Double(step % 91) * .pi / 180)
+            placement.apply(.init(turn: 0.001, beginsOrbit: step % 20 == 0))
+            let matrix = placement.current.worldFromScene()
+            guard placement.sceneTilt.isFinite, matrix.columns.3.x.isFinite else {
+                XCTFail("Invalid pose at gesture step \(step)")
+                return
+            }
+            XCTAssertEqual(simd_length(placement.current.rotation.vector), 1, accuracy: 1e-10)
+            XCTAssertEqual(simd_length(matrix.columns.0), 1, accuracy: 1e-8)
+        }
+    }
+}
+
+extension MapTiltTests {
+    func testInvalidTiltInputKeepsTheLastValidPose() {
+        var placement = MapPlacement(viewpoint: .above(.innsbruck, height: 4000))
+        placement.place(viewer: .zero)
+        placement.setTilt(0.4)
+        let valid = placement.current.worldFromScene()
+        for invalid in [Double.nan, Double.infinity, -Double.infinity] {
+            placement.setTilt(invalid)
+            XCTAssertEqual(placement.current.worldFromScene(), valid)
+        }
+    }
+}
