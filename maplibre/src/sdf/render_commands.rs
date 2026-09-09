@@ -4,7 +4,6 @@ use crate::{
         projection::ProjectionGpuResources,
         render_phase::{PhaseItem, RenderCommand, RenderCommandResult, TranslucentItem},
         resource::TrackedRenderPass,
-        tile_view_pattern::WgpuTileViewPattern,
         INDEX_FORMAT,
     },
     sdf::{textures::SymbolTextures, SymbolBufferPool, SymbolPipeline},
@@ -47,12 +46,10 @@ impl RenderCommand<TranslucentItem> for DrawSymbol {
         item: &TranslucentItem,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let Some((Initialized(symbol_buffer_pool), Initialized(tile_view_pattern))) =
-            world.resources.query::<(
-                &Eventually<SymbolBufferPool>,
-                &Eventually<WgpuTileViewPattern>,
-            )>()
-        else {
+        let Some((Initialized(symbol_buffer_pool), covering)) = world.resources.query::<(
+            &Eventually<SymbolBufferPool>,
+            &super::covering::SymbolCovering,
+        )>() else {
             return RenderCommandResult::Failure;
         };
 
@@ -82,14 +79,7 @@ impl RenderCommand<TranslucentItem> for DrawSymbol {
             return RenderCommandResult::Failure;
         };
 
-        // Uses stencil value of requested tile and the shape of the requested tile
         let reference = source_shape.coords().stencil_reference_value_3d() as u32;
-
-        tracing::trace!(
-            "Drawing layer {:?} at {}",
-            entry.style_layer.source_layer,
-            entry.coords
-        );
 
         let index_range = entry.indices_buffer_range();
 
@@ -110,10 +100,7 @@ impl RenderCommand<TranslucentItem> for DrawSymbol {
                 .vertices()
                 .slice(entry.vertices_buffer_range()),
         );
-        pass.set_vertex_buffer(
-            1,
-            tile_view_pattern.buffer().slice(tile_view_pattern_buffer),
-        );
+        pass.set_vertex_buffer(1, covering.buffer.slice(tile_view_pattern_buffer));
         pass.set_vertex_buffer(
             2,
             symbol_buffer_pool

@@ -1,14 +1,13 @@
-//! Queues [PhaseItems](crate::render::render_phase::PhaseItem) for rendering.
-
+//! Draws a stable symbol covering independently of terrain texture readiness.
 use crate::{
     context::MapContext,
-    io::tile_sources::TileKind,
     render::{
         eventually::{Eventually, Eventually::Initialized},
         render_phase::{DrawState, RenderPhase, TranslucentItem},
-        tile_view_pattern::WgpuTileViewPattern,
+        shaders::ShaderTileMetadata,
+        tile_view_pattern::TileShape,
     },
-    sdf::{render_commands::DrawSymbols, SymbolBufferPool},
+    sdf::{covering::SymbolCovering, render_commands::DrawSymbols, SymbolBufferPool},
     tcs::{
         system::{SystemError, SystemResult},
         tiles::Tile,
@@ -17,49 +16,37 @@ use crate::{
 
 pub fn queue_system(
     MapContext {
-        world, view_state, ..
+        world,
+        style,
+        view_state,
+        renderer,
+        ..
     }: &mut MapContext,
 ) -> SystemResult {
-    let mut seen = std::collections::HashSet::new();
-    let zoom = view_state.zoom().value();
-    let Some((Initialized(tile_view_pattern), translucent_phase, Initialized(symbol_buffer_pool))) =
-        world.resources.query_mut::<(
-            &mut Eventually<WgpuTileViewPattern>,
-            &mut RenderPhase<TranslucentItem>,
-            &mut Eventually<SymbolBufferPool>,
-        )>()
-    else {
+    super::covering::update(world, style, view_state, &renderer.device, &renderer.queue);
+    let Some((covering, phase, Initialized(pool))) = world.resources.query_mut::<(
+        &SymbolCovering,
+        &mut RenderPhase<TranslucentItem>,
+        &Eventually<SymbolBufferPool>,
+    )>() else {
         return Err(SystemError::Dependencies);
     };
-
-    for view_tile in tile_view_pattern.iter() {
-        let coords = &view_tile.coords();
-        tracing::trace!("Drawing tile at {coords}");
-
-        // draw tile normal or the source e.g. parent or children
-        view_tile.render_kind(TileKind::Vector, |source_shape| {
-            if let Some(layer_entries) =
-                symbol_buffer_pool.index().get_layers(source_shape.coords())
-            {
-                for layer_entry in layer_entries {
-                    if !layer_entry.style_layer.is_visible_at(zoom) {
-                        continue;
-                    }
-                    if !seen.insert((layer_entry.coords, layer_entry.style_layer.id.clone())) {
-                        continue;
-                    }
-                    translucent_phase.add(TranslucentItem {
-                        draw_function: Box::new(DrawState::<TranslucentItem, DrawSymbols>::new()),
-                        index: layer_entry.style_layer.index,
-                        style_layer: layer_entry.style_layer.id.clone(),
-                        tile: Tile {
-                            coords: layer_entry.coords,
-                        },
-                        source_shape: source_shape.clone(),
-                    });
-                }
-            };
-        });
+    let stride = size_of::<ShaderTileMetadata>() as u64;
+    for (index, coords) in covering.tiles.iter().enumerate() {
+        let start = index as u64 * stride;
+        let shape = TileShape::with_buffer_range(*coords, view_state.zoom(), start..start + stride);
+        for layer in pool.index().get_layers(*coords).into_iter().flatten() {
+            if !layer.style_layer.is_visible_at(view_state.zoom().value()) {
+                continue;
+            }
+            phase.add(TranslucentItem {
+                draw_function: Box::new(DrawState::<TranslucentItem, DrawSymbols>::new()),
+                index: layer.style_layer.index,
+                style_layer: layer.style_layer.id.clone(),
+                tile: Tile { coords: *coords },
+                source_shape: shape.clone(),
+            });
+        }
     }
     Ok(())
 }

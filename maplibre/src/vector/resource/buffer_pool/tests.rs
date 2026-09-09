@@ -16,9 +16,9 @@ fn a_pool_larger_than_the_device_allows_keeps_whole_elements() {
     assert_eq!(super::fitting_buffer_size(4, 10, 100), 40);
 }
 
-use lyon::tessellation::VertexBuffers;
-
 use std::collections::HashSet;
+
+use lyon::tessellation::VertexBuffers;
 
 use crate::{
     coords::WorldTileCoords,
@@ -202,4 +202,36 @@ fn oversized_geometry_returns_context_without_evicting_resident_data() {
         pool.get_loaded_style_layers_at(coords),
         Some(HashSet::from(["city"]))
     );
+}
+
+#[test]
+fn replacing_geometry_changes_its_identity_even_at_the_same_buffer_address() {
+    let mut pool = pool();
+    let coords = WorldTileCoords::default();
+    pool.allocate_layer_geometry(
+        &TestQueue,
+        coords,
+        style_layer("city"),
+        &geometry(2),
+        0,
+        &[0; 2],
+    )
+    .expect("first upload");
+    let first = pool.index().front().expect("entry").clone();
+    pool.remove_tile(coords);
+    pool.allocate_layer_geometry(
+        &TestQueue,
+        coords,
+        style_layer("city"),
+        &geometry(2),
+        0,
+        &[0; 2],
+    )
+    .expect("replacement");
+    let second = pool.index().front().expect("entry");
+    assert_eq!(
+        first.vertices_buffer_range(),
+        second.vertices_buffer_range()
+    );
+    assert_ne!(first.allocation_id(), second.allocation_id());
 }

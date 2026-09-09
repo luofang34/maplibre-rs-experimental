@@ -22,6 +22,7 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         ];
         self.validate_sizes(sizes)?;
         let entry = IndexEntry {
+            allocation_id: self.revision.wrapping_add(1),
             coords,
             style_layer,
             usable_indices: geometry.usable_indices,

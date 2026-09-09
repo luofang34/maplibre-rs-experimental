@@ -1,4 +1,10 @@
 //! Places elevated text and icons once for both eyes and uploads only changed metadata.
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet},
+    hash::{DefaultHasher, Hash, Hasher},
+};
+
 #[cfg(test)]
 use super::placement::canonical_tile;
 use super::{
@@ -10,28 +16,20 @@ use super::{
 use crate::{
     context::MapContext,
     coords::WorldTileCoords,
-    io::tile_sources::TileKind,
     render::{
         eventually::{Eventually, Eventually::Initialized},
         projection::projection_data_for_view,
         shaders::SDFShaderFeatureMetadata,
-        tile_view_pattern::WgpuTileViewPattern,
     },
     sdf::{SymbolBufferPool, SymbolLayersDataComponent},
     style::layer::LayerPaint,
     tcs::system::{System, SystemError, SystemResult},
 };
-use std::{
-    borrow::Cow,
-    collections::{HashMap, HashSet},
-    hash::{DefaultHasher, Hash, Hasher},
-};
 
 #[derive(Default)]
 pub struct CollisionSystem {
     runs: u32,
-    pool_revision: Option<u64>,
-    uploaded: HashMap<(WorldTileCoords, String), u64>,
+    uploaded: HashMap<(WorldTileCoords, String), (u64, u64)>,
 }
 
 impl CollisionSystem {
@@ -68,27 +66,18 @@ impl System for CollisionSystem {
             return Ok(());
         }
         self.runs = self.runs.wrapping_add(1);
-        if let Some(Initialized(pool)) = world.resources.get::<Eventually<SymbolBufferPool>>() {
-            if self.pool_revision != Some(pool.revision()) {
-                self.pool_revision = Some(pool.revision());
-                self.uploaded.clear();
-            }
-        }
-        let Some(Initialized(pattern)) = world.resources.get::<Eventually<WgpuTileViewPattern>>()
-        else {
-            return Err(SystemError::Dependencies);
-        };
-        let mut seen = HashSet::new();
-        for tile in pattern.iter() {
-            tile.render_kind(TileKind::Vector, |shape| {
-                seen.insert(shape.coords());
-            });
-        }
+        let seen: HashSet<_> = world
+            .resources
+            .get::<super::covering::SymbolCovering>()
+            .map(|covering| covering.tiles.iter().copied().collect())
+            .unwrap_or_default();
         let mut layers = visible_layers(world, style, view_state.zoom().value(), &seen);
         let new_content = layers.iter().any(|(_, layer, _)| {
-            !self
-                .uploaded
-                .contains_key(&(layer.coords, layer.style_layer_id.clone()))
+            allocation(world, layer.coords, &layer.style_layer_id)
+                != self
+                    .uploaded
+                    .get(&(layer.coords, layer.style_layer_id.clone()))
+                    .map(|entry| entry.0)
         });
         if !new_content && !self.runs.is_multiple_of(8) {
             return Ok(());
@@ -105,50 +94,15 @@ impl System for CollisionSystem {
             tracing::error!(%error, "symbol projection failed");
             SystemError::Setup
         })?;
-        let mut boxes = CollisionGrid::new(view_state.width(), view_state.height());
-        let mut updates = Vec::new();
-        let mut placed = PlacedSymbols::default();
-        for (_, layer, paint) in layers {
-            let limits = style
-                .layers
-                .iter()
-                .find(|style| style.id == layer.style_layer_id)
-                .map(|layer| {
-                    [
-                        f64::from(layer.minzoom.unwrap_or(0)),
-                        f64::from(layer.maxzoom.unwrap_or(24)),
-                    ]
-                })
-                .unwrap_or([0.0, 24.0]);
-            let metadata = place_layer(
-                world,
-                view_state,
-                &projection,
-                layer,
-                paint,
-                limits,
-                &mut boxes,
-                &mut placed,
-            );
-            let key = (layer.coords, layer.style_layer_id.clone());
-            let fingerprint = opacity_fingerprint(&metadata);
-            if self.uploaded.get(&key) != Some(&fingerprint) {
-                updates.push((key.clone(), metadata));
-                self.uploaded.insert(key, fingerprint);
-            }
-        }
+        let placed = self.place_layers(
+            world,
+            style,
+            view_state,
+            &projection,
+            &renderer.queue,
+            layers,
+        );
         self.uploaded.retain(|(coords, _), _| seen.contains(coords));
-        if let Some(Initialized(pool)) = world.resources.get::<Eventually<SymbolBufferPool>>() {
-            for ((coords, id), metadata) in updates {
-                if let Some(entry) = pool
-                    .index()
-                    .get_layers(coords)
-                    .and_then(|entries| entries.iter().find(|entry| entry.style_layer.id == id))
-                {
-                    pool.update_feature_metadata(&renderer.queue, entry, &metadata);
-                }
-            }
-        }
         world.resources.insert(placed);
         Ok(())
     }
@@ -288,3 +242,80 @@ fn local_zoom_visible(
         };
     zoom >= limits[0] && zoom < limits[1]
 }
+
+fn allocation(world: &crate::tcs::world::World, coords: WorldTileCoords, id: &str) -> Option<u64> {
+    let Initialized(pool) = world.resources.get::<Eventually<SymbolBufferPool>>()? else {
+        return None;
+    };
+    pool.index()
+        .get_layers(coords)?
+        .iter()
+        .find(|entry| entry.style_layer.id == id)
+        .map(|entry| entry.allocation_id())
+}
+
+impl CollisionSystem {
+    fn place_layers(
+        &mut self,
+        world: &crate::tcs::world::World,
+        style: &crate::style::Style,
+        view_state: &crate::render::view_state::ViewState,
+        projection: &crate::render::projection::ShaderProjectionData,
+        queue: &wgpu::Queue,
+        layers: Vec<VisibleLayer<'_>>,
+    ) -> PlacedSymbols {
+        let mut boxes = CollisionGrid::new(view_state.width(), view_state.height());
+        let mut updates = Vec::new();
+        let mut placed = PlacedSymbols::default();
+        for (_, layer, paint) in layers {
+            let limits = style
+                .layers
+                .iter()
+                .find(|style| style.id == layer.style_layer_id)
+                .map(|layer| {
+                    [
+                        f64::from(layer.minzoom.unwrap_or(0)),
+                        f64::from(layer.maxzoom.unwrap_or(24)),
+                    ]
+                })
+                .unwrap_or([0.0, 24.0]);
+            let metadata = place_layer(
+                world,
+                view_state,
+                projection,
+                layer,
+                paint,
+                limits,
+                &mut boxes,
+                &mut placed,
+            );
+            let key = (layer.coords, layer.style_layer_id.clone());
+            let Some(generation) = allocation(world, layer.coords, &layer.style_layer_id) else {
+                continue;
+            };
+            let fingerprint = opacity_fingerprint(&metadata);
+            if self.uploaded.get(&key) != Some(&(generation, fingerprint)) {
+                updates.push((key.clone(), metadata));
+                self.uploaded.insert(key, (generation, fingerprint));
+            }
+        }
+        if let Some(Initialized(pool)) = world.resources.get::<Eventually<SymbolBufferPool>>() {
+            for ((coords, id), metadata) in updates {
+                if let Some(entry) = pool
+                    .index()
+                    .get_layers(coords)
+                    .and_then(|entries| entries.iter().find(|entry| entry.style_layer.id == id))
+                {
+                    pool.update_feature_metadata(queue, entry, &metadata);
+                }
+            }
+        }
+        placed
+    }
+}
+
+type VisibleLayer<'a> = (
+    u32,
+    &'a crate::sdf::SymbolLayerData,
+    &'a crate::style::layer::SymbolPaint,
+);

@@ -1,4 +1,6 @@
 //! Projects collision rectangles using the same elevated anchors as symbol vertices.
+use cgmath::{InnerSpace, Matrix4, Vector4};
+
 use super::{paint::SymbolUniforms, placement_geometry::SymbolBounds};
 use crate::{
     coords::{TileCoords, WorldTileCoords, ZOOM_BOUNDS},
@@ -7,7 +9,6 @@ use crate::{
     tcs::world::World,
     terrain::coverage::TerrainCoverageIndex,
 };
-use cgmath::{InnerSpace, Matrix4, Vector4};
 
 pub(super) fn canonical_tile(coords: WorldTileCoords) -> Option<TileCoords> {
     let count = i32::try_from(ZOOM_BOUNDS[usize::from(u8::from(coords.z))]).ok()?;
@@ -25,7 +26,11 @@ pub(super) fn elevation(world: &World, layer: &SymbolLayerData, feature: &Featur
     world
         .resources
         .get::<TerrainCoverageIndex>()
-        .and_then(|index| index.elevation_at_zoom(&world.tiles, x, y, u8::from(layer.coords.z)))
+        .and_then(|index| {
+            index
+                .elevation_at(&world.tiles, x, y)
+                .or_else(|| index.elevation_cached(&world.tiles, x, y))
+        })
         .unwrap_or(0.0) as f32
 }
 

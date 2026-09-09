@@ -1,19 +1,16 @@
 //! Uploads data to the GPU which is needed for rendering.
 
+use std::collections::HashSet;
+
 use super::{
     textures::{SymbolTextures, TextureContext},
     SymbolPipeline,
 };
-use std::collections::HashSet;
-
 use crate::{
     context::MapContext,
     render::{
         eventually::{Eventually, Eventually::Initialized},
-        projection::view_region_for_projection,
         shaders::{SDFShaderFeatureMetadata, ShaderLayerMetadata},
-        tile_view_pattern::DEFAULT_TILE_SIZE,
-        view_state::ViewStatePadding,
         Renderer,
     },
     sdf::{SymbolBufferPool, SymbolLayerData, SymbolLayersDataComponent},
@@ -39,34 +36,7 @@ pub fn upload_system(
     if crate::render::eye_covering::EyeInFrame::reuses_content(world) {
         return Ok(());
     }
-    let view_region = view_region_for_projection(
-        style,
-        view_state,
-        world,
-        view_state.zoom().zoom_level(DEFAULT_TILE_SIZE),
-        ViewStatePadding::Loose,
-    )
-    .map_err(|error| {
-        tracing::error!(%error, "unable to select symbol upload tiles");
-        SystemError::Setup
-    })?;
-
-    let mut visible = std::collections::HashSet::new();
-    if let Some(region) = &view_region {
-        visible.extend(region.iter());
-    }
-    if let Some(Initialized(pattern)) = world
-        .resources
-        .get::<Eventually<crate::render::tile_view_pattern::WgpuTileViewPattern>>()
-    {
-        for tile in pattern.iter() {
-            tile.render_kind(crate::io::tile_sources::TileKind::Vector, |shape| {
-                visible.insert(shape.coords());
-            });
-        }
-    }
-    let mut visible: Vec<_> = visible.into_iter().collect();
-    visible.sort_by_key(|coords| (u8::from(coords.z), coords.y, coords.x));
+    let visible = super::covering::upload_tiles(world);
     let Some((Initialized(symbol_buffer_pool), textures, Initialized(pipeline))) =
         world.resources.query_mut::<(
             &mut Eventually<SymbolBufferPool>,
@@ -99,7 +69,6 @@ pub fn upload_system(
     Ok(())
 }
 
-// TODO cleanup, duplicated
 fn upload_symbol_layer(
     symbol_buffer_pool: &mut SymbolBufferPool,
     textures: &mut SymbolTextures,
@@ -109,7 +78,7 @@ fn upload_symbol_layer(
     visible: &[crate::coords::WorldTileCoords],
     zoom: f32,
 ) {
-    // Upload all tessellated layers which are in view
+    let mut bytes = crate::render::memory_budget::UploadBudget::new(8 << 20);
     for &coords in visible {
         let Some(vector_layers) = tiles.query_mut::<&SymbolLayersDataComponent>(coords) else {
             continue;
@@ -122,7 +91,11 @@ fn upload_symbol_layer(
             .map(str::to_string)
             .collect();
 
-        for style_layer in &style.layers {
+        for style_layer in style
+            .layers
+            .iter()
+            .filter(|layer| layer.is_visible_at(f64::from(zoom)))
+        {
             if let Some(LayerPaint::Symbol(paint)) = &style_layer.paint {
                 if let Some(layer) = vector_layers
                     .layers
@@ -149,33 +122,14 @@ fn upload_symbol_layer(
                 continue;
             };
 
-            // One opacity entry per vertex, visible until collision detection hides a label;
-            // the features of a layout that does not attribute quads to labels cover no
-            // vertices, so the vertex count is the only reliable size.
-            let feature_metadata = vec![
-                SDFShaderFeatureMetadata {
-                    opacity: 1.0,
-                    elevation: 0.0
-                };
-                buffer.buffer.vertices.len()
-            ];
-
-            // FIXME avoid uploading empty indices
-            if buffer.buffer.indices.is_empty() {
-                continue;
+            let size = buffer.buffer.vertices.len()
+                * (size_of::<crate::render::shaders::ShaderSymbolVertexNew>()
+                    + size_of::<SDFShaderFeatureMetadata>())
+                + buffer.buffer.indices.len() * size_of::<u32>();
+            if !bytes.take(size) {
+                return;
             }
-
-            log::debug!("Allocating geometry at {coords}");
-            if let Err(error) = symbol_buffer_pool.allocate_layer_geometry(
-                gpu.queue,
-                *coords,
-                style_layer.clone(),
-                buffer,
-                ShaderLayerMetadata::new(style_layer.index as f32, 0.0, [0.0; 2]),
-                &feature_metadata,
-            ) {
-                tracing::error!(%coords, %error, "tile geometry upload failed");
-            }
+            upload_geometry(symbol_buffer_pool, gpu, *coords, style_layer, buffer);
         }
     }
 }
@@ -198,3 +152,40 @@ fn pending_layer_data<'a>(
 
 #[cfg(test)]
 mod tests;
+
+fn upload_geometry(
+    symbol_buffer_pool: &mut SymbolBufferPool,
+    gpu: &TextureContext<'_>,
+    coords: crate::coords::WorldTileCoords,
+    style_layer: &StyleLayer,
+    buffer: &crate::vector::tessellation::OverAlignedVertexBuffer<
+        crate::render::shaders::ShaderSymbolVertexNew,
+        u32,
+    >,
+) {
+    // Collision placement supplies elevation before a new label can become visible.
+    let feature_metadata = vec![
+        SDFShaderFeatureMetadata {
+            opacity: 0.0,
+            elevation: 0.0
+        };
+        buffer.buffer.vertices.len()
+    ];
+
+    // FIXME avoid uploading empty indices
+    if buffer.buffer.indices.is_empty() {
+        return;
+    }
+
+    tracing::debug!(%coords, "allocating symbol geometry");
+    if let Err(error) = symbol_buffer_pool.allocate_layer_geometry(
+        gpu.queue,
+        coords,
+        style_layer.clone(),
+        buffer,
+        ShaderLayerMetadata::new(style_layer.index as f32, 0.0, [0.0; 2]),
+        &feature_metadata,
+    ) {
+        tracing::error!(%coords, %error, "tile geometry upload failed");
+    }
+}

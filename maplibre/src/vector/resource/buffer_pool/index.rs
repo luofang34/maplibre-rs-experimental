@@ -1,6 +1,7 @@
 use super::*;
 #[derive(Debug, Clone)]
 pub struct IndexEntry {
+    pub(super) allocation_id: u64,
     pub coords: WorldTileCoords, // TODO: replace with generic key
     pub style_layer: StyleLayer, // TODO: remove
     // Range of bytes within the backing buffer for vertices
@@ -17,6 +18,11 @@ pub struct IndexEntry {
 }
 
 impl IndexEntry {
+    /// Identifies this upload, even when an evicted layer reuses the same buffer range.
+    pub fn allocation_id(&self) -> u64 {
+        self.allocation_id
+    }
+
     pub fn indices_range(&self) -> Range<u32> {
         0..self.usable_indices
     }

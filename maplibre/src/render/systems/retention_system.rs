@@ -10,7 +10,6 @@
 //! as GL JS sizes it from the viewport; a wide request would otherwise keep every tile a
 //! flight passes resident.
 
-use crate::render::tile_memory::tile_bytes;
 use std::collections::{HashMap, HashSet};
 
 use crate::{
@@ -25,6 +24,7 @@ use crate::{
         eventually::{Eventually, Eventually::Initialized},
         memory_budget::{MemoryBudget, MemoryPressure},
         projection::view_region_for_projection,
+        tile_memory::tile_bytes,
         tile_view_pattern::{WgpuTileViewPattern, DEFAULT_TILE_SIZE},
         view_state::{ViewState, ViewStatePadding},
     },
@@ -198,6 +198,8 @@ fn summarize_residency(world: &World, drawn: usize, in_use: usize, settled: bool
         drape_mb = drape_bytes >> 20,
         dem_textures,
         dem_mb = dem_bytes >> 20,
+        finest_dem_zoom = finest_dem_zoom(world),
+        symbol_revision = symbol_revision(world),
         "resident tiles"
     );
 }
@@ -212,6 +214,12 @@ pub(crate) fn drawn_tiles(world: &World) -> HashSet<WorldTileCoords> {
                 drawn.insert(shape.coords());
             });
         }
+    }
+    if let Some(covering) = world
+        .resources
+        .get::<crate::sdf::covering::SymbolCovering>()
+    {
+        drawn.extend(covering.tiles.iter().copied());
     }
     drawn
 }
@@ -369,3 +377,31 @@ fn drop_gpu_data(world: &mut World, evicted: &[WorldTileCoords]) {
 
 #[cfg(test)]
 mod tests;
+
+fn finest_dem_zoom(world: &World) -> u8 {
+    world
+        .tiles
+        .tiles
+        .values()
+        .filter_map(|tile| {
+            matches!(
+                world
+                    .tiles
+                    .query::<&crate::terrain::DemTileComponent>(tile.coords),
+                Some(crate::terrain::DemTileComponent::Loaded(_))
+            )
+            .then_some(u8::from(tile.coords.z))
+        })
+        .max()
+        .unwrap_or(0)
+}
+
+fn symbol_revision(world: &World) -> u64 {
+    match world
+        .resources
+        .get::<Eventually<crate::sdf::SymbolBufferPool>>()
+    {
+        Some(Initialized(pool)) => pool.revision(),
+        _ => 0,
+    }
+}

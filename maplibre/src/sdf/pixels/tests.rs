@@ -1,4 +1,8 @@
 #![allow(clippy::expect_used, clippy::panic)]
+use std::sync::Arc;
+
+use geozero::{mvt::Message, FeatureProcessor, GeomProcessor};
+
 use crate::{
     coords::{WorldTileCoords, ZoomLevel},
     headless::{
@@ -17,8 +21,6 @@ use crate::{
         SymbolLayerTessellated, VectorPlugin,
     },
 };
-use geozero::{mvt::Message, FeatureProcessor, GeomProcessor};
-use std::sync::Arc;
 const SIZE: u32 = 512;
 
 fn style(offset: f32, anchor: &str) -> Style {
@@ -289,3 +291,5 @@ async fn fixture_map(
 }
 
 mod navigation;
+
+mod stability;
