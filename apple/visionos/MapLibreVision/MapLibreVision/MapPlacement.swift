@@ -125,10 +125,6 @@ struct MapPlacement {
     /// it had grabbed a point at that distance, so a drag near the horizon cannot sling the
     /// world by thousands of kilometres.
     static let maxGrabDistanceInHeights = 20.0
-    /// How many times the pinch ray's own turn the surface under it may turn in one move.
-    /// Where the ray grazes the limb, a small change of the ray moves its surface point far
-    /// around the globe; the turn is held to what the hand's motion warrants.
-    static let maxTurnPerRayTurn = 3.0
     /// Latitudes beyond this fold the Mercator plane; the focus stays inside.
     static let latitudeLimit = 84.0
 
@@ -147,7 +143,7 @@ struct MapPlacement {
     private var flight: Flight?
     /// Whether this pinch began on the rendered sphere; crossing its edge keeps the mode.
     private var globeGrabbed: Bool?
-    private var globeDragPoint: (surface: SIMD3<Double>, aim: SIMD3<Double>)?
+    private var groundDrag: MapDragPlane?
     /// Where the viewer stood when the scene was last placed about them; the world keeps to
     /// that place while they move about the room.
     private var viewerReference = SIMD3<Double>(0, 0, 0)
@@ -393,49 +389,34 @@ struct MapPlacement {
         let radius = MapPlacement.earthRadiusMeters * scale
         let center = current.translation - up * radius
         let reach = MapPlacement.maxGrabDistanceInHeights * max(viewpoint.height, 1.0) * scale
-        var turn = simd_quatd(angle: 0, axis: up)
         var slide = SIMD3<Double>(repeating: 0)
         for move in input.moves {
             if let origin = move.rayOrigin, let from = move.rayFrom, let to = move.rayTo {
                 if !onGround {
                     slide += dragGlobe(move, origin: origin, from: from,
-                                       center: center, radius: radius, reach: reach)
+                                       to: to, center: center, radius: radius, reach: reach)
                     continue
                 }
                 globeGrabbed = nil
-                if let grabbed = hit(origin: origin, direction: from, center: center, radius: radius, reach: reach),
-                   let pulled = hit(origin: origin, direction: to, center: center, radius: radius, reach: reach)
-                {
-                    let before = simd_normalize(grabbed - center)
-                    let after = simd_normalize(pulled - center)
-                    if before.x.isFinite, after.x.isFinite {
-                        let rayTurn = acos(min(max(simd_dot(simd_normalize(from), simd_normalize(to)), -1), 1))
-                        let distance = simd_length(origin - center)
-                        let limit = rayTurn * MapPlacement.maxTurnPerRayTurn * max(distance / radius, 1)
-                        var move = simd_quatd(from: before, to: after)
-                        if move.angle > limit, move.angle > 1e-9 {
-                            move = simd_quatd(angle: limit, axis: move.axis)
-                        }
-                        turn = move * turn
-                    }
-                } else {
-                    slide += (to - from) * reach
+                if move.beginsGesture || groundDrag == nil {
+                    groundDrag = MapDragPlane(origin: origin, ray: from,
+                                              surface: current.translation, normal: up)
                 }
+                slide += groundDrag?.translation(from: from, to: to) ?? .zero
             } else if onGround {
                 slide += move.travel
             }
-        }
-        // The surface point the turn brought under the focus is the new focus.
-        if onGround {
-            let focusWas = turn.inverse.act(up)
-            moveFocus(toLocalDirection: current.rotation.inverse.act(focusWas))
         }
         // The surface moving east under the viewer puts the focus further west.
         let localSlide = current.rotation.inverse.act(slide) / scale
         let earth = MapPlacement.earthRadiusMeters
         if onGround {
-            viewpoint.latitude -= localSlide.y / earth * 180 / .pi
-            viewpoint.longitude -= localSlide.x / (earth * max(cos(viewpoint.latitude * .pi / 180), 0.1)) * 180 / .pi
+            // Local scene metres use the focus's Mercator scale in both directions.
+            let latitude = viewpoint.latitude * .pi / 180
+            let meters = earth * max(cos(latitude), 1e-6)
+            let north = log(tan(.pi / 4 + latitude / 2)) - localSlide.y / meters
+            viewpoint.latitude = (2 * atan(exp(north)) - .pi / 2) * 180 / .pi
+            viewpoint.longitude -= localSlide.x / meters * 180 / .pi
         } else if simd_length(localSlide) > 1e-9,
                   let focus = GlobeDrag.focus(
                     grabbed: offGlobeDirection(localSlide / earth),
@@ -517,27 +498,21 @@ struct MapPlacement {
 
     private mutating func dragGlobe(
         _ move: MapGestureInput.Move, origin: SIMD3<Double>, from: SIMD3<Double>,
-        center: SIMD3<Double>, radius: Double, reach: Double
+        to: SIMD3<Double>, center: SIMD3<Double>, radius: Double, reach: Double
     ) -> SIMD3<Double> {
+        groundDrag = nil
         if move.beginsGesture || globeGrabbed == nil {
-            let point = hit(origin: origin, direction: from, center: center, radius: radius, reach: reach)
-            globeGrabbed = point != nil
-            globeDragPoint = point.map { (surface: $0, aim: $0) }
+            globeGrabbed = hit(origin: origin, direction: from, center: center,
+                               radius: radius, reach: reach) != nil
         }
         guard globeGrabbed == true else {
-            return move.travel * (radius / MapPlacement.tableRadius)
+            // Empty-space drags use the focus's visual depth, like a virtual trackball.
+            return (to - from) * simd_length(current.translation - origin)
         }
-        guard var target = globeDragPoint else { return .zero }
-        // Translate the grabbed point by room-space hand travel. Turning a ray about
-        // the head instead multiplies travel by the ratio of surface and hand depths.
-        target.aim += move.travel
-        defer { globeDragPoint = target }
-        let delta = target.aim - origin
-        guard simd_length(delta) > 1e-6,
-              let pulled = hit(origin: origin, direction: simd_normalize(delta),
-                               center: center, radius: radius, reach: reach),
+        guard let grabbed = hit(origin: origin, direction: from, center: center, radius: radius, reach: reach),
+              let pulled = hit(origin: origin, direction: to, center: center, radius: radius, reach: reach),
               let focus = GlobeDrag.focus(
-                grabbed: current.rotation.inverse.act(simd_normalize(target.surface - center)),
+                grabbed: current.rotation.inverse.act(simd_normalize(grabbed - center)),
                 pulled: current.rotation.inverse.act(simd_normalize(pulled - center)),
                 latitude: viewpoint.latitude, longitude: viewpoint.longitude, roll: viewpoint.globeRoll)
         else { return .zero }
@@ -545,7 +520,6 @@ struct MapPlacement {
         viewpoint.longitude = focus.longitude
         viewpoint.globeRoll = focus.roll
         current = pose(for: viewpoint)
-        target.surface = pulled
         return .zero
     }
 

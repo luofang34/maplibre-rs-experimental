@@ -5,7 +5,7 @@ import simd
 final class MapPlacementTests: XCTestCase {
     private let heights = [40_000_000.0, 20_000_000.0, 8_000_000.0, 1_000_000.0]
 
-    func testGrabbedSurfaceTracksHandDisplacementAtEveryGlobeSize() throws {
+    func testGrabbedSurfaceTracksPointerAtEveryGlobeSize() throws {
         for height in heights {
             for offset in [SIMD2<Double>(0, 0), SIMD2<Double>(0.15, 0.1)] {
                 var placement = placed(height)
@@ -14,19 +14,17 @@ final class MapPlacementTests: XCTestCase {
                 let grabbed = center + placement.current.rotation.act(local) * radius
                 let from = simd_normalize(grabbed)
                 let point = geographicDirection(local, placement.viewpoint)
-                var aim = grabbed
+                var ray = from
                 for step in 0..<12 {
                     let travel = SIMD3<Double>(0.002, 0.001, 0)
-                    aim += travel
-                    // An indirect pinch can originate close to the body; its synthetic
-                    // angular ray must not amplify the actual hand displacement.
-                    let indirect = simd_normalize(from + travel * 5)
+                    let next = simd_normalize(from + SIMD3<Double>(0.001, 0.0005, 0) * Double(step + 1))
                     placement.apply(.init(moves: [.init(
                         travel: travel, beginsGesture: step == 0,
-                        rayOrigin: .zero, rayFrom: from, rayTo: indirect)]))
+                        rayOrigin: .zero, rayFrom: ray, rayTo: next)]))
+                    ray = next
                     let moved = center + placement.current.rotation.act(localDirection(point, placement.viewpoint)) * radius
-                    XCTAssertLessThan(simd_length(simd_cross(simd_normalize(moved), simd_normalize(aim))), 1e-7,
-                                      "grabbed point drifts from hand displacement at height \(height)")
+                    XCTAssertLessThan(simd_length(simd_cross(simd_normalize(moved), ray)), 1e-7,
+                                      "grabbed point drifts from pointer at height \(height)")
                 }
                 XCTAssertEqual(placement.viewpoint.bearing, 0)
             }
@@ -37,26 +35,29 @@ final class MapPlacementTests: XCTestCase {
         var placement = placed(MapPlacement.tableHeight)
         let before = placement.viewpoint
         let from = simd_normalize(placement.current.translation)
-        for (index, travel) in [SIMD3<Double>(1, 0, 0), SIMD3<Double>(-1, 0, 0)].enumerated() {
-            placement.apply(.init(moves: [.init(travel: travel, beginsGesture: index == 0,
-                rayOrigin: .zero, rayFrom: from, rayTo: from)]))
+        let outside = simd_normalize(from + SIMD3<Double>(1, 0, 0))
+        for (index, rays) in [(from, outside), (outside, from)].enumerated() {
+            placement.apply(.init(moves: [.init(travel: .zero, beginsGesture: index == 0,
+                rayOrigin: .zero, rayFrom: rays.0, rayTo: rays.1)]))
             XCTAssertEqual(angularDistance(before, placement.viewpoint), 0, accuracy: 1e-8)
         }
+        placement.apply(.init(moves: [.init(travel: .zero, rayOrigin: .zero,
+            rayFrom: from, rayTo: simd_normalize(from + SIMD3<Double>(0.005, 0, 0)))]))
+        XCTAssertGreaterThan(angularDistance(before, placement.viewpoint), 0.001)
     }
 
-    func testOffGlobeDragKeepsTableAngularSpeedWhileZooming() {
+    func testOffGlobeDragUsesVisualDepthAtEveryScale() {
         for height in heights {
             var placement = placed(height)
             let before = placement.viewpoint
-            let (center, _) = sphere(placement)
+            let (center, radius) = sphere(placement)
             let from = simd_normalize(-center)
-            let travel = placement.current.rotation.act(SIMD3<Double>(0.01, 0, 0))
-            placement.apply(MapGestureInput.Delta(moves: [MapGestureInput.Move(
-                travel: travel, beginsGesture: true, rayOrigin: .zero, rayFrom: from,
-                rayTo: simd_normalize(from + travel))]))
-            let displacement = angularDistance(before, placement.viewpoint)
-            XCTAssertEqual(displacement, 0.01 / MapPlacement.tableRadius, accuracy: 1e-9,
-                           "off-globe drag slows down at height \(height)")
+            let right = placement.current.rotation.act(SIMD3<Double>(1, 0, 0))
+            let to = simd_normalize(from + right * 0.005)
+            let expected = abs(simd_dot(to - from, right)) * simd_length(placement.current.translation) / radius
+            placement.apply(.init(moves: [.init(
+                travel: .zero, beginsGesture: true, rayOrigin: .zero, rayFrom: from, rayTo: to)]))
+            XCTAssertEqual(angularDistance(before, placement.viewpoint), expected, accuracy: 1e-8)
         }
     }
 
@@ -64,15 +65,38 @@ final class MapPlacementTests: XCTestCase {
         var placement = placed(8_000_000)
         let (center, _) = sphere(placement)
         let away = simd_normalize(-center)
-        let travel = placement.current.rotation.act(SIMD3<Double>(0.01, 0, 0))
-        placement.apply(MapGestureInput.Delta(moves: [MapGestureInput.Move(
-            travel: travel, beginsGesture: true, rayOrigin: .zero, rayFrom: away, rayTo: away)]))
-        let first = placement.viewpoint
+        placement.apply(.init(moves: [.init(
+            travel: .zero, beginsGesture: true, rayOrigin: .zero, rayFrom: away, rayTo: away)]))
+        let before = placement.viewpoint
         let from = simd_normalize(placement.current.translation)
-        placement.apply(MapGestureInput.Delta(moves: [MapGestureInput.Move(
-            travel: travel, rayOrigin: .zero, rayFrom: from, rayTo: from)]))
-        XCTAssertEqual(angularDistance(first, placement.viewpoint),
-                       0.01 / MapPlacement.tableRadius, accuracy: 1e-9)
+        placement.apply(.init(moves: [.init(
+            travel: SIMD3<Double>(1, 0, 0), rayOrigin: .zero, rayFrom: from, rayTo: from)]))
+        XCTAssertEqual(angularDistance(before, placement.viewpoint), 0, accuracy: 1e-9)
+    }
+
+    func testGroundPanKeepsGrabbedPointOnPointerAcrossHeightsAndTilts() {
+        for height in [150.0, 4000, 60000] {
+            for tilt in [0.0, 45.0, 65.0] {
+                var placement = placed(height)
+                placement.setTilt(tilt * .pi / 180)
+                let initial = placement.viewpoint
+                let origin = SIMD3<Double>.zero
+                let point = placement.current.translation
+                let scale = exp(placement.current.logScale)
+                let direction = simd_normalize(point - origin)
+                let right = placement.current.rotation.act(SIMD3<Double>(1, 0, 0))
+                let next = simd_normalize(direction + right * 0.025)
+                placement.apply(.init(moves: [.init(travel: .zero, beginsGesture: true,
+                    rayOrigin: origin, rayFrom: direction, rayTo: next)]))
+                let latitude = placement.viewpoint.latitude * .pi / 180
+                let meters = MapPlacement.earthRadiusMeters * cos(latitude)
+                let local = SIMD3<Double>((initial.longitude - placement.viewpoint.longitude) * .pi / 180 * meters,
+                    (log(tan(.pi / 4 + initial.latitude * .pi / 360)) - log(tan(.pi / 4 + latitude / 2))) * meters, 0)
+                let moved = placement.current.translation + placement.current.rotation.act(local * scale)
+                XCTAssertLessThan(simd_length(simd_cross(simd_normalize(moved), next)), 1e-6)
+                XCTAssertEqual(placement.viewpoint.height, height)
+            }
+        }
     }
 
     func testTwoHandCarryMovesGlobeWithoutRotatingIt() {

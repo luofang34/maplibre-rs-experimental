@@ -114,10 +114,12 @@ struct MapGestureRecognizer<ID: Hashable> {
 
     private func turned(_ pinch: Pinch) -> SIMD3<Double>? {
         guard let first = pinch.firstDirection else { return nil }
-        let before = pinch.firstHand - pinch.referenceHead
-        let after = pinch.hand - pinch.referenceHead
-        guard simd_length(before) > 1e-4, simd_length(after) > 1e-4 else { return first }
-        return simd_quatd(from: simd_normalize(before), to: simd_normalize(after)).act(first)
+        // Indirect input moves a virtual pointer in the initial selection plane.
+        // A resting hand close to the body must not multiply the map's angular speed.
+        let depth = max(simd_length(pinch.firstHand - pinch.referenceHead), 0.6)
+        let travel = pinch.hand - pinch.firstHand
+        let planar = travel - first * simd_dot(travel, first)
+        return simd_normalize(first + planar / depth)
     }
 
     private mutating func single(_ id: ID, was: Pinch) -> MapGestureInput.Delta {

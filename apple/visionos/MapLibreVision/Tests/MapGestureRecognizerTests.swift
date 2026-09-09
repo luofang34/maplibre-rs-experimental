@@ -152,4 +152,25 @@ final class MapGestureRecognizerTests: XCTestCase {
         XCTAssertFalse(delta.beginsZoom)
     }
 
+    func testPointerGainIsIdenticalAcrossModesAndRestingHandDepths() throws {
+        for globe in [true, false] {
+            for depth in [0.15, 0.3, 0.6] {
+                var engine = Recognizer()
+                engine.setGlobe(globe)
+                _ = engine.handle([hand(1, 0, 0, -depth)])
+                let delta = engine.handle([hand(1, 0.03, 0, -depth)])
+                let ray = try XCTUnwrap(delta.moves.first?.rayTo)
+                XCTAssertEqual(atan2(ray.x, -ray.z), atan(0.03 / 0.6), accuracy: 1e-9)
+            }
+        }
+    }
+
+    func testMovingHandAlongSelectedRayDoesNotPanOrZoom() {
+        var engine = Recognizer()
+        _ = engine.handle([hand(1, 0)])
+        let delta = engine.handle([hand(1, 0, 0, -0.4)])
+        XCTAssertEqual(delta.moves.first?.rayFrom, delta.moves.first?.rayTo)
+        XCTAssertEqual(delta.logScale, 0)
+    }
+
 }

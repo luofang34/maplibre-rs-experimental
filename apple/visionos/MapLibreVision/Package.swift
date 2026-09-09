@@ -9,7 +9,7 @@ let package = Package(
             name: "MapInteraction", path: "MapLibreVision",
             exclude: ["ContentView.swift", "Info.plist", "MapEyeTargets.swift", "MapGestures.swift",
                       "MapLibreVisionApp.swift", "MapMode.swift", "MapSelection.swift", "MapRenderer.swift", "style.json"],
-            sources: ["MapPlacement.swift", "MapGestureInput.swift", "GlobeDrag.swift", "MapGestureRecognizer.swift", "MapMemoryBudget.swift"]),
+            sources: ["MapPlacement.swift", "MapGestureInput.swift", "GlobeDrag.swift", "MapDragPlane.swift", "MapGestureRecognizer.swift", "MapMemoryBudget.swift"]),
         .testTarget(name: "MapInteractionTests", dependencies: ["MapInteraction"], path: "Tests",
                     exclude: ["check-frame-recovery.py"])
     ])
