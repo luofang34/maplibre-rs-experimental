@@ -199,7 +199,7 @@ final class GlobeOrientationTests: XCTestCase {
         XCTAssertEqual(placement.current.translation, pose.translation)
         placement.levelView()
         XCTAssertEqual(placement.viewpoint.tilt, 0)
-        XCTAssertEqual(placement.current.translation, viewer - SIMD3<Double>(0, 4000, 0))
+        XCTAssertLessThan(simd_length(placement.current.translation - (viewer - SIMD3<Double>(0, 4000, 0))), 1e-7)
     }
 }
 

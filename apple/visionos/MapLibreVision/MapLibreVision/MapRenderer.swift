@@ -273,7 +273,7 @@ final class MapRenderer {
             let column = anchor.originFromAnchorTransform.columns.3
             return SIMD3<Double>(Double(column.x), Double(column.y), Double(column.z))
         } ?? SIMD3<Double>(0, 0, 0)
-        let controls = modeStore.takeControls(isGlobe: placement.viewpoint.height > MapPlacement.groundHeightLimit, tilt: placement.viewpoint.tilt)
+        let controls = modeStore.takeControls(isGlobe: placement.viewpoint.height > MapPlacement.groundHeightLimit, tilt: placement.sceneTilt)
         let headMatrix = deviceAnchor?.originFromAnchorTransform ?? matrix_identity_float4x4
         placement.updateViewRay(origin: head, direction: -SIMD3<Double>(
             Double(headMatrix.columns.2.x), Double(headMatrix.columns.2.y), Double(headMatrix.columns.2.z)))

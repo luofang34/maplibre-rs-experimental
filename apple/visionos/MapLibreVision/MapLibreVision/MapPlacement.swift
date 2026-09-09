@@ -252,8 +252,42 @@ struct MapPlacement {
                          altitudeMeters: focusElevation + local.z)
     }
 
+    /// Artificial scene tilt relative to room gravity; head tracking is independent.
+    var sceneTilt: Double {
+        let up = current.rotation.act(SIMD3<Double>(0, 0, 1))
+        return acos(min(max(up.y, -1), 1))
+    }
+
     mutating func setTilt(_ radians: Double) {
-        rotate(bearing: 0, pitch: radians - viewpoint.tilt, begins: false)
+        guard !inFlight else { return }
+        captureOrbitTarget(anchor: nil)
+        applyAbsoluteTilt(radians)
+    }
+
+    private mutating func applyAbsoluteTilt(_ radians: Double) {
+        let requested = min(max(radians, 0), .pi / 2)
+        let up = current.rotation.act(SIMD3<Double>(0, 0, 1))
+        var slope = SIMD3<Double>(up.x, 0, up.z)
+        if simd_length(slope) < 1e-6 {
+            slope = simd_cross(orbitRight, SIMD3<Double>(0, 1, 0))
+            slope.y = 0
+        }
+        if simd_length(slope) < 1e-6 { slope = SIMD3<Double>(0, 0, 1) }
+        let wanted = SIMD3<Double>(0, cos(requested), 0) + simd_normalize(slope) * sin(requested)
+        let rotation = simd_quatd(from: up, to: wanted) * current.rotation
+        viewpoint.tilt = requested
+        setOrbitRotation(rotation)
+    }
+
+    private mutating func setOrbitRotation(_ rotation: simd_quatd) {
+        let posed = pose(for: viewpoint)
+        sceneRotation = rotation * posed.rotation.inverse * sceneRotation
+        current = pose(for: viewpoint)
+        if let target = orbitTarget {
+            let moved = current.translation + current.rotation.act(target.local * exp(current.logScale))
+            sceneOffset += target.world - moved
+            current = pose(for: viewpoint)
+        }
     }
 
     private mutating func rotate(
@@ -261,20 +295,16 @@ struct MapPlacement {
         anchor: (origin: SIMD3<Double>, direction: SIMD3<Double>)? = nil
     ) {
         if orbitTarget == nil || begins { captureOrbitTarget(anchor: anchor) }
-        let before = current
-        let nextTilt = min(max(viewpoint.tilt + pitch, 0), 70 * .pi / 180)
-        let appliedPitch = nextTilt - viewpoint.tilt
-        viewpoint.bearing += bearing
-        viewpoint.tilt = nextTilt
-        let yaw = simd_quatd(angle: bearing, axis: orbitUp)
-        let pitchTurn = simd_quatd(angle: appliedPitch, axis: orbitRight)
-        let posed = pose(for: viewpoint)
-        sceneRotation = pitchTurn * yaw * before.rotation * posed.rotation.inverse * sceneRotation
-        current = pose(for: viewpoint)
-        if let target = orbitTarget {
-            let moved = current.translation + current.rotation.act(target.local * exp(current.logScale))
-            sceneOffset += target.world - moved
-            current = pose(for: viewpoint)
+        if viewpoint.height <= MapPlacement.groundHeightLimit {
+            let up = current.rotation.act(SIMD3<Double>(0, 0, 1))
+            viewpoint.bearing += bearing
+            setOrbitRotation(simd_quatd(angle: bearing, axis: up) * current.rotation)
+            if pitch != 0 { applyAbsoluteTilt(sceneTilt + pitch) }
+        } else {
+            viewpoint.bearing += bearing
+            let yaw = simd_quatd(angle: bearing, axis: orbitUp)
+            let pitchTurn = simd_quatd(angle: pitch, axis: orbitRight)
+            setOrbitRotation(pitchTurn * yaw * current.rotation)
         }
     }
 
@@ -298,6 +328,10 @@ struct MapPlacement {
     }
 
     mutating func levelView() {
+        if viewpoint.height <= MapPlacement.groundHeightLimit {
+            setTilt(0)
+            return
+        }
         viewpoint.tilt = 0
         viewpoint.bearing = 0
         viewpoint.globeRoll = 0
@@ -311,7 +345,7 @@ struct MapPlacement {
     mutating func fly(to height: Double, at time: Double, viewer: SIMD3<Double>) {
         let from = viewpoint
         let fromPose = current
-        if viewpoint.height <= MapPlacement.groundHeightLimit { immersiveTilt = viewpoint.tilt }
+        if viewpoint.height <= MapPlacement.groundHeightLimit { immersiveTilt = sceneTilt }
         viewerReference = viewer
         orbitTarget = nil
         sceneOffset = .zero
