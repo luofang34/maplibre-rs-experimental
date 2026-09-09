@@ -27,6 +27,15 @@ pub enum XrFrameError {
         /// Position of the eye in the frame.
         index: usize,
     },
+    /// An external view is invalid; the host can keep its complete stereo frame.
+    #[error("eye {index} has an invalid external view")]
+    InvalidView {
+        /// Position of the eye in the frame.
+        index: usize,
+        /// Validation failure from the supplied placement or frustum.
+        #[source]
+        source: crate::render::view_state::ExternalViewError,
+    },
     /// A stage of the schedule failed while drawing an eye.
     #[error("eye {index} could not be drawn")]
     Eye {
@@ -46,6 +55,7 @@ impl HeadlessMap {
     /// An eye without a colour target draws into the map's own texture, which then holds
     /// the last such eye.
     pub fn run_xr_frame(&mut self, frame: XrFrame) -> Result<(), XrFrameError> {
+        let views = self.validate_views(&frame)?;
         self.map_context
             .view_state
             .set_opaque_environment(frame.opaque_environment);
@@ -54,17 +64,6 @@ impl HeadlessMap {
         let frame_number = resources
             .get::<EyeInFrame>()
             .map_or(0, |eye| eye.frame.wrapping_add(1));
-        let views = frame
-            .eyes
-            .iter()
-            .enumerate()
-            .map(|(index, eye)| {
-                frame
-                    .placement
-                    .view_from(eye.world_from_eye, eye.frustum)
-                    .ok_or(XrFrameError::SingularEye { index })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
         for (index, (eye, view)) in frame.eyes.into_iter().zip(views).enumerate() {
             // The first eye selects the frame's tiles; the others draw the same ones.
             self.map_context.world.resources.insert(EyeInFrame {
@@ -110,6 +109,36 @@ impl HeadlessMap {
             frame: frame_number,
         });
         Ok(())
+    }
+
+    fn validate_views(
+        &self,
+        frame: &XrFrame,
+    ) -> Result<Vec<crate::render::view_state::ExternalView>, XrFrameError> {
+        let projection = self
+            .map_context
+            .style
+            .projection
+            .as_ref()
+            .map_or(ProjectionType::Mercator, |spec| {
+                spec.projection_type.clone()
+            });
+        let mut checked = self.map_context.view_state.clone();
+        frame
+            .eyes
+            .iter()
+            .enumerate()
+            .map(|(index, eye)| {
+                let view = frame
+                    .placement
+                    .view_from(eye.world_from_eye, eye.frustum)
+                    .ok_or(XrFrameError::SingularEye { index })?;
+                checked
+                    .set_external_view(view, &projection)
+                    .map_err(|source| XrFrameError::InvalidView { index, source })?;
+                Ok(view)
+            })
+            .collect()
     }
 
     /// Keeps the view the frame's first eye would have from `placement`, so the request

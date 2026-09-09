@@ -192,3 +192,45 @@ async fn head_motion_and_stationary_frames_both_request_visible_tiles() {
         "settling resumes requests without head movement"
     );
 }
+
+#[tokio::test]
+async fn invalid_second_eye_preserves_the_complete_frame_and_recovers() {
+    let style: Style = serde_json::from_str(r##"{"version":8,"sources":{},"layers":[{"id":"background","type":"background","paint":{"background-color":"#718474"}}]}"##).expect("style");
+    let (kernel, renderer) = create_headless_renderer(64, 64, None)
+        .await
+        .expect("renderer");
+    let mut map = HeadlessMap::new(
+        style,
+        renderer,
+        kernel,
+        vec![
+            Box::new(RenderPlugin),
+            Box::new(crate::background::BackgroundPlugin),
+        ],
+    )
+    .expect("map");
+    map.run_xr_frame(frame(16)).expect("valid stereo");
+    let previous = map.view_state().view_projection().0;
+    let generation = map
+        .world()
+        .resources
+        .get::<crate::render::eye_covering::EyeInFrame>()
+        .expect("frame")
+        .frame;
+    let mut invalid = frame(32);
+    invalid.eyes[1].frustum.near = f64::NAN;
+    assert!(matches!(
+        map.run_xr_frame(invalid),
+        Err(super::XrFrameError::InvalidView { index: 1, .. })
+    ));
+    assert_eq!(map.view_state().view_projection().0, previous);
+    assert_eq!(
+        map.world()
+            .resources
+            .get::<crate::render::eye_covering::EyeInFrame>()
+            .expect("preserved frame")
+            .frame,
+        generation
+    );
+    map.run_xr_frame(frame(48)).expect("tracking recovered");
+}

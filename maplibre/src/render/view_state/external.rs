@@ -373,6 +373,9 @@ pub(super) struct EyeFrame {
 
 impl EyeFrame {
     fn of(view: &Matrix4<f64>) -> Result<Self, ExternalViewError> {
+        if (0..4).any(|column| (0..4).any(|row| !view[column][row].is_finite())) {
+            return Err(ExternalViewError::SingularView);
+        }
         let inverse = view.invert().ok_or(ExternalViewError::SingularView)?;
         let eye = inverse * Vector4::new(0.0, 0.0, 0.0, 1.0);
         let scale = (view * Vector4::new(1.0, 0.0, 0.0, 0.0))

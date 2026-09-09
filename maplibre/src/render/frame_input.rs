@@ -89,8 +89,8 @@ pub fn apply_frame_input(
 
 /// Applies the [`FrameInput`] a host wrote; a host that writes none keeps the map view.
 ///
-/// A rejected external view is logged and the frame falls back to the map view, so one bad
-/// pose from a tracker never blanks the screen.
+/// A rejected external view is logged and retains the last valid external view, so a
+/// tracking failure cannot switch projection or start an unrelated tile covering.
 pub fn frame_input_system(
     MapContext {
         world,
@@ -110,8 +110,7 @@ pub fn frame_input_system(
             specification.projection_type.clone()
         });
     if let Err(error) = apply_frame_input(input, view_state, &projection) {
-        tracing::error!(%error, "host view rejected; the frame keeps the map view");
-        view_state.clear_external_view();
+        tracing::error!(%error, "host view rejected; preserving the last valid view");
     }
     Ok(())
 }
