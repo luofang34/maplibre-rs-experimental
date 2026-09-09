@@ -138,6 +138,7 @@ struct MapPlacement {
         let fromPose: ScenePose
         let toPose: ScenePose
         let start: Double
+        var clearanceOffset = SIMD3<Double>.zero
     }
 
     private(set) var viewpoint: Viewpoint
@@ -211,6 +212,47 @@ struct MapPlacement {
     mutating func updateViewRay(origin: SIMD3<Double>, direction: SIMD3<Double>) {
         guard simd_length(direction) > 0.5 else { return }
         viewRay = (origin, simd_normalize(direction))
+    }
+
+    /// Keeps every physical eye above the loaded terrain, including an orbit's displaced eye.
+    mutating func constrainCamera(eyes: [SIMD3<Double>], elevation: (MapAnchor) -> Double?) {
+        let scale = exp(current.logScale)
+        let globe = viewpoint.height > MapPlacement.groundHeightLimit
+        for eye in eyes {
+            let local = current.rotation.inverse.act(eye - current.translation) / scale
+            let position = cameraPosition(local: local, globe: globe)
+            let ground = elevation(position) ?? focusElevation
+            let margin = max(MapPlacement.minHeight, 0.05 / scale)
+            let deficit = ground + margin - position.altitudeMeters
+            guard deficit.isFinite, deficit > 0 else { continue }
+            let normal = globe
+                ? simd_normalize(local + SIMD3<Double>(0, 0, MapPlacement.earthRadiusMeters))
+                : SIMD3<Double>(0, 0, 1)
+            let correction = current.rotation.act(normal * deficit * scale)
+            sceneOffset -= correction
+            flight?.clearanceOffset -= correction
+            current.translation -= correction
+            // A constrained orbit must acquire a reachable target for subsequent input.
+            orbitTarget = nil
+            zoomTarget = nil
+        }
+    }
+
+    private func cameraPosition(local: SIMD3<Double>, globe: Bool) -> MapAnchor {
+        let earth = MapPlacement.earthRadiusMeters
+        if globe {
+            let radial = local + SIMD3<Double>(0, 0, earth)
+            let location = geographic(ofLocalDirection: simd_normalize(radial))
+            return MapAnchor(latitude: location?.latitude ?? viewpoint.latitude,
+                             longitude: location?.longitude ?? viewpoint.longitude,
+                             altitudeMeters: focusElevation + simd_length(radial) - earth)
+        }
+        let latitude = viewpoint.latitude * .pi / 180
+        let meters = earth * max(cos(latitude), 1e-6)
+        let north = log(tan(.pi / 4 + latitude / 2)) + local.y / meters
+        return MapAnchor(latitude: (2 * atan(exp(north)) - .pi / 2) * 180 / .pi,
+                         longitude: viewpoint.longitude + local.x / meters * 180 / .pi,
+                         altitudeMeters: focusElevation + local.z)
     }
 
     mutating func setTilt(_ radians: Double) {
@@ -290,7 +332,12 @@ struct MapPlacement {
                         toPose: pose(for: arrival), start: time)
     }
 
-    func destination() -> ScenePose? { flight?.toPose }
+    func destination() -> ScenePose? {
+        guard let flight else { return nil }
+        var pose = flight.toPose
+        pose.translation += flight.clearanceOffset
+        return pose
+    }
 
     mutating func advance(at time: Double) -> MapImmersion? {
         if let flight {
@@ -301,6 +348,7 @@ struct MapPlacement {
             viewpoint.bearing = flight.from.bearing + (flight.to.bearing - flight.from.bearing) * eased
             viewpoint.globeRoll = flight.from.globeRoll * (1 - eased)
             current = ScenePose.flight(from: flight.fromPose, to: flight.toPose, eased, viewer: viewerReference)
+            current.translation += flight.clearanceOffset
             if t >= 1 {
                 viewpoint = flight.to
                 self.flight = nil

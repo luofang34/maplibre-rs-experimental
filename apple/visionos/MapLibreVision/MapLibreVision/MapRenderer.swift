@@ -307,6 +307,14 @@ final class MapRenderer {
         maplibre_visionos_set_opaque_environment(map, placement.immersion == .full)
         let input = gestures.take()
         placement.apply(input)
+        let eyePositions = drawable.views.map { view -> SIMD3<Double> in
+            let transform = headMatrix * view.transform
+            return SIMD3<Double>(SIMD3<Float>(transform.columns.3.x, transform.columns.3.y, transform.columns.3.z))
+        }
+        placement.constrainCamera(eyes: eyePositions) { position in
+            let value = Double(maplibre_visionos_terrain_elevation(map, position.latitude, position.longitude))
+            return value.isFinite ? value : nil
+        }
         let scenePose = placement.current.worldFromScene()
         var worldFromScene = simd_float4x4(columns: (
             SIMD4<Float>(scenePose.columns.0), SIMD4<Float>(scenePose.columns.1),

@@ -163,3 +163,52 @@ final class MapZoomAnchorTests: XCTestCase {
         XCTAssertLessThan(placement.viewpoint.height, 4000)
     }
 }
+
+final class MapCameraClearanceTests: XCTestCase {
+    func testClearanceDuringFlightDoesNotAccumulateAnIdenticalCorrection() {
+        var placement = MapPlacement(viewpoint: .above(.innsbruck, height: 150))
+        placement.place(viewer: .zero)
+        placement.fly(to: MapPlacement.tableHeight, at: 1, viewer: .zero)
+        _ = placement.advance(at: 1)
+        placement.constrainCamera(eyes: [.zero]) { _ in 3000 }
+        let safe = placement.current.translation
+        for _ in 0..<20 {
+            _ = placement.advance(at: 1)
+            placement.constrainCamera(eyes: [.zero]) { _ in 3000 }
+            XCTAssertLessThan(simd_length(placement.current.translation - safe), 1e-7)
+        }
+    }
+
+    func testTiltAndTranslationKeepBothEyesAboveSampledTerrain() {
+        var placement = MapPlacement(viewpoint: .above(.innsbruck, height: 150))
+        let eyes = [SIMD3<Double>(-0.035, 0, 0), SIMD3<Double>(0.035, 0, 0)]
+        placement.place(viewer: .zero)
+        placement.updateViewRay(origin: .zero, direction: simd_normalize(SIMD3<Double>(0, -0.01, -1)))
+        for tilt in [0.0, 0.3, 0.8, 1.2, 0.0] {
+            placement.setTilt(tilt)
+            placement.apply(.init(moves: [.init(travel: SIMD3<Double>(500, 0, 500))]))
+            placement.constrainCamera(eyes: eyes) { _ in 2600 }
+            let inverse = simd_inverse(placement.current.worldFromScene())
+            for eye in eyes {
+                let local = inverse * SIMD4<Double>(eye, 1)
+                XCTAssertGreaterThanOrEqual(local.z + placement.focusElevation, 2750 - 1e-6)
+            }
+        }
+    }
+
+    func testCameraSamplesDisplacedEyeInsteadOfOnlyFocus() {
+        var placement = MapPlacement(viewpoint: .above(.innsbruck, height: 4000))
+        placement.place(viewer: .zero)
+        placement.updateViewRay(origin: .zero, direction: simd_normalize(SIMD3<Double>(0.3, -0.5, -1)))
+        placement.setTilt(1.0)
+        var sampled: MapAnchor?
+        placement.constrainCamera(eyes: [.zero]) { sampled = $0; return 6000 }
+        XCTAssertNotNil(sampled)
+        XCTAssertGreaterThan(abs((sampled?.latitude ?? 47.26) - 47.26), 0.001)
+        let local = simd_inverse(placement.current.worldFromScene()) * SIMD4<Double>(0, 0, 0, 1)
+        XCTAssertGreaterThanOrEqual(local.z + placement.focusElevation, 6150 - 1e-6)
+        let settled = placement.current.translation
+        placement.constrainCamera(eyes: [.zero]) { _ in 6000 }
+        XCTAssertLessThan(simd_length(placement.current.translation - settled), 1e-6)
+    }
+}

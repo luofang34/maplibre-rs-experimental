@@ -161,7 +161,7 @@ impl HeadlessMap {
         let world = &self.map_context.world;
         let index = world.resources.get::<TerrainCoverageIndex>()?;
         let mercator = WorldCoords::from_lat_lon(position, Zoom::new(0.0));
-        index.elevation_at(&world.tiles, mercator.x / TILE_SIZE, mercator.y / TILE_SIZE)
+        index.elevation_cached(&world.tiles, mercator.x / TILE_SIZE, mercator.y / TILE_SIZE)
     }
 }
 

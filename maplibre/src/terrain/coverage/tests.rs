@@ -187,3 +187,24 @@ fn an_empty_index_covers_nothing() {
     assert!(!index.sample(&tiles, 0.5, 0.5).covered);
     assert_eq!(index.tile_elevation_range(tile(0, 0, 0)), None);
 }
+
+#[test]
+fn camera_clearance_samples_fine_cached_terrain_outside_rendered_tiles() {
+    let mut tiles = Tiles::default();
+    load(&mut tiles, tile(0, 0, 0), gradient_tile(100.0));
+    load(&mut tiles, tile(0, 0, 3), gradient_tile(5000.0));
+    let index = TerrainCoverageIndex::build([tile(3, 3, 2)], &tiles, &source(1.0));
+    assert_eq!(index.elevation_at(&tiles, 0.01, 0.01), None);
+    assert!(
+        index
+            .elevation_cached(&tiles, 0.01, 0.01)
+            .expect("cached mountain")
+            >= 5000.0
+    );
+    assert!(
+        index
+            .elevation_cached(&tiles, 0.4, 0.4)
+            .expect("coarse fallback")
+            < 1000.0
+    );
+}

@@ -195,6 +195,11 @@ impl TerrainCoverageIndex {
         sample.dem_loaded.then_some(sample.elevation)
     }
 
+    /// Finest cached elevation, including terrain outside the current view, for camera clearance.
+    pub fn elevation_cached(&self, tiles: &Tiles, x: f64, y: f64) -> Option<f64> {
+        self.elevation_at_zoom(tiles, x, y, self.maxzoom.saturating_add(1).min(24))
+    }
+
     /// Exaggerated elevation at Mercator coordinates from any loaded DEM, rendered or not, as
     /// the tile at `zoom` would sample it; `None` where nothing covering it has loaded.
     pub fn elevation_at_zoom(
