@@ -64,12 +64,11 @@ pub fn upload_system(
     else {
         return Err(SystemError::Dependencies);
     };
-    let mut source_tiles =
-        if style.terrain.is_some() && crate::terrain::uses_uniform_texture_covering(view_state) {
-            Vec::new()
-        } else {
-            sources_for_upload(pattern)
-        };
+    let mut source_tiles = if style.terrain.is_some() {
+        vec![crate::coords::WorldTileCoords::default()]
+    } else {
+        sources_for_upload(pattern)
+    };
     if let Some(requests) = world
         .resources
         .get::<crate::terrain::request_system::DrapeRequests>()
@@ -89,7 +88,7 @@ pub fn upload_system(
             &source_tiles,
             zoom,
             bearing,
-            previous_paint.map(|frame| frame.zoom),
+            previous_paint,
         );
     }
     if changed {
@@ -126,21 +125,6 @@ fn sources_for_upload(
             }
         });
     }
-    // Coarsened terrain targets and their stand-ins need GPU geometry even when the
-    // screen covering consists entirely of finer tiles.
-    let mut parents = Vec::new();
-    for coords in &source_tiles {
-        let mut current = *coords;
-        while let Some(parent) = current.get_parent() {
-            if seen.insert(parent) {
-                parents.push(parent);
-            }
-            current = parent;
-        }
-    }
-    parents.sort_by_key(|coords| coords.z);
-    parents.extend(source_tiles);
-    let source_tiles = parents;
     source_tiles
 }
 
@@ -150,7 +134,7 @@ fn refresh_layer_paint(
     source_tiles: &[crate::coords::WorldTileCoords],
     zoom: f32,
     bearing: f32,
-    previous_zoom: Option<f32>,
+    previous: Option<VectorPaintFrame>,
 ) {
     for coords in source_tiles {
         for entry in buffer_pool
@@ -160,9 +144,20 @@ fn refresh_layer_paint(
             .flatten()
         {
             let metadata = metadata_for_layer(&entry.style_layer, *coords, zoom, bearing);
-            buffer_pool.update_layer_metadata(queue, entry, metadata);
+            let unchanged = previous.is_some_and(|frame| {
+                bytemuck::bytes_of(&metadata_for_layer(
+                    &entry.style_layer,
+                    *coords,
+                    frame.zoom,
+                    frame.bearing,
+                )) == bytemuck::bytes_of(&metadata)
+            });
+            if !unchanged {
+                buffer_pool.update_layer_metadata(queue, entry, metadata);
+            }
             if let Some(color) = paint::uniform_color(&entry.style_layer, f64::from(zoom)) {
-                if previous_zoom
+                if previous
+                    .map(|frame| frame.zoom)
                     .and_then(|zoom| paint::uniform_color(&entry.style_layer, f64::from(zoom)))
                     == Some(color)
                 {
@@ -192,6 +187,7 @@ fn upload_tessellated_layer(
     // Upload the tessellated layers in view, a few tiles a frame; the rest follow next
     // frame rather than staging a whole burst of arrivals at once.
     let mut uploaded_tiles = 0;
+    let mut bytes = crate::render::memory_budget::UploadBudget::new(16 << 20);
     for coords in source_tiles {
         if uploaded_tiles >= UPLOADS_PER_FRAME {
             break;
@@ -230,6 +226,16 @@ fn upload_tessellated_layer(
                 continue;
             };
 
+            let size = buffer.buffer.vertices.len() * size_of::<crate::render::ShaderVertex>()
+                + buffer.buffer.indices.len() * size_of::<u32>()
+                + feature_indices
+                    .iter()
+                    .map(|count| *count as usize)
+                    .sum::<usize>()
+                    * size_of::<FillShaderFeatureMetadata>();
+            if !bytes.take(size) {
+                return;
+            }
             upload_bucket(
                 buffer_pool,
                 queue,
@@ -282,7 +288,7 @@ fn upload_bucket(
         .map_or(buffer, |(_, _, spatial)| spatial);
     let layer_metadata = metadata_for_layer(style_layer, coords, zoom, bearing);
 
-    log::debug!("Allocating geometry at {coords}");
+    tracing::debug!(%coords, "allocating vector geometry");
     if let Err(error) = buffer_pool.allocate_layer_geometry(
         queue,
         coords,

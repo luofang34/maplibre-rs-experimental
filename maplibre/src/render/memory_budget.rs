@@ -1,6 +1,6 @@
 //! What the host's memory lets a frame keep.
 //!
-//! A headset kills the process at a fixed footprint. A flight to the ground brings a hundred
+//! A headset can terminate memory-heavy processes. A flight to the ground brings a hundred
 //! drawn tiles, each with a drape texture, and a burst of tile uploads, and that alone can
 //! carry the footprint past the limit. The host reports how much memory is still available
 //! each frame; below a reserve the frame goes carefully: only the nearest tiles keep a drape
@@ -126,3 +126,28 @@ impl MemoryBudgetTracker {
 
 #[cfg(test)]
 mod tests;
+
+/// Bounds staging bursts without starving a single layer larger than the frame allowance.
+pub(crate) struct UploadBudget {
+    remaining: usize,
+    started: bool,
+}
+impl UploadBudget {
+    pub(crate) fn new(bytes: usize) -> Self {
+        Self {
+            remaining: bytes,
+            started: false,
+        }
+    }
+    pub(crate) fn take(&mut self, bytes: usize) -> bool {
+        if bytes == 0 {
+            return true;
+        }
+        if self.started && bytes > self.remaining {
+            return false;
+        }
+        self.started = true;
+        self.remaining = self.remaining.saturating_sub(bytes);
+        true
+    }
+}

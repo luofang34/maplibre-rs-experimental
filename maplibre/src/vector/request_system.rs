@@ -89,12 +89,11 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                     y: 0,
                     z: crate::coords::ZoomLevel::new(0),
                 });
-            let uniform = style.terrain.is_some()
-                && crate::terrain::uses_uniform_texture_covering(view_state);
+            let draped = style.terrain.is_some();
             for coords in overview
                 .into_iter()
                 .chain(drapes)
-                .chain(view_region.iter().filter(|_| !uniform))
+                .chain(view_region.iter().filter(|_| !draped))
             {
                 // Above the source maximum zoom the ancestor tile is fetched once and the
                 // view pattern scales it into every descendant in view.

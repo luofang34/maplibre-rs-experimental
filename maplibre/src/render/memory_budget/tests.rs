@@ -66,3 +66,15 @@ fn oscillating_host_reports_cannot_switch_drape_covering_each_frame() {
         MemoryPressure::Low
     );
 }
+
+#[test]
+fn staging_budget_limits_bursts_and_eventually_admits_large_layers() {
+    let mut budget = super::UploadBudget::new(100);
+    assert!(budget.take(60));
+    assert!(!budget.take(60));
+    assert!(budget.take(40));
+    assert!(!budget.take(1));
+    let mut next = super::UploadBudget::new(100);
+    assert!(next.take(200));
+    assert!(!next.take(1));
+}

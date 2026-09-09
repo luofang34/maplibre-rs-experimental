@@ -117,7 +117,7 @@ impl<E: Environment, T: DemTransferables> System for RequestSystem<E, T> {
             view_state,
             world,
             view_state.zoom().zoom_level(DEFAULT_TILE_SIZE),
-            ViewStatePadding::Loose,
+            ViewStatePadding::Tight,
         )
         .map_err(|error| {
             tracing::error!(%error, "unable to select DEM request tiles");
@@ -134,20 +134,12 @@ impl<E: Environment, T: DemTransferables> System for RequestSystem<E, T> {
             .get::<DrapeRequests>()
             .map(|requests| requests.0.clone())
             .unwrap_or_default();
-        let wanted: Vec<WorldTileCoords> = drapes
-            .into_iter()
-            .chain(view_region.iter())
-            .filter_map(|coords| dem_tile_coords(coords, dem.minzoom, dem.maxzoom))
-            .flat_map(|coords| {
-                [
-                    dem_ancestor_coords(coords, dem.minzoom),
-                    Some(coords),
-                    missing_dem_fallback(&world.tiles, coords, dem.minzoom),
-                ]
-                .into_iter()
-                .flatten()
-            })
-            .collect();
+        let wanted = request_order(
+            view_region.iter().chain(drapes),
+            &world.tiles,
+            dem.minzoom,
+            dem.maxzoom,
+        );
         for coords in wanted {
             if coords.build_quad_key().is_none() || !requested.insert(coords) {
                 continue;
@@ -248,3 +240,34 @@ pub fn fetch_dem_apc<K: OffscreenKernel, T: DemTransferables, C: Context + Clone
 
 #[cfg(test)]
 mod tests;
+
+// Foreground DEMs must not queue behind coarse textures: their resolutions are independent.
+fn request_order(
+    tiles: impl Iterator<Item = WorldTileCoords>,
+    loaded: &Tiles,
+    minzoom: u8,
+    maxzoom: u8,
+) -> Vec<WorldTileCoords> {
+    let mut seen = HashSet::new();
+    let fine: Vec<_> = tiles
+        .filter_map(|coords| dem_tile_coords(coords, minzoom, maxzoom))
+        .filter(|coords| seen.insert(*coords))
+        .collect();
+    let mut result = Vec::new();
+    for coords in &fine {
+        if let Some(parent) = dem_ancestor_coords(*coords, minzoom) {
+            if seen.insert(parent) {
+                result.push(parent);
+            }
+        }
+    }
+    // One coarse tile brackets the local terrain while fine tiles arrive.
+    let remaining = result.split_off(result.len().min(1));
+    result.extend(fine.iter().copied());
+    result.extend(remaining);
+    result.extend(
+        fine.into_iter()
+            .filter_map(|coords| missing_dem_fallback(loaded, coords, minzoom)),
+    );
+    result
+}

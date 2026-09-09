@@ -1,9 +1,6 @@
 //! C map lifecycle and host-facing data structures.
 mod diagnostics;
 mod frame;
-use diagnostics::init_logging;
-pub use frame::maplibre_visionos_render_frame;
-
 use std::{
     alloc::{GlobalAlloc, Layout, System},
     ffi::{c_char, c_void, CStr},
@@ -16,6 +13,8 @@ use std::{
 };
 
 use cgmath::{Deg, Matrix4};
+use diagnostics::init_logging;
+pub use frame::maplibre_visionos_render_frame;
 use maplibre::{
     coords::LatLon,
     headless::{create_headless_renderer_with_settings, map::HeadlessMap},
@@ -175,31 +174,12 @@ fn create(
     let mut style: Style =
         serde_json::from_str(style_json).map_err(|error| format!("style: {error}"))?;
     let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .thread_name("map-tile-worker")
         .enable_all()
         .build()
         .map_err(|error| format!("runtime: {error}"))?;
-    // The desktop pool sizes hold close to a gigabyte on the GPU before a tile is drawn.
-    // These hold a few hundred drawn tiles within the device's memory limit; a pool that
-    // cannot hold the drawn tiles has the upload system reload them every frame.
-    let settings = RendererSettings {
-        texture_format: Some(SURFACE_FORMAT),
-        // The upload writes one feature entry per vertex, so the feature ring holds as many
-        // entries as the vertex ring holds vertices; a smaller one would evict every frame.
-        // Fills index each vertex about three times.
-        buffer_pools: BufferPoolSizes {
-            vertices: 8_000_000,
-            indices: 24_000_000,
-            feature_metadata: 8_000_000,
-            layer_metadata: 10 * 1024,
-        },
-        symbol_pools: BufferPoolSizes {
-            vertices: 2_000_000,
-            indices: 4_000_000,
-            feature_metadata: 2_000_000,
-            layer_metadata: 10 * 1024,
-        },
-        ..RendererSettings::default()
-    };
+    let settings = renderer_settings();
     let (kernel, renderer) = runtime
         .block_on(create_headless_renderer_with_settings(
             width, height, cache_dir, settings,
@@ -362,4 +342,29 @@ fn column_major(values: &[f32]) -> Matrix4<f64> {
         v(14),
         v(15),
     )
+}
+
+fn renderer_settings() -> RendererSettings {
+    // The desktop pool sizes hold close to a gigabyte on the GPU before a tile is drawn.
+    // These hold a few hundred drawn tiles within the device's memory limit; a pool that
+    // cannot hold the drawn tiles has the upload system reload them every frame.
+    RendererSettings {
+        texture_format: Some(SURFACE_FORMAT),
+        // The upload writes one feature entry per vertex, so the feature ring holds as many
+        // entries as the vertex ring holds vertices; a smaller one would evict every frame.
+        // Fills index each vertex about three times.
+        buffer_pools: BufferPoolSizes {
+            vertices: 8_000_000,
+            indices: 24_000_000,
+            feature_metadata: 8_000_000,
+            layer_metadata: 10 * 1024,
+        },
+        symbol_pools: BufferPoolSizes {
+            vertices: 2_000_000,
+            indices: 4_000_000,
+            feature_metadata: 2_000_000,
+            layer_metadata: 10 * 1024,
+        },
+        ..RendererSettings::default()
+    }
 }
