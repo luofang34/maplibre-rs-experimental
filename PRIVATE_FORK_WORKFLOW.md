@@ -11,6 +11,9 @@ The current review topics are:
 
 | Branch | Scope |
 | --- | --- |
+| `fix/visionos-rotation-stability` | Normalized gesture rotations and finite tilt reporting |
+| `fix/xr-pose-validation` | Validate every eye before starting a frame; preserve the last valid view |
+| `fix/terrain-detail-streaming` | Balance visible texture detail and bound movement prefetch |
 | `fix/stable-view-unprojection` | Checked and factored CPU unprojection for level views, terrain selection, and gestures |
 | `fix/foreground-terrain-refinement` | Foreground priority, bounded replacement textures, fallback retirement, stable paint |
 | `fix/terrain-road-perspective` | Road alignment, perspective width, bridge elevation, tunnel occlusion |
@@ -20,6 +23,8 @@ The current review topics are:
 These branches form a dependency stack above the integrated globe/terrain work.
 The stable unprojection change builds on the integrated `8d5b79e4` baseline; use
 that commit as its review base to exclude the preceding validation documentation.
+The rotation stability change uses integrated `cc7d163b` as its review base.
+The XR validation and terrain streaming topics build on that stack.
 Their parent branch is the review base; comparing every branch directly with
 upstream `main` would include unrelated prerequisites. Renderer topics can be
 prepared for MapLibre review as their dependencies become available upstream.
