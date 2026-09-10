@@ -13,3 +13,18 @@ Desk globe overview
 Natural Earth 1:50m land, public domain. https://www.naturalearthdata.com/about/terms-of-use/
 Rendered by maplibre-rs, then downsampled to a bounded 2048 x 2048 overview texture.
 Detailed terrain is rendered separately by maplibre-rs in the immersive view.
+
+Conquering the Mach Loop
+Original simulated flight, not a recorded ADS-B track or operational route.
+Location reference: https://www.mjaviation.co.uk/MachLoop.htm
+Terrain: AWS Terrarium / Tilezen, https://github.com/tilezen/joerd/blob/master/docs/attribution.md
+The generator and source checksums are included with this application.
+
+SVS design reference
+FAA Advisory Circular AC 20-185A, January 27, 2021. United States government publication.
+The included PDF is a reference document. The application does not claim certification.
+
+Indicate instrument overlay
+Indicate and IndicateAppleDisplay, copyright their contributors.
+https://github.com/luofang34/Indicate
+https://github.com/luofang34/IndicateAppleDisplay

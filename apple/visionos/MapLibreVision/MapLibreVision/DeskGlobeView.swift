@@ -56,7 +56,13 @@ struct DeskGlobeView: View {
             if phase != .active { session.save() }
         }
         .onDisappear { subscriptions.removeAll(); session.save() }
+        .modifier(FlightImportPresentation(immersiveControls: false))
         .task {
+            await session.loadLibrary()
+            if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "--import-track"),
+               index + 1 < ProcessInfo.processInfo.arguments.count {
+                await session.receive(URL(fileURLWithPath: ProcessInfo.processInfo.arguments[index + 1]))
+            }
             if ProcessInfo.processInfo.arguments.contains("--replay") { await enterTerrain(follow: true) }
             else if ProcessInfo.processInfo.arguments.contains("--mode") {
                 await enterTerrain(follow: false, height: MapModeStore.shared.initialHeight)
@@ -68,7 +74,7 @@ struct DeskGlobeView: View {
         VStack(alignment: .leading, spacing: 12) {
             ReplayControls()
             HStack {
-                Button("Fly approach", systemImage: "airplane") { Task { await enterTerrain(follow: true) } }
+                Button(session.selectedTrackID == "innsbruck-approach" ? "Fly approach" : "Fly track", systemImage: "airplane") { Task { await enterTerrain(follow: true) } }
                     .disabled(session.opening || session.replay.track == nil)
                 Button("Explore terrain", systemImage: "mountain.2") { Task { await enterTerrain(follow: false) } }
                     .disabled(session.opening)

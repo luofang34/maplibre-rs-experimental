@@ -50,7 +50,7 @@ struct MapPlacement {
     /// Where the viewer stood when the scene was last placed about them; the world keeps to
     /// that place while they move about the room.
     var viewerReference = SIMD3<Double>(0, 0, 0)
-    let cameraPolicy: MapCameraPolicy
+    var cameraPolicy: MapCameraPolicy
     var viewRay: (origin: SIMD3<Double>, direction: SIMD3<Double>)?
     struct ZoomTarget {
         var local: SIMD3<Double>

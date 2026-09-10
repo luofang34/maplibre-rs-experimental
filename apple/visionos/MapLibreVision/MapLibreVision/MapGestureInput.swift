@@ -38,6 +38,10 @@ enum MapGestureInput {
         /// A short stationary pinch selects the rendered label under its ray.
         var selection: (origin: SIMD3<Double>, direction: SIMD3<Double>)?
 
+        var navigates: Bool {
+            !moves.isEmpty || translation != .zero || logScale != 0 || turn != 0 || pitch != 0
+        }
+
         var isEmpty: Bool {
             moves.isEmpty && translation == .zero && logScale == 0 && turn == 0 && pitch == 0 && selection == nil
         }

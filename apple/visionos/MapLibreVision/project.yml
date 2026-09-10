@@ -6,6 +6,10 @@ options:
   deploymentTarget:
     visionOS: "26.0"
   createIntermediateGroups: true
+packages:
+  IndicateAppleDisplay:
+    url: https://github.com/luofang34/IndicateAppleDisplay.git
+    revision: b40d0bd301dd23c93d1ed84805d90d409ece3e1b
 settings:
   base:
     SWIFT_VERSION: "5.10"
@@ -25,23 +29,51 @@ targets:
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: true
           UIApplicationPreferredDefaultSceneSessionRole: UIWindowSceneSessionRoleVolumetricApplication
+        LSSupportsOpeningDocumentsInPlace: true
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Flight recording
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes: [org.topografix.gpx, com.google.earth.kml, com.sokolysystems.flight-track, public.json]
+        UTImportedTypeDeclarations:
+          - UTTypeIdentifier: org.topografix.gpx
+            UTTypeConformsTo: [public.xml]
+            UTTypeDescription: GPS track
+            UTTypeTagSpecification:
+              public.filename-extension: [gpx]
+              public.mime-type: application/gpx+xml
+          - UTTypeIdentifier: com.google.earth.kml
+            UTTypeConformsTo: [public.xml]
+            UTTypeDescription: KML flight track
+            UTTypeTagSpecification:
+              public.filename-extension: [kml]
+              public.mime-type: application/vnd.google-earth.kml+xml
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: com.sokolysystems.flight-track
+            UTTypeConformsTo: [public.json]
+            UTTypeDescription: Flight recording
+            UTTypeTagSpecification:
+              public.filename-extension: [flighttrack]
         UILaunchScreen: {}
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.sokolysystems.maplibre.vision
-        SWIFT_OBJC_BRIDGING_HEADER: ../maplibre_visionos.h
-        "LIBRARY_SEARCH_PATHS[sdk=xrsimulator*]": "$(SRCROOT)/../target/aarch64-apple-visionos-sim/release"
-        "LIBRARY_SEARCH_PATHS[sdk=xros*]": "$(SRCROOT)/../target/aarch64-apple-visionos/release"
+        SWIFT_OBJC_BRIDGING_HEADER: MapLibreVision/FlightBridge.h
+        "LIBRARY_SEARCH_PATHS[sdk=xrsimulator*]": "$(SRCROOT)/../target/aarch64-apple-visionos-sim/release $(SRCROOT)/IndicateOverlay/target/aarch64-apple-visionos-sim/release"
+        "LIBRARY_SEARCH_PATHS[sdk=xros*]": "$(SRCROOT)/../target/aarch64-apple-visionos/release $(SRCROOT)/IndicateOverlay/target/aarch64-apple-visionos/release"
         OTHER_LDFLAGS:
           - "-lmaplibre_visionos"
+          - "-lindicate_svs_bridge"
           - "-lobjc"
         CODE_SIGN_STYLE: Automatic
         # The Rust library is built for arm64 only.
         "EXCLUDED_ARCHS[sdk=xrsimulator*]": x86_64
         TARGETED_DEVICE_FAMILY: "7"
     dependencies:
+      - package: IndicateAppleDisplay
+      - sdk: PDFKit.framework
       - sdk: Metal.framework
       - sdk: CompositorServices.framework
       - sdk: RealityKit.framework

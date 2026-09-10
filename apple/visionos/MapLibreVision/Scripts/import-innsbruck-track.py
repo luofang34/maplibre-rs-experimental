@@ -40,7 +40,7 @@ def main():
             altitudeMSL=round(msl, 3), altitudeGNSS=round(gnss, 3),
             geoidSeparation=round(gnss - msl, 3), groundSpeed=round(p[4] * 1852 / 3600, 4),
             track=p[5], roll=p[13]))
-    output = dict(callsign="AUA10A", registration="OE-LWD", aircraft="Embraer E195",
+    output = dict(title="Innsbruck approach", callsign="AUA10A", registration="OE-LWD", aircraft="Embraer E195",
         destination="Innsbruck · LOWI", startUTC=document["timestamp"] + start,
         source=dict(url=SOURCE, license="ODbL-1.0", sha256=hashlib.sha256(raw).hexdigest(),
             altitudeConversion="WGS84 GNSS feet → metres → EGM96 mean sea level; "

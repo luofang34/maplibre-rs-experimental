@@ -20,6 +20,7 @@ final class MapRenderer {
     private let replay: FlightReplay
     private var flightCamera = FlightCamera()
     private var trackOverlay: TrackOverlayRenderer?
+    private var flightHUD: FlightHUDRenderer?
     private var replayEnded = false
     private var placement: MapPlacement
     #if DEBUG
@@ -70,7 +71,10 @@ final class MapRenderer {
         self.layerRenderer = layerRenderer
         device = layerRenderer.device
         recoveryQueue = layerRenderer.device.makeCommandQueue()
-        do { trackOverlay = try TrackOverlayRenderer(device: layerRenderer.device) }
+        do {
+            trackOverlay = try TrackOverlayRenderer(device: layerRenderer.device)
+            flightHUD = try FlightHUDRenderer(device: layerRenderer.device)
+        }
         catch { maplibre_visionos_note("Flight overlay unavailable: \(error)") }
         if let entry = modeStore.takeEntry() {
             placement = MapPlacement(viewpoint: .above(entry.anchor, height: entry.height))
@@ -300,6 +304,11 @@ final class MapRenderer {
         gestures.updateContext(
             head: head, right: SIMD3<Double>(SIMD3<Float>(headMatrix.columns.0.x, headMatrix.columns.0.y, headMatrix.columns.0.z)),
             up: SIMD3<Double>(SIMD3<Float>(headMatrix.columns.1.x, headMatrix.columns.1.y, headMatrix.columns.1.z)), isGlobe: placement.isTableObject)
+        let inputs = gestures.take()
+        if inputs.contains(where: \.navigates) || controls.begin || controls.tilt != nil || controls.level {
+            replay.setView(.free)
+        }
+        if replay.frame().view == .free { flightCamera.detach(placement: &placement) }
         if controls.begin { placement.beginTilt(elevation: elevationAt) }
         if let tilt = controls.tilt { placement.setTilt(tilt, elevation: elevationAt) }
         if controls.end { placement.endTilt() }
@@ -325,18 +334,18 @@ final class MapRenderer {
         maplibre_visionos_set_available_memory(map, available)
         lastAvailableMemory = available
         maplibre_visionos_set_opaque_environment(map, placement.immersion == .full)
-        let inputs = gestures.take()
-        if !inputs.isEmpty || controls.begin || controls.level { replay.follow(false) }
         let replayFrame = replay.frame()
-        let atEnd = replay.track.map { replayFrame.elapsed >= $0.duration } ?? false
+        let atEnd = replayFrame.track.map { replayFrame.elapsed >= $0.duration } ?? false
         if atEnd, !replayEnded {
-            maplibre_visionos_note("ADS-B playback reached the final recorded observation at \(replayFrame.elapsed) seconds")
+            maplibre_visionos_note("Flight playback reached the final recorded observation at \(replayFrame.elapsed) seconds")
         }
         replayEnded = atEnd
         if replayFrame.following, let observation = replayFrame.observation {
             flightCamera.update(observation, placement: &placement, head: head,
-                forward: -SIMD3<Double>(SIMD3<Float>(headMatrix.columns.2.x, headMatrix.columns.2.y, headMatrix.columns.2.z)))
-        } else { flightCamera.detach() }
+                forward: -SIMD3<Double>(SIMD3<Float>(headMatrix.columns.2.x, headMatrix.columns.2.y, headMatrix.columns.2.z)),
+                view: replayFrame.view, revision: replayFrame.cameraRevision, generation: replayFrame.generation)
+            if !flightCamera.isBoarding { replay.boarded(revision: replayFrame.cameraRevision) }
+        } else if !replayFrame.following { flightCamera.detach(placement: &placement) }
         for input in inputs { placement.apply(input, elevation: elevationAt) }
         #if DEBUG
         if let stressInput = zoomStress?.input(at: presentation, height: placement.viewpoint.height,
@@ -352,10 +361,11 @@ final class MapRenderer {
         let anchor = placement.anchor
         var replayDestination: MapPlacement?
         if replayFrame.following, replayFrame.playing,
-           let future = replay.track?.sample(at: replayFrame.elapsed + 3 * replayFrame.rate) {
+           let future = replayFrame.track?.sample(at: replayFrame.elapsed + 3 * replayFrame.rate) {
             var camera = flightCamera
             var destinationPlacement = placement
-            camera.update(future, placement: &destinationPlacement, head: head, forward: [0, 0, -1])
+            camera.update(future, placement: &destinationPlacement, head: head, forward: [0, 0, -1],
+                          view: replayFrame.view, revision: replayFrame.cameraRevision, generation: replayFrame.generation)
             replayDestination = destinationPlacement
         }
         let destination = replayDestination?.current.worldFromScene() ?? placement.destination()?.worldFromScene()
@@ -460,16 +470,18 @@ final class MapRenderer {
         }
         renderSeconds += CACurrentMediaTime() - renderStart
         if result != nil {
-            if let track = replay.track {
+            if let track = replayFrame.track {
                 trackOverlay?.draw(track: track, observation: replayFrame.observation, placement: placement,
-                    drawable: drawable, head: originFromDevice, colors: colors, depths: depths, command: commandBuffer)
+                    drawable: drawable, head: originFromDevice, colors: colors, depths: depths, command: commandBuffer,
+                    fpv: replayFrame.view == .fpv, elapsed: replayFrame.elapsed, generation: replayFrame.generation)
             }
             eyeTargets.publish()
         } else {
             maplibre_visionos_note("stereo frame failed; presenting the last complete frame")
         }
         let copyStart = CACurrentMediaTime()
-        present(drawable, on: commandBuffer, frame: frame)
+        present(drawable, on: commandBuffer, frame: frame, replayFrame: replayFrame,
+                head: originFromDevice, terrainValid: result != nil)
         copySeconds = CACurrentMediaTime() - copyStart
         if let immersionChange { modeStore.showImmersion(immersionChange) }
         // The map knows the terrain under the focus; the viewer stands that much higher, so
@@ -491,8 +503,14 @@ final class MapRenderer {
             gpuAllocated: device.currentAllocatedSize, availableMB: lastAvailableMemory >> 20)
     }
 
-    private func present(_ drawable: LayerRenderer.Drawable, on commandBuffer: MTLCommandBuffer, frame: LayerRenderer.Frame) {
+    private func present(_ drawable: LayerRenderer.Drawable, on commandBuffer: MTLCommandBuffer, frame: LayerRenderer.Frame,
+                         replayFrame: FlightReplay.Frame? = nil, head: simd_float4x4 = matrix_identity_float4x4,
+                         terrainValid: Bool = false) {
         eyeTargets.copy(to: drawable, commandBuffer: commandBuffer, opaque: placement.immersion == .full)
+        if let replayFrame {
+            flightHUD?.draw(frame: replayFrame, head: head, terrainValid: terrainValid,
+                boarding: flightCamera.isBoarding, drawable: drawable, command: commandBuffer)
+        }
         drawable.encodePresent(commandBuffer: commandBuffer)
         commandBuffer.commit()
         frame.endSubmission()

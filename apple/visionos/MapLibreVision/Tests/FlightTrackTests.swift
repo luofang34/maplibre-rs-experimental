@@ -16,8 +16,8 @@ final class FlightTrackTests: XCTestCase {
         XCTAssertEqual(track.duration, 405.47, accuracy: 0.001)
         XCTAssertTrue(track.source.coverage.contains("before the runway"))
         for point in track.observations {
-            XCTAssertEqual(point.altitudeGNSS - point.geoidSeparation, point.altitudeMSL, accuracy: 0.002)
-            XCTAssertTrue((40...60).contains(point.geoidSeparation))
+            XCTAssertEqual(try XCTUnwrap(point.altitudeGNSS) - XCTUnwrap(point.geoidSeparation), point.altitudeMSL, accuracy: 0.002)
+            XCTAssertTrue((40...60).contains(try XCTUnwrap(point.geoidSeparation)))
         }
         let end = try XCTUnwrap(track.observations.last)
         XCTAssertEqual(track.sample(at: track.duration + 5000)?.latitude, end.latitude)
@@ -43,6 +43,20 @@ final class FlightTrackTests: XCTestCase {
         XCTAssertThrowsError(try FlightTrack.decode(JSONSerialization.data(withJSONObject: json)))
     }
 
+    func testNativeRecordingRejectsTeleportUnlessItIsAnExplicitGap() throws {
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: recordingData()) as? [String: Any])
+        var points = Array(try XCTUnwrap(json["observations"] as? [[String: Any]]).prefix(2))
+        points[1]["latitude"] = -47.0
+        points[1]["longitude"] = -169.0
+        points[1]["time"] = 1.0
+        json["observations"] = points
+        XCTAssertThrowsError(try FlightTrack.decode(JSONSerialization.data(withJSONObject: json)))
+        points[1]["startsSegment"] = true
+        json["observations"] = points
+        let split = try FlightTrack.decode(JSONSerialization.data(withJSONObject: json))
+        XCTAssertNil(split.sample(at: 0.5))
+    }
+
     func testPlaybackRateChangesDoNotJumpOrRunBeyondRecording() {
         var clock = FlightPlayback()
         clock.play(at: 100, duration: 400)
@@ -66,8 +80,8 @@ final class FlightTrackTests: XCTestCase {
         camera.update(observation, placement: &placement, head: [0, 1.6, 0], forward: [0, 0, -1])
         let position = placement.roomPoint(for: observation.coordinate)
         XCTAssertEqual(position.x, 0, accuracy: 0.001)
-        XCTAssertEqual(position.y, 1.6 - 600, accuracy: 0.001)
-        XCTAssertEqual(position.z, -3500, accuracy: 0.001)
+        XCTAssertEqual(position.y, 1.6, accuracy: 0.001)
+        XCTAssertEqual(position.z, 0, accuracy: 0.001)
         camera.update(observation, placement: &placement, head: [0.2, 1.8, 0], forward: [1, 0, 0])
         XCTAssertLessThan(simd_distance(position, placement.roomPoint(for: observation.coordinate)), 0.001)
         let levelUp = placement.current.rotation.act(SIMD3<Double>(0, 0, 1))

@@ -52,6 +52,7 @@ struct ContentView: View {
                         }.accessibilityElement(children: .contain)
                     }
                     if !status.isEmpty { Text(status).foregroundStyle(.red) }
+                    if !session.status.isEmpty { Text(session.status).font(.caption).foregroundStyle(.orange) }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 4)
@@ -70,6 +71,7 @@ struct ContentView: View {
         .padding(24)
         .frame(minWidth: 360, idealWidth: 420, maxWidth: 520,
                minHeight: 360, idealHeight: 620, maxHeight: 800)
+        .modifier(FlightImportPresentation(immersiveControls: true))
         .task {
             if !session.immersed {
                 openWindow(id: GlobeSession.homeID, value: GlobeSession.homeID)

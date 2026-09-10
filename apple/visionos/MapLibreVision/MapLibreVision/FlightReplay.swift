@@ -1,73 +1,131 @@
 import Foundation
 
-/// A single clock and immutable recording keep the desk globe and both terrain eyes in step.
+enum FlightView: String, CaseIterable {
+    case fpv = "FPV", chase = "Chase", free = "Free"
+}
+
+/// Both eyes and the desk globe consume the same immutable recording and clock snapshot.
 final class FlightReplay: @unchecked Sendable {
     struct Frame {
+        let track: FlightTrack?
+        let generation: UInt64
+        let cameraRevision: UInt64
         let elapsed: Double
         let playing: Bool
-        let following: Bool
+        let view: FlightView
         let rate: Double
         let observation: FlightTrack.Observation?
+        var following: Bool { view != .free }
     }
 
-    let track: FlightTrack?
-    let loadingError: String?
     private let lock = NSLock()
+    private var recording: FlightTrack?
+    private var failure: String?
     private var clock = FlightPlayback()
-    private var follows = false
+    private var view = FlightView.free
+    private var generation: UInt64 = 0
+    private var cameraRevision: UInt64 = 0
+    private var resumeOnBoard = false
+    private var boarding = false
+
+    var track: FlightTrack? { lock.withLock { recording } }
+    var loadingError: String? { lock.withLock { failure } }
 
     init(bundle: Bundle = .main, restored: DeskGlobeState = .init()) {
         do {
             guard let url = bundle.url(forResource: "innsbruck-approach", withExtension: "json") else {
                 throw CocoaError(.fileNoSuchFile)
             }
-            let loaded = try FlightTrack.decode(Data(contentsOf: url))
-            track = loaded
-            loadingError = nil
-            clock.offset = restored.playbackTime.isFinite ? min(max(restored.playbackTime, 0), loaded.duration) : 0
+            recording = try FlightTrack.decode(Data(contentsOf: url))
+            clock.offset = restored.playbackTime.isFinite ? min(max(restored.playbackTime, 0), recording?.duration ?? 0) : 0
             clock.rate = [1.0, 4, 16].contains(restored.playbackRate) ? restored.playbackRate : 1
             #if DEBUG
             let arguments = ProcessInfo.processInfo.arguments
             if let index = arguments.firstIndex(of: "--replay-rate"), index + 1 < arguments.count,
                let rate = Double(arguments[index + 1]), [1.0, 4, 16].contains(rate) { clock.rate = rate }
             #endif
-        } catch {
-            track = nil
-            loadingError = "The bundled approach could not load: \(error.localizedDescription)"
+        } catch { failure = "The bundled approach could not load: \(error.localizedDescription)" }
+    }
+
+    func replace(with track: FlightTrack) {
+        lock.withLock {
+            recording = track
+            failure = nil
+            clock = FlightPlayback()
+            generation = generation &+ 1
+            cameraRevision = cameraRevision &+ 1
+            view = .free
+            resumeOnBoard = false
+            boarding = false
         }
     }
 
     func frame(at now: Double = ProcessInfo.processInfo.systemUptime) -> Frame {
-        let state = lock.withLock { (clock, follows) }
-        let elapsed = state.0.time(at: now, duration: track?.duration ?? 0)
-        return Frame(elapsed: elapsed, playing: state.0.started != nil && elapsed < (track?.duration ?? 0),
-                     following: state.1, rate: state.0.rate, observation: track?.sample(at: elapsed))
+        let (track, clock, view, generation, revision) = lock.withLock {
+            (recording, self.clock, self.view, self.generation, cameraRevision)
+        }
+        let elapsed = clock.time(at: now, duration: track?.duration ?? 0)
+        return Frame(track: track, generation: generation, cameraRevision: revision, elapsed: elapsed,
+            playing: clock.started != nil && elapsed < (track?.duration ?? 0), view: view, rate: clock.rate,
+            observation: track?.sample(at: elapsed))
     }
 
-    func toggle() {
+    func toggle(at now: Double = ProcessInfo.processInfo.systemUptime) {
         lock.withLock {
-            let now = ProcessInfo.processInfo.systemUptime, duration = track?.duration ?? 0
+            if boarding { resumeOnBoard.toggle(); return }
+            resumeOnBoard = false
+            let duration = recording?.duration ?? 0
             if clock.started != nil, clock.time(at: now, duration: duration) < duration {
                 clock.pause(at: now, duration: duration)
             } else { clock.play(at: now, duration: duration) }
         }
     }
 
-    func pause() {
-        lock.withLock { clock.pause(at: ProcessInfo.processInfo.systemUptime, duration: track?.duration ?? 0) }
+    func pause(at now: Double = ProcessInfo.processInfo.systemUptime) {
+        lock.withLock {
+            clock.pause(at: now, duration: recording?.duration ?? 0)
+            resumeOnBoard = false
+        }
     }
 
     func seek(_ seconds: Double) {
         guard seconds.isFinite else { return }
         lock.withLock {
-            clock.offset = min(max(seconds, 0), track?.duration ?? 0)
+            clock.offset = min(max(seconds, 0), recording?.duration ?? 0)
             if clock.started != nil { clock.started = ProcessInfo.processInfo.systemUptime }
+            generation = generation &+ 1
         }
     }
 
     func setRate(_ rate: Double) {
-        lock.withLock { clock.setRate(rate, at: ProcessInfo.processInfo.systemUptime, duration: track?.duration ?? 0) }
+        lock.withLock { clock.setRate(rate, at: ProcessInfo.processInfo.systemUptime, duration: recording?.duration ?? 0) }
     }
 
-    func follow(_ enabled: Bool) { lock.withLock { follows = enabled } }
+    func setView(_ requested: FlightView, at now: Double = ProcessInfo.processInfo.systemUptime) {
+        lock.withLock {
+            guard requested != view else { return }
+            let duration = recording?.duration ?? 0
+            let playing = clock.started != nil && clock.time(at: now, duration: duration) < duration
+            resumeOnBoard = resumeOnBoard || playing
+            clock.pause(at: now, duration: duration)
+            view = requested
+            boarding = requested != .free
+            cameraRevision = cameraRevision &+ 1
+        }
+    }
+
+    func follow(_ enabled: Bool) { setView(enabled ? .fpv : .free) }
+
+    func recenter() {
+        lock.withLock { cameraRevision = cameraRevision &+ 1 }
+    }
+
+    func boarded(revision: UInt64, at now: Double = ProcessInfo.processInfo.systemUptime) {
+        lock.withLock {
+            guard cameraRevision == revision, boarding else { return }
+            boarding = false
+            if resumeOnBoard { clock.play(at: now, duration: recording?.duration ?? 0) }
+            resumeOnBoard = false
+        }
+    }
 }
