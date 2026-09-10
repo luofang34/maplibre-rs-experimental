@@ -11,6 +11,10 @@ The current review topics are:
 
 | Branch | Scope |
 | --- | --- |
+| `fix/indicate-hud-layout` | Transparent readouts, rolling compass, heading/track qualification and missing-data indications |
+| `fix/visionos-conformal-hud` | Flight-referenced angular symbology, per-eye projection, shared raster storage and bounded overlay buffers |
+| `feat/visionos-ownship-controls` | On-demand compact controls, temporary free look, cancellable return countdown and boarding handoff |
+| `feat/visionos-flight-library` | Liberty KML, removable demos, bounded Share extension inbox and document registration |
 | `feat/indicate-svs-overlay` | Independent Indicate instrument set, telemetry validity, bounded scene bridge and Rust regression gates |
 | `feat/visionos-fpv-replay` | FPV/chase/free camera handoff, track import, simulated Mach Loop example, Apple-rendered overlay and FAA reference viewer |
 | `feat/visionos-desk-flight-replay` | Restorable native desk Volume, bounded manipulation, licensed ADS-B approach replay and terrain follow camera |
@@ -37,6 +41,10 @@ with Indicate; the Swift host and import integration are MapLibre platform topic
 Their parent branch is the review base; comparing every branch directly with
 upstream `main` would include unrelated prerequisites. Renderer topics can be
 prepared for MapLibre review as their dependencies become available upstream.
+The HUD refinement stack starts at integrated `a6ef7869`. Its instrument layout
+belongs with Indicate. Angular geometry and playback policy are independent of
+Metal; the Apple renderer, document sharing and scene lifecycle stay in the
+platform host. These changes introduce no aviation dependencies into MapLibre core.
 The Swift host changes remain separate platform topics. A topic branch is not a
 claim of complete MapLibre style-spec conformance or upstream acceptance.
 
@@ -71,3 +79,23 @@ feature's passing checks. Install from the integrated tree, not a partial topic.
 - The MapLibre baseline CI attempt was not green: formatting returned nonzero,
   and compilation gates stopped on a missing generated SQLite binding in the
   validation cache. These failures are separate from the passing overlay gates.
+
+## HUD and sharing validation — 2026-09-10
+
+- Swift: 95 tests passed in debug and release. The overlay workspace passed fmt,
+  strict clippy, nine tests, missing-docs/broken-link checks and release build.
+- Simulator and unsigned device release builds passed, including the Share
+  extension. Built-bundle checks validate the document and extension registration.
+  Device signing requires the App Group on both targets; Xcode currently reports
+  no signed-in account and a cached wildcard profile without that capability.
+  The device installation and physical AirDrop handoff remain pending.
+- Simulator replays reached the final observations at 3,057 seconds for Liberty
+  and 379.125 seconds for Mach Loop. Visual checks covered missing-data readouts,
+  compass, attitude ladder and prograde cue. Unit tests cover head rotation,
+  retrograde direction and countdown cancellation.
+- HUD readout raster CPU p95 measured approximately 0.85–1.08 ms in the simulator.
+  Three shared IOSurfaces use 8.64 MB of pixel storage, without duplicate CPU/GPU
+  raster copies. Route and angular-symbol buffers are bounded and reused.
+- All MapLibre baseline gates were attempted again: formatting fails, and the
+  compilation/documentation gates stop at the missing SQLite generated binding.
+  No MapLibre core Rust changes are included in this refinement stack.

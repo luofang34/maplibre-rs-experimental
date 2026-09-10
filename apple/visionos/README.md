@@ -45,13 +45,19 @@ and a signing team in the project.
 ## Flight replay
 
 Fly approach starts at the recorded aircraft position. FPV keeps head movement independent
-of aircraft motion. A drag detaches into free camera and pauses the recording. Returning
+of aircraft motion. A drag starts a temporary free look and pauses the recording. After ten idle seconds, a
+visible countdown returns to ownship; Stay free or selecting Free cancels it. Returning
 to FPV or Chase eases to the aircraft before resuming. Look forward recenters the viewing
 reference. Selecting another recording leaves the free camera in place.
 
-AirDrop, Open With, and Import track accept GPX, timestamped absolute-altitude KML
+The compact controls bar expands with Controls; a stationary scene pinch recalls it.
+
+AirDrop, Open With, the Add to MapLibre Vision Share extension, and Import track accept GPX, timestamped absolute-altitude KML
 `gx:Track`, and flight JSON. Imports open in a preview and are stored locally after
-confirmation. GPX requires an explicit EGM96 elevation choice; ellipsoid elevations also
+confirmation. The Share extension stages a bounded copy in the App Group inbox, which the
+app reviews when activated. Device signing must enable `group.com.sokolysystems.maplibre.vision`
+for both targets. All demos can be removed persistently and restored from the library menu.
+The supplied FlightAware example is named Liberty. GPX requires an explicit EGM96 elevation choice; ellipsoid elevations also
 require `geoidheight`. Flight JSON uses SI units, true-north angles in degrees, and EGM96
 MSL altitude. `indicatedAirspeed`, `roll`, `pitch`, and `heading` are optional. Absent values
 stay absent. The importer rejects files over 8 MB or 20,000 samples. The library holds
@@ -59,15 +65,21 @@ at most 20 imports. Segment breaks and gaps over 20 seconds are never interpolat
 
 The transparent `svs-replay` set lives in `MapLibreVision/IndicateOverlay`, independently
 of Indicate's G5 set. The host uses pinned Indicate and IndicateAppleDisplay revisions.
-Readouts update at most 20 times per second in three reusable buffers; stereo placement
-updates with each compositor frame. The overlay reports missing, stale, and failed fields.
+Readouts update at most 20 times per second in three shared IOSurfaces, with no pixel
+upload or idle reraster. Flight-referenced angular symbols are a separate, tested geometry
+unit: prograde, retrograde, and supplied-attitude boresight/horizon/pitch ladder. Metal
+projects them per eye using bounded reusable buffers. Head-following readouts do not rotate
+the flight-referenced symbols. The overlay reports missing, stale, and failed fields.
 GPS ground speed is never substituted for IAS. The FAA AC 20-185A PDF is available from
 SVS reference. This replay does not claim certification or operational navigation support.
 
 Run `sh Scripts/check-flight-overlay.sh` from `MapLibreVision` for the Rust overlay gates,
-and `swift test` for import, playback, camera, and interaction tests. Build the device
+`swift test` for import, playback, camera, and interaction tests, and
+`python3 Scripts/check-flight-documents.py /path/to/MapLibreVision.app` for the built
+file-sharing registration. Build the device
 bridge with `sh Scripts/build-flight-overlay.sh aarch64-apple-visionos` before Xcode.
-The scripts under `MapLibreVision/Scripts` reproduce both bundled example tracks.
+The scripts under `MapLibreVision/Scripts` reproduce the Innsbruck and Mach Loop examples;
+Liberty retains the original supplied KML.
 
 ## Viewpoint
 
