@@ -11,6 +11,10 @@ The current review topics are:
 
 | Branch | Scope |
 | --- | --- |
+| `fix/xr-world-aligned-labels` | Gravity-aligned labels, stable terrain-anchor occlusion and GPU head-roll regression |
+| `fix/terrain-bridge-depth` | Shared casing/deck tangent projection, transparent-depth rejection and bridge GPU regression |
+| `fix/visionos-window-flight-library` | Desk/immersive scene lifecycle and independent row deletion with replay preservation |
+| `feat/visionos-head-mounted-display` | Independent Indicate angular set, world-referenced readouts and geographic ownship marker |
 | `fix/indicate-hud-layout` | Transparent readouts, rolling compass, heading/track qualification and missing-data indications |
 | `fix/visionos-conformal-hud` | Flight-referenced angular symbology, per-eye projection, shared raster storage and bounded overlay buffers |
 | `feat/visionos-ownship-controls` | On-demand compact controls, temporary free look, cancellable return countdown and boarding handoff |
@@ -86,9 +90,9 @@ feature's passing checks. Install from the integrated tree, not a partial topic.
   strict clippy, nine tests, missing-docs/broken-link checks and release build.
 - Simulator and unsigned device release builds passed, including the Share
   extension. Built-bundle checks validate the document and extension registration.
-  Device signing requires the App Group on both targets; Xcode currently reports
-  no signed-in account and a cached wildcard profile without that capability.
-  The device installation and physical AirDrop handoff remain pending.
+  The app and Share extension use the same registered App Group and signed
+  provisioning profiles. Installation on the paired Vision Pro passed.
+  Physical AirDrop transport remains unverified.
 - Simulator replays reached the final observations at 3,057 seconds for Liberty
   and 379.125 seconds for Mach Loop. Visual checks covered missing-data readouts,
   compass, attitude ladder and prograde cue. Unit tests cover head rotation,
@@ -99,3 +103,34 @@ feature's passing checks. Install from the integrated tree, not a partial topic.
 - All MapLibre baseline gates were attempted again: formatting fails, and the
   compilation/documentation gates stop at the missing SQLite generated binding.
   No MapLibre core Rust changes are included in this refinement stack.
+
+## Head-mounted display and rendering validation — 2026-09-10
+
+The four HMD refinement topics start at integrated `e8f59ddc`. The first two
+change MapLibre core only. Scene lifecycle, flight library and Metal projection
+remain Apple host concerns. Indicate owns the bounded east/north/up angular
+scene and qualified numeric instruments; it takes no head pose. The host projects
+that scene per eye. The independent Indicate source is committed locally on
+`feat/head-mounted-instrument-set` at `500ed883`; its identical vendored source
+is included here, without publishing to the public Indicate remote.
+
+- MapLibre library: 494 tests passed, one ignored, including GPU head-roll,
+  stationary-frame, bridge casing/deck and buried-tunnel regressions.
+- Swift: 95 tests passed in both debug and release. Deleting another flight
+  preserves the current replay generation, camera revision, time and selection.
+- Indicate's full workspace and the app overlay passed fmt, strict clippy, tests,
+  missing-docs/broken-link checks and release builds. The app overlay has 13 tests.
+- Native renderer device/simulator release builds and Xcode device/simulator
+  builds passed. Both signed bundles contain the registered App Group.
+  The app installed on the paired Vision Pro. Simulator checks covered Liberty
+  with missing attitude/heading and Mach Loop with simulated attitude. The desk
+  shell is absent during immersive replay; compass numerals are continuous vectors.
+- Angular storage is fixed at 1,024 segments (24,580 bytes across the C ABI);
+  overlay buffers are reused. This is not a new physical-device memory stress test.
+- All full MapLibre workspace CI gates were attempted. Formatting passes; strict
+  clippy and documentation stop in existing build-tool code. Host all-target
+  tests/release include incompatible Android/Web targets and benchmark API errors.
+  These baseline failures are separate from the passing map-library and native
+  visionOS checks.
+- FAA AC 20-185A sections 4.1.2.3–4.1.2.5 inform world alignment and truthful
+  trajectory/data indications. This implementation is not a certification claim.
