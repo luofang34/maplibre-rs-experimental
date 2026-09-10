@@ -1,5 +1,8 @@
 import SwiftUI
 import simd
+#if canImport(FlightExchange)
+import FlightExchange
+#endif
 
 @MainActor
 final class GlobeSession: ObservableObject {
@@ -18,12 +21,13 @@ final class GlobeSession: ObservableObject {
     @Published var selectedTrackID = "innsbruck-approach"
     @Published var preview: ImportPreview?
     @Published var importing = false
-    private let library = FlightLibrary()
+    private let library: FlightLibrary
+    private let defaults: UserDefaults
     private var loadedLibrary = false
+    var didRunLaunchActions = false
     private var selectionRevision: UInt64 = 0
     private var inboxSource: URL?
 
-    @Published var controlsExpanded = false
     @Published var controlsRequest: UInt64 = 0
     @Published var immersed = false
     @Published var opening = false
@@ -31,8 +35,10 @@ final class GlobeSession: ObservableObject {
     var desk: DeskGlobeState
     let replay: FlightReplay
 
-    init() {
-        let restored = UserDefaults.standard.data(forKey: Self.storageKey)
+    init(library: FlightLibrary = FlightLibrary(), defaults: UserDefaults = .standard) {
+        self.library = library
+        self.defaults = defaults
+        let restored = defaults.data(forKey: Self.storageKey)
             .flatMap { try? JSONDecoder().decode(DeskGlobeState.self, from: $0) } ?? .init()
         desk = restored
         replay = FlightReplay(restored: restored)
@@ -43,7 +49,7 @@ final class GlobeSession: ObservableObject {
         loadedLibrary = true
         do {
             tracks = try await library.entries()
-            let id = UserDefaults.standard.string(forKey: "selected-flight") ?? "innsbruck-approach"
+            let id = defaults.string(forKey: "selected-flight") ?? "innsbruck-approach"
             if let entry = tracks.first(where: { $0.id == id }) ?? tracks.first {
                 let time = desk.playbackTime, rate = desk.playbackRate
                 await select(entry)
@@ -68,7 +74,7 @@ final class GlobeSession: ObservableObject {
         let request = selectionRevision
         do {
             let track = try await library.load(entry)
-            guard request == selectionRevision else { return }
+            guard request == selectionRevision, tracks.contains(where: { $0.id == entry.id }) else { return }
             replay.replace(with: track)
             selectedTrackID = entry.id
             save()
@@ -96,7 +102,7 @@ final class GlobeSession: ObservableObject {
             guard let url = try FlightInbox().pending().first else { return }
             inboxSource = url
             await receive(url)
-            if preview != nil { controlsExpanded = true; controlsRequest = controlsRequest &+ 1 }
+            if preview != nil { controlsRequest = controlsRequest &+ 1 }
             else { try FlightInbox().remove(url); inboxSource = nil }
         } catch { status = error.localizedDescription }
     }
@@ -125,11 +131,12 @@ final class GlobeSession: ObservableObject {
         } catch { status = error.localizedDescription }
     }
 
-    func removeSelectedTrack() async {
-        guard let entry = tracks.first(where: { $0.id == selectedTrackID }) else { return }
+    func remove(_ entry: FlightLibrary.Entry) async {
         do {
             try await library.remove(entry)
             tracks.removeAll { $0.id == entry.id }
+            guard selectedTrackID == entry.id else { return }
+            selectionRevision = selectionRevision &+ 1
             if let fallback = tracks.first { await select(fallback) }
             else { replay.replace(with: nil); selectedTrackID = ""; save() }
         } catch { status = error.localizedDescription }
@@ -145,10 +152,10 @@ final class GlobeSession: ObservableObject {
 
     func save() {
         let frame = replay.frame()
-        UserDefaults.standard.set(selectedTrackID, forKey: "selected-flight")
+        defaults.set(selectedTrackID, forKey: "selected-flight")
         desk.playbackTime = frame.elapsed
         desk.playbackRate = frame.rate
-        do { UserDefaults.standard.set(try JSONEncoder().encode(desk), forKey: Self.storageKey) }
+        do { defaults.set(try JSONEncoder().encode(desk), forKey: Self.storageKey) }
         catch { status = "Could not save the globe state: \(error.localizedDescription)" }
     }
 

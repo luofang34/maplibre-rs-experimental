@@ -6,28 +6,18 @@ struct ReplayControls: View {
     @State private var showSource = false
     @State private var importing = false
     @State private var showReference = false
+    @State private var showLibrary = false
+    @State private var importFromLibrary = false
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 0.2)) { _ in
             let frame = session.replay.frame()
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Menu {
-                        ForEach(session.tracks) { entry in
-                            Button(entry.title + (entry.simulated ? " · Simulation" : "")) {
-                                Task { await session.select(entry) }
-                            }
-                        }
-                        Divider()
-                        Button("Restore demo flights") { Task { await session.restoreDemos() } }
-                        Button("Import track…", systemImage: "square.and.arrow.down") { importing = true }
-                        if session.tracks.contains(where: { $0.id == session.selectedTrackID }) {
-                            Button("Remove flight", role: .destructive) { Task { await session.removeSelectedTrack() } }
-                        }
-                    } label: {
-                        Label(frame.track?.displayTitle ?? "Flight library", systemImage: "airplane")
+                    Button { showLibrary = true } label: {
+                        Label(frame.track?.displayTitle ?? "Flight library", systemImage: "list.bullet")
                             .font(.headline).lineLimit(2)
-                    }.buttonStyle(.plain)
+                    }.buttonStyle(.plain).accessibilityLabel("Flight library")
                     Spacer()
                     Button { showSource.toggle() } label: { Image(systemName: "info.circle") }
                         .buttonStyle(.plain).accessibilityLabel("Recording source")
@@ -80,6 +70,11 @@ struct ReplayControls: View {
                     Button("SVS reference") { showReference = true }
                 }.font(.caption).buttonStyle(.plain)
             }
+        }
+        .sheet(isPresented: $showLibrary, onDismiss: {
+            if importFromLibrary { importFromLibrary = false; importing = true }
+        }) {
+            FlightLibraryView { importFromLibrary = true; showLibrary = false }
         }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.flightGPX, .flightKML, .flightRecording, .json]) { result in
             switch result {

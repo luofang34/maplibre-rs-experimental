@@ -1,7 +1,7 @@
 import Foundation
 
 /// Bounded file handoff between the Share extension and the application; no renderer dependencies.
-struct FlightInbox {
+public struct FlightInbox {
     static let group = "group.com.sokolysystems.maplibre.vision"
     static let byteLimit = 8 * 1024 * 1024
     static let extensions = ["gpx", "kml", "json", "flighttrack"]
@@ -18,12 +18,12 @@ struct FlightInbox {
     }
     let directory: URL
 
-    init(directory: URL? = nil) throws {
+    public init(directory: URL? = nil) throws {
         guard let root = directory ?? FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: Self.group)?.appendingPathComponent("IncomingFlights", isDirectory: true) else { throw Failure.unavailable }
         self.directory = root
     }
 
-    func pending() throws -> [URL] {
+    public func pending() throws -> [URL] {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
             .filter { Self.extensions.contains($0.pathExtension.lowercased()) }.sorted { $0.lastPathComponent < $1.lastPathComponent }
@@ -54,7 +54,7 @@ struct FlightInbox {
         try bytes.write(to: directory.appendingPathComponent(UUID().uuidString + "_" + safeName), options: .atomic)
     }
 
-    func remove(_ url: URL) throws {
+    public func remove(_ url: URL) throws {
         guard url.deletingLastPathComponent().standardizedFileURL == directory.standardizedFileURL else { throw Failure.unsupported }
         try FileManager.default.removeItem(at: url)
     }

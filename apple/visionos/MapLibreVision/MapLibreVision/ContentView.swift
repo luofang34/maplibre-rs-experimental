@@ -13,12 +13,11 @@ struct ContentView: View {
     var body: some View {
         VStack(spacing: 16) {
             HStack {
-                Button(session.controlsExpanded ? "Hide controls" : "Controls", systemImage: "slider.horizontal.3") { session.controlsExpanded.toggle() }
+                Text("Map controls").font(.headline)
                 Spacer()
                 Button("Ownship", systemImage: "airplane") { session.replay.setView(.fpv) }.disabled(session.replay.track == nil)
                 Button("Desk", systemImage: "globe") { Task { await toggleMap() } }
             }
-            if session.controlsExpanded {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     ReplayControls()
@@ -73,11 +72,10 @@ struct ContentView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(isOpening)
             }
-            }
         }
         .padding(20)
         .frame(minWidth: 360, idealWidth: 420, maxWidth: 520,
-               minHeight: session.controlsExpanded ? 360 : 64, idealHeight: session.controlsExpanded ? 620 : 64, maxHeight: session.controlsExpanded ? 800 : 96)
+               minHeight: 360, idealHeight: 620, maxHeight: 800)
         .modifier(FlightImportPresentation(immersiveControls: true))
         .task {
             if !session.immersed {
@@ -101,6 +99,7 @@ struct ContentView: View {
         defer { isOpening = false }
         status = ""
         if session.immersed {
+            openWindow(id: GlobeSession.homeID, value: GlobeSession.homeID)
             await dismissImmersiveSpace()
             session.immersed = false
             session.replay.pause()

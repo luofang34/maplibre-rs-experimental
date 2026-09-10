@@ -20,6 +20,8 @@ struct MapLayerConfiguration: CompositorLayerConfiguration {
 struct MapLibreVisionApp: App {
     @ObservedObject private var modeStore = MapModeStore.shared
 
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismissWindow) private var dismissWindow
     @StateObject private var session = GlobeSession()
 
     var body: some Scene {
@@ -47,8 +49,13 @@ struct MapLibreVisionApp: App {
 
         ImmersiveSpace(id: MapRenderer.spaceID) {
             ImmersiveMapView(session: session)
-            .onAppear { session.immersed = true }
+            .onAppear {
+                session.immersed = true
+                dismissWindow(id: GlobeSession.homeID)
+            }
             .onDisappear {
+                openWindow(id: GlobeSession.homeID, value: GlobeSession.homeID)
+                dismissWindow(id: GlobeSession.controlsID)
                 session.immersed = false
                 session.replay.pause()
                 session.save()
@@ -68,7 +75,6 @@ private struct ImmersiveMapView: CompositorContent {
             }.start()
         }
         .onChange(of: session.controlsRequest) { _, _ in
-            session.controlsExpanded = true
             openWindow(id: GlobeSession.controlsID, value: GlobeSession.controlsID)
         }
     }

@@ -51,7 +51,6 @@ struct FlightImportPresentation: ViewModifier {
         content
             .onOpenURL { url in
                 if session.immersed {
-                    session.controlsExpanded = true
                     openWindow(id: GlobeSession.controlsID, value: GlobeSession.controlsID)
                 }
                 Task { await session.receive(url) }

@@ -5,6 +5,7 @@ struct DeskGlobeView: View {
     @EnvironmentObject private var session: GlobeSession
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openImmersiveSpace) private var openImmersiveSpace
+    @Environment(\.dismissWindow) private var dismissWindow
     @Environment(\.openWindow) private var openWindow
     @State private var subscriptions: [EventSubscription] = []
     @State private var error = ""
@@ -59,6 +60,13 @@ struct DeskGlobeView: View {
         .modifier(FlightImportPresentation(immersiveControls: false))
         .task {
             await session.loadLibrary()
+            if session.immersed {
+                openWindow(id: GlobeSession.controlsID, value: GlobeSession.controlsID)
+                dismissWindow(id: GlobeSession.homeID)
+                return
+            }
+            guard !session.didRunLaunchActions else { return }
+            session.didRunLaunchActions = true
             if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "--import-track"),
                index + 1 < ProcessInfo.processInfo.arguments.count {
                 await session.receive(URL(fileURLWithPath: ProcessInfo.processInfo.arguments[index + 1]))
