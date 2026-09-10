@@ -11,6 +11,10 @@ final class TrackOverlayRenderer {
     private let depth: MTLDepthStencilState
     private var route: FlightRoute?
     private var routeGeneration: UInt64?
+    private var vertices: [Vertex] = []
+    private var buffers: [[MTLBuffer]] = []
+    private var slot = 0
+    private let vertexLimit = 1500 * 6 + 180
 
     init(device: MTLDevice) throws {
         enum SetupError: Error { case shaders, depth }
@@ -28,6 +32,13 @@ final class TrackOverlayRenderer {
         state.isDepthWriteEnabled = false
         guard let depth = device.makeDepthStencilState(descriptor: state) else { throw SetupError.depth }
         self.depth = depth
+        vertices.reserveCapacity(vertexLimit)
+        buffers = try (0..<3).map { _ in
+            try (0..<2).map { _ in
+                guard let buffer = device.makeBuffer(length: vertexLimit * MemoryLayout<Vertex>.stride, options: .storageModeShared) else { throw SetupError.depth }
+                return buffer
+            }
+        }
     }
 
     func draw(track: FlightTrack, observation: FlightTrack.Observation?, placement: MapPlacement,
@@ -41,22 +52,23 @@ final class TrackOverlayRenderer {
             (SIMD4<Float>(SIMD3<Float>(placement.roomPoint(for: segment.start)), 1),
              SIMD4<Float>(SIMD3<Float>(placement.roomPoint(for: segment.end)), 1), segment.time)
         }
+        slot = (slot + 1) % buffers.count
         for (index, view) in drawable.views.enumerated() {
             let projection = drawable.computeProjection(viewIndex: index) * simd_inverse(head * view.transform)
             let size = SIMD2<Float>(Float(colors[index].width), Float(colors[index].height))
-            var vertices: [Vertex] = []
-            vertices.reserveCapacity(points.count * 6 + 180)
+            vertices.removeAll(keepingCapacity: true)
             for segment in points {
                 let a = projection * segment.0, b = projection * segment.1
                 let flown = segment.2 <= elapsed
                 appendSegment(a, b, width: flown ? 2.4 : 1.4, size: size,
                               color: flown ? [1, 0.55, 0.1, 1] : [0.2, 0.6, 0.7, 1], vertices: &vertices)
             }
-            if fpv { appendFlightPath(track: track, time: elapsed, placement: placement, projection: projection, size: size, vertices: &vertices) }
             if let observation, !fpv { appendAircraft(observation, placement: placement, projection: projection, size: size, vertices: &vertices) }
-            guard !vertices.isEmpty, let buffer = vertices.withUnsafeBytes({ bytes in
-                bytes.baseAddress.flatMap { command.device.makeBuffer(bytes: $0, length: bytes.count) }
-            }) else { continue }
+            guard !vertices.isEmpty, vertices.count <= vertexLimit, index < buffers[slot].count else { continue }
+            let buffer = buffers[slot][index]
+            vertices.withUnsafeBytes { bytes in
+                if let base = bytes.baseAddress { buffer.contents().copyMemory(from: base, byteCount: bytes.count) }
+            }
             let pass = MTLRenderPassDescriptor()
             pass.colorAttachments[0].texture = colors[index]
             pass.colorAttachments[0].loadAction = .load
@@ -70,29 +82,6 @@ final class TrackOverlayRenderer {
             encoder.setVertexBuffer(buffer, offset: 0, index: 0)
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: vertices.count)
             encoder.endEncoding()
-        }
-    }
-
-    private func appendFlightPath(track: FlightTrack, time: Double, placement: MapPlacement,
-                                  projection: simd_float4x4, size: SIMD2<Float>, vertices: inout [Vertex]) {
-        guard let point = track.sample(at: time), let vertical = track.verticalSpeed(at: time),
-              point.hasVelocity, point.groundSpeed > 1 else { return }
-        let distance = 2000.0, angle = point.track * .pi / 180
-        let ahead = MapAnchor(latitude: point.latitude + cos(angle) * distance / MapPlacement.earthRadiusMeters * 180 / .pi,
-            longitude: point.longitude + sin(angle) * distance / (MapPlacement.earthRadiusMeters * cos(point.latitude * .pi / 180)) * 180 / .pi,
-            altitudeMeters: point.altitudeMSL + vertical * distance / point.groundSpeed)
-        let center = projection * SIMD4<Float>(SIMD3<Float>(placement.roomPoint(for: ahead)), 1)
-        guard center.w > 0.01, abs(center.x / center.w) < 0.9, abs(center.y / center.w) < 0.85 else { return }
-        let radius: Float = 11
-        let offset = { (x: Float, y: Float) in center + SIMD4<Float>(x * 2 / size.x * center.w, y * 2 / size.y * center.w, 0, 0) }
-        for i in 0..<24 {
-            let a = Float(i) * 2 * .pi / 24, b = Float(i + 1) * 2 * .pi / 24
-            appendSegment(offset(cos(a) * radius, sin(a) * radius), offset(cos(b) * radius, sin(b) * radius),
-                          width: 1.5, size: size, color: [0.3, 1, 0.45, 1], vertices: &vertices)
-        }
-        let wings: [(SIMD2<Float>, SIMD2<Float>)] = [([-23, 0], [-11, 0]), ([11, 0], [23, 0]), ([0, 11], [0, 19])]
-        for (a, b) in wings {
-            appendSegment(offset(a.x, a.y), offset(b.x, b.y), width: 1.5, size: size, color: [0.3, 1, 0.45, 1], vertices: &vertices)
         }
     }
 

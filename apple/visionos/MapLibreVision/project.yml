@@ -72,6 +72,7 @@ targets:
         "EXCLUDED_ARCHS[sdk=xrsimulator*]": x86_64
         TARGETED_DEVICE_FAMILY: "7"
     dependencies:
+      - sdk: IOSurface.framework
       - package: IndicateAppleDisplay
       - sdk: PDFKit.framework
       - sdk: Metal.framework

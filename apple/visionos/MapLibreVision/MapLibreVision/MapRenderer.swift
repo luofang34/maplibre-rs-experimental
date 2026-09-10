@@ -21,6 +21,7 @@ final class MapRenderer {
     private var flightCamera = FlightCamera()
     private var trackOverlay: TrackOverlayRenderer?
     private var flightHUD: FlightHUDRenderer?
+    private var flightSymbols: FlightSymbolRenderer?
     private var replayEnded = false
     private var placement: MapPlacement
     #if DEBUG
@@ -74,6 +75,7 @@ final class MapRenderer {
         do {
             trackOverlay = try TrackOverlayRenderer(device: layerRenderer.device)
             flightHUD = try FlightHUDRenderer(device: layerRenderer.device)
+            flightSymbols = try FlightSymbolRenderer(device: layerRenderer.device)
         }
         catch { maplibre_visionos_note("Flight overlay unavailable: \(error)") }
         if let entry = modeStore.takeEntry() {
@@ -508,6 +510,9 @@ final class MapRenderer {
                          terrainValid: Bool = false) {
         eyeTargets.copy(to: drawable, commandBuffer: commandBuffer, opaque: placement.immersion == .full)
         if let replayFrame {
+            if terrainValid, !flightCamera.isBoarding {
+                flightSymbols?.draw(frame: replayFrame, placement: placement, head: head, drawable: drawable, command: commandBuffer)
+            }
             flightHUD?.draw(frame: replayFrame, head: head, terrainValid: terrainValid,
                 boarding: flightCamera.isBoarding, drawable: drawable, command: commandBuffer)
         }

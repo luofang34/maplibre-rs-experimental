@@ -18,18 +18,18 @@ struct IndicateGlyphAtlas: GlyphAtlas {
 
 final class FlightHUDRenderer {
     private struct Vertex { let position: SIMD4<Float>; let uv: SIMD2<Float> }
-    private struct Slot { var context: CGContext; let texture: MTLTexture }
     private let renderer = SceneRenderer(atlas: IndicateGlyphAtlas())
     private let pipeline: MTLRenderPipelineState
     private let depth: MTLDepthStencilState
-    private var slots: [Slot]
+    private var slots: [FlightHUDSurface]
     private var slot = 0
     private var nextUpdate = 0.0
     private var revision: UInt64?
     private var lastValid = false
+    private var lastElapsed = -1.0
+    private var lastCaption = ""
     private(set) var renderMilliseconds = 0.0
     private var timings: [Double] = []
-    private let blankPixels = [UInt8](repeating: 0, count: 1200 * 600 * 4)
     private let logger = Logger(subsystem: "com.sokolysystems.maplibre.vision", category: "FlightHUD")
 
     init(device: MTLDevice) throws {
@@ -52,28 +52,23 @@ final class FlightHUDRenderer {
         state.isDepthWriteEnabled = true
         guard let depth = device.makeDepthStencilState(descriptor: state) else { throw SetupError.resources }
         self.depth = depth
-        let texture = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm_srgb,
-            width: 1200, height: 600, mipmapped: false)
-        texture.usage = .shaderRead
-        texture.storageMode = .shared
-        slots = try (0..<3).map { _ in
-            guard let context = Self.makeContext(),
-                  let gpu = device.makeTexture(descriptor: texture) else { throw SetupError.resources }
-            return Slot(context: context, texture: gpu)
-        }
+        slots = try (0..<3).map { _ in try FlightHUDSurface(device: device) }
     }
 
     func draw(frame: FlightReplay.Frame, head: simd_float4x4, terrainValid: Bool, boarding: Bool,
               drawable: LayerRenderer.Drawable, command: MTLCommandBuffer) {
         guard frame.view == .fpv else { return }
         let now = ProcessInfo.processInfo.systemUptime
-        if now >= nextUpdate || revision != frame.cameraRevision || lastValid != terrainValid {
+        let caption = "\(frame.playing)-\(boarding)"
+        if (now >= nextUpdate && (lastElapsed != frame.elapsed || lastCaption != caption)) || revision != frame.cameraRevision || lastValid != terrainValid {
             // Readouts derive from the terrain update's snapshot. The texture moves with the
             // display each frame; text raster work is bounded independently of refresh rate.
             update(frame, terrainValid: terrainValid, boarding: boarding)
             nextUpdate = now + 1.0 / 20
             revision = frame.cameraRevision
             lastValid = terrainValid
+            lastElapsed = frame.elapsed
+            lastCaption = caption
         }
         for (index, view) in drawable.views.enumerated() {
             let projection = drawable.computeProjection(viewIndex: index) * simd_inverse(head * view.transform) * head
@@ -127,35 +122,32 @@ final class FlightHUDRenderer {
         let length = scene.length <= 8192 ? Int(scene.length) : 0
         let bytes = withUnsafeBytes(of: &scene) { Array($0.dropFirst(4).prefix(length)) }
         slot = (slot + 1) % slots.count
-        var context = slots[slot].context
+        let surface = slots[slot]
+        surface.begin()
+        defer { surface.end() }
+        var context = surface.context
         context.clear(CGRect(x: 0, y: 0, width: 1200, height: 600))
         context.saveGState()
         context.translateBy(x: 0, y: 600)
         context.scaleBy(x: 1, y: -1)
         do {
-            let report = try renderer.render(bytes, into: context)
-            guard report.unknownOpcodes == 0, report.layersPresent.contains(.tapes),
-                  report.layersPresent.contains(.annunciation) else { throw ProducerFault(reason: .paintFailed) }
+            if frame.view == .fpv {
+                let report = try renderer.render(bytes, into: context)
+                guard report.unknownOpcodes == 0, report.layersPresent.contains(.tapes),
+                      report.layersPresent.contains(.annunciation) else { throw ProducerFault(reason: .paintFailed) }
+            }
             drawContext(frame, terrainValid: terrainValid, boarding: boarding, context: context)
         } catch {
             // A failed layer may leave its clip/transform stack open. Discard the context
             // before painting a failure indication so that error state cannot clip it away.
-            guard let clean = Self.makeContext() else {
-                slots[slot].texture.replace(region: MTLRegionMake2D(0, 0, 1200, 600), mipmapLevel: 0,
-                    withBytes: blankPixels, bytesPerRow: 4800)
-                return
-            }
-            slots[slot].context = clean
-            context = clean
+            guard surface.resetContext() else { surface.clearPixels(); return }
+            context = surface.context
             context.saveGState()
             context.translateBy(x: 0, y: 600)
             context.scaleBy(x: 1, y: -1)
             FailurePage.draw(into: context, pixelWidth: 1200, pixelHeight: 600, reason: .paintFailed)
         }
         context.restoreGState()
-        if let pixels = context.data {
-            slots[slot].texture.replace(region: MTLRegionMake2D(0, 0, 1200, 600), mipmapLevel: 0, withBytes: pixels, bytesPerRow: 4800)
-        }
         renderMilliseconds = (ProcessInfo.processInfo.systemUptime - start) * 1000
         timings.append(renderMilliseconds)
         if timings.count == 200 {
@@ -165,23 +157,18 @@ final class FlightHUDRenderer {
         }
     }
 
-    private static func makeContext() -> CGContext? {
-        CGContext(data: nil, width: 1200, height: 600, bitsPerComponent: 8, bytesPerRow: 4800,
-            space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue)
-    }
-
     private func drawContext(_ frame: FlightReplay.Frame, terrainValid: Bool, boarding: Bool, context: CGContext) {
         // Playback state belongs to the host; it must never look like a live sensor annunciation.
         let status = !terrainValid ? "VIEW UNAVAILABLE" : boarding ? "BOARDING" : frame.observation == nil ? "TRACK DATA GAP" : frame.playing ? "FPV REPLAY" : "REPLAY PAUSED"
-        let caption = frame.track?.isSimulation == true ? "SIMULATED FLIGHT" : "RECORDED FLIGHT"
+        let caption = frame.track?.isSimulation == true ? "SIMULATED" : "RECORDED"
         let attributes: [NSAttributedString.Key: Any] = [
             .font: CTFontCreateWithName("Menlo-Bold" as CFString, 16, nil),
             .foregroundColor: CGColor(red: 1, green: 0.8, blue: 0.25, alpha: 1)]
         context.saveGState()
-        context.translateBy(x: 32, y: 40)
+        context.translateBy(x: 40, y: 32)
         context.scaleBy(x: 1, y: -1)
-        for (row, text) in [status, caption, "SIM / NOT FOR FLIGHT"].enumerated() {
+        let lines = [status, caption]
+        for (row, text) in lines.enumerated() {
             context.textPosition = CGPoint(x: 0, y: -CGFloat(row) * 24)
             CTLineDraw(CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: attributes)), context)
         }
