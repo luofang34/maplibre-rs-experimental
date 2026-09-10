@@ -11,6 +11,8 @@ The current review topics are:
 
 | Branch | Scope |
 | --- | --- |
+| `feat/indicate-svs-overlay` | Independent Indicate instrument set, telemetry validity, bounded scene bridge and Rust regression gates |
+| `feat/visionos-fpv-replay` | FPV/chase/free camera handoff, track import, simulated Mach Loop example, Apple-rendered overlay and FAA reference viewer |
 | `feat/visionos-desk-flight-replay` | Restorable native desk Volume, bounded manipulation, licensed ADS-B approach replay and terrain follow camera |
 | `fix/visionos-surface-controls` | Geographic drag and zoom anchors, focus-preserving tilt, gesture intent, first-view placement |
 | `fix/visionos-rotation-stability` | Normalized gesture rotations and finite tilt reporting |
@@ -29,6 +31,9 @@ The rotation stability change uses integrated `cc7d163b` as its review base.
 The XR validation and terrain streaming topics build on that stack.
 The surface controls topic uses integrated `735b6f27` as its review base.
 The desk Volume and recorded flight topic uses integrated `570531b2` as its review base.
+The Indicate overlay topic uses integrated `d8b3a49b` as its review base; the FPV
+integration builds on the overlay topic at `3eb19019`. The independent set belongs
+with Indicate; the Swift host and import integration are MapLibre platform topics.
 Their parent branch is the review base; comparing every branch directly with
 upstream `main` would include unrelated prerequisites. Renderer topics can be
 prepared for MapLibre review as their dependencies become available upstream.
@@ -49,3 +54,20 @@ is required for force pushes or remote branch deletion unless already authorized
 Run fmt, clippy, tests, missing-docs and broken-link documentation checks, and the
 release build. Record platform-specific baseline failures separately from the
 feature's passing checks. Install from the integrated tree, not a partial topic.
+
+## FPV integration validation — 2026-09-10
+
+- Swift: 87 tests passed in both debug and release. The overlay workspace passed
+  formatting, strict clippy, eight tests, missing-docs/broken-link checks and release.
+- Simulator and signed device builds passed. Both flight examples completed in
+  the simulator; the GPX preview required an elevation reference before import.
+  The app installed and launched on the paired Vision Pro. AirDrop transport
+  between physical devices remains untested.
+- The actual Indicate/Apple overlay measured approximately 2.1 ms p95 per raster
+  in the simulator at 20 Hz, with head tracking updated each display frame.
+- IndicateAppleDisplay's `fix/visionos-display-scale` topic passed 45 tests,
+  its benchmark and a visionOS compile check. Its full CI still reports upstream
+  conformance-corpus drift; the app pins the validated bridge revision.
+- The MapLibre baseline CI attempt was not green: formatting returned nonzero,
+  and compilation gates stopped on a missing generated SQLite binding in the
+  validation cache. These failures are separate from the passing overlay gates.
