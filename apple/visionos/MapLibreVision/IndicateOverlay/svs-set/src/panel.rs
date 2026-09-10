@@ -3,7 +3,9 @@ use indicate_instrument_descriptor::{
     BackgroundCapability, ConfigBlob, DesignFrame, GroupSet, PanelDescriptor, PanelDrawError,
     PanelSet,
 };
-use indicate_instrument_scene::{Anchor, LayerId, PaintMode, SceneWriter};
+use indicate_instrument_scene::{Anchor, LayerId, PaintMode, Rgba8, SceneWriter};
+
+const HUD_GREEN: Rgba8 = Rgba8::rgba(90, 255, 130, 255);
 use indicate_instrument_state::{GroupId, PanelData, Sig, SignalStatus};
 use indicate_instrument_symbology::{fmt_label, palette, safety};
 
@@ -54,15 +56,23 @@ fn draw(
 ) -> Result<(), PanelDrawError> {
     config.require_schema(&[])?;
     scene.begin_layer(LayerId::Tapes)?;
-    readout(scene, "IAS KT", data.ias_kt, GroupId::Air, [32.0, 225.0])?;
+    readout(scene, "IAS KT", data.ias_kt, GroupId::Air, [72.0, 250.0])?;
     readout(
         scene,
         "GS KT",
         data.gs_kt,
         GroupId::Kinematics,
-        [32.0, 350.0],
+        [72.0, 365.0],
     )?;
-    let altitude_label = fmt_label!(16, "{} FT", data.altitude.class.label());
+    let altitude_label = fmt_label!(
+        16,
+        "{} FT",
+        if data.altitude.value_ft.status.shows_value() {
+            data.altitude.class.label()
+        } else {
+            "ALT"
+        }
+    );
     readout(
         scene,
         altitude_label.as_str(),
@@ -72,27 +82,16 @@ fn draw(
         } else {
             GroupId::Air
         },
-        [944.0, 225.0],
+        [928.0, 250.0],
     )?;
     readout(
         scene,
         "VS FPM",
         data.vsi_fpm,
         GroupId::Kinematics,
-        [944.0, 350.0],
+        [928.0, 140.0],
     )?;
-    let track = Sig::with_status(data.track_rad.value.to_degrees(), data.track_rad.status);
-    readout(
-        scene,
-        match data.heading.reference {
-            indicate_instrument_state::HeadingReference::Magnetic => "TRK M",
-            indicate_instrument_state::HeadingReference::SimLocalTrue => "TRK SIM",
-            _ => "TRK T",
-        },
-        track,
-        GroupId::Kinematics,
-        [488.0, 40.0],
-    )?;
+    compass(data, scene)?;
     scene.end_layer(LayerId::Tapes)?;
     annunciations(data, scene)
 }
@@ -101,11 +100,15 @@ fn annunciations(data: &PanelData, scene: &mut SceneWriter<'_>) -> Result<(), Pa
     scene.begin_layer(LayerId::Annunciation)?;
     let attitude = data.roll_rad.status.worst(data.pitch_rad.status);
     if !attitude.shows_value() {
-        scene.fill_color(safety::FAILURE_RED)?;
+        scene.fill_color(if attitude == SignalStatus::Failed {
+            safety::FAILURE_RED
+        } else {
+            palette::AMBER
+        })?;
         scene.text(
             600.0,
             532.0,
-            17.0,
+            13.0,
             Anchor::CENTER,
             if attitude == SignalStatus::Failed {
                 "ATT FAILED"
@@ -118,11 +121,15 @@ fn annunciations(data: &PanelData, scene: &mut SceneWriter<'_>) -> Result<(), Pa
         scene.text(600.0, 532.0, 17.0, Anchor::CENTER, "ATT CHECK")?;
     }
     if !data.heading.value_rad.status.shows_value() {
-        scene.fill_color(safety::FAILURE_RED)?;
+        scene.fill_color(if data.heading.value_rad.status == SignalStatus::Failed {
+            safety::FAILURE_RED
+        } else {
+            palette::AMBER
+        })?;
         scene.text(
             600.0,
             558.0,
-            15.0,
+            12.0,
             Anchor::CENTER,
             if data.heading.value_rad.status == SignalStatus::Failed {
                 "HDG FAILED - TRACK VIEW"
@@ -143,29 +150,35 @@ fn readout(
     position: [f32; 2],
 ) -> Result<(), PanelDrawError> {
     let [x, y] = position;
-    scene.fill_color(indicate_instrument_scene::Rgba8::rgba(8, 16, 24, 210))?;
-    scene.rect(PaintMode::Fill, x, y, 224.0, 106.0)?;
-    scene.fill_color(palette::WHITE)?;
-    scene.text(x + 14.0, y + 19.0, 15.0, Anchor::MIDDLE_LEFT, label)?;
+    scene.stroke(Rgba8::rgba(0, 12, 0, 180), 4.0)?;
+    scene.rect(PaintMode::Stroke, x, y + 22.0, 200.0, 48.0)?;
+    scene.stroke(HUD_GREEN, 1.2)?;
+    scene.rect(PaintMode::Stroke, x, y + 22.0, 200.0, 48.0)?;
+    scene.fill_color(HUD_GREEN)?;
+    scene.text(x, y + 8.0, 13.0, Anchor::MIDDLE_LEFT, label)?;
     let in_range = signal.value.is_finite() && signal.value.abs() < 1_000_000.0;
     if signal.status.shows_value() && in_range {
         scene.fill_color(if signal.status == SignalStatus::Valid {
-            palette::WHITE
+            HUD_GREEN
         } else {
             palette::AMBER
         })?;
         let value = fmt_label!(16, "{:.0}", signal.value);
         scene.text_attributed(
             group.to_u8(),
-            x + 210.0,
-            y + 57.0,
-            28.0,
+            x + 186.0,
+            y + 46.0,
+            24.0,
             Anchor::MIDDLE_RIGHT,
             value.as_str(),
         )?;
     } else {
-        scene.fill_color(safety::FAILURE_RED)?;
-        scene.text(x + 210.0, y + 57.0, 28.0, Anchor::MIDDLE_RIGHT, "---")?;
+        scene.fill_color(if signal.status == SignalStatus::Failed {
+            safety::FAILURE_RED
+        } else {
+            palette::AMBER
+        })?;
+        scene.text(x + 186.0, y + 46.0, 28.0, Anchor::MIDDLE_RIGHT, "---")?;
     }
     if signal.status != SignalStatus::Valid || !in_range {
         let status = if signal.status.shows_value() && !in_range {
@@ -178,8 +191,58 @@ fn readout(
                 _ => "MISSING",
             }
         };
-        scene.text(x + 210.0, y + 88.0, 13.0, Anchor::MIDDLE_RIGHT, status)?;
+        scene.text(x + 186.0, y + 86.0, 13.0, Anchor::MIDDLE_RIGHT, status)?;
     }
+    Ok(())
+}
+
+fn compass(data: &PanelData, scene: &mut SceneWriter<'_>) -> Result<(), PanelDrawError> {
+    let has_heading = data.heading.value_rad.status.shows_value();
+    let (signal, group, prefix) = if has_heading {
+        (data.heading.value_rad, GroupId::Heading, "HDG")
+    } else {
+        (data.track_rad, GroupId::Kinematics, "TRK")
+    };
+    let color = if signal.status == SignalStatus::Valid {
+        HUD_GREEN
+    } else {
+        palette::AMBER
+    };
+    scene.fill_color(color)?;
+    let reference = match data.heading.reference {
+        indicate_instrument_state::HeadingReference::Magnetic => "M",
+        indicate_instrument_state::HeadingReference::SimLocalTrue => "SIM",
+        _ => "T",
+    };
+    let label = fmt_label!(16, "{} {}", prefix, reference);
+    scene.text(600.0, 34.0, 13.0, Anchor::CENTER, label.as_str())?;
+    if !signal.status.shows_value() {
+        return Ok(());
+    }
+    let degrees = (signal.value.to_degrees() % 360.0 + 360.0) % 360.0;
+    scene.stroke(color, 1.2)?;
+    scene.line(600.0, 92.0, 595.0, 101.0)?;
+    scene.line(600.0, 92.0, 605.0, 101.0)?;
+    let base = libm::floorf(degrees / 5.0) as i32 * 5;
+    for offset in -5..=5 {
+        let value = base + offset * 5;
+        let x = 600.0 + (value as f32 - degrees) * 7.0;
+        let major = value % 10 == 0;
+        scene.line(x, 85.0, x, if major { 70.0 } else { 77.0 })?;
+        if major {
+            let text = fmt_label!(8, "{:02}", value.rem_euclid(360) / 10);
+            scene.text_attributed(group.to_u8(), x, 57.0, 15.0, Anchor::CENTER, text.as_str())?;
+        }
+    }
+    let text = fmt_label!(8, "{:03.0}", degrees);
+    scene.text_attributed(
+        group.to_u8(),
+        600.0,
+        123.0,
+        20.0,
+        Anchor::CENTER,
+        text.as_str(),
+    )?;
     Ok(())
 }
 

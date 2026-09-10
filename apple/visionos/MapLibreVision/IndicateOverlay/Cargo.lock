@@ -93,6 +93,7 @@ dependencies = [
  "indicate-instrument-scene",
  "indicate-instrument-state",
  "indicate-instrument-symbology",
+ "libm",
 ]
 
 [[package]]

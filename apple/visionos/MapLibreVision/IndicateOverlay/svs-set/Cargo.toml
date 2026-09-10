@@ -8,6 +8,7 @@ publish = false
 workspace = true
 
 [dependencies]
+libm.workspace = true
 indicate-alerts.workspace = true
 indicate-instrument-descriptor.workspace = true
 indicate-instrument-scene.workspace = true
