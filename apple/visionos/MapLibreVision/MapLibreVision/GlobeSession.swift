@@ -21,6 +21,7 @@ final class GlobeSession: ObservableObject {
     private let library = FlightLibrary()
     private var loadedLibrary = false
     private var selectionRevision: UInt64 = 0
+    private var inboxSource: URL?
 
     @Published var controlsExpanded = false
     @Published var controlsRequest: UInt64 = 0
@@ -43,12 +44,12 @@ final class GlobeSession: ObservableObject {
         do {
             tracks = try await library.entries()
             let id = UserDefaults.standard.string(forKey: "selected-flight") ?? "innsbruck-approach"
-            if let entry = tracks.first(where: { $0.id == id }), id != "innsbruck-approach" {
+            if let entry = tracks.first(where: { $0.id == id }) ?? tracks.first {
                 let time = desk.playbackTime, rate = desk.playbackRate
                 await select(entry)
                 replay.seek(time)
                 replay.setRate(rate)
-            }
+            } else { replay.replace(with: nil); selectedTrackID = "" }
             #if DEBUG
             if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "--track"),
                index + 1 < ProcessInfo.processInfo.arguments.count,
@@ -79,7 +80,8 @@ final class GlobeSession: ObservableObject {
         importing = true
         defer { importing = false }
         do {
-            let name = url.lastPathComponent
+            let fileName = url.lastPathComponent
+            let name = inboxSource == url && fileName.count > 37 ? String(fileName.dropFirst(37)) : fileName
             let result = try await Task.detached(priority: .userInitiated) {
                 let data = try FlightImport.read(url)
                 return (data, try FlightImport.decode(data, name: name))
@@ -88,29 +90,56 @@ final class GlobeSession: ObservableObject {
         } catch { status = "Could not import this track: \(error.localizedDescription)" }
     }
 
-    func finishImport(elevation: FlightImport.Elevation) async {
+    func receiveInbox() async {
+        guard !importing, preview == nil else { return }
+        do {
+            guard let url = try FlightInbox().pending().first else { return }
+            inboxSource = url
+            await receive(url)
+            if preview != nil { controlsExpanded = true; controlsRequest = controlsRequest &+ 1 }
+            else { try FlightInbox().remove(url); inboxSource = nil }
+        } catch { status = error.localizedDescription }
+    }
+
+    func cancelImport() {
+        preview = nil
+        if let url = inboxSource {
+            do { try FlightInbox().remove(url); inboxSource = nil }
+            catch { status = error.localizedDescription }
+        }
+    }
+
+    func finishImport(elevation: FlightImport.Elevation, title: String) async {
         guard let preview, !importing else { return }
         importing = true
         defer { importing = false }
         do {
-            let (entry, track) = try await library.importTrack(preview.data, name: preview.name, elevation: elevation)
+            let (entry, track) = try await library.importTrack(preview.data, name: preview.name, elevation: elevation, title: title)
             if !tracks.contains(entry) { tracks.append(entry) }
             selectionRevision = selectionRevision &+ 1
             replay.replace(with: track)
             selectedTrackID = entry.id
-            self.preview = nil
+            cancelImport()
             status = "Imported \(entry.title). Press Fly track when ready."
             save()
         } catch { status = error.localizedDescription }
     }
 
     func removeSelectedTrack() async {
-        guard let entry = tracks.first(where: { $0.id == selectedTrackID && $0.imported }),
-              let fallback = tracks.first(where: { !$0.imported }) else { return }
+        guard let entry = tracks.first(where: { $0.id == selectedTrackID }) else { return }
         do {
             try await library.remove(entry)
             tracks.removeAll { $0.id == entry.id }
-            await select(fallback)
+            if let fallback = tracks.first { await select(fallback) }
+            else { replay.replace(with: nil); selectedTrackID = ""; save() }
+        } catch { status = error.localizedDescription }
+    }
+
+    func restoreDemos() async {
+        do {
+            try await library.restoreDemos()
+            tracks = try await library.entries()
+            if replay.track == nil, let first = tracks.first { await select(first) }
         } catch { status = error.localizedDescription }
     }
 

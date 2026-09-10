@@ -14,7 +14,7 @@
 			<key>CFBundleTypeRole</key>
 			<string>Viewer</string>
 			<key>LSHandlerRank</key>
-			<string>Alternate</string>
+			<string>Default</string>
 			<key>LSItemContentTypes</key>
 			<array>
 				<string>org.topografix.gpx</string>
@@ -60,6 +60,8 @@
 			<key>UTTypeConformsTo</key>
 			<array>
 				<string>public.json</string>
+				<string>public.data</string>
+				<string>public.content</string>
 			</array>
 			<key>UTTypeDescription</key>
 			<string>Flight recording</string>
@@ -80,6 +82,8 @@
 			<key>UTTypeConformsTo</key>
 			<array>
 				<string>public.xml</string>
+				<string>public.data</string>
+				<string>public.content</string>
 			</array>
 			<key>UTTypeDescription</key>
 			<string>GPS track</string>
@@ -99,6 +103,8 @@
 			<key>UTTypeConformsTo</key>
 			<array>
 				<string>public.xml</string>
+				<string>public.data</string>
+				<string>public.content</string>
 			</array>
 			<key>UTTypeDescription</key>
 			<string>KML flight track</string>

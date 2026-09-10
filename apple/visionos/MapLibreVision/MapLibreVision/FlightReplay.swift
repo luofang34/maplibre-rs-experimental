@@ -50,7 +50,7 @@ final class FlightReplay: @unchecked Sendable {
         } catch { failure = "The bundled approach could not load: \(error.localizedDescription)" }
     }
 
-    func replace(with track: FlightTrack) {
+    func replace(with track: FlightTrack?) {
         lock.withLock {
             returnDeadline = nil
             recording = track

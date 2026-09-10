@@ -26,6 +26,7 @@ struct MapLibreVisionApp: App {
         WindowGroup(id: GlobeSession.homeID, for: String.self) { _ in
             DeskGlobeView().environmentObject(session)
         } defaultValue: { GlobeSession.homeID }
+        .handlesExternalEvents(matching: ["*"])
         .windowStyle(.volumetric)
         .defaultSize(width: 0.55, height: 0.65, depth: 0.60, in: .meters)
         .defaultLaunchBehavior(.presented)

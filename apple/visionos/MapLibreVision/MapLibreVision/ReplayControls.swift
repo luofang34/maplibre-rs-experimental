@@ -19,9 +19,10 @@ struct ReplayControls: View {
                             }
                         }
                         Divider()
+                        Button("Restore demo flights") { Task { await session.restoreDemos() } }
                         Button("Import track…", systemImage: "square.and.arrow.down") { importing = true }
-                        if session.tracks.contains(where: { $0.id == session.selectedTrackID && $0.imported }) {
-                            Button("Remove recording", role: .destructive) { Task { await session.removeSelectedTrack() } }
+                        if session.tracks.contains(where: { $0.id == session.selectedTrackID }) {
+                            Button("Remove flight", role: .destructive) { Task { await session.removeSelectedTrack() } }
                         }
                     } label: {
                         Label(frame.track?.displayTitle ?? "Flight library", systemImage: "airplane")

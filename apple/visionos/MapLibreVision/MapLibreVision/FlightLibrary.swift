@@ -10,6 +10,14 @@ actor FlightLibrary {
     private let directory: URL
     private let bundle: Bundle
     static let capacity = 20
+    static let demos = ["innsbruck-approach", "mach-loop", "liberty"]
+
+    private var hiddenURL: URL { directory.appendingPathComponent("hidden-demos.json") }
+
+    private func hiddenDemos() throws -> Set<String> {
+        guard FileManager.default.fileExists(atPath: hiddenURL.path) else { return [] }
+        return try JSONDecoder().decode(Set<String>.self, from: FlightImport.read(hiddenURL))
+    }
 
     init(directory: URL? = nil, bundle: Bundle = .main) {
         self.directory = directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -19,9 +27,10 @@ actor FlightLibrary {
 
     func entries() throws -> [Entry] {
         var entries: [Entry] = []
-        for name in ["innsbruck-approach", "mach-loop"] {
-            if let url = bundle.url(forResource: name, withExtension: "json"),
-               let track = try? FlightTrack.decode(FlightImport.read(url)) {
+        let hidden = try hiddenDemos()
+        for name in Self.demos where !hidden.contains(name) {
+            let entry = Entry(id: name, title: name, simulated: false, imported: false)
+            if let track = try? load(entry) {
                 entries.append(.init(id: name, title: track.displayTitle, simulated: track.isSimulation, imported: false))
             }
         }
@@ -43,17 +52,20 @@ actor FlightLibrary {
             guard UUID(uuidString: entry.id) != nil else { throw FlightImport.Failure.message("Invalid recording identifier.") }
             url = directory.appendingPathComponent(entry.id).appendingPathExtension("flighttrack")
         } else {
-            guard ["innsbruck-approach", "mach-loop"].contains(entry.id),
-                  let resource = bundle.url(forResource: entry.id, withExtension: "json") else {
+            guard Self.demos.contains(entry.id),
+                  let resource = bundle.url(forResource: entry.id, withExtension: entry.id == "liberty" ? "kml" : "json") else {
                 throw FlightImport.Failure.message("This bundled recording is unavailable.")
             }
             url = resource
         }
-        return try FlightTrack.decode(FlightImport.read(url))
+        var track = try FlightImport.decode(FlightImport.read(url), name: url.lastPathComponent)
+        if entry.id == "liberty" { track.title = "Liberty" }
+        return track
     }
 
-    func importTrack(_ data: Data, name: String, elevation: FlightImport.Elevation) throws -> (Entry, FlightTrack) {
-        let track = try FlightImport.decode(data, name: name, elevation: elevation)
+    func importTrack(_ data: Data, name: String, elevation: FlightImport.Elevation, title: String? = nil) throws -> (Entry, FlightTrack) {
+        var track = try FlightImport.decode(data, name: name, elevation: elevation)
+        if let title, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { track.title = String(title.prefix(120)) }
         let existing = try entries().filter(\.imported)
         for entry in existing {
             let saved = try load(entry)
@@ -66,8 +78,20 @@ actor FlightLibrary {
         return (entry, track)
     }
 
+    func restoreDemos() throws {
+        if FileManager.default.fileExists(atPath: hiddenURL.path) { try FileManager.default.removeItem(at: hiddenURL) }
+    }
+
     func remove(_ entry: Entry) throws {
-        guard entry.imported, UUID(uuidString: entry.id) != nil else { return }
+        if !entry.imported {
+            guard Self.demos.contains(entry.id) else { return }
+            var hidden = try hiddenDemos()
+            hidden.insert(entry.id)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try JSONEncoder().encode(hidden).write(to: hiddenURL, options: .atomic)
+            return
+        }
+        guard UUID(uuidString: entry.id) != nil else { return }
         try FileManager.default.removeItem(at: directory.appendingPathComponent(entry.id).appendingPathExtension("flighttrack"))
     }
 }

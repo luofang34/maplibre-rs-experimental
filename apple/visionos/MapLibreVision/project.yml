@@ -20,6 +20,7 @@ targets:
     platform: visionOS
     sources:
       - path: MapLibreVision
+      - path: Shared
       - path: ../maplibre_visionos.h
         buildPhase: none
     info:
@@ -33,30 +34,34 @@ targets:
         CFBundleDocumentTypes:
           - CFBundleTypeName: Flight recording
             CFBundleTypeRole: Viewer
-            LSHandlerRank: Alternate
+            LSHandlerRank: Default
             LSItemContentTypes: [org.topografix.gpx, com.google.earth.kml, com.sokolysystems.flight-track, public.json]
         UTImportedTypeDeclarations:
           - UTTypeIdentifier: org.topografix.gpx
-            UTTypeConformsTo: [public.xml]
+            UTTypeConformsTo: [public.xml, public.data, public.content]
             UTTypeDescription: GPS track
             UTTypeTagSpecification:
               public.filename-extension: [gpx]
               public.mime-type: application/gpx+xml
           - UTTypeIdentifier: com.google.earth.kml
-            UTTypeConformsTo: [public.xml]
+            UTTypeConformsTo: [public.xml, public.data, public.content]
             UTTypeDescription: KML flight track
             UTTypeTagSpecification:
               public.filename-extension: [kml]
               public.mime-type: application/vnd.google-earth.kml+xml
         UTExportedTypeDeclarations:
           - UTTypeIdentifier: com.sokolysystems.flight-track
-            UTTypeConformsTo: [public.json]
+            UTTypeConformsTo: [public.json, public.data, public.content]
             UTTypeDescription: Flight recording
             UTTypeTagSpecification:
               public.filename-extension: [flighttrack]
         UILaunchScreen: {}
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
+    entitlements:
+      path: MapLibreVision/MapLibreVision.entitlements
+      properties:
+        com.apple.security.application-groups: [group.com.sokolysystems.maplibre.vision]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.sokolysystems.maplibre.vision
@@ -72,6 +77,8 @@ targets:
         "EXCLUDED_ARCHS[sdk=xrsimulator*]": x86_64
         TARGETED_DEVICE_FAMILY: "7"
     dependencies:
+      - target: TrackShare
+        embed: true
       - sdk: IOSurface.framework
       - package: IndicateAppleDisplay
       - sdk: PDFKit.framework
@@ -84,3 +91,28 @@ targets:
       - sdk: CoreGraphics.framework
       - sdk: QuartzCore.framework
       - sdk: CoreFoundation.framework
+
+  TrackShare:
+    type: app-extension
+    platform: visionOS
+    sources: [TrackShare, Shared]
+    info:
+      path: TrackShare/Info.plist
+      properties:
+        CFBundleDisplayName: Add to MapLibre Vision
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.share-services
+          NSExtensionPrincipalClass: "$(PRODUCT_MODULE_NAME).ShareTrackViewController"
+          NSExtensionAttributes:
+            NSExtensionActivationRule:
+              NSExtensionActivationSupportsFileWithMaxCount: 1
+    entitlements:
+      path: TrackShare/TrackShare.entitlements
+      properties:
+        com.apple.security.application-groups: [group.com.sokolysystems.maplibre.vision]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.sokolysystems.maplibre.vision.share
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SKIP_INSTALL: YES
+        TARGETED_DEVICE_FAMILY: "7"
