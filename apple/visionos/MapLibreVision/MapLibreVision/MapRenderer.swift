@@ -18,6 +18,7 @@ final class MapRenderer {
     private let modeStore = MapModeStore.shared
     private let gestures = MapGestures()
     private let replay: FlightReplay
+    private let requestControls: @Sendable () -> Void
     private var flightCamera = FlightCamera()
     private var trackOverlay: TrackOverlayRenderer?
     private var flightHUD: FlightHUDRenderer?
@@ -67,8 +68,9 @@ final class MapRenderer {
     }()
     private var lastAvailableMemory: UInt64 = 0
 
-    init(layerRenderer: LayerRenderer, replay: FlightReplay) {
+    init(layerRenderer: LayerRenderer, replay: FlightReplay, requestControls: @escaping @Sendable () -> Void = {}) {
         self.replay = replay
+        self.requestControls = requestControls
         self.layerRenderer = layerRenderer
         device = layerRenderer.device
         recoveryQueue = layerRenderer.device.makeCommandQueue()
@@ -308,8 +310,9 @@ final class MapRenderer {
             up: SIMD3<Double>(SIMD3<Float>(headMatrix.columns.1.x, headMatrix.columns.1.y, headMatrix.columns.1.z)), isGlobe: placement.isTableObject)
         let inputs = gestures.take()
         if inputs.contains(where: \.navigates) || controls.begin || controls.tilt != nil || controls.level {
-            replay.setView(.free)
+            replay.navigate()
         }
+        replay.advanceReturn()
         if replay.frame().view == .free { flightCamera.detach(placement: &placement) }
         if controls.begin { placement.beginTilt(elevation: elevationAt) }
         if let tilt = controls.tilt { placement.setTilt(tilt, elevation: elevationAt) }
@@ -469,6 +472,7 @@ final class MapRenderer {
         if let selection = inputs.compactMap(\.selection).last, let eye = drawable.views.first {
             modeStore.showSelection(selectLabel(selection, worldFromEye: originFromDevice * eye.transform,
                 projection: drawable.computeProjection(viewIndex: 0), map: map))
+            requestControls()
         }
         renderSeconds += CACurrentMediaTime() - renderStart
         if result != nil {

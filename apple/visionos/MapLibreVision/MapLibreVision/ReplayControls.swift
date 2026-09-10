@@ -52,6 +52,13 @@ struct ReplayControls: View {
                             Text("\(Int(point.altitudeMSL / 0.3048)) ft MSL · " + (point.hasVelocity ? "\(Int(point.groundSpeed * 3600 / 1852)) kt GS" : "GS MISSING"))
                         } else { Text("TRACK DATA GAP").foregroundStyle(.orange) }
                     }.font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    if let seconds = frame.returnSeconds {
+                        HStack {
+                            Text("Returning to ownship in \(seconds)s").monospacedDigit()
+                            Spacer()
+                            Button("Stay free") { session.replay.setView(.free) }
+                        }.font(.caption)
+                    }
                     if frame.elapsed >= track.duration { Text("End of available track").font(.caption) }
                     if session.immersed {
                         Picker("Camera", selection: Binding(get: { frame.view }, set: { session.replay.setView($0) })) {

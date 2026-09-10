@@ -15,6 +15,7 @@ final class FlightReplay: @unchecked Sendable {
         let view: FlightView
         let rate: Double
         let observation: FlightTrack.Observation?
+        var returnSeconds: Int? = nil
         var following: Bool { view != .free }
     }
 
@@ -27,6 +28,8 @@ final class FlightReplay: @unchecked Sendable {
     private var cameraRevision: UInt64 = 0
     private var resumeOnBoard = false
     private var boarding = false
+    private var returnDeadline: Double?
+    private var returnView = FlightView.fpv
 
     var track: FlightTrack? { lock.withLock { recording } }
     var loadingError: String? { lock.withLock { failure } }
@@ -49,6 +52,7 @@ final class FlightReplay: @unchecked Sendable {
 
     func replace(with track: FlightTrack) {
         lock.withLock {
+            returnDeadline = nil
             recording = track
             failure = nil
             clock = FlightPlayback()
@@ -61,13 +65,13 @@ final class FlightReplay: @unchecked Sendable {
     }
 
     func frame(at now: Double = ProcessInfo.processInfo.systemUptime) -> Frame {
-        let (track, clock, view, generation, revision) = lock.withLock {
-            (recording, self.clock, self.view, self.generation, cameraRevision)
+        let (track, clock, view, generation, revision, deadline) = lock.withLock {
+            (recording, self.clock, self.view, self.generation, cameraRevision, returnDeadline)
         }
         let elapsed = clock.time(at: now, duration: track?.duration ?? 0)
         return Frame(track: track, generation: generation, cameraRevision: revision, elapsed: elapsed,
             playing: clock.started != nil && elapsed < (track?.duration ?? 0), view: view, rate: clock.rate,
-            observation: track?.sample(at: elapsed))
+            observation: track?.sample(at: elapsed), returnSeconds: deadline.map { Int(ceil(max(0, $0 - now))) })
     }
 
     func toggle(at now: Double = ProcessInfo.processInfo.systemUptime) {
@@ -102,16 +106,36 @@ final class FlightReplay: @unchecked Sendable {
     }
 
     func setView(_ requested: FlightView, at now: Double = ProcessInfo.processInfo.systemUptime) {
+        lock.withLock { setViewLocked(requested, at: now) }
+    }
+
+    func navigate(at now: Double = ProcessInfo.processInfo.systemUptime) {
         lock.withLock {
-            guard requested != view else { return }
-            let duration = recording?.duration ?? 0
-            let playing = clock.started != nil && clock.time(at: now, duration: duration) < duration
-            resumeOnBoard = resumeOnBoard || playing
-            clock.pause(at: now, duration: duration)
-            view = requested
-            boarding = requested != .free
-            cameraRevision = cameraRevision &+ 1
+            if view != .free {
+                returnView = view
+                setViewLocked(.free, at: now)
+                returnDeadline = now + 10
+            } else if returnDeadline != nil { returnDeadline = now + 10 }
         }
+    }
+
+    func advanceReturn(at now: Double = ProcessInfo.processInfo.systemUptime) {
+        lock.withLock {
+            guard let deadline = returnDeadline, now >= deadline else { return }
+            setViewLocked(returnView, at: now)
+        }
+    }
+
+    private func setViewLocked(_ requested: FlightView, at now: Double) {
+        returnDeadline = nil
+        guard requested != view else { return }
+        let duration = recording?.duration ?? 0
+        let playing = clock.started != nil && clock.time(at: now, duration: duration) < duration
+        resumeOnBoard = resumeOnBoard || playing
+        clock.pause(at: now, duration: duration)
+        view = requested
+        boarding = requested != .free
+        cameraRevision = cameraRevision &+ 1
     }
 
     func follow(_ enabled: Bool) { setView(enabled ? .fpv : .free) }

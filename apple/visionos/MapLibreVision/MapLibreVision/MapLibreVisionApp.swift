@@ -45,9 +45,7 @@ struct MapLibreVisionApp: App {
         }
 
         ImmersiveSpace(id: MapRenderer.spaceID) {
-            CompositorLayer(configuration: MapLayerConfiguration()) { layerRenderer in
-                MapRenderer(layerRenderer: layerRenderer, replay: session.replay).start()
-            }
+            ImmersiveMapView(session: session)
             .onAppear { session.immersed = true }
             .onDisappear {
                 session.immersed = false
@@ -56,5 +54,21 @@ struct MapLibreVisionApp: App {
             }
         }
         .immersionStyle(selection: $modeStore.immersionStyle, in: .mixed, .full)
+    }
+}
+
+private struct ImmersiveMapView: CompositorContent {
+    @ObservedObject var session: GlobeSession
+    @Environment(\.openWindow) private var openWindow
+    var body: some CompositorContent {
+        CompositorLayer(configuration: MapLayerConfiguration()) { layer in
+            MapRenderer(layerRenderer: layer, replay: session.replay) {
+                Task { @MainActor in session.controlsRequest = session.controlsRequest &+ 1 }
+            }.start()
+        }
+        .onChange(of: session.controlsRequest) { _, _ in
+            session.controlsExpanded = true
+            openWindow(id: GlobeSession.controlsID, value: GlobeSession.controlsID)
+        }
     }
 }

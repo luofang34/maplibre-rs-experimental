@@ -57,9 +57,9 @@ final class FlightHUDRenderer {
 
     func draw(frame: FlightReplay.Frame, head: simd_float4x4, terrainValid: Bool, boarding: Bool,
               drawable: LayerRenderer.Drawable, command: MTLCommandBuffer) {
-        guard frame.view == .fpv else { return }
+        guard frame.view == .fpv || frame.returnSeconds != nil else { return }
         let now = ProcessInfo.processInfo.systemUptime
-        let caption = "\(frame.playing)-\(boarding)"
+        let caption = "\(frame.playing)-\(boarding)-\(frame.returnSeconds ?? -1)"
         if (now >= nextUpdate && (lastElapsed != frame.elapsed || lastCaption != caption)) || revision != frame.cameraRevision || lastValid != terrainValid {
             // Readouts derive from the terrain update's snapshot. The texture moves with the
             // display each frame; text raster work is bounded independently of refresh rate.
@@ -167,7 +167,7 @@ final class FlightHUDRenderer {
         context.saveGState()
         context.translateBy(x: 40, y: 32)
         context.scaleBy(x: 1, y: -1)
-        let lines = [status, caption]
+        let lines = frame.returnSeconds.map { ["FREE LOOK - RETURN IN \($0)s", "Pinch to open controls / Stay free"] } ?? [status, caption]
         for (row, text) in lines.enumerated() {
             context.textPosition = CGPoint(x: 0, y: -CGFloat(row) * 24)
             CTLineDraw(CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: attributes)), context)

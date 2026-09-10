@@ -22,6 +22,8 @@ final class GlobeSession: ObservableObject {
     private var loadedLibrary = false
     private var selectionRevision: UInt64 = 0
 
+    @Published var controlsExpanded = false
+    @Published var controlsRequest: UInt64 = 0
     @Published var immersed = false
     @Published var opening = false
     @Published var status = ""
