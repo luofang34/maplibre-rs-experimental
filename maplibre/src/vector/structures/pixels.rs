@@ -126,20 +126,9 @@ async fn structure_map(kind: &str, elevation: &str) -> HeadlessMap {
 }
 
 async fn map_with_lines(kind: &str, elevation: &str, line: serde_json::Value) -> HeadlessMap {
-    let style: Style = serde_json::from_value(serde_json::json!({
-            "version": 8, "projection": {"type":"globe"}, "terrain":{"source":"dem"},
-            "sources": {
-                "roads": {"type":"vector", "tiles":["https://roads.example/{z}/{x}/{y}.pbf"]},
-                "dem": {"type":"raster-dem", "tiles":["https://dem.example/{z}/{x}/{y}.png"], "encoding":"terrarium"}
-            }, "layers": [
-                {"id":"background","type":"background","paint":{"background-color":"#990000"}},
-                {"id":"road","type":"line","source":"roads","source-layer":"roads",
-                 "metadata":{"maplibre-rs:terrain-structure":kind,"maplibre-rs:structure-elevation-meters":elevation},
-                 "paint":{"line-color":"#00ff00","line-width":8}}
-            ]
-        })).expect("style");
-    let layer = style.layers[1].clone();
-    assert!(super::kind(&layer).is_some());
+    let style = structure_style(kind, elevation);
+    let layers = style.layers[1..].to_vec();
+    assert!(layers.iter().all(|layer| super::kind(layer).is_some()));
     let (kernel, renderer) = create_headless_renderer(64, 64, None)
         .await
         .expect("renderer");
@@ -170,7 +159,7 @@ async fn map_with_lines(kind: &str, elevation: &str, line: serde_json::Value) ->
         .process_geojson(
             &line,
             "roads",
-            vec![layer],
+            layers,
             root,
             crate::projection::ProjectionType::Globe,
         )
@@ -220,4 +209,47 @@ fn read_blocking(map: &HeadlessMap) -> Vec<u8> {
     let bytes = buffer.slice(..).get_mapped_range().to_vec();
     buffer.unmap();
     bytes
+}
+
+#[tokio::test]
+async fn coplanar_bridge_casing_cannot_hide_the_deck_during_head_motion() {
+    let mut map = structure_map("bridge", "1000").await;
+    for roll in [-0.002, 0.002, 0.0, 0.01, -0.01] {
+        render_at(
+            &mut map,
+            Matrix4::from_translation(Vector3::new(0.0, 0.0, 4000.0))
+                * Matrix4::from_angle_z(Rad(roll)),
+        );
+        let pixels = read_blocking(&map);
+        let green = pixels
+            .chunks_exact(4)
+            .filter(|p| p[1] > 180 && p[0] < 80 && p[2] < 80)
+            .count();
+        assert!(
+            green > 20,
+            "deck disappeared beneath its coplanar casing: {green}"
+        );
+    }
+}
+
+fn structure_style(kind: &str, elevation: &str) -> Style {
+    let mut style: Style = serde_json::from_value(serde_json::json!({
+            "version": 8, "projection": {"type":"globe"}, "terrain":{"source":"dem"},
+            "sources": {
+                "roads": {"type":"vector", "tiles":["https://roads.example/{z}/{x}/{y}.pbf"]},
+                "dem": {"type":"raster-dem", "tiles":["https://dem.example/{z}/{x}/{y}.png"], "encoding":"terrarium"}
+            }, "layers": [
+                {"id":"background","type":"background","paint":{"background-color":"#990000"}},
+                {"id":"casing","type":"line","source":"roads","source-layer":"roads",
+                 "metadata":{"maplibre-rs:terrain-structure":kind,"maplibre-rs:structure-elevation-meters":elevation},
+                 "paint":{"line-color":"#000000","line-width":14}},
+                {"id":"road","type":"line","source":"roads","source-layer":"roads",
+                 "metadata":{"maplibre-rs:terrain-structure":kind,"maplibre-rs:structure-elevation-meters":elevation},
+                 "paint":{"line-color":"#00ff00","line-width":8}}
+            ]
+        })).expect("style");
+    for (index, layer) in style.layers.iter_mut().enumerate() {
+        layer.index = index as u32;
+    }
+    style
 }

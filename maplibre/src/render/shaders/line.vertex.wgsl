@@ -72,12 +72,11 @@ fn main(
     let clip_offset = vec2<f32>(dir.x * outset * px_to_clip_x, dir.y * outset * px_to_clip_y);
     if spatial {
         // Decks share the map-space width of adjoining draped roads, including foreshortening.
-        let edge = project_tile_position_3d(
-            vec3<f32>(position + layer_translate + normal * outset * line_scale.y, elevation),
-            transform, tile_mercator_coords,
-        );
-        center = edge.clip_position;
-        center.z += max(abs(center.z) * 2e-5, 1e-10);
+        // Casing and deck share the centerline tangent plane. Independently projecting
+        // different widths onto a curved sphere gives them intersecting depth surfaces.
+        center += (projected_normal.clip_position - projected_center.clip_position) * (outset * line_scale.y);
+        // Coplanar casing and deck layers need deterministic style order in reversed depth.
+        center.z += max(abs(center.z), 1e-8) * (2e-5 + z_index * 2e-7);
     } else {
         center = vec4<f32>(center.xy + clip_offset, 0.0, center.w);
     }

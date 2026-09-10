@@ -42,5 +42,7 @@ fn main(in: FragmentInput) -> Output {
 
     // Output non-premultiplied alpha: the blend state (SrcAlpha, OneMinusSrcAlpha)
     // handles the premultiplication. Using v_color * alpha here would double-apply alpha.
-    return Output(vec4<f32>(in.v_color.rgb, in.v_color.a * alpha * dash_alpha));
+    let coverage = in.v_color.a * alpha * dash_alpha;
+    if coverage < 0.01 { discard; }
+    return Output(vec4<f32>(in.v_color.rgb, coverage));
 }
