@@ -25,7 +25,10 @@ fn anchor_visibility(clip: vec4<f32>, viewport: vec2<f32>) -> f32 {
         }
     }
     let anchor = clip.z / clip.w;
-    return select(0.0,1.0,anchor + max(abs(anchor)*2e-3,1e-8) >= surface);
+    // A finite occlusion band prevents a subpixel ridge from toggling an entire label.
+    // Reversed depth measures a relative distance margin, independent of eye-plane scale.
+    let tolerance = max(abs(anchor) * 4e-3, 1e-8);
+    return smoothstep(-tolerance, tolerance, anchor + tolerance - surface);
 }
 
 @vertex
@@ -55,6 +58,18 @@ fn main(
     let perspective_ratio = clamp(0.5 + 0.5 * distance_ratio, 0.0, 4.0);
     let size = metrics.x * perspective_ratio;
     let scale = select(size, size / 24.0, is_text);
+    var world_angle = 0.0;
+    if projection.transition_and_padding.w > 0.5 {
+        let top = project_tile_position_3d(vec3<f32>(anchor, elevation + 100.0), transform, tile_mercator_coords).clip_position;
+        var up = (top.xy * projected.clip_position.w - projected.clip_position.xy * top.w) / (projected.clip_position.w * projected.clip_position.w)
+            * vec2<f32>(viewport_width, -viewport_height);
+        if length(up) < 0.01 {
+            let north = project_tile_position_3d(vec3<f32>(anchor + vec2<f32>(0.0,-16.0), elevation), transform, tile_mercator_coords).clip_position;
+            up = (north.xy * projected.clip_position.w - projected.clip_position.xy * north.w) / (projected.clip_position.w * projected.clip_position.w)
+                * vec2<f32>(viewport_width, -viewport_height);
+        }
+        world_angle = atan2(up.y, up.x) + PROJECTION_PI * 0.5;
+    }
     var angle = alignment.z + bitcast<f32>(a_pixeloffset.w);
     if alignment.y > 0.5 {
         let tangent = project_tile_position_3d(vec3<f32>(anchor + vec2<f32>(cos(angle), sin(angle)) * 16.0, elevation), transform, tile_mercator_coords).clip_position;
@@ -62,8 +77,9 @@ fn main(
             * vec2<f32>(viewport_width, -viewport_height);
         if alignment.x < 0.5 { angle = atan2(delta.y, delta.x); }
         let keep_upright = select(symbol.placement.w, symbol.placement.z, is_text);
-        if keep_upright > 0.5 && delta.x < 0.0 { angle += PROJECTION_PI; }
+        if keep_upright > 0.5 && dot(delta, vec2<f32>(cos(world_angle),sin(world_angle))) < 0.0 { angle += PROJECTION_PI; }
     }
+    if alignment.x < 0.5 && alignment.y < 0.5 { angle += world_angle; }
     let rotation = mat2x2<f32>(cos(angle), sin(angle), -sin(angle), cos(angle));
     let offset = rotation * (vec2<f32>(a_pos_offset.zw) / 32.0 * scale + vec2<f32>(a_pixeloffset.xy) / 16.0);
     var position = projected.clip_position;

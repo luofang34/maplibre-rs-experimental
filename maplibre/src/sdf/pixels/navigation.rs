@@ -126,3 +126,47 @@ async fn collision_priority_and_queries_keep_the_original_feature_id_and_propert
     assert_eq!(hits[0].id, Some(93));
     assert_eq!(hits[0].properties["rank"], 1.0);
 }
+
+#[tokio::test]
+async fn external_eye_roll_preserves_world_label_orientation_and_readability() {
+    let style = style(0.0, "ground");
+    let layers = layers(&style);
+    let mut map = fixture_map(style, layers, 1).await;
+    let frame = |roll: f64| XrFrame {
+        opaque_environment: true,
+        timestamp: std::time::Duration::ZERO,
+        placement: ScenePlacement {
+            anchor: ExternalAnchor {
+                position: LatLon::new(-0.04394530819, 0.0439453125),
+                altitude_meters: 1200.0,
+            },
+            world_from_scene: Matrix4::identity(),
+        },
+        eyes: vec![XrEye {
+            world_from_eye: Matrix4::from_translation(Vector3::new(0.0, 0.0, 500.0))
+                * Matrix4::from_angle_z(Deg(roll)),
+            frustum: EyeFrustum::symmetric(Rad(1.4), 1.0, 0.05, 1e8),
+            target: EyeTarget::default(),
+        }],
+        request_overscan: 1.0,
+        prefetch: None,
+    };
+    map.run_xr_frame(frame(0.0)).expect("level eye");
+    let initial = read_blocking(&map);
+    let (count, bounds) = colored_bounds(&initial, 0);
+    assert!(count > 70 && bounds[2] - bounds[0] > bounds[3] - bounds[1]);
+    map.run_xr_frame(frame(90.0)).expect("rolled eye");
+    let (rolled_count, rolled) = colored_bounds(&read_blocking(&map), 0);
+    assert!(
+        rolled_count > 70 && rolled[3] - rolled[1] > rolled[2] - rolled[0],
+        "a world-fixed word rotates in the eye image, rather than following head roll: {rolled:?}"
+    );
+    for roll in [0.01, -0.01, 0.02, -0.02, 0.0] {
+        map.run_xr_frame(frame(roll)).expect("head motion");
+        assert!(
+            colored_bounds(&read_blocking(&map), 0).0 > count / 2,
+            "visible label blinked"
+        );
+    }
+    assert_eq!(read_blocking(&map), initial);
+}

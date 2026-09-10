@@ -198,11 +198,46 @@ impl Placement<'_> {
             if alignment[0] < 0.5 {
                 angle = dy.atan2(dx);
             }
-            if upright > 0.5 && dx < 0.0 {
+            let world_angle = if self.view.has_external_view() {
+                self.world_up_angle(height, clip)?
+            } else {
+                0.0
+            };
+            if upright > 0.5 && dx * world_angle.cos() + dy * world_angle.sin() < 0.0 {
                 angle += std::f64::consts::PI;
             }
         }
+        if self.view.has_external_view() && alignment[0] < 0.5 && alignment[1] < 0.5 {
+            angle += self.world_up_angle(height, clip)?;
+        }
         Some(angle)
+    }
+
+    fn world_up_angle(&self, height: f64, clip: Vector4<f64>) -> Option<f64> {
+        let up = project(
+            self.coords,
+            self.anchor,
+            height + 100.0,
+            self.view,
+            self.projection,
+        )?;
+        let delta = |point: Vector4<f64>| {
+            [
+                (point.x * clip.w - clip.x * point.w) / (clip.w * clip.w) * self.view.width(),
+                -(point.y * clip.w - clip.y * point.w) / (clip.w * clip.w) * self.view.height(),
+            ]
+        };
+        let mut axis = delta(up);
+        if axis[0].hypot(axis[1]) < 0.01 {
+            axis = delta(project(
+                self.coords,
+                [self.anchor[0], self.anchor[1] - 16.0],
+                height,
+                self.view,
+                self.projection,
+            )?);
+        }
+        Some(axis[1].atan2(axis[0]) + std::f64::consts::FRAC_PI_2)
     }
 
     fn screen(&self, clip: Vector4<f64>) -> [f64; 2] {

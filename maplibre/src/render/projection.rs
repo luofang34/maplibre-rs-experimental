@@ -46,7 +46,8 @@ pub struct ShaderProjectionData {
     pub center_clip_w: f32,
     /// Radius of the body in metres, which scales elevations onto the unit sphere.
     pub radius_meters: f32,
-    padding: f32,
+    /// Whether viewport symbols use a world-up basis for a tracked external eye.
+    pub external_view: f32,
 }
 
 impl ShaderProjectionData {
@@ -58,7 +59,7 @@ impl ShaderProjectionData {
             transition: data.projection_transition,
             center_clip_w: 1.0,
             radius_meters: Body::EARTH.radius_meters as f32,
-            padding: 0.0,
+            external_view: 0.0,
         }
     }
 }
@@ -71,7 +72,7 @@ impl Default for ShaderProjectionData {
             transition: 0.0,
             center_clip_w: 1.0,
             radius_meters: Body::EARTH.radius_meters as f32,
-            padding: 0.0,
+            external_view: 0.0,
         }
     }
 }
@@ -205,6 +206,7 @@ pub fn projection_data_for_view(
     let radius_meters = view_state.body().radius_meters as f32;
     if transition == 0.0 {
         return Ok(ShaderProjectionData {
+            external_view: f32::from(view_state.has_external_view()),
             center_clip_w: mercator_center_w,
             radius_meters,
             ..ShaderProjectionData::default()
@@ -236,6 +238,7 @@ pub fn projection_data_for_view(
         },
     );
     Ok(ShaderProjectionData {
+        external_view: f32::from(view_state.has_external_view()),
         center_clip_w: mercator_center_w + (globe_center_w - mercator_center_w) * transition,
         radius_meters,
         ..ShaderProjectionData::from_renderer_data(data)
