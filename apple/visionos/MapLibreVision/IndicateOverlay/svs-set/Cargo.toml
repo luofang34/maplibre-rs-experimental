@@ -1,0 +1,19 @@
+[package]
+name = "indicate-instrument-svs"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+indicate-alerts.workspace = true
+indicate-instrument-descriptor.workspace = true
+indicate-instrument-scene.workspace = true
+indicate-instrument-state.workspace = true
+indicate-instrument-symbology.workspace = true
+
+[dev-dependencies]
+indicate-instrument-conformance.workspace = true
+indicate-instrument-registry.workspace = true
