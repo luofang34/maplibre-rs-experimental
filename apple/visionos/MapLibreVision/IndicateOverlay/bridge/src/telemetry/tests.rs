@@ -89,7 +89,7 @@ fn c_abi_layout_keeps_the_scene_payload_after_its_length() {
 }
 
 #[test]
-fn compass_uses_supplied_heading_and_falls_back_to_qualified_track() {
+fn aircraft_heading_and_track_are_independent_of_the_view_bearing() {
     use indicate_instrument_scene::{Cmd, SceneCmds};
     let texts = |input| {
         let output = crate::indicate_svs_render(input);
@@ -107,9 +107,9 @@ fn compass_uses_supplied_heading_and_falls_back_to_qualified_track() {
         ..gps()
     });
     assert!(heading.iter().any(|text| text == "HDG T"));
-    assert!(heading.iter().any(|text| text == "090"));
-    assert!(!heading.iter().any(|text| text == "TRK T"));
+    assert!(heading.iter().any(|text| text == "90"));
+    assert!(heading.iter().any(|text| text == "TRK T"));
     let track = texts(gps());
     assert!(track.iter().any(|text| text == "TRK T"));
-    assert!(track.iter().any(|text| text == "057"));
+    assert!(track.iter().any(|text| text == "57"));
 }

@@ -4,8 +4,8 @@
 
 use indicate_instrument_descriptor::{DesignFrame, EMPTY_CONFIG};
 use indicate_instrument_glyphs::PANEL_GLYPHS;
+use indicate_instrument_hmd::{AngularScene, HMD_DESCRIPTOR, directions};
 use indicate_instrument_scene::SceneWriter;
-use indicate_instrument_svs::SVS_DESCRIPTOR;
 
 use crate::telemetry::{ReplayTelemetry, resolve_replay};
 
@@ -32,7 +32,7 @@ pub extern "C" fn indicate_svs_render(input: ReplayTelemetry) -> OverlayScene {
         width: 1200.0,
         height: 600.0,
     };
-    if (SVS_DESCRIPTOR.draw)(
+    if (HMD_DESCRIPTOR.draw)(
         &resolve_replay(input),
         &EMPTY_CONFIG,
         None,
@@ -61,4 +61,10 @@ pub extern "C" fn indicate_svs_glyph(scalar: u32) -> u64 {
         .fold(1_u64 << 63, |bits, (row, value)| {
             bits | (u64::from(*value) << (row * 8))
         })
+}
+
+/// Produces collimated true-world directions for either eye using the same resolved sample.
+#[unsafe(no_mangle)]
+pub extern "C" fn indicate_svs_directions(input: ReplayTelemetry) -> AngularScene {
+    directions(&resolve_replay(input))
 }

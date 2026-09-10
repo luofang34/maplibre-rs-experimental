@@ -1,0 +1,16 @@
+import simd
+
+enum FlightViewBasis {
+    /// Readouts follow the viewing direction, while their vertical axis stays aligned with gravity.
+    static func leveled(head: simd_float4x4, up: SIMD3<Float>) -> simd_float4x4 {
+        let forward = -SIMD3(head.columns.2.x, head.columns.2.y, head.columns.2.z)
+        var right = simd_cross(forward, up)
+        if simd_length_squared(right) < 0.0001 {
+            // At the zenith, use world north instead of allowing noisy roll to select an axis.
+            right = simd_cross(forward, abs(forward.y) < 0.9 ? [0, 1, 0] : [0, 0, 1])
+        }
+        right = simd_normalize(right)
+        let vertical = simd_normalize(simd_cross(right, forward))
+        return .init(columns: (SIMD4(right, 0), SIMD4(vertical, 0), SIMD4(-forward, 0), head.columns.3))
+    }
+}

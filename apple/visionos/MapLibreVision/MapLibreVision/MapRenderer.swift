@@ -517,7 +517,7 @@ final class MapRenderer {
             if terrainValid, !flightCamera.isBoarding {
                 flightSymbols?.draw(frame: replayFrame, placement: placement, head: head, drawable: drawable, command: commandBuffer)
             }
-            flightHUD?.draw(frame: replayFrame, head: head, terrainValid: terrainValid,
+            flightHUD?.draw(frame: replayFrame, head: head, placement: placement, terrainValid: terrainValid,
                 boarding: flightCamera.isBoarding, drawable: drawable, command: commandBuffer)
         }
         drawable.encodePresent(commandBuffer: commandBuffer)

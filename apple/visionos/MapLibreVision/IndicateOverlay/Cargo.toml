@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["svs-set", "bridge"]
+members = ["hmd-set", "bridge"]
 
 [workspace.package]
 edition = "2024"
@@ -32,3 +32,7 @@ too_many_lines = "deny"
 [profile.release]
 lto = true
 codegen-units = 1
+
+[workspace.metadata.indicate-hmd]
+repository = "https://github.com/luofang34/Indicate"
+revision = "500ed883022044a2ba4ed0c0dfbee0a221e70fee"

@@ -5,7 +5,7 @@ overlay_manifest="$project_dir/IndicateOverlay/Cargo.toml"
 python3 - "$project_dir/IndicateOverlay" <<'PY'
 from pathlib import Path
 import sys
-for directory in ('bridge/src', 'svs-set/src'):
+for directory in ('bridge/src', 'hmd-set/src'):
     for path in (Path(sys.argv[1]) / directory).rglob('*.rs'):
         lines = path.read_text().splitlines()
         assert path.name != 'mod.rs', path

@@ -11,7 +11,7 @@ crate-type = ["rlib", "staticlib"]
 workspace = true
 
 [dependencies]
-indicate-instrument-svs = { path = "../svs-set" }
+indicate-instrument-hmd = { path = "../hmd-set" }
 indicate-instrument-state.workspace = true
 indicate-instrument-scene.workspace = true
 indicate-instrument-descriptor.workspace = true

@@ -49,13 +49,13 @@ final class FlightHUDRenderer {
         pipeline = try device.makeRenderPipelineState(descriptor: descriptor)
         let state = MTLDepthStencilDescriptor()
         state.depthCompareFunction = .always
-        state.isDepthWriteEnabled = true
+        state.isDepthWriteEnabled = false
         guard let depth = device.makeDepthStencilState(descriptor: state) else { throw SetupError.resources }
         self.depth = depth
         slots = try (0..<3).map { _ in try FlightHUDSurface(device: device) }
     }
 
-    func draw(frame: FlightReplay.Frame, head: simd_float4x4, terrainValid: Bool, boarding: Bool,
+    func draw(frame: FlightReplay.Frame, head: simd_float4x4, placement: MapPlacement, terrainValid: Bool, boarding: Bool,
               drawable: LayerRenderer.Drawable, command: MTLCommandBuffer) {
         guard frame.view == .fpv || frame.returnSeconds != nil else { return }
         let now = ProcessInfo.processInfo.systemUptime
@@ -70,8 +70,10 @@ final class FlightHUDRenderer {
             lastElapsed = frame.elapsed
             lastCaption = caption
         }
+        let localUp = SIMD3<Float>(placement.current.rotation.act([0, 0, 1]))
+        let leveled = FlightViewBasis.leveled(head: head, up: localUp)
         for (index, view) in drawable.views.enumerated() {
-            let projection = drawable.computeProjection(viewIndex: index) * simd_inverse(head * view.transform) * head
+            let projection = drawable.computeProjection(viewIndex: index) * simd_inverse(head * view.transform) * leveled
             let corners: [(SIMD4<Float>, SIMD2<Float>)] = [
                 ([-1.2, 0.6, -2, 1], [0, 0]), ([-1.2, -0.6, -2, 1], [0, 1]), ([1.2, 0.6, -2, 1], [1, 0]),
                 ([1.2, 0.6, -2, 1], [1, 0]), ([-1.2, -0.6, -2, 1], [0, 1]), ([1.2, -0.6, -2, 1], [1, 1])]
@@ -97,27 +99,7 @@ final class FlightHUDRenderer {
 
     private func update(_ frame: FlightReplay.Frame, terrainValid: Bool, boarding: Bool) {
         let start = ProcessInfo.processInfo.systemUptime
-        var input = ReplayTelemetry()
-        if terrainValid, !boarding, let point = frame.observation {
-            input.present = 1 | (point.hasVelocity ? 32 : 0)
-            input.ground_speed = Float(point.groundSpeed)
-            input.track = Float(point.track * .pi / 180)
-            input.altitude_msl = Float(point.altitudeMSL)
-            if let vertical = frame.track?.verticalSpeed(at: frame.elapsed) {
-                input.present |= 2
-                input.vertical_speed = Float(vertical)
-            }
-            if let ias = point.indicatedAirspeed { input.present |= 4; input.ias = Float(ias) }
-            if point.hasAttitude {
-                input.present |= 8
-                input.roll = Float((point.roll ?? 0) * .pi / 180)
-                input.pitch = Float((point.pitch ?? 0) * .pi / 180)
-            }
-            if let heading = point.heading {
-                input.present |= 16
-                input.heading = Float(heading * .pi / 180)
-            }
-        }
+        let input = terrainValid && !boarding ? FlightTelemetry.resolve(frame) : ReplayTelemetry()
         var scene = indicate_svs_render(input)
         let length = scene.length <= 8192 ? Int(scene.length) : 0
         let bytes = withUnsafeBytes(of: &scene) { Array($0.dropFirst(4).prefix(length)) }

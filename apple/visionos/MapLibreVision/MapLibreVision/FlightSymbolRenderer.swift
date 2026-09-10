@@ -9,7 +9,7 @@ final class FlightSymbolRenderer {
     private var buffers: [[MTLBuffer]] = []
     private var vertices: [Vertex] = []
     private var slot = 0
-    private let capacity = 12_000
+    private let capacity = 1024 * 12
 
     init(device: MTLDevice) throws {
         enum SetupError: Error { case resource }
@@ -27,7 +27,7 @@ final class FlightSymbolRenderer {
         pipeline = try device.makeRenderPipelineState(descriptor: descriptor)
         let state = MTLDepthStencilDescriptor()
         state.depthCompareFunction = .always
-        state.isDepthWriteEnabled = true
+        state.isDepthWriteEnabled = false
         guard let depth = device.makeDepthStencilState(descriptor: state) else { throw SetupError.resource }
         self.depth = depth
         buffers = try (0..<3).map { _ in try (0..<2).map { _ in
@@ -39,9 +39,11 @@ final class FlightSymbolRenderer {
 
     func draw(frame: FlightReplay.Frame, placement: MapPlacement, head: simd_float4x4,
               drawable: LayerRenderer.Drawable, command: MTLCommandBuffer) {
-        guard frame.view == .fpv, let point = frame.observation else { return }
-        let geometry = FlightHUDGeometry(point: point, verticalSpeed: frame.track?.verticalSpeed(at: frame.elapsed))
-        let strokes = geometry.references() + geometry.marker(.prograde) + geometry.marker(.retrograde)
+        guard frame.view == .fpv, frame.observation != nil else { return }
+        var scene = indicate_svs_directions(FlightTelemetry.resolve(frame))
+        let strokes = withUnsafeBytes(of: &scene.strokes) {
+            Array($0.bindMemory(to: AngularStroke.self).prefix(min(Int(scene.length), 1024)))
+        }
         slot = (slot + 1) % buffers.count
         for (index, eye) in drawable.views.enumerated() where index < 2 {
             let projection = drawable.computeProjection(viewIndex: index)
@@ -74,11 +76,11 @@ final class FlightSymbolRenderer {
         }
     }
 
-    private func append(_ stroke: FlightHUDGeometry.Stroke, transform: simd_float4x4,
+    private func append(_ stroke: AngularStroke, transform: simd_float4x4,
                         size: SIMD2<Float>, width: Float, color: SIMD4<Float>) {
         // Directions have no translation or binocular parallax: these cues are collimated.
-        var a = transform * SIMD4<Float>(SIMD3<Float>(stroke.a), 0)
-        var b = transform * SIMD4<Float>(SIMD3<Float>(stroke.b), 0)
+        var a = transform * SIMD4<Float>(SIMD3<Float>(stroke.a.0, stroke.a.1, stroke.a.2), 0)
+        var b = transform * SIMD4<Float>(SIMD3<Float>(stroke.b.0, stroke.b.1, stroke.b.2), 0)
         guard a.w > 0.05, b.w > 0.05 else { return }
         a.z = 0; b.z = 0
         let delta = (SIMD2(b.x, b.y) / b.w - SIMD2(a.x, a.y) / a.w) * size

@@ -15,9 +15,9 @@ const FRAME: DesignFrame = DesignFrame {
 };
 
 /// A transparent instrument overlay, independent of the conventional PFD set.
-pub const SVS_DESCRIPTOR: PanelDescriptor = PanelDescriptor {
-    id: "svs-replay",
-    title: "SVS replay",
+pub const HMD_DESCRIPTOR: PanelDescriptor = PanelDescriptor {
+    id: "hmd-replay",
+    title: "Head-mounted replay",
     required_layers: (1 << LayerId::Tapes.to_u8()) | (1 << LayerId::Annunciation.to_u8()),
     required_groups: GroupSet::of(&[
         GroupId::Air,
@@ -42,9 +42,9 @@ pub const SVS_DESCRIPTOR: PanelDescriptor = PanelDescriptor {
 };
 
 /// The set a compositor places above its synthetic terrain imagery.
-pub const SVS_SET: PanelSet = PanelSet {
-    id: "svs-replay",
-    panels: &[SVS_DESCRIPTOR],
+pub const HMD_SET: PanelSet = PanelSet {
+    id: "hmd-replay",
+    panels: &[HMD_DESCRIPTOR],
 };
 
 fn draw(
@@ -197,53 +197,28 @@ fn readout(
 }
 
 fn compass(data: &PanelData, scene: &mut SceneWriter<'_>) -> Result<(), PanelDrawError> {
-    let has_heading = data.heading.value_rad.status.shows_value();
-    let (signal, group, prefix) = if has_heading {
-        (data.heading.value_rad, GroupId::Heading, "HDG")
-    } else {
-        (data.track_rad, GroupId::Kinematics, "TRK")
-    };
-    let color = if signal.status == SignalStatus::Valid {
-        HUD_GREEN
-    } else {
-        palette::AMBER
-    };
-    scene.fill_color(color)?;
+    let track = degrees(data.track_rad);
+    let heading = degrees(data.heading.value_rad);
+    readout(scene, "TRK T", track, GroupId::Kinematics, [355.0, 18.0])?;
     let reference = match data.heading.reference {
         indicate_instrument_state::HeadingReference::Magnetic => "M",
         indicate_instrument_state::HeadingReference::SimLocalTrue => "SIM",
         _ => "T",
     };
-    let label = fmt_label!(16, "{} {}", prefix, reference);
-    scene.text(600.0, 34.0, 13.0, Anchor::CENTER, label.as_str())?;
-    if !signal.status.shows_value() {
-        return Ok(());
-    }
-    let degrees = (signal.value.to_degrees() % 360.0 + 360.0) % 360.0;
-    scene.stroke(color, 1.2)?;
-    scene.line(600.0, 92.0, 595.0, 101.0)?;
-    scene.line(600.0, 92.0, 605.0, 101.0)?;
-    let base = libm::floorf(degrees / 5.0) as i32 * 5;
-    for offset in -5..=5 {
-        let value = base + offset * 5;
-        let x = 600.0 + (value as f32 - degrees) * 7.0;
-        let major = value % 10 == 0;
-        scene.line(x, 85.0, x, if major { 70.0 } else { 77.0 })?;
-        if major {
-            let text = fmt_label!(8, "{:02}", value.rem_euclid(360) / 10);
-            scene.text_attributed(group.to_u8(), x, 57.0, 15.0, Anchor::CENTER, text.as_str())?;
-        }
-    }
-    let text = fmt_label!(8, "{:03.0}", degrees);
-    scene.text_attributed(
-        group.to_u8(),
-        600.0,
-        123.0,
-        20.0,
-        Anchor::CENTER,
-        text.as_str(),
+    let label = fmt_label!(16, "HDG {}", reference);
+    readout(
+        scene,
+        label.as_str(),
+        heading,
+        GroupId::Heading,
+        [645.0, 18.0],
     )?;
     Ok(())
+}
+
+fn degrees(mut signal: Sig<f32>) -> Sig<f32> {
+    signal.value = (signal.value.to_degrees() % 360.0 + 360.0) % 360.0;
+    signal
 }
 
 #[cfg(test)]

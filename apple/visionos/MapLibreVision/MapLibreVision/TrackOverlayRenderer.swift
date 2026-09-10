@@ -63,7 +63,7 @@ final class TrackOverlayRenderer {
                 appendSegment(a, b, width: flown ? 2.4 : 1.4, size: size,
                               color: flown ? [1, 0.55, 0.1, 1] : [0.2, 0.6, 0.7, 1], vertices: &vertices)
             }
-            if let observation, !fpv { appendAircraft(observation, placement: placement, projection: projection, size: size, vertices: &vertices) }
+            if let observation, !fpv { appendAircraft(observation, placement: placement, projection: projection, size: size, focalY: drawable.computeProjection(viewIndex: index).columns.1.y, vertices: &vertices) }
             guard !vertices.isEmpty, vertices.count <= vertexLimit, index < buffers[slot].count else { continue }
             let buffer = buffers[slot][index]
             vertices.withUnsafeBytes { bytes in
@@ -100,24 +100,17 @@ final class TrackOverlayRenderer {
     }
 
     private func appendAircraft(_ observation: FlightTrack.Observation, placement: MapPlacement,
-                                projection: simd_float4x4, size: SIMD2<Float>, vertices: inout [Vertex]) {
+                                projection: simd_float4x4, size: SIMD2<Float>, focalY: Float, vertices: inout [Vertex]) {
         let origin = placement.roomPoint(for: observation.coordinate)
         let clip = projection * SIMD4<Float>(SIMD3<Float>(origin), 1)
         guard clip.w > 0.01, clip.z >= 0 else { return }
-        let heading = observation.track * .pi / 180
-        let ahead = MapAnchor(latitude: observation.latitude + cos(heading) * 0.001,
-            longitude: observation.longitude + sin(heading) * 0.001 / cos(observation.latitude * .pi / 180),
-            altitudeMeters: observation.altitudeMSL)
-        let nose = projection * SIMD4<Float>(SIMD3<Float>(placement.roomPoint(for: ahead)), 1)
-        let delta = nose.w > 0.01 ? (SIMD2(nose.x, nose.y) / nose.w - SIMD2(clip.x, clip.y) / clip.w) * size : .zero
-        let up = simd_length_squared(delta) > 0.0001 ? simd_normalize(delta) : SIMD2<Float>(0, 1)
-        let right = SIMD2(up.y, -up.x)
-        // A screen-sized locator remains readable; it does not pretend to be aircraft attitude.
-        let scale = SIMD2<Float>(18 / size.x, 18 / size.y) * clip.w
-        for offset in [SIMD2<Float>(0, 1.5), [-1, -1], [0, -0.5], [0, 1.5], [0, -0.5], [1, -1]] {
-            let rotated = right * offset.x + up * offset.y
-            vertices.append(Vertex(position: clip + SIMD4<Float>(rotated.x * scale.x, rotated.y * scale.y, 0, 0),
-                                   color: [1, 0.8, 0.2, 1]))
+        let metersPerPixel = Double(2 * clip.w / max(abs(focalY), 0.001) / size.y)
+        let points = FlightOwnshipGeometry.vertices(observation: observation, placement: placement,
+                                                    radius: metersPerPixel * 12)
+        for point in points {
+            let projected = projection * SIMD4<Float>(SIMD3<Float>(point), 1)
+            guard projected.w > 0.01 else { return }
+            vertices.append(Vertex(position: projected, color: [1, 0.8, 0.2, 1]))
         }
     }
 }

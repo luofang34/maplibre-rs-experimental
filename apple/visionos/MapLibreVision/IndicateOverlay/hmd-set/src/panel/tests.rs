@@ -1,5 +1,5 @@
 #![allow(clippy::expect_used, clippy::panic)]
-use super::{FRAME, SVS_DESCRIPTOR, SVS_SET};
+use super::{FRAME, HMD_DESCRIPTOR, HMD_SET};
 use indicate_instrument_conformance::admit;
 use indicate_instrument_descriptor::EMPTY_CONFIG;
 use indicate_instrument_registry::{PanelSet, Registry};
@@ -9,7 +9,7 @@ use std::vec::Vec;
 
 #[test]
 fn independent_overlay_passes_admission_without_background_or_overflow() {
-    static SETS: [&PanelSet; 1] = [&SVS_SET];
+    static SETS: [&PanelSet; 1] = [&HMD_SET];
     let registry = Registry::from_sets(&SETS).expect("independent set composes");
     let report = admit(&registry).expect("transparent readouts pass source withholding");
     assert!(report.warnings.is_empty(), "{:?}", report.warnings);
@@ -20,7 +20,7 @@ fn missing_air_data_draws_missing_not_a_numeral() {
     let data = resolve(&AircraftState::default(), &FreshnessPolicy::default());
     let mut storage = [0; 8192];
     let mut writer = SceneWriter::new(&mut storage).expect("scene buffer");
-    (SVS_DESCRIPTOR.draw)(&data, &EMPTY_CONFIG, None, FRAME, &mut writer)
+    (HMD_DESCRIPTOR.draw)(&data, &EMPTY_CONFIG, None, FRAME, &mut writer)
         .expect("missing-data scene");
     let size = writer.finish();
     let commands: Vec<_> = SceneCmds::new(&storage[..size])
