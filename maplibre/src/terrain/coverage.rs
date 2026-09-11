@@ -3,7 +3,7 @@
 //! Mirrors GL JS `TerrainCoverageIndex`: the index is rebuilt every frame from the tiles the
 //! terrain draws, so elevation queries, ray casts and tile culling all see the same surface.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use crate::{
     context::MapContext,
@@ -59,6 +59,7 @@ pub struct TerrainCoverageIndex {
     exaggeration: f64,
     minzoom: u8,
     maxzoom: u8,
+    edges: Arc<HashMap<WorldTileCoords, super::queue_system::edges::EdgeHeights>>,
 }
 
 impl TerrainCoverageIndex {
@@ -183,7 +184,10 @@ impl TerrainCoverageIndex {
             return TerrainSample {
                 covered: true,
                 dem_loaded: true,
-                elevation: dem.tile.elevation_at_tile_coords(x, y) * self.exaggeration,
+                elevation: self
+                    .stitched_height(coords, *dem_coords, [wrapped_x, mercator_y], &dem.tile)
+                    .unwrap_or_else(|| dem.tile.elevation_at_tile_coords(x, y))
+                    * self.exaggeration,
             };
         }
         TerrainSample::NOT_COVERED
@@ -291,3 +295,5 @@ pub fn coverage_system(
 
 #[cfg(test)]
 mod tests;
+
+mod surface;

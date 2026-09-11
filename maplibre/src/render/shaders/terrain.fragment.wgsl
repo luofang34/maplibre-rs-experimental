@@ -14,13 +14,15 @@ struct TerrainTileUniforms {
     fog_opacity: vec4<f32>,
     surface_color: vec4<f32>,
     fog_position: vec4<f32>,
+    edge_heights: array<vec4<f32>, 128>,
+    edge_last: vec4<f32>,
 };
 
 struct VertexOutput {
     @location(0) tex_coords: vec2<f32>,
     @location(1) horizon_distance: f32,
     @location(2) eye_depth: f32,
-    @location(3) surface_position: vec3<f32>,
+    @location(3) surface_normal: vec3<f32>,
     @location(4) camera_relative_position: vec3<f32>,
     @builtin(position) position: vec4<f32>,
 };
@@ -39,10 +41,7 @@ fn linear_to_gamma(color: vec4<f32>) -> vec4<f32> {
 
 @fragment
 fn main(in: VertexOutput) -> @location(0) vec4<f32> {
-    // Derivatives must be evaluated before divergent horizon clipping.
-    let gradient = cross(dpdx(in.surface_position), dpdy(in.surface_position));
-    let normal = gradient / max(length(gradient), 1e-6);
-    let up_normal = normal * select(-1.0, 1.0, normal.z >= 0.0);
+    let up_normal = normalize(in.surface_normal);
     let light = normalize(vec3<f32>(-0.5, 0.5, 1.0));
     let relief = 1.0 + terrain_tile.relief_strength * (dot(up_normal, light) - light.z);
     if in.horizon_distance < 0.0 {

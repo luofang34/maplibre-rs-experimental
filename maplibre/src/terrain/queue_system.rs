@@ -31,6 +31,7 @@ use crate::{
 };
 mod cohort;
 mod covering;
+pub(crate) mod edges;
 mod prefetch;
 mod targets;
 use targets::target_specs;
@@ -292,13 +293,17 @@ fn queue_tiles(
     dem: &DemSource,
     targets: (&[TargetSpec], &[Option<WorldTileCoords>]),
 ) -> SystemResult {
+    let mut edge_cache = std::mem::take(world.resources.get_or_init_mut::<edges::EdgeCache>());
     {
         let Some(Initialized(terrain)) = world.resources.get_mut::<Eventually<TerrainResources>>()
         else {
             return Err(SystemError::Dependencies);
         };
-        let uniforms::PreparedTerrain { uniforms, sources } =
-            uniforms::prepare_tiles(targets, style, view_state, terrain, dem);
+        let uniforms::PreparedTerrain {
+            mut uniforms,
+            sources,
+        } = uniforms::prepare_tiles(targets, style, view_state, terrain, dem);
+        edge_cache.apply(&sources, &mut uniforms, &world.tiles);
         let written = terrain.write_uniforms(queue, &uniforms);
         tracing::debug!(
             targets = targets.0.len(),
@@ -319,6 +324,12 @@ fn queue_tiles(
             })
             .collect();
         terrain.set_draws(draws);
+        if let Some(index) = world
+            .resources
+            .get_mut::<crate::terrain::TerrainCoverageIndex>()
+        {
+            index.set_surface_edges(&sources, std::sync::Arc::clone(&edge_cache.samples));
+        }
         let kept = sources
             .iter()
             .zip(uniforms)
@@ -327,6 +338,7 @@ fn queue_tiles(
             .collect();
         world.resources.insert(TerrainEyeFrame(kept));
     }
+    world.resources.insert(edge_cache);
 
     Ok(())
 }

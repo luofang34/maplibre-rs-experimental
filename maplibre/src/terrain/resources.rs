@@ -28,7 +28,7 @@ mod drapes;
 /// Edge length in pixels of one drape texture; twice the tile size, as GL JS `qualityFactor`.
 pub const DRAPE_SIZE: u32 = 1024;
 /// Byte stride between per-tile uniform blocks, the WebGPU dynamic offset alignment.
-pub const UNIFORM_STRIDE: u64 = 512;
+pub const UNIFORM_STRIDE: u64 = 2560;
 // A block that outgrows its stride would overwrite the next tile's; the stride is a
 // multiple of the 256-byte offset alignment every backend accepts.
 const _: () = assert!(std::mem::size_of::<TerrainTileUniforms>() as u64 <= UNIFORM_STRIDE);
@@ -70,6 +70,7 @@ pub struct TerrainTileUniforms {
     pub surface_color: [f32; 4],
     /// Tile origin relative to the eye in metres, and metres per tile coordinate.
     pub fog_position: [f32; 4],
+    pub(crate) edge_heights: super::queue_system::edges::EdgeHeights,
 }
 
 /// The fog of a frame, shared by every terrain tile, as GL JS `terrainUniformValues` takes it.
