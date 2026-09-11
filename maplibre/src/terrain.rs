@@ -23,7 +23,7 @@ pub mod coverage;
 pub mod dem;
 mod drape_cache;
 mod drape_pass;
-mod drape_targets;
+pub(crate) mod drape_targets;
 mod draw;
 pub mod elevation;
 pub mod interaction;
