@@ -2,14 +2,14 @@
   "callsign": "AUA10A",
   "registration": "OE-LWD",
   "aircraft": "Embraer E195",
-  "destination": "Innsbruck \u00b7 LOWI",
+  "destination": "Innsbruck · LOWI",
   "startUTC": 1788882935.31,
   "source": {
     "url": "https://globe.adsb.lol/globe_history/2026/09/08/traces/20/trace_full_440820.json",
     "license": "ODbL-1.0",
     "sha256": "23443df2ac3870bada866457528ceff95e1bbf77f04b0f263d0f67d071a3b310",
-    "altitudeConversion": "WGS84 GNSS feet \u2192 metres \u2192 EGM96 mean sea level; https://cdn.proj.org/us_nga_egm96_15.tif; grid SHA256 db493027562c9b004d7220fa881f5603adada4e1c5029b933fa7de4547b0e78d",
-    "coverage": "Recorded approach, 8 September 2026. Receiver coverage ends before the runway. No landing or aircraft attitude is synthesized."
+    "altitudeConversion": "WGS84 GNSS feet → metres → EGM96 mean sea level; https://cdn.proj.org/us_nga_egm96_15.tif; grid SHA256 db493027562c9b004d7220fa881f5603adada4e1c5029b933fa7de4547b0e78d",
+    "coverage": "Recorded approach, 8 September 2026. Geometry is consistent with RNP Z RWY 26 (AR), via RTT and WI002; the actual approach clearance is unconfirmed. Receiver coverage ends before the runway. No landing or aircraft attitude is synthesized."
   },
   "observations": [
     {

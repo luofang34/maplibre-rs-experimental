@@ -23,3 +23,6 @@ https://github.com/luofang34/IndicateAppleDisplay
 Liberty: user-provided FlightAware KML for N9758H, N51–N51, 2026-08-30.
 184 observed positions over 3,057 seconds; source rights remain with FlightAware and the data owner.
 Aircraft IAS, heading, and attitude are not supplied. Gaps over 20 seconds are unavailable.
+
+Innsbruck approach identification is inferred from the recorded geometry, not an ATC clearance.
+Procedure reference: https://eaip.austrocontrol.at/lo/260904/Charts/LOWI/LO_AD_2_LOWI_13-3-2_en.pdf

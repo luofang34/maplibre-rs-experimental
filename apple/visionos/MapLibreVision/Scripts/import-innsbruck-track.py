@@ -45,7 +45,8 @@ def main():
         source=dict(url=SOURCE, license="ODbL-1.0", sha256=hashlib.sha256(raw).hexdigest(),
             altitudeConversion="WGS84 GNSS feet → metres → EGM96 mean sea level; "
                 f"{GRID}; grid SHA256 {hashlib.sha256(args.geoid.read_bytes()).hexdigest()}",
-            coverage="Recorded approach, 8 September 2026. Receiver coverage ends before the runway. "
+            coverage="Recorded approach, 8 September 2026. Geometry is consistent with RNP Z RWY 26 (AR), "
+                "via RTT and WI002; the actual approach clearance is unconfirmed. Receiver coverage ends before the runway. "
                 "No landing or aircraft attitude is synthesized."), observations=observations)
     args.output.write_text(json.dumps(output, ensure_ascii=False, indent=2) + "\n")
     print(f"Imported {len(points)} positions spanning {observations[-1]['time']:.2f} seconds")
