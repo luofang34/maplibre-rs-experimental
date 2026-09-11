@@ -209,11 +209,13 @@ fn create(
             maplibre::terrain::DefaultDemTransferables,
         >::default()));
     }
+    let symbol_visibility = crate::symbols::visibility(&style);
     let map = {
         let _runtime = runtime.enter();
         let mut map = HeadlessMap::new(style, renderer, kernel, plugins)
             .map_err(|error| format!("map: {error:?}"))?;
         map.set_max_pitch(Deg(89.0));
+        map.set_symbol_visibility(symbol_visibility);
         map
     };
     tracing::info!(width, height, has_terrain, "map created");
