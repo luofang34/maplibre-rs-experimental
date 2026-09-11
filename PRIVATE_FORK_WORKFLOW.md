@@ -11,6 +11,11 @@ The current review topics are:
 
 | Branch | Scope |
 | --- | --- |
+| `fix/xr-bridge-projection` | Gaze-independent bridge widths, analytic globe tangents and terrain-tested casing/deck composition |
+| `fix/terrain-grazing-detail` | Screen-space refinement using the longest projected texel axis |
+| `feat/visionos-terrain-basemap` | Natural terrain palette, distinct OSM land cover and adjoining road/bridge consistency |
+| `refactor/visionos-map-first` | Globe/immersive entry with optional replay and lazy overlay resources |
+| `feat/visionos-hwd-speed-altitude` | Vendored Indicate speed/altitude scales, qualified trend and integrated off-axis attitude |
 | `fix/xr-cartographic-scale` | Gaze-independent style zoom and symbol distance scaling with GPU head-pitch regression |
 | `refactor/visionos-map-window` | Remove native desk Volume and PDF viewer; use the map control window as the app entry |
 | `fix/visionos-track-antialiasing` | Near-plane clipping and analytic capsule strokes without per-segment allocations or MSAA targets |
@@ -168,3 +173,47 @@ vendored set is committed locally in Indicate at `6bbb1708`, without a public pu
 - Design references: [NASA 2017 HWD study](https://ntrs.nasa.gov/citations/20170004757),
   [FAA 2025 HWD review](https://www.faa.gov/data_research/research/med_humanfacs/oamtechreports/media/202507.pdf),
   and FAA AC 20-185A sections 4.1.2.3–4.1.2.5. This is replay symbology, not a certification claim.
+
+## Map basemap and instrument validation — 2026-09-10
+
+These topics start at integrated `4b994aaa`. MapLibre owns projection, road depth
+composition and terrain refinement. The Apple demo owns its basemap style and
+optional flight lifecycle. Indicate owns the instrument symbology; identical
+vendored source pins its local commit `47af6655` without a public Indicate push.
+
+- MapLibre library with `headless thread-safe-futures`: 499 passed, one ignored.
+  GPU cases cover elevated bridges and buried tunnels, casing/deck composition,
+  detailed Innsbruck coordinates across head pitches/rolls, and perspective width.
+  Metadata tests hold bridge style scale constant while gaze zoom changes.
+- Swift: 100 tests passed in debug and release. The added cases cover optional
+  replay shutdown, retained track context, basemap palette continuity and
+  dark HWD halos with transparent surrounding pixels.
+- Indicate and the app overlay pass fmt, strict clippy, all-target tests,
+  missing-docs/broken-link documentation and release builds. New instrument tests
+  reject unavailable trends and verify attitude direction and finite geometry.
+- Native device/simulator release and Xcode device/simulator builds passed.
+  Signing and document/Share registration checks passed. The final app installed
+  on Vision Pro; automatic launch timed out. Simulator inspection covers the
+  map-first controls, immersive terrain palette and optional flight instruments.
+- All full MapLibre workspace gates were run. Formatting passes. Strict clippy
+  stops at the existing build-tool `manual_ok_err`; documentation stops at missing
+  build-tool docs. Host all-target tests/release include incompatible Android/Web
+  targets and existing API mismatches. These are not reported as passing gates.
+- HWD raster CPU p95 measured 2.08–2.29 ms across 200-sample batches in the
+  simulator, including contrast halos. Raster updates are capped at 20 Hz; both
+  eyes reuse the result. No additional render target or per-eye text raster is used.
+- Refinement retains the existing texture, tile and movement-prefetch budgets.
+  Disabling replay releases its GPU overlays. This round does not establish a
+  new long-duration physical-device memory or gesture stress result.
+- Bridges use inferred elevations when source deck heights are absent. The
+  terrain basemap uses OpenFreeMap vectors and Terrarium elevation, with building
+  footprints; it does not contain surveyed bridge meshes or photogrammetric cities.
+- [Cesium screen-space error and preload controls](https://cesium.com/learn/cesiumjs/ref-doc/Globe.html)
+  inform bounded refinement. [Apple's detailed MapKit design](https://developer.apple.com/videos/play/wwdc2022/10035/)
+  informs road/terrain hierarchy. [Google's 3D Tiles model](https://developers.google.com/maps/documentation/tile/3d-tiles)
+  remains a separate data/rendering capability, not an implied property of vector styling.
+- The supplied live-flight helmet-display study informs integrated off-axis
+  readouts. The [FAA 2025 review](https://www.faa.gov/data_research/research/med_humanfacs/oamtechreports/media/202507.pdf)
+  and [FAA 2026 guidance research](https://www.faa.gov/data_research/research/med_humanfacs/oamtechreports/media/202601.pdf)
+  inform decluttering and explicit data references. Their findings do not establish
+  a universally preferred tape layout or constitute certification of this replay display.
