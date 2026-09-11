@@ -123,9 +123,9 @@ impl LodContext {
         let distance_2d = distance_to_tile_2d(self.camera, tile);
         let desired = if let Some(focal) = self.eye_focal_pixels {
             let distance = distance_2d.hypot(self.distance_z).max(f64::EPSILON);
-            // Projected texel size falls with distance and with grazing incidence.
+            // Bound the longest projected texel axis. A grazing-angle area estimate
+            // would erase cross-slope detail on terrain and blur roads toward the horizon.
             (focal / (crate::coords::TILE_SIZE * distance)).log2()
-                + 0.5 * (self.distance_z / distance).log2()
         } else {
             calculate_tile_zoom(
                 self.requested_zoom,

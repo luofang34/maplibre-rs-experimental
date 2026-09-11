@@ -276,3 +276,22 @@ fn an_external_eyes_lod_follows_its_own_height_rather_than_its_derived_pitch() {
         "the ground 1500 km ahead of an eye 1000 km up at zoom {zoom} is scored at level {ahead_zoom}"
     );
 }
+
+#[test]
+fn grazing_terrain_retains_cross_slope_texel_detail() {
+    let height = 0.00001;
+    let focal = 1600.0;
+    let context = LodContext::from_eye(Point2::new(0.5, 0.5), height, focal);
+    let tile = TileCoords {
+        x: 8192,
+        y: 8200,
+        z: ZoomLevel::new(14),
+    };
+    let distance = (8.0_f64 / 16384.0).hypot(height);
+    let zoom = context.zoom_for_tile(tile, ZoomRounding::Floor);
+    let texel_pixels = focal / (TILE_SIZE * 2_f64.powi(i32::from(u8::from(zoom))) * distance);
+    assert!(
+        texel_pixels < 2.0,
+        "cross-slope texel spans {texel_pixels} pixels at {zoom:?}"
+    );
+}
