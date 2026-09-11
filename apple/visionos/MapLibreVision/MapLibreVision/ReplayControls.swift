@@ -5,7 +5,6 @@ struct ReplayControls: View {
     @State private var resumeAfterScrub = false
     @State private var showSource = false
     @State private var importing = false
-    @State private var showReference = false
     @State private var showLibrary = false
     @State private var importFromLibrary = false
 
@@ -67,7 +66,6 @@ struct ReplayControls: View {
                 HStack {
                     Button("Import track", systemImage: "square.and.arrow.down") { importing = true }
                     Spacer()
-                    Button("SVS reference") { showReference = true }
                 }.font(.caption).buttonStyle(.plain)
             }
         }
@@ -83,7 +81,6 @@ struct ReplayControls: View {
             }
         }
         .popover(isPresented: $showSource) { source }
-        .sheet(isPresented: $showReference) { SVSReferenceView() }
     }
 
     private var source: some View {
@@ -99,7 +96,6 @@ struct ReplayControls: View {
             }
             Text("IAS, heading and attitude are shown only when provided. GPS track is not aircraft heading.")
             Text("Terrain replay · SIM / NOT FOR FLIGHT").font(.caption).foregroundStyle(.orange)
-            Text("Globe: Natural Earth, public domain · rendered by MapLibre").font(.caption)
         }.padding(24).frame(width: 400)
     }
 

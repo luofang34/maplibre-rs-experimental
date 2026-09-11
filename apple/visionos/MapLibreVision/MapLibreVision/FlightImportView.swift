@@ -45,7 +45,6 @@ struct FlightImportPresentation: ViewModifier {
     @EnvironmentObject private var session: GlobeSession
     @Environment(\.openWindow) private var openWindow
     @Environment(\.scenePhase) private var phase
-    let immersiveControls: Bool
 
     func body(content: Content) -> some View {
         content
@@ -64,7 +63,7 @@ struct FlightImportPresentation: ViewModifier {
                 return true
             }
             .sheet(item: Binding(get: {
-                session.immersed == immersiveControls ? session.preview : nil
+                session.preview
             }, set: { if $0 == nil { session.cancelImport() } }), onDismiss: {
                 Task { await session.receiveInbox() }
             }) { preview in

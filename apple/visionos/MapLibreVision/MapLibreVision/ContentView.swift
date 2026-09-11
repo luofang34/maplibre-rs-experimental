@@ -5,8 +5,7 @@ struct ContentView: View {
     @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
     @ObservedObject private var modeStore = MapModeStore.shared
     @EnvironmentObject private var session: GlobeSession
-    @Environment(\.dismissWindow) private var dismissWindow
-    @Environment(\.openWindow) private var openWindow
+    @Environment(\.scenePhase) private var scenePhase
     @State private var isOpening = false
     @State private var status = ""
 
@@ -15,8 +14,7 @@ struct ContentView: View {
             HStack {
                 Text("Map controls").font(.headline)
                 Spacer()
-                Button("Ownship", systemImage: "airplane") { session.replay.setView(.fpv) }.disabled(session.replay.track == nil)
-                Button("Desk", systemImage: "globe") { Task { await toggleMap() } }
+                Button("Fly track", systemImage: "airplane") { Task { await enterMap(follow: true) } }.disabled(session.replay.track == nil)
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
@@ -66,7 +64,7 @@ struct ContentView: View {
             HStack {
                 Button(modeStore.isGlobe ? "North up" : "Level map") { modeStore.resetLevel() }
                 Spacer()
-                Button(session.immersed ? "Return to desk" : "Enter the map") {
+                Button(session.immersed ? "Leave map" : "Explore map") {
                     Task { await toggleMap() }
                 }
                 .buttonStyle(.borderedProminent)
@@ -76,12 +74,20 @@ struct ContentView: View {
         .padding(20)
         .frame(minWidth: 360, idealWidth: 420, maxWidth: 520,
                minHeight: 360, idealHeight: 620, maxHeight: 800)
-        .modifier(FlightImportPresentation(immersiveControls: true))
+        .modifier(FlightImportPresentation())
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { session.save() }
+        }
         .task {
-            if !session.immersed {
-                openWindow(id: GlobeSession.homeID, value: GlobeSession.homeID)
-                dismissWindow()
+            await session.loadLibrary()
+            guard !session.didRunLaunchActions else { return }
+            session.didRunLaunchActions = true
+            let launch = ProcessInfo.processInfo.arguments
+            if let index = launch.firstIndex(of: "--import-track"), index + 1 < launch.count {
+                await session.receive(URL(fileURLWithPath: launch[index + 1]))
             }
+            if launch.contains("--replay") { await enterMap(follow: true) }
+            else if launch.contains("--mode") { await enterMap(follow: false) }
             // `--switch-after N` flips the mode N seconds later, so a scripted run can show
             // the move between the two placements without a hand on the picker.
             let arguments = ProcessInfo.processInfo.arguments
@@ -95,25 +101,28 @@ struct ContentView: View {
     }
 
     private func toggleMap() async {
-        isOpening = true
-        defer { isOpening = false }
-        status = ""
         if session.immersed {
-            openWindow(id: GlobeSession.homeID, value: GlobeSession.homeID)
             await dismissImmersiveSpace()
             session.immersed = false
             session.replay.pause()
             session.save()
-            dismissWindow()
-        } else {
+        } else { await enterMap(follow: false) }
+    }
+
+    private func enterMap(follow: Bool) async {
+        guard !isOpening else { return }
+        isOpening = true
+        defer { isOpening = false }
+        session.replay.follow(follow)
+        if !session.immersed {
             let result = await openImmersiveSpace(id: MapRenderer.spaceID)
-            maplibre_visionos_note("immersive space open result: \(result)")
             switch result {
             case .opened: session.immersed = true
-            case .userCancelled: break
+            case .userCancelled: session.replay.follow(false)
             case .error: status = "The map could not open. Please try again."
             @unknown default: status = "The map could not open. Please try again."
             }
         }
+        if session.immersed && follow && !session.replay.frame().playing { session.replay.toggle() }
     }
 }

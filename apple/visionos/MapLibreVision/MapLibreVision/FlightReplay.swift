@@ -4,7 +4,7 @@ enum FlightView: String, CaseIterable {
     case fpv = "FPV", chase = "Chase", free = "Free"
 }
 
-/// Both eyes and the desk globe consume the same immutable recording and clock snapshot.
+/// Both eyes consume the same immutable recording and clock snapshot.
 final class FlightReplay: @unchecked Sendable {
     struct Frame {
         let track: FlightTrack?
@@ -34,7 +34,7 @@ final class FlightReplay: @unchecked Sendable {
     var track: FlightTrack? { lock.withLock { recording } }
     var loadingError: String? { lock.withLock { failure } }
 
-    init(bundle: Bundle = .main, restored: DeskGlobeState = .init()) {
+    init(bundle: Bundle = .main, restored: ReplayPreferences = .init()) {
         do {
             guard let url = bundle.url(forResource: "innsbruck-approach", withExtension: "json") else {
                 throw CocoaError(.fileNoSuchFile)

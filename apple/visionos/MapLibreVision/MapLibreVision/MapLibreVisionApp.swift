@@ -21,41 +21,24 @@ struct MapLibreVisionApp: App {
     @ObservedObject private var modeStore = MapModeStore.shared
 
     @Environment(\.openWindow) private var openWindow
-    @Environment(\.dismissWindow) private var dismissWindow
     @StateObject private var session = GlobeSession()
 
     var body: some Scene {
-        WindowGroup(id: GlobeSession.homeID, for: String.self) { _ in
-            DeskGlobeView().environmentObject(session)
-        } defaultValue: { GlobeSession.homeID }
-        .handlesExternalEvents(matching: ["*"])
-        .windowStyle(.volumetric)
-        .defaultSize(width: 0.55, height: 0.65, depth: 0.60, in: .meters)
-        .defaultLaunchBehavior(.presented)
-
         WindowGroup(id: GlobeSession.controlsID, for: String.self) { _ in
             ContentView().environmentObject(session)
         } defaultValue: { GlobeSession.controlsID }
+        .handlesExternalEvents(matching: ["*"])
         .defaultSize(width: 440, height: 620)
         .windowResizability(.contentSize)
-        .defaultLaunchBehavior(.suppressed)
-        .restorationBehavior(.disabled)
-        .defaultWindowPlacement { _, context in
-            if let home = context.windows.first(where: { $0.id == GlobeSession.homeID }) {
-                return WindowPlacement(.trailing(home))
-            }
-            return WindowPlacement(.utilityPanel)
-        }
+        .defaultLaunchBehavior(.presented)
 
         ImmersiveSpace(id: MapRenderer.spaceID) {
             ImmersiveMapView(session: session)
             .onAppear {
                 session.immersed = true
-                dismissWindow(id: GlobeSession.homeID)
             }
             .onDisappear {
-                openWindow(id: GlobeSession.homeID, value: GlobeSession.homeID)
-                dismissWindow(id: GlobeSession.controlsID)
+                openWindow(id: GlobeSession.controlsID, value: GlobeSession.controlsID)
                 session.immersed = false
                 session.replay.pause()
                 session.save()

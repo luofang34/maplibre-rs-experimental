@@ -29,7 +29,7 @@ targets:
         CFBundleDisplayName: MapLibre Vision
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: true
-          UIApplicationPreferredDefaultSceneSessionRole: UIWindowSceneSessionRoleVolumetricApplication
+          UIApplicationPreferredDefaultSceneSessionRole: UIWindowSceneSessionRoleApplication
         LSSupportsOpeningDocumentsInPlace: true
         CFBundleDocumentTypes:
           - CFBundleTypeName: Flight recording
@@ -81,7 +81,6 @@ targets:
         embed: true
       - sdk: IOSurface.framework
       - package: IndicateAppleDisplay
-      - sdk: PDFKit.framework
       - sdk: Metal.framework
       - sdk: CompositorServices.framework
       - sdk: RealityKit.framework

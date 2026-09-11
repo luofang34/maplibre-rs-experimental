@@ -1,14 +1,12 @@
 import SwiftUI
-import simd
 #if canImport(FlightExchange)
 import FlightExchange
 #endif
 
 @MainActor
 final class GlobeSession: ObservableObject {
-    static let homeID = "desk-globe"
     static let controlsID = "map-controls"
-    private static let storageKey = "desk-globe-state"
+    private static let storageKey = "flight-replay-state"
 
     struct ImportPreview: Identifiable {
         let id = UUID()
@@ -32,15 +30,15 @@ final class GlobeSession: ObservableObject {
     @Published var immersed = false
     @Published var opening = false
     @Published var status = ""
-    var desk: DeskGlobeState
+    var preferences: ReplayPreferences
     let replay: FlightReplay
 
     init(library: FlightLibrary = FlightLibrary(), defaults: UserDefaults = .standard) {
         self.library = library
         self.defaults = defaults
         let restored = defaults.data(forKey: Self.storageKey)
-            .flatMap { try? JSONDecoder().decode(DeskGlobeState.self, from: $0) } ?? .init()
-        desk = restored
+            .flatMap { try? JSONDecoder().decode(ReplayPreferences.self, from: $0) } ?? .init()
+        preferences = restored
         replay = FlightReplay(restored: restored)
     }
 
@@ -51,7 +49,7 @@ final class GlobeSession: ObservableObject {
             tracks = try await library.entries()
             let id = defaults.string(forKey: "selected-flight") ?? "innsbruck-approach"
             if let entry = tracks.first(where: { $0.id == id }) ?? tracks.first {
-                let time = desk.playbackTime, rate = desk.playbackRate
+                let time = preferences.playbackTime, rate = preferences.playbackRate
                 await select(entry)
                 replay.seek(time)
                 replay.setRate(rate)
@@ -153,14 +151,10 @@ final class GlobeSession: ObservableObject {
     func save() {
         let frame = replay.frame()
         defaults.set(selectedTrackID, forKey: "selected-flight")
-        desk.playbackTime = frame.elapsed
-        desk.playbackRate = frame.rate
-        do { defaults.set(try JSONEncoder().encode(desk), forKey: Self.storageKey) }
-        catch { status = "Could not save the globe state: \(error.localizedDescription)" }
+        preferences.playbackTime = frame.elapsed
+        preferences.playbackRate = frame.rate
+        do { defaults.set(try JSONEncoder().encode(preferences), forKey: Self.storageKey) }
+        catch { status = "Could not save the playback state: \(error.localizedDescription)" }
     }
 
-    func record(rotation: simd_quatf, radius: Float) {
-        desk.record(rotation: rotation, radius: radius)
-        save()
-    }
 }
