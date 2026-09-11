@@ -11,6 +11,11 @@ The current review topics are:
 
 | Branch | Scope |
 | --- | --- |
+| `fix/xr-cartographic-scale` | Gaze-independent style zoom and symbol distance scaling with GPU head-pitch regression |
+| `refactor/visionos-map-window` | Remove native desk Volume and PDF viewer; use the map control window as the app entry |
+| `fix/visionos-track-antialiasing` | Near-plane clipping and analytic capsule strokes without per-segment allocations or MSAA targets |
+| `feat/visionos-hwd-reference-frames` | Collimated aircraft-referenced panel, qualified track fallback, compact off-axis panel and waterline |
+| `docs/innsbruck-approach-identification` | Evidence-qualified RNP Z RWY 26 inference and reproducible original observations |
 | `fix/xr-world-aligned-labels` | Gravity-aligned labels, stable terrain-anchor occlusion and GPU head-roll regression |
 | `fix/terrain-bridge-depth` | Shared casing/deck tangent projection, transparent-depth rejection and bridge GPU regression |
 | `fix/visionos-window-flight-library` | Desk/immersive scene lifecycle and independent row deletion with replay preservation |
@@ -134,3 +139,32 @@ is included here, without publishing to the public Indicate remote.
   visionOS checks.
 - FAA AC 20-185A sections 4.1.2.3–4.1.2.5 inform world alignment and truthful
   trajectory/data indications. This implementation is not a certification claim.
+
+## Head-pitch scale and virtual HWD validation — 2026-09-10
+
+These five topics start at integrated `acb4b978`. Style scale belongs to MapLibre;
+window lifecycle and pixel stroke rendering belong to the Apple host. Indicate
+owns the virtual-panel reference and compact instrument layout. Its identical
+vendored set is committed locally in Indicate at `6bbb1708`, without a public push.
+
+- MapLibre library with headless GPU tests: 491 passed, one ignored. Camera
+  round trips retain their geometry; physical eye rotation leaves style scale and
+  label pixel width unchanged, while translation still changes scale.
+- Swift: 97 tests passed in debug and release, including near-plane stroke
+  clipping, constant pixel width, collimated panel geometry and glance hysteresis.
+- Indicate full workspace and the 15-test app overlay passed all CI gates: fmt,
+  strict clippy, tests, missing-docs/broken-link documentation and release build.
+- Native device/simulator release builds and Xcode device/simulator builds passed.
+  Simulator replay was inspected. Document/Share registration and code signing
+  passed. The final app installed on Vision Pro; automatic launch timed out.
+  Physical head-motion and long-duration memory testing remain unverified.
+- The app bundle contains neither the desk atlas nor the FAA reference PDF.
+  Strokes use reused vertex buffers and analytic coverage, with no MSAA targets.
+- All full MapLibre workspace gates were attempted: fmt passes; existing
+  build-tool lint/docs and host-incompatible platform targets still fail.
+- The Innsbruck importer reproduces all 55 provider observations. The recorded
+  RTT/WI002 geometry matches RNP Z RWY 26, but the clearance is unconfirmed.
+  Public traces checked did not establish touchdown coverage; no landing is added.
+- Design references: [NASA 2017 HWD study](https://ntrs.nasa.gov/citations/20170004757),
+  [FAA 2025 HWD review](https://www.faa.gov/data_research/research/med_humanfacs/oamtechreports/media/202507.pdf),
+  and FAA AC 20-185A sections 4.1.2.3–4.1.2.5. This is replay symbology, not a certification claim.
