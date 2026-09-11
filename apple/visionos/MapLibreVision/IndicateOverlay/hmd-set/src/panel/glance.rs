@@ -23,7 +23,7 @@ fn draw(
     } else {
         (data.gs_kt, "GS KT", GroupId::Kinematics)
     };
-    readout(scene, label, speed, group, [230.0, 410.0])?;
+    readout(scene, label, speed, group, [270.0, 350.0])?;
     let altitude = fmt_label!(16, "{} FT", data.altitude.class.label());
     readout(
         scene,
@@ -34,15 +34,16 @@ fn draw(
         } else {
             GroupId::Air
         },
-        [500.0, 410.0],
+        [730.0, 350.0],
     )?;
     readout(
         scene,
         "VS FPM",
         data.vsi_fpm,
         GroupId::Kinematics,
-        [770.0, 410.0],
+        [500.0, 430.0],
     )?;
+    super::attitude::draw(data, scene)?;
     scene.end_layer(LayerId::Tapes)?;
     annunciations(data, scene)
 }

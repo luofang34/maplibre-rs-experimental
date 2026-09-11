@@ -5,7 +5,9 @@ use indicate_instrument_descriptor::{
 };
 use indicate_instrument_scene::{Anchor, LayerId, PaintMode, Rgba8, SceneWriter};
 
+mod attitude;
 mod glance;
+mod scale;
 pub use glance::HMD_GLANCE_DESCRIPTOR;
 
 const HUD_GREEN: Rgba8 = Rgba8::rgba(90, 255, 130, 255);
@@ -65,7 +67,7 @@ fn draw(
         "GS KT",
         data.gs_kt,
         GroupId::Kinematics,
-        [72.0, 365.0],
+        [72.0, 420.0],
     )?;
     let altitude_label = fmt_label!(
         16,
@@ -92,8 +94,9 @@ fn draw(
         "VS FPM",
         data.vsi_fpm,
         GroupId::Kinematics,
-        [928.0, 140.0],
+        [928.0, 420.0],
     )?;
+    scale::draw(data, scene)?;
     compass(data, scene)?;
     scene.end_layer(LayerId::Tapes)?;
     annunciations(data, scene)

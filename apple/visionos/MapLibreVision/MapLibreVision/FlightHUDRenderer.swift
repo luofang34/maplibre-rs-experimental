@@ -121,6 +121,7 @@ final class FlightHUDRenderer {
         context.saveGState()
         context.translateBy(x: 0, y: 600)
         context.scaleBy(x: 1, y: -1)
+        FlightHUDContrast.apply(to: context)
         do {
             if frame.view == .fpv {
                 let report = try renderer.render(bytes, into: context)
