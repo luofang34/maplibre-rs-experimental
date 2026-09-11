@@ -2,9 +2,11 @@
 // neither export dereferences a caller pointer or keeps shared mutable state.
 #![allow(unsafe_code)]
 
-use indicate_instrument_descriptor::{DesignFrame, EMPTY_CONFIG};
+use indicate_instrument_descriptor::{DesignFrame, EMPTY_CONFIG, PanelDescriptor};
 use indicate_instrument_glyphs::PANEL_GLYPHS;
-use indicate_instrument_hmd::{AngularScene, HMD_DESCRIPTOR, directions};
+use indicate_instrument_hmd::{
+    AngularScene, HMD_DESCRIPTOR, HMD_GLANCE_DESCRIPTOR, ViewReference, directions, view_reference,
+};
 use indicate_instrument_scene::SceneWriter;
 
 use crate::telemetry::{ReplayTelemetry, resolve_replay};
@@ -21,6 +23,16 @@ pub struct OverlayScene {
 /// Emits one independent SVS overlay from a resolved replay sample.
 #[unsafe(no_mangle)]
 pub extern "C" fn indicate_svs_render(input: ReplayTelemetry) -> OverlayScene {
+    render(input, HMD_DESCRIPTOR)
+}
+
+/// Produces a compact panel for looking away from the aircraft axis.
+#[unsafe(no_mangle)]
+pub extern "C" fn indicate_svs_glance(input: ReplayTelemetry) -> OverlayScene {
+    render(input, HMD_GLANCE_DESCRIPTOR)
+}
+
+fn render(input: ReplayTelemetry, descriptor: PanelDescriptor) -> OverlayScene {
     let mut output = OverlayScene {
         length: 0,
         bytes: [0; 8192],
@@ -32,7 +44,7 @@ pub extern "C" fn indicate_svs_render(input: ReplayTelemetry) -> OverlayScene {
         width: 1200.0,
         height: 600.0,
     };
-    if (HMD_DESCRIPTOR.draw)(
+    if (descriptor.draw)(
         &resolve_replay(input),
         &EMPTY_CONFIG,
         None,
@@ -67,4 +79,10 @@ pub extern "C" fn indicate_svs_glyph(scalar: u32) -> u64 {
 #[unsafe(no_mangle)]
 pub extern "C" fn indicate_svs_directions(input: ReplayTelemetry) -> AngularScene {
     directions(&resolve_replay(input))
+}
+
+/// Resolves the instrument frame in true local coordinates, with an explicit fallback class.
+#[unsafe(no_mangle)]
+pub extern "C" fn indicate_svs_reference(input: ReplayTelemetry) -> ViewReference {
+    view_reference(&resolve_replay(input))
 }

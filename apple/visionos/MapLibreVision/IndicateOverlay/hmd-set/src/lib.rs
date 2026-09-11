@@ -6,5 +6,5 @@ extern crate std;
 
 mod angular;
 mod panel;
-pub use angular::{AngularScene, AngularStroke, directions};
-pub use panel::{HMD_DESCRIPTOR, HMD_SET};
+pub use angular::{AngularScene, AngularStroke, ViewReference, directions, view_reference};
+pub use panel::{HMD_DESCRIPTOR, HMD_GLANCE_DESCRIPTOR, HMD_SET};

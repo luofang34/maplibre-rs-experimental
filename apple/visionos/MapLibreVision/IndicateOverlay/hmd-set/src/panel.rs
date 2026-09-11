@@ -5,6 +5,9 @@ use indicate_instrument_descriptor::{
 };
 use indicate_instrument_scene::{Anchor, LayerId, PaintMode, Rgba8, SceneWriter};
 
+mod glance;
+pub use glance::HMD_GLANCE_DESCRIPTOR;
+
 const HUD_GREEN: Rgba8 = Rgba8::rgba(90, 255, 130, 255);
 use indicate_instrument_state::{GroupId, PanelData, Sig, SignalStatus};
 use indicate_instrument_symbology::{fmt_label, palette, safety};
@@ -44,7 +47,7 @@ pub const HMD_DESCRIPTOR: PanelDescriptor = PanelDescriptor {
 /// The set a compositor places above its synthetic terrain imagery.
 pub const HMD_SET: PanelSet = PanelSet {
     id: "hmd-replay",
-    panels: &[HMD_DESCRIPTOR],
+    panels: &[HMD_DESCRIPTOR, HMD_GLANCE_DESCRIPTOR],
 };
 
 fn draw(

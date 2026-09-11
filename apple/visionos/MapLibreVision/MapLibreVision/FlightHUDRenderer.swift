@@ -28,6 +28,7 @@ final class FlightHUDRenderer {
     private var lastValid = false
     private var lastElapsed = -1.0
     private var lastCaption = ""
+    private var glancing = false
     private(set) var renderMilliseconds = 0.0
     private var timings: [Double] = []
     private let logger = Logger(subsystem: "com.sokolysystems.maplibre.vision", category: "FlightHUD")
@@ -58,11 +59,19 @@ final class FlightHUDRenderer {
     func draw(frame: FlightReplay.Frame, head: simd_float4x4, placement: MapPlacement, terrainValid: Bool, boarding: Bool,
               drawable: LayerRenderer.Drawable, command: MTLCommandBuffer) {
         guard frame.view == .fpv || frame.returnSeconds != nil else { return }
+        let reference = indicate_svs_reference(FlightTelemetry.resolve(frame))
+        func vector(_ v: (Float, Float, Float)) -> SIMD3<Float> { [v.0, v.1, v.2] }
+        let instrument = FlightViewBasis.instrument(rotation: placement.current.rotation,
+            right: vector(reference.right), up: vector(reference.up), forward: vector(reference.forward))
+        let nextGlance = reference.kind == 0 || boarding || frame.view != .fpv
+            || FlightViewBasis.useGlance(wasGlancing: glancing, head: head, instrument: instrument)
+        let layoutChanged = glancing != nextGlance
+        glancing = nextGlance
         let now = ProcessInfo.processInfo.systemUptime
         let caption = "\(frame.playing)-\(boarding)-\(frame.returnSeconds ?? -1)"
-        if (now >= nextUpdate && (lastElapsed != frame.elapsed || lastCaption != caption)) || revision != frame.cameraRevision || lastValid != terrainValid {
-            // Readouts derive from the terrain update's snapshot. The texture moves with the
-            // display each frame; text raster work is bounded independently of refresh rate.
+        if layoutChanged || (now >= nextUpdate && (lastElapsed != frame.elapsed || lastCaption != caption)) || revision != frame.cameraRevision || lastValid != terrainValid {
+            // Both eyes use one telemetry snapshot. Collimated geometry updates every frame;
+            // text raster work is bounded independently of head tracking.
             update(frame, terrainValid: terrainValid, boarding: boarding)
             nextUpdate = now + 1.0 / 20
             revision = frame.cameraRevision
@@ -71,12 +80,12 @@ final class FlightHUDRenderer {
             lastCaption = caption
         }
         let localUp = SIMD3<Float>(placement.current.rotation.act([0, 0, 1]))
-        let leveled = FlightViewBasis.leveled(head: head, up: localUp)
+        let panel = glancing ? FlightViewBasis.leveled(head: head, up: localUp) : instrument
         for (index, view) in drawable.views.enumerated() {
-            let projection = drawable.computeProjection(viewIndex: index) * simd_inverse(head * view.transform) * leveled
+            let projection = drawable.computeProjection(viewIndex: index) * simd_inverse(head * view.transform) * panel
             let corners: [(SIMD4<Float>, SIMD2<Float>)] = [
-                ([-1.2, 0.6, -2, 1], [0, 0]), ([-1.2, -0.6, -2, 1], [0, 1]), ([1.2, 0.6, -2, 1], [1, 0]),
-                ([1.2, 0.6, -2, 1], [1, 0]), ([-1.2, -0.6, -2, 1], [0, 1]), ([1.2, -0.6, -2, 1], [1, 1])]
+                ([-1.2, 0.6, -2, 0], [0, 0]), ([-1.2, -0.6, -2, 0], [0, 1]), ([1.2, 0.6, -2, 0], [1, 0]),
+                ([1.2, 0.6, -2, 0], [1, 0]), ([-1.2, -0.6, -2, 0], [0, 1]), ([1.2, -0.6, -2, 0], [1, 1])]
             let vertices = corners.map { Vertex(position: projection * $0.0, uv: $0.1) }
             let pass = MTLRenderPassDescriptor()
             pass.colorAttachments[0].texture = drawable.colorTextures[index]
@@ -100,7 +109,7 @@ final class FlightHUDRenderer {
     private func update(_ frame: FlightReplay.Frame, terrainValid: Bool, boarding: Bool) {
         let start = ProcessInfo.processInfo.systemUptime
         let input = terrainValid && !boarding ? FlightTelemetry.resolve(frame) : ReplayTelemetry()
-        var scene = indicate_svs_render(input)
+        var scene = glancing ? indicate_svs_glance(input) : indicate_svs_render(input)
         let length = scene.length <= 8192 ? Int(scene.length) : 0
         let bytes = withUnsafeBytes(of: &scene) { Array($0.dropFirst(4).prefix(length)) }
         slot = (slot + 1) % slots.count

@@ -2,6 +2,8 @@
 use indicate_instrument_state::{HeadingReference, PanelData};
 
 mod compass;
+mod reference;
+pub use reference::{ViewReference, view_reference};
 mod vector;
 use vector::{add, cross, direction, normalized, scale};
 
@@ -108,24 +110,24 @@ fn marker(scene: &mut AngularScene, center: [f32; 3], retrograde: bool) {
 
 fn attitude(scene: &mut AngularScene, data: &PanelData) {
     let heading = data.heading.value_rad.value;
-    let forward = direction(heading, data.pitch_rad.value);
-    let level_right = direction(heading + core::f32::consts::FRAC_PI_2, 0.0);
-    let right = add(
-        scale(level_right, libm::cosf(data.roll_rad.value)),
-        scale(
-            cross(level_right, forward),
-            -libm::sinf(data.roll_rad.value),
-        ),
-    );
-    let up = cross(right, forward);
-    scene.line(
-        add(forward, scale(right, -0.006)),
-        add(forward, scale(right, 0.006)),
-    );
-    scene.line(
-        add(forward, scale(up, -0.006)),
-        add(forward, scale(up, 0.006)),
-    );
+    let frame = view_reference(data);
+    // The waterline denotes the fuselage, distinct from the circular velocity marker.
+    let point = |x, y| {
+        add(
+            frame.forward,
+            add(scale(frame.right, x), scale(frame.up, y)),
+        )
+    };
+    for [x, y, u, v] in [
+        [-0.035, 0.0, -0.016, 0.0],
+        [-0.016, 0.0, -0.008, -0.008],
+        [-0.008, -0.008, 0.0, 0.0],
+        [0.0, 0.0, 0.008, -0.008],
+        [0.008, -0.008, 0.016, 0.0],
+        [0.016, 0.0, 0.035, 0.0],
+    ] {
+        scene.line(point(x, y), point(u, v));
+    }
     for pitch in (-30_i32..=30).step_by(5).filter(|p| *p != 0) {
         for side in [-1.0, 1.0] {
             for x in (2..8).filter(|x| pitch > 0 || x % 2 == 0) {

@@ -27,6 +27,10 @@ typedef struct { float a[3]; float b[3]; } AngularStroke;
 typedef struct { uint32_t length; AngularStroke strokes[1024]; } AngularScene;
 _Static_assert(sizeof(AngularScene) == 24580, "Angular scene ABI");
 AngularScene indicate_svs_directions(ReplayTelemetry input);
+typedef struct { uint32_t kind; float right[3]; float up[3]; float forward[3]; } ViewReference;
+_Static_assert(sizeof(ViewReference) == 40, "View reference ABI");
+ViewReference indicate_svs_reference(ReplayTelemetry input);
 OverlayScene indicate_svs_render(ReplayTelemetry input);
+OverlayScene indicate_svs_glance(ReplayTelemetry input);
 uint64_t indicate_svs_glyph(uint32_t scalar);
 #endif
