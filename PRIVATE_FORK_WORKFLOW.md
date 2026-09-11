@@ -217,3 +217,34 @@ vendored source pins its local commit `47af6655` without a public Indicate push.
   and [FAA 2026 guidance research](https://www.faa.gov/data_research/research/med_humanfacs/oamtechreports/media/202601.pdf)
   inform decluttering and explicit data references. Their findings do not establish
   a universally preferred tape layout or constitute certification of this replay display.
+
+
+## Terrain continuity and label relevance validation — 2026-09-11
+
+- A headless GPU regression reproduced missing ground paint above the vector
+  source maximum zoom: a loaded ancestor left the background visible. Uploads now
+  follow the sources selected by terrain draping. The regression passes, including
+  reduced available-memory budgets of 768 MiB and 300 MiB without a blank frame.
+- Adjacent meshes share boundary heights and interpolate fine vertices along the
+  coarse edge. Tests cover different DEM resolutions, mesh T-junctions, longitude
+  wrapping, and CPU picking/label elevations matching the rendered seam collar.
+  Relief uses interpolated DEM-gradient normals. Boundary tables are cached by
+  coverage and DEM revision, shared across eyes; uniform storage adds about 2 MiB
+  at the tile limit. Texture and refinement budgets are unchanged.
+- Symbol placement retains identity and opacity through parent/child replacement,
+  suppresses duplicate representations, and fades collision changes. Tests cover
+  replacement, transient collisions and history eviction. The demo supplies its
+  own distance hierarchy; default renderer styles acquire no distance restriction.
+  Placement follows the continuity approach in MapLibre GL JS's
+  [placement](https://github.com/maplibre/maplibre-gl-js/blob/main/src/symbol/placement.ts)
+  and [cross-tile index](https://github.com/maplibre/maplibre-gl-js/blob/main/src/symbol/cross_tile_symbol_index.ts).
+- MapLibre headless/thread-safe library tests: 508 passed, one ignored. Swift:
+  100 passed. Device/simulator native release and Xcode builds, signing and document
+  registration checks passed. Simulator inspection covers painted immersive ground
+  and the expanded globe. Installation on Vision Pro succeeded; automatic launch
+  timed out. Physical head-motion and prolonged memory stress remain unverified.
+- Full workspace CI was attempted: formatting passes; existing build-tool clippy
+  and missing-docs failures, plus host-incompatible Android/Web targets and API
+  mismatches, prevent the other workspace gates from passing.
+- Pilotage and Indicate are unchanged. Future simulation/shared-client integration
+  is deferred to a separate task.
