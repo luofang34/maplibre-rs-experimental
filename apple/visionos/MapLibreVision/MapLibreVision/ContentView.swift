@@ -12,13 +12,21 @@ struct ContentView: View {
     var body: some View {
         VStack(spacing: 16) {
             HStack {
-                Text("Map controls").font(.headline)
+                Text("MapLibre Vision").font(.headline)
                 Spacer()
-                Button("Fly track", systemImage: "airplane") { Task { await enterMap(follow: true) } }.disabled(session.replay.track == nil)
+                Image(systemName: "globe.europe.africa").foregroundStyle(.secondary)
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    ReplayControls()
+                    Picker("Map view", selection: Binding(get: { modeStore.mode }, set: { mode in
+                        session.replay.follow(false)
+                        modeStore.fly(to: mode)
+                        if !session.immersed { Task { await enterMap(follow: false) } }
+                    })) {
+                        ForEach(MapMode.allCases) { Text($0.title).tag($0) }
+                    }.pickerStyle(.segmented).disabled(isOpening)
+                    Text(modeStore.isGlobe ? "Explore the world as a globe in your room." : "Explore terrain at full scale.")
+                        .foregroundStyle(.secondary)
                     Divider()
                     if modeStore.isGlobe {
                         Label("Drag with one pinch to turn the globe.", systemImage: "hand.draw")
@@ -42,6 +50,14 @@ struct ContentView: View {
                         }
                         Text("Drag to move. Spread two pinches to zoom. Move both hands sideways to orbit or vertically to tilt.")
                             .foregroundStyle(.secondary)
+                    }
+                    Divider()
+                    Toggle("Flight replay", isOn: $session.flightEnabled)
+                    if session.flightEnabled {
+                        ReplayControls()
+                        Button("Fly track", systemImage: "airplane") {
+                            Task { await enterMap(follow: true) }
+                        }.disabled(session.replay.track == nil || isOpening)
                     }
                     if let selection = modeStore.selectedFeature {
                         Divider()
@@ -113,6 +129,7 @@ struct ContentView: View {
         guard !isOpening else { return }
         isOpening = true
         defer { isOpening = false }
+        if follow { session.flightEnabled = true }
         session.replay.follow(follow)
         if !session.immersed {
             let result = await openImmersiveSpace(id: MapRenderer.spaceID)

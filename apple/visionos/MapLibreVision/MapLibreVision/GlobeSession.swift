@@ -15,6 +15,9 @@ final class GlobeSession: ObservableObject {
         let track: FlightTrack
         var needsDatum: Bool { name.lowercased().hasSuffix(".gpx") }
     }
+    @Published var flightEnabled = false {
+        didSet { replay.setEnabled(flightEnabled) }
+    }
     @Published var tracks: [FlightLibrary.Entry] = []
     @Published var selectedTrackID = "innsbruck-approach"
     @Published var preview: ImportPreview?
@@ -124,6 +127,7 @@ final class GlobeSession: ObservableObject {
             replay.replace(with: track)
             selectedTrackID = entry.id
             cancelImport()
+            flightEnabled = true
             status = "Imported \(entry.title). Press Fly track when ready."
             save()
         } catch { status = error.localizedDescription }

@@ -15,11 +15,13 @@ final class FlightReplay: @unchecked Sendable {
         let view: FlightView
         let rate: Double
         let observation: FlightTrack.Observation?
+        var enabled = true
         var returnSeconds: Int? = nil
         var following: Bool { view != .free }
     }
 
     private let lock = NSLock()
+    private var enabled = false
     private var recording: FlightTrack?
     private var failure: String?
     private var clock = FlightPlayback()
@@ -65,13 +67,27 @@ final class FlightReplay: @unchecked Sendable {
     }
 
     func frame(at now: Double = ProcessInfo.processInfo.systemUptime) -> Frame {
-        let (track, clock, view, generation, revision, deadline) = lock.withLock {
-            (recording, self.clock, self.view, self.generation, cameraRevision, returnDeadline)
+        let (track, clock, view, generation, revision, deadline, enabled) = lock.withLock {
+            (recording, self.clock, self.view, self.generation, cameraRevision, returnDeadline, self.enabled)
         }
         let elapsed = clock.time(at: now, duration: track?.duration ?? 0)
         return Frame(track: track, generation: generation, cameraRevision: revision, elapsed: elapsed,
             playing: clock.started != nil && elapsed < (track?.duration ?? 0), view: view, rate: clock.rate,
-            observation: track?.sample(at: elapsed), returnSeconds: deadline.map { Int(ceil(max(0, $0 - now))) })
+            observation: track?.sample(at: elapsed), enabled: enabled, returnSeconds: deadline.map { Int(ceil(max(0, $0 - now))) })
+    }
+
+    func setEnabled(_ enabled: Bool, at now: Double = ProcessInfo.processInfo.systemUptime) {
+        lock.withLock {
+            self.enabled = enabled
+            if !enabled {
+                clock.pause(at: now, duration: recording?.duration ?? 0)
+                view = .free
+                boarding = false
+                resumeOnBoard = false
+                returnDeadline = nil
+                cameraRevision = cameraRevision &+ 1
+            }
+        }
     }
 
     func toggle(at now: Double = ProcessInfo.processInfo.systemUptime) {

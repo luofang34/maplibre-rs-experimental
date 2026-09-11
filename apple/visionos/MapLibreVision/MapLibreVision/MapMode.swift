@@ -13,7 +13,7 @@ enum MapMode: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .tableGlobe: "Table globe"
+        case .tableGlobe: "Globe"
         case .immersive: "Immersive"
         }
     }

@@ -74,12 +74,6 @@ final class MapRenderer {
         self.layerRenderer = layerRenderer
         device = layerRenderer.device
         recoveryQueue = layerRenderer.device.makeCommandQueue()
-        do {
-            trackOverlay = try TrackOverlayRenderer(device: layerRenderer.device)
-            flightHUD = try FlightHUDRenderer(device: layerRenderer.device)
-            flightSymbols = try FlightSymbolRenderer(device: layerRenderer.device)
-        }
-        catch { maplibre_visionos_note("Flight overlay unavailable: \(error)") }
         if let entry = modeStore.takeEntry() {
             placement = MapPlacement(viewpoint: .above(entry.anchor, height: entry.height))
         } else if let parked = MapRenderer.parked {
@@ -93,6 +87,21 @@ final class MapRenderer {
             placement = MapPlacement(
                 viewpoint: Viewpoint.above(anchor, height: modeStore.initialHeight))
         }
+    }
+
+    private func prepareFlightOverlay(enabled: Bool) {
+        guard enabled else {
+            trackOverlay = nil
+            flightHUD = nil
+            flightSymbols = nil
+            return
+        }
+        guard trackOverlay == nil else { return }
+        do {
+            trackOverlay = try TrackOverlayRenderer(device: device)
+            flightHUD = try FlightHUDRenderer(device: device)
+            flightSymbols = try FlightSymbolRenderer(device: device)
+        } catch { maplibre_visionos_note("Flight overlay unavailable: \(error)") }
     }
 
     func start() {
@@ -340,6 +349,7 @@ final class MapRenderer {
         lastAvailableMemory = available
         maplibre_visionos_set_opaque_environment(map, placement.immersion == .full)
         let replayFrame = replay.frame()
+        prepareFlightOverlay(enabled: replayFrame.enabled)
         let atEnd = replayFrame.track.map { replayFrame.elapsed >= $0.duration } ?? false
         if atEnd, !replayEnded {
             maplibre_visionos_note("Flight playback reached the final recorded observation at \(replayFrame.elapsed) seconds")
@@ -476,7 +486,7 @@ final class MapRenderer {
         }
         renderSeconds += CACurrentMediaTime() - renderStart
         if result != nil {
-            if let track = replayFrame.track {
+            if replayFrame.enabled, let track = replayFrame.track {
                 trackOverlay?.draw(track: track, observation: replayFrame.observation, placement: placement,
                     drawable: drawable, head: originFromDevice, colors: colors, depths: depths, command: commandBuffer,
                     fpv: replayFrame.view == .fpv, elapsed: replayFrame.elapsed, generation: replayFrame.generation)
@@ -513,7 +523,7 @@ final class MapRenderer {
                          replayFrame: FlightReplay.Frame? = nil, head: simd_float4x4 = matrix_identity_float4x4,
                          terrainValid: Bool = false) {
         eyeTargets.copy(to: drawable, commandBuffer: commandBuffer, opaque: placement.immersion == .full)
-        if let replayFrame {
+        if let replayFrame, replayFrame.enabled {
             if terrainValid, !flightCamera.isBoarding {
                 flightSymbols?.draw(frame: replayFrame, placement: placement, head: head, drawable: drawable, command: commandBuffer)
             }

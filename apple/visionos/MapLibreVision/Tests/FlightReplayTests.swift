@@ -3,6 +3,29 @@ import simd
 @testable import MapInteraction
 
 final class FlightReplayTests: XCTestCase {
+    func testMapOnlyModeDoesNotEnableFlightAndCancelsReturnToOwnship() throws {
+        let replay = FlightReplay()
+        replay.replace(with: try track())
+        XCTAssertFalse(replay.frame().enabled)
+        replay.setEnabled(true, at: 0)
+        replay.setView(.fpv, at: 0)
+        replay.toggle(at: 0)
+        replay.boarded(revision: replay.frame(at: 0).cameraRevision, at: 0)
+        replay.navigate(at: 2)
+        XCTAssertNotNil(replay.frame(at: 2).returnSeconds)
+        replay.setEnabled(false, at: 3)
+        replay.advanceReturn(at: 100)
+        let frame = replay.frame(at: 100)
+        XCTAssertFalse(frame.enabled)
+        XCTAssertFalse(frame.following)
+        XCTAssertFalse(frame.playing)
+        XCTAssertNil(frame.returnSeconds)
+        XCTAssertNotNil(frame.track)
+        replay.setEnabled(true, at: 100)
+        XCTAssertEqual(replay.frame(at: 100).elapsed, frame.elapsed)
+        XCTAssertFalse(replay.frame(at: 100).following)
+    }
+
     private func track(_ name: String = "innsbruck-approach") throws -> FlightTrack {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
         return try FlightTrack.decode(Data(contentsOf: root.appendingPathComponent("MapLibreVision/Resources/\(name).json")))
