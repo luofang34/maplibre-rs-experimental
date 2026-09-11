@@ -36,6 +36,7 @@ use crate::{
 };
 
 mod processed;
+mod symbols;
 mod xr;
 
 pub use xr::XrFrameError;

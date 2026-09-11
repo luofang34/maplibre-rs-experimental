@@ -29,6 +29,7 @@ use crate::{
 #[derive(Default)]
 pub struct CollisionSystem {
     runs: u32,
+    history: temporal::PlacementHistory,
     uploaded: HashMap<(WorldTileCoords, String), (u64, u64)>,
 }
 
@@ -79,7 +80,7 @@ impl System for CollisionSystem {
                     .get(&(layer.coords, layer.style_layer_id.clone()))
                     .map(|entry| entry.0)
         });
-        if !new_content && !self.runs.is_multiple_of(8) {
+        if !new_content && !self.history.fading && !self.runs.is_multiple_of(8) {
             return Ok(());
         }
         layers.sort_by_key(|(index, layer, _)| {
@@ -94,6 +95,12 @@ impl System for CollisionSystem {
             tracing::error!(%error, "symbol projection failed");
             SystemError::Setup
         })?;
+        self.history.begin(
+            world
+                .resources
+                .get::<crate::render::frame_input::FrameInput>()
+                .map_or(std::time::Duration::ZERO, |input| input.timestamp),
+        );
         let placed = self.place_layers(
             world,
             style,
@@ -109,6 +116,7 @@ impl System for CollisionSystem {
 }
 
 mod rules;
+mod temporal;
 
 #[cfg(test)]
 mod tests;
@@ -149,33 +157,50 @@ fn place_layer(
     layer: &crate::sdf::SymbolLayerData,
     paint: &crate::style::layer::SymbolPaint,
     zoom_limits: [f64; 2],
-    boxes: &mut CollisionGrid,
-    placed: &mut PlacedSymbols,
+    placement: (
+        &mut CollisionGrid,
+        &mut PlacedSymbols,
+        &mut temporal::PlacementHistory,
+    ),
 ) -> Vec<SDFShaderFeatureMetadata> {
-    let mut metadata = vec![
-        SDFShaderFeatureMetadata {
-            opacity: 0.0,
-            elevation: 0.0
-        };
-        layer.new_buffer.buffer.vertices.len()
-    ];
-    let uniforms = SymbolUniforms::new(paint, view_state.style_zoom().value(), [1, 1]);
-    for (feature_index, feature) in layer.features.iter().enumerate() {
-        let ground = symbol_elevation(
-            world,
-            layer,
-            feature,
-            paint,
-            view_state.style_zoom().value(),
-        );
-        let rectangles = local_zoom_visible(
-            layer.coords,
-            feature,
-            ground,
-            view_state,
-            projection,
-            zoom_limits,
-        )
+    let (boxes, placed, history) = placement;
+    let mut metadata = empty_metadata(layer);
+    let zoom = view_state.style_zoom().value();
+    let uniforms = SymbolUniforms::new(paint, zoom, [1, 1]);
+    let mut features: Vec<_> = layer
+        .features
+        .iter()
+        .enumerate()
+        .map(|(i, feature)| (i, feature, history.was_visible(layer, feature)))
+        .collect();
+    features.sort_by(|(_, a, av), (_, b, bv)| {
+        a.data
+            .sort_key
+            .total_cmp(&b.data.sort_key)
+            .then_with(|| bv.cmp(av))
+    });
+    for (feature_index, feature, was_visible) in features {
+        let ground = symbol_elevation(world, layer, feature, paint, zoom);
+        let relevance = world
+            .resources
+            .get::<super::visibility::SymbolVisibility>()
+            .map_or(1.0, |policy| {
+                policy.opacity(layer, feature, ground, view_state)
+            });
+        let mut limits = zoom_limits;
+        if was_visible {
+            limits[0] -= 0.15;
+            limits[1] += 0.15;
+        }
+        let rectangles = (relevance > 0.0
+            && local_zoom_visible(
+                layer.coords,
+                feature,
+                ground,
+                view_state,
+                projection,
+                limits,
+            ))
         .then(|| screen_boxes(layer, feature, ground, view_state, projection, &uniforms))
         .flatten()
         .unwrap_or([None, None]);
@@ -185,7 +210,8 @@ fn place_layer(
             view_state.style_zoom().value(),
         );
         let visible = rules.place(rectangles, boxes, [view_state.width(), view_state.height()]);
-        if visible.iter().any(|v| *v) {
+        let opacity = history.opacity(layer, feature, visible);
+        if visible.iter().any(|v| *v) && opacity.iter().any(|v| *v > 0.0) {
             placed.0.push(PlacedSymbol {
                 coords: layer.coords,
                 layer: layer.style_layer_id.clone(),
@@ -193,29 +219,45 @@ fn place_layer(
                 rectangles: [0, 1].map(|i| if visible[i] { rectangles[i] } else { None }),
             });
         }
-        for index in feature.indices.clone() {
-            let kind = layer
-                .new_buffer
-                .buffer
-                .indices
-                .get(index)
-                .and_then(|index| layer.new_buffer.buffer.vertices.get(*index as usize))
-                .map_or(0, |vertex| usize::from(vertex.a_data[2] != 0));
-            if let Some(vertex) = layer
-                .new_buffer
-                .buffer
-                .indices
-                .get(index)
-                .and_then(|index| metadata.get_mut(*index as usize))
-            {
-                *vertex = SDFShaderFeatureMetadata {
-                    opacity: if visible[kind] { 1.0 } else { 0.0 },
-                    elevation: ground,
-                };
-            }
-        }
+        write_feature_metadata(
+            layer,
+            feature,
+            opacity.map(|value| value * relevance),
+            ground,
+            &mut metadata,
+        );
     }
     metadata
+}
+
+fn write_feature_metadata(
+    layer: &crate::sdf::SymbolLayerData,
+    feature: &crate::sdf::Feature,
+    opacity: [f32; 2],
+    ground: f32,
+    metadata: &mut [SDFShaderFeatureMetadata],
+) {
+    for index in feature.indices.clone() {
+        let kind = layer
+            .new_buffer
+            .buffer
+            .indices
+            .get(index)
+            .and_then(|index| layer.new_buffer.buffer.vertices.get(*index as usize))
+            .map_or(0, |vertex| usize::from(vertex.a_data[2] != 0));
+        if let Some(vertex) = layer
+            .new_buffer
+            .buffer
+            .indices
+            .get(index)
+            .and_then(|index| metadata.get_mut(*index as usize))
+        {
+            *vertex = SDFShaderFeatureMetadata {
+                opacity: opacity[kind],
+                elevation: ground,
+            };
+        }
+    }
 }
 
 fn local_zoom_visible(
@@ -293,8 +335,7 @@ impl CollisionSystem {
                 layer,
                 paint,
                 limits,
-                &mut boxes,
-                &mut placed,
+                (&mut boxes, &mut placed, &mut self.history),
             );
             let key = (layer.coords, layer.style_layer_id.clone());
             let Some(generation) = allocation(world, layer.coords, &layer.style_layer_id) else {
@@ -326,3 +367,13 @@ type VisibleLayer<'a> = (
     &'a crate::sdf::SymbolLayerData,
     &'a crate::style::layer::SymbolPaint,
 );
+
+fn empty_metadata(layer: &crate::sdf::SymbolLayerData) -> Vec<SDFShaderFeatureMetadata> {
+    vec![
+        SDFShaderFeatureMetadata {
+            opacity: 0.0,
+            elevation: 0.0
+        };
+        layer.new_buffer.buffer.vertices.len()
+    ]
+}

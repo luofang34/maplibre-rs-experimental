@@ -42,6 +42,7 @@ mod render_commands;
 mod resource_system;
 mod textures;
 mod upload_system;
+pub mod visibility;
 
 pub mod tessellation;
 pub mod tessellation_new;
