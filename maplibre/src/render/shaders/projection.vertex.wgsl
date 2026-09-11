@@ -169,3 +169,25 @@ fn project_tile_position_3d(
     let horizon_distance = globe_horizon_distance(surface, transition, is_pole);
     return ProjectedTilePosition(mix(mercator_clip, globe_clip, transition), horizon_distance);
 }
+
+// Differentiate the globe analytically: subtracting two projected metre-scale positions
+// loses their direction in f32, especially when a detailed tile is near the camera.
+fn project_tile_tangent_3d(
+    tile_position: vec3<f32>,
+    offset: vec2<f32>,
+    fallback_matrix: mat4x4<f32>,
+    tile_mercator_coords: vec4<f32>,
+) -> vec4<f32> {
+    let mercator = tile_mercator_coords.xy + tile_position.xy * tile_mercator_coords.zw;
+    let longitude = mercator.x * PROJECTION_TWO_PI + PROJECTION_PI;
+    let surface = tile_position_on_unit_sphere(tile_position.xy, tile_mercator_coords);
+    let cos_latitude = globe_circumference_ratio_at_tile_y(tile_position.y, tile_mercator_coords);
+    let east = vec3<f32>(cos(longitude), 0.0, -sin(longitude));
+    let south = vec3<f32>(sin(longitude) * surface.y, -cos_latitude, cos(longitude) * surface.y);
+    let delta = offset * tile_mercator_coords.zw * PROJECTION_TWO_PI;
+    let tangent = (east * delta.x + south * delta.y) * cos_latitude *
+        (1.0 + tile_position.z / projection.transition_and_padding.z);
+    let globe = projection.main_matrix * vec4<f32>(tangent, 0.0);
+    let flat = fallback_matrix * vec4<f32>(offset, 0.0, 0.0);
+    return mix(flat, globe, projection.transition_and_padding.x);
+}

@@ -182,6 +182,7 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
         view_proj: &ViewProjection,
         viewport_width: f32,
         viewport_height: f32,
+        style_zoom: Zoom,
     ) {
         let capacity = (self.view_tiles_buffer.inner_size
             / std::mem::size_of::<ShaderTileMetadata>() as wgpu::BufferAddress)
@@ -217,7 +218,7 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
                 )
                 .into(),
                 line_width_scale: 1.0,
-                line_units_per_pixel: 8.0 * shape.zoom_factor as f32,
+                line_units_per_pixel: 8.0 * style_zoom.scale_to_tile(&shape.coords()) as f32,
                 clip_antimeridian: u32::from(u8::from(shape.coords().z) == 0),
             });
         };

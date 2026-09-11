@@ -36,6 +36,7 @@ pub fn upload_system(
         &view_proj,
         view_state.width() as f32,
         view_state.height() as f32,
+        view_state.style_zoom(),
     );
     let projection_data = projection_data_for_view(style, view_state).map_err(|error| {
         tracing::error!(%error, "unable to prepare projection state");

@@ -52,15 +52,15 @@ fn main(
         transform,
         tile_mercator_coords,
     );
-    let projected_normal = project_tile_position_3d(
-        vec3<f32>(position + layer_translate + normal, elevation),
+    let tangent = project_tile_tangent_3d(
+        vec3<f32>(position + layer_translate, elevation),
+        normal,
         transform,
         tile_mercator_coords,
     );
     var center = projected_center.clip_position;
     let center_ndc = center.xy / center.w;
-    let normal_ndc = projected_normal.clip_position.xy / projected_normal.clip_position.w;
-    let direction = (normal_ndc - center_ndc) * vec2<f32>(viewport_width, viewport_height);
+    let direction = (tangent.xy - center_ndc * tangent.w) * vec2<f32>(viewport_width, viewport_height);
     let dir = direction / max(length(direction), 1e-12);
 
     // Apply pixel-width offset in clip space.
@@ -74,9 +74,9 @@ fn main(
         // Decks share the map-space width of adjoining draped roads, including foreshortening.
         // Casing and deck share the centerline tangent plane. Independently projecting
         // different widths onto a curved sphere gives them intersecting depth surfaces.
-        center += (projected_normal.clip_position - projected_center.clip_position) * (outset * line_scale.y);
-        // Coplanar casing and deck layers need deterministic style order in reversed depth.
-        center.z += max(abs(center.z), 1e-8) * (2e-5 + z_index * 2e-7);
+        center += tangent * (outset * line_scale.y);
+        // A small terrain bias keeps sampled road endpoints above the shared surface.
+        center.z += max(abs(center.z), 1e-8) * 2e-5;
     } else {
         center = vec4<f32>(center.xy + clip_offset, 0.0, center.w);
     }

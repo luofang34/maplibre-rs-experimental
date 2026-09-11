@@ -178,3 +178,40 @@ fn raster_shapes_fall_back_to_the_pyramid_until_the_covering_loads() {
 
     assert_eq!(shape_coords(&tiles[0].raster), vec![tile(0, 0, 3)]);
 }
+
+#[test]
+fn bridge_width_units_follow_style_scale_independently_of_gaze_zoom() {
+    use super::{TileShape, ViewTile};
+    use crate::render::{camera::ViewProjection, shaders::ShaderTileMetadata};
+    use cgmath::{Matrix4, SquareMatrix};
+    struct Captured(std::cell::RefCell<Vec<u8>>);
+    impl Queue<TestBuffer> for Captured {
+        fn write_buffer(&self, _: &TestBuffer, _: u64, bytes: &[u8]) {
+            self.0.replace(bytes.to_vec());
+        }
+    }
+    let queue = Captured(Default::default());
+    let coords = tile(8709, 5744, 14);
+    let style_zoom = Zoom::new(14.0);
+    for gaze_zoom in [10.0, 12.0, 14.0, 16.0] {
+        let mut pattern = TileViewPattern::new(BackingBufferDescriptor {
+            buffer: TestBuffer,
+            inner_size: 104 * 8,
+        });
+        pattern.update_pattern(vec![ViewTile {
+            target: coords,
+            vector: SourceShapes::SourceEqTarget(TileShape::new(coords, Zoom::new(gaze_zoom))),
+            raster: SourceShapes::None,
+        }]);
+        pattern.upload_pattern(
+            &queue,
+            &ViewProjection(Matrix4::identity()),
+            1920.0,
+            1080.0,
+            style_zoom,
+        );
+        let bytes = queue.0.borrow();
+        let metadata = bytemuck::pod_read_unaligned::<ShaderTileMetadata>(&bytes[..104]);
+        assert_eq!(metadata.line_units_per_pixel, 8.0, "gaze zoom {gaze_zoom}");
+    }
+}

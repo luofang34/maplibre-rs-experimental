@@ -35,13 +35,17 @@ async fn elevated_bridge_draws_over_terrain_and_buried_tunnel_is_occluded() {
 }
 
 fn render_at(map: &mut HeadlessMap, camera: Matrix4<f64>) {
+    render_at_anchor(map, camera, LatLon::new(0.0, 0.0));
+}
+
+fn render_at_anchor(map: &mut HeadlessMap, camera: Matrix4<f64>, anchor: LatLon) {
     for timestamp in [0, 16, 32] {
         map.run_xr_frame(XrFrame {
             opaque_environment: true,
             timestamp: Duration::from_millis(timestamp),
             placement: ScenePlacement {
                 anchor: ExternalAnchor {
-                    position: LatLon::new(0.0, 0.0),
+                    position: anchor,
                     altitude_meters: 0.0,
                 },
                 world_from_scene: Matrix4::identity(),
@@ -126,7 +130,25 @@ async fn structure_map(kind: &str, elevation: &str) -> HeadlessMap {
 }
 
 async fn map_with_lines(kind: &str, elevation: &str, line: serde_json::Value) -> HeadlessMap {
-    let style = structure_style(kind, elevation);
+    map_with_tile(kind, elevation, line, WorldTileCoords::default()).await
+}
+
+async fn map_with_tile(
+    kind: &str,
+    elevation: &str,
+    line: serde_json::Value,
+    root: WorldTileCoords,
+) -> HeadlessMap {
+    let mut style = structure_style(kind, elevation);
+    let count = 2_f64.powi(i32::from(u8::from(root.z)));
+    style.center = Some([
+        (f64::from(root.x) + 0.5) / count * 360.0 - 180.0,
+        (std::f64::consts::PI * (1.0 - 2.0 * (f64::from(root.y) + 0.5) / count))
+            .sinh()
+            .atan()
+            .to_degrees(),
+    ]);
+    style.zoom = Some(f64::from(u8::from(root.z)));
     let layers = style.layers[1..].to_vec();
     assert!(layers.iter().all(|layer| super::kind(layer).is_some()));
     let (kernel, renderer) = create_headless_renderer(64, 64, None)
@@ -149,7 +171,6 @@ async fn map_with_lines(kind: &str, elevation: &str, line: serde_json::Value) ->
         ],
     )
     .expect("map");
-    let root = WorldTileCoords::default();
     map.load_dem_tiles(vec![(
         root,
         image::RgbaImage::from_pixel(2, 2, image::Rgba([128, 0, 0, 255])),
@@ -252,4 +273,33 @@ fn structure_style(kind: &str, elevation: &str) -> Style {
         layer.index = index as u32;
     }
     style
+}
+
+#[tokio::test]
+async fn detailed_bridge_deck_survives_pitch_and_roll_near_innsbruck() {
+    let anchor = LatLon::new(47.26, 11.39);
+    let zoom = crate::coords::ZoomLevel::new(14);
+    let x = ((anchor.longitude / 360.0 + 0.5) * 16384.0).floor() as i32;
+    let y = ((1.0 - anchor.latitude.to_radians().tan().asinh() / std::f64::consts::PI) * 8192.0)
+        .floor() as i32;
+    let line = serde_json::json!({"type":"Feature","properties":{},"geometry":{
+        "type":"LineString","coordinates":[[11.385,47.26],[11.395,47.26]]}});
+    let mut map = map_with_tile("bridge", "20", line, WorldTileCoords::from((x, y, zoom))).await;
+    for pitch in [-0.25, 0.0, 0.25] {
+        for roll in [-0.1, 0.0, 0.1] {
+            let eye = Matrix4::from_translation(Vector3::new(0.0, 0.0, 500.0))
+                * Matrix4::from_angle_x(Rad(pitch))
+                * Matrix4::from_angle_z(Rad(roll));
+            render_at_anchor(&mut map, eye, anchor);
+            let pixels = read_blocking(&map);
+            let green = pixels
+                .chunks_exact(4)
+                .filter(|p| p[1] > 160 && p[0] < 80 && p[2] < 80)
+                .count();
+            assert!(
+                green > 12,
+                "missing deck at pitch {pitch}, roll {roll}: {green}"
+            );
+        }
+    }
 }

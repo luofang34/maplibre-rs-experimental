@@ -117,9 +117,15 @@ impl PipelineSetup<'_> {
         } else {
             pipeline
         };
-        pipeline
-            .describe_render_pipeline()
-            .initialize_with_prefix_layouts(self.device, layouts)
+        let mut descriptor = pipeline.describe_render_pipeline();
+        if depth {
+            // Casing and deck are paint layers on the same road surface. Test against
+            // terrain, but let style order composite them without self-occluding edges.
+            if let Some(state) = &mut descriptor.depth_stencil {
+                state.depth_write_enabled = false;
+            }
+        }
+        descriptor.initialize_with_prefix_layouts(self.device, layouts)
     }
 
     fn initialize(
