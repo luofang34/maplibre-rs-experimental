@@ -44,7 +44,7 @@ pub fn resource_system(
         .resources
         .get_mut::<super::line_dash::LineDashResources>()
     {
-        dashes.update(device, queue, style, view_state.zoom().value());
+        dashes.update(device, queue, style, view_state.style_zoom().value());
     }
     let Some((
         buffer_pool,

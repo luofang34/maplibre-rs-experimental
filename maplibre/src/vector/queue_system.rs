@@ -71,7 +71,10 @@ pub fn queue_system(
 
             if let Some(layer_entries) = buffer_pool_index.get_layers(source_shape.coords()) {
                 for layer_entry in layer_entries {
-                    if !layer_entry.style_layer.is_visible_at(zoom) {
+                    if !layer_entry
+                        .style_layer
+                        .is_visible_at(view_state.style_zoom().value())
+                    {
                         continue;
                     }
                     let is_line = layer_entry.style_layer.type_ == "line";

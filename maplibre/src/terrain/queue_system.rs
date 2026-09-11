@@ -86,7 +86,7 @@ pub fn queue_system(
         clear_color,
     } = prepare_drapes(&specs, style, view_state, world, device)?;
     let paint_zoom =
-        crate::vector::upload_system::paint::current_zoom(world, view_state.zoom().value());
+        crate::vector::upload_system::paint::current_zoom(world, view_state.style_zoom().value());
     let phase = encode_drapes(
         &specs,
         &redraw,
@@ -351,7 +351,7 @@ fn prepare_drapes(
         .unwrap_or_default();
     let clear_color = background_clear_color(style);
     let paint_zoom =
-        crate::vector::upload_system::paint::current_zoom(world, view_state.zoom().value());
+        crate::vector::upload_system::paint::current_zoom(world, view_state.style_zoom().value());
     let prints: Vec<u64> = {
         let content = loaded_content(world);
         specs

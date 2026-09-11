@@ -107,9 +107,9 @@ fn frame_paint(
     view_state: &crate::render::view_state::ViewState,
 ) -> (VectorPaintFrame, Option<VectorPaintFrame>) {
     let zoom = if style.terrain.is_some() {
-        paint::stabilize_zoom(world, view_state.zoom().value()) as f32
+        paint::stabilize_zoom(world, view_state.style_zoom().value()) as f32
     } else {
-        view_state.zoom().level()
+        view_state.style_zoom().level()
     };
     let bearing = view_state.camera().get_bearing().0 as f32;
     let paint_frame = VectorPaintFrame { zoom, bearing };

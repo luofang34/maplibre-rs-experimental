@@ -51,5 +51,10 @@ pub(super) fn target_specs(
         .resources
         .insert(crate::terrain::request_system::DrapeRequests(tiles.clone()));
     let targets = select_targets(tiles.into_iter(), world, &raster_coverings);
-    Ok(collect_layer_specs(targets, style, world, zoom.value()))
+    Ok(collect_layer_specs(
+        targets,
+        style,
+        world,
+        view_state.style_zoom().value(),
+    ))
 }

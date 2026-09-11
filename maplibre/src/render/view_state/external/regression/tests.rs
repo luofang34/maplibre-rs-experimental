@@ -81,3 +81,48 @@ fn immersive_gaze_crossing_the_horizon_does_not_switch_projection() {
         }
     }
 }
+
+#[test]
+fn head_rotation_preserves_cartographic_scale_but_translation_changes_it() {
+    for projection in [ProjectionType::Mercator, ProjectionType::Globe] {
+        let mut view = ViewState::new(
+            PhysicalSize::new(1024, 1024).expect("viewport"),
+            WorldCoords::from((256.0, 256.0)),
+            Zoom::new(10.0),
+            Deg(0.0),
+            Deg(45.0),
+        );
+        let external = |pitch, height| ExternalView {
+            anchor: ExternalAnchor {
+                position: LatLon::new(47.26, 11.39),
+                altitude_meters: 600.0,
+            },
+            view: (Matrix4::from_translation(Vector3::new(0.0, 0.0, height))
+                * Matrix4::from_angle_x(Deg(pitch)))
+            .invert()
+            .expect("eye"),
+            frustum: EyeFrustum::symmetric(Rad(1.4), 1.0, 0.05, 1e8),
+        };
+        view.set_external_view(external(0.0, 2000.0), &projection)
+            .expect("eye");
+        let zoom = view.style_zoom().value();
+        for pitch in [30.0, 60.0, 80.0, 90.0, 110.0, 170.0] {
+            view.set_external_view(external(pitch, 2000.0), &projection)
+                .expect("turned eye");
+            assert!(
+                (view.style_zoom().value() - zoom).abs() < 1e-8,
+                "head pitch {pitch} changed style zoom"
+            );
+            assert!(
+                view.eye_settled(),
+                "looking around cannot suppress refinement"
+            );
+        }
+        view.set_external_view(external(60.0, 4000.0), &projection)
+            .expect("moved eye");
+        assert!(
+            view.style_zoom().value() < zoom - 0.7,
+            "physical movement must still change scale"
+        );
+    }
+}

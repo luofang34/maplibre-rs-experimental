@@ -48,7 +48,7 @@ pub fn upload_system(
     };
 
     textures.retain(&world.tiles);
-    let zoom = view_state.zoom().level();
+    let zoom = view_state.style_zoom().level();
 
     {
         upload_symbol_layer(

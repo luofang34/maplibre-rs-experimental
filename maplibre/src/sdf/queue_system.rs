@@ -36,7 +36,10 @@ pub fn queue_system(
         let start = index as u64 * stride;
         let shape = TileShape::with_buffer_range(*coords, view_state.zoom(), start..start + stride);
         for layer in pool.index().get_layers(*coords).into_iter().flatten() {
-            if !layer.style_layer.is_visible_at(view_state.zoom().value()) {
+            if !layer
+                .style_layer
+                .is_visible_at(view_state.style_zoom().value())
+            {
                 continue;
             }
             phase.add(TranslucentItem {

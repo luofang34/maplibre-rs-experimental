@@ -121,7 +121,9 @@ impl Placement<'_> {
         if clip.w <= 0.0 {
             return None;
         }
-        let ratio = if alignment[0] > 0.5 {
+        let ratio = if self.view.has_external_view() {
+            1.0
+        } else if alignment[0] > 0.5 {
             clip.w / f64::from(self.projection.center_clip_w)
         } else {
             f64::from(self.projection.center_clip_w) / clip.w
@@ -251,7 +253,7 @@ impl Placement<'_> {
         let count = 2_f64.powi(i32::from(u8::from(self.coords.z)));
         let y = (f64::from(self.coords.y) + self.anchor[1] / 4096.0) / count;
         let cos_lat = 1.0 / (std::f64::consts::PI * (1.0 - 2.0 * y)).cosh();
-        8.0 * self.view.zoom().scale_to_tile(&self.coords)
+        8.0 * self.view.style_zoom().scale_to_tile(&self.coords)
             * (1.0 - f64::from(self.projection.transition)
                 + f64::from(self.projection.transition) / cos_lat.max(1e-6))
     }

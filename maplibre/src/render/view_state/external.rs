@@ -82,7 +82,7 @@ pub(super) struct ExternalEye {
     sphere: SphereEye,
     /// Pixel focal length of the host frustum, unaffected by request overscan.
     lod_focal_pixels: f64,
-    /// The map zoom the eye implies.
+    /// Physical scale used for cartographic styling, independent of gaze.
     zoom: f64,
     /// How much that zoom moved since the previous eye: a flight or a hand zoom in progress.
     zoom_rate: f64,
@@ -145,7 +145,9 @@ impl ViewState {
                 external.anchor.altitude_meters,
             );
         }
-        let zoom = self.zoom().value();
+        let nadir = crate::projection::globe::unit_sphere_to_lat_lon(sphere.position.normalize());
+        let height = ((sphere.position.magnitude() - 1.0) * body.radius_meters).max(1.0);
+        let zoom = self.zoom_for_center_distance(height, nadir).value();
         let zoom_rate = self
             .external_eye
             .map_or(0.0, |previous| (zoom - previous.zoom).abs());

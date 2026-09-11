@@ -71,7 +71,7 @@ impl System for CollisionSystem {
             .get::<super::covering::SymbolCovering>()
             .map(|covering| covering.tiles.iter().copied().collect())
             .unwrap_or_default();
-        let mut layers = visible_layers(world, style, view_state.zoom().value(), &seen);
+        let mut layers = visible_layers(world, style, view_state.style_zoom().value(), &seen);
         let new_content = layers.iter().any(|(_, layer, _)| {
             allocation(world, layer.coords, &layer.style_layer_id)
                 != self
@@ -159,9 +159,15 @@ fn place_layer(
         };
         layer.new_buffer.buffer.vertices.len()
     ];
-    let uniforms = SymbolUniforms::new(paint, view_state.zoom().value(), [1, 1]);
+    let uniforms = SymbolUniforms::new(paint, view_state.style_zoom().value(), [1, 1]);
     for (feature_index, feature) in layer.features.iter().enumerate() {
-        let ground = symbol_elevation(world, layer, feature, paint, view_state.zoom().value());
+        let ground = symbol_elevation(
+            world,
+            layer,
+            feature,
+            paint,
+            view_state.style_zoom().value(),
+        );
         let rectangles = local_zoom_visible(
             layer.coords,
             feature,
@@ -173,8 +179,11 @@ fn place_layer(
         .then(|| screen_boxes(layer, feature, ground, view_state, projection, &uniforms))
         .flatten()
         .unwrap_or([None, None]);
-        let rules =
-            rules::PlacementRules::new(paint, &feature.data.properties, view_state.zoom().value());
+        let rules = rules::PlacementRules::new(
+            paint,
+            &feature.data.properties,
+            view_state.style_zoom().value(),
+        );
         let visible = rules.place(rectangles, boxes, [view_state.width(), view_state.height()]);
         if visible.iter().any(|v| *v) {
             placed.0.push(PlacedSymbol {
@@ -232,11 +241,9 @@ fn local_zoom_visible(
     if clip.w <= 0.0 {
         return false;
     }
-    let zoom = view.zoom().value()
+    let zoom = view.style_zoom().value()
         + if view.has_external_view() {
-            (f64::from(projection.center_clip_w) / clip.w)
-                .log2()
-                .min(0.0)
+            view.symbol_distance_ratio(clip).log2().min(0.0)
         } else {
             0.0
         };

@@ -127,7 +127,7 @@ pub(super) fn update(
             .unwrap_or_default()
     } else {
         select(&targets(world), |coords| {
-            ready(world, style, view.zoom().value(), coords)
+            ready(world, style, view.style_zoom().value(), coords)
         })
     };
     let entries: Vec<_> = tiles.iter().map(|coords| metadata(*coords, view)).collect();
@@ -157,7 +157,7 @@ pub(super) fn update(
 
 fn metadata(coords: WorldTileCoords, view: &ViewState) -> ShaderTileMetadata {
     let zoom = view.zoom();
-    let zoom_factor = zoom.scale_to_tile(&coords) as f32;
+    let zoom_factor = view.style_zoom().scale_to_tile(&coords) as f32;
     ShaderTileMetadata {
         transform: view
             .gpu_view_projection()

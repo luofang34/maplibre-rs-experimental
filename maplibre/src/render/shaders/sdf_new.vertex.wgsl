@@ -55,7 +55,10 @@ fn main(
     let projected = project_tile_position_3d(vec3<f32>(anchor, elevation), transform, tile_mercator_coords);
     let distance_ratio = select(projection.transition_and_padding.y / max(projected.clip_position.w, 1e-6),
         projected.clip_position.w / max(projection.transition_and_padding.y, 1e-6), alignment.x > 0.5);
-    let perspective_ratio = clamp(0.5 + 0.5 * distance_ratio, 0.0, 4.0);
+    // A tracked eye changes direction independently of map zoom. Viewport labels
+    // retain their angular size; map-aligned text gets perspective from its geometry.
+    let perspective_ratio = select(clamp(0.5 + 0.5 * distance_ratio, 0.0, 4.0),
+        1.0, projection.transition_and_padding.w > 0.5);
     let size = metrics.x * perspective_ratio;
     let scale = select(size, size / 24.0, is_text);
     var world_angle = 0.0;

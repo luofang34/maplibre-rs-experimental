@@ -170,3 +170,47 @@ async fn external_eye_roll_preserves_world_label_orientation_and_readability() {
     }
     assert_eq!(read_blocking(&map), initial);
 }
+
+#[tokio::test]
+async fn head_pitch_does_not_resize_cartographic_labels() {
+    let mut style = style(0.0, "ground");
+    let Some(LayerPaint::Symbol(paint)) = &mut style.layers[2].paint else {
+        panic!("paint");
+    };
+    paint.properties.insert(
+        "text-size".into(),
+        serde_json::json!(["interpolate", ["linear"], ["zoom"], 8, 12, 18, 36]),
+    );
+    let layers = layers(&style);
+    let mut map = fixture_map(style, layers, 1).await;
+    let mut widths = Vec::new();
+    for pitch in [0.0, 15.0, 30.0, 15.0, 0.0] {
+        map.run_xr_frame(XrFrame {
+            opaque_environment: true,
+            timestamp: std::time::Duration::ZERO,
+            placement: ScenePlacement {
+                anchor: ExternalAnchor {
+                    position: LatLon::new(-0.04394530819, 0.0439453125),
+                    altitude_meters: 1200.0,
+                },
+                world_from_scene: Matrix4::identity(),
+            },
+            eyes: vec![XrEye {
+                world_from_eye: Matrix4::from_translation(Vector3::new(0.0, 0.0, 500.0))
+                    * Matrix4::from_angle_x(Deg(pitch)),
+                frustum: EyeFrustum::symmetric(Rad(1.4), 1.0, 0.05, 1e8),
+                target: EyeTarget::default(),
+            }],
+            request_overscan: 1.0,
+            prefetch: None,
+        })
+        .expect("head pitch frame");
+        let (count, bounds) = colored_bounds(&read_blocking(&map), 0);
+        assert!(count > 70, "label must remain visible at pitch {pitch}");
+        widths.push(bounds[2] - bounds[0]);
+    }
+    assert!(
+        widths.iter().all(|w| w.abs_diff(widths[0]) <= 2),
+        "pixel widths: {widths:?}"
+    );
+}

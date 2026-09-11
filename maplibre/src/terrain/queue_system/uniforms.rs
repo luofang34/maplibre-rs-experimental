@@ -170,7 +170,7 @@ pub(super) fn terrain_fog(style: &Style, view_state: &ViewState) -> TerrainFog {
     let Some(sky) = &style.sky else {
         return TerrainFog::default();
     };
-    let colors = sky.colors_at(view_state.zoom().value());
+    let colors = sky.colors_at(view_state.style_zoom().value());
     let (near, far) = view_state.fog_depth_range();
     let meters = view_state.eye_fog_meters_per_pixel().unwrap_or(1.0);
     let (near, far) = (near * meters, far * meters);
