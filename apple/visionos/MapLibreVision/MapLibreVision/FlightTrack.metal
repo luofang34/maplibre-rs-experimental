@@ -1,15 +1,22 @@
 #include <metal_stdlib>
 using namespace metal;
 
-struct FlightVertex { float4 position; float4 color; };
-struct FlightFragment { float4 position [[position]]; float4 color; };
+struct FlightVertex { float4 position; float4 color; float4 capsule; };
+struct FlightFragment { float4 position [[position]]; float4 color; float4 capsule [[center_no_perspective]]; };
 
 vertex FlightFragment flightTrackVertex(uint id [[vertex_id]], constant FlightVertex *vertices [[buffer(0)]]) {
-    return {vertices[id].position, vertices[id].color};
+    return {vertices[id].position, vertices[id].color, vertices[id].capsule};
 }
 
 fragment float4 flightTrackFragment(FlightFragment in [[stage_in]]) {
-    return in.color;
+    float coverage = 1;
+    if (in.capsule.w > 0) {
+        const float2 delta = float2(in.capsule.x - clamp(in.capsule.x, 0.0f, in.capsule.z), in.capsule.y);
+        const float distance = length(delta) - in.capsule.w;
+        coverage = 1 - smoothstep(-0.75f, 0.75f, distance);
+    }
+    const float alpha = in.color.a * coverage;
+    return float4(in.color.rgb * alpha, alpha);
 }
 
 struct HUDVertex { float4 position; float2 uv; };
@@ -25,7 +32,7 @@ fragment float4 flightHUDFragment(HUDFragment in [[stage_in]], texture2d<float> 
 }
 
 struct SymbolVertex { float4 position; float4 color; float edge; };
-struct SymbolFragment { float4 position [[position]]; float4 color; float edge; };
+struct SymbolFragment { float4 position [[position]]; float4 color; float edge [[center_no_perspective]]; };
 vertex SymbolFragment flightSymbolVertex(uint id [[vertex_id]], constant SymbolVertex* vertices [[buffer(0)]]) {
     return {vertices[id].position, vertices[id].color, vertices[id].edge};
 }

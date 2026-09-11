@@ -6,6 +6,7 @@ final class TrackOverlayRenderer {
     struct Vertex {
         var position: SIMD4<Float>
         var color: SIMD4<Float>
+        var capsule: SIMD4<Float> = .zero
     }
     private let pipeline: MTLRenderPipelineState
     private let depth: MTLDepthStencilState
@@ -24,7 +25,13 @@ final class TrackOverlayRenderer {
         let descriptor = MTLRenderPipelineDescriptor()
         descriptor.vertexFunction = vertex
         descriptor.fragmentFunction = fragment
-        descriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
+        let color = descriptor.colorAttachments[0]
+        color?.pixelFormat = .bgra8Unorm
+        color?.isBlendingEnabled = true
+        color?.sourceRGBBlendFactor = .one
+        color?.destinationRGBBlendFactor = .oneMinusSourceAlpha
+        color?.sourceAlphaBlendFactor = .one
+        color?.destinationAlphaBlendFactor = .oneMinusSourceAlpha
         descriptor.depthAttachmentPixelFormat = .depth32Float
         pipeline = try device.makeRenderPipelineState(descriptor: descriptor)
         let state = MTLDepthStencilDescriptor()
@@ -87,15 +94,8 @@ final class TrackOverlayRenderer {
 
     private func appendSegment(_ a: SIMD4<Float>, _ b: SIMD4<Float>, width: Float,
                                size: SIMD2<Float>, color: SIMD4<Float>, vertices: inout [Vertex]) {
-        // Segments through the near plane cannot be expanded safely in screen space.
-        guard a.w > 0.01, b.w > 0.01, a.z >= 0, b.z >= 0 else { return }
-        let delta = (SIMD2(b.x, b.y) / b.w - SIMD2(a.x, a.y) / a.w) * size
-        guard simd_length_squared(delta) > 0.001 else { return }
-        let normal = simd_normalize(SIMD2(-delta.y, delta.x)) * width / size
-        let offsetA = SIMD4<Float>(normal.x * a.w, normal.y * a.w, 0, 0)
-        let offsetB = SIMD4<Float>(normal.x * b.w, normal.y * b.w, 0, 0)
-        for point in [a - offsetA, b - offsetB, a + offsetA, a + offsetA, b - offsetB, b + offsetB] {
-            vertices.append(Vertex(position: point, color: color))
+        FlightStroke.forEachCorner(a, b, width: width, viewport: size) { corner in
+            vertices.append(Vertex(position: corner.position, color: color, capsule: corner.capsule))
         }
     }
 
