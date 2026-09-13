@@ -1,50 +1,73 @@
+//! WGSL validation with relative include expansion.
+use naga::{
+    front::wgsl,
+    valid::{Capabilities, ValidationError, ValidationFlags, Validator},
+};
 use std::{
     collections::HashSet,
-    env, io,
+    env,
+    io::{self, Write},
     path::{Path, PathBuf},
-    process::exit,
-};
-
-use naga::{
-    front::{wgsl, wgsl::ParseError},
-    valid::{Capabilities, ValidationError, ValidationFlags, Validator},
-    SourceLocation,
 };
 use walkdir::WalkDir;
 
-#[derive(Debug)]
+/// A shader build failure with its path and original cause.
+#[derive(Debug, thiserror::Error)]
 pub enum WgslError {
-    ValidationErr(ValidationError),
-    ParserErr {
-        error: String,
-        location: Option<SourceLocation>,
+    /// An included file could not be read or expanded.
+    #[error("loading shader {}: {source}", path.display())]
+    Io {
+        /// Shader file path.
+        path: PathBuf,
+        /// Underlying I/O failure.
+        #[source]
+        source: io::Error,
     },
-    IoErr(std::io::Error),
-}
-
-impl From<std::io::Error> for WgslError {
-    fn from(err: std::io::Error) -> Self {
-        Self::IoErr(err)
-    }
-}
-
-impl WgslError {
-    pub fn from_parse_err(err: ParseError, src: &str) -> Self {
-        let location = err.location(src);
-        let error = err.message().to_string();
-        Self::ParserErr { error, location }
-    }
+    /// WGSL syntax is invalid.
+    #[error("parsing shader {}: {source}", path.display())]
+    Parse {
+        /// Shader entry path.
+        path: PathBuf,
+        /// Parser diagnostics, including source spans.
+        #[source]
+        source: wgsl::ParseError,
+    },
+    /// A parsed shader violates WGSL validation rules.
+    #[error("validating shader {}: {source}", path.display())]
+    Validation {
+        /// Shader entry path.
+        path: PathBuf,
+        /// Validation diagnostics, including source spans.
+        #[source]
+        source: Box<naga::WithSpan<ValidationError>>,
+    },
+    /// Cargo did not supply a usable manifest directory.
+    #[error("reading CARGO_MANIFEST_DIR: {0}")]
+    Manifest(#[from] env::VarError),
+    /// A directory entry could not be inspected.
+    #[error("walking shader sources: {0}")]
+    Walk(#[from] walkdir::Error),
+    /// Cargo build instructions could not be written.
+    #[error("writing cargo shader instructions: {0}")]
+    Output(#[source] io::Error),
 }
 
 fn validate_wgsl(validator: &mut Validator, path: &Path) -> Result<(), WgslError> {
-    let shader = load_wgsl(path, &mut HashSet::new()).map_err(WgslError::from)?;
-    let module = wgsl::parse_str(&shader).map_err(|err| WgslError::from_parse_err(err, &shader))?;
-
-    if let Err(err) = validator.validate(&module) {
-        Err(WgslError::ValidationErr(err.into_inner()))
-    } else {
-        Ok(())
-    }
+    let shader = load_wgsl(path, &mut HashSet::new()).map_err(|source| WgslError::Io {
+        path: path.into(),
+        source,
+    })?;
+    let module = wgsl::parse_str(&shader).map_err(|source| WgslError::Parse {
+        path: path.into(),
+        source,
+    })?;
+    validator
+        .validate(&module)
+        .map_err(|source| WgslError::Validation {
+            path: path.into(),
+            source: Box::new(source),
+        })?;
+    Ok(())
 }
 
 fn load_wgsl(path: &Path, active: &mut HashSet<PathBuf>) -> io::Result<String> {
@@ -74,60 +97,26 @@ fn load_wgsl(path: &Path, active: &mut HashSet<PathBuf>) -> io::Result<String> {
     Ok(expanded)
 }
 
-pub fn validate_project_wgsl() {
+/// Validates shaders below Cargo's manifest directory and emits rebuild instructions.
+///
+/// Errors retain shader paths and parser, validation, or filesystem diagnostics.
+pub fn validate_project_wgsl_blocking() -> Result<(), WgslError> {
+    let root = env::var("CARGO_MANIFEST_DIR")?;
+    validate_directory_blocking(Path::new(&root), &mut io::stdout().lock())
+}
+
+fn validate_directory_blocking(root: &Path, output: &mut impl Write) -> Result<(), WgslError> {
     let mut validator = Validator::new(ValidationFlags::all(), Capabilities::all());
-
-    let root_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
-    let dir_walk = WalkDir::new(&root_dir);
-    let dir_walk = dir_walk.into_iter().filter_entry(|e| {
-        let path = e.path();
-
-        if !path.is_dir() {
-            path.extension().map(|ext| ext == "wgsl").unwrap_or(false)
-        } else {
-            true
-        }
-    });
-
-    for entry in dir_walk {
-        match entry {
-            Ok(entry) => {
-                let path = entry.path();
-                if !path.is_dir() {
-                    println!("cargo:rerun-if-changed={}", path.display());
-                    match validate_wgsl(&mut validator, path) {
-                        Ok(_) => {}
-                        Err(err) => {
-                            let path = path.strip_prefix(&root_dir).unwrap_or(path);
-                            panic!(
-                                "{}{}",
-                                path.to_str().unwrap(),
-                                match err {
-                                    WgslError::ValidationErr(error) => format!(": {error}"),
-                                    WgslError::ParserErr { error, location } =>
-                                        if let Some(SourceLocation {
-                                            line_number,
-                                            line_position,
-                                            ..
-                                        }) = location
-                                        {
-                                            format!(":{line_number}:{line_position} {error}")
-                                        } else {
-                                            error
-                                        },
-                                    WgslError::IoErr(error) => format!(": {error}"),
-                                }
-                            );
-                        }
-                    };
-                }
-            }
-            Err(error) => {
-                println!("cargo:warning={error:?}");
-                exit(1);
-            }
+    for entry in WalkDir::new(root) {
+        let entry = entry?;
+        let path = entry.path();
+        if entry.file_type().is_file() && path.extension().is_some_and(|ext| ext == "wgsl") {
+            writeln!(output, "cargo:rerun-if-changed={}", path.display())
+                .map_err(WgslError::Output)?;
+            validate_wgsl(&mut validator, path)?;
         }
     }
+    Ok(())
 }
 
 #[cfg(test)]

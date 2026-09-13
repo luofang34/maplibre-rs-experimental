@@ -21,3 +21,4 @@ log.workspace = true
 rusqlite = { workspace = true, optional = true }
 serde_json.workspace = true
 flate2.workspace = true
+thiserror.workspace = true
