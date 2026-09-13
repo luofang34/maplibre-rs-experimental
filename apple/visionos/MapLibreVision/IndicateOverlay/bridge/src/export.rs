@@ -86,3 +86,17 @@ pub extern "C" fn indicate_svs_directions(input: ReplayTelemetry) -> AngularScen
 pub extern "C" fn indicate_svs_reference(input: ReplayTelemetry) -> ViewReference {
     view_reference(&resolve_replay(input))
 }
+
+/// Chooses compact instruments using the shared HWD visibility and attitude policy.
+#[unsafe(no_mangle)]
+pub extern "C" fn indicate_svs_compact(
+    input: ReplayTelemetry,
+    alignment_cosine: f32,
+    was_compact: u32,
+) -> u32 {
+    u32::from(indicate_instrument_hmd::use_compact(
+        &resolve_replay(input),
+        alignment_cosine,
+        was_compact != 0,
+    ))
+}

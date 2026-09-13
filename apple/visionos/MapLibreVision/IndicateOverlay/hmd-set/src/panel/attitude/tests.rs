@@ -13,7 +13,7 @@ fn nose_up_moves_horizon_down_and_right_bank_raises_right_end() {
     ] {
         let (a, b) = horizon(Sig::valid(2.0), Sig::valid(pitch)).expect("bounded attitude");
         for p in [a, b] {
-            assert!((p[0] * p[0] + p[1] * p[1] - 34.0 * 34.0).abs() < 0.01);
+            assert!((p[0] * p[0] + p[1] * p[1] - RADIUS * RADIUS).abs() < 0.01);
         }
     }
 }

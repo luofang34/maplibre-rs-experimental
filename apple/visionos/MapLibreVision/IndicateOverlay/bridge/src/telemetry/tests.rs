@@ -113,3 +113,24 @@ fn aircraft_heading_and_track_are_independent_of_the_view_bearing() {
     assert!(track.iter().any(|text| text == "TRK T"));
     assert!(track.iter().any(|text| text == "57"));
 }
+
+#[test]
+fn layout_policy_preserves_hysteresis_and_compacts_unusual_attitude() {
+    let between = libm::cosf(31_f32.to_radians());
+    assert_eq!(crate::indicate_svs_compact(gps(), between, 0), 0);
+    assert_eq!(crate::indicate_svs_compact(gps(), between, 1), 1);
+    let inverted = ReplayTelemetry {
+        present: 63,
+        roll: core::f32::consts::PI,
+        ..gps()
+    };
+    assert_eq!(crate::indicate_svs_compact(inverted, 1.0, 0), 1);
+    assert_eq!(
+        crate::indicate_svs_directions(ReplayTelemetry {
+            age_ms: 1000.0,
+            ..gps()
+        })
+        .length,
+        0
+    );
+}
