@@ -35,4 +35,4 @@ codegen-units = 1
 
 [workspace.metadata.indicate-hmd]
 repository = "https://github.com/luofang34/Indicate"
-revision = "47af6655bacd9bfcd457ce585326289f824d41ca"
+revision = "5e591224b0831dde123e7982c5c1b752fb2b8078"

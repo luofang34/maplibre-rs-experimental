@@ -1,5 +1,5 @@
 //! Aircraft or explicitly track-level reference for a collimated virtual instrument panel.
-use super::{HeadingReference, PanelData, vector::*};
+use super::{HeadingReference, PanelData, live, vector::*};
 
 /// Local east/north/up axes; independent of the observer's head and either eye.
 #[derive(Clone, Copy, Default)]
@@ -17,14 +17,14 @@ pub struct ViewReference {
 
 /// Resolves a panel reference without substituting track for measured aircraft attitude.
 pub fn view_reference(data: &PanelData) -> ViewReference {
-    let aircraft = data.heading.value_rad.status.shows_value()
+    let aircraft = live(data.heading.value_rad)
         && matches!(
             data.heading.reference,
             HeadingReference::True | HeadingReference::SimLocalTrue
         )
-        && data.pitch_rad.status.shows_value()
-        && data.roll_rad.status.shows_value();
-    if !aircraft && !data.track_rad.status.shows_value() {
+        && live(data.pitch_rad)
+        && live(data.roll_rad);
+    if !aircraft && !live(data.track_rad) {
         return ViewReference::default();
     }
     let (heading, pitch, roll) = if aircraft {

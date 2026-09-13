@@ -59,12 +59,15 @@ final class FlightHUDRenderer {
     func draw(frame: FlightReplay.Frame, head: simd_float4x4, placement: MapPlacement, terrainValid: Bool, boarding: Bool,
               drawable: LayerRenderer.Drawable, command: MTLCommandBuffer) {
         guard frame.view == .fpv || frame.returnSeconds != nil else { return }
-        let reference = indicate_svs_reference(FlightTelemetry.resolve(frame))
+        let telemetry = FlightTelemetry.resolve(frame)
+        let reference = indicate_svs_reference(telemetry)
         func vector(_ v: (Float, Float, Float)) -> SIMD3<Float> { [v.0, v.1, v.2] }
         let instrument = FlightViewBasis.instrument(rotation: placement.current.rotation,
             right: vector(reference.right), up: vector(reference.up), forward: vector(reference.forward))
-        let nextGlance = reference.kind == 0 || boarding || frame.view != .fpv
-            || FlightViewBasis.useGlance(wasGlancing: glancing, head: head, instrument: instrument)
+        let alignment = simd_dot(SIMD3(head.columns.2.x, head.columns.2.y, head.columns.2.z),
+                                 SIMD3(instrument.columns.2.x, instrument.columns.2.y, instrument.columns.2.z))
+        let nextGlance = boarding || frame.view != .fpv
+            || indicate_svs_compact(telemetry, alignment, glancing ? 1 : 0) != 0
         let layoutChanged = glancing != nextGlance
         glancing = nextGlance
         let now = ProcessInfo.processInfo.systemUptime
@@ -108,7 +111,8 @@ final class FlightHUDRenderer {
 
     private func update(_ frame: FlightReplay.Frame, terrainValid: Bool, boarding: Bool) {
         let start = ProcessInfo.processInfo.systemUptime
-        let input = terrainValid && !boarding ? FlightTelemetry.resolve(frame) : ReplayTelemetry()
+        // Terrain availability cannot invalidate an independent aircraft-data source.
+        let input = FlightTelemetry.resolve(frame)
         var scene = glancing ? indicate_svs_glance(input) : indicate_svs_render(input)
         let length = scene.length <= 8192 ? Int(scene.length) : 0
         let bytes = withUnsafeBytes(of: &scene) { Array($0.dropFirst(4).prefix(length)) }

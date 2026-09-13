@@ -13,7 +13,7 @@ each eye and copies the rendered texture into the compositor drawable.
   the cargo registry into `vendor/` and widens their macOS/iOS gates to visionOS.
   `.cargo/config.toml` patches crates.io with those copies for this crate alone.
 - `MapLibreVision/project.yml`: the xcodegen spec of the app. `MapLibreVision/MapLibreVision/`
-  holds the Swift sources and the bundled `style.json` (Alpine dusk over OpenFreeMap tiles,
+  holds the Swift sources and the bundled `style.json` (daylight terrain over OpenFreeMap tiles,
   AWS Terrarium elevation worldwide, globe projection).
 
 ## Building for the simulator
@@ -33,13 +33,14 @@ xcodebuild -project MapLibreVision.xcodeproj -scheme MapLibreVision \
   -destination 'generic/platform=visionOS Simulator' -derivedDataPath build build
 xcrun simctl boot "Apple Vision Pro"
 xcrun simctl install booted build/Build/Products/Debug-xrsimulator/MapLibreVision.app
-xcrun simctl launch --console-pty booted com.sokolysystems.maplibre.vision --enter
+xcrun simctl launch --console-pty booted com.sokolysystems.maplibre.vision --mode immersive
 ```
 
-A fresh launch opens the persistent desk Volume. visionOS restores its placement.
+A fresh launch opens the map controls. Table globe and Immersive share one compositor scene.
+The app has no separate desk Volume.
 `--replay` opens the selected recording in FPV; `--track mach-loop --replay` opens the
-labeled simulation. `--replay-rate 4` accelerates replay. `--enter` opens free exploration.
-A device build needs the `aarch64-apple-visionos` target in `.cargo/config.toml`
+labeled simulation. `--replay-rate 4` accelerates replay. `--mode immersive` opens free exploration.
+A device build uses `cargo build --release --target aarch64-apple-visionos`
 and a signing team in the project.
 
 ## Flight replay
@@ -50,7 +51,7 @@ visible countdown returns to ownship; Stay free or selecting Free cancels it. Re
 to FPV or Chase eases to the aircraft before resuming. Look forward recenters the viewing
 reference. Selecting another recording leaves the free camera in place.
 
-The compact controls bar expands with Controls; a stationary scene pinch recalls it.
+The map controls use a standard window. A stationary scene pinch recalls that window.
 
 AirDrop, Open With, the Add to MapLibre Vision Share extension, and Import track accept GPX, timestamped absolute-altitude KML
 `gx:Track`, and flight JSON. Imports open in a preview and are stored locally after
@@ -63,15 +64,15 @@ MSL altitude. `indicatedAirspeed`, `roll`, `pitch`, and `heading` are optional. 
 stay absent. The importer rejects files over 8 MB or 20,000 samples. The library holds
 at most 20 imports. Segment breaks and gaps over 20 seconds are never interpolated.
 
-The transparent `svs-replay` set lives in `MapLibreVision/IndicateOverlay`, independently
-of Indicate's G5 set. The host uses pinned Indicate and IndicateAppleDisplay revisions.
+The transparent HWD set is developed in Indicate, independently of its G5 set.
+`MapLibreVision/IndicateOverlay` vendors that set and exposes its C ABI. The host uses pinned Indicate and IndicateAppleDisplay revisions.
 Readouts update at most 20 times per second in three shared IOSurfaces, with no pixel
 upload or idle reraster. Flight-referenced angular symbols are a separate, tested geometry
 unit: prograde, retrograde, and supplied-attitude boresight/horizon/pitch ladder. Metal
 projects them per eye using bounded reusable buffers. Head-following readouts do not rotate
 the flight-referenced symbols. The overlay reports missing, stale, and failed fields.
-GPS ground speed is never substituted for IAS. The FAA AC 20-185A PDF is available from
-SVS reference. This replay does not claim certification or operational navigation support.
+GPS ground speed is never substituted for IAS. Reference PDFs are not bundled.
+This replay does not claim certification or operational navigation support.
 
 Run `sh Scripts/check-flight-overlay.sh` from `MapLibreVision` for the Rust overlay gates,
 `swift test` for import, playback, camera, and interaction tests, and
@@ -101,7 +102,7 @@ be captured with `xcrun simctl io booted screenshot`.
   the viewer, the focus facing them with north upwards, with the room visible around it.
 - **Immersive**, in full immersion: the world at full size and level with the room, the
   viewer four kilometres above Innsbruck with the Alps as terrain, the horizon at eye level
-  under a night sky, distant ridges fading into haze. The sky is a gradient until a
+  under a daylight sky, distant ridges fading into haze. The sky is a gradient until a
   celestial layer exists.
 
 A short pinch selects a visible label or icon. Holding and dragging one pinch turns the
@@ -134,7 +135,7 @@ and angles from the eye, which steer the tile covering, and draws with matrices 
 the eye itself: on the globe the center is where the eye's view axis meets the sphere and
 the globe camera is the eye; on the flat map the eye's matrix replaces the camera's. It
 ingests tiles once per stereo frame, then renders each eye with its own matrices and the
-same terrain refinement, multisampled, and copies the frame's depth into
+same terrain refinement, and copies the frame's depth into
 the drawable's depth texture. The host commits its copies and the presentation on the
 map's own Metal queue (`maplibre_visionos_command_queue`), so they run after the map's
 draws without a wait on the CPU. When every view owns a whole colour texture that can be

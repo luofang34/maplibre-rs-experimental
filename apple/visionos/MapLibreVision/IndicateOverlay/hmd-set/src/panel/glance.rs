@@ -1,10 +1,10 @@
-//! A compact off-boresight readout keeps the outside view clear.
+//! An integrated off-axis instrument preserves aircraft attitude without implying outside-world alignment.
 use super::*;
 
-/// Minimal head-referenced readouts for looking away from the virtual instrument panel.
+/// Head-referenced speed, attitude, altitude, and vertical speed for looking away from the aircraft nose.
 pub const HMD_GLANCE_DESCRIPTOR: PanelDescriptor = PanelDescriptor {
     id: "hmd-glance",
-    title: "Head-mounted glance",
+    title: "Head-worn off-axis instruments",
     draw,
     ..HMD_DESCRIPTOR
 };
@@ -18,32 +18,43 @@ fn draw(
 ) -> Result<(), PanelDrawError> {
     config.require_schema(&[])?;
     scene.begin_layer(LayerId::Tapes)?;
-    let (speed, label, group) = if data.ias_kt.status.shows_value() {
-        (data.ias_kt, "IAS KT", GroupId::Air)
-    } else {
-        (data.gs_kt, "GS KT", GroupId::Kinematics)
-    };
-    readout(scene, label, speed, group, [270.0, 350.0])?;
-    let altitude = fmt_label!(16, "{} FT", data.altitude.class.label());
-    readout(
+    readout::value(
         scene,
-        altitude.as_str(),
-        data.altitude.value_ft,
-        if data.altitude.class == indicate_instrument_state::AltitudeClass::LocalRelative {
-            GroupId::Kinematics
-        } else {
-            GroupId::Air
-        },
-        [730.0, 350.0],
+        "IAS KT",
+        data.ias_kt,
+        GroupId::Air,
+        [378.0, 405.0],
+        27.0,
     )?;
-    readout(
+    readout::value(
+        scene,
+        "GS KT",
+        data.gs_kt,
+        GroupId::Kinematics,
+        [378.0, 491.0],
+        17.0,
+    )?;
+    let label = fmt_label!(16, "{} FT", data.altitude.class.label());
+    readout::value(
+        scene,
+        label.as_str(),
+        data.altitude.value_ft,
+        altitude_group(data),
+        [828.0, 405.0],
+        27.0,
+    )?;
+    readout::value(
         scene,
         "VS FPM",
         data.vsi_fpm,
         GroupId::Kinematics,
-        [500.0, 430.0],
+        [828.0, 491.0],
+        17.0,
     )?;
-    super::attitude::draw(data, scene)?;
+    attitude::draw(data, scene)?;
+    scene.fill_color(HUD_GREEN)?;
+    scene.text(600.0, 521.0, 12.0, Anchor::CENTER, "AIRCRAFT ATTITUDE")?;
+    heading::draw(data, scene)?;
     scene.end_layer(LayerId::Tapes)?;
-    annunciations(data, scene)
+    annunciation::draw(data, scene)
 }

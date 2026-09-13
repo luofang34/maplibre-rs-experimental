@@ -79,3 +79,39 @@ fn attitude_requires_true_heading_and_scene_remains_bounded() {
     assert!(scene.length > baseline && scene.length < 1024);
     assert_eq!(core::mem::size_of::<AngularScene>(), 24580);
 }
+
+#[test]
+fn stale_or_degraded_navigation_cannot_leave_green_world_cues() {
+    for status in [
+        indicate_instrument_state::SignalStatus::Stale,
+        indicate_instrument_state::SignalStatus::Degraded,
+    ] {
+        let mut data = data();
+        data.track_rad.status = status;
+        assert_eq!(directions(&data).length, 0);
+        assert_eq!(view_reference(&data).kind, 0);
+    }
+}
+
+#[test]
+fn recovery_removes_pitch_ladder_but_preserves_world_markers() {
+    let mut data = data();
+    data.heading.value_rad = Sig::valid(1.4);
+    data.heading.reference = HeadingReference::True;
+    data.roll_rad = Sig::valid(core::f32::consts::PI);
+    data.pitch_rad = Sig::valid(0.0);
+    data.presentation.unusual = false;
+    let normal = directions(&data);
+    data.presentation.unusual = true;
+    let recovery = directions(&data);
+    assert!(recovery.length < normal.length);
+    for (a, b) in recovery.strokes[..recovery.length as usize]
+        .iter()
+        .zip(normal.strokes.iter())
+    {
+        assert_eq!(a.a, b.a);
+        assert_eq!(a.b, b.b);
+    }
+    data.roll_rad = Sig::missing();
+    assert_eq!(recovery.length, directions(&data).length + 6);
+}
