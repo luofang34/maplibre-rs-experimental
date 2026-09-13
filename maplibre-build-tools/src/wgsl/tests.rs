@@ -1,3 +1,4 @@
+#![allow(clippy::expect_used, clippy::panic)]
 use std::{
     collections::HashSet,
     fs, io,
@@ -18,8 +19,9 @@ impl WgslFixture {
             .map_err(io::Error::other)?
             .as_nanos();
         let root = std::env::temp_dir().join(format!(
-            "maplibre-wgsl-include-{}-{nonce}",
-            std::process::id()
+            "maplibre-wgsl-include-{}-{:?}-{nonce}",
+            std::process::id(),
+            std::thread::current().id()
         ));
         fs::create_dir(&root)?;
         Ok(Self { root })
@@ -72,4 +74,22 @@ fn rejects_include_cycles() {
         .expect_err("include cycle should be rejected");
 
     assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+}
+
+#[test]
+fn invalid_shader_returns_its_path_and_parser_error() -> Result<(), Box<dyn std::error::Error>> {
+    let fixture = WgslFixture::new()?;
+    let path = fixture.write("broken.wgsl", "this is not a shader")?;
+    let result = super::validate_directory_blocking(&fixture.root, &mut Vec::new());
+    assert!(matches!(result, Err(super::WgslError::Parse { path: p, .. }) if p == path));
+    Ok(())
+}
+
+#[test]
+fn missing_directory_returns_a_walk_error() {
+    let result = super::validate_directory_blocking(
+        Path::new("/nonexistent-shader-source-directory"),
+        &mut Vec::new(),
+    );
+    assert!(matches!(result, Err(super::WgslError::Walk(_))));
 }
