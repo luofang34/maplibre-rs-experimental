@@ -3,16 +3,13 @@ use std::rc::Rc;
 use thiserror::Error;
 
 use crate::{
-    environment::OffscreenKernelConfig,
     headless::{
         environment::HeadlessEnvironment,
         graph_node::CopySurfaceBufferNode,
         system::WriteSurfaceBufferSystem,
         window::{HeadlessMapWindow, HeadlessMapWindowConfig},
     },
-    io::apc::SchedulerAsyncProcedureCall,
-    kernel::{Kernel, KernelBuilder},
-    platform::{http_client::ReqwestHttpClient, scheduler::TokioScheduler},
+    kernel::Kernel,
     plugin::Plugin,
     render::settings::RendererSettings,
     render::{
@@ -80,19 +77,7 @@ pub async fn create_headless_renderer_with_settings(
 ) -> Result<(Kernel<HeadlessEnvironment>, Renderer), HeadlessRendererError> {
     let size = PhysicalSize::new(width, height)
         .ok_or(HeadlessRendererError::InvalidSize { width, height })?;
-    let client = ReqwestHttpClient::new(cache_path.clone());
-    let kernel = KernelBuilder::new()
-        .with_map_window_config(HeadlessMapWindowConfig::new(size))
-        .with_http_client(client.clone())
-        // Tiles are fetched by the offscreen kernel, so it is the one that needs the cache.
-        .with_apc(SchedulerAsyncProcedureCall::new(
-            TokioScheduler::new(),
-            OffscreenKernelConfig {
-                cache_directory: cache_path,
-            },
-        ))
-        .with_scheduler(TokioScheduler::new())
-        .build();
+    let kernel = environment::create_kernel(size, cache_path);
 
     let mwc: &HeadlessMapWindowConfig = kernel.map_window_config();
     let window: HeadlessMapWindow = mwc
@@ -131,6 +116,7 @@ fn attach_surface_copy_node(
 pub struct HeadlessPlugin {
     write_to_disk: bool,
     preserve_tile_sources: bool,
+    retain_supplied_tiles: bool,
 }
 
 impl HeadlessPlugin {
@@ -138,12 +124,20 @@ impl HeadlessPlugin {
         Self {
             write_to_disk,
             preserve_tile_sources: false,
+            retain_supplied_tiles: false,
         }
     }
 
     /// Keeps source availability checks active for parent/child tile fallback.
     pub fn preserve_tile_sources(mut self) -> Self {
         self.preserve_tile_sources = true;
+        self
+    }
+
+    /// Keeps all supplied tiles resident when no source can reload evicted data.
+    /// The host must bound the size of its offline package before loading it.
+    pub fn retain_supplied_tiles(mut self) -> Self {
+        self.retain_supplied_tiles = true;
         self
     }
 }
@@ -157,20 +151,24 @@ impl Plugin<HeadlessEnvironment> for HeadlessPlugin {
         graph: &mut RenderGraph,
     ) {
         let resources = &mut world.resources;
+        if self.retain_supplied_tiles {
+            resources.insert(crate::render::RetainLoadedTiles);
+        }
 
         let Some(draw_graph) = graph.get_sub_graph_mut(draw_graph::NAME) else {
             tracing::error!("headless draw subgraph is unavailable");
             return;
         };
-        if let Err(error) = attach_surface_copy_node(draw_graph) {
-            tracing::error!(?error, "cannot attach headless surface copy node");
-            return;
+        if self.write_to_disk {
+            if let Err(error) = attach_surface_copy_node(draw_graph) {
+                tracing::error!(?error, "cannot attach headless surface copy node");
+                return;
+            }
+            schedule.add_system_to_stage(
+                RenderStageLabel::Cleanup,
+                SystemContainer::new(WriteSurfaceBufferSystem::new(true)),
+            );
         }
-
-        schedule.add_system_to_stage(
-            RenderStageLabel::Cleanup,
-            SystemContainer::new(WriteSurfaceBufferSystem::new(self.write_to_disk)),
-        );
 
         // FIXME tcs: Is this good style?
         schedule.remove_stage(RenderStageLabel::Extract);

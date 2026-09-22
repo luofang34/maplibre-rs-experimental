@@ -63,12 +63,16 @@ pub struct TileRetention {
     frame: u64,
 }
 
+/// Offline hosts cannot replace an evicted tile without an active source loader.
+pub(crate) struct RetainLoadedTiles;
+
 /// Drops the least recently used tiles beyond the cache budget and releases their GPU data.
 pub fn retention_system(
     MapContext {
         world,
         style,
         view_state,
+        #[cfg(not(target_arch = "wasm32"))]
         renderer,
         ..
     }: &mut MapContext,
@@ -85,6 +89,7 @@ pub fn retention_system(
     }
     if view_state.has_external_view() {
         summarize_residency(world, drawn, in_use.len(), view_state.eye_settled());
+        #[cfg(not(target_arch = "wasm32"))]
         summarize_gpu_objects(world, renderer);
         summarize_timings(world);
     }
@@ -93,6 +98,7 @@ pub fn retention_system(
 
 /// Once a second, how many GPU objects the frame keeps alive, for a host whose footprint
 /// climbs while nothing loads: the kind whose count climbs with it is the one leaking.
+#[cfg(not(target_arch = "wasm32"))]
 fn summarize_gpu_objects(world: &World, renderer: &crate::render::Renderer) {
     let frame = world
         .resources
@@ -289,6 +295,16 @@ pub(crate) fn evict_stale_tiles(
     in_use: &HashSet<WorldTileCoords>,
     view_tiles: usize,
 ) -> Vec<WorldTileCoords> {
+    if world.resources.get::<RetainLoadedTiles>().is_some() {
+        return evict_beyond(
+            world,
+            in_use,
+            CacheBudget {
+                tiles: usize::MAX,
+                bytes: usize::MAX,
+            },
+        );
+    }
     // A host nearly out of memory keeps nothing beyond what the frame draws from.
     let critical = world
         .resources

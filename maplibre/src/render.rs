@@ -65,6 +65,8 @@ pub mod eye_covering;
 pub mod memory_budget;
 #[cfg(all(test, feature = "headless"))]
 pub(crate) use systems::retention_system::drawn_tiles;
+#[cfg(feature = "headless")]
+pub(crate) use systems::retention_system::RetainLoadedTiles;
 pub mod frame_input;
 pub mod projection;
 pub mod render_commands;
@@ -298,8 +300,7 @@ impl Renderer {
         #[cfg(target_arch = "wasm32")]
         let trace_path = None;
 
-        let mut features =
-            adapter.features() | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES;
+        let mut features = adapter.features();
         if adapter_info.device_type == wgpu::DeviceType::DiscreteGpu {
             // `MAPPABLE_PRIMARY_BUFFERS` can have a significant, negative performance impact for
             // discrete GPUs due to having to transfer data across the PCI-E bus and so it
