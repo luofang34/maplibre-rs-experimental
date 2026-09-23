@@ -19,8 +19,9 @@ runs:
   using: "composite"
   steps:
     - name: Publish
-      uses: cloudflare/wrangler-action@v3
+      uses: cloudflare/wrangler-action@25853364521e0d392ece9b0c1e97a4b37b638087 # v4.1.2
       with:
+        wranglerVersion: "3"
         apiToken: ${{ inputs.CF_API_TOKEN }}
         accountId: ${{ inputs.CF_ACCOUNT_ID }}
         command: pages deploy --branch main --project-name=${{ inputs.project }} ${{ inputs.source }}
