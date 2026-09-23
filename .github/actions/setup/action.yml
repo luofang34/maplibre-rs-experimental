@@ -48,7 +48,7 @@ runs:
       if: ${{ inputs.targets && inputs.nightly  }}
       shell: bash
       run: just nightly-targets ${{ inputs.targets }}
-    - uses: Swatinem/rust-cache@v2
+    - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
     # Install just again because Swatinem/rust-cache might remove it while restoring the cache
     - name: Install just
       uses: ./.github/actions/cargo-install
