@@ -36,6 +36,7 @@ use crate::{
 };
 
 mod processed;
+pub mod reference;
 mod symbols;
 mod xr;
 
