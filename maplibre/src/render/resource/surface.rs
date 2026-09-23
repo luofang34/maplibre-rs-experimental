@@ -117,6 +117,44 @@ pub struct BufferedTextureHead {
     buffer_dimensions: BufferDimensions,
 }
 
+impl BufferedTextureHead {
+    fn new(
+        device: &wgpu::Device,
+        size: PhysicalSize,
+        format: wgpu::TextureFormat,
+        features: TextureFormatFeatures,
+    ) -> Self {
+        let dimensions = BufferDimensions::new(size);
+        let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("BufferedTextureHead buffer"),
+            size: (dimensions.padded_bytes_per_row * dimensions.height) as u64,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Surface texture"),
+            size: wgpu::Extent3d {
+                width: size.width(),
+                height: size.height(),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[format],
+        });
+        Self {
+            texture,
+            texture_format: format,
+            texture_format_features: features,
+            output_buffer,
+            buffer_dimensions: dimensions,
+        }
+    }
+}
+
 #[cfg(feature = "headless")]
 #[derive(thiserror::Error, Debug)]
 pub enum WriteImageError {
@@ -248,51 +286,17 @@ impl Surface {
     {
         let size = window.size();
 
-        // It is a WebGPU requirement that ImageCopyBuffer.layout.bytes_per_row % wgpu::COPY_BYTES_PER_ROW_ALIGNMENT == 0
-        // So we calculate padded_bytes_per_row by rounding unpadded_bytes_per_row
-        // up to the next multiple of wgpu::COPY_BYTES_PER_ROW_ALIGNMENT.
-        // https://en.wikipedia.org/wiki/Data_structure_alignment#Computing_padding
-        let buffer_dimensions = BufferDimensions::new(size);
-
-        // The output buffer lets us retrieve the data as an array
-        let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("BufferedTextureHead buffer"),
-            size: (buffer_dimensions.padded_bytes_per_row * buffer_dimensions.height) as u64,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        // TODO: Is this a sane default?
         let format = settings
             .texture_format
             .unwrap_or(wgpu::TextureFormat::Rgba8Unorm);
-
-        let texture_descriptor = wgpu::TextureDescriptor {
-            label: Some("Surface texture"),
-            size: wgpu::Extent3d {
-                width: size.width(),
-                height: size.height(),
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[format],
-        };
-        let texture = device.create_texture(&texture_descriptor);
-        let texture_format_features = adapter.get_texture_format_features(format);
-
         Self {
             size,
-            head: Head::Headless(Arc::new(BufferedTextureHead {
-                texture,
-                texture_format: format,
-                texture_format_features,
-                output_buffer,
-                buffer_dimensions,
-            })),
+            head: Head::Headless(Arc::new(BufferedTextureHead::new(
+                device,
+                size,
+                format,
+                adapter.get_texture_format_features(format),
+            ))),
         }
     }
 
@@ -355,7 +359,18 @@ impl Surface {
                     window.resize_and_configure(self.size.width(), self.size.height(), device);
                 }
             }
-            Head::Headless(_) => {}
+            Head::Headless(head) => {
+                if head.texture.width() != self.size.width()
+                    || head.texture.height() != self.size.height()
+                {
+                    *head = Arc::new(BufferedTextureHead::new(
+                        device,
+                        self.size,
+                        head.texture_format,
+                        head.texture_format_features,
+                    ));
+                }
+            }
         }
     }
 

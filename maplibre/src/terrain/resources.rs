@@ -41,6 +41,10 @@ const UNIFORM_CAPACITY: u64 = 1024;
 pub struct TerrainTileUniforms {
     /// GPU view projection times the tile transform.
     pub transform: [[f32; 4]; 4],
+    /// Tile-centred globe projection, with the large translation resolved in f64.
+    pub globe_transform: [[f32; 4]; 4],
+    /// Centre latitude sine/cosine, radians per tile unit, and radius; zero radius disables it.
+    pub globe_origin: [f32; 4],
     /// Maps tile coordinates to unit coordinates of the sampled DEM tile.
     pub dem_matrix: [[f32; 4]; 4],
     /// Maps the tile's unit coordinates into the drape texture drawn for it, which is an

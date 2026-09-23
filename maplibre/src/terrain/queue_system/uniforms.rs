@@ -17,6 +17,7 @@ use crate::{
     },
 };
 use cgmath::{Matrix4, SquareMatrix, Vector3};
+mod globe;
 #[derive(Default)]
 pub(super) struct TerrainEyeFrame(pub Vec<(WorldTileCoords, TerrainTileUniforms)>);
 
@@ -136,6 +137,8 @@ pub(super) fn tile_uniforms(
     };
     Some(TerrainTileUniforms {
         transform: (*transform).into(),
+        globe_transform: Matrix4::identity().into(),
+        globe_origin: [0.0; 4],
         dem_matrix: dem_matrix.into(),
         drape_matrix: textures
             .drape
@@ -251,6 +254,7 @@ fn surface_uniforms(
     style: &Style,
     view: &ViewState,
 ) {
+    globe::set_uniforms(block, coords, view);
     let color = super::background_clear_color(style);
     block.surface_color = [
         color.r as f32,

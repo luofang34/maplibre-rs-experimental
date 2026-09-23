@@ -1,5 +1,7 @@
 struct TerrainTileUniforms {
     transform: mat4x4<f32>,
+    globe_transform: mat4x4<f32>,
+    globe_origin: vec4<f32>,
     dem_matrix: mat4x4<f32>,
     drape_matrix: mat4x4<f32>,
     tile_mercator_coords: vec4<f32>,

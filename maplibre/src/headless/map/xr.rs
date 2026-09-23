@@ -50,6 +50,11 @@ pub enum XrFrameError {
 }
 
 impl HeadlessMap {
+    /// Resize the render attachments and viewport without discarding supplied tiles.
+    pub fn resize(&mut self, size: crate::window::PhysicalSize) {
+        self.map_context.resize(size, 1.0);
+    }
+
     /// Draws every eye of the frame into its own target, from the placement the host chose.
     ///
     /// Tile ingestion runs once, before the first eye. Later eyes keep its tile content and
@@ -234,10 +239,32 @@ impl HeadlessMap {
         let mercator = WorldCoords::from_lat_lon(position, Zoom::new(0.0));
         index.elevation_cached(&world.tiles, mercator.x / TILE_SIZE, mercator.y / TILE_SIZE)
     }
+
+    /// Samples the last rendered terrain surface at normalized Mercator coordinates.
+    /// A loaded DEM elsewhere in the cache does not make a fallback surface valid.
+    pub fn rendered_terrain_sample_cached(
+        &self,
+        mercator_xy: [f64; 2],
+    ) -> Option<crate::terrain::TerrainSample> {
+        if !mercator_xy.iter().all(|value| value.is_finite()) {
+            return None;
+        }
+        let world = &self.map_context.world;
+        let index = world.resources.get::<TerrainCoverageIndex>()?;
+        Some(index.sample(&world.tiles, mercator_xy[0], mercator_xy[1]))
+    }
 }
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "xr/resizing/tests.rs"]
+mod resizing;
+
+#[cfg(test)]
+#[path = "xr/imagery/tests.rs"]
+mod imagery;
 
 #[cfg(test)]
 #[path = "xr/regression/tests.rs"]

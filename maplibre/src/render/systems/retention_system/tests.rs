@@ -3,6 +3,20 @@
 use std::collections::HashSet;
 
 use super::{evict_beyond, evict_stale_tiles, CacheBudget, MIN_CACHE_TILES};
+
+#[test]
+fn offline_tiles_survive_a_view_with_no_loaded_coverage() {
+    let mut world = World::default();
+    for x in 0..100 {
+        world
+            .tiles
+            .spawn_mut(WorldTileCoords::from((x, 0, ZoomLevel::new(8))))
+            .expect("valid tile");
+    }
+    world.resources.insert(super::RetainLoadedTiles);
+    assert!(evict_stale_tiles(&mut world, &HashSet::new(), 0).is_empty());
+    assert_eq!(world.tiles.tiles.len(), 100);
+}
 use crate::{
     coords::{WorldTileCoords, ZoomLevel},
     tcs::world::World,

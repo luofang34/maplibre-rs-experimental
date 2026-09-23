@@ -53,7 +53,11 @@ impl Default for WgpuSettings {
             }
         };
 
-        let features = Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES;
+        let features = if cfg!(target_arch = "wasm32") {
+            Features::empty()
+        } else {
+            Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
+        };
 
         Self {
             device_label: Default::default(),
