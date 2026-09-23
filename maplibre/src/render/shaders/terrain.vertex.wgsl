@@ -2,6 +2,8 @@
 
 struct TerrainTileUniforms {
     transform: mat4x4<f32>,
+    globe_transform: mat4x4<f32>,
+    globe_origin: vec4<f32>,
     dem_matrix: mat4x4<f32>,
     drape_matrix: mat4x4<f32>,
     tile_mercator_coords: vec4<f32>,
@@ -82,6 +84,26 @@ fn stitched_elevation(position: vec2<f32>, height: f32) -> f32 {
     return height + dot(w, delta) - dot(corner, vec4<f32>(w.x*w.z, w.x*w.w, w.y*w.z, w.y*w.w));
 }
 
+// Small Mercator offsets avoid quantizing global longitude and sphere positions to metres.
+fn tile_relative_globe(position: vec2<f32>, elevation: f32) -> vec4<f32> {
+    let origin = terrain_tile.globe_origin;
+    let angle = (position - vec2<f32>(TERRAIN_EXTENT * 0.5)) * origin.z;
+    let y2 = angle.y * angle.y;
+    let sh = angle.y * (1.0 + y2 / 6.0 + y2 * y2 / 120.0);
+    let ch_minus_one = y2 * (0.5 + y2 / 24.0 + y2 * y2 / 720.0);
+    let denominator = 1.0 + ch_minus_one - origin.x * sh;
+    let ds = -origin.y * origin.y * sh / denominator;
+    let dc = origin.y * (origin.x * sh - ch_minus_one) / denominator;
+    let cosine = origin.y + dc;
+    let half_sine = sin(angle.x * 0.5);
+    let longitude_sag = 2.0 * cosine * half_sine * half_sine;
+    let delta = vec3<f32>(cosine * sin(angle.x),
+        origin.y * ds - origin.x * (dc - longitude_sag),
+        -0.5 * (ds * ds + dc * dc) - origin.y * longitude_sag);
+    let metres = delta * (origin.w + elevation) + vec3<f32>(0.0, 0.0, elevation);
+    return terrain_tile.globe_transform * vec4<f32>(metres, 1.0);
+}
+
 @vertex
 fn main(
     @location(0) raw_position: vec2<i32>,
@@ -97,11 +119,15 @@ fn main(
     let height_gradient = terrain_height_gradient(position);
     let elevation = select(stitched_elevation(position, height_gradient.x), 0.0, north_cap || south_cap)
         - f32(skirt.x) * terrain_tile.skirt_length;
-    let projected = project_tile_position_3d(
+    var projected = project_tile_position_3d(
         vec3<f32>(surface_position_2d, elevation),
         terrain_tile.transform,
         terrain_tile.tile_mercator_coords,
     );
+    if terrain_tile.globe_origin.w > 0.0 && !north_cap && !south_cap {
+        let flat = terrain_tile.transform * vec4<f32>(surface_position_2d, elevation, 1.0);
+        projected.clip_position = mix(flat, tile_relative_globe(position, elevation), projection.transition_and_padding.x);
+    }
     // The fog follows from the eye depth per fragment: it is not linear in depth, and the
     // triangles of a far tile span hundreds of kilometres, so a value found per vertex
     // would step at every tile edge.

@@ -263,6 +263,10 @@ mod tests;
 mod resizing;
 
 #[cfg(test)]
+#[path = "xr/imagery/tests.rs"]
+mod imagery;
+
+#[cfg(test)]
 #[path = "xr/regression/tests.rs"]
 mod regression;
 
