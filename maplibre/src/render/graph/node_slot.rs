@@ -5,17 +5,14 @@ use crate::render::resource::TextureView;
 /// A value passed between render [`Nodes`](super::Node).
 /// Corresponds to the [`SlotType`] specified in the [`RenderGraph`](super::RenderGraph).
 ///
-/// Slots can have four different types of values:
-/// [`Buffer`], [`TextureView`], [`Sampler`] and [`Entity`].
-///
-/// These values do not contain the actual render data, but only the ids to retrieve them.
+/// Slots share GPU resources by reference so connected nodes use the same allocation.
 #[derive(Clone, Debug)]
 pub enum SlotValue {
-    /// A GPU-accessible [`Buffer`].
+    /// A GPU-accessible [`Buffer`](wgpu::Buffer).
     Buffer(Rc<wgpu::Buffer>),
     /// A [`TextureView`] describes a texture used in a pipeline.
     TextureView(Rc<TextureView>),
-    /// A texture [`Sampler`] defines how a pipeline will sample from a [`TextureView`].
+    /// A texture [`Sampler`](wgpu::Sampler) defines how a pipeline will sample from a [`TextureView`].
     Sampler(Rc<wgpu::Sampler>),
 }
 
@@ -54,11 +51,11 @@ impl From<wgpu::Sampler> for SlotValue {
 /// This should not be confused with [`SlotValue`], which actually contains the passed data.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum SlotType {
-    /// A GPU-accessible [`Buffer`].
+    /// A GPU-accessible [`Buffer`](wgpu::Buffer).
     Buffer,
     /// A [`TextureView`] describes a texture used in a pipeline.
     TextureView,
-    /// A texture [`Sampler`] defines how a pipeline will sample from a [`TextureView`].
+    /// A texture [`Sampler`](wgpu::Sampler) defines how a pipeline will sample from a [`TextureView`].
     Sampler,
 }
 

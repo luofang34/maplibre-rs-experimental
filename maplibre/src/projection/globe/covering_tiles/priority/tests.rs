@@ -15,7 +15,7 @@ fn mixed_zoom_tiles_are_sorted_in_one_coordinate_space() {
         z: ZoomLevel::new(8),
     };
     let mut tiles = vec![distant, nearby];
-    sort_by_center(&mut tiles, LatLon::new(0.0, 0.0), ZoomLevel::new(8));
+    sort_by_center(&mut tiles, LatLon::new(0.0, 0.0));
     assert_eq!(tiles[0], nearby, "the nearby lower-zoom tile wins priority");
 }
 

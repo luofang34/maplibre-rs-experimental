@@ -12,7 +12,6 @@ use crate::{
         draw_graph,
         graph::{Node, NodeRunError, RenderContext, RenderGraphContext, SlotInfo},
         render_phase::{LayerItem, RenderPhase, TileMaskItem},
-        resource::TrackedRenderPass,
         Eventually::Initialized,
         RenderResources,
     },
@@ -82,7 +81,7 @@ impl Node for MainPassNode {
             }
         };
 
-        let render_pass =
+        let mut render_pass =
             render_context
                 .command_encoder
                 .begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -103,14 +102,12 @@ impl Node for MainPassNode {
                     occlusion_query_set: None,
                 });
 
-        let mut tracked_pass = TrackedRenderPass::new(render_pass);
-
         // TODO: Automatically raise error when items get linearly too many (+1k)
 
         if let Some(mask_items) = world.resources.get::<RenderPhase<TileMaskItem>>() {
             log::trace!("RenderPhase<TileMaskItem>::size() = {}", mask_items.size());
             for item in mask_items {
-                item.draw_function.draw(&mut tracked_pass, world, item);
+                item.draw_function.draw(&mut render_pass, world, item);
             }
         }
 
@@ -132,14 +129,14 @@ impl Node for MainPassNode {
                 if terrain_pending
                     && terrain.is_some_and(|frame| item.index > frame.draw_after_layer_index)
                 {
-                    draw_terrain(&mut tracked_pass, world);
+                    draw_terrain(&mut render_pass, world);
                     terrain_pending = false;
                 }
-                item.draw_function.draw(&mut tracked_pass, world, item);
+                item.draw_function.draw(&mut render_pass, world, item);
             }
         }
         if terrain_pending {
-            draw_terrain(&mut tracked_pass, world);
+            draw_terrain(&mut render_pass, world);
         }
 
         Ok(())

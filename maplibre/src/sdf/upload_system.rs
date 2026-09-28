@@ -113,17 +113,14 @@ fn upload_symbol_layer(
                     }
                 }
             }
-            let Some(SymbolLayerData {
-                coords,
-                new_buffer: buffer,
-                ..
-            }) = pending_layer_data(&vector_layers.layers, &loaded_layers, style_layer)
+            let Some(SymbolLayerData { coords, buffer, .. }) =
+                pending_layer_data(&vector_layers.layers, &loaded_layers, style_layer)
             else {
                 continue;
             };
 
             let size = buffer.buffer.vertices.len()
-                * (size_of::<crate::render::shaders::ShaderSymbolVertexNew>()
+                * (size_of::<crate::render::shaders::ShaderSymbolVertex>()
                     + size_of::<SDFShaderFeatureMetadata>())
                 + buffer.buffer.indices.len() * size_of::<u32>();
             if !bytes.take(size) {
@@ -159,7 +156,7 @@ fn upload_geometry(
     coords: crate::coords::WorldTileCoords,
     style_layer: &StyleLayer,
     buffer: &crate::vector::tessellation::OverAlignedVertexBuffer<
-        crate::render::shaders::ShaderSymbolVertexNew,
+        crate::render::shaders::ShaderSymbolVertex,
         u32,
     >,
 ) {

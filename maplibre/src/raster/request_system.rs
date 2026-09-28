@@ -106,9 +106,7 @@ pub fn fetch_raster_apc<K: OffscreenKernel, T: RasterTransferables, C: Context +
     kernel: K,
 ) -> AsyncProcedureFuture {
     Box::pin(async move {
-        let Input::TileRequest { coords, style } = input else {
-            return Err(ProcedureError::IncompatibleInput);
-        };
+        let Input::TileRequest { coords, style } = input;
 
         let client = kernel.source_client();
 

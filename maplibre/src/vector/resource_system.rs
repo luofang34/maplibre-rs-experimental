@@ -104,13 +104,14 @@ impl PipelineSetup<'_> {
             self.settings,
             shader.describe_vertex(),
             shader.describe_fragment(),
-            true,
-            false,
-            false,
-            false,
-            self.multisampling,
-            false,
-            false,
+            crate::render::resource::TilePipelineOptions {
+                depth_stencil_enabled: true,
+                update_stencil: false,
+                debug_stencil: false,
+                wireframe: false,
+                multisampling: self.multisampling,
+                textured: false,
+            },
         );
         let pipeline = if depth {
             pipeline.with_depth_write()

@@ -6,7 +6,6 @@ use crate::{
         eventually::{Eventually, Eventually::Initialized},
         projection::ProjectionGpuResources,
         render_phase::{PhaseItem, RenderCommand, RenderCommandResult},
-        resource::TrackedRenderPass,
         tile_view_pattern::WgpuTileViewPattern,
     },
     tcs::world::World,
@@ -17,7 +16,7 @@ impl<P: PhaseItem> RenderCommand<P> for SetDebugPipeline {
     fn render<'w>(
         world: &'w World,
         _item: &P,
-        pass: &mut TrackedRenderPass<'w>,
+        pass: &mut wgpu::RenderPass<'w>,
     ) -> RenderCommandResult {
         let Some((Initialized(pipeline), Initialized(projection_resources))) =
             world.resources.query::<(
@@ -28,7 +27,7 @@ impl<P: PhaseItem> RenderCommand<P> for SetDebugPipeline {
             return RenderCommandResult::Failure;
         };
 
-        pass.set_render_pipeline(pipeline);
+        pass.set_pipeline(pipeline);
         pass.set_bind_group(0, projection_resources.bind_group(), &[]);
         RenderCommandResult::Success
     }
@@ -39,7 +38,7 @@ impl RenderCommand<TileDebugItem> for DrawDebugOutline {
     fn render<'w>(
         world: &'w World,
         item: &TileDebugItem,
-        pass: &mut TrackedRenderPass<'w>,
+        pass: &mut wgpu::RenderPass<'w>,
     ) -> RenderCommandResult {
         let Some(Initialized(tile_view_pattern)) =
             world.resources.get::<Eventually<WgpuTileViewPattern>>()

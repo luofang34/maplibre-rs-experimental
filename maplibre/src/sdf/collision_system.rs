@@ -239,14 +239,14 @@ fn write_feature_metadata(
 ) {
     for index in feature.indices.clone() {
         let kind = layer
-            .new_buffer
+            .buffer
             .buffer
             .indices
             .get(index)
-            .and_then(|index| layer.new_buffer.buffer.vertices.get(*index as usize))
+            .and_then(|index| layer.buffer.buffer.vertices.get(*index as usize))
             .map_or(0, |vertex| usize::from(vertex.a_data[2] != 0));
         if let Some(vertex) = layer
-            .new_buffer
+            .buffer
             .buffer
             .indices
             .get(index)
@@ -374,6 +374,6 @@ fn empty_metadata(layer: &crate::sdf::SymbolLayerData) -> Vec<SDFShaderFeatureMe
             opacity: 0.0,
             elevation: 0.0
         };
-        layer.new_buffer.buffer.vertices.len()
+        layer.buffer.buffer.vertices.len()
     ]
 }

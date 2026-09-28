@@ -17,8 +17,7 @@ pub struct Tile {
     pub coords: WorldTileCoords,
 }
 
-/// A component is data associated with an [`Entity`](crate::tcs::entity::Entity). Each entity can have
-/// multiple different types of components, but only one of them per type.
+/// Data associated with a [`Tile`], with at most one component of each type per tile.
 pub trait TileComponent: Downcast + 'static {}
 impl_downcast!(TileComponent);
 
@@ -47,13 +46,13 @@ impl Tiles {
 
     pub fn exists(&self, coords: WorldTileCoords) -> bool {
         if let Some(key) = coords.build_quad_key() {
-            self.tiles.get(&key).is_some()
+            self.tiles.contains_key(&key)
         } else {
             false
         }
     }
 
-    pub fn spawn_mut(&mut self, coords: WorldTileCoords) -> Option<TileSpawnResult> {
+    pub fn spawn_mut(&mut self, coords: WorldTileCoords) -> Option<TileSpawnResult<'_>> {
         if let Some(key) = coords.build_quad_key() {
             if let Some(tile) = self.tiles.get(&key) {
                 let tile = *tile;
@@ -147,7 +146,7 @@ pub trait ComponentQuery {
     ) -> Option<Self::Item<'t>>;
 }
 
-impl<'a, T: TileComponent> ComponentQuery for &'a T {
+impl<T: TileComponent> ComponentQuery for &T {
     type Item<'t> = &'t T;
     type State<'s> = EphemeralQueryState<'s>;
 
@@ -190,7 +189,7 @@ pub trait ComponentQueryMut {
     ) -> Option<Self::MutItem<'t>>;
 }
 
-impl<'a, T: TileComponent> ComponentQueryMut for &'a T {
+impl<T: TileComponent> ComponentQueryMut for &T {
     type MutItem<'t> = &'t T;
     type State<'s> = EphemeralQueryState<'s>;
 
@@ -203,7 +202,7 @@ impl<'a, T: TileComponent> ComponentQueryMut for &'a T {
     }
 }
 
-impl<'a, T: TileComponent> ComponentQueryMut for &'a mut T {
+impl<T: TileComponent> ComponentQueryMut for &mut T {
     type MutItem<'t> = &'t mut T;
     type State<'s> = EphemeralQueryState<'s>;
 
@@ -232,6 +231,9 @@ impl<'a, T: TileComponent> ComponentQueryMut for &'a mut T {
 // ComponentQueryUnsafe
 
 pub trait ComponentQueryUnsafe: ComponentQueryMut {
+    /// # Safety
+    /// The caller must prevent overlapping mutable borrows of the queried tile components
+    /// for the lifetime of the returned references, including across query states.
     unsafe fn query_unsafe<'t, 's>(
         tiles: &'t Tiles,
         tile: Tile,
@@ -239,7 +241,7 @@ pub trait ComponentQueryUnsafe: ComponentQueryMut {
     ) -> Option<Self::MutItem<'t>>;
 }
 
-impl<'a, T: TileComponent> ComponentQueryUnsafe for &'a T {
+impl<T: TileComponent> ComponentQueryUnsafe for &T {
     unsafe fn query_unsafe<'t, 's>(
         tiles: &'t Tiles,
         tile: Tile,
@@ -249,9 +251,7 @@ impl<'a, T: TileComponent> ComponentQueryUnsafe for &'a T {
     }
 }
 
-impl<'a, T: TileComponent> ComponentQueryUnsafe for &'a mut T {
-    /// SAFETY: Safe if tiles is borrowed mutably.
-    // FIXME tcs: check if really safe
+impl<T: TileComponent> ComponentQueryUnsafe for &mut T {
     unsafe fn query_unsafe<'t, 's>(
         tiles: &'t Tiles,
         tile: Tile,

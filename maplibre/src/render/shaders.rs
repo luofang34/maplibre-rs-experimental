@@ -10,10 +10,6 @@ mod texture;
 mod tile_mask;
 mod vertex;
 
-use crate::{
-    coords::WorldCoords,
-    render::resource::{FragmentState, VertexBufferLayout, VertexState},
-};
 pub use background::{
     AtmosphereLayerMetadata, AtmosphereShader, BackgroundLayerMetadata, BackgroundShader,
     GlobeBackgroundShader, SkyLayerMetadata, SkyShader,
@@ -22,13 +18,18 @@ pub use circle::CircleShader;
 pub use fill::FillShader;
 pub use line::LineShader;
 pub use symbol::SymbolShader;
-pub use symbol_vertex::{ShaderSymbolVertex, ShaderSymbolVertexNew};
+pub use symbol_vertex::ShaderSymbolVertex;
 pub use terrain::TerrainShader;
 pub use texture::{tile_texture_vertex_buffers, DemShader, DemShading, RasterShader};
 pub use tile_mask::TileMaskShader;
 pub use vertex::{
     FillShaderFeatureMetadata, SDFShaderFeatureMetadata, ShaderCamera, ShaderGlobals,
     ShaderLayerMetadata, ShaderTextureVertex, ShaderTileMetadata, ShaderVertex,
+};
+
+use crate::{
+    coords::WorldCoords,
+    render::resource::{FragmentState, VertexBufferLayout, VertexState},
 };
 
 pub type Vec2f32 = [f32; 2];

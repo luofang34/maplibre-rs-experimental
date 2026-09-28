@@ -1,21 +1,21 @@
 use std::marker::PhantomData;
 
-use crate::{render::resource::TrackedRenderPass, tcs::world::World};
+use crate::tcs::world::World;
 
 /// A draw function which is used to draw a specific [`PhaseItem`].
 ///
 /// They are the the general form of drawing items, whereas [`RenderCommands`](RenderCommand)
 /// are more modular.
 pub trait Draw<P: PhaseItem>: 'static {
-    /// Draws the [`PhaseItem`] by issuing draw calls via the [`TrackedRenderPass`].
-    fn draw<'w>(&self, pass: &mut TrackedRenderPass<'w>, wold: &'w World, item: &P);
+    /// Draws the [`PhaseItem`] by issuing draw calls via the [`wgpu::RenderPass`].
+    fn draw<'w>(&self, pass: &mut wgpu::RenderPass<'w>, wold: &'w World, item: &P);
 }
 
 /// An item which will be drawn to the screen. A phase item should be queued up for rendering
-/// during the [`RenderStageLabel::Queue`](crate::RenderStageLabel::Queue) stage.
+/// during the [`RenderStageLabel::Queue`](crate::render::RenderStageLabel::Queue) stage.
 /// Afterwards it will be sorted and rendered automatically  in the
-/// [`RenderStageLabel::PhaseSort`](crate::RenderStageLabel::PhaseSort) stage and
-/// [`RenderStageLabel::Render`](crate::RenderStageLabel::Render) stage, respectively.
+/// [`RenderStageLabel::PhaseSort`](crate::render::RenderStageLabel::PhaseSort) stage and
+/// [`RenderStageLabel::Render`](crate::render::RenderStageLabel::Render) stage, respectively.
 pub trait PhaseItem {
     /// The type used for ordering the items. The smallest values are drawn first.
     type SortKey: Ord;
@@ -31,31 +31,16 @@ pub trait PhaseItem {
 }
 
 /// [`RenderCommand`] is a trait that runs an ECS query and produces one or more
-/// [`TrackedRenderPass`] calls. Types implementing this trait can be composed (as tuples).
+/// [`wgpu::RenderPass`] calls. Types implementing this trait can be composed (as tuples).
 ///
-/// They can be registered as a [`Draw`] function via the
-/// [`AddRenderCommand::add_render_command`] method.
-///
-/// # Example
-/// The `DrawPbr` draw function is created from the following render command
-/// tuple.  Const generics are used to set specific bind group locations:
-///
-/// ```ignore
-/// pub type DrawPbr = (
-///     SetItemPipeline,
-///     SetMeshViewBindGroup<0>,
-///     SetStandardMaterialBindGroup<1>,
-///     SetTransformBindGroup<2>,
-///     DrawMesh,
-/// );
-/// ```
+/// [`DrawState`] adapts a command or command tuple into a [`Draw`] implementation.
 pub trait RenderCommand<P: PhaseItem> {
-    /// Renders the [`PhaseItem`] by issuing draw calls via the [`TrackedRenderPass`].
+    /// Renders the [`PhaseItem`] by issuing draw calls via the [`wgpu::RenderPass`].
     // TODO: reorder the arguments to match Node and Draw
     fn render<'w>(
         world: &'w World,
         item: &P,
-        pass: &mut TrackedRenderPass<'w>,
+        pass: &mut wgpu::RenderPass<'w>,
     ) -> RenderCommandResult;
 }
 
@@ -71,7 +56,7 @@ macro_rules! render_command_tuple_impl {
             fn render<'w>(
                 world: &'w World,
                 item: &P,
-                pass: &mut TrackedRenderPass<'w>,
+                pass: &mut wgpu::RenderPass<'w>,
             ) -> RenderCommandResult{
                 $(if let RenderCommandResult::Failure = $name::render(world, item, pass) {
                     return RenderCommandResult::Failure;
@@ -108,7 +93,7 @@ where
     C: RenderCommand<P>,
 {
     /// Prepares data for the wrapped [`RenderCommand`] and then renders it.
-    fn draw<'w>(&self, pass: &mut TrackedRenderPass<'w>, world: &'w World, item: &P) {
+    fn draw<'w>(&self, pass: &mut wgpu::RenderPass<'w>, world: &'w World, item: &P) {
         C::render(world, item, pass);
     }
 }

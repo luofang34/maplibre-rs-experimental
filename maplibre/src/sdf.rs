@@ -9,15 +9,11 @@ use crate::{
     environment::Environment,
     euclid::{Box2D, Point2D},
     kernel::Kernel,
-    legacy::TileSpace,
     plugin::Plugin,
     render::{
         eventually::Eventually,
         graph::RenderGraph,
-        shaders::{
-            SDFShaderFeatureMetadata, ShaderLayerMetadata, ShaderSymbolVertex,
-            ShaderSymbolVertexNew,
-        },
+        shaders::{SDFShaderFeatureMetadata, ShaderLayerMetadata, ShaderSymbolVertex},
         RenderStageLabel,
     },
     schedule::Schedule,
@@ -44,9 +40,8 @@ mod textures;
 mod upload_system;
 pub mod visibility;
 
+pub(crate) mod glyphs;
 pub mod tessellation;
-pub mod tessellation_new;
-pub mod text;
 
 struct SymbolPipeline(wgpu::RenderPipeline);
 
@@ -61,7 +56,7 @@ impl Deref for SymbolPipeline {
 pub type SymbolBufferPool = BufferPool<
     wgpu::Queue,
     wgpu::Buffer,
-    ShaderSymbolVertexNew,
+    ShaderSymbolVertex,
     IndexDataType,
     ShaderLayerMetadata,
     SDFShaderFeatureMetadata,
@@ -136,6 +131,9 @@ pub struct Feature {
     pub str: String,
 }
 
+/// Coordinates measured on the canonical tile grid.
+pub struct TileSpace;
+
 pub struct SymbolLayerData {
     /// Shared glyph and sprite atlas for this tile.
     pub atlas: Option<std::sync::Arc<assets::SymbolAtlas>>,
@@ -143,7 +141,6 @@ pub struct SymbolLayerData {
     pub source_layer: String,
     pub style_layer_id: String,
     pub buffer: OverAlignedVertexBuffer<ShaderSymbolVertex, IndexDataType>,
-    pub new_buffer: OverAlignedVertexBuffer<ShaderSymbolVertexNew, IndexDataType>, // TODO
     pub features: Vec<Feature>,
 }
 
@@ -155,9 +152,6 @@ pub struct SymbolLayersDataComponent {
 }
 
 impl TileComponent for SymbolLayersDataComponent {}
-
-#[cfg(test)]
-mod tests;
 
 #[cfg(all(test, feature = "headless"))]
 #[path = "sdf/pixels/tests.rs"]

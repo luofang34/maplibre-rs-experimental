@@ -14,7 +14,7 @@ use crate::{
     },
     projection::{globe::subdivision::granularity_for_zoom, ProjectionType},
     render::ShaderVertex,
-    sdf::tessellation_new::TextTessellatorNew,
+    sdf::tessellation::TextTessellator,
     style::{
         expression::{FeatureProperties, Value},
         filter::{FeatureContext, Filter, GeometryType},
@@ -249,27 +249,23 @@ pub(crate) fn process_vector_tile_with_assets<T: VectorTransferables, C: Context
                     }
                     LayerPaint::Symbol(symbol_paint) => {
                         let zoom = f64::from(u8::from(tile_request.coords.z));
-                        let mut tessellator_new = TextTessellatorNew::with_assets(
-                            symbol_paint.clone(),
-                            zoom,
-                            atlas.clone(),
-                        );
-                        tessellator_new.coordinate_scale = coordinate_scale;
-                        tessellator_new.source_ids =
+                        let mut tessellator =
+                            TextTessellator::with_assets(symbol_paint.clone(), zoom, atlas.clone());
+                        tessellator.coordinate_scale = coordinate_scale;
+                        tessellator.source_ids =
                             layer.features.iter().map(|feature| feature.id).collect();
 
-                        if let Err(e) = layer.process(&mut tessellator_new) {
+                        if let Err(e) = layer.process(&mut tessellator) {
                             context.layer_missing(coords, source_layer)?;
 
                             tracing::error!("tessellation for layer source {source_layer} at {coords} failed {e:?}");
                         } else {
-                            tessellator_new.finish();
+                            tessellator.finish();
                             context.symbol_layer_tessellation_finished(
                                 crate::vector::transferables::DefaultSymbolLayerTessellated {
                                     coords: *coords,
-                                    buffer: OverAlignedVertexBuffer::empty(),
-                                    new_buffer: tessellator_new.quad_buffer.into(),
-                                    features: tessellator_new.features,
+                                    buffer: tessellator.quad_buffer.into(),
+                                    features: tessellator.features,
                                     atlas: Some(atlas.clone()),
                                     layer_data: original_layer,
                                     style_layer_id: id.clone(),
@@ -405,7 +401,6 @@ impl<T: VectorTransferables, C: Context> ProcessVectorContext<T, C> {
             .send_back(T::SymbolLayerTessellated::build_from(
                 layer.coords,
                 layer.buffer,
-                layer.new_buffer,
                 layer.features,
                 layer.atlas,
                 layer.layer_data,

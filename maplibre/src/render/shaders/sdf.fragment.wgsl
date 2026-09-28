@@ -1,80 +1,40 @@
+// @include symbol_uniforms.wgsl
 struct VertexOutput {
-//    @location(0) is_glyph: i32, // Chrome complaints about this line
-    @location(1) tex_coords: vec2<f32>,
-    @location(2) color: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+    @location(1) @interpolate(flat) kind: u32,
+    @location(2) size: f32,
     @location(3) opacity: f32,
+    @location(4) horizon_distance: f32,
     @builtin(position) position: vec4<f32>,
 };
+@group(1) @binding(0) var atlas: texture_2d<f32>;
+@group(1) @binding(1) var atlas_sampler: sampler;
 
-struct Output {
-    @location(0) out_color: vec4<f32>,
-};
-
-@group(0) @binding(0)
-var t_glyphs: texture_2d<f32>;
-@group(0) @binding(1)
-var s_glyphs: sampler;
-
-// Note: Ensure uniform control flow!
-// https://www.khronos.org/opengl/wiki/Sampler_(GLSL)#Non-uniform_flow_control
 @fragment
-fn main(in: VertexOutput) -> Output {
-    if (in.opacity == 0.0) {
-        // Shortcut if opacity is zero. TODO is this increasing or harming performance?
-        return Output(vec4<f32>(0.0, 0.0, 0.0, 0.0));
+fn main(in: VertexOutput) -> @location(0) vec4<f32> {
+    let sample = textureSample(atlas, atlas_sampler, in.uv);
+    let distance = select(sample.a, sample.r, in.kind == 0u);
+    // Euclidean coverage keeps diagonal strokes as crisp as horizontal strokes.
+    let derivative = max(0.84 * length(vec2<f32>(dpdx(distance), dpdy(distance))), 0.015);
+    var color: vec4<f32>;
+    if in.kind == 1u {
+        color = vec4<f32>(sample.rgb * sample.a, sample.a);
+    } else {
+        let is_text = in.kind == 0u;
+        let fill = select(symbol.icon_color, symbol.text_color, is_text);
+        let halo = select(symbol.icon_halo_color, symbol.halo_color, is_text);
+        let metrics = select(symbol.icon, symbol.text, is_text);
+        let scale = max(select(in.size, in.size / 24.0, is_text), 0.01);
+        let fill_alpha = smoothstep(0.75 - derivative, 0.75 + derivative, distance) * fill.a;
+        let width = select(metrics.y, min(metrics.y, in.size * 0.25), is_text);
+        let edge = 0.75 - width / (8.0 * scale);
+        let softness = derivative + metrics.z / (8.0 * scale);
+        let halo_alpha = select(0.0, smoothstep(edge-softness, edge+softness, distance) * halo.a, width > 0.0);
+        color = vec4<f32>(fill.rgb * fill_alpha + halo.rgb * halo_alpha * (1.0-fill_alpha),
+            fill_alpha + halo_alpha * (1.0-fill_alpha));
     }
-
-    let buffer_width: f32 = 0.25;
-    let buffer_center_outline: f32 = 0.8;
-
-    // At which offset is the outline of the SDF?
-    let outline_center_offset: f32 = -0.25;
-
-    // shift outline by `outline_width` to the outside
-    let buffer_center: f32 = buffer_center_outline + outline_center_offset;
-
-    let outline_color = vec3<f32>(0.0, 0.0, 0.0);
-
-    // 0 => border, < 0 => inside, > 0 => outside
-    let dist = textureSample(t_glyphs, s_glyphs, in.tex_coords).r;
-
-    let alpha: f32 = smoothstep(buffer_center - buffer_width / 2.0, buffer_center + buffer_width / 2.0, dist);
-    let border: f32 = smoothstep(buffer_center_outline - buffer_width / 2.0, buffer_center_outline + buffer_width / 2.0, dist);
-
-    let color_rgb = mix(outline_color.rgb, in.color.rgb, border);
-
-    // The translucent pass does not have a depth buffer. Therefore we do not need to discord the fragments:
-    // "Another Good Trick" from https://www.sjbaker.org/steve/omniv/alpha_sorting.html
-    // Using discard is an alternative for GL_ALPHA_TEST.
-    // https://stackoverflow.com/questions/53024693/opengl-is-discard-the-only-replacement-for-deprecated-gl-alpha-test
-
-
-    return Output(vec4(color_rgb, in.color.a * alpha * in.opacity));
-    //return Output(vec4(vec3<f32>(in.opacity, 0.0, 0.0), 0.2)); // debug bounding box, alpha 0.2 to see collisions
+    color *= in.opacity;
+    // Transparent texels must not overwrite terrain or the compositor's coverage depth.
+    if in.horizon_distance < 0.0 || color.a < 0.01 { discard; }
+    return color;
 }
-
-
-// MapLibre SDF shader:
-/*
-    let SDF_PX = 8.0;
-    let device_pixel_ratio = 1.0;
-    let EDGE_GAMMA = 0.105 / device_pixel_ratio;
-
-    let size = 6.0; // TODO
-    let font_scale = size / 24.0; // TODO Why / 24?
-    let halo_width = 0.5; // TODO
-    let halo_blur = 0.5; // TODO
-    let halo_color = vec4(1.0, 0.0, 0.0, 1.0);
-
-    var color = in.color;
-    var gamma_scale = 1.0;
-    var gamma = EDGE_GAMMA / (font_scale * gamma_scale);
-    var buff = (256.0 - 64.0) / 256.0;
-
-    let is_halo = false;
-    if (is_halo) {
-        color = halo_color;
-        gamma = (halo_blur * 1.19 / SDF_PX + EDGE_GAMMA) / (font_scale * gamma_scale);
-        buff = (6.0 - halo_width / font_scale) / SDF_PX;
-    }
-*/

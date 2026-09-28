@@ -1,8 +1,10 @@
 //! Font and sprite pixels packed into a tile's shared symbol atlas.
-use crate::sdf::text::sdf_glyphs;
+use std::{collections::HashMap, sync::Arc};
+
 use prost::Message;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, sync::Arc};
+
+use crate::sdf::glyphs;
 
 mod load;
 pub mod wire;
@@ -45,11 +47,7 @@ impl SymbolAtlas {
                             * (std::mem::size_of::<u32>() + std::mem::size_of::<AtlasEntry>())
                 })
                 .sum::<usize>()
-            + self
-                .icons
-                .iter()
-                .map(|(name, _)| name.capacity())
-                .sum::<usize>()
+            + self.icons.keys().map(|name| name.capacity()).sum::<usize>()
             + self.icons.capacity()
                 * (std::mem::size_of::<String>() + std::mem::size_of::<AtlasEntry>())
     }
@@ -118,7 +116,7 @@ impl AtlasBuilder {
         bytes: &[u8],
         wanted: Option<&std::collections::BTreeSet<u32>>,
     ) -> Result<(), prost::DecodeError> {
-        let data = sdf_glyphs::Glyphs::decode(bytes)?;
+        let data = glyphs::Glyphs::decode(bytes)?;
         for glyph in data.stacks.into_iter().flat_map(|stack| stack.glyphs) {
             if wanted.is_some_and(|wanted| !wanted.contains(&glyph.id)) {
                 continue;

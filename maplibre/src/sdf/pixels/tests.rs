@@ -12,7 +12,7 @@ use crate::{
     render::RenderPlugin,
     sdf::{
         assets::{AtlasBuilder, AtlasEntry},
-        tessellation_new::TextTessellatorNew,
+        tessellation::TextTessellator,
         SdfPlugin,
     },
     style::{layer::LayerPaint, Style},
@@ -102,7 +102,7 @@ fn layers(style: &Style) -> crate::headless::map::ProcessedLayers {
     let Some(LayerPaint::Symbol(paint)) = &style.layers[2].paint else {
         panic!("symbol paint");
     };
-    let mut layout = TextTessellatorNew::default();
+    let mut layout = TextTessellator::default();
     layout.configure(paint.clone(), atlas.clone());
     layout.point_begin(0).expect("point begin");
     layout.xy(2048.0, 2048.0, 0).expect("position");
@@ -117,7 +117,6 @@ fn layers(style: &Style) -> crate::headless::map::ProcessedLayers {
         .symbols
         .push(Box::new(DefaultSymbolLayerTessellated::build_from(
             coords,
-            lyon::tessellation::VertexBuffers::new().into(),
             layout.quad_buffer.into(),
             layout.features,
             Some(atlas),

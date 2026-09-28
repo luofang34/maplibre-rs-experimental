@@ -265,7 +265,7 @@ impl EdgeInsets {
         let x = clamp((self.left + width - self.right) / 2.0, 0.0, width);
         let y = clamp((self.top + height - self.bottom) / 2.0, 0.0, height);
 
-        return Point2::new(x, y);
+        Point2::new(x, y)
     }
 }
 

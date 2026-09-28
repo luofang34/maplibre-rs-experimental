@@ -28,7 +28,7 @@ pub fn tile_texture_vertex_buffers() -> Vec<VertexBufferLayout> {
                     shader_location: 4,
                 },
                 wgpu::VertexAttribute {
-                    offset: 1 * wgpu::VertexFormat::Float32x4.size(),
+                    offset: wgpu::VertexFormat::Float32x4.size(),
                     format: wgpu::VertexFormat::Float32x4,
                     shader_location: 5,
                 },

@@ -37,13 +37,14 @@ pub fn resource_system(
             renderer.settings,
             shader.describe_vertex(),
             shader.describe_fragment(),
-            true,
-            false,
-            true,
-            false,
-            surface.is_multisampling_supported(renderer.settings.msaa),
-            false,
-            true,
+            crate::render::resource::TilePipelineOptions {
+                depth_stencil_enabled: true,
+                update_stencil: false,
+                debug_stencil: true,
+                wireframe: false,
+                multisampling: surface.is_multisampling_supported(renderer.settings.msaa),
+                textured: true,
+            },
         )
         .with_depth_write()
         .describe_render_pipeline();

@@ -35,7 +35,8 @@ impl MotionPrefetch {
             return self.ahead.clone();
         }
         self.sample = Some((timestamp, current));
-        self.ahead = (dt >= SAMPLE_INTERVAL && dt <= 0.5)
+        self.ahead = (SAMPLE_INTERVAL..=0.5)
+            .contains(&dt)
             .then(|| predict(previous, current, dt, base, projection))
             .flatten();
         self.ahead.clone()

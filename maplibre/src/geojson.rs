@@ -10,7 +10,7 @@ use crate::{
     coords::{WorldTileCoords, EXTENT},
     io::apc::{Context, SendError},
     projection::{globe::subdivision::granularity_for_zoom, ProjectionType},
-    sdf::tessellation_new::TextTessellatorNew,
+    sdf::tessellation::TextTessellator,
     style::{
         expression::Value,
         filter::{properties_from_json, FeatureContext, Filter, GeometryType},
@@ -378,9 +378,9 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
             LayerPaint::Symbol(symbol_paint) => {
                 let zoom = f64::from(u8::from(coords.z));
                 let atlas = crate::sdf::assets::fallback_atlas();
-                let tessellator_new =
-                    TextTessellatorNew::with_assets(symbol_paint.clone(), zoom, atlas.clone());
-                let mut projecting = ProjectingTessellator::new(coords, tessellator_new);
+                let tessellator =
+                    TextTessellator::with_assets(symbol_paint.clone(), zoom, atlas.clone());
+                let mut projecting = ProjectingTessellator::new(coords, tessellator);
 
                 let mut geojson_src = geozero::geojson::GeoJson(json_str.as_str());
                 if let Err(e) = geojson_src.process(&mut projecting) {
@@ -406,7 +406,6 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
                 context
                     .send_back(T::SymbolLayerTessellated::build_from(
                         coords,
-                        crate::vector::tessellation::OverAlignedVertexBuffer::empty(),
                         inner.quad_buffer.into(),
                         inner.features,
                         Some(atlas),

@@ -1,4 +1,6 @@
 //! Accounts for retained tile data, including symbol atlases shared by style layers.
+use std::{collections::HashSet, mem::size_of, sync::Arc};
+
 use crate::{
     coords::WorldTileCoords,
     raster::{RasterLayerData, RasterLayersDataComponent},
@@ -7,7 +9,6 @@ use crate::{
     terrain::DemTileComponent,
     vector::{VectorLayerBucket, VectorLayerBucketComponent},
 };
-use std::{collections::HashSet, mem::size_of, sync::Arc};
 
 fn capacity<T>(values: &Vec<T>) -> usize {
     values.capacity().saturating_mul(size_of::<T>())
@@ -60,8 +61,8 @@ fn symbols(tiles: &Tiles, coords: WorldTileCoords) -> usize {
         .layers
         .iter()
         .map(|layer| {
-            let geometry = capacity(&layer.new_buffer.buffer.vertices)
-                + capacity(&layer.new_buffer.buffer.indices)
+            let geometry = capacity(&layer.buffer.buffer.vertices)
+                + capacity(&layer.buffer.buffer.indices)
                 + capacity(&layer.buffer.buffer.vertices)
                 + capacity(&layer.buffer.buffer.indices)
                 + capacity(&layer.features)

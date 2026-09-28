@@ -1,7 +1,6 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 use cgmath::InnerSpace;
-
 use geozero::mvt::{tile, Message as _, Tile};
 
 use super::{initial_view_state, process_geojson_layers, process_tile_layers, ProcessedLayers};
@@ -165,11 +164,11 @@ fn headless_processing_keeps_the_symbol_bucket_of_a_label_layer() {
     };
     assert_eq!(symbols.style_layer_id, "label");
     assert_eq!(
-        symbols.new_buffer.buffer.vertices.len(),
+        symbols.buffer.buffer.vertices.len(),
         12,
         "four vertices per glyph of V12"
     );
-    assert_eq!(symbols.new_buffer.buffer.indices.len(), 18);
+    assert_eq!(symbols.buffer.buffer.indices.len(), 18);
     assert_eq!(
         label_texts(&layers),
         [("label".to_string(), vec!["V12".to_string()])]

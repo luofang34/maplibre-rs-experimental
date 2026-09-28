@@ -4,10 +4,8 @@ use wgpu::StoreOp;
 
 use crate::{
     render::{
-        draw_graph,
         graph::{Node, NodeRunError, RenderContext, RenderGraphContext, SlotInfo},
         render_phase::{RenderPhase, TranslucentItem},
-        resource::TrackedRenderPass,
         Eventually::Initialized,
         RenderResources,
     },
@@ -78,7 +76,7 @@ impl Node for TranslucentPassNode {
             }
         };
 
-        let render_pass =
+        let mut render_pass =
             render_context
                 .command_encoder
                 .begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -99,8 +97,6 @@ impl Node for TranslucentPassNode {
                     occlusion_query_set: None,
                 });
 
-        let mut tracked_pass = TrackedRenderPass::new(render_pass);
-
         // TODO: Automatically raise error when items get linearly too many (+1k)
 
         if let Some(mask_items) = world.resources.get::<RenderPhase<TranslucentItem>>() {
@@ -109,25 +105,9 @@ impl Node for TranslucentPassNode {
                 mask_items.size()
             );
             for item in mask_items {
-                item.draw_function.draw(&mut tracked_pass, world, item);
+                item.draw_function.draw(&mut render_pass, world, item);
             }
         }
-
-        Ok(())
-    }
-}
-
-pub struct MainPassDriverNode;
-
-impl Node for MainPassDriverNode {
-    fn run(
-        &self,
-        graph: &mut RenderGraphContext,
-        _render_context: &mut RenderContext,
-        _resources: &RenderResources,
-        _world: &World,
-    ) -> Result<(), NodeRunError> {
-        graph.run_sub_graph(draw_graph::NAME, vec![])?;
 
         Ok(())
     }

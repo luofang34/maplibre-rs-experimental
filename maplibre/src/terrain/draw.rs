@@ -4,14 +4,13 @@ use crate::{
     render::{
         eventually::{Eventually, Eventually::Initialized},
         projection::ProjectionGpuResources,
-        resource::TrackedRenderPass,
     },
     tcs::world::World,
     terrain::resources::TerrainResources,
 };
 
 /// Draws every terrain tile queued for this frame, writing depth.
-pub fn draw_terrain<'w>(pass: &mut TrackedRenderPass<'w>, world: &'w World) {
+pub fn draw_terrain<'w>(pass: &mut wgpu::RenderPass<'w>, world: &'w World) {
     let Some((Initialized(terrain), Initialized(projection))) = world.resources.query::<(
         &Eventually<TerrainResources>,
         &Eventually<ProjectionGpuResources>,
@@ -23,7 +22,7 @@ pub fn draw_terrain<'w>(pass: &mut TrackedRenderPass<'w>, world: &'w World) {
         return;
     }
     tracing::trace!(draws = terrain.draws().len(), "drawing terrain");
-    pass.set_render_pipeline(terrain.pipeline());
+    pass.set_pipeline(terrain.pipeline());
     pass.set_bind_group(0, projection.bind_group(), &[]);
     pass.set_vertex_buffer(0, terrain.vertex_buffer().slice(..));
     pass.set_index_buffer(terrain.index_buffer().slice(..), wgpu::IndexFormat::Uint32);

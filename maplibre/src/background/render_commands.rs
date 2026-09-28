@@ -7,7 +7,6 @@ use crate::{
         eventually::Eventually::{self, Initialized},
         projection::ProjectionGpuResources,
         render_phase::{PhaseItem, RenderCommand, RenderCommandResult},
-        resource::TrackedRenderPass,
         tile_mesh::{GlobeTileMeshCache, TileMeshUsage},
     },
     tcs::world::World,
@@ -18,7 +17,7 @@ impl<P: PhaseItem> RenderCommand<P> for SetBackgroundPipeline {
     fn render<'w>(
         world: &'w World,
         _item: &P,
-        pass: &mut TrackedRenderPass<'w>,
+        pass: &mut wgpu::RenderPass<'w>,
     ) -> RenderCommandResult {
         let Some(Initialized(BackgroundRenderPipeline(pipeline))) = world
             .resources
@@ -27,7 +26,7 @@ impl<P: PhaseItem> RenderCommand<P> for SetBackgroundPipeline {
             return RenderCommandResult::Failure;
         };
 
-        pass.set_render_pipeline(pipeline);
+        pass.set_pipeline(pipeline);
         RenderCommandResult::Success
     }
 }
@@ -37,7 +36,7 @@ impl<P: PhaseItem> RenderCommand<P> for DrawBackgroundQuad {
     fn render<'w>(
         world: &'w World,
         _item: &P,
-        pass: &mut TrackedRenderPass<'w>,
+        pass: &mut wgpu::RenderPass<'w>,
     ) -> RenderCommandResult {
         if let Some(buf) = world
             .resources
@@ -57,7 +56,7 @@ impl<P: PhaseItem> RenderCommand<P> for SetGlobeBackgroundPipeline {
     fn render<'w>(
         world: &'w World,
         _item: &P,
-        pass: &mut TrackedRenderPass<'w>,
+        pass: &mut wgpu::RenderPass<'w>,
     ) -> RenderCommandResult {
         let Some((
             Initialized(GlobeBackgroundRenderPipeline(pipeline)),
@@ -69,7 +68,7 @@ impl<P: PhaseItem> RenderCommand<P> for SetGlobeBackgroundPipeline {
         else {
             return RenderCommandResult::Failure;
         };
-        pass.set_render_pipeline(pipeline);
+        pass.set_pipeline(pipeline);
         pass.set_bind_group(0, projection_resources.bind_group(), &[]);
         RenderCommandResult::Success
     }
@@ -80,7 +79,7 @@ impl<P: PhaseItem> RenderCommand<P> for DrawGlobeBackgroundQuad {
     fn render<'w>(
         world: &'w World,
         _item: &P,
-        pass: &mut TrackedRenderPass<'w>,
+        pass: &mut wgpu::RenderPass<'w>,
     ) -> RenderCommandResult {
         let Some((buffers, mesh_cache)) = world.resources.query::<(
             &crate::background::queue_system::BackgroundBuffers,
@@ -108,7 +107,7 @@ impl<P: PhaseItem> RenderCommand<P> for SetAtmospherePipeline {
     fn render<'w>(
         world: &'w World,
         _item: &P,
-        pass: &mut TrackedRenderPass<'w>,
+        pass: &mut wgpu::RenderPass<'w>,
     ) -> RenderCommandResult {
         let Some((
             Initialized(AtmosphereRenderPipeline(pipeline)),
@@ -120,7 +119,7 @@ impl<P: PhaseItem> RenderCommand<P> for SetAtmospherePipeline {
         else {
             return RenderCommandResult::Failure;
         };
-        pass.set_render_pipeline(pipeline);
+        pass.set_pipeline(pipeline);
         pass.set_bind_group(0, projection_resources.bind_group(), &[]);
         RenderCommandResult::Success
     }
@@ -131,7 +130,7 @@ impl<P: PhaseItem> RenderCommand<P> for DrawAtmosphereFullscreen {
     fn render<'w>(
         world: &'w World,
         _item: &P,
-        pass: &mut TrackedRenderPass<'w>,
+        pass: &mut wgpu::RenderPass<'w>,
     ) -> RenderCommandResult {
         let Some(buffers) = world
             .resources
@@ -152,7 +151,7 @@ impl<P: PhaseItem> RenderCommand<P> for SetSkyPipeline {
     fn render<'w>(
         world: &'w World,
         _item: &P,
-        pass: &mut TrackedRenderPass<'w>,
+        pass: &mut wgpu::RenderPass<'w>,
     ) -> RenderCommandResult {
         let Some((Initialized(SkyRenderPipeline(pipeline)), Initialized(projection_resources))) =
             world.resources.query::<(
@@ -162,7 +161,7 @@ impl<P: PhaseItem> RenderCommand<P> for SetSkyPipeline {
         else {
             return RenderCommandResult::Failure;
         };
-        pass.set_render_pipeline(pipeline);
+        pass.set_pipeline(pipeline);
         pass.set_bind_group(0, projection_resources.bind_group(), &[]);
         RenderCommandResult::Success
     }
@@ -173,7 +172,7 @@ impl<P: PhaseItem> RenderCommand<P> for DrawSkyFullscreen {
     fn render<'w>(
         world: &'w World,
         _item: &P,
-        pass: &mut TrackedRenderPass<'w>,
+        pass: &mut wgpu::RenderPass<'w>,
     ) -> RenderCommandResult {
         let Some(buffers) = world
             .resources
@@ -198,7 +197,7 @@ impl<P: PhaseItem> RenderCommand<P> for DrawBackground {
     fn render<'w>(
         world: &'w World,
         item: &P,
-        pass: &mut TrackedRenderPass<'w>,
+        pass: &mut wgpu::RenderPass<'w>,
     ) -> RenderCommandResult {
         let mut result = SetBackgroundPipeline::render(world, item, pass);
         if let RenderCommandResult::Success = result {

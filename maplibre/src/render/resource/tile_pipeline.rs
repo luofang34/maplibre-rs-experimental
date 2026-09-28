@@ -7,18 +7,26 @@ use crate::render::{
     settings::RendererSettings,
 };
 
+/// Fixed GPU state shared by all draw calls in a tile pipeline.
+#[derive(Clone, Copy, Default)]
+pub struct TilePipelineOptions {
+    /// Enables depth and stencil attachment tests.
+    pub depth_stencil_enabled: bool,
+    /// Replaces stencil values when a fragment passes.
+    pub update_stencil: bool,
+    /// Draws without restricting fragments to the tile stencil.
+    pub debug_stencil: bool,
+    /// Draws triangle edges.
+    pub wireframe: bool,
+    /// Uses the renderer's multisample count.
+    pub multisampling: bool,
+    /// Binds a sampled texture and a filtering sampler.
+    pub textured: bool,
+}
+
 pub struct TilePipeline {
     name: Cow<'static, str>,
-    /// Is the depth stencil used?
-    depth_stencil_enabled: bool,
-    /// This pipeline updates the stenctil
-    update_stencil: bool,
-    /// Force a write and ignore stencil
-    debug_stencil: bool,
-    wireframe: bool,
-    msaa: bool,
-    raster: bool,
-    glyph_rendering: bool,
+    options: TilePipelineOptions,
     /// Writes and tests depth with the reversed-Z convention instead of painter's order.
     depth_write: bool,
     settings: RendererSettings,
@@ -33,23 +41,11 @@ impl TilePipeline {
         settings: RendererSettings,
         vertex_state: VertexState,
         fragment_state: FragmentState,
-        depth_stencil_enabled: bool,
-        update_stencil: bool,
-        debug_stencil: bool,
-        wireframe: bool,
-        multisampling: bool,
-        raster: bool,
-        glyph_rendering: bool,
+        options: TilePipelineOptions,
     ) -> Self {
         TilePipeline {
             name,
-            depth_stencil_enabled,
-            update_stencil,
-            debug_stencil,
-            wireframe,
-            msaa: multisampling,
-            raster,
-            glyph_rendering,
+            options,
             depth_write: false,
             settings,
             vertex_state,
@@ -66,76 +62,19 @@ impl TilePipeline {
 
 impl RenderPipeline for TilePipeline {
     fn describe_render_pipeline(self) -> RenderPipelineDescriptor {
-        let stencil_state = if self.update_stencil {
-            wgpu::StencilFaceState {
-                compare: wgpu::CompareFunction::Always, // Allow ALL values to update the stencil
-                fail_op: wgpu::StencilOperation::Keep,
-                depth_fail_op: wgpu::StencilOperation::Keep, // This is used when the depth test already failed
-                pass_op: wgpu::StencilOperation::Replace,
-            }
-        } else {
-            wgpu::StencilFaceState {
-                compare: if self.debug_stencil {
-                    wgpu::CompareFunction::Always
-                } else {
-                    wgpu::CompareFunction::Equal
-                },
-                fail_op: wgpu::StencilOperation::Keep,
-                depth_fail_op: wgpu::StencilOperation::Keep,
-                pass_op: wgpu::StencilOperation::Keep,
-            }
-        };
+        let layout = self.texture_layout();
+        let depth_stencil = self.depth_stencil();
 
         RenderPipelineDescriptor {
             label: Some(self.name),
-            layout: if self.raster {
-                Some(vec![vec![
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            multisampled: false,
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                ]])
-            } else if self.glyph_rendering {
-                Some(vec![vec![
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                ]])
-            } else {
-                None
-            },
+            layout,
             vertex: self.vertex_state,
             fragment: self.fragment_state,
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
-                polygon_mode: if self.update_stencil {
+                polygon_mode: if self.options.update_stencil {
                     wgpu::PolygonMode::Fill
-                } else if self.wireframe {
+                } else if self.options.wireframe {
                     wgpu::PolygonMode::Line
                 } else {
                     wgpu::PolygonMode::Fill
@@ -146,31 +85,9 @@ impl RenderPipeline for TilePipeline {
                 conservative: false,
                 unclipped_depth: false,
             },
-            depth_stencil: if !self.depth_stencil_enabled {
-                None
-            } else {
-                Some(wgpu::DepthStencilState {
-                    format: self.settings.depth_texture_format,
-                    // Layers use painter's algorithm (draw order), matching MapLibre GL
-                    // behavior, and stencil handles tile masking. Only 3D geometry writes
-                    // depth, using reversed-Z where nearer fragments have greater depth.
-                    depth_write_enabled: self.depth_write,
-                    depth_compare: if self.depth_write {
-                        wgpu::CompareFunction::GreaterEqual
-                    } else {
-                        wgpu::CompareFunction::Always
-                    },
-                    stencil: wgpu::StencilState {
-                        front: stencil_state,
-                        back: stencil_state,
-                        read_mask: 0xff, // Applied to stencil values being read from the stencil buffer
-                        write_mask: 0xff, // Applied to fragment stencil values before being written to  the stencil buffer
-                    },
-                    bias: wgpu::DepthBiasState::default(),
-                })
-            },
+            depth_stencil,
             multisample: wgpu::MultisampleState {
-                count: if self.msaa {
+                count: if self.options.multisampling {
                     self.settings.msaa.samples
                 } else {
                     1
@@ -178,6 +95,80 @@ impl RenderPipeline for TilePipeline {
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
+        }
+    }
+}
+
+impl TilePipeline {
+    fn stencil_face(&self) -> wgpu::StencilFaceState {
+        if self.options.update_stencil {
+            wgpu::StencilFaceState {
+                compare: wgpu::CompareFunction::Always, // Allow ALL values to update the stencil
+                fail_op: wgpu::StencilOperation::Keep,
+                depth_fail_op: wgpu::StencilOperation::Keep, // This is used when the depth test already failed
+                pass_op: wgpu::StencilOperation::Replace,
+            }
+        } else {
+            wgpu::StencilFaceState {
+                compare: if self.options.debug_stencil {
+                    wgpu::CompareFunction::Always
+                } else {
+                    wgpu::CompareFunction::Equal
+                },
+                fail_op: wgpu::StencilOperation::Keep,
+                depth_fail_op: wgpu::StencilOperation::Keep,
+                pass_op: wgpu::StencilOperation::Keep,
+            }
+        }
+    }
+    fn texture_layout(&self) -> Option<Vec<Vec<wgpu::BindGroupLayoutEntry>>> {
+        if self.options.textured {
+            Some(vec![vec![
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ]])
+        } else {
+            None
+        }
+    }
+    fn depth_stencil(&self) -> Option<wgpu::DepthStencilState> {
+        let stencil_state = self.stencil_face();
+        if !self.options.depth_stencil_enabled {
+            None
+        } else {
+            Some(wgpu::DepthStencilState {
+                format: self.settings.depth_texture_format,
+                // Layers use painter's algorithm (draw order), matching MapLibre GL
+                // behavior, and stencil handles tile masking. Only 3D geometry writes
+                // depth, using reversed-Z where nearer fragments have greater depth.
+                depth_write_enabled: self.depth_write,
+                depth_compare: if self.depth_write {
+                    wgpu::CompareFunction::GreaterEqual
+                } else {
+                    wgpu::CompareFunction::Always
+                },
+                stencil: wgpu::StencilState {
+                    front: stencil_state,
+                    back: stencil_state,
+                    read_mask: 0xff, // Applied to stencil values being read from the stencil buffer
+                    write_mask: 0xff, // Applied to fragment stencil values before being written to  the stencil buffer
+                },
+                bias: wgpu::DepthBiasState::default(),
+            })
         }
     }
 }

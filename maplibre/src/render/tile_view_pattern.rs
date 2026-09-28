@@ -187,10 +187,9 @@ pub trait HasTile {
         loop {
             if self.has_tile(current, world) {
                 return Some(current);
-            } else if let Some(parent) = current.get_parent() {
-                current = parent
             } else {
-                return None;
+                let parent = current.get_parent()?;
+                current = parent
             }
         }
     }

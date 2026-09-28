@@ -82,7 +82,7 @@ fn ready(world: &World, style: &Style, zoom: f64, coords: WorldTileCoords) -> bo
             .iter()
             .any(|style| style.id == layer.style_layer_id && style.is_visible_at(zoom));
         !visible
-            || layer.new_buffer.buffer.indices.is_empty()
+            || layer.buffer.buffer.indices.is_empty()
             || loaded.contains(layer.style_layer_id.as_str())
     })
 }

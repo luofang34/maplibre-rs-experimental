@@ -1,8 +1,10 @@
 #![allow(clippy::expect_used, clippy::panic)]
+use std::sync::Mutex;
+
+use prost::Message as _;
+
 use super::*;
 use crate::io::source_client::{HttpSourceClient, SourceFetchError};
-use prost::Message as _;
-use std::sync::Mutex;
 
 #[derive(Clone)]
 struct Assets {
@@ -33,11 +35,11 @@ impl HttpClient for Assets {
 
 #[tokio::test]
 async fn style_assets_fetch_unicode_ranges_and_sprite_queries_without_hidden_layers() {
-    let glyphs = crate::sdf::text::sdf_glyphs::Glyphs {
-        stacks: vec![crate::sdf::text::sdf_glyphs::Fontstack {
+    let glyphs = crate::sdf::glyphs::Glyphs {
+        stacks: vec![crate::sdf::glyphs::Fontstack {
             name: "Font A".into(),
             range: "256-511".into(),
-            glyphs: vec![crate::sdf::text::sdf_glyphs::Glyph {
+            glyphs: vec![crate::sdf::glyphs::Glyph {
                 id: 256,
                 bitmap: Some(vec![255; 64]),
                 width: 2,

@@ -4,7 +4,6 @@ use crate::{
         eventually::{Eventually, Eventually::Initialized},
         projection::ProjectionGpuResources,
         render_phase::{LayerItem, PhaseItem, RenderCommand, RenderCommandResult},
-        resource::TrackedRenderPass,
         tile_mesh::{GlobeTileMeshCache, TileMeshUsage},
         tile_view_pattern::WgpuTileViewPattern,
     },
@@ -16,7 +15,7 @@ impl<P: PhaseItem> RenderCommand<P> for SetRasterTilePipeline {
     fn render<'w>(
         world: &'w World,
         item: &P,
-        pass: &mut TrackedRenderPass<'w>,
+        pass: &mut wgpu::RenderPass<'w>,
     ) -> RenderCommandResult {
         let Some((Initialized(raster_resources), Initialized(projection_resources))) =
             world.resources.query::<(
@@ -27,7 +26,7 @@ impl<P: PhaseItem> RenderCommand<P> for SetRasterTilePipeline {
             return RenderCommandResult::Failure;
         };
 
-        pass.set_render_pipeline(raster_resources.pipeline());
+        pass.set_pipeline(raster_resources.pipeline());
         pass.set_bind_group(
             0,
             projection_resources.bind_group_for(item.projection_binding()),
@@ -42,7 +41,7 @@ impl<const I: usize> RenderCommand<LayerItem> for SetRasterViewBindGroup<I> {
     fn render<'w>(
         world: &'w World,
         item: &LayerItem,
-        pass: &mut TrackedRenderPass<'w>,
+        pass: &mut wgpu::RenderPass<'w>,
     ) -> RenderCommandResult {
         let Some(Initialized(raster_resources)) =
             world.resources.get::<Eventually<RasterResources>>()
@@ -64,7 +63,7 @@ impl RenderCommand<LayerItem> for DrawRasterTile {
     fn render<'w>(
         world: &'w World,
         item: &LayerItem,
-        pass: &mut TrackedRenderPass<'w>,
+        pass: &mut wgpu::RenderPass<'w>,
     ) -> RenderCommandResult {
         let Some((Initialized(tile_view_pattern), tile_mesh_cache)) = world
             .resources
@@ -92,12 +91,10 @@ impl RenderCommand<LayerItem> for DrawRasterTile {
         pass.set_vertex_buffer(0, mesh.vertex_buffer().slice(..));
         pass.set_vertex_buffer(
             1,
-            tile_view_pattern.buffer().slice(tile_view_pattern_buffer),
+            tile_view_pattern
+                .buffer()
+                .slice(tile_view_pattern_buffer.clone()),
         );
-
-        let Some(tile_view_pattern_buffer) = source_shape.buffer_range() else {
-            return RenderCommandResult::Failure;
-        };
 
         // FIXME tcs: I passing random data here right now, but instead we need the correct metadata here
         pass.set_vertex_buffer(

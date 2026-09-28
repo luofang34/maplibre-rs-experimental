@@ -220,13 +220,14 @@ async fn projection_aware_tile_pipelines_compile() {
             RendererSettings::default(),
             shader.describe_vertex(),
             shader.describe_fragment(),
-            true,
-            false,
-            false,
-            false,
-            false,
-            raster,
-            glyph,
+            crate::render::resource::TilePipelineOptions {
+                depth_stencil_enabled: true,
+                update_stencil: false,
+                debug_stencil: false,
+                wireframe: false,
+                multisampling: false,
+                textured: (raster) || (glyph),
+            },
         )
         .describe_render_pipeline();
         if glyph {

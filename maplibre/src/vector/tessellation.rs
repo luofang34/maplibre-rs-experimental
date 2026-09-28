@@ -3,6 +3,7 @@
 use std::cell::RefCell;
 
 use bytemuck::Pod;
+pub use circle::{CircleOptions, CIRCLE_QUAD_INDICES};
 use geozero::{
     error::GeozeroError, ColumnValue, FeatureProcessor, GeomProcessor, PropertyProcessor,
 };
@@ -15,8 +16,6 @@ use lyon::{
         StrokeVertexConstructor, VertexBuffers,
     },
 };
-
-pub use circle::{CircleOptions, CIRCLE_QUAD_INDICES};
 
 use crate::{
     projection::globe::subdivision::{subdivide_line_segment, subdivide_triangles},
@@ -124,7 +123,7 @@ impl<V: Pod, I: Pod> Align<V, I> for VertexBuffers<V, I> {
         let stride = std::mem::size_of::<I>() as wgpu::BufferAddress;
         let unpadded_bytes = self.indices.len() as wgpu::BufferAddress * stride;
         let padding_bytes = (align - unpadded_bytes % align) % align;
-        let overpad = (padding_bytes + stride - 1) / stride; // Divide by stride but round up
+        let overpad = padding_bytes.div_ceil(stride); // Divide by stride but round up
 
         for _ in 0..overpad {
             self.indices.push(I::zeroed());

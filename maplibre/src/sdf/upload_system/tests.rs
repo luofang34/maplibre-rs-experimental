@@ -15,7 +15,6 @@ fn layer_data(style_layer_id: &str) -> SymbolLayerData {
         source_layer: "place".to_string(),
         style_layer_id: style_layer_id.to_string(),
         buffer: OverAlignedVertexBuffer::empty(),
-        new_buffer: OverAlignedVertexBuffer::empty(),
         features: Vec::new(),
     }
 }

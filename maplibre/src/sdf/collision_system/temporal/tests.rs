@@ -15,7 +15,6 @@ fn layer(z: u8) -> SymbolLayerData {
         source_layer: "place".into(),
         style_layer_id: "cities".into(),
         buffer: OverAlignedVertexBuffer::empty(),
-        new_buffer: OverAlignedVertexBuffer::empty(),
         features: vec![],
     }
 }

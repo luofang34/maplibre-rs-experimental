@@ -1,11 +1,13 @@
 //! A small repeating distance texture for each evaluated line dash pattern.
+use std::collections::HashMap;
+
+use wgpu::util::DeviceExt;
+
 use crate::style::{
     layer::LayerPaint,
     property::{NumberList, StyleProperty},
     Style,
 };
-use std::collections::HashMap;
-use wgpu::util::DeviceExt;
 
 const WIDTH: u32 = 256;
 struct DashEntry {
@@ -106,7 +108,7 @@ fn normalize_pattern(mut pattern: Vec<f64>) -> Vec<f64> {
     if pattern.iter().any(|v| !v.is_finite() || *v < 0.0) {
         return Vec::new();
     }
-    if pattern.len() % 2 != 0 {
+    if !pattern.len().is_multiple_of(2) {
         pattern.extend_from_within(..);
     }
     if pattern.iter().sum::<f64>() <= 0.0 {

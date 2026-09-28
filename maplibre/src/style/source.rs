@@ -9,18 +9,13 @@ pub type TileUrl = String;
 pub type TileJSONUrl = String;
 
 /// Tiles can be positioned using either the xyz coordinates or the TMS (Tile Map Service) protocol.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TileAddressingScheme {
     #[serde(rename = "xyz")]
+    #[default]
     XYZ,
     #[serde(rename = "tms")]
     TMS,
-}
-
-impl Default for TileAddressingScheme {
-    fn default() -> Self {
-        TileAddressingScheme::XYZ
-    }
 }
 
 /// GeoJSON data — either an inline JSON value or a URL pointing to a GeoJSON file.

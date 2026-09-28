@@ -1,13 +1,15 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
-use crate::projection::body::Body;
 use cgmath::{Point2, Vector3, Vector4};
 
 use super::{
-    allows_variable_zoom, allows_world_copies, distance_to_tile_2d, globe_tile_bounding_volume,
-    nearest_tile_wrap, GlobeTileBoundsError, TileElevationRange,
+    distance_to_tile_2d, globe_tile_bounding_volume, nearest_tile_wrap, GlobeTileBoundsError,
+    TileElevationRange,
 };
-use crate::coords::{TileCoords, ZoomLevel};
+use crate::{
+    coords::{TileCoords, ZoomLevel},
+    projection::body::Body,
+};
 
 fn tile(x: u32, y: u32, zoom: u8) -> TileCoords {
     TileCoords {
@@ -165,11 +167,4 @@ fn nearest_wrap_tracks_center_across_antimeridian() {
     assert_eq!(nearest_tile_wrap(0.99, western), 1);
     assert_eq!(nearest_tile_wrap(0.01, eastern), -1);
     assert_eq!(nearest_tile_wrap(0.1, western), 0);
-}
-
-#[test]
-fn globe_covering_policy_matches_reference() {
-    assert!(!allows_variable_zoom(4));
-    assert!(allows_variable_zoom(5));
-    assert!(!allows_world_copies());
 }

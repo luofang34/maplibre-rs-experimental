@@ -108,7 +108,7 @@ pub enum RenderStageLabel {
     /// For example data is uploaded to the GPU in this stage.
     Queue,
 
-    /// Sort the [`RenderPhases`](crate::render_phase::RenderPhase) here.
+    /// Sort the [`RenderPhases`](crate::render::render_phase::RenderPhase) here.
     PhaseSort,
 
     /// Actual rendering happens here.

@@ -14,10 +14,7 @@ use maplibre::{
         AvailableRasterLayerData, LayerRaster, LayerRasterMissing, MissingRasterLayerData,
         RasterTransferables,
     },
-    render::{
-        shaders::{ShaderSymbolVertex, ShaderSymbolVertexNew},
-        ShaderVertex,
-    },
+    render::{shaders::ShaderSymbolVertex, ShaderVertex},
     sdf::{Feature, SymbolLayerData},
     terrain::transferables::{DemTransferables, LayerDem, LayerDemMissing},
     tile::Layer,

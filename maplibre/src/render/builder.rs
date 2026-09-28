@@ -45,38 +45,6 @@ impl Default for RendererBuilder {
     }
 }
 
-pub enum InitializationResult {
-    Initialized(InitializedRenderer),
-    Uninitialized(UninitializedRenderer),
-    Gone,
-}
-
-impl Default for InitializationResult {
-    fn default() -> Self {
-        Self::Gone
-    }
-}
-
-impl InitializationResult {
-    pub fn unwrap_renderer(self) -> InitializedRenderer {
-        match self {
-            InitializationResult::Initialized(renderer) => renderer,
-            InitializationResult::Uninitialized(_) => panic!("Renderer is not initialized"),
-            InitializationResult::Gone => panic!("Initialization context is gone"),
-        }
-    }
-
-    pub fn into_option(self) -> Option<Renderer> {
-        match self {
-            InitializationResult::Initialized(InitializedRenderer { renderer, .. }) => {
-                Some(renderer)
-            }
-            InitializationResult::Uninitialized(_) => None,
-            InitializationResult::Gone => panic!("Initialization context is gone"),
-        }
-    }
-}
-
 pub struct UninitializedRenderer {
     pub wgpu_settings: WgpuSettings,
     pub renderer_settings: RendererSettings,
@@ -88,20 +56,17 @@ impl UninitializedRenderer {
     pub async fn initialize_renderer<MWC>(
         self,
         existing_window: &MWC::MapWindow,
-    ) -> Result<InitializationResult, RenderError>
+    ) -> Result<Renderer, RenderError>
     where
         MWC: MapWindowConfig,
         <MWC as MapWindowConfig>::MapWindow: HeadedMapWindow,
     {
-        let renderer = Renderer::initialize(
+        Renderer::initialize(
             existing_window,
             self.wgpu_settings.clone(),
             self.renderer_settings,
         )
-        .await?;
-        Ok(InitializationResult::Initialized(InitializedRenderer {
-            renderer,
-        }))
+        .await
     }
 }
 
@@ -121,8 +86,4 @@ impl UninitializedRenderer {
         )
         .await
     }
-}
-
-pub struct InitializedRenderer {
-    pub renderer: Renderer,
 }

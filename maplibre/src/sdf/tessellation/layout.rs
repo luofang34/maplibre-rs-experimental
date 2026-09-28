@@ -1,16 +1,17 @@
 //! Text and sprite quads in logical pixels around a geographic anchor.
+use geo::Centroid;
+use geo_types::{Geometry, Point};
+use lyon::tessellation::VertexBuffers;
+
 use crate::{
     euclid::{Box2D, Point2D},
-    render::shaders::ShaderSymbolVertexNew,
+    render::shaders::ShaderSymbolVertex,
     sdf::{
         assets::{AtlasEntry, SymbolAtlas},
         Feature,
     },
     style::{expression::FeatureProperties, layer::SymbolPaint},
 };
-use geo::Centroid;
-use geo_types::{Geometry, Point};
-use lyon::tessellation::VertexBuffers;
 
 pub(super) struct CollectedSymbol {
     pub id: Option<u64>,
@@ -48,7 +49,7 @@ pub(super) fn append(
     paint: &SymbolPaint,
     zoom: f64,
     atlas: &SymbolAtlas,
-    buffer: &mut VertexBuffers<ShaderSymbolVertexNew, u32>,
+    buffer: &mut VertexBuffers<ShaderSymbolVertex, u32>,
     features: &mut Vec<Feature>,
 ) {
     let start = buffer.indices.len();
@@ -146,7 +147,7 @@ pub(super) fn anchor_fractions(anchor: &str) -> [f32; 2] {
 }
 
 pub(super) fn quad(
-    buffer: &mut VertexBuffers<ShaderSymbolVertexNew, u32>,
+    buffer: &mut VertexBuffers<ShaderSymbolVertex, u32>,
     anchor: Point<f64>,
     bounds: [f32; 4],
     image: &AtlasEntry,
@@ -170,7 +171,7 @@ pub(super) fn quad(
             bounds[2]
         };
         let py = if index < 2 { bounds[1] } else { bounds[3] };
-        buffer.vertices.push(ShaderSymbolVertexNew {
+        buffer.vertices.push(ShaderSymbolVertex {
             a_pos_offset: [
                 anchor.x().round() as i32,
                 anchor.y().round() as i32,
@@ -187,12 +188,12 @@ pub(super) fn quad(
 }
 
 fn bounds(
-    vertices: &[ShaderSymbolVertexNew],
+    vertices: &[ShaderSymbolVertex],
     indices: &[u32],
     paint: &SymbolPaint,
     properties: &FeatureProperties,
     zoom: f64,
-) -> Box2D<f32, crate::legacy::TileSpace> {
+) -> Box2D<f32, crate::sdf::TileSpace> {
     let text_size = paint
         .text_size
         .as_ref()
@@ -210,7 +211,7 @@ fn bounds(
         } else {
             icon_size
         };
-        let point: Point2D<f32, crate::legacy::TileSpace> = Point2D::new(
+        let point: Point2D<f32, crate::sdf::TileSpace> = Point2D::new(
             vertex.a_pos_offset[2] as f32 / 32.0 * scale,
             vertex.a_pos_offset[3] as f32 / 32.0 * scale,
         );

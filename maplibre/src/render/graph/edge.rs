@@ -1,7 +1,7 @@
 use super::NodeId;
 
 /// An edge, which connects two [`Nodes`](super::Node) in
-/// a [`RenderGraph`](crate::render_graph::RenderGraph).
+/// a [`RenderGraph`](crate::render::graph::RenderGraph).
 ///
 /// They are used to describe the ordering (which node has to run first)
 /// and may be of two kinds: [`NodeEdge`](Self::NodeEdge) and [`SlotEdge`](Self::SlotEdge).

@@ -5,8 +5,8 @@ use std::borrow::Cow;
 use wgpu::PresentMode;
 pub use wgpu::{Backends, Features, Limits, PowerPreference, TextureFormat};
 
-/// Provides configuration for renderer initialization. Use [`Device::features`](crate::renderer::Device::features),
-/// [`Device::limits`](crate::renderer::Device::limits), and the [`WgpuAdapterInfo`](crate::render_resource::WgpuAdapterInfo)
+/// Provides configuration for renderer initialization. Use [`Device::features`](wgpu::Device::features),
+/// [`Device::limits`](wgpu::Device::limits), and the [`WgpuAdapterInfo`](wgpu::AdapterInfo)
 /// resource to get runtime information about the actual adapter, backend, features, and limits.
 #[derive(Clone)]
 pub struct WgpuSettings {

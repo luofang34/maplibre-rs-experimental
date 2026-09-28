@@ -102,7 +102,7 @@ pub trait ResourceQuery {
     fn query<'r, 's>(resources: &'r Resources, state: Self::State<'s>) -> Option<Self::Item<'r>>;
 }
 
-impl<'a, R: Resource> ResourceQuery for &'a R {
+impl<R: Resource> ResourceQuery for &R {
     type Item<'r> = &'r R;
     type State<'s> = EphemeralQueryState<'s>;
 
@@ -124,7 +124,7 @@ pub trait ResourceQueryMut {
     ) -> Option<Self::MutItem<'r>>;
 }
 
-impl<'a, R: Resource> ResourceQueryMut for &'a R {
+impl<R: Resource> ResourceQueryMut for &R {
     type MutItem<'r> = &'r R;
     type State<'s> = EphemeralQueryState<'s>;
 
@@ -136,7 +136,7 @@ impl<'a, R: Resource> ResourceQueryMut for &'a R {
     }
 }
 
-impl<'a, R: Resource> ResourceQueryMut for &'a mut R {
+impl<R: Resource> ResourceQueryMut for &mut R {
     type MutItem<'r> = &'r mut R;
     type State<'s> = EphemeralQueryState<'s>;
 
@@ -151,13 +151,16 @@ impl<'a, R: Resource> ResourceQueryMut for &'a mut R {
 // ResourceQueryUnsafe
 
 pub trait ResourceQueryUnsafe: ResourceQueryMut {
+    /// # Safety
+    /// The caller must prevent overlapping mutable borrows of the queried resources
+    /// for the lifetime of the returned references, including across query states.
     unsafe fn query_unsafe<'r, 's>(
         resources: &'r Resources,
         state: Self::State<'s>,
     ) -> Option<Self::MutItem<'r>>;
 }
 
-impl<'a, R: Resource> ResourceQueryUnsafe for &'a R {
+impl<R: Resource> ResourceQueryUnsafe for &R {
     unsafe fn query_unsafe<'r, 's>(
         resources: &'r Resources,
         state: Self::State<'s>,
@@ -166,9 +169,7 @@ impl<'a, R: Resource> ResourceQueryUnsafe for &'a R {
     }
 }
 
-impl<'a, R: Resource> ResourceQueryUnsafe for &'a mut R {
-    /// SAFETY: Safe if tiles is borrowed mutably.
-    // FIXME tcs: check if really safe
+impl<R: Resource> ResourceQueryUnsafe for &mut R {
     unsafe fn query_unsafe<'r, 's>(
         resources: &'r Resources,
         state: Self::State<'s>,

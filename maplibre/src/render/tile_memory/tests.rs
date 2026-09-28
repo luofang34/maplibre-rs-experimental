@@ -15,7 +15,6 @@ fn layer(coords: WorldTileCoords, atlas: Arc<SymbolAtlas>) -> SymbolLayerData {
         source_layer: "places".into(),
         style_layer_id: "places".into(),
         buffer: OverAlignedVertexBuffer::empty(),
-        new_buffer: OverAlignedVertexBuffer::empty(),
         features: Vec::new(),
     }
 }

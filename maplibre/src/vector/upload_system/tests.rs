@@ -93,8 +93,10 @@ async fn empty_tiles_do_not_starve_later_geometry_uploads() {
         &style,
         coords,
         &[],
-        8.0,
-        0.0,
+        super::VectorPaintFrame {
+            zoom: 8.0,
+            bearing: 0.0,
+        },
     );
     assert!(
         pool.get_loaded_style_layers_at(wanted)

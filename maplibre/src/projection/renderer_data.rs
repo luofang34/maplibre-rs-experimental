@@ -1,4 +1,4 @@
-//! Projection uniforms shared by Mercator, globe, terrain, and custom-layer rendering.
+//! Per-draw projection matrices and globe horizon geometry.
 
 use cgmath::{InnerSpace, Matrix4, Vector3, Vector4};
 use thiserror::Error;
@@ -19,10 +19,6 @@ pub struct ProjectionMatrices {
 pub struct ProjectionDataParams {
     /// Canonical tile rendered by this draw, or `None` for world-space draws.
     pub tile: Option<TileCoords>,
-    /// Requests a pixel-aligned matrix where the active projection supports it.
-    pub aligned: bool,
-    /// Requests terrain transforms for this draw.
-    pub apply_terrain_matrix: bool,
     /// Enables globe projection or its transition for this draw.
     pub apply_globe_matrix: bool,
 }

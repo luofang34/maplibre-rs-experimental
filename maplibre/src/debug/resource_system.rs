@@ -45,13 +45,14 @@ pub fn resource_system(
             *settings,
             mask_shader.describe_vertex(),
             mask_shader.describe_fragment(),
-            false,
-            false,
-            true,
-            false,
-            false,
-            false,
-            false,
+            crate::render::resource::TilePipelineOptions {
+                depth_stencil_enabled: false,
+                update_stencil: false,
+                debug_stencil: true,
+                wireframe: false,
+                multisampling: false,
+                textured: false,
+            },
         )
         .describe_render_pipeline()
         .initialize_with_prefix_layouts(device, &[projection_resources.bind_group_layout()]);

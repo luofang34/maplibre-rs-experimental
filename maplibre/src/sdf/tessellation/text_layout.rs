@@ -1,19 +1,21 @@
 //! Line wrapping and glyph metrics around a symbol anchor.
+use std::collections::HashMap;
+
+use lyon::tessellation::VertexBuffers;
+
 use super::layout::{anchor_fractions, offset, quad, CollectedSymbol};
 use crate::{
-    render::shaders::ShaderSymbolVertexNew,
+    render::shaders::ShaderSymbolVertex,
     sdf::assets::{AtlasEntry, SymbolAtlas},
     style::layer::SymbolPaint,
 };
-use lyon::tessellation::VertexBuffers;
-use std::collections::HashMap;
 
 pub(super) fn append(
     symbol: &CollectedSymbol,
     paint: &SymbolPaint,
     zoom: f64,
     atlas: &SymbolAtlas,
-    buffer: &mut VertexBuffers<ShaderSymbolVertexNew, u32>,
+    buffer: &mut VertexBuffers<ShaderSymbolVertex, u32>,
 ) {
     let Some(text) = paint.label(&symbol.properties, zoom) else {
         return;

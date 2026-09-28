@@ -24,7 +24,7 @@ pub trait HttpClient: Clone + Sync + Send + 'static {
 }
 
 /// Gives access to the HTTP client which can be of multiple types,
-/// see [crates::io::source_client::SourceClient]
+/// see [crate::io::source_client::SourceClient]
 #[derive(Clone)]
 pub struct HttpSourceClient<HC>
 where

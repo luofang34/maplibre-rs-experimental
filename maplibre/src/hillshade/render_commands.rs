@@ -7,7 +7,6 @@ use crate::{
         eventually::{Eventually, Eventually::Initialized},
         projection::ProjectionGpuResources,
         render_phase::{LayerItem, RenderCommand, RenderCommandResult},
-        resource::TrackedRenderPass,
     },
     tcs::world::World,
 };
@@ -18,7 +17,7 @@ impl RenderCommand<LayerItem> for SetDemPipeline {
     fn render<'w>(
         world: &'w World,
         item: &LayerItem,
-        pass: &mut TrackedRenderPass<'w>,
+        pass: &mut wgpu::RenderPass<'w>,
     ) -> RenderCommandResult {
         let Some((Initialized(resources), Initialized(projection_resources))) =
             world.resources.query::<(
@@ -31,7 +30,7 @@ impl RenderCommand<LayerItem> for SetDemPipeline {
         let Some((kind, _)) = resources.layer(&item.style_layer) else {
             return RenderCommandResult::Failure;
         };
-        pass.set_render_pipeline(resources.pipeline(kind));
+        pass.set_pipeline(resources.pipeline(kind));
         pass.set_bind_group(0, projection_resources.bind_group_for(item.projection), &[]);
         RenderCommandResult::Success
     }
@@ -43,7 +42,7 @@ impl RenderCommand<LayerItem> for SetDemLayerBindGroup {
     fn render<'w>(
         world: &'w World,
         item: &LayerItem,
-        pass: &mut TrackedRenderPass<'w>,
+        pass: &mut wgpu::RenderPass<'w>,
     ) -> RenderCommandResult {
         let Some(Initialized(resources)) = world.resources.get::<Eventually<HillshadeResources>>()
         else {

@@ -30,11 +30,8 @@ mod resource_system;
 /// Labels for the "draw" graph
 mod draw_graph {
     pub const NAME: &str = "draw";
-    // Labels for input nodes
-    pub mod input {}
     // Labels for non-input nodes
     pub mod node {
-        pub const MAIN_PASS: &str = "main_pass";
         pub const DEBUG_PASS: &str = "debug_pass";
     }
 }

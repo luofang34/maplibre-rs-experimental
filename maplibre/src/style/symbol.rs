@@ -87,10 +87,8 @@ impl SymbolPaint {
             Some("lowercase") => text.to_lowercase(),
             _ => text,
         };
-        let shaped =
-            crate::legacy::bidi::apply_arabic_shaping(&widestring::U16String::from(text.as_str()));
-        let text = shaped.to_string_lossy().trim().to_string();
-        (!text.trim().is_empty()).then_some(text)
+        let text = text.trim();
+        (!text.is_empty()).then(|| text.to_string())
     }
 }
 

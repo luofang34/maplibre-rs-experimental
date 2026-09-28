@@ -10,13 +10,8 @@ use crate::{
     kernel::Kernel,
     plugin::Plugin,
     render::{
-        builder::{
-            InitializationResult, InitializedRenderer, RendererBuilder, UninitializedRenderer,
-        },
-        camera::DEFAULT_MAX_PITCH,
-        error::RenderError,
-        graph::RenderGraphError,
-        view_state::ViewState,
+        builder::RendererBuilder, camera::DEFAULT_MAX_PITCH, error::RenderError,
+        graph::RenderGraphError, view_state::ViewState,
     },
     schedule::{Schedule, Stage, StageError},
     style::Style,
@@ -42,11 +37,13 @@ pub enum MapError {
 }
 
 pub enum CurrentMapContext {
-    Ready(MapContext),
-    Pending {
-        style: Style,
-        renderer_builder: RendererBuilder,
-    },
+    Ready(Box<MapContext>),
+    Pending(Box<PendingMapContext>),
+}
+
+pub struct PendingMapContext {
+    style: Style,
+    renderer_builder: RendererBuilder,
 }
 
 pub struct Map<E: Environment> {
@@ -79,10 +76,10 @@ where
         let map = Self {
             kernel,
             schedule,
-            map_context: CurrentMapContext::Pending {
+            map_context: CurrentMapContext::Pending(Box::new(PendingMapContext {
                 style,
                 renderer_builder,
-            },
+            })),
             window,
             plugins,
             max_pitch: DEFAULT_MAX_PITCH,
@@ -100,12 +97,13 @@ where
     pub async fn initialize_renderer(&mut self) -> Result<(), MapError> {
         match &mut self.map_context {
             CurrentMapContext::Ready(_) => Err(MapError::RendererAlreadySet),
-            CurrentMapContext::Pending {
-                style,
-                renderer_builder,
-            } => {
-                let init_result = renderer_builder
-                    .clone() // Cloning because we want to be able to build multiple times maybe
+            CurrentMapContext::Pending(pending) => {
+                let PendingMapContext {
+                    style,
+                    renderer_builder,
+                } = pending.as_mut();
+                let mut renderer = renderer_builder
+                    .clone()
                     .build()
                     .initialize_renderer::<E::MapWindowConfig>(&self.window)
                     .await
@@ -137,29 +135,21 @@ where
 
                 let mut world = World::default();
 
-                match init_result {
-                    InitializationResult::Initialized(InitializedRenderer {
-                        mut renderer, ..
-                    }) => {
-                        for plugin in &self.plugins {
-                            plugin.build(
-                                &mut self.schedule,
-                                self.kernel.clone(),
-                                &mut world,
-                                &mut renderer.render_graph,
-                            );
-                        }
+                for plugin in &self.plugins {
+                    plugin.build(
+                        &mut self.schedule,
+                        self.kernel.clone(),
+                        &mut world,
+                        &mut renderer.render_graph,
+                    );
+                }
 
-                        self.map_context = CurrentMapContext::Ready(MapContext {
-                            world,
-                            view_state,
-                            style: std::mem::take(style),
-                            renderer,
-                        });
-                    }
-                    InitializationResult::Uninitialized(UninitializedRenderer { .. }) => {}
-                    _ => panic!("Rendering context gone"),
-                };
+                self.map_context = CurrentMapContext::Ready(Box::new(MapContext {
+                    world,
+                    view_state,
+                    style: std::mem::take(style),
+                    renderer,
+                }));
                 Ok(())
             }
         }
@@ -175,7 +165,7 @@ where
     pub fn is_initialized(&self) -> bool {
         match &self.map_context {
             CurrentMapContext::Ready(_) => true,
-            CurrentMapContext::Pending { .. } => false,
+            CurrentMapContext::Pending(_) => false,
         }
     }
 
@@ -185,14 +175,14 @@ where
         self.schedule.clear();
         match &self.map_context {
             CurrentMapContext::Ready(c) => {
-                self.map_context = CurrentMapContext::Pending {
+                self.map_context = CurrentMapContext::Pending(Box::new(PendingMapContext {
                     style: c.style.clone(),
                     renderer_builder: RendererBuilder::new()
-                        .with_renderer_settings(c.renderer.settings.clone())
+                        .with_renderer_settings(c.renderer.settings)
                         .with_wgpu_settings(c.renderer.wgpu_settings.clone()),
-                }
+                }))
             }
-            CurrentMapContext::Pending { .. } => {}
+            CurrentMapContext::Pending(_) => {}
         }
     }
 
@@ -203,21 +193,21 @@ where
                 self.schedule.run(map_context)?;
                 Ok(())
             }
-            CurrentMapContext::Pending { .. } => Err(MapError::RendererNotReady),
+            CurrentMapContext::Pending(_) => Err(MapError::RendererNotReady),
         }
     }
 
     pub fn context(&self) -> Result<&MapContext, MapError> {
         match &self.map_context {
             CurrentMapContext::Ready(map_context) => Ok(map_context),
-            CurrentMapContext::Pending { .. } => Err(MapError::RendererNotReady),
+            CurrentMapContext::Pending(_) => Err(MapError::RendererNotReady),
         }
     }
 
     pub fn context_mut(&mut self) -> Result<&mut MapContext, MapError> {
         match &mut self.map_context {
             CurrentMapContext::Ready(map_context) => Ok(map_context),
-            CurrentMapContext::Pending { .. } => Err(MapError::RendererNotReady),
+            CurrentMapContext::Pending(_) => Err(MapError::RendererNotReady),
         }
     }
 

@@ -120,7 +120,7 @@ pub(crate) fn covering_tiles_with_history(
     } else {
         unbounded_covering(options.zoom_range.min, inspect)?
     };
-    sort_by_center(&mut visible, priority, options.zoom);
+    sort_by_center(&mut visible, priority);
     Ok(add_padding(visible, options.padding, options.max_tiles))
 }
 

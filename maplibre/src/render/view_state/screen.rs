@@ -36,48 +36,6 @@ impl ViewState {
         self.clip_to_window_transform() * ndc
     }
 
-    /// The way how maplibre converts from clip to window space: https://github.com/maplibre/maplibre-native/blob/4add9ead08799577a37c465b8cb1266676b6c41e/src/mbgl/text/collision_index.cpp/#L437-L438
-    pub(crate) fn clip_to_window_maplibre(&self, clip: &Vector4<f64>) -> Vector4<f64> {
-        assert_eq!(clip.z, 0.0);
-        return Vector4::new(
-            ((clip.x / clip.w + 1.) / 2.) * self.width,
-            ((-clip.y / clip.w + 1.) / 2.) * self.height,
-            0.0,
-            1.0,
-        );
-    }
-
-    /// Alternative implementation to `clip_to_window`. Transforms coordinates in clip space to
-    /// window coordinates.
-    ///
-    /// Adopted from [here](https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/VkViewport.html)
-    /// and [here](https://matthewwellings.com/blog/the-new-vulkan-coordinate-system/) (Vulkan).
-    pub(super) fn clip_to_window_vulkan(&self, clip: &Vector4<f64>) -> Vector3<f64> {
-        #[rustfmt::skip]
-            let ndc = Vector4::new(
-            clip.x / clip.w,
-            clip.y / clip.w,
-            clip.z / clip.w,
-            1.0
-        );
-
-        let min_depth = 0.0;
-        let max_depth = 1.0;
-
-        let x = 0.0;
-        let y = 0.0;
-        let ox = x + self.width / 2.0;
-        let oy = y + self.height / 2.0;
-        let oz = min_depth;
-        let px = self.width;
-        let py = self.height;
-        let pz = max_depth - min_depth;
-        let xd = ndc.x;
-        let yd = ndc.y;
-        let zd = ndc.z;
-        Vector3::new(px / 2.0 * xd + ox, py / 2.0 * yd + oy, pz * zd + oz)
-    }
-
     /// Order of transformations reversed: https://computergraphics.stackexchange.com/questions/6087/screen-space-coordinates-to-eye-space-conversion/6093
     /// `w` is lost.
     ///
@@ -102,30 +60,6 @@ impl ViewState {
             1.0,
         );
         let unprojected = inverted_view_proj.project(ndc);
-
-        Vector3::new(
-            unprojected.x / unprojected.w,
-            unprojected.y / unprojected.w,
-            unprojected.z / unprojected.w,
-        )
-    }
-
-    /// Alternative implementation to `window_to_world`
-    ///
-    /// Adopted from [here](https://docs.rs/nalgebra-glm/latest/src/nalgebra_glm/ext/matrix_projection.rs.html#164-181).
-    pub(super) fn window_to_world_nalgebra(
-        window: &Vector3<f64>,
-        inverted_view_proj: &InvertedViewProjection,
-        width: f64,
-        height: f64,
-    ) -> Vector3<f64> {
-        let pt = Vector4::new(
-            2.0 * (window.x - 0.0) / width - 1.0,
-            2.0 * (height - window.y - 0.0) / height - 1.0,
-            window.z,
-            1.0,
-        );
-        let unprojected = inverted_view_proj.project(pt);
 
         Vector3::new(
             unprojected.x / unprojected.w,

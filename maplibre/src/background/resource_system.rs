@@ -48,13 +48,14 @@ pub fn resource_system(
             *settings,
             shader.describe_vertex(),
             shader.describe_fragment(),
-            true,                                              // depth stencil used
-            false,                                             // update stencil
-            true,  // debug stencil (Always pass stencil)
-            false, // wireframe
-            surface.is_multisampling_supported(settings.msaa), // multisampling
-            false, // raster
-            false, // glyph
+            crate::render::resource::TilePipelineOptions {
+                depth_stencil_enabled: true,
+                update_stencil: false,
+                debug_stencil: true,
+                wireframe: false,
+                multisampling: surface.is_multisampling_supported(settings.msaa),
+                textured: false,
+            },
         )
         .describe_render_pipeline()
         .initialize(device);
@@ -71,13 +72,14 @@ pub fn resource_system(
             *settings,
             shader.describe_vertex(),
             shader.describe_fragment(),
-            true,
-            false,
-            true,
-            false,
-            surface.is_multisampling_supported(settings.msaa),
-            false,
-            false,
+            crate::render::resource::TilePipelineOptions {
+                depth_stencil_enabled: true,
+                update_stencil: false,
+                debug_stencil: true,
+                wireframe: false,
+                multisampling: surface.is_multisampling_supported(settings.msaa),
+                textured: false,
+            },
         )
         .with_depth_write()
         .describe_render_pipeline()
@@ -94,13 +96,14 @@ pub fn resource_system(
             *settings,
             shader.describe_vertex(),
             shader.describe_fragment(),
-            true,
-            false,
-            true,
-            false,
-            surface.is_multisampling_supported(settings.msaa),
-            false,
-            false,
+            crate::render::resource::TilePipelineOptions {
+                depth_stencil_enabled: true,
+                update_stencil: false,
+                debug_stencil: true,
+                wireframe: false,
+                multisampling: surface.is_multisampling_supported(settings.msaa),
+                textured: false,
+            },
         )
         .describe_render_pipeline()
         .initialize_with_prefix_layouts(device, &[projection_resources.bind_group_layout()]);
@@ -117,13 +120,14 @@ pub fn resource_system(
             *settings,
             shader.describe_vertex(),
             shader.describe_fragment(),
-            true,
-            false,
-            true,
-            false,
-            surface.is_multisampling_supported(settings.msaa),
-            false,
-            false,
+            crate::render::resource::TilePipelineOptions {
+                depth_stencil_enabled: true,
+                update_stencil: false,
+                debug_stencil: true,
+                wireframe: false,
+                multisampling: surface.is_multisampling_supported(settings.msaa),
+                textured: false,
+            },
         )
         .with_depth_write()
         .describe_render_pipeline()

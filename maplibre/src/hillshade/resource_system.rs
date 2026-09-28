@@ -60,13 +60,14 @@ pub fn resource_system(
                 *settings,
                 shader.describe_vertex(),
                 shader.describe_fragment(),
-                true,
-                false,
-                true,
-                false,
-                surface.is_multisampling_supported(settings.msaa),
-                true,
-                false,
+                crate::render::resource::TilePipelineOptions {
+                    depth_stencil_enabled: true,
+                    update_stencil: false,
+                    debug_stencil: true,
+                    wireframe: false,
+                    multisampling: surface.is_multisampling_supported(settings.msaa),
+                    textured: true,
+                },
             )
             .describe_render_pipeline();
             // The raster flag gives group 1 the tile texture; the layer uniforms follow.

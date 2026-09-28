@@ -2,6 +2,25 @@
 use super::*;
 
 #[test]
+fn labels_preserve_unicode_and_apply_transform_before_trimming() {
+    for (input, transform, expected) in [
+        ("  مرحبًا 🌍  ", "none", Some("مرحبًا 🌍")),
+        ("  Straße  ", "uppercase", Some("STRASSE")),
+        ("  ALPS  ", "lowercase", Some("alps")),
+        (" \t\n ", "none", None),
+    ] {
+        let paint: SymbolPaint = serde_json::from_value(serde_json::json!({
+            "text-field": input, "text-transform": transform
+        }))
+        .expect("paint");
+        assert_eq!(
+            paint.label(&FeatureProperties::new(), 0.0).as_deref(),
+            expected
+        );
+    }
+}
+
+#[test]
 fn shared_symbol_height_evaluates_features_and_overrides_component_aliases() {
     let paint: SymbolPaint = serde_json::from_value(serde_json::json!({
         "symbol-height-offset": ["+", ["get", "altitude"], 50],

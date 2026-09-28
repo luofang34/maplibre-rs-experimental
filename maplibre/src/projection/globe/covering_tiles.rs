@@ -150,6 +150,9 @@ pub(crate) fn covering_tiles_with_history(
             zoom: u8::from(options.zoom),
         });
     }
+    if options.max_tiles == 0 {
+        return Ok(Vec::new());
+    }
     let lod = lod::LodContext::new(camera, options.requested_zoom);
     let frustum = GlobeFrustum::from_camera(camera);
     let priority = if camera.is_external_eye() {
@@ -190,7 +193,7 @@ pub(crate) fn covering_tiles_with_history(
     } else {
         unbounded_covering(options.zoom_range.min, inspect)?
     };
-    sort_by_center(&mut visible, priority, options.zoom);
+    sort_by_center(&mut visible, priority);
     Ok(add_padding(visible, options.padding, options.max_tiles))
 }
 
@@ -268,11 +271,7 @@ fn combine_intersections(left: Intersection, right: Intersection) -> Intersectio
     }
 }
 
-pub(crate) fn sort_by_center(
-    tiles: &mut [WorldTileCoords],
-    center: LatLon,
-    _nominal_zoom: ZoomLevel,
-) {
+pub(crate) fn sort_by_center(tiles: &mut [WorldTileCoords], center: LatLon) {
     let center_x = center.longitude / 360.0 + 0.5;
     let latitude = center.latitude.to_radians();
     let center_y = (1.0 - latitude.tan().asinh() / std::f64::consts::PI) * 0.5;
@@ -286,6 +285,7 @@ pub(crate) fn sort_by_center(
 fn distance_squared(tile: WorldTileCoords, center_x: f64, center_y: f64) -> f64 {
     let count = 2_f64.powi(i32::from(u8::from(tile.z)));
     let dx = center_x - (f64::from(tile.x) + 0.5) / count;
+    let dx = dx - dx.round();
     let dy = center_y - (f64::from(tile.y) + 0.5) / count;
     dx * dx + dy * dy
 }

@@ -74,9 +74,8 @@ pub trait IntoMessage {
 pub enum Input {
     TileRequest {
         coords: WorldTileCoords,
-        style: Style, // TODO
+        style: Style,
     },
-    NotYetImplemented, // TODO: Placeholder, should be removed when second input is added
 }
 
 #[derive(Error, Debug)]
@@ -93,9 +92,6 @@ pub trait Context: 'static {
 
 #[derive(Error, Debug)]
 pub enum ProcedureError {
-    /// The [`Input`] is not compatible with the procedure
-    #[error("provided input is not compatible with procedure")]
-    IncompatibleInput,
     #[error("execution of procedure failed")]
     Execution(Box<dyn std::error::Error>),
     #[error("sending data failed")]
@@ -104,10 +100,9 @@ pub enum ProcedureError {
 
 #[cfg(feature = "thread-safe-futures")]
 pub type AsyncProcedureFuture =
-    Pin<Box<(dyn Future<Output = Result<(), ProcedureError>> + Send + 'static)>>;
+    Pin<Box<dyn Future<Output = Result<(), ProcedureError>> + Send + 'static>>;
 #[cfg(not(feature = "thread-safe-futures"))]
-pub type AsyncProcedureFuture =
-    Pin<Box<(dyn Future<Output = Result<(), ProcedureError>> + 'static)>>;
+pub type AsyncProcedureFuture = Pin<Box<dyn Future<Output = Result<(), ProcedureError>> + 'static>>;
 
 #[derive(Error, Debug)]
 pub enum CallError {
@@ -131,42 +126,10 @@ pub type AsyncProcedure<K, C> = fn(input: Input, context: C, kernel: K) -> Async
 /// This work can be implemented through procedures which can be called asynchronously, hence the
 /// name AsyncProcedureCall or APC for short.
 ///
-/// APCs serve as an abstraction for doing work on a separate thread, and then getting responses
-/// back. An asynchronous procedure call can for example be performed by using message passing. In
-/// fact this could theoretically work over a network socket.
+/// Schedules tile processing outside the render loop and receives worker messages.
 ///
-/// It is possible to schedule work on a  remote host by calling [`AsyncProcedureCall::call()`]
-/// and getting the results back by calling the non-blocking function
-/// [`AsyncProcedureCall::receive()`]. The [`AsyncProcedureCall::receive()`] function returns a
-/// struct which implements [`Transferables`].
-///
-/// ## Transferables
-///
-/// Based on whether the current platform supports shared-memory or not, the implementation of APCs
-/// might want to send the whole data from the worker to the caller back or just pointers to that
-/// data. The [`Transferables`] trait allows developers to define that and use different data
-/// layouts for different platforms.
-///
-/// ## Message Passing vs APC
-///
-/// One might wonder why this is called [`AsyncProcedureCall`] instead of `MessagePassingInterface`.
-/// The reason for this is quite simple. We are actually referencing and calling procedures which
-/// are defined in different threads, processes or hosts. That means, that an [`AsyncProcedureCall`]
-/// is actually distinct from a `MessagePassingInterface`.
-///
-///
-/// ## Current Implementations
-///
-/// We currently have two implementation for APCs. One uses the Tokio async runtime on native
-/// targets in [`SchedulerAsyncProcedureCall`].
-/// For the web we implemented an alternative way to call APCs which is called
-/// [`PassingAsyncProcedureCall`]. This implementation does not depend on shared-memory compared to
-/// [`SchedulerAsyncProcedureCall`]. In fact, on the web we are currently not depending on
-/// shared-memory because that feature is hidden behind feature flags in browsers
-/// (see [here](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SharedArrayBuffer)).
-///
-///
-// TODO: Rename to AsyncProcedureCaller?
+/// Native workers can share Rust values; Web workers serialize their transfer types.
+/// [`AsyncProcedureCall::receive`] drains matching messages without blocking the frame.
 pub trait AsyncProcedureCall<K: OffscreenKernel>: 'static {
     type Context: Context + Send + Clone;
 
@@ -212,7 +175,7 @@ impl<K: OffscreenKernel, S: Scheduler> SchedulerAsyncProcedureCall<K, S> {
         Self {
             channel: mpsc::channel(),
             buffer: RefCell::new(Vec::new()),
-            phantom_k: PhantomData::default(),
+            phantom_k: PhantomData,
             scheduler,
             offscreen_kernel_config,
         }

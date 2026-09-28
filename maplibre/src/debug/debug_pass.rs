@@ -8,7 +8,6 @@ use crate::{
         eventually::Eventually::Initialized,
         graph::{Node, NodeRunError, RenderContext, RenderGraphContext, SlotInfo},
         render_phase::RenderPhase,
-        resource::TrackedRenderPass,
         RenderResources,
     },
     tcs::world::World,
@@ -51,7 +50,7 @@ impl Node for DebugPassNode {
             resolve_target: None,
         };
 
-        let render_pass =
+        let mut render_pass =
             render_context
                 .command_encoder
                 .begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -62,15 +61,13 @@ impl Node for DebugPassNode {
                     occlusion_query_set: None,
                 });
 
-        let mut tracked_pass = TrackedRenderPass::new(render_pass);
-
         if let Some(debug_items) = world.resources.get::<RenderPhase<TileDebugItem>>() {
             log::trace!(
                 "RenderPhase<TileDebugItem>::size() = {}",
                 debug_items.size()
             );
             for item in debug_items {
-                item.draw_function.draw(&mut tracked_pass, world, item);
+                item.draw_function.draw(&mut render_pass, world, item);
             }
         }
 

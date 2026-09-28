@@ -8,10 +8,7 @@ use crate::{
         apc::{IntoMessage, Message, MessageTag},
         geometry_index::TileIndex,
     },
-    render::{
-        shaders::{ShaderSymbolVertex, ShaderSymbolVertexNew},
-        ShaderVertex,
-    },
+    render::{shaders::ShaderSymbolVertex, ShaderVertex},
     sdf::{Feature, SymbolLayerData},
     vector::{
         tessellation::{IndexDataType, OverAlignedVertexBuffer},
@@ -91,7 +88,6 @@ pub trait SymbolLayerTessellated: IntoMessage + Debug + Send {
     fn build_from(
         coords: WorldTileCoords,
         buffer: OverAlignedVertexBuffer<ShaderSymbolVertex, IndexDataType>,
-        new_buffer: OverAlignedVertexBuffer<ShaderSymbolVertexNew, IndexDataType>,
         features: Vec<Feature>,
         atlas: Option<std::sync::Arc<crate::sdf::assets::SymbolAtlas>>,
         layer_data: Layer,
@@ -99,8 +95,6 @@ pub trait SymbolLayerTessellated: IntoMessage + Debug + Send {
     ) -> Self
     where
         Self: Sized;
-
-    /// Attaches the tile's glyph and sprite pixels to the worker result.
 
     fn coords(&self) -> WorldTileCoords;
 
@@ -281,7 +275,6 @@ pub struct DefaultSymbolLayerTessellated {
     pub atlas: Option<std::sync::Arc<crate::sdf::assets::SymbolAtlas>>,
     pub coords: WorldTileCoords,
     pub buffer: OverAlignedVertexBuffer<ShaderSymbolVertex, IndexDataType>,
-    pub new_buffer: OverAlignedVertexBuffer<ShaderSymbolVertexNew, IndexDataType>,
     pub features: Vec<Feature>,
     pub layer_data: Layer, // FIXME (perf): Introduce a better structure for this
     pub style_layer_id: String,
@@ -307,7 +300,6 @@ impl SymbolLayerTessellated for crate::vector::transferables::DefaultSymbolLayer
     fn build_from(
         coords: WorldTileCoords,
         buffer: OverAlignedVertexBuffer<ShaderSymbolVertex, IndexDataType>,
-        new_buffer: OverAlignedVertexBuffer<ShaderSymbolVertexNew, IndexDataType>,
         features: Vec<Feature>,
         atlas: Option<std::sync::Arc<crate::sdf::assets::SymbolAtlas>>,
         layer_data: Layer,
@@ -317,7 +309,6 @@ impl SymbolLayerTessellated for crate::vector::transferables::DefaultSymbolLayer
             atlas,
             coords,
             buffer,
-            new_buffer,
             features,
             layer_data,
             style_layer_id,
@@ -329,7 +320,7 @@ impl SymbolLayerTessellated for crate::vector::transferables::DefaultSymbolLayer
     }
 
     fn is_empty(&self) -> bool {
-        self.new_buffer.usable_indices == 0
+        self.buffer.usable_indices == 0
     }
 
     fn to_bucket(self) -> SymbolLayerData {
@@ -339,7 +330,6 @@ impl SymbolLayerTessellated for crate::vector::transferables::DefaultSymbolLayer
             source_layer: self.layer_data.name,
             style_layer_id: self.style_layer_id,
             buffer: self.buffer,
-            new_buffer: self.new_buffer,
             features: self.features,
         }
     }

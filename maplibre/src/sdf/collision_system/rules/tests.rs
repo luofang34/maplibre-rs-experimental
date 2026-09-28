@@ -3,13 +3,15 @@ use super::*;
 use crate::style::layer::SymbolPaint;
 
 fn rules(properties: serde_json::Value) -> PlacementRules {
-    let mut paint = SymbolPaint::default();
-    paint.properties = properties
-        .as_object()
-        .expect("properties")
-        .clone()
-        .into_iter()
-        .collect();
+    let paint = SymbolPaint {
+        properties: properties
+            .as_object()
+            .expect("properties")
+            .clone()
+            .into_iter()
+            .collect(),
+        ..Default::default()
+    };
     PlacementRules::new(&paint, &FeatureProperties::new(), 12.0)
 }
 

@@ -37,7 +37,7 @@ impl Shader for FillShader {
                     attributes: vec![
                         attribute(0, wgpu::VertexFormat::Float32x4, 4),
                         attribute(
-                            1 * wgpu::VertexFormat::Float32x4.size(),
+                            wgpu::VertexFormat::Float32x4.size(),
                             wgpu::VertexFormat::Float32x4,
                             5,
                         ),

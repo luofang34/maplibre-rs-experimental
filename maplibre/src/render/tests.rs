@@ -1,20 +1,7 @@
 use crate::{
     tcs::world::World,
-    window::{MapWindow, MapWindowConfig, PhysicalSize, WindowCreateError},
+    window::{MapWindow, PhysicalSize},
 };
-
-#[derive(Clone)]
-pub struct HeadlessMapWindowConfig {
-    size: PhysicalSize,
-}
-
-impl MapWindowConfig for HeadlessMapWindowConfig {
-    type MapWindow = HeadlessMapWindow;
-
-    fn create(&self) -> Result<Self::MapWindow, WindowCreateError> {
-        Ok(Self::MapWindow { size: self.size })
-    }
-}
 
 pub struct HeadlessMapWindow {
     size: PhysicalSize,

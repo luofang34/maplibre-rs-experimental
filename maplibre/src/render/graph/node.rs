@@ -11,8 +11,8 @@ use crate::{render::RenderResources, tcs::world::World};
 
 /// The context with all information required to interact with the GPU.
 ///
-/// The [`Device`] is used to create render resources and the
-/// the [`CommandEncoder`] is used to record a series of GPU operations.
+/// The [`Device`](wgpu::Device) is used to create render resources and the
+/// the [`CommandEncoder`](wgpu::CommandEncoder) is used to record a series of GPU operations.
 pub struct RenderContext<'d> {
     pub device: &'d wgpu::Device,
     pub command_encoder: wgpu::CommandEncoder,

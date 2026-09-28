@@ -16,7 +16,7 @@
 //! maplibre = "0.0.2"
 //! ```
 
-#![deny(unused_imports)]
+#![deny(dead_code, unused_imports)]
 
 extern crate core;
 
@@ -62,6 +62,5 @@ pub mod hillshade;
 pub mod raster;
 pub mod vector;
 
-mod legacy;
 pub mod sdf;
 pub mod terrain;

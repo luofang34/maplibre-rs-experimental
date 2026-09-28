@@ -11,12 +11,12 @@ impl Shader for SymbolShader {
             source: concat!(
                 include_str!("projection.vertex.wgsl"),
                 include_str!("symbol_uniforms.wgsl"),
-                include_str!("sdf_new.vertex.wgsl")
+                include_str!("sdf.vertex.wgsl")
             ),
             entry_point: "main",
             buffers: vec![
                 VertexBufferLayout {
-                    array_stride: std::mem::size_of::<ShaderSymbolVertexNew>() as u64,
+                    array_stride: std::mem::size_of::<ShaderSymbolVertex>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes:
                         wgpu::vertex_attr_array![0 => Sint32x4, 1 => Uint32x4, 2 => Sint32x4]
@@ -48,7 +48,7 @@ impl Shader for SymbolShader {
         FragmentState {
             source: concat!(
                 include_str!("symbol_uniforms.wgsl"),
-                include_str!("sdf_new.fragment.wgsl")
+                include_str!("sdf.fragment.wgsl")
             ),
             entry_point: "main",
             targets: vec![Some(wgpu::ColorTargetState {

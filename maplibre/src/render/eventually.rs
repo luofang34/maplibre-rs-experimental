@@ -4,8 +4,10 @@ use crate::{coords::WorldTileCoords, render::tile_view_pattern::HasTile, tcs::wo
 
 /// Wrapper around a resource which can be initialized or uninitialized.
 /// Uninitialized resourced can be initialized by calling [`Eventually::initialize()`].
+#[derive(Default)]
 pub enum Eventually<T> {
     Initialized(T),
+    #[default]
     Uninitialized,
 }
 
@@ -67,12 +69,6 @@ impl<T> Eventually<T> {
             Eventually::Initialized(value) => value,
             Eventually::Uninitialized => panic!("{message}"),
         }
-    }
-}
-
-impl<T> Default for Eventually<T> {
-    fn default() -> Self {
-        Eventually::Uninitialized
     }
 }
 

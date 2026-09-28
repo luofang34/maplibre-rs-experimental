@@ -3,7 +3,6 @@ use crate::{
         eventually::{Eventually, Eventually::Initialized},
         projection::ProjectionGpuResources,
         render_phase::{PhaseItem, RenderCommand, RenderCommandResult, TranslucentItem},
-        resource::TrackedRenderPass,
         INDEX_FORMAT,
     },
     sdf::{textures::SymbolTextures, SymbolBufferPool, SymbolPipeline},
@@ -15,7 +14,7 @@ impl<P: PhaseItem> RenderCommand<P> for SetSymbolPipeline {
     fn render<'w>(
         world: &'w World,
         _item: &P,
-        pass: &mut TrackedRenderPass<'w>,
+        pass: &mut wgpu::RenderPass<'w>,
     ) -> RenderCommandResult {
         let Some((Initialized(symbol_pipeline), Initialized(projection_resources))) =
             world.resources.query::<(
@@ -26,7 +25,7 @@ impl<P: PhaseItem> RenderCommand<P> for SetSymbolPipeline {
             return RenderCommandResult::Failure;
         };
 
-        pass.set_render_pipeline(symbol_pipeline);
+        pass.set_pipeline(symbol_pipeline);
         pass.set_bind_group(0, projection_resources.bind_group(), &[]);
         let Some(Initialized(depth)) = world
             .resources
@@ -44,7 +43,7 @@ impl RenderCommand<TranslucentItem> for DrawSymbol {
     fn render<'w>(
         world: &'w World,
         item: &TranslucentItem,
-        pass: &mut TrackedRenderPass<'w>,
+        pass: &mut wgpu::RenderPass<'w>,
     ) -> RenderCommandResult {
         let Some((Initialized(symbol_buffer_pool), covering)) = world.resources.query::<(
             &Eventually<SymbolBufferPool>,

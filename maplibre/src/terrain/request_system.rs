@@ -214,9 +214,7 @@ pub fn fetch_dem_apc<K: OffscreenKernel, T: DemTransferables, C: Context + Clone
     kernel: K,
 ) -> AsyncProcedureFuture {
     Box::pin(async move {
-        let Input::TileRequest { coords, style } = input else {
-            return Err(ProcedureError::IncompatibleInput);
-        };
+        let Input::TileRequest { coords, style } = input;
         let Some(dem) = dem_source(&style) else {
             return Ok(());
         };

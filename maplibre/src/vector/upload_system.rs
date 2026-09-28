@@ -89,8 +89,7 @@ pub fn upload_system(
         style,
         source_tiles,
         &spatial,
-        zoom,
-        bearing,
+        paint_frame,
     );
     Ok(())
 }
@@ -202,8 +201,7 @@ fn upload_tessellated_layer(
     style: &Style,
     source_tiles: Vec<crate::coords::WorldTileCoords>,
     spatial: &[super::structures::SpatialBuffer],
-    zoom: f32,
-    bearing: f32,
+    paint: VectorPaintFrame,
 ) {
     // Upload the tessellated layers in view, a few tiles a frame; the rest follow next
     // frame rather than staging a whole burst of arrivals at once.
@@ -234,19 +232,18 @@ fn upload_tessellated_layer(
             .collect::<Vec<_>>();
 
         for style_layer in &style.layers {
-            let Some(AvailableVectorLayerBucket {
-                coords,
-                feature_indices,
-                feature_colors,
-                buffer,
-                ..
-            }) = available_layers
+            let Some(bucket) = available_layers
                 .iter()
                 .find(|layer| style_layer.id.as_str() == layer.style_layer_id.as_str())
             else {
                 continue;
             };
 
+            let AvailableVectorLayerBucket {
+                buffer,
+                feature_indices,
+                ..
+            } = *bucket;
             let size = buffer.buffer.vertices.len() * size_of::<crate::render::ShaderVertex>()
                 + buffer.buffer.indices.len() * size_of::<u32>()
                 + feature_indices
@@ -257,15 +254,7 @@ fn upload_tessellated_layer(
             if !bytes.take(size) {
                 return;
             }
-            upload_bucket(
-                buffer_pool,
-                queue,
-                style_layer,
-                (*coords, buffer, feature_indices, feature_colors),
-                spatial,
-                zoom,
-                bearing,
-            );
+            upload_bucket(buffer_pool, queue, style_layer, bucket, spatial, paint);
         }
         if !available_layers.is_empty() {
             uploaded_tiles += 1;
@@ -277,17 +266,19 @@ fn upload_bucket(
     buffer_pool: &mut VectorBufferPool,
     queue: &wgpu::Queue,
     style_layer: &crate::style::layer::StyleLayer,
-    data: (
-        crate::coords::WorldTileCoords,
-        &crate::vector::tessellation::OverAlignedVertexBuffer<crate::render::ShaderVertex, u32>,
-        &[u32],
-        &[[f32; 4]],
-    ),
+    bucket: &AvailableVectorLayerBucket,
     spatial: &[super::structures::SpatialBuffer],
-    zoom: f32,
-    bearing: f32,
+    paint: VectorPaintFrame,
 ) {
-    let (coords, buffer, feature_indices, feature_colors) = data;
+    let VectorPaintFrame { zoom, bearing } = paint;
+    let AvailableVectorLayerBucket {
+        coords,
+        buffer,
+        feature_indices,
+        feature_colors,
+        ..
+    } = bucket;
+    let coords = *coords;
     let color: Option<Vec4f32> = style_layer
         .paint
         .as_ref()

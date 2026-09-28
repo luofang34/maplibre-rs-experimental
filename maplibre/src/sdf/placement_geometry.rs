@@ -1,6 +1,7 @@
 //! Symbol bounds measured once during layout, shared by collision and near-plane clipping.
-use crate::render::shaders::ShaderSymbolVertexNew;
 use serde::{Deserialize, Serialize};
+
+use crate::render::shaders::ShaderSymbolVertex;
 
 /// Pixel bounds and alignment of a text or icon component at its layout size.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -15,7 +16,7 @@ pub struct SymbolBounds {
     pub text: bool,
 }
 
-pub(crate) fn measure(vertices: &mut [ShaderSymbolVertexNew]) -> [Option<SymbolBounds>; 3] {
+pub(crate) fn measure(vertices: &mut [ShaderSymbolVertex]) -> [Option<SymbolBounds>; 3] {
     let mut parts: [Option<SymbolBounds>; 3] = [None, None, None];
     for vertex in vertices.iter() {
         let Some(slot) = parts.get_mut(vertex.a_data[2] as usize) else {

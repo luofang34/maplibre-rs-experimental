@@ -87,7 +87,7 @@ impl<'a> RenderGraphContext<'a> {
         }
     }
 
-    /// Retrieves the input slot value referenced by the `label` as a [`Sampler`].
+    /// Retrieves the input slot value referenced by the `label` as a [`Sampler`](wgpu::Sampler).
     pub fn get_input_sampler(
         &self,
         label: impl Into<SlotLabel>,
@@ -103,7 +103,7 @@ impl<'a> RenderGraphContext<'a> {
         }
     }
 
-    /// Retrieves the input slot value referenced by the `label` as a [`Buffer`].
+    /// Retrieves the input slot value referenced by the `label` as a [`Buffer`](wgpu::Buffer).
     pub fn get_input_buffer(
         &self,
         label: impl Into<SlotLabel>,

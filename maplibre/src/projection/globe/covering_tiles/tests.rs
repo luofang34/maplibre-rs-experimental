@@ -6,11 +6,13 @@ use super::{
 };
 use crate::{
     coords::{LatLon, TileCoords, ZoomLevel, TILE_SIZE},
-    projection::body::Body,
-    projection::globe::{
-        camera::{ExternalGlobeEye, GlobeCameraOptions, GlobeCameraState},
-        covering::TileElevationRange,
-        globe_radius_pixels, lat_lon_to_unit_sphere,
+    projection::{
+        body::Body,
+        globe::{
+            camera::{ExternalGlobeEye, GlobeCameraOptions, GlobeCameraState},
+            covering::TileElevationRange,
+            globe_radius_pixels, lat_lon_to_unit_sphere,
+        },
     },
     render::camera::EyeFrustum,
 };
@@ -294,4 +296,29 @@ fn grazing_terrain_retains_cross_slope_texel_detail() {
         texel_pixels < 2.0,
         "cross-slope texel spans {texel_pixels} pixels at {zoom:?}"
     );
+}
+
+#[test]
+fn zero_tile_budget_does_not_traverse_a_high_zoom_globe() {
+    let tiles = covering_tiles(
+        &camera(512.0, 512.0, LatLon::new(0.0, 0.0), 0.0),
+        GlobeCoveringOptions {
+            max_tiles: 0,
+            ..options(31)
+        },
+        &flat(),
+    )
+    .expect("valid zero-budget request");
+    assert!(tiles.is_empty());
+}
+
+#[test]
+fn tile_priority_wraps_at_the_antimeridian() {
+    for (longitude, near_x, far_x) in [(179.0, 0, 6), (-179.0, 7, 1)] {
+        let nearby = (near_x, 4, ZoomLevel::new(3)).into();
+        let distant = (far_x, 4, ZoomLevel::new(3)).into();
+        let mut tiles = vec![distant, nearby];
+        super::sort_by_center(&mut tiles, LatLon::new(0.0, longitude));
+        assert_eq!(tiles[0], nearby);
+    }
 }

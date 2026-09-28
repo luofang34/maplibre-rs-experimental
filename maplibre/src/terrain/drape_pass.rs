@@ -6,7 +6,6 @@ use crate::{
     render::{
         eventually::{Eventually, Eventually::Initialized},
         graph::{Node, NodeRunError, RenderContext, RenderGraphContext},
-        resource::TrackedRenderPass,
         RenderResources,
     },
     tcs::world::World,
@@ -87,12 +86,12 @@ impl Node for DrapePassNode {
                         occlusion_query_set: None,
                     });
             {
-                let mut tracked_pass = TrackedRenderPass::new(pass);
+                let mut render_pass = pass;
                 for mask in &target.masks {
-                    mask.draw_function.draw(&mut tracked_pass, world, mask);
+                    mask.draw_function.draw(&mut render_pass, world, mask);
                 }
                 for layer in &target.layers {
-                    layer.draw_function.draw(&mut tracked_pass, world, layer);
+                    layer.draw_function.draw(&mut render_pass, world, layer);
                 }
             }
             terrain.generate_drape_mipmaps(

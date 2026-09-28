@@ -4,8 +4,10 @@ use cgmath::{InnerSpace, Point2, Vector3, Vector4};
 use thiserror::Error;
 
 use super::project_tile_coordinates_to_unit_sphere;
-use crate::coords::{TileCoords, EXTENT};
-use crate::projection::body::Body;
+use crate::{
+    coords::{TileCoords, EXTENT},
+    projection::body::Body,
+};
 
 /// Minimum and maximum elevation included in a tile bounding volume.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -92,16 +94,6 @@ pub fn nearest_tile_wrap(center_x: f64, tile: TileCoords) -> i8 {
     } else {
         0
     }
-}
-
-/// Returns whether the globe covering algorithm may vary zoom within one frame.
-pub fn allows_variable_zoom(covering_zoom: i32) -> bool {
-    covering_zoom > 4
-}
-
-/// Returns whether globe projection draws wrapped world copies.
-pub const fn allows_world_copies() -> bool {
-    false
 }
 
 /// Computes the convex bounding volume for a globe tile and elevation range.

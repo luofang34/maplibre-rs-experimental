@@ -1,4 +1,6 @@
 #![allow(clippy::expect_used, clippy::panic)]
+use cgmath::{Deg, Matrix4, Rad, SquareMatrix, Vector3};
+
 use super::*;
 use crate::{
     coords::LatLon,
@@ -8,7 +10,6 @@ use crate::{
         xr::{EyeTarget, ScenePlacement, XrEye, XrFrame},
     },
 };
-use cgmath::{Deg, Matrix4, Rad, SquareMatrix, Vector3};
 
 #[tokio::test]
 async fn map_aligned_symbols_crossing_the_eye_plane_cannot_stretch_into_spikes() {
@@ -100,10 +101,8 @@ async fn collision_priority_and_queries_keep_the_original_feature_id_and_propert
                 tags: vec![0, index as u32],
                 r#type: Some(1),
                 geometry: vec![9, 4096, 4096],
-                ..Default::default()
             })
             .collect(),
-        ..Default::default()
     };
     let bytes = geozero::mvt::Tile {
         layers: vec![source],

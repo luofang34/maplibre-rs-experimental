@@ -47,13 +47,14 @@ pub fn resource_system(
                 *settings,
                 shader.describe_vertex(),
                 shader.describe_fragment(),
-                true,
-                false,
-                true,
-                false,
-                surface.is_multisampling_supported(settings.msaa),
-                true,
-                false,
+                crate::render::resource::TilePipelineOptions {
+                    depth_stencil_enabled: true,
+                    update_stencil: false,
+                    debug_stencil: true,
+                    wireframe: false,
+                    multisampling: surface.is_multisampling_supported(settings.msaa),
+                    textured: true,
+                },
             )
             .describe_render_pipeline()
             .initialize_with_prefix_layouts(device, &[projection_resources.bind_group_layout()]),
