@@ -14,6 +14,18 @@
       devShells = forAllSystems (system:
         let
           pkgs = import nixpkgs { inherit system; };
+          wasmBindgen = pkgs.buildWasmBindgenCli rec {
+            src = pkgs.fetchCrate {
+              pname = "wasm-bindgen-cli";
+              version = "0.2.127";
+              hash = "sha256-di+qBAdd7pENLiIB9CoZoab+W5xeDoByMREcCGTSzWo=";
+            };
+            cargoDeps = pkgs.rustPlatform.fetchCargoVendor {
+              inherit src;
+              inherit (src) pname version;
+              hash = "sha256-FTv2GZIAQs0ePdIZXIXil7JbZ6kIT05VG6vqC1qNFxQ=";
+            };
+          };
         in
         {
           default = (pkgs.mkShell.override {
@@ -28,7 +40,7 @@
               pkgs.just
               pkgs.nodejs
               pkgs.mdbook
-              pkgs.wasm-bindgen-cli_0_2_126 # Also update in Cargo.toml and CI scripts
+              wasmBindgen
               pkgs.cargo-criterion
               pkgs.nixpkgs-fmt
               # System dependencies

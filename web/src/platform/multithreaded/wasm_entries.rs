@@ -1,6 +1,6 @@
 use wasm_bindgen::prelude::*;
 
-use crate::{platform::multithreaded::pool::Work, JSError};
+use crate::{error::JSError, platform::multithreaded::pool::Work};
 
 /// Entry point invoked by the worker.
 #[wasm_bindgen]

@@ -1,4 +1,5 @@
 import * as maplibre from "./wasm/maplibre"
+import {initializeWasm} from "./wasm-instance.mjs";
 import {Spector} from "spectorjs"
 import {checkRequirements, checkWasmFeatures} from "./browser";
 import {preventDefaultTouchActions} from "./canvas";
@@ -26,23 +27,15 @@ export const startMapLibre = async (wasmPath: string | undefined, workerPath: st
     }
 
     preventDefaultTouchActions();
+    await initializeWasm(wasmPath, undefined);
 
     if (MULTITHREADED) {
-        const MEMORY = 900 * 1024 * 1024; // 900 MB
-        const PAGES = 64 * 1024;
-
-        const memory = new WebAssembly.Memory({initial: 1024, maximum: MEMORY / PAGES, shared: true})
-        await maplibre.default(wasmPath, memory)
-
         await maplibre.run_maplibre(() => {
             return workerPath ? new Worker(workerPath, {
                 type: 'module',
             }) : MultithreadedPoolWorker();
         }, styleJson);
     } else {
-        const memory = new WebAssembly.Memory({initial: 1024, shared: false})
-        await maplibre.default(wasmPath, memory);
-
         await maplibre.run_maplibre((received_ptr: number) => {
             let worker: Worker = workerPath ? new Worker(workerPath, {
                 type: 'module',

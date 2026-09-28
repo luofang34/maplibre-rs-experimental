@@ -12,8 +12,8 @@ pub struct WHATWGFetchHttpClient;
 
 impl WHATWGFetchHttpClient {
     async fn fetch_array_buffer(url: &str) -> Result<JsValue, WebError> {
-        let mut opts = RequestInit::new();
-        opts.method("GET");
+        let opts = RequestInit::new();
+        opts.set_method("GET");
 
         let request = Request::new_with_str_and_init(url, &opts)?;
 

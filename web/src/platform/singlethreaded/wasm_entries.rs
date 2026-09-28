@@ -8,13 +8,13 @@ use maplibre::{
     environment::OffscreenKernel,
     io::apc::CallError,
 };
-use thiserror::Error;
 use wasm_bindgen::prelude::*;
 use web_sys::DedicatedWorkerGlobalScope;
 
 use crate::{
     error::JSError,
     platform::{
+        http_client::WHATWGFetchHttpClient,
         singlethreaded::{
             apc::{ReceivedType, WebMessageTag},
             transferables::FlatBufferTransferable,
@@ -22,7 +22,6 @@ use crate::{
         },
         UsedOffscreenKernelEnvironment,
     },
-    WHATWGFetchHttpClient,
 };
 
 static CONFIG: OnceLock<String> = OnceLock::new();
@@ -72,10 +71,6 @@ pub async fn singlethreaded_process_data(procedure_ptr: u32, input: String) -> R
 
     Ok(())
 }
-
-#[derive(Error, Debug)]
-#[error("unable to deserialize message sent by postMessage()")]
-pub struct DeserializeMessage;
 
 /// Entry point invoked by the main thread. Receives data on the main thread and makes it available
 /// to the renderer.

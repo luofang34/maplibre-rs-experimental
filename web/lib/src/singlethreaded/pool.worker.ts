@@ -1,4 +1,5 @@
 import * as maplibre from "../wasm/maplibre"
+import {initializeWasm} from "../wasm-instance.mjs";
 
 type MessageData = { type: 'wasm_init', module: WebAssembly.Module }
     | { type: 'kernel_config', config: string }
@@ -16,9 +17,8 @@ onmessage = async (message: MessageEvent<MessageData>) => {
     const type = message.data.type;
     if (type === 'wasm_init') {
         const data = message.data;
-        const memory = new WebAssembly.Memory({initial: 1024, shared: false})
         let module = data.module;
-        initialised = maplibre.default(module, memory).catch(err => {
+        initialised = initializeWasm(module, undefined).catch(err => {
             // Propagate to main `onerror`:
             setTimeout(() => {
                 throw err;

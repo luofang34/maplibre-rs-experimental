@@ -20,6 +20,9 @@ default = []
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = true
 
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(no_pendantic_os_check)'] }
+
 [lib]
 crate-type = ["cdylib", "rlib"]
 
@@ -60,3 +63,4 @@ flatc-rust.workspace = true
 
 [dev-dependencies]
 wasm-bindgen-test.workspace = true
+wgpu.workspace = true

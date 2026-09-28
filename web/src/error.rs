@@ -1,9 +1,6 @@
-//! Errors from JS world.
+//! Browser map initialization and worker errors.
 
-use std::{
-    borrow::Cow,
-    fmt::{Display, Formatter},
-};
+use std::borrow::Cow;
 
 use js_sys::TypeError;
 use maplibre::io::apc::{CallError, ProcedureError};
@@ -18,15 +15,15 @@ pub enum WebError {
     #[error("message string in error is invalid")]
     InvalidMessage,
     /// TypeError like it is defined in JS
-    #[error("TypeError from JS")]
+    #[error("JavaScript type error: {0}")]
     TypeError(Cow<'static, str>),
-    #[error("fetching data failed")]
+    #[error("fetching data failed: {0}")]
     FetchError(Cow<'static, str>),
     /// The server has no resource at the URL.
     #[error("no resource at {0}")]
     NotFound(String),
     /// Any other Error
-    #[error("Error from JS")]
+    #[error("JavaScript error: {0}")]
     GenericError(Cow<'static, str>),
 }
 
@@ -50,23 +47,23 @@ impl From<JsValue> for WebError {
     }
 }
 
-/// Wraps several unrelated errors and implements Into<JSValue>. This should be used in Rust
-/// functions called from JS-land as return error type.
+/// Errors returned to JavaScript by map startup and worker execution.
 #[derive(Error, Debug)]
 pub enum JSError {
+    #[error(transparent)]
     Procedure(#[from] ProcedureError),
+    #[error(transparent)]
     Call(#[from] CallError),
+    #[error(transparent)]
     Web(#[from] WebError),
-}
-
-impl Display for JSError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            JSError::Procedure(inner) => inner.fmt(f),
-            JSError::Call(inner) => inner.fmt(f),
-            JSError::Web(inner) => inner.fmt(f),
-        }
-    }
+    #[error("invalid map style: {0}")]
+    InvalidStyle(#[source] serde_json::Error),
+    #[error(transparent)]
+    Map(#[from] maplibre::map::MapError),
+    #[error(transparent)]
+    EventLoop(#[from] maplibre::event_loop::EventLoopError),
+    #[error("map window has no event loop")]
+    MissingEventLoop,
 }
 
 impl From<JSError> for JsValue {

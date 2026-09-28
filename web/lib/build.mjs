@@ -4,6 +4,7 @@ import inlineWorker from 'esbuild-plugin-inline-worker';
 import yargs from "yargs";
 import process from "process";
 import {spawnSync} from "child_process"
+import {readFileSync} from "fs";
 import {dirname} from "path";
 import {fileURLToPath} from "url";
 
@@ -127,8 +128,20 @@ const spawnTool = (program, args) => {
     })
 }
 
-// TODO: Do not continue if one step fails
+const checkWasmBindgenVersion = () => {
+    const manifest = readFileSync(`${getProjectDirectory()}/Cargo.toml`, 'utf8');
+    const required = manifest.match(/^wasm-bindgen\s*=\s*"=([^"]+)"/m)?.[1];
+    if (!required) {
+        throw new Error('Cargo.toml must pin an exact wasm-bindgen version');
+    }
+    const cli = spawnSync('wasm-bindgen', ['--version'], {encoding: 'utf8'});
+    if (cli.status !== 0 || cli.stdout.trim() !== `wasm-bindgen ${required}`) {
+        throw new Error(`Install wasm-bindgen-cli ${required} to match Cargo.toml`);
+    }
+}
+
 const wasmPack = () => {
+    checkWasmBindgenVersion();
     let outDirectory = `${getLibDirectory()}/src/wasm`;
     let profile = release ? "wasm-release" : "wasm-dev"
 
@@ -173,6 +186,11 @@ const wasmPack = () => {
 
     if (wasmbindgen.status !== 0) {
         throw new Error("Failed to execute wasm-bindgen")
+    }
+
+    const memoryTests = spawnTool('node', ['--test', 'test/wasm-instance.test.mjs']);
+    if (memoryTests.status !== 0) {
+        throw new Error('Wasm instance initialization tests failed');
     }
 
     if (release) {
