@@ -14,6 +14,7 @@ fn zoom_range_is_min_inclusive_max_exclusive() {
         source: None,
         source_layer: None,
         visibility: super::LayerVisibility::Visible,
+        unrecognized: Default::default(),
     };
 
     assert!(!layer.is_visible_at(1.99));

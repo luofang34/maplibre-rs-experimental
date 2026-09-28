@@ -136,6 +136,7 @@ impl Default for Style {
                     source: None,
                     source_layer: None,
                     visibility: Default::default(),
+                    unrecognized: Default::default(),
                 },
                 StyleLayer {
                     index: 1,
@@ -154,6 +155,7 @@ impl Default for Style {
                     source: None,
                     source_layer: Some("park".to_string()),
                     visibility: Default::default(),
+                    unrecognized: Default::default(),
                 },
                 StyleLayer {
                     index: 2,
@@ -172,6 +174,7 @@ impl Default for Style {
                     source: None,
                     source_layer: Some("landuse".to_string()),
                     visibility: Default::default(),
+                    unrecognized: Default::default(),
                 },
                 StyleLayer {
                     index: 3,
@@ -190,6 +193,7 @@ impl Default for Style {
                     source: None,
                     source_layer: Some("landcover".to_string()),
                     visibility: Default::default(),
+                    unrecognized: Default::default(),
                 },
                 StyleLayer {
                     index: 4,
@@ -209,6 +213,7 @@ impl Default for Style {
                     source: None,
                     source_layer: Some("transportation".to_string()),
                     visibility: Default::default(),
+                    unrecognized: Default::default(),
                 },
                 StyleLayer {
                     index: 5,
@@ -227,6 +232,7 @@ impl Default for Style {
                     source: None,
                     source_layer: Some("building".to_string()),
                     visibility: Default::default(),
+                    unrecognized: Default::default(),
                 },
                 StyleLayer {
                     index: 6,
@@ -245,6 +251,7 @@ impl Default for Style {
                     source: None,
                     source_layer: Some("water".to_string()),
                     visibility: Default::default(),
+                    unrecognized: Default::default(),
                 },
                 StyleLayer {
                     index: 7,
@@ -263,6 +270,7 @@ impl Default for Style {
                     source: None,
                     source_layer: Some("waterway".to_string()),
                     visibility: Default::default(),
+                    unrecognized: Default::default(),
                 },
                 StyleLayer {
                     index: 8,
@@ -282,6 +290,7 @@ impl Default for Style {
                     source: None,
                     source_layer: Some("boundary".to_string()),
                     visibility: Default::default(),
+                    unrecognized: Default::default(),
                 },
                 StyleLayer {
                     index: 9,
@@ -295,6 +304,7 @@ impl Default for Style {
                     source: None,
                     source_layer: None,
                     visibility: Default::default(),
+                    unrecognized: Default::default(),
                 },
                 StyleLayer {
                     index: 10,
@@ -312,6 +322,7 @@ impl Default for Style {
                     source: None,
                     source_layer: Some("place".to_string()),
                     visibility: Default::default(),
+                    unrecognized: Default::default(),
                 },
                 StyleLayer {
                     index: 11,
@@ -329,6 +340,7 @@ impl Default for Style {
                     source: None,
                     source_layer: Some("transportation_name-disabled".to_string()),
                     visibility: Default::default(),
+                    unrecognized: Default::default(),
                 },
             ],
         }

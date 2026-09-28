@@ -6,7 +6,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::style::expression::{
     convert_token_string, EvaluationContext, Expression, FeatureProperties, LegacyPropertySpec,
-    PropertyKind, Value,
+    ParseError, PropertyKind, Value,
 };
 
 /// A type a style property can hold, with the specification the expression engine needs to
@@ -215,7 +215,7 @@ pub struct UnsupportedProperty {
     /// The JSON as written in the style.
     pub source: serde_json::Value,
     /// Why it was rejected.
-    pub error: String,
+    pub error: ParseError,
 }
 
 /// The value of a style property.
@@ -250,11 +250,14 @@ impl<T: PropertyValue> StyleProperty<T> {
                     Some(constant) => Self::Constant(constant),
                     None => Self::Unsupported(Arc::new(UnsupportedProperty {
                         source: json.clone(),
-                        error: format!(
-                            "expected {}, found {}",
-                            spec.expected_type(),
-                            value.type_of()
-                        ),
+                        error: ParseError {
+                            key: String::new(),
+                            message: format!(
+                                "expected {}, found {}",
+                                spec.expected_type(),
+                                value.type_of()
+                            ),
+                        },
                     })),
                 }
             }
@@ -266,7 +269,7 @@ impl<T: PropertyValue> StyleProperty<T> {
                 tracing::error!(source = %json, %error, "unsupported style property value");
                 Self::Unsupported(Arc::new(UnsupportedProperty {
                     source: json.clone(),
-                    error: error.to_string(),
+                    error,
                 }))
             }
         }

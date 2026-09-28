@@ -1,0 +1,154 @@
+//! Property evaluation capabilities of each paint path.
+
+use super::{
+    Evaluation::{Constant, Elevation, Feature, Zoom},
+    LayerValidation,
+};
+use crate::style::{
+    layer::LayerPaint,
+    property::{NumberList, StyleProperty},
+};
+
+impl LayerValidation<'_> {
+    pub(super) fn paint(&mut self, paint: &LayerPaint) {
+        match paint {
+            LayerPaint::Background(p) => self.property(
+                "paint.background-color",
+                p.background_color.as_ref(),
+                Constant,
+            ),
+            LayerPaint::Fill(p) => {
+                self.property("paint.fill-color", p.fill_color.as_ref(), Feature);
+                self.property("paint.fill-opacity", p.fill_opacity.as_ref(), Feature);
+            }
+            LayerPaint::Line(p) => {
+                self.property("paint.line-color", p.line_color.as_ref(), Feature);
+                self.property("paint.line-opacity", p.line_opacity.as_ref(), Feature);
+                self.property("paint.line-width", p.line_width.as_ref(), Zoom);
+                if let Some(value) = &p.line_dasharray {
+                    self.property(
+                        "paint.line-dasharray",
+                        Some(&StyleProperty::<NumberList>::parse(value)),
+                        Zoom,
+                    );
+                }
+            }
+            LayerPaint::Circle(p) => self.circle(p),
+            LayerPaint::Hillshade(p) => self.hillshade(p),
+            LayerPaint::ColorRelief(p) => {
+                self.property(
+                    "paint.color-relief-opacity",
+                    p.color_relief_opacity.as_ref(),
+                    Zoom,
+                );
+                self.property(
+                    "paint.color-relief-color",
+                    p.color_relief_color.as_ref(),
+                    Elevation,
+                );
+            }
+            LayerPaint::Symbol(p) => self.symbol(p),
+            LayerPaint::Raster(p) => self.raster(p),
+        }
+    }
+
+    fn circle(&mut self, p: &crate::style::circle::CirclePaint) {
+        self.property("paint.circle-color", p.circle_color.as_ref(), Feature);
+        self.property("paint.circle-radius", p.circle_radius.as_ref(), Feature);
+        self.property("paint.circle-opacity", p.circle_opacity.as_ref(), Feature);
+        self.property("paint.circle-blur", p.circle_blur.as_ref(), Zoom);
+        self.property(
+            "paint.circle-stroke-width",
+            p.circle_stroke_width.as_ref(),
+            Feature,
+        );
+        self.property(
+            "paint.circle-stroke-color",
+            p.circle_stroke_color.as_ref(),
+            Constant,
+        );
+        self.property(
+            "paint.circle-stroke-opacity",
+            p.circle_stroke_opacity.as_ref(),
+            Zoom,
+        );
+    }
+
+    fn hillshade(&mut self, p: &crate::style::hillshade::HillshadePaint) {
+        self.property(
+            "paint.hillshade-illumination-direction",
+            p.hillshade_illumination_direction.as_ref(),
+            Zoom,
+        );
+        self.property(
+            "paint.hillshade-illumination-altitude",
+            p.hillshade_illumination_altitude.as_ref(),
+            Zoom,
+        );
+        self.property(
+            "paint.hillshade-shadow-color",
+            p.hillshade_shadow_color.as_ref(),
+            Zoom,
+        );
+        self.property(
+            "paint.hillshade-highlight-color",
+            p.hillshade_highlight_color.as_ref(),
+            Zoom,
+        );
+        self.property(
+            "paint.hillshade-accent-color",
+            p.hillshade_accent_color.as_ref(),
+            Zoom,
+        );
+        self.property(
+            "paint.hillshade-exaggeration",
+            p.hillshade_exaggeration.as_ref(),
+            Zoom,
+        );
+    }
+
+    fn raster(&mut self, p: &crate::style::layer::RasterPaint) {
+        let changed = [
+            (
+                "raster-brightness-max",
+                p.raster_brightness_max.is_some_and(|v| v != 1.0),
+            ),
+            (
+                "raster-brightness-min",
+                p.raster_brightness_min.is_some_and(|v| v != 0.0),
+            ),
+            (
+                "raster-contrast",
+                p.raster_contrast.is_some_and(|v| v != 0.0),
+            ),
+            (
+                "raster-fade-duration",
+                p.raster_fade_duration.is_some_and(|v| v != 0),
+            ),
+            (
+                "raster-hue-rotate",
+                p.raster_hue_rotate.is_some_and(|v| v != 0.0),
+            ),
+            ("raster-opacity", p.raster_opacity.is_some_and(|v| v != 1.0)),
+            (
+                "raster-saturation",
+                p.raster_saturation.is_some_and(|v| v != 0.0),
+            ),
+            (
+                "raster-resampling",
+                matches!(
+                    p.raster_resampling,
+                    Some(crate::style::layer::RasterResampling::Nearest)
+                ),
+            ),
+        ];
+        for (name, changed) in changed {
+            if changed {
+                self.unsupported(
+                    &format!("paint.{name}"),
+                    "raster paint adjustment is not implemented",
+                );
+            }
+        }
+    }
+}
