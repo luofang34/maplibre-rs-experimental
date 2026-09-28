@@ -1,14 +1,19 @@
 #![deny(unused_imports)]
 
-use std::{io::ErrorKind, path::PathBuf};
+use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
+#[cfg(feature = "headless")]
+use maplibre::coords::LatLon;
 use maplibre::{
-    coords::LatLon,
     projection::{ProjectionSpecification, ProjectionType},
     render::settings::WgpuSettings,
     style::Style,
 };
+#[cfg(any(feature = "headless", test))]
+mod coordinates;
+#[cfg(feature = "headless")]
+use coordinates::parse_lat_long;
 use maplibre_winit::{run_headed_map, HeadedMapOptions, WinitMapWindowConfig};
 
 #[cfg(feature = "headless")]
@@ -28,23 +33,6 @@ struct Cli {
     command: Commands,
 }
 
-#[allow(dead_code)]
-fn parse_lat_long(env: &str) -> Result<LatLon, std::io::Error> {
-    let split = env.split(',').collect::<Vec<_>>();
-    if let (Some(latitude), Some(longitude)) = (split.first(), split.get(1)) {
-        Ok(LatLon::new(
-            latitude.parse::<f64>().unwrap(),
-            longitude.parse::<f64>().unwrap(),
-        ))
-    } else {
-        Err(std::io::Error::new(
-            ErrorKind::InvalidData,
-            "Failed to parse latitude and longitude.",
-        ))
-    }
-}
-
-/// Projection forced onto the loaded style.
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum ProjectionArg {
     Globe,
@@ -208,7 +196,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         } => {
             maplibre::platform::run_multithreaded(async {
                 headless::run_headless(*tile_size, *min, *max).await
-            });
+            })?;
         }
     }
     Ok(())
