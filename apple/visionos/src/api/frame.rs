@@ -1,4 +1,7 @@
-use super::*;
+use super::{
+    metal_texture::{import_color_texture, import_depth_texture},
+    *,
+};
 
 /// Draws every eye of a frame and returns the Metal texture (`id<MTLTexture>`) the map draws
 /// into when an eye has no colour texture of its own, owned by the map and valid until the
@@ -132,140 +135,15 @@ pub unsafe extern "C" fn maplibre_visionos_render_frame(
     }
     // The host copies and presents on the map's own queue, in order after these draws, so no
     // wait is needed here; polling only runs the callbacks of finished work.
-    handle.map.device().poll(wgpu::Maintain::Poll);
+    if let Err(error) = handle.map.device().poll(wgpu::PollType::Poll) {
+        tracing::error!(%error, "GPU polling failed");
+        return ptr::null();
+    }
     let Some(texture) = handle.map.head_texture() else {
         return ptr::null();
     };
-    // SAFETY: the renderer runs on Metal on this platform; the callback only reads the handle,
-    // which stays alive with the texture the map owns. `raw_handle` comes from the vendored
-    // wgpu-hal, see vendor-wgpu.sh.
-    unsafe {
-        texture.as_hal::<wgpu_hal::api::Metal, _, _>(|texture| {
-            texture.map_or(ptr::null(), |texture| texture.raw_handle().as_ptr().cast())
-        })
-    }
-}
-
-/// Wraps a compositor colour texture as a linear render target for the map; `None` for a
-/// null handle, a format other than `bgra8Unorm` or its sRGB twin, or a texture that cannot
-/// be viewed in another format, which the host should then draw through a copy.
-///
-/// # Safety
-///
-/// `pointer` must be null or an `id<MTLTexture>` of a single-level 2D texture that stays
-/// alive for the frame.
-unsafe fn import_color_texture(
-    device: &wgpu::Device,
-    pointer: *const c_void,
-) -> Option<wgpu::TextureView> {
-    if pointer.is_null() {
-        return None;
-    }
-    // SAFETY: the caller passes a live Metal texture; `to_owned` retains it.
-    let raw = unsafe { metal::TextureRef::from_ptr(pointer.cast_mut().cast()) }.to_owned();
-    let format = match raw.pixel_format() {
-        metal::MTLPixelFormat::BGRA8Unorm => wgpu::TextureFormat::Bgra8Unorm,
-        metal::MTLPixelFormat::BGRA8Unorm_sRGB => wgpu::TextureFormat::Bgra8UnormSrgb,
-        other => {
-            tracing::warn!(?other, "colour texture format is not drawable");
-            return None;
-        }
-    };
-    if format != SURFACE_FORMAT
-        && !raw
-            .usage()
-            .contains(metal::MTLTextureUsage::PixelFormatView)
-    {
-        return None;
-    }
-    let (width, height) = (raw.width() as u32, raw.height() as u32);
-    // SAFETY: the texture is one 2D level with one layer, which is what is described here.
-    let texture = unsafe {
-        let hal = wgpu_hal::metal::Device::texture_from_raw(
-            raw,
-            format,
-            metal::MTLTextureType::D2,
-            1,
-            1,
-            wgpu_hal::CopyExtent {
-                width,
-                height,
-                depth: 1,
-            },
-        );
-        device.create_texture_from_hal::<wgpu_hal::api::Metal>(
-            hal,
-            &wgpu::TextureDescriptor {
-                label: Some("compositor colour"),
-                size: wgpu::Extent3d {
-                    width,
-                    height,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                view_formats: &[SURFACE_FORMAT],
-            },
-        )
-    };
-    Some(texture.create_view(&wgpu::TextureViewDescriptor {
-        format: Some(SURFACE_FORMAT),
-        ..Default::default()
-    }))
-}
-
-/// Wraps the compositor's depth texture for the renderer; `None` for a null handle.
-///
-/// # Safety
-///
-/// `pointer` must be null or an `id<MTLTexture>` of a single-level `Depth32Float` texture
-/// that stays alive for the frame.
-unsafe fn import_depth_texture(
-    device: &wgpu::Device,
-    pointer: *const c_void,
-) -> Option<wgpu::TextureView> {
-    if pointer.is_null() {
-        return None;
-    }
-    // SAFETY: the caller passes a live Metal texture; `to_owned` retains it, so the wrapper
-    // releases its own reference when the frame is done and the host keeps its own.
-    let raw = unsafe { metal::TextureRef::from_ptr(pointer.cast_mut().cast()) }.to_owned();
-    let (width, height) = (raw.width() as u32, raw.height() as u32);
-    // SAFETY: the texture is one 2D level with one layer, which is what is described here.
-    // `texture_from_raw` comes from the vendored wgpu-hal, see vendor-wgpu.sh.
-    let texture = unsafe {
-        let hal = wgpu_hal::metal::Device::texture_from_raw(
-            raw,
-            wgpu::TextureFormat::Depth32Float,
-            metal::MTLTextureType::D2,
-            1,
-            1,
-            wgpu_hal::CopyExtent {
-                width,
-                height,
-                depth: 1,
-            },
-        );
-        device.create_texture_from_hal::<wgpu_hal::api::Metal>(
-            hal,
-            &wgpu::TextureDescriptor {
-                label: Some("compositor depth"),
-                size: wgpu::Extent3d {
-                    width,
-                    height,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Depth32Float,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                view_formats: &[],
-            },
-        )
-    };
-    Some(texture.create_view(&wgpu::TextureViewDescriptor::default()))
+    // SAFETY: the map owns the texture, keeping the borrowed Metal object alive.
+    unsafe { texture.as_hal::<wgpu_hal::api::Metal>() }.map_or(ptr::null(), |texture| {
+        ptr::from_ref(texture.raw_handle()).cast()
+    })
 }

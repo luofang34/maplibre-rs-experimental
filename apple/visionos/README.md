@@ -8,10 +8,7 @@ each eye and copies the rendered texture into the compositor drawable.
 ## Layout
 
 - `Cargo.toml`, `src/lib.rs`: the `maplibre-visionos` static library and its C ABI. It is
-  its own workspace so the wgpu patch below does not touch the main workspace.
-- `vendor-wgpu.sh`: copies wgpu 22, naga, metal-rs and the Objective-C runtime crates from
-  the cargo registry into `vendor/` and widens their macOS/iOS gates to visionOS.
-  `.cargo/config.toml` patches crates.io with those copies for this crate alone.
+  its own workspace and uses upstream wgpu with visionOS Metal support.
 - `MapLibreVision/project.yml`: the xcodegen spec of the app. `MapLibreVision/MapLibreVision/`
   holds the Swift sources and the bundled `style.json` (Alpine dusk over OpenFreeMap tiles,
   AWS Terrarium elevation worldwide, globe projection).
@@ -24,7 +21,6 @@ library is built from source).
 
 ```sh
 cd apple/visionos
-./vendor-wgpu.sh
 cargo build --release            # target and build-std come from .cargo/config.toml
 cd MapLibreVision
 sh Scripts/build-flight-overlay.sh aarch64-apple-visionos-sim
@@ -163,7 +159,5 @@ Lighting preserves alpha and does not issue additional elevation requests.
 
 ## Known limits
 
-- wgpu 22 is patched rather than upgraded; a wgpu release with visionOS support (25 and
-  later) removes the vendoring.
 - The map draws whatever the eye sees; the horizon, the sky and the fog come from the eye's
   own matrices and height, and the style's `sky` sets their colours.

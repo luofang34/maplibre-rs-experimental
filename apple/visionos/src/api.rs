@@ -1,6 +1,7 @@
 //! C map lifecycle and host-facing data structures.
 mod diagnostics;
 mod frame;
+mod metal_texture;
 use std::{
     alloc::{GlobalAlloc, Layout, System},
     ffi::{c_char, c_void, CStr},
@@ -30,7 +31,6 @@ use maplibre::{
     style::Style,
     tcs::system::heap,
 };
-use metal::foreign_types::{ForeignType, ForeignTypeRef};
 use tracing_subscriber::{
     filter::Targets, fmt::MakeWriter, layer::SubscriberExt, util::SubscriberInitExt, Layer,
 };
@@ -244,18 +244,9 @@ pub unsafe extern "C" fn maplibre_visionos_command_queue(
     let Some(handle) = (unsafe { map.as_ref() }) else {
         return ptr::null();
     };
-    // SAFETY: the renderer runs on Metal on this platform; the queue object stays alive with
-    // the map, which holds it. `raw_handle` comes from the vendored wgpu-hal, see
-    // vendor-wgpu.sh.
-    unsafe {
-        handle
-            .map
-            .queue()
-            .as_hal::<wgpu_hal::api::Metal, _, _>(|queue| {
-                queue.map_or(ptr::null(), |queue| queue.raw_handle().as_ptr().cast())
-            })
-    }
-    .unwrap_or(ptr::null())
+    // SAFETY: the map owns the queue, keeping the borrowed Metal object alive.
+    unsafe { handle.map.queue().as_hal::<wgpu_hal::api::Metal>() }
+        .map_or(ptr::null(), |queue| ptr::from_ref(queue.as_raw()).cast())
 }
 
 /// Far clip distance as a multiple of the near one when the compositor gives none: a tenth
