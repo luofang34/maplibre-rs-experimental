@@ -17,6 +17,10 @@ dist/
 maplibre-gl-js/
 render-tests/**/diff.png
 render-tests/**/actual.png
+/render-tests/src/templates/results.html
+/render-tests/src/templates/results-recycle-map.html
+/render-tests/src/templates/results-failed-caseIds.txt
+/render-tests/src/templates/results-errored-caseIds.txt
 maplibre-native-shaders/
 
 # Cache by reqwest-middleware-cache
@@ -24,6 +28,8 @@ maplibre-native-shaders/
 *maplibre*cache*
 
 logs/
+/.*.log.*
+/:memory:.ses
 
 .DS_Store
 
@@ -35,5 +41,6 @@ perf.data*
 frame_*.png
 
 .direnv/
+/.dpm/
 
 xcode/libs/*/**
