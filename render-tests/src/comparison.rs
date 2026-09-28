@@ -82,12 +82,9 @@ fn compare_equal_dimensions(
     let mut total_diff = 0_u64;
     for (x, y, actual_pixel) in actual.enumerate_pixels() {
         let expected_pixel = expected.get_pixel(x, y);
-        let channel_diffs = actual_pixel
-            .0
-            .iter()
-            .zip(expected_pixel.0.iter())
-            .map(|(actual, expected)| (*actual as i32 - *expected as i32).unsigned_abs() as u8)
-            .collect::<Vec<_>>();
+        let channel_diffs: [u8; 4] = std::array::from_fn(|channel| {
+            actual_pixel.0[channel].abs_diff(expected_pixel.0[channel])
+        });
         let max_channel = channel_diffs.iter().copied().max().unwrap_or(0);
         total_diff += channel_diffs
             .iter()
@@ -106,3 +103,6 @@ fn compare_equal_dimensions(
     let channel_count = u64::from(width) * u64::from(height) * 4;
     Ok(total_diff as f64 / (channel_count as f64 * 255.0))
 }
+
+#[cfg(test)]
+mod tests;
