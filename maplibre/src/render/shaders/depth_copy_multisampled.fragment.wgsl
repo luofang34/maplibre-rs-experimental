@@ -1,4 +1,4 @@
-@group(0) @binding(0) var source: texture_depth_multisampled_2d;
+@group(0) @binding(0) var source: texture_multisampled_2d<f32>;
 
 struct Output {
     @builtin(frag_depth) depth: f32,
@@ -12,7 +12,7 @@ fn main(@builtin(position) position: vec4<f32>) -> Output {
     let samples = i32(textureNumSamples(source));
     var depth = 0.0;
     for (var sample = 0; sample < samples; sample++) {
-        depth = max(depth, textureLoad(source, coordinates, sample));
+        depth = max(depth, textureLoad(source, coordinates, sample).r);
     }
     var output: Output;
     output.depth = depth;

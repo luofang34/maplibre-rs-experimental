@@ -164,12 +164,12 @@ async fn projection_aware_tile_pipelines_compile() {
         },
     };
 
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adapter = wgpu::util::initialize_adapter_from_env_or_default(&instance, None)
         .await
         .expect("GPU adapter should be available");
     let (device, queue) = adapter
-        .request_device(&wgpu::DeviceDescriptor::default(), None)
+        .request_device(&wgpu::DeviceDescriptor::default())
         .await
         .expect("GPU device should be available");
     let projection = super::ProjectionGpuResources::new(&device);

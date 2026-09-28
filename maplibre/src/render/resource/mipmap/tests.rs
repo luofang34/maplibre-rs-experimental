@@ -19,7 +19,7 @@ async fn device() -> (wgpu::Device, wgpu::Queue) {
         .await
         .expect("an adapter");
     adapter
-        .request_device(&wgpu::DeviceDescriptor::default(), None)
+        .request_device(&wgpu::DeviceDescriptor::default())
         .await
         .expect("a device")
 }
@@ -41,15 +41,15 @@ fn read_level(
     });
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
     encoder.copy_texture_to_buffer(
-        wgpu::ImageCopyTexture {
+        wgpu::TexelCopyTextureInfo {
             texture,
             mip_level: level,
             origin: wgpu::Origin3d::ZERO,
             aspect: wgpu::TextureAspect::All,
         },
-        wgpu::ImageCopyBuffer {
+        wgpu::TexelCopyBufferInfo {
             buffer: &buffer,
-            layout: wgpu::ImageDataLayout {
+            layout: wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(bytes_per_row),
                 rows_per_image: None,
@@ -63,8 +63,13 @@ fn read_level(
     );
     queue.submit([encoder.finish()]);
     buffer.slice(..).map_async(wgpu::MapMode::Read, |_| ());
-    device.poll(wgpu::Maintain::Wait);
-    let data = buffer.slice(..).get_mapped_range();
+    device
+        .poll(wgpu::PollType::wait_indefinitely())
+        .expect("GPU readback completes");
+    let data = buffer
+        .slice(..)
+        .get_mapped_range()
+        .expect("mapped readback range");
     let pixels: Vec<u8> = (0..size)
         .flat_map(|row| {
             let start = (row * bytes_per_row) as usize;
@@ -107,7 +112,7 @@ async fn each_level_averages_the_one_above() {
     queue.write_texture(
         texture.texture.as_image_copy(),
         &top,
-        wgpu::ImageDataLayout {
+        wgpu::TexelCopyBufferLayout {
             offset: 0,
             bytes_per_row: Some(16),
             rows_per_image: None,

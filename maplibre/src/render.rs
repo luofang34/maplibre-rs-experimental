@@ -188,9 +188,9 @@ impl Renderer {
     {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu_settings.backends.unwrap_or(wgpu::Backends::all()),
+            display: window.owned_display_handle(),
             flags: Default::default(),
-            dx12_shader_compiler: Default::default(),
-            gles_minor_version: Default::default(),
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
 
         let surface: wgpu::Surface = unsafe {
@@ -205,11 +205,14 @@ impl Renderer {
                 power_preference: wgpu_settings.power_preference,
                 force_fallback_adapter: false,
                 compatible_surface: Some(&surface),
+                ..Default::default()
             },
         )
         .await?;
 
-        let settings = settings.with_float_depth_if_supported(device.features());
+        let settings = settings
+            .with_float_depth_if_supported(device.features())
+            .with_backend_msaa(adapter.get_info().backend);
         let surface = Surface::from_surface(surface, &adapter, window, &settings);
 
         match surface.head() {
@@ -240,8 +243,7 @@ impl Renderer {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu_settings.backends.unwrap_or(wgpu::Backends::all()),
             flags: Default::default(),
-            dx12_shader_compiler: Default::default(),
-            gles_minor_version: Default::default(),
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
 
         let (adapter, device, queue) = Self::request_device(
@@ -251,11 +253,14 @@ impl Renderer {
                 power_preference: wgpu_settings.power_preference,
                 force_fallback_adapter: false,
                 compatible_surface: None,
+                ..Default::default()
             },
         )
         .await?;
 
-        let settings = settings.with_float_depth_if_supported(device.features());
+        let settings = settings
+            .with_float_depth_if_supported(device.features())
+            .with_backend_msaa(adapter.get_info().backend);
         let surface = Surface::from_image(&device, &adapter, window, &settings);
 
         Ok(Self {
@@ -280,162 +285,47 @@ impl Renderer {
         settings: &WgpuSettings,
         request_adapter_options: &wgpu::RequestAdapterOptions<'_, '_>,
     ) -> Result<(wgpu::Adapter, wgpu::Device, wgpu::Queue), RenderError> {
-        let adapter = instance
-            .request_adapter(request_adapter_options)
-            .await
-            .ok_or(RenderError::RequestAdaptor)?;
+        let adapter = instance.request_adapter(request_adapter_options).await?;
 
         let adapter_info = adapter.get_info();
 
-        #[cfg(not(target_arch = "wasm32"))]
-        let trace_path = if settings.record_trace {
-            let path = std::path::Path::new("wgpu_trace");
-            // ignore potential error, wgpu will log it
-            let _ = std::fs::create_dir(path);
-            Some(path)
+        let trace = if settings.record_trace {
+            wgpu::Trace::Directory("wgpu_trace".into())
         } else {
-            None
+            wgpu::Trace::Off
         };
 
-        #[cfg(target_arch = "wasm32")]
-        let trace_path = None;
-
-        let mut features = adapter.features();
+        let mut features = adapter.features() - wgpu::Features::all_experimental_mask();
         if adapter_info.device_type == wgpu::DeviceType::DiscreteGpu {
             // `MAPPABLE_PRIMARY_BUFFERS` can have a significant, negative performance impact for
             // discrete GPUs due to having to transfer data across the PCI-E bus and so it
             // should not be automatically enabled in this case. It is however beneficial for
             // integrated GPUs.
-            features -= wgpu::Features::MAPPABLE_PRIMARY_BUFFERS;
+            features.remove(wgpu::Features::MAPPABLE_PRIMARY_BUFFERS);
         }
         let mut limits = adapter.limits();
 
         // Enforce the disabled features
         if let Some(disabled_features) = settings.disabled_features {
-            features -= disabled_features;
+            features.remove(disabled_features);
         }
         // NOTE: |= is used here to ensure that any explicitly-enabled features are respected.
         features |= settings.features;
 
         // Enforce the limit constraints
         if let Some(constrained_limits) = settings.constrained_limits.as_ref() {
-            // NOTE: Respect the configured limits as an 'upper bound'. This means for 'max' limits, we
-            // take the minimum of the calculated limits according to the adapter/backend and the
-            // specified max_limits. For 'min' limits, take the maximum instead. This is intended to
-            // err on the side of being conservative. We can't claim 'higher' limits that are supported
-            // but we can constrain to 'lower' limits.
-            limits = wgpu::Limits {
-                max_texture_dimension_1d: limits
-                    .max_texture_dimension_1d
-                    .min(constrained_limits.max_texture_dimension_1d),
-                max_texture_dimension_2d: limits
-                    .max_texture_dimension_2d
-                    .min(constrained_limits.max_texture_dimension_2d),
-                max_texture_dimension_3d: limits
-                    .max_texture_dimension_3d
-                    .min(constrained_limits.max_texture_dimension_3d),
-                max_texture_array_layers: limits
-                    .max_texture_array_layers
-                    .min(constrained_limits.max_texture_array_layers),
-                max_bind_groups: limits
-                    .max_bind_groups
-                    .min(constrained_limits.max_bind_groups),
-                max_bindings_per_bind_group: limits
-                    .max_bindings_per_bind_group
-                    .min(constrained_limits.max_bindings_per_bind_group),
-                max_dynamic_uniform_buffers_per_pipeline_layout: limits
-                    .max_dynamic_uniform_buffers_per_pipeline_layout
-                    .min(constrained_limits.max_dynamic_uniform_buffers_per_pipeline_layout),
-                max_dynamic_storage_buffers_per_pipeline_layout: limits
-                    .max_dynamic_storage_buffers_per_pipeline_layout
-                    .min(constrained_limits.max_dynamic_storage_buffers_per_pipeline_layout),
-                max_sampled_textures_per_shader_stage: limits
-                    .max_sampled_textures_per_shader_stage
-                    .min(constrained_limits.max_sampled_textures_per_shader_stage),
-                max_samplers_per_shader_stage: limits
-                    .max_samplers_per_shader_stage
-                    .min(constrained_limits.max_samplers_per_shader_stage),
-                max_storage_buffers_per_shader_stage: limits
-                    .max_storage_buffers_per_shader_stage
-                    .min(constrained_limits.max_storage_buffers_per_shader_stage),
-                max_storage_textures_per_shader_stage: limits
-                    .max_storage_textures_per_shader_stage
-                    .min(constrained_limits.max_storage_textures_per_shader_stage),
-                max_uniform_buffers_per_shader_stage: limits
-                    .max_uniform_buffers_per_shader_stage
-                    .min(constrained_limits.max_uniform_buffers_per_shader_stage),
-                max_uniform_buffer_binding_size: limits
-                    .max_uniform_buffer_binding_size
-                    .min(constrained_limits.max_uniform_buffer_binding_size),
-                max_storage_buffer_binding_size: limits
-                    .max_storage_buffer_binding_size
-                    .min(constrained_limits.max_storage_buffer_binding_size),
-                max_vertex_buffers: limits
-                    .max_vertex_buffers
-                    .min(constrained_limits.max_vertex_buffers),
-                max_vertex_attributes: limits
-                    .max_vertex_attributes
-                    .min(constrained_limits.max_vertex_attributes),
-                max_vertex_buffer_array_stride: limits
-                    .max_vertex_buffer_array_stride
-                    .min(constrained_limits.max_vertex_buffer_array_stride),
-                max_push_constant_size: limits
-                    .max_push_constant_size
-                    .min(constrained_limits.max_push_constant_size),
-                min_uniform_buffer_offset_alignment: limits
-                    .min_uniform_buffer_offset_alignment
-                    .max(constrained_limits.min_uniform_buffer_offset_alignment),
-                min_storage_buffer_offset_alignment: limits
-                    .min_storage_buffer_offset_alignment
-                    .max(constrained_limits.min_storage_buffer_offset_alignment),
-                max_inter_stage_shader_components: limits
-                    .max_inter_stage_shader_components
-                    .min(constrained_limits.max_inter_stage_shader_components),
-                max_color_attachments: limits
-                    .max_color_attachments
-                    .min(constrained_limits.max_color_attachments),
-                max_color_attachment_bytes_per_sample: limits
-                    .max_color_attachment_bytes_per_sample
-                    .min(constrained_limits.max_color_attachment_bytes_per_sample),
-                max_compute_workgroup_storage_size: limits
-                    .max_compute_workgroup_storage_size
-                    .min(constrained_limits.max_compute_workgroup_storage_size),
-                max_compute_invocations_per_workgroup: limits
-                    .max_compute_invocations_per_workgroup
-                    .min(constrained_limits.max_compute_invocations_per_workgroup),
-                max_compute_workgroup_size_x: limits
-                    .max_compute_workgroup_size_x
-                    .min(constrained_limits.max_compute_workgroup_size_x),
-                max_compute_workgroup_size_y: limits
-                    .max_compute_workgroup_size_y
-                    .min(constrained_limits.max_compute_workgroup_size_y),
-                max_compute_workgroup_size_z: limits
-                    .max_compute_workgroup_size_z
-                    .min(constrained_limits.max_compute_workgroup_size_z),
-                max_compute_workgroups_per_dimension: limits
-                    .max_compute_workgroups_per_dimension
-                    .min(constrained_limits.max_compute_workgroups_per_dimension),
-                min_subgroup_size: 0,
-                max_buffer_size: limits
-                    .max_buffer_size
-                    .min(constrained_limits.max_buffer_size),
-                max_non_sampler_bindings: limits
-                    .max_non_sampler_bindings
-                    .min(constrained_limits.max_non_sampler_bindings),
-                max_subgroup_size: 0,
-            };
+            limits = limits.or_worse_values_from(constrained_limits);
         }
 
         let (device, queue) = adapter
-            .request_device(
-                &wgpu::DeviceDescriptor {
-                    label: settings.device_label.as_ref().map(|a| a.as_ref()),
-                    required_features: features,
-                    required_limits: limits,
-                    memory_hints: wgpu::MemoryHints::default(),
-                },
-                trace_path,
-            )
+            .request_device(&wgpu::DeviceDescriptor {
+                label: settings.device_label.as_ref().map(|a| a.as_ref()),
+                required_features: features,
+                required_limits: limits,
+                memory_hints: wgpu::MemoryHints::default(),
+                trace,
+                ..Default::default()
+            })
             .await?;
         Ok((adapter, device, queue))
     }

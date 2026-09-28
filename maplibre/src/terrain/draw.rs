@@ -27,7 +27,7 @@ pub fn draw_terrain<'w>(pass: &mut wgpu::RenderPass<'w>, world: &'w World) {
     pass.set_vertex_buffer(0, terrain.vertex_buffer().slice(..));
     pass.set_index_buffer(terrain.index_buffer().slice(..), wgpu::IndexFormat::Uint32);
     for draw in terrain.draws() {
-        pass.set_bind_group(1, &draw.bind_group, &[draw.uniform_offset]);
+        pass.set_bind_group(1, draw.bind_group.as_ref(), &[draw.uniform_offset]);
         pass.draw_indexed(0..terrain.index_count(), 0, 0..1);
     }
 }

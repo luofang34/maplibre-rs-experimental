@@ -69,7 +69,7 @@ pub fn resource_system(
             .get_or_insert_with(Vec::new)
             .push(super::depth::SymbolDepth::layout());
         if let Some(depth) = descriptor.depth_stencil.as_mut() {
-            depth.depth_compare = wgpu::CompareFunction::Always;
+            depth.depth_compare = Some(wgpu::CompareFunction::Always);
         }
         SymbolPipeline(
             descriptor.initialize_with_prefix_layouts(

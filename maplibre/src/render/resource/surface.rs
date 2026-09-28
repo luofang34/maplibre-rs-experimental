@@ -1,9 +1,14 @@
 //! Utilities for handling surfaces which can be either headless or headed. A headed surface has
 //! a handle to a window. A headless surface renders to a texture.
 
-use std::{mem::size_of, sync::Arc};
+#[cfg(feature = "headless")]
+use std::mem::size_of;
+use std::sync::Arc;
 
 use wgpu::TextureFormatFeatures;
+
+mod acquisition;
+pub use acquisition::SurfaceAcquireError;
 
 use crate::{
     render::{
@@ -15,6 +20,7 @@ use crate::{
     window::{HeadedMapWindow, MapWindow, PhysicalSize},
 };
 
+#[cfg(feature = "headless")]
 pub struct BufferDimensions {
     pub width: u32,
     pub height: u32,
@@ -22,6 +28,7 @@ pub struct BufferDimensions {
     pub padded_bytes_per_row: u32,
 }
 
+#[cfg(feature = "headless")]
 impl BufferDimensions {
     fn new(size: PhysicalSize) -> Self {
         let bytes_per_pixel = size_of::<u32>() as u32;
@@ -70,7 +77,8 @@ impl WindowHead {
     }
 
     pub fn configure(&self, device: &wgpu::Device) {
-        let mut view_formats = vec![self.texture_format];
+        // The base format is implicit; listing it would require unsupported WebGL view formats.
+        let mut view_formats = Vec::new();
         if self.render_format != self.texture_format {
             view_formats.push(self.render_format);
         }
@@ -84,6 +92,7 @@ impl WindowHead {
             present_mode: self.present_mode,
             view_formats,
             desired_maximum_frame_latency: 2,
+            color_space: Default::default(),
         };
 
         self.surface.configure(device, &surface_config);
@@ -104,7 +113,7 @@ impl WindowHead {
         Ok(())
     }
 
-    pub fn surface(&self) -> &wgpu::Surface {
+    pub fn surface(&self) -> &wgpu::Surface<'_> {
         &self.surface
     }
 }
@@ -113,7 +122,9 @@ pub struct BufferedTextureHead {
     texture: wgpu::Texture,
     texture_format: wgpu::TextureFormat,
     texture_format_features: TextureFormatFeatures,
+    #[cfg(feature = "headless")]
     output_buffer: wgpu::Buffer,
+    #[cfg(feature = "headless")]
     buffer_dimensions: BufferDimensions,
 }
 
@@ -124,7 +135,9 @@ impl BufferedTextureHead {
         format: wgpu::TextureFormat,
         features: TextureFormatFeatures,
     ) -> Self {
+        #[cfg(feature = "headless")]
         let dimensions = BufferDimensions::new(size);
+        #[cfg(feature = "headless")]
         let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("BufferedTextureHead buffer"),
             size: (dimensions.padded_bytes_per_row * dimensions.height) as u64,
@@ -149,7 +162,9 @@ impl BufferedTextureHead {
             texture,
             texture_format: format,
             texture_format_features: features,
+            #[cfg(feature = "headless")]
             output_buffer,
+            #[cfg(feature = "headless")]
             buffer_dimensions: dimensions,
         }
     }
@@ -166,32 +181,34 @@ pub enum WriteImageError {
 
 #[cfg(feature = "headless")]
 impl BufferedTextureHead {
-    pub fn map_async(&self, device: &wgpu::Device) -> wgpu::BufferSlice {
-        // Note that we're not calling `.await` here.
+    pub fn map_blocking(
+        &self,
+        device: &wgpu::Device,
+    ) -> Result<wgpu::BufferSlice<'_>, BufferReadbackError> {
         let buffer_slice = self.output_buffer.slice(..);
-        buffer_slice.map_async(wgpu::MapMode::Read, |_| ());
-
-        // Poll the device in a blocking manner so that our future resolves.
-        // In an actual application, `device.poll(...)` should
-        // be called in an event loop or on another thread.
-        device.poll(wgpu::Maintain::Wait);
-        buffer_slice
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
+            sender.send(result).ok();
+        });
+        device.poll(wgpu::PollType::wait_indefinitely())?;
+        receiver.recv()??;
+        Ok(buffer_slice)
     }
 
     pub fn unmap(&self) {
         self.output_buffer.unmap();
     }
 
-    pub fn write_png<'a>(
+    pub fn write_png(
         &self,
-        padded_buffer: &wgpu::BufferView<'a>,
+        padded_buffer: &wgpu::BufferView,
         png_output_path: &str,
     ) -> Result<(), WriteImageError> {
         use std::{fs::File, io::Write};
         let mut png_encoder = png::Encoder::new(
             File::create(png_output_path)?,
-            self.buffer_dimensions.width as u32,
-            self.buffer_dimensions.height as u32,
+            self.buffer_dimensions.width,
+            self.buffer_dimensions.height,
         );
         png_encoder.set_depth(png::BitDepth::Eight);
         png_encoder.set_color(png::ColorType::Rgba);
@@ -213,7 +230,7 @@ impl BufferedTextureHead {
         &self.texture
     }
 
-    pub fn copy_texture(&self) -> wgpu::ImageCopyTexture<'_> {
+    pub fn copy_texture(&self) -> wgpu::TexelCopyTextureInfo<'_> {
         self.texture.as_image_copy()
     }
 
@@ -253,6 +270,13 @@ impl Surface {
 
         let texture_format = settings
             .texture_format
+            .or_else(|| {
+                capabilities
+                    .formats
+                    .iter()
+                    .copied()
+                    .find(|format| !format.is_srgb())
+            })
             .or_else(|| capabilities.formats.first().cloned())
             .unwrap_or(wgpu::TextureFormat::Rgba8Unorm);
         let render_format = strip_srgb(texture_format);
@@ -308,25 +332,18 @@ impl Surface {
     }
 
     #[tracing::instrument(name = "create_view", skip_all)]
-    pub fn create_view(&self, device: &wgpu::Device) -> TextureView {
-        match &self.head {
+    pub fn create_view(&self, device: &wgpu::Device) -> Result<TextureView, SurfaceAcquireError> {
+        Ok(match &self.head {
             Head::Headed(window) => {
                 let WindowHead {
                     surface,
                     render_format,
                     ..
                 } = window;
-                let frame = match surface.get_current_texture() {
-                    Ok(view) => view,
-                    Err(wgpu::SurfaceError::Outdated) => {
-                        log::warn!("surface outdated");
-                        window.configure(device);
-                        surface
-                            .get_current_texture()
-                            .expect("Error reconfiguring surface")
-                    }
-                    err => err.expect("Failed to acquire next swap chain texture!"),
-                };
+                let frame = acquisition::acquire(
+                    || surface.get_current_texture(),
+                    || window.configure(device),
+                )?;
                 // Create view with non-sRGB format to prevent double-gamma on CSS colors
                 let view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
                     format: Some(*render_format),
@@ -341,7 +358,7 @@ impl Surface {
                 .texture
                 .create_view(&wgpu::TextureViewDescriptor::default())
                 .into(),
-        }
+        })
     }
 
     pub fn size(&self) -> PhysicalSize {
@@ -432,4 +449,22 @@ impl HasChanged for WindowHead {
     fn has_changed(&self, criteria: &Self::Criteria) -> bool {
         self.size.width() != criteria.0 || self.size.height() != criteria.1
     }
+}
+
+/// Failure while mapping an offscreen capture buffer.
+#[cfg(feature = "headless")]
+#[derive(thiserror::Error, Debug)]
+pub enum BufferReadbackError {
+    /// Waiting for GPU completion failed.
+    #[error("waiting for offscreen capture failed")]
+    Poll(#[from] wgpu::PollError),
+    /// GPU buffer mapping failed.
+    #[error("mapping offscreen capture failed")]
+    Map(#[from] wgpu::BufferAsyncError),
+    /// The mapping callback ended without delivering a result.
+    #[error("offscreen capture callback was abandoned")]
+    Callback(#[from] std::sync::mpsc::RecvError),
+    /// Access to the mapped bytes failed.
+    #[error("reading mapped offscreen capture failed")]
+    Range(#[from] wgpu::MapRangeError),
 }

@@ -54,6 +54,7 @@ impl RenderPipelineDescriptor {
             .iter()
             .copied()
             .chain(bind_group_layouts.iter())
+            .map(Some)
             .collect::<Vec<_>>();
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -75,23 +76,25 @@ impl RenderPipelineDescriptor {
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &vertex_shader_module,
-                entry_point: self.vertex.entry_point,
+                entry_point: Some(self.vertex.entry_point),
                 compilation_options: Default::default(),
                 buffers: self
                     .vertex
                     .buffers
                     .iter()
-                    .map(|layout| wgpu::VertexBufferLayout {
-                        array_stride: layout.array_stride,
-                        step_mode: layout.step_mode,
-                        attributes: layout.attributes.as_slice(),
+                    .map(|layout| {
+                        Some(wgpu::VertexBufferLayout {
+                            array_stride: layout.array_stride,
+                            step_mode: layout.step_mode,
+                            attributes: layout.attributes.as_slice(),
+                        })
                     })
                     .collect::<Vec<_>>()
                     .as_slice(),
             },
             fragment: Some(wgpu::FragmentState {
                 module: &fragment_shader_module,
-                entry_point: self.fragment.entry_point,
+                entry_point: Some(self.fragment.entry_point),
                 compilation_options: Default::default(),
                 targets: self.fragment.targets.as_slice(),
             }),
@@ -99,7 +102,7 @@ impl RenderPipelineDescriptor {
             depth_stencil: self.depth_stencil.clone(),
             multisample: self.multisample,
 
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 

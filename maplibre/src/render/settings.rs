@@ -29,7 +29,7 @@ pub struct WgpuSettings {
 
 impl Default for WgpuSettings {
     fn default() -> Self {
-        let backends = Some(wgpu::util::backend_bits_from_env().unwrap_or(Backends::all()));
+        let backends = Some(wgpu::Backends::from_env().unwrap_or(Backends::all()));
 
         let limits = if cfg!(feature = "web-webgl") {
             Limits {
@@ -82,13 +82,10 @@ pub enum SurfaceType {
 /// Configuration resource for [Multi-Sample Anti-Aliasing](https://en.wikipedia.org/wiki/Multisample_anti-aliasing).
 ///
 pub struct Msaa {
-    /// The number of samples to run for Multi-Sample Anti-Aliasing. Higher numbers result in
+    /// The requested number of samples for Multi-Sample Anti-Aliasing. Higher numbers result in
     /// smoother edges.
     /// Defaults to 4.
-    ///
-    /// Note that WGPU currently only supports 1 or 4 samples.
-    /// Ultimately we plan on supporting whatever is natively supported on a given device.
-    /// Check out this issue for more info: <https://github.com/gfx-rs/wgpu/issues/1832>
+    /// WebGL uses one sample because symbol occlusion reads the depth attachment.
     pub samples: u32,
 }
 
@@ -142,6 +139,15 @@ pub struct RendererSettings {
 }
 
 impl RendererSettings {
+    pub(super) fn with_backend_msaa(mut self, backend: wgpu::Backend) -> Self {
+        // Symbol occlusion and compositor depth copies sample the depth attachment.
+        // WebGL supports multisampled renderbuffers, but cannot sample their depth.
+        if cfg!(target_arch = "wasm32") && backend == wgpu::Backend::Gl {
+            self.msaa.samples = 1;
+        }
+        self
+    }
+
     /// Selects 32-bit float depth when the device offers it.
     ///
     /// Reversed-Z only recovers precision on a float depth buffer; the 24-bit fallback keeps

@@ -17,6 +17,12 @@ pub enum ReadbackError {
     /// The device refused to map the staging buffer.
     #[error("staging buffer could not be mapped")]
     Map(#[from] wgpu::BufferAsyncError),
+    /// The mapped range could not be accessed.
+    #[error("staging buffer range could not be accessed")]
+    Range(#[from] wgpu::MapRangeError),
+    /// Waiting for GPU work failed.
+    #[error("waiting for texture readback failed")]
+    Poll(#[from] wgpu::PollError),
     /// The device dropped the mapping callback without a result.
     #[error("staging buffer mapping was abandoned")]
     Abandoned,
@@ -67,15 +73,15 @@ fn stage(map: &HeadlessMap, texture: &wgpu::Texture, aspect: wgpu::TextureAspect
     });
     let mut encoder = map.device().create_command_encoder(&Default::default());
     encoder.copy_texture_to_buffer(
-        wgpu::ImageCopyTexture {
+        wgpu::TexelCopyTextureInfo {
             texture,
             mip_level: 0,
             origin: wgpu::Origin3d::ZERO,
             aspect,
         },
-        wgpu::ImageCopyBuffer {
+        wgpu::TexelCopyBufferInfo {
             buffer: &buffer,
-            layout: wgpu::ImageDataLayout {
+            layout: wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(padded),
                 rows_per_image: None,
@@ -108,15 +114,15 @@ fn request(staging: &Staging) -> Mapped {
     Mapped(slot)
 }
 
-fn unpad(staging: Staging) -> Vec<u8> {
-    let mapped = staging.buffer.slice(..).get_mapped_range();
+fn unpad(staging: Staging) -> Result<Vec<u8>, ReadbackError> {
+    let mapped = staging.buffer.slice(..).get_mapped_range()?;
     let bytes = mapped
         .chunks_exact(staging.padded)
         .flat_map(|row| row[..staging.row].iter().copied())
         .collect();
     drop(mapped);
     staging.buffer.unmap();
-    bytes
+    Ok(bytes)
 }
 
 /// Copy a texture to CPU memory with tightly packed rows. Suits WebGPU.
@@ -130,7 +136,7 @@ pub async fn read(
 ) -> Result<Vec<u8>, ReadbackError> {
     let staging = stage(map, texture, aspect);
     request(&staging).await?;
-    Ok(unpad(staging))
+    unpad(staging)
 }
 
 /// Copy a texture to CPU memory with tightly packed rows, and wait for the device.
@@ -141,7 +147,7 @@ pub fn read_blocking(
 ) -> Result<Vec<u8>, ReadbackError> {
     let staging = stage(map, texture, aspect);
     let mapped = request(&staging);
-    map.device().poll(wgpu::Maintain::Wait);
+    map.device().poll(wgpu::PollType::wait_indefinitely())?;
     let result = mapped
         .0
         .lock()
@@ -150,5 +156,5 @@ pub fn read_blocking(
         .take()
         .ok_or(ReadbackError::Abandoned)?;
     result?;
-    Ok(unpad(staging))
+    unpad(staging)
 }

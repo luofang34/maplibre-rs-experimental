@@ -37,6 +37,7 @@ impl<ET: 'static + Clone> MapWindowConfig for WinitMapWindowConfig<ET> {
 
         Ok(Self::MapWindow {
             window,
+            display: raw_event_loop.owned_display_handle(),
             event_loop: Some(WinitEventLoop {
                 event_loop: raw_event_loop,
             }),

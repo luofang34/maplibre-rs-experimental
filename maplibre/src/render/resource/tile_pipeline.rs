@@ -155,12 +155,12 @@ impl TilePipeline {
                 // Layers use painter's algorithm (draw order), matching MapLibre GL
                 // behavior, and stencil handles tile masking. Only 3D geometry writes
                 // depth, using reversed-Z where nearer fragments have greater depth.
-                depth_write_enabled: self.depth_write,
-                depth_compare: if self.depth_write {
+                depth_write_enabled: Some(self.depth_write),
+                depth_compare: Some(if self.depth_write {
                     wgpu::CompareFunction::GreaterEqual
                 } else {
                     wgpu::CompareFunction::Always
-                },
+                }),
                 stencil: wgpu::StencilState {
                     front: stencil_state,
                     back: stencil_state,

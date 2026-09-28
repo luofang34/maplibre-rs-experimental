@@ -36,9 +36,9 @@ impl Node for CopySurfaceBufferNode {
                 let size = surface.size();
                 command_encoder.copy_texture_to_buffer(
                     buffered_texture.copy_texture(),
-                    wgpu::ImageCopyBuffer {
+                    wgpu::TexelCopyBufferInfo {
                         buffer: buffered_texture.buffer(),
-                        layout: wgpu::ImageDataLayout {
+                        layout: wgpu::TexelCopyBufferLayout {
                             offset: 0,
                             bytes_per_row: Some(buffered_texture.bytes_per_row()),
                             rows_per_image: None,

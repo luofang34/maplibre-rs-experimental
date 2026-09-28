@@ -123,7 +123,7 @@ impl PipelineSetup<'_> {
             // Casing and deck are paint layers on the same road surface. Test against
             // terrain, but let style order composite them without self-occluding edges.
             if let Some(state) = &mut descriptor.depth_stencil {
-                state.depth_write_enabled = false;
+                state.depth_write_enabled = Some(false);
             }
         }
         descriptor.initialize_with_prefix_layouts(self.device, layouts)

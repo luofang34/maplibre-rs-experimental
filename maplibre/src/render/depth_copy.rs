@@ -1,4 +1,4 @@
-//! Hands the frame's depth to a host compositor.
+//! Resolves frame depth for symbol occlusion and host compositors.
 //!
 //! A head-mounted display's compositor reprojects the frame for the moment it is shown and
 //! blends it with the world, and needs the depth of every pixel to do so. The map renders
@@ -16,7 +16,7 @@ use crate::{
     tcs::world::World,
 };
 
-/// The pipeline that writes the map's depth into a host's depth texture.
+/// The pipeline that resolves the map's depth into a single-sample depth texture.
 pub struct DepthCopyPipeline {
     pipeline: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
@@ -35,7 +35,7 @@ impl DepthCopyPipeline {
                 binding: 0,
                 visibility: wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Depth,
+                    sample_type: wgpu::TextureSampleType::Float { filterable: false },
                     view_dimension: wgpu::TextureViewDimension::D2,
                     multisampled,
                 },
@@ -44,8 +44,8 @@ impl DepthCopyPipeline {
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("depth copy"),
-            bind_group_layouts: &[&layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&layout)],
+            immediate_size: 0,
         });
         let vertex = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("depth copy vertex"),
@@ -67,26 +67,26 @@ impl DepthCopyPipeline {
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &vertex,
-                entry_point: "main",
+                entry_point: Some("main"),
                 compilation_options: Default::default(),
                 buffers: &[],
             },
             fragment: Some(wgpu::FragmentState {
                 module: &fragment,
-                entry_point: "main",
+                entry_point: Some("main"),
                 compilation_options: Default::default(),
                 targets: &[],
             }),
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: Self::TARGET_FORMAT,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::Always,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::Always),
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState::default(),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
         Self { pipeline, layout }
@@ -113,6 +113,7 @@ impl DepthCopyPipeline {
             }],
         });
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            multiview_mask: None,
             label: Some("depth_copy"),
             color_attachments: &[],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {

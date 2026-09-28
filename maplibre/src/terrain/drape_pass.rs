@@ -55,11 +55,13 @@ impl Node for DrapePassNode {
             });
             let color_attachment = match &scratch.color {
                 Some(multisampled) => wgpu::RenderPassColorAttachment {
+                    depth_slice: None,
                     view: &multisampled.view,
                     resolve_target: Some(&top_level),
                     ops,
                 },
                 None => wgpu::RenderPassColorAttachment {
+                    depth_slice: None,
                     view: &top_level,
                     resolve_target: None,
                     ops,
@@ -69,6 +71,7 @@ impl Node for DrapePassNode {
                 render_context
                     .command_encoder
                     .begin_render_pass(&wgpu::RenderPassDescriptor {
+                        multiview_mask: None,
                         label: Some("drape_pass"),
                         color_attachments: &[Some(color_attachment)],
                         depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {

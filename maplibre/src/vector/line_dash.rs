@@ -167,7 +167,7 @@ fn create_entry(
     queue.write_texture(
         texture.as_image_copy(),
         &pixels,
-        wgpu::ImageDataLayout {
+        wgpu::TexelCopyBufferLayout {
             offset: 0,
             bytes_per_row: Some(WIDTH * 4),
             rows_per_image: Some(1),

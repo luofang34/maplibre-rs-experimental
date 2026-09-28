@@ -58,6 +58,7 @@ impl Node for TranslucentPassNode {
         }
         let color_attachment = if let Some(texture) = multisampling_texture {
             wgpu::RenderPassColorAttachment {
+                depth_slice: None,
                 view: &texture.view,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Load,
@@ -67,6 +68,7 @@ impl Node for TranslucentPassNode {
             }
         } else {
             wgpu::RenderPassColorAttachment {
+                depth_slice: None,
                 view: render_target.deref(),
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Load,
@@ -80,6 +82,7 @@ impl Node for TranslucentPassNode {
             render_context
                 .command_encoder
                 .begin_render_pass(&wgpu::RenderPassDescriptor {
+                    multiview_mask: None,
                     label: Some("translucent_pass"),
                     color_attachments: &[Some(color_attachment)],
                     depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {

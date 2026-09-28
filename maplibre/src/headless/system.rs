@@ -51,16 +51,16 @@ impl System for WriteSurfaceBufferSystem {
                 let device = device.clone();
                 let current_frame = self.frame;
 
-                let buffer_slice = buffered_texture.map_async(&device);
-                let padded_buffer = buffer_slice.get_mapped_range();
+                let buffer_slice = buffered_texture.map_blocking(&device)?;
+                let padded_buffer = buffer_slice
+                    .get_mapped_range()
+                    .map_err(crate::render::resource::BufferReadbackError::from)?;
 
                 if self.write_to_disk {
-                    buffered_texture
-                        .write_png(
-                            &padded_buffer,
-                            format!("frame_{current_frame}.png").as_str(),
-                        )
-                        .expect("Could save frame to disk");
+                    buffered_texture.write_png(
+                        &padded_buffer,
+                        format!("frame_{current_frame}.png").as_str(),
+                    )?;
                 }
 
                 // With the current interface, we have to make sure all mapped views are

@@ -60,9 +60,12 @@ impl System for ResourceSystem {
         let projection_resources =
             projection_resources.initialize(|| ProjectionGpuResources::new(device));
 
-        state
-            .render_target
-            .initialize(|| surface.create_view(device));
+        if matches!(state.render_target, Eventually::Uninitialized) {
+            let view = surface
+                .create_view(device)
+                .map_err(crate::render::error::RenderError::from)?;
+            state.render_target = Eventually::Initialized(view);
+        }
 
         let depth_msaa = if surface.is_multisampling_supported(settings.msaa) {
             settings.msaa

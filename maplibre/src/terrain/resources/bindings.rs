@@ -51,7 +51,7 @@ impl TerrainResources {
                 Some(source) => self.drape_texture(source)?,
                 None => &self.empty_dem,
             };
-            (dem.texture.global_id(), drape.texture.global_id())
+            (dem.texture.clone(), drape.texture.clone())
         };
         if let Some(group) = self.bind_groups.get(&key) {
             return Some(Arc::clone(group));

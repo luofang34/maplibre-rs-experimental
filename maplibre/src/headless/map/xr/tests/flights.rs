@@ -94,8 +94,9 @@ async fn a_globe_on_a_table_requests_only_the_levels_it_shows() {
 
 #[tokio::test]
 async fn a_flight_from_the_table_requests_tiles_a_few_at_a_time() {
-    use crate::io::tile_backpressure::{tiles_in_flight, MAX_TILES_IN_FLIGHT};
     use cgmath::Matrix3;
+
+    use crate::io::tile_backpressure::{tiles_in_flight, MAX_TILES_IN_FLIGHT};
 
     let (width, height) = (1888, 1792);
     let (kernel, renderer) = create_headless_renderer(width, height, None)
@@ -181,8 +182,9 @@ async fn a_flight_from_the_table_requests_tiles_a_few_at_a_time() {
 
 #[tokio::test]
 async fn a_flights_prefetch_is_built_once_and_does_not_follow_the_head() {
-    use crate::render::xr::PrefetchView;
     use cgmath::Matrix3;
+
+    use crate::render::xr::PrefetchView;
 
     let (width, height) = (1888, 1792);
     let (kernel, renderer) = create_headless_renderer(width, height, None)
@@ -284,11 +286,12 @@ async fn a_flights_prefetch_is_built_once_and_does_not_follow_the_head() {
 
 #[tokio::test]
 async fn terrain_draws_reuse_their_bind_groups_from_frame_to_frame() {
+    use cgmath::Matrix3;
+
     use crate::{
         render::eventually::{Eventually, Eventually::Initialized},
         terrain::resources::TerrainResources,
     };
-    use cgmath::Matrix3;
 
     let (width, height) = (1888, 1792);
     let (kernel, renderer) = create_headless_renderer(width, height, None)
@@ -363,7 +366,7 @@ async fn terrain_draws_reuse_their_bind_groups_from_frame_to_frame() {
         let mut groups: Vec<_> = terrain
             .draws()
             .iter()
-            .map(|draw| (draw.coords, draw.bind_group.global_id()))
+            .map(|draw| (draw.coords, draw.bind_group.as_ref().clone()))
             .collect();
         groups.sort_by_key(|(coords, _)| (u8::from(coords.z), coords.x, coords.y));
         groups_per_frame.push(groups);

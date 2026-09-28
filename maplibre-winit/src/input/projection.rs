@@ -159,3 +159,6 @@ fn set_center(view_state: &mut ViewState, center: LatLon, zoom: f64) {
         .camera_mut()
         .move_to(Point2::new(center.x, center.y));
 }
+
+#[cfg(test)]
+mod tests;

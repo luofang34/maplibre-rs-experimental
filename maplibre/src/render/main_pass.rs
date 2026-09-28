@@ -53,6 +53,7 @@ impl Node for MainPassNode {
 
         let color_attachment = if let Some(texture) = multisampling_texture {
             wgpu::RenderPassColorAttachment {
+                depth_slice: None,
                 view: &texture.view,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Clear(wgpu::Color {
@@ -67,6 +68,7 @@ impl Node for MainPassNode {
             }
         } else {
             wgpu::RenderPassColorAttachment {
+                depth_slice: None,
                 view: render_target.deref(),
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Clear(wgpu::Color {
@@ -85,6 +87,7 @@ impl Node for MainPassNode {
             render_context
                 .command_encoder
                 .begin_render_pass(&wgpu::RenderPassDescriptor {
+                    multiview_mask: None,
                     label: Some("main_pass"),
                     color_attachments: &[Some(color_attachment)],
                     depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {

@@ -190,7 +190,32 @@ where
     pub fn run_schedule(&mut self) -> Result<(), MapError> {
         match &mut self.map_context {
             CurrentMapContext::Ready(map_context) => {
-                self.schedule.run(map_context)?;
+                if let Err(error) = self.schedule.run(map_context) {
+                    use crate::{
+                        render::resource::{Head, SurfaceAcquireError},
+                        tcs::system::SystemError,
+                    };
+                    match error {
+                        StageError::System(SystemError::Render(RenderError::Surface(
+                            SurfaceAcquireError::Timeout
+                            | SurfaceAcquireError::Occluded
+                            | SurfaceAcquireError::Outdated,
+                        ))) => return Ok(()),
+                        StageError::System(SystemError::Render(RenderError::Surface(
+                            SurfaceAcquireError::Lost,
+                        ))) => {
+                            let renderer = &mut map_context.renderer;
+                            if let Head::Headed(surface) = renderer.resources.surface.head_mut() {
+                                surface
+                                    .recreate_surface(&self.window, &renderer.instance)
+                                    .map_err(MapError::DeviceInit)?;
+                                surface.configure(&renderer.device);
+                            }
+                            return Ok(());
+                        }
+                        error => return Err(error.into()),
+                    }
+                }
                 Ok(())
             }
             CurrentMapContext::Pending(_) => Err(MapError::RendererNotReady),

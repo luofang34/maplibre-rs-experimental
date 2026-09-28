@@ -51,8 +51,10 @@ fn fill(device: &wgpu::Device, queue: &wgpu::Queue, color: &wgpu::Texture, depth
     let color = color.create_view(&Default::default());
     let depth = depth.create_view(&Default::default());
     encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        multiview_mask: None,
         label: Some("fill colour"),
         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            depth_slice: None,
             view: &color,
             resolve_target: None,
             ops: wgpu::Operations {
@@ -65,6 +67,7 @@ fn fill(device: &wgpu::Device, queue: &wgpu::Queue, color: &wgpu::Texture, depth
         occlusion_query_set: None,
     });
     encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        multiview_mask: None,
         label: Some("fill depth"),
         color_attachments: &[],
         depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
@@ -92,9 +95,9 @@ fn read_back(device: &wgpu::Device, queue: &wgpu::Queue, texture: &wgpu::Texture
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
     encoder.copy_texture_to_buffer(
         texture.as_image_copy(),
-        wgpu::ImageCopyBuffer {
+        wgpu::TexelCopyBufferInfo {
             buffer: &buffer,
-            layout: wgpu::ImageDataLayout {
+            layout: wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(SIZE * 4),
                 rows_per_image: None,
@@ -104,8 +107,14 @@ fn read_back(device: &wgpu::Device, queue: &wgpu::Queue, texture: &wgpu::Texture
     );
     queue.submit([encoder.finish()]);
     buffer.slice(..).map_async(wgpu::MapMode::Read, |_| ());
-    device.poll(wgpu::Maintain::Wait);
-    let data = buffer.slice(..).get_mapped_range().to_vec();
+    device
+        .poll(wgpu::PollType::wait_indefinitely())
+        .expect("GPU readback completes");
+    let data = buffer
+        .slice(..)
+        .get_mapped_range()
+        .expect("mapped readback range")
+        .to_vec();
     buffer.unmap();
     data
 }

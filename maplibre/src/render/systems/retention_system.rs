@@ -110,7 +110,7 @@ fn summarize_gpu_objects(world: &World, renderer: &crate::render::Renderer) {
     let Some(report) = renderer.instance.generate_report() else {
         return;
     };
-    let hub = report.hub_report(renderer.adapter.get_info().backend);
+    let hub = report.hub_report();
     tracing::info!(
         buffers = hub.buffers.num_allocated,
         textures = hub.textures.num_allocated,

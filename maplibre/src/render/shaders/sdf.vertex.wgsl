@@ -10,18 +10,18 @@ struct VertexOutput {
     @builtin(position) position: vec4<f32>,
 };
 
-@group(2) @binding(0) var scene_depth: texture_depth_2d;
+@group(2) @binding(0) var scene_depth: texture_2d<f32>;
 
 fn anchor_visibility(clip: vec4<f32>, viewport: vec2<f32>) -> f32 {
     if clip.w <= 0.0 { return 0.0; }
     let screen = (clip.xy / clip.w * vec2<f32>(0.5,-0.5) + vec2<f32>(0.5)) * viewport;
     let pixel = clamp(vec2<i32>(screen),vec2<i32>(0),vec2<i32>(textureDimensions(scene_depth))-vec2<i32>(1));
     // A pixel covers a footprint; the farthest adjacent sample avoids self-occluding a ground anchor.
-    var surface = textureLoad(scene_depth,pixel,0);
+    var surface = textureLoad(scene_depth,pixel,0).r;
     let limit = vec2<i32>(textureDimensions(scene_depth))-vec2<i32>(1);
     for (var y = -1; y <= 1; y++) {
         for (var x = -1; x <= 1; x++) {
-            surface = min(surface,textureLoad(scene_depth,clamp(pixel+vec2<i32>(x,y),vec2<i32>(0),limit),0));
+            surface = min(surface,textureLoad(scene_depth,clamp(pixel+vec2<i32>(x,y),vec2<i32>(0),limit),0).r);
         }
     }
     let anchor = clip.z / clip.w;

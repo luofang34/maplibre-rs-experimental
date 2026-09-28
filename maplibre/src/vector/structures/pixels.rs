@@ -1,4 +1,8 @@
 #![allow(clippy::expect_used, clippy::panic)]
+use std::time::Duration;
+
+use cgmath::{Matrix4, Rad, SquareMatrix, Vector3};
+
 use crate::{
     coords::{LatLon, WorldTileCoords},
     headless::{create_headless_renderer, map::HeadlessMap},
@@ -10,8 +14,6 @@ use crate::{
     },
     style::Style,
 };
-use cgmath::{Matrix4, Rad, SquareMatrix, Vector3};
-use std::time::Duration;
 
 #[tokio::test]
 async fn elevated_bridge_draws_over_terrain_and_buried_tunnel_is_occluded() {
@@ -212,9 +214,9 @@ fn read_blocking(map: &HeadlessMap) -> Vec<u8> {
     let texture = map.head_texture().expect("color");
     encoder.copy_texture_to_buffer(
         texture.as_image_copy(),
-        wgpu::ImageCopyBuffer {
+        wgpu::TexelCopyBufferInfo {
             buffer: &buffer,
-            layout: wgpu::ImageDataLayout {
+            layout: wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(256),
                 rows_per_image: None,
@@ -226,8 +228,14 @@ fn read_blocking(map: &HeadlessMap) -> Vec<u8> {
     buffer
         .slice(..)
         .map_async(wgpu::MapMode::Read, |result| result.expect("readback"));
-    map.device().poll(wgpu::Maintain::Wait);
-    let bytes = buffer.slice(..).get_mapped_range().to_vec();
+    map.device()
+        .poll(wgpu::PollType::wait_indefinitely())
+        .expect("GPU readback completes");
+    let bytes = buffer
+        .slice(..)
+        .get_mapped_range()
+        .expect("mapped readback range")
+        .to_vec();
     buffer.unmap();
     bytes
 }

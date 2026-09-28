@@ -134,7 +134,7 @@ pub struct TerrainResources {
     /// Bind groups by DEM and drape texture, kept across frames: creating one per tile per
     /// frame is a hundred a frame, and on Metal the memory behind them is returned only
     /// slowly, so the footprint climbs for as long as the map is looked at.
-    bind_groups: HashMap<(wgpu::Id<wgpu::Texture>, wgpu::Id<wgpu::Texture>), Arc<wgpu::BindGroup>>,
+    bind_groups: HashMap<(wgpu::Texture, wgpu::Texture), Arc<wgpu::BindGroup>>,
     msaa: Msaa,
     color_format: wgpu::TextureFormat,
     depth_format: wgpu::TextureFormat,
@@ -216,7 +216,7 @@ impl TerrainResources {
             address_mode_w: wgpu::AddressMode::ClampToEdge,
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
             // Drapes are seen at grazing angles at the horizon; anisotropy keeps their
             // detail along the view direction while the mip levels stop the shimmer.
             anisotropy_clamp: 16,
@@ -316,14 +316,14 @@ impl TerrainResources {
             )
         });
         queue.write_texture(
-            wgpu::ImageCopyTexture {
+            wgpu::TexelCopyTextureInfo {
                 texture: &texture.texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
             dem.pixels(),
-            wgpu::ImageDataLayout {
+            wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(4 * dem.stride()),
                 rows_per_image: Some(dem.stride()),
@@ -423,13 +423,17 @@ impl TerrainResources {
     pub fn set_draws(&mut self, draws: Vec<TerrainDraw>) {
         self.draws = draws;
         // A bind group keeps its textures alive; only the ones this frame draws with stay.
-        let used: HashSet<wgpu::Id<wgpu::BindGroup>> = self
+        #[allow(
+            clippy::mutable_key_type,
+            reason = "wgpu hashes immutable resource identity, independent of internal synchronization"
+        )]
+        let used: HashSet<wgpu::BindGroup> = self
             .draws
             .iter()
-            .map(|draw| draw.bind_group.global_id())
+            .map(|draw| draw.bind_group.as_ref().clone())
             .collect();
         self.bind_groups
-            .retain(|_, group| used.contains(&group.global_id()));
+            .retain(|_, group| used.contains(group.as_ref()));
     }
 
     /// Terrain draws of the current frame.

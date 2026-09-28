@@ -1,3 +1,5 @@
+//! Scheduling interface and typed system failures.
+
 use std::borrow::Cow;
 
 use thiserror::Error;
@@ -11,6 +13,14 @@ pub mod timings;
 
 #[derive(Error, Debug)]
 pub enum SystemError {
+    #[cfg(feature = "headless")]
+    #[error("offscreen capture failed")]
+    Capture(#[from] crate::render::resource::BufferReadbackError),
+    #[cfg(feature = "headless")]
+    #[error("writing offscreen image failed")]
+    Image(#[from] crate::render::resource::WriteImageError),
+    #[error("GPU operation failed")]
+    Render(#[from] crate::render::error::RenderError),
     #[error("renderer was setup wrong")]
     Setup,
     #[error("dependencies were not resolvable")]

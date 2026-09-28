@@ -1,3 +1,5 @@
+//! Typed failures from GPU initialization and frame acquisition.
+
 use thiserror::Error;
 
 use crate::render::graph::RenderGraphError;
@@ -5,7 +7,7 @@ use crate::render::graph::RenderGraphError;
 #[derive(Error, Debug)]
 pub enum RenderError {
     #[error("error in surface")]
-    Surface(#[from] wgpu::SurfaceError),
+    Surface(#[from] super::resource::SurfaceAcquireError),
     #[error("error while getting window handle")]
     Handle(#[from] wgpu::rwh::HandleError),
     #[error("error during surface creation")]
@@ -15,11 +17,5 @@ pub enum RenderError {
     #[error("error while requesting device")]
     RequestDevice(#[from] wgpu::RequestDeviceError),
     #[error("error while requesting adaptor")]
-    RequestAdaptor,
-}
-
-impl RenderError {
-    pub fn should_exit(&self) -> bool {
-        matches!(self, RenderError::Surface(wgpu::SurfaceError::OutOfMemory))
-    }
+    RequestAdaptor(#[from] wgpu::RequestAdapterError),
 }

@@ -28,27 +28,24 @@ async fn test_render() {
         .try_init();
     let graph = RenderGraph::default();
 
-    let backends = wgpu::util::backend_bits_from_env().unwrap_or(wgpu::Backends::all());
+    let backends = wgpu::Backends::from_env().unwrap_or(wgpu::Backends::all());
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends,
         flags: Default::default(),
-        dx12_shader_compiler: Default::default(),
-        gles_minor_version: Default::default(),
+        ..wgpu::InstanceDescriptor::new_without_display_handle()
     });
     let adapter = wgpu::util::initialize_adapter_from_env_or_default(&instance, None)
         .await
         .expect("Unable to initialize adapter");
 
     let (device, queue) = adapter
-        .request_device(
-            &wgpu::DeviceDescriptor {
-                label: None,
-                required_features: wgpu::Features::default(),
-                required_limits: wgpu::Limits::default(),
-                memory_hints: wgpu::MemoryHints::default(),
-            },
-            None,
-        )
+        .request_device(&wgpu::DeviceDescriptor {
+            label: None,
+            required_features: wgpu::Features::default(),
+            required_limits: wgpu::Limits::default(),
+            memory_hints: wgpu::MemoryHints::default(),
+            ..Default::default()
+        })
         .await
         .expect("Unable to request device");
 

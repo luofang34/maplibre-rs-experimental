@@ -4,6 +4,8 @@ use std::num::NonZeroU32;
 
 use thiserror::Error;
 use wgpu::rwh::{HasDisplayHandle, HasWindowHandle};
+/// An owned platform connection suitable for GPU instance creation.
+pub use wgpu::wgt::WgpuHasDisplayHandle as OwnedDisplayHandle;
 
 /// Window of a certain [`PhysicalSize`]. This can either be a proper window or a headless one.
 pub trait MapWindow {
@@ -16,6 +18,11 @@ pub trait HeadedMapWindow: MapWindow {
     type WindowHandle: HasWindowHandle + HasDisplayHandle + Sync;
 
     fn handle(&self) -> &Self::WindowHandle;
+
+    /// Owns the display connection used to create this window, where the backend needs one.
+    fn owned_display_handle(&self) -> Option<Box<dyn OwnedDisplayHandle>> {
+        None
+    }
 
     // TODO: Can we avoid this?
     fn request_redraw(&self);

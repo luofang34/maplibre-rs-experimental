@@ -62,7 +62,7 @@ impl System for GraphRunnerSystem {
             };
 
             if let Some(surface_texture) = render_target.take_surface_texture() {
-                surface_texture.present();
+                queue.present(surface_texture);
             }
 
             #[cfg(feature = "tracing-tracy")]

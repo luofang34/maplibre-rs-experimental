@@ -26,13 +26,12 @@ fn main(
     @location(7) translate4: vec4<f32>,
     @location(8) color: vec4<f32>,
     @location(9) zoom_factor: f32,
-    @location(10) z_index: f32,
     @location(11) viewport_width: f32,
     @location(12) viewport_height: f32,
     @location(15) layer_translate: vec2<f32>,
-    @location(16) stroke_color: vec4<f32>,
-    @location(17) circle_params: vec4<f32>,
-    @location(18) circle_flags: vec4<f32>,
+    @location(3) stroke_color: vec4<f32>,
+    @location(13) circle_params: vec4<f32>,
+    @location(14) circle_flags: vec4<f32>,
 ) -> VertexOutput {
     // Quads are emitted with four consecutive vertices; the corner follows the vertex order.
     let corner = vertex_index % 4u;

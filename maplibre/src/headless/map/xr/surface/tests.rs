@@ -1,4 +1,6 @@
 #![allow(clippy::expect_used, clippy::panic)]
+use cgmath::{Deg, Matrix4};
+
 use super::regression::frame;
 use crate::{
     headless::{create_headless_renderer, map::HeadlessMap},
@@ -9,7 +11,6 @@ use crate::{
     style::Style,
     terrain::resources::TerrainResources,
 };
-use cgmath::{Deg, Matrix4};
 
 const SIZE: u32 = 1024;
 
@@ -32,9 +33,9 @@ fn texture_bytes_blocking(map: &HeadlessMap, texture: &wgpu::Texture) -> Vec<u8>
     let mut encoder = device.create_command_encoder(&Default::default());
     encoder.copy_texture_to_buffer(
         texture.as_image_copy(),
-        wgpu::ImageCopyBuffer {
+        wgpu::TexelCopyBufferInfo {
             buffer: &buffer,
-            layout: wgpu::ImageDataLayout {
+            layout: wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(SIZE * 4),
                 rows_per_image: None,
@@ -46,8 +47,14 @@ fn texture_bytes_blocking(map: &HeadlessMap, texture: &wgpu::Texture) -> Vec<u8>
     buffer.slice(..).map_async(wgpu::MapMode::Read, |result| {
         result.expect("readback mapped")
     });
-    device.poll(wgpu::Maintain::Wait);
-    let bytes = buffer.slice(..).get_mapped_range().to_vec();
+    device
+        .poll(wgpu::PollType::wait_indefinitely())
+        .expect("GPU readback completes");
+    let bytes = buffer
+        .slice(..)
+        .get_mapped_range()
+        .expect("mapped readback range")
+        .to_vec();
     buffer.unmap();
     bytes
 }

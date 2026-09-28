@@ -159,9 +159,9 @@ fn read_blocking(map: &HeadlessMap) -> Vec<u8> {
     let mut encoder = map.device().create_command_encoder(&Default::default());
     encoder.copy_texture_to_buffer(
         texture.as_image_copy(),
-        wgpu::ImageCopyBuffer {
+        wgpu::TexelCopyBufferInfo {
             buffer: &buffer,
-            layout: wgpu::ImageDataLayout {
+            layout: wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(SIZE * 4),
                 rows_per_image: None,
@@ -173,8 +173,14 @@ fn read_blocking(map: &HeadlessMap) -> Vec<u8> {
     buffer
         .slice(..)
         .map_async(wgpu::MapMode::Read, |result| result.expect("readback"));
-    map.device().poll(wgpu::Maintain::Wait);
-    let bytes = buffer.slice(..).get_mapped_range().to_vec();
+    map.device()
+        .poll(wgpu::PollType::wait_indefinitely())
+        .expect("GPU readback completes");
+    let bytes = buffer
+        .slice(..)
+        .get_mapped_range()
+        .expect("mapped readback range")
+        .to_vec();
     buffer.unmap();
     bytes
 }

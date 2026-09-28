@@ -41,6 +41,7 @@ impl Node for DebugPassNode {
         };
 
         let color_attachment = wgpu::RenderPassColorAttachment {
+            depth_slice: None,
             view: render_target.deref(),
             ops: wgpu::Operations {
                 // Draws on-top of previously rendered data
@@ -54,6 +55,7 @@ impl Node for DebugPassNode {
             render_context
                 .command_encoder
                 .begin_render_pass(&wgpu::RenderPassDescriptor {
+                    multiview_mask: None,
                     label: Some("debug_pass"),
                     color_attachments: &[Some(color_attachment)],
                     depth_stencil_attachment: None,

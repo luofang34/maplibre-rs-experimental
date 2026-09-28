@@ -1,5 +1,9 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
+use std::time::Duration;
+
+use cgmath::{Matrix4, Rad, SquareMatrix, Vector3};
+
 use crate::{
     coords::LatLon,
     headless::{create_headless_renderer, map::HeadlessMap},
@@ -11,8 +15,6 @@ use crate::{
     },
     style::Style,
 };
-use cgmath::{Matrix4, Rad, SquareMatrix, Vector3};
-use std::time::Duration;
 
 #[tokio::test]
 async fn both_polar_caps_export_surface_color_and_depth() {
@@ -94,9 +96,9 @@ fn read_blocking(map: &HeadlessMap, texture: &wgpu::Texture) -> Vec<u8> {
     let mut encoder = map.device().create_command_encoder(&Default::default());
     encoder.copy_texture_to_buffer(
         texture.as_image_copy(),
-        wgpu::ImageCopyBuffer {
+        wgpu::TexelCopyBufferInfo {
             buffer: &buffer,
-            layout: wgpu::ImageDataLayout {
+            layout: wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(256),
                 rows_per_image: None,
@@ -108,8 +110,14 @@ fn read_blocking(map: &HeadlessMap, texture: &wgpu::Texture) -> Vec<u8> {
     buffer
         .slice(..)
         .map_async(wgpu::MapMode::Read, |result| result.expect("readback"));
-    map.device().poll(wgpu::Maintain::Wait);
-    let bytes = buffer.slice(..).get_mapped_range().to_vec();
+    map.device()
+        .poll(wgpu::PollType::wait_indefinitely())
+        .expect("GPU readback completes");
+    let bytes = buffer
+        .slice(..)
+        .get_mapped_range()
+        .expect("mapped readback range")
+        .to_vec();
     buffer.unmap();
     bytes
 }
@@ -189,8 +197,10 @@ fn clear_drape_white(map: &HeadlessMap, texture: &wgpu::Texture) {
             ..Default::default()
         });
         let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            multiview_mask: None,
             label: Some("polar test drape"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                depth_slice: None,
                 view: &view,
                 resolve_target: None,
                 ops: wgpu::Operations {
