@@ -46,7 +46,8 @@ fn dem_sample(texel: vec2<i32>) -> f32 {
 
 // Bilinear elevation in metres at a tile position, read from the DEM tile this tile falls in.
 fn terrain_height_gradient(position: vec2<f32>) -> vec3<f32> {
-    let coord = (terrain_tile.dem_matrix * vec4<f32>(position, 0.0, 1.0)).xy * terrain_tile.dem_dim + 1.0;
+    // Two border texels minus half a cell align tile coordinates with pixel centres.
+    let coord = (terrain_tile.dem_matrix * vec4<f32>(position, 0.0, 1.0)).xy * terrain_tile.dem_dim + 1.5;
     let f = fract(coord);
     let corner = vec2<i32>(floor(coord));
     let a = dem_sample(corner);

@@ -62,7 +62,10 @@ fn neighbours_wrap_across_the_antimeridian_and_stop_at_the_poles() {
     );
     assert!(coords.contains(&tile(3, 1, 2)));
     assert!(coords.contains(&tile(1, 1, 2)));
-    assert!(neighbours(tile(0, 0, 0)).is_empty());
+    assert_eq!(
+        neighbours(tile(0, 0, 0)),
+        vec![(tile(0, 0, 0), (-1, 0)), (tile(0, 0, 0), (1, 0))]
+    );
 }
 
 #[test]
@@ -73,7 +76,6 @@ fn do_not_backfill_when_no_neighbouring_tiles_exist() {
     backfill_neighbours(&mut tiles, tile(1, 1, 3));
 
     let dem = loaded(&tiles, tile(1, 1, 3));
-    assert!(dem.backfilled.is_empty());
     assert_eq!(dem.revision, 0);
     assert!(
         (dem.tile.get(-1, 0) - 100.0).abs() < 1e-9,
@@ -112,8 +114,6 @@ fn backfill_when_needed_fills_both_tiles() {
     assert!((south_east.tile.get(-1, -1) - 100.0).abs() < 1e-9);
     assert_eq!(center.revision, 2);
     assert_eq!(east.revision, 1);
-    assert!(center.backfilled.contains(&tile(2, 1, 3)));
-    assert!(east.backfilled.contains(&tile(1, 1, 3)));
 }
 
 #[test]
@@ -140,4 +140,68 @@ fn backfill_wraps_around_the_antimeridian() {
 
     assert!((loaded(&tiles, tile(0, 1, 2)).tile.get(-1, 1) - 200.0).abs() < 1e-9);
     assert!((loaded(&tiles, tile(3, 1, 2)).tile.get(4, 1) - 100.0).abs() < 1e-9);
+}
+
+#[test]
+fn one_neighbour_can_supply_both_wrapped_edges() {
+    let mut tiles = Tiles::default();
+    load(&mut tiles, tile(0, 0, 1), 100.0);
+    load(&mut tiles, tile(1, 0, 1), 200.0);
+    backfill_neighbours(&mut tiles, tile(0, 0, 1));
+    let west = loaded(&tiles, tile(0, 0, 1));
+    assert_eq!(west.tile.get(-1, 1), 200.0);
+    assert_eq!(west.tile.get(4, 1), 200.0);
+    let east = loaded(&tiles, tile(1, 0, 1));
+    assert_eq!(east.tile.get(-1, 1), 100.0);
+    assert_eq!(east.tile.get(4, 1), 100.0);
+}
+
+#[test]
+fn the_world_tile_wraps_its_own_east_and_west_samples() {
+    let mut tiles = Tiles::default();
+    let mut image = RgbaImage::new(4, 4);
+    for (x, _, pixel) in image.enumerate_pixels_mut() {
+        *pixel = terrarium_pixel(f64::from(x) * 100.0);
+    }
+    tiles
+        .spawn_mut(tile(0, 0, 0))
+        .expect("world tile")
+        .insert(DemTileComponent::Loaded(LoadedDem::new(
+            DemTile::from_image(&image, TERRARIUM).expect("DEM"),
+        )));
+    backfill_neighbours(&mut tiles, tile(0, 0, 0));
+    let world = loaded(&tiles, tile(0, 0, 0));
+    assert_eq!(world.tile.get(-1, 1), 300.0);
+    assert_eq!(world.tile.get(4, 1), 0.0);
+}
+
+#[test]
+fn reloaded_neighbours_refresh_existing_borders() {
+    let mut tiles = Tiles::default();
+    let west = tile(1, 1, 3);
+    let east = tile(2, 1, 3);
+    load(&mut tiles, west, 100.0);
+    load(&mut tiles, east, 200.0);
+    backfill_neighbours(&mut tiles, east);
+    *tiles
+        .query_mut::<&mut DemTileComponent>(east)
+        .expect("loaded tile") = DemTileComponent::Loaded(LoadedDem::new(flat_tile(300.0)));
+    backfill_neighbours(&mut tiles, east);
+    assert_eq!(loaded(&tiles, west).tile.get(4, 1), 300.0);
+    assert_eq!(loaded(&tiles, west).revision, 2);
+}
+
+#[test]
+fn gpu_revision_wraps_when_border_pixels_change() {
+    let mut tiles = Tiles::default();
+    let west = tile(1, 1, 3);
+    let east = tile(2, 1, 3);
+    load(&mut tiles, west, 100.0);
+    load(&mut tiles, east, 200.0);
+    if let Some(DemTileComponent::Loaded(dem)) = tiles.query_mut::<&mut DemTileComponent>(west) {
+        dem.revision = u32::MAX;
+    }
+    backfill_neighbours(&mut tiles, east);
+    assert_eq!(loaded(&tiles, west).tile.get(4, 1), 200.0);
+    assert_eq!(loaded(&tiles, west).revision, 0);
 }

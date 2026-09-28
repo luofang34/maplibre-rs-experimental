@@ -38,7 +38,7 @@ pub fn neighbours(coords: WorldTileCoords) -> Vec<(WorldTileCoords, (i32, i32))>
                 y: y as i32,
                 z: ZoomLevel::new(zoom),
             };
-            (neighbour != coords).then_some((neighbour, (dx, dy)))
+            Some((neighbour, (dx, dy)))
         })
         .collect()
 }
@@ -59,35 +59,33 @@ fn fill_border(
     dx: i32,
     dy: i32,
 ) {
-    let already_filled = matches!(
-        tiles.query::<&DemTileComponent>(target),
-        Some(DemTileComponent::Loaded(dem)) if dem.backfilled.contains(&source)
-    );
-    if already_filled {
-        return;
-    }
     let Some(DemTileComponent::Loaded(source_dem)) = tiles.query::<&DemTileComponent>(source)
     else {
         return;
     };
-    let samples = source_dem.tile.edge_samples(dx, dy);
+    let samples = match source_dem.tile.edge_samples(dx, dy) {
+        Ok(samples) => samples,
+        Err(error) => {
+            tracing::warn!(%target, %source, %error, "cannot read DEM neighbour edge");
+            return;
+        }
+    };
     let source_dim = source_dem.tile.dim();
+    let source_unpack = source_dem.tile.unpack();
     let Some(DemTileComponent::Loaded(target_dem)) =
         tiles.query_mut::<&mut DemTileComponent>(target)
     else {
         return;
     };
-    if target_dem.tile.dim() != source_dim {
-        tracing::warn!(
-            %target,
-            %source,
-            "DEM neighbours differ in size; the replicated border stays"
-        );
-        return;
+    let result = target_dem
+        .tile
+        .validate_neighbour(source_dim, source_unpack)
+        .and_then(|()| target_dem.tile.fill_border(dx, dy, &samples));
+    match result {
+        Ok(true) => target_dem.revision = target_dem.revision.wrapping_add(1),
+        Ok(false) => {}
+        Err(error) => tracing::warn!(%target, %source, %error, "cannot backfill DEM border"),
     }
-    target_dem.tile.fill_border(dx, dy, &samples);
-    target_dem.backfilled.insert(source);
-    target_dem.revision = target_dem.revision.wrapping_add(1);
 }
 
 #[cfg(test)]

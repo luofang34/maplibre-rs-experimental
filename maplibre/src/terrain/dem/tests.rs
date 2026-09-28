@@ -31,7 +31,7 @@ fn decodes_terrarium_samples_and_tracks_min_max() {
     let tile = tile(&[[100.0, 200.0], [-50.0, 1250.5]]);
 
     assert_eq!(tile.dim(), 2);
-    assert_eq!(tile.stride(), 4);
+    assert_eq!(tile.stride(), 6);
     assert!((tile.get(0, 0) - 100.0).abs() < 1e-9);
     assert!((tile.get(1, 0) - 200.0).abs() < 1e-9);
     assert!((tile.get(0, 1) + 50.0).abs() < 1e-9);
@@ -50,7 +50,7 @@ fn border_replicates_the_nearest_edge_sample() {
     assert_eq!(tile.get(1, 2), 4.0);
     assert_eq!(tile.get(-1, -1), 1.0);
     assert_eq!(tile.get(2, 2), 4.0);
-    assert_eq!(tile.pixels().len(), 4 * 4 * 4);
+    assert_eq!(tile.pixels().len(), 6 * 6 * 4);
 }
 
 #[test]
@@ -63,7 +63,7 @@ fn bilinear_sampling_blends_towards_the_next_sample() {
     assert!((tile.sample_bilinear(0.5, 0.5) - 150.0).abs() < 1e-9);
     // Beyond the last sample the replicated border keeps the value flat.
     assert!((tile.sample_bilinear(1.5, 1.5) - 300.0).abs() < 1e-9);
-    assert!((tile.elevation_at_tile_coords(EXTENT / 4.0, 0.0) - 50.0).abs() < 1e-9);
+    assert!((tile.elevation_at_tile_coords(EXTENT / 4.0, 0.0) - 0.0).abs() < 1e-9);
 }
 
 #[test]
@@ -155,4 +155,93 @@ fn backfill_border_rejects_a_neighbour_of_another_size() {
             actual: 2
         })
     );
+}
+
+#[test]
+fn both_border_pixels_receive_the_neighbours_samples() {
+    let mut dem = gradient_tile(0.0);
+    let west = gradient_tile(5000.0);
+    dem.backfill_border(&west, -1, 0).expect("same size");
+    assert_eq!(dem.stride(), 8);
+    assert_eq!(dem.get(-2, 1), west.get(2, 1));
+    assert_eq!(dem.get(-1, 1), west.get(3, 1));
+}
+
+#[test]
+fn tile_coordinates_address_pixel_centres() {
+    let dem = tile(&[[0.0, 100.0], [200.0, 300.0]]);
+    assert_eq!(
+        dem.elevation_at_tile_coords(EXTENT / 4.0, EXTENT / 4.0),
+        0.0
+    );
+    assert_eq!(
+        dem.elevation_at_tile_coords(EXTENT / 2.0, EXTENT / 2.0),
+        150.0
+    );
+    assert_eq!(
+        dem.elevation_at_tile_coords(EXTENT * 0.75, EXTENT * 0.75),
+        300.0
+    );
+}
+
+#[test]
+fn shared_tile_edges_interpolate_the_same_two_cell_centres() {
+    let mut west = tile(&[[0.0, 100.0], [0.0, 100.0]]);
+    let mut east = tile(&[[200.0, 300.0], [200.0, 300.0]]);
+    west.backfill_border(&east, 1, 0).expect("east border");
+    east.backfill_border(&west, -1, 0).expect("west border");
+    assert_eq!(west.elevation_at_tile_coords(EXTENT, EXTENT / 2.0), 150.0);
+    assert_eq!(east.elevation_at_tile_coords(0.0, EXTENT / 2.0), 150.0);
+}
+
+mod reference;
+
+#[test]
+fn invalid_borders_leave_the_tile_unchanged() {
+    let mut dem = gradient_tile(0.0);
+    let before = dem.clone();
+    for (dx, dy) in [(0, 0), (-2, 0), (0, 2)] {
+        assert_eq!(
+            dem.backfill_border(&before, dx, dy),
+            Err(DemError::InvalidNeighbour { dx, dy })
+        );
+    }
+    for actual in [0, 28, 36] {
+        assert_eq!(
+            dem.fill_border(1, 0, &vec![0; actual]),
+            Err(DemError::BorderLength {
+                dx: 1,
+                dy: 0,
+                expected: 32,
+                actual
+            })
+        );
+    }
+    let other = DemTile::from_image(&RgbaImage::new(4, 4), MAPBOX).expect("DEM");
+    assert_eq!(
+        dem.backfill_border(&other, 1, 0),
+        Err(DemError::EncodingMismatch {
+            expected: TERRARIUM,
+            actual: MAPBOX
+        })
+    );
+    assert_eq!(dem, before);
+}
+
+#[test]
+fn a_single_pixel_tile_can_fill_both_border_pixels() {
+    let mut dem = DemTile::from_image(
+        &RgbaImage::from_pixel(1, 1, terrarium_pixel(100.0)),
+        TERRARIUM,
+    )
+    .expect("DEM");
+    let neighbour = DemTile::from_image(
+        &RgbaImage::from_pixel(1, 1, terrarium_pixel(200.0)),
+        TERRARIUM,
+    )
+    .expect("DEM");
+    dem.backfill_border(&neighbour, 1, 0).expect("border");
+    assert_eq!(dem.get(1, 0), 200.0);
+    assert_eq!(dem.get(2, 0), 200.0);
+    assert_eq!(dem.elevation_at_tile_coords(EXTENT, EXTENT / 2.0), 150.0);
 }

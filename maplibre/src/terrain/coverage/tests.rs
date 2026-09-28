@@ -95,7 +95,7 @@ fn samples_the_correct_part_of_a_parent_dem_tile() {
     // The rendered z2 tile (1, 1) is the bottom-right child of the z1 DEM tile (0, 0).
     let index = TerrainCoverageIndex::build([tile(1, 1, 2)], &tiles, &source(1.0));
 
-    // The centre of that child sits at 75% of both parent axes: sample (3, 3) of a 4x4 grid.
+    // The centre of that child sits at 75% of both parent axes: sample coordinates (2.5, 2.5) in the parent grid.
     let sample = index.sample(&tiles, 0.375, 0.375);
 
     assert_eq!(
@@ -103,7 +103,7 @@ fn samples_the_correct_part_of_a_parent_dem_tile() {
         TerrainSample {
             covered: true,
             dem_loaded: true,
-            elevation: 330.0,
+            elevation: 275.0,
         }
     );
 }

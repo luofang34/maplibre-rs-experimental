@@ -1,6 +1,6 @@
 //! Terrain: elevation tiles from `raster-dem` sources, draped rendering, and elevation queries.
 
-use std::{collections::HashSet, marker::PhantomData, rc::Rc};
+use std::{marker::PhantomData, rc::Rc};
 
 use crate::{
     coords::WorldTileCoords,
@@ -55,13 +55,11 @@ pub use transferables::{
     DemTransferables, LayerDem, LayerDemMissing,
 };
 
-/// A decoded DEM tile together with its neighbour bookkeeping.
+/// A decoded DEM tile and the revision of its GPU-visible samples.
 #[derive(Debug)]
 pub struct LoadedDem {
     /// Decoded samples.
     pub tile: DemTile,
-    /// Neighbours whose edge samples already replaced this tile's replicated border.
-    pub backfilled: HashSet<WorldTileCoords>,
     /// Advances whenever the samples change, so the GPU copy can follow.
     pub revision: u32,
 }
@@ -69,11 +67,7 @@ pub struct LoadedDem {
 impl LoadedDem {
     /// Wraps a freshly decoded tile with no neighbours filled in yet.
     pub fn new(tile: DemTile) -> Self {
-        Self {
-            tile,
-            backfilled: HashSet::new(),
-            revision: 0,
-        }
+        Self { tile, revision: 0 }
     }
 }
 

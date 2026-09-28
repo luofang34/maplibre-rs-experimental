@@ -5,8 +5,8 @@ use thiserror::Error;
 
 use crate::coords::EXTENT;
 
-/// Failure while building a DEM tile from an image.
-#[derive(Clone, Copy, Debug, Error, PartialEq, Eq)]
+/// Failure while decoding a DEM tile or filling its border.
+#[derive(Clone, Copy, Debug, Error, PartialEq)]
 pub enum DemError {
     /// Elevation tiles must be square.
     #[error("DEM tiles must be square, got {width}x{height} pixels")]
@@ -27,9 +27,37 @@ pub enum DemError {
         /// Samples per edge of the neighbour.
         actual: u32,
     },
+    /// A border must face one of the eight adjacent tiles.
+    #[error("invalid DEM neighbour offset ({dx}, {dy})")]
+    InvalidNeighbour {
+        /// Horizontal offset.
+        dx: i32,
+        /// Vertical offset.
+        dy: i32,
+    },
+    /// Encoded samples cannot be copied between differently encoded tiles.
+    #[error("DEM neighbour unpack vector {actual:?} differs from {expected:?}")]
+    EncodingMismatch {
+        /// This tile's channel factors and base shift.
+        expected: [f64; 4],
+        /// The neighbour's channel factors and base shift.
+        actual: [f64; 4],
+    },
+    /// The border must be supplied in full to avoid partially updated samples.
+    #[error("DEM border ({dx}, {dy}) requires {expected} bytes, got {actual}")]
+    BorderLength {
+        /// Horizontal offset.
+        dx: i32,
+        /// Vertical offset.
+        dy: i32,
+        /// Required byte count.
+        expected: usize,
+        /// Supplied byte count.
+        actual: usize,
+    },
 }
 
-/// Elevation samples of one tile with a one-pixel border, following GL JS `DEMData`.
+/// Elevation samples of one tile with a two-pixel border, following GL JS `DEMData`.
 ///
 /// Pixels keep their RGB encoding so the same bytes upload to the GPU unchanged; the unpack
 /// vector turns a channel triple into metres on both sides. The border replicates the nearest
@@ -55,7 +83,7 @@ impl DemTile {
             return Err(DemError::Empty);
         }
         let dim = width;
-        let stride = dim + 2;
+        let stride = dim + 4;
         let mut tile = Self {
             dim,
             stride,
@@ -83,18 +111,18 @@ impl DemTile {
     }
 
     fn replicate_border(&mut self) {
-        let last = i64::from(self.dim) - 1;
-        let edge = i64::from(self.dim);
-        for i in 0..i64::from(self.dim) {
-            self.copy_pixel((0, i), (-1, i));
-            self.copy_pixel((last, i), (edge, i));
-            self.copy_pixel((i, 0), (i, -1));
-            self.copy_pixel((i, last), (i, edge));
+        let dim = i64::from(self.dim);
+        for y in -2..dim + 2 {
+            if y < 0 || y >= dim {
+                let from = self.byte_index(0, y.clamp(0, dim - 1));
+                let to = self.byte_index(0, y);
+                self.pixels
+                    .copy_within(from..from + self.dim as usize * 4, to);
+            }
+            for x in [-2, -1, dim, dim + 1] {
+                self.copy_pixel((x.clamp(0, dim - 1), y), (x, y));
+            }
         }
-        self.copy_pixel((0, 0), (-1, -1));
-        self.copy_pixel((last, 0), (edge, -1));
-        self.copy_pixel((0, last), (-1, edge));
-        self.copy_pixel((last, last), (edge, edge));
     }
 
     fn copy_pixel(&mut self, from: (i64, i64), to: (i64, i64)) {
@@ -103,16 +131,16 @@ impl DemTile {
         self.pixels.copy_within(from..from + 4, to);
     }
 
-    /// Byte offset of a sample, where `-1` and `dim` address the border.
+    /// Byte offset in the two-pixel padded image.
     fn byte_index(&self, x: i64, y: i64) -> usize {
         let stride = i64::from(self.stride);
-        (((y + 1) * stride + (x + 1)) * 4) as usize
+        (((y + 2) * stride + (x + 2)) * 4) as usize
     }
 
-    /// Elevation in metres of one sample, where `-1` and `dim` address the border.
+    /// Elevation in metres, clamped to the padded range `-2..=dim + 1`.
     pub fn get(&self, x: i64, y: i64) -> f64 {
-        let x = x.clamp(-1, i64::from(self.dim));
-        let y = y.clamp(-1, i64::from(self.dim));
+        let x = x.clamp(-2, i64::from(self.dim) + 1);
+        let y = y.clamp(-2, i64::from(self.dim) + 1);
         let index = self.byte_index(x, y);
         let [red, green, blue, base] = self.unpack;
         f64::from(self.pixels[index]) * red
@@ -121,13 +149,13 @@ impl DemTile {
             - base
     }
 
-    /// Bilinear elevation at sample-space coordinates in `0..=dim`.
+    /// Bilinear elevation in sample space, clamped to `-1..=dim`.
     ///
-    /// Matches the vertex shader, which treats sample `i` as sitting at coordinate `i` and blends
-    /// towards the next sample or the border.
+    /// Integer coordinates address pixel centres; negative fractions interpolate the west or
+    /// north border with the first interior sample.
     pub fn sample_bilinear(&self, x: f64, y: f64) -> f64 {
-        let x = x.clamp(0.0, f64::from(self.dim));
-        let y = y.clamp(0.0, f64::from(self.dim));
+        let x = x.clamp(-1.0, f64::from(self.dim));
+        let y = y.clamp(-1.0, f64::from(self.dim));
         let cx = x.floor();
         let cy = y.floor();
         let (tx, ty) = (x - cx, y - cy);
@@ -140,7 +168,10 @@ impl DemTile {
     /// Elevation at tile coordinates in `0..=EXTENT`.
     pub fn elevation_at_tile_coords(&self, x: f64, y: f64) -> f64 {
         let scale = f64::from(self.dim) / EXTENT;
-        self.sample_bilinear(x * scale, y * scale)
+        self.sample_bilinear(
+            x.clamp(0.0, EXTENT) * scale - 0.5,
+            y.clamp(0.0, EXTENT) * scale - 0.5,
+        )
     }
 
     /// Replaces the border facing a neighbour at `(dx, dy)` with that neighbour's edge samples.
@@ -150,23 +181,33 @@ impl DemTile {
         dx: i32,
         dy: i32,
     ) -> Result<(), DemError> {
-        if neighbour.dim != self.dim {
+        self.validate_neighbour(neighbour.dim, neighbour.unpack)?;
+        self.fill_border(dx, dy, &neighbour.edge_samples(dx, dy)?)?;
+        Ok(())
+    }
+
+    pub(super) fn validate_neighbour(&self, dim: u32, unpack: [f64; 4]) -> Result<(), DemError> {
+        if dim != self.dim {
             return Err(DemError::DimensionMismatch {
                 expected: self.dim,
-                actual: neighbour.dim,
+                actual: dim,
             });
         }
-        self.fill_border(dx, dy, &neighbour.edge_samples(dx, dy));
+        if unpack != self.unpack {
+            return Err(DemError::EncodingMismatch {
+                expected: self.unpack,
+                actual: unpack,
+            });
+        }
         Ok(())
     }
 
     /// Samples of this tile that a neighbour at `(-dx, -dy)` stores in its border facing us.
     ///
-    /// Row-major over that neighbour's border region: a column for `dx != 0`, a row for
-    /// `dy != 0`, a single corner sample when both are set.
-    pub fn edge_samples(&self, dx: i32, dy: i32) -> Vec<u8> {
+    /// Row-major over two columns or rows, or a 2x2 corner when both offsets are set.
+    pub fn edge_samples(&self, dx: i32, dy: i32) -> Result<Vec<u8>, DemError> {
         let dim = i64::from(self.dim);
-        let (x_range, y_range) = Self::border_region(dim, dx, dy);
+        let (x_range, y_range) = Self::border_region(dim, dx, dy)?;
         let count = (x_range.end - x_range.start) * (y_range.end - y_range.start);
         let mut samples = Vec::with_capacity(count.max(0) as usize * 4);
         for y in y_range {
@@ -175,34 +216,50 @@ impl DemTile {
                 samples.extend_from_slice(&self.pixels[index..index + 4]);
             }
         }
-        samples
+        Ok(samples)
     }
 
     /// Writes samples produced by a neighbour's [`edge_samples`](Self::edge_samples) into the
     /// border facing that neighbour at `(dx, dy)`.
-    pub fn fill_border(&mut self, dx: i32, dy: i32, samples: &[u8]) {
+    /// Returns whether any pixels changed.
+    pub fn fill_border(&mut self, dx: i32, dy: i32, samples: &[u8]) -> Result<bool, DemError> {
         let dim = i64::from(self.dim);
-        let (x_range, y_range) = Self::border_region(dim, dx, dy);
-        let mut source = samples.chunks_exact(4);
-        for y in y_range {
-            for x in x_range.clone() {
-                let Some(pixel) = source.next() else {
-                    return;
-                };
-                let index = self.byte_index(x, y);
-                self.pixels[index..index + 4].copy_from_slice(pixel);
-            }
+        let (x_range, y_range) = Self::border_region(dim, dx, dy)?;
+        let expected =
+            (x_range.end - x_range.start) as usize * (y_range.end - y_range.start) as usize * 4;
+        if samples.len() != expected {
+            return Err(DemError::BorderLength {
+                dx,
+                dy,
+                expected,
+                actual: samples.len(),
+            });
         }
+        let mut changed = false;
+        let positions = y_range.flat_map(|y| x_range.clone().map(move |x| (x, y)));
+        for ((x, y), pixel) in positions.zip(samples.chunks_exact(4)) {
+            let index = self.byte_index(x, y);
+            let target = &mut self.pixels[index..index + 4];
+            changed |= target != pixel;
+            target.copy_from_slice(pixel);
+        }
+        Ok(changed)
     }
 
-    /// Border cells facing a neighbour at `(dx, dy)`, as in GL JS `backfillBorder`.
-    fn border_region(dim: i64, dx: i32, dy: i32) -> (std::ops::Range<i64>, std::ops::Range<i64>) {
+    fn border_region(
+        dim: i64,
+        dx: i32,
+        dy: i32,
+    ) -> Result<(std::ops::Range<i64>, std::ops::Range<i64>), DemError> {
+        if !(-1..=1).contains(&dx) || !(-1..=1).contains(&dy) || (dx == 0 && dy == 0) {
+            return Err(DemError::InvalidNeighbour { dx, dy });
+        }
         let axis = |delta: i32| match delta {
-            -1 => -1..0,
-            1 => dim..dim + 1,
+            -1 => -2..0,
+            1 => dim..dim + 2,
             _ => 0..dim,
         };
-        (axis(dx), axis(dy))
+        Ok((axis(dx), axis(dy)))
     }
 
     /// Number of samples along one edge, excluding the border.
