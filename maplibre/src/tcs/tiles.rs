@@ -1,7 +1,6 @@
-use std::{
-    cell::UnsafeCell,
-    collections::{btree_map, BTreeMap},
-};
+//! Tile records, their typed CPU components and rendered-feature query geometry.
+
+use std::{cell::UnsafeCell, collections::BTreeMap};
 
 use downcast_rs::{impl_downcast, Downcast};
 
@@ -69,9 +68,11 @@ impl Tiles {
         }
     }
 
+    /// Drops every tile, component and feature-query geometry.
     pub fn clear(&mut self) {
         self.tiles.clear();
         self.components.clear();
+        self.geometry_index = GeometryIndex::default();
     }
 
     /// Drops a tile with its components and query index; `false` when it was not present.
@@ -85,37 +86,39 @@ impl Tiles {
     }
 }
 
+/// Exclusive insertion handle for a valid tile; chained inserts share the same tile record.
 pub struct TileSpawnResult<'t> {
     tiles: &'t mut Tiles,
     tile: Tile,
 }
 
 impl<'w> TileSpawnResult<'w> {
+    /// Replaces this tile's component of the same type, dropping its old value immediately.
     pub fn insert<T: TileComponent>(&mut self, component: T) -> &mut Self {
-        let components = &mut self.tiles.components;
-        let coords = self.tile.coords;
-
-        if let Some(entry) = coords.build_quad_key().map(|key| components.entry(key)) {
-            match entry {
-                btree_map::Entry::Vacant(_entry) => {
-                    panic!("Can not add a component at {coords}. Entity does not exist.",)
-                }
-                btree_map::Entry::Occupied(mut entry) => {
-                    entry.get_mut().push(UnsafeCell::new(Box::new(component)));
-                }
+        if let Some(key) = self.tile.coords.build_quad_key() {
+            let components = self.tiles.components.entry(key).or_default();
+            if let Some(value) = components
+                .iter_mut()
+                .find_map(|stored| stored.get_mut().downcast_mut::<T>())
+            {
+                *value = component;
+            } else {
+                components.push(UnsafeCell::new(Box::new(component)));
             }
         }
         self
     }
 }
 
-// ComponentQuery
-
+/// Shared component lookup; built-in queries are references and pairs of references.
 pub trait ComponentQuery {
+    /// Value returned with a lifetime bounded by the tile store.
     type Item<'t>;
 
+    /// Access ledger handle shared by the members of a pair query.
     type State<'s>: QueryState<'s>;
 
+    /// Looks up components at `tile` using the common query state.
     fn query<'t, 's>(
         tiles: &'t Tiles,
         tile: Tile,

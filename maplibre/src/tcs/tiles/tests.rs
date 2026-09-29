@@ -90,3 +90,89 @@ fn a_missing_component_does_not_reserve_the_tile_for_later_queries() {
         Some((&Height(10), &Opacity(20)))
     );
 }
+
+#[test]
+fn replacing_a_component_publishes_the_new_value_and_drops_the_old_one() {
+    use std::{cell::Cell, rc::Rc};
+    struct Tracked {
+        value: u32,
+        drops: Rc<Cell<u32>>,
+    }
+    impl TileComponent for Tracked {}
+    impl Drop for Tracked {
+        fn drop(&mut self) {
+            self.drops.set(self.drops.get().wrapping_add(1));
+        }
+    }
+    let drops = Rc::new(Cell::new(0));
+    let (mut tiles, coords) = populated();
+    for value in 0..100 {
+        tiles
+            .spawn_mut(coords)
+            .expect("existing tile")
+            .insert(Tracked {
+                value,
+                drops: Rc::clone(&drops),
+            });
+        assert_eq!(
+            tiles
+                .query::<&Tracked>(coords)
+                .expect("latest component")
+                .value,
+            value
+        );
+        assert_eq!(drops.get(), value);
+        assert_eq!(tiles.query::<&Height>(coords), Some(&Height(10)));
+    }
+    tiles.remove(coords);
+    assert_eq!(drops.get(), 100);
+    assert!(tiles.query::<&Tracked>(coords).is_none());
+}
+
+#[test]
+fn clearing_tiles_discards_geometry_queries_before_coordinates_are_reused() {
+    use std::collections::HashMap;
+
+    use geo_types::{LineString, Point};
+
+    use crate::{
+        coords::{WorldCoords, Zoom, ZoomLevel, EXTENT, TILE_SIZE},
+        io::geometry_index::{ExactGeometry, IndexedGeometry, TileIndex},
+    };
+    let (mut tiles, coords) = populated();
+    tiles.geometry_index.index_tile(
+        &coords,
+        TileIndex::Linear {
+            list: vec![IndexedGeometry {
+                bounds: rstar::AABB::from_corners(Point::new(0.0, 0.0), Point::new(EXTENT, EXTENT)),
+                exact: ExactGeometry::LineString(LineString::from(vec![
+                    (0.0, 0.0),
+                    (EXTENT, EXTENT),
+                ])),
+                properties: HashMap::from([("name".into(), "road".into())]),
+            }],
+        },
+    );
+    let point = WorldCoords::from((TILE_SIZE / 2.0, TILE_SIZE / 2.0));
+    let z = ZoomLevel::from(0);
+    let zoom = Zoom::new(0.0);
+    assert_eq!(
+        tiles
+            .geometry_index
+            .query_point(&point, z, zoom)
+            .expect("indexed tile")
+            .len(),
+        1
+    );
+    assert!(tiles.geometry_index.approximate_bytes() > 0);
+    tiles.clear();
+    assert!(!tiles.exists(coords));
+    assert!(tiles.query::<&Height>(coords).is_none());
+    assert!(tiles.geometry_index.query_point(&point, z, zoom).is_none());
+    assert_eq!(tiles.geometry_index.approximate_bytes(), 0);
+    tiles
+        .spawn_mut(coords)
+        .expect("reused coordinates")
+        .insert(Height(30));
+    assert!(tiles.geometry_index.query_point(&point, z, zoom).is_none());
+}
