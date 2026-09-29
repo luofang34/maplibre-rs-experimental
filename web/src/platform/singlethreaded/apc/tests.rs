@@ -76,19 +76,12 @@ fn final_outcomes_round_trip_with_attempt_and_retry_state() {
                 disposition,
             };
             let message = IntoMessage::into(expected);
-            let message = if kind == RequestKind::Vector {
-                message.with_attempt(73)
-            } else {
-                message
-            };
+            let message = message.with_attempt(73);
             let (tag, buffer) = prepare_message(message).expect("outcome encoded");
             let wire_tag = WebMessageTag::from_u32(tag as u32).expect("wire tag");
             let message = decode_message(wire_tag, buffer).expect("outcome decoded");
             assert!(message.has_tag(kind.message_tag()));
-            assert_eq!(
-                message.attempt(),
-                (kind == RequestKind::Vector).then_some(73)
-            );
+            assert_eq!(message.attempt(), Some(73));
             let actual = message
                 .into_transferable::<TileRequestOutcome>()
                 .expect("outcome payload");
@@ -169,3 +162,5 @@ fn malformed_tracking_headers_are_typed_errors() {
     };
     assert!(cause.is::<TrackedPayloadError>());
 }
+
+mod image_payloads;

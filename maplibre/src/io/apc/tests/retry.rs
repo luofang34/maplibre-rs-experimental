@@ -7,3 +7,5 @@ mod source;
 mod tests;
 
 mod vector;
+
+mod image_payloads;

@@ -7,7 +7,10 @@ use crate::{
     coords::WorldTileCoords,
     environment::{Environment, OffscreenKernel},
     io::{
-        apc::{AsyncProcedureCall, AsyncProcedureFuture, Context, Input, ProcedureError},
+        apc::{
+            AsyncProcedureCall, AsyncProcedureFuture, AttemptContext, Context, Input,
+            ProcedureError,
+        },
         tile_backpressure::request_budget,
         tile_retry::{self, RequestDisposition, RequestKind, TileRequestOutcome},
         tile_sources::missing_tile_fallback,
@@ -217,6 +220,7 @@ pub fn fetch_dem_apc<K: OffscreenKernel, T: DemTransferables, C: Context + Clone
 ) -> AsyncProcedureFuture {
     Box::pin(async move {
         let (coords, style, attempt) = input.into_tile_request();
+        let context = AttemptContext::new(context, attempt);
         let Some(dem) = dem_source(&style) else {
             return Ok(());
         };

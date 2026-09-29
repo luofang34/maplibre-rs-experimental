@@ -17,6 +17,8 @@ use winit::{
 #[path = "desktop/fixture.rs"]
 mod fixture;
 use fixture::{Environment, Source};
+#[path = "desktop/images.rs"]
+mod images;
 
 pub(super) fn run() {
     let mut driver = Driver {
@@ -63,12 +65,18 @@ impl ApplicationHandler for Driver {
 
 async fn check(config: WinitMapWindowConfig<()>) {
     let source = Source::new().await;
-    let mut map = fixture::map(config, &source.url);
+    if std::env::args().any(|arg| arg == "--images-only" || arg == "--dem-only") {
+        images::check(config, &source).await;
+        source.close().await;
+        return;
+    }
+    let mut map = fixture::map(config.clone(), &source.url);
     initialize(&mut map).await;
     if !std::env::args().any(|arg| arg == "--outcome-only") {
         payloads(&mut map, &source).await;
     }
     outcomes(&mut map, &source).await;
+    images::check(config, &source).await;
     source.close().await;
 }
 

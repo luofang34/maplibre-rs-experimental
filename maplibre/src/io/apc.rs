@@ -25,6 +25,9 @@ use crate::{
     style::Style,
 };
 
+mod attempt;
+pub(crate) use attempt::AttemptContext;
+
 define_label!(MessageTag);
 
 impl MessageTag for u32 {

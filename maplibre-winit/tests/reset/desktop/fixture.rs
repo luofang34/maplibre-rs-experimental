@@ -97,6 +97,27 @@ impl Calls {
 }
 
 pub(super) fn map(config: WinitMapWindowConfig<()>, url: &str) -> Map<Environment> {
+    let style = serde_json::from_value(serde_json::json!({
+        "version":8,"center":[0,0],"zoom":0,
+        "sources":{"source":{"type":"vector","tiles":[format!("{url}/{{z}}/{{x}}/{{y}}")],"maxzoom":0}},
+        "layers":[{"id":"land","source":"source","source-layer":"land","type":"fill","paint":{"fill-color":["get","color"]}}]
+    })).expect("vector style");
+    create_map(
+        config,
+        style,
+        vec![
+            Box::new(RenderPlugin),
+            Box::new(VectorPlugin::<DefaultVectorTransferables>::default()),
+            Box::new(SdfPlugin::<DefaultVectorTransferables>::default()),
+        ],
+    )
+}
+
+pub(super) fn create_map(
+    config: WinitMapWindowConfig<()>,
+    style: maplibre::style::Style,
+    plugins: Vec<Box<dyn maplibre::plugin::Plugin<Environment>>>,
+) -> Map<Environment> {
     let kernel = KernelBuilder::new()
         .with_map_window_config(config)
         .with_http_client(ReqwestHttpClient::new::<String>(None))
@@ -104,22 +125,7 @@ pub(super) fn map(config: WinitMapWindowConfig<()>, url: &str) -> Map<Environmen
         .with_apc(Calls::default())
         .build()
         .expect("map services");
-    let style = serde_json::from_value(serde_json::json!({
-        "version":8,"center":[0,0],"zoom":0,
-        "sources":{"source":{"type":"vector","tiles":[format!("{url}/{{z}}/{{x}}/{{y}}")],"maxzoom":0}},
-        "layers":[{"id":"land","source":"source","source-layer":"land","type":"fill","paint":{"fill-color":["get","color"]}}]
-    })).expect("vector style");
-    Map::new(
-        style,
-        kernel,
-        RendererBuilder::new(),
-        vec![
-            Box::new(RenderPlugin),
-            Box::new(VectorPlugin::<DefaultVectorTransferables>::default()),
-            Box::new(SdfPlugin::<DefaultVectorTransferables>::default()),
-        ],
-    )
-    .expect("map bound to resumed window")
+    Map::new(style, kernel, RendererBuilder::new(), plugins).expect("map bound to resumed window")
 }
 
 pub(super) struct Source {
@@ -162,6 +168,14 @@ impl Source {
     }
     pub fn tile(&self, color: &str) {
         *self.response.lock().expect("HTTP response") = (200, tile(color));
+    }
+    pub fn image(&self, value: u8) {
+        use image::ImageEncoder;
+        let mut bytes = Vec::new();
+        image::codecs::png::PngEncoder::new(&mut bytes)
+            .write_image(&[128, value, 0, 255], 1, 1, image::ExtendedColorType::Rgba8)
+            .expect("PNG");
+        *self.response.lock().expect("HTTP response") = (200, bytes);
     }
     pub fn unavailable(&self) {
         *self.response.lock().expect("HTTP response") = (503, Vec::new());

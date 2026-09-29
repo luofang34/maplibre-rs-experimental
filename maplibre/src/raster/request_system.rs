@@ -7,7 +7,10 @@ use crate::{
     coords::WorldTileCoords,
     environment::{Environment, OffscreenKernel},
     io::{
-        apc::{AsyncProcedureCall, AsyncProcedureFuture, Context, Input, ProcedureError},
+        apc::{
+            AsyncProcedureCall, AsyncProcedureFuture, AttemptContext, Context, Input,
+            ProcedureError,
+        },
         tile_backpressure::request_budget,
         tile_retry::{self, RequestDisposition, RequestKind, TileRequestOutcome},
         tile_sources::{missing_tile_fallback, source_layer_groups, TileKind},
@@ -103,6 +106,7 @@ pub fn fetch_raster_apc<K: OffscreenKernel, T: RasterTransferables, C: Context +
 ) -> AsyncProcedureFuture {
     Box::pin(async move {
         let (coords, style, attempt) = input.into_tile_request();
+        let context = AttemptContext::new(context, attempt);
 
         let client = kernel.source_client();
         let mut retry = false;
@@ -111,7 +115,7 @@ pub fn fetch_raster_apc<K: OffscreenKernel, T: RasterTransferables, C: Context +
             let context = context.clone();
             match client.fetch(&coords, &group.source).await {
                 Ok(data) => {
-                    let mut process_context = ProcessRasterContext::<T, C>::new(context.clone());
+                    let mut process_context = ProcessRasterContext::<T, _>::new(context.clone());
                     match process_raster_tile(
                         &data,
                         RasterTileRequest {

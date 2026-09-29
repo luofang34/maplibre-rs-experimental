@@ -62,18 +62,21 @@ pub(crate) fn apply_raster_message<T: RasterTransferables>(
         tile_retry::completed(world, *message.into_transferable::<TileRequestOutcome>()?);
         return Ok(());
     }
+    let attempt = message.attempt();
     let (coords, layer) = if message.has_tag(T::LayerRaster::message_tag()) {
         let message = message.into_transferable::<T::LayerRaster>()?;
-        (
-            message.coords(),
-            RasterLayerData::Available(message.to_layer()),
-        )
+        let coords = message.coords();
+        if !tile_retry::accepts(world, coords, RequestKind::Raster, attempt) {
+            return Ok(());
+        }
+        (coords, RasterLayerData::Available(message.to_layer()))
     } else if message.has_tag(T::LayerRasterMissing::message_tag()) {
         let message = message.into_transferable::<T::LayerRasterMissing>()?;
-        (
-            message.coords(),
-            RasterLayerData::Missing(message.to_layer()),
-        )
+        let coords = message.coords();
+        if !tile_retry::accepts(world, coords, RequestKind::Raster, attempt) {
+            return Ok(());
+        }
+        (coords, RasterLayerData::Missing(message.to_layer()))
     } else {
         return Ok(());
     };

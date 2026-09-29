@@ -6,7 +6,7 @@ use crate::{
     coords::WorldTileCoords,
     environment::OffscreenKernel,
     io::{
-        apc::{AsyncProcedureFuture, Context, Input, IntoMessage, ProcedureError, SendError},
+        apc::{AsyncProcedureFuture, AttemptContext, Context, Input, ProcedureError, SendError},
         source_client::{HttpClient, SourceClient},
         tile_retry::{RequestDisposition, RequestKind, TileRequestOutcome},
         tile_sources::{source_layer_groups, SourceLayerGroup, TileKind},
@@ -27,7 +27,7 @@ pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context +
 ) -> AsyncProcedureFuture {
     Box::pin(async move {
         let (coords, style, attempt) = input.into_tile_request();
-        let context = AttemptContext { context, attempt };
+        let context = AttemptContext::new(context, attempt);
         let client = kernel.source_client();
         let mut groups = source_layer_groups(&style, TileKind::Vector)
             .into_iter()
@@ -146,23 +146,6 @@ fn source_processor<T: VectorTransferables, C: Context>(
         processor
     } else {
         processor.without_completion()
-    }
-}
-
-#[derive(Clone)]
-struct AttemptContext<C> {
-    context: C,
-    attempt: Option<u64>,
-}
-
-impl<C: Context> Context for AttemptContext<C> {
-    fn send_back<T: IntoMessage>(&self, message: T) -> Result<(), SendError> {
-        let message = message.into();
-        let message = match self.attempt {
-            Some(attempt) => message.with_attempt(attempt),
-            None => message,
-        };
-        self.context.send_back(message)
     }
 }
 

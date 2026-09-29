@@ -49,9 +49,13 @@ impl<E: Environment, T: DemTransferables> System for PopulateWorldSystem<E, T> {
                 tile_retry::completed(world, *message.into_transferable::<TileRequestOutcome>()?);
                 return Ok(());
             }
+            let attempt = message.attempt();
             let (coords, state) = if message.has_tag(T::LayerDem::message_tag()) {
                 let message = message.into_transferable::<T::LayerDem>()?;
                 let coords = message.coords();
+                if !tile_retry::accepts(world, coords, RequestKind::Dem, attempt) {
+                    return Ok(());
+                }
                 let state =
                     match unpack.map(|unpack| DemTile::from_image(&message.into_image(), unpack)) {
                         Some(Ok(tile)) => DemTileComponent::Loaded(LoadedDem::new(tile)),
@@ -64,7 +68,11 @@ impl<E: Environment, T: DemTransferables> System for PopulateWorldSystem<E, T> {
                 (coords, state)
             } else {
                 let message = message.into_transferable::<T::LayerDemMissing>()?;
-                (message.coords(), DemTileComponent::Missing)
+                let coords = message.coords();
+                if !tile_retry::accepts(world, coords, RequestKind::Dem, attempt) {
+                    return Ok(());
+                }
+                (coords, DemTileComponent::Missing)
             };
             let loaded = matches!(state, DemTileComponent::Loaded(_));
             if let Some(component) = world.tiles.query_mut::<&mut DemTileComponent>(coords) {

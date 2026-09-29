@@ -39,6 +39,7 @@ serde_json.workspace = true
 window-lifecycle-test = []
 
 [dev-dependencies]
+image.workspace = true
 geozero.workspace = true
 wgpu.workspace = true
 

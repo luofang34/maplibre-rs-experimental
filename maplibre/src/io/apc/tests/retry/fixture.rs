@@ -38,7 +38,7 @@ impl Context for Replies {
     }
 }
 
-type Procedure = AsyncProcedure<ReqwestOffscreenKernelEnvironment, Replies>;
+pub(super) type Procedure = AsyncProcedure<ReqwestOffscreenKernelEnvironment, Replies>;
 #[derive(Default)]
 pub(super) struct Calls {
     pending: RefCell<Vec<(Input, Procedure)>>,
@@ -63,7 +63,12 @@ impl AsyncProcedureCall<ReqwestOffscreenKernelEnvironment> for Calls {
 }
 impl Calls {
     pub async fn complete(&self) {
-        let work = std::mem::take(&mut *self.pending.borrow_mut());
+        self.run_requests(self.take_requests()).await;
+    }
+    pub fn take_requests(&self) -> Vec<(Input, Procedure)> {
+        std::mem::take(&mut *self.pending.borrow_mut())
+    }
+    pub async fn run_requests(&self, work: Vec<(Input, Procedure)>) {
         for (input, procedure) in work {
             procedure(
                 input,
