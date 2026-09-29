@@ -10411,7 +10411,7 @@
         "text-color": "#243740",
         "text-halo-blur": 0.2,
         "text-halo-color": "#eef0e7",
-        "text-halo-width": 1.2
+        "text-halo-width": 1.0
       },
       "minzoom": 14
     },

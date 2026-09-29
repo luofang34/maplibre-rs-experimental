@@ -172,7 +172,9 @@ fn labels_grow_continuously_and_keep_halos_subordinate_to_type() {
             let halo = paint.number("text-halo-width", &FeatureProperties::new(), zoom, 0.0);
             assert!(
                 halo > 0.0 && halo < size(zoom) / 10.0,
-                "heavy halo hides letter shape"
+                "{} at zoom {zoom}: halo {halo} must stay below 10% of text size {}",
+                layer.id,
+                size(zoom)
             );
         }
     }
