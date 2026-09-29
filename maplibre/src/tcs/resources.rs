@@ -1,14 +1,20 @@
+//! One owned map-wide value per concrete Rust type, with checked tuple borrowing.
+
 use std::{any::TypeId, cell::UnsafeCell, collections::HashMap};
 
 use downcast_rs::{impl_downcast, Downcast};
 
 use crate::tcs::{EphemeralQueryState, GlobalQueryState, QueryState};
 
+/// A map-wide value that can be recovered by its concrete type.
+/// Every `'static` type implements this trait; resources need not be `Send` or `Sync`.
 pub trait Resource: Downcast + 'static {}
 impl_downcast!(Resource);
 
 impl<T> Resource for T where T: 'static {}
 
+/// Owns resources until replacement or store destruction.
+/// Returned references borrow the store, preventing insertion while those references are used.
 #[derive(Default)]
 pub struct Resources {
     resources: Vec<UnsafeCell<Box<dyn Resource>>>,
@@ -16,10 +22,12 @@ pub struct Resources {
 }
 
 impl Resources {
+    /// Installs a default value, replacing and dropping any existing value of the same type.
     pub fn init<R: Resource + Default>(&mut self) {
         self.insert(R::default());
     }
 
+    /// Borrows the existing value, installing its default only when the type is absent.
     pub fn get_or_init_mut<R: Resource + Default>(&mut self) -> &mut R {
         if self.exists::<R>() {
             self.get_mut::<R>()
@@ -46,10 +54,12 @@ impl Resources {
         }
     }
 
+    /// Whether a value of exactly this concrete type is stored.
     pub fn exists<R: Resource>(&self) -> bool {
         self.index.contains_key(&TypeId::of::<R>())
     }
 
+    /// Borrows a value by concrete type, or returns `None` when absent.
     pub fn get<R: Resource>(&self) -> Option<&R> {
         let index = *self.index.get(&TypeId::of::<R>())?;
         // Safe callers share the store; mutable tuple queries check type access before
@@ -57,11 +67,14 @@ impl Resources {
         unsafe { (&*self.resources.get(index)?.get()).downcast_ref() }
     }
 
+    /// Exclusively borrows a value by concrete type, or returns `None` when absent.
     pub fn get_mut<R: Resource>(&mut self) -> Option<&mut R> {
         let index = *self.index.get(&TypeId::of::<R>())?;
         self.resources.get_mut(index)?.get_mut().downcast_mut()
     }
 
+    /// Borrows `&R` or tuples of one through six shared resource references.
+    /// Built-in queries return `None` when any requested type is absent.
     pub fn query<Q: ResourceQuery>(&self) -> Option<Q::Item<'_>> {
         let mut global_state = GlobalQueryState::default();
         let state = <Q::State<'_> as QueryState>::create(&mut global_state);
@@ -77,13 +90,15 @@ impl Resources {
     }
 }
 
-// ResourceQuery
-
+/// Shared resource lookup; built-in queries are references and tuples of up to six members.
 pub trait ResourceQuery {
+    /// Value returned with a lifetime bounded by the resource store.
     type Item<'r>;
 
+    /// Borrow ledger handle passed to each member of a tuple query.
     type State<'s>: QueryState<'s>;
 
+    /// Looks up resources using the supplied common query state.
     fn query<'r, 's>(resources: &'r Resources, state: Self::State<'s>) -> Option<Self::Item<'r>>;
 }
 
@@ -100,13 +115,16 @@ impl<R: Resource> ResourceQuery for &R {
     }
 }
 
-// ResourceQueryMut
-
+/// Resource lookup with exclusive access to the store while constructing the result.
+/// Built-in tuples may mix shared and mutable references to disjoint resource types.
 pub trait ResourceQueryMut {
+    /// Value returned with a lifetime bounded by the exclusive store borrow.
     type MutItem<'r>;
 
+    /// Borrow ledger handle shared by tuple members.
     type State<'s>: QueryState<'s>;
 
+    /// Looks up resources; built-in queries return `None` on absence or conflicting access.
     fn query_mut<'r, 's>(
         resources: &'r mut Resources,
         state: Self::State<'s>,
@@ -136,8 +154,6 @@ impl<R: Resource> ResourceQueryMut for &mut R {
         resources.get_mut::<R>()
     }
 }
-
-// ResourceQueryUnsafe
 
 /// Sealed resource references used by mutable tuple queries.
 ///
@@ -187,8 +203,6 @@ impl<R: Resource> ResourceQueryUnsafe for &mut R {
         unsafe { (&mut *resources.resources.get(index)?.get()).downcast_mut() }
     }
 }
-
-// Lift to tuples
 
 macro_rules! impl_resource_query {
     ($($param: ident),*) => {

@@ -13,6 +13,7 @@ pub struct FrameTimings {
 }
 
 impl FrameTimings {
+    /// Accumulates elapsed time under a system or stage name for the current report.
     pub fn record(&mut self, name: Cow<'static, str>, spent: Duration) {
         *self.spent.entry(name).or_default() += spent;
     }
@@ -37,6 +38,7 @@ impl FrameTimings {
         entries
     }
 
+    /// Counts one completed frame for per-frame averages; the counter wraps on overflow.
     pub fn end_frame(&mut self) {
         self.frames = self.frames.wrapping_add(1);
     }

@@ -10,8 +10,10 @@ use crate::{
     io::geometry_index::GeometryIndex,
 };
 
+/// Coordinates identifying one tile record in a [`Tiles`] store.
 #[derive(Copy, Clone, Debug)]
 pub struct Tile {
+    /// Canonical coordinates used to build the store's quadkey.
     pub coords: WorldTileCoords,
 }
 
@@ -19,14 +21,22 @@ pub struct Tile {
 pub trait TileComponent: Downcast + 'static {}
 impl_downcast!(TileComponent);
 
+/// Owns tile records, typed components and their feature-query index.
+/// Component references borrow this store and exclude mutation of its tile membership.
 #[derive(Default)]
 pub struct Tiles {
+    /// Tile records keyed by canonical quadkey.
     pub tiles: BTreeMap<Quadkey, Tile>,
+    /// Component slots under each tile's key. Use [`TileSpawnResult::insert`] to preserve
+    /// one component per type and release replaced values.
     pub components: BTreeMap<Quadkey, Vec<UnsafeCell<Box<dyn TileComponent>>>>,
+    /// Geometry available to rendered-feature queries; cleared with the owning tiles.
     pub geometry_index: GeometryIndex,
 }
 
 impl Tiles {
+    /// Borrows `&T` or a pair of shared component references from one tile.
+    /// Built-in queries return `None` for invalid coordinates or missing components.
     pub fn query<Q: ComponentQuery>(&self, coords: WorldTileCoords) -> Option<Q::Item<'_>> {
         let mut global_state = GlobalQueryState::default();
         let state = <Q::State<'_> as QueryState>::create(&mut global_state);
@@ -44,6 +54,7 @@ impl Tiles {
         Q::query_mut(self, Tile { coords }, state)
     }
 
+    /// Whether a record exists at these coordinates; invalid coordinates return `false`.
     pub fn exists(&self, coords: WorldTileCoords) -> bool {
         if let Some(key) = coords.build_quad_key() {
             self.tiles.contains_key(&key)
@@ -52,6 +63,8 @@ impl Tiles {
         }
     }
 
+    /// Opens a tile for component insertion, preserving its components if it already exists.
+    /// Coordinates outside the canonical tile grid return `None` without changing the store.
     pub fn spawn_mut(&mut self, coords: WorldTileCoords) -> Option<TileSpawnResult<'_>> {
         if let Some(key) = coords.build_quad_key() {
             if let Some(tile) = self.tiles.get(&key) {
@@ -151,13 +164,16 @@ impl<T: TileComponent> ComponentQuery for &T {
     }
 }
 
-// ComponentQueryMut
-
+/// Component lookup with exclusive access to the tile store while constructing the result.
+/// Built-in pairs may mix shared and mutable references to disjoint component types.
 pub trait ComponentQueryMut {
+    /// Value returned with a lifetime bounded by the exclusive tile-store borrow.
     type MutItem<'t>;
 
+    /// Access ledger handle shared by pair members.
     type State<'s>: QueryState<'s>;
 
+    /// Looks up components; built-in queries return `None` on absence or conflicting access.
     fn query_mut<'t, 's>(
         tiles: &'t mut Tiles,
         tile: Tile,
@@ -195,15 +211,13 @@ impl<T: TileComponent> ComponentQueryMut for &mut T {
     }
 }
 
-// ComponentQueryUnsafe
-
 /// Sealed component references used by mutable tuple queries.
 ///
 /// Implementations share the tuple's borrow state and cannot inspect slots already borrowed
 /// mutably by another member of the tuple.
 ///
 /// ```compile_fail
-/// use maplibre::tcs::{EphemeralQueryState, tiles::{Tiles, Tile, ComponentQueryMut, ComponentQueryUnsafe}};
+/// use maplibre::tcs::tiles::{EphemeralQueryState, Tiles, Tile, ComponentQueryMut, ComponentQueryUnsafe};
 /// struct Custom;
 /// impl ComponentQueryMut for Custom {
 ///     type MutItem<'t> = &'t u32;
@@ -257,8 +271,6 @@ impl<T: TileComponent> ComponentQueryUnsafe for &mut T {
         None
     }
 }
-
-// Lift to tuples
 
 impl<CQ1: ComponentQuery, CQ2: ComponentQuery> ComponentQuery for (CQ1, CQ2) {
     type Item<'t> = (CQ1::Item<'t>, CQ2::Item<'t>);

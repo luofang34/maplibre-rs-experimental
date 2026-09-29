@@ -5,16 +5,15 @@ use crate::{
     tcs::system::{System, SystemResult},
 };
 
-/// Conversion trait to turn something into a [`System`].
-///
-/// Use this to get a system from a function. Also note that every system implements this trait as
-/// well.
+/// Converts a stateful map-update function into a [`System`].
 pub trait IntoSystem: Sized {
+    /// Scheduled system that owns this update function.
     type System: System;
     /// Turns this value into its corresponding [`System`].
     fn into_system(self) -> Self::System;
 }
 
+/// A stateful update function whose Rust type name identifies it in frame timings.
 pub struct FunctionSystem<F> {
     func: F,
 }
