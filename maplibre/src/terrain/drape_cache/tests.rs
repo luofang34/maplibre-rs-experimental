@@ -116,8 +116,8 @@ fn tiles_leaving_the_view_are_parked_and_hand_their_textures_on_once_parking_is_
 struct Loaded(bool);
 
 impl SourceContent for Loaded {
-    fn vector_layer_loaded(&self, _: WorldTileCoords, _: &str) -> bool {
-        self.0
+    fn vector_layer_revision(&self, _: WorldTileCoords, _: &str) -> Option<u64> {
+        self.0.then_some(1)
     }
 
     fn raster_revision(&self, _: WorldTileCoords, _: &str) -> Option<u64> {

@@ -201,6 +201,7 @@ async fn retained_content(kind: Kind) {
         .spawn_mut(Default::default())
         .expect("tile");
     match kind {
+        Kind::Vector => unreachable!("raster/DEM fixture"),
         Kind::Raster => {
             tile.insert(RasterLayersDataComponent {
                 layers: vec![RasterLayerData::Available(AvailableRasterLayerData {

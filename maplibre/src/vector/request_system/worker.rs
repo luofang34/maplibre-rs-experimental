@@ -6,8 +6,9 @@ use crate::{
     coords::WorldTileCoords,
     environment::OffscreenKernel,
     io::{
-        apc::{AsyncProcedureFuture, Context, Input, ProcedureError, SendError},
+        apc::{AsyncProcedureFuture, Context, Input, IntoMessage, ProcedureError, SendError},
         source_client::{HttpClient, SourceClient},
+        tile_retry::{RequestDisposition, RequestKind, TileRequestOutcome},
         tile_sources::{source_layer_groups, SourceLayerGroup, TileKind},
     },
     sdf::assets::{load_symbol_assets, SymbolAtlas},
@@ -25,31 +26,34 @@ pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context +
     kernel: K,
 ) -> AsyncProcedureFuture {
     Box::pin(async move {
-        let (coords, style, _) = input.into_tile_request();
+        let (coords, style, attempt) = input.into_tile_request();
+        let context = AttemptContext { context, attempt };
         let client = kernel.source_client();
         let mut groups = source_layer_groups(&style, TileKind::Vector)
             .into_iter()
             .peekable();
         let mut failed = false;
+        let mut retry = false;
         while let Some(group) = groups.next() {
             let data = match client.fetch(&coords, &group.source).await {
                 Ok(data) => data,
                 Err(error) => {
                     tracing::warn!(%coords, source = ?group.source_name, error = %error.describe(), "vector tile unavailable");
                     failed = true;
-                    source_failed::<T, C>(coords, &group.layers, &context)
+                    retry |= error.is_retryable();
+                    source_failed::<T, _>(coords, &group.layers, &context)
                         .map_err(ProcedureError::Send)?;
                     continue;
                 }
             };
-            match process_source::<T, C, K::HttpClient>(
+            match process_source::<T, _, K::HttpClient>(
                 &data,
                 coords,
                 &style,
                 &client,
                 &group,
                 context.clone(),
-                groups.peek().is_none(),
+                groups.peek().is_none() && !failed,
             )
             .await
             {
@@ -60,17 +64,12 @@ pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context +
                 Err(error @ ProcessVectorError::Decoding { .. }) => {
                     tracing::warn!(%coords, source = ?group.source_name, %error, "invalid vector tile");
                     failed = true;
-                    source_failed::<T, C>(coords, &group.layers, &context)
+                    source_failed::<T, _>(coords, &group.layers, &context)
                         .map_err(ProcedureError::Send)?;
                 }
             }
         }
-        let completion = if failed {
-            T::TileTessellated::build_failed(coords, false)
-        } else {
-            T::TileTessellated::build_from(coords)
-        };
-        context.send_back(completion).map_err(ProcedureError::Send)
+        finish::<T, _>(&context, coords, attempt, failed, retry)
     })
 }
 
@@ -148,4 +147,50 @@ fn source_processor<T: VectorTransferables, C: Context>(
     } else {
         processor.without_completion()
     }
+}
+
+#[derive(Clone)]
+struct AttemptContext<C> {
+    context: C,
+    attempt: Option<u64>,
+}
+
+impl<C: Context> Context for AttemptContext<C> {
+    fn send_back<T: IntoMessage>(&self, message: T) -> Result<(), SendError> {
+        let message = message.into();
+        let message = match self.attempt {
+            Some(attempt) => message.with_attempt(attempt),
+            None => message,
+        };
+        self.context.send_back(message)
+    }
+}
+
+fn finish<T: VectorTransferables, C: Context>(
+    context: &C,
+    coords: WorldTileCoords,
+    attempt: Option<u64>,
+    failed: bool,
+    retry: bool,
+) -> Result<(), ProcedureError> {
+    let completion = if failed {
+        T::TileTessellated::build_failed(coords, false)
+    } else {
+        T::TileTessellated::build_from(coords)
+    };
+    context
+        .send_back(completion)
+        .map_err(ProcedureError::Send)?;
+    context
+        .send_back(TileRequestOutcome {
+            coords,
+            kind: RequestKind::Vector,
+            attempt,
+            disposition: if retry {
+                RequestDisposition::Retry
+            } else {
+                RequestDisposition::Complete
+            },
+        })
+        .map_err(ProcedureError::Send)
 }

@@ -175,11 +175,13 @@ struct LoadedContent<'a> {
 }
 
 impl SourceContent for LoadedContent<'_> {
-    fn vector_layer_loaded(&self, coords: WorldTileCoords, layer_id: &str) -> bool {
-        self.pool.is_some_and(|pool| {
-            pool.get_loaded_style_layers_at(coords)
-                .is_some_and(|layers| layers.contains(layer_id))
-        })
+    fn vector_layer_revision(&self, coords: WorldTileCoords, layer_id: &str) -> Option<u64> {
+        self.pool?
+            .index()
+            .get_layers(coords)?
+            .iter()
+            .find(|entry| entry.style_layer.id == layer_id)
+            .map(|entry| entry.allocation_id())
     }
 
     fn raster_revision(&self, coords: WorldTileCoords, layer: &str) -> Option<u64> {

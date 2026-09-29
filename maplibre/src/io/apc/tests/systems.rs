@@ -41,6 +41,12 @@ pub(super) async fn setup() -> (Rc<Kernel<HeadlessEnvironment>>, MapContext) {
 #[tokio::test]
 async fn symbols_leave_geometry_index_results_for_the_vector_consumer() {
     let (kernel, mut context) = setup().await;
+    context
+        .world
+        .tiles
+        .spawn_mut(WorldTileCoords::default())
+        .expect("live tile")
+        .insert(VectorLayerBucketComponent::default());
     let message = DefaultLayerIndexed::build_from(
         WorldTileCoords::default(),
         TileIndex::Linear { list: Vec::new() },

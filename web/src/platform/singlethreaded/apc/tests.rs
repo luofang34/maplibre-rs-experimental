@@ -67,7 +67,7 @@ fn dem_reply_outside_a_worker_returns_a_transport_error() {
 #[wasm_bindgen_test]
 fn final_outcomes_round_trip_with_attempt_and_retry_state() {
     use maplibre::io::tile_retry::RequestDisposition;
-    for kind in [RequestKind::Raster, RequestKind::Dem] {
+    for kind in [RequestKind::Raster, RequestKind::Dem, RequestKind::Vector] {
         for disposition in [RequestDisposition::Complete, RequestDisposition::Retry] {
             let expected = TileRequestOutcome {
                 coords: Default::default(),
@@ -75,11 +75,20 @@ fn final_outcomes_round_trip_with_attempt_and_retry_state() {
                 attempt: Some(73),
                 disposition,
             };
-            let (tag, buffer) =
-                prepare_message(IntoMessage::into(expected)).expect("outcome encoded");
+            let message = IntoMessage::into(expected);
+            let message = if kind == RequestKind::Vector {
+                message.with_attempt(73)
+            } else {
+                message
+            };
+            let (tag, buffer) = prepare_message(message).expect("outcome encoded");
             let wire_tag = WebMessageTag::from_u32(tag as u32).expect("wire tag");
             let message = decode_message(wire_tag, buffer).expect("outcome decoded");
             assert!(message.has_tag(kind.message_tag()));
+            assert_eq!(
+                message.attempt(),
+                (kind == RequestKind::Vector).then_some(73)
+            );
             let actual = message
                 .into_transferable::<TileRequestOutcome>()
                 .expect("outcome payload");
@@ -108,4 +117,55 @@ fn malformed_outcome_payloads_retain_typed_errors() {
         panic!("decode error");
     };
     assert!(cause.is::<serde_json::Error>());
+}
+
+#[wasm_bindgen_test]
+fn tracked_vector_payloads_round_trip_without_losing_tags_or_attempt_bits() {
+    for tag in [
+        WebMessageTag::TileTessellated,
+        WebMessageTag::LayerMissing,
+        WebMessageTag::LayerTessellated,
+        WebMessageTag::SymbolLayerTessellated,
+        WebMessageTag::LayerIndexed,
+    ] {
+        let expected = [1_u8, 3, 5, 9];
+        let data = FlatBufferTransferable::from_array_buffer(
+            tag,
+            Uint8Array::from(expected.as_slice()).buffer(),
+        );
+        let (wire, buffer) =
+            prepare_message(IntoMessage::into(data).with_attempt(u64::MAX - 7)).expect("encoded");
+        assert_eq!(wire, WebMessageTag::TrackedPayload);
+        let message = decode_message(wire, buffer).expect("decoded");
+        assert!(message.has_tag(tag.to_static()));
+        assert_eq!(message.attempt(), Some(u64::MAX - 7));
+        assert_eq!(
+            message
+                .into_transferable::<FlatBufferTransferable>()
+                .expect("payload")
+                .data(),
+            expected
+        );
+    }
+}
+
+#[wasm_bindgen_test]
+fn malformed_tracking_headers_are_typed_errors() {
+    let error = decode_message(WebMessageTag::TrackedPayload, ArrayBuffer::new(11))
+        .expect_err("short header");
+    let CallError::Deserialize(cause) = error else {
+        panic!("decode error");
+    };
+    assert!(cause.is::<TrackedPayloadError>());
+    let mut bytes = [0_u8; 12];
+    bytes[..4].copy_from_slice(&(WebMessageTag::TrackedPayload as u32).to_le_bytes());
+    let error = decode_message(
+        WebMessageTag::TrackedPayload,
+        Uint8Array::from(bytes.as_slice()).buffer(),
+    )
+    .expect_err("nested envelope");
+    let CallError::Deserialize(cause) = error else {
+        panic!("decode error");
+    };
+    assert!(cause.is::<TrackedPayloadError>());
 }

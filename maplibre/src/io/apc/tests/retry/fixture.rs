@@ -100,9 +100,13 @@ impl Environment for TestEnvironment {
 pub(super) enum Kind {
     Raster,
     Dem,
+    Vector,
 }
 impl Kind {
     fn style(self, url: &str, multiple: bool) -> Style {
+        if matches!(self, Self::Vector) {
+            return vector_style(url, multiple);
+        }
         let source_type = if matches!(self, Self::Raster) {
             "raster"
         } else {
@@ -130,6 +134,10 @@ impl Kind {
     }
     fn request(self, kernel: &Rc<Kernel<TestEnvironment>>) -> Box<dyn System> {
         match self {
+            Self::Vector => Box::new(crate::vector::request_system::RequestSystem::<
+                TestEnvironment,
+                crate::vector::DefaultVectorTransferables,
+            >::new(kernel)),
             Self::Raster => Box::new(crate::raster::request_system::RequestSystem::<
                 TestEnvironment,
                 crate::raster::DefaultRasterTransferables,
@@ -142,6 +150,10 @@ impl Kind {
     }
     fn populate(self, kernel: &Rc<Kernel<TestEnvironment>>) -> Box<dyn System> {
         match self {
+            Self::Vector => Box::new(crate::vector::populate_world_system::PopulateWorldSystem::<
+                TestEnvironment,
+                crate::vector::DefaultVectorTransferables,
+            >::new(kernel)),
             Self::Raster => Box::new(crate::raster::populate_world_system::PopulateWorldSystem::<
                 TestEnvironment,
                 crate::raster::DefaultRasterTransferables,
@@ -219,6 +231,9 @@ impl Fixture {
     }
     pub fn loaded(&self) -> bool {
         match self.kind {
+            Kind::Vector => self.context.world.tiles
+                .query::<&crate::vector::VectorLayerBucketComponent>(Default::default())
+                .is_some_and(|component| component.done && !component.failed && component.layers.iter().any(|layer| matches!(layer, crate::vector::VectorLayerBucket::AvailableLayer(bucket) if !bucket.buffer.buffer.indices.is_empty()))),
             Kind::Raster => self
                 .context
                 .world
@@ -234,4 +249,15 @@ impl Fixture {
             ),
         }
     }
+}
+
+fn vector_style(url: &str, multiple: bool) -> Style {
+    let mut json = serde_json::json!({"version":8,
+        "sources":{"source":{"type":"vector","tiles":[format!("{url}/unstable/{{z}}/{{x}}/{{y}}")],"maxzoom":0}},
+        "layers":[{"id":"land","source":"source","source-layer":"land","type":"fill","paint":{"fill-color":"#00ff00"}}]});
+    if multiple {
+        json["sources"]["healthy"] = serde_json::json!({"type":"vector","tiles":[format!("{url}/healthy/{{z}}/{{x}}/{{y}}")],"maxzoom":0});
+        json["layers"].as_array_mut().expect("layers").insert(0, serde_json::json!({"id":"healthy","source":"healthy","source-layer":"land","type":"fill","paint":{"fill-color":"#ff0000"}}));
+    }
+    serde_json::from_value(json).expect("vector style")
 }

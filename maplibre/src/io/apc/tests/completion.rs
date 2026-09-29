@@ -45,7 +45,22 @@ async fn corrupt_vector_source_finishes_after_reporting_missing_layers() {
         .await
         .expect("failure completion delivered");
     let mut messages = std::mem::take(&mut *replies.messages.lock().expect("replies"));
-    assert_eq!(messages.len(), 3);
+    assert_eq!(messages.len(), 4);
+    let outcome = messages
+        .pop()
+        .expect("final request disposition")
+        .into_transferable::<crate::io::tile_retry::TileRequestOutcome>()
+        .expect("request outcome");
+    assert_eq!(outcome.kind, crate::io::tile_retry::RequestKind::Vector);
+    assert_eq!(outcome.coords, WorldTileCoords::default());
+    assert_eq!(
+        outcome.attempt, None,
+        "direct legacy request has no tracked token"
+    );
+    assert_eq!(
+        outcome.disposition,
+        crate::io::tile_retry::RequestDisposition::Complete
+    );
     assert!(messages[0].has_tag(DefaultLayerMissing::message_tag()));
     assert!(messages[1].has_tag(DefaultTileTessellated::message_tag()));
     assert!(messages[2].has_tag(DefaultTileTessellated::message_tag()));

@@ -142,6 +142,8 @@ pub fn process_vector_tile<T: VectorTransferables, C: Context>(
     )
 }
 
+mod processing;
+
 pub(crate) fn process_vector_tile_with_assets<T: VectorTransferables, C: Context>(
     data: &[u8],
     tile_request: VectorTileRequest,
@@ -153,195 +155,35 @@ pub(crate) fn process_vector_tile_with_assets<T: VectorTransferables, C: Context
             coords: tile_request.coords,
             source: Box::new(source),
         })?;
-
-    // Report available layers
-    let coords = &tile_request.coords;
-
-    for style_layer in &tile_request.layers {
-        let id = &style_layer.id;
-        if let (Some(paint), Some(source_layer)) = (&style_layer.paint, &style_layer.source_layer) {
-            if let Some(layer) = tile
-                .layers
-                .iter_mut()
-                .find(|layer| &layer.name == source_layer)
-            {
-                // Clone the layer so filtering doesn't affect other style layers
-                // that reference the same source layer.
-                let mut filtered_layer = layer.clone();
-
-                if let Some(filter) = &style_layer.filter {
-                    match Filter::parse(filter) {
-                        Ok(filter) => apply_filter_to_layer(
-                            &mut filtered_layer,
-                            &filter,
-                            f64::from(u8::from(coords.z)),
-                        ),
-                        Err(error) => {
-                            // Rendering every feature or none would both be wrong; nothing
-                            // plus a loud error is the one a style author can act on.
-                            tracing::error!(
-                                layer = %id,
-                                %error,
-                                "unsupported filter; the layer renders nothing"
-                            );
-                            context.layer_missing(coords, source_layer)?;
-                            continue;
-                        }
-                    }
-                }
-
-                let original_layer = filtered_layer.clone();
-                let layer = &mut filtered_layer;
-                let coordinate_scale = extent_scale(layer);
-
-                match paint {
-                    LayerPaint::Line(_) | LayerPaint::Fill(_) | LayerPaint::Circle(_) => {
-                        let granularity = match paint {
-                            LayerPaint::Fill(_) => {
-                                granularity_for_zoom(128, 2, u8::from(tile_request.coords.z))
-                            }
-                            LayerPaint::Line(_) => {
-                                granularity_for_zoom(512, 0, u8::from(tile_request.coords.z))
-                            }
-                            _ => 1,
-                        };
-                        let use_globe_geometry = tile_request
-                            .projection
-                            .uses_globe_rendering(f64::from(u8::from(tile_request.coords.z)));
-                        let mut tessellator = match paint {
-                            LayerPaint::Circle(circle) => {
-                                ZeroTessellator::<IndexDataType>::default().with_circles(
-                                    CircleOptions::for_paint(
-                                        circle,
-                                        f64::from(u8::from(tile_request.coords.z)),
-                                    ),
-                                )
-                            }
-                            _ if use_globe_geometry => {
-                                let zoom = usize::from(u8::from(tile_request.coords.z));
-                                let last_tile = i64::from(crate::coords::ZOOM_BOUNDS[zoom]) - 1;
-                                ZeroTessellator::<IndexDataType>::default().with_globe_subdivision(
-                                    granularity,
-                                    u8::from(tile_request.coords.z) == 0,
-                                    tile_request.coords.y == 0,
-                                    i64::from(tile_request.coords.y) == last_tile,
-                                )
-                            }
-                            _ => ZeroTessellator::<IndexDataType>::default(),
-                        }
-                        .with_feature_opacity(
-                            paint.opacity(),
-                            f64::from(u8::from(tile_request.coords.z)),
-                        );
-                        tessellator.coordinate_scale = coordinate_scale;
-                        match paint {
-                            LayerPaint::Fill(p) => {
-                                tessellator.style_property = p.fill_color.clone()
-                            }
-                            LayerPaint::Circle(p) => {
-                                tessellator.style_property = p.circle_color.clone()
-                            }
-                            LayerPaint::Line(p) => {
-                                tessellator.style_property = p.line_color.clone();
-                                tessellator.is_line_layer = true;
-                            }
-                            LayerPaint::Background(p) => {
-                                tessellator.style_property = p.background_color.clone()
-                            }
-                            _ => {}
-                        }
-
-                        if let Err(e) = layer.process(&mut tessellator) {
-                            context.layer_missing(coords, source_layer)?;
-
-                            tracing::error!("tessellation for layer source {source_layer} at {coords} failed {e:?}");
-                        } else {
-                            context.layer_tessellation_finished(
-                                coords,
-                                tessellator.buffer.into(),
-                                tessellator.feature_indices,
-                                tessellator.feature_colors,
-                                original_layer,
-                                id.clone(),
-                            )?;
-                        }
-                    }
-                    LayerPaint::Symbol(symbol_paint) => {
-                        let zoom = f64::from(u8::from(tile_request.coords.z));
-                        let mut tessellator =
-                            TextTessellator::with_assets(symbol_paint.clone(), zoom, atlas.clone());
-                        tessellator.coordinate_scale = coordinate_scale;
-                        tessellator.source_ids =
-                            layer.features.iter().map(|feature| feature.id).collect();
-
-                        if let Err(e) = layer.process(&mut tessellator) {
-                            context.layer_missing(coords, source_layer)?;
-
-                            tracing::error!("tessellation for layer source {source_layer} at {coords} failed {e:?}");
-                        } else {
-                            tessellator.finish();
-                            context.symbol_layer_tessellation_finished(
-                                crate::vector::transferables::DefaultSymbolLayerTessellated {
-                                    coords: *coords,
-                                    buffer: tessellator.quad_buffer.into(),
-                                    features: tessellator.features,
-                                    atlas: Some(atlas.clone()),
-                                    layer_data: original_layer,
-                                    style_layer_id: id.clone(),
-                                },
-                            )?;
-                        }
-                    }
-                    _ => {
-                        log::warn!("unhandled style layer type in {id}");
-                    }
-                }
-            } else {
-                // A tile without the layer is routine: producers omit empty layers.
-                tracing::debug!(%coords, layer = %source_layer, "source layer absent from the tile");
-            }
-        } else {
-            log::error!("vector style layer {id} misses a required attribute");
-        }
+    for style in &tile_request.layers {
+        let (Some(_), Some(name)) = (&style.paint, &style.source_layer) else {
+            tracing::error!(layer = %style.id, "vector style layer misses a required attribute");
+            continue;
+        };
+        // Omitted source layers must clear successful replacements just like empty geometry.
+        let layer = tile
+            .layers
+            .iter()
+            .find(|layer| &layer.name == name)
+            .cloned()
+            .unwrap_or_else(|| tile::Layer {
+                version: 2,
+                name: name.clone(),
+                extent: Some(4096),
+                ..Default::default()
+            });
+        processing::process_layer(layer, style, &tile_request, context, atlas.clone())?;
     }
-
-    // Report missing layers
-    let coords = &tile_request.coords;
-    let available_layers: HashSet<_> = tile
-        .layers
-        .iter()
-        .map(|layer| layer.name.clone())
-        .collect::<HashSet<_>>();
-
-    for layer in tile_request.layers {
-        if let Some(source_layer) = layer.source_layer {
-            if !available_layers.contains(&source_layer) {
-                context.layer_missing(coords, &source_layer)?;
-                tracing::info!(
-                    "requested source layer {source_layer} at {coords} not found in tile"
-                );
-            }
-        }
-    }
-
-    // Report index for layer
     let mut index = IndexProcessor::new();
-
     for layer in &mut tile.layers {
         index.set_coordinate_scale(extent_scale(layer));
-        // A layer that the index cannot decode still rendered above; losing its query index is
-        // better than losing the worker.
+        // Query decoding cannot make successfully rendered geometry unavailable.
         if let Err(error) = layer.process(&mut index) {
-            tracing::warn!(%coords, layer = %layer.name, ?error, "skipping query index for layer");
+            tracing::warn!(coords = %tile_request.coords, layer = %layer.name, ?error, "skipping query index for layer");
         }
     }
-
     context.layer_indexing_finished(&tile_request.coords, index.get_geometries())?;
-
-    // Report end
-    tracing::info!("tile tessellated at {coords} finished");
-    context.tile_finished(coords)?;
-
+    context.tile_finished(&tile_request.coords)?;
     Ok(())
 }
 

@@ -1,4 +1,4 @@
-//! Completion and bounded retry scheduling for raster and elevation requests.
+//! Completion and bounded retry scheduling for vector, raster and elevation requests.
 
 use std::time::Duration;
 
@@ -19,6 +19,8 @@ pub enum RequestKind {
     Raster,
     /// Elevation data used for terrain and shading.
     Dem,
+    /// Vector geometry and its associated symbol processing.
+    Vector,
 }
 
 impl MessageTag for RequestKind {
@@ -33,6 +35,7 @@ impl RequestKind {
         match self {
             Self::Raster => &Self::Raster,
             Self::Dem => &Self::Dem,
+            Self::Vector => &Self::Vector,
         }
     }
 
@@ -40,6 +43,7 @@ impl RequestKind {
         match self {
             Self::Raster => 0,
             Self::Dem => 1,
+            Self::Vector => 2,
         }
     }
 }
@@ -58,7 +62,7 @@ pub enum RequestDisposition {
 pub struct TileRequestOutcome {
     /// Tile coordinates shared by this request's source results.
     pub coords: WorldTileCoords,
-    /// Imagery or elevation request family.
+    /// Request family whose admission this outcome finishes.
     pub kind: RequestKind,
     /// Map-owned attempt identifier; direct untracked calls carry `None`.
     pub attempt: Option<u64>,
@@ -81,7 +85,7 @@ struct RetryState {
 }
 
 #[derive(Default)]
-pub(crate) struct TileRequestRetries([RetryState; 2]);
+pub(crate) struct TileRequestRetries([RetryState; 3]);
 impl TileComponent for TileRequestRetries {}
 
 impl TileRequestRetries {
@@ -187,4 +191,18 @@ pub(crate) fn completed(world: &mut World, outcome: TileRequestOutcome) {
             state.deadline = Some(now.saturating_add(state.delay));
         }
     }
+}
+
+/// Payloads from a finished attempt remain valid until a new attempt replaces its identity.
+pub(crate) fn accepts(
+    world: &World,
+    coords: WorldTileCoords,
+    kind: RequestKind,
+    attempt: Option<u64>,
+) -> bool {
+    world
+        .tiles
+        .query::<&TileRequestRetries>(coords)
+        .and_then(|retries| retries.0[kind.index()].attempt)
+        == attempt
 }

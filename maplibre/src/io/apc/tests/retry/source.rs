@@ -15,6 +15,7 @@ pub(super) enum Response {
     Status(u16),
     Image,
     Corrupt,
+    Bytes(Vec<u8>),
     Disconnect,
 }
 
@@ -28,6 +29,7 @@ pub(super) struct Gate {
 pub(super) struct Source {
     pub url: String,
     response: Arc<Mutex<Response>>,
+    healthy: Arc<Mutex<Response>>,
     requests: Arc<Mutex<Vec<String>>>,
     task: JoinHandle<()>,
     gate: Arc<Gate>,
@@ -40,6 +42,8 @@ impl Source {
             .expect("local source");
         let url = format!("http://{}", listener.local_addr().expect("address"));
         let response = Arc::new(Mutex::new(Response::Status(503)));
+        let healthy = Arc::new(Mutex::new(Response::Image));
+        let healthy_reply = healthy.clone();
         let requests = Arc::new(Mutex::new(Vec::new()));
         let replies = response.clone();
         let observed = requests.clone();
@@ -58,7 +62,7 @@ impl Source {
                     worker_gate.release.notified().await;
                 }
                 let response = if request.contains("/healthy/") {
-                    Response::Image
+                    healthy_reply.lock().expect("healthy response").clone()
                 } else {
                     replies.lock().expect("response").clone()
                 };
@@ -69,6 +73,7 @@ impl Source {
                     Response::Status(status) => (status, Vec::new()),
                     Response::Image => (200, png()),
                     Response::Corrupt => (200, vec![255]),
+                    Response::Bytes(bytes) => (200, bytes),
                     Response::Disconnect => unreachable!(),
                 };
                 let headers = format!(
@@ -85,6 +90,7 @@ impl Source {
         Self {
             url,
             response,
+            healthy,
             requests,
             task,
             gate,
@@ -93,6 +99,9 @@ impl Source {
     pub fn block_unstable(&self) -> Arc<Gate> {
         self.gate.blocked.store(true, Ordering::SeqCst);
         self.gate.clone()
+    }
+    pub fn set_healthy(&self, response: Response) {
+        *self.healthy.lock().expect("healthy response") = response;
     }
     pub fn set(&self, response: Response) {
         *self.response.lock().expect("response") = response;

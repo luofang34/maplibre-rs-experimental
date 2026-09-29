@@ -48,6 +48,7 @@ pub enum WebMessageTag {
     LayerDem = 8,
     LayerDemMissing = 9,
     TileRequestOutcome = 10,
+    TrackedPayload = 11,
 }
 
 impl WebMessageTag {
@@ -63,6 +64,7 @@ impl WebMessageTag {
             WebMessageTag::LayerDem => &WebMessageTag::LayerDem,
             WebMessageTag::LayerDemMissing => &WebMessageTag::LayerDemMissing,
             WebMessageTag::TileRequestOutcome => &WebMessageTag::TileRequestOutcome,
+            WebMessageTag::TrackedPayload => &WebMessageTag::TrackedPayload,
         }
     }
 
@@ -84,6 +86,7 @@ impl WebMessageTag {
             x if x == WebMessageTag::TileRequestOutcome as u32 => {
                 Ok(WebMessageTag::TileRequestOutcome)
             }
+            x if x == WebMessageTag::TrackedPayload as u32 => Ok(WebMessageTag::TrackedPayload),
             _ => Err(MessageTagDeserializeError),
         }
     }
@@ -125,8 +128,27 @@ impl Context for PassingContext {
 }
 
 fn prepare_message(message: Message) -> Result<(WebMessageTag, ArrayBuffer), SendError> {
+    let attempt = message.attempt();
+    let (tag, buffer) = prepare_payload(message)?;
+    match attempt {
+        Some(attempt) => {
+            let mut bytes = Vec::with_capacity(12 + buffer.byte_length() as usize);
+            bytes.extend_from_slice(&(tag as u32).to_le_bytes());
+            bytes.extend_from_slice(&attempt.to_le_bytes());
+            bytes.extend_from_slice(&Uint8Array::new(&buffer).to_vec());
+            Ok((
+                WebMessageTag::TrackedPayload,
+                Uint8Array::from(bytes.as_slice()).buffer(),
+            ))
+        }
+        None => Ok((tag, buffer)),
+    }
+}
+
+fn prepare_payload(message: Message) -> Result<(WebMessageTag, ArrayBuffer), SendError> {
     if message.has_tag(RequestKind::Raster.message_tag())
         || message.has_tag(RequestKind::Dem.message_tag())
+        || message.has_tag(RequestKind::Vector.message_tag())
     {
         let outcome = message.into_transferable::<TileRequestOutcome>()?;
         let data = serde_json::to_vec(&*outcome).map_err(|source| SendError::Transmission {
@@ -155,6 +177,27 @@ pub(crate) fn decode_message(
     tag: WebMessageTag,
     buffer: ArrayBuffer,
 ) -> Result<Message, CallError> {
+    if tag == WebMessageTag::TrackedPayload {
+        let bytes = Uint8Array::new(&buffer).to_vec();
+        let header = bytes.first_chunk::<12>().ok_or_else(|| {
+            CallError::Deserialize(Box::new(TrackedPayloadError::Header { bytes: bytes.len() }))
+        })?;
+        let tag = WebMessageTag::from_u32(u32::from_le_bytes([
+            header[0], header[1], header[2], header[3],
+        ]))
+        .map_err(|error| CallError::Deserialize(Box::new(error)))?;
+        if tag == WebMessageTag::TrackedPayload {
+            return Err(CallError::Deserialize(Box::new(
+                TrackedPayloadError::Nested,
+            )));
+        }
+        let attempt = u64::from_le_bytes([
+            header[4], header[5], header[6], header[7], header[8], header[9], header[10],
+            header[11],
+        ]);
+        let payload = Uint8Array::from(&bytes[12..]).buffer();
+        return decode_message(tag, payload).map(|message| message.with_attempt(attempt));
+    }
     if tag == WebMessageTag::TileRequestOutcome {
         let data = Uint8Array::new(&buffer).to_vec();
         let outcome: TileRequestOutcome = serde_json::from_slice(&data)
@@ -165,6 +208,14 @@ pub(crate) fn decode_message(
         tag.to_static(),
         Box::new(FlatBufferTransferable::from_array_buffer(tag, buffer)),
     ))
+}
+
+#[derive(Debug, Error)]
+enum TrackedPayloadError {
+    #[error("tracked worker payload has {bytes} bytes; its header requires 12")]
+    Header { bytes: usize },
+    #[error("tracked worker payload contains a nested tracking envelope")]
+    Nested,
 }
 
 pub type ReceivedType = RefCell<Vec<Message>>;

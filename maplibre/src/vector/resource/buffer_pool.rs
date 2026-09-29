@@ -129,6 +129,13 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         }
     }
 
+    /// Removes one style layer without evicting other sources at the same coordinates.
+    pub fn remove_layer(&mut self, coords: WorldTileCoords, id: &str) {
+        if self.index.remove_layer(coords, id, None) {
+            self.revision = self.revision.wrapping_add(1);
+        }
+    }
+
     #[cfg(test)]
     fn available_space(&self, typ: BackingBufferType) -> wgpu::BufferAddress {
         let gap = self.index.find_largest_gap(

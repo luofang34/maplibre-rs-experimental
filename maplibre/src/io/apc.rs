@@ -52,12 +52,28 @@ pub struct MessageError {
 pub struct Message {
     tag: &'static dyn MessageTag,
     transferable: Box<dyn Any + Send>,
+    attempt: Option<u64>,
 }
 
 impl Message {
     /// Associates a routing tag with an owned payload; the caller must keep their types consistent.
     pub fn new(tag: &'static dyn MessageTag, transferable: Box<dyn Any + Send>) -> Self {
-        Self { tag, transferable }
+        Self {
+            tag,
+            transferable,
+            attempt: None,
+        }
+    }
+
+    /// Associates this result with the request that produced it, including partial payloads.
+    pub fn with_attempt(mut self, attempt: u64) -> Self {
+        self.attempt = Some(attempt);
+        self
+    }
+
+    /// Request identity retained independently of the concrete worker payload.
+    pub fn attempt(&self) -> Option<u64> {
+        self.attempt
     }
 
     /// Takes the payload as its concrete Rust type.
@@ -86,6 +102,12 @@ impl Message {
 pub trait IntoMessage {
     /// Consumes the result, selecting the tag expected by its consumer.
     fn into(self) -> Message;
+}
+
+impl IntoMessage for Message {
+    fn into(self) -> Message {
+        self
+    }
 }
 
 /// Inputs for an [`AsyncProcedure`]

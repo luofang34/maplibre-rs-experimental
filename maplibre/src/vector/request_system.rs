@@ -8,6 +8,7 @@ use crate::{
     io::{
         apc::{AsyncProcedureCall, Input},
         tile_backpressure::vector_request_budget,
+        tile_retry::{self, RequestKind},
         tile_sources::{clamp_to_max_zoom, source_max_zoom, source_min_zoom, TileKind},
     },
     kernel::Kernel,
@@ -15,7 +16,6 @@ use crate::{
         projection::view_region_for_projection, tile_view_pattern::DEFAULT_TILE_SIZE,
         view_state::ViewStatePadding,
     },
-    sdf::SymbolLayersDataComponent,
     tcs::system::{System, SystemError, SystemResult},
     vector::{transferables::VectorTransferables, VectorLayerBucketComponent},
 };
@@ -101,11 +101,11 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                     continue;
                 }
 
-                // TODO: Make tessellation depend on style? So maybe we need to request even if it exists
                 if world
                     .tiles
                     .query::<&VectorLayerBucketComponent>(coords)
                     .is_some()
+                    && !tile_retry::due(world, coords, RequestKind::Vector)
                 {
                     continue;
                 }
@@ -129,15 +129,17 @@ impl<E: Environment, T: VectorTransferables> RequestSystem<E, T> {
         style: &crate::style::Style,
         world: &mut crate::tcs::world::World,
     ) -> SystemResult {
-        let Some(mut tile) = world.tiles.spawn_mut(coords) else {
+        if world.tiles.spawn_mut(coords).is_none() {
             return Err(SystemError::InvalidTile { coords });
-        };
+        }
+        let attempt = tile_retry::next_attempt(world);
         self.kernel
             .apc()
             .call(
-                Input::TileRequest {
+                Input::TrackedTileRequest {
                     coords,
                     style: style.clone(),
+                    attempt,
                 },
                 fetch_vector_apc::<E::OffscreenKernelEnvironment, T, _>,
             )
@@ -146,8 +148,8 @@ impl<E: Environment, T: VectorTransferables> RequestSystem<E, T> {
                 coords,
                 source,
             })?;
-        tile.insert(VectorLayerBucketComponent::default())
-            .insert(SymbolLayersDataComponent::default());
+        super::content::begin(world, coords);
+        tile_retry::started(world, coords, RequestKind::Vector, attempt);
         tracing::debug!(%coords, "vector tile request accepted");
         Ok(())
     }

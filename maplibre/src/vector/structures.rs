@@ -6,7 +6,7 @@
 //! converted to metres. A supplied absolute deck elevation overrides that inference.
 use super::{
     tessellation::{IndexDataType, OverAlignedVertexBuffer},
-    AvailableVectorLayerBucket, VectorBufferPool, VectorLayerBucket, VectorLayerBucketComponent,
+    AvailableVectorLayerBucket, VectorBufferPool,
 };
 use crate::{
     coords::WorldTileCoords,
@@ -91,12 +91,11 @@ fn fingerprint(tiles: &Tiles, style: &Style, sources: &[WorldTileCoords]) -> u64
     }
     for coords in sources {
         coords.hash(&mut hash);
-        if let Some(buckets) = tiles.query::<&VectorLayerBucketComponent>(*coords) {
-            for bucket in &buckets.layers {
-                if let VectorLayerBucket::AvailableLayer(bucket) = bucket {
-                    bucket.buffer.buffer.vertices.len().hash(&mut hash);
-                }
-            }
+        if let Some(pending) = tiles.query::<&super::content::LayerReplacements>(*coords) {
+            pending.revision.hash(&mut hash);
+        }
+        for bucket in super::content::vector_layers(tiles, *coords) {
+            bucket.buffer.buffer.vertices.len().hash(&mut hash);
         }
     }
     for layer in &style.layers {
@@ -117,13 +116,7 @@ fn prepare(tiles: &Tiles, style: &Style, sources: &[WorldTileCoords]) -> Vec<Spa
     let mut output = Vec::new();
     let mut remaining = MAX_VERTICES;
     for coords in sources {
-        let Some(buckets) = tiles.query::<&VectorLayerBucketComponent>(*coords) else {
-            continue;
-        };
-        for bucket in &buckets.layers {
-            let VectorLayerBucket::AvailableLayer(bucket) = bucket else {
-                continue;
-            };
+        for bucket in super::content::vector_layers(tiles, *coords) {
             let Some(layer) = style.layers.iter().find(|l| l.id == bucket.style_layer_id) else {
                 continue;
             };
@@ -237,8 +230,25 @@ fn profile(kind: StructureKind, start: f64, end: f64, ground: f64, t: f64, clear
     }
 }
 
-pub(crate) fn refresh_gpu(pool: &VectorBufferPool, queue: &wgpu::Queue, buffers: &[SpatialBuffer]) {
+pub(crate) fn refresh_gpu(
+    pool: &VectorBufferPool,
+    queue: &wgpu::Queue,
+    buffers: &[SpatialBuffer],
+    tiles: &Tiles,
+) {
     for (coords, id, buffer) in buffers {
+        // Pending geometry must not overwrite an allocation whose indices and paint are retained.
+        if tiles
+            .query::<&super::content::LayerReplacements>(*coords)
+            .is_some_and(|pending| {
+                pending
+                    .vector
+                    .iter()
+                    .any(|layer| layer.style_layer_id == *id)
+            })
+        {
+            continue;
+        }
         if let Some(entry) = pool
             .index()
             .get_layers(*coords)

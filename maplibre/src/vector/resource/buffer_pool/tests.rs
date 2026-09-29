@@ -235,3 +235,55 @@ fn replacing_geometry_changes_its_identity_even_at_the_same_buffer_address() {
     );
     assert_ne!(first.allocation_id(), second.allocation_id());
 }
+
+#[test]
+fn replacing_an_interleaved_layer_preserves_both_indexes_through_wrap() {
+    let mut pool = BufferPool::new(
+        BackingBufferDescriptor::new(TestBuffer { size: 128 }, 128),
+        BackingBufferDescriptor::new(TestBuffer { size: 128 }, 128),
+        BackingBufferDescriptor::new(TestBuffer { size: 128 }, 128),
+        BackingBufferDescriptor::new(TestBuffer { size: 128 }, 128),
+    );
+    let a = WorldTileCoords::from((0, 0, 1_u8.into()));
+    let b = WorldTileCoords::from((1, 0, 1_u8.into()));
+    let c = WorldTileCoords::from((0, 1, 1_u8.into()));
+    for (coords, id, count) in [(a, "first", 2), (b, "first", 1), (a, "second", 1)] {
+        pool.allocate_layer_geometry(
+            &TestQueue,
+            coords,
+            style_layer(id),
+            &geometry(count),
+            0_u32,
+            &vec![0_u32; count],
+        )
+        .expect("upload");
+    }
+    let old = pool.index().get_layers(a).expect("tile")[0].allocation_id();
+    pool.replace_layer_geometry(&TestQueue, a, style_layer("first"), &geometry(1), 0, &[0])
+        .expect("replacement");
+    pool.remove_layer(a, "second");
+    pool.allocate_layer_geometry(
+        &TestQueue,
+        c,
+        style_layer("wrapped"),
+        &geometry(2),
+        0,
+        &[0; 2],
+    )
+    .expect("wrap");
+    assert_eq!(pool.index().front().expect("front").coords, b);
+    assert_eq!(pool.index().back().expect("back").coords, c);
+    let a = pool.index().get_layers(a).expect("replacement remains");
+    assert_eq!(a.len(), 1);
+    assert_ne!(a[0].allocation_id(), old);
+    let b = pool.index().get_layers(b).expect("other source remains");
+    let c = pool.index().get_layers(c).expect("wrapped allocation");
+    let mut ranges = [
+        a[0].vertices_buffer_range(),
+        b[0].vertices_buffer_range(),
+        c[0].vertices_buffer_range(),
+    ];
+    ranges.sort_by_key(|range| range.start);
+    assert!(ranges.windows(2).all(|pair| pair[0].end <= pair[1].start));
+    assert_eq!(ranges[0].start, 0, "allocation actually wraps");
+}

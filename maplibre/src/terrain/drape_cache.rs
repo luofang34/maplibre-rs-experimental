@@ -19,8 +19,8 @@ const MAX_FREE_TEXTURES: usize = 8;
 /// What of a source tile is on the GPU right now, so a drape redraws when its own tile's
 /// content arrives or leaves and not when any other tile's does.
 pub(crate) trait SourceContent {
-    /// Whether the style layer's geometry of the tile is in the vector buffer pool.
-    fn vector_layer_loaded(&self, coords: WorldTileCoords, layer_id: &str) -> bool;
+    /// Identity of the uploaded style-layer geometry, or `None` when it has no allocation.
+    fn vector_layer_revision(&self, coords: WorldTileCoords, layer_id: &str) -> Option<u64>;
     /// Revision of the raster binding, or `None` while no texture is uploaded.
     fn raster_revision(&self, coords: WorldTileCoords, layer: &str) -> Option<u64>;
 }
@@ -49,7 +49,7 @@ pub(crate) fn fingerprint(
             layer.index.hash(&mut hasher);
             layer.coords.hash(&mut hasher);
             content
-                .vector_layer_loaded(layer.coords, &layer.id)
+                .vector_layer_revision(layer.coords, &layer.id)
                 .hash(&mut hasher);
         }
         for (id, index, _) in &shape.raster_layers {

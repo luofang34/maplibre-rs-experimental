@@ -116,6 +116,35 @@ impl RingIndex {
         removed
     }
 
+    pub(super) fn remove_layer(
+        &mut self,
+        coords: WorldTileCoords,
+        id: &str,
+        keep: Option<u64>,
+    ) -> bool {
+        let Some(key) = coords.build_quad_key() else {
+            return false;
+        };
+        let Some(entry) = self.tree_index.get_mut(&key) else {
+            return false;
+        };
+        let mut retained = entry
+            .layers
+            .iter()
+            .map(|layer| layer.style_layer.id != id || keep == Some(layer.allocation_id))
+            .collect::<VecDeque<_>>();
+        let removed = retained.iter().any(|keep| !keep);
+        self.linear_index
+            .retain(|current| *current != key || retained.pop_front().unwrap_or(false));
+        entry
+            .layers
+            .retain(|layer| layer.style_layer.id != id || keep == Some(layer.allocation_id));
+        if entry.layers.is_empty() {
+            self.tree_index.remove(&key);
+        }
+        removed
+    }
+
     pub(super) fn push_back(&mut self, entry: IndexEntry) {
         if let Some(key) = entry.coords.build_quad_key() {
             match self.tree_index.entry(key) {

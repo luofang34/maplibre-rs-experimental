@@ -7,7 +7,10 @@ use crate::{
     sdf::SymbolLayersDataComponent,
     tcs::tiles::Tiles,
     terrain::DemTileComponent,
-    vector::{VectorLayerBucket, VectorLayerBucketComponent},
+    vector::{
+        content::LayerReplacements, AvailableVectorLayerBucket, VectorLayerBucket,
+        VectorLayerBucketComponent,
+    },
 };
 
 fn capacity<T>(values: &Vec<T>) -> usize {
@@ -23,12 +26,7 @@ pub(crate) fn tile_bytes(tiles: &Tiles, coords: WorldTileCoords) -> usize {
                 .layers
                 .iter()
                 .map(|layer| match layer {
-                    VectorLayerBucket::AvailableLayer(layer) => {
-                        capacity(&layer.buffer.buffer.vertices)
-                            + capacity(&layer.buffer.buffer.indices)
-                            + capacity(&layer.feature_indices)
-                            + capacity(&layer.feature_colors)
-                    }
+                    VectorLayerBucket::AvailableLayer(layer) => vector_bytes(layer),
                     VectorLayerBucket::Missing(_) => 0,
                 })
                 .sum::<usize>()
@@ -49,17 +47,31 @@ pub(crate) fn tile_bytes(tiles: &Tiles, coords: WorldTileCoords) -> usize {
         Some(DemTileComponent::Loaded(dem)) => dem.tile.pixels().len(),
         _ => 0,
     };
-    vector + raster + dem + symbols(tiles, coords) + tiles.geometry_index.tile_bytes(coords)
+    let pending = tiles
+        .query::<&LayerReplacements>(coords)
+        .map_or(0, |pending| {
+            pending.vector.iter().map(vector_bytes).sum::<usize>()
+        });
+    vector
+        + pending
+        + raster
+        + dem
+        + symbols(tiles, coords)
+        + tiles.geometry_index.tile_bytes(coords)
 }
 
 fn symbols(tiles: &Tiles, coords: WorldTileCoords) -> usize {
-    let Some(bucket) = tiles.query::<&SymbolLayersDataComponent>(coords) else {
-        return 0;
-    };
     let mut atlases = HashSet::new();
-    bucket
-        .layers
-        .iter()
+    tiles
+        .query::<&SymbolLayersDataComponent>(coords)
+        .into_iter()
+        .flat_map(|bucket| &bucket.layers)
+        .chain(
+            tiles
+                .query::<&LayerReplacements>(coords)
+                .into_iter()
+                .flat_map(|pending| &pending.symbols),
+        )
         .map(|layer| {
             let geometry = capacity(&layer.buffer.buffer.vertices)
                 + capacity(&layer.buffer.buffer.indices)
@@ -105,4 +117,11 @@ fn value_bytes(value: &crate::style::expression::Value) -> usize {
             .sum(),
         _ => 0,
     }
+}
+
+fn vector_bytes(layer: &AvailableVectorLayerBucket) -> usize {
+    capacity(&layer.buffer.buffer.vertices)
+        + capacity(&layer.buffer.buffer.indices)
+        + capacity(&layer.feature_indices)
+        + capacity(&layer.feature_colors)
 }

@@ -2,6 +2,8 @@
 
 use std::collections::HashSet;
 
+use crate::sdf::SymbolLayerData;
+
 use super::{
     textures::{SymbolTextures, TextureContext},
     SymbolPipeline,
@@ -13,7 +15,7 @@ use crate::{
         shaders::{SDFShaderFeatureMetadata, ShaderLayerMetadata},
         Renderer,
     },
-    sdf::{SymbolBufferPool, SymbolLayerData, SymbolLayersDataComponent},
+    sdf::{SymbolBufferPool, SymbolLayersDataComponent},
     style::{
         layer::{LayerPaint, StyleLayer},
         Style,
@@ -80,54 +82,83 @@ fn upload_symbol_layer(
 ) {
     let mut bytes = crate::render::memory_budget::UploadBudget::new(8 << 20);
     for &coords in visible {
-        let Some(vector_layers) = tiles.query_mut::<&SymbolLayersDataComponent>(coords) else {
+        crate::vector::content::ensure(tiles, coords);
+        let Some((layers, pending)) = tiles.query_mut::<(
+            &mut SymbolLayersDataComponent,
+            &mut crate::vector::content::LayerReplacements,
+        )>(coords) else {
             continue;
         };
-
-        let loaded_layers: HashSet<String> = symbol_buffer_pool
+        let loaded: HashSet<String> = symbol_buffer_pool
             .get_loaded_style_layers_at(coords)
             .unwrap_or_default()
             .into_iter()
-            .map(str::to_string)
+            .map(str::to_owned)
             .collect();
-
         for style_layer in style
             .layers
             .iter()
             .filter(|layer| layer.is_visible_at(f64::from(zoom)))
         {
-            if let Some(LayerPaint::Symbol(paint)) = &style_layer.paint {
-                if let Some(layer) = vector_layers
+            if let Some(committed) = layers
+                .layers
+                .iter()
+                .find(|layer| layer.style_layer_id == style_layer.id)
+            {
+                prepare_atlas(textures, gpu, committed, style_layer, zoom);
+            }
+            let replacement = pending
+                .symbols
+                .iter()
+                .position(|layer| layer.style_layer_id == style_layer.id);
+            let upload = replacement
+                .map(|index| &pending.symbols[index])
+                .or_else(|| pending_layer_data(&layers.layers, &loaded, style_layer));
+            let layer = upload.or_else(|| {
+                layers
                     .layers
                     .iter()
                     .find(|layer| layer.style_layer_id == style_layer.id)
-                {
-                    if let Some(atlas) = &layer.atlas {
-                        textures.prepare(
-                            gpu,
-                            (coords, style_layer.id.clone()),
-                            atlas,
-                            paint,
-                            f64::from(zoom),
-                        );
-                    }
-                }
-            }
-            let Some(SymbolLayerData { coords, buffer, .. }) =
-                pending_layer_data(&vector_layers.layers, &loaded_layers, style_layer)
-            else {
+            });
+            let Some(layer) = layer else {
                 continue;
             };
-
-            let size = buffer.buffer.vertices.len()
-                * (size_of::<crate::render::shaders::ShaderSymbolVertex>()
-                    + size_of::<SDFShaderFeatureMetadata>())
-                + buffer.buffer.indices.len() * size_of::<u32>();
-            if !bytes.take(size) {
-                return;
+            if upload.is_some() {
+                let buffer = &layer.buffer;
+                let size = buffer.buffer.vertices.len()
+                    * (size_of::<crate::render::shaders::ShaderSymbolVertex>()
+                        + size_of::<SDFShaderFeatureMetadata>())
+                    + buffer.buffer.indices.len() * size_of::<u32>();
+                if !bytes.take(size) {
+                    return;
+                }
+                if !upload_geometry(symbol_buffer_pool, gpu, coords, style_layer, buffer) {
+                    continue;
+                }
             }
-            upload_geometry(symbol_buffer_pool, gpu, *coords, style_layer, buffer);
+            prepare_atlas(textures, gpu, layer, style_layer, zoom);
+            if let Some(index) = replacement {
+                crate::vector::content::commit_symbols(layers, pending.symbols.remove(index));
+            }
         }
+    }
+}
+
+fn prepare_atlas(
+    textures: &mut SymbolTextures,
+    gpu: &TextureContext<'_>,
+    layer: &SymbolLayerData,
+    style: &StyleLayer,
+    zoom: f32,
+) {
+    if let (Some(LayerPaint::Symbol(paint)), Some(atlas)) = (&style.paint, &layer.atlas) {
+        textures.prepare(
+            gpu,
+            (layer.coords, style.id.clone()),
+            atlas,
+            paint,
+            f64::from(zoom),
+        );
     }
 }
 
@@ -159,7 +190,7 @@ fn upload_geometry(
         crate::render::shaders::ShaderSymbolVertex,
         u32,
     >,
-) {
+) -> bool {
     // Collision placement supplies elevation before a new label can become visible.
     let feature_metadata = vec![
         SDFShaderFeatureMetadata {
@@ -169,13 +200,13 @@ fn upload_geometry(
         buffer.buffer.vertices.len()
     ];
 
-    // FIXME avoid uploading empty indices
     if buffer.buffer.indices.is_empty() {
-        return;
+        symbol_buffer_pool.remove_layer(coords, &style_layer.id);
+        return true;
     }
 
     tracing::debug!(%coords, "allocating symbol geometry");
-    if let Err(error) = symbol_buffer_pool.allocate_layer_geometry(
+    if let Err(error) = symbol_buffer_pool.replace_layer_geometry(
         gpu.queue,
         coords,
         style_layer.clone(),
@@ -184,5 +215,10 @@ fn upload_geometry(
         &feature_metadata,
     ) {
         tracing::error!(%coords, %error, "tile geometry upload failed");
+        return false;
     }
+    true
 }
+
+#[cfg(all(test, feature = "headless", not(target_arch = "wasm32")))]
+mod retry;

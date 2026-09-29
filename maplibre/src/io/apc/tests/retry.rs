@@ -5,3 +5,5 @@
 mod fixture;
 mod source;
 mod tests;
+
+mod vector;

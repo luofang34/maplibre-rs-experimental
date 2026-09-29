@@ -80,7 +80,7 @@ pub fn upload_system(
         );
     }
     if changed {
-        super::structures::refresh_gpu(buffer_pool, queue, &spatial);
+        super::structures::refresh_gpu(buffer_pool, queue, &spatial, &world.tiles);
     }
     upload_tessellated_layer(
         buffer_pool,
@@ -203,63 +203,74 @@ fn upload_tessellated_layer(
     spatial: &[super::structures::SpatialBuffer],
     paint: VectorPaintFrame,
 ) {
-    // Upload the tessellated layers in view, a few tiles a frame; the rest follow next
-    // frame rather than staging a whole burst of arrivals at once.
     let mut uploaded_tiles = 0;
     let mut bytes = crate::render::memory_budget::UploadBudget::new(16 << 20);
     for coords in source_tiles {
         if uploaded_tiles >= UPLOADS_PER_FRAME {
             break;
         }
-        let Some(vector_layers) = tiles.query_mut::<&VectorLayerBucketComponent>(coords) else {
+        super::content::ensure(tiles, coords);
+        let Some((layers, pending)) = tiles.query_mut::<(
+            &mut VectorLayerBucketComponent,
+            &mut super::content::LayerReplacements,
+        )>(coords) else {
             continue;
         };
-
-        let loaded_layers = buffer_pool
-            .get_loaded_style_layers_at(coords)
-            .unwrap_or_default();
-
-        let available_layers = vector_layers
-            .layers
-            .iter()
-            .flat_map(|data| match data {
-                VectorLayerBucket::AvailableLayer(data) => Some(data),
-                VectorLayerBucket::Missing(_) => None,
-            })
-            .filter(|data| !loaded_layers.contains(data.style_layer_id.as_str()))
-            // Empty buckets never enter the pool and must not consume a slot every frame.
-            .filter(|data| !data.buffer.buffer.indices.is_empty())
-            .collect::<Vec<_>>();
-
+        let mut uploaded = false;
         for style_layer in &style.layers {
-            let Some(bucket) = available_layers
+            let replacement = pending
+                .vector
                 .iter()
-                .find(|layer| style_layer.id.as_str() == layer.style_layer_id.as_str())
-            else {
+                .position(|layer| layer.style_layer_id == style_layer.id);
+            let bucket = replacement.map(|index| &pending.vector[index]).or_else(|| {
+                layers.layers.iter().find_map(|layer| match layer {
+                    VectorLayerBucket::AvailableLayer(layer)
+                        if layer.style_layer_id == style_layer.id =>
+                    {
+                        Some(layer)
+                    }
+                    _ => None,
+                })
+            });
+            let Some(bucket) = bucket else {
                 continue;
             };
-
-            let AvailableVectorLayerBucket {
-                buffer,
-                feature_indices,
-                ..
-            } = *bucket;
-            let size = buffer.buffer.vertices.len() * size_of::<crate::render::ShaderVertex>()
-                + buffer.buffer.indices.len() * size_of::<u32>()
-                + feature_indices
-                    .iter()
-                    .map(|count| *count as usize)
-                    .sum::<usize>()
-                    * size_of::<FillShaderFeatureMetadata>();
-            if !bytes.take(size) {
-                return;
+            let loaded = buffer_pool
+                .get_loaded_style_layers_at(coords)
+                .is_some_and(|layers| layers.contains(style_layer.id.as_str()));
+            if replacement.is_none() && loaded {
+                continue;
             }
-            upload_bucket(buffer_pool, queue, style_layer, bucket, spatial, paint);
+            if bucket.buffer.buffer.indices.is_empty() {
+                buffer_pool.remove_layer(coords, &style_layer.id);
+            } else {
+                if !bytes.take(upload_size(bucket)) {
+                    return;
+                }
+                if !upload_bucket(buffer_pool, queue, style_layer, bucket, spatial, paint) {
+                    continue;
+                }
+                uploaded = true;
+            }
+            if let Some(index) = replacement {
+                super::content::commit_vector(layers, pending.vector.remove(index));
+            }
         }
-        if !available_layers.is_empty() {
+        if uploaded {
             uploaded_tiles += 1;
         }
     }
+}
+
+fn upload_size(bucket: &AvailableVectorLayerBucket) -> usize {
+    bucket.buffer.buffer.vertices.len() * size_of::<crate::render::ShaderVertex>()
+        + bucket.buffer.buffer.indices.len() * size_of::<u32>()
+        + bucket
+            .feature_indices
+            .iter()
+            .map(|count| *count as usize)
+            .sum::<usize>()
+            * size_of::<FillShaderFeatureMetadata>()
 }
 
 fn upload_bucket(
@@ -269,7 +280,7 @@ fn upload_bucket(
     bucket: &AvailableVectorLayerBucket,
     spatial: &[super::structures::SpatialBuffer],
     paint: VectorPaintFrame,
-) {
+) -> bool {
     let VectorPaintFrame { zoom, bearing } = paint;
     let AvailableVectorLayerBucket {
         coords,
@@ -301,7 +312,7 @@ fn upload_bucket(
     let layer_metadata = metadata_for_layer(style_layer, coords, zoom, bearing);
 
     tracing::debug!(%coords, "allocating vector geometry");
-    if let Err(error) = buffer_pool.allocate_layer_geometry(
+    if let Err(error) = buffer_pool.replace_layer_geometry(
         queue,
         coords,
         style_layer.clone(),
@@ -310,7 +321,9 @@ fn upload_bucket(
         &feature_metadata,
     ) {
         tracing::error!(%coords, %error, "tile geometry upload failed");
+        return false;
     }
+    true
 }
 
 fn layer_translate_tile_units(
@@ -405,3 +418,7 @@ fn feature_metadata(
 
     feature_metadata
 }
+
+#[cfg(all(test, feature = "headless", not(target_arch = "wasm32")))]
+#[path = "upload_system/retry/tests.rs"]
+mod retry_tests;

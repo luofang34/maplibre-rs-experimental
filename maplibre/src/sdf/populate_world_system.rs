@@ -3,9 +3,11 @@ use std::{borrow::Cow, marker::PhantomData, rc::Rc};
 use crate::{
     context::MapContext,
     environment::Environment,
-    io::apc::{apply_worker_messages, AsyncProcedureCall},
+    io::{
+        apc::{apply_worker_messages, AsyncProcedureCall},
+        tile_retry::{self, RequestKind},
+    },
     kernel::Kernel,
-    sdf::SymbolLayersDataComponent,
     tcs::system::{System, SystemResult},
     vector::transferables::*,
 };
@@ -36,16 +38,11 @@ impl<E: Environment, T: VectorTransferables> System for PopulateWorldSystem<E, T
             .receive(|message| message.has_tag(T::SymbolLayerTessellated::message_tag()));
         apply_worker_messages(messages, |message| {
             if message.has_tag(T::SymbolLayerTessellated::message_tag()) {
+                let attempt = message.attempt();
                 let message = message.into_transferable::<T::SymbolLayerTessellated>()?;
-
-                let Some(component) = world
-                    .tiles
-                    .query_mut::<&mut SymbolLayersDataComponent>(message.coords())
-                else {
-                    return Ok(());
-                };
-
-                component.layers.push(message.to_bucket());
+                if tile_retry::accepts(world, message.coords(), RequestKind::Vector, attempt) {
+                    crate::vector::content::accept_symbols(world, message.to_bucket());
+                }
             }
             Ok(())
         })?;

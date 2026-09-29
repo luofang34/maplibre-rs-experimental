@@ -72,6 +72,29 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         Ok(())
     }
 
+    /// Replaces only this style layer once the new geometry has been validated and uploaded.
+    pub fn replace_layer_geometry(
+        &mut self,
+        queue: &Q,
+        coords: WorldTileCoords,
+        style_layer: StyleLayer,
+        geometry: &OverAlignedVertexBuffer<V, I>,
+        layer_metadata: TM,
+        feature_metadata: &[FM],
+    ) -> Result<(), AllocationError> {
+        let id = style_layer.id.clone();
+        self.allocate_layer_geometry(
+            queue,
+            coords,
+            style_layer,
+            geometry,
+            layer_metadata,
+            feature_metadata,
+        )?;
+        self.index.remove_layer(coords, &id, Some(self.revision));
+        Ok(())
+    }
+
     fn validate_sizes(&self, sizes: [u64; 4]) -> Result<(), AllocationError> {
         let buffers = [
             &self.vertices,

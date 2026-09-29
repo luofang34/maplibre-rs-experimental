@@ -66,3 +66,48 @@ fn symbol_atlas_bytes_evict_tiles_and_shared_layers_are_charged_once() {
         "eviction must release actual pixel allocations"
     );
 }
+
+#[test]
+fn pending_and_committed_layers_share_one_atlas_charge() {
+    use crate::vector::content::LayerReplacements;
+    let mut world = World::default();
+    let coords = WorldTileCoords::default();
+    let atlas = Arc::new(SymbolAtlas {
+        pixels: vec![0; 64],
+        size: [4, 4],
+        ..Default::default()
+    });
+    world
+        .tiles
+        .spawn_mut(coords)
+        .expect("tile")
+        .insert(SymbolLayersDataComponent {
+            pending_assets: false,
+            layers: vec![layer(coords, atlas.clone())],
+        })
+        .insert(LayerReplacements {
+            symbols: vec![layer(coords, atlas)],
+            ..Default::default()
+        });
+    assert_eq!(
+        tile_bytes(&world.tiles, coords),
+        64,
+        "one shared pixel allocation"
+    );
+    let other = Arc::new(SymbolAtlas {
+        pixels: vec![0; 64],
+        size: [4, 4],
+        ..Default::default()
+    });
+    world
+        .tiles
+        .query_mut::<&mut LayerReplacements>(coords)
+        .expect("pending")
+        .symbols
+        .push(layer(coords, other));
+    assert_eq!(
+        tile_bytes(&world.tiles, coords),
+        128,
+        "distinct pending atlas is retained memory"
+    );
+}
