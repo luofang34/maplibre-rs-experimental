@@ -169,3 +169,16 @@ fn quadkeys_reject_unsupported_grid_levels_without_panicking() {
         Some(Quadkey::new(&[ZoomLevel::new(3); 31]))
     );
 }
+
+#[test]
+fn aligned_tile_corners_cover_the_containing_two_by_two_block() {
+    let z = ZoomLevel::new(4);
+    for (x, y, left, top) in [(3, 5, 2, 4), (-1, -3, -2, -4), (0, 0, 0, 0)] {
+        let anchor = WorldTileCoords::from((x, y, z));
+        let aligned = anchor.into_aligned();
+        assert_eq!(aligned.upper_right(), (left + 1, top, z).into());
+        assert_eq!(aligned.lower_left(), (left, top + 1, z).into());
+        assert_eq!(aligned.lower_right(), (left + 1, top + 1, z).into());
+        assert_eq!(aligned.upper_left(), (left, top, z).into());
+    }
+}

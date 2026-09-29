@@ -268,7 +268,7 @@ impl AlignedWorldTileCoords {
     pub fn lower_left(&self) -> WorldTileCoords {
         WorldTileCoords {
             x: self.0.x,
-            y: self.0.y - 1,
+            y: self.0.y + 1,
             z: self.0.z,
         }
     }
