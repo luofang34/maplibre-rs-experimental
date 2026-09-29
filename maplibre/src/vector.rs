@@ -101,7 +101,7 @@ impl HasTile for VectorTilesDone {
         world
             .tiles
             .query::<&VectorLayerBucketComponent>(coords)
-            .is_some_and(|buckets| buckets.done)
+            .is_some_and(|buckets| buckets.done && !buckets.failed)
     }
 }
 
@@ -193,7 +193,10 @@ pub enum VectorLayerBucket {
 
 #[derive(Default)]
 pub struct VectorLayerBucketComponent {
+    /// Base processing has finished; symbol work may still hold the loading slot.
     pub done: bool,
+    /// Source data was unavailable, so this tile must not replace a usable ancestor.
+    pub failed: bool,
     pub layers: Vec<VectorLayerBucket>,
 }
 

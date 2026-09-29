@@ -19,7 +19,7 @@ use crate::{
     window::PhysicalSize,
 };
 
-async fn setup() -> (Rc<Kernel<HeadlessEnvironment>>, MapContext) {
+pub(super) async fn setup() -> (Rc<Kernel<HeadlessEnvironment>>, MapContext) {
     let (kernel, renderer) = create_headless_renderer(16, 16, None)
         .await
         .expect("renderer");

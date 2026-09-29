@@ -38,6 +38,7 @@ fn spawn_vector(world: &mut World, coords: WorldTileCoords, done: bool) {
         .spawn_mut(coords)
         .expect("valid coordinates")
         .insert(VectorLayerBucketComponent {
+            failed: false,
             done,
             layers: Vec::new(),
         });
@@ -194,6 +195,7 @@ fn the_cache_is_bounded_in_bytes_as_well_as_tiles() {
             .spawn_mut(coords)
             .expect("valid coordinates")
             .insert(VectorLayerBucketComponent {
+                failed: false,
                 done: true,
                 layers: vec![VectorLayerBucket::AvailableLayer(
                     AvailableVectorLayerBucket {

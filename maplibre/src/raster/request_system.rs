@@ -13,7 +13,9 @@ use crate::{
     },
     kernel::Kernel,
     raster::{
-        process_raster::{process_raster_tile, ProcessRasterContext, RasterTileRequest},
+        process_raster::{
+            process_raster_tile, ProcessRasterContext, ProcessRasterError, RasterTileRequest,
+        },
         transferables::{LayerRasterMissing, RasterTransferables},
         RasterLayersDataComponent,
     },
@@ -110,12 +112,23 @@ pub fn fetch_raster_apc<K: OffscreenKernel, T: RasterTransferables, C: Context +
             let context = context.clone();
             match client.fetch(&coords, &group.source).await {
                 Ok(data) => {
-                    let data = data.into_boxed_slice();
-
-                    let mut process_context = ProcessRasterContext::<T, C>::new(context);
-
-                    process_raster_tile(&data, RasterTileRequest { coords }, &mut process_context)
-                        .map_err(|e| ProcedureError::Execution(Box::new(e)))?;
+                    let mut process_context = ProcessRasterContext::<T, C>::new(context.clone());
+                    match process_raster_tile(
+                        &data,
+                        RasterTileRequest { coords },
+                        &mut process_context,
+                    ) {
+                        Ok(()) => {}
+                        Err(ProcessRasterError::Send(source)) => {
+                            return Err(ProcedureError::Send(source))
+                        }
+                        Err(ProcessRasterError::Decoding { source }) => {
+                            tracing::warn!(%coords, source = ?group.source_name, error = %source, "invalid raster tile");
+                            context
+                                .send_back(T::LayerRasterMissing::build_from(coords))
+                                .map_err(ProcedureError::Send)?;
+                        }
+                    }
                 }
                 Err(error) => {
                     if error.is_not_found() {

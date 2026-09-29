@@ -51,6 +51,14 @@ pub trait TileTessellated: IntoMessage + Debug + Send {
     where
         Self: Sized;
 
+    /// Reports unavailable source data, retaining parent coverage.
+    /// Keep `pending_symbols` true until the worker sends its final completion.
+    fn build_failed(coords: WorldTileCoords, pending_symbols: bool) -> Self
+    where
+        Self: Sized;
+    /// Whether at least one requested source could not be fetched or decoded.
+    fn failed(&self) -> bool;
+
     /// Marks base geometry ready while symbol assets are still pending.
     fn build_partial(coords: WorldTileCoords) -> Self
     where
@@ -162,6 +170,7 @@ pub trait LayerIndexed: IntoMessage + Debug + Send {
 pub struct DefaultTileTessellated {
     coords: WorldTileCoords,
     pending_symbols: bool,
+    failed: bool,
 }
 
 impl Debug for DefaultTileTessellated {
@@ -185,13 +194,27 @@ impl TileTessellated for DefaultTileTessellated {
         Self {
             coords,
             pending_symbols: false,
+            failed: false,
         }
+    }
+
+    fn build_failed(coords: WorldTileCoords, pending_symbols: bool) -> Self {
+        Self {
+            coords,
+            pending_symbols,
+            failed: true,
+        }
+    }
+
+    fn failed(&self) -> bool {
+        self.failed
     }
 
     fn build_partial(coords: WorldTileCoords) -> Self {
         Self {
             coords,
             pending_symbols: true,
+            failed: false,
         }
     }
     fn pending_symbols(&self) -> bool {

@@ -200,7 +200,11 @@ impl HeadlessMap {
             tiles
                 .spawn_mut(coords)
                 .ok_or(HeadlessMapOperationError::InvalidTile { coords })?
-                .insert(VectorLayerBucketComponent { done: true, layers });
+                .insert(VectorLayerBucketComponent {
+                    done: true,
+                    failed: false,
+                    layers,
+                });
         }
 
         let mut symbols_by_tile = BTreeMap::new();

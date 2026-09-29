@@ -1,24 +1,19 @@
 #[cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 mod admission;
+#[cfg(not(target_arch = "wasm32"))]
+mod completion;
 mod errors;
 mod payload;
 #[cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 mod systems;
 
-use crate::io::apc::{Context, IntoMessage, SendError};
-
-pub struct DummyContext;
-
-impl Context for DummyContext {
-    fn send_back<T: IntoMessage>(&self, _message: T) -> Result<(), SendError> {
-        Ok(())
-    }
-}
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 #[allow(clippy::expect_used)]
 fn buffered_completion_messages_keep_fifo_order_and_drain_in_one_receive() {
-    use super::{AsyncProcedureCall, Message, SchedulerAsyncProcedureCall, SchedulerContext};
+    use super::{
+        AsyncProcedureCall, Context, Message, SchedulerAsyncProcedureCall, SchedulerContext,
+    };
     use crate::{
         environment::OffscreenKernelConfig,
         io::scheduler::NopScheduler,

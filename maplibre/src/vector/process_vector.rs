@@ -1,4 +1,8 @@
-use std::{borrow::Cow, collections::HashSet, marker::PhantomData};
+//! Vector decoding, style evaluation and worker result production.
+
+#![deny(missing_docs)]
+
+use std::{collections::HashSet, marker::PhantomData};
 
 use geozero::{
     mvt::{tile, Message},
@@ -29,14 +33,21 @@ use crate::{
     },
 };
 
+/// Failure decoding vector tile bytes or returning processed results.
 #[derive(Error, Debug)]
 pub enum ProcessVectorError {
     /// Sending of results failed
     #[error("sending data back through context failed")]
     SendError(#[source] SendError),
-    /// Error when decoding e.g. the protobuf file
-    #[error("decoding failed")]
-    Decoding(Cow<'static, str>),
+    /// The source bytes are not a decodable vector tile.
+    #[error("decoding vector tile {coords} failed: {source}")]
+    Decoding {
+        /// Tile whose protocol buffer could not be decoded.
+        coords: WorldTileCoords,
+        /// Underlying protocol-buffer decoder failure.
+        #[source]
+        source: Box<dyn std::error::Error>,
+    },
 }
 
 /// Scale from a layer's declared coordinate extent to the 4096 grid the shaders expect, so a
@@ -50,8 +61,11 @@ pub fn extent_scale(layer: &tile::Layer) -> f64 {
 
 /// A request for a tile at the given coordinates and in the given layers.
 pub struct VectorTileRequest {
+    /// Tile grid used to scale its geometry and index.
     pub coords: WorldTileCoords,
+    /// Style entries to evaluate against the source layers.
     pub layers: HashSet<StyleLayer>,
+    /// Projection controlling globe subdivision of tile geometry.
     pub projection: ProjectionType,
 }
 
@@ -113,6 +127,8 @@ fn apply_filter_to_layer(layer: &mut tile::Layer, filter: &Filter, zoom: f64) {
     layer.features.retain(|_| keep.next().unwrap_or(false));
 }
 
+/// Decodes and processes a tile with the built-in fallback symbol atlas.
+/// Results stream through the context; decoding and delivery failures retain their causes.
 pub fn process_vector_tile<T: VectorTransferables, C: Context>(
     data: &[u8],
     tile_request: VectorTileRequest,
@@ -132,8 +148,11 @@ pub(crate) fn process_vector_tile_with_assets<T: VectorTransferables, C: Context
     context: &mut ProcessVectorContext<T, C>,
     atlas: std::sync::Arc<crate::sdf::assets::SymbolAtlas>,
 ) -> Result<(), ProcessVectorError> {
-    let mut tile = geozero::mvt::Tile::decode(data)
-        .map_err(|e| ProcessVectorError::Decoding(e.to_string().into()))?;
+    let mut tile =
+        geozero::mvt::Tile::decode(data).map_err(|source| ProcessVectorError::Decoding {
+            coords: tile_request.coords,
+            source: Box::new(source),
+        })?;
 
     // Report available layers
     let coords = &tile_request.coords;
@@ -326,17 +345,25 @@ pub(crate) fn process_vector_tile_with_assets<T: VectorTransferables, C: Context
     Ok(())
 }
 
+enum Completion {
+    Deferred,
+    PendingSymbols,
+    Finished,
+}
+
+/// Reply context and completion mode used while processing vector layers.
 pub struct ProcessVectorContext<T: VectorTransferables, C: Context> {
     context: C,
-    pending_symbols: bool,
+    completion: Completion,
     phantom_t: PhantomData<T>,
 }
 
 impl<T: VectorTransferables, C: Context> ProcessVectorContext<T, C> {
+    /// Uses the supplied reply endpoint and completes the tile after this processing batch.
     pub fn new(context: C) -> Self {
         Self {
             context,
-            pending_symbols: false,
+            completion: Completion::Finished,
             phantom_t: Default::default(),
         }
     }
@@ -344,21 +371,28 @@ impl<T: VectorTransferables, C: Context> ProcessVectorContext<T, C> {
 
 impl<T: VectorTransferables, C: Context> ProcessVectorContext<T, C> {
     pub(crate) fn with_pending_symbols(mut self) -> Self {
-        self.pending_symbols = true;
+        self.completion = Completion::PendingSymbols;
         self
     }
 
+    pub(crate) fn without_completion(mut self) -> Self {
+        self.completion = Completion::Deferred;
+        self
+    }
+
+    /// Returns the owned reply endpoint after processing.
     pub fn take_context(self) -> C {
         self.context
     }
 
     fn tile_finished(&mut self, coords: &WorldTileCoords) -> Result<(), ProcessVectorError> {
+        let message = match self.completion {
+            Completion::Deferred => return Ok(()),
+            Completion::PendingSymbols => T::TileTessellated::build_partial(*coords),
+            Completion::Finished => T::TileTessellated::build_from(*coords),
+        };
         self.context
-            .send_back(if self.pending_symbols {
-                T::TileTessellated::build_partial(*coords)
-            } else {
-                T::TileTessellated::build_from(*coords)
-            })
+            .send_back(message)
             .map_err(ProcessVectorError::SendError)
     }
 

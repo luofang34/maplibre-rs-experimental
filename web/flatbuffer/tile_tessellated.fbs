@@ -1,10 +1,9 @@
 include "basic.fbs";
 
-//namespace transferables;
-
 table FlatTileTessellated {
     coords: FlatWorldTileCoords;
     pending_symbols: bool = false;
+    failed: bool = false;
 }
 
 root_type FlatTileTessellated;

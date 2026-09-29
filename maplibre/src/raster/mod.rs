@@ -101,7 +101,7 @@ impl RasterLayersDataComponent {
             .any(|layer| matches!(layer, RasterLayerData::Available(_)))
     }
 
-    /// Whether every source answered that it has no tile here.
+    /// Whether every received result is unavailable, including fetch and decode failures.
     pub fn is_missing(&self) -> bool {
         !self.layers.is_empty() && !self.has_image()
     }

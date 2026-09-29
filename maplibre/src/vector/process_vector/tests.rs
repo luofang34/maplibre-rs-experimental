@@ -400,3 +400,35 @@ fn chart_annotation_expressions_read_text_and_numbers() {
         );
     }
 }
+
+#[test]
+fn invalid_tile_retains_coordinates_and_the_protobuf_decoder_cause() {
+    use std::error::Error;
+    fn assert_cause<E: Error + 'static>(error: &dyn Error, expected: E) {
+        let actual = error
+            .source()
+            .expect("decoder cause")
+            .downcast_ref::<E>()
+            .expect("original decoder type");
+        assert_eq!(actual.to_string(), expected.to_string());
+    }
+    let coords = WorldTileCoords::from((7, 3, 4_u8.into()));
+    let bytes = [255];
+    let error = process_vector_tile(
+        &bytes,
+        VectorTileRequest {
+            coords,
+            layers: Default::default(),
+            projection: ProjectionType::Mercator,
+        },
+        &mut ProcessVectorContext::<DefaultVectorTransferables, _>::new(
+            CollectingContext::default(),
+        ),
+    )
+    .expect_err("invalid protobuf");
+    assert_cause(
+        &error,
+        Tile::decode(bytes.as_slice()).expect_err("decoder rejects bytes"),
+    );
+    assert!(error.to_string().contains(&coords.to_string()));
+}

@@ -1,3 +1,7 @@
+//! Raster image decoding and worker result delivery.
+
+#![deny(missing_docs)]
+
 use std::marker::PhantomData;
 
 use image::RgbaImage;
@@ -5,10 +9,11 @@ use thiserror::Error;
 
 use crate::{
     coords::WorldTileCoords,
-    io::apc::Context,
+    io::apc::{Context, SendError},
     raster::transferables::{LayerRaster, RasterTransferables},
 };
 
+/// Failure decoding image bytes or returning pixels to the caller.
 #[derive(Error, Debug)]
 pub enum ProcessRasterError {
     /// Source bytes could not be decoded as an image.
@@ -18,19 +23,19 @@ pub enum ProcessRasterError {
         #[source]
         source: image::ImageError,
     },
-    /// Error during processing of the pipeline
-    #[error("processing data in pipeline failed")]
-    Processing {
-        /// Underlying context error.
-        #[source]
-        source: Box<dyn std::error::Error>,
-    },
+    /// The caller could not receive the decoded image.
+    #[error("sending raster result failed")]
+    Send(#[source] SendError),
 }
 
+/// Grid location associated with one source image.
 pub struct RasterTileRequest {
+    /// Tile whose image is being decoded.
     pub coords: WorldTileCoords,
 }
 
+/// Decodes source bytes into RGBA8 pixels and sends them through the reply context.
+/// Decoder and transport failures retain their original causes.
 pub fn process_raster_tile<T: RasterTransferables, C: Context>(
     data: &[u8],
     tile_request: RasterTileRequest,
@@ -45,12 +50,14 @@ pub fn process_raster_tile<T: RasterTransferables, C: Context>(
 
     Ok(())
 }
+/// Reply endpoint for decoded raster layers.
 pub struct ProcessRasterContext<T: RasterTransferables, C: Context> {
     context: C,
     phantom_t: PhantomData<T>,
 }
 
 impl<T: RasterTransferables, C: Context> ProcessRasterContext<T, C> {
+    /// Uses the supplied endpoint for each decoded layer.
     pub fn new(context: C) -> Self {
         Self {
             context,
@@ -68,33 +75,6 @@ impl<T: RasterTransferables, C: Context> ProcessRasterContext<T, C> {
     ) -> Result<(), ProcessRasterError> {
         self.context
             .send_back(T::LayerRaster::build_from(*coords, layer_name, image_data))
-            .map_err(|source| ProcessRasterError::Processing {
-                source: Box::new(source),
-            })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::process_raster_tile;
-    use crate::{
-        coords::ZoomLevel,
-        io::apc::tests::DummyContext,
-        raster::{
-            process_raster::{ProcessRasterContext, RasterTileRequest},
-            DefaultRasterTransferables,
-        },
-    };
-
-    #[test] // TODO: Add proper tile byte array
-    #[ignore]
-    fn test() {
-        let _output = process_raster_tile(
-            &[0],
-            RasterTileRequest {
-                coords: (0, 0, ZoomLevel::default()).into(),
-            },
-            &mut ProcessRasterContext::<DefaultRasterTransferables, _>::new(DummyContext),
-        );
+            .map_err(ProcessRasterError::Send)
     }
 }

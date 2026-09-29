@@ -118,10 +118,18 @@ impl TileTessellated for FlatBufferTransferable {
     }
 
     fn build_from(coords: WorldTileCoords) -> Self {
-        tile_completion(coords, false)
+        tile_completion(coords, false, false)
     }
     fn build_partial(coords: WorldTileCoords) -> Self {
-        tile_completion(coords, true)
+        tile_completion(coords, true, false)
+    }
+    fn build_failed(coords: WorldTileCoords, pending_symbols: bool) -> Self {
+        tile_completion(coords, pending_symbols, true)
+    }
+    fn failed(&self) -> bool {
+        root_as_flat_tile_tessellated(&self.data[self.start..])
+            .map(|data| data.failed())
+            .unwrap_or(true)
     }
     fn pending_symbols(&self) -> bool {
         root_as_flat_tile_tessellated(&self.data[self.start..])
@@ -469,22 +477,5 @@ impl RasterTransferables for FlatTransferables {
 
 mod terrain;
 
-fn tile_completion(coords: WorldTileCoords, pending: bool) -> FlatBufferTransferable {
-    let mut inner_builder = FlatBufferBuilder::with_capacity(1024);
-    let mut builder = FlatTileTessellatedBuilder::new(&mut inner_builder);
-
-    builder.add_coords(&FlatWorldTileCoords::new(
-        coords.x,
-        coords.y,
-        coords.z.into(),
-    ));
-    builder.add_pending_symbols(pending);
-    let root = builder.finish();
-    inner_builder.finish(root, None);
-    let (data, start) = inner_builder.collapse();
-    FlatBufferTransferable {
-        tag: WebMessageTag::TileTessellated,
-        data,
-        start,
-    }
-}
+mod completion;
+use self::completion::tile_completion;

@@ -4,13 +4,11 @@ use std::{borrow::Cow, collections::HashSet, marker::PhantomData, rc::Rc};
 
 use crate::{
     context::MapContext,
-    environment::{Environment, OffscreenKernel},
+    environment::Environment,
     io::{
-        apc::{AsyncProcedureCall, AsyncProcedureFuture, Context, Input, ProcedureError},
+        apc::{AsyncProcedureCall, Input},
         tile_backpressure::vector_request_budget,
-        tile_sources::{
-            clamp_to_max_zoom, source_layer_groups, source_max_zoom, source_min_zoom, TileKind,
-        },
+        tile_sources::{clamp_to_max_zoom, source_max_zoom, source_min_zoom, TileKind},
     },
     kernel::Kernel,
     render::{
@@ -18,16 +16,12 @@ use crate::{
         view_state::ViewStatePadding,
     },
     sdf::SymbolLayersDataComponent,
-    style::layer::StyleLayer,
     tcs::system::{System, SystemError, SystemResult},
-    vector::{
-        process_vector::{
-            process_vector_tile_with_assets, ProcessVectorContext, VectorTileRequest,
-        },
-        transferables::{LayerMissing, TileTessellated, VectorTransferables},
-        VectorLayerBucketComponent,
-    },
+    vector::{transferables::VectorTransferables, VectorLayerBucketComponent},
 };
+
+mod worker;
+pub use worker::fetch_vector_apc;
 
 pub struct RequestSystem<E: Environment, T> {
     kernel: Rc<Kernel<E>>,
@@ -126,98 +120,6 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
         }
         Ok(())
     }
-}
-
-pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context + Clone + Send>(
-    input: Input,
-    context: C,
-    kernel: K,
-) -> AsyncProcedureFuture {
-    Box::pin(async move {
-        let Input::TileRequest { coords, style } = input;
-
-        let client = kernel.source_client();
-        let projection = style
-            .projection
-            .as_ref()
-            .map_or_else(Default::default, |specification| {
-                specification.projection_type.clone()
-            });
-
-        for group in source_layer_groups(&style, TileKind::Vector) {
-            let requested_layers: HashSet<StyleLayer> = group.layers.iter().cloned().collect();
-            if requested_layers.is_empty() {
-                continue;
-            }
-            let data = match client.fetch(&coords, &group.source).await {
-                Ok(data) => data,
-                Err(error) => {
-                    tracing::warn!(%coords,source=?group.source_name,error=%error.describe(),"vector tile unavailable");
-                    for layer in requested_layers {
-                        context
-                            .send_back(T::LayerMissing::build_from(coords, layer.id))
-                            .map_err(ProcedureError::Send)?;
-                    }
-                    continue;
-                }
-            };
-            let (symbols, base): (HashSet<_>, HashSet<_>) = requested_layers
-                .into_iter()
-                .partition(|layer| layer.type_ == "symbol");
-            process_base::<T, C>(
-                &data,
-                VectorTileRequest {
-                    coords,
-                    layers: base,
-                    projection: projection.clone(),
-                },
-                context.clone(),
-            )?;
-            if symbols.is_empty() {
-                continue;
-            }
-            let atlas = crate::sdf::assets::load_symbol_assets(
-                &client,
-                &style,
-                &data,
-                f64::from(u8::from(coords.z)),
-            )
-            .await;
-            let mut processor =
-                ProcessVectorContext::<T, C>::new(context.clone()).with_pending_symbols();
-            process_vector_tile_with_assets(
-                &data,
-                VectorTileRequest {
-                    coords,
-                    layers: symbols,
-                    projection: projection.clone(),
-                },
-                &mut processor,
-                atlas,
-            )
-            .map_err(|error| ProcedureError::Execution(Box::new(error)))?;
-        }
-
-        context
-            .send_back(T::TileTessellated::build_from(coords))
-            .map_err(ProcedureError::Send)?;
-        Ok(())
-    })
-}
-
-fn process_base<T: VectorTransferables, C: Context>(
-    data: &[u8],
-    request: VectorTileRequest,
-    context: C,
-) -> Result<(), ProcedureError> {
-    let mut processor = ProcessVectorContext::<T, C>::new(context).with_pending_symbols();
-    process_vector_tile_with_assets(
-        data,
-        request,
-        &mut processor,
-        std::sync::Arc::new(crate::sdf::assets::SymbolAtlas::default()),
-    )
-    .map_err(|error| ProcedureError::Execution(Box::new(error)))
 }
 
 impl<E: Environment, T: VectorTransferables> RequestSystem<E, T> {

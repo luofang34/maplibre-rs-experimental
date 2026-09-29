@@ -72,6 +72,7 @@ async fn empty_tiles_do_not_starve_later_geometry_uploads() {
             .spawn_mut(*coords)
             .expect("tile")
             .insert(VectorLayerBucketComponent {
+                failed: false,
                 done: true,
                 layers: vec![VectorLayerBucket::AvailableLayer(
                     AvailableVectorLayerBucket {

@@ -83,6 +83,7 @@ fn finish_tile<T: TileTessellated>(world: &mut crate::tcs::world::World, message
         .query_mut::<&mut VectorLayerBucketComponent>(message.coords())
     {
         component.done = true;
+        component.failed |= message.failed();
     }
     if let Some(component) = world
         .tiles
