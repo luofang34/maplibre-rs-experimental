@@ -24,7 +24,6 @@ fn raster(index: u32, generate_borders: bool) -> LayerItem {
             (SetBackgroundPipeline, DrawBackgroundQuad),
         >::new()),
         index,
-        is_line: false,
         generate_borders,
         style_layer: "raster".to_string(),
         tile: Tile {

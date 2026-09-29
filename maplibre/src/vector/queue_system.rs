@@ -77,7 +77,6 @@ pub fn queue_system(
                     {
                         continue;
                     }
-                    let is_line = layer_entry.style_layer.type_ == "line";
                     let draw_function: Box<dyn crate::render::render_phase::Draw<LayerItem>> =
                         match layer_entry.style_layer.type_.as_str() {
                             "line" => Box::new(DrawState::<LayerItem, DrawLineTiles>::new()),
@@ -89,7 +88,6 @@ pub fn queue_system(
                         projection: ProjectionBinding::View,
                         draw_function,
                         index: layer_entry.style_layer.index,
-                        is_line,
                         generate_borders: false,
                         style_layer: layer_entry.style_layer.id.clone(),
                         tile: Tile {

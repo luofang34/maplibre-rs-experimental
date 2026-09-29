@@ -117,7 +117,6 @@ pub(super) fn build_drape_phase(
                 target.layers.push(LayerItem {
                     draw_function,
                     index: layer.index,
-                    is_line: layer.is_line,
                     generate_borders: false,
                     style_layer: layer.id.clone(),
                     tile: Tile {
@@ -136,7 +135,6 @@ pub(super) fn build_drape_phase(
                 target.layers.push(LayerItem {
                     draw_function,
                     index: *index,
-                    is_line: false,
                     generate_borders: false,
                     style_layer: id.clone(),
                     tile: Tile {

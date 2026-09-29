@@ -2,13 +2,10 @@ use std::marker::PhantomData;
 
 use crate::tcs::world::World;
 
-/// A draw function which is used to draw a specific [`PhaseItem`].
-///
-/// They are the the general form of drawing items, whereas [`RenderCommands`](RenderCommand)
-/// are more modular.
+/// Encodes a phase item's draw commands using resources borrowed from the frame's world.
 pub trait Draw<P: PhaseItem>: 'static {
     /// Draws the [`PhaseItem`] by issuing draw calls via the [`wgpu::RenderPass`].
-    fn draw<'w>(&self, pass: &mut wgpu::RenderPass<'w>, wold: &'w World, item: &P);
+    fn draw<'w>(&self, pass: &mut wgpu::RenderPass<'w>, world: &'w World, item: &P);
 }
 
 /// An item which will be drawn to the screen. A phase item should be queued up for rendering
@@ -22,6 +19,7 @@ pub trait PhaseItem {
     /// Determines the order in which the items are drawn during the corresponding [`RenderPhase`](super::RenderPhase).
     fn sort_key(&self) -> Self::SortKey;
 
+    /// Command implementation responsible for this item; it may skip missing resources.
     fn draw_function(&self) -> &dyn Draw<Self>;
 
     /// Projection uniform bound at group zero when drawing this item.
@@ -36,7 +34,6 @@ pub trait PhaseItem {
 /// [`DrawState`] adapts a command or command tuple into a [`Draw`] implementation.
 pub trait RenderCommand<P: PhaseItem> {
     /// Renders the [`PhaseItem`] by issuing draw calls via the [`wgpu::RenderPass`].
-    // TODO: reorder the arguments to match Node and Draw
     fn render<'w>(
         world: &'w World,
         item: &P,
@@ -44,8 +41,12 @@ pub trait RenderCommand<P: PhaseItem> {
     ) -> RenderCommandResult;
 }
 
+/// Whether a command tuple may continue; commands run left to right and stop on failure.
+/// Commands already encoded before a failure are not rolled back.
 pub enum RenderCommandResult {
+    /// Continue with the next command in the tuple.
     Success,
+    /// Skip the remaining commands for this item, commonly because resources are unavailable.
     Failure,
 }
 
@@ -73,12 +74,14 @@ render_command_tuple_impl!(C0, C1, C2);
 render_command_tuple_impl!(C0, C1, C2, C3);
 render_command_tuple_impl!(C0, C1, C2, C3, C4);
 
-pub struct DrawState<C, P> {
+/// Stateless adapter from one render command or a command tuple to a phase-item draw.
+/// A failed command stops its tuple without aborting the render pass.
+pub struct DrawState<P, C> {
     phantom_p: PhantomData<P>,
     phantom_c: PhantomData<C>,
 }
 
-impl<C, P> DrawState<C, P> {
+impl<P, C> DrawState<P, C> {
     pub(crate) fn new() -> Self {
         DrawState {
             phantom_p: Default::default(),

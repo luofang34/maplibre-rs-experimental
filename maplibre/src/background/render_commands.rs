@@ -1,3 +1,7 @@
+//! Background and sky commands that skip draws until their GPU resources are ready.
+
+#![deny(missing_docs)]
+
 use crate::{
     background::resource_system::{
         AtmosphereRenderPipeline, BackgroundRenderPipeline, GlobeBackgroundRenderPipeline,
@@ -12,6 +16,7 @@ use crate::{
     tcs::world::World,
 };
 
+/// Binds the flat-background pipeline when it is initialized.
 pub struct SetBackgroundPipeline;
 impl<P: PhaseItem> RenderCommand<P> for SetBackgroundPipeline {
     fn render<'w>(
@@ -31,6 +36,7 @@ impl<P: PhaseItem> RenderCommand<P> for SetBackgroundPipeline {
     }
 }
 
+/// Binds background metadata and draws a fullscreen quad.
 pub struct DrawBackgroundQuad;
 impl<P: PhaseItem> RenderCommand<P> for DrawBackgroundQuad {
     fn render<'w>(
@@ -51,6 +57,7 @@ impl<P: PhaseItem> RenderCommand<P> for DrawBackgroundQuad {
     }
 }
 
+/// Binds the globe-background pipeline and view projection uniform.
 pub struct SetGlobeBackgroundPipeline;
 impl<P: PhaseItem> RenderCommand<P> for SetGlobeBackgroundPipeline {
     fn render<'w>(
@@ -74,6 +81,7 @@ impl<P: PhaseItem> RenderCommand<P> for SetGlobeBackgroundPipeline {
     }
 }
 
+/// Draws the root globe mesh using background color and tile metadata.
 pub struct DrawGlobeBackgroundQuad;
 impl<P: PhaseItem> RenderCommand<P> for DrawGlobeBackgroundQuad {
     fn render<'w>(
@@ -100,8 +108,10 @@ impl<P: PhaseItem> RenderCommand<P> for DrawGlobeBackgroundQuad {
     }
 }
 
+/// Binds the globe-background pipeline and draws the globe surface.
 pub type DrawGlobeBackground = (SetGlobeBackgroundPipeline, DrawGlobeBackgroundQuad);
 
+/// Binds the atmosphere pipeline and view projection uniform.
 pub struct SetAtmospherePipeline;
 impl<P: PhaseItem> RenderCommand<P> for SetAtmospherePipeline {
     fn render<'w>(
@@ -125,6 +135,7 @@ impl<P: PhaseItem> RenderCommand<P> for SetAtmospherePipeline {
     }
 }
 
+/// Draws atmospheric scattering using the frame's evaluated camera and light metadata.
 pub struct DrawAtmosphereFullscreen;
 impl<P: PhaseItem> RenderCommand<P> for DrawAtmosphereFullscreen {
     fn render<'w>(
@@ -144,8 +155,10 @@ impl<P: PhaseItem> RenderCommand<P> for DrawAtmosphereFullscreen {
     }
 }
 
+/// Binds the atmosphere pipeline and draws scattering over the existing scene.
 pub type DrawAtmosphere = (SetAtmospherePipeline, DrawAtmosphereFullscreen);
 
+/// Binds the sky pipeline when it is initialized.
 pub struct SetSkyPipeline;
 impl<P: PhaseItem> RenderCommand<P> for SetSkyPipeline {
     fn render<'w>(
@@ -167,6 +180,7 @@ impl<P: PhaseItem> RenderCommand<P> for SetSkyPipeline {
     }
 }
 
+/// Draws the horizon-clipped sky when sky metadata is available.
 pub struct DrawSkyFullscreen;
 impl<P: PhaseItem> RenderCommand<P> for DrawSkyFullscreen {
     fn render<'w>(
@@ -192,6 +206,7 @@ impl<P: PhaseItem> RenderCommand<P> for DrawSkyFullscreen {
 /// Fills the screen above the horizon with the sky.
 pub type DrawSky = (SetSkyPipeline, DrawSkyFullscreen);
 
+/// Binds and draws the flat background, stopping if either resource lookup fails.
 pub struct DrawBackground;
 impl<P: PhaseItem> RenderCommand<P> for DrawBackground {
     fn render<'w>(
@@ -199,10 +214,6 @@ impl<P: PhaseItem> RenderCommand<P> for DrawBackground {
         item: &P,
         pass: &mut wgpu::RenderPass<'w>,
     ) -> RenderCommandResult {
-        let mut result = SetBackgroundPipeline::render(world, item, pass);
-        if let RenderCommandResult::Success = result {
-            result = DrawBackgroundQuad::render(world, item, pass);
-        }
-        result
+        <(SetBackgroundPipeline, DrawBackgroundQuad)>::render(world, item, pass)
     }
 }

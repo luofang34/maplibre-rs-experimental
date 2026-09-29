@@ -1,5 +1,6 @@
-//! Specifies the instructions which are going to be sent to the GPU. Render commands can be concatenated
-//! into a new render command which executes multiple instruction sets.
+//! Stencil commands that stop a command tuple when required tile resources are unavailable.
+
+#![deny(missing_docs)]
 use crate::{
     render::{
         eventually::{Eventually, Eventually::Initialized},
@@ -12,6 +13,7 @@ use crate::{
     tcs::world::World,
 };
 
+/// Binds the stencil pipeline and the phase item's view or flat projection uniform.
 pub struct SetMaskPipeline;
 impl<P: PhaseItem> RenderCommand<P> for SetMaskPipeline {
     fn render<'w>(
@@ -37,6 +39,7 @@ impl<P: PhaseItem> RenderCommand<P> for SetMaskPipeline {
     }
 }
 
+/// Draws an indexed tile mask using its current metadata range and cached mesh.
 pub struct DrawMask;
 impl RenderCommand<TileMaskItem> for DrawMask {
     fn render<'w>(
@@ -60,7 +63,6 @@ impl RenderCommand<TileMaskItem> for DrawMask {
             return RenderCommandResult::Failure;
         };
 
-        // Draw mask with stencil value of e.g. parent
         let reference = tile_mask.coords().stencil_reference_value_3d() as u32;
 
         pass.set_stencil_reference(reference);
@@ -80,4 +82,5 @@ impl RenderCommand<TileMaskItem> for DrawMask {
     }
 }
 
+/// Binds the stencil pipeline, then draws the mask if all required resources are ready.
 pub type DrawMasks = (SetMaskPipeline, DrawMask);

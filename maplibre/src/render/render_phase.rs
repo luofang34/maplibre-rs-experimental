@@ -1,4 +1,6 @@
-//! Describes the concept of a [`RenderPhase`] and [`PhaseItem`]
+//! Ordered draw queues and projection bindings consumed by the render passes.
+
+#![deny(missing_docs)]
 
 pub use draw::*;
 
@@ -42,11 +44,12 @@ impl<I: PhaseItem> RenderPhase<I> {
         self.items.push(item);
     }
 
-    /// Sorts all of its [`PhaseItems`](PhaseItem).
+    /// Sorts by ascending key while preserving insertion order for equal keys.
     pub fn sort(&mut self) {
         self.items.sort_by_key(|d| d.sort_key());
     }
 
+    /// Drops queued items while retaining the vector allocation for the next frame.
     pub fn clear(&mut self) {
         self.items.clear();
     }
@@ -56,23 +59,28 @@ impl<I: PhaseItem> RenderPhase<I> {
         self.items.retain(keep);
     }
 
+    /// Number of queued items, including items whose draw resources are not ready.
     pub fn size(&self) -> usize {
         self.items.len()
     }
 }
 
+/// Main-pass draw sorted by style index, then borders before interiors within each layer.
 pub struct LayerItem {
+    /// Command implementation invoked when this item is rendered.
     pub draw_function: Box<dyn Draw<LayerItem>>,
+    /// Style painter-order index; lower indices are rendered first.
     pub index: u32,
-    /// Whether this item uses the line pipeline (true) or fill pipeline (false).
-    pub is_line: bool,
     /// Whether projection-aware raster draws use the seam-expanding mesh variant.
     pub generate_borders: bool,
 
+    /// Style layer ID used to locate matching geometry and paint resources.
     pub style_layer: String,
 
+    /// Tile that owns the geometry or texture used by this draw.
     pub tile: Tile,
-    pub source_shape: TileShape, // FIXME tcs: TileShape contains buffer ranges. This is bad, move them to a component?
+    /// Source transform and metadata range valid for the current frame upload.
+    pub source_shape: TileShape,
     /// Projection uniform the draw binds; drape draws use the flat one.
     pub projection: ProjectionBinding,
 }
@@ -93,14 +101,20 @@ impl PhaseItem for LayerItem {
     }
 }
 
+/// Translucent-pass draw sorted by ascending style index; equal indices keep queue order.
 pub struct TranslucentItem {
+    /// Command implementation invoked when this item is rendered.
     pub draw_function: Box<dyn Draw<TranslucentItem>>,
+    /// Style painter-order index; lower indices are rendered first.
     pub index: u32,
 
+    /// Style layer ID used to locate matching geometry and paint resources.
     pub style_layer: String,
 
+    /// Tile that owns the geometry or texture used by this draw.
     pub tile: Tile,
-    pub source_shape: TileShape, // FIXME tcs: TileShape contains buffer ranges. This is bad, move them to a component?
+    /// Source transform and metadata range valid for the current frame upload.
+    pub source_shape: TileShape,
 }
 
 impl PhaseItem for TranslucentItem {
@@ -115,9 +129,13 @@ impl PhaseItem for TranslucentItem {
     }
 }
 
+/// Stencil draw sorted with seam-expanding masks before tile interiors.
 pub struct TileMaskItem {
+    /// Command implementation invoked when this item is rendered.
     pub draw_function: Box<dyn Draw<TileMaskItem>>,
+    /// Source transform and metadata range valid for the current frame upload.
     pub source_shape: TileShape,
+    /// Selects a mesh expanded across tile seams when `true`.
     pub generate_borders: bool,
     /// Projection uniform the draw binds; drape draws use the flat one.
     pub projection: ProjectionBinding,

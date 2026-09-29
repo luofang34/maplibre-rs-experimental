@@ -86,7 +86,6 @@ pub fn queue_system(
                         projection: ProjectionBinding::View,
                         draw_function: Box::new(DrawState::<LayerItem, DrawDemTiles>::new()),
                         index: style_layer.index,
-                        is_line: false,
                         generate_borders: true,
                         style_layer: style_layer.id.clone(),
                         tile: Tile {
@@ -101,7 +100,6 @@ pub fn queue_system(
                     projection: ProjectionBinding::View,
                     draw_function: Box::new(DrawState::<LayerItem, DrawDemTiles>::new()),
                     index: style_layer.index,
-                    is_line: false,
                     generate_borders: false,
                     style_layer: style_layer.id.clone(),
                     tile: Tile {
