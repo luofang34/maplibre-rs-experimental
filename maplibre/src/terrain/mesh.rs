@@ -1,6 +1,6 @@
 //! Regular grid mesh with skirts, shared by every terrain tile.
 
-use crate::coords::EXTENT_SINT;
+use crate::coords::{EXTENT_SINT, EXTENT_UINT};
 
 /// Grid cells per tile edge, as in GL JS `meshSize`.
 pub const TERRAIN_MESH_SIZE: u32 = 128;
@@ -41,15 +41,17 @@ pub struct TerrainMesh {
 /// Builds the grid with a skirt along each edge, following GL JS `getTerrainMesh`.
 ///
 /// Skirts hang below the tile edges so neighbouring tiles at different zoom levels do not
-/// show cracks between their independently sampled edges.
+/// show cracks between their independently sampled edges. A zero resolution uses one cell.
 pub fn create_terrain_mesh(mesh_size: u32) -> TerrainMesh {
     let n = mesh_size.max(1);
-    let delta = EXTENT_SINT / n as i32;
     let mut mesh = TerrainMesh::default();
     for y in 0..=n {
         for x in 0..=n {
-            mesh.vertices
-                .push(TerrainVertex::new(x as i32 * delta, y as i32 * delta, 0));
+            mesh.vertices.push(TerrainVertex::new(
+                grid_coordinate(x, n),
+                grid_coordinate(y, n),
+                0,
+            ));
         }
     }
     let row = n + 1;
@@ -66,12 +68,16 @@ pub fn create_terrain_mesh(mesh_size: u32) -> TerrainMesh {
             ]);
         }
     }
-    build_skirts(&mut mesh, n, delta);
-    build_polar_caps(&mut mesh, n, delta);
+    build_skirts(&mut mesh, n);
+    build_polar_caps(&mut mesh, n);
     mesh
 }
 
-fn build_skirts(mesh: &mut TerrainMesh, n: u32, delta: i32) {
+fn grid_coordinate(index: u32, cells: u32) -> i32 {
+    (u64::from(index) * u64::from(EXTENT_UINT) / u64::from(cells)) as i32
+}
+
+fn build_skirts(mesh: &mut TerrainMesh, n: u32) {
     let row = n + 1;
     let top = mesh.vertices.len() as u32;
     let top_edge = 0;
@@ -79,11 +85,11 @@ fn build_skirts(mesh: &mut TerrainMesh, n: u32, delta: i32) {
     let bottom_edge = row * n;
     for x in 0..=n {
         mesh.vertices
-            .push(TerrainVertex::new(x as i32 * delta, 0, 1));
+            .push(TerrainVertex::new(grid_coordinate(x, n), 0, 1));
     }
     for x in 0..=n {
         mesh.vertices
-            .push(TerrainVertex::new(x as i32 * delta, EXTENT_SINT, 1));
+            .push(TerrainVertex::new(grid_coordinate(x, n), EXTENT_SINT, 1));
     }
     for x in 0..n {
         mesh.indices.extend([
@@ -107,7 +113,7 @@ fn build_skirts(mesh: &mut TerrainMesh, n: u32, delta: i32) {
         for y in 0..=n {
             for skirt in [0, 1] {
                 mesh.vertices
-                    .push(TerrainVertex::new(x, y as i32 * delta, skirt));
+                    .push(TerrainVertex::new(x, grid_coordinate(y, n), skirt));
             }
         }
     }
@@ -129,12 +135,15 @@ fn build_skirts(mesh: &mut TerrainMesh, n: u32, delta: i32) {
     }
 }
 
-fn build_polar_caps(mesh: &mut TerrainMesh, n: u32, delta: i32) {
+fn build_polar_caps(mesh: &mut TerrainMesh, n: u32) {
     for (edge, marker) in [(0, i16::MIN), (n * (n + 1), i16::MAX)] {
         let start = mesh.vertices.len() as u32;
         for x in 0..=n {
-            mesh.vertices
-                .push(TerrainVertex::new(x as i32 * delta, i32::from(marker), 0));
+            mesh.vertices.push(TerrainVertex::new(
+                grid_coordinate(x, n),
+                i32::from(marker),
+                0,
+            ));
         }
         for x in 0..n {
             // Pole vertices coincide only at a fully spherical projection.

@@ -127,3 +127,128 @@ fn polar_caps_cover_their_interpolated_strips() {
         "separated pole markers require complete strips during projection blending"
     );
 }
+
+#[test]
+fn three_cell_grid_covers_tile_and_connects_its_skirts() {
+    assert_tile_coverage_and_skirts(3);
+}
+
+#[test]
+fn five_cell_grid_covers_tile_and_connects_its_skirts() {
+    assert_tile_coverage_and_skirts(5);
+}
+
+#[test]
+fn odd_fine_grid_covers_tile_and_connects_its_skirts() {
+    assert_tile_coverage_and_skirts(127);
+}
+
+#[test]
+fn zero_resolution_uses_one_cell() {
+    assert_eq!(create_terrain_mesh(0), create_terrain_mesh(1));
+}
+
+fn assert_tile_coverage_and_skirts(n: u32) {
+    let mesh = create_terrain_mesh(n);
+    let grid_count = (n + 1) * (n + 1);
+    let faces: Vec<_> = mesh
+        .indices
+        .chunks_exact(3)
+        .filter(|face| face.iter().all(|i| *i < grid_count))
+        .collect();
+    let mut twice_area = 0_i64;
+    for face in &faces {
+        let [a, b, c]: [_; 3] = std::array::from_fn(|i| {
+            let v = mesh.vertices[face[i] as usize];
+            [i64::from(v.x), i64::from(v.y)]
+        });
+        let signed = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+        assert!(
+            signed < 0,
+            "grid {n} contains a collapsed or inverted triangle"
+        );
+        twice_area -= signed;
+    }
+    let edge = f64::from(EXTENT_SINT);
+    for point in [
+        [edge - 0.25, edge * 0.25],
+        [edge - 0.25, edge * 0.75],
+        [edge * 0.25, edge - 0.25],
+        [edge * 0.75, edge - 0.25],
+        [edge - 0.25, edge - 0.25],
+    ] {
+        assert!(
+            faces.iter().any(|face| contains_point(&mesh, face, point)),
+            "grid {n} leaves {point:?} uncovered by its surface triangles"
+        );
+    }
+    assert_eq!(
+        twice_area,
+        2 * i64::from(EXTENT_SINT).pow(2),
+        "grid {n} does not cover the full tile surface"
+    );
+    assert_skirts_attach_to_boundary(&mesh, &faces, n);
+}
+
+fn contains_point(mesh: &super::TerrainMesh, face: &[u32], point: [f64; 2]) -> bool {
+    let vertices: [_; 3] = std::array::from_fn(|i| {
+        let v = mesh.vertices[face[i] as usize];
+        [f64::from(v.x), f64::from(v.y)]
+    });
+    (0..3).all(|i| {
+        let a = vertices[i];
+        let b = vertices[(i + 1) % 3];
+        (b[0] - a[0]) * (point[1] - a[1]) - (b[1] - a[1]) * (point[0] - a[0]) <= 0.0
+    })
+}
+
+fn assert_skirts_attach_to_boundary(mesh: &super::TerrainMesh, faces: &[&[u32]], n: u32) {
+    use std::collections::{BTreeSet, HashMap};
+    let mut incidence = HashMap::new();
+    for face in faces {
+        for i in 0..3 {
+            let (a, b) = (face[i], face[(i + 1) % 3]);
+            let edge = (a.min(b), a.max(b));
+            *incidence.entry(edge).or_insert(0_u32) += 1;
+        }
+    }
+    let xy = |i: u32| {
+        let v = mesh.vertices[i as usize];
+        (v.x, v.y)
+    };
+    let boundary: BTreeSet<_> = incidence
+        .into_iter()
+        .filter(|(_, count)| *count == 1)
+        .map(|((a, b), _)| ordered_edge(xy(a), xy(b)))
+        .collect();
+    let points: BTreeSet<_> = boundary.iter().flat_map(|(a, b)| [*a, *b]).collect();
+    let mut attached = BTreeSet::new();
+    for face in mesh.indices.chunks_exact(3) {
+        if !face.iter().any(|i| mesh.vertices[*i as usize].skirt == 1) {
+            continue;
+        }
+        let ground: Vec<_> = face
+            .iter()
+            .filter(|i| mesh.vertices[**i as usize].skirt == 0)
+            .map(|i| xy(*i))
+            .collect();
+        if ground.len() == 2 {
+            attached.insert(ordered_edge(ground[0], ground[1]));
+        }
+        for i in face
+            .iter()
+            .filter(|i| mesh.vertices[**i as usize].skirt == 1)
+        {
+            assert!(
+                points.contains(&xy(*i)),
+                "grid {n} skirt vertex {:?} does not descend from a surface boundary vertex",
+                xy(*i)
+            );
+        }
+    }
+    assert_eq!(attached, boundary, "grid {n} has an open skirt attachment");
+}
+
+fn ordered_edge(a: (i16, i16), b: (i16, i16)) -> ((i16, i16), (i16, i16)) {
+    (a.min(b), a.max(b))
+}
