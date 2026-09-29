@@ -1,4 +1,4 @@
-use super::{DrawState, LayerItem, PhaseItem, RenderPhase, TileMaskItem};
+use super::{DrawState, LayerItem, RenderPhase, TileMaskItem};
 use crate::{
     background::render_commands::{DrawBackgroundQuad, SetBackgroundPipeline},
     render::{
@@ -46,7 +46,7 @@ fn bordered_stencil_pass_sorts_before_borderless_pass() {
 }
 
 #[test]
-fn raster_borders_sort_before_interiors_without_crossing_style_layers() {
+fn raster_interiors_sort_before_borders_without_crossing_style_layers() {
     let mut phase = RenderPhase::default();
     phase.add(raster(2, false));
     phase.add(raster(1, false));
@@ -58,7 +58,7 @@ fn raster_borders_sort_before_interiors_without_crossing_style_layers() {
     let keys = phase
         .items
         .iter()
-        .map(PhaseItem::sort_key)
+        .map(|item| (item.index, item.generate_borders))
         .collect::<Vec<_>>();
     assert_eq!(keys, vec![(1, false), (1, true), (2, false), (2, true)]);
 }

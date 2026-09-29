@@ -191,3 +191,5 @@ mod tests;
 mod stencil;
 
 mod source_identity;
+
+mod alpha;

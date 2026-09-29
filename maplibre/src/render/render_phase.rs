@@ -65,7 +65,7 @@ impl<I: PhaseItem> RenderPhase<I> {
     }
 }
 
-/// Main-pass draw sorted by style index, then borders before interiors within each layer.
+/// Main-pass draw sorted by style index, then interiors before borders within each layer.
 pub struct LayerItem {
     /// Command implementation invoked when this item is rendered.
     pub draw_function: Box<dyn Draw<LayerItem>>,
@@ -89,7 +89,7 @@ impl PhaseItem for LayerItem {
     type SortKey = (u32, bool);
 
     fn sort_key(&self) -> Self::SortKey {
-        (self.index, !self.generate_borders)
+        (self.index, self.generate_borders)
     }
 
     fn draw_function(&self) -> &dyn Draw<LayerItem> {
