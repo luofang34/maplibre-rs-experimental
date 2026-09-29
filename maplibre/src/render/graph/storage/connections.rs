@@ -46,8 +46,7 @@ impl RenderGraph {
         Ok(())
     }
 
-    /// Removes the [`Edge::SlotEdge`] from the graph. If any nodes or slots do not exist then
-    /// nothing happens.
+    /// Removes a resource connection, returning an error if its nodes, slots or edge are absent.
     pub fn remove_slot_edge(
         &mut self,
         output_node: impl Into<NodeLabel>,
@@ -117,8 +116,7 @@ impl RenderGraph {
         Ok(())
     }
 
-    /// Removes the [`Edge::NodeEdge`] from the graph. If either node does not exist then nothing
-    /// happens.
+    /// Removes an ordering dependency, returning an error if its nodes or edge are absent.
     pub fn remove_node_edge(
         &mut self,
         output_node: impl Into<NodeLabel>,
@@ -144,8 +142,8 @@ impl RenderGraph {
         Ok(())
     }
 
-    /// Verifies that the edge existence is as expected and
-    /// checks that slot edges are connected correctly.
+    /// Checks the expected edge presence and, for slot edges, declarations and single-producer
+    /// compatibility. This does not check the graph for cycles.
     pub fn validate_edge(
         &mut self,
         edge: &Edge,

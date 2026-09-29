@@ -1,5 +1,7 @@
 //! Executes a [`RenderGraph`]
 
+#![deny(missing_docs)]
+
 use std::{
     borrow::Cow,
     collections::{HashMap, VecDeque},
@@ -22,26 +24,41 @@ use crate::{
 pub(crate) struct RenderGraphRunner;
 
 #[derive(Error, Debug)]
+/// Graph execution failed before the runner could submit its recorded commands.
 pub enum RenderGraphRunnerError {
+    /// A node reported a slot or subgraph error.
     #[error(transparent)]
     NodeRunError(#[from] NodeRunError),
+    /// A node returned successfully without assigning one of its declared outputs.
     #[error("node output slot not set (index {slot_index}, name {slot_name})")]
     EmptyNodeOutputSlot {
+        /// Concrete node implementation that omitted the output.
         type_name: &'static str,
+        /// Zero-based position of the unset output.
         slot_index: usize,
+        /// Declared name of the unset output.
         slot_name: Cow<'static, str>,
     },
+    /// A graph input node requires a value not present in the supplied input vector.
     #[error("graph (name: '{graph_name:?}') could not be run because slot '{slot_name}' at index {slot_index} has no value")]
     MissingInput {
+        /// Zero-based position of the missing input value.
         slot_index: usize,
+        /// Declared name of the missing input.
         slot_name: Cow<'static, str>,
+        /// Subgraph name, or `None` for the root graph.
         graph_name: Option<Cow<'static, str>>,
     },
+    /// A graph input value has a different resource type from its declaration.
     #[error("attempted to use the wrong type for input slot")]
     MismatchedInputSlotType {
+        /// Zero-based position of the incompatible value.
         slot_index: usize,
+        /// Declared name of the input slot.
         label: SlotLabel,
+        /// Resource type required by the declaration.
         expected: SlotType,
+        /// Resource type of the supplied value.
         actual: SlotType,
     },
 }

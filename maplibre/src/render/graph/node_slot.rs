@@ -75,7 +75,9 @@ impl fmt::Display for SlotType {
 /// inside the [`RenderGraph`](super::RenderGraph).
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum SlotLabel {
+    /// Zero-based position within one node's input or output declarations.
     Index(usize),
+    /// Name resolved within one node's input or output declarations.
     Name(Cow<'static, str>),
 }
 
@@ -112,11 +114,14 @@ impl From<usize> for SlotLabel {
 /// The internal representation of a slot, which specifies its [`SlotType`] and name.
 #[derive(Clone, Debug)]
 pub struct SlotInfo {
+    /// Lookup name; uniqueness within a slot collection is the caller's responsibility.
     pub name: Cow<'static, str>,
+    /// GPU resource type required for this input or produced by this output.
     pub slot_type: SlotType,
 }
 
 impl SlotInfo {
+    /// Declares a named resource slot without allocating a GPU resource.
     pub fn new(name: impl Into<Cow<'static, str>>, slot_type: SlotType) -> Self {
         SlotInfo {
             name: name.into(),
@@ -167,7 +172,8 @@ impl SlotInfos {
         self.slots.get_mut(index)
     }
 
-    /// Retrieves the index (inside input or output slots) of the slot for the provided label.
+    /// Resolves a name or index to a declared slot position, returning `None` outside the collection.
+    /// If names are duplicated, the first matching declaration wins.
     pub fn get_slot_index(&self, label: impl Into<SlotLabel>) -> Option<usize> {
         let label = label.into();
         match label {

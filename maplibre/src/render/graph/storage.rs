@@ -12,11 +12,9 @@ use crate::{
     tcs::world::World,
 };
 
-/// The render graph configures the modular, parallel and re-usable render logic.
-/// It is a retained and stateless (nodes itself my have their internal state) structure,
-/// which can not be modified while it is executed by the graph runner.
-///
-/// The `RenderGraphRunner` is responsible for executing the entire graph each frame.
+/// Retained node definitions and resource dependencies for a render pass sequence.
+/// Nodes can retain internal state; the runner borrows the topology while executing nodes
+/// in dependency order and recording their commands in a shared encoder.
 ///
 /// It consists of three main components: [`Nodes`](Node), [`Edges`](Edge)
 /// and [`Slots`](super::SlotType).
@@ -26,31 +24,21 @@ use crate::{
 /// Slots describe the render resources created or used by the nodes.
 ///
 /// Additionally a render graph can contain multiple sub graphs, which are run by the
-/// corresponding nodes. Every render graph can have it’s own optional input node.
+/// corresponding nodes. Every render graph can have its own optional input node.
+/// The caller must construct an acyclic graph and connect every required node input;
+/// connection insertion does not detect cycles.
 ///
 /// ## Example
 /// Here is a simple render graph example with two nodes connected by a node edge.
 /// ```
-/// #
-/// # use maplibre::tcs::world::World;
-/// use maplibre::render::graph::{Node, NodeRunError, RenderContext, RenderGraph, RenderGraphContext};
-/// # use maplibre::render::{RenderResources};
-/// # struct MyNode;
-/// #
-/// # impl Node for MyNode {
-/// #     fn run(&self,
-/// #               graph: &mut RenderGraphContext,
-/// #               render_context: &mut RenderContext,
-/// #               state: &RenderResources,
-/// #               world: &World) -> Result<(), NodeRunError> {
-/// #         unimplemented!()
-/// #     }
-/// # }
-/// #
+/// use maplibre::render::graph::{EmptyNode, RenderGraph, RenderGraphError};
+/// # fn main() -> Result<(), RenderGraphError> {
 /// let mut graph = RenderGraph::default();
-/// graph.add_node("input_node", MyNode);
-/// graph.add_node("output_node", MyNode);
-/// graph.add_node_edge("output_node", "input_node").unwrap();
+/// graph.add_node("prepare", EmptyNode);
+/// graph.add_node("draw", EmptyNode);
+/// graph.add_node_edge("prepare", "draw")?;
+/// # Ok(())
+/// # }
 /// ```
 #[derive(Default)]
 pub struct RenderGraph {
@@ -77,7 +65,10 @@ impl RenderGraph {
         }
     }
 
-    /// Creates an [`GraphInputNode`] with the specified slots if not already present.
+    /// Creates the graph input node with matching input and output declarations.
+    ///
+    /// # Panics
+    /// Panics if an input node has already been set, even if it was subsequently removed by name.
     pub fn set_input(&mut self, inputs: Vec<SlotInfo>) -> NodeId {
         assert!(self.input_node.is_none(), "Graph already has an input node");
 
@@ -86,14 +77,14 @@ impl RenderGraph {
         id
     }
 
-    /// Returns the [`NodeState`] of the input node of this graph..
+    /// Returns the input node's state if it is still stored in the graph.
     #[inline]
     pub fn input_node(&self) -> Option<&NodeState> {
         self.input_node.and_then(|id| self.get_node_state(id).ok())
     }
 
-    /// Adds the `node` with the `name` to the graph.
-    /// If the name is already present replaces it instead.
+    /// Allocates an ID for the node and binds its name for subsequent name-based lookups.
+    /// Reusing a name rebinds the lookup; the earlier node and its edges remain under its ID.
     pub fn add_node<T>(&mut self, name: impl Into<Cow<'static, str>>, node: T) -> NodeId
     where
         T: Node,
@@ -109,7 +100,7 @@ impl RenderGraph {
     }
 
     /// Removes the `node` with the `name` from the graph.
-    /// If the name is does not exist, nothing happens.
+    /// If the name does not exist, nothing happens.
     pub fn remove_node(
         &mut self,
         name: impl Into<Cow<'static, str>>,
@@ -195,7 +186,7 @@ impl RenderGraph {
             .ok_or(RenderGraphError::InvalidNode(label))
     }
 
-    /// Retrieves the [`NodeId`] referenced by the `label`.
+    /// Resolves a registered name or passes through an explicit ID without checking its presence.
     pub fn get_node_id(&self, label: impl Into<NodeLabel>) -> Result<NodeId, RenderGraphError> {
         let label = label.into();
         match label {
@@ -227,12 +218,12 @@ impl RenderGraph {
         self.get_node_state_mut(label).and_then(|n| n.node_mut())
     }
 
-    /// Returns an iterator over the [`NodeStates`](NodeState).
+    /// Iterates stored nodes in unspecified order, not dependency or insertion order.
     pub fn iter_nodes(&self) -> impl Iterator<Item = &NodeState> {
         self.nodes.values()
     }
 
-    /// Returns an iterator over the [`NodeStates`](NodeState), that allows modifying each value.
+    /// Mutably iterates stored nodes in unspecified order; topology lookup tables remain unchanged.
     pub fn iter_nodes_mut(&mut self) -> impl Iterator<Item = &mut NodeState> {
         self.nodes.values_mut()
     }

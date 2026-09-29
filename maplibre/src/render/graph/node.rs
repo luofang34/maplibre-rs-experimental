@@ -12,20 +12,21 @@ use crate::{render::RenderResources, tcs::world::World};
 /// The context with all information required to interact with the GPU.
 ///
 /// The [`Device`](wgpu::Device) is used to create render resources and the
-/// the [`CommandEncoder`](wgpu::CommandEncoder) is used to record a series of GPU operations.
+/// [`CommandEncoder`](wgpu::CommandEncoder) records GPU operations for submission by the runner.
 pub struct RenderContext<'d> {
+    /// Device that owns the resources used by this graph execution.
     pub device: &'d wgpu::Device,
+    /// Shared command stream for this graph and its subgraphs; nodes append without submitting it.
     pub command_encoder: wgpu::CommandEncoder,
 }
 
-/// A [`Node`] identifier.
-/// It automatically generates its own random uuid.
-///
-/// This id is used to reference the node internally (edges, etc).
+/// Numeric identity assigned within a [`RenderGraph`](super::RenderGraph).
+/// IDs from different graphs can have the same numeric value and are not interchangeable.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct NodeId(usize);
 
 impl NodeId {
+    /// Wraps a raw ID without checking whether a graph contains it.
     #[allow(clippy::new_without_default)]
     pub fn new(id: usize) -> Self {
         NodeId(id)
@@ -36,7 +37,7 @@ impl NodeId {
 ///
 /// Nodes are the fundamental part of the graph and used to extend its functionality, by
 /// generating draw calls and/or running subgraphs.
-/// They are added via the `render_graph::add_node(my_node)` method.
+/// They are added with [`RenderGraph::add_node`](super::RenderGraph::add_node).
 ///
 /// To determine their position in the graph and ensure that all required dependencies (inputs)
 /// are already executed, [`Edges`](Edge) are used.
@@ -52,7 +53,7 @@ pub trait Node: Downcast + Send + Sync + 'static {
     }
 
     /// Specifies the produced output slots for this node.
-    /// They can then be passed one inside [`RenderGraphContext`] during the run method.
+    /// Every declared output must be assigned through [`RenderGraphContext`] during the run method.
     fn output(&self) -> Vec<SlotInfo> {
         Vec::new()
     }
@@ -63,6 +64,7 @@ pub trait Node: Downcast + Send + Sync + 'static {
     /// Runs the graph node logic, issues draw calls, updates the output slots and
     /// optionally queues up subgraphs for execution. The graph data, input and output values are
     /// passed via the [`RenderGraphContext`].
+    /// Returning an error aborts this graph execution before the runner submits its command buffer.
     fn run(
         &self,
         graph: &mut RenderGraphContext,
@@ -75,11 +77,15 @@ pub trait Node: Downcast + Send + Sync + 'static {
 impl_downcast!(Node);
 
 #[derive(Error, Debug, Eq, PartialEq)]
+/// A node failed while accessing slots or requesting a subgraph.
 pub enum NodeRunError {
+    /// Reading a required input failed.
     #[error("encountered an input slot error")]
     InputSlotError(#[from] InputSlotError),
+    /// Assigning a declared output failed.
     #[error("encountered an output slot error")]
     OutputSlotError(#[from] OutputSlotError),
+    /// Validating a queued subgraph request failed.
     #[error("encountered an error when running a sub-graph")]
     RunSubGraphError(#[from] RunSubGraphError),
 }
@@ -211,13 +217,19 @@ impl Edges {
 ///
 /// The `input_slots` and `output_slots` are provided by the `node`.
 pub struct NodeState {
+    /// Identity used by the graph's edges and ID-based lookups.
     pub id: NodeId,
+    /// Optional display name; changing it does not update the graph's name lookup table.
     pub name: Option<Cow<'static, str>>,
     /// The name of the type that implements [`Node`].
     pub type_name: &'static str,
+    /// Concrete node implementation retained between executions.
     pub node: Box<dyn Node>,
+    /// Ordered input declarations captured when constructing this state.
     pub input_slots: SlotInfos,
+    /// Ordered output declarations captured when constructing this state.
     pub output_slots: SlotInfos,
+    /// Incoming dependencies and outgoing consumers of this node.
     pub edges: Edges,
 }
 
@@ -228,7 +240,7 @@ impl Debug for NodeState {
 }
 
 impl NodeState {
-    /// Creates an [`NodeState`] without edges, but the `input_slots` and `output_slots`
+    /// Creates a [`NodeState`] without edges, but the `input_slots` and `output_slots`
     /// are provided by the `node`.
     pub fn new<T>(id: NodeId, node: T) -> Self
     where
@@ -249,7 +261,7 @@ impl NodeState {
         }
     }
 
-    /// Retrieves the [`Node`].
+    /// Borrows the concrete node, or returns [`RenderGraphError::WrongNodeType`] if `T` differs.
     pub fn node<T>(&self) -> Result<&T, RenderGraphError>
     where
         T: Node,
@@ -259,7 +271,7 @@ impl NodeState {
             .ok_or(RenderGraphError::WrongNodeType)
     }
 
-    /// Retrieves the [`Node`] mutably.
+    /// Mutably borrows the concrete node, or returns [`RenderGraphError::WrongNodeType`] if `T` differs.
     pub fn node_mut<T>(&mut self) -> Result<&mut T, RenderGraphError>
     where
         T: Node,
@@ -292,7 +304,9 @@ impl NodeState {
 /// inside the [`RenderGraph`](super::RenderGraph).
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum NodeLabel {
+    /// Numeric identity within the graph being queried.
     Id(NodeId),
+    /// Name registered in that graph's lookup table.
     Name(Cow<'static, str>),
 }
 
