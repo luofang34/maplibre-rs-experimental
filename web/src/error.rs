@@ -63,9 +63,9 @@ pub enum JSError {
     #[error(transparent)]
     Map(#[from] maplibre::map::MapError),
     #[error(transparent)]
-    EventLoop(#[from] maplibre::event_loop::EventLoopError),
-    #[error("map window has no event loop")]
-    MissingEventLoop,
+    Host(#[from] maplibre_winit::WinitHostError),
+    #[error("event loop closed before map initialization completed")]
+    ClosedBeforeReady,
 }
 
 impl From<JSError> for JsValue {

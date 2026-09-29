@@ -6,7 +6,6 @@ use std::path::PathBuf;
 
 use maplibre::{
     environment::OffscreenKernelConfig,
-    event_loop::EventLoop,
     io::apc::SchedulerAsyncProcedureCall,
     kernel::{Kernel, KernelBuildError, KernelBuilder},
     map::{Map, MapError},
@@ -21,7 +20,7 @@ use maplibre::{
 use thiserror::Error;
 
 use super::{HeadedMapOptions, WinitMapWindowConfig};
-use crate::WinitEnvironment;
+use crate::{WinitApplicationError, WinitEnvironment, WinitEventLoop, WinitHostError};
 
 type NativeEnvironment = WinitEnvironment<
     TokioScheduler,
@@ -46,12 +45,12 @@ pub enum HeadedMapError {
     /// The map window or renderer could not be initialized.
     #[error("map initialization failed")]
     Map(#[from] MapError),
-    /// The host window did not retain an event loop.
-    #[error("map window has no event loop")]
-    MissingEventLoop,
-    /// The platform event loop returned an error.
-    #[error("map event loop failed")]
-    EventLoop(#[from] maplibre::event_loop::EventLoopError),
+    /// The operating system rejected a window or event loop.
+    #[error(transparent)]
+    Host(#[from] WinitHostError),
+    /// The window closed before renderer initialization completed.
+    #[error("event loop closed before map initialization completed")]
+    ClosedBeforeReady,
 }
 
 /// Opens a native window and runs its map until the event loop exits.
@@ -66,19 +65,30 @@ pub fn run_headed_map<P: Into<PathBuf>>(
 ) -> Result<(), HeadedMapError> {
     let cache_path = cache_path.map(Into::into);
     let cache_directory = cache_directory(cache_path.as_ref())?;
+    let event_loop = WinitEventLoop::new(&window_config)?;
     run_multithreaded(async {
-        let kernel = create_kernel(cache_path, cache_directory, window_config)?;
-        let renderer_builder = RendererBuilder::new().with_wgpu_settings(wgpu_settings);
-        let plugins = map_plugins(&style, options.debug_tiles);
-        let mut map = Map::new(style, kernel, renderer_builder, plugins)?;
-        map.set_max_pitch(cgmath::Deg(options.max_pitch_degrees));
-        #[cfg(not(target_os = "android"))]
-        map.initialize_renderer().await?;
-        map.window_mut()
-            .take_event_loop()
-            .ok_or(HeadedMapError::MissingEventLoop)?
-            .run(map, options.max_frames)?;
-        Ok(())
+        let result = event_loop.run_map_blocking(
+            window_config,
+            move |bound_config| {
+                let kernel =
+                    create_kernel(cache_path.clone(), cache_directory.clone(), bound_config)?;
+                let renderer_builder =
+                    RendererBuilder::new().with_wgpu_settings(wgpu_settings.clone());
+                let plugins = map_plugins(&style, options.debug_tiles);
+                let mut map = Map::new(style.clone(), kernel, renderer_builder, plugins)?;
+                map.set_max_pitch(cgmath::Deg(options.max_pitch_degrees));
+                Ok::<_, HeadedMapError>(map)
+            },
+            options.max_frames,
+        );
+        result.map_err(|error| match error {
+            WinitApplicationError::CreateMap(error) => error,
+            WinitApplicationError::Host(error) => HeadedMapError::Host(error),
+            WinitApplicationError::Initialize(error) | WinitApplicationError::Frame(error) => {
+                HeadedMapError::Map(error)
+            }
+            WinitApplicationError::ClosedBeforeReady => HeadedMapError::ClosedBeforeReady,
+        })
     })
 }
 

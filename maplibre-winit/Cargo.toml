@@ -34,3 +34,14 @@ tracing.workspace = true
 thiserror.workspace = true
 reqwest = { workspace = true, features = ["json"] }
 serde_json.workspace = true
+
+[features]
+window-lifecycle-test = []
+
+[dev-dependencies]
+wgpu.workspace = true
+
+[[test]]
+name = "lifecycle"
+harness = false
+required-features = ["window-lifecycle-test"]

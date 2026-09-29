@@ -1,182 +1,89 @@
-//! Event dispatch and redraw timing for winit windows.
-
-use std::fmt::Debug;
-
-use instant::Instant;
+//! Resumed window creation and event dispatch for native and browser hosts.
+use crate::{WinitApplicationError, WinitHostError, WinitMapWindowConfig};
 use maplibre::{
     environment::Environment,
-    event_loop::{EventLoop, EventLoopError, EventLoopProxy, SendEventError},
+    event_loop::{EventLoopProxy, SendEventError},
     map::Map,
-    render::frame_input::FrameInput,
-    window::{HeadedMapWindow, MapWindowConfig, PhysicalSize},
-};
-use winit::{
-    event::{ElementState, Event, KeyEvent, WindowEvent},
-    event_loop::ActiveEventLoop,
-    keyboard::{Key, NamedKey},
 };
 
-use crate::input::{InputController, UpdateState};
+mod dispatch;
+mod lifecycle;
+pub use lifecycle::Application as WinitApplication;
+#[cfg(target_arch = "wasm32")]
+mod completion;
+mod initialization;
 
+/// Platform event loop for application events.
 pub type RawWinitEventLoop<ET> = winit::event_loop::EventLoop<ET>;
+/// Platform user-event sender.
 pub type RawEventLoopProxy<ET> = winit::event_loop::EventLoopProxy<ET>;
 
+/// Owns event dispatch independently of any window or presentation surface.
 pub struct WinitEventLoop<ET: 'static> {
     pub(crate) event_loop: RawWinitEventLoop<ET>,
 }
-
-impl<ET: 'static + PartialEq + Debug> EventLoop<ET> for WinitEventLoop<ET> {
-    type EventLoopProxy = WinitEventLoopProxy<ET>;
-
-    fn run<E>(self, map: Map<E>, max_frames: Option<u64>) -> Result<(), EventLoopError>
-    where
-        E: Environment,
-        <E::MapWindowConfig as MapWindowConfig>::MapWindow: HeadedMapWindow,
-    {
-        let mut state = Dispatch::new(map, max_frames);
-        let dispatch = move |event, target: &ActiveEventLoop| state.handle_event(event, target);
-        #[cfg(target_arch = "wasm32")]
-        {
-            winit::platform::web::EventLoopExtWebSys::spawn(self.event_loop, dispatch);
-            Ok(())
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        self.event_loop.run(dispatch).map_err(|_| EventLoopError)
+impl<ET: 'static + Clone> WinitEventLoop<ET> {
+    /// Builds the event loop without creating a window before the host resumes.
+    pub fn new(config: &WinitMapWindowConfig<ET>) -> Result<Self, WinitHostError> {
+        Ok(Self {
+            event_loop: config.event_loop()?,
+        })
     }
-
-    fn create_proxy(&self) -> Self::EventLoopProxy {
+    /// Creates a sender for this event loop.
+    pub fn create_proxy(&self) -> WinitEventLoopProxy<ET> {
         WinitEventLoopProxy {
             proxy: self.event_loop.create_proxy(),
         }
     }
-}
 
-struct Dispatch<E: Environment>
-where
-    <E::MapWindowConfig as MapWindowConfig>::MapWindow: HeadedMapWindow,
-{
-    map: Map<E>,
-    input: InputController,
-    started: Instant,
-    last_render: Instant,
-    frame: u64,
-    max_frames: Option<u64>,
-    scale_factor: f64,
-}
-
-impl<E: Environment> Dispatch<E>
-where
-    <E::MapWindowConfig as MapWindowConfig>::MapWindow: HeadedMapWindow,
-{
-    fn new(map: Map<E>, max_frames: Option<u64>) -> Self {
-        let now = Instant::now();
-        let scale_factor = map.window().scale_factor();
-        Self {
-            map,
-            input: InputController::new(0.2, 100.0, 0.1),
-            started: now,
-            last_render: now,
-            frame: 0,
-            max_frames,
-            scale_factor,
-        }
+    /// Runs a native map factory on the active event loop and returns lifecycle failures.
+    /// Suspended initialization preserves its map and services for the next resume.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn run_map_blocking<E, F, C>(
+        self,
+        config: WinitMapWindowConfig<ET>,
+        factory: F,
+        max_frames: Option<u64>,
+    ) -> Result<(), WinitApplicationError<C>>
+    where
+        E: Environment<MapWindowConfig = WinitMapWindowConfig<ET>>,
+        F: FnMut(WinitMapWindowConfig<ET>) -> Result<Map<E>, C>,
+        C: std::error::Error + 'static,
+    {
+        let mut app = lifecycle::Application::new(config, factory, max_frames);
+        self.event_loop
+            .run_app(&mut app)
+            .map_err(WinitHostError::EventLoop)?;
+        app.finish()
     }
 
-    fn handle_event<ET>(&mut self, event: Event<ET>, target: &ActiveEventLoop) {
-        #[cfg(target_os = "android")]
-        if !self.map.is_initialized() && matches!(event, Event::Resumed) {
-            let result = tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(self.map.initialize_renderer())
-            });
-            if let Err(error) = result {
-                tracing::error!(%error, "resuming renderer failed");
-                target.exit();
-            }
-            return;
-        }
-        match event {
-            Event::DeviceEvent { event, .. } => {
-                self.input.device_input(&event);
-            }
-            Event::WindowEvent { event, window_id }
-                if window_id == self.map.window().id().into() =>
-            {
-                self.window_event(&event, target);
-            }
-            Event::Suspended => self.map.reset(),
-            _ => {}
-        }
-    }
-
-    fn window_event(&mut self, event: &WindowEvent, target: &ActiveEventLoop) {
-        if matches!(event, WindowEvent::RedrawRequested) {
-            self.redraw(target);
-        }
-        if self.input.window_input(event, self.scale_factor) {
-            return;
-        }
-        match event {
-            WindowEvent::CloseRequested
-            | WindowEvent::KeyboardInput {
-                event:
-                    KeyEvent {
-                        state: ElementState::Pressed,
-                        logical_key: Key::Named(NamedKey::Escape),
-                        ..
-                    },
-                ..
-            } => target.exit(),
-            WindowEvent::Resized(size) => {
-                // Minimized windows can report a zero extent, which cannot configure a surface.
-                if let Some(size) = PhysicalSize::new(size.width, size.height) {
-                    if let Ok(context) = self.map.context_mut() {
-                        context.resize(size, self.scale_factor);
-                        self.map.window().request_redraw();
-                    }
-                }
-            }
-            WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
-                self.scale_factor = *scale_factor;
-                if let Ok(context) = self.map.context_mut() {
-                    context.resize(context.renderer.resources.surface.size(), self.scale_factor);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    fn redraw(&mut self, target: &ActiveEventLoop) {
-        if !self.map.is_initialized() {
-            return;
-        }
-        let now = Instant::now();
-        let elapsed = now - self.last_render;
-        self.last_render = now;
-        if let Ok(context) = self.map.context_mut() {
-            context
-                .world
-                .resources
-                .get_or_init_mut::<FrameInput>()
-                .timestamp = now - self.started;
-            self.input.update_state(context, elapsed);
-        }
-        if let Err(error) = self.map.run_schedule() {
-            tracing::error!(%error, "rendering frame failed");
-            target.exit();
-            return;
-        }
-        if self.max_frames.is_some_and(|max| self.frame >= max) {
-            target.exit();
-        }
-        self.frame = self.frame.wrapping_add(1);
-        self.map.window().request_redraw();
+    /// Starts browser dispatch and resolves after the first successful renderer initialization.
+    /// Suspended initialization preserves its map and services for the next resume.
+    #[cfg(target_arch = "wasm32")]
+    pub async fn spawn_map<E, F, C>(
+        self,
+        config: WinitMapWindowConfig<ET>,
+        factory: F,
+        max_frames: Option<u64>,
+    ) -> Result<(), WinitApplicationError<C>>
+    where
+        E: Environment<MapWindowConfig = WinitMapWindowConfig<ET>>,
+        F: FnMut(WinitMapWindowConfig<ET>) -> Result<Map<E>, C> + 'static,
+        C: std::error::Error + 'static,
+    {
+        use winit::platform::web::EventLoopExtWebSys;
+        let (callback, completion) = completion::channel();
+        let mut app = lifecycle::Application::new(config, factory, max_frames);
+        app.completion = Some(callback);
+        self.event_loop.spawn_app(app);
+        completion.await
     }
 }
 
+/// Sender that reports when its host loop is closed.
 pub struct WinitEventLoopProxy<ET: 'static> {
     proxy: RawEventLoopProxy<ET>,
 }
-
 impl<ET: 'static> EventLoopProxy<ET> for WinitEventLoopProxy<ET> {
     fn send_event(&self, event: ET) -> Result<(), SendEventError> {
         self.proxy

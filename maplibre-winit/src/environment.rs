@@ -9,6 +9,7 @@ use maplibre::{
 
 use crate::WinitMapWindowConfig;
 
+/// Selects winit windows and the host scheduler, HTTP client and worker transport for a map.
 pub struct WinitEnvironment<
     S: Scheduler,
     HC: HttpClient,

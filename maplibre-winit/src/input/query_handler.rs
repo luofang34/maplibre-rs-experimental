@@ -49,11 +49,7 @@ impl QueryHandler {
             return false;
         }
 
-        if *state == ElementState::Pressed {
-            self.clicking = true;
-        } else {
-            self.clicking = false;
-        }
+        self.clicking = *state == ElementState::Pressed;
         true
     }
 }

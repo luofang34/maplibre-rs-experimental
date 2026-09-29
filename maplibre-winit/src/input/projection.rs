@@ -16,12 +16,14 @@ use maplibre::{
     terrain::interaction::pan_mercator_by_pixels,
 };
 
+/// Returns the globe camera while any globe transition is active, or `None` for an invalid view.
 pub fn active_globe_camera(style: &Style, view_state: &ViewState) -> Option<GlobeCameraState> {
     uses_globe(style, view_state)
         .then(|| globe_camera_for_view(view_state).ok())
         .flatten()
 }
 
+/// Whether the selected projection retains a globe contribution at the view zoom.
 pub fn uses_globe(style: &Style, view_state: &ViewState) -> bool {
     style.projection.as_ref().is_some_and(|projection| {
         projection
@@ -31,6 +33,8 @@ pub fn uses_globe(style: &Style, view_state: &ViewState) -> bool {
     })
 }
 
+/// Projects a screen pixel onto the globe and returns world coordinates at the current zoom.
+/// Returns `None` for a Mercator view, an invalid camera, or a pixel outside the globe.
 pub fn globe_world_at_screen(
     style: &Style,
     view_state: &ViewState,
@@ -45,6 +49,7 @@ pub fn globe_world_at_screen(
         .map(|location| WorldCoords::from_lat_lon(location, view_state.zoom()))
 }
 
+/// Returns the midpoint in the view's logical pixel coordinates.
 pub fn center_pixel(view_state: &ViewState) -> Vector2<f64> {
     Vector2::new(view_state.width() / 2.0, view_state.height() / 2.0)
 }

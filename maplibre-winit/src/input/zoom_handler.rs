@@ -62,7 +62,7 @@ impl UpdateState for ZoomHandler {
         }
         let pointer = self
             .window_position
-            .map_or_else(|| center_pixel(view_state), |position| position);
+            .unwrap_or_else(|| center_pixel(view_state));
         let current =
             resolve_gesture_anchor(style, view_state, world, Point2::new(pointer.x, pointer.y));
         let elevation = *self.gesture_elevation.get_or_insert_with(|| {

@@ -62,5 +62,6 @@ reqwest = { workspace = true, features = ["json"] }
 flatc-rust.workspace = true
 
 [dev-dependencies]
+winit.workspace = true
 wasm-bindgen-test.workspace = true
 wgpu.workspace = true

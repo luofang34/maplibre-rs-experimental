@@ -206,3 +206,7 @@ extract-tiles:
       --minzoom=15 --maxzoom=15 \
       --bounds="11.395769,48.083436,11.618242,48.220866" \
       test-data/europe_germany-2020-02-13-openmaptiles-v3.12.1.mbtiles test-data/munich-15.mbtiles
+
+# Requires a desktop display and a presentation-capable GPU.
+window-lifecycle-test:
+    cargo test -p maplibre-winit --features window-lifecycle-test,maplibre/thread-safe-futures --test lifecycle

@@ -47,6 +47,9 @@ pub enum WindowCreateError {
     /// The host could not create its drawable window.
     #[error("unable to create window")]
     Window,
+    /// The host configuration has not been bound to a live window from its active event loop.
+    #[error("window configuration is not bound to a live resumed window")]
+    WindowNotBound,
 }
 
 /// A configuration for a window which determines the corresponding implementation of a
@@ -67,6 +70,12 @@ pub struct PhysicalSize {
 }
 
 impl PhysicalSize {
+    /// Smallest drawable extent, used while a platform window has no nonzero pixel size.
+    pub const MIN: Self = Self {
+        width: NonZeroU32::MIN,
+        height: NonZeroU32::MIN,
+    };
+
     /// Returns `None` if either physical-pixel dimension is zero.
     pub fn new(width: u32, height: u32) -> Option<Self> {
         Some(Self {
@@ -135,16 +144,16 @@ impl LogicalSize {
 
 impl PhysicalSize {
     /// Divides by the device scale and truncates fractional logical units.
-    ///
-    /// # Panics
-    /// Panics if either converted dimension becomes zero. The caller must supply a positive,
-    /// finite scale that leaves at least one logical unit in each dimension.
+    /// Clamps each dimension to one logical unit so subpixel viewports remain drawable.
     pub fn to_logical(&self, scale_factor: f64) -> LogicalSize {
         let width = self.width.get() as f64 / scale_factor;
         let height = self.height.get() as f64 / scale_factor;
         LogicalSize {
-            width: NonZeroU32::new(width as u32).expect("impossible to reach"),
-            height: NonZeroU32::new(height as u32).expect("impossible to reach"),
+            width: NonZeroU32::new(width as u32).unwrap_or(NonZeroU32::MIN),
+            height: NonZeroU32::new(height as u32).unwrap_or(NonZeroU32::MIN),
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

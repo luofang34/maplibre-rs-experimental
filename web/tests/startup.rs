@@ -6,12 +6,24 @@ wasm_bindgen_test_configure!(run_in_browser);
 
 #[wasm_bindgen_test]
 async fn worker_creation_failure_preserves_the_javascript_message() {
+    let document = web_sys::window()
+        .expect("window")
+        .document()
+        .expect("document");
+    let canvas = document.create_element("canvas").expect("canvas");
+    canvas.set_id("maplibre");
+    document
+        .body()
+        .expect("body")
+        .append_child(&canvas)
+        .expect("attached canvas");
     let worker = js_sys::Function::new_no_args("throw new Error('worker creation denied')");
     let style = r#"{"version":8,"sources":{},"layers":[]}"#;
     let error = web::run_maplibre(worker, Some(style.into()))
         .await
         .expect_err("worker creation must reject initialization");
     assert!(error.to_string().contains("worker creation denied"));
+    canvas.remove();
 }
 
 #[wasm_bindgen_test]

@@ -54,7 +54,9 @@ async fn configured_backend_renders_mercator_and_globe_frames() {
     } else {
         wgpu::Backends::BROWSER_WEBGPU
     };
-    let mut map = create_map(backend);
+    let (config, window, stop, closed) = resumed_config().await;
+    let mut map = create_map(backend, config);
+    drop(window);
     map.initialize_renderer().await.expect("initialized map");
     let renderer = &map.context().expect("map context").renderer;
     assert!(backend.contains(renderer.adapter.get_info().backend.into()));
@@ -73,6 +75,10 @@ async fn configured_backend_renders_mercator_and_globe_frames() {
     assert!(error.is_none(), "GPU validation failed: {error:?}");
     assert_surface_retains_window(map, backend).await;
     canvas.remove();
+    stop.send_event(()).expect("close surface fixture loop");
+    wasm_bindgen_futures::JsFuture::from(closed)
+        .await
+        .expect("surface fixture exited");
 }
 
 fn create_canvas() -> web_sys::HtmlCanvasElement {
@@ -95,9 +101,9 @@ fn create_canvas() -> web_sys::HtmlCanvasElement {
     canvas
 }
 
-fn create_map(backend: wgpu::Backends) -> Map<TestEnvironment> {
+fn create_map(backend: wgpu::Backends, config: WinitMapWindowConfig<()>) -> Map<TestEnvironment> {
     let kernel = KernelBuilder::new()
-        .with_map_window_config(WinitMapWindowConfig::new("surface-test".into()))
+        .with_map_window_config(config)
         .with_http_client(Default::default())
         .with_scheduler(BrowserScheduler)
         .with_apc(SchedulerAsyncProcedureCall::new(
@@ -277,4 +283,68 @@ impl HeadedMapWindow for UnavailableWindow {
     fn id(&self) -> u64 {
         0
     }
+}
+
+type BoundWindow = (WinitMapWindowConfig<()>, maplibre_winit::WinitMapWindow<()>);
+
+async fn resumed_config() -> (
+    WinitMapWindowConfig<()>,
+    maplibre_winit::WinitMapWindow<()>,
+    winit::event_loop::EventLoopProxy<()>,
+    js_sys::Promise,
+) {
+    use std::{cell::RefCell, rc::Rc};
+    use winit::{
+        application::ApplicationHandler, event::WindowEvent, event_loop::ActiveEventLoop,
+        platform::web::EventLoopExtWebSys, window::WindowId,
+    };
+    struct Setup {
+        result: Rc<RefCell<Option<BoundWindow>>>,
+        resolve: js_sys::Function,
+        closed: js_sys::Function,
+        initialized: bool,
+    }
+    impl ApplicationHandler for Setup {
+        fn resumed(&mut self, active: &ActiveEventLoop) {
+            if self.initialized {
+                return;
+            }
+            let config = WinitMapWindowConfig::new("surface-test".into());
+            let window = config.create_window(active).expect("resumed canvas");
+            *self.result.borrow_mut() = Some((config.with_window(&window), window));
+            self.initialized = true;
+            self.resolve
+                .call0(&wasm_bindgen::JsValue::NULL)
+                .expect("setup signaled");
+        }
+        fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, _: WindowEvent) {}
+        fn user_event(&mut self, active: &ActiveEventLoop, _: ()) {
+            active.exit();
+        }
+        fn exiting(&mut self, _: &ActiveEventLoop) {
+            self.closed
+                .call0(&wasm_bindgen::JsValue::NULL)
+                .expect("exit signaled");
+        }
+    }
+    let result = Rc::new(RefCell::new(None));
+    let event_loop = winit::event_loop::EventLoop::new().expect("surface fixture loop");
+    let stop = event_loop.create_proxy();
+    let mut exit_callback = None;
+    let closed = js_sys::Promise::new(&mut |resolve, _reject| exit_callback = Some(resolve));
+    let mut setup = Some((event_loop, exit_callback.expect("exit resolver")));
+    let signal = js_sys::Promise::new(&mut |resolve, _reject| {
+        let (event_loop, closed) = setup.take().expect("single setup");
+        event_loop.spawn_app(Setup {
+            result: result.clone(),
+            resolve,
+            closed,
+            initialized: false,
+        });
+    });
+    wasm_bindgen_futures::JsFuture::from(signal)
+        .await
+        .expect("resumed event");
+    let (config, window) = result.borrow_mut().take().expect("resumed setup complete");
+    (config, window, stop, closed)
 }

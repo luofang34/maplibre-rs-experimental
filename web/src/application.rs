@@ -1,12 +1,11 @@
 use maplibre::{
     environment::OffscreenKernelConfig,
-    event_loop::EventLoop,
     kernel::{Kernel, KernelBuilder},
     map::Map,
     render::builder::RendererBuilder,
     style::Style,
 };
-use maplibre_winit::WinitMapWindowConfig;
+use maplibre_winit::{WinitApplicationError, WinitEventLoop, WinitMapWindowConfig};
 use wasm_bindgen::prelude::*;
 
 use crate::{
@@ -37,25 +36,38 @@ pub async fn run_maplibre(
         Some(style_json) => parse_style(style_json)?,
         None => Style::default(),
     };
-    let plugins = map_plugins(&style);
-    let mut map = Map::new(
-        style,
-        create_kernel(new_worker)?,
-        RendererBuilder::new(),
-        plugins,
-    )?;
-    map.initialize_renderer().await?;
-    let event_loop = map
-        .window_mut()
-        .take_event_loop()
-        .ok_or(JSError::MissingEventLoop)?;
-    event_loop.run(map, None)?;
-    Ok(())
+    let config = WinitMapWindowConfig::new("maplibre".into());
+    WinitEventLoop::new(&config)?
+        .spawn_map(
+            config,
+            move |bound_config| {
+                let plugins = map_plugins(&style);
+                Ok::<_, JSError>(Map::new(
+                    style.clone(),
+                    create_kernel(new_worker.clone(), bound_config)?,
+                    RendererBuilder::new(),
+                    plugins,
+                )?)
+            },
+            None,
+        )
+        .await
+        .map_err(|error| match error {
+            WinitApplicationError::CreateMap(error) => error,
+            WinitApplicationError::Host(error) => JSError::Host(error),
+            WinitApplicationError::Initialize(error) | WinitApplicationError::Frame(error) => {
+                JSError::Map(error)
+            }
+            WinitApplicationError::ClosedBeforeReady => JSError::ClosedBeforeReady,
+        })
 }
 
-fn create_kernel(new_worker: js_sys::Function) -> Result<Kernel<CurrentEnvironment>, JSError> {
+fn create_kernel(
+    new_worker: js_sys::Function,
+    window_config: WinitMapWindowConfig<()>,
+) -> Result<Kernel<CurrentEnvironment>, JSError> {
     let mut kernel_builder = KernelBuilder::new()
-        .with_map_window_config(WinitMapWindowConfig::new("maplibre".to_string()))
+        .with_map_window_config(window_config)
         .with_http_client(WHATWGFetchHttpClient::default());
 
     let offscreen_kernel_config = OffscreenKernelConfig {

@@ -22,6 +22,7 @@ mod query_handler;
 mod shift_handler;
 mod zoom_handler;
 
+/// Accumulates window gestures and applies camera changes when the next frame updates.
 pub struct InputController {
     pinch_handler: PinchHandler,
     pan_handler: PanHandler,
@@ -33,16 +34,7 @@ pub struct InputController {
 }
 
 impl InputController {
-    /// Creates a new input controller.
-    ///
-    /// # Arguments
-    ///
-    /// * `speed`: How fast animation should go. Default is 1.0. 2.0 is a speedup of 2.
-    /// * `sensitivity`: How much impact an action has. Default is 10px for pressing the forward
-    /// key for example.
-    ///
-    /// returns: InputController
-    ///
+    /// Sets movement speed, camera/keyboard sensitivity and wheel zoom sensitivity.
     pub fn new(speed: f64, sensitivity: f64, zoom_sensitivity: f64) -> Self {
         Self {
             pinch_handler: PinchHandler::default(),
@@ -55,6 +47,7 @@ impl InputController {
         }
     }
 
+    /// Leaves raw device events unconsumed; navigation is driven by window events.
     pub fn device_input(&mut self, _event: &DeviceEvent) -> bool {
         false
     }
@@ -123,7 +116,9 @@ impl InputController {
     }
 }
 
+/// Applies accumulated input and time-dependent motion to the map frame.
 pub trait UpdateState {
+    /// Advances input effects by the elapsed time since the preceding frame.
     fn update_state(&mut self, state: &mut MapContext, dt: Duration);
 }
 

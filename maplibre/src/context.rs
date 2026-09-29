@@ -24,9 +24,7 @@ pub struct MapContext {
 impl MapContext {
     /// Updates the logical viewport and resizes the physical presentation surface.
     /// `scale_factor` is the number of physical pixels per logical unit.
-    ///
-    /// # Panics
-    /// Panics if conversion through [`PhysicalSize::to_logical`] produces a zero dimension.
+    /// Logical dimensions remain at least one unit even below the device scale.
     pub fn resize(&mut self, size: PhysicalSize, scale_factor: f64) {
         self.view_state.resize(size.to_logical(scale_factor));
         self.renderer.resize_surface(size)
