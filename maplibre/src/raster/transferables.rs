@@ -1,3 +1,7 @@
+//! Worker message contracts for decoded raster pixels and unavailable tiles.
+
+#![deny(missing_docs)]
+
 use std::fmt::{Debug, Formatter};
 
 use image::RgbaImage;
@@ -9,8 +13,11 @@ use crate::{
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+/// Tags used by the owned Rust raster message implementations.
 pub enum RasterMessageTag {
+    /// A decoded tile image is available for upload.
     LayerRaster,
+    /// A tile request completed without an image.
     LayerRasterMissing,
 }
 
@@ -20,29 +27,43 @@ impl MessageTag for RasterMessageTag {
     }
 }
 
+/// Decoded RGBA8 pixels ready to become a renderer raster layer.
 pub trait LayerRaster: IntoMessage + Debug + Send {
+    /// Identifies this backend's decoded-image payload for message dispatch.
     fn message_tag() -> &'static dyn MessageTag;
 
+    /// Takes ownership of a decoded image and its request label at the supplied tile coordinates.
     fn build_from(coords: WorldTileCoords, layer_name: String, image: RgbaImage) -> Self;
 
+    /// Tile-grid coordinates covered by the image.
     fn coords(&self) -> WorldTileCoords;
 
+    /// Consumes the message into pixel data awaiting GPU upload.
     fn to_layer(self) -> AvailableRasterLayerData;
 }
 
+/// A completed raster request with no image, so the tile need not be requested repeatedly.
 pub trait LayerRasterMissing: IntoMessage + Debug + Send {
+    /// Identifies this backend's missing-image payload for message dispatch.
     fn message_tag() -> &'static dyn MessageTag;
 
+    /// Records an unavailable raster tile at the supplied grid coordinates.
     fn build_from(coords: WorldTileCoords) -> Self;
 
+    /// Tile-grid coordinates of the unsuccessful request.
     fn coords(&self) -> WorldTileCoords;
 
+    /// Consumes the message into the renderer's missing-layer record.
     fn to_layer(self) -> MissingRasterLayerData;
 }
 
+/// Owned image message; conversion uses the renderer's `raster` source-layer key.
 pub struct DefaultLayerRaster {
+    /// Tile-grid coordinates covered by the image.
     pub coords: WorldTileCoords,
+    /// Request label retained in this payload; conversion to a layer uses `raster` instead.
     pub layer_name: String,
+    /// Decoded RGBA8 pixels, before GPU upload.
     pub image: RgbaImage,
 }
 
@@ -84,7 +105,9 @@ impl LayerRaster for DefaultLayerRaster {
     }
 }
 
+/// Owned unavailable-tile message using the renderer's `raster` source-layer key.
 pub struct DefaultLayerRasterMissing {
+    /// Tile-grid coordinates of the unsuccessful request.
     pub coords: WorldTileCoords,
 }
 
@@ -121,12 +144,16 @@ impl LayerRasterMissing for DefaultLayerRasterMissing {
     }
 }
 
+/// Selects matching payload representations for raster workers and their receivers.
 pub trait RasterTransferables: Copy + Clone + 'static {
+    /// Decoded image ready for upload.
     type LayerRaster: LayerRaster;
+    /// Tile request completed without an image.
     type LayerRasterMissing: LayerRasterMissing;
 }
 
 #[derive(Copy, Clone)]
+/// Uses owned Rust pixel buffers without serializing them for worker transport.
 pub struct DefaultRasterTransferables;
 
 impl RasterTransferables for DefaultRasterTransferables {
