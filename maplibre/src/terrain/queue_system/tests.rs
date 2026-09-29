@@ -1,5 +1,9 @@
 use super::{awaiting_first_draw, budget_redraws, DrapeState};
 
+#[cfg(feature = "headless")]
+#[path = "tests/dem_uniforms.rs"]
+mod dem_uniforms;
+
 #[test]
 fn a_frame_draws_new_tiles_first_and_at_most_the_budget() {
     use DrapeState::{Changed, New, Unchanged};

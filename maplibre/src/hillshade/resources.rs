@@ -1,13 +1,16 @@
 //! GPU resources of the DEM-shaded layers: the two pipelines and one uniform buffer per layer.
 
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    hash::{Hash, Hasher},
+};
 
 use bytemuck_derive::{Pod, Zeroable};
 
 use crate::style::hillshade::{Illumination, MAX_LIGHTS, MAX_RAMP_STOPS};
 
 /// Which shading a layer uses.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub enum DemLayerKind {
     /// A `hillshade` layer.
     Hillshade,
@@ -111,6 +114,7 @@ impl ColorReliefUniforms {
 
 struct LayerBinding {
     kind: DemLayerKind,
+    fingerprint: u64,
     buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
 }
@@ -153,6 +157,10 @@ impl HillshadeResources {
         kind: DemLayerKind,
         contents: &[u8],
     ) {
+        let mut hasher = std::hash::DefaultHasher::new();
+        kind.hash(&mut hasher);
+        contents.hash(&mut hasher);
+        let fingerprint = hasher.finish();
         let reusable = self.layers.get(layer_id).is_some_and(|binding| {
             binding.kind == kind && binding.buffer.size() == contents.len() as u64
         });
@@ -175,14 +183,21 @@ impl HillshadeResources {
                 layer_id.to_string(),
                 LayerBinding {
                     kind,
+                    fingerprint,
                     buffer,
                     bind_group,
                 },
             );
         }
-        if let Some(binding) = self.layers.get(layer_id) {
+        if let Some(binding) = self.layers.get_mut(layer_id) {
             queue.write_buffer(&binding.buffer, 0, contents);
+            binding.fingerprint = fingerprint;
         }
+    }
+
+    /// Identity of the shader kind and evaluated uniforms written for this layer.
+    pub(crate) fn layer_fingerprint(&self, layer_id: &str) -> Option<u64> {
+        self.layers.get(layer_id).map(|binding| binding.fingerprint)
     }
 
     /// Kind and uniform bind group of a layer written this frame.

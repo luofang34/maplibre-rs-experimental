@@ -172,6 +172,7 @@ fn awaiting_first_draw(states: &[DrapeState], redraw: &[bool]) -> Vec<bool> {
 struct LoadedContent<'a> {
     pool: Option<&'a VectorBufferPool>,
     raster: Option<&'a RasterResources>,
+    dem: Option<&'a crate::hillshade::HillshadeResources>,
 }
 
 impl SourceContent for LoadedContent<'_> {
@@ -188,6 +189,10 @@ impl SourceContent for LoadedContent<'_> {
         self.raster
             .and_then(|raster| raster.texture_revision(layer, coords))
     }
+
+    fn dem_layer_fingerprint(&self, layer: &str) -> Option<u64> {
+        self.dem.and_then(|dem| dem.layer_fingerprint(layer))
+    }
 }
 
 fn loaded_content(world: &World) -> LoadedContent<'_> {
@@ -198,6 +203,13 @@ fn loaded_content(world: &World) -> LoadedContent<'_> {
         },
         raster: match world.resources.get::<Eventually<RasterResources>>() {
             Some(Initialized(raster)) => Some(raster),
+            _ => None,
+        },
+        dem: match world
+            .resources
+            .get::<Eventually<crate::hillshade::HillshadeResources>>()
+        {
+            Some(Initialized(dem)) => Some(dem),
             _ => None,
         },
     }

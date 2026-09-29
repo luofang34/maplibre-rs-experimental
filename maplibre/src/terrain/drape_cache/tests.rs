@@ -123,6 +123,10 @@ impl SourceContent for Loaded {
     fn raster_revision(&self, _: WorldTileCoords, _: &str) -> Option<u64> {
         self.0.then_some(0)
     }
+
+    fn dem_layer_fingerprint(&self, _: &str) -> Option<u64> {
+        None
+    }
 }
 
 #[test]

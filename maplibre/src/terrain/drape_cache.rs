@@ -23,6 +23,8 @@ pub(crate) trait SourceContent {
     fn vector_layer_revision(&self, coords: WorldTileCoords, layer_id: &str) -> Option<u64>;
     /// Revision of the raster binding, or `None` while no texture is uploaded.
     fn raster_revision(&self, coords: WorldTileCoords, layer: &str) -> Option<u64>;
+    /// Identity of the evaluated uniforms used by a DEM-shaded layer.
+    fn dem_layer_fingerprint(&self, layer: &str) -> Option<u64>;
 }
 
 /// Fingerprint of everything that decides a drape texture's content.
@@ -52,10 +54,14 @@ pub(crate) fn fingerprint(
                 .vector_layer_revision(layer.coords, &layer.id)
                 .hash(&mut hasher);
         }
-        for (id, index, _) in &shape.raster_layers {
+        for (id, index, dem) in &shape.raster_layers {
             id.hash(&mut hasher);
             index.hash(&mut hasher);
+            dem.hash(&mut hasher);
             content.raster_revision(shape.source, id).hash(&mut hasher);
+            if *dem {
+                content.dem_layer_fingerprint(id).hash(&mut hasher);
+            }
         }
     }
     hasher.finish()
