@@ -10,7 +10,7 @@ use crate::{
     context::MapContext,
     coords::{LatLon, WorldCoords, Zoom},
     environment::Environment,
-    io::tile_json::resolve_tile_json_sources,
+    io::{tile_json::resolve_tile_json_sources, tile_retry::RequestAttempts},
     kernel::Kernel,
     plugin::Plugin,
     render::{
@@ -65,6 +65,7 @@ pub struct PendingMapContext {
 pub struct Map<E: Environment> {
     kernel: Rc<Kernel<E>>,
     schedule: Schedule,
+    request_attempts: RequestAttempts,
     map_context: CurrentMapContext,
     window: <E::MapWindowConfig as MapWindowConfig>::MapWindow,
 
@@ -94,6 +95,7 @@ where
         let map = Self {
             kernel,
             schedule,
+            request_attempts: RequestAttempts::default(),
             map_context: CurrentMapContext::Pending(Box::new(PendingMapContext {
                 style,
                 renderer_builder,
@@ -155,6 +157,7 @@ where
                     .set_roll(cgmath::Deg(style.roll.unwrap_or_default()));
 
                 let mut world = World::default();
+                world.resources.insert(self.request_attempts.clone());
 
                 for plugin in &self.plugins {
                     plugin.build(

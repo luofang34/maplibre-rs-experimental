@@ -39,9 +39,15 @@ serde_json.workspace = true
 window-lifecycle-test = []
 
 [dev-dependencies]
+geozero.workspace = true
 wgpu.workspace = true
 
 [[test]]
 name = "lifecycle"
+harness = false
+required-features = ["window-lifecycle-test"]
+
+[[test]]
+name = "reset"
 harness = false
 required-features = ["window-lifecycle-test"]

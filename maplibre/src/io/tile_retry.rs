@@ -1,6 +1,6 @@
 //! Completion and bounded retry scheduling for vector, raster and elevation requests.
 
-use std::time::Duration;
+use std::{cell::Cell, rc::Rc, time::Duration};
 
 use instant::Instant;
 use serde::{Deserialize, Serialize};
@@ -94,10 +94,13 @@ impl TileRequestRetries {
     }
 }
 
+// Workers retain the map transport while reset replaces the world and its deadlines.
+#[derive(Clone, Default)]
+pub(crate) struct RequestAttempts(Rc<Cell<u64>>);
+
 struct RequestClock {
     started: Instant,
     last: Duration,
-    next_attempt: u64,
 }
 
 impl Default for RequestClock {
@@ -105,7 +108,6 @@ impl Default for RequestClock {
         Self {
             started: Instant::now(),
             last: Duration::ZERO,
-            next_attempt: 0,
         }
     }
 }
@@ -144,9 +146,10 @@ pub(crate) fn waiting(world: &World, coords: WorldTileCoords, kind: RequestKind)
 }
 
 pub(crate) fn next_attempt(world: &mut World) -> u64 {
-    let clock = world.resources.get_or_init_mut::<RequestClock>();
-    clock.next_attempt = clock.next_attempt.wrapping_add(1);
-    clock.next_attempt
+    let attempts = world.resources.get_or_init_mut::<RequestAttempts>();
+    let next = attempts.0.get().wrapping_add(1);
+    attempts.0.set(next);
+    next
 }
 
 pub(crate) fn started(world: &mut World, coords: WorldTileCoords, kind: RequestKind, attempt: u64) {

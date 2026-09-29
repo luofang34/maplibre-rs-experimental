@@ -209,4 +209,4 @@ extract-tiles:
 
 # Requires a desktop display and a presentation-capable GPU.
 window-lifecycle-test:
-    cargo test -p maplibre-winit --features window-lifecycle-test,maplibre/thread-safe-futures --test lifecycle
+    cargo test -p maplibre-winit --features window-lifecycle-test,maplibre/thread-safe-futures --test lifecycle --test reset
