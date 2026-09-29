@@ -187,7 +187,7 @@ pub struct AvailableVectorLayerBucket {
     pub style_layer_id: String,
     /// Tile-space geometry with an unpadded draw-index count.
     pub buffer: OverAlignedVertexBuffer<ShaderVertex, IndexDataType>,
-    /// Number of indices contributed by each feature, in tessellation order.
+    /// Number of vertices contributed by each feature, in tessellation order.
     pub feature_indices: Vec<u32>,
     /// Encoded-sRGB colors with straight alpha, indexed in the same feature order.
     /// Missing entries use the layer's fallback color during upload.

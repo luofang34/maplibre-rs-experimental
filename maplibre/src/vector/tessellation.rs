@@ -159,7 +159,7 @@ pub struct ZeroTessellator<I: std::ops::Add + From<lyon::tessellation::VertexId>
     /// Accumulated tile-space vertices and indices, without upload padding.
     pub buffer: VertexBuffers<ShaderVertex, I>,
 
-    /// Index count contributed by each completed feature, in processing order.
+    /// Vertex count contributed by each completed feature, in processing order.
     pub feature_indices: Vec<u32>,
     /// Attributes of the feature being processed; cleared after its color is evaluated.
     pub feature_properties: FeatureProperties,
@@ -238,8 +238,6 @@ where
         self
     }
 
-    /// Stores current indices to the output. That way we know which vertices correspond to which
-    /// feature in the output.
     fn update_feature_indices(&mut self) {
         let next_index = self.buffer.vertices.len();
         let indices = (next_index - self.current_index) as u32;
