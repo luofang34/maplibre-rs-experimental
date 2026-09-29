@@ -222,6 +222,7 @@ fn raster_reply(map: &mut HeadlessMap, child: bool, missing: bool) {
             .send_back(
                 <DefaultRasterTransferables as RasterTransferables>::LayerRasterMissing::build_from(
                     target(),
+                    "paint".into(),
                 ),
             )
             .expect("missing worker result");

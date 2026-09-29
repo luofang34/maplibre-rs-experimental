@@ -167,7 +167,7 @@ async fn prepared_map() -> HeadlessMap {
         ProcessedLayers::default(),
         vec![AvailableRasterLayerData {
             coords: WorldTileCoords::from((TILE.0, TILE.1, TILE.2.into())),
-            source_layer: "imagery".into(),
+            source: "imagery".into(),
             image: RgbaImage::from_pixel(512, 512, Rgba([90, 120, 150, 255])),
         }],
         vec![(

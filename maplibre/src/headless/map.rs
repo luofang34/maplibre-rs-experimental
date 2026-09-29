@@ -16,12 +16,8 @@ use crate::{
     kernel::Kernel,
     map::MapError,
     plugin::Plugin,
-    raster::{
-        resource::RasterResources, AvailableRasterLayerData, RasterLayerData,
-        RasterLayersDataComponent,
-    },
+    raster::{AvailableRasterLayerData, RasterSourceId},
     render::{
-        eventually::Eventually,
         frame_input::FrameInput,
         projection::{raster_source_regions, view_region_for_projection, ProjectionStateError},
         tile_view_pattern::DEFAULT_TILE_SIZE,
@@ -43,6 +39,7 @@ mod error;
 pub use error::HeadlessMapOperationError;
 
 mod processed;
+mod raster;
 pub mod reference;
 mod symbols;
 #[cfg(test)]
@@ -240,33 +237,6 @@ impl HeadlessMap {
         self.advance_frames(frame_count)
     }
 
-    fn load_raster_layers(
-        &mut self,
-        raster_layers: Vec<AvailableRasterLayerData>,
-    ) -> Result<(), HeadlessMapOperationError> {
-        let mut rasters_by_tile = BTreeMap::new();
-        for layer in raster_layers {
-            rasters_by_tile
-                .entry(layer.coords)
-                .or_insert_with(Vec::new)
-                .push(RasterLayerData::Available(layer));
-        }
-        let world = &mut self.map_context.world;
-        for (coords, layers) in rasters_by_tile {
-            world
-                .tiles
-                .spawn_mut(coords)
-                .ok_or(HeadlessMapOperationError::InvalidTile { coords })?
-                .insert(RasterLayersDataComponent { layers });
-            if let Some(Eventually::Initialized(raster)) =
-                world.resources.get_mut::<Eventually<RasterResources>>()
-            {
-                raster.remove_texture(coords);
-            }
-        }
-        Ok(())
-    }
-
     fn advance_frames(&mut self, frame_count: u8) -> Result<(), HeadlessMapOperationError> {
         for _ in 0..frame_count {
             self.map_context
@@ -388,6 +358,29 @@ impl HeadlessMap {
         &self,
         source_name: &str,
     ) -> Result<Vec<WorldTileCoords>, ProjectionStateError> {
+        let source = crate::io::tile_sources::source_layer_groups(
+            &self.map_context.style,
+            crate::io::tile_sources::TileKind::Raster,
+        )
+        .into_iter()
+        .find(|group| {
+            group
+                .layers
+                .iter()
+                .any(|layer| layer.source.as_deref() == Some(source_name))
+        })
+        .map(|group| RasterSourceId::new(group.source_name));
+        source.map_or_else(
+            || Ok(Vec::new()),
+            |source| self.required_raster_source_tile_coords(&source),
+        )
+    }
+
+    /// Returns this source's visible tile coordinates, including the explicit unnamed fallback.
+    pub fn required_raster_source_tile_coords(
+        &self,
+        source: &RasterSourceId,
+    ) -> Result<Vec<WorldTileCoords>, ProjectionStateError> {
         let context = &self.map_context;
         Ok(raster_source_regions(
             &context.style,
@@ -396,7 +389,7 @@ impl HeadlessMap {
             ViewStatePadding::Loose,
         )?
         .into_iter()
-        .find(|(name, _)| name == source_name)
+        .find(|(id, _)| id == source)
         .map_or_else(Vec::new, |(_, tiles)| tiles))
     }
 

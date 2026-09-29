@@ -92,6 +92,18 @@ impl<T> HasTile for Eventually<T>
 where
     T: HasTile,
 {
+    fn has_source_tile(
+        &self,
+        source: &crate::raster::RasterSourceId,
+        coords: WorldTileCoords,
+        world: &World,
+    ) -> bool {
+        match self {
+            Eventually::Initialized(value) => value.has_source_tile(source, coords, world),
+            Eventually::Uninitialized => false,
+        }
+    }
+
     fn has_tile(&self, coords: WorldTileCoords, world: &World) -> bool {
         match self {
             Eventually::Initialized(value) => value.has_tile(coords, world),

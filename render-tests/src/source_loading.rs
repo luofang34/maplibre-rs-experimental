@@ -1,0 +1,254 @@
+//! Decodes the fixture sources selected by the renderer's visible tile coverage.
+
+use crate::{
+    paths::{local_data_path, local_tile_path},
+    source_tiles::source_tile_coords,
+};
+use maplibre::{
+    coords::WorldTileCoords,
+    headless::map::{HeadlessMap, ProcessedLayers},
+    io::tile_sources::MAX_OVERZOOMING,
+    projection::ProjectionType,
+    raster::AvailableRasterLayerData,
+    style::{
+        layer::StyleLayer,
+        source::{GeoJsonData, Source, VectorSource},
+        Style,
+    },
+    terrain::dem_tile_coords,
+};
+use serde_json::Value;
+
+pub(super) fn load_sources_blocking(
+    map: &mut HeadlessMap,
+    style: &Style,
+    target_coords: &[WorldTileCoords],
+) -> Result<(ProcessedLayers, Vec<AvailableRasterLayerData>), String> {
+    let mut all_layers = ProcessedLayers::default();
+    let mut all_raster_layers = Vec::new();
+    let projection = style
+        .projection
+        .as_ref()
+        .map_or_else(ProjectionType::default, |specification| {
+            specification.projection_type.clone()
+        });
+    for (name, source) in &style.sources {
+        let layers: Vec<_> = style
+            .layers
+            .iter()
+            .filter(|layer| layer.source.as_deref() == Some(name.as_str()))
+            .cloned()
+            .collect();
+        if layers.is_empty() {
+            continue;
+        }
+        match source {
+            Source::GeoJson(source) => all_layers.append(&mut load_geojson_blocking(
+                map,
+                name,
+                &source.data,
+                &layers,
+                target_coords,
+                &projection,
+            )?),
+            Source::Vector(source) => all_layers.append(&mut load_vector_blocking(
+                map,
+                name,
+                source,
+                &layers,
+                target_coords,
+                &projection,
+            )?),
+            // DEM images supply hillshade and colour relief independently from terrain meshes.
+            Source::Raster(_) | Source::RasterDem(_) => {
+                all_raster_layers.extend(load_raster_blocking(map, name, source)?)
+            }
+        }
+    }
+    Ok((all_layers, all_raster_layers))
+}
+
+fn load_geojson_blocking(
+    map: &mut HeadlessMap,
+    name: &str,
+    data: &GeoJsonData,
+    layers: &[StyleLayer],
+    target_coords: &[WorldTileCoords],
+    projection: &ProjectionType,
+) -> Result<ProcessedLayers, String> {
+    let loaded;
+    let value = match data {
+        GeoJsonData::Inline(value) => value,
+        GeoJsonData::Url(url) => {
+            let path = local_data_path(url)?;
+            let text = std::fs::read_to_string(&path)
+                .map_err(|error| format!("Cannot read GeoJSON {}: {error}", path.display()))?;
+            loaded = serde_json::from_str::<Value>(&text)
+                .map_err(|error| format!("Cannot parse GeoJSON {}: {error}", path.display()))?;
+            &loaded
+        }
+    };
+    let mut processed = ProcessedLayers::default();
+    for coords in target_coords {
+        processed.append(
+            &mut map
+                .process_geojson(value, name, layers.to_vec(), *coords, projection.clone())
+                .map_err(|error| format!("Cannot process GeoJSON source '{name}': {error}"))?,
+        );
+    }
+    Ok(processed)
+}
+
+fn load_vector_blocking(
+    map: &HeadlessMap,
+    name: &str,
+    source: &VectorSource,
+    layers: &[StyleLayer],
+    target_coords: &[WorldTileCoords],
+    projection: &ProjectionType,
+) -> Result<ProcessedLayers, String> {
+    let template = source
+        .tiles
+        .as_ref()
+        .and_then(|templates| templates.first())
+        .ok_or_else(|| format!("Vector source '{name}' has no tile template"))?;
+    let mut processed = ProcessedLayers::default();
+    for coords in source_tile_coords(target_coords, 0, source.minzoom, source.maxzoom) {
+        let path = local_tile_path(template, coords)?;
+        // Missing fixture tiles behave as 404 responses and keep pyramid fallback eligible.
+        let data = match std::fs::read(&path) {
+            Ok(data) => data.into_boxed_slice(),
+            Err(error) => {
+                tracing::warn!(path = %path.display(), %error, "vector tile unavailable");
+                continue;
+            }
+        };
+        for layer in layers {
+            processed.append(
+                &mut map
+                    .process_tile_at(data.clone(), layer, coords, projection.clone())
+                    .map_err(|error| format!("Cannot process vector source '{name}': {error}"))?,
+            );
+        }
+    }
+    Ok(processed)
+}
+
+fn load_raster_blocking(
+    map: &HeadlessMap,
+    name: &str,
+    source: &Source,
+) -> Result<Vec<AvailableRasterLayerData>, String> {
+    let (template, minzoom) = match source {
+        Source::Raster(source) => (
+            source.tiles.as_ref().and_then(|tiles| tiles.first()),
+            source.minzoom,
+        ),
+        Source::RasterDem(source) => (
+            source.tiles.as_ref().and_then(|tiles| tiles.first()),
+            source.minzoom,
+        ),
+        _ => (None, None),
+    };
+    let template =
+        template.ok_or_else(|| format!("Raster source '{name}' has no tile template"))?;
+    let minzoom = minzoom.unwrap_or(0);
+    let required = map
+        .required_raster_tile_coords(name)
+        .map_err(|error| format!("Cannot select raster tiles: {error}"))?;
+    let mut seen = std::collections::BTreeSet::new();
+    let mut layers = Vec::new();
+    for ideal in required {
+        let mut coords = ideal;
+        loop {
+            if !seen.insert(coords) {
+                break;
+            }
+            let path = local_tile_path(template, coords)?;
+            match image::open(&path) {
+                Ok(image) => {
+                    layers.push(AvailableRasterLayerData {
+                        coords,
+                        source: name.into(),
+                        image: image.to_rgba8(),
+                    });
+                    break;
+                }
+                Err(error) => tracing::debug!(path = %path.display(), %error, "no raster tile"),
+            }
+            // The nearest fixture ancestor stands in for GL JS's fallback after a 404.
+            match coords.get_parent() {
+                Some(parent)
+                    if u8::from(parent.z) >= minzoom
+                        && u8::from(ideal.z) - u8::from(parent.z) <= MAX_OVERZOOMING =>
+                {
+                    coords = parent
+                }
+                _ => break,
+            }
+        }
+    }
+    Ok(layers)
+}
+
+/// Reads the DEM tiles the terrain needs for the target tiles from the local asset tree.
+///
+/// Fixtures only ship the tiles their own view needs, so a tile that is missing on disk is
+/// skipped and the mesh falls back to an ancestor or to sea level.
+pub(super) fn load_dem_tiles_blocking(
+    style: &Style,
+    target_coords: &[WorldTileCoords],
+) -> Result<Vec<(WorldTileCoords, image::RgbaImage)>, String> {
+    let Some(terrain) = &style.terrain else {
+        return Ok(Vec::new());
+    };
+    let Some(Source::RasterDem(dem)) = style.sources.get(&terrain.source) else {
+        return Err(format!(
+            "Terrain source '{}' is not a raster-dem source",
+            terrain.source
+        ));
+    };
+    let Some(template) = dem.tiles.as_ref().and_then(|templates| templates.first()) else {
+        return Err(format!(
+            "Terrain source '{}' has no tile template",
+            terrain.source
+        ));
+    };
+    let minzoom = dem.minzoom.unwrap_or(0);
+    let maxzoom = dem.maxzoom.unwrap_or(22);
+    let mut seen = std::collections::BTreeSet::new();
+    let mut tiles = Vec::new();
+    for coords in target_coords {
+        let Some(ideal) = dem_tile_coords(*coords, minzoom, maxzoom) else {
+            continue;
+        };
+        // A tile the fixture does not ship answers 404 in GL JS, which then loads the parent;
+        // the nearest ancestor on disk stands in the same way.
+        let mut coords = ideal;
+        loop {
+            if !seen.insert(coords) {
+                break;
+            }
+            let path = local_tile_path(template, coords)?;
+            match image::open(&path) {
+                Ok(image) => {
+                    tiles.push((coords, image.to_rgba8()));
+                    break;
+                }
+                Err(error) => {
+                    tracing::debug!(%coords, path = %path.display(), %error, "no DEM tile");
+                }
+            }
+            match coords.get_parent() {
+                Some(parent)
+                    if u8::from(parent.z) >= minzoom
+                        && u8::from(ideal.z) - u8::from(parent.z) <= MAX_OVERZOOMING =>
+                {
+                    coords = parent;
+                }
+                _ => break,
+            }
+        }
+    }
+    Ok(tiles)
+}

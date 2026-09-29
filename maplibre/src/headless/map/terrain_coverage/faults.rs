@@ -51,7 +51,7 @@ fn inject(context: &mut MapContext) -> SystemResult {
             panic!("raster resources");
         };
         assert!(
-            raster.get_bound_texture(&coords).is_some(),
+            raster.get_bound_texture(&"paint".into(), &coords).is_some(),
             "evict a real upload"
         );
         raster.remove_texture(coords);

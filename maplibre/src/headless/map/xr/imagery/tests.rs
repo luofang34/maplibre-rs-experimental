@@ -130,7 +130,7 @@ async fn prepared_map(projection: &str) -> HeadlessMap {
         ProcessedLayers::default(),
         vec![AvailableRasterLayerData {
             coords,
-            source_layer: "imagery".into(),
+            source: "imagery".into(),
             image,
         }],
         vec![(

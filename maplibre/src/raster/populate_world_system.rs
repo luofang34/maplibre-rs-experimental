@@ -78,6 +78,7 @@ pub(crate) fn apply_raster_message<T: RasterTransferables>(
         return Ok(());
     };
 
+    let source = layer.source().clone();
     let Some(component) = world
         .tiles
         .query_mut::<&mut RasterLayersDataComponent>(coords)
@@ -88,7 +89,7 @@ pub(crate) fn apply_raster_message<T: RasterTransferables>(
         if let Some(Eventually::Initialized(raster)) =
             world.resources.get_mut::<Eventually<RasterResources>>()
         {
-            raster.remove_texture(coords);
+            raster.remove_source_texture(&source, coords);
         }
     }
     Ok(())

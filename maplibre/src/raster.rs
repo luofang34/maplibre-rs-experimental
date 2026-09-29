@@ -33,7 +33,9 @@ pub mod render_commands;
 pub(crate) mod request_system;
 pub mod resource;
 mod resource_system;
+mod source;
 mod transferables;
+pub use source::RasterSourceId;
 mod upload_system;
 
 pub use transferables::{
@@ -87,8 +89,8 @@ impl<E: Environment, T: RasterTransferables> Plugin<E> for RasterPlugin<T> {
 pub struct AvailableRasterLayerData {
     /// Tile-grid coordinates covered by the image.
     pub coords: WorldTileCoords,
-    /// Worker source-layer label, normally `raster`; this is not a style source ID.
-    pub source_layer: String,
+    /// Style source owning these pixels, or the explicit fallback source.
+    pub source: RasterSourceId,
     /// Decoded RGBA8 texels sampled without sRGB-to-linear conversion.
     pub image: RgbaImage,
 }
@@ -97,8 +99,8 @@ pub struct AvailableRasterLayerData {
 pub struct MissingRasterLayerData {
     /// Coordinates of the unavailable tile.
     pub coords: WorldTileCoords,
-    /// Worker source-layer label, normally `raster`.
-    pub source_layer: String,
+    /// Style source whose request yielded no image.
+    pub source: RasterSourceId,
 }
 
 /// A worker result retained on a tile before GPU upload and fallback selection.
@@ -110,10 +112,10 @@ pub enum RasterLayerData {
 }
 
 impl RasterLayerData {
-    fn source_layer(&self) -> &str {
+    pub(crate) fn source(&self) -> &RasterSourceId {
         match self {
-            Self::Available(layer) => &layer.source_layer,
-            Self::Missing(layer) => &layer.source_layer,
+            Self::Available(layer) => &layer.source,
+            Self::Missing(layer) => &layer.source,
         }
     }
 }
@@ -124,7 +126,7 @@ impl RasterLayersDataComponent {
         if let Some(existing) = self
             .layers
             .iter_mut()
-            .find(|existing| existing.source_layer() == layer.source_layer())
+            .find(|existing| existing.source() == layer.source())
         {
             // A failed refresh must not discard usable pixels from an earlier response.
             if !has_image && matches!(existing, RasterLayerData::Available(_)) {
@@ -135,6 +137,25 @@ impl RasterLayersDataComponent {
             self.layers.push(layer);
         }
         has_image
+    }
+
+    /// Whether this source delivered an image for the tile.
+    pub fn has_source_image(&self, source: &RasterSourceId) -> bool {
+        self.layers.iter().any(
+            |layer| matches!(layer, RasterLayerData::Available(data) if &data.source == source),
+        )
+    }
+
+    /// Whether this source has a completed unavailable result.
+    pub fn source_is_missing(&self, source: &RasterSourceId) -> bool {
+        self.layers
+            .iter()
+            .any(|layer| matches!(layer, RasterLayerData::Missing(data) if &data.source == source))
+    }
+
+    /// Whether a result has arrived for this source.
+    pub fn has_source_result(&self, source: &RasterSourceId) -> bool {
+        self.layers.iter().any(|layer| layer.source() == source)
     }
 
     /// Whether any source delivered an image for the tile.
@@ -163,6 +184,18 @@ impl TileComponent for RasterLayersDataComponent {}
 struct RasterTilesDone;
 
 impl HasTile for RasterTilesDone {
+    fn has_source_tile(
+        &self,
+        source: &RasterSourceId,
+        coords: WorldTileCoords,
+        world: &World,
+    ) -> bool {
+        world
+            .tiles
+            .query::<&RasterLayersDataComponent>(coords)
+            .is_some_and(|data| data.has_source_image(source))
+    }
+
     fn has_tile(&self, coords: WorldTileCoords, world: &World) -> bool {
         world
             .tiles

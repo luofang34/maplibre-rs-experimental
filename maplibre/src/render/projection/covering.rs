@@ -2,7 +2,7 @@
 use super::{globe_camera_for_view, ProjectionStateError};
 use crate::{
     coords::{ViewRegion, WorldTileCoords, ZoomLevel, TILE_SIZE},
-    io::tile_sources::{covering_zoom, TileKind},
+    io::tile_sources::{covering_zoom, source_layer_groups, TileKind},
     projection::{
         globe::{
             covering::{TileElevationProvider, TileElevationRange},
@@ -18,6 +18,7 @@ use crate::{
         },
         ProjectionType,
     },
+    raster::RasterSourceId,
     render::{
         eye_covering::FrameLodHistory,
         tile_view_pattern::DEFAULT_TILE_SIZE,
@@ -137,39 +138,20 @@ pub fn raster_source_regions(
     view_state: &ViewState,
     world: &World,
     padding: ViewStatePadding,
-) -> Result<Vec<(String, Vec<WorldTileCoords>)>, ProjectionStateError> {
+) -> Result<crate::render::eye_covering::RasterCoverings, ProjectionStateError> {
     let zoom = view_state.zoom().value();
     let mut regions = Vec::new();
-    for (name, source) in &style.sources {
-        // Imagery is read by raster layers, elevation tiles by the DEM-shaded layers.
-        let (tile_size, minzoom, maxzoom, layer_types): (f64, _, _, &[&str]) = match source {
-            Source::Raster(raster) => (
-                raster.tile_size.map_or(TILE_SIZE, f64::from),
-                raster.minzoom,
-                raster.maxzoom,
-                &["raster"],
-            ),
-            Source::RasterDem(dem) => (
-                f64::from(dem.tile_size),
-                dem.minzoom,
-                dem.maxzoom,
-                &["hillshade", "color-relief"],
-            ),
-            _ => continue,
-        };
-        let used = style.layers.iter().any(|layer| {
-            layer_types.contains(&layer.type_.as_str())
-                && layer.source.as_deref() == Some(name)
-                && layer.is_visible_at(zoom)
-        });
-        if !used {
+    for group in source_layer_groups(style, TileKind::Raster) {
+        if !group.layers.iter().any(|layer| layer.is_visible_at(zoom)) {
             continue;
         }
-        let request = CoveringRequest::raster_source(zoom, tile_size, minzoom, maxzoom);
+        let source = RasterSourceId::new(group.source_name);
+        let definition = source.name().and_then(|name| style.sources.get(name));
+        let request = raster_covering_request(zoom, definition);
         let history = world
             .resources
             .get::<FrameLodHistory>()
-            .and_then(|h| h.raster.get(name));
+            .and_then(|history| history.raster.get(&source));
         let tiles =
             covering_region_with_history(style, view_state, world, request, padding, history)?
                 .map_or_else(Vec::new, |region| {
@@ -178,9 +160,24 @@ pub fn raster_source_regions(
                         .filter(|coords| coords.build_quad_key().is_some())
                         .collect()
                 });
-        regions.push((name.clone(), tiles));
+        regions.push((source, tiles));
     }
     Ok(regions)
+}
+
+fn raster_covering_request(zoom: f64, source: Option<&Source>) -> CoveringRequest {
+    let (tile_size, minzoom, maxzoom) = match source {
+        Some(Source::Raster(source)) => (
+            source.tile_size.map_or(TILE_SIZE, f64::from),
+            source.minzoom,
+            source.maxzoom,
+        ),
+        Some(Source::RasterDem(source)) => {
+            (f64::from(source.tile_size), source.minzoom, source.maxzoom)
+        }
+        _ => (TILE_SIZE, None, None),
+    };
+    CoveringRequest::raster_source(zoom, tile_size, minzoom, maxzoom)
 }
 
 const MERCATOR: ProjectionType = ProjectionType::Mercator;

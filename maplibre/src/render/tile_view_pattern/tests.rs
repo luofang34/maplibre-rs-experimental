@@ -141,7 +141,7 @@ fn raster_shapes_follow_the_source_covering_while_vector_shapes_use_the_view_til
         .add::<LoadedRaster>(TileKind::Raster);
     let pattern: TileViewPattern<TestQueue, TestBuffer> =
         TileViewPattern::new(BackingBufferDescriptor::new(TestBuffer, 0));
-    let coverings = [("photo".to_string(), vec![a, b, c, d, tile(9, 9, 6)])];
+    let coverings = [("photo".into(), vec![a, b, c, d, tile(9, 9, 6)])];
 
     let tiles = pattern.generate_pattern(
         &ViewRegion::from_tiles(vec![view], ZoomLevel::new(5), 8),
@@ -155,7 +155,7 @@ fn raster_shapes_follow_the_source_covering_while_vector_shapes_use_the_view_til
         panic!("one view tile, got {}", tiles.len());
     };
     assert_eq!(shape_coords(&view_tile.vector), vec![view]);
-    assert_eq!(shape_coords(&view_tile.raster), vec![a, b, c, d]);
+    assert_eq!(shape_coords(&view_tile.raster[0].1), vec![a, b, c, d]);
 }
 
 #[test]
@@ -166,7 +166,7 @@ fn raster_shapes_fall_back_to_the_pyramid_until_the_covering_loads() {
     sources.add::<LoadedRaster>(TileKind::Raster);
     let pattern: TileViewPattern<TestQueue, TestBuffer> =
         TileViewPattern::new(BackingBufferDescriptor::new(TestBuffer, 0));
-    let coverings = [("photo".to_string(), view.get_children().to_vec())];
+    let coverings = [("photo".into(), view.get_children().to_vec())];
 
     let tiles = pattern.generate_pattern(
         &ViewRegion::from_tiles(vec![view], ZoomLevel::new(4), 8),
@@ -176,7 +176,7 @@ fn raster_shapes_fall_back_to_the_pyramid_until_the_covering_loads() {
         &World::default(),
     );
 
-    assert_eq!(shape_coords(&tiles[0].raster), vec![tile(0, 0, 3)]);
+    assert_eq!(shape_coords(&tiles[0].raster[0].1), vec![tile(0, 0, 3)]);
 }
 
 #[test]
@@ -201,7 +201,7 @@ fn bridge_width_units_follow_style_scale_independently_of_gaze_zoom() {
         pattern.update_pattern(vec![ViewTile {
             target: coords,
             vector: SourceShapes::SourceEqTarget(TileShape::new(coords, Zoom::new(gaze_zoom))),
-            raster: SourceShapes::None,
+            raster: Vec::new(),
         }]);
         pattern.upload_pattern(
             &queue,

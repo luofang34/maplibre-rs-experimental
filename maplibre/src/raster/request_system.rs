@@ -10,7 +10,7 @@ use crate::{
         apc::{AsyncProcedureCall, AsyncProcedureFuture, Context, Input, ProcedureError},
         tile_backpressure::request_budget,
         tile_retry::{self, RequestDisposition, RequestKind, TileRequestOutcome},
-        tile_sources::{missing_tile_fallback, source_layer_groups, source_min_zoom, TileKind},
+        tile_sources::{missing_tile_fallback, source_layer_groups, TileKind},
     },
     kernel::Kernel,
     raster::{
@@ -18,7 +18,7 @@ use crate::{
             process_raster_tile, ProcessRasterContext, ProcessRasterError, RasterTileRequest,
         },
         transferables::{LayerRasterMissing, RasterTransferables},
-        RasterLayersDataComponent,
+        RasterLayersDataComponent, RasterSourceId,
     },
     render::{projection::raster_source_regions, view_state::ViewStatePadding},
     tcs::system::{System, SystemError, SystemResult},
@@ -58,33 +58,29 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
         let regions = raster_source_regions(style, view_state, world, ViewStatePadding::Loose)?;
         let mut requested = HashSet::new();
         let mut budget = request_budget(world);
-        let minzoom = source_min_zoom(style, TileKind::Raster).unwrap_or(0);
-        // A tile the source answered 404 for is stood in for by its nearest ancestor,
-        // as GL JS retains and loads parents for it.
-        let wanted: Vec<WorldTileCoords> = regions
+        let wanted = wanted_tiles(regions, style, world);
+        let sources: Vec<_> = source_layer_groups(style, TileKind::Raster)
             .into_iter()
-            .flat_map(|(_, tiles)| tiles)
-            .flat_map(|coords| {
-                let fallback = missing_tile_fallback(coords, minzoom, |coords| {
-                    world
-                        .tiles
-                        .query::<&RasterLayersDataComponent>(coords)
-                        .is_some_and(RasterLayersDataComponent::is_missing)
-                });
-                [Some(coords), fallback].into_iter().flatten()
-            })
+            .map(|group| RasterSourceId::new(group.source_name))
             .collect();
         for coords in wanted {
             if !requested.insert(coords) {
                 continue;
             }
 
-            // TODO: Make tessellation depend on style? So maybe we need to request even if it exists
-            if world
-                .tiles
-                .query::<&RasterLayersDataComponent>(coords)
-                .is_some()
-                && !tile_retry::due(world, coords, RequestKind::Raster)
+            let retry_due = tile_retry::due(world, coords, RequestKind::Raster);
+            if tile_retry::waiting(world, coords, RequestKind::Raster) && !retry_due {
+                continue;
+            }
+            if !retry_due
+                && world
+                    .tiles
+                    .query::<&RasterLayersDataComponent>(coords)
+                    .is_some_and(|component| {
+                        sources
+                            .iter()
+                            .all(|source| component.has_source_result(source))
+                    })
             {
                 continue;
             }
@@ -118,7 +114,10 @@ pub fn fetch_raster_apc<K: OffscreenKernel, T: RasterTransferables, C: Context +
                     let mut process_context = ProcessRasterContext::<T, C>::new(context.clone());
                     match process_raster_tile(
                         &data,
-                        RasterTileRequest { coords },
+                        RasterTileRequest {
+                            coords,
+                            source: RasterSourceId::new(group.source_name.clone()),
+                        },
                         &mut process_context,
                     ) {
                         Ok(()) => {}
@@ -128,7 +127,10 @@ pub fn fetch_raster_apc<K: OffscreenKernel, T: RasterTransferables, C: Context +
                         Err(ProcessRasterError::Decoding { source }) => {
                             tracing::warn!(%coords, source = ?group.source_name, error = %source, "invalid raster tile");
                             context
-                                .send_back(T::LayerRasterMissing::build_from(coords))
+                                .send_back(T::LayerRasterMissing::build_from(
+                                    coords,
+                                    RasterSourceId::new(group.source_name.clone()),
+                                ))
                                 .map_err(ProcedureError::Send)?;
                         }
                     }
@@ -153,6 +155,7 @@ pub fn fetch_raster_apc<K: OffscreenKernel, T: RasterTransferables, C: Context +
                     context
                         .send_back(<T as RasterTransferables>::LayerRasterMissing::build_from(
                             coords,
+                            RasterSourceId::new(group.source_name.clone()),
                         ))
                         .map_err(ProcedureError::Send)?;
                 }
@@ -212,3 +215,34 @@ impl<E: Environment, T: RasterTransferables> RequestSystem<E, T> {
         Ok(())
     }
 }
+
+fn wanted_tiles(
+    regions: Vec<(RasterSourceId, Vec<WorldTileCoords>)>,
+    style: &crate::style::Style,
+    world: &crate::tcs::world::World,
+) -> Vec<WorldTileCoords> {
+    let mut wanted = Vec::new();
+    for (source, tiles) in regions {
+        let minzoom = match source.name().and_then(|name| style.sources.get(name)) {
+            Some(crate::style::source::Source::Raster(source)) => source.minzoom,
+            Some(crate::style::source::Source::RasterDem(source)) => source.minzoom,
+            _ => None,
+        }
+        .unwrap_or(0);
+        for coords in tiles {
+            wanted.push(coords);
+            if let Some(parent) = missing_tile_fallback(coords, minzoom, |coords| {
+                world
+                    .tiles
+                    .query::<&RasterLayersDataComponent>(coords)
+                    .is_some_and(|component| component.source_is_missing(&source))
+            }) {
+                wanted.push(parent);
+            }
+        }
+    }
+    wanted
+}
+
+#[cfg(test)]
+mod tests;

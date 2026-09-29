@@ -32,7 +32,10 @@ fn a_missing_raster_message_marks_the_layer_missing() {
 
     apply_raster_message::<DefaultRasterTransferables>(
         &mut world,
-        IntoMessage::into(DefaultLayerRasterMissing::build_from(tile())),
+        IntoMessage::into(DefaultLayerRasterMissing::build_from(
+            tile(),
+            Default::default(),
+        )),
     )
     .expect("valid missing-tile message");
 
@@ -52,7 +55,10 @@ fn a_message_for_an_unknown_tile_is_dropped() {
 
     apply_raster_message::<DefaultRasterTransferables>(
         &mut world,
-        IntoMessage::into(DefaultLayerRasterMissing::build_from(tile())),
+        IntoMessage::into(DefaultLayerRasterMissing::build_from(
+            tile(),
+            Default::default(),
+        )),
     )
     .expect("valid message for absent tile");
 

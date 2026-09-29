@@ -2,17 +2,20 @@ use std::collections::HashMap;
 
 use crate::{
     coords::WorldTileCoords,
+    raster::RasterSourceId,
     render::{resource::Texture, settings::Msaa, tile_view_pattern::HasTile},
+    style::Style,
     tcs::world::World,
 };
 
-/// Raster pipeline and clamp-to-edge sampler with one texture binding per tile coordinate.
-/// Bindings are shared with DEM-shaded layers and are not keyed by style source ID.
+/// Raster pipeline and sampler with independent bindings for each source and tile.
+/// Raster imagery and DEM shading share storage without sharing source identities.
 pub struct RasterResources {
     sampler: wgpu::Sampler,
     msaa: Msaa,
     pipeline: wgpu::RenderPipeline,
-    bound_textures: HashMap<WorldTileCoords, (wgpu::BindGroup, u64)>,
+    bound_textures: HashMap<RasterSourceId, HashMap<WorldTileCoords, (wgpu::BindGroup, u64)>>,
+    layer_sources: HashMap<String, RasterSourceId>,
     /// Advances whenever a texture is bound, so cached renders of raster tiles can refresh.
     revision: u64,
 }
@@ -35,6 +38,7 @@ impl RasterResources {
             msaa,
             pipeline,
             bound_textures: Default::default(),
+            layer_sources: Default::default(),
             revision: 0,
         }
     }
@@ -59,19 +63,29 @@ impl RasterResources {
     }
 
     /// Borrows the current texture/sampler binding, or `None` before upload or after eviction.
-    pub fn get_bound_texture(&self, coords: &WorldTileCoords) -> Option<&wgpu::BindGroup> {
-        self.bound_textures.get(coords).map(|(binding, _)| binding)
+    pub fn get_bound_texture(
+        &self,
+        source: &RasterSourceId,
+        coords: &WorldTileCoords,
+    ) -> Option<&wgpu::BindGroup> {
+        self.bound_textures
+            .get(source)?
+            .get(coords)
+            .map(|(binding, _)| binding)
     }
 
-    pub(crate) fn texture_revision(&self, coords: WorldTileCoords) -> Option<u64> {
+    pub(crate) fn texture_revision(&self, layer: &str, coords: WorldTileCoords) -> Option<u64> {
         self.bound_textures
+            .get(self.layer_sources.get(layer)?)?
             .get(&coords)
             .map(|(_, revision)| *revision)
     }
 
-    /// Drops the registry's binding for this tile without advancing the insertion generation.
+    /// Drops every source binding at these coordinates without advancing the insertion generation.
     pub fn remove_texture(&mut self, coords: WorldTileCoords) {
-        self.bound_textures.remove(&coords);
+        for textures in self.bound_textures.values_mut() {
+            textures.remove(&coords);
+        }
     }
 
     /// Inserts or replaces the texture/sampler binding at group one of the raster pipeline.
@@ -79,30 +93,66 @@ impl RasterResources {
     pub fn bind_texture(
         &mut self,
         device: &wgpu::Device,
+        source: &RasterSourceId,
         coords: &WorldTileCoords,
         texture: Texture,
     ) {
         self.revision = self.revision.wrapping_add(1);
-        self.bound_textures.insert(
-            *coords,
-            (
-                device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    layout: &self.pipeline.get_bind_group_layout(1),
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: wgpu::BindingResource::TextureView(&texture.view),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: wgpu::BindingResource::Sampler(&self.sampler),
-                        },
-                    ],
-                    label: None,
-                }),
-                self.revision,
-            ),
-        );
+        self.bound_textures
+            .entry(source.clone())
+            .or_default()
+            .insert(
+                *coords,
+                (
+                    device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        layout: &self.pipeline.get_bind_group_layout(1),
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: wgpu::BindingResource::TextureView(&texture.view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::Sampler(&self.sampler),
+                            },
+                        ],
+                        label: None,
+                    }),
+                    self.revision,
+                ),
+            );
+    }
+
+    /// Drops one source binding while retaining other sources at these coordinates.
+    pub fn remove_source_texture(&mut self, source: &RasterSourceId, coords: WorldTileCoords) {
+        if let Some(textures) = self.bound_textures.get_mut(source) {
+            textures.remove(&coords);
+        }
+    }
+
+    pub(crate) fn update_layer_sources(&mut self, style: &Style) {
+        self.layer_sources.clear();
+        for group in crate::io::tile_sources::source_layer_groups(
+            style,
+            crate::io::tile_sources::TileKind::Raster,
+        ) {
+            let source = RasterSourceId::new(group.source_name);
+            for layer in group.layers {
+                self.layer_sources.insert(layer.id, source.clone());
+            }
+        }
+    }
+
+    pub(crate) fn layer_source(&self, layer: &str) -> Option<&RasterSourceId> {
+        self.layer_sources.get(layer)
+    }
+
+    pub(crate) fn layer_texture(
+        &self,
+        layer: &str,
+        coords: &WorldTileCoords,
+    ) -> Option<&wgpu::BindGroup> {
+        self.get_bound_texture(self.layer_source(layer)?, coords)
     }
 
     /// Borrows the raster pipeline whose group-one layout defines the texture bindings.
@@ -112,7 +162,18 @@ impl RasterResources {
 }
 
 impl HasTile for RasterResources {
+    fn has_source_tile(
+        &self,
+        source: &RasterSourceId,
+        coords: WorldTileCoords,
+        _world: &World,
+    ) -> bool {
+        self.get_bound_texture(source, &coords).is_some()
+    }
+
     fn has_tile(&self, coords: WorldTileCoords, _world: &World) -> bool {
-        self.bound_textures.contains_key(&coords)
+        self.bound_textures
+            .values()
+            .any(|textures| textures.contains_key(&coords))
     }
 }

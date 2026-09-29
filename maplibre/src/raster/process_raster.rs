@@ -10,7 +10,10 @@ use thiserror::Error;
 use crate::{
     coords::WorldTileCoords,
     io::apc::{Context, SendError},
-    raster::transferables::{LayerRaster, RasterTransferables},
+    raster::{
+        transferables::{LayerRaster, RasterTransferables},
+        RasterSourceId,
+    },
 };
 
 /// Failure decoding image bytes or returning pixels to the caller.
@@ -32,6 +35,8 @@ pub enum ProcessRasterError {
 pub struct RasterTileRequest {
     /// Tile whose image is being decoded.
     pub coords: WorldTileCoords,
+    /// Source whose image is being decoded.
+    pub source: RasterSourceId,
 }
 
 /// Decodes source bytes into RGBA8 pixels and sends them through the reply context.
@@ -46,7 +51,7 @@ pub fn process_raster_tile<T: RasterTransferables, C: Context>(
         image::load_from_memory(data).map_err(|source| ProcessRasterError::Decoding { source })?;
     let rgba = img.to_rgba8();
 
-    context.layer_raster_finished(coords, "raster".to_string(), rgba)?;
+    context.layer_raster_finished(coords, tile_request.source, rgba)?;
 
     Ok(())
 }
@@ -70,11 +75,11 @@ impl<T: RasterTransferables, C: Context> ProcessRasterContext<T, C> {
     fn layer_raster_finished(
         &mut self,
         coords: &WorldTileCoords,
-        layer_name: String,
+        source: RasterSourceId,
         image_data: RgbaImage,
     ) -> Result<(), ProcessRasterError> {
         self.context
-            .send_back(T::LayerRaster::build_from(*coords, layer_name, image_data))
+            .send_back(T::LayerRaster::build_from(*coords, source, image_data))
             .map_err(ProcessRasterError::Send)
     }
 }

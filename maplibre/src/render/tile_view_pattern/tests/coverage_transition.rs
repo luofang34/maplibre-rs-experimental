@@ -19,7 +19,7 @@ fn raster_shapes(
             &World::default(),
         )
         .iter()
-        .flat_map(|tile| shape_coords(&tile.raster))
+        .flat_map(|tile| shape_coords(&tile.raster[0].1))
         .collect()
 }
 

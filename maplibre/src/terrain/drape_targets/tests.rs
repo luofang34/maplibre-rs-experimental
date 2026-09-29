@@ -34,7 +34,7 @@ fn selected(
     .expect("target")
     .1
     .into_iter()
-    .filter(|shape| shape.raster_source.as_deref() == Some("relief"))
+    .filter(|shape| shape.raster_source.as_ref().and_then(RasterSourceId::name) == Some("relief"))
     .map(|shape| shape.coords)
     .collect()
 }

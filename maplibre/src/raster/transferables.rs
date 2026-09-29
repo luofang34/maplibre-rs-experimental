@@ -9,7 +9,7 @@ use image::RgbaImage;
 use crate::{
     coords::WorldTileCoords,
     io::apc::{IntoMessage, Message, MessageTag},
-    raster::{AvailableRasterLayerData, MissingRasterLayerData},
+    raster::{AvailableRasterLayerData, MissingRasterLayerData, RasterSourceId},
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -32,8 +32,8 @@ pub trait LayerRaster: IntoMessage + Debug + Send {
     /// Identifies this backend's decoded-image payload for message dispatch.
     fn message_tag() -> &'static dyn MessageTag;
 
-    /// Takes ownership of a decoded image and its request label at the supplied tile coordinates.
-    fn build_from(coords: WorldTileCoords, layer_name: String, image: RgbaImage) -> Self;
+    /// Takes ownership of a decoded image and its source identity at the supplied tile coordinates.
+    fn build_from(coords: WorldTileCoords, source: RasterSourceId, image: RgbaImage) -> Self;
 
     /// Tile-grid coordinates covered by the image.
     fn coords(&self) -> WorldTileCoords;
@@ -42,13 +42,13 @@ pub trait LayerRaster: IntoMessage + Debug + Send {
     fn to_layer(self) -> AvailableRasterLayerData;
 }
 
-/// A completed raster request with no image, so the tile need not be requested repeatedly.
+/// A raster source response without pixels; the request outcome determines retry eligibility.
 pub trait LayerRasterMissing: IntoMessage + Debug + Send {
     /// Identifies this backend's missing-image payload for message dispatch.
     fn message_tag() -> &'static dyn MessageTag;
 
     /// Records an unavailable raster tile at the supplied grid coordinates.
-    fn build_from(coords: WorldTileCoords) -> Self;
+    fn build_from(coords: WorldTileCoords, source: RasterSourceId) -> Self;
 
     /// Tile-grid coordinates of the unsuccessful request.
     fn coords(&self) -> WorldTileCoords;
@@ -57,12 +57,12 @@ pub trait LayerRasterMissing: IntoMessage + Debug + Send {
     fn to_layer(self) -> MissingRasterLayerData;
 }
 
-/// Owned image message; conversion uses the renderer's `raster` source-layer key.
+/// Owned image message retaining the identity of the requested source.
 pub struct DefaultLayerRaster {
     /// Tile-grid coordinates covered by the image.
     pub coords: WorldTileCoords,
-    /// Request label retained in this payload; conversion to a layer uses `raster` instead.
-    pub layer_name: String,
+    /// Source owning these pixels.
+    pub source: RasterSourceId,
     /// Decoded RGBA8 pixels, before GPU upload.
     pub image: RgbaImage,
 }
@@ -84,10 +84,10 @@ impl LayerRaster for DefaultLayerRaster {
         &RasterMessageTag::LayerRaster
     }
 
-    fn build_from(coords: WorldTileCoords, layer_name: String, image: RgbaImage) -> Self {
+    fn build_from(coords: WorldTileCoords, source: RasterSourceId, image: RgbaImage) -> Self {
         Self {
             coords,
-            layer_name,
+            source,
             image,
         }
     }
@@ -99,16 +99,18 @@ impl LayerRaster for DefaultLayerRaster {
     fn to_layer(self) -> AvailableRasterLayerData {
         AvailableRasterLayerData {
             coords: self.coords,
-            source_layer: "raster".to_string(),
+            source: self.source,
             image: self.image,
         }
     }
 }
 
-/// Owned unavailable-tile message using the renderer's `raster` source-layer key.
+/// Owned unavailable-tile message retaining the requested source identity.
 pub struct DefaultLayerRasterMissing {
     /// Tile-grid coordinates of the unsuccessful request.
     pub coords: WorldTileCoords,
+    /// Source whose request yielded no image.
+    pub source: RasterSourceId,
 }
 
 impl Debug for DefaultLayerRasterMissing {
@@ -128,8 +130,8 @@ impl LayerRasterMissing for DefaultLayerRasterMissing {
         &RasterMessageTag::LayerRasterMissing
     }
 
-    fn build_from(coords: WorldTileCoords) -> Self {
-        Self { coords }
+    fn build_from(coords: WorldTileCoords, source: RasterSourceId) -> Self {
+        Self { coords, source }
     }
 
     fn coords(&self) -> WorldTileCoords {
@@ -139,7 +141,7 @@ impl LayerRasterMissing for DefaultLayerRasterMissing {
     fn to_layer(self) -> MissingRasterLayerData {
         MissingRasterLayerData {
             coords: self.coords,
-            source_layer: "raster".to_string(),
+            source: self.source,
         }
     }
 }
@@ -160,3 +162,6 @@ impl RasterTransferables for DefaultRasterTransferables {
     type LayerRaster = DefaultLayerRaster;
     type LayerRasterMissing = DefaultLayerRasterMissing;
 }
+
+#[cfg(test)]
+mod tests;

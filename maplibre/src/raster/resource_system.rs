@@ -17,6 +17,7 @@ use crate::{
 pub fn resource_system(
     MapContext {
         world,
+        style,
         renderer:
             Renderer {
                 device,
@@ -60,5 +61,8 @@ pub fn resource_system(
             .initialize_with_prefix_layouts(device, &[projection_resources.bind_group_layout()]),
         )
     });
+    if let Initialized(resources) = raster_resources {
+        resources.update_layer_sources(style);
+    }
     Ok(())
 }

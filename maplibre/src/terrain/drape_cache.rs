@@ -22,7 +22,7 @@ pub(crate) trait SourceContent {
     /// Whether the style layer's geometry of the tile is in the vector buffer pool.
     fn vector_layer_loaded(&self, coords: WorldTileCoords, layer_id: &str) -> bool;
     /// Revision of the raster binding, or `None` while no texture is uploaded.
-    fn raster_revision(&self, coords: WorldTileCoords) -> Option<u64>;
+    fn raster_revision(&self, coords: WorldTileCoords, layer: &str) -> Option<u64>;
 }
 
 /// Fingerprint of everything that decides a drape texture's content.
@@ -55,7 +55,7 @@ pub(crate) fn fingerprint(
         for (id, index, _) in &shape.raster_layers {
             id.hash(&mut hasher);
             index.hash(&mut hasher);
-            content.raster_revision(shape.source).hash(&mut hasher);
+            content.raster_revision(shape.source, id).hash(&mut hasher);
         }
     }
     hasher.finish()

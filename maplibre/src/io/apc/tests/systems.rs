@@ -148,6 +148,7 @@ fn good_results(coords: WorldTileCoords) -> Vec<Message> {
         IntoMessage::into(
             <DefaultRasterTransferables as RasterTransferables>::LayerRasterMissing::build_from(
                 coords,
+                Default::default(),
             ),
         ),
         IntoMessage::into(DefaultLayerDemMissing::build_from(coords)),

@@ -1,11 +1,15 @@
 //! Selects loaded source shapes and owns the tile metadata allocation.
 
-use std::{collections::HashSet, marker::PhantomData};
+use std::{
+    collections::{HashMap, HashSet},
+    marker::PhantomData,
+};
 
 use crate::{
     coords::{ViewRegion, WorldTileCoords, Zoom, ZoomLevel},
     io::tile_sources::TileKind,
     projection::renderer_data::tile_mercator_coordinates,
+    raster::RasterSourceId,
     render::{
         camera::ViewProjection,
         resource::{BackingBufferDescriptor, Queue},
@@ -16,7 +20,7 @@ use crate::{
 };
 
 /// The tiles of every raster source, as its own covering selected them.
-pub type RasterCoverings = [(String, Vec<WorldTileCoords>)];
+pub type RasterCoverings = [(RasterSourceId, Vec<WorldTileCoords>)];
 
 /// Default number of metadata entries allocated for a tile view pattern.
 pub const DEFAULT_TILE_VIEW_PATTERN_SIZE: wgpu::BufferAddress = 512;
@@ -126,12 +130,12 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
     ) -> Vec<ViewTile> {
         let mut view_tiles = Vec::with_capacity(self.view_tiles.len());
         let mut vector_parents = HashSet::new();
-        let mut raster_parents = HashSet::new();
-        let raster_sources = sources.of_kind(TileKind::Raster);
-        let covering: Vec<WorldTileCoords> = raster_coverings
-            .iter()
-            .flat_map(|(_, tiles)| tiles.iter().copied())
-            .collect();
+        let mut raster_parents = HashMap::new();
+        let covering: Vec<_> = if raster_coverings.is_empty() {
+            vec![(RasterSourceId::default(), Vec::new())]
+        } else {
+            raster_coverings.to_vec()
+        };
 
         for coords in view_region.iter() {
             if coords.build_quad_key().is_none() {
@@ -144,18 +148,28 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
                 world,
                 &mut vector_parents,
             );
-            let covered: Vec<WorldTileCoords> = covering_shapes_for(coords, &covering)
-                .into_iter()
-                .filter(|source| raster_sources.has_tile(*source, world))
+            let raster = covering
+                .iter()
+                .map(|(source, covering)| {
+                    let availability = super::SourceTiles {
+                        source,
+                        availability: sources.of_kind(TileKind::Raster),
+                    };
+                    let covered = covering_shapes_for(coords, covering)
+                        .into_iter()
+                        .filter(|tile| availability.has_tile(*tile, world))
+                        .collect();
+                    let shapes = raster_shapes(
+                        &availability,
+                        coords,
+                        covered,
+                        zoom,
+                        world,
+                        raster_parents.entry(source.clone()).or_default(),
+                    );
+                    (source.clone(), shapes)
+                })
                 .collect();
-            let raster = raster_shapes(
-                &raster_sources,
-                coords,
-                covered,
-                zoom,
-                world,
-                &mut raster_parents,
-            );
             view_tiles.push(ViewTile {
                 target: coords,
                 vector,
@@ -232,7 +246,9 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
 
         for view_tile in &mut self.view_tiles {
             view_tile.vector.for_each_mut(&mut add_to_buffer);
-            view_tile.raster.for_each_mut(&mut add_to_buffer);
+            for (_, shapes) in &mut view_tile.raster {
+                shapes.for_each_mut(&mut add_to_buffer);
+            }
         }
 
         if skipped > 0 {

@@ -182,9 +182,9 @@ impl SourceContent for LoadedContent<'_> {
         })
     }
 
-    fn raster_revision(&self, coords: WorldTileCoords) -> Option<u64> {
+    fn raster_revision(&self, coords: WorldTileCoords, layer: &str) -> Option<u64> {
         self.raster
-            .and_then(|raster| raster.texture_revision(coords))
+            .and_then(|raster| raster.texture_revision(layer, coords))
     }
 }
 

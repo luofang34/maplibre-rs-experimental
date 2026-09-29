@@ -3,7 +3,6 @@
 use crate::{
     context::MapContext,
     hillshade::{dem_layer_kind, render_commands::DrawDemTiles, resources::HillshadeResources},
-    io::tile_sources::TileKind,
     raster::resource::RasterResources,
     render::{
         eventually::{Eventually, Eventually::Initialized},
@@ -57,59 +56,20 @@ pub fn queue_system(
 
     let mut items = Vec::new();
     for view_tile in tile_view_pattern.iter() {
-        view_tile.render_kind(TileKind::Raster, |source_shape| {
-            if raster_resources
-                .get_bound_texture(&source_shape.coords())
-                .is_none()
-            {
-                return;
-            }
-            for style_layer in &layers {
-                let mut masks = Vec::with_capacity(2);
-                if uses_globe {
-                    masks.push(TileMaskItem {
-                        projection: ProjectionBinding::View,
-                        draw_function: Box::new(DrawState::<TileMaskItem, DrawMasks>::new()),
-                        source_shape: source_shape.clone(),
-                        generate_borders: true,
-                    });
+        for style_layer in &layers {
+            let Some(source) = raster_resources.layer_source(&style_layer.id) else {
+                continue;
+            };
+            view_tile.render_raster_source(source, |source_shape| {
+                if raster_resources
+                    .layer_texture(&style_layer.id, &source_shape.coords())
+                    .is_none()
+                {
+                    return;
                 }
-                masks.push(TileMaskItem {
-                    projection: ProjectionBinding::View,
-                    draw_function: Box::new(DrawState::<TileMaskItem, DrawMasks>::new()),
-                    source_shape: source_shape.clone(),
-                    generate_borders: false,
-                });
-                let mut draws = Vec::with_capacity(2);
-                if uses_globe {
-                    draws.push(LayerItem {
-                        projection: ProjectionBinding::View,
-                        draw_function: Box::new(DrawState::<LayerItem, DrawDemTiles>::new()),
-                        index: style_layer.index,
-                        generate_borders: true,
-                        style_layer: style_layer.id.clone(),
-                        tile: Tile {
-                            coords: source_shape.coords(),
-                        },
-                        source_shape: source_shape.clone(),
-                    });
-                }
-                // The seam-expanding mesh would draw the tile edges twice, which shows through
-                // translucent shading; the flat map has no cracks to hide, as in GL JS.
-                draws.push(LayerItem {
-                    projection: ProjectionBinding::View,
-                    draw_function: Box::new(DrawState::<LayerItem, DrawDemTiles>::new()),
-                    index: style_layer.index,
-                    generate_borders: false,
-                    style_layer: style_layer.id.clone(),
-                    tile: Tile {
-                        coords: source_shape.coords(),
-                    },
-                    source_shape: source_shape.clone(),
-                });
-                items.push((draws, masks));
-            }
-        });
+                items.push(source_draws(source_shape, style_layer, uses_globe));
+            });
+        }
     }
 
     let Some((layer_item_phase, tile_mask_phase)) = world
@@ -127,4 +87,54 @@ pub fn queue_system(
         }
     }
     Ok(())
+}
+
+fn source_draws(
+    source_shape: &crate::render::tile_view_pattern::TileShape,
+    style_layer: &crate::style::layer::StyleLayer,
+    uses_globe: bool,
+) -> (Vec<LayerItem>, Vec<TileMaskItem>) {
+    let mut masks = Vec::with_capacity(2);
+    if uses_globe {
+        masks.push(TileMaskItem {
+            projection: ProjectionBinding::View,
+            draw_function: Box::new(DrawState::<TileMaskItem, DrawMasks>::new()),
+            source_shape: source_shape.clone(),
+            generate_borders: true,
+        });
+    }
+    masks.push(TileMaskItem {
+        projection: ProjectionBinding::View,
+        draw_function: Box::new(DrawState::<TileMaskItem, DrawMasks>::new()),
+        source_shape: source_shape.clone(),
+        generate_borders: false,
+    });
+    let mut draws = Vec::with_capacity(2);
+    if uses_globe {
+        draws.push(LayerItem {
+            projection: ProjectionBinding::View,
+            draw_function: Box::new(DrawState::<LayerItem, DrawDemTiles>::new()),
+            index: style_layer.index,
+            generate_borders: true,
+            style_layer: style_layer.id.clone(),
+            tile: Tile {
+                coords: source_shape.coords(),
+            },
+            source_shape: source_shape.clone(),
+        });
+    }
+    // The seam-expanding mesh would draw the tile edges twice, which shows through
+    // translucent shading; the flat map has no cracks to hide, as in GL JS.
+    draws.push(LayerItem {
+        projection: ProjectionBinding::View,
+        draw_function: Box::new(DrawState::<LayerItem, DrawDemTiles>::new()),
+        index: style_layer.index,
+        generate_borders: false,
+        style_layer: style_layer.id.clone(),
+        tile: Tile {
+            coords: source_shape.coords(),
+        },
+        source_shape: source_shape.clone(),
+    });
+    (draws, masks)
 }

@@ -53,7 +53,8 @@ impl RenderCommand<LayerItem> for SetRasterViewBindGroup {
             return RenderCommandResult::Failure;
         };
 
-        let Some(bind_group) = raster_resources.get_bound_texture(&item.tile.coords) else {
+        let Some(bind_group) = raster_resources.layer_texture(&item.style_layer, &item.tile.coords)
+        else {
             return RenderCommandResult::Failure;
         };
 

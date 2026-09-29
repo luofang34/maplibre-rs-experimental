@@ -17,6 +17,7 @@ pub use pattern::{
 use crate::{
     coords::{WorldTileCoords, Zoom},
     io::tile_sources::TileKind,
+    raster::RasterSourceId,
     render::shaders::ShaderTileMetadata,
     tcs::{resources::ResourceQuery, world::World},
 };
@@ -86,7 +87,7 @@ impl SourceShapes {
 pub struct ViewTile {
     target: WorldTileCoords,
     vector: SourceShapes,
-    raster: SourceShapes,
+    raster: Vec<(RasterSourceId, SourceShapes)>,
 }
 
 impl ViewTile {
@@ -95,13 +96,15 @@ impl ViewTile {
         self.target
     }
 
-    /// Visits the shapes of every kind; a tile serving both kinds is visited once per kind.
+    /// Visits vector shapes and each raster source's shapes, including shared coordinates.
     pub fn render<F>(&self, mut callback: F)
     where
         F: FnMut(&TileShape),
     {
         self.vector.for_each(&mut callback);
-        self.raster.for_each(&mut callback);
+        for (_, shapes) in &self.raster {
+            shapes.for_each(&mut callback);
+        }
     }
 
     /// Visits the shapes drawn for one kind of source.
@@ -109,13 +112,24 @@ impl ViewTile {
     where
         F: FnMut(&TileShape),
     {
-        self.shapes(kind).for_each(&mut callback);
+        match kind {
+            TileKind::Vector => self.vector.for_each(&mut callback),
+            TileKind::Raster => {
+                for (_, shapes) in &self.raster {
+                    shapes.for_each(&mut callback);
+                }
+            }
+        }
     }
 
-    fn shapes(&self, kind: TileKind) -> &SourceShapes {
-        match kind {
-            TileKind::Vector => &self.vector,
-            TileKind::Raster => &self.raster,
+    /// Visits only the shapes owned by one raster source.
+    pub fn render_raster_source(
+        &self,
+        source: &RasterSourceId,
+        mut callback: impl FnMut(&TileShape),
+    ) {
+        for (_, shapes) in self.raster.iter().filter(|(id, _)| id == source) {
+            shapes.for_each(&mut callback);
         }
     }
 }
@@ -188,6 +202,17 @@ impl Default for TileShape {
 pub trait HasTile {
     /// Whether this tile has the resources required by the provider to render.
     fn has_tile(&self, coords: WorldTileCoords, world: &World) -> bool;
+
+    /// Checks one raster source; providers without source-specific state apply their ordinary constraint.
+    fn has_source_tile(
+        &self,
+        source: &RasterSourceId,
+        coords: WorldTileCoords,
+        world: &World,
+    ) -> bool {
+        let _ = source;
+        self.has_tile(coords, world)
+    }
 
     /// Finds the nearest available ancestor, including `coords` itself; returns `None` at an empty root.
     fn get_available_parent(
@@ -265,17 +290,42 @@ impl<A: HasTile> HasTile for &A {
     fn has_tile(&self, coords: WorldTileCoords, world: &World) -> bool {
         A::has_tile(*self, coords, world)
     }
+    fn has_source_tile(
+        &self,
+        source: &RasterSourceId,
+        coords: WorldTileCoords,
+        world: &World,
+    ) -> bool {
+        A::has_source_tile(*self, source, coords, world)
+    }
 }
 
 impl<A: HasTile> HasTile for (A,) {
     fn has_tile(&self, coords: WorldTileCoords, world: &World) -> bool {
         self.0.has_tile(coords, world)
     }
+    fn has_source_tile(
+        &self,
+        source: &RasterSourceId,
+        coords: WorldTileCoords,
+        world: &World,
+    ) -> bool {
+        self.0.has_source_tile(source, coords, world)
+    }
 }
 
 impl<A: HasTile, B: HasTile> HasTile for (A, B) {
     fn has_tile(&self, coords: WorldTileCoords, world: &World) -> bool {
         self.0.has_tile(coords, world) && self.1.has_tile(coords, world)
+    }
+    fn has_source_tile(
+        &self,
+        source: &RasterSourceId,
+        coords: WorldTileCoords,
+        world: &World,
+    ) -> bool {
+        self.0.has_source_tile(source, coords, world)
+            && self.1.has_source_tile(source, coords, world)
     }
 }
 
@@ -284,6 +334,16 @@ impl<A: HasTile, B: HasTile, C: HasTile> HasTile for (A, B, C) {
         self.0.has_tile(coords, world)
             && self.1.has_tile(coords, world)
             && self.2.has_tile(coords, world)
+    }
+    fn has_source_tile(
+        &self,
+        source: &RasterSourceId,
+        coords: WorldTileCoords,
+        world: &World,
+    ) -> bool {
+        self.0.has_source_tile(source, coords, world)
+            && self.1.has_source_tile(source, coords, world)
+            && self.2.has_source_tile(source, coords, world)
     }
 }
 
@@ -309,6 +369,17 @@ where
             .resources
             .query::<Q>()
             .is_some_and(|resources| resources.has_tile(coords, world))
+    }
+    fn has_source_tile(
+        &self,
+        source: &RasterSourceId,
+        coords: WorldTileCoords,
+        world: &World,
+    ) -> bool {
+        world
+            .resources
+            .query::<Q>()
+            .is_some_and(|resources| resources.has_source_tile(source, coords, world))
     }
 }
 
@@ -365,6 +436,28 @@ pub struct KindSources<'a>(&'a [Box<dyn HasTile>]);
 impl HasTile for KindSources<'_> {
     fn has_tile(&self, coords: WorldTileCoords, world: &World) -> bool {
         self.0.iter().all(|item| item.has_tile(coords, world))
+    }
+    fn has_source_tile(
+        &self,
+        source: &RasterSourceId,
+        coords: WorldTileCoords,
+        world: &World,
+    ) -> bool {
+        self.0
+            .iter()
+            .all(|item| item.has_source_tile(source, coords, world))
+    }
+}
+
+pub(crate) struct SourceTiles<'a, H> {
+    pub(crate) source: &'a RasterSourceId,
+    pub(crate) availability: H,
+}
+
+impl<H: HasTile> HasTile for SourceTiles<'_, H> {
+    fn has_tile(&self, coords: WorldTileCoords, world: &World) -> bool {
+        self.availability
+            .has_source_tile(self.source, coords, world)
     }
 }
 

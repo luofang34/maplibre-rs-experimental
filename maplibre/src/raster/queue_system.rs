@@ -2,7 +2,6 @@
 
 use crate::{
     context::MapContext,
-    io::tile_sources::TileKind,
     raster::{render_commands::DrawRasterTiles, resource::RasterResources},
     render::{
         eventually::{Eventually, Eventually::Initialized},
@@ -44,60 +43,22 @@ pub fn queue_system(
         let coords = &view_tile.coords();
         tracing::trace!("Drawing tile at {coords}");
 
-        // draw tile normal or the source e.g. parent or children
-        view_tile.render_kind(TileKind::Raster, |source_shape| {
-            if raster_resources
-                .get_bound_texture(&source_shape.coords())
-                .is_none()
-            {
-                return;
-            }
-            for style_layer in style.layers.iter().filter(|layer| {
-                layer.type_ == "raster" && layer.is_visible_at(view_state.zoom().value())
-            }) {
-                let mut masks = Vec::with_capacity(2);
-                if uses_globe {
-                    masks.push(TileMaskItem {
-                        projection: ProjectionBinding::View,
-                        draw_function: Box::new(DrawState::<TileMaskItem, DrawMasks>::new()),
-                        source_shape: source_shape.clone(),
-                        generate_borders: true,
-                    });
+        for style_layer in style.layers.iter().filter(|layer| {
+            layer.type_ == "raster" && layer.is_visible_at(view_state.zoom().value())
+        }) {
+            let Some(source) = raster_resources.layer_source(&style_layer.id) else {
+                continue;
+            };
+            view_tile.render_raster_source(source, |source_shape| {
+                if raster_resources
+                    .layer_texture(&style_layer.id, &source_shape.coords())
+                    .is_none()
+                {
+                    return;
                 }
-                masks.push(TileMaskItem {
-                    projection: ProjectionBinding::View,
-                    draw_function: Box::new(DrawState::<TileMaskItem, DrawMasks>::new()),
-                    source_shape: source_shape.clone(),
-                    generate_borders: false,
-                });
-                let mut layers = Vec::with_capacity(if uses_globe { 2 } else { 1 });
-                if uses_globe {
-                    layers.push(LayerItem {
-                        projection: ProjectionBinding::View,
-                        draw_function: Box::new(DrawState::<LayerItem, DrawRasterTiles>::new()),
-                        index: style_layer.index,
-                        generate_borders: true,
-                        style_layer: style_layer.id.clone(),
-                        tile: Tile {
-                            coords: source_shape.coords(),
-                        },
-                        source_shape: source_shape.clone(),
-                    });
-                }
-                layers.push(LayerItem {
-                    projection: ProjectionBinding::View,
-                    draw_function: Box::new(DrawState::<LayerItem, DrawRasterTiles>::new()),
-                    index: style_layer.index,
-                    generate_borders: !uses_globe,
-                    style_layer: style_layer.id.clone(),
-                    tile: Tile {
-                        coords: source_shape.coords(),
-                    },
-                    source_shape: source_shape.clone(),
-                });
-                items.push((layers, masks));
-            }
-        });
+                items.push(source_draws(source_shape, style_layer, uses_globe));
+            });
+        }
     }
 
     let Some((layer_item_phase, tile_mask_phase)) = world
@@ -117,4 +78,52 @@ pub fn queue_system(
     }
 
     Ok(())
+}
+
+fn source_draws(
+    source_shape: &crate::render::tile_view_pattern::TileShape,
+    style_layer: &crate::style::layer::StyleLayer,
+    uses_globe: bool,
+) -> (Vec<LayerItem>, Vec<TileMaskItem>) {
+    let mut masks = Vec::with_capacity(2);
+    if uses_globe {
+        masks.push(TileMaskItem {
+            projection: ProjectionBinding::View,
+            draw_function: Box::new(DrawState::<TileMaskItem, DrawMasks>::new()),
+            source_shape: source_shape.clone(),
+            generate_borders: true,
+        });
+    }
+    masks.push(TileMaskItem {
+        projection: ProjectionBinding::View,
+        draw_function: Box::new(DrawState::<TileMaskItem, DrawMasks>::new()),
+        source_shape: source_shape.clone(),
+        generate_borders: false,
+    });
+    let mut layers = Vec::with_capacity(if uses_globe { 2 } else { 1 });
+    if uses_globe {
+        layers.push(LayerItem {
+            projection: ProjectionBinding::View,
+            draw_function: Box::new(DrawState::<LayerItem, DrawRasterTiles>::new()),
+            index: style_layer.index,
+            generate_borders: true,
+            style_layer: style_layer.id.clone(),
+            tile: Tile {
+                coords: source_shape.coords(),
+            },
+            source_shape: source_shape.clone(),
+        });
+    }
+    layers.push(LayerItem {
+        projection: ProjectionBinding::View,
+        draw_function: Box::new(DrawState::<LayerItem, DrawRasterTiles>::new()),
+        index: style_layer.index,
+        generate_borders: !uses_globe,
+        style_layer: style_layer.id.clone(),
+        tile: Tile {
+            coords: source_shape.coords(),
+        },
+        source_shape: source_shape.clone(),
+    });
+    (layers, masks)
 }

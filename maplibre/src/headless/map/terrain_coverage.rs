@@ -119,7 +119,7 @@ fn tile(coords: WorldTileCoords, relief: bool, child: bool) -> AvailableRasterLa
     };
     AvailableRasterLayerData {
         coords,
-        source_layer: "paint".into(),
+        source: "paint".into(),
         image: RgbaImage::from_pixel(256, 256, Rgba(color)),
     }
 }
@@ -189,3 +189,5 @@ fn assert_color(bytes: &[u8], expected: [u8; 4]) {
 mod tests;
 
 mod stencil;
+
+mod source_identity;

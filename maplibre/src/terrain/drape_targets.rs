@@ -4,11 +4,11 @@ use crate::{
     coords::WorldTileCoords,
     hillshade::dem_layer_kind,
     io::tile_sources::{TileKind, RASTER_LAYER_TYPES},
-    raster::resource::RasterResources,
+    raster::{resource::RasterResources, RasterSourceId},
     render::{
         eventually::{Eventually, Eventually::Initialized},
         tile_view_pattern::{
-            coverage, covering_shapes_for, HasTile, RasterCoverings, ViewTileSources,
+            coverage, covering_shapes_for, HasTile, RasterCoverings, SourceTiles, ViewTileSources,
         },
     },
     style::Style,
@@ -52,11 +52,11 @@ pub(crate) struct TargetSpec {
 }
 
 /// One source tile drawn into a terrain tile's texture: vector data of the tile itself, or
-/// the raster tiles of one named source, which covers the view at its own zoom.
+/// the raster tiles of one source, which covers the view at its own zoom.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ShapeSource {
     pub(crate) coords: WorldTileCoords,
-    pub(crate) raster_source: Option<String>,
+    pub(crate) raster_source: Option<RasterSourceId>,
 }
 
 /// Pairs every view tile with the source tiles that hold its data, without the screen path's
@@ -72,7 +72,6 @@ pub(crate) fn select_targets(
         return Vec::new();
     };
     let vector_sources = sources.of_kind(TileKind::Vector);
-    let raster_sources = sources.of_kind(TileKind::Raster);
     coords
         .filter(|coords| coords.build_quad_key().is_some())
         .map(|coords| {
@@ -85,7 +84,11 @@ pub(crate) fn select_targets(
                         raster_source: None,
                     })
                     .collect();
-            for (name, covering) in raster_coverings {
+            for (source_id, covering) in raster_coverings {
+                let raster_sources = SourceTiles {
+                    source: source_id,
+                    availability: sources.of_kind(TileKind::Raster),
+                };
                 let covered: Vec<WorldTileCoords> = covering_shapes_for(coords, covering)
                     .into_iter()
                     .filter(|source| raster_sources.has_tile(*source, world))
@@ -96,7 +99,7 @@ pub(crate) fn select_targets(
                     .unwrap_or_default();
                 shapes.extend(covered.into_iter().map(|source| ShapeSource {
                     coords: source,
-                    raster_source: Some(name.clone()),
+                    raster_source: Some(source_id.clone()),
                 }));
             }
             (coords, shapes)
@@ -113,27 +116,22 @@ pub(crate) fn collect_layer_specs(
 ) -> Vec<TargetSpec> {
     let vector = world.resources.get::<Eventually<VectorBufferPool>>();
     let raster = world.resources.get::<Eventually<RasterResources>>();
-    let raster_layers: Vec<(String, u32, Option<String>, bool)> = style
+    let raster_layers: Vec<_> = style
         .layers
         .iter()
         .filter(|layer| {
             RASTER_LAYER_TYPES.contains(&layer.type_.as_str()) && layer.is_visible_at(zoom)
         })
-        .map(|layer| {
-            (
+        .filter_map(|layer| {
+            let Some(Initialized(resources)) = raster else {
+                return None;
+            };
+            Some((
                 layer.id.clone(),
                 layer.index,
-                layer.source.clone(),
+                resources.layer_source(&layer.id)?.clone(),
                 dem_layer_kind(&layer.type_).is_some(),
-            )
-        })
-        .collect();
-    let covered_sources: Vec<String> = targets
-        .iter()
-        .flat_map(|(_, shapes)| {
-            shapes
-                .iter()
-                .filter_map(|shape| shape.raster_source.clone())
+            ))
         })
         .collect();
     targets
@@ -143,23 +141,11 @@ pub(crate) fn collect_layer_specs(
             shapes: shapes
                 .into_iter()
                 .map(|shape| {
-                    let has_raster = matches!(raster, Some(Initialized(resources))
-                        if resources.get_bound_texture(&shape.coords).is_some());
-                    // Raster sources without their own covering use the vector shapes.
-                    let raster_layers = if !has_raster {
-                        Vec::new()
-                    } else {
-                        raster_layers
-                            .iter()
-                            .filter(|(_, _, source, _)| match &shape.raster_source {
-                                Some(name) => source.as_deref() == Some(name.as_str()),
-                                None => !source
-                                    .as_ref()
-                                    .is_some_and(|source| covered_sources.contains(source)),
-                            })
-                            .map(|(id, index, _, dem)| (id.clone(), *index, *dem))
-                            .collect()
-                    };
+                    let raster_layers = raster_layers.iter()
+                        .filter(|(_, _, source, _)| shape.raster_source.as_ref() == Some(source))
+                        .filter(|(id, _, _, _)| matches!(raster, Some(Initialized(resources)) if resources.layer_texture(id, &shape.coords).is_some()))
+                        .map(|(id, index, _, dem)| (id.clone(), *index, *dem))
+                        .collect();
                     ShapeSpec {
                         source: shape.coords,
                         vector_layers: match (&shape.raster_source, vector) {

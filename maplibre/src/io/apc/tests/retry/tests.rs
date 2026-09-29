@@ -205,7 +205,7 @@ async fn retained_content(kind: Kind) {
             tile.insert(RasterLayersDataComponent {
                 layers: vec![RasterLayerData::Available(AvailableRasterLayerData {
                     coords: Default::default(),
-                    source_layer: "raster".into(),
+                    source: "source".into(),
                     image,
                 })],
             });

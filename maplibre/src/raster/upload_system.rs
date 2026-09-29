@@ -53,53 +53,58 @@ fn upload_raster_layer(
     source_tiles: BTreeSet<WorldTileCoords>,
 ) {
     for coords in source_tiles {
-        if raster_resources.get_bound_texture(&coords).is_some() {
+        let Some(layers) = tiles.query::<&RasterLayersDataComponent>(coords) else {
             continue;
+        };
+        for data in &layers.layers {
+            if let RasterLayerData::Available(data) = data {
+                if raster_resources
+                    .get_bound_texture(&data.source, &coords)
+                    .is_none()
+                {
+                    upload_image(raster_resources, device, queue, data);
+                }
+            }
         }
-
-        let Some(raster_layers) = tiles.query::<&RasterLayersDataComponent>(coords) else {
-            continue;
-        };
-
-        let Some(AvailableRasterLayerData { coords, image, .. }) =
-            raster_layers.layers.iter().find_map(|data| match data {
-                RasterLayerData::Available(data) => Some(data),
-                RasterLayerData::Missing(_) => None,
-            })
-        else {
-            continue;
-        };
-
-        let (width, height) = image.dimensions();
-
-        let texture = raster_resources.create_texture(
-            None,
-            device,
-            // Raster style colors are sampled in the encoded color space, matching WebGL's
-            // default RGBA upload path. An sRGB texture view would decode the texels to linear
-            // values before writing them to the non-sRGB render target, making imagery too dark.
-            wgpu::TextureFormat::Rgba8Unorm,
-            width,
-            height,
-            wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        );
-
-        queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                aspect: wgpu::TextureAspect::All,
-                texture: &texture.texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-            },
-            image,
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(4 * width),
-                rows_per_image: Some(height),
-            },
-            texture.size,
-        );
-
-        raster_resources.bind_texture(device, coords, texture);
     }
+}
+
+fn upload_image(
+    raster_resources: &mut RasterResources,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    data: &AvailableRasterLayerData,
+) {
+    let image = &data.image;
+    let (width, height) = image.dimensions();
+
+    let texture = raster_resources.create_texture(
+        None,
+        device,
+        // Raster style colors are sampled in the encoded color space, matching WebGL's
+        // default RGBA upload path. An sRGB texture view would decode the texels to linear
+        // values before writing them to the non-sRGB render target, making imagery too dark.
+        wgpu::TextureFormat::Rgba8Unorm,
+        width,
+        height,
+        wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+    );
+
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            aspect: wgpu::TextureAspect::All,
+            texture: &texture.texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+        },
+        image,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(4 * width),
+            rows_per_image: Some(height),
+        },
+        texture.size,
+    );
+
+    raster_resources.bind_texture(device, &data.source, &data.coords, texture);
 }

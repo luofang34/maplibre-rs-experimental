@@ -7,6 +7,7 @@
 use crate::{
     coords::{ViewRegion, WorldTileCoords, ZoomLevel},
     projection::lod_history::LodHistory,
+    raster::RasterSourceId,
     render::{
         projection::{raster_source_regions, view_region_for_projection, ProjectionStateError},
         view_state::{ViewState, ViewStatePadding},
@@ -35,13 +36,13 @@ impl EyeInFrame {
 }
 
 /// Tiles per raster source, as [`raster_source_regions`] selects them.
-pub type RasterCoverings = Vec<(String, Vec<WorldTileCoords>)>;
+pub type RasterCoverings = Vec<(RasterSourceId, Vec<WorldTileCoords>)>;
 
 /// An immutable snapshot used by every request and draw in the stereo frame.
 #[derive(Default)]
 pub(crate) struct FrameLodHistory {
     pub(crate) view: LodHistory,
-    pub(crate) raster: std::collections::HashMap<String, LodHistory>,
+    pub(crate) raster: std::collections::HashMap<RasterSourceId, LodHistory>,
 }
 
 pub(crate) fn snapshot_lod_history(world: &mut World) {

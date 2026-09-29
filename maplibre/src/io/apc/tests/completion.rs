@@ -130,9 +130,13 @@ async fn corrupt_raster_source_does_not_discard_a_healthy_later_image() {
         .tiles
         .query::<&RasterLayersDataComponent>(Default::default())
         .expect("raster");
-    let [RasterLayerData::Available(layer)] = raster.layers.as_slice() else {
-        panic!("healthy image replaces the missing result");
+    let [RasterLayerData::Missing(missing), RasterLayerData::Available(layer)] =
+        raster.layers.as_slice()
+    else {
+        panic!("each source retains its own result");
     };
+    assert_eq!(missing.source.name(), Some("source-0"));
+    assert_eq!(layer.source.name(), Some("source-1"));
     assert_eq!(layer.image.get_pixel(0, 0).0, [20, 100, 220, 255]);
     assert!(raster.has_image());
     assert!(!raster.is_missing());

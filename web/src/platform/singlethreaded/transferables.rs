@@ -12,7 +12,7 @@ use maplibre::{
     },
     raster::{
         AvailableRasterLayerData, LayerRaster, LayerRasterMissing, MissingRasterLayerData,
-        RasterTransferables,
+        RasterSourceId, RasterTransferables,
     },
     render::{shaders::ShaderSymbolVertex, ShaderVertex},
     sdf::{Feature, SymbolLayerData},
@@ -367,95 +367,7 @@ impl LayerIndexed for FlatBufferTransferable {
     }
 }
 
-impl LayerRaster for FlatBufferTransferable {
-    fn message_tag() -> &'static dyn MessageTag {
-        &WebMessageTag::LayerRaster
-    }
-
-    fn build_from(coords: WorldTileCoords, layer_name: String, image: RgbaImage) -> Self {
-        let mut inner_builder = FlatBufferBuilder::with_capacity(1024);
-
-        let width = image.width();
-        let height = image.height();
-
-        let layer_name = inner_builder.create_string(&layer_name);
-        let image_data = inner_builder.create_vector(&image.into_vec());
-
-        let mut builder = FlatLayerRasterBuilder::new(&mut inner_builder);
-
-        builder.add_coords(&FlatWorldTileCoords::new(
-            coords.x,
-            coords.y,
-            coords.z.into(),
-        ));
-        builder.add_layer_name(layer_name);
-        builder.add_image_data(image_data);
-        builder.add_width(width);
-        builder.add_height(height);
-
-        let root = builder.finish();
-        inner_builder.finish(root, None);
-        let (data, start) = inner_builder.collapse();
-        FlatBufferTransferable {
-            tag: WebMessageTag::LayerRaster,
-            data,
-            start,
-        }
-    }
-
-    fn coords(&self) -> WorldTileCoords {
-        let data = root_as_flat_layer_raster(&self.data[self.start..]).unwrap();
-        data.coords().unwrap().into()
-    }
-
-    fn to_layer(self) -> AvailableRasterLayerData {
-        let data = root_as_flat_layer_raster(&self.data[self.start..]).unwrap();
-        let image_data = data.image_data().unwrap().iter().collect();
-        AvailableRasterLayerData {
-            coords: LayerRaster::coords(&self),
-            source_layer: "raster".to_owned(),
-            image: RgbaImage::from_vec(data.width(), data.height(), image_data).unwrap(),
-        }
-    }
-}
-
-impl LayerRasterMissing for FlatBufferTransferable {
-    fn message_tag() -> &'static dyn MessageTag {
-        &WebMessageTag::LayerRasterMissing
-    }
-
-    fn build_from(coords: WorldTileCoords) -> Self {
-        let mut inner_builder = FlatBufferBuilder::with_capacity(1024);
-        let mut builder = FlatLayerIndexedBuilder::new(&mut inner_builder);
-
-        builder.add_coords(&FlatWorldTileCoords::new(
-            coords.x,
-            coords.y,
-            coords.z.into(),
-        ));
-        let root = builder.finish();
-        inner_builder.finish(root, None);
-        let (data, start) = inner_builder.collapse();
-        FlatBufferTransferable {
-            tag: WebMessageTag::LayerRasterMissing,
-            data,
-            start,
-        }
-    }
-
-    fn coords(&self) -> WorldTileCoords {
-        let data = root_as_flat_layer_missing(&self.data[self.start..]).unwrap();
-        data.coords().unwrap().into()
-    }
-
-    fn to_layer(self) -> MissingRasterLayerData {
-        let _data = root_as_flat_layer_raster(&self.data[self.start..]).unwrap();
-        MissingRasterLayerData {
-            coords: LayerRaster::coords(&self),
-            source_layer: "raster".to_string(),
-        }
-    }
-}
+mod raster;
 
 mod symbol;
 

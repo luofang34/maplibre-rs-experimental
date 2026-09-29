@@ -129,6 +129,16 @@ pub(crate) fn due(world: &mut World, coords: WorldTileCoords, kind: RequestKind)
         })
 }
 
+pub(crate) fn waiting(world: &World, coords: WorldTileCoords, kind: RequestKind) -> bool {
+    world
+        .tiles
+        .query::<&TileRequestRetries>(coords)
+        .is_some_and(|retries| {
+            let state = &retries.0[kind.index()];
+            state.pending || state.deadline.is_some()
+        })
+}
+
 pub(crate) fn next_attempt(world: &mut World) -> u64 {
     let clock = world.resources.get_or_init_mut::<RequestClock>();
     clock.next_attempt = clock.next_attempt.wrapping_add(1);
