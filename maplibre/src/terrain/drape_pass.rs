@@ -6,10 +6,15 @@ use crate::{
     render::{
         eventually::{Eventually, Eventually::Initialized},
         graph::{Node, NodeRunError, RenderContext, RenderGraphContext},
+        render_commands::{DrawMask, SetMaskPipeline},
+        render_phase::{RenderCommand, RenderCommandResult},
         RenderResources,
     },
     tcs::world::World,
-    terrain::{resources::TerrainResources, DrapePhase},
+    terrain::{
+        resources::{DrapeScratch, TerrainResources},
+        DrapePhase, DrapeTarget,
+    },
 };
 
 /// Name of the drape node inside the draw sub-graph.
@@ -41,10 +46,6 @@ impl Node for DrapePassNode {
             let Some(texture) = terrain.drape_texture(target.coords) else {
                 continue;
             };
-            let ops = wgpu::Operations {
-                load: wgpu::LoadOp::Clear(target.clear_color),
-                store: StoreOp::Store,
-            };
             // The layers are drawn into the first level alone; the sampled view spans every
             // level, which an attachment may not.
             let top_level = texture.texture.create_view(&wgpu::TextureViewDescriptor {
@@ -53,20 +54,7 @@ impl Node for DrapePassNode {
                 mip_level_count: Some(1),
                 ..Default::default()
             });
-            let color_attachment = match &scratch.color {
-                Some(multisampled) => wgpu::RenderPassColorAttachment {
-                    depth_slice: None,
-                    view: &multisampled.view,
-                    resolve_target: Some(&top_level),
-                    ops,
-                },
-                None => wgpu::RenderPassColorAttachment {
-                    depth_slice: None,
-                    view: &top_level,
-                    resolve_target: None,
-                    ops,
-                },
-            };
+            let color_attachment = color_attachment(scratch, &top_level, target.clear_color);
             let pass =
                 render_context
                     .command_encoder
@@ -90,12 +78,7 @@ impl Node for DrapePassNode {
                     });
             {
                 let mut render_pass = pass;
-                for mask in &target.masks {
-                    mask.draw_function.draw(&mut render_pass, world, mask);
-                }
-                for layer in &target.layers {
-                    layer.draw_function.draw(&mut render_pass, world, layer);
-                }
+                draw_layers(&mut render_pass, world, target);
             }
             terrain.generate_drape_mipmaps(
                 render_context.device,
@@ -104,5 +87,63 @@ impl Node for DrapePassNode {
             );
         }
         Ok(())
+    }
+}
+
+fn draw_layers<'w>(pass: &mut wgpu::RenderPass<'w>, world: &'w World, target: &DrapeTarget) {
+    for layers in target
+        .layers
+        .chunk_by(|left, right| left.index == right.index)
+    {
+        let Some(first_mask) = target.masks.first() else {
+            continue;
+        };
+        if matches!(
+            SetMaskPipeline::render(world, first_mask, pass),
+            RenderCommandResult::Failure
+        ) {
+            continue;
+        }
+        // The source of a layer can use a different tile pyramid. Old stencil values must
+        // not clip its geometry or admit buffered geometry outside the current tile masks.
+        for mask in &target.masks {
+            DrawMask::render_with_reference(world, mask, pass, 0);
+        }
+        for mask in &target.masks {
+            if layers
+                .iter()
+                .any(|layer| layer.source_shape.buffer_range() == mask.source_shape.buffer_range())
+            {
+                mask.draw_function.draw(pass, world, mask);
+            }
+        }
+        for layer in layers {
+            layer.draw_function.draw(pass, world, layer);
+        }
+    }
+}
+
+fn color_attachment<'a>(
+    scratch: &'a DrapeScratch,
+    top_level: &'a wgpu::TextureView,
+    color: wgpu::Color,
+) -> wgpu::RenderPassColorAttachment<'a> {
+    let ops = wgpu::Operations {
+        load: wgpu::LoadOp::Clear(color),
+        store: StoreOp::Store,
+    };
+    match &scratch.color {
+        Some(multisampled) => wgpu::RenderPassColorAttachment {
+            depth_slice: None,
+            view: &multisampled.view,
+            resolve_target: Some(top_level),
+            ops,
+        },
+        None => wgpu::RenderPassColorAttachment {
+            depth_slice: None,
+            view: top_level,
+            resolve_target: None,
+            ops,
+        },
     }
 }

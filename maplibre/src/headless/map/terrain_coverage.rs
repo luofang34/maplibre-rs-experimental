@@ -187,3 +187,5 @@ fn assert_color(bytes: &[u8], expected: [u8; 4]) {
 }
 
 mod tests;
+
+mod stencil;

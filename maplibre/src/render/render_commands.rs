@@ -47,6 +47,22 @@ impl RenderCommand<TileMaskItem> for DrawMask {
         item: &TileMaskItem,
         pass: &mut wgpu::RenderPass<'w>,
     ) -> RenderCommandResult {
+        Self::render_with_reference(
+            world,
+            item,
+            pass,
+            u32::from(item.source_shape.coords().stencil_reference_value_3d()),
+        )
+    }
+}
+
+impl DrawMask {
+    pub(crate) fn render_with_reference<'w>(
+        world: &'w World,
+        item: &TileMaskItem,
+        pass: &mut wgpu::RenderPass<'w>,
+        reference: u32,
+    ) -> RenderCommandResult {
         let Some((Initialized(tile_view_pattern), tile_mesh_cache)) = world
             .resources
             .query::<(&Eventually<WgpuTileViewPattern>, &GlobeTileMeshCache)>()
@@ -62,8 +78,6 @@ impl RenderCommand<TileMaskItem> for DrawMask {
         ) else {
             return RenderCommandResult::Failure;
         };
-
-        let reference = tile_mask.coords().stencil_reference_value_3d() as u32;
 
         pass.set_stencil_reference(reference);
 
