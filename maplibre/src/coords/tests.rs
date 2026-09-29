@@ -118,3 +118,54 @@ fn zoom_observer_tracks_changes_since_its_reference() {
     *zoom = Zoom::new(4.0);
     assert!(zoom.did_change(0.05));
 }
+
+#[test]
+fn canonical_tile_conversion_handles_the_highest_supported_grid() {
+    let max = i32::MAX as u32;
+    for scheme in [TileAddressingScheme::XYZ, TileAddressingScheme::TMS] {
+        for (x, y) in [(0, 0), (max, max), (max, 0)] {
+            let tile = TileCoords::from((x, y, ZoomLevel::new(31)));
+            let world = tile.into_world_tile(scheme);
+            assert!(world.is_some(), "canonical tile rejected: {tile:?}");
+            assert_eq!(world.and_then(|world| world.into_tile(scheme)), Some(tile));
+        }
+    }
+}
+
+#[test]
+fn tile_conversion_rejects_out_of_range_indices_and_levels() {
+    for scheme in [TileAddressingScheme::XYZ, TileAddressingScheme::TMS] {
+        for (x, y, z) in [
+            (2, 0, 1),
+            (0, 2, 1),
+            (u32::MAX, 0, 1),
+            (0, u32::MAX, 1),
+            (1 << 31, 0, 31),
+            (0, 1 << 31, 31),
+            (0, 0, 32),
+            (0, 0, u8::MAX),
+        ] {
+            let tile = TileCoords::from((x, y, ZoomLevel::new(z)));
+            assert_eq!(tile.into_world_tile(scheme), None, "{tile:?}");
+        }
+        for (x, y, z) in [(-1, 0, 1), (0, -1, 1), (2, 0, 1), (0, 0, 32), (0, 0, 255)] {
+            let world = WorldTileCoords::from((x, y, ZoomLevel::new(z)));
+            assert_eq!(world.into_tile(scheme), None, "{world:?}");
+        }
+    }
+}
+
+#[test]
+fn quadkeys_reject_unsupported_grid_levels_without_panicking() {
+    for z in [32, u8::MAX] {
+        assert_eq!(
+            WorldTileCoords::from((0, 0, ZoomLevel::new(z))).build_quad_key(),
+            None
+        );
+    }
+    let last = WorldTileCoords::from((i32::MAX, i32::MAX, ZoomLevel::new(31)));
+    assert_eq!(
+        last.build_quad_key(),
+        Some(Quadkey::new(&[ZoomLevel::new(3); 31]))
+    );
+}

@@ -35,24 +35,17 @@ impl TileCoords {
     /// The [`TileCoords`] `T(x=5,y=5,z=0)` exceeds its bounds because there is no tile
     /// `x=5,y=5` at zoom level `z=0`.
     pub fn into_world_tile(self, scheme: TileAddressingScheme) -> Option<WorldTileCoords> {
-        // FIXME: MAX_ZOOM is 32, which means max bound is 2^32, which wouldn't fit in u32 or i32
-        // Note that unlike WorldTileCoords, values are signed (no idea why)
-        let bounds = ZOOM_BOUNDS[self.z.0 as usize] as i32;
-        let x = self.x as i32;
-        let y = self.y as i32;
-
-        if x >= bounds || y >= bounds {
+        let bounds = *ZOOM_BOUNDS.get(self.z.0 as usize)?;
+        if self.x >= bounds || self.y >= bounds {
             return None;
         }
-
-        Some(match scheme {
-            TileAddressingScheme::XYZ => WorldTileCoords { x, y, z: self.z },
-            TileAddressingScheme::TMS => WorldTileCoords {
-                x,
-                y: bounds - 1 - y,
-                z: self.z,
-            },
-        })
+        // Canonical indices fit i32 even at z=31; the exclusive bound does not.
+        let x = self.x as i32;
+        let y = match scheme {
+            TileAddressingScheme::XYZ => self.y,
+            TileAddressingScheme::TMS => bounds - 1 - self.y,
+        } as i32;
+        Some(WorldTileCoords { x, y, z: self.z })
     }
 }
 
@@ -104,8 +97,7 @@ impl WorldTileCoords {
     /// The [`WorldTileCoords`] `WT(x=5,y=5,z=0)` exceeds its bounds because there is no tile
     /// `x=5,y=5` at zoom level `z=0`.
     pub fn into_tile(self, scheme: TileAddressingScheme) -> Option<TileCoords> {
-        // FIXME: MAX_ZOOM is 32, which means max bound is 2^32, which wouldn't fit in u32 or i32
-        let bounds = ZOOM_BOUNDS[self.z.0 as usize];
+        let bounds = *ZOOM_BOUNDS.get(self.z.0 as usize)?;
         let x = self.x as u32;
         let y = self.y as u32;
 
@@ -160,7 +152,7 @@ impl WorldTileCoords {
 
     /// Adopted from [tilebelt](https://github.com/mapbox/tilebelt)
     pub fn build_quad_key(&self) -> Option<Quadkey> {
-        let bounds = ZOOM_BOUNDS[self.z.0 as usize];
+        let bounds = *ZOOM_BOUNDS.get(self.z.0 as usize)?;
         let x = self.x as u32;
         let y = self.y as u32;
 
