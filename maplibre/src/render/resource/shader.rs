@@ -1,4 +1,4 @@
-//! Utilities for creating shader states.
+//! Owned vertex layouts and WGSL stage descriptions used to construct render pipelines.
 
 /// Describes how the vertex buffer is interpreted.
 #[derive(Clone, Debug)]
@@ -14,7 +14,7 @@ pub struct VertexBufferLayout {
 /// Describes the fragment process in a render pipeline.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FragmentState {
-    /// The shader source
+    /// WGSL source compiled when the pipeline is initialized.
     pub source: &'static str,
     /// The name of the entry point in the compiled shader. There must be a
     /// function with this name in the shader.
@@ -23,9 +23,10 @@ pub struct FragmentState {
     pub targets: Vec<Option<wgpu::ColorTargetState>>,
 }
 
+/// WGSL vertex stage and the ordered buffer layouts bound to its input slots.
 #[derive(Clone, Debug)]
 pub struct VertexState {
-    /// The shader source
+    /// WGSL source compiled when the pipeline is initialized.
     pub source: &'static str,
     /// The name of the entry point in the compiled shader. There must be a
     /// function with this name in the shader.

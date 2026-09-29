@@ -1,5 +1,4 @@
-//! Utility for a texture view which can either be created by a [`TextureView`](wgpu::TextureView)
-//! or [`SurfaceTexture`](wgpu::SurfaceTexture)
+//! Texture allocations and attachment views that retain ownership of presentation frames.
 
 use std::ops::Deref;
 
@@ -19,13 +18,16 @@ pub enum TextureView {
     SurfaceTexture {
         // NOTE: The order of these fields is important because the view must be dropped before the
         // frame is dropped
+        /// Attachment view, dropped before the retained presentation frame.
         view: wgpu::TextureView,
+        /// Frame to present after rendering, or drop to discard it.
         texture: wgpu::SurfaceTexture,
     },
 }
 
 impl TextureView {
-    /// Returns the [`SurfaceTexture`](wgpu::SurfaceTexture) of the texture view if it is of that type.
+    /// Drops the attachment view and returns its presentation frame for the caller to present.
+    /// Consumes ordinary texture views as well, returning `None` for them.
     #[inline]
     pub fn take_surface_texture(self) -> Option<wgpu::SurfaceTexture> {
         match self {
@@ -64,13 +66,22 @@ impl Deref for TextureView {
     }
 }
 
+/// An allocated two-dimensional GPU texture and a view spanning its layers and mip levels.
 pub struct Texture {
+    /// Allocated physical-pixel dimensions, with one array layer.
     pub size: wgpu::Extent3d,
+    /// Allocation whose format, sample count and usages are fixed at creation.
     pub texture: wgpu::Texture,
+    /// View of the allocation for rendering or sampling, subject to its usages.
     pub view: TextureView,
 }
 
 impl Texture {
+    /// Allocates a one-layer, one-mip-level texture with the requested physical-pixel dimensions.
+    ///
+    /// The caller must provide nonzero dimensions within device limits, a format supporting
+    /// `usage`, and a supported sample count. This does not validate or reduce MSAA requests;
+    /// unsupported descriptors are reported through wgpu's validation mechanism.
     pub fn new(
         label: wgpu::Label,
         device: &wgpu::Device,

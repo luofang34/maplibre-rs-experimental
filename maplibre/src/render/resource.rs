@@ -1,5 +1,6 @@
-//! Utilities which holds references to GPU-owned. Usually a resource is a wrapper which makes using
-//! buffers or textures simpler.
+//! GPU allocations, render targets, shader interfaces and pipeline construction.
+
+#![deny(missing_docs)]
 
 pub use buffer::*;
 pub use mipmap::*;
@@ -17,7 +18,10 @@ mod surface;
 mod texture;
 mod tile_pipeline;
 
+/// Upload interface shared by GPU queues and test backends that own a different buffer type.
 pub trait Queue<B> {
+    /// Copies bytes into `buffer` at a byte offset, subject to the backend's bounds and alignment.
+    /// Implementations must consume or copy `data` before returning; GPU execution may be deferred.
     fn write_buffer(&self, buffer: &B, offset: wgpu::BufferAddress, data: &[u8]);
 }
 

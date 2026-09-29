@@ -1,4 +1,4 @@
-//! Utility for declaring pipelines.
+//! Triangle-list pipeline state for tile masking, textured layers and reversed-Z geometry.
 
 use std::borrow::Cow;
 
@@ -24,6 +24,8 @@ pub struct TilePipelineOptions {
     pub textured: bool,
 }
 
+/// Tile draw state with optional texture bindings, stencil masking and depth writes.
+/// Color blending and vertex interpretation come from the supplied shader-stage descriptions.
 pub struct TilePipeline {
     name: Cow<'static, str>,
     options: TilePipelineOptions,
@@ -36,6 +38,9 @@ pub struct TilePipeline {
 }
 
 impl TilePipeline {
+    /// Describes a tile pipeline without compiling shaders or allocating GPU resources.
+    /// When multisampling is enabled in `options`, the caller must check that the settings'
+    /// sample count is supported by the color and depth formats. Depth writes start disabled.
     pub fn new(
         name: Cow<'static, str>,
         settings: RendererSettings,

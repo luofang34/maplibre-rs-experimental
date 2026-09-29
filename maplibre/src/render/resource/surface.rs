@@ -1,14 +1,16 @@
-//! Utilities for handling surfaces which can be either headless or headed. A headed surface has
-//! a handle to a window. A headless surface renders to a texture.
+//! Window presentation and offscreen render targets with deferred resizing.
 
-#[cfg(feature = "headless")]
-use std::mem::size_of;
 use std::sync::Arc;
 
-use wgpu::TextureFormatFeatures;
-
 mod acquisition;
+mod offscreen;
+mod window;
+
 pub use acquisition::SurfaceAcquireError;
+pub use offscreen::BufferedTextureHead;
+#[cfg(feature = "headless")]
+pub use offscreen::{BufferDimensions, BufferReadbackError, WriteImageError};
+pub use window::WindowHead;
 
 use crate::{
     render::{
@@ -20,240 +22,27 @@ use crate::{
     window::{HeadedMapWindow, MapWindow, PhysicalSize},
 };
 
-#[cfg(feature = "headless")]
-pub struct BufferDimensions {
-    pub width: u32,
-    pub height: u32,
-    pub unpadded_bytes_per_row: u32,
-    pub padded_bytes_per_row: u32,
-}
-
-#[cfg(feature = "headless")]
-impl BufferDimensions {
-    fn new(size: PhysicalSize) -> Self {
-        let bytes_per_pixel = size_of::<u32>() as u32;
-        let unpadded_bytes_per_row = size.width() * bytes_per_pixel;
-
-        let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-        let padded_bytes_per_row_padding = (align - unpadded_bytes_per_row % align) % align;
-        let padded_bytes_per_row = unpadded_bytes_per_row + padded_bytes_per_row_padding;
-        Self {
-            width: size.width(),
-            height: size.height(),
-            unpadded_bytes_per_row,
-            padded_bytes_per_row,
-        }
-    }
-}
-
-pub struct WindowHead {
-    surface: wgpu::Surface<'static>,
-    size: PhysicalSize,
-
-    texture_format: wgpu::TextureFormat,
-    /// Non-sRGB variant of texture_format used for rendering.
-    /// Prevents automatic linear→sRGB conversion by the GPU, since our colors
-    /// (from CSS) are already in sRGB space.
-    render_format: wgpu::TextureFormat,
-    present_mode: wgpu::PresentMode,
-    texture_format_features: TextureFormatFeatures,
-}
-
-/// Returns the non-sRGB variant of a texture format.
-/// This prevents the GPU from applying automatic linear→sRGB gamma conversion,
-/// which would double-gamma colors that are already in sRGB space (e.g., CSS colors).
-fn strip_srgb(format: wgpu::TextureFormat) -> wgpu::TextureFormat {
-    match format {
-        wgpu::TextureFormat::Rgba8UnormSrgb => wgpu::TextureFormat::Rgba8Unorm,
-        wgpu::TextureFormat::Bgra8UnormSrgb => wgpu::TextureFormat::Bgra8Unorm,
-        other => other,
-    }
-}
-
-impl WindowHead {
-    pub fn resize_and_configure(&mut self, width: u32, height: u32, device: &wgpu::Device) {
-        self.size = PhysicalSize::new(width, height).unwrap();
-        self.configure(device);
-    }
-
-    pub fn configure(&self, device: &wgpu::Device) {
-        // The base format is implicit; listing it would require unsupported WebGL view formats.
-        let mut view_formats = Vec::new();
-        if self.render_format != self.texture_format {
-            view_formats.push(self.render_format);
-        }
-
-        let surface_config = wgpu::SurfaceConfiguration {
-            alpha_mode: wgpu::CompositeAlphaMode::Auto,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format: self.texture_format,
-            width: self.size.width(),
-            height: self.size.height(),
-            present_mode: self.present_mode,
-            view_formats,
-            desired_maximum_frame_latency: 2,
-            color_space: Default::default(),
-        };
-
-        self.surface.configure(device, &surface_config);
-    }
-
-    pub fn recreate_surface<MW>(
-        &mut self,
-        window: &MW,
-        instance: &wgpu::Instance,
-    ) -> Result<(), RenderError>
-    where
-        MW: MapWindow + HeadedMapWindow,
-    {
-        self.surface = unsafe {
-            instance
-                .create_surface_unsafe(wgpu::SurfaceTargetUnsafe::from_window(&window.handle())?)?
-        };
-        Ok(())
-    }
-
-    pub fn surface(&self) -> &wgpu::Surface<'_> {
-        &self.surface
-    }
-}
-
-pub struct BufferedTextureHead {
-    texture: wgpu::Texture,
-    texture_format: wgpu::TextureFormat,
-    texture_format_features: TextureFormatFeatures,
-    #[cfg(feature = "headless")]
-    output_buffer: wgpu::Buffer,
-    #[cfg(feature = "headless")]
-    buffer_dimensions: BufferDimensions,
-}
-
-impl BufferedTextureHead {
-    fn new(
-        device: &wgpu::Device,
-        size: PhysicalSize,
-        format: wgpu::TextureFormat,
-        features: TextureFormatFeatures,
-    ) -> Self {
-        #[cfg(feature = "headless")]
-        let dimensions = BufferDimensions::new(size);
-        #[cfg(feature = "headless")]
-        let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("BufferedTextureHead buffer"),
-            size: (dimensions.padded_bytes_per_row * dimensions.height) as u64,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("Surface texture"),
-            size: wgpu::Extent3d {
-                width: size.width(),
-                height: size.height(),
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[format],
-        });
-        Self {
-            texture,
-            texture_format: format,
-            texture_format_features: features,
-            #[cfg(feature = "headless")]
-            output_buffer,
-            #[cfg(feature = "headless")]
-            buffer_dimensions: dimensions,
-        }
-    }
-}
-
-#[cfg(feature = "headless")]
-#[derive(thiserror::Error, Debug)]
-pub enum WriteImageError {
-    #[error("error while rendering to image")]
-    WriteImage(#[from] png::EncodingError),
-    #[error("could not create file to save as an image")]
-    CreateImageFileFailed(#[from] std::io::Error),
-}
-
-#[cfg(feature = "headless")]
-impl BufferedTextureHead {
-    pub fn map_blocking(
-        &self,
-        device: &wgpu::Device,
-    ) -> Result<wgpu::BufferSlice<'_>, BufferReadbackError> {
-        let buffer_slice = self.output_buffer.slice(..);
-        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
-        buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
-            sender.send(result).ok();
-        });
-        device.poll(wgpu::PollType::wait_indefinitely())?;
-        receiver.recv()??;
-        Ok(buffer_slice)
-    }
-
-    pub fn unmap(&self) {
-        self.output_buffer.unmap();
-    }
-
-    pub fn write_png(
-        &self,
-        padded_buffer: &wgpu::BufferView,
-        png_output_path: &str,
-    ) -> Result<(), WriteImageError> {
-        use std::{fs::File, io::Write};
-        let mut png_encoder = png::Encoder::new(
-            File::create(png_output_path)?,
-            self.buffer_dimensions.width,
-            self.buffer_dimensions.height,
-        );
-        png_encoder.set_depth(png::BitDepth::Eight);
-        png_encoder.set_color(png::ColorType::Rgba);
-        let mut png_writer = png_encoder
-            .write_header()?
-            .into_stream_writer_with_size(self.buffer_dimensions.unpadded_bytes_per_row as usize)?;
-
-        // from the padded_buffer we write just the unpadded bytes into the image
-        for chunk in padded_buffer.chunks(self.buffer_dimensions.padded_bytes_per_row as usize) {
-            png_writer
-                .write_all(&chunk[..self.buffer_dimensions.unpadded_bytes_per_row as usize])?
-        }
-        png_writer.finish()?;
-        Ok(())
-    }
-
-    /// The texture frames are rendered into.
-    pub fn texture(&self) -> &wgpu::Texture {
-        &self.texture
-    }
-
-    pub fn copy_texture(&self) -> wgpu::TexelCopyTextureInfo<'_> {
-        self.texture.as_image_copy()
-    }
-
-    pub fn buffer(&self) -> &wgpu::Buffer {
-        &self.output_buffer
-    }
-
-    pub fn bytes_per_row(&self) -> u32 {
-        self.buffer_dimensions.padded_bytes_per_row
-    }
-}
-
+/// Backing storage for a render target, including ownership of a window frame or offscreen image.
 pub enum Head {
+    /// A host window from which a new presentation image is acquired each frame.
     Headed(WindowHead),
+    /// A persistent texture shared with capture readers, which can outlive a surface resize.
     Headless(Arc<BufferedTextureHead>),
 }
 
+/// A render target's requested dimensions and currently allocated backing storage.
+/// Resizing changes the requested size; [`Self::reconfigure`] applies it to GPU resources.
 pub struct Surface {
     size: PhysicalSize,
     head: Head,
 }
 
 impl Surface {
+    /// Wraps an unconfigured window surface using the window's physical dimensions.
+    ///
+    /// Uses the requested format, otherwise prefers a supported non-sRGB format and falls back
+    /// to the first advertised format. The returned window head must be configured before use.
+    /// The host must keep the window alive for the lifetime of the supplied surface.
     pub fn from_surface<MW>(
         surface: wgpu::Surface<'static>,
         adapter: &wgpu::Adapter,
@@ -279,7 +68,7 @@ impl Surface {
             })
             .or_else(|| capabilities.formats.first().cloned())
             .unwrap_or(wgpu::TextureFormat::Rgba8Unorm);
-        let render_format = strip_srgb(texture_format);
+        let render_format = window::strip_srgb(texture_format);
         log::info!("surface format: {texture_format:?}, render format: {render_format:?}");
 
         let texture_format_features = adapter.get_texture_format_features(texture_format);
@@ -298,7 +87,12 @@ impl Surface {
         }
     }
 
-    // TODO: Give better name
+    /// Allocates a single-sample offscreen target at the window's physical size.
+    ///
+    /// The format defaults to `Rgba8Unorm`. With the `headless` feature this also allocates a
+    /// readback buffer with four bytes per pixel; PNG capture requires RGBA8 pixel data.
+    /// Dimensions, format and usages must be supported by `device`, or wgpu reports validation
+    /// errors. The window is used only for its size and is not retained.
     pub fn from_image<MW>(
         device: &wgpu::Device,
         adapter: &wgpu::Adapter,
@@ -324,6 +118,9 @@ impl Surface {
         }
     }
 
+    /// Format used by render pipelines and attachment views.
+    /// For a window this strips the sRGB suffix to avoid converting CSS colors a second time;
+    /// an offscreen target retains its explicitly requested format.
     pub fn surface_format(&self) -> wgpu::TextureFormat {
         match &self.head {
             Head::Headed(headed) => headed.render_format,
@@ -331,6 +128,12 @@ impl Surface {
         }
     }
 
+    /// Acquires a window frame or creates a view of the persistent offscreen texture.
+    ///
+    /// Window acquisition retries once after reconfiguration for an outdated or suboptimal
+    /// frame. Other acquisition failures are returned directly. A successful window frame
+    /// must be presented through [`TextureView::take_surface_texture`] or dropped before
+    /// reconfiguration. This does not apply a pending [`Self::resize`].
     #[tracing::instrument(name = "create_view", skip_all)]
     pub fn create_view(&self, device: &wgpu::Device) -> Result<TextureView, SurfaceAcquireError> {
         Ok(match &self.head {
@@ -361,14 +164,21 @@ impl Surface {
         })
     }
 
+    /// Requested physical-pixel dimensions, which may differ from storage until reconfiguration.
     pub fn size(&self) -> PhysicalSize {
         self.size
     }
 
+    /// Records nonzero physical-pixel dimensions without allocating or configuring GPU resources.
     pub fn resize(&mut self, size: PhysicalSize) {
         self.size = size;
     }
 
+    /// Applies a pending size change; an unchanged size leaves resources untouched.
+    ///
+    /// Drop outstanding window frames before calling. An offscreen resize allocates a new
+    /// texture and readback buffer; existing [`Arc`] clones retain the previous allocation.
+    /// This does not recreate dependent depth or multisample attachments.
     pub fn reconfigure(&mut self, device: &wgpu::Device) {
         match &mut self.head {
             Head::Headed(window) => {
@@ -391,6 +201,12 @@ impl Surface {
         }
     }
 
+    /// Replaces a window surface when its configured dimensions differ from the requested size.
+    ///
+    /// Offscreen surfaces and window surfaces with no pending size change are left alone.
+    /// Recreation returns host-handle or surface-creation failures without replacing the
+    /// existing surface. On success, call [`Self::reconfigure`] before acquiring another frame.
+    /// The host must keep `window` alive while the recreated surface exists.
     pub fn recreate<MW>(
         &mut self,
         window: &MW,
@@ -410,16 +226,20 @@ impl Surface {
         Ok(())
     }
 
+    /// Currently allocated backing storage, which may still have the size before a pending resize.
     pub fn head(&self) -> &Head {
         &self.head
     }
 
+    /// Mutable backing storage; replacing it requires matching the requested size and render format.
     pub fn head_mut(&mut self) -> &mut Head {
         &mut self.head
     }
 
-    /// Whether the surface's format can be drawn with `msaa` samples; a headless surface
-    /// multisamples like a window would, its texture resolving the samples.
+    /// Whether the adapter advertises the exact sample count for the color target format.
+    ///
+    /// A count of one is supported; zero and non-power-of-two counts are rejected. This checks
+    /// neither the selected depth format nor whether optional device features have been enabled.
     pub fn is_multisampling_supported(&self, msaa: Msaa) -> bool {
         let flags = match &self.head {
             Head::Headed(headed) => headed.texture_format_features.flags,
@@ -431,33 +251,6 @@ impl Surface {
         }
         is_supported
     }
-}
-
-impl HasChanged for WindowHead {
-    /// Tuple of width and height
-    type Criteria = (u32, u32);
-
-    fn has_changed(&self, criteria: &Self::Criteria) -> bool {
-        self.size.width() != criteria.0 || self.size.height() != criteria.1
-    }
-}
-
-/// Failure while mapping an offscreen capture buffer.
-#[cfg(feature = "headless")]
-#[derive(thiserror::Error, Debug)]
-pub enum BufferReadbackError {
-    /// Waiting for GPU completion failed.
-    #[error("waiting for offscreen capture failed")]
-    Poll(#[from] wgpu::PollError),
-    /// GPU buffer mapping failed.
-    #[error("mapping offscreen capture failed")]
-    Map(#[from] wgpu::BufferAsyncError),
-    /// The mapping callback ended without delivering a result.
-    #[error("offscreen capture callback was abandoned")]
-    Callback(#[from] std::sync::mpsc::RecvError),
-    /// Access to the mapped bytes failed.
-    #[error("reading mapped offscreen capture failed")]
-    Range(#[from] wgpu::MapRangeError),
 }
 
 #[cfg(all(test, feature = "headless"))]

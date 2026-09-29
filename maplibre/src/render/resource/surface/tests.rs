@@ -61,3 +61,46 @@ async fn an_invalid_sample_count_falls_back_to_a_valid_frame() {
     map.run_frame().expect("fallback frame");
     assert!(scope.pop().await.is_none(), "invalid GPU resources");
 }
+
+#[tokio::test]
+async fn resizing_allocates_new_storage_and_retains_existing_capture_handles() {
+    let (_, mut renderer) = crate::headless::create_headless_renderer(3, 2, None)
+        .await
+        .expect("headless renderer");
+    let surface = &mut renderer.resources.surface;
+    let Head::Headless(original) = surface.head() else {
+        panic!("offscreen surface");
+    };
+    let original = original.clone();
+    surface.resize(PhysicalSize::new(65, 3).expect("nonzero size"));
+    assert_eq!(surface.size().width(), 65);
+    let Head::Headless(pending) = surface.head() else {
+        panic!("offscreen surface");
+    };
+    assert!(Arc::ptr_eq(&original, pending), "resize is deferred");
+    surface.reconfigure(&renderer.device);
+    let Head::Headless(current) = surface.head() else {
+        panic!("offscreen surface");
+    };
+    assert!(!Arc::ptr_eq(&original, current));
+    assert_eq!(
+        (current.texture().width(), current.texture().height()),
+        (65, 3)
+    );
+    assert_eq!(current.bytes_per_row(), 512);
+    assert_eq!(current.buffer().size(), 512 * 3);
+    assert_eq!(
+        (original.texture().width(), original.texture().height()),
+        (3, 2)
+    );
+    assert_eq!(original.bytes_per_row(), 256);
+    let current = current.clone();
+    surface.reconfigure(&renderer.device);
+    let Head::Headless(unchanged) = surface.head() else {
+        panic!("offscreen surface");
+    };
+    assert!(
+        Arc::ptr_eq(&current, unchanged),
+        "unchanged size reuses storage"
+    );
+}

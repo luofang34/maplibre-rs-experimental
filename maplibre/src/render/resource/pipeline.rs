@@ -1,19 +1,23 @@
-//! Utility for creating [RenderPipelines](wgpu::RenderPipeline)
+//! Compilation of owned shader and fixed-function descriptions into GPU render pipelines.
 
 use std::borrow::Cow;
 
 use crate::render::resource::shader::{FragmentState, VertexState};
 
+/// Consumes a pipeline configuration into a descriptor without allocating GPU resources.
 pub trait RenderPipeline {
+    /// Produces shader, binding and fixed-function state for later device initialization.
     fn describe_render_pipeline(self) -> RenderPipelineDescriptor;
 }
 
+/// Owned pipeline state, including WGSL sources compiled at initialization.
 pub struct RenderPipelineDescriptor {
     /// Debug label of the pipeline. This will show up in graphics debuggers for easy identification.
     pub label: Option<Cow<'static, str>>,
-    /// The layout of bind groups for this pipeline.
+    /// Descriptor-owned bind groups in shader group-index order, after any prefix layouts.
+    /// `None` adds no groups; it does not request wgpu's automatic layout inference.
     pub layout: Option<Vec<Vec<wgpu::BindGroupLayoutEntry>>>,
-    /// The compiled vertex stage, its entry point, and the input buffers layout.
+    /// Vertex shader source, entry point and ordered input buffer layouts.
     pub vertex: VertexState,
     /// The properties of the pipeline at the primitive assembly and rasterization level.
     pub primitive: wgpu::PrimitiveState,
@@ -21,16 +25,21 @@ pub struct RenderPipelineDescriptor {
     pub depth_stencil: Option<wgpu::DepthStencilState>,
     /// The multi-sampling properties of the pipeline.
     pub multisample: wgpu::MultisampleState,
-    /// The compiled fragment stage, its entry point, and the color targets.
+    /// Fragment shader source, entry point and color attachment formats and blend states.
     pub fragment: FragmentState,
 }
 
 impl RenderPipelineDescriptor {
+    /// Compiles the shaders and creates a pipeline with only the descriptor-owned bind groups.
+    /// Invalid WGSL, incompatible bindings or unsupported states use wgpu's validation mechanism.
     pub fn initialize(&self, device: &wgpu::Device) -> wgpu::RenderPipeline {
         self.initialize_with_prefix_layouts(device, &[])
     }
 
     /// Creates a pipeline with shared bind-group layouts before descriptor-owned layouts.
+    /// Shader group indices must account for the prefix length. Prefix layouts and shader
+    /// interfaces must be compatible with `device`; validation errors use wgpu's error scopes
+    /// or uncaptured-error handler. Every call creates fresh shader modules and a pipeline.
     pub fn initialize_with_prefix_layouts(
         &self,
         device: &wgpu::Device,
