@@ -45,3 +45,5 @@ fn geometry_uses_absolute_deck_elevation_when_supplied() {
     );
     assert!(vertices.iter().all(|v| v.elevation == 250.0));
 }
+
+mod metadata;

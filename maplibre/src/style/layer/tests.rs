@@ -7,8 +7,8 @@ fn zoom_range_is_min_inclusive_max_exclusive() {
         id: "labels".to_string(),
         type_: "symbol".to_string(),
         filter: None,
-        maxzoom: Some(6),
-        minzoom: Some(2),
+        maxzoom: Some(6.0),
+        minzoom: Some(2.0),
         metadata: None,
         paint: None,
         source: None,
@@ -244,3 +244,5 @@ fn parses_fill_and_line_translation_properties() {
     assert_eq!(line.line_translate, Some([2.0, 3.0]));
     assert_eq!(line.line_translate_anchor, TranslateAnchor::Map);
 }
+
+mod document_contracts;

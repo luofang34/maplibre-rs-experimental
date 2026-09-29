@@ -119,7 +119,7 @@ fn place_detail_enters_progressively_and_keeps_major_places_larger() {
             .iter()
             .find(|layer| layer.id == id)
             .expect("place layer");
-        let zoom = layer.minzoom.expect("entry zoom") as f64;
+        let zoom = layer.minzoom.expect("entry zoom");
         assert!(
             zoom > previous_zoom,
             "{id} must enter later than larger places"
@@ -152,8 +152,8 @@ fn labels_grow_continuously_and_keep_halos_subordinate_to_type() {
         let Some(LayerPaint::Symbol(paint)) = &layer.paint else {
             panic!("place symbol")
         };
-        let start = f64::from(layer.minzoom.unwrap_or(0));
-        let end = f64::from(layer.maxzoom.unwrap_or(24)) - 0.1;
+        let start = layer.minzoom.unwrap_or(0.0);
+        let end = layer.maxzoom.unwrap_or(24.0) - 0.1;
         let size = |z| {
             paint
                 .text_size

@@ -41,7 +41,7 @@ pub(crate) fn kind(layer: &StyleLayer) -> Option<StructureKind> {
         .metadata
         .as_ref()?
         .get("maplibre-rs:terrain-structure")?
-        .as_str()
+        .as_str()?
     {
         "bridge" => Some(StructureKind::Bridge),
         "tunnel" => Some(StructureKind::Tunnel),
@@ -102,7 +102,7 @@ fn fingerprint(tiles: &Tiles, style: &Style, sources: &[WorldTileCoords]) -> u64
     for layer in &style.layers {
         if let Some(metadata) = &layer.metadata {
             let mut entries: Vec<_> = metadata.iter().collect();
-            entries.sort();
+            entries.sort_by_key(|(key, _)| *key);
             entries.hash(&mut hash);
         }
     }
@@ -166,12 +166,10 @@ fn prepare(tiles: &Tiles, style: &Style, sources: &[WorldTileCoords]) -> Vec<Spa
 }
 
 fn number(layer: &StyleLayer, key: &str) -> Option<f64> {
-    layer
-        .metadata
-        .as_ref()?
-        .get(key)?
-        .parse::<f64>()
-        .ok()
+    let value = layer.metadata.as_ref()?.get(key)?;
+    value
+        .as_f64()
+        .or_else(|| value.as_str()?.parse::<f64>().ok())
         .filter(|v| v.is_finite())
 }
 

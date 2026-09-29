@@ -38,9 +38,9 @@ struct StyleLayerDef {
     #[serde(rename = "type")]
     type_: String,
     filter: Option<Value>,
-    maxzoom: Option<u8>,
-    minzoom: Option<u8>,
-    metadata: Option<std::collections::HashMap<String, String>>,
+    maxzoom: Option<f64>,
+    minzoom: Option<f64>,
+    metadata: Option<std::collections::HashMap<String, Value>>,
     source: Option<String>,
     #[serde(rename = "source-layer")]
     source_layer: Option<String>,

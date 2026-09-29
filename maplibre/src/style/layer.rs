@@ -110,18 +110,30 @@ pub enum LayerVisibility {
     None,
 }
 
-/// Stores all the styles for a specific layer.
+/// One entry in the style's painter order. Equality and hashing use only the layer ID.
+/// Zoom bounds control display visibility independently of source tile zoom limits.
 #[derive(Debug, Clone)]
 pub struct StyleLayer {
+    /// Zero-based painter order assigned when the containing style is deserialized.
     pub index: u32,
+    /// Document-local identity used for equality, hashing and matching processed geometry.
     pub id: String,
+    /// Rendering type from JSON, used to select paint parsing and the corresponding pipeline.
     pub type_: String,
+    /// Feature-selection expression retained as JSON for filter validation and evaluation.
     pub filter: Option<serde_json::Value>,
-    pub maxzoom: Option<u8>,
-    pub minzoom: Option<u8>,
-    pub metadata: Option<HashMap<String, String>>,
+    /// Exclusive upper display zoom; fractional values are preserved. `None` sets no upper bound.
+    pub maxzoom: Option<f64>,
+    /// Inclusive lower display zoom; fractional values are preserved. `None` sets no lower bound.
+    pub minzoom: Option<f64>,
+    /// Application JSON properties retained across worker serialization.
+    /// Reserved `maplibre-rs:terrain-structure` keys opt into terrain-relative road profiles.
+    pub metadata: Option<HashMap<String, serde_json::Value>>,
+    /// Typed rendering properties; absence lets the relevant rendering path choose defaults.
     pub paint: Option<LayerPaint>,
+    /// Key of a source in the containing style, or `None` for source-independent or host-supplied data.
     pub source: Option<String>,
+    /// Layer name inside a vector tile, distinct from the style layer ID.
     pub source_layer: Option<String>,
     /// Whether the layer is drawn at all.
     pub visibility: LayerVisibility,
@@ -140,10 +152,8 @@ impl StyleLayer {
     /// exclusive.
     pub fn is_visible_at(&self, zoom: f64) -> bool {
         !self.is_hidden()
-            && self
-                .minzoom
-                .is_none_or(|minzoom| zoom >= f64::from(minzoom))
-            && self.maxzoom.is_none_or(|maxzoom| zoom < f64::from(maxzoom))
+            && self.minzoom.is_none_or(|minzoom| zoom >= minzoom)
+            && self.maxzoom.is_none_or(|maxzoom| zoom < maxzoom)
     }
 }
 

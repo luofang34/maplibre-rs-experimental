@@ -321,12 +321,7 @@ impl CollisionSystem {
                 .layers
                 .iter()
                 .find(|style| style.id == layer.style_layer_id)
-                .map(|layer| {
-                    [
-                        f64::from(layer.minzoom.unwrap_or(0)),
-                        f64::from(layer.maxzoom.unwrap_or(24)),
-                    ]
-                })
+                .map(|layer| [layer.minzoom.unwrap_or(0.0), layer.maxzoom.unwrap_or(24.0)])
                 .unwrap_or([0.0, 24.0]);
             let metadata = place_layer(
                 world,
