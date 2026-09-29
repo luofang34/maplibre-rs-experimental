@@ -303,7 +303,7 @@ impl Renderer {
             // integrated GPUs.
             features.remove(wgpu::Features::MAPPABLE_PRIMARY_BUFFERS);
         }
-        let mut limits = adapter.limits();
+        let mut limits = settings.limits.clone();
 
         // Enforce the disabled features
         if let Some(disabled_features) = settings.disabled_features {
