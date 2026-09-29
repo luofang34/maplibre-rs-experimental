@@ -425,16 +425,7 @@ impl Surface {
             Head::Headed(headed) => headed.texture_format_features.flags,
             Head::Headless(headless) => headless.texture_format_features.flags,
         };
-        let max_sample_count = if flags.contains(wgpu::TextureFormatFeatureFlags::MULTISAMPLE_X8) {
-            8
-        } else if flags.contains(wgpu::TextureFormatFeatureFlags::MULTISAMPLE_X4) {
-            4
-        } else if flags.contains(wgpu::TextureFormatFeatureFlags::MULTISAMPLE_X2) {
-            2
-        } else {
-            1
-        };
-        let is_supported = msaa.samples <= max_sample_count;
+        let is_supported = flags.sample_count_supported(msaa.samples);
         if !is_supported {
             log::debug!("Multisampling is not supported on surface");
         }
@@ -468,3 +459,6 @@ pub enum BufferReadbackError {
     #[error("reading mapped offscreen capture failed")]
     Range(#[from] wgpu::MapRangeError),
 }
+
+#[cfg(all(test, feature = "headless"))]
+mod tests;
