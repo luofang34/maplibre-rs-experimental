@@ -148,3 +148,6 @@ fn build_polar_caps(mesh: &mut TerrainMesh, n: u32, delta: i32) {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(all(test, feature = "headless", feature = "thread-safe-futures"))]
+mod pixels;
