@@ -1,4 +1,4 @@
-//! Tessellation for lines and polygons is implemented here.
+//! Tile-space geometry tessellation with per-feature paint and GPU upload padding.
 
 use std::cell::RefCell;
 
@@ -52,14 +52,18 @@ impl StrokeVertexConstructor<ShaderVertex> for VertexConstructor {
     }
 }
 
-/// Vertex buffer which includes additional padding to fulfill the `wgpu::COPY_BUFFER_ALIGNMENT`.
+/// Geometry with a draw-index count separate from any GPU copy-alignment padding.
+/// Conversion from `VertexBuffers` pads indices and requires copy-aligned vertex bytes.
 #[derive(Clone)]
 pub struct OverAlignedVertexBuffer<V, I> {
+    /// Vertex and index storage, including any upload padding.
     pub buffer: VertexBuffers<V, I>,
+    /// Number of leading indices to draw, excluding padding.
     pub usable_indices: u32,
 }
 
 impl<V, I> OverAlignedVertexBuffer<V, I> {
+    /// Creates empty geometry with no drawable indices.
     pub fn empty() -> Self {
         Self {
             buffer: VertexBuffers::with_capacity(0, 0),
@@ -67,6 +71,8 @@ impl<V, I> OverAlignedVertexBuffer<V, I> {
         }
     }
 
+    /// Reconstructs buffers without adding padding or validating `usable_indices`.
+    /// Callers must supply copy-aligned storage and a draw count within the index buffer.
     pub fn from_iters<IV, II>(vertices: IV, indices: II, usable_indices: u32) -> Self
     where
         IV: IntoIterator<Item = V>,
@@ -123,7 +129,7 @@ impl<V: Pod, I: Pod> Align<V, I> for VertexBuffers<V, I> {
         let stride = std::mem::size_of::<I>() as wgpu::BufferAddress;
         let unpadded_bytes = self.indices.len() as wgpu::BufferAddress * stride;
         let padding_bytes = (align - unpadded_bytes % align) % align;
-        let overpad = padding_bytes.div_ceil(stride); // Divide by stride but round up
+        let overpad = padding_bytes.div_ceil(stride);
 
         for _ in 0..overpad {
             self.indices.push(I::zeroed());
@@ -150,14 +156,20 @@ pub struct ZeroTessellator<I: std::ops::Add + From<lyon::tessellation::VertexId>
     /// feature's colour alpha.
     feature_opacity: Option<(crate::style::layer::StyleProperty<f32>, f64)>,
 
+    /// Accumulated tile-space vertices and indices, without upload padding.
     pub buffer: VertexBuffers<ShaderVertex, I>,
 
+    /// Index count contributed by each completed feature, in processing order.
     pub feature_indices: Vec<u32>,
+    /// Attributes of the feature being processed; cleared after its color is evaluated.
     pub feature_properties: FeatureProperties,
     /// Zoom of the tile, at which zoom-driven properties are evaluated.
     pub zoom: f64,
+    /// Encoded-sRGB colors with straight alpha for completed features, including feature opacity.
     pub feature_colors: Vec<[f32; 4]>,
+    /// Color used when no color property is supplied or its evaluation fails.
     pub fallback_color: [f32; 4],
+    /// Color expression evaluated against each feature's attributes at `zoom`.
     pub style_property: Option<crate::style::layer::StyleProperty<csscolorparser::Color>>,
     /// When true, polygon geometry is tessellated as strokes (outlines) instead of fills.
     /// This is used when a line-type style layer references polygon source geometry.
@@ -337,29 +349,24 @@ where
     }
 
     fn point_begin(&mut self, _idx: usize) -> GeoResult<()> {
-        // log::info!("point_begin");
         self.is_point = true;
         Ok(())
     }
 
     fn point_end(&mut self, _idx: usize) -> GeoResult<()> {
-        // log::info!("point_end");
         self.is_point = false;
         Ok(())
     }
 
     fn multipoint_begin(&mut self, _size: usize, _idx: usize) -> GeoResult<()> {
-        // log::info!("multipoint_begin");
         Ok(())
     }
 
     fn multipoint_end(&mut self, _idx: usize) -> GeoResult<()> {
-        // log::info!("multipoint_end");
         Ok(())
     }
 
     fn linestring_begin(&mut self, _tagged: bool, _size: usize, _idx: usize) -> GeoResult<()> {
-        // log::info!("linestring_begin");
         Ok(())
     }
 
@@ -376,7 +383,6 @@ where
     }
 
     fn multilinestring_begin(&mut self, _size: usize, _idx: usize) -> GeoResult<()> {
-        // log::info!("multilinestring_begin");
         Ok(())
     }
 
@@ -389,7 +395,6 @@ where
     }
 
     fn polygon_begin(&mut self, _tagged: bool, _size: usize, _idx: usize) -> GeoResult<()> {
-        // log::info!("polygon_begin");
         Ok(())
     }
 
@@ -409,7 +414,6 @@ where
     }
 
     fn multipolygon_begin(&mut self, _size: usize, _idx: usize) -> GeoResult<()> {
-        // log::info!("multipolygon_begin");
         Ok(())
     }
 

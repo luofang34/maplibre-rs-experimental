@@ -1,5 +1,4 @@
-//! Specifies the instructions which are going to be sent to the GPU. Render commands can be concatenated
-//! into a new render command which executes multiple instruction sets.
+//! Fill, line and circle commands that skip draws until GPU geometry and paint are ready.
 use crate::{
     render::{
         eventually::{Eventually, Eventually::Initialized},
@@ -12,6 +11,7 @@ use crate::{
     vector::{CirclePipeline, LinePipeline, VectorBufferPool, VectorPipeline},
 };
 
+/// Binds the polygon-fill pipeline and the item's view or flat projection.
 pub struct SetVectorTilePipeline;
 impl<P: PhaseItem> RenderCommand<P> for SetVectorTilePipeline {
     fn render<'w>(
@@ -38,6 +38,7 @@ impl<P: PhaseItem> RenderCommand<P> for SetVectorTilePipeline {
     }
 }
 
+/// Draws the tile's matching style-layer geometry with tile, layer and feature metadata.
 pub struct DrawVectorTile;
 impl RenderCommand<LayerItem> for DrawVectorTile {
     fn render<'w>(
@@ -67,7 +68,6 @@ impl RenderCommand<LayerItem> for DrawVectorTile {
 
         let source_shape = &item.source_shape;
 
-        // Uses stencil value of requested tile and the shape of the requested tile
         let reference = source_shape.coords().stencil_reference_value_3d() as u32;
 
         tracing::trace!(
@@ -115,6 +115,7 @@ impl RenderCommand<LayerItem> for DrawVectorTile {
     }
 }
 
+/// Binds the line pipeline and dash atlas; elevated structures use depth-aware drawing on terrain.
 pub struct SetLineTilePipeline;
 impl RenderCommand<LayerItem> for SetLineTilePipeline {
     fn render<'w>(
@@ -162,6 +163,7 @@ impl RenderCommand<LayerItem> for SetLineTilePipeline {
     }
 }
 
+/// Binds the circle pipeline and the item's view or flat projection.
 pub struct SetCircleTilePipeline;
 impl<P: PhaseItem> RenderCommand<P> for SetCircleTilePipeline {
     fn render<'w>(
@@ -188,6 +190,9 @@ impl<P: PhaseItem> RenderCommand<P> for SetCircleTilePipeline {
     }
 }
 
+/// Binds and draws a polygon-fill bucket when both commands succeed.
 pub type DrawVectorTiles = (SetVectorTilePipeline, DrawVectorTile);
+/// Binds and draws a stroked-line bucket when both commands succeed.
 pub type DrawLineTiles = (SetLineTilePipeline, DrawVectorTile);
+/// Binds and draws a circle bucket when both commands succeed.
 pub type DrawCircleTiles = (SetCircleTilePipeline, DrawVectorTile);

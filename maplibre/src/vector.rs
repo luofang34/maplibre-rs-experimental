@@ -1,3 +1,7 @@
+//! Vector tile processing, GPU geometry pools and fill, line and circle draws.
+
+#![deny(missing_docs)]
+
 use std::{marker::PhantomData, ops::Deref, rc::Rc};
 
 pub use process_vector::*;
@@ -44,7 +48,6 @@ pub(crate) mod structures;
 pub(crate) mod transferables;
 pub(crate) mod upload_system;
 
-// Public due to benchmarks
 pub mod tessellation;
 
 struct VectorPipeline(wgpu::RenderPipeline);
@@ -74,6 +77,7 @@ impl Deref for CirclePipeline {
     }
 }
 
+/// GPU storage for tile geometry, per-layer paint and per-vertex feature colors.
 pub type VectorBufferPool = BufferPool<
     wgpu::Queue,
     wgpu::Buffer,
@@ -83,6 +87,8 @@ pub type VectorBufferPool = BufferPool<
     FillShaderFeatureMetadata,
 >;
 
+/// Registers vector requests, worker results, geometry uploads and layer draws.
+/// `T` supplies the host-specific worker message representation.
 pub struct VectorPlugin<T>(PhantomData<T>);
 
 impl<T: VectorTransferables> Default for VectorPlugin<T> {
@@ -166,37 +172,52 @@ impl<E: Environment, T: VectorTransferables> Plugin<E> for VectorPlugin<T> {
         );
 
         schedule.add_system_to_stage(RenderStageLabel::Prepare, resource_system);
-        schedule.add_system_to_stage(RenderStageLabel::Queue, upload_system); // FIXME tcs: Upload updates the TileView in tileviewpattern -> upload most run before prepare
+        schedule.add_system_to_stage(RenderStageLabel::Queue, upload_system);
         schedule.add_system_to_stage(RenderStageLabel::Queue, queue_system);
     }
 }
 
+/// Tessellated geometry and paint for one style layer of a source tile, before GPU upload.
 pub struct AvailableVectorLayerBucket {
+    /// Tile-grid coordinates owning the geometry.
     pub coords: WorldTileCoords,
+    /// Layer name inside the vector source tile, distinct from the style layer ID.
     pub source_layer: String,
+    /// Style layer whose filter and paint produced this bucket.
     pub style_layer_id: String,
+    /// Tile-space geometry with an unpadded draw-index count.
     pub buffer: OverAlignedVertexBuffer<ShaderVertex, IndexDataType>,
-    /// Holds for each feature the count of indices.
+    /// Number of indices contributed by each feature, in tessellation order.
     pub feature_indices: Vec<u32>,
+    /// Encoded-sRGB colors with straight alpha, indexed in the same feature order.
+    /// Missing entries use the layer's fallback color during upload.
     pub feature_colors: Vec<[f32; 4]>,
 }
 
+/// Records a source layer without usable tessellated geometry at the requested tile.
 pub struct MissingVectorLayerBucket {
+    /// Tile-grid coordinates of the unavailable layer.
     pub coords: WorldTileCoords,
+    /// Requested layer name inside the vector source.
     pub source_layer: String,
 }
 
+/// One worker result; an available bucket may still have empty geometry.
 pub enum VectorLayerBucket {
+    /// Tessellation and paint data awaiting upload.
     AvailableLayer(AvailableVectorLayerBucket),
+    /// No usable geometry was returned for the source layer.
     Missing(MissingVectorLayerBucket),
 }
 
+/// Accumulated tile buckets and completion state used to select loading fallbacks.
 #[derive(Default)]
 pub struct VectorLayerBucketComponent {
     /// Base processing has finished; symbol work may still hold the loading slot.
     pub done: bool,
     /// Source data was unavailable, so this tile must not replace a usable ancestor.
     pub failed: bool,
+    /// Worker results, which may arrive before `done` marks base processing complete.
     pub layers: Vec<VectorLayerBucket>,
 }
 
