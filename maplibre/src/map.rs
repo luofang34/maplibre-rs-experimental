@@ -1,3 +1,7 @@
+//! Windowed map creation, GPU initialization and frame execution.
+
+#![deny(missing_docs)]
+
 use std::rc::Rc;
 
 use thiserror::Error;
@@ -19,33 +23,45 @@ use crate::{
     window::{HeadedMapWindow, MapWindow, MapWindowConfig, WindowCreateError},
 };
 
+/// A window, renderer or scheduled update failed, or the map is in the wrong lifecycle state.
 #[derive(Error, Debug)]
 pub enum MapError {
-    /// No need to set renderer again
+    /// Renderer initialization was requested while the map is already ready.
     #[error("renderer was already set for this map")]
     RendererAlreadySet,
+    /// The requested operation requires an initialized renderer.
     #[error("renderer is not fully initialized")]
     RendererNotReady,
+    /// Render graph construction violated a node or connection contract.
     #[error("initializing render graph failed")]
-    RenderGraphInit(RenderGraphError),
+    RenderGraphInit(#[source] RenderGraphError),
+    /// Renderer initialization or presentation surface recovery failed.
     #[error("initializing device failed")]
-    DeviceInit(RenderError),
+    DeviceInit(#[source] RenderError),
+    /// The host could not create the map window or its event loop.
     #[error("creating window failed")]
     Window(#[from] WindowCreateError),
-    #[error("executing stage must not error")]
+    /// A scheduled update failed; preceding state changes are not rolled back.
+    #[error("executing map stage failed")]
     StageError(#[from] StageError),
 }
 
+/// Initialization state of a map's renderer and frame data.
 pub enum CurrentMapContext {
+    /// The renderer and plugin state are available for frame execution.
     Ready(Box<MapContext>),
+    /// The style and GPU configuration await renderer initialization.
     Pending(Box<PendingMapContext>),
 }
 
+/// Style and GPU configuration retained until renderer initialization succeeds.
 pub struct PendingMapContext {
     style: Style,
     renderer_builder: RendererBuilder,
 }
 
+/// Owns a host window and the plugin schedule that updates and renders its map.
+/// Call [`Self::initialize_renderer`] before accessing the context or running a frame.
 pub struct Map<E: Environment> {
     kernel: Rc<Kernel<E>>,
     schedule: Schedule,
@@ -60,6 +76,8 @@ impl<E: Environment> Map<E>
 where
     <<E as Environment>::MapWindowConfig as MapWindowConfig>::MapWindow: HeadedMapWindow,
 {
+    /// Creates the host window and retains the style and plugins for GPU initialization.
+    /// Window errors are returned; style validation findings are logged.
     pub fn new(
         style: Style,
         kernel: Kernel<E>,
@@ -94,6 +112,9 @@ where
         self.max_pitch = max_pitch;
     }
 
+    /// Creates GPU state, resolves source metadata and builds plugins in their supplied order.
+    /// Returns [`MapError::RendererAlreadySet`] if ready, or a renderer failure while keeping
+    /// the map pending. TileJSON resolution failures are logged and do not abort initialization.
     pub async fn initialize_renderer(&mut self) -> Result<(), MapError> {
         match &mut self.map_context {
             CurrentMapContext::Ready(_) => Err(MapError::RendererAlreadySet),
@@ -155,13 +176,16 @@ where
         }
     }
 
+    /// Borrows the host window for platform-specific event-loop or window operations.
     pub fn window_mut(&mut self) -> &mut <E::MapWindowConfig as MapWindowConfig>::MapWindow {
         &mut self.window
     }
+    /// Borrows the host window; it exists even before renderer initialization.
     pub fn window(&self) -> &<E::MapWindowConfig as MapWindowConfig>::MapWindow {
         &self.window
     }
 
+    /// Whether renderer initialization has succeeded since the last reset.
     pub fn is_initialized(&self) -> bool {
         match &self.map_context {
             CurrentMapContext::Ready(_) => true,
@@ -169,8 +193,8 @@ where
         }
     }
 
-    /// Resets the complete state of this map - a new renderer and schedule needs to be created.
-    /// The complete state of the app is reset.
+    /// Drops GPU/frame state and clears the schedule while retaining the window, style,
+    /// renderer settings and plugin list. Call [`Self::initialize_renderer`] before drawing again.
     pub fn reset(&mut self) {
         self.schedule.clear();
         match &self.map_context {
@@ -186,6 +210,9 @@ where
         }
     }
 
+    /// Runs one scheduled update when initialized, stopping on the first failing stage.
+    /// Unavailable presentation frames are skipped; a lost surface is recreated for a later frame.
+    /// Other failures retain the stage or renderer cause in [`MapError`].
     #[tracing::instrument(name = "update_and_redraw", skip_all)]
     pub fn run_schedule(&mut self) -> Result<(), MapError> {
         match &mut self.map_context {
@@ -222,6 +249,7 @@ where
         }
     }
 
+    /// Borrows initialized frame state, or returns [`MapError::RendererNotReady`].
     pub fn context(&self) -> Result<&MapContext, MapError> {
         match &self.map_context {
             CurrentMapContext::Ready(map_context) => Ok(map_context),
@@ -229,6 +257,7 @@ where
         }
     }
 
+    /// Mutably borrows initialized frame state, or returns [`MapError::RendererNotReady`].
     pub fn context_mut(&mut self) -> Result<&mut MapContext, MapError> {
         match &mut self.map_context {
             CurrentMapContext::Ready(map_context) => Ok(map_context),
@@ -236,7 +265,11 @@ where
         }
     }
 
+    /// Shared host services used by the map and its plugins.
     pub fn kernel(&self) -> &Rc<Kernel<E>> {
         &self.kernel
     }
 }
+
+#[cfg(test)]
+mod tests;

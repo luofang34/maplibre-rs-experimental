@@ -1,3 +1,5 @@
+//! Rendering, querying and readback for maps supplied with decoded source tiles.
+
 use std::{cell::RefCell, collections::BTreeMap, ops::Deref, rc::Rc, time::Duration};
 
 use image::RgbaImage;
@@ -52,6 +54,7 @@ pub use xr::XrFrameError;
 /// properties progress the same way in every run.
 const HEADLESS_FRAME_INTERVAL: Duration = Duration::from_millis(16);
 
+/// Owns offscreen frame state and runs the supplied plugins without a host event loop.
 pub struct HeadlessMap {
     kernel: Rc<Kernel<HeadlessEnvironment>>,
     schedule: Schedule,
@@ -59,6 +62,8 @@ pub struct HeadlessMap {
 }
 
 impl HeadlessMap {
+    /// Initializes the view from the style and builds plugins in their supplied order.
+    /// The renderer and host kernel must already be initialized.
     pub fn new(
         style: Style,
         mut renderer: Renderer,
@@ -162,6 +167,9 @@ impl HeadlessMap {
         Ok(())
     }
 
+    /// Loads processed vector, raster and DEM data, then runs `frame_count` offscreen frames.
+    /// A zero count is rejected before loading data. DEM decode failures use ancestor fallback;
+    /// invalid tile coordinates and schedule failures are returned with their cause.
     pub fn render_frames_with_terrain(
         &mut self,
         layers: ProcessedLayers,
@@ -374,6 +382,8 @@ impl HeadlessMap {
         .map_or_else(Vec::new, |(_, tiles)| tiles))
     }
 
+    /// Fetches a vector tile from [`TessellateSource::default`], independent of style sources.
+    /// Addressing and HTTP failures preserve their underlying cause.
     pub async fn fetch_tile(&self, coords: WorldTileCoords) -> Result<Box<[u8]>, SourceFetchError> {
         let source_client = self.kernel.source_client();
         let data = source_client
@@ -454,8 +464,10 @@ fn initial_view_state(window_size: crate::window::PhysicalSize, style: &Style) -
     view_state
 }
 
+/// Collects processed worker messages locally for the offscreen map to consume.
 #[derive(Default, Clone)]
 pub struct HeadlessContext {
+    /// Shared output queue; clones append to the same sequence of messages.
     pub messages: Rc<RefCell<Vec<Message>>>,
 }
 

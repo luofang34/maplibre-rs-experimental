@@ -1,3 +1,7 @@
+//! Platform service types and serializable worker configuration.
+
+#![deny(missing_docs)]
+
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -9,34 +13,40 @@ use crate::{
     window::MapWindowConfig,
 };
 
-/// The environment defines which types must be injected into maplibre at compile time.
-/// Essentially, this trait implements the
-/// [dependency injection](https://en.wikipedia.org/wiki/Dependency_injection) design pattern.
-/// By instantiating this trait at compile time with concrete types, it is possible to create
-/// different compile-time instances of maplibre.
-///
-/// For example it is possible to change the way tasks are scheduled. It is also possible to change
-/// the HTTP implementation for fetching tiles over the network.
+/// Platform services selected together at compile time.
+/// The worker transport must support the same offscreen kernel used to fetch source data.
 pub trait Environment: 'static {
+    /// Factory for the map's host window.
     type MapWindowConfig: MapWindowConfig;
 
+    /// Request/reply transport that runs procedures with the offscreen kernel.
     type AsyncProcedureCall: AsyncProcedureCall<Self::OffscreenKernelEnvironment>;
 
+    /// Executor available to systems running on the map thread.
     type Scheduler: Scheduler;
 
+    /// HTTP implementation used by this environment's source loader.
     type HttpClient: HttpClient;
 
+    /// Services that a worker can create from serialized configuration.
     type OffscreenKernelEnvironment: OffscreenKernel;
 }
 
+/// Configuration passed across worker boundaries to construct source services.
 #[derive(Serialize, Deserialize, Clone)]
 pub struct OffscreenKernelConfig {
+    /// Filesystem cache directory for hosts that support persistent HTTP caching.
+    /// `None` disables that cache; browser-only kernels may ignore the setting.
     pub cache_directory: Option<String>,
 }
 
+/// Worker-side services, independent of window and GPU ownership.
 pub trait OffscreenKernel: Send + Sync + 'static {
+    /// HTTP implementation used by this environment's source loader.
     type HttpClient: HttpClient;
+    /// Constructs worker services from the configuration supplied at worker startup.
     fn create(config: OffscreenKernelConfig) -> Self;
 
+    /// Creates a source loader using this worker's HTTP and cache configuration.
     fn source_client(&self) -> SourceClient<Self::HttpClient>;
 }
