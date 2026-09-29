@@ -1,3 +1,5 @@
+//! Native HTTP source loading with optional disk caching and typed retry classification.
+
 use std::path::PathBuf;
 
 use async_trait::async_trait;
@@ -13,6 +15,8 @@ const USER_AGENT: &str = concat!(
     " (+https://github.com/maplibre/maplibre-rs)"
 );
 
+/// Cloneable HTTP transport that fetches complete bodies and preserves HTTP or network causes.
+/// A configured cache directory enables the HTTP cache middleware; clones share the client.
 #[derive(Clone)]
 pub struct ReqwestHttpClient {
     client: ClientWithMiddleware,
@@ -38,7 +42,9 @@ impl From<reqwest_middleware::Error> for SourceFetchError {
 }
 
 impl ReqwestHttpClient {
-    /// cache_path: Under which path should we cache requests.
+    /// Creates a client, optionally storing cacheable responses under `cache_path`.
+    /// `None` disables the disk cache. If client configuration fails, construction logs
+    /// a warning and falls back to Reqwest's default client.
     pub fn new<P>(cache_path: Option<P>) -> Self
     where
         P: Into<PathBuf>,

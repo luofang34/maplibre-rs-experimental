@@ -1,4 +1,6 @@
-//! Module which is used target platform is not web related.
+//! Native HTTP, task scheduling and Tokio runtime entry points.
+
+#![deny(missing_docs)]
 
 use std::{
     future::Future,
@@ -15,6 +17,12 @@ pub mod http_client;
 pub mod scheduler;
 pub mod trace;
 
+/// Creates an I/O- and timer-enabled Tokio runtime and blocks until `future` completes.
+/// The runtime is dropped before this function returns; detached work must finish before
+/// the supplied future if its results are required.
+///
+/// # Panics
+/// Panics if runtime creation fails or if called from within an asynchronous runtime.
 pub fn run_multithreaded<F: Future>(future: F) -> F::Output {
     tokio::runtime::Builder::new_multi_thread()
         .enable_io()
@@ -35,6 +43,7 @@ pub fn run_multithreaded<F: Future>(future: F) -> F::Output {
         .block_on(future)
 }
 
+/// Worker services that construct a Reqwest source client using the configured cache directory.
 pub struct ReqwestOffscreenKernelEnvironment(OffscreenKernelConfig);
 
 impl OffscreenKernel for ReqwestOffscreenKernelEnvironment {

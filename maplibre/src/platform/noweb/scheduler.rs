@@ -1,3 +1,5 @@
+//! Admission of native worker futures to the entered Tokio runtime.
+
 use std::future::Future;
 
 use crate::io::scheduler::{ScheduleError, Scheduler};
