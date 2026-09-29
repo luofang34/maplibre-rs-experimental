@@ -96,36 +96,7 @@ pub struct PassingContext {
 
 impl Context for PassingContext {
     fn send_back<T: IntoMessage>(&self, message: T) -> Result<(), SendError> {
-        let message = message.into();
-        let tag = if WebMessageTag::LayerRaster.dyn_clone().as_ref() == message.tag() {
-            &WebMessageTag::LayerRaster
-        } else if WebMessageTag::LayerTessellated.dyn_clone().as_ref() == message.tag() {
-            &WebMessageTag::LayerTessellated
-        } else if WebMessageTag::TileTessellated.dyn_clone().as_ref() == message.tag() {
-            &WebMessageTag::TileTessellated
-        } else if WebMessageTag::LayerMissing.dyn_clone().as_ref() == message.tag() {
-            &WebMessageTag::LayerMissing
-        } else if WebMessageTag::LayerIndexed.dyn_clone().as_ref() == message.tag() {
-            &WebMessageTag::LayerIndexed
-        } else if WebMessageTag::SymbolLayerTessellated.dyn_clone().as_ref() == message.tag() {
-            &WebMessageTag::SymbolLayerTessellated
-        } else {
-            unreachable!()
-        };
-        let transferable = message.into_transferable::<FlatBufferTransferable>()?;
-        let data = transferable.data();
-
-        let buffer = ArrayBuffer::new(data.len() as u32);
-        let byte_buffer = Uint8Array::new(&buffer);
-        unsafe {
-            byte_buffer.set(&Uint8Array::view(data), 0);
-        }
-
-        log::debug!(
-            "sending message ({tag:?}) with {}bytes to main thread",
-            data.len()
-        );
-
+        let (tag, buffer) = prepare_message(message.into())?;
         let global: DedicatedWorkerGlobalScope =
             js_sys::global()
                 .dyn_into()
@@ -137,7 +108,7 @@ impl Context for PassingContext {
                 })?;
         global
             .post_message_with_transfer(
-                &js_sys::Array::of2(&JsValue::from(*tag as u32), &buffer),
+                &js_sys::Array::of2(&JsValue::from(tag as u32), &buffer),
                 &js_sys::Array::of1(&buffer),
             )
             .map_err(|source| SendError::Transmission {
@@ -145,6 +116,20 @@ impl Context for PassingContext {
                 source: Box::new(WebError::from(source)),
             })
     }
+}
+
+fn prepare_message(message: Message) -> Result<(WebMessageTag, ArrayBuffer), SendError> {
+    let tag = message
+        .tag()
+        .as_any()
+        .downcast_ref::<WebMessageTag>()
+        .copied()
+        .ok_or(SendError::UnsupportedTag { tag: message.tag() })?;
+    let transferable = message.into_transferable::<FlatBufferTransferable>()?;
+    let data = transferable.data();
+    let buffer = Uint8Array::from(data).buffer();
+    tracing::debug!(?tag, bytes = data.len(), "sending worker result");
+    Ok((tag, buffer))
 }
 
 pub type ReceivedType = RefCell<Vec<Message>>;
@@ -276,3 +261,6 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
         })
     }
 }
+
+#[cfg(test)]
+mod tests;
