@@ -4,6 +4,7 @@ use geozero::{mvt::tile, GeozeroDatasource};
 
 use super::IndexProcessor;
 
+mod processing;
 mod spatial;
 
 fn zigzag(value: i64) -> u32 {

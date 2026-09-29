@@ -1,14 +1,15 @@
-//! Geometry index.
+//! Tile-local geometry and property storage for point queries.
+
+#![deny(missing_docs)]
+
+mod processor;
+pub use processor::IndexProcessor;
 
 use std::collections::{BTreeMap, HashMap};
 
 use cgmath::{num_traits::Signed, Bounded};
 use geo::prelude::*;
-use geo_types::{Coord, CoordFloat, Geometry, LineString, Point, Polygon};
-use geozero::{
-    error::GeozeroError, geo_types::GeoWriter, ColumnValue, FeatureProcessor, GeomProcessor,
-    PropertyProcessor,
-};
+use geo_types::{Coord, CoordFloat, LineString, Point, Polygon};
 use rstar::{Envelope, PointDistance, RTree, RTreeObject, AABB};
 
 use crate::{
@@ -18,18 +19,20 @@ use crate::{
     util::math::bounds_from_points,
 };
 
-/// A quad tree storing the currently loaded tiles.
+/// Query indexes keyed by canonical tile quadkeys; each tile has one replaceable entry.
 pub struct GeometryIndex {
     index: BTreeMap<Quadkey, TileIndex>,
 }
 
 impl GeometryIndex {
+    /// Creates an index with no tiles.
     pub fn new() -> Self {
         Self {
             index: Default::default(),
         }
     }
 
+    /// Replaces the index at `coords`; unaddressable tile coordinates are ignored.
     pub fn index_tile(&mut self, coords: &WorldTileCoords, tile_index: TileIndex) {
         coords
             .build_quad_key()
@@ -56,6 +59,11 @@ impl GeometryIndex {
             .map_or(0, TileIndex::approximate_bytes)
     }
 
+    /// Finds geometries at world pixels measured at `zoom`, in the tile at grid level `z`.
+    ///
+    /// Returns `None` if that tile has no index; an indexed tile with no hits yields `Some`
+    /// of an empty vector. Does not search loaded ancestors, wrap coordinates, filter style
+    /// layers, or sort by draw order. See [`TileIndex::point_query`] for hit tolerance.
     pub fn query_point(
         &self,
         world_coords: &WorldCoords,
@@ -68,7 +76,7 @@ impl GeometryIndex {
             .build_quad_key()
             .and_then(|key| self.index.get(&key))
         {
-            let scale = zoom.scale_delta(&Zoom::from(z)); // FIXME: can be wrong, if tiles of different z are visible
+            let scale = zoom.scale_to_zoom_level(z);
 
             let delta_x = world_coords.x / TILE_SIZE * scale - world_tile_coords.x as f64;
             let delta_y = world_coords.y / TILE_SIZE * scale - world_tile_coords.y as f64;
@@ -88,14 +96,18 @@ impl Default for GeometryIndex {
     }
 }
 
-/// Index of tiles which can be of two types: spatial or linear.
-/// Spatial tiles are stored in a multi-dimentional tree which represents their position in the tile.
-/// Linear tiles are simply stored in a vector.
-///
-/// A spatial tile index can theoretically improve query performance on tiles. Practically it could be slower though. The `Spatial` index is experimental and currently unused.
+/// Geometries for one tile, stored either in input order or in a spatial tree.
 pub enum TileIndex {
-    Spatial { tree: RTree<IndexedGeometry<f64>> },
-    Linear { list: Vec<IndexedGeometry<f64>> },
+    /// Spatial storage; query hits are ordered by distance, with unspecified tie order.
+    Spatial {
+        /// Tree whose envelopes and geometry use the same tile-local units.
+        tree: RTree<IndexedGeometry<f64>>,
+    },
+    /// Sequential storage; query hits retain their position in the list.
+    Linear {
+        /// Geometries in the order to return matching entries.
+        list: Vec<IndexedGeometry<f64>>,
+    },
 }
 
 impl TileIndex {
@@ -109,11 +121,15 @@ impl TileIndex {
         }
     }
 
+    /// Returns polygon interiors and lines within eight tile-local units of the point.
+    ///
+    /// Polygon boundaries and holes are excluded. Coordinates use the 4096-unit tile grid;
+    /// the line tolerance is not a screen-pixel distance. No style visibility, layer order,
+    /// or feature deduplication is applied; multipart features can yield several entries.
     pub fn point_query(&self, inner_coords: InnerCoords) -> Vec<&IndexedGeometry<f64>> {
         let point = Point::new(inner_coords.x, inner_coords.y);
         let coordinate: Coord<_> = point.into();
 
-        // FIXME: Respect layer order of style
         match self {
             TileIndex::Spatial { tree } => tree
                 .nearest_neighbor_iter(&point)
@@ -133,25 +149,32 @@ impl TileIndex {
     }
 }
 
-/// An indexed geometry contains an exact vector geometry, computed bounds which
-/// can be helpful when interacting with the geometry and a hashmap of properties.
+/// A nonempty tile-local geometry, its enclosing bounds, and stringified feature properties.
+///
+/// Callers constructing entries directly must provide finite coordinates and bounds enclosing
+/// the complete geometry. Spatial distance queries use the geometry, including polygon holes.
 #[derive(Debug, Clone)]
 pub struct IndexedGeometry<T>
 where
     T: CoordFloat + Bounded + Signed,
 {
+    /// Envelope enclosing `exact`, in the same coordinate units.
     pub bounds: AABB<Point<T>>,
+    /// Geometry used for hit tests and spatial distance.
     pub exact: ExactGeometry<T>,
+    /// Feature properties; scalar types are represented as strings.
     pub properties: HashMap<String, String>,
 }
 
-/// Contains either a polygon or line vector.
+/// A single polygon or line part in tile-local coordinates.
 #[derive(Debug, Clone)]
 pub enum ExactGeometry<T>
 where
     T: CoordFloat + Bounded + Signed,
 {
+    /// Polygon exterior and any interior holes.
     Polygon(Polygon<T>),
+    /// Ordered vertices of a line.
     LineString(LineString<T>),
 }
 
@@ -199,11 +222,11 @@ where
         linestring: LineString<T>,
         properties: HashMap<String, String>,
     ) -> Option<Self> {
-        let bounds = linestring.envelope();
+        let (min, max) = bounds_from_points(linestring.points())?;
 
         Some(Self {
             exact: ExactGeometry::LineString(linestring),
-            bounds,
+            bounds: AABB::from_corners(Point::from(min), Point::from(max)),
             properties,
         })
     }
@@ -233,169 +256,6 @@ where
             ExactGeometry::LineString(line) => line.euclidean_distance(point),
         };
         distance * distance
-    }
-}
-
-/// A processor able to create geometries using `[geozero::geo_types::GeoWriter]`.
-pub struct IndexProcessor {
-    geo_writer: GeoWriter,
-    geometries: Vec<IndexedGeometry<f64>>,
-    properties: Option<HashMap<String, String>>,
-    coordinate_scale: f64,
-}
-
-impl IndexProcessor {
-    pub fn new() -> Self {
-        Self {
-            geo_writer: GeoWriter::new(),
-            geometries: Vec::new(),
-            properties: None,
-            coordinate_scale: 1.0,
-        }
-    }
-
-    /// Sets the factor from the next layer's coordinate extent to the 4096 tile grid.
-    pub fn set_coordinate_scale(&mut self, scale: f64) {
-        self.coordinate_scale = scale;
-    }
-
-    pub fn build_tree(self) -> RTree<IndexedGeometry<f64>> {
-        RTree::bulk_load(self.geometries)
-    }
-
-    pub fn get_geometries(self) -> Vec<IndexedGeometry<f64>> {
-        self.geometries
-    }
-}
-
-impl Default for IndexProcessor {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl GeomProcessor for IndexProcessor {
-    fn xy(&mut self, x: f64, y: f64, idx: usize) -> Result<(), GeozeroError> {
-        self.geo_writer
-            .xy(x * self.coordinate_scale, y * self.coordinate_scale, idx)
-    }
-    fn point_begin(&mut self, idx: usize) -> Result<(), GeozeroError> {
-        self.geo_writer.point_begin(idx)
-    }
-    fn point_end(&mut self, idx: usize) -> Result<(), GeozeroError> {
-        self.geo_writer.point_end(idx)
-    }
-    fn multipoint_begin(&mut self, size: usize, idx: usize) -> Result<(), GeozeroError> {
-        self.geo_writer.multipoint_begin(size, idx)
-    }
-    fn multipoint_end(&mut self, idx: usize) -> Result<(), GeozeroError> {
-        // Without this the writer keeps the points and the next geometry starts inside them.
-        self.geo_writer.multipoint_end(idx)
-    }
-    fn linestring_begin(
-        &mut self,
-        tagged: bool,
-        size: usize,
-        idx: usize,
-    ) -> Result<(), GeozeroError> {
-        self.geo_writer.linestring_begin(tagged, size, idx)
-    }
-    fn linestring_end(&mut self, tagged: bool, idx: usize) -> Result<(), GeozeroError> {
-        self.geo_writer.linestring_end(tagged, idx)
-    }
-    fn multilinestring_begin(&mut self, size: usize, idx: usize) -> Result<(), GeozeroError> {
-        self.geo_writer.multilinestring_begin(size, idx)
-    }
-    fn multilinestring_end(&mut self, idx: usize) -> Result<(), GeozeroError> {
-        self.geo_writer.multilinestring_end(idx)
-    }
-    fn polygon_begin(&mut self, tagged: bool, size: usize, idx: usize) -> Result<(), GeozeroError> {
-        self.geo_writer.polygon_begin(tagged, size, idx)
-    }
-    fn polygon_end(&mut self, tagged: bool, idx: usize) -> Result<(), GeozeroError> {
-        self.geo_writer.polygon_end(tagged, idx)
-    }
-    fn multipolygon_begin(&mut self, size: usize, idx: usize) -> Result<(), GeozeroError> {
-        self.geo_writer.multipolygon_begin(size, idx)
-    }
-    fn multipolygon_end(&mut self, idx: usize) -> Result<(), GeozeroError> {
-        self.geo_writer.multipolygon_end(idx)
-    }
-}
-
-impl PropertyProcessor for IndexProcessor {
-    fn property(
-        &mut self,
-        _idx: usize,
-        name: &str,
-        value: &ColumnValue,
-    ) -> Result<bool, GeozeroError> {
-        self.properties
-            .as_mut()
-            .unwrap()
-            .insert(name.to_string(), value.to_string());
-        Ok(true)
-    }
-}
-
-impl FeatureProcessor for IndexProcessor {
-    /// Begin of dataset processing.
-    fn dataset_begin(&mut self, _name: Option<&str>) -> Result<(), GeozeroError> {
-        Ok(())
-    }
-    /// End of dataset processing.
-    fn dataset_end(&mut self) -> Result<(), GeozeroError> {
-        Ok(())
-    }
-    /// Begin of feature processing.
-    fn feature_begin(&mut self, _idx: u64) -> Result<(), GeozeroError> {
-        Ok(())
-    }
-    /// End of feature processing.
-    fn feature_end(&mut self, _idx: u64) -> Result<(), GeozeroError> {
-        Ok(())
-    }
-    /// Begin of feature property processing.
-    fn properties_begin(&mut self) -> Result<(), GeozeroError> {
-        self.properties = Some(HashMap::new());
-        Ok(())
-    }
-    /// End of feature property processing.
-    fn properties_end(&mut self) -> Result<(), GeozeroError> {
-        Ok(())
-    }
-    /// Begin of feature geometry processing.
-    fn geometry_begin(&mut self) -> Result<(), GeozeroError> {
-        Ok(())
-    }
-    /// End of feature geometry processing.
-    fn geometry_end(&mut self) -> Result<(), GeozeroError> {
-        let geometry = self.geo_writer.take_geometry();
-
-        match geometry {
-            Some(Geometry::Polygon(polygon)) => self.geometries.push(
-                IndexedGeometry::from_polygon(polygon, self.properties.take().unwrap()).unwrap(),
-            ),
-            Some(Geometry::LineString(linestring)) => self.geometries.push(
-                IndexedGeometry::from_linestring(linestring, self.properties.take().unwrap())
-                    .unwrap(),
-            ),
-            Some(Geometry::Point(_))
-            | Some(Geometry::Line(_))
-            | Some(Geometry::MultiPoint(_))
-            | Some(Geometry::MultiLineString(_))
-            | Some(Geometry::MultiPolygon(_))
-            | Some(Geometry::GeometryCollection(_))
-            | Some(Geometry::Rect(_))
-            | Some(Geometry::Triangle(_)) => {
-                log::debug!("Unsupported geometry in index")
-            }
-            None => {
-                log::debug!("No geometry in index")
-            }
-        };
-
-        Ok(())
     }
 }
 
