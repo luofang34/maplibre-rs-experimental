@@ -1,3 +1,5 @@
+//! Evaluates visible background paint and queues sky and atmosphere draws.
+
 use wgpu::util::DeviceExt;
 
 use crate::{
@@ -25,6 +27,9 @@ pub struct BackgroundBuffers {
 
 use super::render_commands::{DrawAtmosphere, DrawBackground, DrawGlobeBackground, DrawSky};
 
+/// Appends visible background, sky and atmosphere items and uploads their frame metadata.
+/// Returns `Dependencies` if the required phases are absent, or `Setup` if atmosphere
+/// camera or shader metadata cannot be constructed. Existing phase items are not cleared.
 pub fn queue_system(
     MapContext {
         world,

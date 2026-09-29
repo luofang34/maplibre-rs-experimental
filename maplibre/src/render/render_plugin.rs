@@ -1,28 +1,40 @@
+//! Core render stages, graph labels and tile-clipping pipeline registration.
+
+#![deny(missing_docs)]
+
 use super::*;
 
+/// Labels in the root graph, which drives the draw subgraph after its dependencies.
 pub mod main_graph {
-    // Labels for input nodes
+    /// Input-label namespace; the root graph requires no named external slots.
     pub mod input {}
-    // Labels for non-input nodes
+    /// Root nodes used to order work before drawing.
     pub mod node {
+        /// Empty dependency node that must run before the draw-subgraph driver.
         pub const MAIN_PASS_DEPENDENCIES: &str = "main_pass_dependencies";
+        /// Driver that invokes the draw subgraph with the frame's render context.
         pub const MAIN_PASS_DRIVER: &str = "main_pass_driver";
     }
 }
 
-/// Labels for the "draw" graph
+/// Labels for the subgraph that draws map layers and exports their depth.
 pub mod draw_graph {
+    /// Name used to register and look up this subgraph in the root graph.
     pub const NAME: &str = "draw";
-    // Labels for input nodes
+    /// Input-label namespace; the draw subgraph declares no external input slots.
     pub mod input {}
-    // Labels for non-input nodes
+    /// Nodes ordered from opaque drawing through translucency to depth export.
     pub mod node {
+        /// Draws tile masks and map-layer items into the frame attachments.
         pub const MAIN_PASS: &str = "main_pass";
+        /// Draws translucent items using the attachments populated by the main pass.
         pub const TRANSLUCENT_PASS: &str = "translucent_pass";
+        /// Copies rendered depth to the optional host depth target.
         pub const DEPTH_COPY: &str = "depth_copy";
     }
 }
 
+/// GPU pipeline that writes tile identities into stencil for later clipped draws.
 pub struct MaskPipeline(pub wgpu::RenderPipeline);
 impl Deref for MaskPipeline {
     type Target = wgpu::RenderPipeline;
@@ -32,7 +44,8 @@ impl Deref for MaskPipeline {
     }
 }
 
-// TODO: Do we really want a render plugin or do we want to statically do this setup?
+/// Registers the frame stages, draw graph, render phases and projection resource slots.
+/// Install before plugins that add systems to these stages or nodes to the draw graph.
 #[derive(Default)]
 pub struct RenderPlugin;
 

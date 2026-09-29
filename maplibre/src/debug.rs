@@ -1,3 +1,7 @@
+//! Optional tile-boundary overlays and frame-count diagnostics.
+
+#![deny(missing_docs)]
+
 use std::{ops::Deref, rc::Rc};
 
 use crate::{
@@ -62,6 +66,8 @@ impl PhaseItem for TileDebugItem {
     }
 }
 
+/// Adds tile outlines after translucent drawing and logs frame counts during cleanup.
+/// Build the render plugin first so its draw graph and stages are available.
 #[derive(Default)]
 pub struct DebugPlugin;
 

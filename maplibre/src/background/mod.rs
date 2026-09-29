@@ -1,9 +1,15 @@
+//! Background paint, sky and atmosphere drawing for flat and globe views.
+
+#![deny(missing_docs)]
+
 use crate::{environment::Environment, plugin::Plugin};
 
 pub mod queue_system;
 pub mod render_commands;
 pub mod resource_system;
 
+/// Registers background GPU resources and queue systems after the render stages exist.
+/// The render plugin must be built before this plugin.
 pub struct BackgroundPlugin;
 
 impl Default for BackgroundPlugin {

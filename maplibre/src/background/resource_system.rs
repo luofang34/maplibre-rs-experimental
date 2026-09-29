@@ -1,3 +1,5 @@
+//! GPU pipeline initialization for background paint, sky and atmosphere.
+
 use crate::{
     context::MapContext,
     render::{
@@ -8,6 +10,9 @@ use crate::{
     },
 };
 
+/// Initializes missing pipelines using the surface format and supported multisampling.
+/// Returns `Dependencies` unless all pipeline slots and initialized projection resources
+/// are present. Already initialized pipelines are retained.
 pub fn resource_system(
     MapContext {
         world,

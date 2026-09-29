@@ -49,6 +49,8 @@ impl TerrainResources {
         self.mipmaps.generate(device, encoder, &texture.texture);
     }
 
+    /// Keeps the requested tile drapes active and parks other textures with their content.
+    /// Older parked textures are recycled or dropped according to the cache's spare limits.
     pub fn retain_drapes(&mut self, keep: &HashSet<WorldTileCoords>) {
         self.drapes.retain(keep);
     }
