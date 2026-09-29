@@ -100,3 +100,21 @@ fn explicit_view_region_preserves_projection_selection() {
     assert!(region.is_in_view(&(3, 3, zoom).into()));
     assert!(!region.is_in_view(&(3, 4, zoom).into()));
 }
+
+#[test]
+fn zoom_observer_tracks_changes_since_its_reference() {
+    use crate::util::ChangeObserver;
+
+    let mut zoom = ChangeObserver::new(Zoom::new(4.0));
+    assert!(zoom.did_change(0.05));
+    zoom.update_reference();
+    assert!(!zoom.did_change(0.05));
+    *zoom = Zoom::new(4.025);
+    assert!(!zoom.did_change(0.05));
+    *zoom = Zoom::new(4.125);
+    assert!(zoom.did_change(0.05));
+    zoom.update_reference();
+    assert!(!zoom.did_change(0.05));
+    *zoom = Zoom::new(4.0);
+    assert!(zoom.did_change(0.05));
+}

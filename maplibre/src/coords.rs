@@ -256,7 +256,7 @@ impl SignificantlyDifferent for Zoom {
     type Epsilon = f64;
 
     fn ne(&self, other: &Self, epsilon: Self::Epsilon) -> bool {
-        self.0.abs_diff_eq(&other.0, epsilon)
+        self.0.abs_diff_ne(&other.0, epsilon)
     }
 }
 
