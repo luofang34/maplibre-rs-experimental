@@ -1,3 +1,7 @@
+//! Ordered frame stages, with execution stopping at the first failed system.
+
+#![deny(missing_docs)]
+
 use std::borrow::Cow;
 use std::collections::HashMap;
 
@@ -11,6 +15,7 @@ use crate::{
     tcs::system::{stage::SystemStage, IntoSystemContainer, SystemError},
 };
 
+/// A stage that succeeds without reading or changing the frame context.
 pub struct NopStage;
 
 impl Stage for NopStage {
@@ -19,29 +24,47 @@ impl Stage for NopStage {
     }
 }
 
+/// Defines a sequence of default-constructible stages, run in declaration order.
+/// The first error stops execution and is returned without rolling back earlier stages.
+///
+/// ```
+/// #![deny(missing_docs)]
+/// //! An application frame composed from two schedules.
+/// maplibre::multi_stage!(FrameStages,
+///     first: maplibre::schedule::Schedule,
+///     second: maplibre::schedule::Schedule
+/// );
+/// # fn main() { let _stages = FrameStages::default(); }
+/// ```
 #[macro_export]
 macro_rules! multi_stage {
     ($multi_stage:ident, $($stage:ident: $stage_ty:ty),*) => {
+        /// Runs its stages in declaration order and returns the first error.
         pub struct $multi_stage {
             $($stage: $stage_ty),*
         }
 
-        impl Stage for $multi_stage {
-            fn run(&mut self, context: &mut $crate::context::MapContext) {
-                 $(self.$stage.run(context);)*
+        impl $crate::schedule::Stage for $multi_stage {
+            fn run(
+                &mut self,
+                context: &mut $crate::context::MapContext,
+            ) -> $crate::schedule::StageResult {
+                $($crate::schedule::Stage::run(&mut self.$stage, context)?;)*
+                Ok(())
             }
         }
 
-        impl Default for $multi_stage {
+        impl ::core::default::Default for $multi_stage {
             fn default() -> Self {
                 $multi_stage {
-                     $($stage: <$stage_ty>::default()),*
+                     $($stage: <$stage_ty as ::core::default::Default>::default()),*
                 }
             }
         }
     };
 }
 
+/// Runs a fixed-size array of stages in order, stopping at the first error.
 pub struct MultiStage<const I: usize, S>
 where
     S: Stage,
@@ -53,6 +76,7 @@ impl<const I: usize, S> MultiStage<I, S>
 where
     S: Stage,
 {
+    /// Takes ownership of stages in their execution order.
     pub fn new(stages: [S; I]) -> Self {
         Self { stages }
     }
@@ -74,14 +98,18 @@ where
 define_label!(StageLabel);
 pub(crate) type BoxedStageLabel = Box<dyn StageLabel>;
 
+/// Failure that stops execution of a stage or its containing schedule.
 #[derive(Error, Debug)]
 pub enum StageError {
+    /// A scheduled system failed; its typed cause is preserved.
     #[error("system errored")]
     System(#[from] SystemError),
 }
 
+/// Completion status of a stage; an error prevents subsequent stages from running.
 pub type StageResult = Result<(), StageError>;
 
+/// A mutable unit of frame work that can be stored and downcast inside a schedule.
 pub trait Stage: Downcast {
     /// Runs the stage; this happens once per update.
     /// Implementors must initialize all of their state before running the first time.
@@ -90,12 +118,9 @@ pub trait Stage: Downcast {
 
 impl_downcast!(Stage);
 
-/// A container of [`Stage`]s set to be run in a linear order.
-///
-/// Since `Schedule` implements the [`Stage`] trait, it can be inserted into another schedule.
-/// In this way, the properties of the child schedule can be set differently from the parent.
-/// For example, it can be set to run only once during app execution, while the parent schedule
-/// runs indefinitely.
+/// Owns labeled stages and runs them in insertion order against one mutable frame context.
+/// A stage error stops that run without rolling back earlier stages. Schedules can be nested
+/// because they also implement [`Stage`].
 #[derive(Default)]
 pub struct Schedule {
     stages: HashMap<BoxedStageLabel, Box<dyn Stage>>,
@@ -113,6 +138,9 @@ impl Schedule {
     /// # let mut schedule = Schedule::default();
     /// schedule.add_stage("my_stage", NopStage);
     /// ```
+    ///
+    /// # Panics
+    /// Panics if the label is already registered.
     pub fn add_stage<S: Stage>(&mut self, label: impl StageLabel, stage: S) -> &mut Self {
         let label: Box<dyn StageLabel> = Box::new(label);
         self.stage_order.push(label.clone());
@@ -121,6 +149,10 @@ impl Schedule {
         self
     }
 
+    /// Drops the stage with `label` and removes it from the execution order.
+    ///
+    /// # Panics
+    /// Panics if the label is absent.
     pub fn remove_stage(&mut self, label: impl StageLabel) -> &mut Self {
         let remove: Box<dyn StageLabel> = Box::new(label);
         self.stages.remove(&remove).expect("stage not found");
@@ -139,6 +171,9 @@ impl Schedule {
     /// # schedule.add_stage("target_stage", NopStage);
     /// schedule.add_stage_after("target_stage", "my_stage", NopStage);
     /// ```
+    ///
+    /// # Panics
+    /// Panics if the target is absent or the new label is already registered.
     pub fn add_stage_after<S: Stage>(
         &mut self,
         target: impl StageLabel,
@@ -173,6 +208,9 @@ impl Schedule {
     /// #
     /// schedule.add_stage_before("target_stage", "my_stage", NopStage);
     /// ```
+    ///
+    /// # Panics
+    /// Panics if the target is absent or the new label is already registered.
     pub fn add_stage_before<S: Stage>(
         &mut self,
         target: impl StageLabel,
@@ -233,7 +271,7 @@ impl Schedule {
 
     /// Returns a shared reference to the stage identified by `label`, if it exists.
     ///
-    /// If the requested stage does not exist, `None` is returned instead.
+    /// Returns `None` if the label is absent or its stage has a different concrete type.
     ///
     /// # Example
     ///
@@ -253,7 +291,7 @@ impl Schedule {
 
     /// Returns a unique, mutable reference to the stage identified by `label`, if it exists.
     ///
-    /// If the requested stage does not exist, `None` is returned instead.
+    /// Returns `None` if the label is absent or its stage has a different concrete type.
     ///
     /// # Example
     ///
@@ -271,7 +309,7 @@ impl Schedule {
             .and_then(|stage| stage.downcast_mut::<T>())
     }
 
-    /// Executes each [`Stage`] contained in the schedule, one at a time.
+    /// Executes stages in order until one fails; completed mutations remain in the context.
     pub fn run_once(&mut self, context: &mut MapContext) -> StageResult {
         self.run_stages(context, |_| true)
     }
@@ -306,6 +344,7 @@ impl Schedule {
         Ok(())
     }
 
+    /// Drops all stages and their labels without changing the frame context.
     pub fn clear(&mut self) {
         self.stage_order.clear();
         self.stages.clear();
@@ -334,6 +373,9 @@ impl Schedule {
     /// #
     /// schedule.add_system_to_stage("my_stage", my_system);
     /// ```
+    ///
+    /// # Panics
+    /// Panics if the label is absent or names a stage other than `SystemStage`.
     pub fn add_system_to_stage(
         &mut self,
         stage_label: impl StageLabel,
@@ -355,3 +397,6 @@ impl Stage for Schedule {
         Ok(())
     }
 }
+
+#[cfg(all(test, feature = "headless"))]
+mod tests;
