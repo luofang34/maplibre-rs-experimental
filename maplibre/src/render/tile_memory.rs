@@ -75,8 +75,6 @@ fn symbols(tiles: &Tiles, coords: WorldTileCoords) -> usize {
         .map(|layer| {
             let geometry = capacity(&layer.buffer.buffer.vertices)
                 + capacity(&layer.buffer.buffer.indices)
-                + capacity(&layer.buffer.buffer.vertices)
-                + capacity(&layer.buffer.buffer.indices)
                 + capacity(&layer.features)
                 + layer
                     .features
