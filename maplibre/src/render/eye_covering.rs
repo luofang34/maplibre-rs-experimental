@@ -78,7 +78,7 @@ pub struct SharedCovering {
 
 impl SharedCovering {
     /// The tiles the first eye selected, or `None` when it selected no region.
-    #[cfg(test)]
+    #[cfg(all(test, feature = "headless"))]
     pub(crate) fn tiles(&self) -> Option<&[WorldTileCoords]> {
         self.tiles.as_ref().map(|(tiles, _)| tiles.as_slice())
     }
