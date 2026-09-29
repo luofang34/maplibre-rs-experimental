@@ -26,7 +26,7 @@ pub async fn run_headless(
     let requested_layers = style.layers.clone();
 
     let plugins: Vec<Box<dyn Plugin<_>>> = vec![
-        Box::new(RenderPlugin::default()),
+        Box::new(RenderPlugin),
         Box::new(VectorPlugin::<DefaultVectorTransferables>::default()),
         Box::new(RasterPlugin::<DefaultRasterTransferables>::default()),
         Box::new(HeadlessPlugin::new(true)),
