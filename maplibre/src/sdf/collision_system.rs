@@ -1,4 +1,4 @@
-//! Places elevated text and icons once for both eyes and uploads only changed metadata.
+//! Places elevated text and icons once for both eyes, caching metadata by content and allocation.
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
@@ -26,6 +26,8 @@ use crate::{
     tcs::system::{System, SystemError, SystemResult},
 };
 
+/// Places visible symbols across tiles and shares placement between eyes in the same frame.
+/// Retains fade history and refreshes opacity/elevation uploads when content or allocation changes.
 #[derive(Default)]
 pub struct CollisionSystem {
     runs: u32,
@@ -34,6 +36,7 @@ pub struct CollisionSystem {
 }
 
 impl CollisionSystem {
+    /// Starts with no placement history or uploaded metadata fingerprints.
     pub fn new() -> Self {
         Self::default()
     }

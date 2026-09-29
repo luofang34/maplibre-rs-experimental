@@ -1,3 +1,7 @@
+//! Text and icon atlas uploads, collision placement and symbol rendering.
+
+#![deny(missing_docs)]
+
 use std::{marker::PhantomData, ops::Range, rc::Rc};
 
 use crate::{
@@ -45,6 +49,7 @@ struct SymbolPipeline {
     fill: wgpu::RenderPipeline,
 }
 
+/// GPU symbol geometry and paint, with collision opacity and sampled ground height per vertex.
 pub type SymbolBufferPool = BufferPool<
     wgpu::Queue,
     wgpu::Buffer,
@@ -54,6 +59,8 @@ pub type SymbolBufferPool = BufferPool<
     SDFShaderFeatureMetadata,
 >;
 
+/// Registers symbol result ingestion, atlas uploads, placement and drawing.
+/// Vector processing supplies the symbol buckets using the same transferable type `T`.
 pub struct SdfPlugin<T>(PhantomData<T>);
 
 impl<T: VectorTransferables> Default for SdfPlugin<T> {
@@ -85,7 +92,7 @@ impl<E: Environment, T: VectorTransferables> Plugin<E> for SdfPlugin<T> {
         );
 
         schedule.add_system_to_stage(RenderStageLabel::Prepare, resource_system::resource_system);
-        schedule.add_system_to_stage(RenderStageLabel::Queue, upload_system::upload_system); // FIXME tcs: Upload updates the TileView in tileviewpattern -> upload most run before prepare
+        schedule.add_system_to_stage(RenderStageLabel::Queue, upload_system::upload_system);
         schedule.add_system_to_stage(RenderStageLabel::Queue, queue_system::queue_system);
 
         schedule.add_system_to_stage(
@@ -126,20 +133,28 @@ pub struct Feature {
 /// Coordinates measured on the canonical tile grid.
 pub struct TileSpace;
 
+/// Text and icon geometry for one tile/style layer, with its atlas and placement features.
 pub struct SymbolLayerData {
     /// Shared glyph and sprite atlas for this tile.
     pub atlas: Option<std::sync::Arc<assets::SymbolAtlas>>,
+    /// Tile-grid coordinates owning the symbol anchors and geometry.
     pub coords: WorldTileCoords,
+    /// Layer name inside the vector source, retained for feature queries.
     pub source_layer: String,
+    /// Style layer whose layout generated the symbols.
     pub style_layer_id: String,
+    /// Symbol quads and indices with an unpadded draw-index count.
     pub buffer: OverAlignedVertexBuffer<ShaderSymbolVertex, IndexDataType>,
+    /// Labels with collision bounds and ranges into this bucket's index buffer.
     pub features: Vec<Feature>,
 }
 
+/// Symbol buckets retained on a tile while asset loading and GPU placement proceed.
 #[derive(Default)]
 pub struct SymbolLayersDataComponent {
     /// Keeps the worker in the request budget while its visible base geometry is ready.
     pub pending_assets: bool,
+    /// Worker-produced buckets available for atlas upload and collision placement.
     pub layers: Vec<SymbolLayerData>,
 }
 
