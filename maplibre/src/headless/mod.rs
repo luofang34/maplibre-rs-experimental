@@ -1,3 +1,7 @@
+//! Offscreen renderer creation and integration with map plugins.
+
+#![deny(missing_docs)]
+
 use std::rc::Rc;
 
 use thiserror::Error;
@@ -27,6 +31,9 @@ use crate::{
 /// Failure while creating an offscreen renderer.
 #[derive(Debug, Error)]
 pub enum HeadlessRendererError {
+    /// A required host service was not configured.
+    #[error("headless kernel configuration failed")]
+    Kernel(#[from] crate::kernel::KernelBuildError),
     /// Requested dimensions cannot form a physical window size.
     #[error("invalid headless renderer size {width}x{height}")]
     InvalidSize {
@@ -58,6 +65,8 @@ pub mod environment;
 pub mod map;
 pub mod window;
 
+/// Creates a renderer with default GPU settings and nonzero physical-pixel dimensions.
+/// Returns size, window, kernel or GPU initialization failures without drawing a frame.
 pub async fn create_headless_renderer(
     width: u32,
     height: u32,
@@ -77,7 +86,7 @@ pub async fn create_headless_renderer_with_settings(
 ) -> Result<(Kernel<HeadlessEnvironment>, Renderer), HeadlessRendererError> {
     let size = PhysicalSize::new(width, height)
         .ok_or(HeadlessRendererError::InvalidSize { width, height })?;
-    let kernel = environment::create_kernel(size, cache_path);
+    let kernel = environment::create_kernel(size, cache_path)?;
 
     let mwc: &HeadlessMapWindowConfig = kernel.map_window_config();
     let window: HeadlessMapWindow = mwc
@@ -97,8 +106,6 @@ pub async fn create_headless_renderer_with_settings(
 /// Labels for the "draw" graph
 mod draw_graph {
     pub const NAME: &str = "draw";
-    // Labels for input nodes
-    pub mod input {}
     // Labels for non-input nodes
     pub mod node {
         pub const TRANSLUCENT_PASS: &str = "translucent_pass";
@@ -113,6 +120,8 @@ fn attach_surface_copy_node(
     draw_graph.add_node_edge(draw_graph::node::TRANSLUCENT_PASS, draw_graph::node::COPY)
 }
 
+/// Configures an existing render graph to draw supplied tiles without network requests.
+/// Install after the render and tile plugins whose stages and resources it adapts.
 pub struct HeadlessPlugin {
     write_to_disk: bool,
     preserve_tile_sources: bool,
@@ -120,6 +129,7 @@ pub struct HeadlessPlugin {
 }
 
 impl HeadlessPlugin {
+    /// Enables optional image output; source fallback and retention of supplied tiles are off.
     pub fn new(write_to_disk: bool) -> Self {
         Self {
             write_to_disk,
@@ -170,7 +180,6 @@ impl Plugin<HeadlessEnvironment> for HeadlessPlugin {
             );
         }
 
-        // FIXME tcs: Is this good style?
         schedule.remove_stage(RenderStageLabel::Extract);
         // The headless map gets its tiles handed in, so nothing is requested, but the frame
         // input still has to be applied before anything reads the view.

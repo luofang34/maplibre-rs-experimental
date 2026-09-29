@@ -186,7 +186,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     max_pitch_degrees: max_pitch.unwrap_or(default_max_pitch),
                     debug_tiles: *debug_tiles,
                 },
-            );
+            )?;
         }
         #[cfg(feature = "headless")]
         Commands::Headless {

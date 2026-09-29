@@ -131,7 +131,8 @@ pub(super) async fn setup(
                     cache_directory: None,
                 },
             ))
-            .build(),
+            .build()
+            .expect("all kernel services configured"),
     );
     let mut world = World::default();
     world

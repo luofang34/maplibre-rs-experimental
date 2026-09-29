@@ -3,27 +3,16 @@
 //! * Platform Events like suspend/resume
 //! * Render a new frame
 
-use std::{marker::PhantomData, path::PathBuf};
+use std::marker::PhantomData;
 
-use maplibre::{
-    environment::OffscreenKernelConfig,
-    event_loop::EventLoop,
-    io::apc::SchedulerAsyncProcedureCall,
-    kernel::{Kernel, KernelBuilder},
-    map::Map,
-    platform::{
-        http_client::ReqwestHttpClient, run_multithreaded, scheduler::TokioScheduler,
-        ReqwestOffscreenKernelEnvironment,
-    },
-    plugin::Plugin,
-    render::{builder::RendererBuilder, settings::WgpuSettings, RenderPlugin},
-    style::{source::Source, Style},
-    window::{MapWindow, MapWindowConfig, PhysicalSize, WindowCreateError},
-};
+use maplibre::window::{MapWindow, MapWindowConfig, PhysicalSize, WindowCreateError};
 use winit::{dpi::Size, window::WindowAttributes};
 
 use super::WinitMapWindow;
-use crate::{WinitEnvironment, WinitEventLoop};
+use crate::WinitEventLoop;
+
+mod startup;
+pub use startup::{run_headed_map, HeadedMapError};
 
 #[derive(Clone)]
 pub struct WinitMapWindowConfig<ET> {
@@ -126,89 +115,4 @@ impl Default for HeadedMapOptions {
             debug_tiles: false,
         }
     }
-}
-
-/// Opens a window and runs the map event loop until the window closes.
-pub fn run_headed_map<P>(
-    cache_path: Option<P>,
-    window_config: WinitMapWindowConfig<()>,
-    wgpu_settings: WgpuSettings,
-    style: Style,
-    options: HeadedMapOptions,
-) where
-    P: Into<PathBuf>,
-{
-    run_multithreaded(async {
-        type Environment<S, HC, APC> =
-            WinitEnvironment<S, HC, ReqwestOffscreenKernelEnvironment, APC, ()>;
-
-        let cache_path = cache_path.map(|path| path.into());
-        let client = ReqwestHttpClient::new(cache_path.clone());
-
-        let kernel: Kernel<Environment<_, _, _>> = KernelBuilder::new()
-            .with_map_window_config(window_config)
-            .with_http_client(client.clone())
-            .with_apc(SchedulerAsyncProcedureCall::new(
-                TokioScheduler::new(),
-                OffscreenKernelConfig {
-                    cache_directory: cache_path.map(|path| path.to_str().unwrap().to_string()),
-                },
-            ))
-            .with_scheduler(TokioScheduler::new())
-            .build();
-
-        let renderer_builder = RendererBuilder::new().with_wgpu_settings(wgpu_settings);
-
-        // Every registered tile plugin must supply data before a tile counts as ready, so only
-        // the plugins whose sources the style declares are registered.
-        let has_vector_sources = style
-            .sources
-            .values()
-            .any(|source| matches!(source, Source::Vector(_) | Source::GeoJson(_)))
-            || style.sources.is_empty();
-        let has_raster_sources = style
-            .sources
-            .values()
-            .any(|source| matches!(source, Source::Raster(_) | Source::RasterDem(_)));
-        let has_terrain = style.terrain.is_some();
-        let mut plugins: Vec<Box<dyn Plugin<Environment<_, _, _>>>> = vec![
-            Box::new(RenderPlugin::default()),
-            Box::new(maplibre::background::BackgroundPlugin::default()),
-        ];
-        if has_vector_sources {
-            plugins.push(Box::new(maplibre::vector::VectorPlugin::<
-                maplibre::vector::DefaultVectorTransferables,
-            >::default()));
-            plugins.push(Box::new(maplibre::sdf::SdfPlugin::<
-                maplibre::vector::DefaultVectorTransferables,
-            >::default()));
-        }
-        if has_raster_sources {
-            plugins.push(Box::new(maplibre::raster::RasterPlugin::<
-                maplibre::raster::DefaultRasterTransferables,
-            >::default()));
-            plugins.push(Box::new(maplibre::hillshade::HillshadePlugin));
-        }
-        if options.debug_tiles {
-            plugins.push(Box::new(maplibre::debug::DebugPlugin::default()));
-        }
-        if has_terrain {
-            plugins.push(Box::new(maplibre::terrain::TerrainPlugin::<
-                maplibre::terrain::DefaultDemTransferables,
-            >::default()));
-        }
-        let mut map = Map::new(style, kernel, renderer_builder, plugins).unwrap();
-        map.set_max_pitch(cgmath::Deg(options.max_pitch_degrees));
-
-        #[cfg(not(target_os = "android"))]
-        {
-            map.initialize_renderer().await.unwrap();
-        }
-
-        map.window_mut()
-            .take_event_loop()
-            .expect("event loop is not available")
-            .run(map, options.max_frames)
-            .expect("event loop creation failed")
-    })
 }

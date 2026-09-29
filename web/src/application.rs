@@ -89,7 +89,7 @@ fn create_kernel(new_worker: js_sys::Function) -> Result<Kernel<CurrentEnvironme
             .with_scheduler(maplibre::io::scheduler::NopScheduler);
     }
 
-    Ok(kernel_builder.build())
+    Ok(kernel_builder.build()?)
 }
 
 fn map_plugins(style: &Style) -> Vec<Box<dyn maplibre::plugin::Plugin<CurrentEnvironment>>> {

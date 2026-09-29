@@ -1,3 +1,7 @@
+//! Platform services for maps rendered without a presentation window.
+
+#![deny(missing_docs)]
+
 #[cfg(not(target_arch = "wasm32"))]
 use crate::{
     environment::Environment,
@@ -10,6 +14,7 @@ use crate::{
 };
 
 #[cfg(not(target_arch = "wasm32"))]
+/// Native offscreen services using the Tokio scheduler and Reqwest source loader.
 pub struct HeadlessEnvironment;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -33,7 +38,7 @@ pub use web::HeadlessEnvironment;
 pub(super) fn create_kernel(
     size: crate::window::PhysicalSize,
     cache_path: Option<String>,
-) -> crate::kernel::Kernel<HeadlessEnvironment> {
+) -> Result<crate::kernel::Kernel<HeadlessEnvironment>, crate::kernel::KernelBuildError> {
     let client = ReqwestHttpClient::new(cache_path.clone());
     crate::kernel::KernelBuilder::new()
         .with_map_window_config(HeadlessMapWindowConfig::new(size))

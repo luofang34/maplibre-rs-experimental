@@ -50,6 +50,8 @@ impl From<JsValue> for WebError {
 /// Errors returned to JavaScript by map startup and worker execution.
 #[derive(Error, Debug)]
 pub enum JSError {
+    #[error("map kernel configuration failed")]
+    Kernel(#[from] maplibre::kernel::KernelBuildError),
     #[error(transparent)]
     Procedure(#[from] ProcedureError),
     #[error(transparent)]

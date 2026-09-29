@@ -101,7 +101,8 @@ fn create_map(backend: wgpu::Backends) -> Map<TestEnvironment> {
                 cache_directory: None,
             },
         ))
-        .build();
+        .build()
+        .expect("all kernel services configured");
     let style = serde_json::from_str(
         r##"{"version":8,"sources":{},"layers":[{"id":"background","type":"background",
              "paint":{"background-color":"#00ff00"}}]}"##,

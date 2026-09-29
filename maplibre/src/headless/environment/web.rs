@@ -44,7 +44,7 @@ impl Environment for HeadlessEnvironment {
 pub(crate) fn create_kernel(
     size: PhysicalSize,
     _cache_path: Option<String>,
-) -> Kernel<HeadlessEnvironment> {
+) -> Result<Kernel<HeadlessEnvironment>, crate::kernel::KernelBuildError> {
     KernelBuilder::new()
         .with_map_window_config(HeadlessMapWindowConfig::new(size))
         .with_http_client(SuppliedTileClient)

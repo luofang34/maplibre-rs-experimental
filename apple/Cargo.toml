@@ -16,6 +16,7 @@ maplibre = { path = "../maplibre", features = ["thread-safe-futures"] }
 maplibre-winit = { path = "../maplibre-winit", version = "0.1.0"  }
 
 env_logger.workspace = true
+tracing = { workspace = true, features = ["log"] }
 
 [lib]
 name = "maplibre_apple"

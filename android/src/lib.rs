@@ -14,7 +14,7 @@ pub fn android_main(app: android_activity::AndroidApp) {
         android_logger::Config::default().with_max_level(log::LevelFilter::Info),
     );
     log::log!(Level::Info, "maplibre starting");
-    run_headed_map::<String>(
+    if let Err(error) = run_headed_map::<String>(
         None,
         WinitMapWindowConfig::new("maplibre".to_string(), app),
         WgpuSettings {
@@ -23,7 +23,9 @@ pub fn android_main(app: android_activity::AndroidApp) {
         },
         Style::default(),
         HeadedMapOptions::default(),
-    );
+    ) {
+        tracing::error!(%error, ?error, "map startup failed");
+    }
 }
 
 #[no_mangle]
