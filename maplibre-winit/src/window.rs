@@ -1,5 +1,7 @@
 //! Window ownership and renderer display connection.
 
+use std::sync::Arc;
+
 use maplibre::window::HeadedMapWindow;
 
 use crate::WinitEventLoop;
@@ -7,7 +9,7 @@ use crate::WinitEventLoop;
 pub type RawWinitWindow = winit::window::Window;
 
 pub struct WinitMapWindow<ET: 'static> {
-    pub(crate) window: RawWinitWindow,
+    pub(crate) window: Arc<RawWinitWindow>,
     pub(crate) display: winit::event_loop::OwnedDisplayHandle,
     pub(crate) event_loop: Option<WinitEventLoop<ET>>,
 }
@@ -19,7 +21,7 @@ impl<ET> WinitMapWindow<ET> {
 }
 
 impl<ET> HeadedMapWindow for WinitMapWindow<ET> {
-    type WindowHandle = RawWinitWindow;
+    type WindowHandle = Arc<RawWinitWindow>;
 
     fn handle(&self) -> &Self::WindowHandle {
         &self.window

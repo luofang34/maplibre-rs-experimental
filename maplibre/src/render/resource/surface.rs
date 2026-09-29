@@ -42,7 +42,7 @@ impl Surface {
     ///
     /// Uses the requested format, otherwise prefers a supported non-sRGB format and falls back
     /// to the first advertised format. The returned window head must be configured before use.
-    /// The host must keep the window alive for the lifetime of the supplied surface.
+    /// The window is read for its dimensions; ownership comes from the supplied surface.
     pub fn from_surface<MW>(
         surface: wgpu::Surface<'static>,
         adapter: &wgpu::Adapter,
@@ -206,7 +206,7 @@ impl Surface {
     /// Offscreen surfaces and window surfaces with no pending size change are left alone.
     /// Recreation returns host-handle or surface-creation failures without replacing the
     /// existing surface. On success, call [`Self::reconfigure`] before acquiring another frame.
-    /// The host must keep `window` alive while the recreated surface exists.
+    /// The recreated surface retains a cloned window-handle owner.
     pub fn recreate<MW>(
         &mut self,
         window: &MW,

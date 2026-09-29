@@ -1,5 +1,7 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
+use std::sync::Arc;
+
 use maplibre::{
     background::BackgroundPlugin,
     environment::{OffscreenKernel, OffscreenKernelConfig},
@@ -10,9 +12,12 @@ use maplibre::{
     kernel::KernelBuilder,
     map::Map,
     projection::{ProjectionSpecification, ProjectionType},
-    render::{builder::RendererBuilder, settings::WgpuSettings, RenderPlugin},
+    render::{
+        builder::RendererBuilder, resource::Head, settings::WgpuSettings, RenderPlugin, Renderer,
+    },
     sdf::SdfPlugin,
     vector::{DefaultVectorTransferables, VectorPlugin},
+    window::{HeadedMapWindow, MapWindow, PhysicalSize},
 };
 use maplibre_winit::{WinitEnvironment, WinitMapWindowConfig};
 use wasm_bindgen::JsCast;
@@ -66,7 +71,7 @@ async fn configured_backend_renders_mercator_and_globe_frames() {
     }
     let error = errors.pop().await;
     assert!(error.is_none(), "GPU validation failed: {error:?}");
-    drop(map);
+    assert_surface_retains_window(map, backend).await;
     canvas.remove();
 }
 
@@ -135,4 +140,141 @@ async fn next_animation_frame() {
     wasm_bindgen_futures::JsFuture::from(next_frame)
         .await
         .expect("animation frame");
+}
+
+async fn assert_surface_retains_window(map: Map<TestEnvironment>, backend: wgpu::Backends) {
+    let owner = Arc::downgrade(map.window().handle());
+    assert_eq!(
+        owner.strong_count(),
+        2,
+        "map and surface each retain the window"
+    );
+    let mut renderer = RendererBuilder::new()
+        .with_wgpu_settings(WgpuSettings {
+            backends: Some(backend),
+            ..Default::default()
+        })
+        .build()
+        .initialize_renderer::<WinitMapWindowConfig<()>>(map.window())
+        .await
+        .expect("standalone renderer");
+    assert_eq!(
+        owner.strong_count(),
+        3,
+        "standalone surface retains its own owner"
+    );
+    let Head::Headed(head) = renderer.resources.surface.head_mut() else {
+        panic!("expected window surface");
+    };
+    head.recreate_surface(map.window(), &renderer.instance)
+        .expect("recreated surface");
+    head.configure(&renderer.device);
+    assert_eq!(
+        owner.strong_count(),
+        3,
+        "recreation replaces one retained owner"
+    );
+    let error = head
+        .recreate_surface(&UnavailableWindow(map.window().size()), &renderer.instance)
+        .expect_err("unavailable handles cannot create a surface");
+    assert!(
+        std::error::Error::source(&error)
+            .and_then(|source| source.downcast_ref::<wgpu::CreateSurfaceError>())
+            .is_some(),
+        "surface creation error retains its typed source"
+    );
+    assert_eq!(
+        owner.strong_count(),
+        3,
+        "failed recreation preserves the surface owner"
+    );
+    drop(map);
+    assert_eq!(
+        owner.strong_count(),
+        1,
+        "standalone renderer outlives its host wrapper"
+    );
+    let errors = renderer
+        .device
+        .push_error_scope(wgpu::ErrorFilter::Validation);
+    draw_retained_surface(&renderer);
+    assert!(
+        errors.pop().await.is_none(),
+        "retained surface accepts a rendered frame"
+    );
+    drop(renderer);
+    assert_eq!(
+        owner.strong_count(),
+        0,
+        "dropping the last surface releases its owner"
+    );
+}
+
+fn draw_retained_surface(renderer: &Renderer) {
+    let Head::Headed(head) = renderer.resources.surface.head() else {
+        panic!("expected window surface");
+    };
+    let frame = match head.surface().get_current_texture() {
+        wgpu::CurrentSurfaceTexture::Success(frame)
+        | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
+        other => panic!("unable to acquire retained window frame: {other:?}"),
+    };
+    let view = frame
+        .texture
+        .create_view(&wgpu::TextureViewDescriptor::default());
+    let mut encoder = renderer
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+    {
+        let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::GREEN),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            ..Default::default()
+        });
+    }
+    renderer.queue.submit([encoder.finish()]);
+    drop(view);
+    renderer.queue.present(frame);
+}
+
+#[derive(Clone)]
+struct UnavailableWindow(PhysicalSize);
+
+impl wgpu::rwh::HasWindowHandle for UnavailableWindow {
+    fn window_handle(&self) -> Result<wgpu::rwh::WindowHandle<'_>, wgpu::rwh::HandleError> {
+        Err(wgpu::rwh::HandleError::Unavailable)
+    }
+}
+
+impl wgpu::rwh::HasDisplayHandle for UnavailableWindow {
+    fn display_handle(&self) -> Result<wgpu::rwh::DisplayHandle<'_>, wgpu::rwh::HandleError> {
+        Err(wgpu::rwh::HandleError::Unavailable)
+    }
+}
+
+impl MapWindow for UnavailableWindow {
+    fn size(&self) -> PhysicalSize {
+        self.0
+    }
+}
+
+impl HeadedMapWindow for UnavailableWindow {
+    type WindowHandle = Self;
+    fn handle(&self) -> &Self::WindowHandle {
+        self
+    }
+    fn request_redraw(&self) {}
+    fn scale_factor(&self) -> f64 {
+        1.0
+    }
+    fn id(&self) -> u64 {
+        0
+    }
 }

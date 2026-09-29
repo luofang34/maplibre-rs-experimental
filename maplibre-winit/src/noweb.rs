@@ -3,7 +3,7 @@
 //! * Platform Events like suspend/resume
 //! * Render a new frame
 
-use std::marker::PhantomData;
+use std::{marker::PhantomData, sync::Arc};
 
 use maplibre::window::{MapWindow, MapWindowConfig, PhysicalSize, WindowCreateError};
 use winit::{dpi::Size, window::WindowAttributes};
@@ -86,7 +86,7 @@ impl<ET: 'static + Clone> MapWindowConfig for WinitMapWindowConfig<ET> {
             .map_err(|_| WindowCreateError::Window)?;
 
         Ok(Self::MapWindow {
-            window,
+            window: Arc::new(window),
             display: raw_event_loop.owned_display_handle(),
             event_loop: Some(WinitEventLoop {
                 event_loop: raw_event_loop,

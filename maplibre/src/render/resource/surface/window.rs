@@ -1,5 +1,7 @@
 //! Window surface configuration and host-handle recreation.
 
+#![forbid(unsafe_code)]
+
 use wgpu::TextureFormatFeatures;
 
 use crate::{
@@ -7,8 +9,7 @@ use crate::{
     window::{HeadedMapWindow, MapWindow, PhysicalSize},
 };
 
-/// A host-owned window's presentation surface and its configured dimensions and format.
-/// The host window must remain alive until this value and its acquired frames are dropped.
+/// A presentation surface with its retained window owner, configured dimensions and format.
 pub struct WindowHead {
     pub(super) surface: wgpu::Surface<'static>,
     pub(super) size: PhysicalSize,
@@ -72,8 +73,8 @@ impl WindowHead {
     /// Replaces the platform surface while retaining size and presentation settings.
     ///
     /// Returns window-handle or surface-creation failures without changing the existing surface.
-    /// Call [`Self::configure`] on success before acquiring frames. The caller must keep the
-    /// supplied window alive while the new surface or any of its frames exist.
+    /// Call [`Self::configure`] on success before acquiring frames. The new surface retains
+    /// a cloned window-handle owner independently of the supplied host wrapper.
     pub fn recreate_surface<MW>(
         &mut self,
         window: &MW,
@@ -82,10 +83,7 @@ impl WindowHead {
     where
         MW: MapWindow + HeadedMapWindow,
     {
-        self.surface = unsafe {
-            instance
-                .create_surface_unsafe(wgpu::SurfaceTargetUnsafe::from_window(&window.handle())?)?
-        };
+        self.surface = instance.create_surface(window.handle().clone())?;
         Ok(())
     }
 

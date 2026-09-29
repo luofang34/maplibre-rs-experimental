@@ -5,7 +5,6 @@
 use std::num::NonZeroU32;
 
 use thiserror::Error;
-use wgpu::rwh::{HasDisplayHandle, HasWindowHandle};
 /// An owned platform connection suitable for GPU instance creation.
 pub use wgpu::wgt::WgpuHasDisplayHandle as OwnedDisplayHandle;
 
@@ -18,10 +17,10 @@ pub trait MapWindow {
 /// Window which references a physical `RawWindow`. This is only implemented by headed windows and
 /// not by headless windows.
 pub trait HeadedMapWindow: MapWindow {
-    /// Platform handles borrowed by surface creation while the window remains alive.
-    type WindowHandle: HasWindowHandle + HasDisplayHandle + Sync;
+    /// A clonable owner of the window and display handles retained by each presentation surface.
+    type WindowHandle: wgpu::DisplayAndWindowHandle + Clone + 'static;
 
-    /// Borrows the window and display handles without transferring ownership to the renderer.
+    /// Borrows the owner that surface creation clones to keep the platform window alive.
     fn handle(&self) -> &Self::WindowHandle;
 
     /// Owns the display connection used to create this window, where the backend needs one.

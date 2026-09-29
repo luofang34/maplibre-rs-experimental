@@ -18,6 +18,8 @@
 //! We appreciate the design and implementation work which as gone into it.
 //!
 
+#![forbid(unsafe_code)]
+
 use std::{ops::Deref, rc::Rc, sync::Arc};
 
 use crate::{
@@ -154,7 +156,7 @@ impl RenderResources {
 
     /// Recreates a resized window surface, propagating host-handle and creation failures.
     /// Offscreen and unchanged window surfaces are untouched; dependent attachments are not rebuilt.
-    /// The host must keep `window` alive until the recreated surface is dropped.
+    /// The recreated surface retains its own cloned window-handle owner.
     pub fn recreate_surface<MW>(
         &mut self,
         window: &MW,
@@ -201,7 +203,7 @@ pub struct Renderer {
 impl Renderer {
     /// Requests a window-compatible adapter/device and configures the presentation surface.
     /// Returns host-handle, surface-creation, adapter-selection or device-request errors.
-    /// The host must keep the window alive until this renderer's surface is dropped.
+    /// The presentation surface retains a cloned window-handle owner until it is dropped.
     pub async fn initialize<MW>(
         window: &MW,
         wgpu_settings: WgpuSettings,
@@ -217,10 +219,7 @@ impl Renderer {
             ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
 
-        let surface: wgpu::Surface = unsafe {
-            instance
-                .create_surface_unsafe(wgpu::SurfaceTargetUnsafe::from_window(&window.handle())?)?
-        };
+        let surface: wgpu::Surface<'static> = instance.create_surface(window.handle().clone())?;
 
         let (adapter, device, queue) = Self::request_device(
             &instance,
