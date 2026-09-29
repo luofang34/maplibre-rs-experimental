@@ -50,13 +50,11 @@ pub mod graph;
 pub mod resource;
 mod systems;
 
-// Rendering internals
 mod graph_runner;
 mod main_pass;
 pub mod shaders;
-mod translucent_pass; // TODO: Make private
+mod translucent_pass;
 
-// Public API
 pub mod builder;
 pub mod camera;
 pub mod error;
@@ -125,17 +123,25 @@ impl StageLabel for RenderStageLabel {
     }
 }
 
+/// Frame attachments and presentation storage prepared by the render resource stage.
+#[deny(missing_docs)]
 pub struct RenderResources {
+    /// Presentation or offscreen storage, including requested dimensions.
     pub surface: Surface,
+    /// Acquired frame view; presentation consumes a window frame and releases this slot.
     pub render_target: Eventually<TextureView>,
+    /// Depth/stencil attachment recreated when the target dimensions change.
     pub depth_texture: Eventually<Texture>,
+    /// Optional multisample color attachment; initialized `None` means single-sample rendering.
     pub multisampling_texture: Eventually<Option<Texture>>,
     /// A host's `Depth32Float` texture the frame's depth is copied into after everything is
     /// drawn, for a compositor that reprojects the frame.
     pub eye_depth_target: Option<wgpu::TextureView>,
 }
 
+#[deny(missing_docs)]
 impl RenderResources {
+    /// Owns the surface with dependent attachments left uninitialized for the prepare stage.
     pub fn new(surface: Surface) -> Self {
         Self {
             render_target: Default::default(),
@@ -146,6 +152,9 @@ impl RenderResources {
         }
     }
 
+    /// Recreates a resized window surface, propagating host-handle and creation failures.
+    /// Offscreen and unchanged window surfaces are untouched; dependent attachments are not rebuilt.
+    /// The host must keep `window` alive until the recreated surface is dropped.
     pub fn recreate_surface<MW>(
         &mut self,
         window: &MW,
@@ -157,27 +166,42 @@ impl RenderResources {
         self.surface.recreate::<MW>(window, instance)
     }
 
+    /// Borrows the presentation or offscreen storage, including any pending resize.
     pub fn surface(&self) -> &Surface {
         &self.surface
     }
 }
 
+/// GPU device, frame resources and graph used by the rendering schedule.
+/// Construction leaves the graph empty; plugins install the passes and scheduled systems.
+#[deny(missing_docs)]
 pub struct Renderer {
+    /// Backend instance from which the adapter and presentation surfaces are created.
     pub instance: wgpu::Instance,
-    pub device: Arc<wgpu::Device>, // TODO: Arc is needed for headless rendering. Is there a simpler solution?
+    /// Shared device ownership allows offscreen capture to retain it while a readback is pending.
+    pub device: Arc<wgpu::Device>,
+    /// Queue for buffer uploads and encoded frame submissions.
     pub queue: wgpu::Queue,
+    /// Selected adapter, used to inspect backend capabilities and format support.
     pub adapter: wgpu::Adapter,
 
+    /// Requested device configuration; actual enabled capabilities are available from the device.
     pub wgpu_settings: WgpuSettings,
+    /// Render settings adjusted for backend depth and MSAA support during initialization.
+    /// Changing these fields does not automatically rebuild existing pipelines.
     pub settings: RendererSettings,
 
+    /// Presentation state and attachments shared by graph nodes.
     pub resources: RenderResources,
+    /// Pass dependencies and subgraphs executed by the render stage.
     pub render_graph: RenderGraph,
 }
 
+#[deny(missing_docs)]
 impl Renderer {
-    /// Initializes the renderer by retrieving and preparing the GPU instance, device and queue
-    /// for the specified backend.
+    /// Requests a window-compatible adapter/device and configures the presentation surface.
+    /// Returns host-handle, surface-creation, adapter-selection or device-request errors.
+    /// The host must keep the window alive until this renderer's surface is dropped.
     pub async fn initialize<MW>(
         window: &MW,
         wgpu_settings: WgpuSettings,
@@ -232,6 +256,9 @@ impl Renderer {
         })
     }
 
+    /// Requests an adapter/device and allocates an offscreen target at the supplied window size.
+    /// The window is not retained. Adapter/device failures are returned; unsupported texture
+    /// dimensions, formats or usages are reported by wgpu validation.
     pub async fn initialize_headless<MW>(
         window: &MW,
         wgpu_settings: WgpuSettings,
@@ -275,6 +302,7 @@ impl Renderer {
         })
     }
 
+    /// Records physical-pixel dimensions; the prepare stage applies the resize to GPU attachments.
     pub fn resize_surface(&mut self, size: PhysicalSize) {
         self.resources.surface.resize(size)
     }
@@ -330,18 +358,23 @@ impl Renderer {
         Ok((adapter, device, queue))
     }
 
+    /// Borrows the backend instance that owns this renderer's adapter and surfaces.
     pub fn instance(&self) -> &wgpu::Instance {
         &self.instance
     }
+    /// Borrows the device for allocations, capability inspection and command encoding.
     pub fn device(&self) -> &wgpu::Device {
         &self.device
     }
+    /// Borrows the queue used by the renderer for uploads and submissions.
     pub fn queue(&self) -> &wgpu::Queue {
         &self.queue
     }
+    /// Borrows frame attachments and presentation state without acquiring a new frame.
     pub fn state(&self) -> &RenderResources {
         &self.resources
     }
+    /// Borrows the presentation or offscreen storage, including any pending resize.
     pub fn surface(&self) -> &Surface {
         &self.resources.surface
     }
