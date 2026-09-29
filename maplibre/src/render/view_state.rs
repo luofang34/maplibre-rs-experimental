@@ -1,9 +1,9 @@
 //! Viewport, camera and elevation state used for projection and tile visibility.
 
-#![deny(missing_docs)]
+#![deny(missing_docs, deprecated)]
 
 use std::{
-    f64,
+    f64::consts,
     ops::{Deref, DerefMut},
 };
 
@@ -26,7 +26,7 @@ use crate::{
 const VIEW_REGION_PADDING: i32 = 1;
 const MAX_N_TILES: usize = 512;
 /// Pitch beyond which the Mercator plane has no usable horizon.
-const MAX_MERCATOR_HORIZON_ANGLE: Rad<f64> = Rad(89.25 * f64::consts::PI / 180.0);
+const MAX_MERCATOR_HORIZON_ANGLE: Rad<f64> = Rad(89.25 * consts::PI / 180.0);
 /// Keeps some scene below the camera renderable when terrain dips under it.
 const MIN_RENDER_DISTANCE_BELOW_CAMERA_METERS: f64 = 100.0;
 
@@ -181,7 +181,7 @@ impl ViewState {
     /// Pixels per metre at the map center, so elevation in metres maps onto world pixels.
     pub fn pixels_per_meter(&self) -> f64 {
         let world_size = TILE_SIZE * 2.0_f64.powf(self.zoom.value());
-        let latitude = (f64::consts::PI * (1.0 - 2.0 * self.camera.position().y / world_size))
+        let latitude = (consts::PI * (1.0 - 2.0 * self.camera.position().y / world_size))
             .sinh()
             .atan();
         world_size / (self.body.circumference_meters() * latitude.cos())
@@ -229,7 +229,7 @@ impl ViewState {
     pub fn mercator_horizon(&self) -> f64 {
         let pitch = self.camera.get_pitch().0.abs();
         self.camera_to_center_distance()
-            * ((f64::consts::FRAC_PI_2 - pitch).tan() * 0.85)
+            * ((consts::FRAC_PI_2 - pitch).tan() * 0.85)
                 .min((MAX_MERCATOR_HORIZON_ANGLE.0 - pitch).tan())
     }
 
@@ -287,7 +287,7 @@ impl ViewState {
             camera_to_sea_level
         };
 
-        let ground_angle = f64::consts::FRAC_PI_2 + pitch;
+        let ground_angle = consts::FRAC_PI_2 + pitch;
         // A rolled view reaches further along the screen diagonal than the vertical field of
         // view alone, so the far plane widens the field of view with the roll as GL JS does.
         let roll = self.camera.get_roll().0;
@@ -297,17 +297,17 @@ impl ViewState {
         let fov_above_center = rolled_fov * (0.5 + center_offset.y / self.height);
         let surface_distance = |fov: f64| {
             fov.sin() * lowest_plane
-                / (f64::consts::PI - ground_angle - fov)
-                    .clamp(0.01, f64::consts::PI - 0.01)
+                / (consts::PI - ground_angle - fov)
+                    .clamp(0.01, consts::PI - 0.01)
                     .sin()
         };
         let top_half_surface_distance = surface_distance(fov_above_center);
 
         let horizon = distance
-            * ((f64::consts::FRAC_PI_2 - pitch).tan() * 0.85)
+            * ((consts::FRAC_PI_2 - pitch).tan() * 0.85)
                 .min((MAX_MERCATOR_HORIZON_ANGLE.0 - pitch).tan());
         let horizon_angle = (horizon / distance).atan();
-        let min_fov_center_to_horizon = f64::consts::FRAC_PI_2 - MAX_MERCATOR_HORIZON_ANGLE.0;
+        let min_fov_center_to_horizon = consts::FRAC_PI_2 - MAX_MERCATOR_HORIZON_ANGLE.0;
         let fov_center_to_horizon = if horizon_angle > min_fov_center_to_horizon {
             2.0 * horizon_angle * (0.5 + center_offset.y / (horizon * 2.0))
         } else {
@@ -316,8 +316,7 @@ impl ViewState {
         let top_half_horizon_distance = surface_distance(fov_center_to_horizon);
 
         let top_half = top_half_surface_distance.min(top_half_horizon_distance);
-        let far_z =
-            ((f64::consts::FRAC_PI_2 - limited_pitch).cos() * top_half + lowest_plane) * 1.01;
+        let far_z = ((consts::FRAC_PI_2 - limited_pitch).cos() * top_half + lowest_plane) * 1.01;
         let near_z = self.height / 50.0;
         (near_z, far_z)
     }
