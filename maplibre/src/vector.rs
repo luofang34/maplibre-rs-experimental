@@ -32,7 +32,7 @@ use crate::{
     },
 };
 
-mod populate_world_system;
+pub(crate) mod populate_world_system;
 mod process_vector;
 pub(crate) use process_vector::feature_properties;
 mod queue_system;

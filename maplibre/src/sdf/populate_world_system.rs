@@ -30,10 +30,11 @@ impl<E: Environment, T: VectorTransferables> System for PopulateWorldSystem<E, T
     }
 
     fn run(&mut self, MapContext { world, .. }: &mut MapContext) -> SystemResult {
-        for message in self.kernel.apc().receive(|message| {
-            message.has_tag(T::SymbolLayerTessellated::message_tag())
-                || message.has_tag(T::LayerIndexed::message_tag())
-        }) {
+        for message in self
+            .kernel
+            .apc()
+            .receive(|message| message.has_tag(T::SymbolLayerTessellated::message_tag()))
+        {
             let message: Message = message;
             if message.has_tag(T::SymbolLayerTessellated::message_tag()) {
                 let message = message.into_transferable::<T::SymbolLayerTessellated>();

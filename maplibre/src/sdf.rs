@@ -28,7 +28,7 @@ pub(crate) mod covering;
 pub(crate) mod depth;
 mod paint;
 mod placement;
-mod populate_world_system;
+pub(crate) mod populate_world_system;
 mod queue_system;
 mod render_commands;
 mod resource_system;

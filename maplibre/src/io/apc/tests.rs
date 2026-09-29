@@ -1,4 +1,6 @@
 mod errors;
+#[cfg(all(feature = "headless", not(target_arch = "wasm32")))]
+mod systems;
 
 use crate::io::apc::{Context, IntoMessage, SendError};
 
