@@ -5,10 +5,12 @@ use crate::{
     environment::Environment,
     io::apc::{apply_worker_messages, AsyncProcedureCall, Message, MessageError},
     kernel::Kernel,
+    raster::resource::RasterResources,
     raster::{
         transferables::{LayerRaster, LayerRasterMissing, RasterTransferables},
         RasterLayerData, RasterLayersDataComponent,
     },
+    render::eventually::Eventually,
     tcs::{
         system::{System, SystemResult},
         world::World,
@@ -76,7 +78,13 @@ pub(crate) fn apply_raster_message<T: RasterTransferables>(
     else {
         return Ok(());
     };
-    component.layers.push(layer);
+    if component.record(layer) {
+        if let Some(Eventually::Initialized(raster)) =
+            world.resources.get_mut::<Eventually<RasterResources>>()
+        {
+            raster.remove_texture(coords);
+        }
+    }
     Ok(())
 }
 

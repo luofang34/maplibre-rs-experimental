@@ -12,7 +12,7 @@ pub struct RasterResources {
     sampler: wgpu::Sampler,
     msaa: Msaa,
     pipeline: wgpu::RenderPipeline,
-    bound_textures: HashMap<WorldTileCoords, wgpu::BindGroup>,
+    bound_textures: HashMap<WorldTileCoords, (wgpu::BindGroup, u64)>,
     /// Advances whenever a texture is bound, so cached renders of raster tiles can refresh.
     revision: u64,
 }
@@ -60,7 +60,13 @@ impl RasterResources {
 
     /// Borrows the current texture/sampler binding, or `None` before upload or after eviction.
     pub fn get_bound_texture(&self, coords: &WorldTileCoords) -> Option<&wgpu::BindGroup> {
-        self.bound_textures.get(coords)
+        self.bound_textures.get(coords).map(|(binding, _)| binding)
+    }
+
+    pub(crate) fn texture_revision(&self, coords: WorldTileCoords) -> Option<u64> {
+        self.bound_textures
+            .get(&coords)
+            .map(|(_, revision)| *revision)
     }
 
     /// Drops the registry's binding for this tile without advancing the insertion generation.
@@ -79,20 +85,23 @@ impl RasterResources {
         self.revision = self.revision.wrapping_add(1);
         self.bound_textures.insert(
             *coords,
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
-                layout: &self.pipeline.get_bind_group_layout(1),
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&texture.view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&self.sampler),
-                    },
-                ],
-                label: None,
-            }),
+            (
+                device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    layout: &self.pipeline.get_bind_group_layout(1),
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::TextureView(&texture.view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::Sampler(&self.sampler),
+                        },
+                    ],
+                    label: None,
+                }),
+                self.revision,
+            ),
         );
     }
 

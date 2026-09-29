@@ -182,9 +182,9 @@ impl SourceContent for LoadedContent<'_> {
         })
     }
 
-    fn raster_loaded(&self, coords: WorldTileCoords) -> bool {
+    fn raster_revision(&self, coords: WorldTileCoords) -> Option<u64> {
         self.raster
-            .is_some_and(|raster| raster.get_bound_texture(&coords).is_some())
+            .and_then(|raster| raster.texture_revision(coords))
     }
 }
 

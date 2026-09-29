@@ -120,8 +120,8 @@ impl SourceContent for Loaded {
         self.0
     }
 
-    fn raster_loaded(&self, _: WorldTileCoords) -> bool {
-        self.0
+    fn raster_revision(&self, _: WorldTileCoords) -> Option<u64> {
+        self.0.then_some(0)
     }
 }
 

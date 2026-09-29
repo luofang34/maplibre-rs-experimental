@@ -8,7 +8,7 @@ use crate::{
         apc::{Input, ProcedureError},
         tile_backpressure::{request_budget, MAX_TILES_IN_FLIGHT},
     },
-    raster::{DefaultRasterTransferables, RasterLayersDataComponent},
+    raster::{DefaultRasterTransferables, RasterLayerData, RasterLayersDataComponent},
     tcs::world::World,
     vector::{transferables::*, DefaultVectorTransferables},
 };
@@ -130,7 +130,10 @@ async fn corrupt_raster_source_does_not_discard_a_healthy_later_image() {
         .tiles
         .query::<&RasterLayersDataComponent>(Default::default())
         .expect("raster");
-    assert_eq!(raster.layers.len(), 2);
+    let [RasterLayerData::Available(layer)] = raster.layers.as_slice() else {
+        panic!("healthy image replaces the missing result");
+    };
+    assert_eq!(layer.image.get_pixel(0, 0).0, [20, 100, 220, 255]);
     assert!(raster.has_image());
     assert!(!raster.is_missing());
 }

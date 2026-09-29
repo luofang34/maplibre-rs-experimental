@@ -109,7 +109,34 @@ pub enum RasterLayerData {
     Missing(MissingRasterLayerData),
 }
 
+impl RasterLayerData {
+    fn source_layer(&self) -> &str {
+        match self {
+            Self::Available(layer) => &layer.source_layer,
+            Self::Missing(layer) => &layer.source_layer,
+        }
+    }
+}
+
 impl RasterLayersDataComponent {
+    pub(crate) fn record(&mut self, layer: RasterLayerData) -> bool {
+        let has_image = matches!(layer, RasterLayerData::Available(_));
+        if let Some(existing) = self
+            .layers
+            .iter_mut()
+            .find(|existing| existing.source_layer() == layer.source_layer())
+        {
+            // A failed refresh must not discard usable pixels from an earlier response.
+            if !has_image && matches!(existing, RasterLayerData::Available(_)) {
+                return false;
+            }
+            *existing = layer;
+        } else {
+            self.layers.push(layer);
+        }
+        has_image
+    }
+
     /// Whether any source delivered an image for the tile.
     pub fn has_image(&self) -> bool {
         self.layers

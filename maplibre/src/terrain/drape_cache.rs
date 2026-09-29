@@ -21,8 +21,8 @@ const MAX_FREE_TEXTURES: usize = 8;
 pub(crate) trait SourceContent {
     /// Whether the style layer's geometry of the tile is in the vector buffer pool.
     fn vector_layer_loaded(&self, coords: WorldTileCoords, layer_id: &str) -> bool;
-    /// Whether the raster tile has a texture bound.
-    fn raster_loaded(&self, coords: WorldTileCoords) -> bool;
+    /// Revision of the raster binding, or `None` while no texture is uploaded.
+    fn raster_revision(&self, coords: WorldTileCoords) -> Option<u64>;
 }
 
 /// Fingerprint of everything that decides a drape texture's content.
@@ -55,7 +55,7 @@ pub(crate) fn fingerprint(
         for (id, index, _) in &shape.raster_layers {
             id.hash(&mut hasher);
             index.hash(&mut hasher);
-            content.raster_loaded(shape.source).hash(&mut hasher);
+            content.raster_revision(shape.source).hash(&mut hasher);
         }
     }
     hasher.finish()

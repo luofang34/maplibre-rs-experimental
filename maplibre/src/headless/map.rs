@@ -16,8 +16,12 @@ use crate::{
     kernel::Kernel,
     map::MapError,
     plugin::Plugin,
-    raster::{AvailableRasterLayerData, RasterLayerData, RasterLayersDataComponent},
+    raster::{
+        resource::RasterResources, AvailableRasterLayerData, RasterLayerData,
+        RasterLayersDataComponent,
+    },
     render::{
+        eventually::Eventually,
         frame_input::FrameInput,
         projection::{raster_source_regions, view_region_for_projection, ProjectionStateError},
         tile_view_pattern::DEFAULT_TILE_SIZE,
@@ -232,6 +236,14 @@ impl HeadlessMap {
                 });
         }
 
+        self.load_raster_layers(raster_layers)?;
+        self.advance_frames(frame_count)
+    }
+
+    fn load_raster_layers(
+        &mut self,
+        raster_layers: Vec<AvailableRasterLayerData>,
+    ) -> Result<(), HeadlessMapOperationError> {
         let mut rasters_by_tile = BTreeMap::new();
         for layer in raster_layers {
             rasters_by_tile
@@ -239,14 +251,20 @@ impl HeadlessMap {
                 .or_insert_with(Vec::new)
                 .push(RasterLayerData::Available(layer));
         }
+        let world = &mut self.map_context.world;
         for (coords, layers) in rasters_by_tile {
-            tiles
+            world
+                .tiles
                 .spawn_mut(coords)
                 .ok_or(HeadlessMapOperationError::InvalidTile { coords })?
                 .insert(RasterLayersDataComponent { layers });
+            if let Some(Eventually::Initialized(raster)) =
+                world.resources.get_mut::<Eventually<RasterResources>>()
+            {
+                raster.remove_texture(coords);
+            }
         }
-
-        self.advance_frames(frame_count)
+        Ok(())
     }
 
     fn advance_frames(&mut self, frame_count: u8) -> Result<(), HeadlessMapOperationError> {
