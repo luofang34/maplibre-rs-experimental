@@ -3,7 +3,7 @@ use std::{borrow::Cow, marker::PhantomData, rc::Rc};
 use crate::{
     context::MapContext,
     environment::Environment,
-    io::apc::{AsyncProcedureCall, Message},
+    io::apc::{apply_worker_messages, AsyncProcedureCall},
     kernel::Kernel,
     sdf::SymbolLayersDataComponent,
     tcs::system::{System, SystemResult},
@@ -30,25 +30,25 @@ impl<E: Environment, T: VectorTransferables> System for PopulateWorldSystem<E, T
     }
 
     fn run(&mut self, MapContext { world, .. }: &mut MapContext) -> SystemResult {
-        for message in self
+        let messages = self
             .kernel
             .apc()
-            .receive(|message| message.has_tag(T::SymbolLayerTessellated::message_tag()))
-        {
-            let message: Message = message;
+            .receive(|message| message.has_tag(T::SymbolLayerTessellated::message_tag()));
+        apply_worker_messages(messages, |message| {
             if message.has_tag(T::SymbolLayerTessellated::message_tag()) {
-                let message = message.into_transferable::<T::SymbolLayerTessellated>();
+                let message = message.into_transferable::<T::SymbolLayerTessellated>()?;
 
                 let Some(component) = world
                     .tiles
                     .query_mut::<&mut SymbolLayersDataComponent>(message.coords())
                 else {
-                    continue;
+                    return Ok(());
                 };
 
                 component.layers.push(message.to_bucket());
             }
-        }
+            Ok(())
+        })?;
 
         Ok(())
     }

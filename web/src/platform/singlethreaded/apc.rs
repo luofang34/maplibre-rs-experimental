@@ -112,7 +112,7 @@ impl Context for PassingContext {
         } else {
             unreachable!()
         };
-        let transferable = message.into_transferable::<FlatBufferTransferable>();
+        let transferable = message.into_transferable::<FlatBufferTransferable>()?;
         let data = transferable.data();
 
         let buffer = ArrayBuffer::new(data.len() as u32);
@@ -126,15 +126,24 @@ impl Context for PassingContext {
             data.len()
         );
 
-        let global: DedicatedWorkerGlobalScope = js_sys::global()
-            .dyn_into()
-            .map_err(|_e| SendError::Transmission)?;
+        let global: DedicatedWorkerGlobalScope =
+            js_sys::global()
+                .dyn_into()
+                .map_err(|_| SendError::Transmission {
+                    operation: "accessing the worker global scope",
+                    source: Box::new(WebError::TypeError(
+                        "not a dedicated worker global scope".into(),
+                    )),
+                })?;
         global
             .post_message_with_transfer(
                 &js_sys::Array::of2(&JsValue::from(*tag as u32), &buffer),
                 &js_sys::Array::of1(&buffer),
             )
-            .map_err(|_e| SendError::Transmission)
+            .map_err(|source| SendError::Transmission {
+                operation: "posting a worker result",
+                source: Box::new(WebError::from(source)),
+            })
     }
 }
 

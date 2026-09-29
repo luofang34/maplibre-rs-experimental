@@ -5,7 +5,7 @@ use std::{borrow::Cow, marker::PhantomData, rc::Rc};
 use crate::{
     context::MapContext,
     environment::Environment,
-    io::apc::{AsyncProcedureCall, Message},
+    io::apc::{apply_worker_messages, AsyncProcedureCall},
     kernel::Kernel,
     tcs::system::{System, SystemResult},
     terrain::{
@@ -38,13 +38,13 @@ impl<E: Environment, T: DemTransferables> System for PopulateWorldSystem<E, T> {
 
     fn run(&mut self, MapContext { style, world, .. }: &mut MapContext) -> SystemResult {
         let unpack = dem_source(style).map(|dem| dem.unpack);
-        for message in self.kernel.apc().receive(|message| {
+        let messages = self.kernel.apc().receive(|message| {
             message.has_tag(T::LayerDem::message_tag())
                 || message.has_tag(T::LayerDemMissing::message_tag())
-        }) {
-            let message: Message = message;
+        });
+        apply_worker_messages(messages, |message| {
             let (coords, state) = if message.has_tag(T::LayerDem::message_tag()) {
-                let message = message.into_transferable::<T::LayerDem>();
+                let message = message.into_transferable::<T::LayerDem>()?;
                 let coords = message.coords();
                 let state =
                     match unpack.map(|unpack| DemTile::from_image(&message.into_image(), unpack)) {
@@ -57,7 +57,7 @@ impl<E: Environment, T: DemTransferables> System for PopulateWorldSystem<E, T> {
                     };
                 (coords, state)
             } else {
-                let message = message.into_transferable::<T::LayerDemMissing>();
+                let message = message.into_transferable::<T::LayerDemMissing>()?;
                 (message.coords(), DemTileComponent::Missing)
             };
             let loaded = matches!(state, DemTileComponent::Loaded(_));
@@ -67,7 +67,9 @@ impl<E: Environment, T: DemTransferables> System for PopulateWorldSystem<E, T> {
             if loaded {
                 backfill_neighbours(&mut world.tiles, coords);
             }
-        }
+            Ok(())
+        })?;
+
         Ok(())
     }
 }

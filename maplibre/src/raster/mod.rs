@@ -22,7 +22,7 @@ use crate::{
     tcs::{system::SystemContainer, tiles::TileComponent, world::World},
 };
 
-mod populate_world_system;
+pub(crate) mod populate_world_system;
 mod process_raster;
 mod queue_system;
 pub mod render_commands;

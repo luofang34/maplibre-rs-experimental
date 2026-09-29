@@ -122,7 +122,11 @@ fn tessellated(messages: Vec<Message>) -> Vec<DefaultLayerTessellated> {
     messages
         .into_iter()
         .filter(|message| message.has_tag(DefaultLayerTessellated::message_tag()))
-        .map(|message| *message.into_transferable::<DefaultLayerTessellated>())
+        .map(|message| {
+            *message
+                .into_transferable::<DefaultLayerTessellated>()
+                .expect("matching message payload")
+        })
         .collect()
 }
 
@@ -139,7 +143,11 @@ fn maximum_index_x(bytes: &[u8]) -> f64 {
     let indexed = process(bytes, line_layer(None))
         .into_iter()
         .find(|message| message.has_tag(DefaultLayerIndexed::message_tag()))
-        .map(|message| *message.into_transferable::<DefaultLayerIndexed>())
+        .map(|message| {
+            *message
+                .into_transferable::<DefaultLayerIndexed>()
+                .expect("matching message payload")
+        })
         .expect("index message");
     let TileIndex::Linear { list } = indexed.to_tile_index() else {
         panic!("worker index is linear");
@@ -217,6 +225,7 @@ fn an_unsupported_filter_reports_the_layer_missing_instead_of_guessing() {
         .map(|message| {
             message
                 .into_transferable::<DefaultLayerMissing>()
+                .expect("matching message payload")
                 .layer_name()
                 .to_string()
         })
@@ -301,7 +310,11 @@ fn label_texts(layout: Option<serde_json::Value>) -> Vec<String> {
     process(&labelled_point_tile(), symbol_layer(layout))
         .into_iter()
         .filter(|message| message.has_tag(DefaultSymbolLayerTessellated::message_tag()))
-        .map(|message| *message.into_transferable::<DefaultSymbolLayerTessellated>())
+        .map(|message| {
+            *message
+                .into_transferable::<DefaultSymbolLayerTessellated>()
+                .expect("matching message payload")
+        })
         .flat_map(|layer| layer.features.into_iter().map(|feature| feature.str))
         .collect()
 }

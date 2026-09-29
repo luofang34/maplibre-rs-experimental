@@ -1,4 +1,5 @@
 mod errors;
+mod payload;
 #[cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 mod systems;
 
@@ -51,6 +52,7 @@ fn buffered_completion_messages_keep_fifo_order_and_drain_in_one_receive() {
         .map(|message| {
             message
                 .into_transferable::<DefaultTileTessellated>()
+                .expect("matching message payload")
                 .pending_symbols()
         })
         .collect();
@@ -61,7 +63,11 @@ fn buffered_completion_messages_keep_fifo_order_and_drain_in_one_receive() {
     );
     let retained: Vec<_> = apc
         .receive(|_| true)
-        .map(|message| *message.into_transferable::<u32>())
+        .map(|message| {
+            *message
+                .into_transferable::<u32>()
+                .expect("matching message payload")
+        })
         .collect();
     assert_eq!(retained, [7], "other consumers must retain their messages");
 }

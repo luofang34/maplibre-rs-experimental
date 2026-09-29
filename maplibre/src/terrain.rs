@@ -28,7 +28,7 @@ mod draw;
 pub mod elevation;
 pub mod interaction;
 pub mod mesh;
-mod populate_world_system;
+pub(crate) mod populate_world_system;
 mod queue_system;
 pub(crate) mod request_system;
 mod resource_system;

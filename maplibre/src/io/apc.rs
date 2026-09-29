@@ -1,7 +1,7 @@
 //! Tile worker calls, return messages, and scheduler-backed delivery.
 
 use std::{
-    any::Any,
+    any::{type_name, Any, TypeId},
     cell::RefCell,
     fmt::Debug,
     future::Future,
@@ -33,12 +33,16 @@ impl MessageTag for u32 {
     }
 }
 
-/// A consumer could not interpret an erased message payload.
+/// A worker payload has a different Rust type from the one its consumer requested.
 #[derive(Error, Debug)]
-pub enum MessageError {
-    /// Retains a payload that could not be cast to the requested type.
-    #[error("the message did not contain the expected data")]
-    CastError(Box<dyn Any>),
+#[error("message {tag:?} carries payload type {actual:?}, expected {expected}")]
+pub struct MessageError {
+    /// Routing tag attached to the rejected result.
+    pub tag: &'static dyn MessageTag,
+    /// Rust type name requested by the consumer.
+    pub expected: &'static str,
+    /// Runtime type identifier of the rejected payload.
+    pub actual: TypeId,
 }
 
 /// A tagged worker result with an owned, type-erased payload.
@@ -57,13 +61,14 @@ impl Message {
     }
 
     /// Takes the payload as its concrete Rust type.
-    ///
-    /// # Panics
-    /// Panics if the payload is not `T`, even when its routing tag matches the consumer.
-    pub fn into_transferable<T: 'static>(self) -> Box<T> {
-        self.transferable
-            .downcast::<T>()
-            .expect("message has wrong tag")
+    /// A mismatch drops the payload and returns its tag and type context.
+    pub fn into_transferable<T: 'static>(self) -> Result<Box<T>, MessageError> {
+        let actual = self.transferable.as_ref().type_id();
+        self.transferable.downcast::<T>().map_err(|_| MessageError {
+            tag: self.tag,
+            expected: type_name::<T>(),
+            actual,
+        })
     }
 
     /// Tests routing-tag equality, including the tag's concrete type.
@@ -99,8 +104,23 @@ pub enum Input {
 #[derive(Error, Debug)]
 pub enum SendError {
     /// The transport rejected the message or its receiving endpoint is gone.
-    #[error("could not transmit data")]
-    Transmission,
+    #[error("worker transport failed while {operation}")]
+    Transmission {
+        /// Transport operation that rejected the result.
+        operation: &'static str,
+        /// Underlying channel or platform error.
+        #[source]
+        source: Box<dyn std::error::Error>,
+    },
+    /// The result has a routing tag unsupported by this transport.
+    #[error("worker transport does not support message tag {tag:?}")]
+    UnsupportedTag {
+        /// Rejected routing tag.
+        tag: &'static dyn MessageTag,
+    },
+    /// The result's payload is incompatible with the transport.
+    #[error("worker result has an invalid payload")]
+    Payload(#[from] MessageError),
 }
 
 /// Allows sending messages from workers to back to the caller.
@@ -180,7 +200,10 @@ impl Context for SchedulerContext {
     fn send_back<T: IntoMessage>(&self, message: T) -> Result<(), SendError> {
         self.sender
             .send(message.into())
-            .map_err(|_e| SendError::Transmission)
+            .map_err(|source| SendError::Transmission {
+                operation: "sending a result to the caller",
+                source: Box::new(source),
+            })
     }
 }
 
@@ -252,6 +275,21 @@ impl<K: OffscreenKernel, S: Scheduler> AsyncProcedureCall<K> for SchedulerAsyncP
             })
             .map_err(CallError::Schedule)
     }
+}
+
+/// Applies valid results in the entire drained batch before reporting its first type error.
+pub(crate) fn apply_worker_messages(
+    messages: impl IntoIterator<Item = Message>,
+    mut apply: impl FnMut(Message) -> Result<(), MessageError>,
+) -> Result<(), MessageError> {
+    let mut first_error = None;
+    for message in messages {
+        if let Err(error) = apply(message) {
+            tracing::error!(%error, "worker result rejected");
+            first_error.get_or_insert(error);
+        }
+    }
+    first_error.map_or(Ok(()), Err)
 }
 
 #[cfg(test)]

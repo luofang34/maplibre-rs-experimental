@@ -14,6 +14,9 @@ pub mod timings;
 /// Failure returned by a scheduled system; the stage stops before running later systems.
 #[derive(Error, Debug)]
 pub enum SystemError {
+    /// A worker result could not be interpreted by its receiving system.
+    #[error("worker result has an invalid payload")]
+    WorkerMessage(#[from] crate::io::apc::MessageError),
     /// An offscreen buffer could not be read back from the GPU.
     #[cfg(feature = "headless")]
     #[error("offscreen capture failed")]

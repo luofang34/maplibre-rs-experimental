@@ -3,7 +3,7 @@ use std::{borrow::Cow, marker::PhantomData, rc::Rc};
 use crate::{
     context::MapContext,
     environment::Environment,
-    io::apc::{AsyncProcedureCall, Message},
+    io::apc::{apply_worker_messages, AsyncProcedureCall},
     kernel::Kernel,
     tcs::system::{System, SystemResult},
     vector::{transferables::*, VectorLayerBucket, VectorLayerBucketComponent},
@@ -29,53 +29,50 @@ impl<E: Environment, T: VectorTransferables> System for PopulateWorldSystem<E, T
     }
 
     fn run(&mut self, MapContext { world, .. }: &mut MapContext) -> SystemResult {
-        for message in self.kernel.apc().receive(|message| {
+        let messages = self.kernel.apc().receive(|message| {
             message.has_tag(T::TileTessellated::message_tag())
                 || message.has_tag(T::LayerMissing::message_tag())
                 || message.has_tag(T::LayerTessellated::message_tag())
                 || message.has_tag(T::LayerIndexed::message_tag())
-        }) {
-            let message: Message = message;
+        });
+        apply_worker_messages(messages, |message| {
             if message.has_tag(T::TileTessellated::message_tag()) {
-                let message = message.into_transferable::<T::TileTessellated>();
+                let message = message.into_transferable::<T::TileTessellated>()?;
                 finish_tile(world, &*message);
             } else if message.has_tag(T::LayerMissing::message_tag()) {
-                let message = message.into_transferable::<T::LayerMissing>();
+                let message = message.into_transferable::<T::LayerMissing>()?;
                 let Some(component) = world
                     .tiles
                     .query_mut::<&mut VectorLayerBucketComponent>(message.coords())
                 else {
-                    continue;
+                    return Ok(());
                 };
 
                 component
                     .layers
                     .push(VectorLayerBucket::Missing(message.to_bucket()));
             } else if message.has_tag(T::LayerTessellated::message_tag()) {
-                let message = message.into_transferable::<T::LayerTessellated>();
-                // FIXME: Handle points!
-                /*if message.is_empty() {
-                    continue;
-                }*/
-
+                let message = message.into_transferable::<T::LayerTessellated>()?;
                 let Some(component) = world
                     .tiles
                     .query_mut::<&mut VectorLayerBucketComponent>(message.coords())
                 else {
-                    continue;
+                    return Ok(());
                 };
 
                 component
                     .layers
                     .push(VectorLayerBucket::AvailableLayer(message.to_bucket()));
             } else if message.has_tag(T::LayerIndexed::message_tag()) {
-                let message = message.into_transferable::<T::LayerIndexed>();
+                let message = message.into_transferable::<T::LayerIndexed>()?;
                 world
                     .tiles
                     .geometry_index
                     .index_tile(&message.coords(), message.to_tile_index());
             }
-        }
+            Ok(())
+        })?;
+
         Ok(())
     }
 }

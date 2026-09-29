@@ -3,7 +3,7 @@ use std::{borrow::Cow, marker::PhantomData, rc::Rc};
 use crate::{
     context::MapContext,
     environment::Environment,
-    io::apc::{AsyncProcedureCall, Message},
+    io::apc::{apply_worker_messages, AsyncProcedureCall, Message, MessageError},
     kernel::Kernel,
     raster::{
         transferables::{LayerRaster, LayerRasterMissing, RasterTransferables},
@@ -35,12 +35,13 @@ impl<E: Environment, T: RasterTransferables> System for PopulateWorldSystem<E, T
     }
 
     fn run(&mut self, MapContext { world, .. }: &mut MapContext) -> SystemResult {
-        for message in self.kernel.apc().receive(|message| {
+        let messages = self.kernel.apc().receive(|message| {
             message.has_tag(T::LayerRaster::message_tag())
                 || message.has_tag(T::LayerRasterMissing::message_tag())
-        }) {
-            apply_raster_message::<T>(world, message);
-        }
+        });
+        apply_worker_messages(messages, |message| {
+            apply_raster_message::<T>(world, message)
+        })?;
 
         Ok(())
     }
@@ -49,30 +50,34 @@ impl<E: Environment, T: RasterTransferables> System for PopulateWorldSystem<E, T
 /// Records a worker's raster result on its tile. A fetched image becomes an available layer and
 /// a failed fetch a missing one, so the tile counts as done either way instead of being
 /// requested again forever.
-pub(crate) fn apply_raster_message<T: RasterTransferables>(world: &mut World, message: Message) {
+pub(crate) fn apply_raster_message<T: RasterTransferables>(
+    world: &mut World,
+    message: Message,
+) -> Result<(), MessageError> {
     let (coords, layer) = if message.has_tag(T::LayerRaster::message_tag()) {
-        let message = message.into_transferable::<T::LayerRaster>();
+        let message = message.into_transferable::<T::LayerRaster>()?;
         (
             message.coords(),
             RasterLayerData::Available(message.to_layer()),
         )
     } else if message.has_tag(T::LayerRasterMissing::message_tag()) {
-        let message = message.into_transferable::<T::LayerRasterMissing>();
+        let message = message.into_transferable::<T::LayerRasterMissing>()?;
         (
             message.coords(),
             RasterLayerData::Missing(message.to_layer()),
         )
     } else {
-        return;
+        return Ok(());
     };
 
     let Some(component) = world
         .tiles
         .query_mut::<&mut RasterLayersDataComponent>(coords)
     else {
-        return;
+        return Ok(());
     };
     component.layers.push(layer);
+    Ok(())
 }
 
 #[cfg(test)]

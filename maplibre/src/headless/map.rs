@@ -1,12 +1,10 @@
 use std::{cell::RefCell, collections::BTreeMap, ops::Deref, rc::Rc, time::Duration};
 
 use image::RgbaImage;
-use thiserror::Error;
 
 use crate::{
     context::MapContext,
     coords::{LatLon, WorldCoords, WorldTileCoords, Zoom, TILE_SIZE},
-    geojson::ProcessGeoJsonError,
     headless::environment::HeadlessEnvironment,
     io::{
         apc::{Context, IntoMessage, Message, SendError},
@@ -24,16 +22,19 @@ use crate::{
         view_state::{ViewState, ViewStatePadding},
         Renderer,
     },
-    schedule::{Schedule, Stage, StageError},
+    schedule::{Schedule, Stage},
     sdf::SymbolLayersDataComponent,
     style::{layer::StyleLayer, Style},
     tcs::world::World,
     terrain::{backfill_neighbours, dem::DemTile, source::dem_source, DemTileComponent, LoadedDem},
     vector::{
-        transferables::SymbolLayerTessellated, AvailableVectorLayerBucket, ProcessVectorError,
-        VectorLayerBucket, VectorLayerBucketComponent,
+        transferables::SymbolLayerTessellated, AvailableVectorLayerBucket, VectorLayerBucket,
+        VectorLayerBucketComponent,
     },
 };
+
+mod error;
+pub use error::HeadlessMapOperationError;
 
 mod processed;
 pub mod reference;
@@ -46,41 +47,6 @@ pub use processed::{
     process_geojson_layers, process_tile_layers, ProcessedLayers, SymbolLayer, VectorLayer,
 };
 pub use xr::XrFrameError;
-
-/// Failure while processing or rendering data through a [`HeadlessMap`].
-#[derive(Debug, Error)]
-pub enum HeadlessMapOperationError {
-    /// At least one frame is required for a render request.
-    #[error("headless render frame count must be positive")]
-    InvalidFrameCount,
-    /// Tile coordinates cannot be represented by the tile store.
-    #[error("cannot spawn headless tile {coords}")]
-    InvalidTile {
-        /// Invalid source-tile coordinates.
-        coords: WorldTileCoords,
-    },
-    /// Vector source processing failed.
-    #[error("headless vector source processing failed")]
-    Vector {
-        /// Underlying vector processor error.
-        #[source]
-        source: ProcessVectorError,
-    },
-    /// GeoJSON source processing failed.
-    #[error("headless GeoJSON source processing failed")]
-    GeoJson {
-        /// Underlying GeoJSON processor error.
-        #[source]
-        source: ProcessGeoJsonError,
-    },
-    /// Render schedule execution failed.
-    #[error("headless render schedule failed")]
-    Schedule {
-        /// Underlying schedule error.
-        #[source]
-        source: StageError,
-    },
-}
 
 /// A headless frame advances the frame clock by a nominal 60 Hz interval, so animated
 /// properties progress the same way in every run.

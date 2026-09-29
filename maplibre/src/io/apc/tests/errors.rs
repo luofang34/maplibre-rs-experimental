@@ -45,7 +45,10 @@ fn procedure_failures_keep_their_underlying_causes() {
         execution.source().expect("decode cause").to_string(),
         "decode failed"
     );
-    let send = ProcedureError::Send(SendError::Transmission);
+    let send = ProcedureError::Send(SendError::Transmission {
+        operation: "sending a result",
+        source: Box::new(std::io::Error::other("receiver disconnected")),
+    });
     assert!(send.source().expect("send cause").is::<SendError>());
 }
 

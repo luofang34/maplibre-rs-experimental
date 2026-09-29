@@ -46,20 +46,20 @@ impl ProcessedLayers {
         self.vector.is_empty() && self.symbols.is_empty()
     }
 
-    fn from_messages(messages: Vec<Message>) -> Self {
+    fn from_messages(messages: Vec<Message>) -> Result<Self, HeadlessMapOperationError> {
         let mut layers = Self::default();
         for message in messages {
             if message.has_tag(VectorLayer::message_tag()) {
                 layers
                     .vector
-                    .push(message.into_transferable::<VectorLayer>());
+                    .push(message.into_transferable::<VectorLayer>()?);
             } else if message.has_tag(SymbolLayer::message_tag()) {
                 layers
                     .symbols
-                    .push(message.into_transferable::<SymbolLayer>());
+                    .push(message.into_transferable::<SymbolLayer>()?);
             }
         }
-        layers
+        Ok(layers)
     }
 }
 
@@ -84,7 +84,7 @@ pub fn process_tile_layers(
     )
     .map_err(|source| HeadlessMapOperationError::Vector { source })?;
     let messages = processor.take_context().messages.deref().take();
-    Ok(ProcessedLayers::from_messages(messages))
+    ProcessedLayers::from_messages(messages)
 }
 
 /// Tessellates inline GeoJSON for the style layers drawing a source.
@@ -108,5 +108,8 @@ pub fn process_geojson_layers(
     )
     .map_err(|source| HeadlessMapOperationError::GeoJson { source })?;
     let messages = context.messages.deref().take();
-    Ok(ProcessedLayers::from_messages(messages))
+    ProcessedLayers::from_messages(messages)
 }
+
+#[cfg(test)]
+mod tests;
