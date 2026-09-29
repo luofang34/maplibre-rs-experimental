@@ -8,6 +8,7 @@ use maplibre::{
             AsyncProcedure, AsyncProcedureCall, CallError, Context, Input, IntoMessage, Message,
             MessageTag, SendError,
         },
+        scheduler::ScheduleError,
         source_client::SourceClient,
     },
 };
@@ -259,10 +260,10 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
         let worker = self
             .workers
             .choose(&mut thread_rng())
-            .ok_or(CallError::Schedule)?;
+            .ok_or(CallError::Schedule(ScheduleError::NoWorkers))?;
 
-        worker
-            .post_message(&message)
-            .map_err(|_e| CallError::Schedule)
+        worker.post_message(&message).map_err(|error| {
+            CallError::Schedule(ScheduleError::Scheduling(Box::new(WebError::from(error))))
+        })
     }
 }

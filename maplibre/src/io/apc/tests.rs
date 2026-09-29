@@ -1,3 +1,5 @@
+mod errors;
+
 use crate::io::apc::{Context, IntoMessage, SendError};
 
 pub struct DummyContext;
