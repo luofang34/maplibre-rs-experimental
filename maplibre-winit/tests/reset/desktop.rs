@@ -1,6 +1,6 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use maplibre::window::{HeadedMapWindow, MapWindowConfig};
+use maplibre::window::{HeadedMapWindow, MapWindow, MapWindowConfig};
 use maplibre::{
     map::Map,
     render::frame_input::FrameInput,
@@ -9,14 +9,16 @@ use maplibre::{
 use maplibre_winit::{WinitMapWindow, WinitMapWindowConfig};
 use winit::{
     application::ApplicationHandler,
-    event::WindowEvent,
-    event_loop::{ActiveEventLoop, EventLoop},
+    event::{StartCause, WindowEvent},
+    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     window::WindowId,
 };
 
 #[path = "desktop/fixture.rs"]
 mod fixture;
 use fixture::{Environment, Source};
+#[path = "desktop/camera.rs"]
+mod camera;
 #[path = "desktop/images.rs"]
 mod images;
 
@@ -24,6 +26,14 @@ pub(super) fn run() {
     let mut driver = Driver {
         complete: false,
         window: None,
+        camera: None,
+        camera_complete: std::env::args().any(|arg| {
+            matches!(
+                arg.as_str(),
+                "--images-only" | "--dem-only" | "--outcome-only"
+            )
+        }),
+        deadline: Instant::now() + Duration::from_secs(60),
     };
     EventLoop::new()
         .expect("desktop event loop")
@@ -35,8 +45,17 @@ pub(super) fn run() {
 struct Driver {
     complete: bool,
     window: Option<WinitMapWindow<()>>,
+    camera: Option<camera::Check>,
+    camera_complete: bool,
+    deadline: Instant,
 }
 impl ApplicationHandler for Driver {
+    fn new_events(&mut self, _: &ActiveEventLoop, _: StartCause) {
+        assert!(
+            Instant::now() < self.deadline,
+            "reset checks reached their deadline"
+        );
+    }
     fn resumed(&mut self, active: &ActiveEventLoop) {
         if self.complete || self.window.is_some() {
             return;
@@ -45,8 +64,13 @@ impl ApplicationHandler for Driver {
         let window = config.create_window(active).expect("resumed window");
         window.request_redraw();
         self.window = Some(window);
+        active.set_control_flow(ControlFlow::WaitUntil(self.deadline));
     }
     fn window_event(&mut self, active: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
+        if !self.camera_complete {
+            self.check_camera(active, event);
+            return;
+        }
         if !matches!(event, WindowEvent::RedrawRequested) || self.complete {
             return;
         }
@@ -60,6 +84,39 @@ impl ApplicationHandler for Driver {
         });
         self.complete = true;
         active.exit();
+    }
+}
+
+impl Driver {
+    fn check_camera(&mut self, active: &ActiveEventLoop, event: WindowEvent) {
+        let window = self.window.as_ref().expect("resumed window");
+        let runtime = tokio::runtime::Runtime::new().expect("camera runtime");
+        if let Some(check) = &self.camera {
+            if !matches!(event, WindowEvent::Resized(_)) || !check.was_resized(window) {
+                return;
+            }
+            let check = self.camera.take().expect("camera awaiting actual resize");
+            runtime.block_on(async {
+                tokio::time::timeout(Duration::from_secs(30), check.finish())
+                    .await
+                    .expect("camera resume completed before its deadline");
+            });
+            self.camera_complete = true;
+            if std::env::args().any(|arg| arg == "--camera-only") {
+                self.complete = true;
+                active.exit();
+            } else {
+                window.request_redraw();
+            }
+        } else if matches!(event, WindowEvent::RedrawRequested) {
+            let config =
+                WinitMapWindowConfig::new("Map camera reset guard".into()).with_window(window);
+            self.camera = Some(runtime.block_on(async {
+                tokio::time::timeout(Duration::from_secs(30), camera::Check::start(config))
+                    .await
+                    .expect("camera initialization completed before its deadline")
+            }));
+        }
     }
 }
 
@@ -90,6 +147,15 @@ async fn initialize(map: &mut Map<Environment>) {
         .create()
         .expect("live window");
     let renderer = &mut map.context_mut().expect("ready map").renderer;
+    assert!(matches!(
+        renderer.resources.surface.head(),
+        maplibre::render::resource::Head::Headed(_)
+    ));
+    assert_eq!(
+        renderer.resources.surface.size(),
+        window.size(),
+        "renderer initialization uses the current physical window size"
+    );
     // A compositor may skip window frames while this callback drives worker delivery.
     renderer.resources.surface = maplibre::render::resource::Surface::from_image(
         &renderer.device,

@@ -20,7 +20,7 @@ use crate::{
     schedule::{Schedule, Stage, StageError},
     style::Style,
     tcs::world::World,
-    window::{HeadedMapWindow, MapWindow, MapWindowConfig, WindowCreateError},
+    window::{HeadedMapWindow, MapWindow, MapWindowConfig, PhysicalSize, WindowCreateError},
 };
 
 /// A window, renderer or scheduled update failed, or the map is in the wrong lifecycle state.
@@ -50,14 +50,15 @@ pub enum MapError {
 pub enum CurrentMapContext {
     /// The renderer and plugin state are available for frame execution.
     Ready(Box<MapContext>),
-    /// The style and GPU configuration await renderer initialization.
+    /// The style, retained camera and GPU configuration await renderer initialization.
     Pending(Box<PendingMapContext>),
 }
 
-/// Style and GPU configuration retained until renderer initialization succeeds.
+/// Style, camera and GPU configuration retained until renderer initialization succeeds.
 pub struct PendingMapContext {
     style: Style,
     renderer_builder: RendererBuilder,
+    view_state: Option<ViewState>,
 }
 
 /// Owns a host window and the plugin schedule that updates and renders its map.
@@ -99,6 +100,7 @@ where
             map_context: CurrentMapContext::Pending(Box::new(PendingMapContext {
                 style,
                 renderer_builder,
+                view_state: None,
             })),
             window,
             plugins,
@@ -109,12 +111,13 @@ where
 
     /// Sets the largest pitch the camera accepts, matching the GL JS `maxPitch` map option.
     ///
-    /// Takes effect when the renderer initializes the view state from the style.
+    /// Takes effect when the renderer initializes or restores the view state.
     pub fn set_max_pitch(&mut self, max_pitch: cgmath::Deg<f64>) {
         self.max_pitch = max_pitch;
     }
 
     /// Creates GPU state, resolves source metadata and builds plugins in their supplied order.
+    /// Uses current logical window dimensions and restores any retained orbit camera.
     /// Returns [`MapError::RendererAlreadySet`] if ready, or a renderer failure while keeping
     /// the map pending. TileJSON resolution failures are logged and do not abort initialization.
     pub async fn initialize_renderer(&mut self) -> Result<(), MapError> {
@@ -124,6 +127,7 @@ where
                 let PendingMapContext {
                     style,
                     renderer_builder,
+                    view_state: retained_view,
                 } = pending.as_mut();
                 let mut renderer = renderer_builder
                     .clone()
@@ -132,29 +136,20 @@ where
                     .await
                     .map_err(MapError::DeviceInit)?;
 
-                let window_size = self.window.size();
-
                 resolve_tile_json_sources(style, self.kernel.source_client()).await;
 
-                let center = style.center.unwrap_or_default();
-                let initial_zoom = style.zoom.map(Zoom::new).unwrap_or_default();
-                let mut view_state = ViewState::new(
-                    window_size,
-                    WorldCoords::from_lat_lon(LatLon::new(center[1], center[0]), initial_zoom),
-                    initial_zoom,
-                    cgmath::Deg::<f64>(style.pitch.unwrap_or_default()),
-                    cgmath::Rad(0.6435011087932844),
-                );
-                view_state.set_max_pitch(self.max_pitch);
-                view_state
-                    .camera_mut()
-                    .set_pitch(cgmath::Deg::<f64>(style.pitch.unwrap_or_default()));
-                view_state
-                    .camera_mut()
-                    .set_bearing(cgmath::Deg(style.bearing.unwrap_or_default()));
-                view_state
-                    .camera_mut()
-                    .set_roll(cgmath::Deg(style.roll.unwrap_or_default()));
+                let window_size = self.window.size();
+                renderer.resize_surface(window_size);
+                let mut view_state = match retained_view {
+                    Some(view) => {
+                        let mut view = view.clone();
+                        view.clear_external_view();
+                        view.set_max_pitch(self.max_pitch);
+                        view
+                    }
+                    None => initial_view_state(style, window_size, self.max_pitch),
+                };
+                view_state.resize(window_size.to_logical(self.window.scale_factor()));
 
                 let mut world = World::default();
                 world.resources.insert(self.request_attempts.clone());
@@ -197,13 +192,15 @@ where
     }
 
     /// Drops GPU/frame state and clears the schedule while retaining the window, style,
-    /// renderer settings and plugin list. Call [`Self::initialize_renderer`] before drawing again.
+    /// orbit camera, renderer settings and plugins. External eyes must be supplied for new frames.
+    /// Call [`Self::initialize_renderer`] before drawing again.
     pub fn reset(&mut self) {
         self.schedule.clear();
         match &self.map_context {
             CurrentMapContext::Ready(c) => {
                 self.map_context = CurrentMapContext::Pending(Box::new(PendingMapContext {
                     style: c.style.clone(),
+                    view_state: Some(c.view_state.clone()),
                     renderer_builder: RendererBuilder::new()
                         .with_renderer_settings(c.renderer.settings)
                         .with_wgpu_settings(c.renderer.wgpu_settings.clone()),
@@ -272,6 +269,30 @@ where
     pub fn kernel(&self) -> &Rc<Kernel<E>> {
         &self.kernel
     }
+}
+
+fn initial_view_state(
+    style: &Style,
+    window_size: PhysicalSize,
+    max_pitch: cgmath::Deg<f64>,
+) -> ViewState {
+    let center = style.center.unwrap_or_default();
+    let zoom = style.zoom.map(Zoom::new).unwrap_or_default();
+    let mut view = ViewState::new(
+        window_size,
+        WorldCoords::from_lat_lon(LatLon::new(center[1], center[0]), zoom),
+        zoom,
+        cgmath::Deg(style.pitch.unwrap_or_default()),
+        cgmath::Rad(0.6435011087932844),
+    );
+    view.set_max_pitch(max_pitch);
+    view.camera_mut()
+        .set_pitch(cgmath::Deg(style.pitch.unwrap_or_default()));
+    view.camera_mut()
+        .set_bearing(cgmath::Deg(style.bearing.unwrap_or_default()));
+    view.camera_mut()
+        .set_roll(cgmath::Deg(style.roll.unwrap_or_default()));
+    view
 }
 
 #[cfg(test)]
