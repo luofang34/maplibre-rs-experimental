@@ -1,4 +1,6 @@
-//! Settings for the renderer
+//! Device capability requests, surface formats and GPU buffer pool capacities.
+
+#![deny(missing_docs)]
 
 use std::borrow::Cow;
 
@@ -10,20 +12,26 @@ pub use wgpu::{Backends, Features, Limits, PowerPreference, TextureFormat};
 /// resource to get runtime information about the actual adapter, backend, features, and limits.
 #[derive(Clone)]
 pub struct WgpuSettings {
+    /// Label included in GPU diagnostics for the requested device.
     pub device_label: Option<Cow<'static, str>>,
+    /// Backends available for adapter selection; `None` enables all compiled backends.
+    /// The default reads `WGPU_BACKEND` when present.
     pub backends: Option<Backends>,
+    /// Preference used when choosing a compatible adapter; not a guaranteed device class.
     pub power_preference: PowerPreference,
-    /// The features to ensure are enabled regardless of what the adapter/backend supports.
-    /// Setting these explicitly may cause renderer initialization to fail.
+    /// Explicitly required features, added after automatic feature selection and exclusions.
+    /// These take precedence over [`Self::disabled_features`]; unsupported requests fail initialization.
     pub features: Features,
-    /// The features to ensure are disabled regardless of what the adapter/backend supports
+    /// Features to remove from automatic selection, unless explicitly required by [`Self::features`].
     pub disabled_features: Option<Features>,
-    /// The imposed limits.
+    /// Limits used for the device request, rather than the adapter's full capabilities.
+    /// Unsupported values fail initialization unless reduced by [`Self::constrained_limits`].
     pub limits: Limits,
-    /// The constraints on limits allowed regardless of what the adapter/backend supports
+    /// Optional ceilings on requested capabilities: maxima decrease and minimum alignments increase.
+    /// This is applied to [`Self::limits`] and does not expand the request toward adapter limits.
     pub constrained_limits: Option<Limits>,
 
-    /// Whether a trace is recorded an stored in the current working directory
+    /// Requests a GPU trace in `wgpu_trace` under the working directory when the backend supports it.
     pub record_trace: bool,
 }
 
@@ -73,8 +81,11 @@ impl Default for WgpuSettings {
 }
 
 #[derive(Clone)]
+/// Whether rendering targets an offscreen texture or a host window surface.
 pub enum SurfaceType {
+    /// Render into a texture without presenting a window frame.
     Headless,
+    /// Acquire and present frames through a host window surface.
     Headed,
 }
 
@@ -90,6 +101,7 @@ pub struct Msaa {
 }
 
 impl Msaa {
+    /// Whether more than one sample is requested; this does not validate format support.
     pub fn is_multisampling(&self) -> bool {
         self.samples > 1
     }
@@ -102,14 +114,17 @@ impl Default for Msaa {
     }
 }
 
-/// Capacity of the GPU buffer pools tiles are uploaded into, in elements. The defaults suit a
-/// desktop; a device with a memory limit wants smaller pools, since two pools of ten million
-/// vertices hold close to a gigabyte before a tile is drawn.
+/// Capacity of each GPU tile buffer pool in elements, not bytes.
+/// Actual allocations are capped by the device's maximum buffer size.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BufferPoolSizes {
+    /// Number of geometry vertices in the vertex pool.
     pub vertices: u64,
+    /// Number of draw indices in the index pool.
     pub indices: u64,
+    /// Number of per-vertex feature metadata records.
     pub feature_metadata: u64,
+    /// Number of layer metadata records.
     pub layer_metadata: u64,
 }
 
@@ -125,14 +140,17 @@ impl Default for BufferPoolSizes {
 }
 
 #[derive(Clone, Copy)]
+/// Requested render target properties and pool capacities used during renderer initialization.
 pub struct RendererSettings {
+    /// Requested color/depth sample count; the WebGL backend reduces this to one.
     pub msaa: Msaa,
     /// Capacity of the vector buffer pool.
     pub buffer_pools: BufferPoolSizes,
-    /// Capacity of the symbol buffer pool, whose vertices are three times the size.
+    /// Capacity of the symbol buffer pools in elements of their respective vertex/metadata types.
     pub symbol_pools: BufferPoolSizes,
-    /// Explicitly set a texture format or let the renderer automatically choose one
+    /// Requested surface format; `None` selects a supported window format or offscreen RGBA8.
     pub texture_format: Option<TextureFormat>,
+    /// Depth/stencil format; initialization selects `Depth32FloatStencil8` when supported.
     pub depth_texture_format: TextureFormat,
     /// Present mode for surfaces if a surface is used.
     pub present_mode: PresentMode,
