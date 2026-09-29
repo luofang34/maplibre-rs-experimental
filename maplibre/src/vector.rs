@@ -37,7 +37,7 @@ mod process_vector;
 pub(crate) use process_vector::feature_properties;
 mod queue_system;
 pub mod render_commands;
-mod request_system;
+pub(crate) mod request_system;
 pub(crate) mod resource;
 mod resource_system;
 pub(crate) mod structures;

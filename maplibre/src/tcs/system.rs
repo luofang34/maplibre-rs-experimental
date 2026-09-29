@@ -14,6 +14,26 @@ pub mod timings;
 /// Failure returned by a scheduled system; the stage stops before running later systems.
 #[derive(Error, Debug)]
 pub enum SystemError {
+    /// Tile selection failed for the current view.
+    #[error("failed to select tiles for the current view")]
+    Projection(#[from] crate::render::projection::ProjectionStateError),
+    /// Tile coordinates cannot be represented by the tile store.
+    #[error("cannot request invalid tile {coords}")]
+    InvalidTile {
+        /// Rejected tile coordinates.
+        coords: crate::coords::WorldTileCoords,
+    },
+    /// A worker did not accept a tile request; the tile remains eligible for retry.
+    #[error("failed to submit {kind} tile request for {coords}")]
+    TileRequest {
+        /// Requested data family, such as vector, raster or DEM.
+        kind: &'static str,
+        /// Tile whose request was rejected.
+        coords: crate::coords::WorldTileCoords,
+        /// Underlying serialization or scheduling failure.
+        #[source]
+        source: crate::io::apc::CallError,
+    },
     /// A worker result could not be interpreted by its receiving system.
     #[error("worker result has an invalid payload")]
     WorkerMessage(#[from] crate::io::apc::MessageError),

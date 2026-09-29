@@ -1,3 +1,5 @@
+#[cfg(all(feature = "headless", not(target_arch = "wasm32")))]
+mod admission;
 mod errors;
 mod payload;
 #[cfg(all(feature = "headless", not(target_arch = "wasm32")))]

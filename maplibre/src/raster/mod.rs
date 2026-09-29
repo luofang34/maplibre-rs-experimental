@@ -26,7 +26,7 @@ pub(crate) mod populate_world_system;
 mod process_raster;
 mod queue_system;
 pub mod render_commands;
-mod request_system;
+pub(crate) mod request_system;
 pub mod resource;
 mod resource_system;
 mod transferables;

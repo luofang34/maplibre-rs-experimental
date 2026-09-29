@@ -19,7 +19,7 @@ use crate::{
     },
     sdf::SymbolLayersDataComponent,
     style::layer::StyleLayer,
-    tcs::system::{System, SystemResult},
+    tcs::system::{System, SystemError, SystemResult},
     vector::{
         process_vector::{
             process_vector_tile_with_assets, ProcessVectorContext, VectorTileRequest,
@@ -63,11 +63,7 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
             world,
             view_state.zoom().zoom_level(DEFAULT_TILE_SIZE),
             ViewStatePadding::Loose,
-        )
-        .map_err(|error| {
-            tracing::error!(%error, "unable to select vector request tiles");
-            crate::tcs::system::SystemError::Setup
-        })?;
+        )?;
 
         // Tile arrivals, eviction and a settling eye can change the covering without motion.
         if let Some(view_region) = &view_region {
@@ -232,16 +228,25 @@ impl<E: Environment, T: VectorTransferables> RequestSystem<E, T> {
         world: &mut crate::tcs::world::World,
     ) -> SystemResult {
         let Some(mut tile) = world.tiles.spawn_mut(coords) else {
-            return Err(crate::tcs::system::SystemError::Setup);
+            return Err(SystemError::InvalidTile { coords });
         };
+        self.kernel
+            .apc()
+            .call(
+                Input::TileRequest {
+                    coords,
+                    style: style.clone(),
+                },
+                fetch_vector_apc::<E::OffscreenKernelEnvironment, T, _>,
+            )
+            .map_err(|source| SystemError::TileRequest {
+                kind: "vector",
+                coords,
+                source,
+            })?;
         tile.insert(VectorLayerBucketComponent::default())
             .insert(SymbolLayersDataComponent::default());
-        tracing::debug!(%coords, "tile request started");
-        self.kernel.apc().call(Input::TileRequest { coords, style: style.clone() },
-            fetch_vector_apc::<E::OffscreenKernelEnvironment, T, <E::AsyncProcedureCall as AsyncProcedureCall<E::OffscreenKernelEnvironment>>::Context>)
-            .map_err(|error| {
-                tracing::error!(%coords, ?error, "unable to schedule tile request");
-                crate::tcs::system::SystemError::Setup
-            })
+        tracing::debug!(%coords, "vector tile request accepted");
+        Ok(())
     }
 }

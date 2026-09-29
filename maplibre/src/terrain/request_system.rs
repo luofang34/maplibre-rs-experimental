@@ -122,11 +122,7 @@ impl<E: Environment, T: DemTransferables> System for RequestSystem<E, T> {
             world,
             view_state.zoom().zoom_level(DEFAULT_TILE_SIZE),
             ViewStatePadding::Tight,
-        )
-        .map_err(|error| {
-            tracing::error!(%error, "unable to select DEM request tiles");
-            SystemError::Setup
-        })?
+        )?
         else {
             return Ok(());
         };
@@ -167,7 +163,7 @@ impl<E: Environment, T: DemTransferables> System for RequestSystem<E, T> {
                 break;
             }
             budget -= 1;
-            self.request(coords, style, world);
+            self.request(coords, style, world)?;
         }
 
         Ok(())
@@ -180,30 +176,27 @@ impl<E: Environment, T: DemTransferables> RequestSystem<E, T> {
         coords: WorldTileCoords,
         style: &crate::style::Style,
         world: &mut crate::tcs::world::World,
-    ) {
+    ) -> SystemResult {
         let Some(mut tile) = world.tiles.spawn_mut(coords) else {
-            return;
+            return Err(SystemError::InvalidTile { coords });
         };
+        self.kernel
+            .apc()
+            .call(
+                Input::TileRequest {
+                    coords,
+                    style: style.clone(),
+                },
+                fetch_dem_apc::<E::OffscreenKernelEnvironment, T, _>,
+            )
+            .map_err(|source| SystemError::TileRequest {
+                kind: "DEM",
+                coords,
+                source,
+            })?;
         tile.insert(DemTileComponent::Pending);
-        tracing::debug!(%coords, "DEM tile request started");
-
-        if let Err(error) =
-                self.kernel.apc().call(
-                    Input::TileRequest {
-                        coords,
-                        style: style.clone(),
-                    },
-                    fetch_dem_apc::<
-                        E::OffscreenKernelEnvironment,
-                        T,
-                        <E::AsyncProcedureCall as AsyncProcedureCall<
-                            E::OffscreenKernelEnvironment,
-                        >>::Context,
-                    >,
-                )
-            {
-                tracing::error!(%coords, ?error, "unable to schedule DEM tile request");
-            }
+        tracing::debug!(%coords, "DEM tile request accepted");
+        Ok(())
     }
 }
 

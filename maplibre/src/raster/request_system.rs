@@ -18,7 +18,7 @@ use crate::{
         RasterLayersDataComponent,
     },
     render::{projection::raster_source_regions, view_state::ViewStatePadding},
-    tcs::system::{System, SystemResult},
+    tcs::system::{System, SystemError, SystemResult},
 };
 
 pub struct RequestSystem<E: Environment, T: RasterTransferables> {
@@ -52,11 +52,7 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
         // Missing ancestors and deferred tiles must progress while the camera is stationary.
         // Each raster source covers the view at its own tile size and rounding, as GL JS's
         // per-source tile managers do; the tiles of every source are requested together.
-        let regions = raster_source_regions(style, view_state, world, ViewStatePadding::Loose)
-            .map_err(|error| {
-                tracing::error!(%error, "unable to select raster request tiles");
-                crate::tcs::system::SystemError::Setup
-            })?;
+        let regions = raster_source_regions(style, view_state, world, ViewStatePadding::Loose)?;
         let mut requested = HashSet::new();
         let mut budget = request_budget(world);
         let minzoom = source_min_zoom(style, TileKind::Raster).unwrap_or(0);
@@ -158,15 +154,24 @@ impl<E: Environment, T: RasterTransferables> RequestSystem<E, T> {
         world: &mut crate::tcs::world::World,
     ) -> SystemResult {
         let Some(mut tile) = world.tiles.spawn_mut(coords) else {
-            return Err(crate::tcs::system::SystemError::Setup);
+            return Err(SystemError::InvalidTile { coords });
         };
+        self.kernel
+            .apc()
+            .call(
+                Input::TileRequest {
+                    coords,
+                    style: style.clone(),
+                },
+                fetch_raster_apc::<E::OffscreenKernelEnvironment, T, _>,
+            )
+            .map_err(|source| SystemError::TileRequest {
+                kind: "raster",
+                coords,
+                source,
+            })?;
         tile.insert(RasterLayersDataComponent::default());
-        tracing::debug!(%coords, "tile request started");
-        self.kernel.apc().call(Input::TileRequest { coords, style: style.clone() },
-            fetch_raster_apc::<E::OffscreenKernelEnvironment, T, <E::AsyncProcedureCall as AsyncProcedureCall<E::OffscreenKernelEnvironment>>::Context>)
-            .map_err(|error| {
-                tracing::error!(%coords, ?error, "unable to schedule tile request");
-                crate::tcs::system::SystemError::Setup
-            })
+        tracing::debug!(%coords, "raster tile request accepted");
+        Ok(())
     }
 }
