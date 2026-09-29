@@ -1,4 +1,7 @@
 //! Coordinate spaces, map zoom and visible tile regions.
+
+#![deny(missing_docs)]
+
 mod tile;
 use std::{
     f64::consts::PI,
@@ -21,17 +24,21 @@ use crate::{
     },
 };
 
+/// Unsigned tile-local extent used when normalizing decoded geometry.
 pub const EXTENT_UINT: u32 = 4096;
+/// Signed tile-local extent for geometry that can extend beyond a tile boundary.
 pub const EXTENT_SINT: i32 = EXTENT_UINT as i32;
+/// Tile-local extent at the precision used by coordinate transforms.
 pub const EXTENT: f64 = EXTENT_UINT as f64;
 #[cfg(test)]
 const TOP_LEFT_EXTENT: Vector4<f64> = Vector4::new(0.0, 0.0, 0.0, 1.0);
 
+/// Width of the entire Mercator world in pixels at zoom zero.
 pub const TILE_SIZE: f64 = 512.0;
+/// Number of discrete zoom levels represented by [`ZOOM_BOUNDS`], not an inclusive zoom limit.
 pub const MAX_ZOOM: usize = 32;
 
-// FIXME: MAX_ZOOM is 32, which means max bound is 2^32, which wouldn't fit in u32 or i32
-// Bounds are generated 0..=31
+/// Number of tile columns or rows at each supported grid level: `2^z` for `z` in `0..MAX_ZOOM`.
 pub const ZOOM_BOUNDS: [u32; MAX_ZOOM] = create_zoom_bounds::<MAX_ZOOM>();
 
 const fn create_zoom_bounds<const DIM: usize>() -> [u32; DIM] {
@@ -44,15 +51,16 @@ const fn create_zoom_bounds<const DIM: usize>() -> [u32; DIM] {
     result
 }
 
-/// Represents the position of a node within a quad tree. The first u8 defines the `ZoomLevel` of the node.
-/// The remaining bytes define which part (north west, south west, south east, north east) of each
-/// subdivision of the quadtree is concerned.
-///
-/// TODO: We can optimize the quadkey and store the keys on 2 bits instead of 8
+/// Ordered tile key containing its zoom level and the quadrant digit for each coordinate bit pair.
 #[derive(Ord, PartialOrd, Eq, PartialEq, Clone, Copy)]
 pub struct Quadkey([ZoomLevel; MAX_ZOOM]);
 
 impl Quadkey {
+    /// Builds a key from quadrant digits, starting with the least-significant coordinate bits.
+    /// The slice length determines the tile zoom; digit values are stored without validation.
+    ///
+    /// # Panics
+    /// Panics when the slice contains [`MAX_ZOOM`] or more digits.
     pub fn new(quad_encoded: &[ZoomLevel]) -> Self {
         let mut key = [ZoomLevel::default(); MAX_ZOOM];
         key[0] = (quad_encoded.len() as u8).into();
@@ -75,7 +83,7 @@ impl fmt::Debug for Quadkey {
     }
 }
 
-// FIXME: does Pod and Zeroable make sense?
+/// Integer tile-grid level. Construction does not validate the bounds of a particular grid.
 #[derive(
     Ord,
     PartialOrd,
@@ -95,9 +103,11 @@ impl fmt::Debug for Quadkey {
 pub struct ZoomLevel(u8);
 
 impl ZoomLevel {
+    /// Stores a level without range checking; grid-table lookups require `z < MAX_ZOOM`.
     pub const fn new(z: u8) -> Self {
         ZoomLevel(z)
     }
+    /// Whether this level consists of the single zoom-zero world tile.
     pub fn is_root(self) -> bool {
         self.0 == 0
     }
@@ -140,12 +150,16 @@ impl From<ZoomLevel> for u8 {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
+/// Geographic coordinates in degrees, ordered latitude before longitude.
 pub struct LatLon {
+    /// Latitude in degrees north of the equator; no range is enforced by this type.
     pub latitude: f64,
+    /// Longitude in degrees east of the prime meridian; no wrapping is performed by this type.
     pub longitude: f64,
 }
 
 impl LatLon {
+    /// Stores coordinates in degrees without clamping latitude or wrapping longitude.
     pub fn new(latitude: f64, longitude: f64) -> Self {
         LatLon {
             latitude,
@@ -169,12 +183,12 @@ impl Display for LatLon {
     }
 }
 
-/// `Zoom` is an exponential scale that defines the zoom of the camera on the map.
-/// We can derive the `ZoomLevel` from `Zoom` by using the `[crate::coords::ZOOM_BOUNDS]`.
+/// Continuous map zoom: increasing it by one doubles the world-pixel scale.
 #[derive(Copy, Clone, Debug)]
 pub struct Zoom(f64);
 
 impl Zoom {
+    /// Stores a continuous zoom without validating finiteness or a source's supported range.
     pub fn new(zoom: f64) -> Self {
         Zoom(zoom)
     }
@@ -184,12 +198,14 @@ impl Zoom {
         self.0
     }
 
+    /// Returns the continuous zoom at GPU precision; it does not round to a tile-grid level.
     pub fn level(&self) -> f32 {
         self.0 as f32
     }
 }
 
 impl Zoom {
+    /// Converts a discrete tile level to a continuous zoom with no fractional component.
     pub fn from(zoom_level: ZoomLevel) -> Self {
         Zoom(zoom_level.0 as f64)
     }
@@ -224,27 +240,25 @@ impl std::ops::Sub for Zoom {
 }
 
 impl Zoom {
+    /// Scale factor `2^(tile.z - self)` from this zoom to the tile's grid level.
     pub fn scale_to_tile(&self, coords: &WorldTileCoords) -> f64 {
         2.0_f64.powf(coords.z.0 as f64 - self.0)
     }
 
+    /// Scale factor `2^(z - self)` from this zoom to a discrete grid level.
     pub fn scale_to_zoom_level(&self, z: ZoomLevel) -> f64 {
         2.0_f64.powf(z.0 as f64 - self.0)
     }
 
+    /// Scale factor `2^(zoom - self)` for positions when changing to the supplied zoom.
     pub fn scale_delta(&self, zoom: &Zoom) -> f64 {
         2.0_f64.powf(zoom.0 - self.0)
     }
 
-    /// Adopted from
-    /// [Transform::coveringZoomLevel](https://github.com/maplibre/maplibre-gl-js/blob/80e232a64716779bfff841dbc18fddc1f51535ad/src/geo/transform.ts#L279-L288)
+    /// Selects a tile level using `floor(zoom + log2(512 / tile_size))`.
     ///
-    /// This function calculates which ZoomLevel to show at this zoom.
-    ///
-    /// The `tile_size` is the size of the tile like specified in the source definition,
-    /// For example raster tiles can be 512px or 256px. If it is 256px, then 2x as many tiles are
-    /// displayed. If the raster tile is 512px then exactly as many raster tiles like vector
-    /// tiles would be displayed.
+    /// `tile_size` is the positive source tile width in pixels. A 256-pixel source selects one
+    /// level higher than a 512-pixel source. The result is not clamped to source min/max zoom.
     pub fn zoom_level(&self, tile_size: f64) -> ZoomLevel {
         // TODO: Also support round() instead of floor() here
         let z = (self.0 + (TILE_SIZE / tile_size).ln() / 2.0_f64.ln()).floor() as u8;
@@ -267,11 +281,15 @@ impl SignificantlyDifferent for Zoom {
 /// The origin of the coordinate system is in the upper-left corner.
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub struct WorldCoords {
+    /// Pixel distance east from the Mercator world's western edge at the associated zoom.
     pub x: f64,
+    /// Pixel distance south from the Mercator world's northern edge at the associated zoom.
     pub y: f64,
 }
 
 impl WorldCoords {
+    /// Projects degrees to Mercator pixels at `zoom` without clamping latitude or wrapping longitude.
+    /// Callers must supply finite longitude and latitude strictly between -90 and 90 degrees.
     pub fn from_lat_lon(lat_lon: LatLon, zoom: Zoom) -> WorldCoords {
         let tile_size = TILE_SIZE * 2.0_f64.powf(zoom.0);
         // Get x value
@@ -287,10 +305,13 @@ impl WorldCoords {
         WorldCoords { x, y }
     }
 
+    /// Stores a ground-plane pixel position; the associated zoom remains the caller's responsibility.
     pub fn at_ground(x: f64, y: f64) -> Self {
         Self { x, y }
     }
 
+    /// Converts pixels at `zoom` to tile indices at `z`, truncating fractional indices toward zero.
+    /// The returned indices are not checked against canonical tile bounds.
     pub fn into_world_tile(self, z: ZoomLevel, zoom: Zoom) -> WorldTileCoords {
         let tile_scale = zoom.scale_to_zoom_level(z) / TILE_SIZE; // TODO: Deduplicate
         let x = self.x * tile_scale;
@@ -346,6 +367,8 @@ pub struct ViewRegion {
 }
 
 impl ViewRegion {
+    /// Covers a world-pixel box at `zoom` with tiles at `z` and an integer tile padding.
+    /// `max_n_tiles` limits iteration, not the membership test in [`Self::is_in_view`].
     pub fn new(
         view_region: Aabb2<f64>,
         padding: i32,
@@ -384,10 +407,12 @@ impl ViewRegion {
         }
     }
 
+    /// Returns the grid level supplied when constructing this region.
     pub fn zoom_level(&self) -> ZoomLevel {
         self.zoom_level
     }
 
+    /// Tests the padded bounds or explicit selection without applying the iteration limit.
     pub fn is_in_view(&self, &world_coords: &WorldTileCoords) -> bool {
         if let Some(tiles) = &self.explicit_tiles {
             return tiles.contains(&world_coords);
@@ -399,6 +424,7 @@ impl ViewRegion {
             && world_coords.z == self.zoom_level
     }
 
+    /// Yields up to the configured limit, in explicit selection order or column-major grid order.
     pub fn iter(&self) -> Box<dyn Iterator<Item = WorldTileCoords> + '_> {
         if let Some(tiles) = &self.explicit_tiles {
             return Box::new(tiles.iter().copied().take(self.max_n_tiles));

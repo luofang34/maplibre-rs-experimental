@@ -1,15 +1,17 @@
 //! Canonical and wrapped tile coordinates and their map-space transforms.
 use super::*;
 
-/// Within each tile there is a separate coordinate system. Usually this coordinate system is
-/// within [`EXTENT`]. Therefore, `x` and `y` must be within the bounds of [`EXTENT`].
+/// Tile-local coordinates, where [`EXTENT`] spans one tile edge.
+/// Buffered geometry may extend beyond the tile boundary.
 ///
 /// # Coordinate System Origin
 ///
 /// The origin is in the upper-left corner.
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub struct InnerCoords {
+    /// Horizontal distance from the tile's left edge in tile-local units.
     pub x: f64,
+    /// Vertical distance from the tile's top edge in tile-local units.
     pub y: f64,
 }
 
@@ -21,15 +23,18 @@ pub struct InnerCoords {
 /// For Web Mercator the origin of the coordinate system is in the upper-left corner.
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, Default)]
 pub struct TileCoords {
+    /// Column index, increasing eastward; construction does not validate the grid bounds.
     pub x: u32,
+    /// Row index; its origin is selected by [`TileAddressingScheme`] during conversion.
     pub y: u32,
+    /// Discrete tile-grid level.
     pub z: ZoomLevel,
 }
 
 impl TileCoords {
     /// Transforms the tile coordinates as defined by the tile grid addressing scheme into a
     /// representation which is used in the 3d-world.
-    /// This is not possible if the coordinates of this [`TileCoords`] exceed their bounds.
+    /// Returns `None` if the level is unsupported or either index is outside `0..2^z`.
     ///
     /// # Example
     /// The [`TileCoords`] `T(x=5,y=5,z=0)` exceeds its bounds because there is no tile
@@ -83,14 +88,17 @@ impl From<(u32, u32, ZoomLevel)> for TileCoords {
 )]
 #[repr(C)]
 pub struct WorldTileCoords {
+    /// Column index increasing eastward; negative values can represent wrapped worlds.
     pub x: i32,
+    /// Row index increasing southward from the northern Mercator boundary.
     pub y: i32,
+    /// Discrete tile-grid level; construction does not validate its range.
     pub z: ZoomLevel,
 }
 
 impl WorldTileCoords {
     /// Returns the tile coords according to an addressing scheme. This is not possible if the
-    /// coordinates of this [`WorldTileCoords`] exceed their bounds.
+    /// level is unsupported or either index lies outside `0..2^z`; wrapped tiles are rejected.
     ///
     /// # Example
     ///
@@ -115,7 +123,8 @@ impl WorldTileCoords {
         })
     }
 
-    /// Adopted from
+    /// Maps tile-local x/y units to world pixels at `zoom`, leaving the z coordinate unchanged.
+    /// Based on
     /// [Transform::calculatePosMatrix](https://github.com/maplibre/maplibre-gl-js/blob/80e232a64716779bfff841dbc18fddc1f51535ad/src/geo/transform.ts#L719-L731)
     #[tracing::instrument(skip_all)]
     pub fn transform_for_zoom(&self, zoom: Zoom) -> Matrix4<f64> {
@@ -142,6 +151,7 @@ impl WorldTileCoords {
         translate * normalize_and_scale
     }
 
+    /// Floors both indices to the even-indexed anchor of a containing 2-by-2 tile block.
     pub fn into_aligned(self) -> AlignedWorldTileCoords {
         AlignedWorldTileCoords(WorldTileCoords {
             x: div_floor(self.x, 2) * 2,
@@ -150,7 +160,8 @@ impl WorldTileCoords {
         })
     }
 
-    /// Adopted from [tilebelt](https://github.com/mapbox/tilebelt)
+    /// Builds a key from least-significant coordinate bits first, or `None` outside the grid.
+    /// Quadrant encoding follows [tilebelt](https://github.com/mapbox/tilebelt).
     pub fn build_quad_key(&self) -> Option<Quadkey> {
         let bounds = *ZOOM_BOUNDS.get(self.z.0 as usize)?;
         let x = self.x as u32;
@@ -178,7 +189,9 @@ impl WorldTileCoords {
         Some(Quadkey(key))
     }
 
-    /// Adopted from [tilebelt](https://github.com/mapbox/tilebelt)
+    /// Returns children clockwise from the upper left, without clipping to canonical bounds.
+    /// Callers must leave room in the signed indices and zoom level for doubling and incrementing.
+    /// Child ordering follows [tilebelt](https://github.com/mapbox/tilebelt).
     pub fn get_children(&self) -> [WorldTileCoords; 4] {
         [
             WorldTileCoords {
@@ -242,21 +255,20 @@ impl From<(i32, i32, ZoomLevel)> for WorldTileCoords {
     }
 }
 
-/// An aligned world tile coordinate aligns a world coordinate at a 4x4 tile raster within the
-/// world. The aligned coordinates is defined by the coordinates of the upper left tile in the 4x4
-/// tile raster divided by 2 and rounding to the ceiling.
-///
-///
-/// # Coordinate System Origin
-///
-/// The origin of the coordinate system is in the upper-left corner.
-pub struct AlignedWorldTileCoords(pub WorldTileCoords);
+/// Upper-left anchor of a 2-by-2 tile block with x eastward and y southward.
+/// [`WorldTileCoords::into_aligned`] supplies even indices; direct construction is unchecked.
+pub struct AlignedWorldTileCoords(
+    /// Anchor at the block's tile-grid level, with space for a neighbor at each index plus one.
+    pub WorldTileCoords,
+);
 
 impl AlignedWorldTileCoords {
+    /// Returns the stored upper-left anchor.
     pub fn upper_left(self) -> WorldTileCoords {
         self.0
     }
 
+    /// Returns the tile immediately east of the anchor.
     pub fn upper_right(&self) -> WorldTileCoords {
         WorldTileCoords {
             x: self.0.x + 1,
@@ -265,6 +277,7 @@ impl AlignedWorldTileCoords {
         }
     }
 
+    /// Returns the tile immediately south of the anchor.
     pub fn lower_left(&self) -> WorldTileCoords {
         WorldTileCoords {
             x: self.0.x,
@@ -273,6 +286,7 @@ impl AlignedWorldTileCoords {
         }
     }
 
+    /// Returns the tile one column east and one row south of the anchor.
     pub fn lower_right(&self) -> WorldTileCoords {
         WorldTileCoords {
             x: self.0.x + 1,
