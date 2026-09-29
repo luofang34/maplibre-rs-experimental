@@ -1,19 +1,21 @@
-//! Vector tile data utilities.
+//! Named vector, image, elevation and GeoJSON source definitions.
 
 use serde::{Deserialize, Serialize};
 
-/// String url to a tile.
+/// Tile URL template, which may contain `{z}`, `{x}` and `{y}` placeholders.
 pub type TileUrl = String;
 
-/// String url to a JSON tile.
+/// URL of a TileJSON metadata document, distinct from an individual tile URL.
 pub type TileJSONUrl = String;
 
 /// Tiles can be positioned using either the xyz coordinates or the TMS (Tile Map Service) protocol.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TileAddressingScheme {
+    /// Rows start at the north edge of the world.
     #[serde(rename = "xyz")]
     #[default]
     XYZ,
+    /// Rows start at the south edge; the tile loader flips the Y coordinate.
     #[serde(rename = "tms")]
     TMS,
 }
@@ -22,27 +24,33 @@ pub enum TileAddressingScheme {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(untagged)]
 pub enum GeoJsonData {
+    /// Address of a GeoJSON document.
     Url(String),
+    /// Embedded feature, feature collection or geometry JSON.
     Inline(serde_json::Value),
 }
 
-/// Source properties for a GeoJSON source.
+/// GeoJSON source declaration; the tile loader does not automatically fetch or tile it.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct GeoJsonSource {
+    /// Embedded geometry or a document URL for the host to load.
     pub data: GeoJsonData,
+    /// Declared upper source zoom, retained for host-managed processing.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub maxzoom: Option<u8>,
+    /// Declared lower source zoom, retained for host-managed processing.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub minzoom: Option<u8>,
 }
 
-/// Source properties for tiles or rasters.
+/// TileJSON-compatible addressing shared by vector and raster image sources.
+/// Raster sources additionally use `tile_size` to choose their visible tile zoom.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct VectorSource {
     /// String which contains attribution information for the used tiles.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attribution: Option<String>,
-    /// The bounds in which tiles are available.
+    /// Declared availability bounds as `(west, south, east, north)` in geographic degrees.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bounds: Option<(f64, f64, f64, f64)>,
     /// Max zoom level at which tiles are available.
@@ -51,7 +59,7 @@ pub struct VectorSource {
     /// Min zoom level at which tiles are available.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub minzoom: Option<u8>,
-    // TODO: promoteId
+    /// Y-axis convention for tile URL expansion; omission uses XYZ.
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scheme: Option<TileAddressingScheme>,
@@ -64,10 +72,9 @@ pub struct VectorSource {
     /// URL of a TileJSON document that supplies the tile URLs and zoom range.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<TileJSONUrl>,
-    // TODO volatile
 }
 
-/// How elevation is packed into the RGB channels of a `raster-dem` tile.
+/// How elevation in meters is packed into 8-bit RGB channels of a `raster-dem` tile.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DemEncoding {
     /// Mapbox Terrain-RGB: `(R * 256 * 256 + G * 256 + B) / 10 - 10000`.
@@ -88,7 +95,7 @@ pub struct RasterDemSource {
     /// String which contains attribution information for the used tiles.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attribution: Option<String>,
-    /// The bounds in which tiles are available.
+    /// Declared availability bounds as `(west, south, east, north)` in geographic degrees.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bounds: Option<(f64, f64, f64, f64)>,
     /// Max zoom level at which tiles are available.
@@ -103,7 +110,7 @@ pub struct RasterDemSource {
     /// URL of a TileJSON document that supplies the tile URLs and zoom range.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<TileJSONUrl>,
-    /// Edge length of one tile in pixels.
+    /// Nominal tile size in pixels used for zoom selection; omission defaults to 512.
     #[serde(rename = "tileSize", default = "default_dem_tile_size")]
     pub tile_size: u32,
     /// Elevation packing of the tile pixels.
@@ -148,15 +155,20 @@ impl RasterDemSource {
     }
 }
 
+/// Data source selected by the JSON `type` field.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type")]
 pub enum Source {
+    /// Vector tile geometry and feature properties.
     #[serde(rename = "vector")]
     Vector(VectorSource),
+    /// Raster image tiles, using the same URL and TileJSON fields as vector sources.
     #[serde(rename = "raster")]
-    Raster(VectorSource), // FIXME: Does it make sense that a raster have a VectorSource?
+    Raster(VectorSource),
+    /// Packed elevation images consumed by terrain, hillshade and relief rendering.
     #[serde(rename = "raster-dem")]
     RasterDem(RasterDemSource),
+    /// GeoJSON features declared inline or by document URL.
     #[serde(rename = "geojson")]
     GeoJson(GeoJsonSource),
 }

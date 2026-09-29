@@ -1,4 +1,4 @@
-//! Vector tile layer drawing utilities.
+//! Layer identity, visibility and typed paint properties.
 
 use std::{
     collections::HashMap,
@@ -23,24 +23,32 @@ pub use paint::{
 };
 pub use serialization::LayerProperties;
 
-/// The different types of paints.
+/// Typed properties selected by a style layer's rendering type.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type", content = "paint")]
 pub enum LayerPaint {
+    /// Background color beneath source-backed layers.
     #[serde(rename = "background")]
     Background(BackgroundPaint),
+    /// Stroked paths with width, opacity, translation and dash properties.
     #[serde(rename = "line")]
     Line(LinePaint),
+    /// Filled polygon color, opacity and translation.
     #[serde(rename = "fill")]
     Fill(FillPaint),
+    /// Image sampling and adjustment properties retained from the style.
     #[serde(rename = "raster")]
     Raster(RasterPaint),
+    /// Elevation-dependent illumination and shadow colors.
     #[serde(rename = "hillshade")]
     Hillshade(HillshadePaint),
+    /// Color ramp evaluated against decoded elevation.
     #[serde(rename = "color-relief")]
     ColorRelief(ColorReliefPaint),
+    /// Text and icon appearance and layout properties.
     #[serde(rename = "symbol")]
     Symbol(SymbolPaint),
+    /// Point radius, fill, stroke and alignment properties.
     #[serde(rename = "circle")]
     Circle(CirclePaint),
 }
@@ -60,40 +68,22 @@ impl LayerPaint {
         }
     }
 
+    /// Returns a constant base color in encoded sRGB with straight alpha.
+    /// Expressions, absent colors and paint families without one base color return `None`.
+    /// Layer opacity is not multiplied into this value.
     pub fn get_color(&self) -> Option<Alpha<EncodedSrgb<f32>>> {
-        match self {
-            LayerPaint::Background(paint) => paint.background_color.as_ref().and_then(|property| {
-                if let StyleProperty::Constant(color) = property {
-                    Some(color.clone().into())
-                } else {
-                    None // Expression types have no single static color
-                }
-            }),
-            LayerPaint::Line(paint) => paint.line_color.as_ref().and_then(|property| {
-                if let StyleProperty::Constant(color) = property {
-                    Some(color.clone().into())
-                } else {
-                    None
-                }
-            }),
-            LayerPaint::Fill(paint) => paint.fill_color.as_ref().and_then(|property| {
-                if let StyleProperty::Constant(color) = property {
-                    Some(color.clone().into())
-                } else {
-                    None
-                }
-            }),
-            LayerPaint::Circle(paint) => paint.circle_color.as_ref().and_then(|property| {
-                if let StyleProperty::Constant(color) = property {
-                    Some(color.clone().into())
-                } else {
-                    None
-                }
-            }),
-            LayerPaint::Raster(_)
-            | LayerPaint::Hillshade(_)
-            | LayerPaint::ColorRelief(_)
-            | LayerPaint::Symbol(_) => None,
+        let property = match self {
+            Self::Background(paint) => &paint.background_color,
+            Self::Line(paint) => &paint.line_color,
+            Self::Fill(paint) => &paint.fill_color,
+            Self::Circle(paint) => &paint.circle_color,
+            Self::Raster(_) | Self::Hillshade(_) | Self::ColorRelief(_) | Self::Symbol(_) => {
+                return None
+            }
+        };
+        match property.as_ref()? {
+            StyleProperty::Constant(color) => Some(color.clone().into()),
+            _ => None,
         }
     }
 }

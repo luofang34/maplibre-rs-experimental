@@ -1,9 +1,13 @@
+//! Typed paint fields and symbol layout values retained by layer serialization.
+
 use super::{StyleProperty, TextField};
 use csscolorparser::Color;
 use serde::{Deserialize, Serialize};
 
+/// Base background color; properties outside this model are retained by layer serialization.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct BackgroundPaint {
+    /// Background color property; rendering supports constant colors.
     #[serde(rename = "background-color")]
     #[serde(
         default,
@@ -25,8 +29,10 @@ pub enum TranslateAnchor {
     Viewport,
 }
 
+/// Polygon appearance; absent fields defer to the rendering path's defaults.
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct FillPaint {
+    /// Per-feature fill color property, before multiplying layer opacity.
     #[serde(rename = "fill-color")]
     #[serde(
         default,
@@ -48,11 +54,12 @@ pub struct FillPaint {
     /// Coordinate frame for `fill_translate`.
     #[serde(rename = "fill-translate-anchor", default)]
     pub fill_translate_anchor: TranslateAnchor,
-    // TODO a lot
 }
 
+/// Path appearance with widths and translations expressed in screen pixels.
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct LinePaint {
+    /// Per-feature stroke color property, before multiplying layer opacity.
     #[serde(rename = "line-color")]
     #[serde(
         default,
@@ -61,6 +68,7 @@ pub struct LinePaint {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub line_color: Option<StyleProperty<Color>>,
 
+    /// Stroke width in screen pixels, evaluated at the current zoom.
     #[serde(rename = "line-width")]
     #[serde(
         default,
@@ -88,41 +96,53 @@ pub struct LinePaint {
         skip_serializing_if = "Option::is_none"
     )]
     pub line_dasharray: Option<serde_json::Value>,
-    // TODO a lot
 }
 
+/// Requested raster texture filter; validation reports unsupported sampling modes.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum RasterResampling {
+    /// Interpolates neighboring texels.
     #[serde(rename = "linear")]
     Linear,
+    /// Selects the nearest texel without interpolation.
     #[serde(rename = "nearest")]
     Nearest,
 }
 
-/// Raster tile layer description
+/// Raster image adjustments retained for serialization and validation.
+/// Rendering supports only neutral adjustments and linear sampling; [`crate::style::Style::validate`]
+/// reports non-neutral values. `Default` sets neutral values and disables fading.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct RasterPaint {
+    /// Upper brightness mapping bound in 0..=1; the neutral value is 1.
     #[serde(rename = "raster-brightness-max")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raster_brightness_max: Option<f32>,
+    /// Lower brightness mapping bound in 0..=1; the neutral value is 0.
     #[serde(rename = "raster-brightness-min")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raster_brightness_min: Option<f32>,
+    /// Contrast adjustment in -1..=1; zero preserves the source contrast.
     #[serde(rename = "raster-contrast")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raster_contrast: Option<f32>,
+    /// Requested tile fade duration in milliseconds; zero disables fading.
     #[serde(rename = "raster-fade-duration")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raster_fade_duration: Option<u32>,
+    /// Requested hue rotation in degrees; zero preserves source colors.
     #[serde(rename = "raster-hue-rotate")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raster_hue_rotate: Option<f32>,
+    /// Layer alpha multiplier in 0..=1; one preserves source alpha.
     #[serde(rename = "raster-opacity")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raster_opacity: Option<f32>,
+    /// Requested texture filter; omission and the renderer default use linear sampling.
     #[serde(rename = "raster-resampling")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raster_resampling: Option<RasterResampling>,
+    /// Saturation adjustment in -1..=1; zero preserves source saturation.
     #[serde(rename = "raster-saturation")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raster_saturation: Option<f32>,
@@ -143,6 +163,7 @@ impl Default for RasterPaint {
     }
 }
 
+/// Typed text properties and additional text/icon paint and layout values.
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct SymbolPaint {
     /// Text of each symbol: a `{token}` template, a literal, or an expression; `None` draws
@@ -155,6 +176,7 @@ pub struct SymbolPaint {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text_field: Option<StyleProperty<TextField>>,
 
+    /// Text em size in screen pixels, evaluated for each feature and zoom.
     #[serde(rename = "text-size")]
     #[serde(
         default,
@@ -162,7 +184,6 @@ pub struct SymbolPaint {
     )]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text_size: Option<StyleProperty<f32>>,
-    // TODO a lot
     /// Symbol paint and layout properties evaluated during placement.
     #[serde(flatten)]
     pub properties: serde_json::Map<String, serde_json::Value>,

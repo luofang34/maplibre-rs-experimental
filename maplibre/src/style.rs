@@ -1,27 +1,10 @@
-//! Vector tile format styling.
+//! Map style documents, layer properties and source configuration.
 
-// ----------------------
-// Demotiles
-// ----------------------
+#![deny(missing_docs)]
 
-// use std::collections::HashMap;
-
-// pub use cint::*;
-// use serde::{Deserialize, Serialize};
-
-// use crate::style::{layer::StyleLayer, source::Source};
-
-// pub mod layer;
-// pub mod source;
-
-// ----------------------
-// Use manual styel
-// ----------------------
-
-use std::{collections::HashMap, str::FromStr};
+use std::collections::HashMap;
 
 pub use cint::*;
-use csscolorparser::Color;
 use serde::{Deserialize, Serialize};
 
 pub mod circle;
@@ -39,25 +22,25 @@ pub mod validation;
 
 use crate::{
     projection::ProjectionSpecification,
-    style::{
-        layer::{
-            BackgroundPaint, FillPaint, LayerPaint, LinePaint, RasterPaint, StyleLayer,
-            StyleProperty, SymbolPaint,
-        },
-        source::Source,
-    },
+    style::{layer::StyleLayer, source::Source},
 };
 
-/// Stores the style for a multi-layered map.
+/// Ordered layers, named data sources and initial view settings from a style document.
+/// [`Self::validate`] checks layer rendering capabilities, not all style-spec constraints.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Style {
+    /// Style specification version, normally 8; deserialization does not validate the version.
     pub version: u16,
+    /// Human-readable document name with no rendering effect.
     #[serde(default)]
     pub name: Option<String>,
+    /// Application-defined JSON properties retained without changing rendering.
     #[serde(default)]
     pub metadata: HashMap<String, serde_json::Value>,
+    /// Data sources keyed by the identifiers referenced by layers and terrain.
     #[serde(default)]
     pub sources: HashMap<String, Source>,
+    /// Painter order from bottom to top; deserialization assigns zero-based layer indices.
     #[serde(deserialize_with = "layer_order::deserialize_layers")]
     pub layers: Vec<StyleLayer>,
     /// URL template for font glyph ranges.
@@ -66,408 +49,32 @@ pub struct Style {
     /// Sprite URL or named sprite sources.
     #[serde(default)]
     pub sprite: Option<serde_json::Value>,
-    pub center: Option<[f64; 2]>, // TODO: Use LatLon type here
+    /// Initial `[longitude, latitude]` in degrees, before host camera overrides.
+    pub center: Option<[f64; 2]>,
+    /// Initial continuous camera zoom, before host overrides.
     pub zoom: Option<f64>,
+    /// Initial clockwise rotation from north in degrees.
     pub bearing: Option<f64>,
+    /// Initial camera tilt from the map normal in degrees, clamped by the camera pitch limit.
     pub pitch: Option<f64>,
     /// Roll of the view about its axis in degrees, as the GL JS `roll` map option.
     pub roll: Option<f64>,
+    /// Map projection and its parameters; omission uses the renderer's default projection.
     #[serde(default)]
     pub projection: Option<ProjectionSpecification>,
+    /// Lighting parameters used by style-driven shading.
     #[serde(default)]
     pub light: Option<light::LightSpecification>,
+    /// Sky and atmosphere appearance; omission leaves the sky layer disabled.
     #[serde(default)]
     pub sky: Option<sky::SkySpecification>,
+    /// Elevation source and vertical exaggeration; omission renders without terrain.
     #[serde(default)]
     pub terrain: Option<terrain::TerrainSpecification>,
 }
 
-/// Default style for https://openmaptiles.org/schema/
-impl Default for Style {
-    fn default() -> Self {
-        // ----------------------
-        // Demotiles
-        // ----------------------
-
-        // let mut style: Style = serde_json::from_str(include_str!("../../res/demotiles.json"))
-        //     .expect("Failed to parse default demotiles.json style");
-
-        // // Ensure layers have sequential Z-indices
-        // for (i, layer) in style.layers.iter_mut().enumerate() {
-        //     layer.index = i as u32;
-        // }
-
-        // style
-
-        // ----------------------
-        // Use manual styel
-        // ----------------------
-
-        Style {
-            version: 8,
-            glyphs: None,
-            sprite: None,
-            name: Some("Default Style".to_string()),
-            metadata: Default::default(),
-            sources: Default::default(),
-            center: Some([50.85045, 4.34878]),
-            bearing: Some(0.0),
-            pitch: Some(0.0),
-            roll: Some(0.0),
-            projection: None,
-            light: None,
-            sky: None,
-            terrain: None,
-            zoom: Some(13.0),
-            layers: vec![
-                StyleLayer {
-                    index: 0,
-                    id: "background".to_string(),
-                    type_: "background".to_string(),
-                    filter: None,
-                    maxzoom: None,
-                    minzoom: None,
-                    metadata: None,
-                    paint: Some(LayerPaint::Background(BackgroundPaint {
-                        background_color: Some(StyleProperty::Constant(
-                            Color::from_str("#ffffff").unwrap(),
-                        )),
-                    })),
-                    source: None,
-                    source_layer: None,
-                    visibility: Default::default(),
-                    unrecognized: Default::default(),
-                },
-                StyleLayer {
-                    index: 1,
-                    id: "park".to_string(),
-                    type_: "fill".to_string(),
-                    filter: None,
-                    maxzoom: None,
-                    minzoom: None,
-                    metadata: None,
-                    paint: Some(LayerPaint::Fill(FillPaint {
-                        fill_color: Some(StyleProperty::Constant(
-                            Color::from_str("#c8facc").unwrap(),
-                        )),
-                        ..FillPaint::default()
-                    })),
-                    source: None,
-                    source_layer: Some("park".to_string()),
-                    visibility: Default::default(),
-                    unrecognized: Default::default(),
-                },
-                StyleLayer {
-                    index: 2,
-                    id: "landuse".to_string(),
-                    type_: "fill".to_string(),
-                    filter: None,
-                    maxzoom: None,
-                    minzoom: None,
-                    metadata: None,
-                    paint: Some(LayerPaint::Fill(FillPaint {
-                        fill_color: Some(StyleProperty::Constant(
-                            Color::from_str("#e0dfdf").unwrap(),
-                        )),
-                        ..FillPaint::default()
-                    })),
-                    source: None,
-                    source_layer: Some("landuse".to_string()),
-                    visibility: Default::default(),
-                    unrecognized: Default::default(),
-                },
-                StyleLayer {
-                    index: 3,
-                    id: "landcover".to_string(),
-                    type_: "fill".to_string(),
-                    filter: None,
-                    maxzoom: None,
-                    minzoom: None,
-                    metadata: None,
-                    paint: Some(LayerPaint::Fill(FillPaint {
-                        fill_color: Some(StyleProperty::Constant(
-                            Color::from_str("#aedfa3").unwrap(),
-                        )),
-                        ..FillPaint::default()
-                    })),
-                    source: None,
-                    source_layer: Some("landcover".to_string()),
-                    visibility: Default::default(),
-                    unrecognized: Default::default(),
-                },
-                StyleLayer {
-                    index: 4,
-                    id: "transportation".to_string(),
-                    type_: "line".to_string(),
-                    filter: None,
-                    maxzoom: None,
-                    minzoom: None,
-                    metadata: None,
-                    paint: Some(LayerPaint::Line(LinePaint {
-                        line_color: Some(StyleProperty::Constant(
-                            Color::from_str("#ffffff").unwrap(),
-                        )),
-                        line_width: None,
-                        ..LinePaint::default()
-                    })),
-                    source: None,
-                    source_layer: Some("transportation".to_string()),
-                    visibility: Default::default(),
-                    unrecognized: Default::default(),
-                },
-                StyleLayer {
-                    index: 5,
-                    id: "building".to_string(),
-                    type_: "fill".to_string(),
-                    filter: None,
-                    maxzoom: None,
-                    minzoom: None,
-                    metadata: None,
-                    paint: Some(LayerPaint::Fill(FillPaint {
-                        fill_color: Some(StyleProperty::Constant(
-                            Color::from_str("#d9d0c9").unwrap(),
-                        )),
-                        ..FillPaint::default()
-                    })),
-                    source: None,
-                    source_layer: Some("building".to_string()),
-                    visibility: Default::default(),
-                    unrecognized: Default::default(),
-                },
-                StyleLayer {
-                    index: 6,
-                    id: "water".to_string(),
-                    type_: "fill".to_string(),
-                    filter: None,
-                    maxzoom: None,
-                    minzoom: None,
-                    metadata: None,
-                    paint: Some(LayerPaint::Fill(FillPaint {
-                        fill_color: Some(StyleProperty::Constant(
-                            Color::from_str("#aad3df").unwrap(),
-                        )),
-                        ..FillPaint::default()
-                    })),
-                    source: None,
-                    source_layer: Some("water".to_string()),
-                    visibility: Default::default(),
-                    unrecognized: Default::default(),
-                },
-                StyleLayer {
-                    index: 7,
-                    id: "waterway".to_string(),
-                    type_: "fill".to_string(),
-                    filter: None,
-                    maxzoom: None,
-                    minzoom: None,
-                    metadata: None,
-                    paint: Some(LayerPaint::Fill(FillPaint {
-                        fill_color: Some(StyleProperty::Constant(
-                            Color::from_str("#aad3df").unwrap(),
-                        )),
-                        ..FillPaint::default()
-                    })),
-                    source: None,
-                    source_layer: Some("waterway".to_string()),
-                    visibility: Default::default(),
-                    unrecognized: Default::default(),
-                },
-                StyleLayer {
-                    index: 8,
-                    id: "boundary".to_string(),
-                    type_: "line".to_string(),
-                    filter: None,
-                    maxzoom: None,
-                    minzoom: None,
-                    metadata: None,
-                    paint: Some(LayerPaint::Line(LinePaint {
-                        line_color: Some(StyleProperty::Constant(
-                            Color::from_str("black").unwrap(),
-                        )),
-                        line_width: None,
-                        ..LinePaint::default()
-                    })),
-                    source: None,
-                    source_layer: Some("boundary".to_string()),
-                    visibility: Default::default(),
-                    unrecognized: Default::default(),
-                },
-                StyleLayer {
-                    index: 9,
-                    id: "raster".to_string(),
-                    type_: "raster".to_string(),
-                    filter: None,
-                    maxzoom: None,
-                    minzoom: None,
-                    metadata: None,
-                    paint: Some(LayerPaint::Raster(RasterPaint::default())),
-                    source: None,
-                    source_layer: None,
-                    visibility: Default::default(),
-                    unrecognized: Default::default(),
-                },
-                StyleLayer {
-                    index: 10,
-                    id: "text".to_string(),
-                    type_: "symbol".to_string(),
-                    filter: None,
-                    maxzoom: None,
-                    minzoom: None,
-                    metadata: None,
-                    paint: Some(LayerPaint::Symbol(SymbolPaint {
-                        text_field: Some(StyleProperty::parse(&serde_json::json!("{name}"))),
-                        text_size: None,
-                        ..Default::default()
-                    })),
-                    source: None,
-                    source_layer: Some("place".to_string()),
-                    visibility: Default::default(),
-                    unrecognized: Default::default(),
-                },
-                StyleLayer {
-                    index: 11,
-                    id: "transportation_name".to_string(),
-                    type_: "symbol".to_string(),
-                    filter: None,
-                    maxzoom: None,
-                    minzoom: None,
-                    metadata: None,
-                    paint: Some(LayerPaint::Symbol(SymbolPaint {
-                        text_field: Some(StyleProperty::parse(&serde_json::json!("{name}"))),
-                        text_size: None,
-                        ..Default::default()
-                    })),
-                    source: None,
-                    source_layer: Some("transportation_name-disabled".to_string()),
-                    visibility: Default::default(),
-                    unrecognized: Default::default(),
-                },
-            ],
-        }
-    }
-}
+mod default_style;
+mod layer_order;
 
 #[cfg(test)]
-mod tests {
-    #![allow(clippy::expect_used)]
-
-    use super::*;
-
-    #[test]
-    fn the_roll_of_the_view_is_read_from_the_style() {
-        let style: Style = serde_json::from_value(serde_json::json!({
-            "version": 8, "sources": {}, "layers": [], "bearing": 30, "pitch": 40, "roll": 15
-        }))
-        .expect("style parses");
-        assert_eq!(style.roll, Some(15.0));
-        let plain: Style =
-            serde_json::from_value(serde_json::json!({"version": 8, "sources": {}, "layers": []}))
-                .expect("style parses");
-        assert_eq!(plain.roll, None);
-    }
-
-    #[test]
-    fn test_reading() {
-        // language=JSON
-        let style_json_str = r##"
-        {
-          "version": 8,
-          "name": "Test Style",
-          "metadata": {},
-          "sources": {
-            "openmaptiles": {
-              "type": "vector",
-              "url": "https://maps.tuerantuer.org/europe_germany/tiles.json"
-            }
-          },
-          "layers": [
-            {
-              "id": "background",
-              "type": "background",
-              "paint": {"background-color": "rgb(239,239,239)"}
-            },
-            {
-              "id": "transportation",
-              "type": "line",
-              "source": "openmaptiles",
-              "source-layer": "transportation",
-              "paint": {
-                "line-color": "#3D3D3D"
-              }
-            },
-            {
-              "id": "boundary",
-              "type": "line",
-              "source": "openmaptiles",
-              "source-layer": "boundary",
-              "paint": {
-                "line-color": "#3D3D3D"
-              }
-            },
-            {
-              "id": "building",
-              "minzoom": 14,
-              "maxzoom": 15,
-              "type": "fill",
-              "source": "openmaptiles",
-              "source-layer": "building",
-              "paint": {
-                "line-color": "#3D3D3D"
-              }
-            }
-          ]
-        }
-        "##;
-
-        let _style: Style = serde_json::from_str(style_json_str).unwrap();
-    }
-
-    #[test]
-    fn test_style_roundtrip_serde() {
-        // Test that the default style can serialize and deserialize (required for web worker Input)
-        let style = Style::default();
-        let json = serde_json::to_string(&style).unwrap();
-        let roundtripped: Style = serde_json::from_str(&json).unwrap();
-        assert_eq!(style.layers.len(), roundtripped.layers.len());
-        for (orig, rt) in style.layers.iter().zip(roundtripped.layers.iter()) {
-            assert_eq!(orig.id, rt.id, "layer ids must match after round-trip");
-            assert_eq!(
-                orig.type_, rt.type_,
-                "layer types must match after round-trip for {}",
-                orig.id
-            );
-        }
-    }
-
-    #[test]
-    fn parses_the_gl_js_3d_terrain_example() {
-        // language=JSON
-        let style_json_str = r##"
-        {
-          "version": 8,
-          "sources": {
-            "osm": {"type": "raster", "tiles": ["https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"], "tileSize": 256, "maxzoom": 19},
-            "terrainSource": {"type": "raster-dem", "url": "https://demotiles.maplibre.org/terrain-tiles/tiles.json", "tileSize": 256},
-            "hillshadeSource": {"type": "raster-dem", "url": "https://demotiles.maplibre.org/terrain-tiles/tiles.json", "tileSize": 256}
-          },
-          "layers": [
-            {"id": "osm", "type": "raster", "source": "osm"},
-            {"id": "hills", "type": "hillshade", "source": "hillshadeSource", "paint": {"hillshade-shadow-color": "#473B24"}}
-          ],
-          "terrain": {"source": "terrainSource", "exaggeration": 1},
-          "sky": {}
-        }
-        "##;
-        let style: Style = serde_json::from_str(style_json_str).unwrap();
-
-        let terrain = style.terrain.expect("terrain root property");
-        assert_eq!(terrain.source, "terrainSource");
-        assert_eq!(terrain.exaggeration, 1.0);
-        match style.sources.get("terrainSource") {
-            Some(Source::RasterDem(source)) => assert_eq!(source.tile_size, 256),
-            other => panic!("expected raster-dem source, got {other:?}"),
-        }
-    }
-}
-
-mod layer_order;
+mod tests;
