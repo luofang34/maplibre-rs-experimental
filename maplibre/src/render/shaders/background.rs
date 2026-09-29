@@ -11,21 +11,26 @@ use crate::{
     style::light::{LightError, LightSpecification},
 };
 
+/// Background color, painter index and viewport horizon supplied per draw.
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 pub struct BackgroundLayerMetadata {
+    /// Encoded-sRGB background color with straight alpha.
     pub color: [f32; 4],
+    /// Style painter-order index carried by the instance layout.
     pub z_index: f32,
     /// Keeps the horizon sixteen-byte aligned.
     pub padding: [f32; 3],
     /// Horizon point in screen pixels with y up, then the unit normal pointing into the sky;
     /// the flat map ends there, as the tiles GL JS draws the background on do.
     pub horizon: [f32; 4],
-    /// Viewport height in pixels.
+    /// Viewport height in X, terrain-enabled flag in Y, then two unused components.
     pub viewport: [f32; 4],
 }
 
+/// Fullscreen background clipped to the flat map's horizon.
 pub struct BackgroundShader {
+    /// Format of the color attachment receiving the background.
     pub format: wgpu::TextureFormat,
 }
 

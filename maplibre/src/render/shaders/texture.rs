@@ -73,7 +73,9 @@ pub fn tile_texture_vertex_buffers() -> Vec<VertexBufferLayout> {
     ]
 }
 
+/// Raster tile shader using subdivided tile meshes and image sampling.
 pub struct RasterShader {
+    /// Format of the color attachment used by the render pipeline.
     pub format: wgpu::TextureFormat,
 }
 

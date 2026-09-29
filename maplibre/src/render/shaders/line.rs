@@ -4,7 +4,9 @@ use super::{
 };
 use crate::render::resource::{FragmentState, VertexBufferLayout, VertexState};
 
+/// Stroked-path shader with screen-pixel width and optional terrain-relative elevation.
 pub struct LineShader {
+    /// Format of the color attachment used by the render pipeline.
     pub format: wgpu::TextureFormat,
 }
 

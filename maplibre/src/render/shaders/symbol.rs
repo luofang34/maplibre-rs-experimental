@@ -1,7 +1,9 @@
 //! Symbol pipeline vertex buffers and premultiplied color blending.
 use super::*;
 
+/// Text and icon shader with atlas sampling, collision opacity and terrain occlusion.
 pub struct SymbolShader {
+    /// Format of the color attachment used by the render pipeline.
     pub format: wgpu::TextureFormat,
 }
 

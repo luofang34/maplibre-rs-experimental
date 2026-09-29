@@ -19,17 +19,11 @@ fn main(
     @location(9) zoom_factor: f32,
     @location(10) z_index: f32,
     @location(15) layer_translate: vec2<f32>,
-    @builtin(instance_index) instance_idx: u32 // instance_index is used when we have multiple instances of the same "object"
 ) -> VertexOutput {
     // Tile-space z is elevation in metres; fills sit on the surface and take their
     // draw order from the clip depth written below.
     let z = 0.0;
     let width = 3.0 * zoom_factor;
-
-    // The following code moves all "invisible" vertices to (0, 0, 0)
-    //if (color.w == 0.0) {
-    //   return VertexOutput(color, vec4<f32>(0.0, 0.0, 0.0, 1.0));
-    //}
 
     let projected = project_tile_position(
         vec3<f32>(position + layer_translate + normal * width, z),

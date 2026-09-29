@@ -32,7 +32,6 @@ fn main(
 ) -> VertexOutput {
     let normal = path.xy;
     let line_width_px = line_width * line_scale.x;
-    let blur = 0.0;
     let gapwidth = 0.0;
 
     let halfwidth = line_width_px * 0.5;

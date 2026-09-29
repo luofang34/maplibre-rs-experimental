@@ -1,14 +1,3 @@
-struct ShaderCamera {
-    view_proj: mat4x4<f32>,
-    view_position: vec4<f32>,
-};
-
-struct ShaderGlobals {
-    camera: ShaderCamera,
-};
-
-@group(0) @binding(0) var<uniform> globals: ShaderGlobals;
-
 struct VertexOutput {
     @location(0) color: vec4<f32>,
     @location(1) @interpolate(flat) horizon: vec4<f32>,
@@ -36,9 +25,6 @@ fn main(
 
     let pos = positions[vertex_idx % 6u];
     
-    // Position z in vulkan normalized device coordinates mapping:
-    let z = 0.0;
-
     // Output raw clip space coordinates (identity mapping)
     var out: VertexOutput;
     

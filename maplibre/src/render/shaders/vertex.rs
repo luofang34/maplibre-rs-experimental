@@ -1,50 +1,15 @@
+//! Packed CPU records consumed by the vertex layouts of tile rendering pipelines.
+
 use super::{Mat4x4f32, Vec2f32, Vec4f32};
 use bytemuck_derive::{Pod, Zeroable};
-use cgmath::SquareMatrix;
 
-#[repr(C)]
-#[derive(Copy, Clone, Pod, Zeroable)]
-pub struct ShaderCamera {
-    view_proj: Mat4x4f32,   // 64 bytes
-    view_position: Vec4f32, // 16 bytes
-}
-
-impl ShaderCamera {
-    pub fn new(view_proj: Mat4x4f32, view_position: Vec4f32) -> Self {
-        Self {
-            view_position,
-            view_proj,
-        }
-    }
-}
-
-impl Default for ShaderCamera {
-    fn default() -> Self {
-        Self {
-            view_position: [0.0; 4],
-            view_proj: cgmath::Matrix4::identity().into(),
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Pod, Zeroable)]
-pub struct ShaderGlobals {
-    camera: ShaderCamera,
-}
-
-impl ShaderGlobals {
-    pub fn new(camera_uniform: ShaderCamera) -> Self {
-        Self {
-            camera: camera_uniform,
-        }
-    }
-}
-
+/// Tile-space geometry shared by fills, lines and circles.
 #[repr(C)]
 #[derive(Copy, Clone, Pod, Zeroable)]
 pub struct ShaderVertex {
+    /// Tile-local position in the renderer's 4096-unit grid.
     pub position: Vec2f32,
+    /// Extrusion direction for polygon/line vertices; circle vertices store radius and stroke width in pixels.
     pub normal: Vec2f32,
     /// Distance along a stroked path, in tile units.
     pub distance: f32,
@@ -53,6 +18,7 @@ pub struct ShaderVertex {
 }
 
 impl ShaderVertex {
+    /// Creates a vertex with zero path distance and the sentinel for cartographic draping.
     pub fn new(position: Vec2f32, normal: Vec2f32) -> Self {
         Self {
             position,
@@ -69,24 +35,33 @@ impl Default for ShaderVertex {
     }
 }
 
+/// Per-vertex feature color for vector geometry.
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Pod, Zeroable)]
 pub struct FillShaderFeatureMetadata {
+    /// Encoded-sRGB color with straight alpha; feature opacity is folded into alpha.
     pub color: Vec4f32,
 }
 
+/// Per-vertex collision visibility and sampled terrain height for symbols.
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Pod, Zeroable, Default)]
 pub struct SDFShaderFeatureMetadata {
+    /// Collision and fade opacity in 0..=1, repeated for the symbol's vertices.
     pub opacity: f32,
+    /// Sampled ground elevation in meters; symbol height offsets are carried in the geometry.
     pub elevation: f32,
 }
 
+/// Per-layer instance record shared across tile pipelines.
 #[repr(C)]
 #[derive(Copy, Clone, Pod, Zeroable)]
 pub struct ShaderLayerMetadata {
+    /// Style painter-order index carried by the shared instance layout.
     pub z_index: f32,
+    /// Evaluated line width in style pixels, before per-tile drape scaling.
     pub line_width: f32,
+    /// Layer translation converted to tile units in map axes.
     pub translate: Vec2f32,
     /// Circle stroke colour as straight RGBA; other layers leave it black.
     pub stroke_color: Vec4f32,
@@ -110,14 +85,21 @@ impl ShaderLayerMetadata {
     }
 }
 
+/// Per-tile instance record with projection, viewport and line scaling inputs.
 #[repr(C)]
 #[derive(Copy, Clone, Pod, Zeroable)]
 pub struct ShaderTileMetadata {
+    /// Column-major tile-to-clip transform used by the flat projection path.
     pub transform: Mat4x4f32,
+    /// Scale from view zoom to tile zoom, normally `2^(tile_zoom - view_zoom)`.
     pub zoom_factor: f32,
+    /// Render viewport width in pixels.
     pub viewport_width: f32,
+    /// Render viewport height in pixels.
     pub viewport_height: f32,
+    /// Mercator world origin in XY and per-tile-unit scales in ZW.
     pub tile_mercator_coords: Vec4f32,
+    /// One clips geometry outside the root tile at the antimeridian; zero disables clipping.
     pub clip_antimeridian: u32,
     /// Converts style pixels to pixels in an offscreen drape texture.
     pub line_width_scale: f32,
@@ -126,6 +108,8 @@ pub struct ShaderTileMetadata {
 }
 
 impl ShaderTileMetadata {
+    /// Creates root-tile metadata for a 512-pixel viewport without antimeridian clipping.
+    /// Callers drawing another tile or viewport must replace those fields before upload.
     pub fn new(transform: Mat4x4f32, zoom_factor: f32) -> Self {
         Self {
             transform,
@@ -137,27 +121,5 @@ impl ShaderTileMetadata {
             line_width_scale: 1.0,
             line_units_per_pixel: 8.0 * zoom_factor,
         }
-    }
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Pod, Zeroable)]
-pub struct ShaderTextureVertex {
-    pub position: Vec2f32,
-    pub tex_coords: Vec2f32,
-}
-
-impl ShaderTextureVertex {
-    pub fn new(position: Vec2f32, tex_coords: Vec2f32) -> Self {
-        Self {
-            position,
-            tex_coords,
-        }
-    }
-}
-
-impl Default for ShaderTextureVertex {
-    fn default() -> Self {
-        ShaderTextureVertex::new([0.0, 0.0], [0.0, 0.0])
     }
 }

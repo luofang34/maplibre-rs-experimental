@@ -4,7 +4,9 @@ use super::{
 };
 use crate::render::resource::{FragmentState, VertexBufferLayout, VertexState};
 
+/// Polygon-fill shader with premultiplied-alpha output.
 pub struct FillShader {
+    /// Format of the color attachment used by the render pipeline.
     pub format: wgpu::TextureFormat,
 }
 

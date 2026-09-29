@@ -1,4 +1,6 @@
 //! Vertex formats and shader entry points for map render passes.
+
+#![deny(missing_docs)]
 mod background;
 mod circle;
 mod fill;
@@ -23,8 +25,8 @@ pub use terrain::TerrainShader;
 pub use texture::{tile_texture_vertex_buffers, DemShader, DemShading, RasterShader};
 pub use tile_mask::TileMaskShader;
 pub use vertex::{
-    FillShaderFeatureMetadata, SDFShaderFeatureMetadata, ShaderCamera, ShaderGlobals,
-    ShaderLayerMetadata, ShaderTextureVertex, ShaderTileMetadata, ShaderVertex,
+    FillShaderFeatureMetadata, SDFShaderFeatureMetadata, ShaderLayerMetadata, ShaderTileMetadata,
+    ShaderVertex,
 };
 
 use crate::{
@@ -32,9 +34,13 @@ use crate::{
     render::resource::{FragmentState, VertexBufferLayout, VertexState},
 };
 
+/// Two-component GPU vector in tightly packed scalar order.
 pub type Vec2f32 = [f32; 2];
+/// Three-component GPU vector; world-coordinate conversion sets its third component to zero.
 pub type Vec3f32 = [f32; 3];
+/// Four-component GPU vector in tightly packed scalar order.
 pub type Vec4f32 = [f32; 4];
+/// Column-major GPU matrix, with one four-component vector per column.
 pub type Mat4x4f32 = [Vec4f32; 4];
 
 impl From<WorldCoords> for Vec3f32 {
@@ -43,8 +49,12 @@ impl From<WorldCoords> for Vec3f32 {
     }
 }
 
+/// Describes WGSL stages and their vertex, attachment and blend interfaces for pipeline creation.
+/// Descriptors must match the data uploaded by the corresponding rendering path.
 pub trait Shader {
+    /// Vertex entry point and buffer strides, step modes, formats and shader locations.
     fn describe_vertex(&self) -> VertexState;
+    /// Fragment entry point with render-target formats, write masks and blending.
     fn describe_fragment(&self) -> FragmentState;
 }
 

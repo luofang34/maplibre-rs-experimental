@@ -1,9 +1,13 @@
 use super::{attribute, Shader, ShaderTileMetadata};
 use crate::render::resource::{FragmentState, VertexBufferLayout, VertexState};
 
+/// Tile stencil shader with optional diagnostic colors and outlines.
 pub struct TileMaskShader {
+    /// Format of the color attachment used by the render pipeline.
     pub format: wgpu::TextureFormat,
+    /// Enables writes to the color attachment in addition to stencil updates.
     pub draw_colors: bool,
+    /// Uses generated outline vertices instead of the indexed tile mesh.
     pub debug_lines: bool,
 }
 

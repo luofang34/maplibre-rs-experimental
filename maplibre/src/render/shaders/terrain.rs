@@ -3,6 +3,7 @@ use crate::render::resource::{FragmentState, VertexBufferLayout, VertexState};
 
 /// Terrain mesh shader: elevation from a DEM texture, color from a drape texture.
 pub struct TerrainShader {
+    /// Format of the color attachment receiving the draped terrain.
     pub format: wgpu::TextureFormat,
 }
 
