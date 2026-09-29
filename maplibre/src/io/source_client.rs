@@ -13,7 +13,9 @@ pub type HTTPClientFactory<HC> = dyn Fn() -> HC;
 
 /// Fetches complete response bodies through a platform-specific HTTP transport.
 ///
-/// Implementations distinguish missing resources with [`SourceFetchError::not_found`].
+/// Implementations distinguish missing resources with [`SourceFetchError::not_found`],
+/// transient transport failures with [`SourceFetchError::temporary`], and status failures
+/// with [`SourceFetchError::http_response`]. Unclassified errors are not retried.
 /// Returned futures need `Send` only when `thread-safe-futures` is enabled; clients themselves
 /// can be cloned and shared across threads.
 #[cfg_attr(not(feature = "thread-safe-futures"), async_trait(?Send))]
@@ -46,7 +48,50 @@ pub struct TileNotFound {
     pub url: String,
 }
 
+/// An HTTP error response, retaining both response context and its transport error.
+#[derive(Error, Debug)]
+#[error("HTTP {status} from {url}")]
+pub struct HttpResponseError {
+    /// Request URL that returned the error status.
+    pub url: String,
+    /// HTTP response status code.
+    pub status: u16,
+    /// Original platform response error.
+    #[source]
+    pub source: Box<dyn std::error::Error>,
+}
+
+#[derive(Error, Debug)]
+#[error("temporary source transport failure")]
+struct TemporarySourceError(#[source] Box<dyn std::error::Error>);
+
 impl SourceFetchError {
+    /// Marks a transport failure as retryable while preserving its original cause.
+    pub fn temporary(source: impl std::error::Error + 'static) -> Self {
+        Self(Box::new(TemporarySourceError(Box::new(source))))
+    }
+
+    /// Records an HTTP status and its platform error for retry classification.
+    pub fn http_response(url: &str, status: u16, source: impl std::error::Error + 'static) -> Self {
+        Self(Box::new(HttpResponseError {
+            url: url.to_owned(),
+            status,
+            source: Box::new(source),
+        }))
+    }
+
+    /// Whether retrying can recover a transport failure, timeout, rate limit or server error.
+    /// Unclassified failures, malformed URLs, decode errors and other client errors are terminal.
+    pub fn is_retryable(&self) -> bool {
+        self.0.is::<TemporarySourceError>()
+            || self
+                .0
+                .downcast_ref::<HttpResponseError>()
+                .is_some_and(|error| {
+                    error.status == 408 || error.status == 429 || (500..600).contains(&error.status)
+                })
+    }
+
     /// The error for a URL the server answered with 404.
     pub fn not_found(url: &str) -> Self {
         Self(Box::new(TileNotFound {

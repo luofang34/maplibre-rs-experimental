@@ -4,6 +4,7 @@ use crate::{
     context::MapContext,
     environment::Environment,
     io::apc::{apply_worker_messages, AsyncProcedureCall, Message, MessageError},
+    io::tile_retry::{self, RequestKind, TileRequestOutcome},
     kernel::Kernel,
     raster::resource::RasterResources,
     raster::{
@@ -38,7 +39,8 @@ impl<E: Environment, T: RasterTransferables> System for PopulateWorldSystem<E, T
 
     fn run(&mut self, MapContext { world, .. }: &mut MapContext) -> SystemResult {
         let messages = self.kernel.apc().receive(|message| {
-            message.has_tag(T::LayerRaster::message_tag())
+            message.has_tag(RequestKind::Raster.message_tag())
+                || message.has_tag(T::LayerRaster::message_tag())
                 || message.has_tag(T::LayerRasterMissing::message_tag())
         });
         apply_worker_messages(messages, |message| {
@@ -50,12 +52,16 @@ impl<E: Environment, T: RasterTransferables> System for PopulateWorldSystem<E, T
 }
 
 /// Records a worker's raster result on its tile. A fetched image becomes an available layer and
-/// a failed fetch a missing one, so the tile counts as done either way instead of being
-/// requested again forever.
+/// a failed fetch a missing one. Final request results schedule retries independently of
+/// the pixels retained for drawing.
 pub(crate) fn apply_raster_message<T: RasterTransferables>(
     world: &mut World,
     message: Message,
 ) -> Result<(), MessageError> {
+    if message.has_tag(RequestKind::Raster.message_tag()) {
+        tile_retry::completed(world, *message.into_transferable::<TileRequestOutcome>()?);
+        return Ok(());
+    }
     let (coords, layer) = if message.has_tag(T::LayerRaster::message_tag()) {
         let message = message.into_transferable::<T::LayerRaster>()?;
         (

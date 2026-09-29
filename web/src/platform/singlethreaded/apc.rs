@@ -10,6 +10,7 @@ use maplibre::{
         },
         scheduler::ScheduleError,
         source_client::SourceClient,
+        tile_retry::{RequestKind, TileRequestOutcome},
     },
 };
 use rand::{prelude::SliceRandom, thread_rng};
@@ -46,6 +47,7 @@ pub enum WebMessageTag {
     SymbolLayerTessellated = 7,
     LayerDem = 8,
     LayerDemMissing = 9,
+    TileRequestOutcome = 10,
 }
 
 impl WebMessageTag {
@@ -60,6 +62,7 @@ impl WebMessageTag {
             WebMessageTag::SymbolLayerTessellated => &WebMessageTag::SymbolLayerTessellated,
             WebMessageTag::LayerDem => &WebMessageTag::LayerDem,
             WebMessageTag::LayerDemMissing => &WebMessageTag::LayerDemMissing,
+            WebMessageTag::TileRequestOutcome => &WebMessageTag::TileRequestOutcome,
         }
     }
 
@@ -78,6 +81,9 @@ impl WebMessageTag {
             }
             x if x == WebMessageTag::LayerDem as u32 => Ok(WebMessageTag::LayerDem),
             x if x == WebMessageTag::LayerDemMissing as u32 => Ok(WebMessageTag::LayerDemMissing),
+            x if x == WebMessageTag::TileRequestOutcome as u32 => {
+                Ok(WebMessageTag::TileRequestOutcome)
+            }
             _ => Err(MessageTagDeserializeError),
         }
     }
@@ -119,6 +125,19 @@ impl Context for PassingContext {
 }
 
 fn prepare_message(message: Message) -> Result<(WebMessageTag, ArrayBuffer), SendError> {
+    if message.has_tag(RequestKind::Raster.message_tag())
+        || message.has_tag(RequestKind::Dem.message_tag())
+    {
+        let outcome = message.into_transferable::<TileRequestOutcome>()?;
+        let data = serde_json::to_vec(&*outcome).map_err(|source| SendError::Transmission {
+            operation: "encoding a tile request outcome",
+            source: Box::new(source),
+        })?;
+        return Ok((
+            WebMessageTag::TileRequestOutcome,
+            Uint8Array::from(data.as_slice()).buffer(),
+        ));
+    }
     let tag = message
         .tag()
         .as_any()
@@ -130,6 +149,22 @@ fn prepare_message(message: Message) -> Result<(WebMessageTag, ArrayBuffer), Sen
     let buffer = Uint8Array::from(data).buffer();
     tracing::debug!(?tag, bytes = data.len(), "sending worker result");
     Ok((tag, buffer))
+}
+
+pub(crate) fn decode_message(
+    tag: WebMessageTag,
+    buffer: ArrayBuffer,
+) -> Result<Message, CallError> {
+    if tag == WebMessageTag::TileRequestOutcome {
+        let data = Uint8Array::new(&buffer).to_vec();
+        let outcome: TileRequestOutcome = serde_json::from_slice(&data)
+            .map_err(|source| CallError::Deserialize(Box::new(source)))?;
+        return Ok(IntoMessage::into(outcome));
+    }
+    Ok(Message::new(
+        tag.to_static(),
+        Box::new(FlatBufferTransferable::from_array_buffer(tag, buffer)),
+    ))
 }
 
 pub type ReceivedType = RefCell<Vec<Message>>;

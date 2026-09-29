@@ -20,13 +20,20 @@ pub struct ReqwestHttpClient {
 
 impl From<reqwest::Error> for SourceFetchError {
     fn from(err: reqwest::Error) -> Self {
-        SourceFetchError(Box::new(err))
+        if err.is_timeout() || err.is_connect() || err.is_request() || err.is_body() {
+            SourceFetchError::temporary(err)
+        } else {
+            SourceFetchError(Box::new(err))
+        }
     }
 }
 
 impl From<reqwest_middleware::Error> for SourceFetchError {
     fn from(err: reqwest_middleware::Error) -> Self {
-        SourceFetchError(Box::new(err))
+        match err {
+            reqwest_middleware::Error::Reqwest(error) => error.into(),
+            other => SourceFetchError(Box::new(other)),
+        }
     }
 }
 
@@ -69,6 +76,7 @@ impl HttpClient for ReqwestHttpClient {
         if response.status() == StatusCode::NOT_FOUND {
             return Err(SourceFetchError::not_found(url));
         }
+        let status = response.status().as_u16();
         match response.error_for_status() {
             Ok(response) => {
                 if response.status() == StatusCode::NOT_MODIFIED {
@@ -79,7 +87,7 @@ impl HttpClient for ReqwestHttpClient {
 
                 Ok(Vec::from(body.as_ref()))
             }
-            Err(e) => Err(SourceFetchError(Box::new(e))),
+            Err(error) => Err(SourceFetchError::http_response(url, status, error)),
         }
     }
 }

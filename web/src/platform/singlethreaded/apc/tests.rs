@@ -63,3 +63,49 @@ fn dem_reply_outside_a_worker_returns_a_transport_error() {
         Some(WebError::TypeError(_))
     ));
 }
+
+#[wasm_bindgen_test]
+fn final_outcomes_round_trip_with_attempt_and_retry_state() {
+    use maplibre::io::tile_retry::RequestDisposition;
+    for kind in [RequestKind::Raster, RequestKind::Dem] {
+        for disposition in [RequestDisposition::Complete, RequestDisposition::Retry] {
+            let expected = TileRequestOutcome {
+                coords: Default::default(),
+                kind,
+                attempt: Some(73),
+                disposition,
+            };
+            let (tag, buffer) =
+                prepare_message(IntoMessage::into(expected)).expect("outcome encoded");
+            let wire_tag = WebMessageTag::from_u32(tag as u32).expect("wire tag");
+            let message = decode_message(wire_tag, buffer).expect("outcome decoded");
+            assert!(message.has_tag(kind.message_tag()));
+            let actual = message
+                .into_transferable::<TileRequestOutcome>()
+                .expect("outcome payload");
+            assert_eq!(actual.coords, expected.coords);
+            assert_eq!(actual.kind, expected.kind);
+            assert_eq!(actual.attempt, expected.attempt);
+            assert_eq!(actual.disposition, expected.disposition);
+        }
+    }
+}
+
+#[wasm_bindgen_test]
+fn malformed_outcome_payloads_retain_typed_errors() {
+    let error = prepare_message(Message::new(
+        RequestKind::Raster.message_tag(),
+        Box::new(17_u32),
+    ))
+    .expect_err("wrong native payload");
+    assert!(matches!(error, SendError::Payload(_)));
+    let error = decode_message(
+        WebMessageTag::TileRequestOutcome,
+        Uint8Array::from(&[255_u8][..]).buffer(),
+    )
+    .expect_err("invalid encoded outcome");
+    let CallError::Deserialize(cause) = error else {
+        panic!("decode error");
+    };
+    assert!(cause.is::<serde_json::Error>());
+}

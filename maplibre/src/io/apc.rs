@@ -98,6 +98,29 @@ pub enum Input {
         /// Style snapshot used to choose and process the tile's layers.
         style: Style,
     },
+    /// Requests a tile with a map-owned attempt token for final completion matching.
+    TrackedTileRequest {
+        /// Tile grid location requested from the worker.
+        coords: WorldTileCoords,
+        /// Style snapshot used to choose and process the tile's layers.
+        style: Style,
+        /// Identifier distinguishing requests when coordinates are evicted and reused.
+        attempt: u64,
+    },
+}
+
+impl Input {
+    /// Consumes a tile request and its optional completion token.
+    pub fn into_tile_request(self) -> (WorldTileCoords, Style, Option<u64>) {
+        match self {
+            Self::TileRequest { coords, style } => (coords, style, None),
+            Self::TrackedTileRequest {
+                coords,
+                style,
+                attempt,
+            } => (coords, style, Some(attempt)),
+        }
+    }
 }
 
 /// A worker result could not be delivered to its caller.

@@ -25,7 +25,7 @@ pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context +
     kernel: K,
 ) -> AsyncProcedureFuture {
     Box::pin(async move {
-        let Input::TileRequest { coords, style } = input;
+        let (coords, style, _) = input.into_tile_request();
         let client = kernel.source_client();
         let mut groups = source_layer_groups(&style, TileKind::Vector)
             .into_iter()

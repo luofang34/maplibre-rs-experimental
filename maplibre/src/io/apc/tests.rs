@@ -5,6 +5,8 @@ mod completion;
 mod errors;
 mod payload;
 #[cfg(all(feature = "headless", not(target_arch = "wasm32")))]
+mod retry;
+#[cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 mod systems;
 
 #[cfg(all(feature = "headless", not(target_arch = "wasm32")))]

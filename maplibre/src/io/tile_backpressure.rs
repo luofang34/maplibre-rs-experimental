@@ -21,6 +21,9 @@ pub const MAX_TILES_IN_FLIGHT: usize = 12;
 
 /// Whether every request for the tile has produced a result.
 pub(crate) fn is_settled(tiles: &Tiles, coords: WorldTileCoords) -> bool {
+    let retry_loading = tiles
+        .query::<&crate::io::tile_retry::TileRequestRetries>(coords)
+        .is_some_and(crate::io::tile_retry::TileRequestRetries::pending);
     let vector_loading = tiles
         .query::<&VectorLayerBucketComponent>(coords)
         .is_some_and(|component| !component.done);
@@ -34,7 +37,7 @@ pub(crate) fn is_settled(tiles: &Tiles, coords: WorldTileCoords) -> bool {
     let symbol_loading = tiles
         .query::<&crate::sdf::SymbolLayersDataComponent>(coords)
         .is_some_and(|component| component.pending_assets);
-    !(vector_loading || raster_loading || dem_loading || symbol_loading)
+    !(retry_loading || vector_loading || raster_loading || dem_loading || symbol_loading)
 }
 
 /// Tiles with a request that has not produced its result yet.

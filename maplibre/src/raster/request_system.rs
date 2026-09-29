@@ -9,6 +9,7 @@ use crate::{
     io::{
         apc::{AsyncProcedureCall, AsyncProcedureFuture, Context, Input, ProcedureError},
         tile_backpressure::request_budget,
+        tile_retry::{self, RequestDisposition, RequestKind, TileRequestOutcome},
         tile_sources::{missing_tile_fallback, source_layer_groups, source_min_zoom, TileKind},
     },
     kernel::Kernel,
@@ -83,6 +84,7 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
                 .tiles
                 .query::<&RasterLayersDataComponent>(coords)
                 .is_some()
+                && !tile_retry::due(world, coords, RequestKind::Raster)
             {
                 continue;
             }
@@ -104,9 +106,10 @@ pub fn fetch_raster_apc<K: OffscreenKernel, T: RasterTransferables, C: Context +
     kernel: K,
 ) -> AsyncProcedureFuture {
     Box::pin(async move {
-        let Input::TileRequest { coords, style } = input;
+        let (coords, style, attempt) = input.into_tile_request();
 
         let client = kernel.source_client();
+        let mut retry = false;
 
         for group in source_layer_groups(&style, TileKind::Raster) {
             let context = context.clone();
@@ -131,6 +134,7 @@ pub fn fetch_raster_apc<K: OffscreenKernel, T: RasterTransferables, C: Context +
                     }
                 }
                 Err(error) => {
+                    retry |= error.is_retryable();
                     if error.is_not_found() {
                         tracing::debug!(
                             %coords,
@@ -155,7 +159,18 @@ pub fn fetch_raster_apc<K: OffscreenKernel, T: RasterTransferables, C: Context +
             }
         }
 
-        Ok(())
+        context
+            .send_back(TileRequestOutcome {
+                coords,
+                kind: RequestKind::Raster,
+                attempt,
+                disposition: if retry {
+                    RequestDisposition::Retry
+                } else {
+                    RequestDisposition::Complete
+                },
+            })
+            .map_err(ProcedureError::Send)
     })
 }
 
@@ -166,13 +181,19 @@ impl<E: Environment, T: RasterTransferables> RequestSystem<E, T> {
         style: &crate::style::Style,
         world: &mut crate::tcs::world::World,
     ) -> SystemResult {
+        let exists = world
+            .tiles
+            .query::<&RasterLayersDataComponent>(coords)
+            .is_some();
+        let attempt = tile_retry::next_attempt(world);
         let Some(mut tile) = world.tiles.spawn_mut(coords) else {
             return Err(SystemError::InvalidTile { coords });
         };
         self.kernel
             .apc()
             .call(
-                Input::TileRequest {
+                Input::TrackedTileRequest {
+                    attempt,
                     coords,
                     style: style.clone(),
                 },
@@ -183,7 +204,10 @@ impl<E: Environment, T: RasterTransferables> RequestSystem<E, T> {
                 coords,
                 source,
             })?;
-        tile.insert(RasterLayersDataComponent::default());
+        if !exists {
+            tile.insert(RasterLayersDataComponent::default());
+        }
+        tile_retry::started(world, coords, RequestKind::Raster, attempt);
         tracing::debug!(%coords, "raster tile request accepted");
         Ok(())
     }

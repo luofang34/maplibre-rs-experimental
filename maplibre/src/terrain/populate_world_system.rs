@@ -6,6 +6,7 @@ use crate::{
     context::MapContext,
     environment::Environment,
     io::apc::{apply_worker_messages, AsyncProcedureCall},
+    io::tile_retry::{self, RequestKind, TileRequestOutcome},
     kernel::Kernel,
     tcs::system::{System, SystemResult},
     terrain::{
@@ -39,10 +40,15 @@ impl<E: Environment, T: DemTransferables> System for PopulateWorldSystem<E, T> {
     fn run(&mut self, MapContext { style, world, .. }: &mut MapContext) -> SystemResult {
         let unpack = dem_source(style).map(|dem| dem.unpack);
         let messages = self.kernel.apc().receive(|message| {
-            message.has_tag(T::LayerDem::message_tag())
+            message.has_tag(RequestKind::Dem.message_tag())
+                || message.has_tag(T::LayerDem::message_tag())
                 || message.has_tag(T::LayerDemMissing::message_tag())
         });
         apply_worker_messages(messages, |message| {
+            if message.has_tag(RequestKind::Dem.message_tag()) {
+                tile_retry::completed(world, *message.into_transferable::<TileRequestOutcome>()?);
+                return Ok(());
+            }
             let (coords, state) = if message.has_tag(T::LayerDem::message_tag()) {
                 let message = message.into_transferable::<T::LayerDem>()?;
                 let coords = message.coords();
@@ -62,7 +68,9 @@ impl<E: Environment, T: DemTransferables> System for PopulateWorldSystem<E, T> {
             };
             let loaded = matches!(state, DemTileComponent::Loaded(_));
             if let Some(component) = world.tiles.query_mut::<&mut DemTileComponent>(coords) {
-                *component = state;
+                if loaded || !matches!(component, DemTileComponent::Loaded(_)) {
+                    *component = state;
+                }
             }
             if loaded {
                 backfill_neighbours(&mut world.tiles, coords);

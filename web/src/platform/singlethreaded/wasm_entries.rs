@@ -2,7 +2,7 @@ use std::{mem, rc::Rc, sync::OnceLock};
 
 use maplibre::{
     benchmarking::io::{
-        apc::{AsyncProcedure, Input, Message},
+        apc::{AsyncProcedure, Input},
         source_client::{HttpSourceClient, SourceClient},
     },
     environment::OffscreenKernel,
@@ -17,7 +17,6 @@ use crate::{
         http_client::WHATWGFetchHttpClient,
         singlethreaded::{
             apc::{ReceivedType, WebMessageTag},
-            transferables::FlatBufferTransferable,
             PassingContext, UsedContext,
         },
         UsedOffscreenKernelEnvironment,
@@ -87,10 +86,7 @@ pub fn singlethreaded_receive_data(
         buffer.byte_length()
     );
 
-    let message = Message::new(
-        tag.to_static(),
-        Box::new(FlatBufferTransferable::from_array_buffer(tag, buffer)),
-    );
+    let message = super::apc::decode_message(tag, buffer)?;
 
     // FIXME: Can we make this call safe? check if it was cloned before?
     let received: Rc<ReceivedType> = unsafe { Rc::from_raw(received_ptr) };

@@ -9,6 +9,7 @@ use crate::{
     io::{
         apc::{AsyncProcedureCall, AsyncProcedureFuture, Context, Input, ProcedureError},
         tile_backpressure::request_budget,
+        tile_retry::{self, RequestDisposition, RequestKind, TileRequestOutcome},
         tile_sources::missing_tile_fallback,
     },
     kernel::Kernel,
@@ -155,7 +156,9 @@ impl<E: Environment, T: DemTransferables> System for RequestSystem<E, T> {
             if coords.build_quad_key().is_none() || !requested.insert(coords) {
                 continue;
             }
-            if world.tiles.query::<&DemTileComponent>(coords).is_some() {
+            if world.tiles.query::<&DemTileComponent>(coords).is_some()
+                && !tile_retry::due(world, coords, RequestKind::Dem)
+            {
                 continue;
             }
             // The rest wait for a later frame, once tiles in flight have landed.
@@ -177,13 +180,16 @@ impl<E: Environment, T: DemTransferables> RequestSystem<E, T> {
         style: &crate::style::Style,
         world: &mut crate::tcs::world::World,
     ) -> SystemResult {
+        let exists = world.tiles.query::<&DemTileComponent>(coords).is_some();
+        let attempt = tile_retry::next_attempt(world);
         let Some(mut tile) = world.tiles.spawn_mut(coords) else {
             return Err(SystemError::InvalidTile { coords });
         };
         self.kernel
             .apc()
             .call(
-                Input::TileRequest {
+                Input::TrackedTileRequest {
+                    attempt,
                     coords,
                     style: style.clone(),
                 },
@@ -194,7 +200,10 @@ impl<E: Environment, T: DemTransferables> RequestSystem<E, T> {
                 coords,
                 source,
             })?;
-        tile.insert(DemTileComponent::Pending);
+        if !exists {
+            tile.insert(DemTileComponent::Pending);
+        }
+        tile_retry::started(world, coords, RequestKind::Dem, attempt);
         tracing::debug!(%coords, "DEM tile request accepted");
         Ok(())
     }
@@ -207,10 +216,11 @@ pub fn fetch_dem_apc<K: OffscreenKernel, T: DemTransferables, C: Context + Clone
     kernel: K,
 ) -> AsyncProcedureFuture {
     Box::pin(async move {
-        let Input::TileRequest { coords, style } = input;
+        let (coords, style, attempt) = input.into_tile_request();
         let Some(dem) = dem_source(&style) else {
             return Ok(());
         };
+        let mut retry = false;
         let image = match kernel.source_client().fetch(&coords, &dem.source).await {
             Ok(data) => match image::load_from_memory(&data) {
                 Ok(image) => Some(image.to_rgba8()),
@@ -224,6 +234,7 @@ pub fn fetch_dem_apc<K: OffscreenKernel, T: DemTransferables, C: Context + Clone
                 None
             }
             Err(error) => {
+                retry = error.is_retryable();
                 tracing::error!(
                     %coords,
                     source = %dem.name,
@@ -240,7 +251,19 @@ pub fn fetch_dem_apc<K: OffscreenKernel, T: DemTransferables, C: Context + Clone
             None => context
                 .send_back(T::LayerDemMissing::build_from(coords))
                 .map_err(ProcedureError::Send),
-        }
+        }?;
+        context
+            .send_back(TileRequestOutcome {
+                coords,
+                kind: RequestKind::Dem,
+                attempt,
+                disposition: if retry {
+                    RequestDisposition::Retry
+                } else {
+                    RequestDisposition::Complete
+                },
+            })
+            .map_err(ProcedureError::Send)
     })
 }
 

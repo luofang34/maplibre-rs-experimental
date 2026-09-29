@@ -7,77 +7,59 @@ use web_sys::{Request, RequestInit, Response, WorkerGlobalScope};
 
 use crate::error::WebError;
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct WHATWGFetchHttpClient;
 
+fn invalid_response(message: &'static str) -> SourceFetchError {
+    SourceFetchError(Box::new(WebError::TypeError(message.into())))
+}
+
 impl WHATWGFetchHttpClient {
-    async fn fetch_array_buffer(url: &str) -> Result<JsValue, WebError> {
+    async fn fetch_array_buffer(url: &str) -> Result<JsValue, SourceFetchError> {
         let opts = RequestInit::new();
         opts.set_method("GET");
+        let request = Request::new_with_str_and_init(url, &opts)
+            .map_err(|error| SourceFetchError(Box::new(WebError::from(error))))?;
 
-        let request = Request::new_with_str_and_init(url, &opts)?;
-
-        // Tiles are fetched from workers, but TileJSON documents are resolved on the main thread
-        // before the first frame, so both global scopes must be able to fetch.
+        // Tile workers and the main-thread TileJSON loader use the same transport.
         let global = js_sys::global();
         let promise = match global.dyn_into::<WorkerGlobalScope>() {
             Ok(scope) => scope.fetch_with_request(&request),
             Err(_) => web_sys::window()
-                .ok_or_else(|| {
-                    WebError::TypeError("No worker or window scope to fetch from".into())
-                })?
+                .ok_or_else(|| invalid_response("No worker or window scope to fetch from"))?
                 .fetch_with_request(&request),
         };
-
-        let maybe_response = JsFuture::from(promise).await?;
-        let response: Response = maybe_response
+        let response: Response = JsFuture::from(promise)
+            .await
+            .map_err(|error| SourceFetchError::temporary(WebError::from(error)))?
             .dyn_into()
-            .map_err(|_e| WebError::TypeError("Unable to cast to Response".into()))?;
-
+            .map_err(|_| invalid_response("Unable to cast to Response"))?;
         if response.status() == 404 {
-            return Err(WebError::NotFound(url.to_string()));
+            return Err(SourceFetchError::not_found(url));
         }
         if !response.ok() {
-            return Err(WebError::GenericError(
-                format!("failed to fetch {}", response.status()).into(),
+            return Err(SourceFetchError::http_response(
+                url,
+                response.status(),
+                WebError::FetchError(response.status_text().into()),
             ));
         }
-
-        // Get ArrayBuffer
-        let maybe_array_buffer = JsFuture::from(response.array_buffer()?).await?;
-        Ok(maybe_array_buffer)
-    }
-
-    async fn fetch_bytes(&self, url: &str) -> Result<Vec<u8>, WebError> {
-        let maybe_array_buffer = Self::fetch_array_buffer(url).await?;
-
-        let array_buffer: ArrayBuffer = maybe_array_buffer
-            .dyn_into()
-            .map_err(|_e| WebError::TypeError("Unable to cast to ArrayBuffer".into()))?;
-
-        // Copy data to Vec<u8>
-        let buffer: Uint8Array = Uint8Array::new(&array_buffer);
-        let mut output: Vec<u8> = vec![0; array_buffer.byte_length() as usize];
-        buffer.copy_to(output.as_mut_slice());
-
-        Ok(output)
-    }
-}
-
-impl Clone for WHATWGFetchHttpClient {
-    fn clone(&self) -> Self {
-        WHATWGFetchHttpClient {}
+        let buffer = response
+            .array_buffer()
+            .map_err(|error| SourceFetchError(Box::new(WebError::from(error))))?;
+        JsFuture::from(buffer)
+            .await
+            .map_err(|error| SourceFetchError::temporary(WebError::from(error)))
     }
 }
 
 #[async_trait(?Send)]
 impl HttpClient for WHATWGFetchHttpClient {
     async fn fetch(&self, url: &str) -> Result<Vec<u8>, SourceFetchError> {
-        // A source that has no tile at a coordinate answers 404, which the request paths
-        // treat as an empty tile rather than a failure.
-        self.fetch_bytes(url).await.map_err(|error| match error {
-            WebError::NotFound(url) => SourceFetchError::not_found(&url),
-            other => SourceFetchError(Box::new(other)),
-        })
+        let array_buffer: ArrayBuffer = Self::fetch_array_buffer(url)
+            .await?
+            .dyn_into()
+            .map_err(|_| invalid_response("Unable to cast to ArrayBuffer"))?;
+        Ok(Uint8Array::new(&array_buffer).to_vec())
     }
 }
