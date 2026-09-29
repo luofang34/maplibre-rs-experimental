@@ -1,12 +1,11 @@
 use std::{
-    any,
-    any::TypeId,
     cell::UnsafeCell,
-    collections::{btree_map, BTreeMap, HashSet},
+    collections::{btree_map, BTreeMap},
 };
 
 use downcast_rs::{impl_downcast, Downcast};
 
+pub use crate::tcs::{EphemeralQueryState, GlobalQueryState, QueryState};
 use crate::{
     coords::{Quadkey, WorldTileCoords},
     io::geometry_index::GeometryIndex,
@@ -35,6 +34,8 @@ impl Tiles {
         Q::query(self, Tile { coords }, state)
     }
 
+    /// Borrows components of one tile, or returns `None` for missing data or conflicting
+    /// reference types. Repeated shared references are allowed; mutable ones must be disjoint.
     pub fn query_mut<Q: ComponentQueryMut>(
         &mut self,
         coords: WorldTileCoords,
@@ -108,30 +109,6 @@ impl<'w> TileSpawnResult<'w> {
     }
 }
 
-#[derive(Default)]
-pub struct GlobalQueryState {
-    mutably_borrowed: HashSet<TypeId>,
-}
-
-pub trait QueryState<'s> {
-    fn create(state: &'s mut GlobalQueryState) -> Self;
-    fn clone_to<'a, S: QueryState<'a>>(&'a mut self) -> S;
-}
-
-pub struct EphemeralQueryState<'s> {
-    state: &'s mut GlobalQueryState,
-}
-
-impl<'s> QueryState<'s> for EphemeralQueryState<'s> {
-    fn create(state: &'s mut GlobalQueryState) -> Self {
-        Self { state }
-    }
-
-    fn clone_to<'a, S: QueryState<'a>>(&'a mut self) -> S {
-        S::create(self.state)
-    }
-}
-
 // ComponentQuery
 
 pub trait ComponentQuery {
@@ -153,25 +130,21 @@ impl<T: TileComponent> ComponentQuery for &T {
     fn query<'t, 's>(
         tiles: &'t Tiles,
         tile: Tile,
-        _state: Self::State<'s>,
+        mut state: Self::State<'s>,
     ) -> Option<Self::Item<'t>> {
+        state.borrow_shared::<T>()?;
         let components = tiles.components.get(&tile.coords.build_quad_key()?)?;
-
-        components
-            .iter()
-            // FIXME tcs: Is this safe? We cast directly to & instead of &mut
-            .find(|component| unsafe {
-                component.get().as_ref().unwrap().as_ref().type_id() == TypeId::of::<T>()
-            })
-            .map(|component| unsafe {
-                component
-                    .get()
-                    .as_ref()
-                    .unwrap()
-                    .as_ref()
-                    .downcast_ref()
-                    .expect("inserted component has wrong TypeId")
-            })
+        for (index, component) in components.iter().enumerate() {
+            if state.state.mutably_borrowed_components.contains(&index) {
+                continue;
+            }
+            // Even checking a trait object's type borrows its value. Mutable slots must
+            // be skipped before dereferencing, including slots of a different type.
+            if let Some(value) = unsafe { (&*component.get()).downcast_ref::<T>() } {
+                return Some(value);
+            }
+        }
+        None
     }
 }
 
@@ -215,22 +188,30 @@ impl<T: TileComponent> ComponentQueryMut for &mut T {
 
         components
             .iter_mut()
-            .find(|component| unsafe {
-                component.get().as_ref().unwrap().as_ref().type_id() == TypeId::of::<T>()
-            })
-            .map(|component| {
-                component
-                    .get_mut()
-                    .as_mut()
-                    .downcast_mut()
-                    .expect("inserted component has wrong TypeId")
-            })
+            .find_map(|component| component.get_mut().downcast_mut())
     }
 }
 
 // ComponentQueryUnsafe
 
-pub trait ComponentQueryUnsafe: ComponentQueryMut {
+/// Sealed component references used by mutable tuple queries.
+///
+/// Implementations share the tuple's borrow state and cannot inspect slots already borrowed
+/// mutably by another member of the tuple.
+///
+/// ```compile_fail
+/// use maplibre::tcs::{EphemeralQueryState, tiles::{Tiles, Tile, ComponentQueryMut, ComponentQueryUnsafe}};
+/// struct Custom;
+/// impl ComponentQueryMut for Custom {
+///     type MutItem<'t> = &'t u32;
+///     type State<'s> = EphemeralQueryState<'s>;
+///     fn query_mut<'t, 's>(_: &'t mut Tiles, _: Tile, _: Self::State<'s>) -> Option<&'t u32> { None }
+/// }
+/// impl ComponentQueryUnsafe for Custom {
+///     unsafe fn query_unsafe<'t, 's>(_: &'t Tiles, _: Tile, _: Self::State<'s>) -> Option<&'t u32> { None }
+/// }
+/// ```
+pub trait ComponentQueryUnsafe: ComponentQueryMut + sealed::Reference {
     /// # Safety
     /// The caller must prevent overlapping mutable borrows of the queried tile components
     /// for the lifetime of the returned references, including across query states.
@@ -255,35 +236,22 @@ impl<T: TileComponent> ComponentQueryUnsafe for &mut T {
     unsafe fn query_unsafe<'t, 's>(
         tiles: &'t Tiles,
         tile: Tile,
-        state: Self::State<'s>,
+        mut state: Self::State<'s>,
     ) -> Option<Self::MutItem<'t>> {
-        let id = TypeId::of::<T>();
-        let borrowed = &mut state.state.mutably_borrowed;
-
-        if borrowed.contains(&id) {
-            panic!(
-                "tried to borrow an {} more than once mutably",
-                any::type_name::<T>()
-            )
-        }
-
-        borrowed.insert(id);
-
+        state.borrow_mut::<T>()?;
         let components = tiles.components.get(&tile.coords.build_quad_key()?)?;
-
-        components
-            .iter()
-            .find(|component| {
-                component.get().as_ref().unwrap().as_ref().type_id() == TypeId::of::<T>()
-            })
-            .map(|component| {
-                component
-                    .get()
-                    .as_mut()
-                    .unwrap()
-                    .downcast_mut()
-                    .expect("inserted component has wrong TypeId")
-            })
+        for (index, component) in components.iter().enumerate() {
+            if state.state.mutably_borrowed_components.contains(&index) {
+                continue;
+            }
+            // Type inspection is shared only until the test ends. No prior mutable slot
+            // is inspected, and the type check excludes prior shared references to this slot.
+            if unsafe { (&*component.get()).is::<T>() } {
+                state.state.mutably_borrowed_components.insert(index);
+                return unsafe { (&mut *component.get()).downcast_mut() };
+            }
+        }
+        None
     }
 }
 
@@ -318,6 +286,7 @@ impl<
         tile: Tile,
         mut state: Self::State<'s>,
     ) -> Option<Self::MutItem<'t>> {
+        // Sealed reference queries share one access ledger under an exclusive store borrow.
         unsafe {
             Some((
                 <CQ1 as ComponentQueryUnsafe>::query_unsafe(
@@ -334,3 +303,12 @@ impl<
         }
     }
 }
+
+mod sealed {
+    pub trait Reference {}
+    impl<T: super::TileComponent> Reference for &T {}
+    impl<T: super::TileComponent> Reference for &mut T {}
+}
+
+#[cfg(test)]
+mod tests;

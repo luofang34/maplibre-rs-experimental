@@ -7,7 +7,9 @@ pub mod world;
 
 #[derive(Default)]
 pub struct GlobalQueryState {
+    shared: HashSet<TypeId>,
     mutably_borrowed: HashSet<TypeId>,
+    mutably_borrowed_components: HashSet<usize>,
 }
 
 pub trait QueryState<'s> {
@@ -17,6 +19,25 @@ pub trait QueryState<'s> {
 
 pub struct EphemeralQueryState<'s> {
     state: &'s mut GlobalQueryState,
+}
+
+impl EphemeralQueryState<'_> {
+    fn borrow_shared<T: 'static>(&mut self) -> Option<()> {
+        let id = TypeId::of::<T>();
+        if self.state.mutably_borrowed.contains(&id) {
+            return None;
+        }
+        self.state.shared.insert(id);
+        Some(())
+    }
+
+    fn borrow_mut<T: 'static>(&mut self) -> Option<()> {
+        let id = TypeId::of::<T>();
+        if self.state.shared.contains(&id) || !self.state.mutably_borrowed.insert(id) {
+            return None;
+        }
+        Some(())
+    }
 }
 
 impl<'s> QueryState<'s> for EphemeralQueryState<'s> {

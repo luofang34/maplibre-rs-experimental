@@ -1,4 +1,4 @@
-use std::{any, any::TypeId, cell::UnsafeCell, collections::HashMap};
+use std::{any::TypeId, cell::UnsafeCell, collections::HashMap};
 
 use downcast_rs::{impl_downcast, Downcast};
 
@@ -51,32 +51,15 @@ impl Resources {
     }
 
     pub fn get<R: Resource>(&self) -> Option<&R> {
-        if let Some(index) = self.index.get(&TypeId::of::<R>()) {
-            unsafe {
-                return Some(
-                    self.resources[*index]
-                        // FIXME tcs: Is this safe? We cast directly to & instead of &mut
-                        .get()
-                        .as_ref()
-                        .unwrap()
-                        .downcast_ref()
-                        .expect("inserted resource has wrong TypeId"),
-                );
-            }
-        }
-        None
+        let index = *self.index.get(&TypeId::of::<R>())?;
+        // Safe callers share the store; mutable tuple queries check type access before
+        // calling this method and cannot mutate the resource index during the borrow.
+        unsafe { (&*self.resources.get(index)?.get()).downcast_ref() }
     }
 
     pub fn get_mut<R: Resource>(&mut self) -> Option<&mut R> {
-        if let Some(index) = self.index.get(&TypeId::of::<R>()) {
-            return Some(
-                self.resources[*index]
-                    .get_mut()
-                    .downcast_mut()
-                    .expect("inserted resource has wrong TypeId"),
-            );
-        }
-        None
+        let index = *self.index.get(&TypeId::of::<R>())?;
+        self.resources.get_mut(index)?.get_mut().downcast_mut()
     }
 
     pub fn query<Q: ResourceQuery>(&self) -> Option<Q::Item<'_>> {
@@ -85,6 +68,8 @@ impl Resources {
         Q::query(self, state)
     }
 
+    /// Borrows the requested resources, or returns `None` for a missing resource or alias
+    /// conflict. Repeated shared references are allowed; mutable references must be disjoint.
     pub fn query_mut<Q: ResourceQueryMut>(&mut self) -> Option<Q::MutItem<'_>> {
         let mut global_state = GlobalQueryState::default();
         let state = <Q::State<'_> as QueryState>::create(&mut global_state);
@@ -106,7 +91,11 @@ impl<R: Resource> ResourceQuery for &R {
     type Item<'r> = &'r R;
     type State<'s> = EphemeralQueryState<'s>;
 
-    fn query<'r, 's>(resources: &'r Resources, _state: Self::State<'s>) -> Option<Self::Item<'r>> {
+    fn query<'r, 's>(
+        resources: &'r Resources,
+        mut state: Self::State<'s>,
+    ) -> Option<Self::Item<'r>> {
+        state.borrow_shared::<R>()?;
         resources.get::<R>()
     }
 }
@@ -150,7 +139,24 @@ impl<R: Resource> ResourceQueryMut for &mut R {
 
 // ResourceQueryUnsafe
 
-pub trait ResourceQueryUnsafe: ResourceQueryMut {
+/// Sealed resource references used by mutable tuple queries.
+///
+/// Implementations must share the tuple's borrow checks, so downstream query types cannot
+/// supply an unchecked implementation.
+///
+/// ```compile_fail
+/// use maplibre::tcs::{EphemeralQueryState, resources::{Resources, ResourceQueryMut, ResourceQueryUnsafe}};
+/// struct Custom;
+/// impl ResourceQueryMut for Custom {
+///     type MutItem<'r> = &'r u32;
+///     type State<'s> = EphemeralQueryState<'s>;
+///     fn query_mut<'r, 's>(_: &'r mut Resources, _: Self::State<'s>) -> Option<&'r u32> { None }
+/// }
+/// impl ResourceQueryUnsafe for Custom {
+///     unsafe fn query_unsafe<'r, 's>(_: &'r Resources, _: Self::State<'s>) -> Option<&'r u32> { None }
+/// }
+/// ```
+pub trait ResourceQueryUnsafe: ResourceQueryMut + sealed::Reference {
     /// # Safety
     /// The caller must prevent overlapping mutable borrows of the queried resources
     /// for the lifetime of the returned references, including across query states.
@@ -172,32 +178,13 @@ impl<R: Resource> ResourceQueryUnsafe for &R {
 impl<R: Resource> ResourceQueryUnsafe for &mut R {
     unsafe fn query_unsafe<'r, 's>(
         resources: &'r Resources,
-        state: Self::State<'s>,
+        mut state: Self::State<'s>,
     ) -> Option<Self::MutItem<'r>> {
-        let id = TypeId::of::<R>();
-        let borrowed = &mut state.state.mutably_borrowed;
-
-        if borrowed.contains(&id) {
-            panic!(
-                "tried to borrow an {} more than once mutably",
-                any::type_name::<R>()
-            )
-        }
-
-        borrowed.insert(id);
-
-        if let Some(index) = resources.index.get(&TypeId::of::<R>()) {
-            return Some(
-                resources.resources[*index]
-                    .get()
-                    .as_mut()
-                    .unwrap()
-                    .downcast_mut()
-                    .expect("inserted resource has wrong TypeId"),
-            );
-        }
-
-        None
+        state.borrow_mut::<R>()?;
+        let index = *resources.index.get(&TypeId::of::<R>())?;
+        // The type index selects one stable slot; the shared query state excludes any
+        // other reference to its value for the lifetime of this tuple.
+        unsafe { (&mut *resources.resources.get(index)?.get()).downcast_mut() }
     }
 }
 
@@ -228,6 +215,8 @@ macro_rules! impl_resource_query {
                 mut state: Self::State<'s>,
             ) -> Option<Self::MutItem<'r>> {
                 unsafe {
+                    // Only sealed reference queries participate, and every member uses
+                    // the same borrow state while the caller exclusively holds the store.
                     Some(
                         (
                             $(<$param as ResourceQueryUnsafe>::query_unsafe(resources, state.clone_to::<$param::State<'_>>())?,)*
@@ -245,6 +234,12 @@ impl_resource_query!(R1, R2, R3);
 impl_resource_query!(R1, R2, R3, R4);
 impl_resource_query!(R1, R2, R3, R4, R5);
 impl_resource_query!(R1, R2, R3, R4, R5, R6);
+
+mod sealed {
+    pub trait Reference {}
+    impl<R: super::Resource> Reference for &R {}
+    impl<R: super::Resource> Reference for &mut R {}
+}
 
 #[cfg(test)]
 mod tests;
