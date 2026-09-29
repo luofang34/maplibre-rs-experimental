@@ -222,17 +222,17 @@ where
 
 impl<T> PointDistance for IndexedGeometry<T>
 where
-    T: CoordFloat + Bounded + Signed + PartialOrd,
+    T: geo::GeoFloat,
 {
     fn distance_2(
         &self,
         point: &<Self::Envelope as Envelope>::Point,
     ) -> <<Self::Envelope as Envelope>::Point as rstar::Point>::Scalar {
-        self.bounds.center().distance_2(point)
-    }
-
-    fn contains_point(&self, point: &<Self::Envelope as Envelope>::Point) -> bool {
-        self.bounds.contains_point(point)
+        let distance = match &self.exact {
+            ExactGeometry::Polygon(polygon) => polygon.euclidean_distance(point),
+            ExactGeometry::LineString(line) => line.euclidean_distance(point),
+        };
+        distance * distance
     }
 }
 

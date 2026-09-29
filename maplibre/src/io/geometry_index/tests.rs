@@ -4,6 +4,8 @@ use geozero::{mvt::tile, GeozeroDatasource};
 
 use super::IndexProcessor;
 
+mod spatial;
+
 fn zigzag(value: i64) -> u32 {
     ((value << 1) ^ (value >> 63)) as u32
 }
