@@ -8,8 +8,7 @@ use crate::{
     render::{
         eventually::{Eventually, Eventually::Initialized},
         tile_view_pattern::{
-            covering_shapes_for, HasTile, KindSources, RasterCoverings, ViewTileSources,
-            COMPLETE_CHILDREN_SEARCH_DEPTH,
+            coverage, covering_shapes_for, HasTile, RasterCoverings, ViewTileSources,
         },
     },
     style::Style,
@@ -18,8 +17,6 @@ use crate::{
 };
 
 const DRAPEABLE_LAYER_TYPES: [&str; 5] = ["fill", "line", "raster", "hillshade", "color-relief"];
-
-pub(super) mod coverage;
 
 #[cfg(test)]
 mod tests;
@@ -79,13 +76,15 @@ pub(crate) fn select_targets(
     coords
         .filter(|coords| coords.build_quad_key().is_some())
         .map(|coords| {
-            let mut shapes: Vec<ShapeSource> = loaded_shapes(&vector_sources, coords, world)
-                .into_iter()
-                .map(|source| ShapeSource {
-                    coords: source,
-                    raster_source: None,
-                })
-                .collect();
+            let mut shapes: Vec<ShapeSource> =
+                coverage::loaded_cover(&vector_sources, coords, world)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|source| ShapeSource {
+                        coords: source,
+                        raster_source: None,
+                    })
+                    .collect();
             for (name, covering) in raster_coverings {
                 let covered: Vec<WorldTileCoords> = covering_shapes_for(coords, covering)
                     .into_iter()
@@ -93,7 +92,8 @@ pub(crate) fn select_targets(
                     .collect();
                 // A partial child set would erase the uncovered part when the drape is cleared.
                 let covered = coverage::complete_cover(coords, covered)
-                    .unwrap_or_else(|| loaded_shapes(&raster_sources, coords, world));
+                    .or_else(|| coverage::loaded_cover(&raster_sources, coords, world))
+                    .unwrap_or_default();
                 shapes.extend(covered.into_iter().map(|source| ShapeSource {
                     coords: source,
                     raster_source: Some(name.clone()),
@@ -102,26 +102,6 @@ pub(crate) fn select_targets(
             (coords, shapes)
         })
         .collect()
-}
-
-/// The loaded tiles nearest to `coords` in the pyramid: itself, complete children, the parent,
-/// or no shape until complete coverage is available.
-fn loaded_shapes(
-    sources: &KindSources<'_>,
-    coords: WorldTileCoords,
-    world: &World,
-) -> Vec<WorldTileCoords> {
-    if sources.has_tile(coords, world) {
-        vec![coords]
-    } else if let Some(children) =
-        sources.get_complete_children(coords, world, COMPLETE_CHILDREN_SEARCH_DEPTH)
-    {
-        children
-    } else if let Some(parent) = sources.get_available_parent(coords, world) {
-        vec![parent]
-    } else {
-        Vec::new()
-    }
 }
 
 /// Lists the drapeable layers each source tile currently holds.

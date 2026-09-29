@@ -1,11 +1,8 @@
 //! A cached drape is replaced only by a complete, uploaded set of visible layers.
 
 use crate::{
-    io::tile_sources::RASTER_LAYER_TYPES,
-    style::Style,
-    tcs::world::World,
-    terrain::drape_targets::{coverage::covers_target, TargetSpec},
-    vector::geometry_uploaded,
+    io::tile_sources::RASTER_LAYER_TYPES, render::tile_view_pattern::coverage::covers_target,
+    style::Style, tcs::world::World, terrain::drape_targets::TargetSpec, vector::geometry_uploaded,
 };
 
 pub(super) fn ready(

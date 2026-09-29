@@ -1,17 +1,45 @@
-//! Geometric coverage of a drape target by a tile pyramid.
+//! Complete, disjoint source coverage shared by screen and terrain rendering.
 
-use crate::{coords::WorldTileCoords, projection::tile_covering::covers};
+use super::{HasTile, COMPLETE_CHILDREN_SEARCH_DEPTH};
+use crate::{coords::WorldTileCoords, projection::tile_covering::covers, tcs::world::World};
+
+/// The tile itself, complete descendants, or its nearest loaded ancestor.
+pub(crate) fn loaded_cover(
+    sources: &impl HasTile,
+    coords: WorldTileCoords,
+    world: &World,
+) -> Option<Vec<WorldTileCoords>> {
+    if sources.has_tile(coords, world) {
+        Some(vec![coords])
+    } else {
+        sources
+            .get_complete_children(coords, world, COMPLETE_CHILDREN_SEARCH_DEPTH)
+            .or_else(|| {
+                sources
+                    .get_available_parent(coords, world)
+                    .map(|parent| vec![parent])
+            })
+    }
+}
 
 /// A disjoint covering, or no replacement while some part of the target is missing.
-pub(super) fn complete_cover(
+pub(crate) fn complete_cover(
     target: WorldTileCoords,
-    mut tiles: Vec<WorldTileCoords>,
+    tiles: Vec<WorldTileCoords>,
 ) -> Option<Vec<WorldTileCoords>> {
     target.build_quad_key()?;
+    let disjoint = disjoint_tiles(target, tiles);
+    covers_target(target, &disjoint).then_some(disjoint)
+}
+
+pub(super) fn disjoint_tiles(
+    target: WorldTileCoords,
+    mut tiles: Vec<WorldTileCoords>,
+) -> Vec<WorldTileCoords> {
     tiles.retain(|tile| {
         tile.build_quad_key().is_some() && (covers(*tile, target) || covers(target, *tile))
     });
-    tiles.sort_unstable_by_key(|tile| (tile.z, tile.x, tile.y));
+    tiles.sort_by_key(|tile| tile.z);
     let mut disjoint = Vec::new();
     for tile in tiles {
         // Drawing both an ancestor and a descendant would blend translucent layers twice.
@@ -19,7 +47,7 @@ pub(super) fn complete_cover(
             disjoint.push(tile);
         }
     }
-    covers_target(target, &disjoint).then_some(disjoint)
+    disjoint
 }
 
 /// Checks the union, so duplicates and unrelated tiles cannot fill a missing quadrant.

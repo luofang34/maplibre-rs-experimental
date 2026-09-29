@@ -1,3 +1,5 @@
+//! Selects loaded source shapes and owns the tile metadata allocation.
+
 use std::{collections::HashSet, marker::PhantomData};
 
 use crate::{
@@ -16,11 +18,9 @@ use crate::{
 /// The tiles of every raster source, as its own covering selected them.
 pub type RasterCoverings = [(String, Vec<WorldTileCoords>)];
 
-// FIXME: If network is very slow, this pattern size can
-// increase dramatically.
-// E.g. imagine if a pattern for zoom level 18 is drawn
-// when completely zoomed out.
+/// Default number of metadata entries allocated for a tile view pattern.
 pub const DEFAULT_TILE_VIEW_PATTERN_SIZE: wgpu::BufferAddress = 512;
+/// Maximum descendant depth used when no complete source coverage is loaded.
 pub const CHILDREN_SEARCH_DEPTH: usize = 4;
 /// How many zoom levels down a complete set of finer tiles is preferred over a coarser parent.
 pub const COMPLETE_CHILDREN_SEARCH_DEPTH: usize = 2;
@@ -148,11 +148,14 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
                 .into_iter()
                 .filter(|source| raster_sources.has_tile(*source, world))
                 .collect();
-            let raster = if covered.is_empty() {
-                source_shapes(&raster_sources, coords, zoom, world, &mut raster_parents)
-            } else {
-                shapes_from_tiles(coords, covered, zoom)
-            };
+            let raster = raster_shapes(
+                &raster_sources,
+                coords,
+                covered,
+                zoom,
+                world,
+                &mut raster_parents,
+            );
             view_tiles.push(ViewTile {
                 target: coords,
                 vector,
@@ -206,14 +209,11 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
                 return;
             }
             shape.set_buffer_range(buffer.len() as u64);
-            // TODO: Name `ShaderTileMetadata` is unfortunate here, because for raster rendering it actually is a layer
             let transform = view_proj
                 .to_model_view_projection(shape.transform)
                 .downcast()
-                .into(); // TODO: move this calculation to update() fn above
+                .into();
             buffer.push(ShaderTileMetadata {
-                // We are casting here from 64bit to 32bit, because 32bit is more performant and is
-                // better supported.
                 transform,
                 zoom_factor: shape.zoom_factor as f32,
                 viewport_width,
@@ -248,6 +248,27 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
     }
 }
 
+fn raster_shapes<T: HasTile>(
+    sources: &T,
+    coords: WorldTileCoords,
+    covered: Vec<WorldTileCoords>,
+    zoom: Zoom,
+    world: &World,
+    used_parents: &mut HashSet<WorldTileCoords>,
+) -> SourceShapes {
+    let covered = super::coverage::disjoint_tiles(coords, covered);
+    let complete = super::coverage::covers_target(coords, &covered)
+        .then(|| covered.clone())
+        .or_else(|| super::coverage::loaded_cover(sources, coords, world));
+    if let Some(tiles) = complete {
+        selected_shapes(coords, tiles, zoom, used_parents)
+    } else if !covered.is_empty() {
+        selected_shapes(coords, covered, zoom, used_parents)
+    } else {
+        source_shapes(sources, coords, zoom, world, used_parents)
+    }
+}
+
 /// The loaded shapes nearest to `coords` in the pyramid: the tile itself, complete children,
 /// a parent, or whatever children exist. A parent already standing in for another view tile
 /// is not drawn twice.
@@ -258,38 +279,27 @@ fn source_shapes<T: HasTile>(
     world: &World,
     used_parents: &mut HashSet<WorldTileCoords>,
 ) -> SourceShapes {
-    if container.has_tile(coords, world) {
-        SourceShapes::SourceEqTarget(TileShape::new(coords, zoom))
-    } else if let Some(children_coords) =
-        container.get_complete_children(coords, world, COMPLETE_CHILDREN_SEARCH_DEPTH)
+    match super::coverage::loaded_cover(container, coords, world)
+        .or_else(|| container.get_available_children(coords, world, CHILDREN_SEARCH_DEPTH))
     {
-        SourceShapes::Children(
-            children_coords
-                .iter()
-                .map(|child_coord| TileShape::new(*child_coord, zoom))
-                .collect(),
-        )
-    } else if let Some(parent_coords) = container.get_available_parent(coords, world) {
-        log::debug!("Could not find data at {coords}. Falling back to {parent_coords}");
-        // Suppose the map only offers zoom levels 0-14. A pattern for z=18 finds no tiles
-        // and looks for parents; many view tiles then share one parent, drawn once.
-        if !used_parents.insert(parent_coords) {
+        Some(tiles) => selected_shapes(coords, tiles, zoom, used_parents),
+        None => SourceShapes::None,
+    }
+}
+
+fn selected_shapes(
+    coords: WorldTileCoords,
+    tiles: Vec<WorldTileCoords>,
+    zoom: Zoom,
+    used_parents: &mut HashSet<WorldTileCoords>,
+) -> SourceShapes {
+    if let [parent] = tiles.as_slice() {
+        // Adjacent view tiles sharing an ancestor must not blend that ancestor repeatedly.
+        if parent.z < coords.z && !used_parents.insert(*parent) {
             return SourceShapes::None;
         }
-        SourceShapes::Parent(TileShape::new(parent_coords, zoom))
-    } else if let Some(children_coords) =
-        container.get_available_children(coords, world, CHILDREN_SEARCH_DEPTH)
-    {
-        log::debug!("Could not find data at {coords}. Falling back children: {children_coords:?}");
-        SourceShapes::Children(
-            children_coords
-                .iter()
-                .map(|child_coord| TileShape::new(*child_coord, zoom))
-                .collect(),
-        )
-    } else {
-        SourceShapes::None
     }
+    shapes_from_tiles(coords, tiles, zoom)
 }
 
 /// Shapes for covering tiles that overlap `coords`: the tile itself, its descendants, or the

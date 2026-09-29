@@ -216,4 +216,5 @@ fn bridge_width_units_follow_style_scale_independently_of_gaze_zoom() {
     }
 }
 
+mod coverage_transition;
 mod metadata_upload;

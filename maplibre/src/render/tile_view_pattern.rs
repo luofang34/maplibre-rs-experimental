@@ -1,4 +1,6 @@
-//! Utility for generating a tile pattern which can be used for masking.
+//! Loaded tile coverage and per-frame metadata for stencil masks and tile draws.
+
+pub(crate) mod coverage;
 
 mod pattern;
 
