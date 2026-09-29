@@ -1,3 +1,7 @@
+//! Viewport, camera and elevation state used for projection and tile visibility.
+
+#![deny(missing_docs)]
+
 use std::{
     f64,
     ops::{Deref, DerefMut},
@@ -27,14 +31,16 @@ const MAX_MERCATOR_HORIZON_ANGLE: Rad<f64> = Rad(89.25 * f64::consts::PI / 180.0
 const MIN_RENDER_DISTANCE_BELOW_CAMERA_METERS: f64 = 100.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Tile padding around the Mercator view's projected ground bounds.
 pub enum ViewStatePadding {
-    // This is helpful for loading a set of tiles.
+    /// Include one extra row and column on each side for tile prefetching.
     Loose,
-    // This is helpful for rendering a set of tiles.
+    /// Use the projected bounds without extra tile padding.
     Tight,
 }
 
-#[derive(Clone)] // TODO: Remove
+/// Camera, viewport and terrain reference state for one map view.
+#[derive(Clone)]
 pub struct ViewState {
     zoom: ChangeObserver<Zoom>,
     camera: ChangeObserver<Camera>,
@@ -70,6 +76,8 @@ impl ViewState {
         self.opaque_environment = opaque;
     }
 
+    /// Creates a view with physical-pixel dimensions and a center in world pixels at `zoom`.
+    /// Initial bearing, roll, padding and terrain elevations are zero; `fovy` is the full angle.
     pub fn new<F: Into<Rad<f64>>, P: Into<Deg<f64>>>(
         window_size: PhysicalSize,
         position: WorldCoords,
@@ -178,19 +186,24 @@ impl ViewState {
             .atan();
         world_size / (self.body.circumference_meters() * latitude.cos())
     }
+    /// Sets padding in the same pixel units as the stored viewport dimensions.
     pub fn set_edge_insets(&mut self, edge_insets: EdgeInsets) {
         self.edge_insets = edge_insets;
     }
 
+    /// Returns the padding that shifts the viewport's apparent map center.
     pub fn edge_insets(&self) -> &EdgeInsets {
         &self.edge_insets
     }
 
+    /// Replaces the viewport dimensions with logical pixels without changing the camera or padding.
     pub fn resize(&mut self, size: LogicalSize) {
         self.width = size.width() as f64;
         self.height = size.height() as f64;
     }
 
+    /// Covers the Mercator ground bounds at `visible_level`, with iteration capped at 512 tiles.
+    /// Returns `None` if the projection cannot be inverted or has no usable ground bounds.
     pub fn create_view_region(
         &self,
         visible_level: ZoomLevel,
@@ -222,8 +235,7 @@ impl ViewState {
 
     /// Distances in pixels the fog depth spans: from the camera's distance to sea level, where
     /// the map center sits, to the far plane, as the GL JS fog matrix takes them. An external
-    /// eye's fog is fixed by its height instead, see
-    /// [`eye_fog_depth_range`](Self::eye_fog_depth_range).
+    /// eye's fog is fixed by its height instead.
     pub fn fog_depth_range(&self) -> (f64, f64) {
         if let Some(range) = self.eye_fog_depth_range() {
             return range;
@@ -310,6 +322,7 @@ impl ViewState {
         (near_z, far_z)
     }
 
+    /// Orbit distance in pixels derived from the viewport height and vertical field of view.
     pub fn camera_to_center_distance(&self) -> f64 {
         let height = self.height;
 
@@ -332,8 +345,8 @@ impl ViewState {
         center - Vector2::new(self.width, self.height) / 2.0
     }
 
-    /// This function matches how maplibre-gl-js implements perspective and cameras at the time
-    /// of the mapbox -> maplibre fork: [src/geo/transform.ts#L680](https://github.com/maplibre/maplibre-gl-js/blob/e78ad7944ef768e67416daa4af86b0464bd0f617/src/geo/transform.ts#L680)
+    /// Projects world x/y in pixels and elevation in metres into clip space with depth `[0, w]`.
+    /// CPU unprojection uses this unreversed depth; GPU rendering uses [`Self::gpu_view_projection`].
     #[tracing::instrument(skip_all)]
     pub fn view_projection(&self) -> ViewProjection {
         let camera_matrix = self.camera_matrix();
@@ -396,14 +409,17 @@ impl ViewState {
         ViewProjection(REVERSED_Z * self.view_projection().0)
     }
 
+    /// Returns the continuous zoom that defines the world-pixel scale.
     pub fn zoom(&self) -> Zoom {
         *self.zoom
     }
 
+    /// Whether zoom differs from the stored reference by more than 0.05, or no reference exists.
     pub fn did_zoom_change(&self) -> bool {
         self.zoom.did_change(0.05)
     }
 
+    /// Sets zoom without rescaling the world-pixel center; [`Self::zoom_to`] preserves its location.
     pub fn update_zoom(&mut self, new_zoom: Zoom) {
         *self.zoom = new_zoom;
         tracing::debug!(zoom = new_zoom.value(), "zoom changed");
@@ -420,26 +436,33 @@ impl ViewState {
         self.update_zoom(new_zoom);
     }
 
+    /// Borrows the map's orbit camera, which is retained while an external view is active.
     pub fn camera(&self) -> &Camera {
         self.camera.deref()
     }
 
+    /// Mutably borrows the orbit camera without updating the change-detection reference.
     pub fn camera_mut(&mut self) -> &mut Camera {
         self.camera.deref_mut()
     }
 
+    /// Whether a position component or angle differs by over 0.05 pixels or radians, respectively.
+    /// Returns true before a reference is stored; pitch-limit changes alone are not compared.
     pub fn did_camera_change(&self) -> bool {
         self.camera.did_change(0.05)
     }
 
+    /// Stores the current camera and zoom as references for subsequent change detection.
     pub fn update_references(&mut self) {
         self.camera.update_reference();
         self.zoom.update_reference();
     }
 
+    /// Viewport height: physical pixels at construction, logical pixels after [`Self::resize`].
     pub fn height(&self) -> f64 {
         self.height
     }
+    /// Viewport width: physical pixels at construction, logical pixels after [`Self::resize`].
     pub fn width(&self) -> f64 {
         self.width
     }

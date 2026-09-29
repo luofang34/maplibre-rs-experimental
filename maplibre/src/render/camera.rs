@@ -1,10 +1,13 @@
-//! Main camera
+//! Orbit cameras and homogeneous transforms between world, camera and clip coordinates.
+
+#![deny(missing_docs)]
 
 use cgmath::{num_traits::clamp, prelude::*, *};
 
 use crate::util::SignificantlyDifferent;
 
 #[rustfmt::skip]
+/// Converts OpenGL clip depth `[-w, w]` to WebGPU depth `[0, w]` without reversing it.
 pub const OPENGL_TO_WGPU_MATRIX: Matrix4<f64> = Matrix4::new(
     1.0, 0.0, 0.0, 0.0,
     0.0, 1.0, 0.0, 0.0,
@@ -13,6 +16,7 @@ pub const OPENGL_TO_WGPU_MATRIX: Matrix4<f64> = Matrix4::new(
 );
 
 #[rustfmt::skip]
+/// Reflects the vertical coordinate while preserving horizontal position and depth.
 pub const FLIP_Y: Matrix4<f64> = Matrix4::new(
     1.0, 0.0, 0.0, 0.0, 
     0.0, -1.0, 0.0, 0.0, 
@@ -25,7 +29,7 @@ pub const FLIP_Y: Matrix4<f64> = Matrix4::new(
 /// Float depth spacing then cancels the perspective divide, which keeps metre-scale geometry
 /// near the camera and terrain hundreds of kilometres away from fighting in one depth buffer.
 /// Depth-writing pipelines compare with `GreaterEqual` and the depth attachment clears to 0.
-/// CPU-side unprojection keeps the OpenGL-style matrices where the far plane sits at depth 1.
+/// CPU-side unprojection keeps unreversed depth, where the far plane sits at depth 1.
 #[rustfmt::skip]
 pub const REVERSED_Z: Matrix4<f64> = Matrix4::new(
     1.0, 0.0, 0.0, 0.0,
@@ -35,7 +39,11 @@ pub const REVERSED_Z: Matrix4<f64> = Matrix4::new(
 );
 
 #[derive(Debug, Clone, Copy)]
-pub struct ViewProjection(pub Matrix4<f64>);
+/// World-to-clip transform; its depth convention is determined by the constructor or caller.
+pub struct ViewProjection(
+    /// Column-major transform applied to homogeneous world coordinates.
+    pub Matrix4<f64>,
+);
 
 /// A projection cannot be unprojected into finite world coordinates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -57,27 +65,32 @@ impl ViewProjection {
         })
     }
 
+    /// Transforms a homogeneous world position without dividing the result by its `w` component.
     pub fn project(&self, vector: Vector4<f64>) -> Vector4<f64> {
         self.0 * vector
     }
 
     #[tracing::instrument(skip_all)]
+    /// Prepends a model-to-world transform on the input side of this view projection.
     pub fn to_model_view_projection(&self, projection: Matrix4<f64>) -> ModelViewProjection {
         ModelViewProjection(self.0 * projection)
     }
 
+    /// Copies the matrix to GPU precision; large world translations can lose low-order bits.
     pub fn downcast(&self) -> Matrix4<f32> {
         let columns: [[f64; 4]; 4] = self.0.into();
         Matrix4::from(columns.map(|column| column.map(|value| value as f32)))
     }
 }
 
+/// Clip-to-world transform with separate projection and camera factors for numerical precision.
 pub struct InvertedViewProjection {
     pub(crate) clip_to_camera: Matrix4<f64>,
     pub(crate) camera_to_world: Matrix4<f64>,
 }
 
 impl InvertedViewProjection {
+    /// Transforms a homogeneous clip position; divide by the returned `w` for world coordinates.
     pub fn project(&self, vector: Vector4<f64>) -> Vector4<f64> {
         // Form the camera ray before adding the world translation. Multiplying these
         // matrices first would cancel the small homogeneous depth at the far plane.
@@ -85,18 +98,22 @@ impl InvertedViewProjection {
     }
 }
 
+/// Combined model-to-world and world-to-clip transform.
 pub struct ModelViewProjection(Matrix4<f64>);
 
 impl ModelViewProjection {
+    /// Copies the transform to GPU precision without changing its coordinate convention.
     pub fn downcast(&self) -> Matrix4<f32> {
         let columns: [[f64; 4]; 4] = self.0.into();
         Matrix4::from(columns.map(|column| column.map(|value| value as f32)))
     }
 
+    /// Returns the column-major model-to-clip matrix at CPU precision.
     pub fn get(&self) -> Matrix4<f64> {
         self.0
     }
 
+    /// Transforms a homogeneous model position without performing the perspective divide.
     pub fn project(&self, vector: Vector4<f64>) -> Vector4<f64> {
         self.0 * vector
     }
@@ -110,6 +127,7 @@ const MIN_YAW: Deg<f64> = Deg(-30.0);
 const MAX_YAW: Deg<f64> = Deg(30.0);
 
 #[derive(Debug, Clone)]
+/// Orientation around a map center expressed in world pixels, with angles stored in radians.
 pub struct Camera {
     position: Point2<f64>,
     yaw: Rad<f64>,
@@ -132,6 +150,9 @@ impl SignificantlyDifferent for Camera {
 }
 
 impl Camera {
+    /// Creates a camera with zero bearing and roll, clamping pitch to its default limits.
+    ///
+    /// `position` is the orbit center in world pixels. Initial yaw is stored without clamping.
     pub fn new<V: Into<Point2<f64>>, Y: Into<Rad<f64>>, P: Into<Rad<f64>>>(
         position: V,
         yaw: Y,
@@ -154,11 +175,15 @@ impl Camera {
     }
 
     /// Sets the largest pitch the camera accepts and clamps the current pitch to it.
+    /// Callers must supply a finite limit at or above -30 degrees.
     pub fn set_max_pitch<P: Into<Rad<f64>>>(&mut self, max_pitch: P) {
         self.max_pitch = max_pitch.into();
         self.set_pitch(self.pitch);
     }
 
+    /// Builds the world-to-camera matrix with an orbit distance in world pixels.
+    ///
+    /// All three input axes must use the same pixel scale; elevation scaling belongs to the caller.
     pub fn calc_matrix(&self, camera_height: f64) -> Matrix4<f64> {
         // GL JS turns the world by minus the bearing, so a bearing of 90 degrees puts east at the
         // top of the screen, and then turns the view by minus the roll about the view axis.
@@ -170,14 +195,17 @@ impl Camera {
             * Matrix4::from_translation(Vector3::new(-self.position.x, -self.position.y, 0.0))
     }
 
+    /// Returns the orbit center in world pixels, independent of pitch and bearing.
     pub fn position(&self) -> Point2<f64> {
         self.position
     }
 
+    /// Returns the lateral camera rotation in radians.
     pub fn get_yaw(&self) -> Rad<f64> {
         self.yaw
     }
 
+    /// Adds a yaw delta only if the result stays between -30 and 30 degrees.
     pub fn yaw<P: Into<Rad<f64>>>(&mut self, delta: P) {
         let new_yaw = self.yaw + delta.into();
 
@@ -196,10 +224,12 @@ impl Camera {
         self.roll
     }
 
+    /// Returns tilt away from a vertical map view in radians.
     pub fn get_pitch(&self) -> Rad<f64> {
         self.pitch
     }
 
+    /// Adds a pitch delta only if the result stays between -30 degrees and [`Self::max_pitch`].
     pub fn pitch<P: Into<Rad<f64>>>(&mut self, delta: P) {
         let new_pitch = self.pitch + delta.into();
 
@@ -208,58 +238,64 @@ impl Camera {
         }
     }
 
+    /// Offsets the orbit center in world pixels, without rotating the delta by the camera bearing.
     pub fn move_relative(&mut self, delta: Vector2<f64>) {
         self.position += delta;
     }
 
+    /// Replaces the orbit center in world pixels without changing orientation.
     pub fn move_to(&mut self, new_position: Point2<f64>) {
         self.position = new_position;
     }
 
+    /// Returns the world-pixel orbit center as a vector from the world origin.
     pub fn position_vector(&self) -> Vector2<f64> {
         self.position.to_vec()
     }
 
+    /// Appends a pixel height to the orbit center; this does not apply the camera's rotations.
     pub fn to_3d(&self, camera_height: f64) -> Point3<f64> {
         Point3::new(self.position.x, self.position.y, camera_height)
     }
+    /// Sets lateral rotation, clamped to -30 through 30 degrees.
     pub fn set_yaw<P: Into<Rad<f64>>>(&mut self, yaw: P) {
         let new_yaw = yaw.into();
         let max: Rad<_> = MAX_YAW.into();
         let min: Rad<_> = MIN_YAW.into();
         self.yaw = Rad(new_yaw.0.min(max.0).max(min.0))
     }
+    /// Sets tilt, clamped to -30 degrees through [`Self::max_pitch`].
     pub fn set_pitch<P: Into<Rad<f64>>>(&mut self, pitch: P) {
         let new_pitch = pitch.into();
         let min: Rad<_> = MIN_PITCH.into();
         self.pitch = Rad(new_pitch.0.min(self.max_pitch.0).max(min.0))
     }
+    /// Sets clockwise rotation from north without normalizing the angle.
     pub fn set_bearing<P: Into<Rad<f64>>>(&mut self, bearing: P) {
         self.bearing = bearing.into();
     }
+    /// Sets rotation about the view axis without clamping or normalizing the angle.
     pub fn set_roll<P: Into<Rad<f64>>>(&mut self, roll: P) {
         self.roll = roll.into();
     }
 }
 
 #[derive(PartialEq, Copy, Clone, Default)]
+/// Viewport padding in pixels that shifts the apparent map center without resizing the viewport.
 pub struct EdgeInsets {
+    /// Padding measured down from the top edge.
     pub top: f64,
+    /// Padding measured up from the bottom edge.
     pub bottom: f64,
+    /// Padding measured right from the left edge.
     pub left: f64,
+    /// Padding measured left from the right edge.
     pub right: f64,
 }
 
 impl EdgeInsets {
-    /**
-     * Utility method that computes the new apparent center or vanishing point after applying insets.
-     * This is in pixels and with the top left being (0.0) and +y being downwards.
-     *
-     * @param {number} width the width
-     * @param {number} height the height
-     * @returns {Point} the point
-     * @memberof EdgeInsets
-     */
+    /// Returns the padded center in viewport pixels, clamped to the viewport bounds.
+    /// Coordinates start at the top left and increase rightward and downward.
     pub fn center(&self, width: f64, height: f64) -> Point2<f64> {
         // Clamp insets so they never overflow width/height and always calculate a valid center
         let x = clamp((self.left + width - self.right) / 2.0, 0.0, width);
@@ -270,45 +306,61 @@ impl EdgeInsets {
 }
 
 #[derive(Clone)]
+/// Vertical field of view used to construct OpenGL-convention perspective matrices.
 pub struct Perspective {
     fovy: Rad<f64>,
 }
 
 impl Perspective {
+    /// Stores a vertical field of view without validating its range.
     pub fn new<F: Into<Rad<f64>>>(fovy: F) -> Self {
         let rad = fovy.into();
         Self { fovy: rad }
     }
 
+    /// Returns the full vertical viewing angle in radians.
     pub fn fovy(&self) -> Rad<f64> {
         self.fovy
     }
+    /// Returns the horizontal viewing angle for a viewport with positive width and height.
     pub fn fovx(&self, width: f64, height: f64) -> Rad<f64> {
         let aspect = width / height;
         Rad(2.0 * ((self.fovy / 2.0).tan() * aspect).atan())
     }
 
+    /// Returns the half-height of the frustum at unit distance from the eye.
     pub fn y_tan(&self) -> f64 {
         let half_fovy = self.fovy / 2.0;
         half_fovy.tan()
     }
+    /// Returns the half-width of the frustum at unit distance for the given viewport aspect.
     pub fn x_tan(&self, width: f64, height: f64) -> f64 {
         let half_fovx = self.fovx(width, height) / 2.0;
         half_fovx.tan()
     }
 
+    /// Expresses a pixel center offset as a fraction of the viewport's half-width.
     pub fn offset_x(&self, center_offset: Point2<f64>, width: f64) -> f64 {
         center_offset.x * 2.0 / width
     }
 
+    /// Expresses a pixel center offset as a fraction of the viewport's half-height.
     pub fn offset_y(&self, center_offset: Point2<f64>, height: f64) -> f64 {
         center_offset.y * 2.0 / height
     }
 
+    /// Builds a centered perspective matrix with OpenGL clip depth `[-w, w]`.
+    /// `aspect` is width/height; clip distances must satisfy `0 < near_z < far_z`.
+    ///
+    /// # Panics
+    /// Panics if the field of view is outside `(0, pi)`, the aspect is approximately zero,
+    /// or clip distances are nonpositive or approximately equal, as checked by [`cgmath::perspective`].
     pub fn calc_matrix(&self, aspect: f64, near_z: f64, far_z: f64) -> Matrix4<f64> {
         perspective(self.fovy, aspect, near_z, far_z)
     }
 
+    /// Builds an off-center perspective matrix with OpenGL clip depth `[-w, w]`.
+    /// Viewport dimensions and the center offset share pixel units; clip distances share world units.
     pub fn calc_matrix_with_center(
         &self,
         width: f64,
