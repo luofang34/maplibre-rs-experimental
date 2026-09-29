@@ -323,5 +323,6 @@ fn sphere_depth(
 }
 
 mod route;
+mod seams;
 mod sphere;
 mod tests;

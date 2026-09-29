@@ -65,6 +65,7 @@ pub fn resource_system(
         )
         .with_depth_write()
         .describe_render_pipeline();
+        descriptor.primitive.cull_mode = Some(wgpu::Face::Back);
         descriptor.layout = Some(vec![TerrainResources::bind_group_layout_entries()]);
         let pipeline = descriptor
             .initialize_with_prefix_layouts(device, &[projection_resources.bind_group_layout()]);

@@ -24,11 +24,10 @@ struct TerrainTileUniforms {
 
 struct VertexOutput {
     @location(0) tex_coords: vec2<f32>,
-    @location(1) horizon_distance: f32,
     // Distance along the view axis, the clip w, from which the fragment takes its fog.
-    @location(2) eye_depth: f32,
-    @location(3) surface_normal: vec3<f32>,
-    @location(4) camera_relative_position: vec3<f32>,
+    @location(1) eye_depth: f32,
+    @location(2) surface_normal: vec3<f32>,
+    @location(3) camera_relative_position: vec3<f32>,
     @builtin(position) clip_position: vec4<f32>,
 };
 
@@ -112,8 +111,9 @@ fn main(
 ) -> VertexOutput {
     let position = clamp(vec2<f32>(raw_position), vec2<f32>(0.0), vec2<f32>(TERRAIN_EXTENT));
     var surface_position_2d = position;
-    let north_cap = raw_position.y == -32768 && terrain_tile.tile_mercator_coords.y == 0.0;
-    let south_cap = raw_position.y == 32767 &&
+    let caps_enabled = projection.transition_and_padding.x > 0.0;
+    let north_cap = caps_enabled && raw_position.y == -32768 && terrain_tile.tile_mercator_coords.y == 0.0;
+    let south_cap = caps_enabled && raw_position.y == 32767 &&
         terrain_tile.tile_mercator_coords.y + TERRAIN_EXTENT * terrain_tile.tile_mercator_coords.w >= 1.0;
     if north_cap || south_cap { surface_position_2d.y = f32(raw_position.y); }
     // Every longitude meets at the same altitude; unknown polar DEM samples cannot split the fan.
@@ -140,7 +140,6 @@ fn main(
     if north_cap || south_cap { normal = vec3<f32>(0.0, 0.0, 1.0); }
     return VertexOutput(
         position / TERRAIN_EXTENT,
-        projected.horizon_distance,
         projected.clip_position.w,
         normal,
         terrain_tile.fog_position.xyz + vec3<f32>(position.x * terrain_tile.fog_position.w,

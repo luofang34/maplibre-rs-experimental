@@ -22,10 +22,9 @@ struct TerrainTileUniforms {
 
 struct VertexOutput {
     @location(0) tex_coords: vec2<f32>,
-    @location(1) horizon_distance: f32,
-    @location(2) eye_depth: f32,
-    @location(3) surface_normal: vec3<f32>,
-    @location(4) camera_relative_position: vec3<f32>,
+    @location(1) eye_depth: f32,
+    @location(2) surface_normal: vec3<f32>,
+    @location(3) camera_relative_position: vec3<f32>,
     @builtin(position) position: vec4<f32>,
 };
 
@@ -46,9 +45,6 @@ fn main(in: VertexOutput) -> @location(0) vec4<f32> {
     let up_normal = normalize(in.surface_normal);
     let light = normalize(vec3<f32>(-0.5, 0.5, 1.0));
     let relief = 1.0 + terrain_tile.relief_strength * (dot(up_normal, light) - light.z);
-    if in.horizon_distance < 0.0 {
-        discard;
-    }
     let drape_uv = (terrain_tile.drape_matrix * vec4<f32>(in.tex_coords, 0.0, 1.0)).xy;
     let draped = select(textureSample(drape_texture, drape_sampler, drape_uv),
         terrain_tile.surface_color, terrain_tile.fog_opacity.z > 0.5);

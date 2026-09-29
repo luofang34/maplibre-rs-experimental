@@ -137,11 +137,16 @@ fn build_polar_caps(mesh: &mut TerrainMesh, n: u32, delta: i32) {
                 .push(TerrainVertex::new(x as i32 * delta, i32::from(marker), 0));
         }
         for x in 0..n {
-            let mut triangle = [edge + x, edge + x + 1, start + x];
-            if marker == i16::MIN {
-                triangle.swap(0, 1);
+            // Pole vertices coincide only at a fully spherical projection.
+            for mut triangle in [
+                [edge + x, edge + x + 1, start + x],
+                [edge + x + 1, start + x + 1, start + x],
+            ] {
+                if marker == i16::MAX {
+                    triangle.swap(0, 1);
+                }
+                mesh.indices.extend(triangle);
             }
-            mesh.indices.extend(triangle);
         }
     }
 }
