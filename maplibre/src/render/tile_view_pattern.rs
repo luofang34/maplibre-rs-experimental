@@ -1,5 +1,7 @@
 //! Loaded tile coverage and per-frame metadata for stencil masks and tile draws.
 
+#![deny(missing_docs, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 pub(crate) mod coverage;
 
 mod pattern;
@@ -8,8 +10,8 @@ use std::{marker::PhantomData, mem::size_of, ops::Range};
 
 use cgmath::Matrix4;
 pub use pattern::{
-    covering_shapes_for, RasterCoverings, TileViewPattern, COMPLETE_CHILDREN_SEARCH_DEPTH,
-    DEFAULT_TILE_VIEW_PATTERN_SIZE,
+    covering_shapes_for, RasterCoverings, TileMetadataOverflow, TileViewPattern,
+    COMPLETE_CHILDREN_SEARCH_DEPTH, DEFAULT_TILE_VIEW_PATTERN_SIZE,
 };
 
 use crate::{
@@ -19,6 +21,7 @@ use crate::{
     tcs::{resources::ResourceQuery, world::World},
 };
 
+/// Tile pattern backed by a wgpu metadata buffer and queue.
 pub type WgpuTileViewPattern = TileViewPattern<wgpu::Queue, wgpu::Buffer>;
 
 /// If not otherwise specified, raster tiles usually are 512.0 by 512.0 pixel.
@@ -87,6 +90,7 @@ pub struct ViewTile {
 }
 
 impl ViewTile {
+    /// Tile coordinate represented by this entry.
     pub fn coords(&self) -> WorldTileCoords {
         self.target
     }
@@ -122,7 +126,6 @@ impl ViewTile {
 pub struct TileShape {
     coords: WorldTileCoords,
 
-    // TODO: optimization, `zoom_factor` and `transform` are no longer required if `buffer_range` is Some()
     zoom_factor: f64,
     transform: Matrix4<f64>,
 
@@ -159,10 +162,13 @@ impl TileShape {
         self.buffer_range = None;
     }
 
+    /// Byte range populated by the latest upload, or `None` before upload or on overflow.
+    /// The range is valid until the pattern buffer is uploaded again.
     pub fn buffer_range(&self) -> Option<Range<wgpu::BufferAddress>> {
         self.buffer_range.clone()
     }
 
+    /// Tile coordinate represented by this entry.
     pub fn coords(&self) -> WorldTileCoords {
         self.coords
     }
@@ -177,9 +183,13 @@ impl Default for TileShape {
     }
 }
 
+/// Availability provider used to choose loaded replacements for requested tiles.
+/// Missing or uninitialized backing resources must report tiles as unavailable.
 pub trait HasTile {
+    /// Whether this tile has the resources required by the provider to render.
     fn has_tile(&self, coords: WorldTileCoords, world: &World) -> bool;
 
+    /// Finds the nearest available ancestor, including `coords` itself; returns `None` at an empty root.
     fn get_available_parent(
         &self,
         coords: WorldTileCoords,
@@ -198,8 +208,8 @@ pub trait HasTile {
 
     /// Loaded descendants that cover `coords` completely, at most `search_depth` levels down.
     ///
-    /// Finer tiles are preferred over a coarser parent, as GL JS retains loaded children
-    /// first; a raster source of 256-pixel tiles covers each 512-pixel view tile this way.
+    /// Returns `None` at depth zero or if any quadrant lacks data within the search depth.
+    /// Coordinates must allow subdivision through the requested depth without integer overflow.
     fn get_complete_children(
         &self,
         coords: WorldTileCoords,
@@ -220,6 +230,9 @@ pub trait HasTile {
         Some(output)
     }
 
+    /// Finds available descendants up to `search_depth` levels below `coords`.
+    /// Stops descending each loaded branch; coverage can be partial and an empty result is `Some([])`.
+    /// Coordinates must allow subdivision through the requested depth without integer overflow.
     fn get_available_children(
         &self,
         coords: WorldTileCoords,
@@ -274,6 +287,7 @@ impl<A: HasTile, B: HasTile, C: HasTile> HasTile for (A, B, C) {
     }
 }
 
+/// Resolves a resource query for each availability check; absent resources return `false`.
 pub struct QueryHasTile<Q> {
     phantom_q: PhantomData<Q>,
 }
@@ -291,12 +305,10 @@ where
     for<'a> Q::Item<'a>: HasTile,
 {
     fn has_tile(&self, coords: WorldTileCoords, world: &World) -> bool {
-        let resources = world
+        world
             .resources
             .query::<Q>()
-            .expect("resource not found for has_tile check");
-
-        resources.has_tile(coords, world)
+            .is_some_and(|resources| resources.has_tile(coords, world))
     }
 }
 
