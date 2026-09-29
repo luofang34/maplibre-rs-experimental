@@ -115,7 +115,9 @@ impl Default for RasterSource {
 /// Represents the tiles' different types of source.
 #[derive(Clone, Debug)]
 pub enum SourceType {
+    /// Raster image tile URL template.
     Raster(RasterSource),
+    /// Vector tile URL template for geometry processing.
     Tessellate(TessellateSource),
 }
 

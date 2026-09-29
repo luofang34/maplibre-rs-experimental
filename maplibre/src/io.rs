@@ -1,4 +1,6 @@
-//! Handles IO related processing as well as multithreading.
+//! Source loading, tile geometry indexing, and asynchronous worker transport.
+
+#![deny(missing_docs)]
 
 pub use geozero::mvt::tile::Layer as RawLayer;
 
