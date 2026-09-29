@@ -1,3 +1,7 @@
+//! Raster tile requests, decoded image results and GPU draw registration.
+
+#![deny(missing_docs)]
+
 use std::{marker::PhantomData, rc::Rc};
 
 use image::RgbaImage;
@@ -38,6 +42,8 @@ pub use transferables::{
 
 use crate::render::graph::RenderGraph;
 
+/// Registers raster requests, worker results, uploads and draws with the render schedule.
+/// `T` supplies the host-specific worker message representation.
 pub struct RasterPlugin<T>(PhantomData<T>);
 
 impl<T: RasterTransferables> Default for RasterPlugin<T> {
@@ -73,23 +79,33 @@ impl<E: Environment, T: RasterTransferables> Plugin<E> for RasterPlugin<T> {
         );
         schedule.add_system_to_stage(RenderStageLabel::Prepare, resource_system);
         schedule.add_system_to_stage(RenderStageLabel::Queue, upload_system);
-        schedule.add_system_to_stage(RenderStageLabel::Queue, queue_system); // FIXME tcs: Upload updates the TileView in tileviewpattern -> upload most run before prepare
+        schedule.add_system_to_stage(RenderStageLabel::Queue, queue_system);
     }
 }
 
+/// Decoded tile pixels waiting for upload; availability does not imply GPU residency.
 pub struct AvailableRasterLayerData {
+    /// Tile-grid coordinates covered by the image.
     pub coords: WorldTileCoords,
+    /// Worker source-layer label, normally `raster`; this is not a style source ID.
     pub source_layer: String,
+    /// Decoded RGBA8 texels sampled without sRGB-to-linear conversion.
     pub image: RgbaImage,
 }
 
+/// A completed raster request that produced no usable image.
 pub struct MissingRasterLayerData {
+    /// Coordinates of the unavailable tile.
     pub coords: WorldTileCoords,
+    /// Worker source-layer label, normally `raster`.
     pub source_layer: String,
 }
 
+/// A worker result retained on a tile before GPU upload and fallback selection.
 pub enum RasterLayerData {
+    /// Decoded pixels can supply coverage once uploaded.
     Available(AvailableRasterLayerData),
+    /// Fetching or decoding yielded no image; usable ancestors must remain eligible.
     Missing(MissingRasterLayerData),
 }
 
@@ -107,8 +123,10 @@ impl RasterLayersDataComponent {
     }
 }
 
+/// Received raster results; an empty component has no completed result yet.
 #[derive(Default)]
 pub struct RasterLayersDataComponent {
+    /// Available and unavailable worker results retained for this tile.
     pub layers: Vec<RasterLayerData>,
 }
 

@@ -1,3 +1,5 @@
+//! Raster draw commands that stop when uploaded textures, meshes or metadata are missing.
+
 use crate::{
     raster::resource::RasterResources,
     render::{
@@ -10,6 +12,7 @@ use crate::{
     tcs::world::World,
 };
 
+/// Binds the raster pipeline and the item's view or flat projection at group zero.
 pub struct SetRasterTilePipeline;
 impl<P: PhaseItem> RenderCommand<P> for SetRasterTilePipeline {
     fn render<'w>(
@@ -36,8 +39,9 @@ impl<P: PhaseItem> RenderCommand<P> for SetRasterTilePipeline {
     }
 }
 
-pub struct SetRasterViewBindGroup<const I: usize>;
-impl<const I: usize> RenderCommand<LayerItem> for SetRasterViewBindGroup<I> {
+/// Binds the tile's uploaded texture and sampler at the pipeline's fixed group one.
+pub struct SetRasterViewBindGroup;
+impl RenderCommand<LayerItem> for SetRasterViewBindGroup {
     fn render<'w>(
         world: &'w World,
         item: &LayerItem,
@@ -58,6 +62,7 @@ impl<const I: usize> RenderCommand<LayerItem> for SetRasterViewBindGroup<I> {
     }
 }
 
+/// Draws a cached tile mesh with the item's stencil reference and current metadata range.
 pub struct DrawRasterTile;
 impl RenderCommand<LayerItem> for DrawRasterTile {
     fn render<'w>(
@@ -91,16 +96,9 @@ impl RenderCommand<LayerItem> for DrawRasterTile {
         pass.set_vertex_buffer(0, mesh.vertex_buffer().slice(..));
         pass.set_vertex_buffer(
             1,
-            tile_view_pattern
-                .buffer()
-                .slice(tile_view_pattern_buffer.clone()),
-        );
-
-        // FIXME tcs: I passing random data here right now, but instead we need the correct metadata here
-        pass.set_vertex_buffer(
-            2,
             tile_view_pattern.buffer().slice(tile_view_pattern_buffer),
         );
+
         pass.set_index_buffer(mesh.index_buffer().slice(..), mesh.index_format());
         pass.draw_indexed(0..mesh.index_count(), 0, 0..1);
 
@@ -108,8 +106,9 @@ impl RenderCommand<LayerItem> for DrawRasterTile {
     }
 }
 
+/// Binds the raster pipeline and image, then draws only when every command succeeds.
 pub type DrawRasterTiles = (
     SetRasterTilePipeline,
-    SetRasterViewBindGroup<0>,
+    SetRasterViewBindGroup,
     DrawRasterTile,
 );

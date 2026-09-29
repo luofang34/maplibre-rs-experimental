@@ -1,8 +1,7 @@
-use super::{Shader, ShaderLayerMetadata, ShaderTileMetadata};
+use super::{Shader, ShaderTileMetadata};
 use crate::render::resource::{FragmentState, VertexBufferLayout, VertexState};
 
-/// The vertex buffers every tile-quad texture draw binds: the subdivided tile mesh, the
-/// tile metadata and the layer metadata.
+/// Raster and DEM draws bind the subdivided tile mesh at slot zero and tile metadata at slot one.
 pub fn tile_texture_vertex_buffers() -> Vec<VertexBufferLayout> {
     vec![
         // subdivided tile mesh
@@ -42,31 +41,12 @@ pub fn tile_texture_vertex_buffers() -> Vec<VertexBufferLayout> {
                     format: wgpu::VertexFormat::Float32x4,
                     shader_location: 7,
                 },
-                // zoom_factor
-                wgpu::VertexAttribute {
-                    offset: 4 * wgpu::VertexFormat::Float32x4.size(),
-                    format: wgpu::VertexFormat::Float32,
-                    shader_location: 9,
-                },
                 // tile_mercator_coords
                 wgpu::VertexAttribute {
                     offset: 4 * wgpu::VertexFormat::Float32x4.size()
                         + 3 * wgpu::VertexFormat::Float32.size(),
                     format: wgpu::VertexFormat::Float32x4,
                     shader_location: 2,
-                },
-            ],
-        },
-        // layer metadata
-        VertexBufferLayout {
-            array_stride: std::mem::size_of::<ShaderLayerMetadata>() as u64,
-            step_mode: wgpu::VertexStepMode::Instance,
-            attributes: vec![
-                // z_index
-                wgpu::VertexAttribute {
-                    offset: 0,
-                    format: wgpu::VertexFormat::Float32,
-                    shader_location: 10,
                 },
             ],
         },

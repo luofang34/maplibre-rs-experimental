@@ -59,7 +59,7 @@ impl RenderCommand<LayerItem> for SetDemLayerBindGroup {
 /// Draws one DEM tile shape with the layer's shading.
 pub type DrawDemTiles = (
     SetDemPipeline,
-    SetRasterViewBindGroup<0>,
+    SetRasterViewBindGroup,
     SetDemLayerBindGroup,
     DrawRasterTile,
 );

@@ -20,10 +20,6 @@ fn main(
     @location(5) translate2: vec4<f32>,
     @location(6) translate3: vec4<f32>,
     @location(7) translate4: vec4<f32>,
-    @location(9) zoom_factor: f32,
-
-    @location(10) z_index: f32,
-
 ) -> VertexOutput {
     let tile_position = vec3<f32>(vec2<f32>(raw_position), 0.0);
     let projected = project_tile_mesh_position(
