@@ -27,12 +27,13 @@ use crate::{
         source::{dem_source, DemSource},
         DrapePhase, TerrainFrame,
     },
-    vector::{geometry_uploaded, VectorBufferPool},
+    vector::VectorBufferPool,
 };
 mod cohort;
 mod covering;
 pub(crate) mod edges;
 mod prefetch;
+mod readiness;
 mod targets;
 use targets::target_specs;
 
@@ -379,14 +380,7 @@ fn prepare_drapes(
         .is_some_and(|state| state.enabled);
     let mut ready: Vec<bool> = specs
         .iter()
-        .map(|spec| {
-            !spec.shapes.is_empty()
-                && spec.shapes.iter().all(|shape| {
-                    !shape.raster_layers.is_empty()
-                        || ((!strict || shape.source == spec.coords)
-                            && geometry_uploaded(shape.source, world))
-                })
-        })
+        .map(|spec| readiness::ready(spec, style, view_state.style_zoom().value(), world, strict))
         .collect();
     let capacity = match world.resources.get::<Eventually<WgpuTileViewPattern>>() {
         Some(Initialized(pattern)) => pattern.remaining_metadata_capacity(),

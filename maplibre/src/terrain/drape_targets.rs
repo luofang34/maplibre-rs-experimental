@@ -3,8 +3,7 @@
 use crate::{
     coords::WorldTileCoords,
     hillshade::dem_layer_kind,
-    io::tile_sources::TileKind,
-    io::tile_sources::RASTER_LAYER_TYPES,
+    io::tile_sources::{TileKind, RASTER_LAYER_TYPES},
     raster::resource::RasterResources,
     render::{
         eventually::{Eventually, Eventually::Initialized},
@@ -19,6 +18,11 @@ use crate::{
 };
 
 const DRAPEABLE_LAYER_TYPES: [&str; 5] = ["fill", "line", "raster", "hillshade", "color-relief"];
+
+pub(super) mod coverage;
+
+#[cfg(test)]
+mod tests;
 
 /// Whether a style layer renders into drape textures rather than straight to the screen.
 pub fn is_drapeable(layer_type: &str) -> bool {
@@ -83,13 +87,13 @@ pub(crate) fn select_targets(
                 })
                 .collect();
             for (name, covering) in raster_coverings {
-                let mut covered: Vec<WorldTileCoords> = covering_shapes_for(coords, covering)
+                let covered: Vec<WorldTileCoords> = covering_shapes_for(coords, covering)
                     .into_iter()
                     .filter(|source| raster_sources.has_tile(*source, world))
                     .collect();
-                if covered.is_empty() {
-                    covered = loaded_shapes(&raster_sources, coords, world);
-                }
+                // A partial child set would erase the uncovered part when the drape is cleared.
+                let covered = coverage::complete_cover(coords, covered)
+                    .unwrap_or_else(|| loaded_shapes(&raster_sources, coords, world));
                 shapes.extend(covered.into_iter().map(|source| ShapeSource {
                     coords: source,
                     raster_source: Some(name.clone()),
@@ -161,8 +165,7 @@ pub(crate) fn collect_layer_specs(
                 .map(|shape| {
                     let has_raster = matches!(raster, Some(Initialized(resources))
                         if resources.get_bound_texture(&shape.coords).is_some());
-                    // Raster layers of a source without a covering of its own ride along with
-                    // the vector shapes, as every raster layer did before per-source coverings.
+                    // Raster sources without their own covering use the vector shapes.
                     let raster_layers = if !has_raster {
                         Vec::new()
                     } else {

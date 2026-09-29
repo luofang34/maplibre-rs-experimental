@@ -38,13 +38,14 @@ use crate::{
 mod processed;
 pub mod reference;
 mod symbols;
+#[cfg(test)]
+mod terrain_coverage;
 mod xr;
-
-pub use xr::XrFrameError;
 
 pub use processed::{
     process_geojson_layers, process_tile_layers, ProcessedLayers, SymbolLayer, VectorLayer,
 };
+pub use xr::XrFrameError;
 
 /// Failure while processing or rendering data through a [`HeadlessMap`].
 #[derive(Debug, Error)]
