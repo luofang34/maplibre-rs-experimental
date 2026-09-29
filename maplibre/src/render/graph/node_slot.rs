@@ -171,7 +171,7 @@ impl SlotInfos {
     pub fn get_slot_index(&self, label: impl Into<SlotLabel>) -> Option<usize> {
         let label = label.into();
         match label {
-            SlotLabel::Index(index) => Some(index),
+            SlotLabel::Index(index) => (index < self.slots.len()).then_some(index),
             SlotLabel::Name(ref name) => self
                 .slots
                 .iter()

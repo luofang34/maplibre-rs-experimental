@@ -67,8 +67,10 @@ impl<'a> RenderGraphContext<'a> {
         let index = self
             .input_info()
             .get_slot_index(label.clone())
-            .ok_or(InputSlotError::InvalidSlot(label))?;
-        Ok(&self.inputs[index])
+            .ok_or_else(|| InputSlotError::InvalidSlot(label.clone()))?;
+        self.inputs
+            .get(index)
+            .ok_or(InputSlotError::InvalidSlot(label))
     }
 
     /// Retrieves the input slot value referenced by the `label` as a [`TextureView`].
@@ -134,15 +136,19 @@ impl<'a> RenderGraphContext<'a> {
         let slot = self
             .output_info()
             .get_slot(slot_index)
-            .expect("slot is valid");
+            .ok_or_else(|| OutputSlotError::InvalidSlot(label.clone()))?;
         if value.slot_type() != slot.slot_type {
             return Err(OutputSlotError::MismatchedSlotType {
                 label,
-                actual: slot.slot_type,
-                expected: value.slot_type(),
+                actual: value.slot_type(),
+                expected: slot.slot_type,
             });
         }
-        self.outputs[slot_index] = Some(value);
+        let output = self
+            .outputs
+            .get_mut(slot_index)
+            .ok_or(OutputSlotError::InvalidSlot(label))?;
+        *output = Some(value);
         Ok(())
     }
 
@@ -231,10 +237,13 @@ pub enum OutputSlotError {
 pub enum InputSlotError {
     #[error("input slot `{0:?}` does not exist")]
     InvalidSlot(SlotLabel),
-    #[error("attempted to retrieve a value of type `{actual}` from input slot `{label:?}`, which has type `{expected}`")]
+    #[error("attempted to retrieve input slot `{label:?}` as `{expected}`, but its value has type `{actual}`")]
     MismatchedSlotType {
         label: SlotLabel,
         expected: SlotType,
         actual: SlotType,
     },
 }
+
+#[cfg(test)]
+mod tests;
