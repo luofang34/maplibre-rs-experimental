@@ -1,37 +1,24 @@
+//! Plane intersections, axis-aligned bounds and signed integer rounding.
+
 use std::{cmp::Ordering, fmt};
 
 use cgmath::{
     ulps_eq, BaseFloat, BaseNum, EuclideanSpace, InnerSpace, Point2, Point3, Vector3, Zero,
 };
 
-/// A 3-dimensional plane formed from the equation: `A*x + B*y + C*z - D = 0`.
+/// A three-dimensional plane with equation `n.dot(point) + d = 0`.
+/// The normal need not be normalized; `d` is an equation coefficient rather than a distance.
 ///
-/// # Fields
-///
-/// - `n`: a unit vector representing the normal of the plane where:
-///   - `n.x`: corresponds to `A` in the plane equation
-///   - `n.y`: corresponds to `B` in the plane equation
-///   - `n.z`: corresponds to `C` in the plane equation
-/// - `d`: the distance value, corresponding to `D` in the plane equation
-///
-/// # Notes
-///
-/// The `A*x + B*y + C*z - D = 0` form is preferred over the other common
-/// alternative, `A*x + B*y + C*z + D = 0`, because it tends to avoid
-/// superfluous negations (see _Real Time Collision Detection_, p. 55).
-///
-/// Copied from: https://github.com/rustgd/collision-rs
+/// Adapted from [collision-rs](https://github.com/rustgd/collision-rs).
 pub struct Plane<S> {
     /// Plane normal
     pub n: Vector3<S>,
-    /// Plane distance value
+    /// Constant coefficient in `n.dot(point) + d = 0`.
     pub d: S,
 }
 
 impl<S: BaseFloat> Plane<S> {
-    /// Construct a plane from a normal vector and a scalar distance. The
-    /// plane will be perpendicular to `n`, and `d` units offset from the
-    /// origin.
+    /// Stores plane equation coefficients without normalizing or validating them.
     pub fn new(n: Vector3<S>, d: S) -> Plane<S> {
         Plane { n, d }
     }
@@ -58,7 +45,7 @@ impl<S: BaseFloat> Plane<S> {
     /// Construct a plane from a point and a normal vector.
     /// The plane will contain the point `p` and be perpendicular to `n`.
     pub fn from_point_normal(p: Point3<S>, n: Vector3<S>) -> Plane<S> {
-        Plane { n, d: p.dot(n) }
+        Plane { n, d: -p.dot(n) }
     }
 
     fn intersection_distance_ray(
@@ -79,8 +66,8 @@ impl<S: BaseFloat> Plane<S> {
     }
 
     /// Returns unsorted intersection points with an Aabb3
-    /// Adopted from: https://www.asawicki.info/news_1428_finding_polygon_of_plane-aabb_intersection
-    /// Inspired by: https://godotengine.org/qa/54688/camera-frustum-intersection-with-plane
+    /// Algorithm: <https://www.asawicki.info/news_1428_finding_polygon_of_plane-aabb_intersection>.
+    /// Reference: <https://godotengine.org/qa/54688/camera-frustum-intersection-with-plane>.
     pub fn intersection_points_aabb3(&self, aabb: &Aabb3<S>) -> Vec<Vector3<S>> {
         let mut out_points: Vec<Vector3<S>> = Vec::new();
         let aabb_min: Vector3<S> = aabb.min.to_vec();
@@ -179,6 +166,9 @@ impl<S: BaseFloat> Plane<S> {
         out_points
     }
 
+    /// Orders the edge intersections from [`Self::intersection_points_aabb3`] around
+    /// the first point using the plane normal. Coincident intersections are retained;
+    /// an empty intersection produces an empty vector.
     pub fn intersection_polygon_aabb3(&self, aabb: &Aabb3<S>) -> Vec<Vector3<S>> {
         let mut points = self.intersection_points_aabb3(aabb);
 
@@ -208,7 +198,7 @@ impl<S: BaseFloat> fmt::Debug for Plane<S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{:?}x + {:?}y + {:?}z - {:?} = 0",
+            "{:?}x + {:?}y + {:?}z + {:?} = 0",
             self.n.x, self.n.y, self.n.z, self.d
         )
     }
@@ -304,6 +294,8 @@ impl<S: BaseNum> fmt::Debug for Aabb3<S> {
     }
 }
 
+/// Returns component-wise `([min_x, min_y], [max_x, max_y])` bounds, or `None` for no points.
+/// Coordinates use their own `PartialOrd`; incomparable values do not replace an existing bound.
 pub fn bounds_from_points<P, T>(points: impl Iterator<Item = P>) -> Option<([T; 2], [T; 2])>
 where
     P: Into<[T; 2]>,
@@ -378,6 +370,10 @@ impl Ord for FloatOrd {
     }
 }
 
+/// Divides by a positive denominator, rounding a fractional result away from zero.
+///
+/// # Panics
+/// Panics if `rhs` is zero or negative.
 pub const fn div_away(lhs: i32, rhs: i32) -> i32 {
     if rhs < 0 {
         panic!("rhs must be positive")
@@ -390,6 +386,10 @@ pub const fn div_away(lhs: i32, rhs: i32) -> i32 {
     }
 }
 
+/// Divides signed integers, rounding a fractional result toward positive infinity.
+///
+/// # Panics
+/// Panics if `rhs` is zero or the quotient of `i32::MIN / -1` cannot be represented.
 pub const fn div_ceil(lhs: i32, rhs: i32) -> i32 {
     let d = lhs / rhs;
     let r = lhs % rhs;
@@ -400,6 +400,10 @@ pub const fn div_ceil(lhs: i32, rhs: i32) -> i32 {
     }
 }
 
+/// Divides signed integers, rounding a fractional result toward negative infinity.
+///
+/// # Panics
+/// Panics if `rhs` is zero or the quotient of `i32::MIN / -1` cannot be represented.
 pub const fn div_floor(lhs: i32, rhs: i32) -> i32 {
     let d = lhs / rhs;
     let r = lhs % rhs;
@@ -411,12 +415,4 @@ pub const fn div_floor(lhs: i32, rhs: i32) -> i32 {
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::{coords::EXTENT_SINT, util::math::div_ceil};
-
-    #[test]
-    pub fn test_div_floor() {
-        assert_eq!(div_ceil(7000, EXTENT_SINT), 2);
-        assert_eq!(div_ceil(-7000, EXTENT_SINT), -1);
-    }
-}
+mod tests;
