@@ -1,8 +1,4 @@
-use std::{
-    marker::PhantomData,
-    ops::{Deref, Range},
-    rc::Rc,
-};
+use std::{marker::PhantomData, ops::Range, rc::Rc};
 
 use crate::{
     coords::WorldTileCoords,
@@ -43,14 +39,10 @@ pub mod visibility;
 pub(crate) mod glyphs;
 pub mod tessellation;
 
-struct SymbolPipeline(wgpu::RenderPipeline);
-
-impl Deref for SymbolPipeline {
-    type Target = wgpu::RenderPipeline;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
+struct SymbolPipeline {
+    combined: wgpu::RenderPipeline,
+    halo: wgpu::RenderPipeline,
+    fill: wgpu::RenderPipeline,
 }
 
 pub type SymbolBufferPool = BufferPool<

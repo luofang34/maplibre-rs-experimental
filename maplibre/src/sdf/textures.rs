@@ -12,9 +12,10 @@ struct TileAtlas {
     texture: wgpu::Texture,
 }
 
-struct DrawBinding {
+pub(super) struct DrawBinding {
     atlas: Arc<TileAtlas>,
-    group: wgpu::BindGroup,
+    pub group: wgpu::BindGroup,
+    pub separate_halo: bool,
     buffer: wgpu::Buffer,
     uniforms: SymbolUniforms,
 }
@@ -41,8 +42,13 @@ impl SymbolTextures {
         zoom: f64,
     ) {
         let uniforms = SymbolUniforms::new(paint, zoom, atlas.size);
+        let separate_halo = uniforms.text[1] > 1.0
+            || uniforms.icon[1] > 1.0
+            || (uniforms.text[1] > 0.0
+                && paint.number("text-letter-spacing", &Default::default(), zoom, 0.0) < 0.0);
         if let Some(binding) = self.bindings.get_mut(&key) {
             if Arc::ptr_eq(&binding.atlas.source, atlas) {
+                binding.separate_halo = separate_halo;
                 if binding.uniforms != uniforms {
                     gpu.queue
                         .write_buffer(&binding.buffer, 0, bytemuck::bytes_of(&uniforms));
@@ -63,13 +69,11 @@ impl SymbolTextures {
                 texture
             });
         self.bindings
-            .insert(key, DrawBinding::new(gpu, texture, uniforms));
+            .insert(key, DrawBinding::new(gpu, texture, uniforms, separate_halo));
     }
 
-    pub fn binding(&self, coords: WorldTileCoords, layer: &str) -> Option<&wgpu::BindGroup> {
-        self.bindings
-            .get(&(coords, layer.to_string()))
-            .map(|binding| &binding.group)
+    pub fn binding(&self, coords: WorldTileCoords, layer: &str) -> Option<&DrawBinding> {
+        self.bindings.get(&(coords, layer.to_string()))
     }
 
     pub fn retain(&mut self, tiles: &crate::tcs::tiles::Tiles) {
@@ -111,7 +115,12 @@ impl TileAtlas {
 }
 
 impl DrawBinding {
-    fn new(gpu: &TextureContext<'_>, atlas: Arc<TileAtlas>, uniforms: SymbolUniforms) -> Self {
+    fn new(
+        gpu: &TextureContext<'_>,
+        atlas: Arc<TileAtlas>,
+        uniforms: SymbolUniforms,
+        separate_halo: bool,
+    ) -> Self {
         let buffer = gpu
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -146,6 +155,7 @@ impl DrawBinding {
         Self {
             atlas,
             group,
+            separate_halo,
             buffer,
             uniforms,
         }

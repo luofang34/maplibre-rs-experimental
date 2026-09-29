@@ -57,7 +57,7 @@ pub fn upload_system(
             &TextureContext {
                 device,
                 queue,
-                pipeline,
+                pipeline: &pipeline.combined,
             },
             &mut world.tiles,
             style,

@@ -25,7 +25,7 @@ impl<P: PhaseItem> RenderCommand<P> for SetSymbolPipeline {
             return RenderCommandResult::Failure;
         };
 
-        pass.set_pipeline(symbol_pipeline);
+        pass.set_pipeline(&symbol_pipeline.combined);
         pass.set_bind_group(0, projection_resources.bind_group(), &[]);
         let Some(Initialized(depth)) = world
             .resources
@@ -45,10 +45,13 @@ impl RenderCommand<TranslucentItem> for DrawSymbol {
         item: &TranslucentItem,
         pass: &mut wgpu::RenderPass<'w>,
     ) -> RenderCommandResult {
-        let Some((Initialized(symbol_buffer_pool), covering)) = world.resources.query::<(
-            &Eventually<SymbolBufferPool>,
-            &super::covering::SymbolCovering,
-        )>() else {
+        let Some((Initialized(symbol_buffer_pool), covering, Initialized(pipeline))) =
+            world.resources.query::<(
+                &Eventually<SymbolBufferPool>,
+                &super::covering::SymbolCovering,
+                &Eventually<SymbolPipeline>,
+            )>()
+        else {
             return RenderCommandResult::Failure;
         };
 
@@ -70,15 +73,13 @@ impl RenderCommand<TranslucentItem> for DrawSymbol {
         else {
             return RenderCommandResult::Failure;
         };
-        pass.set_bind_group(1, binding, &[]);
+        pass.set_bind_group(1, &binding.group, &[]);
 
-        let source_shape = &item.source_shape;
-
-        let Some(tile_view_pattern_buffer) = source_shape.buffer_range() else {
+        let Some(tile_view_pattern_buffer) = item.source_shape.buffer_range() else {
             return RenderCommandResult::Failure;
         };
 
-        let reference = source_shape.coords().stencil_reference_value_3d() as u32;
+        let reference = item.source_shape.coords().stencil_reference_value_3d() as u32;
 
         let index_range = entry.indices_buffer_range();
 
@@ -113,9 +114,24 @@ impl RenderCommand<TranslucentItem> for DrawSymbol {
                 .slice(entry.feature_metadata_buffer_range()),
         );
 
-        pass.draw_indexed(entry.indices_range(), 0, 0..1);
+        draw_indices(pass, pipeline, entry.indices_range(), binding.separate_halo);
         RenderCommandResult::Success
     }
+}
+
+fn draw_indices<'w>(
+    pass: &mut wgpu::RenderPass<'w>,
+    pipeline: &'w SymbolPipeline,
+    indices: std::ops::Range<u32>,
+    separate_halo: bool,
+) {
+    if separate_halo {
+        // All halos must precede fills so an adjacent glyph cannot cover a finished stroke.
+        pass.set_pipeline(&pipeline.halo);
+        pass.draw_indexed(indices.clone(), 0, 0..1);
+        pass.set_pipeline(&pipeline.fill);
+    }
+    pass.draw_indexed(indices, 0, 0..1);
 }
 
 pub type DrawSymbols = (SetSymbolPipeline, DrawSymbol);

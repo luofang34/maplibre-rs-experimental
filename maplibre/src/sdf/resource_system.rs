@@ -27,57 +27,7 @@ pub fn resource_system(
     pool.initialize(|| {
         BufferPool::from_device_with_sizes(&renderer.device, renderer.settings.symbol_pools)
     });
-    pipeline.initialize(|| {
-        let surface = &renderer.resources.surface;
-        let shader = SymbolShader {
-            format: surface.surface_format(),
-        };
-        let mut descriptor = TilePipeline::new(
-            "symbol_pipeline".into(),
-            renderer.settings,
-            shader.describe_vertex(),
-            shader.describe_fragment(),
-            crate::render::resource::TilePipelineOptions {
-                depth_stencil_enabled: true,
-                update_stencil: false,
-                debug_stencil: true,
-                wireframe: false,
-                multisampling: surface.is_multisampling_supported(renderer.settings.msaa),
-                textured: true,
-            },
-        )
-        .with_depth_write()
-        .describe_render_pipeline();
-        if let Some(layout) = descriptor
-            .layout
-            .as_mut()
-            .and_then(|groups| groups.first_mut())
-        {
-            layout.push(wgpu::BindGroupLayoutEntry {
-                binding: 2,
-                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            });
-        }
-        descriptor
-            .layout
-            .get_or_insert_with(Vec::new)
-            .push(super::depth::SymbolDepth::layout());
-        if let Some(depth) = descriptor.depth_stencil.as_mut() {
-            depth.depth_compare = Some(wgpu::CompareFunction::Always);
-        }
-        SymbolPipeline(
-            descriptor.initialize_with_prefix_layouts(
-                &renderer.device,
-                &[projection.bind_group_layout()],
-            ),
-        )
-    });
+    pipeline.initialize(|| create_pipeline(renderer, projection));
     let Some((depth, Initialized(pipeline))) = world.resources.query_mut::<(
         &mut Eventually<super::depth::SymbolDepth>,
         &Eventually<SymbolPipeline>,
@@ -90,8 +40,70 @@ pub fn resource_system(
     let size = source.texture.size();
     let samples = source.texture.sample_count();
     depth.reinitialize(
-        || super::depth::SymbolDepth::new(&renderer.device, size, samples, pipeline),
+        || super::depth::SymbolDepth::new(&renderer.device, size, samples, &pipeline.combined),
         &(size.width, size.height, samples),
     );
     Ok(())
+}
+
+fn create_pipeline(
+    renderer: &crate::render::Renderer,
+    projection: &ProjectionGpuResources,
+) -> SymbolPipeline {
+    let surface = &renderer.resources.surface;
+    let shader = SymbolShader {
+        format: surface.surface_format(),
+    };
+    let mut descriptor = TilePipeline::new(
+        "symbol_pipeline".into(),
+        renderer.settings,
+        shader.describe_vertex(),
+        shader.describe_fragment(),
+        crate::render::resource::TilePipelineOptions {
+            depth_stencil_enabled: true,
+            update_stencil: false,
+            debug_stencil: true,
+            wireframe: false,
+            multisampling: surface.is_multisampling_supported(renderer.settings.msaa),
+            textured: true,
+        },
+    )
+    .with_depth_write()
+    .describe_render_pipeline();
+    if let Some(layout) = descriptor
+        .layout
+        .as_mut()
+        .and_then(|groups| groups.first_mut())
+    {
+        layout.push(wgpu::BindGroupLayoutEntry {
+            binding: 2,
+            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        });
+    }
+    descriptor
+        .layout
+        .get_or_insert_with(Vec::new)
+        .push(super::depth::SymbolDepth::layout());
+    if let Some(depth) = descriptor.depth_stencil.as_mut() {
+        depth.depth_compare = Some(wgpu::CompareFunction::Always);
+    }
+    let combined = descriptor
+        .initialize_with_prefix_layouts(&renderer.device, &[projection.bind_group_layout()]);
+    descriptor.fragment.entry_point = "halo";
+    let halo = descriptor
+        .initialize_with_prefix_layouts(&renderer.device, &[projection.bind_group_layout()]);
+    descriptor.fragment.entry_point = "fill";
+    let fill = descriptor
+        .initialize_with_prefix_layouts(&renderer.device, &[projection.bind_group_layout()]);
+    SymbolPipeline {
+        combined,
+        halo,
+        fill,
+    }
 }
