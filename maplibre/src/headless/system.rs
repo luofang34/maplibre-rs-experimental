@@ -1,4 +1,4 @@
-use std::{borrow::Cow, sync::Arc};
+use std::borrow::Cow;
 
 use crate::{
     context::MapContext,
@@ -46,27 +46,10 @@ impl System for WriteSurfaceBufferSystem {
         match surface.head() {
             Head::Headed(_) => Err(SystemError::Setup),
             Head::Headless(buffered_texture) => {
-                let buffered_texture: Arc<BufferedTextureHead> = buffered_texture.clone();
-
-                let device = device.clone();
-                let current_frame = self.frame;
-
-                let buffer_slice = buffered_texture.map_blocking(&device)?;
-                let padded_buffer = buffer_slice
-                    .get_mapped_range()
-                    .map_err(crate::render::resource::BufferReadbackError::from)?;
-
-                if self.write_to_disk {
-                    buffered_texture.write_png(
-                        &padded_buffer,
-                        format!("frame_{current_frame}.png").as_str(),
-                    )?;
-                }
-
-                // With the current interface, we have to make sure all mapped views are
-                // dropped before we unmap the buffer.
-                drop(padded_buffer);
-                buffered_texture.unmap();
+                let path = self
+                    .write_to_disk
+                    .then(|| format!("frame_{}.png", self.frame));
+                write_surface_buffer_blocking(buffered_texture, device, path.as_deref())?;
 
                 self.frame = self.frame.wrapping_add(1);
                 Ok(())
@@ -74,3 +57,26 @@ impl System for WriteSurfaceBufferSystem {
         }
     }
 }
+
+fn write_surface_buffer_blocking(
+    texture: &BufferedTextureHead,
+    device: &wgpu::Device,
+    path: Option<&str>,
+) -> Result<(), SystemError> {
+    let slice = texture.map_blocking(device)?;
+    let result = (|| {
+        let bytes = slice
+            .get_mapped_range()
+            .map_err(crate::render::resource::BufferReadbackError::from)?;
+        if let Some(path) = path {
+            texture.write_png(&bytes, path)?;
+        }
+        Ok(())
+    })();
+    // All mapped views must be dropped before unmapping, including on encoding or I/O failure.
+    texture.unmap();
+    result
+}
+
+#[cfg(test)]
+mod tests;
