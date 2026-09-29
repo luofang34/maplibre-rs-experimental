@@ -1,7 +1,4 @@
-//! The main render pass for this application.
-//!
-//! Right now there is only one render graph. A use case for multiple render passes would be
-//! [shadows](https://www.raywenderlich.com/books/metal-by-tutorials/v2.0/chapters/14-multipass-deferred-rendering).
+//! Draws ordered style layers and terrain with each layer's own tile clipping masks.
 
 use std::ops::Deref;
 
@@ -11,13 +8,18 @@ use crate::{
     render::{
         draw_graph,
         graph::{Node, NodeRunError, RenderContext, RenderGraphContext, SlotInfo},
-        render_phase::{LayerItem, RenderPhase, TileMaskItem},
+        render_commands::{DrawMask, SetMaskPipeline},
+        render_phase::{LayerItem, RenderCommand, RenderCommandResult, RenderPhase, TileMaskItem},
+        resource::Texture,
         Eventually::Initialized,
         RenderResources,
     },
     tcs::world::World,
     terrain::{draw_terrain, TerrainFrame},
 };
+
+// Valid tiles use four references per zoom; this value is outside that range, including z0.
+const EMPTY_STENCIL_REFERENCE: u32 = crate::coords::MAX_ZOOM as u32 * 4;
 
 pub struct MainPassNode {}
 
@@ -50,46 +52,14 @@ impl Node for MainPassNode {
         let Initialized(depth_texture) = &state.depth_texture else {
             return Ok(());
         };
-
-        let color_attachment = if let Some(texture) = multisampling_texture {
-            wgpu::RenderPassColorAttachment {
-                depth_slice: None,
-                view: &texture.view,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color {
-                        r: 0.0,
-                        g: 0.0,
-                        b: 0.0,
-                        a: 0.0,
-                    }),
-                    store: StoreOp::Store,
-                },
-                resolve_target: Some(render_target.deref()),
-            }
-        } else {
-            wgpu::RenderPassColorAttachment {
-                depth_slice: None,
-                view: render_target.deref(),
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color {
-                        r: 0.0,
-                        g: 0.0,
-                        b: 0.0,
-                        a: 0.0,
-                    }),
-                    store: StoreOp::Store,
-                },
-                resolve_target: None,
-            }
-        };
-
-        let mut render_pass =
+        let color = color_attachment(render_target.deref(), multisampling_texture.as_ref());
+        let mut pass =
             render_context
                 .command_encoder
                 .begin_render_pass(&wgpu::RenderPassDescriptor {
                     multiview_mask: None,
                     label: Some("main_pass"),
-                    color_attachments: &[Some(color_attachment)],
+                    color_attachments: &[Some(color)],
                     depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                         view: &depth_texture.view,
                         depth_ops: Some(wgpu::Operations {
@@ -97,52 +67,97 @@ impl Node for MainPassNode {
                             store: StoreOp::Store,
                         }),
                         stencil_ops: Some(wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(0),
+                            load: wgpu::LoadOp::Clear(EMPTY_STENCIL_REFERENCE),
                             store: StoreOp::Store,
                         }),
                     }),
                     timestamp_writes: None,
                     occlusion_query_set: None,
                 });
+        draw_layers(&mut pass, world);
+        Ok(())
+    }
+}
 
-        // TODO: Automatically raise error when items get linearly too many (+1k)
-
-        if let Some(mask_items) = world.resources.get::<RenderPhase<TileMaskItem>>() {
-            log::trace!("RenderPhase<TileMaskItem>::size() = {}", mask_items.size());
-            for item in mask_items {
-                item.draw_function.draw(&mut render_pass, world, item);
-            }
-        }
-
-        // Terrain writes depth and sits above the background but under screen-space layers.
-        let terrain = world
-            .resources
-            .get::<TerrainFrame>()
-            .filter(|frame| frame.active)
-            .copied();
-        let mut terrain_pending = terrain.is_some();
-        if let Some(layer_items) = world.resources.get::<RenderPhase<LayerItem>>() {
-            log::trace!("RenderPhase<LayerItem>::size() = {}", layer_items.size());
-
-            // Draw layers in style index order (painter's algorithm).
-            // This preserves the MapLibre GL JS rendering model where e.g.
-            // coastline (line) → countries-fill (fill) → countries-boundary (line)
-            // ensures fill covers inland portions of coastline.
-            for item in layer_items {
+fn draw_layers<'w>(pass: &mut wgpu::RenderPass<'w>, world: &'w World) {
+    let terrain = world
+        .resources
+        .get::<TerrainFrame>()
+        .filter(|frame| frame.active)
+        .copied();
+    let mut terrain_pending = terrain.is_some();
+    if let Some(layers) = world.resources.get::<RenderPhase<LayerItem>>() {
+        let mut previous = &[][..];
+        for group in layers.into_iter().as_slice().chunk_by(|left, right| {
+            left.index == right.index && left.style_layer == right.style_layer
+        }) {
+            set_layer_masks(pass, world, previous, group);
+            for layer in group {
+                // Terrain preserves depth for screen-space layers while remaining above the background.
                 if terrain_pending
-                    && terrain.is_some_and(|frame| item.index > frame.draw_after_layer_index)
+                    && terrain.is_some_and(|frame| layer.index > frame.draw_after_layer_index)
                 {
-                    draw_terrain(&mut render_pass, world);
+                    draw_terrain(pass, world);
                     terrain_pending = false;
                 }
-                item.draw_function.draw(&mut render_pass, world, item);
+                layer.draw_function.draw(pass, world, layer);
             }
+            previous = group;
         }
-        if terrain_pending {
-            draw_terrain(&mut render_pass, world);
-        }
+    }
+    if terrain_pending {
+        draw_terrain(pass, world);
+    }
+}
 
-        Ok(())
+fn set_layer_masks<'w>(
+    pass: &mut wgpu::RenderPass<'w>,
+    world: &'w World,
+    previous: &[LayerItem],
+    current: &[LayerItem],
+) {
+    let Some(masks) = world.resources.get::<RenderPhase<TileMaskItem>>() else {
+        return;
+    };
+    let owns_mask = |mask: &TileMaskItem, layers: &[LayerItem]| {
+        layers
+            .iter()
+            .any(|layer| layer.source_shape.buffer_range() == mask.source_shape.buffer_range())
+    };
+    // A new source pyramid must neither inherit old clipping nor admit buffered geometry.
+    for mask in masks {
+        if owns_mask(mask, previous)
+            && matches!(
+                SetMaskPipeline::render(world, mask, pass),
+                RenderCommandResult::Success
+            )
+        {
+            DrawMask::render_with_reference(world, mask, pass, EMPTY_STENCIL_REFERENCE);
+        }
+    }
+    for mask in masks {
+        if owns_mask(mask, current) {
+            mask.draw_function.draw(pass, world, mask);
+        }
+    }
+}
+
+fn color_attachment<'a>(
+    target: &'a wgpu::TextureView,
+    multisampled: Option<&'a Texture>,
+) -> wgpu::RenderPassColorAttachment<'a> {
+    let (view, resolve_target) = match multisampled {
+        Some(texture) => (texture.view.deref(), Some(target)),
+        None => (target, None),
+    };
+    wgpu::RenderPassColorAttachment {
+        depth_slice: None,
+        view,
+        resolve_target,
+        ops: wgpu::Operations {
+            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+            store: StoreOp::Store,
+        },
     }
 }
 
@@ -157,7 +172,6 @@ impl Node for MainPassDriverNode {
         _world: &World,
     ) -> Result<(), NodeRunError> {
         graph.run_sub_graph(draw_graph::NAME, vec![])?;
-
         Ok(())
     }
 }
