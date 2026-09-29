@@ -2,7 +2,8 @@ use std::time::Duration;
 
 use instant::Instant;
 
-/// Measures the frames per second.
+/// Counts update calls and logs a sample when at least one second has elapsed.
+/// Samples are raw frame counts; long gaps between calls are not normalized to a rate.
 ///
 /// # Example
 /// ```
@@ -10,7 +11,7 @@ use instant::Instant;
 ///
 /// let mut meter = FPSMeter::new();
 ///
-/// // call the following the the render loop
+/// // Call once per rendered frame.
 /// meter.update_and_print();
 /// ```
 pub struct FPSMeter {
@@ -19,6 +20,7 @@ pub struct FPSMeter {
 }
 
 impl FPSMeter {
+    /// Starts an empty sample whose first report is due one second from creation.
     pub fn new() -> Self {
         let start = Instant::now();
         Self {
@@ -27,6 +29,8 @@ impl FPSMeter {
         }
     }
 
+    /// Counts this frame and, if the deadline has passed, logs and resets the sample.
+    /// Reporting happens only when called; the next deadline is one second after that call.
     pub fn update_and_print(&mut self) {
         self.frame_count += 1;
         let now = Instant::now();

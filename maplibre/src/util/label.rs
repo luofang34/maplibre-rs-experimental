@@ -5,9 +5,12 @@ use std::{
     hash::{Hash, Hasher},
 };
 
+/// Object-safe equality that distinguishes both concrete type and value.
 pub trait DynEq: Any {
+    /// Borrows the concrete value for a type-checked downcast.
     fn as_any(&self) -> &dyn Any;
 
+    /// Compares values of the same concrete type; different types are unequal.
     fn dyn_eq(&self, other: &dyn DynEq) -> bool;
 }
 
@@ -27,9 +30,12 @@ where
     }
 }
 
+/// Object-safe hashing consistent with type-aware [`DynEq`] equality.
 pub trait DynHash: DynEq {
+    /// Borrows the equality interface without changing the concrete value.
     fn as_dyn_eq(&self) -> &dyn DynEq;
 
+    /// Feeds both the value and its concrete type identity into the supplied hasher.
     fn dyn_hash(&self, state: &mut dyn Hasher);
 }
 

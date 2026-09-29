@@ -1,5 +1,8 @@
+//! Web Mercator grid construction and regional tile-coordinate enumeration.
+
 use tile_grid::{extent_wgs84_to_merc, Extent, Grid, GridIterator, Origin, Unit};
 
+/// Returns an EPSG:3857 grid with 256-pixel tiles, a top-left origin and zooms 0 through 22.
 pub fn google_mercator() -> Grid {
     Grid::new(
         256,
@@ -41,17 +44,14 @@ pub fn google_mercator() -> Grid {
     )
 }
 
-///
-/// Returns coordinates for tiles within bavaria according to the specified grid.
-/// The grid is responsible for defining the coordinate system. For example whether
-/// [Slippy map tilenames](https://wiki.openstreetmap.org/wiki/Slippy_map_tilenames) (also known as
-/// XYZ) or [TMS](https://wiki.osgeo.org/wiki/Tile_Map_Service_Specification#TileMap_Diagram) is
-/// used.
+/// Returns `(zoom, x, y)` tiles intersecting Bavaria's bounding rectangle at `zoom`.
+/// Supply an EPSG:3857 grid: the geographic bounds are converted to Web Mercator metres
+/// before tile limits are calculated. The grid's origin determines XYZ or TMS row ordering.
 ///
 /// ## Additional Resources:
 ///
-/// * https://www.maptiler.com/google-maps-coordinates-tile-bounds-projection
-/// * https://gist.github.com/maptiler/fddb5ce33ba995d5523de9afdf8ef118
+/// * <https://www.maptiler.com/google-maps-coordinates-tile-bounds-projection>
+/// * <https://gist.github.com/maptiler/fddb5ce33ba995d5523de9afdf8ef118>
 pub fn tile_coordinates_bavaria(grid: &Grid, zoom: u8) -> Vec<(u8, u32, u32)> {
     let tile_limits = grid.tile_limits(
         extent_wgs84_to_merc(&Extent {

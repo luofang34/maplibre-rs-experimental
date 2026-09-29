@@ -1,6 +1,8 @@
 //! GeoJSON source processing — projects geographic coordinates into tile space and
 //! tessellates features using the existing vector rendering pipeline.
 
+#![deny(missing_docs)]
+
 use std::{borrow::Cow, f64::consts::PI};
 
 use geozero::{FeatureProcessor, GeomProcessor, GeozeroDatasource, PropertyProcessor};
@@ -25,16 +27,20 @@ use crate::{
     },
 };
 
+/// Failure reported while preparing or delivering GeoJSON tile geometry.
 #[derive(Error, Debug)]
 pub enum ProcessGeoJsonError {
+    /// A worker result could not be delivered through the supplied reply context.
     #[error("sending data back through context failed")]
     SendError(SendError),
+    /// Parser detail for invalid GeoJSON input.
     #[error("GeoJSON parsing failed: {0}")]
     Parse(Cow<'static, str>),
 }
 
-/// Wraps a processor and reprojects geographic (lon/lat) coordinates into
-/// tile-local extent coordinates (0–4096) using the Web Mercator projection.
+/// Reprojects longitude/latitude in degrees into Web Mercator tile coordinates for a processor.
+/// One tile spans 4096 units. Latitude is clamped to the Mercator range; geometry outside
+/// the requested tile is not clipped. Non-finite input coordinates are rejected.
 pub struct ProjectingTessellator<T> {
     inner: T,
     tile_x: i32,
@@ -43,6 +49,7 @@ pub struct ProjectingTessellator<T> {
 }
 
 impl<T> ProjectingTessellator<T> {
+    /// Takes ownership of a processor and fixes the tile origin and zoom used for projection.
     pub fn new(coords: WorldTileCoords, inner: T) -> Self {
         Self {
             inner,
@@ -63,6 +70,7 @@ impl<T> ProjectingTessellator<T> {
         (x, y)
     }
 
+    /// Returns the wrapped processor with any geometry accumulated through this adapter.
     pub fn into_inner(self) -> T {
         self.inner
     }
@@ -183,7 +191,9 @@ impl<T: FeatureProcessor> FeatureProcessor for ProjectingTessellator<T> {
 
 /// Request for processing GeoJSON features for a set of style layers.
 pub struct GeoJsonTileRequest {
+    /// Target tile origin and zoom for projected geometry and expression evaluation.
     pub coords: WorldTileCoords,
+    /// Candidate layers, processed only when their source name matches this request.
     pub layers: Vec<StyleLayer>,
     /// Name of the GeoJSON source (used to match style layers by `source` field).
     pub source_name: String,
@@ -249,10 +259,10 @@ pub fn filter_geojson(
 /// This mirrors [`crate::vector::process_vector_tile`] but works with geographic
 /// (lon/lat) coordinates rather than pre-projected MVT tile coordinates.
 ///
-/// For each style layer that references the named GeoJSON source (and has no
-/// `source_layer`), ALL features in the GeoJSON are tessellated and sent back
-/// via `context`. The tessellated bucket's virtual source-layer name is set to
-/// `style_layer.id`, matching the fallback in `upload_system`.
+/// Matching layers with supported paint are filtered and tessellated independently.
+/// Results use the style-layer ID as their source-layer key. A filter or geometry failure
+/// emits a missing-layer result and processing continues; a delivery failure is returned.
+/// The final tile-completion message is sent after all candidate layers have been processed.
 pub fn process_geojson_features<T: VectorTransferables, C: Context>(
     geojson_value: &serde_json::Value,
     request: GeoJsonTileRequest,
