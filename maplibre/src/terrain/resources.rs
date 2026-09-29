@@ -16,7 +16,6 @@ use crate::{
         settings::Msaa,
     },
     terrain::{
-        dem::DemTile,
         drape_cache::DrapeCache,
         mesh::{create_terrain_mesh, TERRAIN_MESH_SIZE},
     },
@@ -24,6 +23,9 @@ use crate::{
 
 mod bindings;
 mod drapes;
+mod elevation_textures;
+
+use elevation_textures::DemTexture;
 
 /// Edge length in pixels of one drape texture; twice the tile size, as GL JS `qualityFactor`.
 pub const DRAPE_SIZE: u32 = 1024;
@@ -126,7 +128,7 @@ pub struct TerrainResources {
     index_buffer: wgpu::Buffer,
     index_count: u32,
     uniform_buffer: wgpu::Buffer,
-    dem_textures: HashMap<WorldTileCoords, (Texture, u32)>,
+    dem_textures: HashMap<WorldTileCoords, DemTexture>,
     empty_dem: Texture,
     drapes: DrapeCache<Texture>,
     drape_scratch: Option<DrapeScratch>,
@@ -278,78 +280,6 @@ impl TerrainResources {
         self.msaa
     }
 
-    /// Whether a DEM tile has been uploaded.
-    pub fn has_dem_texture(&self, coords: WorldTileCoords) -> bool {
-        self.dem_textures.contains_key(&coords)
-    }
-
-    /// Revision of the uploaded copy of a DEM tile, if any.
-    pub fn dem_revision(&self, coords: WorldTileCoords) -> Option<u32> {
-        self.dem_textures
-            .get(&coords)
-            .map(|(_, revision)| *revision)
-    }
-
-    /// Uploads the bordered pixels of a decoded DEM tile, reusing its texture across revisions.
-    pub fn upload_dem(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        coords: WorldTileCoords,
-        dem: &DemTile,
-        revision: u32,
-    ) {
-        let reusable = self
-            .dem_textures
-            .remove(&coords)
-            .map(|(texture, _)| texture)
-            .filter(|texture| texture.size.width == dem.stride());
-        let texture = reusable.unwrap_or_else(|| {
-            Texture::new(
-                Some("DEM tile"),
-                device,
-                wgpu::TextureFormat::Rgba8Unorm,
-                dem.stride(),
-                dem.stride(),
-                Msaa { samples: 1 },
-                wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            )
-        });
-        queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &texture.texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            dem.pixels(),
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(4 * dem.stride()),
-                rows_per_image: Some(dem.stride()),
-            },
-            texture.size,
-        );
-        self.dem_textures.insert(coords, (texture, revision));
-    }
-
-    /// Releases the DEM texture of a tile that left the store.
-    pub fn drop_dem(&mut self, coords: WorldTileCoords) {
-        self.dem_textures.remove(&coords);
-    }
-
-    /// DEM texture of a tile, or the flat stand-in while it loads.
-    pub fn dem_texture(&self, coords: Option<WorldTileCoords>) -> &Texture {
-        coords
-            .and_then(|coords| self.dem_textures.get(&coords))
-            .map_or(&self.empty_dem, |(texture, _)| texture)
-    }
-
-    /// DEM textures resident on the GPU.
-    pub fn dem_texture_count(&self) -> usize {
-        self.dem_textures.len()
-    }
-
     /// Bytes of drape textures, held and free, and of DEM textures.
     pub fn texture_bytes(&self) -> (usize, usize) {
         let (held, free) = self.drape_counts();
@@ -358,7 +288,7 @@ impl TerrainResources {
         let dem = self
             .dem_textures
             .values()
-            .map(|(texture, _)| (texture.size.width * texture.size.height * 4) as usize)
+            .map(|dem| (dem.texture.size.width * dem.texture.size.height * 4) as usize)
             .sum();
         ((held + free) * drape, dem)
     }

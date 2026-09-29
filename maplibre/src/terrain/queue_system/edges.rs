@@ -2,7 +2,9 @@
 use crate::{
     coords::{WorldTileCoords, EXTENT},
     tcs::tiles::Tiles,
-    terrain::{mesh::TERRAIN_MESH_SIZE, resources::TerrainTileUniforms, DemTileComponent},
+    terrain::{
+        mesh::TERRAIN_MESH_SIZE, resources::TerrainTileUniforms, DemRevision, DemTileComponent,
+    },
 };
 use std::{collections::HashMap, sync::Arc};
 
@@ -37,7 +39,7 @@ impl Default for EdgeHeights {
 
 #[derive(Default)]
 pub(super) struct EdgeCache {
-    signature: Vec<(WorldTileCoords, Option<(WorldTileCoords, u32)>)>,
+    signature: Vec<(WorldTileCoords, Option<(WorldTileCoords, DemRevision)>)>,
     pub(super) samples: Arc<HashMap<WorldTileCoords, EdgeHeights>>,
 }
 impl EdgeCache {
@@ -56,7 +58,7 @@ impl EdgeCache {
             .map(|(source, tile, _)| {
                 let revision =
                     source.and_then(|source| match tiles.query::<&DemTileComponent>(source) {
-                        Some(DemTileComponent::Loaded(dem)) => Some((source, dem.revision)),
+                        Some(DemTileComponent::Loaded(dem)) => Some((source, dem.revision_key())),
                         _ => None,
                     });
                 (*tile, revision)
@@ -67,7 +69,7 @@ impl EdgeCache {
             let selection = Sources::new(
                 signature
                     .iter()
-                    .map(|(tile, source)| (*tile, source.map(|v| v.0)))
+                    .map(|(tile, source)| (*tile, source.as_ref().map(|v| v.0)))
                     .collect(),
             );
             self.samples = Arc::new(

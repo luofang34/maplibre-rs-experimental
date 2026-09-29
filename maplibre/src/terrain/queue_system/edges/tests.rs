@@ -83,3 +83,24 @@ fn wraparound_edges_agree() {
         assert_eq!(at(&aa, i, 2), at(&bb, i, 3));
     }
 }
+
+#[test]
+fn replacing_a_dem_refreshes_cached_mesh_edges() {
+    use bytemuck::Zeroable;
+
+    let coords = tile(3, 2, 3);
+    let mut tiles = Tiles::default();
+    load(&mut tiles, coords, 1000);
+    let sources = [(Some(coords), coords, None)];
+    let mut uniforms = [TerrainTileUniforms::zeroed()];
+    let mut cache = EdgeCache::default();
+    cache.apply(&sources, &mut uniforms, &tiles);
+    let initial = uniforms[0].edge_heights.samples;
+    load(&mut tiles, coords, 2000);
+    cache.apply(&sources, &mut uniforms, &tiles);
+    for (before, after) in initial.iter().zip(uniforms[0].edge_heights.samples) {
+        for (before, after) in before.iter().zip(after) {
+            assert!((after - before - 1000.0).abs() < 0.001);
+        }
+    }
+}

@@ -7,6 +7,15 @@ mod payload;
 #[cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 mod systems;
 
+#[cfg(all(feature = "headless", not(target_arch = "wasm32")))]
+pub(crate) fn reply_context<K: super::OffscreenKernel, S: super::Scheduler>(
+    apc: &super::SchedulerAsyncProcedureCall<K, S>,
+) -> super::SchedulerContext {
+    super::SchedulerContext {
+        sender: apc.channel.0.clone(),
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 #[allow(clippy::expect_used)]

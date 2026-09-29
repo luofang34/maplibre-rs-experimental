@@ -35,10 +35,7 @@ pub fn upload_system(
         let Some(DemTileComponent::Loaded(dem)) = tiles.query::<&DemTileComponent>(coords) else {
             continue;
         };
-        if terrain_resources.dem_revision(coords) == Some(dem.revision) {
-            continue;
-        }
-        terrain_resources.upload_dem(device, queue, coords, &dem.tile, dem.revision);
+        terrain_resources.upload_loaded_dem(device, queue, coords, dem);
     }
     Ok(())
 }

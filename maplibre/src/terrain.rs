@@ -27,6 +27,7 @@ pub(crate) mod drape_targets;
 mod draw;
 pub mod elevation;
 pub mod interaction;
+mod loaded_dem;
 pub mod mesh;
 pub(crate) mod populate_world_system;
 mod queue_system;
@@ -46,6 +47,8 @@ pub use drape_targets::is_drapeable;
 pub use draw::draw_terrain;
 pub use elevation::elevation_at_world;
 pub use interaction::{GestureAnchor, TerrainHit};
+use loaded_dem::DemRevision;
+pub use loaded_dem::LoadedDem;
 use populate_world_system::PopulateWorldSystem;
 use request_system::RequestSystem;
 pub use request_system::{dem_ancestor_coords, dem_tile_coords, fetch_dem_apc};
@@ -54,22 +57,6 @@ pub use transferables::{
     DefaultDemTransferables, DefaultLayerDem, DefaultLayerDemMissing, DemMessageTag,
     DemTransferables, LayerDem, LayerDemMissing,
 };
-
-/// A decoded DEM tile and the revision of its GPU-visible samples.
-#[derive(Debug)]
-pub struct LoadedDem {
-    /// Decoded samples.
-    pub tile: DemTile,
-    /// Advances whenever the samples change, so the GPU copy can follow.
-    pub revision: u32,
-}
-
-impl LoadedDem {
-    /// Wraps a freshly decoded tile with no neighbours filled in yet.
-    pub fn new(tile: DemTile) -> Self {
-        Self { tile, revision: 0 }
-    }
-}
 
 /// Elevation data of one `raster-dem` tile as it moves through the pipeline.
 ///

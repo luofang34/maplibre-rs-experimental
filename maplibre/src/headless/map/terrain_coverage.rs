@@ -17,6 +17,7 @@ use crate::{
 const SIZE: u32 = 512;
 
 mod faults;
+mod reload;
 
 fn target() -> WorldTileCoords {
     WorldTileCoords::from((2423, 1389, 12_u8.into()))
