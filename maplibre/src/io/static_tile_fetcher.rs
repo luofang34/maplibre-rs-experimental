@@ -1,93 +1,73 @@
-//! Static tile fetcher
+//! Reads vector tile bytes compiled into the binary.
 
-use std::{
-    concat, env,
-    fmt::{Display, Formatter},
-};
+use std::{concat, env};
 
 #[cfg(static_tiles_found)]
 use include_dir::include_dir;
 use include_dir::Dir;
+use thiserror::Error;
 
 use crate::coords::TileCoords;
 
 #[cfg(static_tiles_found)]
 static TILES: Dir = include_dir!("$OUT_DIR/extracted-tiles");
 #[cfg(not(static_tiles_found))]
-static TILES: Dir = Dir::new("/path", &[]);
+static TILES: Dir = Dir::new("extracted-tiles", &[]);
 
-#[derive(Debug)]
+/// A tile could not be read from the binary's embedded archive.
+#[derive(Debug, Error)]
 pub enum StaticFetchError {
-    /// Tile was not found in the static content
-    NotFound,
+    /// No tiles were compiled into this binary.
+    #[error("no tiles are embedded in this binary; requested {}/{}/{}", .coords.z, .coords.x, .coords.y)]
+    EmptyArchive {
+        /// Requested tile location.
+        coords: TileCoords,
+    },
+    /// The archive exists but has no entry for the requested tile.
+    #[error("tile {}/{}/{} is not embedded", .coords.z, .coords.x, .coords.y)]
+    NotFound {
+        /// Requested tile location.
+        coords: TileCoords,
+    },
 }
 
-impl Display for StaticFetchError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{self:?}")
-    }
-}
-
-/// Load PBF files which were statically embedded in the `build.rs`
+/// Fetches owned copies of PBF tiles embedded by the build script.
+///
+/// Requires `embed-static-tiles`. If the build has no tile archive, construction still succeeds
+/// and fetches return [`StaticFetchError::EmptyArchive`]. No runtime filesystem access is needed.
 #[derive(Default)]
 pub struct StaticTileFetcher;
 
 impl StaticTileFetcher {
+    /// Build-time directory used to embed tiles; it need not exist on the running machine.
     pub fn get_source_path() -> &'static str {
         concat!(env!("OUT_DIR"), "/extracted-tiles")
     }
 
+    /// Creates a fetcher without inspecting the filesystem or checking tile availability.
     pub fn new() -> Self {
         Self {}
     }
 
-    /// Fetch the tile static file asynchronously and returns a vector of bytes or a network error if the file
-    /// could not be fetched.
+    /// Copies an embedded tile using an async-compatible interface; performs no asynchronous I/O.
+    /// Returns the same archive and lookup errors as [`Self::sync_fetch_tile`].
     pub async fn fetch_tile(&self, coords: &TileCoords) -> Result<Vec<u8>, StaticFetchError> {
         self.sync_fetch_tile(coords)
     }
 
-    /// Fetch the tile static file and returns a vector of bytes or a network error if the file
-    /// could not be fetched.
+    /// Copies the `{z}/{x}/{y}.pbf` entry from memory without changing coordinate addressing.
+    /// Returns a typed error identifying the tile if the archive or entry is missing.
     pub fn sync_fetch_tile(&self, coords: &TileCoords) -> Result<Vec<u8>, StaticFetchError> {
         if TILES.entries().is_empty() {
-            panic!(
-                "There are not tiles statically embedded in this binary! StaticTileFetcher will \
-                not return any tiles!"
-            )
+            return Err(StaticFetchError::EmptyArchive { coords: *coords });
         }
 
         let tile = TILES
-            .get_file(format!("{}/{}/{}.{}", coords.z, coords.x, coords.y, "pbf"))
-            .ok_or_else(|| StaticFetchError::NotFound)?;
+            .get_file(format!("{}/{}/{}.pbf", coords.z, coords.x, coords.y))
+            .ok_or(StaticFetchError::NotFound { coords: *coords })?;
         Ok(Vec::from(tile.contents()))
     }
 }
 
 #[cfg(test)]
-mod tests {
-    #[cfg(static_tiles_found)]
-    #[tokio::test]
-    async fn test_tiles_available() {
-        use super::StaticTileFetcher;
-        use crate::{
-            coords::{WorldTileCoords, ZoomLevel},
-            style::source::TileAddressingScheme,
-        };
-
-        const MUNICH_X: i32 = 17425;
-        const MUNICH_Y: i32 = 11365;
-        const MUNICH_Z: u8 = 15;
-
-        let fetcher = StaticTileFetcher::new();
-        assert!(fetcher
-            .fetch_tile(&(0u32, 0u32, ZoomLevel::new(0)).into())
-            .await
-            .is_err()); // World overview
-        let world_tile: WorldTileCoords = (MUNICH_X, MUNICH_Y, ZoomLevel::new(MUNICH_Z)).into();
-        assert!(fetcher
-            .fetch_tile(&world_tile.into_tile(TileAddressingScheme::XYZ).unwrap())
-            .await
-            .is_ok()); // Maxvorstadt Munich
-    }
-}
+mod tests;
