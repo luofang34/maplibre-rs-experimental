@@ -43,7 +43,7 @@ impl<B> BackingBuffer<B> {
 pub struct TileViewPattern<Q, B> {
     view_tiles: Vec<ViewTile>,
     view_tiles_buffer: BackingBuffer<B>,
-    /// Metadata entries written by the last `upload_pattern`; extra entries follow them.
+    /// Occupied entries, including appended metadata; a view-pattern upload starts a new frame.
     uploaded: u64,
     phantom_q: PhantomData<Q>,
 }
@@ -59,6 +59,7 @@ pub struct TileMetadataOverflow {
 }
 
 impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
+    /// Takes ownership of a metadata buffer whose descriptor capacity is measured in bytes.
     pub fn new(view_tiles_buffer: BackingBufferDescriptor<B>) -> Self {
         Self {
             view_tiles: Vec::with_capacity(64),
@@ -71,16 +72,15 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
         }
     }
 
-    /// Appends metadata entries after this frame's view tiles and returns their buffer ranges.
-    ///
-    /// Drape draws use these entries to place source shapes inside a tile texture instead of on
-    /// the screen; call after [`Self::upload_pattern`] so the view entries stay intact.
-    /// Number of extra metadata entries that still fit behind the uploaded pattern.
+    /// Number of metadata entries still available in this frame.
     pub fn remaining_metadata_capacity(&self) -> usize {
         let capacity = self.view_tiles_buffer.inner_size / size_of::<ShaderTileMetadata>() as u64;
         capacity.saturating_sub(self.uploaded) as usize
     }
 
+    /// Appends entries without changing ranges returned by earlier appends in this frame.
+    /// Call after [`Self::upload_pattern`]; the next pattern upload invalidates these ranges.
+    /// Returns an overflow error without writing or reserving entries if they do not all fit.
     pub fn upload_extra_metadata(
         &mut self,
         queue: &Q,
@@ -104,6 +104,7 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
             offset,
             bytemuck::cast_slice(entries),
         );
+        self.uploaded = requested;
         Ok((0..entries.len() as u64)
             .map(|index| offset + index * STRIDE..offset + (index + 1) * STRIDE)
             .collect())
@@ -162,19 +163,25 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
         view_tiles
     }
 
+    /// Replaces the CPU-side view tiles; call [`Self::upload_pattern`] before drawing them.
     pub fn update_pattern(&mut self, mut view_tiles: Vec<ViewTile>) {
         self.view_tiles.clear();
         self.view_tiles.append(&mut view_tiles)
     }
 
+    /// Iterates view tiles in covering order; source shapes may reference shared ancestors.
     pub fn iter(&self) -> impl Iterator<Item = &ViewTile> + '_ {
         self.view_tiles.iter()
     }
 
+    /// Borrows the backing metadata buffer, including space reserved for extra entries.
     pub fn buffer(&self) -> &B {
         &self.view_tiles_buffer.inner
     }
 
+    /// Writes this frame's view metadata and resets the append cursor.
+    /// Shapes exceeding capacity lose their buffer ranges and are skipped for this frame.
+    /// Viewport dimensions and `style_zoom` determine screen-pixel line widths.
     #[tracing::instrument(skip_all)]
     pub fn upload_pattern(
         &mut self,

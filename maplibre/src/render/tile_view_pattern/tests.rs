@@ -215,3 +215,5 @@ fn bridge_width_units_follow_style_scale_independently_of_gaze_zoom() {
         assert_eq!(metadata.line_units_per_pixel, 8.0, "gaze zoom {gaze_zoom}");
     }
 }
+
+mod metadata_upload;
