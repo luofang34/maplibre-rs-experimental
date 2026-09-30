@@ -84,6 +84,17 @@ impl Style {
         }
     }
 
+    /// The findings for one layer, which need not be part of the style yet.
+    pub fn validate_layer(&self, layer: &StyleLayer) -> Vec<StyleValidationError> {
+        let mut errors = Vec::new();
+        LayerValidation {
+            layer,
+            errors: &mut errors,
+        }
+        .validate();
+        errors
+    }
+
     /// Logs each validation error; the map still loads and renders what it can.
     pub fn log_validation_errors(&self) {
         if let Err(errors) = self.validate() {

@@ -521,3 +521,188 @@ async fn a_background_layer_reading_state_does_not_refetch_vector_tiles() {
         "a background is drawn from the style each frame, not from tiles"
     );
 }
+
+fn two_layer_style() -> crate::style::Style {
+    serde_json::from_value(serde_json::json!({"version":8,
+        "sources":{"shapes":{"type":"geojson","data":serde_json::from_str::<serde_json::Value>(WORLD_POLYGON).expect("polygon")}},
+        "layers":[
+            {"id":"paper","type":"background","paint":{"background-color":"#ffffff"}},
+            {"id":"blue","source":"shapes","type":"fill","paint":{"fill-color":"#0000ff"}}]}))
+    .expect("style")
+}
+
+fn green_fill(id: &str) -> serde_json::Value {
+    serde_json::json!({"id": id, "source": "shapes", "type": "fill",
+        "paint": {"fill-color": "#00ff00"}})
+}
+
+#[tokio::test]
+async fn added_layers_appear_and_removed_layers_disappear_after_the_tiles_refresh() {
+    let mut test = Fixture::new(Kind::Vector, false).await;
+    test.context.style = two_layer_style();
+    test.frame(0);
+    test.receive().await;
+    assert_eq!(layers_with_geometry(&test), ["blue"]);
+
+    let change = test
+        .context
+        .mutate_style(|style| style.add_layer(green_fill("green"), None))
+        .expect("add layer");
+    assert!(change.redraw_tiles);
+    test.frame(1);
+    assert_eq!(
+        test.kernel.apc().pending(),
+        1,
+        "the loaded tile is requested again"
+    );
+    test.receive().await;
+    assert_eq!(layers_with_geometry(&test), ["blue", "green"]);
+
+    test.context
+        .mutate_style(|style| style.remove_layer("blue"))
+        .expect("remove layer");
+    test.frame(2);
+    test.receive().await;
+    assert_eq!(
+        layers_with_geometry(&test),
+        ["green"],
+        "the removed layer's geometry is gone"
+    );
+
+    test.context
+        .mutate_style(|style| {
+            style.add_layer(
+                serde_json::json!({"id": "blue", "source": "shapes",
+            "type": "fill", "paint": {"fill-color": "#0000ff"}}),
+                Some("green"),
+            )
+        })
+        .expect("the same id can come back");
+    test.frame(3);
+    test.receive().await;
+    assert_eq!(layers_with_geometry(&test), ["blue", "green"]);
+}
+
+#[tokio::test]
+async fn a_paint_change_shows_in_the_pixels_and_a_refused_change_costs_nothing() {
+    let mut test = Fixture::new(Kind::Vector, false).await;
+    test.context.style = two_layer_style();
+    let mut frames = super::render::Frames::new(&mut test);
+    test.frame(0);
+    test.receive().await;
+    test.context
+        .mutate_style(|style| {
+            style.set_paint_property("blue", "fill-color", serde_json::json!("#00ff00"))
+        })
+        .expect("set paint");
+    test.frame(1);
+    test.receive().await;
+    super::render::assert_green(&frames.render(&mut test));
+
+    let refused = test.context.mutate_style(|style| {
+        style.set_paint_property("blue", "fill-color", serde_json::json!(["not-an-operator"]))
+    });
+    assert!(refused.is_err());
+    let missing = test.context.mutate_style(|style| {
+        style.add_layer(
+            serde_json::json!({"id": "x", "type": "fill", "source": "nowhere"}),
+            None,
+        )
+    });
+    assert!(missing.is_err());
+    test.frame(2);
+    assert_eq!(
+        test.kernel.apc().pending(),
+        0,
+        "refused changes touch neither style nor tiles"
+    );
+    test.frame(3);
+    super::render::assert_green(&frames.render(&mut test));
+}
+
+#[tokio::test]
+async fn reordering_and_background_edits_refresh_only_what_needs_it() {
+    let mut test = Fixture::new(Kind::Vector, false).await;
+    test.context.style = two_layer_style();
+    test.context
+        .mutate_style(|style| style.add_layer(green_fill("green"), None))
+        .expect("add");
+    test.frame(0);
+    test.receive().await;
+
+    test.context
+        .mutate_style(|style| {
+            style.set_paint_property("paper", "background-color", serde_json::json!("#101010"))
+        })
+        .expect("background");
+    test.frame(1);
+    assert_eq!(
+        test.kernel.apc().pending(),
+        0,
+        "a background is redrawn from the style"
+    );
+
+    test.context
+        .mutate_style(|style| style.move_layer("green", Some("blue")))
+        .expect("reorder");
+    let order: Vec<_> = test
+        .context
+        .style
+        .layers
+        .iter()
+        .map(|layer| (layer.id.clone(), layer.index))
+        .collect();
+    assert_eq!(
+        order,
+        [("paper".into(), 0), ("green".into(), 1), ("blue".into(), 2)]
+    );
+    test.frame(2);
+    assert_eq!(
+        test.kernel.apc().pending(),
+        1,
+        "draw order is baked into the tiles"
+    );
+    test.receive().await;
+    assert_eq!(layers_with_geometry(&test), ["blue", "green"]);
+}
+
+#[tokio::test]
+async fn a_geojson_source_removed_and_added_again_shows_only_its_new_data() {
+    let mut test = Fixture::new(Kind::Vector, false).await;
+    test.context.style = two_layer_style();
+    test.frame(0);
+    test.receive().await;
+    assert_eq!(layers_with_geometry(&test), ["blue"]);
+
+    assert!(
+        test.context
+            .mutate_style(|style| style.remove_source("shapes"))
+            .is_err(),
+        "a source in use cannot be removed"
+    );
+    test.context
+        .mutate_style(|style| style.remove_layer("blue"))
+        .expect("remove layer");
+    test.context
+        .mutate_style(|style| style.remove_source("shapes"))
+        .expect("remove source");
+    test.frame(1);
+    test.receive().await;
+    assert!(layers_with_geometry(&test).is_empty());
+
+    let nothing: crate::style::source::Source = serde_json::from_value(serde_json::json!(
+        {"type": "geojson", "data": {"type": "FeatureCollection", "features": []}}))
+    .expect("source");
+    test.context
+        .mutate_style(|style| style.add_source("shapes", nothing))
+        .expect("add source");
+    test.context
+        .mutate_style(|style| style.add_layer(green_fill("green"), None))
+        .expect("add layer");
+    test.frame(2);
+    test.receive().await;
+    assert!(
+        layers_with_geometry(&test).is_empty(),
+        "the readded source has its own empty data, not the removed source's polygon"
+    );
+}

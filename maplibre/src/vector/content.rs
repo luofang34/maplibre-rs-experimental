@@ -161,3 +161,54 @@ pub(crate) fn vector_layers(
     }
     layers
 }
+
+/// Drops everything the removed style layers left in loaded tiles: their buckets, pending
+/// replacements and GPU buffers. Buckets are otherwise only ever replaced by layer id, so a layer
+/// that is no longer in the style would keep its geometry until the tile is evicted.
+pub(crate) fn purge_layers(world: &mut World, removed: &[String]) {
+    let coords: Vec<WorldTileCoords> = world.tiles.tiles.values().map(|tile| tile.coords).collect();
+    for at in &coords {
+        if let Some(component) = world
+            .tiles
+            .query_mut::<&mut VectorLayerBucketComponent>(*at)
+        {
+            component.layers.retain(|layer| match layer {
+                VectorLayerBucket::AvailableLayer(bucket) => {
+                    !removed.contains(&bucket.style_layer_id)
+                }
+                VectorLayerBucket::Missing(_) => true,
+            });
+        }
+        if let Some(component) = world.tiles.query_mut::<&mut SymbolLayersDataComponent>(*at) {
+            component
+                .layers
+                .retain(|layer| !removed.contains(&layer.style_layer_id));
+        }
+        if let Some(pending) = world.tiles.query_mut::<&mut LayerReplacements>(*at) {
+            pending
+                .vector
+                .retain(|layer| !removed.contains(&layer.style_layer_id));
+            pending
+                .symbols
+                .retain(|layer| !removed.contains(&layer.style_layer_id));
+        }
+    }
+    if let Some(Eventually::Initialized(pool)) =
+        world.resources.get_mut::<Eventually<VectorBufferPool>>()
+    {
+        for at in &coords {
+            for id in removed {
+                pool.remove_layer(*at, id);
+            }
+        }
+    }
+    if let Some(Eventually::Initialized(pool)) =
+        world.resources.get_mut::<Eventually<SymbolBufferPool>>()
+    {
+        for at in &coords {
+            for id in removed {
+                pool.remove_layer(*at, id);
+            }
+        }
+    }
+}

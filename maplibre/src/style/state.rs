@@ -50,6 +50,19 @@ impl Style {
         self.resolve_global_state()
     }
 
+    /// The layer at `position` as declared: with its global-state references, unless it was
+    /// edited since it was last resolved.
+    pub(super) fn declared_layer_at(&self, position: usize) -> StyleLayer {
+        let layer = &self.layers[position];
+        let current = serde_json::to_value(layer).ok();
+        match self.state_templates.get(&layer.id) {
+            Some(template) if Some(&template.resolved) == current.as_ref() => {
+                template.declared.clone()
+            }
+            _ => layer.clone(),
+        }
+    }
+
     /// Substitutes the current state into every layer that reads it and returns the ids of the
     /// layers that changed. Call it once after loading a style so declared defaults apply.
     ///
@@ -202,11 +215,10 @@ impl crate::context::MapContext {
     /// vector layer that read it again; their old content stays until the new tiles arrive.
     pub fn set_global_state(&mut self, key: &str, value: Value) {
         let changed = self.style.set_global_state(key, value);
-        let drawn_from_vector_tiles = self.style.layers.iter().any(|layer| {
-            changed.contains(&layer.id)
-                && layer.type_ != "background"
-                && !crate::io::tile_sources::RASTER_LAYER_TYPES.contains(&layer.type_.as_str())
-        });
+        let drawn_from_vector_tiles =
+            self.style.layers.iter().any(|layer| {
+                changed.contains(&layer.id) && super::mutation::from_vector_tiles(layer)
+            });
         if drawn_from_vector_tiles {
             crate::io::tile_retry::refresh(
                 &mut self.world,

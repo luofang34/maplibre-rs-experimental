@@ -90,6 +90,7 @@ pub struct Style {
 
 mod default_style;
 mod layer_order;
+pub mod mutation;
 pub mod state;
 
 #[cfg(test)]

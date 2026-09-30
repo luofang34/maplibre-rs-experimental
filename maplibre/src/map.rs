@@ -23,7 +23,11 @@ use crate::{
     },
     schedule::{Schedule, Stage, StageError},
     sdf::query::{QueryError, QueryGeometry, QueryOptions, RenderedSymbol},
-    style::{source::GeoJsonData, Style},
+    style::{
+        mutation::{StyleChange, StyleMutationError},
+        source::{GeoJsonData, Source},
+        Style,
+    },
     tcs::world::World,
     window::{HeadedMapWindow, MapWindow, MapWindowConfig, PhysicalSize, WindowCreateError},
 };
@@ -58,6 +62,9 @@ pub enum MapError {
     /// A rendered-feature query was rejected.
     #[error("querying rendered features failed")]
     Query(#[from] QueryError),
+    /// A style change was refused; the style is unchanged.
+    #[error("changing the style failed")]
+    StyleChange(#[from] StyleMutationError),
 }
 
 /// Initialization state of a map's renderer and frame data.
@@ -292,6 +299,86 @@ where
             }
         }
         Ok(())
+    }
+
+    /// Applies a style change before or after the renderer is initialized; when it needs loaded
+    /// vector tiles fetched again, that is requested.
+    fn mutate_style(
+        &mut self,
+        apply: impl FnOnce(&mut Style) -> Result<StyleChange, StyleMutationError>,
+    ) -> Result<StyleChange, MapError> {
+        match &mut self.map_context {
+            CurrentMapContext::Ready(context) => Ok(context.mutate_style(apply)?),
+            CurrentMapContext::Pending(pending) => Ok(apply(&mut pending.style)?),
+        }
+    }
+
+    /// Adds a layer given as style JSON above `before`, or on top; see [`Style::add_layer`].
+    pub fn add_layer(
+        &mut self,
+        layer: serde_json::Value,
+        before: Option<&str>,
+    ) -> Result<StyleChange, MapError> {
+        self.mutate_style(|style| style.add_layer(layer, before))
+    }
+
+    /// Removes a layer.
+    pub fn remove_layer(&mut self, id: &str) -> Result<StyleChange, MapError> {
+        self.mutate_style(|style| style.remove_layer(id))
+    }
+
+    /// Moves a layer above `before`, or to the top.
+    pub fn move_layer(&mut self, id: &str, before: Option<&str>) -> Result<StyleChange, MapError> {
+        self.mutate_style(|style| style.move_layer(id, before))
+    }
+
+    /// Sets a paint property; `null` restores its default.
+    pub fn set_paint_property(
+        &mut self,
+        layer: &str,
+        name: &str,
+        value: serde_json::Value,
+    ) -> Result<StyleChange, MapError> {
+        self.mutate_style(|style| style.set_paint_property(layer, name, value))
+    }
+
+    /// Sets a layout property, including `visibility`; `null` restores its default.
+    pub fn set_layout_property(
+        &mut self,
+        layer: &str,
+        name: &str,
+        value: serde_json::Value,
+    ) -> Result<StyleChange, MapError> {
+        self.mutate_style(|style| style.set_layout_property(layer, name, value))
+    }
+
+    /// Sets a layer's filter; `None` removes it.
+    pub fn set_filter(
+        &mut self,
+        layer: &str,
+        filter: Option<serde_json::Value>,
+    ) -> Result<StyleChange, MapError> {
+        self.mutate_style(|style| style.set_filter(layer, filter))
+    }
+
+    /// Sets the zooms between which a layer is drawn.
+    pub fn set_layer_zoom_range(
+        &mut self,
+        layer: &str,
+        minzoom: Option<f64>,
+        maxzoom: Option<f64>,
+    ) -> Result<StyleChange, MapError> {
+        self.mutate_style(|style| style.set_layer_zoom_range(layer, minzoom, maxzoom))
+    }
+
+    /// Adds a source.
+    pub fn add_source(&mut self, name: &str, source: Source) -> Result<StyleChange, MapError> {
+        self.mutate_style(|style| style.add_source(name, source))
+    }
+
+    /// Removes a source no layer draws from.
+    pub fn remove_source(&mut self, name: &str) -> Result<StyleChange, MapError> {
+        self.mutate_style(|style| style.remove_source(name))
     }
 
     /// Sets a `global-state` value, as GL JS `setGlobalStateProperty`; `null` restores the
