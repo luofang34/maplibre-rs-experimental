@@ -19,6 +19,8 @@ fn main(
     @builtin(vertex_index) vertex_index: u32,
     @location(0) position: vec2<f32>,
     @location(1) normal: vec2<f32>,
+    // A blur and stroke opacity that vary by feature; negative ones leave the layer's own.
+    @location(10) per_feature: vec2<f32>,
     @location(2) tile_mercator_coords: vec4<f32>,
     @location(4) translate1: vec4<f32>,
     @location(5) translate2: vec4<f32>,
@@ -85,13 +87,15 @@ fn main(
     clip.z = 0.0;
 
     // Roughly one pixel of blur keeps the edge antialiased whatever the radius.
-    let antialiasblur = -max(1.0 / total, circle_params.z);
+    let blur = select(circle_params.z, per_feature.x, per_feature.x >= 0.0);
+    let stroke_opacity = select(circle_params.y, per_feature.y, per_feature.y >= 0.0);
+    let antialiasblur = -max(1.0 / total, blur);
     return VertexOutput(
         clip,
         color,
         stroke_color,
         vec3<f32>(extrude, antialiasblur),
-        vec4<f32>(radius / total, circle_params.x, circle_params.y, stroke_width),
+        vec4<f32>(radius / total, circle_params.x, stroke_opacity, stroke_width),
         horizon,
     );
 }

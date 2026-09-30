@@ -90,6 +90,8 @@ mod circles {
                 radius_default: 5.0,
                 stroke_width: StyleProperty::Constant(stroke_width),
                 stroke_width_default: 0.0,
+                blur: None,
+                stroke_opacity: None,
                 zoom: 3.0,
             })
             .with_feature_opacity(

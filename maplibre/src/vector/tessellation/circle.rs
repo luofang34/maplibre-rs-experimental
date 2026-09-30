@@ -28,8 +28,19 @@ pub struct CircleOptions {
     pub radius_default: f32,
     /// What the stroke-width slot holds when the property has no value for a feature.
     pub stroke_width_default: f32,
+    /// `circle-blur`, when it varies by feature; otherwise the layer's value serves.
+    pub blur: Option<StyleProperty<f32>>,
+    /// `circle-stroke-opacity`, when it varies by feature.
+    pub stroke_opacity: Option<StyleProperty<f32>>,
     /// Zoom of the tile, at which zoom-driven properties are evaluated.
     pub zoom: f64,
+}
+
+/// The property when it needs each feature's attributes.
+fn per_feature(property: Option<&StyleProperty<f32>>) -> Option<StyleProperty<f32>> {
+    property
+        .filter(|property| !property.is_feature_constant())
+        .cloned()
 }
 
 impl CircleOptions {
@@ -40,6 +51,8 @@ impl CircleOptions {
             radius_default: CirclePaint::DEFAULT_RADIUS,
             stroke_width: paint.stroke_width(),
             stroke_width_default: 0.0,
+            blur: per_feature(paint.circle_blur.as_ref()),
+            stroke_opacity: per_feature(paint.circle_stroke_opacity.as_ref()),
             zoom,
         }
     }
@@ -62,6 +75,8 @@ impl CircleOptions {
                 .clone()
                 .unwrap_or(StyleProperty::Constant(1.0)),
             stroke_width_default: 1.0,
+            blur: None,
+            stroke_opacity: None,
             zoom,
         }
     }
@@ -96,11 +111,23 @@ where
             .unwrap_or(options.stroke_width_default)
             .max(0.0);
 
+        // Negative values tell the shader to keep the layer's own blur and stroke opacity.
+        let per_feature = |property: &Option<StyleProperty<f32>>| {
+            property
+                .as_ref()
+                .and_then(|property| property.evaluate_for(&self.feature_properties, options.zoom))
+                .map_or(-1.0, |value| value.max(0.0))
+        };
+        let (blur, stroke_opacity) = (
+            per_feature(&options.blur),
+            per_feature(&options.stroke_opacity),
+        );
         let base = self.buffer.vertices.len() as u32;
         for _ in 0..4 {
-            self.buffer
-                .vertices
-                .push(ShaderVertex::new([x, y], [radius, stroke_width]));
+            let mut vertex = ShaderVertex::new([x, y], [radius, stroke_width]);
+            vertex.distance = blur;
+            vertex.elevation = stroke_opacity;
+            self.buffer.vertices.push(vertex);
         }
         for offset in CIRCLE_QUAD_INDICES {
             self.buffer.indices.push(I::from(VertexId(base + offset)));

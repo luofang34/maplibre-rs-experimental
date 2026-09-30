@@ -95,7 +95,7 @@ impl LayerValidation<'_> {
         self.property("paint.circle-color", p.circle_color.as_ref(), Feature);
         self.property("paint.circle-radius", p.circle_radius.as_ref(), Feature);
         self.property("paint.circle-opacity", p.circle_opacity.as_ref(), Feature);
-        self.property("paint.circle-blur", p.circle_blur.as_ref(), Zoom);
+        self.property("paint.circle-blur", p.circle_blur.as_ref(), Feature);
         self.property(
             "paint.circle-stroke-width",
             p.circle_stroke_width.as_ref(),
@@ -109,7 +109,7 @@ impl LayerValidation<'_> {
         self.property(
             "paint.circle-stroke-opacity",
             p.circle_stroke_opacity.as_ref(),
-            Zoom,
+            Feature,
         );
     }
 
