@@ -34,6 +34,10 @@ struct DashEntry {
     round: bool,
     image: LineImage,
     binding: wgpu::BindGroup,
+    uniform: wgpu::Buffer,
+    period: f32,
+    /// The fractional-zoom scale of the dashes the uniform holds.
+    scale: f32,
 }
 pub(crate) struct LineDashResources {
     pub(crate) layout: wgpu::BindGroupLayout,
@@ -90,7 +94,13 @@ impl LineDashResources {
                 },
             ],
         });
-        let solid = create_entry(device, queue, &layout, (&[], false), &LineImage::None);
+        let solid = create_entry(
+            device,
+            queue,
+            &layout,
+            (&[], false),
+            (&LineImage::None, 1.0),
+        );
         Self {
             layout,
             entries: HashMap::new(),
@@ -107,6 +117,7 @@ impl LineDashResources {
     ) {
         self.entries
             .retain(|id, _| style.layers.iter().any(|layer| &layer.id == id));
+        let scale = dash_scale(zoom);
         for layer in &style.layers {
             let Some(LayerPaint::Line(paint)) = &layer.paint else {
                 continue;
@@ -126,14 +137,25 @@ impl LineDashResources {
                 self.entries.remove(&layer.id);
                 continue;
             }
-            if self.entries.get(&layer.id).is_some_and(|entry| {
+            if let Some(entry) = self.entries.get_mut(&layer.id).filter(|entry| {
                 entry.pattern == pattern && entry.round == round && entry.image == image
             }) {
+                if entry.scale != scale {
+                    entry.scale = scale;
+                    let uniform = image_uniform(entry.period, &entry.image, entry.round, scale);
+                    queue.write_buffer(&entry.uniform, 0, bytemuck::cast_slice(&uniform));
+                }
                 continue;
             }
             self.entries.insert(
                 layer.id.clone(),
-                create_entry(device, queue, &self.layout, (&pattern, round), &image),
+                create_entry(
+                    device,
+                    queue,
+                    &self.layout,
+                    (&pattern, round),
+                    (&image, scale),
+                ),
             );
         }
     }
@@ -225,12 +247,18 @@ fn round_dash_pixels(pattern: &[f64]) -> (Vec<u8>, f32, u32) {
     (pixels, period as f32, rows)
 }
 
+/// Dashes are laid out in tile units of the whole zoom below the view's, as GL JS does, so
+/// between whole zooms they grow with the map instead of holding their size on screen.
+fn dash_scale(zoom: f64) -> f32 {
+    2.0_f64.powf(zoom - zoom.floor()) as f32
+}
+
 fn create_entry(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
     (pattern, round): (&[f64], bool),
-    image: &LineImage,
+    (image, scale): (&LineImage, f32),
 ) -> DashEntry {
     let (pixels, period, rows) = if round {
         round_dash_pixels(pattern)
@@ -271,8 +299,8 @@ fn create_entry(
     });
     let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("line dash period"),
-        contents: bytemuck::cast_slice(&image_uniform(period, image, round)),
-        usage: wgpu::BufferUsages::UNIFORM,
+        contents: bytemuck::cast_slice(&image_uniform(period, image, round, scale)),
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
     let (ramp_view, ramp_sampler) = ramp_texture(device, queue, image);
     let binding = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -306,16 +334,20 @@ fn create_entry(
         round,
         image: image.clone(),
         binding,
+        uniform,
+        period,
+        scale,
     }
 }
 
 /// The uniform of a dash entry: the dash period, what fills the line, and the size of a pattern
-/// or, for a dash, whether its texture has the rows of round caps.
-fn image_uniform(period: f32, image: &LineImage, round: bool) -> [f32; 4] {
+/// or, for a dash, whether its texture has the rows of round caps and how far the fractional
+/// zoom stretches it.
+fn image_uniform(period: f32, image: &LineImage, round: bool, scale: f32) -> [f32; 4] {
     let round = f32::from(round);
     match image {
-        LineImage::None => [period, 0.0, round, 0.0],
-        LineImage::Gradient(_) => [period, 1.0, round, 0.0],
+        LineImage::None => [period, 0.0, round, scale],
+        LineImage::Gradient(_) => [period, 1.0, round, scale],
         LineImage::Pattern { display, .. } => [period, 2.0, display[0], display[1]],
     }
 }

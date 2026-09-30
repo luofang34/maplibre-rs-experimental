@@ -42,6 +42,7 @@ fn path_length(path: &Path) -> f32 {
 }
 
 mod circle;
+mod line_origin;
 mod line_style;
 pub use line_style::LineFeatureStyle;
 mod extrusion;
@@ -299,6 +300,14 @@ where
         let path = self.path_builder.replace(Path::builder()).build();
         self.line_length = self.line_length.max(path_length(&path));
         let first_vertex = self.buffer.vertices.len();
+        // A gradient measures its progress along the whole line, not from the tile.
+        let constructor = line_origin::StrokeOrigins {
+            origins: if self.line_gradient {
+                Vec::new()
+            } else {
+                line_origin::entry_distances(&path)
+            },
+        };
 
         StrokeTessellator::new()
             .tessellate_path(
@@ -315,7 +324,7 @@ where
                         LineJoin::Round => lyon::tessellation::LineJoin::Round,
                     })
                     .with_miter_limit(self.stroke.miter_limit),
-                &mut BuffersBuilder::new(&mut self.buffer, VertexConstructor {}),
+                &mut BuffersBuilder::new(&mut self.buffer, constructor),
             )
             .map_err(|error| GeozeroError::Geometry(error.to_string()))?;
         if let Some(style) = &self.line_feature_style {
