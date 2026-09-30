@@ -14,6 +14,7 @@ fn atlas() -> Arc<SymbolAtlas> {
                     rect: [0, 0, 10, 18],
                     metrics: [0., -9., 10., 1.],
                     kind: 0,
+                    ..Default::default()
                 },
             )]
             .into(),
@@ -182,6 +183,7 @@ fn icon_text_fit_stretches_the_icon_around_the_text_and_padding() {
             rect: [0, 0, 20, 20],
             metrics: [0., 0., 20., 1.],
             kind: 1,
+            ..Default::default()
         },
     );
     let paint: SymbolPaint = serde_json::from_value(serde_json::json!({

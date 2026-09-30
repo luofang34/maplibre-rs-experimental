@@ -14,7 +14,7 @@ pub use cache::{AssetCache, AssetFailure};
 pub use load::{load_symbol_assets, SymbolAssetError};
 
 /// Coordinates and metrics of a glyph or sprite in the atlas.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct AtlasEntry {
     /// Pixel rectangle x, y, width, height.
     pub rect: [u32; 4],
@@ -22,6 +22,36 @@ pub struct AtlasEntry {
     pub metrics: [f32; 4],
     /// Zero for text SDF, one for RGBA icons, two for SDF icons.
     pub kind: u32,
+    /// How an icon stretches around its text, from the sprite's `stretchX`, `stretchY`,
+    /// `content` and `textFit*` fields; `None` for glyphs and plain icons.
+    #[serde(default)]
+    pub stretch: Option<Box<IconStretch>>,
+}
+
+/// The sprite fields that let an icon stretch to fit its text, in image pixels.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct IconStretch {
+    /// Column ranges that grow; empty when the icon does not stretch horizontally.
+    pub stretch_x: Vec<[f32; 2]>,
+    /// Row ranges that grow; empty when the icon does not stretch vertically.
+    pub stretch_y: Vec<[f32; 2]>,
+    /// The area, `[left, top, right, bottom]`, that the text is fitted to.
+    pub content: Option<[f32; 4]>,
+    /// How the content area follows the text horizontally.
+    pub text_fit_width: Option<TextFit>,
+    /// How the content area follows the text vertically.
+    pub text_fit_height: Option<TextFit>,
+}
+
+/// The `textFitWidth` and `textFitHeight` sprite values.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TextFit {
+    /// The content area may stretch or shrink to the text.
+    StretchOrShrink,
+    /// The content area may only stretch.
+    StretchOnly,
+    /// The content area keeps its aspect ratio.
+    Proportional,
 }
 
 /// Immutable atlas shared by all symbol layers of a tile.
@@ -155,6 +185,7 @@ impl AtlasBuilder {
                             1.0,
                         ],
                         kind: 0,
+                        ..Default::default()
                     },
                 );
         }

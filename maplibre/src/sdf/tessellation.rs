@@ -20,6 +20,7 @@ use crate::{
     vector::tessellation::{property_value, IndexDataType},
 };
 
+mod icon_quads;
 mod layout;
 mod line_anchors;
 mod text_layout;

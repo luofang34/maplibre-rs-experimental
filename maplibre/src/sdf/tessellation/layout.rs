@@ -84,21 +84,34 @@ pub(super) fn append(
             width * (1.0 - fractions[0]) + offset[0],
             height * (1.0 - fractions[1]) + offset[1],
         ];
-        let bounds = fit_to_text(paint, symbol, zoom, atlas, [width, height], offset)
-            // Layout pixels are drawn scaled by icon-size, which a fitted icon does not take.
-            .map_or(placed, |fitted| fitted.map(|edge| edge / icon_size));
+        let fitted = fit_to_text(paint, symbol, zoom, atlas, [width, height], offset);
         let shift = crate::sdf::translation::tile_translation(paint, "icon");
-        quad(
-            buffer,
-            Point::new(symbol.anchor.x() + shift[0], symbol.anchor.y() + shift[1]),
-            bounds,
-            icon,
-            height_offset,
-            symbol.angle,
-            paint
-                .number("icon-rotate", &symbol.properties, zoom, 0.0)
-                .to_radians(),
-        );
+        let anchor = Point::new(symbol.anchor.x() + shift[0], symbol.anchor.y() + shift[1]);
+        let rotation = paint
+            .number("icon-rotate", &symbol.properties, zoom, 0.0)
+            .to_radians();
+        // Layout pixels are drawn scaled by icon-size, which a fitted icon does not take.
+        let undo_size = if fitted.is_some() {
+            1.0 / icon_size
+        } else {
+            1.0
+        };
+        for piece in super::icon_quads::icon_quads(icon, fitted.unwrap_or(placed), fitted.is_some())
+        {
+            let part = AtlasEntry {
+                rect: piece.rect,
+                ..icon.clone()
+            };
+            quad(
+                buffer,
+                anchor,
+                piece.bounds.map(|edge| edge * undo_size),
+                &part,
+                height_offset,
+                symbol.angle,
+                rotation,
+            );
+        }
     }
     let first_glyph_index = buffer.indices.len();
     let glyph_offsets = super::text_layout::append(symbol, paint, zoom, atlas, buffer);

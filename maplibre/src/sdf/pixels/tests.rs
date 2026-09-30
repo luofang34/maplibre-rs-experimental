@@ -159,6 +159,7 @@ fn atlas() -> Arc<crate::sdf::assets::SymbolAtlas> {
             rect,
             metrics: [0., 0., 0., 1.],
             kind: 1,
+            ..Default::default()
         },
     );
     atlas.finish()

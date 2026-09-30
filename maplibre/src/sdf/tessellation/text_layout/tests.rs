@@ -16,6 +16,7 @@ fn letter_spacing_is_between_glyphs_and_does_not_shift_centered_text() {
                     rect: [0, 0, 10, 18],
                     metrics: [0., -9., 10., 1.],
                     kind: 0,
+                    ..Default::default()
                 },
             )]
             .into(),
@@ -66,6 +67,7 @@ fn label_top(anchor: &str, field: &str) -> i32 {
                     rect: [0, 0, 10, 18],
                     metrics: [0., -9., 10., 1.],
                     kind: 0,
+                    ..Default::default()
                 },
             )]
             .into(),

@@ -8,7 +8,7 @@ use geozero::mvt::Message;
 
 use super::{
     cache::{AssetFailure, SpriteSheet},
-    AtlasBuilder, AtlasEntry, SymbolAtlas,
+    AtlasBuilder, AtlasEntry, IconStretch, SymbolAtlas, TextFit,
 };
 use crate::{
     io::source_client::{HttpClient, SourceClient},
@@ -242,9 +242,51 @@ fn pack_sprites(
                 } else {
                     1
                 },
+                stretch: icon_stretch(&value),
             },
         );
     }
+}
+
+fn ranges(value: &serde_json::Value, key: &str) -> Vec<[f32; 2]> {
+    value
+        .get(key)
+        .and_then(|ranges| ranges.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|range| {
+            let range = range.as_array()?;
+            Some([
+                range.first()?.as_f64()? as f32,
+                range.get(1)?.as_f64()? as f32,
+            ])
+        })
+        .collect()
+}
+
+fn text_fit(value: &serde_json::Value, key: &str) -> Option<TextFit> {
+    match value.get(key)?.as_str()? {
+        "stretchOrShrink" => Some(TextFit::StretchOrShrink),
+        "stretchOnly" => Some(TextFit::StretchOnly),
+        "proportional" => Some(TextFit::Proportional),
+        _ => None,
+    }
+}
+
+/// The stretch fields of a sprite entry, or `None` when it has none.
+fn icon_stretch(value: &serde_json::Value) -> Option<Box<IconStretch>> {
+    let stretch = IconStretch {
+        stretch_x: ranges(value, "stretchX"),
+        stretch_y: ranges(value, "stretchY"),
+        content: value.get("content").and_then(|content| {
+            let content = content.as_array()?;
+            let read = |index: usize| content.get(index)?.as_f64().map(|edge| edge as f32);
+            Some([read(0)?, read(1)?, read(2)?, read(3)?])
+        }),
+        text_fit_width: text_fit(value, "textFitWidth"),
+        text_fit_height: text_fit(value, "textFitHeight"),
+    };
+    (stretch != IconStretch::default()).then(|| Box::new(stretch))
 }
 
 fn sprite_url(url: &str, extension: &str) -> String {
