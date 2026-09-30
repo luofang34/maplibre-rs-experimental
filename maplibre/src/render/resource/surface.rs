@@ -16,7 +16,7 @@ use crate::{
     render::{
         error::RenderError,
         eventually::HasChanged,
-        resource::texture::TextureView,
+        resource::{share_gpu, texture::TextureView},
         settings::{Msaa, RendererSettings},
     },
     window::{HeadedMapWindow, MapWindow, PhysicalSize},
@@ -109,7 +109,7 @@ impl Surface {
             .unwrap_or(wgpu::TextureFormat::Rgba8Unorm);
         Self {
             size,
-            head: Head::Headless(Arc::new(BufferedTextureHead::new(
+            head: Head::Headless(share_gpu(BufferedTextureHead::new(
                 device,
                 size,
                 format,
@@ -190,7 +190,7 @@ impl Surface {
                 if head.texture.width() != self.size.width()
                     || head.texture.height() != self.size.height()
                 {
-                    *head = Arc::new(BufferedTextureHead::new(
+                    *head = share_gpu(BufferedTextureHead::new(
                         device,
                         self.size,
                         head.texture_format,

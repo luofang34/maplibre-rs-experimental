@@ -1,6 +1,7 @@
 //! Renders one labelled point through the headless map and checks that its text reaches the
 //! frame, so symbol buckets are not only returned by processing but also drawn.
 
+#![cfg(not(target_arch = "wasm32"))]
 #![allow(clippy::expect_used, clippy::panic)]
 
 use maplibre::{

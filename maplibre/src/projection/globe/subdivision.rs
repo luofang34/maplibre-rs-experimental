@@ -110,7 +110,7 @@ where
     let input = buffer.indices[index_start..].to_vec();
     buffer.indices.truncate(index_start);
     let mut vertices = HashMap::new();
-    for triangle in input.chunks_exact(3) {
+    for triangle in input.as_chunks::<3>().0 {
         let points = triangle_points(&buffer.vertices, triangle)?;
         subdivide_triangle(
             buffer,

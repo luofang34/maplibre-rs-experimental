@@ -68,7 +68,7 @@ fn create_kernel(
 ) -> Result<Kernel<CurrentEnvironment>, JSError> {
     let mut kernel_builder = KernelBuilder::new()
         .with_map_window_config(window_config)
-        .with_http_client(WHATWGFetchHttpClient::default());
+        .with_http_client(WHATWGFetchHttpClient);
 
     let offscreen_kernel_config = OffscreenKernelConfig {
         cache_directory: None,

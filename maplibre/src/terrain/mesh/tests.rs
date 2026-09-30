@@ -41,7 +41,7 @@ fn indices_stay_in_range_and_skirts_hang_from_the_edges() {
 fn terrain_grid_and_polar_fans_face_outward() {
     use cgmath::{InnerSpace, Vector3};
     let mesh = create_terrain_mesh(TERRAIN_MESH_SIZE);
-    for triangle in mesh.indices.chunks_exact(3) {
+    for triangle in mesh.indices.as_chunks::<3>().0 {
         let vertices: [_; 3] = std::array::from_fn(|i| mesh.vertices[triangle[i] as usize]);
         if vertices.iter().any(|vertex| vertex.skirt != 0) {
             continue;
@@ -76,7 +76,7 @@ fn terrain_grid_and_polar_fans_face_outward() {
 fn terrain_skirts_face_outside_each_tile_edge() {
     use cgmath::{InnerSpace, Vector3};
     let mesh = create_terrain_mesh(4);
-    for triangle in mesh.indices.chunks_exact(3) {
+    for triangle in mesh.indices.as_chunks::<3>().0 {
         let vertices: [_; 3] = std::array::from_fn(|i| mesh.vertices[triangle[i] as usize]);
         if !vertices.iter().any(|vertex| vertex.skirt != 0) {
             continue;
@@ -105,7 +105,7 @@ fn terrain_skirts_face_outside_each_tile_edge() {
 fn polar_caps_cover_their_interpolated_strips() {
     let mesh = create_terrain_mesh(TERRAIN_MESH_SIZE);
     let mut twice_area = 0_i64;
-    for triangle in mesh.indices.chunks_exact(3) {
+    for triangle in mesh.indices.as_chunks::<3>().0 {
         let vertices: [_; 3] = std::array::from_fn(|i| mesh.vertices[triangle[i] as usize]);
         if !vertices.iter().any(|v| matches!(v.y, i16::MIN | i16::MAX)) {
             continue;
@@ -151,9 +151,12 @@ fn zero_resolution_uses_one_cell() {
 fn assert_tile_coverage_and_skirts(n: u32) {
     let mesh = create_terrain_mesh(n);
     let grid_count = (n + 1) * (n + 1);
-    let faces: Vec<_> = mesh
+    let faces: Vec<&[u32]> = mesh
         .indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .map(|face| face.as_slice())
         .filter(|face| face.iter().all(|i| *i < grid_count))
         .collect();
     let mut twice_area = 0_i64;
@@ -223,7 +226,7 @@ fn assert_skirts_attach_to_boundary(mesh: &super::TerrainMesh, faces: &[&[u32]],
         .collect();
     let points: BTreeSet<_> = boundary.iter().flat_map(|(a, b)| [*a, *b]).collect();
     let mut attached = BTreeSet::new();
-    for face in mesh.indices.chunks_exact(3) {
+    for face in mesh.indices.as_chunks::<3>().0 {
         if !face.iter().any(|i| mesh.vertices[*i as usize].skirt == 1) {
             continue;
         }

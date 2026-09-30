@@ -16,7 +16,7 @@ extern "C" {
     fn new_worker() -> JsValue;
 }
 
-pub type PinnedFuture = std::pin::Pin<Box<(dyn std::future::Future<Output = ()> + 'static)>>;
+pub type PinnedFuture = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'static>>;
 
 type NewWorker = Box<dyn Fn() -> Result<Worker, WebError>>;
 type Execute = Box<dyn (FnOnce() -> PinnedFuture) + Send>;

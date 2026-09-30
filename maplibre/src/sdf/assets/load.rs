@@ -246,5 +246,5 @@ async fn fetch_asset<HC: HttpClient>(client: &SourceClient<HC>, url: &str) -> Op
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;

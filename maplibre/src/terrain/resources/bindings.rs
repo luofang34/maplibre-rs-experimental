@@ -1,5 +1,6 @@
 //! Cached texture bindings for terrain surfaces and their symbols.
 use super::*;
+use crate::render::resource::share_gpu;
 
 impl TerrainResources {
     /// Binds the uniform block window, a DEM texture and a drape texture for one tile.
@@ -62,7 +63,7 @@ impl TerrainResources {
                 Some(source) => self.drape_texture(source)?,
                 None => &self.empty_dem,
             };
-            Arc::new(self.create_bind_group(device, dem, drape))
+            share_gpu(self.create_bind_group(device, dem, drape))
         };
         self.bind_groups.insert(key, Arc::clone(&group));
         Some(group)

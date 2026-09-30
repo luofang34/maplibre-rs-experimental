@@ -31,7 +31,7 @@ use crate::{
         eventually::Eventually,
         graph::{EmptyNode, RenderGraph},
         main_pass::{MainPassDriverNode, MainPassNode},
-        resource::{Head, Surface, Texture, TextureView},
+        resource::{share_gpu, Head, Surface, Texture, TextureView},
         settings::{RendererSettings, WgpuSettings},
         systems::{
             cleanup_system::cleanup_system, resource_system::ResourceSystem,
@@ -245,7 +245,7 @@ impl Renderer {
 
         Ok(Self {
             instance,
-            device: Arc::new(device),
+            device: share_gpu(device),
             queue,
             adapter,
             wgpu_settings,
@@ -291,7 +291,7 @@ impl Renderer {
 
         Ok(Self {
             instance,
-            device: Arc::new(device),
+            device: share_gpu(device),
             queue,
             adapter,
             wgpu_settings,

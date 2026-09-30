@@ -52,7 +52,7 @@ pub enum WebMessageTag {
 }
 
 impl WebMessageTag {
-    pub fn to_static(&self) -> &'static WebMessageTag {
+    pub fn to_static(self) -> &'static WebMessageTag {
         match self {
             WebMessageTag::LayerRaster => &WebMessageTag::LayerRaster,
             WebMessageTag::LayerMissing => &WebMessageTag::LayerMissing,

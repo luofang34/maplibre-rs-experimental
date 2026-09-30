@@ -237,7 +237,7 @@ impl DemTile {
         }
         let mut changed = false;
         let positions = y_range.flat_map(|y| x_range.clone().map(move |x| (x, y)));
-        for ((x, y), pixel) in positions.zip(samples.chunks_exact(4)) {
+        for ((x, y), pixel) in positions.zip(samples.as_chunks::<4>().0.iter()) {
             let index = self.byte_index(x, y);
             let target = &mut self.pixels[index..index + 4];
             changed |= target != pixel;

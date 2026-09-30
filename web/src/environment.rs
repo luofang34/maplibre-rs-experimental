@@ -17,7 +17,7 @@ impl OffscreenKernel for WHATWGOffscreenKernelEnvironment {
     }
 
     fn source_client(&self) -> SourceClient<Self::HttpClient> {
-        SourceClient::new(HttpSourceClient::new(WHATWGFetchHttpClient::default()))
+        SourceClient::new(HttpSourceClient::new(WHATWGFetchHttpClient))
     }
 }
 

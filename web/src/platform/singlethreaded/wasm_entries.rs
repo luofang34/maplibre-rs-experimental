@@ -46,7 +46,7 @@ pub async fn singlethreaded_process_data(procedure_ptr: u32, input: String) -> R
     })?;
 
     let context = PassingContext {
-        source_client: SourceClient::new(HttpSourceClient::new(WHATWGFetchHttpClient::default())),
+        source_client: SourceClient::new(HttpSourceClient::new(WHATWGFetchHttpClient)),
     };
 
     if let Ok(global) = js_sys::global().dyn_into::<DedicatedWorkerGlobalScope>() {
@@ -64,7 +64,7 @@ pub async fn singlethreaded_process_data(procedure_ptr: u32, input: String) -> R
     procedure(
         input,
         context,
-        UsedOffscreenKernelEnvironment::create(serde_json::from_str(&kernel_config()).unwrap()),
+        UsedOffscreenKernelEnvironment::create(serde_json::from_str(kernel_config()).unwrap()),
     )
     .await?;
 

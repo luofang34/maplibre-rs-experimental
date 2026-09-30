@@ -117,7 +117,9 @@ fn parse_step(values: &[Value]) -> Result<ProjectionType, ProjectionExpressionEr
 
 fn parse_stops(values: &[Value]) -> Result<Vec<ProjectionStop>, ProjectionExpressionError> {
     values
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             let zoom = pair[0]
                 .as_f64()

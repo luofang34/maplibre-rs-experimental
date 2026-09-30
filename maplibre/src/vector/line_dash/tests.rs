@@ -3,7 +3,12 @@ use super::{dash_pixels, normalize_pattern};
 fn dash_distance_texture_contains_on_and_off_intervals_at_the_declared_ratio() {
     let (pixels, period) = dash_pixels(&[2.0, 1.0]);
     assert_eq!(period, 3.0);
-    let on = pixels.chunks_exact(4).filter(|p| p[0] > 128).count();
+    let on = pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .filter(|p| p[0] > 128)
+        .count();
     assert!((on as i32 - 170).abs() < 3);
     assert!(pixels[4 * 80] > 128);
     assert!(pixels[4 * 210] < 128);

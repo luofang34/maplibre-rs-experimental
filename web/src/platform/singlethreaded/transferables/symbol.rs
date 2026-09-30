@@ -109,11 +109,7 @@ impl SymbolLayerTessellated for FlatBufferTransferable {
             coords: SymbolLayerTessellated::coords(&self),
             source_layer: layer_name,
             style_layer_id,
-            buffer: OverAlignedVertexBuffer::from_iters(
-                vertices.into_iter(),
-                indices.into_iter(),
-                usable_indices,
-            ),
+            buffer: OverAlignedVertexBuffer::from_iters(vertices, indices, usable_indices),
             features: data
                 .symbol_features()
                 .and_then(|bytes| {

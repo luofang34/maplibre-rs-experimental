@@ -1,6 +1,6 @@
 //! GPU atlases shared by layers and their evaluated draw uniforms.
 use super::{assets::SymbolAtlas, paint::SymbolUniforms};
-use crate::{coords::WorldTileCoords, style::layer::SymbolPaint};
+use crate::{coords::WorldTileCoords, render::resource::share_gpu, style::layer::SymbolPaint};
 use std::{
     collections::HashMap,
     sync::{Arc, Weak},
@@ -64,7 +64,7 @@ impl SymbolTextures {
             .get(&identity)
             .and_then(Weak::upgrade)
             .unwrap_or_else(|| {
-                let texture = Arc::new(TileAtlas::new(gpu, atlas));
+                let texture = share_gpu(TileAtlas::new(gpu, atlas));
                 self.atlases.insert(identity, Arc::downgrade(&texture));
                 texture
             });
