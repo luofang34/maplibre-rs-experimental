@@ -18,7 +18,7 @@ pub(super) fn globe_style(coords: WorldTileCoords) -> Style {
     style
 }
 
-fn assert_spherical(map: &HeadlessMap) {
+pub(super) fn assert_spherical(map: &HeadlessMap) {
     let actual = crate::render::projection::projection_data_for_view(
         &map.map_context.style,
         &map.map_context.view_state,

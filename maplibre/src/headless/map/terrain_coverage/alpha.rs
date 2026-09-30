@@ -189,4 +189,6 @@ fn assert_center(bytes: &[u8], expected: [u8; 4]) {
 
 mod tests;
 
+mod fill_opacity;
+
 mod globe;
