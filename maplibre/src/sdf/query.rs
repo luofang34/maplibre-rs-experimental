@@ -21,6 +21,23 @@ pub(crate) struct PlacedSymbol {
     pub(crate) layer: String,
     pub(crate) feature: usize,
     pub(crate) rectangles: [Option<[f64; 4]>; 2],
+    /// One box per glyph of a text that follows a line; empty for other labels, whose text
+    /// is the first rectangle.
+    pub(crate) glyph_boxes: Vec<[f64; 4]>,
+}
+
+impl PlacedSymbol {
+    /// The screen areas a pointer can hit: the icon, and the text, glyph by glyph on a line.
+    fn hit_areas(&self) -> impl Iterator<Item = [f64; 4]> + '_ {
+        let text = if self.glyph_boxes.is_empty() {
+            self.rectangles[0]
+        } else {
+            None
+        };
+        text.into_iter()
+            .chain(self.rectangles[1])
+            .chain(self.glyph_boxes.iter().copied())
+    }
 }
 
 /// A rendered symbol and its source attributes, ordered from the topmost style layer.
@@ -150,7 +167,7 @@ pub fn query_rendered_symbols_in(
             .layers
             .as_ref()
             .is_some_and(|layers| !layers.contains(&hit.layer))
-            || !hit.rectangles.iter().flatten().any(|r| {
+            || !hit.hit_areas().any(|r| {
                 r[0] <= bounds[2] && r[2] >= bounds[0] && r[1] <= bounds[3] && r[3] >= bounds[1]
             })
         {

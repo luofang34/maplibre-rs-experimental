@@ -206,6 +206,54 @@ pub(super) fn line_glyph_poses(
     LinePoses::Poses(poses)
 }
 
+/// One square per glyph of a line label, as tall as the text and centred on the glyph, so a
+/// curved label collides along its curve instead of through the box around all of it. The
+/// squares of neighbouring glyphs overlap and cover the text without gaps.
+pub(super) fn line_glyph_boxes(
+    layer: &SymbolLayerData,
+    poses: &[GlyphPose],
+    elevation: f32,
+    view: &ViewState,
+    projection: &ShaderProjectionData,
+    uniforms: &SymbolUniforms,
+) -> Vec<[f64; 4]> {
+    let height = f64::from(elevation) * f64::from(uniforms.text_layout[3]);
+    let padding = f64::from(uniforms.placement[0]);
+    let anchor = poses.first().map_or([0.0; 2], |pose| {
+        [f64::from(pose.point[0]), f64::from(pose.point[1])]
+    });
+    let placement = Placement {
+        coords: layer.coords,
+        anchor,
+        elevation: f64::from(elevation),
+        view,
+        projection,
+        uniforms,
+    };
+    poses
+        .iter()
+        .filter_map(|pose| {
+            let clip = project(
+                layer.coords,
+                [f64::from(pose.point[0]), f64::from(pose.point[1])],
+                height,
+                view,
+                projection,
+            )
+            .filter(|clip| clip.w > 0.0)?;
+            let ratio = if view.has_external_view() {
+                1.0
+            } else {
+                clip.w / f64::from(projection.center_clip_w)
+            };
+            let half =
+                f64::from(uniforms.text[0]) * (0.5 + 0.5 * ratio).clamp(0.0, 4.0) / 2.0 + padding;
+            let [x, y] = placement.screen(clip);
+            Some([x - half, y - half, x + half, y + half])
+        })
+        .collect()
+}
+
 struct Placement<'a> {
     coords: WorldTileCoords,
     anchor: [f64; 2],

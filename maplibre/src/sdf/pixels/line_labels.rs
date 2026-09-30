@@ -200,3 +200,26 @@ async fn a_sharp_bend_under_the_label_refuses_it_until_max_angle_allows_it() {
             > 100
     );
 }
+
+#[tokio::test]
+async fn a_curved_label_is_selectable_on_its_glyphs_but_not_under_the_curve() {
+    let map = line_map(line_style(serde_json::json!({})), &top_arc()).await;
+    let pixels = read_blocking(&map);
+    let index = pixels
+        .chunks_exact(4)
+        .position(|p| p[0] > 180 && p[1] < 80 && p[2] < 80)
+        .expect("the label draws");
+    let on_glyph = [
+        (index % SIZE as usize) as f64 + 0.5,
+        (index / SIZE as usize) as f64 + 0.5,
+    ];
+    assert!(
+        !map.query_rendered_symbols(on_glyph, None).is_empty(),
+        "a drawn glyph selects the label"
+    );
+    // Below the middle of the arc, inside the box around all glyphs but on none of them.
+    assert!(
+        map.query_rendered_symbols([381.0, 340.0], None).is_empty(),
+        "the space under a curve is not part of the label"
+    );
+}

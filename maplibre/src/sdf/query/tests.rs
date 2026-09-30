@@ -76,6 +76,7 @@ fn placed(buckets: Vec<SymbolLayerData>) -> World {
                 layer: bucket.style_layer_id.clone(),
                 feature,
                 rectangles: [Some([100.0, 100.0, 200.0, 140.0]), None],
+                glyph_boxes: Vec::new(),
             });
         }
         let key = (bucket.coords.x, bucket.coords.y, u8::from(bucket.coords.z));
@@ -226,6 +227,7 @@ fn only_the_second_rectangle_of_a_symbol_can_be_the_one_hit() {
         layer: "low".into(),
         feature: 0,
         rectangles: [None, Some([300.0, 300.0, 340.0, 320.0])],
+        glyph_boxes: Vec::new(),
     }]));
     let at = |point: [f64; 2]| {
         query_rendered_symbols_in(
@@ -304,4 +306,34 @@ fn a_box_overlapping_only_the_edge_of_a_label_still_finds_it() {
     };
     assert_eq!(query(edge), 1);
     assert_eq!(query(miss), 0);
+}
+
+#[test]
+fn a_line_label_is_hit_on_its_glyphs_and_not_in_the_gap_between_them() {
+    let mut world = placed(vec![bucket(
+        coords(0, 0, 0),
+        "low",
+        vec![label(1, 0.0, [0.0, 0.0])],
+    )]);
+    world.resources.insert(PlacedSymbols(vec![PlacedSymbol {
+        coords: coords(0, 0, 0),
+        layer: "low".into(),
+        feature: 0,
+        // The box around the whole curved text spans the gap; only the glyphs count.
+        rectangles: [Some([100.0, 100.0, 300.0, 200.0]), None],
+        glyph_boxes: vec![[100.0, 100.0, 130.0, 130.0], [270.0, 170.0, 300.0, 200.0]],
+    }]));
+    let at = |point: [f64; 2]| {
+        query_rendered_symbols_in(
+            &world,
+            &style(),
+            QueryGeometry::Point(point),
+            &QueryOptions::default(),
+        )
+        .expect("query")
+        .len()
+    };
+    assert_eq!(at([115.0, 115.0]), 1, "on the first glyph");
+    assert_eq!(at([285.0, 185.0]), 1, "on the last glyph");
+    assert_eq!(at([200.0, 150.0]), 0, "in the gap under the curve");
 }

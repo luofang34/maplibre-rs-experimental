@@ -104,3 +104,51 @@ fn overlap_modes_decide_who_may_share_space() {
         "text-overlap wins over text-allow-overlap"
     );
 }
+
+#[test]
+fn a_label_along_a_line_collides_through_its_glyph_boxes_not_the_box_around_them() {
+    // Two glyph boxes far apart with a gap between, as at the ends of a curved label.
+    let glyphs = [[10.0, 10.0, 40.0, 40.0], [160.0, 10.0, 190.0, 40.0]];
+    let around = [Some([10.0, 10.0, 190.0, 40.0]), None];
+    let gap_obstacle = [80.0, 15.0, 120.0, 35.0];
+    let mut grid = CollisionGrid::new(512.0, 512.0);
+    grid.insert(gap_obstacle);
+    let rules = rules(serde_json::json!({}));
+    assert_eq!(
+        rules.place(around, &mut grid, [512.0; 2]),
+        [false, false],
+        "the surrounding box meets an obstacle that lies between the glyphs"
+    );
+    assert_eq!(
+        rules.place_along_line(around, &glyphs, &mut grid, [512.0; 2]),
+        [true, false],
+        "the glyph boxes leave the gap free"
+    );
+    let mut blocked = CollisionGrid::new(512.0, 512.0);
+    blocked.insert([150.0, 20.0, 170.0, 30.0]);
+    assert_eq!(
+        rules.place_along_line(around, &glyphs, &mut blocked, [512.0; 2]),
+        [false, false],
+        "an obstacle on one glyph blocks the label"
+    );
+}
+
+#[test]
+fn a_placed_line_label_occupies_its_glyph_boxes_only() {
+    let glyphs = [[10.0, 10.0, 40.0, 40.0], [160.0, 10.0, 190.0, 40.0]];
+    let around = [Some([10.0, 10.0, 190.0, 40.0]), None];
+    let mut grid = CollisionGrid::new(512.0, 512.0);
+    let rules = rules(serde_json::json!({}));
+    assert_eq!(
+        rules.place_along_line(around, &glyphs, &mut grid, [512.0; 2]),
+        [true, false]
+    );
+    assert!(
+        grid.overlaps([20.0, 20.0, 30.0, 30.0]),
+        "a glyph box is taken"
+    );
+    assert!(
+        !grid.overlaps([90.0, 20.0, 110.0, 30.0]),
+        "the gap between glyphs stays free for other labels"
+    );
+}

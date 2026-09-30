@@ -5,15 +5,11 @@ use std::{
     hash::{DefaultHasher, Hash, Hasher},
 };
 
+use layer_pass::place_layer;
+
 #[cfg(test)]
 use super::placement::canonical_tile;
-use super::{
-    collision_grid::CollisionGrid,
-    line_glyphs::GlyphPose,
-    paint::SymbolUniforms,
-    placement::{line_glyph_poses, screen_boxes, symbol_elevation, LinePoses},
-    query::{PlacedSymbol, PlacedSymbols},
-};
+use super::{collision_grid::CollisionGrid, query::PlacedSymbols};
 use crate::{
     context::MapContext,
     coords::WorldTileCoords,
@@ -132,6 +128,7 @@ impl System for CollisionSystem {
     }
 }
 
+mod layer_pass;
 mod rules;
 mod temporal;
 
@@ -165,223 +162,6 @@ fn visible_layers<'a>(
         }
     }
     layers
-}
-
-type OrderedFeature<'a> = (usize, usize, &'a crate::sdf::Feature, bool);
-
-/// Features of all `layers` in placement order: ascending `symbol-sort-key`, equal keys in tile
-/// order, and within a tile the labels that were visible first so they keep their place.
-fn ordered_features<'a>(
-    layers: &[&'a crate::sdf::SymbolLayerData],
-    history: &temporal::PlacementHistory,
-) -> Vec<OrderedFeature<'a>> {
-    let mut features: Vec<_> = layers
-        .iter()
-        .enumerate()
-        .flat_map(|(position, layer)| {
-            layer
-                .features
-                .iter()
-                .enumerate()
-                .map(move |(i, feature)| (position, i, feature))
-        })
-        .map(|(position, i, feature)| {
-            (
-                position,
-                i,
-                feature,
-                history.was_visible(layers[position], feature),
-            )
-        })
-        .collect();
-    features.sort_by(|(pa, _, a, av), (pb, _, b, bv)| {
-        a.data
-            .sort_key
-            .total_cmp(&b.data.sort_key)
-            .then_with(|| pa.cmp(pb))
-            .then_with(|| bv.cmp(av))
-    });
-    features
-}
-
-/// Places the features of one style layer across every visible tile together, in ascending
-/// `symbol-sort-key` order, and returns each tile's metadata in the order of `layers`.
-fn place_layer(
-    world: &crate::tcs::world::World,
-    view_state: &crate::render::view_state::ViewState,
-    projection: &crate::render::projection::ShaderProjectionData,
-    layers: &[&crate::sdf::SymbolLayerData],
-    paint: &crate::style::layer::SymbolPaint,
-    zoom_limits: [f64; 2],
-    placement: (
-        &mut CollisionGrid,
-        &mut PlacedSymbols,
-        &mut temporal::PlacementHistory,
-    ),
-) -> Vec<Vec<SDFShaderFeatureMetadata>> {
-    let (boxes, placed, history) = placement;
-    let mut metadata: Vec<_> = layers.iter().map(|layer| empty_metadata(layer)).collect();
-    let zoom = view_state.style_zoom().value();
-    let uniforms = SymbolUniforms::new(paint, zoom, [1, 1]);
-    let features = ordered_features(layers, history);
-    for (position, feature_index, feature, was_visible) in features {
-        let layer = layers[position];
-        let ground = symbol_elevation(world, layer, feature, paint, zoom);
-        let relevance = world
-            .resources
-            .get::<super::visibility::SymbolVisibility>()
-            .map_or(1.0, |policy| {
-                policy.opacity(layer, feature, ground, view_state)
-            });
-        let mut limits = zoom_limits;
-        if was_visible {
-            limits[0] -= 0.15;
-            limits[1] += 0.15;
-        }
-        let line = feature
-            .line
-            .as_ref()
-            .map(|_| line_glyph_poses(layer, feature, ground, view_state, projection, &uniforms));
-        let rectangles = (relevance > 0.0
-            && !matches!(line, Some(LinePoses::DoesNotFit))
-            && !super::placement::buried_in_terrain(world, layer, feature, ground)
-            && local_zoom_visible(
-                layer.coords,
-                feature,
-                ground,
-                view_state,
-                projection,
-                limits,
-            ))
-        .then(|| screen_boxes(layer, feature, ground, view_state, projection, &uniforms))
-        .flatten()
-        .unwrap_or([None, None]);
-        let rules = rules::PlacementRules::new(
-            paint,
-            &feature.data.properties,
-            view_state.style_zoom().value(),
-        );
-        let visible = rules.place(rectangles, boxes, [view_state.width(), view_state.height()]);
-        let opacity = history.opacity(layer, feature, visible);
-        if visible.iter().any(|v| *v) && opacity.iter().any(|v| *v > 0.0) {
-            placed.0.push(PlacedSymbol {
-                coords: layer.coords,
-                layer: layer.style_layer_id.clone(),
-                feature: feature_index,
-                rectangles: [0, 1].map(|i| if visible[i] { rectangles[i] } else { None }),
-            });
-        }
-        write_feature_metadata(
-            layer,
-            feature,
-            opacity.map(|value| value * relevance),
-            ground,
-            match &line {
-                Some(LinePoses::Poses(poses)) => Some(poses.as_slice()),
-                _ => None,
-            },
-            &mut metadata[position],
-        );
-    }
-    metadata
-}
-
-fn write_feature_metadata(
-    layer: &crate::sdf::SymbolLayerData,
-    feature: &crate::sdf::Feature,
-    opacity: [f32; 2],
-    ground: f32,
-    poses: Option<&[GlyphPose]>,
-    metadata: &mut [SDFShaderFeatureMetadata],
-) {
-    for index in feature.indices.clone() {
-        let kind = layer
-            .buffer
-            .buffer
-            .indices
-            .get(index)
-            .and_then(|index| layer.buffer.buffer.vertices.get(*index as usize))
-            .map_or(0, |vertex| usize::from(vertex.a_data[2] != 0));
-        if let Some(vertex) = layer
-            .buffer
-            .buffer
-            .indices
-            .get(index)
-            .and_then(|index| metadata.get_mut(*index as usize))
-        {
-            *vertex = SDFShaderFeatureMetadata {
-                opacity: opacity[kind],
-                elevation: ground,
-                pose: [0.0; 4],
-            };
-        }
-    }
-    if let (Some(line), Some(poses)) = (&feature.line, poses) {
-        write_glyph_poses(layer, line, poses, metadata);
-    }
-}
-
-/// Puts each glyph's six indices' vertices at its pose along the line.
-fn write_glyph_poses(
-    layer: &crate::sdf::SymbolLayerData,
-    line: &crate::sdf::LineLabel,
-    poses: &[GlyphPose],
-    metadata: &mut [SDFShaderFeatureMetadata],
-) {
-    let buffer = &layer.buffer.buffer;
-    for (glyph, pose) in poses.iter().enumerate() {
-        let first = line.first_glyph_index + glyph * 6;
-        for index in first..first + 6 {
-            let Some(vertex_index) = buffer.indices.get(index).map(|index| *index as usize) else {
-                continue;
-            };
-            let (Some(vertex), Some(entry)) = (
-                buffer.vertices.get(vertex_index),
-                metadata.get_mut(vertex_index),
-            ) else {
-                continue;
-            };
-            // The vertex anchor is the label anchor rounded to whole tile units.
-            entry.pose = [
-                pose.point[0] - vertex.a_pos_offset[0] as f32,
-                pose.point[1] - vertex.a_pos_offset[1] as f32,
-                pose.angle,
-                1.0,
-            ];
-        }
-    }
-}
-
-fn local_zoom_visible(
-    coords: WorldTileCoords,
-    feature: &crate::sdf::Feature,
-    ground: f32,
-    view: &crate::render::view_state::ViewState,
-    projection: &crate::render::projection::ShaderProjectionData,
-    limits: [f64; 2],
-) -> bool {
-    let Some(clip) = super::placement::project(
-        coords,
-        [
-            f64::from(feature.text_anchor.x),
-            f64::from(feature.text_anchor.y),
-        ],
-        f64::from(ground),
-        view,
-        projection,
-    ) else {
-        return false;
-    };
-    if clip.w <= 0.0 {
-        return false;
-    }
-    let zoom = view.style_zoom().value()
-        + if view.has_external_view() {
-            view.symbol_distance_ratio(clip).log2().min(0.0)
-        } else {
-            0.0
-        };
-    zoom >= limits[0] && zoom < limits[1]
 }
 
 fn allocation(world: &crate::tcs::world::World, coords: WorldTileCoords, id: &str) -> Option<u64> {
@@ -472,7 +252,3 @@ type VisibleLayer<'a> = (
     &'a crate::sdf::SymbolLayerData,
     &'a crate::style::layer::SymbolPaint,
 );
-
-fn empty_metadata(layer: &crate::sdf::SymbolLayerData) -> Vec<SDFShaderFeatureMetadata> {
-    vec![SDFShaderFeatureMetadata::default(); layer.buffer.buffer.vertices.len()]
-}
