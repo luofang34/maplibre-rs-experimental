@@ -66,6 +66,42 @@ pub struct GeoJsonSource {
     /// Numbers features without an id by their position in the document.
     #[serde(rename = "generateId", default, skip_serializing_if = "is_false")]
     pub generate_id: bool,
+    /// Groups nearby points into clusters that carry `cluster`, `point_count` and
+    /// `point_count_abbreviated`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub cluster: bool,
+    /// Pixel radius, on a 512-pixel tile, within which points cluster; 50 when absent.
+    #[serde(
+        rename = "clusterRadius",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub cluster_radius: Option<f64>,
+    /// Highest zoom that clusters; one below `maxzoom` when absent.
+    #[serde(
+        rename = "clusterMaxZoom",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub cluster_max_zoom: Option<u8>,
+    /// Fewest points that make a cluster; 2 when absent.
+    #[serde(
+        rename = "clusterMinPoints",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub cluster_min_points: Option<usize>,
+    /// Properties aggregated over the points of each cluster: a name for each
+    /// `[operator, map expression]`.
+    #[serde(
+        rename = "clusterProperties",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub cluster_properties: Option<serde_json::Value>,
+    /// Keeps only the features this filter accepts, before any clustering.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filter: Option<serde_json::Value>,
     /// Identifies this version of the data. It is unique per parsed style and per change, so
     /// workers that share one cache never mix up two documents of the same source name, and a
     /// changed value makes them load and index the data again. It is serialized, so the tile

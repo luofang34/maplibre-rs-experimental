@@ -235,3 +235,29 @@ fn generated_ids_count_the_position_in_the_document_even_past_skipped_features()
         .collect();
     assert_eq!(ids, [Some(1)]);
 }
+
+#[test]
+fn clustering_sources_tile_their_points_as_clusters_until_the_cluster_zoom_passes() {
+    let points = json!({"type": "FeatureCollection", "features": [
+        {"type": "Feature", "properties": {"n": 1}, "geometry": {"type": "Point", "coordinates": [10.0, 10.0]}},
+        {"type": "Feature", "properties": {"n": 2}, "geometry": {"type": "Point", "coordinates": [10.001, 10.0]}},
+        {"type": "Feature", "properties": {"n": 3}, "geometry": {"type": "Point", "coordinates": [-100.0, -40.0]}},
+    ]});
+    let index = index(
+        points,
+        json!({"cluster": true, "clusterRadius": 40, "clusterMaxZoom": 3}),
+    );
+    let low = index.tile(tile(0, 0, 0));
+    assert_eq!(
+        features(&low).len(),
+        2,
+        "the two close points make one cluster"
+    );
+    let decoded = Tile::decode(low.as_slice()).expect("tile");
+    assert!(decoded.layers[0].keys.contains(&"point_count".to_owned()));
+    let deep = features(&index.tile(tile(6, 34, 25)));
+    assert!(
+        deep.len() <= 1,
+        "past the cluster zoom every point stands alone"
+    );
+}

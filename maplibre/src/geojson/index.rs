@@ -47,13 +47,14 @@ type Point = [f64; 2];
 type Ring = Vec<Point>;
 
 /// Points, lines and polygons of one feature in world coordinates, where the world is `0..1`.
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct Geometry {
     points: Vec<Point>,
     lines: Vec<Ring>,
     polygons: Vec<Vec<Ring>>,
 }
 
+#[derive(Clone)]
 struct IndexedFeature {
     id: Option<u64>,
     geometry: Geometry,
@@ -79,6 +80,10 @@ impl RTreeObject for Entry {
 /// Features of one GeoJSON document, findable by the tile they fall in.
 pub struct GeoJsonIndex {
     features: Vec<IndexedFeature>,
+    /// The points of a clustering source, and how they group at each zoom.
+    clustered: Option<(Vec<IndexedFeature>, Clusters)>,
+    /// Whether the source filters its features before they are tiled.
+    filtered: bool,
     tree: RTree<Entry>,
     approximate_bytes: usize,
 }
@@ -97,9 +102,18 @@ impl GeoJsonIndex {
         let mut entries = Vec::new();
         let mut bytes = 0;
         let mut position = 0_usize;
+        let filter = source_filter(source);
+        let filter_declared = filter.is_some();
+        let mut points = Vec::new();
         let mut add = |feature: &Value| -> Result<(), GeoJsonError> {
             let index = position;
             position += 1;
+            if filter
+                .as_ref()
+                .is_some_and(|filter| !feature_passes(feature, filter, 0.0))
+            {
+                return Ok(());
+            }
             let Some(geometry) = feature.get("geometry").filter(|value| !value.is_null()) else {
                 return Ok(());
             };
@@ -115,6 +129,14 @@ impl GeoJsonIndex {
                 .map(|map| map.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
                 .unwrap_or_default();
             let id = numeric_feature_id(feature, promote, source.generate_id.then_some(index));
+            if source.cluster && is_single_point(geometry, &parsed) {
+                points.push(IndexedFeature {
+                    id,
+                    geometry: parsed,
+                    properties,
+                });
+                return Ok(());
+            }
             bytes += coordinate_count(&parsed) * 16
                 + properties
                     .iter()
@@ -154,8 +176,30 @@ impl GeoJsonIndex {
                 })
             }
         }
+        let clustered = source.cluster.then(|| {
+            let inputs: Vec<ClusterInput<'_>> = points
+                .iter()
+                .filter_map(|feature| {
+                    Some((
+                        *feature.geometry.points.first()?,
+                        feature.properties.as_slice(),
+                    ))
+                })
+                .collect();
+            let options = ClusterOptions::new(
+                source.cluster_radius,
+                source.cluster_max_zoom,
+                source.cluster_min_points,
+                source.cluster_properties.as_ref(),
+                source.maxzoom,
+            );
+            let clusters = Clusters::new(&inputs, options);
+            (points, clusters)
+        });
         Ok(Self {
             features,
+            clustered,
+            filtered: filter_declared,
             tree: RTree::bulk_load(entries),
             approximate_bytes: bytes,
         })
@@ -174,6 +218,81 @@ impl GeoJsonIndex {
     /// Memory the index holds, for the shared cache's byte budget.
     pub fn approximate_bytes(&self) -> usize {
         self.approximate_bytes
+    }
+
+    /// The GeoJSON a source with a filter or clusters presents to `coords`: the features of
+    /// `document` that pass the filter, with its points replaced by the clusters they form at
+    /// that zoom. `None` for a source that presents its document unchanged.
+    pub fn source_document(
+        &self,
+        document: &Value,
+        source: &GeoJsonSource,
+        coords: WorldTileCoords,
+    ) -> Option<Value> {
+        let clusters = self.clustered.as_ref().map(|(_, clusters)| clusters);
+        if clusters.is_none() && !self.filtered {
+            return None;
+        }
+        let filter = source_filter(source);
+        let members: Vec<&Value> = match document.get("type").and_then(Value::as_str) {
+            Some("FeatureCollection") => document
+                .get("features")
+                .and_then(Value::as_array)
+                .map(|features| features.iter().collect())
+                .unwrap_or_default(),
+            _ => vec![document],
+        };
+        let mut features: Vec<Value> = members
+            .into_iter()
+            .filter(|feature| {
+                filter
+                    .as_ref()
+                    .is_none_or(|filter| feature_passes(feature, filter, 0.0))
+            })
+            .filter(|feature| {
+                clusters.is_none()
+                    || !feature.get("geometry").is_some_and(|geometry| {
+                        geometry.get("type").and_then(Value::as_str) == Some("Point")
+                    })
+            })
+            .cloned()
+            .collect();
+        if let Some(clusters) = clusters {
+            let zoom = u32::from(u8::from(coords.z));
+            let tiles = f64::from(1_u32 << zoom.min(30));
+            let (west, north) = (
+                f64::from(coords.x.rem_euclid(1_i32 << zoom.min(30))) / tiles,
+                f64::from(coords.y) / tiles,
+            );
+            let margin = BUFFER / f64::from(EXTENT) / tiles;
+            let window = [
+                west - margin,
+                north - margin,
+                west + 1.0 / tiles + margin,
+                north + 1.0 / tiles + margin,
+            ];
+            let points = &self.clustered.as_ref()?.0;
+            for item in clusters.within(zoom.min(24) as u8, window) {
+                let (position, id, properties) = match item {
+                    Clustered::Point(index, position) => {
+                        (position, points[index].id, points[index].properties.clone())
+                    }
+                    Clustered::Cluster(position, id, properties) => {
+                        (position, Some(id), properties)
+                    }
+                };
+                let mut feature = serde_json::json!({
+                    "type": "Feature",
+                    "properties": properties.into_iter().collect::<serde_json::Map<String, Value>>(),
+                    "geometry": {"type": "Point", "coordinates": super::cluster::unproject(position)},
+                });
+                if let Some(id) = id {
+                    feature["id"] = serde_json::json!(id);
+                }
+                features.push(feature);
+            }
+        }
+        Some(serde_json::json!({"type": "FeatureCollection", "features": features}))
     }
 
     /// Vector tile bytes with the features that touch `coords`, in document order.
@@ -204,6 +323,28 @@ impl GeoJsonIndex {
         for index in hits {
             let feature = &self.features[index as usize];
             encoder.feature(feature, &to_tile);
+        }
+        if let Some((points, clusters)) = &self.clustered {
+            let window = [
+                window.lower()[0],
+                window.lower()[1],
+                window.upper()[0],
+                window.upper()[1],
+            ];
+            for item in clusters.within(zoom.min(24) as u8, window) {
+                let feature = match item {
+                    Clustered::Point(index, _) => points[index].clone(),
+                    Clustered::Cluster(position, id, properties) => IndexedFeature {
+                        id: Some(id),
+                        geometry: Geometry {
+                            points: vec![position],
+                            ..Geometry::default()
+                        },
+                        properties,
+                    },
+                };
+                encoder.feature(&feature, &to_tile);
+            }
         }
         Tile {
             layers: vec![encoder.finish()],
@@ -331,6 +472,24 @@ fn bounds_of(geometry: &Geometry) -> Option<[f64; 4]> {
 
 mod encode;
 use encode::TileEncoder;
+
+use super::{
+    cluster::{ClusterInput, ClusterOptions, Clustered, Clusters},
+    feature_passes,
+};
+
+/// The source's own filter, when it has a valid one.
+fn source_filter(source: &GeoJsonSource) -> Option<crate::style::filter::Filter> {
+    crate::style::filter::Filter::parse(source.filter.as_ref()?).ok()
+}
+
+/// Whether a feature is one point, the only geometry that clusters.
+fn is_single_point(geometry: &Value, parsed: &Geometry) -> bool {
+    geometry.get("type").and_then(Value::as_str) == Some("Point")
+        && parsed.points.len() == 1
+        && parsed.lines.is_empty()
+        && parsed.polygons.is_empty()
+}
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;

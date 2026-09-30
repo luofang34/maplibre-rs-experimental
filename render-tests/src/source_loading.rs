@@ -119,9 +119,11 @@ fn load_geojson_blocking(
     let mut processed = ProcessedLayers::default();
     for coords in target_coords {
         let atlas = symbol_atlas(&symbol_style, layers, &index.tile(*coords), *coords)?;
+        // A source that filters or clusters shows each tile its own version of the document.
+        let presented = index.source_document(value, source, *coords);
         processed.append(
             &mut process_geojson_layers_with_atlas(
-                value,
+                presented.as_ref().unwrap_or(value),
                 name,
                 layers.to_vec(),
                 *coords,

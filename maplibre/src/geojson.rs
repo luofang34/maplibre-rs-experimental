@@ -27,6 +27,8 @@ use crate::{
     },
 };
 
+mod cluster;
+
 /// Failure reported while preparing or delivering GeoJSON tile geometry.
 #[derive(Error, Debug)]
 pub enum ProcessGeoJsonError {
