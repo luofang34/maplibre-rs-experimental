@@ -139,6 +139,8 @@ impl ViewTile {
 #[derive(Debug, Clone)]
 pub struct TileShape {
     coords: WorldTileCoords,
+    /// How many worlds from the tile's own this shape is drawn, for a copy of the world.
+    wrap: i32,
 
     zoom_factor: f64,
     transform: Matrix4<f64>,
@@ -150,6 +152,7 @@ impl TileShape {
     fn new(coords: WorldTileCoords, zoom: Zoom) -> Self {
         Self {
             coords,
+            wrap: 0,
             zoom_factor: zoom.scale_to_tile(&coords),
             transform: coords.transform_for_zoom(zoom),
             buffer_range: None,
@@ -165,6 +168,17 @@ impl TileShape {
         let mut shape = Self::new(coords, zoom);
         shape.buffer_range = Some(buffer_range);
         shape
+    }
+
+    /// The shape drawn `wrap` worlds over, where the view sees a copy of the world.
+    fn wrapped(&mut self, wrap: i32, zoom: Zoom) {
+        let tiles = 1_i64 << u32::from(u8::from(self.coords.z));
+        let placed = WorldTileCoords {
+            x: (i64::from(self.coords.x) + i64::from(wrap) * tiles) as i32,
+            ..self.coords
+        };
+        self.wrap = wrap;
+        self.transform = placed.transform_for_zoom(zoom);
     }
 
     fn set_buffer_range(&mut self, index: u64) {

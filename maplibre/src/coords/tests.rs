@@ -182,3 +182,40 @@ fn aligned_tile_corners_cover_the_containing_two_by_two_block() {
         assert_eq!(aligned.upper_left(), (left, top, z).into());
     }
 }
+
+#[test]
+fn a_tile_seen_in_a_copy_of_the_world_maps_back_to_the_tile_it_repeats() {
+    let tile = |x, y, z| WorldTileCoords::from((x, y, ZoomLevel::from(z)));
+    assert_eq!(tile(-1, 2, 2).wrapped(), Some((tile(3, 2, 2), -1)));
+    assert_eq!(tile(5, 0, 2).wrapped(), Some((tile(1, 0, 2), 1)));
+    assert_eq!(tile(2, 1, 2).wrapped(), Some((tile(2, 1, 2), 0)));
+    assert_eq!(tile(-3, 0, 0).wrapped(), Some((tile(0, 0, 0), -3)));
+    assert_eq!(
+        tile(0, 4, 2).wrapped(),
+        None,
+        "no copy has a row below the grid"
+    );
+}
+
+#[test]
+fn a_view_lists_the_tiles_of_the_copies_it_sees_once_each_for_loading() {
+    let region = ViewRegion::from_tiles(
+        vec![
+            WorldTileCoords::from((-1, 0, ZoomLevel::from(0))),
+            WorldTileCoords::from((0, 0, ZoomLevel::from(0))),
+            WorldTileCoords::from((1, 0, ZoomLevel::from(0))),
+        ],
+        ZoomLevel::from(0),
+        8,
+    );
+    assert_eq!(region.copies().count(), 3);
+    let loaded: Vec<_> = region.iter().collect();
+    assert_eq!(loaded, [WorldTileCoords::from((0, 0, ZoomLevel::from(0)))]);
+}
+
+#[test]
+fn a_point_left_of_the_world_lies_in_the_tile_before_the_first() {
+    let point = WorldCoords::from((-10.0, 20.0));
+    let tile = point.into_world_tile(ZoomLevel::from(0), Zoom::new(0.0));
+    assert_eq!((tile.x, tile.y), (-1, 0));
+}

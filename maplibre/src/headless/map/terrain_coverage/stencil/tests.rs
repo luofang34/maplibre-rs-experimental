@@ -153,7 +153,8 @@ async fn root_tile_buffer_cannot_draw_outside_the_world_mask() {
         .await;
         let reference = read_stencil_blocking(&reference, "stencil-root-reference");
         assert_pixel(&reference, 100, SIZE / 2, [0, 0, 255, 255]);
-        assert_pixel(&reference, 450, SIZE / 2, [0, 0, 0, 0]);
+        // Right of the world a copy of it repeats; the buffered tile must not differ from it.
+        assert_pixel(&reference, 450, SIZE / 2, [0, 0, 255, 255]);
         let buffered = process(&polygon("water", 12288), &style.layers[0], coords);
         let map = map_with(style, buffered, samples, coords).await;
         let pixels = read_stencil_blocking(&map, "stencil-root-buffered");

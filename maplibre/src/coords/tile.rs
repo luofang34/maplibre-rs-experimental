@@ -160,6 +160,23 @@ impl WorldTileCoords {
         })
     }
 
+    /// The tile of the world this coordinate repeats and how many worlds away it lies, for a
+    /// tile that a view sees in a copy of the world; `None` when the row or level is outside
+    /// the grid, which no copy can fix.
+    pub fn wrapped(self) -> Option<(WorldTileCoords, i32)> {
+        let bounds = i64::from(*ZOOM_BOUNDS.get(self.z.0 as usize)?);
+        if !(0..bounds).contains(&i64::from(self.y)) {
+            return None;
+        }
+        let x = i64::from(self.x);
+        let canonical = WorldTileCoords {
+            x: x.rem_euclid(bounds) as i32,
+            y: self.y,
+            z: self.z,
+        };
+        Some((canonical, x.div_euclid(bounds) as i32))
+    }
+
     /// Builds a key from least-significant coordinate bits first, or `None` outside the grid.
     /// Quadrant encoding follows [tilebelt](https://github.com/mapbox/tilebelt).
     pub fn build_quad_key(&self) -> Option<Quadkey> {

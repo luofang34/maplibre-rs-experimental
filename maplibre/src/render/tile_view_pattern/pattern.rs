@@ -129,25 +129,28 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
         world: &World,
     ) -> Vec<ViewTile> {
         let mut view_tiles = Vec::with_capacity(self.view_tiles.len());
-        let mut vector_parents = HashSet::new();
-        let mut raster_parents = HashMap::new();
+        // A parent stands in once for each copy of the world it is seen in.
+        let mut vector_parents: HashMap<i32, HashSet<WorldTileCoords>> = HashMap::new();
+        let mut raster_parents: HashMap<(RasterSourceId, i32), HashSet<WorldTileCoords>> =
+            HashMap::new();
         let covering: Vec<_> = if raster_coverings.is_empty() {
             vec![(RasterSourceId::default(), Vec::new())]
         } else {
             raster_coverings.to_vec()
         };
 
-        for coords in view_region.iter() {
-            if coords.build_quad_key().is_none() {
+        for seen in view_region.copies() {
+            let Some((coords, wrap)) = seen.wrapped() else {
                 continue;
-            }
-            let vector = source_shapes(
+            };
+            let mut vector = source_shapes(
                 &sources.of_kind(TileKind::Vector),
                 coords,
                 zoom,
                 world,
-                &mut vector_parents,
+                vector_parents.entry(wrap).or_default(),
             );
+            vector.for_each_mut(&mut |shape| shape.wrapped(wrap, zoom));
             let raster = covering
                 .iter()
                 .map(|(source, covering)| {
@@ -159,14 +162,15 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
                         .into_iter()
                         .filter(|tile| availability.has_tile(*tile, world))
                         .collect();
-                    let shapes = raster_shapes(
+                    let mut shapes = raster_shapes(
                         &availability,
                         coords,
                         covered,
                         zoom,
                         world,
-                        raster_parents.entry(source.clone()).or_default(),
+                        raster_parents.entry((source.clone(), wrap)).or_default(),
                     );
+                    shapes.for_each_mut(&mut |shape| shape.wrapped(wrap, zoom));
                     (source.clone(), shapes)
                 })
                 .collect();
@@ -232,12 +236,16 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
                 zoom_factor: shape.zoom_factor as f32,
                 viewport_width,
                 viewport_height,
-                tile_mercator_coords: tile_mercator_coordinates(
-                    shape
-                        .coords()
-                        .into_tile(crate::style::source::TileAddressingScheme::XYZ),
-                )
-                .into(),
+                tile_mercator_coords: {
+                    let mut mercator = tile_mercator_coordinates(
+                        shape
+                            .coords()
+                            .into_tile(crate::style::source::TileAddressingScheme::XYZ),
+                    );
+                    // A copy of the world lies whole worlds over in Mercator units.
+                    mercator.x += shape.wrap as f32;
+                    mercator.into()
+                },
                 line_width_scale: 1.0,
                 line_units_per_pixel: 8.0 * style_zoom.scale_to_tile(&shape.coords()) as f32,
                 clip_antimeridian: u32::from(u8::from(shape.coords().z) == 0),

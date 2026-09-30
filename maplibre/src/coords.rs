@@ -310,16 +310,17 @@ impl WorldCoords {
         Self { x, y }
     }
 
-    /// Converts pixels at `zoom` to tile indices at `z`, truncating fractional indices toward zero.
-    /// The returned indices are not checked against canonical tile bounds.
+    /// Converts pixels at `zoom` to tile indices at `z`, flooring fractional indices, so a point
+    /// left of the world lies in tile `-1`. The returned indices are not checked against
+    /// canonical tile bounds.
     pub fn into_world_tile(self, z: ZoomLevel, zoom: Zoom) -> WorldTileCoords {
         let tile_scale = zoom.scale_to_zoom_level(z) / TILE_SIZE; // TODO: Deduplicate
         let x = self.x * tile_scale;
         let y = self.y * tile_scale;
 
         WorldTileCoords {
-            x: x as i32,
-            y: y as i32,
+            x: x.floor() as i32,
+            y: y.floor() as i32,
             z,
         }
     }
@@ -424,8 +425,21 @@ impl ViewRegion {
             && world_coords.z == self.zoom_level
     }
 
-    /// Yields up to the configured limit, in explicit selection order or column-major grid order.
+    /// The tiles a view sees, with those seen in copies of the world as the tiles they repeat,
+    /// each once: up to the configured limit, in explicit selection order or column-major
+    /// grid order.
     pub fn iter(&self) -> Box<dyn Iterator<Item = WorldTileCoords> + '_> {
+        let mut seen = std::collections::HashSet::new();
+        Box::new(
+            self.copies()
+                .map(|coords| coords.wrapped().map_or(coords, |(tile, _)| tile))
+                .filter(move |tile| seen.insert(*tile)),
+        )
+    }
+
+    /// The tiles of the view as drawn, a tile seen again in another copy of the world once more
+    /// at coordinates beyond the grid.
+    pub fn copies(&self) -> Box<dyn Iterator<Item = WorldTileCoords> + '_> {
         if let Some(tiles) = &self.explicit_tiles {
             return Box::new(tiles.iter().copied().take(self.max_n_tiles));
         }
