@@ -13,7 +13,9 @@ use crate::{
     style::{source::TileAddressingScheme, Style},
     tcs::tiles::Tile,
     terrain::{
-        drape_targets::TargetSpec, resources::DRAPE_SIZE, rtt::drape_transform, DrapePhase,
+        drape_targets::TargetSpec,
+        resources::DRAPE_SIZE,
+        rtt::{drape_transform, overlapped}, DrapePhase,
         DrapeTarget,
     },
     vector::render_commands::{DrawLineTiles, DrawVectorTiles},
@@ -41,6 +43,13 @@ pub(super) fn drape_metadata(
             let transform = redraw
                 .then(|| drape_transform(spec.coords, shape.source))
                 .flatten()
+                .map(|transform| {
+                    if shape.raster_layers.is_empty() {
+                        transform
+                    } else {
+                        overlapped(transform)
+                    }
+                })
                 .and_then(|transform| transform.cast::<f32>());
             let Some(transform) = transform else {
                 target_slots.push(None);
