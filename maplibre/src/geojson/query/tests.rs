@@ -33,7 +33,7 @@ fn places() -> Style {
 }
 
 fn ids(found: &[SourceFeature]) -> Vec<Option<u64>> {
-    found.iter().map(|feature| feature.id.clone()).collect()
+    found.iter().map(|feature| feature.id).collect()
 }
 
 #[test]
