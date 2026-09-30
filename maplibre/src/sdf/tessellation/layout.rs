@@ -77,15 +77,20 @@ pub(super) fn append(
         } else {
             paint.height_offset("icon", &symbol.properties, zoom)
         };
+        let icon_size = paint.number("icon-size", &symbol.properties, zoom, 1.0);
+        let placed = [
+            -width * fractions[0] + offset[0],
+            -height * fractions[1] + offset[1],
+            width * (1.0 - fractions[0]) + offset[0],
+            height * (1.0 - fractions[1]) + offset[1],
+        ];
+        let bounds = fit_to_text(paint, symbol, zoom, atlas, [width, height], offset)
+            // Layout pixels are drawn scaled by icon-size, which a fitted icon does not take.
+            .map_or(placed, |fitted| fitted.map(|edge| edge / icon_size));
         quad(
             buffer,
             symbol.anchor,
-            [
-                -width * fractions[0] + offset[0],
-                -height * fractions[1] + offset[1],
-                width * (1.0 - fractions[0]) + offset[0],
-                height * (1.0 - fractions[1]) + offset[1],
-            ],
+            bounds,
             icon,
             height_offset,
             symbol.angle,
@@ -130,6 +135,58 @@ pub(super) fn append(
                 first_glyph_index,
             }),
     });
+}
+
+/// The icon box `[left, top, right, bottom]` that `icon-text-fit` stretches around the text,
+/// in text-size pixels, or `None` when the icon keeps its own size.
+fn fit_to_text(
+    paint: &SymbolPaint,
+    symbol: &CollectedSymbol,
+    zoom: f64,
+    atlas: &SymbolAtlas,
+    [icon_width, icon_height]: [f32; 2],
+    offset: [f32; 2],
+) -> Option<[f32; 4]> {
+    let fit = paint.text("icon-text-fit", &symbol.properties, zoom)?;
+    if fit == "none" {
+        return None;
+    }
+    let text_size = paint
+        .text_size
+        .as_ref()
+        .and_then(|value| value.evaluate_for(&symbol.properties, zoom))
+        .unwrap_or(16.0);
+    let scale = text_size / 24.0;
+    let [left, top, right, bottom] =
+        super::text_layout::extent(symbol, paint, zoom, atlas)?.map(|edge| edge * scale);
+    let padding = paint
+        .properties
+        .get("icon-text-fit-padding")
+        .and_then(|value| value.as_array())
+        .filter(|values| values.len() == 4)
+        .map_or([0.0; 4], |values| {
+            let read = |index: usize| values[index].as_f64().unwrap_or(0.0) as f32;
+            [read(0), read(1), read(2), read(3)]
+        });
+    let (min_x, max_x) = if matches!(fit.as_str(), "width" | "both") {
+        (
+            offset[0] + left - padding[3],
+            offset[0] + right + padding[1],
+        )
+    } else {
+        let min = offset[0] + (left + right - icon_width) / 2.0;
+        (min, min + icon_width)
+    };
+    let (min_y, max_y) = if matches!(fit.as_str(), "height" | "both") {
+        (
+            offset[1] + top - padding[0],
+            offset[1] + bottom + padding[2],
+        )
+    } else {
+        let min = offset[1] + (top + bottom - icon_height) / 2.0;
+        (min, min + icon_height)
+    };
+    Some([min_x, min_y, max_x, max_y])
 }
 
 pub(super) fn offset(paint: &SymbolPaint, name: &str, scale: f32) -> [f32; 2] {

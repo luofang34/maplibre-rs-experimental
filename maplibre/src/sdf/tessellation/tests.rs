@@ -172,3 +172,39 @@ fn text_rotation_can_come_from_a_feature_property() {
     }
     assert_ne!(flat, turned);
 }
+
+#[test]
+fn icon_text_fit_stretches_the_icon_around_the_text_and_padding() {
+    let mut symbols = atlas().as_ref().clone();
+    symbols.icons.insert(
+        "box".into(),
+        AtlasEntry {
+            rect: [0, 0, 20, 20],
+            metrics: [0., 0., 20., 1.],
+            kind: 1,
+        },
+    );
+    let paint: SymbolPaint = serde_json::from_value(serde_json::json!({
+        "text-field": "A", "text-font": ["test"], "text-size": 24, "icon-image": "box",
+        "icon-text-fit": "both", "icon-text-fit-padding": [1, 2, 3, 4]
+    }))
+    .expect("paint");
+    let mut tessellator = TextTessellator::default();
+    tessellator.configure(paint, Arc::new(symbols));
+    tessellator.point_begin(0).expect("begin");
+    tessellator.xy(100.0, 100.0, 0).expect("vertex");
+    tessellator.point_end(0).expect("end");
+    tessellator.feature_end(0).expect("feature");
+    tessellator.finish();
+    let corner = |index: usize| {
+        let vertex = &tessellator.quad_buffer.vertices[index];
+        [
+            vertex.a_pos_offset[2] as f32 / 32.0,
+            vertex.a_pos_offset[3] as f32 / 32.0,
+        ]
+    };
+    // The text box is 10 wide and one 28.8 line high around the anchor.
+    let (top_left, bottom_right) = (corner(0), corner(2));
+    assert!((top_left[0] + 9.0).abs() < 0.1 && (top_left[1] + 15.4).abs() < 0.1);
+    assert!((bottom_right[0] - 7.0).abs() < 0.1 && (bottom_right[1] - 17.4).abs() < 0.1);
+}

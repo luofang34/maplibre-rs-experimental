@@ -18,6 +18,7 @@ enum Property {
     Boolean,
     BooleanExpression,
     Offset,
+    Padding,
     Font,
     Enum(&'static [&'static str]),
 }
@@ -57,6 +58,8 @@ fn property(name: &str) -> Option<Property> {
         | "text-rotation-alignment"
         | "icon-rotation-alignment" => Property::Enum(&["auto", "map", "viewport"]),
         "symbol-height-anchor" => Property::Enum(&["ground", "absolute"]),
+        "icon-text-fit" => Property::Enum(&["none", "width", "height", "both"]),
+        "icon-text-fit-padding" => Property::Padding,
         "text-height-anchor" | "icon-height-anchor" => {
             Property::Enum(&["ground", "sea", "absolute"])
         }
@@ -115,6 +118,9 @@ fn valid_literal(property: &Property, value: &Value) -> bool {
         Property::Offset => value
             .as_array()
             .is_some_and(|items| items.len() == 2 && items.iter().all(Value::is_number)),
+        Property::Padding => value
+            .as_array()
+            .is_some_and(|items| items.len() == 4 && items.iter().all(Value::is_number)),
         Property::Font => value.as_array().is_some_and(|items| {
             !items.is_empty()
                 && !crate::style::expression::is_expression(items)

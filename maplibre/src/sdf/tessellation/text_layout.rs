@@ -10,38 +10,43 @@ use crate::{
     style::layer::SymbolPaint,
 };
 
-pub(super) fn append(
+/// The wrapped lines of a label and where they sit around the anchor, in layout pixels.
+struct Block<'a> {
+    glyphs: &'a HashMap<u32, AtlasEntry>,
+    lines: Vec<String>,
+    spacing: f32,
+    line_height: f32,
+    max_line: f32,
+    height: f32,
+    fractions: [f32; 2],
+    justify: f32,
+    offset: [f32; 2],
+}
+
+fn block<'a>(
     symbol: &CollectedSymbol,
     paint: &SymbolPaint,
     zoom: f64,
-    atlas: &SymbolAtlas,
-    buffer: &mut VertexBuffers<ShaderSymbolVertex, u32>,
-) -> Vec<f32> {
-    let mut centres = Vec::new();
-    let Some(text) = paint.label(&symbol.properties, zoom) else {
-        return centres;
-    };
-    let Some(glyphs) = atlas
+    atlas: &'a SymbolAtlas,
+) -> Option<Block<'a>> {
+    let text = paint.label(&symbol.properties, zoom)?;
+    let glyphs = atlas
         .glyphs
         .get(&paint.font_stack())
-        .or_else(|| atlas.glyphs.values().next())
-    else {
-        return centres;
-    };
+        .or_else(|| atlas.glyphs.values().next())?;
     let spacing = paint.number("text-letter-spacing", &symbol.properties, zoom, 0.0) * 24.0;
-    let width = |text: &str| line_width(text, glyphs, spacing);
     let max_width = paint.number("text-max-width", &symbol.properties, zoom, 10.0) * 24.0;
     // Text along a line runs the whole line: it is never wrapped.
     let lines = if super::is_line_placed(paint) {
-        vec![text.clone()]
+        vec![text]
     } else {
         wrap(&text, max_width, glyphs, spacing)
     };
     let line_height = paint.number("text-line-height", &symbol.properties, zoom, 1.2) * 24.0;
-    let max_line = lines.iter().map(|line| width(line)).fold(0.0, f32::max);
-    // Every line takes a full line height, with the glyphs centred in it.
-    let height = lines.len() as f32 * line_height;
-    let half_leading = (line_height - 24.0) / 2.0;
+    let max_line = lines
+        .iter()
+        .map(|line| line_width(line, glyphs, spacing))
+        .fold(0.0, f32::max);
     let fractions = anchor_fractions(
         &paint
             .text("text-anchor", &symbol.properties, zoom)
@@ -56,7 +61,60 @@ pub(super) fn append(
         "auto" => fractions[0],
         _ => 0.5,
     };
-    let offset = offset(paint, "text-offset", 24.0);
+    Some(Block {
+        glyphs,
+        // Every line takes a full line height, with the glyphs centred in it.
+        height: lines.len() as f32 * line_height,
+        lines,
+        spacing,
+        line_height,
+        max_line,
+        fractions,
+        justify,
+        offset: offset(paint, "text-offset", 24.0),
+    })
+}
+
+/// The label's layout box `[left, top, right, bottom]` around the anchor, in layout pixels.
+pub(super) fn extent(
+    symbol: &CollectedSymbol,
+    paint: &SymbolPaint,
+    zoom: f64,
+    atlas: &SymbolAtlas,
+) -> Option<[f32; 4]> {
+    let block = block(symbol, paint, zoom, atlas)?;
+    if block.max_line <= 0.0 {
+        return None;
+    }
+    let left = -block.max_line * block.fractions[0] + block.offset[0];
+    let top = -block.height * block.fractions[1] + block.offset[1];
+    Some([left, top, left + block.max_line, top + block.height])
+}
+
+pub(super) fn append(
+    symbol: &CollectedSymbol,
+    paint: &SymbolPaint,
+    zoom: f64,
+    atlas: &SymbolAtlas,
+    buffer: &mut VertexBuffers<ShaderSymbolVertex, u32>,
+) -> Vec<f32> {
+    let mut centres = Vec::new();
+    let Some(Block {
+        glyphs,
+        lines,
+        spacing,
+        line_height,
+        max_line,
+        height,
+        fractions,
+        justify,
+        offset,
+    }) = block(symbol, paint, zoom, atlas)
+    else {
+        return centres;
+    };
+    let width = |text: &str| line_width(text, glyphs, spacing);
+    let half_leading = (line_height - 24.0) / 2.0;
     let elevation = if paint.uses_shared_height() {
         0.0
     } else {
