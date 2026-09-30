@@ -16,6 +16,11 @@ struct PatternBinding {
     /// Identity of the image the binding was made for, so a replaced image is uploaded again.
     fingerprint: u64,
     bind_group: wgpu::BindGroup,
+    size: wgpu::Buffer,
+    /// The image's display size in layout pixels.
+    display: [f32; 2],
+    /// How far the fractional zoom stretches the pattern the buffer holds.
+    scale: f32,
 }
 
 /// The pipeline and the per-layer bindings of layers that fill with a repeating image.
@@ -73,6 +78,16 @@ pub(crate) fn pattern_name(paint: &LayerPaint, zoom: f64) -> Option<String> {
         .filter(|name| !name.is_empty())
 }
 
+/// Patterns are laid out in tile units of the whole zoom below the view's, as GL JS does, so
+/// between whole zooms they grow with the map.
+fn pattern_scale(zoom: f64) -> f32 {
+    2.0_f64.powf(zoom - zoom.floor()) as f32
+}
+
+fn size(display: [f32; 2], scale: f32) -> [f32; 4] {
+    [display[0] * scale, display[1] * scale, 0.0, 0.0]
+}
+
 fn fingerprint(name: &str, image: &StyleImage) -> u64 {
     let mut hasher = std::hash::DefaultHasher::new();
     name.hash(&mut hasher);
@@ -109,6 +124,7 @@ impl PatternResources {
         style: &Style,
         zoom: f64,
     ) {
+        let scale = pattern_scale(zoom);
         self.layers
             .retain(|id, _| style.layers.iter().any(|layer| &layer.id == id));
         for layer in &style.layers {
@@ -122,21 +138,23 @@ impl PatternResources {
                 continue;
             };
             let fingerprint = fingerprint(&name, image);
-            if self
+            if let Some(binding) = self
                 .layers
-                .get(&layer.id)
-                .is_some_and(|binding| binding.fingerprint == fingerprint)
+                .get_mut(&layer.id)
+                .filter(|binding| binding.fingerprint == fingerprint)
             {
+                if binding.scale != scale {
+                    binding.scale = scale;
+                    queue.write_buffer(
+                        &binding.size,
+                        0,
+                        bytemuck::cast_slice(&size(binding.display, scale)),
+                    );
+                }
                 continue;
             }
-            if let Some(bind_group) = self.bind(device, queue, image) {
-                self.layers.insert(
-                    layer.id.clone(),
-                    PatternBinding {
-                        fingerprint,
-                        bind_group,
-                    },
-                );
+            if let Some(binding) = self.bind(device, queue, image, (fingerprint, scale)) {
+                self.layers.insert(layer.id.clone(), binding);
             }
         }
     }
@@ -146,7 +164,8 @@ impl PatternResources {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         image: &StyleImage,
-    ) -> Option<wgpu::BindGroup> {
+        (fingerprint, scale): (u64, f32),
+    ) -> Option<PatternBinding> {
         if image.width == 0
             || image.height == 0
             || image.data.len() != image.width as usize * image.height as usize * 4
@@ -173,18 +192,14 @@ impl PatternResources {
             &image.data,
         );
         let ratio = image.pixel_ratio.max(0.01);
+        let display = [image.width as f32 / ratio, image.height as f32 / ratio];
         let size = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("fill pattern size"),
-            contents: bytemuck::cast_slice(&[
-                image.width as f32 / ratio,
-                image.height as f32 / ratio,
-                0.0_f32,
-                0.0,
-            ]),
-            usage: wgpu::BufferUsages::UNIFORM,
+            contents: bytemuck::cast_slice(&size(display, scale)),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         let view = texture.create_view(&Default::default());
-        Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("fill pattern"),
             layout: &self.layout,
             entries: &[
@@ -201,7 +216,14 @@ impl PatternResources {
                     resource: wgpu::BindingResource::Sampler(&self.sampler),
                 },
             ],
-        }))
+        });
+        Some(PatternBinding {
+            fingerprint,
+            bind_group,
+            size,
+            display,
+            scale,
+        })
     }
 
     /// Sets the pipeline that draws fills with these images.
