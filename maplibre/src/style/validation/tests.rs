@@ -44,14 +44,14 @@ fn style_with_layer(layer: serde_json::Value) -> Style {
 fn ignored_paint_and_layout_properties_are_reported() {
     let style = style_with_layer(serde_json::json!({
         "id": "roads", "type": "line",
-        "paint": {"line-color": "red", "line-offset": 2},
+        "paint": {"line-color": "red", "line-translate-anchor-x": 2},
         "layout": {"line-round-limit": 1.5}
     }));
     let errors = style
         .validate()
         .expect_err("ignored properties must be reported");
     assert_eq!(errors.len(), 2, "{errors:?}");
-    for path in ["paint.line-offset", "layout.line-round-limit"] {
+    for path in ["paint.line-translate-anchor-x", "layout.line-round-limit"] {
         assert!(
             errors.iter().any(|error| {
                 let text = error.to_string();

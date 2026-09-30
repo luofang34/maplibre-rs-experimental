@@ -129,3 +129,27 @@ fn a_heatmap_layer_carries_radius_and_intensity_at_the_view_zoom() {
     assert_eq!(metadata.line_width, 20.0);
     assert_eq!(metadata.circle_params[0], 2.0);
 }
+
+#[test]
+fn a_line_layer_carries_offset_gap_width_and_blur_at_the_view_zoom() {
+    let layer: crate::style::layer::StyleLayer = serde_json::from_value(serde_json::json!({
+        "id": "road", "type": "line", "source": "s",
+        "paint": {
+            "line-offset": ["interpolate", ["linear"], ["zoom"], 0, 0, 10, 20],
+            "line-gap-width": 3,
+            "line-blur": -1
+        }
+    }))
+    .expect("layer");
+    let metadata = super::metadata_for_layer(
+        &layer,
+        Default::default(),
+        super::VectorPaintFrame {
+            zoom: 5.0,
+            bearing: 0.0,
+            light: Default::default(),
+        },
+    );
+    // A negative blur is clamped: the edge cannot be sharper than the antialiasing.
+    assert_eq!(metadata.circle_params, [10.0, 3.0, 0.0, 0.0]);
+}

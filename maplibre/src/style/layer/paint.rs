@@ -171,6 +171,30 @@ pub struct LinePaint {
     )]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub line_gradient: Option<StyleProperty<Color>>,
+    /// Distance in pixels the line is moved to the right of its direction, at the view zoom.
+    #[serde(
+        rename = "line-offset",
+        default,
+        deserialize_with = "StyleProperty::<f32>::deserialize_f32_or_none"
+    )]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line_offset: Option<StyleProperty<f32>>,
+    /// Width in pixels of the empty band along the middle of the line, at the view zoom.
+    #[serde(
+        rename = "line-gap-width",
+        default,
+        deserialize_with = "StyleProperty::<f32>::deserialize_f32_or_none"
+    )]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line_gap_width: Option<StyleProperty<f32>>,
+    /// Blur of the line's edges in pixels, at the view zoom.
+    #[serde(
+        rename = "line-blur",
+        default,
+        deserialize_with = "StyleProperty::<f32>::deserialize_f32_or_none"
+    )]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line_blur: Option<StyleProperty<f32>>,
     /// Name of the image drawn along the line instead of a colour, as written: a string, a
     /// zoom expression or a feature expression.
     #[serde(rename = "line-pattern", default)]

@@ -12,6 +12,7 @@ struct VertexOutput {
     @location(7) dash: vec2<f32>,
     @location(8) progress: f32,
     @location(9) across: f32,
+    @location(10) blur: f32,
 };
 
 @vertex
@@ -19,6 +20,8 @@ fn main(
     @location(0) position: vec2<f32>,
     @location(1) path: vec4<f32>,
     @location(2) tile_mercator_coords: vec4<f32>,
+    // Offset, gap width and blur of the line in pixels.
+    @location(3) line_style: vec4<f32>,
     @location(4) translate1: vec4<f32>,
     @location(5) translate2: vec4<f32>,
     @location(6) translate3: vec4<f32>,
@@ -34,7 +37,7 @@ fn main(
 ) -> VertexOutput {
     let normal = path.xy;
     let line_width_px = line_width * line_scale.x;
-    let gapwidth = 0.0;
+    let gapwidth = line_style.y * 0.5;
 
     let halfwidth = line_width_px * 0.5;
     let pixel_ratio = 1.0;
@@ -70,7 +73,11 @@ fn main(
     // Use per-axis conversion to handle non-square viewports correctly.
     let px_to_clip_x = (2.0 / viewport_width) * center.w;
     let px_to_clip_y = (2.0 / viewport_height) * center.w;
-    let clip_offset = vec2<f32>(dir.x * outset * px_to_clip_x, dir.y * outset * px_to_clip_y);
+    // The offset moves both edges of the line the same way: the sign of the side undoes the
+    // opposite directions of their extrusions.
+    let side = select(1.0, -1.0, path.w < -1.5e30);
+    let moved = outset + side * line_style.x;
+    let clip_offset = vec2<f32>(dir.x * moved * px_to_clip_x, dir.y * moved * px_to_clip_y);
     if spatial {
         // Decks share the map-space width of adjoining draped roads, including foreshortening.
         // Casing and deck share the centerline tangent plane. Independently projecting
@@ -96,5 +103,6 @@ fn main(
         path.z / max(color.x, 1e-6),
         // Which side of the line the vertex is on: the elevation sentinel of a stroke encodes it.
         select(1.0, -1.0, path.w < -1.5e30) * min(length(normal), 1.0),
+        line_style.z,
     );
 }

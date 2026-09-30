@@ -408,6 +408,20 @@ fn metadata_for_layer(
         };
         layer_metadata.circle_params = [paint.intensity_at(zoom), 1.0, 0.0, 0.0];
     }
+    if let Some(LayerPaint::Line(paint)) = &style_layer.paint {
+        let value = |property: &Option<crate::style::layer::StyleProperty<f32>>| {
+            property
+                .as_ref()
+                .and_then(|property| property.evaluate_at_zoom(f64::from(zoom)))
+                .unwrap_or(0.0)
+        };
+        layer_metadata.circle_params = [
+            value(&paint.line_offset),
+            value(&paint.line_gap_width).max(0.0),
+            value(&paint.line_blur).max(0.0),
+            0.0,
+        ];
+    }
     if let Some(LayerPaint::Circle(paint)) = &style_layer.paint {
         let zoom = f64::from(zoom);
         layer_metadata.stroke_color = paint.stroke_color_rgba();

@@ -15,6 +15,7 @@ struct FragmentInput {
     @location(7) dash: vec2<f32>,
     @location(8) progress: f32,
     @location(9) across: f32,
+    @location(10) blur: f32,
 };
 
 struct Output {
@@ -37,7 +38,7 @@ fn main(in: FragmentInput) -> Output {
     let dist = length(in.v_normal) * in.v_width2.x;
 
     let pixel_ratio = 1.0; 
-    let blur = 0.0;
+    let blur = in.blur;
     
     // Calculate the antialiasing fade factor
     let blur2 = (blur + (1.0 / pixel_ratio)) * in.v_gamma_scale;

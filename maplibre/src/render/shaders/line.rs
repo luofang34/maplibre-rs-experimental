@@ -49,6 +49,12 @@ impl Shader for LineShader {
                             wgpu::VertexFormat::Float32x2,
                             15,
                         ),
+                        // Offset, gap width and blur of the line, in pixels.
+                        attribute(
+                            std::mem::offset_of!(ShaderLayerMetadata, circle_params) as u64,
+                            wgpu::VertexFormat::Float32x4,
+                            3,
+                        ),
                     ],
                 },
                 // features
