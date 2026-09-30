@@ -70,6 +70,8 @@ fn worker_wire_roundtrip_preserves_exact_collision_ranges_and_anchor() {
         indices: 6..30,
         text_anchor: crate::euclid::Point2D::new(123., 456.),
         anchor_shifts: Vec::new(),
+        text_sets: Vec::new(),
+        anchor_sets: Vec::new(),
         str: "Zürich".into(),
         line: Some(crate::sdf::LineLabel {
             polyline: [[0.0, 0.0], [500.0, 0.0]].into(),

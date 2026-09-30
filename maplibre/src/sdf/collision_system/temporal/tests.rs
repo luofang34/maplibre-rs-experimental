@@ -26,6 +26,8 @@ fn feature(anchor: f32) -> Feature {
         indices: 0..0,
         text_anchor: Point2D::new(anchor, anchor),
         anchor_shifts: Vec::new(),
+        text_sets: Vec::new(),
+        anchor_sets: Vec::new(),
         str: "Innsbruck".into(),
         line: None,
     }

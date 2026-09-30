@@ -226,6 +226,20 @@ fn variable_anchors_give_the_shifts_from_the_first_anchor_to_each_other_one() {
 }
 
 #[test]
+fn auto_justification_lays_the_text_out_once_for_each_justification_its_anchors_need() {
+    let mut tessellator = point_label(serde_json::json!({
+        "text-variable-anchor": ["left", "right", "top-left", "bottom"], "text-justify": "auto"
+    }));
+    let feature = tessellator.features.remove(0);
+    assert_eq!(feature.text_sets.len(), 3);
+    assert_eq!(feature.anchor_sets, [0, 1, 0, 2]);
+    assert!(feature
+        .text_sets
+        .windows(2)
+        .all(|pair| pair[0].end == pair[1].start));
+}
+
+#[test]
 fn a_radial_offset_pushes_each_anchor_away_from_the_point() {
     let mut tessellator = point_label(serde_json::json!({
         "text-variable-anchor": ["top", "left"], "text-radial-offset": 1

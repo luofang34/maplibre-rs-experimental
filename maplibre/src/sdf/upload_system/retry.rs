@@ -107,6 +107,8 @@ fn layer(count: usize, atlas: Arc<SymbolAtlas>, text: &str) -> SymbolLayerData {
             indices: 0..3,
             text_anchor: crate::euclid::Point2D::zero(),
             anchor_shifts: Vec::new(),
+            text_sets: Vec::new(),
+            anchor_sets: Vec::new(),
             str: text.into(),
             line: None,
         }],

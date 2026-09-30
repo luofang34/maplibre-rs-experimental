@@ -7,7 +7,7 @@ use super::layout::{anchor_fractions, offset, quad, CollectedSymbol};
 use crate::{
     render::shaders::ShaderSymbolVertex,
     sdf::assets::{AtlasEntry, SymbolAtlas},
-    style::layer::SymbolPaint,
+    style::{expression::FeatureProperties, layer::SymbolPaint},
 };
 
 /// The wrapped lines of a label and where they sit around the anchor, in layout pixels.
@@ -172,15 +172,83 @@ pub(super) fn extent(
     Some([left, top, left + block.max_line, top + block.height])
 }
 
+/// The glyph quads of a label, and for text along a line the centre of each glyph; text that
+/// justifies differently for each of its variable anchors is laid out once per justification.
+pub(super) struct Laid {
+    pub centres: Vec<f32>,
+    /// Index range of each justification's glyphs; empty when the text has just one.
+    pub sets: Vec<std::ops::Range<usize>>,
+    /// Which of `sets` each variable anchor shows.
+    pub anchor_sets: Vec<u8>,
+}
+
+/// The justifications the label lays out, one per distinct value its anchors call for under
+/// `text-justify: auto`, and the one each anchor takes.
+fn justifications(
+    paint: &SymbolPaint,
+    block_justify: f32,
+    properties: &FeatureProperties,
+    zoom: f64,
+) -> (Vec<f32>, Vec<u8>) {
+    let anchors = variable_anchors(paint);
+    let auto = paint.text("text-justify", properties, zoom).as_deref() == Some("auto");
+    if !auto || anchors.len() < 2 {
+        return (vec![block_justify], Vec::new());
+    }
+    let mut values: Vec<f32> = Vec::new();
+    let taken = anchors
+        .iter()
+        .map(|anchor| {
+            let value = anchor_fractions(anchor)[0];
+            let at = values.iter().position(|v| *v == value).unwrap_or_else(|| {
+                values.push(value);
+                values.len() - 1
+            });
+            at as u8
+        })
+        .collect();
+    (values, taken)
+}
+
 pub(super) fn append(
     symbol: &CollectedSymbol,
     paint: &SymbolPaint,
     zoom: f64,
     atlas: &SymbolAtlas,
     buffer: &mut VertexBuffers<ShaderSymbolVertex, u32>,
+) -> Laid {
+    let mut laid = Laid {
+        centres: Vec::new(),
+        sets: Vec::new(),
+        anchor_sets: Vec::new(),
+    };
+    let Some(block) = block(symbol, paint, zoom, atlas) else {
+        return laid;
+    };
+    let (values, anchor_sets) = justifications(paint, block.justify, &symbol.properties, zoom);
+    for justify in &values {
+        let start = buffer.indices.len();
+        let centres = glyph_pass(symbol, paint, zoom, &block, *justify, buffer);
+        laid.centres.extend(centres);
+        laid.sets.push(start..buffer.indices.len());
+    }
+    if values.len() > 1 {
+        laid.anchor_sets = anchor_sets;
+    } else {
+        laid.sets.clear();
+    }
+    laid
+}
+
+fn glyph_pass(
+    symbol: &CollectedSymbol,
+    paint: &SymbolPaint,
+    zoom: f64,
+    block: &Block<'_>,
+    justify: f32,
+    buffer: &mut VertexBuffers<ShaderSymbolVertex, u32>,
 ) -> Vec<f32> {
-    let mut centres = Vec::new();
-    let Some(Block {
+    let Block {
         glyphs,
         lines,
         spacing,
@@ -188,12 +256,11 @@ pub(super) fn append(
         max_line,
         height,
         fractions,
-        justify,
         offset,
-    }) = block(symbol, paint, zoom, atlas)
-    else {
-        return centres;
-    };
+        ..
+    } = block;
+    let (spacing, line_height, max_line, height) = (*spacing, *line_height, *max_line, *height);
+    let mut centres = Vec::new();
     let width = |text: &str| line_width(text, glyphs, spacing);
     let half_leading = (line_height - 24.0) / 2.0;
     let elevation = if paint.uses_shared_height() {

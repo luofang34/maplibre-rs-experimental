@@ -67,6 +67,8 @@ struct FeaturePlacement {
     /// Where the text sits relative to its laid-out anchor, in layout pixels, when a later
     /// `text-variable-anchor` was the first to fit.
     text_shift: [f32; 2],
+    /// The `text-variable-anchor` entry the text took.
+    anchor: usize,
     opacity: [f32; 2],
     ground: f32,
     line: Option<LinePoses>,
@@ -106,7 +108,7 @@ pub(super) fn place_layer(
         write_feature_metadata(
             layer,
             feature,
-            (outcome.opacity, outcome.text_shift),
+            (outcome.opacity, outcome.text_shift, outcome.anchor),
             outcome.ground,
             match &outcome.line {
                 Some(LinePoses::Poses(poses)) => Some(poses.as_slice()),
@@ -137,9 +139,9 @@ impl LayerFrame<'_> {
         feature: &crate::sdf::Feature,
         (rectangles, glyph_boxes): ([Option<[f64; 4]>; 2], &[[f64; 4]]),
         (rules, grid, viewport): (&rules::PlacementRules, &CollisionGrid, [f64; 2]),
-    ) -> ([Option<[f64; 4]>; 2], [f32; 2]) {
+    ) -> ([Option<[f64; 4]>; 2], [f32; 2], usize) {
         let (Some(text), true) = (rectangles[0], feature.anchor_shifts.len() > 1) else {
-            return (rectangles, [0.0; 2]);
+            return (rectangles, [0.0; 2], 0);
         };
         // An icon stretched around the text follows it to the anchor it took.
         let fitted = self
@@ -164,12 +166,13 @@ impl LayerFrame<'_> {
                 }),
             ]
         };
-        let shift = feature
+        let index = feature
             .anchor_shifts
             .iter()
-            .find(|shift| rules.visible(moved(shift), glyph_boxes, grid, viewport)[0])
-            .unwrap_or(&feature.anchor_shifts[0]);
-        (moved(shift), *shift)
+            .position(|shift| rules.visible(moved(shift), glyph_boxes, grid, viewport)[0])
+            .unwrap_or(0);
+        let shift = feature.anchor_shifts[index];
+        (moved(&shift), shift, index)
     }
 
     fn place_feature(
@@ -229,7 +232,7 @@ impl LayerFrame<'_> {
         };
         let rules = rules::PlacementRules::new(self.paint, &feature.data.properties, zoom);
         let viewport = [view_state.width(), view_state.height()];
-        let (rectangles, text_shift) = self.first_fitting_anchor(
+        let (rectangles, text_shift, anchor) = self.first_fitting_anchor(
             feature,
             (rectangles, &glyph_boxes),
             (&rules, &*boxes, viewport),
@@ -247,6 +250,7 @@ impl LayerFrame<'_> {
         }
         FeaturePlacement {
             text_shift,
+            anchor,
             opacity: opacity.map(|value| value * relevance),
             ground,
             line,
@@ -290,7 +294,7 @@ fn label_boxes(
 fn write_feature_metadata(
     layer: &crate::sdf::SymbolLayerData,
     feature: &crate::sdf::Feature,
-    (opacity, text_shift): ([f32; 2], [f32; 2]),
+    (opacity, text_shift, anchor): ([f32; 2], [f32; 2], usize),
     ground: f32,
     poses: Option<&[GlyphPose]>,
     (paint, zoom, metadata): (
@@ -311,6 +315,11 @@ fn write_feature_metadata(
         0.0
     };
     let shifts = [text_shift, text_shift.map(|shift| shift * icon_ratio)];
+    // Only the glyph layout that justifies for the chosen anchor is shown.
+    let shown_set = feature
+        .anchor_sets
+        .get(anchor)
+        .and_then(|set| feature.text_sets.get(usize::from(*set)));
     for index in feature.indices.clone() {
         let kind = layer
             .buffer
@@ -327,7 +336,11 @@ fn write_feature_metadata(
             .and_then(|index| metadata.get_mut(*index as usize))
         {
             *vertex = SDFShaderFeatureMetadata {
-                opacity: opacity[kind],
+                opacity: if kind == 0 && shown_set.is_some_and(|set| !set.contains(&index)) {
+                    0.0
+                } else {
+                    opacity[kind]
+                },
                 elevation: ground,
                 // A text vertex without a glyph pose carries its anchor shift here.
                 pose: [shifts[kind][0], shifts[kind][1], 0.0, 0.0],

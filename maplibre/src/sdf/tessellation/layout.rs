@@ -114,7 +114,8 @@ pub(super) fn append(
         }
     }
     let first_glyph_index = buffer.indices.len();
-    let glyph_offsets = super::text_layout::append(symbol, paint, zoom, atlas, buffer);
+    let laid = super::text_layout::append(symbol, paint, zoom, atlas, buffer);
+    let glyph_offsets = laid.centres;
     if start == buffer.indices.len() {
         return;
     }
@@ -146,6 +147,8 @@ pub(super) fn append(
         indices: start..buffer.indices.len(),
         text_anchor: anchor,
         anchor_shifts: super::text_layout::variable_shifts(symbol, paint, zoom, atlas),
+        text_sets: laid.sets,
+        anchor_sets: laid.anchor_sets,
         str: text,
         line: symbol
             .line

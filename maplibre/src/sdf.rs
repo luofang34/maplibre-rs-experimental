@@ -148,6 +148,11 @@ pub struct Feature {
     /// Shifts of the text, in layout pixels, that the other anchors of `text-variable-anchor`
     /// would give it relative to the laid-out one; empty for a label with a single anchor.
     pub anchor_shifts: Vec<[f32; 2]>,
+    /// Index range of the glyphs of each justification when the text justifies differently
+    /// for its variable anchors; empty when it has one layout.
+    pub text_sets: Vec<std::ops::Range<usize>>,
+    /// The entry of `text_sets` each variable anchor shows.
+    pub anchor_sets: Vec<u8>,
 }
 
 /// Coordinates measured on the canonical tile grid.
