@@ -42,6 +42,21 @@ fn initial_view_uses_style_camera_options() {
 }
 
 #[test]
+fn a_style_without_a_center_looks_at_longitude_and_latitude_zero_at_any_zoom() {
+    let style: Style =
+        serde_json::from_str(r#"{"version": 8, "zoom": 1, "sources": {}, "layers": []}"#)
+            .expect("style should parse");
+    let view = initial_view_state(
+        PhysicalSize::new(256, 256).expect("size should be nonzero"),
+        &style,
+    );
+    let center = crate::render::projection::globe_camera_for_view(&view)
+        .expect("globe camera should be valid")
+        .center();
+    assert!(center.latitude.abs() <= 1e-9 && center.longitude.abs() <= 1e-9);
+}
+
+#[test]
 fn unrotated_headless_view_keeps_map_light_in_view_axes() {
     let style: Style = serde_json::from_str(
         r#"{

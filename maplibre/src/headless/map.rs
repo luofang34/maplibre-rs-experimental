@@ -6,7 +6,7 @@ use image::RgbaImage;
 
 use crate::{
     context::MapContext,
-    coords::{LatLon, WorldCoords, WorldTileCoords, Zoom, TILE_SIZE},
+    coords::{LatLon, WorldCoords, WorldTileCoords, Zoom},
     headless::environment::HeadlessEnvironment,
     io::{
         apc::{Context, IntoMessage, Message, SendError},
@@ -500,10 +500,8 @@ impl HeadlessMap {
 
 fn initial_view_state(window_size: crate::window::PhysicalSize, style: &Style) -> ViewState {
     let zoom = Zoom::new(style.zoom.unwrap_or_default());
-    let center = style.center.map_or_else(
-        || WorldCoords::from((TILE_SIZE / 2.0, TILE_SIZE / 2.0)),
-        |center| WorldCoords::from_lat_lon(LatLon::new(center[1], center[0]), zoom),
-    );
+    let center = style.center.unwrap_or_default();
+    let center = WorldCoords::from_lat_lon(LatLon::new(center[1], center[0]), zoom);
     let mut view_state = ViewState::new(
         window_size,
         center,
