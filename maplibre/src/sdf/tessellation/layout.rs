@@ -24,29 +24,33 @@ pub(super) struct CollectedSymbol {
     pub angle: f32,
 }
 
-pub(super) fn anchor(geometry: &Geometry<f64>) -> Option<Point<f64>> {
+/// Where the labels of a geometry go when they do not follow a line, as GL JS places them:
+/// at every point, at the first vertex of every line, and at the pole of inaccessibility of
+/// every polygon.
+pub(super) fn anchors(geometry: &Geometry<f64>) -> Vec<Point<f64>> {
+    let polygon = |polygon: &geo_types::Polygon<f64>| {
+        let rings: Vec<Vec<[f64; 2]>> = std::iter::once(polygon.exterior())
+            .chain(polygon.interiors())
+            .map(|ring| ring.coords().map(|c| [c.x, c.y]).collect())
+            .collect();
+        super::pole::pole_of_inaccessibility(&rings, POLE_PRECISION).map(|[x, y]| Point::new(x, y))
+    };
+    let first = |line: &geo_types::LineString<f64>| {
+        line.0.first().map(|point| Point::new(point.x, point.y))
+    };
     match geometry {
-        Geometry::LineString(line) => {
-            let lengths: Vec<_> = line
-                .lines()
-                .map(|line| (line, (line.dx().powi(2) + line.dy().powi(2)).sqrt()))
-                .collect();
-            let mut remaining = lengths.iter().map(|(_, length)| length).sum::<f64>() / 2.0;
-            for (line, length) in lengths {
-                if remaining <= length && length > 0.0 {
-                    let t = remaining / length;
-                    return Some(Point::new(
-                        line.start.x + line.dx() * t,
-                        line.start.y + line.dy() * t,
-                    ));
-                }
-                remaining -= length;
-            }
-            line.0.first().map(|point| Point::new(point.x, point.y))
-        }
-        _ => geometry.centroid(),
+        Geometry::Point(point) => vec![*point],
+        Geometry::MultiPoint(points) => points.iter().copied().collect(),
+        Geometry::LineString(line) => first(line).into_iter().collect(),
+        Geometry::MultiLineString(lines) => lines.iter().filter_map(first).collect(),
+        Geometry::Polygon(shape) => polygon(shape).into_iter().collect(),
+        Geometry::MultiPolygon(shapes) => shapes.iter().filter_map(polygon).collect(),
+        other => other.centroid().into_iter().collect(),
     }
 }
+
+/// How close, in tile units, a polygon's label gets to its pole of inaccessibility: two pixels.
+const POLE_PRECISION: f64 = 16.0;
 
 pub(super) fn append(
     symbol: &CollectedSymbol,

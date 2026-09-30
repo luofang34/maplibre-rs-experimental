@@ -25,6 +25,7 @@ mod layout;
 mod line_anchors;
 mod line_break;
 mod line_merge;
+mod pole;
 mod text_layout;
 mod text_offset;
 use layout::CollectedSymbol;
@@ -362,7 +363,7 @@ impl FeatureProcessor for TextTessellator {
                 // A point has no line to follow.
                 (Some(_), None) => {}
                 (None, _) => {
-                    if let Some(anchor) = layout::anchor(&geometry) {
+                    for anchor in layout::anchors(&geometry) {
                         self.collect(anchor, 0.0, id, None);
                     }
                 }
