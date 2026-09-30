@@ -3,7 +3,10 @@ use std::collections::HashMap;
 
 use lyon::tessellation::VertexBuffers;
 
-use super::layout::{anchor_fractions, offset, quad, CollectedSymbol};
+use super::{
+    layout::{anchor_fractions, quad, CollectedSymbol},
+    text_offset::{anchored_offset, variable_anchors},
+};
 use crate::{
     render::shaders::ShaderSymbolVertex,
     sdf::assets::{AtlasEntry, SymbolAtlas},
@@ -75,52 +78,6 @@ fn block<'a>(
         justify,
         offset: anchored_offset(paint, &anchors, &anchor, (&symbol.properties, zoom)),
     })
-}
-
-/// The anchors `text-variable-anchor` lists, best first; empty without the property.
-pub(super) fn variable_anchors(paint: &SymbolPaint) -> Vec<String> {
-    paint
-        .properties
-        .get("text-variable-anchor")
-        .and_then(|value| value.as_array())
-        .map(|anchors| {
-            anchors
-                .iter()
-                .filter_map(|anchor| anchor.as_str().map(str::to_owned))
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-/// The text offset in layout pixels for an anchor: `text-radial-offset` pushes the text away
-/// from the point along the anchor's direction, and `text-offset` applies as written when no
-/// radial offset is set or the anchor is fixed.
-fn anchored_offset(
-    paint: &SymbolPaint,
-    variable: &[String],
-    anchor: &str,
-    (properties, zoom): (&crate::style::expression::FeatureProperties, f64),
-) -> [f32; 2] {
-    if variable.is_empty() || !paint.properties.contains_key("text-radial-offset") {
-        return offset(paint, "text-offset", 24.0, (properties, zoom));
-    }
-    let radius = paint.number("text-radial-offset", properties, zoom, 0.0) * 24.0;
-    let diagonal = radius / std::f32::consts::SQRT_2;
-    let x = match anchor {
-        "top-right" | "bottom-right" => -diagonal,
-        "top-left" | "bottom-left" => diagonal,
-        "left" => radius,
-        "right" => -radius,
-        _ => 0.0,
-    };
-    let y = match anchor {
-        "top-right" | "top-left" => diagonal,
-        "bottom-right" | "bottom-left" => -diagonal,
-        "top" => radius,
-        "bottom" => -radius,
-        _ => 0.0,
-    };
-    [x, y]
 }
 
 /// How far the label moves, in layout pixels, when it takes each of its variable anchors

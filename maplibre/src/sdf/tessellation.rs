@@ -25,6 +25,7 @@ mod layout;
 mod line_anchors;
 mod line_merge;
 mod text_layout;
+mod text_offset;
 use layout::CollectedSymbol;
 type GeoResult<T> = geozero::error::Result<T>;
 

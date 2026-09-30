@@ -20,6 +20,7 @@ enum Property {
     Pair(super::Evaluation),
     Padding,
     Anchors,
+    AnchorOffsets,
     Font,
     Enum(&'static [&'static str]),
 }
@@ -67,6 +68,7 @@ fn property(name: &str) -> Option<Property> {
         "text-translate" | "icon-translate" => Property::Pair(Zoom),
         "text-translate-anchor" | "icon-translate-anchor" => Property::Enum(&["map", "viewport"]),
         "text-variable-anchor" => Property::Anchors,
+        "text-variable-anchor-offset" => Property::AnchorOffsets,
         "icon-text-fit" => Property::Enum(&["none", "width", "height", "both"]),
         "icon-text-fit-padding" => Property::Padding,
         "text-height-anchor" | "icon-height-anchor" => {
@@ -137,6 +139,15 @@ impl LayerValidation<'_> {
 fn valid_literal(property: &Property, value: &Value) -> bool {
     match property {
         Property::Boolean => value.is_boolean(),
+        Property::AnchorOffsets => value.as_array().is_some_and(|items| {
+            items.len() % 2 == 0
+                && items.as_chunks::<2>().0.iter().all(|pair| {
+                    pair[0].as_str().is_some()
+                        && pair[1].as_array().is_some_and(|offset| {
+                            offset.len() == 2 && offset.iter().all(Value::is_number)
+                        })
+                })
+        }),
         Property::Anchors => value.as_array().is_some_and(|items| {
             items.iter().all(|item| {
                 item.as_str().is_some_and(|anchor| {
