@@ -208,15 +208,44 @@ pub struct LinePaint {
     pub line_dasharray: Option<serde_json::Value>,
 }
 
-/// Requested raster texture filter; validation reports unsupported sampling modes.
+/// Requested raster texture filter, a constant or a step function of zoom.
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(untagged)]
 pub enum RasterResampling {
+    /// One filter at every zoom.
+    Constant(ResamplingMode),
+    /// The filter of the last stop at or below the zoom, or of the first stop below them all.
+    ByZoom {
+        /// Stops as zoom and filter, in ascending zoom order.
+        stops: Vec<(f64, ResamplingMode)>,
+    },
+}
+
+/// A raster texture filter.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResamplingMode {
     /// Interpolates neighboring texels.
     #[serde(rename = "linear")]
     Linear,
     /// Selects the nearest texel without interpolation.
     #[serde(rename = "nearest")]
     Nearest,
+}
+
+impl RasterResampling {
+    /// Whether texels are picked without interpolation at `zoom`.
+    pub fn is_nearest_at(&self, zoom: f64) -> bool {
+        let mode = match self {
+            Self::Constant(mode) => Some(mode),
+            Self::ByZoom { stops } => stops
+                .iter()
+                .rev()
+                .find(|(stop, _)| *stop <= zoom)
+                .or_else(|| stops.first())
+                .map(|(_, mode)| mode),
+        };
+        mode == Some(&ResamplingMode::Nearest)
+    }
 }
 
 /// Raster image adjustments retained for serialization and validation.
@@ -291,7 +320,7 @@ impl Default for RasterPaint {
             raster_fade_duration: Some(0),
             raster_hue_rotate: Some(StyleProperty::Constant(0.0)),
             raster_opacity: Some(StyleProperty::Constant(1.0)),
-            raster_resampling: Some(RasterResampling::Linear),
+            raster_resampling: Some(RasterResampling::Constant(ResamplingMode::Linear)),
             raster_saturation: Some(StyleProperty::Constant(0.0)),
         }
     }

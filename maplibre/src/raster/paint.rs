@@ -59,8 +59,8 @@ pub struct RasterUniforms {
     pub brightness_min: f32,
     /// Output for white input.
     pub brightness_max: f32,
-    /// Aligns the next field to eight bytes, as WGSL does for a `vec2`.
-    pub padding: f32,
+    /// One when texels are picked without interpolation (`raster-resampling: nearest`).
+    pub nearest: f32,
     /// Screen translation in clip units per unit of `w`: the raster is placed as if the
     /// centre of the view lay on a whole pixel, which keeps texels on pixels.
     pub align: [f32; 2],
@@ -100,7 +100,12 @@ impl RasterUniforms {
             },
             brightness_min: value(&paint.raster_brightness_min, 0.0),
             brightness_max: value(&paint.raster_brightness_max, 1.0),
-            padding: 0.0,
+            nearest: f32::from(u8::from(
+                paint
+                    .raster_resampling
+                    .as_ref()
+                    .is_some_and(|resampling| resampling.is_nearest_at(zoom)),
+            )),
             align: [0.0; 2],
         }
     }

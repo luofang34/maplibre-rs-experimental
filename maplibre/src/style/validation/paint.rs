@@ -158,27 +158,12 @@ impl LayerValidation<'_> {
             p.raster_saturation.as_ref(),
             Zoom,
         );
-        // The adjustments are applied by the raster shader; fading and nearest sampling are not.
-        let changed = [
-            (
-                "raster-fade-duration",
-                p.raster_fade_duration.is_some_and(|v| v != 0),
-            ),
-            (
-                "raster-resampling",
-                matches!(
-                    p.raster_resampling,
-                    Some(crate::style::layer::RasterResampling::Nearest)
-                ),
-            ),
-        ];
-        for (name, changed) in changed {
-            if changed {
-                self.unsupported(
-                    &format!("paint.{name}"),
-                    "raster paint adjustment is not implemented",
-                );
-            }
+        // Fading is the one adjustment the raster shader does not apply.
+        if p.raster_fade_duration.is_some_and(|v| v != 0) {
+            self.unsupported(
+                "paint.raster-fade-duration",
+                "raster paint adjustment is not implemented",
+            );
         }
     }
 }

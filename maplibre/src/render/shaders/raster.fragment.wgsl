@@ -11,6 +11,7 @@ struct RasterPaint {
     contrast_factor: f32,
     brightness_min: f32,
     brightness_max: f32,
+    nearest: f32,
     align: vec2<f32>,
 };
 
@@ -26,7 +27,12 @@ fn main(in: VertexOutput) -> @location(0) vec4<f32> {
     if in.horizon_distance < 0.0 {
         discard;
     }
-    let color = textureSample(t_diffuse, s_diffuse, in.tex_coords.xy / in.tex_coords.z);
+    var uv = in.tex_coords.xy / in.tex_coords.z;
+    if paint.nearest > 0.5 {
+        let size = vec2<f32>(textureDimensions(t_diffuse));
+        uv = (floor(uv * size) + 0.5) / size;
+    }
+    let color = textureSample(t_diffuse, s_diffuse, uv);
     let alpha = color.a * paint.opacity;
     var rgb = color.rgb;
     let w = paint.spin_weights.xyz;
