@@ -11,6 +11,7 @@ struct RasterPaint {
     contrast_factor: f32,
     brightness_min: f32,
     brightness_max: f32,
+    align: vec2<f32>,
 };
 
 @group(1) @binding(0)

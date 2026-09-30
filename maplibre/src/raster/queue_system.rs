@@ -35,12 +35,13 @@ pub fn queue_system(
         return Err(SystemError::Dependencies);
     };
     for layer in style.layers.iter().filter(|layer| layer.type_ == "raster") {
-        let uniforms = match &layer.paint {
+        let mut uniforms = match &layer.paint {
             Some(LayerPaint::Raster(paint)) => {
                 RasterUniforms::from_paint(paint, view_state.zoom().value())
             }
             _ => RasterUniforms::from_paint(&RasterPaint::default(), 0.0),
         };
+        uniforms.align = crate::raster::paint::pixel_alignment(view_state);
         raster_resources.write_layer_paint(device, queue, &layer.id, &uniforms);
     }
 

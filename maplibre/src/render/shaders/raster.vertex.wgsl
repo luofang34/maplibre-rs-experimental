@@ -8,6 +8,20 @@ struct VertexOutput {
 
 const EXTENT: f32 = 4096.0;
 
+struct RasterPaint {
+    spin_weights: vec4<f32>,
+    opacity: f32,
+    saturation_factor: f32,
+    contrast_factor: f32,
+    brightness_min: f32,
+    brightness_max: f32,
+    // Screen shift in clip units per unit of w that aligns the texels with the pixels.
+    align: vec2<f32>,
+};
+
+@group(2) @binding(0)
+var<uniform> paint: RasterPaint;
+
 @vertex
 fn main(
     @location(0) raw_position: vec2<i32>,
@@ -30,9 +44,14 @@ fn main(
     } else if raw_position.y > 32766 {
         tex_coords.y = 1.0;
     }
+    var clip = projected.clip_position;
+    // The globe is not aligned: its clip positions are not those of a flat map.
+    if projection.transition_and_padding.x < 0.5 {
+        clip = vec4<f32>(clip.xy + paint.align * clip.w, clip.zw);
+    }
     return VertexOutput(
         vec3<f32>(tex_coords, 1.0),
         projected.horizon_distance,
-        projected.clip_position,
+        clip,
     );
 }
