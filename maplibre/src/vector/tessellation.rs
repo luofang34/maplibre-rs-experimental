@@ -68,6 +68,12 @@ impl StrokeVertexConstructor<ShaderVertex> for VertexConstructor {
             vertex.normal().to_array(),
         );
         output.distance = vertex.advancement();
+        // A stroke has no elevation; the sentinel also says which side of the line the vertex
+        // is on, which a pattern needs to draw the image across the line the right way up.
+        output.elevation = match vertex.side() {
+            lyon::tessellation::Side::Positive => -1e30,
+            lyon::tessellation::Side::Negative => -2e30,
+        };
         output
     }
 }

@@ -11,6 +11,7 @@ struct VertexOutput {
     @location(6) @interpolate(flat) clip_antimeridian: u32,
     @location(7) dash: vec2<f32>,
     @location(8) progress: f32,
+    @location(9) across: f32,
 };
 
 @vertex
@@ -93,5 +94,7 @@ fn main(
         vec2<f32>(path.z / max(line_scale.y * line_width_px, 1e-6), line_width_px),
         // A gradient layer carries the length of the line in the red channel of its colour.
         path.z / max(color.x, 1e-6),
+        // Which side of the line the vertex is on: the elevation sentinel of a stroke encodes it.
+        select(1.0, -1.0, path.w < -1.5e30) * min(length(normal), 1.0),
     );
 }

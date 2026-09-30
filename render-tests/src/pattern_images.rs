@@ -34,10 +34,13 @@ fn with_extension(base: &std::path::Path, suffix: &str, extension: &str) -> Path
 pub(super) fn add_pattern_images(style: &mut Style, pixel_ratio: f64) -> Result<(), String> {
     let mut wanted = BTreeSet::new();
     for layer in &style.layers {
-        if let Some(LayerPaint::Fill(paint)) = &layer.paint {
-            if let Some(pattern) = &paint.fill_pattern {
-                strings(pattern, &mut wanted);
-            }
+        let pattern = match &layer.paint {
+            Some(LayerPaint::Fill(paint)) => paint.fill_pattern.as_ref(),
+            Some(LayerPaint::Line(paint)) => paint.line_pattern.as_ref(),
+            _ => None,
+        };
+        if let Some(pattern) = pattern {
+            strings(pattern, &mut wanted);
         }
     }
     let Some(base) = sprite_base(style).filter(|_| !wanted.is_empty()) else {

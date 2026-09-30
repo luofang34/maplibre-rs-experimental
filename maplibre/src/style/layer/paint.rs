@@ -163,6 +163,11 @@ pub struct LinePaint {
     )]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub line_gradient: Option<StyleProperty<Color>>,
+    /// Name of the image drawn along the line instead of a colour, as written: a string, a
+    /// zoom expression or a feature expression.
+    #[serde(rename = "line-pattern", default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line_pattern: Option<serde_json::Value>,
     /// Alternating dash and gap lengths in line-width units, evaluated at integer zoom.
     #[serde(
         rename = "line-dasharray",

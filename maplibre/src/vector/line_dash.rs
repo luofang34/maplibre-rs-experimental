@@ -10,9 +10,27 @@ use crate::style::{
 };
 
 const WIDTH: u32 = 256;
+/// What fills a line instead of its colour, when something does.
+#[derive(Clone, Debug, Default, PartialEq)]
+enum LineImage {
+    /// The line takes its colour from the layer.
+    #[default]
+    None,
+    /// Colours along the line, from `line-gradient`.
+    Gradient(Vec<[u8; 4]>),
+    /// An image repeated along the line, from `line-pattern`: its size in layout pixels and its
+    /// RGBA bytes.
+    Pattern {
+        width: u32,
+        height: u32,
+        display: [f32; 2],
+        data: Vec<u8>,
+    },
+}
+
 struct DashEntry {
     pattern: Vec<f64>,
-    gradient: Vec<[u8; 4]>,
+    image: LineImage,
     binding: wgpu::BindGroup,
 }
 pub(crate) struct LineDashResources {
@@ -70,7 +88,7 @@ impl LineDashResources {
                 },
             ],
         });
-        let solid = create_entry(device, queue, &layout, &[], &[]);
+        let solid = create_entry(device, queue, &layout, &[], &LineImage::None);
         Self {
             layout,
             entries: HashMap::new(),
@@ -98,24 +116,21 @@ impl LineDashResources {
                     StyleProperty::<NumberList>::parse(value).evaluate_at_zoom(zoom.floor())
                 })
                 .map_or_else(Vec::new, |values| normalize_pattern(values.0));
-            let gradient = paint
-                .line_gradient
-                .as_ref()
-                .map_or_else(Vec::new, crate::style::line_gradient::ramp);
-            if pattern.is_empty() && gradient.is_empty() {
+            let image = line_image(paint, style, zoom);
+            if pattern.is_empty() && image == LineImage::None {
                 self.entries.remove(&layer.id);
                 continue;
             }
             if self
                 .entries
                 .get(&layer.id)
-                .is_some_and(|entry| entry.pattern == pattern && entry.gradient == gradient)
+                .is_some_and(|entry| entry.pattern == pattern && entry.image == image)
             {
                 continue;
             }
             self.entries.insert(
                 layer.id.clone(),
-                create_entry(device, queue, &self.layout, &pattern, &gradient),
+                create_entry(device, queue, &self.layout, &pattern, &image),
             );
         }
     }
@@ -169,7 +184,7 @@ fn create_entry(
     queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
     pattern: &[f64],
-    gradient: &[[u8; 4]],
+    image: &LineImage,
 ) -> DashEntry {
     let (pixels, period) = dash_pixels(pattern);
     let texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -205,15 +220,10 @@ fn create_entry(
     });
     let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("line dash period"),
-        contents: bytemuck::cast_slice(&[
-            period,
-            f32::from(u8::from(!gradient.is_empty())),
-            0.0,
-            0.0,
-        ]),
+        contents: bytemuck::cast_slice(&image_uniform(period, image)),
         usage: wgpu::BufferUsages::UNIFORM,
     });
-    let (ramp_view, ramp_sampler) = ramp_texture(device, queue, gradient);
+    let (ramp_view, ramp_sampler) = ramp_texture(device, queue, image);
     let binding = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("line dash"),
         layout,
@@ -242,29 +252,72 @@ fn create_entry(
     });
     DashEntry {
         pattern: pattern.to_vec(),
-        gradient: gradient.to_vec(),
+        image: image.clone(),
         binding,
     }
 }
 
-/// The gradient ramp as a texture, or one white texel for a layer without a gradient.
+/// The uniform of a dash entry: the dash period, what fills the line, and the size of a pattern.
+fn image_uniform(period: f32, image: &LineImage) -> [f32; 4] {
+    match image {
+        LineImage::None => [period, 0.0, 0.0, 0.0],
+        LineImage::Gradient(_) => [period, 1.0, 0.0, 0.0],
+        LineImage::Pattern { display, .. } => [period, 2.0, display[0], display[1]],
+    }
+}
+
+/// The image a line layer draws instead of its colour at a zoom.
+fn line_image(paint: &crate::style::layer::LinePaint, style: &Style, zoom: f64) -> LineImage {
+    if let Some(gradient) = &paint.line_gradient {
+        return LineImage::Gradient(crate::style::line_gradient::ramp(gradient));
+    }
+    let Some(pattern) = &paint.line_pattern else {
+        return LineImage::None;
+    };
+    let name = StyleProperty::<crate::style::layer::TextField>::parse(pattern)
+        .evaluate_at_zoom(zoom)
+        .map(|name| name.0);
+    let image = name.and_then(|name| style.images.get(&name));
+    match image {
+        Some(image)
+            if image.width > 0
+                && image.height > 0
+                && image.data.len() == image.width as usize * image.height as usize * 4 =>
+        {
+            let ratio = image.pixel_ratio.max(0.01);
+            LineImage::Pattern {
+                width: image.width,
+                height: image.height,
+                display: [image.width as f32 / ratio, image.height as f32 / ratio],
+                data: image.data.clone(),
+            }
+        }
+        _ => LineImage::None,
+    }
+}
+
+/// The gradient ramp or pattern as a texture, or one white texel for a plain line.
 fn ramp_texture(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
-    gradient: &[[u8; 4]],
+    image: &LineImage,
 ) -> (wgpu::TextureView, wgpu::Sampler) {
-    let white = [[255_u8; 4]];
-    let texels = if gradient.is_empty() {
-        &white[..]
-    } else {
-        gradient
+    let white = [255_u8; 4];
+    let (width, height, bytes): (u32, u32, &[u8]) = match image {
+        LineImage::None => (1, 1, &white),
+        LineImage::Gradient(texels) => (texels.len() as u32, 1, bytemuck::cast_slice(texels)),
+        LineImage::Pattern {
+            width,
+            height,
+            data,
+            ..
+        } => (*width, *height, data),
     };
-    let width = texels.len() as u32;
     let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("line gradient"),
+        label: Some("line image"),
         size: wgpu::Extent3d {
             width,
-            height: 1,
+            height,
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
@@ -276,16 +329,17 @@ fn ramp_texture(
     });
     queue.write_texture(
         texture.as_image_copy(),
-        bytemuck::cast_slice(texels),
+        bytes,
         wgpu::TexelCopyBufferLayout {
             offset: 0,
             bytes_per_row: Some(width * 4),
-            rows_per_image: Some(1),
+            rows_per_image: Some(height),
         },
         texture.size(),
     );
     let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
         address_mode_u: wgpu::AddressMode::ClampToEdge,
+        address_mode_v: wgpu::AddressMode::ClampToEdge,
         mag_filter: wgpu::FilterMode::Linear,
         min_filter: wgpu::FilterMode::Linear,
         ..Default::default()

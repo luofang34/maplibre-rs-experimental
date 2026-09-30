@@ -14,6 +14,7 @@ struct FragmentInput {
     @location(6) @interpolate(flat) clip_antimeridian: u32,
     @location(7) dash: vec2<f32>,
     @location(8) progress: f32,
+    @location(9) across: f32,
 };
 
 struct Output {
@@ -47,6 +48,15 @@ fn main(in: FragmentInput) -> Output {
     // handles the premultiplication. Using v_color * alpha here would double-apply alpha.
     // With a gradient the colour comes from the ramp and the layer's opacity from the alpha.
     let ramp = textureSample(ramp_texture, ramp_sampler, vec2<f32>(clamp(in.progress, 0.0, 1.0), 0.5));
+    // A pattern repeats along the line with its height fitted to the line's width.
+    if dash_period.y > 1.5 {
+        let width_px = max(in.dash.y, 1e-6);
+        let along = fract(in.dash.x * width_px / dash_period.z * dash_period.w / width_px);
+        let texel = textureSample(ramp_texture, ramp_sampler, vec2<f32>(along, 0.5 * in.across + 0.5));
+        let pattern_coverage = texel.a * in.v_color.a * alpha;
+        if pattern_coverage < 0.01 { discard; }
+        return Output(vec4<f32>(texel.rgb, pattern_coverage));
+    }
     let use_ramp = dash_period.y > 0.5;
     let color = select(in.v_color.rgb, ramp.rgb, use_ramp);
     let opacity = select(in.v_color.a, in.v_color.a * ramp.a, use_ramp);
