@@ -3,11 +3,7 @@ use super::*;
 
 async fn blended_center(terrain: bool, samples: u32, opacity: serde_json::Value) -> Vec<u8> {
     let mut style = alpha_style(terrain, 1.0, None);
-    style.layers[0] = serde_json::from_value(serde_json::json!({
-        "id":"fill", "type":"fill", "source":"vector", "source-layer":"fill",
-        "paint":{"fill-color":"#0000ff", "fill-opacity":opacity}
-    }))
-    .expect("fill");
+    style.layers[0] = fill_layer(opacity);
     let style = with_background(style, "#ffffff");
     let map = styled_alpha_map(style, samples, None, true).await;
     pixels_blocking(&map, "fill-opacity")
@@ -21,6 +17,10 @@ async fn fill_opacity_blends_with_the_background_in_every_covered_mode() {
                 (serde_json::json!(1.0), [0, 0, 255, 255]),
                 (serde_json::json!(0.0), [255, 255, 255, 255]),
                 (serde_json::json!(0.5), [128, 128, 255, 255]),
+                // Unset means opaque, and values beyond the range are clamped to it.
+                (serde_json::Value::Null, [0, 0, 255, 255]),
+                (serde_json::json!(2.0), [0, 0, 255, 255]),
+                (serde_json::json!(-1.0), [255, 255, 255, 255]),
             ] {
                 let bytes = blended_center(terrain, samples, opacity.clone()).await;
                 assert_center(&bytes, expected);
@@ -29,10 +29,14 @@ async fn fill_opacity_blends_with_the_background_in_every_covered_mode() {
     }
 }
 
+/// A layer with `fill-opacity` set, or left at its default when the value is null.
 fn fill_layer(opacity: serde_json::Value) -> crate::style::layer::StyleLayer {
+    let mut paint = serde_json::json!({"fill-color":"#0000ff"});
+    if !opacity.is_null() {
+        paint["fill-opacity"] = opacity;
+    }
     serde_json::from_value(serde_json::json!({
-        "id":"fill", "type":"fill", "source":"vector", "source-layer":"fill",
-        "paint":{"fill-color":"#0000ff", "fill-opacity":opacity}
+        "id":"fill", "type":"fill", "source":"vector", "source-layer":"fill", "paint":paint
     }))
     .expect("fill")
 }
