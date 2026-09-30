@@ -44,9 +44,19 @@ fn style(offset: f32, anchor: &str) -> Style {
 }
 
 async fn render(offset: f32, anchor: &str, zoom: f64, samples: u32) -> Vec<u8> {
+    render_with_atlas(offset, anchor, zoom, samples, atlas()).await
+}
+
+async fn render_with_atlas(
+    offset: f32,
+    anchor: &str,
+    zoom: f64,
+    samples: u32,
+    atlas: Arc<crate::sdf::assets::SymbolAtlas>,
+) -> Vec<u8> {
     let mut style = style(offset, anchor);
     style.zoom = Some(zoom);
-    let layers = layers(&style);
+    let layers = layers_with_atlas(&style, atlas);
     let map = fixture_map(style, layers, samples).await;
     let pixels = read_blocking(&map);
     if let Some(index) = pixels
@@ -76,6 +86,13 @@ async fn render(offset: f32, anchor: &str, zoom: f64, samples: u32) -> Vec<u8> {
 }
 
 fn layers(style: &Style) -> crate::headless::map::ProcessedLayers {
+    layers_with_atlas(style, atlas())
+}
+
+fn layers_with_atlas(
+    style: &Style,
+    atlas: Arc<crate::sdf::assets::SymbolAtlas>,
+) -> crate::headless::map::ProcessedLayers {
     let coords = WorldTileCoords {
         x: 2048,
         y: 2048,
@@ -98,7 +115,6 @@ fn layers(style: &Style) -> crate::headless::map::ProcessedLayers {
     .encode_to_vec();
     let mut layers =
         process_tile_layers(&bytes, &style.layers[1], coords, Default::default()).expect("point");
-    let atlas = atlas();
     let Some(LayerPaint::Symbol(paint)) = &style.layers[2].paint else {
         panic!("symbol paint");
     };
@@ -304,6 +320,8 @@ async fn fixture_map(
     .expect("frame");
     map
 }
+
+mod loaded_assets;
 
 mod navigation;
 
