@@ -173,6 +173,14 @@ fn labelled_point_tile() -> Vec<u8> {
     .encode_to_vec()
 }
 
+fn tile_is_complete(test: &Fixture) -> bool {
+    test.context
+        .world
+        .tiles
+        .query::<&crate::vector::VectorLayerBucketComponent>(Default::default())
+        .is_some_and(|component| component.done && !component.failed)
+}
+
 #[tokio::test]
 async fn transient_glyph_failure_retries_the_tile_until_symbols_load() {
     let mut test = Fixture::new(Kind::Vector, false).await;
@@ -190,6 +198,10 @@ async fn transient_glyph_failure_retries_the_tile_until_symbols_load() {
     test.frame(0);
     test.receive().await;
     assert_eq!(test.source.requests(), 2, "tile and one glyph range");
+    assert!(
+        tile_is_complete(&test),
+        "the tile stays complete, drawn without labels, while symbol assets are retried"
+    );
     test.source.set_healthy(Response::Bytes(
         include_bytes!("../../../../../../../data/0-255.pbf").to_vec(),
     ));

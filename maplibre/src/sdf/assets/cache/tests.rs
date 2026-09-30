@@ -94,6 +94,23 @@ async fn a_missing_range_is_not_requested_again() {
 }
 
 #[tokio::test]
+async fn a_remembered_miss_expires_after_its_lifetime() {
+    let http = Scripted::default();
+    http.then(Step::NotFound);
+    let client = client(&http);
+    let cache = AssetCache::with_limits(usize::MAX, Duration::ZERO);
+    assert_eq!(
+        cache.glyphs(&client, RANGE).await.err(),
+        Some(AssetFailure::NotFound)
+    );
+    cache
+        .glyphs(&client, RANGE)
+        .await
+        .expect("asked again once it expired");
+    assert_eq!(http.calls(), 2);
+}
+
+#[tokio::test]
 async fn a_transient_failure_reaches_every_waiter_once_and_is_not_remembered() {
     let http = Scripted::default();
     http.then(Step::Temporary);

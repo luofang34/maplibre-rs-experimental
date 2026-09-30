@@ -62,9 +62,9 @@ pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context +
                     return Err(ProcedureError::Send(source))
                 }
                 Err(error @ ProcessVectorError::SymbolAssets(_)) => {
-                    // The base layers were already delivered; only the symbols are retried.
+                    // The base layers were delivered, so the tile stays complete and drawn without
+                    // labels; only the retry outcome asks for another attempt.
                     tracing::warn!(%coords, source = ?group.source_name, error = %error, "symbol assets unavailable");
-                    failed = true;
                     retry = true;
                 }
                 Err(error @ ProcessVectorError::Decoding { .. }) => {

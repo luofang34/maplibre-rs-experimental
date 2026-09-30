@@ -2,8 +2,9 @@
 //!
 //! Tiles that show the same font range or sprite sheet fetch and decode it once. Concurrent
 //! requests for one asset wait for a single fetch instead of issuing their own. The cache is
-//! shared by clones, so it spans calls only where the owner keeps one handle; a web worker pool
-//! gives every worker its own cache because handles do not cross the worker boundary.
+//! shared by clones, so it spans calls only where the owner keeps one handle. A worker that
+//! receives its configuration as a serialized message starts with its own cache; workers that
+//! share memory and the same configuration value share one.
 
 use std::{
     any::Any,
@@ -67,6 +68,7 @@ pub struct AssetCache(Arc<Shared>);
 struct Shared {
     state: Mutex<State>,
     budget_bytes: usize,
+    negative_ttl: Duration,
 }
 
 impl std::fmt::Debug for Shared {
@@ -132,9 +134,15 @@ impl AssetCache {
     /// Creates a cache that keeps at most `budget_bytes` of decoded assets, except that the
     /// most recently loaded asset is always kept.
     pub fn with_budget(budget_bytes: usize) -> Self {
+        Self::with_limits(budget_bytes, NEGATIVE_TTL)
+    }
+
+    /// Like [`Self::with_budget`], remembering a missing or malformed asset for `negative_ttl`.
+    pub fn with_limits(budget_bytes: usize, negative_ttl: Duration) -> Self {
         Self(Arc::new(Shared {
             state: Mutex::new(State::default()),
             budget_bytes,
+            negative_ttl,
         }))
     }
 
@@ -258,7 +266,7 @@ impl AssetCache {
             Some(Entry {
                 slot: Slot::Failed { failure, at, .. },
                 ..
-            }) if !failure.is_retryable() && at.elapsed() < NEGATIVE_TTL => {
+            }) if !failure.is_retryable() && at.elapsed() < self.0.negative_ttl => {
                 return Claim::Failed(failure.clone());
             }
             _ => {}
