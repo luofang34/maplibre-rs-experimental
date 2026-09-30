@@ -57,9 +57,12 @@ impl PlacementHistory {
     ) -> [f32; 2] {
         let frame = self.frame;
         let states = self.states.entry(key(layer, feature)).or_default();
-        let existing = states
-            .iter()
-            .position(|state| matches(state, layer.coords, feature));
+        // A state a same-tile feature already took this frame belongs to that feature, so a
+        // second feature of the tile with the same key is tracked separately.
+        let existing = states.iter().position(|state| {
+            matches(state, layer.coords, feature)
+                && !(state.claimed == frame && state.claimed_by == layer.coords)
+        });
         let index = existing.unwrap_or_else(|| {
             states.push(State {
                 position: position(layer.coords, feature),
@@ -73,15 +76,10 @@ impl PlacementHistory {
             states.len() - 1
         });
         let state = &mut states[index];
+        // A label repeated across tiles is drawn once, so a parent and child that are both
+        // visible do not double up.
         if state.claimed == frame {
-            // A label repeated across tiles is drawn once, so a parent and child that are both
-            // visible do not double up. Features of one tile that share a key are distinct
-            // labels and share the fade.
-            return if state.claimed_by == layer.coords {
-                state.opacity
-            } else {
-                [0.0; 2]
-            };
+            return [0.0; 2];
         }
         let step = (self.now.saturating_sub(state.last_seen).as_secs_f32() / 0.16).min(1.0);
         for (i, visible) in target.iter().enumerate() {

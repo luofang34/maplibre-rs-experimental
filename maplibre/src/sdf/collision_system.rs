@@ -86,7 +86,14 @@ impl System for CollisionSystem {
                     .map(|entry| entry.0)
         });
         let view = (view_state.view_projection().0, view_state.viewport_size());
-        let moved = self.placed_view.as_ref() != Some(&view);
+        // A head-tracked view changes every frame, so it keeps the periodic cadence instead of
+        // placing every label each frame.
+        let moved = !view_state.has_external_view()
+            && AsRef::<[[f64; 4]; 4]>::as_ref(&view.0)
+                .iter()
+                .flatten()
+                .all(|value| value.is_finite())
+            && self.placed_view.as_ref() != Some(&view);
         if !new_content && !moved && !self.history.fading && !self.runs.is_multiple_of(8) {
             return Ok(());
         }
