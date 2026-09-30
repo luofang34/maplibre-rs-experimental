@@ -346,15 +346,7 @@ impl Style {
     /// ordered.
     fn ensure_shape(&self, layer: &StyleLayer) -> Result<(), StyleMutationError> {
         let id = layer.id.clone();
-        if let (Some(minzoom), Some(maxzoom)) = (layer.minzoom, layer.maxzoom) {
-            if minzoom > maxzoom {
-                return Err(StyleMutationError::InvalidZoomRange {
-                    layer: id,
-                    minzoom,
-                    maxzoom,
-                });
-            }
-        }
+        ensure_zoom_range(layer)?;
         if layer.type_ == "background" {
             return Ok(());
         }
@@ -446,7 +438,9 @@ impl Style {
         })?;
         edited.index = self.layers[position].index;
         self.ensure_supported(&edited)?;
-        self.ensure_shape(&edited)?;
+        // Only the zoom range is checked: an edit does not change the layer's source, so a layer
+        // loaded in a legacy shape stays editable.
+        ensure_zoom_range(&edited)?;
         let before = serde_json::to_value(&self.layers[position]).ok();
         self.layers[position] = edited;
         self.state_templates.remove(id);
@@ -460,6 +454,19 @@ impl Style {
                 ..Default::default()
             })
         })
+    }
+}
+
+fn ensure_zoom_range(layer: &StyleLayer) -> Result<(), StyleMutationError> {
+    match (layer.minzoom, layer.maxzoom) {
+        (Some(minzoom), Some(maxzoom)) if minzoom > maxzoom => {
+            Err(StyleMutationError::InvalidZoomRange {
+                layer: layer.id.clone(),
+                minzoom,
+                maxzoom,
+            })
+        }
+        _ => Ok(()),
     }
 }
 

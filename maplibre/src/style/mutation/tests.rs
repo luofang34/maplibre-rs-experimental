@@ -348,3 +348,20 @@ fn sources_given_only_as_a_tilejson_url_are_refused() {
         .add_source("listed", listed)
         .expect("listed tiles are fine");
 }
+
+#[test]
+fn a_layer_loaded_without_a_source_can_still_be_edited() {
+    let mut style: Style = serde_json::from_value(json!({"version": 8, "sources": {},
+        "layers": [{"id": "legacy", "type": "fill", "paint": {"fill-color": "#00ff00"}}]}))
+    .expect("style");
+    style
+        .set_paint_property("legacy", "fill-color", json!("#0000ff"))
+        .expect("edit");
+    style
+        .set_layer_zoom_range("legacy", Some(2.0), Some(8.0))
+        .expect("edit");
+    assert!(matches!(
+        style.set_layer_zoom_range("legacy", Some(9.0), Some(8.0)),
+        Err(StyleMutationError::InvalidZoomRange { .. })
+    ));
+}
