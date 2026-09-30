@@ -96,6 +96,14 @@ pub fn queue_system(
             if layer.type_ != "background" || !layer.is_visible_at(view_state.zoom().value()) {
                 continue;
             }
+            // A layer that names an image it does not have draws nothing, not its colour.
+            if crate::vector::pattern::names_missing_image(
+                layer.paint.as_ref(),
+                style,
+                view_state.style_zoom().value(),
+            ) {
+                continue;
+            }
             background_index = background_index.max(layer.index);
             let c = background_color(layer, view_state.zoom().value());
             let z_index = layer.index as f32;

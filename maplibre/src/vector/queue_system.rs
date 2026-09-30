@@ -94,6 +94,13 @@ pub fn queue_system(
                     {
                         continue;
                     }
+                    if super::pattern::names_missing_image(
+                        layer_entry.style_layer.paint.as_ref(),
+                        style,
+                        view_state.style_zoom().value(),
+                    ) {
+                        continue;
+                    }
                     let draw_function: Box<dyn crate::render::render_phase::Draw<LayerItem>> =
                         match layer_entry.style_layer.type_.as_str() {
                             // The heatmap plugin draws these into a density target instead.

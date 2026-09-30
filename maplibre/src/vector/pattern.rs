@@ -78,6 +78,22 @@ pub(crate) fn pattern_name(paint: &LayerPaint, zoom: f64) -> Option<String> {
         .filter(|name| !name.is_empty())
 }
 
+/// Whether a layer declares a pattern that names no image the style holds at `zoom`, so that GL
+/// JS draws nothing for it; a name that varies by feature counts as none here.
+pub(crate) fn names_missing_image(paint: Option<&LayerPaint>, style: &Style, zoom: f64) -> bool {
+    let value = match paint {
+        Some(LayerPaint::Fill(fill)) => fill.fill_pattern.as_ref(),
+        Some(LayerPaint::FillExtrusion(extrusion)) => extrusion.fill_extrusion_pattern.as_ref(),
+        Some(LayerPaint::Background(background)) => background.background_pattern.as_ref(),
+        _ => None,
+    };
+    value.is_some_and(|value| {
+        StyleProperty::<TextField>::parse(value)
+            .evaluate_at_zoom(zoom)
+            .is_none_or(|name| !style.images.contains_key(&name.0))
+    })
+}
+
 /// Patterns are laid out in tile units of the whole zoom below the view's, as GL JS does, so
 /// between whole zooms they grow with the map.
 fn pattern_scale(zoom: f64) -> f32 {
