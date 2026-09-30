@@ -152,7 +152,10 @@ pub(super) fn icon_quads(icon: &AtlasEntry, boxed: [f32; 4], fitted: bool) -> Ve
         let em = (cut.stretch - offsets.0[axis]) / offsets.1[axis] * span + origin;
         let px = (cut.fixed - fixed_offsets.0[axis])
             - fixed_offsets.1[axis] * cut.stretch / stretch_total;
-        em + px / ratio
+        // A box smaller than the pixels that cannot stretch grows to hold them: the stretched
+        // share never scales below the fixed content.
+        let at_least = (fixed_offsets.1[axis] / ratio / span).max(1.0);
+        em * at_least + px / ratio
     };
     let x_cuts = cuts(&stretch_x, fixed_width, stretch_width);
     let y_cuts = cuts(&stretch_y, fixed_height, stretch_height);
