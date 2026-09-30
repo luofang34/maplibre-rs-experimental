@@ -9,6 +9,26 @@ use image::RgbaImage;
 /// Texels added on each side of a DEM tile.
 pub const BORDER: u32 = 1;
 
+/// The bit standing for the neighbour at offset (`dx`, `dy`) in a sides mask.
+pub fn side_bit(dx: i32, dy: i32) -> u16 {
+    1 << ((dy + 1) * 3 + (dx + 1))
+}
+
+/// The sides of a border filled from a neighbour of the tile's own size.
+pub fn filled_sides(image: &RgbaImage, neighbours: &[[Option<&RgbaImage>; 3]; 3]) -> u16 {
+    let mut sides = 0;
+    for dy in -1..=1_i32 {
+        for dx in -1..=1_i32 {
+            let usable = neighbours[(dy + 1) as usize][(dx + 1) as usize]
+                .is_some_and(|neighbour| neighbour.dimensions() == image.dimensions());
+            if (dx, dy) != (0, 0) && usable {
+                sides |= side_bit(dx, dy);
+            }
+        }
+    }
+    sides
+}
+
 /// The image with a border of neighbour samples; `neighbours` is indexed `[dy + 1][dx + 1]`
 /// and the centre entry is ignored. A neighbour of another size counts as missing.
 pub fn with_border(image: &RgbaImage, neighbours: &[[Option<&RgbaImage>; 3]; 3]) -> RgbaImage {

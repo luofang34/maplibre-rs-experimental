@@ -18,6 +18,8 @@ pub struct RasterResources {
     layer_sources: HashMap<String, RasterSourceId>,
     /// Sources whose textures carry a border of neighbour samples for slope shading.
     dem_sources: HashSet<RasterSourceId>,
+    /// For each bordered texture, the sides whose border holds a real neighbour's samples.
+    border_sides: HashMap<RasterSourceId, HashMap<WorldTileCoords, u16>>,
     /// Advances whenever a texture is bound, so cached renders of raster tiles can refresh.
     revision: u64,
 }
@@ -42,6 +44,7 @@ impl RasterResources {
             bound_textures: Default::default(),
             layer_sources: Default::default(),
             dem_sources: Default::default(),
+            border_sides: Default::default(),
             revision: 0,
         }
     }
@@ -89,6 +92,9 @@ impl RasterResources {
         for textures in self.bound_textures.values_mut() {
             textures.remove(&coords);
         }
+        for sides in self.border_sides.values_mut() {
+            sides.remove(&coords);
+        }
     }
 
     /// Inserts or replaces the texture/sampler binding at group one of the raster pipeline.
@@ -131,28 +137,72 @@ impl RasterResources {
         if let Some(textures) = self.bound_textures.get_mut(source) {
             textures.remove(&coords);
         }
+        if let Some(sides) = self.border_sides.get_mut(source) {
+            sides.remove(&coords);
+        }
     }
 
     pub(crate) fn update_layer_sources(&mut self, style: &Style) {
         self.layer_sources.clear();
-        self.dem_sources.clear();
+        self.dem_sources = style
+            .sources
+            .iter()
+            .filter(|(_, source)| matches!(source, crate::style::source::Source::RasterDem(_)))
+            .map(|(name, _)| RasterSourceId::from(name.as_str()))
+            .collect();
         for group in crate::io::tile_sources::source_layer_groups(
             style,
             crate::io::tile_sources::TileKind::Raster,
         ) {
-            let is_dem = matches!(
-                group
-                    .source_name
-                    .as_deref()
-                    .and_then(|name| style.sources.get(name)),
-                Some(crate::style::source::Source::RasterDem(_))
-            );
             let source = RasterSourceId::new(group.source_name);
-            if is_dem {
-                self.dem_sources.insert(source.clone());
-            }
             for layer in group.layers {
                 self.layer_sources.insert(layer.id, source.clone());
+            }
+        }
+    }
+
+    /// Records which sides of a freshly uploaded bordered texture hold a neighbour's samples.
+    pub(crate) fn set_border_sides(
+        &mut self,
+        source: &RasterSourceId,
+        coords: WorldTileCoords,
+        sides: u16,
+    ) {
+        self.border_sides
+            .entry(source.clone())
+            .or_default()
+            .insert(coords, sides);
+    }
+
+    /// Drops the texture of a tile whose data changed, and the neighbour textures that carry
+    /// its old or replicated edge in their border.
+    pub(crate) fn tile_data_changed(&mut self, source: &RasterSourceId, coords: WorldTileCoords) {
+        let reloaded = self.get_bound_texture(source, &coords).is_some();
+        self.remove_source_texture(source, coords);
+        if self.has_border(source) {
+            self.refresh_neighbour_borders(source, coords, reloaded);
+        }
+    }
+
+    /// Drops the bordered textures around a tile whose samples they lack, so they upload again
+    /// with the real edge. A tile that already had a texture is reloading, and its neighbours
+    /// may hold stale samples, so all of them go.
+    pub(crate) fn refresh_neighbour_borders(
+        &mut self,
+        source: &RasterSourceId,
+        coords: WorldTileCoords,
+        reloaded: bool,
+    ) {
+        for (neighbour, (dx, dy)) in crate::terrain::backfill::neighbours(coords) {
+            let toward_tile = crate::raster::dem_border::side_bit(-dx, -dy);
+            let sides = self
+                .border_sides
+                .get(source)
+                .and_then(|sides| sides.get(&neighbour))
+                .copied()
+                .unwrap_or(0);
+            if reloaded || sides & toward_tile == 0 {
+                self.remove_source_texture(source, neighbour);
             }
         }
     }

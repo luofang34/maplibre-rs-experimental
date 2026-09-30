@@ -55,6 +55,14 @@ fn hillshade_style(paint: serde_json::Value, bearing: f64, columns: f64) -> Styl
 }
 
 async fn shaded(style: Style, tiles: Vec<(WorldTileCoords, RgbaImage)>) -> Vec<u8> {
+    shaded_in_batches(style, vec![tiles]).await
+}
+
+/// Renders after each batch of tiles arrives, so later tiles reach a map that already drew.
+async fn shaded_in_batches(
+    style: Style,
+    batches: Vec<Vec<(WorldTileCoords, RgbaImage)>>,
+) -> Vec<u8> {
     let (kernel, renderer) = create_headless_renderer(SIZE, SIZE, None)
         .await
         .expect("renderer");
@@ -76,16 +84,18 @@ async fn shaded(style: Style, tiles: Vec<(WorldTileCoords, RgbaImage)>) -> Vec<u
         ],
     )
     .expect("map");
-    let raster = tiles
-        .into_iter()
-        .map(|(coords, image)| AvailableRasterLayerData {
-            coords,
-            source: "dem".into(),
-            image,
-        })
-        .collect();
-    map.render_frames_with_terrain(ProcessedLayers::default(), raster, vec![], 3)
-        .expect("hillshade frame");
+    for tiles in batches {
+        let raster = tiles
+            .into_iter()
+            .map(|(coords, image)| AvailableRasterLayerData {
+                coords,
+                source: "dem".into(),
+                image,
+            })
+            .collect();
+        map.render_frames_with_terrain(ProcessedLayers::default(), raster, vec![], 3)
+            .expect("hillshade frame");
+    }
     read_blocking(&map, "hillshade")
 }
 
@@ -176,6 +186,48 @@ async fn a_continuous_slope_shades_without_a_seam_between_tiles() {
         max - min <= 1,
         "one plane across two tiles shades one colour, not {min}..{max}: {colours:?}"
     );
+}
+
+/// The centre row of two tiles of one gentle slope, delivered in the given order.
+async fn seam_row(batches: [Rise; 2]) -> Vec<u8> {
+    const GENTLE: f64 = 4.0;
+    let west = target();
+    let east = WorldTileCoords::from((west.x + 1, west.y, west.z));
+    let tile = |coords: WorldTileCoords| {
+        let offset = if coords == west { 0 } else { 256 };
+        (coords, dem_tile_with(Rise::West, offset, GENTLE))
+    };
+    let order = match batches {
+        [Rise::West, _] => [west, east],
+        _ => [east, west],
+    };
+    let bytes = shaded_in_batches(
+        hillshade_style(serde_json::json!({"hillshade-exaggeration": 1.0}), 0.0, 0.5),
+        order.iter().map(|coords| vec![tile(*coords)]).collect(),
+    )
+    .await;
+    (32..SIZE - 32)
+        .map(|x| pixel(&bytes, x, SIZE / 2)[0])
+        .collect()
+}
+
+#[tokio::test]
+async fn a_tile_arriving_later_fills_the_border_of_the_one_already_drawn() {
+    // West first then east, and east first then west: either neighbour lands after a draw.
+    for order in [[Rise::West, Rise::East], [Rise::East, Rise::West]] {
+        let colours = seam_row(order).await;
+        let (min, max) = colours.iter().fold((255u8, 0u8), |(min, max), value| {
+            (min.min(*value), max.max(*value))
+        });
+        assert!(
+            max + 8 < 128,
+            "the slope is shaded across both tiles: {colours:?}"
+        );
+        assert!(
+            max - min <= 1,
+            "no seam after a late neighbour: {min}..{max}"
+        );
+    }
 }
 
 #[tokio::test]

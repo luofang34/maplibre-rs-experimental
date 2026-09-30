@@ -94,13 +94,7 @@ pub(crate) fn apply_raster_message<T: RasterTransferables>(
         if let Some(Eventually::Initialized(raster)) =
             world.resources.get_mut::<Eventually<RasterResources>>()
         {
-            raster.remove_source_texture(&source, coords);
-            // Neighbours of a bordered source hold this tile's edge in their own border.
-            if raster.has_border(&source) {
-                for (neighbour, _) in crate::terrain::backfill::neighbours(coords) {
-                    raster.remove_source_texture(&source, neighbour);
-                }
-            }
+            raster.tile_data_changed(&source, coords);
         }
     }
     Ok(())

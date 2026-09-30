@@ -47,7 +47,7 @@ impl HeadlessMap {
                 if let Some(Eventually::Initialized(raster)) =
                     world.resources.get_mut::<Eventually<RasterResources>>()
                 {
-                    raster.remove_source_texture(&source, coords);
+                    raster.tile_data_changed(&source, coords);
                 }
             }
         }

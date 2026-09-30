@@ -5,8 +5,9 @@ use crate::{
     context::MapContext,
     coords::WorldTileCoords,
     raster::{
-        dem_border::with_border, resource::RasterResources, AvailableRasterLayerData,
-        RasterLayerData, RasterLayersDataComponent,
+        dem_border::{filled_sides, with_border},
+        resource::RasterResources,
+        AvailableRasterLayerData, RasterLayerData, RasterLayersDataComponent,
     },
     render::{
         eventually::{Eventually, Eventually::Initialized},
@@ -97,11 +98,11 @@ fn upload_image(
     data: &AvailableRasterLayerData,
 ) {
     let bordered;
+    let mut border_sides = None;
     let image = if raster_resources.has_border(&data.source) {
-        bordered = with_border(
-            &data.image,
-            &neighbour_images(tiles, &data.source, data.coords),
-        );
+        let neighbours = neighbour_images(tiles, &data.source, data.coords);
+        border_sides = Some(filled_sides(&data.image, &neighbours));
+        bordered = with_border(&data.image, &neighbours);
         &bordered
     } else {
         &data.image
@@ -137,4 +138,7 @@ fn upload_image(
     );
 
     raster_resources.bind_texture(device, &data.source, &data.coords, texture);
+    if let Some(sides) = border_sides {
+        raster_resources.set_border_sides(&data.source, data.coords, sides);
+    }
 }
