@@ -145,7 +145,11 @@ fn feature_state(
 
 /// Applies every operation to `style`. An operation the mutation API has no counterpart for
 /// is an error, so its fixture is reported instead of compared against the wrong state.
-pub(super) fn apply(style: &mut Style, operations: &[Value]) -> Result<(), String> {
+pub(super) fn apply(
+    style: &mut Style,
+    operations: &[Value],
+    transitions: &mut crate::transitions::Transitions,
+) -> Result<(), String> {
     for operation in operations {
         let Some(items) = operation.as_array() else {
             return Err(format!("Malformed operation: {operation}"));
@@ -155,7 +159,10 @@ pub(super) fn apply(style: &mut Style, operations: &[Value]) -> Result<(), Strin
         let value = |index: usize| items.get(index).cloned().unwrap_or(Value::Null);
         let outcome = match (name, text(1)) {
             // Rendering is deterministic, so waiting for the map to settle changes nothing.
-            ("wait" | "idle" | "sleep", _) => Ok(()),
+            ("wait" | "idle" | "sleep", _) => {
+                transitions.wait(items.get(1).and_then(Value::as_f64).unwrap_or(0.0));
+                Ok(())
+            }
             // Only the camera left by the last operation is drawn, so it becomes the style's.
             ("setZoom", _) => number(items, 1).map(|zoom| style.zoom = Some(zoom)),
             ("setBearing", _) => number(items, 1).map(|bearing| style.bearing = Some(bearing)),
@@ -237,6 +244,11 @@ pub(super) fn apply(style: &mut Style, operations: &[Value]) -> Result<(), Strin
             ("setPaintProperty", Some(layer)) => text(2)
                 .ok_or_else(|| "setPaintProperty needs a property".to_owned())
                 .and_then(|property| {
+                    if property.ends_with("-transition") {
+                        transitions.declare(layer, property, &value(3));
+                        return Ok(());
+                    }
+                    transitions.before_change(style, layer, property, &value(3));
                     style
                         .set_paint_property(layer, property, value(3))
                         .map(drop)

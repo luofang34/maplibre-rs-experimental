@@ -98,11 +98,17 @@ fn load_style_blocking(test_dir: &Path) -> Result<(Style, TestMeta), String> {
     let operations = crate::operations::operations_of(&value);
     meta.padding = crate::camera_options::padding_of(&operations);
     meta.center_elevation = crate::camera_options::pinned_center_elevation(&operations);
+    let mut transitions = crate::transitions::Transitions::extract(&mut value);
     let mut style: Style = serde_json::from_value(value.clone())
         .map_err(|error| format!("Cannot deserialize Style: {error}"))?;
     // The tiles are decoded from this copy of the style, so it carries the state's values too.
     style.resolve_global_state();
-    crate::operations::apply(&mut style, &crate::operations::operations_of(&value))?;
+    crate::operations::apply(
+        &mut style,
+        &crate::operations::operations_of(&value),
+        &mut transitions,
+    )?;
+    transitions.settle(&mut style)?;
     crate::pattern_images::add_pattern_images(&mut style, meta.pixel_ratio)?;
     for (index, layer) in style.layers.iter_mut().enumerate() {
         layer.index = index as u32 + 1; // The depth clear is zero.
