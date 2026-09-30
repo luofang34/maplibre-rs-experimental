@@ -242,7 +242,7 @@ fn pack_sprites(
                 } else {
                     1
                 },
-                stretch: icon_stretch(&value),
+                stretch: icon_stretch(value),
             },
         );
     }
