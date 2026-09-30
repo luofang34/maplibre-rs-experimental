@@ -34,14 +34,18 @@ fn shade(in: VertexOutput, mode: u32) -> vec4<f32> {
         let edge = 0.75 - width / (8.0 * scale);
         let softness = derivative + metrics.z / (8.0 * scale);
         let halo_alpha = select(0.0, smoothstep(edge-softness, edge+softness, distance) * halo.a, width > 0.0);
+        // The halo is a ring around the glyph: its inside stays clear even where the fill is
+        // transparent.
+        let halo_gamma = (metrics.z * 1.19 / 8.0 + 0.105) / scale;
+        let hole = smoothstep(0.75, 0.75 + 2.0 * halo_gamma, distance);
+        let ring = min(halo_alpha, 1.0 - hole);
         if mode == 1u {
-            let ring = halo_alpha * (1.0 - fill_coverage);
             color = vec4<f32>(halo.rgb * ring, ring);
         } else if mode == 2u {
             color = vec4<f32>(fill.rgb * fill_alpha, fill_alpha);
         } else {
-            color = vec4<f32>(fill.rgb * fill_alpha + halo.rgb * halo_alpha * (1.0-fill_alpha),
-                fill_alpha + halo_alpha * (1.0-fill_alpha));
+            color = vec4<f32>(fill.rgb * fill_alpha + halo.rgb * ring * (1.0 - fill_alpha),
+                fill_alpha + ring * (1.0 - fill_alpha));
         }
     }
     color *= in.opacity;
