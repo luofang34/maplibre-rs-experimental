@@ -68,8 +68,9 @@ pub struct GeoJsonSource {
     pub generate_id: bool,
     /// Identifies this version of the data. It is unique per parsed style and per change, so
     /// workers that share one cache never mix up two documents of the same source name, and a
-    /// changed value makes them load and index the data again.
-    #[serde(skip, default = "fresh_generation")]
+    /// changed value makes them load and index the data again. It is serialized, so the tile
+    /// requests a worker receives as messages keep the value and share one cached index.
+    #[serde(default = "fresh_generation")]
     pub generation: u64,
 }
 

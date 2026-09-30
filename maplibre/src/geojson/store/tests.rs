@@ -180,3 +180,30 @@ async fn two_styles_with_one_source_name_never_share_an_index() {
         "a clone of one style shares its data"
     );
 }
+
+#[tokio::test]
+async fn a_source_sent_to_a_worker_as_a_message_keeps_its_generation_and_shares_one_index() {
+    let documents = Documents::default();
+    let (client, cache) = (client(&documents), AssetCache::default());
+    let declared: GeoJsonSource =
+        serde_json::from_value(json!({"data": "https://data.invalid/a.geojson"})).expect("source");
+    let message = serde_json::to_string(&declared).expect("serializes");
+    let first: GeoJsonSource = serde_json::from_str(&message).expect("first request");
+    let second: GeoJsonSource = serde_json::from_str(&message).expect("second request");
+    assert_eq!(first.generation, declared.generation);
+    assert_eq!(second.generation, declared.generation);
+    let a = cache
+        .geojson_index(&client, "places", &first)
+        .await
+        .expect("first");
+    let b = cache
+        .geojson_index(&client, "places", &second)
+        .await
+        .expect("second");
+    assert!(Arc::ptr_eq(&a, &b), "both tile requests use one index");
+    assert_eq!(
+        documents.calls.lock().expect("calls").len(),
+        1,
+        "the document is fetched once"
+    );
+}
