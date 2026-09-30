@@ -14,6 +14,8 @@ pub mod heatmap;
 pub mod hillshade;
 pub mod layer;
 pub mod light;
+pub mod line_gradient;
+pub mod line_stroke;
 pub mod property;
 pub mod sky;
 pub mod source;

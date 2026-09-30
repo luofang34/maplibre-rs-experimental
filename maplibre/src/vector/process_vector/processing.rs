@@ -75,6 +75,7 @@ fn tessellator(paint: &LayerPaint, request: &VectorTileRequest) -> ZeroTessellat
         LayerPaint::Line(paint) => {
             tessellator.style_property = paint.line_color.clone();
             tessellator.is_line_layer = true;
+            tessellator.line_gradient = paint.line_gradient.is_some();
         }
         _ => {}
     }
@@ -90,6 +91,7 @@ fn vector_layer<T: VectorTransferables, C: Context>(
 ) -> Result<(), ProcessVectorError> {
     let original = layer.clone();
     let mut tessellator = tessellator(paint, request);
+    tessellator.stroke = crate::style::line_stroke::LineStroke::of_layer(style);
     tessellator.coordinate_scale = extent_scale(&layer);
     match layer.process(&mut tessellator) {
         Err(error) => {

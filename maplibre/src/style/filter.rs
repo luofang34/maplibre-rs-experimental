@@ -140,6 +140,7 @@ impl Filter {
             zoom: feature.zoom,
             elevation: 0.0,
             heatmap_density: 0.0,
+            line_progress: 0.0,
             properties: Some(feature.properties),
             geometry_type: Some(feature.geometry_type.name()),
             id: feature.id.as_ref(),

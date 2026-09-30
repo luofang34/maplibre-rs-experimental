@@ -10,6 +10,7 @@ struct VertexOutput {
     @location(5) tile_x: f32,
     @location(6) @interpolate(flat) clip_antimeridian: u32,
     @location(7) dash: vec2<f32>,
+    @location(8) progress: f32,
 };
 
 @vertex
@@ -90,5 +91,7 @@ fn main(
         position.x,
         clip_antimeridian,
         vec2<f32>(path.z / max(line_scale.y * line_width_px, 1e-6), line_width_px),
+        // A gradient layer carries the length of the line in the red channel of its colour.
+        path.z / max(color.x, 1e-6),
     );
 }

@@ -351,6 +351,9 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
                     LayerPaint::Line(p) => {
                         tessellator.style_property = p.line_color.clone();
                         tessellator.is_line_layer = true;
+                        tessellator.line_gradient = p.line_gradient.is_some();
+                        tessellator.stroke =
+                            crate::style::line_stroke::LineStroke::of_layer(style_layer);
                     }
                     LayerPaint::Background(p) => {
                         tessellator.style_property = p.background_color.clone()

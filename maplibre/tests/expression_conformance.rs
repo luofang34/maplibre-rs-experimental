@@ -175,6 +175,10 @@ fn run_case(path: &Path) -> Outcome {
                 .get("heatmapDensity")
                 .and_then(Json::as_f64)
                 .unwrap_or(0.0),
+            line_progress: globals
+                .get("lineProgress")
+                .and_then(Json::as_f64)
+                .unwrap_or(0.0),
             properties: Some(&properties),
             geometry_type,
             id: id.as_ref(),

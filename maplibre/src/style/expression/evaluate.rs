@@ -21,6 +21,8 @@ pub struct EvaluationContext<'a> {
     pub elevation: f64,
     /// Density of a heatmap at the colour being looked up, for `heatmap-density`.
     pub heatmap_density: f64,
+    /// How far along its line the colour being looked up lies, for `line-progress`.
+    pub line_progress: f64,
     /// Properties of the feature; none when the expression is not evaluated for a feature.
     pub properties: Option<&'a FeatureProperties>,
     /// Geometry kind of the feature, as `geometry-type` reports it.
@@ -122,6 +124,7 @@ impl Expression {
             Self::Global(Global::Zoom) => Ok(Value::Number(context.zoom)),
             Self::Global(Global::Elevation) => Ok(Value::Number(context.elevation)),
             Self::Global(Global::HeatmapDensity) => Ok(Value::Number(context.heatmap_density)),
+            Self::Global(Global::LineProgress) => Ok(Value::Number(context.line_progress)),
             Self::GlobalState(key) => Ok(context
                 .global_state
                 .and_then(|state| state.get(key))

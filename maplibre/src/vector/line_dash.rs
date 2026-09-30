@@ -12,6 +12,7 @@ use crate::style::{
 const WIDTH: u32 = 256;
 struct DashEntry {
     pattern: Vec<f64>,
+    gradient: Vec<[u8; 4]>,
     binding: wgpu::BindGroup,
 }
 pub(crate) struct LineDashResources {
@@ -51,9 +52,25 @@ impl LineDashResources {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
             ],
         });
-        let solid = create_entry(device, queue, &layout, &[]);
+        let solid = create_entry(device, queue, &layout, &[], &[]);
         Self {
             layout,
             entries: HashMap::new(),
@@ -81,20 +98,24 @@ impl LineDashResources {
                     StyleProperty::<NumberList>::parse(value).evaluate_at_zoom(zoom.floor())
                 })
                 .map_or_else(Vec::new, |values| normalize_pattern(values.0));
-            if pattern.is_empty() {
+            let gradient = paint
+                .line_gradient
+                .as_ref()
+                .map_or_else(Vec::new, crate::style::line_gradient::ramp);
+            if pattern.is_empty() && gradient.is_empty() {
                 self.entries.remove(&layer.id);
                 continue;
             }
             if self
                 .entries
                 .get(&layer.id)
-                .is_some_and(|entry| entry.pattern == pattern)
+                .is_some_and(|entry| entry.pattern == pattern && entry.gradient == gradient)
             {
                 continue;
             }
             self.entries.insert(
                 layer.id.clone(),
-                create_entry(device, queue, &self.layout, &pattern),
+                create_entry(device, queue, &self.layout, &pattern, &gradient),
             );
         }
     }
@@ -148,6 +169,7 @@ fn create_entry(
     queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
     pattern: &[f64],
+    gradient: &[[u8; 4]],
 ) -> DashEntry {
     let (pixels, period) = dash_pixels(pattern);
     let texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -183,9 +205,15 @@ fn create_entry(
     });
     let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("line dash period"),
-        contents: bytemuck::cast_slice(&[period, 0.0_f32, 0.0, 0.0]),
+        contents: bytemuck::cast_slice(&[
+            period,
+            f32::from(u8::from(!gradient.is_empty())),
+            0.0,
+            0.0,
+        ]),
         usage: wgpu::BufferUsages::UNIFORM,
     });
+    let (ramp_view, ramp_sampler) = ramp_texture(device, queue, gradient);
     let binding = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("line dash"),
         layout,
@@ -202,12 +230,67 @@ fn create_entry(
                 binding: 2,
                 resource: uniform.as_entire_binding(),
             },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: wgpu::BindingResource::TextureView(&ramp_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: wgpu::BindingResource::Sampler(&ramp_sampler),
+            },
         ],
     });
     DashEntry {
         pattern: pattern.to_vec(),
+        gradient: gradient.to_vec(),
         binding,
     }
+}
+
+/// The gradient ramp as a texture, or one white texel for a layer without a gradient.
+fn ramp_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    gradient: &[[u8; 4]],
+) -> (wgpu::TextureView, wgpu::Sampler) {
+    let white = [[255_u8; 4]];
+    let texels = if gradient.is_empty() {
+        &white[..]
+    } else {
+        gradient
+    };
+    let width = texels.len() as u32;
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("line gradient"),
+        size: wgpu::Extent3d {
+            width,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    queue.write_texture(
+        texture.as_image_copy(),
+        bytemuck::cast_slice(texels),
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(width * 4),
+            rows_per_image: Some(1),
+        },
+        texture.size(),
+    );
+    let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        address_mode_u: wgpu::AddressMode::ClampToEdge,
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Linear,
+        ..Default::default()
+    });
+    (texture.create_view(&Default::default()), sampler)
 }
 
 #[cfg(test)]

@@ -20,8 +20,26 @@ use lyon::{
 use crate::{
     projection::globe::subdivision::{subdivide_line_segment, subdivide_triangles},
     render::ShaderVertex,
-    style::expression::{FeatureProperties, Value},
+    style::{
+        expression::{FeatureProperties, Value},
+        line_stroke::{LineCap, LineJoin},
+    },
 };
+
+/// The length of the path's segments in tile units.
+fn path_length(path: &Path) -> f32 {
+    path.iter()
+        .map(|event| match event {
+            lyon::path::Event::Line { from, to } => (to - from).length(),
+            lyon::path::Event::End {
+                last,
+                first,
+                close: true,
+            } => (first - last).length(),
+            _ => 0.0,
+        })
+        .sum()
+}
 
 mod circle;
 mod extrusion;
@@ -160,6 +178,13 @@ pub struct ZeroTessellator<I: std::ops::Add + From<lyon::tessellation::VertexId>
     /// feature's colour alpha.
     feature_opacity: Option<(crate::style::layer::StyleProperty<f32>, f64)>,
 
+    /// When set, a line feature's colour is its length in tile units and its opacity, which the
+    /// shader turns into a position along the gradient ramp.
+    pub line_gradient: bool,
+    /// Cap and join of stroked lines.
+    pub stroke: crate::style::line_stroke::LineStroke,
+    line_length: f32,
+
     /// Accumulated tile-space vertices and indices, without upload padding.
     pub buffer: VertexBuffers<ShaderVertex, I>,
 
@@ -195,6 +220,9 @@ impl<I: std::ops::Add + From<lyon::tessellation::VertexId> + MaxIndex> Default
             fallback_color: [0.0, 0.0, 0.0, 1.0],
             style_property: None,
             is_line_layer: false,
+            line_gradient: false,
+            stroke: Default::default(),
+            line_length: 0.0,
             current_index: 0,
             path_open: false,
             is_point: false,
@@ -257,12 +285,24 @@ where
     }
 
     fn tessellate_strokes(&mut self) -> GeoResult<()> {
-        let path_builder = self.path_builder.replace(Path::builder());
+        let path = self.path_builder.replace(Path::builder()).build();
+        self.line_length = self.line_length.max(path_length(&path));
 
         StrokeTessellator::new()
             .tessellate_path(
-                &path_builder.build(),
-                &StrokeOptions::tolerance(DEFAULT_TOLERANCE),
+                &path,
+                &StrokeOptions::tolerance(DEFAULT_TOLERANCE)
+                    .with_line_cap(match self.stroke.cap {
+                        LineCap::Butt => lyon::tessellation::LineCap::Butt,
+                        LineCap::Round => lyon::tessellation::LineCap::Round,
+                        LineCap::Square => lyon::tessellation::LineCap::Square,
+                    })
+                    .with_line_join(match self.stroke.join {
+                        LineJoin::Miter => lyon::tessellation::LineJoin::Miter,
+                        LineJoin::Bevel => lyon::tessellation::LineJoin::Bevel,
+                        LineJoin::Round => lyon::tessellation::LineJoin::Round,
+                    })
+                    .with_miter_limit(self.stroke.miter_limit),
                 &mut BuffersBuilder::new(&mut self.buffer, VertexConstructor {}),
             )
             .map_err(|error| GeozeroError::Geometry(error.to_string()))?;
@@ -492,6 +532,10 @@ where
         } else {
             self.fallback_color
         };
+        if self.line_gradient {
+            color = [self.line_length, 0.0, 0.0, 1.0];
+            self.line_length = 0.0;
+        }
         if let Some((opacity, zoom)) = &self.feature_opacity {
             color[3] *= opacity
                 .evaluate_for(&self.feature_properties, *zoom)

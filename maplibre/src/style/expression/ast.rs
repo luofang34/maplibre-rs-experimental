@@ -14,6 +14,8 @@ pub enum Global {
     Elevation,
     /// The `heatmap-density` operator.
     HeatmapDensity,
+    /// The `line-progress` operator.
+    LineProgress,
 }
 
 /// A property of the feature being evaluated.

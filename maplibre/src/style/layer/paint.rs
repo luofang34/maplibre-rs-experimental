@@ -150,6 +150,14 @@ pub struct LinePaint {
     /// Coordinate frame for `line_translate`.
     #[serde(rename = "line-translate-anchor", default)]
     pub line_translate_anchor: TranslateAnchor,
+    /// Colour along the line as a function of `["line-progress"]`; replaces `line-color`.
+    #[serde(
+        rename = "line-gradient",
+        default,
+        deserialize_with = "StyleProperty::<Color>::deserialize_color_or_none"
+    )]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line_gradient: Option<StyleProperty<Color>>,
     /// Alternating dash and gap lengths in line-width units, evaluated at integer zoom.
     #[serde(
         rename = "line-dasharray",

@@ -112,6 +112,7 @@ enum Evaluation {
     Feature,
     Elevation,
     Density,
+    Progress,
     Filter,
 }
 
@@ -144,8 +145,19 @@ impl LayerValidation<'_> {
             ("paint", &self.layer.unrecognized.paint),
             ("layout", &self.layer.unrecognized.layout),
         ] {
-            for name in properties.keys() {
-                self.unsupported(&format!("{scope}.{name}"), "property is not implemented");
+            for (name, value) in properties {
+                let stroke = self.layer.type_ == "line"
+                    && scope == "layout"
+                    && crate::style::line_stroke::STROKE_LAYOUT.contains(&name.as_str());
+                if stroke && crate::style::line_stroke::LineStroke::accepts(name, value) {
+                    continue;
+                }
+                let reason = if stroke {
+                    "this rendering path requires a supported literal value"
+                } else {
+                    "property is not implemented"
+                };
+                self.unsupported(&format!("{scope}.{name}"), reason);
             }
         }
         if let Some(value) = &self.layer.filter {
@@ -206,7 +218,10 @@ impl LayerValidation<'_> {
             );
         } else if matches!(
             evaluation,
-            Evaluation::Constant | Evaluation::Elevation | Evaluation::Density
+            Evaluation::Constant
+                | Evaluation::Elevation
+                | Evaluation::Density
+                | Evaluation::Progress
         ) && !property.is_zoom_constant()
         {
             self.unsupported(name, "this rendering path requires a constant value");
@@ -228,6 +243,9 @@ fn missing_input(expression: &Expression, evaluation: Evaluation) -> Option<&'st
             if !matches!(evaluation, Evaluation::Density) =>
         {
             Some("this evaluation has no heatmap density")
+        }
+        Expression::Global(Global::LineProgress) if !matches!(evaluation, Evaluation::Progress) => {
+            Some("this evaluation has no position along a line")
         }
         _ => None,
     };
