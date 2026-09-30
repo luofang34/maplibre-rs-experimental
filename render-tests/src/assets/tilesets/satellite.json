@@ -1,0 +1,5 @@
+{
+    "tiles": [
+      "local://tiles/satellite/{z}-{x}-{y}.png"
+    ]
+}

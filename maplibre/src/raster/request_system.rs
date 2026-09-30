@@ -233,7 +233,16 @@ fn wanted_tiles(
             _ => None,
         }
         .unwrap_or(0);
+        let bounds = match source.name().and_then(|name| style.sources.get(name)) {
+            Some(crate::style::source::Source::Raster(source)) => source.bounds,
+            _ => None,
+        };
         for coords in tiles {
+            // Tiles outside the source's declared bounds are never requested.
+            if bounds.is_some_and(|bounds| !crate::io::tile_sources::tile_in_bounds(coords, bounds))
+            {
+                continue;
+            }
             wanted.push(coords);
             if let Some(parent) = missing_tile_fallback(coords, minzoom, |coords| {
                 world

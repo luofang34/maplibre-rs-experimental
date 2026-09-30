@@ -48,6 +48,16 @@ impl TileKind {
         }
     }
 
+    /// The geographic bounds a source of this kind declares, `(west, south, east, north)`.
+    fn bounds_of(self, source: &Source) -> Option<(f64, f64, f64, f64)> {
+        match (self, source) {
+            (Self::Vector, Source::Vector(vector)) | (Self::Raster, Source::Raster(vector)) => {
+                vector.bounds
+            }
+            _ => None,
+        }
+    }
+
     /// The largest zoom a source of this kind has tiles for.
     fn max_zoom_of(self, source: &Source) -> Option<u8> {
         match (self, source) {
@@ -242,6 +252,52 @@ pub fn source_min_zoom(style: &Style, kind: TileKind) -> Option<u8> {
         .filter_map(|layer| style.sources.get(layer.source.as_ref()?))
         .filter_map(|source| kind.min_zoom_of(source))
         .max()
+}
+
+/// Whether every source of this kind that the style draws declares bounds that leave the tile
+/// out, so that it is not requested, as GL JS skips tiles outside a source's `bounds`.
+pub fn outside_source_bounds(style: &Style, kind: TileKind, coords: WorldTileCoords) -> bool {
+    let mut any = false;
+    for source in style
+        .layers
+        .iter()
+        .filter(|layer| kind.accepts_layer(layer))
+        .filter_map(|layer| style.sources.get(layer.source.as_ref()?))
+    {
+        let Some((west, south, east, north)) = kind.bounds_of(source) else {
+            return false;
+        };
+        any = true;
+        if tile_in_bounds(coords, (west, south, east, north)) {
+            return false;
+        }
+    }
+    any
+}
+
+/// Whether the tile's geographic extent overlaps the bounds `(west, south, east, north)`;
+/// touching along an edge does not.
+pub fn tile_in_bounds(
+    coords: WorldTileCoords,
+    (west, south, east, north): (f64, f64, f64, f64),
+) -> bool {
+    let count = f64::from(1_u32 << u32::from(u8::from(coords.z)).min(30));
+    let longitude = |x: f64| x / count * 360.0 - 180.0;
+    let latitude = |y: f64| {
+        (std::f64::consts::PI * (1.0 - 2.0 * y / count))
+            .sinh()
+            .atan()
+            .to_degrees()
+    };
+    let (tile_west, tile_east) = (
+        longitude(f64::from(coords.x)),
+        longitude(f64::from(coords.x) + 1.0),
+    );
+    let (tile_north, tile_south) = (
+        latitude(f64::from(coords.y)),
+        latitude(f64::from(coords.y) + 1.0),
+    );
+    tile_east > west && tile_west < east && tile_north > south && tile_south < north
 }
 
 /// Replaces coordinates above the source maximum zoom with their ancestor at that zoom.

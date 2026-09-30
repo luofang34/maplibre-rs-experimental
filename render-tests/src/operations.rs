@@ -225,6 +225,8 @@ pub(super) fn apply(style: &mut Style, operations: &[Value]) -> Result<(), Strin
                     }
                     other => other,
                 };
+                let mut replacement = replacement;
+                crate::tilesets::resolve_sources(&mut replacement)?;
                 *style = serde_json::from_value(replacement)
                     .map_err(|error| format!("setStyle: invalid style: {error}"))?;
                 Ok(())
@@ -260,14 +262,18 @@ pub(super) fn apply(style: &mut Style, operations: &[Value]) -> Result<(), Strin
                 .remove_source(source)
                 .map(drop)
                 .map_err(|error| error.to_string()),
-            ("addSource", Some(source)) => serde_json::from_value(value(2))
-                .map_err(|error| format!("addSource: invalid source: {error}"))
-                .and_then(|parsed| {
-                    style
-                        .add_source(source, parsed)
-                        .map(drop)
-                        .map_err(|error| error.to_string())
-                }),
+            ("addSource", Some(source)) => {
+                let mut declaration = value(2);
+                crate::tilesets::resolve_source(&mut declaration)?;
+                serde_json::from_value(declaration)
+            }
+            .map_err(|error| format!("addSource: invalid source: {error}"))
+            .and_then(|parsed| {
+                style
+                    .add_source(source, parsed)
+                    .map(drop)
+                    .map_err(|error| error.to_string())
+            }),
             ("addLayer", _) => style
                 .add_layer(value(1), text(2))
                 .map(drop)

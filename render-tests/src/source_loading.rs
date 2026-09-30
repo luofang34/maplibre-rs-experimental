@@ -9,7 +9,7 @@ use maplibre::{
         process_geojson_layers_with_atlas, process_tile_layers_with_atlas, HeadlessMap,
         ProcessedLayers,
     },
-    io::tile_sources::MAX_OVERZOOMING,
+    io::tile_sources::{tile_in_bounds, MAX_OVERZOOMING},
     projection::ProjectionType,
     raster::AvailableRasterLayerData,
     style::{
@@ -150,6 +150,13 @@ fn load_vector_blocking(
         .ok_or_else(|| format!("Vector source '{name}' has no tile template"))?;
     let mut processed = ProcessedLayers::default();
     for coords in source_tile_coords(target_coords, 0, source.minzoom, source.maxzoom) {
+        // Tiles outside the source's declared bounds are never requested.
+        if source
+            .bounds
+            .is_some_and(|bounds| !tile_in_bounds(coords, bounds))
+        {
+            continue;
+        }
         let path = local_tile_path(template, coords)?;
         // Missing fixture tiles behave as 404 responses and keep pyramid fallback eligible.
         let data = match std::fs::read(&path) {

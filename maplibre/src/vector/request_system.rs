@@ -9,7 +9,9 @@ use crate::{
         apc::{AsyncProcedureCall, Input},
         tile_backpressure::vector_request_budget,
         tile_retry::{self, RequestKind},
-        tile_sources::{clamp_to_max_zoom, source_max_zoom, source_min_zoom, TileKind},
+        tile_sources::{
+            clamp_to_max_zoom, outside_source_bounds, source_max_zoom, source_min_zoom, TileKind,
+        },
     },
     kernel::Kernel,
     render::{
@@ -98,7 +100,10 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                     continue;
                 }
                 let coords = clamp_to_max_zoom(coords, max_zoom);
-                if coords.build_quad_key().is_none() || !requested.insert(coords) {
+                if coords.build_quad_key().is_none()
+                    || outside_source_bounds(style, TileKind::Vector, coords)
+                    || !requested.insert(coords)
+                {
                     continue;
                 }
 

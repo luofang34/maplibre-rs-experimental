@@ -2,7 +2,7 @@
 
 use super::{
     clamp_to_max_zoom, covering_zoom, missing_tile_fallback, source_layer_groups, source_max_zoom,
-    source_tiles_for, TileKind,
+    source_tiles_for, tile_in_bounds, TileKind,
 };
 use crate::{
     coords::{WorldTileCoords, ZoomLevel},
@@ -262,4 +262,18 @@ fn geojson_is_never_tiled_deeper_than_the_unclipped_limit() {
         "layers": [{"id": "geo", "type": "fill", "source": "shapes"}]}))
     .expect("style");
     assert_eq!(source_max_zoom(&style, TileKind::Vector), Some(18));
+}
+
+#[test]
+fn tiles_beyond_a_sources_bounds_are_outside_them() {
+    let tile = |x, y, z| WorldTileCoords::from((x, y, ZoomLevel::from(z)));
+    // The north-east quarter of the world: longitude 0 to 180, latitude 0 to 85.
+    let bounds = (0.0, 0.0, 180.0, 85.0);
+    assert!(tile_in_bounds(tile(1, 0, 1), bounds));
+    assert!(!tile_in_bounds(tile(0, 0, 1), bounds), "the western half");
+    assert!(!tile_in_bounds(tile(1, 1, 1), bounds), "the southern half");
+    assert!(
+        tile_in_bounds(tile(0, 0, 0), bounds),
+        "the world tile meets any bounds"
+    );
 }

@@ -81,8 +81,9 @@ async fn render_fixture(test_dir: &Path) -> Result<(f64, f64), String> {
 fn load_style_blocking(test_dir: &Path) -> Result<(Style, TestMeta), String> {
     let text = std::fs::read_to_string(test_dir.join("style.json"))
         .map_err(|error| format!("Cannot read style.json: {error}"))?;
-    let value =
+    let mut value: serde_json::Value =
         serde_json::from_str(&text).map_err(|error| format!("Cannot parse style.json: {error}"))?;
+    crate::tilesets::resolve_sources(&mut value)?;
     let meta = parse_test_meta(&value);
     let mut style: Style = serde_json::from_value(value.clone())
         .map_err(|error| format!("Cannot deserialize Style: {error}"))?;

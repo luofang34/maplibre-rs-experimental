@@ -33,6 +33,7 @@ mod report;
 mod source_loading;
 mod source_tiles;
 mod symbol_assets;
+mod tilesets;
 
 use paths::{collect_tests, workspace_templates_dir, workspace_tests_dir};
 use render_case::run_test_inner;

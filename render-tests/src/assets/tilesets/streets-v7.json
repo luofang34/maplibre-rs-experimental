@@ -1,0 +1,5 @@
+{
+    "tiles": [
+      "local://tiles/streets-v7/{z}-{x}-{y}.mvt"
+    ]
+}
