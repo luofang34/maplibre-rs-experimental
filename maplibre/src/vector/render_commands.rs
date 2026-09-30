@@ -190,6 +190,34 @@ impl<P: PhaseItem> RenderCommand<P> for SetCircleTilePipeline {
     }
 }
 
+/// Binds the pattern pipeline and the pattern of the item's layer.
+pub struct SetPatternTilePipeline;
+impl RenderCommand<LayerItem> for SetPatternTilePipeline {
+    fn render<'w>(
+        world: &'w World,
+        item: &LayerItem,
+        pass: &mut wgpu::RenderPass<'w>,
+    ) -> RenderCommandResult {
+        let (Some(patterns), Some(Initialized(projection_resources))) = (
+            world.resources.get::<super::pattern::PatternResources>(),
+            world.resources.get::<Eventually<ProjectionGpuResources>>(),
+        ) else {
+            return RenderCommandResult::Failure;
+        };
+        let Some(binding) = patterns.binding(&item.style_layer) else {
+            return RenderCommandResult::Failure;
+        };
+        pass.set_pipeline(patterns.pipeline());
+        pass.set_bind_group(
+            0,
+            projection_resources.bind_group_for(item.projection_binding()),
+            &[],
+        );
+        pass.set_bind_group(1, binding, &[]);
+        RenderCommandResult::Success
+    }
+}
+
 /// Binds one pass of the extrusion pipeline and the item's view or flat projection.
 pub struct SetExtrusionPipeline<const PASS: u8>;
 /// The pass an extrusion draw belongs to.
@@ -231,6 +259,8 @@ impl<P: PhaseItem, const PASS: u8> RenderCommand<P> for SetExtrusionPipeline<PAS
     }
 }
 
+/// Binds and draws a polygon bucket filled with a repeating image.
+pub type DrawPatternTiles = (SetPatternTilePipeline, DrawVectorTile);
 /// Draws an extruded bucket into depth only.
 pub type DrawExtrusionDepth = (
     SetExtrusionPipeline<{ extrusion_pass::DEPTH }>,

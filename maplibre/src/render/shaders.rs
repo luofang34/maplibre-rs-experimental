@@ -19,7 +19,7 @@ pub use background::{
     GlobeBackgroundShader, SkyLayerMetadata, SkyShader,
 };
 pub use circle::CircleShader;
-pub use fill::FillShader;
+pub use fill::{FillPatternShader, FillShader};
 pub use fill_extrusion::{ExtrusionPass, FillExtrusionShader};
 pub use heatmap::{HeatmapCompositeShader, HeatmapDensityShader, DENSITY_FORMAT};
 pub use line::LineShader;

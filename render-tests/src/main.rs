@@ -27,6 +27,7 @@ mod comparison;
 mod image_sources;
 mod operations;
 mod paths;
+mod pattern_images;
 mod render_case;
 mod report;
 mod source_loading;

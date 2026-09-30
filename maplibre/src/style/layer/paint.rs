@@ -57,6 +57,11 @@ pub struct FillPaint {
     )]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fill_opacity: Option<StyleProperty<f32>>,
+    /// Name of the image the polygon repeats instead of a colour, as written: a string, a
+    /// zoom expression or a feature expression.
+    #[serde(rename = "fill-pattern", default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fill_pattern: Option<serde_json::Value>,
     /// The style's `fill-antialias`, kept as written so validation can tell a request the
     /// renderer honours from one it cannot.
     #[serde(rename = "fill-antialias", default)]

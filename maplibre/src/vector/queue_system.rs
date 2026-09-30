@@ -15,7 +15,7 @@ use crate::{
     vector::{
         render_commands::{
             DrawCircleTiles, DrawExtrusionClear, DrawExtrusionColor, DrawExtrusionDepth,
-            DrawLineTiles, DrawVectorTiles,
+            DrawLineTiles, DrawPatternTiles, DrawVectorTiles,
         },
         VectorBufferPool,
     },
@@ -51,6 +51,16 @@ pub fn queue_system(
         .as_ref()
         .is_some_and(|specification| specification.projection_type.uses_globe_rendering(zoom));
 
+    let pattern_layers: std::collections::HashSet<&str> = style
+        .layers
+        .iter()
+        .filter(|layer| {
+            layer.paint.as_ref().is_some_and(|paint| {
+                super::pattern::pattern_name(paint, view_state.style_zoom().value()).is_some()
+            })
+        })
+        .map(|layer| layer.id.as_str())
+        .collect();
     // Every tile's depth is drawn before any tile's colour, so an extrusion that crosses tiles
     // shows its nearest surface once instead of once per tile.
     let mut extrusion_colors = Vec::new();
@@ -122,6 +132,11 @@ pub fn queue_system(
                                     source_shape: source_shape.clone(),
                                 });
                                 Box::new(DrawState::<LayerItem, DrawExtrusionDepth>::new())
+                            }
+                            "fill"
+                                if pattern_layers.contains(layer_entry.style_layer.id.as_str()) =>
+                            {
+                                Box::new(DrawState::<LayerItem, DrawPatternTiles>::new())
                             }
                             _ => Box::new(DrawState::<LayerItem, DrawVectorTiles>::new()),
                         };

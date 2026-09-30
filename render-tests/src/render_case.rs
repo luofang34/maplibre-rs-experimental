@@ -89,6 +89,7 @@ fn load_style_blocking(test_dir: &Path) -> Result<(Style, TestMeta), String> {
     // The tiles are decoded from this copy of the style, so it carries the state's values too.
     style.resolve_global_state();
     crate::operations::apply(&mut style, &crate::operations::operations_of(&value))?;
+    crate::pattern_images::add_pattern_images(&mut style, meta.pixel_ratio)?;
     for (index, layer) in style.layers.iter_mut().enumerate() {
         layer.index = index as u32 + 1; // The depth clear is zero.
     }

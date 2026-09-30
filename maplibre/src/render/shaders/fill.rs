@@ -4,6 +4,37 @@ use super::{
 };
 use crate::render::resource::{FragmentState, VertexBufferLayout, VertexState};
 
+/// The fill shader with the fill replaced by a repeating image.
+pub struct FillPatternShader {
+    /// Format of the color attachment used by the render pipeline.
+    pub format: wgpu::TextureFormat,
+}
+
+impl Shader for FillPatternShader {
+    fn describe_vertex(&self) -> VertexState {
+        VertexState {
+            source: concat!(
+                include_str!("projection.vertex.wgsl"),
+                include_str!("fill_pattern.vertex.wgsl")
+            ),
+            ..FillShader {
+                format: self.format,
+            }
+            .describe_vertex()
+        }
+    }
+
+    fn describe_fragment(&self) -> FragmentState {
+        FragmentState {
+            source: include_str!("fill_pattern.fragment.wgsl"),
+            ..FillShader {
+                format: self.format,
+            }
+            .describe_fragment()
+        }
+    }
+}
+
 /// Polygon-fill shader with premultiplied-alpha output.
 pub struct FillShader {
     /// Format of the color attachment used by the render pipeline.

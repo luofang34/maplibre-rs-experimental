@@ -57,6 +57,10 @@ pub fn resource_system(
     else {
         return Err(SystemError::Dependencies);
     };
+    let missing_pattern = world
+        .resources
+        .get::<super::pattern::PatternResources>()
+        .is_none();
     let Some((
         buffer_pool,
         vector_pipeline,
@@ -92,6 +96,18 @@ pub fn resource_system(
         &dashes_layout,
     );
     setup.initialize_extrusion(extrusion_pipeline);
+    let pattern_pipeline = missing_pattern.then(|| setup.create_pattern());
+    if let Some(pipeline) = pattern_pipeline {
+        world
+            .resources
+            .insert(super::pattern::PatternResources::new(device, pipeline));
+    }
+    if let Some(patterns) = world
+        .resources
+        .get_mut::<super::pattern::PatternResources>()
+    {
+        patterns.update(device, queue, style, view_state.style_zoom().value());
+    }
     Ok(())
 }
 
@@ -139,6 +155,23 @@ impl PipelineSetup<'_> {
             }
         }
         descriptor.initialize_with_prefix_layouts(self.device, layouts)
+    }
+
+    fn create_pattern(&self) -> wgpu::RenderPipeline {
+        let pattern = self
+            .device
+            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("fill pattern layout"),
+                entries: &super::pattern::layout_entries(),
+            });
+        self.create(
+            "fill_pattern_pipeline",
+            &shaders::FillPatternShader {
+                format: self.format,
+            },
+            &[self.projection, &pattern],
+            false,
+        )
     }
 
     fn create_extrusion(&self, pass: shaders::ExtrusionPass) -> wgpu::RenderPipeline {
