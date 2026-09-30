@@ -71,6 +71,10 @@ async fn rendered(style: Style, points: &[(i32, i32, f64)]) -> Vec<u8> {
         crate::projection::ProjectionType::default(),
     )
     .expect("points");
+    render_processed(style, processed).await
+}
+
+async fn render_processed(style: Style, processed: ProcessedLayers) -> Vec<u8> {
     let (kernel, renderer) = create_headless_renderer(SIZE, SIZE, None)
         .await
         .expect("renderer");
@@ -374,5 +378,57 @@ async fn a_heatmap_composites_at_its_place_in_the_style_order() {
         [0, 0, 255],
         2,
         "a heatmap below opaque land is covered",
+    );
+}
+
+#[tokio::test]
+async fn a_geojson_source_draws_a_heatmap_like_a_vector_tile() {
+    let style = heatmap_style(serde_json::json!({
+        "heatmap-radius": 40, "heatmap-intensity": UNIT_INTENSITY
+    }));
+    let centre = style.center.expect("centre");
+    let layer = style
+        .layers
+        .iter()
+        .find(|layer| layer.id == "heat")
+        .expect("heatmap layer")
+        .clone();
+    let processed = crate::headless::map::process_geojson_layers(
+        &serde_json::json!({"type":"Feature","properties":{},
+            "geometry":{"type":"Point","coordinates":[centre[0], centre[1]]}}),
+        "points",
+        vec![layer],
+        target(),
+        crate::projection::ProjectionType::default(),
+    )
+    .expect("geojson layers");
+    let bytes = render_processed(style, processed).await;
+    assert_close(
+        pixel(&bytes, SIZE / 2, SIZE / 2),
+        over_white(ramp_at(1.0), 1.0),
+        4,
+        "a GeoJSON point at the centre",
+    );
+}
+
+#[tokio::test]
+async fn a_strong_point_keeps_its_kernel_tail_past_the_radius() {
+    // Eight units of strength leave a visible density 1.1 radii out; a quad cut at one radius
+    // would end there in a ring.
+    let paint = serde_json::json!({
+        "heatmap-radius": 40, "heatmap-intensity": 8.0 * UNIT_INTENSITY
+    });
+    let bytes = rendered(heatmap_style(paint), &[(CENTRE.0, CENTRE.1, 1.0)]).await;
+    let pixels = 44_u32;
+    let density = 8.0 * kernel((f64::from(pixels) + 0.5) / 40.0);
+    assert_close(
+        pixel(&bytes, SIZE / 2 + pixels, SIZE / 2),
+        over_white(ramp_at(density), 1.0),
+        10,
+        "1.1 radii from a strong point",
+    );
+    assert_ne!(
+        pixel(&bytes, SIZE / 2 + pixels, SIZE / 2),
+        [255, 255, 255, 255]
     );
 }

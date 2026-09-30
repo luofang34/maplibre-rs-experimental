@@ -308,7 +308,8 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
             LayerPaint::Fill(_)
             | LayerPaint::Line(_)
             | LayerPaint::Background(_)
-            | LayerPaint::Circle(_) => {
+            | LayerPaint::Circle(_)
+            | LayerPaint::Heatmap(_) => {
                 let zoom = u8::from(coords.z);
                 let granularity = match paint {
                     LayerPaint::Fill(_) => granularity_for_zoom(128, 2, zoom),
@@ -319,6 +320,8 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
                 let mut tessellator = match paint {
                     LayerPaint::Circle(circle) => ZeroTessellator::<IndexDataType>::default()
                         .with_circles(CircleOptions::for_paint(circle, f64::from(zoom))),
+                    LayerPaint::Heatmap(heatmap) => ZeroTessellator::<IndexDataType>::default()
+                        .with_circles(CircleOptions::for_heatmap(heatmap, f64::from(zoom))),
                     _ if use_globe_geometry => {
                         let last_tile =
                             i64::from(crate::coords::ZOOM_BOUNDS[usize::from(zoom)]) - 1;

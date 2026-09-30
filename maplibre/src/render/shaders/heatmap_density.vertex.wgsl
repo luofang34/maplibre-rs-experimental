@@ -11,8 +11,10 @@ struct VertexOutput {
 
 // A 512-pixel view tile spans the 4096-unit tile grid.
 const TILE_UNITS_PER_PIXEL: f32 = 8.0;
-// The kernel reaches three standard deviations, so one radius covers the whole bell.
-const KERNEL_EXTENT: f32 = 1.0;
+// The Gaussian's normalisation, 1 / sqrt(2 * pi).
+const GAUSS_COEF: f32 = 0.3989422804014327;
+// Density below this is not drawn: an eighth of the smallest step of an 8-bit ramp lookup.
+const ZERO: f32 = 1.0 / 255.0 / 16.0;
 
 @vertex
 fn main(
@@ -36,9 +38,14 @@ fn main(
     );
     let weight = normal.y;
     let intensity = circle_params.x;
+    let strength = weight * intensity;
+    // Extend the quad until the kernel falls below ZERO, so a strong point has no visible edge.
+    let peak = max(strength * GAUSS_COEF, ZERO * 1.0001);
+    let scale = sqrt(-2.0 * log(ZERO / peak)) / 3.0;
+    let reach = extrude * scale;
     let transform = mat4x4<f32>(translate1, translate2, translate3, translate4);
     // The radius is in pixels on the map plane, so pitch shrinks far points as it does circles.
-    let corner_position = position + extrude * radius * KERNEL_EXTENT * TILE_UNITS_PER_PIXEL * zoom_factor;
+    let corner_position = position + reach * radius * TILE_UNITS_PER_PIXEL * zoom_factor;
     let projected = project_tile_position(
         vec3<f32>(corner_position, 0.0),
         transform,
@@ -46,5 +53,5 @@ fn main(
     );
     var clip = projected.clip_position;
     clip.z = 0.0;
-    return VertexOutput(clip, extrude, weight * intensity, projected.horizon_distance);
+    return VertexOutput(clip, reach, strength, projected.horizon_distance);
 }
