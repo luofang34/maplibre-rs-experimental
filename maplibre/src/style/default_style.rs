@@ -25,6 +25,7 @@ impl Default for Style {
             bearing: Some(0.0),
             pitch: Some(0.0),
             roll: Some(0.0),
+            vertical_field_of_view: None,
             projection: None,
             light: None,
             sky: None,

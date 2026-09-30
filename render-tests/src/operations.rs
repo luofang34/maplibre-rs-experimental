@@ -161,6 +161,9 @@ pub(super) fn apply(style: &mut Style, operations: &[Value]) -> Result<(), Strin
             ("setBearing", _) => number(items, 1).map(|bearing| style.bearing = Some(bearing)),
             ("setPitch", _) => number(items, 1).map(|pitch| style.pitch = Some(pitch)),
             ("setRoll", _) => number(items, 1).map(|roll| style.roll = Some(roll)),
+            ("setVerticalFieldOfView", _) => {
+                number(items, 1).map(|degrees| style.vertical_field_of_view = Some(degrees))
+            }
             ("addImage", Some(name)) => add_image(style, name, &value(2), &value(3)),
             ("removeImage", Some(name)) => {
                 style.remove_image(name);
@@ -171,6 +174,17 @@ pub(super) fn apply(style: &mut Style, operations: &[Value]) -> Result<(), Strin
                     serde_json::from_value(value(1))
                         .map_err(|error| format!("setLight: invalid light: {error}"))?,
                 );
+                Ok(())
+            }
+            ("setTerrain", _) => {
+                // Called without an argument, it removes the terrain.
+                style.terrain = match value(1) {
+                    Value::Null => None,
+                    terrain => Some(
+                        serde_json::from_value(terrain)
+                            .map_err(|error| format!("setTerrain: invalid terrain: {error}"))?,
+                    ),
+                };
                 Ok(())
             }
             ("setFeatureState", _) => feature_state(style, &value(1), &value(2), false),

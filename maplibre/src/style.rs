@@ -62,6 +62,10 @@ pub struct Style {
     pub pitch: Option<f64>,
     /// Roll of the view about its axis in degrees, as the GL JS `roll` map option.
     pub roll: Option<f64>,
+    /// Full vertical field of view in degrees, as the GL JS `verticalFieldOfView` map option;
+    /// omission keeps the renderer's default of about 36.87 degrees.
+    #[serde(default, rename = "vertical-field-of-view")]
+    pub vertical_field_of_view: Option<f64>,
     /// Map projection and its parameters; omission uses the renderer's default projection.
     #[serde(default)]
     pub projection: Option<ProjectionSpecification>,

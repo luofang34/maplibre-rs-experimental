@@ -515,7 +515,11 @@ fn initial_view_state(window_size: crate::window::PhysicalSize, style: &Style) -
         center,
         zoom,
         cgmath::Deg(style.pitch.unwrap_or_default()),
-        cgmath::Rad(0.6435011087932844),
+        style
+            .vertical_field_of_view
+            .map_or(cgmath::Rad(0.6435011087932844), |degrees| {
+                cgmath::Rad::from(cgmath::Deg(degrees))
+            }),
     );
     view_state
         .camera_mut()
