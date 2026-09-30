@@ -1,6 +1,7 @@
 //! Collects symbol anchors and feature properties for font and sprite layout.
 use std::sync::Arc;
 
+use geo_types::{Geometry, Point};
 use geozero::{
     geo_types::GeoWriter, ColumnValue, FeatureProcessor, GeomProcessor, PropertyProcessor,
 };
@@ -20,6 +21,7 @@ use crate::{
 };
 
 mod layout;
+mod line_anchors;
 mod text_layout;
 use layout::CollectedSymbol;
 type GeoResult<T> = geozero::error::Result<T>;
@@ -157,33 +159,151 @@ impl PropertyProcessor for TextTessellator {
     }
 }
 
+/// How a symbol follows a line, from `symbol-placement`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LinePlacement {
+    /// Repeated along the line.
+    Line,
+    /// Once, at the middle of the line.
+    Center,
+}
+
+fn line_placement(paint: &SymbolPaint) -> Option<LinePlacement> {
+    match paint
+        .properties
+        .get("symbol-placement")
+        .and_then(|value| value.as_str())
+    {
+        Some("line") => Some(LinePlacement::Line),
+        Some("line-center") => Some(LinePlacement::Center),
+        _ => None,
+    }
+}
+
+/// Whether the layer places its text along lines.
+pub(super) fn is_line_placed(paint: &SymbolPaint) -> bool {
+    line_placement(paint).is_some()
+}
+
+/// Tile units in one pixel of a tile drawn at its own zoom: 4096 units span 512 pixels.
+const TILE_UNITS_PER_PIXEL: f64 = 8.0;
+
+/// A segment direction folded into upright text, `-90..=90` degrees.
+fn upright(angle: f64) -> f32 {
+    let mut angle = angle;
+    if angle > std::f64::consts::FRAC_PI_2 {
+        angle -= std::f64::consts::PI;
+    }
+    if angle < -std::f64::consts::FRAC_PI_2 {
+        angle += std::f64::consts::PI;
+    }
+    angle as f32
+}
+
+impl TextTessellator {
+    fn collect(&mut self, anchor: Point<f64>, angle: f32, id: Option<u64>) {
+        self.collected.push(CollectedSymbol {
+            id,
+            anchor,
+            angle,
+            properties: self.properties.clone(),
+        });
+    }
+
+    /// Anchors along the lines of a feature, as many as the spacing allows.
+    fn collect_along_lines(
+        &mut self,
+        lines: Vec<Vec<[f64; 2]>>,
+        placement: LinePlacement,
+        id: Option<u64>,
+    ) {
+        let probe = CollectedSymbol {
+            id,
+            anchor: Point::new(0.0, 0.0),
+            angle: 0.0,
+            properties: self.properties.clone(),
+        };
+        let text_size = self
+            .paint
+            .text_size
+            .as_ref()
+            .and_then(|value| value.evaluate_at_zoom(self.zoom))
+            .map_or(16.0, f64::from);
+        let label_pixels = f64::from(text_layout::unwrapped_width(
+            &self.paint,
+            &probe,
+            self.zoom,
+            &self.atlas,
+        )) * text_size
+            / 24.0;
+        let number = |name, fallback| {
+            self.paint
+                .number(name, &self.properties, self.zoom, fallback)
+        };
+        let params = line_anchors::AnchorSpacing {
+            spacing: f64::from(number("symbol-spacing", 250.0)) * TILE_UNITS_PER_PIXEL,
+            max_angle: f64::from(number("text-max-angle", 45.0)).to_radians(),
+            label_length: label_pixels * TILE_UNITS_PER_PIXEL,
+            text_size: text_size * TILE_UNITS_PER_PIXEL,
+        };
+        let anchors: Vec<line_anchors::LineAnchor> = match placement {
+            LinePlacement::Line => line_anchors::clip_to_tile(&lines)
+                .iter()
+                .flat_map(|line| line_anchors::line_anchors(line, params))
+                .collect(),
+            LinePlacement::Center => lines
+                .iter()
+                .filter(|line| line.len() > 1)
+                .filter_map(|line| line_anchors::center_anchor(line, params))
+                .collect(),
+        };
+        for anchor in anchors {
+            self.collect(
+                Point::new(anchor.point[0], anchor.point[1]),
+                upright(anchor.angle),
+                id,
+            );
+        }
+    }
+}
+
 impl FeatureProcessor for TextTessellator {
     fn feature_end(&mut self, idx: u64) -> GeoResult<()> {
         if let Some(geometry) = self.geo_writer.take_geometry() {
-            if let Some(anchor) = layout::anchor(&geometry) {
-                let on_line = self
-                    .paint
-                    .properties
-                    .get("symbol-placement")
-                    .and_then(|value| value.as_str())
-                    .is_some_and(|value| value == "line" || value == "line-center");
-                let angle = if on_line {
-                    layout::line_angle(&geometry, anchor)
-                } else {
-                    0.0
-                };
-                self.collected.push(CollectedSymbol {
-                    id: usize::try_from(idx)
-                        .ok()
-                        .and_then(|idx| self.source_ids.get(idx).copied())
-                        .flatten(),
-                    anchor,
-                    angle,
-                    properties: std::mem::take(&mut self.properties),
-                });
+            let id = usize::try_from(idx)
+                .ok()
+                .and_then(|idx| self.source_ids.get(idx).copied())
+                .flatten();
+            let lines: Option<Vec<Vec<[f64; 2]>>> = match &geometry {
+                Geometry::LineString(line) => {
+                    Some(vec![line.coords().map(|c| [c.x, c.y]).collect()])
+                }
+                Geometry::MultiLineString(lines) => Some(
+                    lines
+                        .iter()
+                        .map(|line| line.coords().map(|c| [c.x, c.y]).collect())
+                        .collect(),
+                ),
+                _ => None,
+            };
+            match (line_placement(&self.paint), lines) {
+                (Some(placement), Some(lines)) => self.collect_along_lines(lines, placement, id),
+                (placement, _) => {
+                    if let Some(anchor) = layout::anchor(&geometry) {
+                        let angle = if placement.is_some() {
+                            layout::line_angle(&geometry, anchor)
+                        } else {
+                            0.0
+                        };
+                        self.collect(anchor, angle, id);
+                    }
+                }
             }
         }
         self.properties.clear();
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests;

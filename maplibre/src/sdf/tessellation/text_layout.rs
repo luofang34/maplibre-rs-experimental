@@ -30,7 +30,12 @@ pub(super) fn append(
     let spacing = paint.number("text-letter-spacing", &symbol.properties, zoom, 0.0) * 24.0;
     let width = |text: &str| line_width(text, glyphs, spacing);
     let max_width = paint.number("text-max-width", &symbol.properties, zoom, 10.0) * 24.0;
-    let lines = wrap(&text, max_width, glyphs, spacing);
+    // Text along a line runs the whole line: it is never wrapped.
+    let lines = if super::is_line_placed(paint) {
+        vec![text.clone()]
+    } else {
+        wrap(&text, max_width, glyphs, spacing)
+    };
     let line_height = paint.number("text-line-height", &symbol.properties, zoom, 1.2) * 24.0;
     let max_line = lines.iter().map(|line| width(line)).fold(0.0, f32::max);
     let height = 24.0 + lines.len().saturating_sub(1) as f32 * line_height;
@@ -75,6 +80,27 @@ pub(super) fn append(
             pen += glyph.metrics[2] + spacing;
         }
     }
+}
+
+/// Width in layout pixels of the label on one line, without wrapping; zero without glyphs.
+pub(super) fn unwrapped_width(
+    paint: &SymbolPaint,
+    symbol: &CollectedSymbol,
+    zoom: f64,
+    atlas: &SymbolAtlas,
+) -> f32 {
+    let Some(text) = paint.label(&symbol.properties, zoom) else {
+        return 0.0;
+    };
+    let Some(glyphs) = atlas
+        .glyphs
+        .get(&paint.font_stack())
+        .or_else(|| atlas.glyphs.values().next())
+    else {
+        return 0.0;
+    };
+    let spacing = paint.number("text-letter-spacing", &symbol.properties, zoom, 0.0) * 24.0;
+    line_width(&text, glyphs, spacing)
 }
 
 fn line_width(text: &str, glyphs: &HashMap<u32, AtlasEntry>, spacing: f32) -> f32 {
