@@ -49,6 +49,11 @@ pub struct FillPaint {
     )]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fill_opacity: Option<StyleProperty<f32>>,
+    /// The style's `fill-antialias`, kept as written so validation can tell a request the
+    /// renderer honours from one it cannot.
+    #[serde(rename = "fill-antialias", default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fill_antialias: Option<serde_json::Value>,
     /// Translation in screen pixels before conversion to tile units.
     #[serde(rename = "fill-translate", default)]
     pub fill_translate: Option<[f32; 2]>,
