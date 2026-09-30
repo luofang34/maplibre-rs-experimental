@@ -380,6 +380,14 @@ impl HeadlessMap {
         self.map_context.view_state.set_edge_insets(padding);
     }
 
+    /// Puts the camera's center at `meters` above sea level and holds it there, so terrain under
+    /// the center does not move it.
+    pub fn pin_center_elevation(&mut self, meters: f64) {
+        let view_state = &mut self.map_context.view_state;
+        view_state.set_center_elevation(meters);
+        view_state.freeze_center_elevation();
+    }
+
     /// Raises the pitch limit and re-applies the style's pitch, which the default limit clamps.
     pub fn set_max_pitch(&mut self, max_pitch: cgmath::Deg<f64>) {
         let context = &mut self.map_context;

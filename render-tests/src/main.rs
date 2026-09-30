@@ -23,10 +23,10 @@ use std::{
 use maplibre::platform::run_multithreaded;
 use serde_json::Value;
 
+mod camera_options;
 mod comparison;
 mod image_sources;
 mod operations;
-mod padding;
 mod paths;
 mod pattern_images;
 mod render_case;
@@ -57,7 +57,9 @@ struct TestMeta {
     /// Whether the padding edges and padded center are drawn over the frame.
     show_padding: bool,
     /// Camera padding left by the fixture's operations.
-    padding: padding::Padding,
+    padding: camera_options::Padding,
+    /// Elevation the fixture pins the camera's center at.
+    center_elevation: Option<f64>,
 }
 
 impl Default for TestMeta {
@@ -70,7 +72,8 @@ impl Default for TestMeta {
             max_pitch: None,
             pixel_ratio: 1.0,
             show_padding: false,
-            padding: padding::Padding::default(),
+            padding: camera_options::Padding::default(),
+            center_elevation: None,
         }
     }
 }
@@ -109,7 +112,8 @@ fn parse_test_meta(style_value: &Value) -> TestMeta {
             .get("showPadding")
             .and_then(Value::as_bool)
             .unwrap_or(false),
-        padding: padding::Padding::default(),
+        padding: camera_options::Padding::default(),
+        center_elevation: None,
     }
 }
 
