@@ -413,6 +413,10 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
                 }
 
                 let mut inner = projecting.into_inner();
+                // A bare geometry never reaches feature_end, so its symbol is committed here.
+                if inner.features.is_empty() {
+                    let _ = inner.feature_end(0);
+                }
                 inner.finish();
 
                 let synthetic_layer = geozero::mvt::tile::Layer {
