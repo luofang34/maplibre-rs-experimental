@@ -85,7 +85,7 @@ pub struct Style {
     /// only so a style can still be built with struct update syntax.
     #[doc(hidden)]
     #[serde(skip)]
-    pub state_templates: HashMap<String, StyleLayer>,
+    pub state_templates: HashMap<String, state::StateTemplate>,
 }
 
 mod default_style;

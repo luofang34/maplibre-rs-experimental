@@ -186,3 +186,97 @@ fn array_values_are_wrapped_so_they_stay_data() {
         Some(json!(["in", ["get", "kind"], ["literal", ["a", "b"]]]))
     );
 }
+
+fn ids_and_types(style: &Style) -> Vec<(String, String)> {
+    style
+        .layers
+        .iter()
+        .map(|layer| (layer.id.clone(), layer.type_.clone()))
+        .collect()
+}
+
+#[test]
+fn layers_that_share_an_id_are_left_alone_instead_of_clobbering_each_other() {
+    let mut style: Style = serde_json::from_value(json!({"version": 8, "sources": {},
+        "layers": [
+            {"id": "twin", "type": "line", "paint": {"line-color": ["global-state", "c"]}},
+            {"id": "twin", "type": "fill", "paint": {"fill-color": "#0000ff"}}]}))
+    .expect("style");
+    style.resolve_global_state();
+    assert!(style.set_global_state("c", json!("green")).is_empty());
+    assert_eq!(
+        ids_and_types(&style),
+        [
+            ("twin".into(), "line".into()),
+            ("twin".into(), "fill".into())
+        ],
+        "neither layer changed type"
+    );
+}
+
+#[test]
+fn a_replaced_or_edited_layer_is_not_resurrected_from_its_old_template() {
+    let mut style = style();
+    style.set_global_state("color", json!("cyan"));
+    let replacement: crate::style::layer::StyleLayer = serde_json::from_value(
+        json!({"id": "tinted", "type": "fill", "paint": {"fill-color": "#123456"}}),
+    )
+    .expect("layer");
+    let index = style.layers[0].index;
+    style.layers[0] = replacement;
+    style.layers[0].index = index;
+    assert!(style.set_global_state("color", json!("yellow")).is_empty());
+    assert_eq!(
+        fill_color(&style, "tinted"),
+        Some(Color::from_rgba8(0x12, 0x34, 0x56, 255))
+    );
+    assert!(
+        !style.state_templates.contains_key("tinted"),
+        "a layer that no longer reads state is released"
+    );
+}
+
+#[test]
+fn a_layer_that_reads_state_again_after_an_edit_is_tracked_from_the_new_declaration() {
+    let mut style = style();
+    let edited: crate::style::layer::StyleLayer = serde_json::from_value(json!({"id": "plain",
+        "type": "fill", "paint": {"fill-color": ["global-state", "color"]}}))
+    .expect("layer");
+    let index = style.layers[1].index;
+    style.layers[1] = edited;
+    style.layers[1].index = index;
+    assert_eq!(style.resolve_global_state(), ["plain"]);
+    assert_eq!(
+        fill_color(&style, "plain"),
+        Some(Color::from_rgba8(255, 0, 255, 255))
+    );
+    assert_eq!(
+        style.set_global_state("color", json!("cyan")),
+        ["tinted", "plain"]
+    );
+}
+
+#[test]
+fn templates_of_removed_layers_are_dropped() {
+    let mut style = style();
+    assert!(style.state_templates.contains_key("tinted"));
+    style.layers.retain(|layer| layer.id != "tinted");
+    style.resolve_global_state();
+    assert!(!style.state_templates.contains_key("tinted"));
+}
+
+#[test]
+fn a_value_of_the_wrong_type_falls_back_to_the_layers_default() {
+    let mut style = style();
+    style.set_global_state("color", json!(5));
+    assert_eq!(
+        fill_color(&style, "tinted"),
+        None,
+        "a number is not a color"
+    );
+    style.set_global_state("color", json!("cyan"));
+    assert_eq!(
+        fill_color(&style, "tinted"),
+        Some(Color::from_rgba8(0, 255, 255, 255))
+    );
+}

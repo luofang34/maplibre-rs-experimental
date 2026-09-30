@@ -492,3 +492,32 @@ async fn global_state_changes_only_the_layers_that_read_it_and_only_when_they_do
         "null restores the declared default"
     );
 }
+
+#[tokio::test]
+async fn a_background_layer_reading_state_does_not_refetch_vector_tiles() {
+    let mut test = Fixture::new(Kind::Vector, false).await;
+    let mut style = state_style();
+    style.state.insert(
+        "paper".into(),
+        crate::style::state::StateDeclaration {
+            default: Some(serde_json::json!("#ffffff")),
+        },
+    );
+    let background: crate::style::layer::StyleLayer = serde_json::from_value(serde_json::json!(
+        {"id": "paper", "type": "background",
+         "paint": {"background-color": ["global-state", "paper"]}}))
+    .expect("background layer");
+    style.layers.push(background);
+    style.resolve_global_state();
+    test.context.style = style;
+    test.frame(0);
+    test.receive().await;
+    test.context
+        .set_global_state("paper", serde_json::json!("#000000"));
+    test.frame(1);
+    assert_eq!(
+        test.kernel.apc().pending(),
+        0,
+        "a background is drawn from the style each frame, not from tiles"
+    );
+}
