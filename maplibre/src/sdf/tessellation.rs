@@ -23,6 +23,7 @@ use crate::{
 mod icon_quads;
 mod layout;
 mod line_anchors;
+mod line_break;
 mod line_merge;
 mod text_layout;
 mod text_offset;

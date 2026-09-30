@@ -14,8 +14,10 @@ use super::{
 
 mod compound;
 mod curves;
+mod format;
 mod operators;
 
+pub use format::{FIELD, FORMATTED_START, SECTION};
 pub use operators::is_expression;
 
 /// Why an expression could not be parsed, with the path of the offending element.
@@ -232,6 +234,10 @@ impl Parser {
                 }
                 Ok(Expression::Literal(Value::from_json(&args[0])))
             }
+            "format" => match format::lower(args) {
+                Ok(lowered) => self.parse(&lowered, expected),
+                Err(message) => Err(self.error(message)),
+            },
             "zoom" => self.nullary(args, Expression::Global(Global::Zoom)),
             "elevation" => self.nullary(args, Expression::Global(Global::Elevation)),
             "heatmap-density" => self.nullary(args, Expression::Global(Global::HeatmapDensity)),

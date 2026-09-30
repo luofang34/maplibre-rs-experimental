@@ -29,6 +29,8 @@ pub struct SymbolFeature {
     text_sets: Vec<[usize; 2]>,
     #[serde(default)]
     anchor_sets: Vec<u8>,
+    #[serde(default)]
+    text_colors: Vec<([usize; 2], [f32; 4])>,
 }
 
 /// The line a label follows, in a form that survives the worker boundary.
@@ -68,6 +70,11 @@ impl From<&Feature> for SymbolFeature {
                 .map(|set| [set.start, set.end])
                 .collect(),
             anchor_sets: feature.anchor_sets.clone(),
+            text_colors: feature
+                .text_colors
+                .iter()
+                .map(|(range, color)| ([range.start, range.end], *color))
+                .collect(),
             line: feature.line.as_ref().map(|line| LineLabelWire {
                 polyline: line.polyline.to_vec(),
                 anchor_distance: line.anchor_distance,
@@ -101,6 +108,11 @@ impl From<SymbolFeature> for Feature {
             anchor_shifts: feature.anchor_shifts,
             text_sets: feature.text_sets.iter().map(|set| set[0]..set[1]).collect(),
             anchor_sets: feature.anchor_sets,
+            text_colors: feature
+                .text_colors
+                .into_iter()
+                .map(|(range, color)| (range[0]..range[1], color))
+                .collect(),
             line: feature.line.map(|line| crate::sdf::LineLabel {
                 polyline: line.polyline.into(),
                 anchor_distance: line.anchor_distance,

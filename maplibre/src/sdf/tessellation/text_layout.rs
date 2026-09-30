@@ -1,10 +1,11 @@
 //! Line wrapping and glyph metrics around a symbol anchor.
-use std::collections::HashMap;
+use std::{collections::HashMap, ops::Range};
 
 use lyon::tessellation::VertexBuffers;
 
 use super::{
     layout::{anchor_fractions, quad, CollectedSymbol},
+    line_break::wrap,
     text_offset::{anchored_offset, variable_anchors},
 };
 use crate::{
@@ -13,10 +14,32 @@ use crate::{
     style::{expression::FeatureProperties, layer::SymbolPaint},
 };
 
+/// Index range of glyphs a `format` section colours, with the colour.
+pub(super) type TextColorRun = (Range<usize>, [f32; 4]);
+
+/// What one character of a label is drawn with.
+#[derive(Clone)]
+struct CharStyle<'a> {
+    scale: f32,
+    color: Option<[f32; 4]>,
+    glyphs: &'a HashMap<u32, AtlasEntry>,
+}
+
+impl CharStyle<'_> {
+    fn advance(&self, c: char) -> f32 {
+        self.glyphs
+            .get(&(c as u32))
+            .map_or(0.0, |glyph| glyph.metrics[2] * self.scale)
+    }
+}
+
 /// The wrapped lines of a label and where they sit around the anchor, in layout pixels.
 struct Block<'a> {
-    glyphs: &'a HashMap<u32, AtlasEntry>,
-    lines: Vec<String>,
+    chars: Vec<char>,
+    styles: Vec<CharStyle<'a>>,
+    lines: Vec<Range<usize>>,
+    /// The largest scale of any character in each line, which sets the line's height.
+    line_scales: Vec<f32>,
     spacing: f32,
     line_height: f32,
     max_line: f32,
@@ -33,23 +56,32 @@ fn block<'a>(
     atlas: &'a SymbolAtlas,
 ) -> Option<Block<'a>> {
     let text = paint.label(&symbol.properties, zoom)?;
-    let glyphs = atlas
-        .glyphs
-        .get(&paint.font_stack())
-        .or_else(|| atlas.glyphs.values().next())?;
+    let chars: Vec<char> = text.chars().collect();
+    let styles = char_styles(paint, symbol, zoom, atlas, chars.len())?;
     let spacing = paint.number("text-letter-spacing", &symbol.properties, zoom, 0.0) * 24.0;
     let max_width = paint.number("text-max-width", &symbol.properties, zoom, 10.0) * 24.0;
     // Text along a line runs the whole line: it is never wrapped.
     let lines = if super::is_line_placed(paint) {
-        vec![text]
+        std::iter::once(0..chars.len()).collect()
     } else {
-        wrap(&text, max_width, glyphs, spacing)
+        wrap(&chars, max_width, &|index| {
+            styles[index].advance(chars[index]) + spacing
+        })
     };
     let line_height = paint.number("text-line-height", &symbol.properties, zoom, 1.2) * 24.0;
     let max_line = lines
         .iter()
-        .map(|line| line_width(line, glyphs, spacing))
+        .map(|line| line_width(&chars, &styles, line.clone(), spacing))
         .fold(0.0, f32::max);
+    let line_scales: Vec<f32> = lines
+        .iter()
+        .map(|line| {
+            styles[line.clone()]
+                .iter()
+                .map(|style| style.scale)
+                .fold(1.0, f32::max)
+        })
+        .collect();
     let anchors = variable_anchors(paint);
     let anchor = anchors.first().cloned().unwrap_or_else(|| {
         paint
@@ -67,10 +99,12 @@ fn block<'a>(
         _ => 0.5,
     };
     Some(Block {
-        glyphs,
         // Every line takes a full line height, with the glyphs centred in it.
-        height: lines.len() as f32 * line_height,
+        height: line_scales.iter().sum::<f32>() * line_height,
+        chars,
+        styles,
         lines,
+        line_scales,
         spacing,
         line_height,
         max_line,
@@ -78,6 +112,53 @@ fn block<'a>(
         justify,
         offset: anchored_offset(paint, &anchors, &anchor, (&symbol.properties, zoom)),
     })
+}
+
+/// The glyphs a character is drawn from: its section's font where the atlas holds it, else
+/// the layer's.
+fn glyphs_for<'a>(
+    atlas: &'a SymbolAtlas,
+    paint: &SymbolPaint,
+    font: Option<&str>,
+) -> Option<&'a HashMap<u32, AtlasEntry>> {
+    font.and_then(|font| atlas.glyphs.get(font))
+        .or_else(|| atlas.glyphs.get(&paint.font_stack()))
+        .or_else(|| atlas.glyphs.values().next())
+}
+
+/// The style of each of the `count` characters of the label: its section's scale, colour and
+/// font, or the layer's own for text that is all one section.
+fn char_styles<'a>(
+    paint: &SymbolPaint,
+    symbol: &CollectedSymbol,
+    zoom: f64,
+    atlas: &'a SymbolAtlas,
+    count: usize,
+) -> Option<Vec<CharStyle<'a>>> {
+    let default = glyphs_for(atlas, paint, None)?;
+    let sections = paint.label_sections(&symbol.properties, zoom);
+    let mut styles = Vec::with_capacity(count);
+    for section in &sections {
+        let glyphs = glyphs_for(atlas, paint, section.font.as_deref()).unwrap_or(default);
+        styles.extend(std::iter::repeat_n(
+            CharStyle {
+                scale: section.scale.unwrap_or(1.0).max(0.0),
+                color: section.color,
+                glyphs,
+            },
+            section.length,
+        ));
+    }
+    styles.resize(
+        count,
+        CharStyle {
+            scale: 1.0,
+            color: None,
+            glyphs: default,
+        },
+    );
+    styles.truncate(count);
+    Some(styles)
 }
 
 /// How far the label moves, in layout pixels, when it takes each of its variable anchors
@@ -137,6 +218,8 @@ pub(super) struct Laid {
     pub sets: Vec<std::ops::Range<usize>>,
     /// Which of `sets` each variable anchor shows.
     pub anchor_sets: Vec<u8>,
+    /// Index ranges of glyphs whose section gives them a colour of their own.
+    pub colors: Vec<TextColorRun>,
 }
 
 /// The justifications the label lays out, one per distinct value its anchors call for under
@@ -178,6 +261,7 @@ pub(super) fn append(
         centres: Vec::new(),
         sets: Vec::new(),
         anchor_sets: Vec::new(),
+        colors: Vec::new(),
     };
     let Some(block) = block(symbol, paint, zoom, atlas) else {
         return laid;
@@ -185,8 +269,9 @@ pub(super) fn append(
     let (values, anchor_sets) = justifications(paint, block.justify, &symbol.properties, zoom);
     for justify in &values {
         let start = buffer.indices.len();
-        let centres = glyph_pass(symbol, paint, zoom, &block, *justify, buffer);
+        let (centres, colors) = glyph_pass(symbol, paint, zoom, &block, *justify, buffer);
         laid.centres.extend(centres);
+        laid.colors.extend(colors);
         laid.sets.push(start..buffer.indices.len());
     }
     if values.len() > 1 {
@@ -204,10 +289,12 @@ fn glyph_pass(
     block: &Block<'_>,
     justify: f32,
     buffer: &mut VertexBuffers<ShaderSymbolVertex, u32>,
-) -> Vec<f32> {
+) -> (Vec<f32>, Vec<TextColorRun>) {
     let Block {
-        glyphs,
+        chars,
+        styles,
         lines,
+        line_scales,
         spacing,
         line_height,
         max_line,
@@ -218,7 +305,7 @@ fn glyph_pass(
     } = block;
     let (spacing, line_height, max_line, height) = (*spacing, *line_height, *max_line, *height);
     let mut centres = Vec::new();
-    let width = |text: &str| line_width(text, glyphs, spacing);
+    let mut colors: Vec<TextColorRun> = Vec::new();
     let half_leading = (line_height - 24.0) / 2.0;
     let elevation = if paint.uses_shared_height() {
         0.0
@@ -231,29 +318,49 @@ fn glyph_pass(
     let rotation = paint
         .number("text-rotate", &symbol.properties, zoom, 0.0)
         .to_radians();
-    for (row, line) in lines.iter().enumerate() {
-        let baseline =
-            -height * fractions[1] + half_leading - 5.0 + row as f32 * line_height + offset[1];
-        let mut pen = -max_line * fractions[0] + (max_line - width(line)) * justify + offset[0];
-        for c in line.chars() {
-            let Some(glyph) = glyphs.get(&(c as u32)) else {
+    let mut line_top = 0.0;
+    for (line, largest) in lines.iter().zip(line_scales) {
+        let baseline = -height * fractions[1] + half_leading * largest - 5.0 + line_top + offset[1];
+        line_top += line_height * largest;
+        let width = line_width(chars, styles, line.clone(), spacing);
+        let mut pen = -max_line * fractions[0] + (max_line - width) * justify + offset[0];
+        for index in line.clone() {
+            let style = &styles[index];
+            let Some(glyph) = style.glyphs.get(&(chars[index] as u32)) else {
                 continue;
             };
+            let scale = style.scale;
             if glyph.rect[2] > 0 && glyph.rect[3] > 0 {
-                let (x, y) = (pen + glyph.metrics[0], baseline - glyph.metrics[1]);
+                // Smaller glyphs of a line sit on its bottom, where the largest one does.
+                let x = pen + glyph.metrics[0] * scale;
+                let y = baseline - glyph.metrics[1] * scale + (largest - scale) * 24.0;
+                let first_index = buffer.indices.len();
                 quad(
                     buffer,
                     anchor,
-                    [x, y, x + glyph.rect[2] as f32, y + glyph.rect[3] as f32],
+                    [
+                        x,
+                        y,
+                        x + glyph.rect[2] as f32 * scale,
+                        y + glyph.rect[3] as f32 * scale,
+                    ],
                     glyph,
                     elevation,
                     symbol.angle,
                     rotation,
                 );
+                if let Some(color) = style.color {
+                    match colors.last_mut() {
+                        Some((range, last)) if *last == color && range.end == first_index => {
+                            range.end = buffer.indices.len();
+                        }
+                        _ => colors.push((first_index..buffer.indices.len(), color)),
+                    }
+                }
                 if symbol.line.is_some() && follows_line {
                     // A glyph along a line is placed by its centre: the vertex carries where
                     // that centre lies in the straight layout, in 1/32 pixel.
-                    let centre = pen + glyph.metrics[2] / 2.0;
+                    let centre = pen + glyph.metrics[2] * scale / 2.0;
                     let first = buffer.vertices.len() - 4;
                     for vertex in &mut buffer.vertices[first..] {
                         vertex.a_pixeloffset[0] = (centre * 32.0).round() as i32;
@@ -261,10 +368,10 @@ fn glyph_pass(
                     centres.push(centre);
                 }
             }
-            pen += glyph.metrics[2] + spacing;
+            pen += glyph.metrics[2] * scale + spacing;
         }
     }
-    centres
+    (centres, colors)
 }
 
 /// Width in layout pixels of the label on one line, without wrapping; zero without glyphs.
@@ -277,182 +384,26 @@ pub(super) fn unwrapped_width(
     let Some(text) = paint.label(&symbol.properties, zoom) else {
         return 0.0;
     };
-    let Some(glyphs) = atlas
-        .glyphs
-        .get(&paint.font_stack())
-        .or_else(|| atlas.glyphs.values().next())
-    else {
+    let chars: Vec<char> = text.chars().collect();
+    let Some(styles) = char_styles(paint, symbol, zoom, atlas, chars.len()) else {
         return 0.0;
     };
     let spacing = paint.number("text-letter-spacing", &symbol.properties, zoom, 0.0) * 24.0;
-    line_width(&text, glyphs, spacing)
+    line_width(&chars, &styles, 0..chars.len(), spacing)
 }
 
 /// Width of a line of glyphs without the spacing after the last one. Tight letter spacing
 /// makes it negative, which justifies the line as GL JS does; a line without glyphs has none.
-fn line_width(text: &str, glyphs: &HashMap<u32, AtlasEntry>, spacing: f32) -> f32 {
-    let advances: Vec<f32> = text
-        .chars()
-        .filter_map(|c| glyphs.get(&(c as u32)))
-        .map(|glyph| glyph.metrics[2] + spacing)
+fn line_width(chars: &[char], styles: &[CharStyle<'_>], line: Range<usize>, spacing: f32) -> f32 {
+    let advances: Vec<f32> = line
+        .filter(|index| styles[*index].glyphs.contains_key(&(chars[*index] as u32)))
+        .map(|index| styles[index].advance(chars[index]) + spacing)
         .collect();
     if advances.is_empty() {
         0.0
     } else {
         advances.iter().sum::<f32>() - spacing
     }
-}
-
-/// A place the text may break, with the least raggedness of any way to reach it.
-struct Break {
-    index: usize,
-    x: f32,
-    prior: Option<usize>,
-    badness: f32,
-}
-
-fn is_whitespace(c: char) -> bool {
-    c.is_whitespace()
-}
-
-/// Characters after which a line may break.
-fn breakable(c: char) -> bool {
-    matches!(
-        c,
-        '\n' | ' '
-            | '&'
-            | ')'
-            | '+'
-            | '-'
-            | '/'
-            | '\u{ad}'
-            | '\u{b7}'
-            | '\u{200b}'
-            | '\u{2010}'
-            | '\u{2013}'
-            | '\u{2027}'
-    )
-}
-
-/// Ideographic characters, which may break between any two of them.
-fn allows_ideographic_breaking(c: char) -> bool {
-    matches!(
-        u32::from(c),
-        0x2E80..=0x2FDF | 0x3000..=0x30FF | 0x3100..=0x9FFF | 0xA000..=0xA4CF | 0xF900..=0xFAFF
-            | 0xFE30..=0xFE4F | 0xFF00..=0xFFEF | 0x20000..=0x2FA1F
-    )
-}
-
-fn break_penalty(c: char, next: char, penalizable_ideographic_break: bool) -> f32 {
-    let mut penalty = 0.0;
-    if c == '\n' {
-        penalty -= 10_000.0;
-    }
-    if penalizable_ideographic_break {
-        penalty += 150.0;
-    }
-    if c == '(' || c == '\u{ff08}' {
-        penalty += 50.0;
-    }
-    if next == ')' || next == '\u{ff09}' {
-        penalty += 50.0;
-    }
-    penalty
-}
-
-fn badness(line_width: f32, target: f32, penalty: f32, last: bool) -> f32 {
-    let raggedness = (line_width - target).powi(2);
-    if last {
-        // Final lines shorter than the average are favoured over longer ones.
-        if line_width < target {
-            raggedness / 2.0
-        } else {
-            raggedness * 2.0
-        }
-    } else {
-        raggedness + penalty.abs() * penalty
-    }
-}
-
-fn evaluate_break(
-    (index, x): (usize, f32),
-    (target, penalty, last): (f32, f32, bool),
-    potential: &[Break],
-) -> Break {
-    let mut prior = None;
-    let mut best = badness(x, target, penalty, last);
-    for (at, candidate) in potential.iter().enumerate() {
-        let total = badness(x - candidate.x, target, penalty, last) + candidate.badness;
-        if total <= best {
-            prior = Some(at);
-            best = total;
-        }
-    }
-    Break {
-        index,
-        x,
-        prior,
-        badness: best,
-    }
-}
-
-/// Breaks the text into lines the way GL JS does: at the places that leave the lines closest
-/// to the same width, with the width a line may run to only steering how many lines there are.
-fn wrap(
-    text: &str,
-    max_width: f32,
-    glyphs: &HashMap<u32, AtlasEntry>,
-    spacing: f32,
-) -> Vec<String> {
-    let chars: Vec<char> = text.chars().collect();
-    let advance = |c: char| {
-        glyphs
-            .get(&(c as u32))
-            .map_or(0.0, |glyph| glyph.metrics[2] + spacing)
-    };
-    let total: f32 = chars.iter().map(|c| advance(*c)).sum();
-    let target = total / (total / max_width).ceil().max(1.0);
-    let has_zero_width_space = chars.contains(&'\u{200b}');
-    let mut potential: Vec<Break> = Vec::new();
-    let mut x = 0.0;
-    for (index, c) in chars.iter().copied().enumerate() {
-        if !is_whitespace(c) {
-            x += advance(c);
-        }
-        let Some(next) = chars.get(index + 1).copied() else {
-            continue;
-        };
-        let ideographic = allows_ideographic_breaking(c);
-        if breakable(c) || ideographic || (index + 2 < chars.len() && next == '(') {
-            let penalty = break_penalty(c, next, ideographic && has_zero_width_space);
-            let found = evaluate_break((index + 1, x), (target, penalty, false), &potential);
-            potential.push(found);
-        }
-    }
-    let last = evaluate_break((chars.len(), x), (target, 0.0, true), &potential);
-    let mut ends = vec![last.index];
-    let mut prior = last.prior;
-    while let Some(at) = prior {
-        ends.push(potential[at].index);
-        prior = potential[at].prior;
-    }
-    ends.reverse();
-    let mut lines = Vec::new();
-    let mut start = 0;
-    for end in ends {
-        lines.push(
-            chars[start..end]
-                .iter()
-                .collect::<String>()
-                .trim()
-                .to_owned(),
-        );
-        start = end;
-    }
-    if start < chars.len() {
-        lines.push(chars[start..].iter().collect::<String>().trim().to_owned());
-    }
-    lines
 }
 
 #[cfg(test)]

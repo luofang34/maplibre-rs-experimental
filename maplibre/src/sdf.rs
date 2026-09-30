@@ -153,6 +153,8 @@ pub struct Feature {
     pub text_sets: Vec<std::ops::Range<usize>>,
     /// The entry of `text_sets` each variable anchor shows.
     pub anchor_sets: Vec<u8>,
+    /// Index ranges of glyphs that a `format` section colours, with the colour.
+    pub text_colors: Vec<(std::ops::Range<usize>, [f32; 4])>,
 }
 
 /// Coordinates measured on the canonical tile grid.

@@ -70,3 +70,30 @@ fn component_height_aliases_remain_usable_without_shared_properties() {
     assert!(!paint.height_follows_ground("text"));
     assert!(paint.height_follows_ground("icon"));
 }
+
+#[test]
+fn a_format_expression_gives_its_sections_their_own_size_and_colour() {
+    let paint: SymbolPaint = serde_json::from_value(serde_json::json!({
+        "text-field": ["format", "Big", {"font-scale": 1.5, "text-color": "#ff0000"}, "\n", {}, ["get", "name"], {}]
+    }))
+    .expect("paint");
+    let properties = FeatureProperties::from([("name".to_string(), "small".into())]);
+    let sections = paint.label_sections(&properties, 0.0);
+    assert_eq!(paint.label(&properties, 0.0).as_deref(), Some("Big\nsmall"));
+    assert_eq!(sections.len(), 3);
+    assert_eq!(sections[0].scale, Some(1.5));
+    assert_eq!(sections[0].color.map(|color| color[0]), Some(1.0));
+    assert_eq!(sections[2].length, "small".chars().count());
+}
+
+#[test]
+fn a_format_inside_a_match_keeps_its_sections() {
+    let paint: SymbolPaint = serde_json::from_value(serde_json::json!({
+        "text-field": ["match", ["get", "case"], "false", "error", "one",
+            ["format", "Green", {"text-color": "green"}, "Two", {}], "default"]
+    }))
+    .expect("paint");
+    let properties = FeatureProperties::from([("case".to_string(), "one".into())]);
+    assert_eq!(paint.label(&properties, 0.0).as_deref(), Some("GreenTwo"));
+    assert_eq!(paint.label_sections(&properties, 0.0).len(), 2);
+}

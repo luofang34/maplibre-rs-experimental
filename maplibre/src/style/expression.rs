@@ -23,7 +23,10 @@ pub use legacy::{
     convert_filter, convert_function, convert_token_string, is_expression_filter,
     LegacyPropertySpec, PropertyKind,
 };
-pub use parse::{is_expression, ParseError, FEATURE_STATE_PREFIX};
+pub use parse::{
+    is_expression, ParseError, FEATURE_STATE_PREFIX, FIELD as FORMAT_FIELD, FORMATTED_START,
+    SECTION as FORMAT_SECTION,
+};
 use parse::{Annotation, Parser};
 pub use value::{js_number, Color, Type, Value};
 

@@ -109,6 +109,7 @@ fn layer(count: usize, atlas: Arc<SymbolAtlas>, text: &str) -> SymbolLayerData {
             anchor_shifts: Vec::new(),
             text_sets: Vec::new(),
             anchor_sets: Vec::new(),
+            text_colors: Vec::new(),
             str: text.into(),
             line: None,
         }],

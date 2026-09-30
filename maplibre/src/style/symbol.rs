@@ -92,6 +92,50 @@ impl SymbolPaint {
     }
 }
 
+impl SymbolPaint {
+    /// The sections of the label's text, if `text-field` is a `format` expression: the runs of
+    /// `label`'s characters with their own size, colour or font; empty for one plain section.
+    pub fn label_sections(
+        &self,
+        properties: &FeatureProperties,
+        zoom: f64,
+    ) -> Vec<crate::style::property::TextSection> {
+        let Some(field) = self
+            .text_field
+            .as_ref()
+            .and_then(|field| field.evaluate_for(properties, zoom))
+        else {
+            return Vec::new();
+        };
+        if field.1.is_empty() {
+            return Vec::new();
+        }
+        let Some(label) = self.label(properties, zoom) else {
+            return Vec::new();
+        };
+        // A case change that alters the length of the text leaves no way to tell which
+        // characters belong to which section.
+        if label.chars().count() != field.0.trim().chars().count() {
+            return Vec::new();
+        }
+        let leading = field.0.chars().take_while(|c| c.is_whitespace()).count();
+        let mut skip = leading;
+        let mut remaining = label.chars().count();
+        let mut sections = Vec::new();
+        for mut section in field.1 {
+            let dropped = skip.min(section.length);
+            skip -= dropped;
+            section.length -= dropped;
+            section.length = section.length.min(remaining);
+            remaining -= section.length;
+            if section.length > 0 {
+                sections.push(section);
+            }
+        }
+        sections
+    }
+}
+
 #[cfg(test)]
 #[path = "symbol/tests.rs"]
 mod tests;

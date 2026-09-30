@@ -138,9 +138,79 @@ impl PropertyValue for String {
     }
 }
 
-/// The text of a symbol: a `{token}` template, a literal, or an expression producing text.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
-pub struct TextField(pub String);
+/// A run of a formatted text that has its own size, colour or font.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TextSection {
+    /// How many characters the run holds.
+    pub length: usize,
+    /// Factor on the layout size; `None` leaves the size unchanged.
+    pub scale: Option<f32>,
+    /// Straight RGBA text colour that replaces the layer's.
+    pub color: Option<[f32; 4]>,
+    /// Font stack, comma-joined, that replaces the layer's.
+    pub font: Option<String>,
+}
+
+/// The text of a symbol: a `{token}` template, a literal, or an expression producing text, in
+/// one section or, for a `format` expression, several.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TextField(pub String, pub Vec<TextSection>);
+
+/// A text field is written as its plain text; sections exist only in the expression that makes
+/// them.
+impl Serialize for TextField {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.0)
+    }
+}
+
+impl TextField {
+    /// A text that is all one section.
+    pub fn plain(text: impl Into<String>) -> Self {
+        Self(text.into(), Vec::new())
+    }
+
+    /// Reads the text a `format` expression lowered to, or a plain string as it is.
+    fn decode(text: &str) -> Self {
+        use crate::style::expression::{FORMATTED_START, FORMAT_FIELD, FORMAT_SECTION};
+
+        let Some(body) = text.strip_prefix(FORMATTED_START) else {
+            return Self::plain(text);
+        };
+        let mut plain = String::new();
+        let mut sections = Vec::new();
+        for section in body
+            .split(FORMAT_SECTION)
+            .filter(|section| !section.is_empty())
+        {
+            let mut fields = section.splitn(4, FORMAT_FIELD);
+            let (scale, color, font, content) = (
+                fields.next().unwrap_or_default(),
+                fields.next().unwrap_or_default(),
+                fields.next().unwrap_or_default(),
+                fields.next().unwrap_or_default(),
+            );
+            plain.push_str(content);
+            sections.push(TextSection {
+                length: content.chars().count(),
+                scale: scale.parse().ok(),
+                color: csscolorparser::parse(color)
+                    .ok()
+                    .map(|color| color.to_array().map(|channel| channel as f32)),
+                font: serde_json::from_str::<Vec<String>>(font)
+                    .ok()
+                    .filter(|fonts| !fonts.is_empty())
+                    .map(|fonts| fonts.join(",")),
+            });
+        }
+        if sections.iter().all(|section| {
+            section.scale.is_none() && section.color.is_none() && section.font.is_none()
+        }) {
+            return Self::plain(plain);
+        }
+        Self(plain, sections)
+    }
+}
 
 impl PropertyValue for TextField {
     fn spec() -> LegacyPropertySpec {
@@ -153,7 +223,7 @@ impl PropertyValue for TextField {
     }
 
     fn from_value(value: &Value) -> Option<Self> {
-        value.as_str().map(|text| Self(text.to_string()))
+        value.as_str().map(Self::decode)
     }
 }
 

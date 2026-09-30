@@ -136,7 +136,16 @@ pub(super) fn append(
         &symbol.properties,
         zoom,
     );
-    let parts = crate::sdf::placement_geometry::measure(&mut buffer.vertices[first_vertex..]);
+    let mut parts = crate::sdf::placement_geometry::measure(&mut buffer.vertices[first_vertex..]);
+    // Text collides by the box of its lines, not by the bitmaps of its glyphs, which reach
+    // a few pixels beyond it.
+    if let (Some(text_part), None) = (&mut parts[0], &symbol.line) {
+        if let Some([left, top, right, bottom]) =
+            super::text_layout::extent(symbol, paint, zoom, atlas)
+        {
+            text_part.bounds = [left, top, right, bottom].map(f64::from);
+        }
+    }
     features.push(Feature {
         parts,
         data: crate::sdf::SymbolFeatureData {
@@ -150,6 +159,7 @@ pub(super) fn append(
         anchor_shifts: super::text_layout::variable_shifts(symbol, paint, zoom, atlas),
         text_sets: laid.sets,
         anchor_sets: laid.anchor_sets,
+        text_colors: laid.colors,
         str: text,
         line: symbol
             .line

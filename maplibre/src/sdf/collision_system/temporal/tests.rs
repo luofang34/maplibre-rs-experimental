@@ -28,6 +28,7 @@ fn feature(anchor: f32) -> Feature {
         anchor_shifts: Vec::new(),
         text_sets: Vec::new(),
         anchor_sets: Vec::new(),
+        text_colors: Vec::new(),
         str: "Innsbruck".into(),
         line: None,
     }

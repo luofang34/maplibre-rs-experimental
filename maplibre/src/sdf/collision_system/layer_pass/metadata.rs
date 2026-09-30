@@ -58,7 +58,16 @@ pub(super) fn write_feature_metadata(
                 elevation: ground,
                 // A text vertex without a glyph pose carries its anchor shift here.
                 pose: [shifts[kind][0], shifts[kind][1], 0.0, 0.0],
-                color: styles[kind][0],
+                // A `format` section may give its glyphs a colour of their own.
+                color: if kind == 0 {
+                    feature
+                        .text_colors
+                        .iter()
+                        .find(|(range, _)| range.contains(&index))
+                        .map_or(styles[0][0], |(_, color)| *color)
+                } else {
+                    styles[kind][0]
+                },
                 halo: styles[kind][1],
                 params: styles[kind][2],
             };
