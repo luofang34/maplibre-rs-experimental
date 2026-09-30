@@ -39,7 +39,9 @@ pub(super) fn append(
     };
     let line_height = paint.number("text-line-height", &symbol.properties, zoom, 1.2) * 24.0;
     let max_line = lines.iter().map(|line| width(line)).fold(0.0, f32::max);
-    let height = 24.0 + lines.len().saturating_sub(1) as f32 * line_height;
+    // Every line takes a full line height, with the glyphs centred in it.
+    let height = lines.len() as f32 * line_height;
+    let half_leading = (line_height - 24.0) / 2.0;
     let fractions = anchor_fractions(
         &paint
             .text("text-anchor", &symbol.properties, zoom)
@@ -62,7 +64,8 @@ pub(super) fn append(
     };
     let follows_line = crate::sdf::paint::text_follows_line(paint, zoom);
     for (row, line) in lines.iter().enumerate() {
-        let baseline = -height * fractions[1] - 5.0 + row as f32 * line_height + offset[1];
+        let baseline =
+            -height * fractions[1] + half_leading - 5.0 + row as f32 * line_height + offset[1];
         let mut pen = -max_line * fractions[0] + (max_line - width(line)) * justify + offset[0];
         for c in line.chars() {
             let Some(glyph) = glyphs.get(&(c as u32)) else {

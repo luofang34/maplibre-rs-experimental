@@ -51,3 +51,54 @@ fn letter_spacing_is_between_glyphs_and_does_not_shift_centered_text() {
     );
     assert!(((right - left) as f32 / 32.0 - 22.4).abs() < 0.07);
 }
+
+fn label_top(anchor: &str, field: &str) -> i32 {
+    let paint: SymbolPaint = serde_json::from_value(serde_json::json!({
+        "text-field": field, "text-font": ["test"], "text-max-width": 0.5, "text-anchor": anchor
+    }))
+    .expect("paint");
+    let atlas = SymbolAtlas {
+        glyphs: [(
+            "test".into(),
+            [(
+                'A' as u32,
+                AtlasEntry {
+                    rect: [0, 0, 10, 18],
+                    metrics: [0., -9., 10., 1.],
+                    kind: 0,
+                },
+            )]
+            .into(),
+        )]
+        .into(),
+        ..Default::default()
+    };
+    let symbol = CollectedSymbol {
+        id: None,
+        line: None,
+        anchor: geo_types::Point::new(100., 100.),
+        properties: Default::default(),
+        angle: 0.,
+    };
+    let mut buffer = VertexBuffers::new();
+    append(&symbol, &paint, 12., &atlas, &mut buffer);
+    buffer
+        .vertices
+        .iter()
+        .map(|v| v.a_pos_offset[3])
+        .min()
+        .expect("top")
+}
+
+#[test]
+fn every_line_takes_a_full_line_height_when_anchoring_a_block() {
+    // "A A" wraps into two lines at a one-em width; each line is 1.2 ems of 24 pixels tall.
+    let block = 2.0 * 1.2 * 24.0;
+    let shift = (label_top("top", "A A") - label_top("bottom", "A A")) as f32 / 32.0;
+    assert!(
+        (shift - block).abs() < 0.1,
+        "a top-anchored block hangs {shift} px below a bottom-anchored one, not {block}"
+    );
+    let one = (label_top("top", "A") - label_top("bottom", "A")) as f32 / 32.0;
+    assert!((one - 1.2 * 24.0).abs() < 0.1, "{one}");
+}

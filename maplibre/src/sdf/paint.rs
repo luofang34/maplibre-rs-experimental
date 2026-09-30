@@ -35,7 +35,7 @@ impl SymbolUniforms {
         Self {
             text_color: color(paint, "text-color", zoom, [0.0, 0.0, 0.0, 1.0]),
             halo_color: color(paint, "text-halo-color", zoom, [0.0; 4]),
-            icon_color: color(paint, "icon-color", zoom, [1.0; 4]),
+            icon_color: color(paint, "icon-color", zoom, [0.0, 0.0, 0.0, 1.0]),
             icon_halo_color: color(paint, "icon-halo-color", zoom, [0.0; 4]),
             text: [
                 paint
@@ -121,4 +121,16 @@ fn keep_upright(paint: &SymbolPaint, prefix: &str, fallback: bool) -> f32 {
             .and_then(|v| v.as_bool())
             .unwrap_or(fallback),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sdf_icons_default_to_black_and_text_to_black_like_the_specification() {
+        let uniforms = SymbolUniforms::new(&SymbolPaint::default(), 12.0, [1, 1]);
+        assert_eq!(uniforms.icon_color, [0.0, 0.0, 0.0, 1.0]);
+        assert_eq!(uniforms.text_color, [0.0, 0.0, 0.0, 1.0]);
+    }
 }
