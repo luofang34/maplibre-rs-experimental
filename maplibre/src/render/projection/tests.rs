@@ -248,6 +248,12 @@ async fn projection_aware_tile_pipelines_compile() {
                 });
             }
         }
+        if raster {
+            descriptor
+                .layout
+                .get_or_insert_with(Vec::new)
+                .push(crate::raster::paint::layout());
+        }
         if glyph {
             descriptor
                 .layout

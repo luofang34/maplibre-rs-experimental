@@ -109,17 +109,22 @@ fn upload_image(
     };
     let (width, height) = image.dimensions();
 
-    let texture = raster_resources.create_texture(
-        None,
-        device,
-        // Raster style colors are sampled in the encoded color space, matching WebGL's
-        // default RGBA upload path. An sRGB texture view would decode the texels to linear
-        // values before writing them to the non-sRGB render target, making imagery too dark.
-        wgpu::TextureFormat::Rgba8Unorm,
-        width,
-        height,
-        wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-    );
+    // Raster style colors are sampled in the encoded color space, matching WebGL's default
+    // RGBA upload path. An sRGB texture view would decode the texels to linear values before
+    // writing them to the non-sRGB render target, making imagery too dark.
+    let mipmapped = border_sides.is_none();
+    let texture = if mipmapped {
+        raster_resources.create_imagery_texture(device, width, height)
+    } else {
+        raster_resources.create_texture(
+            None,
+            device,
+            wgpu::TextureFormat::Rgba8Unorm,
+            width,
+            height,
+            wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        )
+    };
 
     queue.write_texture(
         wgpu::TexelCopyTextureInfo {
@@ -137,6 +142,9 @@ fn upload_image(
         texture.size,
     );
 
+    if mipmapped {
+        raster_resources.generate_mipmaps(device, queue, &texture);
+    }
     raster_resources.bind_texture(device, &data.source, &data.coords, texture);
     if let Some(sides) = border_sides {
         raster_resources.set_border_sides(&data.source, data.coords, sides);

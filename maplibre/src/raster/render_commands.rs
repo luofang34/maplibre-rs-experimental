@@ -63,6 +63,27 @@ impl RenderCommand<LayerItem> for SetRasterViewBindGroup {
     }
 }
 
+/// Binds the layer's paint adjustments at group two.
+pub struct SetRasterPaintBindGroup;
+impl RenderCommand<LayerItem> for SetRasterPaintBindGroup {
+    fn render<'w>(
+        world: &'w World,
+        item: &LayerItem,
+        pass: &mut wgpu::RenderPass<'w>,
+    ) -> RenderCommandResult {
+        let Some(Initialized(raster_resources)) =
+            world.resources.get::<Eventually<RasterResources>>()
+        else {
+            return RenderCommandResult::Failure;
+        };
+        let Some(bind_group) = raster_resources.layer_paint(&item.style_layer) else {
+            return RenderCommandResult::Failure;
+        };
+        pass.set_bind_group(2, bind_group, &[]);
+        RenderCommandResult::Success
+    }
+}
+
 /// Draws a cached tile mesh with the item's stencil reference and current metadata range.
 pub struct DrawRasterTile;
 impl RenderCommand<LayerItem> for DrawRasterTile {
@@ -111,5 +132,6 @@ impl RenderCommand<LayerItem> for DrawRasterTile {
 pub type DrawRasterTiles = (
     SetRasterTilePipeline,
     SetRasterViewBindGroup,
+    SetRasterPaintBindGroup,
     DrawRasterTile,
 );

@@ -80,8 +80,8 @@ fn raster_adjustments_and_unknown_layer_types_are_reported() {
     for (kind, paint, path) in [
         (
             "raster",
-            serde_json::json!({"raster-opacity": 0.5}),
-            "paint.raster-opacity",
+            serde_json::json!({"raster-fade-duration": 300}),
+            "paint.raster-fade-duration",
         ),
         ("fill-extrusion", serde_json::json!({}), "fill-extrusion"),
     ] {

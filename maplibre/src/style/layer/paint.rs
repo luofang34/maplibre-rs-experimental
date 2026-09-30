@@ -130,49 +130,73 @@ pub enum RasterResampling {
 pub struct RasterPaint {
     /// Upper brightness mapping bound in 0..=1; the neutral value is 1.
     #[serde(rename = "raster-brightness-max")]
+    #[serde(
+        default,
+        deserialize_with = "StyleProperty::<f32>::deserialize_f32_or_none"
+    )]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub raster_brightness_max: Option<f32>,
+    pub raster_brightness_max: Option<StyleProperty<f32>>,
     /// Lower brightness mapping bound in 0..=1; the neutral value is 0.
     #[serde(rename = "raster-brightness-min")]
+    #[serde(
+        default,
+        deserialize_with = "StyleProperty::<f32>::deserialize_f32_or_none"
+    )]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub raster_brightness_min: Option<f32>,
+    pub raster_brightness_min: Option<StyleProperty<f32>>,
     /// Contrast adjustment in -1..=1; zero preserves the source contrast.
     #[serde(rename = "raster-contrast")]
+    #[serde(
+        default,
+        deserialize_with = "StyleProperty::<f32>::deserialize_f32_or_none"
+    )]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub raster_contrast: Option<f32>,
+    pub raster_contrast: Option<StyleProperty<f32>>,
     /// Requested tile fade duration in milliseconds; zero disables fading.
     #[serde(rename = "raster-fade-duration")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raster_fade_duration: Option<u32>,
     /// Requested hue rotation in degrees; zero preserves source colors.
     #[serde(rename = "raster-hue-rotate")]
+    #[serde(
+        default,
+        deserialize_with = "StyleProperty::<f32>::deserialize_f32_or_none"
+    )]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub raster_hue_rotate: Option<f32>,
+    pub raster_hue_rotate: Option<StyleProperty<f32>>,
     /// Layer alpha multiplier in 0..=1; one preserves source alpha.
     #[serde(rename = "raster-opacity")]
+    #[serde(
+        default,
+        deserialize_with = "StyleProperty::<f32>::deserialize_f32_or_none"
+    )]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub raster_opacity: Option<f32>,
+    pub raster_opacity: Option<StyleProperty<f32>>,
     /// Requested texture filter; omission and the renderer default use linear sampling.
     #[serde(rename = "raster-resampling")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raster_resampling: Option<RasterResampling>,
     /// Saturation adjustment in -1..=1; zero preserves source saturation.
     #[serde(rename = "raster-saturation")]
+    #[serde(
+        default,
+        deserialize_with = "StyleProperty::<f32>::deserialize_f32_or_none"
+    )]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub raster_saturation: Option<f32>,
+    pub raster_saturation: Option<StyleProperty<f32>>,
 }
 
 impl Default for RasterPaint {
     fn default() -> Self {
         RasterPaint {
-            raster_brightness_max: Some(1.0),
-            raster_brightness_min: Some(0.0),
-            raster_contrast: Some(0.0),
+            raster_brightness_max: Some(StyleProperty::Constant(1.0)),
+            raster_brightness_min: Some(StyleProperty::Constant(0.0)),
+            raster_contrast: Some(StyleProperty::Constant(0.0)),
             raster_fade_duration: Some(0),
-            raster_hue_rotate: Some(0.0),
-            raster_opacity: Some(1.0),
+            raster_hue_rotate: Some(StyleProperty::Constant(0.0)),
+            raster_opacity: Some(StyleProperty::Constant(1.0)),
             raster_resampling: Some(RasterResampling::Linear),
-            raster_saturation: Some(0.0),
+            raster_saturation: Some(StyleProperty::Constant(0.0)),
         }
     }
 }

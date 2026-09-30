@@ -133,31 +133,33 @@ impl LayerValidation<'_> {
     }
 
     fn raster(&mut self, p: &crate::style::layer::RasterPaint) {
+        self.property("paint.raster-opacity", p.raster_opacity.as_ref(), Zoom);
+        self.property(
+            "paint.raster-brightness-min",
+            p.raster_brightness_min.as_ref(),
+            Zoom,
+        );
+        self.property(
+            "paint.raster-brightness-max",
+            p.raster_brightness_max.as_ref(),
+            Zoom,
+        );
+        self.property("paint.raster-contrast", p.raster_contrast.as_ref(), Zoom);
+        self.property(
+            "paint.raster-hue-rotate",
+            p.raster_hue_rotate.as_ref(),
+            Zoom,
+        );
+        self.property(
+            "paint.raster-saturation",
+            p.raster_saturation.as_ref(),
+            Zoom,
+        );
+        // The adjustments are applied by the raster shader; fading and nearest sampling are not.
         let changed = [
-            (
-                "raster-brightness-max",
-                p.raster_brightness_max.is_some_and(|v| v != 1.0),
-            ),
-            (
-                "raster-brightness-min",
-                p.raster_brightness_min.is_some_and(|v| v != 0.0),
-            ),
-            (
-                "raster-contrast",
-                p.raster_contrast.is_some_and(|v| v != 0.0),
-            ),
             (
                 "raster-fade-duration",
                 p.raster_fade_duration.is_some_and(|v| v != 0),
-            ),
-            (
-                "raster-hue-rotate",
-                p.raster_hue_rotate.is_some_and(|v| v != 0.0),
-            ),
-            ("raster-opacity", p.raster_opacity.is_some_and(|v| v != 1.0)),
-            (
-                "raster-saturation",
-                p.raster_saturation.is_some_and(|v| v != 0.0),
             ),
             (
                 "raster-resampling",

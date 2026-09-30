@@ -2,8 +2,12 @@ use std::collections::{HashMap, HashSet};
 
 use crate::{
     coords::WorldTileCoords,
-    raster::RasterSourceId,
-    render::{resource::Texture, settings::Msaa, tile_view_pattern::HasTile},
+    raster::{paint::RasterUniforms, RasterSourceId},
+    render::{
+        resource::{MipmapGenerator, Texture},
+        settings::Msaa,
+        tile_view_pattern::HasTile,
+    },
     style::Style,
     tcs::world::World,
 };
@@ -12,6 +16,7 @@ use crate::{
 /// Raster imagery and DEM shading share storage without sharing source identities.
 pub struct RasterResources {
     sampler: wgpu::Sampler,
+    mipmaps: MipmapGenerator,
     msaa: Msaa,
     pipeline: wgpu::RenderPipeline,
     bound_textures: HashMap<RasterSourceId, HashMap<WorldTileCoords, (wgpu::BindGroup, u64)>>,
@@ -20,6 +25,8 @@ pub struct RasterResources {
     dem_sources: HashSet<RasterSourceId>,
     /// For each bordered texture, the sides whose border holds a real neighbour's samples.
     border_sides: HashMap<RasterSourceId, HashMap<WorldTileCoords, u16>>,
+    /// Uniform buffer and bind group of each raster layer's paint adjustments.
+    layer_paints: HashMap<String, (wgpu::Buffer, wgpu::BindGroup)>,
     /// Advances whenever a texture is bound, so cached renders of raster tiles can refresh.
     revision: u64,
 }
@@ -34,17 +41,20 @@ impl RasterResources {
             address_mode_w: wgpu::AddressMode::ClampToEdge,
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            // GL JS picks the nearest level for raster tiles rather than blending two.
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
             ..Default::default()
         });
         Self {
             sampler,
+            mipmaps: MipmapGenerator::new(device, wgpu::TextureFormat::Rgba8Unorm),
             msaa,
             pipeline,
             bound_textures: Default::default(),
             layer_sources: Default::default(),
             dem_sources: Default::default(),
             border_sides: Default::default(),
+            layer_paints: Default::default(),
             revision: 0,
         }
     }
@@ -66,6 +76,34 @@ impl RasterResources {
         usage: wgpu::TextureUsages,
     ) -> Texture {
         Texture::new(label, device, format, width, height, self.msaa, usage)
+    }
+
+    /// Allocates an imagery texture with a full mip chain, so tiles drawn smaller than their
+    /// pixels are minified as GL JS does. Fill level zero, then call [`Self::generate_mipmaps`].
+    pub fn create_imagery_texture(
+        &self,
+        device: &wgpu::Device,
+        width: u32,
+        height: u32,
+    ) -> Texture {
+        Texture::new_mipmapped(
+            None,
+            device,
+            wgpu::TextureFormat::Rgba8Unorm,
+            width,
+            height,
+            wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::RENDER_ATTACHMENT,
+        )
+    }
+
+    /// Fills the levels below the first from the level above.
+    pub fn generate_mipmaps(&self, device: &wgpu::Device, queue: &wgpu::Queue, texture: &Texture) {
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        self.mipmaps
+            .generate(device, &mut encoder, &texture.texture);
+        queue.submit([encoder.finish()]);
     }
 
     /// Borrows the current texture/sampler binding, or `None` before upload or after eviction.
@@ -222,6 +260,42 @@ impl RasterResources {
         coords: &WorldTileCoords,
     ) -> Option<&wgpu::BindGroup> {
         self.get_bound_texture(self.layer_source(layer)?, coords)
+    }
+
+    /// Writes a layer's paint uniforms, creating its buffer on first use.
+    pub fn write_layer_paint(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        layer_id: &str,
+        uniforms: &RasterUniforms,
+    ) {
+        if !self.layer_paints.contains_key(layer_id) {
+            let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Raster layer paint"),
+                size: std::mem::size_of::<RasterUniforms>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Raster layer paint"),
+                layout: &self.pipeline.get_bind_group_layout(2),
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: buffer.as_entire_binding(),
+                }],
+            });
+            self.layer_paints
+                .insert(layer_id.to_string(), (buffer, bind_group));
+        }
+        if let Some((buffer, _)) = self.layer_paints.get(layer_id) {
+            queue.write_buffer(buffer, 0, bytemuck::bytes_of(uniforms));
+        }
+    }
+
+    /// The paint bind group of a layer written this frame.
+    pub(crate) fn layer_paint(&self, layer_id: &str) -> Option<&wgpu::BindGroup> {
+        self.layer_paints.get(layer_id).map(|(_, group)| group)
     }
 
     /// Borrows the raster pipeline whose group-one layout defines the texture bindings.

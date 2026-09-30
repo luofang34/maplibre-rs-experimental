@@ -2,13 +2,15 @@
 
 use crate::{
     context::MapContext,
-    raster::{render_commands::DrawRasterTiles, resource::RasterResources},
+    raster::{paint::RasterUniforms, render_commands::DrawRasterTiles, resource::RasterResources},
     render::{
         eventually::{Eventually, Eventually::Initialized},
         render_commands::DrawMasks,
         render_phase::{DrawState, LayerItem, ProjectionBinding, RenderPhase, TileMaskItem},
         tile_view_pattern::WgpuTileViewPattern,
+        Renderer,
     },
+    style::layer::{LayerPaint, RasterPaint},
     tcs::{
         system::{SystemError, SystemResult},
         tiles::Tile,
@@ -20,17 +22,27 @@ pub fn queue_system(
         style,
         view_state,
         world,
+        renderer: Renderer { device, queue, .. },
         ..
     }: &mut MapContext,
 ) -> SystemResult {
     let Some((Initialized(tile_view_pattern), Initialized(raster_resources))) =
-        world.resources.query::<(
-            &Eventually<WgpuTileViewPattern>,
-            &Eventually<RasterResources>,
+        world.resources.query_mut::<(
+            &mut Eventually<WgpuTileViewPattern>,
+            &mut Eventually<RasterResources>,
         )>()
     else {
         return Err(SystemError::Dependencies);
     };
+    for layer in style.layers.iter().filter(|layer| layer.type_ == "raster") {
+        let uniforms = match &layer.paint {
+            Some(LayerPaint::Raster(paint)) => {
+                RasterUniforms::from_paint(paint, view_state.zoom().value())
+            }
+            _ => RasterUniforms::from_paint(&RasterPaint::default(), 0.0),
+        };
+        raster_resources.write_layer_paint(device, queue, &layer.id, &uniforms);
+    }
 
     let mut items = Vec::new();
     let uses_globe = style.projection.as_ref().is_some_and(|specification| {

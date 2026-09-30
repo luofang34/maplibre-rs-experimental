@@ -60,6 +60,11 @@ pub fn resource_system(
             state.stencil.front.pass_op = wgpu::StencilOperation::Invert;
             state.stencil.back.pass_op = wgpu::StencilOperation::Invert;
         }
+        // The raster flag gives group 1 the tile texture; the layer's paint follows.
+        descriptor
+            .layout
+            .get_or_insert_with(Vec::new)
+            .push(crate::raster::paint::layout());
         let pipeline = descriptor
             .initialize_with_prefix_layouts(device, &[projection_resources.bind_group_layout()]);
         RasterResources::new(Msaa { samples: 1 }, device, pipeline)

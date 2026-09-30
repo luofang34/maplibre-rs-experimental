@@ -27,6 +27,7 @@ use crate::{
 };
 
 mod dem_border;
+pub mod paint;
 pub(crate) mod populate_world_system;
 mod process_raster;
 mod queue_system;
