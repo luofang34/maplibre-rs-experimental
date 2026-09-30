@@ -126,6 +126,39 @@ pub(super) fn screen_boxes(
     Some(result)
 }
 
+/// The factor the text's pixel offsets grow by at the anchor: a viewport-aligned label nearer
+/// the camera than the view center is drawn larger, and its anchor shift with it.
+pub(super) fn text_perspective_scale(
+    layer: &SymbolLayerData,
+    feature: &Feature,
+    elevation: f32,
+    view: &ViewState,
+    projection: &ShaderProjectionData,
+    uniforms: &SymbolUniforms,
+) -> f64 {
+    let alignment = uniforms.text_layout;
+    if view.has_external_view() {
+        return 1.0;
+    }
+    let height = f64::from(elevation) * f64::from(alignment[3]);
+    let anchor = [
+        f64::from(feature.text_anchor.x),
+        f64::from(feature.text_anchor.y),
+    ];
+    let Some(clip) =
+        project(layer.coords, anchor, height, view, projection).filter(|clip| clip.w > 0.0)
+    else {
+        return 1.0;
+    };
+    let center = f64::from(projection.center_clip_w);
+    let ratio = if alignment[0] > 0.5 {
+        clip.w / center
+    } else {
+        center / clip.w
+    };
+    (0.5 + 0.5 * ratio).clamp(0.0, 4.0)
+}
+
 /// Where the glyphs of a line label go this frame.
 pub(super) enum LinePoses {
     /// The layer does not align its text to the map, so glyphs keep the straight layout.

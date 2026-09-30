@@ -103,8 +103,8 @@ impl System for CollisionSystem {
             (
                 std::cmp::Reverse(*index),
                 std::cmp::Reverse(u8::from(layer.coords.z)),
-                layer.coords.y,
                 layer.coords.x,
+                layer.coords.y,
             )
         });
         let projection = projection_data_for_view(style, view_state).map_err(|error| {
