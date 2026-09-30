@@ -16,6 +16,13 @@ pub(super) fn operations_of(style: &Value) -> Vec<Value> {
         .unwrap_or_default()
 }
 
+fn number(items: &[Value], index: usize) -> Result<f64, String> {
+    items
+        .get(index)
+        .and_then(Value::as_f64)
+        .ok_or_else(|| format!("{} needs a number", items.first().unwrap_or(&Value::Null)))
+}
+
 /// Applies every operation to `style`. An operation the mutation API has no counterpart for
 /// is an error, so its fixture is reported instead of compared against the wrong state.
 pub(super) fn apply(style: &mut Style, operations: &[Value]) -> Result<(), String> {
@@ -27,7 +34,34 @@ pub(super) fn apply(style: &mut Style, operations: &[Value]) -> Result<(), Strin
         let text = |index: usize| items.get(index).and_then(Value::as_str);
         let value = |index: usize| items.get(index).cloned().unwrap_or(Value::Null);
         let outcome = match (name, text(1)) {
-            ("wait", _) => Ok(()),
+            // Rendering is deterministic, so waiting for the map to settle changes nothing.
+            ("wait" | "idle" | "sleep", _) => Ok(()),
+            // Only the camera left by the last operation is drawn, so it becomes the style's.
+            ("setZoom", _) => number(items, 1).map(|zoom| style.zoom = Some(zoom)),
+            ("setBearing", _) => number(items, 1).map(|bearing| style.bearing = Some(bearing)),
+            ("setPitch", _) => number(items, 1).map(|pitch| style.pitch = Some(pitch)),
+            ("setRoll", _) => number(items, 1).map(|roll| style.roll = Some(roll)),
+            ("setLayerZoomRange", Some(layer)) => {
+                let (minzoom, maxzoom) = (number(items, 2)?, number(items, 3)?);
+                let layer = style
+                    .layers
+                    .iter_mut()
+                    .find(|candidate| candidate.id == layer)
+                    .ok_or_else(|| format!("setLayerZoomRange: no layer `{layer}`"))?;
+                layer.minzoom = Some(minzoom);
+                layer.maxzoom = Some(maxzoom);
+                Ok(())
+            }
+            ("setCenter", _) => match value(1).as_array().map(Vec::as_slice) {
+                Some([longitude, latitude]) => match (longitude.as_f64(), latitude.as_f64()) {
+                    (Some(longitude), Some(latitude)) => {
+                        style.center = Some([longitude, latitude]);
+                        Ok(())
+                    }
+                    _ => Err("setCenter needs numbers".to_owned()),
+                },
+                _ => Err("setCenter needs [longitude, latitude]".to_owned()),
+            },
             ("setStyle", _) => {
                 let replacement = match value(1) {
                     Value::String(url) => {
