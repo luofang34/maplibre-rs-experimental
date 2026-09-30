@@ -13,6 +13,7 @@ const MAX_ZOOM_LEVELS_ON_SCREEN: f64 = 9.314;
 const TILE_COUNT_MAX_MIN_RATIO: f64 = 3.0;
 const INTEGRATION_POINTS: usize = 10;
 
+#[derive(Clone, Copy)]
 pub(crate) struct LodContext {
     camera: Point2<f64>,
     eye_focal_pixels: Option<f64>,
@@ -106,6 +107,15 @@ impl LodContext {
             distance_to_center_3d: height,
             requested_zoom: 0.0,
             field_of_view_degrees: 0.0,
+        }
+    }
+
+    /// The context of a copy of the world `worlds` over: the camera lies that many worlds the
+    /// other way from its tiles.
+    pub(crate) fn shifted(&self, worlds: f64) -> Self {
+        Self {
+            camera: Point2::new(self.camera.x - worlds, self.camera.y),
+            ..*self
         }
     }
 

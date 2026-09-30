@@ -122,6 +122,7 @@ fn invalid_world_scale_returns_a_covering_error() {
             rounding: ZoomRounding::Floor,
             zoom_range: SourceZoomRange::default(),
             padding: 0,
+            world_copies: 0,
             max_tiles: 12,
         },
         &TileElevationRange::default(),

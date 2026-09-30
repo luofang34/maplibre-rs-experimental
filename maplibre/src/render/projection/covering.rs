@@ -362,6 +362,11 @@ fn mercator_view_region(
                 ViewStatePadding::Loose => 1,
                 ViewStatePadding::Tight => 0,
             },
+            world_copies: if style.terrain.is_none() && !view_state.has_external_view() {
+                3
+            } else {
+                0
+            },
             max_tiles: 512,
         },
         elevation.as_ref(),

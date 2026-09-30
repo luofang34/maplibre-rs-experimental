@@ -37,6 +37,7 @@ fn options(zoom: u8, requested_zoom: f64, variable_zoom: bool) -> MercatorCoveri
         rounding: ZoomRounding::Floor,
         zoom_range: SourceZoomRange::default(),
         padding: 0,
+        world_copies: 0,
         max_tiles: 512,
     }
 }

@@ -51,6 +51,7 @@ fn bottom_frustum_ground_stays_covered_when_the_tile_budget_is_small() {
                 rounding: ZoomRounding::Floor,
                 zoom_range: SourceZoomRange::default(),
                 padding: 0,
+                world_copies: 0,
                 max_tiles: 12,
             };
             let tiles =

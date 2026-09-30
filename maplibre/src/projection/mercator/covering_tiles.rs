@@ -33,6 +33,8 @@ pub struct MercatorCoveringOptions {
     pub rounding: ZoomRounding,
     /// Levels the source serves.
     pub zoom_range: SourceZoomRange,
+    /// How many copies of the world to either side to cover; GL JS draws three.
+    pub world_copies: i32,
     /// Number of canonical neighbors to add around visible tiles.
     pub padding: i32,
     /// Maximum number of returned tiles after padding.
@@ -90,18 +92,22 @@ pub(crate) fn covering_tiles_with_history(
         center
     };
     let priority = mercator_world_to_lat_lon(priority.x, priority.y, world_size);
-    let inspect = |tile: WorldTileCoords, fully_visible| -> Result<_, MercatorCoveringError> {
-        let tile = TileCoords::from((tile.x as u32, tile.y as u32, tile.z));
+    let inspect = |placed: WorldTileCoords, fully_visible| -> Result<_, MercatorCoveringError> {
+        let Some((canonical, wrap)) = placed.wrapped() else {
+            return Ok(None);
+        };
+        let tile = TileCoords::from((canonical.x as u32, canonical.y as u32, canonical.z));
         let intersection = if fully_visible {
             Intersection::Full
         } else {
-            tile_intersection(&frustum, tile, world_size, elevation)
+            tile_intersection(&frustum, (tile, wrap), world_size, elevation)
         };
         if intersection == Intersection::None {
             return Ok(None);
         }
         let target = options.zoom_range.cap(if options.variable_zoom {
-            lod.stable_zoom_for_tile(tile, options.rounding, history)
+            lod.shifted(f64::from(wrap))
+                .stable_zoom_for_tile(tile, options.rounding, history)
         } else {
             options.zoom
         });
@@ -118,7 +124,7 @@ pub(crate) fn covering_tiles_with_history(
             inspect,
         )?
     } else {
-        unbounded_covering(options.zoom_range.min, inspect)?
+        unbounded_covering(options.zoom_range.min, options.world_copies, inspect)?
     };
     sort_by_center(&mut visible, priority);
     Ok(add_padding(visible, options.padding, options.max_tiles))
@@ -152,14 +158,15 @@ fn lod_context(view_state: &ViewState, requested_zoom: f64, world_size: f64) -> 
 
 fn tile_intersection(
     frustum: &GlobeFrustum,
-    tile: TileCoords,
+    (tile, wrap): (TileCoords, i32),
     world_size: f64,
     elevation: &dyn TileElevationProvider,
 ) -> Intersection {
-    let size = world_size / 2_f64.powi(i32::from(u8::from(tile.z)));
+    let count = 2_f64.powi(i32::from(u8::from(tile.z)));
+    let size = world_size / count;
     let range = elevation.elevation_range(tile);
     let min = Vector3::new(
-        f64::from(tile.x) * size,
+        (f64::from(tile.x) + f64::from(wrap) * count) * size,
         f64::from(tile.y) * size,
         range.min_meters.min(0.0),
     );

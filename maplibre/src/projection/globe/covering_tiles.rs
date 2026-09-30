@@ -191,7 +191,7 @@ pub(crate) fn covering_tiles_with_history(
             inspect,
         )?
     } else {
-        unbounded_covering(options.zoom_range.min, inspect)?
+        unbounded_covering(options.zoom_range.min, 0, inspect)?
     };
     sort_by_center(&mut visible, priority);
     Ok(add_padding(visible, options.padding, options.max_tiles))
@@ -199,12 +199,16 @@ pub(crate) fn covering_tiles_with_history(
 
 pub(crate) fn unbounded_covering<E>(
     min_zoom: u8,
+    copies: i32,
     mut inspect: impl FnMut(
         WorldTileCoords,
         bool,
     ) -> Result<Option<crate::projection::tile_covering::Refinement>, E>,
 ) -> Result<Vec<WorldTileCoords>, E> {
-    let mut stack = vec![(WorldTileCoords::from((0, 0, ZoomLevel::new(0))), false)];
+    // Copies of the world to either side start from their own roots, as GL JS renders them.
+    let mut stack: Vec<_> = (-copies..=copies)
+        .map(|wrap| (WorldTileCoords::from((wrap, 0, ZoomLevel::new(0))), false))
+        .collect();
     let mut visible = Vec::new();
     while let Some((tile, fully_visible)) = stack.pop() {
         let Some(refinement) = inspect(tile, fully_visible)? else {
