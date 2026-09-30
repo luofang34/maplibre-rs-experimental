@@ -34,8 +34,10 @@ const IGOR: u32 = 2u;
 const MULTIDIRECTIONAL: u32 = 3u;
 const BASIC: u32 = 4u;
 
+// The texture carries one texel of neighbour samples on every side, so `texel` runs from -1 to
+// the tile size inclusive and the tile's own first texel sits at index 1.
 fn elevation_at(texel: vec2<i32>, dim: vec2<i32>) -> f32 {
-    let clamped = clamp(texel, vec2<i32>(0, 0), dim - vec2<i32>(1, 1));
+    let clamped = clamp(texel, vec2<i32>(-1, -1), dim) + vec2<i32>(1, 1);
     let data = textureLoad(t_dem, clamped, 0) * 255.0;
     return dot(vec4<f32>(data.rgb, -1.0), hillshade.unpack);
 }
@@ -135,7 +137,7 @@ fn main(in: VertexOutput) -> @location(0) vec4<f32> {
     if in.horizon_distance < 0.0 {
         discard;
     }
-    let dim = vec2<i32>(textureDimensions(t_dem));
+    let dim = vec2<i32>(textureDimensions(t_dem)) - vec2<i32>(2, 2);
     let uv = in.tex_coords.xy / in.tex_coords.z;
     let pos = vec2<i32>(floor(uv * vec2<f32>(dim)));
     let a = elevation_at(pos + vec2<i32>(-1, -1), dim);

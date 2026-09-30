@@ -13,14 +13,18 @@ enum Rise {
     West,
 }
 
-/// A Terrarium tile whose elevation follows `rise` across `columns` pixels starting at `offset`.
+/// A Terrarium tile whose elevation follows `rise` across its pixels, starting at column `offset`.
 fn dem_tile(rise: Rise, offset: u32) -> RgbaImage {
+    dem_tile_with(rise, offset, RISE_PER_PIXEL)
+}
+
+fn dem_tile_with(rise: Rise, offset: u32, per_pixel: f64) -> RgbaImage {
     RgbaImage::from_fn(256, 256, |x, _| {
         let column = f64::from(x + offset);
         let meters = match rise {
             Rise::Flat => 1000.0,
-            Rise::East => 1000.0 + RISE_PER_PIXEL * column,
-            Rise::West => 9000.0 - RISE_PER_PIXEL * column,
+            Rise::East => 1000.0 + per_pixel * column,
+            Rise::West => 9000.0 - per_pixel * column,
         };
         let encoded = meters + 32768.0;
         let red = (encoded / 256.0).floor();
@@ -147,27 +151,29 @@ async fn the_illumination_anchor_decides_whether_light_turns_with_the_map() {
 
 #[tokio::test]
 async fn a_continuous_slope_shades_without_a_seam_between_tiles() {
+    // A gentle slope, well below the derivative clamp, so a halved edge derivative would show.
+    const GENTLE: f64 = 4.0;
     let west = target();
     let east = WorldTileCoords::from((west.x + 1, west.y, west.z));
     let bytes = shaded(
         hillshade_style(serde_json::json!({"hillshade-exaggeration": 1.0}), 0.0, 0.5),
         vec![
-            (west, dem_tile(Rise::West, 0)),
-            (east, dem_tile(Rise::West, 256)),
+            (west, dem_tile_with(Rise::West, 0, GENTLE)),
+            (east, dem_tile_with(Rise::West, 256, GENTLE)),
         ],
     )
     .await;
     let row = SIZE / 2;
-    let colours: Vec<[u8; 4]> = (32..SIZE - 32).map(|x| pixel(&bytes, x, row)).collect();
-    let (min, max) = colours.iter().fold((255u8, 0u8), |(min, max), pixel| {
-        (min.min(pixel[0]), max.max(pixel[0]))
+    let colours: Vec<u8> = (32..SIZE - 32).map(|x| pixel(&bytes, x, row)[0]).collect();
+    let (min, max) = colours.iter().fold((255u8, 0u8), |(min, max), value| {
+        (min.min(*value), max.max(*value))
     });
     assert!(
-        max + 20 < 128,
+        max + 8 < 128,
         "the slope is shaded across both tiles: {colours:?}"
     );
     assert!(
-        max - min <= 3,
+        max - min <= 1,
         "one plane across two tiles shades one colour, not {min}..{max}: {colours:?}"
     );
 }

@@ -5,8 +5,8 @@ use crate::{
     context::MapContext,
     coords::WorldTileCoords,
     raster::{
-        resource::RasterResources, AvailableRasterLayerData, RasterLayerData,
-        RasterLayersDataComponent,
+        dem_border::with_border, resource::RasterResources, AvailableRasterLayerData,
+        RasterLayerData, RasterLayersDataComponent,
     },
     render::{
         eventually::{Eventually, Eventually::Initialized},
@@ -62,20 +62,50 @@ fn upload_raster_layer(
                     .get_bound_texture(&data.source, &coords)
                     .is_none()
                 {
-                    upload_image(raster_resources, device, queue, data);
+                    upload_image(raster_resources, device, queue, tiles, data);
                 }
             }
         }
     }
 }
 
+/// The image of `source` loaded at each tile around `coords`, indexed `[dy + 1][dx + 1]`.
+fn neighbour_images<'a>(
+    tiles: &'a Tiles,
+    source: &crate::raster::RasterSourceId,
+    coords: WorldTileCoords,
+) -> [[Option<&'a image::RgbaImage>; 3]; 3] {
+    let mut images: [[Option<&image::RgbaImage>; 3]; 3] = Default::default();
+    for (neighbour, (dx, dy)) in crate::terrain::backfill::neighbours(coords) {
+        images[(dy + 1) as usize][(dx + 1) as usize] = tiles
+            .query::<&RasterLayersDataComponent>(neighbour)
+            .and_then(|component| {
+                component.layers.iter().find_map(|layer| match layer {
+                    RasterLayerData::Available(data) if &data.source == source => Some(&data.image),
+                    _ => None,
+                })
+            });
+    }
+    images
+}
+
 fn upload_image(
     raster_resources: &mut RasterResources,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
+    tiles: &Tiles,
     data: &AvailableRasterLayerData,
 ) {
-    let image = &data.image;
+    let bordered;
+    let image = if raster_resources.has_border(&data.source) {
+        bordered = with_border(
+            &data.image,
+            &neighbour_images(tiles, &data.source, data.coords),
+        );
+        &bordered
+    } else {
+        &data.image
+    };
     let (width, height) = image.dimensions();
 
     let texture = raster_resources.create_texture(

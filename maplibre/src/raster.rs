@@ -26,6 +26,7 @@ use crate::{
     tcs::{system::SystemContainer, tiles::TileComponent, world::World},
 };
 
+mod dem_border;
 pub(crate) mod populate_world_system;
 mod process_raster;
 mod queue_system;

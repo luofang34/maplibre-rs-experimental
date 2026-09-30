@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::{
     coords::WorldTileCoords,
@@ -16,6 +16,8 @@ pub struct RasterResources {
     pipeline: wgpu::RenderPipeline,
     bound_textures: HashMap<RasterSourceId, HashMap<WorldTileCoords, (wgpu::BindGroup, u64)>>,
     layer_sources: HashMap<String, RasterSourceId>,
+    /// Sources whose textures carry a border of neighbour samples for slope shading.
+    dem_sources: HashSet<RasterSourceId>,
     /// Advances whenever a texture is bound, so cached renders of raster tiles can refresh.
     revision: u64,
 }
@@ -39,6 +41,7 @@ impl RasterResources {
             pipeline,
             bound_textures: Default::default(),
             layer_sources: Default::default(),
+            dem_sources: Default::default(),
             revision: 0,
         }
     }
@@ -132,15 +135,31 @@ impl RasterResources {
 
     pub(crate) fn update_layer_sources(&mut self, style: &Style) {
         self.layer_sources.clear();
+        self.dem_sources.clear();
         for group in crate::io::tile_sources::source_layer_groups(
             style,
             crate::io::tile_sources::TileKind::Raster,
         ) {
+            let is_dem = matches!(
+                group
+                    .source_name
+                    .as_deref()
+                    .and_then(|name| style.sources.get(name)),
+                Some(crate::style::source::Source::RasterDem(_))
+            );
             let source = RasterSourceId::new(group.source_name);
+            if is_dem {
+                self.dem_sources.insert(source.clone());
+            }
             for layer in group.layers {
                 self.layer_sources.insert(layer.id, source.clone());
             }
         }
+    }
+
+    /// Whether textures of this source are uploaded with a one-texel border.
+    pub(crate) fn has_border(&self, source: &RasterSourceId) -> bool {
+        self.dem_sources.contains(source)
     }
 
     pub(crate) fn layer_source(&self, layer: &str) -> Option<&RasterSourceId> {

@@ -35,7 +35,10 @@ fn main(in: VertexOutput) -> @location(0) vec4<f32> {
         discard;
     }
     let uv = in.tex_coords.xy / in.tex_coords.z;
-    let data = textureSample(t_dem, s_dem, uv) * 255.0;
+    // The texture carries one texel of neighbour samples on every side.
+    let inner = vec2<f32>(textureDimensions(t_dem)) - vec2<f32>(2.0, 2.0);
+    let padded = (uv * inner + vec2<f32>(1.0, 1.0)) / (inner + vec2<f32>(2.0, 2.0));
+    let data = textureSample(t_dem, s_dem, padded) * 255.0;
     let elevation = dot(vec4<f32>(data.rgb, -1.0), relief.unpack);
     let count = relief.stop_count;
     if count == 0u {
