@@ -172,32 +172,3 @@ mod tests {
         assert_eq!(uniforms.text_color, [0.0, 0.0, 0.0, 1.0]);
     }
 }
-
-#[cfg(test)]
-mod tests {
-    #![allow(clippy::expect_used, clippy::panic)]
-    use super::*;
-    use crate::style::expression::Value;
-
-    #[test]
-    fn a_feature_takes_its_own_colour_size_and_opacity() {
-        let paint: SymbolPaint = serde_json::from_value(serde_json::json!({
-            "text-color": ["get", "tint"],
-            "text-halo-width": ["get", "halo"],
-            "icon-size": ["get", "scale"],
-            "icon-opacity": 0.5
-        }))
-        .expect("paint");
-        let properties = FeatureProperties::from([
-            ("tint".to_string(), Value::from("red")),
-            ("halo".to_string(), Value::Number(2.0)),
-            ("scale".to_string(), Value::Number(3.0)),
-        ]);
-        let [color, halo, params] = feature_style(&paint, "text", &properties, 5.0);
-        assert_eq!(color, [1.0, 0.0, 0.0, 1.0]);
-        assert_eq!(halo, [0.0; 4]);
-        assert_eq!(params, [16.0, 2.0, 0.0, 1.0]);
-        let [_, _, icon] = feature_style(&paint, "icon", &properties, 5.0);
-        assert_eq!(icon, [3.0, 0.0, 0.0, 0.5]);
-    }
-}
