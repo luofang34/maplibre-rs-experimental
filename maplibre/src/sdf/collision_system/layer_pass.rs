@@ -141,12 +141,27 @@ impl LayerFrame<'_> {
         let (Some(text), true) = (rectangles[0], feature.anchor_shifts.len() > 1) else {
             return (rectangles, [0.0; 2]);
         };
+        // An icon stretched around the text follows it to the anchor it took.
+        let fitted = self
+            .paint
+            .text(
+                "icon-text-fit",
+                &feature.data.properties,
+                self.view_state.style_zoom().value(),
+            )
+            .is_some_and(|fit| fit != "none");
         let scale = f64::from(self.uniforms.text[0]) / 24.0;
         let moved = |shift: &[f32; 2]| {
             let [dx, dy] = shift.map(|pixels| f64::from(pixels) * scale);
             [
                 Some([text[0] + dx, text[1] + dy, text[2] + dx, text[3] + dy]),
-                rectangles[1],
+                rectangles[1].map(|icon| {
+                    if fitted {
+                        [icon[0] + dx, icon[1] + dy, icon[2] + dx, icon[3] + dy]
+                    } else {
+                        icon
+                    }
+                }),
             ]
         };
         let shift = feature
@@ -286,6 +301,16 @@ fn write_feature_metadata(
 ) {
     let properties = &feature.data.properties;
     let styles = ["text", "icon"].map(|prefix| feature_style(paint, prefix, properties, zoom));
+    let fitted = paint
+        .text("icon-text-fit", properties, zoom)
+        .is_some_and(|fit| fit != "none");
+    // The shader scales an icon's shift by the icon size, which the text size replaces here.
+    let icon_ratio = if fitted && styles[1][2][0] > 0.0 {
+        styles[0][2][0] / 24.0 / styles[1][2][0]
+    } else {
+        0.0
+    };
+    let shifts = [text_shift, text_shift.map(|shift| shift * icon_ratio)];
     for index in feature.indices.clone() {
         let kind = layer
             .buffer
@@ -305,11 +330,7 @@ fn write_feature_metadata(
                 opacity: opacity[kind],
                 elevation: ground,
                 // A text vertex without a glyph pose carries its anchor shift here.
-                pose: if kind == 0 {
-                    [text_shift[0], text_shift[1], 0.0, 0.0]
-                } else {
-                    [0.0; 4]
-                },
+                pose: [shifts[kind][0], shifts[kind][1], 0.0, 0.0],
                 color: styles[kind][0],
                 halo: styles[kind][1],
                 params: styles[kind][2],
