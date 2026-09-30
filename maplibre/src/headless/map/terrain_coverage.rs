@@ -7,6 +7,7 @@ use super::{HeadlessMap, ProcessedLayers};
 use crate::{
     coords::WorldTileCoords,
     headless::{create_headless_renderer, HeadlessPlugin},
+    heatmap::HeatmapPlugin,
     hillshade::HillshadePlugin,
     raster::{AvailableRasterLayerData, DefaultRasterTransferables, RasterPlugin},
     render::RenderPlugin,
@@ -193,6 +194,8 @@ mod stencil;
 mod source_identity;
 
 mod alpha;
+
+mod heatmap;
 
 mod hillshade;
 

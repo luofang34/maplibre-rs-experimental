@@ -79,6 +79,8 @@ pub fn queue_system(
                     }
                     let draw_function: Box<dyn crate::render::render_phase::Draw<LayerItem>> =
                         match layer_entry.style_layer.type_.as_str() {
+                            // The heatmap plugin draws these into a density target instead.
+                            "heatmap" => continue,
                             "line" => Box::new(DrawState::<LayerItem, DrawLineTiles>::new()),
                             "circle" => Box::new(DrawState::<LayerItem, DrawCircleTiles>::new()),
                             _ => Box::new(DrawState::<LayerItem, DrawVectorTiles>::new()),

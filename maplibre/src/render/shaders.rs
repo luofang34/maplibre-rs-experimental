@@ -4,6 +4,7 @@
 mod background;
 mod circle;
 mod fill;
+mod heatmap;
 mod line;
 mod symbol;
 mod symbol_vertex;
@@ -18,6 +19,7 @@ pub use background::{
 };
 pub use circle::CircleShader;
 pub use fill::FillShader;
+pub use heatmap::{HeatmapCompositeShader, HeatmapDensityShader, DENSITY_FORMAT};
 pub use line::LineShader;
 pub use symbol::SymbolShader;
 pub use symbol_vertex::ShaderSymbolVertex;

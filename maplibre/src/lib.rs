@@ -48,6 +48,7 @@ pub mod tcs;
 
 pub mod debug;
 pub mod geojson;
+pub mod heatmap;
 pub mod hillshade;
 pub mod raster;
 pub mod vector;

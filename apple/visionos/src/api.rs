@@ -203,6 +203,7 @@ fn create(
             maplibre::raster::DefaultRasterTransferables,
         >::default()),
         Box::new(maplibre::hillshade::HillshadePlugin),
+        Box::new(maplibre::heatmap::HeatmapPlugin),
     ];
     if has_terrain {
         plugins.push(Box::new(maplibre::terrain::TerrainPlugin::<

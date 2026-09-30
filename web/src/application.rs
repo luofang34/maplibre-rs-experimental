@@ -119,6 +119,7 @@ fn map_plugins(style: &Style) -> Vec<Box<dyn maplibre::plugin::Plugin<CurrentEnv
         Box::<maplibre::background::BackgroundPlugin>::default(),
         Box::<maplibre::vector::VectorPlugin<platform::UsedVectorTransferables>>::default(),
         Box::new(maplibre::sdf::SdfPlugin::<platform::UsedVectorTransferables>::default()),
+        Box::new(maplibre::heatmap::HeatmapPlugin),
     ];
     if has_raster_sources {
         plugins.push(Box::new(maplibre::raster::RasterPlugin::<
