@@ -21,6 +21,17 @@ pub struct SymbolFeature {
     properties: std::collections::BTreeMap<String, serde_json::Value>,
     #[serde(default)]
     sort_key: f32,
+    #[serde(default)]
+    line: Option<LineLabelWire>,
+}
+
+/// The line a label follows, in a form that survives the worker boundary.
+#[derive(Serialize, Deserialize)]
+pub struct LineLabelWire {
+    polyline: Vec<[f32; 2]>,
+    anchor_distance: f32,
+    glyph_offsets: Vec<f32>,
+    first_glyph_index: usize,
 }
 
 impl From<&Feature> for SymbolFeature {
@@ -44,6 +55,12 @@ impl From<&Feature> for SymbolFeature {
                 .map(|(key, value)| (key.clone(), value.to_json()))
                 .collect(),
             sort_key: feature.data.sort_key,
+            line: feature.line.as_ref().map(|line| LineLabelWire {
+                polyline: line.polyline.to_vec(),
+                anchor_distance: line.anchor_distance,
+                glyph_offsets: line.glyph_offsets.clone(),
+                first_glyph_index: line.first_glyph_index,
+            }),
         }
     }
 }
@@ -68,6 +85,12 @@ impl From<SymbolFeature> for Feature {
                     .collect(),
                 sort_key: feature.sort_key,
             },
+            line: feature.line.map(|line| crate::sdf::LineLabel {
+                polyline: line.polyline.into(),
+                anchor_distance: line.anchor_distance,
+                glyph_offsets: line.glyph_offsets,
+                first_glyph_index: line.first_glyph_index,
+            }),
         }
     }
 }

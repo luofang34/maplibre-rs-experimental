@@ -201,9 +201,16 @@ fn upright(angle: f64) -> f32 {
 }
 
 impl TextTessellator {
-    fn collect(&mut self, anchor: Point<f64>, angle: f32, id: Option<u64>) {
+    fn collect(
+        &mut self,
+        anchor: Point<f64>,
+        angle: f32,
+        id: Option<u64>,
+        line: Option<layout::LineContext>,
+    ) {
         self.collected.push(CollectedSymbol {
             id,
+            line,
             anchor,
             angle,
             properties: self.properties.clone(),
@@ -219,6 +226,7 @@ impl TextTessellator {
     ) {
         let probe = CollectedSymbol {
             id,
+            line: None,
             anchor: Point::new(0.0, 0.0),
             angle: 0.0,
             properties: self.properties.clone(),
@@ -246,23 +254,33 @@ impl TextTessellator {
             label_length: label_pixels * TILE_UNITS_PER_PIXEL,
             text_size: text_size * TILE_UNITS_PER_PIXEL,
         };
-        let anchors: Vec<line_anchors::LineAnchor> = match placement {
-            LinePlacement::Line => line_anchors::clip_to_tile(&lines)
-                .iter()
-                .flat_map(|line| line_anchors::line_anchors(line, params))
-                .collect(),
-            LinePlacement::Center => lines
-                .iter()
-                .filter(|line| line.len() > 1)
-                .filter_map(|line| line_anchors::center_anchor(line, params))
-                .collect(),
+        let parts: Vec<Vec<[f64; 2]>> = match placement {
+            LinePlacement::Line => line_anchors::clip_to_tile(&lines),
+            LinePlacement::Center => lines.into_iter().filter(|line| line.len() > 1).collect(),
         };
-        for anchor in anchors {
-            self.collect(
-                Point::new(anchor.point[0], anchor.point[1]),
-                upright(anchor.angle),
-                id,
-            );
+        for part in parts {
+            let anchors = match placement {
+                LinePlacement::Line => line_anchors::line_anchors(&part, params),
+                LinePlacement::Center => line_anchors::center_anchor(&part, params)
+                    .into_iter()
+                    .collect(),
+            };
+            if anchors.is_empty() {
+                continue;
+            }
+            let polyline: Arc<[[f32; 2]]> = part
+                .iter()
+                .map(|point| [point[0] as f32, point[1] as f32])
+                .collect();
+            for anchor in anchors {
+                let distance = line_anchors::distance_to(&part, anchor);
+                self.collect(
+                    Point::new(anchor.point[0], anchor.point[1]),
+                    upright(anchor.angle),
+                    id,
+                    Some((polyline.clone(), distance as f32)),
+                );
+            }
         }
     }
 }
@@ -295,7 +313,7 @@ impl FeatureProcessor for TextTessellator {
                         } else {
                             0.0
                         };
-                        self.collect(anchor, angle, id);
+                        self.collect(anchor, angle, id, None);
                     }
                 }
             }

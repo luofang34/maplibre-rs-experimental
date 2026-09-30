@@ -70,6 +70,12 @@ fn worker_wire_roundtrip_preserves_exact_collision_ranges_and_anchor() {
         indices: 6..30,
         text_anchor: crate::euclid::Point2D::new(123., 456.),
         str: "Zürich".into(),
+        line: Some(crate::sdf::LineLabel {
+            polyline: [[0.0, 0.0], [500.0, 0.0]].into(),
+            anchor_distance: 250.0,
+            glyph_offsets: vec![-5.0, 5.0],
+            first_glyph_index: 12,
+        }),
     };
     let bytes = serde_json::to_vec(&wire::SymbolFeature::from(&feature)).expect("serialize");
     let decoded: wire::SymbolFeature = serde_json::from_slice(&bytes).expect("deserialize");
@@ -81,6 +87,11 @@ fn worker_wire_roundtrip_preserves_exact_collision_ranges_and_anchor() {
     assert_eq!(decoded.data.id, feature.data.id);
     assert_eq!(decoded.data.properties, feature.data.properties);
     assert_eq!(decoded.data.sort_key, feature.data.sort_key);
+    let line = decoded.line.expect("the line the label follows");
+    assert_eq!(&*line.polyline, &[[0.0, 0.0], [500.0, 0.0]]);
+    assert_eq!(line.anchor_distance, 250.0);
+    assert_eq!(line.glyph_offsets, [-5.0, 5.0]);
+    assert_eq!(line.first_glyph_index, 12);
     assert_eq!(
         decoded.parts[0].as_ref().expect("bounds").bounds,
         [-12.0, -8.0, 34.0, 16.0]

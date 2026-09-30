@@ -13,8 +13,12 @@ use crate::{
     style::{expression::FeatureProperties, layer::SymbolPaint},
 };
 
+/// A polyline in tile units and the arc length from its start to a label's anchor.
+pub(super) type LineContext = (std::sync::Arc<[[f32; 2]]>, f32);
+
 pub(super) struct CollectedSymbol {
     pub id: Option<u64>,
+    pub line: Option<LineContext>,
     pub anchor: Point<f64>,
     pub properties: FeatureProperties,
     pub angle: f32,
@@ -87,7 +91,8 @@ pub(super) fn append(
             symbol.angle,
         );
     }
-    super::text_layout::append(symbol, paint, zoom, atlas, buffer);
+    let first_glyph_index = buffer.indices.len();
+    let glyph_offsets = super::text_layout::append(symbol, paint, zoom, atlas, buffer);
     if start == buffer.indices.len() {
         return;
     }
@@ -111,6 +116,16 @@ pub(super) fn append(
         indices: start..buffer.indices.len(),
         text_anchor: anchor,
         str: text,
+        line: symbol
+            .line
+            .as_ref()
+            .filter(|_| !glyph_offsets.is_empty())
+            .map(|(polyline, distance)| crate::sdf::LineLabel {
+                polyline: polyline.clone(),
+                anchor_distance: *distance,
+                glyph_offsets,
+                first_glyph_index,
+            }),
     });
 }
 

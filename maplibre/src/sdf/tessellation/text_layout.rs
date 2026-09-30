@@ -16,16 +16,17 @@ pub(super) fn append(
     zoom: f64,
     atlas: &SymbolAtlas,
     buffer: &mut VertexBuffers<ShaderSymbolVertex, u32>,
-) {
+) -> Vec<f32> {
+    let mut centres = Vec::new();
     let Some(text) = paint.label(&symbol.properties, zoom) else {
-        return;
+        return centres;
     };
     let Some(glyphs) = atlas
         .glyphs
         .get(&paint.font_stack())
         .or_else(|| atlas.glyphs.values().next())
     else {
-        return;
+        return centres;
     };
     let spacing = paint.number("text-letter-spacing", &symbol.properties, zoom, 0.0) * 24.0;
     let width = |text: &str| line_width(text, glyphs, spacing);
@@ -76,10 +77,21 @@ pub(super) fn append(
                     elevation,
                     symbol.angle,
                 );
+                if symbol.line.is_some() {
+                    // A glyph along a line is placed by its centre: the vertex carries where
+                    // that centre lies in the straight layout, in 1/32 pixel.
+                    let centre = pen + glyph.metrics[2] / 2.0;
+                    let first = buffer.vertices.len() - 4;
+                    for vertex in &mut buffer.vertices[first..] {
+                        vertex.a_pixeloffset[0] = (centre * 32.0).round() as i32;
+                    }
+                    centres.push(centre);
+                }
             }
             pen += glyph.metrics[2] + spacing;
         }
     }
+    centres
 }
 
 /// Width in layout pixels of the label on one line, without wrapping; zero without glyphs.

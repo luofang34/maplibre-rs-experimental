@@ -34,6 +34,15 @@ fn distance(a: Point, b: Point) -> f64 {
     (b[0] - a[0]).hypot(b[1] - a[1])
 }
 
+/// Arc length from the start of `line` to the anchor.
+pub(super) fn distance_to(line: &[Point], anchor: LineAnchor) -> f64 {
+    let before: f64 = line[..=anchor.segment]
+        .windows(2)
+        .map(|segment| distance(segment[0], segment[1]))
+        .sum();
+    before + distance(line[anchor.segment], anchor.point)
+}
+
 fn direction(from: Point, to: Point) -> f64 {
     (to[1] - from[1]).atan2(to[0] - from[0])
 }

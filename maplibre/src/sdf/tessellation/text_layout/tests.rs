@@ -25,6 +25,7 @@ fn letter_spacing_is_between_glyphs_and_does_not_shift_centered_text() {
     };
     let symbol = CollectedSymbol {
         id: None,
+        line: None,
         anchor: geo_types::Point::new(100., 100.),
         properties: Default::default(),
         angle: 0.,

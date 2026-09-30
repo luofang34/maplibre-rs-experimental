@@ -26,6 +26,7 @@ fn feature(anchor: f32) -> Feature {
         indices: 0..0,
         text_anchor: Point2D::new(anchor, anchor),
         str: "Innsbruck".into(),
+        line: None,
     }
 }
 #[test]

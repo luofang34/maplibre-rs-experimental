@@ -66,6 +66,14 @@ fn a_line_label_repeats_along_the_line_and_is_never_wrapped() {
         anchors_x(&tessellator),
         [128.0, 928.0, 1728.0, 2528.0, 3328.0]
     );
+    let second = tessellator.features[1].line.as_ref().expect("a line label");
+    assert_eq!(second.anchor_distance, 928.0);
+    assert_eq!(&*second.polyline, &[[0.0, 2048.0], [4000.0, 2048.0]]);
+    assert_eq!(
+        second.glyph_offsets,
+        [-15.0, -5.0, 5.0, 15.0],
+        "glyph centres around the label centre, in 24-pixel layout units"
+    );
     for feature in &tessellator.features {
         assert_eq!(
             feature.indices.len(),

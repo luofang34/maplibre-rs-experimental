@@ -113,6 +113,19 @@ pub struct SymbolFeatureData {
     pub sort_key: f32,
 }
 
+/// The line a label follows, and where its glyphs sit along the text.
+#[derive(Clone)]
+pub struct LineLabel {
+    /// The polyline of the anchor's line part in tile units, shared by its repeated labels.
+    pub polyline: std::sync::Arc<[[f32; 2]]>,
+    /// Arc length from the start of the polyline to the anchor, in tile units.
+    pub anchor_distance: f32,
+    /// Distance of each glyph's centre from the anchor along the text, in layout pixels.
+    pub glyph_offsets: Vec<f32>,
+    /// Position in the index buffer where the first glyph's triangles begin; each takes six.
+    pub first_glyph_index: usize,
+}
+
 /// One label of a symbol bucket.
 pub struct Feature {
     /// Layout bounds for text, RGBA icon and SDF icon, respectively.
@@ -128,6 +141,8 @@ pub struct Feature {
     pub text_anchor: Point2D<f32, TileSpace>,
     /// The text of the label.
     pub str: String,
+    /// The line the label follows, when its glyphs are placed along one.
+    pub line: Option<LineLabel>,
 }
 
 /// Coordinates measured on the canonical tile grid.
