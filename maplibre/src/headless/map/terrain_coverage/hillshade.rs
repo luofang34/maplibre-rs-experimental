@@ -187,7 +187,7 @@ async fn turning_the_light_half_way_around_swaps_the_lit_and_shadowed_sides() {
             "hillshade-method": method
         })
     };
-    for method in ["standard", "basic"] {
+    for method in ["standard", "basic", "combined", "igor", "multidirectional"] {
         let from_north_west = center_of(Rise::West, light(335.0, method), 0.0).await;
         let from_south_east = center_of(Rise::West, light(155.0, method), 0.0).await;
         assert!(
@@ -196,4 +196,31 @@ async fn turning_the_light_half_way_around_swaps_the_lit_and_shadowed_sides() {
              {from_north_west:?} against {from_south_east:?}"
         );
     }
+}
+
+#[tokio::test]
+async fn a_translucent_shadow_colour_darkens_less_than_an_opaque_one() {
+    let shadow = |color: &str| serde_json::json!({"hillshade-exaggeration": 1.0, "hillshade-shadow-color": color});
+    let opaque = center_of(Rise::West, shadow("#000000"), 0.0).await;
+    let translucent = center_of(Rise::West, shadow("rgba(0, 0, 0, 0.5)"), 0.0).await;
+    assert!(
+        translucent[0] > opaque[0] + 4 && translucent[0] < 128,
+        "half-transparent shadow lies between the opaque shadow and the ground: \
+         {opaque:?} {translucent:?}"
+    );
+}
+
+#[tokio::test]
+async fn opposite_lights_average_toward_flat_ground() {
+    let lights = |directions: serde_json::Value| {
+        serde_json::json!({"hillshade-exaggeration": 1.0, "hillshade-method": "multidirectional",
+            "hillshade-illumination-direction": directions,
+            "hillshade-illumination-altitude": [45.0, 45.0]})
+    };
+    let one = center_of(Rise::West, lights(serde_json::json!([335.0, 335.0])), 0.0).await;
+    let two = center_of(Rise::West, lights(serde_json::json!([335.0, 155.0])), 0.0).await;
+    assert!(
+        two[0] > one[0] + 20,
+        "a second light from the other side softens the shadow: {one:?} then {two:?}"
+    );
 }
