@@ -86,6 +86,8 @@ fn load_style_blocking(test_dir: &Path) -> Result<(Style, TestMeta), String> {
     let meta = parse_test_meta(&value);
     let mut style: Style = serde_json::from_value(value.clone())
         .map_err(|error| format!("Cannot deserialize Style: {error}"))?;
+    // The tiles are decoded from this copy of the style, so it carries the state's values too.
+    style.resolve_global_state();
     crate::operations::apply(&mut style, &crate::operations::operations_of(&value))?;
     for (index, layer) in style.layers.iter_mut().enumerate() {
         layer.index = index as u32 + 1; // The depth clear is zero.
