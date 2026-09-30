@@ -9,7 +9,7 @@ use crate::{
 #[test]
 fn viewport_translation_rotates_with_map_bearing() {
     let paint = LayerPaint::Fill(FillPaint {
-        fill_translate: Some([10.0, 50.0]),
+        fill_translate: Some([10.0, 50.0].into()),
         fill_translate_anchor: TranslateAnchor::Viewport,
         ..FillPaint::default()
     });
@@ -23,7 +23,7 @@ fn viewport_translation_rotates_with_map_bearing() {
 #[test]
 fn map_translation_scales_pixels_for_parent_tile() {
     let paint = LayerPaint::Fill(FillPaint {
-        fill_translate: Some([10.0, 50.0]),
+        fill_translate: Some([10.0, 50.0].into()),
         ..FillPaint::default()
     });
     let translation = layer_translate_tile_units(Some(&paint), ZoomLevel::new(0), 2.0, 0.0);

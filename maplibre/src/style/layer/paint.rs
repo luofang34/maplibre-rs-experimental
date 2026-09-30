@@ -73,7 +73,7 @@ pub struct FillPaint {
     pub fill_antialias: Option<serde_json::Value>,
     /// Translation in screen pixels before conversion to tile units.
     #[serde(rename = "fill-translate", default)]
-    pub fill_translate: Option<[f32; 2]>,
+    pub fill_translate: Option<crate::style::translation::Translation>,
     /// Coordinate frame for `fill_translate`.
     #[serde(rename = "fill-translate-anchor", default)]
     pub fill_translate_anchor: TranslateAnchor,
@@ -124,7 +124,7 @@ pub struct FillExtrusionPaint {
     pub fill_extrusion_vertical_gradient: Option<bool>,
     /// Translation in screen pixels before conversion to tile units.
     #[serde(rename = "fill-extrusion-translate", default)]
-    pub fill_extrusion_translate: Option<[f32; 2]>,
+    pub fill_extrusion_translate: Option<crate::style::translation::Translation>,
     /// Coordinate frame for `fill_extrusion_translate`.
     #[serde(rename = "fill-extrusion-translate-anchor", default)]
     pub fill_extrusion_translate_anchor: TranslateAnchor,
@@ -159,7 +159,7 @@ pub struct LinePaint {
     pub line_opacity: Option<StyleProperty<f32>>,
     /// Translation in screen pixels before conversion to tile units.
     #[serde(rename = "line-translate", default)]
-    pub line_translate: Option<[f32; 2]>,
+    pub line_translate: Option<crate::style::translation::Translation>,
     /// Coordinate frame for `line_translate`.
     #[serde(rename = "line-translate-anchor", default)]
     pub line_translate_anchor: TranslateAnchor,

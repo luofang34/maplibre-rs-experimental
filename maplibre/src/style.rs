@@ -21,6 +21,7 @@ pub mod sky;
 pub mod source;
 pub mod symbol;
 pub mod terrain;
+pub mod translation;
 pub mod validation;
 
 use crate::{

@@ -123,7 +123,7 @@ impl LayerValidation<'_> {
             }
         }
         for prefix in ["text", "icon"] {
-            if crate::sdf::translation::viewport_translation(paint, prefix) {
+            if crate::sdf::translation::viewport_translation(paint, prefix, 0.0) {
                 self.unsupported(
                     &format!("paint.{prefix}-translate-anchor"),
                     "translation in viewport axes depends on the bearing and is not applied",

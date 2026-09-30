@@ -85,7 +85,7 @@ pub(super) fn append(
             height * (1.0 - fractions[1]) + offset[1],
         ];
         let fitted = fit_to_text(paint, symbol, zoom, atlas, [width, height], offset);
-        let shift = crate::sdf::translation::tile_translation(paint, "icon");
+        let shift = crate::sdf::translation::tile_translation(paint, "icon", zoom);
         let anchor = Point::new(symbol.anchor.x() + shift[0], symbol.anchor.y() + shift[1]);
         let rotation = paint
             .number("icon-rotate", &symbol.properties, zoom, 0.0)
@@ -123,6 +123,7 @@ pub(super) fn append(
     let shift = crate::sdf::translation::tile_translation(
         paint,
         if text.is_empty() { "icon" } else { "text" },
+        zoom,
     );
     let anchor = Point2D::new(
         (symbol.anchor.x() + shift[0]) as f32,

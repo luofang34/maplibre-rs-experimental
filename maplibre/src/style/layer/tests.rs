@@ -235,13 +235,19 @@ fn parses_fill_and_line_translation_properties() {
     let Some(LayerPaint::Fill(fill)) = style.layers[0].paint.as_ref() else {
         panic!("first layer should be a fill");
     };
-    assert_eq!(fill.fill_translate, Some([10.0, 50.0]));
+    assert_eq!(
+        fill.fill_translate.as_ref().map(|t| t.at_zoom(0.0)),
+        Some([10.0, 50.0])
+    );
     assert_eq!(fill.fill_translate_anchor, TranslateAnchor::Viewport);
 
     let Some(LayerPaint::Line(line)) = style.layers[1].paint.as_ref() else {
         panic!("second layer should be a line");
     };
-    assert_eq!(line.line_translate, Some([2.0, 3.0]));
+    assert_eq!(
+        line.line_translate.as_ref().map(|t| t.at_zoom(0.0)),
+        Some([2.0, 3.0])
+    );
     assert_eq!(line.line_translate_anchor, TranslateAnchor::Map);
 }
 

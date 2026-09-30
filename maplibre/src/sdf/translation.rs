@@ -1,25 +1,21 @@
 //! `text-translate` and `icon-translate`: a fixed shift of a symbol's anchor.
 
-use crate::style::layer::SymbolPaint;
+use crate::style::{layer::SymbolPaint, property::StyleProperty, translation::Pair};
 
 /// Tile units in one pixel of a tile drawn at its own zoom: 4096 units span 512 pixels.
 const TILE_UNITS_PER_PIXEL: f64 = 8.0;
 
-fn translate(paint: &SymbolPaint, prefix: &str) -> [f64; 2] {
-    let read = |index: usize| {
-        paint
-            .properties
-            .get(&format!("{prefix}-translate"))
-            .and_then(|value| value.get(index))
-            .and_then(serde_json::Value::as_f64)
-            .unwrap_or(0.0)
-    };
-    [read(0), read(1)]
+fn translate(paint: &SymbolPaint, prefix: &str, zoom: f64) -> [f64; 2] {
+    paint
+        .properties
+        .get(&format!("{prefix}-translate"))
+        .and_then(|value| StyleProperty::<Pair>::parse(value).evaluate_at_zoom(zoom))
+        .map_or([0.0; 2], |Pair(pair)| pair)
 }
 
 /// Whether the translation follows the viewport axes instead of the map's.
-pub(crate) fn viewport_translation(paint: &SymbolPaint, prefix: &str) -> bool {
-    translate(paint, prefix) != [0.0; 2]
+pub(crate) fn viewport_translation(paint: &SymbolPaint, prefix: &str, zoom: f64) -> bool {
+    translate(paint, prefix, zoom) != [0.0; 2]
         && paint
             .properties
             .get(&format!("{prefix}-translate-anchor"))
@@ -28,11 +24,11 @@ pub(crate) fn viewport_translation(paint: &SymbolPaint, prefix: &str) -> bool {
 }
 
 /// The shift of the anchor in tile units; a translation in viewport axes is not applied.
-pub(crate) fn tile_translation(paint: &SymbolPaint, prefix: &str) -> [f64; 2] {
-    if viewport_translation(paint, prefix) {
+pub(crate) fn tile_translation(paint: &SymbolPaint, prefix: &str, zoom: f64) -> [f64; 2] {
+    if viewport_translation(paint, prefix, zoom) {
         return [0.0; 2];
     }
-    translate(paint, prefix).map(|pixels| pixels * TILE_UNITS_PER_PIXEL)
+    translate(paint, prefix, zoom).map(|pixels| pixels * TILE_UNITS_PER_PIXEL)
 }
 
 #[cfg(test)]
@@ -46,12 +42,12 @@ mod tests {
     #[test]
     fn map_translation_is_in_tile_units_and_viewport_translation_is_left_out() {
         let map = paint(serde_json::json!({"text-translate": [2, -1]}));
-        assert_eq!(tile_translation(&map, "text"), [16.0, -8.0]);
-        assert_eq!(tile_translation(&map, "icon"), [0.0, 0.0]);
+        assert_eq!(tile_translation(&map, "text", 0.0), [16.0, -8.0]);
+        assert_eq!(tile_translation(&map, "icon", 0.0), [0.0, 0.0]);
         let viewport = paint(serde_json::json!({
             "icon-translate": [2, 0], "icon-translate-anchor": "viewport"
         }));
-        assert!(viewport_translation(&viewport, "icon"));
-        assert_eq!(tile_translation(&viewport, "icon"), [0.0, 0.0]);
+        assert!(viewport_translation(&viewport, "icon", 0.0));
+        assert_eq!(tile_translation(&viewport, "icon", 0.0), [0.0, 0.0]);
     }
 }

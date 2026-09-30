@@ -268,7 +268,7 @@ fn glyph_pass(
     } else {
         paint.height_offset("text", &symbol.properties, zoom)
     };
-    let shift = crate::sdf::translation::tile_translation(paint, "text");
+    let shift = crate::sdf::translation::tile_translation(paint, "text", zoom);
     let anchor = geo_types::Point::new(symbol.anchor.x() + shift[0], symbol.anchor.y() + shift[1]);
     let follows_line = crate::sdf::paint::text_follows_line(paint, zoom);
     let rotation = paint

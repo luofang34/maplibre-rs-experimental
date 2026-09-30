@@ -90,7 +90,7 @@ pub struct CirclePaint {
     pub circle_stroke_opacity: Option<StyleProperty<f32>>,
     /// Translation in screen pixels before conversion to tile units.
     #[serde(rename = "circle-translate", default)]
-    pub circle_translate: Option<[f32; 2]>,
+    pub circle_translate: Option<super::translation::Translation>,
     /// Whether the translation follows the map or the viewport.
     #[serde(rename = "circle-translate-anchor", default)]
     pub circle_translate_anchor: TranslateAnchor,

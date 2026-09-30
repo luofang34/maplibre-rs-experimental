@@ -102,7 +102,7 @@ fn raster_adjustments_and_unknown_layer_types_are_reported() {
 fn malformed_paint_does_not_discard_the_whole_paint_silently() {
     let result = serde_json::from_value::<Style>(serde_json::json!({
         "version": 8, "sources": {}, "layers": [{
-            "id": "roads", "type": "line", "paint": {"line-translate": "invalid"}
+            "id": "roads", "type": "line", "paint": {"line-translate-anchor": "invalid"}
         }]
     }));
     let error = result

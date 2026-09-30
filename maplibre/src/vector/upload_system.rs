@@ -340,19 +340,31 @@ fn layer_translate_tile_units(
 ) -> [f32; 2] {
     let (translate, anchor) = match paint {
         Some(LayerPaint::Fill(paint)) => (
-            paint.fill_translate.unwrap_or([0.0; 2]),
+            crate::style::translation::translation_at(
+                paint.fill_translate.as_ref(),
+                f64::from(view_zoom),
+            ),
             paint.fill_translate_anchor,
         ),
         Some(LayerPaint::Line(paint)) => (
-            paint.line_translate.unwrap_or([0.0; 2]),
+            crate::style::translation::translation_at(
+                paint.line_translate.as_ref(),
+                f64::from(view_zoom),
+            ),
             paint.line_translate_anchor,
         ),
         Some(LayerPaint::Circle(paint)) => (
-            paint.circle_translate.unwrap_or([0.0; 2]),
+            crate::style::translation::translation_at(
+                paint.circle_translate.as_ref(),
+                f64::from(view_zoom),
+            ),
             paint.circle_translate_anchor,
         ),
         Some(LayerPaint::FillExtrusion(paint)) => (
-            paint.fill_extrusion_translate.unwrap_or([0.0; 2]),
+            crate::style::translation::translation_at(
+                paint.fill_extrusion_translate.as_ref(),
+                f64::from(view_zoom),
+            ),
             paint.fill_extrusion_translate_anchor,
         ),
         _ => return [0.0; 2],
