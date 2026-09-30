@@ -706,3 +706,27 @@ async fn a_geojson_source_removed_and_added_again_shows_only_its_new_data() {
         "the readded source has its own empty data, not the removed source's polygon"
     );
 }
+
+#[tokio::test]
+async fn a_layer_removed_while_its_tile_is_in_flight_does_not_come_back() {
+    let mut test = Fixture::new(Kind::Vector, false).await;
+    test.context.style = two_layer_style();
+    test.frame(0);
+    assert_eq!(test.kernel.apc().pending(), 1, "the first tile is loading");
+    test.context
+        .mutate_style(|style| style.remove_layer("blue"))
+        .expect("remove while loading");
+    test.receive().await;
+    assert!(
+        layers_with_geometry(&test).is_empty(),
+        "the reply that was already on its way is dropped for the removed layer"
+    );
+    test.frame(1);
+    test.receive().await;
+    test.frame(2);
+    test.receive().await;
+    assert!(
+        layers_with_geometry(&test).is_empty(),
+        "and the refetch does not restore it"
+    );
+}

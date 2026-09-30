@@ -85,6 +85,10 @@ async fn each_consumer_applies_valid_results_after_an_invalid_payload() {
     };
     let (kernel, mut context) = setup().await;
     let coords = WorldTileCoords::default();
+    context.style.layers.push(
+        serde_json::from_value(serde_json::json!({"id": "labels", "type": "symbol"}))
+            .expect("the symbol layer the result belongs to"),
+    );
     context
         .world
         .tiles

@@ -5,6 +5,8 @@
 //! returned [`StyleChange`] says which layers changed and whether tiles must be fetched again;
 //! per-tile buffers bake in draw order, colors and filters, so only layers drawn from vector
 //! tiles need that, while background and raster layers are read from the style every frame.
+//! Until the fetched tiles arrive, a moved layer can be drawn in its old order relative to layers
+//! that read the live order.
 
 use serde_json::{json, Value};
 use thiserror::Error;
@@ -62,6 +64,46 @@ pub enum StyleMutationError {
         source_name: String,
         /// A layer using it.
         layer: String,
+    },
+    /// A layer that draws from a source names none.
+    #[error("layer `{layer}` needs a source")]
+    SourceRequired {
+        /// The layer.
+        layer: String,
+    },
+    /// A layer on a vector source names no source layer.
+    #[error("layer `{layer}` needs a source-layer of vector source `{source_name}`")]
+    SourceLayerRequired {
+        /// The layer.
+        layer: String,
+        /// The vector source.
+        source_name: String,
+    },
+    /// The layer's type cannot draw from the kind of source it names.
+    #[error("layer `{layer}` of type `{kind}` cannot draw from source `{source_name}`")]
+    WrongSourceKind {
+        /// The layer.
+        layer: String,
+        /// The layer's type.
+        kind: String,
+        /// The source it names.
+        source_name: String,
+    },
+    /// The lower zoom bound is above the upper one.
+    #[error("layer `{layer}` has minzoom {minzoom} above maxzoom {maxzoom}")]
+    InvalidZoomRange {
+        /// The layer.
+        layer: String,
+        /// The lower bound.
+        minzoom: f64,
+        /// The upper bound.
+        maxzoom: f64,
+    },
+    /// A vector, raster or DEM source given only as a TileJSON url, which is not fetched here.
+    #[error("source `{source_name}` gives only a TileJSON url; list its tiles instead")]
+    TileJsonNotSupported {
+        /// The source.
+        source_name: String,
     },
     /// The layer, or the layer with the change applied, cannot be read.
     #[error("layer `{layer}` is invalid")]
@@ -129,6 +171,7 @@ impl Style {
         }
         let position = self.position_before(before)?;
         self.ensure_supported(&parsed)?;
+        self.ensure_shape(&parsed)?;
         self.layers.insert(position, parsed);
         let mut change = self.renumber();
         push_unique(&mut change.layers, &id);
@@ -241,6 +284,18 @@ impl Style {
                 source_name: name.to_owned(),
             });
         }
+        let url_only = match &source {
+            Source::Vector(vector) | Source::Raster(vector) => {
+                vector.tiles.is_none() && vector.url.is_some()
+            }
+            Source::RasterDem(dem) => dem.tiles.is_none() && dem.url.is_some(),
+            Source::GeoJson(_) => false,
+        };
+        if url_only {
+            return Err(StyleMutationError::TileJsonNotSupported {
+                source_name: name.to_owned(),
+            });
+        }
         if let Source::GeoJson(geojson) = &mut source {
             geojson.generation = fresh_generation();
         }
@@ -284,6 +339,53 @@ impl Style {
             Some(id) => self.position_of(id),
             None => Ok(self.layers.len()),
         }
+    }
+
+    /// Checks what GL JS checks of a layer: that its source exists, is of a kind its type can draw
+    /// from and, for vector sources, is read through a source layer, and that the zoom range is
+    /// ordered.
+    fn ensure_shape(&self, layer: &StyleLayer) -> Result<(), StyleMutationError> {
+        let id = layer.id.clone();
+        if let (Some(minzoom), Some(maxzoom)) = (layer.minzoom, layer.maxzoom) {
+            if minzoom > maxzoom {
+                return Err(StyleMutationError::InvalidZoomRange {
+                    layer: id,
+                    minzoom,
+                    maxzoom,
+                });
+            }
+        }
+        if layer.type_ == "background" {
+            return Ok(());
+        }
+        let Some(source_name) = &layer.source else {
+            return Err(StyleMutationError::SourceRequired { layer: id });
+        };
+        let Some(source) = self.sources.get(source_name) else {
+            return Err(StyleMutationError::MissingSource {
+                layer: id,
+                source_name: source_name.clone(),
+            });
+        };
+        let fits = match layer.type_.as_str() {
+            "raster" => matches!(source, Source::Raster(_) | Source::RasterDem(_)),
+            "hillshade" | "color-relief" => matches!(source, Source::RasterDem(_)),
+            _ => matches!(source, Source::Vector(_) | Source::GeoJson(_)),
+        };
+        if !fits {
+            return Err(StyleMutationError::WrongSourceKind {
+                layer: id,
+                kind: layer.type_.clone(),
+                source_name: source_name.clone(),
+            });
+        }
+        if matches!(source, Source::Vector(_)) && layer.source_layer.is_none() {
+            return Err(StyleMutationError::SourceLayerRequired {
+                layer: id,
+                source_name: source_name.clone(),
+            });
+        }
+        Ok(())
     }
 
     fn ensure_supported(&self, layer: &StyleLayer) -> Result<(), StyleMutationError> {
@@ -344,6 +446,7 @@ impl Style {
         })?;
         edited.index = self.layers[position].index;
         self.ensure_supported(&edited)?;
+        self.ensure_shape(&edited)?;
         let before = serde_json::to_value(&self.layers[position]).ok();
         self.layers[position] = edited;
         self.state_templates.remove(id);

@@ -285,3 +285,66 @@ fn sources_are_added_removed_and_a_readded_geojson_source_gets_a_fresh_generatio
         "workers cannot serve the old data"
     );
 }
+
+#[test]
+fn layers_must_fit_their_source_and_have_an_ordered_zoom_range() {
+    let mut style = style();
+    let before = ids(&style);
+    assert!(matches!(
+        style.add_layer(json!({"id": "x", "type": "fill"}), None),
+        Err(StyleMutationError::SourceRequired { .. })
+    ));
+    assert!(matches!(
+        style.add_layer(json!({"id": "x", "type": "line", "source": "roads"}), None),
+        Err(StyleMutationError::SourceLayerRequired { .. })
+    ));
+    assert!(matches!(
+        style.add_layer(
+            json!({"id": "x", "type": "raster", "source": "roads"}),
+            None
+        ),
+        Err(StyleMutationError::WrongSourceKind { .. })
+    ));
+    assert!(matches!(
+        style.add_layer(
+            json!({"id": "x", "type": "fill", "source": "shapes",
+            "minzoom": 5, "maxzoom": 2}),
+            None
+        ),
+        Err(StyleMutationError::InvalidZoomRange { .. })
+    ));
+    assert!(matches!(
+        style.set_layer_zoom_range("land", Some(9.0), Some(3.0)),
+        Err(StyleMutationError::InvalidZoomRange { .. })
+    ));
+    assert_eq!(ids(&style), before);
+    style
+        .add_layer(json!({"id": "backdrop", "type": "background"}), None)
+        .expect("a background needs no source");
+    style
+        .add_layer(
+            json!({"id": "dots", "type": "circle", "source": "shapes"}),
+            None,
+        )
+        .expect("a geojson source needs no source-layer");
+}
+
+#[test]
+fn sources_given_only_as_a_tilejson_url_are_refused() {
+    let mut style = style();
+    let url_only: Source = serde_json::from_value(
+        json!({"type": "vector", "url": "https://tiles.invalid/tiles.json"}),
+    )
+    .expect("source");
+    assert!(matches!(
+        style.add_source("catalog", url_only),
+        Err(StyleMutationError::TileJsonNotSupported { .. })
+    ));
+    let listed: Source = serde_json::from_value(
+        json!({"type": "vector", "tiles": ["https://tiles.invalid/{z}/{x}/{y}.pbf"]}),
+    )
+    .expect("source");
+    style
+        .add_source("listed", listed)
+        .expect("listed tiles are fine");
+}

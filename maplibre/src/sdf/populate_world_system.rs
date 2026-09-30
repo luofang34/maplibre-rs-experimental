@@ -31,7 +31,7 @@ impl<E: Environment, T: VectorTransferables> System for PopulateWorldSystem<E, T
         "sdf_populate_world_system".into()
     }
 
-    fn run(&mut self, MapContext { world, .. }: &mut MapContext) -> SystemResult {
+    fn run(&mut self, MapContext { world, style, .. }: &mut MapContext) -> SystemResult {
         let messages = self
             .kernel
             .apc()
@@ -40,8 +40,15 @@ impl<E: Environment, T: VectorTransferables> System for PopulateWorldSystem<E, T
             if message.has_tag(T::SymbolLayerTessellated::message_tag()) {
                 let attempt = message.attempt();
                 let message = message.into_transferable::<T::SymbolLayerTessellated>()?;
-                if tile_retry::accepts(world, message.coords(), RequestKind::Vector, attempt) {
-                    crate::vector::content::accept_symbols(world, message.to_bucket());
+                let coords = message.coords();
+                let bucket = message.to_bucket();
+                if tile_retry::accepts(world, coords, RequestKind::Vector, attempt)
+                    && style
+                        .layers
+                        .iter()
+                        .any(|layer| layer.id == bucket.style_layer_id)
+                {
+                    crate::vector::content::accept_symbols(world, bucket);
                 }
             }
             Ok(())

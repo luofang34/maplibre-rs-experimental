@@ -31,7 +31,7 @@ impl<E: Environment, T: VectorTransferables> System for PopulateWorldSystem<E, T
         "populate_world_system".into()
     }
 
-    fn run(&mut self, MapContext { world, .. }: &mut MapContext) -> SystemResult {
+    fn run(&mut self, MapContext { world, style, .. }: &mut MapContext) -> SystemResult {
         let messages = self.kernel.apc().receive(|message| {
             message.has_tag(RequestKind::Vector.message_tag())
                 || message.has_tag(T::TileTessellated::message_tag())
@@ -72,8 +72,16 @@ impl<E: Environment, T: VectorTransferables> System for PopulateWorldSystem<E, T
                 }
             } else if message.has_tag(T::LayerTessellated::message_tag()) {
                 let message = message.into_transferable::<T::LayerTessellated>()?;
-                if tile_retry::accepts(world, message.coords(), RequestKind::Vector, attempt) {
-                    super::content::accept_vector(world, message.to_bucket());
+                // A layer removed while its tile was in flight must not come back with the reply.
+                let coords = message.coords();
+                let bucket = message.to_bucket();
+                if tile_retry::accepts(world, coords, RequestKind::Vector, attempt)
+                    && style
+                        .layers
+                        .iter()
+                        .any(|layer| layer.id == bucket.style_layer_id)
+                {
+                    super::content::accept_vector(world, bucket);
                 }
             } else if message.has_tag(T::LayerIndexed::message_tag()) {
                 let message = message.into_transferable::<T::LayerIndexed>()?;
