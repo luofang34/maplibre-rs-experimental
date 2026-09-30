@@ -47,7 +47,8 @@ mod terrain_coverage;
 mod xr;
 
 pub use processed::{
-    process_geojson_layers, process_tile_layers, ProcessedLayers, SymbolLayer, VectorLayer,
+    process_geojson_layers, process_geojson_layers_with_atlas, process_tile_layers,
+    process_tile_layers_with_atlas, ProcessedLayers, SymbolLayer, VectorLayer,
 };
 pub use xr::XrFrameError;
 
@@ -223,6 +224,23 @@ impl HeadlessMap {
                 .entry(layer.coords())
                 .or_insert_with(Vec::new)
                 .push((*layer).to_bucket());
+        }
+        // A tile whose only layers are symbols is still a delivered tile, as when a worker
+        // reports it finished, or its labels would never be covered.
+        for coords in symbols_by_tile.keys() {
+            if tiles
+                .query::<&VectorLayerBucketComponent>(*coords)
+                .is_none()
+            {
+                tiles
+                    .spawn_mut(*coords)
+                    .ok_or(HeadlessMapOperationError::InvalidTile { coords: *coords })?
+                    .insert(VectorLayerBucketComponent {
+                        done: true,
+                        failed: false,
+                        layers: Vec::new(),
+                    });
+            }
         }
         for (coords, layers) in symbols_by_tile {
             tiles

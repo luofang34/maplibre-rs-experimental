@@ -199,6 +199,8 @@ pub struct GeoJsonTileRequest {
     pub source_name: String,
     /// Projection controlling tessellation density and antimeridian policy.
     pub projection: ProjectionType,
+    /// Glyphs and sprites for the layers' symbols; the bundled Latin fallback when absent.
+    pub atlas: Option<std::sync::Arc<crate::sdf::assets::SymbolAtlas>>,
 }
 
 /// Whether one GeoJSON feature passes a layer filter.
@@ -390,7 +392,10 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
             }
             LayerPaint::Symbol(symbol_paint) => {
                 let zoom = f64::from(u8::from(coords.z));
-                let atlas = crate::sdf::assets::fallback_atlas();
+                let atlas = request
+                    .atlas
+                    .clone()
+                    .unwrap_or_else(crate::sdf::assets::fallback_atlas);
                 let tessellator =
                     TextTessellator::with_assets(symbol_paint.clone(), zoom, atlas.clone());
                 let mut projecting = ProjectingTessellator::new(coords, tessellator);

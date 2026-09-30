@@ -4,7 +4,7 @@
 //! checked without a GPU. Vector and symbol layers are kept apart, as the world stores them in
 //! different tile components.
 
-use std::ops::Deref;
+use std::{ops::Deref, sync::Arc};
 
 use crate::{
     coords::WorldTileCoords,
@@ -12,9 +12,10 @@ use crate::{
     headless::map::{HeadlessContext, HeadlessMapOperationError},
     io::apc::Message,
     projection::ProjectionType,
+    sdf::assets::{fallback_atlas, SymbolAtlas},
     style::layer::StyleLayer,
     vector::{
-        process_vector_tile,
+        process_vector_tile_with_assets,
         transferables::{LayerTessellated, SymbolLayerTessellated},
         DefaultVectorTransferables, ProcessVectorContext, VectorTileRequest, VectorTransferables,
     },
@@ -63,17 +64,29 @@ impl ProcessedLayers {
     }
 }
 
-/// Tessellates one vector source tile for a style layer.
+/// Tessellates one vector source tile for a style layer with the bundled fallback glyphs.
 pub fn process_tile_layers(
     tile_data: &[u8],
     layer: &StyleLayer,
     coords: WorldTileCoords,
     projection: ProjectionType,
 ) -> Result<ProcessedLayers, HeadlessMapOperationError> {
+    process_tile_layers_with_atlas(tile_data, layer, coords, projection, None)
+}
+
+/// Tessellates one vector source tile for a style layer; symbol layers use `atlas` for their
+/// glyphs and sprites, or the bundled fallback when it is `None`.
+pub fn process_tile_layers_with_atlas(
+    tile_data: &[u8],
+    layer: &StyleLayer,
+    coords: WorldTileCoords,
+    projection: ProjectionType,
+    atlas: Option<Arc<SymbolAtlas>>,
+) -> Result<ProcessedLayers, HeadlessMapOperationError> {
     let mut processor = ProcessVectorContext::<DefaultVectorTransferables, HeadlessContext>::new(
         HeadlessContext::default(),
     );
-    process_vector_tile(
+    process_vector_tile_with_assets(
         tile_data,
         VectorTileRequest {
             coords,
@@ -81,6 +94,7 @@ pub fn process_tile_layers(
             projection,
         },
         &mut processor,
+        atlas.unwrap_or_else(fallback_atlas),
     )
     .map_err(|source| HeadlessMapOperationError::Vector { source })?;
     let messages = processor.take_context().messages.deref().take();
@@ -95,6 +109,19 @@ pub fn process_geojson_layers(
     coords: WorldTileCoords,
     projection: ProjectionType,
 ) -> Result<ProcessedLayers, HeadlessMapOperationError> {
+    process_geojson_layers_with_atlas(geojson, source_name, layers, coords, projection, None)
+}
+
+/// Tessellates inline GeoJSON for the style layers drawing a source; symbol layers use `atlas`
+/// for their glyphs and sprites, or the bundled fallback when it is `None`.
+pub fn process_geojson_layers_with_atlas(
+    geojson: &serde_json::Value,
+    source_name: &str,
+    layers: Vec<StyleLayer>,
+    coords: WorldTileCoords,
+    projection: ProjectionType,
+    atlas: Option<Arc<SymbolAtlas>>,
+) -> Result<ProcessedLayers, HeadlessMapOperationError> {
     let context = HeadlessContext::default();
     process_geojson_features::<DefaultVectorTransferables, HeadlessContext>(
         geojson,
@@ -103,6 +130,7 @@ pub fn process_geojson_layers(
             layers,
             source_name: source_name.to_owned(),
             projection,
+            atlas,
         },
         &context,
     )
