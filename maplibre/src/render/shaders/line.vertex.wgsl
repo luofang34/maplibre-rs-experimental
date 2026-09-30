@@ -28,7 +28,7 @@ fn main(
     @location(7) translate4: vec4<f32>,
     @location(8) color: vec4<f32>,
     @location(9) line_scale: vec2<f32>,
-    @location(10) z_index: f32,
+    @location(10) packed_style: f32,
     @location(11) viewport_width: f32,
     @location(12) viewport_height: f32,
     @location(13) line_width: f32,
@@ -36,7 +36,13 @@ fn main(
     @location(15) layer_translate: vec2<f32>,
 ) -> VertexOutput {
     let normal = path.xy;
-    let line_width_px = line_width * line_scale.x;
+    // A width or offset that varies by feature rides in the mantissa of `packed_style`.
+    let payload = bitcast<u32>(packed_style) & 0x7fffffu;
+    let per_feature = payload != 0u;
+    let feature_width = f32((payload >> 11u) & 0xfffu) / 16.0;
+    let feature_offset = f32(i32(payload & 0x7ffu) - 1024) / 8.0;
+    let line_width_px = select(line_width, feature_width, per_feature) * line_scale.x;
+    let line_offset = select(line_style.x, feature_offset, per_feature);
     let gapwidth = line_style.y * 0.5;
 
     let halfwidth = line_width_px * 0.5;
@@ -79,7 +85,7 @@ fn main(
     // A join vertex carries the miter or bevel offset as a normal longer or shorter than one,
     // and the edge lies that much further out along it.
     let extent = length(normal);
-    let moved = outset * max(extent, 1.0) + side * line_style.x;
+    let moved = outset * max(extent, 1.0) + side * line_offset;
     let clip_offset = vec2<f32>(dir.x * moved * px_to_clip_x, dir.y * moved * px_to_clip_y);
     if spatial {
         // Decks share the map-space width of adjoining draped roads, including foreshortening.

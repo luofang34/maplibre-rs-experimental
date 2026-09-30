@@ -42,6 +42,8 @@ fn path_length(path: &Path) -> f32 {
 }
 
 mod circle;
+mod line_style;
+pub use line_style::LineFeatureStyle;
 mod extrusion;
 pub use extrusion::ExtrusionOptions;
 
@@ -209,6 +211,8 @@ pub struct ZeroTessellator<I: std::ops::Add + From<lyon::tessellation::VertexId>
     /// When true, polygon geometry is tessellated as strokes (outlines) instead of fills.
     /// This is used when a line-type style layer references polygon source geometry.
     pub is_line_layer: bool,
+    /// Set when a line's width or offset varies by feature; packed into each stroke vertex.
+    pub line_feature_style: Option<LineFeatureStyle>,
     current_index: usize,
 }
 
@@ -226,6 +230,7 @@ impl<I: std::ops::Add + From<lyon::tessellation::VertexId> + MaxIndex> Default
             fallback_color: [0.0, 0.0, 0.0, 1.0],
             style_property: None,
             is_line_layer: false,
+            line_feature_style: None,
             line_gradient: false,
             stroke: Default::default(),
             line_length: 0.0,
@@ -293,6 +298,7 @@ where
     fn tessellate_strokes(&mut self) -> GeoResult<()> {
         let path = self.path_builder.replace(Path::builder()).build();
         self.line_length = self.line_length.max(path_length(&path));
+        let first_vertex = self.buffer.vertices.len();
 
         StrokeTessellator::new()
             .tessellate_path(
@@ -312,6 +318,12 @@ where
                 &mut BuffersBuilder::new(&mut self.buffer, VertexConstructor {}),
             )
             .map_err(|error| GeozeroError::Geometry(error.to_string()))?;
+        if let Some(style) = &self.line_feature_style {
+            let packed = style.pack(&self.feature_properties);
+            for vertex in &mut self.buffer.vertices[first_vertex..] {
+                vertex.edge_distance = packed;
+            }
+        }
         Ok(())
     }
 

@@ -16,7 +16,8 @@ pub struct ShaderVertex {
     pub distance: f32,
     /// Height above the body datum for spatial lines; a negative sentinel keeps cartographic draping.
     pub elevation: f32,
-    /// Distance along the ring of an extruded wall, in tile units; zero elsewhere.
+    /// Distance along the ring of an extruded wall, in tile units; a stroke packs its
+    /// per-feature width and offset here instead. Zero elsewhere.
     pub edge_distance: f32,
 }
 

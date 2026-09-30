@@ -153,7 +153,7 @@ fn validation_observes_programmatic_property_changes() {
 fn expression_diagnostics_follow_the_renderers_evaluation_context() {
     let style = style_with_layer(serde_json::json!({
         "id": "roads", "type": "line", "paint": {
-            "line-width": ["get", "width"],
+            "line-gap-width": ["get", "width"],
             "line-color": ["get", "color"],
             "line-opacity": ["coalesce", ["global-state", "opacity"], 1]
         }
@@ -164,7 +164,7 @@ fn expression_diagnostics_follow_the_renderers_evaluation_context() {
     assert_eq!(errors.len(), 1, "{errors:?}");
     assert!(errors
         .iter()
-        .any(|error| error.to_string().contains("paint.line-width")));
+        .any(|error| error.to_string().contains("paint.line-gap-width")));
     assert!(
         !errors
             .iter()

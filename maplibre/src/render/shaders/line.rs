@@ -30,6 +30,12 @@ impl Shader for LineShader {
                             wgpu::VertexFormat::Float32x4,
                             1,
                         ),
+                        // Packed per-feature width and offset; zero bits leave the layer's own.
+                        attribute(
+                            std::mem::offset_of!(ShaderVertex, edge_distance) as u64,
+                            wgpu::VertexFormat::Float32,
+                            10,
+                        ),
                     ],
                 },
                 tile_layout(),
@@ -38,7 +44,6 @@ impl Shader for LineShader {
                     array_stride: std::mem::size_of::<ShaderLayerMetadata>() as u64,
                     step_mode: wgpu::VertexStepMode::Instance,
                     attributes: vec![
-                        attribute(0, wgpu::VertexFormat::Float32, 10),
                         attribute(
                             wgpu::VertexFormat::Float32.size(),
                             wgpu::VertexFormat::Float32,
