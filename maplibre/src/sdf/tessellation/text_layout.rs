@@ -102,7 +102,7 @@ fn anchored_offset(
     (properties, zoom): (&crate::style::expression::FeatureProperties, f64),
 ) -> [f32; 2] {
     if variable.is_empty() || !paint.properties.contains_key("text-radial-offset") {
-        return offset(paint, "text-offset", 24.0);
+        return offset(paint, "text-offset", 24.0, (properties, zoom));
     }
     let radius = paint.number("text-radial-offset", properties, zoom, 0.0) * 24.0;
     let diagonal = radius / std::f32::consts::SQRT_2;

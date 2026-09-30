@@ -66,7 +66,7 @@ pub(super) fn append(
         let ratio = icon.metrics[3];
         let width = icon.rect[2] as f32 / ratio;
         let height = icon.rect[3] as f32 / ratio;
-        let offset = offset(paint, "icon-offset", 1.0);
+        let offset = offset(paint, "icon-offset", 1.0, (&symbol.properties, zoom));
         let fractions = anchor_fractions(
             &paint
                 .text("icon-anchor", &symbol.properties, zoom)
@@ -216,17 +216,26 @@ fn fit_to_text(
     Some([min_x, min_y, max_x, max_y])
 }
 
-pub(super) fn offset(paint: &SymbolPaint, name: &str, scale: f32) -> [f32; 2] {
-    let read = |i| {
-        paint
-            .properties
-            .get(name)
-            .and_then(|value| value.get(i))
-            .and_then(|value| value.as_f64())
-            .unwrap_or(0.0) as f32
-            * scale
+/// The `[x, y]` offset a layout property gives one symbol, times `scale`; zero without one.
+pub(super) fn offset(
+    paint: &SymbolPaint,
+    name: &str,
+    scale: f32,
+    (properties, zoom): (&crate::style::expression::FeatureProperties, f64),
+) -> [f32; 2] {
+    let Some(value) = paint.properties.get(name) else {
+        return [0.0; 2];
     };
-    [read(0), read(1)]
+    // A written pair is the common case and needs no expression.
+    let [x, y] = match crate::style::translation::Pair::from_json(value) {
+        Some(pair) => pair.0,
+        None => {
+            crate::style::property::StyleProperty::<crate::style::translation::Pair>::parse(value)
+                .evaluate_for(properties, zoom)
+                .map_or([0.0; 2], |pair| pair.0)
+        }
+    };
+    [x as f32 * scale, y as f32 * scale]
 }
 
 pub(super) fn anchor_fractions(anchor: &str) -> [f32; 2] {

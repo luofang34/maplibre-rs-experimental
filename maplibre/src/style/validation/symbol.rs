@@ -17,7 +17,7 @@ enum Property {
     Text,
     Boolean,
     BooleanExpression,
-    Offset,
+    Pair(super::Evaluation),
     Padding,
     Anchors,
     Font,
@@ -55,7 +55,7 @@ fn property(name: &str) -> Option<Property> {
         | "icon-optional" => Property::BooleanExpression,
         "text-overlap" | "icon-overlap" => Property::Enum(&["never", "always", "cooperative"]),
         "text-keep-upright" | "icon-keep-upright" => Property::Boolean,
-        "text-offset" | "icon-offset" => Property::Offset,
+        "text-offset" | "icon-offset" => Property::Pair(Feature),
         "text-font" => Property::Font,
         "text-transform" => Property::Enum(&["none", "uppercase", "lowercase"]),
         "symbol-placement" => Property::Enum(&["point", "line", "line-center"]),
@@ -64,7 +64,7 @@ fn property(name: &str) -> Option<Property> {
         | "text-rotation-alignment"
         | "icon-rotation-alignment" => Property::Enum(&["auto", "map", "viewport"]),
         "symbol-height-anchor" => Property::Enum(&["ground", "absolute"]),
-        "text-translate" | "icon-translate" => Property::Offset,
+        "text-translate" | "icon-translate" => Property::Pair(Zoom),
         "text-translate-anchor" | "icon-translate-anchor" => Property::Enum(&["map", "viewport"]),
         "text-variable-anchor" => Property::Anchors,
         "icon-text-fit" => Property::Enum(&["none", "width", "height", "both"]),
@@ -114,6 +114,7 @@ impl LayerValidation<'_> {
             let path = format!("{scope}.{name}");
             match property(name) {
                 Some(Property::Color) => self.property(&path, Some(&StyleProperty::<csscolorparser::Color>::parse(value)), Feature),
+                Some(Property::Pair(evaluation)) => self.property(&path, Some(&StyleProperty::<crate::style::translation::Pair>::parse(value)), evaluation),
                 Some(Property::Number(evaluation)) => self.property(&path, Some(&StyleProperty::<f32>::parse(value)), evaluation),
                 Some(Property::Text) => self.property(&path, Some(&StyleProperty::<TextField>::parse(value)), Feature),
                 Some(Property::BooleanExpression) => self.property(&path, Some(&StyleProperty::<bool>::parse(value)), Feature),
@@ -136,9 +137,6 @@ impl LayerValidation<'_> {
 fn valid_literal(property: &Property, value: &Value) -> bool {
     match property {
         Property::Boolean => value.is_boolean(),
-        Property::Offset => value
-            .as_array()
-            .is_some_and(|items| items.len() == 2 && items.iter().all(Value::is_number)),
         Property::Anchors => value.as_array().is_some_and(|items| {
             items.iter().all(|item| {
                 item.as_str().is_some_and(|anchor| {

@@ -29,6 +29,13 @@ impl PropertyValue for Pair {
     }
 
     fn from_literal(json: &serde_json::Value) -> Option<Self> {
+        Self::from_json(json)
+    }
+}
+
+impl Pair {
+    /// A pair written out as a JSON array of two numbers.
+    pub fn from_json(json: &serde_json::Value) -> Option<Self> {
         match json.as_array()?.as_slice() {
             [x, y] => Some(Self([x.as_f64()?, y.as_f64()?])),
             _ => None,
