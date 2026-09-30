@@ -17,6 +17,6 @@ fn main(
     }
     let uv = fract(pattern_position / pattern.size.xy);
     let texel = textureSample(pattern_texture, pattern_sampler, uv);
-    let alpha = texel.a * v_color.a;
-    return vec4<f32>(texel.rgb * alpha, alpha);
+    // The texture holds premultiplied colours, so filtering does not fringe the edges.
+    return texel * v_color.a;
 }

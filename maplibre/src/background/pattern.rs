@@ -75,7 +75,7 @@ impl BackgroundPatternGpu {
     }
 
     /// Points the pattern at the map the view looks at, as far as the frame can see it.
-    pub(crate) fn write(&self, queue: &wgpu::Queue, view: &ViewState) {
+    pub(crate) fn write(&self, queue: &wgpu::Queue, view: &ViewState, physical: [f32; 2]) {
         use cgmath::{Matrix4, SquareMatrix, Vector3};
 
         let center = view.camera().position();
@@ -98,7 +98,9 @@ impl BackgroundPatternGpu {
         let uniforms = ViewUniforms {
             clip_to_map: columns.map(|column| column.map(|value| value as f32)),
             center: [upper_x, upper_y, lower_x, lower_y],
-            viewport: [view.width() as f32, view.height() as f32, 0.0, 0.0],
+            // The shader reads pixel positions of the frame, which may have more pixels than
+            // the view has logical ones.
+            viewport: [physical[0], physical[1], 0.0, 0.0],
         };
         queue.write_buffer(&self.buffer, 0, bytemuck::bytes_of(&uniforms));
     }

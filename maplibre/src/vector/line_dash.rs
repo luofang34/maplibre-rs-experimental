@@ -375,7 +375,7 @@ fn line_image(paint: &crate::style::layer::LinePaint, style: &Style, zoom: f64) 
                 width: image.width,
                 height: image.height,
                 display: [image.width as f32 / ratio, image.height as f32 / ratio],
-                data: image.data.clone(),
+                data: super::pattern::premultiplied(&image.data),
             }
         }
         _ => LineImage::None,

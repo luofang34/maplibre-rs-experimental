@@ -53,6 +53,6 @@ fn main(
     let offset = low - size * floor(low / size);
     let uv = fract((delta + offset) / size);
     let texel = textureSample(pattern_texture, pattern_sampler, uv);
-    let alpha = texel.a * v_color.a;
-    return Output(vec4<f32>(texel.rgb * alpha, alpha));
+    // The texture holds premultiplied colours, so filtering does not fringe the edges.
+    return Output(texel * v_color.a);
 }

@@ -84,6 +84,18 @@ fn pattern_scale(zoom: f64) -> f32 {
     2.0_f64.powf(zoom - zoom.floor()) as f32
 }
 
+/// The image's colours multiplied by its alpha, which filters without a dark fringe.
+pub(super) fn premultiplied(data: &[u8]) -> Vec<u8> {
+    let mut out = data.to_vec();
+    for texel in out.chunks_exact_mut(4) {
+        let alpha = u16::from(texel[3]);
+        for channel in &mut texel[..3] {
+            *channel = ((u16::from(*channel) * alpha + 127) / 255) as u8;
+        }
+    }
+    out
+}
+
 fn size(display: [f32; 2], scale: f32) -> [f32; 4] {
     [display[0] * scale, display[1] * scale, 0.0, 0.0]
 }
@@ -189,7 +201,7 @@ impl PatternResources {
                 view_formats: &[],
             },
             wgpu::util::TextureDataOrder::LayerMajor,
-            &image.data,
+            &premultiplied(&image.data),
         );
         let ratio = image.pixel_ratio.max(0.01);
         let display = [image.width as f32 / ratio, image.height as f32 / ratio];

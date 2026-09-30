@@ -65,7 +65,12 @@ pub fn queue_system(
         .resources
         .get::<super::pattern::BackgroundPatternGpu>()
     {
-        gpu.write(&renderer.queue, view_state);
+        let size = renderer.state().surface().size();
+        gpu.write(
+            &renderer.queue,
+            view_state,
+            [size.width() as f32, size.height() as f32],
+        );
     }
     {
         let Some((layer_item_phase, translucent_phase)) = world.resources.query_mut::<(

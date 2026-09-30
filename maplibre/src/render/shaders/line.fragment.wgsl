@@ -61,7 +61,9 @@ fn main(in: FragmentInput) -> Output {
         let texel = textureSample(ramp_texture, ramp_sampler, vec2<f32>(along, 0.5 * in.across + 0.5));
         let pattern_coverage = texel.a * in.v_color.a * alpha;
         if pattern_coverage < 0.01 { discard; }
-        return Output(vec4<f32>(texel.rgb, pattern_coverage));
+        // The pattern is premultiplied, so filtering does not fringe its edges; blending
+        // takes straight colours.
+        return Output(vec4<f32>(texel.rgb / max(texel.a, 1e-4), pattern_coverage));
     }
     let use_ramp = dash_period.y > 0.5;
     let color = select(in.v_color.rgb, ramp.rgb, use_ramp);

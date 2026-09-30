@@ -36,6 +36,6 @@ fn pattern_main(
     let offset = low - size * floor(low / size);
     let uv = fract((pattern_pixels + offset) / size);
     let texel = textureSample(pattern_texture, pattern_sampler, uv);
-    // The image is straight alpha; the light and the opacity scale it as a premultiplied colour.
-    return Output(vec4<f32>(texel.rgb * texel.a, texel.a) * lighting);
+    // The image is premultiplied; the light and the opacity scale it as such.
+    return Output(texel * lighting);
 }
