@@ -19,6 +19,14 @@ pub(crate) struct BackgroundPatternGpu {
     pipeline: wgpu::RenderPipeline,
     buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
+    globe: Option<GlobePattern>,
+}
+
+/// The pipeline of pattern backgrounds on the globe and the size of the world it repeats over.
+struct GlobePattern {
+    pipeline: wgpu::RenderPipeline,
+    buffer: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
 }
 
 fn view_layout_entries() -> Vec<wgpu::BindGroupLayoutEntry> {
@@ -71,7 +79,47 @@ impl BackgroundPatternGpu {
             pipeline,
             buffer,
             bind_group,
+            globe: None,
         }
+    }
+
+    /// Adds the globe pipeline, whose third bind group is the size of the world.
+    pub(crate) fn with_globe(
+        &mut self,
+        device: &wgpu::Device,
+        pipeline: wgpu::RenderPipeline,
+        world_layout: &wgpu::BindGroupLayout,
+    ) {
+        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("globe background pattern world"),
+            contents: bytemuck::bytes_of(&[1.0_f32; 4]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("globe background pattern world"),
+            layout: world_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: buffer.as_entire_binding(),
+            }],
+        });
+        self.globe = Some(GlobePattern {
+            pipeline,
+            buffer,
+            bind_group,
+        });
+    }
+
+    /// Whether the globe pipeline has been added.
+    pub(crate) fn has_globe(&self) -> bool {
+        self.globe.is_some()
+    }
+
+    /// The globe pipeline and the bind group of the world's size.
+    pub(crate) fn globe(&self) -> Option<(&wgpu::RenderPipeline, &wgpu::BindGroup)> {
+        self.globe
+            .as_ref()
+            .map(|globe| (&globe.pipeline, &globe.bind_group))
     }
 
     /// Points the pattern at the map the view looks at, as far as the frame can see it.
@@ -103,6 +151,15 @@ impl BackgroundPatternGpu {
             viewport: [physical[0], physical[1], 0.0, 0.0],
         };
         queue.write_buffer(&self.buffer, 0, bytemuck::bytes_of(&uniforms));
+        if let Some(globe) = &self.globe {
+            // Map pixels the world spans at the view's zoom, which the pattern repeats over.
+            let world = (crate::coords::TILE_SIZE * 2_f64.powf(view.zoom().value())) as f32;
+            queue.write_buffer(
+                &globe.buffer,
+                0,
+                bytemuck::bytes_of(&[world, 0.0, 0.0, 0.0]),
+            );
+        }
     }
 
     pub(crate) fn pipeline(&self) -> &wgpu::RenderPipeline {
@@ -112,4 +169,12 @@ impl BackgroundPatternGpu {
     pub(crate) fn view(&self) -> &wgpu::BindGroup {
         &self.bind_group
     }
+}
+
+/// The bind group layout of the world-size uniform the globe pattern reads.
+pub(crate) fn world_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("globe background pattern world"),
+        entries: &view_layout_entries(),
+    })
 }

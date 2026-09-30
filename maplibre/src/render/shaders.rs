@@ -15,7 +15,7 @@ mod tile_mask;
 mod vertex;
 
 pub use background::{
-    AtmosphereLayerMetadata, AtmosphereShader, BackgroundLayerMetadata, BackgroundPatternShader,
+    AtmosphereLayerMetadata, AtmosphereShader, BackgroundLayerMetadata, BackgroundPatternShader, GlobeBackgroundPatternShader,
     BackgroundShader, GlobeBackgroundShader, SkyLayerMetadata, SkyShader,
 };
 pub use circle::CircleShader;

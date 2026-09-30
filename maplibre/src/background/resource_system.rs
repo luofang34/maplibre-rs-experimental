@@ -7,8 +7,8 @@ use crate::{
         projection::ProjectionGpuResources,
         resource::{RenderPipeline, TilePipeline},
         shaders::{
-            AtmosphereShader, BackgroundPatternShader, BackgroundShader, GlobeBackgroundShader,
-            Shader, SkyShader,
+            AtmosphereShader, BackgroundPatternShader, BackgroundShader,
+            GlobeBackgroundPatternShader, GlobeBackgroundShader, Shader, SkyShader,
         },
     },
 };
@@ -82,6 +82,49 @@ pub fn resource_system(
         .get_mut::<crate::vector::pattern::PatternResources>()
     {
         patterns.update(device, queue, style, view_state.style_zoom().value());
+    }
+    if world
+        .resources
+        .get::<super::pattern::BackgroundPatternGpu>()
+        .is_some_and(|gpu| !gpu.has_globe())
+    {
+        let projection_layout = match world.resources.get::<Eventually<ProjectionGpuResources>>() {
+            Some(Initialized(resources)) => Some(resources.bind_group_layout().clone()),
+            _ => None,
+        };
+        if let Some(projection_layout) = projection_layout {
+            let shader = GlobeBackgroundPatternShader {
+                format: surface.surface_format(),
+            };
+            let image_layouts = super::pattern::layouts(device);
+            let world_layout = super::pattern::world_layout(device);
+            let pipeline = TilePipeline::new(
+                "globe_background_pattern_pipeline".into(),
+                *settings,
+                shader.describe_vertex(),
+                shader.describe_fragment(),
+                crate::render::resource::TilePipelineOptions {
+                    depth_stencil_enabled: true,
+                    update_stencil: false,
+                    debug_stencil: true,
+                    wireframe: false,
+                    multisampling: surface.is_multisampling_supported(settings.msaa),
+                    textured: false,
+                },
+            )
+            .with_depth_write()
+            .describe_render_pipeline()
+            .initialize_with_prefix_layouts(
+                device,
+                &[&projection_layout, &image_layouts[0], &world_layout],
+            );
+            if let Some(gpu) = world
+                .resources
+                .get_mut::<super::pattern::BackgroundPatternGpu>()
+            {
+                gpu.with_globe(device, pipeline, &world_layout);
+            }
+        }
     }
     let Some((
         background_pipeline,

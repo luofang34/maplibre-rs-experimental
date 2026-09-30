@@ -28,7 +28,8 @@ pub struct BackgroundBuffers {
 }
 
 use super::render_commands::{
-    DrawAtmosphere, DrawBackground, DrawBackgroundPattern, DrawGlobeBackground, DrawSky,
+    DrawAtmosphere, DrawBackground, DrawBackgroundPattern, DrawGlobeBackground,
+    DrawGlobeBackgroundPattern, DrawSky,
 };
 
 /// Appends visible background, sky and atmosphere items and uploads their frame metadata.
@@ -127,14 +128,16 @@ pub fn queue_system(
                 world_rows,
             });
 
-            let draw_function: Box<dyn crate::render::render_phase::Draw<LayerItem>> = if uses_globe
-            {
-                Box::new(DrawState::<LayerItem, DrawGlobeBackground>::new())
-            } else if patterned.contains(layer.id.as_str()) {
-                Box::new(DrawState::<LayerItem, DrawBackgroundPattern>::new())
-            } else {
-                Box::new(DrawState::<LayerItem, DrawBackground>::new())
-            };
+            let draw_function: Box<dyn crate::render::render_phase::Draw<LayerItem>> =
+                if uses_globe && patterned.contains(layer.id.as_str()) {
+                    Box::new(DrawState::<LayerItem, DrawGlobeBackgroundPattern>::new())
+                } else if uses_globe {
+                    Box::new(DrawState::<LayerItem, DrawGlobeBackground>::new())
+                } else if patterned.contains(layer.id.as_str()) {
+                    Box::new(DrawState::<LayerItem, DrawBackgroundPattern>::new())
+                } else {
+                    Box::new(DrawState::<LayerItem, DrawBackground>::new())
+                };
             layer_item_phase.add(LayerItem {
                 projection: ProjectionBinding::View,
                 draw_function,

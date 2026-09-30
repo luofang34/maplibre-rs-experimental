@@ -69,6 +69,35 @@ pub struct GlobeBackgroundShader {
     pub format: wgpu::TextureFormat,
 }
 
+/// Shader repeating an image over the projected globe surface in place of the colour.
+pub struct GlobeBackgroundPatternShader {
+    /// Render-target format.
+    pub format: wgpu::TextureFormat,
+}
+
+impl Shader for GlobeBackgroundPatternShader {
+    fn describe_vertex(&self) -> VertexState {
+        VertexState {
+            source: concat!(
+                include_str!("projection.vertex.wgsl"),
+                include_str!("globe_background_pattern.vertex.wgsl")
+            ),
+            entry_point: "main",
+            buffers: globe_background_buffers(),
+        }
+    }
+
+    fn describe_fragment(&self) -> FragmentState {
+        FragmentState {
+            source: include_str!("globe_background_pattern.fragment.wgsl"),
+            ..GlobeBackgroundShader {
+                format: self.format,
+            }
+            .describe_fragment()
+        }
+    }
+}
+
 /// Per-draw inputs for GL JS-compatible atmospheric scattering.
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]

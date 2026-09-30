@@ -115,6 +115,41 @@ impl RenderCommand<LayerItem> for DrawGlobeBackgroundQuad {
     }
 }
 
+/// Binds the globe pattern pipeline, the image of the item's layer and the size of the world.
+pub struct SetGlobeBackgroundPatternPipeline;
+impl RenderCommand<LayerItem> for SetGlobeBackgroundPatternPipeline {
+    fn render<'w>(
+        world: &'w World,
+        item: &LayerItem,
+        pass: &mut wgpu::RenderPass<'w>,
+    ) -> RenderCommandResult {
+        let (Some(gpu), Some(patterns), Some(Initialized(projection_resources))) = (
+            world
+                .resources
+                .get::<crate::background::pattern::BackgroundPatternGpu>(),
+            world
+                .resources
+                .get::<crate::vector::pattern::PatternResources>(),
+            world.resources.get::<Eventually<ProjectionGpuResources>>(),
+        ) else {
+            return RenderCommandResult::Failure;
+        };
+        let (Some((pipeline, world_size)), Some(image)) =
+            (gpu.globe(), patterns.binding(&item.style_layer))
+        else {
+            return RenderCommandResult::Failure;
+        };
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, projection_resources.bind_group(), &[]);
+        pass.set_bind_group(1, image, &[]);
+        pass.set_bind_group(2, world_size, &[]);
+        RenderCommandResult::Success
+    }
+}
+
+/// Draws the globe background from an image.
+pub type DrawGlobeBackgroundPattern = (SetGlobeBackgroundPatternPipeline, DrawGlobeBackgroundQuad);
+
 /// Binds the globe-background pipeline and draws the globe surface.
 pub type DrawGlobeBackground = (SetGlobeBackgroundPipeline, DrawGlobeBackgroundQuad);
 
