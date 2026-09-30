@@ -9,5 +9,7 @@ struct SymbolUniforms {
     icon_layout: vec4<f32>,
     atlas: vec4<f32>,
     placement: vec4<f32>,
+    // Screen-pixel shift of text (xy) and icons (zw) that translate in viewport axes.
+    translate: vec4<f32>,
 };
 @group(1) @binding(2) var<uniform> symbol: SymbolUniforms;

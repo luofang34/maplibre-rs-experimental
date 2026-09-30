@@ -23,6 +23,16 @@ pub(crate) fn viewport_translation(paint: &SymbolPaint, prefix: &str, zoom: f64)
             == Some("viewport")
 }
 
+/// The shift in screen pixels of a symbol that translates in viewport axes; none when the
+/// translation follows the map.
+pub(crate) fn viewport_shift(paint: &SymbolPaint, prefix: &str, zoom: f64) -> [f32; 2] {
+    if viewport_translation(paint, prefix, zoom) {
+        translate(paint, prefix, zoom).map(|pixels| pixels as f32)
+    } else {
+        [0.0; 2]
+    }
+}
+
 /// The shift of the anchor in tile units; a translation in viewport axes is not applied.
 pub(crate) fn tile_translation(paint: &SymbolPaint, prefix: &str, zoom: f64) -> [f64; 2] {
     if viewport_translation(paint, prefix, zoom) {

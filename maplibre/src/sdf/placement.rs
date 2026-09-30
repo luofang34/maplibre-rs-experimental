@@ -92,7 +92,19 @@ pub(super) fn screen_boxes(
             projection,
             uniforms,
         };
-        let bounds = placement.bounds(&part)?;
+        let mut bounds = placement.bounds(&part)?;
+        // A translation in viewport axes moves the box on the screen.
+        let shift = if part.text {
+            [uniforms.translate[0], uniforms.translate[1]]
+        } else {
+            [uniforms.translate[2], uniforms.translate[3]]
+        };
+        bounds = [
+            bounds[0] + f64::from(shift[0]),
+            bounds[1] + f64::from(shift[1]),
+            bounds[2] + f64::from(shift[0]),
+            bounds[3] + f64::from(shift[1]),
+        ];
         let padding = f64::from(if part.text {
             uniforms.placement[0]
         } else {

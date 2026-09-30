@@ -19,6 +19,9 @@ pub(super) struct SymbolUniforms {
     pub icon_layout: [f32; 4],
     pub atlas: [f32; 4],
     pub placement: [f32; 4],
+    /// Shift in screen pixels of text (x, y) and icons (z, w) whose translation follows the
+    /// viewport.
+    pub translate: [f32; 4],
 }
 
 /// Whether text along a line is placed glyph by glyph: it lies on the map plane and turns with
@@ -62,6 +65,11 @@ impl SymbolUniforms {
                 keep_upright(paint, "text", true),
                 keep_upright(paint, "icon", false),
             ],
+            translate: {
+                let [text_x, text_y] = crate::sdf::translation::viewport_shift(paint, "text", zoom);
+                let [icon_x, icon_y] = crate::sdf::translation::viewport_shift(paint, "icon", zoom);
+                [text_x, text_y, icon_x, icon_y]
+            },
         }
     }
 }

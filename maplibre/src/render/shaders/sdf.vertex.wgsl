@@ -113,6 +113,10 @@ fn main(
         position.x += offset.x * 2.0 / viewport_width * position.w;
         position.y -= offset.y * 2.0 / viewport_height * position.w;
     }
+    // A translation in viewport axes moves the symbol on the screen.
+    let shift = select(symbol.translate.zw, symbol.translate.xy, is_text);
+    position.x += shift.x * 2.0 / viewport_width * position.w;
+    position.y -= shift.y * 2.0 / viewport_height * position.w;
     // A small relative bias resolves coplanar labels without lifting them above unrelated hills.
     position.z += max(abs(position.z) * 2e-5, 1e-10);
     var near_visibility = 1.0;
