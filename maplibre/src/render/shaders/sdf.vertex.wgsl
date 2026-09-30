@@ -91,8 +91,10 @@ fn main(
     let rotation = mat2x2<f32>(cos(angle), sin(angle), -sin(angle), cos(angle));
     // A posed glyph is laid out around its own centre, which the vertex carries in 1/32 pixel.
     let centre = vec2<f32>(f32(a_pixeloffset.x) / 32.0, 0.0);
+    // Text that took a later variable anchor is moved in layout pixels, which the size scales.
+    let anchor_shift = select(vec2<f32>(0.0), pose.xy * scale, is_text);
     let local = select(
-        vec2<f32>(a_pos_offset.zw) / 32.0 * scale + vec2<f32>(a_pixeloffset.xy) / 16.0,
+        vec2<f32>(a_pos_offset.zw) / 32.0 * scale + vec2<f32>(a_pixeloffset.xy) / 16.0 + anchor_shift,
         (vec2<f32>(a_pos_offset.zw) / 32.0 - centre) * scale,
         has_pose);
     let offset = rotation * local;

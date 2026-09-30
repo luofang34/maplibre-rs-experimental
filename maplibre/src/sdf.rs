@@ -145,6 +145,9 @@ pub struct Feature {
     pub str: String,
     /// The line the label follows, when its glyphs are placed along one.
     pub line: Option<LineLabel>,
+    /// Shifts of the text, in layout pixels, that the other anchors of `text-variable-anchor`
+    /// would give it relative to the laid-out one; empty for a label with a single anchor.
+    pub anchor_shifts: Vec<[f32; 2]>,
 }
 
 /// Coordinates measured on the canonical tile grid.

@@ -152,3 +152,26 @@ fn a_placed_line_label_occupies_its_glyph_boxes_only() {
         "the gap between glyphs stays free for other labels"
     );
 }
+
+#[test]
+fn asking_whether_a_label_fits_does_not_take_its_place() {
+    let mut grid = CollisionGrid::new(512.0, 512.0);
+    let rectangles = [Some([10.0, 10.0, 60.0, 30.0]), None];
+    let rules = rules(serde_json::json!({}));
+    assert_eq!(
+        rules.visible(rectangles, &[], &grid, [512.0; 2]),
+        [true, false]
+    );
+    assert_eq!(
+        rules.visible(rectangles, &[], &grid, [512.0; 2]),
+        [true, false]
+    );
+    assert_eq!(
+        rules.place(rectangles, &mut grid, [512.0; 2]),
+        [true, false]
+    );
+    assert_eq!(
+        rules.visible(rectangles, &[], &grid, [512.0; 2]),
+        [false, false]
+    );
+}

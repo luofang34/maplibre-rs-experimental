@@ -47,11 +47,13 @@ fn block<'a>(
         .iter()
         .map(|line| line_width(line, glyphs, spacing))
         .fold(0.0, f32::max);
-    let fractions = anchor_fractions(
-        &paint
+    let anchors = variable_anchors(paint);
+    let anchor = anchors.first().cloned().unwrap_or_else(|| {
+        paint
             .text("text-anchor", &symbol.properties, zoom)
-            .unwrap_or_else(|| "center".into()),
-    );
+            .unwrap_or_else(|| "center".into())
+    });
+    let fractions = anchor_fractions(&anchor);
     let justify = paint
         .text("text-justify", &symbol.properties, zoom)
         .unwrap_or_else(|| "center".into());
@@ -71,8 +73,87 @@ fn block<'a>(
         max_line,
         fractions,
         justify,
-        offset: offset(paint, "text-offset", 24.0),
+        offset: anchored_offset(paint, &anchors, &anchor, (&symbol.properties, zoom)),
     })
+}
+
+/// The anchors `text-variable-anchor` lists, best first; empty without the property.
+pub(super) fn variable_anchors(paint: &SymbolPaint) -> Vec<String> {
+    paint
+        .properties
+        .get("text-variable-anchor")
+        .and_then(|value| value.as_array())
+        .map(|anchors| {
+            anchors
+                .iter()
+                .filter_map(|anchor| anchor.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The text offset in layout pixels for an anchor: `text-radial-offset` pushes the text away
+/// from the point along the anchor's direction, and `text-offset` applies as written when no
+/// radial offset is set or the anchor is fixed.
+fn anchored_offset(
+    paint: &SymbolPaint,
+    variable: &[String],
+    anchor: &str,
+    (properties, zoom): (&crate::style::expression::FeatureProperties, f64),
+) -> [f32; 2] {
+    if variable.is_empty() || !paint.properties.contains_key("text-radial-offset") {
+        return offset(paint, "text-offset", 24.0);
+    }
+    let radius = paint.number("text-radial-offset", properties, zoom, 0.0) * 24.0;
+    let diagonal = radius / std::f32::consts::SQRT_2;
+    let x = match anchor {
+        "top-right" | "bottom-right" => -diagonal,
+        "top-left" | "bottom-left" => diagonal,
+        "left" => radius,
+        "right" => -radius,
+        _ => 0.0,
+    };
+    let y = match anchor {
+        "top-right" | "top-left" => diagonal,
+        "bottom-right" | "bottom-left" => -diagonal,
+        "top" => radius,
+        "bottom" => -radius,
+        _ => 0.0,
+    };
+    [x, y]
+}
+
+/// How far the label moves, in layout pixels, when it takes each of its variable anchors
+/// instead of the first; empty unless the label has several.
+pub(super) fn variable_shifts(
+    symbol: &CollectedSymbol,
+    paint: &SymbolPaint,
+    zoom: f64,
+    atlas: &SymbolAtlas,
+) -> Vec<[f32; 2]> {
+    let anchors = variable_anchors(paint);
+    if anchors.len() < 2 {
+        return Vec::new();
+    }
+    let Some(block) = block(symbol, paint, zoom, atlas) else {
+        return Vec::new();
+    };
+    let corner = |anchor: &str| {
+        let fractions = anchor_fractions(anchor);
+        let offset = anchored_offset(paint, &anchors, anchor, (&symbol.properties, zoom));
+        [
+            -block.max_line * fractions[0] + offset[0],
+            -block.height * fractions[1] + offset[1],
+        ]
+    };
+    let first = corner(&anchors[0]);
+    anchors
+        .iter()
+        .map(|anchor| {
+            let corner = corner(anchor);
+            [corner[0] - first[0], corner[1] - first[1]]
+        })
+        .collect()
 }
 
 /// The label's layout box `[left, top, right, bottom]` around the anchor, in layout pixels.

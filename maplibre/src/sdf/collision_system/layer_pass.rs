@@ -64,6 +64,9 @@ struct LayerFrame<'a> {
 
 /// The GPU-visible outcome of placing one feature.
 struct FeaturePlacement {
+    /// Where the text sits relative to its laid-out anchor, in layout pixels, when a later
+    /// `text-variable-anchor` was the first to fit.
+    text_shift: [f32; 2],
     opacity: [f32; 2],
     ground: f32,
     line: Option<LinePoses>,
@@ -103,7 +106,7 @@ pub(super) fn place_layer(
         write_feature_metadata(
             layer,
             feature,
-            outcome.opacity,
+            (outcome.opacity, outcome.text_shift),
             outcome.ground,
             match &outcome.line {
                 Some(LinePoses::Poses(poses)) => Some(poses.as_slice()),
@@ -121,6 +124,33 @@ impl LayerFrame<'_> {
     fn limits_for(&self, was_visible: bool) -> [f64; 2] {
         let margin = if was_visible { 0.15 } else { 0.0 };
         [self.zoom_limits[0] - margin, self.zoom_limits[1] + margin]
+    }
+
+    /// The rectangles with the text moved to the first anchor of `text-variable-anchor` that
+    /// fits, and that move in layout pixels; the first anchor when none does.
+    fn first_fitting_anchor(
+        &self,
+        feature: &crate::sdf::Feature,
+        (rectangles, glyph_boxes): ([Option<[f64; 4]>; 2], &[[f64; 4]]),
+        (rules, grid, viewport): (&rules::PlacementRules, &CollisionGrid, [f64; 2]),
+    ) -> ([Option<[f64; 4]>; 2], [f32; 2]) {
+        let (Some(text), true) = (rectangles[0], feature.anchor_shifts.len() > 1) else {
+            return (rectangles, [0.0; 2]);
+        };
+        let scale = f64::from(self.uniforms.text[0]) / 24.0;
+        let moved = |shift: &[f32; 2]| {
+            let [dx, dy] = shift.map(|pixels| f64::from(pixels) * scale);
+            [
+                Some([text[0] + dx, text[1] + dy, text[2] + dx, text[3] + dy]),
+                rectangles[1],
+            ]
+        };
+        let shift = feature
+            .anchor_shifts
+            .iter()
+            .find(|shift| rules.visible(moved(shift), glyph_boxes, grid, viewport)[0])
+            .unwrap_or(&feature.anchor_shifts[0]);
+        (moved(shift), *shift)
     }
 
     fn place_feature(
@@ -179,12 +209,13 @@ impl LayerFrame<'_> {
             ([None, None], Vec::new())
         };
         let rules = rules::PlacementRules::new(self.paint, &feature.data.properties, zoom);
-        let visible = rules.place_along_line(
-            rectangles,
-            &glyph_boxes,
-            boxes,
-            [view_state.width(), view_state.height()],
+        let viewport = [view_state.width(), view_state.height()];
+        let (rectangles, text_shift) = self.first_fitting_anchor(
+            feature,
+            (rectangles, &glyph_boxes),
+            (&rules, &*boxes, viewport),
         );
+        let visible = rules.place_along_line(rectangles, &glyph_boxes, boxes, viewport);
         let opacity = history.opacity(layer, feature, visible);
         if visible.iter().any(|v| *v) && opacity.iter().any(|v| *v > 0.0) {
             placed.0.push(PlacedSymbol {
@@ -196,6 +227,7 @@ impl LayerFrame<'_> {
             });
         }
         FeaturePlacement {
+            text_shift,
             opacity: opacity.map(|value| value * relevance),
             ground,
             line,
@@ -239,7 +271,7 @@ fn label_boxes(
 fn write_feature_metadata(
     layer: &crate::sdf::SymbolLayerData,
     feature: &crate::sdf::Feature,
-    opacity: [f32; 2],
+    (opacity, text_shift): ([f32; 2], [f32; 2]),
     ground: f32,
     poses: Option<&[GlyphPose]>,
     metadata: &mut [SDFShaderFeatureMetadata],
@@ -262,7 +294,12 @@ fn write_feature_metadata(
             *vertex = SDFShaderFeatureMetadata {
                 opacity: opacity[kind],
                 elevation: ground,
-                pose: [0.0; 4],
+                // A text vertex without a glyph pose carries its anchor shift here.
+                pose: if kind == 0 {
+                    [text_shift[0], text_shift[1], 0.0, 0.0]
+                } else {
+                    [0.0; 4]
+                },
             };
         }
     }

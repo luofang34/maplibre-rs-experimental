@@ -43,6 +43,7 @@ fn label(id: u64, sort_key: f32, at: [f32; 2]) -> Feature {
         bbox: Box2D::zero(),
         indices: 0..0,
         text_anchor: Point2D::new(at[0], at[1]),
+        anchor_shifts: Vec::new(),
         str: format!("label {id}"),
         line: None,
     }

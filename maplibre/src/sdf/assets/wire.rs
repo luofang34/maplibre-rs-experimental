@@ -23,6 +23,8 @@ pub struct SymbolFeature {
     sort_key: f32,
     #[serde(default)]
     line: Option<LineLabelWire>,
+    #[serde(default)]
+    anchor_shifts: Vec<[f32; 2]>,
 }
 
 /// The line a label follows, in a form that survives the worker boundary.
@@ -55,6 +57,7 @@ impl From<&Feature> for SymbolFeature {
                 .map(|(key, value)| (key.clone(), value.to_json()))
                 .collect(),
             sort_key: feature.data.sort_key,
+            anchor_shifts: feature.anchor_shifts.clone(),
             line: feature.line.as_ref().map(|line| LineLabelWire {
                 polyline: line.polyline.to_vec(),
                 anchor_distance: line.anchor_distance,
@@ -85,6 +88,7 @@ impl From<SymbolFeature> for Feature {
                     .collect(),
                 sort_key: feature.sort_key,
             },
+            anchor_shifts: feature.anchor_shifts,
             line: feature.line.map(|line| crate::sdf::LineLabel {
                 polyline: line.polyline.into(),
                 anchor_distance: line.anchor_distance,

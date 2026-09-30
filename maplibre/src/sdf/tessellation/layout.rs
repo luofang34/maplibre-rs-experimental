@@ -132,6 +132,7 @@ pub(super) fn append(
         bbox,
         indices: start..buffer.indices.len(),
         text_anchor: anchor,
+        anchor_shifts: super::text_layout::variable_shifts(symbol, paint, zoom, atlas),
         str: text,
         line: symbol
             .line

@@ -74,13 +74,37 @@ impl PlacementRules {
         grid: &mut CollisionGrid,
         viewport: [f64; 2],
     ) -> [bool; 2] {
-        let collision_boxes = |i: usize| -> Vec<[f64; 4]> {
-            if i == 0 && !glyph_boxes.is_empty() {
-                glyph_boxes.to_vec()
-            } else {
-                rectangles[i].into_iter().collect()
+        let visible = self.visible(rectangles, glyph_boxes, grid, viewport);
+        for (i, shown) in visible.into_iter().enumerate() {
+            if shown && !self.ignore[i] {
+                for part in Self::collision_boxes(i, rectangles, glyph_boxes) {
+                    grid.insert_as(part, self.overlap[i] == Overlap::Cooperative);
+                }
             }
-        };
+        }
+        visible
+    }
+
+    fn collision_boxes(
+        i: usize,
+        rectangles: [Option<[f64; 4]>; 2],
+        glyph_boxes: &[[f64; 4]],
+    ) -> Vec<[f64; 4]> {
+        if i == 0 && !glyph_boxes.is_empty() {
+            glyph_boxes.to_vec()
+        } else {
+            rectangles[i].into_iter().collect()
+        }
+    }
+
+    /// Which parts of a label would be shown, without taking their place in the grid.
+    pub(super) fn visible(
+        &self,
+        rectangles: [Option<[f64; 4]>; 2],
+        glyph_boxes: &[[f64; 4]],
+        grid: &CollisionGrid,
+        viewport: [f64; 2],
+    ) -> [bool; 2] {
         let accepted = [0, 1].map(|i| {
             rectangles[i].is_some_and(|rect| {
                 rect.iter().all(|v| v.is_finite())
@@ -88,24 +112,18 @@ impl PlacementRules {
                     && rect[3] >= 0.0
                     && rect[0] <= viewport[0]
                     && rect[1] <= viewport[1]
-                    && collision_boxes(i).iter().all(|part| match self.overlap[i] {
-                        Overlap::Always => true,
-                        Overlap::Never => !grid.overlaps(*part),
-                        Overlap::Cooperative => !grid.overlaps_non_cooperative(*part),
-                    })
+                    && Self::collision_boxes(i, rectangles, glyph_boxes)
+                        .iter()
+                        .all(|part| match self.overlap[i] {
+                            Overlap::Always => true,
+                            Overlap::Never => !grid.overlaps(*part),
+                            Overlap::Cooperative => !grid.overlaps_non_cooperative(*part),
+                        })
             })
         });
-        let visible = [0, 1].map(|i| {
+        [0, 1].map(|i| {
             accepted[i] && (rectangles[1 - i].is_none() || accepted[1 - i] || self.optional[1 - i])
-        });
-        for (i, shown) in visible.into_iter().enumerate() {
-            if shown && !self.ignore[i] {
-                for part in collision_boxes(i) {
-                    grid.insert_as(part, self.overlap[i] == Overlap::Cooperative);
-                }
-            }
-        }
-        visible
+        })
     }
 }
 

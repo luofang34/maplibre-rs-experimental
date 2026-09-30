@@ -25,6 +25,7 @@ fn feature(anchor: f32) -> Feature {
         bbox: Box2D::new(Point2D::new(0.0, 0.0), Point2D::new(1.0, 1.0)),
         indices: 0..0,
         text_anchor: Point2D::new(anchor, anchor),
+        anchor_shifts: Vec::new(),
         str: "Innsbruck".into(),
         line: None,
     }

@@ -19,6 +19,7 @@ enum Property {
     BooleanExpression,
     Offset,
     Padding,
+    Anchors,
     Font,
     Enum(&'static [&'static str]),
 }
@@ -35,6 +36,7 @@ fn property(name: &str) -> Option<Property> {
         | "symbol-sort-key"
         | "text-rotate"
         | "icon-rotate"
+        | "text-radial-offset"
         | "symbol-height-offset"
         | "text-height-offset"
         | "icon-height-offset" => Property::Number(Feature),
@@ -60,6 +62,7 @@ fn property(name: &str) -> Option<Property> {
         "symbol-height-anchor" => Property::Enum(&["ground", "absolute"]),
         "text-translate" | "icon-translate" => Property::Offset,
         "text-translate-anchor" | "icon-translate-anchor" => Property::Enum(&["map", "viewport"]),
+        "text-variable-anchor" => Property::Anchors,
         "icon-text-fit" => Property::Enum(&["none", "width", "height", "both"]),
         "icon-text-fit-padding" => Property::Padding,
         "text-height-anchor" | "icon-height-anchor" => {
@@ -132,6 +135,24 @@ fn valid_literal(property: &Property, value: &Value) -> bool {
         Property::Offset => value
             .as_array()
             .is_some_and(|items| items.len() == 2 && items.iter().all(Value::is_number)),
+        Property::Anchors => value.as_array().is_some_and(|items| {
+            items.iter().all(|item| {
+                item.as_str().is_some_and(|anchor| {
+                    matches!(
+                        anchor,
+                        "center"
+                            | "left"
+                            | "right"
+                            | "top"
+                            | "bottom"
+                            | "top-left"
+                            | "top-right"
+                            | "bottom-left"
+                            | "bottom-right"
+                    )
+                })
+            })
+        }),
         Property::Padding => value
             .as_array()
             .is_some_and(|items| items.len() == 4 && items.iter().all(Value::is_number)),

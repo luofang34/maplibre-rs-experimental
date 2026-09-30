@@ -208,3 +208,29 @@ fn icon_text_fit_stretches_the_icon_around_the_text_and_padding() {
     assert!((top_left[0] + 9.0).abs() < 0.1 && (top_left[1] + 15.4).abs() < 0.1);
     assert!((bottom_right[0] - 7.0).abs() < 0.1 && (bottom_right[1] - 17.4).abs() < 0.1);
 }
+
+#[test]
+fn variable_anchors_give_the_shifts_from_the_first_anchor_to_each_other_one() {
+    let mut tessellator = point_label(serde_json::json!({
+        "text-variable-anchor": ["top", "bottom", "left", "right"]
+    }));
+    // A text 10 wide and 28.8 high: the laid-out one hangs below the point.
+    let shifts = tessellator.features.remove(0).anchor_shifts;
+    let expected = [[0.0, 0.0], [0.0, -28.8], [5.0, -14.4], [-5.0, -14.4]];
+    assert_eq!(shifts.len(), 4);
+    for (shift, want) in shifts.iter().zip(expected) {
+        assert!((shift[0] - want[0]).abs() < 1e-4 && (shift[1] - want[1]).abs() < 1e-4);
+    }
+}
+
+#[test]
+fn a_radial_offset_pushes_each_anchor_away_from_the_point() {
+    let mut tessellator = point_label(serde_json::json!({
+        "text-variable-anchor": ["top", "left"], "text-radial-offset": 1
+    }));
+    let shifts = tessellator.features.remove(0).anchor_shifts;
+    // Top sits 24 below the point; left sits 24 to its right and centred: from top that is
+    // 5 right (half the width) and 14.4 up, plus the change of offset.
+    assert!((shifts[1][0] - (5.0 + 24.0)).abs() < 1e-3);
+    assert!((shifts[1][1] - (-14.4 - 24.0)).abs() < 1e-3);
+}
