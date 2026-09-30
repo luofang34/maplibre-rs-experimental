@@ -175,3 +175,54 @@ async fn a_pan_moves_the_placed_label_within_the_next_frame() {
         1
     );
 }
+
+#[tokio::test]
+async fn only_the_first_eye_of_a_frame_places_symbols() {
+    use crate::render::eye_covering::EyeInFrame;
+
+    let mut map = label_map().await;
+    let camera = map.view_state().camera().position();
+    map.view_state_mut()
+        .camera_mut()
+        .move_to(cgmath::Point2::new(camera.x + 40.0, camera.y));
+    let old_place = QueryGeometry::Box {
+        min: [AT_LABEL[0] - 4.0, AT_LABEL[1] - 4.0],
+        max: [AT_LABEL[0] + 4.0, AT_LABEL[1] + 4.0],
+    };
+    let hits = |map: &crate::headless::map::HeadlessMap| {
+        map.query_rendered_symbols_in(old_place, &QueryOptions::default())
+            .expect("query")
+            .len()
+    };
+    map.world_mut()
+        .resources
+        .insert(EyeInFrame { index: 1, frame: 1 });
+    map.run_frame().expect("second eye");
+    assert_eq!(
+        hits(&map),
+        1,
+        "the second eye reuses the first eye's placement"
+    );
+    map.world_mut()
+        .resources
+        .insert(EyeInFrame { index: 0, frame: 2 });
+    map.run_frame().expect("first eye of the next frame");
+    assert_eq!(hits(&map), 0, "the first eye places for the moved view");
+}
+
+#[tokio::test]
+async fn a_label_buried_in_terrain_is_neither_placed_nor_queryable() {
+    let style = style(0.0, "absolute");
+    let layers = layers(&style);
+    let map = fixture_map(style, layers, 1).await;
+    let screen = QueryGeometry::Box {
+        min: [0.0, 0.0],
+        max: [512.0, 512.0],
+    };
+    assert!(
+        map.query_rendered_symbols_in(screen, &QueryOptions::default())
+            .expect("query")
+            .is_empty(),
+        "the sea-level label sits under 1200 m of ground and is not drawn"
+    );
+}

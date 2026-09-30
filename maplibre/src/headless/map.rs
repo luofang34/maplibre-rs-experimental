@@ -309,6 +309,12 @@ impl HeadlessMap {
         &self.map_context.view_state
     }
 
+    /// Mutable world access for tests that stage frame state.
+    #[cfg(test)]
+    pub(crate) fn world_mut(&mut self) -> &mut crate::tcs::world::World {
+        &mut self.map_context.world
+    }
+
     /// Moves the camera between frames, as a host gesture would.
     #[cfg(test)]
     pub(crate) fn view_state_mut(&mut self) -> &mut ViewState {

@@ -38,6 +38,20 @@ pub(super) fn symbol_elevation(
     base + paint.height_offset("text", &feature.data.properties, zoom)
 }
 
+/// Whether the anchor at `height` is inside the terrain surface below it, where the depth test
+/// hides it. Such a label must not hold collision space or answer queries.
+pub(super) fn buried_in_terrain(
+    world: &World,
+    layer: &SymbolLayerData,
+    feature: &Feature,
+    height: f32,
+) -> bool {
+    elevation(world, layer, feature) - height > BURIAL_TOLERANCE_METERS
+}
+
+/// Heights within this of the ground count as on it, so DEM sampling noise never hides a label.
+const BURIAL_TOLERANCE_METERS: f32 = 1.0;
+
 pub(super) fn elevation(world: &World, layer: &SymbolLayerData, feature: &Feature) -> f32 {
     let scale = 2_f64.powi(i32::from(u8::from(layer.coords.z)));
     let x = (f64::from(layer.coords.x) + f64::from(feature.text_anchor.x) / 4096.0) / scale;

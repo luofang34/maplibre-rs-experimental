@@ -237,6 +237,7 @@ fn place_layer(
             limits[1] += 0.15;
         }
         let rectangles = (relevance > 0.0
+            && !super::placement::buried_in_terrain(world, layer, feature, ground)
             && local_zoom_visible(
                 layer.coords,
                 feature,
