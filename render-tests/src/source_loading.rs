@@ -2,13 +2,17 @@
 
 use maplibre::{
     coords::WorldTileCoords,
-    headless::map::{HeadlessMap, ProcessedLayers},
+    geojson::index::GeoJsonIndex,
+    headless::map::{
+        process_geojson_layers_with_atlas, process_tile_layers_with_atlas, HeadlessMap,
+        ProcessedLayers,
+    },
     io::tile_sources::MAX_OVERZOOMING,
     projection::ProjectionType,
     raster::AvailableRasterLayerData,
     style::{
-        layer::StyleLayer,
-        source::{GeoJsonData, Source, VectorSource},
+        layer::{LayerPaint, StyleLayer},
+        source::{GeoJsonData, GeoJsonSource, Source, VectorSource, GEOJSON_LAYER},
         Style,
     },
     terrain::dem_tile_coords,
@@ -18,6 +22,7 @@ use serde_json::Value;
 use crate::{
     paths::{local_data_path, local_tile_path},
     source_tiles::source_tile_coords,
+    symbol_assets::load_atlas_blocking,
 };
 
 pub(super) fn load_sources_blocking(
@@ -46,16 +51,14 @@ pub(super) fn load_sources_blocking(
         match source {
             Source::GeoJson(source) => all_layers.append(&mut load_geojson_blocking(
                 map,
-                name,
-                &source.data,
+                (style, name, source),
                 &layers,
                 target_coords,
                 &projection,
             )?),
             Source::Vector(source) => all_layers.append(&mut load_vector_blocking(
                 map,
-                name,
-                source,
+                (style, name, source),
                 &layers,
                 target_coords,
                 &projection,
@@ -70,13 +73,13 @@ pub(super) fn load_sources_blocking(
 }
 
 fn load_geojson_blocking(
-    map: &mut HeadlessMap,
-    name: &str,
-    data: &GeoJsonData,
+    _map: &mut HeadlessMap,
+    (style, name, source): (&Style, &str, &GeoJsonSource),
     layers: &[StyleLayer],
     target_coords: &[WorldTileCoords],
     projection: &ProjectionType,
 ) -> Result<ProcessedLayers, String> {
+    let data = &source.data;
     let loaded;
     let value = match data {
         GeoJsonData::Inline(value) => value.as_ref(),
@@ -89,21 +92,37 @@ fn load_geojson_blocking(
             &loaded
         }
     };
+    let index = GeoJsonIndex::from_value(value, source)
+        .map_err(|error| format!("Cannot index GeoJSON source '{name}': {error}"))?;
+    // The glyphs a tile needs are found in the same tile the worker path would build, whose
+    // one layer has a fixed name that the style's layers do not carry.
+    let mut symbol_style = style.clone();
+    for layer in &mut symbol_style.layers {
+        if layer.source.as_deref() == Some(name) {
+            layer.source_layer = Some(GEOJSON_LAYER.to_owned());
+        }
+    }
     let mut processed = ProcessedLayers::default();
     for coords in target_coords {
+        let atlas = symbol_atlas(&symbol_style, layers, &index.tile(*coords), *coords)?;
         processed.append(
-            &mut map
-                .process_geojson(value, name, layers.to_vec(), *coords, projection.clone())
-                .map_err(|error| format!("Cannot process GeoJSON source '{name}': {error}"))?,
+            &mut process_geojson_layers_with_atlas(
+                value,
+                name,
+                layers.to_vec(),
+                *coords,
+                projection.clone(),
+                atlas,
+            )
+            .map_err(|error| format!("Cannot process GeoJSON source '{name}': {error}"))?,
         );
     }
     Ok(processed)
 }
 
 fn load_vector_blocking(
-    map: &HeadlessMap,
-    name: &str,
-    source: &VectorSource,
+    _map: &HeadlessMap,
+    (style, name, source): (&Style, &str, &VectorSource),
     layers: &[StyleLayer],
     target_coords: &[WorldTileCoords],
     projection: &ProjectionType,
@@ -124,11 +143,17 @@ fn load_vector_blocking(
                 continue;
             }
         };
+        let atlas = symbol_atlas(style, layers, &data, coords)?;
         for layer in layers {
             processed.append(
-                &mut map
-                    .process_tile_at(data.clone(), layer, coords, projection.clone())
-                    .map_err(|error| format!("Cannot process vector source '{name}': {error}"))?,
+                &mut process_tile_layers_with_atlas(
+                    &data,
+                    layer,
+                    coords,
+                    projection.clone(),
+                    atlas.clone(),
+                )
+                .map_err(|error| format!("Cannot process vector source '{name}': {error}"))?,
             );
         }
     }
@@ -252,4 +277,20 @@ pub(super) fn load_dem_tiles_blocking(
         }
     }
     Ok(tiles)
+}
+
+/// The atlas for the symbol layers among `layers`, or `None` when there are none.
+fn symbol_atlas(
+    style: &Style,
+    layers: &[StyleLayer],
+    tile: &[u8],
+    coords: WorldTileCoords,
+) -> Result<Option<std::sync::Arc<maplibre::sdf::assets::SymbolAtlas>>, String> {
+    if !layers
+        .iter()
+        .any(|layer| matches!(layer.paint, Some(LayerPaint::Symbol(_))))
+    {
+        return Ok(None);
+    }
+    load_atlas_blocking(style, tile, f64::from(u8::from(coords.z)))
 }

@@ -10,7 +10,7 @@ use maplibre::{
         settings::{Msaa, RendererSettings},
         RenderPlugin,
     },
-    style::{source::Source, Style},
+    style::{layer::LayerPaint, source::Source, Style},
     terrain::{DefaultDemTransferables, TerrainPlugin},
     vector::{DefaultVectorTransferables, VectorPlugin},
 };
@@ -47,7 +47,19 @@ async fn render_fixture(test_dir: &Path) -> Result<(f64, f64), String> {
             .map_err(|error| format!("Cannot select source tiles: {error}"))?;
     }
     let (layers, raster_layers) = load_sources_blocking(&mut map, &style, &coords)?;
-    let frames = [PathBuf::from("frame_0.png"), PathBuf::from("frame_1.png")];
+    // Labels fade in, so a frame settles only after several; other layers need two.
+    let frame_count: u8 = if style
+        .layers
+        .iter()
+        .any(|layer| matches!(layer.paint, Some(LayerPaint::Symbol(_))))
+    {
+        12
+    } else {
+        2
+    };
+    let frames: Vec<PathBuf> = (0..frame_count)
+        .map(|index| PathBuf::from(format!("frame_{index}.png")))
+        .collect();
     for path in &frames {
         match std::fs::remove_file(path) {
             Ok(()) => {}
@@ -55,9 +67,13 @@ async fn render_fixture(test_dir: &Path) -> Result<(f64, f64), String> {
             Err(error) => return Err(format!("Cannot remove stale headless frame: {error}")),
         }
     }
-    map.render_frames_with_terrain(layers, raster_layers, Vec::new(), 2)
+    map.render_frames_with_terrain(layers, raster_layers, Vec::new(), frame_count)
         .map_err(|error| format!("Cannot render source tiles: {error}"))?;
-    let diff = compare_frame_blocking(&frames[1], test_dir, &meta)?;
+    let last = frames.last().ok_or("no frame requested")?;
+    let diff = compare_frame_blocking(last, test_dir, &meta)?;
+    for path in &frames {
+        std::fs::remove_file(path).ok();
+    }
     Ok((diff, meta.max_diff))
 }
 
@@ -97,6 +113,16 @@ async fn create_map(style: &Style, meta: &TestMeta) -> Result<HeadlessMap, Strin
         plugins.push(Box::new(
             VectorPlugin::<DefaultVectorTransferables>::default(),
         ));
+        plugins.push(Box::new(maplibre::heatmap::HeatmapPlugin));
+    }
+    if style
+        .layers
+        .iter()
+        .any(|layer| matches!(layer.paint, Some(LayerPaint::Symbol(_))))
+    {
+        plugins.push(Box::new(maplibre::sdf::SdfPlugin::<
+            DefaultVectorTransferables,
+        >::default()));
     }
     if style
         .sources
@@ -131,10 +157,46 @@ fn compare_frame_blocking(frame: &Path, test_dir: &Path, meta: &TestMeta) -> Res
     if let Some(background) = meta.comparison_background {
         composite_opaque_background(&actual, background)?;
     }
-    let expected = test_dir.join("expected.png");
-    if !expected.exists() {
-        return Err(format!("expected.png not found: {}", expected.display()));
+    // GL JS fixtures carry alternative reference images for platform or precision variants
+    // (`expected-half-float.png`, `expected-macos.png`, ...); matching any one passes.
+    let mut references = expected_images(test_dir)?;
+    if references.is_empty() {
+        return Err(format!(
+            "expected.png not found: {}",
+            test_dir.join("expected.png").display()
+        ));
     }
-    compare_and_diff(&actual, &expected, &test_dir.join("diff.png"))
-        .map_err(|error| format!("Image comparison failed: {error}"))
+    let diff_path = test_dir.join("diff.png");
+    let mut best: Option<(f64, PathBuf)> = None;
+    for reference in references.drain(..) {
+        let diff = compare_and_diff(&actual, &reference, &diff_path)
+            .map_err(|error| format!("Image comparison failed: {error}"))?;
+        if best.as_ref().is_none_or(|(smallest, _)| diff < *smallest) {
+            best = Some((diff, reference));
+        }
+    }
+    let Some((diff, reference)) = best else {
+        return Err("no reference image".into());
+    };
+    // Leave the difference image of the closest reference.
+    compare_and_diff(&actual, &reference, &diff_path)
+        .map_err(|error| format!("Image comparison failed: {error}"))?;
+    Ok(diff)
+}
+
+/// Every reference image of a fixture, `expected.png` first.
+fn expected_images(test_dir: &Path) -> Result<Vec<PathBuf>, String> {
+    let entries = std::fs::read_dir(test_dir)
+        .map_err(|error| format!("Cannot list {}: {error}", test_dir.display()))?;
+    let mut references: Vec<PathBuf> = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("expected") && name.ends_with(".png"))
+        })
+        .collect();
+    references.sort();
+    Ok(references)
 }
