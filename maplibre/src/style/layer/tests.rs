@@ -246,3 +246,20 @@ fn parses_fill_and_line_translation_properties() {
 }
 
 mod document_contracts;
+
+#[test]
+fn layers_without_a_paint_block_still_get_their_type_of_paint() {
+    for (kind, matches) in [
+        ("fill", "Fill"),
+        ("line", "Line"),
+        ("background", "Background"),
+        ("circle", "Circle"),
+    ] {
+        let layer: super::StyleLayer = serde_json::from_value(serde_json::json!({
+            "id": "l", "type": kind, "source": "s"
+        }))
+        .expect("layer");
+        let name = format!("{:?}", layer.paint.expect("a default paint"));
+        assert!(name.starts_with(matches), "{kind}: {name}");
+    }
+}

@@ -100,8 +100,14 @@ fn load_geojson_blocking(
             &loaded
         }
     };
-    let index = GeoJsonIndex::from_value(value, source)
-        .map_err(|error| format!("Cannot index GeoJSON source '{name}': {error}"))?;
+    // A document that is not GeoJSON is reported and leaves the source empty, as in GL JS.
+    let index = match GeoJsonIndex::from_value(value, source) {
+        Ok(index) => index,
+        Err(error) => {
+            tracing::warn!(source = name, %error, "GeoJSON source is not usable and draws nothing");
+            return Ok(ProcessedLayers::default());
+        }
+    };
     // The glyphs a tile needs are found in the same tile the worker path would build, whose
     // one layer has a fixed name that the style's layers do not carry.
     let mut symbol_style = style.clone();

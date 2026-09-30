@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use super::{StyleProperty, TextField};
 
 /// Base background color; properties outside this model are retained by layer serialization.
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct BackgroundPaint {
     /// Background color property; rendering supports constant colors.
     #[serde(rename = "background-color")]
