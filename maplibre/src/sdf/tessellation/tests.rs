@@ -236,3 +236,29 @@ fn a_radial_offset_pushes_each_anchor_away_from_the_point() {
     assert!((shifts[1][0] - (5.0 + 24.0)).abs() < 1e-3);
     assert!((shifts[1][1] - (-14.4 - 24.0)).abs() < 1e-3);
 }
+
+#[test]
+fn polygon_rings_are_wound_clockwise_on_screen_outside_and_counter_clockwise_for_holes() {
+    use geo_types::{LineString, Polygon};
+
+    // In tile coordinates y grows downwards, so this outer ring runs counter-clockwise.
+    let outer = LineString::from(vec![(0.0, 0.0), (0.0, 10.0), (10.0, 10.0), (10.0, 0.0)]);
+    let hole = LineString::from(vec![(2.0, 2.0), (8.0, 2.0), (8.0, 8.0), (2.0, 8.0)]);
+    let rings = super::polygon_rings(&Polygon::new(outer, vec![hole]));
+    assert_eq!(
+        rings[0],
+        [
+            [0.0, 0.0],
+            [10.0, 0.0],
+            [10.0, 10.0],
+            [0.0, 10.0],
+            [0.0, 0.0]
+        ],
+        "the outer ring is reversed"
+    );
+    assert_eq!(
+        rings[1],
+        [[2.0, 2.0], [2.0, 8.0], [8.0, 8.0], [8.0, 2.0], [2.0, 2.0]],
+        "the hole, clockwise as given, is reversed too"
+    );
+}
