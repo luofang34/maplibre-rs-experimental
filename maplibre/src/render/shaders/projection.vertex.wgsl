@@ -18,6 +18,16 @@ const PROJECTION_TWO_PI: f32 = 6.283185307179586;
 const GLOBE_Z_CLIPPING_START: f32 = 0.2;
 const POLE_TRANSITION_START: f32 = 0.98;
 
+// The tessellator marks a pole with the extreme 16-bit tile rows. Only those values are poles:
+// a line that runs many tiles beyond its own reaches the same magnitudes without being one.
+fn is_north_pole_y(tile_y: f32) -> bool {
+    return abs(tile_y + 32768.0) < 0.5;
+}
+
+fn is_south_pole_y(tile_y: f32) -> bool {
+    return abs(tile_y - 32767.0) < 0.5;
+}
+
 fn tile_position_on_unit_sphere(
     tile_position: vec2<f32>,
     tile_mercator_coords: vec4<f32>,
@@ -34,9 +44,9 @@ fn tile_position_on_unit_sphere(
         sin_latitude,
         cos(longitude) * cos_latitude,
     );
-    if tile_position.y < -32767.5 {
+    if is_north_pole_y(tile_position.y) {
         surface = vec3<f32>(0.0, 1.0, 0.0);
-    } else if tile_position.y > 32766.5 {
+    } else if is_south_pole_y(tile_position.y) {
         surface = vec3<f32>(0.0, -1.0, 0.0);
     }
     return surface;
@@ -113,7 +123,7 @@ fn project_tile_position(
     let surface = tile_position_on_unit_sphere(tile_position.xy, tile_mercator_coords);
     let mercator_clip = fallback_matrix * vec4<f32>(tile_position, 1.0);
     let globe_clip = projection.main_matrix * vec4<f32>(surface, 1.0);
-    let is_pole = tile_position.y < -32767.5 || tile_position.y > 32766.5;
+    let is_pole = is_north_pole_y(tile_position.y) || is_south_pole_y(tile_position.y);
     let horizon_distance = globe_horizon_distance(
         surface,
         transition,
@@ -164,7 +174,7 @@ fn project_tile_position_3d(
     let surface = tile_position_on_unit_sphere(tile_position.xy, tile_mercator_coords);
     let elevated = surface * (1.0 + tile_position.z / projection.transition_and_padding.z);
     let globe_clip = projection.main_matrix * vec4<f32>(elevated, 1.0);
-    let is_pole = tile_position.y < -32767.5 || tile_position.y > 32766.5;
+    let is_pole = is_north_pole_y(tile_position.y) || is_south_pole_y(tile_position.y);
     let horizon_distance = globe_horizon_distance(surface, transition, is_pole);
     // The inactive Mercator projection is undefined at the geographic poles.
     if transition == 1.0 {

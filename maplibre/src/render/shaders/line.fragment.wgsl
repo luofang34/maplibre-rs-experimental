@@ -24,6 +24,14 @@ struct Output {
 
 @fragment
 fn main(in: FragmentInput) -> Output {
+    // The distance from the line changes by this many nominal pixels per screen pixel, which
+    // is how much the map-space line has narrowed or widened; the edge feather scales with it.
+    let nominal_distance = length(in.v_normal) * in.v_width2.x;
+    let gamma_scale = clamp(
+        length(vec2<f32>(dpdx(nominal_distance), dpdy(nominal_distance))),
+        0.25,
+        64.0,
+    );
     // Dashes stretch with the fractional zoom; a pattern keeps `dash_period.w` for its height.
     let dash_scale = select(1.0, dash_period.w, dash_period.y < 1.5);
     // A dash with round caps has a row of the texture for each step across the line.
@@ -40,13 +48,13 @@ fn main(in: FragmentInput) -> Output {
         discard;
     }
     // Calculate the distance of the pixel from the line in pixels
-    let dist = length(in.v_normal) * in.v_width2.x;
+    let dist = nominal_distance;
 
     let pixel_ratio = 1.0; 
     let blur = in.blur;
     
     // Calculate the antialiasing fade factor
-    let blur2 = (blur + (1.0 / pixel_ratio)) * in.v_gamma_scale;
+    let blur2 = (blur + (1.0 / pixel_ratio)) * gamma_scale;
     let denom = max(blur2, 1e-6);
     let alpha = clamp(min(dist - (in.v_width2.y - blur2), in.v_width2.x - dist) / denom, 0.0, 1.0);
 

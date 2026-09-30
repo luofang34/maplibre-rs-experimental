@@ -81,16 +81,6 @@ fn main(
         tile_mercator_coords,
     );
     var center = projected_center.clip_position;
-    let center_ndc = center.xy / center.w;
-    let direction = (tangent.xy - center_ndc * tangent.w) * vec2<f32>(viewport_width, viewport_height);
-    let dir = direction / max(length(direction), 1e-12);
-
-    // Apply pixel-width offset in clip space.
-    // NDC spans 2 units across the viewport, so 1 pixel = 2/viewport_px in NDC.
-    // Multiply by center.w to compensate for the perspective divide.
-    // Use per-axis conversion to handle non-square viewports correctly.
-    let px_to_clip_x = (2.0 / viewport_width) * center.w;
-    let px_to_clip_y = (2.0 / viewport_height) * center.w;
     // The offset moves both edges of the line the same way: the sign of the side undoes the
     // opposite directions of their extrusions.
     let side = select(1.0, -1.0, negative_side);
@@ -98,7 +88,6 @@ fn main(
     // and the edge lies that much further out along it.
     let extent = length(normal);
     let moved = outset * max(extent, 1.0) + side * line_offset;
-    let clip_offset = vec2<f32>(dir.x * moved * px_to_clip_x, dir.y * moved * px_to_clip_y);
     if spatial {
         // Decks share the map-space width of adjoining draped roads, including foreshortening.
         // Casing and deck share the centerline tangent plane. Independently projecting
@@ -107,7 +96,9 @@ fn main(
         // A small terrain bias keeps sampled road endpoints above the shared surface.
         center.z += max(abs(center.z), 1e-8) * 2e-5;
     } else {
-        center = vec4<f32>(center.xy + clip_offset, 0.0, center.w);
+        // The extrusion lies on the map, so it shrinks with distance as the ground does.
+        let offset = tangent * (moved * line_scale.y / max(extent, 1e-6));
+        center = vec4<f32>(center.xy + offset.xy, 0.0, center.w + offset.w);
     }
 
     return VertexOutput(
