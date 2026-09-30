@@ -4,6 +4,7 @@
 
 use crate::{environment::Environment, plugin::Plugin};
 
+pub(crate) mod pattern;
 pub mod queue_system;
 pub mod render_commands;
 pub mod resource_system;

@@ -6,7 +6,10 @@ use crate::{
         eventually::{Eventually, Eventually::Initialized},
         projection::ProjectionGpuResources,
         resource::{RenderPipeline, TilePipeline},
-        shaders::{AtmosphereShader, BackgroundShader, GlobeBackgroundShader, Shader, SkyShader},
+        shaders::{
+            AtmosphereShader, BackgroundPatternShader, BackgroundShader, GlobeBackgroundShader,
+            Shader, SkyShader,
+        },
     },
 };
 
@@ -16,9 +19,12 @@ use crate::{
 pub fn resource_system(
     MapContext {
         world,
+        style,
+        view_state,
         renderer:
             crate::render::Renderer {
                 device,
+                queue,
                 resources: crate::render::RenderResources { surface, .. },
                 settings,
                 ..
@@ -26,6 +32,57 @@ pub fn resource_system(
         ..
     }: &mut MapContext,
 ) -> crate::tcs::system::SystemResult {
+    if world
+        .resources
+        .get::<super::pattern::BackgroundPatternGpu>()
+        .is_none()
+    {
+        let shader = BackgroundPatternShader {
+            format: surface.surface_format(),
+        };
+        let layouts = super::pattern::layouts(device);
+        let pipeline = TilePipeline::new(
+            "background_pattern_pipeline".into(),
+            *settings,
+            shader.describe_vertex(),
+            shader.describe_fragment(),
+            crate::render::resource::TilePipelineOptions {
+                depth_stencil_enabled: true,
+                update_stencil: false,
+                debug_stencil: true,
+                wireframe: false,
+                multisampling: surface.is_multisampling_supported(settings.msaa),
+                textured: false,
+            },
+        )
+        .describe_render_pipeline()
+        .initialize_with_prefix_layouts(device, &[&layouts[0], &layouts[1]]);
+        if world
+            .resources
+            .get::<crate::vector::pattern::PatternResources>()
+            .is_none()
+        {
+            world
+                .resources
+                .insert(crate::vector::pattern::PatternResources::new(
+                    device,
+                    layouts[0].clone(),
+                ));
+        }
+        world
+            .resources
+            .insert(super::pattern::BackgroundPatternGpu::new(
+                device,
+                pipeline,
+                &layouts[1],
+            ));
+    }
+    if let Some(patterns) = world
+        .resources
+        .get_mut::<crate::vector::pattern::PatternResources>()
+    {
+        patterns.update(device, queue, style, view_state.style_zoom().value());
+    }
     let Some((
         background_pipeline,
         globe_background_pipeline,

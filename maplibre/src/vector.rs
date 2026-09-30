@@ -49,7 +49,7 @@ pub(crate) mod structures;
 pub(crate) mod transferables;
 pub(crate) mod upload_system;
 
-mod pattern;
+pub(crate) mod pattern;
 pub mod tessellation;
 
 struct VectorPipeline(wgpu::RenderPipeline);

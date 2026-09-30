@@ -207,7 +207,10 @@ impl RenderCommand<LayerItem> for SetPatternTilePipeline {
         let Some(binding) = patterns.binding(&item.style_layer) else {
             return RenderCommandResult::Failure;
         };
-        pass.set_pipeline(patterns.pipeline());
+        let Some(pipeline) = patterns.pipeline() else {
+            return RenderCommandResult::Failure;
+        };
+        pass.set_pipeline(pipeline);
         pass.set_bind_group(
             0,
             projection_resources.bind_group_for(item.projection_binding()),

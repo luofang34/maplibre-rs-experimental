@@ -213,6 +213,46 @@ impl<P: PhaseItem> RenderCommand<P> for DrawSkyFullscreen {
 /// Fills the screen above the horizon with the sky.
 pub type DrawSky = (SetSkyPipeline, DrawSkyFullscreen);
 
+/// Binds the pattern pipeline, the image of the item's layer and the view of the map.
+pub struct SetBackgroundPatternPipeline;
+impl RenderCommand<LayerItem> for SetBackgroundPatternPipeline {
+    fn render<'w>(
+        world: &'w World,
+        item: &LayerItem,
+        pass: &mut wgpu::RenderPass<'w>,
+    ) -> RenderCommandResult {
+        let (Some(gpu), Some(patterns)) = (
+            world
+                .resources
+                .get::<crate::background::pattern::BackgroundPatternGpu>(),
+            world
+                .resources
+                .get::<crate::vector::pattern::PatternResources>(),
+        ) else {
+            return RenderCommandResult::Failure;
+        };
+        let Some(image) = patterns.binding(&item.style_layer) else {
+            return RenderCommandResult::Failure;
+        };
+        pass.set_pipeline(gpu.pipeline());
+        pass.set_bind_group(0, image, &[]);
+        pass.set_bind_group(1, gpu.view(), &[]);
+        RenderCommandResult::Success
+    }
+}
+
+/// Draws the flat background from an image.
+pub struct DrawBackgroundPattern;
+impl RenderCommand<LayerItem> for DrawBackgroundPattern {
+    fn render<'w>(
+        world: &'w World,
+        item: &LayerItem,
+        pass: &mut wgpu::RenderPass<'w>,
+    ) -> RenderCommandResult {
+        <(SetBackgroundPatternPipeline, DrawBackgroundQuad)>::render(world, item, pass)
+    }
+}
+
 /// Binds and draws the flat background, stopping if either resource lookup fails.
 pub struct DrawBackground;
 impl RenderCommand<LayerItem> for DrawBackground {

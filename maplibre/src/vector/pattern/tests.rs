@@ -32,3 +32,24 @@ fn a_fill_without_a_pattern_names_none() {
     .expect("layer");
     assert_eq!(pattern_name(&layer.paint.expect("paint"), 3.0), None);
 }
+
+#[test]
+fn background_and_extrusion_layers_name_their_images_too() {
+    let layer = |kind: &str, key: &str| -> LayerPaint {
+        let layer: crate::style::layer::StyleLayer = serde_json::from_value(serde_json::json!({
+            "id": "l", "type": kind, "paint": {key: "dots"}
+        }))
+        .expect("layer");
+        layer.paint.expect("paint")
+    };
+    for (kind, key) in [
+        ("background", "background-pattern"),
+        ("fill-extrusion", "fill-extrusion-pattern"),
+    ] {
+        assert_eq!(
+            pattern_name(&layer(kind, key), 3.0).as_deref(),
+            Some("dots"),
+            "{kind}"
+        );
+    }
+}

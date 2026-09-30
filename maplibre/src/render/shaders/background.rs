@@ -33,6 +33,31 @@ pub struct BackgroundShader {
     pub format: wgpu::TextureFormat,
 }
 
+/// The fullscreen background with an image repeated over the map in place of the colour.
+pub struct BackgroundPatternShader {
+    /// Format of the color attachment receiving the background.
+    pub format: wgpu::TextureFormat,
+}
+
+impl Shader for BackgroundPatternShader {
+    fn describe_vertex(&self) -> VertexState {
+        BackgroundShader {
+            format: self.format,
+        }
+        .describe_vertex()
+    }
+
+    fn describe_fragment(&self) -> FragmentState {
+        FragmentState {
+            source: include_str!("background_pattern.fragment.wgsl"),
+            ..BackgroundShader {
+                format: self.format,
+            }
+            .describe_fragment()
+        }
+    }
+}
+
 /// Shader drawing background paint on the projected globe surface.
 pub struct GlobeBackgroundShader {
     /// Render-target format.

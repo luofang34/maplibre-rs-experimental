@@ -38,6 +38,7 @@ pub(super) fn add_pattern_images(style: &mut Style, pixel_ratio: f64) -> Result<
             Some(LayerPaint::Fill(paint)) => paint.fill_pattern.as_ref(),
             Some(LayerPaint::Line(paint)) => paint.line_pattern.as_ref(),
             Some(LayerPaint::FillExtrusion(paint)) => paint.fill_extrusion_pattern.as_ref(),
+            Some(LayerPaint::Background(paint)) => paint.background_pattern.as_ref(),
             _ => None,
         };
         if let Some(pattern) = pattern {

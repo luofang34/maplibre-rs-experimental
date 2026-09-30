@@ -16,6 +16,10 @@ pub struct BackgroundPaint {
     )]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub background_color: Option<StyleProperty<Color>>,
+    /// Name of the image the background repeats instead of a colour, as written.
+    #[serde(rename = "background-pattern", default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub background_pattern: Option<serde_json::Value>,
     /// Opacity multiplied into the background color.
     #[serde(rename = "background-opacity")]
     #[serde(

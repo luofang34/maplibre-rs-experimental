@@ -27,7 +27,9 @@ pub struct BackgroundBuffers {
     pub sky_metadata_buffer: Option<wgpu::Buffer>,
 }
 
-use super::render_commands::{DrawAtmosphere, DrawBackground, DrawGlobeBackground, DrawSky};
+use super::render_commands::{
+    DrawAtmosphere, DrawBackground, DrawBackgroundPattern, DrawGlobeBackground, DrawSky,
+};
 
 /// Appends visible background, sky and atmosphere items and uploads their frame metadata.
 /// Returns `Dependencies` if the required phases are absent, or `Setup` if atmosphere
@@ -59,6 +61,12 @@ pub fn queue_system(
         .filter(|_| projection_transition < 1.0 || view_state.opaque_environment())
         .map(|sky| sky_metadata(sky, view_state, projection_transition));
 
+    if let Some(gpu) = world
+        .resources
+        .get::<super::pattern::BackgroundPatternGpu>()
+    {
+        gpu.write(&renderer.queue, view_state);
+    }
     {
         let Some((layer_item_phase, translucent_phase)) = world.resources.query_mut::<(
             &mut RenderPhase<LayerItem>,
@@ -67,6 +75,17 @@ pub fn queue_system(
             return Err(SystemError::Dependencies);
         };
 
+        let patterned: std::collections::HashSet<&str> = style
+            .layers
+            .iter()
+            .filter(|layer| {
+                layer.paint.as_ref().is_some_and(|paint| {
+                    crate::vector::pattern::pattern_name(paint, view_state.style_zoom().value())
+                        .is_some()
+                })
+            })
+            .map(|layer| layer.id.as_str())
+            .collect();
         let mut background_index = 0;
         for layer in &style.layers {
             if layer.type_ != "background" || !layer.is_visible_at(view_state.zoom().value()) {
@@ -92,6 +111,8 @@ pub fn queue_system(
             let draw_function: Box<dyn crate::render::render_phase::Draw<LayerItem>> = if uses_globe
             {
                 Box::new(DrawState::<LayerItem, DrawGlobeBackground>::new())
+            } else if patterned.contains(layer.id.as_str()) {
+                Box::new(DrawState::<LayerItem, DrawBackgroundPattern>::new())
             } else {
                 Box::new(DrawState::<LayerItem, DrawBackground>::new())
             };

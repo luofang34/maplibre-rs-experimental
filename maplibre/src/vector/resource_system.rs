@@ -57,10 +57,10 @@ pub fn resource_system(
     else {
         return Err(SystemError::Dependencies);
     };
-    let missing_pattern = world
+    let missing_pattern_pipeline = world
         .resources
         .get::<super::pattern::PatternResources>()
-        .is_none();
+        .is_none_or(|patterns| patterns.pipeline().is_none());
     let Some((
         buffer_pool,
         vector_pipeline,
@@ -100,16 +100,27 @@ pub fn resource_system(
         &dashes_layout,
     );
     setup.initialize_extrusion(extrusion_pipeline);
-    let pattern_pipeline = missing_pattern.then(|| setup.create_pattern());
+    let pattern_pipeline = missing_pattern_pipeline.then(|| setup.create_pattern());
     let pattern_layout = setup.pattern.clone();
-    if let Some(pipeline) = pattern_pipeline {
+    if world
+        .resources
+        .get::<super::pattern::PatternResources>()
+        .is_none()
+    {
         world
             .resources
             .insert(super::pattern::PatternResources::new(
                 device,
-                pipeline,
                 pattern_layout,
             ));
+    }
+    if let (Some(pipeline), Some(patterns)) = (
+        pattern_pipeline,
+        world
+            .resources
+            .get_mut::<super::pattern::PatternResources>(),
+    ) {
+        patterns.set_pipeline(pipeline);
     }
     if let Some(patterns) = world
         .resources
