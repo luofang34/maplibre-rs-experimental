@@ -5,8 +5,10 @@ use cgmath::{Point2, Vector2};
 use super::{clamp_pan_inertia_center, pan_camera_by_pixels, pan_center_to_anchor};
 use crate::{
     coords::LatLon,
-    projection::body::Body,
-    projection::globe::camera::{GlobeCameraOptions, GlobeCameraState},
+    projection::{
+        body::Body,
+        globe::camera::{GlobeCameraOptions, GlobeCameraState},
+    },
 };
 
 fn assert_close(actual: f64, expected: f64) {

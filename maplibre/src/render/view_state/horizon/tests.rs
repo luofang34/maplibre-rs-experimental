@@ -1,4 +1,6 @@
 #![allow(clippy::expect_used, clippy::panic)]
+use cgmath::{Deg, Matrix4, Rad, SquareMatrix, Vector3};
+
 use super::*;
 use crate::{
     coords::{LatLon, WorldCoords, Zoom},
@@ -9,8 +11,6 @@ use crate::{
     },
     window::PhysicalSize,
 };
-use cgmath::SquareMatrix;
-use cgmath::{Deg, Matrix4, Rad, Vector3};
 
 #[test]
 fn sky_side_is_continuous_when_gaze_and_ground_center_cross_the_horizon() {

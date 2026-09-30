@@ -5,8 +5,10 @@ use std::{borrow::Cow, marker::PhantomData, rc::Rc};
 use crate::{
     context::MapContext,
     environment::Environment,
-    io::apc::{apply_worker_messages, AsyncProcedureCall},
-    io::tile_retry::{self, RequestKind, TileRequestOutcome},
+    io::{
+        apc::{apply_worker_messages, AsyncProcedureCall},
+        tile_retry::{self, RequestKind, TileRequestOutcome},
+    },
     kernel::Kernel,
     tcs::system::{System, SystemResult},
     terrain::{

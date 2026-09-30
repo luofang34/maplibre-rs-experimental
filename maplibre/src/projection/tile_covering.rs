@@ -1,9 +1,10 @@
 //! Coverage-preserving refinement with a bounded tile working set.
-use crate::coords::{LatLon, WorldTileCoords, ZoomLevel};
 use std::{
     cmp::Ordering,
     collections::{BinaryHeap, HashMap},
 };
+
+use crate::coords::{LatLon, WorldTileCoords, ZoomLevel};
 
 pub(crate) struct Refinement {
     pub(crate) target: ZoomLevel,

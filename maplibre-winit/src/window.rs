@@ -1,9 +1,10 @@
 //! Window ownership and renderer display connection.
-use maplibre::window::{HeadedMapWindow, MapWindow, PhysicalSize, WindowCreateError};
 use std::{
     marker::PhantomData,
     sync::{Arc, Weak},
 };
+
+use maplibre::window::{HeadedMapWindow, MapWindow, PhysicalSize, WindowCreateError};
 
 /// Platform window retained by each presentation surface.
 pub type RawWinitWindow = winit::window::Window;

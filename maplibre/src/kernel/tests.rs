@@ -2,8 +2,10 @@
 
 use super::*;
 use crate::{
-    io::apc::AsyncProcedureCall,
-    io::scheduler::{ScheduleError, Scheduler},
+    io::{
+        apc::AsyncProcedureCall,
+        scheduler::{ScheduleError, Scheduler},
+    },
     window::{MapWindow, MapWindowConfig},
 };
 

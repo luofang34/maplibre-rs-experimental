@@ -3,13 +3,12 @@
 #![deny(missing_docs)]
 
 mod processor;
-pub use processor::IndexProcessor;
-
 use std::collections::{BTreeMap, HashMap};
 
 use cgmath::{num_traits::Signed, Bounded};
 use geo::prelude::*;
 use geo_types::{Coord, CoordFloat, LineString, Point, Polygon};
+pub use processor::IndexProcessor;
 use rstar::{Envelope, PointDistance, RTree, RTreeObject, AABB};
 
 use crate::{

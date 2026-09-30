@@ -3,11 +3,13 @@ use std::{borrow::Cow, marker::PhantomData, rc::Rc};
 use crate::{
     context::MapContext,
     environment::Environment,
-    io::apc::{apply_worker_messages, AsyncProcedureCall, Message, MessageError},
-    io::tile_retry::{self, RequestKind, TileRequestOutcome},
+    io::{
+        apc::{apply_worker_messages, AsyncProcedureCall, Message, MessageError},
+        tile_retry::{self, RequestKind, TileRequestOutcome},
+    },
     kernel::Kernel,
-    raster::resource::RasterResources,
     raster::{
+        resource::RasterResources,
         transferables::{LayerRaster, LayerRasterMissing, RasterTransferables},
         RasterLayerData, RasterLayersDataComponent,
     },

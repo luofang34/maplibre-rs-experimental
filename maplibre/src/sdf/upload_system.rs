@@ -2,8 +2,6 @@
 
 use std::collections::HashSet;
 
-use crate::sdf::SymbolLayerData;
-
 use super::{
     textures::{SymbolTextures, TextureContext},
     SymbolPipeline,
@@ -15,7 +13,7 @@ use crate::{
         shaders::{SDFShaderFeatureMetadata, ShaderLayerMetadata},
         Renderer,
     },
-    sdf::{SymbolBufferPool, SymbolLayersDataComponent},
+    sdf::{SymbolBufferPool, SymbolLayerData, SymbolLayersDataComponent},
     style::{
         layer::{LayerPaint, StyleLayer},
         Style,

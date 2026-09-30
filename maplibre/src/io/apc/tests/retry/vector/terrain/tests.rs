@@ -1,7 +1,9 @@
-use super::super::super::source::Response;
-use super::super::{deliver, render::assert_green, tile};
-use super::*;
 use geozero::mvt::{Message, Tile};
+
+use super::{
+    super::{super::source::Response, deliver, render::assert_green, tile},
+    *,
+};
 
 #[tokio::test]
 async fn same_size_geometry_refresh_redraws_its_terrain_texture() {

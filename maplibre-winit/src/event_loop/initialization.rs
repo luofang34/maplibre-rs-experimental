@@ -1,11 +1,13 @@
 //! Cancellation releases GPU work while returning the map's services to its host.
-use super::dispatch::Dispatch;
+use std::{cell::RefCell, rc::Rc};
+
 use maplibre::{
     environment::Environment,
     map::MapError,
     window::{HeadedMapWindow, MapWindowConfig},
 };
-use std::{cell::RefCell, rc::Rc};
+
+use super::dispatch::Dispatch;
 
 pub(super) struct Initialization<E: Environment>
 where

@@ -1,10 +1,11 @@
 //! Resumed window creation and event dispatch for native and browser hosts.
-use crate::{WinitApplicationError, WinitHostError, WinitMapWindowConfig};
 use maplibre::{
     environment::Environment,
     event_loop::{EventLoopProxy, SendEventError},
     map::Map,
 };
+
+use crate::{WinitApplicationError, WinitHostError, WinitMapWindowConfig};
 
 mod dispatch;
 mod lifecycle;

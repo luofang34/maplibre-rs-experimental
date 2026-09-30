@@ -15,10 +15,9 @@ use crate::{
     },
     kernel::Kernel,
     plugin::Plugin,
-    render::settings::RendererSettings,
     render::{
         builder::RendererBuilder, frame_input::frame_input_system, graph::RenderGraph,
-        tile_view_pattern::ViewTileSources, RenderStageLabel, Renderer,
+        settings::RendererSettings, tile_view_pattern::ViewTileSources, RenderStageLabel, Renderer,
     },
     schedule::Schedule,
     tcs::{

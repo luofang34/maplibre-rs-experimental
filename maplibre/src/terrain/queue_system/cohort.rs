@@ -1,9 +1,10 @@
 //! Coordinated texture detail for an external eye viewing a globe from above the atmosphere.
+use std::collections::HashSet;
+
 use crate::{
     coords::{WorldTileCoords, ZoomLevel},
     tcs::world::World,
 };
-use std::collections::HashSet;
 
 #[derive(Default)]
 pub(super) struct TextureCohort {

@@ -1,9 +1,10 @@
 //! Uniform values for readable text and sprite rendering.
+use bytemuck_derive::{Pod, Zeroable};
+
 use crate::style::{
     expression::FeatureProperties,
     layer::{StyleProperty, SymbolPaint},
 };
-use bytemuck_derive::{Pod, Zeroable};
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable, PartialEq)]

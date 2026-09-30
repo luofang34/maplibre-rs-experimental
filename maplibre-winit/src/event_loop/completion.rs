@@ -1,5 +1,4 @@
 //! Startup notification holds no borrow while browser callbacks or futures execute.
-use crate::WinitApplicationError;
 use std::{
     cell::RefCell,
     future::Future,
@@ -7,6 +6,8 @@ use std::{
     rc::Rc,
     task::{Context, Poll, Waker},
 };
+
+use crate::WinitApplicationError;
 
 struct State<C: std::error::Error + 'static> {
     result: Option<Result<(), WinitApplicationError<C>>>,

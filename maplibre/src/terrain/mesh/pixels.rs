@@ -1,6 +1,14 @@
 //! Terrain readback with analytic planes and spheres independent of tile selection.
 #![allow(clippy::expect_used, clippy::panic)]
 
+use std::{
+    path::PathBuf,
+    time::{Duration, Instant},
+};
+
+use cgmath::{Deg, InnerSpace, Matrix4, SquareMatrix, Vector3};
+use image::{Rgba, RgbaImage};
+
 use crate::{
     coords::{LatLon, WorldTileCoords},
     headless::{
@@ -18,12 +26,6 @@ use crate::{
     },
     style::Style,
     terrain::{resources::TerrainResources, DefaultDemTransferables, TerrainPlugin},
-};
-use cgmath::{Deg, InnerSpace, Matrix4, SquareMatrix, Vector3};
-use image::{Rgba, RgbaImage};
-use std::{
-    path::PathBuf,
-    time::{Duration, Instant},
 };
 
 const SIZE: u32 = 128;

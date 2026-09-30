@@ -1,10 +1,11 @@
 #![allow(clippy::expect_used, clippy::panic)]
+use cgmath::{Deg, SquareMatrix};
+
 use super::*;
 use crate::{
     coords::{WorldCoords, Zoom},
     window::PhysicalSize,
 };
-use cgmath::{Deg, SquareMatrix};
 
 #[test]
 fn terrain_arrivals_do_not_move_a_stationary_eyes_lod_center() {

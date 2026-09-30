@@ -5,8 +5,7 @@ use thiserror::Error;
 
 use super::{Mat4x4f32, Shader, ShaderTileMetadata};
 use crate::{
-    projection::body::Body,
-    projection::globe::camera::GlobeCameraState,
+    projection::{body::Body, globe::camera::GlobeCameraState},
     render::resource::{FragmentState, VertexBufferLayout, VertexState},
     style::light::{LightError, LightSpecification},
 };

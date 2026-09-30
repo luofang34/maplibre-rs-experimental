@@ -1,6 +1,8 @@
 //! Replacements invalidate only the drapes that draw the changed geometry.
-use super::super::fixture::{Fixture, Kind};
-use super::render::Frames;
+use super::{
+    super::fixture::{Fixture, Kind},
+    render::Frames,
+};
 use crate::{
     sdf::SymbolLayersDataComponent,
     terrain::{DemTile, DemTileComponent, LoadedDem},

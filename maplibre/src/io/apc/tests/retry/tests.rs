@@ -1,7 +1,9 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
-use super::fixture::{Fixture, Kind};
-use super::source::Response;
+use super::{
+    fixture::{Fixture, Kind},
+    source::Response,
+};
 use crate::io::tile_backpressure::{request_budget, MAX_TILES_IN_FLIGHT};
 
 async fn recovers(kind: Kind) {

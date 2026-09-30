@@ -1,4 +1,6 @@
 //! Vector pixels with overlapping source pyramids and buffered geometry.
+use geozero::mvt::Message;
+
 use super::*;
 use crate::{
     headless::{create_headless_renderer_with_settings, map::process_tile_layers},
@@ -7,7 +9,6 @@ use crate::{
     style::layer::StyleLayer,
     vector::{DefaultVectorTransferables, VectorPlugin},
 };
-use geozero::mvt::Message;
 
 fn vector_tile(name: &str, geometry: Vec<u32>, kind: i32) -> Vec<u8> {
     geozero::mvt::Tile {

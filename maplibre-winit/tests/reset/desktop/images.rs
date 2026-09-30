@@ -1,4 +1,3 @@
-use super::{fixture, frame, initialize, reset, Environment, Source};
 use maplibre::{
     map::Map,
     raster::{
@@ -8,6 +7,8 @@ use maplibre::{
     terrain::{DefaultDemTransferables, DemTileComponent, TerrainPlugin},
 };
 use maplibre_winit::WinitMapWindowConfig;
+
+use super::{fixture, frame, initialize, reset, Environment, Source};
 
 pub(super) async fn check(config: WinitMapWindowConfig<()>, source: &Source) {
     for dem in [false, true] {

@@ -1,7 +1,8 @@
+use cgmath::{Matrix4, SquareMatrix, Vector3};
+
 use super::*;
-use crate::coords::ZoomLevel;
 use crate::{
-    coords::{LatLon, WorldCoords, Zoom},
+    coords::{LatLon, WorldCoords, Zoom, ZoomLevel},
     projection::ProjectionType,
     render::{
         camera::EyeFrustum,
@@ -9,7 +10,6 @@ use crate::{
     },
     window::PhysicalSize,
 };
-use cgmath::{Matrix4, SquareMatrix, Vector3};
 #[test]
 fn speculative_work_excludes_visible_and_respects_count_and_bytes() {
     let candidates: Vec<_> = (0..20)

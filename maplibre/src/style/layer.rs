@@ -8,12 +8,11 @@ use std::{
 use cint::{Alpha, EncodedSrgb};
 use serde::{Deserialize, Serialize};
 
+pub use crate::style::property::{PropertyValue, StyleProperty, TextField};
 use crate::style::{
     circle::CirclePaint,
     hillshade::{ColorReliefPaint, HillshadePaint},
 };
-
-pub use crate::style::property::{PropertyValue, StyleProperty, TextField};
 
 mod paint;
 mod serialization;

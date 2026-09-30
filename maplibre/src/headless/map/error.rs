@@ -1,10 +1,11 @@
 //! Failures from headless data processing and frame execution.
 
+use thiserror::Error;
+
 use crate::{
     coords::WorldTileCoords, geojson::ProcessGeoJsonError, schedule::StageError,
     vector::ProcessVectorError,
 };
-use thiserror::Error;
 
 /// Failure while processing or rendering data through a [`super::HeadlessMap`].
 #[derive(Debug, Error)]

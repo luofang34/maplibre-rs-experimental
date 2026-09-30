@@ -4,6 +4,11 @@
 //! `tunnel`). This is renderer metadata, not a MapLibre line paint property. The profile
 //! joins sampled endpoints; the configured clearance is an inference, never an OSM `layer`
 //! converted to metres. A supplied absolute deck elevation overrides that inference.
+use std::{
+    hash::{Hash, Hasher},
+    sync::Arc,
+};
+
 use super::{
     tessellation::{IndexDataType, OverAlignedVertexBuffer},
     AvailableVectorLayerBucket, VectorBufferPool,
@@ -14,10 +19,6 @@ use crate::{
     style::{layer::StyleLayer, Style},
     tcs::{tiles::Tiles, world::World},
     terrain::{coverage::TerrainCoverageIndex, source::dem_source, DemTileComponent},
-};
-use std::{
-    hash::{Hash, Hasher},
-    sync::Arc,
 };
 
 const MAX_VERTICES: usize = 65_536;

@@ -294,6 +294,7 @@ async fn resumed_config() -> (
     js_sys::Promise,
 ) {
     use std::{cell::RefCell, rc::Rc};
+
     use winit::{
         application::ApplicationHandler, event::WindowEvent, event_loop::ActiveEventLoop,
         platform::web::EventLoopExtWebSys, window::WindowId,

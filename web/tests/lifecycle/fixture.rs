@@ -1,3 +1,11 @@
+use std::{
+    cell::Cell,
+    future::poll_fn,
+    rc::Rc,
+    sync::{Arc, Mutex, Weak},
+    task::{Poll, Waker},
+};
+
 use maplibre::{
     environment::OffscreenKernelConfig,
     io::{
@@ -15,13 +23,6 @@ use maplibre::{
     tcs::world::World,
 };
 use maplibre_winit::{RawWinitWindow, WinitEnvironment, WinitMapWindowConfig};
-use std::{
-    cell::Cell,
-    future::poll_fn,
-    rc::Rc,
-    sync::{Arc, Mutex, Weak},
-    task::{Poll, Waker},
-};
 use web::WHATWGOffscreenKernelEnvironment;
 use winit::event_loop::EventLoopProxy;
 

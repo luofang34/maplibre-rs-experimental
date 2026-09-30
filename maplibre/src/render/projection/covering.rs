@@ -1,4 +1,6 @@
 //! Visible requests and speculative coverage under the active projection.
+use std::collections::HashSet;
+
 use super::{globe_camera_for_view, ProjectionStateError};
 use crate::{
     coords::{ViewRegion, WorldTileCoords, ZoomLevel, TILE_SIZE},
@@ -29,7 +31,6 @@ use crate::{
     tcs::world::World,
     terrain::coverage::{IndexedTileElevation, TerrainCoverageIndex},
 };
-use std::collections::HashSet;
 const ASSUMED_MAX_FEATURE_HEIGHT_METERS: f64 = 500.0;
 const MAX_MERCATOR_HORIZON_DEGREES: f64 = 89.25;
 const TILE_CULLING_HORIZON_ONSET_DEGREES: f64 = 15.0;

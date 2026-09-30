@@ -1,7 +1,8 @@
 //! Allocation and deferred content of terrain drape textures.
+use std::collections::HashSet;
+
 use super::{TerrainResources, DRAPE_SIZE};
 use crate::{coords::WorldTileCoords, render::resource::Texture, terrain::drape_cache::DrapeState};
-use std::collections::HashSet;
 impl TerrainResources {
     /// Gives a view tile a drape texture and reports what it holds.
     pub fn acquire_drape(

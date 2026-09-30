@@ -1,9 +1,10 @@
+use cgmath::Point2;
+
 use super::*;
 use crate::{
     coords::ZoomLevel,
     projection::globe::covering_tiles::{lod::LodContext, ZoomRounding},
 };
-use cgmath::Point2;
 
 #[test]
 fn jitter_keeps_a_leaf_until_split_and_merge_thresholds_are_crossed() {

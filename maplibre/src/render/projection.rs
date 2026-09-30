@@ -1,5 +1,10 @@
 //! GPU-facing projection data shared by tile shaders.
 
+use bytemuck_derive::{Pod, Zeroable};
+use cgmath::{Matrix4, Point2};
+use thiserror::Error;
+use wgpu::util::DeviceExt;
+
 use crate::{
     coords::{LatLon, TILE_SIZE},
     projection::{
@@ -22,10 +27,6 @@ use crate::{
     },
     style::Style,
 };
-use bytemuck_derive::{Pod, Zeroable};
-use cgmath::{Matrix4, Point2};
-use thiserror::Error;
-use wgpu::util::DeviceExt;
 mod covering;
 pub use covering::{
     covering_region, raster_source_regions, view_region_for_projection, CoveringRequest,

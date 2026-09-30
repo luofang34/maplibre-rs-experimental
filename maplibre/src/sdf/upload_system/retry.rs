@@ -1,4 +1,6 @@
 //! Upload failures preserve the committed symbol geometry, atlas and placement features.
+use std::{rc::Rc, sync::Arc};
+
 use super::*;
 use crate::{
     coords::{WorldCoords, WorldTileCoords, Zoom},
@@ -12,7 +14,6 @@ use crate::{
     tcs::world::World,
     vector::{content, DefaultVectorTransferables, VectorPlugin},
 };
-use std::{rc::Rc, sync::Arc};
 
 async fn context() -> MapContext {
     let (kernel, mut renderer) = crate::headless::create_headless_renderer(16, 16, None)

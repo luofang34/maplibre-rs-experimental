@@ -1,9 +1,10 @@
 //! Placement history follows a symbol across tile replacement, with bounded fades.
+use std::{collections::HashMap, time::Duration};
+
 use crate::{
     coords::WorldTileCoords,
     sdf::{Feature, SymbolLayerData},
 };
-use std::{collections::HashMap, time::Duration};
 
 #[derive(Clone, Hash, PartialEq, Eq)]
 struct Key {

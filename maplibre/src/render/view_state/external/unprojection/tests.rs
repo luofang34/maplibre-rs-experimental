@@ -1,11 +1,12 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
+use cgmath::Deg;
+
 use super::*;
 use crate::{
     coords::{WorldCoords, Zoom},
     window::PhysicalSize,
 };
-use cgmath::Deg;
 
 fn level_transition(pitch: f64, bearing: f64, near: f64, height: f64) -> ViewState {
     let mut state = ViewState::new(
@@ -103,12 +104,12 @@ fn leveling_with_head_rotation_preserves_frustum_corners() {
 
 #[test]
 fn invalid_world_scale_returns_a_covering_error() {
-    use crate::projection::globe::{
-        covering::TileElevationRange,
-        covering_tiles::{SourceZoomRange, ZoomRounding},
-    };
-    use crate::projection::mercator::{
-        covering_tiles, MercatorCoveringError, MercatorCoveringOptions,
+    use crate::projection::{
+        globe::{
+            covering::TileElevationRange,
+            covering_tiles::{SourceZoomRange, ZoomRounding},
+        },
+        mercator::{covering_tiles, MercatorCoveringError, MercatorCoveringOptions},
     };
     let mut state = level_transition(90.0, 37.3, 0.05, 4000.0);
     state.update_zoom(Zoom::new(-2048.0));

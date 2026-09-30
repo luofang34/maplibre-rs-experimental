@@ -1,4 +1,6 @@
 //! Geometry uploads follow the actual sources selected for each terrain texture.
+use std::collections::HashSet;
+
 use crate::{
     coords::WorldTileCoords,
     io::tile_sources::{clamp_to_max_zoom, source_max_zoom, TileKind},
@@ -6,7 +8,6 @@ use crate::{
     tcs::world::World,
     terrain::{drape_targets::select_targets, request_system::DrapeRequests},
 };
-use std::collections::HashSet;
 
 pub(super) fn terrain_sources(world: &World, style: &Style) -> Vec<WorldTileCoords> {
     let max_zoom = source_max_zoom(style, TileKind::Vector);

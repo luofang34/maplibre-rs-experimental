@@ -9,9 +9,9 @@ use cgmath::{EuclideanSpace, InnerSpace, Point2, Vector2, Vector3};
 
 use crate::{
     coords::{LatLon, Zoom, TILE_SIZE},
-    projection::body::Body,
-    projection::globe::{
-        camera::GlobeCameraState, ray_sphere_intersection, unit_sphere_to_lat_lon,
+    projection::{
+        body::Body,
+        globe::{camera::GlobeCameraState, ray_sphere_intersection, unit_sphere_to_lat_lon},
     },
     render::{
         projection::{globe_camera_for_view, mercator_world_to_lat_lon},

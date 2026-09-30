@@ -1,4 +1,12 @@
-use super::Event;
+use std::{
+    cell::Cell,
+    io::{Read, Write},
+    net::TcpListener,
+    rc::Rc,
+    sync::mpsc,
+    thread,
+};
+
 use maplibre::{
     environment::OffscreenKernelConfig,
     io::apc::SchedulerAsyncProcedureCall,
@@ -14,15 +22,9 @@ use maplibre::{
     tcs::world::World,
 };
 use maplibre_winit::{WinitEnvironment, WinitMapWindowConfig};
-use std::{
-    cell::Cell,
-    io::{Read, Write},
-    net::TcpListener,
-    rc::Rc,
-    sync::mpsc,
-    thread,
-};
 use winit::event_loop::EventLoopProxy;
+
+use super::Event;
 
 type Environment = WinitEnvironment<
     TokioScheduler,

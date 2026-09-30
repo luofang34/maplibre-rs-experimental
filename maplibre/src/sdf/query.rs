@@ -1,8 +1,9 @@
 //! Queries the screen bounds of symbols accepted by the latest placement pass.
+use serde::Serialize;
+
 use crate::{
     coords::WorldTileCoords, sdf::SymbolLayersDataComponent, style::Style, tcs::world::World,
 };
-use serde::Serialize;
 
 #[derive(Default, Debug)]
 pub(crate) struct PlacedSymbols(pub(crate) Vec<PlacedSymbol>);

@@ -1,4 +1,6 @@
 //! Shared boundary elevations for independently loaded terrain meshes.
+use std::{collections::HashMap, sync::Arc};
+
 use crate::{
     coords::{WorldTileCoords, EXTENT},
     tcs::tiles::Tiles,
@@ -6,7 +8,6 @@ use crate::{
         mesh::TERRAIN_MESH_SIZE, resources::TerrainTileUniforms, DemRevision, DemTileComponent,
     },
 };
-use std::{collections::HashMap, sync::Arc};
 
 const N: usize = TERRAIN_MESH_SIZE as usize;
 struct Sources {

@@ -12,9 +12,9 @@ use bytemuck::Pod;
 
 use crate::{
     coords::{Quadkey, WorldTileCoords},
-    render::settings::BufferPoolSizes,
     render::{
         resource::{BackingBufferDescriptor, Queue},
+        settings::BufferPoolSizes,
         tile_view_pattern::HasTile,
     },
     style::layer::StyleLayer,

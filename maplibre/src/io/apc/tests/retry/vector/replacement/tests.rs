@@ -1,5 +1,4 @@
-use super::super::super::source::Response;
-use super::super::{deliver, manual, render, tile};
+use super::super::{super::source::Response, deliver, manual, render, tile};
 use crate::{
     render::eventually::Eventually,
     vector::{VectorBufferPool, VectorLayerBucket, VectorLayerBucketComponent},

@@ -1,7 +1,8 @@
 #![allow(clippy::expect_used)]
 
-use super::*;
 use std::error::Error;
+
+use super::*;
 
 #[test]
 fn graph_initialization_error_exposes_its_original_cause() {

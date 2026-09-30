@@ -1,5 +1,9 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
+use std::time::Duration;
+
+use cgmath::{Matrix4, Rad, SquareMatrix, Vector3};
+
 use crate::{
     context::MapContext,
     coords::LatLon,
@@ -16,8 +20,6 @@ use crate::{
     tcs::system::{stage::SystemStage, SystemResult},
     terrain::{resources::TerrainResources, DrapePhase},
 };
-use cgmath::{Matrix4, Rad, SquareMatrix, Vector3};
-use std::time::Duration;
 
 #[derive(Default)]
 struct Observations {

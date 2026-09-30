@@ -1,6 +1,7 @@
 //! Split and merge hysteresis without delaying newly visible ground.
-use crate::coords::{TileCoords, WorldTileCoords};
 use std::collections::HashSet;
+
+use crate::coords::{TileCoords, WorldTileCoords};
 
 const ZOOM_MARGIN: f64 = 0.15;
 

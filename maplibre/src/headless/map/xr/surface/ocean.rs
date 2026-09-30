@@ -1,4 +1,6 @@
 #![allow(clippy::expect_used, clippy::panic)]
+use geozero::mvt::Message;
+
 use super::{read_back_blocking, SIZE};
 use crate::{
     coords::WorldTileCoords,
@@ -9,7 +11,6 @@ use crate::{
     render::RenderPlugin,
     style::Style,
 };
-use geozero::mvt::Message;
 
 #[tokio::test]
 async fn globe_background_does_not_occlude_below_sea_level_terrain() {

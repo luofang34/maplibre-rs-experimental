@@ -1,6 +1,7 @@
 #![allow(clippy::expect_used, clippy::panic)]
-use super::*;
 use wasm_bindgen_test::wasm_bindgen_test;
+
+use super::*;
 
 fn transferred(message: FlatBufferTransferable, tag: WebMessageTag) -> FlatBufferTransferable {
     let buffer = js_sys::Uint8Array::from(message.data()).buffer();

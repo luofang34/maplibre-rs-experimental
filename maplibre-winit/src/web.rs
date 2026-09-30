@@ -1,8 +1,10 @@
 //! Canvas windows are created only on the active browser event loop.
-use crate::{WinitHostError, WinitMapWindow};
-use maplibre::window::{MapWindowConfig, WindowCreateError};
 use std::{marker::PhantomData, sync::Arc};
+
+use maplibre::window::{MapWindowConfig, WindowCreateError};
 use winit::{platform::web::WindowAttributesExtWebSys, window::WindowAttributes};
+
+use crate::{WinitHostError, WinitMapWindow};
 
 /// Canvas selection and binding for a browser map.
 #[derive(Clone)]

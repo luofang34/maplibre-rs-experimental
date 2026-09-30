@@ -1,3 +1,9 @@
+use std::{
+    cell::RefCell,
+    sync::{Arc, Mutex},
+    vec::IntoIter,
+};
+
 use maplibre::{
     environment::{OffscreenKernel, OffscreenKernelConfig},
     io::{
@@ -15,11 +21,6 @@ use maplibre::{
     vector::{DefaultVectorTransferables, VectorPlugin},
 };
 use maplibre_winit::{WinitEnvironment, WinitMapWindowConfig};
-use std::{
-    cell::RefCell,
-    sync::{Arc, Mutex},
-    vec::IntoIter,
-};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,

@@ -1,7 +1,8 @@
 //! Packed CPU records consumed by the vertex layouts of tile rendering pipelines.
 
-use super::{Mat4x4f32, Vec2f32, Vec4f32};
 use bytemuck_derive::{Pod, Zeroable};
+
+use super::{Mat4x4f32, Vec2f32, Vec4f32};
 
 /// Tile-space geometry shared by fills, lines and circles.
 #[repr(C)]

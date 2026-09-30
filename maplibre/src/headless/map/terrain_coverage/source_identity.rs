@@ -1,4 +1,8 @@
 //! Named raster sources delivered through real worker decoding and GPU upload.
+use std::sync::Arc;
+
+use image::ImageEncoder;
+
 use super::*;
 use crate::{
     environment::{OffscreenKernel, OffscreenKernelConfig},
@@ -10,8 +14,6 @@ use crate::{
     raster::{populate_world_system::PopulateWorldSystem, RasterLayersDataComponent},
     tcs::system::System,
 };
-use image::ImageEncoder;
-use std::sync::Arc;
 
 #[derive(Default)]
 struct SourceGate {

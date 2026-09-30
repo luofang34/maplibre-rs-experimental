@@ -1,11 +1,12 @@
 #![allow(clippy::expect_used, clippy::panic)]
+use cgmath::{Deg, Rad};
+
 use super::*;
 use crate::{
     coords::{LatLon, WorldCoords, Zoom},
     render::{camera::EyeFrustum, view_state::ExternalAnchor},
     window::PhysicalSize,
 };
-use cgmath::{Deg, Rad};
 
 fn view(x: f64, turn: f64) -> ExternalView {
     ExternalView {

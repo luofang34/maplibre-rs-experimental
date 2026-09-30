@@ -1,8 +1,9 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
+use std::{cell::RefCell, rc::Rc, sync::Arc};
+
 use maplibre::{map::MapError, window::HeadedMapWindow};
 use maplibre_winit::{WinitApplication, WinitMapWindowConfig};
-use std::{cell::RefCell, rc::Rc, sync::Arc};
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_test::*;
 use winit::{

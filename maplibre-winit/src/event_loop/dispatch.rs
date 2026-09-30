@@ -1,5 +1,4 @@
 //! Input and frames for an initialized map.
-use crate::input::{InputController, UpdateState};
 use instant::Instant;
 use maplibre::{
     environment::Environment,
@@ -12,6 +11,8 @@ use winit::{
     event_loop::ActiveEventLoop,
     keyboard::{Key, NamedKey},
 };
+
+use crate::input::{InputController, UpdateState};
 
 pub(super) struct Dispatch<E: Environment>
 where

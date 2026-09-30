@@ -3,8 +3,10 @@ use cgmath::Point2;
 use super::AtmosphereLayerMetadata;
 use crate::{
     coords::LatLon,
-    projection::body::Body,
-    projection::globe::camera::{GlobeCameraOptions, GlobeCameraState},
+    projection::{
+        body::Body,
+        globe::camera::{GlobeCameraOptions, GlobeCameraState},
+    },
     style::light::LightSpecification,
 };
 

@@ -1,4 +1,6 @@
 #![allow(clippy::expect_used, clippy::panic)]
+use cgmath::{Deg, Matrix4, Rad, SquareMatrix};
+
 use super::*;
 use crate::{
     coords::{LatLon, WorldCoords, Zoom},
@@ -9,7 +11,6 @@ use crate::{
     },
     window::PhysicalSize,
 };
-use cgmath::{Deg, Matrix4, Rad, SquareMatrix};
 
 fn eye(height: f64, pitch: f64, roll: f64) -> ViewState {
     let mut view = ViewState::new(

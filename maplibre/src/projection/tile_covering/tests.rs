@@ -1,6 +1,7 @@
 #![allow(clippy::expect_used, clippy::panic)]
-use super::*;
 use std::convert::Infallible;
+
+use super::*;
 
 fn full(target: u8) -> Result<Option<Refinement>, Infallible> {
     Ok(Some(Refinement {

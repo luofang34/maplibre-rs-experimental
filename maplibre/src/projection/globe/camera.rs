@@ -12,8 +12,8 @@ use super::{
 };
 use crate::{
     coords::{LatLon, TileCoords, EXTENT},
-    projection::body::Body,
     projection::{
+        body::Body,
         globe::globe_radius_pixels,
         renderer_data::{compute_globe_clipping_plane, GlobeViewGeometry, ProjectionDataError},
     },

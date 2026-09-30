@@ -2,8 +2,7 @@
 
 #![deny(missing_docs)]
 
-use std::borrow::Cow;
-use std::collections::HashMap;
+use std::{borrow::Cow, collections::HashMap};
 
 use downcast_rs::{impl_downcast, Downcast};
 use thiserror::Error;
@@ -11,8 +10,10 @@ use thiserror::Error;
 use crate::{
     context::MapContext,
     define_label,
-    tcs::system::{heap::live_bytes, timings::FrameTimings},
-    tcs::system::{stage::SystemStage, IntoSystemContainer, SystemError},
+    tcs::system::{
+        heap::live_bytes, stage::SystemStage, timings::FrameTimings, IntoSystemContainer,
+        SystemError,
+    },
 };
 
 /// A stage that succeeds without reading or changing the frame context.

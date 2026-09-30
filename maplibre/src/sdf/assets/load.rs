@@ -1,14 +1,16 @@
 //! Loads the glyph ranges and sprite images referenced by visible tile features.
+use std::{
+    collections::{BTreeSet, HashMap, HashSet},
+    sync::Arc,
+};
+
+use geozero::mvt::Message;
+
 use super::{AtlasBuilder, AtlasEntry, SymbolAtlas};
 use crate::{
     io::source_client::{HttpClient, SourceClient},
     style::{layer::LayerPaint, Style},
     vector::feature_properties,
-};
-use geozero::mvt::Message;
-use std::{
-    collections::{BTreeSet, HashMap, HashSet},
-    sync::Arc,
 };
 
 type GlyphRequests = HashMap<String, BTreeSet<u32>>;

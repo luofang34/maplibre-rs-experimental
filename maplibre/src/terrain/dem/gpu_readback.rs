@@ -5,8 +5,8 @@ use bytemuck::Zeroable;
 use wgpu::util::DeviceExt;
 
 use super::DemTile;
-use crate::coords::EXTENT;
 use crate::{
+    coords::EXTENT,
     render::{
         resource::Texture,
         shaders::{Shader, TerrainShader},

@@ -1,7 +1,4 @@
 //! The handler owns pending initialization so suspension drops every surface synchronously.
-use super::dispatch::Dispatch;
-use crate::{RawWinitWindow, WinitApplicationError, WinitMapWindowConfig};
-use maplibre::{environment::Environment, map::Map, window::HeadedMapWindow};
 use std::{
     cell::RefCell,
     future::Future,
@@ -10,12 +7,17 @@ use std::{
     sync::{Arc, Weak},
     task::{Context, Poll, Wake, Waker},
 };
+
+use maplibre::{environment::Environment, map::Map, window::HeadedMapWindow};
 use winit::{
     application::ApplicationHandler,
     event::{DeviceEvent, DeviceId, WindowEvent},
     event_loop::ActiveEventLoop,
     window::WindowId,
 };
+
+use super::dispatch::Dispatch;
+use crate::{RawWinitWindow, WinitApplicationError, WinitMapWindowConfig};
 
 type Initializing<E> = Pin<Box<dyn Future<Output = Result<Dispatch<E>, maplibre::map::MapError>>>>;
 pub(super) type Completion<C> = Box<dyn FnOnce(Result<(), WinitApplicationError<C>>)>;

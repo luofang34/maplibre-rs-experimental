@@ -2,8 +2,9 @@
 
 use std::{any::TypeId, error::Error};
 
-use super::*;
 use wasm_bindgen_test::*;
+
+use super::*;
 
 #[wasm_bindgen_test]
 fn every_wire_tag_preserves_payload_bytes() {

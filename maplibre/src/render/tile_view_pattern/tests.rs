@@ -181,9 +181,10 @@ fn raster_shapes_fall_back_to_the_pyramid_until_the_covering_loads() {
 
 #[test]
 fn bridge_width_units_follow_style_scale_independently_of_gaze_zoom() {
+    use cgmath::{Matrix4, SquareMatrix};
+
     use super::{TileShape, ViewTile};
     use crate::render::{camera::ViewProjection, shaders::ShaderTileMetadata};
-    use cgmath::{Matrix4, SquareMatrix};
     struct Captured(std::cell::RefCell<Vec<u8>>);
     impl Queue<TestBuffer> for Captured {
         fn write_buffer(&self, _: &TestBuffer, _: u64, bytes: &[u8]) {

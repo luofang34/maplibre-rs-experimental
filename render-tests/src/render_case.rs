@@ -1,11 +1,7 @@
 //! Renders a fixture and compares its pixels with the expected image.
 
-use crate::{
-    comparison::{compare_and_diff, composite_opaque_background, unpremultiply},
-    parse_test_meta,
-    source_loading::{load_dem_tiles_blocking, load_sources_blocking},
-    TestMeta, TestResult,
-};
+use std::path::{Path, PathBuf};
+
 use maplibre::{
     headless::{create_headless_renderer_with_settings, map::HeadlessMap, HeadlessPlugin},
     plugin::Plugin,
@@ -18,7 +14,13 @@ use maplibre::{
     terrain::{DefaultDemTransferables, TerrainPlugin},
     vector::{DefaultVectorTransferables, VectorPlugin},
 };
-use std::path::{Path, PathBuf};
+
+use crate::{
+    comparison::{compare_and_diff, composite_opaque_background, unpremultiply},
+    parse_test_meta,
+    source_loading::{load_dem_tiles_blocking, load_sources_blocking},
+    TestMeta, TestResult,
+};
 
 pub(super) async fn run_test_inner(test_dir: &Path) -> TestResult {
     let result = render_fixture(test_dir).await;

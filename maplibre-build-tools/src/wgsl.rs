@@ -1,13 +1,14 @@
 //! WGSL validation with relative include expansion.
-use naga::{
-    front::wgsl,
-    valid::{Capabilities, ValidationError, ValidationFlags, Validator},
-};
 use std::{
     collections::HashSet,
     env,
     io::{self, Write},
     path::{Path, PathBuf},
+};
+
+use naga::{
+    front::wgsl,
+    valid::{Capabilities, ValidationError, ValidationFlags, Validator},
 };
 use walkdir::WalkDir;
 

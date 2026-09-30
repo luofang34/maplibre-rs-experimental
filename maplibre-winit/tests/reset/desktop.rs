@@ -1,10 +1,10 @@
 use std::time::{Duration, Instant};
 
-use maplibre::window::{HeadedMapWindow, MapWindow, MapWindowConfig};
 use maplibre::{
     map::Map,
     render::frame_input::FrameInput,
     vector::{VectorLayerBucket, VectorLayerBucketComponent},
+    window::{HeadedMapWindow, MapWindow, MapWindowConfig},
 };
 use maplibre_winit::{WinitMapWindow, WinitMapWindowConfig};
 use winit::{

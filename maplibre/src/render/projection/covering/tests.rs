@@ -27,6 +27,8 @@ fn prefetch_limits_preserve_every_primary_tile() {
 
 #[test]
 fn moving_eye_requests_start_with_all_visible_tiles() {
+    use cgmath::{Deg, Matrix4, Rad, SquareMatrix, Vector3};
+
     use crate::{
         coords::{LatLon, WorldCoords, Zoom},
         render::{
@@ -35,7 +37,6 @@ fn moving_eye_requests_start_with_all_visible_tiles() {
         },
         window::PhysicalSize,
     };
-    use cgmath::{Deg, Matrix4, Rad, SquareMatrix, Vector3};
     let style: Style = serde_json::from_str(
         r#"{"version":8,"sources":{},"layers":[],"terrain":{"source":"dem"}}"#,
     )

@@ -1,6 +1,7 @@
 #![allow(clippy::expect_used, clippy::panic)]
-use super::*;
 use std::collections::BTreeSet;
+
+use super::*;
 
 #[test]
 fn glyph_subset_keeps_spaces_and_unicode_metrics_without_uploading_unused_letters() {

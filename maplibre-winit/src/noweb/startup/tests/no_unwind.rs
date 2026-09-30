@@ -1,9 +1,11 @@
 #[cfg(unix)]
 #[test]
 fn invalid_cache_path_returns_without_unwinding() {
-    use crate::{run_headed_map, HeadedMapOptions, WinitMapWindowConfig};
-    use maplibre::{render::settings::WgpuSettings, style::Style};
     use std::{ffi::OsString, os::unix::ffi::OsStringExt, path::PathBuf};
+
+    use maplibre::{render::settings::WgpuSettings, style::Style};
+
+    use crate::{run_headed_map, HeadedMapOptions, WinitMapWindowConfig};
 
     let result = std::panic::catch_unwind(|| {
         drop(run_headed_map(

@@ -1,14 +1,15 @@
-use maplibre::{
-    map::MapError,
-    window::{HeadedMapWindow, MapWindowConfig, WindowCreateError},
-};
-use maplibre_winit::{RawWinitWindow, WinitApplication, WinitMapWindowConfig};
 use std::{
     cell::RefCell,
     rc::Rc,
     sync::{mpsc, Arc, Weak},
     time::{Duration, Instant},
 };
+
+use maplibre::{
+    map::MapError,
+    window::{HeadedMapWindow, MapWindowConfig, WindowCreateError},
+};
+use maplibre_winit::{RawWinitWindow, WinitApplication, WinitMapWindowConfig};
 use winit::{
     application::ApplicationHandler,
     event::{StartCause, WindowEvent},

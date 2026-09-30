@@ -1,5 +1,7 @@
 //! Image workers retain the request that owns each result, including unsuccessful results.
 
+use image::ImageEncoder;
+
 use super::{
     fixture::{Fixture, Kind},
     source::Response,
@@ -9,7 +11,6 @@ use crate::{
     raster::{RasterLayerData, RasterLayersDataComponent},
     terrain::DemTileComponent,
 };
-use image::ImageEncoder;
 
 fn png(value: u8) -> Vec<u8> {
     let mut bytes = Vec::new();

@@ -1,6 +1,6 @@
 //! A child with only one completed source cannot replace complete parent pixels.
-use super::super::{fixture::Fixture, source::Response};
 use super::{
+    super::{fixture::Fixture, source::Response},
     deliver, manual,
     render::{assert_green, Frames},
     tile,

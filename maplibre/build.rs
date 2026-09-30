@@ -11,8 +11,9 @@ type BuildResult = Result<(), Box<dyn std::error::Error>>;
 
 #[cfg(feature = "embed-static-tiles")]
 fn embed_tiles_statically_blocking() -> BuildResult {
-    use maplibre_build_tools::mbtiles::extract_blocking;
     use std::{env, path::Path};
+
+    use maplibre_build_tools::mbtiles::extract_blocking;
 
     const MUNICH_X: u32 = 17425;
     const MUNICH_Y: u32 = 11365;

@@ -1,9 +1,10 @@
 //! Worker transport for symbol collision geometry and atlases.
+use serde::{Deserialize, Serialize};
+
 use crate::{
     euclid::{Box2D, Point2D},
     sdf::Feature,
 };
-use serde::{Deserialize, Serialize};
 
 /// Serializable collision geometry for one label and its icon.
 #[derive(Serialize, Deserialize)]

@@ -1,10 +1,12 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
-use crate::projection::body::Body;
 use cgmath::{InnerSpace, Point2, SquareMatrix, Vector3};
 
 use super::{GlobeCameraError, GlobeCameraOptions, GlobeCameraState};
-use crate::coords::{LatLon, TileCoords, ZoomLevel, EXTENT};
+use crate::{
+    coords::{LatLon, TileCoords, ZoomLevel, EXTENT},
+    projection::body::Body,
+};
 
 fn options() -> GlobeCameraOptions {
     GlobeCameraOptions {

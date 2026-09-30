@@ -163,10 +163,12 @@ mod tests {
     use super::GlobeFrustum;
     use crate::{
         coords::{LatLon, TileCoords, ZoomLevel, TILE_SIZE},
-        projection::body::Body,
-        projection::globe::{
-            camera::{GlobeCameraOptions, GlobeCameraState},
-            covering::{globe_tile_bounding_volume, TileElevationRange},
+        projection::{
+            body::Body,
+            globe::{
+                camera::{GlobeCameraOptions, GlobeCameraState},
+                covering::{globe_tile_bounding_volume, TileElevationRange},
+            },
         },
     };
 

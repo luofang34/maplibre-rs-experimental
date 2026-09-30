@@ -24,9 +24,8 @@ pub use legacy::{
     LegacyPropertySpec, PropertyKind,
 };
 pub use parse::{is_expression, ParseError};
-pub use value::{js_number, Color, Type, Value};
-
 use parse::{Annotation, Parser};
+pub use value::{js_number, Color, Type, Value};
 
 impl Expression {
     /// Parses an expression with no expectation about its type.

@@ -1,11 +1,13 @@
 //! GPU atlases shared by layers and their evaluated draw uniforms.
-use super::{assets::SymbolAtlas, paint::SymbolUniforms};
-use crate::{coords::WorldTileCoords, render::resource::share_gpu, style::layer::SymbolPaint};
 use std::{
     collections::HashMap,
     sync::{Arc, Weak},
 };
+
 use wgpu::util::{DeviceExt, TextureDataOrder};
+
+use super::{assets::SymbolAtlas, paint::SymbolUniforms};
+use crate::{coords::WorldTileCoords, render::resource::share_gpu, style::layer::SymbolPaint};
 
 struct TileAtlas {
     source: Arc<SymbolAtlas>,

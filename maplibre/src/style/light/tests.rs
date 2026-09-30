@@ -3,8 +3,10 @@ use cgmath::{InnerSpace, Point2};
 use super::{LightAnchor, LightError, LightSpecification};
 use crate::{
     coords::LatLon,
-    projection::body::Body,
-    projection::globe::camera::{GlobeCameraOptions, GlobeCameraState},
+    projection::{
+        body::Body,
+        globe::camera::{GlobeCameraOptions, GlobeCameraState},
+    },
     style::Style,
 };
 

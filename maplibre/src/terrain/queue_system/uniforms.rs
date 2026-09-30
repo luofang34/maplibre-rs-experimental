@@ -1,4 +1,6 @@
 //! Terrain texture coordinates and uniforms shared across a stereo frame.
+use cgmath::{Matrix4, SquareMatrix, Vector3};
+
 use crate::{
     coords::{WorldTileCoords, EXTENT},
     projection::renderer_data::tile_mercator_coordinates,
@@ -16,7 +18,6 @@ use crate::{
         DrapePhase,
     },
 };
-use cgmath::{Matrix4, SquareMatrix, Vector3};
 mod globe;
 #[derive(Default)]
 pub(super) struct TerrainEyeFrame(pub Vec<(WorldTileCoords, TerrainTileUniforms)>);

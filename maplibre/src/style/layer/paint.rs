@@ -1,8 +1,9 @@
 //! Typed paint fields and symbol layout values retained by layer serialization.
 
-use super::{StyleProperty, TextField};
 use csscolorparser::Color;
 use serde::{Deserialize, Serialize};
+
+use super::{StyleProperty, TextField};
 
 /// Base background color; properties outside this model are retained by layer serialization.
 #[derive(Serialize, Deserialize, Debug, Clone)]

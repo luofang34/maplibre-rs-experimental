@@ -1,11 +1,12 @@
 //! Transparent source pixels composed directly and through terrain drapes.
+use geozero::mvt::Message;
+
 use super::*;
 use crate::{
     headless::{create_headless_renderer_with_settings, map::process_tile_layers},
     render::settings::{Msaa, RendererSettings},
     vector::{DefaultVectorTransferables, VectorPlugin},
 };
-use geozero::mvt::Message;
 
 fn alpha_style(terrain: bool, fill_alpha: f32, raster_alpha: Option<u8>) -> Style {
     let mut style = coverage_style(false, false);

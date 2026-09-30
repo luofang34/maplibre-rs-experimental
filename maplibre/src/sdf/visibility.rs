@@ -1,10 +1,12 @@
 //! Optional host relevance limits for symbols in externally driven 3D views.
+use std::collections::HashMap;
+
+use cgmath::InnerSpace;
+
 use crate::{
     render::view_state::ViewState,
     sdf::{Feature, SymbolLayerData},
 };
-use cgmath::InnerSpace;
-use std::collections::HashMap;
 
 /// Host presentation policy; absent limits preserve style-defined symbol visibility.
 #[derive(Clone, Debug, Default)]

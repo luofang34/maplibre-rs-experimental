@@ -1,4 +1,8 @@
 #![allow(clippy::expect_used, clippy::panic)]
+use std::cell::Cell;
+
+use cgmath::{Matrix3, Point2, Rad, Vector3};
+
 use super::*;
 use crate::{
     coords::TILE_SIZE,
@@ -12,8 +16,6 @@ use crate::{
     },
     render::camera::EyeFrustum,
 };
-use cgmath::{Matrix3, Point2, Rad, Vector3};
-use std::cell::Cell;
 
 struct CountedElevation(Cell<usize>);
 impl TileElevationProvider for CountedElevation {

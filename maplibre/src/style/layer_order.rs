@@ -1,6 +1,7 @@
 //! Preserves the style document's painter order across asynchronous tile processing.
-use super::layer::StyleLayer;
 use serde::{Deserialize, Deserializer};
+
+use super::layer::StyleLayer;
 
 pub(super) fn deserialize_layers<'de, D: Deserializer<'de>>(
     deserializer: D,

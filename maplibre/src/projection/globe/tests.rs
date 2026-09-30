@@ -1,6 +1,5 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
-use crate::projection::body::Body;
 use std::f64::consts::SQRT_2;
 
 use cgmath::{InnerSpace, Vector3, Vector4};
@@ -13,6 +12,7 @@ use super::{
     orientation_from_lat_lon_bearing, ray_sphere_intersection, unit_sphere_to_lat_lon,
     EARTH_RADIUS_METERS,
 };
+use crate::projection::body::Body;
 
 #[test]
 fn globe_preset_transitions_between_zoom_eleven_and_twelve() {

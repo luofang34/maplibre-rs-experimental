@@ -1,10 +1,11 @@
 //! Completion flags shared between Web worker replies and tile coverage selection.
 
+use flatbuffers::FlatBufferBuilder;
+use maplibre::coords::WorldTileCoords;
+
 use super::{
     FlatBufferTransferable, FlatTileTessellatedBuilder, FlatWorldTileCoords, WebMessageTag,
 };
-use flatbuffers::FlatBufferBuilder;
-use maplibre::coords::WorldTileCoords;
 
 pub(super) fn tile_completion(
     coords: WorldTileCoords,

@@ -1,9 +1,5 @@
 //! Decodes the fixture sources selected by the renderer's visible tile coverage.
 
-use crate::{
-    paths::{local_data_path, local_tile_path},
-    source_tiles::source_tile_coords,
-};
 use maplibre::{
     coords::WorldTileCoords,
     headless::map::{HeadlessMap, ProcessedLayers},
@@ -18,6 +14,11 @@ use maplibre::{
     terrain::dem_tile_coords,
 };
 use serde_json::Value;
+
+use crate::{
+    paths::{local_data_path, local_tile_path},
+    source_tiles::source_tile_coords,
+};
 
 pub(super) fn load_sources_blocking(
     map: &mut HeadlessMap,
