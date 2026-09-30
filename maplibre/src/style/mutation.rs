@@ -289,7 +289,7 @@ impl Style {
                 vector.tiles.is_none() && vector.url.is_some()
             }
             Source::RasterDem(dem) => dem.tiles.is_none() && dem.url.is_some(),
-            Source::GeoJson(_) => false,
+            Source::GeoJson(_) | Source::Image(_) => false,
         };
         if url_only {
             return Err(StyleMutationError::TileJsonNotSupported {

@@ -1,5 +1,7 @@
 //! Decodes the fixture sources selected by the renderer's visible tile coverage.
 
+use std::collections::HashMap;
+
 use maplibre::{
     coords::WorldTileCoords,
     geojson::index::GeoJsonIndex,
@@ -20,6 +22,7 @@ use maplibre::{
 use serde_json::Value;
 
 use crate::{
+    image_sources::PlacedImage,
     paths::{local_data_path, local_tile_path},
     source_tiles::source_tile_coords,
     symbol_assets::load_atlas_blocking,
@@ -29,6 +32,7 @@ pub(super) fn load_sources_blocking(
     map: &mut HeadlessMap,
     style: &Style,
     target_coords: &[WorldTileCoords],
+    images: &HashMap<String, PlacedImage>,
 ) -> Result<(ProcessedLayers, Vec<AvailableRasterLayerData>), String> {
     let mut all_layers = ProcessedLayers::default();
     let mut all_raster_layers = Vec::new();
@@ -64,8 +68,12 @@ pub(super) fn load_sources_blocking(
                 &projection,
             )?),
             // DEM images supply hillshade and colour relief independently from terrain meshes.
+            Source::Image(_) => return Err(format!("Image source '{name}' was not lowered")),
             Source::Raster(_) | Source::RasterDem(_) => {
-                all_raster_layers.extend(load_raster_blocking(map, name, source)?)
+                all_raster_layers.extend(match images.get(name) {
+                    Some(placed) => load_image_blocking(map, name, placed)?,
+                    None => load_raster_blocking(map, name, source)?,
+                })
             }
         }
     }
@@ -158,6 +166,27 @@ fn load_vector_blocking(
         }
     }
     Ok(processed)
+}
+
+fn load_image_blocking(
+    map: &HeadlessMap,
+    name: &str,
+    placed: &PlacedImage,
+) -> Result<Vec<AvailableRasterLayerData>, String> {
+    let required = map
+        .required_raster_tile_coords(name)
+        .map_err(|error| format!("Cannot select raster tiles: {error}"))?;
+    Ok(required
+        .into_iter()
+        .filter_map(|coords| {
+            maplibre::raster::image_source::render_tile(&placed.image, placed.coordinates, coords)
+                .map(|image| AvailableRasterLayerData {
+                    coords,
+                    source: name.into(),
+                    image,
+                })
+        })
+        .collect())
 }
 
 fn load_raster_blocking(

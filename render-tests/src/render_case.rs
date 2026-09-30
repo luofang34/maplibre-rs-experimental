@@ -32,7 +32,8 @@ pub(super) async fn run_test_inner(test_dir: &Path) -> TestResult {
 }
 
 async fn render_fixture(test_dir: &Path) -> Result<(f64, f64), String> {
-    let (style, meta) = load_style_blocking(test_dir)?;
+    let (mut style, meta) = load_style_blocking(test_dir)?;
+    let images = crate::image_sources::lower(&mut style)?;
     let mut map = create_map(&style, &meta).await?;
     let mut coords = map
         .required_tile_coords()
@@ -46,7 +47,7 @@ async fn render_fixture(test_dir: &Path) -> Result<(f64, f64), String> {
             .required_tile_coords()
             .map_err(|error| format!("Cannot select source tiles: {error}"))?;
     }
-    let (layers, raster_layers) = load_sources_blocking(&mut map, &style, &coords)?;
+    let (layers, raster_layers) = load_sources_blocking(&mut map, &style, &coords, &images)?;
     // Labels fade in, so a frame settles only after several; other layers need two.
     let frame_count: u8 = if style
         .layers

@@ -24,6 +24,7 @@ use maplibre::platform::run_multithreaded;
 use serde_json::Value;
 
 mod comparison;
+mod image_sources;
 mod operations;
 mod paths;
 mod render_case;

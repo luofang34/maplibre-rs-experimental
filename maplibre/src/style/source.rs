@@ -218,6 +218,19 @@ pub enum Source {
     /// GeoJSON features declared inline or by document URL.
     #[serde(rename = "geojson")]
     GeoJson(GeoJsonSource),
+    /// One image stretched over four geographic corners.
+    #[serde(rename = "image")]
+    Image(ImageSource),
+}
+
+/// An image placed on the map by the longitude and latitude of its corners.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct ImageSource {
+    /// Location of the image file.
+    pub url: String,
+    /// `[longitude, latitude]` of the top left, top right, bottom right and bottom left
+    /// corners of the image.
+    pub coordinates: [[f64; 2]; 4],
 }
 
 #[cfg(test)]
