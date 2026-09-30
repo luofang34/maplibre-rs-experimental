@@ -23,8 +23,13 @@ pub struct BackgroundLayerMetadata {
     /// Horizon point in screen pixels with y up, then the unit normal pointing into the sky;
     /// the flat map ends there, as the tiles GL JS draws the background on do.
     pub horizon: [f32; 4],
-    /// Viewport height in X, terrain-enabled flag in Y, then two unused components.
+    /// Viewport height in X, terrain-enabled flag in Y, then the frame's width and height in
+    /// pixels.
     pub viewport: [f32; 4],
+    /// Where the flat map ends north and south, relative to the view center: the row that
+    /// turns a pixel into its numerator of the map row under it with the northern edge's map
+    /// row behind it, then the denominator's row with the southern edge's.
+    pub world_rows: [[f32; 4]; 2],
 }
 
 /// Fullscreen background clipped to the flat map's horizon.
@@ -376,6 +381,16 @@ impl Shader for BackgroundShader {
                         offset: 48,
                         format: wgpu::VertexFormat::Float32x4,
                         shader_location: 3,
+                    },
+                    wgpu::VertexAttribute {
+                        offset: 64,
+                        format: wgpu::VertexFormat::Float32x4,
+                        shader_location: 4,
+                    },
+                    wgpu::VertexAttribute {
+                        offset: 80,
+                        format: wgpu::VertexFormat::Float32x4,
+                        shader_location: 5,
                     },
                 ],
             }],

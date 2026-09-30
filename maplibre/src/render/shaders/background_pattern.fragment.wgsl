@@ -28,6 +28,8 @@ fn main(
     @location(0) v_color: vec4<f32>,
     @location(1) @interpolate(flat) horizon: vec4<f32>,
     @location(2) @interpolate(flat) viewport: vec4<f32>,
+    @location(3) @interpolate(flat) row_numerator: vec4<f32>,
+    @location(4) @interpolate(flat) row_denominator: vec4<f32>,
     @builtin(position) position: vec4<f32>,
 ) -> Output {
     let y = viewport.x - position.y;

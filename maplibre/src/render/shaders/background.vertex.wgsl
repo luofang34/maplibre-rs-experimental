@@ -2,6 +2,8 @@ struct VertexOutput {
     @location(0) color: vec4<f32>,
     @location(1) @interpolate(flat) horizon: vec4<f32>,
     @location(2) @interpolate(flat) viewport: vec4<f32>,
+    @location(3) @interpolate(flat) row_numerator: vec4<f32>,
+    @location(4) @interpolate(flat) row_denominator: vec4<f32>,
     @builtin(position) position: vec4<f32>,
 };
 
@@ -12,6 +14,8 @@ fn main(
     @location(1) z_index: f32, // Passed from per-layer metadata
     @location(2) horizon: vec4<f32>,
     @location(3) viewport: vec4<f32>,
+    @location(4) row_numerator: vec4<f32>,
+    @location(5) row_denominator: vec4<f32>,
 ) -> VertexOutput {
     // Generate a fullscreen quad using standard 6-vertex triangle list layout
     var positions = array<vec2<f32>, 6>(
@@ -33,6 +37,8 @@ fn main(
     out.color = color;
     out.horizon = horizon;
     out.viewport = viewport;
+    out.row_numerator = row_numerator;
+    out.row_denominator = row_denominator;
 
     return out;
 }

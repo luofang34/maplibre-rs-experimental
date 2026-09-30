@@ -44,6 +44,11 @@ pub fn queue_system(
     }: &mut MapContext,
 ) -> SystemResult {
     let mut metadatas = Vec::new();
+    let frame = {
+        let size = renderer.state().surface().size();
+        [size.width() as f32, size.height() as f32]
+    };
+    let world_rows = world_rows(view_state, style.terrain.is_none());
     let mut instances = std::collections::HashMap::new();
     let projection_transition = style.projection.as_ref().map_or(0.0, |specification| {
         specification
@@ -116,9 +121,10 @@ pub fn queue_system(
                 viewport: [
                     view_state.height() as f32,
                     f32::from(style.terrain.is_some()),
-                    0.0,
-                    0.0,
+                    frame[0],
+                    frame[1],
                 ],
+                world_rows,
             });
 
             let draw_function: Box<dyn crate::render::render_phase::Draw<LayerItem>> = if uses_globe
@@ -181,9 +187,10 @@ pub fn queue_system(
                 viewport: [
                     view_state.height() as f32,
                     f32::from(style.terrain.is_some()),
-                    0.0,
-                    0.0,
+                    frame[0],
+                    frame[1],
                 ],
+                world_rows,
             });
         }
         let buffer = renderer
@@ -319,6 +326,52 @@ fn sky_metadata(
             },
         ],
     }
+}
+
+/// The rows that tell a pixel's map row for the northern and southern edges of the flat map,
+/// or ones that cut nothing where the map has no such edges.
+fn world_rows(view_state: &crate::render::view_state::ViewState, edges: bool) -> [[f32; 4]; 2] {
+    use cgmath::{Matrix3, Matrix4, SquareMatrix, Vector3};
+
+    const OPEN: [[f32; 4]; 2] = [[0.0, 0.0, 0.0, -1e30], [0.0, 0.0, 0.0, 1e30]];
+    if !edges {
+        return OPEN;
+    }
+    let center = view_state.camera().position();
+    let relative = view_state.view_projection().0
+        * Matrix4::from_translation(Vector3::new(center.x, center.y, 0.0));
+    // A point of the map plane is (x, y, 0, 1); the clip x, y and w it produces come from
+    // the matrix columns of x, y and the constant.
+    let plane = Matrix3::new(
+        relative.x.x,
+        relative.x.y,
+        relative.x.w,
+        relative.y.x,
+        relative.y.y,
+        relative.y.w,
+        relative.w.x,
+        relative.w.y,
+        relative.w.w,
+    );
+    let Some(inverse) = plane.invert() else {
+        return OPEN;
+    };
+    let world = crate::coords::TILE_SIZE * 2_f64.powf(view_state.zoom().value());
+    // Rows of the inverse give the map x, y and the scale a pixel's clip position carries.
+    [
+        [
+            inverse.x.y as f32,
+            inverse.y.y as f32,
+            inverse.z.y as f32,
+            (-center.y) as f32,
+        ],
+        [
+            inverse.x.z as f32,
+            inverse.y.z as f32,
+            inverse.z.z as f32,
+            (world - center.y) as f32,
+        ],
+    ]
 }
 
 #[cfg(test)]
