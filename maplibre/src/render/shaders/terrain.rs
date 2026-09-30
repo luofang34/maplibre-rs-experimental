@@ -40,7 +40,9 @@ impl Shader for TerrainShader {
             entry_point: "main",
             targets: vec![Some(wgpu::ColorTargetState {
                 format: self.format,
-                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                // The drape holds premultiplied colours and the surface is written as it is, so a
+                // translucent layer keeps its colour instead of being multiplied by its alpha twice.
+                blend: None,
                 write_mask: wgpu::ColorWrites::ALL,
             })],
         }
