@@ -161,6 +161,9 @@ pub(super) fn apply(style: &mut Style, operations: &[Value]) -> Result<(), Strin
             ("setBearing", _) => number(items, 1).map(|bearing| style.bearing = Some(bearing)),
             ("setPitch", _) => number(items, 1).map(|pitch| style.pitch = Some(pitch)),
             ("setRoll", _) => number(items, 1).map(|roll| style.roll = Some(roll)),
+            // The padding is applied to the camera by the harness, not to the style.
+            ("setPadding", _) => Ok(()),
+            ("easeTo", _) if crate::padding::eases_only_padding(&value(1)) => Ok(()),
             ("setVerticalFieldOfView", _) => {
                 number(items, 1).map(|degrees| style.vertical_field_of_view = Some(degrees))
             }

@@ -375,6 +375,11 @@ impl HeadlessMap {
         context.view_state.resize(physical.to_logical(ratio));
     }
 
+    /// Pads the viewport, which moves the apparent center the camera looks through.
+    pub fn set_padding(&mut self, padding: crate::render::camera::EdgeInsets) {
+        self.map_context.view_state.set_edge_insets(padding);
+    }
+
     /// Raises the pitch limit and re-applies the style's pitch, which the default limit clamps.
     pub fn set_max_pitch(&mut self, max_pitch: cgmath::Deg<f64>) {
         let context = &mut self.map_context;

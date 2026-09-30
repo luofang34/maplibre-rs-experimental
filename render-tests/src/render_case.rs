@@ -35,6 +35,12 @@ async fn render_fixture(test_dir: &Path) -> Result<(f64, f64), String> {
     let (mut style, meta) = load_style_blocking(test_dir)?;
     let images = crate::image_sources::lower(&mut style)?;
     let mut map = create_map(&style, &meta).await?;
+    map.set_padding(maplibre::render::camera::EdgeInsets {
+        top: meta.padding.top,
+        bottom: meta.padding.bottom,
+        left: meta.padding.left,
+        right: meta.padding.right,
+    });
     let mut coords = map
         .required_tile_coords()
         .map_err(|error| format!("Cannot select source tiles: {error}"))?;
@@ -84,7 +90,8 @@ fn load_style_blocking(test_dir: &Path) -> Result<(Style, TestMeta), String> {
     let mut value: serde_json::Value =
         serde_json::from_str(&text).map_err(|error| format!("Cannot parse style.json: {error}"))?;
     crate::tilesets::resolve_sources(&mut value)?;
-    let meta = parse_test_meta(&value);
+    let mut meta = parse_test_meta(&value);
+    meta.padding = crate::padding::padding_of(&crate::operations::operations_of(&value));
     let mut style: Style = serde_json::from_value(value.clone())
         .map_err(|error| format!("Cannot deserialize Style: {error}"))?;
     // The tiles are decoded from this copy of the style, so it carries the state's values too.
@@ -168,6 +175,14 @@ fn compare_frame_blocking(frame: &Path, test_dir: &Path, meta: &TestMeta) -> Res
     std::fs::rename(frame, &actual)
         .map_err(|error| format!("Cannot move rendered frame into test output: {error}"))?;
     unpremultiply(&actual)?;
+    if meta.show_padding {
+        crate::padding::draw_overlay(
+            &actual,
+            meta.padding,
+            (meta.width, meta.height),
+            meta.pixel_ratio,
+        )?;
+    }
     if let Some(background) = meta.comparison_background {
         composite_opaque_background(&actual, background)?;
     }

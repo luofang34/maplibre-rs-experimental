@@ -26,6 +26,7 @@ use serde_json::Value;
 mod comparison;
 mod image_sources;
 mod operations;
+mod padding;
 mod paths;
 mod pattern_images;
 mod render_case;
@@ -53,6 +54,10 @@ struct TestMeta {
     max_pitch: Option<f64>,
     /// Physical pixels per logical pixel; the reference image is that many times larger.
     pixel_ratio: f64,
+    /// Whether the padding edges and padded center are drawn over the frame.
+    show_padding: bool,
+    /// Camera padding left by the fixture's operations.
+    padding: padding::Padding,
 }
 
 impl Default for TestMeta {
@@ -64,6 +69,8 @@ impl Default for TestMeta {
             max_diff: 0.02,
             max_pitch: None,
             pixel_ratio: 1.0,
+            show_padding: false,
+            padding: padding::Padding::default(),
         }
     }
 }
@@ -98,6 +105,11 @@ fn parse_test_meta(style_value: &Value) -> TestMeta {
             .and_then(Value::as_f64)
             .filter(|ratio| *ratio > 0.0)
             .unwrap_or(1.0),
+        show_padding: test
+            .get("showPadding")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        padding: padding::Padding::default(),
     }
 }
 

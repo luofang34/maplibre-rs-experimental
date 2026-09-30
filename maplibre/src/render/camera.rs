@@ -378,15 +378,12 @@ impl Perspective {
         let offset_y = self.offset_y(center_offset, height);
         frustum(
             // https://webglfundamentals.org/webgl/lessons/webgl-qna-how-can-i-move-the-perspective-vanishing-point-from-the-center-of-the-canvas-.html
-            xmax * (-1.0 + offset_x), /* = -xmax + (center_offset.x * screen_to_near_factor_x)
-                                                 where:
-                                                  screen_to_near_factor_x = near_width / width
-                                                  where:
-                                                    near_width = xmax * 2.0
-                                      */
-            xmax * (1.0 + offset_x),
-            ymax * (-1.0 + offset_y),
-            ymax * (1.0 + offset_y),
+            // Sliding the window one way moves the scene the other, so the window moves against
+            // the offset for the scene's vanishing point to follow it.
+            xmax * (-1.0 - offset_x),
+            xmax * (1.0 - offset_x),
+            ymax * (-1.0 - offset_y),
+            ymax * (1.0 - offset_y),
             near_z,
             far_z,
         )
