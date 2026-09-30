@@ -367,6 +367,14 @@ impl HeadlessMap {
         resources.insert(budget);
     }
 
+    /// Draws at `ratio` physical pixels per logical pixel: the view measures its viewport, and
+    /// so its layout units, in logical pixels while the frame keeps its physical size.
+    pub fn set_pixel_ratio(&mut self, ratio: f64) {
+        let context = &mut self.map_context;
+        let physical = context.renderer.state().surface().size();
+        context.view_state.resize(physical.to_logical(ratio));
+    }
+
     /// Raises the pitch limit and re-applies the style's pitch, which the default limit clamps.
     pub fn set_max_pitch(&mut self, max_pitch: cgmath::Deg<f64>) {
         let context = &mut self.map_context;

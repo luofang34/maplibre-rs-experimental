@@ -56,7 +56,34 @@ pub async fn load_symbol_assets<HC: HttpClient>(
             load_sprites(client, &mut builder, &prefix, &url, &icons).await?;
         }
     }
+    for (name, image) in &style.images {
+        if icons.contains(name) {
+            pack_style_image(&mut builder, name, image);
+        }
+    }
     Ok(builder.finish())
+}
+
+/// Packs an image the host added to the style, replacing a sprite icon of the same name.
+fn pack_style_image(builder: &mut AtlasBuilder, name: &str, image: &crate::style::StyleImage) {
+    if image.width == 0
+        || image.height == 0
+        || image.data.len() != image.width as usize * image.height as usize * 4
+    {
+        return;
+    }
+    let Some(rect) = builder.pack(image.width, image.height, &image.data) else {
+        return;
+    };
+    builder.atlas.icons.insert(
+        name.to_owned(),
+        AtlasEntry {
+            rect,
+            metrics: [0.0, 0.0, 0.0, image.pixel_ratio.max(0.01)],
+            kind: if image.sdf { 2 } else { 1 },
+            ..Default::default()
+        },
+    );
 }
 
 /// The range from the style's glyph server, or the bundled Latin range when that is all there is.

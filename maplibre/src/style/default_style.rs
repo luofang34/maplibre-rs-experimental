@@ -32,6 +32,7 @@ impl Default for Style {
             state: Default::default(),
             global_state: Default::default(),
             state_templates: Default::default(),
+            images: Default::default(),
             zoom: Some(13.0),
             layers: default_layers(),
         }

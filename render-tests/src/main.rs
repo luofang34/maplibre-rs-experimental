@@ -49,6 +49,8 @@ struct TestMeta {
     max_diff: f64,
     /// Largest pitch the fixture may request, as GL JS passes `maxPitch` to the map.
     max_pitch: Option<f64>,
+    /// Physical pixels per logical pixel; the reference image is that many times larger.
+    pixel_ratio: f64,
 }
 
 impl Default for TestMeta {
@@ -59,6 +61,7 @@ impl Default for TestMeta {
             comparison_background: None,
             max_diff: 0.02,
             max_pitch: None,
+            pixel_ratio: 1.0,
         }
     }
 }
@@ -88,6 +91,11 @@ fn parse_test_meta(style_value: &Value) -> TestMeta {
             }),
         max_diff: test.get("max-diff").and_then(Value::as_f64).unwrap_or(0.02),
         max_pitch: test.get("maxPitch").and_then(Value::as_f64),
+        pixel_ratio: test
+            .get("pixelRatio")
+            .and_then(Value::as_f64)
+            .filter(|ratio| *ratio > 0.0)
+            .unwrap_or(1.0),
     }
 }
 

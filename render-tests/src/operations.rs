@@ -23,6 +23,30 @@ fn number(items: &[Value], index: usize) -> Result<f64, String> {
         .ok_or_else(|| format!("{} needs a number", items.first().unwrap_or(&Value::Null)))
 }
 
+/// Reads the image at `path`, relative to the assets, and adds it to the style by name.
+fn add_image(style: &mut Style, name: &str, path: &Value, options: &Value) -> Result<(), String> {
+    let path = path.as_str().ok_or("addImage needs an image path")?;
+    let relative = path.strip_prefix("./").unwrap_or(path);
+    let file = std::path::Path::new("render-tests/src/assets").join(relative);
+    let image = image::open(&file)
+        .map_err(|error| format!("Cannot read image {}: {error}", file.display()))?
+        .to_rgba8();
+    style.add_image(
+        name,
+        maplibre::style::StyleImage {
+            width: image.width(),
+            height: image.height(),
+            data: image.into_raw(),
+            pixel_ratio: options
+                .get("pixelRatio")
+                .and_then(Value::as_f64)
+                .map_or(1.0, |ratio| ratio as f32),
+            sdf: options.get("sdf").and_then(Value::as_bool).unwrap_or(false),
+        },
+    );
+    Ok(())
+}
+
 /// Whether a feature's id, or its promoted property, is `wanted`.
 fn has_id(feature: &Value, promote: Option<&str>, wanted: &str) -> bool {
     let id = match promote {
@@ -132,6 +156,11 @@ pub(super) fn apply(style: &mut Style, operations: &[Value]) -> Result<(), Strin
             ("setBearing", _) => number(items, 1).map(|bearing| style.bearing = Some(bearing)),
             ("setPitch", _) => number(items, 1).map(|pitch| style.pitch = Some(pitch)),
             ("setRoll", _) => number(items, 1).map(|roll| style.roll = Some(roll)),
+            ("addImage", Some(name)) => add_image(style, name, &value(2), &value(3)),
+            ("removeImage", Some(name)) => {
+                style.remove_image(name);
+                Ok(())
+            }
             ("setFeatureState", _) => feature_state(style, &value(1), &value(2), false),
             ("removeFeatureState", _) => feature_state(style, &value(1), &value(2), true),
             ("setGlobalStateProperty", Some(key)) => {

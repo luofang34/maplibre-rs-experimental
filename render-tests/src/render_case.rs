@@ -101,10 +101,17 @@ async fn create_map(style: &Style, meta: &TestMeta) -> Result<HeadlessMap, Strin
         msaa: Msaa { samples: 1 },
         ..RendererSettings::default()
     };
-    let (kernel, renderer) =
-        create_headless_renderer_with_settings(meta.width, meta.height, None, settings)
-            .await
-            .map_err(|error| format!("Cannot create headless renderer: {error}"))?;
+    let physical = |edge: u32| (f64::from(edge) * meta.pixel_ratio).round() as u32;
+    let (width, height) = (physical(meta.width), physical(meta.height));
+    // The largest texture dimension every adapter is guaranteed to offer.
+    if width.max(height) > 8192 {
+        return Err(format!(
+            "A {width}x{height} frame is larger than the GPU limit of 8192"
+        ));
+    }
+    let (kernel, renderer) = create_headless_renderer_with_settings(width, height, None, settings)
+        .await
+        .map_err(|error| format!("Cannot create headless renderer: {error}"))?;
     let mut plugins: Vec<Box<dyn Plugin<_>>> = vec![
         Box::new(RenderPlugin),
         Box::new(maplibre::background::BackgroundPlugin),
@@ -144,6 +151,7 @@ async fn create_map(style: &Style, meta: &TestMeta) -> Result<HeadlessMap, Strin
     plugins.push(Box::new(HeadlessPlugin::new(true).preserve_tile_sources()));
     let mut map = HeadlessMap::new(style.clone(), renderer, kernel, plugins)
         .map_err(|error| format!("HeadlessMap creation failed: {error:?}"))?;
+    map.set_pixel_ratio(meta.pixel_ratio);
     if let Some(max_pitch) = meta.max_pitch {
         map.set_max_pitch(cgmath::Deg(max_pitch));
     }

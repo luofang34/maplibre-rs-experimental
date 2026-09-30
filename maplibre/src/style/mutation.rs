@@ -142,6 +142,32 @@ pub(crate) fn from_vector_tiles(layer: &StyleLayer) -> bool {
 }
 
 impl Style {
+    /// Adds or replaces an image that symbol layers can draw by name. Every symbol layer is
+    /// reported as changed, since any of them may name it.
+    pub fn add_image(&mut self, name: &str, image: super::StyleImage) -> StyleChange {
+        self.images.insert(name.to_owned(), image);
+        self.symbol_layers_changed()
+    }
+
+    /// Removes an added image; layers that named it lose the icon.
+    pub fn remove_image(&mut self, name: &str) -> StyleChange {
+        self.images.remove(name);
+        self.symbol_layers_changed()
+    }
+
+    fn symbol_layers_changed(&self) -> StyleChange {
+        let layers = self
+            .layers
+            .iter()
+            .filter(|layer| layer.type_ == "symbol")
+            .map(|layer| layer.id.clone())
+            .collect();
+        self.finish(StyleChange {
+            layers,
+            ..StyleChange::default()
+        })
+    }
+
     /// Adds a layer given as style JSON above the layer `before`, or on top when `None`.
     pub fn add_layer(
         &mut self,

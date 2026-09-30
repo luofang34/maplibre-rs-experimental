@@ -242,3 +242,30 @@ async fn a_transient_glyph_failure_is_returned_so_the_tile_can_retry() {
         .expect("retry");
     assert!(atlas.glyphs["Font A"].contains_key(&65));
 }
+
+#[test]
+fn an_image_added_to_the_style_is_packed_with_its_ratio_and_kind() {
+    let mut builder = AtlasBuilder::new();
+    let image = crate::style::StyleImage {
+        width: 4,
+        height: 2,
+        data: vec![255; 4 * 2 * 4],
+        pixel_ratio: 2.0,
+        sdf: true,
+    };
+    pack_style_image(&mut builder, "added", &image);
+    // Bytes that do not match the size are left out rather than read past.
+    pack_style_image(
+        &mut builder,
+        "short",
+        &crate::style::StyleImage {
+            data: vec![0; 3],
+            ..image.clone()
+        },
+    );
+    let atlas = builder.finish();
+    let entry = atlas.icons.get("added").expect("the added image");
+    assert_eq!((entry.rect[2], entry.rect[3]), (4, 2));
+    assert_eq!((entry.metrics[3], entry.kind), (2.0, 2));
+    assert!(!atlas.icons.contains_key("short"));
+}

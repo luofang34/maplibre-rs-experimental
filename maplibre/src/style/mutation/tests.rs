@@ -365,3 +365,28 @@ fn a_layer_loaded_without_a_source_can_still_be_edited() {
         Err(StyleMutationError::InvalidZoomRange { .. })
     ));
 }
+
+#[test]
+fn adding_or_removing_an_image_marks_every_symbol_layer_changed() {
+    let mut style: Style = serde_json::from_value(serde_json::json!({
+        "version": 8, "sources": {},
+        "layers": [
+            {"id": "bg", "type": "background"},
+            {"id": "labels", "type": "symbol", "source": "s", "source-layer": "l"}
+        ]
+    }))
+    .expect("style");
+    let image = crate::style::StyleImage {
+        width: 1,
+        height: 1,
+        data: vec![0; 4],
+        pixel_ratio: 1.0,
+        sdf: false,
+    };
+    let added = style.add_image("dot", image);
+    assert_eq!(added.layers, ["labels"]);
+    assert!(added.redraw_tiles);
+    assert!(style.images.contains_key("dot"));
+    style.remove_image("dot");
+    assert!(style.images.is_empty());
+}

@@ -87,6 +87,30 @@ pub struct Style {
     #[doc(hidden)]
     #[serde(skip)]
     pub state_templates: HashMap<String, state::StateTemplate>,
+    /// Images a host added by name, which `icon-image` can use next to the sprite's own.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub images: HashMap<String, StyleImage>,
+}
+
+/// An RGBA image a host added to the style, as GL JS `addImage` takes it.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct StyleImage {
+    /// Width in pixels.
+    pub width: u32,
+    /// Height in pixels.
+    pub height: u32,
+    /// Straight-alpha RGBA bytes, `width * height * 4` of them.
+    pub data: Vec<u8>,
+    /// Image pixels per layout pixel; 1 unless the image is drawn smaller than it is.
+    #[serde(default = "one")]
+    pub pixel_ratio: f32,
+    /// Whether the alpha channel is a signed distance field that `icon-color` tints.
+    #[serde(default)]
+    pub sdf: bool,
+}
+
+fn one() -> f32 {
+    1.0
 }
 
 mod default_style;
