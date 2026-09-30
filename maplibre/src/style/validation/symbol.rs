@@ -28,8 +28,12 @@ fn property(name: &str) -> Option<Property> {
     Some(match name {
         "text-color" | "text-halo-color" | "icon-color" | "icon-halo-color" => Property::Color,
         "text-opacity" | "text-halo-width" | "text-halo-blur" | "icon-opacity"
-        | "icon-halo-width" | "icon-halo-blur" | "text-size" | "icon-size" | "text-padding"
-        | "icon-padding" | "symbol-spacing" | "text-max-angle" => Property::Number(Zoom),
+        | "icon-halo-width" | "icon-halo-blur" | "text-size" | "icon-size" => {
+            Property::Number(Feature)
+        }
+        "text-padding" | "icon-padding" | "symbol-spacing" | "text-max-angle" => {
+            Property::Number(Zoom)
+        }
         "text-max-width"
         | "text-line-height"
         | "text-letter-spacing"
@@ -104,12 +108,12 @@ pub(crate) fn is_layout(name: &str) -> bool {
 impl LayerValidation<'_> {
     pub(super) fn symbol(&mut self, paint: &SymbolPaint) {
         self.property("layout.text-field", paint.text_field.as_ref(), Feature);
-        self.property("layout.text-size", paint.text_size.as_ref(), Zoom);
+        self.property("layout.text-size", paint.text_size.as_ref(), Feature);
         for (name, value) in &paint.properties {
             let scope = if is_layout(name) { "layout" } else { "paint" };
             let path = format!("{scope}.{name}");
             match property(name) {
-                Some(Property::Color) => self.property(&path, Some(&StyleProperty::<csscolorparser::Color>::parse(value)), Zoom),
+                Some(Property::Color) => self.property(&path, Some(&StyleProperty::<csscolorparser::Color>::parse(value)), Feature),
                 Some(Property::Number(evaluation)) => self.property(&path, Some(&StyleProperty::<f32>::parse(value)), evaluation),
                 Some(Property::Text) => self.property(&path, Some(&StyleProperty::<TextField>::parse(value)), Feature),
                 Some(Property::BooleanExpression) => self.property(&path, Some(&StyleProperty::<bool>::parse(value)), Feature),

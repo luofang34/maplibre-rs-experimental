@@ -202,10 +202,7 @@ fn symbol_values_that_are_not_evaluated_are_reported() {
         "layout": {"text-field": "label", "text-transform": ["get", "case"]}
     }));
     let errors = style.validate().expect_err("unsupported symbol values");
-    assert_eq!(errors.len(), 2, "{errors:?}");
-    assert!(errors
-        .iter()
-        .any(|error| error.to_string().contains("paint.text-color")));
+    assert_eq!(errors.len(), 1, "{errors:?}");
     assert!(errors
         .iter()
         .any(|error| error.to_string().contains("layout.text-transform")));
