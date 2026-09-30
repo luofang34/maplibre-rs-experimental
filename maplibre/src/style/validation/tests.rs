@@ -212,6 +212,22 @@ fn symbol_values_that_are_not_evaluated_are_reported() {
 }
 
 #[test]
+fn overlap_modes_are_accepted_as_literals_only() {
+    let accepted = style_with_layer(serde_json::json!({
+        "id": "labels", "type": "symbol",
+        "layout": {"text-field": "label", "text-overlap": "cooperative", "icon-overlap": "always"}
+    }));
+    accepted.validate().expect("overlap literals are supported");
+    let rejected = style_with_layer(serde_json::json!({
+        "id": "labels", "type": "symbol",
+        "layout": {"text-field": "label", "text-overlap": ["step", ["zoom"], "never", 8, "always"],
+            "icon-overlap": "sometimes"}
+    }));
+    let errors = rejected.validate().expect_err("unsupported overlap values");
+    assert_eq!(errors.len(), 2, "{errors:?}");
+}
+
+#[test]
 fn filter_and_paint_feature_contexts_are_distinguished() {
     let style = style_with_layer(serde_json::json!({
         "id": "roads", "type": "line", "filter": ["==", ["id"], 1],
