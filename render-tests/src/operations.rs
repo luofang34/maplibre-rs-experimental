@@ -23,6 +23,97 @@ fn number(items: &[Value], index: usize) -> Result<f64, String> {
         .ok_or_else(|| format!("{} needs a number", items.first().unwrap_or(&Value::Null)))
 }
 
+/// Whether a feature's id, or its promoted property, is `wanted`.
+fn has_id(feature: &Value, promote: Option<&str>, wanted: &str) -> bool {
+    let id = match promote {
+        Some(property) => feature
+            .get("properties")
+            .and_then(|props| props.get(property)),
+        None => feature.get("id"),
+    };
+    match id {
+        Some(Value::String(text)) => text == wanted,
+        Some(Value::Number(number)) => number.to_string() == wanted,
+        _ => false,
+    }
+}
+
+/// Stores the state of one GeoJSON feature among its properties, where `feature-state`
+/// expressions read it. `removing` deletes the named keys, or all of them for `null`.
+fn feature_state(
+    style: &mut Style,
+    target: &Value,
+    states: &Value,
+    removing: bool,
+) -> Result<(), String> {
+    use maplibre::style::{
+        expression::FEATURE_STATE_PREFIX,
+        source::{GeoJsonData, PromoteId, Source},
+    };
+
+    let source = target
+        .get("source")
+        .and_then(Value::as_str)
+        .ok_or("feature state needs a source")?;
+    let wanted = match target.get("id") {
+        Some(Value::String(text)) => text.clone(),
+        Some(Value::Number(number)) => number.to_string(),
+        _ => return Err("feature state needs an id".to_owned()),
+    };
+    let Some(Source::GeoJson(geojson)) = style.sources.get_mut(source) else {
+        return Err(format!(
+            "feature state on `{source}`: only GeoJSON sources are supported"
+        ));
+    };
+    let promote = match &geojson.promote_id {
+        Some(PromoteId::Property(property)) => Some(property.clone()),
+        _ => None,
+    };
+    let GeoJsonData::Inline(data) = &mut geojson.data else {
+        return Err("feature state needs inline GeoJSON".to_owned());
+    };
+    let mut document = data.as_ref().clone();
+    let features: Vec<&mut Value> = match document.get("type").and_then(Value::as_str) {
+        Some("FeatureCollection") => document
+            .get_mut("features")
+            .and_then(Value::as_array_mut)
+            .map(|features| features.iter_mut().collect())
+            .unwrap_or_default(),
+        Some("Feature") => vec![&mut document],
+        _ => Vec::new(),
+    };
+    for feature in features {
+        if !has_id(feature, promote.as_deref(), &wanted) {
+            continue;
+        }
+        let Some(properties) = feature
+            .as_object_mut()
+            .map(|object| {
+                object
+                    .entry("properties")
+                    .or_insert_with(|| Value::Object(Default::default()))
+            })
+            .and_then(Value::as_object_mut)
+        else {
+            continue;
+        };
+        match (removing, states) {
+            (true, Value::String(key)) => {
+                properties.remove(&format!("{FEATURE_STATE_PREFIX}{key}"));
+            }
+            (true, _) => properties.retain(|key, _| !key.starts_with(FEATURE_STATE_PREFIX)),
+            (false, Value::Object(values)) => {
+                for (key, value) in values {
+                    properties.insert(format!("{FEATURE_STATE_PREFIX}{key}"), value.clone());
+                }
+            }
+            (false, _) => return Err("setFeatureState needs an object of states".to_owned()),
+        }
+    }
+    *data = std::sync::Arc::new(document);
+    Ok(())
+}
+
 /// Applies every operation to `style`. An operation the mutation API has no counterpart for
 /// is an error, so its fixture is reported instead of compared against the wrong state.
 pub(super) fn apply(style: &mut Style, operations: &[Value]) -> Result<(), String> {
@@ -41,6 +132,8 @@ pub(super) fn apply(style: &mut Style, operations: &[Value]) -> Result<(), Strin
             ("setBearing", _) => number(items, 1).map(|bearing| style.bearing = Some(bearing)),
             ("setPitch", _) => number(items, 1).map(|pitch| style.pitch = Some(pitch)),
             ("setRoll", _) => number(items, 1).map(|roll| style.roll = Some(roll)),
+            ("setFeatureState", _) => feature_state(style, &value(1), &value(2), false),
+            ("removeFeatureState", _) => feature_state(style, &value(1), &value(2), true),
             ("setGlobalStateProperty", Some(key)) => {
                 style.set_global_state(key, value(2));
                 Ok(())

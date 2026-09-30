@@ -95,12 +95,32 @@ pub struct Filter {
     expression: Expression,
 }
 
+/// Whether a filter, at any depth, reads `feature-state`, which a tile's features cannot
+/// answer when the filter runs.
+fn reads_feature_state(value: &Json) -> bool {
+    match value {
+        Json::Array(items) => {
+            items.first().and_then(Json::as_str) == Some("feature-state")
+                || items.iter().any(reads_feature_state)
+        }
+        _ => false,
+    }
+}
+
 impl Filter {
     /// Parses a layer's `filter` value; `null` and an empty array pass every feature.
     pub fn parse(value: &Json) -> Result<Self, FilterError> {
         let expression = match value {
             Json::Null => Expression::Literal(Value::Bool(true)),
             Json::Array(items) if items.is_empty() => Expression::Literal(Value::Bool(true)),
+            Json::Array(_) if reads_feature_state(value) => {
+                return Err(FilterError::Invalid {
+                    source: ParseError {
+                        key: String::new(),
+                        message: "\"feature-state\" is not allowed in a filter".to_owned(),
+                    },
+                })
+            }
             Json::Bool(_) | Json::Array(_) => {
                 Expression::parse_filter(value).map_err(|source| FilterError::Invalid { source })?
             }

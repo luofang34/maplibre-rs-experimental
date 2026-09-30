@@ -338,3 +338,26 @@ fn legacy_filters_lower_into_expressions() {
     assert!(passes(json!(["any", [">", "mag", 5], ["<", "mag", 3]])));
     assert!(!passes(json!(["==", "missing", null])));
 }
+
+#[test]
+fn feature_state_reads_the_state_stored_among_the_properties() {
+    let mut properties = properties();
+    properties.insert(
+        format!("{}hover", super::FEATURE_STATE_PREFIX),
+        Value::Bool(true),
+    );
+    let evaluate = |expression: serde_json::Value| {
+        Expression::parse(&expression)
+            .expect("expression parses")
+            .evaluate(&EvaluationContext::for_feature(0.0, &properties))
+    };
+    assert_eq!(
+        evaluate(json!(["feature-state", "hover"])),
+        Ok(Value::Bool(true))
+    );
+    assert_eq!(evaluate(json!(["feature-state", "other"])), Ok(Value::Null));
+    assert_eq!(
+        evaluate(json!(["coalesce", ["feature-state", "other"], "fallback"])),
+        Ok(Value::from("fallback"))
+    );
+}

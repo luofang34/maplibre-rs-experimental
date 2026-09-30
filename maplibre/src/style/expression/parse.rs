@@ -28,6 +28,9 @@ pub struct ParseError {
     pub message: String,
 }
 
+/// Prefix of the property names under which a feature's state is stored.
+pub const FEATURE_STATE_PREFIX: &str = "\u{1}state:";
+
 impl ParseError {
     /// Whether the expression uses an operator the engine does not implement.
     pub fn is_unknown_operator(&self) -> bool {
@@ -239,6 +242,15 @@ impl Parser {
             "e" => self.nullary(args, Expression::Literal(Value::Number(std::f64::consts::E))),
             "ln2" => self.nullary(args, Expression::Literal(Value::Number(std::f64::consts::LN_2))),
             "get" | "has" => self.parse_lookup(operator, args),
+            // A feature's state is kept among its properties under a reserved name, so a
+            // host that sets state writes properties and every property path reads it.
+            "feature-state" => match args {
+                [Json::String(key)] => self.parse_lookup(
+                    "get",
+                    &[Json::String(format!("{FEATURE_STATE_PREFIX}{key}"))],
+                ),
+                _ => Err(self.error("Expected 1 string argument, but found a different shape.")),
+            },
             "global-state" => match args {
                 [Json::String(key)] => Ok(Expression::GlobalState(key.clone())),
                 _ => Err(self.error("Expected 1 argument, but found a different shape.")),
