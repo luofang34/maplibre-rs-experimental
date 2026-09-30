@@ -62,6 +62,7 @@ pub(super) fn builder_without(missing: &str) -> KernelBuilder<TestEnvironment> {
             NopScheduler,
             OffscreenKernelConfig {
                 cache_directory: None,
+                ..Default::default()
             },
         ));
     }

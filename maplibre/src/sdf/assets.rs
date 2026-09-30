@@ -6,9 +6,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::sdf::glyphs;
 
+mod cache;
 mod load;
 pub mod wire;
-pub use load::load_symbol_assets;
+pub use cache::{AssetCache, AssetFailure};
+pub use load::{load_symbol_assets, SymbolAssetError};
 
 /// Coordinates and metrics of a glyph or sprite in the atlas.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -107,35 +109,36 @@ impl AtlasBuilder {
         font: &str,
         bytes: &[u8],
     ) -> Result<(), prost::DecodeError> {
-        self.glyph_subset(font, bytes, None)
+        self.glyph_subset(font, &glyphs::Glyphs::decode(bytes)?, None);
+        Ok(())
     }
 
     pub(super) fn glyph_subset(
         &mut self,
         font: &str,
-        bytes: &[u8],
+        data: &glyphs::Glyphs,
         wanted: Option<&std::collections::BTreeSet<u32>>,
-    ) -> Result<(), prost::DecodeError> {
-        let data = glyphs::Glyphs::decode(bytes)?;
-        for glyph in data.stacks.into_iter().flat_map(|stack| stack.glyphs) {
+    ) {
+        for glyph in data.stacks.iter().flat_map(|stack| &stack.glyphs) {
             if wanted.is_some_and(|wanted| !wanted.contains(&glyph.id)) {
                 continue;
             }
             if glyph.width > 1016 || glyph.height > 4088 {
                 continue;
             }
-            let rect = if let Some(bitmap) = glyph.bitmap.filter(|bitmap| !bitmap.is_empty()) {
-                let pixels: Vec<u8> = bitmap
-                    .into_iter()
-                    .flat_map(|value| [value, value, value, 255])
-                    .collect();
-                let Some(rect) = self.pack(glyph.width + 6, glyph.height + 6, &pixels) else {
-                    continue;
+            let rect =
+                if let Some(bitmap) = glyph.bitmap.as_ref().filter(|bitmap| !bitmap.is_empty()) {
+                    let pixels: Vec<u8> = bitmap
+                        .iter()
+                        .flat_map(|&value| [value, value, value, 255])
+                        .collect();
+                    let Some(rect) = self.pack(glyph.width + 6, glyph.height + 6, &pixels) else {
+                        continue;
+                    };
+                    rect
+                } else {
+                    [0; 4]
                 };
-                rect
-            } else {
-                [0; 4]
-            };
             self.atlas
                 .glyphs
                 .entry(font.to_string())
@@ -154,7 +157,6 @@ impl AtlasBuilder {
                     },
                 );
         }
-        Ok(())
     }
 
     pub(super) fn finish(mut self) -> Arc<SymbolAtlas> {

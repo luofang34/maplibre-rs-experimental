@@ -61,6 +61,12 @@ pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context +
                 Err(ProcessVectorError::SendError(source)) => {
                     return Err(ProcedureError::Send(source))
                 }
+                Err(error @ ProcessVectorError::SymbolAssets(_)) => {
+                    // The base layers were already delivered; only the symbols are retried.
+                    tracing::warn!(%coords, source = ?group.source_name, error = %error, "symbol assets unavailable");
+                    failed = true;
+                    retry = true;
+                }
                 Err(error @ ProcessVectorError::Decoding { .. }) => {
                     tracing::warn!(%coords, source = ?group.source_name, %error, "invalid vector tile");
                     failed = true;
@@ -122,7 +128,9 @@ async fn process_source<T: VectorTransferables, C: Context + Clone, H: HttpClien
     if symbols.is_empty() {
         return Ok(());
     }
-    let atlas = load_symbol_assets(client, style, data, f64::from(u8::from(coords.z))).await;
+    let atlas = load_symbol_assets(client, style, data, f64::from(u8::from(coords.z)))
+        .await
+        .map_err(ProcessVectorError::SymbolAssets)?;
     let mut processor = source_processor::<T, C>(context, last_source);
     process_vector_tile_with_assets(
         data,

@@ -149,6 +149,7 @@ fn map_with_plugins(
             BrowserScheduler,
             OffscreenKernelConfig {
                 cache_directory: None,
+                ..Default::default()
             },
         ))
         .build()

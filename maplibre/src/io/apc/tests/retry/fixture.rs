@@ -75,6 +75,7 @@ impl Calls {
                 self.replies.clone(),
                 ReqwestOffscreenKernelEnvironment::create(OffscreenKernelConfig {
                     cache_directory: None,
+                    ..Default::default()
                 }),
             )
             .await

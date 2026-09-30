@@ -6,6 +6,7 @@ use thiserror::Error;
 use crate::{
     coords::WorldTileCoords,
     io::source_type::{InvalidTileCoords, SourceType},
+    sdf::assets::AssetCache,
 };
 
 /// A closure that returns a HTTP client.
@@ -126,6 +127,7 @@ where
     HC: HttpClient,
 {
     http: HttpSourceClient<HC>,
+    assets: AssetCache,
 }
 
 impl<HC> SourceClient<HC>
@@ -134,7 +136,21 @@ where
 {
     /// Creates a source client using the supplied HTTP adapter.
     pub fn new(http: HttpSourceClient<HC>) -> Self {
-        Self { http }
+        Self {
+            http,
+            assets: AssetCache::default(),
+        }
+    }
+
+    /// Shares decoded glyphs and sprites with every client that received the same handle.
+    pub fn with_asset_cache(mut self, assets: AssetCache) -> Self {
+        self.assets = assets;
+        self
+    }
+
+    /// The cache of decoded symbol assets this client loads through.
+    pub fn assets(&self) -> &AssetCache {
+        &self.assets
     }
 
     /// Resolves the source template for `coords` and fetches the response body.

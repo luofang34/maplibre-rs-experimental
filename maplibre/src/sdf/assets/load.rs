@@ -6,68 +6,97 @@ use std::{
 
 use geozero::mvt::Message;
 
-use super::{AtlasBuilder, AtlasEntry, SymbolAtlas};
+use super::{
+    cache::{AssetFailure, SpriteSheet},
+    AtlasBuilder, AtlasEntry, SymbolAtlas,
+};
 use crate::{
     io::source_client::{HttpClient, SourceClient},
+    sdf::glyphs::Glyphs,
     style::{layer::LayerPaint, Style},
     vector::feature_properties,
 };
 
+const BUNDLED_LATIN: &[u8] = include_bytes!("../../../../data/0-255.pbf");
+
 type GlyphRequests = HashMap<String, BTreeSet<u32>>;
 
-/// Fetches assets through the map's cached HTTP client before worker-side symbol layout.
+/// A symbol asset could not be loaded, and a later attempt can succeed.
+#[derive(Debug, thiserror::Error)]
+#[error("symbol asset {url} is temporarily unavailable: {reason}")]
+pub struct SymbolAssetError {
+    /// The URL that failed.
+    pub url: String,
+    /// The transport or server error.
+    pub reason: String,
+}
+
+/// Loads the glyph ranges and sprites the tile's features use through the client's shared cache.
+///
+/// Missing or malformed assets are logged once and left out of the atlas. A transport or server
+/// failure is returned so the caller can retry the tile instead of keeping an incomplete atlas.
 pub async fn load_symbol_assets<HC: HttpClient>(
     client: &SourceClient<HC>,
     style: &Style,
     data: &[u8],
     zoom: f64,
-) -> Arc<SymbolAtlas> {
+) -> Result<Arc<SymbolAtlas>, SymbolAssetError> {
     let (fonts, icons) = requests(style, data, zoom);
     let mut builder = AtlasBuilder::new();
     for (font, characters) in fonts {
         let ranges: BTreeSet<_> = characters.iter().map(|code| (code / 256) * 256).collect();
         for range in ranges {
-            let bytes = if let Some(template) = &style.glyphs {
-                let encoded: String = font
-                    .bytes()
-                    .map(|byte| {
-                        if byte.is_ascii_alphanumeric() || b"-_.~".contains(&byte) {
-                            char::from(byte).to_string()
-                        } else {
-                            format!("%{byte:02X}")
-                        }
-                    })
-                    .collect();
-                let url = template
-                    .replace("{fontstack}", &encoded.replace('+', "%20"))
-                    .replace("{range}", &format!("{range}-{}", range + 255));
-                match client.fetch_url(&url).await {
-                    Ok(bytes) => bytes,
-                    Err(error) => {
-                        tracing::warn!(%url, error = %error.describe(), "symbol glyph range unavailable");
-                        if range != 0 {
-                            continue;
-                        }
-                        include_bytes!("../../../../data/0-255.pbf").to_vec()
-                    }
-                }
-            } else {
-                if range != 0 {
-                    continue;
-                }
-                include_bytes!("../../../../data/0-255.pbf").to_vec()
-            };
-            if let Err(error) = builder.glyph_subset(&font, &bytes, Some(&characters)) {
-                tracing::warn!(%font, range, %error, "invalid glyph range");
+            if let Some(glyphs) = glyph_range(client, style, &font, range).await? {
+                builder.glyph_subset(&font, &glyphs, Some(&characters));
             }
         }
     }
     if !icons.is_empty() {
         for (prefix, url) in sprite_sources(style) {
-            load_sprites(client, &mut builder, &prefix, &url, &icons).await;
+            load_sprites(client, &mut builder, &prefix, &url, &icons).await?;
         }
     }
-    builder.finish()
+    Ok(builder.finish())
+}
+
+/// The range from the style's glyph server, or the bundled Latin range when that is all there is.
+async fn glyph_range<HC: HttpClient>(
+    client: &SourceClient<HC>,
+    style: &Style,
+    font: &str,
+    range: u32,
+) -> Result<Option<Arc<Glyphs>>, SymbolAssetError> {
+    let bundled = || client.assets().bundled_glyphs(BUNDLED_LATIN);
+    let Some(template) = &style.glyphs else {
+        return Ok(if range == 0 {
+            bundled().await.ok()
+        } else {
+            None
+        });
+    };
+    let url = glyph_url(template, font, range);
+    match client.assets().glyphs(client, &url).await {
+        Ok(glyphs) => Ok(Some(glyphs)),
+        Err(AssetFailure::Retryable(reason)) => Err(SymbolAssetError { url, reason }),
+        Err(_) if range == 0 => Ok(bundled().await.ok()),
+        Err(_) => Ok(None),
+    }
+}
+
+fn glyph_url(template: &str, font: &str, range: u32) -> String {
+    let encoded: String = font
+        .bytes()
+        .map(|byte| {
+            if byte.is_ascii_alphanumeric() || b"-_.~".contains(&byte) {
+                char::from(byte).to_string()
+            } else {
+                format!("%{byte:02X}")
+            }
+        })
+        .collect();
+    template
+        .replace("{fontstack}", &encoded.replace('+', "%20"))
+        .replace("{range}", &format!("{range}-{}", range + 255))
 }
 
 fn requests(style: &Style, data: &[u8], zoom: f64) -> (GlyphRequests, HashSet<String>) {
@@ -148,40 +177,30 @@ async fn load_sprites<HC: HttpClient>(
     prefix: &str,
     url: &str,
     wanted: &HashSet<String>,
-) {
+) -> Result<(), SymbolAssetError> {
     let json_url = sprite_url(url, "json");
     let png_url = sprite_url(url, "png");
-    let Some(json) = fetch_asset(client, &json_url).await else {
-        return;
-    };
-    let Some(png) = fetch_asset(client, &png_url).await else {
-        return;
-    };
-    let document: HashMap<String, serde_json::Value> = match serde_json::from_slice(&json) {
-        Ok(document) => document,
-        Err(error) => {
-            tracing::warn!(%json_url, %error, "invalid sprite metadata");
-            return;
+    match client.assets().sprites(client, &json_url, &png_url).await {
+        Ok(sheet) => pack_sprites(builder, prefix, wanted, &sheet),
+        Err(AssetFailure::Retryable(reason)) => {
+            return Err(SymbolAssetError {
+                url: json_url,
+                reason,
+            })
         }
-    };
-    let image = match image::load_from_memory(&png) {
-        Ok(image) => image.to_rgba8(),
-        Err(error) => {
-            tracing::warn!(%png_url, %error, "invalid sprite image");
-            return;
-        }
-    };
-    pack_sprites(builder, prefix, wanted, document, &image);
+        Err(_) => {}
+    }
+    Ok(())
 }
 
 fn pack_sprites(
     builder: &mut AtlasBuilder,
     prefix: &str,
     wanted: &HashSet<String>,
-    document: HashMap<String, serde_json::Value>,
-    image: &image::RgbaImage,
+    sheet: &SpriteSheet,
 ) {
-    for (name, value) in document {
+    let image = &sheet.image;
+    for (name, value) in &sheet.document {
         let name = format!("{prefix}{name}");
         if !wanted.contains(&name) {
             continue;
@@ -236,16 +255,6 @@ fn sprite_url(url: &str, extension: &str) -> String {
         "{path}.{extension}{}",
         query.map_or_else(String::new, |query| format!("?{query}"))
     )
-}
-
-async fn fetch_asset<HC: HttpClient>(client: &SourceClient<HC>, url: &str) -> Option<Vec<u8>> {
-    match client.fetch_url(url).await {
-        Ok(bytes) => Some(bytes),
-        Err(error) => {
-            tracing::warn!(%url,error=%error.describe(),"symbol asset unavailable");
-            None
-        }
-    }
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

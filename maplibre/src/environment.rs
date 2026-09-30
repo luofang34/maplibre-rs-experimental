@@ -10,6 +10,7 @@ use crate::{
         scheduler::Scheduler,
         source_client::{HttpClient, SourceClient},
     },
+    sdf::assets::AssetCache,
     window::MapWindowConfig,
 };
 
@@ -33,11 +34,16 @@ pub trait Environment: 'static {
 }
 
 /// Configuration passed across worker boundaries to construct source services.
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct OffscreenKernelConfig {
     /// Filesystem cache directory for hosts that support persistent HTTP caching.
     /// `None` disables that cache; browser-only kernels may ignore the setting.
     pub cache_directory: Option<String>,
+    /// Decoded glyphs and sprites shared by every call made from clones of this configuration.
+    /// It is not serialized: a worker that receives the configuration over a channel starts
+    /// with its own empty cache.
+    #[serde(skip)]
+    pub asset_cache: AssetCache,
 }
 
 /// Worker-side services, independent of window and GPU ownership.

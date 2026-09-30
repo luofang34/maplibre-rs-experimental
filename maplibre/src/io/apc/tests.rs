@@ -35,6 +35,7 @@ fn buffered_completion_messages_keep_fifo_order_and_drain_in_one_receive() {
         NopScheduler,
         OffscreenKernelConfig {
             cache_directory: None,
+            ..Default::default()
         },
     );
     let sender = SchedulerContext {

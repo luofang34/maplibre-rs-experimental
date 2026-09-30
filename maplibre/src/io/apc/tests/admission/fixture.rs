@@ -129,6 +129,7 @@ pub(super) async fn setup(
                 scheduler,
                 OffscreenKernelConfig {
                     cache_directory: None,
+                    ..Default::default()
                 },
             ))
             .build()

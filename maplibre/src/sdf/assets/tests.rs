@@ -6,13 +6,10 @@ use super::*;
 #[test]
 fn glyph_subset_keeps_spaces_and_unicode_metrics_without_uploading_unused_letters() {
     let mut builder = AtlasBuilder::new();
-    builder
-        .glyph_subset(
-            "test",
-            include_bytes!("../../../../data/0-255.pbf"),
-            Some(&BTreeSet::from([32, 65, 233])),
-        )
-        .expect("font");
+    let glyphs =
+        crate::sdf::glyphs::Glyphs::decode(include_bytes!("../../../../data/0-255.pbf").as_slice())
+            .expect("font");
+    builder.glyph_subset("test", &glyphs, Some(&BTreeSet::from([32, 65, 233])));
     let atlas = builder.finish();
     let font = &atlas.glyphs["test"];
     assert_eq!(font.len(), 3);

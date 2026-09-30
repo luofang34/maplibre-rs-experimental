@@ -47,6 +47,7 @@ pub(super) fn create_kernel(
             TokioScheduler::new(),
             crate::environment::OffscreenKernelConfig {
                 cache_directory: cache_path,
+                ..Default::default()
             },
         ))
         .with_scheduler(TokioScheduler::new())

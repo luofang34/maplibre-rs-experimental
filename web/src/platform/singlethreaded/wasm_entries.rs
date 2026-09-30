@@ -5,7 +5,7 @@ use maplibre::{
         apc::{AsyncProcedure, Input},
         source_client::{HttpSourceClient, SourceClient},
     },
-    environment::OffscreenKernel,
+    environment::{OffscreenKernel, OffscreenKernelConfig},
     io::apc::CallError,
 };
 use wasm_bindgen::prelude::*;
@@ -23,14 +23,16 @@ use crate::{
     },
 };
 
-static CONFIG: OnceLock<String> = OnceLock::new();
+/// Parsed once so every call this worker serves shares the configuration's asset cache.
+static CONFIG: OnceLock<OffscreenKernelConfig> = OnceLock::new();
 
-fn kernel_config() -> &'static str {
-    CONFIG.get().map(move |t| t.as_str()).unwrap_or("{}")
+fn kernel_config() -> OffscreenKernelConfig {
+    CONFIG.get().cloned().unwrap_or_default()
 }
 
 #[wasm_bindgen]
 pub fn set_kernel_config(config: String) {
+    let config = serde_json::from_str(&config).expect("invalid kernel config");
     CONFIG.set(config).expect("failed to set kernel config")
 }
 
@@ -64,7 +66,7 @@ pub async fn singlethreaded_process_data(procedure_ptr: u32, input: String) -> R
     procedure(
         input,
         context,
-        UsedOffscreenKernelEnvironment::create(serde_json::from_str(kernel_config()).unwrap()),
+        UsedOffscreenKernelEnvironment::create(kernel_config()),
     )
     .await?;
 

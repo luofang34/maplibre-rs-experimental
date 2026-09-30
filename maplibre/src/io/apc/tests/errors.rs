@@ -20,6 +20,7 @@ fn scheduling_failure_keeps_the_scheduler_cause() {
         NopScheduler,
         OffscreenKernelConfig {
             cache_directory: None,
+            ..Default::default()
         },
     );
     let error = apc

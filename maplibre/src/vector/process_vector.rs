@@ -18,7 +18,7 @@ use crate::{
     },
     projection::{globe::subdivision::granularity_for_zoom, ProjectionType},
     render::ShaderVertex,
-    sdf::tessellation::TextTessellator,
+    sdf::{assets::SymbolAssetError, tessellation::TextTessellator},
     style::{
         expression::{FeatureProperties, Value},
         filter::{FeatureContext, Filter, GeometryType},
@@ -48,6 +48,9 @@ pub enum ProcessVectorError {
         #[source]
         source: Box<dyn std::error::Error>,
     },
+    /// A glyph range or sprite could not be fetched, so the tile's symbols would be incomplete.
+    #[error("loading symbol assets failed")]
+    SymbolAssets(#[source] SymbolAssetError),
 }
 
 /// Scale from a layer's declared coordinate extent to the 4096 grid the shaders expect, so a

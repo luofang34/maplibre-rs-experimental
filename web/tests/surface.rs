@@ -110,6 +110,7 @@ fn create_map(backend: wgpu::Backends, config: WinitMapWindowConfig<()>) -> Map<
             BrowserScheduler,
             OffscreenKernelConfig {
                 cache_directory: None,
+                ..Default::default()
             },
         ))
         .build()

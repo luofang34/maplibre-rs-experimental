@@ -7,17 +7,18 @@ use maplibre_winit::WinitEnvironment;
 use crate::platform::{self, http_client::WHATWGFetchHttpClient, UsedOffscreenKernelEnvironment};
 
 /// Offscreen workers fetch map sources with the browser HTTP API.
-pub struct WHATWGOffscreenKernelEnvironment;
+pub struct WHATWGOffscreenKernelEnvironment(OffscreenKernelConfig);
 
 impl OffscreenKernel for WHATWGOffscreenKernelEnvironment {
     type HttpClient = WHATWGFetchHttpClient;
 
-    fn create(_config: OffscreenKernelConfig) -> Self {
-        WHATWGOffscreenKernelEnvironment
+    fn create(config: OffscreenKernelConfig) -> Self {
+        WHATWGOffscreenKernelEnvironment(config)
     }
 
     fn source_client(&self) -> SourceClient<Self::HttpClient> {
         SourceClient::new(HttpSourceClient::new(WHATWGFetchHttpClient))
+            .with_asset_cache(self.0.asset_cache.clone())
     }
 }
 

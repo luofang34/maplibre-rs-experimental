@@ -101,6 +101,7 @@ pub(super) fn create_map(
             TokioScheduler::new(),
             OffscreenKernelConfig {
                 cache_directory: None,
+                ..Default::default()
             },
         ))
         .build()

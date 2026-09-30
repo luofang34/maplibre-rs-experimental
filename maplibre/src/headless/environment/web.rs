@@ -52,6 +52,7 @@ pub(crate) fn create_kernel(
             NopScheduler,
             OffscreenKernelConfig {
                 cache_directory: None,
+                ..Default::default()
             },
         ))
         .with_scheduler(NopScheduler)

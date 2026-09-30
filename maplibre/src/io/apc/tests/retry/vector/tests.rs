@@ -154,3 +154,62 @@ async fn partial_vector_sources_remain_incomplete_until_the_matching_final_reply
     );
     super::render::assert_green(&frames.render(&mut test));
 }
+
+fn labelled_point_tile() -> Vec<u8> {
+    use geozero::mvt::{tile, Message, Tile};
+    Tile {
+        layers: vec![tile::Layer {
+            version: 2,
+            name: "land".into(),
+            features: vec![tile::Feature {
+                r#type: Some(tile::GeomType::Point as i32),
+                geometry: vec![9, 4096, 4096],
+                ..Default::default()
+            }],
+            extent: Some(8192),
+            ..Default::default()
+        }],
+    }
+    .encode_to_vec()
+}
+
+#[tokio::test]
+async fn transient_glyph_failure_retries_the_tile_until_symbols_load() {
+    let mut test = Fixture::new(Kind::Vector, false).await;
+    let url = test.source.url.clone();
+    test.context.style = serde_json::from_value(serde_json::json!({"version":8,
+        "sources":{"source":{"type":"vector","tiles":[format!("{url}/unstable/{{z}}/{{x}}/{{y}}")],"maxzoom":0}},
+        "glyphs":format!("{url}/healthy/glyphs/{{fontstack}}/{{range}}.pbf"),
+        "layers":[
+            {"id":"land","source":"source","source-layer":"land","type":"fill","paint":{"fill-color":"#00ff00"}},
+            {"id":"label","source":"source","source-layer":"land","type":"symbol",
+             "layout":{"text-field":"A","text-font":["Font A"]}}]}))
+    .expect("style with symbols");
+    test.source.set(Response::Bytes(labelled_point_tile()));
+    test.source.set_healthy(Response::Status(503));
+    test.frame(0);
+    test.receive().await;
+    assert_eq!(test.source.requests(), 2, "tile and one glyph range");
+    test.source.set_healthy(Response::Bytes(
+        include_bytes!("../../../../../../../data/0-255.pbf").to_vec(),
+    ));
+    test.frame(999);
+    test.receive().await;
+    assert_eq!(test.source.requests(), 2, "the failure backs off");
+    test.frame(1000);
+    test.frame(1001);
+    assert_eq!(test.kernel.apc().pending(), 1, "one retry at the deadline");
+    test.receive().await;
+    assert_eq!(
+        test.source.requests(),
+        4,
+        "the retry refetches tile and glyphs"
+    );
+    test.frame(60000);
+    test.receive().await;
+    assert_eq!(
+        test.source.requests(),
+        4,
+        "the recovered tile schedules no more retries"
+    );
+}

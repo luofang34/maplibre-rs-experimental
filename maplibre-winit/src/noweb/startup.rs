@@ -111,7 +111,10 @@ fn create_kernel(
         .with_http_client(ReqwestHttpClient::new(cache_path))
         .with_apc(SchedulerAsyncProcedureCall::new(
             TokioScheduler::new(),
-            OffscreenKernelConfig { cache_directory },
+            OffscreenKernelConfig {
+                cache_directory,
+                ..Default::default()
+            },
         ))
         .with_scheduler(TokioScheduler::new())
         .build()
