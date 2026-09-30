@@ -21,6 +21,9 @@ async fn fill_opacity_blends_with_the_background_in_every_covered_mode() {
                 (serde_json::Value::Null, [0, 0, 255, 255]),
                 (serde_json::json!(2.0), [0, 0, 255, 255]),
                 (serde_json::json!(-1.0), [255, 255, 255, 255]),
+                // Per-feature values take the vertex-colour path instead of the layer uniform.
+                (serde_json::json!(["get", "alpha"]), [128, 128, 255, 255]),
+                (serde_json::json!(["get", "missing"]), [0, 0, 255, 255]),
             ] {
                 let bytes = blended_center(terrain, samples, opacity.clone()).await;
                 assert_center(&bytes, expected);

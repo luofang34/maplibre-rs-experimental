@@ -41,12 +41,17 @@ fn fill_source(style: &Style, coords: WorldTileCoords) -> ProcessedLayers {
             name: "fill".into(),
             version: 2,
             extent: Some(4096),
+            keys: vec!["alpha".into()],
+            values: vec![geozero::mvt::tile::Value {
+                double_value: Some(0.5),
+                ..Default::default()
+            }],
             features: vec![geozero::mvt::tile::Feature {
+                tags: vec![0, 0],
                 r#type: Some(3),
                 geometry: vec![9, 0, 0, 26, 8192, 0, 0, 8192, 8191, 0, 15],
                 ..Default::default()
             }],
-            ..Default::default()
         }],
     }
     .encode_to_vec();
