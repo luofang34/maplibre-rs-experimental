@@ -15,8 +15,10 @@ fn draped_road_width_has_the_same_world_size_at_every_target_lod() {
             z: ZoomLevel::from(target_zoom),
         };
         let spec = TargetSpec {
+            absent_sources: Vec::new(),
             coords,
             shapes: vec![ShapeSpec {
+                view_complete: false,
                 source: coords,
                 vector_layers: vec![],
                 raster_layers: vec![],

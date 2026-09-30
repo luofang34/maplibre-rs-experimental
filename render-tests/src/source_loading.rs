@@ -199,13 +199,16 @@ fn load_image_blocking(
         .map_err(|error| format!("Cannot select raster tiles: {error}"))?;
     Ok(required
         .into_iter()
-        .filter_map(|coords| {
-            maplibre::raster::image_source::render_tile(&placed.image, placed.coordinates, coords)
-                .map(|image| AvailableRasterLayerData {
-                    coords,
-                    source: name.into(),
-                    image,
-                })
+        .map(|coords| AvailableRasterLayerData {
+            coords,
+            source: name.into(),
+            // A tile the image does not touch is empty, which is still a tile that has loaded.
+            image: maplibre::raster::image_source::render_tile(
+                &placed.image,
+                placed.coordinates,
+                coords,
+            )
+            .unwrap_or_else(|| image::RgbaImage::new(1, 1)),
         })
         .collect())
 }

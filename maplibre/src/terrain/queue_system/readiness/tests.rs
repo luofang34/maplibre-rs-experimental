@@ -14,6 +14,7 @@ fn style() -> Style {
 
 fn shape(source: WorldTileCoords, layer: &str) -> ShapeSpec {
     ShapeSpec {
+        view_complete: false,
         source,
         vector_layers: Vec::new(),
         raster_layers: vec![(layer.into(), 0, layer != "imagery")],
@@ -26,6 +27,7 @@ fn each_visible_raster_layer_needs_its_own_complete_coverage() {
     let children = coords.get_children();
     let world = World::default();
     let mut spec = TargetSpec {
+        absent_sources: Vec::new(),
         coords,
         shapes: vec![shape(coords, "imagery")],
     };
@@ -50,8 +52,10 @@ fn each_visible_raster_layer_needs_its_own_complete_coverage() {
 fn a_finished_vector_shape_cannot_hide_missing_raster_uploads() {
     let coords = WorldTileCoords::from((2423, 1389, 12_u8.into()));
     let spec = TargetSpec {
+        absent_sources: Vec::new(),
         coords,
         shapes: vec![ShapeSpec {
+            view_complete: false,
             source: coords,
             vector_layers: Vec::new(),
             raster_layers: Vec::new(),

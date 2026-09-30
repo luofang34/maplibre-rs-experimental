@@ -42,6 +42,9 @@ pub(crate) struct ShapeSpec {
     pub(crate) vector_layers: Vec<VectorLayerSpec>,
     /// Raster and DEM-shaded layers as id, style index and whether the DEM shaders draw it.
     pub(crate) raster_layers: Vec<(String, u32, bool)>,
+    /// Whether this raster tile stands in for a set that does not fill the terrain tile because
+    /// the rest lies outside the view.
+    pub(crate) view_complete: bool,
 }
 
 /// A terrain tile and the source tiles drawn into its texture.
@@ -49,6 +52,9 @@ pub(crate) struct ShapeSpec {
 pub(crate) struct TargetSpec {
     pub(crate) coords: WorldTileCoords,
     pub(crate) shapes: Vec<ShapeSpec>,
+    /// Raster sources that have tiles in the view but none over this terrain tile, which their
+    /// layers therefore do not wait for.
+    pub(crate) absent_sources: Vec<RasterSourceId>,
 }
 
 /// One source tile drawn into a terrain tile's texture: vector data of the tile itself, or
@@ -57,6 +63,10 @@ pub(crate) struct TargetSpec {
 pub(crate) struct ShapeSource {
     pub(crate) coords: WorldTileCoords,
     pub(crate) raster_source: Option<RasterSourceId>,
+    /// See [`ShapeSpec::view_complete`].
+    pub(crate) view_complete: bool,
+    /// Marks a raster source with nothing over the terrain tile rather than a tile to draw.
+    pub(crate) absent: bool,
 }
 
 /// Pairs every view tile with the source tiles that hold its data, without the screen path's
@@ -82,6 +92,8 @@ pub(crate) fn select_targets(
                     .map(|source| ShapeSource {
                         coords: source,
                         raster_source: None,
+                        view_complete: false,
+                        absent: false,
                     })
                     .collect();
             for (source_id, covering) in raster_coverings {
@@ -89,17 +101,36 @@ pub(crate) fn select_targets(
                     source: source_id,
                     availability: sources.of_kind(TileKind::Raster),
                 };
-                let covered: Vec<WorldTileCoords> = covering_shapes_for(coords, covering)
-                    .into_iter()
+                let wanted = covering_shapes_for(coords, covering);
+                if wanted.is_empty() && !covering.is_empty() {
+                    shapes.push(ShapeSource {
+                        coords,
+                        raster_source: Some(source_id.clone()),
+                        view_complete: true,
+                        absent: true,
+                    });
+                    continue;
+                }
+                let loaded: Vec<WorldTileCoords> = wanted
+                    .iter()
+                    .copied()
                     .filter(|source| raster_sources.has_tile(*source, world))
                     .collect();
-                // A partial child set would erase the uncovered part when the drape is cleared.
-                let covered = coverage::complete_cover(coords, covered)
-                    .or_else(|| coverage::loaded_cover(&raster_sources, coords, world))
+                // A partial child set would erase the uncovered part when the drape is cleared,
+                // so it only stands in when every tile the view needs over this terrain tile is
+                // loaded and nothing complete exists: the rest lies outside the view.
+                let all_loaded = !wanted.is_empty() && loaded.len() == wanted.len();
+                let complete = coverage::complete_cover(coords, loaded.clone())
+                    .or_else(|| coverage::loaded_cover(&raster_sources, coords, world));
+                let view_complete = complete.is_none() && all_loaded;
+                let covered = complete
+                    .or_else(|| all_loaded.then_some(loaded))
                     .unwrap_or_default();
                 shapes.extend(covered.into_iter().map(|source| ShapeSource {
                     coords: source,
                     raster_source: Some(source_id.clone()),
+                    view_complete,
+                    absent: false,
                 }));
             }
             (coords, shapes)
@@ -138,8 +169,14 @@ pub(crate) fn collect_layer_specs(
         .into_iter()
         .map(|(coords, shapes)| TargetSpec {
             coords,
+            absent_sources: shapes
+                .iter()
+                .filter(|shape| shape.absent)
+                .filter_map(|shape| shape.raster_source.clone())
+                .collect(),
             shapes: shapes
                 .into_iter()
+                .filter(|shape| !shape.absent)
                 .map(|shape| {
                     let raster_layers = raster_layers.iter()
                         .filter(|(_, _, source, _)| shape.raster_source.as_ref() == Some(source))
@@ -147,6 +184,7 @@ pub(crate) fn collect_layer_specs(
                         .map(|(id, index, _, dem)| (id.clone(), *index, *dem))
                         .collect();
                     ShapeSpec {
+                        view_complete: shape.view_complete,
                         source: shape.coords,
                         vector_layers: match (&shape.raster_source, vector) {
                             (None, Some(Initialized(pool))) => {

@@ -63,8 +63,10 @@ fn keys_for(specs: &[TargetSpec; 2], world: &World) -> [u64; 2] {
 fn spec(x: i32, layer: &str) -> TargetSpec {
     let coords = WorldTileCoords::from((x, 0, 2_u8.into()));
     TargetSpec {
+        absent_sources: Vec::new(),
         coords,
         shapes: vec![ShapeSpec {
+            view_complete: false,
             source: coords,
             vector_layers: Vec::new(),
             raster_layers: vec![(layer.into(), 0, true)],

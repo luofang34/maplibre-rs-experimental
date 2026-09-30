@@ -25,6 +25,7 @@ pub(super) fn for_frame(
     let specs = surfaces
         .into_iter()
         .map(|coords| TargetSpec {
+            absent_sources: Vec::new(),
             coords,
             shapes: Vec::new(),
         })

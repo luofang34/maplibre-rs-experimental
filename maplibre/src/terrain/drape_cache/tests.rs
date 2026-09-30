@@ -18,10 +18,12 @@ fn tile(x: i32, y: i32, z: u8) -> WorldTileCoords {
 
 fn spec(coords: WorldTileCoords, sources: &[WorldTileCoords]) -> TargetSpec {
     TargetSpec {
+        absent_sources: Vec::new(),
         coords,
         shapes: sources
             .iter()
             .map(|source| ShapeSpec {
+                view_complete: false,
                 source: *source,
                 vector_layers: vec![VectorLayerSpec {
                     id: "water".to_string(),

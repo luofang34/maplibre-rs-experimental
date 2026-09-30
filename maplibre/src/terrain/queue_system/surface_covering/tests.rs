@@ -15,6 +15,7 @@ fn reducing_texture_budget_preserves_every_mesh_coordinate_and_dem_zoom() {
     let mut world = World::default();
     world.resources.insert(SurfaceTiles(fine.clone()));
     let drapes = vec![TargetSpec {
+        absent_sources: Vec::new(),
         coords: coarse,
         shapes: Vec::new(),
     }];
@@ -38,9 +39,11 @@ fn metadata_shortage_defers_whole_textures_instead_of_caching_partial_coverage()
     let specs: Vec<_> = [2, 3, 1]
         .into_iter()
         .map(|count| TargetSpec {
+            absent_sources: Vec::new(),
             coords: source,
             shapes: (0..count)
                 .map(|_| ShapeSpec {
+                    view_complete: false,
                     source,
                     vector_layers: Vec::new(),
                     raster_layers: Vec::new(),
