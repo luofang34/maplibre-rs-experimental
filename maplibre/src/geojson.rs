@@ -345,7 +345,13 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
                 }
                 .with_feature_opacity(paint.opacity(), f64::from(zoom));
                 match paint {
+                    LayerPaint::Fill(p) if p.fill_pattern.is_some() => {
+                        tessellator.fallback_color = [1.0; 4]
+                    }
                     LayerPaint::Fill(p) => tessellator.style_property = p.fill_color.clone(),
+                    LayerPaint::FillExtrusion(p) if p.fill_extrusion_pattern.is_some() => {
+                        tessellator.fallback_color = [1.0; 4]
+                    }
                     LayerPaint::FillExtrusion(p) => {
                         tessellator.style_property = p.fill_extrusion_color.clone()
                     }

@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use maplibre::coords::WorldTileCoords;
+use maplibre::{coords::WorldTileCoords, style::source::TileAddressingScheme};
 
 pub(super) fn workspace_tests_dir() -> PathBuf {
     PathBuf::from("render-tests/src/tests")
@@ -12,15 +12,29 @@ pub(super) fn workspace_templates_dir() -> PathBuf {
     PathBuf::from("render-tests/src/templates")
 }
 
-pub(super) fn local_tile_path(template: &str, coords: WorldTileCoords) -> Result<PathBuf, String> {
+pub(super) fn local_tile_path(
+    template: &str,
+    coords: WorldTileCoords,
+    scheme: Option<TileAddressingScheme>,
+) -> Result<PathBuf, String> {
     let relative = template
         .strip_prefix("local://tiles/")
         .ok_or_else(|| format!("Unsupported tile URL in render harness: {template}"))?;
     let relative = relative
         .replace("{z}", &u8::from(coords.z).to_string())
         .replace("{x}", &coords.x.to_string())
-        .replace("{y}", &coords.y.to_string());
+        .replace("{y}", &row_in_scheme(coords, scheme).to_string());
     Ok(PathBuf::from("render-tests/src/assets/tiles").join(relative))
+}
+
+/// The row a tile has in the addressing scheme of its source: TMS rows count from the south.
+fn row_in_scheme(coords: WorldTileCoords, scheme: Option<TileAddressingScheme>) -> i64 {
+    match scheme {
+        Some(TileAddressingScheme::TMS) => {
+            (1_i64 << u32::from(u8::from(coords.z))) - 1 - i64::from(coords.y)
+        }
+        _ => i64::from(coords.y),
+    }
 }
 
 pub(super) fn local_data_path(url: &str) -> Result<PathBuf, String> {

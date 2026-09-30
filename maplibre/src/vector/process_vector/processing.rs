@@ -67,7 +67,14 @@ fn tessellator(paint: &LayerPaint, request: &VectorTileRequest) -> ZeroTessellat
     }
     .with_feature_opacity(paint.opacity(), f64::from(zoom));
     match paint {
+        // An image repeated over a fill takes nothing from the fill's colour but its opacity.
+        LayerPaint::Fill(paint) if paint.fill_pattern.is_some() => {
+            tessellator.fallback_color = [1.0; 4]
+        }
         LayerPaint::Fill(paint) => tessellator.style_property = paint.fill_color.clone(),
+        LayerPaint::FillExtrusion(paint) if paint.fill_extrusion_pattern.is_some() => {
+            tessellator.fallback_color = [1.0; 4]
+        }
         LayerPaint::FillExtrusion(paint) => {
             tessellator.style_property = paint.fill_extrusion_color.clone()
         }

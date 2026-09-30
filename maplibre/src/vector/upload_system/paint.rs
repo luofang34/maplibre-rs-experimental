@@ -1,8 +1,24 @@
 //! Paint shared by every feature must use the view zoom, including overzoomed source tiles.
-use crate::style::layer::{LayerPaint, StyleLayer};
+use crate::style::layer::{LayerPaint, StyleLayer, StyleProperty};
+
+/// White with the opacity of a fill that repeats an image, unless the opacity varies by feature.
+fn pattern_color(opacity: Option<&StyleProperty<f32>>, zoom: f64) -> Option<[f32; 4]> {
+    if opacity.is_some_and(|opacity| !opacity.is_feature_constant()) {
+        return None;
+    }
+    let opacity = opacity
+        .and_then(|opacity| opacity.evaluate_at_zoom(zoom))
+        .unwrap_or(1.0)
+        .clamp(0.0, 1.0);
+    Some([1.0, 1.0, 1.0, opacity])
+}
 
 pub(super) fn uniform_color(layer: &StyleLayer, zoom: f64) -> Option<[f32; 4]> {
     let (color, opacity) = match layer.paint.as_ref()? {
+        // A pattern takes only the opacity of the fill.
+        LayerPaint::Fill(paint) if paint.fill_pattern.is_some() => {
+            return pattern_color(paint.fill_opacity.as_ref(), zoom)
+        }
         LayerPaint::Fill(paint) => (&paint.fill_color, &paint.fill_opacity),
         // A gradient's colour comes from its ramp, so the feature colours carry the length.
         LayerPaint::Line(paint) if paint.line_gradient.is_some() => return None,

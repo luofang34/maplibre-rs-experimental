@@ -157,7 +157,7 @@ fn load_vector_blocking(
         {
             continue;
         }
-        let path = local_tile_path(template, coords)?;
+        let path = local_tile_path(template, coords, source.scheme)?;
         // Missing fixture tiles behave as 404 responses and keep pyramid fallback eligible.
         let data = match std::fs::read(&path) {
             Ok(data) => data.into_boxed_slice(),
@@ -209,16 +209,18 @@ fn load_raster_blocking(
     name: &str,
     source: &Source,
 ) -> Result<Vec<AvailableRasterLayerData>, String> {
-    let (template, minzoom) = match source {
+    let (template, minzoom, scheme) = match source {
         Source::Raster(source) => (
             source.tiles.as_ref().and_then(|tiles| tiles.first()),
             source.minzoom,
+            source.scheme,
         ),
         Source::RasterDem(source) => (
             source.tiles.as_ref().and_then(|tiles| tiles.first()),
             source.minzoom,
+            None,
         ),
-        _ => (None, None),
+        _ => (None, None, None),
     };
     let template =
         template.ok_or_else(|| format!("Raster source '{name}' has no tile template"))?;
@@ -234,7 +236,7 @@ fn load_raster_blocking(
             if !seen.insert(coords) {
                 break;
             }
-            let path = local_tile_path(template, coords)?;
+            let path = local_tile_path(template, coords, scheme)?;
             match image::open(&path) {
                 Ok(image) => {
                     layers.push(AvailableRasterLayerData {
@@ -299,7 +301,7 @@ pub(super) fn load_dem_tiles_blocking(
             if !seen.insert(coords) {
                 break;
             }
-            let path = local_tile_path(template, coords)?;
+            let path = local_tile_path(template, coords, None)?;
             match image::open(&path) {
                 Ok(image) => {
                     tiles.push((coords, image.to_rgba8()));
