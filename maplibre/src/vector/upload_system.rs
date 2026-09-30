@@ -387,7 +387,11 @@ fn metadata_for_layer(
     if let Some(LayerPaint::Heatmap(paint)) = &style_layer.paint {
         let zoom = f64::from(zoom);
         // Radius and intensity are one value per layer, taken at the view zoom.
-        layer_metadata.line_width = paint.radius_at(zoom);
+        layer_metadata.line_width = if paint.radius_per_feature() {
+            1.0
+        } else {
+            paint.radius_at(zoom)
+        };
         layer_metadata.circle_params = [paint.intensity_at(zoom), 1.0, 0.0, 0.0];
     }
     if let Some(LayerPaint::Circle(paint)) = &style_layer.paint {

@@ -186,6 +186,13 @@ impl TileShape {
     pub fn coords(&self) -> WorldTileCoords {
         self.coords
     }
+
+    /// Whether both shapes draw the same tile at the same place. A world copy of a tile has
+    /// the tile's coordinates but another place, and a parent standing in for several view
+    /// tiles is one shape however many entries carry it.
+    pub fn same_placement(&self, other: &Self) -> bool {
+        self.coords == other.coords && self.transform == other.transform
+    }
 }
 
 impl Default for TileShape {

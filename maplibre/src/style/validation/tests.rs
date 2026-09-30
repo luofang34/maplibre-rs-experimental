@@ -272,7 +272,7 @@ fn heatmap_properties_validate_by_their_evaluation_context() {
         "id": "heat", "type": "heatmap", "source": "points",
         "paint": {
             "heatmap-weight": ["get", "mag"],
-            "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 0, 2, 10, 30],
+            "heatmap-radius": ["*", ["get", "size"], 2],
             "heatmap-color": ["interpolate", ["linear"], ["heatmap-density"], 0, "#00f", 1, "#f00"]
         }
     }));
@@ -281,14 +281,14 @@ fn heatmap_properties_validate_by_their_evaluation_context() {
         "id": "heat", "type": "heatmap", "source": "points",
         "paint": {
             "heatmap-opacity": ["heatmap-density"],
-            "heatmap-radius": ["get", "size"],
+            "heatmap-intensity": ["get", "size"],
             "heatmap-color": ["get", "colour"]
         }
     }));
     let errors = rejected
         .validate()
         .expect_err("misplaced inputs are reported");
-    for property in ["heatmap-opacity", "heatmap-radius"] {
+    for property in ["heatmap-opacity", "heatmap-intensity"] {
         assert!(
             errors
                 .iter()

@@ -74,14 +74,14 @@ pub fn queue_system(
         return Ok(());
     }
 
-    // Each source tile is drawn once however many view tiles it stands in for while its
-    // children load, so a point is never counted twice.
+    // Each source tile is drawn once at each place, however many view tiles it stands in for
+    // while its children load, so a point is never counted twice; a world copy is another place.
     let mut sources: Vec<TileShape> = Vec::new();
     for view_tile in tile_view_pattern.iter() {
         view_tile.render_kind(TileKind::Vector, |source_shape| {
             if !sources
                 .iter()
-                .any(|known| known.coords() == source_shape.coords())
+                .any(|known| known.same_placement(source_shape))
             {
                 sources.push(source_shape.clone());
             }

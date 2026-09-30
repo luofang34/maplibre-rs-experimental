@@ -57,6 +57,13 @@ pub struct HeatmapPaint {
 }
 
 impl HeatmapPaint {
+    /// Whether the radius depends on the feature, so each point carries its own.
+    pub fn radius_per_feature(&self) -> bool {
+        self.heatmap_radius
+            .as_ref()
+            .is_some_and(|radius| !radius.is_feature_constant())
+    }
+
     /// Radius in pixels at `zoom`.
     pub fn radius_at(&self, zoom: f64) -> f32 {
         Self::number(&self.heatmap_radius, zoom, 30.0)

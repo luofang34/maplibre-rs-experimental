@@ -24,6 +24,8 @@ pub struct CircleOptions {
     pub radius: StyleProperty<f32>,
     /// Stroke width in screen pixels, evaluated per feature.
     pub stroke_width: StyleProperty<f32>,
+    /// What the radius is when the property has no value for a feature.
+    pub radius_default: f32,
     /// What the stroke-width slot holds when the property has no value for a feature.
     pub stroke_width_default: f32,
     /// Zoom of the tile, at which zoom-driven properties are evaluated.
@@ -35,18 +37,26 @@ impl CircleOptions {
     pub fn for_paint(paint: &CirclePaint, zoom: f64) -> Self {
         Self {
             radius: paint.radius(),
+            radius_default: CirclePaint::DEFAULT_RADIUS,
             stroke_width: paint.stroke_width(),
             stroke_width_default: 0.0,
             zoom,
         }
     }
 
-    /// Options for a heatmap point: a unit quad whose weight travels in the slot circles use
-    /// for the stroke width, because the pixel radius is one value for the whole layer and
-    /// comes from the layer's instance record. A feature without a weight counts once.
+    /// Options for a heatmap point: a quad whose weight travels in the slot circles use for
+    /// the stroke width. A radius that does not depend on the feature is one value for the
+    /// whole layer, taken from the layer's instance record, so the quad is one unit; a
+    /// per-feature radius is the quad's own size, and the layer's factor is then one. A
+    /// feature without a weight counts once.
     pub fn for_heatmap(paint: &HeatmapPaint, zoom: f64) -> Self {
+        let per_feature = paint.radius_per_feature();
         Self {
-            radius: StyleProperty::Constant(1.0),
+            radius: match &paint.heatmap_radius {
+                Some(radius) if per_feature => radius.clone(),
+                _ => StyleProperty::Constant(1.0),
+            },
+            radius_default: if per_feature { 30.0 } else { 1.0 },
             stroke_width: paint
                 .heatmap_weight
                 .clone()
@@ -78,7 +88,7 @@ where
         let radius = options
             .radius
             .evaluate_for(&self.feature_properties, options.zoom)
-            .unwrap_or(CirclePaint::DEFAULT_RADIUS)
+            .unwrap_or(options.radius_default)
             .max(0.0);
         let stroke_width = options
             .stroke_width

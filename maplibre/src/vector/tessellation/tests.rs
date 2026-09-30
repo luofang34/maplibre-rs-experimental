@@ -87,6 +87,7 @@ mod circles {
         ZeroTessellator::<IndexDataType>::default()
             .with_circles(CircleOptions {
                 radius,
+                radius_default: 5.0,
                 stroke_width: StyleProperty::Constant(stroke_width),
                 stroke_width_default: 0.0,
                 zoom: 3.0,
@@ -237,5 +238,24 @@ mod circles {
         point(&mut tessellator, 10.0, 10.0);
         tessellator.feature_end(0).expect("feature ends");
         assert_eq!(tessellator.buffer.vertices[0].normal, [1.0, 1.0]);
+    }
+
+    #[test]
+    fn a_per_feature_heatmap_radius_is_the_quads_own_size() {
+        let mut tessellator = heatmap_tessellator(serde_json::json!({
+            "heatmap-radius": ["get", "size"]
+        }));
+        tessellator
+            .property(0, "size", &ColumnValue::Double(12.0))
+            .expect("property");
+        point(&mut tessellator, 100.0, 200.0);
+        tessellator.feature_end(0).expect("feature ends");
+        point(&mut tessellator, 300.0, 400.0);
+        tessellator.feature_end(1).expect("feature ends");
+        assert_eq!(tessellator.buffer.vertices[0].normal[0], 12.0);
+        assert_eq!(
+            tessellator.buffer.vertices[4].normal[0], 30.0,
+            "a feature without a radius takes the specification default"
+        );
     }
 }

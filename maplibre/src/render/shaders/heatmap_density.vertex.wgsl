@@ -27,7 +27,7 @@ fn main(
     @location(6) translate3: vec4<f32>,
     @location(7) translate4: vec4<f32>,
     @location(9) zoom_factor: f32,
-    @location(13) radius: f32,
+    @location(13) layer_radius: f32,
     @location(14) circle_params: vec4<f32>,
 ) -> VertexOutput {
     // Quads are emitted with four consecutive vertices; the corner follows the vertex order.
@@ -36,6 +36,8 @@ fn main(
         select(-1.0, 1.0, corner == 1u || corner == 2u),
         select(-1.0, 1.0, corner >= 2u),
     );
+    // One unit for a layer-wide radius, else the point's own radius in pixels.
+    let radius = layer_radius * normal.x;
     let weight = normal.y;
     let intensity = circle_params.x;
     let strength = weight * intensity;

@@ -59,7 +59,7 @@ impl LayerValidation<'_> {
                 );
             }
             LayerPaint::Heatmap(p) => {
-                self.property("paint.heatmap-radius", p.heatmap_radius.as_ref(), Zoom);
+                self.property("paint.heatmap-radius", p.heatmap_radius.as_ref(), Feature);
                 self.property("paint.heatmap-weight", p.heatmap_weight.as_ref(), Feature);
                 self.property(
                     "paint.heatmap-intensity",
