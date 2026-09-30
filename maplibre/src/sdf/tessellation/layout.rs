@@ -62,6 +62,7 @@ pub(super) fn append(
 ) {
     let start = buffer.indices.len();
     let first_vertex = buffer.vertices.len();
+    let mut icon_padding = 0.0_f32;
     let text = paint.label(&symbol.properties, zoom).unwrap_or_default();
     if let Some(icon) = paint
         .text("icon-image", &symbol.properties, zoom)
@@ -102,6 +103,7 @@ pub(super) fn append(
         };
         for piece in super::icon_quads::icon_quads(icon, fitted.unwrap_or(placed), fitted.is_some())
         {
+            icon_padding = icon_padding.max(piece.padding * undo_size);
             let part = AtlasEntry {
                 rect: piece.rect,
                 ..icon.clone()
@@ -141,6 +143,16 @@ pub(super) fn append(
         zoom,
     );
     let mut parts = crate::sdf::placement_geometry::measure(&mut buffer.vertices[first_vertex..]);
+    // An icon collides by its image, not by the clear border its quad reaches into.
+    for part in parts[1..].iter_mut().flatten() {
+        let pad = f64::from(icon_padding);
+        part.bounds = [
+            part.bounds[0] + pad,
+            part.bounds[1] + pad,
+            part.bounds[2] - pad,
+            part.bounds[3] - pad,
+        ];
+    }
     // Text collides by the box of its lines, not by the bitmaps of its glyphs, which reach
     // a few pixels beyond it.
     if let (Some(text_part), None) = (&mut parts[0], &symbol.line) {

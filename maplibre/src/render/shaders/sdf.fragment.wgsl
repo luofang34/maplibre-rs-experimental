@@ -21,7 +21,7 @@ fn shade(in: VertexOutput, mode: u32) -> vec4<f32> {
     var color: vec4<f32>;
     if in.kind == 1u {
         if mode == 1u { discard; }
-        color = vec4<f32>(sample.rgb * sample.a, sample.a);
+        color = vec4<f32>(sample.rgb, sample.a);
     } else {
         let is_text = in.kind == 0u;
         let fill = in.fill;

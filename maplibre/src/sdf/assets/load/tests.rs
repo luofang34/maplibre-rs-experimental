@@ -94,7 +94,8 @@ async fn style_assets_fetch_unicode_ranges_and_sprite_queries_without_hidden_lay
     let icon = &atlas.icons["marker"];
     assert_eq!(icon.metrics[3], 2.0);
     let offset = ((icon.rect[1] * atlas.size[0] + icon.rect[0]) * 4) as usize;
-    assert_eq!(&atlas.pixels[offset..offset + 4], &[0, 255, 0, 191]);
+    // Colour icons are stored premultiplied by their alpha.
+    assert_eq!(&atlas.pixels[offset..offset + 4], &[0, 191, 0, 191]);
 }
 
 #[derive(Clone, Copy)]

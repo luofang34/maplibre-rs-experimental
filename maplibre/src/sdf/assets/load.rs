@@ -64,6 +64,18 @@ pub async fn load_symbol_assets<HC: HttpClient>(
     Ok(builder.finish())
 }
 
+/// RGBA bytes with each colour channel scaled by its alpha.
+fn premultiply(data: &[u8]) -> Vec<u8> {
+    let mut out = data.to_vec();
+    for pixel in out.as_chunks_mut::<4>().0 {
+        let alpha = u32::from(pixel[3]);
+        for channel in &mut pixel[..3] {
+            *channel = ((u32::from(*channel) * alpha + 127) / 255) as u8;
+        }
+    }
+    out
+}
+
 /// Packs an image the host added to the style, replacing a sprite icon of the same name.
 fn pack_style_image(builder: &mut AtlasBuilder, name: &str, image: &crate::style::StyleImage) {
     if image.width == 0
@@ -72,7 +84,14 @@ fn pack_style_image(builder: &mut AtlasBuilder, name: &str, image: &crate::style
     {
         return;
     }
-    let Some(rect) = builder.pack(image.width, image.height, &image.data) else {
+    let premultiplied;
+    let data = if image.sdf {
+        &image.data
+    } else {
+        premultiplied = premultiply(&image.data);
+        &premultiplied
+    };
+    let Some(rect) = builder.pack(image.width, image.height, data) else {
         return;
     };
     builder.atlas.icons.insert(
@@ -251,7 +270,15 @@ fn pack_sprites(
             continue;
         }
         let pixels = image::imageops::crop_imm(image, x, y, width, height).to_image();
-        let Some(rect) = builder.pack(width, height, pixels.as_raw()) else {
+        let sdf = value.get("sdf").and_then(|v| v.as_bool()).unwrap_or(false);
+        // Colour icons are stored premultiplied, so filtering them never darkens an edge with
+        // the colour of the clear texels around it.
+        let packed = if sdf {
+            pixels.into_raw()
+        } else {
+            premultiply(pixels.as_raw())
+        };
+        let Some(rect) = builder.pack(width, height, &packed) else {
             continue;
         };
         let ratio = value

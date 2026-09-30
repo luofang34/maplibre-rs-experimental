@@ -18,7 +18,9 @@ fn nine_part() -> AtlasEntry {
 fn an_icon_without_a_fit_is_one_quad() {
     let quads = icon_quads(&nine_part(), [0.0, 0.0, 40.0, 40.0], false);
     assert_eq!(quads.len(), 1);
-    assert_eq!(quads[0].rect, [100, 200, 40, 40]);
+    // The quad takes one texel of the clear border around the image on each side.
+    assert_eq!(quads[0].rect, [99, 199, 42, 42]);
+    assert_eq!(quads[0].bounds, [-1.0, -1.0, 41.0, 41.0]);
 }
 
 #[test]

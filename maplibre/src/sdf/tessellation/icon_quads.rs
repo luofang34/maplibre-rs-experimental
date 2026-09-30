@@ -8,6 +8,8 @@ use crate::sdf::assets::{AtlasEntry, IconStretch, TextFit};
 pub(super) struct IconQuad {
     pub bounds: [f32; 4],
     pub rect: [u32; 4],
+    /// How far, in layout pixels, the quad reaches beyond the image into its clear border.
+    pub padding: f32,
 }
 
 /// One cut through the image: pixels that keep their size before it, and stretchable
@@ -89,9 +91,27 @@ pub(super) fn icon_quads(icon: &AtlasEntry, boxed: [f32; 4], fitted: bool) -> Ve
     let [x, y, width, height] = icon.rect;
     let (image_width, image_height) = (width as f32, height as f32);
     let Some(stretch) = icon.stretch.as_deref().filter(|_| fitted) else {
+        if fitted {
+            return vec![IconQuad {
+                bounds: boxed,
+                rect: icon.rect,
+                padding: 0.0,
+            }];
+        }
+        // The quad reaches one texel into the atlas's clear border, so the image fades out at
+        // its edge instead of ending on a hard line.
+        let pad = 1.0 / ratio;
+        let [left, top, right, bottom] = boxed;
+        let [x, y, width, height] = icon.rect;
         return vec![IconQuad {
-            bounds: boxed,
-            rect: icon.rect,
+            bounds: [left - pad, top - pad, right + pad, bottom + pad],
+            rect: [
+                x.saturating_sub(1),
+                y.saturating_sub(1),
+                width + 2,
+                height + 2,
+            ],
+            padding: pad,
         }];
     };
     let stretch_x = if stretch.stretch_x.is_empty() {
@@ -186,6 +206,7 @@ pub(super) fn icon_quads(icon: &AtlasEntry, boxed: [f32; 4], fitted: bool) -> Ve
                     (x2 - x1) as u32,
                     (y2 - y1) as u32,
                 ],
+                padding: 0.0,
             });
         }
     }
