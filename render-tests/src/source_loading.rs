@@ -26,14 +26,18 @@ use crate::{
     paths::{local_data_path, local_tile_path},
     source_tiles::source_tile_coords,
     symbol_assets::load_atlas_blocking,
+    vector_feature_state::VectorFeatureStates,
 };
 
 pub(super) fn load_sources_blocking(
     map: &mut HeadlessMap,
     style: &Style,
     target_coords: &[WorldTileCoords],
-    images: &HashMap<String, PlacedImage>,
-    pixel_ratio: f64,
+    (images, pixel_ratio, vector_states): (
+        &HashMap<String, PlacedImage>,
+        f64,
+        &VectorFeatureStates,
+    ),
 ) -> Result<(ProcessedLayers, Vec<AvailableRasterLayerData>), String> {
     let mut all_layers = ProcessedLayers::default();
     let mut all_raster_layers = Vec::new();
@@ -67,6 +71,7 @@ pub(super) fn load_sources_blocking(
                 &layers,
                 target_coords,
                 (&projection, pixel_ratio),
+                vector_states,
             )?),
             // DEM images supply hillshade and colour relief independently from terrain meshes.
             Source::Image(_) => return Err(format!("Image source '{name}' was not lowered")),
@@ -148,6 +153,7 @@ fn load_vector_blocking(
     layers: &[StyleLayer],
     target_coords: &[WorldTileCoords],
     (projection, pixel_ratio): (&ProjectionType, f64),
+    vector_states: &VectorFeatureStates,
 ) -> Result<ProcessedLayers, String> {
     let template = source
         .tiles
@@ -171,6 +177,11 @@ fn load_vector_blocking(
                 tracing::warn!(path = %path.display(), %error, "vector tile unavailable");
                 continue;
             }
+        };
+        let data = if vector_states.has(name) {
+            vector_states.apply(name, &data)?.into_boxed_slice()
+        } else {
+            data
         };
         let atlas = symbol_atlas(style, layers, &data, (coords, pixel_ratio))?;
         for layer in layers {

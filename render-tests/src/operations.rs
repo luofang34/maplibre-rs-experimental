@@ -68,7 +68,7 @@ fn feature_state(
     style: &mut Style,
     target: &Value,
     states: &Value,
-    removing: bool,
+    (removing, vector_states): (bool, &mut crate::vector_feature_state::VectorFeatureStates),
 ) -> Result<(), String> {
     use maplibre::style::{
         expression::FEATURE_STATE_PREFIX,
@@ -86,9 +86,16 @@ fn feature_state(
         None if removing => None,
         _ => return Err("feature state needs an id".to_owned()),
     };
+    if matches!(style.sources.get(source), Some(Source::Vector(_))) {
+        return if removing {
+            vector_states.remove(target, states)
+        } else {
+            vector_states.set(target, states)
+        };
+    }
     let Some(Source::GeoJson(geojson)) = style.sources.get_mut(source) else {
         return Err(format!(
-            "feature state on `{source}`: only GeoJSON sources are supported"
+            "feature state on `{source}`: only GeoJSON and vector sources are supported"
         ));
     };
     let promote = match &geojson.promote_id {
@@ -148,7 +155,10 @@ fn feature_state(
 pub(super) fn apply(
     style: &mut Style,
     operations: &[Value],
-    transitions: &mut crate::transitions::Transitions,
+    (transitions, vector_states): (
+        &mut crate::transitions::Transitions,
+        &mut crate::vector_feature_state::VectorFeatureStates,
+    ),
 ) -> Result<(), String> {
     for operation in operations {
         let Some(items) = operation.as_array() else {
@@ -197,8 +207,12 @@ pub(super) fn apply(
                 };
                 Ok(())
             }
-            ("setFeatureState", _) => feature_state(style, &value(1), &value(2), false),
-            ("removeFeatureState", _) => feature_state(style, &value(1), &value(2), true),
+            ("setFeatureState", _) => {
+                feature_state(style, &value(1), &value(2), (false, &mut *vector_states))
+            }
+            ("removeFeatureState", _) => {
+                feature_state(style, &value(1), &value(2), (true, &mut *vector_states))
+            }
             ("setGlobalStateProperty", Some(key)) => {
                 style.set_global_state(key, value(2));
                 Ok(())

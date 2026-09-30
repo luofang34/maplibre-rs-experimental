@@ -32,7 +32,7 @@ pub(super) async fn run_test_inner(test_dir: &Path) -> TestResult {
 }
 
 async fn render_fixture(test_dir: &Path) -> Result<(f64, f64), String> {
-    let (mut style, meta) = load_style_blocking(test_dir)?;
+    let (mut style, meta, vector_states) = load_style_blocking(test_dir)?;
     let images = crate::image_sources::lower(&mut style)?;
     let mut map = create_map(&style, &meta).await?;
     map.set_padding(maplibre::render::camera::EdgeInsets {
@@ -56,8 +56,12 @@ async fn render_fixture(test_dir: &Path) -> Result<(f64, f64), String> {
             .required_tile_coords()
             .map_err(|error| format!("Cannot select source tiles: {error}"))?;
     }
-    let (layers, raster_layers) =
-        load_sources_blocking(&mut map, &style, &coords, &images, meta.pixel_ratio)?;
+    let (layers, raster_layers) = load_sources_blocking(
+        &mut map,
+        &style,
+        &coords,
+        (&images, meta.pixel_ratio, &vector_states),
+    )?;
     // Labels fade in, so a frame settles only after several; other layers need two.
     let frame_count: u8 = if style
         .layers
@@ -88,7 +92,16 @@ async fn render_fixture(test_dir: &Path) -> Result<(f64, f64), String> {
     Ok((diff, meta.max_diff))
 }
 
-fn load_style_blocking(test_dir: &Path) -> Result<(Style, TestMeta), String> {
+fn load_style_blocking(
+    test_dir: &Path,
+) -> Result<
+    (
+        Style,
+        TestMeta,
+        crate::vector_feature_state::VectorFeatureStates,
+    ),
+    String,
+> {
     let text = std::fs::read_to_string(test_dir.join("style.json"))
         .map_err(|error| format!("Cannot read style.json: {error}"))?;
     let mut value: serde_json::Value =
@@ -103,17 +116,18 @@ fn load_style_blocking(test_dir: &Path) -> Result<(Style, TestMeta), String> {
         .map_err(|error| format!("Cannot deserialize Style: {error}"))?;
     // The tiles are decoded from this copy of the style, so it carries the state's values too.
     style.resolve_global_state();
+    let mut vector_states = crate::vector_feature_state::VectorFeatureStates::default();
     crate::operations::apply(
         &mut style,
         &crate::operations::operations_of(&value),
-        &mut transitions,
+        (&mut transitions, &mut vector_states),
     )?;
     transitions.settle(&mut style)?;
     crate::pattern_images::add_pattern_images(&mut style, meta.pixel_ratio)?;
     for (index, layer) in style.layers.iter_mut().enumerate() {
         layer.index = index as u32 + 1; // The depth clear is zero.
     }
-    Ok((style, meta))
+    Ok((style, meta, vector_states))
 }
 
 async fn create_map(style: &Style, meta: &TestMeta) -> Result<HeadlessMap, String> {
