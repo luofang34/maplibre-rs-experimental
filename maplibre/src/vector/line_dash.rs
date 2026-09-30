@@ -30,6 +30,8 @@ enum LineImage {
 
 struct DashEntry {
     pattern: Vec<f64>,
+    /// Whether the dashes end in round caps, which the texture then encodes across the line.
+    round: bool,
     image: LineImage,
     binding: wgpu::BindGroup,
 }
@@ -88,7 +90,7 @@ impl LineDashResources {
                 },
             ],
         });
-        let solid = create_entry(device, queue, &layout, &[], &LineImage::None);
+        let solid = create_entry(device, queue, &layout, (&[], false), &LineImage::None);
         Self {
             layout,
             entries: HashMap::new(),
@@ -117,20 +119,21 @@ impl LineDashResources {
                 })
                 .map_or_else(Vec::new, |values| normalize_pattern(values.0));
             let image = line_image(paint, style, zoom);
+            let round = !pattern.is_empty()
+                && crate::style::line_stroke::LineStroke::of_layer(layer).cap
+                    == crate::style::line_stroke::LineCap::Round;
             if pattern.is_empty() && image == LineImage::None {
                 self.entries.remove(&layer.id);
                 continue;
             }
-            if self
-                .entries
-                .get(&layer.id)
-                .is_some_and(|entry| entry.pattern == pattern && entry.image == image)
-            {
+            if self.entries.get(&layer.id).is_some_and(|entry| {
+                entry.pattern == pattern && entry.round == round && entry.image == image
+            }) {
                 continue;
             }
             self.entries.insert(
                 layer.id.clone(),
-                create_entry(device, queue, &self.layout, &pattern, &image),
+                create_entry(device, queue, &self.layout, (&pattern, round), &image),
             );
         }
     }
@@ -179,19 +182,67 @@ fn dash_pixels(pattern: &[f64]) -> (Vec<u8>, f32) {
     (pixels, period as f32)
 }
 
+/// Rows either side of the centre of a round dash's texture.
+const ROUND_HALF_ROWS: i32 = 7;
+
+/// The dash texture with round caps: one row per step across the line, each holding the signed
+/// distance to the dash shape at that height, so a dash and a gap end in half circles.
+fn round_dash_pixels(pattern: &[f64]) -> (Vec<u8>, f32, u32) {
+    let period = pattern.iter().sum::<f64>();
+    let rows = (2 * ROUND_HALF_ROWS + 1) as u32;
+    if period <= 0.0 {
+        return (vec![255; WIDTH as usize * rows as usize * 4], 0.0, rows);
+    }
+    let stretch = f64::from(WIDTH) / period;
+    let half = stretch / 2.0;
+    let mut bounds = Vec::with_capacity(pattern.len());
+    let mut edge = 0.0;
+    for length in pattern {
+        bounds.push((edge * stretch, (edge + length) * stretch));
+        edge += length;
+    }
+    let mut pixels = Vec::with_capacity(WIDTH as usize * rows as usize * 4);
+    for row in -ROUND_HALF_ROWS..=ROUND_HALF_ROWS {
+        let middle = f64::from(row) / f64::from(ROUND_HALF_ROWS) * (half + 1.0);
+        for x in 0..WIDTH {
+            let x = f64::from(x);
+            let (index, (left, right)) = bounds
+                .iter()
+                .copied()
+                .enumerate()
+                .find(|(_, (_, right))| x <= *right)
+                .unwrap_or((bounds.len() - 1, bounds[bounds.len() - 1]));
+            let nearest = (x - left).abs().min((x - right).abs());
+            let signed = if index % 2 == 0 {
+                (nearest * nearest + (half - middle.abs()).powi(2)).sqrt()
+            } else {
+                half - (nearest * nearest + middle * middle).sqrt()
+            };
+            let value = (128.0 + signed / f64::from(WIDTH) * 254.0).clamp(0.0, 255.0) as u8;
+            pixels.extend([value, value, value, 255]);
+        }
+    }
+    (pixels, period as f32, rows)
+}
+
 fn create_entry(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
-    pattern: &[f64],
+    (pattern, round): (&[f64], bool),
     image: &LineImage,
 ) -> DashEntry {
-    let (pixels, period) = dash_pixels(pattern);
+    let (pixels, period, rows) = if round {
+        round_dash_pixels(pattern)
+    } else {
+        let (pixels, period) = dash_pixels(pattern);
+        (pixels, period, 1)
+    };
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("line dash distance"),
         size: wgpu::Extent3d {
             width: WIDTH,
-            height: 1,
+            height: rows,
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
@@ -207,7 +258,7 @@ fn create_entry(
         wgpu::TexelCopyBufferLayout {
             offset: 0,
             bytes_per_row: Some(WIDTH * 4),
-            rows_per_image: Some(1),
+            rows_per_image: Some(rows),
         },
         texture.size(),
     );
@@ -220,7 +271,7 @@ fn create_entry(
     });
     let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("line dash period"),
-        contents: bytemuck::cast_slice(&image_uniform(period, image)),
+        contents: bytemuck::cast_slice(&image_uniform(period, image, round)),
         usage: wgpu::BufferUsages::UNIFORM,
     });
     let (ramp_view, ramp_sampler) = ramp_texture(device, queue, image);
@@ -252,16 +303,19 @@ fn create_entry(
     });
     DashEntry {
         pattern: pattern.to_vec(),
+        round,
         image: image.clone(),
         binding,
     }
 }
 
-/// The uniform of a dash entry: the dash period, what fills the line, and the size of a pattern.
-fn image_uniform(period: f32, image: &LineImage) -> [f32; 4] {
+/// The uniform of a dash entry: the dash period, what fills the line, and the size of a pattern
+/// or, for a dash, whether its texture has the rows of round caps.
+fn image_uniform(period: f32, image: &LineImage, round: bool) -> [f32; 4] {
+    let round = f32::from(round);
     match image {
-        LineImage::None => [period, 0.0, 0.0, 0.0],
-        LineImage::Gradient(_) => [period, 1.0, 0.0, 0.0],
+        LineImage::None => [period, 0.0, round, 0.0],
+        LineImage::Gradient(_) => [period, 1.0, round, 0.0],
         LineImage::Pattern { display, .. } => [period, 2.0, display[0], display[1]],
     }
 }

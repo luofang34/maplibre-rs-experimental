@@ -24,8 +24,11 @@ struct Output {
 
 @fragment
 fn main(in: FragmentInput) -> Output {
+    // A dash with round caps has a row of the texture for each step across the line.
+    let round_dash = dash_period.z > 0.5 && dash_period.y < 1.5;
+    let dash_v = select(0.5, (7.5 - 7.0 * in.across) / 15.0, round_dash);
     let distance_sample = textureSample(dash_texture, dash_sampler,
-        vec2<f32>(in.dash.x / max(dash_period.x, 1e-6), 0.5)).r;
+        vec2<f32>(in.dash.x / max(dash_period.x, 1e-6), dash_v)).r;
     let dash_alpha = select(clamp(0.5 + (distance_sample * 255.0 - 128.0) / 254.0 * dash_period.x * in.dash.y, 0.0, 1.0),
         1.0, dash_period.x <= 0.0);
     if in.horizon_distance < 0.0 {

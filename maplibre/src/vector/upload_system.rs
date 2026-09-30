@@ -419,7 +419,7 @@ fn metadata_for_layer(
             value(&paint.line_offset),
             value(&paint.line_gap_width).max(0.0),
             value(&paint.line_blur).max(0.0),
-            0.0,
+            f32::from(paint.line_gradient.is_some()),
         ];
     }
     if let Some(LayerPaint::Circle(paint)) = &style_layer.paint {

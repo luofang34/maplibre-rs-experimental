@@ -42,6 +42,8 @@ fn main(
     let feature_width = f32((payload >> 11u) & 0xfffu) / 16.0;
     let feature_offset = f32(i32(payload & 0x7ffu) - 1024) / 8.0;
     let line_width_px = select(line_width, feature_width, per_feature) * line_scale.x;
+    // A gradient line measures its dashes in pixels rather than line widths.
+    let dash_unit = select(line_width_px, 1.0, line_style.w > 0.5);
     let line_offset = select(line_style.x, feature_offset, per_feature);
     let gapwidth = line_style.y * 0.5;
 
@@ -107,7 +109,7 @@ fn main(
         projected_center.horizon_distance,
         position.x,
         clip_antimeridian,
-        vec2<f32>(path.z / max(line_scale.y * line_width_px, 1e-6), line_width_px),
+        vec2<f32>(path.z / max(line_scale.y * dash_unit, 1e-6), dash_unit),
         // A gradient layer carries the length of the line in the red channel of its colour.
         path.z / max(color.x, 1e-6),
         // Which side of the line the vertex is on: the elevation sentinel of a stroke encodes it.
