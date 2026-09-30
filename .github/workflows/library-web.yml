@@ -42,7 +42,7 @@ jobs:
         # We want a specific, as Cargo uses a pinned version of wasm-bindgen as dependency of the web crate
         with:
           # Update version in flake.nix and Cargo.toml
-          name: wasm-bindgen-cli@0.2.127
+          name: wasm-bindgen-cli@0.2.129
       - name: Build lib
         shell: bash
         run: just web-lib build --release ${{ inputs.webgl && '--webgl' || '' }} ${{ inputs.multithreaded && '--multithreaded' || '' }}
