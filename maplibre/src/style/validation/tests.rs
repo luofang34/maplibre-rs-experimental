@@ -161,13 +161,16 @@ fn expression_diagnostics_follow_the_renderers_evaluation_context() {
     let errors = style
         .validate()
         .expect_err("unsupported expression contexts");
-    assert_eq!(errors.len(), 2, "{errors:?}");
+    assert_eq!(errors.len(), 1, "{errors:?}");
     assert!(errors
         .iter()
         .any(|error| error.to_string().contains("paint.line-width")));
-    assert!(errors
-        .iter()
-        .any(|error| error.to_string().contains("global-state")));
+    assert!(
+        !errors
+            .iter()
+            .any(|error| error.to_string().contains("global-state")),
+        "global-state evaluates to null when unset, so it is supported"
+    );
 }
 
 #[test]

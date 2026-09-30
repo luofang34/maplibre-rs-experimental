@@ -66,11 +66,12 @@ impl HeadlessMap {
     /// Initializes the view from the style and builds plugins in their supplied order.
     /// The renderer and host kernel must already be initialized.
     pub fn new(
-        style: Style,
+        mut style: Style,
         mut renderer: Renderer,
         kernel: Kernel<HeadlessEnvironment>,
         plugins: Vec<Box<dyn Plugin<HeadlessEnvironment>>>,
     ) -> Result<Self, MapError> {
+        style.resolve_global_state();
         style.log_validation_errors();
         let window_size = renderer.state().surface().size();
 

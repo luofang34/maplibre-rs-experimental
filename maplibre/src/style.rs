@@ -71,10 +71,26 @@ pub struct Style {
     /// Elevation source and vertical exaggeration; omission renders without terrain.
     #[serde(default)]
     pub terrain: Option<terrain::TerrainSpecification>,
+    /// Defaults for the values `global-state` expressions read.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub state: HashMap<String, state::StateDeclaration>,
+    /// Values set at runtime; they override the defaults and travel with the style to workers.
+    #[serde(
+        default,
+        rename = "globalState",
+        skip_serializing_if = "HashMap::is_empty"
+    )]
+    pub global_state: HashMap<String, serde_json::Value>,
+    /// Layers as declared, kept while the layers in use have global state substituted. Public
+    /// only so a style can still be built with struct update syntax.
+    #[doc(hidden)]
+    #[serde(skip)]
+    pub state_templates: HashMap<String, StyleLayer>,
 }
 
 mod default_style;
 mod layer_order;
+pub mod state;
 
 #[cfg(test)]
 mod tests;

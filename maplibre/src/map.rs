@@ -95,11 +95,12 @@ where
     /// Creates the host window and retains the style and plugins for GPU initialization.
     /// Window errors are returned; style validation findings are logged.
     pub fn new(
-        style: Style,
+        mut style: Style,
         kernel: Kernel<E>,
         renderer_builder: RendererBuilder,
         plugins: Vec<Box<dyn Plugin<E>>>,
     ) -> Result<Self, MapError> {
+        style.resolve_global_state();
         style.log_validation_errors();
         let schedule = Schedule::default();
 
@@ -291,6 +292,25 @@ where
             }
         }
         Ok(())
+    }
+
+    /// Sets a `global-state` value, as GL JS `setGlobalStateProperty`; `null` restores the
+    /// declared default. Works before or after the renderer is initialized.
+    pub fn set_global_state(&mut self, key: &str, value: serde_json::Value) {
+        match &mut self.map_context {
+            CurrentMapContext::Ready(context) => context.set_global_state(key, value),
+            CurrentMapContext::Pending(pending) => {
+                pending.style.set_global_state(key, value);
+            }
+        }
+    }
+
+    /// Every declared or set `global-state` key with its current value.
+    pub fn global_state(&self) -> std::collections::BTreeMap<String, serde_json::Value> {
+        match &self.map_context {
+            CurrentMapContext::Ready(context) => context.style.global_state_values(),
+            CurrentMapContext::Pending(pending) => pending.style.global_state_values(),
+        }
     }
 
     /// The features of an inline GeoJSON source, before or after the renderer is initialized;

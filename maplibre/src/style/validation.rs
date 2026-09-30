@@ -200,7 +200,6 @@ impl LayerValidation<'_> {
 
 fn missing_input(expression: &Expression, evaluation: Evaluation) -> Option<&'static str> {
     let mut missing = match expression {
-        Expression::GlobalState(_) => Some("global-state is not connected to renderer evaluation"),
         Expression::Feature(FeatureProperty::Id | FeatureProperty::GeometryType)
             if !matches!(evaluation, Evaluation::Filter) =>
         {

@@ -29,6 +29,9 @@ impl Default for Style {
             light: None,
             sky: None,
             terrain: None,
+            state: Default::default(),
+            global_state: Default::default(),
+            state_templates: Default::default(),
             zoom: Some(13.0),
             layers: default_layers(),
         }

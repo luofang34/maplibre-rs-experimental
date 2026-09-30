@@ -411,3 +411,84 @@ async fn set_data_does_not_cut_short_the_backoff_of_a_failing_tile() {
     test.frame(1001);
     assert_eq!(test.kernel.apc().pending(), 1);
 }
+
+fn state_style() -> crate::style::Style {
+    let mut style: crate::style::Style = serde_json::from_value(serde_json::json!({"version":8,
+        "state":{"show":{"default":true}},
+        "sources":{"shapes":{"type":"geojson","data":serde_json::from_str::<serde_json::Value>(WORLD_POLYGON).expect("polygon")}},
+        "layers":[
+            {"id":"toggled","source":"shapes","type":"fill","paint":{"fill-color":"#00ff00"},
+             "filter":["==",["global-state","show"],true]},
+            {"id":"steady","source":"shapes","type":"fill","paint":{"fill-color":"#0000ff"}}]}))
+    .expect("style with state");
+    style.resolve_global_state();
+    style
+}
+
+fn layers_with_geometry(test: &Fixture) -> Vec<String> {
+    let Some(component) = test
+        .context
+        .world
+        .tiles
+        .query::<&crate::vector::VectorLayerBucketComponent>(Default::default())
+    else {
+        return Vec::new();
+    };
+    let mut ids: Vec<String> = component
+        .layers
+        .iter()
+        .filter_map(|layer| match layer {
+            crate::vector::VectorLayerBucket::AvailableLayer(bucket)
+                if !bucket.buffer.buffer.indices.is_empty() =>
+            {
+                Some(bucket.style_layer_id.clone())
+            }
+            _ => None,
+        })
+        .collect();
+    ids.sort();
+    ids
+}
+
+#[tokio::test]
+async fn global_state_changes_only_the_layers_that_read_it_and_only_when_they_do() {
+    let mut test = Fixture::new(Kind::Vector, false).await;
+    test.context.style = state_style();
+    test.frame(0);
+    test.receive().await;
+    assert_eq!(layers_with_geometry(&test), ["steady", "toggled"]);
+
+    test.context
+        .set_global_state("unrelated", serde_json::json!(1));
+    test.frame(1);
+    assert_eq!(
+        test.kernel.apc().pending(),
+        0,
+        "a key no layer reads does not touch the tiles"
+    );
+
+    test.context
+        .set_global_state("show", serde_json::json!(false));
+    test.frame(2);
+    assert_eq!(
+        test.kernel.apc().pending(),
+        1,
+        "a dependent layer refreshes its tile"
+    );
+    test.receive().await;
+    assert_eq!(
+        layers_with_geometry(&test),
+        ["steady"],
+        "only the dependent layer changed"
+    );
+
+    test.context
+        .set_global_state("show", serde_json::Value::Null);
+    test.frame(3);
+    test.receive().await;
+    assert_eq!(
+        layers_with_geometry(&test),
+        ["steady", "toggled"],
+        "null restores the declared default"
+    );
+}
