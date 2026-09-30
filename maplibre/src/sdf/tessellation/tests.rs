@@ -131,3 +131,44 @@ fn every_part_of_a_multi_line_feature_is_labelled() {
         "each line has its own label, on the line"
     );
 }
+
+fn point_label(extra: serde_json::Value) -> TextTessellator {
+    let mut paint = serde_json::json!({"text-field": "A", "text-font": ["test"], "text-size": 24});
+    for (key, value) in extra.as_object().expect("extra").clone() {
+        paint[key] = value;
+    }
+    let paint: SymbolPaint = serde_json::from_value(paint).expect("paint");
+    let mut tessellator = TextTessellator::default();
+    tessellator.configure(paint, atlas());
+    tessellator.point_begin(0).expect("begin");
+    tessellator.xy(100.0, 100.0, 0).expect("vertex");
+    tessellator.point_end(0).expect("end");
+    tessellator
+        .property(0, "turn", &ColumnValue::Double(90.0))
+        .expect("property");
+    tessellator.feature_end(0).expect("feature");
+    tessellator.finish();
+    tessellator
+}
+
+fn corner_offsets(tessellator: &TextTessellator) -> Vec<[i32; 2]> {
+    tessellator
+        .quad_buffer
+        .vertices
+        .iter()
+        .map(|vertex| [vertex.a_pos_offset[2], vertex.a_pos_offset[3]])
+        .collect()
+}
+
+#[test]
+fn text_rotation_can_come_from_a_feature_property() {
+    let flat = corner_offsets(&point_label(serde_json::json!({})));
+    let turned = corner_offsets(&point_label(
+        serde_json::json!({"text-rotate": ["get", "turn"]}),
+    ));
+    // A quarter turn sends each offset (x, y) to (-y, x), clockwise on a y-down screen.
+    for (before, after) in flat.iter().zip(&turned) {
+        assert!((after[0] + before[1]).abs() <= 1 && (after[1] - before[0]).abs() <= 1);
+    }
+    assert_ne!(flat, turned);
+}

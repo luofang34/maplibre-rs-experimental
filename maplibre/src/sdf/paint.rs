@@ -53,8 +53,8 @@ impl SymbolUniforms {
                 number("icon-halo-blur", 0.0),
                 number("icon-opacity", 1.0),
             ],
-            text_layout: layout(paint, "text", zoom),
-            icon_layout: layout(paint, "icon", zoom),
+            text_layout: layout(paint, "text"),
+            icon_layout: layout(paint, "icon"),
             atlas: [size[0] as f32, size[1] as f32, 0.0, 0.0],
             placement: [
                 number("text-padding", 2.0),
@@ -76,7 +76,7 @@ fn color(paint: &SymbolPaint, name: &str, zoom: f64, fallback: [f32; 4]) -> [f32
     [r as f32, g as f32, b as f32, a as f32]
 }
 
-fn layout(paint: &SymbolPaint, prefix: &str, zoom: f64) -> [f32; 4] {
+fn layout(paint: &SymbolPaint, prefix: &str) -> [f32; 4] {
     let read = |suffix: &str| {
         paint
             .properties
@@ -96,14 +96,8 @@ fn layout(paint: &SymbolPaint, prefix: &str, zoom: f64) -> [f32; 4] {
     [
         u32::from(map_pitch) as f32,
         u32::from(map_rotation) as f32,
-        paint
-            .number(
-                &format!("{prefix}-rotate"),
-                &FeatureProperties::new(),
-                zoom,
-                0.0,
-            )
-            .to_radians(),
+        // The tessellator bakes the rotation into each symbol's corners.
+        0.0,
         u32::from(paint.uses_shared_height() || paint.height_follows_ground(prefix)) as f32,
     ]
 }

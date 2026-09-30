@@ -26,14 +26,14 @@ fn property(name: &str) -> Option<Property> {
     Some(match name {
         "text-color" | "text-halo-color" | "icon-color" | "icon-halo-color" => Property::Color,
         "text-opacity" | "text-halo-width" | "text-halo-blur" | "icon-opacity"
-        | "icon-halo-width" | "icon-halo-blur" | "text-size" | "icon-size" | "text-rotate"
-        | "icon-rotate" | "text-padding" | "icon-padding" | "symbol-spacing" | "text-max-angle" => {
-            Property::Number(Zoom)
-        }
+        | "icon-halo-width" | "icon-halo-blur" | "text-size" | "icon-size" | "text-padding"
+        | "icon-padding" | "symbol-spacing" | "text-max-angle" => Property::Number(Zoom),
         "text-max-width"
         | "text-line-height"
         | "text-letter-spacing"
         | "symbol-sort-key"
+        | "text-rotate"
+        | "icon-rotate"
         | "symbol-height-offset"
         | "text-height-offset"
         | "icon-height-offset" => Property::Number(Feature),

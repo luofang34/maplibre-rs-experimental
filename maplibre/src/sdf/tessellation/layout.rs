@@ -89,6 +89,9 @@ pub(super) fn append(
             icon,
             height_offset,
             symbol.angle,
+            paint
+                .number("icon-rotate", &symbol.properties, zoom, 0.0)
+                .to_radians(),
         );
     }
     let first_glyph_index = buffer.indices.len();
@@ -168,8 +171,10 @@ pub(super) fn quad(
     image: &AtlasEntry,
     height: f32,
     angle: f32,
+    rotation: f32,
 ) {
     let base = buffer.vertices.len() as u32;
+    let (sin, cos) = rotation.sin_cos();
     let [x, y, width, height_pixels] = image.rect;
     for (index, (u, v)) in [
         (x, y),
@@ -186,6 +191,8 @@ pub(super) fn quad(
             bounds[2]
         };
         let py = if index < 2 { bounds[1] } else { bounds[3] };
+        // The quad turns about the anchor, offsets included, as GL JS rotates its corners.
+        let (px, py) = (px * cos - py * sin, px * sin + py * cos);
         buffer.vertices.push(ShaderSymbolVertex {
             a_pos_offset: [
                 anchor.x().round() as i32,
