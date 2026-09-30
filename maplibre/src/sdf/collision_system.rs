@@ -165,11 +165,13 @@ fn visible_layers<'a>(
     layers
 }
 
+/// Places the features of one style layer across every visible tile together, in ascending
+/// `symbol-sort-key` order, and returns each tile's metadata in the order of `layers`.
 fn place_layer(
     world: &crate::tcs::world::World,
     view_state: &crate::render::view_state::ViewState,
     projection: &crate::render::projection::ShaderProjectionData,
-    layer: &crate::sdf::SymbolLayerData,
+    layers: &[&crate::sdf::SymbolLayerData],
     paint: &crate::style::layer::SymbolPaint,
     zoom_limits: [f64; 2],
     placement: (
@@ -177,24 +179,39 @@ fn place_layer(
         &mut PlacedSymbols,
         &mut temporal::PlacementHistory,
     ),
-) -> Vec<SDFShaderFeatureMetadata> {
+) -> Vec<Vec<SDFShaderFeatureMetadata>> {
     let (boxes, placed, history) = placement;
-    let mut metadata = empty_metadata(layer);
+    let mut metadata: Vec<_> = layers.iter().map(|layer| empty_metadata(layer)).collect();
     let zoom = view_state.style_zoom().value();
     let uniforms = SymbolUniforms::new(paint, zoom, [1, 1]);
-    let mut features: Vec<_> = layer
-        .features
+    let mut features: Vec<_> = layers
         .iter()
         .enumerate()
-        .map(|(i, feature)| (i, feature, history.was_visible(layer, feature)))
+        .flat_map(|(position, layer)| {
+            layer
+                .features
+                .iter()
+                .enumerate()
+                .map(move |(i, feature)| (position, i, feature))
+        })
+        .map(|(position, i, feature)| {
+            (
+                position,
+                i,
+                feature,
+                history.was_visible(layers[position], feature),
+            )
+        })
         .collect();
-    features.sort_by(|(_, a, av), (_, b, bv)| {
+    // The sort is stable, so equal keys keep the order the tiles were given in.
+    features.sort_by(|(_, _, a, av), (_, _, b, bv)| {
         a.data
             .sort_key
             .total_cmp(&b.data.sort_key)
             .then_with(|| bv.cmp(av))
     });
-    for (feature_index, feature, was_visible) in features {
+    for (position, feature_index, feature, was_visible) in features {
+        let layer = layers[position];
         let ground = symbol_elevation(world, layer, feature, paint, zoom);
         let relevance = world
             .resources
@@ -239,7 +256,7 @@ fn place_layer(
             feature,
             opacity.map(|value| value * relevance),
             ground,
-            &mut metadata,
+            &mut metadata[position],
         );
     }
     metadata
@@ -331,30 +348,44 @@ impl CollisionSystem {
         let mut boxes = CollisionGrid::new(view_state.width(), view_state.height());
         let mut updates = Vec::new();
         let mut placed = PlacedSymbols::default();
-        for (_, layer, paint) in layers {
+        let mut groups: Vec<(
+            u32,
+            &crate::style::layer::SymbolPaint,
+            Vec<&crate::sdf::SymbolLayerData>,
+        )> = Vec::new();
+        for (index, layer, paint) in layers {
+            match groups.last_mut() {
+                Some((last, _, members)) if *last == index => members.push(layer),
+                _ => groups.push((index, paint, vec![layer])),
+            }
+        }
+        for (_, paint, members) in groups {
             let limits = style
                 .layers
                 .iter()
-                .find(|style| style.id == layer.style_layer_id)
+                .find(|style| style.id == members[0].style_layer_id)
                 .map(|layer| [layer.minzoom.unwrap_or(0.0), layer.maxzoom.unwrap_or(24.0)])
                 .unwrap_or([0.0, 24.0]);
             let metadata = place_layer(
                 world,
                 view_state,
                 projection,
-                layer,
+                &members,
                 paint,
                 limits,
                 (&mut boxes, &mut placed, &mut self.history),
             );
-            let key = (layer.coords, layer.style_layer_id.clone());
-            let Some(generation) = allocation(world, layer.coords, &layer.style_layer_id) else {
-                continue;
-            };
-            let fingerprint = opacity_fingerprint(&metadata);
-            if self.uploaded.get(&key) != Some(&(generation, fingerprint)) {
-                updates.push((key.clone(), metadata));
-                self.uploaded.insert(key, (generation, fingerprint));
+            for (layer, metadata) in members.into_iter().zip(metadata) {
+                let key = (layer.coords, layer.style_layer_id.clone());
+                let Some(generation) = allocation(world, layer.coords, &layer.style_layer_id)
+                else {
+                    continue;
+                };
+                let fingerprint = opacity_fingerprint(&metadata);
+                if self.uploaded.get(&key) != Some(&(generation, fingerprint)) {
+                    updates.push((key.clone(), metadata));
+                    self.uploaded.insert(key, (generation, fingerprint));
+                }
             }
         }
         if let Some(Initialized(pool)) = world.resources.get::<Eventually<SymbolBufferPool>>() {

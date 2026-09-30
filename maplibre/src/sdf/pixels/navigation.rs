@@ -126,6 +126,76 @@ async fn collision_priority_and_queries_keep_the_original_feature_id_and_propert
     assert_eq!(hits[0].properties["rank"], 1.0);
 }
 
+fn ranked_label(id: u64, rank: f64, x: i32, y: i32) -> Vec<u8> {
+    let source = geozero::mvt::tile::Layer {
+        name: "places".into(),
+        version: 2,
+        extent: Some(4096),
+        keys: vec!["rank".into()],
+        values: vec![geozero::mvt::tile::Value {
+            double_value: Some(rank),
+            ..Default::default()
+        }],
+        features: vec![geozero::mvt::tile::Feature {
+            id: Some(id),
+            tags: vec![0, 0],
+            r#type: Some(1),
+            geometry: vec![9, (x as u32) << 1, (y as u32) << 1],
+        }],
+    };
+    geozero::mvt::Tile {
+        layers: vec![source],
+    }
+    .encode_to_vec()
+}
+
+#[tokio::test]
+async fn sort_key_decides_between_labels_of_neighbouring_tiles() {
+    let mut style = style(0.0, "ground");
+    let Some(LayerPaint::Symbol(paint)) = &mut style.layers[2].paint else {
+        panic!("paint");
+    };
+    paint
+        .properties
+        .insert("text-allow-overlap".into(), false.into());
+    paint
+        .properties
+        .insert("symbol-sort-key".into(), serde_json::json!(["get", "rank"]));
+    paint.properties.remove("icon-image");
+    style.center = Some([0.087_890_625, -0.087_890_61]);
+    let first = WorldTileCoords {
+        x: 2048,
+        y: 2048,
+        z: ZoomLevel::from(12),
+    };
+    let second = WorldTileCoords {
+        x: 2049,
+        y: 2049,
+        z: ZoomLevel::from(12),
+    };
+    // Both labels sit on the shared corner of the two tiles. The tile placed first holds the
+    // worse rank, so tile order alone would let it win.
+    let low_priority = ranked_label(1, 5.0, 4096, 4096);
+    let high_priority = ranked_label(2, 1.0, 0, 0);
+    let mut processed =
+        process_tile_layers(&low_priority, &style.layers[1], first, Default::default())
+            .expect("base");
+    for (bytes, coords, layer) in [
+        (&low_priority, first, 2),
+        (&high_priority, second, 1),
+        (&high_priority, second, 2),
+    ] {
+        processed.append(
+            &mut process_tile_layers(bytes, &style.layers[layer], coords, Default::default())
+                .expect("layers"),
+        );
+    }
+    let map = fixture_map(style, processed, 1).await;
+    let hits = map.query_rendered_symbols([256.0, 256.0], None);
+    assert_eq!(hits.len(), 1, "overlapping labels must have one winner");
+    assert_eq!(hits[0].id, Some(2), "the better rank wins across tiles");
+}
+
 #[tokio::test]
 async fn external_eye_roll_preserves_world_label_orientation_and_readability() {
     let style = style(0.0, "ground");
