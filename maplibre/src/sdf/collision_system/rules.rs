@@ -132,10 +132,10 @@ impl PlacementRules {
         let accepted = [0, 1].map(|i| {
             rectangles[i].is_some_and(|rect| {
                 rect.iter().all(|v| v.is_finite())
-                    && rect[2] >= 0.0
-                    && rect[3] >= 0.0
-                    && rect[0] <= viewport[0]
-                    && rect[1] <= viewport[1]
+                    && rect[2] >= -VIEWPORT_PADDING
+                    && rect[3] >= -VIEWPORT_PADDING
+                    && rect[0] < viewport[0] + VIEWPORT_PADDING
+                    && rect[1] < viewport[1] + VIEWPORT_PADDING
                     && Self::collision_boxes(i, rectangles, glyph_boxes)
                         .iter()
                         .all(|part| match overlap[i] {
@@ -150,6 +150,10 @@ impl PlacementRules {
         })
     }
 }
+
+/// How far past the viewport edge a box still takes part in placement, as in GL JS, so a label
+/// whose icon is just off screen keeps its text and labels slide in without popping.
+const VIEWPORT_PADDING: f64 = 100.0;
 
 #[cfg(test)]
 mod tests;
