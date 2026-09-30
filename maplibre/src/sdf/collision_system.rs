@@ -47,6 +47,9 @@ fn opacity_fingerprint(metadata: &[SDFShaderFeatureMetadata]) -> u64 {
         entry.opacity.to_bits().hash(&mut hash);
         entry.elevation.to_bits().hash(&mut hash);
         entry.pose.map(f32::to_bits).hash(&mut hash);
+        entry.color.map(f32::to_bits).hash(&mut hash);
+        entry.halo.map(f32::to_bits).hash(&mut hash);
+        entry.params.map(f32::to_bits).hash(&mut hash);
     }
     hash.finish()
 }

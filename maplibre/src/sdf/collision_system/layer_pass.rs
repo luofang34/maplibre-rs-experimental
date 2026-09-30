@@ -7,7 +7,7 @@ use crate::{
     sdf::{
         collision_grid::CollisionGrid,
         line_glyphs::GlyphPose,
-        paint::SymbolUniforms,
+        paint::{feature_style, SymbolUniforms},
         placement::{
             line_glyph_boxes, line_glyph_poses, screen_boxes, symbol_elevation, LinePoses,
         },
@@ -112,7 +112,11 @@ pub(super) fn place_layer(
                 Some(LinePoses::Poses(poses)) => Some(poses.as_slice()),
                 _ => None,
             },
-            &mut metadata[position],
+            (
+                paint,
+                view_state.style_zoom().value(),
+                &mut metadata[position],
+            ),
         );
     }
     metadata
@@ -274,8 +278,14 @@ fn write_feature_metadata(
     (opacity, text_shift): ([f32; 2], [f32; 2]),
     ground: f32,
     poses: Option<&[GlyphPose]>,
-    metadata: &mut [SDFShaderFeatureMetadata],
+    (paint, zoom, metadata): (
+        &crate::style::layer::SymbolPaint,
+        f64,
+        &mut [SDFShaderFeatureMetadata],
+    ),
 ) {
+    let properties = &feature.data.properties;
+    let styles = ["text", "icon"].map(|prefix| feature_style(paint, prefix, properties, zoom));
     for index in feature.indices.clone() {
         let kind = layer
             .buffer
@@ -300,6 +310,9 @@ fn write_feature_metadata(
                 } else {
                     [0.0; 4]
                 },
+                color: styles[kind][0],
+                halo: styles[kind][1],
+                params: styles[kind][2],
             };
         }
     }

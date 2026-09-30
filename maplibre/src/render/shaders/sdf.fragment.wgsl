@@ -5,6 +5,9 @@ struct VertexOutput {
     @location(2) size: f32,
     @location(3) opacity: f32,
     @location(4) horizon_distance: f32,
+    @location(5) @interpolate(flat) fill: vec4<f32>,
+    @location(6) @interpolate(flat) halo: vec4<f32>,
+    @location(7) @interpolate(flat) metrics: vec4<f32>,
     @builtin(position) position: vec4<f32>,
 };
 @group(1) @binding(0) var atlas: texture_2d<f32>;
@@ -21,9 +24,9 @@ fn shade(in: VertexOutput, mode: u32) -> vec4<f32> {
         color = vec4<f32>(sample.rgb * sample.a, sample.a);
     } else {
         let is_text = in.kind == 0u;
-        let fill = select(symbol.icon_color, symbol.text_color, is_text);
-        let halo = select(symbol.icon_halo_color, symbol.halo_color, is_text);
-        let metrics = select(symbol.icon, symbol.text, is_text);
+        let fill = in.fill;
+        let halo = in.halo;
+        let metrics = in.metrics;
         let scale = max(select(in.size, in.size / 24.0, is_text), 0.01);
         let fill_coverage = smoothstep(0.75 - derivative, 0.75 + derivative, distance);
         let fill_alpha = fill_coverage * fill.a;

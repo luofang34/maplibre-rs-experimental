@@ -7,6 +7,9 @@ struct VertexOutput {
     @location(2) size: f32,
     @location(3) opacity: f32,
     @location(4) horizon_distance: f32,
+    @location(5) @interpolate(flat) fill: vec4<f32>,
+    @location(6) @interpolate(flat) halo: vec4<f32>,
+    @location(7) @interpolate(flat) metrics: vec4<f32>,
     @builtin(position) position: vec4<f32>,
 };
 
@@ -48,10 +51,14 @@ fn main(
     // For a glyph placed along a line: the offset of its centre from the vertex anchor in tile
     // units, its direction, and 1 when it has such a pose.
     @location(14) pose: vec4<f32>,
+    // Fill colour, halo colour, and size, halo width, halo blur and opacity of this feature.
+    @location(10) style_fill: vec4<f32>,
+    @location(13) style_halo: vec4<f32>,
+    @location(15) style_metrics: vec4<f32>,
 ) -> VertexOutput {
     let has_pose = pose.w > 0.5;
     let is_text = a_data.z == 0u;
-    let metrics = select(symbol.icon, symbol.text, is_text);
+    let metrics = style_metrics;
     let alignment = select(symbol.icon_layout, symbol.text_layout, is_text);
     let anchor = vec2<f32>(a_pos_offset.xy) + select(vec2<f32>(0.0), pose.xy, has_pose);
     let elevation = feature.y * alignment.w + bitcast<f32>(a_pixeloffset.z);
@@ -121,5 +128,5 @@ fn main(
     // Hidden geometry must not cross the eye plane and produce unbounded clipped triangles.
     if visibility <= 0.0 || projected.clip_position.w <= 0.0 { position = vec4<f32>(0.0, 0.0, 0.0, 1.0); }
     return VertexOutput(vec2<f32>(a_data.xy) / symbol.atlas.xy, a_data.z, size,
-        visibility, projected.horizon_distance, position);
+        visibility, projected.horizon_distance, style_fill, style_halo, style_metrics, position);
 }

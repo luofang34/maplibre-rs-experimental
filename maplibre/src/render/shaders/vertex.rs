@@ -58,6 +58,12 @@ pub struct SDFShaderFeatureMetadata {
     /// Where a glyph placed along a line sits: the offset of its centre from the vertex anchor
     /// in tile units, its direction in radians, and 1 when the glyph has such a pose.
     pub pose: [f32; 4],
+    /// Fill colour of the symbol's text or icon, straight alpha, evaluated for its feature.
+    pub color: [f32; 4],
+    /// Halo colour of the text or icon.
+    pub halo: [f32; 4],
+    /// Size, halo width, halo blur and opacity of the text or icon.
+    pub params: [f32; 4],
 }
 
 /// Per-layer instance record shared across tile pipelines.

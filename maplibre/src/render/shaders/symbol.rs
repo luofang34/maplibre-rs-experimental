@@ -35,12 +35,17 @@ impl Shader for SymbolShader {
                 VertexBufferLayout {
                     array_stride: std::mem::size_of::<ShaderLayerMetadata>() as u64,
                     step_mode: wgpu::VertexStepMode::Instance,
-                    attributes: wgpu::vertex_attr_array![10 => Float32, 13 => Float32].to_vec(),
+                    // The paint that varies by feature travels with the features instead.
+                    attributes: Vec::new(),
                 },
                 VertexBufferLayout {
                     array_stride: std::mem::size_of::<SDFShaderFeatureMetadata>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: wgpu::vertex_attr_array![12 => Float32x2, 14 => Float32x4].to_vec(),
+                    attributes: wgpu::vertex_attr_array![
+                        12 => Float32x2, 14 => Float32x4, 10 => Float32x4, 13 => Float32x4,
+                        15 => Float32x4
+                    ]
+                    .to_vec(),
                 },
             ],
         }

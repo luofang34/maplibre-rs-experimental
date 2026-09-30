@@ -66,6 +66,50 @@ impl SymbolUniforms {
     }
 }
 
+/// The fill colour, halo colour and size, halo width, halo blur and opacity of a feature's text
+/// (`prefix` "text") or icon (`prefix` "icon"), each evaluated for its properties.
+pub(crate) fn feature_style(
+    paint: &SymbolPaint,
+    prefix: &str,
+    properties: &FeatureProperties,
+    zoom: f64,
+) -> [[f32; 4]; 3] {
+    let color = |name: &str, fallback: [f32; 4]| {
+        paint
+            .properties
+            .get(&format!("{prefix}-{name}"))
+            .and_then(|value| {
+                StyleProperty::<csscolorparser::Color>::parse(value).evaluate_for(properties, zoom)
+            })
+            .map_or(fallback, |color| {
+                let [r, g, b, a] = color.to_array();
+                [r as f32, g as f32, b as f32, a as f32]
+            })
+    };
+    let number = |name: &str, fallback: f32| {
+        paint.number(&format!("{prefix}-{name}"), properties, zoom, fallback)
+    };
+    let size = if prefix == "text" {
+        paint
+            .text_size
+            .as_ref()
+            .and_then(|value| value.evaluate_for(properties, zoom))
+            .unwrap_or(16.0)
+    } else {
+        number("size", 1.0)
+    };
+    [
+        color("color", [0.0, 0.0, 0.0, 1.0]),
+        color("halo-color", [0.0; 4]),
+        [
+            size,
+            number("halo-width", 0.0),
+            number("halo-blur", 0.0),
+            number("opacity", 1.0),
+        ],
+    ]
+}
+
 fn color(paint: &SymbolPaint, name: &str, zoom: f64, fallback: [f32; 4]) -> [f32; 4] {
     let Some(color) = paint.properties.get(name).and_then(|value| {
         StyleProperty::<csscolorparser::Color>::parse(value).evaluate_at_zoom(zoom)
@@ -126,5 +170,34 @@ mod tests {
         let uniforms = SymbolUniforms::new(&SymbolPaint::default(), 12.0, [1, 1]);
         assert_eq!(uniforms.icon_color, [0.0, 0.0, 0.0, 1.0]);
         assert_eq!(uniforms.text_color, [0.0, 0.0, 0.0, 1.0]);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used, clippy::panic)]
+    use super::*;
+    use crate::style::expression::Value;
+
+    #[test]
+    fn a_feature_takes_its_own_colour_size_and_opacity() {
+        let paint: SymbolPaint = serde_json::from_value(serde_json::json!({
+            "text-color": ["get", "tint"],
+            "text-halo-width": ["get", "halo"],
+            "icon-size": ["get", "scale"],
+            "icon-opacity": 0.5
+        }))
+        .expect("paint");
+        let properties = FeatureProperties::from([
+            ("tint".to_string(), Value::from("red")),
+            ("halo".to_string(), Value::Number(2.0)),
+            ("scale".to_string(), Value::Number(3.0)),
+        ]);
+        let [color, halo, params] = feature_style(&paint, "text", &properties, 5.0);
+        assert_eq!(color, [1.0, 0.0, 0.0, 1.0]);
+        assert_eq!(halo, [0.0; 4]);
+        assert_eq!(params, [16.0, 2.0, 0.0, 1.0]);
+        let [_, _, icon] = feature_style(&paint, "icon", &properties, 5.0);
+        assert_eq!(icon, [3.0, 0.0, 0.0, 0.5]);
     }
 }
