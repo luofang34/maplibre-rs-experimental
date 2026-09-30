@@ -325,6 +325,8 @@ mod loaded_assets;
 
 mod navigation;
 
+mod queries;
+
 mod stability;
 
 #[path = "styling/tests.rs"]

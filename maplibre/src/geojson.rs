@@ -441,6 +441,7 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
 }
 
 pub mod index;
+pub mod query;
 mod store;
 pub mod update;
 

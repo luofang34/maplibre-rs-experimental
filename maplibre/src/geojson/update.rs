@@ -203,7 +203,7 @@ fn geojson_source_mut<'a>(
     }
 }
 
-fn promoted_property(source: &GeoJsonSource) -> Option<String> {
+pub(super) fn promoted_property(source: &GeoJsonSource) -> Option<String> {
     match source.promote_id.as_ref()? {
         PromoteId::Property(name) => Some(name.clone()),
         PromoteId::PerLayer(map) => map.get(GEOJSON_LAYER).cloned(),
@@ -211,7 +211,7 @@ fn promoted_property(source: &GeoJsonSource) -> Option<String> {
 }
 
 /// The features of a document, whichever GeoJSON root it has.
-fn feature_list(document: &Value) -> Vec<Value> {
+pub(super) fn feature_list(document: &Value) -> Vec<Value> {
     match document.get("type").and_then(Value::as_str) {
         Some("FeatureCollection") => document
             .get("features")
@@ -225,7 +225,7 @@ fn feature_list(document: &Value) -> Vec<Value> {
 }
 
 /// The value a feature is addressed by: the promoted property, else its `id`.
-fn feature_id(feature: &Value, promoted: Option<&str>) -> Option<Value> {
+pub(super) fn feature_id(feature: &Value, promoted: Option<&str>) -> Option<Value> {
     promoted
         .and_then(|name| feature.get("properties")?.get(name))
         .filter(|value| !value.is_null())

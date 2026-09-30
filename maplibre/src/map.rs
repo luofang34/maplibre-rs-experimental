@@ -10,7 +10,10 @@ use crate::{
     context::MapContext,
     coords::{LatLon, WorldCoords, Zoom},
     environment::Environment,
-    geojson::update::{GeoJsonDiff, SourceUpdateError},
+    geojson::{
+        query::{SourceFeature, SourceQueryError, SourceQueryOptions},
+        update::{GeoJsonDiff, SourceUpdateError},
+    },
     io::{tile_json::resolve_tile_json_sources, tile_retry::RequestAttempts},
     kernel::Kernel,
     plugin::Plugin,
@@ -19,6 +22,7 @@ use crate::{
         graph::RenderGraphError, view_state::ViewState,
     },
     schedule::{Schedule, Stage, StageError},
+    sdf::query::{QueryError, QueryGeometry, QueryOptions, RenderedSymbol},
     style::{source::GeoJsonData, Style},
     tcs::world::World,
     window::{HeadedMapWindow, MapWindow, MapWindowConfig, PhysicalSize, WindowCreateError},
@@ -48,6 +52,12 @@ pub enum MapError {
     /// A source's data could not be replaced or edited; the source is unchanged.
     #[error("updating source data failed")]
     SourceUpdate(#[from] SourceUpdateError),
+    /// A source's features could not be read.
+    #[error("querying source features failed")]
+    SourceQuery(#[from] SourceQueryError),
+    /// A rendered-feature query was rejected.
+    #[error("querying rendered features failed")]
+    Query(#[from] QueryError),
 }
 
 /// Initialization state of a map's renderer and frame data.
@@ -281,6 +291,29 @@ where
             }
         }
         Ok(())
+    }
+
+    /// The features of an inline GeoJSON source, before or after the renderer is initialized;
+    /// see [`crate::style::Style::query_source_features`].
+    pub fn query_source_features(
+        &self,
+        source_name: &str,
+        options: &SourceQueryOptions,
+    ) -> Result<Vec<SourceFeature>, MapError> {
+        let style = match &self.map_context {
+            CurrentMapContext::Ready(context) => &context.style,
+            CurrentMapContext::Pending(pending) => &pending.style,
+        };
+        Ok(style.query_source_features(source_name, options)?)
+    }
+
+    /// Placed symbols under a point or box, topmost first. Requires an initialized renderer.
+    pub fn query_rendered_symbols(
+        &self,
+        geometry: QueryGeometry,
+        options: &QueryOptions,
+    ) -> Result<Vec<RenderedSymbol>, MapError> {
+        Ok(self.context()?.query_rendered_symbols(geometry, options)?)
     }
 
     /// Borrows initialized frame state, or returns [`MapError::RendererNotReady`].

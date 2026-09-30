@@ -2,7 +2,14 @@
 use serde::Serialize;
 
 use crate::{
-    coords::WorldTileCoords, sdf::SymbolLayersDataComponent, style::Style, tcs::world::World,
+    coords::WorldTileCoords,
+    sdf::SymbolLayersDataComponent,
+    style::{
+        expression::Value,
+        filter::{FeatureContext, Filter, FilterError, GeometryType},
+        Style,
+    },
+    tcs::world::World,
 };
 
 #[derive(Default, Debug)]
@@ -35,6 +42,59 @@ pub struct RenderedSymbol {
     pub coordinates: [f64; 2],
 }
 
+/// Region of a query, in screen pixels with y down.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum QueryGeometry {
+    /// Features under one pixel position.
+    Point([f64; 2]),
+    /// Features overlapping a rectangle given by two opposite corners.
+    Box {
+        /// One corner.
+        min: [f64; 2],
+        /// The opposite corner.
+        max: [f64; 2],
+    },
+}
+
+impl QueryGeometry {
+    fn bounds(self) -> Option<[f64; 4]> {
+        let [x0, y0, x1, y1] = match self {
+            Self::Point([x, y]) => [x, y, x, y],
+            Self::Box { min, max } => [min[0], min[1], max[0], max[1]],
+        };
+        [x0, y0, x1, y1]
+            .iter()
+            .all(|value| value.is_finite())
+            .then(|| [x0.min(x1), y0.min(y1), x0.max(x1), y0.max(y1)])
+    }
+}
+
+/// Narrows a feature query, as the options of GL JS `queryRenderedFeatures`.
+#[derive(Clone, Debug, Default)]
+pub struct QueryOptions {
+    /// Style layer ids to query; every layer when `None`.
+    pub layers: Option<Vec<String>>,
+    /// A layer filter, in the legacy or the expression syntax, applied to each candidate.
+    pub filter: Option<serde_json::Value>,
+}
+
+/// Why a query could not run.
+#[derive(Debug, thiserror::Error, PartialEq)]
+pub enum QueryError {
+    /// The geometry has a coordinate that is not a finite number.
+    #[error("query geometry must have finite coordinates")]
+    InvalidGeometry,
+    /// A requested layer is not in the style.
+    #[error("layer `{layer}` does not exist in the style and cannot be queried")]
+    UnknownLayer {
+        /// The requested id.
+        layer: String,
+    },
+    /// The filter is not valid.
+    #[error("query filter is invalid")]
+    InvalidFilter(#[source] FilterError),
+}
+
 /// Returns placed text or icons whose screen bounds contain the point, in pixels with y down.
 /// An optional layer list restricts results. Hidden collision candidates are excluded.
 pub fn query_rendered_symbols(
@@ -43,17 +103,49 @@ pub fn query_rendered_symbols(
     point: [f64; 2],
     layers: Option<&[&str]>,
 ) -> Vec<RenderedSymbol> {
-    if !point.iter().all(|v| v.is_finite()) {
-        return Vec::new();
+    let options = QueryOptions {
+        layers: layers.map(|layers| layers.iter().map(|layer| (*layer).to_owned()).collect()),
+        filter: None,
+    };
+    query_rendered_symbols_in(world, style, QueryGeometry::Point(point), &options)
+        .unwrap_or_default()
+}
+
+/// Returns the placed symbols overlapping a point or box, topmost style layer first and, within
+/// a layer, by descending sort key. Layers that are hidden are skipped, a filter is evaluated
+/// with each symbol's properties at its tile's zoom, and unloaded tiles yield nothing. Only
+/// symbols are queryable; fill, line and circle features are not retained for queries.
+pub fn query_rendered_symbols_in(
+    world: &World,
+    style: &Style,
+    geometry: QueryGeometry,
+    options: &QueryOptions,
+) -> Result<Vec<RenderedSymbol>, QueryError> {
+    let bounds = geometry.bounds().ok_or(QueryError::InvalidGeometry)?;
+    for layer in options.layers.iter().flatten() {
+        if !style.layers.iter().any(|candidate| &candidate.id == layer) {
+            return Err(QueryError::UnknownLayer {
+                layer: layer.clone(),
+            });
+        }
     }
+    let filter = options
+        .filter
+        .as_ref()
+        .map(Filter::parse)
+        .transpose()
+        .map_err(QueryError::InvalidFilter)?;
     let Some(placed) = world.resources.get::<PlacedSymbols>() else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
     let mut matches = Vec::new();
     for hit in &placed.0 {
-        if layers.is_some_and(|layers| !layers.contains(&hit.layer.as_str()))
+        if options
+            .layers
+            .as_ref()
+            .is_some_and(|layers| !layers.contains(&hit.layer))
             || !hit.rectangles.iter().flatten().any(|r| {
-                point[0] >= r[0] && point[0] <= r[2] && point[1] >= r[1] && point[1] <= r[3]
+                r[0] <= bounds[2] && r[2] >= bounds[0] && r[1] <= bounds[3] && r[3] >= bounds[1]
             })
         {
             continue;
@@ -76,6 +168,24 @@ pub fn query_rendered_symbols(
         let Some(style_layer) = style.layers.iter().find(|layer| layer.id == hit.layer) else {
             continue;
         };
+        if style_layer.is_hidden() {
+            continue;
+        }
+        if let Some(filter) = &filter {
+            let id = feature
+                .data
+                .id
+                .map(|id| Value::from_json(&serde_json::json!(id)));
+            let passes = filter.evaluate(&FeatureContext {
+                properties: &feature.data.properties,
+                geometry_type: GeometryType::Point,
+                id,
+                zoom: f64::from(u8::from(hit.coords.z)),
+            });
+            if !passes {
+                continue;
+            }
+        }
         let scale = 2_f64.powi(i32::from(u8::from(hit.coords.z)));
         let x = (f64::from(hit.coords.x) + f64::from(feature.text_anchor.x) / 4096.0) / scale;
         let y = (f64::from(hit.coords.y) + f64::from(feature.text_anchor.y) / 4096.0) / scale;
@@ -105,7 +215,7 @@ pub fn query_rendered_symbols(
         ));
     }
     matches.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.total_cmp(&a.1)));
-    matches.into_iter().map(|(_, _, feature)| feature).collect()
+    Ok(matches.into_iter().map(|(_, _, feature)| feature).collect())
 }
 
 #[cfg(test)]
