@@ -79,9 +79,11 @@ fn feature_state(
         .get("source")
         .and_then(Value::as_str)
         .ok_or("feature state needs a source")?;
+    // Removing state without an id removes it from every feature of the source.
     let wanted = match target.get("id") {
-        Some(Value::String(text)) => text.clone(),
-        Some(Value::Number(number)) => number.to_string(),
+        Some(Value::String(text)) => Some(text.clone()),
+        Some(Value::Number(number)) => Some(number.to_string()),
+        None if removing => None,
         _ => return Err("feature state needs an id".to_owned()),
     };
     let Some(Source::GeoJson(geojson)) = style.sources.get_mut(source) else {
@@ -107,7 +109,10 @@ fn feature_state(
         _ => Vec::new(),
     };
     for feature in features {
-        if !has_id(feature, promote.as_deref(), &wanted) {
+        if wanted
+            .as_deref()
+            .is_some_and(|wanted| !has_id(feature, promote.as_deref(), wanted))
+        {
             continue;
         }
         let Some(properties) = feature
@@ -159,6 +164,13 @@ pub(super) fn apply(style: &mut Style, operations: &[Value]) -> Result<(), Strin
             ("addImage", Some(name)) => add_image(style, name, &value(2), &value(3)),
             ("removeImage", Some(name)) => {
                 style.remove_image(name);
+                Ok(())
+            }
+            ("setLight", _) => {
+                style.light = Some(
+                    serde_json::from_value(value(1))
+                        .map_err(|error| format!("setLight: invalid light: {error}"))?,
+                );
                 Ok(())
             }
             ("setFeatureState", _) => feature_state(style, &value(1), &value(2), false),
