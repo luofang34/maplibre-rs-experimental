@@ -50,8 +50,8 @@ impl LayerValidation<'_> {
                 self.property("paint.line-opacity", p.line_opacity.as_ref(), Feature);
                 self.property("paint.line-gradient", p.line_gradient.as_ref(), Progress);
                 self.property("paint.line-offset", p.line_offset.as_ref(), Feature);
-                self.property("paint.line-gap-width", p.line_gap_width.as_ref(), Zoom);
-                self.property("paint.line-blur", p.line_blur.as_ref(), Zoom);
+                self.property("paint.line-gap-width", p.line_gap_width.as_ref(), Feature);
+                self.property("paint.line-blur", p.line_blur.as_ref(), Feature);
                 self.property("paint.line-width", p.line_width.as_ref(), Feature);
                 if let Some(value) = &p.line_dasharray {
                     self.property(

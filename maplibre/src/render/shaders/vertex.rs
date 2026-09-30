@@ -14,7 +14,8 @@ pub struct ShaderVertex {
     pub normal: Vec2f32,
     /// Distance along a stroked path, in tile units.
     pub distance: f32,
-    /// Height above the body datum for spatial lines; a negative sentinel keeps cartographic draping.
+    /// Height above the body datum for spatial lines; a float below -1e20 keeps cartographic
+    /// draping and then carries a stroke's side, gap width and blur.
     pub elevation: f32,
     /// Distance along the ring of an extruded wall, in tile units; a stroke packs its
     /// per-feature width and offset here instead. Zero elsewhere.

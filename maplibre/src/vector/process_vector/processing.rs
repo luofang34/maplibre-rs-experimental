@@ -77,11 +77,7 @@ fn tessellator(paint: &LayerPaint, request: &VectorTileRequest) -> ZeroTessellat
             tessellator.is_line_layer = true;
             tessellator.line_gradient = paint.line_gradient.is_some();
             tessellator.line_feature_style =
-                super::super::tessellation::LineFeatureStyle::for_paint(
-                    &paint.line_width,
-                    &paint.line_offset,
-                    f64::from(zoom),
-                );
+                super::super::tessellation::LineFeatureStyle::for_paint(paint, f64::from(zoom));
         }
         _ => {}
     }

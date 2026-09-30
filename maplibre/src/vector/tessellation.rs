@@ -42,7 +42,7 @@ mod circle;
 mod geometry;
 mod line_origin;
 mod line_style;
-pub use line_style::LineFeatureStyle;
+pub use line_style::{LineFeatureStyle, PackedLine};
 mod extrusion;
 pub use extrusion::ExtrusionOptions;
 
@@ -280,7 +280,6 @@ where
     fn tessellate_strokes(&mut self) -> GeoResult<()> {
         let path = self.path_builder.replace(Path::builder()).build();
         self.line_length = self.line_length.max(path_length(&path));
-        let first_vertex = self.buffer.vertices.len();
         // A gradient measures its progress along the whole line, not from the tile.
         let constructor = line_origin::StrokeOrigins {
             origins: if self.line_gradient {
@@ -288,6 +287,12 @@ where
             } else {
                 line_origin::entry_distances(&path)
             },
+            packed: self
+                .line_feature_style
+                .as_ref()
+                .map_or(PackedLine::LAYER, |style| {
+                    style.pack(&self.feature_properties)
+                }),
         };
 
         StrokeTessellator::new()
@@ -308,12 +313,6 @@ where
                 &mut BuffersBuilder::new(&mut self.buffer, constructor),
             )
             .map_err(|error| GeozeroError::Geometry(error.to_string()))?;
-        if let Some(style) = &self.line_feature_style {
-            let packed = style.pack(&self.feature_properties);
-            for vertex in &mut self.buffer.vertices[first_vertex..] {
-                vertex.edge_distance = packed;
-            }
-        }
         Ok(())
     }
 

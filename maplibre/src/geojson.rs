@@ -356,8 +356,7 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
                         tessellator.line_gradient = p.line_gradient.is_some();
                         tessellator.line_feature_style =
                             crate::vector::tessellation::LineFeatureStyle::for_paint(
-                                &p.line_width,
-                                &p.line_offset,
+                                p,
                                 f64::from(zoom),
                             );
                         tessellator.stroke =

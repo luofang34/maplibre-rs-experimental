@@ -6,6 +6,7 @@ use lyon::{
     tessellation::{StrokeVertex, StrokeVertexConstructor, VertexSource},
 };
 
+use super::line_style::PackedLine;
 use crate::render::ShaderVertex;
 
 /// Tile units either side of a tile that a line clipped for it reaches, as GL JS clips the
@@ -71,6 +72,8 @@ fn entry_parameter(from: lyon::math::Point, to: lyon::math::Point) -> Option<f32
 pub struct StrokeOrigins {
     /// Entry distance of each path endpoint's sub-path, from [`entry_distances`].
     pub origins: Vec<f32>,
+    /// What the feature's line style adds to each vertex.
+    pub packed: PackedLine,
 }
 
 impl StrokeVertexConstructor<ShaderVertex> for StrokeOrigins {
@@ -89,12 +92,13 @@ impl StrokeVertexConstructor<ShaderVertex> for StrokeOrigins {
             .copied()
             .unwrap_or(0.0);
         output.distance = vertex.advancement() - origin;
-        // A stroke has no elevation; the sentinel also says which side of the line the vertex
-        // is on, which a pattern needs to draw the image across the line the right way up.
-        output.elevation = match vertex.side() {
-            lyon::tessellation::Side::Positive => -1e30,
-            lyon::tessellation::Side::Negative => -2e30,
-        };
+        // A stroke has no elevation; the slot instead says which side of the line the vertex is
+        // on, which a pattern needs to draw the image across the line the right way up, and
+        // carries the gap width and blur.
+        output.elevation = self
+            .packed
+            .stroke_elevation(matches!(vertex.side(), lyon::tessellation::Side::Negative));
+        output.edge_distance = self.packed.style;
         output
     }
 }

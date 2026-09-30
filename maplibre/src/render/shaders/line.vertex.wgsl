@@ -45,7 +45,17 @@ fn main(
     // A gradient line measures its dashes in pixels rather than line widths.
     let dash_unit = select(line_width_px, 1.0, line_style.w > 0.5);
     let line_offset = select(line_style.x, feature_offset, per_feature);
-    let gapwidth = line_style.y * 0.5;
+    // A stroke's elevation slot carries its side and, in the mantissa, the gap width and blur of
+    // its feature in eighths of a pixel; all ones leaves the layer's own.
+    // A spatial line has a real elevation there instead, and keeps the layer's values.
+    let has_stroke_bits = path.w <= -1e20;
+    let stroke_bits = select(0x3fffffu, bitcast<u32>(path.w) & 0x7fffffu, has_stroke_bits);
+    let negative_side = has_stroke_bits && ((stroke_bits >> 22u) & 1u) == 1u;
+    let gap_bits = (stroke_bits >> 11u) & 0x7ffu;
+    let blur_bits = stroke_bits & 0x7ffu;
+    let gap_width = select(f32(gap_bits) / 8.0, line_style.y, gap_bits == 0x7ffu);
+    let blur_width = select(f32(blur_bits) / 8.0, line_style.z, blur_bits == 0x7ffu);
+    let gapwidth = gap_width * 0.5;
 
     let halfwidth = line_width_px * 0.5;
     let pixel_ratio = 1.0;
@@ -83,7 +93,7 @@ fn main(
     let px_to_clip_y = (2.0 / viewport_height) * center.w;
     // The offset moves both edges of the line the same way: the sign of the side undoes the
     // opposite directions of their extrusions.
-    let side = select(1.0, -1.0, path.w < -1.5e30);
+    let side = select(1.0, -1.0, negative_side);
     // A join vertex carries the miter or bevel offset as a normal longer or shorter than one,
     // and the edge lies that much further out along it.
     let extent = length(normal);
@@ -113,7 +123,7 @@ fn main(
         // A gradient layer carries the length of the line in the red channel of its colour.
         path.z / max(color.x, 1e-6),
         // Which side of the line the vertex is on: the elevation sentinel of a stroke encodes it.
-        select(1.0, -1.0, path.w < -1.5e30) * min(length(normal), 1.0),
-        line_style.z,
+        select(1.0, -1.0, negative_side) * min(length(normal), 1.0),
+        blur_width,
     );
 }
