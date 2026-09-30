@@ -188,18 +188,6 @@ pub(super) fn is_line_placed(paint: &SymbolPaint) -> bool {
 /// Tile units in one pixel of a tile drawn at its own zoom: 4096 units span 512 pixels.
 const TILE_UNITS_PER_PIXEL: f64 = 8.0;
 
-/// A segment direction folded into upright text, `-90..=90` degrees.
-fn upright(angle: f64) -> f32 {
-    let mut angle = angle;
-    if angle > std::f64::consts::FRAC_PI_2 {
-        angle -= std::f64::consts::PI;
-    }
-    if angle < -std::f64::consts::FRAC_PI_2 {
-        angle += std::f64::consts::PI;
-    }
-    angle as f32
-}
-
 impl TextTessellator {
     fn collect(
         &mut self,
@@ -237,13 +225,26 @@ impl TextTessellator {
             .as_ref()
             .and_then(|value| value.evaluate_at_zoom(self.zoom))
             .map_or(16.0, f64::from);
-        let label_pixels = f64::from(text_layout::unwrapped_width(
+        let text_width = f64::from(text_layout::unwrapped_width(
             &self.paint,
             &probe,
             self.zoom,
             &self.atlas,
-        )) * text_size
-            / 24.0;
+        ));
+        // GL JS spaces labels by the longer of the text and the icon, and scales both by the
+        // text size; an icon-only label has no text to bend, so its bends are not checked.
+        let icon_width = self
+            .paint
+            .text("icon-image", &self.properties, self.zoom)
+            .and_then(|name| self.atlas.icons.get(&name))
+            .map_or(0.0, |icon| {
+                f64::from(icon.rect[2]) / f64::from(icon.metrics[3])
+                    * f64::from(
+                        self.paint
+                            .number("icon-size", &self.properties, self.zoom, 1.0),
+                    )
+            });
+        let label_pixels = text_width.max(icon_width) * text_size / 24.0;
         let number = |name, fallback| {
             self.paint
                 .number(name, &self.properties, self.zoom, fallback)
@@ -253,6 +254,7 @@ impl TextTessellator {
             max_angle: f64::from(number("text-max-angle", 45.0)).to_radians(),
             label_length: label_pixels * TILE_UNITS_PER_PIXEL,
             text_size: text_size * TILE_UNITS_PER_PIXEL,
+            checks_bends: text_width > 0.0,
         };
         let parts: Vec<Vec<[f64; 2]>> = match placement {
             LinePlacement::Line => line_anchors::clip_to_tile(&lines),
@@ -276,13 +278,20 @@ impl TextTessellator {
                 let distance = line_anchors::distance_to(&part, anchor);
                 self.collect(
                     Point::new(anchor.point[0], anchor.point[1]),
-                    upright(anchor.angle),
+                    anchor.angle as f32,
                     id,
                     Some((polyline.clone(), distance as f32)),
                 );
             }
         }
     }
+}
+
+fn polygon_rings(polygon: &geo_types::Polygon<f64>) -> Vec<Vec<[f64; 2]>> {
+    std::iter::once(polygon.exterior())
+        .chain(polygon.interiors())
+        .map(|ring| ring.coords().map(|c| [c.x, c.y]).collect())
+        .collect()
 }
 
 impl FeatureProcessor for TextTessellator {
@@ -302,18 +311,20 @@ impl FeatureProcessor for TextTessellator {
                         .map(|line| line.coords().map(|c| [c.x, c.y]).collect())
                         .collect(),
                 ),
+                // The rings of a polygon are lines to follow, as in GL JS.
+                Geometry::Polygon(polygon) => Some(polygon_rings(polygon)),
+                Geometry::MultiPolygon(polygons) => {
+                    Some(polygons.iter().flat_map(polygon_rings).collect())
+                }
                 _ => None,
             };
             match (line_placement(&self.paint), lines) {
                 (Some(placement), Some(lines)) => self.collect_along_lines(lines, placement, id),
-                (placement, _) => {
+                // A point has no line to follow.
+                (Some(_), None) => {}
+                (None, _) => {
                     if let Some(anchor) = layout::anchor(&geometry) {
-                        let angle = if placement.is_some() {
-                            layout::line_angle(&geometry, anchor)
-                        } else {
-                            0.0
-                        };
-                        self.collect(anchor, angle, id, None);
+                        self.collect(anchor, 0.0, id, None);
                     }
                 }
             }

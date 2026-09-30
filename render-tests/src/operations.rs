@@ -29,7 +29,17 @@ pub(super) fn apply(style: &mut Style, operations: &[Value]) -> Result<(), Strin
         let outcome = match (name, text(1)) {
             ("wait", _) => Ok(()),
             ("setStyle", _) => {
-                *style = serde_json::from_value(value(1))
+                let replacement = match value(1) {
+                    Value::String(url) => {
+                        let path = crate::paths::local_style_path(&url)?;
+                        let text = std::fs::read_to_string(&path)
+                            .map_err(|error| format!("Cannot read {}: {error}", path.display()))?;
+                        serde_json::from_str(&text)
+                            .map_err(|error| format!("Cannot parse {}: {error}", path.display()))?
+                    }
+                    other => other,
+                };
+                *style = serde_json::from_value(replacement)
                     .map_err(|error| format!("setStyle: invalid style: {error}"))?;
                 Ok(())
             }

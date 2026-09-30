@@ -28,6 +28,8 @@ pub(super) struct AnchorSpacing {
     pub label_length: f64,
     /// Height of a glyph, which sizes the bend window and the start offset.
     pub text_size: f64,
+    /// Whether a bend under the label matters, which it does only for text.
+    pub checks_bends: bool,
 }
 
 fn distance(a: Point, b: Point) -> f64 {
@@ -143,7 +145,11 @@ fn resample(
 ) -> Vec<LineAnchor> {
     let half_label = params.label_length / 2.0;
     let line_length = length(line);
-    let window = 0.6 * params.text_size;
+    let window = if params.checks_bends {
+        0.6 * params.text_size
+    } else {
+        0.0
+    };
     let extent = EXTENT;
     let (mut travelled, mut marked) = (0.0, offset - spacing);
     let mut anchors = Vec::new();
@@ -197,7 +203,11 @@ pub(super) fn center_anchor(line: &[Point], params: AnchorSpacing) -> Option<Lin
                 angle: direction(pair[0], pair[1]),
                 segment: index,
             };
-            let window = 0.6 * params.text_size;
+            let window = if params.checks_bends {
+                0.6 * params.text_size
+            } else {
+                0.0
+            };
             // A centre in the buffer belongs to the tile that owns that part of the line.
             let inside = (0.0..EXTENT).contains(&anchor.point[0])
                 && (0.0..EXTENT).contains(&anchor.point[1]);
@@ -225,6 +235,9 @@ fn bends_within_limit(
     window: f64,
     max_angle: f64,
 ) -> bool {
+    if window <= 0.0 {
+        return true;
+    }
     let mut point = anchor.point;
     let mut index = anchor.segment as isize + 1;
     let mut anchor_distance = 0.0;
@@ -238,7 +251,11 @@ fn bends_within_limit(
         point = line[index as usize];
     }
     let mut index = index as usize;
-    anchor_distance += distance(line[index], line[index + 1]);
+    // A label without length walks nowhere and leaves the index on the anchor's own segment.
+    let (Some(start), Some(end)) = (line.get(index), line.get(index + 1)) else {
+        return false;
+    };
+    anchor_distance += distance(*start, *end);
     index += 1;
     let mut recent: Vec<(f64, f64)> = Vec::new();
     let mut recent_angle = 0.0;

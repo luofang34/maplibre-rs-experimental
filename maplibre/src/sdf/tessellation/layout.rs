@@ -237,33 +237,3 @@ fn bounds(
     }
     bounds
 }
-
-pub(super) fn line_angle(geometry: &Geometry<f64>, point: Point<f64>) -> f32 {
-    let Geometry::LineString(line) = geometry else {
-        return 0.0;
-    };
-    let segment = line.lines().min_by(|a, b| {
-        let distance = |line: &geo_types::Line<f64>| {
-            let length = line.dx().powi(2) + line.dy().powi(2);
-            let t = if length > 0.0 {
-                ((point.x() - line.start.x) * line.dx() + (point.y() - line.start.y) * line.dy())
-                    / length
-            } else {
-                0.0
-            };
-            (point.x() - line.start.x - line.dx() * t.clamp(0.0, 1.0)).powi(2)
-                + (point.y() - line.start.y - line.dy() * t.clamp(0.0, 1.0)).powi(2)
-        };
-        distance(a).total_cmp(&distance(b))
-    });
-    segment.map_or(0.0, |segment| {
-        let mut angle = segment.dy().atan2(segment.dx());
-        if angle > std::f64::consts::FRAC_PI_2 {
-            angle -= std::f64::consts::PI;
-        }
-        if angle < -std::f64::consts::FRAC_PI_2 {
-            angle += std::f64::consts::PI;
-        }
-        angle as f32
-    })
-}

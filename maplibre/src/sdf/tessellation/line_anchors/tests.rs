@@ -7,6 +7,7 @@ fn params(spacing: f64, label_length: f64) -> AnchorSpacing {
         max_angle: 45.0_f64.to_radians(),
         label_length,
         text_size: 100.0,
+        checks_bends: true,
     }
 }
 
@@ -116,4 +117,16 @@ fn a_line_center_label_in_the_tile_buffer_belongs_to_the_neighbour() {
         "the middle is at 4500"
     );
     assert!(center_anchor(&[[1000.0, 2000.0], [3000.0, 2000.0]], params).is_some());
+}
+
+#[test]
+fn a_label_without_length_does_not_index_past_the_line() {
+    let line = vec![[1000.0, 2000.0], [3000.0, 2000.0]];
+    let empty = AnchorSpacing {
+        max_angle: 180.0_f64.to_radians(),
+        ..params(500.0, 0.0)
+    };
+    // No glyphs means no length; the anchors are still computed without a panic.
+    let _ = line_anchors(&line, empty);
+    let _ = center_anchor(&line, empty);
 }
