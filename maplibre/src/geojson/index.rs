@@ -114,15 +114,7 @@ impl GeoJsonIndex {
                 .and_then(Value::as_object)
                 .map(|map| map.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
                 .unwrap_or_default();
-            let id = promote
-                .and_then(|name| {
-                    properties
-                        .iter()
-                        .find(|(key, _)| key == name)
-                        .and_then(|(_, value)| integer_id(value))
-                })
-                .or_else(|| feature.get("id").and_then(integer_id))
-                .or(source.generate_id.then_some(index as u64));
+            let id = numeric_feature_id(feature, promote, source.generate_id.then_some(index));
             bytes += coordinate_count(&parsed) * 16
                 + properties
                     .iter()
@@ -225,6 +217,20 @@ fn promoted_property(promote: Option<&PromoteId>) -> Option<&str> {
         PromoteId::Property(name) => Some(name),
         PromoteId::PerLayer(map) => map.get(GEOJSON_LAYER).map(String::as_str),
     }
+}
+
+/// The id a feature carries into tiles and queries: the promoted property or `id` when it is a
+/// whole non-negative number, else its position in the document with `generateId`.
+pub(super) fn numeric_feature_id(
+    feature: &Value,
+    promoted: Option<&str>,
+    generated: Option<usize>,
+) -> Option<u64> {
+    promoted
+        .and_then(|name| feature.get("properties")?.get(name))
+        .and_then(integer_id)
+        .or_else(|| feature.get("id").and_then(integer_id))
+        .or(generated.map(|index| index as u64))
 }
 
 fn integer_id(value: &Value) -> Option<u64> {

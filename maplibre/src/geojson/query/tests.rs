@@ -32,7 +32,7 @@ fn places() -> Style {
     )
 }
 
-fn ids(found: &[SourceFeature]) -> Vec<Option<Value>> {
+fn ids(found: &[SourceFeature]) -> Vec<Option<u64>> {
     found.iter().map(|feature| feature.id.clone()).collect()
 }
 
@@ -41,10 +41,7 @@ fn every_feature_comes_back_in_document_order_with_its_attributes() {
     let found = places()
         .query_source_features("places", &SourceQueryOptions::default())
         .expect("query");
-    assert_eq!(
-        ids(&found),
-        [Some(json!(1)), Some(json!(2)), Some(json!(4))]
-    );
+    assert_eq!(ids(&found), [Some(1), Some(2), Some(4)]);
     assert_eq!(found[0].source, "places");
     assert_eq!(found[0].source_layer, "_geojson");
     assert_eq!(found[0].geometry_type, "Point");
@@ -66,19 +63,10 @@ fn filters_use_the_legacy_and_the_expression_syntax_and_geometry_type() {
             )
             .expect("query"))
     };
-    assert_eq!(
-        query(json!(["==", "kind", "town"])),
-        [Some(json!(1)), Some(json!(4))]
-    );
-    assert_eq!(
-        query(json!([">", ["get", "rank"], 4])),
-        [Some(json!(2)), Some(json!(4))]
-    );
-    assert_eq!(
-        query(json!(["==", "$type", "LineString"])),
-        [Some(json!(2))]
-    );
-    assert_eq!(query(json!(["==", "$id", 4])), [Some(json!(4))]);
+    assert_eq!(query(json!(["==", "kind", "town"])), [Some(1), Some(4)]);
+    assert_eq!(query(json!([">", ["get", "rank"], 4])), [Some(2), Some(4)]);
+    assert_eq!(query(json!(["==", "$type", "LineString"])), [Some(2)]);
+    assert_eq!(query(json!(["==", "$id", 4])), [Some(4)]);
     assert!(query(json!(["==", "kind", "village"])).is_empty());
 }
 
@@ -112,7 +100,11 @@ fn ids_follow_promote_id_and_generate_id() {
     let found = style
         .query_source_features("places", &SourceQueryOptions::default())
         .expect("query");
-    assert_eq!(ids(&found), [Some(json!("a")), Some(json!(1))]);
+    assert_eq!(
+        ids(&found),
+        [Some(0), Some(1)],
+        "a string id is not carried into tiles, so a source query reports the generated one"
+    );
 }
 
 #[test]

@@ -10,7 +10,10 @@ use serde::Serialize;
 use serde_json::Value;
 use thiserror::Error;
 
-use super::update::{feature_id, feature_list, promoted_property};
+use super::{
+    index::numeric_feature_id,
+    update::{feature_list, promoted_property},
+};
 use crate::{
     context::MapContext,
     style::{
@@ -37,8 +40,9 @@ pub struct SourceFeature {
     pub source: String,
     /// The `_geojson` layer name.
     pub source_layer: String,
-    /// The feature id, or its position in the document with `generateId`.
-    pub id: Option<Value>,
+    /// The feature id as tiles carry it: a whole number from the promoted property or `id`, or
+    /// the position in the document with `generateId`.
+    pub id: Option<u64>,
     /// The feature's own properties.
     pub properties: BTreeMap<String, Value>,
     /// The geometry type name, such as `Point` or `MultiPolygon`.
@@ -113,8 +117,9 @@ impl Style {
             return Ok(Vec::new());
         }
         let promoted = promoted_property(source);
+        let features = feature_list(document);
         let mut found = Vec::new();
-        for (position, feature) in feature_list(document).iter().enumerate() {
+        for (position, feature) in features.iter().enumerate() {
             let Some(geometry) = feature.get("geometry").filter(|value| !value.is_null()) else {
                 continue;
             };
@@ -122,14 +127,17 @@ impl Style {
                 .get("type")
                 .and_then(Value::as_str)
                 .unwrap_or_default();
-            let id = feature_id(feature, promoted.as_deref())
-                .or_else(|| source.generate_id.then(|| Value::from(position as u64)));
+            let id = numeric_feature_id(
+                feature,
+                promoted.as_deref(),
+                source.generate_id.then_some(position),
+            );
             if let Some(filter) = &filter {
                 let properties = properties_from_json(feature.get("properties"));
                 let passes = filter.evaluate(&FeatureContext {
                     properties: &properties,
                     geometry_type: GeometryType::from_geojson(geometry_type),
-                    id: id.as_ref().map(StyleValue::from_json),
+                    id: id.map(|id| StyleValue::from_json(&Value::from(id))),
                     zoom: 0.0,
                 });
                 if !passes {

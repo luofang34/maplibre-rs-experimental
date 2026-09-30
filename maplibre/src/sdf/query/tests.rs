@@ -169,6 +169,119 @@ fn coordinates_are_normalized_into_one_world() {
 }
 
 #[test]
+fn boxes_enclosing_crossing_or_touching_only_the_second_rectangle_all_find_the_label() {
+    let world = placed(vec![bucket(
+        coords(0, 0, 0),
+        "low",
+        vec![label(1, 0.0, [0.0, 0.0])],
+    )]);
+    let query = |min: [f64; 2], max: [f64; 2]| {
+        query_rendered_symbols_in(
+            &world,
+            &style(),
+            QueryGeometry::Box { min, max },
+            &QueryOptions::default(),
+        )
+        .expect("query")
+        .len()
+    };
+    // The label rectangle is x 100..200, y 100..140.
+    assert_eq!(
+        query([0.0, 0.0], [400.0, 400.0]),
+        1,
+        "a box enclosing the label"
+    );
+    assert_eq!(
+        query([150.0, 0.0], [160.0, 400.0]),
+        1,
+        "a strip crossing with no corner inside"
+    );
+    assert_eq!(
+        query([0.0, 120.0], [400.0, 125.0]),
+        1,
+        "a band crossing the label"
+    );
+    assert_eq!(
+        query([0.0, 0.0], [99.0, 400.0]),
+        0,
+        "a box entirely to the left"
+    );
+    assert_eq!(
+        query([201.0, 0.0], [400.0, 400.0]),
+        0,
+        "a box entirely to the right"
+    );
+}
+
+#[test]
+fn only_the_second_rectangle_of_a_symbol_can_be_the_one_hit() {
+    let mut world = placed(vec![bucket(
+        coords(0, 0, 0),
+        "low",
+        vec![label(1, 0.0, [0.0, 0.0])],
+    )]);
+    world.resources.insert(PlacedSymbols(vec![PlacedSymbol {
+        coords: coords(0, 0, 0),
+        layer: "low".into(),
+        feature: 0,
+        rectangles: [None, Some([300.0, 300.0, 340.0, 320.0])],
+    }]));
+    let at = |point: [f64; 2]| {
+        query_rendered_symbols_in(
+            &world,
+            &style(),
+            QueryGeometry::Point(point),
+            &QueryOptions::default(),
+        )
+        .expect("query")
+        .len()
+    };
+    assert_eq!(at([310.0, 310.0]), 1);
+    assert_eq!(at([150.0, 120.0]), 0);
+}
+
+#[test]
+fn a_filter_selects_by_property_and_id_and_an_empty_layer_list_selects_nothing() {
+    let mut rank_two = label(2, 0.0, [0.0, 0.0]);
+    rank_two
+        .data
+        .properties
+        .insert("rank".into(), crate::style::expression::Value::Number(2.0));
+    let mut rank_nine = label(9, 0.0, [0.0, 0.0]);
+    rank_nine
+        .data
+        .properties
+        .insert("rank".into(), crate::style::expression::Value::Number(9.0));
+    let world = placed(vec![bucket(
+        coords(0, 0, 0),
+        "low",
+        vec![rank_two, rank_nine],
+    )]);
+    let with = |options: QueryOptions| {
+        ids(&query_rendered_symbols_in(&world, &style(), HERE, &options).expect("query"))
+    };
+    let filtered = |filter: serde_json::Value| QueryOptions {
+        layers: None,
+        filter: Some(filter),
+    };
+    assert_eq!(
+        with(filtered(serde_json::json!([">", ["get", "rank"], 5]))),
+        [9]
+    );
+    assert_eq!(with(filtered(serde_json::json!(["==", "rank", 2]))), [2]);
+    assert_eq!(with(filtered(serde_json::json!(["==", "$id", 9]))), [9]);
+    assert!(with(filtered(serde_json::json!(["==", "$id", 5]))).is_empty());
+    assert_eq!(
+        with(QueryOptions {
+            layers: Some(Vec::new()),
+            filter: None
+        }),
+        Vec::<u64>::new(),
+        "an empty layer list matches no layer"
+    );
+}
+
+#[test]
 fn a_box_overlapping_only_the_edge_of_a_label_still_finds_it() {
     let world = placed(vec![bucket(
         coords(0, 0, 0),

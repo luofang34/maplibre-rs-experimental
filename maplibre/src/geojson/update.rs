@@ -3,7 +3,7 @@
 //! Every change is validated before it is applied and bumps the source's generation, which makes
 //! workers index the new data and lets the request system replace loaded tiles.
 
-use std::sync::Arc;
+use std::{borrow::Cow, sync::Arc};
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -148,7 +148,7 @@ impl Style {
             });
         };
         let promoted = promoted_property(source);
-        let mut features = feature_list(document);
+        let mut features = feature_list(document).into_owned();
         apply(&mut features, diff, promoted.as_deref(), source_name)?;
         let updated = json!({"type": "FeatureCollection", "features": features});
         GeoJsonIndex::from_value(&updated, source).map_err(|source| {
@@ -211,16 +211,19 @@ pub(super) fn promoted_property(source: &GeoJsonSource) -> Option<String> {
 }
 
 /// The features of a document, whichever GeoJSON root it has.
-pub(super) fn feature_list(document: &Value) -> Vec<Value> {
+pub(super) fn feature_list(document: &Value) -> Cow<'_, [Value]> {
     match document.get("type").and_then(Value::as_str) {
         Some("FeatureCollection") => document
             .get("features")
             .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default(),
-        Some("Feature") => vec![document.clone()],
-        Some(_) => vec![json!({"type": "Feature", "properties": {}, "geometry": document})],
-        None => Vec::new(),
+            .map_or(Cow::Owned(Vec::new()), |features| {
+                Cow::Borrowed(features.as_slice())
+            }),
+        Some("Feature") => Cow::Owned(vec![document.clone()]),
+        Some(_) => Cow::Owned(vec![
+            json!({"type": "Feature", "properties": {}, "geometry": document}),
+        ]),
+        None => Cow::Owned(Vec::new()),
     }
 }
 
