@@ -61,3 +61,46 @@ fn optional_icon_can_fail_without_hiding_text() {
         );
     }
 }
+
+#[test]
+fn overlap_modes_decide_who_may_share_space() {
+    let rect = [Some([10.0, 10.0, 60.0, 30.0]), None];
+    let place = |properties: serde_json::Value, grid: &mut CollisionGrid| {
+        rules(properties).place(rect, grid, [512.0; 2])
+    };
+    let mut grid = CollisionGrid::new(512.0, 512.0);
+    let cooperative = serde_json::json!({"text-overlap": "cooperative"});
+    assert_eq!(place(cooperative.clone(), &mut grid), [true, false]);
+    assert_eq!(
+        place(cooperative, &mut grid),
+        [true, false],
+        "two cooperative symbols share space"
+    );
+    assert_eq!(
+        place(serde_json::json!({}), &mut grid),
+        [false, false],
+        "a symbol that never overlaps still collides with cooperative ones"
+    );
+    let mut grid = CollisionGrid::new(512.0, 512.0);
+    assert_eq!(place(serde_json::json!({}), &mut grid), [true, false]);
+    assert_eq!(
+        place(
+            serde_json::json!({"text-overlap": "cooperative"}),
+            &mut grid
+        ),
+        [false, false],
+        "cooperative symbols collide with ordinary ones"
+    );
+    assert_eq!(
+        place(serde_json::json!({"text-overlap": "always"}), &mut grid),
+        [true, false]
+    );
+    assert_eq!(
+        place(
+            serde_json::json!({"text-overlap": "never", "text-allow-overlap": true}),
+            &mut grid
+        ),
+        [false, false],
+        "text-overlap wins over text-allow-overlap"
+    );
+}

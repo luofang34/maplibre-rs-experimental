@@ -5,8 +5,19 @@ use crate::style::{
     layer::{StyleProperty, SymbolPaint},
 };
 
+/// How a symbol treats overlap, from `text-overlap` and `icon-overlap`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Overlap {
+    /// Collides with every placed symbol.
+    Never,
+    /// Never collides.
+    Always,
+    /// Collides only with symbols that are not cooperative.
+    Cooperative,
+}
+
 pub(super) struct PlacementRules {
-    allow: [bool; 2],
+    overlap: [Overlap; 2],
     ignore: [bool; 2],
     optional: [bool; 2],
 }
@@ -24,8 +35,20 @@ impl PlacementRules {
                     .unwrap_or(false)
             })
         };
+        let allow = read("allow-overlap");
+        // The newer property replaces the boolean when a style sets both.
+        let overlap = [0, 1].map(|i| {
+            let name = format!("{}-overlap", ["text", "icon"][i]);
+            match paint.properties.get(&name).and_then(|value| value.as_str()) {
+                Some("always") => Overlap::Always,
+                Some("cooperative") => Overlap::Cooperative,
+                Some(_) => Overlap::Never,
+                None if allow[i] => Overlap::Always,
+                None => Overlap::Never,
+            }
+        });
         Self {
-            allow: read("allow-overlap"),
+            overlap,
             ignore: read("ignore-placement"),
             optional: read("optional"),
         }
@@ -44,7 +67,11 @@ impl PlacementRules {
                     && rect[3] >= 0.0
                     && rect[0] <= viewport[0]
                     && rect[1] <= viewport[1]
-                    && (self.allow[i] || !grid.overlaps(rect))
+                    && match self.overlap[i] {
+                        Overlap::Always => true,
+                        Overlap::Never => !grid.overlaps(rect),
+                        Overlap::Cooperative => !grid.overlaps_non_cooperative(rect),
+                    }
             })
         });
         let visible = [0, 1].map(|i| {
@@ -53,7 +80,7 @@ impl PlacementRules {
         for i in 0..2 {
             if visible[i] && !self.ignore[i] {
                 if let Some(rect) = rectangles[i] {
-                    grid.insert(rect);
+                    grid.insert_as(rect, self.overlap[i] == Overlap::Cooperative);
                 }
             }
         }

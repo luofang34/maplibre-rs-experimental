@@ -44,6 +44,7 @@ fn property(name: &str) -> Option<Property> {
         | "icon-ignore-placement"
         | "text-optional"
         | "icon-optional" => Property::BooleanExpression,
+        "text-overlap" | "icon-overlap" => Property::Enum(&["never", "always", "cooperative"]),
         "text-keep-upright" | "icon-keep-upright" => Property::Boolean,
         "text-offset" | "icon-offset" => Property::Offset,
         "text-font" => Property::Font,
