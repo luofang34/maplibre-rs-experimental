@@ -33,6 +33,7 @@ pub(super) fn load_sources_blocking(
     style: &Style,
     target_coords: &[WorldTileCoords],
     images: &HashMap<String, PlacedImage>,
+    pixel_ratio: f64,
 ) -> Result<(ProcessedLayers, Vec<AvailableRasterLayerData>), String> {
     let mut all_layers = ProcessedLayers::default();
     let mut all_raster_layers = Vec::new();
@@ -58,14 +59,14 @@ pub(super) fn load_sources_blocking(
                 (style, name, source),
                 &layers,
                 target_coords,
-                &projection,
+                (&projection, pixel_ratio),
             )?),
             Source::Vector(source) => all_layers.append(&mut load_vector_blocking(
                 map,
                 (style, name, source),
                 &layers,
                 target_coords,
-                &projection,
+                (&projection, pixel_ratio),
             )?),
             // DEM images supply hillshade and colour relief independently from terrain meshes.
             Source::Image(_) => return Err(format!("Image source '{name}' was not lowered")),
@@ -85,7 +86,7 @@ fn load_geojson_blocking(
     (style, name, source): (&Style, &str, &GeoJsonSource),
     layers: &[StyleLayer],
     target_coords: &[WorldTileCoords],
-    projection: &ProjectionType,
+    (projection, pixel_ratio): (&ProjectionType, f64),
 ) -> Result<ProcessedLayers, String> {
     let data = &source.data;
     let loaded;
@@ -118,7 +119,12 @@ fn load_geojson_blocking(
     }
     let mut processed = ProcessedLayers::default();
     for coords in target_coords {
-        let atlas = symbol_atlas(&symbol_style, layers, &index.tile(*coords), *coords)?;
+        let atlas = symbol_atlas(
+            &symbol_style,
+            layers,
+            &index.tile(*coords),
+            (*coords, pixel_ratio),
+        )?;
         // A source that filters or clusters shows each tile its own version of the document.
         let presented = index.source_document(value, source, *coords);
         processed.append(
@@ -141,7 +147,7 @@ fn load_vector_blocking(
     (style, name, source): (&Style, &str, &VectorSource),
     layers: &[StyleLayer],
     target_coords: &[WorldTileCoords],
-    projection: &ProjectionType,
+    (projection, pixel_ratio): (&ProjectionType, f64),
 ) -> Result<ProcessedLayers, String> {
     let template = source
         .tiles
@@ -166,7 +172,7 @@ fn load_vector_blocking(
                 continue;
             }
         };
-        let atlas = symbol_atlas(style, layers, &data, coords)?;
+        let atlas = symbol_atlas(style, layers, &data, (coords, pixel_ratio))?;
         for layer in layers {
             processed.append(
                 &mut process_tile_layers_with_atlas(
@@ -330,7 +336,7 @@ fn symbol_atlas(
     style: &Style,
     layers: &[StyleLayer],
     tile: &[u8],
-    coords: WorldTileCoords,
+    (coords, pixel_ratio): (WorldTileCoords, f64),
 ) -> Result<Option<std::sync::Arc<maplibre::sdf::assets::SymbolAtlas>>, String> {
     if !layers
         .iter()
@@ -338,5 +344,5 @@ fn symbol_atlas(
     {
         return Ok(None);
     }
-    load_atlas_blocking(style, tile, f64::from(u8::from(coords.z)))
+    load_atlas_blocking(style, tile, (f64::from(u8::from(coords.z)), pixel_ratio))
 }

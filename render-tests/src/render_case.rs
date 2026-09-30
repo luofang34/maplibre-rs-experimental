@@ -53,7 +53,8 @@ async fn render_fixture(test_dir: &Path) -> Result<(f64, f64), String> {
             .required_tile_coords()
             .map_err(|error| format!("Cannot select source tiles: {error}"))?;
     }
-    let (layers, raster_layers) = load_sources_blocking(&mut map, &style, &coords, &images)?;
+    let (layers, raster_layers) =
+        load_sources_blocking(&mut map, &style, &coords, &images, meta.pixel_ratio)?;
     // Labels fade in, so a frame settles only after several; other layers need two.
     let frame_count: u8 = if style
         .layers
