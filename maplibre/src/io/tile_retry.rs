@@ -82,6 +82,8 @@ struct RetryState {
     pending: bool,
     delay: Duration,
     deadline: Option<Duration>,
+    /// The style changed while this request was in flight, so its result is refetched.
+    stale: bool,
 }
 
 #[derive(Default)]
@@ -124,6 +126,27 @@ fn now(world: &mut World) -> Duration {
     clock.last
 }
 
+/// Requests every requested tile of `kind` again, keeping what it shows until the new data lands.
+pub(crate) fn refresh(world: &mut World, kind: RequestKind) {
+    let now = now(world);
+    let coords: Vec<WorldTileCoords> = world.tiles.tiles.values().map(|tile| tile.coords).collect();
+    for coords in coords {
+        let Some(retries) = world.tiles.query_mut::<&mut TileRequestRetries>(coords) else {
+            continue;
+        };
+        let state = &mut retries.0[kind.index()];
+        if state.attempt.is_none() {
+            continue;
+        }
+        if state.pending {
+            state.stale = true;
+        } else {
+            state.delay = Duration::ZERO;
+            state.deadline = Some(now);
+        }
+    }
+}
+
 pub(crate) fn due(world: &mut World, coords: WorldTileCoords, kind: RequestKind) -> bool {
     let now = now(world);
     world
@@ -163,6 +186,7 @@ pub(crate) fn started(world: &mut World, coords: WorldTileCoords, kind: RequestK
         state.attempt = Some(attempt);
         state.pending = true;
         state.deadline = None;
+        state.stale = false;
     }
 }
 
@@ -180,10 +204,11 @@ pub(crate) fn completed(world: &mut World, outcome: TileRequestOutcome) {
         return;
     }
     state.pending = false;
+    let stale = std::mem::take(&mut state.stale);
     match outcome.disposition {
         RequestDisposition::Complete => {
             state.delay = Duration::ZERO;
-            state.deadline = None;
+            state.deadline = stale.then_some(now);
         }
         RequestDisposition::Retry => {
             state.delay = if state.delay.is_zero() {

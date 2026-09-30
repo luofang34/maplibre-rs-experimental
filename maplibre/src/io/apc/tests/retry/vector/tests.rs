@@ -297,3 +297,91 @@ async fn a_malformed_geojson_document_is_a_terminal_typed_failure_that_is_not_re
         "a bad document is remembered, not refetched"
     );
 }
+
+fn inline(data: &str) -> crate::style::source::GeoJsonData {
+    crate::style::source::GeoJsonData::Inline(std::sync::Arc::new(
+        serde_json::from_str(data).expect("geojson"),
+    ))
+}
+
+const NOTHING: &str = r#"{"type":"FeatureCollection","features":[]}"#;
+
+#[tokio::test]
+async fn set_data_replaces_loaded_tiles_and_an_empty_source_clears_them() {
+    let mut test = Fixture::new(Kind::Vector, false).await;
+    test.context.style = geojson_style(serde_json::from_str(WORLD_POLYGON).expect("polygon"));
+    let mut frames = super::render::Frames::new(&mut test);
+    test.frame(0);
+    test.receive().await;
+    assert!(test.loaded());
+    test.context
+        .set_geojson_data("shapes", inline(NOTHING))
+        .expect("set data");
+    test.frame(1);
+    assert_eq!(
+        test.kernel.apc().pending(),
+        1,
+        "the loaded tile is requested again"
+    );
+    assert!(
+        test.loaded(),
+        "the old data stays until the new tile arrives"
+    );
+    test.receive().await;
+    assert!(!test.loaded(), "an empty source leaves nothing to draw");
+    test.context
+        .set_geojson_data("shapes", inline(WORLD_POLYGON))
+        .expect("set data again");
+    test.frame(2);
+    test.receive().await;
+    assert!(test.loaded());
+    super::render::assert_green(&frames.render(&mut test));
+    assert_eq!(
+        test.source.requests(),
+        0,
+        "inline data never leaves the process"
+    );
+}
+
+#[tokio::test]
+async fn a_reply_to_an_older_generation_cannot_stay_after_set_data() {
+    let mut test = Fixture::new(Kind::Vector, false).await;
+    test.context.style = geojson_style(serde_json::from_str(WORLD_POLYGON).expect("polygon"));
+    test.frame(0);
+    assert_eq!(test.kernel.apc().pending(), 1, "first load in flight");
+    test.context
+        .set_geojson_data("shapes", inline(NOTHING))
+        .expect("set data during the load");
+    test.receive().await;
+    assert!(
+        test.loaded(),
+        "the reply to the old generation is shown briefly"
+    );
+    test.frame(1);
+    assert_eq!(
+        test.kernel.apc().pending(),
+        1,
+        "the newer generation is requested"
+    );
+    test.receive().await;
+    assert!(!test.loaded(), "and the newer data wins");
+}
+
+#[tokio::test]
+async fn edits_by_feature_reach_loaded_tiles() {
+    let mut test = Fixture::new(Kind::Vector, false).await;
+    test.context.style = geojson_style(serde_json::json!({"type":"FeatureCollection",
+        "features":[{"type":"Feature","id":1,"properties":{},"geometry":
+            serde_json::from_str::<serde_json::Value>(WORLD_POLYGON).expect("polygon")["geometry"]}]}));
+    test.frame(0);
+    test.receive().await;
+    assert!(test.loaded());
+    let removal: crate::geojson::update::GeoJsonDiff =
+        serde_json::from_value(serde_json::json!({"remove": [1]})).expect("diff");
+    test.context
+        .update_geojson_data("shapes", &removal)
+        .expect("remove by id");
+    test.frame(1);
+    test.receive().await;
+    assert!(!test.loaded(), "the removed feature is gone from the tile");
+}

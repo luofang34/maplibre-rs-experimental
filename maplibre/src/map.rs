@@ -10,6 +10,7 @@ use crate::{
     context::MapContext,
     coords::{LatLon, WorldCoords, Zoom},
     environment::Environment,
+    geojson::update::{GeoJsonDiff, SourceUpdateError},
     io::{tile_json::resolve_tile_json_sources, tile_retry::RequestAttempts},
     kernel::Kernel,
     plugin::Plugin,
@@ -18,7 +19,7 @@ use crate::{
         graph::RenderGraphError, view_state::ViewState,
     },
     schedule::{Schedule, Stage, StageError},
-    style::Style,
+    style::{source::GeoJsonData, Style},
     tcs::world::World,
     window::{HeadedMapWindow, MapWindow, MapWindowConfig, PhysicalSize, WindowCreateError},
 };
@@ -44,6 +45,9 @@ pub enum MapError {
     /// A scheduled update failed; preceding state changes are not rolled back.
     #[error("executing map stage failed")]
     StageError(#[from] StageError),
+    /// A source's data could not be replaced or edited; the source is unchanged.
+    #[error("updating source data failed")]
+    SourceUpdate(#[from] SourceUpdateError),
 }
 
 /// Initialization state of a map's renderer and frame data.
@@ -247,6 +251,36 @@ where
             }
             CurrentMapContext::Pending(_) => Err(MapError::RendererNotReady),
         }
+    }
+
+    /// Replaces the data of a GeoJSON source, before or after the renderer is initialized.
+    pub fn set_geojson_data(
+        &mut self,
+        source_name: &str,
+        data: GeoJsonData,
+    ) -> Result<(), MapError> {
+        match &mut self.map_context {
+            CurrentMapContext::Ready(context) => context.set_geojson_data(source_name, data)?,
+            CurrentMapContext::Pending(pending) => {
+                pending.style.set_geojson_data(source_name, data)?
+            }
+        }
+        Ok(())
+    }
+
+    /// Adds, changes and removes features of an inline GeoJSON source.
+    pub fn update_geojson_data(
+        &mut self,
+        source_name: &str,
+        diff: &GeoJsonDiff,
+    ) -> Result<(), MapError> {
+        match &mut self.map_context {
+            CurrentMapContext::Ready(context) => context.update_geojson_data(source_name, diff)?,
+            CurrentMapContext::Pending(pending) => {
+                pending.style.update_geojson_data(source_name, diff)?
+            }
+        }
+        Ok(())
     }
 
     /// Borrows initialized frame state, or returns [`MapError::RendererNotReady`].
