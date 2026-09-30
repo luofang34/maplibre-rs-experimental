@@ -46,6 +46,7 @@ fn default_layers() -> Vec<StyleLayer> {
             None,
             LayerPaint::Background(BackgroundPaint {
                 background_color: Some(color([255, 255, 255])),
+                background_opacity: None,
             }),
         ),
         fill("park", [200, 250, 204]),

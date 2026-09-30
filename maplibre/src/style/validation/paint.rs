@@ -12,11 +12,14 @@ use crate::style::{
 impl LayerValidation<'_> {
     pub(super) fn paint(&mut self, paint: &LayerPaint) {
         match paint {
-            LayerPaint::Background(p) => self.property(
-                "paint.background-color",
-                p.background_color.as_ref(),
-                Constant,
-            ),
+            LayerPaint::Background(p) => {
+                self.property("paint.background-color", p.background_color.as_ref(), Zoom);
+                self.property(
+                    "paint.background-opacity",
+                    p.background_opacity.as_ref(),
+                    Zoom,
+                );
+            }
             LayerPaint::Fill(p) => {
                 self.property("paint.fill-color", p.fill_color.as_ref(), Feature);
                 self.property("paint.fill-opacity", p.fill_opacity.as_ref(), Feature);

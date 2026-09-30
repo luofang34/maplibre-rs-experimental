@@ -17,6 +17,8 @@ use crate::{
 pub struct BackgroundBuffers {
     /// Background layer paint metadata.
     pub metadata_buffer: wgpu::Buffer,
+    /// Instance of each background style layer in `metadata_buffer`.
+    pub instances: std::collections::HashMap<String, u32>,
     /// Zoom-zero tile transform used by globe meshes.
     pub tile_metadata_buffer: wgpu::Buffer,
     /// Evaluated atmosphere opacity.
@@ -40,6 +42,7 @@ pub fn queue_system(
     }: &mut MapContext,
 ) -> SystemResult {
     let mut metadatas = Vec::new();
+    let mut instances = std::collections::HashMap::new();
     let projection_transition = style.projection.as_ref().map_or(0.0, |specification| {
         specification
             .projection_type
@@ -70,14 +73,9 @@ pub fn queue_system(
                 continue;
             }
             background_index = background_index.max(layer.index);
-            let c: [f32; 4] = match &layer.paint {
-                Some(paint @ LayerPaint::Background(_)) => paint
-                    .get_color()
-                    .map(|c| c.into())
-                    .unwrap_or([0.0, 0.0, 0.0, 1.0]),
-                _ => [0.0, 0.0, 0.0, 1.0],
-            };
+            let c = background_color(layer, view_state.zoom().value());
             let z_index = layer.index as f32;
+            instances.insert(layer.id.clone(), metadatas.len() as u32);
             metadatas.push(BackgroundLayerMetadata {
                 color: c,
                 z_index,
@@ -226,6 +224,7 @@ pub fn queue_system(
         });
         world.resources.insert(BackgroundBuffers {
             metadata_buffer: buffer,
+            instances,
             tile_metadata_buffer,
             atmosphere_metadata_buffer,
             sky_metadata_buffer,
@@ -233,6 +232,27 @@ pub fn queue_system(
     }
 
     Ok(())
+}
+
+/// The background colour at a zoom, with its opacity multiplied into premultiplied-free alpha.
+fn background_color(layer: &crate::style::layer::StyleLayer, zoom: f64) -> [f32; 4] {
+    let Some(LayerPaint::Background(paint)) = &layer.paint else {
+        return [0.0, 0.0, 0.0, 1.0];
+    };
+    let mut color: [f32; 4] = paint
+        .background_color
+        .as_ref()
+        .and_then(|property| property.evaluate_at_zoom(zoom))
+        .map_or([0.0, 0.0, 0.0, 1.0], |color| {
+            cint::Alpha::<cint::EncodedSrgb<f32>>::from(color).into()
+        });
+    let opacity = paint
+        .background_opacity
+        .as_ref()
+        .and_then(|property| property.evaluate_at_zoom(zoom))
+        .unwrap_or(1.0);
+    color[3] *= opacity.clamp(0.0, 1.0);
+    color
 }
 
 /// The sky draw's values for the frame: colours at the zoom and the horizon line on screen,
@@ -264,5 +284,36 @@ fn sky_metadata(
                 0.0
             },
         ],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::background_color;
+    use crate::style::layer::StyleLayer;
+
+    fn layer(paint: serde_json::Value) -> StyleLayer {
+        let layer = serde_json::json!({"id": "b", "type": "background", "paint": paint});
+        serde_json::from_value(layer).expect("valid background layer")
+    }
+
+    #[test]
+    fn opacity_scales_alpha() {
+        let color = background_color(
+            &layer(serde_json::json!({"background-color": "blue", "background-opacity": 0.5})),
+            0.0,
+        );
+        assert_eq!(color, [0.0, 0.0, 1.0, 0.5]);
+    }
+
+    #[test]
+    fn colour_follows_zoom() {
+        let paint = serde_json::json!({"background-color": {
+            "stops": [[0, "red"], [10, "blue"]], "base": 1.0
+        }});
+        let start = background_color(&layer(paint.clone()), 0.0);
+        let end = background_color(&layer(paint), 10.0);
+        assert_eq!(start[..3], [1.0, 0.0, 0.0]);
+        assert_eq!(end[..3], [0.0, 0.0, 1.0]);
     }
 }

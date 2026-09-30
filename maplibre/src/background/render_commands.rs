@@ -10,7 +10,7 @@ use crate::{
     render::{
         eventually::Eventually::{self, Initialized},
         projection::ProjectionGpuResources,
-        render_phase::{PhaseItem, RenderCommand, RenderCommandResult},
+        render_phase::{LayerItem, PhaseItem, RenderCommand, RenderCommandResult},
         tile_mesh::{GlobeTileMeshCache, TileMeshUsage},
     },
     tcs::world::World,
@@ -38,10 +38,10 @@ impl<P: PhaseItem> RenderCommand<P> for SetBackgroundPipeline {
 
 /// Binds background metadata and draws a fullscreen quad.
 pub struct DrawBackgroundQuad;
-impl<P: PhaseItem> RenderCommand<P> for DrawBackgroundQuad {
+impl RenderCommand<LayerItem> for DrawBackgroundQuad {
     fn render<'w>(
         world: &'w World,
-        _item: &P,
+        item: &LayerItem,
         pass: &mut wgpu::RenderPass<'w>,
     ) -> RenderCommandResult {
         if let Some(buf) = world
@@ -50,7 +50,9 @@ impl<P: PhaseItem> RenderCommand<P> for DrawBackgroundQuad {
         {
             pass.set_vertex_buffer(0, buf.metadata_buffer.slice(..));
 
-            pass.draw(0..6, 0..1);
+            // Each background layer paints with its own colour.
+            let instance = buf.instances.get(&item.style_layer).copied().unwrap_or(0);
+            pass.draw(0..6, instance..instance + 1);
             return RenderCommandResult::Success;
         }
         RenderCommandResult::Failure
@@ -83,10 +85,10 @@ impl<P: PhaseItem> RenderCommand<P> for SetGlobeBackgroundPipeline {
 
 /// Draws the root globe mesh using background color and tile metadata.
 pub struct DrawGlobeBackgroundQuad;
-impl<P: PhaseItem> RenderCommand<P> for DrawGlobeBackgroundQuad {
+impl RenderCommand<LayerItem> for DrawGlobeBackgroundQuad {
     fn render<'w>(
         world: &'w World,
-        _item: &P,
+        item: &LayerItem,
         pass: &mut wgpu::RenderPass<'w>,
     ) -> RenderCommandResult {
         let Some((buffers, mesh_cache)) = world.resources.query::<(
@@ -103,7 +105,12 @@ impl<P: PhaseItem> RenderCommand<P> for DrawGlobeBackgroundQuad {
         pass.set_vertex_buffer(1, buffers.tile_metadata_buffer.slice(..));
         pass.set_vertex_buffer(2, buffers.metadata_buffer.slice(..));
         pass.set_index_buffer(mesh.index_buffer().slice(..), mesh.index_format());
-        pass.draw_indexed(0..mesh.index_count(), 0, 0..1);
+        let instance = buffers
+            .instances
+            .get(&item.style_layer)
+            .copied()
+            .unwrap_or(0);
+        pass.draw_indexed(0..mesh.index_count(), 0, instance..instance + 1);
         RenderCommandResult::Success
     }
 }
@@ -208,10 +215,10 @@ pub type DrawSky = (SetSkyPipeline, DrawSkyFullscreen);
 
 /// Binds and draws the flat background, stopping if either resource lookup fails.
 pub struct DrawBackground;
-impl<P: PhaseItem> RenderCommand<P> for DrawBackground {
+impl RenderCommand<LayerItem> for DrawBackground {
     fn render<'w>(
         world: &'w World,
-        item: &P,
+        item: &LayerItem,
         pass: &mut wgpu::RenderPass<'w>,
     ) -> RenderCommandResult {
         <(SetBackgroundPipeline, DrawBackgroundQuad)>::render(world, item, pass)

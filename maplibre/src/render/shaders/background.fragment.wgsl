@@ -16,5 +16,5 @@ fn main(
     if distance > 0.0 {
         discard;
     }
-    return Output(v_color);
+    return Output(vec4<f32>(v_color.rgb * v_color.a, v_color.a));
 }

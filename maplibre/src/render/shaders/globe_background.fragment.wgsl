@@ -10,5 +10,5 @@ fn main(
     if horizon_distance < 0.0 || color.a <= 0.0 {
         discard;
     }
-    return Output(color);
+    return Output(vec4<f32>(color.rgb * color.a, color.a));
 }

@@ -16,6 +16,14 @@ pub struct BackgroundPaint {
     )]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub background_color: Option<StyleProperty<Color>>,
+    /// Opacity multiplied into the background color.
+    #[serde(rename = "background-opacity")]
+    #[serde(
+        default,
+        deserialize_with = "StyleProperty::<f32>::deserialize_f32_or_none"
+    )]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub background_opacity: Option<StyleProperty<f32>>,
 }
 
 /// Coordinate frame used by fill and line paint translations.
