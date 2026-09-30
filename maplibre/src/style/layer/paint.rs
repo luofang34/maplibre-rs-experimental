@@ -66,8 +66,7 @@ pub struct FillPaint {
     #[serde(rename = "fill-pattern", default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fill_pattern: Option<serde_json::Value>,
-    /// The style's `fill-antialias`, kept as written so validation can tell a request the
-    /// renderer honours from one it cannot.
+    /// The style's `fill-antialias`, kept as written so the style serializes unchanged.
     #[serde(rename = "fill-antialias", default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fill_antialias: Option<serde_json::Value>,

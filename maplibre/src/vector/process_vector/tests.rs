@@ -432,3 +432,21 @@ fn invalid_tile_retains_coordinates_and_the_protobuf_decoder_cause() {
     );
     assert!(error.to_string().contains(&coords.to_string()));
 }
+
+#[test]
+fn a_tile_padded_with_zero_bytes_still_decodes() {
+    let mut bytes = Tile {
+        layers: vec![tile::Layer {
+            version: 2,
+            name: "roads".into(),
+            ..Default::default()
+        }],
+    }
+    .encode_to_vec();
+    bytes.extend([0; 64]);
+
+    let tile = super::decode_tile(&bytes).expect("padding is ignored");
+
+    assert_eq!(tile.layers[0].name, "roads");
+    assert!(super::decode_tile(&[0x0a, 0xff]).is_err());
+}

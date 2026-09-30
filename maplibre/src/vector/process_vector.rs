@@ -150,17 +150,28 @@ pub fn process_vector_tile<T: VectorTransferables, C: Context>(
 
 mod processing;
 
+/// Decodes a tile, tolerating the zero padding some tile servers append: a zero tag is not a
+/// field, so a strict decoder rejects a tile that GL JS reads.
+fn decode_tile(data: &[u8]) -> Result<geozero::mvt::Tile, Box<dyn std::error::Error>> {
+    geozero::mvt::Tile::decode(data).or_else(|error| {
+        let end = data.iter().rposition(|byte| *byte != 0).map_or(0, |i| i + 1);
+        if end == data.len() {
+            return Err(error.into());
+        }
+        geozero::mvt::Tile::decode(&data[..end]).map_err(|_| error.into())
+    })
+}
+
 pub(crate) fn process_vector_tile_with_assets<T: VectorTransferables, C: Context>(
     data: &[u8],
     tile_request: VectorTileRequest,
     context: &mut ProcessVectorContext<T, C>,
     atlas: std::sync::Arc<crate::sdf::assets::SymbolAtlas>,
 ) -> Result<(), ProcessVectorError> {
-    let mut tile =
-        geozero::mvt::Tile::decode(data).map_err(|source| ProcessVectorError::Decoding {
-            coords: tile_request.coords,
-            source: Box::new(source),
-        })?;
+    let mut tile = decode_tile(data).map_err(|source| ProcessVectorError::Decoding {
+        coords: tile_request.coords,
+        source,
+    })?;
     for style in &tile_request.layers {
         let (Some(_), Some(name)) = (&style.paint, &style.source_layer) else {
             tracing::error!(layer = %style.id, "vector style layer misses a required attribute");

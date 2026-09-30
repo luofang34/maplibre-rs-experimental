@@ -23,17 +23,6 @@ impl LayerValidation<'_> {
             LayerPaint::Fill(p) => {
                 self.property("paint.fill-color", p.fill_color.as_ref(), Feature);
                 self.property("paint.fill-opacity", p.fill_opacity.as_ref(), Feature);
-                // Edges are antialiased by the renderer's multisampling, which a layer cannot
-                // turn off; asking for no antialiasing is the one request that is not honoured.
-                if p.fill_antialias
-                    .as_ref()
-                    .is_some_and(|value| *value != serde_json::Value::Bool(true))
-                {
-                    self.unsupported(
-                        "paint.fill-antialias",
-                        "only antialiased fills are drawn; multisampling cannot be turned off per layer",
-                    );
-                }
             }
             LayerPaint::FillExtrusion(p) => {
                 let color = p.fill_extrusion_color.as_ref();

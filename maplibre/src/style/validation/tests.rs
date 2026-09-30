@@ -296,17 +296,11 @@ fn heatmap_properties_validate_by_their_evaluation_context() {
 }
 
 #[test]
-fn fill_antialias_is_honoured_when_on_and_reported_when_off() {
-    let on = style_with_layer(serde_json::json!({
-        "id": "land", "type": "fill", "paint": {"fill-color": "#eee", "fill-antialias": true}
-    }));
-    on.validate()
-        .expect("antialiased fills are what the renderer draws");
-    let off = style_with_layer(serde_json::json!({
-        "id": "land", "type": "fill", "paint": {"fill-antialias": false}
-    }));
-    let errors = off.validate().expect_err("no antialiasing cannot be drawn");
-    assert!(errors
-        .iter()
-        .any(|error| error.to_string().contains("paint.fill-antialias")));
+fn fill_antialias_only_toggles_an_outline_the_renderer_does_not_draw() {
+    for value in [true, false] {
+        let style = style_with_layer(serde_json::json!({
+            "id": "land", "type": "fill", "paint": {"fill-color": "#eee", "fill-antialias": value}
+        }));
+        style.validate().expect("fill-antialias does not change the fill");
+    }
 }
