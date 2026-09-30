@@ -78,3 +78,20 @@ fn distinct_features_of_one_tile_with_the_same_key_fade_on_their_own_results() {
         "a collided feature is not drawn because its neighbour was placed"
     );
 }
+#[test]
+fn placed_features_of_one_tile_with_the_same_key_are_each_drawn() {
+    let mut history = PlacementHistory::default();
+    let layer = layer(12);
+    let a = feature(1000.0);
+    let b = feature(1002.0);
+    history.begin(Duration::ZERO);
+    history.opacity(&layer, &a, [true, false]);
+    history.opacity(&layer, &b, [true, false]);
+    history.begin(Duration::from_millis(200));
+    assert_eq!(history.opacity(&layer, &a, [true, false]), [1.0, 0.0]);
+    assert_eq!(
+        history.opacity(&layer, &b, [true, false]),
+        [1.0, 0.0],
+        "the second placed feature is not suppressed as a duplicate"
+    );
+}
