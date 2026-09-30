@@ -23,6 +23,7 @@ use crate::{
 mod icon_quads;
 mod layout;
 mod line_anchors;
+mod line_merge;
 mod text_layout;
 use layout::CollectedSymbol;
 type GeoResult<T> = geozero::error::Result<T>;
@@ -34,6 +35,8 @@ pub struct TextTessellator {
     zoom: f64,
     atlas: Arc<SymbolAtlas>,
     collected: Vec<CollectedSymbol>,
+    /// Lines to be labelled along, held until they can be merged.
+    pending_lines: Vec<line_merge::PendingLine>,
     properties: FeatureProperties,
     /// Symbol triangles.
     pub quad_buffer: VertexBuffers<ShaderSymbolVertex, IndexDataType>,
@@ -66,6 +69,7 @@ impl TextTessellator {
             zoom,
             atlas,
             collected: Vec::new(),
+            pending_lines: Vec::new(),
             properties: FeatureProperties::new(),
             quad_buffer: VertexBuffers::new(),
             features: Vec::new(),
@@ -82,6 +86,12 @@ impl TextTessellator {
 
     /// Builds quads and collision ranges from the collected map features.
     pub fn finish(&mut self) {
+        let pending = std::mem::take(&mut self.pending_lines);
+        for line in line_merge::merge_lines(pending) {
+            self.properties = line.properties;
+            self.collect_along_lines(vec![line.line], LinePlacement::Line, line.id);
+        }
+        self.properties.clear();
         self.collected.sort_by(|a, b| {
             let key = |symbol: &CollectedSymbol| {
                 self.paint
@@ -334,6 +344,18 @@ impl FeatureProcessor for TextTessellator {
                 _ => None,
             };
             match (line_placement(&self.paint), lines) {
+                // Lines that continue one another are merged once all of them are known.
+                (Some(LinePlacement::Line), Some(lines)) => {
+                    let text = self.paint.label(&self.properties, self.zoom);
+                    for line in lines.into_iter().filter(|line| line.len() > 1) {
+                        self.pending_lines.push(line_merge::PendingLine {
+                            text: text.clone(),
+                            line,
+                            id,
+                            properties: self.properties.clone(),
+                        });
+                    }
+                }
                 (Some(placement), Some(lines)) => self.collect_along_lines(lines, placement, id),
                 // A point has no line to follow.
                 (Some(_), None) => {}
