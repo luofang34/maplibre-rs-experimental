@@ -7,7 +7,7 @@ use crate::{
         eventually::{Eventually, Eventually::Initialized},
         projection::ProjectionGpuResources,
         resource::{RenderPipeline, TilePipeline, TilePipelineOptions},
-        shaders::{HeatmapCompositeShader, HeatmapDensityShader, Shader},
+        shaders::{HeatmapCompositeShader, HeatmapDensityShader, Shader, DENSITY_FORMAT},
         RenderResources, Renderer,
     },
     tcs::system::{SystemError, SystemResult},
@@ -39,12 +39,29 @@ fn ramp_layout() -> Vec<wgpu::BindGroupLayoutEntry> {
     ]
 }
 
+/// Marks that the device cannot draw density targets, so the failure is reported once.
+struct DensityUnsupported;
+
+/// Whether the density format can be rendered to, blended and sampled with filtering. Core
+/// WebGPU guarantees it; a WebGL2 context needs the half-float colour buffer extension.
+fn density_format_supported(adapter: &wgpu::Adapter) -> bool {
+    let features = adapter.get_texture_format_features(DENSITY_FORMAT);
+    features
+        .allowed_usages
+        .contains(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING)
+        && features.flags.contains(
+            wgpu::TextureFormatFeatureFlags::BLENDABLE
+                | wgpu::TextureFormatFeatureFlags::FILTERABLE,
+        )
+}
+
 pub fn resource_system(
     MapContext {
         world,
         renderer:
             Renderer {
                 device,
+                adapter,
                 resources: RenderResources { surface, .. },
                 settings,
                 ..
@@ -52,6 +69,16 @@ pub fn resource_system(
         ..
     }: &mut MapContext,
 ) -> SystemResult {
+    if !density_format_supported(adapter) {
+        if world.resources.get::<DensityUnsupported>().is_none() {
+            tracing::error!(
+                format = ?DENSITY_FORMAT,
+                "this device cannot render and blend half-float density targets; heatmap layers are not drawn"
+            );
+            world.resources.insert(DensityUnsupported);
+        }
+        return Ok(());
+    }
     let Some((heatmap_resources, Initialized(projection_resources))) =
         world.resources.query_mut::<(
             &mut Eventually<HeatmapResources>,
