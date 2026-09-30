@@ -93,10 +93,11 @@ impl<E: Environment, T: VectorTransferables> System for PopulateWorldSystem<E, T
                 {
                     return Ok(());
                 }
-                world
-                    .tiles
-                    .geometry_index
-                    .index_tile(&message.coords(), message.to_tile_index());
+                world.tiles.geometry_index.index_tile(
+                    &message.coords(),
+                    message.source(),
+                    message.to_tile_index(),
+                );
             }
             Ok(())
         })?;

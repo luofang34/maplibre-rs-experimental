@@ -6,10 +6,23 @@ use rstar::{PointDistance, RTree};
 use super::super::{IndexedGeometry, TileIndex};
 use crate::coords::InnerCoords;
 
+fn name(properties: &crate::style::expression::FeatureProperties) -> Option<&str> {
+    match properties.get("name") {
+        Some(crate::style::expression::Value::String(text)) => Some(text.as_str()),
+        _ => None,
+    }
+}
+
 fn line(points: &[(f64, f64)], name: &str) -> IndexedGeometry<f64> {
     IndexedGeometry::from_linestring(
         LineString::from(points.to_vec()),
-        HashMap::from([("name".into(), name.into())]),
+        super::super::FeatureMeta {
+            properties: std::sync::Arc::new(HashMap::from([(
+                "name".to_owned(),
+                crate::style::expression::Value::String(name.to_owned()),
+            )])),
+            ..Default::default()
+        },
     )
     .expect("nonempty line")
 }
@@ -32,7 +45,7 @@ fn donut() -> IndexedGeometry<f64> {
                 (20.0, 20.0),
             ])],
         ),
-        HashMap::new(),
+        super::super::FeatureMeta::default(),
     )
     .expect("nonempty polygon")
 }
@@ -45,25 +58,19 @@ fn nearest_neighbor_uses_the_geometry_instead_of_its_bounds_center() {
     ]);
     let names: Vec<_> = tree
         .nearest_neighbor_iter(&Point::new(0.0, 0.0))
-        .map(|geometry| geometry.properties.get("name").map(String::as_str))
+        .map(|geometry| name(&geometry.properties))
         .collect();
     assert_eq!(names, vec![Some("near"), Some("far")]);
     let nearest = tree
         .nearest_neighbor(&Point::new(0.0, 0.0))
         .expect("nearest line");
-    assert_eq!(
-        nearest.properties.get("name").map(String::as_str),
-        Some("near")
-    );
+    assert_eq!(name(&nearest.properties), Some("near"));
     assert_eq!(nearest.distance_2(&Point::new(0.0, 0.0)), 1.0);
     let close: Vec<_> = tree
         .locate_within_distance(Point::new(0.0, 0.0), 4.0)
         .collect();
     assert_eq!(close.len(), 1);
-    assert_eq!(
-        close[0].properties.get("name").map(String::as_str),
-        Some("near")
-    );
+    assert_eq!(name(&close[0].properties), Some("near"));
 }
 
 #[test]

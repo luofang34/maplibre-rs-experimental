@@ -180,12 +180,20 @@ pub(crate) fn process_vector_tile_with_assets<T: VectorTransferables, C: Context
     let mut index = IndexProcessor::new();
     for layer in &mut tile.layers {
         index.set_coordinate_scale(extent_scale(layer));
+        index.begin_layer(
+            &layer.name,
+            layer.features.iter().map(|feature| feature.id).collect(),
+        );
         // Query decoding cannot make successfully rendered geometry unavailable.
         if let Err(error) = layer.process(&mut index) {
             tracing::warn!(coords = %tile_request.coords, layer = %layer.name, ?error, "skipping query index for layer");
         }
     }
-    context.layer_indexing_finished(&tile_request.coords, index.get_geometries())?;
+    let source = tile_request
+        .layers
+        .iter()
+        .find_map(|layer| layer.source.clone());
+    context.layer_indexing_finished(&tile_request.coords, source, index.get_geometries())?;
     context.tile_finished(&tile_request.coords)?;
     Ok(())
 }
@@ -291,11 +299,13 @@ impl<T: VectorTransferables, C: Context> ProcessVectorContext<T, C> {
     fn layer_indexing_finished(
         &mut self,
         coords: &WorldTileCoords,
+        source: Option<String>,
         geometries: Vec<IndexedGeometry<f64>>,
     ) -> Result<(), ProcessVectorError> {
         self.context
             .send_back(T::LayerIndexed::build_from(
                 *coords,
+                source,
                 TileIndex::Linear { list: geometries },
             ))
             .map_err(ProcessVectorError::SendError)

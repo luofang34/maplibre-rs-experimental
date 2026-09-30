@@ -336,7 +336,7 @@ impl LayerIndexed for FlatBufferTransferable {
         &WebMessageTag::LayerIndexed
     }
 
-    fn build_from(coords: WorldTileCoords, _index: TileIndex) -> Self {
+    fn build_from(coords: WorldTileCoords, _source: Option<String>, _index: TileIndex) -> Self {
         let mut inner_builder = FlatBufferBuilder::with_capacity(1024);
         let mut builder = FlatLayerIndexedBuilder::new(&mut inner_builder);
 
@@ -360,6 +360,10 @@ impl LayerIndexed for FlatBufferTransferable {
     fn coords(&self) -> WorldTileCoords {
         let data = root_as_flat_layer_indexed(&self.data[self.start..]).unwrap();
         data.coords().unwrap().into()
+    }
+
+    fn source(&self) -> Option<String> {
+        None
     }
 
     fn to_tile_index(self) -> TileIndex {

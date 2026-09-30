@@ -57,7 +57,7 @@ pub enum QueryGeometry {
 }
 
 impl QueryGeometry {
-    fn bounds(self) -> Option<[f64; 4]> {
+    pub(crate) fn bounds(self) -> Option<[f64; 4]> {
         let [x0, y0, x1, y1] = match self {
             Self::Point([x, y]) => [x, y, x, y],
             Self::Box { min, max } => [min[0], min[1], max[0], max[1]],
@@ -93,6 +93,12 @@ pub enum QueryError {
     /// The filter is not valid.
     #[error("query filter is invalid")]
     InvalidFilter(#[source] FilterError),
+    /// Fill and line features cannot be located in this view.
+    #[error("fill and line features cannot be queried with {reason}")]
+    UnsupportedView {
+        /// What the view uses that the query cannot unproject through.
+        reason: &'static str,
+    },
 }
 
 /// Returns placed text or icons whose screen bounds contain the point, in pixels with y down.

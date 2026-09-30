@@ -27,6 +27,7 @@ pub mod headless;
 pub mod io;
 pub mod platform;
 pub mod projection;
+pub mod query;
 pub mod render;
 pub mod style;
 pub mod util;

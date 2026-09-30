@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::sync::Arc;
 
 use geo_types::Geometry;
 use geozero::{
@@ -7,20 +7,24 @@ use geozero::{
 };
 use rstar::RTree;
 
-use super::IndexedGeometry;
+use super::{FeatureMeta, IndexedGeometry};
+use crate::style::expression::{FeatureProperties, Value};
 
 /// Collects tile-local lines and polygons from a geozero feature stream.
 ///
 /// Multipart and collection geometries yield one entry per line or polygon, in input order,
-/// with a copy of the feature's stringified properties. Points and empty parts are omitted.
-/// A feature with no properties receives an empty map. Starting a feature discards any
+/// all sharing the feature's typed properties, id and source layer. Points and empty parts are
+/// omitted. A feature with no properties receives an empty map. Starting a feature discards any
 /// unfinished geometry and properties from a failed feature, retaining completed entries.
 /// Geometry-only streams must be enclosed in the feature/geometry callbacks.
 pub struct IndexProcessor {
     geo_writer: GeoWriter,
     geometries: Vec<IndexedGeometry<f64>>,
-    properties: HashMap<String, String>,
+    properties: FeatureProperties,
     coordinate_scale: f64,
+    source_layer: Arc<str>,
+    ids: Vec<Option<u64>>,
+    feature: usize,
 }
 
 impl IndexProcessor {
@@ -29,9 +33,19 @@ impl IndexProcessor {
         Self {
             geo_writer: GeoWriter::new(),
             geometries: Vec::new(),
-            properties: HashMap::new(),
+            properties: FeatureProperties::new(),
             coordinate_scale: 1.0,
+            source_layer: Arc::from(""),
+            ids: Vec::new(),
+            feature: 0,
         }
+    }
+
+    /// Names the source layer of the features that follow and gives their ids by position, as
+    /// the layer's own feature list has them; geozero does not pass ids through.
+    pub fn begin_layer(&mut self, source_layer: &str, ids: Vec<Option<u64>>) {
+        self.source_layer = Arc::from(source_layer);
+        self.ids = ids;
     }
 
     /// Sets the factor from the next layer's coordinate extent to the 4096 tile grid.
@@ -53,15 +67,16 @@ impl IndexProcessor {
     }
 
     fn index_geometry(&mut self, geometry: Geometry<f64>) {
+        let meta = FeatureMeta {
+            properties: Arc::new(std::mem::take(&mut self.properties)),
+            source_layer: self.source_layer.clone(),
+            id: self.ids.get(self.feature).copied().flatten(),
+        };
         let mut pending = vec![geometry];
         while let Some(geometry) = pending.pop() {
             let indexed = match geometry {
-                Geometry::Polygon(polygon) => {
-                    IndexedGeometry::from_polygon(polygon, self.properties.clone())
-                }
-                Geometry::LineString(line) => {
-                    IndexedGeometry::from_linestring(line, self.properties.clone())
-                }
+                Geometry::Polygon(polygon) => IndexedGeometry::from_polygon(polygon, meta.clone()),
+                Geometry::LineString(line) => IndexedGeometry::from_linestring(line, meta.clone()),
                 Geometry::MultiLineString(lines) => {
                     pending.extend(lines.0.into_iter().rev().map(Geometry::LineString));
                     None
@@ -158,15 +173,17 @@ impl PropertyProcessor for IndexProcessor {
         name: &str,
         value: &ColumnValue,
     ) -> Result<bool, GeozeroError> {
-        self.properties.insert(name.to_string(), value.to_string());
+        self.properties
+            .insert(name.to_string(), column_value(value));
         Ok(true)
     }
 }
 
 impl FeatureProcessor for IndexProcessor {
-    fn feature_begin(&mut self, _idx: u64) -> Result<(), GeozeroError> {
+    fn feature_begin(&mut self, idx: u64) -> Result<(), GeozeroError> {
         self.geo_writer = GeoWriter::new();
         self.properties.clear();
+        self.feature = usize::try_from(idx).unwrap_or(usize::MAX);
         Ok(())
     }
 
@@ -180,5 +197,23 @@ impl FeatureProcessor for IndexProcessor {
             self.index_geometry(geometry);
         }
         Ok(())
+    }
+}
+
+/// The typed value of a decoded property, as filters compare them.
+fn column_value(value: &ColumnValue) -> Value {
+    match value {
+        ColumnValue::Bool(flag) => Value::Bool(*flag),
+        ColumnValue::Byte(number) => Value::Number(f64::from(*number)),
+        ColumnValue::UByte(number) => Value::Number(f64::from(*number)),
+        ColumnValue::Short(number) => Value::Number(f64::from(*number)),
+        ColumnValue::UShort(number) => Value::Number(f64::from(*number)),
+        ColumnValue::Int(number) => Value::Number(f64::from(*number)),
+        ColumnValue::UInt(number) => Value::Number(f64::from(*number)),
+        ColumnValue::Long(number) => Value::Number(*number as f64),
+        ColumnValue::ULong(number) => Value::Number(*number as f64),
+        ColumnValue::Float(number) => Value::Number(f64::from(*number)),
+        ColumnValue::Double(number) => Value::Number(*number),
+        other => Value::String(other.to_string()),
     }
 }

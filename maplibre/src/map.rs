@@ -423,6 +423,16 @@ where
         Ok(self.context()?.query_rendered_symbols(geometry, options)?)
     }
 
+    /// Fill, line and symbol features under a point or box, topmost first. Requires an
+    /// initialized renderer.
+    pub fn query_rendered_features(
+        &self,
+        geometry: QueryGeometry,
+        options: &QueryOptions,
+    ) -> Result<Vec<crate::query::QueriedFeature>, MapError> {
+        Ok(self.context()?.query_rendered_features(geometry, options)?)
+    }
+
     /// Borrows initialized frame state, or returns [`MapError::RendererNotReady`].
     pub fn context(&self) -> Result<&MapContext, MapError> {
         match &self.map_context {

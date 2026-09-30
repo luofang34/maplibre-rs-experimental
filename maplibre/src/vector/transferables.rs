@@ -154,13 +154,17 @@ pub trait LayerIndexed: IntoMessage + Debug + Send {
     /// Identifies this backend's spatial-index payload for message dispatch.
     fn message_tag() -> &'static dyn MessageTag;
 
-    /// Associates an owned spatial index with its tile-grid coordinates.
-    fn build_from(coords: WorldTileCoords, index: TileIndex) -> Self
+    /// Associates an owned spatial index with its tile-grid coordinates and the source it was
+    /// read from.
+    fn build_from(coords: WorldTileCoords, source: Option<String>, index: TileIndex) -> Self
     where
         Self: Sized;
 
     /// Tile-grid coordinates associated with the index.
     fn coords(&self) -> WorldTileCoords;
+
+    /// The style's name for the source the index was read from, when the payload carries it.
+    fn source(&self) -> Option<String>;
 
     /// Consumes the transfer representation and returns its spatial index.
     fn to_tile_index(self) -> TileIndex;
@@ -421,6 +425,7 @@ impl SymbolLayerTessellated for crate::vector::transferables::DefaultSymbolLayer
 /// Owned spatial index and the tile coordinates to which it belongs.
 pub struct DefaultLayerIndexed {
     coords: WorldTileCoords,
+    source: Option<String>,
     index: TileIndex,
 }
 
@@ -441,12 +446,20 @@ impl LayerIndexed for DefaultLayerIndexed {
         &VectorMessageTag::LayerIndexed
     }
 
-    fn build_from(coords: WorldTileCoords, index: TileIndex) -> Self {
-        Self { coords, index }
+    fn build_from(coords: WorldTileCoords, source: Option<String>, index: TileIndex) -> Self {
+        Self {
+            coords,
+            source,
+            index,
+        }
     }
 
     fn coords(&self) -> WorldTileCoords {
         self.coords
+    }
+
+    fn source(&self) -> Option<String> {
+        self.source.clone()
     }
 
     fn to_tile_index(self) -> TileIndex {

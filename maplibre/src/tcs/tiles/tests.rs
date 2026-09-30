@@ -142,6 +142,7 @@ fn clearing_tiles_discards_geometry_queries_before_coordinates_are_reused() {
     let (mut tiles, coords) = populated();
     tiles.geometry_index.index_tile(
         &coords,
+        None,
         TileIndex::Linear {
             list: vec![IndexedGeometry {
                 bounds: rstar::AABB::from_corners(Point::new(0.0, 0.0), Point::new(EXTENT, EXTENT)),
@@ -149,7 +150,12 @@ fn clearing_tiles_discards_geometry_queries_before_coordinates_are_reused() {
                     (0.0, 0.0),
                     (EXTENT, EXTENT),
                 ])),
-                properties: HashMap::from([("name".into(), "road".into())]),
+                properties: std::sync::Arc::new(HashMap::from([(
+                    "name".into(),
+                    crate::style::expression::Value::String("road".into()),
+                )])),
+                source_layer: "roads".into(),
+                id: None,
             }],
         },
     );

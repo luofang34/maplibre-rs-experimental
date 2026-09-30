@@ -3,7 +3,10 @@
 #![deny(missing_docs)]
 
 mod processor;
-use std::collections::{BTreeMap, HashMap};
+use std::{
+    collections::{BTreeMap, HashSet},
+    sync::Arc,
+};
 
 use cgmath::{num_traits::Signed, Bounded};
 use geo::prelude::*;
@@ -15,12 +18,14 @@ use crate::{
     coords::{
         InnerCoords, Quadkey, WorldCoords, WorldTileCoords, Zoom, ZoomLevel, EXTENT, TILE_SIZE,
     },
+    style::expression::FeatureProperties,
     util::math::bounds_from_points,
 };
 
-/// Query indexes keyed by canonical tile quadkeys; each tile has one replaceable entry.
+/// Query indexes keyed by canonical tile quadkeys; each tile has one replaceable entry for every
+/// source that contributed to it.
 pub struct GeometryIndex {
-    index: BTreeMap<Quadkey, TileIndex>,
+    index: BTreeMap<Quadkey, BTreeMap<Option<String>, TileIndex>>,
 }
 
 impl GeometryIndex {
@@ -31,11 +36,34 @@ impl GeometryIndex {
         }
     }
 
-    /// Replaces the index at `coords`; unaddressable tile coordinates are ignored.
-    pub fn index_tile(&mut self, coords: &WorldTileCoords, tile_index: TileIndex) {
-        coords
-            .build_quad_key()
-            .and_then(|key| self.index.insert(key, tile_index));
+    /// Replaces the index a source holds at `coords`, leaving other sources' entries in place;
+    /// unaddressable tile coordinates are ignored. A source is the style's name for it, or
+    /// `None` for layers that name no source.
+    pub fn index_tile(
+        &mut self,
+        coords: &WorldTileCoords,
+        source: Option<String>,
+        tile_index: TileIndex,
+    ) {
+        if let Some(key) = coords.build_quad_key() {
+            self.index
+                .entry(key)
+                .or_default()
+                .insert(source, tile_index);
+        }
+    }
+
+    /// The indexes of every source at `coords`, or `None` when the tile has none.
+    pub fn tile_indexes(
+        &self,
+        coords: &WorldTileCoords,
+    ) -> Option<impl Iterator<Item = (Option<&str>, &TileIndex)>> {
+        let sources = self.index.get(&coords.build_quad_key()?)?;
+        Some(
+            sources
+                .iter()
+                .map(|(source, index)| (source.as_deref(), index)),
+        )
     }
 
     /// Forgets a tile's index when the tile leaves the store.
@@ -47,7 +75,11 @@ impl GeometryIndex {
 
     /// Memory the index holds, estimated from its geometries and properties.
     pub fn approximate_bytes(&self) -> usize {
-        self.index.values().map(TileIndex::approximate_bytes).sum()
+        self.index
+            .values()
+            .flat_map(BTreeMap::values)
+            .map(TileIndex::approximate_bytes)
+            .sum()
     }
 
     /// Estimated memory retained by one tile's geometries and query properties.
@@ -55,7 +87,9 @@ impl GeometryIndex {
         coords
             .build_quad_key()
             .and_then(|key| self.index.get(&key))
-            .map_or(0, TileIndex::approximate_bytes)
+            .map_or(0, |sources| {
+                sources.values().map(TileIndex::approximate_bytes).sum()
+            })
     }
 
     /// Finds geometries at world pixels measured at `zoom`, in the tile at grid level `z`.
@@ -71,7 +105,7 @@ impl GeometryIndex {
     ) -> Option<Vec<&IndexedGeometry<f64>>> {
         let world_tile_coords = world_coords.into_world_tile(z, zoom);
 
-        if let Some(index) = world_tile_coords
+        if let Some(sources) = world_tile_coords
             .build_quad_key()
             .and_then(|key| self.index.get(&key))
         {
@@ -82,7 +116,12 @@ impl GeometryIndex {
 
             let x = delta_x * EXTENT;
             let y = delta_y * EXTENT;
-            Some(index.point_query(InnerCoords { x, y }))
+            Some(
+                sources
+                    .values()
+                    .flat_map(|index| index.point_query(InnerCoords { x, y }))
+                    .collect(),
+            )
         } else {
             None
         }
@@ -112,12 +151,19 @@ pub enum TileIndex {
 impl TileIndex {
     /// Memory the tile's index holds, estimated from its geometries and properties.
     pub fn approximate_bytes(&self) -> usize {
-        match self {
-            TileIndex::Spatial { tree } => {
-                tree.iter().map(IndexedGeometry::approximate_bytes).sum()
+        let mut shared = HashSet::new();
+        let mut total = 0;
+        let mut count = |geometry: &IndexedGeometry<f64>| {
+            total += geometry.geometry_bytes();
+            if shared.insert(Arc::as_ptr(&geometry.properties)) {
+                total += properties_bytes(&geometry.properties);
             }
-            TileIndex::Linear { list } => list.iter().map(IndexedGeometry::approximate_bytes).sum(),
+        };
+        match self {
+            TileIndex::Spatial { tree } => tree.iter().for_each(&mut count),
+            TileIndex::Linear { list } => list.iter().for_each(&mut count),
         }
+        total
     }
 
     /// Returns polygon interiors and lines within eight tile-local units of the point.
@@ -148,7 +194,18 @@ impl TileIndex {
     }
 }
 
-/// A nonempty tile-local geometry, its enclosing bounds, and stringified feature properties.
+/// What identifies the feature a geometry part belongs to: shared by all its parts.
+#[derive(Debug, Clone, Default)]
+pub struct FeatureMeta {
+    /// Typed feature properties, shared by every part of the feature.
+    pub properties: Arc<FeatureProperties>,
+    /// The source layer the feature was read from.
+    pub source_layer: Arc<str>,
+    /// The feature's id, when the source assigned one.
+    pub id: Option<u64>,
+}
+
+/// A nonempty tile-local geometry, its enclosing bounds and the feature it belongs to.
 ///
 /// Callers constructing entries directly must provide finite coordinates and bounds enclosing
 /// the complete geometry. Spatial distance queries use the geometry, including polygon holes.
@@ -161,8 +218,12 @@ where
     pub bounds: AABB<Point<T>>,
     /// Geometry used for hit tests and spatial distance.
     pub exact: ExactGeometry<T>,
-    /// Feature properties; scalar types are represented as strings.
-    pub properties: HashMap<String, String>,
+    /// Typed feature properties, shared by every part of the feature.
+    pub properties: Arc<FeatureProperties>,
+    /// The source layer the feature was read from.
+    pub source_layer: Arc<str>,
+    /// The feature's id, when the source assigned one.
+    pub id: Option<u64>,
 }
 
 /// A single polygon or line part in tile-local coordinates.
@@ -181,10 +242,14 @@ impl<T> IndexedGeometry<T>
 where
     T: CoordFloat + Bounded + Signed + PartialOrd,
 {
-    /// Memory the geometry holds: its coordinates, its property strings and the map and
-    /// tree entries that carry them.
+    /// Memory the geometry holds: its coordinates, and its properties, which parts of one
+    /// feature share; [`TileIndex::approximate_bytes`] counts those once.
     pub fn approximate_bytes(&self) -> usize {
-        const ENTRY_OVERHEAD: usize = 2 * std::mem::size_of::<String>() + 16;
+        self.geometry_bytes() + properties_bytes(&self.properties)
+    }
+
+    /// Memory of the geometry alone.
+    fn geometry_bytes(&self) -> usize {
         const TREE_OVERHEAD: usize = 32;
         let coordinates = match &self.exact {
             ExactGeometry::Polygon(polygon) => {
@@ -197,38 +262,47 @@ where
             }
             ExactGeometry::LineString(line) => line.0.len(),
         };
-        let properties: usize = self
-            .properties
-            .iter()
-            .map(|(key, value)| key.capacity() + value.capacity() + ENTRY_OVERHEAD)
-            .sum();
-        std::mem::size_of::<Self>()
-            + coordinates * std::mem::size_of::<Coord<T>>()
-            + properties
-            + TREE_OVERHEAD
+        std::mem::size_of::<Self>() + coordinates * std::mem::size_of::<Coord<T>>() + TREE_OVERHEAD
     }
 
-    fn from_polygon(polygon: Polygon<T>, properties: HashMap<String, String>) -> Option<Self> {
+    fn from_polygon(polygon: Polygon<T>, meta: FeatureMeta) -> Option<Self> {
         let (min, max) = bounds_from_points(polygon.exterior().points())?;
 
         Some(Self {
             exact: ExactGeometry::Polygon(polygon),
             bounds: AABB::from_corners(Point::from(min), Point::from(max)),
-            properties,
+            properties: meta.properties,
+            source_layer: meta.source_layer,
+            id: meta.id,
         })
     }
-    fn from_linestring(
-        linestring: LineString<T>,
-        properties: HashMap<String, String>,
-    ) -> Option<Self> {
+    fn from_linestring(linestring: LineString<T>, meta: FeatureMeta) -> Option<Self> {
         let (min, max) = bounds_from_points(linestring.points())?;
 
         Some(Self {
             exact: ExactGeometry::LineString(linestring),
             bounds: AABB::from_corners(Point::from(min), Point::from(max)),
-            properties,
+            properties: meta.properties,
+            source_layer: meta.source_layer,
+            id: meta.id,
         })
     }
+}
+
+/// Memory of a feature's properties: keys, values and the map entries that carry them.
+fn properties_bytes(properties: &FeatureProperties) -> usize {
+    const ENTRY_OVERHEAD: usize = 2 * std::mem::size_of::<String>() + 16;
+    properties
+        .iter()
+        .map(|(key, value)| {
+            key.capacity()
+                + match value {
+                    crate::style::expression::Value::String(text) => text.capacity(),
+                    _ => 0,
+                }
+                + ENTRY_OVERHEAD
+        })
+        .sum()
 }
 
 impl<T> RTreeObject for IndexedGeometry<T>

@@ -10,6 +10,13 @@ use crate::{
     io::geometry_index::{ExactGeometry, TileIndex},
 };
 
+fn name(properties: &crate::style::expression::FeatureProperties) -> Option<&str> {
+    match properties.get("name") {
+        Some(crate::style::expression::Value::String(text)) => Some(text.as_str()),
+        _ => None,
+    }
+}
+
 fn process_json(input: &str) -> IndexProcessor {
     let mut processor = IndexProcessor::new();
     GeoJson(input)
@@ -54,10 +61,7 @@ fn empty_polygons_do_not_abort_later_features() {
     );
     let geometries = processor.get_geometries();
     assert_eq!(geometries.len(), 1);
-    assert_eq!(
-        geometries[0].properties.get("name").map(String::as_str),
-        Some("road")
-    );
+    assert_eq!(name(&geometries[0].properties), Some("road"));
 }
 
 #[test]
@@ -112,9 +116,7 @@ fn every_mvt_line_part_keeps_its_properties_and_coordinate_scale() {
         .expect("MVT with two line parts processes");
     let list = processor.get_geometries();
     assert_eq!(list.len(), 2);
-    assert!(list
-        .iter()
-        .all(|g| g.properties.get("name").map(String::as_str) == Some("road")));
+    assert!(list.iter().all(|g| name(&g.properties) == Some("road")));
     let ExactGeometry::LineString(line) = &list[1].exact else {
         panic!("line expected")
     };
@@ -142,10 +144,7 @@ fn every_polygon_part_is_queryable_and_holes_stay_empty() {
     for x in [10.0, 250.0] {
         let hits = index.point_query(InnerCoords { x, y: 50.0 });
         assert_eq!(hits.len(), 1);
-        assert_eq!(
-            hits[0].properties.get("name").map(String::as_str),
-            Some("land")
-        );
+        assert_eq!(name(&hits[0].properties), Some("land"));
     }
     assert!(index
         .point_query(InnerCoords { x: 50.0, y: 50.0 })
@@ -170,7 +169,7 @@ fn nested_collections_keep_queryable_parts_in_input_order() {
     assert!(matches!(geometries[1].exact, ExactGeometry::Polygon(_)));
     assert!(geometries
         .iter()
-        .all(|g| g.properties.get("name").map(String::as_str) == Some("mixed")));
+        .all(|g| name(&g.properties) == Some("mixed")));
 }
 
 #[test]

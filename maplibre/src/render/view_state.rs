@@ -196,6 +196,11 @@ impl ViewState {
         &self.edge_insets
     }
 
+    /// Viewport width and height in pixels.
+    pub fn viewport_size(&self) -> (f64, f64) {
+        (self.width, self.height)
+    }
+
     /// Replaces the viewport dimensions with logical pixels without changing the camera or padding.
     pub fn resize(&mut self, size: LogicalSize) {
         self.width = size.width() as f64;

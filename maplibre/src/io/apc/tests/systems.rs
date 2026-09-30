@@ -49,6 +49,7 @@ async fn symbols_leave_geometry_index_results_for_the_vector_consumer() {
         .insert(VectorLayerBucketComponent::default());
     let message = DefaultLayerIndexed::build_from(
         WorldTileCoords::default(),
+        None,
         TileIndex::Linear { list: Vec::new() },
     );
     kernel
