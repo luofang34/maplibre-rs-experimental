@@ -120,6 +120,8 @@ pub(super) fn append(
     } else {
         paint.height_offset("text", &symbol.properties, zoom)
     };
+    let shift = crate::sdf::translation::tile_translation(paint, "text");
+    let anchor = geo_types::Point::new(symbol.anchor.x() + shift[0], symbol.anchor.y() + shift[1]);
     let follows_line = crate::sdf::paint::text_follows_line(paint, zoom);
     let rotation = paint
         .number("text-rotate", &symbol.properties, zoom, 0.0)
@@ -136,7 +138,7 @@ pub(super) fn append(
                 let (x, y) = (pen + glyph.metrics[0], baseline - glyph.metrics[1]);
                 quad(
                     buffer,
-                    symbol.anchor,
+                    anchor,
                     [x, y, x + glyph.rect[2] as f32, y + glyph.rect[3] as f32],
                     glyph,
                     elevation,

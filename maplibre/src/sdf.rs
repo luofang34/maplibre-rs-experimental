@@ -38,6 +38,7 @@ mod queue_system;
 mod render_commands;
 mod resource_system;
 mod textures;
+pub(crate) mod translation;
 mod upload_system;
 pub mod visibility;
 

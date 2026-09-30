@@ -58,6 +58,8 @@ fn property(name: &str) -> Option<Property> {
         | "text-rotation-alignment"
         | "icon-rotation-alignment" => Property::Enum(&["auto", "map", "viewport"]),
         "symbol-height-anchor" => Property::Enum(&["ground", "absolute"]),
+        "text-translate" | "icon-translate" => Property::Offset,
+        "text-translate-anchor" | "icon-translate-anchor" => Property::Enum(&["map", "viewport"]),
         "icon-text-fit" => Property::Enum(&["none", "width", "height", "both"]),
         "icon-text-fit-padding" => Property::Padding,
         "text-height-anchor" | "icon-height-anchor" => {
@@ -85,6 +87,10 @@ pub(crate) fn is_layout(name: &str) -> bool {
                 | "icon-opacity"
                 | "icon-halo-width"
                 | "icon-halo-blur"
+                | "text-translate"
+                | "icon-translate"
+                | "text-translate-anchor"
+                | "icon-translate-anchor"
                 | "text-height-offset"
                 | "text-height-anchor"
                 | "icon-height-offset"
@@ -107,6 +113,14 @@ impl LayerValidation<'_> {
                 Some(kind) if valid_literal(&kind, value) => {}
                 Some(_) => self.unsupported(&path, "this property requires a supported literal value; expressions are not evaluated"),
                 None => self.unsupported(&path, "property is not implemented"),
+            }
+        }
+        for prefix in ["text", "icon"] {
+            if crate::sdf::translation::viewport_translation(paint, prefix) {
+                self.unsupported(
+                    &format!("paint.{prefix}-translate-anchor"),
+                    "translation in viewport axes depends on the bearing and is not applied",
+                );
             }
         }
     }

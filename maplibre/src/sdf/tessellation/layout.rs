@@ -87,9 +87,10 @@ pub(super) fn append(
         let bounds = fit_to_text(paint, symbol, zoom, atlas, [width, height], offset)
             // Layout pixels are drawn scaled by icon-size, which a fitted icon does not take.
             .map_or(placed, |fitted| fitted.map(|edge| edge / icon_size));
+        let shift = crate::sdf::translation::tile_translation(paint, "icon");
         quad(
             buffer,
-            symbol.anchor,
+            Point::new(symbol.anchor.x() + shift[0], symbol.anchor.y() + shift[1]),
             bounds,
             icon,
             height_offset,
@@ -104,7 +105,15 @@ pub(super) fn append(
     if start == buffer.indices.len() {
         return;
     }
-    let anchor = Point2D::new(symbol.anchor.x() as f32, symbol.anchor.y() as f32);
+    // Collision follows the text where there is one, as the icon alone otherwise.
+    let shift = crate::sdf::translation::tile_translation(
+        paint,
+        if text.is_empty() { "icon" } else { "text" },
+    );
+    let anchor = Point2D::new(
+        (symbol.anchor.x() + shift[0]) as f32,
+        (symbol.anchor.y() + shift[1]) as f32,
+    );
     let bbox = bounds(
         &buffer.vertices,
         &buffer.indices[start..],
