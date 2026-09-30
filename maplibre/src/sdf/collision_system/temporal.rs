@@ -20,6 +20,7 @@ struct State {
     target: [bool; 2],
     last_seen: Duration,
     claimed: u64,
+    claimed_by: WorldTileCoords,
 }
 #[derive(Default)]
 pub(super) struct PlacementHistory {
@@ -67,13 +68,20 @@ impl PlacementHistory {
                 target,
                 last_seen: self.now,
                 claimed: frame.wrapping_sub(1),
+                claimed_by: layer.coords,
             });
             states.len() - 1
         });
         let state = &mut states[index];
-        // One conceptual label is drawn once even if both a parent and child are visible.
         if state.claimed == frame {
-            return [0.0; 2];
+            // A label repeated across tiles is drawn once, so a parent and child that are both
+            // visible do not double up. Features of one tile that share a key are distinct
+            // labels and share the fade.
+            return if state.claimed_by == layer.coords {
+                state.opacity
+            } else {
+                [0.0; 2]
+            };
         }
         let step = (self.now.saturating_sub(state.last_seen).as_secs_f32() / 0.16).min(1.0);
         for (i, visible) in target.iter().enumerate() {
@@ -84,6 +92,7 @@ impl PlacementHistory {
         state.target = target;
         state.last_seen = self.now;
         state.claimed = frame;
+        state.claimed_by = layer.coords;
         state.position = position(layer.coords, feature);
         state.zoom = u8::from(layer.coords.z);
         state.opacity

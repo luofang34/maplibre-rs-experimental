@@ -31,6 +31,8 @@ use crate::{
 #[derive(Default)]
 pub struct CollisionSystem {
     runs: u32,
+    /// View the last placement ran for; a different one makes it stale within a frame.
+    placed_view: Option<(cgmath::Matrix4<f64>, (f64, f64))>,
     history: temporal::PlacementHistory,
     uploaded: HashMap<(WorldTileCoords, String), (u64, u64)>,
 }
@@ -83,9 +85,12 @@ impl System for CollisionSystem {
                     .get(&(layer.coords, layer.style_layer_id.clone()))
                     .map(|entry| entry.0)
         });
-        if !new_content && !self.history.fading && !self.runs.is_multiple_of(8) {
+        let view = (view_state.view_projection().0, view_state.viewport_size());
+        let moved = self.placed_view.as_ref() != Some(&view);
+        if !new_content && !moved && !self.history.fading && !self.runs.is_multiple_of(8) {
             return Ok(());
         }
+        self.placed_view = Some(view);
         layers.sort_by_key(|(index, layer, _)| {
             (
                 std::cmp::Reverse(*index),

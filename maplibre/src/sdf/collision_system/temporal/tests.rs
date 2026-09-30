@@ -61,3 +61,19 @@ fn transient_collision_fades_instead_of_switching_off_and_history_expires() {
     history.begin(Duration::from_secs(2));
     assert!(history.states.is_empty());
 }
+#[test]
+fn distinct_features_of_one_tile_with_the_same_key_are_both_drawn() {
+    let mut history = PlacementHistory::default();
+    let layer = layer(12);
+    let a = feature(1000.0);
+    let b = feature(1002.0);
+    history.begin(Duration::ZERO);
+    history.opacity(&layer, &a, [true, false]);
+    history.begin(Duration::from_millis(200));
+    assert_eq!(history.opacity(&layer, &a, [true, false]), [1.0, 0.0]);
+    assert_eq!(
+        history.opacity(&layer, &b, [true, false]),
+        [1.0, 0.0],
+        "the second feature is not suppressed as a duplicate"
+    );
+}

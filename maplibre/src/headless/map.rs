@@ -309,6 +309,12 @@ impl HeadlessMap {
         &self.map_context.view_state
     }
 
+    /// Moves the camera between frames, as a host gesture would.
+    #[cfg(test)]
+    pub(crate) fn view_state_mut(&mut self) -> &mut ViewState {
+        &mut self.map_context.view_state
+    }
+
     /// The texture the offscreen head renders into, in the surface format.
     pub fn head_texture(&self) -> Option<&wgpu::Texture> {
         match self.map_context.renderer.resources.surface.head() {

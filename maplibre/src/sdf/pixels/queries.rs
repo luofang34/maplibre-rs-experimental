@@ -145,3 +145,33 @@ async fn invalid_geometry_is_rejected_and_hidden_layers_are_skipped() {
     .expect("query");
     assert!(found.is_empty(), "a layer switched off is not queryable");
 }
+
+#[tokio::test]
+async fn a_pan_moves_the_placed_label_within_the_next_frame() {
+    let mut map = label_map().await;
+    let camera = map.view_state().camera().position();
+    map.view_state_mut()
+        .camera_mut()
+        .move_to(cgmath::Point2::new(camera.x + 40.0, camera.y));
+    map.run_frame().expect("frame after the pan");
+    let old_place = QueryGeometry::Box {
+        min: [AT_LABEL[0] - 4.0, AT_LABEL[1] - 4.0],
+        max: [AT_LABEL[0] + 4.0, AT_LABEL[1] + 4.0],
+    };
+    assert!(
+        map.query_rendered_symbols_in(old_place, &QueryOptions::default())
+            .expect("query")
+            .is_empty(),
+        "placement still holds the label where the camera left it"
+    );
+    let screen = QueryGeometry::Box {
+        min: [0.0, 0.0],
+        max: [512.0, 512.0],
+    };
+    assert_eq!(
+        map.query_rendered_symbols_in(screen, &QueryOptions::default())
+            .expect("query")
+            .len(),
+        1
+    );
+}
