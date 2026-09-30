@@ -96,8 +96,10 @@ impl GeoJsonIndex {
         let mut features = Vec::new();
         let mut entries = Vec::new();
         let mut bytes = 0;
+        let mut position = 0_usize;
         let mut add = |feature: &Value| -> Result<(), GeoJsonError> {
-            let index = features.len();
+            let index = position;
+            position += 1;
             let Some(geometry) = feature.get("geometry").filter(|value| !value.is_null()) else {
                 return Ok(());
             };

@@ -223,3 +223,15 @@ fn inline_data_is_shared_not_copied_per_request() {
     };
     assert!(std::sync::Arc::ptr_eq(first, second));
 }
+
+#[test]
+fn generated_ids_count_the_position_in_the_document_even_past_skipped_features() {
+    let collection = json!({"type": "FeatureCollection", "features": [
+        {"type": "Feature", "geometry": null, "properties": {}},
+        {"type": "Feature", "geometry": {"type": "Point", "coordinates": [0, 0]}}]});
+    let ids: Vec<_> = features(&index(collection, json!({"generateId": true})).tile(tile(0, 0, 0)))
+        .iter()
+        .map(|feature| feature.id)
+        .collect();
+    assert_eq!(ids, [Some(1)]);
+}

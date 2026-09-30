@@ -40,10 +40,10 @@ impl HttpClient for Documents {
 }
 
 fn url_source(generation: u64) -> GeoJsonSource {
-    serde_json::from_value(
-        json!({"data": "https://data.invalid/a.geojson", "generation": generation}),
-    )
-    .expect("source")
+    let mut source: GeoJsonSource =
+        serde_json::from_value(json!({"data": "https://data.invalid/a.geojson"})).expect("source");
+    source.generation = generation;
+    source
 }
 
 fn client(documents: &Documents) -> SourceClient<Documents> {
@@ -147,4 +147,36 @@ async fn missing_and_broken_documents_are_typed_and_remembered_but_transient_one
         .geojson_index(&client, "flaky", &url_source(0))
         .await
         .expect("recovers");
+}
+
+#[tokio::test]
+async fn two_styles_with_one_source_name_never_share_an_index() {
+    let documents = Documents::default();
+    let (client, cache) = (client(&documents), AssetCache::default());
+    let declare = |x: f64| -> GeoJsonSource {
+        serde_json::from_value(json!({"data": {"type": "Point", "coordinates": [x, 0.0]}}))
+            .expect("source")
+    };
+    let (first, second) = (declare(1.0), declare(2.0));
+    assert_ne!(
+        first.generation, second.generation,
+        "each parse gets its own generation"
+    );
+    let a = cache
+        .geojson_index(&client, "points", &first)
+        .await
+        .expect("first");
+    let b = cache
+        .geojson_index(&client, "points", &second)
+        .await
+        .expect("second");
+    assert!(!Arc::ptr_eq(&a, &b));
+    let again = cache
+        .geojson_index(&client, "points", &first.clone())
+        .await
+        .expect("clone");
+    assert!(
+        Arc::ptr_eq(&a, &again),
+        "a clone of one style shares its data"
+    );
 }

@@ -140,7 +140,8 @@ pub(crate) fn refresh(world: &mut World, kind: RequestKind) {
         }
         if state.pending {
             state.stale = true;
-        } else {
+        } else if state.deadline.is_none() {
+            // A tile already backing off retries at its deadline with the new data.
             state.delay = Duration::ZERO;
             state.deadline = Some(now);
         }

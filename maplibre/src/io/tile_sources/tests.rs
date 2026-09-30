@@ -253,3 +253,13 @@ fn a_missing_tile_falls_back_to_the_nearest_ancestor_that_may_exist() {
         "nothing beyond ten levels up"
     );
 }
+
+#[test]
+fn geojson_is_never_tiled_deeper_than_the_unclipped_limit() {
+    let style: Style = serde_json::from_value(serde_json::json!({"version": 8,
+        "sources": {"shapes": {"type": "geojson", "maxzoom": 24,
+            "data": {"type": "FeatureCollection", "features": []}}},
+        "layers": [{"id": "geo", "type": "fill", "source": "shapes"}]}))
+    .expect("style");
+    assert_eq!(source_max_zoom(&style, TileKind::Vector), Some(18));
+}

@@ -9,6 +9,7 @@ use crate::{
         layer::StyleLayer,
         source::{
             Source, TileAddressingScheme, VectorSource, GEOJSON_DEFAULT_MAXZOOM, GEOJSON_LAYER,
+            GEOJSON_MAX_TILED_ZOOM,
         },
         Style,
     },
@@ -54,9 +55,12 @@ impl TileKind {
                 vector.maxzoom
             }
             (Self::Raster, Source::RasterDem(dem)) => dem.maxzoom,
-            (Self::Vector, Source::GeoJson(geojson)) => {
-                Some(geojson.maxzoom.unwrap_or(GEOJSON_DEFAULT_MAXZOOM))
-            }
+            (Self::Vector, Source::GeoJson(geojson)) => Some(
+                geojson
+                    .maxzoom
+                    .unwrap_or(GEOJSON_DEFAULT_MAXZOOM)
+                    .min(GEOJSON_MAX_TILED_ZOOM),
+            ),
             _ => None,
         }
     }

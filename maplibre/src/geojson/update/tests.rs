@@ -69,33 +69,42 @@ fn base() -> Style {
 #[test]
 fn set_data_replaces_the_document_and_bumps_the_generation() {
     let mut style = base();
-    assert_eq!(generation(&style), 0);
+    let mut seen = vec![generation(&style)];
     let replacement = collection(json!([point(json!(9), "nine", [5.0, 5.0])]));
     style
         .set_geojson_data("places", GeoJsonData::Inline(Arc::new(replacement.clone())))
         .expect("set data");
     assert_eq!(data(&style), replacement);
-    assert_eq!(generation(&style), 1);
+    seen.push(generation(&style));
     style
         .set_geojson_data(
             "places",
             GeoJsonData::Url("https://data.invalid/a.json".into()),
         )
         .expect("switch to a URL");
-    assert_eq!(generation(&style), 2);
+    seen.push(generation(&style));
+    let unique: std::collections::HashSet<_> = seen.iter().collect();
+    assert_eq!(
+        unique.len(),
+        3,
+        "every version of the data has its own generation"
+    );
 }
 
 #[test]
 fn invalid_data_is_rejected_and_the_source_keeps_what_it_had() {
     let mut style = base();
-    let before = data(&style);
+    let (before, before_generation) = (data(&style), generation(&style));
     let bad = collection(json!([{"type": "Feature",
         "geometry": {"type": "Point", "coordinates": "nowhere"}}]));
     let error = style
         .set_geojson_data("places", GeoJsonData::Inline(Arc::new(bad)))
         .expect_err("invalid geometry");
     assert!(matches!(error, SourceUpdateError::Invalid { .. }));
-    assert_eq!((data(&style), generation(&style)), (before, 0));
+    assert_eq!(
+        (data(&style), generation(&style)),
+        (before, before_generation)
+    );
 }
 
 #[test]
@@ -115,6 +124,7 @@ fn only_geojson_sources_can_be_updated() {
 #[test]
 fn a_diff_adds_replaces_updates_and_removes_features_by_id() {
     let mut style = base();
+    let before_generation = generation(&style);
     style
         .update_geojson_data(
             "places",
@@ -133,7 +143,7 @@ fn a_diff_adds_replaces_updates_and_removes_features_by_id() {
         "same id is replaced in place"
     );
     assert_eq!(features[1]["properties"], json!({"size": 4}));
-    assert_eq!(generation(&style), 1);
+    assert_ne!(generation(&style), before_generation);
 }
 
 #[test]
@@ -174,7 +184,7 @@ fn promoted_properties_identify_features_for_a_diff() {
 #[test]
 fn invalid_diffs_change_nothing() {
     let mut style = base();
-    let before = data(&style);
+    let (before, before_generation) = (data(&style), generation(&style));
     for bad in [
         json!({"add": [{"type": "Feature", "properties": {},
             "geometry": {"type": "Point", "coordinates": [0, 0]}}]}),
@@ -185,7 +195,10 @@ fn invalid_diffs_change_nothing() {
         style
             .update_geojson_data("places", &diff(bad))
             .expect_err("rejected");
-        assert_eq!((data(&style), generation(&style)), (before.clone(), 0));
+        assert_eq!(
+            (data(&style), generation(&style)),
+            (before.clone(), before_generation)
+        );
     }
 }
 

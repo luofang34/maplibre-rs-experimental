@@ -14,7 +14,7 @@ use crate::{
     context::MapContext,
     io::tile_retry::{self, RequestKind},
     style::{
-        source::{GeoJsonData, GeoJsonSource, PromoteId, Source, GEOJSON_LAYER},
+        source::{fresh_generation, GeoJsonData, GeoJsonSource, PromoteId, Source, GEOJSON_LAYER},
         Style,
     },
 };
@@ -131,7 +131,7 @@ impl Style {
             })?;
         }
         source.data = data;
-        source.generation = source.generation.wrapping_add(1);
+        source.generation = fresh_generation();
         Ok(())
     }
 
@@ -158,7 +158,7 @@ impl Style {
             }
         })?;
         source.data = GeoJsonData::Inline(Arc::new(updated));
-        source.generation = source.generation.wrapping_add(1);
+        source.generation = fresh_generation();
         Ok(())
     }
 }

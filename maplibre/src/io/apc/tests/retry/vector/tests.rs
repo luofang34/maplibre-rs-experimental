@@ -385,3 +385,29 @@ async fn edits_by_feature_reach_loaded_tiles() {
     test.receive().await;
     assert!(!test.loaded(), "the removed feature is gone from the tile");
 }
+
+#[tokio::test]
+async fn set_data_does_not_cut_short_the_backoff_of_a_failing_tile() {
+    let mut test = Fixture::new(Kind::Vector, false).await;
+    let url = format!("{}/unstable/shapes.geojson", test.source.url);
+    test.context.style = geojson_style(serde_json::Value::String(url.clone()));
+    test.frame(0);
+    test.receive().await;
+    assert_eq!(
+        test.source.requests(),
+        1,
+        "the first attempt failed with a 503"
+    );
+    test.context
+        .set_geojson_data("shapes", crate::style::source::GeoJsonData::Url(url))
+        .expect("set data");
+    test.frame(1);
+    assert_eq!(
+        test.kernel.apc().pending(),
+        0,
+        "the tile keeps waiting for its own retry deadline"
+    );
+    test.frame(1000);
+    test.frame(1001);
+    assert_eq!(test.kernel.apc().pending(), 1);
+}

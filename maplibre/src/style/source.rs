@@ -1,6 +1,10 @@
 //! Named vector, image, elevation and GeoJSON source definitions.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{hash_map::RandomState, HashMap},
+    hash::{BuildHasher, Hasher},
+    sync::Arc,
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -62,8 +66,10 @@ pub struct GeoJsonSource {
     /// Numbers features without an id by their position in the document.
     #[serde(rename = "generateId", default, skip_serializing_if = "is_false")]
     pub generate_id: bool,
-    /// Identifies the data version; a changed value makes workers load and index it again.
-    #[serde(default, skip_serializing_if = "is_zero")]
+    /// Identifies this version of the data. It is unique per parsed style and per change, so
+    /// workers that share one cache never mix up two documents of the same source name, and a
+    /// changed value makes them load and index the data again.
+    #[serde(skip, default = "fresh_generation")]
     pub generation: u64,
 }
 
@@ -71,12 +77,17 @@ fn is_false(value: &bool) -> bool {
     !value
 }
 
-fn is_zero(value: &u64) -> bool {
-    *value == 0
+/// A generation no other source version has, without any global counter.
+pub fn fresh_generation() -> u64 {
+    RandomState::new().build_hasher().finish()
 }
 
 /// The GL JS default for a GeoJSON source's `maxzoom`.
 pub const GEOJSON_DEFAULT_MAXZOOM: u8 = 18;
+
+/// The deepest zoom GeoJSON is tiled at. Features are not clipped, so deeper tiles would place
+/// vertices beyond the vector tile grid's integer range; deeper views overzoom this level.
+pub const GEOJSON_MAX_TILED_ZOOM: u8 = 18;
 
 /// TileJSON-compatible addressing shared by vector and raster image sources.
 /// Raster sources additionally use `tile_size` to choose their visible tile zoom.
