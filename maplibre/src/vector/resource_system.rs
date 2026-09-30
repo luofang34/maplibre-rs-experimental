@@ -88,6 +88,10 @@ pub fn resource_system(
         format: surface.surface_format(),
         multisampling: surface.is_multisampling_supported(settings.msaa),
         projection: projection_resources.bind_group_layout(),
+        pattern: device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("pattern layout"),
+            entries: &super::pattern::layout_entries(),
+        }),
     };
     setup.initialize(
         vector_pipeline,
@@ -97,10 +101,15 @@ pub fn resource_system(
     );
     setup.initialize_extrusion(extrusion_pipeline);
     let pattern_pipeline = missing_pattern.then(|| setup.create_pattern());
+    let pattern_layout = setup.pattern.clone();
     if let Some(pipeline) = pattern_pipeline {
         world
             .resources
-            .insert(super::pattern::PatternResources::new(device, pipeline));
+            .insert(super::pattern::PatternResources::new(
+                device,
+                pipeline,
+                pattern_layout,
+            ));
     }
     if let Some(patterns) = world
         .resources
@@ -117,6 +126,8 @@ struct PipelineSetup<'a> {
     format: wgpu::TextureFormat,
     multisampling: bool,
     projection: &'a wgpu::BindGroupLayout,
+    /// The second bind group of every pipeline that draws an image.
+    pattern: wgpu::BindGroupLayout,
 }
 
 impl PipelineSetup<'_> {
@@ -158,24 +169,18 @@ impl PipelineSetup<'_> {
     }
 
     fn create_pattern(&self) -> wgpu::RenderPipeline {
-        let pattern = self
-            .device
-            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("fill pattern layout"),
-                entries: &super::pattern::layout_entries(),
-            });
         self.create(
             "fill_pattern_pipeline",
             &shaders::FillPatternShader {
                 format: self.format,
             },
-            &[self.projection, &pattern],
+            &[self.projection, &self.pattern],
             false,
         )
     }
 
     fn create_extrusion(&self, pass: shaders::ExtrusionPass) -> wgpu::RenderPipeline {
-        use shaders::ExtrusionPass::{Clear, Color, Depth};
+        use shaders::ExtrusionPass::{Clear, Color, Depth, PatternColor};
 
         let shader = shaders::FillExtrusionShader {
             format: self.format,
@@ -185,6 +190,7 @@ impl PipelineSetup<'_> {
             match pass {
                 Depth => "extrusion_depth_pipeline",
                 Color => "extrusion_color_pipeline",
+                PatternColor => "extrusion_pattern_pipeline",
                 Clear => "extrusion_clear_pipeline",
             }
             .into(),
@@ -205,7 +211,7 @@ impl PipelineSetup<'_> {
         if let Some(state) = &mut descriptor.depth_stencil {
             state.depth_write_enabled = Some(pass == Depth);
             state.depth_compare = Some(match pass {
-                Depth | Color => wgpu::CompareFunction::GreaterEqual,
+                Depth | Color | PatternColor => wgpu::CompareFunction::GreaterEqual,
                 Clear => wgpu::CompareFunction::Always,
             });
             // Tile references use the low seven bits; the top bit marks the pixels the colour
@@ -224,7 +230,7 @@ impl PipelineSetup<'_> {
             };
             match pass {
                 Depth => {}
-                Color => state.stencil.front = marked,
+                Color | PatternColor => state.stencil.front = marked,
                 Clear => state.stencil.front = unmark,
             }
             state.stencil.back = state.stencil.front;
@@ -233,7 +239,12 @@ impl PipelineSetup<'_> {
                 state.stencil.write_mask = STENCIL_MARK;
             }
         }
-        descriptor.initialize_with_prefix_layouts(self.device, &[self.projection])
+        let layouts: &[&wgpu::BindGroupLayout] = if pass == PatternColor {
+            &[self.projection, &self.pattern]
+        } else {
+            &[self.projection]
+        };
+        descriptor.initialize_with_prefix_layouts(self.device, layouts)
     }
 
     fn initialize_extrusion(&self, extrusion: &mut Eventually<ExtrusionPipeline>) {
@@ -241,6 +252,7 @@ impl PipelineSetup<'_> {
             depth: self.create_extrusion(shaders::ExtrusionPass::Depth),
             color: self.create_extrusion(shaders::ExtrusionPass::Color),
             clear: self.create_extrusion(shaders::ExtrusionPass::Clear),
+            pattern: self.create_extrusion(shaders::ExtrusionPass::PatternColor),
         });
     }
 

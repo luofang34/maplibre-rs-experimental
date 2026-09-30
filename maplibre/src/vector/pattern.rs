@@ -21,6 +21,7 @@ struct PatternBinding {
 /// The pipeline and the per-layer bindings of layers that fill with a repeating image.
 pub(crate) struct PatternResources {
     pipeline: wgpu::RenderPipeline,
+    layout: wgpu::BindGroupLayout,
     layers: HashMap<String, PatternBinding>,
     sampler: wgpu::Sampler,
 }
@@ -57,12 +58,13 @@ pub(crate) fn layout_entries() -> Vec<wgpu::BindGroupLayoutEntry> {
     ]
 }
 
-/// The name of the image a fill layer repeats at a zoom, if it repeats one.
+/// The name of the image a fill or extrusion layer repeats at a zoom, if it repeats one.
 pub(crate) fn pattern_name(paint: &LayerPaint, zoom: f64) -> Option<String> {
-    let LayerPaint::Fill(fill) = paint else {
-        return None;
+    let value = match paint {
+        LayerPaint::Fill(fill) => fill.fill_pattern.as_ref()?,
+        LayerPaint::FillExtrusion(extrusion) => extrusion.fill_extrusion_pattern.as_ref()?,
+        _ => return None,
     };
-    let value = fill.fill_pattern.as_ref()?;
     StyleProperty::<TextField>::parse(value)
         .evaluate_at_zoom(zoom)
         .map(|name| name.0)
@@ -80,7 +82,11 @@ fn fingerprint(name: &str, image: &StyleImage) -> u64 {
 
 impl PatternResources {
     /// Wraps the pipeline, whose second bind group layout is [`layout_entries`].
-    pub(crate) fn new(device: &wgpu::Device, pipeline: wgpu::RenderPipeline) -> Self {
+    pub(crate) fn new(
+        device: &wgpu::Device,
+        pipeline: wgpu::RenderPipeline,
+        layout: wgpu::BindGroupLayout,
+    ) -> Self {
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             address_mode_u: wgpu::AddressMode::Repeat,
             address_mode_v: wgpu::AddressMode::Repeat,
@@ -90,6 +96,7 @@ impl PatternResources {
         });
         Self {
             pipeline,
+            layout,
             layers: HashMap::new(),
             sampler,
         }
@@ -181,7 +188,7 @@ impl PatternResources {
         let view = texture.create_view(&Default::default());
         Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("fill pattern"),
-            layout: &self.pipeline.get_bind_group_layout(1),
+            layout: &self.layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,

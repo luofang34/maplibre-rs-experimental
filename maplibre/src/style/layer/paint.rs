@@ -86,6 +86,10 @@ pub struct FillExtrusionPaint {
     )]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fill_extrusion_color: Option<StyleProperty<Color>>,
+    /// Name of the image the walls and roof repeat instead of a colour, as written.
+    #[serde(rename = "fill-extrusion-pattern", default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fill_extrusion_pattern: Option<serde_json::Value>,
     /// Opacity of the whole layer at the view zoom.
     #[serde(rename = "fill-extrusion-opacity")]
     #[serde(

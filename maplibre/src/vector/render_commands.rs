@@ -228,6 +228,8 @@ pub mod extrusion_pass {
     pub const COLOR: u8 = 1;
     /// Stencil reset.
     pub const CLEAR: u8 = 2;
+    /// Colour from an image, once per pixel.
+    pub const PATTERN: u8 = 3;
 }
 
 impl<P: PhaseItem, const PASS: u8> RenderCommand<P> for SetExtrusionPipeline<PASS> {
@@ -248,6 +250,7 @@ impl<P: PhaseItem, const PASS: u8> RenderCommand<P> for SetExtrusionPipeline<PAS
         pass.set_pipeline(match PASS {
             extrusion_pass::DEPTH => &pipeline.depth,
             extrusion_pass::COLOR => &pipeline.color,
+            extrusion_pass::PATTERN => &pipeline.pattern,
             _ => &pipeline.clear,
         });
         pass.set_bind_group(
@@ -261,6 +264,26 @@ impl<P: PhaseItem, const PASS: u8> RenderCommand<P> for SetExtrusionPipeline<PAS
 
 /// Binds and draws a polygon bucket filled with a repeating image.
 pub type DrawPatternTiles = (SetPatternTilePipeline, DrawVectorTile);
+/// Binds the image of the item's layer at the second bind group.
+pub struct SetPatternBindGroup;
+impl RenderCommand<LayerItem> for SetPatternBindGroup {
+    fn render<'w>(
+        world: &'w World,
+        item: &LayerItem,
+        pass: &mut wgpu::RenderPass<'w>,
+    ) -> RenderCommandResult {
+        let Some(binding) = world
+            .resources
+            .get::<super::pattern::PatternResources>()
+            .and_then(|patterns| patterns.binding(&item.style_layer))
+        else {
+            return RenderCommandResult::Failure;
+        };
+        pass.set_bind_group(1, binding, &[]);
+        RenderCommandResult::Success
+    }
+}
+
 /// Draws an extruded bucket into depth only.
 pub type DrawExtrusionDepth = (
     SetExtrusionPipeline<{ extrusion_pass::DEPTH }>,
@@ -269,6 +292,12 @@ pub type DrawExtrusionDepth = (
 /// Draws an extruded bucket where its depth pass left the nearest surface, once per pixel.
 pub type DrawExtrusionColor = (
     SetExtrusionPipeline<{ extrusion_pass::COLOR }>,
+    DrawVectorTile,
+);
+/// Draws an extruded bucket from an image, once per pixel.
+pub type DrawExtrusionPatternColor = (
+    SetExtrusionPipeline<{ extrusion_pass::PATTERN }>,
+    SetPatternBindGroup,
     DrawVectorTile,
 );
 /// Resets the stencil bit the colour draw marked.

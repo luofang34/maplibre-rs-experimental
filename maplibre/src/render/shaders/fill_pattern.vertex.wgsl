@@ -40,9 +40,18 @@ fn main(
     // agree where they meet: the tile's corner in map pixels, taken modulo the pattern size,
     // plus the position in the tile in pixels.
     let tile_units_to_pixels = 1.0 / (8.0 * zoom_factor);
-    let view_scale = 1.0 / (zoom_factor * tile_mercator_coords.z * 4096.0);
-    let origin = tile_mercator_coords.xy * 512.0 * view_scale;
-    let offset = origin - pattern.size.xy * floor(origin / pattern.size.xy);
+    // The tile's column and row are exact integers and scaling them by powers of two is
+    // exact, so the corner splits without loss into a high and a low part, as GL JS does,
+    // and the modulo of the pattern size is taken in steps that stay small.
+    let tile_scale = 1.0 / (tile_mercator_coords.z * 4096.0);
+    let corner = floor(tile_mercator_coords.xy * tile_scale + vec2<f32>(0.5)) * 512.0 / zoom_factor;
+    let upper = floor(corner / 65536.0);
+    let lower = corner - upper * 65536.0;
+    let size = pattern.size.xy;
+    let upper_mod = upper - size * floor(upper / size);
+    let coarse = upper_mod * 256.0 - size * floor(upper_mod * 256.0 / size);
+    let low = coarse * 256.0 + lower;
+    let offset = low - size * floor(low / size);
     let pattern_position = (position + layer_translate) * tile_units_to_pixels + offset;
 
     return VertexOutput(color, pattern_position, projected.horizon_distance, final_position);

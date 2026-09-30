@@ -13,6 +13,8 @@ pub enum ExtrusionPass {
     Depth,
     /// Lit colour where the depth pass left its nearest surface, once per pixel.
     Color,
+    /// The colour pass with an image in place of the colour.
+    PatternColor,
     /// Nothing but the stencil reset of the pixels the colour pass marked.
     Clear,
 }
@@ -54,6 +56,11 @@ impl Shader for FillExtrusionShader {
                             std::mem::offset_of!(ShaderVertex, elevation) as u64,
                             wgpu::VertexFormat::Float32,
                             11,
+                        ),
+                        attribute(
+                            std::mem::offset_of!(ShaderVertex, edge_distance) as u64,
+                            wgpu::VertexFormat::Float32,
+                            10,
                         ),
                     ],
                 },
@@ -111,13 +118,16 @@ impl Shader for FillExtrusionShader {
     fn describe_fragment(&self) -> FragmentState {
         FragmentState {
             source: include_str!("fill_extrusion.fragment.wgsl"),
-            entry_point: "main",
+            entry_point: match self.pass {
+                ExtrusionPass::PatternColor => "pattern_main",
+                _ => "main",
+            },
             targets: vec![Some(wgpu::ColorTargetState {
                 format: self.format,
                 blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
                 write_mask: match self.pass {
                     ExtrusionPass::Depth | ExtrusionPass::Clear => wgpu::ColorWrites::empty(),
-                    ExtrusionPass::Color => wgpu::ColorWrites::ALL,
+                    ExtrusionPass::Color | ExtrusionPass::PatternColor => wgpu::ColorWrites::ALL,
                 },
             })],
         }

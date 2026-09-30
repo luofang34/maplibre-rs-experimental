@@ -3,6 +3,12 @@
 struct VertexOutput {
     @location(0) v_color: vec4<f32>,
     @location(4) horizon_distance: f32,
+    // For a pattern: the position in the image space before the pattern size is applied, the
+    // corner of the tile in the same units, and the light that shades the image.
+    @location(5) pattern_pixels: vec2<f32>,
+    @location(6) @interpolate(flat) origin_upper: vec2<f32>,
+    @location(8) @interpolate(flat) origin_lower: vec2<f32>,
+    @location(7) lighting: vec4<f32>,
     @builtin(position) @invariant position: vec4<f32>,
 };
 
@@ -18,6 +24,8 @@ fn main(
     @location(6) translate3: vec4<f32>,
     @location(7) translate4: vec4<f32>,
     @location(8) color: vec4<f32>,
+    @location(9) zoom_factor: f32,
+    @location(10) edge_distance: f32,
     @location(11) height: f32,
     @location(12) light_color: vec4<f32>,
     // Opacity, vertical gradient and light intensity.
@@ -44,7 +52,7 @@ fn main(
     let lit = surface + vec3<f32>(0.03);
     var directional = clamp(dot(normal, light_position.xyz), 0.0, 1.0);
     directional = mix(1.0 - intensity, max(1.0 - colorvalue + intensity, 1.0), directional);
-    if abs(normal.y) * 16384.0 >= 0.5 {
+    if is_wall {
         let gradient = clamp(
             (top + base_in) * pow(height / 150.0, 0.5),
             mix(0.7, 0.98, 1.0 - intensity),
@@ -57,5 +65,42 @@ fn main(
         mix(vec3<f32>(0.0), vec3<f32>(0.3), vec3<f32>(1.0) - light_color.rgb),
         vec3<f32>(1.0),
     );
-    return VertexOutput(vec4<f32>(rgb, 1.0) * paint.x, projected.horizon_distance, projected.clip_position);
+
+    // The pattern is fixed to the pixel grid of the map at the view zoom. A roof takes its
+    // place in the tile; a wall takes its distance along the ring and its height.
+    let tile_units_to_pixels = 1.0 / (8.0 * zoom_factor);
+    let tile_scale = 1.0 / (tile_mercator_coords.z * 4096.0);
+    let height_factor = -tile_scale / 4096.0;
+    let pattern_place = select(position, vec2<f32>(edge_distance, z * height_factor), is_wall);
+    let view_scale = tile_scale / zoom_factor;
+    // The corner of the tile in map pixels, split as GL JS splits it so that taking it modulo
+    // the pattern size loses nothing: the tile's column and row are exact integers, and
+    // scaling them by powers of two is exact too.
+    let corner = floor(tile_mercator_coords.xy * tile_scale + vec2<f32>(0.5)) * 512.0 * (view_scale / tile_scale);
+    let origin_upper = floor(corner / 65536.0);
+    let origin_lower = corner - origin_upper * 65536.0;
+    let pattern_light = mix(1.0 - intensity, max(0.5 + intensity, 1.0), clamp(dot(normal, light_position.xyz), 0.0, 1.0));
+    var pattern_directional = pattern_light;
+    if is_wall {
+        let gradient = clamp(
+            (top + base_in) * pow(height / 150.0, 0.5),
+            mix(0.7, 0.98, 1.0 - intensity),
+            1.0,
+        );
+        pattern_directional *= (1.0 - paint.y) + paint.y * gradient;
+    }
+    let pattern_rgb = clamp(
+        pattern_directional * light_color.rgb,
+        mix(vec3<f32>(0.0), vec3<f32>(0.3), vec3<f32>(1.0) - light_color.rgb),
+        vec3<f32>(1.0),
+    );
+    return VertexOutput(
+        vec4<f32>(rgb, 1.0) * paint.x,
+        projected.horizon_distance,
+        pattern_place * tile_units_to_pixels,
+        origin_upper,
+        origin_lower,
+        vec4<f32>(pattern_rgb, 1.0) * paint.x,
+        projected.clip_position,
+    );
 }

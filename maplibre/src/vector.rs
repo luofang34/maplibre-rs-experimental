@@ -75,6 +75,8 @@ struct ExtrusionPipeline {
     depth: wgpu::RenderPipeline,
     color: wgpu::RenderPipeline,
     clear: wgpu::RenderPipeline,
+    /// The colour pass with an image in place of the colour.
+    pattern: wgpu::RenderPipeline,
 }
 
 struct CirclePipeline(wgpu::RenderPipeline);

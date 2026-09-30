@@ -112,14 +112,21 @@ fn push_wall<I: From<VertexId>>(
     [a, b]: [[f32; 2]; 2],
     normal: [f32; 2],
     (base, height): (f32, f32),
+    edge_distances: [f32; 2],
 ) {
     let first = buffer.vertices.len() as u32;
     let index = |offset: u32| I::from(VertexId(first + offset));
-    for (point, top) in [(a, false), (a, true), (b, true), (b, false)] {
+    for (point, top, distance) in [
+        (a, false, edge_distances[0]),
+        (a, true, edge_distances[0]),
+        (b, true, edge_distances[1]),
+        (b, false, edge_distances[1]),
+    ] {
         let scale = if top { 2.0 } else { 1.0 };
         let mut vertex = ShaderVertex::new(point, [normal[0] * scale, normal[1] * scale]);
         vertex.distance = base;
         vertex.elevation = height;
+        vertex.edge_distance = distance;
         buffer.vertices.push(vertex);
     }
     buffer.indices.extend([0, 1, 2, 0, 2, 3].map(index));
@@ -149,14 +156,17 @@ pub(super) fn extrude<I: From<VertexId> + std::ops::Add + MaxIndex>(
         // other way round: the wall of an outer ring takes the inside direction and the wall
         // of a hole the direction into the ring's outside.
         let facing = if is_hole(index, &rings) { area } else { -area }.signum();
+        let mut travelled = 0.0;
         for (a, b) in ring.iter().zip(ring.iter().cycle().skip(1)) {
             let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
             let length = dx.hypot(dy);
+            let start = travelled;
+            travelled += length;
             if length == 0.0 || on_clipped_edge(*a, *b) {
                 continue;
             }
             let normal = [facing * dy / length, -facing * dx / length];
-            push_wall(buffer, [*a, *b], normal, heights);
+            push_wall(buffer, [*a, *b], normal, heights, [start, travelled]);
         }
     }
     Ok(())

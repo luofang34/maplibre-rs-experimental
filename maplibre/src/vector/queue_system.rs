@@ -15,7 +15,7 @@ use crate::{
     vector::{
         render_commands::{
             DrawCircleTiles, DrawExtrusionClear, DrawExtrusionColor, DrawExtrusionDepth,
-            DrawLineTiles, DrawPatternTiles, DrawVectorTiles,
+            DrawExtrusionPatternColor, DrawLineTiles, DrawPatternTiles, DrawVectorTiles,
         },
         VectorBufferPool,
     },
@@ -116,13 +116,19 @@ pub fn queue_system(
                                     },
                                     source_shape: source_shape.clone(),
                                 });
+                                let color: Box<dyn crate::render::render_phase::Draw<LayerItem>> =
+                                    if pattern_layers.contains(layer_entry.style_layer.id.as_str())
+                                    {
+                                        Box::new(
+                                            DrawState::<LayerItem, DrawExtrusionPatternColor>::new(
+                                            ),
+                                        )
+                                    } else {
+                                        Box::new(DrawState::<LayerItem, DrawExtrusionColor>::new())
+                                    };
                                 extrusion_colors.push(LayerItem {
                                     projection: ProjectionBinding::View,
-                                    draw_function: Box::new(DrawState::<
-                                        LayerItem,
-                                        DrawExtrusionColor,
-                                    >::new(
-                                    )),
+                                    draw_function: color,
                                     index: layer_entry.style_layer.index,
                                     generate_borders: false,
                                     style_layer: layer_entry.style_layer.id.clone(),
