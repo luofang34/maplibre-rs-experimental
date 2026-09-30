@@ -64,11 +64,11 @@ impl LayerPaint {
             LayerPaint::Line(paint) => paint.line_opacity.clone(),
             LayerPaint::Circle(paint) => paint.circle_opacity.clone(),
             LayerPaint::ColorRelief(paint) => paint.color_relief_opacity.clone(),
-            LayerPaint::Heatmap(paint) => paint.heatmap_opacity.clone(),
             LayerPaint::Background(_)
             | LayerPaint::Raster(_)
             | LayerPaint::Hillshade(_)
-            | LayerPaint::Symbol(_) => None,
+            | LayerPaint::Symbol(_)
+            | LayerPaint::Heatmap(_) => None,
         }
     }
 

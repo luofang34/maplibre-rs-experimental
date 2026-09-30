@@ -22,9 +22,12 @@ pub(super) fn process_layer<T: VectorTransferables, C: Context>(
         }
     }
     match style.paint.as_ref() {
-        Some(paint @ (LayerPaint::Line(_) | LayerPaint::Fill(_) | LayerPaint::Circle(_))) => {
-            vector_layer(layer, style, paint, request, context)
-        }
+        Some(
+            paint @ (LayerPaint::Line(_)
+            | LayerPaint::Fill(_)
+            | LayerPaint::Circle(_)
+            | LayerPaint::Heatmap(_)),
+        ) => vector_layer(layer, style, paint, request, context),
         Some(LayerPaint::Symbol(paint)) => {
             symbol_layer(layer, style, paint, request, context, atlas)
         }
@@ -45,6 +48,8 @@ fn tessellator(paint: &LayerPaint, request: &VectorTileRequest) -> ZeroTessellat
     let mut tessellator = match paint {
         LayerPaint::Circle(circle) => ZeroTessellator::default()
             .with_circles(CircleOptions::for_paint(circle, f64::from(zoom))),
+        LayerPaint::Heatmap(heatmap) => ZeroTessellator::default()
+            .with_circles(CircleOptions::for_heatmap(heatmap, f64::from(zoom))),
         _ if request.projection.uses_globe_rendering(f64::from(zoom)) => {
             let last_tile = i64::from(crate::coords::ZOOM_BOUNDS[usize::from(zoom)]) - 1;
             ZeroTessellator::default().with_globe_subdivision(

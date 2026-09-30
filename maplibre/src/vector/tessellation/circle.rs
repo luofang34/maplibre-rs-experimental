@@ -11,7 +11,7 @@ use super::ZeroTessellator;
 use crate::{
     coords::EXTENT,
     render::ShaderVertex,
-    style::{circle::CirclePaint, layer::StyleProperty},
+    style::{circle::CirclePaint, heatmap::HeatmapPaint, layer::StyleProperty},
 };
 
 /// Vertex order of a circle quad; corners follow the shader's `vertex_index % 4` decoding.
@@ -24,6 +24,8 @@ pub struct CircleOptions {
     pub radius: StyleProperty<f32>,
     /// Stroke width in screen pixels, evaluated per feature.
     pub stroke_width: StyleProperty<f32>,
+    /// What the stroke-width slot holds when the property has no value for a feature.
+    pub stroke_width_default: f32,
     /// Zoom of the tile, at which zoom-driven properties are evaluated.
     pub zoom: f64,
 }
@@ -34,6 +36,22 @@ impl CircleOptions {
         Self {
             radius: paint.radius(),
             stroke_width: paint.stroke_width(),
+            stroke_width_default: 0.0,
+            zoom,
+        }
+    }
+
+    /// Options for a heatmap point: a unit quad whose weight travels in the slot circles use
+    /// for the stroke width, because the pixel radius is one value for the whole layer and
+    /// comes from the layer's instance record. A feature without a weight counts once.
+    pub fn for_heatmap(paint: &HeatmapPaint, zoom: f64) -> Self {
+        Self {
+            radius: StyleProperty::Constant(1.0),
+            stroke_width: paint
+                .heatmap_weight
+                .clone()
+                .unwrap_or(StyleProperty::Constant(1.0)),
+            stroke_width_default: 1.0,
             zoom,
         }
     }
@@ -65,7 +83,7 @@ where
         let stroke_width = options
             .stroke_width
             .evaluate_for(&self.feature_properties, options.zoom)
-            .unwrap_or(0.0)
+            .unwrap_or(options.stroke_width_default)
             .max(0.0);
 
         let base = self.buffer.vertices.len() as u32;

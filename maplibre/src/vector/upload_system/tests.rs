@@ -105,3 +105,18 @@ async fn empty_tiles_do_not_starve_later_geometry_uploads() {
         "empty buckets must leave upload slots for later geometry"
     );
 }
+
+#[test]
+fn a_heatmap_layer_carries_radius_and_intensity_at_the_view_zoom() {
+    let layer: crate::style::layer::StyleLayer = serde_json::from_value(serde_json::json!({
+        "id": "heat", "type": "heatmap", "source": "points",
+        "paint": {
+            "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 0, 10, 10, 30],
+            "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 0, 1, 10, 3]
+        }
+    }))
+    .expect("layer");
+    let metadata = super::metadata_for_layer(&layer, Default::default(), 5.0, 0.0);
+    assert_eq!(metadata.line_width, 20.0);
+    assert_eq!(metadata.circle_params[0], 2.0);
+}

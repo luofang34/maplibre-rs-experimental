@@ -88,6 +88,7 @@ mod circles {
             .with_circles(CircleOptions {
                 radius,
                 stroke_width: StyleProperty::Constant(stroke_width),
+                stroke_width_default: 0.0,
                 zoom: 3.0,
             })
             .with_feature_opacity(
@@ -199,5 +200,42 @@ mod circles {
         point(&mut tessellator, 2.0, 2.0);
 
         assert_eq!(tessellator.buffer.indices[6..], [4, 5, 6, 4, 6, 7]);
+    }
+
+    fn heatmap_tessellator(paint: serde_json::Value) -> ZeroTessellator<IndexDataType> {
+        let paint: crate::style::heatmap::HeatmapPaint =
+            serde_json::from_value(paint).expect("heatmap paint");
+        ZeroTessellator::<IndexDataType>::default()
+            .with_circles(CircleOptions::for_heatmap(&paint, 3.0))
+    }
+
+    #[test]
+    fn a_heatmap_point_is_a_unit_quad_carrying_its_weight() {
+        let mut tessellator = heatmap_tessellator(serde_json::json!({
+            "heatmap-weight": ["get", "mag"]
+        }));
+        tessellator
+            .property(0, "mag", &ColumnValue::Double(0.25))
+            .expect("property");
+        point(&mut tessellator, 100.0, 200.0);
+        tessellator.feature_end(0).expect("feature ends");
+        point(&mut tessellator, 300.0, 400.0);
+        tessellator.feature_end(1).expect("feature ends");
+
+        assert_eq!(tessellator.buffer.vertices.len(), 8);
+        assert_eq!(tessellator.buffer.vertices[0].normal, [1.0, 0.25]);
+        assert_eq!(
+            tessellator.buffer.vertices[4].normal,
+            [1.0, 1.0],
+            "a feature without the property counts once"
+        );
+    }
+
+    #[test]
+    fn a_heatmap_without_a_weight_counts_every_point_once() {
+        let mut tessellator = heatmap_tessellator(serde_json::json!({}));
+        point(&mut tessellator, 10.0, 10.0);
+        tessellator.feature_end(0).expect("feature ends");
+        assert_eq!(tessellator.buffer.vertices[0].normal, [1.0, 1.0]);
     }
 }
