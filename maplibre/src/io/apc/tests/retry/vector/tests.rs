@@ -730,3 +730,58 @@ async fn a_layer_removed_while_its_tile_is_in_flight_does_not_come_back() {
         "and the refetch does not restore it"
     );
 }
+
+#[tokio::test]
+async fn a_removed_url_source_is_not_requested_again_and_a_readded_one_loads_its_own_data() {
+    let mut test = Fixture::new(Kind::Vector, false).await;
+    let url = format!("{}/unstable/shapes.geojson", test.source.url);
+    test.context.style = geojson_style(serde_json::Value::String(url.clone()));
+    test.frame(0);
+    test.receive().await;
+    assert_eq!(
+        test.source.requests(),
+        1,
+        "the first attempt failed with a 503 and backs off"
+    );
+
+    test.context
+        .mutate_style(|style| style.remove_layer("area"))
+        .expect("remove layer");
+    test.context
+        .mutate_style(|style| style.remove_source("shapes"))
+        .expect("remove source");
+    test.frame(1000);
+    test.frame(1001);
+    test.receive().await;
+    assert_eq!(
+        test.source.requests(),
+        1,
+        "nothing asks the removed source's URL again at the retry deadline"
+    );
+
+    test.source
+        .set(Response::Bytes(WORLD_POLYGON.as_bytes().to_vec()));
+    let readded: crate::style::source::Source =
+        serde_json::from_value(serde_json::json!({"type": "geojson", "data": url}))
+            .expect("source");
+    test.context
+        .mutate_style(|style| style.add_source("shapes", readded))
+        .expect("add source");
+    test.context
+        .mutate_style(|style| {
+            style.add_layer(
+                serde_json::json!({"id": "area", "source": "shapes", "type": "fill",
+                    "paint": {"fill-color": "#00ff00"}}),
+                None,
+            )
+        })
+        .expect("add layer");
+    test.frame(2000);
+    test.receive().await;
+    assert_eq!(
+        layers_with_geometry(&test),
+        ["area"],
+        "the readded source loads its own data"
+    );
+    assert_eq!(test.source.requests(), 2);
+}
