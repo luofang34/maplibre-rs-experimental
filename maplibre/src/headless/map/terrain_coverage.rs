@@ -194,4 +194,6 @@ mod source_identity;
 
 mod alpha;
 
+mod hillshade;
+
 mod uniforms;
