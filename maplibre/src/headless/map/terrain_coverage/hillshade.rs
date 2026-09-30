@@ -255,6 +255,8 @@ async fn a_translucent_shadow_colour_darkens_less_than_an_opaque_one() {
     let shadow = |color: &str| serde_json::json!({"hillshade-exaggeration": 1.0, "hillshade-shadow-color": color});
     let opaque = center_of(Rise::West, shadow("#000000"), 0.0).await;
     let translucent = center_of(Rise::West, shadow("rgba(0, 0, 0, 0.5)"), 0.0).await;
+    // The gap is small: a translucent shadow lets more of the black accent colour through,
+    // which darkens the slope again, so only the ordering and a few levels can be asserted.
     assert!(
         translucent[0] > opaque[0] + 4 && translucent[0] < 128,
         "half-transparent shadow lies between the opaque shadow and the ground: \
