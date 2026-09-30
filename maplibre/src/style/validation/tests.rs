@@ -83,7 +83,7 @@ fn raster_adjustments_and_unknown_layer_types_are_reported() {
             serde_json::json!({"raster-opacity": 0.5}),
             "paint.raster-opacity",
         ),
-        ("heatmap", serde_json::json!({}), "heatmap"),
+        ("fill-extrusion", serde_json::json!({}), "fill-extrusion"),
     ] {
         let style = style_with_layer(serde_json::json!({
             "id": "unsupported", "type": kind, "paint": paint
@@ -264,4 +264,36 @@ fn elevation_is_only_available_to_color_relief() {
         .validate()
         .expect_err("fill evaluation has no elevation");
     assert!(errors[0].to_string().contains("paint.fill-opacity"));
+}
+
+#[test]
+fn heatmap_properties_validate_by_their_evaluation_context() {
+    let accepted = style_with_layer(serde_json::json!({
+        "id": "heat", "type": "heatmap", "source": "points",
+        "paint": {
+            "heatmap-weight": ["get", "mag"],
+            "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 0, 2, 10, 30],
+            "heatmap-color": ["interpolate", ["linear"], ["heatmap-density"], 0, "#00f", 1, "#f00"]
+        }
+    }));
+    accepted.validate().expect("heatmap styles are supported");
+    let rejected = style_with_layer(serde_json::json!({
+        "id": "heat", "type": "heatmap", "source": "points",
+        "paint": {
+            "heatmap-opacity": ["heatmap-density"],
+            "heatmap-radius": ["get", "size"],
+            "heatmap-color": ["get", "colour"]
+        }
+    }));
+    let errors = rejected
+        .validate()
+        .expect_err("misplaced inputs are reported");
+    for property in ["heatmap-opacity", "heatmap-radius"] {
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.to_string().contains(property)),
+            "{property}: {errors:?}"
+        );
+    }
 }

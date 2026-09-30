@@ -19,6 +19,8 @@ pub struct EvaluationContext<'a> {
     pub zoom: f64,
     /// Terrain elevation in metres, for `elevation`.
     pub elevation: f64,
+    /// Density of a heatmap at the colour being looked up, for `heatmap-density`.
+    pub heatmap_density: f64,
     /// Properties of the feature; none when the expression is not evaluated for a feature.
     pub properties: Option<&'a FeatureProperties>,
     /// Geometry kind of the feature, as `geometry-type` reports it.
@@ -119,6 +121,7 @@ impl Expression {
             Self::Literal(value) | Self::Folded { value, .. } => Ok(value.clone()),
             Self::Global(Global::Zoom) => Ok(Value::Number(context.zoom)),
             Self::Global(Global::Elevation) => Ok(Value::Number(context.elevation)),
+            Self::Global(Global::HeatmapDensity) => Ok(Value::Number(context.heatmap_density)),
             Self::GlobalState(key) => Ok(context
                 .global_state
                 .and_then(|state| state.get(key))

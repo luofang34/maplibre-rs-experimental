@@ -231,6 +231,7 @@ impl Parser {
             }
             "zoom" => self.nullary(args, Expression::Global(Global::Zoom)),
             "elevation" => self.nullary(args, Expression::Global(Global::Elevation)),
+            "heatmap-density" => self.nullary(args, Expression::Global(Global::HeatmapDensity)),
             "id" => self.nullary(args, Expression::Feature(FeatureProperty::Id)),
             "geometry-type" => self.nullary(args, Expression::Feature(FeatureProperty::GeometryType)),
             "properties" => self.nullary(args, Expression::Feature(FeatureProperty::Properties)),

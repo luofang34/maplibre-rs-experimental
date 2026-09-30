@@ -111,6 +111,7 @@ enum Evaluation {
     Zoom,
     Feature,
     Elevation,
+    Density,
     Filter,
 }
 
@@ -131,6 +132,7 @@ impl LayerValidation<'_> {
                 | "raster"
                 | "hillshade"
                 | "color-relief"
+                | "heatmap"
         ) {
             self.errors.push(StyleValidationError::LayerType {
                 layer: self.layer.id.clone(),
@@ -201,8 +203,10 @@ impl LayerValidation<'_> {
                 name,
                 "this rendering path does not evaluate per-feature values",
             );
-        } else if matches!(evaluation, Evaluation::Constant | Evaluation::Elevation)
-            && !property.is_zoom_constant()
+        } else if matches!(
+            evaluation,
+            Evaluation::Constant | Evaluation::Elevation | Evaluation::Density
+        ) && !property.is_zoom_constant()
         {
             self.unsupported(name, "this rendering path requires a constant value");
         }
@@ -218,6 +222,11 @@ fn missing_input(expression: &Expression, evaluation: Evaluation) -> Option<&'st
         }
         Expression::Global(Global::Elevation) if !matches!(evaluation, Evaluation::Elevation) => {
             Some("this evaluation has no terrain elevation")
+        }
+        Expression::Global(Global::HeatmapDensity)
+            if !matches!(evaluation, Evaluation::Density) =>
+        {
+            Some("this evaluation has no heatmap density")
         }
         _ => None,
     };

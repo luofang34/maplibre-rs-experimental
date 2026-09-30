@@ -1,7 +1,7 @@
 //! Property evaluation capabilities of each paint path.
 
 use super::{
-    Evaluation::{Constant, Elevation, Feature, Zoom},
+    Evaluation::{Constant, Density, Elevation, Feature, Zoom},
     LayerValidation,
 };
 use crate::style::{
@@ -46,6 +46,17 @@ impl LayerValidation<'_> {
                     p.color_relief_color.as_ref(),
                     Elevation,
                 );
+            }
+            LayerPaint::Heatmap(p) => {
+                self.property("paint.heatmap-radius", p.heatmap_radius.as_ref(), Zoom);
+                self.property("paint.heatmap-weight", p.heatmap_weight.as_ref(), Feature);
+                self.property(
+                    "paint.heatmap-intensity",
+                    p.heatmap_intensity.as_ref(),
+                    Zoom,
+                );
+                self.property("paint.heatmap-opacity", p.heatmap_opacity.as_ref(), Zoom);
+                self.property("paint.heatmap-color", p.heatmap_color.as_ref(), Density);
             }
             LayerPaint::Symbol(p) => self.symbol(p),
             LayerPaint::Raster(p) => self.raster(p),

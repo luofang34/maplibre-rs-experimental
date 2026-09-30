@@ -12,6 +12,8 @@ pub enum Global {
     Zoom,
     /// The `elevation` operator.
     Elevation,
+    /// The `heatmap-density` operator.
+    HeatmapDensity,
 }
 
 /// A property of the feature being evaluated.

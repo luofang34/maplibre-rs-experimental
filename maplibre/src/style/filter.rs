@@ -119,6 +119,7 @@ impl Filter {
         let context = EvaluationContext {
             zoom: feature.zoom,
             elevation: 0.0,
+            heatmap_density: 0.0,
             properties: Some(feature.properties),
             geometry_type: Some(feature.geometry_type.name()),
             id: feature.id.as_ref(),

@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 pub mod circle;
 pub mod expression;
 pub mod filter;
+pub mod heatmap;
 pub mod hillshade;
 pub mod layer;
 pub mod light;

@@ -57,6 +57,7 @@ impl StyleLayerDef {
         let Some(paint) = self.paint.take() else {
             return Ok(match self.type_.as_str() {
                 "circle" => Some(LayerPaint::Circle(Default::default())),
+                "heatmap" => Some(LayerPaint::Heatmap(Default::default())),
                 "hillshade" => Some(LayerPaint::Hillshade(Default::default())),
                 "color-relief" => Some(LayerPaint::ColorRelief(Default::default())),
                 "symbol" => Some(LayerPaint::Symbol(Default::default())),
@@ -71,6 +72,7 @@ impl StyleLayerDef {
             "hillshade" => parse_paint(paint, extra, LayerPaint::Hillshade)?,
             "color-relief" => parse_paint(paint, extra, LayerPaint::ColorRelief)?,
             "circle" => parse_paint(paint, extra, LayerPaint::Circle)?,
+            "heatmap" => parse_paint(paint, extra, LayerPaint::Heatmap)?,
             "symbol" => LayerPaint::Symbol(serde_json::from_value(paint)?),
             _ => {
                 *extra = serde_json::from_value(paint)?;
