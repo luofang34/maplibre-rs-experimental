@@ -165,25 +165,14 @@ fn visible_layers<'a>(
     layers
 }
 
-/// Places the features of one style layer across every visible tile together, in ascending
-/// `symbol-sort-key` order, and returns each tile's metadata in the order of `layers`.
-fn place_layer(
-    world: &crate::tcs::world::World,
-    view_state: &crate::render::view_state::ViewState,
-    projection: &crate::render::projection::ShaderProjectionData,
-    layers: &[&crate::sdf::SymbolLayerData],
-    paint: &crate::style::layer::SymbolPaint,
-    zoom_limits: [f64; 2],
-    placement: (
-        &mut CollisionGrid,
-        &mut PlacedSymbols,
-        &mut temporal::PlacementHistory,
-    ),
-) -> Vec<Vec<SDFShaderFeatureMetadata>> {
-    let (boxes, placed, history) = placement;
-    let mut metadata: Vec<_> = layers.iter().map(|layer| empty_metadata(layer)).collect();
-    let zoom = view_state.style_zoom().value();
-    let uniforms = SymbolUniforms::new(paint, zoom, [1, 1]);
+type OrderedFeature<'a> = (usize, usize, &'a crate::sdf::Feature, bool);
+
+/// Features of all `layers` in placement order: ascending `symbol-sort-key`, equal keys in tile
+/// order, and within a tile the labels that were visible first so they keep their place.
+fn ordered_features<'a>(
+    layers: &[&'a crate::sdf::SymbolLayerData],
+    history: &temporal::PlacementHistory,
+) -> Vec<OrderedFeature<'a>> {
     let mut features: Vec<_> = layers
         .iter()
         .enumerate()
@@ -203,13 +192,36 @@ fn place_layer(
             )
         })
         .collect();
-    // The sort is stable, so equal keys keep the order the tiles were given in.
-    features.sort_by(|(_, _, a, av), (_, _, b, bv)| {
+    features.sort_by(|(pa, _, a, av), (pb, _, b, bv)| {
         a.data
             .sort_key
             .total_cmp(&b.data.sort_key)
+            .then_with(|| pa.cmp(pb))
             .then_with(|| bv.cmp(av))
     });
+    features
+}
+
+/// Places the features of one style layer across every visible tile together, in ascending
+/// `symbol-sort-key` order, and returns each tile's metadata in the order of `layers`.
+fn place_layer(
+    world: &crate::tcs::world::World,
+    view_state: &crate::render::view_state::ViewState,
+    projection: &crate::render::projection::ShaderProjectionData,
+    layers: &[&crate::sdf::SymbolLayerData],
+    paint: &crate::style::layer::SymbolPaint,
+    zoom_limits: [f64; 2],
+    placement: (
+        &mut CollisionGrid,
+        &mut PlacedSymbols,
+        &mut temporal::PlacementHistory,
+    ),
+) -> Vec<Vec<SDFShaderFeatureMetadata>> {
+    let (boxes, placed, history) = placement;
+    let mut metadata: Vec<_> = layers.iter().map(|layer| empty_metadata(layer)).collect();
+    let zoom = view_state.style_zoom().value();
+    let uniforms = SymbolUniforms::new(paint, zoom, [1, 1]);
+    let features = ordered_features(layers, history);
     for (position, feature_index, feature, was_visible) in features {
         let layer = layers[position];
         let ground = symbol_elevation(world, layer, feature, paint, zoom);
@@ -355,7 +367,11 @@ impl CollisionSystem {
         )> = Vec::new();
         for (index, layer, paint) in layers {
             match groups.last_mut() {
-                Some((last, _, members)) if *last == index => members.push(layer),
+                Some((last, _, members))
+                    if *last == index && members[0].style_layer_id == layer.style_layer_id =>
+                {
+                    members.push(layer);
+                }
                 _ => groups.push((index, paint, vec![layer])),
             }
         }
