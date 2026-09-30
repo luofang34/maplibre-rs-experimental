@@ -331,14 +331,19 @@ pub(super) fn unwrapped_width(
     line_width(&text, glyphs, spacing)
 }
 
+/// Width of a line of glyphs without the spacing after the last one. Tight letter spacing
+/// makes it negative, which justifies the line as GL JS does; a line without glyphs has none.
 fn line_width(text: &str, glyphs: &HashMap<u32, AtlasEntry>, spacing: f32) -> f32 {
-    (text
+    let advances: Vec<f32> = text
         .chars()
         .filter_map(|c| glyphs.get(&(c as u32)))
         .map(|glyph| glyph.metrics[2] + spacing)
-        .sum::<f32>()
-        - spacing)
-        .max(0.0)
+        .collect();
+    if advances.is_empty() {
+        0.0
+    } else {
+        advances.iter().sum::<f32>() - spacing
+    }
 }
 
 /// A place the text may break, with the least raggedness of any way to reach it.
