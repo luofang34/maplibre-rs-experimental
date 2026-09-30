@@ -105,6 +105,30 @@ impl PlacementRules {
         grid: &CollisionGrid,
         viewport: [f64; 2],
     ) -> [bool; 2] {
+        self.visible_as(self.overlap, rectangles, glyph_boxes, grid, viewport)
+    }
+
+    /// Like `visible`, with the text treated as one that may not overlap: the first attempt of
+    /// a label with variable anchors, before it accepts overlap at its first anchor.
+    pub(super) fn visible_without_text_overlap(
+        &self,
+        rectangles: [Option<[f64; 4]>; 2],
+        glyph_boxes: &[[f64; 4]],
+        grid: &CollisionGrid,
+        viewport: [f64; 2],
+    ) -> [bool; 2] {
+        let overlap = [Overlap::Never, self.overlap[1]];
+        self.visible_as(overlap, rectangles, glyph_boxes, grid, viewport)
+    }
+
+    fn visible_as(
+        &self,
+        overlap: [Overlap; 2],
+        rectangles: [Option<[f64; 4]>; 2],
+        glyph_boxes: &[[f64; 4]],
+        grid: &CollisionGrid,
+        viewport: [f64; 2],
+    ) -> [bool; 2] {
         let accepted = [0, 1].map(|i| {
             rectangles[i].is_some_and(|rect| {
                 rect.iter().all(|v| v.is_finite())
@@ -114,7 +138,7 @@ impl PlacementRules {
                     && rect[1] <= viewport[1]
                     && Self::collision_boxes(i, rectangles, glyph_boxes)
                         .iter()
-                        .all(|part| match self.overlap[i] {
+                        .all(|part| match overlap[i] {
                             Overlap::Always => true,
                             Overlap::Never => !grid.overlaps(*part),
                             Overlap::Cooperative => !grid.overlaps_non_cooperative(*part),

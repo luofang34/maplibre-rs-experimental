@@ -168,10 +168,20 @@ impl LayerFrame<'_> {
                 }),
             ]
         };
+        // Every anchor is tried without overlap before the first one takes the overlap the
+        // style allows.
         let index = feature
             .anchor_shifts
             .iter()
-            .position(|shift| rules.visible(moved(shift), glyph_boxes, grid, viewport)[0])
+            .position(|shift| {
+                rules.visible_without_text_overlap(moved(shift), glyph_boxes, grid, viewport)[0]
+            })
+            .or_else(|| {
+                feature
+                    .anchor_shifts
+                    .iter()
+                    .position(|shift| rules.visible(moved(shift), glyph_boxes, grid, viewport)[0])
+            })
             .unwrap_or(0);
         let shift = feature.anchor_shifts[index];
         (moved(&shift), shift, index)
