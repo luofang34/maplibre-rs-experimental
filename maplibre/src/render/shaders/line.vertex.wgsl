@@ -76,7 +76,10 @@ fn main(
     // The offset moves both edges of the line the same way: the sign of the side undoes the
     // opposite directions of their extrusions.
     let side = select(1.0, -1.0, path.w < -1.5e30);
-    let moved = outset + side * line_style.x;
+    // A join vertex carries the miter or bevel offset as a normal longer or shorter than one,
+    // and the edge lies that much further out along it.
+    let extent = length(normal);
+    let moved = outset * max(extent, 1.0) + side * line_style.x;
     let clip_offset = vec2<f32>(dir.x * moved * px_to_clip_x, dir.y * moved * px_to_clip_y);
     if spatial {
         // Decks share the map-space width of adjoining draped roads, including foreshortening.
@@ -92,7 +95,7 @@ fn main(
     return VertexOutput(
         center,
         color,
-        normal,
+        normal / max(extent, 1.0),
         vec2<f32>(outset, inset),
         1.0,
         projected_center.horizon_distance,
