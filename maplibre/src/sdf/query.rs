@@ -120,7 +120,7 @@ pub fn query_rendered_symbols(
 /// Returns the placed symbols overlapping a point or box, topmost style layer first and, within
 /// a layer, by descending sort key. Layers that are hidden are skipped, a filter is evaluated
 /// with each symbol's properties at its tile's zoom, and unloaded tiles yield nothing. Only
-/// symbols are queryable; fill, line and circle features are not retained for queries.
+/// symbols are queryable here; use [`crate::query::query_rendered_features`] for fill and line features.
 pub fn query_rendered_symbols_in(
     world: &World,
     style: &Style,

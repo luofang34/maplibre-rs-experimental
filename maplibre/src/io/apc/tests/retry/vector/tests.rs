@@ -226,14 +226,14 @@ async fn transient_glyph_failure_retries_the_tile_until_symbols_load() {
     );
 }
 
-fn geojson_style(data: serde_json::Value) -> crate::style::Style {
+pub(super) fn geojson_style(data: serde_json::Value) -> crate::style::Style {
     serde_json::from_value(serde_json::json!({"version":8,
         "sources":{"shapes":{"type":"geojson","data":data}},
         "layers":[{"id":"area","source":"shapes","type":"fill","paint":{"fill-color":"#00ff00"}}]}))
     .expect("geojson style")
 }
 
-const WORLD_POLYGON: &str = r#"{"type":"Feature","properties":{},"geometry":{"type":"Polygon",
+pub(super) const WORLD_POLYGON: &str = r#"{"type":"Feature","properties":{},"geometry":{"type":"Polygon",
     "coordinates":[[[-100,-60],[100,-60],[100,60],[-100,60],[-100,-60]]]}}"#;
 
 #[tokio::test]
@@ -820,91 +820,4 @@ async fn every_source_of_a_tile_keeps_its_own_index() {
         [Some("healthy".to_owned()), Some("source".to_owned())],
         "the second source's index did not replace the first's"
     );
-}
-
-fn screen_center(test: &Fixture) -> crate::sdf::query::QueryGeometry {
-    let (width, height) = test.context.view_state.viewport_size();
-    crate::sdf::query::QueryGeometry::Point([width / 2.0, height / 2.0])
-}
-
-#[tokio::test]
-async fn a_rendered_polygon_is_found_under_the_screen_center_with_its_properties() {
-    let mut test = Fixture::new(Kind::Vector, false).await;
-    test.context.style = geojson_style(serde_json::json!({"type":"Feature","id":7,
-        "properties":{"name":"world"},
-        "geometry":{"type":"Polygon","coordinates":[[[-100,-60],[100,-60],[100,60],[-100,60],[-100,-60]]]}}));
-    test.frame(0);
-    test.receive().await;
-    let found = test
-        .context
-        .query_rendered_features(screen_center(&test), &Default::default())
-        .expect("query");
-    assert_eq!(
-        found.len(),
-        1,
-        "one polygon, however many tiles hold it: {found:?}"
-    );
-    assert_eq!(found[0].layer, "area");
-    assert_eq!(found[0].source.as_deref(), Some("shapes"));
-    assert_eq!(found[0].geometry_type, "Polygon");
-    assert_eq!(found[0].id, Some(7));
-    assert_eq!(found[0].properties["name"], "world");
-}
-
-#[tokio::test]
-async fn a_layer_filter_and_removal_apply_to_the_live_style_at_query_time() {
-    let mut test = Fixture::new(Kind::Vector, false).await;
-    test.context.style = geojson_style(serde_json::from_str(WORLD_POLYGON).expect("polygon"));
-    test.frame(0);
-    test.receive().await;
-    let rejecting = crate::sdf::query::QueryOptions {
-        filter: Some(serde_json::json!(["==", "name", "nothing"])),
-        ..Default::default()
-    };
-    assert!(test
-        .context
-        .query_rendered_features(screen_center(&test), &rejecting)
-        .expect("query")
-        .is_empty());
-    assert_eq!(
-        test.context
-            .query_rendered_features(screen_center(&test), &Default::default())
-            .expect("query")
-            .len(),
-        1
-    );
-    test.context.style.layers.clear();
-    assert!(test
-        .context
-        .query_rendered_features(screen_center(&test), &Default::default())
-        .expect("query")
-        .is_empty());
-}
-
-#[tokio::test]
-async fn a_polygon_away_from_the_point_is_not_found_and_a_nearby_line_is() {
-    let mut test = Fixture::new(Kind::Vector, false).await;
-    test.context.style = serde_json::from_value(serde_json::json!({"version":8,
-        "sources":{"shapes":{"type":"geojson","data":{"type":"FeatureCollection","features":[
-            {"type":"Feature","properties":{"k":"far"},"geometry":{"type":"Polygon",
-                "coordinates":[[[100,40],[120,40],[120,50],[100,50],[100,40]]]}},
-            {"type":"Feature","properties":{"k":"road"},"geometry":{"type":"LineString",
-                "coordinates":[[-60,0.0],[60,0.0]]}}]}}},
-        "layers":[
-            {"id":"area","source":"shapes","type":"fill"},
-            {"id":"road","source":"shapes","type":"line"}]}))
-    .expect("style");
-    test.frame(0);
-    test.receive().await;
-    let found = test
-        .context
-        .query_rendered_features(screen_center(&test), &Default::default())
-        .expect("query");
-    let layers: Vec<&str> = found.iter().map(|f| f.layer.as_str()).collect();
-    assert_eq!(
-        layers,
-        ["road"],
-        "the far polygon is not under the point: {found:?}"
-    );
-    assert_eq!(found[0].geometry_type, "LineString");
 }

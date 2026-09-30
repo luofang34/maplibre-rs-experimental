@@ -24,15 +24,13 @@ use crate::{
     style::{
         expression::Value,
         filter::{FeatureContext, Filter, GeometryType},
-        layer::StyleLayer,
+        layer::{LayerPaint, StyleLayer},
         source::GEOJSON_LAYER,
         Style,
     },
     tcs::world::World,
 };
 
-/// How far from a line, in screen pixels, still counts as touching it.
-const LINE_TOLERANCE_PIXELS: f64 = 2.0;
 /// Tiles a single query reads at one zoom before it uses a coarser one.
 const MAX_TILES: i64 = 256;
 /// Deepest tile zoom a query looks at.
@@ -107,6 +105,59 @@ pub fn query_rendered_features(
 struct Candidate<'a> {
     layer: &'a StyleLayer,
     filter: Option<Filter>,
+    /// How far from a line, in screen pixels, still counts as touching it: half its width.
+    reach_pixels: f64,
+}
+
+impl<'a> Candidate<'a> {
+    /// A layer whose filter cannot be parsed draws nothing, so it also matches nothing.
+    fn new(layer: &'a StyleLayer, zoom: f64) -> Option<Self> {
+        let filter = match &layer.filter {
+            Some(filter) => Some(Filter::parse(filter).ok()?),
+            None => None,
+        };
+        let reach_pixels = match &layer.paint {
+            Some(LayerPaint::Line(paint)) => {
+                paint
+                    .line_width
+                    .as_ref()
+                    .and_then(|width| width.evaluate_at_zoom(zoom))
+                    .unwrap_or(1.0)
+                    / 2.0
+            }
+            _ => 0.0,
+        };
+        Some(Self {
+            layer,
+            filter,
+            reach_pixels: f64::from(reach_pixels),
+        })
+    }
+}
+
+/// What one query keeps while it walks tiles.
+struct Search<'a> {
+    candidates: Vec<Candidate<'a>>,
+    query_filter: Option<Filter>,
+    seen: HashSet<(String, Identity)>,
+    found: Vec<(u32, QueriedFeature)>,
+}
+
+/// Fill and line features are located on a flat ground plane.
+fn refuse_unsupported_view(style: &Style, zoom: f64) -> Result<(), QueryError> {
+    if style.terrain.is_some() {
+        return Err(QueryError::UnsupportedView { reason: "terrain" });
+    }
+    if style
+        .projection
+        .as_ref()
+        .is_some_and(|projection| projection.projection_type.globe_transition(zoom) != 0.0)
+    {
+        return Err(QueryError::UnsupportedView {
+            reason: "an active globe",
+        });
+    }
+    Ok(())
 }
 
 fn vector_features(
@@ -128,29 +179,12 @@ fn vector_features(
                     .as_ref()
                     .is_none_or(|layers| layers.contains(&layer.id))
         })
-        .map(|layer| Candidate {
-            layer,
-            filter: layer
-                .filter
-                .as_ref()
-                .and_then(|filter| Filter::parse(filter).ok()),
-        })
+        .filter_map(|layer| Candidate::new(layer, zoom.value()))
         .collect();
     if candidates.is_empty() {
         return Ok(Vec::new());
     }
-    if style.terrain.is_some() {
-        return Err(QueryError::UnsupportedView { reason: "terrain" });
-    }
-    if style
-        .projection
-        .as_ref()
-        .is_some_and(|projection| projection.projection_type.globe_transition(zoom.value()) != 0.0)
-    {
-        return Err(QueryError::UnsupportedView {
-            reason: "an active globe",
-        });
-    }
+    refuse_unsupported_view(style, zoom.value())?;
     let query_filter = options
         .filter
         .as_ref()
@@ -163,9 +197,14 @@ fn vector_features(
     let Some(region) = ground_region(view_state, bounds) else {
         return Ok(Vec::new());
     };
-    let mut seen = HashSet::new();
-    let mut found = Vec::new();
-    let top = (zoom.value().floor() as i32).clamp(0, MAX_QUERY_ZOOM);
+    let mut search = Search {
+        candidates,
+        query_filter,
+        seen: HashSet::new(),
+        found: Vec::new(),
+    };
+    // One level above the view zoom covers sources whose tiles are finer than the view's.
+    let top = (zoom.value().floor() as i32 + 1).clamp(0, MAX_QUERY_ZOOM);
     for z in (0..=top).rev() {
         let tiles = tiles_in(region, zoom, z as u8);
         if tiles.is_empty() {
@@ -179,15 +218,7 @@ fn vector_features(
             any = true;
             for (source, index) in indexes {
                 for geometry in candidates_in(index, tile.local) {
-                    collect(
-                        geometry,
-                        source,
-                        tile,
-                        &candidates,
-                        query_filter.as_ref(),
-                        &mut seen,
-                        &mut found,
-                    );
+                    collect(geometry, source, tile, &mut search);
                 }
             }
         }
@@ -195,7 +226,7 @@ fn vector_features(
             break;
         }
     }
-    Ok(found)
+    Ok(search.found)
 }
 
 /// The rectangle of world pixels a screen box covers on the ground plane, or `None` when none of
@@ -295,46 +326,42 @@ fn candidates_in(index: &TileIndex, local: [f64; 4]) -> Vec<&IndexedGeometry<f64
     }
 }
 
-fn touches(geometry: &IndexedGeometry<f64>, tile: &QueryTile) -> bool {
-    let tolerance = LINE_TOLERANCE_PIXELS * tile.units_per_pixel;
+fn touches(geometry: &IndexedGeometry<f64>, tile: &QueryTile, candidate: &Candidate) -> bool {
     let [x0, y0, x1, y1] = tile.local;
-    match &geometry.exact {
-        ExactGeometry::Polygon(polygon) => {
-            let area = Rect::new(Coord { x: x0, y: y0 }, Coord { x: x1, y: y1 });
-            polygon.intersects(&area)
+    let reach = candidate.reach_pixels * tile.units_per_pixel;
+    let area = Rect::new(
+        Coord {
+            x: x0 - reach,
+            y: y0 - reach,
+        },
+        Coord {
+            x: x1 + reach,
+            y: y1 + reach,
+        },
+    );
+    match (&geometry.exact, candidate.layer.type_.as_str()) {
+        (ExactGeometry::Polygon(polygon), "fill") => polygon.intersects(&area),
+        (ExactGeometry::Polygon(polygon), "line") => {
+            polygon.exterior().intersects(&area)
+                || polygon
+                    .interiors()
+                    .iter()
+                    .any(|ring| ring.intersects(&area))
         }
-        ExactGeometry::LineString(line) => {
-            let area = Rect::new(
-                Coord {
-                    x: x0 - tolerance,
-                    y: y0 - tolerance,
-                },
-                Coord {
-                    x: x1 + tolerance,
-                    y: y1 + tolerance,
-                },
-            );
-            line.intersects(&area)
-        }
+        (ExactGeometry::LineString(line), "line") => line.intersects(&area),
+        _ => false,
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn collect(
     geometry: &IndexedGeometry<f64>,
     source: Option<&str>,
     tile: &QueryTile,
-    candidates: &[Candidate],
-    query_filter: Option<&Filter>,
-    seen: &mut HashSet<(String, Identity)>,
-    found: &mut Vec<(u32, QueriedFeature)>,
+    search: &mut Search,
 ) {
-    if !touches(geometry, tile) {
-        return;
-    }
-    let (kind, layer_type, geometry_type) = match &geometry.exact {
-        ExactGeometry::Polygon(_) => (GeometryType::Polygon, "fill", "Polygon"),
-        ExactGeometry::LineString(_) => (GeometryType::LineString, "line", "LineString"),
+    let (kind, geometry_type) = match &geometry.exact {
+        ExactGeometry::Polygon(_) => (GeometryType::Polygon, "Polygon"),
+        ExactGeometry::LineString(_) => (GeometryType::LineString, "LineString"),
     };
     let id = geometry.id.map(|id| Value::Number(id as f64));
     let context = FeatureContext {
@@ -343,16 +370,24 @@ fn collect(
         id,
         zoom: f64::from(tile.zoom_level),
     };
-    for candidate in candidates {
+    let Search {
+        candidates,
+        query_filter,
+        seen,
+        found,
+    } = search;
+    for candidate in candidates.iter() {
         let layer = candidate.layer;
-        if layer.type_ != layer_type
-            || layer.source.as_deref() != source
+        if layer.source.as_deref() != source
             || layer.source_layer.as_deref().unwrap_or(GEOJSON_LAYER) != &*geometry.source_layer
             || candidate
                 .filter
                 .as_ref()
                 .is_some_and(|filter| !filter.evaluate(&context))
-            || query_filter.is_some_and(|filter| !filter.evaluate(&context))
+            || query_filter
+                .as_ref()
+                .is_some_and(|filter| !filter.evaluate(&context))
+            || !touches(geometry, tile, candidate)
         {
             continue;
         }
