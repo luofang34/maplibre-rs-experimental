@@ -52,6 +52,9 @@ pub struct SDFShaderFeatureMetadata {
     pub opacity: f32,
     /// Sampled ground elevation in meters; symbol height offsets are carried in the geometry.
     pub elevation: f32,
+    /// Where a glyph placed along a line sits: the offset of its centre from the vertex anchor
+    /// in tile units, its direction in radians, and 1 when the glyph has such a pose.
+    pub pose: [f32; 4],
 }
 
 /// Per-layer instance record shared across tile pipelines.

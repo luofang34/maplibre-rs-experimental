@@ -9,8 +9,9 @@ use std::{
 use super::placement::canonical_tile;
 use super::{
     collision_grid::CollisionGrid,
+    line_glyphs::GlyphPose,
     paint::SymbolUniforms,
-    placement::{screen_boxes, symbol_elevation},
+    placement::{line_glyph_poses, screen_boxes, symbol_elevation, LinePoses},
     query::{PlacedSymbol, PlacedSymbols},
 };
 use crate::{
@@ -49,6 +50,7 @@ fn opacity_fingerprint(metadata: &[SDFShaderFeatureMetadata]) -> u64 {
     for entry in metadata {
         entry.opacity.to_bits().hash(&mut hash);
         entry.elevation.to_bits().hash(&mut hash);
+        entry.pose.map(f32::to_bits).hash(&mut hash);
     }
     hash.finish()
 }
@@ -236,7 +238,12 @@ fn place_layer(
             limits[0] -= 0.15;
             limits[1] += 0.15;
         }
+        let line = feature
+            .line
+            .as_ref()
+            .map(|_| line_glyph_poses(layer, feature, ground, view_state, projection, &uniforms));
         let rectangles = (relevance > 0.0
+            && !matches!(line, Some(LinePoses::DoesNotFit))
             && !super::placement::buried_in_terrain(world, layer, feature, ground)
             && local_zoom_visible(
                 layer.coords,
@@ -269,6 +276,10 @@ fn place_layer(
             feature,
             opacity.map(|value| value * relevance),
             ground,
+            match &line {
+                Some(LinePoses::Poses(poses)) => Some(poses.as_slice()),
+                _ => None,
+            },
             &mut metadata[position],
         );
     }
@@ -280,6 +291,7 @@ fn write_feature_metadata(
     feature: &crate::sdf::Feature,
     opacity: [f32; 2],
     ground: f32,
+    poses: Option<&[GlyphPose]>,
     metadata: &mut [SDFShaderFeatureMetadata],
 ) {
     for index in feature.indices.clone() {
@@ -300,7 +312,42 @@ fn write_feature_metadata(
             *vertex = SDFShaderFeatureMetadata {
                 opacity: opacity[kind],
                 elevation: ground,
+                pose: [0.0; 4],
             };
+        }
+    }
+    if let (Some(line), Some(poses)) = (&feature.line, poses) {
+        write_glyph_poses(layer, line, poses, metadata);
+    }
+}
+
+/// Puts each glyph's six indices' vertices at its pose along the line.
+fn write_glyph_poses(
+    layer: &crate::sdf::SymbolLayerData,
+    line: &crate::sdf::LineLabel,
+    poses: &[GlyphPose],
+    metadata: &mut [SDFShaderFeatureMetadata],
+) {
+    let buffer = &layer.buffer.buffer;
+    for (glyph, pose) in poses.iter().enumerate() {
+        let first = line.first_glyph_index + glyph * 6;
+        for index in first..first + 6 {
+            let Some(vertex_index) = buffer.indices.get(index).map(|index| *index as usize) else {
+                continue;
+            };
+            let (Some(vertex), Some(entry)) = (
+                buffer.vertices.get(vertex_index),
+                metadata.get_mut(vertex_index),
+            ) else {
+                continue;
+            };
+            // The vertex anchor is the label anchor rounded to whole tile units.
+            entry.pose = [
+                pose.point[0] - vertex.a_pos_offset[0] as f32,
+                pose.point[1] - vertex.a_pos_offset[1] as f32,
+                pose.angle,
+                1.0,
+            ];
         }
     }
 }
@@ -427,11 +474,5 @@ type VisibleLayer<'a> = (
 );
 
 fn empty_metadata(layer: &crate::sdf::SymbolLayerData) -> Vec<SDFShaderFeatureMetadata> {
-    vec![
-        SDFShaderFeatureMetadata {
-            opacity: 0.0,
-            elevation: 0.0
-        };
-        layer.buffer.buffer.vertices.len()
-    ]
+    vec![SDFShaderFeatureMetadata::default(); layer.buffer.buffer.vertices.len()]
 }

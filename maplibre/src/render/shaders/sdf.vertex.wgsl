@@ -45,11 +45,15 @@ fn main(
     @location(9) zoom_factor: f32,
     @location(11) viewport_height: f32,
     @location(12) feature: vec2<f32>,
+    // For a glyph placed along a line: the offset of its centre from the vertex anchor in tile
+    // units, its direction, and 1 when it has such a pose.
+    @location(14) pose: vec4<f32>,
 ) -> VertexOutput {
+    let has_pose = pose.w > 0.5;
     let is_text = a_data.z == 0u;
     let metrics = select(symbol.icon, symbol.text, is_text);
     let alignment = select(symbol.icon_layout, symbol.text_layout, is_text);
-    let anchor = vec2<f32>(a_pos_offset.xy);
+    let anchor = vec2<f32>(a_pos_offset.xy) + select(vec2<f32>(0.0), pose.xy, has_pose);
     let elevation = feature.y * alignment.w + bitcast<f32>(a_pixeloffset.z);
     let transform = mat4x4<f32>(translate1, translate2, translate3, translate4);
     let projected = project_tile_position_3d(vec3<f32>(anchor, elevation), transform, tile_mercator_coords);
@@ -73,18 +77,25 @@ fn main(
         }
         world_angle = atan2(up.y, up.x) + PROJECTION_PI * 0.5;
     }
-    var angle = alignment.z + bitcast<f32>(a_pixeloffset.w);
+    var angle = alignment.z + select(bitcast<f32>(a_pixeloffset.w), pose.z, has_pose);
     if alignment.y > 0.5 {
         let tangent = project_tile_position_3d(vec3<f32>(anchor + vec2<f32>(cos(angle), sin(angle)) * 16.0, elevation), transform, tile_mercator_coords).clip_position;
         let delta = (tangent.xy / tangent.w - projected.clip_position.xy / projected.clip_position.w)
             * vec2<f32>(viewport_width, -viewport_height);
         if alignment.x < 0.5 { angle = atan2(delta.y, delta.x); }
         let keep_upright = select(symbol.placement.w, symbol.placement.z, is_text);
-        if keep_upright > 0.5 && dot(delta, vec2<f32>(cos(world_angle),sin(world_angle))) < 0.0 { angle += PROJECTION_PI; }
+        // A glyph with a pose was turned upright on the CPU, as a whole label.
+        if keep_upright > 0.5 && !has_pose && dot(delta, vec2<f32>(cos(world_angle),sin(world_angle))) < 0.0 { angle += PROJECTION_PI; }
     }
     if alignment.x < 0.5 && alignment.y < 0.5 { angle += world_angle; }
     let rotation = mat2x2<f32>(cos(angle), sin(angle), -sin(angle), cos(angle));
-    let offset = rotation * (vec2<f32>(a_pos_offset.zw) / 32.0 * scale + vec2<f32>(a_pixeloffset.xy) / 16.0);
+    // A posed glyph is laid out around its own centre, which the vertex carries in 1/32 pixel.
+    let centre = vec2<f32>(f32(a_pixeloffset.x) / 32.0, 0.0);
+    let local = select(
+        vec2<f32>(a_pos_offset.zw) / 32.0 * scale + vec2<f32>(a_pixeloffset.xy) / 16.0,
+        (vec2<f32>(a_pos_offset.zw) / 32.0 - centre) * scale,
+        has_pose);
+    let offset = rotation * local;
     var position = projected.clip_position;
     if alignment.x > 0.5 {
         let tile_offset = offset * 8.0 * zoom_factor * project_symbol_scale(anchor.y, tile_mercator_coords);

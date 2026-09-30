@@ -190,13 +190,7 @@ fn upload_geometry(
     >,
 ) -> bool {
     // Collision placement supplies elevation before a new label can become visible.
-    let feature_metadata = vec![
-        SDFShaderFeatureMetadata {
-            opacity: 0.0,
-            elevation: 0.0
-        };
-        buffer.buffer.vertices.len()
-    ];
+    let feature_metadata = vec![SDFShaderFeatureMetadata::default(); buffer.buffer.vertices.len()];
 
     if buffer.buffer.indices.is_empty() {
         symbol_buffer_pool.remove_layer(coords, &style_layer.id);

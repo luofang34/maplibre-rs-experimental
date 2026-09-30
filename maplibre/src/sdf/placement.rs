@@ -1,7 +1,11 @@
 //! Projects collision rectangles using the same elevated anchors as symbol vertices.
 use cgmath::{InnerSpace, Matrix4, Vector4};
 
-use super::{paint::SymbolUniforms, placement_geometry::SymbolBounds};
+use super::{
+    line_glyphs::{place_glyphs, reads_backwards, GlyphPose},
+    paint::SymbolUniforms,
+    placement_geometry::SymbolBounds,
+};
 use crate::{
     coords::{TileCoords, WorldTileCoords, ZOOM_BOUNDS},
     render::{projection::ShaderProjectionData, view_state::ViewState},
@@ -108,6 +112,98 @@ pub(super) fn screen_boxes(
         }));
     }
     Some(result)
+}
+
+/// Where the glyphs of a line label go this frame.
+pub(super) enum LinePoses {
+    /// The layer does not align its text to the map, so glyphs keep the straight layout.
+    NotApplicable,
+    /// The line cannot hold the label at this scale; it is not drawn.
+    DoesNotFit,
+    /// A pose for each glyph, along the line and upright.
+    Poses(Vec<GlyphPose>),
+}
+
+/// Places the glyphs of a line label along its line at the current view.
+///
+/// The label plane is the map, so distances along the line are tile units and neither pitch
+/// nor bearing changes them; the view only decides whether the text would read upside down.
+pub(super) fn line_glyph_poses(
+    layer: &SymbolLayerData,
+    feature: &Feature,
+    elevation: f32,
+    view: &ViewState,
+    projection: &ShaderProjectionData,
+    uniforms: &SymbolUniforms,
+) -> LinePoses {
+    let Some(line) = &feature.line else {
+        return LinePoses::NotApplicable;
+    };
+    let alignment = uniforms.text_layout;
+    if alignment[0] <= 0.5 || alignment[1] <= 0.5 {
+        return LinePoses::NotApplicable;
+    }
+    let placement = Placement {
+        coords: layer.coords,
+        anchor: [
+            f64::from(feature.text_anchor.x),
+            f64::from(feature.text_anchor.y),
+        ],
+        elevation: f64::from(elevation),
+        view,
+        projection,
+        uniforms,
+    };
+    let height = f64::from(elevation) * f64::from(alignment[3]);
+    let Some(clip) = project(layer.coords, placement.anchor, height, view, projection) else {
+        return LinePoses::DoesNotFit;
+    };
+    if clip.w <= 0.0 {
+        return LinePoses::DoesNotFit;
+    }
+    let ratio = if view.has_external_view() {
+        1.0
+    } else {
+        clip.w / f64::from(projection.center_clip_w)
+    };
+    // A layout pixel at the 24-pixel em becomes this many tile units at the current size.
+    let to_tile = (0.5 + 0.5 * ratio).clamp(0.0, 4.0)
+        * f64::from(uniforms.text[0] / 24.0)
+        * placement.tile_units();
+    let offsets: Vec<f32> = line
+        .glyph_offsets
+        .iter()
+        .map(|offset| (f64::from(*offset) * to_tile) as f32)
+        .collect();
+    let place = |flip| place_glyphs(&line.polyline, line.anchor_distance, &offsets, flip);
+    let Some(mut poses) = place(false) else {
+        return LinePoses::DoesNotFit;
+    };
+    if uniforms.placement[2] > 0.5 {
+        let screen = |pose: &GlyphPose| {
+            project(
+                layer.coords,
+                [f64::from(pose.point[0]), f64::from(pose.point[1])],
+                height,
+                view,
+                projection,
+            )
+            .filter(|clip| clip.w > 0.0)
+            .map(|clip| placement.screen(clip))
+        };
+        if let (Some(first), Some(last)) = (
+            poses.first().and_then(screen),
+            poses.last().and_then(screen),
+        ) {
+            if reads_backwards(first, last) {
+                match place(true) {
+                    Some(flipped) => poses = flipped,
+                    None => return LinePoses::DoesNotFit,
+                }
+            }
+        }
+    }
+    LinePoses::Poses(poses)
 }
 
 struct Placement<'a> {

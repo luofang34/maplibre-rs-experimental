@@ -321,6 +321,8 @@ async fn fixture_map(
     map
 }
 
+mod line_labels;
+
 mod loaded_assets;
 
 mod navigation;
