@@ -198,8 +198,18 @@ pub(super) fn center_anchor(line: &[Point], params: AnchorSpacing) -> Option<Lin
                 segment: index,
             };
             let window = 0.6 * params.text_size;
-            return bends_within_limit(line, anchor, params.label_length, window, params.max_angle)
-                .then_some(anchor);
+            // A centre in the buffer belongs to the tile that owns that part of the line.
+            let inside = (0.0..EXTENT).contains(&anchor.point[0])
+                && (0.0..EXTENT).contains(&anchor.point[1]);
+            return (inside
+                && bends_within_limit(
+                    line,
+                    anchor,
+                    params.label_length,
+                    window,
+                    params.max_angle,
+                ))
+            .then_some(anchor);
         }
         remaining -= segment;
     }

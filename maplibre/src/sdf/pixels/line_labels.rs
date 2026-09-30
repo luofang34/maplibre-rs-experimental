@@ -223,3 +223,26 @@ async fn a_curved_label_is_selectable_on_its_glyphs_but_not_under_the_curve() {
         "the space under a curve is not part of the label"
     );
 }
+
+#[tokio::test]
+async fn a_viewport_aligned_line_label_keeps_its_straight_layout() {
+    // Such text is not placed glyph by glyph; it must still sit centred on its anchor.
+    let straight = [[500.0, 1000.0], [1900.0, 1000.0]];
+    let style = line_style(serde_json::json!({
+        "text-rotation-alignment": "viewport", "text-pitch-alignment": "viewport"
+    }));
+    let pixels = read_blocking(&line_map(style, &straight).await);
+    let (count, bounds) = colored_bounds(&pixels, 0);
+    assert!(count > 100, "the label drew {count} pixels");
+    assert!(
+        bounds[2] - bounds[0] < 70,
+        "glyphs stay together, not {} px wide",
+        bounds[2] - bounds[0]
+    );
+    let middle = (bounds[0] + bounds[2]) as f64 / 2.0;
+    let anchor = 256.0 + 1200.0 * PIXELS_PER_UNIT;
+    assert!(
+        (middle - anchor).abs() < 6.0,
+        "centred on the anchor {anchor}, not at {middle}"
+    );
+}

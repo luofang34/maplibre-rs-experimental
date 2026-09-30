@@ -97,3 +97,23 @@ fn anchors_outside_the_tile_belong_to_the_neighbour() {
         assert!(anchor.point[0] < 4096.0, "{anchor:?}");
     }
 }
+
+#[test]
+fn a_label_longer_than_the_line_is_left_out() {
+    let line = vec![[1000.0, 2000.0], [1300.0, 2000.0]];
+    assert!(line_anchors(&line, params(1000.0, 400.0)).is_empty());
+}
+
+#[test]
+fn a_line_center_label_in_the_tile_buffer_belongs_to_the_neighbour() {
+    let line = [[3500.0, 2000.0], [5500.0, 2000.0]];
+    let params = AnchorSpacing {
+        max_angle: 180.0_f64.to_radians(),
+        ..params(1000.0, 200.0)
+    };
+    assert!(
+        center_anchor(&line, params).is_none(),
+        "the middle is at 4500"
+    );
+    assert!(center_anchor(&[[1000.0, 2000.0], [3000.0, 2000.0]], params).is_some());
+}

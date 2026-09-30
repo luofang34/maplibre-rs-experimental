@@ -60,6 +60,7 @@ pub(super) fn append(
     } else {
         paint.height_offset("text", &symbol.properties, zoom)
     };
+    let follows_line = crate::sdf::paint::text_follows_line(paint, zoom);
     for (row, line) in lines.iter().enumerate() {
         let baseline = -height * fractions[1] - 5.0 + row as f32 * line_height + offset[1];
         let mut pen = -max_line * fractions[0] + (max_line - width(line)) * justify + offset[0];
@@ -77,7 +78,7 @@ pub(super) fn append(
                     elevation,
                     symbol.angle,
                 );
-                if symbol.line.is_some() {
+                if symbol.line.is_some() && follows_line {
                     // A glyph along a line is placed by its centre: the vertex carries where
                     // that centre lies in the straight layout, in 1/32 pixel.
                     let centre = pen + glyph.metrics[2] / 2.0;

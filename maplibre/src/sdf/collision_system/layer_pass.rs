@@ -337,3 +337,85 @@ fn local_zoom_visible(
 pub(super) fn empty_metadata(layer: &crate::sdf::SymbolLayerData) -> Vec<SDFShaderFeatureMetadata> {
     vec![SDFShaderFeatureMetadata::default(); layer.buffer.buffer.vertices.len()]
 }
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used, clippy::panic)]
+    use super::*;
+    use crate::{
+        coords::ZoomLevel,
+        render::shaders::ShaderSymbolVertex,
+        sdf::{Feature, LineLabel},
+        vector::tessellation::OverAlignedVertexBuffer,
+    };
+
+    fn vertex(anchor: [i32; 2]) -> ShaderSymbolVertex {
+        ShaderSymbolVertex {
+            a_pos_offset: [anchor[0], anchor[1], 0, 0],
+            a_data: [0; 4],
+            a_pixeloffset: [0; 4],
+        }
+    }
+
+    #[test]
+    fn each_glyph_writes_its_own_pose_to_its_six_indices() {
+        // Two glyph quads after one icon quad: vertices 4..8 and 8..12.
+        let mut buffer = OverAlignedVertexBuffer::empty();
+        buffer.buffer.vertices = (0..12).map(|_| vertex([100, 200])).collect();
+        for quad in 0..3_u32 {
+            let base = quad * 4;
+            buffer
+                .buffer
+                .indices
+                .extend([base, base + 1, base + 2, base, base + 2, base + 3]);
+        }
+        let layer = crate::sdf::SymbolLayerData {
+            atlas: None,
+            coords: crate::coords::WorldTileCoords {
+                x: 0,
+                y: 0,
+                z: ZoomLevel::from(0),
+            },
+            source_layer: "roads".into(),
+            style_layer_id: "label".into(),
+            buffer,
+            features: Vec::<Feature>::new(),
+        };
+        let line = LineLabel {
+            polyline: [[0.0, 0.0], [500.0, 0.0]].into(),
+            anchor_distance: 250.0,
+            glyph_offsets: vec![-10.0, 10.0],
+            first_glyph_index: 6,
+        };
+        let poses = [
+            GlyphPose {
+                point: [90.0, 200.0],
+                angle: 0.5,
+            },
+            GlyphPose {
+                point: [110.0, 205.0],
+                angle: 0.75,
+            },
+        ];
+        let mut metadata = vec![SDFShaderFeatureMetadata::default(); 12];
+        write_glyph_poses(&layer, &line, &poses, &mut metadata);
+        assert!(
+            metadata[..4].iter().all(|entry| entry.pose[3] == 0.0),
+            "the icon has no pose"
+        );
+        assert!(metadata[4..8]
+            .iter()
+            .all(|entry| entry.pose == [-10.0, 0.0, 0.5, 1.0]));
+        assert!(metadata[8..]
+            .iter()
+            .all(|entry| entry.pose == [10.0, 5.0, 0.75, 1.0]));
+    }
+
+    #[test]
+    fn a_changed_pose_changes_the_upload_fingerprint() {
+        let mut metadata = vec![SDFShaderFeatureMetadata::default(); 4];
+        let before = super::super::opacity_fingerprint(&metadata);
+        metadata[2].pose = [1.0, 0.0, 0.0, 1.0];
+        assert_ne!(before, super::super::opacity_fingerprint(&metadata));
+    }
+}

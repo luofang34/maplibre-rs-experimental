@@ -13,23 +13,42 @@ pub(crate) struct GlyphPose {
     pub angle: f32,
 }
 
-/// The point at arc length `distance` from the start of the polyline and the direction of the
-/// segment it lies on; `None` when the line is too short to reach it.
-fn point_at(polyline: &[[f32; 2]], distance: f32) -> Option<([f32; 2], f32)> {
-    if distance < 0.0 {
-        return None;
-    }
-    let mut travelled = 0.0;
-    for pair in polyline.windows(2) {
-        let (dx, dy) = (pair[1][0] - pair[0][0], pair[1][1] - pair[0][1]);
-        let length = dx.hypot(dy);
-        if length > 0.0 && distance <= travelled + length {
-            let t = (distance - travelled) / length;
-            return Some(([pair[0][0] + dx * t, pair[0][1] + dy * t], dy.atan2(dx)));
+/// Finds points by arc length along a polyline, resuming where the last one was found so that
+/// a run of ascending distances walks the line once.
+struct LineWalker<'a> {
+    polyline: &'a [[f32; 2]],
+    segment: usize,
+    travelled: f32,
+}
+
+impl<'a> LineWalker<'a> {
+    fn new(polyline: &'a [[f32; 2]]) -> Self {
+        Self {
+            polyline,
+            segment: 0,
+            travelled: 0.0,
         }
-        travelled += length;
     }
-    None
+
+    /// The point at arc length `distance` from the start of the polyline and the direction of
+    /// the segment it lies on; `None` when the line is too short to reach it. Distances must
+    /// not decrease between calls.
+    fn point_at(&mut self, distance: f32) -> Option<([f32; 2], f32)> {
+        if distance < 0.0 {
+            return None;
+        }
+        while let [from, to] = self.polyline.get(self.segment..self.segment + 2)? {
+            let (dx, dy) = (to[0] - from[0], to[1] - from[1]);
+            let length = dx.hypot(dy);
+            if length > 0.0 && distance <= self.travelled + length {
+                let t = (distance - self.travelled) / length;
+                return Some(([from[0] + dx * t, from[1] + dy * t], dy.atan2(dx)));
+            }
+            self.travelled += length;
+            self.segment += 1;
+        }
+        None
+    }
 }
 
 /// Poses of glyphs whose centres are `offsets` (tile units, signed) from the anchor at
@@ -42,25 +61,33 @@ pub(crate) fn place_glyphs(
     offsets: &[f32],
     flip: bool,
 ) -> Option<Vec<GlyphPose>> {
-    offsets
+    let distances: Vec<f32> = offsets
         .iter()
         .map(|offset| {
-            let along = if flip {
+            if flip {
                 anchor_distance - offset
             } else {
                 anchor_distance + offset
-            };
-            let (point, angle) = point_at(polyline, along)?;
-            Some(GlyphPose {
-                point,
-                angle: if flip {
-                    angle + std::f32::consts::PI
-                } else {
-                    angle
-                },
-            })
+            }
         })
-        .collect()
+        .collect();
+    // Glyphs are found in order of distance with one walk along the line.
+    let mut order: Vec<usize> = (0..distances.len()).collect();
+    order.sort_by(|a, b| distances[*a].total_cmp(&distances[*b]));
+    let mut walker = LineWalker::new(polyline);
+    let mut poses = vec![None; distances.len()];
+    for index in order {
+        let (point, angle) = walker.point_at(distances[index])?;
+        poses[index] = Some(GlyphPose {
+            point,
+            angle: if flip {
+                angle + std::f32::consts::PI
+            } else {
+                angle
+            },
+        });
+    }
+    poses.into_iter().collect()
 }
 
 /// Whether text that reads along the line would end up upside down: its first glyph lies to
