@@ -35,6 +35,16 @@ impl LayerValidation<'_> {
                     );
                 }
             }
+            LayerPaint::FillExtrusion(p) => {
+                let color = p.fill_extrusion_color.as_ref();
+                self.property("paint.fill-extrusion-color", color, Feature);
+                let height = p.fill_extrusion_height.as_ref();
+                self.property("paint.fill-extrusion-height", height, Feature);
+                let base = p.fill_extrusion_base.as_ref();
+                self.property("paint.fill-extrusion-base", base, Feature);
+                let opacity = p.fill_extrusion_opacity.as_ref();
+                self.property("paint.fill-extrusion-opacity", opacity, Zoom);
+            }
             LayerPaint::Line(p) => {
                 self.property("paint.line-color", p.line_color.as_ref(), Feature);
                 self.property("paint.line-opacity", p.line_opacity.as_ref(), Feature);

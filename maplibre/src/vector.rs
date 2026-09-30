@@ -69,6 +69,13 @@ impl Deref for LinePipeline {
     }
 }
 
+/// The passes of extruded polygons: depth, colour once per pixel, and the stencil reset.
+struct ExtrusionPipeline {
+    depth: wgpu::RenderPipeline,
+    color: wgpu::RenderPipeline,
+    clear: wgpu::RenderPipeline,
+}
+
 struct CirclePipeline(wgpu::RenderPipeline);
 impl Deref for CirclePipeline {
     type Target = wgpu::RenderPipeline;
@@ -158,6 +165,7 @@ impl<E: Environment, T: VectorTransferables> Plugin<E> for VectorPlugin<T> {
         resources.insert(Eventually::<VectorPipeline>::Uninitialized);
         resources.insert(Eventually::<LinePipeline>::Uninitialized);
         resources.insert(Eventually::<CirclePipeline>::Uninitialized);
+        resources.insert(Eventually::<ExtrusionPipeline>::Uninitialized);
 
         resources
             .get_or_init_mut::<ViewTileSources>()

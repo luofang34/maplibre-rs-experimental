@@ -150,3 +150,21 @@ fn zero_radius_is_rejected() {
 fn assert_close(actual: f64, expected: f64) {
     assert!((actual - expected).abs() <= 1e-12, "{actual} != {expected}");
 }
+
+#[test]
+fn extrusion_light_defaults_and_follows_the_view_bearing() {
+    let light: LightSpecification =
+        serde_json::from_value(serde_json::json!({"intensity": 1})).expect("light");
+    let lit = light.extrusion_light(0.0, 0.0).expect("light evaluates");
+    assert_eq!(lit.intensity, 1.0);
+    assert_eq!(lit.color, [1.0; 3]);
+    // The default position: radius 1.15 at azimuth 210 and polar angle 30 degrees.
+    assert!((lit.position[0] - 0.2875).abs() < 1e-4);
+    assert!((lit.position[1] + 0.4979).abs() < 1e-3);
+    assert!((lit.position[2] - 0.9959).abs() < 1e-3);
+    let turned = light
+        .extrusion_light(0.0, std::f64::consts::FRAC_PI_2)
+        .expect("light evaluates");
+    assert!((turned.position[0] - 0.4979).abs() < 1e-3);
+    assert!((turned.position[1] - 0.2875).abs() < 1e-3);
+}

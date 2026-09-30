@@ -8,7 +8,7 @@ use crate::{
         INDEX_FORMAT,
     },
     tcs::world::World,
-    vector::{CirclePipeline, LinePipeline, VectorBufferPool, VectorPipeline},
+    vector::{CirclePipeline, ExtrusionPipeline, LinePipeline, VectorBufferPool, VectorPipeline},
 };
 
 /// Binds the polygon-fill pipeline and the item's view or flat projection.
@@ -190,6 +190,62 @@ impl<P: PhaseItem> RenderCommand<P> for SetCircleTilePipeline {
     }
 }
 
+/// Binds one pass of the extrusion pipeline and the item's view or flat projection.
+pub struct SetExtrusionPipeline<const PASS: u8>;
+/// The pass an extrusion draw belongs to.
+pub mod extrusion_pass {
+    /// Depth only.
+    pub const DEPTH: u8 = 0;
+    /// Colour once per pixel.
+    pub const COLOR: u8 = 1;
+    /// Stencil reset.
+    pub const CLEAR: u8 = 2;
+}
+
+impl<P: PhaseItem, const PASS: u8> RenderCommand<P> for SetExtrusionPipeline<PASS> {
+    fn render<'w>(
+        world: &'w World,
+        item: &P,
+        pass: &mut wgpu::RenderPass<'w>,
+    ) -> RenderCommandResult {
+        let Some((Initialized(pipeline), Initialized(projection_resources))) =
+            world.resources.query::<(
+                &Eventually<ExtrusionPipeline>,
+                &Eventually<ProjectionGpuResources>,
+            )>()
+        else {
+            return RenderCommandResult::Failure;
+        };
+
+        pass.set_pipeline(match PASS {
+            extrusion_pass::DEPTH => &pipeline.depth,
+            extrusion_pass::COLOR => &pipeline.color,
+            _ => &pipeline.clear,
+        });
+        pass.set_bind_group(
+            0,
+            projection_resources.bind_group_for(item.projection_binding()),
+            &[],
+        );
+        RenderCommandResult::Success
+    }
+}
+
+/// Draws an extruded bucket into depth only.
+pub type DrawExtrusionDepth = (
+    SetExtrusionPipeline<{ extrusion_pass::DEPTH }>,
+    DrawVectorTile,
+);
+/// Draws an extruded bucket where its depth pass left the nearest surface, once per pixel.
+pub type DrawExtrusionColor = (
+    SetExtrusionPipeline<{ extrusion_pass::COLOR }>,
+    DrawVectorTile,
+);
+/// Resets the stencil bit the colour draw marked.
+pub type DrawExtrusionClear = (
+    SetExtrusionPipeline<{ extrusion_pass::CLEAR }>,
+    DrawVectorTile,
+);
 /// Binds and draws a polygon-fill bucket when both commands succeed.
 pub type DrawVectorTiles = (SetVectorTilePipeline, DrawVectorTile);
 /// Binds and draws a stroked-line bucket when both commands succeed.

@@ -25,6 +25,7 @@ pub(super) fn process_layer<T: VectorTransferables, C: Context>(
         Some(
             paint @ (LayerPaint::Line(_)
             | LayerPaint::Fill(_)
+            | LayerPaint::FillExtrusion(_)
             | LayerPaint::Circle(_)
             | LayerPaint::Heatmap(_)),
         ) => vector_layer(layer, style, paint, request, context),
@@ -50,6 +51,9 @@ fn tessellator(paint: &LayerPaint, request: &VectorTileRequest) -> ZeroTessellat
             .with_circles(CircleOptions::for_paint(circle, f64::from(zoom))),
         LayerPaint::Heatmap(heatmap) => ZeroTessellator::default()
             .with_circles(CircleOptions::for_heatmap(heatmap, f64::from(zoom))),
+        LayerPaint::FillExtrusion(extrusion) => {
+            ZeroTessellator::default().with_extrusion(ExtrusionOptions::for_paint(extrusion))
+        }
         _ if request.projection.uses_globe_rendering(f64::from(zoom)) => {
             let last_tile = i64::from(crate::coords::ZOOM_BOUNDS[usize::from(zoom)]) - 1;
             ZeroTessellator::default().with_globe_subdivision(
@@ -64,6 +68,9 @@ fn tessellator(paint: &LayerPaint, request: &VectorTileRequest) -> ZeroTessellat
     .with_feature_opacity(paint.opacity(), f64::from(zoom));
     match paint {
         LayerPaint::Fill(paint) => tessellator.style_property = paint.fill_color.clone(),
+        LayerPaint::FillExtrusion(paint) => {
+            tessellator.style_property = paint.fill_extrusion_color.clone()
+        }
         LayerPaint::Circle(paint) => tessellator.style_property = paint.circle_color.clone(),
         LayerPaint::Line(paint) => {
             tessellator.style_property = paint.line_color.clone();

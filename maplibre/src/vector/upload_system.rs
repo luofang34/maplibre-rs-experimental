@@ -37,6 +37,8 @@ pub(crate) fn drape_paint_zoom(zoom: f64) -> f64 {
 struct VectorPaintFrame {
     zoom: f32,
     bearing: f32,
+    /// The root light as extruded polygons are shaded with it.
+    light: crate::style::light::ExtrusionLight,
 }
 
 pub fn upload_system(
@@ -52,7 +54,6 @@ pub fn upload_system(
         return Ok(());
     }
     let (paint_frame, previous_paint) = frame_paint(world, style, view_state);
-    let VectorPaintFrame { zoom, bearing } = paint_frame;
     let refresh_paint = previous_paint != Some(paint_frame);
     let Some(Initialized(pattern)) = world.resources.get::<Eventually<WgpuTileViewPattern>>()
     else {
@@ -74,8 +75,7 @@ pub fn upload_system(
             buffer_pool,
             queue,
             &painted_tiles,
-            zoom,
-            bearing,
+            paint_frame,
             previous_paint,
         );
     }
@@ -105,7 +105,17 @@ fn frame_paint(
         view_state.style_zoom().level()
     };
     let bearing = view_state.camera().get_bearing().0 as f32;
-    let paint_frame = VectorPaintFrame { zoom, bearing };
+    let light = style
+        .light
+        .clone()
+        .unwrap_or_default()
+        .extrusion_light(view_state.style_zoom().value(), f64::from(bearing))
+        .unwrap_or_default();
+    let paint_frame = VectorPaintFrame {
+        zoom,
+        bearing,
+        light,
+    };
     let previous_paint = world.resources.get::<VectorPaintFrame>().copied();
     world.resources.insert(paint_frame);
     (paint_frame, previous_paint)
@@ -152,10 +162,10 @@ fn refresh_layer_paint(
     buffer_pool: &VectorBufferPool,
     queue: &wgpu::Queue,
     source_tiles: &[crate::coords::WorldTileCoords],
-    zoom: f32,
-    bearing: f32,
+    frame: VectorPaintFrame,
     previous: Option<VectorPaintFrame>,
 ) {
+    let VectorPaintFrame { zoom, .. } = frame;
     for coords in source_tiles {
         for entry in buffer_pool
             .index()
@@ -163,14 +173,10 @@ fn refresh_layer_paint(
             .into_iter()
             .flatten()
         {
-            let metadata = metadata_for_layer(&entry.style_layer, *coords, zoom, bearing);
-            let unchanged = previous.is_some_and(|frame| {
-                bytemuck::bytes_of(&metadata_for_layer(
-                    &entry.style_layer,
-                    *coords,
-                    frame.zoom,
-                    frame.bearing,
-                )) == bytemuck::bytes_of(&metadata)
+            let metadata = metadata_for_layer(&entry.style_layer, *coords, frame);
+            let unchanged = previous.is_some_and(|previous| {
+                bytemuck::bytes_of(&metadata_for_layer(&entry.style_layer, *coords, previous))
+                    == bytemuck::bytes_of(&metadata)
             });
             if !unchanged {
                 buffer_pool.update_layer_metadata(queue, entry, metadata);
@@ -281,7 +287,7 @@ fn upload_bucket(
     spatial: &[super::structures::SpatialBuffer],
     paint: VectorPaintFrame,
 ) -> bool {
-    let VectorPaintFrame { zoom, bearing } = paint;
+    let VectorPaintFrame { zoom, .. } = paint;
     let AvailableVectorLayerBucket {
         coords,
         buffer,
@@ -309,7 +315,7 @@ fn upload_bucket(
         .iter()
         .find(|(tile, id, _)| *tile == coords && *id == style_layer.id)
         .map_or(buffer, |(_, _, spatial)| spatial);
-    let layer_metadata = metadata_for_layer(style_layer, coords, zoom, bearing);
+    let layer_metadata = metadata_for_layer(style_layer, coords, paint);
 
     tracing::debug!(%coords, "allocating vector geometry");
     if let Err(error) = buffer_pool.replace_layer_geometry(
@@ -345,6 +351,10 @@ fn layer_translate_tile_units(
             paint.circle_translate.unwrap_or([0.0; 2]),
             paint.circle_translate_anchor,
         ),
+        Some(LayerPaint::FillExtrusion(paint)) => (
+            paint.fill_extrusion_translate.unwrap_or([0.0; 2]),
+            paint.fill_extrusion_translate_anchor,
+        ),
         _ => return [0.0; 2],
     };
     let translated = if anchor == TranslateAnchor::Viewport {
@@ -369,9 +379,13 @@ mod tests;
 fn metadata_for_layer(
     style_layer: &crate::style::layer::StyleLayer,
     coords: crate::coords::WorldTileCoords,
-    zoom: f32,
-    bearing: f32,
+    frame: VectorPaintFrame,
 ) -> ShaderLayerMetadata {
+    let VectorPaintFrame {
+        zoom,
+        bearing,
+        light,
+    } = frame;
     // Extract line-width from style paint (default 1.0px)
     let line_width = match &style_layer.paint {
         Some(LayerPaint::Line(paint)) => paint
@@ -406,6 +420,20 @@ fn metadata_for_layer(
             0.0,
             0.0,
         ];
+    }
+
+    if let Some(LayerPaint::FillExtrusion(paint)) = &style_layer.paint {
+        let opacity = paint
+            .fill_extrusion_opacity
+            .as_ref()
+            .and_then(|opacity| opacity.evaluate_at_zoom(f64::from(zoom)))
+            .unwrap_or(1.0)
+            .clamp(0.0, 1.0);
+        let gradient = paint.fill_extrusion_vertical_gradient.unwrap_or(true);
+        layer_metadata.stroke_color = [light.color[0], light.color[1], light.color[2], 1.0];
+        layer_metadata.circle_params = [opacity, f32::from(gradient), light.intensity, 0.0];
+        layer_metadata.circle_flags =
+            [light.position[0], light.position[1], light.position[2], 0.0];
     }
 
     layer_metadata

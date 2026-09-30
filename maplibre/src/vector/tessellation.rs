@@ -24,6 +24,8 @@ use crate::{
 };
 
 mod circle;
+mod extrusion;
+pub use extrusion::ExtrusionOptions;
 
 const DEFAULT_TOLERANCE: f32 = 0.02;
 
@@ -152,6 +154,8 @@ pub struct ZeroTessellator<I: std::ops::Add + From<lyon::tessellation::VertexId>
     pub coordinate_scale: f64,
     /// When set, every coordinate becomes a circle quad and no path is built.
     circle: Option<CircleOptions>,
+    /// When set, polygons become walls and a roof at the feature's height.
+    extrusion: Option<ExtrusionOptions>,
     /// The layer's opacity property and the zoom it is evaluated at, multiplied into every
     /// feature's colour alpha.
     feature_opacity: Option<(crate::style::layer::StyleProperty<f32>, f64)>,
@@ -202,6 +206,7 @@ impl<I: std::ops::Add + From<lyon::tessellation::VertexId> + MaxIndex> Default
             extend_to_south_pole: false,
             coordinate_scale: 1.0,
             circle: None,
+            extrusion: None,
             feature_opacity: None,
         }
     }
@@ -220,6 +225,12 @@ where
     ) -> Self {
         self.feature_opacity = opacity.map(|opacity| (opacity, zoom));
         self.zoom = zoom;
+        self
+    }
+
+    /// Raises polygons to the feature's height instead of filling them flat.
+    pub fn with_extrusion(mut self, options: ExtrusionOptions) -> Self {
+        self.extrusion = Some(options);
         self
     }
 
@@ -271,7 +282,24 @@ where
         Ok(())
     }
 
+    fn tessellate_extrusion(&mut self, options: &ExtrusionOptions) -> GeoResult<()> {
+        let path = self.path_builder.replace(Path::builder()).build();
+        let evaluate = |property: &Option<crate::style::layer::StyleProperty<f32>>| {
+            property
+                .as_ref()
+                .and_then(|property| property.evaluate_for(&self.feature_properties, self.zoom))
+                .unwrap_or(0.0)
+        };
+        let height = evaluate(&options.height);
+        let base = evaluate(&options.base).max(0.0);
+        extrusion::extrude(&path, (base, height), &mut self.buffer, DEFAULT_TOLERANCE)
+            .map_err(|error| GeozeroError::Geometry(error.to_string()))
+    }
+
     fn tessellate_fill(&mut self) -> GeoResult<()> {
+        if let Some(options) = self.extrusion.clone() {
+            return self.tessellate_extrusion(&options);
+        }
         let path_builder = self.path_builder.replace(Path::builder());
         let index_start = self.buffer.indices.len();
 

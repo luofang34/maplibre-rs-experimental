@@ -57,6 +57,7 @@ impl StyleLayerDef {
         let Some(paint) = self.paint.take() else {
             return Ok(match self.type_.as_str() {
                 "circle" => Some(LayerPaint::Circle(Default::default())),
+                "fill-extrusion" => Some(LayerPaint::FillExtrusion(Default::default())),
                 "heatmap" => Some(LayerPaint::Heatmap(Default::default())),
                 "hillshade" => Some(LayerPaint::Hillshade(Default::default())),
                 "color-relief" => Some(LayerPaint::ColorRelief(Default::default())),
@@ -68,6 +69,7 @@ impl StyleLayerDef {
             "background" => parse_paint(paint, extra, LayerPaint::Background)?,
             "line" => parse_paint(paint, extra, LayerPaint::Line)?,
             "fill" => parse_paint(paint, extra, LayerPaint::Fill)?,
+            "fill-extrusion" => parse_paint(paint, extra, LayerPaint::FillExtrusion)?,
             "raster" => parse_paint(paint, extra, LayerPaint::Raster)?,
             "hillshade" => parse_paint(paint, extra, LayerPaint::Hillshade)?,
             "color-relief" => parse_paint(paint, extra, LayerPaint::ColorRelief)?,

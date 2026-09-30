@@ -11,9 +11,13 @@ use crate::{
     },
     tcs::system::{SystemError, SystemResult},
     vector::{
-        resource::BufferPool, CirclePipeline, LinePipeline, VectorBufferPool, VectorPipeline,
+        resource::BufferPool, CirclePipeline, ExtrusionPipeline, LinePipeline, VectorBufferPool,
+        VectorPipeline,
     },
 };
+
+/// The stencil bit no tile reference uses.
+const STENCIL_MARK: u32 = 0x80;
 
 pub fn resource_system(
     MapContext {
@@ -46,20 +50,27 @@ pub fn resource_system(
     {
         dashes.update(device, queue, style, view_state.style_zoom().value());
     }
+    let Some(dashes_layout) = world
+        .resources
+        .get::<super::line_dash::LineDashResources>()
+        .map(|dashes| dashes.layout.clone())
+    else {
+        return Err(SystemError::Dependencies);
+    };
     let Some((
         buffer_pool,
         vector_pipeline,
         line_pipeline,
         circle_pipeline,
+        extrusion_pipeline,
         Initialized(projection_resources),
-        dashes,
     )) = world.resources.query_mut::<(
         &mut Eventually<VectorBufferPool>,
         &mut Eventually<VectorPipeline>,
         &mut Eventually<LinePipeline>,
         &mut Eventually<CirclePipeline>,
+        &mut Eventually<ExtrusionPipeline>,
         &mut Eventually<ProjectionGpuResources>,
-        &super::line_dash::LineDashResources,
     )>()
     else {
         return Err(SystemError::Dependencies);
@@ -78,8 +89,9 @@ pub fn resource_system(
         vector_pipeline,
         line_pipeline,
         circle_pipeline,
-        &dashes.layout,
+        &dashes_layout,
     );
+    setup.initialize_extrusion(extrusion_pipeline);
     Ok(())
 }
 
@@ -127,6 +139,76 @@ impl PipelineSetup<'_> {
             }
         }
         descriptor.initialize_with_prefix_layouts(self.device, layouts)
+    }
+
+    fn create_extrusion(&self, pass: shaders::ExtrusionPass) -> wgpu::RenderPipeline {
+        use shaders::ExtrusionPass::{Clear, Color, Depth};
+
+        let shader = shaders::FillExtrusionShader {
+            format: self.format,
+            pass,
+        };
+        let mut descriptor = TilePipeline::new(
+            match pass {
+                Depth => "extrusion_depth_pipeline",
+                Color => "extrusion_color_pipeline",
+                Clear => "extrusion_clear_pipeline",
+            }
+            .into(),
+            self.settings,
+            shader.describe_vertex(),
+            shader.describe_fragment(),
+            crate::render::resource::TilePipelineOptions {
+                depth_stencil_enabled: true,
+                update_stencil: false,
+                debug_stencil: true,
+                wireframe: false,
+                multisampling: self.multisampling,
+                textured: false,
+            },
+        )
+        .with_depth_write()
+        .describe_render_pipeline();
+        if let Some(state) = &mut descriptor.depth_stencil {
+            state.depth_write_enabled = Some(pass == Depth);
+            state.depth_compare = Some(match pass {
+                Depth | Color => wgpu::CompareFunction::GreaterEqual,
+                Clear => wgpu::CompareFunction::Always,
+            });
+            // Tile references use the low seven bits; the top bit marks the pixels the colour
+            // pass has drawn, so a surface that two tiles both hold is blended once.
+            let marked = wgpu::StencilFaceState {
+                compare: wgpu::CompareFunction::Equal,
+                fail_op: wgpu::StencilOperation::Keep,
+                depth_fail_op: wgpu::StencilOperation::Keep,
+                pass_op: wgpu::StencilOperation::Invert,
+            };
+            let unmark = wgpu::StencilFaceState {
+                compare: wgpu::CompareFunction::Always,
+                fail_op: wgpu::StencilOperation::Keep,
+                depth_fail_op: wgpu::StencilOperation::Keep,
+                pass_op: wgpu::StencilOperation::Zero,
+            };
+            match pass {
+                Depth => {}
+                Color => state.stencil.front = marked,
+                Clear => state.stencil.front = unmark,
+            }
+            state.stencil.back = state.stencil.front;
+            if pass != Depth {
+                state.stencil.read_mask = STENCIL_MARK;
+                state.stencil.write_mask = STENCIL_MARK;
+            }
+        }
+        descriptor.initialize_with_prefix_layouts(self.device, &[self.projection])
+    }
+
+    fn initialize_extrusion(&self, extrusion: &mut Eventually<ExtrusionPipeline>) {
+        extrusion.initialize(|| ExtrusionPipeline {
+            depth: self.create_extrusion(shaders::ExtrusionPass::Depth),
+            color: self.create_extrusion(shaders::ExtrusionPass::Color),
+            clear: self.create_extrusion(shaders::ExtrusionPass::Clear),
+        });
     }
 
     fn initialize(

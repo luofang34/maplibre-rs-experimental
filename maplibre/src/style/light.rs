@@ -30,6 +30,18 @@ pub struct LightSpecification {
     /// Spherical position as radius, azimuth, and polar angle.
     #[serde(default = "default_position_property")]
     pub position: StyleProperty<[f64; 3]>,
+    /// Colour of the light; extruded polygons are lit with it, white by default.
+    #[serde(
+        default,
+        deserialize_with = "StyleProperty::<csscolorparser::Color>::deserialize_color_or_none"
+    )]
+    pub color: Option<StyleProperty<csscolorparser::Color>>,
+    /// Strength of the light in 0..=1; 0.5 by default.
+    #[serde(
+        default,
+        deserialize_with = "StyleProperty::<f32>::deserialize_f32_or_none"
+    )]
+    pub intensity: Option<StyleProperty<f32>>,
 }
 
 impl Default for LightSpecification {
@@ -37,6 +49,8 @@ impl Default for LightSpecification {
         Self {
             anchor: LightAnchor::Viewport,
             position: default_position_property(),
+            color: None,
+            intensity: None,
         }
     }
 }
@@ -58,7 +72,62 @@ pub enum LightError {
     InvalidViewDirection,
 }
 
+/// The light as the extrusion shader takes it.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ExtrusionLight {
+    /// Position on the sphere of the given radius, in map axes with y pointing south.
+    pub position: [f32; 3],
+    /// Linear-channel colour of the light.
+    pub color: [f32; 3],
+    /// Strength in 0..=1.
+    pub intensity: f32,
+}
+
 impl LightSpecification {
+    /// Evaluates the light at `zoom` for a view turned by `bearing_radians`, as GL JS lights
+    /// extrusions: a viewport-anchored light turns against the map.
+    pub fn extrusion_light(
+        &self,
+        zoom: f64,
+        bearing_radians: f64,
+    ) -> Result<ExtrusionLight, LightError> {
+        let [radius, azimuth, polar] = evaluate_position(&self.position, zoom)?;
+        if !radius.is_finite() || !azimuth.is_finite() || !polar.is_finite() {
+            return Err(LightError::InvalidPosition);
+        }
+        let azimuth = (azimuth + 90.0).to_radians();
+        let polar = polar.to_radians();
+        let (x, y, z) = (
+            radius * azimuth.cos() * polar.sin(),
+            radius * azimuth.sin() * polar.sin(),
+            radius * polar.cos(),
+        );
+        let (x, y) = match self.anchor {
+            LightAnchor::Map => (x, y),
+            LightAnchor::Viewport => {
+                let (sin, cos) = bearing_radians.sin_cos();
+                (x * cos - y * sin, x * sin + y * cos)
+            }
+        };
+        let color = self
+            .color
+            .as_ref()
+            .and_then(|color| color.evaluate_at_zoom(zoom))
+            .map_or([1.0; 3], |color| {
+                [color.r as f32, color.g as f32, color.b as f32]
+            });
+        let intensity = self
+            .intensity
+            .as_ref()
+            .and_then(|intensity| intensity.evaluate_at_zoom(zoom))
+            .unwrap_or(0.5);
+        Ok(ExtrusionLight {
+            position: [x as f32, y as f32, z as f32],
+            color,
+            intensity,
+        })
+    }
+
     /// Evaluates the light and returns the sun direction in camera-view axes.
     pub fn sun_direction_in_view(
         &self,

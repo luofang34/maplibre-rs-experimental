@@ -25,7 +25,10 @@ use crate::{
         layer::{LayerPaint, StyleLayer},
     },
     vector::{
-        tessellation::{CircleOptions, IndexDataType, OverAlignedVertexBuffer, ZeroTessellator},
+        tessellation::{
+            CircleOptions, ExtrusionOptions, IndexDataType, OverAlignedVertexBuffer,
+            ZeroTessellator,
+        },
         transferables::{
             LayerIndexed, LayerMissing, LayerTessellated, SymbolLayerTessellated, TileTessellated,
             VectorTransferables,

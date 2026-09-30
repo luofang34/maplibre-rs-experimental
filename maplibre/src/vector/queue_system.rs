@@ -13,7 +13,10 @@ use crate::{
         tiles::Tile,
     },
     vector::{
-        render_commands::{DrawCircleTiles, DrawLineTiles, DrawVectorTiles},
+        render_commands::{
+            DrawCircleTiles, DrawExtrusionClear, DrawExtrusionColor, DrawExtrusionDepth,
+            DrawLineTiles, DrawVectorTiles,
+        },
         VectorBufferPool,
     },
 };
@@ -48,6 +51,10 @@ pub fn queue_system(
         .as_ref()
         .is_some_and(|specification| specification.projection_type.uses_globe_rendering(zoom));
 
+    // Every tile's depth is drawn before any tile's colour, so an extrusion that crosses tiles
+    // shows its nearest surface once instead of once per tile.
+    let mut extrusion_colors = Vec::new();
+    let mut extrusion_clears = Vec::new();
     for view_tile in tile_view_pattern.iter() {
         let coords = &view_tile.coords();
         tracing::trace!("Drawing tile at {coords}");
@@ -83,6 +90,39 @@ pub fn queue_system(
                             "heatmap" => continue,
                             "line" => Box::new(DrawState::<LayerItem, DrawLineTiles>::new()),
                             "circle" => Box::new(DrawState::<LayerItem, DrawCircleTiles>::new()),
+                            "fill-extrusion" => {
+                                extrusion_clears.push(LayerItem {
+                                    projection: ProjectionBinding::View,
+                                    draw_function: Box::new(DrawState::<
+                                        LayerItem,
+                                        DrawExtrusionClear,
+                                    >::new(
+                                    )),
+                                    index: layer_entry.style_layer.index,
+                                    generate_borders: false,
+                                    style_layer: layer_entry.style_layer.id.clone(),
+                                    tile: Tile {
+                                        coords: layer_entry.coords,
+                                    },
+                                    source_shape: source_shape.clone(),
+                                });
+                                extrusion_colors.push(LayerItem {
+                                    projection: ProjectionBinding::View,
+                                    draw_function: Box::new(DrawState::<
+                                        LayerItem,
+                                        DrawExtrusionColor,
+                                    >::new(
+                                    )),
+                                    index: layer_entry.style_layer.index,
+                                    generate_borders: false,
+                                    style_layer: layer_entry.style_layer.id.clone(),
+                                    tile: Tile {
+                                        coords: layer_entry.coords,
+                                    },
+                                    source_shape: source_shape.clone(),
+                                });
+                                Box::new(DrawState::<LayerItem, DrawExtrusionDepth>::new())
+                            }
                             _ => Box::new(DrawState::<LayerItem, DrawVectorTiles>::new()),
                         };
 
@@ -100,6 +140,10 @@ pub fn queue_system(
                 }
             }
         });
+    }
+
+    for item in extrusion_colors.into_iter().chain(extrusion_clears) {
+        layer_item_phase.add(item);
     }
 
     Ok(())

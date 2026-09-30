@@ -42,6 +42,7 @@ fn upload(world: &mut World, queue: &wgpu::Queue, style: &Style, coords: Vec<Wor
         VectorPaintFrame {
             zoom: 4.0,
             bearing: 0.0,
+            light: Default::default(),
         },
     );
 }

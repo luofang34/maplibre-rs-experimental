@@ -4,6 +4,7 @@
 mod background;
 mod circle;
 mod fill;
+mod fill_extrusion;
 mod heatmap;
 mod line;
 mod symbol;
@@ -19,6 +20,7 @@ pub use background::{
 };
 pub use circle::CircleShader;
 pub use fill::FillShader;
+pub use fill_extrusion::{ExtrusionPass, FillExtrusionShader};
 pub use heatmap::{HeatmapCompositeShader, HeatmapDensityShader, DENSITY_FORMAT};
 pub use line::LineShader;
 pub use symbol::SymbolShader;

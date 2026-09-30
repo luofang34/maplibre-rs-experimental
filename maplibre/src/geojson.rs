@@ -19,7 +19,7 @@ use crate::{
         layer::{LayerPaint, StyleLayer},
     },
     vector::{
-        tessellation::{CircleOptions, IndexDataType, ZeroTessellator},
+        tessellation::{CircleOptions, ExtrusionOptions, IndexDataType, ZeroTessellator},
         transferables::{
             LayerMissing, LayerTessellated, SymbolLayerTessellated, TileTessellated,
             VectorTransferables,
@@ -308,6 +308,7 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
 
         match paint {
             LayerPaint::Fill(_)
+            | LayerPaint::FillExtrusion(_)
             | LayerPaint::Line(_)
             | LayerPaint::Background(_)
             | LayerPaint::Circle(_)
@@ -324,6 +325,10 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
                         .with_circles(CircleOptions::for_paint(circle, f64::from(zoom))),
                     LayerPaint::Heatmap(heatmap) => ZeroTessellator::<IndexDataType>::default()
                         .with_circles(CircleOptions::for_heatmap(heatmap, f64::from(zoom))),
+                    LayerPaint::FillExtrusion(extrusion) => {
+                        ZeroTessellator::<IndexDataType>::default()
+                            .with_extrusion(ExtrusionOptions::for_paint(extrusion))
+                    }
                     _ if use_globe_geometry => {
                         let last_tile =
                             i64::from(crate::coords::ZOOM_BOUNDS[usize::from(zoom)]) - 1;
@@ -339,6 +344,9 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
                 .with_feature_opacity(paint.opacity(), f64::from(zoom));
                 match paint {
                     LayerPaint::Fill(p) => tessellator.style_property = p.fill_color.clone(),
+                    LayerPaint::FillExtrusion(p) => {
+                        tessellator.style_property = p.fill_extrusion_color.clone()
+                    }
                     LayerPaint::Circle(p) => tessellator.style_property = p.circle_color.clone(),
                     LayerPaint::Line(p) => {
                         tessellator.style_property = p.line_color.clone();

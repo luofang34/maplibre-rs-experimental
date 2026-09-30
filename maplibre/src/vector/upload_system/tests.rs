@@ -97,6 +97,7 @@ async fn empty_tiles_do_not_starve_later_geometry_uploads() {
         super::VectorPaintFrame {
             zoom: 8.0,
             bearing: 0.0,
+            light: Default::default(),
         },
     );
     assert!(
@@ -116,7 +117,15 @@ fn a_heatmap_layer_carries_radius_and_intensity_at_the_view_zoom() {
         }
     }))
     .expect("layer");
-    let metadata = super::metadata_for_layer(&layer, Default::default(), 5.0, 0.0);
+    let metadata = super::metadata_for_layer(
+        &layer,
+        Default::default(),
+        super::VectorPaintFrame {
+            zoom: 5.0,
+            bearing: 0.0,
+            light: Default::default(),
+        },
+    );
     assert_eq!(metadata.line_width, 20.0);
     assert_eq!(metadata.circle_params[0], 2.0);
 }

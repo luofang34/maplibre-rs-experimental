@@ -70,6 +70,53 @@ pub struct FillPaint {
     pub fill_translate_anchor: TranslateAnchor,
 }
 
+/// Extruded polygon appearance; heights are in metres above the ground.
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct FillExtrusionPaint {
+    /// Colour of the walls and roof, per feature where data driven.
+    #[serde(rename = "fill-extrusion-color")]
+    #[serde(
+        default,
+        deserialize_with = "StyleProperty::<Color>::deserialize_color_or_none"
+    )]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fill_extrusion_color: Option<StyleProperty<Color>>,
+    /// Opacity of the whole layer at the view zoom.
+    #[serde(rename = "fill-extrusion-opacity")]
+    #[serde(
+        default,
+        deserialize_with = "StyleProperty::<f32>::deserialize_f32_or_none"
+    )]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fill_extrusion_opacity: Option<StyleProperty<f32>>,
+    /// Height of the roof above the ground, per feature where data driven.
+    #[serde(rename = "fill-extrusion-height")]
+    #[serde(
+        default,
+        deserialize_with = "StyleProperty::<f32>::deserialize_f32_or_none"
+    )]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fill_extrusion_height: Option<StyleProperty<f32>>,
+    /// Height of the bottom of the walls above the ground, per feature where data driven.
+    #[serde(rename = "fill-extrusion-base")]
+    #[serde(
+        default,
+        deserialize_with = "StyleProperty::<f32>::deserialize_f32_or_none"
+    )]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fill_extrusion_base: Option<StyleProperty<f32>>,
+    /// Whether the walls darken towards their base; defaults to on.
+    #[serde(rename = "fill-extrusion-vertical-gradient", default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fill_extrusion_vertical_gradient: Option<bool>,
+    /// Translation in screen pixels before conversion to tile units.
+    #[serde(rename = "fill-extrusion-translate", default)]
+    pub fill_extrusion_translate: Option<[f32; 2]>,
+    /// Coordinate frame for `fill_extrusion_translate`.
+    #[serde(rename = "fill-extrusion-translate-anchor", default)]
+    pub fill_extrusion_translate_anchor: TranslateAnchor,
+}
+
 /// Path appearance with widths and translations expressed in screen pixels.
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct LinePaint {

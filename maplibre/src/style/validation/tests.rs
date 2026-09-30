@@ -83,7 +83,7 @@ fn raster_adjustments_and_unknown_layer_types_are_reported() {
             serde_json::json!({"raster-fade-duration": 300}),
             "paint.raster-fade-duration",
         ),
-        ("fill-extrusion", serde_json::json!({}), "fill-extrusion"),
+        ("model", serde_json::json!({}), "model"),
     ] {
         let style = style_with_layer(serde_json::json!({
             "id": "unsupported", "type": kind, "paint": paint

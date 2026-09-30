@@ -18,8 +18,8 @@ use crate::style::{
 mod paint;
 mod serialization;
 pub use paint::{
-    BackgroundPaint, FillPaint, LinePaint, RasterPaint, RasterResampling, SymbolPaint,
-    TranslateAnchor,
+    BackgroundPaint, FillExtrusionPaint, FillPaint, LinePaint, RasterPaint, RasterResampling,
+    SymbolPaint, TranslateAnchor,
 };
 pub use serialization::LayerProperties;
 
@@ -36,6 +36,9 @@ pub enum LayerPaint {
     /// Filled polygon color, opacity and translation.
     #[serde(rename = "fill")]
     Fill(FillPaint),
+    /// Polygons raised to a height, with lit walls and roof.
+    #[serde(rename = "fill-extrusion")]
+    FillExtrusion(FillExtrusionPaint),
     /// Image sampling and adjustment properties retained from the style.
     #[serde(rename = "raster")]
     Raster(RasterPaint),
@@ -65,6 +68,7 @@ impl LayerPaint {
             LayerPaint::Circle(paint) => paint.circle_opacity.clone(),
             LayerPaint::ColorRelief(paint) => paint.color_relief_opacity.clone(),
             LayerPaint::Background(_)
+            | LayerPaint::FillExtrusion(_)
             | LayerPaint::Raster(_)
             | LayerPaint::Hillshade(_)
             | LayerPaint::Symbol(_)
@@ -81,6 +85,7 @@ impl LayerPaint {
             Self::Line(paint) => &paint.line_color,
             Self::Fill(paint) => &paint.fill_color,
             Self::Circle(paint) => &paint.circle_color,
+            Self::FillExtrusion(paint) => &paint.fill_extrusion_color,
             Self::Raster(_)
             | Self::Hillshade(_)
             | Self::ColorRelief(_)

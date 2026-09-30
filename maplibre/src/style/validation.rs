@@ -126,6 +126,7 @@ impl LayerValidation<'_> {
             self.layer.type_.as_str(),
             "background"
                 | "fill"
+                | "fill-extrusion"
                 | "line"
                 | "circle"
                 | "symbol"
