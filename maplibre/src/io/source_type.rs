@@ -2,7 +2,10 @@
 
 use thiserror::Error;
 
-use crate::{coords::WorldTileCoords, style::source::TileAddressingScheme};
+use crate::{
+    coords::WorldTileCoords,
+    style::source::{GeoJsonSource, TileAddressingScheme},
+};
 
 /// Tile coordinates that cannot be addressed by any tile URL.
 #[derive(Debug, Error)]
@@ -112,9 +115,20 @@ impl Default for RasterSource {
     }
 }
 
+/// A GeoJSON source whose tiles are cut from an index the worker builds and shares.
+#[derive(Clone, Debug)]
+pub struct GeoJsonTileSource {
+    /// The style's name for the source, which keys the shared index.
+    pub name: String,
+    /// The declaration: data, zoom range and id options.
+    pub source: GeoJsonSource,
+}
+
 /// Represents the tiles' different types of source.
 #[derive(Clone, Debug)]
 pub enum SourceType {
+    /// GeoJSON document tiled by the worker instead of fetched per tile.
+    GeoJson(GeoJsonTileSource),
     /// Raster image tile URL template.
     Raster(RasterSource),
     /// Vector tile URL template for geometry processing.
@@ -125,6 +139,7 @@ impl SourceType {
     /// Returns the tile URL, or `None` when the coordinates are outside the world.
     pub fn format(&self, coords: &WorldTileCoords) -> Option<String> {
         match self {
+            SourceType::GeoJson(_) => None,
             SourceType::Raster(raster_source) => raster_source.format(coords),
             SourceType::Tessellate(tessellate_source) => tessellate_source.format(coords),
         }

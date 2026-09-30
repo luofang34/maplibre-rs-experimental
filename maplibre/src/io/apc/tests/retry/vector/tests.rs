@@ -225,3 +225,75 @@ async fn transient_glyph_failure_retries_the_tile_until_symbols_load() {
         "the recovered tile schedules no more retries"
     );
 }
+
+fn geojson_style(data: serde_json::Value) -> crate::style::Style {
+    serde_json::from_value(serde_json::json!({"version":8,
+        "sources":{"shapes":{"type":"geojson","data":data}},
+        "layers":[{"id":"area","source":"shapes","type":"fill","paint":{"fill-color":"#00ff00"}}]}))
+    .expect("geojson style")
+}
+
+const WORLD_POLYGON: &str = r#"{"type":"Feature","properties":{},"geometry":{"type":"Polygon",
+    "coordinates":[[[-100,-60],[100,-60],[100,60],[-100,60],[-100,-60]]]}}"#;
+
+#[tokio::test]
+async fn inline_geojson_declared_in_the_style_reaches_the_screen_without_any_request() {
+    let mut test = Fixture::new(Kind::Vector, false).await;
+    test.context.style = geojson_style(serde_json::from_str(WORLD_POLYGON).expect("polygon"));
+    let mut frames = super::render::Frames::new(&mut test);
+    test.frame(0);
+    test.receive().await;
+    assert_eq!(test.source.requests(), 0, "inline data is never fetched");
+    assert!(
+        test.loaded(),
+        "the polygon is tiled, tessellated and stored"
+    );
+    super::render::assert_green(&frames.render(&mut test));
+}
+
+#[tokio::test]
+async fn url_geojson_retries_a_transient_failure_and_then_renders() {
+    let mut test = Fixture::new(Kind::Vector, false).await;
+    let url = format!("{}/unstable/shapes.geojson", test.source.url);
+    test.context.style = geojson_style(serde_json::Value::String(url));
+    let mut frames = super::render::Frames::new(&mut test);
+    test.frame(0);
+    test.receive().await;
+    assert_eq!(test.source.requests(), 1);
+    assert!(!test.loaded(), "a 503 leaves the tile without data");
+    test.source
+        .set(Response::Bytes(WORLD_POLYGON.as_bytes().to_vec()));
+    test.frame(999);
+    test.receive().await;
+    assert_eq!(test.source.requests(), 1, "the failure backs off");
+    test.frame(1000);
+    test.frame(1001);
+    assert_eq!(test.kernel.apc().pending(), 1, "one retry at the deadline");
+    test.receive().await;
+    assert_eq!(test.source.requests(), 2);
+    assert!(test.loaded());
+    super::render::assert_green(&frames.render(&mut test));
+    test.frame(60000);
+    test.receive().await;
+    assert_eq!(test.source.requests(), 2, "success clears the deadline");
+}
+
+#[tokio::test]
+async fn a_malformed_geojson_document_is_a_terminal_typed_failure_that_is_not_retried() {
+    let mut test = Fixture::new(Kind::Vector, false).await;
+    let url = format!("{}/unstable/shapes.geojson", test.source.url);
+    test.context.style = geojson_style(serde_json::Value::String(url));
+    test.source
+        .set(Response::Bytes(b"<html>not geojson".to_vec()));
+    test.frame(0);
+    test.receive().await;
+    assert_eq!(test.source.requests(), 1);
+    assert!(!test.loaded());
+    test.frame(60000);
+    test.receive().await;
+    assert_eq!(
+        test.source.requests(),
+        1,
+        "a bad document is remembered, not refetched"
+    );
+}

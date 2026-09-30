@@ -60,7 +60,7 @@ png = { version = "0.17.10" }
 reqwest = { version = "0.12.5", default-features = false, features = ["rustls-tls", "gzip"] }  # Use rusttls on android because cross compiling is difficult
 rstar = "0.12.0"
 rusqlite = { version = "0.32.0" }
-serde = { version = "1.0.188", features = ["derive"] }
+serde = { version = "1.0.188", features = ["derive", "rc"] }
 serde_json = "1.0.107"
 smallvec = "1.11.1"
 thiserror = "1.0.48"

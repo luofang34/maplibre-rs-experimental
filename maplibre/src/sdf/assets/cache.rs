@@ -201,7 +201,7 @@ impl AssetCache {
         .await
     }
 
-    async fn load<T, F, Fut>(&self, key: String, make: F) -> Result<Arc<T>, AssetFailure>
+    pub(crate) async fn load<T, F, Fut>(&self, key: String, make: F) -> Result<Arc<T>, AssetFailure>
     where
         T: Any + Send + Sync,
         F: FnOnce() -> Fut,
@@ -417,7 +417,7 @@ fn wake(waiters: Vec<Waker>) {
     }
 }
 
-async fn fetch<HC: HttpClient>(
+pub(crate) async fn fetch<HC: HttpClient>(
     client: &SourceClient<HC>,
     url: &str,
     what: &str,

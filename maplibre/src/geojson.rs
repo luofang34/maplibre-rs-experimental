@@ -440,5 +440,8 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
     Ok(())
 }
 
+pub mod index;
+mod store;
+
 #[cfg(test)]
 mod tests;

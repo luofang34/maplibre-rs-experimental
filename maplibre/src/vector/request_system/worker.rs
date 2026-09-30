@@ -2,6 +2,7 @@
 
 use std::{collections::HashSet, sync::Arc};
 
+use super::group_tile::fetch_group_tile;
 use crate::{
     coords::WorldTileCoords,
     environment::OffscreenKernel,
@@ -35,7 +36,7 @@ pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context +
         let mut failed = false;
         let mut retry = false;
         while let Some(group) = groups.next() {
-            let data = match client.fetch(&coords, &group.source).await {
+            let data = match fetch_group_tile(&client, coords, &group).await {
                 Ok(data) => data,
                 Err(error) => {
                     tracing::warn!(%coords, source = ?group.source_name, error = %error.describe(), "vector tile unavailable");

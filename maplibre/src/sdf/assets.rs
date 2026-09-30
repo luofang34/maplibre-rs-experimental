@@ -9,6 +9,7 @@ use crate::sdf::glyphs;
 mod cache;
 mod load;
 pub mod wire;
+pub(crate) use cache::fetch;
 pub use cache::{AssetCache, AssetFailure};
 pub use load::{load_symbol_assets, SymbolAssetError};
 

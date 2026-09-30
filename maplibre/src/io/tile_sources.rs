@@ -4,10 +4,12 @@ use std::collections::BTreeMap;
 
 use crate::{
     coords::{WorldTileCoords, TILE_SIZE},
-    io::source_type::{RasterSource, SourceType, TessellateSource},
+    io::source_type::{GeoJsonTileSource, RasterSource, SourceType, TessellateSource},
     style::{
         layer::StyleLayer,
-        source::{Source, TileAddressingScheme, VectorSource},
+        source::{
+            Source, TileAddressingScheme, VectorSource, GEOJSON_DEFAULT_MAXZOOM, GEOJSON_LAYER,
+        },
         Style,
     },
 };
@@ -40,6 +42,7 @@ impl TileKind {
                 vector.minzoom
             }
             (Self::Raster, Source::RasterDem(dem)) => dem.minzoom,
+            (Self::Vector, Source::GeoJson(geojson)) => geojson.minzoom,
             _ => None,
         }
     }
@@ -51,6 +54,9 @@ impl TileKind {
                 vector.maxzoom
             }
             (Self::Raster, Source::RasterDem(dem)) => dem.maxzoom,
+            (Self::Vector, Source::GeoJson(geojson)) => {
+                Some(geojson.maxzoom.unwrap_or(GEOJSON_DEFAULT_MAXZOOM))
+            }
             _ => None,
         }
     }
@@ -106,8 +112,8 @@ fn template_of(source: &VectorSource) -> Option<(&str, TileAddressingScheme)> {
 /// Groups the style layers of one tile kind by the source they read from.
 ///
 /// Layers that name no source, or a source without tile URLs, share the crate default source so
-/// styles that predate style-driven sources keep rendering. Layers of non-tile sources such as
-/// GeoJSON are not part of any group.
+/// styles that predate style-driven sources keep rendering. GeoJSON layers form a group whose
+/// tiles the worker cuts from its index and whose layers read the `_geojson` source layer.
 pub fn source_layer_groups(style: &Style, kind: TileKind) -> Vec<SourceLayerGroup> {
     let mut groups: BTreeMap<Option<String>, SourceLayerGroup> = BTreeMap::new();
     for layer in style
@@ -120,6 +126,13 @@ pub fn source_layer_groups(style: &Style, kind: TileKind) -> Vec<SourceLayerGrou
             .as_ref()
             .map(|name| (name, style.sources.get(name)));
         let (key, source) = match named {
+            Some((name, Some(Source::GeoJson(geojson)))) if kind == TileKind::Vector => (
+                Some(name.clone()),
+                SourceType::GeoJson(GeoJsonTileSource {
+                    name: name.clone(),
+                    source: geojson.clone(),
+                }),
+            ),
             Some((name, Some(source))) => match kind.template_of(source) {
                 Some((template, scheme)) => (
                     Some(name.clone()),
@@ -137,6 +150,10 @@ pub fn source_layer_groups(style: &Style, kind: TileKind) -> Vec<SourceLayerGrou
             },
             Some((_, None)) | None => (None, kind.default_source()),
         };
+        let mut layer = layer.clone();
+        if matches!(source, SourceType::GeoJson(_)) && layer.source_layer.is_none() {
+            layer.source_layer = Some(GEOJSON_LAYER.to_owned());
+        }
         groups
             .entry(key.clone())
             .or_insert_with(|| SourceLayerGroup {
@@ -145,7 +162,7 @@ pub fn source_layer_groups(style: &Style, kind: TileKind) -> Vec<SourceLayerGrou
                 layers: Vec::new(),
             })
             .layers
-            .push(layer.clone());
+            .push(layer);
     }
     groups.into_values().collect()
 }

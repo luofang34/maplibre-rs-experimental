@@ -20,6 +20,7 @@ use crate::{
     vector::{transferables::VectorTransferables, VectorLayerBucketComponent},
 };
 
+mod group_tile;
 mod worker;
 pub use worker::fetch_vector_apc;
 

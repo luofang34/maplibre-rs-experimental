@@ -79,7 +79,7 @@ fn load_geojson_blocking(
 ) -> Result<ProcessedLayers, String> {
     let loaded;
     let value = match data {
-        GeoJsonData::Inline(value) => value,
+        GeoJsonData::Inline(value) => value.as_ref(),
         GeoJsonData::Url(url) => {
             let path = local_data_path(url)?;
             let text = std::fs::read_to_string(&path)

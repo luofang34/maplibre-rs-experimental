@@ -49,7 +49,12 @@ fn vector_layers_group_by_source_template() {
 
     assert_eq!(
         names,
-        vec![None, Some("detail".into()), Some("world".into())]
+        vec![
+            None,
+            Some("detail".into()),
+            Some("shapes".into()),
+            Some("world".into())
+        ]
     );
     let world = groups
         .iter()
@@ -130,13 +135,21 @@ fn unresolvable_sources_fall_back_to_the_default_group() {
 }
 
 #[test]
-fn geojson_and_background_layers_are_not_tile_groups() {
+fn geojson_layers_form_a_group_reading_the_geojson_layer_and_background_is_left_out() {
     let groups = source_layer_groups(&style(), TileKind::Vector);
 
-    assert!(groups
+    let shapes = groups
         .iter()
-        .flat_map(|g| &g.layers)
-        .all(|l| l.id != "geo" && l.id != "bg"));
+        .find(|group| group.source_name.as_deref() == Some("shapes"))
+        .expect("geojson group");
+    let SourceType::GeoJson(source) = &shapes.source else {
+        panic!("geojson groups are cut from an index");
+    };
+    assert_eq!(source.name, "shapes");
+    assert_eq!(shapes.layers.len(), 1);
+    assert_eq!(shapes.layers[0].source_layer.as_deref(), Some("_geojson"));
+    assert!(groups.iter().flat_map(|g| &g.layers).all(|l| l.id != "bg"));
+    assert_eq!(source_max_zoom(&style(), TileKind::Vector), Some(6));
 }
 
 #[test]

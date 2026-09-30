@@ -1,5 +1,7 @@
 //! Named vector, image, elevation and GeoJSON source definitions.
 
+use std::{collections::HashMap, sync::Arc};
+
 use serde::{Deserialize, Serialize};
 
 /// Tile URL template, which may contain `{z}`, `{x}` and `{y}` placeholders.
@@ -26,22 +28,55 @@ pub enum TileAddressingScheme {
 pub enum GeoJsonData {
     /// Address of a GeoJSON document.
     Url(String),
-    /// Embedded feature, feature collection or geometry JSON.
-    Inline(serde_json::Value),
+    /// Embedded feature, feature collection or geometry JSON, shared by every request.
+    Inline(Arc<serde_json::Value>),
 }
 
-/// GeoJSON source declaration; the tile loader does not automatically fetch or tile it.
+/// Feature property that replaces the feature id, as the style specification's `promoteId`.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum PromoteId {
+    /// One property for every layer of the source.
+    Property(String),
+    /// A property for each source layer; GeoJSON has the single layer `_geojson`.
+    PerLayer(HashMap<String, String>),
+}
+
+/// The vector tile layer name GeoJSON features are tiled into, as GL JS names it.
+pub const GEOJSON_LAYER: &str = "_geojson";
+
+/// GeoJSON source declaration; workers fetch URL data, index it once per generation and tile it.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct GeoJsonSource {
-    /// Embedded geometry or a document URL for the host to load.
+    /// Embedded geometry or a document URL.
     pub data: GeoJsonData,
-    /// Declared upper source zoom, retained for host-managed processing.
+    /// Upper zoom the source is tiled at; deeper views overzoom it. GL JS defaults to 18.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub maxzoom: Option<u8>,
-    /// Declared lower source zoom, retained for host-managed processing.
+    /// Lower source zoom; nothing is tiled below it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub minzoom: Option<u8>,
+    /// Property whose value becomes the feature id.
+    #[serde(rename = "promoteId", default, skip_serializing_if = "Option::is_none")]
+    pub promote_id: Option<PromoteId>,
+    /// Numbers features without an id by their position in the document.
+    #[serde(rename = "generateId", default, skip_serializing_if = "is_false")]
+    pub generate_id: bool,
+    /// Identifies the data version; a changed value makes workers load and index it again.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub generation: u64,
 }
+
+fn is_false(value: &bool) -> bool {
+    !value
+}
+
+fn is_zero(value: &u64) -> bool {
+    *value == 0
+}
+
+/// The GL JS default for a GeoJSON source's `maxzoom`.
+pub const GEOJSON_DEFAULT_MAXZOOM: u8 = 18;
 
 /// TileJSON-compatible addressing shared by vector and raster image sources.
 /// Raster sources additionally use `tile_size` to choose their visible tile zoom.
