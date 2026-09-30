@@ -171,3 +171,23 @@ async fn a_continuous_slope_shades_without_a_seam_between_tiles() {
         "one plane across two tiles shades one colour, not {min}..{max}: {colours:?}"
     );
 }
+
+#[tokio::test]
+async fn turning_the_light_half_way_around_swaps_the_lit_and_shadowed_sides() {
+    let light = |direction: f64, method: &str| {
+        serde_json::json!({
+            "hillshade-exaggeration": 1.0,
+            "hillshade-illumination-direction": direction,
+            "hillshade-method": method
+        })
+    };
+    for method in ["standard", "basic"] {
+        let from_north_west = center_of(Rise::West, light(335.0, method), 0.0).await;
+        let from_south_east = center_of(Rise::West, light(155.0, method), 0.0).await;
+        assert!(
+            from_south_east[0] > from_north_west[0] + 20,
+            "{method}: a slope facing east is lit from the south-east: \
+             {from_north_west:?} against {from_south_east:?}"
+        );
+    }
+}
