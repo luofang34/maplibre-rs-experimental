@@ -91,6 +91,9 @@ fn sample(image: &RgbaImage, u: f64, v: f64) -> [f32; 4] {
     premultiplied
 }
 
+/// Copies of the world an image can wrap onto before the rest are ignored.
+const MAX_WORLD_SHIFTS: usize = 4;
+
 /// The part of the image inside `tile`, or `None` when the image does not touch it.
 pub fn render_tile(
     image: &RgbaImage,
@@ -110,24 +113,36 @@ pub fn render_tile(
         f64::from(tile.y) / tile_count,
     );
     let size = 1.0 / tile_count;
-    if east < left || west > left + size || south < top || north > top + size {
+    // The image may reach past the antimeridian, so the tile also shows it shifted by whole worlds.
+    let shifts: Vec<f64> = ((west - left - size).floor() as i64..=(east - left).ceil() as i64)
+        .map(|shift| shift as f64)
+        .filter(|shift| {
+            let (lo, hi) = (left + shift, left + shift + size);
+            !(east < lo || west > hi)
+        })
+        .take(MAX_WORLD_SHIFTS)
+        .collect();
+    if shifts.is_empty() || south < top || north > top + size {
         return None;
     }
     let to_unit = inverse(unit_square_to_quad(corners))?;
     let mut tile_image = RgbaImage::new(IMAGE_TILE_SIZE, IMAGE_TILE_SIZE);
     let step = size / f64::from(IMAGE_TILE_SIZE);
     for (px, py, pixel) in tile_image.enumerate_pixels_mut() {
-        let x = left + (f64::from(px) + 0.5) * step;
         let y = top + (f64::from(py) + 0.5) * step;
-        let w = to_unit[2][0] * x + to_unit[2][1] * y + to_unit[2][2];
-        let u = (to_unit[0][0] * x + to_unit[0][1] * y + to_unit[0][2]) / w;
-        let v = (to_unit[1][0] * x + to_unit[1][1] * y + to_unit[1][2]) / w;
-        if !(0.0..=1.0).contains(&u) || !(0.0..=1.0).contains(&v) || w <= 0.0 {
-            continue;
-        }
-        let [r, g, b, a] = sample(image, u, v);
-        if a > 0.0 {
-            *pixel = image::Rgba([r / a, g / a, b / a, a].map(|c| (c * 255.0).round() as u8));
+        for shift in &shifts {
+            let x = left + shift + (f64::from(px) + 0.5) * step;
+            let w = to_unit[2][0] * x + to_unit[2][1] * y + to_unit[2][2];
+            let u = (to_unit[0][0] * x + to_unit[0][1] * y + to_unit[0][2]) / w;
+            let v = (to_unit[1][0] * x + to_unit[1][1] * y + to_unit[1][2]) / w;
+            if !(0.0..=1.0).contains(&u) || !(0.0..=1.0).contains(&v) || w <= 0.0 {
+                continue;
+            }
+            let [r, g, b, a] = sample(image, u, v);
+            if a > 0.0 {
+                *pixel = image::Rgba([r / a, g / a, b / a, a].map(|c| (c * 255.0).round() as u8));
+                break;
+            }
         }
     }
     Some(tile_image)

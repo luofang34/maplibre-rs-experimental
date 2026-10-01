@@ -67,3 +67,22 @@ fn a_skewed_quad_maps_its_corners() {
         );
     }
 }
+
+#[test]
+fn the_part_of_an_image_past_the_antimeridian_wraps_to_the_other_side() {
+    let wrapped = [
+        [-270.0, 85.0511287798],
+        [90.0, 85.0511287798],
+        [90.0, -85.0511287798],
+        [-270.0, -85.0511287798],
+    ];
+    let tile = render_tile(
+        &checker(),
+        wrapped,
+        WorldTileCoords::from((0, 0, 0u8.into())),
+    )
+    .expect("the image covers tile zero");
+    // Longitudes 90 to 180 show the image's first quarter, its red left edge.
+    assert_eq!(tile.get_pixel(500, 2).0, [255, 0, 0, 255]);
+    assert_eq!(tile.get_pixel(255, 2).0, [0, 255, 0, 255]);
+}
