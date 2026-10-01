@@ -309,6 +309,10 @@ fn queue_tiles(
     targets: (&[TargetSpec], &[Option<WorldTileCoords>]),
 ) -> SystemResult {
     let mut edge_cache = std::mem::take(world.resources.get_or_init_mut::<edges::EdgeCache>());
+    let copies = world
+        .resources
+        .get::<surface_covering::SurfaceCopies>()
+        .map(|copies| copies.0.clone());
     {
         let Some(Initialized(terrain)) = world.resources.get_mut::<Eventually<TerrainResources>>()
         else {
@@ -319,6 +323,8 @@ fn queue_tiles(
             sources,
         } = uniforms::prepare_tiles(targets, style, view_state, terrain, dem);
         edge_cache.apply(&sources, &mut uniforms, &world.tiles);
+        let (sources, placed) =
+            uniforms::with_world_copies(&mut uniforms, sources, copies.as_ref(), view_state);
         let written = terrain.write_uniforms(queue, &uniforms);
         tracing::debug!(
             targets = targets.0.len(),
@@ -345,12 +351,7 @@ fn queue_tiles(
         {
             index.set_surface_edges(&sources, std::sync::Arc::clone(&edge_cache.samples));
         }
-        let kept = sources
-            .iter()
-            .zip(uniforms)
-            .take(written)
-            .map(|((_, coords, _), uniform)| (*coords, uniform))
-            .collect();
+        let kept = placed.into_iter().zip(uniforms).take(written).collect();
         world.resources.insert(TerrainEyeFrame(kept));
     }
     world.resources.insert(edge_cache);

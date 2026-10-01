@@ -25,6 +25,9 @@ pub(super) fn target_specs(
     world
         .resources
         .insert(surface_covering::SurfaceTiles(view_region.iter().collect()));
+    world
+        .resources
+        .insert(surface_covering::SurfaceCopies::of(view_region.copies()));
     let uniform_globe = uses_uniform_texture_covering(view_state);
     world
         .resources

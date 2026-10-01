@@ -362,7 +362,7 @@ fn mercator_view_region(
                 ViewStatePadding::Loose => 1,
                 ViewStatePadding::Tight => 0,
             },
-            world_copies: if style.terrain.is_none() && !view_state.has_external_view() {
+            world_copies: if !view_state.has_external_view() {
                 3
             } else {
                 0

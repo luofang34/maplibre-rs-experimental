@@ -15,8 +15,8 @@ use crate::{
     terrain::{
         drape_targets::TargetSpec,
         resources::DRAPE_SIZE,
-        rtt::{drape_transform, overlapped}, DrapePhase,
-        DrapeTarget,
+        rtt::{drape_transform, overlapped},
+        DrapePhase, DrapeTarget,
     },
     vector::render_commands::{DrawLineTiles, DrawVectorTiles},
 };

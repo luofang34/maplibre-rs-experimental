@@ -249,6 +249,47 @@ pub(super) fn prepare_tiles(
     PreparedTerrain { uniforms, sources }
 }
 
+/// Adds a draw of each surface tile for every copy of the world that shows it, shifted over by
+/// the copy's whole worlds. Returns the draws' sources and the coordinates, beyond the grid for a
+/// copy, each is placed at.
+pub(super) fn with_world_copies(
+    uniforms: &mut Vec<TerrainTileUniforms>,
+    sources: Vec<TileSources>,
+    copies: Option<&std::collections::HashMap<WorldTileCoords, Vec<i32>>>,
+    view: &ViewState,
+) -> (Vec<TileSources>, Vec<WorldTileCoords>) {
+    let mut placed: Vec<WorldTileCoords> = sources.iter().map(|(_, coords, _)| *coords).collect();
+    let mut all = sources;
+    let Some(copies) = copies else {
+        return (all, placed);
+    };
+    let projection = view.gpu_view_projection();
+    let zoom = view.zoom();
+    for index in 0..all.len() {
+        let coords = all[index].1;
+        let Some(wraps) = copies.get(&coords) else {
+            continue;
+        };
+        let bounds = crate::coords::ZOOM_BOUNDS[usize::from(u8::from(coords.z))] as i32;
+        for wrap in wraps {
+            let shifted = WorldTileCoords {
+                x: coords.x + wrap * bounds,
+                ..coords
+            };
+            let mut block = uniforms[index];
+            block.transform = projection
+                .to_model_view_projection(shifted.transform_for_zoom(zoom))
+                .downcast()
+                .into();
+            block.tile_mercator_coords[0] += *wrap as f32;
+            uniforms.push(block);
+            all.push(all[index]);
+            placed.push(shifted);
+        }
+    }
+    (all, placed)
+}
+
 fn surface_uniforms(
     block: &mut TerrainTileUniforms,
     coords: WorldTileCoords,

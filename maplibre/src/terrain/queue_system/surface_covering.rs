@@ -4,6 +4,26 @@ use crate::{coords::WorldTileCoords, tcs::world::World, terrain::drape_targets::
 #[derive(Default)]
 pub(super) struct SurfaceTiles(pub Vec<WorldTileCoords>);
 
+/// How many worlds over each surface tile is seen again: its copies beside the main world.
+#[derive(Default)]
+pub(super) struct SurfaceCopies(pub std::collections::HashMap<WorldTileCoords, Vec<i32>>);
+
+impl SurfaceCopies {
+    /// The copies of the world the view sees its tiles in, keyed by the tile they repeat.
+    pub(super) fn of(tiles: impl Iterator<Item = WorldTileCoords>) -> Self {
+        let mut copies: std::collections::HashMap<WorldTileCoords, Vec<i32>> = Default::default();
+        for (tile, wrap) in tiles.filter_map(WorldTileCoords::wrapped) {
+            if wrap != 0 {
+                let wraps = copies.entry(tile).or_default();
+                if !wraps.contains(&wrap) {
+                    wraps.push(wrap);
+                }
+            }
+        }
+        Self(copies)
+    }
+}
+
 pub(super) fn for_frame(
     world: &mut World,
     drapes: &[TargetSpec],
