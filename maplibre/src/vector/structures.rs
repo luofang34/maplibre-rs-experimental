@@ -34,11 +34,16 @@ pub(crate) enum StructureKind {
     Tunnel,
     /// Stands on the terrain surface, as a heatmap's points do.
     Surface,
+    /// Rises from the terrain at the middle of its footprint, as a building does.
+    Extrusion,
 }
 
 pub(crate) fn kind(layer: &StyleLayer) -> Option<StructureKind> {
     if layer.type_ == "heatmap" {
         return Some(StructureKind::Surface);
+    }
+    if layer.type_ == "fill-extrusion" {
+        return Some(StructureKind::Extrusion);
     }
     if layer.type_ != "line" {
         return None;
@@ -197,6 +202,20 @@ fn elevate_span(
     absolute: Option<f64>,
     sample: &impl Fn([f32; 2]) -> Option<f64>,
 ) {
+    if matches!(kind, StructureKind::Extrusion) {
+        // The footprint's middle decides the ground, so a building is not sheared by a slope.
+        let count = vertices.len().max(1) as f32;
+        let middle = vertices.iter().fold([0.0_f32; 2], |sum, vertex| {
+            [sum[0] + vertex.position[0], sum[1] + vertex.position[1]]
+        });
+        if let Some(ground) = sample([middle[0] / count, middle[1] / count]) {
+            for vertex in vertices {
+                vertex.distance += ground as f32;
+                vertex.elevation += ground as f32;
+            }
+        }
+        return;
+    }
     if matches!(kind, StructureKind::Surface) {
         for vertex in vertices {
             if let Some(ground) = sample(vertex.position) {
@@ -241,7 +260,7 @@ fn profile(kind: StructureKind, start: f64, end: f64, ground: f64, t: f64, clear
     match kind {
         StructureKind::Bridge => chord.max(ground + separation) + 0.5,
         StructureKind::Tunnel => chord.min(ground - separation) + 0.1,
-        StructureKind::Surface => ground,
+        StructureKind::Surface | StructureKind::Extrusion => ground,
     }
 }
 

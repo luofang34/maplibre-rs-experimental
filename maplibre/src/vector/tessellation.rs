@@ -177,6 +177,8 @@ pub struct ZeroTessellator<I: std::ops::Add + From<lyon::tessellation::VertexId>
     pub line_gradient: bool,
     /// Cap and join of stroked lines.
     pub stroke: crate::style::line_stroke::LineStroke,
+    /// Entries added for the polygons of the feature being tessellated, when each is a building.
+    polygon_entries: usize,
     /// Whether a sharp corner gets a vertex either side, for lines driven by distance.
     pub split_corners: bool,
     /// A pattern that varies by feature, whose key each feature's colour carries.
@@ -234,6 +236,7 @@ impl<I: std::ops::Add + From<lyon::tessellation::VertexId> + MaxIndex> Default
             stroke: Default::default(),
             join_property: None,
             split_corners: false,
+            polygon_entries: 0,
             pattern_property: None,
             line_length: 0.0,
             current_index: 0,
@@ -374,7 +377,11 @@ where
         let height = evaluate(&options.height);
         let base = evaluate(&options.base).max(0.0);
         extrusion::extrude(&path, (base, height), &mut self.buffer, DEFAULT_TOLERANCE)
-            .map_err(|error| GeozeroError::Geometry(error.to_string()))
+            .map_err(|error| GeozeroError::Geometry(error.to_string()))?;
+        // Each polygon of a multipolygon is a building of its own, standing on its own ground.
+        self.update_feature_indices();
+        self.polygon_entries += 1;
+        Ok(())
     }
 
     fn tessellate_fill(&mut self) -> GeoResult<()> {
@@ -472,8 +479,11 @@ where
     I: std::ops::Add + From<lyon::tessellation::VertexId> + MaxIndex + Copy + Into<u32>,
 {
     fn feature_end(&mut self, _idx: u64) -> geozero::error::Result<()> {
-        let first_entry = self.feature_indices.len();
-        self.update_feature_indices();
+        let polygons = std::mem::take(&mut self.polygon_entries);
+        let first_entry = self.feature_indices.len() - polygons;
+        if polygons == 0 {
+            self.update_feature_indices();
+        }
         let mut color = if let Some(style) = &self.style_property {
             if let Some(c) = style.evaluate_for(&self.feature_properties, self.zoom) {
                 [c.r as f32, c.g as f32, c.b as f32, c.a as f32]
@@ -511,7 +521,9 @@ where
         if let Some(value) = pattern {
             color[0] = value;
         }
-        self.feature_colors.push(color);
+        for _ in 0..polygons.max(1) {
+            self.feature_colors.push(color);
+        }
         self.append_outline();
         self.sort_key.record(
             &self.feature_properties,
