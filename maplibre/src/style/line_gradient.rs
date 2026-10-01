@@ -15,6 +15,17 @@ pub const RAMP_TEXELS: usize = 256;
 /// step as narrow as a thousandth of a line stays where it is, as GL JS widens it.
 pub const STEP_RAMP_TEXELS: usize = 8192;
 
+/// How far a stepped gradient's ramp reaches into the small progress values: texel `i` of `n`
+/// holds the colour at `(2^(u * STEP_RAMP_SPAN_BITS) - 1) / 2^STEP_RAMP_SPAN_BITS` for
+/// `u = i / (n - 1)`, so a step at a millionth of a very long line stays as sharp as one at a
+/// tenth of a short one.
+pub const STEP_RAMP_SPAN_BITS: f64 = 20.0;
+
+/// The progress a position `u` in `0..=1` of a stepped gradient's ramp stands for.
+pub fn stepped_progress(u: f64) -> f64 {
+    ((u * STEP_RAMP_SPAN_BITS).exp2() - 1.0) / STEP_RAMP_SPAN_BITS.exp2()
+}
+
 /// Whether the gradient is a `step` expression, whose edges are hard.
 pub fn is_stepped(gradient: &StyleProperty<Color>) -> bool {
     matches!(
@@ -33,7 +44,12 @@ pub fn ramp(gradient: &StyleProperty<Color>) -> Vec<[u8; 4]> {
     };
     (0..texels)
         .map(|texel| {
-            let progress = texel as f64 / (texels - 1) as f64;
+            let position = texel as f64 / (texels - 1) as f64;
+            let progress = if texels == STEP_RAMP_TEXELS {
+                stepped_progress(position)
+            } else {
+                position
+            };
             let color = match gradient {
                 StyleProperty::Constant(color) => Some(ExpressionColor::from(color.clone())),
                 StyleProperty::Expression(property) => {

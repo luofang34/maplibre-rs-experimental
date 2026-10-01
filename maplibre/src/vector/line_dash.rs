@@ -440,6 +440,12 @@ fn image_uniform(period: f32, image: &LineImage, round: bool, scale: f32) -> [f3
     let round = f32::from(round);
     match image {
         LineImage::None => [period, 0.0, round, scale],
+        // A stepped gradient's ramp is spread over the progress on a logarithmic scale.
+        LineImage::Gradient(texels)
+            if texels.len() == crate::style::line_gradient::STEP_RAMP_TEXELS =>
+        {
+            [period, 1.25, round, scale]
+        }
         LineImage::Gradient(_) => [period, 1.0, round, scale],
         LineImage::Pattern { display, .. } => [period, 2.0 + scale, display[0], display[1]],
     }

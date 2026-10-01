@@ -71,7 +71,15 @@ fn main(in: FragmentInput) -> Output {
     // Output non-premultiplied alpha: the blend state (SrcAlpha, OneMinusSrcAlpha)
     // handles the premultiplication. Using v_color * alpha here would double-apply alpha.
     // With a gradient the colour comes from the ramp and the layer's opacity from the alpha.
-    let ramp = textureSample(ramp_texture, ramp_sampler, vec2<f32>(clamp(in.progress, 0.0, 1.0), 0.5));
+    // A stepped gradient's ramp covers the progress on a logarithmic scale.
+    let stepped = dash_period.y > 1.2 && dash_period.y < 1.3;
+    let clamped_progress = clamp(in.progress, 0.0, 1.0);
+    let ramp_position = select(
+        clamped_progress,
+        log2(clamped_progress * 1048576.0 + 1.0) / 20.0,
+        stepped,
+    );
+    let ramp = textureSample(ramp_texture, ramp_sampler, vec2<f32>(ramp_position, 0.5));
     // A pattern repeats along the line with its height fitted to the line's width.
     if dash_period.y > 1.5 {
         let width_px = max(in.dash.y, 1e-6);
