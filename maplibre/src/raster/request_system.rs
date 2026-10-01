@@ -203,6 +203,7 @@ impl<E: Environment, T: RasterTransferables> RequestSystem<E, T> {
                     attempt,
                     coords,
                     style: style.clone(),
+                    overscaled_zoom: 0,
                 },
                 fetch_raster_apc::<E::OffscreenKernelEnvironment, T, _>,
             )

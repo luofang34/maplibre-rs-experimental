@@ -74,6 +74,7 @@ async fn empty_tiles_do_not_starve_later_geometry_uploads() {
             .insert(VectorLayerBucketComponent {
                 failed: false,
                 done: true,
+                overscaled_zoom: 0,
                 layers: vec![VectorLayerBucket::AvailableLayer(
                     AvailableVectorLayerBucket {
                         coords: *coords,

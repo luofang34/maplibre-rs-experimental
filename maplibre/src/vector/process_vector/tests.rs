@@ -111,6 +111,7 @@ fn process(bytes: &[u8], layer: StyleLayer) -> Vec<Message> {
             coords: WorldTileCoords::default(),
             layers: [layer].into_iter().collect(),
             projection: ProjectionType::Mercator,
+            overscaled_zoom: 0,
         },
         &mut processor,
     )
@@ -418,6 +419,7 @@ fn invalid_tile_retains_coordinates_and_the_protobuf_decoder_cause() {
             coords,
             layers: Default::default(),
             projection: ProjectionType::Mercator,
+            overscaled_zoom: 0,
         },
         &mut ProcessVectorContext::<DefaultVectorTransferables, _>::new(
             CollectingContext::default(),
@@ -458,4 +460,17 @@ fn a_within_filter_tests_the_geometry_of_a_vector_tile_feature() {
     };
     assert_eq!(feature_count(polygon(-200.0, 200.0)), 1);
     assert_eq!(feature_count(polygon(10.0, 20.0)), 0);
+}
+
+#[test]
+fn a_tile_magnified_past_its_source_zoom_reports_its_overscaling() {
+    let request = |zoom| VectorTileRequest {
+        coords: WorldTileCoords::from((0, 0, 14u8.into())),
+        layers: Default::default(),
+        projection: Default::default(),
+        overscaled_zoom: zoom,
+    };
+    assert_eq!(request(0).overscaling(), 1.0);
+    assert_eq!(request(14).overscaling(), 1.0);
+    assert_eq!(request(17).overscaling(), 8.0);
 }

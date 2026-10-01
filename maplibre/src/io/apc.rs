@@ -131,6 +131,10 @@ pub enum Input {
         style: Style,
         /// Identifier distinguishing requests when coordinates are evicted and reused.
         attempt: u64,
+        /// The zoom a vector tile is drawn at when that is past its source's last zoom; zero
+        /// when it is drawn at its own zoom.
+        #[serde(default)]
+        overscaled_zoom: u8,
     },
 }
 
@@ -143,7 +147,18 @@ impl Input {
                 coords,
                 style,
                 attempt,
+                ..
             } => (coords, style, Some(attempt)),
+        }
+    }
+
+    /// The zoom the requested tile is magnified to, or zero when it is not magnified.
+    pub fn overscaled_zoom(&self) -> u8 {
+        match self {
+            Self::TileRequest { .. } => 0,
+            Self::TrackedTileRequest {
+                overscaled_zoom, ..
+            } => *overscaled_zoom,
         }
     }
 }

@@ -44,6 +44,7 @@ pub(crate) use process_vector::feature_properties;
 mod queue_system;
 pub mod render_commands;
 pub(crate) mod request_system;
+pub use request_system::depends_on_overscaling;
 pub(crate) mod resource;
 mod resource_system;
 pub(crate) mod structures;
@@ -232,6 +233,8 @@ pub struct VectorLayerBucketComponent {
     pub failed: bool,
     /// Worker results, which may arrive before `done` marks base processing complete.
     pub layers: Vec<VectorLayerBucket>,
+    /// The zoom the tile was last requested to be magnified to, zero when it was not.
+    pub overscaled_zoom: u8,
 }
 
 impl TileComponent for VectorLayerBucketComponent {}

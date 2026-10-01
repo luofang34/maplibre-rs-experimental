@@ -73,6 +73,17 @@ pub struct VectorTileRequest {
     pub layers: HashSet<StyleLayer>,
     /// Projection controlling globe subdivision of tile geometry.
     pub projection: ProjectionType,
+    /// The zoom the tile is drawn at when that is past the last zoom of its source, so its
+    /// geometry is magnified; zero when the tile is drawn at its own zoom.
+    pub overscaled_zoom: u8,
+}
+
+impl VectorTileRequest {
+    /// How many times the tile is magnified past its source's last zoom.
+    pub fn overscaling(&self) -> f64 {
+        let own = u8::from(self.coords.z);
+        2_f64.powi(i32::from(self.overscaled_zoom.saturating_sub(own)))
+    }
 }
 
 /// Reads an MVT feature's tags into typed filter values through the layer's key and value

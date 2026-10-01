@@ -148,7 +148,7 @@ fn load_geojson_blocking(
 }
 
 fn load_vector_blocking(
-    _map: &HeadlessMap,
+    map: &HeadlessMap,
     (style, name, source): (&Style, &str, &VectorSource),
     layers: &[StyleLayer],
     target_coords: &[WorldTileCoords],
@@ -191,13 +191,37 @@ fn load_vector_blocking(
                     layer,
                     coords,
                     projection.clone(),
-                    atlas.clone(),
+                    (atlas.clone(), overscaled_zoom(map, style, source, coords)),
                 )
                 .map_err(|error| format!("Cannot process vector source '{name}': {error}"))?,
             );
         }
     }
     Ok(processed)
+}
+
+/// The zoom a source tile is magnified to at the view's zoom level once the view is past the
+/// source's last zoom, which only matters to layers laid out along lines.
+fn overscaled_zoom(
+    map: &HeadlessMap,
+    style: &Style,
+    source: &VectorSource,
+    coords: WorldTileCoords,
+) -> u8 {
+    let level = u8::from(
+        map.view_state()
+            .zoom()
+            .zoom_level(maplibre::render::tile_view_pattern::DEFAULT_TILE_SIZE),
+    );
+    match source.maxzoom {
+        Some(max_zoom)
+            if maplibre::vector::depends_on_overscaling(style)
+                && u8::from(coords.z) >= max_zoom =>
+        {
+            level.max(u8::from(coords.z))
+        }
+        _ => 0,
+    }
 }
 
 fn load_image_blocking(

@@ -153,6 +153,7 @@ fn symbol_layer<T: VectorTransferables, C: Context>(
     let zoom = f64::from(u8::from(request.coords.z));
     let mut tessellator = TextTessellator::with_assets(paint.clone(), zoom, atlas.clone());
     tessellator.coordinate_scale = extent_scale(&layer);
+    tessellator.overscaling = request.overscaling();
     tessellator.source_ids = layer.features.iter().map(|feature| feature.id).collect();
     match layer.process(&mut tessellator) {
         Err(error) => {

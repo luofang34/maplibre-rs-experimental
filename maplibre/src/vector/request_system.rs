@@ -88,6 +88,8 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                     z: crate::coords::ZoomLevel::new(0),
                 });
             let draped = style.terrain.is_some();
+            let magnifies = depends_on_overscaling(style);
+            let level = u8::from(view_state.zoom().zoom_level(DEFAULT_TILE_SIZE));
             for coords in overview
                 .into_iter()
                 .chain(drapes)
@@ -107,13 +109,19 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                     continue;
                 }
 
-                if world
-                    .tiles
-                    .query::<&VectorLayerBucketComponent>(coords)
-                    .is_some()
-                    && !tile_retry::due(world, coords, RequestKind::Vector)
-                {
-                    continue;
+                // A source's last zoom is drawn magnified at the zooms past it, and what depends on
+                // that is laid out again when the magnification changes.
+                let overscaled_zoom = match max_zoom {
+                    Some(max_zoom) if magnifies && u8::from(coords.z) >= max_zoom => {
+                        level.max(u8::from(coords.z))
+                    }
+                    _ => 0,
+                };
+                if let Some(tile) = world.tiles.query::<&VectorLayerBucketComponent>(coords) {
+                    let current = !magnifies || tile.overscaled_zoom == overscaled_zoom;
+                    if current && !tile_retry::due(world, coords, RequestKind::Vector) {
+                        continue;
+                    }
                 }
                 // The rest wait for a later frame, once tiles in flight have landed.
                 if budget == 0 {
@@ -121,7 +129,7 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                 }
                 budget -= 1;
 
-                self.request(coords, style, world)?;
+                self.request(coords, style, world, overscaled_zoom)?;
             }
         }
         Ok(())
@@ -134,6 +142,7 @@ impl<E: Environment, T: VectorTransferables> RequestSystem<E, T> {
         coords: crate::coords::WorldTileCoords,
         style: &crate::style::Style,
         world: &mut crate::tcs::world::World,
+        overscaled_zoom: u8,
     ) -> SystemResult {
         if world.tiles.spawn_mut(coords).is_none() {
             return Err(SystemError::InvalidTile { coords });
@@ -146,6 +155,7 @@ impl<E: Environment, T: VectorTransferables> RequestSystem<E, T> {
                     coords,
                     style: style.clone(),
                     attempt,
+                    overscaled_zoom,
                 },
                 fetch_vector_apc::<E::OffscreenKernelEnvironment, T, _>,
             )
@@ -155,8 +165,26 @@ impl<E: Environment, T: VectorTransferables> RequestSystem<E, T> {
                 source,
             })?;
         super::content::begin(world, coords);
+        if let Some(tile) = world
+            .tiles
+            .query_mut::<&mut VectorLayerBucketComponent>(coords)
+        {
+            tile.overscaled_zoom = overscaled_zoom;
+        }
         tile_retry::started(world, coords, RequestKind::Vector, attempt);
         tracing::debug!(%coords, "vector tile request accepted");
         Ok(())
     }
+}
+
+/// Whether any layer lays out differently when its tile is magnified past the source's last
+/// zoom, which a symbol placed along a line does through its spacing.
+pub fn depends_on_overscaling(style: &crate::style::Style) -> bool {
+    style.layers.iter().any(|layer| {
+        matches!(
+            &layer.paint,
+            Some(crate::style::layer::LayerPaint::Symbol(paint))
+                if crate::sdf::tessellation::is_line_placed(paint)
+        )
+    })
 }

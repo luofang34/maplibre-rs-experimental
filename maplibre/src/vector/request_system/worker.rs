@@ -27,6 +27,7 @@ pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context +
     kernel: K,
 ) -> AsyncProcedureFuture {
     Box::pin(async move {
+        let overscaled_zoom = input.overscaled_zoom();
         let (coords, style, attempt) = input.into_tile_request();
         let context = AttemptContext::new(context, attempt);
         let client = kernel.source_client();
@@ -54,7 +55,7 @@ pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context +
                 &client,
                 &group,
                 context.clone(),
-                groups.peek().is_none() && !failed,
+                (groups.peek().is_none() && !failed, overscaled_zoom),
             )
             .await
             {
@@ -100,7 +101,7 @@ async fn process_source<T: VectorTransferables, C: Context + Clone, H: HttpClien
     client: &SourceClient<H>,
     group: &SourceLayerGroup,
     context: C,
-    last_source: bool,
+    (last_source, overscaled_zoom): (bool, u8),
 ) -> Result<(), ProcessVectorError> {
     let projection = style
         .projection
@@ -121,6 +122,7 @@ async fn process_source<T: VectorTransferables, C: Context + Clone, H: HttpClien
                 coords,
                 layers: base,
                 projection: projection.clone(),
+                overscaled_zoom,
             },
             &mut processor,
             Arc::new(SymbolAtlas::default()),
@@ -139,6 +141,7 @@ async fn process_source<T: VectorTransferables, C: Context + Clone, H: HttpClien
             coords,
             layers: symbols,
             projection,
+            overscaled_zoom,
         },
         &mut processor,
         atlas,

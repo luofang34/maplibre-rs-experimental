@@ -8,6 +8,7 @@ fn params(spacing: f64, label_length: f64) -> AnchorSpacing {
         label_length,
         text_size: 100.0,
         checks_bends: true,
+        overscaling: 1.0,
     }
 }
 
@@ -129,4 +130,20 @@ fn a_label_without_length_does_not_index_past_the_line() {
     // No glyphs means no length; the anchors are still computed without a panic.
     let _ = line_anchors(&line, empty);
     let _ = center_anchor(&line, empty);
+}
+
+#[test]
+fn a_magnified_tile_starts_its_repeats_where_the_tile_it_magnifies_would() {
+    let line = vec![[100.0, 2000.0], [3900.0, 2000.0]];
+    let plain = line_anchors(&line, params(1000.0, 200.0));
+    let magnified = line_anchors(
+        &line,
+        AnchorSpacing {
+            overscaling: 4.0,
+            ..params(1000.0, 200.0)
+        },
+    );
+    // (100 + 2 * 100) * 4 % 1000 = 200 puts the first anchor at 300 rather than 400.
+    assert_eq!(plain[0].point[0], 400.0);
+    assert_eq!(magnified[0].point[0], 300.0);
 }

@@ -41,6 +41,7 @@ fn spawn_vector(world: &mut World, coords: WorldTileCoords, done: bool) {
             failed: false,
             done,
             layers: Vec::new(),
+            overscaled_zoom: 0,
         });
 }
 
@@ -197,6 +198,7 @@ fn the_cache_is_bounded_in_bytes_as_well_as_tiles() {
             .insert(VectorLayerBucketComponent {
                 failed: false,
                 done: true,
+                overscaled_zoom: 0,
                 layers: vec![VectorLayerBucket::AvailableLayer(
                     AvailableVectorLayerBucket {
                         coords,

@@ -71,17 +71,18 @@ pub fn process_tile_layers(
     coords: WorldTileCoords,
     projection: ProjectionType,
 ) -> Result<ProcessedLayers, HeadlessMapOperationError> {
-    process_tile_layers_with_atlas(tile_data, layer, coords, projection, None)
+    process_tile_layers_with_atlas(tile_data, layer, coords, projection, (None, 0))
 }
 
-/// Tessellates one vector source tile for a style layer; symbol layers use `atlas` for their
-/// glyphs and sprites, or the bundled fallback when it is `None`.
+/// Tessellates one vector source tile for a style layer; symbol layers use the atlas for their
+/// glyphs and sprites, or the bundled fallback when it is `None`. `overscaled_zoom` is the zoom
+/// the tile is magnified to past its source's last zoom, or zero.
 pub fn process_tile_layers_with_atlas(
     tile_data: &[u8],
     layer: &StyleLayer,
     coords: WorldTileCoords,
     projection: ProjectionType,
-    atlas: Option<Arc<SymbolAtlas>>,
+    (atlas, overscaled_zoom): (Option<Arc<SymbolAtlas>>, u8),
 ) -> Result<ProcessedLayers, HeadlessMapOperationError> {
     let mut processor = ProcessVectorContext::<DefaultVectorTransferables, HeadlessContext>::new(
         HeadlessContext::default(),
@@ -92,6 +93,7 @@ pub fn process_tile_layers_with_atlas(
             coords,
             layers: [layer].into_iter().cloned().collect(),
             projection,
+            overscaled_zoom,
         },
         &mut processor,
         atlas.unwrap_or_else(fallback_atlas),

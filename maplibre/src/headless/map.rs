@@ -215,6 +215,7 @@ impl HeadlessMap {
                     done: true,
                     failed: false,
                     layers,
+                    overscaled_zoom: 0,
                 });
         }
 
@@ -239,6 +240,7 @@ impl HeadlessMap {
                         done: true,
                         failed: false,
                         layers: Vec::new(),
+                        overscaled_zoom: 0,
                     });
             }
         }

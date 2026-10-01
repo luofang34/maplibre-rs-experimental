@@ -47,6 +47,9 @@ pub struct TextTessellator {
     pub features: Vec<Feature>,
     /// Source layer extent conversion.
     pub coordinate_scale: f64,
+    /// How many times the tile is magnified past the zoom its source stops at; zero or one when
+    /// it is not.
+    pub overscaling: f64,
     /// Source IDs indexed by the feature order supplied to the geometry processor.
     pub source_ids: Vec<Option<u64>>,
 }
@@ -77,6 +80,7 @@ impl TextTessellator {
             quad_buffer: VertexBuffers::new(),
             features: Vec::new(),
             coordinate_scale: 1.0,
+            overscaling: 1.0,
             source_ids: Vec::new(),
         }
     }
@@ -195,7 +199,7 @@ fn line_placement(paint: &SymbolPaint) -> Option<LinePlacement> {
 }
 
 /// Whether the layer places its text along lines.
-pub(super) fn is_line_placed(paint: &SymbolPaint) -> bool {
+pub(crate) fn is_line_placed(paint: &SymbolPaint) -> bool {
     line_placement(paint).is_some()
 }
 
@@ -263,12 +267,16 @@ impl TextTessellator {
             self.paint
                 .number(name, &self.properties, self.zoom, fallback)
         };
+        let overscaling = self.overscaling.max(1.0);
+        // A magnified tile has fewer tile units under a pixel.
+        let units_per_pixel = TILE_UNITS_PER_PIXEL / overscaling;
         let params = line_anchors::AnchorSpacing {
-            spacing: f64::from(number("symbol-spacing", 250.0)) * TILE_UNITS_PER_PIXEL,
+            spacing: f64::from(number("symbol-spacing", 250.0)) * units_per_pixel,
             max_angle: f64::from(number("text-max-angle", 45.0)).to_radians(),
-            label_length: label_pixels * TILE_UNITS_PER_PIXEL,
-            text_size: text_size * TILE_UNITS_PER_PIXEL,
+            label_length: label_pixels * units_per_pixel,
+            text_size: text_size * units_per_pixel,
             checks_bends: text_width > 0.0,
+            overscaling,
         };
         let parts: Vec<Vec<[f64; 2]>> = match placement {
             LinePlacement::Line => line_anchors::clip_to_tile(&lines),

@@ -30,6 +30,8 @@ pub(super) struct AnchorSpacing {
     pub text_size: f64,
     /// Whether a bend under the label matters, which it does only for text.
     pub checks_bends: bool,
+    /// How many times the tile is magnified past its source's last zoom.
+    pub overscaling: f64,
 }
 
 fn distance(a: Point, b: Point) -> f64 {
@@ -128,9 +130,9 @@ pub(super) fn line_anchors(line: &[Point], params: AnchorSpacing) -> Vec<LineAnc
     // Repeats begin at a fixed distance from the tile edge, so the neighbouring tile's
     // continuation of the line places its labels on the same rhythm.
     let offset = if on_edge {
-        params.text_size % spacing
+        (params.text_size * params.overscaling) % spacing
     } else {
-        (params.label_length / 2.0 + 2.0 * params.text_size) % spacing
+        ((params.label_length / 2.0 + 2.0 * params.text_size) * params.overscaling) % spacing
     };
     resample(line, offset, spacing, params, on_edge, false)
 }

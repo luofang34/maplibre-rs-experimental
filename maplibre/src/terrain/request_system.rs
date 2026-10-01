@@ -195,6 +195,7 @@ impl<E: Environment, T: DemTransferables> RequestSystem<E, T> {
                     attempt,
                     coords,
                     style: style.clone(),
+                    overscaled_zoom: 0,
                 },
                 fetch_dem_apc::<E::OffscreenKernelEnvironment, T, _>,
             )
