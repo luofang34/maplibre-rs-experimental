@@ -133,6 +133,10 @@ fn has_upright_orientation(c: char) -> bool {
 
 /// How far a character advances along a vertical label's line: a full em for an upright one.
 pub(super) fn advance(style: &CharStyle<'_>, c: char) -> f32 {
+    if let Some((_, size, _)) = style.image {
+        // An image takes its height along the line.
+        return size[1];
+    }
     if is_upright(c) {
         24.0 * style.scale
     } else {
@@ -179,6 +183,10 @@ pub(super) struct VerticalLine {
     pub baseline: f32,
     /// The largest scale on the line.
     pub largest: f32,
+    /// How far the column grows past an em to hold an image wider than that.
+    pub extra: f32,
+    /// The width of the column's content: an em of the largest scale, or its widest image.
+    pub content: f32,
     /// Where along the line the first glyph starts.
     pub pen: f32,
 }
@@ -191,19 +199,46 @@ pub(super) fn place_line(
     placed: &VerticalLine,
 ) {
     let mut pen = placed.pen;
+    // How far the line shifts its glyphs sideways, as GL JS keeps the column centred.
+    let column_offset = ((placed.largest - 1.0) * 24.0).max(placed.extra);
     for index in line {
         let style = &styles[index];
         let c = chars[index];
+        if let Some((entry, size, hang)) = style.image {
+            let entry = AtlasEntry {
+                kind: 3,
+                ..entry.clone()
+            };
+            let half_advance = size[1] / 2.0;
+            let left = hang[0] - half_advance;
+            let top = hang[1];
+            let line_offset = column_offset / 2.0 + (24.0 - size[0]) / 2.0;
+            let across = -(placed.baseline + placed.content - size[1] - line_offset
+                + UPRIGHT_BASELINE)
+                + (12.0 - half_advance);
+            let along = pen - UPRIGHT_CENTRE;
+            emit.quad_rotated(
+                &entry,
+                [
+                    left + across,
+                    top + along,
+                    left + size[0] + across,
+                    top + size[1] + along,
+                ],
+                0.0,
+            );
+            pen += size[1] + spacing;
+            continue;
+        }
         let Some(glyph) = style.glyphs.get(&(c as u32)) else {
             continue;
         };
         let scale = style.scale;
-        let upright = is_upright(c);
-        let line_offset = ((placed.largest - 1.0) * 24.0).max(0.0) / 2.0 - (scale - 1.0) * 24.0;
+        let line_offset = column_offset / 2.0 - (scale - 1.0) * 24.0;
         if glyph.rect[2] > 0 && glyph.rect[3] > 0 {
             let first_index = emit.buffer.indices.len();
             let (width, height) = (glyph.rect[2] as f32 * scale, glyph.rect[3] as f32 * scale);
-            if upright {
+            if is_upright(c) {
                 emit_upright(
                     emit,
                     glyph,
@@ -215,8 +250,8 @@ pub(super) fn place_line(
             } else {
                 // Lying on its side: placed along the line, then turned with the label.
                 let x = pen + glyph.metrics[0] * scale;
-                let y = placed.baseline - glyph.metrics[1] * scale
-                    + (placed.largest - scale) * 24.0
+                let y = placed.baseline - glyph.metrics[1] * scale + placed.content
+                    - scale * 24.0
                     - line_offset;
                 emit.quad_rotated(
                     glyph,
@@ -242,7 +277,7 @@ fn emit_upright(
     line_offset: f32,
 ) {
     let half_advance = glyph.metrics[2] * scale / 2.0;
-    let from_baseline = (placed.largest - scale) * 24.0;
+    let from_baseline = placed.content - scale * 24.0;
     let left = glyph.metrics[0] * scale
         - half_advance
         - (placed.baseline + from_baseline - line_offset + UPRIGHT_BASELINE);

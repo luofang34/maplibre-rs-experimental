@@ -52,7 +52,11 @@ struct Block<'a> {
 
 /// The largest scale of any character in each line, how far each line grows past its height to
 /// hold an image taller than its em box, and the height of its content.
-fn line_sizes(styles: &[CharStyle<'_>], lines: &[Range<usize>]) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+fn line_sizes(
+    styles: &[CharStyle<'_>],
+    lines: &[Range<usize>],
+    vertical: bool,
+) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
     let line_scales: Vec<f32> = lines
         .iter()
         .map(|line| {
@@ -65,7 +69,12 @@ fn line_sizes(styles: &[CharStyle<'_>], lines: &[Range<usize>]) -> (Vec<f32>, Ve
     let tallest_image = |line: &Range<usize>| {
         styles[line.clone()]
             .iter()
-            .filter_map(|style| style.image.map(|(_, size, _)| size[1]))
+            .filter_map(|style| {
+                style
+                    .image
+                    // A vertical column holds the widths of its images.
+                    .map(|(_, size, _)| if vertical { size[0] } else { size[1] })
+            })
             .fold(0.0, f32::max)
     };
     let line_contents: Vec<f32> = lines
@@ -105,8 +114,7 @@ fn block<'a>(
         && symbol
             .vertical
             .unwrap_or_else(|| vertical::prefers_vertical(paint))
-        && vertical::allows_vertical_writing(&chars)
-        && styles.iter().all(|style| style.image.is_none());
+        && vertical::allows_vertical_writing(&chars);
     let max_line = lines
         .iter()
         .map(|line| {
@@ -118,7 +126,7 @@ fn block<'a>(
         })
         .fold(0.0, f32::max);
     bidirectional::reorder_lines(&mut chars, &mut styles, &lines);
-    let (line_scales, line_extras, line_contents) = line_sizes(&styles, &lines);
+    let (line_scales, line_extras, line_contents) = line_sizes(&styles, &lines, vertical);
     let anchors = variable_anchors(paint);
     let anchor = anchors.first().cloned().unwrap_or_else(|| {
         paint
@@ -397,6 +405,8 @@ fn glyph_pass(
             let placed = vertical::VerticalLine {
                 baseline,
                 largest,
+                extra,
+                content,
                 pen,
             };
             vertical::place_line(
