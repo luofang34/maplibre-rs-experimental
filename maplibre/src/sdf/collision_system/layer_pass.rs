@@ -45,12 +45,11 @@ fn ordered_features<'a>(
             )
         })
         .collect();
-    features.sort_by(|(pa, _, a, av), (pb, _, b, bv)| {
+    features.sort_by(|(pa, _, a, _), (pb, _, b, _)| {
         a.data
             .sort_key
             .total_cmp(&b.data.sort_key)
             .then_with(|| pa.cmp(pb))
-            .then_with(|| bv.cmp(av))
     });
     features
 }

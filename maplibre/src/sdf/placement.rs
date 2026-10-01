@@ -416,11 +416,16 @@ impl Placement<'_> {
         } else {
             0.0
         };
+        // A viewport-aligned box grows with the perspective, padding included, as GL JS scales it.
         let padding = f64::from(if part.text {
             self.uniforms.placement[0]
         } else {
             self.uniforms.placement[1]
-        });
+        }) * if alignment[0] > 0.5 {
+            1.0
+        } else {
+            (0.5 + 0.5 * ratio).clamp(0.0, 4.0)
+        };
         let mut result = [
             f64::INFINITY,
             f64::INFINITY,
