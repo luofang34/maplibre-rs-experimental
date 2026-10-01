@@ -103,7 +103,15 @@ fn parse_test_meta(style_value: &Value) -> TestMeta {
                 ]),
                 _ => None,
             }),
-        max_diff: test.get("max-diff").and_then(Value::as_f64).unwrap_or(0.02),
+        // A fixture that allows more difference than the default says so as `allowed`.
+        max_diff: test
+            .get("max-diff")
+            .and_then(Value::as_f64)
+            .unwrap_or_else(|| {
+                test.get("allowed")
+                    .and_then(Value::as_f64)
+                    .map_or(0.02, |allowed| allowed.max(0.02))
+            }),
         max_pitch: test.get("maxPitch").and_then(Value::as_f64),
         pixel_ratio: test
             .get("pixelRatio")

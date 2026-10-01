@@ -133,14 +133,9 @@ fn combined_hillshade(deriv_in: vec2<f32>) -> vec4<f32> {
     return hillshade.shadows[0] * shade + hillshade.highlights[0] * highlight;
 }
 
-@fragment
-fn main(in: VertexOutput) -> @location(0) vec4<f32> {
-    if in.horizon_distance < 0.0 {
-        discard;
-    }
-    let dim = vec2<i32>(textureDimensions(t_dem)) - vec2<i32>(2, 2);
-    let uv = in.tex_coords.xy / in.tex_coords.z;
-    let pos = vec2<i32>(floor(uv * vec2<f32>(dim)));
+// The slope at one texel, from the eight around it; the exaggeration keeps the shading visible
+// at low zooms, as the GL JS prepare pass does.
+fn slope_at(pos: vec2<i32>, dim: vec2<i32>, zoom: f32) -> vec2<f32> {
     let a = elevation_at(pos + vec2<i32>(-1, -1), dim);
     let b = elevation_at(pos + vec2<i32>(0, -1), dim);
     let c = elevation_at(pos + vec2<i32>(1, -1), dim);
@@ -149,18 +144,37 @@ fn main(in: VertexOutput) -> @location(0) vec4<f32> {
     let g = elevation_at(pos + vec2<i32>(-1, 1), dim);
     let h = elevation_at(pos + vec2<i32>(0, 1), dim);
     let i = elevation_at(pos + vec2<i32>(1, 1), dim);
-
-    // Slopes are divided by eight times the pixel size in metres; the exaggeration keeps the
-    // shading visible at low zooms, as the GL JS prepare pass does.
     let tile_size = f32(dim.x);
-    let zoom = in.zoom;
     let exaggeration_factor = select(select(0.3, 0.35, zoom < 4.5), 0.4, zoom < 2.0);
     let exaggeration = select(0.0, (zoom - 15.0) * exaggeration_factor, zoom < 15.0);
-    var deriv = vec2<f32>(
+    let deriv = vec2<f32>(
         (c + f + f + i) - (a + d + d + g),
         (g + h + h + i) - (a + b + b + c),
     ) * tile_size / pow(2.0, exaggeration + (28.2562 - zoom));
-    deriv = clamp(deriv, vec2<f32>(-4.0, -4.0), vec2<f32>(4.0, 4.0));
+    return clamp(deriv, vec2<f32>(-4.0, -4.0), vec2<f32>(4.0, 4.0));
+}
+
+@fragment
+fn main(in: VertexOutput) -> @location(0) vec4<f32> {
+    if in.horizon_distance < 0.0 {
+        discard;
+    }
+    let dim = vec2<i32>(textureDimensions(t_dem)) - vec2<i32>(2, 2);
+    let uv = in.tex_coords.xy / in.tex_coords.z;
+    let zoom = in.zoom;
+    // On the globe the slope of each texel is drawn blended between the four nearest, as GL JS
+    // filters the texture its prepare pass renders; the flat map shows one slope per texel.
+    var deriv = slope_at(vec2<i32>(floor(uv * vec2<f32>(dim))), dim, zoom);
+    if in.transition > 0.0 {
+        let place = uv * vec2<f32>(dim) - vec2<f32>(0.5);
+        let corner = vec2<i32>(floor(place));
+        let blend = place - floor(place);
+        deriv = mix(
+            mix(slope_at(corner, dim, zoom), slope_at(corner + vec2<i32>(1, 0), dim, zoom), blend.x),
+            mix(slope_at(corner + vec2<i32>(0, 1), dim, zoom), slope_at(corner + vec2<i32>(1, 1), dim, zoom), blend.x),
+            blend.y,
+        );
+    }
 
     // The Mercator projection stretches distances with latitude; the globe does not.
     let latitude = atan(sinh(PI * (1.0 - 2.0 * in.mercator_y)));
