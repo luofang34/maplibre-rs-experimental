@@ -332,7 +332,13 @@ impl Placement<'_> {
             f64::from(self.projection.center_clip_w) / clip.w
         };
         let scale = (0.5 + 0.5 * ratio).clamp(0.0, 4.0) * f64::from(size);
-        let angle = self.angle(part, alignment, height, clip)?;
+        // GL JS bounds an icon by its box before any rotation along a line or with the map; the
+        // icon's own `icon-rotate` is already in the bounds.
+        let angle = if part.text {
+            self.angle(part, alignment, height, clip)?
+        } else {
+            0.0
+        };
         let padding = f64::from(if part.text {
             self.uniforms.placement[0]
         } else {
