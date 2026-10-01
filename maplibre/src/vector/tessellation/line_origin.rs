@@ -91,7 +91,14 @@ impl StrokeVertexConstructor<ShaderVertex> for StrokeOrigins {
             .get(endpoint.to_usize())
             .copied()
             .unwrap_or(0.0);
-        output.distance = vertex.advancement() - origin;
+        let distance = vertex.advancement() - origin;
+        // GL JS stores a vertex's distance in whole tile units, so the phase of a dash or pattern
+        // drifts from one line to the next by up to one unit; a gradient keeps its fraction.
+        output.distance = if self.origins.is_empty() {
+            distance
+        } else {
+            distance.floor()
+        };
         // A stroke has no elevation; the slot instead says which side of the line the vertex is
         // on, which a pattern needs to draw the image across the line the right way up, and
         // carries the gap width and blur.
