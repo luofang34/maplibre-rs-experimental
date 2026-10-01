@@ -31,6 +31,7 @@ fn a_step_gradient_changes_colour_at_its_stop() {
         0.5,
         "blue"
     ])));
+    assert_eq!(ramp.len(), STEP_RAMP_TEXELS);
     assert_eq!(ramp[100], [255, 0, 0, 255]);
-    assert_eq!(ramp[200], [0, 0, 255, 255]);
+    assert_eq!(ramp[STEP_RAMP_TEXELS - 100], [0, 0, 255, 255]);
 }

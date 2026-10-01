@@ -11,12 +11,29 @@ use crate::style::{
 /// a line.
 pub const RAMP_TEXELS: usize = 256;
 
-/// The colour of each of [`RAMP_TEXELS`] positions along the line, straight-alpha 8-bit RGBA.
-/// A position whose colour cannot be evaluated is transparent.
+/// Texels in the ramp of a gradient made of steps, sampled without blending: wide enough that a
+/// step as narrow as a thousandth of a line stays where it is, as GL JS widens it.
+pub const STEP_RAMP_TEXELS: usize = 8192;
+
+/// Whether the gradient is a `step` expression, whose edges are hard.
+pub fn is_stepped(gradient: &StyleProperty<Color>) -> bool {
+    matches!(
+        gradient.expression(),
+        Some(crate::style::expression::Expression::Step { .. })
+    )
+}
+
+/// The colour of each of [`RAMP_TEXELS`] positions along the line, or [`STEP_RAMP_TEXELS`] for
+/// steps, straight-alpha 8-bit RGBA. A position whose colour cannot be evaluated is transparent.
 pub fn ramp(gradient: &StyleProperty<Color>) -> Vec<[u8; 4]> {
-    (0..RAMP_TEXELS)
+    let texels = if is_stepped(gradient) {
+        STEP_RAMP_TEXELS
+    } else {
+        RAMP_TEXELS
+    };
+    (0..texels)
         .map(|texel| {
-            let progress = texel as f64 / (RAMP_TEXELS - 1) as f64;
+            let progress = texel as f64 / (texels - 1) as f64;
             let color = match gradient {
                 StyleProperty::Constant(color) => Some(ExpressionColor::from(color.clone())),
                 StyleProperty::Expression(property) => {
