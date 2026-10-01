@@ -68,6 +68,21 @@ impl Geometry {
         }
     }
 
+    /// The GeoJSON of the geometry, a collection when it has more than one kind of part.
+    pub fn to_geojson(&self) -> Json {
+        let mut parts = Vec::new();
+        if !self.points.is_empty() {
+            parts.push(serde_json::json!({"type": "MultiPoint", "coordinates": self.points}));
+        }
+        if !self.lines.is_empty() {
+            parts.push(serde_json::json!({"type": "MultiLineString", "coordinates": self.lines}));
+        }
+        if !self.polygons.is_empty() {
+            parts.push(serde_json::json!({"type": "MultiPolygon", "coordinates": self.polygons}));
+        }
+        serde_json::json!({"type": "GeometryCollection", "geometries": parts})
+    }
+
     /// Adds every item, whether or not an earlier one was read.
     fn add_all(&mut self, items: &[Json]) -> bool {
         let mut any = false;

@@ -29,6 +29,7 @@ use crate::{
 
 mod cluster;
 mod geometry_property;
+pub(crate) use geometry_property::reads_geometry;
 
 /// Failure reported while preparing or delivering GeoJSON tile geometry.
 #[derive(Error, Debug)]

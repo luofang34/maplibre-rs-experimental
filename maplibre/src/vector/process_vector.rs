@@ -148,6 +148,7 @@ pub fn process_vector_tile<T: VectorTransferables, C: Context>(
     )
 }
 
+mod geometry_tags;
 mod processing;
 
 /// Decodes a tile, tolerating the zero padding some tile servers append: a zero tag is not a

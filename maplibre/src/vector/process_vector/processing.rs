@@ -8,6 +8,9 @@ pub(super) fn process_layer<T: VectorTransferables, C: Context>(
     context: &mut ProcessVectorContext<T, C>,
     atlas: std::sync::Arc<crate::sdf::assets::SymbolAtlas>,
 ) -> Result<(), ProcessVectorError> {
+    if crate::geojson::reads_geometry(style) {
+        super::geometry_tags::add_geometry_tags(&mut layer, request.coords);
+    }
     if let Some(filter) = &style.filter {
         match Filter::parse(filter) {
             Ok(filter) => {

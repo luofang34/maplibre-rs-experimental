@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 use crate::style::{expression::GEOMETRY_PROPERTY, layer::StyleLayer};
 
 /// Whether the layer has an expression that reads the feature's geometry.
-pub(super) fn reads_geometry(layer: &StyleLayer) -> bool {
+pub(crate) fn reads_geometry(layer: &StyleLayer) -> bool {
     serde_json::to_string(layer)
         .is_ok_and(|text| text.contains("\"within\"") || text.contains("\"distance\""))
 }

@@ -448,3 +448,14 @@ fn a_tile_padded_with_zero_bytes_still_decodes() {
     assert_eq!(tile.layers[0].name, "roads");
     assert!(super::decode_tile(&[0x0a, 0xff]).is_err());
 }
+
+#[test]
+fn a_within_filter_tests_the_geometry_of_a_vector_tile_feature() {
+    let polygon = |west: f64, east: f64| {
+        serde_json::json!(["within", {"type": "Polygon", "coordinates": [[
+            [west, -90], [east, -90], [east, 90], [west, 90], [west, -90]
+        ]]}])
+    };
+    assert_eq!(feature_count(polygon(-200.0, 200.0)), 1);
+    assert_eq!(feature_count(polygon(10.0, 20.0)), 0);
+}
