@@ -241,7 +241,8 @@ impl TextTessellator {
             .paint
             .text_size
             .as_ref()
-            .and_then(|value| value.evaluate_at_zoom(self.zoom))
+            // GL JS lays a label out at the size of the zoom above the tile's, which the shader then scales down.
+            .and_then(|value| value.evaluate_at_zoom(self.zoom + 1.0))
             .map_or(16.0, f64::from);
         let text_width = f64::from(text_layout::unwrapped_width(
             &self.paint,
