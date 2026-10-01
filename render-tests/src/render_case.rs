@@ -62,13 +62,14 @@ async fn render_fixture(test_dir: &Path) -> Result<(f64, f64), String> {
         &coords,
         (&images, meta.pixel_ratio, &vector_states),
     )?;
-    // Labels fade in, so a frame settles only after several; other layers need two.
+    // Labels fade in over 300 ms of 16 ms frames, so a frame settles only after about twenty;
+    // GL JS renders its references with the fade off. Other layers need two.
     let frame_count: u8 = if style
         .layers
         .iter()
         .any(|layer| matches!(layer.paint, Some(LayerPaint::Symbol(_))))
     {
-        12
+        24
     } else {
         2
     };
