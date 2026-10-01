@@ -70,7 +70,9 @@ fn main(
     // place in the tile; a wall takes its distance along the ring and its height.
     let tile_units_to_pixels = 1.0 / (8.0 * zoom_factor);
     let tile_scale = 1.0 / (tile_mercator_coords.z * 4096.0);
-    let height_factor = -tile_scale / 4096.0;
+    // A wall's pattern rows span half as many metres as the tile-unit conversion alone gives, which
+    // is how GL JS's walls repeat the image.
+    let height_factor = -0.5 * tile_scale / 4096.0;
     let pattern_place = select(position, vec2<f32>(edge_distance, z * height_factor), is_wall);
     let view_scale = tile_scale / zoom_factor;
     // The corner of the tile in map pixels, split as GL JS splits it so that taking it modulo
