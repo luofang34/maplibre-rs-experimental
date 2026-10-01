@@ -20,6 +20,7 @@ use crate::{
     vector::tessellation::{property_value, IndexDataType},
 };
 
+mod draw_order;
 mod icon_quads;
 mod layout;
 mod line_anchors;
@@ -115,6 +116,9 @@ impl TextTessellator {
                 &mut self.quad_buffer,
                 &mut self.features,
             );
+        }
+        if draw_order::sorts_by_height(&self.paint, self.zoom) {
+            draw_order::reorder(&mut self.quad_buffer, &mut self.features);
         }
     }
 }

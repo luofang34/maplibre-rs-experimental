@@ -71,6 +71,7 @@ fn property(name: &str) -> Option<Property> {
         "text-variable-anchor" => Property::Anchors,
         "text-variable-anchor-offset" => Property::AnchorOffsets,
         "text-writing-mode" => Property::WritingModes,
+        "symbol-z-order" => Property::Enum(&["auto", "viewport-y", "source"]),
         "icon-text-fit" => Property::Enum(&["none", "width", "height", "both"]),
         "icon-text-fit-padding" => Property::Padding,
         "text-height-anchor" | "icon-height-anchor" => {
