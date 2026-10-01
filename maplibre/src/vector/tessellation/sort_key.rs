@@ -36,12 +36,13 @@ impl SortKeys {
         properties: &FeatureProperties,
         zoom: f64,
         entries: Range<usize>,
-        indices_end: usize,
+        (indices_end, grouped_by): (usize, Option<f32>),
     ) {
-        let Some(property) = &self.property else {
-            return;
+        let key = match (&self.property, grouped_by) {
+            (_, Some(group)) => group,
+            (Some(property), None) => property.evaluate_for(properties, zoom).unwrap_or(0.0),
+            (None, None) => return,
         };
-        let key = property.evaluate_for(properties, zoom).unwrap_or(0.0);
         self.spans.push(Span {
             key,
             entries,

@@ -72,20 +72,27 @@ fn tessellator(paint: &LayerPaint, request: &VectorTileRequest) -> ZeroTessellat
     match paint {
         // An image repeated over a fill takes nothing from the fill's colour but its opacity.
         LayerPaint::Fill(paint) if paint.fill_pattern.is_some() => {
-            tessellator.fallback_color = [1.0; 4]
+            tessellator.fallback_color = [1.0; 4];
+            tessellator.pattern_property =
+                crate::vector::pattern::per_feature_pattern(&LayerPaint::Fill(paint.clone()));
         }
         LayerPaint::Fill(paint) => {
             tessellator.style_property = paint.fill_color.clone();
             tessellator.outline_property = paint.outline_color(f64::from(zoom));
         }
         LayerPaint::FillExtrusion(paint) if paint.fill_extrusion_pattern.is_some() => {
-            tessellator.fallback_color = [1.0; 4]
+            tessellator.fallback_color = [1.0; 4];
+            tessellator.pattern_property = crate::vector::pattern::per_feature_pattern(
+                &LayerPaint::FillExtrusion(paint.clone()),
+            );
         }
         LayerPaint::FillExtrusion(paint) => {
             tessellator.style_property = paint.fill_extrusion_color.clone()
         }
         LayerPaint::Circle(paint) => tessellator.style_property = paint.circle_color.clone(),
         LayerPaint::Line(paint) => {
+            tessellator.pattern_property =
+                crate::vector::pattern::per_feature_pattern(&LayerPaint::Line(paint.clone()));
             tessellator.style_property = paint.line_color.clone();
             tessellator.is_line_layer = true;
             tessellator.line_gradient = paint.line_gradient.is_some();

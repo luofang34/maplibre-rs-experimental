@@ -363,20 +363,26 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
                 );
                 match paint {
                     LayerPaint::Fill(p) if p.fill_pattern.is_some() => {
-                        tessellator.fallback_color = [1.0; 4]
+                        tessellator.fallback_color = [1.0; 4];
+                        tessellator.pattern_property =
+                            crate::vector::pattern::per_feature_pattern(paint);
                     }
                     LayerPaint::Fill(p) => {
                         tessellator.style_property = p.fill_color.clone();
                         tessellator.outline_property = p.outline_color(f64::from(zoom));
                     }
                     LayerPaint::FillExtrusion(p) if p.fill_extrusion_pattern.is_some() => {
-                        tessellator.fallback_color = [1.0; 4]
+                        tessellator.fallback_color = [1.0; 4];
+                        tessellator.pattern_property =
+                            crate::vector::pattern::per_feature_pattern(paint);
                     }
                     LayerPaint::FillExtrusion(p) => {
                         tessellator.style_property = p.fill_extrusion_color.clone()
                     }
                     LayerPaint::Circle(p) => tessellator.style_property = p.circle_color.clone(),
                     LayerPaint::Line(p) => {
+                        tessellator.pattern_property =
+                            crate::vector::pattern::per_feature_pattern(paint);
                         tessellator.style_property = p.line_color.clone();
                         tessellator.is_line_layer = true;
                         tessellator.line_gradient = p.line_gradient.is_some();

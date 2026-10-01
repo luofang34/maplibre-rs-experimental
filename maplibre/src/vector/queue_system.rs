@@ -57,6 +57,7 @@ pub fn queue_system(
         .filter(|layer| {
             layer.paint.as_ref().is_some_and(|paint| {
                 super::pattern::pattern_name(paint, view_state.style_zoom().value()).is_some()
+                    || super::pattern::per_feature_pattern(paint).is_some()
             })
         })
         .map(|layer| layer.id.as_str())

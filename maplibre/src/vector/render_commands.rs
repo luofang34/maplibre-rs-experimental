@@ -39,8 +39,11 @@ impl<P: PhaseItem> RenderCommand<P> for SetVectorTilePipeline {
 }
 
 /// Draws the tile's matching style-layer geometry with tile, layer and feature metadata.
-pub struct DrawVectorTile;
-impl RenderCommand<LayerItem> for DrawVectorTile {
+///
+/// With `RUNS`, a layer whose pattern varies by feature is drawn one run of features at a
+/// time, each with the image its pattern names bound at the second bind group.
+pub struct DrawVectorTile<const RUNS: bool = false>;
+impl<const RUNS: bool> RenderCommand<LayerItem> for DrawVectorTile<RUNS> {
     fn render<'w>(
         world: &'w World,
         item: &LayerItem,
@@ -109,7 +112,29 @@ impl RenderCommand<LayerItem> for DrawVectorTile {
                 .feature_metadata()
                 .slice(entry.feature_metadata_buffer_range()),
         );
-        pass.draw_indexed(entry.indices_range(), 0, 0..1);
+        let runs = RUNS
+            .then(|| buffer_pool.pattern_runs(item.tile.coords, &item.style_layer))
+            .flatten();
+        let Some(runs) = runs else {
+            pass.draw_indexed(entry.indices_range(), 0, 0..1);
+            return RenderCommandResult::Success;
+        };
+        let patterns = world.resources.get::<super::pattern::PatternResources>();
+        let dashes = world.resources.get::<super::line_dash::LineDashResources>();
+        let is_line = entry.style_layer.type_ == "line";
+        let first = entry.indices_range().start;
+        for (key, range) in runs {
+            let image = if is_line {
+                dashes.and_then(|dashes| dashes.image_binding(*key))
+            } else {
+                patterns.and_then(|patterns| patterns.image_binding(*key))
+            };
+            let Some(image) = image else {
+                continue;
+            };
+            pass.set_bind_group(1, image, &[]);
+            pass.draw_indexed(first + range.start..first + range.end, 0, 0..1);
+        }
 
         RenderCommandResult::Success
     }
@@ -204,9 +229,10 @@ impl RenderCommand<LayerItem> for SetPatternTilePipeline {
         ) else {
             return RenderCommandResult::Failure;
         };
-        let Some(binding) = patterns.binding(&item.style_layer) else {
+        let binding = patterns.binding(&item.style_layer);
+        if binding.is_none() && !patterns.is_per_feature(&item.style_layer) {
             return RenderCommandResult::Failure;
-        };
+        }
         let Some(pipeline) = patterns.pipeline() else {
             return RenderCommandResult::Failure;
         };
@@ -216,7 +242,9 @@ impl RenderCommand<LayerItem> for SetPatternTilePipeline {
             projection_resources.bind_group_for(item.projection_binding()),
             &[],
         );
-        pass.set_bind_group(1, binding, &[]);
+        if let Some(binding) = binding {
+            pass.set_bind_group(1, binding, &[]);
+        }
         RenderCommandResult::Success
     }
 }
@@ -266,7 +294,7 @@ impl<P: PhaseItem, const PASS: u8> RenderCommand<P> for SetExtrusionPipeline<PAS
 }
 
 /// Binds and draws a polygon bucket filled with a repeating image.
-pub type DrawPatternTiles = (SetPatternTilePipeline, DrawVectorTile);
+pub type DrawPatternTiles = (SetPatternTilePipeline, DrawVectorTile<true>);
 /// Binds the image of the item's layer at the second bind group.
 pub struct SetPatternBindGroup;
 impl RenderCommand<LayerItem> for SetPatternBindGroup {
@@ -275,14 +303,14 @@ impl RenderCommand<LayerItem> for SetPatternBindGroup {
         item: &LayerItem,
         pass: &mut wgpu::RenderPass<'w>,
     ) -> RenderCommandResult {
-        let Some(binding) = world
-            .resources
-            .get::<super::pattern::PatternResources>()
-            .and_then(|patterns| patterns.binding(&item.style_layer))
-        else {
+        let Some(patterns) = world.resources.get::<super::pattern::PatternResources>() else {
             return RenderCommandResult::Failure;
         };
-        pass.set_bind_group(1, binding, &[]);
+        match patterns.binding(&item.style_layer) {
+            Some(binding) => pass.set_bind_group(1, binding, &[]),
+            None if patterns.is_per_feature(&item.style_layer) => {}
+            None => return RenderCommandResult::Failure,
+        }
         RenderCommandResult::Success
     }
 }
@@ -301,7 +329,7 @@ pub type DrawExtrusionColor = (
 pub type DrawExtrusionPatternColor = (
     SetExtrusionPipeline<{ extrusion_pass::PATTERN }>,
     SetPatternBindGroup,
-    DrawVectorTile,
+    DrawVectorTile<true>,
 );
 /// Resets the stencil bit the colour draw marked.
 pub type DrawExtrusionClear = (
@@ -311,6 +339,6 @@ pub type DrawExtrusionClear = (
 /// Binds and draws a polygon-fill bucket when both commands succeed.
 pub type DrawVectorTiles = (SetVectorTilePipeline, DrawVectorTile);
 /// Binds and draws a stroked-line bucket when both commands succeed.
-pub type DrawLineTiles = (SetLineTilePipeline, DrawVectorTile);
+pub type DrawLineTiles = (SetLineTilePipeline, DrawVectorTile<true>);
 /// Binds and draws a circle bucket when both commands succeed.
 pub type DrawCircleTiles = (SetCircleTilePipeline, DrawVectorTile);

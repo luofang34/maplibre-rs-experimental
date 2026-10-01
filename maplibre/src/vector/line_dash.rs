@@ -43,6 +43,9 @@ pub(crate) struct LineDashResources {
     pub(crate) layout: wgpu::BindGroupLayout,
     entries: HashMap<String, DashEntry>,
     solid: DashEntry,
+    /// Layers whose pattern varies by feature, and the entry of each style image by its key.
+    per_feature: std::collections::HashSet<String>,
+    images: HashMap<u32, DashEntry>,
 }
 
 impl LineDashResources {
@@ -105,6 +108,8 @@ impl LineDashResources {
             layout,
             entries: HashMap::new(),
             solid,
+            per_feature: Default::default(),
+            images: HashMap::new(),
         }
     }
 
@@ -118,6 +123,19 @@ impl LineDashResources {
         self.entries
             .retain(|id, _| style.layers.iter().any(|layer| &layer.id == id));
         let scale = dash_scale(zoom);
+        self.per_feature = style
+            .layers
+            .iter()
+            .filter(|layer| {
+                layer
+                    .paint
+                    .as_ref()
+                    .is_some_and(|paint| super::pattern::per_feature_pattern(paint).is_some())
+            })
+            .filter(|layer| matches!(layer.paint, Some(LayerPaint::Line(_))))
+            .map(|layer| layer.id.clone())
+            .collect();
+        self.update_images(device, queue, style, scale);
         for layer in &style.layers {
             let Some(LayerPaint::Line(paint)) = &layer.paint else {
                 continue;
@@ -158,6 +176,55 @@ impl LineDashResources {
                 ),
             );
         }
+    }
+
+    /// Keeps an entry for every image of the style while a line layer picks its image per feature.
+    fn update_images(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        style: &Style,
+        scale: f32,
+    ) {
+        if self.per_feature.is_empty() {
+            self.images.clear();
+            return;
+        }
+        let mut keys = std::collections::HashSet::new();
+        for (name, image) in &style.images {
+            let key = crate::style::pattern_key::pattern_key(name);
+            keys.insert(key);
+            let Some(line_image) = pattern_image(image) else {
+                self.images.remove(&key);
+                continue;
+            };
+            if let Some(entry) = self
+                .images
+                .get_mut(&key)
+                .filter(|entry| entry.image == line_image)
+            {
+                if entry.scale != scale {
+                    entry.scale = scale;
+                    let uniform = image_uniform(entry.period, &entry.image, false, scale);
+                    queue.write_buffer(&entry.uniform, 0, bytemuck::cast_slice(&uniform));
+                }
+                continue;
+            }
+            let entry = create_entry(
+                device,
+                queue,
+                &self.layout,
+                (&[], false),
+                (&line_image, scale),
+            );
+            self.images.insert(key, entry);
+        }
+        self.images.retain(|key, _| keys.contains(key));
+    }
+
+    /// The image a pattern key names, for a layer that picks its image per feature.
+    pub(crate) fn image_binding(&self, key: u32) -> Option<&wgpu::BindGroup> {
+        self.images.get(&key).map(|entry| &entry.binding)
     }
 
     pub(crate) fn binding(&self, layer: &str) -> &wgpu::BindGroup {
@@ -389,23 +456,26 @@ fn line_image(paint: &crate::style::layer::LinePaint, style: &Style, zoom: f64) 
     let name = StyleProperty::<crate::style::layer::TextField>::parse(pattern)
         .evaluate_at_zoom(zoom)
         .map(|name| name.0);
-    let image = name.and_then(|name| style.images.get(&name));
-    match image {
-        Some(image)
-            if image.width > 0
-                && image.height > 0
-                && image.data.len() == image.width as usize * image.height as usize * 4 =>
-        {
-            let ratio = image.pixel_ratio.max(0.01);
-            LineImage::Pattern {
-                width: image.width,
-                height: image.height,
-                display: [image.width as f32 / ratio, image.height as f32 / ratio],
-                data: super::pattern::premultiplied(&image.data),
-            }
-        }
-        _ => LineImage::None,
+    name.and_then(|name| style.images.get(&name))
+        .and_then(pattern_image)
+        .unwrap_or(LineImage::None)
+}
+
+/// The pattern an image makes, when its pixels fit its size.
+fn pattern_image(image: &crate::style::StyleImage) -> Option<LineImage> {
+    if image.width == 0
+        || image.height == 0
+        || image.data.len() != image.width as usize * image.height as usize * 4
+    {
+        return None;
     }
+    let ratio = image.pixel_ratio.max(0.01);
+    Some(LineImage::Pattern {
+        width: image.width,
+        height: image.height,
+        display: [image.width as f32 / ratio, image.height as f32 / ratio],
+        data: super::pattern::premultiplied(&image.data),
+    })
 }
 
 /// The gradient ramp or pattern as a texture, or one white texel for a plain line.

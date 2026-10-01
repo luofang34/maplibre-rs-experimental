@@ -17,13 +17,24 @@ pub(super) fn uniform_color(layer: &StyleLayer, zoom: f64) -> Option<[f32; 4]> {
     let (color, opacity) = match layer.paint.as_ref()? {
         // A pattern takes only the opacity of the fill.
         LayerPaint::Fill(paint) if paint.fill_pattern.is_some() => {
-            return pattern_color(paint.fill_opacity.as_ref(), zoom)
+            // A pattern that varies by feature rides in the feature colours.
+            if super::super::pattern::per_feature_pattern(layer.paint.as_ref()?).is_some() {
+                return None;
+            }
+            return pattern_color(paint.fill_opacity.as_ref(), zoom);
         }
         // The outline is a feature of its own, with its own colour.
         LayerPaint::Fill(paint) if paint.fill_outline_color.is_some() => return None,
         LayerPaint::Fill(paint) => (&paint.fill_color, &paint.fill_opacity),
         // A gradient's colour comes from its ramp, so the feature colours carry the length.
         LayerPaint::Line(paint) if paint.line_gradient.is_some() => return None,
+        // A pattern that varies by feature rides in the feature colours.
+        LayerPaint::Line(paint) if paint.line_pattern.is_some() => {
+            if super::super::pattern::per_feature_pattern(layer.paint.as_ref()?).is_some() {
+                return None;
+            }
+            (&paint.line_color, &paint.line_opacity)
+        }
         LayerPaint::Line(paint) => (&paint.line_color, &paint.line_opacity),
         _ => return None,
     };

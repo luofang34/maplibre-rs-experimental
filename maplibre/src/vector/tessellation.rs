@@ -176,6 +176,9 @@ pub struct ZeroTessellator<I: std::ops::Add + From<lyon::tessellation::VertexId>
     pub line_gradient: bool,
     /// Cap and join of stroked lines.
     pub stroke: crate::style::line_stroke::LineStroke,
+    /// A pattern that varies by feature, whose key each feature's colour carries.
+    pub pattern_property:
+        Option<crate::style::layer::StyleProperty<crate::style::layer::TextField>>,
     /// A `line-join` that varies by feature, which replaces the stroke's own.
     pub join_property: Option<crate::style::layer::StyleProperty<String>>,
     line_length: f32,
@@ -227,6 +230,7 @@ impl<I: std::ops::Add + From<lyon::tessellation::VertexId> + MaxIndex> Default
             line_gradient: false,
             stroke: Default::default(),
             join_property: None,
+            pattern_property: None,
             line_length: 0.0,
             current_index: 0,
             path_open: false,
@@ -488,13 +492,25 @@ where
                 .clamp(0.0, 1.0);
         }
 
+        // Features sharing a pattern end up side by side, so one draw can bind its image.
+        let pattern = self.pattern_property.as_ref().map(|property| {
+            crate::style::pattern_key::pattern_value(
+                property
+                    .evaluate_for(&self.feature_properties, self.zoom)
+                    .as_ref()
+                    .map(|name| name.0.as_str()),
+            )
+        });
+        if let Some(value) = pattern {
+            color[0] = value;
+        }
         self.feature_colors.push(color);
         self.append_outline();
         self.sort_key.record(
             &self.feature_properties,
             self.zoom,
             first_entry..self.feature_indices.len(),
-            self.buffer.indices.len(),
+            (self.buffer.indices.len(), pattern),
         );
         self.feature_properties.clear();
         Ok(())

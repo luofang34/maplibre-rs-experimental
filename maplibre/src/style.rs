@@ -124,6 +124,7 @@ fn one() -> f32 {
 mod default_style;
 mod layer_order;
 pub mod mutation;
+pub mod pattern_key;
 pub mod state;
 
 #[cfg(test)]

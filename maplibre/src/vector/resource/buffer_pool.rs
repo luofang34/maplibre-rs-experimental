@@ -22,6 +22,9 @@ use crate::{
     vector::tessellation::OverAlignedVertexBuffer,
 };
 
+/// The pattern key and index range of each run of features that share one image.
+pub type PatternRuns = Vec<(u32, Range<u32>)>;
+
 /// This is inspired by the memory pool in Vulkan documented
 /// [here](https://gpuopen-librariesandsdks.github.io/VulkanMemoryAllocator/html/custom_memory_pools.html).
 #[derive(Debug)]
@@ -32,6 +35,9 @@ pub struct BufferPool<Q, B, V, I, TM, FM> {
     feature_metadata: BackingBuffer<B>,
 
     index: RingIndex,
+    /// For layers whose pattern varies by feature: the pattern key and index range of each run
+    /// of features sharing one image, relative to the layer's first index.
+    pattern_runs: std::collections::HashMap<(WorldTileCoords, String), PatternRuns>,
     /// Advances whenever geometry is allocated or evicted, so cached renders can refresh.
     revision: u64,
     phantom_v: PhantomData<V>,
@@ -108,6 +114,7 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
                 BackingBufferType::FeatureMetadata,
             ),
             index: RingIndex::new(),
+            pattern_runs: Default::default(),
             revision: 0,
             phantom_v: Default::default(),
             phantom_i: Default::default(),
@@ -119,11 +126,13 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
 
     pub fn clear(&mut self) {
         self.index.clear();
+        self.pattern_runs.clear();
         self.revision = self.revision.wrapping_add(1);
     }
 
     /// Releases GPU geometry when the tile data and its glyph atlas leave the CPU cache.
     pub fn remove_tile(&mut self, coords: WorldTileCoords) {
+        self.pattern_runs.retain(|(tile, _), _| *tile != coords);
         if self.index.remove_tile(coords) {
             self.revision = self.revision.wrapping_add(1);
         }
@@ -131,9 +140,30 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
 
     /// Removes one style layer without evicting other sources at the same coordinates.
     pub fn remove_layer(&mut self, coords: WorldTileCoords, id: &str) {
+        self.pattern_runs.remove(&(coords, id.to_owned()));
         if self.index.remove_layer(coords, id, None) {
             self.revision = self.revision.wrapping_add(1);
         }
+    }
+
+    /// Records, or with `None` forgets, the pattern runs of a layer's geometry.
+    pub fn set_pattern_runs(
+        &mut self,
+        coords: WorldTileCoords,
+        id: &str,
+        runs: Option<PatternRuns>,
+    ) {
+        match runs {
+            Some(runs) => self.pattern_runs.insert((coords, id.to_owned()), runs),
+            None => self.pattern_runs.remove(&(coords, id.to_owned())),
+        };
+    }
+
+    /// The pattern runs of a layer's geometry, when its pattern varies by feature.
+    pub fn pattern_runs(&self, coords: WorldTileCoords, id: &str) -> Option<&[(u32, Range<u32>)]> {
+        self.pattern_runs
+            .get(&(coords, id.to_owned()))
+            .map(Vec::as_slice)
     }
 
     #[cfg(test)]

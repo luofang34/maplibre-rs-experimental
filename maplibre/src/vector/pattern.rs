@@ -29,6 +29,10 @@ pub(crate) struct PatternResources {
     pipeline: Option<wgpu::RenderPipeline>,
     layout: wgpu::BindGroupLayout,
     layers: HashMap<String, PatternBinding>,
+    /// Layers whose pattern varies by feature, and so bind an image per run of features.
+    per_feature: std::collections::HashSet<String>,
+    /// Every image of the style by its pattern key, for the layers in `per_feature`.
+    images: HashMap<u32, PatternBinding>,
     sampler: wgpu::Sampler,
 }
 
@@ -78,6 +82,18 @@ pub(crate) fn pattern_name(paint: &LayerPaint, zoom: f64) -> Option<String> {
         .filter(|name| !name.is_empty())
 }
 
+/// The pattern property of a fill, extrusion or line layer when its image varies by feature.
+pub(crate) fn per_feature_pattern(paint: &LayerPaint) -> Option<StyleProperty<TextField>> {
+    let value = match paint {
+        LayerPaint::Fill(fill) => fill.fill_pattern.as_ref()?,
+        LayerPaint::FillExtrusion(extrusion) => extrusion.fill_extrusion_pattern.as_ref()?,
+        LayerPaint::Line(line) => line.line_pattern.as_ref()?,
+        _ => return None,
+    };
+    let property = StyleProperty::<TextField>::parse(value);
+    (!property.is_feature_constant()).then_some(property)
+}
+
 /// Whether a layer declares a pattern that names no image the style holds at `zoom`, so that GL
 /// JS draws nothing for it; a name that varies by feature counts as none here.
 pub(crate) fn names_missing_image(paint: Option<&LayerPaint>, style: &Style, zoom: f64) -> bool {
@@ -88,9 +104,12 @@ pub(crate) fn names_missing_image(paint: Option<&LayerPaint>, style: &Style, zoo
         _ => None,
     };
     value.is_some_and(|value| {
-        StyleProperty::<TextField>::parse(value)
-            .evaluate_at_zoom(zoom)
-            .is_none_or(|name| !style.images.contains_key(&name.0))
+        let property = StyleProperty::<TextField>::parse(value);
+        // A feature's own name decides, where its geometry is drawn.
+        property.is_feature_constant()
+            && property
+                .evaluate_at_zoom(zoom)
+                .is_none_or(|name| !style.images.contains_key(&name.0))
     })
 }
 
@@ -139,6 +158,8 @@ impl PatternResources {
             pipeline: None,
             layout,
             layers: HashMap::new(),
+            per_feature: Default::default(),
+            images: HashMap::new(),
             sampler,
         }
     }
@@ -155,6 +176,13 @@ impl PatternResources {
         let scale = pattern_scale(zoom);
         self.layers
             .retain(|id, _| style.layers.iter().any(|layer| &layer.id == id));
+        self.per_feature = style
+            .layers
+            .iter()
+            .filter(|layer| layer.paint.as_ref().and_then(per_feature_pattern).is_some())
+            .map(|layer| layer.id.clone())
+            .collect();
+        self.update_images(device, queue, style, scale);
         for layer in &style.layers {
             let image = layer
                 .paint
@@ -185,6 +213,60 @@ impl PatternResources {
                 self.layers.insert(layer.id.clone(), binding);
             }
         }
+    }
+
+    /// Keeps a binding for every image of the style while a layer picks its image per feature.
+    fn update_images(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        style: &Style,
+        scale: f32,
+    ) {
+        if self.per_feature.is_empty() {
+            self.images.clear();
+            return;
+        }
+        let mut keys = std::collections::HashSet::new();
+        for (name, image) in &style.images {
+            let key = crate::style::pattern_key::pattern_key(name);
+            keys.insert(key);
+            let fingerprint = fingerprint(name, image);
+            if let Some(binding) = self
+                .images
+                .get_mut(&key)
+                .filter(|binding| binding.fingerprint == fingerprint)
+            {
+                if binding.scale != scale {
+                    binding.scale = scale;
+                    queue.write_buffer(
+                        &binding.size,
+                        0,
+                        bytemuck::cast_slice(&size(binding.display, scale)),
+                    );
+                }
+                continue;
+            }
+            match self.bind(device, queue, image, (fingerprint, scale)) {
+                Some(binding) => {
+                    self.images.insert(key, binding);
+                }
+                None => {
+                    self.images.remove(&key);
+                }
+            }
+        }
+        self.images.retain(|key, _| keys.contains(key));
+    }
+
+    /// Whether the layer picks its image per feature.
+    pub(crate) fn is_per_feature(&self, layer: &str) -> bool {
+        self.per_feature.contains(layer)
+    }
+
+    /// The image a pattern key names, for a layer that picks its image per feature.
+    pub(crate) fn image_binding(&self, key: u32) -> Option<&wgpu::BindGroup> {
+        self.images.get(&key).map(|binding| &binding.bind_group)
     }
 
     fn bind(

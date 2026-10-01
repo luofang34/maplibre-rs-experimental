@@ -33,6 +33,8 @@ fn with_extension(base: &std::path::Path, suffix: &str, extension: &str) -> Path
 /// ratio when the fixture ships one.
 pub(super) fn add_pattern_images(style: &mut Style, pixel_ratio: f64) -> Result<(), String> {
     let mut wanted = BTreeSet::new();
+    // A pattern that is not one name picks its image from feature data the style does not hold.
+    let mut varying = false;
     for layer in &style.layers {
         let pattern = match &layer.paint {
             Some(LayerPaint::Fill(paint)) => paint.fill_pattern.as_ref(),
@@ -43,6 +45,7 @@ pub(super) fn add_pattern_images(style: &mut Style, pixel_ratio: f64) -> Result<
         };
         if let Some(pattern) = pattern {
             strings(pattern, &mut wanted);
+            varying |= !pattern.is_string();
         }
     }
     let Some(base) = sprite_base(style).filter(|_| !wanted.is_empty()) else {
@@ -60,6 +63,14 @@ pub(super) fn add_pattern_images(style: &mut Style, pixel_ratio: f64) -> Result<
     let sheet = image::open(&png_path)
         .map_err(|error| format!("Cannot read {}: {error}", png_path.display()))?
         .to_rgba8();
+    if varying {
+        wanted.extend(
+            document
+                .as_object()
+                .into_iter()
+                .flat_map(|names| names.keys().cloned()),
+        );
+    }
     for name in wanted {
         let Some(entry) = document.get(&name) else {
             continue;

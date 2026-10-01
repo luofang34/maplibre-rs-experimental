@@ -153,3 +153,21 @@ fn a_line_layer_carries_offset_gap_width_and_blur_at_the_view_zoom() {
     // A negative blur is clamped: the edge cannot be sharper than the antialiasing.
     assert_eq!(metadata.circle_params, [10.0, 3.0, 0.0, 0.0]);
 }
+
+#[test]
+fn features_sharing_a_pattern_form_one_run_of_indices() {
+    use crate::style::pattern_key::pattern_value;
+
+    let colors = [
+        [pattern_value(Some("a")), 0.0, 0.0, 1.0],
+        [pattern_value(Some("a")), 0.0, 0.0, 1.0],
+        [pattern_value(Some("b")), 0.0, 0.0, 1.0],
+        [pattern_value(None), 0.0, 0.0, 1.0],
+    ];
+    // Four features of three vertices each, one triangle apiece.
+    let indices = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+    let runs = super::pattern_runs(&[3, 3, 3, 3], &colors, &indices);
+    assert_eq!(runs.len(), 2);
+    assert_eq!(runs[0].1, 0..6);
+    assert_eq!(runs[1].1, 6..9);
+}

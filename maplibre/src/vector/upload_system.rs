@@ -316,6 +316,11 @@ fn upload_bucket(
         .find(|(tile, id, _)| *tile == coords && *id == style_layer.id)
         .map_or(buffer, |(_, _, spatial)| spatial);
     let layer_metadata = metadata_for_layer(style_layer, coords, paint);
+    let runs = style_layer
+        .paint
+        .as_ref()
+        .and_then(super::pattern::per_feature_pattern)
+        .map(|_| pattern_runs(feature_indices, feature_colors, &buffer.buffer.indices));
 
     tracing::debug!(%coords, "allocating vector geometry");
     if let Err(error) = buffer_pool.replace_layer_geometry(
@@ -329,7 +334,39 @@ fn upload_bucket(
         tracing::error!(%coords, %error, "tile geometry upload failed");
         return false;
     }
+    buffer_pool.set_pattern_runs(coords, &style_layer.id, runs);
     true
+}
+
+/// The index range of each run of consecutive features that share a pattern key.
+fn pattern_runs(
+    feature_indices: &[u32],
+    feature_colors: &[[f32; 4]],
+    indices: &[u32],
+) -> Vec<(u32, std::ops::Range<u32>)> {
+    let mut runs: Vec<(u32, std::ops::Range<u32>)> = Vec::new();
+    let (mut vertex_end, mut position) = (0_u32, 0_u32);
+    for (feature, count) in feature_indices.iter().enumerate() {
+        vertex_end = vertex_end.wrapping_add(*count);
+        let first = position;
+        while indices
+            .get(position as usize)
+            .is_some_and(|index| *index < vertex_end)
+        {
+            position = position.wrapping_add(1);
+        }
+        let key = feature_colors
+            .get(feature)
+            .and_then(|color| crate::style::pattern_key::key_of_value(color[0]));
+        let Some(key) = key.filter(|_| position > first) else {
+            continue;
+        };
+        match runs.last_mut() {
+            Some((last, range)) if *last == key && range.end == first => range.end = position,
+            _ => runs.push((key, first..position)),
+        }
+    }
+    runs
 }
 
 fn layer_translate_tile_units(
