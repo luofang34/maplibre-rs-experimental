@@ -75,6 +75,14 @@ fn rings(path: &Path) -> Vec<Ring> {
     rings
 }
 
+/// The sum of `(x2 - x1) * (y1 + y2)` over the ring's edges, as geojson-vt measures the winding.
+fn trapezoid_area(ring: &Ring) -> f32 {
+    ring.iter()
+        .zip(ring.iter().cycle().skip(1))
+        .map(|(a, b)| (b[0] - a[0]) * (a[1] + b[1]))
+        .sum()
+}
+
 /// Twice the signed area in the raw coordinates; the sign tells which side the inside is on.
 fn signed_area(ring: &Ring) -> f32 {
     ring.iter()
@@ -157,9 +165,10 @@ pub(super) fn clipped(path: &Path, buffer: f32) -> Path {
         .collect();
     let mut builder = Path::builder();
     for (index, ring) in rings.iter().enumerate() {
-        let counterclockwise = signed_area(ring) < 0.0;
         let mut ring = ring.clone();
-        if counterclockwise == is_hole(index, &rings) {
+        // An outer ring keeps its order when its area is not positive, a hole when it is, as
+        // geojson-vt winds them.
+        if (trapezoid_area(&ring) > 0.0) != is_hole(index, &rings) {
             ring[1..].reverse();
         }
         builder.begin(lyon::math::point(ring[0][0], ring[0][1]));
@@ -256,7 +265,9 @@ where
                 continue;
             }
             let normal = [facing * dy / length, -facing * dx / length];
-            push_wall(buffer, [*a, *b], normal, heights, [start, travelled]);
+            // GL JS gives the end of an edge the distance before it and the start the distance
+            // after it.
+            push_wall(buffer, [*a, *b], normal, heights, [travelled, start]);
         }
     }
     Ok(())

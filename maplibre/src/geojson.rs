@@ -374,9 +374,14 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
                     LayerPaint::FillExtrusion(extrusion) => {
                         let tessellator = ZeroTessellator::<IndexDataType>::default()
                             .with_extrusion(ExtrusionOptions {
-                                clip_buffer: request.buffer.map(|buffer| {
-                                    buffer as f32 * crate::coords::EXTENT as f32 / 512.0
-                                }),
+                                // Clipping decides where a pattern's walls start; a plain extrusion
+                                // keeps the copies that other tiles draw of it.
+                                clip_buffer: request
+                                    .buffer
+                                    .filter(|_| extrusion.fill_extrusion_pattern.is_some())
+                                    .map(|buffer| {
+                                        buffer as f32 * crate::coords::EXTENT as f32 / 512.0
+                                    }),
                                 ..ExtrusionOptions::for_paint(extrusion)
                             });
                         if use_globe_geometry {
