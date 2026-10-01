@@ -149,6 +149,18 @@ impl PipelineSetup<'_> {
         layouts: &[&wgpu::BindGroupLayout],
         depth: bool,
     ) -> wgpu::RenderPipeline {
+        self.create_with_clipping(name, shader, layouts, depth, true)
+    }
+
+    /// `clipped` keeps the pipeline inside its tile's stencil mask.
+    fn create_with_clipping(
+        &self,
+        name: &'static str,
+        shader: &impl Shader,
+        layouts: &[&wgpu::BindGroupLayout],
+        depth: bool,
+        clipped: bool,
+    ) -> wgpu::RenderPipeline {
         let pipeline = TilePipeline::new(
             name.into(),
             self.settings,
@@ -157,7 +169,7 @@ impl PipelineSetup<'_> {
             crate::render::resource::TilePipelineOptions {
                 depth_stencil_enabled: true,
                 update_stencil: false,
-                debug_stencil: false,
+                debug_stencil: !clipped,
                 wireframe: false,
                 multisampling: self.multisampling,
                 textured: false,
@@ -299,12 +311,14 @@ impl PipelineSetup<'_> {
             )
         });
         circle.initialize(|| {
-            CirclePipeline(self.create(
+            // Circles cross tile boundaries, as in GL JS, where each point belongs to one tile.
+            CirclePipeline(self.create_with_clipping(
                 "circle_pipeline",
                 &shaders::CircleShader {
                     format: self.format,
                 },
                 &[self.projection],
+                false,
                 false,
             ))
         });
