@@ -38,6 +38,7 @@ tracing-tracy = { workspace = true, optional = true }
 reqwest.workspace = true
 
 [dependencies]
+unicode-bidi = "0.3"
 async-trait.workspace = true
 instant.workspace = true
 

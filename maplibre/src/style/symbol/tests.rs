@@ -3,8 +3,10 @@ use super::*;
 
 #[test]
 fn labels_preserve_unicode_and_apply_transform_before_trimming() {
+    let shaped = crate::style::arabic_shaping::shape("مرحبًا 🌍");
+    assert_ne!(shaped, "مرحبًا 🌍", "Arabic letters take their joined forms");
     for (input, transform, expected) in [
-        ("  مرحبًا 🌍  ", "none", Some("مرحبًا 🌍")),
+        ("  مرحبًا 🌍  ", "none", Some(shaped.as_str())),
         ("  Straße  ", "uppercase", Some("STRASSE")),
         ("  ALPS  ", "lowercase", Some("alps")),
         (" \t\n ", "none", None),

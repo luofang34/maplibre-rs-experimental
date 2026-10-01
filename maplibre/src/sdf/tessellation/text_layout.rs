@@ -3,6 +3,7 @@ use std::ops::Range;
 
 use lyon::tessellation::VertexBuffers;
 
+mod bidirectional;
 mod extents;
 mod styles;
 mod vertical;
@@ -87,8 +88,8 @@ fn block<'a>(
     atlas: &'a SymbolAtlas,
 ) -> Option<Block<'a>> {
     let text = paint.label(&symbol.properties, zoom)?;
-    let chars: Vec<char> = text.chars().collect();
-    let styles = char_styles(paint, symbol, zoom, atlas, chars.len())?;
+    let mut chars: Vec<char> = text.chars().collect();
+    let mut styles = char_styles(paint, symbol, zoom, atlas, chars.len())?;
     let spacing = paint.number("text-letter-spacing", &symbol.properties, zoom, 0.0) * 24.0;
     let max_width = paint.number("text-max-width", &symbol.properties, zoom, 10.0) * 24.0;
     // Text along a line runs the whole line: it is never wrapped.
@@ -116,6 +117,7 @@ fn block<'a>(
             }
         })
         .fold(0.0, f32::max);
+    bidirectional::reorder_lines(&mut chars, &mut styles, &lines);
     let (line_scales, line_extras, line_contents) = line_sizes(&styles, &lines);
     let anchors = variable_anchors(paint);
     let anchor = anchors.first().cloned().unwrap_or_else(|| {

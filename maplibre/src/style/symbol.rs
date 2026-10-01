@@ -130,7 +130,22 @@ impl SymbolPaint {
             _ => text,
         };
         let text = text.trim();
-        (!text.is_empty()).then(|| text.to_string())
+        if text.is_empty() {
+            return None;
+        }
+        // Sections cannot follow letters that change length when they join.
+        let plain = self
+            .text_field
+            .as_ref()
+            .and_then(|field| field.evaluate_for(properties, zoom))
+            .is_none_or(|field| field.1.is_empty());
+        Some(
+            if plain && crate::style::arabic_shaping::needs_shaping(text) {
+                crate::style::arabic_shaping::shape(text)
+            } else {
+                text.to_string()
+            },
+        )
     }
 }
 

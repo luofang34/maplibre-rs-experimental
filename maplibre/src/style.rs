@@ -7,6 +7,7 @@ use std::collections::HashMap;
 pub use cint::*;
 use serde::{Deserialize, Serialize};
 
+pub(crate) mod arabic_shaping;
 pub mod circle;
 pub mod expression;
 pub mod filter;
