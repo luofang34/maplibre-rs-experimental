@@ -9,9 +9,9 @@ use lyon::{
 use super::line_style::PackedLine;
 use crate::render::ShaderVertex;
 
-/// Tile units either side of a tile that a line clipped for it reaches, as GL JS clips the
-/// lines of a GeoJSON source.
-const BUFFER: f32 = 256.0;
+/// Tile units either side of a tile that a line clipped for it reaches: the quarter of a tile
+/// that GL JS keeps when it clips the lines of a GeoJSON source.
+const BUFFER: f32 = 1024.0;
 const EXTENT: f32 = 4096.0;
 
 /// The distance along its sub-path at which each endpoint's line enters the buffered tile.
@@ -117,7 +117,7 @@ mod tests {
         builder.end(false);
         let origins = entry_distances(&builder.build());
         assert_eq!(origins.len(), 2);
-        assert!((origins[0] - (10_000.0 - 256.0)).abs() < 0.01);
+        assert!((origins[0] - (10_000.0 - BUFFER)).abs() < 0.01);
         assert_eq!(origins[0], origins[1]);
     }
 
