@@ -17,7 +17,7 @@ pub use ast::{
     Arithmetic, Coercion, Comparison, Expression, FeatureProperty, Global, MathFunction,
     StringFunction,
 };
-pub use evaluate::{EvaluationContext, EvaluationError, FeatureProperties};
+pub use evaluate::{EvaluationContext, EvaluationError, FeatureProperties, ImageSet};
 pub use interpolation::{interpolate_number, ColorSpace, Interpolation};
 pub use legacy::{
     convert_filter, convert_function, convert_token_string, is_expression_filter,

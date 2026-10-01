@@ -31,6 +31,21 @@ pub struct EvaluationContext<'a> {
     pub id: Option<&'a Value>,
     /// Map-level state read by `global-state`; the map keeps none, so it is normally absent.
     pub global_state: Option<&'a FeatureProperties>,
+    /// The images a layout can draw, which `image` expressions are checked against; absent when
+    /// every image is assumed to exist.
+    pub available_images: Option<&'a dyn ImageSet>,
+}
+
+/// A set of image names.
+pub trait ImageSet: std::fmt::Debug {
+    /// Whether an image of that name exists.
+    fn contains_image(&self, name: &str) -> bool;
+}
+
+impl<V: std::fmt::Debug> ImageSet for HashMap<String, V> {
+    fn contains_image(&self, name: &str) -> bool {
+        self.contains_key(name)
+    }
 }
 
 impl<'a> EvaluationContext<'a> {
@@ -318,6 +333,14 @@ impl Expression {
                     }
                 }
                 Ok(Value::Null)
+            }
+            Self::Image(name) => {
+                let name = name.evaluate(context)?;
+                let available = match (&name, context.available_images) {
+                    (Value::String(name), Some(images)) => images.contains_image(name),
+                    _ => true,
+                };
+                Ok(if available { name } else { Value::Null })
             }
             Self::Coerce { coercion, operands } => coerce(*coercion, operands, context),
             Self::ToRgba(operand) => {

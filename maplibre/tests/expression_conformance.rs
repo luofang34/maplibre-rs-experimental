@@ -183,6 +183,7 @@ fn run_case(path: &Path) -> Outcome {
             geometry_type,
             id: id.as_ref(),
             global_state: global_state.as_ref(),
+            available_images: None,
         };
         let result = expression.evaluate(&context);
         let expects_error = expected.get("error").is_some();

@@ -358,6 +358,7 @@ impl Parser {
                     operands,
                 })
             }
+            "image" => Ok(Expression::Image(Box::new(self.parse_single(args, &Type::String)?))),
             "to-rgba" => Ok(Expression::ToRgba(Box::new(self.parse_single(args, &Type::Color)?))),
             "rgb" => Ok(Expression::Rgba(self.parse_exactly(args, 3, &Type::Number)?)),
             "rgba" => Ok(Expression::Rgba(self.parse_exactly(args, 4, &Type::Number)?)),

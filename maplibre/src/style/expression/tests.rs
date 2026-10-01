@@ -361,3 +361,28 @@ fn feature_state_reads_the_state_stored_among_the_properties() {
         Ok(Value::from("fallback"))
     );
 }
+
+#[test]
+fn an_image_expression_falls_through_to_the_first_image_that_exists() {
+    let expression =
+        Expression::parse(&json!(["coalesce", ["image", "missing"], ["image", "rocket"]]))
+            .expect("expression parses");
+    let images = std::collections::HashMap::from([("rocket".to_string(), ())]);
+    let properties = properties();
+    let context = EvaluationContext {
+        available_images: Some(&images),
+        ..EvaluationContext::for_feature(0.0, &properties)
+    };
+
+    assert_eq!(
+        expression.evaluate(&context).expect("evaluates"),
+        Value::from("rocket")
+    );
+    // Without a set of images every one is taken to exist.
+    assert_eq!(
+        expression
+            .evaluate(&EvaluationContext::for_feature(0.0, &properties))
+            .expect("evaluates"),
+        Value::from("missing")
+    );
+}

@@ -291,6 +291,8 @@ pub enum Expression {
         /// Candidates in order.
         operands: Vec<Expression>,
     },
+    /// An image by name: the name when the image is available, null otherwise.
+    Image(Box<Expression>),
     /// `to-number`, `to-string`, `to-boolean` and `to-color`.
     Coerce {
         /// Conversion.
@@ -365,7 +367,9 @@ impl Expression {
             | Self::Arithmetic { .. }
             | Self::Math { .. }
             | Self::MinMax { .. } => Type::Number,
-            Self::TypeOf(_) | Self::Concat(_) | Self::StringCase { .. } => Type::String,
+            Self::TypeOf(_) | Self::Concat(_) | Self::StringCase { .. } | Self::Image(_) => {
+                Type::String
+            }
             Self::Assert { required, .. } => required.clone(),
             Self::Coerce { coercion, .. } => match coercion {
                 Coercion::Number => Type::Number,
@@ -437,6 +441,7 @@ impl Expression {
             | Self::Length(operand)
             | Self::Math { operand, .. }
             | Self::TypeOf(operand)
+            | Self::Image(operand)
             | Self::ToRgba(operand)
             | Self::StringCase { operand, .. } => visit(operand),
             Self::In { needle, haystack } => {
@@ -492,7 +497,8 @@ impl Expression {
     /// Whether the result depends on neither the feature nor the map.
     pub fn is_constant(&self) -> bool {
         match self {
-            Self::Global(_) | Self::GlobalState(_) => false,
+            // Whether an image exists is known only where it is drawn.
+            Self::Global(_) | Self::GlobalState(_) | Self::Image(_) => false,
             _ => self.is_feature_constant() && self.children_all(Self::is_constant),
         }
     }

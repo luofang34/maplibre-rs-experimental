@@ -145,6 +145,7 @@ impl Filter {
             geometry_type: Some(feature.geometry_type.name()),
             id: feature.id.as_ref(),
             global_state: None,
+            available_images: None,
         };
         self.expression
             .evaluate(&context)

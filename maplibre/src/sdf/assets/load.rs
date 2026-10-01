@@ -196,6 +196,8 @@ fn requests(style: &Style, data: &[u8], zoom: f64) -> (GlyphRequests, HashSet<St
             {
                 icons.insert(icon);
             }
+            // An `image` expression may fall through to any image it names.
+            icons.extend(paint.icon_image_names());
         }
     }
     (fonts, icons)

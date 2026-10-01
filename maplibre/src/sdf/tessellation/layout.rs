@@ -65,7 +65,7 @@ pub(super) fn append(
     let mut icon_padding = 0.0_f32;
     let text = paint.label(&symbol.properties, zoom).unwrap_or_default();
     if let Some(icon) = paint
-        .text("icon-image", &symbol.properties, zoom)
+        .text_among_images("icon-image", &symbol.properties, zoom, &atlas.icons)
         .and_then(|name| atlas.icons.get(&name))
     {
         let ratio = icon.metrics[3];
