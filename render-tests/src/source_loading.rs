@@ -128,7 +128,7 @@ fn load_geojson_blocking(
             &symbol_style,
             layers,
             &index.tile(*coords),
-            (*coords, pixel_ratio),
+            (*coords, 0, pixel_ratio),
         )?;
         // A source that filters or clusters shows each tile its own version of the document.
         let presented = index.source_document(value, source, *coords);
@@ -183,7 +183,8 @@ fn load_vector_blocking(
         } else {
             data
         };
-        let atlas = symbol_atlas(style, layers, &data, (coords, pixel_ratio))?;
+        let magnified = overscaled_zoom(map, style, source, coords);
+        let atlas = symbol_atlas(style, layers, &data, (coords, magnified, pixel_ratio))?;
         for layer in layers {
             processed.append(
                 &mut process_tile_layers_with_atlas(
@@ -191,7 +192,7 @@ fn load_vector_blocking(
                     layer,
                     coords,
                     projection.clone(),
-                    (atlas.clone(), overscaled_zoom(map, style, source, coords)),
+                    (atlas.clone(), magnified),
                 )
                 .map_err(|error| format!("Cannot process vector source '{name}': {error}"))?,
             );
@@ -374,7 +375,7 @@ fn symbol_atlas(
     style: &Style,
     layers: &[StyleLayer],
     tile: &[u8],
-    (coords, pixel_ratio): (WorldTileCoords, f64),
+    (coords, magnified, pixel_ratio): (WorldTileCoords, u8, f64),
 ) -> Result<Option<std::sync::Arc<maplibre::sdf::assets::SymbolAtlas>>, String> {
     if !layers
         .iter()
@@ -382,5 +383,9 @@ fn symbol_atlas(
     {
         return Ok(None);
     }
-    load_atlas_blocking(style, tile, (f64::from(u8::from(coords.z)), pixel_ratio))
+    load_atlas_blocking(
+        style,
+        tile,
+        (f64::from(magnified.max(u8::from(coords.z))), pixel_ratio),
+    )
 }

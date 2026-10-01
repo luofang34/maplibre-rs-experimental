@@ -13,9 +13,7 @@ pub(super) fn process_layer<T: VectorTransferables, C: Context>(
     }
     if let Some(filter) = &style.filter {
         match Filter::parse(filter) {
-            Ok(filter) => {
-                apply_filter_to_layer(&mut layer, &filter, f64::from(u8::from(request.coords.z)))
-            }
+            Ok(filter) => apply_filter_to_layer(&mut layer, &filter, request.style_zoom()),
             Err(error) => {
                 // Rendering either all features or none silently would conceal an invalid style.
                 tracing::error!(layer = %style.id,%error,"unsupported filter; the layer renders nothing");
@@ -44,31 +42,33 @@ pub(super) fn process_layer<T: VectorTransferables, C: Context>(
 
 fn tessellator(paint: &LayerPaint, request: &VectorTileRequest) -> ZeroTessellator<IndexDataType> {
     let zoom = u8::from(request.coords.z);
+    let style_zoom = request.style_zoom();
     let granularity = match paint {
         LayerPaint::Fill(_) => granularity_for_zoom(128, 2, zoom),
         LayerPaint::Line(_) => granularity_for_zoom(512, 0, zoom),
         _ => 1,
     };
-    let mut tessellator = match paint {
-        LayerPaint::Circle(circle) => ZeroTessellator::default()
-            .with_circles(CircleOptions::for_paint(circle, f64::from(zoom))),
-        LayerPaint::Heatmap(heatmap) => ZeroTessellator::default()
-            .with_circles(CircleOptions::for_heatmap(heatmap, f64::from(zoom))),
-        LayerPaint::FillExtrusion(extrusion) => {
-            ZeroTessellator::default().with_extrusion(ExtrusionOptions::for_paint(extrusion))
+    let mut tessellator =
+        match paint {
+            LayerPaint::Circle(circle) => ZeroTessellator::default()
+                .with_circles(CircleOptions::for_paint(circle, style_zoom)),
+            LayerPaint::Heatmap(heatmap) => ZeroTessellator::default()
+                .with_circles(CircleOptions::for_heatmap(heatmap, style_zoom)),
+            LayerPaint::FillExtrusion(extrusion) => {
+                ZeroTessellator::default().with_extrusion(ExtrusionOptions::for_paint(extrusion))
+            }
+            _ if request.projection.uses_globe_rendering(style_zoom) => {
+                let last_tile = i64::from(crate::coords::ZOOM_BOUNDS[usize::from(zoom)]) - 1;
+                ZeroTessellator::default().with_globe_subdivision(
+                    granularity,
+                    zoom == 0,
+                    request.coords.y == 0,
+                    i64::from(request.coords.y) == last_tile,
+                )
+            }
+            _ => ZeroTessellator::default(),
         }
-        _ if request.projection.uses_globe_rendering(f64::from(zoom)) => {
-            let last_tile = i64::from(crate::coords::ZOOM_BOUNDS[usize::from(zoom)]) - 1;
-            ZeroTessellator::default().with_globe_subdivision(
-                granularity,
-                zoom == 0,
-                request.coords.y == 0,
-                i64::from(request.coords.y) == last_tile,
-            )
-        }
-        _ => ZeroTessellator::default(),
-    }
-    .with_feature_opacity(paint.opacity(), f64::from(zoom));
+        .with_feature_opacity(paint.opacity(), style_zoom);
     match paint {
         // An image repeated over a fill takes nothing from the fill's colour but its opacity.
         LayerPaint::Fill(paint) if paint.fill_pattern.is_some() => {
@@ -100,7 +100,7 @@ fn tessellator(paint: &LayerPaint, request: &VectorTileRequest) -> ZeroTessellat
                 || paint.line_pattern.is_some()
                 || paint.line_dasharray.is_some();
             tessellator.line_feature_style =
-                super::super::tessellation::LineFeatureStyle::for_paint(paint, f64::from(zoom));
+                super::super::tessellation::LineFeatureStyle::for_paint(paint, style_zoom);
         }
         _ => {}
     }
@@ -150,7 +150,7 @@ fn symbol_layer<T: VectorTransferables, C: Context>(
     atlas: std::sync::Arc<crate::sdf::assets::SymbolAtlas>,
 ) -> Result<(), ProcessVectorError> {
     let original = layer.clone();
-    let zoom = f64::from(u8::from(request.coords.z));
+    let zoom = request.style_zoom();
     let mut tessellator = TextTessellator::with_assets(paint.clone(), zoom, atlas.clone());
     tessellator.coordinate_scale = extent_scale(&layer);
     tessellator.overscaling = request.overscaling();

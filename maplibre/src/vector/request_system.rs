@@ -177,14 +177,8 @@ impl<E: Environment, T: VectorTransferables> RequestSystem<E, T> {
     }
 }
 
-/// Whether any layer lays out differently when its tile is magnified past the source's last
-/// zoom, which a symbol placed along a line does through its spacing.
+/// Whether tiles are laid out for the zoom they are magnified to: layout and filter
+/// expressions are evaluated at that zoom, and labels along a line space themselves by it.
 pub fn depends_on_overscaling(style: &crate::style::Style) -> bool {
-    style.layers.iter().any(|layer| {
-        matches!(
-            &layer.paint,
-            Some(crate::style::layer::LayerPaint::Symbol(paint))
-                if crate::sdf::tessellation::is_line_placed(paint)
-        )
-    })
+    style.layers.iter().any(|layer| layer.paint.is_some())
 }

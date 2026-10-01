@@ -79,6 +79,12 @@ pub struct VectorTileRequest {
 }
 
 impl VectorTileRequest {
+    /// The zoom style expressions are evaluated at: the zoom the tile is magnified to, which is
+    /// the tile's own when it is not.
+    pub fn style_zoom(&self) -> f64 {
+        f64::from(self.overscaled_zoom.max(u8::from(self.coords.z)))
+    }
+
     /// How many times the tile is magnified past its source's last zoom.
     pub fn overscaling(&self) -> f64 {
         let own = u8::from(self.coords.z);

@@ -131,9 +131,14 @@ async fn process_source<T: VectorTransferables, C: Context + Clone, H: HttpClien
     if symbols.is_empty() {
         return Ok(());
     }
-    let atlas = load_symbol_assets(client, style, data, f64::from(u8::from(coords.z)))
-        .await
-        .map_err(ProcessVectorError::SymbolAssets)?;
+    let atlas = load_symbol_assets(
+        client,
+        style,
+        data,
+        f64::from(overscaled_zoom.max(u8::from(coords.z))),
+    )
+    .await
+    .map_err(ProcessVectorError::SymbolAssets)?;
     let mut processor = source_processor::<T, C>(context, last_source);
     process_vector_tile_with_assets(
         data,
