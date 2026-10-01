@@ -17,7 +17,7 @@ mod curves;
 mod format;
 mod operators;
 
-pub use format::{FIELD, FORMATTED_START, SECTION};
+pub use format::{FIELD, FORMATTED_START, IMAGE_PLACEHOLDER, SECTION};
 pub use operators::is_expression;
 
 /// Why an expression could not be parsed, with the path of the offending element.

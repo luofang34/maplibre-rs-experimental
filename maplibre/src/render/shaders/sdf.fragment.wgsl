@@ -19,7 +19,7 @@ fn shade(in: VertexOutput, mode: u32) -> vec4<f32> {
     // Euclidean coverage keeps diagonal strokes as crisp as horizontal strokes.
     let derivative = max(0.84 * length(vec2<f32>(dpdx(distance), dpdy(distance))), 0.015);
     var color: vec4<f32>;
-    if in.kind == 1u {
+    if in.kind == 1u || in.kind == 3u {
         if mode == 1u { discard; }
         color = vec4<f32>(sample.rgb, sample.a);
     } else {

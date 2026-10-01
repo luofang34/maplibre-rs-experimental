@@ -1,7 +1,11 @@
 //! Line wrapping and glyph metrics around a symbol anchor.
-use std::{collections::HashMap, ops::Range};
+use std::ops::Range;
 
 use lyon::tessellation::VertexBuffers;
+
+mod styles;
+
+use styles::{char_styles, line_width, CharStyle};
 
 use super::{
     layout::{anchor_fractions, quad, CollectedSymbol},
@@ -17,22 +21,6 @@ use crate::{
 /// Index range of glyphs a `format` section colours, with the colour.
 pub(super) type TextColorRun = (Range<usize>, [f32; 4]);
 
-/// What one character of a label is drawn with.
-#[derive(Clone)]
-struct CharStyle<'a> {
-    scale: f32,
-    color: Option<[f32; 4]>,
-    glyphs: &'a HashMap<u32, AtlasEntry>,
-}
-
-impl CharStyle<'_> {
-    fn advance(&self, c: char) -> f32 {
-        self.glyphs
-            .get(&(c as u32))
-            .map_or(0.0, |glyph| glyph.metrics[2] * self.scale)
-    }
-}
-
 /// The wrapped lines of a label and where they sit around the anchor, in layout pixels.
 struct Block<'a> {
     chars: Vec<char>,
@@ -40,6 +28,10 @@ struct Block<'a> {
     lines: Vec<Range<usize>>,
     /// The largest scale of any character in each line, which sets the line's height.
     line_scales: Vec<f32>,
+    /// How far each line grows past its height to hold an image taller than its em box.
+    line_extras: Vec<f32>,
+    /// The height of the content of each line: its em box, or its tallest image.
+    line_contents: Vec<f32>,
     spacing: f32,
     line_height: f32,
     max_line: f32,
@@ -82,6 +74,22 @@ fn block<'a>(
                 .fold(1.0, f32::max)
         })
         .collect();
+    let tallest_image = |line: &Range<usize>| {
+        styles[line.clone()]
+            .iter()
+            .filter_map(|style| style.image.map(|(_, size, _)| size[1]))
+            .fold(0.0, f32::max)
+    };
+    let line_contents: Vec<f32> = lines
+        .iter()
+        .zip(&line_scales)
+        .map(|(line, largest)| (largest * 24.0).max(tallest_image(line)))
+        .collect();
+    let line_extras: Vec<f32> = lines
+        .iter()
+        .zip(&line_scales)
+        .map(|(line, largest)| (tallest_image(line) - largest * 24.0).max(0.0))
+        .collect();
     let anchors = variable_anchors(paint);
     let anchor = anchors.first().cloned().unwrap_or_else(|| {
         paint
@@ -100,11 +108,13 @@ fn block<'a>(
     };
     Some(Block {
         // Every line takes a full line height, with the glyphs centred in it.
-        height: line_scales.iter().sum::<f32>() * line_height,
+        height: line_scales.iter().sum::<f32>() * line_height + line_extras.iter().sum::<f32>(),
         chars,
         styles,
         lines,
         line_scales,
+        line_extras,
+        line_contents,
         spacing,
         line_height,
         max_line,
@@ -112,53 +122,6 @@ fn block<'a>(
         justify,
         offset: anchored_offset(paint, &anchors, &anchor, (&symbol.properties, zoom)),
     })
-}
-
-/// The glyphs a character is drawn from: its section's font where the atlas holds it, else
-/// the layer's.
-fn glyphs_for<'a>(
-    atlas: &'a SymbolAtlas,
-    paint: &SymbolPaint,
-    font: Option<&str>,
-) -> Option<&'a HashMap<u32, AtlasEntry>> {
-    font.and_then(|font| atlas.glyphs.get(font))
-        .or_else(|| atlas.glyphs.get(&paint.font_stack()))
-        .or_else(|| atlas.glyphs.values().next())
-}
-
-/// The style of each of the `count` characters of the label: its section's scale, colour and
-/// font, or the layer's own for text that is all one section.
-fn char_styles<'a>(
-    paint: &SymbolPaint,
-    symbol: &CollectedSymbol,
-    zoom: f64,
-    atlas: &'a SymbolAtlas,
-    count: usize,
-) -> Option<Vec<CharStyle<'a>>> {
-    let default = glyphs_for(atlas, paint, None)?;
-    let sections = paint.label_sections(&symbol.properties, zoom);
-    let mut styles = Vec::with_capacity(count);
-    for section in &sections {
-        let glyphs = glyphs_for(atlas, paint, section.font.as_deref()).unwrap_or(default);
-        styles.extend(std::iter::repeat_n(
-            CharStyle {
-                scale: section.scale.unwrap_or(1.0).max(0.0),
-                color: section.color,
-                glyphs,
-            },
-            section.length,
-        ));
-    }
-    styles.resize(
-        count,
-        CharStyle {
-            scale: 1.0,
-            color: None,
-            glyphs: default,
-        },
-    );
-    styles.truncate(count);
-    Some(styles)
 }
 
 /// How far the label moves, in layout pixels, when it takes each of its variable anchors
@@ -282,6 +245,101 @@ pub(super) fn append(
     laid
 }
 
+/// Where the quads of one label go and what they have recorded.
+struct Emitter<'a> {
+    buffer: &'a mut VertexBuffers<ShaderSymbolVertex, u32>,
+    anchor: geo_types::Point<f64>,
+    elevation: f32,
+    angle: f32,
+    rotation: f32,
+    /// Whether each quad is placed by its centre along a line.
+    along_line: bool,
+    centres: Vec<f32>,
+    colors: Vec<TextColorRun>,
+}
+
+impl Emitter<'_> {
+    /// Adds the quad of `entry` at `bounds`, placed along a line by the `centre` of its advance.
+    fn quad(&mut self, entry: &AtlasEntry, bounds: [f32; 4], centre: f32) {
+        quad(
+            self.buffer,
+            self.anchor,
+            bounds,
+            entry,
+            self.elevation,
+            self.angle,
+            self.rotation,
+        );
+        if self.along_line {
+            // The vertex carries where the centre lies in the straight layout, in 1/32 pixel.
+            let first = self.buffer.vertices.len() - 4;
+            for vertex in &mut self.buffer.vertices[first..] {
+                vertex.a_pixeloffset[0] = (centre * 32.0).round() as i32;
+            }
+            self.centres.push(centre);
+        }
+    }
+
+    /// Notes that the glyphs added since `first_index` have a colour of their own.
+    fn colour(&mut self, first_index: usize, color: [f32; 4]) {
+        let end = self.buffer.indices.len();
+        match self.colors.last_mut() {
+            Some((range, last)) if *last == color && range.end == first_index => range.end = end,
+            _ => self.colors.push((first_index..end, color)),
+        }
+    }
+}
+
+/// Adds the quads of the characters `line` holds, the first at `pen` on the line's `baseline`
+/// with the line's `content` height.
+fn place_line(
+    emit: &mut Emitter<'_>,
+    block: &Block<'_>,
+    line: Range<usize>,
+    (baseline, content): (f32, f32),
+    mut pen: f32,
+) {
+    for index in line {
+        let style = &block.styles[index];
+        if let Some((entry, size, hang)) = style.image {
+            // An image sits on the bottom of the line's content.
+            let (x, y) = (pen + hang[0], baseline + content - size[1] + hang[1]);
+            let entry = AtlasEntry {
+                kind: 3,
+                ..entry.clone()
+            };
+            emit.quad(
+                &entry,
+                [x, y, x + size[0], y + size[1]],
+                pen + size[0] / 2.0,
+            );
+            pen += size[0] + block.spacing;
+            continue;
+        }
+        let Some(glyph) = style.glyphs.get(&(block.chars[index] as u32)) else {
+            continue;
+        };
+        let scale = style.scale;
+        if glyph.rect[2] > 0 && glyph.rect[3] > 0 {
+            // Smaller glyphs of a line sit on its bottom, where the largest one does.
+            let x = pen + glyph.metrics[0] * scale;
+            let y = baseline - glyph.metrics[1] * scale + content - scale * 24.0;
+            let first_index = emit.buffer.indices.len();
+            let bounds = [
+                x,
+                y,
+                x + glyph.rect[2] as f32 * scale,
+                y + glyph.rect[3] as f32 * scale,
+            ];
+            emit.quad(glyph, bounds, pen + glyph.metrics[2] * scale / 2.0);
+            if let Some(color) = style.color {
+                emit.colour(first_index, color);
+            }
+        }
+        pen += glyph.metrics[2] * scale + block.spacing;
+    }
+}
+
 fn glyph_pass(
     symbol: &CollectedSymbol,
     paint: &SymbolPaint,
@@ -290,88 +348,47 @@ fn glyph_pass(
     justify: f32,
     buffer: &mut VertexBuffers<ShaderSymbolVertex, u32>,
 ) -> (Vec<f32>, Vec<TextColorRun>) {
-    let Block {
-        chars,
-        styles,
-        lines,
-        line_scales,
-        spacing,
-        line_height,
-        max_line,
-        height,
-        fractions,
-        offset,
-        ..
-    } = block;
-    let (spacing, line_height, max_line, height) = (*spacing, *line_height, *max_line, *height);
-    let mut centres = Vec::new();
-    let mut colors: Vec<TextColorRun> = Vec::new();
-    let half_leading = (line_height - 24.0) / 2.0;
-    let elevation = if paint.uses_shared_height() {
-        0.0
-    } else {
-        paint.height_offset("text", &symbol.properties, zoom)
-    };
     let shift = crate::sdf::translation::tile_translation(paint, "text", zoom);
-    let anchor = geo_types::Point::new(symbol.anchor.x() + shift[0], symbol.anchor.y() + shift[1]);
-    let follows_line = crate::sdf::paint::text_follows_line(paint, zoom);
-    let rotation = paint
-        .number("text-rotate", &symbol.properties, zoom, 0.0)
-        .to_radians();
+    let mut emit = Emitter {
+        buffer,
+        anchor: geo_types::Point::new(symbol.anchor.x() + shift[0], symbol.anchor.y() + shift[1]),
+        elevation: if paint.uses_shared_height() {
+            0.0
+        } else {
+            paint.height_offset("text", &symbol.properties, zoom)
+        },
+        angle: symbol.angle,
+        rotation: paint
+            .number("text-rotate", &symbol.properties, zoom, 0.0)
+            .to_radians(),
+        along_line: symbol.line.is_some() && crate::sdf::paint::text_follows_line(paint, zoom),
+        centres: Vec::new(),
+        colors: Vec::new(),
+    };
+    let half_leading = (block.line_height - 24.0) / 2.0;
+    let grown = block.line_extras.iter().any(|extra| *extra > 0.0);
     let mut line_top = 0.0;
-    for (line, largest) in lines.iter().zip(line_scales) {
-        let baseline = -height * fractions[1] + half_leading * largest - 5.0 + line_top + offset[1];
-        line_top += line_height * largest;
-        let width = line_width(chars, styles, line.clone(), spacing);
-        let mut pen = -max_line * fractions[0] + (max_line - width) * justify + offset[0];
-        for index in line.clone() {
-            let style = &styles[index];
-            let Some(glyph) = style.glyphs.get(&(chars[index] as u32)) else {
-                continue;
-            };
-            let scale = style.scale;
-            if glyph.rect[2] > 0 && glyph.rect[3] > 0 {
-                // Smaller glyphs of a line sit on its bottom, where the largest one does.
-                let x = pen + glyph.metrics[0] * scale;
-                let y = baseline - glyph.metrics[1] * scale + (largest - scale) * 24.0;
-                let first_index = buffer.indices.len();
-                quad(
-                    buffer,
-                    anchor,
-                    [
-                        x,
-                        y,
-                        x + glyph.rect[2] as f32 * scale,
-                        y + glyph.rect[3] as f32 * scale,
-                    ],
-                    glyph,
-                    elevation,
-                    symbol.angle,
-                    rotation,
-                );
-                if let Some(color) = style.color {
-                    match colors.last_mut() {
-                        Some((range, last)) if *last == color && range.end == first_index => {
-                            range.end = buffer.indices.len();
-                        }
-                        _ => colors.push((first_index..buffer.indices.len(), color)),
-                    }
-                }
-                if symbol.line.is_some() && follows_line {
-                    // A glyph along a line is placed by its centre: the vertex carries where
-                    // that centre lies in the straight layout, in 1/32 pixel.
-                    let centre = pen + glyph.metrics[2] * scale / 2.0;
-                    let first = buffer.vertices.len() - 4;
-                    for vertex in &mut buffer.vertices[first..] {
-                        vertex.a_pixeloffset[0] = (centre * 32.0).round() as i32;
-                    }
-                    centres.push(centre);
-                }
-            }
-            pen += glyph.metrics[2] * scale + spacing;
-        }
+    for (index, line) in block.lines.iter().enumerate() {
+        let (largest, extra, content) = (
+            block.line_scales[index],
+            block.line_extras[index],
+            block.line_contents[index],
+        );
+        // A block with a line taller than the line height is aligned by its whole height alone.
+        let leading = if grown {
+            0.0
+        } else {
+            half_leading * largest - 5.0
+        };
+        let baseline = -block.height * block.fractions[1] + leading + line_top + block.offset[1];
+        line_top += block.line_height * largest + extra;
+        let width = line_width(&block.chars, &block.styles, line.clone(), block.spacing);
+        let pen = -block.max_line * block.fractions[0]
+            + (block.max_line - width) * justify
+            + block.offset[0];
+        place_line(&mut emit, block, line.clone(), (baseline, content), pen);
     }
-    (centres, colors)
+    (emit.centres, emit.colors)
 }
 
 /// Width in layout pixels of the label on one line, without wrapping; zero without glyphs.
@@ -390,20 +407,6 @@ pub(super) fn unwrapped_width(
     };
     let spacing = paint.number("text-letter-spacing", &symbol.properties, zoom, 0.0) * 24.0;
     line_width(&chars, &styles, 0..chars.len(), spacing)
-}
-
-/// Width of a line of glyphs without the spacing after the last one. Tight letter spacing
-/// makes it negative, which justifies the line as GL JS does; a line without glyphs has none.
-fn line_width(chars: &[char], styles: &[CharStyle<'_>], line: Range<usize>, spacing: f32) -> f32 {
-    let advances: Vec<f32> = line
-        .filter(|index| styles[*index].glyphs.contains_key(&(chars[*index] as u32)))
-        .map(|index| styles[index].advance(chars[index]) + spacing)
-        .collect();
-    if advances.is_empty() {
-        0.0
-    } else {
-        advances.iter().sum::<f32>() - spacing
-    }
 }
 
 #[cfg(test)]

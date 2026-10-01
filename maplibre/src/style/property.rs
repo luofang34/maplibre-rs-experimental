@@ -149,6 +149,8 @@ pub struct TextSection {
     pub color: Option<[f32; 4]>,
     /// Font stack, comma-joined, that replaces the layer's.
     pub font: Option<String>,
+    /// The image the run is, drawn in the line of text in place of a character.
+    pub image: Option<String>,
 }
 
 /// The text of a symbol: a `{token}` template, a literal, or an expression producing text, in
@@ -183,8 +185,9 @@ impl TextField {
             .split(FORMAT_SECTION)
             .filter(|section| !section.is_empty())
         {
-            let mut fields = section.splitn(4, FORMAT_FIELD);
-            let (scale, color, font, content) = (
+            let mut fields = section.splitn(5, FORMAT_FIELD);
+            let (scale, color, font, content, image) = (
+                fields.next().unwrap_or_default(),
                 fields.next().unwrap_or_default(),
                 fields.next().unwrap_or_default(),
                 fields.next().unwrap_or_default(),
@@ -201,10 +204,14 @@ impl TextField {
                     .ok()
                     .filter(|fonts| !fonts.is_empty())
                     .map(|fonts| fonts.join(",")),
+                image: (!image.is_empty()).then(|| image.to_owned()),
             });
         }
         if sections.iter().all(|section| {
-            section.scale.is_none() && section.color.is_none() && section.font.is_none()
+            section.scale.is_none()
+                && section.color.is_none()
+                && section.font.is_none()
+                && section.image.is_none()
         }) {
             return Self::plain(plain);
         }

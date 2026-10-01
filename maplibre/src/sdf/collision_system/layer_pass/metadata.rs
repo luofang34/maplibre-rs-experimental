@@ -41,7 +41,7 @@ pub(super) fn write_feature_metadata(
             .indices
             .get(index)
             .and_then(|index| layer.buffer.buffer.vertices.get(*index as usize))
-            .map_or(0, |vertex| usize::from(vertex.a_data[2] != 0));
+            .map_or(0, |vertex| usize::from(matches!(vertex.a_data[2], 1 | 2)));
         if let Some(vertex) = layer
             .buffer
             .buffer

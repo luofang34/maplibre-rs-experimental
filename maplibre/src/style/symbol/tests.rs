@@ -97,3 +97,23 @@ fn a_format_inside_a_match_keeps_its_sections() {
     assert_eq!(paint.label(&properties, 0.0).as_deref(), Some("GreenTwo"));
     assert_eq!(paint.label_sections(&properties, 0.0).len(), 2);
 }
+
+#[test]
+fn an_image_in_a_format_is_a_placeholder_character_with_its_own_section() {
+    let paint: SymbolPaint = serde_json::from_value(serde_json::json!({
+        "text-field": ["format", "Stop ", {}, ["image", "bus"], {"font-scale": 2.0}]
+    }))
+    .expect("paint");
+    let properties = FeatureProperties::new();
+    let sections = paint.label_sections(&properties, 0.0);
+
+    assert_eq!(
+        paint.label(&properties, 0.0).as_deref(),
+        Some("Stop \u{e000}")
+    );
+    assert_eq!(sections.len(), 2);
+    assert_eq!(sections[0].image, None);
+    assert_eq!(sections[1].image.as_deref(), Some("bus"));
+    assert_eq!(sections[1].scale, Some(2.0));
+    assert_eq!(sections[1].length, 1);
+}

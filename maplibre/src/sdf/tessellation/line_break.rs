@@ -17,7 +17,10 @@ fn is_whitespace(c: char) -> bool {
 fn breakable(c: char) -> bool {
     matches!(
         c,
-        '\n' | ' '
+        // An image in text may be followed by a break.
+        crate::style::expression::FORMAT_IMAGE
+            | '\n'
+            | ' '
             | '&'
             | ')'
             | '+'

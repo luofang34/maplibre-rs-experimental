@@ -11,8 +11,10 @@ use serde_json::{json, Value as Json};
 pub const FORMATTED_START: char = '\u{1}';
 /// Starts each section.
 pub const SECTION: char = '\u{2}';
-/// Separates the fields of a section: font scale, colour, font stack, text.
+/// Separates the fields of a section: font scale, colour, font stack, text, image name.
 pub const FIELD: char = '\u{3}';
+/// The character that stands for an image in the text of a section.
+pub const IMAGE_PLACEHOLDER: char = '\u{E000}';
 
 /// The expression a `format` with these arguments stands for, or what is wrong with them.
 pub(super) fn lower(args: &[Json]) -> Result<Json, String> {
@@ -22,9 +24,10 @@ pub(super) fn lower(args: &[Json]) -> Result<Json, String> {
     let mut parts = vec![json!("concat"), json!(FORMATTED_START.to_string())];
     let mut rest = args;
     while let Some((content, after)) = rest.split_first() {
-        if content.is_array_with_operator("image") {
-            return Err("Images in formatted text are not supported.".to_owned());
-        }
+        let image = content
+            .is_array_with_operator("image")
+            .then(|| content.get(1).cloned())
+            .flatten();
         let (options, after) = match after.split_first() {
             Some((Json::Object(options), after)) => (Some(options), after),
             _ => (None, after),
@@ -43,7 +46,13 @@ pub(super) fn lower(args: &[Json]) -> Result<Json, String> {
             FIELD.to_string(),
             field("text-font"),
             FIELD.to_string(),
-            ["to-string", content],
+            if image.is_some() {
+                json!(IMAGE_PLACEHOLDER.to_string())
+            } else {
+                json!(["to-string", content])
+            },
+            FIELD.to_string(),
+            image.map_or_else(|| json!(""), |name| json!(["to-string", name])),
         ]));
         rest = after;
     }

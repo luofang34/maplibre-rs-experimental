@@ -185,10 +185,11 @@ fn requests(style: &Style, data: &[u8], zoom: f64) -> (GlyphRequests, HashSet<St
                 }
             }
             if let Some(text) = paint.label(&properties, zoom) {
-                fonts
-                    .entry(paint.font_stack())
-                    .or_default()
-                    .extend(text.chars().map(|c| c as u32));
+                fonts.entry(paint.font_stack()).or_default().extend(
+                    text.chars()
+                        .filter(|c| *c != crate::style::expression::FORMAT_IMAGE)
+                        .map(|c| c as u32),
+                );
             }
             if let Some(icon) = paint
                 .text("icon-image", &properties, zoom)
@@ -198,6 +199,12 @@ fn requests(style: &Style, data: &[u8], zoom: f64) -> (GlyphRequests, HashSet<St
             }
             // An `image` expression may fall through to any image it names.
             icons.extend(paint.icon_image_names());
+            icons.extend(
+                paint
+                    .label_sections(&properties, zoom)
+                    .into_iter()
+                    .filter_map(|section| section.image),
+            );
         }
     }
     (fonts, icons)

@@ -25,7 +25,7 @@ pub use legacy::{
 };
 pub use parse::{
     is_expression, ParseError, FEATURE_STATE_PREFIX, FIELD as FORMAT_FIELD, FORMATTED_START,
-    SECTION as FORMAT_SECTION,
+    IMAGE_PLACEHOLDER as FORMAT_IMAGE, SECTION as FORMAT_SECTION,
 };
 use parse::{Annotation, Parser};
 pub use value::{js_number, Color, Type, Value};

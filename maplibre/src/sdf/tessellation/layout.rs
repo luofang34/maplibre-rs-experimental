@@ -155,6 +155,23 @@ pub(super) fn append(
     }
     // Text collides by the box of its lines, not by the bitmaps of its glyphs, which reach
     // a few pixels beyond it.
+    // A label of images alone has no glyphs to measure, so its box is the layout's.
+    if parts[0].is_none() && symbol.line.is_none() {
+        let image = buffer.vertices[first_vertex..]
+            .iter()
+            .find(|vertex| vertex.a_data[2] == 3);
+        if let (Some(vertex), Some(extent)) = (
+            image,
+            super::text_layout::extent(symbol, paint, zoom, atlas),
+        ) {
+            parts[0] = Some(crate::sdf::placement_geometry::SymbolBounds {
+                bounds: extent.map(f64::from),
+                height: f64::from(f32::from_bits(vertex.a_pixeloffset[2] as u32)),
+                angle: f64::from(f32::from_bits(vertex.a_pixeloffset[3] as u32)),
+                text: true,
+            });
+        }
+    }
     if let (Some(text_part), None) = (&mut parts[0], &symbol.line) {
         if let Some([left, top, right, bottom]) =
             super::text_layout::extent(symbol, paint, zoom, atlas)
@@ -347,7 +364,7 @@ fn bounds(
     );
     for index in indices {
         let vertex = &vertices[*index as usize];
-        let scale = if vertex.a_data[2] == 0 {
+        let scale = if matches!(vertex.a_data[2], 0 | 3) {
             text_size / 24.0
         } else {
             icon_size

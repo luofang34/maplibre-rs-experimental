@@ -57,7 +57,8 @@ fn main(
     @location(15) style_metrics: vec4<f32>,
 ) -> VertexOutput {
     let has_pose = pose.w > 0.5;
-    let is_text = a_data.z == 0u;
+    // An image in text (kind three) is laid out with the text and drawn as an icon.
+    let is_text = a_data.z == 0u || a_data.z == 3u;
     let metrics = style_metrics;
     let alignment = select(symbol.icon_layout, symbol.text_layout, is_text);
     let anchor = vec2<f32>(a_pos_offset.xy) + select(vec2<f32>(0.0), pose.xy, has_pose);
