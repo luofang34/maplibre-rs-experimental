@@ -66,7 +66,11 @@ fn main(in: FragmentInput) -> Output {
     if dash_period.y > 1.5 {
         let width_px = max(in.dash.y, 1e-6);
         let along = fract(in.dash.x * width_px / dash_period.z * dash_period.w / width_px);
-        let texel = textureSample(ramp_texture, ramp_sampler, vec2<f32>(along, 0.5 * in.across + 0.5));
+        // The image spans the pattern less a texel of its own edge on every side, as GL JS
+        // pads each image in its atlas.
+        let dimensions = vec2<f32>(textureDimensions(ramp_texture));
+        let uv = (vec2<f32>(along, 0.5 - 0.5 * in.across) * (dimensions + vec2<f32>(2.0)) - vec2<f32>(1.0)) / dimensions;
+        let texel = textureSample(ramp_texture, ramp_sampler, uv);
         let pattern_coverage = texel.a * in.v_color.a * alpha;
         if pattern_coverage < 0.01 { discard; }
         // The pattern is premultiplied, so filtering does not fringe its edges; blending
