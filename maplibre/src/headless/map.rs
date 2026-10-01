@@ -520,7 +520,18 @@ impl HeadlessMap {
 }
 
 fn initial_view_state(window_size: crate::window::PhysicalSize, style: &Style) -> ViewState {
-    let zoom = Zoom::new(style.zoom.unwrap_or_default());
+    // The flat world may not be smaller than the viewport is tall, as GL JS constrains the zoom;
+    // a globe may be seen whole.
+    let globe = style
+        .projection
+        .as_ref()
+        .is_some_and(|specification| specification.projection_type.uses_globe_rendering(0.0));
+    let lowest_zoom = if globe {
+        f64::NEG_INFINITY
+    } else {
+        (f64::from(window_size.height()) / crate::coords::TILE_SIZE).log2()
+    };
+    let zoom = Zoom::new(style.zoom.unwrap_or_default().max(lowest_zoom));
     let center = style.center.unwrap_or_default();
     let center = WorldCoords::from_lat_lon(LatLon::new(center[1], center[0]), zoom);
     let mut view_state = ViewState::new(

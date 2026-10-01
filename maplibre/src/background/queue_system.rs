@@ -102,6 +102,11 @@ pub fn queue_system(
             if layer.type_ != "background" || !layer.is_visible_at(view_state.zoom().value()) {
                 continue;
             }
+            // Under terrain the drape of each terrain tile carries the background, so nothing
+            // paints outside the world.
+            if style.terrain.is_some() && !uses_globe {
+                continue;
+            }
             // A layer that names an image it does not have draws nothing, not its colour.
             if crate::vector::pattern::names_missing_image(
                 layer.paint.as_ref(),
