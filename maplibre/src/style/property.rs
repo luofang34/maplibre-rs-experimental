@@ -158,11 +158,11 @@ pub struct TextSection {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TextField(pub String, pub Vec<TextSection>);
 
-/// A text field is written as its plain text; sections exist only in the expression that makes
-/// them.
+/// A text field with sections is written in the lowered form `decode` reads back, so a layer
+/// that is serialized and parsed again keeps its sections.
 impl Serialize for TextField {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&self.0)
+        serializer.serialize_str(&self.encode())
     }
 }
 
@@ -170,6 +170,38 @@ impl TextField {
     /// A text that is all one section.
     pub fn plain(text: impl Into<String>) -> Self {
         Self(text.into(), Vec::new())
+    }
+
+    fn encode(&self) -> String {
+        use crate::style::expression::{FORMATTED_START, FORMAT_FIELD, FORMAT_SECTION};
+
+        if self.1.is_empty() {
+            return self.0.clone();
+        }
+        let mut encoded = FORMATTED_START.to_string();
+        let mut characters = self.0.chars();
+        for section in &self.1 {
+            let content: String = characters.by_ref().take(section.length).collect();
+            let color = section.color.map_or_else(String::new, |[r, g, b, a]| {
+                csscolorparser::Color::new(r.into(), g.into(), b.into(), a.into()).to_hex_string()
+            });
+            let font = section.font.as_ref().map_or_else(String::new, |font| {
+                serde_json::to_string(&font.split(',').collect::<Vec<_>>()).unwrap_or_default()
+            });
+            encoded.push(FORMAT_SECTION);
+            encoded.push_str(
+                &section
+                    .scale
+                    .map_or_else(String::new, |scale| scale.to_string()),
+            );
+            for field in [&color, &font, &content] {
+                encoded.push(FORMAT_FIELD);
+                encoded.push_str(field);
+            }
+            encoded.push(FORMAT_FIELD);
+            encoded.push_str(section.image.as_deref().unwrap_or_default());
+        }
+        encoded
     }
 
     /// Reads the text a `format` expression lowered to, or a plain string as it is.

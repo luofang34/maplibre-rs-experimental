@@ -251,8 +251,14 @@ pub(super) fn apply(
                 };
                 let mut replacement = replacement;
                 crate::tilesets::resolve_sources(&mut replacement)?;
-                *style = serde_json::from_value(replacement)
+                let mut replaced: Style = serde_json::from_value(replacement)
                     .map_err(|error| format!("setStyle: invalid style: {error}"))?;
+                // A style that does not place the camera leaves it where it is.
+                replaced.center = replaced.center.or(style.center);
+                replaced.zoom = replaced.zoom.or(style.zoom);
+                replaced.bearing = replaced.bearing.or(style.bearing);
+                replaced.pitch = replaced.pitch.or(style.pitch);
+                *style = replaced;
                 Ok(())
             }
             ("setPaintProperty", Some(layer)) => text(2)

@@ -117,3 +117,28 @@ fn an_image_in_a_format_is_a_placeholder_character_with_its_own_section() {
     assert_eq!(sections[1].scale, Some(2.0));
     assert_eq!(sections[1].length, 1);
 }
+
+#[test]
+fn a_formatted_text_field_survives_serialization() {
+    let layer: crate::style::layer::StyleLayer = serde_json::from_value(serde_json::json!({
+        "id": "text", "type": "symbol", "source": "s",
+        "layout": {"text-field": ["format", "Blue", {"text-color": "blue", "font-scale": 1.5}, "\n", {}, "Orange", {}]}
+    }))
+    .expect("layer parses");
+    let again: crate::style::layer::StyleLayer =
+        serde_json::from_str(&serde_json::to_string(&layer).expect("layer serializes"))
+            .expect("layer parses again");
+    assert_eq!(
+        serde_json::to_value(&layer).expect("value"),
+        serde_json::to_value(&again).expect("value")
+    );
+    let sections = |layer: &crate::style::layer::StyleLayer| match &layer.paint {
+        Some(crate::style::layer::LayerPaint::Symbol(paint)) => paint
+            .text_field
+            .as_ref()
+            .and_then(|field| field.evaluate_at_zoom(0.0)),
+        _ => None,
+    };
+    assert_eq!(sections(&layer), sections(&again));
+    assert!(sections(&again).is_some_and(|field| field.1.len() == 3));
+}
