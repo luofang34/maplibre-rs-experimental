@@ -165,17 +165,43 @@ impl LineDashResources {
     }
 }
 
-fn normalize_pattern(mut pattern: Vec<f64>) -> Vec<f64> {
-    if pattern.iter().any(|v| !v.is_finite() || *v < 0.0) {
+/// The pattern as GL JS's line atlas reads it: an odd-length array joins its last dash to its
+/// first, and a gap of zero length joins the dashes either side of it, so a pattern with no
+/// real gap is a solid line.
+fn normalize_pattern(pattern: Vec<f64>) -> Vec<f64> {
+    if pattern.iter().any(|v| !v.is_finite() || *v < 0.0) || pattern.len() < 2 {
         return Vec::new();
     }
-    if !pattern.len().is_multiple_of(2) {
-        pattern.extend_from_within(..);
+    let mut parts = pattern;
+    if parts.len() % 2 == 1 {
+        let last = parts.pop().unwrap_or(0.0);
+        parts[0] += last;
     }
-    if pattern.iter().sum::<f64>() <= 0.0 {
-        pattern.clear();
+    let mut merged = vec![parts[0]];
+    for pair in parts[1..].chunks(2) {
+        match pair {
+            [gap, dash] if *gap == 0.0 => {
+                if let Some(last) = merged.last_mut() {
+                    *last += dash;
+                }
+            }
+            [gap, dash] => merged.extend([*gap, *dash]),
+            [gap] if *gap > 0.0 => merged.push(*gap),
+            _ => {}
+        }
     }
-    pattern
+    if merged.len() % 2 == 1 {
+        if merged.len() == 1 {
+            return Vec::new();
+        }
+        // The pattern ended on a dash that the first one continues.
+        let last = merged.pop().unwrap_or(0.0);
+        merged[0] += last;
+    }
+    if merged.iter().sum::<f64>() <= 0.0 {
+        merged.clear();
+    }
+    merged
 }
 
 fn dash_pixels(pattern: &[f64]) -> (Vec<u8>, f32) {

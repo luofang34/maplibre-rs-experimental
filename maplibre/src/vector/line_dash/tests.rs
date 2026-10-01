@@ -14,11 +14,12 @@ fn dash_distance_texture_contains_on_and_off_intervals_at_the_declared_ratio() {
     assert!(pixels[4 * 210] < 128);
 }
 #[test]
-fn odd_patterns_repeat_with_alternating_gaps_and_invalid_patterns_are_solid() {
-    assert_eq!(
-        normalize_pattern(vec![2.0, 1.0, 3.0]),
-        [2.0, 1.0, 3.0, 2.0, 1.0, 3.0]
-    );
+fn odd_patterns_join_their_end_dashes_and_zero_gaps_join_dashes() {
+    assert_eq!(normalize_pattern(vec![2.0, 1.0, 3.0]), [5.0, 1.0]);
+    assert_eq!(normalize_pattern(vec![1.0, 1.0, 0.0]), [1.0, 1.0]);
+    assert_eq!(normalize_pattern(vec![1.0, 0.0, 1.0, 1.0]), [2.0, 1.0]);
+    assert!(normalize_pattern(vec![1.0, 0.0, 1.0]).is_empty());
+    assert!(normalize_pattern(vec![1.0, 0.0]).is_empty());
     assert!(normalize_pattern(vec![-1.0, 2.0]).is_empty());
     assert!(normalize_pattern(vec![0.0, 0.0]).is_empty());
 }
