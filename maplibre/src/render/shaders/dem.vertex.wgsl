@@ -7,6 +7,8 @@ struct VertexOutput {
     @location(2) mercator_y: f32,
     // Zoom of the tile the texture belongs to.
     @location(3) zoom: f32,
+    // How far the view has moved from the Mercator plane to the globe.
+    @location(4) transition: f32,
     @builtin(position) clip_position: vec4<f32>,
 };
 
@@ -41,6 +43,7 @@ fn main(
         projected.horizon_distance,
         mercator_y,
         zoom,
+        projection.transition_and_padding.x,
         projected.clip_position,
     );
 }

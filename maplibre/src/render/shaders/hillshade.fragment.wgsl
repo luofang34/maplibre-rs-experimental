@@ -3,6 +3,7 @@ struct VertexOutput {
     @location(1) horizon_distance: f32,
     @location(2) mercator_y: f32,
     @location(3) zoom: f32,
+    @location(4) transition: f32,
     @builtin(position) position: vec4<f32>,
 };
 
@@ -161,9 +162,9 @@ fn main(in: VertexOutput) -> @location(0) vec4<f32> {
     ) * tile_size / pow(2.0, exaggeration + (28.2562 - zoom));
     deriv = clamp(deriv, vec2<f32>(-4.0, -4.0), vec2<f32>(4.0, 4.0));
 
-    // The Mercator projection stretches distances with latitude.
+    // The Mercator projection stretches distances with latitude; the globe does not.
     let latitude = atan(sinh(PI * (1.0 - 2.0 * in.mercator_y)));
-    deriv = deriv / cos(latitude);
+    deriv = deriv / mix(cos(latitude), 1.0, in.transition);
 
     switch hillshade.method {
         case BASIC: {
