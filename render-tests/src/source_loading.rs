@@ -164,7 +164,7 @@ fn load_geojson_blocking(
                 layers.to_vec(),
                 *coords,
                 projection.clone(),
-                (atlas, magnified),
+                (atlas, magnified, source.buffer),
             )
             .map_err(|error| format!("Cannot process GeoJSON source '{name}': {error}"))?,
         );

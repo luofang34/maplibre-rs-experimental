@@ -371,7 +371,10 @@ where
     }
 
     fn tessellate_extrusion(&mut self, options: &ExtrusionOptions) -> GeoResult<()> {
-        let path = self.path_builder.replace(Path::builder()).build();
+        let mut path = self.path_builder.replace(Path::builder()).build();
+        if let Some(buffer) = options.clip_buffer {
+            path = extrusion::clipped(&path, buffer);
+        }
         let evaluate = |property: &Option<crate::style::layer::StyleProperty<f32>>| {
             property
                 .as_ref()

@@ -208,6 +208,9 @@ pub struct GeoJsonTileRequest {
     /// The zoom the tile is drawn at when that is past the source's last zoom, so its geometry
     /// is magnified; zero when the tile is drawn at its own zoom.
     pub overscaled_zoom: u8,
+    /// Pixels of a 512-pixel tile that the geometry extends past the tile's edge, when the source
+    /// sets it; without it the polygons of an extrusion are not clipped to the tile.
+    pub buffer: Option<u32>,
 }
 
 impl GeoJsonTileRequest {
@@ -370,7 +373,12 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
                         }),
                     LayerPaint::FillExtrusion(extrusion) => {
                         let tessellator = ZeroTessellator::<IndexDataType>::default()
-                            .with_extrusion(ExtrusionOptions::for_paint(extrusion));
+                            .with_extrusion(ExtrusionOptions {
+                                clip_buffer: request.buffer.map(|buffer| {
+                                    buffer as f32 * crate::coords::EXTENT as f32 / 512.0
+                                }),
+                                ..ExtrusionOptions::for_paint(extrusion)
+                            });
                         if use_globe_geometry {
                             // Roofs and the edges of walls follow the sphere as fills and lines do.
                             let last_tile =

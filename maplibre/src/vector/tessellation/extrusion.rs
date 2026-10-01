@@ -26,6 +26,9 @@ pub struct ExtrusionOptions {
     pub height: Option<StyleProperty<f32>>,
     /// Wall base in metres.
     pub base: Option<StyleProperty<f32>>,
+    /// Tile units past the tile's edge to which the polygons are clipped, for geometry that is
+    /// not clipped already; a vector tile's polygons are.
+    pub clip_buffer: Option<f32>,
 }
 
 impl ExtrusionOptions {
@@ -34,6 +37,7 @@ impl ExtrusionOptions {
         Self {
             height: paint.fill_extrusion_height.clone(),
             base: paint.fill_extrusion_base.clone(),
+            clip_buffer: None,
         }
     }
 }
@@ -51,6 +55,9 @@ impl FillVertexConstructor<ShaderVertex> for RoofVertex {
         output
     }
 }
+
+/// The longest distance along a ring in tile units before it starts over, as GL JS stores it.
+const MAX_EDGE_DISTANCE: f32 = 32768.0 / 2.0;
 
 type Ring = Vec<[f32; 2]>;
 
@@ -105,6 +112,63 @@ fn on_clipped_edge(a: [f32; 2], b: [f32; 2]) -> bool {
     let extent = EXTENT as f32;
     (a[0] == b[0] && (a[0] < 0.0 || a[0] > extent))
         || (a[1] == b[1] && (a[1] < 0.0 || a[1] > extent))
+}
+
+/// `ring` cut to the square from `low` to `high` on both axes, one edge of the square at a time.
+fn clip_ring(ring: &Ring, (low, high): (f32, f32)) -> Ring {
+    let mut clipped = ring.clone();
+    for axis in 0..2 {
+        for keep_above in [true, false] {
+            let bound = if keep_above { low } else { high };
+            let inside = |point: &[f32; 2]| {
+                if keep_above {
+                    point[axis] >= bound
+                } else {
+                    point[axis] <= bound
+                }
+            };
+            let mut next = Ring::new();
+            for (a, b) in clipped.iter().zip(clipped.iter().cycle().skip(1)) {
+                if inside(a) {
+                    next.push(*a);
+                }
+                if inside(a) != inside(b) {
+                    let t = (bound - a[axis]) / (b[axis] - a[axis]);
+                    let mut crossing = [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])];
+                    crossing[axis] = bound;
+                    next.push(crossing);
+                }
+            }
+            clipped = next;
+        }
+    }
+    clipped
+}
+
+/// `path` with each ring clipped to `buffer` tile units past the tile and wound the way a
+/// GeoJSON source winds them, outer rings counterclockwise on the map and holes the other way;
+/// a ring left with no area is dropped. The wall distance of a pattern runs along that winding.
+pub(super) fn clipped(path: &Path, buffer: f32) -> Path {
+    let bounds = (-buffer, EXTENT as f32 + buffer);
+    let rings: Vec<Ring> = rings(path)
+        .iter()
+        .map(|ring| clip_ring(ring, bounds))
+        .filter(|ring| ring.len() >= 3 && signed_area(ring) != 0.0)
+        .collect();
+    let mut builder = Path::builder();
+    for (index, ring) in rings.iter().enumerate() {
+        let counterclockwise = signed_area(ring) < 0.0;
+        let mut ring = ring.clone();
+        if counterclockwise == is_hole(index, &rings) {
+            ring[1..].reverse();
+        }
+        builder.begin(lyon::math::point(ring[0][0], ring[0][1]));
+        for point in &ring[1..] {
+            builder.line_to(lyon::math::point(point[0], point[1]));
+        }
+        builder.end(true);
+    }
+    builder.build()
 }
 
 fn push_wall<I: From<VertexId>>(
@@ -178,9 +242,17 @@ where
         for (a, b) in ring.iter().zip(ring.iter().cycle().skip(1)) {
             let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
             let length = dx.hypot(dy);
+            // The distance along the ring counts only the walls drawn, and starts over before it
+            // outgrows what GL JS stores.
+            if on_clipped_edge(*a, *b) {
+                continue;
+            }
+            if travelled + length > MAX_EDGE_DISTANCE {
+                travelled = 0.0;
+            }
             let start = travelled;
             travelled += length;
-            if length == 0.0 || on_clipped_edge(*a, *b) {
+            if length == 0.0 {
                 continue;
             }
             let normal = [facing * dy / length, -facing * dx / length];

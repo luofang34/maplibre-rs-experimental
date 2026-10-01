@@ -1,7 +1,7 @@
 #![allow(clippy::expect_used, clippy::panic)]
 use lyon::{math::point, path::Path, tessellation::VertexBuffers};
 
-use super::extrude;
+use super::{clipped, extrude, rings};
 use crate::render::ShaderVertex;
 
 fn square(builder: &mut lyon::path::path::Builder, [x0, y0, x1, y1]: [f32; 4]) {
@@ -96,4 +96,23 @@ fn a_hole_gets_walls_facing_the_other_way() {
 fn walls_along_the_clipped_edge_of_a_tile_are_left_out() {
     let buffer = extruded(&[[-200.0, 0.0, -100.0, 100.0]]);
     assert_eq!(walls(&buffer).len(), 8);
+}
+
+#[test]
+fn clipping_keeps_a_polygon_inside_the_buffer() {
+    use lyon::math::point;
+    let mut builder = Path::builder();
+    builder.begin(point(3201.0, 3201.0));
+    for corner in [
+        (3201.0, 4991.0),
+        (4991.0, 4991.0),
+        (4991.0, 3201.0),
+        (3201.0, 3201.0),
+    ] {
+        builder.line_to(point(corner.0, corner.1));
+    }
+    builder.end(true);
+    let clipped = clipped(&builder.build(), 1024.0);
+    let ring = &rings(&clipped)[0];
+    assert_eq!(ring.len(), 5, "{ring:?}");
 }

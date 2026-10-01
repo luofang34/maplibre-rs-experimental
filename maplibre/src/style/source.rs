@@ -57,6 +57,10 @@ pub struct GeoJsonSource {
     /// Upper zoom the source is tiled at; deeper views overzoom it. GL JS defaults to 18.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub maxzoom: Option<u8>,
+    /// Pixels of a 512-pixel tile that the geometry of a tile extends past its edge. GL JS
+    /// defaults to 128.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub buffer: Option<u32>,
     /// Lower source zoom; nothing is tiled below it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub minzoom: Option<u8>,
