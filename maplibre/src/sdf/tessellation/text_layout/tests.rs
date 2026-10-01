@@ -30,6 +30,8 @@ fn letter_spacing_is_between_glyphs_and_does_not_shift_centered_text() {
         anchor: geo_types::Point::new(100., 100.),
         properties: Default::default(),
         angle: 0.,
+        vertical: None,
+        fallback: false,
     };
     let mut buffer = VertexBuffers::new();
     append(&symbol, &paint, 12., &atlas, &mut buffer);
@@ -81,6 +83,8 @@ fn label_top(anchor: &str, field: &str) -> i32 {
         anchor: geo_types::Point::new(100., 100.),
         properties: Default::default(),
         angle: 0.,
+        vertical: None,
+        fallback: false,
     };
     let mut buffer = VertexBuffers::new();
     append(&symbol, &paint, 12., &atlas, &mut buffer);

@@ -47,6 +47,7 @@ fn label(id: u64, sort_key: f32, at: [f32; 2]) -> Feature {
         text_sets: Vec::new(),
         anchor_sets: Vec::new(),
         text_colors: Vec::new(),
+        fallback: false,
         str: format!("label {id}"),
         line: None,
     }

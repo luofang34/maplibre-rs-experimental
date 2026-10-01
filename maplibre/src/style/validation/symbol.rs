@@ -21,6 +21,7 @@ enum Property {
     Padding,
     Anchors,
     AnchorOffsets,
+    WritingModes,
     Font,
     Enum(&'static [&'static str]),
 }
@@ -69,6 +70,7 @@ fn property(name: &str) -> Option<Property> {
         "text-translate-anchor" | "icon-translate-anchor" => Property::Enum(&["map", "viewport"]),
         "text-variable-anchor" => Property::Anchors,
         "text-variable-anchor-offset" => Property::AnchorOffsets,
+        "text-writing-mode" => Property::WritingModes,
         "icon-text-fit" => Property::Enum(&["none", "width", "height", "both"]),
         "icon-text-fit-padding" => Property::Padding,
         "text-height-anchor" | "icon-height-anchor" => {
@@ -157,6 +159,11 @@ fn valid_literal(property: &Property, value: &Value) -> bool {
                     )
                 })
             })
+        }),
+        Property::WritingModes => value.as_array().is_some_and(|items| {
+            items
+                .iter()
+                .all(|item| matches!(item.as_str(), Some("horizontal" | "vertical")))
         }),
         Property::Padding => value
             .as_array()

@@ -3,7 +3,13 @@ use std::ops::Range;
 
 use lyon::tessellation::VertexBuffers;
 
+mod extents;
 mod styles;
+mod vertical;
+
+pub(super) use extents::{
+    both_orientations, extent, is_vertical, layout_extent, unwrapped_width, variable_shifts,
+};
 
 use styles::{char_styles, line_width, CharStyle};
 
@@ -39,32 +45,13 @@ struct Block<'a> {
     fractions: [f32; 2],
     justify: f32,
     offset: [f32; 2],
+    /// Whether the label is written top to bottom.
+    vertical: bool,
 }
 
-fn block<'a>(
-    symbol: &CollectedSymbol,
-    paint: &SymbolPaint,
-    zoom: f64,
-    atlas: &'a SymbolAtlas,
-) -> Option<Block<'a>> {
-    let text = paint.label(&symbol.properties, zoom)?;
-    let chars: Vec<char> = text.chars().collect();
-    let styles = char_styles(paint, symbol, zoom, atlas, chars.len())?;
-    let spacing = paint.number("text-letter-spacing", &symbol.properties, zoom, 0.0) * 24.0;
-    let max_width = paint.number("text-max-width", &symbol.properties, zoom, 10.0) * 24.0;
-    // Text along a line runs the whole line: it is never wrapped.
-    let lines = if super::is_line_placed(paint) {
-        std::iter::once(0..chars.len()).collect()
-    } else {
-        wrap(&chars, max_width, &|index| {
-            styles[index].advance(chars[index]) + spacing
-        })
-    };
-    let line_height = paint.number("text-line-height", &symbol.properties, zoom, 1.2) * 24.0;
-    let max_line = lines
-        .iter()
-        .map(|line| line_width(&chars, &styles, line.clone(), spacing))
-        .fold(0.0, f32::max);
+/// The largest scale of any character in each line, how far each line grows past its height to
+/// hold an image taller than its em box, and the height of its content.
+fn line_sizes(styles: &[CharStyle<'_>], lines: &[Range<usize>]) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
     let line_scales: Vec<f32> = lines
         .iter()
         .map(|line| {
@@ -90,6 +77,46 @@ fn block<'a>(
         .zip(&line_scales)
         .map(|(line, largest)| (tallest_image(line) - largest * 24.0).max(0.0))
         .collect();
+    (line_scales, line_extras, line_contents)
+}
+
+fn block<'a>(
+    symbol: &CollectedSymbol,
+    paint: &SymbolPaint,
+    zoom: f64,
+    atlas: &'a SymbolAtlas,
+) -> Option<Block<'a>> {
+    let text = paint.label(&symbol.properties, zoom)?;
+    let chars: Vec<char> = text.chars().collect();
+    let styles = char_styles(paint, symbol, zoom, atlas, chars.len())?;
+    let spacing = paint.number("text-letter-spacing", &symbol.properties, zoom, 0.0) * 24.0;
+    let max_width = paint.number("text-max-width", &symbol.properties, zoom, 10.0) * 24.0;
+    // Text along a line runs the whole line: it is never wrapped.
+    let lines = if super::is_line_placed(paint) {
+        std::iter::once(0..chars.len()).collect()
+    } else {
+        wrap(&chars, max_width, &|index| {
+            styles[index].advance(chars[index]) + spacing
+        })
+    };
+    let line_height = paint.number("text-line-height", &symbol.properties, zoom, 1.2) * 24.0;
+    let vertical = !super::is_line_placed(paint)
+        && symbol
+            .vertical
+            .unwrap_or_else(|| vertical::prefers_vertical(paint))
+        && vertical::allows_vertical_writing(&chars)
+        && styles.iter().all(|style| style.image.is_none());
+    let max_line = lines
+        .iter()
+        .map(|line| {
+            if vertical {
+                vertical::line_length(&chars, &styles, line.clone(), spacing)
+            } else {
+                line_width(&chars, &styles, line.clone(), spacing)
+            }
+        })
+        .fold(0.0, f32::max);
+    let (line_scales, line_extras, line_contents) = line_sizes(&styles, &lines);
     let anchors = variable_anchors(paint);
     let anchor = anchors.first().cloned().unwrap_or_else(|| {
         paint
@@ -101,14 +128,26 @@ fn block<'a>(
         .text("text-justify", &symbol.properties, zoom)
         .unwrap_or_else(|| "center".into());
     let justify = match justify.as_str() {
+        // A vertical label is justified to the start of its line.
+        _ if vertical => 0.0,
         "left" => 0.0,
         "right" => 1.0,
         "auto" => fractions[0],
         _ => 0.5,
     };
+    let height = line_scales.iter().sum::<f32>() * line_height + line_extras.iter().sum::<f32>();
+    let mut fractions = fractions;
+    let mut offset = anchored_offset(paint, &anchors, &anchor, (&symbol.properties, zoom));
+    if vertical && !anchors.is_empty() {
+        // A vertical label with variable anchors is laid out centred before it turns; each
+        // anchor then moves the turned box, which the first one has done already.
+        let shift = vertical::anchor_shift(&anchor, [height, max_line], offset);
+        fractions = [0.5, 0.5];
+        offset = [shift[1], -shift[0]];
+    }
     Some(Block {
         // Every line takes a full line height, with the glyphs centred in it.
-        height: line_scales.iter().sum::<f32>() * line_height + line_extras.iter().sum::<f32>(),
+        height,
         chars,
         styles,
         lines,
@@ -120,57 +159,9 @@ fn block<'a>(
         max_line,
         fractions,
         justify,
-        offset: anchored_offset(paint, &anchors, &anchor, (&symbol.properties, zoom)),
+        offset,
+        vertical,
     })
-}
-
-/// How far the label moves, in layout pixels, when it takes each of its variable anchors
-/// instead of the first; empty unless the label has several.
-pub(super) fn variable_shifts(
-    symbol: &CollectedSymbol,
-    paint: &SymbolPaint,
-    zoom: f64,
-    atlas: &SymbolAtlas,
-) -> Vec<[f32; 2]> {
-    let anchors = variable_anchors(paint);
-    if anchors.len() < 2 {
-        return Vec::new();
-    }
-    let Some(block) = block(symbol, paint, zoom, atlas) else {
-        return Vec::new();
-    };
-    let corner = |anchor: &str| {
-        let fractions = anchor_fractions(anchor);
-        let offset = anchored_offset(paint, &anchors, anchor, (&symbol.properties, zoom));
-        [
-            -block.max_line * fractions[0] + offset[0],
-            -block.height * fractions[1] + offset[1],
-        ]
-    };
-    let first = corner(&anchors[0]);
-    anchors
-        .iter()
-        .map(|anchor| {
-            let corner = corner(anchor);
-            [corner[0] - first[0], corner[1] - first[1]]
-        })
-        .collect()
-}
-
-/// The label's layout box `[left, top, right, bottom]` around the anchor, in layout pixels.
-pub(super) fn extent(
-    symbol: &CollectedSymbol,
-    paint: &SymbolPaint,
-    zoom: f64,
-    atlas: &SymbolAtlas,
-) -> Option<[f32; 4]> {
-    let block = block(symbol, paint, zoom, atlas)?;
-    if block.max_line <= 0.0 {
-        return None;
-    }
-    let left = -block.max_line * block.fractions[0] + block.offset[0];
-    let top = -block.height * block.fractions[1] + block.offset[1];
-    Some([left, top, left + block.max_line, top + block.height])
 }
 
 /// The glyph quads of a label, and for text along a line the centre of each glyph; text that
@@ -280,6 +271,20 @@ impl Emitter<'_> {
         }
     }
 
+    /// Adds the quad of `entry` at `bounds`, turned about the anchor by `rotation` instead of the
+    /// label's own.
+    fn quad_rotated(&mut self, entry: &AtlasEntry, bounds: [f32; 4], rotation: f32) {
+        quad(
+            self.buffer,
+            self.anchor,
+            bounds,
+            entry,
+            self.elevation,
+            self.angle,
+            rotation,
+        );
+    }
+
     /// Notes that the glyphs added since `first_index` have a colour of their own.
     fn colour(&mut self, first_index: usize, color: [f32; 4]) {
         let end = self.buffer.indices.len();
@@ -386,27 +391,23 @@ fn glyph_pass(
         let pen = -block.max_line * block.fractions[0]
             + (block.max_line - width) * justify
             + block.offset[0];
+        if block.vertical {
+            let placed = vertical::VerticalLine {
+                baseline,
+                largest,
+                pen,
+            };
+            vertical::place_line(
+                &mut emit,
+                (&block.chars, &block.styles, block.spacing),
+                line.clone(),
+                &placed,
+            );
+            continue;
+        }
         place_line(&mut emit, block, line.clone(), (baseline, content), pen);
     }
     (emit.centres, emit.colors)
-}
-
-/// Width in layout pixels of the label on one line, without wrapping; zero without glyphs.
-pub(super) fn unwrapped_width(
-    paint: &SymbolPaint,
-    symbol: &CollectedSymbol,
-    zoom: f64,
-    atlas: &SymbolAtlas,
-) -> f32 {
-    let Some(text) = paint.label(&symbol.properties, zoom) else {
-        return 0.0;
-    };
-    let chars: Vec<char> = text.chars().collect();
-    let Some(styles) = char_styles(paint, symbol, zoom, atlas, chars.len()) else {
-        return 0.0;
-    };
-    let spacing = paint.number("text-letter-spacing", &symbol.properties, zoom, 0.0) * 24.0;
-    line_width(&chars, &styles, 0..chars.len(), spacing)
 }
 
 #[cfg(test)]

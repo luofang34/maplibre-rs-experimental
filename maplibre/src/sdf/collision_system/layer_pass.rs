@@ -75,6 +75,8 @@ struct FeaturePlacement {
     opacity: [f32; 2],
     ground: f32,
     line: Option<LinePoses>,
+    /// Whether the label found a place this frame, which its fade may not show yet.
+    placed: bool,
 }
 
 /// Places the features of one style layer across every visible tile together, in ascending
@@ -103,26 +105,46 @@ pub(super) fn place_layer(
         zoom_limits,
     };
     for (position, feature_index, feature, was_visible) in ordered_features(layers, history) {
+        // A second way of writing a label is placed with the first, and only when that finds
+        // no place.
+        if feature.fallback {
+            continue;
+        }
         let layer = layers[position];
-        let outcome = frame.place_feature(
-            (layer, feature, feature_index, was_visible),
-            (&mut *boxes, &mut *placed, &mut *history),
-        );
-        write_feature_metadata(
-            layer,
-            feature,
-            (outcome.opacity, outcome.text_shift, outcome.anchor),
-            outcome.ground,
-            match &outcome.line {
-                Some(LinePoses::Poses(poses)) => Some(poses.as_slice()),
-                _ => None,
-            },
-            (
-                paint,
-                view_state.style_zoom().value(),
-                &mut metadata[position],
-            ),
-        );
+        let mut next = Some((feature_index, feature, was_visible, false));
+        while let Some((index, feature, was_visible, suppressed)) = next.take() {
+            let outcome = frame.place_feature(
+                (layer, feature, index, was_visible, suppressed),
+                (&mut *boxes, &mut *placed, &mut *history),
+            );
+            write_feature_metadata(
+                layer,
+                feature,
+                (outcome.opacity, outcome.text_shift, outcome.anchor),
+                outcome.ground,
+                match &outcome.line {
+                    Some(LinePoses::Poses(poses)) => Some(poses.as_slice()),
+                    _ => None,
+                },
+                (
+                    paint,
+                    view_state.style_zoom().value(),
+                    &mut metadata[position],
+                ),
+            );
+            next = layer
+                .features
+                .get(index + 1)
+                .filter(|other| other.fallback)
+                .map(|other| {
+                    (
+                        index + 1,
+                        other,
+                        history.was_visible(layer, other),
+                        suppressed || outcome.placed,
+                    )
+                });
+        }
     }
     metadata
 }
@@ -218,10 +240,11 @@ impl LayerFrame<'_> {
 
     fn place_feature(
         &self,
-        (layer, feature, feature_index, was_visible): (
+        (layer, feature, feature_index, was_visible, suppressed): (
             &crate::sdf::SymbolLayerData,
             &crate::sdf::Feature,
             usize,
+            bool,
             bool,
         ),
         (boxes, placed, history): (
@@ -251,7 +274,8 @@ impl LayerFrame<'_> {
                 &self.uniforms,
             )
         });
-        let shown = relevance > 0.0
+        let shown = !suppressed
+            && relevance > 0.0
             && !matches!(line, Some(LinePoses::DoesNotFit))
             && !crate::sdf::placement::buried_in_terrain(self.world, layer, feature, ground)
             && local_zoom_visible(
@@ -308,6 +332,7 @@ impl LayerFrame<'_> {
             });
         }
         FeaturePlacement {
+            placed: visible.iter().any(|v| *v),
             text_shift,
             anchor,
             opacity: opacity.map(|value| value * relevance),

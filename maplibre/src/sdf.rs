@@ -155,6 +155,9 @@ pub struct Feature {
     pub anchor_sets: Vec<u8>,
     /// Index ranges of glyphs that a `format` section colours, with the colour.
     pub text_colors: Vec<(std::ops::Range<usize>, [f32; 4])>,
+    /// Whether the label is the other way of writing the one before it, which shows only when
+    /// that one finds no place.
+    pub fallback: bool,
 }
 
 /// Coordinates measured on the canonical tile grid.

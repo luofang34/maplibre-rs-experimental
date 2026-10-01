@@ -31,6 +31,8 @@ pub struct SymbolFeature {
     anchor_sets: Vec<u8>,
     #[serde(default)]
     text_colors: Vec<([usize; 2], [f32; 4])>,
+    #[serde(default)]
+    fallback: bool,
 }
 
 /// The line a label follows, in a form that survives the worker boundary.
@@ -75,6 +77,7 @@ impl From<&Feature> for SymbolFeature {
                 .iter()
                 .map(|(range, color)| ([range.start, range.end], *color))
                 .collect(),
+            fallback: feature.fallback,
             line: feature.line.as_ref().map(|line| LineLabelWire {
                 polyline: line.polyline.to_vec(),
                 anchor_distance: line.anchor_distance,
@@ -113,6 +116,7 @@ impl From<SymbolFeature> for Feature {
                 .into_iter()
                 .map(|(range, color)| (range[0]..range[1], color))
                 .collect(),
+            fallback: feature.fallback,
             line: feature.line.map(|line| crate::sdf::LineLabel {
                 polyline: line.polyline.into(),
                 anchor_distance: line.anchor_distance,

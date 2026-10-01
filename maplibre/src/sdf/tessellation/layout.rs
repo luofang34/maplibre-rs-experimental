@@ -22,6 +22,10 @@ pub(super) struct CollectedSymbol {
     pub anchor: Point<f64>,
     pub properties: FeatureProperties,
     pub angle: f32,
+    /// How the text is written when the style leaves it open: `Some(true)` vertically.
+    pub vertical: Option<bool>,
+    /// Whether the label is the second way of writing a text that has two.
+    pub fallback: bool,
 }
 
 /// Where the labels of a geometry go when they do not follow a line, as GL JS places them:
@@ -94,7 +98,12 @@ pub(super) fn append(
         let anchor = Point::new(symbol.anchor.x() + shift[0], symbol.anchor.y() + shift[1]);
         let rotation = paint
             .number("icon-rotate", &symbol.properties, zoom, 0.0)
-            .to_radians();
+            .to_radians()
+            + if super::text_layout::is_vertical(symbol, paint, zoom, atlas) {
+                std::f32::consts::FRAC_PI_2
+            } else {
+                0.0
+            };
         // Layout pixels are drawn scaled by icon-size, which a fitted icon does not take.
         let undo_size = if fitted.is_some() {
             1.0 / icon_size
@@ -193,6 +202,7 @@ pub(super) fn append(
         text_sets: laid.sets,
         anchor_sets: laid.anchor_sets,
         text_colors: laid.colors,
+        fallback: symbol.fallback,
         str: text,
         line: symbol
             .line
@@ -227,8 +237,9 @@ fn fit_to_text(
         .and_then(|value| value.evaluate_for(&symbol.properties, zoom))
         .unwrap_or(16.0);
     let scale = text_size / 24.0;
+    // A vertical label's icon is fitted before the symbol turns.
     let [left, top, right, bottom] =
-        super::text_layout::extent(symbol, paint, zoom, atlas)?.map(|edge| edge * scale);
+        super::text_layout::layout_extent(symbol, paint, zoom, atlas)?.map(|edge| edge * scale);
     let padding = paint
         .properties
         .get("icon-text-fit-padding")

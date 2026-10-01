@@ -214,13 +214,31 @@ impl TextTessellator {
         id: Option<u64>,
         line: Option<layout::LineContext>,
     ) {
-        self.collected.push(CollectedSymbol {
-            id,
-            line,
-            anchor,
-            angle,
-            properties: self.properties.clone(),
-        });
+        let ways = line
+            .is_none()
+            .then(|| self.paint.label(&self.properties, self.zoom))
+            .flatten()
+            .and_then(|text| text_layout::both_orientations(&self.paint, &text));
+        // A text that may be written both ways is laid out twice; the second shows when the
+        // first has no place.
+        for (index, vertical) in ways
+            .map_or_else(
+                || vec![None],
+                |[first, second]| vec![Some(first), Some(second)],
+            )
+            .into_iter()
+            .enumerate()
+        {
+            self.collected.push(CollectedSymbol {
+                id,
+                line: line.clone(),
+                anchor,
+                angle,
+                properties: self.properties.clone(),
+                vertical,
+                fallback: index == 1,
+            });
+        }
     }
 
     /// Anchors along the lines of a feature, as many as the spacing allows.
@@ -236,6 +254,8 @@ impl TextTessellator {
             anchor: Point::new(0.0, 0.0),
             angle: 0.0,
             properties: self.properties.clone(),
+            vertical: None,
+            fallback: false,
         };
         let text_size = self
             .paint
