@@ -49,23 +49,33 @@ fn pixels_outside_the_quad_stay_transparent() {
 
 #[test]
 fn a_skewed_quad_maps_its_corners() {
-    let skewed = [[-40.0, 40.0], [30.0, 50.0], [40.0, -30.0], [-30.0, -40.0]];
-    let m = unit_square_to_quad(skewed.map(mercator));
-    for (uv, corner) in [
-        ([0.0, 0.0], 0),
-        ([1.0, 0.0], 1),
-        ([1.0, 1.0], 2),
-        ([0.0, 1.0], 3),
+    let skewed = [[-40.0, 40.0], [30.0, 50.0], [40.0, -30.0], [-30.0, -40.0]].map(mercator);
+    let inward = |corner: [f64; 2], toward: [f64; 2]| {
+        [
+            corner[0] + (toward[0] - corner[0]) * 1e-6,
+            corner[1] + (toward[1] - corner[1]) * 1e-6,
+        ]
+    };
+    for (corner, uv) in [
+        (0, [0.0, 0.0]),
+        (1, [1.0, 0.0]),
+        (2, [1.0, 1.0]),
+        (3, [0.0, 1.0]),
     ] {
-        let w = m[2][0] * uv[0] + m[2][1] * uv[1] + 1.0;
-        let x = (m[0][0] * uv[0] + m[0][1] * uv[1] + m[0][2]) / w;
-        let y = (m[1][0] * uv[0] + m[1][1] * uv[1] + m[1][2]) / w;
-        let want = mercator(skewed[corner]);
+        let point = inward(skewed[corner], skewed[(corner + 2) % 4]);
+        let [u, v] = unit_coordinates(&skewed, point[0], point[1]).expect("inside the quad");
         assert!(
-            (x - want[0]).abs() < 1e-9 && (y - want[1]).abs() < 1e-9,
+            (u - uv[0]).abs() < 1e-3 && (v - uv[1]).abs() < 1e-3,
             "corner {corner}"
         );
     }
+}
+
+#[test]
+fn the_diagonal_from_top_right_to_bottom_left_splits_a_bent_quad() {
+    let bent = [[0.0, 0.0], [4.0, 0.0], [8.0, 8.0], [0.0, 4.0]];
+    let [u, v] = unit_coordinates(&bent, 2.0, 2.0).expect("on the diagonal");
+    assert!((u - 0.5).abs() < 1e-9 && (v - 0.5).abs() < 1e-9);
 }
 
 #[test]
