@@ -24,7 +24,7 @@ fn raster_shapes(
 }
 
 #[test]
-fn a_loaded_ancestor_covers_each_partial_child_arrival() {
+fn a_loaded_ancestor_stays_under_each_partial_child_arrival() {
     let target = tile(2423, 1389, 12);
     let parent = target.get_parent().expect("parent");
     let children = target.get_children();
@@ -33,7 +33,9 @@ fn a_loaded_ancestor_covers_each_partial_child_arrival() {
         loaded.extend_from_slice(&children[..count]);
         let selected = raster_shapes(vec![target], children.to_vec(), loaded);
         if count < 4 {
-            assert_eq!(selected, vec![parent], "only {count} children loaded");
+            let mut expected = vec![parent];
+            expected.extend_from_slice(&children[..count]);
+            assert_eq!(selected, expected, "only {count} children loaded");
         } else {
             assert_eq!(
                 selected.into_iter().collect::<HashSet<_>>(),
@@ -44,7 +46,7 @@ fn a_loaded_ancestor_covers_each_partial_child_arrival() {
 }
 
 #[test]
-fn a_mixed_zoom_cover_waits_for_the_last_missing_quadrant() {
+fn a_mixed_zoom_cover_draws_over_the_ancestor_until_the_last_quadrant() {
     let target = tile(2423, 1389, 12);
     let parent = target.get_parent().expect("parent");
     let children = target.get_children();
@@ -55,7 +57,9 @@ fn a_mixed_zoom_cover_waits_for_the_last_missing_quadrant() {
         loaded.extend_from_slice(&covering[..count]);
         let selected = raster_shapes(vec![target], covering.clone(), loaded);
         if count < covering.len() {
-            assert_eq!(selected, vec![parent], "only {count} covering tiles loaded");
+            let mut expected = vec![parent];
+            expected.extend_from_slice(&covering[..count]);
+            assert_eq!(selected, expected, "only {count} covering tiles loaded");
         } else {
             assert_eq!(selected, covering);
         }

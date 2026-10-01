@@ -281,15 +281,22 @@ fn raster_shapes<T: HasTile>(
     used_parents: &mut HashSet<WorldTileCoords>,
 ) -> SourceShapes {
     let covered = super::coverage::disjoint_tiles(coords, covered);
-    let complete = super::coverage::covers_target(coords, &covered)
-        .then(|| covered.clone())
-        .or_else(|| super::coverage::loaded_cover(sources, coords, world));
+    let complete = super::coverage::covers_target(coords, &covered).then(|| covered.clone());
     if let Some(tiles) = complete {
         selected_shapes(coords, tiles, zoom, used_parents)
-    } else if !covered.is_empty() {
-        selected_shapes(coords, covered, zoom, used_parents)
+    } else if covered.is_empty() {
+        match super::coverage::loaded_cover(sources, coords, world) {
+            Some(tiles) => selected_shapes(coords, tiles, zoom, used_parents),
+            None => source_shapes(sources, coords, zoom, world, used_parents),
+        }
     } else {
-        source_shapes(sources, coords, zoom, world, used_parents)
+        // What the view needs of this tile is loaded in part: the nearest loaded tile above or
+        // at it stays underneath, and the part's own tiles are drawn over it.
+        let mut tiles = super::coverage::loaded_cover(sources, coords, world).unwrap_or_default();
+        tiles.retain(|tile| !covered.contains(tile));
+        tiles.extend(covered);
+        tiles.sort_by_key(|tile| tile.z);
+        selected_shapes(coords, tiles, zoom, used_parents)
     }
 }
 

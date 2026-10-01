@@ -142,10 +142,14 @@ pub struct TileMaskItem {
 }
 
 impl PhaseItem for TileMaskItem {
-    type SortKey = u32;
+    type SortKey = (u32, u8);
 
+    /// Coarser tiles write their masks first, so the masks of finer tiles lie over them.
     fn sort_key(&self) -> Self::SortKey {
-        u32::from(!self.generate_borders)
+        (
+            u32::from(!self.generate_borders),
+            u8::from(self.source_shape.coords().z),
+        )
     }
 
     fn draw_function(&self) -> &dyn Draw<TileMaskItem> {
