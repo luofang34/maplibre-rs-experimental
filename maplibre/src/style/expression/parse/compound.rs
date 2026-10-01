@@ -6,6 +6,7 @@ use serde_json::Value as Json;
 use super::{Parser, Result};
 use crate::style::expression::{
     ast::{Arithmetic, Comparison, Expression},
+    geometry::Geometry,
     value::{Type, Value},
 };
 
@@ -145,6 +146,47 @@ impl Parser {
             case_sensitive: Box::new(case_sensitive),
             diacritic_sensitive: Box::new(diacritic_sensitive),
             locale,
+        })
+    }
+
+    pub(super) fn parse_geometry(&mut self, args: &[Json], within: bool) -> Result<Expression> {
+        let [json] = args else {
+            return Err(self.error(format!(
+                "'{}' expression requires exactly one argument, but found {} instead.",
+                if within { "within" } else { "distance" },
+                args.len()
+            )));
+        };
+        let geometry = Geometry::from_geojson(json)
+            .filter(|geometry| !within || !geometry.polygons.is_empty())
+            .ok_or_else(|| self.error("Expected a GeoJSON geometry."))?;
+        Ok(if within {
+            Expression::Within(geometry)
+        } else {
+            Expression::Distance(geometry)
+        })
+    }
+
+    pub(super) fn parse_number_format(&mut self, args: &[Json]) -> Result<Expression> {
+        let (Some(input), Some(Json::Object(options)), 2) = (args.first(), args.get(1), args.len())
+        else {
+            return Err(self.error("Expected two arguments: a number and an options object."));
+        };
+        let input = self.parse_at(input, 1, Some(&Type::Number))?;
+        let mut parsed = Vec::new();
+        for (name, expected) in [
+            ("locale", Type::String),
+            ("currency", Type::String),
+            ("min-fraction-digits", Type::Number),
+            ("max-fraction-digits", Type::Number),
+        ] {
+            if let Some(option) = options.get(name) {
+                parsed.push((name.to_owned(), self.parse_at(option, 2, Some(&expected))?));
+            }
+        }
+        Ok(Expression::NumberFormat {
+            input: Box::new(input),
+            options: parsed,
         })
     }
 

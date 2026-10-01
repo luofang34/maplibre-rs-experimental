@@ -9,8 +9,10 @@
 mod ast;
 mod collation;
 mod evaluate;
+mod geometry;
 mod interpolation;
 mod legacy;
+mod number_format;
 mod parse;
 mod value;
 
@@ -19,6 +21,7 @@ pub use ast::{
     StringFunction,
 };
 pub use evaluate::{EvaluationContext, EvaluationError, FeatureProperties, ImageSet};
+pub use geometry::GEOMETRY_PROPERTY;
 pub use interpolation::{interpolate_number, ColorSpace, Interpolation};
 pub use legacy::{
     convert_filter, convert_function, convert_token_string, is_expression_filter,

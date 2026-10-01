@@ -11,7 +11,7 @@ fn unsupported_filters_are_reported_per_layer() {
             "sources": {},
             "layers": [
                 {"id": "ok", "type": "line", "filter": ["==", ["get", "level"], "low"]},
-                {"id": "bad", "type": "line", "filter": ["within", {"type": "Polygon", "coordinates": []}]}
+                {"id": "bad", "type": "line", "filter": ["within", 5]}
             ]
         }"#,
     )

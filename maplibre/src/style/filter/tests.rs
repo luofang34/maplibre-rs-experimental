@@ -196,7 +196,7 @@ fn a_collator_decides_whether_case_and_accents_differ() {
 #[test]
 fn unsupported_operators_are_errors_not_guesses() {
     for filter in [
-        json!(["within", {"type": "Polygon", "coordinates": []}]),
+        json!(["within", 5]),
         json!(["==", ["feature-state", "level"], "low"]),
         json!(["match", ["get", "level"], "low"]),
     ] {

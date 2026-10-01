@@ -7,6 +7,8 @@ use thiserror::Error;
 use super::{
     ast::{Expression, FeatureProperty, Global},
     collation::{is_supported_script, Collation},
+    geometry::{Geometry, GEOMETRY_PROPERTY},
+    number_format,
     value::{Type, Value},
 };
 
@@ -66,6 +68,12 @@ impl<'a> EvaluationContext<'a> {
             ..Self::default()
         }
     }
+}
+
+/// The geometry a feature carries in its properties, when it carries one.
+fn feature_geometry(context: &EvaluationContext<'_>) -> Option<Geometry> {
+    let text = context.properties?.get(GEOMETRY_PROPERTY)?.as_str()?;
+    Geometry::from_geojson(&serde_json::from_str(text).ok()?)
 }
 
 /// Why an expression could not produce a value.
@@ -257,6 +265,39 @@ impl Expression {
                     None => None,
                 },
             })),
+            Self::Within(area) => Ok(Value::Bool(
+                feature_geometry(context).is_some_and(|geometry| geometry.is_within(area)),
+            )),
+            Self::Distance(other) => Ok(Value::Number(
+                feature_geometry(context)
+                    .and_then(|geometry| geometry.distance_to(other))
+                    .unwrap_or(-1.0),
+            )),
+            Self::NumberFormat { input, options } => {
+                let number = expect_number(input.evaluate(context)?)?;
+                let read = |name: &str| -> Result<Option<Value>> {
+                    options
+                        .iter()
+                        .find(|(key, _)| key == name)
+                        .map(|(_, option)| option.evaluate(context))
+                        .transpose()
+                };
+                let digits = |value: Option<Value>| {
+                    value
+                        .and_then(|value| value.as_number())
+                        .map(|digits| digits.clamp(0.0, 20.0) as usize)
+                };
+                let currency =
+                    read("currency")?.and_then(|value| value.as_str().map(str::to_owned));
+                let min = digits(read("min-fraction-digits")?);
+                let max = digits(read("max-fraction-digits")?);
+                Ok(Value::String(number_format::format(
+                    number,
+                    currency.as_deref(),
+                    min,
+                    max,
+                )))
+            }
             Self::ResolvedLocale(collator) => Ok(match collator.evaluate(context)? {
                 Value::Collator(collation) => Value::String(collation.resolved_locale().to_owned()),
                 _ => Value::Null,

@@ -389,3 +389,29 @@ fn an_image_expression_falls_through_to_the_first_image_that_exists() {
         Value::from("missing")
     );
 }
+
+#[test]
+fn within_and_distance_read_the_geometry_a_feature_carries() {
+    let properties = FeatureProperties::from([(
+        super::GEOMETRY_PROPERTY.to_string(),
+        Value::from(r#"{"type":"Point","coordinates":[0.5,0.5]}"#),
+    )]);
+    let evaluate = |expression: serde_json::Value| {
+        Expression::parse(&expression)
+            .expect("expression parses")
+            .evaluate(&EvaluationContext::for_feature(0.0, &properties))
+            .expect("evaluates")
+    };
+    let square =
+        json!({"type": "Polygon", "coordinates": [[[0, 0], [0, 1], [1, 1], [1, 0], [0, 0]]]});
+    assert_eq!(evaluate(json!(["within", square])), Value::Bool(true));
+    let far = json!({"type": "Point", "coordinates": [0.5, 0.501]});
+    let metres = evaluate(json!(["distance", far]))
+        .as_number()
+        .expect("a number");
+    assert!((metres - 110.574).abs() < 0.5, "{metres}");
+    assert_eq!(
+        evaluate(json!(["number-format", 1234.5, {"min-fraction-digits": 2}])),
+        Value::from("1,234.50")
+    );
+}

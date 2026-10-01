@@ -28,6 +28,7 @@ use crate::{
 };
 
 mod cluster;
+mod geometry_property;
 
 /// Failure reported while preparing or delivering GeoJSON tile geometry.
 #[derive(Error, Debug)]
@@ -274,6 +275,11 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
 ) -> Result<(), ProcessGeoJsonError> {
     let coords = request.coords;
     let unfiltered = geojson_value.to_string();
+    let with_geometry = request
+        .layers
+        .iter()
+        .any(geometry_property::reads_geometry)
+        .then(|| geometry_property::with_geometry_property(geojson_value));
 
     for style_layer in &request.layers {
         let matches_source = style_layer
@@ -289,10 +295,17 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
             continue;
         };
 
+        let (source_value, unfiltered) = match &with_geometry {
+            Some(annotated) if geometry_property::reads_geometry(style_layer) => {
+                (annotated, annotated.to_string())
+            }
+            _ => (geojson_value, unfiltered.clone()),
+        };
         let json_str = match &style_layer.filter {
             Some(filter) => match Filter::parse(filter) {
-                Ok(filter) => filter_geojson(geojson_value, &filter, f64::from(u8::from(coords.z)))
-                    .to_string(),
+                Ok(filter) => {
+                    filter_geojson(source_value, &filter, f64::from(u8::from(coords.z))).to_string()
+                }
                 Err(error) => {
                     tracing::error!(
                         layer = %style_layer.id,
@@ -305,7 +318,7 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
                     continue;
                 }
             },
-            None => unfiltered.clone(),
+            None => unfiltered,
         };
 
         match paint {

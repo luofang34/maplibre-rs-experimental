@@ -282,6 +282,9 @@ impl Parser {
             }
             "!" => Ok(Expression::Not(Box::new(self.parse_single(args, &Type::Boolean)?))),
             "collator" => self.parse_collator(args),
+            "within" => self.parse_geometry(args, true),
+            "distance" => self.parse_geometry(args, false),
+            "number-format" => self.parse_number_format(args),
             "resolved-locale" => Ok(Expression::ResolvedLocale(Box::new(
                 self.parse_single(args, &Type::Collator)?,
             ))),

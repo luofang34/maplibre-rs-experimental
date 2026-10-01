@@ -208,9 +208,7 @@ fn expression_and_legacy_filters_select_the_same_features() {
 fn an_unsupported_filter_reports_the_layer_missing_instead_of_guessing() {
     let messages = process(
         &diagonal_line_tile(4096),
-        line_layer(Some(
-            serde_json::json!(["within", {"type": "Polygon", "coordinates": []}]),
-        )),
+        line_layer(Some(serde_json::json!(["within", 5]))),
     );
 
     assert!(

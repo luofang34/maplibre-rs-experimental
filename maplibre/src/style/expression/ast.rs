@@ -237,6 +237,17 @@ pub enum Expression {
         /// The locale, if given.
         locale: Option<Box<Expression>>,
     },
+    /// `within`: whether the feature's geometry lies inside the area.
+    Within(super::geometry::Geometry),
+    /// `distance`: metres from the feature's geometry to the geometry.
+    Distance(super::geometry::Geometry),
+    /// `number-format`: a number as text, in the style of a locale.
+    NumberFormat {
+        /// The number.
+        input: Box<Expression>,
+        /// Options: `locale`, `currency`, `min-fraction-digits`, `max-fraction-digits`.
+        options: Vec<(String, Expression)>,
+    },
     /// `resolved-locale`: the locale a collator compares in.
     ResolvedLocale(Box<Expression>),
     /// `is-supported-script`: whether a string is in scripts the renderer can lay out.
@@ -369,7 +380,9 @@ impl Expression {
             | Self::Any(_)
             | Self::Not(_)
             | Self::IsSupportedScript(_)
+            | Self::Within(_)
             | Self::In { .. } => Type::Boolean,
+            Self::Distance(_) => Type::Number,
             Self::Collator { .. } => Type::Collator,
             Self::Var { bound, .. } => bound.output_type(),
             Self::Let { body, .. } => body.output_type(),
@@ -388,6 +401,7 @@ impl Expression {
             | Self::Concat(_)
             | Self::StringCase { .. }
             | Self::ResolvedLocale(_)
+            | Self::NumberFormat { .. }
             | Self::Image(_) => Type::String,
             Self::Assert { required, .. } => required.clone(),
             Self::Coerce { coercion, .. } => match coercion {
@@ -408,7 +422,13 @@ impl Expression {
             | Self::Folded { .. }
             | Self::Global(_)
             | Self::Feature(_)
+            | Self::Within(_)
+            | Self::Distance(_)
             | Self::GlobalState(_) => {}
+            Self::NumberFormat { input, options } => {
+                visit(input);
+                options.iter().for_each(|(_, option)| visit(option));
+            }
             Self::Get { key, object } | Self::Has { key, object } => {
                 visit(key);
                 if let Some(object) = object {
@@ -520,7 +540,7 @@ impl Expression {
     /// Whether the result is the same for every feature.
     pub fn is_feature_constant(&self) -> bool {
         match self {
-            Self::Feature(_) => false,
+            Self::Feature(_) | Self::Within(_) | Self::Distance(_) => false,
             Self::Get { object: None, .. } | Self::Has { object: None, .. } => false,
             _ => self.children_all(Self::is_feature_constant),
         }
