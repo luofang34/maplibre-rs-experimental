@@ -63,3 +63,11 @@ fn invalid_structure_settings_do_not_enable_profiles_or_elevations() {
         assert!(number(&invalid, "maplibre-rs:structure-clearance-meters").is_none());
     }
 }
+
+#[test]
+fn a_heatmap_layer_stands_on_the_terrain_surface() {
+    let heatmap: StyleLayer =
+        serde_json::from_value(serde_json::json!({"id": "h", "type": "heatmap", "source": "s"}))
+            .expect("layer");
+    assert!(matches!(kind(&heatmap), Some(StructureKind::Surface)));
+}

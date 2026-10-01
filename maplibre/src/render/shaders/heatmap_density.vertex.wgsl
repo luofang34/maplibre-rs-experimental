@@ -20,7 +20,8 @@ const ZERO: f32 = 1.0 / 255.0 / 16.0;
 fn main(
     @builtin(vertex_index) vertex_index: u32,
     @location(0) position: vec2<f32>,
-    @location(1) normal: vec2<f32>,
+    // Radius factor, weight, path distance and, over terrain, the height of the point.
+    @location(1) path: vec4<f32>,
     @location(2) tile_mercator_coords: vec4<f32>,
     @location(4) translate1: vec4<f32>,
     @location(5) translate2: vec4<f32>,
@@ -37,8 +38,8 @@ fn main(
         select(-1.0, 1.0, corner >= 2u),
     );
     // One unit for a layer-wide radius, else the point's own radius in pixels.
-    let radius = layer_radius * normal.x;
-    let weight = normal.y;
+    let radius = layer_radius * path.x;
+    let weight = path.y;
     let intensity = circle_params.x;
     let strength = weight * intensity;
     // Extend the quad until the kernel falls below ZERO, so a strong point has no visible edge.
@@ -48,11 +49,22 @@ fn main(
     let transform = mat4x4<f32>(translate1, translate2, translate3, translate4);
     // The radius is in pixels on the map plane, so pitch shrinks far points as it does circles.
     let corner_position = position + reach * radius * TILE_UNITS_PER_PIXEL * zoom_factor;
-    let projected = project_tile_position(
-        vec3<f32>(corner_position, 0.0),
-        transform,
-        tile_mercator_coords,
-    );
+    // A point over terrain stands on the surface, as GL JS places its kernels.
+    let spatial = path.w > -1e20;
+    var projected: ProjectedTilePosition;
+    if spatial {
+        projected = project_tile_position_3d(
+            vec3<f32>(corner_position, path.w),
+            transform,
+            tile_mercator_coords,
+        );
+    } else {
+        projected = project_tile_position(
+            vec3<f32>(corner_position, 0.0),
+            transform,
+            tile_mercator_coords,
+        );
+    }
     var clip = projected.clip_position;
     clip.z = 0.0;
     return VertexOutput(clip, reach, strength, projected.horizon_distance);

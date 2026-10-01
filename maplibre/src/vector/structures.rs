@@ -32,9 +32,14 @@ pub(crate) type SpatialBuffer = (
 pub(crate) enum StructureKind {
     Bridge,
     Tunnel,
+    /// Stands on the terrain surface, as a heatmap's points do.
+    Surface,
 }
 
 pub(crate) fn kind(layer: &StyleLayer) -> Option<StructureKind> {
+    if layer.type_ == "heatmap" {
+        return Some(StructureKind::Surface);
+    }
     if layer.type_ != "line" {
         return None;
     }
@@ -192,6 +197,14 @@ fn elevate_span(
     absolute: Option<f64>,
     sample: &impl Fn([f32; 2]) -> Option<f64>,
 ) {
+    if matches!(kind, StructureKind::Surface) {
+        for vertex in vertices {
+            if let Some(ground) = sample(vertex.position) {
+                vertex.elevation = ground as f32;
+            }
+        }
+        return;
+    }
     let Some(first) = vertices
         .iter()
         .min_by(|a, b| a.distance.total_cmp(&b.distance))
@@ -228,6 +241,7 @@ fn profile(kind: StructureKind, start: f64, end: f64, ground: f64, t: f64, clear
     match kind {
         StructureKind::Bridge => chord.max(ground + separation) + 0.5,
         StructureKind::Tunnel => chord.min(ground - separation) + 0.1,
+        StructureKind::Surface => ground,
     }
 }
 
