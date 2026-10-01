@@ -133,18 +133,36 @@ fn push_wall<I: From<VertexId>>(
 }
 
 /// Appends the roof and walls of the polygons in `path` to `buffer`.
-pub(super) fn extrude<I: From<VertexId> + std::ops::Add + MaxIndex>(
+///
+/// `refine_roof` may split the roof's triangles from the given index on, as a globe tile does so
+/// the roof follows the sphere; the vertices it adds take the roof's base and height.
+pub(super) fn extrude<I>(
     path: &Path,
     heights: (f32, f32),
     buffer: &mut VertexBuffers<ShaderVertex, I>,
-    tolerance: f32,
-) -> Result<(), lyon::tessellation::TessellationError> {
+    (tolerance, refine_roof): (
+        f32,
+        impl FnOnce(&mut VertexBuffers<ShaderVertex, I>, usize) -> Result<(), String>,
+    ),
+) -> Result<(), String>
+where
+    I: From<VertexId> + std::ops::Add + MaxIndex,
+{
     let (base, height) = heights;
-    FillTessellator::new().tessellate_path(
-        path,
-        &FillOptions::tolerance(tolerance).with_fill_rule(FillRule::EvenOdd),
-        &mut BuffersBuilder::new(buffer, RoofVertex { base, height }),
-    )?;
+    let roof_start = buffer.indices.len();
+    let vertex_start = buffer.vertices.len();
+    FillTessellator::new()
+        .tessellate_path(
+            path,
+            &FillOptions::tolerance(tolerance).with_fill_rule(FillRule::EvenOdd),
+            &mut BuffersBuilder::new(buffer, RoofVertex { base, height }),
+        )
+        .map_err(|error| error.to_string())?;
+    refine_roof(buffer, roof_start)?;
+    for vertex in &mut buffer.vertices[vertex_start..] {
+        vertex.distance = base;
+        vertex.elevation = height;
+    }
     let rings = rings(path);
     for (index, ring) in rings.iter().enumerate() {
         let area = signed_area(ring);

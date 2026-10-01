@@ -55,7 +55,20 @@ fn tessellator(paint: &LayerPaint, request: &VectorTileRequest) -> ZeroTessellat
             LayerPaint::Heatmap(heatmap) => ZeroTessellator::default()
                 .with_circles(CircleOptions::for_heatmap(heatmap, style_zoom)),
             LayerPaint::FillExtrusion(extrusion) => {
-                ZeroTessellator::default().with_extrusion(ExtrusionOptions::for_paint(extrusion))
+                let tessellator = ZeroTessellator::default()
+                    .with_extrusion(ExtrusionOptions::for_paint(extrusion));
+                if request.projection.uses_globe_rendering(style_zoom) {
+                    // Roofs and the edges of walls follow the sphere as fills and lines do.
+                    let last_tile = i64::from(crate::coords::ZOOM_BOUNDS[usize::from(zoom)]) - 1;
+                    tessellator.with_globe_subdivision(
+                        granularity_for_zoom(128, 2, zoom),
+                        zoom == 0,
+                        request.coords.y == 0,
+                        i64::from(request.coords.y) == last_tile,
+                    )
+                } else {
+                    tessellator
+                }
             }
             _ if request.projection.uses_globe_rendering(style_zoom) => {
                 let last_tile = i64::from(crate::coords::ZOOM_BOUNDS[usize::from(zoom)]) - 1;

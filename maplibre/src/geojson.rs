@@ -342,8 +342,21 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
                     LayerPaint::Heatmap(heatmap) => ZeroTessellator::<IndexDataType>::default()
                         .with_circles(CircleOptions::for_heatmap(heatmap, f64::from(zoom))),
                     LayerPaint::FillExtrusion(extrusion) => {
-                        ZeroTessellator::<IndexDataType>::default()
-                            .with_extrusion(ExtrusionOptions::for_paint(extrusion))
+                        let tessellator = ZeroTessellator::<IndexDataType>::default()
+                            .with_extrusion(ExtrusionOptions::for_paint(extrusion));
+                        if use_globe_geometry {
+                            // Roofs and the edges of walls follow the sphere as fills and lines do.
+                            let last_tile =
+                                i64::from(crate::coords::ZOOM_BOUNDS[usize::from(zoom)]) - 1;
+                            tessellator.with_globe_subdivision(
+                                granularity_for_zoom(128, 2, zoom),
+                                zoom == 0,
+                                coords.y == 0,
+                                i64::from(coords.y) == last_tile,
+                            )
+                        } else {
+                            tessellator
+                        }
                     }
                     _ if use_globe_geometry => {
                         let last_tile =

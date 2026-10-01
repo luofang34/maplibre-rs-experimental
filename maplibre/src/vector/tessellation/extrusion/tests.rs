@@ -18,7 +18,13 @@ fn extruded(squares: &[[f32; 4]]) -> VertexBuffers<ShaderVertex, u32> {
         square(&mut builder, *corners);
     }
     let mut buffer = VertexBuffers::new();
-    extrude(&builder.build(), (2.0, 10.0), &mut buffer, 0.02).expect("extrudes");
+    extrude(
+        &builder.build(),
+        (2.0, 10.0),
+        &mut buffer,
+        (0.02, |_: &mut VertexBuffers<ShaderVertex, u32>, _| Ok(())),
+    )
+    .expect("extrudes");
     buffer
 }
 

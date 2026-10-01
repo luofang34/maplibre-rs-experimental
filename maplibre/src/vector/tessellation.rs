@@ -380,8 +380,25 @@ where
         };
         let height = evaluate(&options.height);
         let base = evaluate(&options.base).max(0.0);
-        extrusion::extrude(&path, (base, height), &mut self.buffer, DEFAULT_TOLERANCE)
-            .map_err(|error| GeozeroError::Geometry(error.to_string()))?;
+        let subdivision = crate::projection::globe::subdivision::FillSubdivisionOptions {
+            granularity: self.subdivision_granularity,
+            clip_x_to_tile: self.clip_x_to_tile,
+            extend_to_north_pole: self.extend_to_north_pole,
+            extend_to_south_pole: self.extend_to_south_pole,
+        };
+        extrusion::extrude(
+            &path,
+            (base, height),
+            &mut self.buffer,
+            (
+                DEFAULT_TOLERANCE,
+                |buffer: &mut VertexBuffers<ShaderVertex, I>, start| {
+                    subdivide_triangles(buffer, start, subdivision)
+                        .map_err(|error| error.to_string())
+                },
+            ),
+        )
+        .map_err(GeozeroError::Geometry)?;
         // Each polygon of a multipolygon is a building of its own, standing on its own ground.
         self.update_feature_indices();
         self.polygon_entries += 1;
