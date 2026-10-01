@@ -117,16 +117,30 @@ pub(crate) fn select_targets(
                     .filter(|source| raster_sources.has_tile(*source, world))
                     .collect();
                 // A partial child set would erase the uncovered part when the drape is cleared,
-                // so it only stands in when every tile the view needs over this terrain tile is
-                // loaded and nothing complete exists: the rest lies outside the view.
+                // so an ancestor goes underneath it; the set itself is what the view needs
+                // over this terrain tile.
                 let all_loaded = !wanted.is_empty() && loaded.len() == wanted.len();
-                let complete = coverage::complete_cover(coords, loaded.clone())
-                    .or_else(|| coverage::loaded_cover(&raster_sources, coords, world));
-                let view_complete = complete.is_none() && all_loaded;
-                let covered = complete
-                    .or_else(|| all_loaded.then_some(loaded))
-                    .unwrap_or_default();
-                shapes.extend(covered.into_iter().map(|source| ShapeSource {
+                let complete = coverage::complete_cover(coords, loaded.clone());
+                let (under, over, view_complete) = match complete {
+                    Some(complete) => (Vec::new(), complete, false),
+                    None if all_loaded => (
+                        coverage::loaded_cover(&raster_sources, coords, world).unwrap_or_default(),
+                        loaded,
+                        true,
+                    ),
+                    None => (
+                        coverage::loaded_cover(&raster_sources, coords, world).unwrap_or_default(),
+                        Vec::new(),
+                        false,
+                    ),
+                };
+                shapes.extend(under.into_iter().map(|source| ShapeSource {
+                    coords: source,
+                    raster_source: Some(source_id.clone()),
+                    view_complete: false,
+                    absent: false,
+                }));
+                shapes.extend(over.into_iter().map(|source| ShapeSource {
                     coords: source,
                     raster_source: Some(source_id.clone()),
                     view_complete,
