@@ -190,6 +190,17 @@ fn requests(style: &Style, data: &[u8], zoom: f64) -> (GlyphRequests, HashSet<St
                         .filter(|c| *c != crate::style::expression::FORMAT_IMAGE)
                         .map(|c| c as u32),
                 );
+                // A section with a font of its own needs that font's glyphs for its characters.
+                let mut characters = text.chars();
+                for section in paint.label_sections(&properties, zoom) {
+                    let own: Vec<char> = characters.by_ref().take(section.length).collect();
+                    if let Some(font) = &section.font {
+                        fonts
+                            .entry(font.clone())
+                            .or_default()
+                            .extend(own.into_iter().map(|c| c as u32));
+                    }
+                }
             }
             if let Some(icon) = paint
                 .text("icon-image", &properties, zoom)
