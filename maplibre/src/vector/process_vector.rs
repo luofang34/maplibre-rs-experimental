@@ -154,7 +154,10 @@ mod processing;
 /// field, so a strict decoder rejects a tile that GL JS reads.
 fn decode_tile(data: &[u8]) -> Result<geozero::mvt::Tile, Box<dyn std::error::Error>> {
     geozero::mvt::Tile::decode(data).or_else(|error| {
-        let end = data.iter().rposition(|byte| *byte != 0).map_or(0, |i| i + 1);
+        let end = data
+            .iter()
+            .rposition(|byte| *byte != 0)
+            .map_or(0, |i| i + 1);
         if end == data.len() {
             return Err(error.into());
         }

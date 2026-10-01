@@ -301,6 +301,8 @@ fn fill_antialias_only_toggles_an_outline_the_renderer_does_not_draw() {
         let style = style_with_layer(serde_json::json!({
             "id": "land", "type": "fill", "paint": {"fill-color": "#eee", "fill-antialias": value}
         }));
-        style.validate().expect("fill-antialias does not change the fill");
+        style
+            .validate()
+            .expect("fill-antialias does not change the fill");
     }
 }
