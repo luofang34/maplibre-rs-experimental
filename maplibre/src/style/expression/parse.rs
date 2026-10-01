@@ -281,6 +281,13 @@ impl Parser {
                 })
             }
             "!" => Ok(Expression::Not(Box::new(self.parse_single(args, &Type::Boolean)?))),
+            "collator" => self.parse_collator(args),
+            "resolved-locale" => Ok(Expression::ResolvedLocale(Box::new(
+                self.parse_single(args, &Type::Collator)?,
+            ))),
+            "is-supported-script" => Ok(Expression::IsSupportedScript(Box::new(
+                self.parse_single(args, &Type::String)?,
+            ))),
             "in" => self.parse_in(args),
             "index-of" => self.parse_index_of(args),
             "slice" => self.parse_slice(args),

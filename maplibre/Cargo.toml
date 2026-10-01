@@ -55,6 +55,7 @@ rstar.workspace = true
 geozero = { workspace = true, features = ["with-geojson"] }
 tile-grid.workspace = true
 mlt-core.workspace = true
+unicode-normalization.workspace = true
 
 # Rendering
 wgpu.workspace = true

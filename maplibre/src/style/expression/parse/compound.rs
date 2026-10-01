@@ -6,7 +6,7 @@ use serde_json::Value as Json;
 use super::{Parser, Result};
 use crate::style::expression::{
     ast::{Arithmetic, Comparison, Expression},
-    value::Type,
+    value::{Type, Value},
 };
 
 impl Parser {
@@ -73,9 +73,10 @@ impl Parser {
         if args.len() != 2 && args.len() != 3 {
             return Err(self.error("Expected two or three arguments."));
         }
-        if args.len() == 3 {
-            return Err(self.error("Unknown expression \"collator\"."));
-        }
+        let collator = match args.get(2) {
+            Some(json) => Some(Box::new(self.parse_at(json, 3, Some(&Type::Collator))?)),
+            None => None,
+        };
         let mut left = self.parse_at(&args[0], 1, Some(&Type::Value))?;
         let mut right = self.parse_at(&args[1], 2, Some(&Type::Value))?;
         let (left_type, right_type) = (left.output_type(), right.output_type());
@@ -120,6 +121,30 @@ impl Parser {
             untyped: left_type == Type::Value || right_type == Type::Value,
             left: Box::new(left),
             right: Box::new(right),
+            collator,
+        })
+    }
+
+    pub(super) fn parse_collator(&mut self, args: &[Json]) -> Result<Expression> {
+        let [Json::Object(options)] = args else {
+            return Err(self.error("Collator options argument must be an object."));
+        };
+        let mut flag = |name: &str, index: usize| {
+            options.get(name).map_or_else(
+                || Ok(Expression::Literal(Value::Bool(false))),
+                |json| self.parse_at(json, index, Some(&Type::Boolean)),
+            )
+        };
+        let case_sensitive = flag("case-sensitive", 1)?;
+        let diacritic_sensitive = flag("diacritic-sensitive", 1)?;
+        let locale = match options.get("locale") {
+            Some(json) => Some(Box::new(self.parse_at(json, 1, Some(&Type::String))?)),
+            None => None,
+        };
+        Ok(Expression::Collator {
+            case_sensitive: Box::new(case_sensitive),
+            diacritic_sensitive: Box::new(diacritic_sensitive),
+            locale,
         })
     }
 

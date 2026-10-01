@@ -225,7 +225,22 @@ pub enum Expression {
         right: Box<Expression>,
         /// Whether an operand's type is only known at run time.
         untyped: bool,
+        /// How strings compare, when the expression names a collator.
+        collator: Option<Box<Expression>>,
     },
+    /// `collator`: a rule for comparing strings.
+    Collator {
+        /// Whether letters differing only in case differ.
+        case_sensitive: Box<Expression>,
+        /// Whether letters differing only in their accents differ.
+        diacritic_sensitive: Box<Expression>,
+        /// The locale, if given.
+        locale: Option<Box<Expression>>,
+    },
+    /// `resolved-locale`: the locale a collator compares in.
+    ResolvedLocale(Box<Expression>),
+    /// `is-supported-script`: whether a string is in scripts the renderer can lay out.
+    IsSupportedScript(Box<Expression>),
     /// `all`
     All(Vec<Expression>),
     /// `any`
@@ -353,7 +368,9 @@ impl Expression {
             | Self::All(_)
             | Self::Any(_)
             | Self::Not(_)
+            | Self::IsSupportedScript(_)
             | Self::In { .. } => Type::Boolean,
+            Self::Collator { .. } => Type::Collator,
             Self::Var { bound, .. } => bound.output_type(),
             Self::Let { body, .. } => body.output_type(),
             Self::Case { output, .. }
@@ -367,9 +384,11 @@ impl Expression {
             | Self::Arithmetic { .. }
             | Self::Math { .. }
             | Self::MinMax { .. } => Type::Number,
-            Self::TypeOf(_) | Self::Concat(_) | Self::StringCase { .. } | Self::Image(_) => {
-                Type::String
-            }
+            Self::TypeOf(_)
+            | Self::Concat(_)
+            | Self::StringCase { .. }
+            | Self::ResolvedLocale(_)
+            | Self::Image(_) => Type::String,
             Self::Assert { required, .. } => required.clone(),
             Self::Coerce { coercion, .. } => match coercion {
                 Coercion::Number => Type::Number,
@@ -433,11 +452,32 @@ impl Expression {
             | Self::Coerce { operands, .. }
             | Self::Rgba(operands)
             | Self::Concat(operands) => operands.iter().for_each(visit),
-            Self::Compare { left, right, .. } => {
+            Self::Compare {
+                left,
+                right,
+                collator,
+                ..
+            } => {
                 visit(left);
                 visit(right);
+                if let Some(collator) = collator {
+                    visit(collator);
+                }
+            }
+            Self::Collator {
+                case_sensitive,
+                diacritic_sensitive,
+                locale,
+            } => {
+                visit(case_sensitive);
+                visit(diacritic_sensitive);
+                if let Some(locale) = locale {
+                    visit(locale);
+                }
             }
             Self::Not(operand)
+            | Self::ResolvedLocale(operand)
+            | Self::IsSupportedScript(operand)
             | Self::Length(operand)
             | Self::Math { operand, .. }
             | Self::TypeOf(operand)

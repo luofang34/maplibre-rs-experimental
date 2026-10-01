@@ -176,11 +176,28 @@ fn expression_operators() {
 }
 
 #[test]
+fn a_collator_decides_whether_case_and_accents_differ() {
+    let properties = low_airway();
+    let compare = |case_sensitive: bool| {
+        passes(
+            json!([
+                "==",
+                ["get", "level"],
+                "LOW",
+                ["collator", {"case-sensitive": case_sensitive}]
+            ]),
+            &properties,
+        )
+    };
+    assert!(compare(false));
+    assert!(!compare(true));
+}
+
+#[test]
 fn unsupported_operators_are_errors_not_guesses() {
     for filter in [
         json!(["within", {"type": "Polygon", "coordinates": []}]),
         json!(["==", ["feature-state", "level"], "low"]),
-        json!(["==", ["get", "a"], ["get", "b"], ["collator", {}]]),
         json!(["match", ["get", "level"], "low"]),
     ] {
         assert!(

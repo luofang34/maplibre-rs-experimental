@@ -16,7 +16,7 @@ use maplibre::style::expression::{
 use serde_json::Value as Json;
 
 /// Passing cases the vendored suite must keep producing.
-const MIN_PASSING_CASES: usize = 380;
+const MIN_PASSING_CASES: usize = 387;
 
 /// Types of the specification the engine has no value for.
 const UNSUPPORTED_TYPES: &[&str] = &[
@@ -27,7 +27,6 @@ const UNSUPPORTED_TYPES: &[&str] = &[
     "colorArray",
     "projectionDefinition",
     "variableAnchorOffsetCollection",
-    "collator",
 ];
 
 enum Outcome {

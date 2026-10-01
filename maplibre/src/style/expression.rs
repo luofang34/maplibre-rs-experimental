@@ -7,6 +7,7 @@
 //! crate's `tests` directory pins them.
 
 mod ast;
+mod collation;
 mod evaluate;
 mod interpolation;
 mod legacy;

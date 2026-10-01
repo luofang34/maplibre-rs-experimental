@@ -4,6 +4,7 @@
 use super::{EvaluationContext, EvaluationError, Result};
 use crate::style::expression::{
     ast::{Arithmetic, Coercion, Comparison, Expression, MathFunction},
+    collation::Collation,
     interpolation::{interpolate_number, ColorSpace},
     value::{Color, Type, Value},
 };
@@ -131,6 +132,7 @@ pub(super) fn compare(
     left: Value,
     right: Value,
     untyped: bool,
+    collation: Option<&Collation>,
 ) -> Result<Value> {
     if operator.is_ordering() && untyped {
         let (left_type, right_type) = (left.type_of(), right.type_of());
@@ -144,12 +146,19 @@ pub(super) fn compare(
     }
     let ordering = match (&left, &right) {
         (Value::Number(a), Value::Number(b)) => a.partial_cmp(b),
-        (Value::String(a), Value::String(b)) => Some(a.cmp(b)),
+        (Value::String(a), Value::String(b)) => Some(match collation {
+            Some(collation) => collation.compare(a, b),
+            None => a.cmp(b),
+        }),
         _ => None,
     };
+    let equal = match (&left, &right, collation) {
+        (Value::String(a), Value::String(b), Some(collation)) => collation.compare(a, b).is_eq(),
+        _ => left == right,
+    };
     Ok(Value::Bool(match operator {
-        Comparison::Equal => left == right,
-        Comparison::NotEqual => left != right,
+        Comparison::Equal => equal,
+        Comparison::NotEqual => !equal,
         Comparison::Less => ordering.is_some_and(|ordering| ordering.is_lt()),
         Comparison::LessEqual => ordering.is_some_and(|ordering| ordering.is_le()),
         Comparison::Greater => ordering.is_some_and(|ordering| ordering.is_gt()),

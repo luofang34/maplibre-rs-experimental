@@ -6,6 +6,7 @@ use thiserror::Error;
 
 use super::{
     ast::{Expression, FeatureProperty, Global},
+    collation::{is_supported_script, Collation},
     value::{Type, Value},
 };
 
@@ -227,12 +228,44 @@ impl Expression {
                 left,
                 right,
                 untyped,
-            } => compare(
-                *operator,
-                left.evaluate(context)?,
-                right.evaluate(context)?,
-                *untyped,
-            ),
+                collator,
+            } => {
+                let collation = match collator {
+                    Some(collator) => match collator.evaluate(context)? {
+                        Value::Collator(collation) => Some(collation),
+                        _ => None,
+                    },
+                    None => None,
+                };
+                compare(
+                    *operator,
+                    left.evaluate(context)?,
+                    right.evaluate(context)?,
+                    *untyped,
+                    collation.as_ref(),
+                )
+            }
+            Self::Collator {
+                case_sensitive,
+                diacritic_sensitive,
+                locale,
+            } => Ok(Value::Collator(Collation {
+                case_sensitive: case_sensitive.evaluate(context)?.truthy(),
+                diacritic_sensitive: diacritic_sensitive.evaluate(context)?.truthy(),
+                locale: match locale {
+                    Some(locale) => locale.evaluate(context)?.as_str().map(str::to_owned),
+                    None => None,
+                },
+            })),
+            Self::ResolvedLocale(collator) => Ok(match collator.evaluate(context)? {
+                Value::Collator(collation) => Value::String(collation.resolved_locale().to_owned()),
+                _ => Value::Null,
+            }),
+            Self::IsSupportedScript(text) => Ok(Value::Bool(
+                text.evaluate(context)?
+                    .as_str()
+                    .is_none_or(is_supported_script),
+            )),
             Self::All(operands) => {
                 for operand in operands {
                     if !expect_bool(operand.evaluate(context)?)? {
