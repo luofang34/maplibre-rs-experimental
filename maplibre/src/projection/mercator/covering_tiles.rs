@@ -153,6 +153,7 @@ fn lod_context(view_state: &ViewState, requested_zoom: f64, world_size: f64) -> 
                 view_state.field_of_view().0.to_degrees(),
                 requested_zoom,
             )
+            .planar()
         })
 }
 

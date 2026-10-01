@@ -21,6 +21,9 @@ pub(crate) struct LodContext {
     distance_to_center_3d: f64,
     requested_zoom: f64,
     field_of_view_degrees: f64,
+    /// Whether a tile's distance is the straight distance to its rectangle, as on the Mercator
+    /// plane, instead of the farther of the two axis distances GL JS uses on the globe.
+    planar: bool,
 }
 
 impl LodContext {
@@ -96,7 +99,14 @@ impl LodContext {
             distance_to_center_3d: distance_to_center_2d.hypot(distance_z),
             requested_zoom,
             field_of_view_degrees,
+            planar: false,
         }
+    }
+
+    /// Measures the distance to a tile as the straight distance to its rectangle.
+    pub(crate) fn planar(mut self) -> Self {
+        self.planar = true;
+        self
     }
 
     pub(crate) fn from_eye(camera: Point2<f64>, height: f64, focal_pixels: f64) -> Self {
@@ -107,6 +117,7 @@ impl LodContext {
             distance_to_center_3d: height,
             requested_zoom: 0.0,
             field_of_view_degrees: 0.0,
+            planar: false,
         }
     }
 
@@ -130,7 +141,11 @@ impl LodContext {
         rounding: ZoomRounding,
         history: Option<&crate::projection::lod_history::LodHistory>,
     ) -> ZoomLevel {
-        let distance_2d = distance_to_tile_2d(self.camera, tile);
+        let distance_2d = if self.planar {
+            distance_to_tile_planar(self.camera, tile)
+        } else {
+            distance_to_tile_2d(self.camera, tile)
+        };
         let desired = if let Some(focal) = self.eye_focal_pixels {
             let distance = distance_2d.hypot(self.distance_z).max(f64::EPSILON);
             // Bound the longest projected texel axis. A grazing-angle area estimate
@@ -150,6 +165,21 @@ impl LodContext {
             .clamp(0.0, (MAX_ZOOM - 1) as f64);
         ZoomLevel::new(desired as u8)
     }
+}
+
+/// The straight distance from a point to a tile's rectangle in Mercator `0..1` units.
+fn distance_to_tile_planar(point: Point2<f64>, tile: TileCoords) -> f64 {
+    let scale = 2_f64.powi(i32::from(u8::from(tile.z)));
+    let size = 1.0 / scale;
+    let axis = |point: f64, corner: f64| {
+        let delta = point - corner;
+        if delta < 0.0 {
+            -delta
+        } else {
+            (delta - size).max(0.0)
+        }
+    };
+    axis(point.x, f64::from(tile.x) / scale).hypot(axis(point.y, f64::from(tile.y) / scale))
 }
 
 fn mercator_center(camera: &GlobeCameraState) -> Point2<f64> {
