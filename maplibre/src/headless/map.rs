@@ -533,7 +533,15 @@ fn initial_view_state(window_size: crate::window::PhysicalSize, style: &Style) -
     };
     let zoom = Zoom::new(style.zoom.unwrap_or_default().max(lowest_zoom));
     let center = style.center.unwrap_or_default();
-    let center = WorldCoords::from_lat_lon(LatLon::new(center[1], center[0]), zoom);
+    let mut center = WorldCoords::from_lat_lon(LatLon::new(center[1], center[0]), zoom);
+    if !globe {
+        // The view may not show past the poles of a flat world, as GL JS constrains the centre.
+        let world = crate::coords::TILE_SIZE * 2_f64.powf(zoom.value());
+        let half = f64::from(window_size.height()) / 2.0;
+        if world > 2.0 * half {
+            center.y = center.y.clamp(half, world - half);
+        }
+    }
     let mut view_state = ViewState::new(
         window_size,
         center,
