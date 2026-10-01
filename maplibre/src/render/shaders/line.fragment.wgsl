@@ -16,6 +16,7 @@ struct FragmentInput {
     @location(8) progress: f32,
     @location(9) across: f32,
     @location(10) blur: f32,
+    @location(11) @interpolate(flat) floor_width: f32,
 };
 
 struct Output {
@@ -39,7 +40,16 @@ fn main(in: FragmentInput) -> Output {
     let dash_v = select(0.5, (7.5 - 7.0 * in.across) / 15.0, round_dash);
     let distance_sample = textureSample(dash_texture, dash_sampler,
         vec2<f32>(in.dash.x / max(dash_period.x * dash_scale, 1e-6), dash_v)).r;
-    let dash_alpha = select(clamp(0.5 + (distance_sample * 255.0 - 128.0) / 254.0 * dash_period.x * dash_scale * in.dash.y, 0.0, 1.0),
+    // A gradient line's dash edge is a smoothstep over a thirtysecond of the pattern's width in
+    // alpha units, as GL JS draws it; other dashes ramp over a pixel.
+    let edge = 1.0 / max(dash_period.x * in.floor_width, 1e-6);
+    let gradient_alpha = smoothstep(0.5 - edge, 0.5 + edge, distance_sample);
+    let dash_alpha = select(
+        select(
+            clamp(0.5 + (distance_sample * 255.0 - 128.0) / 254.0 * dash_period.x * dash_scale * in.dash.y, 0.0, 1.0),
+            gradient_alpha,
+            dash_period.y > 0.5 && dash_period.y < 1.5,
+        ),
         1.0, dash_period.x <= 0.0);
     if in.horizon_distance < 0.0 {
         discard;

@@ -13,6 +13,7 @@ struct VertexOutput {
     @location(8) progress: f32,
     @location(9) across: f32,
     @location(10) blur: f32,
+    @location(11) @interpolate(flat) floor_width: f32,
 };
 
 @vertex
@@ -101,6 +102,14 @@ fn main(
         center = vec4<f32>(center.xy + offset.xy, 0.0, center.w + offset.w);
     }
 
+    // A line with a gradient counts its dashes along the progress of the whole line, scaled to
+    // a range of 32767, in widths rounded down: a pattern repeats every `sum * 16 * floor(width)`
+    // of those units, as GL JS draws it.
+    let floor_width = max(floor(select(line_width, feature_width, per_feature)), 1.0);
+    let gradient_dash = vec2<f32>(
+        path.z / max(color.x, 1e-6) * 32767.0 / (16.0 * floor_width),
+        color.x / max(line_scale.y, 1e-6) * 16.0 * floor_width / 32767.0,
+    );
     return VertexOutput(
         center,
         color,
@@ -110,11 +119,16 @@ fn main(
         projected_center.horizon_distance,
         position.x,
         clip_antimeridian,
-        vec2<f32>(path.z / max(line_scale.y * dash_unit, 1e-6), dash_unit),
+        select(
+            vec2<f32>(path.z / max(line_scale.y * dash_unit, 1e-6), dash_unit),
+            gradient_dash,
+            line_style.w > 0.5,
+        ),
         // A gradient layer carries the length of the line in the red channel of its colour.
         path.z / max(color.x, 1e-6),
         // Which side of the line the vertex is on: the elevation sentinel of a stroke encodes it.
         select(1.0, -1.0, negative_side) * min(length(normal), 1.0),
         blur_width,
+        floor_width,
     );
 }
