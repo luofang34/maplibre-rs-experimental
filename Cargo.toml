@@ -54,6 +54,8 @@ jni = "0.21.1"
 js-sys = "0.3"
 log = "0.4.20"
 lyon = { version = "1.0.1", features = [] }
+# Pinned: later releases require a newer rustc than the workspace toolchain.
+mlt-core = "=0.12.5"
 naga = { version = "30.0.1", features = ["wgsl-in"] }
 android_logger = "0.14.1"
 png = { version = "0.17.10" }
