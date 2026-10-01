@@ -23,6 +23,11 @@ impl LayerValidation<'_> {
             LayerPaint::Fill(p) => {
                 self.property("paint.fill-color", p.fill_color.as_ref(), Feature);
                 self.property("paint.fill-opacity", p.fill_opacity.as_ref(), Feature);
+                self.property(
+                    "paint.fill-outline-color",
+                    p.fill_outline_color.as_ref(),
+                    Feature,
+                );
             }
             LayerPaint::FillExtrusion(p) => {
                 let color = p.fill_extrusion_color.as_ref();

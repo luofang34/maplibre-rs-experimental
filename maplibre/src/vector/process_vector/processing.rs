@@ -71,7 +71,10 @@ fn tessellator(paint: &LayerPaint, request: &VectorTileRequest) -> ZeroTessellat
         LayerPaint::Fill(paint) if paint.fill_pattern.is_some() => {
             tessellator.fallback_color = [1.0; 4]
         }
-        LayerPaint::Fill(paint) => tessellator.style_property = paint.fill_color.clone(),
+        LayerPaint::Fill(paint) => {
+            tessellator.style_property = paint.fill_color.clone();
+            tessellator.outline_property = paint.fill_outline_color.clone();
+        }
         LayerPaint::FillExtrusion(paint) if paint.fill_extrusion_pattern.is_some() => {
             tessellator.fallback_color = [1.0; 4]
         }

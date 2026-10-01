@@ -62,6 +62,15 @@ impl FillVertexConstructor<ShaderVertex> for VertexConstructor {
     }
 }
 
+impl lyon::tessellation::StrokeVertexConstructor<ShaderVertex> for VertexConstructor {
+    fn new_vertex(&mut self, vertex: lyon::tessellation::StrokeVertex) -> ShaderVertex {
+        ShaderVertex::new(vertex.position().to_array(), [0.0, 0.0])
+    }
+}
+
+/// Outline width in tile units: about one pixel of a 512 px tile.
+const OUTLINE_WIDTH: f32 = 8.0;
+
 /// Geometry with a draw-index count separate from any GPU copy-alignment padding.
 /// Conversion from `VertexBuffers` pads indices and requires copy-aligned vertex bytes.
 #[derive(Clone)]
@@ -195,6 +204,10 @@ pub struct ZeroTessellator<I: std::ops::Add + From<lyon::tessellation::VertexId>
     pub is_line_layer: bool,
     /// Set when a line's width or offset varies by feature; packed into each stroke vertex.
     pub line_feature_style: Option<LineFeatureStyle>,
+    /// Colour of a one-pixel outline drawn along the edges of each filled polygon.
+    pub outline_property: Option<crate::style::layer::StyleProperty<csscolorparser::Color>>,
+    /// The outline of the feature being processed, drawn after its fill.
+    outline: VertexBuffers<ShaderVertex, I>,
     current_index: usize,
 }
 
@@ -229,6 +242,8 @@ impl<I: std::ops::Add + From<lyon::tessellation::VertexId> + MaxIndex> Default
             circle: None,
             extrusion: None,
             feature_opacity: None,
+            outline_property: None,
+            outline: VertexBuffers::new(),
         }
     }
 }
@@ -349,10 +364,20 @@ where
         }
         let path_builder = self.path_builder.replace(Path::builder());
         let index_start = self.buffer.indices.len();
+        let path = path_builder.build();
+        if self.outline_property.is_some() {
+            StrokeTessellator::new()
+                .tessellate_path(
+                    &path,
+                    &StrokeOptions::tolerance(DEFAULT_TOLERANCE).with_line_width(OUTLINE_WIDTH),
+                    &mut BuffersBuilder::new(&mut self.outline, VertexConstructor {}),
+                )
+                .map_err(|error| GeozeroError::Geometry(error.to_string()))?;
+        }
 
         FillTessellator::new()
             .tessellate_path(
-                &path_builder.build(),
+                &path,
                 &FillOptions::tolerance(DEFAULT_TOLERANCE).with_fill_rule(FillRule::NonZero),
                 &mut BuffersBuilder::new(&mut self.buffer, VertexConstructor {}),
             )
@@ -368,6 +393,45 @@ where
             },
         )
         .map_err(|error| GeozeroError::Geometry(error.to_string()))
+    }
+
+    /// Draws the pending outline as a feature of its own, after the fill it belongs to.
+    fn append_outline(&mut self) {
+        let outline = std::mem::replace(&mut self.outline, VertexBuffers::new());
+        let Some(property) = &self.outline_property else {
+            return;
+        };
+        let Some(colour) = property.evaluate_for(&self.feature_properties, self.zoom) else {
+            return;
+        };
+        if outline.vertices.is_empty() {
+            return;
+        }
+        let base = self.buffer.vertices.len();
+        self.buffer.vertices.extend(outline.vertices);
+        self.buffer
+            .indices
+            .extend(outline.indices.into_iter().map(|index| {
+                I::from(lyon::tessellation::VertexId::from_usize(
+                    base + index.into() as usize,
+                ))
+            }));
+        self.update_feature_indices();
+        let opacity = self
+            .feature_opacity
+            .as_ref()
+            .map_or(1.0, |(opacity, zoom)| {
+                opacity
+                    .evaluate_for(&self.feature_properties, *zoom)
+                    .unwrap_or(1.0)
+                    .clamp(0.0, 1.0)
+            });
+        self.feature_colors.push([
+            colour.r as f32,
+            colour.g as f32,
+            colour.b as f32,
+            colour.a as f32 * opacity,
+        ]);
     }
 
     fn append_coordinate(&mut self, coordinate: [f32; 2]) -> GeoResult<()> {
@@ -454,6 +518,7 @@ where
         }
 
         self.feature_colors.push(color);
+        self.append_outline();
         self.feature_properties.clear();
         Ok(())
     }

@@ -53,6 +53,14 @@ pub struct FillPaint {
     )]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fill_color: Option<StyleProperty<Color>>,
+    /// Colour of a one-pixel outline along the polygon's edges, per feature where data driven.
+    #[serde(rename = "fill-outline-color")]
+    #[serde(
+        default,
+        deserialize_with = "StyleProperty::<Color>::deserialize_color_or_none"
+    )]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fill_outline_color: Option<StyleProperty<Color>>,
     /// Opacity multiplied into the fill colour, per feature where data driven.
     #[serde(rename = "fill-opacity")]
     #[serde(
