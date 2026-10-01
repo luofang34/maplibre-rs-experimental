@@ -62,6 +62,8 @@ struct TestMeta {
     padding: camera_options::Padding,
     /// Elevation the fixture pins the camera's center at.
     center_elevation: Option<f64>,
+    /// Sources whose tiles stop loading, with the zoom the camera was at when they were paused.
+    paused_tiles: std::collections::HashMap<String, f64>,
 }
 
 impl Default for TestMeta {
@@ -76,6 +78,7 @@ impl Default for TestMeta {
             show_padding: false,
             padding: camera_options::Padding::default(),
             center_elevation: None,
+            paused_tiles: std::collections::HashMap::new(),
         }
     }
 }
@@ -124,6 +127,7 @@ fn parse_test_meta(style_value: &Value) -> TestMeta {
             .unwrap_or(false),
         padding: camera_options::Padding::default(),
         center_elevation: None,
+        paused_tiles: std::collections::HashMap::new(),
     }
 }
 

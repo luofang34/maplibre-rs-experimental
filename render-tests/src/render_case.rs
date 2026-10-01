@@ -1,6 +1,9 @@
 //! Renders a fixture and compares its pixels with the expected image.
 
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 
 use maplibre::{
     headless::{create_headless_renderer_with_settings, map::HeadlessMap, HeadlessPlugin},
@@ -56,10 +59,11 @@ async fn render_fixture(test_dir: &Path) -> Result<(f64, f64), String> {
             .required_tile_coords()
             .map_err(|error| format!("Cannot select source tiles: {error}"))?;
     }
+    let paused = paused_coords(&style, &meta).await?;
     let (layers, raster_layers) = load_sources_blocking(
         &mut map,
         &style,
-        &coords,
+        (&coords, &paused),
         (&images, meta.pixel_ratio, &vector_states),
     )?;
     // Labels fade in over 300 ms of 16 ms frames, so a frame settles only after about twenty;
@@ -121,7 +125,7 @@ fn load_style_blocking(
     crate::operations::apply(
         &mut style,
         &crate::operations::operations_of(&value),
-        (&mut transitions, &mut vector_states),
+        (&mut transitions, &mut vector_states, &mut meta.paused_tiles),
     )?;
     transitions.settle(&mut style)?;
     crate::pattern_images::add_pattern_images(&mut style, meta.pixel_ratio)?;
@@ -129,6 +133,24 @@ fn load_style_blocking(
         layer.index = index as u32 + 1; // The depth clear is zero.
     }
     Ok((style, meta, vector_states))
+}
+
+/// The tiles each paused source loaded: those the camera needed when the source was paused.
+async fn paused_coords(
+    style: &Style,
+    meta: &TestMeta,
+) -> Result<HashMap<String, Vec<maplibre::coords::WorldTileCoords>>, String> {
+    let mut paused = HashMap::new();
+    for (source, zoom) in &meta.paused_tiles {
+        let mut earlier = style.clone();
+        earlier.zoom = Some(*zoom);
+        let map = create_map(&earlier, meta).await?;
+        let coords = map
+            .required_tile_coords()
+            .map_err(|error| format!("Cannot select source tiles: {error}"))?;
+        paused.insert(source.clone(), coords);
+    }
+    Ok(paused)
 }
 
 async fn create_map(style: &Style, meta: &TestMeta) -> Result<HeadlessMap, String> {

@@ -155,9 +155,10 @@ fn feature_state(
 pub(super) fn apply(
     style: &mut Style,
     operations: &[Value],
-    (transitions, vector_states): (
+    (transitions, vector_states, paused_tiles): (
         &mut crate::transitions::Transitions,
         &mut crate::vector_feature_state::VectorFeatureStates,
+        &mut std::collections::HashMap<String, f64>,
     ),
 ) -> Result<(), String> {
     for operation in operations {
@@ -171,6 +172,11 @@ pub(super) fn apply(
             // Rendering is deterministic, so waiting for the map to settle changes nothing.
             ("wait" | "idle" | "sleep", _) => {
                 transitions.wait(items.get(1).and_then(Value::as_f64).unwrap_or(0.0));
+                Ok(())
+            }
+            // The source keeps the tiles its view needed now, and later views draw those.
+            ("pauseTiles", Some(source)) => {
+                paused_tiles.insert(source.to_owned(), style.zoom.unwrap_or(0.0));
                 Ok(())
             }
             // Only the camera left by the last operation is drawn, so it becomes the style's.

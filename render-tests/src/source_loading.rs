@@ -35,7 +35,7 @@ use crate::{
 pub(super) fn load_sources_blocking(
     map: &mut HeadlessMap,
     style: &Style,
-    target_coords: &[WorldTileCoords],
+    (view_coords, paused): (&[WorldTileCoords], &HashMap<String, Vec<WorldTileCoords>>),
     (images, pixel_ratio, vector_states): (
         &HashMap<String, PlacedImage>,
         f64,
@@ -60,13 +60,14 @@ pub(super) fn load_sources_blocking(
         if layers.is_empty() {
             continue;
         }
+        let target_coords = paused.get(name).map_or(view_coords, Vec::as_slice);
         match source {
             Source::GeoJson(source) => all_layers.append(&mut load_geojson_blocking(
                 map,
                 (style, name, source),
                 &layers,
                 target_coords,
-                (&projection, pixel_ratio),
+                (&projection, pixel_ratio, paused.contains_key(name)),
             )?),
             Source::Vector(source) => all_layers.append(&mut load_vector_blocking(
                 map,
@@ -94,7 +95,7 @@ fn load_geojson_blocking(
     (style, name, source): (&Style, &str, &GeoJsonSource),
     layers: &[StyleLayer],
     target_coords: &[WorldTileCoords],
-    (projection, pixel_ratio): (&ProjectionType, f64),
+    (projection, pixel_ratio, paused): (&ProjectionType, f64, bool),
 ) -> Result<ProcessedLayers, String> {
     let data = &source.data;
     let loaded;
@@ -141,7 +142,9 @@ fn load_geojson_blocking(
         }
     }
     for coords in &tiles {
-        let magnified = if u8::from(coords.z) >= max_zoom {
+        // A paused source keeps its tiles while the view moves on, so they are laid out at the
+        // zoom the view has.
+        let magnified = if paused || u8::from(coords.z) >= max_zoom {
             level.max(u8::from(coords.z))
         } else {
             0
