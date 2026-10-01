@@ -79,8 +79,33 @@ pub(super) fn screen_boxes(
     projection: &ShaderProjectionData,
     uniforms: &SymbolUniforms,
 ) -> Option<[Option<[f64; 4]>; 2]> {
+    screen_boxes_shifted(
+        layer, feature, elevation, view, projection, uniforms, [0.0; 2],
+    )
+}
+
+/// [`screen_boxes`] with the text moved by `text_shift` layout pixels along its own axes before
+/// it is projected, so that a label lying on the map is foreshortened like the rest of it.
+pub(super) fn screen_boxes_shifted(
+    layer: &SymbolLayerData,
+    feature: &Feature,
+    elevation: f32,
+    view: &ViewState,
+    projection: &ShaderProjectionData,
+    uniforms: &SymbolUniforms,
+    text_shift: [f32; 2],
+) -> Option<[Option<[f64; 4]>; 2]> {
     let mut result: [Option<[f64; 4]>; 2] = [None, None];
-    for part in feature.parts.into_iter().flatten() {
+    for mut part in feature.parts.into_iter().flatten() {
+        if part.text {
+            let [x, y] = text_shift.map(f64::from);
+            part.bounds = [
+                part.bounds[0] + x,
+                part.bounds[1] + y,
+                part.bounds[2] + x,
+                part.bounds[3] + y,
+            ];
+        }
         let placement = Placement {
             coords: layer.coords,
             anchor: [
