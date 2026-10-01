@@ -22,15 +22,20 @@ fn main(
     @location(5) translate2: vec4<f32>,
     @location(6) translate3: vec4<f32>,
     @location(7) translate4: vec4<f32>,
+    @location(9) overlap: f32,
 ) -> VertexOutput {
-    let tile_position = vec3<f32>(vec2<f32>(raw_position), 0.0);
+    // A tile drawn into a drape texture reaches a hair past its edges, which extend the texels
+    // there instead of stretching the tile.
+    let is_pole = raw_position.y < -32767 || raw_position.y > 32766;
+    let enlarged = (vec2<f32>(raw_position) - vec2<f32>(EXTENT * 0.5)) * overlap + vec2<f32>(EXTENT * 0.5);
+    let tile_position = vec3<f32>(select(enlarged, vec2<f32>(raw_position), is_pole), 0.0);
     let projected = project_tile_mesh_position(
         tile_position,
         raw_position,
         mat4x4<f32>(translate1, translate2, translate3, translate4),
         tile_mercator_coords,
     );
-    var tex_coords = vec2<f32>(raw_position) / EXTENT;
+    var tex_coords = tile_position.xy / EXTENT;
     if raw_position.y < -32767 {
         tex_coords.y = 0.0;
     } else if raw_position.y > 32766 {

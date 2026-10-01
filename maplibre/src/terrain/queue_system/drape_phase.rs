@@ -15,7 +15,7 @@ use crate::{
     terrain::{
         drape_targets::TargetSpec,
         resources::DRAPE_SIZE,
-        rtt::{drape_transform, overlapped},
+        rtt::{drape_transform, EDGE_OVERLAP},
         DrapePhase, DrapeTarget,
     },
     vector::render_commands::{DrawLineTiles, DrawVectorTiles},
@@ -43,13 +43,6 @@ pub(super) fn drape_metadata(
             let transform = redraw
                 .then(|| drape_transform(spec.coords, shape.source))
                 .flatten()
-                .map(|transform| {
-                    if shape.raster_layers.is_empty() {
-                        transform
-                    } else {
-                        overlapped(transform)
-                    }
-                })
                 .and_then(|transform| transform.cast::<f32>());
             let Some(transform) = transform else {
                 target_slots.push(None);
@@ -72,7 +65,13 @@ pub(super) fn drape_metadata(
                 .into(),
                 clip_antimeridian: 0,
                 line_units_per_pixel: 8.0 * texture_zoom.scale_to_tile(&shape.source) as f32,
-                line_width_scale: 2.0_f64.powf(texture_zoom.value() - view_zoom.value()) as f32,
+                // A raster tile reaches a hair past its edges; a vector tile's lines scale with the
+                // texture's zoom.
+                line_width_scale: if shape.raster_layers.is_empty() {
+                    2.0_f64.powf(texture_zoom.value() - view_zoom.value()) as f32
+                } else {
+                    (1.0 + EDGE_OVERLAP) as f32
+                },
             });
         }
         slots.push(target_slots);

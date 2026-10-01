@@ -7,7 +7,7 @@ use crate::coords::{WorldTileCoords, EXTENT};
 /// Homogeneous scale keeping layer z-indices well inside the clip depth range when `w` is one.
 const CLIP_SCALE: f64 = 65536.0;
 /// Fraction of a raster tile's extent by which it overlaps its neighbours in a drape texture.
-const EDGE_OVERLAP: f64 = 0.01;
+pub(crate) const EDGE_OVERLAP: f64 = 0.01;
 
 /// Maps tile-local coordinates of `source` to clip space of the drape texture of `target`.
 ///
@@ -30,17 +30,6 @@ pub fn drape_transform(target: WorldTileCoords, source: WorldTileCoords) -> Opti
         0.0, 0.0, 0.0, CLIP_SCALE,
     );
     Some(clip_scale * ortho * source_to_target)
-}
-
-/// `transform` with the tile reaching a hair past its edges. The texture coordinates stay those
-/// of the tile, so the edge texels extend into the overlap, and neighbouring raster tiles leave
-/// no crack where two partly covered edge pixels blend with what lies under them.
-pub fn overlapped(transform: Matrix4<f64>) -> Matrix4<f64> {
-    let centre = Vector3::new(EXTENT / 2.0, EXTENT / 2.0, 0.0);
-    transform
-        * Matrix4::from_translation(centre)
-        * Matrix4::from_nonuniform_scale(1.0 + EDGE_OVERLAP, 1.0 + EDGE_OVERLAP, 1.0)
-        * Matrix4::from_translation(-centre)
 }
 
 /// Maps `source` tile-local coordinates in `0..EXTENT` to `target` tile-local coordinates.

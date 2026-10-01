@@ -41,6 +41,12 @@ pub fn tile_texture_vertex_buffers() -> Vec<VertexBufferLayout> {
                     format: wgpu::VertexFormat::Float32x4,
                     shader_location: 7,
                 },
+                // How far a tile drawn into a drape texture is enlarged; one elsewhere.
+                wgpu::VertexAttribute {
+                    offset: std::mem::offset_of!(ShaderTileMetadata, line_width_scale) as u64,
+                    format: wgpu::VertexFormat::Float32,
+                    shader_location: 9,
+                },
                 // tile_mercator_coords
                 wgpu::VertexAttribute {
                     offset: 4 * wgpu::VertexFormat::Float32x4.size()
