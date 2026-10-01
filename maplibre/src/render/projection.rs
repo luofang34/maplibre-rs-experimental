@@ -49,6 +49,9 @@ pub struct ShaderProjectionData {
     pub radius_meters: f32,
     /// Whether viewport symbols use a world-up basis for a tracked external eye.
     pub external_view: f32,
+    /// x: the globe's angle per pixel relative to a world of 512 pixels at the zoom, which the
+    /// extent of a circle lying on the globe follows; the other lanes are padding.
+    pub globe_circle: [f32; 4],
 }
 
 impl ShaderProjectionData {
@@ -61,6 +64,7 @@ impl ShaderProjectionData {
             center_clip_w: 1.0,
             radius_meters: Body::EARTH.radius_meters as f32,
             external_view: 0.0,
+            globe_circle: [1.0, 0.0, 0.0, 0.0],
         }
     }
 }
@@ -74,6 +78,7 @@ impl Default for ShaderProjectionData {
             center_clip_w: 1.0,
             radius_meters: Body::EARTH.radius_meters as f32,
             external_view: 0.0,
+            globe_circle: [1.0, 0.0, 0.0, 0.0],
         }
     }
 }
@@ -242,6 +247,7 @@ pub fn projection_data_for_view(
         external_view: f32::from(view_state.has_external_view()),
         center_clip_w: mercator_center_w + (globe_center_w - mercator_center_w) * transition,
         radius_meters,
+        globe_circle: [globe.circle_radius_correction() as f32, 0.0, 0.0, 0.0],
         ..ShaderProjectionData::from_renderer_data(data)
     })
 }

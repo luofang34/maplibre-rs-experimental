@@ -4,6 +4,8 @@ struct ShaderProjectionData {
     // x: Mercator-to-globe transition, y: clip-space w of the view center,
     // z: radius of the body in metres.
     transition_and_padding: vec4<f32>,
+    // x: radius correction of a circle lying on the globe.
+    globe_circle: vec4<f32>,
 };
 
 struct ProjectedTilePosition {
@@ -204,4 +206,15 @@ fn project_tile_tangent_3d(
     let globe = projection.main_matrix * vec4<f32>(tangent, 0.0);
     let flat = fallback_matrix * vec4<f32>(offset, 0.0, 0.0);
     return mix(flat, globe, projection.transition_and_padding.x);
+}
+
+// Turns a unit-sphere vector by angles toward the tile's east and south, as a circle lying on
+// the globe is extruded.
+fn globe_rotate_vector(vector: vec3<f32>, angles: vec2<f32>) -> vec3<f32> {
+    var axis_right = vec3<f32>(vector.z, 0.0, -vector.x);
+    var axis_up = cross(axis_right, vector);
+    axis_right = normalize(axis_right);
+    axis_up = normalize(axis_up);
+    let t = tan(angles);
+    return normalize(vector + axis_right * t.x + axis_up * t.y);
 }

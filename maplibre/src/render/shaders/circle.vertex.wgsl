@@ -64,14 +64,17 @@ fn main(
             // Lying on the map already scales with distance; undo it at the center.
             pixels = total * projected_center.clip_position.w / center_distance;
         }
-        let corner_position = center + extrude * pixels * TILE_UNITS_PER_PIXEL * zoom_factor;
-        let projected = project_tile_position(
-            vec3<f32>(corner_position, 0.0),
-            transform,
-            tile_mercator_coords,
-        );
-        clip = projected.clip_position;
-        horizon = projected.horizon_distance;
+        let corner_offset = extrude * pixels * TILE_UNITS_PER_PIXEL * zoom_factor;
+        let corner_position = center + corner_offset;
+        // On the globe the circle keeps its angular size, not the stretch of the Mercator
+        // plane it was laid out in, so its corners are turned on the sphere from its center.
+        let transition = projection.transition_and_padding.x;
+        let mercator_clip = transform * vec4<f32>(corner_position, 0.0, 1.0);
+        let center_vector = tile_position_on_unit_sphere(center, tile_mercator_coords);
+        let angles = corner_offset * tile_mercator_coords.z * PROJECTION_TWO_PI * projection.globe_circle.x;
+        let globe_clip = projection.main_matrix * vec4<f32>(globe_rotate_vector(center_vector, angles), 1.0);
+        clip = interpolate_clip_position(mercator_clip, globe_clip, transition);
+        horizon = projected_center.horizon_distance;
     } else {
         let projected = project_tile_position(
             vec3<f32>(center, 0.0),
