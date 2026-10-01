@@ -337,10 +337,20 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
                 };
                 let use_globe_geometry = request.projection.uses_globe_rendering(f64::from(zoom));
                 let mut tessellator = match paint {
-                    LayerPaint::Circle(circle) => ZeroTessellator::<IndexDataType>::default()
-                        .with_circles(CircleOptions::for_paint(circle, f64::from(zoom))),
+                    LayerPaint::Circle(circle) => {
+                        ZeroTessellator::<IndexDataType>::default().with_circles(CircleOptions {
+                            // A circle lying on the map follows the globe's curve.
+                            grid: use_globe_geometry
+                                && circle.circle_pitch_alignment
+                                    == crate::style::circle::CirclePitchAlignment::Map,
+                            ..CircleOptions::for_paint(circle, f64::from(zoom))
+                        })
+                    }
                     LayerPaint::Heatmap(heatmap) => ZeroTessellator::<IndexDataType>::default()
-                        .with_circles(CircleOptions::for_heatmap(heatmap, f64::from(zoom))),
+                        .with_circles(CircleOptions {
+                            grid: use_globe_geometry,
+                            ..CircleOptions::for_heatmap(heatmap, f64::from(zoom))
+                        }),
                     LayerPaint::FillExtrusion(extrusion) => {
                         let tessellator = ZeroTessellator::<IndexDataType>::default()
                             .with_extrusion(ExtrusionOptions::for_paint(extrusion));

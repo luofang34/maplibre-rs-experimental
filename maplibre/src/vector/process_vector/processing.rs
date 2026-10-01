@@ -48,40 +48,45 @@ fn tessellator(paint: &LayerPaint, request: &VectorTileRequest) -> ZeroTessellat
         LayerPaint::Line(_) => granularity_for_zoom(512, 0, zoom),
         _ => 1,
     };
-    let mut tessellator =
-        match paint {
-            LayerPaint::Circle(circle) => ZeroTessellator::default()
-                .with_circles(CircleOptions::for_paint(circle, style_zoom)),
-            LayerPaint::Heatmap(heatmap) => ZeroTessellator::default()
-                .with_circles(CircleOptions::for_heatmap(heatmap, style_zoom)),
-            LayerPaint::FillExtrusion(extrusion) => {
-                let tessellator = ZeroTessellator::default()
-                    .with_extrusion(ExtrusionOptions::for_paint(extrusion));
-                if request.projection.uses_globe_rendering(style_zoom) {
-                    // Roofs and the edges of walls follow the sphere as fills and lines do.
-                    let last_tile = i64::from(crate::coords::ZOOM_BOUNDS[usize::from(zoom)]) - 1;
-                    tessellator.with_globe_subdivision(
-                        granularity_for_zoom(128, 2, zoom),
-                        zoom == 0,
-                        request.coords.y == 0,
-                        i64::from(request.coords.y) == last_tile,
-                    )
-                } else {
-                    tessellator
-                }
-            }
-            _ if request.projection.uses_globe_rendering(style_zoom) => {
+    let mut tessellator = match paint {
+        LayerPaint::Circle(circle) => ZeroTessellator::default().with_circles(CircleOptions {
+            // A circle lying on the map follows the globe's curve.
+            grid: request.projection.uses_globe_rendering(style_zoom)
+                && circle.circle_pitch_alignment == crate::style::circle::CirclePitchAlignment::Map,
+            ..CircleOptions::for_paint(circle, style_zoom)
+        }),
+        LayerPaint::Heatmap(heatmap) => ZeroTessellator::default().with_circles(CircleOptions {
+            grid: request.projection.uses_globe_rendering(style_zoom),
+            ..CircleOptions::for_heatmap(heatmap, style_zoom)
+        }),
+        LayerPaint::FillExtrusion(extrusion) => {
+            let tessellator =
+                ZeroTessellator::default().with_extrusion(ExtrusionOptions::for_paint(extrusion));
+            if request.projection.uses_globe_rendering(style_zoom) {
+                // Roofs and the edges of walls follow the sphere as fills and lines do.
                 let last_tile = i64::from(crate::coords::ZOOM_BOUNDS[usize::from(zoom)]) - 1;
-                ZeroTessellator::default().with_globe_subdivision(
-                    granularity,
+                tessellator.with_globe_subdivision(
+                    granularity_for_zoom(128, 2, zoom),
                     zoom == 0,
                     request.coords.y == 0,
                     i64::from(request.coords.y) == last_tile,
                 )
+            } else {
+                tessellator
             }
-            _ => ZeroTessellator::default(),
         }
-        .with_feature_opacity(paint.opacity(), style_zoom);
+        _ if request.projection.uses_globe_rendering(style_zoom) => {
+            let last_tile = i64::from(crate::coords::ZOOM_BOUNDS[usize::from(zoom)]) - 1;
+            ZeroTessellator::default().with_globe_subdivision(
+                granularity,
+                zoom == 0,
+                request.coords.y == 0,
+                i64::from(request.coords.y) == last_tile,
+            )
+        }
+        _ => ZeroTessellator::default(),
+    }
+    .with_feature_opacity(paint.opacity(), style_zoom);
     match paint {
         // An image repeated over a fill takes nothing from the fill's colour but its opacity.
         LayerPaint::Fill(paint) if paint.fill_pattern.is_some() => {

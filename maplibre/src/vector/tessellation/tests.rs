@@ -141,6 +141,7 @@ mod circles {
                 blur: None,
                 stroke_opacity: None,
                 zoom: 3.0,
+                grid: false,
             })
             .with_feature_opacity(
                 Some(StyleProperty::parse(&serde_json::json!(["get", "alpha"]))),
@@ -188,6 +189,39 @@ mod circles {
         let vertex = &tessellator.buffer.vertices[0];
         assert_eq!(vertex.normal[0], 2.0);
         assert_eq!(vertex.edge_distance, 10.0);
+    }
+
+    #[test]
+    fn a_circle_on_the_globe_is_a_grid_of_sixteen_vertices() {
+        let mut tessellator =
+            ZeroTessellator::<IndexDataType>::default().with_circles(CircleOptions {
+                radius: StyleProperty::Constant(4.0),
+                radius_default: 5.0,
+                stroke_width: StyleProperty::Constant(0.0),
+                stroke_width_default: 0.0,
+                blur: None,
+                stroke_opacity: None,
+                zoom: 3.0,
+                grid: true,
+            });
+        point(&mut tessellator, 100.0, 200.0);
+        tessellator.feature_end(0).expect("feature ends");
+
+        assert_eq!(tessellator.buffer.vertices.len(), 16);
+        assert_eq!(tessellator.buffer.indices.len(), 3 * 3 * 6);
+        let codes: Vec<f32> = tessellator
+            .buffer
+            .vertices
+            .iter()
+            .map(|vertex| vertex.corner_code)
+            .collect();
+        assert_eq!(codes[0], 1.0, "the first corner is the grid's origin");
+        assert_eq!(
+            codes[15],
+            1.0 + 7.0 * 8.0 + 7.0,
+            "the last is its far corner"
+        );
+        assert_eq!(tessellator.feature_indices, vec![16]);
     }
 
     #[test]

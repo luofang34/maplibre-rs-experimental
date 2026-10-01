@@ -24,7 +24,23 @@ impl Shader for HeatmapDensityShader {
                 VertexBufferLayout {
                     array_stride: std::mem::size_of::<ShaderVertex>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x4].to_vec(),
+                    attributes: vec![
+                        wgpu::VertexAttribute {
+                            offset: 0,
+                            format: wgpu::VertexFormat::Float32x2,
+                            shader_location: 0,
+                        },
+                        wgpu::VertexAttribute {
+                            offset: std::mem::offset_of!(ShaderVertex, normal) as u64,
+                            format: wgpu::VertexFormat::Float32x4,
+                            shader_location: 1,
+                        },
+                        wgpu::VertexAttribute {
+                            offset: std::mem::offset_of!(ShaderVertex, corner_code) as u64,
+                            format: wgpu::VertexFormat::Float32,
+                            shader_location: 10,
+                        },
+                    ],
                 },
                 VertexBufferLayout {
                     array_stride: std::mem::size_of::<ShaderTileMetadata>() as u64,

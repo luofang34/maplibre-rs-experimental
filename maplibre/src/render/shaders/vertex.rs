@@ -20,6 +20,10 @@ pub struct ShaderVertex {
     /// Distance along the ring of an extruded wall, in tile units; a stroke packs its
     /// per-feature width and offset here instead. Zero elsewhere.
     pub edge_distance: f32,
+    /// For a vertex of a subdivided circle or heatmap kernel, one plus the packed position of
+    /// its corner on an eight-by-eight grid; zero where the shader decodes the corner from the
+    /// vertex index.
+    pub corner_code: f32,
 }
 
 impl ShaderVertex {
@@ -31,6 +35,7 @@ impl ShaderVertex {
             distance: 0.0,
             elevation: -1e30,
             edge_distance: 0.0,
+            corner_code: 0.0,
         }
     }
 }

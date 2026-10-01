@@ -14,6 +14,10 @@ use crate::{
     style::{circle::CirclePaint, heatmap::HeatmapPaint, layer::StyleProperty},
 };
 
+/// Positions on the eight-by-eight corner grid of a subdivided circle, which is four by four
+/// vertices; GL JS uses these for circles and heatmap kernels that follow the globe.
+pub const CIRCLE_GRID_STEPS: [u32; 4] = [0, 2, 5, 7];
+
 /// Vertex order of a circle quad; corners follow the shader's `vertex_index % 4` decoding.
 pub const CIRCLE_QUAD_INDICES: [u32; 6] = [0, 1, 2, 0, 2, 3];
 
@@ -34,6 +38,8 @@ pub struct CircleOptions {
     pub stroke_opacity: Option<StyleProperty<f32>>,
     /// Zoom of the tile, at which zoom-driven properties are evaluated.
     pub zoom: f64,
+    /// Whether each quad is a grid of vertices, so a circle lying on the globe follows its curve.
+    pub grid: bool,
 }
 
 /// The property when it needs each feature's attributes.
@@ -54,6 +60,7 @@ impl CircleOptions {
             blur: per_feature(paint.circle_blur.as_ref()),
             stroke_opacity: per_feature(paint.circle_stroke_opacity.as_ref()),
             zoom,
+            grid: false,
         }
     }
 
@@ -78,6 +85,7 @@ impl CircleOptions {
             blur: None,
             stroke_opacity: None,
             zoom,
+            grid: false,
         }
     }
 }
@@ -134,15 +142,36 @@ where
             per_feature(&options.stroke_opacity),
         );
         let base = self.buffer.vertices.len() as u32;
-        for _ in 0..4 {
+        let push = |code: f32, buffer: &mut Vec<ShaderVertex>| {
             let mut vertex = ShaderVertex::new([x, y], [radius, stroke_width]);
             vertex.distance = blur;
             vertex.elevation = stroke_opacity;
             vertex.edge_distance = radius_next;
-            self.buffer.vertices.push(vertex);
-        }
-        for offset in CIRCLE_QUAD_INDICES {
-            self.buffer.indices.push(I::from(VertexId(base + offset)));
+            vertex.corner_code = code;
+            buffer.push(vertex);
+        };
+        if options.grid {
+            for ey in CIRCLE_GRID_STEPS {
+                for ex in CIRCLE_GRID_STEPS {
+                    push(1.0 + (ex * 8 + ey) as f32, &mut self.buffer.vertices);
+                }
+            }
+            for row in 0..3_u32 {
+                for column in 0..3_u32 {
+                    let lower = base + row * 4 + column;
+                    let upper = lower + 4;
+                    for offset in [lower, lower + 1, upper + 1, lower, upper + 1, upper] {
+                        self.buffer.indices.push(I::from(VertexId(offset)));
+                    }
+                }
+            }
+        } else {
+            for _ in 0..4 {
+                push(0.0, &mut self.buffer.vertices);
+            }
+            for offset in CIRCLE_QUAD_INDICES {
+                self.buffer.indices.push(I::from(VertexId(base + offset)));
+            }
         }
     }
 }

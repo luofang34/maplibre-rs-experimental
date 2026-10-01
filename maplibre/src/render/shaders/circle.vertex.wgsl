@@ -20,7 +20,7 @@ fn main(
     @location(0) position: vec2<f32>,
     @location(1) normal: vec2<f32>,
     // A blur and stroke opacity that vary by feature; negative ones leave the layer's own.
-    @location(10) per_feature: vec3<f32>,
+    @location(10) per_feature: vec4<f32>,
     @location(2) tile_mercator_coords: vec4<f32>,
     @location(4) translate1: vec4<f32>,
     @location(5) translate2: vec4<f32>,
@@ -37,10 +37,15 @@ fn main(
 ) -> VertexOutput {
     // Quads are emitted with four consecutive vertices; the corner follows the vertex order.
     let corner = vertex_index % 4u;
-    let extrude = vec2<f32>(
+    var extrude = vec2<f32>(
         select(-1.0, 1.0, corner == 1u || corner == 2u),
         select(-1.0, 1.0, corner >= 2u),
     );
+    // A subdivided circle names its corner on an eight-by-eight grid, to follow the globe.
+    if per_feature.w > 0.5 {
+        let cell = u32(per_feature.w - 0.5);
+        extrude = vec2<f32>(f32(cell / 8u), f32(cell % 8u)) / 7.0 * 2.0 - vec2<f32>(1.0);
+    }
     // The radius of a feature that varies with zoom is blended toward the zoom above the tile's.
     let zoom_blend = clamp(-log2(zoom_factor), 0.0, 1.0);
     let radius = mix(normal.x, per_feature.z, zoom_blend);

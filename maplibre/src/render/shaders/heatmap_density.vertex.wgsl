@@ -22,6 +22,7 @@ fn main(
     @location(0) position: vec2<f32>,
     // Radius factor, weight, path distance and, over terrain, the height of the point.
     @location(1) path: vec4<f32>,
+    @location(10) corner_code: f32,
     @location(2) tile_mercator_coords: vec4<f32>,
     @location(4) translate1: vec4<f32>,
     @location(5) translate2: vec4<f32>,
@@ -33,10 +34,15 @@ fn main(
 ) -> VertexOutput {
     // Quads are emitted with four consecutive vertices; the corner follows the vertex order.
     let corner = vertex_index % 4u;
-    let extrude = vec2<f32>(
+    var extrude = vec2<f32>(
         select(-1.0, 1.0, corner == 1u || corner == 2u),
         select(-1.0, 1.0, corner >= 2u),
     );
+    // A subdivided kernel names its corner on an eight-by-eight grid, to follow the globe.
+    if corner_code > 0.5 {
+        let cell = u32(corner_code - 0.5);
+        extrude = vec2<f32>(f32(cell / 8u), f32(cell % 8u)) / 7.0 * 2.0 - vec2<f32>(1.0);
+    }
     // One unit for a layer-wide radius, else the point's own radius in pixels.
     let radius = layer_radius * path.x;
     let weight = path.y;
