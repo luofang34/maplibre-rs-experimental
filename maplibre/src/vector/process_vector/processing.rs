@@ -107,6 +107,7 @@ fn vector_layer<T: VectorTransferables, C: Context>(
     let original = layer.clone();
     let mut tessellator = tessellator(paint, request);
     tessellator.stroke = crate::style::line_stroke::LineStroke::of_layer(style);
+    tessellator.join_property = crate::style::line_stroke::LineStroke::join_property(style);
     tessellator.coordinate_scale = extent_scale(&layer);
     tessellator.sort_key =
         crate::vector::tessellation::SortKeys::by(crate::vector::tessellation::sort_key_of(style));

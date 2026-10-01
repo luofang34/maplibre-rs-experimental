@@ -74,11 +74,39 @@ impl LineStroke {
         stroke
     }
 
+    /// The `line-join` of a layer when it varies by feature or zoom, as an expression.
+    pub fn join_property(layer: &StyleLayer) -> Option<crate::style::layer::StyleProperty<String>> {
+        let value = layer.unrecognized.layout.get("line-join")?;
+        (!value.is_string()).then(|| crate::style::layer::StyleProperty::parse(value))
+    }
+
+    fn join_property_parses(value: &serde_json::Value) -> bool {
+        !matches!(
+            crate::style::layer::StyleProperty::<String>::parse(value),
+            crate::style::layer::StyleProperty::Unsupported(_)
+        )
+    }
+
+    /// The join a property value names.
+    pub fn join_named(name: &str) -> Option<LineJoin> {
+        match name {
+            "miter" => Some(LineJoin::Miter),
+            "bevel" => Some(LineJoin::Bevel),
+            "round" => Some(LineJoin::Round),
+            _ => None,
+        }
+    }
+
     /// Whether a layout property is one of these and holds a value the stroke understands.
     pub fn accepts(name: &str, value: &serde_json::Value) -> bool {
         match name {
             "line-cap" => matches!(value.as_str(), Some("butt" | "round" | "square")),
-            "line-join" => matches!(value.as_str(), Some("miter" | "bevel" | "round")),
+            "line-join" => {
+                value
+                    .as_str()
+                    .is_none_or(|name| Self::join_named(name).is_some())
+                    && (value.is_string() || Self::join_property_parses(value))
+            }
             "line-miter-limit" => value.is_number(),
             _ => false,
         }

@@ -176,6 +176,8 @@ pub struct ZeroTessellator<I: std::ops::Add + From<lyon::tessellation::VertexId>
     pub line_gradient: bool,
     /// Cap and join of stroked lines.
     pub stroke: crate::style::line_stroke::LineStroke,
+    /// A `line-join` that varies by feature, which replaces the stroke's own.
+    pub join_property: Option<crate::style::layer::StyleProperty<String>>,
     line_length: f32,
 
     /// Accumulated tile-space vertices and indices, without upload padding.
@@ -224,6 +226,7 @@ impl<I: std::ops::Add + From<lyon::tessellation::VertexId> + MaxIndex> Default
             line_feature_style: None,
             line_gradient: false,
             stroke: Default::default(),
+            join_property: None,
             line_length: 0.0,
             current_index: 0,
             path_open: false,
@@ -316,7 +319,7 @@ where
                         LineCap::Round => lyon::tessellation::LineCap::Round,
                         LineCap::Square => lyon::tessellation::LineCap::Square,
                     })
-                    .with_line_join(match self.stroke.join {
+                    .with_line_join(match self.feature_join() {
                         LineJoin::Miter => lyon::tessellation::LineJoin::Miter,
                         LineJoin::Bevel => lyon::tessellation::LineJoin::Bevel,
                         LineJoin::Round => lyon::tessellation::LineJoin::Round,
@@ -326,6 +329,14 @@ where
             )
             .map_err(|error| GeozeroError::Geometry(error.to_string()))?;
         Ok(())
+    }
+
+    fn feature_join(&self) -> LineJoin {
+        self.join_property
+            .as_ref()
+            .and_then(|property| property.evaluate_for(&self.feature_properties, self.zoom))
+            .and_then(|name| crate::style::line_stroke::LineStroke::join_named(&name))
+            .unwrap_or(self.stroke.join)
     }
 
     fn end(&mut self, close: bool) -> GeoResult<()> {

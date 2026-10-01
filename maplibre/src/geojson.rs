@@ -387,6 +387,8 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
                             );
                         tessellator.stroke =
                             crate::style::line_stroke::LineStroke::of_layer(style_layer);
+                        tessellator.join_property =
+                            crate::style::line_stroke::LineStroke::join_property(style_layer);
                     }
                     LayerPaint::Background(p) => {
                         tessellator.style_property = p.background_color.clone()
