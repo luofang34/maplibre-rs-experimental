@@ -101,3 +101,22 @@ fn worker_wire_roundtrip_preserves_exact_collision_ranges_and_anchor() {
         [-12.0, -8.0, 34.0, 16.0]
     );
 }
+
+#[test]
+fn the_default_sprite_has_no_prefix_and_others_take_their_id() {
+    let style: crate::style::Style = serde_json::from_value(serde_json::json!({
+        "version": 8, "sources": {}, "layers": [],
+        "sprite": [
+            {"id": "default", "url": "https://a.test/one"},
+            {"id": "night", "url": "https://a.test/two"}
+        ]
+    }))
+    .expect("style parses");
+    assert_eq!(
+        super::load::sprite_sources(&style),
+        [
+            (String::new(), "https://a.test/one".to_string()),
+            ("night:".to_string(), "https://a.test/two".to_string())
+        ]
+    );
+}

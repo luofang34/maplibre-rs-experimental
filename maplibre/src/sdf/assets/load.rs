@@ -210,16 +210,20 @@ fn requests(style: &Style, data: &[u8], zoom: f64) -> (GlyphRequests, HashSet<St
     (fonts, icons)
 }
 
-fn sprite_sources(style: &Style) -> Vec<(String, String)> {
+pub(super) fn sprite_sources(style: &Style) -> Vec<(String, String)> {
     match &style.sprite {
         Some(serde_json::Value::String(url)) => vec![(String::new(), url.clone())],
         Some(serde_json::Value::Array(sources)) => sources
             .iter()
             .filter_map(|source| {
-                Some((
-                    format!("{}:", source.get("id")?.as_str()?),
-                    source.get("url")?.as_str()?.to_string(),
-                ))
+                let id = source.get("id")?.as_str()?;
+                // The sprite named `default` supplies the plain image names.
+                let prefix = if id == "default" {
+                    String::new()
+                } else {
+                    format!("{id}:")
+                };
+                Some((prefix, source.get("url")?.as_str()?.to_string()))
             })
             .collect(),
         _ => Vec::new(),
