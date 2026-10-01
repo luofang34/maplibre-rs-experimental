@@ -363,7 +363,13 @@ impl FeatureProcessor for TextTessellator {
                 // A point has no line to follow.
                 (Some(_), None) => {}
                 (None, _) => {
-                    for anchor in layout::anchors(&geometry) {
+                    // The buffer around a tile repeats the labels of its neighbours, which draw
+                    // them from their own tiles.
+                    let tile = 0.0..crate::coords::EXTENT;
+                    for anchor in layout::anchors(&geometry)
+                        .into_iter()
+                        .filter(|anchor| tile.contains(&anchor.x()) && tile.contains(&anchor.y()))
+                    {
                         self.collect(anchor, 0.0, id, None);
                     }
                 }

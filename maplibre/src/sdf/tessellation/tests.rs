@@ -152,6 +152,24 @@ fn point_label(extra: serde_json::Value) -> TextTessellator {
     tessellator
 }
 
+#[test]
+fn a_point_in_the_tile_buffer_is_left_to_the_tile_that_owns_it() {
+    let paint: SymbolPaint = serde_json::from_value(
+        serde_json::json!({"text-field": "A", "text-font": ["test"], "text-size": 24}),
+    )
+    .expect("paint");
+    let mut tessellator = TextTessellator::default();
+    tessellator.configure(paint, atlas());
+    for (index, x) in [-50.0, 100.0, 4100.0].into_iter().enumerate() {
+        tessellator.point_begin(index).expect("begin");
+        tessellator.xy(x, 100.0, 0).expect("vertex");
+        tessellator.point_end(index).expect("end");
+        tessellator.feature_end(index as u64).expect("feature");
+    }
+    tessellator.finish();
+    assert_eq!(anchors_x(&tessellator), [100.0]);
+}
+
 fn corner_offsets(tessellator: &TextTessellator) -> Vec<[i32; 2]> {
     tessellator
         .quad_buffer
