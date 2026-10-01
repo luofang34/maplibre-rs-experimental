@@ -16,6 +16,7 @@ pub mod layer;
 pub mod light;
 pub mod line_gradient;
 pub mod line_stroke;
+mod opaque_pass;
 pub mod property;
 pub mod sky;
 pub mod source;

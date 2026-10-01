@@ -119,11 +119,14 @@ pub fn queue_system(
             layer: layer.id.clone(),
             items,
         });
+        // Ignoring depth, the composite lands over opaque layers above it; at their index it
+        // sorts behind them through the borders flag.
+        let above = style.opaque_layer_above(layer, zoom);
         layer_item_phase.add(LayerItem {
             projection: ProjectionBinding::View,
             draw_function: Box::new(DrawState::<LayerItem, DrawHeatmapComposite>::new()),
-            index: layer.index,
-            generate_borders: false,
+            index: above.unwrap_or(layer.index),
+            generate_borders: above.is_some(),
             style_layer: layer.id.clone(),
             tile: Tile {
                 coords: any_shape.coords(),
