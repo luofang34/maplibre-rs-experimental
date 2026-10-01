@@ -5,12 +5,19 @@ use lyon::tessellation::{StrokeVertex, StrokeVertexConstructor, VertexBuffers};
 use super::{VertexConstructor, ZeroTessellator};
 use crate::render::ShaderVertex;
 
-/// Outline width in tile units: about one pixel of a 512 px tile.
-pub(super) const OUTLINE_WIDTH: f32 = 8.0;
+/// Only the path and its normals matter to the outline; the fill shader moves each vertex
+/// along its normal by a width that follows the view's zoom.
+pub(super) const OUTLINE_WIDTH: f32 = 1.0;
+/// Half the outline's width in screen pixels.
+const HALF_WIDTH_PIXELS: f32 = 0.5;
+/// Tile units the fill shader moves a vertex along a unit normal, per tile unit of zoom factor,
+/// as a multiple of one screen pixel (eight tile units).
+const NORMAL_UNITS_PER_PIXEL: f32 = 8.0 / 3.0;
 
 impl StrokeVertexConstructor<ShaderVertex> for VertexConstructor {
     fn new_vertex(&mut self, vertex: StrokeVertex) -> ShaderVertex {
-        ShaderVertex::new(vertex.position().to_array(), [0.0, 0.0])
+        let normal = vertex.normal() * (HALF_WIDTH_PIXELS * NORMAL_UNITS_PER_PIXEL);
+        ShaderVertex::new(vertex.position_on_path().to_array(), normal.to_array())
     }
 }
 
