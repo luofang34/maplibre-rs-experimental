@@ -122,4 +122,5 @@ fn vector_bytes(layer: &AvailableVectorLayerBucket) -> usize {
         + capacity(&layer.buffer.buffer.indices)
         + capacity(&layer.feature_indices)
         + capacity(&layer.feature_colors)
+        + capacity(&layer.feature_sort_keys)
 }

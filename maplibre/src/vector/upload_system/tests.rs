@@ -83,6 +83,7 @@ async fn empty_tiles_do_not_starve_later_geometry_uploads() {
                         buffer: buffer.into(),
                         feature_indices: if nonempty { vec![3] } else { Vec::new() },
                         feature_colors: Vec::new(),
+                        feature_sort_keys: Vec::new(),
                     },
                 )],
             });
@@ -171,4 +172,18 @@ fn features_sharing_a_pattern_form_one_run_of_indices() {
     assert_eq!(runs.len(), 2);
     assert_eq!(runs[0].1, 0..6);
     assert_eq!(runs[1].1, 6..9);
+}
+
+#[test]
+fn features_with_one_sort_key_draw_as_a_single_run() {
+    // Three features of three indices each, the first two sharing a key.
+    let indices: Vec<u32> = vec![0, 1, 2, 3, 4, 5, 6, 7, 8];
+    let runs = super::sort_runs(&[3, 3, 3], &[1.0, 1.0, 2.0], &indices);
+    assert_eq!(runs, vec![(1.0, 0..6), (2.0, 6..9)]);
+}
+
+#[test]
+fn a_feature_without_indices_makes_no_run() {
+    let runs = super::sort_runs(&[3, 0, 3], &[1.0, 1.0, 1.0], &[0, 1, 2, 3, 4, 5]);
+    assert_eq!(runs, vec![(1.0, 0..6)]);
 }

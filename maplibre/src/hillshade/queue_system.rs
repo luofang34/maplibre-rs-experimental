@@ -121,6 +121,7 @@ fn source_draws(
                 coords: source_shape.coords(),
             },
             source_shape: source_shape.clone(),
+            run: None,
         });
     }
     // The seam-expanding mesh would draw the tile edges twice, which shows through
@@ -135,6 +136,7 @@ fn source_draws(
             coords: source_shape.coords(),
         },
         source_shape: source_shape.clone(),
+        run: None,
     });
     (draws, masks)
 }

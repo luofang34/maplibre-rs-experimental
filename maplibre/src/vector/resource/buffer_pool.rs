@@ -25,6 +25,9 @@ use crate::{
 /// The pattern key and index range of each run of features that share one image.
 pub type PatternRuns = Vec<(u32, Range<u32>)>;
 
+/// The sort key and index range of each run of features that share a key.
+pub type SortRuns = Vec<(f32, Range<u32>)>;
+
 /// This is inspired by the memory pool in Vulkan documented
 /// [here](https://gpuopen-librariesandsdks.github.io/VulkanMemoryAllocator/html/custom_memory_pools.html).
 #[derive(Debug)]
@@ -38,6 +41,9 @@ pub struct BufferPool<Q, B, V, I, TM, FM> {
     /// For layers whose pattern varies by feature: the pattern key and index range of each run
     /// of features sharing one image, relative to the layer's first index.
     pattern_runs: std::collections::HashMap<(WorldTileCoords, String), PatternRuns>,
+    /// For layers whose features draw in the order of a sort key across tiles: the key and index
+    /// range of each run of features sharing one, relative to the layer's first index.
+    sort_runs: std::collections::HashMap<(WorldTileCoords, String), SortRuns>,
     /// Advances whenever geometry is allocated or evicted, so cached renders can refresh.
     revision: u64,
     phantom_v: PhantomData<V>,
@@ -115,6 +121,7 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
             ),
             index: RingIndex::new(),
             pattern_runs: Default::default(),
+            sort_runs: Default::default(),
             revision: 0,
             phantom_v: Default::default(),
             phantom_i: Default::default(),
@@ -127,12 +134,14 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
     pub fn clear(&mut self) {
         self.index.clear();
         self.pattern_runs.clear();
+        self.sort_runs.clear();
         self.revision = self.revision.wrapping_add(1);
     }
 
     /// Releases GPU geometry when the tile data and its glyph atlas leave the CPU cache.
     pub fn remove_tile(&mut self, coords: WorldTileCoords) {
         self.pattern_runs.retain(|(tile, _), _| *tile != coords);
+        self.sort_runs.retain(|(tile, _), _| *tile != coords);
         if self.index.remove_tile(coords) {
             self.revision = self.revision.wrapping_add(1);
         }
@@ -141,6 +150,7 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
     /// Removes one style layer without evicting other sources at the same coordinates.
     pub fn remove_layer(&mut self, coords: WorldTileCoords, id: &str) {
         self.pattern_runs.remove(&(coords, id.to_owned()));
+        self.sort_runs.remove(&(coords, id.to_owned()));
         if self.index.remove_layer(coords, id, None) {
             self.revision = self.revision.wrapping_add(1);
         }
@@ -157,6 +167,22 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
             Some(runs) => self.pattern_runs.insert((coords, id.to_owned()), runs),
             None => self.pattern_runs.remove(&(coords, id.to_owned())),
         };
+    }
+
+    /// Records, or with `None` forgets, the sort runs of a layer's geometry.
+    pub fn set_sort_runs(&mut self, coords: WorldTileCoords, id: &str, runs: Option<SortRuns>) {
+        match runs {
+            Some(runs) => self.sort_runs.insert((coords, id.to_owned()), runs),
+            None => self.sort_runs.remove(&(coords, id.to_owned())),
+        };
+    }
+
+    /// The sort runs of a layer's geometry, when its features draw in the order of a sort key
+    /// across tiles.
+    pub fn sort_runs(&self, coords: WorldTileCoords, id: &str) -> Option<&[(f32, Range<u32>)]> {
+        self.sort_runs
+            .get(&(coords, id.to_owned()))
+            .map(Vec::as_slice)
     }
 
     /// The pattern runs of a layer's geometry, when its pattern varies by feature.

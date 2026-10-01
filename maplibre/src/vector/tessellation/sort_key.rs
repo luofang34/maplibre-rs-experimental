@@ -23,6 +23,11 @@ pub struct SortKeys {
 }
 
 impl SortKeys {
+    /// Whether a property ranks the features, rather than none or a grouping alone.
+    pub fn is_keyed(&self) -> bool {
+        self.property.is_some()
+    }
+
     /// Ranks features by `property`; a feature without a key ranks as zero.
     pub fn by(property: Option<StyleProperty<f32>>) -> Self {
         Self {
@@ -62,14 +67,36 @@ impl<I> ZeroTessellator<I>
 where
     I: std::ops::Add + From<VertexId> + MaxIndex + Copy + Into<u32>,
 {
+    /// The sort key of each entry of `feature_indices` when a property ranks the features;
+    /// empty otherwise.
+    pub fn sort_key_values(&mut self) -> Vec<f32> {
+        if self.sort_key.is_keyed() {
+            std::mem::take(&mut self.entry_sort_keys)
+        } else {
+            Vec::new()
+        }
+    }
+
     /// Reorders the finished features so that greater sort keys draw later, keeping the order
     /// of equal keys.
     pub fn apply_sort_keys(&mut self) {
         let mut spans = std::mem::take(&mut self.sort_key.spans);
+        self.entry_sort_keys = vec![0.0; self.feature_indices.len()];
         if spans.windows(2).all(|pair| pair[0].key <= pair[1].key) {
+            for span in &spans {
+                for entry in span.entries.clone() {
+                    if let Some(key) = self.entry_sort_keys.get_mut(entry) {
+                        *key = span.key;
+                    }
+                }
+            }
             return;
         }
         spans.sort_by(|a, b| a.key.total_cmp(&b.key));
+        self.entry_sort_keys = spans
+            .iter()
+            .flat_map(|span| span.entries.clone().map(move |_| span.key))
+            .collect();
         let mut starts = Vec::with_capacity(self.feature_indices.len());
         let mut start = 0_u32;
         for count in &self.feature_indices {

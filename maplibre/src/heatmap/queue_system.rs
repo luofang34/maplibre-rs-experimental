@@ -112,6 +112,7 @@ pub fn queue_system(
                         coords: entry.coords,
                     },
                     source_shape: source_shape.clone(),
+                    run: None,
                 });
             }
         }
@@ -132,6 +133,7 @@ pub fn queue_system(
                 coords: any_shape.coords(),
             },
             source_shape: any_shape.clone(),
+            run: None,
         });
     }
     Ok(())

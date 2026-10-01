@@ -203,6 +203,7 @@ impl HeadlessMap {
                         buffer: layer.buffer,
                         feature_indices: layer.feature_indices,
                         feature_colors: layer.feature_colors,
+                        feature_sort_keys: layer.feature_sort_keys,
                     },
                 ));
         }

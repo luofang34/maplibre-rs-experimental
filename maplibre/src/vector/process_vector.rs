@@ -308,7 +308,7 @@ impl<T: VectorTransferables, C: Context> ProcessVectorContext<T, C> {
         coords: &WorldTileCoords,
         buffer: OverAlignedVertexBuffer<ShaderVertex, IndexDataType>,
         feature_indices: Vec<u32>,
-        feature_colors: Vec<[f32; 4]>,
+        (feature_colors, feature_sort_keys): (Vec<[f32; 4]>, Vec<f32>),
         layer_data: tile::Layer,
         style_layer_id: String,
     ) -> Result<(), ProcessVectorError> {
@@ -318,6 +318,7 @@ impl<T: VectorTransferables, C: Context> ProcessVectorContext<T, C> {
                 buffer,
                 feature_indices,
                 feature_colors,
+                feature_sort_keys,
                 layer_data,
                 style_layer_id,
             ))

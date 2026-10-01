@@ -125,6 +125,7 @@ fn source_draws(
                 coords: source_shape.coords(),
             },
             source_shape: source_shape.clone(),
+            run: None,
         });
     }
     layers.push(LayerItem {
@@ -137,6 +138,7 @@ fn source_draws(
             coords: source_shape.coords(),
         },
         source_shape: source_shape.clone(),
+        run: None,
     });
     (layers, masks)
 }

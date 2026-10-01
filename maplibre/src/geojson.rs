@@ -487,12 +487,14 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
                     ..Default::default()
                 };
 
+                let sort_keys = inner.sort_key_values();
                 context
                     .send_back(T::LayerTessellated::build_from(
                         coords,
                         inner.buffer.into(),
                         inner.feature_indices,
                         inner.feature_colors,
+                        sort_keys,
                         synthetic_layer,
                         style_layer.id.clone(),
                     ))

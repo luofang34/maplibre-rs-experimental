@@ -213,6 +213,7 @@ fn the_cache_is_bounded_in_bytes_as_well_as_tiles() {
                         },
                         feature_indices: Vec::new(),
                         feature_colors: Vec::new(),
+                        feature_sort_keys: Vec::new(),
                     },
                 )],
             });

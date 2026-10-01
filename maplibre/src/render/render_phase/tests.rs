@@ -30,6 +30,7 @@ fn raster(index: u32, generate_borders: bool) -> LayerItem {
             coords: Default::default(),
         },
         source_shape: TileShape::default(),
+        run: None,
     }
 }
 

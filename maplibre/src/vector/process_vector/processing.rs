@@ -148,11 +148,12 @@ fn vector_layer<T: VectorTransferables, C: Context>(
         }
         Ok(()) => {
             tessellator.apply_sort_keys();
+            let sort_keys = tessellator.sort_key_values();
             context.layer_tessellation_finished(
                 &request.coords,
                 tessellator.buffer.into(),
                 tessellator.feature_indices,
-                tessellator.feature_colors,
+                (tessellator.feature_colors, sort_keys),
                 original,
                 style.id.clone(),
             )?

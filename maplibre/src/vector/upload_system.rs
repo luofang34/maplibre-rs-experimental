@@ -293,6 +293,7 @@ fn upload_bucket(
         buffer,
         feature_indices,
         feature_colors,
+        feature_sort_keys,
         ..
     } = bucket;
     let coords = *coords;
@@ -322,6 +323,9 @@ fn upload_bucket(
         .and_then(super::pattern::per_feature_pattern)
         .map(|_| pattern_runs(feature_indices, feature_colors, &buffer.buffer.indices));
 
+    let sort_runs = (style_layer.type_ == "circle" && !feature_sort_keys.is_empty())
+        .then(|| sort_runs(feature_indices, feature_sort_keys, &buffer.buffer.indices));
+
     tracing::debug!(%coords, "allocating vector geometry");
     if let Err(error) = buffer_pool.replace_layer_geometry(
         queue,
@@ -335,7 +339,37 @@ fn upload_bucket(
         return false;
     }
     buffer_pool.set_pattern_runs(coords, &style_layer.id, runs);
+    buffer_pool.set_sort_runs(coords, &style_layer.id, sort_runs);
     true
+}
+
+/// The index range of each run of consecutive features that share a sort key.
+fn sort_runs(
+    feature_indices: &[u32],
+    feature_sort_keys: &[f32],
+    indices: &[u32],
+) -> Vec<(f32, std::ops::Range<u32>)> {
+    let mut runs: Vec<(f32, std::ops::Range<u32>)> = Vec::new();
+    let (mut vertex_end, mut position) = (0_u32, 0_u32);
+    for (feature, count) in feature_indices.iter().enumerate() {
+        vertex_end = vertex_end.wrapping_add(*count);
+        let first = position;
+        while indices
+            .get(position as usize)
+            .is_some_and(|index| *index < vertex_end)
+        {
+            position = position.wrapping_add(1);
+        }
+        if position == first {
+            continue;
+        }
+        let key = feature_sort_keys.get(feature).copied().unwrap_or(0.0);
+        match runs.last_mut() {
+            Some((last, range)) if *last == key && range.end == first => range.end = position,
+            _ => runs.push((key, first..position)),
+        }
+    }
+    runs
 }
 
 /// The index range of each run of consecutive features that share a pattern key.

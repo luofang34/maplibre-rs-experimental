@@ -5,7 +5,9 @@ use crate::{
     render::{
         eventually::{Eventually, Eventually::Initialized},
         render_commands::DrawMasks,
-        render_phase::{DrawState, LayerItem, ProjectionBinding, RenderPhase, TileMaskItem},
+        render_phase::{
+            DrawState, LayerItem, ProjectionBinding, RenderPhase, SortedRun, TileMaskItem,
+        },
         tile_view_pattern::WgpuTileViewPattern,
     },
     tcs::{
@@ -123,6 +125,7 @@ pub fn queue_system(
                                         coords: layer_entry.coords,
                                     },
                                     source_shape: source_shape.clone(),
+                                    run: None,
                                 });
                                 let color: Box<dyn crate::render::render_phase::Draw<LayerItem>> =
                                     if pattern_layers.contains(layer_entry.style_layer.id.as_str())
@@ -144,6 +147,7 @@ pub fn queue_system(
                                         coords: layer_entry.coords,
                                     },
                                     source_shape: source_shape.clone(),
+                                    run: None,
                                 });
                                 Box::new(DrawState::<LayerItem, DrawExtrusionDepth>::new())
                             }
@@ -155,6 +159,35 @@ pub fn queue_system(
                             _ => Box::new(DrawState::<LayerItem, DrawVectorTiles>::new()),
                         };
 
+                    // Features that draw in the order of a sort key, across tiles, draw a run at
+                    // a time.
+                    let runs = (layer_entry.style_layer.type_ == "circle")
+                        .then(|| {
+                            buffer_pool.sort_runs(layer_entry.coords, &layer_entry.style_layer.id)
+                        })
+                        .flatten();
+                    if let Some(runs) = runs.filter(|runs| !runs.is_empty()) {
+                        for (key, range) in runs {
+                            layer_item_phase.add(LayerItem {
+                                projection: ProjectionBinding::View,
+                                draw_function: Box::new(
+                                    DrawState::<LayerItem, DrawCircleTiles>::new(),
+                                ),
+                                index: layer_entry.style_layer.index,
+                                generate_borders: false,
+                                style_layer: layer_entry.style_layer.id.clone(),
+                                tile: Tile {
+                                    coords: layer_entry.coords,
+                                },
+                                source_shape: source_shape.clone(),
+                                run: Some(SortedRun {
+                                    key: *key,
+                                    range: range.clone(),
+                                }),
+                            });
+                        }
+                        continue;
+                    }
                     layer_item_phase.add(LayerItem {
                         projection: ProjectionBinding::View,
                         draw_function,
@@ -165,6 +198,7 @@ pub fn queue_system(
                             coords: layer_entry.coords,
                         },
                         source_shape: source_shape.clone(),
+                        run: None,
                     });
                 }
             }

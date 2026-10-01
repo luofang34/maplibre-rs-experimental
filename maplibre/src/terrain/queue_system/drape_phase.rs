@@ -132,6 +132,7 @@ pub(super) fn build_drape_phase(
                     },
                     source_shape: source_shape.clone(),
                     projection: ProjectionBinding::Flat,
+                    run: None,
                 });
             }
             for (id, index, dem) in &shape.raster_layers {
@@ -150,6 +151,7 @@ pub(super) fn build_drape_phase(
                     },
                     source_shape: source_shape.clone(),
                     projection: ProjectionBinding::Flat,
+                    run: None,
                 });
             }
         }

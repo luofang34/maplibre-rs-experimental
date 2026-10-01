@@ -112,6 +112,11 @@ impl<const RUNS: bool> RenderCommand<LayerItem> for DrawVectorTile<RUNS> {
                 .feature_metadata()
                 .slice(entry.feature_metadata_buffer_range()),
         );
+        if let Some(run) = &item.run {
+            let first = entry.indices_range().start;
+            pass.draw_indexed(first + run.range.start..first + run.range.end, 0, 0..1);
+            return RenderCommandResult::Success;
+        }
         let runs = RUNS
             .then(|| buffer_pool.pattern_runs(item.tile.coords, &item.style_layer))
             .flatten();

@@ -206,6 +206,8 @@ pub struct AvailableVectorLayerBucket {
     /// Encoded-sRGB colors with straight alpha, indexed in the same feature order.
     /// Missing entries use the layer's fallback color during upload.
     pub feature_colors: Vec<[f32; 4]>,
+    /// The sort key of each feature, in the same order; empty without a sort key.
+    pub feature_sort_keys: Vec<f32>,
 }
 
 /// Records a source layer without usable tessellated geometry at the requested tile.

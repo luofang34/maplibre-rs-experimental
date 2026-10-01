@@ -23,6 +23,7 @@ fn bucket(coords: WorldTileCoords, x: f32) -> AvailableVectorLayerBucket {
         ),
         feature_indices: vec![3],
         feature_colors: vec![[0.0, 1.0, 0.0, 1.0]],
+        feature_sort_keys: Vec::new(),
     }
 }
 

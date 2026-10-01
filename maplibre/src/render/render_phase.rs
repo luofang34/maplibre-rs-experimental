@@ -83,13 +83,41 @@ pub struct LayerItem {
     pub source_shape: TileShape,
     /// Projection uniform the draw binds; drape draws use the flat one.
     pub projection: ProjectionBinding,
+    /// The part of the layer's geometry this draw covers, when features draw in the order of a
+    /// sort key across tiles; the whole layer otherwise.
+    pub run: Option<SortedRun>,
+}
+
+/// Features of a layer that share a sort key, as a range of its indices.
+#[derive(Clone, Debug)]
+pub struct SortedRun {
+    /// The sort key; greater keys draw later.
+    pub key: f32,
+    /// Index range relative to the layer's first index.
+    pub range: std::ops::Range<u32>,
+}
+
+impl SortedRun {
+    /// The key as an integer that orders like the float.
+    fn order(&self) -> u32 {
+        let bits = self.key.to_bits();
+        if bits >> 31 == 1 {
+            !bits
+        } else {
+            bits | 0x8000_0000
+        }
+    }
 }
 
 impl PhaseItem for LayerItem {
-    type SortKey = (u32, bool);
+    type SortKey = (u32, bool, u32);
 
     fn sort_key(&self) -> Self::SortKey {
-        (self.index, self.generate_borders)
+        (
+            self.index,
+            self.generate_borders,
+            self.run.as_ref().map_or(0, SortedRun::order),
+        )
     }
 
     fn draw_function(&self) -> &dyn Draw<LayerItem> {

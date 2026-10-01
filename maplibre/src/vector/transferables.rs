@@ -102,6 +102,7 @@ pub trait LayerTessellated: IntoMessage + Debug + Send {
         buffer: OverAlignedVertexBuffer<ShaderVertex, IndexDataType>,
         feature_indices: Vec<u32>,
         feature_colors: Vec<[f32; 4]>,
+        feature_sort_keys: Vec<f32>,
         layer_data: Layer,
         style_layer_id: String,
     ) -> Self
@@ -286,6 +287,8 @@ pub struct DefaultLayerTessellated {
     pub feature_indices: Vec<u32>,
     /// Normalized RGBA paint colors in feature order; missing entries use the renderer's fallback.
     pub feature_colors: Vec<[f32; 4]>,
+    /// The sort key of each feature, in feature order; empty without a sort key.
+    pub feature_sort_keys: Vec<f32>,
     /// Decoded source layer; bucket conversion retains its name.
     pub layer_data: Layer, // FIXME (perf): Introduce a better structure for this
     /// Style entry whose paint and layout produced this bucket.
@@ -314,6 +317,7 @@ impl LayerTessellated for DefaultLayerTessellated {
         buffer: OverAlignedVertexBuffer<ShaderVertex, IndexDataType>,
         feature_indices: Vec<u32>,
         feature_colors: Vec<[f32; 4]>,
+        feature_sort_keys: Vec<f32>,
         layer_data: Layer,
         style_layer_id: String,
     ) -> Self {
@@ -322,6 +326,7 @@ impl LayerTessellated for DefaultLayerTessellated {
             buffer,
             feature_indices,
             feature_colors,
+            feature_sort_keys,
             layer_data,
             style_layer_id,
         }
@@ -347,6 +352,7 @@ impl LayerTessellated for DefaultLayerTessellated {
             buffer: self.buffer,
             feature_indices: self.feature_indices,
             feature_colors: self.feature_colors,
+            feature_sort_keys: self.feature_sort_keys,
         }
     }
 }

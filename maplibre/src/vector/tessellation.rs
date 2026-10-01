@@ -217,6 +217,8 @@ pub struct ZeroTessellator<I: std::ops::Add + From<lyon::tessellation::VertexId>
     outline: VertexBuffers<ShaderVertex, I>,
     /// Orders features by `*-sort-key`, so the greater keys draw on top.
     pub sort_key: SortKeys,
+    /// The sort key of each entry of `feature_indices`, set by `apply_sort_keys`.
+    pub entry_sort_keys: Vec<f32>,
     current_index: usize,
 }
 
@@ -259,6 +261,7 @@ impl<I: std::ops::Add + From<lyon::tessellation::VertexId> + MaxIndex> Default
             outline_property: None,
             outline: VertexBuffers::new(),
             sort_key: Default::default(),
+            entry_sort_keys: Vec::new(),
         }
     }
 }

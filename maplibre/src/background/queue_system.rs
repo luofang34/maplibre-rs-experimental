@@ -155,6 +155,7 @@ pub fn queue_system(
                 tile: crate::tcs::tiles::Tile {
                     coords: crate::coords::WorldTileCoords::default(),
                 },
+                run: None,
             });
         }
         // The sky follows the background layers and precedes everything else, as GL JS draws it
@@ -170,6 +171,7 @@ pub fn queue_system(
                 tile: crate::tcs::tiles::Tile {
                     coords: crate::coords::WorldTileCoords::default(),
                 },
+                run: None,
             });
         }
         if atmosphere_blend > 0.0 {
