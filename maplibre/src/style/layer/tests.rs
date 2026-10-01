@@ -269,3 +269,26 @@ fn layers_without_a_paint_block_still_get_their_type_of_paint() {
         assert!(name.starts_with(matches), "{kind}: {name}");
     }
 }
+
+#[test]
+fn an_antialiased_translucent_fill_outlines_in_its_own_colour() {
+    let outline = |paint: serde_json::Value| {
+        serde_json::from_value::<super::paint::FillPaint>(paint)
+            .expect("paint parses")
+            .outline_color(0.0)
+            .is_some()
+    };
+    assert!(outline(
+        serde_json::json!({"fill-color": "rgba(255,0,0,0.5)"})
+    ));
+    assert!(outline(
+        serde_json::json!({"fill-color": "red", "fill-opacity": 0.5})
+    ));
+    assert!(!outline(serde_json::json!({"fill-color": "red"})));
+    assert!(!outline(
+        serde_json::json!({"fill-color": "rgba(255,0,0,0.5)", "fill-antialias": false})
+    ));
+    assert!(outline(
+        serde_json::json!({"fill-color": "red", "fill-outline-color": "blue"})
+    ));
+}

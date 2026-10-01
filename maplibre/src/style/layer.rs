@@ -15,6 +15,7 @@ use crate::style::{
     hillshade::{ColorReliefPaint, HillshadePaint},
 };
 
+mod fill_outline;
 mod paint;
 mod serialization;
 pub use paint::{
