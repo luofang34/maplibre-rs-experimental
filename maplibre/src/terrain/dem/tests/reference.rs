@@ -61,10 +61,9 @@ fn decoding_sampling_and_all_borders_match_gl_js() {
         close(dem.max(), case.max);
         assert_samples(&dem, &case.initial, &case.encoding);
         for [x, y, expected] in case.tile_samples {
-            close(
-                dem.elevation_at_tile_coords(x * EXTENT, y * EXTENT),
-                expected,
-            );
+            // The fixture samples at texel centres, half a texel before a tile coordinate.
+            let dim = f64::from(case.dim);
+            close(dem.sample_bilinear(x * dim - 0.5, y * dim - 0.5), expected);
         }
         for border in case.backfilled {
             let mut filled = dem.clone();

@@ -131,7 +131,7 @@ pub(super) fn tile_uniforms(
                 .dem_texture(Some(dem_coords))
                 .size
                 .width
-                .saturating_sub(2))
+                .saturating_sub(4))
             .max(1) as f32,
         ),
         None => (Matrix4::identity(), [0.0; 4], 1.0),

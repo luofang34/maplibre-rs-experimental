@@ -63,7 +63,7 @@ fn bilinear_sampling_blends_towards_the_next_sample() {
     assert!((tile.sample_bilinear(0.5, 0.5) - 150.0).abs() < 1e-9);
     // Beyond the last sample the replicated border keeps the value flat.
     assert!((tile.sample_bilinear(1.5, 1.5) - 300.0).abs() < 1e-9);
-    assert!((tile.elevation_at_tile_coords(EXTENT / 4.0, 0.0) - 0.0).abs() < 1e-9);
+    assert!((tile.elevation_at_tile_coords(EXTENT / 4.0, 0.0) - 50.0).abs() < 1e-9);
 }
 
 #[test]
@@ -168,30 +168,27 @@ fn both_border_pixels_receive_the_neighbours_samples() {
 }
 
 #[test]
-fn tile_coordinates_address_pixel_centres() {
+fn a_sample_sits_at_the_integer_coordinate_of_its_texel() {
     let dem = tile(&[[0.0, 100.0], [200.0, 300.0]]);
+    assert_eq!(dem.elevation_at_tile_coords(0.0, 0.0), 0.0);
     assert_eq!(
         dem.elevation_at_tile_coords(EXTENT / 4.0, EXTENT / 4.0),
-        0.0
-    );
-    assert_eq!(
-        dem.elevation_at_tile_coords(EXTENT / 2.0, EXTENT / 2.0),
         150.0
     );
     assert_eq!(
-        dem.elevation_at_tile_coords(EXTENT * 0.75, EXTENT * 0.75),
+        dem.elevation_at_tile_coords(EXTENT / 2.0, EXTENT / 2.0),
         300.0
     );
 }
 
 #[test]
-fn shared_tile_edges_interpolate_the_same_two_cell_centres() {
+fn shared_tile_edges_read_the_same_sample() {
     let mut west = tile(&[[0.0, 100.0], [0.0, 100.0]]);
     let mut east = tile(&[[200.0, 300.0], [200.0, 300.0]]);
     west.backfill_border(&east, 1, 0).expect("east border");
     east.backfill_border(&west, -1, 0).expect("west border");
-    assert_eq!(west.elevation_at_tile_coords(EXTENT, EXTENT / 2.0), 150.0);
-    assert_eq!(east.elevation_at_tile_coords(0.0, EXTENT / 2.0), 150.0);
+    assert_eq!(west.elevation_at_tile_coords(EXTENT, EXTENT / 2.0), 200.0);
+    assert_eq!(east.elevation_at_tile_coords(0.0, EXTENT / 2.0), 200.0);
 }
 
 mod reference;

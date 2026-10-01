@@ -165,13 +165,11 @@ impl DemTile {
         top * (1.0 - ty) + bottom * ty
     }
 
-    /// Elevation at tile coordinates in `0..=EXTENT`.
+    /// Elevation at tile coordinates in `0..=EXTENT`. As in GL JS, a sample sits at the integer
+    /// coordinate of its texel, not at the texel's centre.
     pub fn elevation_at_tile_coords(&self, x: f64, y: f64) -> f64 {
         let scale = f64::from(self.dim) / EXTENT;
-        self.sample_bilinear(
-            x.clamp(0.0, EXTENT) * scale - 0.5,
-            y.clamp(0.0, EXTENT) * scale - 0.5,
-        )
+        self.sample_bilinear(x.clamp(0.0, EXTENT) * scale, y.clamp(0.0, EXTENT) * scale)
     }
 
     /// Replaces the border facing a neighbour at `(dx, dy)` with that neighbour's edge samples.
