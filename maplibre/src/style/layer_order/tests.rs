@@ -26,3 +26,21 @@ fn serialization_preserves_document_order_without_private_index_fields() {
         ]
     );
 }
+
+#[test]
+fn a_layer_with_ref_takes_the_definition_of_the_layer_it_names() {
+    let style: Style =
+        serde_json::from_value(serde_json::json!({"version":8,"sources":{},"layers":[
+            {"id":"a","type":"symbol","source":"s","source-layer":"poi","minzoom":3,
+             "filter":["==","k","v"],"layout":{"icon-image":"x"}},
+            {"id":"b","ref":"a","paint":{"icon-opacity":0.5}}
+        ]}))
+        .expect("style");
+    let (a, b) = (&style.layers[0], &style.layers[1]);
+    assert_eq!(b.type_, a.type_);
+    assert_eq!(b.source, a.source);
+    assert_eq!(b.source_layer, a.source_layer);
+    assert_eq!(b.minzoom, Some(3.0));
+    assert_eq!(b.filter, a.filter);
+    assert_eq!(b.index, 1);
+}
