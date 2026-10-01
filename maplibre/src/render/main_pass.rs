@@ -9,7 +9,10 @@ use crate::{
         draw_graph,
         graph::{Node, NodeRunError, RenderContext, RenderGraphContext, SlotInfo},
         render_commands::{DrawMask, SetMaskPipeline},
-        render_phase::{LayerItem, RenderCommand, RenderCommandResult, RenderPhase, TileMaskItem},
+        render_phase::{
+            LayerItem, RenderCommand, RenderCommandResult, RenderPhase, TileMaskItem,
+            TranslucentItem,
+        },
         resource::Texture,
         Eventually::Initialized,
         RenderResources,
@@ -79,6 +82,61 @@ impl Node for MainPassNode {
     }
 }
 
+/// The layers that draw after the first symbol layer, with the last group drawn before it.
+///
+/// Symbols draw in their own pass so they can read the depth the layers below them left; the
+/// layers above the first symbol layer join that pass in order, so they cover symbols as the
+/// style's order says. Terrain draws everything in the main pass.
+pub(super) struct AboveSymbols<'w> {
+    /// The last group of layer items the main pass draws.
+    pub previous: &'w [LayerItem],
+    /// Items of the layers that draw after the first symbol layer.
+    pub items: &'w [LayerItem],
+}
+
+pub(super) fn above_symbols(world: &World) -> Option<AboveSymbols<'_>> {
+    if world
+        .resources
+        .get::<TerrainFrame>()
+        .is_some_and(|frame| frame.active)
+    {
+        return None;
+    }
+    let cutoff = world
+        .resources
+        .get::<RenderPhase<TranslucentItem>>()?
+        .into_iter()
+        .map(|item| item.index)
+        .filter(|index| *index != u32::MAX)
+        .min()?;
+    let layers = world.resources.get::<RenderPhase<LayerItem>>()?;
+    let items = layers.into_iter().as_slice();
+    let split = items.partition_point(|item| item.index < cutoff);
+    let below = &items[..split];
+    let previous = below.chunk_by(same_layer).last().unwrap_or(&[][..]);
+    Some(AboveSymbols {
+        previous,
+        items: &items[split..],
+    })
+}
+
+pub(super) fn same_layer(left: &LayerItem, right: &LayerItem) -> bool {
+    left.index == right.index && left.style_layer == right.style_layer
+}
+
+/// Draws one layer's items inside its tile masks, replacing the masks of `previous`.
+pub(super) fn draw_group<'w>(
+    pass: &mut wgpu::RenderPass<'w>,
+    world: &'w World,
+    previous: &[LayerItem],
+    group: &'w [LayerItem],
+) {
+    set_layer_masks(pass, world, previous, group);
+    for layer in group {
+        layer.draw_function.draw(pass, world, layer);
+    }
+}
+
 fn draw_layers<'w>(pass: &mut wgpu::RenderPass<'w>, world: &'w World) {
     let terrain = world
         .resources
@@ -86,11 +144,12 @@ fn draw_layers<'w>(pass: &mut wgpu::RenderPass<'w>, world: &'w World) {
         .filter(|frame| frame.active)
         .copied();
     let mut terrain_pending = terrain.is_some();
+    let above = above_symbols(world);
     if let Some(layers) = world.resources.get::<RenderPhase<LayerItem>>() {
         let mut previous = &[][..];
-        for group in layers.into_iter().as_slice().chunk_by(|left, right| {
-            left.index == right.index && left.style_layer == right.style_layer
-        }) {
+        let all = layers.into_iter().as_slice();
+        let drawn = all.len() - above.as_ref().map_or(0, |above| above.items.len());
+        for group in all[..drawn].chunk_by(same_layer) {
             set_layer_masks(pass, world, previous, group);
             for layer in group {
                 // Terrain preserves depth for screen-space layers while remaining above the background.

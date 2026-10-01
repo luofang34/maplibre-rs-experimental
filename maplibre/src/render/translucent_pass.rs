@@ -107,8 +107,23 @@ impl Node for TranslucentPassNode {
                 "RenderPhase<TranslucentItem>::size() = {}",
                 mask_items.size()
             );
+            let above = super::main_pass::above_symbols(world);
+            let mut previous = above.as_ref().map_or(&[][..], |above| above.previous);
+            let mut groups = above
+                .as_ref()
+                .map_or(&[][..], |above| above.items)
+                .chunk_by(super::main_pass::same_layer)
+                .peekable();
             for item in mask_items {
+                while let Some(group) = groups.next_if(|group| group[0].index < item.index) {
+                    super::main_pass::draw_group(&mut render_pass, world, previous, group);
+                    previous = group;
+                }
                 item.draw_function.draw(&mut render_pass, world, item);
+            }
+            for group in groups {
+                super::main_pass::draw_group(&mut render_pass, world, previous, group);
+                previous = group;
             }
         }
 
