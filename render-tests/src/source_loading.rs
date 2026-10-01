@@ -14,7 +14,10 @@ use maplibre::{
     raster::AvailableRasterLayerData,
     style::{
         layer::{LayerPaint, StyleLayer},
-        source::{GeoJsonData, GeoJsonSource, Source, VectorSource, GEOJSON_LAYER},
+        source::{
+            GeoJsonData, GeoJsonSource, Source, VectorSource, GEOJSON_DEFAULT_MAXZOOM,
+            GEOJSON_LAYER,
+        },
         Style,
     },
     terrain::dem_tile_coords,
@@ -87,7 +90,7 @@ pub(super) fn load_sources_blocking(
 }
 
 fn load_geojson_blocking(
-    _map: &mut HeadlessMap,
+    map: &mut HeadlessMap,
     (style, name, source): (&Style, &str, &GeoJsonSource),
     layers: &[StyleLayer],
     target_coords: &[WorldTileCoords],
@@ -123,7 +126,26 @@ fn load_geojson_blocking(
         }
     }
     let mut processed = ProcessedLayers::default();
+    // Past its last zoom a GeoJSON source is drawn magnified from the tile of that zoom.
+    let max_zoom = source.maxzoom.unwrap_or(GEOJSON_DEFAULT_MAXZOOM);
+    let level = u8::from(
+        map.view_state()
+            .zoom()
+            .zoom_level(maplibre::render::tile_view_pattern::DEFAULT_TILE_SIZE),
+    );
+    let mut tiles: Vec<WorldTileCoords> = Vec::new();
     for coords in target_coords {
+        let coords = maplibre::io::tile_sources::clamp_to_max_zoom(*coords, Some(max_zoom));
+        if !tiles.contains(&coords) {
+            tiles.push(coords);
+        }
+    }
+    for coords in &tiles {
+        let magnified = if u8::from(coords.z) >= max_zoom {
+            level.max(u8::from(coords.z))
+        } else {
+            0
+        };
         let atlas = symbol_atlas(
             &symbol_style,
             layers,
@@ -139,7 +161,7 @@ fn load_geojson_blocking(
                 layers.to_vec(),
                 *coords,
                 projection.clone(),
-                atlas,
+                (atlas, magnified),
             )
             .map_err(|error| format!("Cannot process GeoJSON source '{name}': {error}"))?,
         );

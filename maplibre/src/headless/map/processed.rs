@@ -111,18 +111,19 @@ pub fn process_geojson_layers(
     coords: WorldTileCoords,
     projection: ProjectionType,
 ) -> Result<ProcessedLayers, HeadlessMapOperationError> {
-    process_geojson_layers_with_atlas(geojson, source_name, layers, coords, projection, None)
+    process_geojson_layers_with_atlas(geojson, source_name, layers, coords, projection, (None, 0))
 }
 
 /// Tessellates inline GeoJSON for the style layers drawing a source; symbol layers use `atlas`
-/// for their glyphs and sprites, or the bundled fallback when it is `None`.
+/// for their glyphs and sprites, or the bundled fallback when it is `None`; the tile is drawn
+/// magnified to `overscaled_zoom` when that is past its own zoom.
 pub fn process_geojson_layers_with_atlas(
     geojson: &serde_json::Value,
     source_name: &str,
     layers: Vec<StyleLayer>,
     coords: WorldTileCoords,
     projection: ProjectionType,
-    atlas: Option<Arc<SymbolAtlas>>,
+    (atlas, overscaled_zoom): (Option<Arc<SymbolAtlas>>, u8),
 ) -> Result<ProcessedLayers, HeadlessMapOperationError> {
     let context = HeadlessContext::default();
     process_geojson_features::<DefaultVectorTransferables, HeadlessContext>(
@@ -133,6 +134,7 @@ pub fn process_geojson_layers_with_atlas(
             source_name: source_name.to_owned(),
             projection,
             atlas,
+            overscaled_zoom,
         },
         &context,
     )

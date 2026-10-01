@@ -205,6 +205,22 @@ pub struct GeoJsonTileRequest {
     pub projection: ProjectionType,
     /// Glyphs and sprites for the layers' symbols; the bundled Latin fallback when absent.
     pub atlas: Option<std::sync::Arc<crate::sdf::assets::SymbolAtlas>>,
+    /// The zoom the tile is drawn at when that is past the source's last zoom, so its geometry
+    /// is magnified; zero when the tile is drawn at its own zoom.
+    pub overscaled_zoom: u8,
+}
+
+impl GeoJsonTileRequest {
+    /// The zoom style expressions are evaluated at.
+    fn style_zoom(&self) -> f64 {
+        f64::from(self.overscaled_zoom.max(u8::from(self.coords.z)))
+    }
+
+    /// How many times the tile is magnified past its source's last zoom.
+    fn overscaling(&self) -> f64 {
+        let own = u8::from(self.coords.z);
+        2_f64.powi(i32::from(self.overscaled_zoom.saturating_sub(own)))
+    }
 }
 
 /// Whether one GeoJSON feature passes a layer filter.
@@ -330,6 +346,7 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
             | LayerPaint::Circle(_)
             | LayerPaint::Heatmap(_) => {
                 let zoom = u8::from(coords.z);
+                let style_zoom = request.style_zoom();
                 let granularity = match paint {
                     LayerPaint::Fill(_) => granularity_for_zoom(128, 2, zoom),
                     LayerPaint::Line(_) => granularity_for_zoom(512, 0, zoom),
@@ -343,13 +360,13 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
                             grid: use_globe_geometry
                                 && circle.circle_pitch_alignment
                                     == crate::style::circle::CirclePitchAlignment::Map,
-                            ..CircleOptions::for_paint(circle, f64::from(zoom))
+                            ..CircleOptions::for_paint(circle, style_zoom)
                         })
                     }
                     LayerPaint::Heatmap(heatmap) => ZeroTessellator::<IndexDataType>::default()
                         .with_circles(CircleOptions {
                             grid: use_globe_geometry,
-                            ..CircleOptions::for_heatmap(heatmap, f64::from(zoom))
+                            ..CircleOptions::for_heatmap(heatmap, style_zoom)
                         }),
                     LayerPaint::FillExtrusion(extrusion) => {
                         let tessellator = ZeroTessellator::<IndexDataType>::default()
@@ -380,7 +397,7 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
                     }
                     _ => ZeroTessellator::<IndexDataType>::default(),
                 }
-                .with_feature_opacity(paint.opacity(), f64::from(zoom));
+                .with_feature_opacity(paint.opacity(), style_zoom);
                 tessellator.sort_key = crate::vector::tessellation::SortKeys::by(
                     crate::vector::tessellation::sort_key_of(style_layer),
                 );
@@ -413,10 +430,9 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
                             || p.line_pattern.is_some()
                             || p.line_dasharray.is_some();
                         tessellator.line_feature_style =
-                            crate::vector::tessellation::LineFeatureStyle::for_paint(
-                                p,
-                                f64::from(zoom),
-                            );
+                            crate::vector::tessellation::LineFeatureStyle::for_paint(p, style_zoom);
+                        tessellator.sharp_corner_offset =
+                            crate::vector::tessellation::sharp_corner_offset(request.overscaling());
                         tessellator.stroke =
                             crate::style::line_stroke::LineStroke::of_layer(style_layer);
                         tessellator.join_property =
@@ -470,13 +486,14 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
                     .map_err(ProcessGeoJsonError::SendError)?;
             }
             LayerPaint::Symbol(symbol_paint) => {
-                let zoom = f64::from(u8::from(coords.z));
+                let zoom = request.style_zoom();
                 let atlas = request
                     .atlas
                     .clone()
                     .unwrap_or_else(crate::sdf::assets::fallback_atlas);
-                let tessellator =
+                let mut tessellator =
                     TextTessellator::with_assets(symbol_paint.clone(), zoom, atlas.clone());
+                tessellator.overscaling = request.overscaling();
                 let mut projecting = ProjectingTessellator::new(coords, tessellator);
 
                 let mut geojson_src = geozero::geojson::GeoJson(json_str.as_str());

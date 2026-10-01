@@ -441,7 +441,7 @@ fn image_uniform(period: f32, image: &LineImage, round: bool, scale: f32) -> [f3
     match image {
         LineImage::None => [period, 0.0, round, scale],
         LineImage::Gradient(_) => [period, 1.0, round, scale],
-        LineImage::Pattern { display, .. } => [period, 2.0, display[0], display[1]],
+        LineImage::Pattern { display, .. } => [period, 2.0 + scale, display[0], display[1]],
     }
 }
 
