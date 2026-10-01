@@ -26,7 +26,7 @@ impl Shader for CircleShader {
                     array_stride: std::mem::size_of::<ShaderVertex>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes:
-                        wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 10 => Float32x2]
+                        wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 10 => Float32x3]
                             .to_vec(),
                 },
                 VertexBufferLayout {

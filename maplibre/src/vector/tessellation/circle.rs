@@ -105,6 +105,17 @@ where
             .evaluate_for(&self.feature_properties, options.zoom)
             .unwrap_or(options.radius_default)
             .max(0.0);
+        // A radius that varies by feature and by zoom is stored for the tile's zoom and the one
+        // above it, which the shader blends by the fractional zoom, as GL JS does.
+        let radius_next = if options.radius.is_feature_constant() {
+            radius
+        } else {
+            options
+                .radius
+                .evaluate_for(&self.feature_properties, options.zoom + 1.0)
+                .unwrap_or(options.radius_default)
+                .max(0.0)
+        };
         let stroke_width = options
             .stroke_width
             .evaluate_for(&self.feature_properties, options.zoom)
@@ -127,6 +138,7 @@ where
             let mut vertex = ShaderVertex::new([x, y], [radius, stroke_width]);
             vertex.distance = blur;
             vertex.elevation = stroke_opacity;
+            vertex.edge_distance = radius_next;
             self.buffer.vertices.push(vertex);
         }
         for offset in CIRCLE_QUAD_INDICES {

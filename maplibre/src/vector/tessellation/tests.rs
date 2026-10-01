@@ -173,6 +173,24 @@ mod circles {
     }
 
     #[test]
+    fn a_radius_that_varies_by_feature_and_zoom_also_carries_the_next_zoom() {
+        let radius = StyleProperty::parse(&serde_json::json!({
+            "property": "size", "type": "exponential",
+            "stops": [[{"zoom": 3, "value": 0}, 2], [{"zoom": 4, "value": 0}, 10]]
+        }));
+        let mut tessellator = circle_tessellator(radius, 0.0);
+        tessellator
+            .property(0, "size", &ColumnValue::Double(0.0))
+            .expect("property");
+        point(&mut tessellator, 5.0, 5.0);
+        tessellator.feature_end(0).expect("feature ends");
+
+        let vertex = &tessellator.buffer.vertices[0];
+        assert_eq!(vertex.normal[0], 2.0);
+        assert_eq!(vertex.edge_distance, 10.0);
+    }
+
+    #[test]
     fn a_point_becomes_a_quad_carrying_radius_and_stroke() {
         let mut tessellator = circle_tessellator(StyleProperty::Constant(4.0), 1.5);
         point(&mut tessellator, 100.0, 200.0);

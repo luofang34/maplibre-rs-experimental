@@ -20,7 +20,7 @@ fn main(
     @location(0) position: vec2<f32>,
     @location(1) normal: vec2<f32>,
     // A blur and stroke opacity that vary by feature; negative ones leave the layer's own.
-    @location(10) per_feature: vec2<f32>,
+    @location(10) per_feature: vec3<f32>,
     @location(2) tile_mercator_coords: vec4<f32>,
     @location(4) translate1: vec4<f32>,
     @location(5) translate2: vec4<f32>,
@@ -41,7 +41,9 @@ fn main(
         select(-1.0, 1.0, corner == 1u || corner == 2u),
         select(-1.0, 1.0, corner >= 2u),
     );
-    let radius = normal.x;
+    // The radius of a feature that varies with zoom is blended toward the zoom above the tile's.
+    let zoom_blend = clamp(-log2(zoom_factor), 0.0, 1.0);
+    let radius = mix(normal.x, per_feature.z, zoom_blend);
     let stroke_width = normal.y;
     let total = max(radius + stroke_width, 1e-3);
     let transform = mat4x4<f32>(translate1, translate2, translate3, translate4);
