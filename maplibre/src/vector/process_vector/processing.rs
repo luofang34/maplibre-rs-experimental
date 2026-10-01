@@ -96,6 +96,8 @@ fn tessellator(paint: &LayerPaint, request: &VectorTileRequest) -> ZeroTessellat
             tessellator.style_property = paint.line_color.clone();
             tessellator.is_line_layer = true;
             tessellator.line_gradient = paint.line_gradient.is_some();
+            tessellator.sharp_corner_offset =
+                crate::vector::tessellation::sharp_corner_offset(request.overscaling());
             tessellator.split_corners = paint.line_gradient.is_some()
                 || paint.line_pattern.is_some()
                 || paint.line_dasharray.is_some();

@@ -46,6 +46,7 @@ pub use line_style::{LineFeatureStyle, PackedLine};
 mod extrusion;
 mod outline;
 mod sharp_corners;
+pub use sharp_corners::offset_for as sharp_corner_offset;
 mod sort_key;
 pub use extrusion::ExtrusionOptions;
 pub use sort_key::{sort_key_name, sort_key_of, SortKeys};
@@ -181,6 +182,8 @@ pub struct ZeroTessellator<I: std::ops::Add + From<lyon::tessellation::VertexId>
     polygon_entries: usize,
     /// Whether a sharp corner gets a vertex either side, for lines driven by distance.
     pub split_corners: bool,
+    /// Tile units from a sharp corner at which a split line gets its own vertex.
+    pub sharp_corner_offset: f32,
     /// A pattern that varies by feature, whose key each feature's colour carries.
     pub pattern_property:
         Option<crate::style::layer::StyleProperty<crate::style::layer::TextField>>,
@@ -236,6 +239,7 @@ impl<I: std::ops::Add + From<lyon::tessellation::VertexId> + MaxIndex> Default
             stroke: Default::default(),
             join_property: None,
             split_corners: false,
+            sharp_corner_offset: sharp_corners::UNMAGNIFIED_OFFSET,
             polygon_entries: 0,
             pattern_property: None,
             line_length: 0.0,
@@ -306,7 +310,7 @@ where
     fn tessellate_strokes(&mut self) -> GeoResult<()> {
         let mut path = self.path_builder.replace(Path::builder()).build();
         if self.split_corners {
-            path = sharp_corners::split(&path);
+            path = sharp_corners::split(&path, self.sharp_corner_offset);
         }
         self.line_length = self.line_length.max(path_length(&path));
         // A gradient measures its progress along the whole line, not from the tile.

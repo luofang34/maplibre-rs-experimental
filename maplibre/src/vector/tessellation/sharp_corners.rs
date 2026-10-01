@@ -10,13 +10,27 @@ use lyon::{
     path::{Event, Path},
 };
 
-/// Tile units from a sharp corner at which the line gets a vertex of its own.
-const OFFSET: f32 = 7.5;
+/// Tile units from a sharp corner at which a tile that is not magnified gets a vertex of its own;
+/// a magnified tile has proportionally fewer.
+pub const UNMAGNIFIED_OFFSET: f32 = 120.0;
+
+/// The distance from a sharp corner for a tile magnified by `overscaling`; GL JS adds no vertex
+/// past sixteen times.
+pub fn offset_for(overscaling: f64) -> f32 {
+    if overscaling > 16.0 {
+        0.0
+    } else {
+        UNMAGNIFIED_OFFSET / overscaling.max(1.0) as f32
+    }
+}
 /// Turns beyond this many degrees count as sharp.
 const SHARP_TURN_DEGREES: f32 = 75.0;
 
 /// `path` with a vertex added either side of each sharp corner.
-pub fn split(path: &Path) -> Path {
+pub fn split(path: &Path, offset: f32) -> Path {
+    if offset <= 0.0 {
+        return path.clone();
+    }
     let mut builder = Path::builder();
     let mut points: Vec<Point> = Vec::new();
     for event in path.iter() {
@@ -27,7 +41,7 @@ pub fn split(path: &Path) -> Path {
             }
             Event::Line { to, .. } => points.push(to),
             Event::End { close, .. } => {
-                emit(&mut builder, &points, close);
+                emit(&mut builder, &points, close, offset);
                 points.clear();
             }
             Event::Quadratic { .. } | Event::Cubic { .. } => {}
@@ -36,7 +50,7 @@ pub fn split(path: &Path) -> Path {
     builder.build()
 }
 
-fn emit(builder: &mut lyon::path::path::Builder, points: &[Point], close: bool) {
+fn emit(builder: &mut lyon::path::path::Builder, points: &[Point], close: bool, offset: f32) {
     let Some(first) = points.first() else {
         return;
     };
@@ -55,12 +69,12 @@ fn emit(builder: &mut lyon::path::path::Builder, points: &[Point], close: bool) 
         };
         let sharp = next.is_some_and(|next| is_sharp(previous, current, next));
         if sharp {
-            let before = toward(current, previous);
+            let before = toward(current, previous, offset);
             if let Some(before) = before {
                 builder.line_to(before);
             }
             builder.line_to(current);
-            if let Some(after) = next.and_then(|next| toward(current, next)) {
+            if let Some(after) = next.and_then(|next| toward(current, next, offset)) {
                 builder.line_to(after);
                 last = after;
                 continue;
@@ -74,12 +88,12 @@ fn emit(builder: &mut lyon::path::path::Builder, points: &[Point], close: bool) 
     builder.end(close);
 }
 
-/// The point `OFFSET` from `from` toward `to`, when the segment is long enough to hold two.
-fn toward(from: Point, to: Point) -> Option<Point> {
+/// The point `offset` from `from` toward `to`, when the segment is long enough to hold two.
+fn toward(from: Point, to: Point, offset: f32) -> Option<Point> {
     let delta = to - from;
     let length = delta.length();
-    (length > 2.0 * OFFSET).then(|| {
-        let step = delta * (OFFSET / length);
+    (length > 2.0 * offset).then(|| {
+        let step = delta * (offset / length);
         point((from.x + step.x).round(), (from.y + step.y).round())
     })
 }
@@ -115,7 +129,7 @@ mod tests {
         builder.line_to(point(100.0, 0.0));
         builder.line_to(point(0.0, 10.0));
         builder.end(false);
-        let split = points_of(&split(&builder.build()));
+        let split = points_of(&split(&builder.build(), 7.5));
         assert_eq!(split.len(), 5);
         assert_eq!(split[1], point(93.0, 0.0));
         assert_eq!(split[2], point(100.0, 0.0));
@@ -128,6 +142,13 @@ mod tests {
         builder.line_to(point(100.0, 0.0));
         builder.line_to(point(200.0, 20.0));
         builder.end(false);
-        assert_eq!(points_of(&split(&builder.build())).len(), 3);
+        assert_eq!(points_of(&split(&builder.build(), 7.5)).len(), 3);
+    }
+
+    #[test]
+    fn the_offset_shrinks_with_the_magnification_and_vanishes_past_sixteen() {
+        assert_eq!(offset_for(1.0), 120.0);
+        assert_eq!(offset_for(16.0), 7.5);
+        assert_eq!(offset_for(32.0), 0.0);
     }
 }
