@@ -299,6 +299,58 @@ pub(super) fn line_glyph_boxes(
         .collect()
 }
 
+/// The screen angle of a text's own axis, which a variable anchor's shift turns with.
+pub(super) fn text_rotation(
+    layer: &SymbolLayerData,
+    feature: &Feature,
+    elevation: f32,
+    view: &ViewState,
+    projection: &ShaderProjectionData,
+    uniforms: &SymbolUniforms,
+) -> f64 {
+    let alignment = uniforms.text_layout;
+    let Some(part) = feature.parts.into_iter().flatten().find(|part| part.text) else {
+        return 0.0;
+    };
+    let placement = Placement {
+        coords: layer.coords,
+        anchor: [
+            f64::from(feature.text_anchor.x),
+            f64::from(feature.text_anchor.y),
+        ],
+        elevation: f64::from(elevation),
+        view,
+        projection,
+        uniforms,
+    };
+    let height = f64::from(elevation) * f64::from(alignment[3]) + part.height;
+    let Some(clip) = project(layer.coords, placement.anchor, height, view, projection) else {
+        return 0.0;
+    };
+    let rotation = if alignment[0] > 0.5 {
+        // A map-plane shift lands turned by the screen direction of the text's own axis.
+        let angle = f64::from(alignment[2]) + part.angle;
+        project(
+            layer.coords,
+            [
+                placement.anchor[0] + angle.cos() * 16.0,
+                placement.anchor[1] + angle.sin() * 16.0,
+            ],
+            height,
+            view,
+            projection,
+        )
+        .map(|tangent| {
+            let dx = (tangent.x / tangent.w - clip.x / clip.w) * view.width();
+            let dy = -(tangent.y / tangent.w - clip.y / clip.w) * view.height();
+            dy.atan2(dx)
+        })
+    } else {
+        placement.angle(&part, alignment, height, clip)
+    };
+    rotation.unwrap_or(0.0)
+}
+
 struct Placement<'a> {
     coords: WorldTileCoords,
     anchor: [f64; 2],

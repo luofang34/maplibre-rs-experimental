@@ -9,7 +9,7 @@ use crate::{
         paint::SymbolUniforms,
         placement::{
             line_glyph_boxes, line_glyph_poses, screen_boxes, symbol_elevation,
-            text_perspective_scale, LinePoses,
+            text_perspective_scale, text_rotation, LinePoses,
         },
         query::{PlacedSymbol, PlacedSymbols},
     },
@@ -142,7 +142,7 @@ impl LayerFrame<'_> {
         feature: &crate::sdf::Feature,
         (rectangles, glyph_boxes): ([Option<[f64; 4]>; 2], &[[f64; 4]]),
         (rules, grid, viewport): (&rules::PlacementRules, &CollisionGrid, [f64; 2]),
-        perspective: f64,
+        (perspective, rotation): (f64, f64),
     ) -> ([Option<[f64; 4]>; 2], [f32; 2], usize) {
         let (Some(text), true) = (rectangles[0], feature.anchor_shifts.len() > 1) else {
             return (rectangles, [0.0; 2], 0);
@@ -158,7 +158,9 @@ impl LayerFrame<'_> {
             .is_some_and(|fit| fit != "none");
         let scale = f64::from(self.uniforms.text[0]) / 24.0 * perspective;
         let moved = |shift: &[f32; 2]| {
-            let [dx, dy] = shift.map(|pixels| f64::from(pixels) * scale);
+            let [x, y] = shift.map(|pixels| f64::from(pixels) * scale);
+            let (sin, cos) = rotation.sin_cos();
+            let (dx, dy) = (x * cos - y * sin, x * sin + y * cos);
             [
                 Some([text[0] + dx, text[1] + dy, text[2] + dx, text[3] + dy]),
                 rectangles[1].map(|icon| {
@@ -250,13 +252,23 @@ impl LayerFrame<'_> {
             feature,
             (rectangles, &glyph_boxes),
             (&rules, &*boxes, viewport),
-            text_perspective_scale(
-                layer,
-                feature,
-                ground,
-                view_state,
-                projection,
-                &self.uniforms,
+            (
+                text_perspective_scale(
+                    layer,
+                    feature,
+                    ground,
+                    view_state,
+                    projection,
+                    &self.uniforms,
+                ),
+                text_rotation(
+                    layer,
+                    feature,
+                    ground,
+                    view_state,
+                    projection,
+                    &self.uniforms,
+                ),
             ),
         );
         let visible = rules.place_along_line(rectangles, &glyph_boxes, boxes, viewport);
