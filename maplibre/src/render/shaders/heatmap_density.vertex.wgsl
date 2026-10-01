@@ -48,11 +48,28 @@ fn main(
     let reach = extrude * scale;
     let transform = mat4x4<f32>(translate1, translate2, translate3, translate4);
     // The radius is in pixels on the map plane, so pitch shrinks far points as it does circles.
-    let corner_position = position + reach * radius * TILE_UNITS_PER_PIXEL * zoom_factor;
+    let corner_offset = reach * radius * TILE_UNITS_PER_PIXEL * zoom_factor;
+    let corner_position = position + corner_offset;
     // A point over terrain stands on the surface, as GL JS places its kernels.
     let spatial = path.w > -1e20;
     var projected: ProjectedTilePosition;
-    if spatial {
+    let transition = projection.transition_and_padding.x;
+    if transition > 0.0 {
+        // On the globe the kernel keeps its angular size, as a map-aligned circle does, and
+        // stands on the sphere whatever the terrain below it.
+        let center = project_tile_position(vec3<f32>(position, 0.0), transform, tile_mercator_coords);
+        let center_vector = tile_position_on_unit_sphere(position, tile_mercator_coords);
+        let angles = corner_offset * tile_mercator_coords.z * PROJECTION_TWO_PI * projection.globe_circle.x;
+        let globe_clip = projection.main_matrix * vec4<f32>(globe_rotate_vector(center_vector, angles), 1.0);
+        projected = ProjectedTilePosition(
+            interpolate_clip_position(
+                transform * vec4<f32>(corner_position, 0.0, 1.0),
+                globe_clip,
+                transition,
+            ),
+            center.horizon_distance,
+        );
+    } else if spatial {
         projected = project_tile_position_3d(
             vec3<f32>(corner_position, path.w),
             transform,
