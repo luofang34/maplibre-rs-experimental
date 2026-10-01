@@ -344,6 +344,9 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
                     _ => ZeroTessellator::<IndexDataType>::default(),
                 }
                 .with_feature_opacity(paint.opacity(), f64::from(zoom));
+                tessellator.sort_key = crate::vector::tessellation::SortKeys::by(
+                    crate::vector::tessellation::sort_key_of(style_layer),
+                );
                 match paint {
                     LayerPaint::Fill(p) if p.fill_pattern.is_some() => {
                         tessellator.fallback_color = [1.0; 4]
@@ -399,6 +402,7 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
                 if inner.feature_indices.is_empty() && !inner.buffer.indices.is_empty() {
                     let _ = inner.feature_end(0);
                 }
+                inner.apply_sort_keys();
 
                 let synthetic_layer = geozero::mvt::tile::Layer {
                     version: 2,

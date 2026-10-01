@@ -152,6 +152,12 @@ impl LayerValidation<'_> {
                 if stroke && crate::style::line_stroke::LineStroke::accepts(name, value) {
                     continue;
                 }
+                if scope == "layout"
+                    && crate::vector::tessellation::sort_key_name(&self.layer.type_)
+                        == Some(name.as_str())
+                {
+                    continue;
+                }
                 let reason = if stroke {
                     "this rendering path requires a supported literal value"
                 } else {

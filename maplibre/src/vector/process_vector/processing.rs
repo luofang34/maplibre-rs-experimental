@@ -105,19 +105,24 @@ fn vector_layer<T: VectorTransferables, C: Context>(
     let mut tessellator = tessellator(paint, request);
     tessellator.stroke = crate::style::line_stroke::LineStroke::of_layer(style);
     tessellator.coordinate_scale = extent_scale(&layer);
+    tessellator.sort_key =
+        crate::vector::tessellation::SortKeys::by(crate::vector::tessellation::sort_key_of(style));
     match layer.process(&mut tessellator) {
         Err(error) => {
             context.layer_missing(&request.coords, &layer.name)?;
             tracing::error!(coords = %request.coords, layer = %layer.name, ?error,"vector tessellation failed");
         }
-        Ok(()) => context.layer_tessellation_finished(
-            &request.coords,
-            tessellator.buffer.into(),
-            tessellator.feature_indices,
-            tessellator.feature_colors,
-            original,
-            style.id.clone(),
-        )?,
+        Ok(()) => {
+            tessellator.apply_sort_keys();
+            context.layer_tessellation_finished(
+                &request.coords,
+                tessellator.buffer.into(),
+                tessellator.feature_indices,
+                tessellator.feature_colors,
+                original,
+                style.id.clone(),
+            )?
+        }
     }
     Ok(())
 }

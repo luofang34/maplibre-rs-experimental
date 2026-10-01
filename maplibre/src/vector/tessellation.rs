@@ -44,7 +44,10 @@ mod line_origin;
 mod line_style;
 pub use line_style::{LineFeatureStyle, PackedLine};
 mod extrusion;
+mod outline;
+mod sort_key;
 pub use extrusion::ExtrusionOptions;
+pub use sort_key::{sort_key_name, sort_key_of, SortKeys};
 
 const DEFAULT_TOLERANCE: f32 = 0.02;
 
@@ -61,15 +64,6 @@ impl FillVertexConstructor<ShaderVertex> for VertexConstructor {
         ShaderVertex::new(vertex.position().to_array(), [0.0, 0.0])
     }
 }
-
-impl lyon::tessellation::StrokeVertexConstructor<ShaderVertex> for VertexConstructor {
-    fn new_vertex(&mut self, vertex: lyon::tessellation::StrokeVertex) -> ShaderVertex {
-        ShaderVertex::new(vertex.position().to_array(), [0.0, 0.0])
-    }
-}
-
-/// Outline width in tile units: about one pixel of a 512 px tile.
-const OUTLINE_WIDTH: f32 = 8.0;
 
 /// Geometry with a draw-index count separate from any GPU copy-alignment padding.
 /// Conversion from `VertexBuffers` pads indices and requires copy-aligned vertex bytes.
@@ -208,6 +202,8 @@ pub struct ZeroTessellator<I: std::ops::Add + From<lyon::tessellation::VertexId>
     pub outline_property: Option<crate::style::layer::StyleProperty<csscolorparser::Color>>,
     /// The outline of the feature being processed, drawn after its fill.
     outline: VertexBuffers<ShaderVertex, I>,
+    /// Orders features by `*-sort-key`, so the greater keys draw on top.
+    pub sort_key: SortKeys,
     current_index: usize,
 }
 
@@ -244,6 +240,7 @@ impl<I: std::ops::Add + From<lyon::tessellation::VertexId> + MaxIndex> Default
             feature_opacity: None,
             outline_property: None,
             outline: VertexBuffers::new(),
+            sort_key: Default::default(),
         }
     }
 }
@@ -369,7 +366,8 @@ where
             StrokeTessellator::new()
                 .tessellate_path(
                     &path,
-                    &StrokeOptions::tolerance(DEFAULT_TOLERANCE).with_line_width(OUTLINE_WIDTH),
+                    &StrokeOptions::tolerance(DEFAULT_TOLERANCE)
+                        .with_line_width(outline::OUTLINE_WIDTH),
                     &mut BuffersBuilder::new(&mut self.outline, VertexConstructor {}),
                 )
                 .map_err(|error| GeozeroError::Geometry(error.to_string()))?;
@@ -393,45 +391,6 @@ where
             },
         )
         .map_err(|error| GeozeroError::Geometry(error.to_string()))
-    }
-
-    /// Draws the pending outline as a feature of its own, after the fill it belongs to.
-    fn append_outline(&mut self) {
-        let outline = std::mem::replace(&mut self.outline, VertexBuffers::new());
-        let Some(property) = &self.outline_property else {
-            return;
-        };
-        let Some(colour) = property.evaluate_for(&self.feature_properties, self.zoom) else {
-            return;
-        };
-        if outline.vertices.is_empty() {
-            return;
-        }
-        let base = self.buffer.vertices.len();
-        self.buffer.vertices.extend(outline.vertices);
-        self.buffer
-            .indices
-            .extend(outline.indices.into_iter().map(|index| {
-                I::from(lyon::tessellation::VertexId::from_usize(
-                    base + index.into() as usize,
-                ))
-            }));
-        self.update_feature_indices();
-        let opacity = self
-            .feature_opacity
-            .as_ref()
-            .map_or(1.0, |(opacity, zoom)| {
-                opacity
-                    .evaluate_for(&self.feature_properties, *zoom)
-                    .unwrap_or(1.0)
-                    .clamp(0.0, 1.0)
-            });
-        self.feature_colors.push([
-            colour.r as f32,
-            colour.g as f32,
-            colour.b as f32,
-            colour.a as f32 * opacity,
-        ]);
     }
 
     fn append_coordinate(&mut self, coordinate: [f32; 2]) -> GeoResult<()> {
@@ -491,6 +450,7 @@ where
     I: std::ops::Add + From<lyon::tessellation::VertexId> + MaxIndex + Copy + Into<u32>,
 {
     fn feature_end(&mut self, _idx: u64) -> geozero::error::Result<()> {
+        let first_entry = self.feature_indices.len();
         self.update_feature_indices();
         let mut color = if let Some(style) = &self.style_property {
             if let Some(c) = style.evaluate_for(&self.feature_properties, self.zoom) {
@@ -519,6 +479,12 @@ where
 
         self.feature_colors.push(color);
         self.append_outline();
+        self.sort_key.record(
+            &self.feature_properties,
+            self.zoom,
+            first_entry..self.feature_indices.len(),
+            self.buffer.indices.len(),
+        );
         self.feature_properties.clear();
         Ok(())
     }

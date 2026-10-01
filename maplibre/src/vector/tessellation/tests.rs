@@ -1,4 +1,6 @@
-use geozero::GeomProcessor;
+use geozero::{FeatureProcessor, GeomProcessor, PropertyProcessor};
+
+use crate::style::layer::StyleProperty;
 
 use super::{IndexDataType, ZeroTessellator};
 
@@ -28,6 +30,52 @@ fn globe_fill_tessellation_cuts_triangle_interior() {
         .vertices
         .iter()
         .any(|vertex| vertex.position == [2048.0, 0.0]));
+}
+
+#[test]
+fn features_with_greater_sort_keys_are_drawn_later() {
+    let mut tessellator = ZeroTessellator::<IndexDataType> {
+        sort_key: super::SortKeys::by(Some(StyleProperty::parse(&serde_json::json!([
+            "get", "rank"
+        ])))),
+        fallback_color: [0.0; 4],
+        ..Default::default()
+    };
+    for (rank, x) in [(2.0, 100.0), (0.0, 200.0), (1.0, 300.0)] {
+        tessellator
+            .property(0, "rank", &geozero::ColumnValue::Double(rank))
+            .expect("rank is accepted");
+        tessellator
+            .polygon_begin(true, 1, 0)
+            .expect("polygon begins");
+        tessellator
+            .linestring_begin(false, 4, 0)
+            .expect("ring begins");
+        for (dx, dy) in [(0.0, 0.0), (50.0, 0.0), (50.0, 50.0), (0.0, 0.0)] {
+            tessellator.xy(x + dx, dy, 0).expect("coordinate is valid");
+        }
+        tessellator.linestring_end(false, 0).expect("ring ends");
+        tessellator.polygon_end(true, 0).expect("polygon ends");
+        tessellator.feature_end(0).expect("feature ends");
+    }
+    tessellator.apply_sort_keys();
+
+    let firsts: Vec<f32> = tessellator
+        .feature_indices
+        .iter()
+        .scan(0_usize, |start, count| {
+            let first = *start;
+            *start += *count as usize;
+            Some(tessellator.buffer.vertices[first].position[0])
+        })
+        .collect();
+    assert_eq!(firsts, [200.0, 300.0, 100.0]);
+    let vertices = tessellator.buffer.vertices.len() as u32;
+    assert!(tessellator
+        .buffer
+        .indices
+        .iter()
+        .all(|index| *index < vertices));
 }
 
 fn tessellate_reference_line(tessellator: &mut ZeroTessellator<IndexDataType>) {
