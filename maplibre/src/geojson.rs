@@ -369,7 +369,7 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
                     }
                     LayerPaint::Fill(p) => {
                         tessellator.style_property = p.fill_color.clone();
-                        tessellator.outline_property = p.outline_color(f64::from(zoom));
+                        tessellator.outline_property = p.outline_color();
                     }
                     LayerPaint::FillExtrusion(p) if p.fill_extrusion_pattern.is_some() => {
                         tessellator.fallback_color = [1.0; 4];

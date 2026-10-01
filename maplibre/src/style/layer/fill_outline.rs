@@ -5,12 +5,11 @@ use csscolorparser::Color;
 use super::{paint::FillPaint, StyleProperty};
 
 impl FillPaint {
-    /// The colour of the outline drawn along the polygons' edges at `zoom`.
+    /// The colour of the outline drawn along the polygons' edges.
     ///
-    /// An antialiased fill outlines in its own colour unless `fill-outline-color` says otherwise,
-    /// which only shows where the fill is translucent; a fill that is opaque everywhere skips
-    /// the outline.
-    pub fn outline_color(&self, zoom: f64) -> Option<StyleProperty<Color>> {
+    /// An antialiased fill outlines in its own colour unless `fill-outline-color` says otherwise;
+    /// the outline softens the edges of an opaque fill and darkens those of a translucent one.
+    pub fn outline_color(&self) -> Option<StyleProperty<Color>> {
         if self.fill_outline_color.is_some() {
             return self.fill_outline_color.clone();
         }
@@ -18,25 +17,14 @@ impl FillPaint {
             .fill_antialias
             .as_ref()
             .is_none_or(|flag| flag.as_bool().unwrap_or(true));
-        if !antialiased || self.fill_pattern.is_some() || self.is_opaque(zoom) {
+        if !antialiased || self.fill_pattern.is_some() {
             return None;
         }
-        self.fill_color.clone()
-    }
-
-    fn is_opaque(&self, zoom: f64) -> bool {
-        let color_opaque = self.fill_color.as_ref().is_none_or(|color| {
-            color.is_feature_constant()
-                && color
-                    .evaluate_at_zoom(zoom)
-                    .is_none_or(|color| color.a >= 1.0)
-        });
-        let opacity_full = self.fill_opacity.as_ref().is_none_or(|opacity| {
-            opacity.is_feature_constant()
-                && opacity
-                    .evaluate_at_zoom(zoom)
-                    .is_none_or(|opacity| opacity >= 1.0)
-        });
-        color_opaque && opacity_full
+        // The default fill is opaque black.
+        Some(
+            self.fill_color
+                .clone()
+                .unwrap_or(StyleProperty::Constant(Color::new(0.0, 0.0, 0.0, 1.0))),
+        )
     }
 }
