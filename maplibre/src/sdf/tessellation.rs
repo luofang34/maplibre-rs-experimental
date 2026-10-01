@@ -41,6 +41,8 @@ pub struct TextTessellator {
     collected: Vec<CollectedSymbol>,
     /// Lines to be labelled along, held until they can be merged.
     pending_lines: Vec<line_merge::PendingLine>,
+    /// Where each text already has a label along a line, so a repeat of it keeps its distance.
+    line_anchors_by_text: std::collections::HashMap<String, Vec<[f64; 2]>>,
     properties: FeatureProperties,
     /// Symbol triangles.
     pub quad_buffer: VertexBuffers<ShaderSymbolVertex, IndexDataType>,
@@ -77,6 +79,7 @@ impl TextTessellator {
             atlas,
             collected: Vec::new(),
             pending_lines: Vec::new(),
+            line_anchors_by_text: std::collections::HashMap::new(),
             properties: FeatureProperties::new(),
             quad_buffer: VertexBuffers::new(),
             features: Vec::new(),
@@ -245,6 +248,22 @@ impl TextTessellator {
         }
     }
 
+    /// Whether a label with the same text already sits within `repeat_distance` of `point`; a
+    /// label that does not is remembered.
+    fn anchor_is_too_close(&mut self, point: [f64; 2], repeat_distance: f64) -> bool {
+        let Some(text) = self.paint.label(&self.properties, self.zoom) else {
+            return false;
+        };
+        let others = self.line_anchors_by_text.entry(text).or_default();
+        let too_close = others
+            .iter()
+            .any(|other| (other[0] - point[0]).hypot(other[1] - point[1]) < repeat_distance);
+        if !too_close {
+            others.push(point);
+        }
+        too_close
+    }
+
     /// Anchors along the lines of a feature, as many as the spacing allows.
     fn collect_along_lines(
         &mut self,
@@ -322,6 +341,11 @@ impl TextTessellator {
                 .map(|point| [point[0] as f32, point[1] as f32])
                 .collect();
             for anchor in anchors {
+                if placement == LinePlacement::Line
+                    && self.anchor_is_too_close(anchor.point, params.spacing / 2.0)
+                {
+                    continue;
+                }
                 let distance = line_anchors::distance_to(&part, anchor);
                 self.collect(
                     Point::new(anchor.point[0], anchor.point[1]),

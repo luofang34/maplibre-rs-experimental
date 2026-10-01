@@ -38,7 +38,7 @@ fn labels_longer_than_the_spacing_push_the_repeats_apart() {
 fn a_line_continuing_across_the_tile_edge_starts_on_its_own_rhythm() {
     let starts_on_edge = vec![[0.0, 2000.0], [4000.0, 2000.0]];
     let anchors = line_anchors(&starts_on_edge, params(1000.0, 200.0));
-    assert_eq!(anchors[0].point[0], 100.0, "offset is one glyph height");
+    assert_eq!(anchors[0].point[0], 500.0, "offset is half the spacing");
 }
 
 #[test]

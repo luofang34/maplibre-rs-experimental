@@ -130,7 +130,7 @@ pub(super) fn line_anchors(line: &[Point], params: AnchorSpacing) -> Vec<LineAnc
     // Repeats begin at a fixed distance from the tile edge, so the neighbouring tile's
     // continuation of the line places its labels on the same rhythm.
     let offset = if on_edge {
-        (params.text_size * params.overscaling) % spacing
+        (spacing / 2.0 * params.overscaling) % spacing
     } else {
         ((params.label_length / 2.0 + 2.0 * params.text_size) * params.overscaling) % spacing
     };

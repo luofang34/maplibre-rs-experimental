@@ -65,10 +65,10 @@ fn a_line_label_repeats_along_the_line_and_is_never_wrapped() {
     );
     assert_eq!(
         anchors_x(&tessellator),
-        [128.0, 928.0, 1728.0, 2528.0, 3328.0]
+        [400.0, 1200.0, 2000.0, 2800.0, 3600.0]
     );
     let second = tessellator.features[1].line.as_ref().expect("a line label");
-    assert_eq!(second.anchor_distance, 928.0);
+    assert_eq!(second.anchor_distance, 1200.0);
     assert_eq!(&*second.polyline, &[[0.0, 2048.0], [4000.0, 2048.0]]);
     assert_eq!(
         second.glyph_offsets,
@@ -97,7 +97,7 @@ fn line_center_places_one_label_and_repeat_distance_follows_the_style() {
         serde_json::json!({"symbol-spacing": 200}),
         &[[0.0, 2048.0], [4000.0, 2048.0]],
     );
-    assert_eq!(anchors_x(&sparse), [128.0, 1728.0, 3328.0]);
+    assert_eq!(anchors_x(&sparse), [800.0, 2400.0]);
 }
 
 #[test]
