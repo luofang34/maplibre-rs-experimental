@@ -386,6 +386,9 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
                         tessellator.style_property = p.line_color.clone();
                         tessellator.is_line_layer = true;
                         tessellator.line_gradient = p.line_gradient.is_some();
+                        tessellator.split_corners = p.line_gradient.is_some()
+                            || p.line_pattern.is_some()
+                            || p.line_dasharray.is_some();
                         tessellator.line_feature_style =
                             crate::vector::tessellation::LineFeatureStyle::for_paint(
                                 p,
