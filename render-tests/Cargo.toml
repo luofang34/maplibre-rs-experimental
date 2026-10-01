@@ -22,6 +22,7 @@ geozero.workspace = true
 maplibre = { path = "../maplibre", features = ["headless", "geojson", "thread-safe-futures"] }
 serde_json.workspace = true
 image.workspace = true
+moxcms = "0.8"
 tracing.workspace = true
 tracing-subscriber.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
