@@ -372,12 +372,20 @@ async fn a_heatmap_composites_at_its_place_in_the_style_order() {
         2,
         "the land shows beyond the kernel",
     );
+    // GL JS draws opaque fills in a depth-writing pass ahead of its translucent layers, and the
+    // heatmap composite ignores depth, so it shows even over opaque land above it.
     let under_land = layered(["heat", "land"]).await;
     assert_close(
         pixel(&under_land, SIZE / 2, SIZE / 2),
+        [255, 0, 0],
+        3,
+        "a heatmap below opaque land still shows over it, as in GL JS",
+    );
+    assert_close(
+        pixel(&under_land, SIZE / 2 + 80, SIZE / 2),
         [0, 0, 255],
         2,
-        "a heatmap below opaque land is covered",
+        "the land shows beyond the kernel",
     );
 }
 
