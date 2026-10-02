@@ -78,6 +78,9 @@ const SEAM_MARGIN: f64 = 0.2;
 /// How far the drawn cap may lie from the sphere: its flat triangles sag a few kilometres
 /// below the arc, while the far side of the globe seen through a hole is thousands away.
 const CHORD_TOLERANCE: f64 = 30_000.0;
+/// Degrees beyond the seam in which every tile pixel must keep its drape, so the cap's fill
+/// stops at the last row of tiles instead of spreading over it.
+const TILE_RING: f64 = 2.5;
 const NEAR: f64 = 1000.0;
 const FAR: f64 = 1e9;
 
@@ -223,6 +226,7 @@ impl PolarMap {
         let depths = read_blocking(&self.map, &self.depth);
         let mut cap = 0;
         let mut white = 0;
+        let mut ring = 0;
         for y in 0..SIZE {
             for x in 0..SIZE {
                 let offset = ((y * SIZE + x) * 4) as usize;
@@ -236,7 +240,16 @@ impl PolarMap {
                     continue;
                 }
                 if colatitude > CAP_COLATITUDE + SEAM_MARGIN {
-                    white += usize::from(pixel[..3].iter().all(|channel| *channel > 220));
+                    let is_white = pixel[..3].iter().all(|channel| *channel > 220);
+                    white += usize::from(is_white);
+                    if drapes_white && colatitude < CAP_COLATITUDE + TILE_RING {
+                        ring += 1;
+                        assert!(
+                            is_white,
+                            "{case}: the last row of tiles at ({x},{y}) {colatitude:.3}° from \
+                             the pole is {pixel:?}, not its drape"
+                        );
+                    }
                     continue;
                 }
                 if colatitude > CAP_COLATITUDE - SEAM_MARGIN {
@@ -259,6 +272,10 @@ impl PolarMap {
             }
         }
         assert!(cap > 200, "{case}: {cap} cap pixels checked");
+        assert!(
+            !drapes_white || ring > 200,
+            "{case}: {ring} pixels of the last row of tiles checked"
+        );
         if drapes_white {
             white
         } else {
