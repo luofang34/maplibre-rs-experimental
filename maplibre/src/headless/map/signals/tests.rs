@@ -339,3 +339,40 @@ async fn frame_trace_overhead() {
     );
     assert!(share < 0.02, "recording costs under 2% of a frame's p95");
 }
+
+#[tokio::test]
+async fn the_main_pass_gpu_time_lands_in_the_frame_it_timed() {
+    let mut map = raster_map().await;
+    if !map
+        .device()
+        .features()
+        .contains(wgpu::Features::TIMESTAMP_QUERY)
+    {
+        return;
+    }
+    map.enable_frame_trace(32);
+    for _ in 0..6 {
+        map.render_source_frames(Default::default(), vec![picture()], 1)
+            .expect("frame");
+        // The readback is mapped before the next frame takes it.
+        map.device()
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll");
+    }
+    let export = map.frame_trace_mut().expect("trace").export();
+    let timed = |record: &crate::render::frame_trace::FrameRecord| {
+        record.spans.iter().any(|span| span.name == "map")
+    };
+    let first = export.frames.first().expect("frames");
+    let last = export.frames.last().expect("frames");
+    assert!(
+        timed(first),
+        "the first frame's time arrives a frame later and is filed under it: {:?}",
+        export.frames.iter().map(timed).collect::<Vec<_>>()
+    );
+    assert!(
+        !timed(last),
+        "the newest frame's time is still on its way: {:?}",
+        export.frames.iter().map(timed).collect::<Vec<_>>()
+    );
+}
