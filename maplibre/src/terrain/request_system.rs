@@ -16,10 +16,7 @@ use crate::{
         tile_sources::missing_tile_fallback,
     },
     kernel::Kernel,
-    render::{
-        projection::view_region_for_projection, tile_view_pattern::DEFAULT_TILE_SIZE,
-        view_state::ViewStatePadding,
-    },
+    render::view_state::ViewStatePadding,
     tcs::{
         system::{System, SystemError, SystemResult},
         tiles::Tiles,
@@ -120,11 +117,11 @@ impl<E: Environment, T: DemTransferables> System for RequestSystem<E, T> {
         let Some(dem) = dem_source(style) else {
             return Ok(());
         };
-        let Some(view_region) = view_region_for_projection(
+        let Some(view_region) = crate::render::projection::terrain_region(
             style,
             view_state,
             world,
-            view_state.zoom().zoom_level(DEFAULT_TILE_SIZE),
+            dem.tile_size,
             ViewStatePadding::Tight,
         )?
         else {

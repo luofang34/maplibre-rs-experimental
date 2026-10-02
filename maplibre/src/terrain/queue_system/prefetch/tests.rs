@@ -27,11 +27,12 @@ fn speculative_work_excludes_visible_and_respects_count_and_bytes() {
 fn moving_terrain_prepares_offscreen_tiles_and_clears_them_under_pressure() {
     let (style, view, external) = immersive_view();
     let mut world = World::default();
-    let visible = view_region_for_projection(
+    let dem = crate::terrain::source::dem_source(&style).expect("terrain");
+    let visible = crate::render::projection::terrain_region(
         &style,
         &view,
         &world,
-        view.zoom().zoom_level(DEFAULT_TILE_SIZE),
+        dem.tile_size,
         ViewStatePadding::Tight,
     )
     .expect("covering")
@@ -83,7 +84,7 @@ fn moving_terrain_prepares_offscreen_tiles_and_clears_them_under_pressure() {
 fn immersive_view() -> (Style, ViewState, crate::render::view_state::ExternalView) {
     use cgmath::{Deg, Matrix4, Vector3};
     let style: Style = serde_json::from_str(
-        r#"{"version":8,"sources":{},"layers":[],"terrain":{"source":"dem"}}"#,
+        r#"{"version":8,"sources":{"dem":{"type":"raster-dem","tiles":["https://example.com/{z}/{x}/{y}.png"]}},"layers":[],"terrain":{"source":"dem"}}"#,
     )
     .expect("style");
     let mut view = ViewState::new(

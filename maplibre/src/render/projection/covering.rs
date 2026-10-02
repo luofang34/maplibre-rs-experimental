@@ -80,6 +80,47 @@ impl CoveringRequest {
     }
 }
 
+/// How many levels a terrain tile sits above the DEM tile size: GL JS `TerrainTileManager`
+/// covers the view with tiles of twice the DEM tile's pixels.
+const TERRAIN_DELTA_ZOOM: i32 = 1;
+/// The deepest level terrain tiles are drawn at; GL JS lets them overscale the DEM source.
+const TERRAIN_MAX_ZOOM: u8 = 22;
+
+impl CoveringRequest {
+    /// The request for the tiles the terrain surface is drawn with, as GL JS
+    /// `TerrainTileManager` covers the view: tiles of `2^TERRAIN_DELTA_ZOOM` times the DEM's
+    /// `dem_tile_size` pixels, floored, from level zero to `TERRAIN_MAX_ZOOM` whatever levels
+    /// the DEM source serves.
+    pub fn terrain(zoom: f64, dem_tile_size: f64) -> Self {
+        let tile_size = dem_tile_size * 2_f64.powi(TERRAIN_DELTA_ZOOM);
+        let requested_zoom = zoom + (TILE_SIZE / tile_size).log2();
+        let zoom_range = SourceZoomRange::from_style(Some(0), Some(TERRAIN_MAX_ZOOM));
+        Self {
+            level: zoom_range.cap(ZoomLevel::new(requested_zoom.floor().max(0.0) as u8)),
+            requested_zoom,
+            rounding: ZoomRounding::Floor,
+            zoom_range,
+        }
+    }
+}
+
+/// The tiles the terrain surface is drawn with for a DEM source of `dem_tile_size` pixels.
+pub fn terrain_region(
+    style: &Style,
+    view_state: &ViewState,
+    world: &World,
+    dem_tile_size: u32,
+    padding: ViewStatePadding,
+) -> Result<Option<ViewRegion>, ProjectionStateError> {
+    covering_region(
+        style,
+        view_state,
+        world,
+        CoveringRequest::terrain(view_state.zoom().value(), f64::from(dem_tile_size)),
+        padding,
+    )
+}
+
 /// Selects the visible region using the projection declared by the current style.
 pub fn view_region_for_projection(
     style: &Style,

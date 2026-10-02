@@ -9,10 +9,7 @@ use crate::{
     context::MapContext,
     coords::{TileCoords, WorldTileCoords, ZoomLevel, EXTENT},
     projection::globe::covering::{TileElevationProvider, TileElevationRange},
-    render::{
-        projection::view_region_for_projection, tile_view_pattern::DEFAULT_TILE_SIZE,
-        view_state::ViewStatePadding,
-    },
+    render::view_state::ViewStatePadding,
     tcs::{system::SystemResult, tiles::Tiles},
     terrain::{
         request_system::dem_tile_coords,
@@ -268,11 +265,11 @@ pub fn coverage_system(
         world.resources.insert(TerrainCoverageIndex::default());
         return Ok(());
     };
-    let rendered = view_region_for_projection(
+    let rendered = crate::render::projection::terrain_region(
         style,
         view_state,
         world,
-        view_state.zoom().zoom_level(DEFAULT_TILE_SIZE),
+        dem.tile_size,
         ViewStatePadding::Tight,
     )
     .map_err(|error| {

@@ -7,13 +7,27 @@ pub(super) fn target_specs(
     world: &mut World,
 ) -> Result<Vec<TargetSpec>, SystemError> {
     let zoom = view_state.zoom();
-    let (view_region, raster_coverings) =
+    let (_, raster_coverings) =
         drawn_covering(style, view_state, world, zoom.zoom_level(DEFAULT_TILE_SIZE)).map_err(
             |error| {
                 tracing::error!(%error, "unable to select terrain tiles");
                 SystemError::Setup
             },
         )?;
+    let Some(dem) = crate::terrain::source::dem_source(style) else {
+        return Ok(Vec::new());
+    };
+    let view_region = crate::render::projection::terrain_region(
+        style,
+        view_state,
+        world,
+        dem.tile_size,
+        crate::render::view_state::ViewStatePadding::Tight,
+    )
+    .map_err(|error| {
+        tracing::error!(%error, "unable to select terrain tiles");
+        SystemError::Setup
+    })?;
     let Some(view_region) = view_region else {
         return Ok(Vec::new());
     };

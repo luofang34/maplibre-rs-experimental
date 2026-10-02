@@ -29,7 +29,8 @@ use crate::{
 };
 mod covering;
 pub use covering::{
-    covering_region, raster_source_regions, view_region_for_projection, CoveringRequest,
+    covering_region, raster_source_regions, terrain_region, view_region_for_projection,
+    CoveringRequest,
 };
 
 /// View-wide globe projection values uploaded as a uniform buffer.

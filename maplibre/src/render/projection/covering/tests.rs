@@ -98,3 +98,28 @@ fn assert_visible_requests(style: &Style, view: &ViewState, world: &World) {
         visible
     );
 }
+
+#[test]
+fn terrain_tiles_are_twice_the_dem_tile_and_floored_beyond_the_dem_source() {
+    // GL JS TerrainTileManager: a 512-pixel DEM gives 1024-pixel terrain tiles, a level
+    // below the 512-pixel view tiles, floored and free of the DEM source's own zoom range.
+    let request = CoveringRequest::terrain(11.56, 512.0);
+    assert_eq!(request.level, ZoomLevel::new(10));
+    assert!((request.requested_zoom - 10.56).abs() < 1e-9);
+    assert_eq!(request.rounding, ZoomRounding::Floor);
+    assert_eq!(
+        request.zoom_range,
+        SourceZoomRange::from_style(Some(0), Some(22))
+    );
+
+    let small_dem = CoveringRequest::terrain(11.56, 256.0);
+    assert_eq!(small_dem.level, ZoomLevel::new(11));
+    assert_eq!(
+        CoveringRequest::terrain(30.0, 512.0).level,
+        ZoomLevel::new(22)
+    );
+    assert_eq!(
+        CoveringRequest::terrain(0.4, 512.0).level,
+        ZoomLevel::new(0)
+    );
+}

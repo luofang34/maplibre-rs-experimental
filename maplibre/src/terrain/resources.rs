@@ -28,7 +28,7 @@ mod elevation_textures;
 use elevation_textures::DemTexture;
 
 /// Edge length in pixels of one drape texture; twice the tile size, as GL JS `qualityFactor`.
-pub const DRAPE_SIZE: u32 = 1024;
+pub const DRAPE_SIZE: u32 = 2048;
 /// Byte stride between per-tile uniform blocks, the WebGPU dynamic offset alignment.
 pub const UNIFORM_STRIDE: u64 = 2560;
 // A block that outgrows its stride would overwrite the next tile's; the stride is a

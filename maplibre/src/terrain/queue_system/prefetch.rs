@@ -6,9 +6,7 @@ use crate::{
     render::{
         frame_input::FrameInput,
         memory_budget::{MemoryBudget, MemoryPressure},
-        projection::view_region_for_projection,
         tile_memory::tile_bytes,
-        tile_view_pattern::DEFAULT_TILE_SIZE,
         view_state::{ViewState, ViewStatePadding},
         xr::PrefetchView,
     },
@@ -61,18 +59,23 @@ pub(super) fn prepare(
         ViewStatePadding::Loose
     };
     let candidates = {
-        let region = view_region_for_projection(
-            style,
-            request_view,
-            world,
-            request_view.zoom().zoom_level(DEFAULT_TILE_SIZE),
-            padding,
-        )
-        .map_err(|error| {
-            tracing::warn!(%error, "cannot prepare terrain margin");
-        })
-        .ok()
-        .flatten();
+        let region = crate::terrain::source::dem_source(style)
+            .map(|dem| {
+                crate::render::projection::terrain_region(
+                    style,
+                    request_view,
+                    world,
+                    dem.tile_size,
+                    padding,
+                )
+            })
+            .transpose()
+            .map(Option::flatten)
+            .map_err(|error| {
+                tracing::warn!(%error, "cannot prepare terrain margin");
+            })
+            .ok()
+            .flatten();
         let tiles = region.map_or_else(Vec::new, |region| region.iter().collect());
         super::covering::bounded_covering(
             tiles.into_iter(),
