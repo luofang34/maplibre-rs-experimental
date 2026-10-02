@@ -8,7 +8,7 @@ use std::{
 use maplibre::{
     headless::{create_headless_renderer_with_settings, map::HeadlessMap, HeadlessPlugin},
     plugin::Plugin,
-    raster::{DefaultRasterTransferables, RasterPlugin},
+    raster::{cross_fade::RasterCrossFade, DefaultRasterTransferables, RasterPlugin},
     render::{
         settings::{Msaa, RendererSettings},
         RenderPlugin,
@@ -21,7 +21,7 @@ use maplibre::{
 use crate::{
     comparison::{compare_and_diff, composite_opaque_background, unpremultiply},
     parse_test_meta,
-    source_loading::{load_dem_tiles_blocking, load_sources_blocking},
+    source_loading::{load_dem_tiles_blocking, load_sources_blocking, DepartingRasterTiles},
     TestMeta, TestResult,
 };
 
@@ -60,12 +60,20 @@ async fn render_fixture(test_dir: &Path) -> Result<(f64, f64), String> {
             .map_err(|error| format!("Cannot select source tiles: {error}"))?;
     }
     let paused = paused_coords(&style, &meta).await?;
+    let departing = departing_raster_tiles(&style, &meta).await?;
     let (layers, raster_layers) = load_sources_blocking(
         &mut map,
         &style,
-        (&coords, &paused),
+        (&coords, &paused, &departing),
         (&images, meta.pixel_ratio, &vector_states),
     )?;
+    if !departing.is_empty() {
+        let mut fade = RasterCrossFade::default();
+        for (source, (tiles, opacity)) in departing {
+            fade.insert(&source, tiles.into_iter().collect(), opacity);
+        }
+        map.set_raster_cross_fade(fade);
+    }
     // Labels fade in over 300 ms of 16 ms frames, so a frame settles only after about twenty;
     // GL JS renders its references with the fade off. Other layers need two.
     let frame_count: u8 = if style
@@ -125,14 +133,60 @@ fn load_style_blocking(
     crate::operations::apply(
         &mut style,
         &crate::operations::operations_of(&value),
-        (&mut transitions, &mut vector_states, &mut meta.paused_tiles),
+        (
+            &mut transitions,
+            &mut vector_states,
+            &mut meta.paused_tiles,
+            &mut meta.zoom_change,
+        ),
     )?;
+    meta.waited = transitions.now();
     transitions.settle(&mut style)?;
     crate::pattern_images::add_pattern_images(&mut style, meta.pixel_ratio)?;
     for (index, layer) in style.layers.iter_mut().enumerate() {
         layer.index = index as u32 + 1; // The depth clear is zero.
     }
     Ok((style, meta, vector_states))
+}
+
+/// The tiles of each raster source the last `setZoom` left that are still fading out, with
+/// the opacity they keep: GL JS fades them over `raster-fade-duration` from the change.
+async fn departing_raster_tiles(
+    style: &Style,
+    meta: &TestMeta,
+) -> Result<DepartingRasterTiles, String> {
+    let mut departing = HashMap::new();
+    let Some(change) = meta.zoom_change else {
+        return Ok(departing);
+    };
+    let elapsed = meta.waited - change.at;
+    for (name, source) in &style.sources {
+        if !matches!(source, Source::Raster(_)) {
+            continue;
+        }
+        let duration = style
+            .layers
+            .iter()
+            .filter(|layer| layer.source.as_deref() == Some(name.as_str()))
+            .filter_map(|layer| match &layer.paint {
+                Some(LayerPaint::Raster(paint)) => {
+                    Some(f64::from(paint.raster_fade_duration.unwrap_or(300)))
+                }
+                _ => None,
+            })
+            .fold(0.0, f64::max);
+        if duration <= 0.0 || elapsed >= duration {
+            continue;
+        }
+        let mut earlier = style.clone();
+        earlier.zoom = Some(change.previous_zoom);
+        let tiles = create_map(&earlier, meta)
+            .await?
+            .required_raster_tile_coords(name)
+            .map_err(|error| format!("Cannot select raster tiles: {error}"))?;
+        departing.insert(name.clone(), (tiles, (1.0 - elapsed / duration) as f32));
+    }
+    Ok(departing)
 }
 
 /// The tiles each paused source loaded: those the camera needed when the source was paused.

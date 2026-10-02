@@ -170,6 +170,11 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
                         world,
                         raster_parents.entry((source.clone(), wrap)).or_default(),
                     );
+                    if let Some(faded) =
+                        with_departing((&availability, source, &shapes), zoom, world)
+                    {
+                        shapes = faded;
+                    }
                     shapes.for_each_mut(&mut |shape| shape.wrapped(wrap, zoom));
                     (source.clone(), shapes)
                 })
@@ -270,6 +275,48 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
         let raw_buffer = bytemuck::cast_slice(buffer.as_slice());
         queue.write_buffer(&self.view_tiles_buffer.inner, 0, raw_buffer);
     }
+}
+
+/// The shown tiles with the loaded descendants their source is fading out drawn over each of
+/// them, as GL JS draws departing tiles over the tile that replaces them until the fade ends;
+/// `None` when nothing under these shapes is departing.
+fn with_departing<T: HasTile>(
+    (availability, source, shapes): (&T, &RasterSourceId, &SourceShapes),
+    zoom: Zoom,
+    world: &World,
+) -> Option<SourceShapes> {
+    let shown: Vec<WorldTileCoords> = match shapes {
+        SourceShapes::SourceEqTarget(shape) => vec![shape.coords()],
+        SourceShapes::Children(shapes) => shapes.iter().map(TileShape::coords).collect(),
+        SourceShapes::Parent(_) | SourceShapes::None => return None,
+    };
+    let departing = world
+        .resources
+        .get::<crate::raster::cross_fade::RasterCrossFade>()?
+        .departing(source.name())?;
+    let mut tiles = Vec::new();
+    let mut any = false;
+    for tile in shown {
+        tiles.push(TileShape::new(tile, zoom));
+        let mut under: Vec<_> = departing
+            .tiles
+            .iter()
+            .copied()
+            .filter(|departed| {
+                departed.z > tile.z
+                    && ancestor_at(*departed, tile.z) == Some(tile)
+                    && availability.has_tile(*departed, world)
+            })
+            .collect();
+        under.sort_by_key(|departed| (departed.z, departed.x, departed.y));
+        any |= !under.is_empty();
+        tiles.extend(
+            under
+                .into_iter()
+                .map(|departed| TileShape::new(departed, zoom).within(tile)),
+        );
+    }
+    any.then_some(SourceShapes::Children(tiles))
 }
 
 fn raster_shapes<T: HasTile>(

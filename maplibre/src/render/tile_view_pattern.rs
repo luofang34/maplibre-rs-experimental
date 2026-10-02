@@ -146,6 +146,9 @@ pub struct TileShape {
     transform: Matrix4<f64>,
 
     buffer_range: Option<Range<wgpu::BufferAddress>>,
+    /// The tile whose stencil mask this shape draws within, when it is drawn over that tile
+    /// rather than in its own place in the pyramid.
+    within: Option<WorldTileCoords>,
 }
 
 impl TileShape {
@@ -156,7 +159,25 @@ impl TileShape {
             zoom_factor: zoom.scale_to_tile(&coords),
             transform: coords.transform_for_zoom(zoom),
             buffer_range: None,
+            within: None,
         }
+    }
+
+    /// The shape drawn inside `tile`'s mask, over that tile.
+    fn within(mut self, tile: WorldTileCoords) -> Self {
+        self.within = Some(tile);
+        self
+    }
+
+    /// The tile whose stencil mask the shape draws within: its own, unless it is drawn over
+    /// another tile.
+    pub fn stencil_coords(&self) -> WorldTileCoords {
+        self.within.unwrap_or(self.coords)
+    }
+
+    /// Whether the shape is drawn within another tile's mask and so needs none of its own.
+    pub fn is_drawn_within_another(&self) -> bool {
+        self.within.is_some()
     }
 
     /// Creates a shape whose metadata lives at an explicit buffer range, such as a drape entry.

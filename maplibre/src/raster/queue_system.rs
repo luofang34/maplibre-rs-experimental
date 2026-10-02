@@ -2,7 +2,10 @@
 
 use crate::{
     context::MapContext,
-    raster::{paint::RasterUniforms, render_commands::DrawRasterTiles, resource::RasterResources},
+    raster::{
+        cross_fade::RasterCrossFade, paint::RasterUniforms, render_commands::DrawRasterTiles,
+        resource::RasterResources,
+    },
     render::{
         eventually::{Eventually, Eventually::Initialized},
         render_commands::DrawMasks,
@@ -26,6 +29,20 @@ pub fn queue_system(
         ..
     }: &mut MapContext,
 ) -> SystemResult {
+    let departing_opacity: std::collections::HashMap<String, f32> = world
+        .resources
+        .get::<RasterCrossFade>()
+        .map(|fade| {
+            style
+                .layers
+                .iter()
+                .filter_map(|layer| {
+                    let departing = fade.departing(layer.source.as_deref())?;
+                    Some((layer.id.clone(), departing.opacity))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     let Some((Initialized(tile_view_pattern), Initialized(raster_resources))) =
         world.resources.query_mut::<(
             &mut Eventually<WgpuTileViewPattern>,
@@ -43,6 +60,10 @@ pub fn queue_system(
         };
         uniforms.align = crate::raster::paint::pixel_alignment(view_state);
         raster_resources.write_layer_paint(device, queue, &layer.id, &uniforms);
+        if let Some(opacity) = departing_opacity.get(&layer.id) {
+            uniforms.opacity *= opacity;
+            raster_resources.write_departing_paint(device, queue, &layer.id, &uniforms);
+        }
     }
 
     let mut items = Vec::new();
@@ -113,6 +134,10 @@ fn source_draws(
         source_shape: source_shape.clone(),
         generate_borders: false,
     });
+    if source_shape.is_drawn_within_another() {
+        // It draws inside the mask of the tile it is drawn over.
+        masks.clear();
+    }
     let mut layers = Vec::with_capacity(if uses_globe { 2 } else { 1 });
     if uses_globe {
         layers.push(LayerItem {

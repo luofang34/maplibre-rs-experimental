@@ -32,10 +32,17 @@ use crate::{
     vector_feature_state::VectorFeatureStates,
 };
 
+/// The tiles each raster source is fading out after a zoom, with the opacity they keep.
+pub(super) type DepartingRasterTiles = HashMap<String, (Vec<WorldTileCoords>, f32)>;
+
 pub(super) fn load_sources_blocking(
     map: &mut HeadlessMap,
     style: &Style,
-    (view_coords, paused): (&[WorldTileCoords], &HashMap<String, Vec<WorldTileCoords>>),
+    (view_coords, paused, departing): (
+        &[WorldTileCoords],
+        &HashMap<String, Vec<WorldTileCoords>>,
+        &DepartingRasterTiles,
+    ),
     (images, pixel_ratio, vector_states): (
         &HashMap<String, PlacedImage>,
         f64,
@@ -82,7 +89,11 @@ pub(super) fn load_sources_blocking(
             Source::Raster(_) | Source::RasterDem(_) => {
                 all_raster_layers.extend(match images.get(name) {
                     Some(placed) => load_image_blocking(map, name, placed)?,
-                    None => load_raster_blocking(map, name, source)?,
+                    None => load_raster_blocking(
+                        map,
+                        (name, source),
+                        departing.get(name).map_or(&[][..], |(tiles, _)| tiles),
+                    )?,
                 })
             }
         }
@@ -274,10 +285,11 @@ fn load_image_blocking(
         .collect())
 }
 
+/// Reads the raster tiles the view needs, and the `departing` ones a zoom left fading out.
 fn load_raster_blocking(
     map: &HeadlessMap,
-    name: &str,
-    source: &Source,
+    (name, source): (&str, &Source),
+    departing: &[WorldTileCoords],
 ) -> Result<Vec<AvailableRasterLayerData>, String> {
     let (template, minzoom, scheme) = match source {
         Source::Raster(source) => (
@@ -295,9 +307,10 @@ fn load_raster_blocking(
     let template =
         template.ok_or_else(|| format!("Raster source '{name}' has no tile template"))?;
     let minzoom = minzoom.unwrap_or(0);
-    let required = map
+    let mut required = map
         .required_raster_tile_coords(name)
         .map_err(|error| format!("Cannot select raster tiles: {error}"))?;
+    required.extend_from_slice(departing);
     let mut seen = std::collections::BTreeSet::new();
     let mut layers = Vec::new();
     for ideal in required {

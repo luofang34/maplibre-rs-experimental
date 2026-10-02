@@ -150,15 +150,25 @@ fn feature_state(
     Ok(())
 }
 
+/// A `setZoom` the fixture made: the zoom it left and the clock when it did.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct ZoomChange {
+    /// The zoom before the change.
+    pub previous_zoom: f64,
+    /// Milliseconds the fixture had waited when it changed the zoom.
+    pub at: f64,
+}
+
 /// Applies every operation to `style`. An operation the mutation API has no counterpart for
 /// is an error, so its fixture is reported instead of compared against the wrong state.
 pub(super) fn apply(
     style: &mut Style,
     operations: &[Value],
-    (transitions, vector_states, paused_tiles): (
+    (transitions, vector_states, paused_tiles, zoom_change): (
         &mut crate::transitions::Transitions,
         &mut crate::vector_feature_state::VectorFeatureStates,
         &mut std::collections::HashMap<String, f64>,
+        &mut Option<ZoomChange>,
     ),
 ) -> Result<(), String> {
     for operation in operations {
@@ -180,7 +190,13 @@ pub(super) fn apply(
                 Ok(())
             }
             // Only the camera left by the last operation is drawn, so it becomes the style's.
-            ("setZoom", _) => number(items, 1).map(|zoom| style.zoom = Some(zoom)),
+            ("setZoom", _) => number(items, 1).map(|zoom| {
+                *zoom_change = Some(ZoomChange {
+                    previous_zoom: style.zoom.unwrap_or(0.0),
+                    at: transitions.now(),
+                });
+                style.zoom = Some(zoom);
+            }),
             ("setBearing", _) => number(items, 1).map(|bearing| style.bearing = Some(bearing)),
             ("setPitch", _) => number(items, 1).map(|pitch| style.pitch = Some(pitch)),
             ("setRoll", _) => number(items, 1).map(|roll| style.roll = Some(roll)),

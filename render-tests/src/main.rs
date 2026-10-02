@@ -66,6 +66,10 @@ struct TestMeta {
     center_elevation: Option<f64>,
     /// Sources whose tiles stop loading, with the zoom the camera was at when they were paused.
     paused_tiles: std::collections::HashMap<String, f64>,
+    /// The zoom the last `setZoom` left, and when.
+    zoom_change: Option<operations::ZoomChange>,
+    /// Milliseconds the fixture waits in all.
+    waited: f64,
 }
 
 impl Default for TestMeta {
@@ -82,6 +86,8 @@ impl Default for TestMeta {
             padding: camera_options::Padding::default(),
             center_elevation: None,
             paused_tiles: std::collections::HashMap::new(),
+            zoom_change: None,
+            waited: 0.0,
         }
     }
 }
@@ -135,6 +141,8 @@ fn parse_test_meta(style_value: &Value) -> TestMeta {
         padding: camera_options::Padding::default(),
         center_elevation: None,
         paused_tiles: std::collections::HashMap::new(),
+        zoom_change: None,
+        waited: 0.0,
     }
 }
 

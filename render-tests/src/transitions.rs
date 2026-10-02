@@ -101,6 +101,11 @@ impl Transitions {
         });
     }
 
+    /// Milliseconds the fixture has waited so far.
+    pub(super) fn now(&self) -> f64 {
+        self.clock
+    }
+
     /// Advances the clock by a `wait` of `milliseconds`.
     pub(super) fn wait(&mut self, milliseconds: f64) {
         self.clock += milliseconds;

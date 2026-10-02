@@ -26,6 +26,7 @@ use crate::{
     tcs::{system::SystemContainer, tiles::TileComponent, world::World},
 };
 
+pub mod cross_fade;
 mod dem_border;
 pub mod image_source;
 pub mod paint;

@@ -391,6 +391,12 @@ impl HeadlessMap {
         view_state.freeze_center_elevation();
     }
 
+    /// Fades out raster tiles a camera change left behind, drawing them over the tiles that
+    /// replace them as GL JS does during `raster-fade-duration`.
+    pub fn set_raster_cross_fade(&mut self, fade: crate::raster::cross_fade::RasterCrossFade) {
+        self.map_context.world.resources.insert(fade);
+    }
+
     /// Raises the pitch limit and re-applies the style's pitch, which the default limit clamps.
     pub fn set_max_pitch(&mut self, max_pitch: cgmath::Deg<f64>) {
         let context = &mut self.map_context;

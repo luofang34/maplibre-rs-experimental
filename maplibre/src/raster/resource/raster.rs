@@ -25,8 +25,9 @@ pub struct RasterResources {
     dem_sources: HashSet<RasterSourceId>,
     /// For each bordered texture, the sides whose border holds a real neighbour's samples.
     border_sides: HashMap<RasterSourceId, HashMap<WorldTileCoords, u16>>,
-    /// Uniform buffer and bind group of each raster layer's paint adjustments.
-    layer_paints: HashMap<String, (wgpu::Buffer, wgpu::BindGroup)>,
+    /// Uniform buffer and bind group of each raster layer's paint adjustments, and of the
+    /// same paint for the layer's departing tiles.
+    layer_paints: HashMap<(String, bool), (wgpu::Buffer, wgpu::BindGroup)>,
     /// Advances whenever a texture is bound, so cached renders of raster tiles can refresh.
     revision: u64,
 }
@@ -270,7 +271,30 @@ impl RasterResources {
         layer_id: &str,
         uniforms: &RasterUniforms,
     ) {
-        if !self.layer_paints.contains_key(layer_id) {
+        self.write_paint(device, queue, (layer_id, false), uniforms);
+    }
+
+    /// Writes the paint the layer's departing tiles draw with while they fade out.
+    pub fn write_departing_paint(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        layer_id: &str,
+        uniforms: &RasterUniforms,
+    ) {
+        self.write_paint(device, queue, (layer_id, true), uniforms);
+    }
+
+    fn write_paint(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        (layer_id, departing): (&str, bool),
+        uniforms: &RasterUniforms,
+    ) {
+        let key = (layer_id.to_owned(), departing);
+        let pipeline = &self.pipeline;
+        let (buffer, _) = self.layer_paints.entry(key).or_insert_with(|| {
             let buffer = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("Raster layer paint"),
                 size: std::mem::size_of::<RasterUniforms>() as u64,
@@ -279,23 +303,22 @@ impl RasterResources {
             });
             let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("Raster layer paint"),
-                layout: &self.pipeline.get_bind_group_layout(2),
+                layout: &pipeline.get_bind_group_layout(2),
                 entries: &[wgpu::BindGroupEntry {
                     binding: 0,
                     resource: buffer.as_entire_binding(),
                 }],
             });
-            self.layer_paints
-                .insert(layer_id.to_string(), (buffer, bind_group));
-        }
-        if let Some((buffer, _)) = self.layer_paints.get(layer_id) {
-            queue.write_buffer(buffer, 0, bytemuck::bytes_of(uniforms));
-        }
+            (buffer, bind_group)
+        });
+        queue.write_buffer(buffer, 0, bytemuck::bytes_of(uniforms));
     }
 
-    /// The paint bind group of a layer written this frame.
-    pub(crate) fn layer_paint(&self, layer_id: &str) -> Option<&wgpu::BindGroup> {
-        self.layer_paints.get(layer_id).map(|(_, group)| group)
+    /// The paint bind group of a layer written this frame, or of its departing tiles.
+    pub(crate) fn layer_paint(&self, layer_id: &str, departing: bool) -> Option<&wgpu::BindGroup> {
+        self.layer_paints
+            .get(&(layer_id.to_owned(), departing))
+            .map(|(_, group)| group)
     }
 
     /// Borrows the raster pipeline whose group-one layout defines the texture bindings.

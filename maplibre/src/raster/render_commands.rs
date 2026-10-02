@@ -1,7 +1,7 @@
 //! Raster draw commands that stop when uploaded textures, meshes or metadata are missing.
 
 use crate::{
-    raster::resource::RasterResources,
+    raster::{cross_fade::RasterCrossFade, resource::RasterResources, RasterSourceId},
     render::{
         eventually::{Eventually, Eventually::Initialized},
         projection::ProjectionGpuResources,
@@ -63,7 +63,7 @@ impl RenderCommand<LayerItem> for SetRasterViewBindGroup {
     }
 }
 
-/// Binds the layer's paint adjustments at group two.
+/// Binds the layer's paint adjustments at group two, faded for a tile that is departing.
 pub struct SetRasterPaintBindGroup;
 impl RenderCommand<LayerItem> for SetRasterPaintBindGroup {
     fn render<'w>(
@@ -76,7 +76,18 @@ impl RenderCommand<LayerItem> for SetRasterPaintBindGroup {
         else {
             return RenderCommandResult::Failure;
         };
-        let Some(bind_group) = raster_resources.layer_paint(&item.style_layer) else {
+        let departing = world
+            .resources
+            .get::<RasterCrossFade>()
+            .is_some_and(|fade| {
+                fade.is_departing(
+                    raster_resources
+                        .layer_source(&item.style_layer)
+                        .and_then(RasterSourceId::name),
+                    &item.tile.coords,
+                )
+            });
+        let Some(bind_group) = raster_resources.layer_paint(&item.style_layer, departing) else {
             return RenderCommandResult::Failure;
         };
         pass.set_bind_group(2, bind_group, &[]);
@@ -108,7 +119,14 @@ impl RenderCommand<LayerItem> for DrawRasterTile {
             return RenderCommandResult::Failure;
         };
 
-        let reference = source_shape.coords().stencil_reference_value_3d() as u32;
+        let reference = source_shape.stencil_coords().stencil_reference_value_3d();
+        // Each raster draw inverts the stencil it passes, so no pixel is drawn twice; a shape
+        // drawn over another tile finds that tile's reference inverted.
+        let reference = u32::from(if source_shape.is_drawn_within_another() {
+            !reference
+        } else {
+            reference
+        });
 
         pass.set_stencil_reference(reference);
 
