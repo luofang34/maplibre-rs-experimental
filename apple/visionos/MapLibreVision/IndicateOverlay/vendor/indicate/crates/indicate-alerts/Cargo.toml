@@ -1,0 +1,12 @@
+[package]
+name = "indicate-alerts"
+description = "Deterministic central flightcrew alert manager and aural contract (ALR-01)"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = { workspace = true }

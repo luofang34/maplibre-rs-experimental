@@ -113,3 +113,62 @@ fn aircraft_heading_and_track_are_independent_of_the_view_bearing() {
     assert!(track.iter().any(|text| text == "TRK T"));
     assert!(track.iter().any(|text| text == "57"));
 }
+
+#[test]
+fn layout_policy_preserves_hysteresis_and_compacts_unusual_attitude() {
+    let between = libm::cosf(31_f32.to_radians());
+    assert_eq!(crate::indicate_svs_compact(gps(), between, 0), 0);
+    assert_eq!(crate::indicate_svs_compact(gps(), between, 1), 1);
+    let inverted = ReplayTelemetry {
+        present: 63,
+        roll: core::f32::consts::PI,
+        ..gps()
+    };
+    assert_eq!(crate::indicate_svs_compact(inverted, 1.0, 0), 1);
+    assert_eq!(
+        crate::indicate_svs_directions(ReplayTelemetry {
+            age_ms: 1000.0,
+            ..gps()
+        })
+        .length,
+        0
+    );
+}
+
+#[test]
+fn forward_recovery_and_host_contract_match_the_shared_instruments() {
+    use indicate_instrument_hmd::{InstrumentReference, layer_reference};
+    use indicate_instrument_scene::{Cmd, LayerId, SceneCmds};
+    let contract = crate::indicate_svs_display_contract();
+    assert_eq!(contract.reference, 2);
+    assert_eq!(core::mem::size_of::<crate::DisplayContract>(), 20);
+    for compact in [false, true] {
+        for layer in [
+            LayerId::Tapes,
+            LayerId::Guidance,
+            LayerId::Annunciation,
+            LayerId::Failure,
+        ] {
+            assert_eq!(layer_reference(layer, compact), InstrumentReference::Head);
+        }
+    }
+    for (pitch, expected) in [(35.0_f32, "NOSE HIGH"), (-25.0, "NOSE LOW")] {
+        let input = ReplayTelemetry {
+            present: 63,
+            ias: 90.0,
+            pitch: pitch.to_radians(),
+            ..gps()
+        };
+        assert_eq!(crate::indicate_svs_compact(input, 1.0, 0), 1);
+        let scene = crate::indicate_svs_render(input);
+        let labels: Vec<_> = SceneCmds::new(&scene.bytes[..scene.length as usize])
+            .expect("scene")
+            .filter_map(|cmd| match cmd.expect("command") {
+                Cmd::Text { text, .. } => Some(text),
+                _ => None,
+            })
+            .collect();
+        assert!(labels.contains(&"UNUSUAL ATTITUDE"));
+        assert!(labels.contains(&expected));
+    }
+}

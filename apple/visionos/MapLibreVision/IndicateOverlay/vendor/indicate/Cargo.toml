@@ -1,0 +1,44 @@
+[workspace]
+resolver = "3"
+members = ["crates/indicate-alerts", "crates/indicate-frames", "crates/indicate-instrument-conformance", "crates/indicate-instrument-descriptor", "crates/indicate-instrument-glyphs", "sets/indicate-instrument-hmd", "sets/indicate-instrument-panels", "crates/indicate-instrument-registry", "crates/indicate-instrument-scene", "crates/indicate-instrument-state", "crates/indicate-instrument-symbology", "crates/indicate-sha256"]
+
+[workspace.package]
+edition = "2024"
+
+[workspace.dependencies]
+libm = "0.2.16"
+thiserror = { version = "2.0.18", default-features = false }
+proptest = "1.11.0"
+sha2 = "0.11.0"
+tracing = "0.1.44"
+tracing-subscriber = "0.3.23"
+indicate-frames = { path = "crates/indicate-frames" }
+indicate-alerts = { path = "crates/indicate-alerts" }
+indicate-sha256 = { path = "crates/indicate-sha256" }
+indicate-instrument-scene = { path = "crates/indicate-instrument-scene" }
+indicate-instrument-state = { path = "crates/indicate-instrument-state" }
+indicate-instrument-glyphs = { path = "crates/indicate-instrument-glyphs" }
+indicate-instrument-symbology = { path = "crates/indicate-instrument-symbology" }
+indicate-instrument-descriptor = { path = "crates/indicate-instrument-descriptor" }
+indicate-instrument-panels = { path = "sets/indicate-instrument-panels" }
+indicate-instrument-template = { path = "sets/indicate-instrument-template" }
+indicate-instrument-raster = { path = "crates/indicate-instrument-raster" }
+indicate-instrument-conformance = { path = "crates/indicate-instrument-conformance" }
+indicate-instrument-feeder = { path = "crates/indicate-instrument-feeder" }
+indicate-intent = { path = "crates/indicate-intent" }
+indicate-host = { path = "tools/indicate-host" }
+indicate-instrument-registry = { path = "crates/indicate-instrument-registry" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "deny"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+let_underscore_must_use = "deny"
+let_underscore_future = "deny"
+await_holding_lock = "deny"
+disallowed_types = "deny"
+disallowed_macros = "deny"

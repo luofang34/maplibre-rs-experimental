@@ -1,0 +1,22 @@
+[package]
+name = "indicate-instrument-panels"
+description = "PFD and HSI instrument panels as pure state-to-scene functions (ADR-0017)"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+libm = { workspace = true }
+indicate-alerts = { workspace = true }
+indicate-instrument-descriptor = { workspace = true }
+indicate-instrument-scene = { workspace = true }
+indicate-instrument-state = { workspace = true }
+indicate-instrument-symbology = { workspace = true }
+
+[dev-dependencies]
+indicate-instrument-registry = { workspace = true }
+indicate-frames = { workspace = true }
+indicate-instrument-glyphs = { workspace = true }
