@@ -65,6 +65,12 @@ pub fn upload_system(
             zoom,
         );
     }
+    for coords in textures.take_bound() {
+        crate::render::frame_signals::resource_ready(
+            world,
+            crate::render::frame_signals::ResourceReady::SymbolAtlas { coords },
+        );
+    }
 
     Ok(())
 }

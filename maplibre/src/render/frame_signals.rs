@@ -24,6 +24,11 @@ pub enum ResourceReady {
         /// Whether the request delivered its data.
         loaded: bool,
     },
+    /// A tile's glyphs and icons reached the GPU, so its labels can draw.
+    SymbolAtlas {
+        /// The tile.
+        coords: WorldTileCoords,
+    },
 }
 
 /// What one frame cost.

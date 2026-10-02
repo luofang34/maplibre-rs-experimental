@@ -32,6 +32,8 @@ pub(super) struct TextureContext<'a> {
 pub(super) struct SymbolTextures {
     atlases: HashMap<usize, Weak<TileAtlas>>,
     bindings: HashMap<(WorldTileCoords, String), DrawBinding>,
+    /// Tiles whose labels gained an atlas since the last drain.
+    bound: Vec<WorldTileCoords>,
 }
 
 impl SymbolTextures {
@@ -70,8 +72,16 @@ impl SymbolTextures {
                 self.atlases.insert(identity, Arc::downgrade(&texture));
                 texture
             });
+        if !self.bound.contains(&key.0) {
+            self.bound.push(key.0);
+        }
         self.bindings
             .insert(key, DrawBinding::new(gpu, texture, uniforms, separate_halo));
+    }
+
+    /// Tiles whose glyphs and icons became drawable since the last call.
+    pub fn take_bound(&mut self) -> Vec<WorldTileCoords> {
+        std::mem::take(&mut self.bound)
     }
 
     pub fn binding(&self, coords: WorldTileCoords, layer: &str) -> Option<&DrawBinding> {

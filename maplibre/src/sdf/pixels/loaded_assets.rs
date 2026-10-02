@@ -79,3 +79,27 @@ async fn text_and_sprite_loaded_through_the_asset_cache_are_drawn() {
     assert!(red > 70, "loaded glyphs are not drawn: {red} {text:?}");
     assert!(green > 100, "loaded sprite is not drawn: {green} {icon:?}");
 }
+
+#[tokio::test]
+async fn a_tile_whose_atlas_reaches_the_gpu_is_reported_ready() {
+    let mut style = style(0., "ground");
+    style.zoom = Some(12.);
+    let layers = super::layers(&style);
+    let mut map = super::fixture_map(style, layers, 1).await;
+    let ready = map.take_ready_resources();
+    assert!(
+        ready.iter().any(|resource| matches!(
+            resource,
+            crate::render::frame_signals::ResourceReady::SymbolAtlas { .. }
+        )),
+        "the labels' atlas is reported: {ready:?}"
+    );
+    map.run_frame().expect("still frame");
+    assert!(
+        !map.take_ready_resources().iter().any(|resource| matches!(
+            resource,
+            crate::render::frame_signals::ResourceReady::SymbolAtlas { .. }
+        )),
+        "an atlas already bound is not reported again"
+    );
+}
