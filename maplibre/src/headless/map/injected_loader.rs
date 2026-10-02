@@ -31,6 +31,13 @@ impl HttpClient for Recorder {
     async fn fetch(&self, url: &str) -> Result<Vec<u8>, SourceFetchError> {
         self.urls.lock().expect("urls").push(url.to_owned());
         self.fetched.notify_one();
+        if url.ends_with(".png") {
+            let mut png = std::io::Cursor::new(Vec::new());
+            image::RgbaImage::from_pixel(4, 4, image::Rgba([128, 0, 0, 255]))
+                .write_to(&mut png, image::ImageFormat::Png)
+                .expect("PNG");
+            return Ok(png.into_inner());
+        }
         Ok(geozero::mvt::Tile {
             layers: vec![geozero::mvt::tile::Layer {
                 version: 2,
@@ -109,6 +116,67 @@ async fn the_map_thread_and_tile_workers_fetch_through_the_injected_loader() {
     assert!(
         recorder.saw("https://worker.invalid/"),
         "tile workers fetch through the host's loader: {:?}",
+        recorder.urls.lock().expect("urls")
+    );
+}
+
+#[tokio::test]
+async fn an_elevation_tile_fetched_through_the_loader_is_reported_ready() {
+    use crate::{io::tile_retry::RequestKind, render::frame_signals::ResourceReady};
+    let recorder = Recorder::default();
+    let (kernel, renderer) = create_headless_renderer_with_loader(
+        64,
+        64,
+        Default::default(),
+        SharedLoader::new(recorder.clone()),
+    )
+    .await
+    .expect("renderer");
+    let style: Style = serde_json::from_value(serde_json::json!({
+        "version": 8, "zoom": 2,
+        "sources": {"dem": {"type": "raster-dem", "encoding": "terrarium",
+            "tiles": ["https://dem.invalid/{z}/{x}/{y}.png"]}},
+        "terrain": {"source": "dem"},
+        "layers": [{"id": "bg", "type": "background"}]
+    }))
+    .expect("style");
+    let mut map = HeadlessMap::new(
+        style,
+        renderer,
+        kernel,
+        vec![
+            Box::new(RenderPlugin),
+            Box::new(crate::terrain::TerrainPlugin::<
+                crate::terrain::DefaultDemTransferables,
+            >::default()),
+        ],
+    )
+    .expect("map");
+    let mut ready = Vec::new();
+    for _ in 0..40 {
+        map.run_frame().expect("frame");
+        ready.extend(map.take_ready_resources());
+        if ready.iter().any(|resource| {
+            matches!(
+                resource,
+                ResourceReady::Tile {
+                    kind: RequestKind::Dem,
+                    loaded: true,
+                    ..
+                }
+            )
+        }) {
+            return;
+        }
+        tokio::time::timeout(
+            std::time::Duration::from_millis(200),
+            recorder.fetched.notified(),
+        )
+        .await
+        .ok();
+    }
+    panic!(
+        "no elevation tile was reported ready: {ready:?}, fetched {:?}",
         recorder.urls.lock().expect("urls")
     );
 }
