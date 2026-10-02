@@ -3,8 +3,8 @@
 //! Bytes reach the GPU through [`UploadQueue::write_buffer`], [`UploadQueue::write_texture`],
 //! [`UploadQueue::create_buffer_init`] and [`UploadQueue::create_texture_with_data`]. The queue
 //! is not reachable as a [`wgpu::Queue`] except through [`UploadQueue::inner`], and the
-//! workspace's clippy configuration rejects the uncounted wgpu methods, so an upload that skips
-//! the count does not build.
+//! crate denies the uncounted wgpu methods that its clippy.toml lists, so clippy rejects an
+//! upload that skips the count.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 

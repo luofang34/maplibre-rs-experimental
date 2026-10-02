@@ -174,3 +174,63 @@ async fn a_stage_is_charged_the_time_its_systems_take() {
     }
     assert!(stats.cpu() >= twenty);
 }
+
+/// The main pass's GPU time over a few frames of `layers` half-transparent backgrounds.
+async fn gpu_time_of(layers: usize) -> Option<std::time::Duration> {
+    let style: Style = serde_json::from_value(serde_json::json!({
+        "version": 8,
+        "sources": {},
+        "layers": (0..layers)
+            .map(|index| serde_json::json!({"id": format!("bg-{index}"), "type": "background",
+                "paint": {"background-color": "#336699", "background-opacity": 0.5}}))
+            .collect::<Vec<_>>()
+    }))
+    .expect("style");
+    let (kernel, renderer) = create_headless_renderer(1024, 1024, None)
+        .await
+        .expect("renderer");
+    let mut map = HeadlessMap::new(
+        style,
+        renderer,
+        kernel,
+        vec![
+            Box::new(RenderPlugin),
+            Box::new(crate::background::BackgroundPlugin),
+            Box::new(HeadlessPlugin::new(false)),
+        ],
+    )
+    .expect("map");
+    if !map
+        .device()
+        .features()
+        .contains(wgpu::Features::TIMESTAMP_QUERY)
+    {
+        return None;
+    }
+    let mut measured = Vec::new();
+    for _ in 0..8 {
+        map.device()
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll");
+        map.render_source_frames(Default::default(), Vec::new(), 1)
+            .expect("frame");
+        measured.extend(map.last_frame_stats().gpu);
+    }
+    measured.sort();
+    measured.get(measured.len() / 2).copied()
+}
+
+#[tokio::test]
+async fn gpu_time_grows_with_the_work_a_frame_draws() {
+    let (Some(light), Some(heavy)) = (gpu_time_of(1).await, gpu_time_of(96).await) else {
+        return;
+    };
+    assert!(
+        heavy > std::time::Duration::from_micros(20),
+        "covering a large target 96 times takes measurable GPU time: {heavy:?}"
+    );
+    assert!(
+        heavy > light * 4,
+        "96 layers take far longer than one: {heavy:?} against {light:?}"
+    );
+}

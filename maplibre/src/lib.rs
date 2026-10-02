@@ -9,6 +9,8 @@
 //! The official guide book can be found [here](https://maplibre.org/maplibre-rs/docs/book/).
 //!
 #![deny(dead_code, unused_imports)]
+// The uncounted wgpu upload methods listed in clippy.toml are errors, not warnings.
+#![deny(clippy::disallowed_methods)]
 
 extern crate core;
 
