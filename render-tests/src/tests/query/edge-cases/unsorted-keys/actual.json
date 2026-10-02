@@ -1,0 +1,44 @@
+{
+  "actual": [
+    {
+      "id": 1540753080,
+      "layer": "place-town",
+      "properties": {
+        "ldir": "E",
+        "localrank": 1,
+        "name": "Loveland",
+        "name_de": "Loveland",
+        "name_en": "Loveland",
+        "name_es": "Loveland",
+        "name_fr": "Loveland",
+        "name_ru": "Лавленд",
+        "name_zh": "洛弗兰德",
+        "type": "town"
+      },
+      "source": "maplibre",
+      "sourceLayer": "place_label",
+      "type": "Point"
+    }
+  ],
+  "expected": [
+    {
+      "id": 1540753080,
+      "layer": "place-town",
+      "properties": {
+        "ldir": "E",
+        "localrank": 1,
+        "name": "Loveland",
+        "name_de": "Loveland",
+        "name_en": "Loveland",
+        "name_es": "Loveland",
+        "name_fr": "Loveland",
+        "name_ru": "Лавленд",
+        "name_zh": "洛弗兰德",
+        "type": "town"
+      },
+      "source": "maplibre",
+      "sourceLayer": "place_label",
+      "type": "Point"
+    }
+  ]
+}

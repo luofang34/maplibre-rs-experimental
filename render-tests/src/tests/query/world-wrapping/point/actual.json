@@ -1,0 +1,16 @@
+{
+  "actual": [],
+  "expected": [
+    {
+      "id": 967,
+      "layer": null,
+      "properties": {
+        "class": "shadow",
+        "level": 56
+      },
+      "source": "maplibre",
+      "sourceLayer": "hillshade",
+      "type": "Polygon"
+    }
+  ]
+}

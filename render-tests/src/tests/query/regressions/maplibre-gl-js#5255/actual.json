@@ -1,0 +1,13 @@
+{
+  "actual": [],
+  "expected": [
+    {
+      "id": null,
+      "layer": "circle",
+      "properties": {},
+      "source": "circle",
+      "sourceLayer": null,
+      "type": "Point"
+    }
+  ]
+}

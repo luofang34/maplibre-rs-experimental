@@ -1,0 +1,15 @@
+{
+  "actual": [],
+  "expected": [
+    {
+      "id": null,
+      "layer": null,
+      "properties": {
+        "radius": 20
+      },
+      "source": "maplibre",
+      "sourceLayer": null,
+      "type": "Point"
+    }
+  ]
+}

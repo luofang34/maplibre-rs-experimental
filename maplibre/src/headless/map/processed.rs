@@ -16,7 +16,7 @@ use crate::{
     style::layer::StyleLayer,
     vector::{
         process_vector_tile_with_assets,
-        transferables::{LayerTessellated, SymbolLayerTessellated},
+        transferables::{LayerIndexed, LayerTessellated, SymbolLayerTessellated},
         DefaultVectorTransferables, ProcessVectorContext, VectorTileRequest, VectorTransferables,
     },
 };
@@ -25,6 +25,8 @@ use crate::{
 pub type VectorLayer = <DefaultVectorTransferables as VectorTransferables>::LayerTessellated;
 /// A tessellated symbol layer as the headless worker produces it.
 pub type SymbolLayer = <DefaultVectorTransferables as VectorTransferables>::SymbolLayerTessellated;
+/// The query index of a source's tile as the headless worker produces it.
+pub type IndexedLayer = <DefaultVectorTransferables as VectorTransferables>::LayerIndexed;
 
 /// Every layer a headless processing step produced, by kind.
 #[derive(Debug, Default)]
@@ -33,6 +35,8 @@ pub struct ProcessedLayers {
     pub vector: Vec<Box<VectorLayer>>,
     /// Text buckets of symbol layers.
     pub symbols: Vec<Box<SymbolLayer>>,
+    /// Feature geometry each source tile indexes for queries.
+    pub indexes: Vec<Box<IndexedLayer>>,
 }
 
 impl ProcessedLayers {
@@ -40,6 +44,7 @@ impl ProcessedLayers {
     pub fn append(&mut self, other: &mut Self) {
         self.vector.append(&mut other.vector);
         self.symbols.append(&mut other.symbols);
+        self.indexes.append(&mut other.indexes);
     }
 
     /// Whether processing produced no layer of any kind.
@@ -58,6 +63,10 @@ impl ProcessedLayers {
                 layers
                     .symbols
                     .push(message.into_transferable::<SymbolLayer>()?);
+            } else if message.has_tag(IndexedLayer::message_tag()) {
+                layers
+                    .indexes
+                    .push(message.into_transferable::<IndexedLayer>()?);
             }
         }
         Ok(layers)

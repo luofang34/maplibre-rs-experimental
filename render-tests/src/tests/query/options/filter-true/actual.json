@@ -1,0 +1,15 @@
+{
+  "actual": [],
+  "expected": [
+    {
+      "id": null,
+      "layer": null,
+      "properties": {
+        "key": "value"
+      },
+      "source": "geojson",
+      "sourceLayer": null,
+      "type": "Point"
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "actual": [],
+  "expected": [
+    {
+      "id": 2,
+      "layer": null,
+      "properties": {
+        "internalId": 1
+      },
+      "source": "linestring",
+      "sourceLayer": null,
+      "type": "LineString"
+    }
+  ]
+}

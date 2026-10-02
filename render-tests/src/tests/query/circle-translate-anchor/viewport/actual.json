@@ -1,0 +1,31 @@
+{
+  "actual": [],
+  "expected": [
+    {
+      "id": 4887461,
+      "layer": null,
+      "properties": {
+        "class": "street",
+        "oneway": 0,
+        "osm_id": 4887461,
+        "type": "residential"
+      },
+      "source": "maplibre",
+      "sourceLayer": "road",
+      "type": "LineString"
+    },
+    {
+      "id": 4612753,
+      "layer": null,
+      "properties": {
+        "class": "street",
+        "oneway": 0,
+        "osm_id": 4612753,
+        "type": "residential"
+      },
+      "source": "maplibre",
+      "sourceLayer": "road",
+      "type": "LineString"
+    }
+  ]
+}

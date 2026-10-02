@@ -29,6 +29,7 @@ mod image_sources;
 mod operations;
 mod paths;
 mod pattern_images;
+mod queries;
 mod render_case;
 mod report;
 mod source_loading;
@@ -60,6 +61,8 @@ struct TestMeta {
     show_padding: bool,
     /// Whether each layer counts its draws instead of shading, as `showOverdrawInspector` asks.
     show_overdraw: bool,
+    /// The test metadata of a query fixture, which carries `queryGeometry`.
+    query: Option<serde_json::Map<String, Value>>,
     /// Whether terrain tiles hang skirts, from `terrainSkirtLength`.
     terrain_skirts: maplibre::terrain::TerrainSkirts,
     /// Camera padding left by the fixture's operations.
@@ -86,6 +89,7 @@ impl Default for TestMeta {
             show_padding: false,
             show_overdraw: false,
             terrain_skirts: maplibre::terrain::TerrainSkirts::Auto,
+            query: None,
             padding: camera_options::Padding::default(),
             center_elevation: None,
             paused_tiles: std::collections::HashMap::new(),
@@ -141,6 +145,7 @@ fn parse_test_meta(style_value: &Value) -> TestMeta {
             .get("showOverdrawInspector")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        query: test.contains_key("queryGeometry").then(|| test.clone()),
         terrain_skirts: match test.get("terrainSkirtLength").and_then(Value::as_str) {
             Some("none") => maplibre::terrain::TerrainSkirts::None,
             _ => maplibre::terrain::TerrainSkirts::Auto,

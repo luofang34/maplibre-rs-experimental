@@ -1,0 +1,15 @@
+{
+  "actual": [],
+  "expected": [
+    {
+      "id": null,
+      "layer": null,
+      "properties": {
+        "layer": "extrusion_three_points"
+      },
+      "source": "extrusion_three_points",
+      "sourceLayer": null,
+      "type": "Polygon"
+    }
+  ]
+}

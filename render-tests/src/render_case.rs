@@ -107,6 +107,20 @@ async fn render_fixture(test_dir: &Path) -> Result<(f64, f64), String> {
         "render passes"
     );
     let last = frames.last().ok_or("no frame requested")?;
+    if let Some(query) = meta
+        .query
+        .as_ref()
+        .map(crate::queries::of)
+        .transpose()?
+        .flatten()
+    {
+        let matched = crate::queries::compare(&map, &query, test_dir)?;
+        for path in &frames {
+            std::fs::remove_file(path).ok();
+        }
+        // A query either returns what GL JS returns or it does not.
+        return Ok((if matched { 0.0 } else { 1.0 }, 0.5));
+    }
     let diff = compare_frame_blocking(last, test_dir, &meta)?;
     for path in &frames {
         std::fs::remove_file(path).ok();

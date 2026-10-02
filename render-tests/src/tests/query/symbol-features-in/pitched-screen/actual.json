@@ -1,0 +1,102 @@
+{
+  "actual": [
+    {
+      "id": null,
+      "layer": "symbol",
+      "properties": {},
+      "source": "geojson",
+      "sourceLayer": "symbol",
+      "type": "Point"
+    },
+    {
+      "id": null,
+      "layer": "symbol",
+      "properties": {},
+      "source": "geojson",
+      "sourceLayer": "symbol",
+      "type": "Point"
+    },
+    {
+      "id": null,
+      "layer": "symbol",
+      "properties": {},
+      "source": "geojson",
+      "sourceLayer": "symbol",
+      "type": "Point"
+    },
+    {
+      "id": null,
+      "layer": "symbol",
+      "properties": {},
+      "source": "geojson",
+      "sourceLayer": "symbol",
+      "type": "Point"
+    },
+    {
+      "id": null,
+      "layer": "symbol",
+      "properties": {},
+      "source": "geojson",
+      "sourceLayer": "symbol",
+      "type": "Point"
+    },
+    {
+      "id": null,
+      "layer": "symbol",
+      "properties": {},
+      "source": "geojson",
+      "sourceLayer": "symbol",
+      "type": "Point"
+    }
+  ],
+  "expected": [
+    {
+      "id": 108,
+      "layer": "symbol",
+      "properties": {},
+      "source": "geojson",
+      "sourceLayer": "symbol",
+      "type": "Point"
+    },
+    {
+      "id": 119,
+      "layer": "symbol",
+      "properties": {},
+      "source": "geojson",
+      "sourceLayer": "symbol",
+      "type": "Point"
+    },
+    {
+      "id": 107,
+      "layer": "symbol",
+      "properties": {},
+      "source": "geojson",
+      "sourceLayer": "symbol",
+      "type": "Point"
+    },
+    {
+      "id": 106,
+      "layer": "symbol",
+      "properties": {},
+      "source": "geojson",
+      "sourceLayer": "symbol",
+      "type": "Point"
+    },
+    {
+      "id": 96,
+      "layer": "symbol",
+      "properties": {},
+      "source": "geojson",
+      "sourceLayer": "symbol",
+      "type": "Point"
+    },
+    {
+      "id": 118,
+      "layer": "symbol",
+      "properties": {},
+      "source": "geojson",
+      "sourceLayer": "symbol",
+      "type": "Point"
+    }
+  ]
+}

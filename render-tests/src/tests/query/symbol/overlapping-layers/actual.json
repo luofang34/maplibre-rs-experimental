@@ -1,0 +1,78 @@
+{
+  "actual": [
+    {
+      "id": null,
+      "layer": "icon2",
+      "properties": {},
+      "source": "geojson",
+      "sourceLayer": "icon2",
+      "type": "Point"
+    },
+    {
+      "id": null,
+      "layer": "icon2",
+      "properties": {},
+      "source": "geojson",
+      "sourceLayer": "icon2",
+      "type": "Point"
+    },
+    {
+      "id": null,
+      "layer": "icon2",
+      "properties": {},
+      "source": "geojson",
+      "sourceLayer": "icon2",
+      "type": "Point"
+    }
+  ],
+  "expected": [
+    {
+      "id": null,
+      "layer": "icon2",
+      "properties": {},
+      "source": "geojson",
+      "sourceLayer": "icon2",
+      "type": "Point"
+    },
+    {
+      "id": null,
+      "layer": "icon2",
+      "properties": {},
+      "source": "geojson",
+      "sourceLayer": "icon2",
+      "type": "Point"
+    },
+    {
+      "id": null,
+      "layer": "icon2",
+      "properties": {},
+      "source": "geojson",
+      "sourceLayer": "icon2",
+      "type": "Point"
+    },
+    {
+      "id": null,
+      "layer": null,
+      "properties": {},
+      "source": "geojson",
+      "sourceLayer": null,
+      "type": "Point"
+    },
+    {
+      "id": null,
+      "layer": null,
+      "properties": {},
+      "source": "geojson",
+      "sourceLayer": null,
+      "type": "Point"
+    },
+    {
+      "id": null,
+      "layer": null,
+      "properties": {},
+      "source": "geojson",
+      "sourceLayer": null,
+      "type": "Point"
+    }
+  ]
+}

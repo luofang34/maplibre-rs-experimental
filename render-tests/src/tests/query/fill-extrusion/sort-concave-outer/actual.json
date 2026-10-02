@@ -1,0 +1,23 @@
+{
+  "actual": [],
+  "expected": [
+    {
+      "id": null,
+      "layer": null,
+      "properties": {
+        "outside": true
+      },
+      "source": "zones",
+      "sourceLayer": null,
+      "type": "Polygon"
+    },
+    {
+      "id": null,
+      "layer": null,
+      "properties": {},
+      "source": "zones",
+      "sourceLayer": null,
+      "type": "Polygon"
+    }
+  ]
+}

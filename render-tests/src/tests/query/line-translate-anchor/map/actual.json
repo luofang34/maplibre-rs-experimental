@@ -1,0 +1,29 @@
+{
+  "actual": [],
+  "expected": [
+    {
+      "id": 49,
+      "layer": null,
+      "properties": {
+        "id": "34029",
+        "name": "Ocean County",
+        "pop_density": 2310.250993696356
+      },
+      "source": "us-counties",
+      "sourceLayer": "counties",
+      "type": "Polygon"
+    },
+    {
+      "id": 49,
+      "layer": null,
+      "properties": {
+        "id": "34029",
+        "name": "Ocean County",
+        "pop_density": 2310.250993696356
+      },
+      "source": "us-counties",
+      "sourceLayer": "counties",
+      "type": "Polygon"
+    }
+  ]
+}

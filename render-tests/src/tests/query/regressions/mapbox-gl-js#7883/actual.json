@@ -1,0 +1,45 @@
+{
+  "actual": [],
+  "expected": [
+    {
+      "id": null,
+      "layer": null,
+      "properties": {
+        "layer": "upper"
+      },
+      "source": "fill-upper",
+      "sourceLayer": null,
+      "type": "Polygon"
+    },
+    {
+      "id": null,
+      "layer": null,
+      "properties": {
+        "layer": "extrusion_closer"
+      },
+      "source": "extrusion_closer",
+      "sourceLayer": null,
+      "type": "Polygon"
+    },
+    {
+      "id": null,
+      "layer": null,
+      "properties": {
+        "layer": "extrusion_further"
+      },
+      "source": "extrusion",
+      "sourceLayer": null,
+      "type": "Polygon"
+    },
+    {
+      "id": null,
+      "layer": null,
+      "properties": {
+        "layer": "fill-lower"
+      },
+      "source": "fill-lower",
+      "sourceLayer": null,
+      "type": "Polygon"
+    }
+  ]
+}

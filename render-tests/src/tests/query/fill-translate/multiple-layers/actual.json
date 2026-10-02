@@ -1,0 +1,13 @@
+{
+  "actual": [],
+  "expected": [
+    {
+      "id": 1,
+      "layer": null,
+      "properties": {},
+      "source": "maplibre",
+      "sourceLayer": null,
+      "type": "Polygon"
+    }
+  ]
+}

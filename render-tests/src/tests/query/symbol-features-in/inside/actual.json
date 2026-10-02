@@ -1,0 +1,30 @@
+{
+  "actual": [
+    {
+      "id": 33,
+      "layer": "counties",
+      "properties": {
+        "id": "34005",
+        "name": "Burlington County",
+        "pop_density": 2007.2920458152796
+      },
+      "source": "us-counties",
+      "sourceLayer": "counties",
+      "type": "Point"
+    }
+  ],
+  "expected": [
+    {
+      "id": 33,
+      "layer": "counties",
+      "properties": {
+        "id": "34005",
+        "name": "Burlington County",
+        "pop_density": 2007.2920458152796
+      },
+      "source": "us-counties",
+      "sourceLayer": "counties",
+      "type": "Polygon"
+    }
+  ]
+}

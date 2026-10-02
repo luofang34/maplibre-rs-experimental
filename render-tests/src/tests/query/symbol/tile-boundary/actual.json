@@ -1,0 +1,22 @@
+{
+  "actual": [
+    {
+      "id": null,
+      "layer": "text",
+      "properties": {},
+      "source": "point",
+      "sourceLayer": "text",
+      "type": "Point"
+    }
+  ],
+  "expected": [
+    {
+      "id": null,
+      "layer": "text",
+      "properties": {},
+      "source": "point",
+      "sourceLayer": "text",
+      "type": "Point"
+    }
+  ]
+}

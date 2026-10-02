@@ -1,0 +1,15 @@
+{
+  "actual": [],
+  "expected": [
+    {
+      "id": null,
+      "layer": null,
+      "properties": {
+        "identifier": "firstSource"
+      },
+      "source": "source",
+      "sourceLayer": null,
+      "type": "Point"
+    }
+  ]
+}

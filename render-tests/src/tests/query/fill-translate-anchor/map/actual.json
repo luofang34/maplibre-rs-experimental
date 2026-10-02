@@ -1,0 +1,30 @@
+{
+  "actual": [
+    {
+      "id": 33,
+      "layer": "counties",
+      "properties": {
+        "id": "34005",
+        "name": "Burlington County",
+        "pop_density": 2007.2920458152796
+      },
+      "source": "us-counties",
+      "sourceLayer": "counties",
+      "type": "Polygon"
+    }
+  ],
+  "expected": [
+    {
+      "id": 24,
+      "layer": "counties",
+      "properties": {
+        "id": "42017",
+        "name": "Bucks County",
+        "pop_density": 3662.8124921176313
+      },
+      "source": "us-counties",
+      "sourceLayer": "counties",
+      "type": "Polygon"
+    }
+  ]
+}

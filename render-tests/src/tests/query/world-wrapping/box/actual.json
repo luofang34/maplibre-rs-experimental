@@ -1,0 +1,38 @@
+{
+  "actual": [],
+  "expected": [
+    {
+      "id": 958,
+      "layer": null,
+      "properties": {
+        "class": "shadow",
+        "level": 56
+      },
+      "source": "maplibre",
+      "sourceLayer": "hillshade",
+      "type": "Polygon"
+    },
+    {
+      "id": 957,
+      "layer": null,
+      "properties": {
+        "class": "shadow",
+        "level": 56
+      },
+      "source": "maplibre",
+      "sourceLayer": "hillshade",
+      "type": "Polygon"
+    },
+    {
+      "id": 956,
+      "layer": null,
+      "properties": {
+        "class": "shadow",
+        "level": 56
+      },
+      "source": "maplibre",
+      "sourceLayer": "hillshade",
+      "type": "Polygon"
+    }
+  ]
+}

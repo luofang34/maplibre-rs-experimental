@@ -1,0 +1,35 @@
+{
+  "actual": [],
+  "expected": [
+    {
+      "id": null,
+      "layer": null,
+      "properties": {
+        "position": "top"
+      },
+      "source": "zones",
+      "sourceLayer": null,
+      "type": "Polygon"
+    },
+    {
+      "id": null,
+      "layer": null,
+      "properties": {
+        "position": "middle"
+      },
+      "source": "zones",
+      "sourceLayer": null,
+      "type": "Polygon"
+    },
+    {
+      "id": null,
+      "layer": null,
+      "properties": {
+        "position": "bottom"
+      },
+      "source": "zones",
+      "sourceLayer": null,
+      "type": "Polygon"
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "actual": [],
+  "expected": [
+    {
+      "id": null,
+      "layer": null,
+      "properties": {
+        "gap": 20
+      },
+      "source": "geojson",
+      "sourceLayer": null,
+      "type": "LineString"
+    }
+  ]
+}

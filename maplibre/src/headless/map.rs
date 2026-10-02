@@ -4,6 +4,7 @@ use std::{cell::RefCell, collections::BTreeMap, ops::Deref, rc::Rc, time::Durati
 
 use image::RgbaImage;
 
+use crate::vector::transferables::LayerIndexed;
 use crate::{
     context::MapContext,
     coords::{LatLon, WorldCoords, WorldTileCoords, Zoom},
@@ -188,7 +189,18 @@ impl HeadlessMap {
         }
         let context = &mut self.map_context;
         let tiles = &mut context.world.tiles;
-        let ProcessedLayers { vector, symbols } = layers;
+        let ProcessedLayers {
+            vector,
+            symbols,
+            indexes,
+        } = layers;
+        for index in indexes {
+            tiles.geometry_index.index_tile(
+                &index.coords(),
+                index.source(),
+                (*index).to_tile_index(),
+            );
+        }
 
         let mut layers_by_tile = BTreeMap::new();
         for layer in vector {
@@ -289,6 +301,16 @@ impl HeadlessMap {
             .world
             .resources
             .get_or_init_mut::<FrameInput>()
+    }
+
+    /// Fill, line and symbol features under a point or box, topmost first, as GL JS
+    /// `queryRenderedFeatures` returns them.
+    pub fn query_rendered_features(
+        &self,
+        geometry: crate::sdf::query::QueryGeometry,
+        options: &crate::sdf::query::QueryOptions,
+    ) -> Result<Vec<crate::query::QueriedFeature>, crate::sdf::query::QueryError> {
+        self.map_context.query_rendered_features(geometry, options)
     }
 
     /// Symbols accepted by placement under a point or box, narrowed by layers and a filter.
