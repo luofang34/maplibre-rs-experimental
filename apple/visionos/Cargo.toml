@@ -9,7 +9,7 @@ description = "C ABI of the maplibre-rs renderer for the visionOS host app"
 crate-type = ["staticlib"]
 
 [dependencies]
-maplibre = { path = "../../maplibre", features = ["headless", "thread-safe-futures"] }
+maplibre = { path = "../../maplibre", default-features = false, features = ["raster", "headless", "thread-safe-futures"] }
 tokio = { version = "1", features = ["rt-multi-thread"] }
 wgpu = "30.0.1"
 wgpu-hal = { version = "30.0.1", features = ["metal"] }

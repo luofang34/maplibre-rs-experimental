@@ -167,6 +167,12 @@ xcodebuild-archive-fat EXISTING_ARCH EXISTING_PLATFORM ARCH: (xcodebuild-archive
     cp -R $inner/Modules/{{ BINARY_NAME }}.swiftmodule/* \
           "$fat_inner/Modules/{{ BINARY_NAME }}.swiftmodule/"
 
+# visionOS is a tier 3 target; apple/visionos pins the nightly that builds std from source.
+check-visionos:
+    cd apple/visionos && cargo check --target aarch64-apple-visionos-sim
+    cd apple/visionos && cargo check --target aarch64-apple-visionos
+    cd apple/visionos && cargo clippy --all-targets -- -D warnings
+
 xcodebuild-clean:
     rm -rf {{ BUILD_DIR }}/*.xcarchive
     rm -rf {{ XC_FRAMEWORK_DIRECTORY }}/*.xcframework

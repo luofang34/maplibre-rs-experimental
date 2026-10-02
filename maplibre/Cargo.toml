@@ -14,7 +14,7 @@ authors.workspace = true
 
 [features]
 # FIXME tcs: Remove raster from default
-default = ["raster"]
+default = ["raster", "mlt"]
 web-webgl = ["wgpu/webgl"]
 # Enable tracing using tracy on desktop/mobile and the chrome profiler on web
 trace = ["tracing-subscriber", "tracing-tracy"]
@@ -23,6 +23,9 @@ embed-static-tiles = ["maplibre-build-tools/sqlite"]
 headless = ["png"]
 raster = ["image"]
 geojson = []
+# Reads MapLibre Tile (MLT) vector tiles. Its encoder dependencies reach `getrandom` 0.1,
+# which has no visionOS support, so a visionOS build turns it off.
+mlt = ["dep:mlt-core"]
 
 
 [target.'cfg(any(target_os = "macos", target_os = "ios", target_os = "visionos", target_os = "linux", target_os = "android", target_os = "windows"))'.dependencies]
@@ -55,7 +58,7 @@ geo-types.workspace = true
 rstar.workspace = true
 geozero = { workspace = true, features = ["with-geojson"] }
 tile-grid.workspace = true
-mlt-core.workspace = true
+mlt-core = { workspace = true, optional = true }
 unicode-normalization.workspace = true
 
 # Rendering

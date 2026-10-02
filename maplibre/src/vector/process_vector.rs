@@ -172,11 +172,14 @@ mod processing;
 /// field, so a strict decoder rejects a tile that GL JS reads.
 pub(super) fn decode_tile(data: &[u8]) -> Result<geozero::mvt::Tile, Box<dyn std::error::Error>> {
     // A payload that is not a protobuf tile with layers is tried as a MapLibre Tile.
+    #[cfg(feature = "mlt")]
     match decode_mvt(data) {
         Ok(tile) if !tile.layers.is_empty() => Ok(tile),
         Ok(tile) => Ok(super::mlt::decode(data).unwrap_or(tile)),
         Err(error) => super::mlt::decode(data).map_err(|_| error),
     }
+    #[cfg(not(feature = "mlt"))]
+    decode_mvt(data)
 }
 
 fn decode_mvt(data: &[u8]) -> Result<geozero::mvt::Tile, Box<dyn std::error::Error>> {
