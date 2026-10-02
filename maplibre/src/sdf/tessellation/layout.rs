@@ -16,8 +16,15 @@ use crate::{
 /// A polyline in tile units and the arc length from its start to a label's anchor.
 pub(super) type LineContext = (std::sync::Arc<[[f32; 2]]>, f32);
 
-pub(super) struct CollectedSymbol {
+/// The source feature a label is drawn for, as a query reports it.
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct SourceFeature {
     pub id: Option<u64>,
+    pub kind: crate::style::filter::GeometryType,
+}
+
+pub(super) struct CollectedSymbol {
+    pub source: SourceFeature,
     pub line: Option<LineContext>,
     pub anchor: Point<f64>,
     pub properties: FeatureProperties,
@@ -191,7 +198,8 @@ pub(super) fn append(
     features.push(Feature {
         parts,
         data: crate::sdf::SymbolFeatureData {
-            id: symbol.id,
+            id: symbol.source.id,
+            geometry_type: symbol.source.kind,
             properties: symbol.properties.clone(),
             sort_key: paint.number("symbol-sort-key", &symbol.properties, zoom, 0.0),
         },

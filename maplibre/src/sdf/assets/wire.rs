@@ -22,6 +22,8 @@ pub struct SymbolFeature {
     #[serde(default)]
     sort_key: f32,
     #[serde(default)]
+    geometry_type: crate::style::filter::GeometryType,
+    #[serde(default)]
     line: Option<LineLabelWire>,
     #[serde(default)]
     anchor_shifts: Vec<[f32; 2]>,
@@ -65,6 +67,7 @@ impl From<&Feature> for SymbolFeature {
                 .map(|(key, value)| (key.clone(), value.to_json()))
                 .collect(),
             sort_key: feature.data.sort_key,
+            geometry_type: feature.data.geometry_type,
             anchor_shifts: feature.anchor_shifts.clone(),
             text_sets: feature
                 .text_sets
@@ -107,6 +110,7 @@ impl From<SymbolFeature> for Feature {
                     .map(|(key, value)| (key, crate::style::expression::Value::from_json(&value)))
                     .collect(),
                 sort_key: feature.sort_key,
+                geometry_type: feature.geometry_type,
             },
             anchor_shifts: feature.anchor_shifts,
             text_sets: feature.text_sets.iter().map(|set| set[0]..set[1]).collect(),

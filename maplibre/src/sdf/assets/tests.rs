@@ -52,6 +52,7 @@ fn worker_wire_roundtrip_preserves_exact_collision_ranges_and_anchor() {
             )]
             .into(),
             sort_key: 3.5,
+            geometry_type: crate::style::filter::GeometryType::Polygon,
         },
         parts: [
             Some(crate::sdf::placement_geometry::SymbolBounds {
@@ -92,6 +93,7 @@ fn worker_wire_roundtrip_preserves_exact_collision_ranges_and_anchor() {
     assert_eq!(decoded.data.id, feature.data.id);
     assert_eq!(decoded.data.properties, feature.data.properties);
     assert_eq!(decoded.data.sort_key, feature.data.sort_key);
+    assert_eq!(decoded.data.geometry_type, feature.data.geometry_type);
     let line = decoded.line.expect("the line the label follows");
     assert_eq!(&*line.polyline, &[[0.0, 0.0], [500.0, 0.0]]);
     assert_eq!(line.anchor_distance, 250.0);

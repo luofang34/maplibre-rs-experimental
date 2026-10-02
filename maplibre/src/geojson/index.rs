@@ -362,6 +362,19 @@ fn promoted_property(promote: Option<&PromoteId>) -> Option<&str> {
 
 /// The id a feature carries into tiles and queries: the promoted property or `id` when it is a
 /// whole non-negative number, else its position in the document with `generateId`.
+/// The id of each feature of a collection, or of a bare feature, in the order a geometry
+/// processor meets them.
+pub(super) fn feature_ids(geojson: &Value) -> Vec<Option<u64>> {
+    geojson
+        .get("features")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or(std::slice::from_ref(geojson))
+        .iter()
+        .map(|feature| numeric_feature_id(feature, None, None))
+        .collect()
+}
+
 pub(super) fn numeric_feature_id(
     feature: &Value,
     promoted: Option<&str>,

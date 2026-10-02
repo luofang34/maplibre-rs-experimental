@@ -53,15 +53,7 @@ pub(super) fn send<T: VectorTransferables, C: Context>(
     (coords, source, buffer): (WorldTileCoords, &str, Option<u32>),
     context: &C,
 ) -> Result<(), ProcessGeoJsonError> {
-    let features = geojson_value
-        .get("features")
-        .and_then(serde_json::Value::as_array)
-        .map(Vec::as_slice)
-        .unwrap_or(std::slice::from_ref(geojson_value));
-    let ids = features
-        .iter()
-        .map(|feature| super::index::numeric_feature_id(feature, None, None))
-        .collect();
+    let ids = super::index::feature_ids(geojson_value);
     let mut index = IndexProcessor::new();
     index.begin_layer(GEOJSON_LAYER, ids);
     let mut projecting = ProjectingTessellator::new(coords, index);

@@ -39,6 +39,7 @@ fn label(id: u64, sort_key: f32, at: [f32; 2]) -> Feature {
             id: Some(id),
             properties: Default::default(),
             sort_key,
+            geometry_type: crate::style::filter::GeometryType::Point,
         },
         bbox: Box2D::zero(),
         indices: 0..0,

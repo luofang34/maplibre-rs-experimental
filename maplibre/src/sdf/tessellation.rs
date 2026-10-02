@@ -30,6 +30,8 @@ mod pole;
 mod text_layout;
 mod text_offset;
 use layout::CollectedSymbol;
+
+use crate::style::filter::GeometryType;
 type GeoResult<T> = geozero::error::Result<T>;
 
 /// Worker-side geometry for screen-sized symbols anchored to map features.
@@ -100,7 +102,7 @@ impl TextTessellator {
         let pending = std::mem::take(&mut self.pending_lines);
         for line in line_merge::merge_lines(pending) {
             self.properties = line.properties;
-            self.collect_along_lines(vec![line.line], LinePlacement::Line, line.id);
+            self.collect_along_lines(vec![line.line], LinePlacement::Line, line.source);
         }
         self.properties.clear();
         self.collected.sort_by(|a, b| {
@@ -218,7 +220,7 @@ impl TextTessellator {
         &mut self,
         anchor: Point<f64>,
         angle: f32,
-        id: Option<u64>,
+        source: layout::SourceFeature,
         line: Option<layout::LineContext>,
     ) {
         let ways = line
@@ -237,7 +239,7 @@ impl TextTessellator {
             .enumerate()
         {
             self.collected.push(CollectedSymbol {
-                id,
+                source,
                 line: line.clone(),
                 anchor,
                 angle,
@@ -269,10 +271,10 @@ impl TextTessellator {
         &mut self,
         lines: Vec<Vec<[f64; 2]>>,
         placement: LinePlacement,
-        id: Option<u64>,
+        source: layout::SourceFeature,
     ) {
         let probe = CollectedSymbol {
-            id,
+            source,
             line: None,
             anchor: Point::new(0.0, 0.0),
             angle: 0.0,
@@ -350,7 +352,7 @@ impl TextTessellator {
                 self.collect(
                     Point::new(anchor.point[0], anchor.point[1]),
                     anchor.angle as f32,
-                    id,
+                    source,
                     Some((polyline.clone(), distance as f32)),
                 );
             }
@@ -386,6 +388,13 @@ impl FeatureProcessor for TextTessellator {
                 .ok()
                 .and_then(|idx| self.source_ids.get(idx).copied())
                 .flatten();
+            let kind = match &geometry {
+                Geometry::Point(_) | Geometry::MultiPoint(_) => GeometryType::Point,
+                Geometry::LineString(_) | Geometry::MultiLineString(_) => GeometryType::LineString,
+                Geometry::Polygon(_) | Geometry::MultiPolygon(_) => GeometryType::Polygon,
+                _ => GeometryType::Unknown,
+            };
+            let source = layout::SourceFeature { id, kind };
             let lines: Option<Vec<Vec<[f64; 2]>>> = match &geometry {
                 Geometry::LineString(line) => {
                     Some(vec![line.coords().map(|c| [c.x, c.y]).collect()])
@@ -411,12 +420,14 @@ impl FeatureProcessor for TextTessellator {
                         self.pending_lines.push(line_merge::PendingLine {
                             text: text.clone(),
                             line,
-                            id,
+                            source,
                             properties: self.properties.clone(),
                         });
                     }
                 }
-                (Some(placement), Some(lines)) => self.collect_along_lines(lines, placement, id),
+                (Some(placement), Some(lines)) => {
+                    self.collect_along_lines(lines, placement, source)
+                }
                 // A point has no line to follow.
                 (Some(_), None) => {}
                 (None, _) => {
@@ -427,7 +438,7 @@ impl FeatureProcessor for TextTessellator {
                         .into_iter()
                         .filter(|anchor| tile.contains(&anchor.x()) && tile.contains(&anchor.y()))
                     {
-                        self.collect(anchor, 0.0, id, None);
+                        self.collect(anchor, 0.0, source, None);
                     }
                 }
             }

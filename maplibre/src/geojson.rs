@@ -509,6 +509,9 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
                 let mut tessellator =
                     TextTessellator::with_assets(symbol_paint.clone(), zoom, atlas.clone());
                 tessellator.overscaling = request.overscaling();
+                tessellator.source_ids = serde_json::from_str(&json_str)
+                    .map(|filtered| index::feature_ids(&filtered))
+                    .unwrap_or_default();
                 let mut projecting = ProjectingTessellator::new(coords, tessellator);
 
                 let mut geojson_src = geozero::geojson::GeoJson(json_str.as_str());

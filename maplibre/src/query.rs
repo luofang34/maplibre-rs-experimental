@@ -65,10 +65,22 @@ impl From<RenderedSymbol> for QueriedFeature {
             source_layer: symbol.source_layer,
             id: symbol.id,
             properties: symbol.properties,
-            geometry_type: "Point",
+            geometry_type: symbol.geometry_type.name(),
             text: Some(symbol.text),
         }
     }
+}
+
+/// A feature's properties as its source gives them, without the feature state an expression
+/// reads through them.
+pub(crate) fn source_properties(
+    properties: &crate::style::expression::FeatureProperties,
+) -> BTreeMap<String, serde_json::Value> {
+    properties
+        .iter()
+        .filter(|(key, _)| !key.starts_with(crate::style::expression::FEATURE_STATE_PREFIX))
+        .map(|(key, value)| (key.clone(), value.to_json()))
+        .collect()
 }
 
 /// Features under `geometry`, topmost style layer first.
@@ -541,11 +553,7 @@ fn collect(
                 source: layer.source.clone(),
                 source_layer: geometry.source_layer.to_string(),
                 id: geometry.id,
-                properties: geometry
-                    .properties
-                    .iter()
-                    .map(|(key, value)| (key.clone(), value.to_json()))
-                    .collect(),
+                properties: source_properties(&geometry.properties),
                 geometry_type,
                 text: None,
             },
@@ -576,3 +584,6 @@ impl crate::context::MapContext {
         )
     }
 }
+
+#[cfg(test)]
+mod tests;

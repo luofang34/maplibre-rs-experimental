@@ -113,6 +113,8 @@ pub struct SymbolFeatureData {
     pub properties: crate::style::expression::FeatureProperties,
     /// Evaluated symbol-sort-key; smaller keys have collision priority.
     pub sort_key: f32,
+    /// The kind of the source feature's geometry, which a query reports and filters by.
+    pub geometry_type: crate::style::filter::GeometryType,
 }
 
 /// The line a label follows, and where its glyphs sit along the text.

@@ -25,7 +25,7 @@ fn letter_spacing_is_between_glyphs_and_does_not_shift_centered_text() {
         ..Default::default()
     };
     let symbol = CollectedSymbol {
-        id: None,
+        source: Default::default(),
         line: None,
         anchor: geo_types::Point::new(100., 100.),
         properties: Default::default(),
@@ -78,7 +78,7 @@ fn label_top(anchor: &str, field: &str) -> i32 {
         ..Default::default()
     };
     let symbol = CollectedSymbol {
-        id: None,
+        source: Default::default(),
         line: None,
         anchor: geo_types::Point::new(100., 100.),
         properties: Default::default(),
@@ -128,7 +128,7 @@ fn a_bidirectional_mark_is_not_drawn_even_where_the_font_has_a_glyph_for_it() {
         ..Default::default()
     };
     let symbol = CollectedSymbol {
-        id: None,
+        source: Default::default(),
         line: None,
         anchor: geo_types::Point::new(100., 100.),
         properties: Default::default(),

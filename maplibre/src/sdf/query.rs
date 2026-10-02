@@ -53,6 +53,8 @@ pub struct RenderedSymbol {
     pub id: Option<u64>,
     /// Original source attributes.
     pub properties: std::collections::BTreeMap<String, serde_json::Value>,
+    /// The kind of the source feature's geometry, which GL JS reports for a label.
+    pub geometry_type: GeometryType,
     /// Rendered text, also useful for accessible selection feedback.
     pub text: String,
     /// Geographic anchor as longitude and latitude in degrees.
@@ -201,7 +203,7 @@ pub fn query_rendered_symbols_in(
                 .map(|id| Value::from_json(&serde_json::json!(id)));
             let passes = filter.evaluate(&FeatureContext {
                 properties: &feature.data.properties,
-                geometry_type: GeometryType::Point,
+                geometry_type: feature.data.geometry_type,
                 id,
                 zoom: f64::from(u8::from(hit.coords.z)),
             });
@@ -214,18 +216,15 @@ pub fn query_rendered_symbols_in(
         let y = (f64::from(hit.coords.y) + f64::from(feature.text_anchor.y) / 4096.0) / scale;
         matches.push((
             style_layer.index,
-            feature.data.sort_key,
+            (u8::from(hit.coords.z), hit.coords.y, hit.coords.x),
+            hit.feature,
             RenderedSymbol {
                 layer: hit.layer.clone(),
                 source: style_layer.source.clone(),
                 source_layer: layer.source_layer.clone(),
                 id: feature.data.id,
-                properties: feature
-                    .data
-                    .properties
-                    .iter()
-                    .map(|(key, value)| (key.clone(), value.to_json()))
-                    .collect(),
+                properties: crate::query::source_properties(&feature.data.properties),
+                geometry_type: feature.data.geometry_type,
                 text: feature.str.clone(),
                 coordinates: [
                     (x * 360.0 + 180.0).rem_euclid(360.0) - 180.0,
@@ -237,8 +236,14 @@ pub fn query_rendered_symbols_in(
             },
         ));
     }
-    matches.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.total_cmp(&a.1)));
-    Ok(matches.into_iter().map(|(_, _, feature)| feature).collect())
+    // As GL JS `queryRenderedSymbols`: the topmost layer first, its tiles from the lowest zoom
+    // and then top to bottom, and in each tile the labels drawn last first. A tile's labels are
+    // in drawing order: by symbol-sort-key, or by screen height where labels may overlap.
+    matches.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)).then(b.2.cmp(&a.2)));
+    Ok(matches
+        .into_iter()
+        .map(|(_, _, _, feature)| feature)
+        .collect())
 }
 
 #[cfg(test)]

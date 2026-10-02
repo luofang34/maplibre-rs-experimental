@@ -299,3 +299,49 @@ fn polygon_rings_are_wound_clockwise_on_screen_outside_and_counter_clockwise_for
         "the hole, clockwise as given, is reversed too"
     );
 }
+
+#[test]
+fn a_label_keeps_the_id_and_geometry_kind_of_its_source_feature() {
+    let paint: SymbolPaint = serde_json::from_value(
+        serde_json::json!({"text-field": "A", "text-font": ["test"], "text-size": 24}),
+    )
+    .expect("paint");
+    let mut tessellator = TextTessellator::default();
+    tessellator.configure(paint, atlas());
+    tessellator.source_ids = vec![None, Some(9)];
+    tessellator.point_begin(0).expect("begin");
+    tessellator.xy(100.0, 100.0, 0).expect("vertex");
+    tessellator.point_end(0).expect("end");
+    tessellator.feature_end(0).expect("feature");
+    let square = [
+        [1000.0, 1000.0],
+        [2000.0, 1000.0],
+        [2000.0, 2000.0],
+        [1000.0, 2000.0],
+        [1000.0, 1000.0],
+    ];
+    tessellator.polygon_begin(true, 1, 1).expect("begin");
+    tessellator
+        .linestring_begin(false, square.len(), 0)
+        .expect("ring");
+    for (index, [x, y]) in square.into_iter().enumerate() {
+        tessellator.xy(x, y, index).expect("vertex");
+    }
+    tessellator.linestring_end(false, 0).expect("ring end");
+    tessellator.polygon_end(true, 1).expect("end");
+    tessellator.feature_end(1).expect("feature");
+    tessellator.finish();
+
+    let sources: Vec<_> = tessellator
+        .features
+        .iter()
+        .map(|feature| (feature.data.id, feature.data.geometry_type))
+        .collect();
+    assert_eq!(
+        sources,
+        [
+            (None, GeometryType::Point),
+            (Some(9), GeometryType::Polygon)
+        ]
+    );
+}

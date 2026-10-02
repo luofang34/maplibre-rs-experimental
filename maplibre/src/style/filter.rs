@@ -33,7 +33,7 @@ pub enum FilterError {
 }
 
 /// The geometry kind a filter can test with `$type` or `["geometry-type"]`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum GeometryType {
     /// Points and multi-points.
     Point,
@@ -42,6 +42,7 @@ pub enum GeometryType {
     /// Polygons and multi-polygons.
     Polygon,
     /// A geometry the source did not classify.
+    #[default]
     Unknown,
 }
 

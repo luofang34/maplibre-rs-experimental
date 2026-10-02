@@ -11,7 +11,7 @@ pub(super) struct PendingLine {
     /// The text of the label; a line without text is never merged.
     pub text: Option<String>,
     pub line: Vec<[f64; 2]>,
-    pub id: Option<u64>,
+    pub source: super::layout::SourceFeature,
     pub properties: FeatureProperties,
 }
 
