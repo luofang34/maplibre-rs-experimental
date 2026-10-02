@@ -556,6 +556,12 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
         }
     }
 
+    query_index::send::<T, C>(
+        geojson_value,
+        &unfiltered,
+        (coords, &request.source_name, request.buffer),
+        context,
+    )?;
     context
         .send_back(T::TileTessellated::build_from(coords))
         .map_err(ProcessGeoJsonError::SendError)?;
@@ -565,6 +571,7 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
 
 pub mod index;
 pub mod query;
+mod query_index;
 mod store;
 pub mod update;
 

@@ -31,6 +31,8 @@ use crate::{
     tcs::world::World,
 };
 
+mod extrusion;
+
 /// Tiles a single query reads at one zoom before it uses a coarser one.
 const MAX_TILES: i64 = 256;
 /// Deepest tile zoom a query looks at.
@@ -83,7 +85,7 @@ pub fn query_rendered_features(
     options: &QueryOptions,
 ) -> Result<Vec<QueriedFeature>, QueryError> {
     let symbols = query_rendered_symbols_in(world, style, geometry, options)?;
-    let mut found: Vec<(u32, QueriedFeature)> = symbols
+    let mut found: Vec<(u32, Option<f64>, QueriedFeature)> = symbols
         .into_iter()
         .map(|symbol| {
             let index = style
@@ -91,14 +93,52 @@ pub fn query_rendered_features(
                 .iter()
                 .find(|layer| layer.id == symbol.layer)
                 .map_or(0, |layer| layer.index);
-            (index, QueriedFeature::from(symbol))
+            (index, None, QueriedFeature::from(symbol))
         })
         .collect();
     found.extend(vector_features(
         world, style, view_state, geometry, options,
     )?);
-    found.sort_by_key(|(index, _)| Reverse(*index));
-    Ok(found.into_iter().map(|(_, feature)| feature).collect())
+    Ok(in_drawing_order(found))
+}
+
+/// Features topmost first, as GL JS `Style.queryRenderedFeatures` orders them: layer by layer
+/// from the top, where each fill extrusion layer gives out the nearest remaining extrusions
+/// for as long as the nearest is in that layer or above it.
+fn in_drawing_order(found: Vec<(u32, Option<f64>, QueriedFeature)>) -> Vec<QueriedFeature> {
+    let (mut extruded, flat): (Vec<_>, Vec<_>) =
+        found.into_iter().partition(|(_, depth, _)| depth.is_some());
+    // Nearest last, so the nearest is popped first.
+    extruded.sort_by(|a, b| b.1.unwrap_or(0.0).total_cmp(&a.1.unwrap_or(0.0)));
+    let extrusion_layers: HashSet<u32> = extruded.iter().map(|(layer, _, _)| *layer).collect();
+    let mut layers: Vec<u32> = flat
+        .iter()
+        .map(|(layer, _, _)| *layer)
+        .chain(extrusion_layers.iter().copied())
+        .collect();
+    layers.sort_unstable_by_key(|layer| Reverse(*layer));
+    layers.dedup();
+    let mut flat_by_layer: BTreeMap<u32, Vec<QueriedFeature>> = BTreeMap::new();
+    for (layer, _, feature) in flat {
+        flat_by_layer.entry(layer).or_default().push(feature);
+    }
+    let mut ordered = Vec::new();
+    for layer in layers {
+        if extrusion_layers.contains(&layer) {
+            while extruded
+                .last()
+                .is_some_and(|(nearest, _, _)| *nearest >= layer)
+            {
+                if let Some((_, _, feature)) = extruded.pop() {
+                    ordered.push(feature);
+                }
+            }
+        }
+        if let Some(features) = flat_by_layer.remove(&layer) {
+            ordered.extend(features);
+        }
+    }
+    ordered
 }
 
 /// A layer a fill or line feature can be reported for, with its filter parsed once.
@@ -140,7 +180,11 @@ struct Search<'a> {
     candidates: Vec<Candidate<'a>>,
     query_filter: Option<Filter>,
     seen: HashSet<(String, Identity)>,
-    found: Vec<(u32, QueriedFeature)>,
+    /// Each feature with its layer's index and, for a fill extrusion, its depth on screen.
+    found: Vec<(u32, Option<f64>, QueriedFeature)>,
+    /// The query in window pixels, which extrusions are met against as they stand.
+    screen: extrusion::ScreenQuery,
+    view_state: &'a ViewState,
 }
 
 /// Fill and line features are located on a flat ground plane.
@@ -166,13 +210,13 @@ fn vector_features(
     view_state: &ViewState,
     geometry: QueryGeometry,
     options: &QueryOptions,
-) -> Result<Vec<(u32, QueriedFeature)>, QueryError> {
+) -> Result<Vec<(u32, Option<f64>, QueriedFeature)>, QueryError> {
     let zoom = view_state.zoom();
     let candidates: Vec<Candidate> = style
         .layers
         .iter()
         .filter(|layer| {
-            matches!(layer.type_.as_str(), "fill" | "line")
+            matches!(layer.type_.as_str(), "fill" | "line" | "fill-extrusion")
                 && layer.is_visible_at(zoom.value())
                 && options
                     .layers
@@ -194,14 +238,30 @@ fn vector_features(
     let Some(bounds) = geometry.bounds() else {
         return Err(QueryError::InvalidGeometry);
     };
-    let Some(region) = ground_region(view_state, bounds) else {
+    // An extrusion stands up from the ground, so it can meet the query far from where the
+    // query meets the ground: every tile in view is searched.
+    let extrudes = candidates
+        .iter()
+        .any(|candidate| candidate.layer.type_ == "fill-extrusion");
+    let searched = if extrudes {
+        camera_query_bounds(view_state, bounds)
+    } else {
+        bounds
+    };
+    let Some(region) = ground_region(view_state, searched) else {
         return Ok(Vec::new());
+    };
+    let screen = match geometry {
+        QueryGeometry::Point(point) => extrusion::ScreenQuery::Point(point),
+        QueryGeometry::Box { .. } => extrusion::ScreenQuery::Box(bounds),
     };
     let mut search = Search {
         candidates,
         query_filter,
         seen: HashSet::new(),
         found: Vec::new(),
+        screen,
+        view_state,
     };
     // One level above the view zoom covers sources whose tiles are finer than the view's.
     let top = (zoom.value().floor() as i32 + 1).clamp(0, MAX_QUERY_ZOOM);
@@ -227,6 +287,19 @@ fn vector_features(
         }
     }
     Ok(search.found)
+}
+
+/// The screen box with the point under the camera added, as GL JS `getCameraQueryGeometry`:
+/// the base of any extrusion that stands up into the query lies between the two.
+fn camera_query_bounds(view_state: &ViewState, [x0, y0, x1, y1]: [f64; 4]) -> [f64; 4] {
+    let offset = view_state.camera().get_pitch().0.tan() * view_state.camera_to_center_distance();
+    let camera = [view_state.width() / 2.0, view_state.height() / 2.0 + offset];
+    [
+        x0.min(camera[0]),
+        y0.min(camera[1]),
+        x1.max(camera[0]),
+        y1.max(camera[1]),
+    ]
 }
 
 /// The rectangle of world pixels a screen box covers on the ground plane, or `None` when none of
@@ -269,6 +342,10 @@ struct QueryTile {
     /// Tile units that make one screen pixel.
     units_per_pixel: f64,
     zoom_level: u8,
+    /// World pixels of the tile's top-left corner, in the copy of the world it is seen in.
+    origin: [f64; 2],
+    /// World pixels in one tile unit.
+    world_per_unit: f64,
 }
 
 /// The tiles at grid level `z` that a region of world pixels at view zoom `zoom` covers.
@@ -302,6 +379,8 @@ fn tiles_in(region: [f64; 4], zoom: Zoom, z: u8) -> Vec<QueryTile> {
                 ],
                 units_per_pixel,
                 zoom_level: z,
+                origin: [tx as f64 * TILE_SIZE / scale, ty as f64 * TILE_SIZE / scale],
+                world_per_unit: TILE_SIZE / scale / EXTENT,
             });
         }
     }
@@ -324,6 +403,46 @@ fn candidates_in(index: &TileIndex, local: [f64; 4]) -> Vec<&IndexedGeometry<f64
             })
             .collect(),
     }
+}
+
+/// Where a fill extrusion stands: its rings in world pixels and its base and top in metres.
+fn extruded_depth(
+    polygon: &geo_types::Polygon<f64>,
+    tile: &QueryTile,
+    candidate: &Candidate,
+    (properties, screen, view_state): (
+        &crate::style::expression::FeatureProperties,
+        extrusion::ScreenQuery,
+        &ViewState,
+    ),
+) -> Option<f64> {
+    let Some(LayerPaint::FillExtrusion(paint)) = &candidate.layer.paint else {
+        return None;
+    };
+    let zoom = view_state.zoom().value();
+    let metres = |property: &Option<crate::style::property::StyleProperty<f32>>| {
+        property
+            .as_ref()
+            .and_then(|value| value.evaluate_for(properties, zoom))
+            .map_or(0.0, f64::from)
+    };
+    let world = |ring: &geo_types::LineString<f64>| -> Vec<[f64; 2]> {
+        ring.coords()
+            .map(|point| {
+                [
+                    tile.origin[0] + point.x * tile.world_per_unit,
+                    tile.origin[1] + point.y * tile.world_per_unit,
+                ]
+            })
+            .collect()
+    };
+    let rings: Vec<Vec<[f64; 2]>> = std::iter::once(polygon.exterior())
+        .chain(polygon.interiors())
+        .map(world)
+        .collect();
+    let base = metres(&paint.fill_extrusion_base);
+    let top = metres(&paint.fill_extrusion_height).max(base);
+    extrusion::intersection_depth(view_state, &rings, (base, top), screen)
 }
 
 fn touches(geometry: &IndexedGeometry<f64>, tile: &QueryTile, candidate: &Candidate) -> bool {
@@ -375,6 +494,8 @@ fn collect(
         query_filter,
         seen,
         found,
+        screen,
+        view_state,
     } = search;
     for candidate in candidates.iter() {
         let layer = candidate.layer;
@@ -387,10 +508,24 @@ fn collect(
             || query_filter
                 .as_ref()
                 .is_some_and(|filter| !filter.evaluate(&context))
-            || !touches(geometry, tile, candidate)
         {
             continue;
         }
+        let depth = match (&geometry.exact, candidate.layer.type_.as_str()) {
+            (ExactGeometry::Polygon(polygon), "fill-extrusion") => {
+                match extruded_depth(
+                    polygon,
+                    tile,
+                    candidate,
+                    (&geometry.properties, *screen, view_state),
+                ) {
+                    Some(depth) => Some(depth),
+                    None => continue,
+                }
+            }
+            _ if touches(geometry, tile, candidate) => None,
+            _ => continue,
+        };
         let identity = match geometry.id {
             Some(id) => Identity::Id(id),
             None => Identity::Part(std::sync::Arc::as_ptr(&geometry.properties) as usize),
@@ -400,6 +535,7 @@ fn collect(
         }
         found.push((
             layer.index,
+            depth,
             QueriedFeature {
                 layer: layer.id.clone(),
                 source: layer.source.clone(),

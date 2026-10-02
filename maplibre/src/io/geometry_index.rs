@@ -2,6 +2,7 @@
 
 #![deny(missing_docs)]
 
+mod clip;
 mod processor;
 use std::{
     collections::{BTreeMap, HashSet},
