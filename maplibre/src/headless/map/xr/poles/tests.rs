@@ -87,9 +87,10 @@ async fn both_polar_caps_export_surface_color_and_depth() {
 }
 
 fn read_blocking(map: &HeadlessMap, texture: &wgpu::Texture) -> Vec<u8> {
+    let (width, height) = (texture.width(), texture.height());
     let buffer = map.device().create_buffer(&wgpu::BufferDescriptor {
         label: Some("polar readback"),
-        size: 64 * 64 * 4,
+        size: u64::from(width * height * 4),
         usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
@@ -100,7 +101,7 @@ fn read_blocking(map: &HeadlessMap, texture: &wgpu::Texture) -> Vec<u8> {
             buffer: &buffer,
             layout: wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(256),
+                bytes_per_row: Some(width * 4),
                 rows_per_image: None,
             },
         },
@@ -120,72 +121,6 @@ fn read_blocking(map: &HeadlessMap, texture: &wgpu::Texture) -> Vec<u8> {
         .to_vec();
     buffer.unmap();
     bytes
-}
-
-#[tokio::test]
-async fn terrain_caps_show_the_draped_map_instead_of_background() {
-    use crate::{
-        render::eventually::{Eventually, Eventually::Initialized},
-        terrain::resources::TerrainResources,
-    };
-    for latitude in [-89.999999, 89.999999] {
-        let style: Style = serde_json::from_str(r##"{"version":8,"sources":{"dem":{"type":"raster-dem","tiles":["https://dem.example/{z}/{x}/{y}.png"],"encoding":"terrarium"}},"layers":[{"id":"background","type":"background","paint":{"background-color":"#006600"}}],"terrain":{"source":"dem"},"projection":{"type":"globe"}}"##).expect("style");
-        let (kernel, renderer) = create_headless_renderer(64, 64, None)
-            .await
-            .expect("renderer");
-        let mut map = HeadlessMap::new(
-            style,
-            renderer,
-            kernel,
-            vec![
-                Box::new(RenderPlugin),
-                Box::new(crate::background::BackgroundPlugin),
-                Box::new(crate::terrain::TerrainPlugin::<
-                    crate::terrain::DefaultDemTransferables,
-                >::default()),
-            ],
-        )
-        .expect("map");
-        let frame = |timestamp| XrFrame {
-            opaque_environment: false,
-            timestamp: Duration::from_millis(timestamp),
-            placement: ScenePlacement {
-                anchor: ExternalAnchor {
-                    position: LatLon::new(latitude, 11.0),
-                    altitude_meters: 0.0,
-                },
-                world_from_scene: Matrix4::identity(),
-            },
-            eyes: vec![XrEye {
-                world_from_eye: Matrix4::from_translation(Vector3::new(0.0, 0.0, 40_000_000.0)),
-                frustum: EyeFrustum::symmetric(Rad(1.0), 1.0, 0.1, 1e10),
-                target: EyeTarget::default(),
-            }],
-            request_overscan: 1.0,
-            prefetch: None,
-        };
-        map.run_xr_frame(frame(0)).expect("allocate terrain");
-        map.run_xr_frame(frame(16)).expect("settle terrain");
-        let Some(Initialized(terrain)) =
-            map.world().resources.get::<Eventually<TerrainResources>>()
-        else {
-            panic!("terrain");
-        };
-        assert!(!terrain.draws().is_empty());
-        for draw in terrain.draws() {
-            let texture = terrain.drape_texture(draw.coords).expect("drape");
-            clear_drape_white(&map, &texture.texture);
-        }
-        map.run_xr_frame(frame(32)).expect("polar terrain");
-        let colors = read_blocking(&map, map.head_texture().expect("color"));
-        for y in 31..33 {
-            for x in 31..33 {
-                let offset = (y * 64 + x) * 4;
-                assert!(colors[offset] > 220 && colors[offset+1] > 220 && colors[offset+2] > 220,
-                "polar terrain must retain its white drape at {latitude}: {:?}; white pixels {}, redrawn {:?}, draws {:?}", &colors[offset..offset+4], colors.chunks_exact(4).filter(|p| p[0] > 220 && p[1] > 220 && p[2] > 220).count(), map.world().resources.get::<crate::terrain::DrapePhase>().map(|p| p.targets.len()), match map.world().resources.get::<Eventually<TerrainResources>>() { Some(Initialized(t)) => t.draws().iter().map(|d|d.coords).collect::<Vec<_>>(), _ => Vec::new() });
-            }
-        }
-    }
 }
 
 fn clear_drape_white(map: &HeadlessMap, texture: &wgpu::Texture) {
@@ -216,3 +151,6 @@ fn clear_drape_white(map: &HeadlessMap, texture: &wgpu::Texture) {
     }
     map.queue().submit([encoder.finish()]);
 }
+
+#[path = "caps.rs"]
+mod caps;
