@@ -121,6 +121,31 @@ fn slabs(area: Rect<f64>) -> [Slab; 2] {
 }
 
 impl IndexedGeometry<f64> {
+    /// The geometry in the units of a child tile `scale` times finer whose top left corner lies
+    /// at `offset` of the child's units, as GL JS moves an overzoomed tile's features into it.
+    pub fn rescaled(&self, scale: f64, offset: [f64; 2]) -> Self {
+        use geo::MapCoords;
+        let map = |coord: geo_types::Coord<f64>| geo_types::Coord {
+            x: coord.x * scale - offset[0],
+            y: coord.y * scale - offset[1],
+        };
+        let exact = match &self.exact {
+            ExactGeometry::Polygon(polygon) => ExactGeometry::Polygon(polygon.map_coords(map)),
+            ExactGeometry::LineString(line) => ExactGeometry::LineString(line.map_coords(map)),
+            ExactGeometry::Point(point) => ExactGeometry::Point(point.map_coords(map)),
+        };
+        let (lower, upper) = (self.bounds.lower(), self.bounds.upper());
+        let (lower, upper) = (map(lower.0), map(upper.0));
+        Self {
+            bounds: rstar::AABB::from_corners(lower.into(), upper.into()),
+            exact,
+            properties: self.properties.clone(),
+            source_layer: self.source_layer.clone(),
+            id: self.id,
+            feature_index: self.feature_index,
+        }
+    }
+
     /// The parts of the geometry within `area`, each indexed on its own.
     pub fn clipped_to(self, area: Rect<f64>) -> Vec<Self> {
         let meta = FeatureMeta {

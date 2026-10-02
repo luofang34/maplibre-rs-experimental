@@ -31,9 +31,10 @@ use crate::{
 mod circle;
 mod extrusion;
 mod ground;
+mod overzoomed;
 mod tiles;
 
-use crate::coords::{WorldTileCoords, Zoom};
+use crate::coords::{WorldTileCoords, Zoom, ZoomLevel, EXTENT};
 use tiles::{
     camera_query_bounds, candidates_in, ground_corners, ground_region, tiles_in, QueryTile,
 };
@@ -329,26 +330,53 @@ fn vector_features(
 fn search_tiles(world: &World, (region, zoom, margin): ([f64; 4], Zoom, f64), search: &mut Search) {
     // One level above the view zoom covers sources whose tiles are finer than the view's.
     let top = (zoom.value().floor() as i32 + 1).clamp(0, MAX_QUERY_ZOOM);
-    for z in (0..=top).rev() {
-        let mut any = false;
-        for mut tile in tiles_in(region, margin, zoom, z as u8) {
-            let Some(indexes) = world.tiles.geometry_index.tile_indexes(&tile.coords) else {
-                continue;
-            };
-            any = true;
-            tile.footprint = tile.footprint_of(&search.ground);
-            let tile = &tile;
-            let widen = margin * tile.units_per_pixel;
-            let [x0, y0, x1, y1] = tile.local;
-            let window = [x0 - widen, y0 - widen, x1 + widen, y1 + widen];
-            for (source, index) in indexes {
-                for geometry in candidates_in(index, window) {
+    let Some(z) = (0..=top).rev().find(|&z| {
+        tiles_in(region, margin, zoom, z as u8).iter().any(|tile| {
+            world
+                .tiles
+                .geometry_index
+                .tile_indexes(&tile.coords)
+                .is_some()
+        })
+    }) else {
+        return;
+    };
+    // A source that stops before the view's zoom is queried as GL JS queries it: through the
+    // tiles of the view's zoom cut out of the coarser one.
+    let view_z = (zoom.value().floor() as i32).clamp(0, MAX_QUERY_ZOOM);
+    let tile_z = z.max(view_z) as u8;
+    for mut tile in tiles_in(region, margin, zoom, tile_z) {
+        let depth = tile_z - z as u8;
+        let source_coords = WorldTileCoords {
+            x: tile.coords.x >> depth,
+            y: tile.coords.y >> depth,
+            z: ZoomLevel::new(z as u8),
+        };
+        let Some(indexes) = world.tiles.geometry_index.tile_indexes(&source_coords) else {
+            continue;
+        };
+        tile.footprint = tile.footprint_of(&search.ground);
+        let tile = &tile;
+        let scale = f64::from(1_u32 << depth);
+        let offset = [
+            f64::from(tile.coords.x - (source_coords.x << depth)) * EXTENT,
+            f64::from(tile.coords.y - (source_coords.y << depth)) * EXTENT,
+        ];
+        let widen = margin * tile.units_per_pixel;
+        let [x0, y0, x1, y1] = tile.local;
+        // The window in the units of the tile the index belongs to.
+        let child = [x0 - widen, y0 - widen, x1 + widen, y1 + widen];
+        let window = [0, 1, 2, 3].map(|i| (child[i] + offset[i % 2]) / scale);
+        for (source, index) in indexes {
+            for geometry in candidates_in(index, window) {
+                if depth == 0 {
                     collect(geometry, source, tile, search);
+                    continue;
+                }
+                for part in overzoomed::slice(geometry, scale, offset) {
+                    collect(&part, source, tile, search);
                 }
             }
-        }
-        if any {
-            break;
         }
     }
 }
