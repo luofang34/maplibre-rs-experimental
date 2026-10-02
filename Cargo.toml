@@ -30,6 +30,7 @@ rand = { version = "0.8.5" }
 reqwest-middleware = "0.3.2"
 winit = { version = "0.30", default-features = false, features = ["rwh_06"] }
 async-trait = "0.1.73"
+futures = { version = "0.3", default-features = false, features = ["std"] }
 bytemuck = "1.14.0"
 bytemuck_derive = "1.5.0"
 cgmath = "0.18.0"

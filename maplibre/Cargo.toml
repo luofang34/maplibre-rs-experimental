@@ -43,6 +43,7 @@ reqwest.workspace = true
 [dependencies]
 unicode-bidi = "0.3"
 async-trait.workspace = true
+futures.workspace = true
 instant.workspace = true
 
 # Tracing

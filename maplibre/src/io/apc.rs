@@ -3,6 +3,7 @@
 use std::{
     any::{type_name, Any, TypeId},
     cell::RefCell,
+    collections::HashMap,
     fmt::Debug,
     future::Future,
     marker::PhantomData,
@@ -10,10 +11,12 @@ use std::{
     sync::{
         mpsc,
         mpsc::{Receiver, Sender},
+        Arc, Mutex, PoisonError,
     },
     vec::IntoIter,
 };
 
+use futures::future::{AbortHandle, Abortable, Aborted};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -251,6 +254,10 @@ pub trait AsyncProcedureCall<K: OffscreenKernel>: 'static {
         input: Input,
         procedure: AsyncProcedure<K, Self::Context>,
     ) -> Result<(), CallError>;
+
+    /// Stops the tracked call with `attempt` if it is still running. A transport that cannot
+    /// reach its worker lets the call finish; the map ignores a result it gave up on.
+    fn cancel(&self, _attempt: u64) {}
 }
 
 /// Reply sender whose clones share the scheduler-backed APC's receiving channel.
@@ -280,6 +287,8 @@ pub struct SchedulerAsyncProcedureCall<K: OffscreenKernel, S: Scheduler> {
     scheduler: S,
     phantom_k: PhantomData<K>,
     offscreen_kernel_config: OffscreenKernelConfig,
+    /// Tracked calls still running, by attempt, so a cancelled one can be stopped.
+    running: Arc<Mutex<HashMap<u64, AbortHandle>>>,
 }
 
 impl<K: OffscreenKernel, S: Scheduler> SchedulerAsyncProcedureCall<K, S> {
@@ -291,7 +300,12 @@ impl<K: OffscreenKernel, S: Scheduler> SchedulerAsyncProcedureCall<K, S> {
             phantom_k: PhantomData,
             scheduler,
             offscreen_kernel_config,
+            running: Arc::default(),
         }
+    }
+
+    fn running(&self) -> std::sync::MutexGuard<'_, HashMap<u64, AbortHandle>> {
+        self.running.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
 
@@ -324,6 +338,15 @@ impl<K: OffscreenKernel, S: Scheduler> AsyncProcedureCall<K> for SchedulerAsyncP
     ) -> Result<(), CallError> {
         let sender = self.channel.0.clone();
         let offscreen_kernel_config = self.offscreen_kernel_config.clone();
+        let attempt = match &input {
+            Input::TrackedTileRequest { attempt, .. } => Some(*attempt),
+            Input::TileRequest { .. } => None,
+        };
+        let (abort, registration) = AbortHandle::new_pair();
+        if let Some(attempt) = attempt {
+            self.running().insert(attempt, abort);
+        }
+        let running = self.running.clone();
 
         self.scheduler
             .schedule(move || async move {
@@ -332,11 +355,26 @@ impl<K: OffscreenKernel, S: Scheduler> AsyncProcedureCall<K> for SchedulerAsyncP
                 let kernel = K::create(offscreen_kernel_config);
                 // A result that cannot be delivered, because the map already shut down, must
                 // not take the worker thread down with it.
-                if let Err(error) = procedure(input, SchedulerContext { sender }, kernel).await {
-                    tracing::warn!(?error, "procedure failed");
+                let call = procedure(input, SchedulerContext { sender }, kernel);
+                match Abortable::new(call, registration).await {
+                    Ok(Err(error)) => tracing::warn!(?error, "procedure failed"),
+                    Ok(Ok(())) => {}
+                    Err(Aborted) => tracing::debug!(?attempt, "cancelled worker call stopped"),
+                }
+                if let Some(attempt) = attempt {
+                    running
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .remove(&attempt);
                 }
             })
             .map_err(CallError::Schedule)
+    }
+
+    fn cancel(&self, attempt: u64) {
+        if let Some(abort) = self.running().remove(&attempt) {
+            abort.abort();
+        }
     }
 }
 

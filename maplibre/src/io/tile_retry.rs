@@ -1,6 +1,6 @@
 //! Completion and bounded retry scheduling for vector, raster and elevation requests.
 
-use std::{cell::Cell, rc::Rc, time::Duration};
+use std::{cell::Cell, collections::HashSet, rc::Rc, time::Duration};
 
 use instant::Instant;
 use serde::{Deserialize, Serialize};
@@ -266,4 +266,69 @@ pub(crate) fn accepts(
         .query::<&TileRequestRetries>(coords)
         .and_then(|retries| retries.0[kind.index()].attempt)
         == attempt
+}
+
+/// The tiles each request family considered this frame; a family that did not run leaves
+/// its requests alone.
+#[derive(Default)]
+struct WantedRequests([Option<HashSet<WorldTileCoords>>; 3]);
+
+/// Attempts given up on, for the next request system to stop in its worker.
+#[derive(Default)]
+struct CancelledAttempts(Vec<u64>);
+
+/// Records the tiles a request family still wants, whether or not it requested them now.
+pub(crate) fn want(world: &mut World, kind: RequestKind, coords: &HashSet<WorldTileCoords>) {
+    world.resources.get_or_init_mut::<WantedRequests>().0[kind.index()] = Some(coords.clone());
+}
+
+/// Gives up the requests in flight that no request family wanted this frame, so they stop
+/// holding a slot, and returns the tiles they were for.
+pub(crate) fn cancel_unwanted(world: &mut World) -> Vec<WorldTileCoords> {
+    let Some(wanted) = world
+        .resources
+        .get_mut::<WantedRequests>()
+        .map(std::mem::take)
+    else {
+        return Vec::new();
+    };
+    let coords: Vec<WorldTileCoords> = world.tiles.tiles.values().map(|tile| tile.coords).collect();
+    let mut cancelled = Vec::new();
+    let mut tiles = Vec::new();
+    for coords in coords {
+        let Some(retries) = world.tiles.query_mut::<&mut TileRequestRetries>(coords) else {
+            continue;
+        };
+        for (state, wanted) in retries.0.iter_mut().zip(&wanted.0) {
+            let unwanted = wanted.as_ref().is_some_and(|set| !set.contains(&coords));
+            if state.pending && unwanted {
+                cancelled.extend(state.attempt);
+                *state = RetryState::default();
+                if !tiles.contains(&coords) {
+                    tiles.push(coords);
+                }
+            }
+        }
+    }
+    world
+        .resources
+        .get_or_init_mut::<CancelledAttempts>()
+        .0
+        .extend(cancelled);
+    tiles
+}
+
+/// Stops the worker calls of the attempts cancelled since the last call.
+pub(crate) fn stop_cancelled<K: crate::environment::OffscreenKernel>(
+    world: &mut World,
+    apc: &impl crate::io::apc::AsyncProcedureCall<K>,
+) {
+    let cancelled = world
+        .resources
+        .get_mut::<CancelledAttempts>()
+        .map(|cancelled| std::mem::take(&mut cancelled.0))
+        .unwrap_or_default();
+    for attempt in cancelled {
+        apc.cancel(attempt);
+    }
 }

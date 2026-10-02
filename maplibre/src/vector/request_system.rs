@@ -54,6 +54,7 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
             ..
         }: &mut MapContext,
     ) -> SystemResult {
+        tile_retry::stop_cancelled(world, self.kernel.apc());
         let view_region = view_region_for_projection(
             style,
             view_state,
@@ -125,12 +126,13 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                 }
                 // The rest wait for a later frame, once tiles in flight have landed.
                 if budget == 0 {
-                    break;
+                    continue;
                 }
                 budget -= 1;
 
                 self.request(coords, style, world, overscaled_zoom)?;
             }
+            tile_retry::want(world, RequestKind::Vector, &requested);
         }
         Ok(())
     }

@@ -56,6 +56,7 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
             ..
         }: &mut MapContext,
     ) -> SystemResult {
+        tile_retry::stop_cancelled(world, self.kernel.apc());
         // Missing ancestors and deferred tiles must progress while the camera is stationary.
         // Each raster source covers the view at its own tile size and rounding, as GL JS's
         // per-source tile managers do; the tiles of every source are requested together.
@@ -90,12 +91,13 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
             }
             // The rest wait for a later frame, once tiles in flight have landed.
             if budget == 0 {
-                break;
+                continue;
             }
             budget -= 1;
 
             self.request(coords, style, world)?;
         }
+        tile_retry::want(world, RequestKind::Raster, &requested);
 
         Ok(())
     }

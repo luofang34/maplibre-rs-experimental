@@ -114,6 +114,7 @@ impl<E: Environment, T: DemTransferables> System for RequestSystem<E, T> {
             ..
         }: &mut MapContext,
     ) -> SystemResult {
+        tile_retry::stop_cancelled(world, self.kernel.apc());
         let Some(dem) = dem_source(style) else {
             return Ok(());
         };
@@ -163,11 +164,12 @@ impl<E: Environment, T: DemTransferables> System for RequestSystem<E, T> {
             }
             // The rest wait for a later frame, once tiles in flight have landed.
             if budget == 0 {
-                break;
+                continue;
             }
             budget -= 1;
             self.request(coords, style, world)?;
         }
+        tile_retry::want(world, RequestKind::Dem, &requested);
 
         Ok(())
     }

@@ -82,6 +82,7 @@ pub fn retention_system(
     }
     let drawn = drawn_tiles(world).len();
     let in_use = tiles_in_use(world, style, view_state);
+    drop_cancelled(world, &in_use);
     let evicted = evict_stale_tiles(world, &in_use, drawn);
     if !evicted.is_empty() {
         tracing::debug!(count = evicted.len(), "evicted tiles that left the view");
@@ -369,6 +370,29 @@ pub(crate) fn evict_beyond(
         retention.last_used.remove(coords);
     }
     evicted
+}
+
+/// Drops the tiles whose requests no one wants any more, freeing their slots for tiles in view.
+fn drop_cancelled(world: &mut World, in_use: &HashSet<WorldTileCoords>) {
+    let cancelled: Vec<WorldTileCoords> = crate::io::tile_retry::cancel_unwanted(world)
+        .into_iter()
+        .filter(|coords| !in_use.contains(coords))
+        .collect();
+    if cancelled.is_empty() {
+        return;
+    }
+    tracing::debug!(
+        count = cancelled.len(),
+        "cancelled requests for tiles out of view"
+    );
+    let retention = world.resources.get_or_init_mut::<TileRetention>();
+    for coords in &cancelled {
+        retention.last_used.remove(coords);
+    }
+    for coords in &cancelled {
+        world.tiles.remove(*coords);
+    }
+    drop_gpu_data(world, &cancelled);
 }
 
 fn drop_gpu_data(world: &mut World, evicted: &[WorldTileCoords]) {

@@ -180,3 +180,126 @@ async fn an_elevation_tile_fetched_through_the_loader_is_reported_ready() {
         recorder.urls.lock().expect("urls")
     );
 }
+
+/// Holds every fetch until the test ends, counting fetches begun and fetches dropped unfinished.
+#[derive(Clone, Default)]
+struct Stalled {
+    urls: Arc<Mutex<Vec<String>>>,
+    dropped: Arc<Mutex<Vec<String>>>,
+    entered: Arc<tokio::sync::Notify>,
+    never: Arc<tokio::sync::Notify>,
+}
+
+struct Unfinished(String, Arc<Mutex<Vec<String>>>);
+impl Drop for Unfinished {
+    fn drop(&mut self) {
+        self.1.lock().expect("dropped").push(self.0.clone());
+    }
+}
+
+#[cfg_attr(not(feature = "thread-safe-futures"), async_trait::async_trait(?Send))]
+#[cfg_attr(feature = "thread-safe-futures", async_trait::async_trait)]
+impl HttpClient for Stalled {
+    async fn fetch(&self, url: &str) -> Result<Vec<u8>, SourceFetchError> {
+        self.urls.lock().expect("urls").push(url.to_owned());
+        let _unfinished = Unfinished(url.to_owned(), self.dropped.clone());
+        self.entered.notify_one();
+        self.never.notified().await;
+        Err(SourceFetchError::not_found(url))
+    }
+}
+
+impl Stalled {
+    /// Lets workers run until `count` fetches have begun or nothing more happens.
+    async fn until_fetched(&self, count: usize) {
+        while self.urls.lock().expect("urls").len() < count {
+            let entered = self.entered.notified();
+            if tokio::time::timeout(std::time::Duration::from_secs(2), entered)
+                .await
+                .is_err()
+            {
+                return;
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn requests_for_tiles_out_of_view_stop_and_free_their_slots() {
+    use std::collections::HashSet;
+
+    use crate::io::tile_backpressure::{tiles_in_flight, MAX_TILES_IN_FLIGHT};
+    let stalled = Stalled::default();
+    let (kernel, renderer) = create_headless_renderer_with_loader(
+        256,
+        256,
+        Default::default(),
+        SharedLoader::new(stalled.clone()),
+    )
+    .await
+    .expect("renderer");
+    let style: Style = serde_json::from_value(serde_json::json!({
+        "version": 8, "zoom": 5, "center": [-100, 40],
+        "sources": {"v": {"type": "vector",
+            "tiles": ["https://worker.invalid/{z}/{x}/{y}.pbf"]}},
+        "layers": [{"id": "roads", "type": "line", "source": "v", "source-layer": "roads"}]
+    }))
+    .expect("style");
+    let mut map = HeadlessMap::new(
+        style,
+        renderer,
+        kernel,
+        vec![
+            Box::new(RenderPlugin),
+            Box::new(VectorPlugin::<DefaultVectorTransferables>::default()),
+        ],
+    )
+    .expect("map");
+    map.run_frame().expect("first view");
+    stalled.until_fetched(MAX_TILES_IN_FLIGHT).await;
+    let first: HashSet<WorldTileCoords> = map
+        .world()
+        .tiles
+        .tiles
+        .values()
+        .map(|tile| tile.coords)
+        .collect();
+    assert_eq!(
+        tiles_in_flight(&map.world().tiles),
+        MAX_TILES_IN_FLIGHT,
+        "the first view's requests take every slot"
+    );
+
+    // Half the world away, nothing of the first view is wanted.
+    map.view_state_mut()
+        .camera_mut()
+        .move_relative(cgmath::Vector2::new(512.0 * 32.0 / 2.0, 0.0));
+    map.run_frame().expect("moved view");
+    map.run_frame().expect("following frame");
+    stalled.until_fetched(2 * MAX_TILES_IN_FLIGHT).await;
+
+    let resident: HashSet<WorldTileCoords> = map
+        .world()
+        .tiles
+        .tiles
+        .values()
+        .map(|tile| tile.coords)
+        .collect();
+    let kept: Vec<_> = first
+        .iter()
+        .filter(|coords| resident.contains(coords) && u8::from(coords.z) > 0)
+        .collect();
+    assert!(
+        kept.is_empty(),
+        "requests out of view are dropped: {kept:?}"
+    );
+    let dropped = stalled.dropped.lock().expect("dropped").len();
+    assert!(
+        dropped >= MAX_TILES_IN_FLIGHT - 1,
+        "their fetches stopped: {dropped} dropped"
+    );
+    assert!(
+        stalled.urls.lock().expect("urls").len() > MAX_TILES_IN_FLIGHT,
+        "the freed slots fetch the new view"
+    );
+}
