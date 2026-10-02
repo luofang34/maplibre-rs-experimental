@@ -59,7 +59,6 @@ pub(super) fn local_style_path(url: &str) -> Result<PathBuf, String> {
 pub(super) fn collect_tests(test_root: &std::path::Path) -> Vec<PathBuf> {
     let mut tests = walkdir::WalkDir::new(test_root)
         .min_depth(1)
-        .max_depth(5)
         .into_iter()
         .filter_map(Result::ok)
         .filter(|entry| entry.file_name() == "style.json")
@@ -69,3 +68,6 @@ pub(super) fn collect_tests(test_root: &std::path::Path) -> Vec<PathBuf> {
     tests.sort();
     tests
 }
+
+#[cfg(test)]
+mod tests;
