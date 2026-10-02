@@ -115,7 +115,9 @@ fn main(
         color,
         normal / max(extent, 1.0),
         vec2<f32>(outset, inset),
-        1.0,
+        // A deck keeps a one-pixel feather; zero lets a line on the map scale its feather with
+        // how much it has narrowed, as GL JS's gamma scale does.
+        select(0.0, 1.0, spatial),
         projected_center.horizon_distance,
         position.x,
         clip_antimeridian,

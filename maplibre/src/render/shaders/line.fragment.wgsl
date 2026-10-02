@@ -28,10 +28,10 @@ fn main(in: FragmentInput) -> Output {
     // The distance from the line changes by this many nominal pixels per screen pixel, which
     // is how much the map-space line has narrowed or widened; the edge feather scales with it.
     let nominal_distance = length(in.v_normal) * in.v_width2.x;
-    let gamma_scale = clamp(
-        length(vec2<f32>(dpdx(nominal_distance), dpdy(nominal_distance))),
-        0.25,
-        64.0,
+    let gamma_scale = select(
+        clamp(length(vec2<f32>(dpdx(nominal_distance), dpdy(nominal_distance))), 0.25, 64.0),
+        in.v_gamma_scale,
+        in.v_gamma_scale > 0.0,
     );
     // Dashes stretch with the fractional zoom; a pattern keeps `dash_period.w` for its height.
     let dash_scale = select(1.0, dash_period.w, dash_period.y < 1.5);
