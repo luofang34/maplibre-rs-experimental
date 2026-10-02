@@ -40,9 +40,10 @@ impl Shader for TerrainShader {
             entry_point: "main",
             targets: vec![Some(wgpu::ColorTargetState {
                 format: self.format,
-                // The drape holds premultiplied colours and the surface is written as it is, so a
-                // translucent layer keeps its colour instead of being multiplied by its alpha twice.
-                blend: None,
+                // The drape holds premultiplied colours, so blending them over what is drawn
+                // multiplies by alpha once; a translucent drape shows the terrain behind it,
+                // its skirts included, as GL JS draws terrain in its translucent pass.
+                blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
                 write_mask: wgpu::ColorWrites::ALL,
             })],
         }
