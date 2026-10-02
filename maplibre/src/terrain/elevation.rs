@@ -62,10 +62,17 @@ pub fn center_elevation_system(
     let zoom = view_state.zoom();
     let center = view_state.camera().position();
     let world_size = TILE_SIZE * 2_f64.powf(zoom.value());
-    let sample = index.sample(&world.tiles, center.x / world_size, center.y / world_size);
-    tracing::trace!(?sample, "center elevation");
-    if sample.dem_loaded && !view_state.center_elevation_frozen() {
-        view_state.set_center_elevation(sample.elevation);
+    // GL JS lifts the centre by the terrain tile at the integer zoom, not by the tile drawn
+    // under it, which a coarser level may stand in for at a distance.
+    let tile_zoom = zoom.value().floor().clamp(0.0, f64::from(u8::MAX)) as u8;
+    let elevation = index.elevation_at_zoom(
+        &world.tiles,
+        center.x / world_size,
+        center.y / world_size,
+        tile_zoom,
+    );
+    if let Some(elevation) = elevation.filter(|_| !view_state.center_elevation_frozen()) {
+        view_state.set_center_elevation(elevation);
     }
     let center_tile = WorldCoords::at_ground(center.x, center.y)
         .into_world_tile(zoom.zoom_level(TILE_SIZE), zoom);
