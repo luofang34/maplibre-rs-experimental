@@ -110,6 +110,56 @@ pub(super) fn geometry_hit(
     }
 }
 
+/// The specification's default `heatmap-radius`.
+const DEFAULT_HEATMAP_RADIUS: f64 = 30.0;
+
+fn heatmap_radius(
+    paint: &crate::style::heatmap::HeatmapPaint,
+    properties: &FeatureProperties,
+    zoom: f64,
+) -> f64 {
+    paint
+        .heatmap_radius
+        .as_ref()
+        .and_then(|radius| radius.evaluate_for(properties, zoom))
+        .map_or(DEFAULT_HEATMAP_RADIUS, f64::from)
+}
+
+/// Whether a heatmap point, or vertex, comes within its `heatmap-radius` of the query on the
+/// ground, as GL JS `HeatmapStyleLayer.queryIntersectsFeature` tests it with the circle test of
+/// a circle lying on the map.
+pub(super) fn heatmap_hit(
+    geometry: &crate::io::geometry_index::ExactGeometry<f64>,
+    tile: &QueryTile,
+    (paint, properties): (&crate::style::heatmap::HeatmapPaint, &FeatureProperties),
+    zoom: f64,
+) -> bool {
+    use crate::io::geometry_index::ExactGeometry;
+    let Some(footprint) = &tile.footprint else {
+        return false;
+    };
+    let radius = heatmap_radius(paint, properties, zoom) * tile.units_per_pixel;
+    let reaches = |point: Point<f64>| footprint.reaches(point, radius);
+    match geometry {
+        ExactGeometry::Point(point) => reaches(*point),
+        ExactGeometry::LineString(line) => line.points().any(reaches),
+        ExactGeometry::Polygon(polygon) => std::iter::once(polygon.exterior())
+            .chain(polygon.interiors())
+            .any(|ring| ring.points().any(reaches)),
+    }
+}
+
+/// How far from the query, in screen pixels, a heatmap point can be and still meet it.
+pub(super) fn heatmap_margin_pixels(paint: &crate::style::heatmap::HeatmapPaint, zoom: f64) -> f64 {
+    const BY_FEATURE: f64 = 64.0;
+    let varies = paint
+        .heatmap_radius
+        .as_ref()
+        .is_some_and(|radius| !radius.is_feature_constant());
+    heatmap_radius(paint, &FeatureProperties::default(), zoom)
+        + if varies { BY_FEATURE } else { 0.0 }
+}
+
 /// How far from the query, in screen pixels, a circle of the layer can be centred and still
 /// meet it: its size, doubled for the circles a pitched view brings nearer, and more where the
 /// size varies by feature, which is not known before the feature is.

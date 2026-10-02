@@ -33,7 +33,7 @@ mod extrusion;
 mod ground;
 mod tiles;
 
-use crate::coords::Zoom;
+use crate::coords::{WorldTileCoords, Zoom};
 use tiles::{
     camera_query_bounds, candidates_in, ground_corners, ground_region, tiles_in, QueryTile,
 };
@@ -184,6 +184,7 @@ impl<'a> Candidate<'a> {
         let reach_pixels = match &layer.paint {
             Some(LayerPaint::Line(paint)) => line_margin_pixels(paint, zoom),
             Some(LayerPaint::Circle(paint)) => circle::margin_pixels(paint, zoom),
+            Some(LayerPaint::Heatmap(paint)) => circle::heatmap_margin_pixels(paint, zoom),
             _ => 0.0,
         };
         Some(Self {
@@ -218,7 +219,9 @@ fn line_margin_pixels(paint: &LinePaint, zoom: f64) -> f64 {
 struct Search<'a> {
     candidates: Vec<Candidate<'a>>,
     query_filter: Option<Filter>,
-    seen: HashSet<(String, Identity)>,
+    /// Features already reported, per layer and per tile: GL JS reports a feature once for each
+    /// tile it is found in, merging only the copies of one tile in different worlds.
+    seen: HashSet<(String, WorldTileCoords, Identity)>,
     /// Each feature with its layer's index and, for a fill extrusion, its depth on screen.
     /// Each with GL JS's order within its layer: tiles from the lowest zoom, then top to bottom,
     /// west copy of the world first, and west to east; then the features of a tile from the last
@@ -263,7 +266,7 @@ fn vector_features(
         .filter(|layer| {
             matches!(
                 layer.type_.as_str(),
-                "fill" | "line" | "fill-extrusion" | "circle"
+                "fill" | "line" | "fill-extrusion" | "circle" | "heatmap"
             ) && layer.is_visible_at(zoom.value())
                 && options
                     .layers
@@ -429,6 +432,19 @@ fn collect(
                     None => continue,
                 }
             }
+            (exact, "heatmap") => match &candidate.layer.paint {
+                Some(LayerPaint::Heatmap(paint))
+                    if circle::heatmap_hit(
+                        exact,
+                        tile,
+                        (paint, &geometry.properties),
+                        view_state.zoom().value(),
+                    ) =>
+                {
+                    None
+                }
+                _ => continue,
+            },
             (exact, "circle") => match &candidate.layer.paint {
                 Some(LayerPaint::Circle(paint))
                     if circle::geometry_hit(
@@ -449,7 +465,7 @@ fn collect(
             Some(id) => Identity::Id(id),
             None => Identity::Part(std::sync::Arc::as_ptr(&geometry.properties) as usize),
         };
-        if !seen.insert((layer.id.clone(), identity)) {
+        if !seen.insert((layer.id.clone(), tile.coords, identity)) {
             continue;
         }
         let order = (

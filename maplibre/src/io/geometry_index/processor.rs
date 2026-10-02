@@ -230,6 +230,10 @@ fn column_value(value: &ColumnValue) -> Value {
         ColumnValue::ULong(number) => Value::Number(*number as f64),
         ColumnValue::Float(number) => Value::Number(f64::from(*number)),
         ColumnValue::Double(number) => Value::Number(*number),
+        // A GeoJSON property that is an object or an array stays one, as GL JS reports it.
+        ColumnValue::Json(json) => serde_json::from_str(json)
+            .map(|parsed: serde_json::Value| Value::from_json(&parsed))
+            .unwrap_or_else(|_| Value::String((*json).to_owned())),
         other => Value::String(other.to_string()),
     }
 }

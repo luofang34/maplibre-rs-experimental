@@ -48,3 +48,28 @@ fn size_is_radius_and_stroke_with_the_default_radius() {
 
     assert_eq!(size_pixels(&paint, &FeatureProperties::default(), 0.0), 7.0);
 }
+
+#[test]
+fn a_heatmap_point_is_met_within_its_radius_on_the_ground() {
+    use crate::{
+        coords::WorldTileCoords, io::geometry_index::ExactGeometry, style::heatmap::HeatmapPaint,
+    };
+    let tile = QueryTile {
+        coords: WorldTileCoords::default(),
+        wrap: 0,
+        local: [100.0, 100.0, 100.0, 100.0],
+        units_per_pixel: 2.0,
+        zoom_level: 0,
+        origin: [0.0, 0.0],
+        world_per_unit: 0.5,
+        footprint: crate::query::ground::Footprint::of(&[[100.0, 100.0]]),
+    };
+    let paint: HeatmapPaint =
+        serde_json::from_value(serde_json::json!({"heatmap-radius": 10})).unwrap();
+    let at = |x: f64| ExactGeometry::Point(Point::new(x, 100.0));
+    let props = FeatureProperties::default();
+
+    // Ten pixels are twenty tile units here.
+    assert!(heatmap_hit(&at(119.0), &tile, (&paint, &props), 0.0));
+    assert!(!heatmap_hit(&at(121.0), &tile, (&paint, &props), 0.0));
+}

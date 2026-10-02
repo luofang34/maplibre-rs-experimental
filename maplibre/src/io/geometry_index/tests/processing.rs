@@ -204,3 +204,18 @@ fn nonfinite_scaled_coordinates_return_an_error_and_allow_the_next_feature() {
         assert!(matches!(&parts[2].exact, ExactGeometry::LineString(line) if line.0.len() == 2));
     }
 }
+
+#[test]
+fn an_object_property_stays_an_object() {
+    let processor = process_json(
+        r#"{"type":"Feature","properties":{"nested":{"inner":{"num":1}}},"geometry":{"type":"Point","coordinates":[0,0]}}"#,
+    );
+    let geometries = processor.get_geometries();
+    assert_eq!(
+        geometries[0]
+            .properties
+            .get("nested")
+            .map(|value| value.to_json()),
+        Some(serde_json::json!({"inner": {"num": 1}}))
+    );
+}
