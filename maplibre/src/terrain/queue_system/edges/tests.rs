@@ -185,4 +185,14 @@ fn a_changed_coverage_rebuilds_only_the_edges_it_reaches_and_matches_a_full_rebu
     // An unchanged coverage rebuilds nothing.
     cover(&mut cache, &coverage, &tiles);
     assert_eq!(cache.rebuilt, 3, "the count stays from the last change");
+
+    // Removing a coarse tile beside finer ones, with nothing in its place, frees the fine
+    // tiles' shared edge from the coarse heights.
+    let coarse = row[1];
+    coverage.retain(|(coords, _)| *coords != coarse);
+    cover(&mut cache, &coverage, &tiles);
+    assert!(same(
+        &cache.samples,
+        &rebuilt_from_scratch(&coverage, &tiles)
+    ));
 }
