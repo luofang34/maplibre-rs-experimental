@@ -234,3 +234,106 @@ async fn gpu_time_grows_with_the_work_a_frame_draws() {
         "96 layers take far longer than one: {heavy:?} against {light:?}"
     );
 }
+
+#[tokio::test]
+async fn a_frame_trace_collects_each_frame_with_the_host_s_spans() {
+    use crate::render::frame_trace::Clock;
+    let mut map = raster_map().await;
+    map.enable_frame_trace(4);
+    for index in 0..6_u64 {
+        map.render_source_frames(Default::default(), vec![picture()], 1)
+            .expect("frame");
+        let frame = map.last_frame_stats().frame;
+        let trace = map.frame_trace_mut().expect("trace");
+        trace.record_span(
+            frame,
+            "overlay",
+            Clock::Gpu,
+            std::time::Duration::from_micros(index),
+        );
+    }
+    let export = map.frame_trace_mut().expect("trace").export();
+    assert_eq!(export.frames.len(), 4, "the window keeps the last frames");
+    assert_eq!(
+        export.summary.dropped, 2,
+        "the frames pushed out are counted"
+    );
+    let first = &export.frames[0];
+    assert!(
+        first
+            .spans
+            .iter()
+            .any(|span| span.name == "Render" && span.clock == Clock::Cpu),
+        "the map's stages land in its frame: {first:?}"
+    );
+    assert!(first
+        .spans
+        .iter()
+        .any(|span| span.name == "overlay" && span.clock == Clock::Gpu));
+    assert!(export.summary.spans.contains_key("cpu/Prepare"));
+}
+
+/// Frame CPU time with and without a frame trace, interleaved so drift hits both alike. Run
+/// with `cargo test --release -p maplibre -p render-tests -- --ignored frame_trace_overhead`.
+#[tokio::test]
+#[ignore = "a timing comparison for release builds"]
+async fn frame_trace_overhead() {
+    use crate::render::{
+        frame_signals::FrameStats,
+        frame_trace::{Clock, Percentiles},
+    };
+    let mut map = raster_map().await;
+    map.render_source_frames(Default::default(), vec![picture()], 8)
+        .expect("warm-up");
+    let (mut plain, mut traced) = (Vec::new(), Vec::new());
+    for round in 0..400 {
+        let tracing = round % 2 == 1;
+        if tracing {
+            map.enable_frame_trace(64);
+        } else {
+            map.disable_frame_trace();
+        }
+        let start = std::time::Instant::now();
+        map.run_frame().expect("frame");
+        let frame = map.last_frame_stats().frame;
+        if let Some(trace) = map.frame_trace_mut() {
+            trace.record_span(frame, "queue-wait", Clock::Cpu, start.elapsed());
+        }
+        let spent = start.elapsed();
+        if tracing {
+            traced.push(spent);
+        } else {
+            plain.push(spent);
+        }
+    }
+    let (plain, traced) = (
+        Percentiles::of(plain).expect("plain"),
+        Percentiles::of(traced).expect("traced"),
+    );
+    let overhead = traced.p95.as_secs_f64() / plain.p95.as_secs_f64() - 1.0;
+    println!(
+        "plain {plain:?} traced {traced:?} p95 overhead {:.2}%",
+        overhead * 100.0
+    );
+    // Frames this small swing by microseconds, so the recorder's own cost per frame, timed
+    // over many frames, is what bounds it against the frame time.
+    let stats = map.last_frame_stats();
+    let mut trace = crate::render::frame_trace::FrameTrace::new(64);
+    let rounds = 10_000_u32;
+    let start = std::time::Instant::now();
+    for frame in 0..u64::from(rounds) {
+        let stats = FrameStats {
+            frame,
+            ..stats.clone()
+        };
+        trace.record_map_frame(&stats);
+        trace.record_span(frame, "queue-wait", Clock::Cpu, plain.p50);
+    }
+    let per_frame = start.elapsed() / rounds;
+    let share = per_frame.as_secs_f64() / plain.p95.as_secs_f64();
+    println!(
+        "recorder {per_frame:?} per frame, {:.3}% of the plain p95",
+        share * 100.0
+    );
+    assert!(share < 0.02, "recording costs under 2% of a frame's p95");
+}

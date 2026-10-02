@@ -49,6 +49,20 @@ void maplibre_visionos_set_opaque_environment(MaplibreVisionOSMap *map, bool opa
  * Only writes when buffer is non-null and capacity is sufficient. */
 size_t maplibre_visionos_query_symbols(const MaplibreVisionOSMap *map, double x, double y,
                                      char *buffer, size_t capacity);
+/** Frame timeline: the map's own frame statistics plus the host's spans, under one frame number.
+ * Spans with gpu=true are GPU execution time from timestamps; false is CPU time, including
+ * command encoding. Export returns required bytes including NUL and only writes (and empties
+ * the timeline) when the buffer is large enough. */
+void maplibre_visionos_trace_enable(MaplibreVisionOSMap *map, uint32_t capacity);
+uint64_t maplibre_visionos_last_frame(MaplibreVisionOSMap *map);
+void maplibre_visionos_trace_span(MaplibreVisionOSMap *map, uint64_t frame, const char *name,
+                                  bool gpu, uint64_t nanoseconds);
+void maplibre_visionos_trace_presentation(MaplibreVisionOSMap *map, uint64_t frame,
+                                          uint64_t deadline_nanoseconds,
+                                          uint64_t completed_nanoseconds);
+void maplibre_visionos_trace_device(MaplibreVisionOSMap *map, uint64_t frame,
+                                    uint64_t resident_bytes, int32_t thermal_state);
+size_t maplibre_visionos_trace_export(MaplibreVisionOSMap *map, char *buffer, size_t capacity);
 uint32_t maplibre_visionos_width(const MaplibreVisionOSMap *map);
 uint32_t maplibre_visionos_height(const MaplibreVisionOSMap *map);
 

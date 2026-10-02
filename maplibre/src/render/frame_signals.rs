@@ -136,6 +136,14 @@ pub(crate) fn finish_frame(context: &mut MapContext) {
     signals.last = finished;
     signals.dirty = std::mem::take(&mut signals.animating);
     signals.camera = Some(drawn);
+    if let Some((signals, slot)) = context.world.resources.query_mut::<(
+        &mut FrameSignals,
+        &mut crate::render::frame_trace::FrameTraceSlot,
+    )>() {
+        if let Some(trace) = slot.0.as_mut() {
+            trace.record_map_frame(&signals.last);
+        }
+    }
 }
 
 impl MapContext {

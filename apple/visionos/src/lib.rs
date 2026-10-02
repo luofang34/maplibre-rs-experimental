@@ -14,3 +14,5 @@ pub use api::*;
 pub use selection::{maplibre_visionos_query_symbols, maplibre_visionos_set_opaque_environment};
 
 mod symbols;
+mod trace;
+pub use trace::*;
