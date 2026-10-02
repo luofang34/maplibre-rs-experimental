@@ -49,7 +49,7 @@ pub struct DeviceSample {
 /// Everything recorded for one frame.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct FrameRecord {
-    /// The map's frame number.
+    /// The host's frame number, [`FrameStats::host_frame`].
     pub frame: u64,
     /// Measured spans in the order they were recorded.
     pub spans: Vec<Span>,
@@ -172,9 +172,11 @@ impl FrameTrace {
         self.frames.iter_mut().find(|record| record.frame == frame)
     }
 
-    /// Adds what the map measured of its frame `stats.frame`.
+    /// Adds what the map measured of a frame to its host frame `stats.host_frame`; the eyes of
+    /// an XR frame add theirs to one record. The GPU time arrives later, under the frame it
+    /// measured.
     pub fn record_map_frame(&mut self, stats: &FrameStats) {
-        let Some(record) = self.frame_mut(stats.frame) else {
+        let Some(record) = self.frame_mut(stats.host_frame) else {
             return;
         };
         for (stage, spent) in &stats.stages {
@@ -182,13 +184,6 @@ impl FrameTrace {
                 name: stage.clone(),
                 clock: Clock::Cpu,
                 duration: *spent,
-            });
-        }
-        if let Some(gpu) = stats.gpu {
-            record.spans.push(Span {
-                name: "map".into(),
-                clock: Clock::Gpu,
-                duration: gpu,
             });
         }
         record.upload_bytes = record.upload_bytes.saturating_add(stats.upload_bytes);

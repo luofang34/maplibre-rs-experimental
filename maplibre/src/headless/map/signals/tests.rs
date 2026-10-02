@@ -243,7 +243,7 @@ async fn a_frame_trace_collects_each_frame_with_the_host_s_spans() {
     for index in 0..6_u64 {
         map.render_source_frames(Default::default(), vec![picture()], 1)
             .expect("frame");
-        let frame = map.last_frame_stats().frame;
+        let frame = map.last_frame_stats().host_frame;
         let trace = map.frame_trace_mut().expect("trace");
         trace.record_span(
             frame,
@@ -254,9 +254,11 @@ async fn a_frame_trace_collects_each_frame_with_the_host_s_spans() {
     }
     let export = map.frame_trace_mut().expect("trace").export();
     assert_eq!(export.frames.len(), 4, "the window keeps the last frames");
-    assert_eq!(
-        export.summary.dropped, 2,
-        "the frames pushed out are counted"
+    // GPU times arriving for frames already pushed out are dropped records too.
+    assert!(
+        export.summary.dropped >= 2,
+        "the frames pushed out are counted: {}",
+        export.summary.dropped
     );
     let first = &export.frames[0];
     assert!(
@@ -295,7 +297,7 @@ async fn frame_trace_overhead() {
         }
         let start = std::time::Instant::now();
         map.run_frame().expect("frame");
-        let frame = map.last_frame_stats().frame;
+        let frame = map.last_frame_stats().host_frame;
         if let Some(trace) = map.frame_trace_mut() {
             trace.record_span(frame, "queue-wait", Clock::Cpu, start.elapsed());
         }

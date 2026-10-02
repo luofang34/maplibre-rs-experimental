@@ -23,7 +23,8 @@ fn percentiles_take_the_nearest_rank() {
 fn a_frame_gathers_the_map_s_and_the_host_s_measurements_under_one_number() {
     let mut trace = FrameTrace::new(8);
     trace.record_map_frame(&FrameStats {
-        frame: 3,
+        frame: 5,
+        host_frame: 3,
         stages: vec![("Queue".into(), ms(2))],
         gpu: Some(ms(4)),
         upload_bytes: 1024,
@@ -46,7 +47,10 @@ fn a_frame_gathers_the_map_s_and_the_host_s_measurements_under_one_number() {
     assert_eq!(summary.frames, 1);
     assert_eq!(summary.spans["cpu/copy"].p50, ms(1));
     assert_eq!(summary.spans["gpu/copy"].p50, ms(3));
-    assert_eq!(summary.spans["gpu/map"].p50, ms(4));
+    assert!(
+        !summary.spans.contains_key("gpu/map"),
+        "the map's GPU time comes with its readback, under the frame it measured"
+    );
     assert_eq!(summary.spans["cpu/Queue"].p50, ms(2));
     assert_eq!((summary.upload_bytes, summary.drape_redraws), (1024, 2));
     assert_eq!(summary.missed_deadlines, 0);

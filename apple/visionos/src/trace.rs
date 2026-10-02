@@ -27,14 +27,15 @@ pub unsafe extern "C" fn maplibre_visionos_trace_enable(
     }
 }
 
-/// The number of the frame the map drew last, under which the host records its own spans.
+/// The host frame the map drew last, one per stereo frame, under which the host records its
+/// own spans.
 ///
 /// # Safety
 /// The map must be live and exclusively accessed by its render thread.
 #[no_mangle]
 pub unsafe extern "C" fn maplibre_visionos_last_frame(map: *mut MaplibreVisionOSMap) -> u64 {
     // SAFETY: the exported function's contract requires a live, exclusive handle or null.
-    unsafe { handle(map) }.map_or(0, |handle| handle.map.last_frame_stats().frame)
+    unsafe { handle(map) }.map_or(0, |handle| handle.map.last_frame_stats().host_frame)
 }
 
 /// Adds a span the host measured for `frame`: `gpu` for time the GPU executed, from its

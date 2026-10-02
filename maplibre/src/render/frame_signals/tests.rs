@@ -50,3 +50,22 @@ fn a_failed_request_is_reported_as_not_loaded() {
         [ResourceReady::Tile { loaded: false, .. }]
     ));
 }
+
+#[test]
+fn gpu_time_is_filed_under_the_frame_it_measured() {
+    use crate::render::frame_trace::{Clock, FrameTrace, FrameTraceSlot};
+    let mut world = World::default();
+    world
+        .resources
+        .insert(FrameTraceSlot(Some(FrameTrace::new(8))));
+    record_gpu_time(&mut world, 4, Duration::from_millis(3));
+    let export = world
+        .resources
+        .get_mut::<FrameTraceSlot>()
+        .and_then(|slot| slot.0.as_mut())
+        .expect("trace")
+        .export();
+    assert_eq!(export.frames.len(), 1);
+    assert_eq!(export.frames[0].frame, 4);
+    assert_eq!(export.frames[0].spans[0].clock, Clock::Gpu);
+}

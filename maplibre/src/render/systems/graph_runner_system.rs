@@ -46,13 +46,21 @@ impl System for GraphRunnerSystem {
                     crate::render::gpu_timer::GpuTimer::new(device),
                 ));
         }
-        let measured = world
+        let timer = world
             .resources
             .get::<crate::render::gpu_timer::GpuTimerSlot>()
-            .and_then(|slot| slot.0.as_ref())
-            .and_then(|timer| timer.take(device, queue.get_timestamp_period()));
-        if let Some(spent) = measured {
-            crate::render::frame_signals::record_gpu_time(world, spent);
+            .and_then(|slot| slot.0.as_ref());
+        let measured = timer.and_then(|timer| {
+            Some((
+                timer.frame(),
+                timer.take(device, queue.get_timestamp_period())?,
+            ))
+        });
+        if let Some(timer) = timer {
+            timer.tag(crate::render::frame_signals::host_frame_in_progress(world));
+        }
+        if let Some((frame, spent)) = measured {
+            crate::render::frame_signals::record_gpu_time(world, frame, spent);
         }
         if world
             .resources

@@ -36,6 +36,9 @@ pub enum ResourceReady {
 pub struct FrameStats {
     /// The frame's number, counting from one.
     pub frame: u64,
+    /// The host's frame this belongs to: one per frame, or one per XR frame whatever its eyes,
+    /// which a frame timeline records the frame under.
+    pub host_frame: u64,
     /// CPU time of each schedule stage, in the order they ran.
     pub stages: Vec<(String, Duration)>,
     /// GPU time of the latest main pass whose timestamps came back, usually the previous
@@ -65,6 +68,7 @@ pub struct FrameSignals {
     events: Vec<ResourceReady>,
     dirty: bool,
     animating: bool,
+    host_frame: u64,
     camera: Option<[f64; 16]>,
 }
 
@@ -116,8 +120,39 @@ pub(crate) fn count_drape_redraws(world: &mut World, redraws: usize) {
 
 /// Records the GPU time of the latest measured main pass, which reaches the CPU a frame or more
 /// after its own frame.
-pub(crate) fn record_gpu_time(world: &mut World, spent: Duration) {
+pub(crate) fn record_gpu_time(world: &mut World, host_frame: u64, spent: Duration) {
     signals(world).current.gpu = Some(spent);
+    // The timeline files the time under the frame whose pass it measured.
+    if let Some(trace) = world
+        .resources
+        .get_mut::<crate::render::frame_trace::FrameTraceSlot>()
+        .and_then(|slot| slot.0.as_mut())
+    {
+        trace.record_span(
+            host_frame,
+            "map",
+            crate::render::frame_trace::Clock::Gpu,
+            spent,
+        );
+    }
+}
+
+/// The host frame the frame being drawn belongs to: a new one, unless it is a later eye of
+/// an XR frame.
+pub(crate) fn host_frame_in_progress(world: &World) -> u64 {
+    let last = world
+        .resources
+        .get::<FrameSignals>()
+        .map_or(0, |signals| signals.host_frame);
+    let later_eye = world
+        .resources
+        .get::<crate::render::eye_covering::EyeInFrame>()
+        .is_some_and(|eye| eye.index > 0);
+    if later_eye {
+        last
+    } else {
+        last.wrapping_add(1)
+    }
 }
 
 fn camera(context: &MapContext) -> [f64; 16] {
@@ -143,10 +178,13 @@ pub(crate) fn finish_frame(context: &mut MapContext) {
         .get::<crate::render::tracked_pass::RenderStats>()
         .map_or(0, |stats| stats.peek().draws);
     let drawn = camera(context);
+    let host_frame = host_frame_in_progress(&context.world);
     let signals = signals(&mut context.world);
+    signals.host_frame = host_frame;
     signals.frame = signals.frame.wrapping_add(1);
     let mut finished = std::mem::take(&mut signals.current);
     finished.frame = signals.frame;
+    finished.host_frame = host_frame;
     finished.upload_bytes = upload_bytes;
     finished.draws = draws;
     signals.last = finished;

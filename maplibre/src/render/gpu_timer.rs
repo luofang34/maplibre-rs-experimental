@@ -30,6 +30,8 @@ pub struct GpuTimer {
     resolved: wgpu::Buffer,
     readback: wgpu::Buffer,
     state: Arc<AtomicU8>,
+    /// The host frame whose passes the measurement in flight timed.
+    frame: std::sync::atomic::AtomicU64,
 }
 
 impl GpuTimer {
@@ -55,7 +57,20 @@ impl GpuTimer {
             resolved: buffer(wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC),
             readback: buffer(wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST),
             state: Arc::new(AtomicU8::new(IDLE)),
+            frame: std::sync::atomic::AtomicU64::new(0),
         })
+    }
+
+    /// Names the host frame that the next measurement will time, unless one is in flight.
+    pub fn tag(&self, frame: u64) {
+        if self.state.load(Ordering::Acquire) == IDLE {
+            self.frame.store(frame, Ordering::Release);
+        }
+    }
+
+    /// The host frame of the measurement [`Self::take`] returns.
+    pub fn frame(&self) -> u64 {
+        self.frame.load(Ordering::Acquire)
     }
 
     /// The timestamp writes for this frame's main pass, unless an earlier measurement is still

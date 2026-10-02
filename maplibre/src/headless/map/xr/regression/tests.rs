@@ -254,3 +254,49 @@ async fn invalid_second_eye_preserves_the_complete_frame_and_recovers() {
     );
     map.run_xr_frame(frame(48)).expect("tracking recovered");
 }
+
+#[tokio::test]
+async fn both_eyes_of_an_xr_frame_land_in_one_timeline_record() {
+    use crate::render::frame_trace::Clock;
+    let style: Style =
+        serde_json::from_str(r#"{"version":8,"sources":{},"layers":[]}"#).expect("style");
+    let (kernel, renderer) = create_headless_renderer(64, 64, None)
+        .await
+        .expect("renderer");
+    let mut map =
+        HeadlessMap::new(style, renderer, kernel, vec![Box::new(RenderPlugin)]).expect("map");
+    map.enable_frame_trace(16);
+    for timestamp in [16, 32] {
+        map.run_xr_frame(frame(timestamp)).expect("stereo frame");
+        // The host records under the number the map reports after the frame.
+        let host_frame = map.last_frame_stats().host_frame;
+        map.frame_trace_mut().expect("trace").record_span(
+            host_frame,
+            "copy-encode",
+            Clock::Cpu,
+            Duration::from_micros(10),
+        );
+    }
+    let export = map.frame_trace_mut().expect("trace").export();
+    assert_eq!(
+        export
+            .frames
+            .iter()
+            .map(|record| record.frame)
+            .collect::<Vec<_>>(),
+        [1, 2],
+        "one record per stereo frame"
+    );
+    for record in &export.frames {
+        let renders = record
+            .spans
+            .iter()
+            .filter(|span| span.name == "Render")
+            .count();
+        assert_eq!(
+            renders, 2,
+            "both eyes' stages are in the frame's record: {record:?}"
+        );
+        assert!(record.spans.iter().any(|span| span.name == "copy-encode"));
+    }
+}
