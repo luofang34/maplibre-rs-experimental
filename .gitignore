@@ -17,6 +17,7 @@ dist/
 maplibre-gl-js/
 render-tests/**/diff.png
 render-tests/**/actual.png
+render-tests/**/actual.json
 /render-tests/src/templates/results.html
 /render-tests/src/templates/results-recycle-map.html
 /render-tests/src/templates/results-failed-caseIds.txt
