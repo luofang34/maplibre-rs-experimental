@@ -1,7 +1,5 @@
 //! Backgrounds that repeat an image: the pipeline and the view they are drawn against.
 
-use wgpu::util::DeviceExt;
-
 use crate::render::view_state::ViewState;
 
 /// The uniform of the view the pattern fragment shader reads; the layout mirrors the WGSL
@@ -59,14 +57,18 @@ pub(crate) fn layouts(device: &wgpu::Device) -> [wgpu::BindGroupLayout; 2] {
 impl BackgroundPatternGpu {
     pub(crate) fn new(
         device: &wgpu::Device,
+        queue: &crate::render::upload_queue::UploadQueue,
         pipeline: wgpu::RenderPipeline,
         view_layout: &wgpu::BindGroupLayout,
     ) -> Self {
-        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("background pattern view"),
-            contents: bytemuck::bytes_of(&<ViewUniforms as bytemuck::Zeroable>::zeroed()),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let buffer = queue.create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("background pattern view"),
+                contents: bytemuck::bytes_of(&<ViewUniforms as bytemuck::Zeroable>::zeroed()),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            },
+        );
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("background pattern view"),
             layout: view_layout,
@@ -87,14 +89,18 @@ impl BackgroundPatternGpu {
     pub(crate) fn with_globe(
         &mut self,
         device: &wgpu::Device,
+        queue: &crate::render::upload_queue::UploadQueue,
         pipeline: wgpu::RenderPipeline,
         world_layout: &wgpu::BindGroupLayout,
     ) {
-        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("globe background pattern world"),
-            contents: bytemuck::bytes_of(&[1.0_f32; 4]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let buffer = queue.create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("globe background pattern world"),
+                contents: bytemuck::bytes_of(&[1.0_f32; 4]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            },
+        );
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("globe background pattern world"),
             layout: world_layout,

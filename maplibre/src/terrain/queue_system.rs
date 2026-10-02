@@ -60,6 +60,24 @@ const MAX_DRAPES_PER_FRAME: usize = 24;
 /// of tiles within a few frames, and a display's frame budget holds only a few drapes.
 const EYE_DRAPES_PER_FRAME: usize = 8;
 
+/// How many drapes a frame draws, the rest waiting for later frames.
+#[derive(Clone, Copy, Debug)]
+pub struct DrapeBudget {
+    /// Drapes per frame of the map's own camera.
+    pub per_frame: usize,
+    /// Drapes per frame while a host's eye drives the map.
+    pub per_eye_frame: usize,
+}
+
+impl Default for DrapeBudget {
+    fn default() -> Self {
+        Self {
+            per_frame: MAX_DRAPES_PER_FRAME,
+            per_eye_frame: EYE_DRAPES_PER_FRAME,
+        }
+    }
+}
+
 pub fn queue_system(
     MapContext {
         style,
@@ -223,7 +241,7 @@ fn acquire_drapes(
     prints: &[u64],
     ready: &[bool],
     memory: MemoryBudget,
-    external: bool,
+    budget: usize,
     terrain: &mut TerrainResources,
     device: &wgpu::Device,
 ) -> (Vec<bool>, Vec<Option<WorldTileCoords>>, bool) {
@@ -250,11 +268,6 @@ fn acquire_drapes(
             }
         })
         .collect();
-    let budget = if external {
-        EYE_DRAPES_PER_FRAME
-    } else {
-        MAX_DRAPES_PER_FRAME
-    };
     let redraw = budget_redraws(&states, budget);
     let mut deferred = false;
     for ((spec, state), drawn) in specs.iter().zip(&states).zip(&redraw) {
@@ -412,21 +425,23 @@ fn prepare_drapes(
         _ => 0,
     };
     surface_covering::fit_metadata(specs, &mut ready, capacity);
+    let budget = world
+        .resources
+        .get::<DrapeBudget>()
+        .copied()
+        .unwrap_or_default();
+    let budget = if view_state.has_external_view() {
+        budget.per_eye_frame
+    } else {
+        budget.per_frame
+    };
     let (redraw, drape_sources, deferred) = {
         let Some(Initialized(terrain)) = world.resources.get_mut::<Eventually<TerrainResources>>()
         else {
             return Err(SystemError::Dependencies);
         };
         terrain.ensure_scratch(device);
-        acquire_drapes(
-            specs,
-            &prints,
-            &ready,
-            memory,
-            view_state.has_external_view(),
-            terrain,
-            device,
-        )
+        acquire_drapes(specs, &prints, &ready, memory, budget, terrain, device)
     };
     crate::render::frame_signals::count_drape_redraws(
         world,

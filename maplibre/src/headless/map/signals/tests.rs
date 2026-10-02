@@ -79,6 +79,17 @@ async fn a_settled_map_needs_a_frame_only_after_its_camera_or_style_changes() {
     .expect("style change");
     assert!(map.needs_redraw(), "a style change needs a frame");
     assert!(settle(&mut map));
+
+    map.set_terrain_skirts(Default::default());
+    assert!(map.needs_redraw(), "a rendering setting needs a frame");
+    assert!(settle(&mut map));
+
+    map.resize(crate::window::PhysicalSize::new(64, 64).expect("size"));
+    assert!(
+        map.needs_redraw(),
+        "a new surface needs a frame even at the same size"
+    );
+    assert!(settle(&mut map));
 }
 
 #[tokio::test]
@@ -128,4 +139,38 @@ async fn frame_statistics_count_the_work_of_each_frame() {
             "a device with timestamps reports the main pass's GPU time"
         );
     }
+}
+
+fn spend_twenty_milliseconds(
+    _: &mut crate::context::MapContext,
+) -> crate::tcs::system::SystemResult {
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_stage_is_charged_the_time_its_systems_take() {
+    use crate::render::RenderStageLabel;
+    let mut map = raster_map().await;
+    map.render_sources(Default::default(), vec![picture()])
+        .expect("loading frame");
+    assert!(settle(&mut map));
+    map.schedule
+        .add_system_to_stage(RenderStageLabel::Queue, spend_twenty_milliseconds);
+    map.run_frame().expect("slow frame");
+    let stats = map.last_frame_stats();
+    let spent = |stage: &str| {
+        stats
+            .stages
+            .iter()
+            .find(|(name, _)| name == stage)
+            .map(|(_, spent)| *spent)
+            .expect("stage timed")
+    };
+    let twenty = std::time::Duration::from_millis(20);
+    assert!(spent("Queue") >= twenty, "{stats:?}");
+    for stage in ["Extract", "Prepare", "Render"] {
+        assert!(spent(stage) < twenty, "{stage} is not charged: {stats:?}");
+    }
+    assert!(stats.cpu() >= twenty);
 }

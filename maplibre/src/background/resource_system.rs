@@ -73,6 +73,7 @@ pub fn resource_system(
             .resources
             .insert(super::pattern::BackgroundPatternGpu::new(
                 device,
+                queue,
                 pipeline,
                 &layouts[1],
             ));
@@ -122,7 +123,7 @@ pub fn resource_system(
                 .resources
                 .get_mut::<super::pattern::BackgroundPatternGpu>()
             {
-                gpu.with_globe(device, pipeline, &world_layout);
+                gpu.with_globe(device, queue, pipeline, &world_layout);
             }
         }
     }

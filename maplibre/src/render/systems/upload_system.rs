@@ -47,7 +47,7 @@ pub fn upload_system(
     if projection_data.transition > 0.0 {
         let coords = crate::coords::WorldTileCoords::default();
         tile_mesh_cache
-            .prepare(device, coords, TileMeshUsage::Raster, false)
+            .prepare(device, queue, coords, TileMeshUsage::Raster, false)
             .map_err(|error| {
                 tracing::error!(%error, "unable to prepare globe background mesh");
                 SystemError::Setup
@@ -66,7 +66,7 @@ pub fn upload_system(
             (TileMeshUsage::Raster, false),
         ] {
             tile_mesh_cache
-                .prepare(device, coords, usage, generate_borders)
+                .prepare(device, queue, coords, usage, generate_borders)
                 .map_err(|error| {
                     tracing::error!(%error, %coords, "unable to prepare globe tile mesh");
                     SystemError::Setup

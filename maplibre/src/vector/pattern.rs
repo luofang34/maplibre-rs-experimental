@@ -5,8 +5,6 @@ use std::{
     hash::{Hash, Hasher},
 };
 
-use wgpu::util::DeviceExt;
-
 use crate::style::{
     layer::{LayerPaint, StyleProperty, TextField},
     Style, StyleImage,
@@ -282,8 +280,8 @@ impl PatternResources {
         {
             return None;
         }
-        let texture = device.create_texture_with_data(
-            queue,
+        let texture = queue.create_texture_with_data(
+            device,
             &wgpu::TextureDescriptor {
                 label: Some("fill pattern"),
                 size: wgpu::Extent3d {
@@ -303,11 +301,14 @@ impl PatternResources {
         );
         let ratio = image.pixel_ratio.max(0.01);
         let display = [image.width as f32 / ratio, image.height as f32 / ratio];
-        let size = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("fill pattern size"),
-            contents: bytemuck::cast_slice(&size(display, scale)),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let size = queue.create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("fill pattern size"),
+                contents: bytemuck::cast_slice(&size(display, scale)),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            },
+        );
         let view = texture.create_view(&Default::default());
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("fill pattern"),

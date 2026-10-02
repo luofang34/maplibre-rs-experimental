@@ -33,6 +33,7 @@ impl System for ResourceSystem {
                 Renderer {
                     settings,
                     device,
+                    queue,
                     adapter,
                     resources: state,
                     ..
@@ -68,7 +69,7 @@ impl System for ResourceSystem {
         surface.reconfigure(device);
 
         let projection_resources =
-            projection_resources.initialize(|| ProjectionGpuResources::new(device));
+            projection_resources.initialize(|| ProjectionGpuResources::new(device, queue));
 
         if matches!(state.render_target, Eventually::Uninitialized) {
             let view = surface

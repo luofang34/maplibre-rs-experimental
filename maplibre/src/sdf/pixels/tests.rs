@@ -277,6 +277,16 @@ async fn fixture_map(
     layers: crate::headless::map::ProcessedLayers,
     samples: u32,
 ) -> HeadlessMap {
+    fixture_map_after(style, layers, samples, 16).await
+}
+
+/// The fixture after `frames` frames, fewer than a label takes to fade in.
+async fn fixture_map_after(
+    style: Style,
+    layers: crate::headless::map::ProcessedLayers,
+    samples: u32,
+    frames: u8,
+) -> HeadlessMap {
     let (kernel, renderer) = create_headless_renderer_with_settings(
         SIZE,
         SIZE,
@@ -316,7 +326,7 @@ async fn fixture_map(
             },
             dem,
         )],
-        16,
+        frames,
     )
     .expect("frame");
     map

@@ -84,6 +84,7 @@ fn read_level(
 #[tokio::test]
 async fn each_level_averages_the_one_above() {
     let (device, queue) = device().await;
+    let queue = crate::render::upload_queue::UploadQueue::new(queue);
     let format = wgpu::TextureFormat::Rgba8Unorm;
     let texture = Texture::new_mipmapped(
         Some("mipmap test"),
@@ -124,7 +125,7 @@ async fn each_level_averages_the_one_above() {
     generator.generate(&device, &mut encoder, &texture.texture);
     queue.submit([encoder.finish()]);
 
-    let half = read_level(&device, &queue, &texture.texture, 1, 2);
+    let half = read_level(&device, queue.inner(), &texture.texture, 1, 2);
     assert_eq!(&half[0..4], &[255, 0, 0, 255], "top left stays red");
     assert_eq!(&half[4..8], &[0, 0, 255, 255], "top right stays blue");
     assert_eq!(&half[8..12], &[0, 255, 0, 255], "bottom left stays green");
@@ -133,7 +134,7 @@ async fn each_level_averages_the_one_above() {
         &[255, 255, 255, 255],
         "bottom right stays white"
     );
-    let one = read_level(&device, &queue, &texture.texture, 2, 1);
+    let one = read_level(&device, queue.inner(), &texture.texture, 2, 1);
     assert!(
         one[..3].iter().all(|channel| (126..=129).contains(channel)),
         "the last level mixes all four quadrants: {one:?}"

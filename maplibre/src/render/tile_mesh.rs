@@ -3,7 +3,6 @@
 use std::{collections::HashMap, num::TryFromIntError};
 
 use thiserror::Error;
-use wgpu::util::DeviceExt;
 
 use crate::{
     coords::{WorldTileCoords, ZOOM_BOUNDS},
@@ -89,6 +88,7 @@ impl GlobeTileMeshCache {
     pub fn prepare(
         &mut self,
         device: &wgpu::Device,
+        queue: &crate::render::upload_queue::UploadQueue,
         coords: WorldTileCoords,
         usage: TileMeshUsage,
         generate_borders: bool,
@@ -109,12 +109,15 @@ impl GlobeTileMeshCache {
         .map_err(|source| GpuTileMeshError::Generate { source })?;
         let index_count = u32::try_from(mesh.indices.len())
             .map_err(|source| GpuTileMeshError::IndexCount { source })?;
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("globe tile mesh vertices"),
-            contents: bytemuck::cast_slice(&mesh.vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-        let (index_buffer, index_format) = upload_indices(device, mesh.indices);
+        let vertex_buffer = queue.create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("globe tile mesh vertices"),
+                contents: bytemuck::cast_slice(&mesh.vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            },
+        );
+        let (index_buffer, index_format) = upload_indices(device, queue, mesh.indices);
         self.meshes.insert(
             key,
             GpuTileMesh {
@@ -140,17 +143,21 @@ impl GlobeTileMeshCache {
 
 fn upload_indices(
     device: &wgpu::Device,
+    queue: &crate::render::upload_queue::UploadQueue,
     indices: TileMeshIndices,
 ) -> (wgpu::Buffer, wgpu::IndexFormat) {
     let (bytes, format) = match &indices {
         TileMeshIndices::U16(values) => (bytemuck::cast_slice(values), wgpu::IndexFormat::Uint16),
         TileMeshIndices::U32(values) => (bytemuck::cast_slice(values), wgpu::IndexFormat::Uint32),
     };
-    let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("globe tile mesh indices"),
-        contents: bytes,
-        usage: wgpu::BufferUsages::INDEX,
-    });
+    let buffer = queue.create_buffer_init(
+        device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("globe tile mesh indices"),
+            contents: bytes,
+            usage: wgpu::BufferUsages::INDEX,
+        },
+    );
     (buffer, format)
 }
 

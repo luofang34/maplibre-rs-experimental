@@ -341,3 +341,59 @@ async fn frame_statistics_count_drapes_drawn_and_none_on_a_still_frame() {
         "a still frame draws none"
     );
 }
+
+#[tokio::test]
+async fn drapes_past_a_frames_budget_keep_frames_coming_until_drawn() {
+    let mut map = prepared_map(false).await;
+    map.set_max_pitch(cgmath::Deg(85.0));
+    map.map_context
+        .view_state
+        .camera_mut()
+        .set_pitch(cgmath::Deg(70.0));
+    map.map_context
+        .world
+        .resources
+        .insert(crate::terrain::DrapeBudget {
+            per_frame: 2,
+            per_eye_frame: 2,
+        });
+    let required = map
+        .required_raster_tile_coords("paint")
+        .expect("source covering");
+    let missing: Vec<_> = required
+        .iter()
+        .filter(|coords| {
+            map.map_context
+                .world
+                .tiles
+                .query::<&crate::raster::RasterLayersDataComponent>(**coords)
+                .is_none_or(|component| component.layers.is_empty())
+        })
+        .map(|coords| tile(*coords, false, false))
+        .collect();
+    map.render_sources(ProcessedLayers::default(), missing)
+        .expect("pitched frame");
+    let mut drawn = vec![map.last_frame_stats().drape_redraws];
+    while map.needs_redraw() && drawn.len() < 32 {
+        map.run_frame().expect("following frame");
+        drawn.push(map.last_frame_stats().drape_redraws);
+    }
+    assert!(
+        drawn.iter().all(|count| *count <= 2),
+        "a frame draws at most its budget: {drawn:?}"
+    );
+    assert!(
+        drawn.iter().filter(|count| **count > 0).count() > 2,
+        "the drapes past the budget keep frames coming until they are drawn: {drawn:?}"
+    );
+    assert!(
+        !map.needs_redraw(),
+        "the map settles once all are drawn: {drawn:?}"
+    );
+    map.run_frame().expect("settled frame");
+    assert_eq!(
+        map.last_frame_stats().drape_redraws,
+        0,
+        "no drape was left undrawn: {drawn:?}"
+    );
+}

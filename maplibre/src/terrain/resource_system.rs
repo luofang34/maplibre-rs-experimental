@@ -21,6 +21,7 @@ pub fn resource_system(
         renderer:
             Renderer {
                 device,
+                queue,
                 resources: RenderResources { surface, .. },
                 settings,
                 ..
@@ -71,6 +72,7 @@ pub fn resource_system(
             .initialize_with_prefix_layouts(device, &[projection_resources.bind_group_layout()]);
         TerrainResources::new(
             device,
+            queue,
             pipeline,
             surface.surface_format(),
             settings.depth_texture_format,

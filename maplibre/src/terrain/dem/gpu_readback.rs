@@ -2,7 +2,6 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 use bytemuck::Zeroable;
-use wgpu::util::DeviceExt;
 
 use super::DemTile;
 use crate::{
@@ -49,6 +48,7 @@ fn sample_dem(@builtin(global_invocation_id) id: vec3<u32>) {
 
 fn tile_bindings(
     device: &wgpu::Device,
+    queue: &crate::render::upload_queue::UploadQueue,
     pipeline: &wgpu::ComputePipeline,
     dem: &DemTile,
     texture: &Texture,
@@ -60,11 +60,14 @@ fn tile_bindings(
     uniforms.dem_unpack = dem.unpack().map(|value| value as f32);
     uniforms.dem_dim = dem.dim() as f32;
     uniforms.exaggeration = 1.0;
-    let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("DEM regression uniforms"),
-        contents: bytemuck::bytes_of(&uniforms),
-        usage: wgpu::BufferUsages::UNIFORM,
-    });
+    let buffer = queue.create_buffer_init(
+        device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("DEM regression uniforms"),
+            contents: bytemuck::bytes_of(&uniforms),
+            usage: wgpu::BufferUsages::UNIFORM,
+        },
+    );
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("DEM regression tile"),
         layout: &pipeline.get_bind_group_layout(1),
@@ -105,7 +108,7 @@ pub(crate) fn sample_gpu_blocking(
         layout: &pipeline.get_bind_group_layout(0),
         entries: &[],
     });
-    let tile = tile_bindings(device, pipeline, dem, texture);
+    let tile = tile_bindings(device, queue, pipeline, dem, texture);
     let result = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: None,
         layout: &pipeline.get_bind_group_layout(2),

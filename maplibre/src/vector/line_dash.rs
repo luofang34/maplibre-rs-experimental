@@ -1,8 +1,6 @@
 //! A small repeating distance texture for each evaluated line dash pattern.
 use std::collections::HashMap;
 
-use wgpu::util::DeviceExt;
-
 use crate::style::{
     layer::LayerPaint,
     property::{NumberList, StyleProperty},
@@ -393,11 +391,14 @@ fn create_entry(
         min_filter: wgpu::FilterMode::Linear,
         ..Default::default()
     });
-    let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("line dash period"),
-        contents: bytemuck::cast_slice(&image_uniform(period, image, round, scale)),
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-    });
+    let uniform = queue.create_buffer_init(
+        device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("line dash period"),
+            contents: bytemuck::cast_slice(&image_uniform(period, image, round, scale)),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        },
+    );
     let (ramp_view, ramp_sampler) = ramp_texture(device, queue, image);
     let binding = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("line dash"),

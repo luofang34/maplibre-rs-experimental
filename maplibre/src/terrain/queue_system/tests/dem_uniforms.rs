@@ -83,7 +83,7 @@ fn write(world: &mut World, map: &HeadlessMap, layer: &str, opacity: f32) {
     let uniforms = ColorReliefUniforms::new([0.0; 4], opacity, &[(0.0, [1.0; 4])]);
     resources.write_layer(
         map.device(),
-        map.queue(),
+        map.upload_queue(),
         layer,
         DemLayerKind::ColorRelief,
         bytemuck::bytes_of(&uniforms),

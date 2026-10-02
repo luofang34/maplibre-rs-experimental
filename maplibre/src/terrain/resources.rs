@@ -7,7 +7,6 @@ use std::{
 };
 
 use bytemuck_derive::{Pod, Zeroable};
-use wgpu::util::DeviceExt;
 
 use crate::{
     coords::WorldTileCoords,
@@ -190,22 +189,29 @@ impl TerrainResources {
     /// Creates the shared mesh, sampler and uniform storage for an initialized pipeline.
     pub fn new(
         device: &wgpu::Device,
+        queue: &crate::render::upload_queue::UploadQueue,
         pipeline: wgpu::RenderPipeline,
         color_format: wgpu::TextureFormat,
         depth_format: wgpu::TextureFormat,
         msaa: Msaa,
     ) -> Self {
         let mesh = create_terrain_mesh(TERRAIN_MESH_SIZE);
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("terrain mesh vertices"),
-            contents: bytemuck::cast_slice(&mesh.vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("terrain mesh indices"),
-            contents: bytemuck::cast_slice(&mesh.indices),
-            usage: wgpu::BufferUsages::INDEX,
-        });
+        let vertex_buffer = queue.create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("terrain mesh vertices"),
+                contents: bytemuck::cast_slice(&mesh.vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            },
+        );
+        let index_buffer = queue.create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("terrain mesh indices"),
+                contents: bytemuck::cast_slice(&mesh.indices),
+                usage: wgpu::BufferUsages::INDEX,
+            },
+        );
         let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("terrain tile uniforms"),
             size: UNIFORM_STRIDE * UNIFORM_CAPACITY,

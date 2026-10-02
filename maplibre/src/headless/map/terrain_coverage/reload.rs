@@ -75,7 +75,7 @@ fn assert_uploaded(map: &HeadlessMap, coords: WorldTileCoords, expected: f64) {
     let pipeline = pipeline(map.device());
     let heights = sample_gpu_blocking(
         map.device(),
-        map.queue(),
+        map.upload_queue(),
         &pipeline,
         &dem.tile,
         resources.dem_texture(Some(coords)),

@@ -103,3 +103,20 @@ async fn a_tile_whose_atlas_reaches_the_gpu_is_reported_ready() {
         "an atlas already bound is not reported again"
     );
 }
+
+#[tokio::test]
+async fn fading_labels_keep_the_map_animating_until_they_settle() {
+    let mut style = style(0., "ground");
+    style.zoom = Some(12.);
+    let layers = super::layers(&style);
+    // One frame in, the label has only begun to fade in.
+    let mut map = super::fixture_map_after(style, layers, 1, 1).await;
+    let mut frames = 0;
+    while map.needs_redraw() && frames < 200 {
+        map.render_source_frames(Default::default(), Vec::new(), 1)
+            .expect("frame");
+        frames += 1;
+    }
+    assert!(!map.needs_redraw(), "the fade settles");
+    assert!(frames > 2, "labels fading in keep frames coming: {frames}");
+}

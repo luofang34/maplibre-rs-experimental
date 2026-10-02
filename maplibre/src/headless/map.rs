@@ -360,6 +360,12 @@ impl HeadlessMap {
         &mut self.map_context.world
     }
 
+    /// The queue the map's own uploads are counted through.
+    #[cfg(test)]
+    pub(crate) fn upload_queue(&self) -> &crate::render::upload_queue::UploadQueue {
+        &self.map_context.renderer.queue
+    }
+
     /// Moves the camera between frames, as a host gesture would.
     #[cfg(test)]
     pub(crate) fn view_state_mut(&mut self) -> &mut ViewState {
@@ -379,9 +385,10 @@ impl HeadlessMap {
         &self.map_context.renderer.device
     }
 
-    /// The queue the renderer submits to.
-    pub fn queue(&self) -> &crate::render::upload_queue::UploadQueue {
-        &self.map_context.renderer.queue
+    /// The queue the renderer submits to. What a host writes through it is its own upload,
+    /// not counted in the map's frame statistics.
+    pub fn queue(&self) -> &wgpu::Queue {
+        self.map_context.renderer.queue.inner()
     }
 
     /// Tells the map how much memory the host still has, or `None` when it cannot tell, so
@@ -430,11 +437,13 @@ impl HeadlessMap {
     /// replace them as GL JS does during `raster-fade-duration`.
     pub fn set_raster_cross_fade(&mut self, fade: crate::raster::cross_fade::RasterCrossFade) {
         self.map_context.world.resources.insert(fade);
+        crate::render::frame_signals::mark_dirty(&mut self.map_context.world);
     }
 
     /// Whether terrain tiles hang skirts below their edges, as GL JS `terrainSkirtLength`.
     pub fn set_terrain_skirts(&mut self, skirts: crate::terrain::TerrainSkirts) {
         self.map_context.world.resources.insert(skirts);
+        crate::render::frame_signals::mark_dirty(&mut self.map_context.world);
     }
 
     /// Raises the pitch limit and re-applies the style's pitch, which the default limit clamps.

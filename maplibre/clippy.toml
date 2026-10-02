@@ -1,0 +1,7 @@
+# Uploads are counted for frame statistics; render::upload_queue::UploadQueue is the counted path.
+disallowed-methods = [
+    { path = "wgpu::Queue::write_buffer", reason = "use UploadQueue::write_buffer so the upload is counted" },
+    { path = "wgpu::Queue::write_texture", reason = "use UploadQueue::write_texture so the upload is counted" },
+    { path = "wgpu::util::DeviceExt::create_buffer_init", reason = "use UploadQueue::create_buffer_init so the upload is counted" },
+    { path = "wgpu::util::DeviceExt::create_texture_with_data", reason = "use UploadQueue::create_texture_with_data so the upload is counted" },
+]

@@ -1,7 +1,5 @@
 //! Evaluates visible background paint and queues sky and atmosphere draws.
 
-use wgpu::util::DeviceExt;
-
 use crate::{
     context::MapContext,
     render::{
@@ -203,13 +201,14 @@ pub fn queue_system(
                 world_rows,
             });
         }
-        let buffer = renderer
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let buffer = renderer.queue.create_buffer_init(
+            &renderer.device,
+            &wgpu::util::BufferInitDescriptor {
                 label: Some("Background Metadata Buffer"),
                 contents: bytemuck::cast_slice(&metadatas),
                 usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            });
+            },
+        );
         let coords = crate::coords::WorldTileCoords::default();
         let transform = view_state
             .gpu_view_projection()
@@ -229,14 +228,14 @@ pub fn queue_system(
             line_width_scale: 1.0,
             line_units_per_pixel: 8.0 * view_state.zoom().scale_to_tile(&coords) as f32,
         };
-        let tile_metadata_buffer =
-            renderer
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Globe Background Tile Metadata Buffer"),
-                    contents: bytemuck::bytes_of(&tile_metadata),
-                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                });
+        let tile_metadata_buffer = renderer.queue.create_buffer_init(
+            &renderer.device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("Globe Background Tile Metadata Buffer"),
+                contents: bytemuck::bytes_of(&tile_metadata),
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            },
+        );
         let atmosphere_metadata = if atmosphere_blend > 0.0 {
             let camera = globe_camera_for_view(view_state).map_err(|error| {
                 tracing::error!(?error, "failed to build atmosphere globe camera");
@@ -256,22 +255,23 @@ pub fn queue_system(
         } else {
             AtmosphereLayerMetadata::disabled()
         };
-        let atmosphere_metadata_buffer =
-            renderer
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Atmosphere Metadata Buffer"),
-                    contents: bytemuck::bytes_of(&atmosphere_metadata),
-                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                });
+        let atmosphere_metadata_buffer = renderer.queue.create_buffer_init(
+            &renderer.device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("Atmosphere Metadata Buffer"),
+                contents: bytemuck::bytes_of(&atmosphere_metadata),
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            },
+        );
         let sky_metadata_buffer = sky_metadata.map(|sky| {
-            renderer
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            renderer.queue.create_buffer_init(
+                &renderer.device,
+                &wgpu::util::BufferInitDescriptor {
                     label: Some("Sky Metadata Buffer"),
                     contents: bytemuck::bytes_of(&sky),
                     usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                })
+                },
+            )
         });
         world.resources.insert(BackgroundBuffers {
             metadata_buffer: buffer,

@@ -51,4 +51,36 @@ async fn buffer_and_texture_writes_are_counted_and_taken() {
     );
     assert_eq!(queue.take_written_bytes(), 128);
     assert_eq!(queue.take_written_bytes(), 0, "taking starts a new count");
+    queue.create_buffer_init(
+        &device,
+        &wgpu::util::BufferInitDescriptor {
+            label: None,
+            contents: &[0; 32],
+            usage: wgpu::BufferUsages::VERTEX,
+        },
+    );
+    queue.create_texture_with_data(
+        &device,
+        &wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d {
+                width: 4,
+                height: 4,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        },
+        wgpu::util::TextureDataOrder::LayerMajor,
+        &[0; 64],
+    );
+    assert_eq!(
+        queue.take_written_bytes(),
+        96,
+        "buffers and textures created with their contents are uploads too"
+    );
 }

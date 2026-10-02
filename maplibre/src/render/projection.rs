@@ -3,7 +3,6 @@
 use bytemuck_derive::{Pod, Zeroable};
 use cgmath::{Matrix4, Point2};
 use thiserror::Error;
-use wgpu::util::DeviceExt;
 
 use crate::{
     coords::{LatLon, TILE_SIZE},
@@ -95,7 +94,7 @@ pub struct ProjectionGpuResources {
 
 impl ProjectionGpuResources {
     /// Allocates the projection uniform and its stable bind-group layout.
-    pub fn new(device: &wgpu::Device) -> Self {
+    pub fn new(device: &wgpu::Device, queue: &crate::render::upload_queue::UploadQueue) -> Self {
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("projection uniform layout"),
             entries: &[wgpu::BindGroupLayoutEntry {
@@ -112,11 +111,14 @@ impl ProjectionGpuResources {
             }],
         });
         let initial_data = ShaderProjectionData::default();
-        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("projection uniform buffer"),
-            contents: bytemuck::bytes_of(&initial_data),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let buffer = queue.create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("projection uniform buffer"),
+                contents: bytemuck::bytes_of(&initial_data),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            },
+        );
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("projection uniform bind group"),
             layout: &bind_group_layout,
@@ -125,11 +127,14 @@ impl ProjectionGpuResources {
                 resource: buffer.as_entire_binding(),
             }],
         });
-        let flat_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("flat projection uniform buffer"),
-            contents: bytemuck::bytes_of(&initial_data),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
+        let flat_buffer = queue.create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("flat projection uniform buffer"),
+                contents: bytemuck::bytes_of(&initial_data),
+                usage: wgpu::BufferUsages::UNIFORM,
+            },
+        );
         let flat_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("flat projection uniform bind group"),
             layout: &bind_group_layout,

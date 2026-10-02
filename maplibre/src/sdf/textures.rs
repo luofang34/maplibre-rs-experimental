@@ -4,7 +4,7 @@ use std::{
     sync::{Arc, Weak},
 };
 
-use wgpu::util::{DeviceExt, TextureDataOrder};
+use wgpu::util::TextureDataOrder;
 
 use super::{assets::SymbolAtlas, paint::SymbolUniforms};
 use crate::{coords::WorldTileCoords, render::resource::share_gpu, style::layer::SymbolPaint};
@@ -100,8 +100,8 @@ impl SymbolTextures {
 
 impl TileAtlas {
     fn new(gpu: &TextureContext<'_>, atlas: &Arc<SymbolAtlas>) -> Self {
-        let texture = gpu.device.create_texture_with_data(
-            gpu.queue,
+        let texture = gpu.queue.create_texture_with_data(
+            gpu.device,
             &wgpu::TextureDescriptor {
                 label: Some("symbol atlas"),
                 size: wgpu::Extent3d {
@@ -133,13 +133,14 @@ impl DrawBinding {
         uniforms: SymbolUniforms,
         separate_halo: bool,
     ) -> Self {
-        let buffer = gpu
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let buffer = gpu.queue.create_buffer_init(
+            gpu.device,
+            &wgpu::util::BufferInitDescriptor {
                 label: Some("symbol paint"),
                 contents: bytemuck::bytes_of(&uniforms),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            });
+            },
+        );
         let sampler = gpu.device.create_sampler(&wgpu::SamplerDescriptor {
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
