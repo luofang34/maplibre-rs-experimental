@@ -108,3 +108,46 @@ fn every_line_takes_a_full_line_height_when_anchoring_a_block() {
     let one = (label_top("top", "A") - label_top("bottom", "A")) as f32 / 32.0;
     assert!((one - 1.2 * 24.0).abs() < 0.1, "{one}");
 }
+
+#[test]
+fn a_bidirectional_mark_is_not_drawn_even_where_the_font_has_a_glyph_for_it() {
+    // GL JS's bidirectional pass leaves U+200E out of the text it draws; the fixture fonts
+    // carry a visible glyph for it, so laying it out would draw a mark.
+    let entry = AtlasEntry {
+        rect: [0, 0, 10, 18],
+        metrics: [0., -9., 10., 1.],
+        kind: 0,
+        ..Default::default()
+    };
+    let atlas = SymbolAtlas {
+        glyphs: [(
+            "test".into(),
+            [('A' as u32, entry.clone()), ('\u{200E}' as u32, entry)].into(),
+        )]
+        .into(),
+        ..Default::default()
+    };
+    let symbol = CollectedSymbol {
+        id: None,
+        line: None,
+        anchor: geo_types::Point::new(100., 100.),
+        properties: Default::default(),
+        angle: 0.,
+        vertical: None,
+        fallback: false,
+    };
+    let laid_out = |field: &str| {
+        let paint: SymbolPaint = serde_json::from_value(serde_json::json!({
+            "text-field": field, "text-font": ["test"]
+        }))
+        .expect("paint");
+        let mut buffer = VertexBuffers::new();
+        append(&symbol, &paint, 12., &atlas, &mut buffer);
+        buffer
+            .vertices
+            .iter()
+            .map(|vertex| vertex.a_pos_offset)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(laid_out("A\u{200E}A"), laid_out("AA"));
+}
