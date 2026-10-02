@@ -1,0 +1,78 @@
+{
+  "version": 8,
+  "metadata": {
+    "test": {
+      "description": "Formatted runs keep their own colour and scale while the layer's halo surrounds every run. max-diff is below the default so that a label without its halo (about 0.0115 against this reference) fails.",
+      "height": 256,
+      "width": 256,
+      "max-diff": 0.009
+    }
+  },
+  "center": [
+    0,
+    0
+  ],
+  "zoom": 0,
+  "sources": {
+    "point": {
+      "type": "geojson",
+      "data": {
+        "type": "Feature",
+        "properties": {},
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            0,
+            0
+          ]
+        }
+      }
+    }
+  },
+  "glyphs": "local://glyphs/{fontstack}/{range}.pbf",
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "#d8e8d8"
+      }
+    },
+    {
+      "id": "text",
+      "type": "symbol",
+      "source": "point",
+      "layout": {
+        "text-field": [
+          "format",
+          "Big",
+          {
+            "font-scale": 1.6,
+            "text-color": "#c02020"
+          },
+          " small",
+          {
+            "font-scale": 0.7
+          },
+          "\n",
+          {},
+          "Blue",
+          {
+            "text-color": "#2040c0"
+          }
+        ],
+        "text-font": [
+          "Open Sans Semibold",
+          "Arial Unicode MS Bold"
+        ],
+        "text-size": 28
+      },
+      "paint": {
+        "text-color": "#202020",
+        "text-halo-color": "#ffe060",
+        "text-halo-width": 3,
+        "text-halo-blur": 1
+      }
+    }
+  ]
+}

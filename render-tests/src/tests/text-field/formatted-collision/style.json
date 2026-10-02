@@ -1,0 +1,131 @@
+{
+  "version": 8,
+  "metadata": {
+    "test": {
+      "description": "A formatted label's collision box grows with its largest run: the 2.4x run hides label 1 below it, which an unscaled run of the same text leaves visible. max-diff is below the default so that showing label 1 (about 0.015 against this reference) fails.",
+      "height": 256,
+      "width": 256,
+      "max-diff": 0.013
+    }
+  },
+  "center": [
+    0,
+    0
+  ],
+  "zoom": 2,
+  "sources": {
+    "points": {
+      "type": "geojson",
+      "data": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "rank": 0
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                0,
+                0
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "rank": 1
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                0,
+                -6.5
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "rank": 2
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                0,
+                18
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "glyphs": "local://glyphs/{fontstack}/{range}.pbf",
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "white"
+      }
+    },
+    {
+      "id": "text",
+      "type": "symbol",
+      "source": "points",
+      "layout": {
+        "symbol-sort-key": [
+          "get",
+          "rank"
+        ],
+        "text-field": [
+          "case",
+          [
+            "==",
+            [
+              "get",
+              "rank"
+            ],
+            0
+          ],
+          [
+            "format",
+            "Tall",
+            {
+              "font-scale": 2.4
+            },
+            " run",
+            {}
+          ],
+          [
+            "concat",
+            "label ",
+            [
+              "to-string",
+              [
+                "get",
+                "rank"
+              ]
+            ]
+          ]
+        ],
+        "text-font": [
+          "Open Sans Semibold",
+          "Arial Unicode MS Bold"
+        ],
+        "text-size": [
+          "match",
+          [
+            "get",
+            "rank"
+          ],
+          1,
+          30,
+          14
+        ]
+      }
+    }
+  ]
+}
