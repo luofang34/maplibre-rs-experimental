@@ -28,6 +28,9 @@ struct VertexOutput {
     @location(1) eye_depth: f32,
     @location(2) surface_normal: vec3<f32>,
     @location(3) camera_relative_position: vec3<f32>,
+    // 1 at a pole and 0 on the tile, so the polar cap's triangles are told apart from the
+    // tile's: their texture coordinates would only repeat the tile's edge row to the pole.
+    @location(4) polar_cap: f32,
     @builtin(position) clip_position: vec4<f32>,
 };
 
@@ -145,6 +148,7 @@ fn main(
         normal,
         terrain_tile.fog_position.xyz + vec3<f32>(position.x * terrain_tile.fog_position.w,
             -position.y * terrain_tile.fog_position.w, elevation),
+        select(0.0, 1.0, north_cap || south_cap),
         projected.clip_position,
     );
 }

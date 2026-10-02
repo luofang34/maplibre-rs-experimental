@@ -25,6 +25,7 @@ struct VertexOutput {
     @location(1) eye_depth: f32,
     @location(2) surface_normal: vec3<f32>,
     @location(3) camera_relative_position: vec3<f32>,
+    @location(4) polar_cap: f32,
     @builtin(position) position: vec4<f32>,
 };
 
@@ -48,7 +49,10 @@ fn main(in: VertexOutput) -> @location(0) vec4<f32> {
     let drape_uv = (terrain_tile.drape_matrix * vec4<f32>(in.tex_coords, 0.0, 1.0)).xy;
     let draped = select(textureSample(drape_texture, drape_sampler, drape_uv),
         terrain_tile.surface_color, terrain_tile.fog_opacity.z > 0.5);
-    let surface = vec4<f32>(draped.rgb * relief, draped.a);
+    // No tile holds the ground beyond the last row of tiles, so the cap closing the globe takes
+    // the style's background colour, unlit, instead of the drape's edge stretched to the pole.
+    let surface = select(vec4<f32>(draped.rgb * relief, draped.a), terrain_tile.surface_color,
+        in.polar_cap > 0.0);
     let ground_blend = terrain_tile.fog_range.z;
     let horizon_blend = terrain_tile.fog_range.w;
     let opacity = terrain_tile.fog_opacity.x;
