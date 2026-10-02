@@ -145,3 +145,5 @@ fn jump(map: &mut HeadlessMap, distance: f64, name: &str) -> Frame {
         .move_relative(cgmath::Vector2::new(distance, 0.0));
     drag_frame(map, name)
 }
+
+mod zoom;

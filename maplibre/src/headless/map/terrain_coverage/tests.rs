@@ -356,6 +356,7 @@ async fn drapes_past_a_frames_budget_keep_frames_coming_until_drawn() {
         .insert(crate::terrain::DrapeBudget {
             per_frame: 2,
             per_eye_frame: 2,
+            ..Default::default()
         });
     let required = map
         .required_raster_tile_coords("paint")

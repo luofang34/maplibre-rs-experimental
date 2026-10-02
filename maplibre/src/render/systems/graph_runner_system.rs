@@ -54,6 +54,25 @@ impl System for GraphRunnerSystem {
         if let Some(spent) = measured {
             crate::render::frame_signals::record_gpu_time(world, spent);
         }
+        if world
+            .resources
+            .get::<crate::terrain::drape_timing::DrapeTimerSlot>()
+            .is_none()
+        {
+            world
+                .resources
+                .insert(crate::terrain::drape_timing::DrapeTimerSlot::new(device));
+        }
+        let per_drape = world
+            .resources
+            .get::<crate::terrain::drape_timing::DrapeTimerSlot>()
+            .and_then(|slot| slot.take_per_drape(device, queue.get_timestamp_period()));
+        if let Some(per_drape) = per_drape {
+            world
+                .resources
+                .get_or_init_mut::<crate::terrain::drape_timing::DrapeCost>()
+                .measured(per_drape);
+        }
 
         if let Err(e) = RenderGraphRunner::run(render_graph, device, queue, state, world) {
             error!("Error running render graph:");

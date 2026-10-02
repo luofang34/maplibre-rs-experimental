@@ -89,6 +89,18 @@ pub(crate) fn resource_ready(world: &mut World, ready: ResourceReady) {
     signals.events.push(ready);
 }
 
+/// Whether the camera differs from the one the last frame drew, as while a gesture runs.
+pub(crate) fn camera_moved(
+    world: &World,
+    view_state: &crate::render::view_state::ViewState,
+) -> bool {
+    world
+        .resources
+        .get::<FrameSignals>()
+        .and_then(|signals| signals.camera)
+        .is_some_and(|drawn| drawn != camera_of(view_state))
+}
+
 /// Charges a stage's CPU time to the current frame.
 pub(crate) fn record_stage(world: &mut World, stage: String, spent: Duration) {
     signals(world).current.stages.push((stage, spent));
@@ -109,7 +121,11 @@ pub(crate) fn record_gpu_time(world: &mut World, spent: Duration) {
 }
 
 fn camera(context: &MapContext) -> [f64; 16] {
-    let matrix: [[f64; 4]; 4] = context.view_state.view_projection().0.into();
+    camera_of(&context.view_state)
+}
+
+fn camera_of(view_state: &crate::render::view_state::ViewState) -> [f64; 16] {
+    let matrix: [[f64; 4]; 4] = view_state.view_projection().0.into();
     let mut flat = [0.0; 16];
     for (column, values) in matrix.iter().enumerate() {
         flat[column * 4..column * 4 + 4].copy_from_slice(values);

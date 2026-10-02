@@ -24,6 +24,7 @@ pub mod dem;
 mod drape_cache;
 mod drape_pass;
 pub(crate) mod drape_targets;
+pub mod drape_timing;
 mod draw;
 pub mod elevation;
 pub mod interaction;

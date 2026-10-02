@@ -61,13 +61,28 @@ impl GpuTimer {
     /// The timestamp writes for this frame's main pass, unless an earlier measurement is still
     /// on its way back.
     pub fn pass_writes(&self) -> Option<wgpu::RenderPassTimestampWrites<'_>> {
-        self.state
-            .compare_exchange(IDLE, WRITTEN, Ordering::AcqRel, Ordering::Acquire)
-            .ok()?;
+        self.span_writes(true, true)
+    }
+
+    /// The timestamp writes of one pass in a run of passes timed together: the first pass
+    /// writes the start, claiming the timer unless a measurement is still on its way back, and
+    /// the last writes the end.
+    pub fn span_writes(
+        &self,
+        first: bool,
+        last: bool,
+    ) -> Option<wgpu::RenderPassTimestampWrites<'_>> {
+        if first {
+            self.state
+                .compare_exchange(IDLE, WRITTEN, Ordering::AcqRel, Ordering::Acquire)
+                .ok()?;
+        } else if self.state.load(Ordering::Acquire) != WRITTEN || !last {
+            return None;
+        }
         Some(wgpu::RenderPassTimestampWrites {
             query_set: &self.queries,
-            beginning_of_pass_write_index: Some(0),
-            end_of_pass_write_index: Some(1),
+            beginning_of_pass_write_index: first.then_some(0),
+            end_of_pass_write_index: last.then_some(1),
         })
     }
 

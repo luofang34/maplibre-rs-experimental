@@ -83,7 +83,11 @@ impl RenderGraphRunner {
             .resources
             .get::<crate::render::gpu_timer::GpuTimerSlot>()
             .and_then(|slot| slot.0.as_ref());
-        if let Some(timer) = timer {
+        let drape_timer = world
+            .resources
+            .get::<crate::terrain::drape_timing::DrapeTimerSlot>()
+            .and_then(|slot| slot.timer.as_ref());
+        for timer in timer.into_iter().chain(drape_timer) {
             timer.resolve(&mut render_context.command_encoder);
         }
         {
@@ -91,7 +95,7 @@ impl RenderGraphRunner {
             let _span = tracing::info_span!("submit_graph_commands").entered();
             queue.submit(vec![render_context.command_encoder.finish()]);
         }
-        if let Some(timer) = timer {
+        for timer in timer.into_iter().chain(drape_timer) {
             timer.after_submit();
         }
         Ok(())

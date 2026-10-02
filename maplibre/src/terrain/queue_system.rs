@@ -67,6 +67,9 @@ pub struct DrapeBudget {
     pub per_frame: usize,
     /// Drapes per frame while a host's eye drives the map.
     pub per_eye_frame: usize,
+    /// GPU time a frame spends on drapes while the camera moves; the drapes past it keep their
+    /// previous or an ancestor's texture until a later frame.
+    pub moving_time: std::time::Duration,
 }
 
 impl Default for DrapeBudget {
@@ -74,6 +77,7 @@ impl Default for DrapeBudget {
         Self {
             per_frame: MAX_DRAPES_PER_FRAME,
             per_eye_frame: EYE_DRAPES_PER_FRAME,
+            moving_time: std::time::Duration::from_millis(4),
         }
     }
 }
@@ -241,7 +245,7 @@ fn acquire_drapes(
     prints: &[u64],
     ready: &[bool],
     memory: MemoryBudget,
-    budget: usize,
+    (budget, limit): (usize, usize),
     terrain: &mut TerrainResources,
     device: &wgpu::Device,
 ) -> (Vec<bool>, Vec<Option<WorldTileCoords>>, bool) {
@@ -268,7 +272,22 @@ fn acquire_drapes(
             }
         })
         .collect();
-    let redraw = budget_redraws(&states, budget);
+    let mut redraw = budget_redraws(&states, budget);
+    // A new drape with no drawn ancestor would leave its tile blank, so it is drawn past the time
+    // budget, up to the count a frame's command buffer holds.
+    let mut drawn = redraw.iter().filter(|drawn| **drawn).count();
+    for (index, (spec, state)) in specs.iter().zip(&states).enumerate() {
+        if drawn >= limit {
+            break;
+        }
+        if *state == DrapeState::New
+            && !redraw[index]
+            && present_ancestors(spec.coords, terrain).is_empty()
+        {
+            redraw[index] = true;
+            drawn += 1;
+        }
+    }
     let mut deferred = false;
     for ((spec, state), drawn) in specs.iter().zip(&states).zip(&redraw) {
         if !matches!(state, DrapeState::Unchanged | DrapeState::Withheld) && !drawn {
@@ -430,10 +449,21 @@ fn prepare_drapes(
         .get::<DrapeBudget>()
         .copied()
         .unwrap_or_default();
-    let budget = if view_state.has_external_view() {
+    let limit = if view_state.has_external_view() {
         budget.per_eye_frame
     } else {
         budget.per_frame
+    };
+    // A moving view draws what fits its time; the view at rest draws the rest at full pace.
+    let budget = if crate::render::frame_signals::camera_moved(world, view_state) {
+        world
+            .resources
+            .get::<crate::terrain::drape_timing::DrapeCost>()
+            .copied()
+            .unwrap_or_default()
+            .drapes_within(budget.moving_time, limit)
+    } else {
+        limit
     };
     let (redraw, drape_sources, deferred) = {
         let Some(Initialized(terrain)) = world.resources.get_mut::<Eventually<TerrainResources>>()
@@ -441,7 +471,15 @@ fn prepare_drapes(
             return Err(SystemError::Dependencies);
         };
         terrain.ensure_scratch(device);
-        acquire_drapes(specs, &prints, &ready, memory, budget, terrain, device)
+        acquire_drapes(
+            specs,
+            &prints,
+            &ready,
+            memory,
+            (budget, limit),
+            terrain,
+            device,
+        )
     };
     crate::render::frame_signals::count_drape_redraws(
         world,
