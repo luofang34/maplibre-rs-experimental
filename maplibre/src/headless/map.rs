@@ -408,6 +408,11 @@ impl HeadlessMap {
         self.map_context.world.resources.insert(fade);
     }
 
+    /// Whether terrain tiles hang skirts below their edges, as GL JS `terrainSkirtLength`.
+    pub fn set_terrain_skirts(&mut self, skirts: crate::terrain::TerrainSkirts) {
+        self.map_context.world.resources.insert(skirts);
+    }
+
     /// Raises the pitch limit and re-applies the style's pitch, which the default limit clamps.
     pub fn set_max_pitch(&mut self, max_pitch: cgmath::Deg<f64>) {
         let context = &mut self.map_context;

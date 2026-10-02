@@ -212,15 +212,21 @@ pub(super) fn prepare_tiles(
     style: &Style,
     view_state: &ViewState,
     terrain: &TerrainResources,
-    dem: &DemSource,
+    (dem, skirts): (&DemSource, crate::terrain::TerrainSkirts),
 ) -> PreparedTerrain {
     let (specs, drape_sources) = targets;
     let zoom = view_state.zoom();
     let gpu_view_projection = view_state.gpu_view_projection();
     let fog = terrain_fog(style, view_state);
-    let skirt_length = view_state.body().circumference_meters()
-        / 2_f64.powf(zoom.value().max(0.0))
-        / super::SKIRT_DIVISOR;
+    let skirt_length = match skirts {
+        crate::terrain::TerrainSkirts::Auto => {
+            view_state.body().circumference_meters()
+                / 2_f64.powf(zoom.value().max(0.0))
+                / super::SKIRT_DIVISOR
+        }
+        // A skirt of no length folds onto the tile edge and covers no pixel.
+        crate::terrain::TerrainSkirts::None => 0.0,
+    };
     let mut uniforms = Vec::with_capacity(specs.len());
     let mut sources = Vec::with_capacity(specs.len());
     for (spec, drape_source) in specs.iter().zip(drape_sources) {

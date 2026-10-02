@@ -75,3 +75,28 @@ pub(super) fn target_specs(
         view_state.style_zoom().value(),
     ))
 }
+
+/// The key GL JS draws terrain tiles by, smallest first: `coveringTiles`' squared distance
+/// between the map centre, at the covering's nominal level, and the tile's own column and row,
+/// whatever its level. With translucent drapes the order decides which skirts show through.
+pub(super) fn draw_order_key(
+    view_state: &ViewState,
+    dem_tile_size: f64,
+) -> impl Fn(&WorldTileCoords) -> f64 {
+    let request = crate::render::projection::CoveringRequest::terrain(
+        view_state.zoom().value(),
+        dem_tile_size,
+    );
+    let tiles_across = 2_f64.powi(i32::from(u8::from(request.level)));
+    let world_size = crate::coords::TILE_SIZE * 2_f64.powf(view_state.zoom().value());
+    let center = view_state.camera().position();
+    let center = [
+        center.x / world_size * tiles_across - 0.5,
+        center.y / world_size * tiles_across - 0.5,
+    ];
+    move |tile: &WorldTileCoords| {
+        let dx = center[0] - f64::from(tile.x);
+        let dy = center[1] - f64::from(tile.y);
+        dx * dx + dy * dy
+    }
+}

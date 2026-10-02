@@ -44,6 +44,7 @@ async fn render_fixture(test_dir: &Path) -> Result<(f64, f64), String> {
         left: meta.padding.left,
         right: meta.padding.right,
     });
+    map.set_terrain_skirts(meta.terrain_skirts);
     if let Some(meters) = meta.center_elevation {
         map.pin_center_elevation(meters);
     }

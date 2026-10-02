@@ -60,6 +60,8 @@ struct TestMeta {
     show_padding: bool,
     /// Whether each layer counts its draws instead of shading, as `showOverdrawInspector` asks.
     show_overdraw: bool,
+    /// Whether terrain tiles hang skirts, from `terrainSkirtLength`.
+    terrain_skirts: maplibre::terrain::TerrainSkirts,
     /// Camera padding left by the fixture's operations.
     padding: camera_options::Padding,
     /// Elevation the fixture pins the camera's center at.
@@ -83,6 +85,7 @@ impl Default for TestMeta {
             pixel_ratio: 1.0,
             show_padding: false,
             show_overdraw: false,
+            terrain_skirts: maplibre::terrain::TerrainSkirts::Auto,
             padding: camera_options::Padding::default(),
             center_elevation: None,
             paused_tiles: std::collections::HashMap::new(),
@@ -138,6 +141,10 @@ fn parse_test_meta(style_value: &Value) -> TestMeta {
             .get("showOverdrawInspector")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        terrain_skirts: match test.get("terrainSkirtLength").and_then(Value::as_str) {
+            Some("none") => maplibre::terrain::TerrainSkirts::None,
+            _ => maplibre::terrain::TerrainSkirts::Auto,
+        },
         padding: camera_options::Padding::default(),
         center_elevation: None,
         paused_tiles: std::collections::HashMap::new(),

@@ -40,6 +40,18 @@ pub mod transferables;
 mod upload_system;
 
 pub use backfill::backfill_neighbours;
+
+/// Whether terrain tiles hang skirts below their edges, as GL JS `terrainSkirtLength`: skirts
+/// hide the cracks between neighbouring tiles of different levels, and show through a
+/// translucent drape.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TerrainSkirts {
+    /// Skirts drop by a fifth of a tile's circumference at the camera's zoom.
+    #[default]
+    Auto,
+    /// No skirts.
+    None,
+}
 pub use coverage::{TerrainCoverageIndex, TerrainSample};
 pub use dem::{DemError, DemTile};
 use drape_pass::{DrapePassNode, DRAPE_PASS};

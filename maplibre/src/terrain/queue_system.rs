@@ -313,6 +313,11 @@ fn queue_tiles(
         .resources
         .get::<surface_covering::SurfaceCopies>()
         .map(|copies| copies.0.clone());
+    let skirts = world
+        .resources
+        .get::<crate::terrain::TerrainSkirts>()
+        .copied()
+        .unwrap_or_default();
     {
         let Some(Initialized(terrain)) = world.resources.get_mut::<Eventually<TerrainResources>>()
         else {
@@ -321,7 +326,7 @@ fn queue_tiles(
         let uniforms::PreparedTerrain {
             mut uniforms,
             sources,
-        } = uniforms::prepare_tiles(targets, style, view_state, terrain, dem);
+        } = uniforms::prepare_tiles(targets, style, view_state, terrain, (dem, skirts));
         edge_cache.apply(&sources, &mut uniforms, &world.tiles);
         let (sources, placed) =
             uniforms::with_world_copies(&mut uniforms, sources, copies.as_ref(), view_state);
@@ -343,7 +348,10 @@ fn queue_tiles(
                     uniform_offset: (index as u64 * UNIFORM_STRIDE) as u32,
                 })
             })
-            .collect();
+            .collect::<Vec<_>>();
+        let key = targets::draw_order_key(view_state, f64::from(dem.tile_size));
+        let mut draws = draws;
+        draws.sort_by(|left, right| key(&left.coords).total_cmp(&key(&right.coords)));
         terrain.set_draws(draws);
         if let Some(index) = world
             .resources
