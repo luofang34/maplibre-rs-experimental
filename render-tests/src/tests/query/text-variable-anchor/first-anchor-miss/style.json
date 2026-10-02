@@ -1,0 +1,56 @@
+{
+  "version": 8,
+  "metadata": {
+    "test": {
+      "width": 256,
+      "height": 256,
+      "queryGeometry": [138, 128]
+    }
+  },
+  "center": [0, 0],
+  "zoom": 10,
+  "sources": {
+    "places": {
+      "type": "geojson",
+      "data": {
+        "type": "FeatureCollection",
+        "features": [
+          {"type": "Feature", "id": 1, "properties": {"name": "Moved"}, "geometry": {"type": "Point", "coordinates": [0, 0]}}
+        ]
+      }
+    },
+    "obstacle": {
+      "type": "geojson",
+      "data": {
+        "type": "FeatureCollection",
+        "features": [
+          {"type": "Feature", "id": 2, "properties": {"name": "Block"}, "geometry": {"type": "Point", "coordinates": [0.0322, 0]}}
+        ]
+      }
+    }
+  },
+  "glyphs": "local://glyphs/{fontstack}/{range}.pbf",
+  "layers": [
+    {
+      "id": "places",
+      "type": "symbol",
+      "source": "places",
+      "layout": {
+        "text-field": "{name}",
+        "text-font": ["Open Sans Semibold", "Arial Unicode MS Bold"],
+        "text-size": 20,
+        "text-variable-anchor": ["left", "right"]
+      }
+    },
+    {
+      "id": "obstacle",
+      "type": "symbol",
+      "source": "obstacle",
+      "layout": {
+        "text-field": "{name}",
+        "text-font": ["Open Sans Semibold", "Arial Unicode MS Bold"],
+        "text-size": 20
+      }
+    }
+  ]
+}

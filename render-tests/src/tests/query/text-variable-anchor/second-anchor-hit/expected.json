@@ -1,0 +1,14 @@
+[
+  {
+    "type": "Feature",
+    "properties": {
+      "name": "Moved"
+    },
+    "id": 1,
+    "source": "places",
+    "geometry": {
+      "type": "Point"
+    },
+    "state": {}
+  }
+]
