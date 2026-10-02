@@ -374,10 +374,7 @@ pub(crate) fn evict_beyond(
 
 /// Drops the tiles whose requests no one wants any more, freeing their slots for tiles in view.
 fn drop_cancelled(world: &mut World, in_use: &HashSet<WorldTileCoords>) {
-    let cancelled: Vec<WorldTileCoords> = crate::io::tile_retry::cancel_unwanted(world)
-        .into_iter()
-        .filter(|coords| !in_use.contains(coords))
-        .collect();
+    let cancelled = crate::io::tile_retry::cancel_unwanted(world, in_use);
     if cancelled.is_empty() {
         return;
     }

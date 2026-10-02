@@ -283,8 +283,12 @@ pub(crate) fn want(world: &mut World, kind: RequestKind, coords: &HashSet<WorldT
 }
 
 /// Gives up the requests in flight that no request family wanted this frame, so they stop
-/// holding a slot, and returns the tiles they were for.
-pub(crate) fn cancel_unwanted(world: &mut World) -> Vec<WorldTileCoords> {
+/// holding a slot, and returns the tiles they were for. Tiles in `in_use` keep theirs: the
+/// drape requests a family follows lag a frame behind what the view uses.
+pub(crate) fn cancel_unwanted(
+    world: &mut World,
+    in_use: &HashSet<WorldTileCoords>,
+) -> Vec<WorldTileCoords> {
     let Some(wanted) = world
         .resources
         .get_mut::<WantedRequests>()
@@ -292,7 +296,13 @@ pub(crate) fn cancel_unwanted(world: &mut World) -> Vec<WorldTileCoords> {
     else {
         return Vec::new();
     };
-    let coords: Vec<WorldTileCoords> = world.tiles.tiles.values().map(|tile| tile.coords).collect();
+    let coords: Vec<WorldTileCoords> = world
+        .tiles
+        .tiles
+        .values()
+        .map(|tile| tile.coords)
+        .filter(|coords| !in_use.contains(coords))
+        .collect();
     let mut cancelled = Vec::new();
     let mut tiles = Vec::new();
     for coords in coords {
@@ -332,3 +342,6 @@ pub(crate) fn stop_cancelled<K: crate::environment::OffscreenKernel>(
         apc.cancel(attempt);
     }
 }
+
+#[cfg(test)]
+mod tests;

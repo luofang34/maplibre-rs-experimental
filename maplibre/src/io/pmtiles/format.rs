@@ -35,6 +35,16 @@ pub enum PmtilesFormatError {
     /// The tile coordinates have no tile ID.
     #[error("zoom {0} is past the deepest PMTiles zoom")]
     Zoom(u8),
+    /// The column or row is outside its zoom.
+    #[error("tile {z}/{x}/{y} is outside its zoom")]
+    OutsideZoom {
+        /// Zoom.
+        z: u8,
+        /// Column.
+        x: u32,
+        /// Row.
+        y: u32,
+    },
 }
 
 /// The fixed header of an archive.
@@ -217,6 +227,9 @@ pub fn find(entries: &[Entry], tile_id: u64) -> Option<Found> {
 pub fn tile_id(z: u8, x: u32, y: u32) -> Result<u64, PmtilesFormatError> {
     if z > 31 {
         return Err(PmtilesFormatError::Zoom(z));
+    }
+    if u64::from(x.max(y)) >= 1_u64 << z {
+        return Err(PmtilesFormatError::OutsideZoom { z, x, y });
     }
     let above = ((1_u128 << (2 * u32::from(z))) - 1) / 3;
     let (mut x, mut y) = (u64::from(x), u64::from(y));

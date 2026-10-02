@@ -95,6 +95,15 @@ impl HttpClient for Gated {
         }
         Ok(url.as_bytes().to_vec())
     }
+
+    /// Held like a whole fetch, so ranges of one resource are in flight together.
+    async fn fetch_range(&self, url: &str, range: ByteRange) -> Result<Vec<u8>, SourceFetchError> {
+        self.fetches
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.entered.notify_one();
+        self.release.notified().await;
+        Ok(format!("{url}@{}", range.offset).into_bytes())
+    }
 }
 
 fn spawn_fetch(
@@ -184,6 +193,49 @@ async fn a_waiter_gets_the_failure_classified_as_the_fetch_was() {
                 .expect("task")
                 .expect_err("missing")
                 .is_not_found());
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn different_ranges_of_one_resource_in_flight_together_each_fetch() {
+    use std::sync::atomic::Ordering;
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let gated = Gated::default();
+            let loader = SharedLoader::new(gated.clone());
+            let range = |offset| {
+                let loader = loader.clone();
+                tokio::task::spawn_local(async move {
+                    loader
+                        .fetch_range("https://a.invalid/archive", ByteRange { offset, length: 4 })
+                        .await
+                })
+            };
+            let started = || {
+                tokio::time::timeout(std::time::Duration::from_secs(2), gated.entered.notified())
+            };
+            let first = range(0);
+            started().await.expect("the first range fetches");
+            let second = range(100);
+            started()
+                .await
+                .expect("another range of the same resource fetches too");
+            let same = range(100);
+            tokio::task::yield_now().await;
+            gated.release.notify_waiters();
+            assert_eq!(
+                first.await.expect("task").expect("first"),
+                b"https://a.invalid/archive@0"
+            );
+            let second = second.await.expect("task").expect("second");
+            assert_eq!(second, b"https://a.invalid/archive@100");
+            assert_eq!(same.await.expect("task").expect("same"), second);
+            assert_eq!(
+                gated.fetches.load(Ordering::SeqCst),
+                2,
+                "a range waits only for the same range"
+            );
         })
         .await;
 }

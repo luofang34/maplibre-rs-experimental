@@ -11,6 +11,8 @@ fn tile_ids_follow_the_reference_numbering() {
     assert_eq!(tile_id(2, 0, 0).expect("id"), 5);
     assert_eq!(tile_id(12, 3423, 1763).expect("id"), 19_078_479);
     assert!(tile_id(32, 0, 0).is_err());
+    assert!(tile_id(1, 2, 0).is_err(), "column outside its zoom");
+    assert!(tile_id(3, 0, 8).is_err(), "row outside its zoom");
 }
 
 fn varint(mut value: u64, out: &mut Vec<u8>) {
