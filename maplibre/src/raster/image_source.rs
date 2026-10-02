@@ -10,6 +10,8 @@ use image::RgbaImage;
 
 use crate::coords::WorldTileCoords;
 
+mod warp;
+
 /// Pixels per side of a resampled tile.
 pub const IMAGE_TILE_SIZE: u32 = 512;
 
@@ -21,42 +23,6 @@ fn mercator([longitude, latitude]: [f64; 2]) -> [f64; 2] {
             .ln()
             / std::f64::consts::TAU;
     [x, y]
-}
-
-/// The image coordinates of a point inside the quad, or `None` outside it.
-///
-/// The quad is split into two triangles along the diagonal from the top right to the bottom left
-/// corner and interpolated linearly inside each, so a quad that is not a parallelogram bends
-/// along that diagonal.
-fn unit_coordinates(corners: &[[f64; 2]; 4], x: f64, y: f64) -> Option<[f64; 2]> {
-    let [top_left, top_right, bottom_right, bottom_left] = *corners;
-    let triangles = [
-        (
-            [top_left, top_right, bottom_left],
-            [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
-        ),
-        (
-            [bottom_right, top_right, bottom_left],
-            [[1.0, 1.0], [1.0, 0.0], [0.0, 1.0]],
-        ),
-    ];
-    triangles.iter().find_map(|(points, uv)| {
-        let [a, b, c] = *points;
-        let determinant = (b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1]);
-        if determinant == 0.0 {
-            return None;
-        }
-        let l1 = ((x - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (y - a[1])) / determinant;
-        let l2 = ((b[0] - a[0]) * (y - a[1]) - (x - a[0]) * (b[1] - a[1])) / determinant;
-        let l0 = 1.0 - l1 - l2;
-        if l0 < 0.0 || l1 < 0.0 || l2 < 0.0 {
-            return None;
-        }
-        Some([
-            l0 * uv[0][0] + l1 * uv[1][0] + l2 * uv[2][0],
-            l0 * uv[0][1] + l1 * uv[1][1] + l2 * uv[2][1],
-        ])
-    })
 }
 
 fn sample(image: &RgbaImage, u: f64, v: f64) -> [f32; 4] {
@@ -82,6 +48,56 @@ fn sample(image: &RgbaImage, u: f64, v: f64) -> [f32; 4] {
         }
     }
     premultiplied
+}
+
+/// Draws one triangle of the warped picture into the tile: each pixel whose centre it covers
+/// takes the picture at the texture coordinates interpolated across it and divided by the
+/// interpolated weight, as GPU interpolation of GL JS's `v_pos0` gives them. A pixel an earlier
+/// triangle or world copy already drew keeps its colour.
+fn fill(
+    tile: &mut RgbaImage,
+    drawn: &mut [bool],
+    image: &RgbaImage,
+    [(a, ta), (b, tb), (c, tc)]: [([f64; 2], [f64; 3]); 3],
+) {
+    let determinant = (b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1]);
+    if determinant == 0.0 || !determinant.is_finite() {
+        return;
+    }
+    let size = f64::from(IMAGE_TILE_SIZE);
+    let lo = |values: [f64; 3]| values.into_iter().fold(f64::MAX, f64::min).floor().max(0.0);
+    let hi = |values: [f64; 3]| values.into_iter().fold(f64::MIN, f64::max).ceil().min(size);
+    let (x0, x1) = (lo([a[0], b[0], c[0]]), hi([a[0], b[0], c[0]]));
+    let (y0, y1) = (lo([a[1], b[1], c[1]]), hi([a[1], b[1], c[1]]));
+    for py in y0 as u32..y1 as u32 {
+        for px in x0 as u32..x1 as u32 {
+            let index = (py * IMAGE_TILE_SIZE + px) as usize;
+            if drawn[index] {
+                continue;
+            }
+            let (x, y) = (f64::from(px) + 0.5, f64::from(py) + 0.5);
+            let l1 = ((x - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (y - a[1])) / determinant;
+            let l2 = ((b[0] - a[0]) * (y - a[1]) - (x - a[0]) * (b[1] - a[1])) / determinant;
+            let l0 = 1.0 - l1 - l2;
+            if l0 < 0.0 || l1 < 0.0 || l2 < 0.0 {
+                continue;
+            }
+            let texture = [0, 1, 2].map(|i| l0 * ta[i] + l1 * tb[i] + l2 * tc[i]);
+            let [r, g, blue, alpha] =
+                sample(image, texture[0] / texture[2], texture[1] / texture[2]);
+            if alpha > 0.0 {
+                tile.put_pixel(
+                    px,
+                    py,
+                    image::Rgba(
+                        [r / alpha, g / alpha, blue / alpha, alpha]
+                            .map(|c| (c * 255.0).round() as u8),
+                    ),
+                );
+                drawn[index] = true;
+            }
+        }
+    }
 }
 
 /// Copies of the world an image can wrap onto before the rest are ignored.
@@ -119,22 +135,62 @@ pub fn render_tile(
         return None;
     }
     let mut tile_image = RgbaImage::new(IMAGE_TILE_SIZE, IMAGE_TILE_SIZE);
-    let step = size / f64::from(IMAGE_TILE_SIZE);
-    for (px, py, pixel) in tile_image.enumerate_pixels_mut() {
-        let y = top + (f64::from(py) + 0.5) * step;
-        for shift in &shifts {
-            let x = left + shift + (f64::from(px) + 0.5) * step;
-            let Some([u, v]) = unit_coordinates(&corners, x, y) else {
-                continue;
-            };
-            let [r, g, b, a] = sample(image, u, v);
-            if a > 0.0 {
-                *pixel = image::Rgba([r / a, g / a, b / a, a].map(|c| (c * 255.0).round() as u8));
-                break;
-            }
+    let mut drawn = vec![false; (IMAGE_TILE_SIZE * IMAGE_TILE_SIZE) as usize];
+    let triangles = warp::triangles(corners);
+    // Mercator units to tile pixels, for the copy of the world `shift` whole worlds east.
+    let pixels = f64::from(IMAGE_TILE_SIZE) / size;
+    for shift in &shifts {
+        let to_tile = |[x, y]: [f64; 2]| [(x - left - shift) * pixels, (y - top) * pixels];
+        for triangle in &triangles {
+            let corners = triangle.map(|(position, texture)| (to_tile(position), texture));
+            fill(&mut tile_image, &mut drawn, image, corners);
         }
     }
     Some(tile_image)
+}
+
+/// Why an image source's picture cannot be drawn.
+#[derive(Debug, thiserror::Error)]
+pub enum PictureError {
+    /// The bytes are not a picture the decoder reads.
+    #[error("the picture cannot be decoded")]
+    Decode(#[source] image::ImageError),
+    /// The picture's embedded colour profile cannot be converted to sRGB.
+    #[error("the picture's colour profile cannot be converted to sRGB")]
+    Profile(#[source] moxcms::CmsError),
+}
+
+/// Decodes an image source's picture into sRGB, converting it from the colour profile it embeds,
+/// as GL JS shows it once the browser has decoded it.
+pub fn decode(bytes: &[u8]) -> Result<RgbaImage, PictureError> {
+    use image::ImageDecoder;
+    let mut decoder = image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|error| PictureError::Decode(image::ImageError::IoError(error)))?
+        .into_decoder()
+        .map_err(PictureError::Decode)?;
+    let profile = decoder.icc_profile().map_err(PictureError::Decode)?;
+    let picture = image::DynamicImage::from_decoder(decoder)
+        .map_err(PictureError::Decode)?
+        .to_rgba8();
+    // A profile the converter does not understand leaves the stored values as they are.
+    let Some(Ok(source)) = profile.map(|bytes| moxcms::ColorProfile::new_from_slice(&bytes)) else {
+        return Ok(picture);
+    };
+    let transform = source
+        .create_transform_8bit(
+            moxcms::Layout::Rgba,
+            &moxcms::ColorProfile::new_srgb(),
+            moxcms::Layout::Rgba,
+            moxcms::TransformOptions::default(),
+        )
+        .map_err(PictureError::Profile)?;
+    let (width, height) = picture.dimensions();
+    let mut converted = vec![0_u8; picture.as_raw().len()];
+    transform
+        .transform(picture.as_raw(), &mut converted)
+        .map_err(PictureError::Profile)?;
+    Ok(RgbaImage::from_raw(width, height, converted).unwrap_or(picture))
 }
 
 /// Makes an image source's tiles again after its picture or corners changed. A tile the
@@ -213,12 +269,10 @@ pub(crate) async fn load_tile<HC: crate::io::source_client::HttpClient>(
             format!("image-source:{url}#{}", source.generation),
             || async {
                 let bytes = crate::sdf::assets::fetch(client, url, "image source").await?;
-                let picture = image::load_from_memory(&bytes)
-                    .map_err(|error| {
-                        tracing::warn!(%url, %error, "invalid image source picture");
-                        AssetFailure::Terminal(format!("invalid image {url}: {error}"))
-                    })?
-                    .to_rgba8();
+                let picture = decode(&bytes).map_err(|error| {
+                    tracing::warn!(%url, %error, "invalid image source picture");
+                    AssetFailure::Terminal(format!("invalid image {url}: {error}"))
+                })?;
                 let bytes = picture.as_raw().len();
                 Ok((picture, bytes))
             },
