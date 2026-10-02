@@ -44,6 +44,7 @@ reqwest.workspace = true
 unicode-bidi = "0.3"
 async-trait.workspace = true
 futures.workspace = true
+flate2.workspace = true
 instant.workspace = true
 
 # Tracing

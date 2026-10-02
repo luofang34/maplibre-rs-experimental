@@ -2,8 +2,8 @@
 //!
 //! A host injects a loader once; the map thread fetches TileJSON with it and native tile
 //! workers fetch tiles, glyphs and sprites with clones of the same handle. Any
-//! [`HttpClient`] is a loader, so a host can pass its own transport, an in-process fake, or an
-//! adapter such as an archive reader.
+//! [`HttpClient`] is a loader, so a host can pass its own transport or an in-process fake;
+//! `pmtiles://` URLs are read out of their archive with range requests through it.
 
 use std::{
     collections::HashMap,
@@ -14,7 +14,10 @@ use std::{
 use async_trait::async_trait;
 use futures::channel::oneshot;
 
-use crate::io::source_client::{ByteRange, HttpClient, SourceFetchError};
+use crate::io::{
+    pmtiles::{PmtilesReader, PmtilesUrl},
+    source_client::{ByteRange, HttpClient, SourceFetchError},
+};
 
 /// Fetches whole resources and byte ranges of them.
 ///
@@ -50,6 +53,7 @@ pub struct SharedLoader(Arc<Inner>);
 struct Inner {
     loader: Box<dyn ResourceLoader>,
     in_flight: Mutex<HashMap<Key, Vec<oneshot::Sender<Outcome>>>>,
+    pmtiles: PmtilesReader,
 }
 
 type Key = (String, Option<ByteRange>);
@@ -182,6 +186,7 @@ impl SharedLoader {
         Self(Arc::new(Inner {
             loader: Box::new(loader),
             in_flight: Mutex::default(),
+            pmtiles: PmtilesReader::default(),
         }))
     }
 }
@@ -196,7 +201,12 @@ impl fmt::Debug for SharedLoader {
 #[cfg_attr(feature = "thread-safe-futures", async_trait)]
 impl HttpClient for SharedLoader {
     async fn fetch(&self, url: &str) -> Result<Vec<u8>, SourceFetchError> {
-        self.0.load(url, None).await
+        // An archive's range requests come back through this loader, so concurrent readers of
+        // one archive share them.
+        match PmtilesUrl::parse(url) {
+            Some(request) => self.0.pmtiles.fetch(self, url, request).await,
+            None => self.0.load(url, None).await,
+        }
     }
 
     async fn fetch_range(&self, url: &str, range: ByteRange) -> Result<Vec<u8>, SourceFetchError> {

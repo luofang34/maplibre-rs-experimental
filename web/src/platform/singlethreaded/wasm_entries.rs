@@ -14,7 +14,7 @@ use web_sys::DedicatedWorkerGlobalScope;
 use crate::{
     error::JSError,
     platform::{
-        http_client::WHATWGFetchHttpClient,
+        http_client::web_http_client,
         singlethreaded::{
             apc::{ReceivedType, WebMessageTag},
             PassingContext, UsedContext,
@@ -48,7 +48,7 @@ pub async fn singlethreaded_process_data(procedure_ptr: u32, input: String) -> R
     })?;
 
     let context = PassingContext {
-        source_client: SourceClient::new(HttpSourceClient::new(WHATWGFetchHttpClient)),
+        source_client: SourceClient::new(HttpSourceClient::new(web_http_client())),
     };
 
     if let Ok(global) = js_sys::global().dyn_into::<DedicatedWorkerGlobalScope>() {

@@ -4,20 +4,24 @@ use maplibre::{
 };
 use maplibre_winit::WinitEnvironment;
 
-use crate::platform::{self, http_client::WHATWGFetchHttpClient, UsedOffscreenKernelEnvironment};
+use crate::platform::{
+    self,
+    http_client::{web_http_client, WebHttpClient},
+    UsedOffscreenKernelEnvironment,
+};
 
 /// Offscreen workers fetch map sources with the browser HTTP API.
 pub struct WHATWGOffscreenKernelEnvironment(OffscreenKernelConfig);
 
 impl OffscreenKernel for WHATWGOffscreenKernelEnvironment {
-    type HttpClient = WHATWGFetchHttpClient;
+    type HttpClient = WebHttpClient;
 
     fn create(config: OffscreenKernelConfig) -> Self {
         WHATWGOffscreenKernelEnvironment(config)
     }
 
     fn source_client(&self) -> SourceClient<Self::HttpClient> {
-        SourceClient::new(HttpSourceClient::new(WHATWGFetchHttpClient))
+        SourceClient::new(HttpSourceClient::new(web_http_client()))
             .with_asset_cache(self.0.asset_cache.clone())
     }
 }
@@ -25,7 +29,7 @@ impl OffscreenKernel for WHATWGOffscreenKernelEnvironment {
 #[cfg(not(target_feature = "atomics"))]
 pub(crate) type CurrentEnvironment = WinitEnvironment<
     maplibre::io::scheduler::NopScheduler,
-    WHATWGFetchHttpClient,
+    WebHttpClient,
     UsedOffscreenKernelEnvironment,
     platform::singlethreaded::apc::PassingAsyncProcedureCall,
     (),
@@ -34,7 +38,7 @@ pub(crate) type CurrentEnvironment = WinitEnvironment<
 #[cfg(target_feature = "atomics")]
 pub(crate) type CurrentEnvironment = WinitEnvironment<
     platform::multithreaded::pool_scheduler::WebWorkerPoolScheduler,
-    WHATWGFetchHttpClient,
+    WebHttpClient,
     UsedOffscreenKernelEnvironment,
     maplibre::io::apc::SchedulerAsyncProcedureCall<
         UsedOffscreenKernelEnvironment,

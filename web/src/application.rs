@@ -11,7 +11,7 @@ use wasm_bindgen::prelude::*;
 use crate::{
     environment::CurrentEnvironment,
     error::JSError,
-    platform::{self, http_client::WHATWGFetchHttpClient},
+    platform::{self, http_client::web_http_client},
 };
 
 /// A browser map using the configured worker transport.
@@ -68,7 +68,7 @@ fn create_kernel(
 ) -> Result<Kernel<CurrentEnvironment>, JSError> {
     let mut kernel_builder = KernelBuilder::new()
         .with_map_window_config(window_config)
-        .with_http_client(WHATWGFetchHttpClient);
+        .with_http_client(web_http_client());
 
     let offscreen_kernel_config = OffscreenKernelConfig {
         cache_directory: None,

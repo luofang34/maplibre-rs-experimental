@@ -48,7 +48,9 @@ fn dem_reply_outside_a_worker_returns_a_transport_error() {
     use maplibre::io::source_client::HttpSourceClient;
 
     let context = PassingContext {
-        source_client: SourceClient::new(HttpSourceClient::new(UsedHttpClient::default())),
+        source_client: SourceClient::new(HttpSourceClient::new(
+            crate::platform::http_client::web_http_client(),
+        )),
     };
     let payload = FlatBufferTransferable::from_array_buffer(
         WebMessageTag::LayerDemMissing,

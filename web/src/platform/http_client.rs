@@ -10,6 +10,14 @@ use crate::error::WebError;
 #[derive(Clone, Default)]
 pub struct WHATWGFetchHttpClient;
 
+/// The browser transport, also reading tiles out of PMTiles archives with range requests.
+pub type WebHttpClient = maplibre::io::pmtiles::PmtilesClient<WHATWGFetchHttpClient>;
+
+/// A browser client with an empty archive cache.
+pub fn web_http_client() -> WebHttpClient {
+    maplibre::io::pmtiles::PmtilesClient::new(WHATWGFetchHttpClient)
+}
+
 fn invalid_response(message: &'static str) -> SourceFetchError {
     SourceFetchError(Box::new(WebError::TypeError(message.into())))
 }
