@@ -199,6 +199,8 @@ mod stencil;
 
 mod source_identity;
 
+mod drag;
+
 mod alpha;
 
 mod heatmap;
