@@ -12,6 +12,11 @@ pub struct IndexEntry {
     pub(super) buffer_layer_metadata: Range<wgpu::BufferAddress>,
     // Range of bytes within the backing buffer for feature metadata
     pub(super) buffer_feature_metadata: Range<wgpu::BufferAddress>,
+    // Element index of the first vertex, which is also that of its first feature metadata
+    // record: drawn from the whole buffers with this as the base vertex.
+    pub(super) first_vertex: u32,
+    // Element index of the first index within the whole index buffer.
+    pub(super) first_index: u32,
     // Amount of actually usable indices. Each index has the size/format `IndexDataType`.
     // Can be lower than size(buffer_indices) / indices_stride because of alignment.
     pub(super) usable_indices: u32,
@@ -25,6 +30,17 @@ impl IndexEntry {
 
     pub fn indices_range(&self) -> Range<u32> {
         0..self.usable_indices
+    }
+
+    /// The layer's indices within the whole index buffer, offset by `base_vertex` when drawn.
+    pub fn whole_buffer_indices(&self) -> Range<u32> {
+        self.first_index..self.first_index + self.usable_indices
+    }
+
+    /// Added to every index of the layer when drawn from the whole vertex and feature metadata
+    /// buffers.
+    pub fn base_vertex(&self) -> i32 {
+        self.first_vertex as i32
     }
 
     pub fn indices_buffer_range(&self) -> Range<wgpu::BufferAddress> {
@@ -162,19 +178,21 @@ impl RingIndex {
         }
     }
 
+    /// Frees the oldest allocations until `bytes` fit, starting at a multiple of `align`.
     pub(super) fn make_room(
         &mut self,
         bytes: u64,
         typ: BackingBufferType,
-        size: u64,
+        (size, align): (u64, u64),
     ) -> Option<Range<u64>> {
         if bytes > size {
             return None;
         }
         loop {
             let gap = self.find_largest_gap(typ, size);
-            if bytes <= gap.end - gap.start {
-                return Some(gap.start..gap.start + bytes);
+            let start = gap.start.div_ceil(align) * align;
+            if start <= gap.end && bytes <= gap.end - start {
+                return Some(start..start + bytes);
             }
             self.pop_front()?;
         }

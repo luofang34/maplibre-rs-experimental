@@ -21,31 +21,43 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
             feature_metadata.len() as u64 * size_of::<FM>() as u64,
         ];
         self.validate_sizes(sizes)?;
+        let (vertex_stride, record_stride) = (size_of::<V>() as u64, size_of::<FM>() as u64);
+        let (vertices, records) = (
+            geometry.buffer.vertices.len() as u64,
+            feature_metadata.len() as u64,
+        );
+        if records > vertices {
+            return Err(AllocationError::FeatureMetadata { vertices, records });
+        }
+        // Vertices start on a whole element, so the layer draws from the whole buffer with
+        // its first vertex as the base vertex; its feature records sit at the same index.
+        let buffer_vertices = self.reserve(
+            sizes[0],
+            BackingBufferType::Vertices,
+            (self.vertex_capacity(), vertex_stride),
+        )?;
+        let first_vertex = buffer_vertices.start / vertex_stride;
+        let buffer_indices = self.reserve(
+            sizes[1],
+            BackingBufferType::Indices,
+            (self.indices.inner_size, size_of::<I>() as u64),
+        )?;
         let entry = IndexEntry {
             allocation_id: self.revision.wrapping_add(1),
             coords,
             style_layer,
             usable_indices: geometry.usable_indices,
-            buffer_vertices: self.reserve(
-                sizes[0],
-                BackingBufferType::Vertices,
-                self.vertices.inner_size,
-            )?,
-            buffer_indices: self.reserve(
-                sizes[1],
-                BackingBufferType::Indices,
-                self.indices.inner_size,
-            )?,
+            first_vertex: element_index(first_vertex)?,
+            first_index: element_index(buffer_indices.start / size_of::<I>() as u64)?,
+            buffer_vertices,
+            buffer_indices,
             buffer_layer_metadata: self.reserve(
                 sizes[2],
                 BackingBufferType::Metadata,
-                self.layer_metadata.inner_size,
+                (self.layer_metadata.inner_size, size_of::<TM>() as u64),
             )?,
-            buffer_feature_metadata: self.reserve(
-                sizes[3],
-                BackingBufferType::FeatureMetadata,
-                self.feature_metadata.inner_size,
-            )?,
+            buffer_feature_metadata: first_vertex * record_stride
+                ..first_vertex * record_stride + sizes[3],
         };
         queue.write_buffer(
             &self.vertices.inner,
@@ -120,18 +132,35 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         Ok(())
     }
 
+    /// Bytes of the vertex buffer the pool allocates from: as many whole vertices as both the
+    /// vertex buffer and the feature metadata buffer, which holds a record per vertex, hold.
+    fn vertex_capacity(&self) -> u64 {
+        let elements = (self.vertices.inner_size / size_of::<V>() as u64)
+            .min(self.feature_metadata.inner_size / size_of::<FM>() as u64);
+        elements * size_of::<V>() as u64
+    }
+
     fn reserve(
         &mut self,
         requested: u64,
         buffer: BackingBufferType,
-        capacity: u64,
+        (capacity, align): (u64, u64),
     ) -> Result<Range<u64>, AllocationError> {
         self.index
-            .make_room(requested, buffer, capacity)
+            .make_room(requested, buffer, (capacity, align))
             .ok_or(AllocationError::Capacity {
                 buffer,
                 requested,
                 capacity,
             })
     }
+}
+
+/// An element index as the 32 bits a draw call takes; a pool beyond them is not drawable.
+fn element_index(index: u64) -> Result<u32, AllocationError> {
+    u32::try_from(index).map_err(|_| AllocationError::Capacity {
+        buffer: BackingBufferType::Vertices,
+        requested: index,
+        capacity: u64::from(u32::MAX),
+    })
 }

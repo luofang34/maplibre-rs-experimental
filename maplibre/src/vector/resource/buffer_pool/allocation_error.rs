@@ -20,6 +20,15 @@ pub enum AllocationError {
         /// Payload byte count.
         bytes: u64,
     },
+    /// A layer has more per-vertex feature records than vertices; each record sits at the
+    /// index of its vertex.
+    #[error("{records} feature metadata records for {vertices} vertices")]
+    FeatureMetadata {
+        /// Vertices of the layer.
+        vertices: u64,
+        /// Feature metadata records of the layer.
+        records: u64,
+    },
     /// The tile cannot be addressed by the pool index.
     #[error("invalid tile coordinates {coords}")]
     Coordinates {

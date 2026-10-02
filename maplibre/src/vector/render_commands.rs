@@ -88,11 +88,10 @@ impl<const RUNS: bool> RenderCommand<LayerItem> for DrawVectorTile<RUNS> {
 
         pass.set_stencil_reference(reference);
 
-        pass.set_index_buffer(buffer_pool.indices().slice(index_range), INDEX_FORMAT);
-        pass.set_vertex_buffer(
-            0,
-            buffer_pool.vertices().slice(entry.vertices_buffer_range()),
-        );
+        // The pool's buffers are bound whole, so consecutive layers keep them bound and each
+        // draws its own range by offset.
+        pass.set_index_buffer(buffer_pool.indices().slice(..), INDEX_FORMAT);
+        pass.set_vertex_buffer(0, buffer_pool.vertices().slice(..));
         let Some(tile_view_pattern_buffer) = source_shape.buffer_range() else {
             return RenderCommandResult::Failure;
         };
@@ -106,28 +105,27 @@ impl<const RUNS: bool> RenderCommand<LayerItem> for DrawVectorTile<RUNS> {
                 .metadata()
                 .slice(entry.layer_metadata_buffer_range()),
         );
-        pass.set_vertex_buffer(
-            3,
-            buffer_pool
-                .feature_metadata()
-                .slice(entry.feature_metadata_buffer_range()),
-        );
+        pass.set_vertex_buffer(3, buffer_pool.feature_metadata().slice(..));
+        let base_vertex = entry.base_vertex();
+        let first = entry.whole_buffer_indices().start;
         if let Some(run) = &item.run {
-            let first = entry.indices_range().start;
-            pass.draw_indexed(first + run.range.start..first + run.range.end, 0, 0..1);
+            pass.draw_indexed(
+                first + run.range.start..first + run.range.end,
+                base_vertex,
+                0..1,
+            );
             return RenderCommandResult::Success;
         }
         let runs = RUNS
             .then(|| buffer_pool.pattern_runs(item.tile.coords, &item.style_layer))
             .flatten();
         let Some(runs) = runs else {
-            pass.draw_indexed(entry.indices_range(), 0, 0..1);
+            pass.draw_indexed(entry.whole_buffer_indices(), base_vertex, 0..1);
             return RenderCommandResult::Success;
         };
         let patterns = world.resources.get::<super::pattern::PatternResources>();
         let dashes = world.resources.get::<super::line_dash::LineDashResources>();
         let is_line = entry.style_layer.type_ == "line";
-        let first = entry.indices_range().start;
         for (key, range) in runs {
             let image = if is_line {
                 dashes.and_then(|dashes| dashes.image_binding(*key))
@@ -138,7 +136,7 @@ impl<const RUNS: bool> RenderCommand<LayerItem> for DrawVectorTile<RUNS> {
                 continue;
             };
             pass.set_bind_group(1, image, &[]);
-            pass.draw_indexed(first + range.start..first + range.end, 0, 0..1);
+            pass.draw_indexed(first + range.start..first + range.end, base_vertex, 0..1);
         }
 
         RenderCommandResult::Success

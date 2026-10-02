@@ -287,3 +287,55 @@ fn replacing_an_interleaved_layer_preserves_both_indexes_through_wrap() {
     assert!(ranges.windows(2).all(|pair| pair[0].end <= pair[1].start));
     assert_eq!(ranges[0].start, 0, "allocation actually wraps");
 }
+
+#[test]
+fn a_layer_draws_from_the_whole_buffers_at_its_first_vertex_and_index() {
+    let mut pool = pool();
+    let coords = WorldTileCoords::default();
+    // The first layer has fewer feature records than vertices; the records of the next
+    // layers still sit at the index of their own vertices.
+    for (id, vertices, records) in [("first", 3, 1), ("second", 5, 5), ("third", 2, 2)] {
+        pool.allocate_layer_geometry(
+            &TestQueue,
+            coords,
+            style_layer(id),
+            &geometry(vertices),
+            0u32,
+            &vec![0u32; records],
+        )
+        .expect("allocation fits");
+    }
+    for entry in pool.index().get_layers(coords).expect("layers") {
+        let base_vertex = entry.base_vertex() as u64;
+        assert_eq!(entry.vertices_buffer_range().start, base_vertex * 24);
+        assert_eq!(entry.feature_metadata_buffer_range().start, base_vertex * 4);
+        assert_eq!(
+            u64::from(entry.whole_buffer_indices().start) * 4,
+            entry.indices_buffer_range().start
+        );
+        assert_eq!(
+            entry.whole_buffer_indices().len(),
+            entry.indices_range().len()
+        );
+    }
+}
+
+#[test]
+fn more_feature_records_than_vertices_are_refused() {
+    let mut pool = pool();
+    let refused = pool.allocate_layer_geometry(
+        &TestQueue,
+        WorldTileCoords::default(),
+        style_layer("place_city"),
+        &geometry(2),
+        0u32,
+        &[0u32; 3],
+    );
+    assert!(matches!(
+        refused,
+        Err(super::AllocationError::FeatureMetadata {
+            vertices: 2,
+            records: 3
+        })
+    ));
+}

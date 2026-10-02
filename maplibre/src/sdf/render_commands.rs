@@ -90,16 +90,10 @@ impl RenderCommand<TranslucentItem> for DrawSymbol {
 
         pass.set_stencil_reference(reference);
 
-        pass.set_index_buffer(
-            symbol_buffer_pool.indices().slice(index_range),
-            INDEX_FORMAT,
-        );
-        pass.set_vertex_buffer(
-            0,
-            symbol_buffer_pool
-                .vertices()
-                .slice(entry.vertices_buffer_range()),
-        );
+        // The pool's buffers are bound whole, so consecutive layers keep them bound and each
+        // draws its own range by offset.
+        pass.set_index_buffer(symbol_buffer_pool.indices().slice(..), INDEX_FORMAT);
+        pass.set_vertex_buffer(0, symbol_buffer_pool.vertices().slice(..));
         pass.set_vertex_buffer(1, covering.buffer.slice(tile_view_pattern_buffer));
         pass.set_vertex_buffer(
             2,
@@ -107,14 +101,14 @@ impl RenderCommand<TranslucentItem> for DrawSymbol {
                 .metadata()
                 .slice(entry.layer_metadata_buffer_range()),
         );
-        pass.set_vertex_buffer(
-            3,
-            symbol_buffer_pool
-                .feature_metadata()
-                .slice(entry.feature_metadata_buffer_range()),
-        );
+        pass.set_vertex_buffer(3, symbol_buffer_pool.feature_metadata().slice(..));
 
-        draw_indices(pass, pipeline, entry.indices_range(), binding.separate_halo);
+        draw_indices(
+            pass,
+            pipeline,
+            (entry.whole_buffer_indices(), entry.base_vertex()),
+            binding.separate_halo,
+        );
         RenderCommandResult::Success
     }
 }
@@ -122,16 +116,16 @@ impl RenderCommand<TranslucentItem> for DrawSymbol {
 fn draw_indices<'w>(
     pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     pipeline: &'w SymbolPipeline,
-    indices: std::ops::Range<u32>,
+    (indices, base_vertex): (std::ops::Range<u32>, i32),
     separate_halo: bool,
 ) {
     if separate_halo {
         // All halos must precede fills so an adjacent glyph cannot cover a finished stroke.
         pass.set_pipeline(&pipeline.halo);
-        pass.draw_indexed(indices.clone(), 0, 0..1);
+        pass.draw_indexed(indices.clone(), base_vertex, 0..1);
         pass.set_pipeline(&pipeline.fill);
     }
-    pass.draw_indexed(indices, 0, 0..1);
+    pass.draw_indexed(indices, base_vertex, 0..1);
 }
 
 pub type DrawSymbols = (SetSymbolPipeline, DrawSymbol);
