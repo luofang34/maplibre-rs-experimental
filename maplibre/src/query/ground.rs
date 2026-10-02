@@ -57,6 +57,15 @@ impl Footprint {
         }
     }
 
+    /// Whether the footprint comes nearer than `radius` to `point`, as GL JS
+    /// `polygonIntersectsBufferedPoint`.
+    pub(super) fn reaches(&self, point: Point<f64>, radius: f64) -> bool {
+        match self {
+            Self::Point(at) => at.euclidean_distance(&point) < radius,
+            Self::Polygon(footprint) => footprint.euclidean_distance(&point) < radius,
+        }
+    }
+
     fn distance(&self, line: &LineString<f64>) -> f64 {
         match self {
             Self::Point(point) => point.euclidean_distance(line),
@@ -136,7 +145,7 @@ pub(super) fn touches(
         } else {
             offset_line(ring, offset)
         };
-        query.distance(&ring) <= half_width
+        query.distance(&ring) < half_width
     };
     match (&geometry.exact, kind) {
         (ExactGeometry::Polygon(polygon), "fill") => query.meets(polygon),

@@ -67,7 +67,14 @@ pub(super) fn send<T: VectorTransferables, C: Context>(
             coords,
             Some(source.to_owned()),
             TileIndex::Linear {
-                list: within_tile(projecting.into_inner().get_geometries(), buffer),
+                list: within_tile(
+                    {
+                        let mut index = projecting.into_inner();
+                        index.commit_bare_geometry();
+                        index.get_geometries()
+                    },
+                    buffer,
+                ),
             },
         ))
         .map_err(ProcessGeoJsonError::SendError)

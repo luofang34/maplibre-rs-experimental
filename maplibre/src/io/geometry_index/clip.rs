@@ -127,6 +127,7 @@ impl IndexedGeometry<f64> {
             properties: self.properties,
             source_layer: self.source_layer,
             id: self.id,
+            feature_index: self.feature_index,
         };
         let slabs = slabs(area);
         match self.exact {
@@ -148,6 +149,16 @@ impl IndexedGeometry<f64> {
                     .map(LineString::new)
                     .collect();
                 Self::from_polygon(Polygon::new(LineString::new(exterior), holes), meta)
+                    .into_iter()
+                    .collect()
+            }
+            ExactGeometry::Point(point) => {
+                let (min, max) = (area.min(), area.max());
+                let inside =
+                    (min.x..=max.x).contains(&point.x()) && (min.y..=max.y).contains(&point.y());
+                inside
+                    .then(|| Self::from_point(point, meta))
+                    .flatten()
                     .into_iter()
                     .collect()
             }

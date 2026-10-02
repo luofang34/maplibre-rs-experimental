@@ -65,6 +65,8 @@ pub(super) fn ground_corners(view_state: &ViewState, bounds: [f64; 4]) -> Vec<[f
 /// One tile a query touches: its canonical coordinates and the query rectangle in its grid.
 pub(super) struct QueryTile {
     pub(super) coords: WorldTileCoords,
+    /// Which copy of the world the tile is seen in: zero for the one at the antimeridian's east.
+    pub(super) wrap: i32,
     /// Query rectangle in tile units, as `[min x, min y, max x, max y]`.
     pub(super) local: [f64; 4],
     /// Tile units that make one screen pixel.
@@ -119,6 +121,7 @@ pub(super) fn tiles_in(region: [f64; 4], margin: f64, zoom: Zoom, z: u8) -> Vec<
                     y: ty as i32,
                     z: ZoomLevel::new(z),
                 },
+                wrap: tx.div_euclid(tiles_wide) as i32,
                 local: [
                     (x0 - tx as f64) * EXTENT,
                     (y0 - ty as f64) * EXTENT,

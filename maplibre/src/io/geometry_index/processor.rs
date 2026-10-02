@@ -61,6 +61,16 @@ impl IndexProcessor {
         RTree::bulk_load(self.geometries)
     }
 
+    /// Indexes a geometry given on its own rather than in a feature, which no `geometry_end`
+    /// ever completes, as a bare GeoJSON geometry is.
+    pub fn commit_bare_geometry(&mut self) {
+        if self.geometries.is_empty() {
+            if let Some(geometry) = self.geo_writer.take_geometry() {
+                self.index_geometry(geometry);
+            }
+        }
+    }
+
     /// Consumes completed entries in feature and part order, excluding unfinished geometry.
     pub fn get_geometries(self) -> Vec<IndexedGeometry<f64>> {
         self.geometries
@@ -71,12 +81,18 @@ impl IndexProcessor {
             properties: Arc::new(std::mem::take(&mut self.properties)),
             source_layer: self.source_layer.clone(),
             id: self.ids.get(self.feature).copied().flatten(),
+            feature_index: u32::try_from(self.feature).unwrap_or(u32::MAX),
         };
         let mut pending = vec![geometry];
         while let Some(geometry) = pending.pop() {
             let indexed = match geometry {
                 Geometry::Polygon(polygon) => IndexedGeometry::from_polygon(polygon, meta.clone()),
                 Geometry::LineString(line) => IndexedGeometry::from_linestring(line, meta.clone()),
+                Geometry::Point(point) => IndexedGeometry::from_point(point, meta.clone()),
+                Geometry::MultiPoint(points) => {
+                    pending.extend(points.0.into_iter().rev().map(Geometry::Point));
+                    None
+                }
                 Geometry::MultiLineString(lines) => {
                     pending.extend(lines.0.into_iter().rev().map(Geometry::LineString));
                     None

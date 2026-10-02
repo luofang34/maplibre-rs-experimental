@@ -182,6 +182,7 @@ impl TileIndex {
                 .filter(|geometry| match &geometry.exact {
                     ExactGeometry::Polygon(exact) => exact.contains(&coordinate),
                     ExactGeometry::LineString(exact) => exact.distance_2(&point) <= 64.0,
+                    ExactGeometry::Point(_) => false,
                 })
                 .collect::<Vec<_>>(),
             TileIndex::Linear { list } => list
@@ -189,6 +190,7 @@ impl TileIndex {
                 .filter(|geometry| match &geometry.exact {
                     ExactGeometry::Polygon(exact) => exact.contains(&coordinate),
                     ExactGeometry::LineString(exact) => exact.distance_2(&point) <= 64.0,
+                    ExactGeometry::Point(_) => false,
                 })
                 .collect::<Vec<_>>(),
         }
@@ -204,6 +206,9 @@ pub struct FeatureMeta {
     pub source_layer: Arc<str>,
     /// The feature's id, when the source assigned one.
     pub id: Option<u64>,
+    /// The feature's place in its source layer, which orders query results top-down as GL JS
+    /// orders them by feature index.
+    pub feature_index: u32,
 }
 
 /// A nonempty tile-local geometry, its enclosing bounds and the feature it belongs to.
@@ -225,9 +230,12 @@ where
     pub source_layer: Arc<str>,
     /// The feature's id, when the source assigned one.
     pub id: Option<u64>,
+    /// The feature's place in its source layer, which orders query results top-down as GL JS
+    /// orders them by feature index.
+    pub feature_index: u32,
 }
 
-/// A single polygon or line part in tile-local coordinates.
+/// A single polygon, line or point part in tile-local coordinates.
 #[derive(Debug, Clone)]
 pub enum ExactGeometry<T>
 where
@@ -237,6 +245,8 @@ where
     Polygon(Polygon<T>),
     /// Ordered vertices of a line.
     LineString(LineString<T>),
+    /// One point, as each point of a multi-point is its own part.
+    Point(Point<T>),
 }
 
 impl<T> IndexedGeometry<T>
@@ -262,6 +272,7 @@ where
                         .sum::<usize>()
             }
             ExactGeometry::LineString(line) => line.0.len(),
+            ExactGeometry::Point(_) => 1,
         };
         std::mem::size_of::<Self>() + coordinates * std::mem::size_of::<Coord<T>>() + TREE_OVERHEAD
     }
@@ -275,8 +286,20 @@ where
             properties: meta.properties,
             source_layer: meta.source_layer,
             id: meta.id,
+            feature_index: meta.feature_index,
         })
     }
+    fn from_point(point: Point<T>, meta: FeatureMeta) -> Option<Self> {
+        Some(Self {
+            exact: ExactGeometry::Point(point),
+            bounds: AABB::from_corners(point, point),
+            properties: meta.properties,
+            source_layer: meta.source_layer,
+            id: meta.id,
+            feature_index: meta.feature_index,
+        })
+    }
+
     fn from_linestring(linestring: LineString<T>, meta: FeatureMeta) -> Option<Self> {
         let (min, max) = bounds_from_points(linestring.points())?;
 
@@ -286,6 +309,7 @@ where
             properties: meta.properties,
             source_layer: meta.source_layer,
             id: meta.id,
+            feature_index: meta.feature_index,
         })
     }
 }
@@ -328,6 +352,7 @@ where
         let distance = match &self.exact {
             ExactGeometry::Polygon(polygon) => polygon.euclidean_distance(point),
             ExactGeometry::LineString(line) => line.euclidean_distance(point),
+            ExactGeometry::Point(at) => at.euclidean_distance(point),
         };
         distance * distance
     }

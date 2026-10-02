@@ -9,6 +9,7 @@ fn meta() -> FeatureMeta {
         properties: Arc::default(),
         source_layer: Arc::from("_geojson"),
         id: Some(7),
+        feature_index: 0,
     }
 }
 

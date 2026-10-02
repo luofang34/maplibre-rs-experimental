@@ -11,6 +11,7 @@ fn indexed(exact: ExactGeometry<f64>) -> IndexedGeometry<f64> {
         properties: Arc::default(),
         source_layer: Arc::from("lines"),
         id: None,
+        feature_index: 0,
     }
 }
 

@@ -28,6 +28,7 @@ use crate::{
     tcs::world::World,
 };
 
+mod circle;
 mod extrusion;
 mod ground;
 mod tiles;
@@ -155,6 +156,12 @@ fn in_drawing_order(found: Vec<(u32, Option<f64>, QueriedFeature)>) -> Vec<Queri
     ordered
 }
 
+/// A feature with its layer's index and, for a fill extrusion, its depth on screen.
+type Found = (u32, Option<f64>, QueriedFeature);
+
+/// Where a feature comes in GL JS's top-down order within its layer.
+type TopDown = (u8, i32, i32, i32, Reverse<u32>);
+
 /// A layer a fill or line feature can be reported for, with its filter parsed once.
 struct Candidate<'a> {
     layer: &'a StyleLayer,
@@ -176,6 +183,7 @@ impl<'a> Candidate<'a> {
         };
         let reach_pixels = match &layer.paint {
             Some(LayerPaint::Line(paint)) => line_margin_pixels(paint, zoom),
+            Some(LayerPaint::Circle(paint)) => circle::margin_pixels(paint, zoom),
             _ => 0.0,
         };
         Some(Self {
@@ -212,7 +220,10 @@ struct Search<'a> {
     query_filter: Option<Filter>,
     seen: HashSet<(String, Identity)>,
     /// Each feature with its layer's index and, for a fill extrusion, its depth on screen.
-    found: Vec<(u32, Option<f64>, QueriedFeature)>,
+    /// Each with GL JS's order within its layer: tiles from the lowest zoom, then top to bottom,
+    /// west copy of the world first, and west to east; then the features of a tile from the last
+    /// one in its data.
+    found: Vec<(TopDown, Found)>,
     /// The query in window pixels, which extrusions are met against as they stand.
     screen: extrusion::ScreenQuery,
     /// The corners of the ground the query covers, in world pixels.
@@ -250,8 +261,10 @@ fn vector_features(
         .layers
         .iter()
         .filter(|layer| {
-            matches!(layer.type_.as_str(), "fill" | "line" | "fill-extrusion")
-                && layer.is_visible_at(zoom.value())
+            matches!(
+                layer.type_.as_str(),
+                "fill" | "line" | "fill-extrusion" | "circle"
+            ) && layer.is_visible_at(zoom.value())
                 && options
                     .layers
                     .as_ref()
@@ -303,7 +316,9 @@ fn vector_features(
         view_state,
     };
     search_tiles(world, (region, zoom, margin), &mut search);
-    Ok(search.found)
+    let mut found = search.found;
+    found.sort_by_key(|(order, _)| *order);
+    Ok(found.into_iter().map(|(_, feature)| feature).collect())
 }
 
 /// Collects from the finest level of tiles that holds any index for the region, looking
@@ -370,6 +385,7 @@ fn collect(
     let (kind, geometry_type) = match &geometry.exact {
         ExactGeometry::Polygon(_) => (GeometryType::Polygon, "Polygon"),
         ExactGeometry::LineString(_) => (GeometryType::LineString, "LineString"),
+        ExactGeometry::Point(_) => (GeometryType::Point, "Point"),
     };
     let id = geometry.id.map(|id| Value::Number(id as f64));
     let context = FeatureContext {
@@ -413,6 +429,19 @@ fn collect(
                     None => continue,
                 }
             }
+            (exact, "circle") => match &candidate.layer.paint {
+                Some(LayerPaint::Circle(paint))
+                    if circle::geometry_hit(
+                        exact,
+                        (tile, candidate),
+                        (paint, &geometry.properties),
+                        (*screen, view_state),
+                    ) =>
+                {
+                    None
+                }
+                _ => continue,
+            },
             _ if flat_hit(geometry, tile, candidate, view_state.zoom().value()) => None,
             _ => continue,
         };
@@ -423,18 +452,28 @@ fn collect(
         if !seen.insert((layer.id.clone(), identity)) {
             continue;
         }
+        let order = (
+            u8::from(tile.coords.z),
+            tile.coords.y,
+            tile.wrap,
+            tile.coords.x,
+            Reverse(geometry.feature_index),
+        );
         found.push((
-            layer.index,
-            depth,
-            QueriedFeature {
-                layer: layer.id.clone(),
-                source: layer.source.clone(),
-                source_layer: geometry.source_layer.to_string(),
-                id: geometry.id,
-                properties: source_properties(&geometry.properties),
-                geometry_type,
-                text: None,
-            },
+            order,
+            (
+                layer.index,
+                depth,
+                QueriedFeature {
+                    layer: layer.id.clone(),
+                    source: layer.source.clone(),
+                    source_layer: geometry.source_layer.to_string(),
+                    id: geometry.id,
+                    properties: source_properties(&geometry.properties),
+                    geometry_type,
+                    text: None,
+                },
+            ),
         ));
     }
 }

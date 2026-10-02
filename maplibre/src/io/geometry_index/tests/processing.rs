@@ -39,7 +39,7 @@ fn a_feature_without_properties_is_queryable() {
 }
 
 #[test]
-fn unsupported_geometry_cannot_leak_properties_into_the_next_feature() {
+fn a_features_properties_do_not_leak_into_the_next_feature() {
     let processor = process_json(
         r#"{"type":"FeatureCollection","features":[
         {"type":"Feature","properties":{"name":"point"},"geometry":{"type":"Point","coordinates":[0,0]}},
@@ -47,8 +47,9 @@ fn unsupported_geometry_cannot_leak_properties_into_the_next_feature() {
     ]}"#,
     );
     let geometries = processor.get_geometries();
-    assert_eq!(geometries.len(), 1);
-    assert!(geometries[0].properties.is_empty());
+    assert_eq!(geometries.len(), 2);
+    assert_eq!(name(&geometries[0].properties), Some("point"));
+    assert!(geometries[1].properties.is_empty());
 }
 
 #[test]
@@ -92,8 +93,12 @@ fn a_new_feature_discards_an_interrupted_geometry() {
         .process(&mut processor)
         .expect("next layer processes");
     let geometries = processor.get_geometries();
-    assert_eq!(geometries.len(), 1);
-    assert!(geometries[0].properties.is_empty());
+    assert_eq!(
+        geometries.len(),
+        3,
+        "the multi-point's two points and the line"
+    );
+    assert!(geometries.iter().all(|part| part.properties.is_empty()));
 }
 
 #[test]
@@ -164,9 +169,10 @@ fn nested_collections_keep_queryable_parts_in_input_order() {
         ]}}"#,
     );
     let geometries = processor.get_geometries();
-    assert_eq!(geometries.len(), 2);
+    assert_eq!(geometries.len(), 3);
     assert!(matches!(geometries[0].exact, ExactGeometry::LineString(_)));
-    assert!(matches!(geometries[1].exact, ExactGeometry::Polygon(_)));
+    assert!(matches!(geometries[1].exact, ExactGeometry::Point(_)));
+    assert!(matches!(geometries[2].exact, ExactGeometry::Polygon(_)));
     assert!(geometries
         .iter()
         .all(|g| name(&g.properties) == Some("mixed")));
@@ -189,6 +195,12 @@ fn nonfinite_scaled_coordinates_return_an_error_and_allow_the_next_feature() {
         multipoint_then_line()
             .process(&mut processor)
             .expect("next layer processes");
-        assert_eq!(processor.get_geometries().len(), 1);
+        let parts = processor.get_geometries();
+        assert_eq!(
+            parts.len(),
+            3,
+            "the next layer's two points and line, and nothing else"
+        );
+        assert!(matches!(&parts[2].exact, ExactGeometry::LineString(line) if line.0.len() == 2));
     }
 }

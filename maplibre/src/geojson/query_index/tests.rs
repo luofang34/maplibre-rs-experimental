@@ -18,6 +18,7 @@ fn indexed(polygon: Polygon<f64>) -> IndexedGeometry<f64> {
         properties: Default::default(),
         source_layer: GEOJSON_LAYER.into(),
         id: None,
+        feature_index: 0,
     }
 }
 

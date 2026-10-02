@@ -52,10 +52,34 @@ fn a_multipoint_feature_does_not_swallow_the_geometry_after_it() {
         .process(&mut index)
         .expect("the layer processes");
 
-    let geometries = index.get_geometries();
+    let parts: Vec<_> = index
+        .get_geometries()
+        .into_iter()
+        .map(|part| {
+            let kind = match part.exact {
+                super::ExactGeometry::Point(_) => "point",
+                super::ExactGeometry::LineString(_) => "line",
+                super::ExactGeometry::Polygon(_) => "polygon",
+            };
+            (kind, part.id, part.feature_index)
+        })
+        .collect();
     assert_eq!(
-        geometries.len(),
-        1,
-        "the line is indexed; points are not queryable"
+        parts,
+        [("point", None, 0), ("point", None, 0), ("line", None, 1)],
+        "each point of the multi-point is a part of the first feature, and the line follows"
     );
+}
+
+#[test]
+fn a_bare_geometry_is_indexed_once_committed() {
+    let mut index = IndexProcessor::new();
+    geozero::geojson::GeoJson(r#"{"type": "Point", "coordinates": [5, 6]}"#)
+        .process(&mut index)
+        .expect("the geometry processes");
+    index.commit_bare_geometry();
+
+    let parts = index.get_geometries();
+    assert_eq!(parts.len(), 1);
+    assert!(matches!(parts[0].exact, super::ExactGeometry::Point(point) if point.x() == 5.0));
 }

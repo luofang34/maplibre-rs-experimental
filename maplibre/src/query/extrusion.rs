@@ -46,6 +46,18 @@ pub(super) enum ScreenQuery {
 }
 
 impl ScreenQuery {
+    /// Whether the query comes nearer than `radius` to the window position `centre`, as GL JS
+    /// `polygonIntersectsBufferedPoint`.
+    pub(super) fn reaches(&self, [x, y]: [f64; 2], radius: f64) -> bool {
+        let (dx, dy) = match self {
+            Self::Point([px, py]) => (px - x, py - y),
+            Self::Box([x0, y0, x1, y1]) => {
+                ((x0 - x).max(0.0).max(x - x1), (y0 - y).max(0.0).max(y - y1))
+            }
+        };
+        dx.hypot(dy) < radius
+    }
+
     fn meets(&self, face: &Polygon<f64>) -> bool {
         match self {
             Self::Point([x, y]) => face.intersects(&Point::new(*x, *y)),

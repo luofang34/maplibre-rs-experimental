@@ -156,6 +156,7 @@ fn clearing_tiles_discards_geometry_queries_before_coordinates_are_reused() {
                 )])),
                 source_layer: "roads".into(),
                 id: None,
+                feature_index: 0,
             }],
         },
     );
