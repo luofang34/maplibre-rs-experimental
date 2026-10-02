@@ -43,6 +43,7 @@ fn bench_process_vector_tile(c: &mut Criterion) {
                         .unwrap(),
                     layers: Style::default().layers.iter().cloned().collect(),
                     projection: ProjectionType::Mercator,
+                    overscaled_zoom: 0,
                 },
                 &mut ProcessVectorContext::<DefaultVectorTransferables, _>::new(DummyContext),
             )
