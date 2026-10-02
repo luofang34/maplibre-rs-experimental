@@ -171,6 +171,24 @@ impl RasterResources {
             );
     }
 
+    /// Drops every texture of a source, as when it leaves the style.
+    pub(crate) fn forget_source(&mut self, source: &RasterSourceId) {
+        self.bound_textures.remove(source);
+        self.border_sides.remove(source);
+    }
+
+    /// Whether a layer of the style draws from the source, so its tiles need textures.
+    pub(crate) fn draws(&self, source: &RasterSourceId) -> bool {
+        self.dem_sources.contains(source)
+            || self.layer_sources.values().any(|drawn| drawn == source)
+    }
+
+    /// The number of tile textures bound for a source.
+    #[cfg(test)]
+    pub(crate) fn texture_count(&self, source: &RasterSourceId) -> usize {
+        self.bound_textures.get(source).map_or(0, HashMap::len)
+    }
+
     /// Drops one source binding while retaining other sources at these coordinates.
     pub fn remove_source_texture(&mut self, source: &RasterSourceId, coords: WorldTileCoords) {
         if let Some(textures) = self.bound_textures.get_mut(source) {

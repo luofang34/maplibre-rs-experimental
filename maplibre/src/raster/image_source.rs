@@ -134,5 +134,92 @@ pub fn render_tile(
     Some(tile_image)
 }
 
+/// Makes an image source's tiles again after its picture or corners changed. A tile the
+/// picture still reaches keeps showing the old one until the new arrives; a tile it no longer
+/// reaches drops it now.
+pub(crate) fn reload(
+    world: &mut crate::tcs::world::World,
+    style: &crate::style::Style,
+    name: &str,
+) {
+    use crate::{
+        io::tile_retry::{self, RequestKind},
+        raster::{RasterLayersDataComponent, RasterSourceId},
+        render::eventually::Eventually,
+        style::source::Source,
+    };
+    let Some(Source::Image(image)) = style.sources.get(name) else {
+        return;
+    };
+    let source = RasterSourceId::from(name);
+    let coords: Vec<WorldTileCoords> = world.tiles.tiles.values().map(|tile| tile.coords).collect();
+    for coords in coords {
+        if render_tile_bounds_reach(image.coordinates, coords) {
+            continue;
+        }
+        if let Some(component) = world
+            .tiles
+            .query_mut::<&mut RasterLayersDataComponent>(coords)
+        {
+            component.layers.retain(|layer| layer.source() != &source);
+        }
+        if let Some(Eventually::Initialized(raster)) = world
+            .resources
+            .get_mut::<Eventually<crate::raster::resource::RasterResources>>()
+        {
+            raster.remove_source_texture(&source, coords);
+        }
+    }
+    tile_retry::refresh(world, RequestKind::Raster);
+}
+
+/// Whether the picture stretched over `coordinates` can reach the tile: its corners' bounding box
+/// overlaps the tile.
+fn render_tile_bounds_reach(coordinates: [[f64; 2]; 4], tile: WorldTileCoords) -> bool {
+    let tile_count = 2_f64.powi(i32::from(u8::from(tile.z)));
+    let corners = coordinates.map(mercator);
+    let fold = |axis: usize| {
+        corners.iter().fold((f64::MAX, f64::MIN), |(lo, hi), c| {
+            (lo.min(c[axis]), hi.max(c[axis]))
+        })
+    };
+    let ((west, east), (north, south)) = (fold(0), fold(1));
+    let (left, top) = (
+        f64::from(tile.x) / tile_count,
+        f64::from(tile.y) / tile_count,
+    );
+    let size = 1.0 / tile_count;
+    // A picture past the antimeridian shows in copies of the world, which this does not follow.
+    let wraps = west < 0.0 || east > 1.0;
+    wraps || !(east < left || west > left + size || south < top || north > top + size)
+}
+
+/// The tile `coords` of an image source, resampled from its picture, which is fetched and
+/// decoded once through the client's shared asset cache. `Ok(None)` when the picture does not
+/// reach the tile.
+pub(crate) async fn load_tile<HC: crate::io::source_client::HttpClient>(
+    client: &crate::io::source_client::SourceClient<HC>,
+    source: &crate::style::source::ImageSource,
+    coords: WorldTileCoords,
+) -> Result<Option<RgbaImage>, crate::sdf::assets::AssetFailure> {
+    use crate::sdf::assets::AssetFailure;
+    let url = source.url.as_str();
+    let picture = client
+        .assets()
+        .load(format!("image-source:{url}"), || async {
+            let bytes = crate::sdf::assets::fetch(client, url, "image source").await?;
+            let picture = image::load_from_memory(&bytes)
+                .map_err(|error| {
+                    tracing::warn!(%url, %error, "invalid image source picture");
+                    AssetFailure::Terminal(format!("invalid image {url}: {error}"))
+                })?
+                .to_rgba8();
+            let bytes = picture.as_raw().len();
+            Ok((picture, bytes))
+        })
+        .await?;
+    Ok(render_tile(&picture, source.coordinates, coords))
+}
+
 #[cfg(test)]
 mod tests;

@@ -9,3 +9,5 @@ mod tests;
 mod vector;
 
 mod image_payloads;
+
+mod image_source;

@@ -59,9 +59,11 @@ fn upload_raster_layer(
         };
         for data in &layers.layers {
             if let RasterLayerData::Available(data) = data {
-                if raster_resources
-                    .get_bound_texture(&data.source, &coords)
-                    .is_none()
+                // A result that lands after its source left the style is never drawn.
+                if raster_resources.draws(&data.source)
+                    && raster_resources
+                        .get_bound_texture(&data.source, &coords)
+                        .is_none()
                 {
                     upload_image(raster_resources, device, queue, tiles, data);
                 }

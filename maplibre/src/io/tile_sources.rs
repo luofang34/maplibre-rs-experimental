@@ -4,7 +4,9 @@ use std::collections::BTreeMap;
 
 use crate::{
     coords::{WorldTileCoords, TILE_SIZE},
-    io::source_type::{GeoJsonTileSource, RasterSource, SourceType, TessellateSource},
+    io::source_type::{
+        GeoJsonTileSource, ImageTileSource, RasterSource, SourceType, TessellateSource,
+    },
     style::{
         layer::StyleLayer,
         source::{
@@ -145,6 +147,12 @@ pub fn source_layer_groups(style: &Style, kind: TileKind) -> Vec<SourceLayerGrou
                 SourceType::GeoJson(GeoJsonTileSource {
                     name: name.clone(),
                     source: geojson.clone(),
+                }),
+            ),
+            Some((name, Some(Source::Image(image)))) if kind == TileKind::Raster => (
+                Some(name.clone()),
+                SourceType::Image(ImageTileSource {
+                    source: image.clone(),
                 }),
             ),
             Some((name, Some(source))) => match kind.template_of(source) {

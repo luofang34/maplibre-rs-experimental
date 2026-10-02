@@ -25,7 +25,7 @@ use crate::{
     sdf::query::{QueryError, QueryGeometry, QueryOptions, RenderedSymbol},
     style::{
         mutation::{StyleChange, StyleMutationError},
-        source::{GeoJsonData, Source},
+        source::GeoJsonData,
         Style,
     },
     tcs::world::World,
@@ -303,7 +303,7 @@ where
 
     /// Applies a style change before or after the renderer is initialized; when it needs loaded
     /// vector tiles fetched again, that is requested.
-    fn mutate_style(
+    pub(crate) fn mutate_style(
         &mut self,
         apply: impl FnOnce(&mut Style) -> Result<StyleChange, StyleMutationError>,
     ) -> Result<StyleChange, MapError> {
@@ -369,16 +369,6 @@ where
         maxzoom: Option<f64>,
     ) -> Result<StyleChange, MapError> {
         self.mutate_style(|style| style.set_layer_zoom_range(layer, minzoom, maxzoom))
-    }
-
-    /// Adds a source.
-    pub fn add_source(&mut self, name: &str, source: Source) -> Result<StyleChange, MapError> {
-        self.mutate_style(|style| style.add_source(name, source))
-    }
-
-    /// Removes a source no layer draws from.
-    pub fn remove_source(&mut self, name: &str) -> Result<StyleChange, MapError> {
-        self.mutate_style(|style| style.remove_source(name))
     }
 
     /// Sets a `global-state` value, as GL JS `setGlobalStateProperty`; `null` restores the
@@ -478,6 +468,8 @@ fn initial_view_state(
         .set_roll(cgmath::Deg(style.roll.unwrap_or_default()));
     view
 }
+
+mod sources;
 
 #[cfg(test)]
 mod tests;

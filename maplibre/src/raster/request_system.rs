@@ -11,6 +11,7 @@ use crate::{
             AsyncProcedureCall, AsyncProcedureFuture, AttemptContext, Context, Input,
             ProcedureError,
         },
+        source_type::SourceType,
         tile_backpressure::request_budget,
         tile_retry::{self, RequestDisposition, RequestKind, TileRequestOutcome},
         tile_sources::{missing_tile_fallback, source_layer_groups, TileKind},
@@ -113,6 +114,15 @@ pub fn fetch_raster_apc<K: OffscreenKernel, T: RasterTransferables, C: Context +
 
         for group in source_layer_groups(&style, TileKind::Raster) {
             let context = context.clone();
+            if let SourceType::Image(image) = &group.source {
+                retry |= send_image_tile::<T, _, _>(
+                    (&client, &image.source),
+                    (coords, RasterSourceId::new(group.source_name.clone())),
+                    context,
+                )
+                .await?;
+                continue;
+            }
             match client.fetch(&coords, &group.source).await {
                 Ok(data) => {
                     let mut process_context = ProcessRasterContext::<T, _>::new(context.clone());
@@ -181,6 +191,39 @@ pub fn fetch_raster_apc<K: OffscreenKernel, T: RasterTransferables, C: Context +
     })
 }
 
+/// Sends the tile of an image source back, empty where the picture does not reach it, and
+/// returns whether a failed fetch is worth retrying.
+async fn send_image_tile<
+    T: RasterTransferables,
+    HC: crate::io::source_client::HttpClient,
+    C: Context,
+>(
+    (client, image): (
+        &crate::io::source_client::SourceClient<HC>,
+        &crate::style::source::ImageSource,
+    ),
+    (coords, source): (WorldTileCoords, RasterSourceId),
+    context: C,
+) -> Result<bool, ProcedureError> {
+    use crate::raster::transferables::LayerRaster;
+    match crate::raster::image_source::load_tile(client, image, coords).await {
+        Ok(tile) => {
+            // A tile the picture does not reach has loaded too; it is simply empty.
+            let tile = tile.unwrap_or_else(|| image::RgbaImage::new(1, 1));
+            context
+                .send_back(T::LayerRaster::build_from(coords, source, tile))
+                .map_err(ProcedureError::Send)?;
+            Ok(false)
+        }
+        Err(failure) => {
+            context
+                .send_back(T::LayerRasterMissing::build_from(coords, source))
+                .map_err(ProcedureError::Send)?;
+            Ok(failure.is_retryable())
+        }
+    }
+}
+
 impl<E: Environment, T: RasterTransferables> RequestSystem<E, T> {
     fn request(
         &self,
@@ -236,6 +279,7 @@ fn wanted_tiles(
         .unwrap_or(0);
         let bounds = match source.name().and_then(|name| style.sources.get(name)) {
             Some(crate::style::source::Source::Raster(source)) => source.bounds,
+            Some(crate::style::source::Source::Image(image)) => image_bounds(image),
             _ => None,
         };
         for coords in tiles {
@@ -256,6 +300,23 @@ fn wanted_tiles(
         }
     }
     wanted
+}
+
+/// The bounds `(west, south, east, north)` of an image's corners, so tiles it cannot reach are
+/// not requested; none for a picture that reaches past the antimeridian, whose copies across it
+/// a tile may show.
+fn image_bounds(image: &crate::style::source::ImageSource) -> Option<(f64, f64, f64, f64)> {
+    let longitudes = image.coordinates.map(|[longitude, _]| longitude);
+    let latitudes = image.coordinates.map(|[_, latitude]| latitude);
+    let fold = |values: [f64; 4]| {
+        values
+            .into_iter()
+            .fold((f64::MAX, f64::MIN), |(lo, hi), value| {
+                (lo.min(value), hi.max(value))
+            })
+    };
+    let ((west, east), (south, north)) = (fold(longitudes), fold(latitudes));
+    (west >= -180.0 && east <= 180.0).then_some((west, south, east, north))
 }
 
 #[cfg(test)]

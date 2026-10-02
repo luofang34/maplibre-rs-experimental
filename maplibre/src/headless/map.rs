@@ -42,6 +42,7 @@ pub use error::HeadlessMapOperationError;
 mod processed;
 mod raster;
 pub mod reference;
+mod style;
 mod symbols;
 #[cfg(test)]
 mod terrain_coverage;

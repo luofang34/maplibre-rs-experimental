@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use crate::{
     coords::WorldTileCoords,
-    style::source::{GeoJsonSource, TileAddressingScheme},
+    style::source::{GeoJsonSource, ImageSource, TileAddressingScheme},
 };
 
 /// Tile coordinates that cannot be addressed by any tile URL.
@@ -124,6 +124,13 @@ pub struct GeoJsonTileSource {
     pub source: GeoJsonSource,
 }
 
+/// An image source, whose tiles are resampled from one picture instead of fetched.
+#[derive(Clone, Debug)]
+pub struct ImageTileSource {
+    /// The declaration: the picture's URL and the corners it is stretched over.
+    pub source: ImageSource,
+}
+
 /// Represents the tiles' different types of source.
 #[derive(Clone, Debug)]
 pub enum SourceType {
@@ -131,6 +138,8 @@ pub enum SourceType {
     GeoJson(GeoJsonTileSource),
     /// Raster image tile URL template.
     Raster(RasterSource),
+    /// One picture resampled into raster tiles.
+    Image(ImageTileSource),
     /// Vector tile URL template for geometry processing.
     Tessellate(TessellateSource),
 }
@@ -139,7 +148,7 @@ impl SourceType {
     /// Returns the tile URL, or `None` when the coordinates are outside the world.
     pub fn format(&self, coords: &WorldTileCoords) -> Option<String> {
         match self {
-            SourceType::GeoJson(_) => None,
+            SourceType::GeoJson(_) | SourceType::Image(_) => None,
             SourceType::Raster(raster_source) => raster_source.format(coords),
             SourceType::Tessellate(tessellate_source) => tessellate_source.format(coords),
         }

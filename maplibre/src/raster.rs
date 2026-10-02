@@ -29,6 +29,28 @@ use crate::{
 pub mod cross_fade;
 mod dem_border;
 pub mod image_source;
+
+/// Drops a source that left the style: its results on every tile and its textures, so neither
+/// outlives it.
+pub(crate) fn forget_source(world: &mut World, name: &str) {
+    let source = RasterSourceId::from(name);
+    let coords: Vec<WorldTileCoords> = world.tiles.tiles.values().map(|tile| tile.coords).collect();
+    for coords in coords {
+        if let Some(component) = world
+            .tiles
+            .query_mut::<&mut RasterLayersDataComponent>(coords)
+        {
+            component.layers.retain(|layer| layer.source() != &source);
+        }
+    }
+    if let Some(crate::render::eventually::Eventually::Initialized(raster)) =
+        world
+            .resources
+            .get_mut::<crate::render::eventually::Eventually<resource::RasterResources>>()
+    {
+        raster.forget_source(&source);
+    }
+}
 pub mod paint;
 pub(crate) mod populate_world_system;
 mod process_raster;

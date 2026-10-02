@@ -50,7 +50,8 @@ impl AssetFailure {
         }
     }
 
-    fn is_retryable(&self) -> bool {
+    /// Whether a later attempt can succeed.
+    pub fn is_retryable(&self) -> bool {
         matches!(self, Self::Retryable(_))
     }
 }

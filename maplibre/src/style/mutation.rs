@@ -122,6 +122,12 @@ pub enum StyleMutationError {
         /// Everything that is not supported.
         findings: Vec<StyleValidationError>,
     },
+    /// An image update names a source that is not an image source.
+    #[error("source `{source_name}` is not an image source")]
+    NotAnImageSource {
+        /// The source.
+        source_name: String,
+    },
 }
 
 /// What a change did.
@@ -133,6 +139,10 @@ pub struct StyleChange {
     pub redraw_tiles: bool,
     /// Layers that are gone, whose leftovers in loaded tiles must be dropped.
     pub removed_layers: Vec<String>,
+    /// Image sources whose picture or corners changed, whose tiles must be made again.
+    pub reloaded_image_sources: Vec<String>,
+    /// Raster and image sources that are gone, whose tiles and textures must be dropped.
+    pub removed_raster_sources: Vec<String>,
 }
 
 /// Whether a layer's content lives in per-tile buffers built from vector tiles.
@@ -346,8 +356,17 @@ impl Style {
                 layer: layer.id.clone(),
             });
         }
-        self.sources.remove(name);
-        Ok(StyleChange::default())
+        let removed = self.sources.remove(name);
+        Ok(StyleChange {
+            removed_raster_sources: matches!(
+                removed,
+                Some(Source::Raster(_) | Source::RasterDem(_) | Source::Image(_))
+            )
+            .then(|| name.to_owned())
+            .into_iter()
+            .collect(),
+            ..StyleChange::default()
+        })
     }
 
     fn position_of(&self, id: &str) -> Result<usize, StyleMutationError> {
@@ -533,9 +552,17 @@ impl MapContext {
         if change.redraw_tiles {
             tile_retry::refresh(&mut self.world, RequestKind::Vector);
         }
+        for name in &change.removed_raster_sources {
+            crate::raster::forget_source(&mut self.world, name);
+        }
+        for name in &change.reloaded_image_sources {
+            crate::raster::image_source::reload(&mut self.world, &self.style, name);
+        }
         Ok(change)
     }
 }
+
+mod image_source;
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;
