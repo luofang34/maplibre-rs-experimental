@@ -332,5 +332,7 @@ mod queries;
 
 mod stability;
 
+mod variable_anchors;
+
 #[path = "styling/tests.rs"]
 mod styling;

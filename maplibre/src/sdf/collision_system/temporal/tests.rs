@@ -101,3 +101,25 @@ fn placed_features_of_one_tile_with_the_same_key_are_each_drawn() {
         "the second placed feature is not suppressed as a duplicate"
     );
 }
+
+#[test]
+fn the_anchor_of_a_shown_label_is_kept_for_the_next_placement() {
+    let mut history = PlacementHistory::default();
+    let (layer, feature) = (layer(12), feature(100.0));
+    history.begin(Duration::from_millis(0));
+    assert_eq!(history.previous_anchor(&layer, &feature), None);
+    history.opacity(&layer, &feature, [true, false]);
+    history.remember_anchor(&layer, &feature, Some(1));
+
+    history.begin(Duration::from_millis(16));
+    assert_eq!(history.previous_anchor(&layer, &feature), Some(1));
+    history.opacity(&layer, &feature, [false, false]);
+    history.remember_anchor(&layer, &feature, None);
+
+    history.begin(Duration::from_millis(32));
+    assert_eq!(
+        history.previous_anchor(&layer, &feature),
+        None,
+        "a hidden label has no anchor to keep"
+    );
+}

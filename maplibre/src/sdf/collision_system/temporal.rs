@@ -21,6 +21,8 @@ struct State {
     last_seen: Duration,
     claimed: u64,
     claimed_by: WorldTileCoords,
+    /// The variable anchor the text was last placed with.
+    anchor: Option<usize>,
 }
 #[derive(Default)]
 pub(super) struct PlacementHistory {
@@ -72,6 +74,7 @@ impl PlacementHistory {
                 last_seen: self.now,
                 claimed: frame.wrapping_sub(1),
                 claimed_by: layer.coords,
+                anchor: None,
             });
             states.len() - 1
         });
@@ -96,6 +99,47 @@ impl PlacementHistory {
         state.opacity
     }
 }
+impl PlacementHistory {
+    /// The anchor the label's text was placed with in the last placement it was shown in, which
+    /// GL JS tries first so a label that still fits does not jump between anchors.
+    pub(super) fn previous_anchor(
+        &self,
+        layer: &SymbolLayerData,
+        feature: &Feature,
+    ) -> Option<usize> {
+        self.states
+            .get(&key(layer, feature))?
+            .iter()
+            .find(|state| matches(state, layer.coords, feature))
+            .filter(|state| state.target[0])?
+            .anchor
+    }
+
+    /// Records the anchor this frame placed the label's text with, on the state
+    /// [`Self::opacity`] took for it.
+    pub(super) fn remember_anchor(
+        &mut self,
+        layer: &SymbolLayerData,
+        feature: &Feature,
+        anchor: Option<usize>,
+    ) {
+        let frame = self.frame;
+        if let Some(state) = self
+            .states
+            .get_mut(&key(layer, feature))
+            .and_then(|states| {
+                states.iter_mut().find(|state| {
+                    state.claimed == frame
+                        && state.claimed_by == layer.coords
+                        && matches(state, layer.coords, feature)
+                })
+            })
+        {
+            state.anchor = anchor;
+        }
+    }
+}
+
 fn key(layer: &SymbolLayerData, feature: &Feature) -> Key {
     Key {
         layer: layer.style_layer_id.clone(),
