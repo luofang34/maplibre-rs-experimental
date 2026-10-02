@@ -1,0 +1,40 @@
+{
+  "version": 8,
+  "metadata": {
+    "test": {
+      "description": "A courtyard building: the hole is open to the ground and walled on the inside, across the four tiles the polygon spans. Expected image rendered by MapLibre GL JS 6.3.0. The same building without its hole differs from it by about 0.042; max-diff sits well below the default to catch smaller errors in the inner walls.",
+      "max-diff": 0.006,
+      "width": 256,
+      "height": 256
+    }
+  },
+  "center": [0, 0],
+  "zoom": 17,
+  "pitch": 50,
+  "bearing": 30,
+  "sources": {
+    "courtyard": {
+      "type": "geojson",
+      "data": {
+        "type": "Feature",
+        "properties": {},
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [[-0.0008, -0.0006], [0.0008, -0.0006], [0.0008, 0.0006], [-0.0008, 0.0006], [-0.0008, -0.0006]],
+            [[-0.0004, -0.0003], [-0.0004, 0.0003], [0.0004, 0.0003], [0.0004, -0.0003], [-0.0004, -0.0003]]
+          ]
+        }
+      }
+    }
+  },
+  "layers": [
+    {"id": "background", "type": "background", "paint": {"background-color": "white"}},
+    {
+      "id": "courtyard",
+      "type": "fill-extrusion",
+      "source": "courtyard",
+      "paint": {"fill-extrusion-color": "#4060c0", "fill-extrusion-height": 30}
+    }
+  ]
+}
