@@ -33,8 +33,8 @@ fn adjacent_tiles_with_different_dem_resolutions_have_identical_edges() {
     load(&mut tiles, left, 1000);
     load(&mut tiles, parent, 400);
     let sources = Sources::new(HashMap::from([(left, Some(left)), (right, Some(parent))]));
-    let a = build_edges(left, &sources, &tiles);
-    let b = build_edges(right, &sources, &tiles);
+    let a = build_edges(left, &sources, &Dems::new(&sources, &tiles));
+    let b = build_edges(right, &sources, &Dems::new(&sources, &tiles));
     for i in 0..=N {
         assert_eq!(at(&a, i, 3), at(&b, i, 2), "vertex {i}");
     }
@@ -54,9 +54,9 @@ fn fine_vertices_interpolate_the_coarse_mesh_edge() {
         (fine, Some(fine)),
         (fine_south, Some(fine_south)),
     ]));
-    let a = build_edges(coarse, &sources, &tiles);
+    let a = build_edges(coarse, &sources, &Dems::new(&sources, &tiles));
     for (offset, tile) in [(0, fine), (N / 2, fine_south)] {
-        let b = build_edges(tile, &sources, &tiles);
+        let b = build_edges(tile, &sources, &Dems::new(&sources, &tiles));
         for i in 0..=N {
             let t = offset as f32 + i as f32 / 2.0;
             let expected = at(&a, t.floor() as usize, 3) * (1.0 - t.fract())
@@ -77,8 +77,8 @@ fn wraparound_edges_agree() {
     load(&mut tiles, a, 1000);
     load(&mut tiles, b, 2000);
     let sources = Sources::new(HashMap::from([(a, Some(a)), (b, Some(b))]));
-    let aa = build_edges(a, &sources, &tiles);
-    let bb = build_edges(b, &sources, &tiles);
+    let aa = build_edges(a, &sources, &Dems::new(&sources, &tiles));
+    let bb = build_edges(b, &sources, &Dems::new(&sources, &tiles));
     for i in 0..=N {
         assert_eq!(at(&aa, i, 2), at(&bb, i, 3));
     }
@@ -103,4 +103,86 @@ fn replacing_a_dem_refreshes_cached_mesh_edges() {
             assert!((after - before - 1000.0).abs() < 0.001);
         }
     }
+}
+
+/// Applies a coverage of `(tile, DEM source)` pairs to the cache.
+fn cover(cache: &mut EdgeCache, coverage: &[(WorldTileCoords, WorldTileCoords)], tiles: &Tiles) {
+    let sources: Vec<_> = coverage
+        .iter()
+        .map(|(tile, source)| (Some(*source), *tile, None))
+        .collect();
+    let mut uniforms = vec![bytemuck::Zeroable::zeroed(); sources.len()];
+    cache.apply(&sources, &mut uniforms, tiles);
+}
+
+fn rebuilt_from_scratch(
+    coverage: &[(WorldTileCoords, WorldTileCoords)],
+    tiles: &Tiles,
+) -> HashMap<WorldTileCoords, EdgeHeights> {
+    let mut fresh = EdgeCache::default();
+    cover(&mut fresh, coverage, tiles);
+    (*fresh.samples).clone()
+}
+
+fn same(
+    a: &HashMap<WorldTileCoords, EdgeHeights>,
+    b: &HashMap<WorldTileCoords, EdgeHeights>,
+) -> bool {
+    a.len() == b.len()
+        && a.iter().all(|(tile, edges)| {
+            b.get(tile)
+                .is_some_and(|other| bytemuck::bytes_of(edges) == bytemuck::bytes_of(other))
+        })
+}
+
+#[test]
+fn a_changed_coverage_rebuilds_only_the_edges_it_reaches_and_matches_a_full_rebuild() {
+    let mut tiles = Tiles::default();
+    let parent = tile(2, 1, 2);
+    load(&mut tiles, parent, 400);
+    let row: Vec<WorldTileCoords> = (0..8).map(|x| tile(x, 2, 3)).collect();
+    for (i, coords) in row.iter().enumerate() {
+        load(&mut tiles, *coords, 1000 + 100 * i as u16);
+    }
+    let mut cache = EdgeCache::default();
+    let mut coverage: Vec<_> = row.iter().map(|coords| (*coords, *coords)).collect();
+    cover(&mut cache, &coverage, &tiles);
+    assert_eq!(
+        cache.rebuilt,
+        row.len(),
+        "a first coverage builds every tile"
+    );
+
+    // Refining the westmost tile into its children reaches only them, the tile east of them and,
+    // across the antimeridian, the eastmost tile of the row.
+    let west = row[0];
+    load(&mut tiles, tile(0, 4, 4), 3000);
+    coverage.retain(|(coords, _)| *coords != west);
+    for child in west.get_children() {
+        coverage.push((child, if child == tile(0, 4, 4) { child } else { west }));
+    }
+    cover(&mut cache, &coverage, &tiles);
+    assert_eq!(
+        cache.rebuilt, 6,
+        "the four children and the two tiles beside them"
+    );
+    assert!(same(
+        &cache.samples,
+        &rebuilt_from_scratch(&coverage, &tiles)
+    ));
+
+    // A tile whose DEM is replaced by a coarser one is rebuilt with both its neighbours.
+    let middle = row[4];
+    coverage.retain(|(coords, _)| *coords != middle);
+    coverage.push((middle, parent));
+    cover(&mut cache, &coverage, &tiles);
+    assert_eq!(cache.rebuilt, 3);
+    assert!(same(
+        &cache.samples,
+        &rebuilt_from_scratch(&coverage, &tiles)
+    ));
+
+    // An unchanged coverage rebuilds nothing.
+    cover(&mut cache, &coverage, &tiles);
+    assert_eq!(cache.rebuilt, 3, "the count stays from the last change");
 }

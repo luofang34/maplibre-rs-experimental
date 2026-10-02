@@ -5,7 +5,8 @@ use crate::{
     coords::{WorldTileCoords, EXTENT},
     tcs::tiles::Tiles,
     terrain::{
-        mesh::TERRAIN_MESH_SIZE, resources::TerrainTileUniforms, DemRevision, DemTileComponent,
+        dem::DemTile, mesh::TERRAIN_MESH_SIZE, resources::TerrainTileUniforms, DemRevision,
+        DemTileComponent,
     },
 };
 
@@ -20,6 +21,25 @@ impl Sources {
         zooms.sort_unstable();
         zooms.dedup();
         Self { tiles, zooms }
+    }
+}
+
+/// The loaded DEM of every source a selection samples, looked up once per rebuild so the
+/// per-vertex sampling does no tile query.
+struct Dems<'a>(HashMap<WorldTileCoords, &'a DemTile>);
+impl<'a> Dems<'a> {
+    fn new(sources: &Sources, tiles: &'a Tiles) -> Self {
+        Self(
+            sources
+                .tiles
+                .values()
+                .flatten()
+                .filter_map(|source| match tiles.query::<&DemTileComponent>(*source) {
+                    Some(DemTileComponent::Loaded(dem)) => Some((*source, &dem.tile)),
+                    _ => None,
+                })
+                .collect(),
+        )
     }
 }
 
@@ -38,10 +58,14 @@ impl Default for EdgeHeights {
     }
 }
 
+type Signature = Vec<(WorldTileCoords, Option<(WorldTileCoords, DemRevision)>)>;
+
 #[derive(Default)]
 pub(super) struct EdgeCache {
-    signature: Vec<(WorldTileCoords, Option<(WorldTileCoords, DemRevision)>)>,
+    signature: Signature,
     pub(super) samples: Arc<HashMap<WorldTileCoords, EdgeHeights>>,
+    /// How many tiles' edges the last change rebuilt.
+    pub(super) rebuilt: usize,
 }
 impl EdgeCache {
     pub(super) fn apply(
@@ -67,20 +91,7 @@ impl EdgeCache {
             .collect();
         signature.sort_by_key(|(tile, _)| (u8::from(tile.z), tile.y, tile.x));
         if signature != self.signature {
-            let selection = Sources::new(
-                signature
-                    .iter()
-                    .map(|(tile, source)| (*tile, source.as_ref().map(|v| v.0)))
-                    .collect(),
-            );
-            self.samples = Arc::new(
-                selection
-                    .tiles
-                    .keys()
-                    .map(|tile| (*tile, build_edges(*tile, &selection, tiles)))
-                    .collect(),
-            );
-            self.signature = signature;
+            self.update(signature, tiles);
         }
         for ((_, tile, _), uniform) in sources.iter().zip(uniforms) {
             if let Some(edges) = self.samples.get(tile) {
@@ -90,7 +101,75 @@ impl EdgeCache {
     }
 }
 
-fn build_edges(tile: WorldTileCoords, sources: &Sources, tiles: &Tiles) -> EdgeHeights {
+impl EdgeCache {
+    /// Rebuilds the edges of the tiles the change reaches: those added or given another DEM,
+    /// and those touching a tile that was added, removed or changed, whose shared vertices
+    /// may now belong to another mesh. The edges of every other tile are kept.
+    fn update(&mut self, signature: Signature, tiles: &Tiles) {
+        let before: HashMap<_, _> = self
+            .signature
+            .iter()
+            .map(|(tile, source)| (*tile, source))
+            .collect();
+        let after: HashMap<_, _> = signature
+            .iter()
+            .map(|(tile, source)| (*tile, source))
+            .collect();
+        let changed: Vec<WorldTileCoords> = after
+            .iter()
+            .filter(|(tile, source)| before.get(*tile) != Some(*source))
+            .map(|(tile, _)| *tile)
+            .chain(
+                before
+                    .keys()
+                    .filter(|tile| !after.contains_key(*tile))
+                    .copied(),
+            )
+            .collect();
+        let selection = Sources::new(
+            signature
+                .iter()
+                .map(|(tile, source)| (*tile, source.as_ref().map(|v| v.0)))
+                .collect(),
+        );
+        let affected: Vec<WorldTileCoords> = selection
+            .tiles
+            .keys()
+            .copied()
+            .filter(|tile| changed.iter().any(|other| touches(*tile, *other)))
+            .collect();
+        let dems = Dems::new(&selection, tiles);
+        let mut samples: HashMap<_, _> = self
+            .samples
+            .iter()
+            .filter(|(tile, _)| after.contains_key(tile))
+            .map(|(tile, edges)| (*tile, *edges))
+            .collect();
+        for tile in &affected {
+            samples.insert(*tile, build_edges(*tile, &selection, &dems));
+        }
+        self.rebuilt = affected.len();
+        self.samples = Arc::new(samples);
+        self.signature = signature;
+    }
+}
+
+/// Whether two tiles share any point, an edge or a corner, across the antimeridian too; a tile
+/// touches itself.
+fn touches(a: WorldTileCoords, b: WorldTileCoords) -> bool {
+    let bounds = |tile: WorldTileCoords| {
+        let size = 1.0 / 2_f64.powi(i32::from(u8::from(tile.z)));
+        [f64::from(tile.x) * size, f64::from(tile.y) * size, size]
+    };
+    let ([ax, ay, asize], [bx, by, bsize]) = (bounds(a), bounds(b));
+    let overlaps = |a0: f64, a1: f64, b0: f64, b1: f64| a0 <= b1 + 1e-12 && b0 <= a1 + 1e-12;
+    overlaps(ay, ay + asize, by, by + bsize)
+        && [-1.0, 0.0, 1.0]
+            .into_iter()
+            .any(|shift| overlaps(ax, ax + asize, bx + shift, bx + shift + bsize))
+}
+
+fn build_edges(tile: WorldTileCoords, sources: &Sources, dems: &Dems) -> EdgeHeights {
     let mut result = EdgeHeights::default();
     let scale = 2_f64.powi(i32::from(u8::from(tile.z)));
     for i in 0..=N {
@@ -100,7 +179,7 @@ fn build_edges(tile: WorldTileCoords, sources: &Sources, tiles: &Tiles) -> EdgeH
                 (f64::from(tile.x) + uv[0]) / scale,
                 (f64::from(tile.y) + uv[1]) / scale,
             ];
-            shared_height(point, tile, sources, tiles) as f32
+            shared_height(point, tile, sources, dems) as f32
         });
         if i == N {
             result.last = heights;
@@ -142,7 +221,7 @@ fn shared_height(
     point: [f64; 2],
     fallback: WorldTileCoords,
     sources: &Sources,
-    tiles: &Tiles,
+    dems: &Dems,
 ) -> f64 {
     let tile = owner(point, fallback, sources);
     let scale = 2_f64.powi(i32::from(u8::from(tile.z)));
@@ -162,7 +241,7 @@ fn shared_height(
         sample_source(
             p,
             sources.tiles.get(&endpoint_owner).copied().flatten(),
-            tiles,
+            dems,
         )
     };
     let top =
@@ -172,11 +251,11 @@ fn shared_height(
     top * (1.0 - y.fract()) + bottom * y.fract()
 }
 
-fn sample_source(point: [f64; 2], source: Option<WorldTileCoords>, tiles: &Tiles) -> f64 {
+fn sample_source(point: [f64; 2], source: Option<WorldTileCoords>, dems: &Dems) -> f64 {
     let Some(source) = source else {
         return 0.0;
     };
-    let Some(DemTileComponent::Loaded(dem)) = tiles.query::<&DemTileComponent>(source) else {
+    let Some(dem) = dems.0.get(&source) else {
         return 0.0;
     };
     let scale = 2_f64.powi(i32::from(u8::from(source.z)));
@@ -184,7 +263,7 @@ fn sample_source(point: [f64; 2], source: Option<WorldTileCoords>, tiles: &Tiles
         .rem_euclid(scale)
         .min(1.0);
     let y = (point[1] * scale - f64::from(source.y)).clamp(0.0, 1.0);
-    dem.tile.elevation_at_tile_coords(x * EXTENT, y * EXTENT)
+    dem.elevation_at_tile_coords(x * EXTENT, y * EXTENT)
 }
 
 #[cfg(test)]
