@@ -524,15 +524,33 @@ final class MapRenderer {
                          terrainValid: Bool = false) {
         eyeTargets.copy(to: drawable, commandBuffer: commandBuffer, opaque: placement.immersion == .full)
         if let replayFrame, replayFrame.enabled {
-            if terrainValid, !flightCamera.isBoarding {
-                flightSymbols?.draw(frame: replayFrame, placement: placement, head: head, drawable: drawable, command: commandBuffer)
-            }
-            flightHUD?.draw(frame: replayFrame, head: head, placement: placement, terrainValid: terrainValid,
-                boarding: flightCamera.isBoarding, drawable: drawable, command: commandBuffer)
+            drawFlightOverlay(replayFrame, head: head, drawable: drawable, command: commandBuffer, terrainValid: terrainValid)
         }
         drawable.encodePresent(commandBuffer: commandBuffer)
         commandBuffer.commit()
         frame.endSubmission()
+    }
+
+    private func drawFlightOverlay(_ frame: FlightReplay.Frame, head: simd_float4x4,
+                                   drawable: LayerRenderer.Drawable, command: MTLCommandBuffer, terrainValid: Bool) {
+        guard frame.view == .fpv || frame.returnSeconds != nil else { return }
+        let telemetry = FlightTelemetry.resolve(frame)
+        let symbolsVisible = terrainValid && !flightCamera.isBoarding && frame.view == .fpv && frame.observation != nil
+        if symbolsVisible { flightSymbols?.prepare(telemetry: telemetry) }
+        flightHUD?.prepare(frame: frame, head: head, placement: placement, terrainValid: terrainValid,
+                           boarding: flightCamera.isBoarding, telemetry: telemetry)
+        // One overlay pass per eye avoids storing and loading the full drawable between symbols and text.
+        for index in drawable.views.indices {
+            let pass = MTLRenderPassDescriptor()
+            pass.colorAttachments[0].texture = drawable.colorTextures[index]
+            pass.colorAttachments[0].loadAction = .load
+            pass.colorAttachments[0].storeAction = .store
+            guard let encoder = command.makeRenderCommandEncoder(descriptor: pass) else { continue }
+            encoder.label = "Flight overlay eye \(index)"
+            if symbolsVisible { flightSymbols?.encode(placement: placement, head: head, drawable: drawable, index: index, encoder: encoder) }
+            flightHUD?.encode(head: head, drawable: drawable, index: index, encoder: encoder)
+            encoder.endEncoding()
+        }
     }
 
     private static func seconds(_ duration: Duration) -> TimeInterval {

@@ -31,13 +31,16 @@ fragment float4 flightHUDFragment(HUDFragment in [[stage_in]], texture2d<float> 
     return color;
 }
 
-struct SymbolVertex { float4 position; float4 color; float edge; };
-struct SymbolFragment { float4 position [[position]]; float4 color; float edge [[center_no_perspective]]; };
+struct SymbolVertex { float4 position; float4 color; float4 capsule; };
+struct SymbolFragment { float4 position [[position]]; float4 color; float4 capsule [[center_no_perspective]]; };
 vertex SymbolFragment flightSymbolVertex(uint id [[vertex_id]], constant SymbolVertex* vertices [[buffer(0)]]) {
-    return {vertices[id].position, vertices[id].color, vertices[id].edge};
+    return {vertices[id].position, vertices[id].color, vertices[id].capsule};
 }
-fragment float4 flightSymbolFragment(SymbolFragment in [[stage_in]]) {
-    const float alpha = in.color.a * (1 - smoothstep(0.65, 1.0, abs(in.edge)));
-    if (alpha < 0.01) discard_fragment();
-    return float4(in.color.rgb * alpha, alpha);
+fragment float4 flightSymbolFragment(SymbolFragment in [[stage_in]], constant uint& pass [[buffer(0)]]) {
+    const float2 delta = float2(in.capsule.x - clamp(in.capsule.x, 0.0f, in.capsule.z), in.capsule.y);
+    const float radius = pass == 0 ? in.capsule.w : 0.8f;
+    const float coverage = 1 - smoothstep(-0.75f, 0.75f, length(delta) - radius);
+    const float alpha = coverage * (pass == 0 ? 0.8f : in.color.a);
+    const float3 color = pass == 0 ? float3(0, 0.04, 0) : in.color.rgb;
+    return float4(color * alpha, alpha);
 }

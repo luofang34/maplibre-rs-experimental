@@ -26,6 +26,7 @@ targets:
     info:
       path: MapLibreVision/Info.plist
       properties:
+        CFBundleVersion: "2026.9.17"
         CFBundleDisplayName: MapLibre Vision
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: true
@@ -98,6 +99,7 @@ targets:
     info:
       path: TrackShare/Info.plist
       properties:
+        CFBundleVersion: "2026.9.17"
         CFBundleDisplayName: Add to MapLibre Vision
         NSExtension:
           NSExtensionPointIdentifier: com.apple.share-services
