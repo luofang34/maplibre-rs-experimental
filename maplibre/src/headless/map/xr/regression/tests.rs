@@ -126,9 +126,27 @@ async fn stereo_ingests_and_refines_terrain_once_per_frame() {
         assert_eq!(pair[1].2, 0, "later eyes reuse completed drapes");
     }
     assert!(observations.eyes[0].2 > 0);
-    assert_eq!(
-        observations.eyes[2].1, observations.eyes[0].1,
-        "texture refinement keeps the entire stationary surface visible"
+    // A tile may be refined into its children between the frames, but the surface they cover
+    // stays the same: the area is equal and every tile of the second frame lies in one of the
+    // first.
+    let (first, second) = (&observations.eyes[0].1, &observations.eyes[2].1);
+    use crate::coords::WorldTileCoords;
+    let area = |tiles: &[WorldTileCoords]| -> f64 {
+        tiles
+            .iter()
+            .map(|tile| 4_f64.powi(-i32::from(u8::from(tile.z))))
+            .sum()
+    };
+    assert!(
+        (area(first) - area(second)).abs() < 1e-15,
+        "texture refinement keeps the entire stationary surface visible: {first:?} then {second:?}"
+    );
+    assert!(
+        second.iter().all(|tile| {
+            std::iter::successors(Some(*tile), WorldTileCoords::get_parent)
+                .any(|ancestor| first.contains(&ancestor))
+        }),
+        "the second frame draws only within the first: {first:?} then {second:?}"
     );
 }
 
