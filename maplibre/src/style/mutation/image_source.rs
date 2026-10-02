@@ -9,7 +9,9 @@ use crate::style::{
 
 impl Style {
     /// Points an image source at a picture, fetched again even from the same URL, and
-    /// optionally at other corners, as GL JS `ImageSource.updateImage`.
+    /// optionally at other corners, as GL JS `ImageSource.updateImage`. New corners apply at
+    /// once, where GL JS applies them with the new picture: until it arrives, the old picture is
+    /// drawn over the new corners, and tiles they no longer reach are already empty.
     pub fn update_image_source(
         &mut self,
         name: &str,

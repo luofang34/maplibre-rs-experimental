@@ -79,5 +79,10 @@ fn corners_rounded_onto_a_rectangle_count_as_one() {
     // Off by far less than a unit of the tile the picture is centred in.
     let nearly = [[0.25, 0.25], [0.5 + 1e-12, 0.25], [0.5, 0.5], [0.25, 0.5]];
     assert_eq!(terms(rounded_corners(nearly)), BILINEAR);
-    assert_eq!(triangles(nearly).len(), 2);
+    let mesh = triangles(nearly);
+    assert_eq!(mesh.len(), 2);
+    assert!(
+        mesh.iter().flatten().all(|(_, texture)| texture[2] == 1.0),
+        "the mesh is drawn as a rectangle, with no perspective weight"
+    );
 }
