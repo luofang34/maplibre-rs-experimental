@@ -74,3 +74,6 @@ fn attribute(
         shader_location,
     }
 }
+
+#[cfg(test)]
+mod tests;
