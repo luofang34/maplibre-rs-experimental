@@ -184,7 +184,17 @@ fn create(
         .block_on(create_headless_renderer_with_settings(
             width, height, cache_dir, settings,
         ))
-        .map_err(|error| format!("renderer: {error}"))?;
+        .map_err(|error| {
+            // The outer message names only the step; the causes say why a device failed.
+            let mut chain = format!("renderer: {error}");
+            let mut cause = std::error::Error::source(&error);
+            while let Some(source) = cause {
+                chain.push_str(": ");
+                chain.push_str(&source.to_string());
+                cause = source.source();
+            }
+            chain
+        })?;
     runtime.block_on(resolve_tile_json_sources(
         &mut style,
         kernel.source_client(),

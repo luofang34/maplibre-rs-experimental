@@ -350,6 +350,13 @@ impl Renderer {
         if let Some(constrained_limits) = settings.constrained_limits.as_ref() {
             limits = limits.or_worse_values_from(constrained_limits);
         }
+        // Default limits a device falls short of, such as the visionOS simulator's GPU with
+        // 15 inter-stage variables, are lowered to what it offers, so the map still starts and
+        // only a pipeline needing more fails, naming the limit. Limits a host asked for are
+        // kept, and a device that cannot meet them is an error.
+        if settings.limits == wgpu::Limits::default() {
+            limits = limits.or_worse_values_from(&adapter.limits());
+        }
 
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
