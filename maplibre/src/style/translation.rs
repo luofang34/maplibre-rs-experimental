@@ -63,6 +63,42 @@ impl From<[f32; 2]> for Translation {
     }
 }
 
+/// A layer's `*-translate` at `zoom` in screen pixels along the map's axes: a translation
+/// anchored to the viewport turns with the view's `bearing`, in radians.
+pub fn layer_translate_pixels(
+    paint: Option<&super::layer::LayerPaint>,
+    zoom: f64,
+    bearing: f64,
+) -> [f64; 2] {
+    use super::layer::{LayerPaint, TranslateAnchor};
+    let (translate, anchor) = match paint {
+        Some(LayerPaint::Fill(paint)) => (
+            translation_at(paint.fill_translate.as_ref(), zoom),
+            paint.fill_translate_anchor,
+        ),
+        Some(LayerPaint::Line(paint)) => (
+            translation_at(paint.line_translate.as_ref(), zoom),
+            paint.line_translate_anchor,
+        ),
+        Some(LayerPaint::Circle(paint)) => (
+            translation_at(paint.circle_translate.as_ref(), zoom),
+            paint.circle_translate_anchor,
+        ),
+        Some(LayerPaint::FillExtrusion(paint)) => (
+            translation_at(paint.fill_extrusion_translate.as_ref(), zoom),
+            paint.fill_extrusion_translate_anchor,
+        ),
+        _ => return [0.0; 2],
+    };
+    let [x, y] = translate.map(f64::from);
+    if anchor == TranslateAnchor::Viewport {
+        let (sin, cos) = bearing.sin_cos();
+        [x * cos - y * sin, x * sin + y * cos]
+    } else {
+        [x, y]
+    }
+}
+
 /// The translation a layer asks for at `zoom`; none is no translation.
 pub fn translation_at(translation: Option<&Translation>, zoom: f64) -> [f32; 2] {
     translation.map_or([0.0; 2], |translation| translation.at_zoom(zoom))

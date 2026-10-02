@@ -14,7 +14,7 @@ use crate::{
     },
     style::{
         circle::{CirclePitchAlignment, CirclePitchScale},
-        layer::{LayerPaint, TranslateAnchor},
+        layer::LayerPaint,
         Style,
     },
     tcs::{
@@ -409,46 +409,12 @@ fn layer_translate_tile_units(
     view_zoom: f32,
     bearing: f32,
 ) -> [f32; 2] {
-    let (translate, anchor) = match paint {
-        Some(LayerPaint::Fill(paint)) => (
-            crate::style::translation::translation_at(
-                paint.fill_translate.as_ref(),
-                f64::from(view_zoom),
-            ),
-            paint.fill_translate_anchor,
-        ),
-        Some(LayerPaint::Line(paint)) => (
-            crate::style::translation::translation_at(
-                paint.line_translate.as_ref(),
-                f64::from(view_zoom),
-            ),
-            paint.line_translate_anchor,
-        ),
-        Some(LayerPaint::Circle(paint)) => (
-            crate::style::translation::translation_at(
-                paint.circle_translate.as_ref(),
-                f64::from(view_zoom),
-            ),
-            paint.circle_translate_anchor,
-        ),
-        Some(LayerPaint::FillExtrusion(paint)) => (
-            crate::style::translation::translation_at(
-                paint.fill_extrusion_translate.as_ref(),
-                f64::from(view_zoom),
-            ),
-            paint.fill_extrusion_translate_anchor,
-        ),
-        _ => return [0.0; 2],
-    };
-    let translated = if anchor == TranslateAnchor::Viewport {
-        let (sin, cos) = bearing.sin_cos();
-        [
-            translate[0] * cos - translate[1] * sin,
-            translate[0] * sin + translate[1] * cos,
-        ]
-    } else {
-        translate
-    };
+    let translated = crate::style::translation::layer_translate_pixels(
+        paint,
+        f64::from(view_zoom),
+        f64::from(bearing),
+    )
+    .map(|pixels| pixels as f32);
     let pixels_to_tile_units = 8.0 * 2.0_f32.powf(f32::from(u8::from(tile_zoom)) - view_zoom);
     [
         translated[0] * pixels_to_tile_units,

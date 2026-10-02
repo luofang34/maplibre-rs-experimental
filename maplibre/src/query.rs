@@ -9,14 +9,10 @@ use std::{
     collections::{BTreeMap, HashSet},
 };
 
-use cgmath::Vector2;
-use geo::prelude::*;
-use geo_types::{Coord, Rect};
 use serde::Serialize;
 
 use crate::{
-    coords::{WorldTileCoords, Zoom, ZoomLevel, EXTENT, TILE_SIZE},
-    io::geometry_index::{ExactGeometry, IndexedGeometry, TileIndex},
+    io::geometry_index::{ExactGeometry, IndexedGeometry},
     render::view_state::ViewState,
     sdf::query::{
         query_rendered_symbols_in, QueryError, QueryGeometry, QueryOptions, RenderedSymbol,
@@ -24,17 +20,23 @@ use crate::{
     style::{
         expression::Value,
         filter::{FeatureContext, Filter, GeometryType},
-        layer::{LayerPaint, StyleLayer},
+        layer::{LayerPaint, LinePaint, StyleLayer},
         source::GEOJSON_LAYER,
+        translation::layer_translate_pixels,
         Style,
     },
     tcs::world::World,
 };
 
 mod extrusion;
+mod ground;
+mod tiles;
 
-/// Tiles a single query reads at one zoom before it uses a coarser one.
-const MAX_TILES: i64 = 256;
+use crate::coords::Zoom;
+use tiles::{
+    camera_query_bounds, candidates_in, ground_corners, ground_region, tiles_in, QueryTile,
+};
+
 /// Deepest tile zoom a query looks at.
 const MAX_QUERY_ZOOM: i32 = 22;
 
@@ -157,34 +159,51 @@ fn in_drawing_order(found: Vec<(u32, Option<f64>, QueriedFeature)>) -> Vec<Queri
 struct Candidate<'a> {
     layer: &'a StyleLayer,
     filter: Option<Filter>,
-    /// How far from a line, in screen pixels, still counts as touching it: half its width.
+    /// How far from a line, in screen pixels, its features can be drawn and still be met: half
+    /// its width and its offset.
     reach_pixels: f64,
+    /// Where the layer draws its features from where they are, in screen pixels along the
+    /// map's axes: its `*-translate`.
+    translate: [f64; 2],
 }
 
 impl<'a> Candidate<'a> {
     /// A layer whose filter cannot be parsed draws nothing, so it also matches nothing.
-    fn new(layer: &'a StyleLayer, zoom: f64) -> Option<Self> {
+    fn new(layer: &'a StyleLayer, zoom: f64, bearing: f64) -> Option<Self> {
         let filter = match &layer.filter {
             Some(filter) => Some(Filter::parse(filter).ok()?),
             None => None,
         };
         let reach_pixels = match &layer.paint {
-            Some(LayerPaint::Line(paint)) => {
-                paint
-                    .line_width
-                    .as_ref()
-                    .and_then(|width| width.evaluate_at_zoom(zoom))
-                    .unwrap_or(1.0)
-                    / 2.0
-            }
+            Some(LayerPaint::Line(paint)) => line_margin_pixels(paint, zoom),
             _ => 0.0,
         };
         Some(Self {
             layer,
             filter,
-            reach_pixels: f64::from(reach_pixels),
+            reach_pixels,
+            translate: layer_translate_pixels(layer.paint.as_ref(), zoom, bearing),
         })
     }
+
+    /// How far from the query, in screen pixels, a feature the layer draws there can lie.
+    fn margin_pixels(&self) -> f64 {
+        self.reach_pixels + self.translate[0].hypot(self.translate[1])
+    }
+}
+
+/// The farthest a line layer reaches from its features: half its width and its offset, at their
+/// widest where they vary by feature.
+fn line_margin_pixels(paint: &LinePaint, zoom: f64) -> f64 {
+    // A width or offset set by feature is not known before the feature is; this much covers
+    // what styles give them.
+    const BY_FEATURE: f64 = 64.0;
+    let [half_width, offset] = ground::line_reach(paint, &Default::default(), zoom);
+    let varies = [&paint.line_width, &paint.line_gap_width, &paint.line_offset]
+        .into_iter()
+        .flatten()
+        .any(|property| !property.is_feature_constant());
+    half_width + offset.abs() + if varies { BY_FEATURE } else { 0.0 }
 }
 
 /// What one query keeps while it walks tiles.
@@ -196,6 +215,8 @@ struct Search<'a> {
     found: Vec<(u32, Option<f64>, QueriedFeature)>,
     /// The query in window pixels, which extrusions are met against as they stand.
     screen: extrusion::ScreenQuery,
+    /// The corners of the ground the query covers, in world pixels.
+    ground: Vec<[f64; 2]>,
     view_state: &'a ViewState,
 }
 
@@ -224,6 +245,7 @@ fn vector_features(
     options: &QueryOptions,
 ) -> Result<Vec<(u32, Option<f64>, QueriedFeature)>, QueryError> {
     let zoom = view_state.zoom();
+    let bearing = view_state.camera().get_bearing().0;
     let candidates: Vec<Candidate> = style
         .layers
         .iter()
@@ -235,7 +257,7 @@ fn vector_features(
                     .as_ref()
                     .is_none_or(|layers| layers.contains(&layer.id))
         })
-        .filter_map(|layer| Candidate::new(layer, zoom.value()))
+        .filter_map(|layer| Candidate::new(layer, zoom.value(), bearing))
         .collect();
     if candidates.is_empty() {
         return Ok(Vec::new());
@@ -255,6 +277,10 @@ fn vector_features(
     let extrudes = candidates
         .iter()
         .any(|candidate| candidate.layer.type_ == "fill-extrusion");
+    let margin = candidates
+        .iter()
+        .map(Candidate::margin_pixels)
+        .fold(0.0, f64::max);
     let searched = if extrudes {
         camera_query_bounds(view_state, bounds)
     } else {
@@ -273,24 +299,33 @@ fn vector_features(
         seen: HashSet::new(),
         found: Vec::new(),
         screen,
+        ground: ground_corners(view_state, bounds),
         view_state,
     };
+    search_tiles(world, (region, zoom, margin), &mut search);
+    Ok(search.found)
+}
+
+/// Collects from the finest level of tiles that holds any index for the region, looking
+/// `margin` screen pixels beyond the query for features a layer draws within reach of it.
+fn search_tiles(world: &World, (region, zoom, margin): ([f64; 4], Zoom, f64), search: &mut Search) {
     // One level above the view zoom covers sources whose tiles are finer than the view's.
     let top = (zoom.value().floor() as i32 + 1).clamp(0, MAX_QUERY_ZOOM);
     for z in (0..=top).rev() {
-        let tiles = tiles_in(region, zoom, z as u8);
-        if tiles.is_empty() {
-            continue;
-        }
         let mut any = false;
-        for tile in &tiles {
+        for mut tile in tiles_in(region, margin, zoom, z as u8) {
             let Some(indexes) = world.tiles.geometry_index.tile_indexes(&tile.coords) else {
                 continue;
             };
             any = true;
+            tile.footprint = tile.footprint_of(&search.ground);
+            let tile = &tile;
+            let widen = margin * tile.units_per_pixel;
+            let [x0, y0, x1, y1] = tile.local;
+            let window = [x0 - widen, y0 - widen, x1 + widen, y1 + widen];
             for (source, index) in indexes {
-                for geometry in candidates_in(index, tile.local) {
-                    collect(geometry, source, tile, &mut search);
+                for geometry in candidates_in(index, window) {
+                    collect(geometry, source, tile, search);
                 }
             }
         }
@@ -298,190 +333,32 @@ fn vector_features(
             break;
         }
     }
-    Ok(search.found)
 }
 
-/// The screen box with the point under the camera added, as GL JS `getCameraQueryGeometry`:
-/// the base of any extrusion that stands up into the query lies between the two.
-fn camera_query_bounds(view_state: &ViewState, [x0, y0, x1, y1]: [f64; 4]) -> [f64; 4] {
-    let offset = view_state.camera().get_pitch().0.tan() * view_state.camera_to_center_distance();
-    let camera = [view_state.width() / 2.0, view_state.height() / 2.0 + offset];
-    [
-        x0.min(camera[0]),
-        y0.min(camera[1]),
-        x1.max(camera[0]),
-        y1.max(camera[1]),
-    ]
-}
-
-/// The rectangle of world pixels a screen box covers on the ground plane, or `None` when none of
-/// its corners reaches the ground (it is all sky).
-fn ground_region(view_state: &ViewState, bounds: [f64; 4]) -> Option<[f64; 4]> {
-    let inverted = view_state.inverted_view_projection().ok()?;
-    let mut region: Option<[f64; 4]> = None;
-    for (x, y) in [
-        (bounds[0], bounds[1]),
-        (bounds[2], bounds[1]),
-        (bounds[2], bounds[3]),
-        (bounds[0], bounds[3]),
-    ] {
-        let Some(point) =
-            view_state.window_to_world_at_ground(&Vector2::new(x, y), &inverted, true)
-        else {
-            continue;
-        };
-        if !point.x.is_finite() || !point.y.is_finite() {
-            continue;
-        }
-        region = Some(match region {
-            None => [point.x, point.y, point.x, point.y],
-            Some(r) => [
-                r[0].min(point.x),
-                r[1].min(point.y),
-                r[2].max(point.x),
-                r[3].max(point.y),
-            ],
-        });
-    }
-    region
-}
-
-/// One tile a query touches: its canonical coordinates and the query rectangle in its grid.
-struct QueryTile {
-    coords: WorldTileCoords,
-    /// Query rectangle in tile units, as `[min x, min y, max x, max y]`.
-    local: [f64; 4],
-    /// Tile units that make one screen pixel.
-    units_per_pixel: f64,
-    zoom_level: u8,
-    /// World pixels of the tile's top-left corner, in the copy of the world it is seen in.
-    origin: [f64; 2],
-    /// World pixels in one tile unit.
-    world_per_unit: f64,
-}
-
-/// The tiles at grid level `z` that a region of world pixels at view zoom `zoom` covers.
-fn tiles_in(region: [f64; 4], zoom: Zoom, z: u8) -> Vec<QueryTile> {
-    let scale = zoom.scale_to_zoom_level(ZoomLevel::new(z));
-    let to_grid = |world: f64| world / TILE_SIZE * scale;
-    let (x0, y0) = (to_grid(region[0]), to_grid(region[1]));
-    let (x1, y1) = (to_grid(region[2]), to_grid(region[3]));
-    let (tx0, tx1) = (x0.floor() as i64, x1.floor() as i64);
-    let (ty0, ty1) = (y0.floor() as i64, y1.floor() as i64);
-    let tiles_wide = 1_i64 << z;
-    if (tx1 - tx0 + 1) * (ty1 - ty0 + 1) > MAX_TILES {
-        return Vec::new();
-    }
-    let units_per_pixel = EXTENT * scale / TILE_SIZE;
-    let mut tiles = Vec::new();
-    for ty in ty0.max(0)..=ty1.min(tiles_wide - 1) {
-        for tx in tx0..=tx1 {
-            let canonical = tx.rem_euclid(tiles_wide);
-            tiles.push(QueryTile {
-                coords: WorldTileCoords {
-                    x: canonical as i32,
-                    y: ty as i32,
-                    z: ZoomLevel::new(z),
-                },
-                local: [
-                    (x0 - tx as f64) * EXTENT,
-                    (y0 - ty as f64) * EXTENT,
-                    (x1 - tx as f64) * EXTENT,
-                    (y1 - ty as f64) * EXTENT,
-                ],
-                units_per_pixel,
-                zoom_level: z,
-                origin: [tx as f64 * TILE_SIZE / scale, ty as f64 * TILE_SIZE / scale],
-                world_per_unit: TILE_SIZE / scale / EXTENT,
-            });
-        }
-    }
-    tiles
-}
-
-/// The geometries whose bounds meet the query rectangle.
-fn candidates_in(index: &TileIndex, local: [f64; 4]) -> Vec<&IndexedGeometry<f64>> {
-    let window = rstar::AABB::from_corners(
-        geo_types::Point::new(local[0], local[1]),
-        geo_types::Point::new(local[2], local[3]),
-    );
-    match index {
-        TileIndex::Spatial { tree } => tree.locate_in_envelope_intersecting(&window).collect(),
-        TileIndex::Linear { list } => list
-            .iter()
-            .filter(|geometry| {
-                use rstar::Envelope;
-                geometry.bounds.intersects(&window)
-            })
-            .collect(),
-    }
-}
-
-/// Where a fill extrusion stands: its rings in world pixels and its base and top in metres.
-fn extruded_depth(
-    polygon: &geo_types::Polygon<f64>,
+/// Whether a fill or line feature meets the query in this tile.
+fn flat_hit(
+    geometry: &IndexedGeometry<f64>,
     tile: &QueryTile,
     candidate: &Candidate,
-    (properties, screen, view_state): (
-        &crate::style::expression::FeatureProperties,
-        extrusion::ScreenQuery,
-        &ViewState,
-    ),
-) -> Option<f64> {
-    let Some(LayerPaint::FillExtrusion(paint)) = &candidate.layer.paint else {
-        return None;
+    zoom: f64,
+) -> bool {
+    let Some(footprint) = &tile.footprint else {
+        return false;
     };
-    let zoom = view_state.zoom().value();
-    let metres = |property: &Option<crate::style::property::StyleProperty<f32>>| {
-        property
-            .as_ref()
-            .and_then(|value| value.evaluate_for(properties, zoom))
-            .map_or(0.0, f64::from)
+    let line = match &candidate.layer.paint {
+        Some(LayerPaint::Line(paint)) => ground::line_reach(paint, &geometry.properties, zoom)
+            .map(|pixels| pixels * tile.units_per_pixel),
+        _ => [0.0; 2],
     };
-    let world = |ring: &geo_types::LineString<f64>| -> Vec<[f64; 2]> {
-        ring.coords()
-            .map(|point| {
-                [
-                    tile.origin[0] + point.x * tile.world_per_unit,
-                    tile.origin[1] + point.y * tile.world_per_unit,
-                ]
-            })
-            .collect()
-    };
-    let rings: Vec<Vec<[f64; 2]>> = std::iter::once(polygon.exterior())
-        .chain(polygon.interiors())
-        .map(world)
-        .collect();
-    let base = metres(&paint.fill_extrusion_base);
-    let top = metres(&paint.fill_extrusion_height).max(base);
-    extrusion::intersection_depth(view_state, &rings, (base, top), screen)
-}
-
-fn touches(geometry: &IndexedGeometry<f64>, tile: &QueryTile, candidate: &Candidate) -> bool {
-    let [x0, y0, x1, y1] = tile.local;
-    let reach = candidate.reach_pixels * tile.units_per_pixel;
-    let area = Rect::new(
-        Coord {
-            x: x0 - reach,
-            y: y0 - reach,
-        },
-        Coord {
-            x: x1 + reach,
-            y: y1 + reach,
-        },
-    );
-    match (&geometry.exact, candidate.layer.type_.as_str()) {
-        (ExactGeometry::Polygon(polygon), "fill") => polygon.intersects(&area),
-        (ExactGeometry::Polygon(polygon), "line") => {
-            polygon.exterior().intersects(&area)
-                || polygon
-                    .interiors()
-                    .iter()
-                    .any(|ring| ring.intersects(&area))
-        }
-        (ExactGeometry::LineString(line), "line") => line.intersects(&area),
-        _ => false,
-    }
+    let translate = candidate
+        .translate
+        .map(|pixels| pixels * tile.units_per_pixel);
+    ground::touches(
+        geometry,
+        footprint,
+        (candidate.layer.type_.as_str(), translate),
+        line,
+    )
 }
 
 fn collect(
@@ -508,6 +385,7 @@ fn collect(
         found,
         screen,
         view_state,
+        ..
     } = search;
     for candidate in candidates.iter() {
         let layer = candidate.layer;
@@ -525,7 +403,7 @@ fn collect(
         }
         let depth = match (&geometry.exact, candidate.layer.type_.as_str()) {
             (ExactGeometry::Polygon(polygon), "fill-extrusion") => {
-                match extruded_depth(
+                match extrusion::extruded_depth(
                     polygon,
                     tile,
                     candidate,
@@ -535,7 +413,7 @@ fn collect(
                     None => continue,
                 }
             }
-            _ if touches(geometry, tile, candidate) => None,
+            _ if flat_hit(geometry, tile, candidate, view_state.zoom().value()) => None,
             _ => continue,
         };
         let identity = match geometry.id {

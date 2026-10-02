@@ -8,7 +8,8 @@
 use cgmath::Vector4;
 use geo::{prelude::*, Coord, LineString, Point, Polygon, Rect};
 
-use crate::render::view_state::ViewState;
+use super::{tiles::QueryTile, Candidate};
+use crate::{render::view_state::ViewState, style::layer::LayerPaint};
 
 /// A point projected to the window with its depth.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -146,6 +147,46 @@ pub(super) fn intersection_depth(
         }
     }
     met.then_some(nearest)
+}
+
+/// Where a fill extrusion stands: its rings in world pixels and its base and top in metres.
+pub(super) fn extruded_depth(
+    polygon: &geo_types::Polygon<f64>,
+    tile: &QueryTile,
+    candidate: &Candidate,
+    (properties, screen, view_state): (
+        &crate::style::expression::FeatureProperties,
+        ScreenQuery,
+        &ViewState,
+    ),
+) -> Option<f64> {
+    let Some(LayerPaint::FillExtrusion(paint)) = &candidate.layer.paint else {
+        return None;
+    };
+    let zoom = view_state.zoom().value();
+    let metres = |property: &Option<crate::style::property::StyleProperty<f32>>| {
+        property
+            .as_ref()
+            .and_then(|value| value.evaluate_for(properties, zoom))
+            .map_or(0.0, f64::from)
+    };
+    let world = |ring: &geo_types::LineString<f64>| -> Vec<[f64; 2]> {
+        ring.coords()
+            .map(|point| {
+                [
+                    tile.origin[0] + point.x * tile.world_per_unit + candidate.translate[0],
+                    tile.origin[1] + point.y * tile.world_per_unit + candidate.translate[1],
+                ]
+            })
+            .collect()
+    };
+    let rings: Vec<Vec<[f64; 2]>> = std::iter::once(polygon.exterior())
+        .chain(polygon.interiors())
+        .map(world)
+        .collect();
+    let base = metres(&paint.fill_extrusion_base);
+    let top = metres(&paint.fill_extrusion_height).max(base);
+    intersection_depth(view_state, &rings, (base, top), screen)
 }
 
 #[cfg(test)]
