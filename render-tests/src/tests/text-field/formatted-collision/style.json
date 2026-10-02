@@ -2,10 +2,10 @@
   "version": 8,
   "metadata": {
     "test": {
-      "description": "A formatted label's collision box grows with its largest run: the 2.4x run hides label 1 below it, which an unscaled run of the same text leaves visible. max-diff is below the default so that showing label 1 (about 0.015 against this reference) fails.",
+      "description": "A formatted label's collision box grows with its largest run: the 2.4x run hides label 1 below it, which an unscaled run of the same text leaves visible; label 1 also takes its own data-driven text-size. max-diff is below the default so that drawing label 1 (about 0.010 against this reference) fails.",
       "height": 256,
       "width": 256,
-      "max-diff": 0.013
+      "max-diff": 0.008
     }
   },
   "center": [

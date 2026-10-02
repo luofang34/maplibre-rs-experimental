@@ -74,6 +74,22 @@ impl SymbolUniforms {
     }
 }
 
+impl SymbolUniforms {
+    /// The uniforms with `text-size` and `icon-size` evaluated for one feature's properties:
+    /// a data-driven size has no value for the layer as a whole, and a label collides by the
+    /// size it is drawn at.
+    pub fn with_feature_sizes(
+        mut self,
+        paint: &SymbolPaint,
+        properties: &FeatureProperties,
+        zoom: f64,
+    ) -> Self {
+        self.text[0] = feature_style(paint, "text", properties, zoom)[2][0];
+        self.icon[0] = feature_style(paint, "icon", properties, zoom)[2][0];
+        self
+    }
+}
+
 /// The fill colour, halo colour and size, halo width, halo blur and opacity of a feature's text
 /// (`prefix` "text") or icon (`prefix` "icon"), each evaluated for its properties.
 pub(crate) fn feature_style(

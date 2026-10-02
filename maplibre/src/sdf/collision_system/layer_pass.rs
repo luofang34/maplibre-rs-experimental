@@ -112,6 +112,14 @@ pub(super) fn place_layer(
         let layer = layers[position];
         let mut next = Some((feature_index, feature, was_visible, false));
         while let Some((index, feature, was_visible, suppressed)) = next.take() {
+            let frame = LayerFrame {
+                uniforms: frame.uniforms.with_feature_sizes(
+                    paint,
+                    &feature.data.properties,
+                    view_state.style_zoom().value(),
+                ),
+                ..frame
+            };
             let outcome = frame.place_feature(
                 (layer, feature, index, was_visible, suppressed),
                 (&mut *boxes, &mut *placed, &mut *history),
