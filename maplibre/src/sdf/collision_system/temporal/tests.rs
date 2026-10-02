@@ -103,22 +103,31 @@ fn placed_features_of_one_tile_with_the_same_key_are_each_drawn() {
 }
 
 #[test]
-fn the_anchor_of_a_shown_label_is_kept_for_the_next_placement() {
+fn the_anchor_of_a_label_is_kept_until_it_has_faded_out() {
     let mut history = PlacementHistory::default();
     let (layer, feature) = (layer(12), feature(100.0));
-    history.begin(Duration::from_millis(0));
-    assert_eq!(history.previous_anchor(&layer, &feature), None);
-    history.opacity(&layer, &feature, [true, false]);
-    history.remember_anchor(&layer, &feature, Some(1));
-
-    history.begin(Duration::from_millis(16));
-    assert_eq!(history.previous_anchor(&layer, &feature), Some(1));
-    history.opacity(&layer, &feature, [false, false]);
-    history.remember_anchor(&layer, &feature, None);
-
-    history.begin(Duration::from_millis(32));
+    let mut frame = |millis: u64, shown: bool, anchor: Option<usize>| {
+        history.begin(Duration::from_millis(millis));
+        let previous = history.previous_anchor(&layer, &feature);
+        history.opacity(&layer, &feature, [shown, false]);
+        history.remember_anchor(&layer, &feature, anchor);
+        previous
+    };
+    assert_eq!(frame(0, true, Some(1)), None);
+    assert_eq!(frame(80, true, Some(1)), Some(1));
     assert_eq!(
-        history.previous_anchor(&layer, &feature),
+        frame(96, false, None),
+        Some(1),
+        "a label that loses its place fades out from it"
+    );
+    assert_eq!(
+        frame(112, false, None),
+        Some(1),
+        "and keeps its anchor while it fades"
+    );
+    assert_eq!(frame(1000, false, None), Some(1), "until it has faded out");
+    assert_eq!(
+        frame(1016, false, None),
         None,
         "a hidden label has no anchor to keep"
     );

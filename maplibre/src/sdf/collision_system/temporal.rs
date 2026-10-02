@@ -100,7 +100,7 @@ impl PlacementHistory {
     }
 }
 impl PlacementHistory {
-    /// The anchor the label's text was placed with in the last placement it was shown in, which
+    /// The anchor the label's text was placed with while it was last shown or fading out, which
     /// GL JS tries first so a label that still fits does not jump between anchors.
     pub(super) fn previous_anchor(
         &self,
@@ -110,13 +110,13 @@ impl PlacementHistory {
         self.states
             .get(&key(layer, feature))?
             .iter()
-            .find(|state| matches(state, layer.coords, feature))
-            .filter(|state| state.target[0])?
+            .find(|state| matches(state, layer.coords, feature))?
             .anchor
     }
 
     /// Records the anchor this frame placed the label's text with, on the state
-    /// [`Self::opacity`] took for it.
+    /// [`Self::opacity`] took for it. A label not placed keeps its anchor while it fades out,
+    /// as GL JS keeps the offsets of symbols that are not yet hidden.
     pub(super) fn remember_anchor(
         &mut self,
         layer: &SymbolLayerData,
@@ -135,7 +135,9 @@ impl PlacementHistory {
                 })
             })
         {
-            state.anchor = anchor;
+            if anchor.is_some() || state.opacity[0] == 0.0 {
+                state.anchor = anchor;
+            }
         }
     }
 }
