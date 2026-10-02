@@ -58,6 +58,8 @@ struct TestMeta {
     pixel_ratio: f64,
     /// Whether the padding edges and padded center are drawn over the frame.
     show_padding: bool,
+    /// Whether each layer counts its draws instead of shading, as `showOverdrawInspector` asks.
+    show_overdraw: bool,
     /// Camera padding left by the fixture's operations.
     padding: camera_options::Padding,
     /// Elevation the fixture pins the camera's center at.
@@ -76,6 +78,7 @@ impl Default for TestMeta {
             max_pitch: None,
             pixel_ratio: 1.0,
             show_padding: false,
+            show_overdraw: false,
             padding: camera_options::Padding::default(),
             center_elevation: None,
             paused_tiles: std::collections::HashMap::new(),
@@ -123,6 +126,10 @@ fn parse_test_meta(style_value: &Value) -> TestMeta {
             .unwrap_or(1.0),
         show_padding: test
             .get("showPadding")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        show_overdraw: test
+            .get("showOverdrawInspector")
             .and_then(Value::as_bool)
             .unwrap_or(false),
         padding: camera_options::Padding::default(),

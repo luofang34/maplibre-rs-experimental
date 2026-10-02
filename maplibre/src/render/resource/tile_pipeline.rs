@@ -74,7 +74,11 @@ impl RenderPipeline for TilePipeline {
             label: Some(self.name),
             layout,
             vertex: self.vertex_state,
-            fragment: self.fragment_state,
+            fragment: if self.settings.overdraw_inspector {
+                counting_overdraw(self.fragment_state)
+            } else {
+                self.fragment_state
+            },
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 polygon_mode: if self.options.update_stencil {
@@ -101,6 +105,48 @@ impl RenderPipeline for TilePipeline {
                 alpha_to_coverage_enabled: false,
             },
         }
+    }
+}
+
+/// One step of the overdraw inspector: a fragment adds an eighth of white, as GL JS adds one of
+/// eight steps per draw.
+const OVERDRAW_FRAGMENT: &str = "@fragment
+fn main() -> @location(0) vec4<f32> {
+    return vec4<f32>(0.125, 0.125, 0.125, 1.0);
+}
+";
+
+/// A fragment stage that counts draws instead of shading; stages that write no colour, or more
+/// than one target, keep their own.
+fn counting_overdraw(fragment: FragmentState) -> FragmentState {
+    let writes_one_colour = matches!(
+        fragment.targets.as_slice(),
+        [Some(target)] if !target.write_mask.is_empty()
+    );
+    if !writes_one_colour {
+        return fragment;
+    }
+    let adding = wgpu::BlendComponent {
+        src_factor: wgpu::BlendFactor::One,
+        dst_factor: wgpu::BlendFactor::One,
+        operation: wgpu::BlendOperation::Add,
+    };
+    FragmentState {
+        source: OVERDRAW_FRAGMENT,
+        entry_point: "main",
+        targets: fragment
+            .targets
+            .into_iter()
+            .map(|target| {
+                target.map(|target| wgpu::ColorTargetState {
+                    blend: Some(wgpu::BlendState {
+                        color: adding,
+                        alpha: adding,
+                    }),
+                    ..target
+                })
+            })
+            .collect(),
     }
 }
 
@@ -177,3 +223,6 @@ impl TilePipeline {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -154,6 +154,9 @@ pub struct RendererSettings {
     pub depth_texture_format: TextureFormat,
     /// Present mode for surfaces if a surface is used.
     pub present_mode: PresentMode,
+    /// Draws every layer fragment as an equal step of grey added to what is below, so the
+    /// brightness of a pixel counts how often it was drawn, as GL JS's overdraw inspector does.
+    pub overdraw_inspector: bool,
 }
 
 impl RendererSettings {
@@ -188,6 +191,7 @@ impl Default for RendererSettings {
 
             depth_texture_format: TextureFormat::Depth24PlusStencil8,
             present_mode: PresentMode::AutoVsync,
+            overdraw_inspector: false,
         }
     }
 }

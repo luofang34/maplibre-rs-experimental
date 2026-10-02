@@ -157,6 +157,7 @@ async fn create_map(style: &Style, meta: &TestMeta) -> Result<HeadlessMap, Strin
     // GL JS reference edges are aliased, so the comparison disables multisampling.
     let settings = RendererSettings {
         msaa: Msaa { samples: 1 },
+        overdraw_inspector: meta.show_overdraw,
         ..RendererSettings::default()
     };
     let physical = |edge: u32| (f64::from(edge) * meta.pixel_ratio).round() as u32;
