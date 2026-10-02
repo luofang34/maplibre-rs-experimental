@@ -27,14 +27,24 @@ pub(super) fn assert_spherical(map: &HeadlessMap) {
     assert_eq!(actual.transition, 1.0, "exercise spherical shader path");
 }
 
+/// Every pixel shows the parent's or a child's colour once. A pixel on the edge of a child that
+/// has loaded over its parent may resolve its samples to a mix of the two, which lies between
+/// them; a gap shows neither, and an overlap blends the child over the parent, off that line.
 fn assert_source_color(bytes: &[u8]) {
+    const PARENT: [f64; 3] = [128.0, 0.0, 127.0];
+    const CHILD: [f64; 3] = [0.0, 128.0, 127.0];
     for y in 16..SIZE - 16 {
         for x in 16..SIZE - 16 {
             let start = ((y * SIZE + x) * 4) as usize;
             let pixel = &bytes[start..start + 4];
-            let matches = [[128, 0, 127, 255], [0, 128, 127, 255]]
-                .iter()
-                .any(|color| pixel.iter().zip(color).all(|(a, b)| a.abs_diff(*b) <= 2));
+            let share = f64::from(pixel[1]) / 128.0;
+            let mix = [0, 1, 2].map(|i| PARENT[i] + (CHILD[i] - PARENT[i]) * share);
+            let matches = pixel[3] == 255
+                && (0.0..=1.0).contains(&share)
+                && pixel[..3]
+                    .iter()
+                    .zip(mix)
+                    .all(|(a, b)| (f64::from(*a) - b).abs() <= 2.5);
             assert!(matches, "source overlap or gap at ({x},{y}): {pixel:?}");
         }
     }
