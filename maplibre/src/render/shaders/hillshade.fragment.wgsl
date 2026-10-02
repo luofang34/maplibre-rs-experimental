@@ -171,9 +171,14 @@ fn main(in: VertexOutput) -> @location(0) vec4<f32> {
         let place = uv * vec2<f32>(dim) - vec2<f32>(0.5);
         let corner = vec2<i32>(floor(place));
         let blend = place - floor(place);
+        // GL JS samples its slope texture clamped to the edge, so a pixel at the tile's edge
+        // blends the edge texels' slopes and never one computed past the one-texel border.
+        let last = dim - vec2<i32>(1, 1);
+        let low = clamp(corner, vec2<i32>(0, 0), last);
+        let high = clamp(corner + vec2<i32>(1, 1), vec2<i32>(0, 0), last);
         deriv = mix(
-            mix(slope_at(corner, dim, zoom), slope_at(corner + vec2<i32>(1, 0), dim, zoom), blend.x),
-            mix(slope_at(corner + vec2<i32>(0, 1), dim, zoom), slope_at(corner + vec2<i32>(1, 1), dim, zoom), blend.x),
+            mix(slope_at(low, dim, zoom), slope_at(vec2<i32>(high.x, low.y), dim, zoom), blend.x),
+            mix(slope_at(vec2<i32>(low.x, high.y), dim, zoom), slope_at(high, dim, zoom), blend.x),
             blend.y,
         );
     }
