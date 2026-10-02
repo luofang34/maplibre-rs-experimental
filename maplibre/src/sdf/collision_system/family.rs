@@ -105,3 +105,6 @@ pub(super) fn mirror(
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests;

@@ -2,7 +2,7 @@
 //! and neither a label that lost a collision nor one behind the globe can be found.
 #![allow(clippy::expect_used, clippy::panic)]
 
-use geozero::{mvt::Message, FeatureProcessor, GeomProcessor};
+use geozero::{mvt::Message, FeatureProcessor, GeomProcessor, PropertyProcessor};
 
 use super::{atlas, fixture_map_after, SIZE};
 use crate::{
@@ -38,11 +38,29 @@ fn style(center: [f64; 2], zoom: f64, overlap: bool, globe: bool) -> Style {
 
 /// Labels with ids 1, 2, ... at `positions` in tile units of the world's single z0 tile.
 fn labels(style: &Style, positions: &[[u32; 2]]) -> ProcessedLayers {
-    let coords = WorldTileCoords {
-        x: 0,
-        y: 0,
-        z: ZoomLevel::from(0),
-    };
+    labels_in(
+        style,
+        WorldTileCoords {
+            x: 0,
+            y: 0,
+            z: ZoomLevel::from(0),
+        },
+        positions,
+    )
+}
+
+/// Labels with ids 1, 2, ... at `positions` in tile units of the tile at `coords`.
+fn labels_in(style: &Style, coords: WorldTileCoords, positions: &[[u32; 2]]) -> ProcessedLayers {
+    coloured_labels_in(style, coords, positions, &[])
+}
+
+/// Labels as [`labels_in`], the `n`th with `colors[n]` as its `color` property when given.
+fn coloured_labels_in(
+    style: &Style,
+    coords: WorldTileCoords,
+    positions: &[[u32; 2]],
+    colors: &[&str],
+) -> ProcessedLayers {
     let source = geozero::mvt::tile::Layer {
         name: "places".into(),
         version: 2,
@@ -74,6 +92,11 @@ fn labels(style: &Style, positions: &[[u32; 2]]) -> ProcessedLayers {
         layout.configure(paint.clone(), atlas.clone());
         layout.source_ids = source.features.iter().map(|feature| feature.id).collect();
         for (index, [x, y]) in positions.iter().enumerate() {
+            if let Some(color) = colors.get(index) {
+                layout
+                    .property(0, "color", &geozero::ColumnValue::String(color))
+                    .expect("property");
+            }
             layout.point_begin(0).expect("point begin");
             layout
                 .xy(f64::from(*x), f64::from(*y), 0)
@@ -178,5 +201,83 @@ async fn layers_alike_in_layout_share_one_placement_and_are_found_in_each() {
             ("label".to_owned(), Some(1))
         ],
         "as GL JS buckets them together, neither hides the other"
+    );
+}
+
+#[tokio::test]
+async fn a_label_held_by_a_parent_and_its_child_is_drawn_and_found_once() {
+    // The north-west child of the world tile is loaded and its siblings are not, so the view
+    // shows the child and, around it, the parent: both hold the label at the child's centre.
+    let style = style([-90.0, 66.5], 1.0, true, false);
+    let child = WorldTileCoords {
+        x: 0,
+        y: 0,
+        z: ZoomLevel::from(1),
+    };
+    let mut layers = labels(&style, &[[1024, 1024]]);
+    layers.append(&mut labels_in(&style, child, &[[2048, 2048]]));
+    let both = fixture_map_after(style.clone(), layers, 1, 16).await;
+    let alone = fixture_map_after(style.clone(), labels(&style, &[[1024, 1024]]), 1, 16).await;
+    assert_eq!(found(&both), [Some(1)], "one label is one hit");
+    assert_eq!(found(&alone), [Some(1)]);
+    let (drawn_both, drawn_alone) = (drawn(&both), drawn(&alone));
+    assert!(drawn_alone > 0);
+    assert!(
+        drawn_both <= drawn_alone + drawn_alone / 4,
+        "the label is drawn once: {drawn_both} red pixels against {drawn_alone} alone"
+    );
+}
+
+fn coloured(map: &HeadlessMap) -> [usize; 2] {
+    let pixels = super::read_blocking(map);
+    let count = |channel: usize| {
+        pixels
+            .chunks_exact(4)
+            .filter(|pixel| {
+                pixel[channel] > 180 && (0..3).all(|other| other == channel || pixel[other] < 80)
+            })
+            .count()
+    };
+    [count(0), count(1)]
+}
+
+#[tokio::test]
+async fn overlapping_labels_are_drawn_and_found_in_the_rotated_order() {
+    let mut on_top = Vec::new();
+    for bearing in [0.0, 180.0] {
+        let mut value = serde_json::to_value(style([0.0, 0.0], 2.0, true, false)).expect("style");
+        value["bearing"] = bearing.into();
+        value["layers"][2]["paint"]["text-color"] = serde_json::json!(["get", "color"]);
+        let style: Style = serde_json::from_value(value).expect("style");
+        let world = WorldTileCoords {
+            x: 0,
+            y: 0,
+            z: ZoomLevel::from(0),
+        };
+        // The green label sits a little lower on the map, so it is the lower one unturned.
+        let layers = coloured_labels_in(
+            &style,
+            world,
+            &[[2048, 2048], [2052, 2051]],
+            &["#ff0000", "#00ff00"],
+        );
+        let map = fixture_map_after(style, layers, 1, 16).await;
+        let [red, green] = coloured(&map);
+        assert!(
+            red > 0 && green > 0,
+            "both labels show at {bearing}: {red} {green}"
+        );
+        let shown = if green > red { Some(2) } else { Some(1) };
+        assert_eq!(
+            found(&map).first().copied().flatten(),
+            shown,
+            "the label drawn on top is found first at {bearing}: {red} red, {green} green"
+        );
+        on_top.push(shown);
+    }
+    assert_eq!(
+        on_top,
+        [Some(2), Some(1)],
+        "turning the map round puts the other label on top"
     );
 }
