@@ -86,7 +86,7 @@ pub(crate) fn select_targets(
         .filter(|coords| coords.build_quad_key().is_some())
         .map(|coords| {
             let mut shapes: Vec<ShapeSource> =
-                coverage::loaded_cover(&vector_sources, coords, world)
+                coverage::loaded_or_partial_cover(&vector_sources, coords, world)
                     .unwrap_or_default()
                     .into_iter()
                     .map(|source| ShapeSource {

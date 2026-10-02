@@ -22,6 +22,42 @@ pub(crate) fn loaded_cover(
     }
 }
 
+/// [`loaded_cover`], or else whichever descendants have loaded: GL JS draws the vector tiles it
+/// has over the parts they cover and leaves the rest empty rather than drawing none of them.
+pub(crate) fn loaded_or_partial_cover(
+    sources: &impl HasTile,
+    coords: WorldTileCoords,
+    world: &World,
+) -> Option<Vec<WorldTileCoords>> {
+    loaded_cover(sources, coords, world).or_else(|| {
+        let partial = loaded_descendants(sources, coords, world, COMPLETE_CHILDREN_SEARCH_DEPTH);
+        (!partial.is_empty()).then_some(partial)
+    })
+}
+
+/// The loaded tiles under `coords`, the shallowest wherever one is loaded, up to `depth` levels.
+fn loaded_descendants(
+    sources: &impl HasTile,
+    coords: WorldTileCoords,
+    world: &World,
+    depth: usize,
+) -> Vec<WorldTileCoords> {
+    if depth == 0 {
+        return Vec::new();
+    }
+    coords
+        .get_children()
+        .into_iter()
+        .flat_map(|child| {
+            if sources.has_tile(child, world) {
+                vec![child]
+            } else {
+                loaded_descendants(sources, child, world, depth - 1)
+            }
+        })
+        .collect()
+}
+
 /// A disjoint covering, or no replacement while some part of the target is missing.
 pub(crate) fn complete_cover(
     target: WorldTileCoords,

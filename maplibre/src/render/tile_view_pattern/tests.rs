@@ -220,3 +220,18 @@ fn bridge_width_units_follow_style_scale_independently_of_gaze_zoom() {
 mod coverage_transition;
 mod metadata_upload;
 mod resources;
+
+#[test]
+fn a_vector_cover_takes_the_children_that_loaded_when_nothing_else_has() {
+    let target = tile(2423, 1389, 12);
+    let children = target.get_children();
+    let loaded = Loaded(children[..1].iter().copied().collect());
+    let world = World::default();
+
+    assert_eq!(super::coverage::loaded_cover(&loaded, target, &world), None);
+    assert_eq!(
+        super::coverage::loaded_or_partial_cover(&loaded, target, &world),
+        Some(vec![children[0]]),
+        "one child of four still draws its own part"
+    );
+}
