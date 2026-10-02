@@ -315,6 +315,28 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         );
     }
 
+    /// Rewrites a layer's indices in place, as when its labels are drawn in a new order; the
+    /// count must be the one it was uploaded with.
+    pub fn update_indices(&self, queue: &Q, entry: &IndexEntry, indices: &[I]) {
+        let bytes = std::mem::size_of_val(indices) as wgpu::BufferAddress;
+        let allocated = entry.buffer_indices.end - entry.buffer_indices.start;
+        if bytes > allocated || !bytes.is_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT) {
+            tracing::error!(
+                coords = %entry.coords,
+                layer = %entry.style_layer.id,
+                allocated,
+                offered = bytes,
+                "index update skipped: it does not fit the allocation"
+            );
+            return;
+        }
+        queue.write_buffer(
+            &self.indices.inner,
+            entry.buffer_indices.start,
+            bytemuck::cast_slice(indices),
+        );
+    }
+
     pub fn index(&self) -> &RingIndex {
         &self.index
     }

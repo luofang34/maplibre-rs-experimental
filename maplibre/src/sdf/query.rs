@@ -228,13 +228,13 @@ pub fn query_rendered_symbols_in(
             Some(crate::style::layer::LayerPaint::Symbol(paint))
                 if crate::sdf::tessellation::sorts_by_height(paint, zoom) =>
             {
-                // As GL JS `sortFeatures`: by height on the rotated screen, from anchors in
-                // whole units of its 8192-unit tiles, and equal heights the later feature first.
-                let angle = -bearing;
-                let [x, y] = [feature.text_anchor.x, feature.text_anchor.y]
-                    .map(|value| (f64::from(value) * 2.0).round());
-                let height = (angle.sin() * x + angle.cos() * y).round() as i64;
-                (height, -(hit.feature as i64))
+                // As GL JS `sortFeatures`: by height on the rotated screen, equal heights the
+                // later feature first.
+                let anchor = [feature.text_anchor.x, feature.text_anchor.y];
+                (
+                    crate::sdf::tessellation::rotated_height(anchor, bearing),
+                    -(hit.feature as i64),
+                )
             }
             _ => (0, hit.feature as i64),
         };

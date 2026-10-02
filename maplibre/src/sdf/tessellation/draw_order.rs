@@ -11,6 +11,37 @@ use crate::{
     },
 };
 
+/// A label's height on the screen turned by `bearing`, as GL JS `sortFeatures` measures it:
+/// from its anchor in whole units of 8192-unit tiles.
+pub(crate) fn rotated_height(anchor: [f32; 2], bearing: f64) -> i64 {
+    let angle = -bearing;
+    let [x, y] = anchor.map(|value| (f64::from(value) * 2.0).round());
+    (angle.sin() * x + angle.cos() * y).round() as i64
+}
+
+/// The order a layer's labels are drawn in at `bearing`: by rotated height, equal heights the
+/// later label first, and a second way of writing a label with the label it belongs to.
+pub(crate) fn drawn_order(features: &[Feature], bearing: f64) -> Vec<usize> {
+    let mut group = 0;
+    let groups: Vec<usize> = features
+        .iter()
+        .enumerate()
+        .map(|(index, feature)| {
+            if !feature.fallback {
+                group = index;
+            }
+            group
+        })
+        .collect();
+    let mut order: Vec<usize> = (0..features.len()).collect();
+    let height = |index: usize| {
+        let anchor = features[index].text_anchor;
+        rotated_height([anchor.x, anchor.y], bearing)
+    };
+    order.sort_by_key(|index| (height(*index), std::cmp::Reverse(groups[*index])));
+    order
+}
+
 /// Whether the layer draws its labels by screen height: `symbol-z-order: viewport-y`, or `auto`
 /// without a `symbol-sort-key`, for labels that may overlap.
 pub(crate) fn sorts_by_height(paint: &SymbolPaint, zoom: f64) -> bool {

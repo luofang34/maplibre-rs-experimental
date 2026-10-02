@@ -32,6 +32,7 @@ pub struct CollisionSystem {
     placed_view: Option<(cgmath::Matrix4<f64>, (f64, f64))>,
     history: temporal::PlacementHistory,
     uploaded: HashMap<(WorldTileCoords, String), (u64, u64)>,
+    draw_sort: draw_sort::DrawSort,
 }
 
 impl CollisionSystem {
@@ -99,6 +100,15 @@ impl System for CollisionSystem {
             return Ok(());
         }
         self.placed_view = Some(view);
+        self.draw_sort.follow_bearing(
+            world,
+            &renderer.queue,
+            (
+                view_state.camera().get_bearing().0,
+                view_state.style_zoom().value(),
+            ),
+            &layers,
+        );
         layers.sort_by_key(|(index, layer, _)| {
             (
                 std::cmp::Reverse(*index),
@@ -138,6 +148,7 @@ impl System for CollisionSystem {
     }
 }
 
+mod draw_sort;
 mod family;
 mod layer_pass;
 mod rules;

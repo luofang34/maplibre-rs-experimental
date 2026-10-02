@@ -21,7 +21,7 @@ use crate::{
 };
 
 mod draw_order;
-pub(crate) use draw_order::sorts_by_height;
+pub(crate) use draw_order::{drawn_order, rotated_height, sorts_by_height};
 mod icon_quads;
 mod layout;
 mod line_anchors;
