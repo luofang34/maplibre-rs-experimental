@@ -24,3 +24,11 @@ fn a_moving_frame_draws_the_drapes_its_time_holds() {
         "a moving view still refines one drape a frame"
     );
 }
+
+#[test]
+fn a_frame_s_measurement_is_shared_among_the_drapes_it_drew() {
+    let mut cost = DrapeCost::default();
+    cost.measured_frame(Duration::from_millis(12), 4);
+    assert_eq!(cost.per_drape(), Duration::from_millis(3));
+    assert_eq!(cost.last_frame(), Some((Duration::from_millis(12), 4)));
+}

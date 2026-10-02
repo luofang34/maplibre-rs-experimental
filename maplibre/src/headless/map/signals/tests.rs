@@ -175,8 +175,8 @@ async fn a_stage_is_charged_the_time_its_systems_take() {
     assert!(stats.cpu() >= twenty);
 }
 
-/// The main pass's GPU time over a few frames of `layers` half-transparent backgrounds.
-async fn gpu_time_of(layers: usize) -> Option<std::time::Duration> {
+/// A 1024² map of `layers` translucent backgrounds, on a device that can time passes.
+async fn heavy_map(layers: usize) -> Option<HeadlessMap> {
     let style: Style = serde_json::from_value(serde_json::json!({
         "version": 8,
         "sources": {},
@@ -189,7 +189,7 @@ async fn gpu_time_of(layers: usize) -> Option<std::time::Duration> {
     let (kernel, renderer) = create_headless_renderer(1024, 1024, None)
         .await
         .expect("renderer");
-    let mut map = HeadlessMap::new(
+    let map = HeadlessMap::new(
         style,
         renderer,
         kernel,
@@ -207,6 +207,12 @@ async fn gpu_time_of(layers: usize) -> Option<std::time::Duration> {
     {
         return None;
     }
+    Some(map)
+}
+
+/// The main pass's GPU time over a few frames of `layers` half-transparent backgrounds.
+async fn gpu_time_of(layers: usize) -> Option<std::time::Duration> {
+    let mut map = heavy_map(layers).await?;
     let mut measured = Vec::new();
     for _ in 0..8 {
         map.device()
@@ -342,37 +348,45 @@ async fn frame_trace_overhead() {
 
 #[tokio::test]
 async fn the_main_pass_gpu_time_lands_in_the_frame_it_timed() {
-    let mut map = raster_map().await;
-    if !map
-        .device()
-        .features()
-        .contains(wgpu::Features::TIMESTAMP_QUERY)
-    {
+    // A pass heavy enough that its start and end timestamps always differ, so every frame's
+    // measurement comes back.
+    let Some(mut map) = heavy_map(32).await else {
         return;
-    }
-    map.enable_frame_trace(32);
-    for _ in 0..6 {
-        map.render_source_frames(Default::default(), vec![picture()], 1)
+    };
+    map.enable_frame_trace(64);
+    let timed = |map: &mut HeadlessMap| -> Vec<u64> {
+        map.frame_trace_mut()
+            .expect("trace")
+            .peek()
+            .frames
+            .iter()
+            .filter(|record| record.spans.iter().any(|span| span.name == "map"))
+            .map(|record| record.frame)
+            .collect()
+    };
+    let mut arrivals = 0;
+    for _ in 0..40 {
+        let before = timed(&mut map);
+        map.render_source_frames(Default::default(), Vec::new(), 1)
             .expect("frame");
-        // The readback is mapped before the next frame takes it.
+        let drawing = map.last_frame_stats().host_frame;
+        for frame in timed(&mut map)
+            .into_iter()
+            .filter(|frame| !before.contains(frame))
+        {
+            arrivals += 1;
+            assert!(
+                frame < drawing,
+                "a time read back while drawing frame {drawing} measured an earlier frame, not {frame}"
+            );
+        }
+        // The readback is mapped before a later frame takes it.
         map.device()
             .poll(wgpu::PollType::wait_indefinitely())
             .expect("device poll");
+        if arrivals >= 3 {
+            break;
+        }
     }
-    let export = map.frame_trace_mut().expect("trace").export();
-    let timed = |record: &crate::render::frame_trace::FrameRecord| {
-        record.spans.iter().any(|span| span.name == "map")
-    };
-    let first = export.frames.first().expect("frames");
-    let last = export.frames.last().expect("frames");
-    assert!(
-        timed(first),
-        "the first frame's time arrives a frame later and is filed under it: {:?}",
-        export.frames.iter().map(timed).collect::<Vec<_>>()
-    );
-    assert!(
-        !timed(last),
-        "the newest frame's time is still on its way: {:?}",
-        export.frames.iter().map(timed).collect::<Vec<_>>()
-    );
+    assert!(arrivals >= 3, "GPU times came back: {arrivals}");
 }
