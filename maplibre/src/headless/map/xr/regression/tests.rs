@@ -300,3 +300,44 @@ async fn both_eyes_of_an_xr_frame_land_in_one_timeline_record() {
         assert!(record.spans.iter().any(|span| span.name == "copy-encode"));
     }
 }
+
+#[derive(Default)]
+struct MovedEyes(Vec<bool>);
+
+fn note_moved(context: &mut MapContext) -> SystemResult {
+    let moved = crate::render::frame_signals::camera_moved(&context.world, &context.view_state);
+    context
+        .world
+        .resources
+        .get_or_init_mut::<MovedEyes>()
+        .0
+        .push(moved);
+    Ok(())
+}
+
+#[tokio::test]
+async fn each_eye_of_a_still_stereo_view_is_at_rest() {
+    let style: Style =
+        serde_json::from_str(r#"{"version":8,"sources":{},"layers":[]}"#).expect("style");
+    let (kernel, renderer) = create_headless_renderer(64, 64, None)
+        .await
+        .expect("renderer");
+    let mut map =
+        HeadlessMap::new(style, renderer, kernel, vec![Box::new(RenderPlugin)]).expect("map");
+    map.schedule
+        .add_system_to_stage(RenderStageLabel::Queue, note_moved);
+    // The same placement twice: each eye sees what it saw the frame before.
+    map.run_xr_frame(frame(16)).expect("first stereo frame");
+    map.run_xr_frame(frame(32)).expect("second stereo frame");
+    let moved = &map
+        .world()
+        .resources
+        .get::<MovedEyes>()
+        .expect("observed")
+        .0;
+    assert_eq!(
+        moved[2..],
+        [false, false],
+        "neither eye moved, so drapes catch up at full pace: {moved:?}"
+    );
+}

@@ -43,11 +43,12 @@ impl DrapeTimerSlot {
             .store(u32::try_from(drapes).unwrap_or(u32::MAX), Ordering::Release);
     }
 
-    /// The measured cost of one drape, once a measurement is back.
-    pub(crate) fn take_per_drape(&self, device: &wgpu::Device, period: f32) -> Option<Duration> {
+    /// The GPU time of a frame's drape passes and how many drapes they drew, once a
+    /// measurement is back.
+    pub(crate) fn take(&self, device: &wgpu::Device, period: f32) -> Option<(Duration, u32)> {
         let spent = self.timer.as_ref()?.take(device, period)?;
         let drapes = self.drapes.load(Ordering::Acquire);
-        (drapes > 0).then(|| spent / drapes)
+        (drapes > 0).then_some((spent, drapes))
     }
 }
 
@@ -55,9 +56,23 @@ impl DrapeTimerSlot {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct DrapeCost {
     per_drape: Option<Duration>,
+    last: Option<(Duration, u32)>,
 }
 
 impl DrapeCost {
+    /// Adds a frame's measurement: `spent` on the GPU drawing `drapes` drapes.
+    pub fn measured_frame(&mut self, spent: Duration, drapes: u32) {
+        self.last = Some((spent, drapes));
+        if drapes > 0 {
+            self.measured(spent / drapes);
+        }
+    }
+
+    /// The last frame measured: its drape passes' GPU time and how many drapes they drew.
+    pub fn last_frame(&self) -> Option<(Duration, u32)> {
+        self.last
+    }
+
     /// Adds a measurement of one drape's cost.
     pub fn measured(&mut self, per_drape: Duration) {
         self.per_drape = Some(match self.per_drape {

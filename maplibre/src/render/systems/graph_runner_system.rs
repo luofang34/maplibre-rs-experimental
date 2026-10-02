@@ -74,12 +74,12 @@ impl System for GraphRunnerSystem {
         let per_drape = world
             .resources
             .get::<crate::terrain::drape_timing::DrapeTimerSlot>()
-            .and_then(|slot| slot.take_per_drape(device, queue.get_timestamp_period()));
-        if let Some(per_drape) = per_drape {
+            .and_then(|slot| slot.take(device, queue.get_timestamp_period()));
+        if let Some((spent, drapes)) = per_drape {
             world
                 .resources
                 .get_or_init_mut::<crate::terrain::drape_timing::DrapeCost>()
-                .measured(per_drape);
+                .measured_frame(spent, drapes);
         }
 
         if let Err(e) = RenderGraphRunner::run(render_graph, device, queue, state, world) {
