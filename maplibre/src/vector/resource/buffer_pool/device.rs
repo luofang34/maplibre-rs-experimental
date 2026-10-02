@@ -59,3 +59,37 @@ impl<V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<wgpu::Queue, wgpu::Buffer, V, 
         )
     }
 }
+
+impl<V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<wgpu::Queue, wgpu::Buffer, V, I, TM, FM> {
+    /// Binds a layer's indices, vertices and feature metadata (at `feature_slot`) and returns
+    /// the first index and base vertex to draw its indices with. With `whole` the pool's
+    /// buffers are bound whole, so consecutive layers keep them bound; without, as on WebGL2,
+    /// which has no base vertex, the layer's own ranges are bound and drawn from zero.
+    pub fn bind_layer<'w>(
+        &self,
+        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
+        entry: &IndexEntry,
+        (feature_slot, whole): (u32, bool),
+    ) -> (u32, i32) {
+        let format = crate::render::INDEX_FORMAT;
+        if whole {
+            pass.set_index_buffer(self.indices.inner.slice(..), format);
+            pass.set_vertex_buffer(0, self.vertices.inner.slice(..));
+            pass.set_vertex_buffer(feature_slot, self.feature_metadata.inner.slice(..));
+            (entry.whole_buffer_indices().start, entry.base_vertex())
+        } else {
+            pass.set_index_buffer(
+                self.indices.inner.slice(entry.indices_buffer_range()),
+                format,
+            );
+            pass.set_vertex_buffer(0, self.vertices.inner.slice(entry.vertices_buffer_range()));
+            pass.set_vertex_buffer(
+                feature_slot,
+                self.feature_metadata
+                    .inner
+                    .slice(entry.feature_metadata_buffer_range()),
+            );
+            (0, 0)
+        }
+    }
+}

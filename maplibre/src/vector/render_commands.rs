@@ -5,7 +5,6 @@ use crate::{
         projection::ProjectionGpuResources,
         render_phase::{LayerItem, PhaseItem, RenderCommand, RenderCommandResult},
         tile_view_pattern::WgpuTileViewPattern,
-        INDEX_FORMAT,
     },
     tcs::world::World,
     vector::{CirclePipeline, ExtrusionPipeline, LinePipeline, VectorBufferPool, VectorPipeline},
@@ -88,10 +87,11 @@ impl<const RUNS: bool> RenderCommand<LayerItem> for DrawVectorTile<RUNS> {
 
         pass.set_stencil_reference(reference);
 
-        // The pool's buffers are bound whole, so consecutive layers keep them bound and each
-        // draws its own range by offset.
-        pass.set_index_buffer(buffer_pool.indices().slice(..), INDEX_FORMAT);
-        pass.set_vertex_buffer(0, buffer_pool.vertices().slice(..));
+        let whole = world
+            .resources
+            .get::<crate::render::tracked_pass::DrawCapabilities>()
+            .is_some_and(|capabilities| capabilities.base_vertex);
+        let (first, base_vertex) = buffer_pool.bind_layer(pass, entry, (3, whole));
         let Some(tile_view_pattern_buffer) = source_shape.buffer_range() else {
             return RenderCommandResult::Failure;
         };
@@ -105,9 +105,6 @@ impl<const RUNS: bool> RenderCommand<LayerItem> for DrawVectorTile<RUNS> {
                 .metadata()
                 .slice(entry.layer_metadata_buffer_range()),
         );
-        pass.set_vertex_buffer(3, buffer_pool.feature_metadata().slice(..));
-        let base_vertex = entry.base_vertex();
-        let first = entry.whole_buffer_indices().start;
         if let Some(run) = &item.run {
             pass.draw_indexed(
                 first + run.range.start..first + run.range.end,
@@ -120,7 +117,11 @@ impl<const RUNS: bool> RenderCommand<LayerItem> for DrawVectorTile<RUNS> {
             .then(|| buffer_pool.pattern_runs(item.tile.coords, &item.style_layer))
             .flatten();
         let Some(runs) = runs else {
-            pass.draw_indexed(entry.whole_buffer_indices(), base_vertex, 0..1);
+            pass.draw_indexed(
+                first..first + entry.indices_range().len() as u32,
+                base_vertex,
+                0..1,
+            );
             return RenderCommandResult::Success;
         };
         let patterns = world.resources.get::<super::pattern::PatternResources>();

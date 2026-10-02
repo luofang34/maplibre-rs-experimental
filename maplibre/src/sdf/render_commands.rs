@@ -3,7 +3,6 @@ use crate::{
         eventually::{Eventually, Eventually::Initialized},
         projection::ProjectionGpuResources,
         render_phase::{PhaseItem, RenderCommand, RenderCommandResult, TranslucentItem},
-        INDEX_FORMAT,
     },
     sdf::{textures::SymbolTextures, SymbolBufferPool, SymbolPipeline},
     tcs::world::World,
@@ -90,10 +89,11 @@ impl RenderCommand<TranslucentItem> for DrawSymbol {
 
         pass.set_stencil_reference(reference);
 
-        // The pool's buffers are bound whole, so consecutive layers keep them bound and each
-        // draws its own range by offset.
-        pass.set_index_buffer(symbol_buffer_pool.indices().slice(..), INDEX_FORMAT);
-        pass.set_vertex_buffer(0, symbol_buffer_pool.vertices().slice(..));
+        let whole = world
+            .resources
+            .get::<crate::render::tracked_pass::DrawCapabilities>()
+            .is_some_and(|capabilities| capabilities.base_vertex);
+        let (first, base_vertex) = symbol_buffer_pool.bind_layer(pass, entry, (3, whole));
         pass.set_vertex_buffer(1, covering.buffer.slice(tile_view_pattern_buffer));
         pass.set_vertex_buffer(
             2,
@@ -101,12 +101,13 @@ impl RenderCommand<TranslucentItem> for DrawSymbol {
                 .metadata()
                 .slice(entry.layer_metadata_buffer_range()),
         );
-        pass.set_vertex_buffer(3, symbol_buffer_pool.feature_metadata().slice(..));
-
         draw_indices(
             pass,
             pipeline,
-            (entry.whole_buffer_indices(), entry.base_vertex()),
+            (
+                first..first + entry.indices_range().len() as u32,
+                base_vertex,
+            ),
             binding.separate_halo,
         );
         RenderCommandResult::Success

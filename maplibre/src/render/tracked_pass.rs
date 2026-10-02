@@ -56,6 +56,26 @@ impl RenderStats {
     }
 }
 
+/// What the adapter's draw calls can do beyond what WebGL2 guarantees.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DrawCapabilities {
+    /// Whether an indexed draw may add a base vertex to its indices; WebGL2 cannot, so pooled
+    /// geometry is then bound from its own offset instead of drawn from the whole buffer.
+    pub base_vertex: bool,
+}
+
+impl DrawCapabilities {
+    /// The capabilities `adapter` reports.
+    pub fn of(adapter: &wgpu::Adapter) -> Self {
+        Self {
+            base_vertex: adapter
+                .get_downlevel_capabilities()
+                .flags
+                .contains(wgpu::DownlevelFlags::BASE_VERTEX),
+        }
+    }
+}
+
 /// A bound buffer range, compared by buffer identity, offset and size.
 #[derive(Clone, PartialEq)]
 struct BoundSlice {

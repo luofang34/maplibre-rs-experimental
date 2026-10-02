@@ -33,6 +33,7 @@ impl System for ResourceSystem {
                 Renderer {
                     settings,
                     device,
+                    adapter,
                     resources: state,
                     ..
                 },
@@ -40,6 +41,15 @@ impl System for ResourceSystem {
             ..
         }: &mut MapContext,
     ) -> SystemResult {
+        if world
+            .resources
+            .get::<crate::render::tracked_pass::DrawCapabilities>()
+            .is_none()
+        {
+            world
+                .resources
+                .insert(crate::render::tracked_pass::DrawCapabilities::of(adapter));
+        }
         let Some((tile_view_pattern, mask_pipeline, projection_resources, depth_copy)) =
             world.resources.query_mut::<(
                 &mut Eventually<WgpuTileViewPattern>,
