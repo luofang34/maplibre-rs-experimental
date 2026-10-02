@@ -47,7 +47,15 @@ fn parent_child_replacement_keeps_opacity_and_suppresses_the_duplicate() {
     assert_eq!(history.opacity(&parent, &a, [true, false]), [1.0, 0.0]);
     history.begin(Duration::from_millis(216));
     assert!(history.was_visible(&child, &b));
+    assert!(
+        !history.shown_elsewhere(&child, &b),
+        "the first copy takes the label"
+    );
     assert_eq!(history.opacity(&child, &b, [true, false]), [1.0, 0.0]);
+    assert!(
+        history.shown_elsewhere(&parent, &a),
+        "the parent's copy is a duplicate this frame, so a query skips it"
+    );
     assert_eq!(history.opacity(&parent, &a, [true, false]), [0.0, 0.0]);
 }
 #[test]

@@ -15,7 +15,12 @@ use crate::{
 #[derive(Default, Debug)]
 pub(crate) struct PlacedSymbols(pub(crate) Vec<PlacedSymbol>);
 
-#[derive(Debug)]
+/// The map's bearing when the symbols were placed, in radians, which decides the order of
+/// labels drawn by their height on the screen.
+#[derive(Default, Debug, Clone, Copy)]
+pub(crate) struct PlacementBearing(pub(crate) f64);
+
+#[derive(Clone, Debug)]
 pub(crate) struct PlacedSymbol {
     pub(crate) coords: WorldTileCoords,
     pub(crate) layer: String,
@@ -163,6 +168,10 @@ pub fn query_rendered_symbols_in(
     let Some(placed) = world.resources.get::<PlacedSymbols>() else {
         return Ok(Vec::new());
     };
+    let bearing = world
+        .resources
+        .get::<PlacementBearing>()
+        .map_or(0.0, |bearing| bearing.0);
     let mut matches = Vec::new();
     for hit in &placed.0 {
         if options
@@ -214,10 +223,25 @@ pub fn query_rendered_symbols_in(
         let scale = 2_f64.powi(i32::from(u8::from(hit.coords.z)));
         let x = (f64::from(hit.coords.x) + f64::from(feature.text_anchor.x) / 4096.0) / scale;
         let y = (f64::from(hit.coords.y) + f64::from(feature.text_anchor.y) / 4096.0) / scale;
+        let zoom = f64::from(u8::from(hit.coords.z));
+        let draw_order = match &style_layer.paint {
+            Some(crate::style::layer::LayerPaint::Symbol(paint))
+                if crate::sdf::tessellation::sorts_by_height(paint, zoom) =>
+            {
+                // As GL JS `sortFeatures`: by height on the rotated screen, from anchors in
+                // whole units of its 8192-unit tiles, and equal heights the later feature first.
+                let angle = -bearing;
+                let [x, y] = [feature.text_anchor.x, feature.text_anchor.y]
+                    .map(|value| (f64::from(value) * 2.0).round());
+                let height = (angle.sin() * x + angle.cos() * y).round() as i64;
+                (height, -(hit.feature as i64))
+            }
+            _ => (0, hit.feature as i64),
+        };
         matches.push((
             style_layer.index,
             (u8::from(hit.coords.z), hit.coords.y, hit.coords.x),
-            hit.feature,
+            draw_order,
             RenderedSymbol {
                 layer: hit.layer.clone(),
                 source: style_layer.source.clone(),
@@ -238,7 +262,7 @@ pub fn query_rendered_symbols_in(
     }
     // As GL JS `queryRenderedSymbols`: the topmost layer first, its tiles from the lowest zoom
     // and then top to bottom, and in each tile the labels drawn last first. A tile's labels are
-    // in drawing order: by symbol-sort-key, or by screen height where labels may overlap.
+    // drawn by symbol-sort-key, or by height on the rotated screen where they may overlap.
     matches.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)).then(b.2.cmp(&a.2)));
     Ok(matches
         .into_iter()

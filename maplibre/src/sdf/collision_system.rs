@@ -127,6 +127,9 @@ impl System for CollisionSystem {
         );
         self.uploaded.retain(|(coords, _), _| seen.contains(coords));
         world.resources.insert(placed);
+        world.resources.insert(super::query::PlacementBearing(
+            view_state.camera().get_bearing().0,
+        ));
         // Labels still fading in or out change the next frame.
         if self.history.fading {
             crate::render::frame_signals::keep_animating(world);
@@ -135,6 +138,7 @@ impl System for CollisionSystem {
     }
 }
 
+mod family;
 mod layer_pass;
 mod rules;
 mod temporal;
@@ -210,14 +214,31 @@ impl CollisionSystem {
                 _ => groups.push((index, paint, vec![layer])),
             }
         }
+        // A layer GL JS would group with a lower one is placed by it, after the pass.
+        let leaders = family::leaders(style);
+        let present: HashSet<&str> = groups
+            .iter()
+            .map(|(_, _, members)| members[0].style_layer_id.as_str())
+            .collect();
+        let mut outcomes = HashMap::new();
+        let mut mirrored = Vec::new();
+        let mut placed_layers = Vec::new();
         for (_, paint, members) in groups {
+            let id = members[0].style_layer_id.clone();
+            if let Some(leader) = leaders
+                .get(&id)
+                .filter(|leader| **leader != id && present.contains(leader.as_str()))
+            {
+                mirrored.push((leader.clone(), paint, members));
+                continue;
+            }
             let limits = style
                 .layers
                 .iter()
-                .find(|style| style.id == members[0].style_layer_id)
+                .find(|style| style.id == id)
                 .map(|layer| [layer.minzoom.unwrap_or(0.0), layer.maxzoom.unwrap_or(24.0)])
                 .unwrap_or([0.0, 24.0]);
-            let metadata = place_layer(
+            let (metadata, outcome) = place_layer(
                 world,
                 view_state,
                 projection,
@@ -226,6 +247,24 @@ impl CollisionSystem {
                 limits,
                 (&mut boxes, &mut placed, &mut self.history),
             );
+            if leaders.get(&id) == Some(&id) {
+                outcomes.insert(id, (members.clone(), outcome));
+            }
+            placed_layers.push((members, metadata));
+        }
+        for (leader, paint, members) in mirrored {
+            let Some((leader_members, outcome)) = outcomes.get(&leader) else {
+                continue;
+            };
+            let metadata = family::mirror(
+                (leader_members, outcome),
+                &members,
+                (paint, view_state.style_zoom().value()),
+                &mut placed,
+            );
+            placed_layers.push((members, metadata));
+        }
+        for (members, metadata) in placed_layers {
             for (layer, metadata) in members.into_iter().zip(metadata) {
                 let key = (layer.coords, layer.style_layer_id.clone());
                 let Some(generation) = allocation(world, layer.coords, &layer.style_layer_id)

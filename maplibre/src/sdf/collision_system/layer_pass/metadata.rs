@@ -5,7 +5,7 @@ use crate::{
     sdf::{line_glyphs::GlyphPose, paint::feature_style},
 };
 
-pub(super) fn write_feature_metadata(
+pub(in crate::sdf::collision_system) fn write_feature_metadata(
     layer: &crate::sdf::SymbolLayerData,
     feature: &crate::sdf::Feature,
     (opacity, text_shift, anchor): ([f32; 2], [f32; 2], usize),

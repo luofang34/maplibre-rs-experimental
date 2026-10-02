@@ -17,7 +17,7 @@ use crate::{
 
 mod anchors;
 mod metadata;
-use metadata::write_feature_metadata;
+pub(super) use metadata::write_feature_metadata;
 
 type OrderedFeature<'a> = (usize, usize, &'a crate::sdf::Feature, bool);
 
@@ -80,7 +80,8 @@ struct FeaturePlacement {
 }
 
 /// Places the features of one style layer across every visible tile together, in ascending
-/// `symbol-sort-key` order, and returns each tile's metadata in the order of `layers`.
+/// `symbol-sort-key` order, and returns each tile's metadata and placement in the order of
+/// `layers`.
 pub(super) fn place_layer(
     world: &crate::tcs::world::World,
     view_state: &crate::render::view_state::ViewState,
@@ -93,9 +94,13 @@ pub(super) fn place_layer(
         &mut PlacedSymbols,
         &mut temporal::PlacementHistory,
     ),
-) -> Vec<Vec<SDFShaderFeatureMetadata>> {
+) -> (Vec<Vec<SDFShaderFeatureMetadata>>, super::family::Outcomes) {
     let (boxes, placed, history) = placement;
     let mut metadata: Vec<_> = layers.iter().map(|layer| empty_metadata(layer)).collect();
+    let mut outcomes: super::family::Outcomes = layers
+        .iter()
+        .map(|layer| layer.features.iter().map(|_| None).collect())
+        .collect();
     let frame = LayerFrame {
         world,
         view_state,
@@ -125,21 +130,31 @@ pub(super) fn place_layer(
                 (layer, feature, index, was_visible, suppressed),
                 (&mut *boxes, &mut *placed, &mut *history),
             );
+            let poses = match &outcome.line {
+                Some(LinePoses::Poses(poses)) => Some(poses.clone()),
+                _ => None,
+            };
             write_feature_metadata(
                 layer,
                 feature,
                 (outcome.opacity, outcome.text_shift, outcome.anchor),
                 outcome.ground,
-                match &outcome.line {
-                    Some(LinePoses::Poses(poses)) => Some(poses.as_slice()),
-                    _ => None,
-                },
+                poses.as_deref(),
                 (
                     paint,
                     view_state.style_zoom().value(),
                     &mut metadata[position],
                 ),
             );
+            if let Some(slot) = outcomes[position].get_mut(index) {
+                *slot = Some(super::family::Outcome {
+                    opacity: outcome.opacity,
+                    text_shift: outcome.text_shift,
+                    anchor: outcome.anchor,
+                    ground: outcome.ground,
+                    poses,
+                });
+            }
             next = layer
                 .features
                 .get(index + 1)
@@ -154,7 +169,7 @@ pub(super) fn place_layer(
                 });
         }
     }
-    metadata
+    (metadata, outcomes)
 }
 
 impl LayerFrame<'_> {
@@ -255,9 +270,12 @@ impl LayerFrame<'_> {
             ),
         );
         let visible = rules.place_along_line(rectangles, &glyph_boxes, boxes, viewport);
+        let duplicate = history.shown_elsewhere(layer, feature);
         let opacity = history.opacity(layer, feature, visible);
         history.remember_anchor(layer, feature, visible[0].then_some(anchor));
-        if visible.iter().any(|v| *v) && opacity.iter().any(|v| *v > 0.0) {
+        // A placed label is found from its first frame, while it starts fading in, as GL JS
+        // queries its collision index; a copy drawn by another tile is found once.
+        if visible.iter().any(|v| *v) && !duplicate {
             placed.0.push(PlacedSymbol {
                 coords: layer.coords,
                 layer: layer.style_layer_id.clone(),

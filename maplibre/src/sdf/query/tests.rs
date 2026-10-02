@@ -343,3 +343,36 @@ fn a_line_label_is_hit_on_its_glyphs_and_not_in_the_gap_between_them() {
     assert_eq!(at([285.0, 185.0]), 1, "on the last glyph");
     assert_eq!(at([200.0, 150.0]), 0, "in the gap under the curve");
 }
+
+#[test]
+fn labels_that_may_overlap_come_in_the_order_drawn_on_the_rotated_screen() {
+    let style: Style = serde_json::from_value(serde_json::json!({"version": 8, "sources": {},
+        "layers": [{"id": "overlap", "type": "symbol", "source": "s", "source-layer": "places",
+            "layout": {"text-allow-overlap": true}}]}))
+    .expect("style");
+    let tile = coords(0, 0, 0);
+    let labels = || {
+        vec![
+            label(1, 0.0, [0.0, 0.0]),
+            label(2, 0.0, [100.0, 0.0]),
+            label(3, 0.0, [0.0, 100.0]),
+        ]
+    };
+    let screen = QueryGeometry::Box {
+        min: [0.0, 0.0],
+        max: [512.0, 512.0],
+    };
+    // Unrotated, the lowest label is drawn last and found first; of the two level ones the
+    // earlier feature is drawn last.
+    let mut world = placed(vec![bucket(tile, "overlap", labels())]);
+    let found =
+        query_rendered_symbols_in(&world, &style, screen, &QueryOptions::default()).expect("query");
+    assert_eq!(ids(&found), [3, 1, 2]);
+    // Turned a quarter, height runs along the tile's x axis.
+    world
+        .resources
+        .insert(PlacementBearing(std::f64::consts::FRAC_PI_2));
+    let found =
+        query_rendered_symbols_in(&world, &style, screen, &QueryOptions::default()).expect("query");
+    assert_eq!(ids(&found), [1, 3, 2]);
+}

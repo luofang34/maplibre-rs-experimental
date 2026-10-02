@@ -51,6 +51,21 @@ impl PlacementHistory {
             })
             .is_some_and(|state| state.target.iter().any(|v| *v))
     }
+    /// Whether another tile's copy of the label already took it this frame, so this copy is
+    /// neither drawn nor found by a query. Asked before [`Self::opacity`] takes it.
+    pub(super) fn shown_elsewhere(&self, layer: &SymbolLayerData, feature: &Feature) -> bool {
+        let frame = self.frame;
+        self.states.get(&key(layer, feature)).is_some_and(|states| {
+            states
+                .iter()
+                .find(|state| {
+                    matches(state, layer.coords, feature)
+                        && !(state.claimed == frame && state.claimed_by == layer.coords)
+                })
+                .is_some_and(|state| state.claimed == frame)
+        })
+    }
+
     pub(super) fn opacity(
         &mut self,
         layer: &SymbolLayerData,

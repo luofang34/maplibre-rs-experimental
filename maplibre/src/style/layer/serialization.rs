@@ -191,6 +191,22 @@ impl Serialize for StyleLayer {
 }
 
 impl StyleLayer {
+    /// What GL JS `groupByLayout` compares: layers equal in type, source, source layer, zoom
+    /// range, filter and every layout property share one symbol bucket and one placement.
+    pub(crate) fn layout_group_key(&self) -> Option<String> {
+        let layout = self.property_maps().ok()?.layout;
+        serde_json::to_string(&(
+            &self.type_,
+            &self.source,
+            &self.source_layer,
+            self.minzoom,
+            self.maxzoom,
+            &self.filter,
+            layout,
+        ))
+        .ok()
+    }
+
     fn property_maps(&self) -> Result<LayerProperties, serde_json::Error> {
         let mut paint = self.unrecognized.paint.clone();
         let mut layout = self.unrecognized.layout.clone();

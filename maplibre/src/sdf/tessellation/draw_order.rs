@@ -13,7 +13,7 @@ use crate::{
 
 /// Whether the layer draws its labels by screen height: `symbol-z-order: viewport-y`, or `auto`
 /// without a `symbol-sort-key`, for labels that may overlap.
-pub(super) fn sorts_by_height(paint: &SymbolPaint, zoom: f64) -> bool {
+pub(crate) fn sorts_by_height(paint: &SymbolPaint, zoom: f64) -> bool {
     let order = paint
         .properties
         .get("symbol-z-order")

@@ -340,6 +340,8 @@ mod navigation;
 
 mod queries;
 
+mod query_visibility;
+
 mod stability;
 
 mod variable_anchors;
