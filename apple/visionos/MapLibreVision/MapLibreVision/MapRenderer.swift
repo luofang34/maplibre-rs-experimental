@@ -47,6 +47,7 @@ final class MapRenderer {
     private static var loggedProjection = false
     private var placedFromHead = false
     private var stats = FrameStats()
+    private let trace = FrameTraceRecorder()
     private var skippedFrames = 0
     /// Frames the GPU may still be drawing while the next is encoded. Without a bound the
     /// CPU runs ahead until the queue holds its limit of command buffers and Metal blocks
@@ -183,6 +184,7 @@ final class MapRenderer {
             print("maplibre_visionos_create failed")
             maplibre_visionos_note("maplibre_visionos_create failed")
         }
+        if let map { trace.enable(map) }
         if let map, let raw = maplibre_visionos_command_queue(map) {
             mapQueue = Unmanaged<AnyObject>.fromOpaque(raw).takeUnretainedValue() as? MTLCommandQueue
         }
@@ -257,7 +259,9 @@ final class MapRenderer {
             }
             return
         }
+        let waitStart = CACurrentMediaTime()
         framesInFlight.wait()
+        let queueWait = CACurrentMediaTime() - waitStart
         var completionOwnsPermit = false
         defer {
             if !completionOwnsPermit { framesInFlight.signal() }
@@ -272,6 +276,7 @@ final class MapRenderer {
         LayerRenderer.Clock().wait(until: timing.optimalInputTime)
         // The wait paces the loop; the work of the frame starts here.
         let frameStart = CACurrentMediaTime()
+        let deadline = MapRenderer.seconds(LayerRenderer.Clock().now.duration(to: timing.renderingDeadline))
         frame.startSubmission()
         // A frame without a drawable is skipped without ending its submission, as the
         // Compositor Services sample does; ending it aborts the process.
@@ -495,10 +500,16 @@ final class MapRenderer {
         } else {
             maplibre_visionos_note("stereo frame failed; presenting the last complete frame")
         }
+        let traceFrame = trace.frame(map)
+        trace.watch(commandBuffer, frame: traceFrame, start: frameStart, deadline: deadline)
         let copyStart = CACurrentMediaTime()
         present(drawable, on: commandBuffer, frame: frame, replayFrame: replayFrame,
                 head: originFromDevice, terrainValid: result != nil)
         copySeconds = CACurrentMediaTime() - copyStart
+        trace.cpu(map, frame: traceFrame, "queue-wait", seconds: queueWait)
+        trace.cpu(map, frame: traceFrame, "map-render-call", seconds: renderSeconds)
+        // Encoding the copy and overlays is CPU time; their GPU time comes from the completion.
+        trace.cpu(map, frame: traceFrame, "copy-encode", seconds: copySeconds)
         if let immersionChange { modeStore.showImmersion(immersionChange) }
         // The map knows the terrain under the focus; the viewer stands that much higher, so
         // a height is a height above the ground. The ground eases to a newly loaded DEM
@@ -517,6 +528,7 @@ final class MapRenderer {
         stats.add(
             total: CACurrentMediaTime() - frameStart, render: renderSeconds, copy: copySeconds,
             gpuAllocated: device.currentAllocatedSize, availableMB: lastAvailableMemory >> 20)
+        trace.flush(map, frame: traceFrame) { FrameStats.memoryMB().footprint }
     }
 
     private func present(_ drawable: LayerRenderer.Drawable, on commandBuffer: MTLCommandBuffer, frame: LayerRenderer.Frame,
