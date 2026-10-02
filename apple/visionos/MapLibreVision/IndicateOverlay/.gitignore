@@ -1,2 +1,5 @@
 /target/
 !Cargo.lock
+!vendor/
+!vendor/indicate/
+!vendor/indicate/**

@@ -1,0 +1,19 @@
+[package]
+name = "indicate-instrument-registry"
+description = "Panel registry: shell composition of panel descriptors, init-time validation, and the cross-shell scene digest (ADR-0029, ADR-0033)"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+indicate-instrument-descriptor = { workspace = true }
+indicate-instrument-scene = { workspace = true }
+indicate-instrument-state = { workspace = true }
+indicate-sha256 = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+indicate-alerts = { workspace = true }

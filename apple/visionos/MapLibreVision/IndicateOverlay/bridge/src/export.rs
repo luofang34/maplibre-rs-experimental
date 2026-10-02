@@ -100,3 +100,28 @@ pub extern "C" fn indicate_svs_compact(
         was_compact != 0,
     ))
 }
+
+/// Display geometry shared with the host compositor.
+#[repr(C)]
+pub struct DisplayContract {
+    /// Projection: 2 means display-fixed for every nonconformal instrument layer.
+    pub reference: u32,
+    /// Host status reservation in the logical frame: left, top, width, height.
+    pub host_context: [f32; 4],
+}
+
+/// Provides the projection and reserved host status region from the instrument set.
+#[unsafe(no_mangle)]
+pub extern "C" fn indicate_svs_display_contract() -> DisplayContract {
+    use indicate_instrument_hmd::{HOST_CONTEXT_ZONE, InstrumentReference, layer_reference};
+    let zone = HOST_CONTEXT_ZONE;
+    let reference = match layer_reference(indicate_instrument_scene::LayerId::Tapes, false) {
+        InstrumentReference::Aircraft => 0,
+        InstrumentReference::HeadLevel => 1,
+        InstrumentReference::Head => 2,
+    };
+    DisplayContract {
+        reference,
+        host_context: [zone.x, zone.y, zone.width, zone.height],
+    }
+}

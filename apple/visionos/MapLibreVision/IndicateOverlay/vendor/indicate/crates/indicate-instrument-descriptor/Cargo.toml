@@ -1,0 +1,15 @@
+[package]
+name = "indicate-instrument-descriptor"
+description = "Panel descriptor vocabulary: identity, required layers and groups, design frame, config schema, canonical states (ADR-0029, ADR-0033)"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+indicate-alerts = { workspace = true }
+indicate-instrument-scene = { workspace = true }
+indicate-instrument-state = { workspace = true }
+thiserror = { workspace = true }

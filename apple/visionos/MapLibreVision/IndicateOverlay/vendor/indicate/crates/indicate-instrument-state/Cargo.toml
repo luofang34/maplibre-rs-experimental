@@ -1,0 +1,15 @@
+[package]
+name = "indicate-instrument-state"
+description = "Unified aircraft/nav state, per-signal validity, and display derivations (ADR-0017)"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+indicate-frames = { workspace = true }
+indicate-alerts = { workspace = true }
+libm = { workspace = true }
+thiserror = { workspace = true }

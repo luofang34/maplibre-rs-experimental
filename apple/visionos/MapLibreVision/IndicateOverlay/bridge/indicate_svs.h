@@ -34,4 +34,7 @@ uint32_t indicate_svs_compact(ReplayTelemetry input, float alignment_cosine, uin
 OverlayScene indicate_svs_render(ReplayTelemetry input);
 OverlayScene indicate_svs_glance(ReplayTelemetry input);
 uint64_t indicate_svs_glyph(uint32_t scalar);
+typedef struct { uint32_t reference; float host_context[4]; } DisplayContract;
+_Static_assert(sizeof(DisplayContract) == 20, "Display contract ABI");
+DisplayContract indicate_svs_display_contract(void);
 #endif

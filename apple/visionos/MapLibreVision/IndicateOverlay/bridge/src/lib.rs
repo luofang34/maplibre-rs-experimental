@@ -8,3 +8,5 @@ pub use export::{
     indicate_svs_glyph, indicate_svs_reference, indicate_svs_render,
 };
 pub use telemetry::{ReplayTelemetry, resolve_replay};
+
+pub use export::{DisplayContract, indicate_svs_display_contract};
