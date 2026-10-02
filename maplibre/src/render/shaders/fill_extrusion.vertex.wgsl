@@ -50,9 +50,12 @@ fn main(
     let colorvalue = dot(surface, vec3<f32>(0.2126, 0.7152, 0.0722));
     // A little ambient light keeps every extrusion from going black.
     let lit = surface + vec3<f32>(0.03);
+    // GL JS shades a wall by its height only where its normal leans north or south: it stores
+    // the normal as integers of 16384ths, and an east or west face has none of y.
+    let graded = is_wall && trunc(normal.y * 16384.0) != 0.0;
     var directional = clamp(dot(normal, light_position.xyz), 0.0, 1.0);
     directional = mix(1.0 - intensity, max(1.0 - colorvalue + intensity, 1.0), directional);
-    if is_wall {
+    if graded {
         let gradient = clamp(
             (top + base_in) * pow(height / 150.0, 0.5),
             mix(0.7, 0.98, 1.0 - intensity),
@@ -83,7 +86,7 @@ fn main(
     let origin_lower = corner - origin_upper * 65536.0;
     let pattern_light = mix(1.0 - intensity, max(0.5 + intensity, 1.0), clamp(dot(normal, light_position.xyz), 0.0, 1.0));
     var pattern_directional = pattern_light;
-    if is_wall {
+    if graded {
         let gradient = clamp(
             (top + base_in) * pow(height / 150.0, 0.5),
             mix(0.7, 0.98, 1.0 - intensity),
