@@ -11,6 +11,32 @@ fn is_rtl(c: char) -> bool {
     )
 }
 
+/// Whether `c` only steers the bidirectional algorithm: marks, embeddings, overrides and
+/// isolates, which GL JS's bidirectional pass leaves out of the text it draws.
+pub(super) fn is_bidi_control(c: char) -> bool {
+    matches!(
+        c,
+        '\u{061C}' | '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}'
+    )
+}
+
+/// The lines with each also ended after any paragraph separator in it: GL JS's bidirectional
+/// pass takes the separators as paragraph ends on top of the breaks that fit the width.
+pub(super) fn split_paragraphs(chars: &[char], lines: Vec<Range<usize>>) -> Vec<Range<usize>> {
+    let mut split = Vec::with_capacity(lines.len());
+    for line in lines {
+        let mut start = line.start;
+        for index in line.clone() {
+            if index + 1 < line.end && bidi_class(chars[index]) == BidiClass::B {
+                split.push(start..index + 1);
+                start = index + 1;
+            }
+        }
+        split.push(start..line.end);
+    }
+    split
+}
+
 /// The indices of the characters of `line`, in the order they are drawn from left to right.
 fn visual_order(chars: &[char], line: Range<usize>) -> Vec<usize> {
     let logical: Vec<usize> = line.clone().collect();

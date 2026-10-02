@@ -144,3 +144,27 @@ fn a_formatted_text_field_survives_serialization() {
     assert_eq!(sections(&layer), sections(&again));
     assert!(sections(&again).is_some_and(|field| field.1.len() == 3));
 }
+
+#[test]
+fn each_section_of_a_formatted_label_is_shaped_on_its_own() {
+    // GL JS shapes each run of a formatted label: لا joins into one ligature, so its section
+    // shrinks, while the Latin section keeps its length and follows it.
+    let paint: SymbolPaint = serde_json::from_value(serde_json::json!({
+        "text-field": ["format", "لا", {"font-scale": 1.5}, " ab", {}]
+    }))
+    .expect("paint");
+    let properties = FeatureProperties::new();
+    let label = paint.label(&properties, 0.0).expect("label");
+    let arabic = crate::style::arabic_shaping::shape("لا");
+    assert_eq!(label, format!("{arabic} ab"));
+    let lengths: Vec<usize> = paint
+        .label_sections(&properties, 0.0)
+        .iter()
+        .map(|section| section.length)
+        .collect();
+    assert_eq!(lengths, [arabic.chars().count(), 3]);
+    assert!(
+        arabic.chars().count() < 2,
+        "lam and alef join into one presentation form: {arabic:?}"
+    );
+}

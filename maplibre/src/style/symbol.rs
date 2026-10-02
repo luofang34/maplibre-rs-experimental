@@ -119,6 +119,19 @@ impl SymbolPaint {
 
     /// Text transformed before both glyph requests and layout.
     pub fn label(&self, properties: &FeatureProperties, zoom: f64) -> Option<String> {
+        let (text, _) = self.shaped_field(properties, zoom)?;
+        let text = text.trim();
+        (!text.is_empty()).then(|| text.to_string())
+    }
+
+    /// The text field with `text-transform` applied and the Arabic of each section shaped on
+    /// its own, as GL JS shapes each run of a formatted label; the sections, empty for plain
+    /// text, keep the lengths their shaped runs have.
+    fn shaped_field(
+        &self,
+        properties: &FeatureProperties,
+        zoom: f64,
+    ) -> Option<(String, Vec<crate::style::property::TextSection>)> {
         let text = self.text("text-field", properties, zoom)?;
         let text = match self
             .properties
@@ -129,23 +142,37 @@ impl SymbolPaint {
             Some("lowercase") => text.to_lowercase(),
             _ => text,
         };
-        let text = text.trim();
-        if text.is_empty() {
-            return None;
-        }
-        // Sections cannot follow letters that change length when they join.
-        let plain = self
+        let shape = |text: String| {
+            if crate::style::arabic_shaping::needs_shaping(&text) {
+                crate::style::arabic_shaping::shape(&text)
+            } else {
+                text
+            }
+        };
+        let sections = self
             .text_field
             .as_ref()
             .and_then(|field| field.evaluate_for(properties, zoom))
-            .is_none_or(|field| field.1.is_empty());
-        Some(
-            if plain && crate::style::arabic_shaping::needs_shaping(text) {
-                crate::style::arabic_shaping::shape(text)
-            } else {
-                text.to_string()
-            },
-        )
+            .map(|field| field.1)
+            .unwrap_or_default();
+        let total: usize = sections.iter().map(|section| section.length).sum();
+        // A case change that alters the length of the text leaves no way to tell which
+        // characters belong to which section.
+        if sections.is_empty() || total != text.chars().count() {
+            return Some((shape(text), Vec::new()));
+        }
+        let mut chars = text.chars();
+        let mut shaped = String::with_capacity(text.len());
+        let mut shaped_sections = Vec::with_capacity(sections.len());
+        for section in sections {
+            let run = shape(chars.by_ref().take(section.length).collect());
+            shaped_sections.push(crate::style::property::TextSection {
+                length: run.chars().count(),
+                ..section
+            });
+            shaped.push_str(&run);
+        }
+        Some((shaped, shaped_sections))
     }
 }
 
@@ -157,39 +184,27 @@ impl SymbolPaint {
         properties: &FeatureProperties,
         zoom: f64,
     ) -> Vec<crate::style::property::TextSection> {
-        let Some(field) = self
-            .text_field
-            .as_ref()
-            .and_then(|field| field.evaluate_for(properties, zoom))
-        else {
+        let Some((text, sections)) = self.shaped_field(properties, zoom) else {
             return Vec::new();
         };
-        if field.1.is_empty() {
+        if sections.is_empty() || text.trim().is_empty() {
             return Vec::new();
         }
-        let Some(label) = self.label(properties, zoom) else {
-            return Vec::new();
-        };
-        // A case change that alters the length of the text leaves no way to tell which
-        // characters belong to which section.
-        if label.chars().count() != field.0.trim().chars().count() {
-            return Vec::new();
-        }
-        let leading = field.0.chars().take_while(|c| c.is_whitespace()).count();
+        let leading = text.chars().take_while(|c| c.is_whitespace()).count();
         let mut skip = leading;
-        let mut remaining = label.chars().count();
-        let mut sections = Vec::new();
-        for mut section in field.1 {
+        let mut remaining = text.trim().chars().count();
+        let mut trimmed = Vec::new();
+        for mut section in sections {
             let dropped = skip.min(section.length);
             skip -= dropped;
             section.length -= dropped;
             section.length = section.length.min(remaining);
             remaining -= section.length;
             if section.length > 0 {
-                sections.push(section);
+                trimmed.push(section);
             }
         }
-        sections
+        trimmed
     }
 }
 

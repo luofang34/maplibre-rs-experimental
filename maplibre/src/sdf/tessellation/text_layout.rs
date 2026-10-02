@@ -97,17 +97,25 @@ fn block<'a>(
     atlas: &'a SymbolAtlas,
 ) -> Option<Block<'a>> {
     let text = paint.label(&symbol.properties, zoom)?;
-    let mut chars: Vec<char> = text.chars().collect();
-    let mut styles = char_styles(paint, symbol, zoom, atlas, chars.len())?;
+    let chars: Vec<char> = text.chars().collect();
+    let styles = char_styles(paint, symbol, zoom, atlas, chars.len())?;
+    let (mut chars, mut styles): (Vec<char>, Vec<_>) = chars
+        .into_iter()
+        .zip(styles)
+        .filter(|(c, _)| !bidirectional::is_bidi_control(*c))
+        .unzip();
     let spacing = paint.number("text-letter-spacing", &symbol.properties, zoom, 0.0) * 24.0;
     let max_width = paint.number("text-max-width", &symbol.properties, zoom, 10.0) * 24.0;
     // Text along a line runs the whole line: it is never wrapped.
     let lines = if super::is_line_placed(paint) {
         std::iter::once(0..chars.len()).collect()
     } else {
-        wrap(&chars, max_width, &|index| {
-            styles[index].advance(chars[index]) + spacing
-        })
+        bidirectional::split_paragraphs(
+            &chars,
+            wrap(&chars, max_width, &|index| {
+                styles[index].advance(chars[index]) + spacing
+            }),
+        )
     };
     let line_height = paint.number("text-line-height", &symbol.properties, zoom, 1.2) * 24.0;
     let vertical = !super::is_line_placed(paint)
