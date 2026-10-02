@@ -1,8 +1,8 @@
 //! Resamples an `image` source into the tiles that cover it.
 //!
 //! Resampling the picture into raster tiles lets terrain, globe and masks treat it like any other
-//! raster source. The picture is warped onto its corners as GL JS's default `auto` warp does it
-//! (in its `warp` module); the `perspective` and `flat` warps a GL JS map can be set to are not offered.
+//! raster source. The `warp` submodule warps the picture onto its corners as GL JS's default
+//! `auto` warp does; the `perspective` and `flat` warps a GL JS map can be set to are not offered.
 
 use image::RgbaImage;
 
