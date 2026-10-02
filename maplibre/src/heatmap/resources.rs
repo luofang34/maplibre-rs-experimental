@@ -67,7 +67,7 @@ impl HeatmapResources {
     pub fn write_layer(
         &mut self,
         device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        queue: &crate::render::upload_queue::UploadQueue,
         layer_id: &str,
         size: (u32, u32),
         ramp: &[[u8; 4]],
@@ -199,7 +199,11 @@ impl HeatmapResources {
     }
 }
 
-fn write_ramp(queue: &wgpu::Queue, texture: &wgpu::Texture, ramp: &[[u8; 4]]) {
+fn write_ramp(
+    queue: &crate::render::upload_queue::UploadQueue,
+    texture: &wgpu::Texture,
+    ramp: &[[u8; 4]],
+) {
     let mut texels = Vec::with_capacity(RAMP_TEXELS * 4);
     for texel in ramp.iter().take(RAMP_TEXELS) {
         texels.extend_from_slice(texel);

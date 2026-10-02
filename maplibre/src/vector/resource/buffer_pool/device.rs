@@ -1,5 +1,7 @@
 use super::*;
-impl<V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<wgpu::Queue, wgpu::Buffer, V, I, TM, FM> {
+impl<V: Pod, I: Pod, TM: Pod, FM: Pod>
+    BufferPool<crate::render::upload_queue::UploadQueue, wgpu::Buffer, V, I, TM, FM>
+{
     pub fn from_device(device: &wgpu::Device) -> Self {
         Self::from_device_with_sizes(device, BufferPoolSizes::default())
     }
@@ -60,7 +62,9 @@ impl<V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<wgpu::Queue, wgpu::Buffer, V, 
     }
 }
 
-impl<V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<wgpu::Queue, wgpu::Buffer, V, I, TM, FM> {
+impl<V: Pod, I: Pod, TM: Pod, FM: Pod>
+    BufferPool<crate::render::upload_queue::UploadQueue, wgpu::Buffer, V, I, TM, FM>
+{
     /// Binds a layer's indices, vertices and feature metadata (at `feature_slot`) and returns
     /// the first index and base vertex to draw its indices with. With `whole` the pool's
     /// buffers are bound whole, so consecutive layers keep them bound; without, as on WebGL2,

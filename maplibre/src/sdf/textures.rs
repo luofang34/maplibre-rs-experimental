@@ -24,7 +24,7 @@ pub(super) struct DrawBinding {
 
 pub(super) struct TextureContext<'a> {
     pub device: &'a wgpu::Device,
-    pub queue: &'a wgpu::Queue,
+    pub queue: &'a crate::render::upload_queue::UploadQueue,
     pub pipeline: &'a wgpu::RenderPipeline,
 }
 

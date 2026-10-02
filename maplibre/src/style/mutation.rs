@@ -546,6 +546,7 @@ impl MapContext {
         apply: impl FnOnce(&mut Style) -> Result<StyleChange, StyleMutationError>,
     ) -> Result<StyleChange, StyleMutationError> {
         let change = apply(&mut self.style)?;
+        crate::render::frame_signals::mark_dirty(&mut self.world);
         if !change.removed_layers.is_empty() {
             crate::vector::content::purge_layers(&mut self.world, &change.removed_layers);
         }

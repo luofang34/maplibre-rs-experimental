@@ -123,7 +123,12 @@ impl BackgroundPatternGpu {
     }
 
     /// Points the pattern at the map the view looks at, as far as the frame can see it.
-    pub(crate) fn write(&self, queue: &wgpu::Queue, view: &ViewState, physical: [f32; 2]) {
+    pub(crate) fn write(
+        &self,
+        queue: &crate::render::upload_queue::UploadQueue,
+        view: &ViewState,
+        physical: [f32; 2],
+    ) {
         use cgmath::{Matrix4, SquareMatrix, Vector3};
 
         let center = view.camera().position();

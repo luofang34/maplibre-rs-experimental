@@ -6,7 +6,7 @@ use crate::{
 
 fn assert_gpu_matches_cpu(
     device: &wgpu::Device,
-    queue: &wgpu::Queue,
+    queue: &crate::render::upload_queue::UploadQueue,
     pipeline: &wgpu::ComputePipeline,
     dem: &DemTile,
 ) {
@@ -53,6 +53,7 @@ async fn production_shader_matches_cpu_at_pixel_centres_and_borders() {
         .request_device(&Default::default())
         .await
         .expect("GPU device");
+    let queue = crate::render::upload_queue::UploadQueue::new(queue);
     let pipeline = pipeline(&device);
     let fixture: Fixture =
         serde_json::from_str(include_str!("../gljs.json")).expect("GL JS fixture");

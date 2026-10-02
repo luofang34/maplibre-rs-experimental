@@ -68,6 +68,8 @@ pub(crate) use systems::retention_system::drawn_tiles;
 #[cfg(feature = "headless")]
 pub(crate) use systems::retention_system::RetainLoadedTiles;
 pub mod frame_input;
+pub mod frame_signals;
+pub mod gpu_timer;
 pub mod projection;
 pub mod render_commands;
 pub mod render_phase;
@@ -75,6 +77,7 @@ pub mod settings;
 pub mod tile_mesh;
 pub mod tile_view_pattern;
 pub mod tracked_pass;
+pub mod upload_queue;
 pub mod view_state;
 pub mod xr;
 
@@ -183,8 +186,8 @@ pub struct Renderer {
     pub instance: wgpu::Instance,
     /// Shared device ownership allows offscreen capture to retain it while a readback is pending.
     pub device: Arc<wgpu::Device>,
-    /// Queue for buffer uploads and encoded frame submissions.
-    pub queue: wgpu::Queue,
+    /// Queue for buffer uploads and encoded frame submissions, counting the bytes uploaded.
+    pub queue: upload_queue::UploadQueue,
     /// Selected adapter, used to inspect backend capabilities and format support.
     pub adapter: wgpu::Adapter,
 
@@ -247,7 +250,7 @@ impl Renderer {
         Ok(Self {
             instance,
             device: share_gpu(device),
-            queue,
+            queue: upload_queue::UploadQueue::new(queue),
             adapter,
             wgpu_settings,
             settings,
@@ -293,7 +296,7 @@ impl Renderer {
         Ok(Self {
             instance,
             device: share_gpu(device),
-            queue,
+            queue: upload_queue::UploadQueue::new(queue),
             adapter,
             wgpu_settings,
             settings,
@@ -367,7 +370,7 @@ impl Renderer {
         &self.device
     }
     /// Borrows the queue used by the renderer for uploads and submissions.
-    pub fn queue(&self) -> &wgpu::Queue {
+    pub fn queue(&self) -> &upload_queue::UploadQueue {
         &self.queue
     }
     /// Borrows frame attachments and presentation state without acquiring a new frame.

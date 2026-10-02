@@ -469,6 +469,7 @@ fn initial_view_state(
     view
 }
 
+mod signals;
 mod sources;
 
 #[cfg(test)]

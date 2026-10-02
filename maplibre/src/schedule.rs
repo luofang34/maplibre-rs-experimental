@@ -336,7 +336,13 @@ impl Schedule {
             let timings = context.world.resources.get_or_init_mut::<FrameTimings>();
             timings.record(Cow::Owned(format!("stage {label:?}")), spent);
             timings.record_growth(Cow::Owned(format!("stage {label:?}")), grown);
+            crate::render::frame_signals::record_stage(
+                &mut context.world,
+                format!("{label:?}"),
+                spent,
+            );
         }
+        crate::render::frame_signals::finish_frame(context);
         context
             .world
             .resources

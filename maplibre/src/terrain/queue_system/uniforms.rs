@@ -26,7 +26,7 @@ pub(super) fn replay(
     world: &mut World,
     style: &Style,
     view: &ViewState,
-    queue: &wgpu::Queue,
+    queue: &crate::render::upload_queue::UploadQueue,
 ) -> SystemResult {
     let fog = terrain_fog(style, view);
     let projection = view.gpu_view_projection();

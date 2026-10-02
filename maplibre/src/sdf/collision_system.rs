@@ -127,6 +127,10 @@ impl System for CollisionSystem {
         );
         self.uploaded.retain(|(coords, _), _| seen.contains(coords));
         world.resources.insert(placed);
+        // Labels still fading in or out change the next frame.
+        if self.history.fading {
+            crate::render::frame_signals::keep_animating(world);
+        }
         Ok(())
     }
 }
@@ -185,7 +189,7 @@ impl CollisionSystem {
         style: &crate::style::Style,
         view_state: &crate::render::view_state::ViewState,
         projection: &crate::render::projection::ShaderProjectionData,
-        queue: &wgpu::Queue,
+        queue: &crate::render::upload_queue::UploadQueue,
         layers: Vec<VisibleLayer<'_>>,
     ) -> PlacedSymbols {
         let mut boxes = CollisionGrid::new(view_state.width(), view_state.height());

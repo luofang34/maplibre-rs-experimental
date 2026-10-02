@@ -17,7 +17,7 @@ impl TerrainResources {
     pub(crate) fn upload_loaded_dem(
         &mut self,
         device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        queue: &crate::render::upload_queue::UploadQueue,
         coords: WorldTileCoords,
         dem: &LoadedDem,
     ) {
@@ -49,7 +49,7 @@ impl TerrainResources {
     pub fn upload_dem(
         &mut self,
         device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        queue: &crate::render::upload_queue::UploadQueue,
         coords: WorldTileCoords,
         dem: &DemTile,
         revision: u32,

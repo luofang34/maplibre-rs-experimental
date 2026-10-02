@@ -169,7 +169,7 @@ impl PatternResources {
     pub(crate) fn update(
         &mut self,
         device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        queue: &crate::render::upload_queue::UploadQueue,
         style: &Style,
         zoom: f64,
     ) {
@@ -219,7 +219,7 @@ impl PatternResources {
     fn update_images(
         &mut self,
         device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        queue: &crate::render::upload_queue::UploadQueue,
         style: &Style,
         scale: f32,
     ) {
@@ -272,7 +272,7 @@ impl PatternResources {
     fn bind(
         &self,
         device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        queue: &crate::render::upload_queue::UploadQueue,
         image: &StyleImage,
         (fingerprint, scale): (u64, f32),
     ) -> Option<PatternBinding> {

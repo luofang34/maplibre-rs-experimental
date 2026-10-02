@@ -35,6 +35,25 @@ impl System for GraphRunnerSystem {
         }: &mut MapContext,
     ) -> SystemResult {
         render_graph.update(state);
+        if world
+            .resources
+            .get::<crate::render::gpu_timer::GpuTimerSlot>()
+            .is_none()
+        {
+            world
+                .resources
+                .insert(crate::render::gpu_timer::GpuTimerSlot(
+                    crate::render::gpu_timer::GpuTimer::new(device),
+                ));
+        }
+        let measured = world
+            .resources
+            .get::<crate::render::gpu_timer::GpuTimerSlot>()
+            .and_then(|slot| slot.0.as_ref())
+            .and_then(|timer| timer.take(device, queue.get_timestamp_period()));
+        if let Some(spent) = measured {
+            crate::render::frame_signals::record_gpu_time(world, spent);
+        }
 
         if let Err(e) = RenderGraphRunner::run(render_graph, device, queue, state, world) {
             error!("Error running render graph:");

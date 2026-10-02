@@ -44,6 +44,17 @@ impl RenderStats {
         }
     }
 
+    /// The counts since the last [`Self::take`], leaving them in place.
+    pub fn peek(&self) -> PassStats {
+        match self.recorded.lock() {
+            Ok(recorded) => *recorded,
+            Err(error) => {
+                tracing::error!(%error, "render statistics are poisoned");
+                PassStats::default()
+            }
+        }
+    }
+
     /// The counts since the last call, leaving zero behind.
     pub fn take(&self) -> PassStats {
         match self.recorded.lock() {

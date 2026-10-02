@@ -165,7 +165,11 @@ impl ProjectionGpuResources {
     }
 
     /// Uploads projection state for the current frame.
-    pub fn upload(&self, queue: &wgpu::Queue, data: ShaderProjectionData) {
+    pub fn upload(
+        &self,
+        queue: &crate::render::upload_queue::UploadQueue,
+        data: ShaderProjectionData,
+    ) {
         queue.write_buffer(&self.buffer, 0, bytemuck::bytes_of(&data));
     }
 }

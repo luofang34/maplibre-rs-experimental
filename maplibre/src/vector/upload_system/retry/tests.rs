@@ -27,7 +27,12 @@ fn bucket(coords: WorldTileCoords, x: f32) -> AvailableVectorLayerBucket {
     }
 }
 
-fn upload(world: &mut World, queue: &wgpu::Queue, style: &Style, coords: Vec<WorldTileCoords>) {
+fn upload(
+    world: &mut World,
+    queue: &crate::render::upload_queue::UploadQueue,
+    style: &Style,
+    coords: Vec<WorldTileCoords>,
+) {
     let Some(Eventually::Initialized(pool)) =
         world.resources.get_mut::<Eventually<VectorBufferPool>>()
     else {

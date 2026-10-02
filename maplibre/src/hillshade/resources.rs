@@ -152,7 +152,7 @@ impl HillshadeResources {
     pub fn write_layer(
         &mut self,
         device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        queue: &crate::render::upload_queue::UploadQueue,
         layer_id: &str,
         kind: DemLayerKind,
         contents: &[u8],

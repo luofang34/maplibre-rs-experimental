@@ -73,7 +73,11 @@ impl Node for MainPassNode {
                         store: StoreOp::Store,
                     }),
                 }),
-                timestamp_writes: None,
+                timestamp_writes: world
+                    .resources
+                    .get::<crate::render::gpu_timer::GpuTimerSlot>()
+                    .and_then(|slot| slot.0.as_ref())
+                    .and_then(crate::render::gpu_timer::GpuTimer::pass_writes),
                 occlusion_query_set: None,
             });
         let mut pass = crate::render::tracked_pass::TrackedRenderPass::new(pass);

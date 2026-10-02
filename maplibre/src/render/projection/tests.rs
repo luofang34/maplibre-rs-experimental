@@ -172,6 +172,7 @@ async fn projection_aware_tile_pipelines_compile() {
         .request_device(&wgpu::DeviceDescriptor::default())
         .await
         .expect("GPU device should be available");
+    let queue = crate::render::upload_queue::UploadQueue::new(queue);
     let projection = super::ProjectionGpuResources::new(&device);
     let dashes = crate::vector::line_dash::LineDashResources::new(&device, &queue);
     let format = wgpu::TextureFormat::Rgba8Unorm;

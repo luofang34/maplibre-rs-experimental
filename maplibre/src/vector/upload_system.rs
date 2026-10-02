@@ -160,7 +160,7 @@ fn sources_for_upload(
 
 fn refresh_layer_paint(
     buffer_pool: &VectorBufferPool,
-    queue: &wgpu::Queue,
+    queue: &crate::render::upload_queue::UploadQueue,
     source_tiles: &[crate::coords::WorldTileCoords],
     frame: VectorPaintFrame,
     previous: Option<VectorPaintFrame>,
@@ -202,7 +202,7 @@ fn refresh_layer_paint(
 
 fn upload_tessellated_layer(
     buffer_pool: &mut VectorBufferPool,
-    queue: &wgpu::Queue,
+    queue: &crate::render::upload_queue::UploadQueue,
     tiles: &mut Tiles,
     style: &Style,
     source_tiles: Vec<crate::coords::WorldTileCoords>,
@@ -281,7 +281,7 @@ fn upload_size(bucket: &AvailableVectorLayerBucket) -> usize {
 
 fn upload_bucket(
     buffer_pool: &mut VectorBufferPool,
-    queue: &wgpu::Queue,
+    queue: &crate::render::upload_queue::UploadQueue,
     style_layer: &crate::style::layer::StyleLayer,
     bucket: &AvailableVectorLayerBucket,
     spatial: &[super::structures::SpatialBuffer],

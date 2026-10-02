@@ -126,8 +126,31 @@ fn now(world: &mut World) -> Duration {
     clock.last
 }
 
+/// Whether a frame has request work: a request in flight, whose result the next frame applies,
+/// or a retry whose deadline has passed, which the next frame issues.
+pub(crate) fn needs_frame(world: &World) -> bool {
+    let now = world
+        .resources
+        .get::<RequestClock>()
+        .map_or(Duration::ZERO, |clock| {
+            clock.last.max(clock.started.elapsed())
+        });
+    world.tiles.tiles.values().any(|tile| {
+        world
+            .tiles
+            .query::<&TileRequestRetries>(tile.coords)
+            .is_some_and(|retries| {
+                retries
+                    .0
+                    .iter()
+                    .any(|state| state.pending || state.deadline.is_some_and(|due| due <= now))
+            })
+    })
+}
+
 /// Requests every requested tile of `kind` again, keeping what it shows until the new data lands.
 pub(crate) fn refresh(world: &mut World, kind: RequestKind) {
+    crate::render::frame_signals::mark_dirty(world);
     let now = now(world);
     let coords: Vec<WorldTileCoords> = world.tiles.tiles.values().map(|tile| tile.coords).collect();
     for coords in coords {
@@ -206,6 +229,7 @@ pub(crate) fn completed(world: &mut World, outcome: TileRequestOutcome) {
     }
     state.pending = false;
     let stale = std::mem::take(&mut state.stale);
+    let loaded = matches!(outcome.disposition, RequestDisposition::Complete);
     match outcome.disposition {
         RequestDisposition::Complete => {
             state.delay = Duration::ZERO;
@@ -220,6 +244,14 @@ pub(crate) fn completed(world: &mut World, outcome: TileRequestOutcome) {
             state.deadline = Some(now.saturating_add(state.delay));
         }
     }
+    crate::render::frame_signals::resource_ready(
+        world,
+        crate::render::frame_signals::ResourceReady::Tile {
+            coords: outcome.coords,
+            kind: outcome.kind,
+            loaded,
+        },
+    );
 }
 
 /// Payloads from a finished attempt remain valid until a new attempt replaces its identity.

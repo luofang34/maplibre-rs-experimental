@@ -93,7 +93,7 @@ impl Deref for CirclePipeline {
 
 /// GPU storage for tile geometry, per-layer paint and per-vertex feature colors.
 pub type VectorBufferPool = BufferPool<
-    wgpu::Queue,
+    crate::render::upload_queue::UploadQueue,
     wgpu::Buffer,
     ShaderVertex,
     IndexDataType,

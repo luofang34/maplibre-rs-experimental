@@ -266,7 +266,7 @@ fn profile(kind: StructureKind, start: f64, end: f64, ground: f64, t: f64, clear
 
 pub(crate) fn refresh_gpu(
     pool: &VectorBufferPool,
-    queue: &wgpu::Queue,
+    queue: &crate::render::upload_queue::UploadQueue,
     buffers: &[SpatialBuffer],
     tiles: &Tiles,
 ) {

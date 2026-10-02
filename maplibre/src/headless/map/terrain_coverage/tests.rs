@@ -320,3 +320,24 @@ async fn unrelated_raster_arrival_does_not_redraw_the_cached_target() {
         .any(|entry| entry.coords == target()));
     assert_color(&read_blocking(&map, "raster-unrelated"), [0, 255, 0, 255]);
 }
+
+#[tokio::test]
+async fn frame_statistics_count_drapes_drawn_and_none_on_a_still_frame() {
+    let mut map = prepared_map(true).await;
+    // Replacing the source at the drape's own coordinates draws that drape again.
+    map.render_sources(ProcessedLayers::default(), vec![tile(target(), true, true)])
+        .expect("replacement source");
+    assert!(
+        map.last_frame_stats().drape_redraws > 0,
+        "new content draws a drape again: {:?}",
+        map.last_frame_stats()
+    );
+    for _ in 0..4 {
+        map.run_frame().expect("still frame");
+    }
+    assert_eq!(
+        map.last_frame_stats().drape_redraws,
+        0,
+        "a still frame draws none"
+    );
+}

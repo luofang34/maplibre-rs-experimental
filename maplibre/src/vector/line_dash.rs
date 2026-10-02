@@ -49,7 +49,10 @@ pub(crate) struct LineDashResources {
 }
 
 impl LineDashResources {
-    pub(crate) fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
+    pub(crate) fn new(
+        device: &wgpu::Device,
+        queue: &crate::render::upload_queue::UploadQueue,
+    ) -> Self {
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("line dash layout"),
             entries: &[
@@ -116,7 +119,7 @@ impl LineDashResources {
     pub(crate) fn update(
         &mut self,
         device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        queue: &crate::render::upload_queue::UploadQueue,
         style: &Style,
         zoom: f64,
     ) {
@@ -182,7 +185,7 @@ impl LineDashResources {
     fn update_images(
         &mut self,
         device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        queue: &crate::render::upload_queue::UploadQueue,
         style: &Style,
         scale: f32,
     ) {
@@ -348,7 +351,7 @@ fn dash_scale(zoom: f64) -> f32 {
 
 fn create_entry(
     device: &wgpu::Device,
-    queue: &wgpu::Queue,
+    queue: &crate::render::upload_queue::UploadQueue,
     layout: &wgpu::BindGroupLayout,
     (pattern, round): (&[f64], bool),
     (image, scale): (&LineImage, f32),
@@ -487,7 +490,7 @@ fn pattern_image(image: &crate::style::StyleImage) -> Option<LineImage> {
 /// The gradient ramp or pattern as a texture, or one white texel for a plain line.
 fn ramp_texture(
     device: &wgpu::Device,
-    queue: &wgpu::Queue,
+    queue: &crate::render::upload_queue::UploadQueue,
     image: &LineImage,
 ) -> (wgpu::TextureView, wgpu::Sampler) {
     let white = [255_u8; 4];

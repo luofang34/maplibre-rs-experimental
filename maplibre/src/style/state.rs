@@ -249,6 +249,7 @@ impl crate::context::MapContext {
     /// vector layer that read it again; their old content stays until the new tiles arrive.
     pub fn set_global_state(&mut self, key: &str, value: Value) {
         let changed = self.style.set_global_state(key, value);
+        crate::render::frame_signals::mark_dirty(&mut self.world);
         let drawn_from_vector_tiles =
             self.style.layers.iter().any(|layer| {
                 changed.contains(&layer.id) && super::mutation::from_vector_tiles(layer)

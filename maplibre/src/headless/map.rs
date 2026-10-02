@@ -42,6 +42,7 @@ pub use error::HeadlessMapOperationError;
 mod processed;
 mod raster;
 pub mod reference;
+mod signals;
 mod style;
 mod symbols;
 #[cfg(test)]
@@ -379,7 +380,7 @@ impl HeadlessMap {
     }
 
     /// The queue the renderer submits to.
-    pub fn queue(&self) -> &wgpu::Queue {
+    pub fn queue(&self) -> &crate::render::upload_queue::UploadQueue {
         &self.map_context.renderer.queue
     }
 

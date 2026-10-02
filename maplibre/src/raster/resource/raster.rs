@@ -100,7 +100,12 @@ impl RasterResources {
     }
 
     /// Fills the levels below the first from the level above.
-    pub fn generate_mipmaps(&self, device: &wgpu::Device, queue: &wgpu::Queue, texture: &Texture) {
+    pub fn generate_mipmaps(
+        &self,
+        device: &wgpu::Device,
+        queue: &crate::render::upload_queue::UploadQueue,
+        texture: &Texture,
+    ) {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
         self.mipmaps
             .generate(device, &mut encoder, &texture.texture);
@@ -285,7 +290,7 @@ impl RasterResources {
     pub fn write_layer_paint(
         &mut self,
         device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        queue: &crate::render::upload_queue::UploadQueue,
         layer_id: &str,
         uniforms: &RasterUniforms,
     ) {
@@ -296,7 +301,7 @@ impl RasterResources {
     pub fn write_departing_paint(
         &mut self,
         device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        queue: &crate::render::upload_queue::UploadQueue,
         layer_id: &str,
         uniforms: &RasterUniforms,
     ) {
@@ -306,7 +311,7 @@ impl RasterResources {
     fn write_paint(
         &mut self,
         device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        queue: &crate::render::upload_queue::UploadQueue,
         (layer_id, departing): (&str, bool),
         uniforms: &RasterUniforms,
     ) {

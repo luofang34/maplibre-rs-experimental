@@ -330,7 +330,11 @@ impl TerrainResources {
     }
 
     /// Writes the per-tile uniform blocks and returns how many fit.
-    pub fn write_uniforms(&self, queue: &wgpu::Queue, uniforms: &[TerrainTileUniforms]) -> usize {
+    pub fn write_uniforms(
+        &self,
+        queue: &crate::render::upload_queue::UploadQueue,
+        uniforms: &[TerrainTileUniforms],
+    ) -> usize {
         let count = uniforms.len().min(UNIFORM_CAPACITY as usize);
         if count < uniforms.len() {
             tracing::warn!(

@@ -67,7 +67,7 @@ impl RenderGraphRunner {
     pub fn run(
         graph: &RenderGraph,
         device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        queue: &crate::render::upload_queue::UploadQueue,
         state: &RenderResources,
         world: &World,
     ) -> Result<(), RenderGraphRunnerError> {
@@ -79,10 +79,20 @@ impl RenderGraphRunner {
         };
 
         Self::run_graph(graph, None, &mut render_context, state, world, &[])?;
+        let timer = world
+            .resources
+            .get::<crate::render::gpu_timer::GpuTimerSlot>()
+            .and_then(|slot| slot.0.as_ref());
+        if let Some(timer) = timer {
+            timer.resolve(&mut render_context.command_encoder);
+        }
         {
             #[cfg(feature = "trace")]
             let _span = tracing::info_span!("submit_graph_commands").entered();
             queue.submit(vec![render_context.command_encoder.finish()]);
+        }
+        if let Some(timer) = timer {
+            timer.after_submit();
         }
         Ok(())
     }

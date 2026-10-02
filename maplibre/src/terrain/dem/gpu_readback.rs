@@ -83,7 +83,7 @@ fn tile_bindings(
 
 pub(crate) fn sample_gpu_blocking(
     device: &wgpu::Device,
-    queue: &wgpu::Queue,
+    queue: &crate::render::upload_queue::UploadQueue,
     pipeline: &wgpu::ComputePipeline,
     dem: &DemTile,
     texture: &Texture,

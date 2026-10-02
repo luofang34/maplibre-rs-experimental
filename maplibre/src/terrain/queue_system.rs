@@ -226,7 +226,7 @@ fn acquire_drapes(
     external: bool,
     terrain: &mut TerrainResources,
     device: &wgpu::Device,
-) -> (Vec<bool>, Vec<Option<WorldTileCoords>>) {
+) -> (Vec<bool>, Vec<Option<WorldTileCoords>>, bool) {
     let keep = covering::retained_textures(specs.iter().map(|spec| spec.coords), |coords| {
         terrain.drape_texture(coords).is_some()
     });
@@ -256,13 +256,15 @@ fn acquire_drapes(
         MAX_DRAPES_PER_FRAME
     };
     let redraw = budget_redraws(&states, budget);
+    let mut deferred = false;
     for ((spec, state), drawn) in specs.iter().zip(&states).zip(&redraw) {
         if !matches!(state, DrapeState::Unchanged | DrapeState::Withheld) && !drawn {
             terrain.defer_drape(spec.coords, *state);
+            deferred = true;
         }
     }
     let sources = drape_sources(specs, &states, &redraw, ready, terrain);
-    (redraw, sources)
+    (redraw, sources, deferred)
 }
 
 fn drape_sources(
@@ -304,7 +306,7 @@ fn queue_tiles(
     style: &Style,
     view_state: &ViewState,
     device: &wgpu::Device,
-    queue: &wgpu::Queue,
+    queue: &crate::render::upload_queue::UploadQueue,
     dem: &DemSource,
     targets: (&[TargetSpec], &[Option<WorldTileCoords>]),
 ) -> SystemResult {
@@ -410,7 +412,7 @@ fn prepare_drapes(
         _ => 0,
     };
     surface_covering::fit_metadata(specs, &mut ready, capacity);
-    let (redraw, drape_sources) = {
+    let (redraw, drape_sources, deferred) = {
         let Some(Initialized(terrain)) = world.resources.get_mut::<Eventually<TerrainResources>>()
         else {
             return Err(SystemError::Dependencies);
@@ -426,6 +428,14 @@ fn prepare_drapes(
             device,
         )
     };
+    crate::render::frame_signals::count_drape_redraws(
+        world,
+        redraw.iter().filter(|drawn| **drawn).count(),
+    );
+    // A drape left for a later frame's budget needs that frame.
+    if deferred {
+        crate::render::frame_signals::keep_animating(world);
+    }
     Ok(PreparedDrapes {
         redraw,
         sources: drape_sources,
@@ -439,7 +449,7 @@ fn encode_drapes(
     clear_color: wgpu::Color,
     world: &mut World,
     zoom: crate::coords::Zoom,
-    queue: &wgpu::Queue,
+    queue: &crate::render::upload_queue::UploadQueue,
 ) -> Result<DrapePhase, SystemError> {
     let capacity = match world.resources.get::<Eventually<WgpuTileViewPattern>>() {
         Some(Initialized(pattern)) => pattern.remaining_metadata_capacity(),

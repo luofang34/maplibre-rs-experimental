@@ -49,7 +49,7 @@ pub fn upload_system(
 fn upload_raster_layer(
     raster_resources: &mut RasterResources,
     device: &wgpu::Device,
-    queue: &wgpu::Queue,
+    queue: &crate::render::upload_queue::UploadQueue,
     tiles: &Tiles,
     source_tiles: BTreeSet<WorldTileCoords>,
 ) {
@@ -95,7 +95,7 @@ fn neighbour_images<'a>(
 fn upload_image(
     raster_resources: &mut RasterResources,
     device: &wgpu::Device,
-    queue: &wgpu::Queue,
+    queue: &crate::render::upload_queue::UploadQueue,
     tiles: &Tiles,
     data: &AvailableRasterLayerData,
 ) {

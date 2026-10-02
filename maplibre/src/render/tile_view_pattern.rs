@@ -23,7 +23,8 @@ use crate::{
 };
 
 /// Tile pattern backed by a wgpu metadata buffer and queue.
-pub type WgpuTileViewPattern = TileViewPattern<wgpu::Queue, wgpu::Buffer>;
+pub type WgpuTileViewPattern =
+    TileViewPattern<crate::render::upload_queue::UploadQueue, wgpu::Buffer>;
 
 /// If not otherwise specified, raster tiles usually are 512.0 by 512.0 pixel.
 /// In order to support 256.0 x 256.0 raster tiles 256.0 must be used.

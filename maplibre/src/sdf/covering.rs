@@ -117,7 +117,7 @@ pub(super) fn update(
     style: &Style,
     view: &ViewState,
     device: &wgpu::Device,
-    queue: &wgpu::Queue,
+    queue: &crate::render::upload_queue::UploadQueue,
 ) {
     let tiles = if crate::render::eye_covering::EyeInFrame::reuses_content(world) {
         world

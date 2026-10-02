@@ -32,3 +32,9 @@ impl Queue<wgpu::Buffer> for wgpu::Queue {
         self.write_buffer(buffer, offset, data)
     }
 }
+
+impl Queue<wgpu::Buffer> for super::upload_queue::UploadQueue {
+    fn write_buffer(&self, buffer: &wgpu::Buffer, offset: wgpu::BufferAddress, data: &[u8]) {
+        super::upload_queue::UploadQueue::write_buffer(self, buffer, offset, data)
+    }
+}

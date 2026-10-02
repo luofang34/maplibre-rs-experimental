@@ -61,6 +61,7 @@ async fn test_render() {
     ));
 
     let world = World::default();
+    let queue = crate::render::upload_queue::UploadQueue::new(queue);
     RenderGraphRunner::run(&graph, &device, &queue, &render_state, &world)
         .expect("failed to run graph runner");
 }

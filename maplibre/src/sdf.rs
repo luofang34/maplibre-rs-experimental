@@ -53,7 +53,7 @@ struct SymbolPipeline {
 
 /// GPU symbol geometry and paint, with collision opacity and sampled ground height per vertex.
 pub type SymbolBufferPool = BufferPool<
-    wgpu::Queue,
+    crate::render::upload_queue::UploadQueue,
     wgpu::Buffer,
     ShaderSymbolVertex,
     IndexDataType,
