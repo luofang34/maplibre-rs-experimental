@@ -489,4 +489,16 @@ async fn drape_time_is_measured_across_every_drape_a_frame_draws() {
         many.as_secs_f64() > one.as_secs_f64() * f64::from(drawn) / 3.0,
         "{drawn} drapes take about {drawn} times one: {many:?} against {one:?}"
     );
+    // The moving budget divides its time by this, so it must be a drape's cost.
+    let per_drape = map
+        .map_context
+        .world
+        .resources
+        .get::<crate::terrain::drape_timing::DrapeCost>()
+        .expect("measured")
+        .per_drape();
+    assert!(
+        per_drape > one / 3 && per_drape < one * 3,
+        "the cost the budget uses is one drape's: {per_drape:?} against {one:?}"
+    );
 }
