@@ -63,13 +63,20 @@ pub fn resource_system(
                 crate::render::resource::TilePipelineOptions {
                     depth_stencil_enabled: true,
                     update_stencil: false,
-                    debug_stencil: true,
+                    debug_stencil: false,
                     wireframe: false,
                     multisampling: surface.is_multisampling_supported(settings.msaa),
                     textured: true,
                 },
             )
             .describe_render_pipeline();
+            if let Some(state) = &mut descriptor.depth_stencil {
+                // Shaded colours are translucent: like a raster tile, a DEM tile draws only
+                // inside its own mask and inverts what it passes, so where a child covers its
+                // parent the pixel is shaded once, as GL JS shades it.
+                state.stencil.front.pass_op = wgpu::StencilOperation::Invert;
+                state.stencil.back.pass_op = wgpu::StencilOperation::Invert;
+            }
             // The raster flag gives group 1 the tile texture; the layer uniforms follow.
             descriptor
                 .layout
