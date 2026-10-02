@@ -391,6 +391,17 @@ impl HeadlessMap {
         view_state.freeze_center_elevation();
     }
 
+    /// What the render passes recorded since the last call: draws, and the state changes they
+    /// recorded or skipped as already bound.
+    pub fn take_render_stats(&self) -> crate::render::tracked_pass::PassStats {
+        self.map_context
+            .world
+            .resources
+            .get::<crate::render::tracked_pass::RenderStats>()
+            .map(crate::render::tracked_pass::RenderStats::take)
+            .unwrap_or_default()
+    }
+
     /// Fades out raster tiles a camera change left behind, drawing them over the tiles that
     /// replace them as GL JS does during `raster-fade-duration`.
     pub fn set_raster_cross_fade(&mut self, fade: crate::raster::cross_fade::RasterCrossFade) {

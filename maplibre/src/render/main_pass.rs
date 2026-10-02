@@ -56,28 +56,29 @@ impl Node for MainPassNode {
             return Ok(());
         };
         let color = color_attachment(render_target.deref(), multisampling_texture.as_ref());
-        let mut pass =
-            render_context
-                .command_encoder
-                .begin_render_pass(&wgpu::RenderPassDescriptor {
-                    multiview_mask: None,
-                    label: Some("main_pass"),
-                    color_attachments: &[Some(color)],
-                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                        view: &depth_texture.view,
-                        depth_ops: Some(wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(0.0),
-                            store: StoreOp::Store,
-                        }),
-                        stencil_ops: Some(wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(EMPTY_STENCIL_REFERENCE),
-                            store: StoreOp::Store,
-                        }),
+        let pass = render_context
+            .command_encoder
+            .begin_render_pass(&wgpu::RenderPassDescriptor {
+                multiview_mask: None,
+                label: Some("main_pass"),
+                color_attachments: &[Some(color)],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &depth_texture.view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(0.0),
+                        store: StoreOp::Store,
                     }),
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                });
+                    stencil_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(EMPTY_STENCIL_REFERENCE),
+                        store: StoreOp::Store,
+                    }),
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+        let mut pass = crate::render::tracked_pass::TrackedRenderPass::new(pass);
         draw_layers(&mut pass, world);
+        pass.finish(world);
         Ok(())
     }
 }
@@ -126,7 +127,7 @@ pub(super) fn same_layer(left: &LayerItem, right: &LayerItem) -> bool {
 
 /// Draws one layer's items inside its tile masks, replacing the masks of `previous`.
 pub(super) fn draw_group<'w>(
-    pass: &mut wgpu::RenderPass<'w>,
+    pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     world: &'w World,
     previous: &[LayerItem],
     group: &'w [LayerItem],
@@ -137,7 +138,10 @@ pub(super) fn draw_group<'w>(
     }
 }
 
-fn draw_layers<'w>(pass: &mut wgpu::RenderPass<'w>, world: &'w World) {
+fn draw_layers<'w>(
+    pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
+    world: &'w World,
+) {
     let terrain = world
         .resources
         .get::<TerrainFrame>()
@@ -170,7 +174,7 @@ fn draw_layers<'w>(pass: &mut wgpu::RenderPass<'w>, world: &'w World) {
 }
 
 fn set_layer_masks<'w>(
-    pass: &mut wgpu::RenderPass<'w>,
+    pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     world: &'w World,
     previous: &[LayerItem],
     current: &[LayerItem],

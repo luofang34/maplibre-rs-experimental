@@ -97,6 +97,14 @@ async fn render_fixture(test_dir: &Path) -> Result<(f64, f64), String> {
     }
     map.render_frames_with_terrain(layers, raster_layers, Vec::new(), frame_count)
         .map_err(|error| format!("Cannot render source tiles: {error}"))?;
+    let stats = map.take_render_stats();
+    tracing::debug!(
+        draws = stats.draws,
+        state_changes = stats.state_changes,
+        redundant = stats.redundant_state_changes,
+        frames = frame_count,
+        "render passes"
+    );
     let last = frames.last().ok_or("no frame requested")?;
     let diff = compare_frame_blocking(last, test_dir, &meta)?;
     for path in &frames {

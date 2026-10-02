@@ -99,6 +99,7 @@ impl<E: Environment> Plugin<E> for RenderPlugin {
 
         // render graph dependency
         resources.init::<RenderPhase<LayerItem>>();
+        resources.init::<super::tracked_pass::RenderStats>();
         resources.init::<RenderPhase<TileMaskItem>>();
         resources.init::<RenderPhase<TranslucentItem>>();
         // tile_view_pattern:

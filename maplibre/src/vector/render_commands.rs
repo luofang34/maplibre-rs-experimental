@@ -17,7 +17,7 @@ impl<P: PhaseItem> RenderCommand<P> for SetVectorTilePipeline {
     fn render<'w>(
         world: &'w World,
         item: &P,
-        pass: &mut wgpu::RenderPass<'w>,
+        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some((Initialized(pipeline), Initialized(projection_resources))) =
             world.resources.query::<(
@@ -47,7 +47,7 @@ impl<const RUNS: bool> RenderCommand<LayerItem> for DrawVectorTile<RUNS> {
     fn render<'w>(
         world: &'w World,
         item: &LayerItem,
-        pass: &mut wgpu::RenderPass<'w>,
+        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some((Initialized(buffer_pool), Initialized(tile_view_pattern))) =
             world.resources.query::<(
@@ -151,7 +151,7 @@ impl RenderCommand<LayerItem> for SetLineTilePipeline {
     fn render<'w>(
         world: &'w World,
         item: &LayerItem,
-        pass: &mut wgpu::RenderPass<'w>,
+        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some((Initialized(pipeline), Initialized(projection_resources))) =
             world.resources.query::<(
@@ -199,7 +199,7 @@ impl<P: PhaseItem> RenderCommand<P> for SetCircleTilePipeline {
     fn render<'w>(
         world: &'w World,
         item: &P,
-        pass: &mut wgpu::RenderPass<'w>,
+        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some((Initialized(pipeline), Initialized(projection_resources))) =
             world.resources.query::<(
@@ -226,7 +226,7 @@ impl RenderCommand<LayerItem> for SetPatternTilePipeline {
     fn render<'w>(
         world: &'w World,
         item: &LayerItem,
-        pass: &mut wgpu::RenderPass<'w>,
+        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let (Some(patterns), Some(Initialized(projection_resources))) = (
             world.resources.get::<super::pattern::PatternResources>(),
@@ -272,7 +272,7 @@ impl<P: PhaseItem, const PASS: u8> RenderCommand<P> for SetExtrusionPipeline<PAS
     fn render<'w>(
         world: &'w World,
         item: &P,
-        pass: &mut wgpu::RenderPass<'w>,
+        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some((Initialized(pipeline), Initialized(projection_resources))) =
             world.resources.query::<(
@@ -306,7 +306,7 @@ impl RenderCommand<LayerItem> for SetPatternBindGroup {
     fn render<'w>(
         world: &'w World,
         item: &LayerItem,
-        pass: &mut wgpu::RenderPass<'w>,
+        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some(patterns) = world.resources.get::<super::pattern::PatternResources>() else {
             return RenderCommandResult::Failure;

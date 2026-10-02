@@ -19,7 +19,7 @@ impl<P: PhaseItem> RenderCommand<P> for SetMaskPipeline {
     fn render<'w>(
         world: &'w World,
         item: &P,
-        pass: &mut wgpu::RenderPass<'w>,
+        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some((Initialized(pipeline), Initialized(projection_resources))) =
             world.resources.query::<(
@@ -45,7 +45,7 @@ impl RenderCommand<TileMaskItem> for DrawMask {
     fn render<'w>(
         world: &'w World,
         item: &TileMaskItem,
-        pass: &mut wgpu::RenderPass<'w>,
+        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         Self::render_with_reference(
             world,
@@ -60,7 +60,7 @@ impl DrawMask {
     pub(crate) fn render_with_reference<'w>(
         world: &'w World,
         item: &TileMaskItem,
-        pass: &mut wgpu::RenderPass<'w>,
+        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
         reference: u32,
     ) -> RenderCommandResult {
         let Some((Initialized(tile_view_pattern), tile_mesh_cache)) = world

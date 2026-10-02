@@ -18,7 +18,7 @@ impl<P: PhaseItem> RenderCommand<P> for SetRasterTilePipeline {
     fn render<'w>(
         world: &'w World,
         item: &P,
-        pass: &mut wgpu::RenderPass<'w>,
+        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some((Initialized(raster_resources), Initialized(projection_resources))) =
             world.resources.query::<(
@@ -45,7 +45,7 @@ impl RenderCommand<LayerItem> for SetRasterViewBindGroup {
     fn render<'w>(
         world: &'w World,
         item: &LayerItem,
-        pass: &mut wgpu::RenderPass<'w>,
+        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some(Initialized(raster_resources)) =
             world.resources.get::<Eventually<RasterResources>>()
@@ -69,7 +69,7 @@ impl RenderCommand<LayerItem> for SetRasterPaintBindGroup {
     fn render<'w>(
         world: &'w World,
         item: &LayerItem,
-        pass: &mut wgpu::RenderPass<'w>,
+        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some(Initialized(raster_resources)) =
             world.resources.get::<Eventually<RasterResources>>()
@@ -101,7 +101,7 @@ impl RenderCommand<LayerItem> for DrawRasterTile {
     fn render<'w>(
         world: &'w World,
         item: &LayerItem,
-        pass: &mut wgpu::RenderPass<'w>,
+        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some((Initialized(tile_view_pattern), tile_mesh_cache)) = world
             .resources

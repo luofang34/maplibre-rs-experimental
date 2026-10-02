@@ -74,6 +74,7 @@ pub mod render_phase;
 pub mod settings;
 pub mod tile_mesh;
 pub mod tile_view_pattern;
+pub mod tracked_pass;
 pub mod view_state;
 pub mod xr;
 

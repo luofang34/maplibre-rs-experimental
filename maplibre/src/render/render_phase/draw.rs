@@ -5,7 +5,12 @@ use crate::tcs::world::World;
 /// Encodes a phase item's draw commands using resources borrowed from the frame's world.
 pub trait Draw<P: PhaseItem>: 'static {
     /// Draws the [`PhaseItem`] by issuing draw calls via the [`wgpu::RenderPass`].
-    fn draw<'w>(&self, pass: &mut wgpu::RenderPass<'w>, world: &'w World, item: &P);
+    fn draw<'w>(
+        &self,
+        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
+        world: &'w World,
+        item: &P,
+    );
 }
 
 /// An item which will be drawn to the screen. A phase item should be queued up for rendering
@@ -37,7 +42,7 @@ pub trait RenderCommand<P: PhaseItem> {
     fn render<'w>(
         world: &'w World,
         item: &P,
-        pass: &mut wgpu::RenderPass<'w>,
+        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult;
 }
 
@@ -57,7 +62,7 @@ macro_rules! render_command_tuple_impl {
             fn render<'w>(
                 world: &'w World,
                 item: &P,
-                pass: &mut wgpu::RenderPass<'w>,
+                pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
             ) -> RenderCommandResult{
                 $(if let RenderCommandResult::Failure = $name::render(world, item, pass) {
                     return RenderCommandResult::Failure;
@@ -96,7 +101,12 @@ where
     C: RenderCommand<P>,
 {
     /// Prepares data for the wrapped [`RenderCommand`] and then renders it.
-    fn draw<'w>(&self, pass: &mut wgpu::RenderPass<'w>, world: &'w World, item: &P) {
+    fn draw<'w>(
+        &self,
+        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
+        world: &'w World,
+        item: &P,
+    ) {
         C::render(world, item, pass);
     }
 }

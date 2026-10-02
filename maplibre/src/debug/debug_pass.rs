@@ -51,7 +51,7 @@ impl Node for DebugPassNode {
             resolve_target: None,
         };
 
-        let mut render_pass =
+        let render_pass =
             render_context
                 .command_encoder
                 .begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -62,6 +62,7 @@ impl Node for DebugPassNode {
                     timestamp_writes: None,
                     occlusion_query_set: None,
                 });
+        let mut render_pass = crate::render::tracked_pass::TrackedRenderPass::new(render_pass);
 
         if let Some(debug_items) = world.resources.get::<RenderPhase<TileDebugItem>>() {
             log::trace!(
@@ -72,6 +73,7 @@ impl Node for DebugPassNode {
                 item.draw_function.draw(&mut render_pass, world, item);
             }
         }
+        render_pass.finish(world);
 
         Ok(())
     }

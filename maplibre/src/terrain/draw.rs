@@ -10,7 +10,10 @@ use crate::{
 };
 
 /// Draws every terrain tile queued for this frame, writing depth.
-pub fn draw_terrain<'w>(pass: &mut wgpu::RenderPass<'w>, world: &'w World) {
+pub fn draw_terrain<'w>(
+    pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
+    world: &'w World,
+) {
     let Some((Initialized(terrain), Initialized(projection))) = world.resources.query::<(
         &Eventually<TerrainResources>,
         &Eventually<ProjectionGpuResources>,

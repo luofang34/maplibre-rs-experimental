@@ -14,7 +14,7 @@ impl<P: PhaseItem> RenderCommand<P> for SetSymbolPipeline {
     fn render<'w>(
         world: &'w World,
         _item: &P,
-        pass: &mut wgpu::RenderPass<'w>,
+        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some((Initialized(symbol_pipeline), Initialized(projection_resources))) =
             world.resources.query::<(
@@ -43,7 +43,7 @@ impl RenderCommand<TranslucentItem> for DrawSymbol {
     fn render<'w>(
         world: &'w World,
         item: &TranslucentItem,
-        pass: &mut wgpu::RenderPass<'w>,
+        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some((Initialized(symbol_buffer_pool), covering, Initialized(pipeline))) =
             world.resources.query::<(
@@ -120,7 +120,7 @@ impl RenderCommand<TranslucentItem> for DrawSymbol {
 }
 
 fn draw_indices<'w>(
-    pass: &mut wgpu::RenderPass<'w>,
+    pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     pipeline: &'w SymbolPipeline,
     indices: std::ops::Range<u32>,
     separate_halo: bool,

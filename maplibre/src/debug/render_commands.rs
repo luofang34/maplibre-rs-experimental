@@ -16,7 +16,7 @@ impl<P: PhaseItem> RenderCommand<P> for SetDebugPipeline {
     fn render<'w>(
         world: &'w World,
         _item: &P,
-        pass: &mut wgpu::RenderPass<'w>,
+        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some((Initialized(pipeline), Initialized(projection_resources))) =
             world.resources.query::<(
@@ -38,7 +38,7 @@ impl RenderCommand<TileDebugItem> for DrawDebugOutline {
     fn render<'w>(
         world: &'w World,
         item: &TileDebugItem,
-        pass: &mut wgpu::RenderPass<'w>,
+        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some(Initialized(tile_view_pattern)) =
             world.resources.get::<Eventually<WgpuTileViewPattern>>()

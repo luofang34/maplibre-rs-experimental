@@ -38,7 +38,7 @@ impl Node for DensityPassNode {
                 continue;
             };
             // A layer without points still clears its target, or last frame's density stays.
-            let mut pass =
+            let pass =
                 render_context
                     .command_encoder
                     .begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -57,9 +57,11 @@ impl Node for DensityPassNode {
                         timestamp_writes: None,
                         occlusion_query_set: None,
                     });
+            let mut pass = crate::render::tracked_pass::TrackedRenderPass::new(pass);
             for item in &layer.items {
                 item.draw_function.draw(&mut pass, world, item);
             }
+            pass.finish(world);
         }
         Ok(())
     }

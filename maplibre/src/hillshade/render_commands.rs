@@ -17,7 +17,7 @@ impl RenderCommand<LayerItem> for SetDemPipeline {
     fn render<'w>(
         world: &'w World,
         item: &LayerItem,
-        pass: &mut wgpu::RenderPass<'w>,
+        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some((Initialized(resources), Initialized(projection_resources))) =
             world.resources.query::<(
@@ -42,7 +42,7 @@ impl RenderCommand<LayerItem> for SetDemLayerBindGroup {
     fn render<'w>(
         world: &'w World,
         item: &LayerItem,
-        pass: &mut wgpu::RenderPass<'w>,
+        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some(Initialized(resources)) = world.resources.get::<Eventually<HillshadeResources>>()
         else {

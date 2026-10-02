@@ -78,7 +78,7 @@ impl Node for TranslucentPassNode {
             }
         };
 
-        let mut render_pass =
+        let render_pass =
             render_context
                 .command_encoder
                 .begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -99,6 +99,7 @@ impl Node for TranslucentPassNode {
                     timestamp_writes: None,
                     occlusion_query_set: None,
                 });
+        let mut render_pass = crate::render::tracked_pass::TrackedRenderPass::new(render_pass);
 
         // TODO: Automatically raise error when items get linearly too many (+1k)
 
@@ -126,6 +127,7 @@ impl Node for TranslucentPassNode {
                 previous = group;
             }
         }
+        render_pass.finish(world);
 
         Ok(())
     }

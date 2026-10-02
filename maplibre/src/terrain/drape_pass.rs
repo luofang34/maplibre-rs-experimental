@@ -77,8 +77,9 @@ impl Node for DrapePassNode {
                         occlusion_query_set: None,
                     });
             {
-                let mut render_pass = pass;
+                let mut render_pass = crate::render::tracked_pass::TrackedRenderPass::new(pass);
                 draw_layers(&mut render_pass, world, target);
+                render_pass.finish(world);
             }
             terrain.generate_drape_mipmaps(
                 render_context.device,
@@ -90,7 +91,11 @@ impl Node for DrapePassNode {
     }
 }
 
-fn draw_layers<'w>(pass: &mut wgpu::RenderPass<'w>, world: &'w World, target: &DrapeTarget) {
+fn draw_layers<'w>(
+    pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
+    world: &'w World,
+    target: &DrapeTarget,
+) {
     for layers in target
         .layers
         .chunk_by(|left, right| left.index == right.index)

@@ -22,7 +22,7 @@ impl<P: PhaseItem> RenderCommand<P> for SetBackgroundPipeline {
     fn render<'w>(
         world: &'w World,
         _item: &P,
-        pass: &mut wgpu::RenderPass<'w>,
+        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some(Initialized(BackgroundRenderPipeline(pipeline))) = world
             .resources
@@ -42,7 +42,7 @@ impl RenderCommand<LayerItem> for DrawBackgroundQuad {
     fn render<'w>(
         world: &'w World,
         item: &LayerItem,
-        pass: &mut wgpu::RenderPass<'w>,
+        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         if let Some(buf) = world
             .resources
@@ -65,7 +65,7 @@ impl<P: PhaseItem> RenderCommand<P> for SetGlobeBackgroundPipeline {
     fn render<'w>(
         world: &'w World,
         _item: &P,
-        pass: &mut wgpu::RenderPass<'w>,
+        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some((
             Initialized(GlobeBackgroundRenderPipeline(pipeline)),
@@ -89,7 +89,7 @@ impl RenderCommand<LayerItem> for DrawGlobeBackgroundQuad {
     fn render<'w>(
         world: &'w World,
         item: &LayerItem,
-        pass: &mut wgpu::RenderPass<'w>,
+        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some((buffers, mesh_cache)) = world.resources.query::<(
             &crate::background::queue_system::BackgroundBuffers,
@@ -121,7 +121,7 @@ impl RenderCommand<LayerItem> for SetGlobeBackgroundPatternPipeline {
     fn render<'w>(
         world: &'w World,
         item: &LayerItem,
-        pass: &mut wgpu::RenderPass<'w>,
+        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let (Some(gpu), Some(patterns), Some(Initialized(projection_resources))) = (
             world
@@ -159,7 +159,7 @@ impl<P: PhaseItem> RenderCommand<P> for SetAtmospherePipeline {
     fn render<'w>(
         world: &'w World,
         _item: &P,
-        pass: &mut wgpu::RenderPass<'w>,
+        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some((
             Initialized(AtmosphereRenderPipeline(pipeline)),
@@ -183,7 +183,7 @@ impl<P: PhaseItem> RenderCommand<P> for DrawAtmosphereFullscreen {
     fn render<'w>(
         world: &'w World,
         _item: &P,
-        pass: &mut wgpu::RenderPass<'w>,
+        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some(buffers) = world
             .resources
@@ -206,7 +206,7 @@ impl<P: PhaseItem> RenderCommand<P> for SetSkyPipeline {
     fn render<'w>(
         world: &'w World,
         _item: &P,
-        pass: &mut wgpu::RenderPass<'w>,
+        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some((Initialized(SkyRenderPipeline(pipeline)), Initialized(projection_resources))) =
             world.resources.query::<(
@@ -228,7 +228,7 @@ impl<P: PhaseItem> RenderCommand<P> for DrawSkyFullscreen {
     fn render<'w>(
         world: &'w World,
         _item: &P,
-        pass: &mut wgpu::RenderPass<'w>,
+        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some(buffers) = world
             .resources
@@ -254,7 +254,7 @@ impl RenderCommand<LayerItem> for SetBackgroundPatternPipeline {
     fn render<'w>(
         world: &'w World,
         item: &LayerItem,
-        pass: &mut wgpu::RenderPass<'w>,
+        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let (Some(gpu), Some(patterns)) = (
             world
@@ -282,7 +282,7 @@ impl RenderCommand<LayerItem> for DrawBackgroundPattern {
     fn render<'w>(
         world: &'w World,
         item: &LayerItem,
-        pass: &mut wgpu::RenderPass<'w>,
+        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         <(SetBackgroundPatternPipeline, DrawBackgroundQuad)>::render(world, item, pass)
     }
@@ -294,7 +294,7 @@ impl RenderCommand<LayerItem> for DrawBackground {
     fn render<'w>(
         world: &'w World,
         item: &LayerItem,
-        pass: &mut wgpu::RenderPass<'w>,
+        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         <(SetBackgroundPipeline, DrawBackgroundQuad)>::render(world, item, pass)
     }
