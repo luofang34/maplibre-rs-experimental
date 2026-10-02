@@ -1,0 +1,9 @@
+{
+  "compilerOptions": {
+    "target": "ES2023", "module": "ESNext", "moduleResolution": "bundler",
+    "lib": ["ES2023", "DOM"], "types": ["vite/client", "node", "webxr"],
+    "strict": true, "noEmit": true, "skipLibCheck": true,
+    "allowImportingTsExtensions": true, "erasableSyntaxOnly": true
+  },
+  "include": ["src", "vite.config.ts"]
+}

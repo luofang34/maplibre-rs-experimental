@@ -41,6 +41,9 @@ and a signing team in the project.
 
 ## Flight replay
 
+Platform policy: iPad presents SVS, not an HWD. visionOS defaults to the Indicate HWD.
+Map and replay remain usable independently of flight instruments.
+
 Fly approach starts at the recorded aircraft position. FPV keeps head movement independent
 of aircraft motion. A drag starts a temporary free look and pauses the recording. After ten idle seconds, a
 visible countdown returns to ownship; Stay free or selecting Free cancels it. Returning

@@ -1,0 +1,15 @@
+{
+  "name": "maplibre-webxr-replay",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "test": "node --experimental-strip-types --test src/*.test.ts",
+    "verify:local": "node scripts/verify-local.mjs",
+    "cert": "node scripts/certificate.mjs"
+  },
+  "dependencies": { "maplibre-gl": "6.9.0", "three": "0.186.0" },
+  "devDependencies": { "@types/three": "0.186.0", "@types/webxr": "0.5.24", "@types/node": "^24.0.0", "typescript": "7.0.2", "vite": "8.3.0" }
+}

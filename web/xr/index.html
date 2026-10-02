@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#162521"><title>MapLibre · Spatial replay</title></head>
+<body>
+  <div id="map" aria-label="Interactive globe and terrain map"></div>
+  <div id="spatial" hidden></div>
+  <header>
+    <div class="brand"><span class="logo">◎</span><div><strong>MapLibre</strong><small>SPATIAL REPLAY LAB</small></div></div>
+    <nav aria-label="Map view"><button id="globe">Globe</button><button id="terrain">Terrain</button><button id="spatial-open">3D replay</button><button id="xr" disabled>Checking XR…</button></nav>
+  </header>
+  <aside class="library">
+    <span class="eyebrow">FLIGHT LIBRARY</span>
+    <label for="track">Recording</label><select id="track"><option value="innsbruck-approach">Innsbruck approach</option><option value="mach-loop">Conquering the Mach Loop</option></select>
+    <p id="provenance"></p>
+    <p class="hint">Drag to explore · Pinch or scroll to zoom<br>Right-drag or two fingers to tilt</p>
+    <details><summary>About this prototype</summary><p>MapLibre GL JS + Three.js browser adapter. Native maplibre-rs XR rendering is a separate integration. Spatial replay preloads a bounded terrain region; it does not stream worldwide detail.</p><p>iPad: SVS. visionOS: HWD by default. Instruments are not included in this map-and-replay prototype.</p></details>
+  </aside>
+  <div id="status" role="status" aria-live="polite">Loading map and recordings…</div>
+  <section class="transport" aria-label="Replay controls">
+    <div class="transport-heading"><div><span id="kind" class="eyebrow">RECORDED FLIGHT</span><h1 id="title">Innsbruck approach</h1></div><span id="telemetry">—</span></div>
+    <div class="transport-row"><button id="play" aria-label="Play recording">▶ Play</button><label class="sr-only" for="timeline">Replay position</label><input id="timeline" type="range" min="0" max="1" value="0" step="0.1"><output id="time">0:00 / 0:00</output><label class="sr-only" for="rate">Playback speed</label><select id="rate"><option value="1">1×</option><option value="4">4×</option><option value="16">16×</option></select></div>
+    <div class="view-row"><span>CAMERA</span><button id="overview">Overview</button><button id="fpv">Track FPV</button><button id="return-map" hidden>Return to map</button><span id="gap" role="status"></span></div>
+  </section>
+  <footer>© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> · <a href="https://openfreemap.org">OpenFreeMap</a> · <a href="https://registry.opendata.aws/terrain-tiles/">AWS terrain</a> · Replay: <a id="source" href="https://adsb.lol">source</a></footer>
+  <script type="module" src="/src/main.ts"></script>
+</body></html>
