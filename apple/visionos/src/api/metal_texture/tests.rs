@@ -45,7 +45,7 @@ fn host_texture(
         MTLStorageMode::Shared
     });
     // SAFETY: the guard retains the device while it allocates the host's texture.
-    unsafe { device.as_hal::<wgpu_hal::api::Metal>() }
+    unsafe { device.as_hal::<wgpu::hal::api::Metal>() }
         .expect("Metal device")
         .raw_device()
         .newTextureWithDescriptor(&descriptor)
@@ -54,7 +54,7 @@ fn host_texture(
 
 fn host_waits_blocking(queue: &wgpu::Queue) {
     // SAFETY: the guard borrows the queue only while creating an owned command buffer.
-    let buffer = unsafe { queue.as_hal::<wgpu_hal::api::Metal>() }
+    let buffer = unsafe { queue.as_hal::<wgpu::hal::api::Metal>() }
         .expect("Metal queue")
         .as_raw()
         .commandBuffer()

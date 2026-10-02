@@ -246,7 +246,7 @@ pub unsafe extern "C" fn maplibre_visionos_command_queue(
         return ptr::null();
     };
     // SAFETY: the map owns the queue, keeping the borrowed Metal object alive.
-    unsafe { handle.map.queue().as_hal::<wgpu_hal::api::Metal>() }
+    unsafe { handle.map.queue().as_hal::<wgpu::hal::api::Metal>() }
         .map_or(ptr::null(), |queue| ptr::from_ref(queue.as_raw()).cast())
 }
 

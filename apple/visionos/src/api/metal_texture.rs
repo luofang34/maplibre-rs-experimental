@@ -73,7 +73,7 @@ unsafe fn retain_render_target(
         return None;
     }
     // SAFETY: the guard only reads the device; the returned texture keeps its own reference.
-    let hal_device = unsafe { device.as_hal::<wgpu_hal::api::Metal>() }?;
+    let hal_device = unsafe { device.as_hal::<wgpu::hal::api::Metal>() }?;
     if !ptr::eq(&**hal_device.raw_device(), &*raw.device()) {
         tracing::warn!("compositor target belongs to another Metal device");
         return None;
@@ -92,20 +92,20 @@ fn wrap_render_target(
     // moves into HAL, so dropping the wrapper releases only our reference. Each eye clears
     // its attachments; the compositor's existing contents may be discarded.
     unsafe {
-        let hal = wgpu_hal::metal::Device::texture_from_raw(
+        let hal = wgpu::hal::metal::Device::texture_from_raw(
             raw,
             format,
             MTLTextureType::Type2D,
             1,
             1,
-            wgpu_hal::CopyExtent {
+            wgpu::hal::CopyExtent {
                 width,
                 height,
                 depth: 1,
             },
             None,
         );
-        device.create_texture_from_hal::<wgpu_hal::api::Metal>(
+        device.create_texture_from_hal::<wgpu::hal::api::Metal>(
             hal,
             &wgpu::TextureDescriptor {
                 label: Some("compositor target"),

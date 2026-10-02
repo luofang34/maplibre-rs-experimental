@@ -143,7 +143,7 @@ pub unsafe extern "C" fn maplibre_visionos_render_frame(
         return ptr::null();
     };
     // SAFETY: the map owns the texture, keeping the borrowed Metal object alive.
-    unsafe { texture.as_hal::<wgpu_hal::api::Metal>() }.map_or(ptr::null(), |texture| {
+    unsafe { texture.as_hal::<wgpu::hal::api::Metal>() }.map_or(ptr::null(), |texture| {
         ptr::from_ref(texture.raw_handle()).cast()
     })
 }
