@@ -4,7 +4,11 @@ use cgmath::{InnerSpace, Vector3};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use super::layer::StyleProperty;
+use super::{
+    expression::{LegacyPropertySpec, PropertyKind, Value},
+    layer::StyleProperty,
+    property::PropertyValue,
+};
 use crate::projection::globe::camera::GlobeCameraState;
 
 const DEFAULT_POSITION: [f64; 3] = [1.15, 210.0, 30.0];
@@ -21,12 +25,29 @@ pub enum LightAnchor {
     Map,
 }
 
+impl PropertyValue for LightAnchor {
+    fn spec() -> LegacyPropertySpec {
+        LegacyPropertySpec::stepped(PropertyKind::Enum(vec![
+            "viewport".to_owned(),
+            "map".to_owned(),
+        ]))
+    }
+
+    fn from_value(value: &Value) -> Option<Self> {
+        match value.as_str()? {
+            "viewport" => Some(Self::Viewport),
+            "map" => Some(Self::Map),
+            _ => None,
+        }
+    }
+}
+
 /// Root light configuration relevant to globe rendering.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LightSpecification {
     /// Coordinate frame for the light position.
-    #[serde(default)]
-    pub anchor: LightAnchor,
+    #[serde(default = "default_anchor_property")]
+    pub anchor: StyleProperty<LightAnchor>,
     /// Spherical position as radius, azimuth, and polar angle.
     #[serde(default = "default_position_property")]
     pub position: StyleProperty<[f64; 3]>,
@@ -47,7 +68,7 @@ pub struct LightSpecification {
 impl Default for LightSpecification {
     fn default() -> Self {
         Self {
-            anchor: LightAnchor::Viewport,
+            anchor: default_anchor_property(),
             position: default_position_property(),
             color: None,
             intensity: None,
@@ -102,7 +123,7 @@ impl LightSpecification {
             radius * azimuth.sin() * polar.sin(),
             radius * polar.cos(),
         );
-        let (x, y) = match self.anchor {
+        let (x, y) = match self.anchor_at(zoom) {
             LightAnchor::Map => (x, y),
             LightAnchor::Viewport => {
                 let (sin, cos) = bearing_radians.sin_cos();
@@ -128,6 +149,12 @@ impl LightSpecification {
         })
     }
 
+    /// The frame the light is anchored to at `zoom`; the viewport where it cannot be evaluated,
+    /// as the specification's default.
+    pub fn anchor_at(&self, zoom: f64) -> LightAnchor {
+        self.anchor.evaluate_at_zoom(zoom).unwrap_or_default()
+    }
+
     /// Evaluates the light and returns the sun direction in camera-view axes.
     pub fn sun_direction_in_view(
         &self,
@@ -137,13 +164,17 @@ impl LightSpecification {
         let position = evaluate_position(&self.position, zoom)?;
         let cartesian = spherical_to_cartesian(position)?;
         let sun = -cartesian;
-        match self.anchor {
+        match self.anchor_at(zoom) {
             LightAnchor::Viewport => normalize(sun),
             LightAnchor::Map => camera
                 .world_direction_to_view(sun)
                 .ok_or(LightError::InvalidViewDirection),
         }
     }
+}
+
+fn default_anchor_property() -> StyleProperty<LightAnchor> {
+    StyleProperty::Constant(LightAnchor::Viewport)
 }
 
 fn default_position_property() -> StyleProperty<[f64; 3]> {

@@ -96,6 +96,10 @@ pub struct Style {
     #[doc(hidden)]
     #[serde(skip)]
     pub state_templates: HashMap<String, state::StateTemplate>,
+    /// The light as declared, kept while the light in use has global state substituted.
+    #[doc(hidden)]
+    #[serde(skip)]
+    pub light_template: Option<light::LightSpecification>,
     /// Images a host added by name, which `icon-image` can use next to the sprite's own.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub images: HashMap<String, StyleImage>,

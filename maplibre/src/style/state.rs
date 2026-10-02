@@ -69,6 +69,7 @@ impl Style {
     /// A layer that was replaced or edited since it was last resolved is taken as newly declared,
     /// layers that share an id are left alone, and templates of layers that are gone are dropped.
     pub fn resolve_global_state(&mut self) -> Vec<String> {
+        self.resolve_light();
         let mut counts: HashMap<&str, usize> = HashMap::new();
         for layer in &self.layers {
             *counts.entry(layer.id.as_str()).or_default() += 1;
@@ -124,6 +125,39 @@ impl Style {
             }
         }
         changed
+    }
+}
+
+impl Style {
+    /// Substitutes the current state into the light, as into a layer's paint properties.
+    fn resolve_light(&mut self) {
+        if self.light_template.is_none() {
+            let reads = self
+                .light
+                .as_ref()
+                .and_then(|light| serde_json::to_value(light).ok())
+                .is_some_and(|light| reads_global_state(&light));
+            if !reads {
+                return;
+            }
+            self.light_template = self.light.clone();
+        }
+        let Some(Value::Object(declared)) = self
+            .light_template
+            .as_ref()
+            .and_then(|light| serde_json::to_value(light).ok())
+        else {
+            return;
+        };
+        let lookup = |key: &str| self.global_state_value(key);
+        let resolved = declared
+            .iter()
+            .map(|(name, property)| (name.clone(), substitute(property, &lookup, true)))
+            .collect();
+        match serde_json::from_value(Value::Object(resolved)) {
+            Ok(light) => self.light = Some(light),
+            Err(error) => tracing::warn!(%error, "light is invalid once global state is applied"),
+        }
     }
 }
 

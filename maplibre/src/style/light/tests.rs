@@ -30,7 +30,7 @@ fn camera(center: LatLon) -> GlobeCameraState {
 #[test]
 fn defaults_match_the_gl_js_light_contract() {
     let light: LightSpecification = serde_json::from_str("{}").expect("light should parse");
-    assert_eq!(light.anchor, LightAnchor::Viewport);
+    assert_eq!(light.anchor_at(0.0), LightAnchor::Viewport);
 
     let direction = light
         .sun_direction_in_view(&camera(LatLon::new(0.0, 0.0)), 0.0)
@@ -53,7 +53,7 @@ fn root_style_parses_gl_js_atmosphere_fixture_light() {
     .expect("GL JS atmosphere style should parse");
 
     assert_eq!(
-        style.light.expect("light should exist").anchor,
+        style.light.expect("light should exist").anchor_at(0.0),
         LightAnchor::Map
     );
 }
@@ -167,4 +167,15 @@ fn extrusion_light_defaults_and_follows_the_view_bearing() {
         .expect("light evaluates");
     assert!((turned.position[0] - 0.4979).abs() < 1e-3);
     assert!((turned.position[1] - 0.2875).abs() < 1e-3);
+}
+
+#[test]
+fn the_anchor_steps_with_zoom() {
+    let light: LightSpecification = serde_json::from_value(
+        serde_json::json!({"anchor": {"stops": [[0, "viewport"], [10, "map"]]}}),
+    )
+    .expect("light should parse");
+
+    assert_eq!(light.anchor_at(5.0), LightAnchor::Viewport);
+    assert_eq!(light.anchor_at(12.0), LightAnchor::Map);
 }

@@ -280,3 +280,30 @@ fn a_value_of_the_wrong_type_falls_back_to_the_layers_default() {
         Some(Color::from_rgba8(0, 255, 255, 255))
     );
 }
+
+#[test]
+fn the_light_reads_global_state_and_follows_it() {
+    use crate::style::light::LightAnchor;
+
+    let mut style: Style = serde_json::from_value(json!({"version": 8,
+        "state": {"anchor": {"default": "map"}, "position": {"default": [1.5, 90, 80]}},
+        "light": {"anchor": ["global-state", "anchor"], "position": ["global-state", "position"]},
+        "sources": {}, "layers": []}))
+    .expect("style");
+    style.resolve_global_state();
+    let light = |style: &Style| style.light.clone().expect("light");
+
+    assert_eq!(light(&style).anchor_at(0.0), LightAnchor::Map);
+    assert_eq!(
+        light(&style).position.evaluate_at_zoom(0.0),
+        Some([1.5, 90.0, 80.0])
+    );
+
+    style.set_global_state("anchor", json!("viewport"));
+    style.set_global_state("position", json!([1.0, 0.0, 10.0]));
+    assert_eq!(light(&style).anchor_at(0.0), LightAnchor::Viewport);
+    assert_eq!(
+        light(&style).position.evaluate_at_zoom(0.0),
+        Some([1.0, 0.0, 10.0])
+    );
+}
