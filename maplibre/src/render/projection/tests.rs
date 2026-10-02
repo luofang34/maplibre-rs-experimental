@@ -383,3 +383,76 @@ fn an_eyes_requests_cover_the_ground_behind_it() {
         );
     }
 }
+
+mod orbit_target {
+    use cgmath::{Deg, InnerSpace, Matrix4, Rad, SquareMatrix, Vector3};
+
+    use crate::{
+        coords::{LatLon, WorldCoords, Zoom},
+        projection::ProjectionType,
+        render::{
+            camera::EyeFrustum,
+            projection::globe_camera_for_view,
+            view_state::{ExternalAnchor, ExternalView, ViewState},
+        },
+        window::PhysicalSize,
+    };
+
+    fn view() -> ViewState {
+        ViewState::new(
+            PhysicalSize::new(2330, 1800).expect("viewport"),
+            WorldCoords::from((300.0 * 4096.0, 200.0 * 4096.0)),
+            Zoom::new(11.67),
+            Deg(70.0),
+            Deg(36.87),
+        )
+    }
+
+    #[test]
+    fn the_globe_camera_orbits_the_center_elevation_only_when_told_to() {
+        let mut state = view();
+        state.set_center_elevation(4000.0);
+        let sea_level = globe_camera_for_view(&state).expect("camera");
+        assert_eq!(
+            sea_level.target().magnitude(),
+            1.0,
+            "the preset orbits sea level"
+        );
+        state.set_globe_orbits_terrain(true);
+        let raised = globe_camera_for_view(&state).expect("camera");
+        let expected = 1.0 + 4000.0 / state.body().radius_meters;
+        assert!(
+            (raised.target().magnitude() - expected).abs() < 1e-12,
+            "the elevation is applied once: {} radii",
+            raised.target().magnitude()
+        );
+    }
+
+    #[test]
+    fn a_hosts_eye_stays_where_it_is_placed_whatever_the_center_elevation() {
+        let mut state = view();
+        state.set_globe_orbits_terrain(true);
+        let external = ExternalView {
+            anchor: ExternalAnchor {
+                position: LatLon::new(27.765, 88.054),
+                altitude_meters: 5000.0,
+            },
+            view: (Matrix4::from_translation(Vector3::new(0.0, 0.0, 9000.0))
+                * Matrix4::from_angle_x(Deg(70.0)))
+            .invert()
+            .expect("eye"),
+            frustum: EyeFrustum::symmetric(Rad(1.2), 2330.0 / 1800.0, 0.1, 1.0e8),
+        };
+        state
+            .set_external_view(external, &ProjectionType::VerticalPerspective)
+            .expect("eye");
+        state.set_center_elevation(0.0);
+        let low = globe_camera_for_view(&state).expect("camera");
+        state.set_center_elevation(4000.0);
+        let high = globe_camera_for_view(&state).expect("camera");
+        assert!(high.is_external_eye());
+        assert_eq!(low.camera_position(), high.camera_position());
+        assert_eq!(low.view_projection(), high.view_projection());
+        assert_eq!(low.clipping_plane(), high.clipping_plane());
+    }
+}

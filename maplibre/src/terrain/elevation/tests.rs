@@ -81,3 +81,32 @@ fn falls_back_to_a_loaded_ancestor_and_reports_no_coverage() {
     assert!((covered.expect("ancestor covers") + 100.0).abs() < 1e-6);
     assert!(elevation_at_world(&tiles, &source(1.0), zoom, outside).is_none());
 }
+
+#[test]
+fn only_pure_vertical_perspective_with_terrain_orbits_the_terrain() {
+    let style = |projection: &str, terrain: bool| -> crate::style::Style {
+        let terrain = if terrain {
+            r#","terrain":{"source":"dem"}"#
+        } else {
+            ""
+        };
+        serde_json::from_str(&format!(
+            r#"{{"version":8,"sources":{{"dem":{{"type":"raster-dem","tiles":["https://dem.example/{{z}}/{{x}}/{{y}}.png"]}}}},"layers":[]{terrain}{projection}}}"#
+        ))
+        .expect("style")
+    };
+    let vertical = r#","projection":{"type":"vertical-perspective"}"#;
+    assert!(super::globe_orbits_terrain(&style(vertical, true)));
+    assert!(!super::globe_orbits_terrain(&style(vertical, false)));
+    for other in [
+        r#","projection":{"type":"globe"}"#,
+        r#","projection":{"type":"mercator"}"#,
+        r#","projection":{"type":["interpolate",["linear"],["zoom"],10,"vertical-perspective",12,"mercator"]}"#,
+        "",
+    ] {
+        assert!(
+            !super::globe_orbits_terrain(&style(other, true)),
+            "{other} keeps the sea-level orbit"
+        );
+    }
+}

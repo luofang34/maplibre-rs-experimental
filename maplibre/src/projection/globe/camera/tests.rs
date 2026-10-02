@@ -21,6 +21,7 @@ fn options() -> GlobeCameraOptions {
         center_offset: Point2::new(0.0, 0.0),
 
         body: Body::EARTH,
+        target_elevation_meters: 0.0,
     }
 }
 
@@ -190,3 +191,6 @@ fn wgpu_view_projection_maps_near_to_one_and_far_to_zero() {
     assert!((depth_of(-near) - 1.0).abs() < 1e-9);
     assert!(depth_of(-far).abs() < 1e-9);
 }
+
+#[path = "tests/target.rs"]
+mod target;

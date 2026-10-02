@@ -30,6 +30,7 @@ fn camera(width: f64, height: f64, center: LatLon, zoom: f64) -> super::GlobeCam
         center_offset: Point2::new(0.0, 0.0),
 
         body: Body::EARTH,
+        target_elevation_meters: 0.0,
     })
     .expect("reference camera should be valid")
 }
@@ -123,6 +124,7 @@ fn pitched_view_matches_gl_js_variable_lod_reference() {
         center_offset: Point2::new(0.0, 0.0),
 
         body: Body::EARTH,
+        target_elevation_meters: 0.0,
     })
     .expect("pitched reference camera should be valid");
     let mut covering_options = options(8);
@@ -164,6 +166,7 @@ fn pitched_rotated_view_matches_gl_js_variable_lod_reference() {
         center_offset: Point2::new(0.0, 0.0),
 
         body: Body::EARTH,
+        target_elevation_meters: 0.0,
     })
     .expect("rotated reference camera should be valid");
     let mut covering_options = options(8);
@@ -240,6 +243,7 @@ fn level_eye_looking_north(at: LatLon, height_meters: f64) -> (GlobeCameraState,
         roll_degrees: 0.0,
         center_offset: Point2::new(0.0, 0.0),
         body,
+        target_elevation_meters: 0.0,
     };
     let eye = ExternalGlobeEye {
         position,

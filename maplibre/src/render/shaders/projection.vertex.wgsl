@@ -103,6 +103,11 @@ fn interpolate_clip_position(
     globe_clip: vec4<f32>,
     transition: f32,
 ) -> vec4<f32> {
+    // The pure globe takes nothing from the flat projection, whose infinities at the poles
+    // would survive a weight of zero.
+    if transition >= 1.0 {
+        return globe_clip;
+    }
     var result = globe_clip;
     result.x = mix(mercator_clip.x, globe_clip.x, transition);
     result.y = mix(mercator_clip.y, globe_clip.y, transition);
@@ -179,7 +184,7 @@ fn project_tile_position_3d(
     let is_pole = is_north_pole_y(tile_position.y) || is_south_pole_y(tile_position.y);
     let horizon_distance = globe_horizon_distance(surface, transition, is_pole);
     // The inactive Mercator projection is undefined at the geographic poles.
-    if transition == 1.0 {
+    if transition >= 1.0 {
         return ProjectedTilePosition(globe_clip, horizon_distance);
     }
     let mercator_clip = fallback_matrix * vec4<f32>(tile_position, 1.0);
@@ -204,6 +209,9 @@ fn project_tile_tangent_3d(
     let tangent = (east * delta.x + south * delta.y) * cos_latitude *
         (1.0 + tile_position.z / projection.transition_and_padding.z);
     let globe = projection.main_matrix * vec4<f32>(tangent, 0.0);
+    if projection.transition_and_padding.x >= 1.0 {
+        return globe;
+    }
     let flat = fallback_matrix * vec4<f32>(offset, 0.0, 0.0);
     return mix(flat, globe, projection.transition_and_padding.x);
 }

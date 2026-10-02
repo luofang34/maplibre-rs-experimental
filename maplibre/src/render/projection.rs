@@ -11,7 +11,6 @@ use crate::{
         globe::{
             camera::{GlobeCameraError, GlobeCameraOptions, GlobeCameraState},
             covering_tiles::GlobeCoveringError,
-            lat_lon_to_unit_sphere,
         },
         mercator::MercatorCoveringError,
         renderer_data::{
@@ -230,8 +229,7 @@ pub fn projection_data_for_view(
     }
 
     let globe = globe_camera_for_view(view_state)?;
-    let globe_center_clip =
-        globe.wgpu_view_projection() * lat_lon_to_unit_sphere(globe.center()).extend(1.0);
+    let globe_center_clip = globe.wgpu_view_projection() * globe.target().extend(1.0);
     let globe_center_w = globe_center_clip.w as f32;
     let globe_matrix = globe
         .wgpu_view_projection()
@@ -285,6 +283,12 @@ pub fn globe_camera_for_view(
         center_offset: external_eye
             .map_or_else(|| view_state.center_offset(), |_| Point2::new(0.0, 0.0)),
         body: view_state.body(),
+        // A host's eye is placed where it is; the center's terrain must not move it.
+        target_elevation_meters: if external_eye.is_none() && view_state.globe_orbits_terrain() {
+            view_state.center_elevation()
+        } else {
+            0.0
+        },
     };
     match external_eye {
         Some(eye) => GlobeCameraState::from_external_eye(options, eye),

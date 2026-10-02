@@ -49,6 +49,8 @@ mod style;
 mod symbols;
 #[cfg(test)]
 mod terrain_coverage;
+#[cfg(test)]
+mod vertical_perspective;
 mod xr;
 
 pub use processed::{

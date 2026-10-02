@@ -24,6 +24,7 @@ fn posed_options() -> GlobeCameraOptions {
         roll_degrees: 12.0,
         center_offset: Point2::new(0.0, 0.0),
         body: Body::EARTH,
+        target_elevation_meters: 0.0,
     }
 }
 

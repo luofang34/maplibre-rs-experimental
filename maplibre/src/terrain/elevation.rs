@@ -41,6 +41,17 @@ fn tile_local(position: WorldCoords, coords: WorldTileCoords, zoom: Zoom) -> (f6
     (x.clamp(0.0, EXTENT), y.clamp(0.0, EXTENT))
 }
 
+/// Whether the globe camera of `style` orbits the terrain under the center.
+///
+/// Pure vertical perspective has no flat camera to fall back to, so its globe camera orbits
+/// the terrain as the flat camera does; the globe preset keeps GL JS's sea-level orbit.
+pub(crate) fn globe_orbits_terrain(style: &crate::style::Style) -> bool {
+    style.terrain.is_some()
+        && style.projection.as_ref().is_some_and(|projection| {
+            projection.projection_type == crate::projection::ProjectionType::VerticalPerspective
+        })
+}
+
 /// Lifts the camera's orbit point onto the terrain under the map center every frame, and
 /// records the lowest elevation of the tile under it for the far plane.
 pub fn center_elevation_system(
@@ -51,6 +62,7 @@ pub fn center_elevation_system(
         ..
     }: &mut MapContext,
 ) -> SystemResult {
+    view_state.set_globe_orbits_terrain(globe_orbits_terrain(style));
     if style.terrain.is_none() {
         view_state.set_center_elevation(0.0);
         view_state.set_min_elevation(0.0);
