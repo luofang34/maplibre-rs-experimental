@@ -216,6 +216,7 @@ impl LayerTessellated for FlatBufferTransferable {
         buffer: OverAlignedVertexBuffer<ShaderVertex, IndexDataType>,
         feature_indices: Vec<u32>,
         feature_colors: Vec<[f32; 4]>,
+        feature_sort_keys: Vec<f32>,
         layer_data: Layer,
         style_layer_id: String,
     ) -> Self {
@@ -239,6 +240,7 @@ impl LayerTessellated for FlatBufferTransferable {
             .flat_map(|c| c.iter().copied())
             .collect();
         let feature_colors_fb = inner_builder.create_vector(&flat_colors);
+        let feature_sort_keys_fb = inner_builder.create_vector(&feature_sort_keys);
         let distances = inner_builder.create_vector(
             &buffer
                 .buffer
@@ -263,6 +265,7 @@ impl LayerTessellated for FlatBufferTransferable {
         builder.add_style_layer_id(style_layer_id_fb);
         builder.add_feature_colors(feature_colors_fb);
         builder.add_vertex_distances(distances);
+        builder.add_feature_sort_keys(feature_sort_keys_fb);
         let root = builder.finish();
 
         inner_builder.finish(root, None);
@@ -327,6 +330,10 @@ impl LayerTessellated for FlatBufferTransferable {
             buffer: OverAlignedVertexBuffer::from_iters(vertices, indices, usable_indices),
             feature_indices,
             feature_colors,
+            feature_sort_keys: data
+                .feature_sort_keys()
+                .map(|keys| keys.iter().collect())
+                .unwrap_or_default(),
         }
     }
 }

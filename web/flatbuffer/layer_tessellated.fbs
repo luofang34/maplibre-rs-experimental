@@ -18,6 +18,8 @@ table FlatLayerTessellated {
     // Per-feature RGBA colors (4 floats per feature, flattened).
     feature_colors: [float];
     vertex_distances: [float];
+    // Per-feature `circle-sort-key` values, in feature order; empty without one.
+    feature_sort_keys: [float];
 }
 
 root_type FlatLayerTessellated;
