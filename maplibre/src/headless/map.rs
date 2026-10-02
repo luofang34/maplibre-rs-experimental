@@ -362,6 +362,12 @@ impl HeadlessMap {
         &mut self.map_context.world
     }
 
+    /// The renderer, for tests that look at its attachments.
+    #[cfg(test)]
+    pub(crate) fn renderer(&self) -> &crate::render::Renderer {
+        &self.map_context.renderer
+    }
+
     /// The queue the map's own uploads are counted through.
     #[cfg(test)]
     pub(crate) fn upload_queue(&self) -> &crate::render::upload_queue::UploadQueue {

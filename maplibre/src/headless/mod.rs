@@ -97,6 +97,28 @@ pub async fn create_headless_renderer_with_loader(
     create_renderer(width, height, None, settings, Some(loader)).await
 }
 
+/// Creates a headless renderer drawing with the host's GPU objects into a texture the host
+/// samples through [`HeadlessMap::head_texture`](map::HeadlessMap::head_texture), with the
+/// format and sample count of `settings`; `loader` fetches what the map loads, or the native
+/// HTTP client when `None`.
+pub fn create_headless_renderer_on_host_gpu(
+    width: u32,
+    height: u32,
+    gpu: crate::render::host_gpu::HostGpu,
+    settings: RendererSettings,
+    loader: Option<crate::io::resource_loader::SharedLoader>,
+) -> Result<(Kernel<HeadlessEnvironment>, Renderer), HeadlessRendererError> {
+    let size = PhysicalSize::new(width, height)
+        .ok_or(HeadlessRendererError::InvalidSize { width, height })?;
+    let kernel = environment::create_kernel(size, None, loader)?;
+    let window: HeadlessMapWindow = kernel
+        .map_window_config()
+        .create()
+        .map_err(|source| HeadlessRendererError::Window { source })?;
+    let renderer = Renderer::on_host_gpu(&window, gpu, settings);
+    Ok((kernel, renderer))
+}
+
 async fn create_renderer(
     width: u32,
     height: u32,

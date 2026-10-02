@@ -70,6 +70,8 @@ pub(crate) use systems::retention_system::RetainLoadedTiles;
 pub mod frame_input;
 pub mod frame_signals;
 pub mod gpu_timer;
+#[cfg(feature = "headless")]
+pub mod host_gpu;
 pub mod projection;
 pub mod render_commands;
 pub mod render_phase;

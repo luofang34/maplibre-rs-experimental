@@ -5,7 +5,7 @@
 //! a render. [`ReferenceTarget`] owns the depth attachment, draws the view, and
 //! reads it back. Depth is the distance along the optical axis in metres.
 
-mod readback;
+pub(crate) mod readback;
 
 use std::time::Duration;
 
