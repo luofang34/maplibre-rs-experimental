@@ -189,7 +189,7 @@ async fn heavy_map(layers: usize) -> Option<HeadlessMap> {
     let (kernel, renderer) = create_headless_renderer(1024, 1024, None)
         .await
         .expect("renderer");
-    let mut map = HeadlessMap::new(
+    let map = HeadlessMap::new(
         style,
         renderer,
         kernel,
