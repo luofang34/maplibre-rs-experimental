@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use maplibre::{
     environment::OffscreenKernelConfig,
-    io::apc::SchedulerAsyncProcedureCall,
+    io::{apc::SchedulerAsyncProcedureCall, resource_loader::SharedLoader},
     kernel::{Kernel, KernelBuildError, KernelBuilder},
     map::{Map, MapError},
     platform::{
@@ -24,7 +24,7 @@ use crate::{WinitApplicationError, WinitEnvironment, WinitEventLoop, WinitHostEr
 
 type NativeEnvironment = WinitEnvironment<
     TokioScheduler,
-    ReqwestHttpClient,
+    SharedLoader,
     ReqwestOffscreenKernelEnvironment,
     SchedulerAsyncProcedureCall<ReqwestOffscreenKernelEnvironment, TokioScheduler>,
     (),
@@ -106,13 +106,16 @@ fn create_kernel(
     cache_directory: Option<String>,
     window_config: WinitMapWindowConfig<()>,
 ) -> Result<Kernel<NativeEnvironment>, KernelBuildError> {
+    // Tile workers fetch through the map thread's client and share its connection pool.
+    let loader = SharedLoader::new(ReqwestHttpClient::new(cache_path));
     KernelBuilder::new()
         .with_map_window_config(window_config)
-        .with_http_client(ReqwestHttpClient::new(cache_path))
+        .with_http_client(loader.clone())
         .with_apc(SchedulerAsyncProcedureCall::new(
             TokioScheduler::new(),
             OffscreenKernelConfig {
                 cache_directory,
+                loader: Some(loader),
                 ..Default::default()
             },
         ))

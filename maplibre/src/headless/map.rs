@@ -37,6 +37,8 @@ use crate::{
 };
 
 mod error;
+#[cfg(test)]
+mod injected_loader;
 pub use error::HeadlessMapOperationError;
 
 mod processed;

@@ -44,6 +44,11 @@ pub struct OffscreenKernelConfig {
     /// with its own empty cache.
     #[serde(skip)]
     pub asset_cache: AssetCache,
+    /// The loader the map thread uses, so in-process workers fetch through the same one.
+    /// Like the asset cache it is not serialized: a worker in another process or a browser
+    /// worker builds its platform's own loader.
+    #[serde(skip)]
+    pub loader: Option<crate::io::resource_loader::SharedLoader>,
 }
 
 /// Worker-side services, independent of window and GPU ownership.

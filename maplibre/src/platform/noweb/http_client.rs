@@ -7,7 +7,7 @@ use http_cache_reqwest::{CACacheManager, Cache, CacheMode, HttpCache, HttpCacheO
 use reqwest::{Client, StatusCode};
 use reqwest_middleware::ClientWithMiddleware;
 
-use crate::io::source_client::{HttpClient, SourceFetchError};
+use crate::io::source_client::{ByteRange, HttpClient, SourceFetchError};
 
 const USER_AGENT: &str = concat!(
     "maplibre-rs/",
@@ -78,7 +78,22 @@ impl ReqwestHttpClient {
 #[cfg_attr(feature = "thread-safe-futures", async_trait)]
 impl HttpClient for ReqwestHttpClient {
     async fn fetch(&self, url: &str) -> Result<Vec<u8>, SourceFetchError> {
-        let response = self.client.get(url).send().await?;
+        self.get(url, None).await
+    }
+
+    async fn fetch_range(&self, url: &str, range: ByteRange) -> Result<Vec<u8>, SourceFetchError> {
+        self.get(url, Some(range)).await
+    }
+}
+
+impl ReqwestHttpClient {
+    /// A server that ignores the range answers with the whole body, cut down here.
+    async fn get(&self, url: &str, range: Option<ByteRange>) -> Result<Vec<u8>, SourceFetchError> {
+        let mut request = self.client.get(url);
+        if let Some(range) = range {
+            request = request.header(reqwest::header::RANGE, range.header());
+        }
+        let response = request.send().await?;
         if response.status() == StatusCode::NOT_FOUND {
             return Err(SourceFetchError::not_found(url));
         }
@@ -89,9 +104,12 @@ impl HttpClient for ReqwestHttpClient {
                     log::info!("Using data from cache");
                 }
 
+                let partial = response.status() == StatusCode::PARTIAL_CONTENT;
                 let body = response.bytes().await?;
-
-                Ok(Vec::from(body.as_ref()))
+                match range {
+                    Some(range) if !partial => range.slice(url, &body).map(<[u8]>::to_vec),
+                    _ => Ok(Vec::from(body.as_ref())),
+                }
             }
             Err(error) => Err(SourceFetchError::http_response(url, status, error)),
         }

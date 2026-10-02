@@ -23,7 +23,7 @@ impl Environment for HeadlessEnvironment {
     type AsyncProcedureCall =
         SchedulerAsyncProcedureCall<Self::OffscreenKernelEnvironment, Self::Scheduler>;
     type Scheduler = TokioScheduler;
-    type HttpClient = ReqwestHttpClient;
+    type HttpClient = crate::io::resource_loader::SharedLoader;
     type OffscreenKernelEnvironment = ReqwestOffscreenKernelEnvironment;
 }
 
@@ -38,15 +38,19 @@ pub use web::HeadlessEnvironment;
 pub(super) fn create_kernel(
     size: crate::window::PhysicalSize,
     cache_path: Option<String>,
+    loader: Option<crate::io::resource_loader::SharedLoader>,
 ) -> Result<crate::kernel::Kernel<HeadlessEnvironment>, crate::kernel::KernelBuildError> {
-    let client = ReqwestHttpClient::new(cache_path.clone());
+    let loader = loader.unwrap_or_else(|| {
+        crate::io::resource_loader::SharedLoader::new(ReqwestHttpClient::new(cache_path.clone()))
+    });
     crate::kernel::KernelBuilder::new()
         .with_map_window_config(HeadlessMapWindowConfig::new(size))
-        .with_http_client(client)
+        .with_http_client(loader.clone())
         .with_apc(SchedulerAsyncProcedureCall::new(
             TokioScheduler::new(),
             crate::environment::OffscreenKernelConfig {
                 cache_directory: cache_path,
+                loader: Some(loader),
                 ..Default::default()
             },
         ))

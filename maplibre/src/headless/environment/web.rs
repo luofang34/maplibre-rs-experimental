@@ -4,6 +4,7 @@ use crate::{
     headless::window::HeadlessMapWindowConfig,
     io::{
         apc::SchedulerAsyncProcedureCall,
+        resource_loader::SharedLoader,
         scheduler::NopScheduler,
         source_client::{HttpClient, HttpSourceClient, SourceClient, SourceFetchError},
     },
@@ -38,16 +39,17 @@ impl Environment for HeadlessEnvironment {
     type MapWindowConfig = HeadlessMapWindowConfig;
     type AsyncProcedureCall = SchedulerAsyncProcedureCall<SuppliedTileKernel, NopScheduler>;
     type Scheduler = NopScheduler;
-    type HttpClient = SuppliedTileClient;
+    type HttpClient = SharedLoader;
     type OffscreenKernelEnvironment = SuppliedTileKernel;
 }
 pub(crate) fn create_kernel(
     size: PhysicalSize,
     _cache_path: Option<String>,
+    loader: Option<SharedLoader>,
 ) -> Result<Kernel<HeadlessEnvironment>, crate::kernel::KernelBuildError> {
     KernelBuilder::new()
         .with_map_window_config(HeadlessMapWindowConfig::new(size))
-        .with_http_client(SuppliedTileClient)
+        .with_http_client(loader.unwrap_or_else(|| SharedLoader::new(SuppliedTileClient)))
         .with_apc(SchedulerAsyncProcedureCall::new(
             NopScheduler,
             OffscreenKernelConfig {

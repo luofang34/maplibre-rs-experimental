@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use js_sys::{ArrayBuffer, Uint8Array};
-use maplibre::io::source_client::{HttpClient, SourceFetchError};
+use maplibre::io::source_client::{ByteRange, HttpClient, SourceFetchError};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{Request, RequestInit, Response, WorkerGlobalScope};
@@ -15,11 +15,21 @@ fn invalid_response(message: &'static str) -> SourceFetchError {
 }
 
 impl WHATWGFetchHttpClient {
-    async fn fetch_array_buffer(url: &str) -> Result<JsValue, SourceFetchError> {
+    /// The body and whether it is only the range asked for.
+    async fn fetch_array_buffer(
+        url: &str,
+        range: Option<ByteRange>,
+    ) -> Result<(JsValue, bool), SourceFetchError> {
         let opts = RequestInit::new();
         opts.set_method("GET");
         let request = Request::new_with_str_and_init(url, &opts)
             .map_err(|error| SourceFetchError(Box::new(WebError::from(error))))?;
+        if let Some(range) = range {
+            request
+                .headers()
+                .set("Range", &range.header())
+                .map_err(|error| SourceFetchError(Box::new(WebError::from(error))))?;
+        }
 
         // Tile workers and the main-thread TileJSON loader use the same transport.
         let global = js_sys::global();
@@ -44,22 +54,37 @@ impl WHATWGFetchHttpClient {
                 WebError::FetchError(response.status_text().into()),
             ));
         }
+        let partial = response.status() == 206;
         let buffer = response
             .array_buffer()
             .map_err(|error| SourceFetchError(Box::new(WebError::from(error))))?;
-        JsFuture::from(buffer)
+        let body = JsFuture::from(buffer)
             .await
-            .map_err(|error| SourceFetchError::temporary(WebError::from(error)))
+            .map_err(|error| SourceFetchError::temporary(WebError::from(error)))?;
+        Ok((body, partial))
+    }
+
+    async fn get(url: &str, range: Option<ByteRange>) -> Result<Vec<u8>, SourceFetchError> {
+        let (body, partial) = Self::fetch_array_buffer(url, range).await?;
+        let array_buffer: ArrayBuffer = body
+            .dyn_into()
+            .map_err(|_| invalid_response("Unable to cast to ArrayBuffer"))?;
+        let body = Uint8Array::new(&array_buffer).to_vec();
+        // A server that ignores the range answers with the whole body.
+        match range {
+            Some(range) if !partial => range.slice(url, &body).map(<[u8]>::to_vec),
+            _ => Ok(body),
+        }
     }
 }
 
 #[async_trait(?Send)]
 impl HttpClient for WHATWGFetchHttpClient {
     async fn fetch(&self, url: &str) -> Result<Vec<u8>, SourceFetchError> {
-        let array_buffer: ArrayBuffer = Self::fetch_array_buffer(url)
-            .await?
-            .dyn_into()
-            .map_err(|_| invalid_response("Unable to cast to ArrayBuffer"))?;
-        Ok(Uint8Array::new(&array_buffer).to_vec())
+        Self::get(url, None).await
+    }
+
+    async fn fetch_range(&self, url: &str, range: ByteRange) -> Result<Vec<u8>, SourceFetchError> {
+        Self::get(url, Some(range)).await
     }
 }

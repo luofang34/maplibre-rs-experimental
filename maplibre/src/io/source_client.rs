@@ -24,6 +24,64 @@ pub type HTTPClientFactory<HC> = dyn Fn() -> HC;
 pub trait HttpClient: Clone + Sync + Send + 'static {
     /// Returns response bytes, or an error retaining the transport or HTTP failure cause.
     async fn fetch(&self, url: &str) -> Result<Vec<u8>, SourceFetchError>;
+
+    /// Returns `range` of the response body. A transport that cannot ask for a range fetches
+    /// the whole body and cuts the range out of it.
+    async fn fetch_range(&self, url: &str, range: ByteRange) -> Result<Vec<u8>, SourceFetchError> {
+        let body = self.fetch(url).await?;
+        range.slice(url, &body).map(<[u8]>::to_vec)
+    }
+}
+
+/// A span of a resource's bytes, as an HTTP `Range` header asks for it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ByteRange {
+    /// First byte.
+    pub offset: u64,
+    /// Number of bytes.
+    pub length: u64,
+}
+
+/// A range reaches past the end of the resource it was asked of.
+#[derive(Error, Debug)]
+#[error("bytes {offset}..{end} are past the end of {url} ({size} bytes)")]
+pub struct RangeOutOfBounds {
+    /// The resource.
+    pub url: String,
+    /// First byte asked for.
+    pub offset: u64,
+    /// One past the last byte asked for.
+    pub end: u64,
+    /// The resource's size.
+    pub size: usize,
+}
+
+impl ByteRange {
+    /// The `Range` header value asking for these bytes.
+    pub fn header(&self) -> String {
+        format!(
+            "bytes={}-{}",
+            self.offset,
+            self.offset + self.length.saturating_sub(1)
+        )
+    }
+
+    /// These bytes of a whole body, or an error when the body is too short.
+    pub fn slice<'a>(&self, url: &str, body: &'a [u8]) -> Result<&'a [u8], SourceFetchError> {
+        let end = self.offset.saturating_add(self.length);
+        usize::try_from(self.offset)
+            .ok()
+            .zip(usize::try_from(end).ok())
+            .and_then(|(start, end)| body.get(start..end))
+            .ok_or_else(|| {
+                SourceFetchError(Box::new(RangeOutOfBounds {
+                    url: url.to_owned(),
+                    offset: self.offset,
+                    end,
+                    size: body.len(),
+                }))
+            })
+    }
 }
 
 /// Resolves tile URL templates and delegates requests to an HTTP transport.

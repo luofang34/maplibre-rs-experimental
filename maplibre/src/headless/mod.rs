@@ -83,9 +83,30 @@ pub async fn create_headless_renderer_with_settings(
     cache_path: Option<String>,
     settings: RendererSettings,
 ) -> Result<(Kernel<HeadlessEnvironment>, Renderer), HeadlessRendererError> {
+    create_renderer(width, height, cache_path, settings, None).await
+}
+
+/// Creates a headless renderer whose map thread and tile workers fetch everything through
+/// `loader`.
+pub async fn create_headless_renderer_with_loader(
+    width: u32,
+    height: u32,
+    settings: RendererSettings,
+    loader: crate::io::resource_loader::SharedLoader,
+) -> Result<(Kernel<HeadlessEnvironment>, Renderer), HeadlessRendererError> {
+    create_renderer(width, height, None, settings, Some(loader)).await
+}
+
+async fn create_renderer(
+    width: u32,
+    height: u32,
+    cache_path: Option<String>,
+    settings: RendererSettings,
+    loader: Option<crate::io::resource_loader::SharedLoader>,
+) -> Result<(Kernel<HeadlessEnvironment>, Renderer), HeadlessRendererError> {
     let size = PhysicalSize::new(width, height)
         .ok_or(HeadlessRendererError::InvalidSize { width, height })?;
-    let kernel = environment::create_kernel(size, cache_path)?;
+    let kernel = environment::create_kernel(size, cache_path, loader)?;
 
     let mwc: &HeadlessMapWindowConfig = kernel.map_window_config();
     let window: HeadlessMapWindow = mwc
