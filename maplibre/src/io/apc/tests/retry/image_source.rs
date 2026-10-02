@@ -132,3 +132,88 @@ async fn an_image_update_rejects_a_source_that_is_not_an_image() {
         Err(crate::style::mutation::StyleMutationError::UnknownSource { .. })
     ));
 }
+
+/// A 1×1 picture of one colour.
+fn plain(rgba: [u8; 4]) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    image::codecs::png::PngEncoder::new(&mut bytes)
+        .write_image(&rgba, 1, 1, image::ExtendedColorType::Rgba8)
+        .expect("PNG");
+    bytes
+}
+
+#[tokio::test]
+async fn a_new_url_is_fetched_and_drawn() {
+    let mut test = western_half().await;
+    test.source.set(Response::Bytes(picture()));
+    test.frame(0);
+    test.receive().await;
+
+    test.source.set(Response::Bytes(plain([0, 255, 0, 255])));
+    let url = format!("{}/unstable/second.png", test.source.url);
+    test.context
+        .mutate_style(|style| style.update_image_source("source", url, None))
+        .expect("new picture");
+    test.frame(1);
+    test.receive().await;
+
+    assert!(test.source.requested("/unstable/second.png"));
+    let [red, green, _, _] = tile_pixels(&test).expect("tile").get_pixel(64, 256).0;
+    assert!(red < 50 && green > 200, "the new picture is drawn");
+}
+
+fn tiles_with_results(test: &Fixture) -> Vec<(i32, i32)> {
+    let mut found: Vec<(i32, i32)> = (0..2)
+        .flat_map(|x| (0..2).map(move |y| (x, y)))
+        .filter(|&(x, y)| {
+            test.context
+                .world
+                .tiles
+                .query::<&RasterLayersDataComponent>(crate::coords::WorldTileCoords {
+                    x,
+                    y,
+                    z: crate::coords::ZoomLevel::from(1),
+                })
+                .is_some_and(|component| !component.layers.is_empty())
+        })
+        .collect();
+    found.sort_unstable();
+    found
+}
+
+#[tokio::test]
+async fn only_the_tiles_a_picture_reaches_are_made_and_new_corners_drop_the_rest_at_once() {
+    let mut test = western_half().await;
+    test.context
+        .view_state
+        .update_zoom(crate::coords::Zoom::new(1.0));
+    test.source.set(Response::Bytes(picture()));
+    test.frame(0);
+    test.receive().await;
+    assert_eq!(
+        tiles_with_results(&test),
+        [(0, 0), (0, 1)],
+        "the eastern tiles, which the picture does not reach, are not requested"
+    );
+
+    test.context
+        .mutate_style(|style| {
+            style.set_image_coordinates(
+                "source",
+                [
+                    [90.0, 85.0511],
+                    [180.0, 85.0511],
+                    [180.0, -85.0511],
+                    [90.0, -85.0511],
+                ],
+            )
+        })
+        .expect("new corners");
+    assert!(
+        tiles_with_results(&test).is_empty(),
+        "the western tiles drop the picture as soon as it leaves them"
+    );
+    test.frame(1);
+    test.receive().await;
+    assert_eq!(tiles_with_results(&test), [(1, 0), (1, 1)]);
+}

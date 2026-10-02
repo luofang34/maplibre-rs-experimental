@@ -21,18 +21,19 @@ where
         self.mutate_style(|style| style.remove_source(name))
     }
 
-    /// Points an image source at another picture or other corners, as GL JS
-    /// `ImageSource.updateImage`; see [`Style::update_image_source`].
+    /// Points an image source at a picture and optionally other corners, as GL JS
+    /// `ImageSource.updateImage`; see [`crate::style::Style::update_image_source`].
     pub fn update_image_source(
         &mut self,
         name: &str,
-        image: crate::style::source::ImageSource,
+        url: String,
+        coordinates: Option<[[f64; 2]; 4]>,
     ) -> Result<StyleChange, MapError> {
-        self.mutate_style(|style| style.update_image_source(name, image))
+        self.mutate_style(|style| style.update_image_source(name, url, coordinates))
     }
 
     /// Stretches an image source over other corners, as GL JS `ImageSource.setCoordinates`;
-    /// see [`Style::set_image_coordinates`].
+    /// see [`crate::style::Style::set_image_coordinates`].
     pub fn set_image_coordinates(
         &mut self,
         name: &str,

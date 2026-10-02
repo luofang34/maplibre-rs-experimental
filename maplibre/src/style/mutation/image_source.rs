@@ -3,56 +3,59 @@
 
 use super::{StyleChange, StyleMutationError};
 use crate::style::{
-    source::{ImageSource, Source},
+    source::{fresh_generation, ImageSource, Source},
     Style,
 };
 
 impl Style {
-    /// Points an image source at another picture or other corners.
+    /// Points an image source at a picture, fetched again even from the same URL, and
+    /// optionally at other corners, as GL JS `ImageSource.updateImage`.
     pub fn update_image_source(
         &mut self,
         name: &str,
-        image: ImageSource,
+        url: String,
+        coordinates: Option<[[f64; 2]; 4]>,
     ) -> Result<StyleChange, StyleMutationError> {
-        match self.sources.get_mut(name) {
-            Some(Source::Image(current)) => *current = image,
-            Some(_) => {
-                return Err(StyleMutationError::NotAnImageSource {
-                    source_name: name.to_owned(),
-                })
-            }
-            None => {
-                return Err(StyleMutationError::UnknownSource {
-                    source_name: name.to_owned(),
-                })
-            }
+        let image = image_source_mut(&mut self.sources, name)?;
+        image.url = url;
+        image.generation = fresh_generation();
+        if let Some(coordinates) = coordinates {
+            image.coordinates = coordinates;
         }
-        Ok(StyleChange {
-            reloaded_image_sources: vec![name.to_owned()],
-            ..StyleChange::default()
-        })
+        Ok(reloaded(name))
     }
 
-    /// Stretches an image source's picture over other corners: `[longitude, latitude]` of the
-    /// top left, top right, bottom right and bottom left.
+    /// Stretches an image source's picture over other corners, `[longitude, latitude]` of the
+    /// top left, top right, bottom right and bottom left, as GL JS `ImageSource.setCoordinates`;
+    /// the picture is not fetched again.
     pub fn set_image_coordinates(
         &mut self,
         name: &str,
         coordinates: [[f64; 2]; 4],
     ) -> Result<StyleChange, StyleMutationError> {
-        let url = match self.sources.get(name) {
-            Some(Source::Image(current)) => current.url.clone(),
-            Some(_) => {
-                return Err(StyleMutationError::NotAnImageSource {
-                    source_name: name.to_owned(),
-                })
-            }
-            None => {
-                return Err(StyleMutationError::UnknownSource {
-                    source_name: name.to_owned(),
-                })
-            }
-        };
-        self.update_image_source(name, ImageSource { url, coordinates })
+        image_source_mut(&mut self.sources, name)?.coordinates = coordinates;
+        Ok(reloaded(name))
+    }
+}
+
+fn image_source_mut<'a>(
+    sources: &'a mut std::collections::HashMap<String, Source>,
+    name: &str,
+) -> Result<&'a mut ImageSource, StyleMutationError> {
+    match sources.get_mut(name) {
+        Some(Source::Image(image)) => Ok(image),
+        Some(_) => Err(StyleMutationError::NotAnImageSource {
+            source_name: name.to_owned(),
+        }),
+        None => Err(StyleMutationError::UnknownSource {
+            source_name: name.to_owned(),
+        }),
+    }
+}
+
+fn reloaded(name: &str) -> StyleChange {
+    StyleChange {
+        reloaded_image_sources: vec![name.to_owned()],
+        ..StyleChange::default()
     }
 }

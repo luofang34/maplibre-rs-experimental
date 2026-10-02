@@ -271,6 +271,11 @@ pub struct ImageSource {
     /// `[longitude, latitude]` of the top left, top right, bottom right and bottom left
     /// corners of the image.
     pub coordinates: [[f64; 2]; 4],
+    /// Identifies this version of the picture: a new one, even from the same URL, is fetched
+    /// again, as GL JS `updateImage` loads it again. Serialized so workers that receive the
+    /// style as a message share the cached picture.
+    #[serde(default = "fresh_generation")]
+    pub generation: u64,
 }
 
 #[cfg(test)]

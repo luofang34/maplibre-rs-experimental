@@ -106,6 +106,14 @@ impl Source {
     pub fn set(&self, response: Response) {
         *self.response.lock().expect("response") = response;
     }
+    /// Whether a request for `path` reached the server.
+    pub fn requested(&self, path: &str) -> bool {
+        self.requests
+            .lock()
+            .expect("requests")
+            .iter()
+            .any(|request| request.contains(path))
+    }
     pub fn requests(&self) -> usize {
         self.requests.lock().expect("requests").len()
     }

@@ -1,7 +1,10 @@
 //! Resamples an `image` source into the tiles that cover it.
 //!
-//! GL JS draws the image as a quad of two triangles; resampling it into raster tiles gives the same
-//! picture and lets terrain, globe and masks treat it like any other raster source.
+//! Resampling the picture into raster tiles lets terrain, globe and masks treat it like any other
+//! raster source. Corners that form a rectangle in Mercator give GL JS's picture exactly. A quad
+//! that is not one is split into two triangles, which matches neither of GL JS's warps: its
+//! `perspective` warp, which foreshortens the picture as a view of a plane, or its `flat` warp,
+//! which interpolates it bilinearly between the corners.
 
 use image::RgbaImage;
 
@@ -22,9 +25,9 @@ fn mercator([longitude, latitude]: [f64; 2]) -> [f64; 2] {
 
 /// The image coordinates of a point inside the quad, or `None` outside it.
 ///
-/// GL JS draws the quad as two triangles split along the diagonal from the top right to the
-/// bottom left corner and interpolates linearly inside each, so a quad that is not a
-/// parallelogram bends along that diagonal instead of mapping projectively.
+/// The quad is split into two triangles along the diagonal from the top right to the bottom left
+/// corner and interpolated linearly inside each, so a quad that is not a parallelogram bends
+/// along that diagonal.
 fn unit_coordinates(corners: &[[f64; 2]; 4], x: f64, y: f64) -> Option<[f64; 2]> {
     let [top_left, top_right, bottom_right, bottom_left] = *corners;
     let triangles = [
@@ -206,17 +209,20 @@ pub(crate) async fn load_tile<HC: crate::io::source_client::HttpClient>(
     let url = source.url.as_str();
     let picture = client
         .assets()
-        .load(format!("image-source:{url}"), || async {
-            let bytes = crate::sdf::assets::fetch(client, url, "image source").await?;
-            let picture = image::load_from_memory(&bytes)
-                .map_err(|error| {
-                    tracing::warn!(%url, %error, "invalid image source picture");
-                    AssetFailure::Terminal(format!("invalid image {url}: {error}"))
-                })?
-                .to_rgba8();
-            let bytes = picture.as_raw().len();
-            Ok((picture, bytes))
-        })
+        .load(
+            format!("image-source:{url}#{}", source.generation),
+            || async {
+                let bytes = crate::sdf::assets::fetch(client, url, "image source").await?;
+                let picture = image::load_from_memory(&bytes)
+                    .map_err(|error| {
+                        tracing::warn!(%url, %error, "invalid image source picture");
+                        AssetFailure::Terminal(format!("invalid image {url}: {error}"))
+                    })?
+                    .to_rgba8();
+                let bytes = picture.as_raw().len();
+                Ok((picture, bytes))
+            },
+        )
         .await?;
     Ok(render_tile(&picture, source.coordinates, coords))
 }

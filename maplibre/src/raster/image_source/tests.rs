@@ -96,3 +96,56 @@ fn the_part_of_an_image_past_the_antimeridian_wraps_to_the_other_side() {
     assert_eq!(tile.get_pixel(500, 2).0, [255, 0, 0, 255]);
     assert_eq!(tile.get_pixel(255, 2).0, [0, 255, 0, 255]);
 }
+
+/// Serves one small PNG for every URL and counts the requests.
+#[derive(Clone, Default)]
+struct Pictures(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
+
+#[cfg_attr(not(feature = "thread-safe-futures"), async_trait::async_trait(?Send))]
+#[cfg_attr(feature = "thread-safe-futures", async_trait::async_trait)]
+impl crate::io::source_client::HttpClient for Pictures {
+    async fn fetch(
+        &self,
+        url: &str,
+    ) -> Result<Vec<u8>, crate::io::source_client::SourceFetchError> {
+        use image::ImageEncoder;
+        self.0.lock().unwrap().push(url.to_owned());
+        let mut bytes = Vec::new();
+        image::codecs::png::PngEncoder::new(&mut bytes)
+            .write_image(&[255, 0, 0, 255], 1, 1, image::ExtendedColorType::Rgba8)
+            .unwrap();
+        Ok(bytes)
+    }
+}
+
+#[tokio::test]
+async fn the_picture_is_fetched_once_per_version_even_from_the_same_url() {
+    use crate::{
+        io::source_client::{HttpSourceClient, SourceClient},
+        style::source::{fresh_generation, ImageSource},
+    };
+    let http = Pictures::default();
+    let client = SourceClient::new(HttpSourceClient::new(http.clone()));
+    let mut source = ImageSource {
+        url: "https://images.invalid/a.png".to_owned(),
+        coordinates: WORLD,
+        generation: fresh_generation(),
+    };
+    let tile = WorldTileCoords::default();
+    for _ in 0..2 {
+        assert!(load_tile(&client, &source, tile).await.unwrap().is_some());
+    }
+    assert_eq!(
+        http.0.lock().unwrap().len(),
+        1,
+        "one version is fetched once"
+    );
+
+    source.generation = fresh_generation();
+    load_tile(&client, &source, tile).await.unwrap();
+    assert_eq!(
+        http.0.lock().unwrap().len(),
+        2,
+        "a new version is fetched again from the same URL"
+    );
+}
