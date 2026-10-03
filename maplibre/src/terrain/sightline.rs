@@ -370,4 +370,6 @@ fn mercator_y_to_latitude(y: f64) -> f64 {
 }
 
 #[cfg(test)]
+pub(crate) mod synthetic;
+#[cfg(test)]
 mod tests;

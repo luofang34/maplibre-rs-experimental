@@ -51,6 +51,26 @@ impl GlobeCameraState {
         self.closest_horizon_location(direction)
     }
 
+    /// Where the ray through a viewport pixel first meets the sphere `elevation_meters` above
+    /// the mean radius, as a point raised that high would sit under the pixel; `None` where
+    /// the ray passes the sphere.
+    pub fn screen_point_to_location_at(
+        &self,
+        pixel: Point2<f64>,
+        elevation_meters: f64,
+    ) -> Option<LatLon> {
+        let direction = self.ray_direction_from_pixel(pixel)?;
+        let radius = self.options.body.unit_radius_at(elevation_meters);
+        let hit = ray_sphere_intersection(self.camera_position, direction, radius)?;
+        let t = if hit.t_min > 0.0 {
+            hit.t_min
+        } else {
+            hit.t_max
+        };
+        (t > 0.0)
+            .then(|| unit_sphere_to_lat_lon((self.camera_position + direction * t).normalize()))
+    }
+
     /// Returns whether the ray through a viewport pixel intersects the unit globe.
     pub fn is_point_on_map_surface(&self, pixel: Point2<f64>) -> bool {
         self.ray_direction_from_pixel(pixel)

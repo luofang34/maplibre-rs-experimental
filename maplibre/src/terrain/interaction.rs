@@ -278,6 +278,7 @@ pub fn resolve_gesture_anchor(
 }
 
 mod flat_gestures;
+pub mod globe;
 pub use flat_gestures::{pan_mercator_by_pixels, set_location_at_pixel, zoom_mercator_around};
 
 /// Holds the center elevation still for the duration of a gesture.
@@ -301,7 +302,12 @@ pub fn finish_gesture(style: &Style, view_state: &mut ViewState, world: &World) 
     let world_size = TILE_SIZE * 2_f64.powf(view_state.zoom().value());
     let center = view_state.camera().position();
     let sample = index.sample(&world.tiles, center.x / world_size, center.y / world_size);
-    if sample.dem_loaded {
+    if !sample.dem_loaded {
+        return;
+    }
+    if globe::globe_pose(view_state).is_some() {
+        globe::recalculate_globe_zoom_and_center(view_state, sample.elevation);
+    } else {
         recalculate_zoom_and_center(view_state, sample.elevation);
     }
 }
@@ -361,6 +367,10 @@ pub fn recalculate_zoom_and_center(view_state: &mut ViewState, elevation: f64) {
 pub fn keep_camera_above_terrain(style: &Style, view_state: &mut ViewState, world: &World) -> bool {
     if style.terrain.is_none() {
         return false;
+    }
+    // The globe that orbits the terrain has an eye of its own, not the flat camera's altitude.
+    if globe::globe_pose(view_state).is_some() {
+        return globe::keep_globe_camera_above_terrain(view_state, world);
     }
     let Some(index) = world.resources.get::<TerrainCoverageIndex>() else {
         return false;

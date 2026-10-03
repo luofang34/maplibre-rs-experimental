@@ -4,7 +4,11 @@ use cgmath::{Point2, Vector2};
 use instant::Instant;
 use maplibre::{
     context::MapContext,
-    terrain::interaction::{begin_gesture, finish_gesture, resolve_gesture_anchor},
+    terrain::interaction::{
+        begin_gesture, finish_gesture,
+        globe::{place_anchor_at_pixel, terrain_anchor_at, TerrainAnchor},
+        resolve_gesture_anchor,
+    },
 };
 use winit::event::{ElementState, MouseButton};
 
@@ -23,6 +27,9 @@ pub struct PanHandler {
     inertia: PanInertia,
     /// Elevation of the plane the running gesture drags, captured when it starts.
     gesture_plane: Option<f64>,
+    /// The terrain point a drag on a globe orbiting the terrain keeps under the pointer, and
+    /// the pixel it was last placed at.
+    globe_anchor: Option<(TerrainAnchor, Vector2<f64>)>,
 }
 
 impl UpdateState for PanHandler {
@@ -39,6 +46,12 @@ impl UpdateState for PanHandler {
         let now = Instant::now();
         if !self.is_panning {
             if let Some(delta) = self.inertia.step(now) {
+                if let Some((anchor, pixel)) = &mut self.globe_anchor {
+                    *pixel += delta;
+                    if place_anchor_at_pixel(view_state, *anchor, Point2::new(pixel.x, pixel.y)) {
+                        return;
+                    }
+                }
                 let center = center_pixel(view_state);
                 let plane = self
                     .gesture_plane
@@ -47,6 +60,7 @@ impl UpdateState for PanHandler {
                     pan_plane_by_pixels(view_state, center, delta, plane);
                 }
             } else if self.gesture_plane.take().is_some() {
+                self.globe_anchor = None;
                 finish_gesture(style, view_state, world);
             }
             return;
@@ -59,18 +73,28 @@ impl UpdateState for PanHandler {
         let delta = window_position - self.last_window_position.unwrap_or(window_position);
         self.last_window_position = Some(window_position);
         self.inertia.record(now, delta);
-        let plane = *self.gesture_plane.get_or_insert_with(|| {
-            let anchor = resolve_gesture_anchor(
-                style,
-                view_state,
-                world,
-                Point2::new(start_window_position.x, start_window_position.y),
-            );
-            begin_gesture(view_state);
-            anchor
-                .elevation
-                .unwrap_or_else(|| view_state.center_elevation())
-        });
+        let start = Point2::new(start_window_position.x, start_window_position.y);
+        let plane = match self.gesture_plane {
+            Some(plane) => plane,
+            None => {
+                let anchor = resolve_gesture_anchor(style, view_state, world, start);
+                self.globe_anchor = terrain_anchor_at(style, view_state, world, start)
+                    .map(|anchor| (anchor, start_window_position));
+                begin_gesture(view_state);
+                let plane = anchor
+                    .elevation
+                    .unwrap_or_else(|| view_state.center_elevation());
+                self.gesture_plane = Some(plane);
+                plane
+            }
+        };
+        if let Some((anchor, pixel)) = &mut self.globe_anchor {
+            *pixel = window_position;
+            let at = Point2::new(window_position.x, window_position.y);
+            if place_anchor_at_pixel(view_state, *anchor, at) {
+                return;
+            }
+        }
         if pan_globe_by_pixels(style, view_state, window_position, delta) {
             return;
         }
