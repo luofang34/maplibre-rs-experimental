@@ -295,12 +295,7 @@ impl ViewState {
         self.free_globe = Some(free);
         height(self);
         self.sync_flat_camera();
-        if crate::render::projection::globe_camera_for_view(self).is_ok() {
-            true
-        } else {
-            *self = before;
-            false
-        }
+        self.keep_if_drawable(before)
     }
 
     /// Turns the free-globe camera of `from` about its target: its bearing by `bearing` and its

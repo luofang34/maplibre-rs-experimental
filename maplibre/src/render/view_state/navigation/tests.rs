@@ -10,6 +10,8 @@ use crate::{
     window::PhysicalSize,
 };
 
+mod past_ninety;
+
 const VERTICAL: ProjectionType = ProjectionType::VerticalPerspective;
 
 fn view(center: LatLon, zoom: f64, bearing: f64, pitch: f64, roll: f64) -> ViewState {
@@ -385,72 +387,6 @@ fn a_pose_placed_past_the_pitch_limit_turns_without_a_jump_and_never_further_up(
         (pitch_and_roll(&state).0 - 78.0).abs() < 1e-9,
         "down as asked"
     );
-}
-
-/// A constrained view at zoom 14 over a target raised 3000 m, pitch limit 120 degrees, as
-/// GL JS allows up to 180.
-fn raised(pitch: f64) -> ViewState {
-    let mut state = view(LatLon::new(40.0, 10.0), 14.0, 30.0, 0.0, 0.0);
-    state.set_max_pitch(Deg(120.0));
-    state.camera_mut().set_pitch(Deg(pitch));
-    state.set_center_altitude(3000.0);
-    state
-}
-
-#[test]
-fn a_pose_past_ninety_degrees_that_the_camera_draws_is_free_to_enter_turn_and_restore() {
-    use cgmath::Rad;
-    // Entering free navigation from a constrained camera looking up at its raised center.
-    let mut state = raised(110.0);
-    let before = matrix(&state);
-    state
-        .set_navigation_mode(NavigationMode::FreeGlobe, &VERTICAL)
-        .expect("free navigation from 110 degrees");
-    assert_same_matrix(matrix(&state), before, "entered at 110");
-    // Turning across 90 degrees, and storing and restoring where the turn ends.
-    let mut state = raised(80.0);
-    state
-        .set_navigation_mode(NavigationMode::FreeGlobe, &VERTICAL)
-        .expect("free navigation");
-    let start = state.globe_pose().expect("pose");
-    state
-        .orbit_globe_pose(start, Rad(0.0), Rad(30_f64.to_radians()))
-        .expect("orbit across 90 degrees");
-    assert!((pitch_and_roll(&state).0 - 110.0).abs() < 1e-9);
-    let turned = state.globe_pose().expect("pose");
-    let at = matrix(&state);
-    let mut restored = raised(0.0);
-    restored
-        .restore_globe_pose(turned, &VERTICAL)
-        .expect("a turned pose restores");
-    assert_same_matrix(matrix(&restored), at, "restored at 110");
-}
-
-#[test]
-fn a_pose_whose_eye_would_be_inside_the_body_is_refused_and_the_view_kept() {
-    use cgmath::Rad;
-    let center = LatLon::new(40.0, 10.0);
-    let mut state = view(center, 5.0, 0.0, 30.0, 0.0);
-    state
-        .set_navigation_mode(NavigationMode::FreeGlobe, &VERTICAL)
-        .expect("free navigation");
-    let pose = state.globe_pose().expect("pose");
-    let kept = matrix(&state);
-    // Looking up at a target on the ground from 80 km away puts the eye deep underground.
-    let under = pose_at(center, 0.0, 120.0, 0.0);
-    assert!(matches!(
-        state.restore_globe_pose(under, &VERTICAL),
-        Err(NavigationError::InvalidPose { .. })
-    ));
-    assert_eq!(state.globe_pose(), Some(pose));
-    assert_eq!(matrix(&state), kept);
-    // A turn that would take the eye there is refused the same way.
-    state.set_max_pitch(Deg(170.0));
-    assert!(matches!(
-        state.orbit_globe_pose(pose, Rad(0.0), Rad(130_f64.to_radians())),
-        Err(NavigationError::InvalidPose { .. })
-    ));
-    assert_eq!(matrix(&state), kept);
 }
 
 #[test]
