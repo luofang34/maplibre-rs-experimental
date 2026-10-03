@@ -178,3 +178,43 @@ async fn a_center_altitude_holds_without_terrain_and_the_pure_globe_orbits_it() 
         assert!((map.view_state().field_of_view().0.to_degrees() - 50.0).abs() < 1e-12);
     }
 }
+
+/// The screen direction, as an angle, in which the ground's up points at `location`: from the
+/// point at `elevation` to the one a kilometre above it.
+fn up_on_screen(project: impl Fn(f64) -> Point2<f64>, elevation: f64) -> f64 {
+    let (low, high) = (project(elevation), project(elevation + 1000.0));
+    (high.y - low.y).atan2(high.x - low.x)
+}
+
+#[test]
+fn roll_and_center_altitude_together_raise_the_target_and_tilt_the_horizon() {
+    let mut tilts = Vec::new();
+    for roll in [0.0, 30.0, -75.0] {
+        let style = style(&format!(
+            r#"{{"version":8,"center":[88.05,27.77],"centerAltitude":4200.5,"zoom":16,
+                "bearing":20,"pitch":40,"roll":{roll},
+                "projection":{{"type":"vertical-perspective"}},"sources":{{}},"layers":[]}}"#
+        ));
+        let mut view = initial_view_state(PhysicalSize::new(800, 600).expect("size"), &style);
+        view.set_globe_orbits_center(true);
+        let globe = globe_camera_for_view(&view).expect("camera");
+        let center = LatLon::new(27.77, 88.05);
+        // The raised target is the point at the viewport's center.
+        let target = globe.location_to_screen(center, 4200.5);
+        assert!(
+            (target - Point2::new(400.0, 600.0 / 2.0)).magnitude() < 1e-6,
+            "roll {roll}: the target shows at {target:?}"
+        );
+        let tilt = up_on_screen(|meters| globe.location_to_screen(center, meters), 4200.5);
+        tilts.push(tilt);
+    }
+    // The horizon tilts with the roll, the same amount either way, and counterclockwise for
+    // a positive roll of the camera turns the scene clockwise on screen.
+    let turned = |index: usize| {
+        let turn = (tilts[index] - tilts[0]).to_degrees();
+        (turn + 540.0).rem_euclid(360.0) - 180.0
+    };
+    assert!((turned(1).abs() - 30.0).abs() < 1e-6, "{tilts:?}");
+    assert!((turned(2).abs() - 75.0).abs() < 1e-6, "{tilts:?}");
+    assert!(turned(1).signum() != turned(2).signum(), "{tilts:?}");
+}
