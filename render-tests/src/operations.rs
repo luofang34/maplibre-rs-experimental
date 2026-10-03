@@ -201,11 +201,15 @@ pub(super) fn apply(
             ("setPitch", _) => number(items, 1).map(|pitch| style.pitch = Some(pitch)),
             ("setRoll", _) => number(items, 1).map(|roll| style.roll = Some(roll)),
             // The padding is applied to the camera by the harness, not to the style.
-            ("setPadding" | "setCenterClampedToGround" | "setCenterElevation", _) => Ok(()),
+            // The harness applies these to the map's camera, not to the style.
+            (
+                "setPadding"
+                | "setCenterClampedToGround"
+                | "setCenterElevation"
+                | "setVerticalFieldOfView",
+                _,
+            ) => Ok(()),
             ("easeTo", _) if crate::camera_options::eases_only_padding(&value(1)) => Ok(()),
-            ("setVerticalFieldOfView", _) => {
-                number(items, 1).map(|degrees| style.vertical_field_of_view = Some(degrees))
-            }
             ("addImage", Some(name)) => add_image(style, name, &value(2), &value(3)),
             ("removeImage", Some(name)) => {
                 style.remove_image(name);

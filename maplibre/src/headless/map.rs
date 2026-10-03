@@ -425,11 +425,18 @@ impl HeadlessMap {
     }
 
     /// Puts the camera's center at `meters` above sea level and holds it there, so terrain under
-    /// the center does not move it.
+    /// the center does not move it, as GL JS does once `centerClampedToGround` is off.
     pub fn pin_center_elevation(&mut self, meters: f64) {
         let view_state = &mut self.map_context.view_state;
-        view_state.set_center_elevation(meters);
-        view_state.freeze_center_elevation();
+        view_state.set_center_clamped_to_ground(false);
+        view_state.set_center_altitude(meters);
+    }
+
+    /// Sets the full vertical field of view, as the GL JS `verticalFieldOfView` map option.
+    pub fn set_vertical_field_of_view(&mut self, field_of_view: cgmath::Deg<f64>) {
+        self.map_context
+            .view_state
+            .set_field_of_view(cgmath::Rad::from(field_of_view));
     }
 
     /// What the render passes recorded since the last call: draws, and the state changes they
@@ -615,12 +622,11 @@ fn initial_view_state(window_size: crate::window::PhysicalSize, style: &Style) -
         center,
         zoom,
         cgmath::Deg(style.pitch.unwrap_or_default()),
-        style
-            .vertical_field_of_view
-            .map_or(cgmath::Rad(0.6435011087932844), |degrees| {
-                cgmath::Rad::from(cgmath::Deg(degrees))
-            }),
+        cgmath::Rad(0.6435011087932844),
     );
+    if let Some(meters) = style.center_altitude {
+        view_state.set_center_altitude(meters);
+    }
     view_state
         .camera_mut()
         .set_bearing(cgmath::Deg(style.bearing.unwrap_or_default()));

@@ -44,7 +44,7 @@ fn view_at(center: LatLon, zoom: f64, pitch: f64, bearing: f64, elevation: f64) 
     view.set_max_pitch(Deg(85.0));
     view.camera_mut().set_pitch(Deg(pitch));
     view.camera_mut().set_bearing(Deg(bearing));
-    view.set_globe_orbits_terrain(true);
+    view.set_globe_orbits_center(true);
     view.set_center_elevation(elevation);
     view
 }

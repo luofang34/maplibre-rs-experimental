@@ -293,7 +293,8 @@ pub fn finish_gesture(style: &Style, view_state: &mut ViewState, world: &World) 
         return;
     }
     view_state.thaw_center_elevation();
-    if style.terrain.is_none() {
+    // Off the ground the center keeps its altitude; GL JS recomputes only a clamped center.
+    if style.terrain.is_none() || !view_state.center_clamped_to_ground() {
         return;
     }
     let Some(index) = world.resources.get::<TerrainCoverageIndex>() else {

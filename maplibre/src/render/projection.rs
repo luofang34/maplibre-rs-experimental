@@ -279,12 +279,12 @@ pub fn globe_camera_for_view(
         world_size,
         bearing_degrees: view_state.camera().get_bearing().0.to_degrees(),
         pitch_degrees: view_state.camera().get_pitch().0.to_degrees(),
-        roll_degrees: external_eye.map_or(0.0, |_| view_state.camera().get_roll().0.to_degrees()),
+        roll_degrees: view_state.camera().get_roll().0.to_degrees(),
         center_offset: external_eye
             .map_or_else(|| view_state.center_offset(), |_| Point2::new(0.0, 0.0)),
         body: view_state.body(),
         // A host's eye is placed where it is; the center's terrain must not move it.
-        target_elevation_meters: if external_eye.is_none() && view_state.globe_orbits_terrain() {
+        target_elevation_meters: if external_eye.is_none() && view_state.globe_orbits_center() {
             view_state.center_elevation()
         } else {
             0.0

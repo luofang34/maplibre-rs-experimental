@@ -41,15 +41,34 @@ fn tile_local(position: WorldCoords, coords: WorldTileCoords, zoom: Zoom) -> (f6
     (x.clamp(0.0, EXTENT), y.clamp(0.0, EXTENT))
 }
 
-/// Whether the globe camera of `style` orbits the terrain under the center.
+/// Whether the globe camera of `style` orbits the center's elevation.
 ///
 /// Pure vertical perspective has no flat camera to fall back to, so its globe camera orbits
-/// the terrain as the flat camera does; the globe preset keeps GL JS's sea-level orbit.
-pub(crate) fn globe_orbits_terrain(style: &crate::style::Style) -> bool {
-    style.terrain.is_some()
-        && style.projection.as_ref().is_some_and(|projection| {
-            projection.projection_type == crate::projection::ProjectionType::VerticalPerspective
-        })
+/// the point the camera looks at, on the terrain or at the center altitude, as the flat
+/// camera does; the globe preset keeps GL JS's sea-level orbit.
+pub(crate) fn globe_orbits_center(style: &crate::style::Style) -> bool {
+    style.projection.as_ref().is_some_and(|projection| {
+        projection.projection_type == crate::projection::ProjectionType::VerticalPerspective
+    })
+}
+
+/// Decides what the camera orbits at the center every frame, terrain or not: whether the globe
+/// camera orbits the center's elevation, and, without terrain or with the center off the
+/// ground, rests the center at its altitude. A gesture holds it where it is.
+pub fn center_target_system(
+    MapContext {
+        style, view_state, ..
+    }: &mut MapContext,
+) -> SystemResult {
+    view_state.set_globe_orbits_center(globe_orbits_center(style));
+    let off_ground = style.terrain.is_none() || !view_state.center_clamped_to_ground();
+    if off_ground && !view_state.center_elevation_frozen() {
+        view_state.set_center_elevation(view_state.center_altitude());
+    }
+    if style.terrain.is_none() {
+        view_state.set_min_elevation(0.0);
+    }
+    Ok(())
 }
 
 /// Lifts the camera's orbit point onto the terrain under the map center every frame, and
@@ -62,10 +81,8 @@ pub fn center_elevation_system(
         ..
     }: &mut MapContext,
 ) -> SystemResult {
-    view_state.set_globe_orbits_terrain(globe_orbits_terrain(style));
+    // Off the ground the center rests at its altitude, which center_target_system applies.
     if style.terrain.is_none() {
-        view_state.set_center_elevation(0.0);
-        view_state.set_min_elevation(0.0);
         return Ok(());
     }
     let Some(index) = world.resources.get::<TerrainCoverageIndex>() else {
@@ -83,7 +100,9 @@ pub fn center_elevation_system(
         center.y / world_size,
         tile_zoom,
     );
-    if let Some(elevation) = elevation.filter(|_| !view_state.center_elevation_frozen()) {
+    let follows_ground =
+        view_state.center_clamped_to_ground() && !view_state.center_elevation_frozen();
+    if let Some(elevation) = elevation.filter(|_| follows_ground) {
         view_state.set_center_elevation(elevation);
     }
     let center_tile = WorldCoords::at_ground(center.x, center.y)

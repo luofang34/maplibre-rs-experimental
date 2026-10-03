@@ -38,7 +38,7 @@ pub struct Style {
     /// Style specification version, normally 8; deserialization does not validate the version.
     pub version: u16,
     /// Human-readable document name with no rendering effect.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     /// Application-defined JSON properties retained without changing rendering.
     #[serde(default)]
@@ -50,36 +50,45 @@ pub struct Style {
     #[serde(deserialize_with = "layer_order::deserialize_layers")]
     pub layers: Vec<StyleLayer>,
     /// URL template for font glyph ranges.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub glyphs: Option<String>,
     /// Sprite URL or named sprite sources.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sprite: Option<serde_json::Value>,
     /// Initial `[longitude, latitude]` in degrees, before host camera overrides.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub center: Option<[f64; 2]>,
+    /// Initial altitude in metres above sea level of the point the camera looks at, before
+    /// host overrides; terrain that holds the center to the ground takes its place.
+    #[serde(
+        default,
+        rename = "centerAltitude",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub center_altitude: Option<f64>,
     /// Initial continuous camera zoom, before host overrides.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub zoom: Option<f64>,
     /// Initial clockwise rotation from north in degrees.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bearing: Option<f64>,
     /// Initial camera tilt from the map normal in degrees, clamped by the camera pitch limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pitch: Option<f64>,
-    /// Roll of the view about its axis in degrees, as the GL JS `roll` map option.
+    /// Initial roll in degrees, counterclockwise about the camera's line of sight.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub roll: Option<f64>,
-    /// Full vertical field of view in degrees, as the GL JS `verticalFieldOfView` map option;
-    /// omission keeps the renderer's default of about 36.87 degrees.
-    #[serde(default, rename = "vertical-field-of-view")]
-    pub vertical_field_of_view: Option<f64>,
     /// Map projection and its parameters; omission uses the renderer's default projection.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub projection: Option<ProjectionSpecification>,
     /// Lighting parameters used by style-driven shading.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub light: Option<light::LightSpecification>,
     /// Sky and atmosphere appearance; omission leaves the sky layer disabled.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sky: Option<sky::SkySpecification>,
     /// Elevation source and vertical exaggeration; omission renders without terrain.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terrain: Option<terrain::TerrainSpecification>,
     /// Defaults for the values `global-state` expressions read.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]

@@ -49,14 +49,10 @@ pub struct ViewState {
     width: f64,
     height: f64,
     edge_insets: EdgeInsets,
-    /// Terrain elevation in metres at the map center; the camera orbits this point.
-    center_elevation: f64,
+    /// Height of the point the camera orbits at the map center, and what decides it.
+    center: center::CenterElevation,
     /// Lowest terrain elevation in metres among visible tiles, used for the far plane.
     min_elevation: f64,
-    /// Whether a gesture holds the center elevation still, as GL JS `elevationFreeze` does.
-    center_elevation_frozen: bool,
-    /// Whether the globe camera orbits the terrain at the center rather than its sea level.
-    globe_orbits_terrain: bool,
     /// The body the map is drawn on; its radius turns metres into pixels.
     body: Body,
     /// The eye a host supplied, which replaces the map's perspective and, on the globe, its
@@ -103,10 +99,8 @@ impl ViewState {
                 left: 0.0,
                 right: 0.0,
             },
-            center_elevation: 0.0,
+            center: center::CenterElevation::default(),
             min_elevation: 0.0,
-            center_elevation_frozen: false,
-            globe_orbits_terrain: false,
             body: Body::default(),
             external_eye: None,
             request_overscan: 1.0,
@@ -137,46 +131,6 @@ impl ViewState {
     /// Draws the map on another body; every metre-to-pixel conversion follows its radius.
     pub fn set_body(&mut self, body: Body) {
         self.body = body;
-    }
-
-    /// Terrain elevation in metres at the map center.
-    pub fn center_elevation(&self) -> f64 {
-        self.center_elevation
-    }
-
-    /// Sets the terrain elevation at the map center; the camera keeps its distance to it.
-    pub fn set_center_elevation(&mut self, meters: f64) {
-        if meters.is_finite() {
-            self.center_elevation = meters;
-        }
-    }
-
-    /// Holds the center elevation still until [`thaw_center_elevation`](Self::thaw_center_elevation).
-    ///
-    /// The camera would otherwise bob with every change of the terrain under the center while a
-    /// drag or zoom is in progress.
-    pub fn freeze_center_elevation(&mut self) {
-        self.center_elevation_frozen = true;
-    }
-
-    /// Lets the center elevation follow the terrain again.
-    pub fn thaw_center_elevation(&mut self) {
-        self.center_elevation_frozen = false;
-    }
-
-    /// Whether the globe camera orbits [`center_elevation`](Self::center_elevation), not sea level.
-    pub fn globe_orbits_terrain(&self) -> bool {
-        self.globe_orbits_terrain
-    }
-
-    /// Makes the globe camera orbit the terrain at the center, or its sea level.
-    pub fn set_globe_orbits_terrain(&mut self, orbits: bool) {
-        self.globe_orbits_terrain = orbits;
-    }
-
-    /// Whether a gesture currently holds the center elevation still.
-    pub fn center_elevation_frozen(&self) -> bool {
-        self.center_elevation_frozen
     }
 
     /// Sets the lowest visible terrain elevation, which extends the far plane below sea level.
@@ -266,7 +220,7 @@ impl ViewState {
             .abs()
             .min(MAX_MERCATOR_HORIZON_ANGLE.0);
         let camera_to_sea_level = (distance / 2.0)
-            .max(distance + self.center_elevation * self.pixels_per_meter() / limited_pitch.cos());
+            .max(distance + self.center.elevation * self.pixels_per_meter() / limited_pitch.cos());
         let (_, far_z) = self.depth_range(self.center_offset());
         (camera_to_sea_level, far_z)
     }
@@ -293,10 +247,11 @@ impl ViewState {
         let pitch = self.camera.get_pitch().0.abs();
         let limited_pitch = pitch.min(MAX_MERCATOR_HORIZON_ANGLE.0);
         let camera_to_sea_level = (distance / 2.0)
-            .max(distance + self.center_elevation * pixels_per_meter / limited_pitch.cos());
-        let camera_altitude = pitch.cos() * distance / pixels_per_meter + self.center_elevation;
+            .max(distance + self.center.elevation * pixels_per_meter / limited_pitch.cos());
+        let camera_altitude = pitch.cos() * distance / pixels_per_meter + self.center.elevation;
         let min_elevation = self
-            .center_elevation
+            .center
+            .elevation
             .min(self.min_elevation)
             .min(camera_altitude - MIN_RENDER_DISTANCE_BELOW_CAMERA_METERS);
         let lowest_plane = if min_elevation < 0.0 {
@@ -356,6 +311,13 @@ impl ViewState {
         self.perspective.fovy()
     }
 
+    /// Sets the full vertical field of view; angles outside `0..PI` are ignored.
+    pub fn set_field_of_view(&mut self, field_of_view: Rad<f64>) {
+        if field_of_view.0 > 0.0 && field_of_view.0 < consts::PI {
+            self.perspective = Perspective::new(field_of_view);
+        }
+    }
+
     /// Returns the perspective-center offset from the viewport center.
     pub fn center_offset(&self) -> Point2<f64> {
         let center = self.edge_insets.center(self.width, self.height);
@@ -389,7 +351,7 @@ impl ViewState {
         }
         self.camera.calc_matrix(self.camera_to_center_distance())
             * Matrix4::from_nonuniform_scale(1.0, 1.0, self.pixels_per_meter())
-            * Matrix4::from_translation(Vector3::new(0.0, 0.0, -self.center_elevation))
+            * Matrix4::from_translation(Vector3::new(0.0, 0.0, -self.center.elevation))
     }
 
     /// The map's own perspective in OpenGL clip conventions, its vanishing point moved by the
@@ -485,6 +447,7 @@ impl ViewState {
     }
 }
 
+mod center;
 mod external;
 mod horizon;
 mod pose;

@@ -40,7 +40,7 @@ pub struct TerrainAnchor {
 /// The eye and the raised target of a view whose globe camera orbits the terrain, in
 /// unit-sphere space; `None` for any other camera, a host's eye included.
 pub fn globe_pose(view_state: &ViewState) -> Option<(Vector3<f64>, Vector3<f64>)> {
-    if !view_state.globe_orbits_terrain() || view_state.has_external_view() {
+    if !view_state.globe_orbits_center() || view_state.has_external_view() {
         return None;
     }
     let camera = globe_camera_for_view(view_state).ok()?;

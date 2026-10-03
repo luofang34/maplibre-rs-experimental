@@ -115,7 +115,9 @@ impl<E: Environment> Plugin<E> for RenderPlugin {
         // already see the frame's view.
         schedule.add_stage(
             RenderStageLabel::Extract,
-            SystemStage::default().with_system(frame_input::frame_input_system),
+            SystemStage::default()
+                .with_system(frame_input::frame_input_system)
+                .with_system(crate::terrain::elevation::center_target_system),
         );
         schedule.add_stage(
             RenderStageLabel::Prepare,
