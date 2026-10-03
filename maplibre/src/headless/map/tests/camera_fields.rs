@@ -218,3 +218,30 @@ fn roll_and_center_altitude_together_raise_the_target_and_tilt_the_horizon() {
     assert!((turned(2).abs() - 75.0).abs() < 1e-6, "{tilts:?}");
     assert!(turned(1).signum() != turned(2).signum(), "{tilts:?}");
 }
+
+#[tokio::test]
+async fn whether_terrain_holds_the_center_follows_the_style_frame_by_frame() {
+    let (kernel, renderer) = crate::headless::create_headless_renderer(64, 64, None)
+        .await
+        .expect("renderer");
+    let mut map = super::super::HeadlessMap::new(
+        style(r#"{"version":8,"centerAltitude":3000,"sources":{},"layers":[]}"#),
+        renderer,
+        kernel,
+        vec![Box::new(crate::render::RenderPlugin)],
+    )
+    .expect("map");
+    map.run_frame().expect("frame");
+    assert!(!map.view_state().center_held_by_terrain());
+    map.map_context.style.terrain =
+        Some(serde_json::from_str(r#"{"source":"dem"}"#).expect("terrain"));
+    map.run_frame().expect("frame");
+    assert!(
+        map.view_state().center_held_by_terrain(),
+        "terrain added at runtime holds it"
+    );
+    map.map_context.style.terrain = None;
+    map.run_frame().expect("frame");
+    assert!(!map.view_state().center_held_by_terrain());
+    assert_eq!(map.view_state().center_elevation(), 3000.0);
+}

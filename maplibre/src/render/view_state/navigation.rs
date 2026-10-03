@@ -264,21 +264,36 @@ impl ViewState {
         {
             return Err(NavigationError::InvalidPose { pose });
         }
-        self.free_globe = Some(FreeGlobe {
+        let free = FreeGlobe {
             target: target.normalize(),
             orientation: orientation.normalize(),
             distance_meters: pose.distance_meters,
-        });
-        // The pose's target height is where the center rests off the ground; while terrain
-        // holds the center to the ground, the ground decides it from the next frame.
-        self.set_center_altitude(pose.target_elevation_meters);
+        };
+        // Pitched to the horizon or past it, the eye looks up from under its target, which no
+        // camera can draw.
+        let (_, _, pitch, _) = free.decompose();
+        if pitch >= 90.0 {
+            return Err(NavigationError::InvalidPose { pose });
+        }
+        self.free_globe = Some(free);
+        // Off the ground the pose's target height is where the center rests from now on. On
+        // it the terrain under the target decides the height from the next frame, and the
+        // altitude the center rests at once off the ground again, the style's centerAltitude
+        // or the host's, stays as it was.
+        if self.center_held_by_terrain() {
+            self.set_center_elevation(pose.target_elevation_meters);
+        } else {
+            self.set_center_altitude(pose.target_elevation_meters);
+        }
         self.sync_flat_camera();
         Ok(())
     }
 
     /// Turns the free-globe camera of `from` about its target: its bearing by `bearing` and its
-    /// pitch by `pitch`, the pitch kept between straight down and the camera's limit. The target,
-    /// distance and roll stay. A drag hands the pose it started from with its whole turn so far.
+    /// pitch by `pitch`, the pitch kept between straight down and the camera's limit, or the
+    /// pose's own pitch where a host placed it past the limit, so a turn never jumps. The
+    /// target, distance and roll stay, and the center's height is left to whatever holds it. A
+    /// drag hands the pose it started from with its whole turn so far.
     pub fn orbit_globe_pose(
         &mut self,
         from: GlobePose,
@@ -297,23 +312,22 @@ impl ViewState {
             distance_meters: from.distance_meters,
         };
         let (center, start_bearing, start_pitch, roll) = start.decompose();
-        let limit = self.camera().max_pitch().0.to_degrees();
+        let limit = self.camera().max_pitch().0.to_degrees().max(start_pitch);
         let turned = view_rotation(
             center,
             start_bearing + bearing.0.to_degrees(),
             (start_pitch + pitch.0.to_degrees()).clamp(0.0, limit),
             roll,
         );
-        let orientation = Quaternion::from(turned);
-        self.set_globe_pose(GlobePose {
-            orientation: [
-                orientation.s,
-                orientation.v.x,
-                orientation.v.y,
-                orientation.v.z,
-            ],
-            ..from
-        })
+        if self.has_external_view() {
+            return Err(NavigationError::ExternalView);
+        }
+        self.free_globe = Some(FreeGlobe {
+            orientation: Quaternion::from(turned).normalize(),
+            ..start
+        });
+        self.sync_flat_camera();
+        Ok(())
     }
 
     /// Ends free navigation when the projection no longer allows it, recording why.
