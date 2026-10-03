@@ -27,6 +27,7 @@ fn camera(center: LatLon, zoom: f64) -> GlobeCameraState {
         roll_degrees: 0.0,
         center_offset: Point2::new(0.0, 0.0),
         body: Body::EARTH,
+        target_elevation_meters: 0.0,
     })
     .unwrap_or_else(|error| panic!("camera must be valid: {error}"))
 }

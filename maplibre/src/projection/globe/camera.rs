@@ -6,22 +6,16 @@ use cgmath::{
 use thiserror::Error;
 
 use super::{
-    closest_point_on_sphere, elevate_surface_point, horizon_plane_to_circle,
-    lat_lon_to_unit_sphere, mercator_to_angular_radians, project_tile_coordinates_to_unit_sphere,
-    ray_sphere_intersection, unit_sphere_to_lat_lon,
+    elevate_surface_point, lat_lon_to_unit_sphere, mercator_to_angular_radians,
+    project_tile_coordinates_to_unit_sphere,
 };
 use crate::{
     coords::{LatLon, TileCoords, EXTENT},
-    projection::{
-        body::Body,
-        globe::globe_radius_pixels,
-        renderer_data::{compute_globe_clipping_plane, GlobeViewGeometry, ProjectionDataError},
-    },
+    projection::{body::Body, globe::globe_radius_pixels, renderer_data::ProjectionDataError},
     render::camera::{OPENGL_TO_WGPU_MATRIX, REVERSED_Z},
 };
 
 const NEAR_Z: f64 = 0.5;
-const HORIZON_FALLBACK_RAY_LENGTH: f64 = 2.0;
 const MIN_DIRECTION_LENGTH_SQUARED: f64 = 1e-24;
 
 /// Inputs used to create a vertical-perspective globe camera state.
@@ -47,6 +41,9 @@ pub struct GlobeCameraOptions {
     pub center_offset: Point2<f64>,
     /// The body the globe stands for; its radius scales elevations onto the unit sphere.
     pub body: Body,
+    /// Height in metres of the point the camera orbits above the center's sea level, as the
+    /// terrain is drawn there, exaggeration included; zero orbits the sea-level surface.
+    pub target_elevation_meters: f64,
 }
 
 /// Screen projection of a globe point.
@@ -99,7 +96,13 @@ pub enum GlobeCameraError {
         /// Invalid vertical offset.
         y: f64,
     },
-    /// An external eye sits on or under the surface, where no horizon exists.
+    /// The orbit target lies at or below the center of the body.
+    #[error("the camera target lies {meters} m above sea level, at or below the body's center")]
+    InvalidTargetElevation {
+        /// Invalid target elevation in metres.
+        meters: f64,
+    },
+    /// The eye sits on or under the surface its horizon is measured on, where it has none.
     #[error("the eye is {distance} radii from the globe center, on or below the surface")]
     EyeBelowSurface {
         /// Distance of the eye from the globe center in radii.
@@ -142,25 +145,24 @@ impl GlobeCameraState {
         validate_options(options)?;
         let camera_to_center_distance = camera_to_center_distance(options);
         let radius = globe_radius_pixels(options.world_size, options.center.latitude);
-        let far_z = camera_to_center_distance + radius * 2.0;
+        let target = target_scale(options)?;
+        // The line of sight to the horizon of a sphere scaled by `target` is shorter than the
+        // eye's distance to the globe center, and the tallest terrain beyond that horizon adds
+        // a small part of a radius, so this far plane holds everything in front of the eye.
+        let far_z = camera_to_center_distance + radius * 2.0 * target;
         let projection = projection_matrix(options, far_z);
         let inverse_projection = projection
             .invert()
             .ok_or(GlobeCameraError::NonInvertibleViewProjection)?;
-        let view = globe_view_matrix(options, camera_to_center_distance, radius);
+        let view = globe_view_matrix(options, camera_to_center_distance, radius, target);
         let view_projection = projection * view;
         let inverse_view_projection = view_projection
             .invert()
             .ok_or(GlobeCameraError::NonInvertibleViewProjection)?;
-        let camera_position = camera_position(options, camera_to_center_distance, radius);
-        let clipping_plane = compute_globe_clipping_plane(GlobeViewGeometry {
-            center: options.center,
-            bearing_degrees: options.bearing_degrees,
-            pitch_degrees: options.pitch_degrees,
-            camera_to_center_distance,
-            globe_radius_pixels: radius,
-        })
-        .map_err(|source| GlobeCameraError::ProjectionData { source })?;
+        let camera_position = camera_position(options, camera_to_center_distance, radius, target);
+        // Below sea level, as in a depression, the eye can sit inside the sea-level sphere,
+        // which then hides nothing; the ground it stands over does.
+        let clipping_plane = horizon_plane(camera_position, target.min(1.0))?;
 
         Ok(Self {
             options,
@@ -218,6 +220,13 @@ impl GlobeCameraState {
     /// rather than derived from the map center, pitch and distance.
     pub fn is_external_eye(&self) -> bool {
         self.external_eye
+    }
+
+    /// The point the camera orbits, in unit-globe coordinates: the center raised to the
+    /// target elevation.
+    pub fn target(&self) -> Vector3<f64> {
+        let scale = 1.0 + self.options.target_elevation_meters / self.options.body.radius_meters;
+        lat_lon_to_unit_sphere(self.options.center) * scale
     }
 
     /// Returns the geographic center used to orient the globe.
@@ -352,43 +361,6 @@ impl GlobeCameraState {
         !self.is_surface_point_visible(lat_lon_to_unit_sphere(location))
     }
 
-    /// Returns a normalized world-space ray from the camera through a viewport pixel.
-    pub fn ray_direction_from_pixel(&self, pixel: Point2<f64>) -> Option<Vector3<f64>> {
-        let clip = Vector4::new(
-            pixel.x / self.options.width * 2.0 - 1.0,
-            -(pixel.y / self.options.height * 2.0 - 1.0),
-            1.0,
-            1.0,
-        );
-        let world = self.inverse_view_projection * clip;
-        if world.w.abs() <= f64::EPSILON {
-            return None;
-        }
-        let point = world.truncate() / world.w;
-        let direction = point - self.camera_position;
-        (direction.magnitude2() > MIN_DIRECTION_LENGTH_SQUARED).then(|| direction.normalize())
-    }
-
-    /// Converts a viewport pixel to a surface location, clamping misses to the visible horizon.
-    pub fn screen_point_to_location(&self, pixel: Point2<f64>) -> Option<LatLon> {
-        let direction = self.ray_direction_from_pixel(pixel)?;
-        if let Some(intersection) = ray_sphere_intersection(self.camera_position, direction, 1.0) {
-            let point = self.camera_position + direction * intersection.t_min;
-            if point.magnitude2() > MIN_DIRECTION_LENGTH_SQUARED {
-                return Some(unit_sphere_to_lat_lon(point.normalize()));
-            }
-        }
-        self.closest_horizon_location(direction)
-    }
-
-    /// Returns whether the ray through a viewport pixel intersects the unit globe.
-    pub fn is_point_on_map_surface(&self, pixel: Point2<f64>) -> bool {
-        self.ray_direction_from_pixel(pixel)
-            .is_some_and(|direction| {
-                ray_sphere_intersection(self.camera_position, direction, 1.0).is_some()
-            })
-    }
-
     fn project_surface_point(
         &self,
         position: Vector3<f64>,
@@ -405,76 +377,32 @@ impl GlobeCameraState {
     fn is_surface_point_visible(&self, surface: Vector3<f64>) -> bool {
         self.clipping_plane.truncate().dot(surface) + self.clipping_plane.w >= 0.0
     }
+}
 
-    fn closest_horizon_location(&self, direction: Vector3<f64>) -> Option<LatLon> {
-        let normal = self.clipping_plane.truncate();
-        let denominator = normal.dot(direction);
-        let origin_distance = normal.dot(self.camera_position) + self.clipping_plane.w;
-        let distance = if denominator.abs() > f64::EPSILON {
-            -origin_distance / denominator
-        } else {
-            -1.0
-        };
-        let plane_point = if distance.is_finite() && distance > 0.0 {
-            self.camera_position + direction * distance
-        } else {
-            let distant = self.camera_position + direction * HORIZON_FALLBACK_RAY_LENGTH;
-            let plane_distance = normal.dot(distant) + self.clipping_plane.w;
-            distant - normal * plane_distance
-        };
-        let horizon = horizon_plane_to_circle(self.clipping_plane);
-        closest_point_on_sphere(horizon.center, horizon.radius, plane_point)
-            .or_else(|| (horizon.radius == 0.0).then_some(horizon.center))
-            .map(unit_sphere_to_lat_lon)
+/// The orbit target's distance from the globe center in radii.
+fn target_scale(options: GlobeCameraOptions) -> Result<f64, GlobeCameraError> {
+    let scale = 1.0 + options.target_elevation_meters / options.body.radius_meters;
+    if scale.is_finite() && scale > 0.0 {
+        Ok(scale)
+    } else {
+        Err(GlobeCameraError::InvalidTargetElevation {
+            meters: options.target_elevation_meters,
+        })
     }
 }
 
-fn validate_options(options: GlobeCameraOptions) -> Result<(), GlobeCameraError> {
-    if !options.width.is_finite()
-        || !options.height.is_finite()
-        || options.width <= 0.0
-        || options.height <= 0.0
-    {
-        return Err(GlobeCameraError::InvalidViewport {
-            width: options.width,
-            height: options.height,
-        });
+/// The plane through the points where lines from `eye` touch the sphere of `radius` about
+/// the globe center: the points `P` of that sphere with `dot(eye, P) = radius²`, normalised so
+/// the visible side is positive. On the unit sphere this is `dot(eye, P) = 1`.
+pub(super) fn horizon_plane(
+    eye: Vector3<f64>,
+    radius: f64,
+) -> Result<Vector4<f64>, GlobeCameraError> {
+    let distance = eye.magnitude();
+    if distance.is_nan() || distance <= radius {
+        return Err(GlobeCameraError::EyeBelowSurface { distance });
     }
-    if !options.field_of_view_degrees.is_finite()
-        || !(0.0..180.0).contains(&options.field_of_view_degrees)
-    {
-        return Err(GlobeCameraError::InvalidFieldOfView {
-            degrees: options.field_of_view_degrees,
-        });
-    }
-    if !options.world_size.is_finite() || options.world_size <= 0.0 {
-        return Err(GlobeCameraError::InvalidWorldSize {
-            world_size: options.world_size,
-        });
-    }
-    validate_angles(options)?;
-    if !options.center_offset.x.is_finite() || !options.center_offset.y.is_finite() {
-        return Err(GlobeCameraError::InvalidCenterOffset {
-            x: options.center_offset.x,
-            y: options.center_offset.y,
-        });
-    }
-    Ok(())
-}
-
-fn validate_angles(options: GlobeCameraOptions) -> Result<(), GlobeCameraError> {
-    for (name, degrees) in [
-        ("center latitude", options.center.latitude),
-        ("center longitude", options.center.longitude),
-        ("bearing", options.bearing_degrees),
-        ("pitch", options.pitch_degrees),
-        ("roll", options.roll_degrees),
-    ] {
-        if !degrees.is_finite() {
-            return Err(GlobeCameraError::InvalidAngle { name, degrees });
-        }
-    }
-    Ok(())
+    Ok((eye / distance).extend(-radius * radius / distance))
 }
 
 fn camera_to_center_distance(options: GlobeCameraOptions) -> f64 {
@@ -497,28 +425,38 @@ fn globe_view_matrix(
     options: GlobeCameraOptions,
     camera_distance: f64,
     radius: f64,
+    target: f64,
 ) -> Matrix4<f64> {
     Matrix4::from_translation(Vector3::new(0.0, 0.0, -camera_distance))
         * Matrix4::from_angle_z(Deg(options.roll_degrees))
         * Matrix4::from_angle_x(Deg(-options.pitch_degrees))
         * Matrix4::from_angle_z(Deg(options.bearing_degrees))
-        * Matrix4::from_translation(Vector3::new(0.0, 0.0, -radius))
+        * Matrix4::from_translation(Vector3::new(0.0, 0.0, -radius * target))
         * Matrix4::from_angle_x(Deg(options.center.latitude))
         * Matrix4::from_angle_y(Deg(-options.center.longitude))
         * Matrix4::from_scale(radius)
 }
 
-fn camera_position(options: GlobeCameraOptions, camera_distance: f64, radius: f64) -> Vector3<f64> {
+fn camera_position(
+    options: GlobeCameraOptions,
+    camera_distance: f64,
+    radius: f64,
+    target: f64,
+) -> Vector3<f64> {
     let mut position = Vector3::new(0.0, 0.0, camera_distance / radius);
     position = Matrix3::from_angle_z(Deg(-options.roll_degrees)) * position;
     position = Matrix3::from_angle_x(Deg(options.pitch_degrees)) * position;
     position = Matrix3::from_angle_z(Deg(-options.bearing_degrees)) * position;
-    position += Vector3::unit_z();
+    position += Vector3::unit_z() * target;
     position = Matrix3::from_angle_x(Deg(-options.center.latitude)) * position;
     Matrix3::from_angle_y(Rad(options.center.longitude.to_radians())) * position
 }
 
 mod external;
+mod screen;
+mod validation;
+
+use validation::validate_options;
 
 pub use external::ExternalGlobeEye;
 

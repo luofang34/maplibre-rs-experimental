@@ -6,6 +6,7 @@ use super::Body;
 fn earth_is_the_default_and_a_smaller_body_scales_every_derived_length() {
     let moon = Body {
         radius_meters: 1_737_400.0,
+        highest_ground_meters: 10_786.0,
     };
 
     assert_eq!(Body::default(), Body::EARTH);

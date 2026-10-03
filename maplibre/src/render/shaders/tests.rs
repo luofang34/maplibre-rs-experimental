@@ -164,3 +164,6 @@ fn every_shader_file_is_part_of_a_pipeline() {
         );
     }
 }
+
+#[path = "tests/pure_globe.rs"]
+mod pure_globe;

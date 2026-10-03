@@ -55,6 +55,8 @@ pub struct ViewState {
     min_elevation: f64,
     /// Whether a gesture holds the center elevation still, as GL JS `elevationFreeze` does.
     center_elevation_frozen: bool,
+    /// Whether the globe camera orbits the terrain at the center rather than its sea level.
+    globe_orbits_terrain: bool,
     /// The body the map is drawn on; its radius turns metres into pixels.
     body: Body,
     /// The eye a host supplied, which replaces the map's perspective and, on the globe, its
@@ -104,6 +106,7 @@ impl ViewState {
             center_elevation: 0.0,
             min_elevation: 0.0,
             center_elevation_frozen: false,
+            globe_orbits_terrain: false,
             body: Body::default(),
             external_eye: None,
             request_overscan: 1.0,
@@ -159,6 +162,16 @@ impl ViewState {
     /// Lets the center elevation follow the terrain again.
     pub fn thaw_center_elevation(&mut self) {
         self.center_elevation_frozen = false;
+    }
+
+    /// Whether the globe camera orbits [`center_elevation`](Self::center_elevation), not sea level.
+    pub fn globe_orbits_terrain(&self) -> bool {
+        self.globe_orbits_terrain
+    }
+
+    /// Makes the globe camera orbit the terrain at the center, or its sea level.
+    pub fn set_globe_orbits_terrain(&mut self, orbits: bool) {
+        self.globe_orbits_terrain = orbits;
     }
 
     /// Whether a gesture currently holds the center elevation still.

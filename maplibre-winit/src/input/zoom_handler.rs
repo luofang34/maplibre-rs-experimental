@@ -6,7 +6,9 @@ use maplibre::{
     context::MapContext,
     coords::Zoom,
     terrain::interaction::{
-        begin_gesture, finish_gesture, resolve_gesture_anchor, zoom_mercator_around, GestureAnchor,
+        begin_gesture, finish_gesture,
+        globe::{terrain_anchor_at, zoom_globe_keeping_anchor, TerrainAnchor},
+        resolve_gesture_anchor, zoom_mercator_around, GestureAnchor,
     },
 };
 use winit::keyboard::Key;
@@ -27,6 +29,9 @@ pub struct ZoomHandler {
     sensitivity: f64,
     /// Elevation the running gesture anchors on, captured when it starts.
     gesture_elevation: Option<Option<f64>>,
+    /// The terrain point a zoom on a globe orbiting the terrain keeps under the pointer,
+    /// captured when the gesture starts.
+    globe_anchor: Option<TerrainAnchor>,
     last_input: Option<Instant>,
 }
 
@@ -49,6 +54,7 @@ impl UpdateState for ZoomHandler {
             if finished {
                 finish_gesture(style, view_state, world);
                 self.gesture_elevation = None;
+                self.globe_anchor = None;
                 self.last_input = None;
             }
             return;
@@ -65,15 +71,27 @@ impl UpdateState for ZoomHandler {
             .unwrap_or_else(|| center_pixel(view_state));
         let current =
             resolve_gesture_anchor(style, view_state, world, Point2::new(pointer.x, pointer.y));
-        let elevation = *self.gesture_elevation.get_or_insert_with(|| {
-            begin_gesture(view_state);
-            current.elevation
-        });
+        let elevation = match self.gesture_elevation {
+            Some(elevation) => elevation,
+            None => {
+                self.globe_anchor = terrain_anchor_at(style, view_state, world, current.pixel);
+                begin_gesture(view_state);
+                self.gesture_elevation = Some(current.elevation);
+                current.elevation
+            }
+        };
         let anchor = GestureAnchor {
             pixel: current.pixel,
             elevation,
         };
         let next_zoom = view_state.zoom() + Zoom::new(step);
+        if let Some(globe_anchor) = self.globe_anchor {
+            if zoom_globe_keeping_anchor(view_state, globe_anchor, anchor.pixel, next_zoom.value())
+            {
+                self.last_input = Some(now);
+                return;
+            }
+        }
         let screen = Vector2::new(anchor.pixel.x, anchor.pixel.y);
         if !zoom_globe_around_pixel(style, view_state, screen, next_zoom) {
             zoom_mercator_around(view_state, anchor, next_zoom);
@@ -89,6 +107,7 @@ impl ZoomHandler {
             zoom_delta: None,
             sensitivity,
             gesture_elevation: None,
+            globe_anchor: None,
             last_input: None,
         }
     }

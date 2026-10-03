@@ -36,6 +36,7 @@ pub(crate) mod request_system;
 mod resource_system;
 pub mod resources;
 pub mod rtt;
+pub mod sightline;
 pub mod source;
 pub mod transferables;
 mod upload_system;

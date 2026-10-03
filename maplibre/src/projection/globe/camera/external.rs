@@ -62,10 +62,13 @@ impl GlobeCameraState {
         eye: ExternalGlobeEye,
     ) -> Result<Self, GlobeCameraError> {
         validate_options(options)?;
-        let distance = eye.position.magnitude();
-        if distance.is_nan() || distance <= 1.0 {
-            return Err(GlobeCameraError::EyeBelowSurface { distance });
-        }
+        // The eye is where the host placed it; it orbits nothing, so no elevation raises the
+        // point the camera reports as its target.
+        let options = GlobeCameraOptions {
+            target_elevation_meters: 0.0,
+            ..options
+        };
+        let clipping_plane = super::horizon_plane(eye.position, 1.0)?;
         let radius = globe_radius_pixels(options.world_size, options.center.latitude);
         // The eye's axes are expressed in sphere space, so their transpose takes sphere
         // space into the eye's; the sphere is scaled to pixels first.
@@ -97,8 +100,7 @@ impl GlobeCameraState {
             view_projection,
             inverse_view_projection,
             camera_position: eye.position,
-            // The horizon is where the surface is tangent to a line through the eye.
-            clipping_plane: (eye.position / distance).extend(-1.0 / distance),
+            clipping_plane,
             globe_radius_pixels: radius,
             camera_to_center_distance: eye.camera_to_center_distance,
             near_z: frustum.near,

@@ -1,17 +1,22 @@
-//! The body the map is drawn on. Earth by default; the radius is the one figure the globe
-//! projection, terrain and the atmosphere need, so a second body only has to change it here.
+//! The body the map is drawn on. Earth by default; the radius is the figure the globe
+//! projection, terrain and the atmosphere need, and the height of the highest ground bounds
+//! terrain no elevation data has described yet, so a second body only changes them here.
 
 /// A spherical body the map projects onto.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Body {
     /// Mean radius in metres.
     pub radius_meters: f64,
+    /// Height in metres of the body's highest ground above the mean radius: where no
+    /// elevation data has loaded, ground anywhere below it may hide what lies beyond.
+    pub highest_ground_meters: f64,
 }
 
 impl Body {
     /// Earth, with the mean radius GL JS uses.
     pub const EARTH: Self = Self {
         radius_meters: 6_371_008.8,
+        highest_ground_meters: 8_849.0,
     };
 
     /// Metres around the equator, the length one Mercator unit covers there.
