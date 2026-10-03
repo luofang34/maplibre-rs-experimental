@@ -286,3 +286,54 @@ fn a_stored_pose_is_restored_only_where_the_projection_allows_free_navigation() 
     other.restore_globe_pose(pose, &VERTICAL).expect("restore");
     assert_same_matrix(matrix(&other), matrix(&state), "restored");
 }
+
+/// The free pose's decomposed pitch and roll.
+fn pitch_and_roll(state: &ViewState) -> (f64, f64) {
+    let view = state.pose_view().expect("free camera");
+    (view.pitch_degrees, view.roll_degrees)
+}
+
+#[test]
+fn an_orbit_keeps_the_pitch_between_straight_down_and_the_limit_and_keeps_the_roll() {
+    use cgmath::Rad;
+    let mut state = view(LatLon::new(40.0, 0.0), 5.0, 30.0, 40.0, 20.0);
+    state
+        .set_navigation_mode(NavigationMode::FreeGlobe, &VERTICAL)
+        .expect("free navigation");
+    let start = state.globe_pose().expect("pose");
+    state
+        .orbit_globe_pose(start, Rad(0.0), Rad(80_f64.to_radians()))
+        .expect("orbit");
+    let (pitch, roll) = pitch_and_roll(&state);
+    assert!(
+        (pitch - 85.0).abs() < 1e-9,
+        "the pitch stops at the limit: {pitch}"
+    );
+    assert!((roll - 20.0).abs() < 1e-9, "the roll stays: {roll}");
+    state
+        .orbit_globe_pose(start, Rad(10_f64.to_radians()), Rad(-80_f64.to_radians()))
+        .expect("orbit");
+    let (pitch, _) = pitch_and_roll(&state);
+    assert!(
+        pitch.abs() < 1e-9,
+        "the pitch stops looking straight down: {pitch}"
+    );
+    state
+        .orbit_globe_pose(start, Rad(25_f64.to_radians()), Rad(5_f64.to_radians()))
+        .expect("orbit");
+    let (pitch, roll) = pitch_and_roll(&state);
+    assert!(
+        (pitch - 45.0).abs() < 1e-9 && (roll - 20.0).abs() < 1e-9,
+        "{pitch}, {roll}"
+    );
+}
+
+#[test]
+fn a_mode_stored_as_north_locked_reads_as_constrained() {
+    let mode: NavigationMode = serde_json::from_str(r#""NorthLocked""#).expect("mode");
+    assert_eq!(mode, NavigationMode::Constrained);
+    assert_eq!(
+        serde_json::to_string(&NavigationMode::Constrained).expect("write"),
+        r#""Constrained""#
+    );
+}
