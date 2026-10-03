@@ -139,6 +139,10 @@ impl PanHandler {
     fn begin(&mut self, window_position: Option<Vector2<f64>>) {
         self.inertia.cancel();
         self.is_panning = true;
+        // A press while inertia still carries the last drag starts a new one, which grabs
+        // whatever is under the new press.
+        self.gesture_plane = None;
+        self.globe_anchor = None;
         if let Some(window_position) = window_position {
             self.start_window_position = Some(window_position);
             self.last_window_position = Some(window_position);
@@ -154,3 +158,6 @@ impl PanHandler {
         self.is_panning = false;
     }
 }
+
+#[cfg(test)]
+mod tests;

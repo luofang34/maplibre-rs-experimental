@@ -7,7 +7,7 @@ use super::{
     zoom_globe_keeping_anchor, TerrainAnchor,
 };
 use crate::{
-    coords::{WorldCoords, Zoom, TILE_SIZE},
+    coords::{LatLon, WorldCoords, Zoom, TILE_SIZE},
     render::{projection::globe_camera_for_view, view_state::ViewState},
     tcs::world::World,
     terrain::sightline::{
@@ -18,10 +18,22 @@ use crate::{
     window::PhysicalSize,
 };
 
+/// A center beside the antimeridian, where longitudes wrap between the eye and its target.
+const ANTIMERIDIAN: LatLon = LatLon {
+    latitude: -16.5,
+    longitude: 179.995,
+};
+const BEARINGS: [f64; 4] = [30.0, 135.0, 210.0, 324.037_142_967_012_36];
+
 /// The 2330x1800 Himalayan view orbiting the terrain at `elevation`.
 fn view(zoom: f64, pitch: f64, bearing: f64, elevation: f64) -> ViewState {
+    view_at(SCENE, zoom, pitch, bearing, elevation)
+}
+
+/// The 2330x1800 view of `center` orbiting the terrain at `elevation`.
+fn view_at(center: LatLon, zoom: f64, pitch: f64, bearing: f64, elevation: f64) -> ViewState {
     let world_size = TILE_SIZE * 2_f64.powf(zoom);
-    let mercator = lat_lon_to_mercator(SCENE);
+    let mercator = lat_lon_to_mercator(center);
     let mut view = ViewState::new(
         PhysicalSize::new(2330, 1800).expect("viewport"),
         WorldCoords::from((mercator.x * world_size, mercator.y * world_size)),
@@ -78,87 +90,144 @@ fn the_pose_derived_from_an_eye_and_target_is_the_camera_s_own() {
 fn a_new_center_elevation_at_the_end_of_a_gesture_keeps_the_eye_in_place() {
     // Lower ground moves the target away and steepens the view at it; 80 degrees leaves room
     // under the pitch limit.
-    for (pitch, elevation) in [
+    let cases = [
         (0.0, 1500.0),
         (70.0, 1500.0),
         (85.0, 1500.0),
         (80.0, -300.0),
-    ] {
-        let mut state = view(12.0, pitch, 324.037_142_967_012_36, 0.0);
-        let (eye, target) = globe_pose(&state).expect("orbiting camera");
-        assert!(recalculate_globe_zoom_and_center(&mut state, elevation));
-        let (moved_eye, moved_target) = globe_pose(&state).expect("orbiting camera");
-        assert!(
-            (moved_eye - eye).magnitude() < 1e-11,
-            "pitch {pitch}: the eye moved by {} radii",
-            (moved_eye - eye).magnitude()
-        );
-        assert!(
-            ((moved_target - eye).normalize() - (target - eye).normalize()).magnitude() < 1e-9,
-            "pitch {pitch}: the view axis turned"
-        );
-        assert!((state.center_elevation() - elevation).abs() < 1e-6);
+    ];
+    for center in [SCENE, ANTIMERIDIAN] {
+        for bearing in BEARINGS {
+            for (pitch, elevation) in cases {
+                let case = format!("{center:?}, bearing {bearing}, pitch {pitch}");
+                let mut state = view_at(center, 12.0, pitch, bearing, 0.0);
+                let (eye, target) = globe_pose(&state).expect("orbiting camera");
+                assert!(recalculate_globe_zoom_and_center(&mut state, elevation));
+                let (moved_eye, moved_target) = globe_pose(&state).expect("orbiting camera");
+                assert!(
+                    (moved_eye - eye).magnitude() < 1e-11,
+                    "{case}: the eye moved by {} radii",
+                    (moved_eye - eye).magnitude()
+                );
+                assert!(
+                    ((moved_target - eye).normalize() - (target - eye).normalize()).magnitude()
+                        < 1e-9,
+                    "{case}: the view axis turned"
+                );
+                assert!((state.center_elevation() - elevation).abs() < 1e-6);
+            }
+        }
     }
 }
 
 #[test]
-fn an_eye_inside_the_ground_is_lifted_onto_it_and_still_looks_at_its_target() {
-    let world = world(Ground::around(SCENE, |_| 1500.0));
-    // At zoom 14 and 85 degrees of pitch the eye flies a few hundred metres over the target,
-    // here at sea level under ground 1500 m high.
-    let mut state = view(14.0, 85.0, 90.0, 0.0);
-    let (eye, target) = globe_pose(&state).expect("orbiting camera");
-    let radius = state.body().radius_meters;
-    assert!((eye.magnitude() - 1.0) * radius < 1500.0);
-    assert!(keep_globe_camera_above_terrain(&mut state, &world));
-    let (lifted, kept) = globe_pose(&state).expect("orbiting camera");
-    let height = (lifted.magnitude() - 1.0) * radius;
-    assert!(height >= 1500.0, "the eye is still {height} m high");
-    assert!((kept - target).magnitude() < 1e-11, "the target moved");
-    let camera = globe_camera_for_view(&state).expect("camera");
-    let center = camera
-        .ray_direction_from_pixel(Point2::new(1165.0, 900.0))
-        .expect("center ray");
-    assert!(center.dot((kept - lifted).normalize()) > 1.0 - 1e-12);
-    assert!(!keep_globe_camera_above_terrain(&mut state, &world));
+fn past_the_pitch_limit_the_eye_gives_and_the_target_still_lands_on_the_new_ground() {
+    // At 85 degrees, lower ground would steepen the view at the target beyond the limit.
+    let mut state = view(12.0, 85.0, 90.0, 0.0);
+    let (eye, _) = globe_pose(&state).expect("orbiting camera");
+    assert!(recalculate_globe_zoom_and_center(&mut state, -300.0));
+    let (moved, target) = globe_pose(&state).expect("orbiting camera");
+    assert!((state.camera().get_pitch().0 - 85_f64.to_radians()).abs() < 1e-12);
+    assert!((state.center_elevation() + 300.0).abs() < 1e-6);
+    assert!(((target.magnitude() - 1.0) * state.body().radius_meters + 300.0).abs() < 1e-3);
+    assert!((moved - eye).magnitude() > 1e-9, "the eye gave way");
+}
+
+#[test]
+fn an_eye_inside_the_ground_is_lifted_onto_the_ground_under_itself() {
+    for center in [SCENE, ANTIMERIDIAN] {
+        for bearing in [90.0, 200.0, 324.037_142_967_012_36] {
+            // At zoom 14 and 85 degrees of pitch the eye flies a few hundred metres over its
+            // target; the ground rises to 1500 m under the eye and stays at sea level under
+            // the target.
+            let mut state = view_at(center, 14.0, 85.0, bearing, 0.0);
+            let (eye, target) = globe_pose(&state).expect("orbiting camera");
+            let under = lat_lon_to_mercator(crate::projection::globe::unit_sphere_to_lat_lon(
+                eye.normalize(),
+            ));
+            let reach = 3000.0 / state.body().circumference_meters();
+            let world = world(Ground::around(center, move |mercator| {
+                let dx = (mercator.x - under.x + 0.5).rem_euclid(1.0) - 0.5;
+                if dx.hypot(mercator.y - under.y) < reach {
+                    1500.0
+                } else {
+                    0.0
+                }
+            }));
+            let case = format!("{center:?}, bearing {bearing}");
+            let radius = state.body().radius_meters;
+            assert!((eye.magnitude() - 1.0) * radius < 1500.0);
+            assert!(
+                keep_globe_camera_above_terrain(&mut state, &world),
+                "{case}"
+            );
+            let (lifted, kept) = globe_pose(&state).expect("orbiting camera");
+            let height = (lifted.magnitude() - 1.0) * radius;
+            assert!(height >= 1500.0, "{case}: the eye is still {height} m high");
+            assert!(
+                (lifted.normalize() - eye.normalize()).magnitude() < 1e-12,
+                "{case}"
+            );
+            assert!(
+                (kept - target).magnitude() < 1e-11,
+                "{case}: the target moved"
+            );
+            let camera = globe_camera_for_view(&state).expect("camera");
+            let center_ray = camera
+                .ray_direction_from_pixel(Point2::new(1165.0, 900.0))
+                .expect("center ray");
+            assert!(
+                center_ray.dot((kept - lifted).normalize()) > 1.0 - 1e-12,
+                "{case}"
+            );
+            assert!(
+                !keep_globe_camera_above_terrain(&mut state, &world),
+                "{case}"
+            );
+        }
+    }
 }
 
 #[test]
 fn a_picked_terrain_point_stays_under_the_pointer_through_a_zoom() {
-    let ground = Ground::around(SCENE, hills);
-    let elevation = ground.terrain().ground_at(SCENE).expect("ground");
-    for (pitch, pointer) in [
-        (70.0, Point2::new(1700.0, 1200.0)),
-        (85.0, Point2::new(700.0, 1000.0)),
-    ] {
-        let mut state = view(10.8, pitch, 324.037_142_967_012_36, elevation);
-        state.freeze_center_elevation();
-        let camera = globe_camera_for_view(&state).expect("camera");
-        let TerrainPick::Ground(hit) = pick_globe_terrain(&camera, ground.terrain(), pointer)
-        else {
-            panic!("pitch {pitch}: the pointer is over the ground");
-        };
-        let anchor = TerrainAnchor {
-            location: location(hit.mercator),
-            elevation: hit.elevation,
-        };
-        let mut zoom = 10.8;
-        while zoom < 12.2 {
-            zoom += 0.1;
-            assert!(
-                zoom_globe_keeping_anchor(&mut state, anchor, pointer, zoom),
-                "pitch {pitch}, zoom {zoom}: the anchor left the pointer"
-            );
+    for center in [SCENE, ANTIMERIDIAN] {
+        let ground = Ground::around(center, hills);
+        let elevation = ground.terrain().ground_at(center).expect("ground");
+        for (pitch, bearing, pointer) in [
+            (70.0, 324.037_142_967_012_36, Point2::new(1700.0, 1200.0)),
+            (85.0, 324.037_142_967_012_36, Point2::new(700.0, 1000.0)),
+            (70.0, 135.0, Point2::new(500.0, 1300.0)),
+        ] {
+            let case = format!("{center:?}, pitch {pitch}, bearing {bearing}");
+            let mut state = view_at(center, 10.8, pitch, bearing, elevation);
+            state.freeze_center_elevation();
             let camera = globe_camera_for_view(&state).expect("camera");
-            let point = crate::projection::globe::lat_lon_to_unit_sphere(anchor.location)
-                * camera.body().unit_radius_at(anchor.elevation);
-            let clip = camera.view_projection() * point.extend(1.0);
-            let at = camera.ndc_to_pixel(Point2::new(clip.x / clip.w, clip.y / clip.w));
-            assert!(
-                (at - pointer).magnitude() < 1e-2,
-                "pitch {pitch}, zoom {zoom}: the anchor shows at {at:?}, not {pointer:?}"
-            );
-            assert!((state.zoom().value() - zoom).abs() < 0.05, "zoom {zoom}");
+            let TerrainPick::Ground(hit) = pick_globe_terrain(&camera, ground.terrain(), pointer)
+            else {
+                panic!("{case}: the pointer is over the ground");
+            };
+            let anchor = TerrainAnchor {
+                location: location(hit.mercator),
+                elevation: hit.elevation,
+            };
+            let mut zoom = 10.8;
+            while zoom < 12.2 {
+                zoom += 0.1;
+                assert!(
+                    zoom_globe_keeping_anchor(&mut state, anchor, pointer, zoom),
+                    "{case}, zoom {zoom}: the anchor left the pointer"
+                );
+                let camera = globe_camera_for_view(&state).expect("camera");
+                let point = crate::projection::globe::lat_lon_to_unit_sphere(anchor.location)
+                    * camera.body().unit_radius_at(anchor.elevation);
+                let clip = camera.view_projection() * point.extend(1.0);
+                let at = camera.ndc_to_pixel(Point2::new(clip.x / clip.w, clip.y / clip.w));
+                assert!(
+                    (at - pointer).magnitude() < 1e-2,
+                    "{case}, zoom {zoom}: the anchor shows at {at:?}, not {pointer:?}"
+                );
+                assert!((state.zoom().value() - zoom).abs() < 0.05, "zoom {zoom}");
+            }
         }
     }
 }
@@ -236,4 +305,22 @@ fn the_gesture_entry_points_take_the_globe_path_for_a_globe_that_orbits_the_terr
     // Straight up from where it was, still looking at the same target.
     assert!((lifted.normalize() - under.normalize()).magnitude() < 1e-12);
     assert!((kept - target).magnitude() < 1e-11);
+}
+
+#[test]
+fn an_anchor_that_cannot_reach_its_pixel_leaves_the_view_as_it_was() {
+    let mut state = view(12.0, 85.0, 90.0, 0.0);
+    let (zoom, position) = (state.zoom().value(), state.camera().position());
+    let anchor = TerrainAnchor {
+        location: SCENE,
+        elevation: 0.0,
+    };
+    // The top of the screen shows the sky, which no sphere near the ground reaches.
+    assert!(!super::place_anchor_at_pixel(
+        &mut state,
+        anchor,
+        Point2::new(1165.0, 1.0)
+    ));
+    assert_eq!(state.zoom().value(), zoom);
+    assert_eq!(state.camera().position(), position);
 }

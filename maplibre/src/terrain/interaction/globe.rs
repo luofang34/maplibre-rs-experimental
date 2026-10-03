@@ -16,7 +16,10 @@ use crate::{
     },
     render::{projection::globe_camera_for_view, view_state::ViewState},
     tcs::world::World,
-    terrain::{coverage::TerrainCoverageIndex, sightline::lat_lon_to_mercator},
+    terrain::{
+        coverage::TerrainCoverageIndex,
+        sightline::{lat_lon_to_mercator, mercator_to_lat_lon},
+    },
 };
 
 /// Corrections that place an anchor at its pixel; the zoom adjustment of each is small, so
@@ -95,20 +98,24 @@ fn look_from(view_state: &mut ViewState, eye: Vector3<f64>, target: Vector3<f64>
 /// Keeps the eye where it is while the center elevation becomes `elevation`: the target
 /// slides along the view axis onto the sphere at that height, and the zoom follows the new
 /// distance. The pitch at the new target stays within the camera's limit, so where keeping the
-/// eye would exceed it the eye moves instead. Returns whether the camera changed.
+/// eye would exceed it the eye moves instead. Where the axis never reaches that sphere, as when
+/// the eye is inside it, the camera keeps its target instead and moves with the elevation.
+/// Returns whether the eye was kept.
 pub fn recalculate_globe_zoom_and_center(view_state: &mut ViewState, elevation: f64) -> bool {
     let Some((eye, target)) = globe_pose(view_state) else {
         return false;
     };
     let radius = view_state.body().unit_radius_at(elevation);
     let axis = (target - eye).normalize();
-    let Some(hit) = crate::projection::globe::ray_sphere_intersection(eye, axis, radius) else {
-        return false;
-    };
-    if hit.t_min <= 0.0 {
-        return false;
+    let reached = crate::projection::globe::ray_sphere_intersection(eye, axis, radius)
+        .filter(|hit| hit.t_min > 0.0);
+    match reached {
+        Some(hit) => look_from(view_state, eye, eye + axis * hit.t_min),
+        None => {
+            view_state.set_center_elevation(elevation);
+            false
+        }
     }
-    look_from(view_state, eye, eye + axis * hit.t_min)
 }
 
 /// Lifts the eye out of the ground under it, keeping the target, as GL JS raises its camera
@@ -137,6 +144,21 @@ pub fn keep_globe_camera_above_terrain(view_state: &mut ViewState, world: &World
 /// turns about its center, carrying the anchor along the sphere at its own height to where the
 /// pixel's ray meets that sphere. Returns whether the anchor reached the pixel.
 pub fn place_anchor_at_pixel(
+    view_state: &mut ViewState,
+    anchor: TerrainAnchor,
+    pixel: Point2<f64>,
+) -> bool {
+    let (zoom, position) = (view_state.zoom(), view_state.camera().position());
+    let placed = turn_anchor_to_pixel(view_state, anchor, pixel);
+    if !placed {
+        // A caller falling back to another gesture path starts from the view it had.
+        view_state.update_zoom(zoom);
+        view_state.camera_mut().move_to(position);
+    }
+    placed
+}
+
+fn turn_anchor_to_pixel(
     view_state: &mut ViewState,
     anchor: TerrainAnchor,
     pixel: Point2<f64>,
@@ -185,13 +207,7 @@ pub fn terrain_anchor_at(
     globe_pose(view_state)?;
     let hit = super::screen_point_to_terrain(style, view_state, world, pixel)?;
     Some(TerrainAnchor {
-        location: LatLon::new(
-            (std::f64::consts::PI * (1.0 - 2.0 * hit.mercator.y))
-                .sinh()
-                .atan()
-                .to_degrees(),
-            hit.mercator.x * 360.0 - 180.0,
-        ),
+        location: mercator_to_lat_lon(hit.mercator),
         elevation: hit.elevation,
     })
 }
