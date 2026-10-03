@@ -245,3 +245,28 @@ async fn whether_terrain_holds_the_center_follows_the_style_frame_by_frame() {
     assert!(!map.view_state().center_held_by_terrain());
     assert_eq!(map.view_state().center_elevation(), 3000.0);
 }
+
+#[test]
+fn a_pose_set_before_the_first_frame_over_terrain_keeps_the_style_center_altitude() {
+    use crate::{projection::ProjectionType, render::view_state::NavigationMode};
+    let style = style(
+        r#"{"version":8,"center":[88.05,27.77],"centerAltitude":3000,"zoom":11,"pitch":40,
+            "sources":{"dem":{"type":"raster-dem","tiles":["https://dem.example/{z}/{x}/{y}.png"]}},
+            "terrain":{"source":"dem"},"projection":{"type":"vertical-perspective"},"layers":[]}"#,
+    );
+    let mut view = initial_view_state(PhysicalSize::new(800, 600).expect("size"), &style);
+    assert!(
+        view.center_held_by_terrain(),
+        "the style's terrain holds the center from the start"
+    );
+    view.set_navigation_mode(
+        NavigationMode::FreeGlobe,
+        &ProjectionType::VerticalPerspective,
+    )
+    .expect("free navigation");
+    let mut pose = view.globe_pose().expect("pose");
+    pose.target_elevation_meters = 500.0;
+    view.set_globe_pose(pose).expect("pose");
+    assert_eq!(view.center_altitude(), 3000.0);
+    assert_eq!(view.center_elevation(), 500.0);
+}
