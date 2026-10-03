@@ -326,14 +326,14 @@ fn an_anchor_that_cannot_reach_its_pixel_leaves_the_view_as_it_was() {
 }
 
 #[test]
-fn the_north_locked_terrain_gestures_stand_aside_for_a_free_camera() {
+fn the_constrained_terrain_gestures_stand_aside_for_a_free_camera() {
     use crate::{projection::ProjectionType, render::view_state::NavigationMode};
     let style: crate::style::Style = serde_json::from_str(
         r#"{"version":8,"sources":{"dem":{"type":"raster-dem","tiles":["https://dem.example/{z}/{x}/{y}.png"],"encoding":"terrarium","tileSize":256}},"layers":[],"terrain":{"source":"dem"},"projection":{"type":"vertical-perspective"}}"#,
     )
     .expect("style");
     let world = world(Ground::around(SCENE, |_| 1500.0));
-    // Low enough that a north-locked camera would be lifted out of the ground.
+    // Low enough that a constrained camera would be lifted out of the ground.
     let mut state = view(14.0, 85.0, 90.0, 0.0);
     state
         .set_navigation_mode(

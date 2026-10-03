@@ -73,7 +73,7 @@ fn free_navigation_starts_where_the_camera_is_and_its_pose_round_trips() {
                 .set_navigation_mode(NavigationMode::FreeGlobe, &VERTICAL)
                 .expect("free navigation");
             assert_same_matrix(matrix(&state), before, &case);
-            // Inside the Mercator world the style zoom is the north-locked view's.
+            // Inside the Mercator world the style zoom is the constrained view's.
             assert!((state.zoom().value() - zoom).abs() < 1e-9, "{case}");
             let pose = state.globe_pose().expect("pose");
             let stored = serde_json::to_string(&pose).expect("serialize");
@@ -99,7 +99,7 @@ fn free_navigation_is_refused_or_ended_where_the_projection_turns_flat() {
             state.set_navigation_mode(NavigationMode::FreeGlobe, &projection),
             Err(NavigationError::ProjectionNotSupported { .. })
         ));
-        assert_eq!(state.navigation_mode(), NavigationMode::NorthLocked);
+        assert_eq!(state.navigation_mode(), NavigationMode::Constrained);
     }
     let mut state = view(LatLon::new(40.0, 0.0), 5.0, 0.0, 30.0, 0.0);
     state
@@ -108,14 +108,14 @@ fn free_navigation_is_refused_or_ended_where_the_projection_turns_flat() {
     state.enforce_navigation(&VERTICAL);
     assert_eq!(state.navigation_mode(), NavigationMode::FreeGlobe);
     state.enforce_navigation(&ProjectionType::Globe);
-    assert_eq!(state.navigation_mode(), NavigationMode::NorthLocked);
+    assert_eq!(state.navigation_mode(), NavigationMode::Constrained);
     assert_eq!(
         state.navigation_limit(),
         Some(NavigationLimit::ProjectionChanged)
     );
     state
-        .set_navigation_mode(NavigationMode::NorthLocked, &ProjectionType::Globe)
-        .expect("north-locked");
+        .set_navigation_mode(NavigationMode::Constrained, &ProjectionType::Globe)
+        .expect("constrained");
     assert_eq!(state.navigation_limit(), None, "the host has chosen again");
 }
 
@@ -222,7 +222,7 @@ fn a_zoom_keeps_its_ground_under_the_pointer_over_the_cap() {
 }
 
 #[test]
-fn north_locked_navigation_ignores_the_free_gestures() {
+fn constrained_navigation_ignores_the_free_gestures() {
     let mut state = view(LatLon::new(40.0, 0.0), 5.0, 0.0, 30.0, 0.0);
     let before = matrix(&state);
     assert!(!state.drag_free_globe(Point2::new(600.0, 400.0), Point2::new(600.0, 450.0)));
@@ -282,7 +282,7 @@ fn a_stored_pose_is_restored_only_where_the_projection_allows_free_navigation() 
         other.restore_globe_pose(pose, &ProjectionType::Globe),
         Err(NavigationError::ProjectionNotSupported { .. })
     ));
-    assert_eq!(other.navigation_mode(), NavigationMode::NorthLocked);
+    assert_eq!(other.navigation_mode(), NavigationMode::Constrained);
     other.restore_globe_pose(pose, &VERTICAL).expect("restore");
     assert_same_matrix(matrix(&other), matrix(&state), "restored");
 }

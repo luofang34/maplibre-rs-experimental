@@ -34,7 +34,7 @@ pub struct TerrainAnchor {
     pub elevation: f64,
 }
 
-/// The eye and the raised target of a north-locked view whose globe camera orbits the
+/// The eye and the raised target of a constrained view whose globe camera orbits the
 /// terrain, in unit-sphere space; `None` for any other camera, a host's eye and a free-globe
 /// camera, which moves by its own pose, included.
 pub fn globe_pose(view_state: &ViewState) -> Option<(Vector3<f64>, Vector3<f64>)> {

@@ -45,7 +45,7 @@ async fn a_frame_ends_free_navigation_when_the_style_projection_changes() {
     map.run_frame().expect("frame");
     assert_eq!(
         map.view_state().navigation_mode(),
-        NavigationMode::NorthLocked
+        NavigationMode::Constrained
     );
     assert_eq!(
         map.view_state().navigation_limit(),
@@ -96,5 +96,83 @@ async fn a_drag_over_a_cap_counts_as_a_move_though_the_flat_camera_stays() {
     assert!(
         crate::render::frame_signals::camera_moved(&map.map_context.world, map.view_state()),
         "the free camera moved"
+    );
+}
+
+#[tokio::test]
+async fn a_restored_pose_keeps_its_target_height_through_frames_without_terrain() {
+    let mut map = free_map(LatLon::new(40.0, 10.0)).await;
+    // The first frame fits the view to the surface; the pose is restored on a running map.
+    map.run_frame().expect("frame");
+    let mut pose = map.view_state().globe_pose().expect("pose");
+    pose.target_elevation_meters = 1200.0;
+    map.restore_globe_pose(pose).expect("restore");
+    let camera = |map: &super::super::HeadlessMap| {
+        let columns: [[f64; 4]; 4] =
+            crate::render::projection::globe_camera_for_view(map.view_state())
+                .expect("camera")
+                .view_projection()
+                .into();
+        columns
+    };
+    let restored = camera(&map);
+    for _ in 0..3 {
+        map.run_frame().expect("frame");
+    }
+    let held = map.view_state().globe_pose().expect("pose");
+    assert_eq!(held.target_elevation_meters, 1200.0);
+    assert_eq!(held.target, pose.target);
+    assert_eq!(camera(&map), restored);
+}
+
+#[tokio::test]
+async fn constrained_navigation_refuses_a_target_past_the_mercator_world() {
+    let mut map = free_map(LatLon::new(84.0, 10.0)).await;
+    let center = Point2::new(32.0, 32.0);
+    while map
+        .view_state()
+        .pose_view()
+        .expect("free camera")
+        .center
+        .latitude
+        < 86.0
+    {
+        assert!(map
+            .map_context
+            .view_state
+            .drag_free_globe(center - cgmath::Vector2::new(0.0, 8.0), center));
+    }
+    let pose = map.view_state().globe_pose();
+    assert!(matches!(
+        map.set_navigation_mode(NavigationMode::Constrained),
+        Err(crate::render::view_state::NavigationError::BeyondMercatorWorld { .. })
+    ));
+    assert_eq!(
+        map.view_state().navigation_mode(),
+        NavigationMode::FreeGlobe
+    );
+    assert_eq!(
+        map.view_state().globe_pose(),
+        pose,
+        "the free camera stays where it is"
+    );
+    while map
+        .view_state()
+        .pose_view()
+        .expect("free camera")
+        .center
+        .latitude
+        > 84.0
+    {
+        assert!(map
+            .map_context
+            .view_state
+            .drag_free_globe(center + cgmath::Vector2::new(0.0, 8.0), center));
+    }
+    map.set_navigation_mode(NavigationMode::Constrained)
+        .expect("back inside the Mercator world");
+    assert_eq!(
+        map.view_state().navigation_mode(),
+        NavigationMode::Constrained
     );
 }
