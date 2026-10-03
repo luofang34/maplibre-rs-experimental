@@ -1,7 +1,8 @@
-//! How the camera navigates the globe: locked to north, or free to turn and to cross the poles.
+//! How the camera navigates the globe: as the map's own camera, or free to cross the poles.
 //!
-//! North-locked navigation describes the camera by a center, zoom, bearing, pitch and roll,
-//! the center in the Mercator world, which ends short of the poles. Free-globe navigation
+//! Constrained navigation describes the camera by a center, zoom, bearing, pitch and roll,
+//! the center in the Mercator world, which ends short of the poles; it turns freely about its
+//! center and does not hold north up. Free-globe navigation
 //! describes it by a [`GlobePose`]: the point it looks at as a direction from the body's
 //! center, its orientation, and its distance in metres. None of these are style fields; a host
 //! sets them at runtime and may store a pose in its own documents.
@@ -33,9 +34,11 @@ const VERTICAL_TILT: f64 = 1e-8;
 /// How the camera navigates the globe.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NavigationMode {
-    /// A center, zoom, bearing, pitch and roll, the center kept within the Mercator world.
+    /// The map's own camera: a center, zoom, bearing, pitch and roll, the center kept within the
+    /// Mercator world. It turns to any bearing and does not hold north up.
     #[default]
-    NorthLocked,
+    #[serde(alias = "NorthLocked")]
+    Constrained,
     /// A pose that may look at any point and turn any way, across the poles included.
     FreeGlobe,
 }
@@ -69,6 +72,12 @@ pub enum NavigationError {
     /// A host's eye drives the camera.
     #[error("a host's eye drives the camera")]
     ExternalView,
+    /// Constrained navigation cannot show a target this far towards a pole.
+    #[error("the camera looks at latitude {latitude}, past the Mercator world constrained navigation shows")]
+    BeyondMercatorWorld {
+        /// The latitude of the free camera's target.
+        latitude: f64,
+    },
     /// The pose is not finite, its target or orientation has no direction, or its distance is
     /// not positive.
     #[error("invalid globe pose {pose:?}")]
@@ -82,7 +91,7 @@ pub enum NavigationError {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NavigationLimit {
     /// The style's projection stopped being pure vertical perspective, so the camera returned
-    /// to north-locked navigation at the nearest view it can show.
+    /// to constrained navigation at the nearest view it can show.
     ProjectionChanged,
 }
 
@@ -160,7 +169,7 @@ impl ViewState {
         if self.free_globe.is_some() {
             NavigationMode::FreeGlobe
         } else {
-            NavigationMode::NorthLocked
+            NavigationMode::Constrained
         }
     }
 
@@ -169,8 +178,9 @@ impl ViewState {
         self.navigation_limit
     }
 
-    /// Switches navigation, keeping the camera where it is: free navigation starts from the
-    /// current view, and north-locked navigation from the nearest view it can show.
+    /// Switches navigation, keeping the camera where it is. Constrained navigation cannot show
+    /// a target past the Mercator world's last latitude, so a free camera looking there is
+    /// refused rather than moved; the host brings it back first.
     pub fn set_navigation_mode(
         &mut self,
         mode: NavigationMode,
@@ -178,7 +188,14 @@ impl ViewState {
     ) -> Result<(), NavigationError> {
         self.navigation_limit = None;
         match mode {
-            NavigationMode::NorthLocked => {
+            NavigationMode::Constrained => {
+                if let Some(view) = self.pose_view() {
+                    if view.center.latitude.abs() > scale::MERCATOR_LATITUDE_LIMIT {
+                        return Err(NavigationError::BeyondMercatorWorld {
+                            latitude: view.center.latitude,
+                        });
+                    }
+                }
                 self.free_globe = None;
                 Ok(())
             }
@@ -188,13 +205,13 @@ impl ViewState {
                 if self.has_external_view() {
                     return Err(NavigationError::ExternalView);
                 }
-                let pose = self.north_locked_pose();
+                let pose = self.constrained_pose();
                 self.set_globe_pose(pose)
             }
         }
     }
 
-    /// The free-globe camera's pose; `None` while navigation is north-locked.
+    /// The free-globe camera's pose; `None` while navigation is constrained.
     pub fn globe_pose(&self) -> Option<GlobePose> {
         self.free_globe.map(|free| GlobePose {
             target: free.target.into(),
@@ -252,9 +269,51 @@ impl ViewState {
             orientation: orientation.normalize(),
             distance_meters: pose.distance_meters,
         });
-        self.set_center_elevation(pose.target_elevation_meters);
+        // The pose's target height is where the center rests off the ground; while terrain
+        // holds the center to the ground, the ground decides it from the next frame.
+        self.set_center_altitude(pose.target_elevation_meters);
         self.sync_flat_camera();
         Ok(())
+    }
+
+    /// Turns the free-globe camera of `from` about its target: its bearing by `bearing` and its
+    /// pitch by `pitch`, the pitch kept between straight down and the camera's limit. The target,
+    /// distance and roll stay. A drag hands the pose it started from with its whole turn so far.
+    pub fn orbit_globe_pose(
+        &mut self,
+        from: GlobePose,
+        bearing: Rad<f64>,
+        pitch: Rad<f64>,
+    ) -> Result<(), NavigationError> {
+        let start = FreeGlobe {
+            target: Vector3::from(from.target).normalize(),
+            orientation: Quaternion::new(
+                from.orientation[0],
+                from.orientation[1],
+                from.orientation[2],
+                from.orientation[3],
+            )
+            .normalize(),
+            distance_meters: from.distance_meters,
+        };
+        let (center, start_bearing, start_pitch, roll) = start.decompose();
+        let limit = self.camera().max_pitch().0.to_degrees();
+        let turned = view_rotation(
+            center,
+            start_bearing + bearing.0.to_degrees(),
+            (start_pitch + pitch.0.to_degrees()).clamp(0.0, limit),
+            roll,
+        );
+        let orientation = Quaternion::from(turned);
+        self.set_globe_pose(GlobePose {
+            orientation: [
+                orientation.s,
+                orientation.v.x,
+                orientation.v.y,
+                orientation.v.z,
+            ],
+            ..from
+        })
     }
 
     /// Ends free navigation when the projection no longer allows it, recording why.
@@ -305,8 +364,8 @@ impl ViewState {
         self.height() * 0.5 / (self.field_of_view().0 * 0.5).tan()
     }
 
-    /// The pose of the current north-locked view.
-    fn north_locked_pose(&self) -> GlobePose {
+    /// The pose of the current constrained view.
+    fn constrained_pose(&self) -> GlobePose {
         let world_size = TILE_SIZE * 2_f64.powf(self.zoom().value());
         let position = self.camera().position();
         let center = crate::render::projection::mercator_world_to_lat_lon(
