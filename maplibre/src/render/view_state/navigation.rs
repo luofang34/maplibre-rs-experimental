@@ -26,6 +26,10 @@ use crate::{
     },
 };
 
+/// Sine of the tilt below which the camera counts as looking straight down or up, its roll
+/// folded into its bearing; well above rounding, well below a pixel's turn.
+const VERTICAL_TILT: f64 = 1e-8;
+
 /// How the camera navigates the globe.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NavigationMode {
@@ -119,8 +123,10 @@ fn frame_at(center: LatLon) -> Matrix3<f64> {
 impl FreeGlobe {
     /// Decomposes the pose into a center and angles. Any longitude serves at a pole, so the
     /// one `atan2` gives there is taken, and bearing and roll are measured in the frame that
-    /// longitude defines, which the view matrix rebuilds exactly. Looking straight down, roll
-    /// and bearing turn about the same axis and the turn is all bearing.
+    /// longitude defines, which the view matrix rebuilds exactly. Looking straight down or
+    /// straight up, roll and bearing turn about the same axis and the turn is all bearing:
+    /// `Rz(roll) Rx(0) Rz(bearing)` turns by `roll + bearing`, `Rz(roll) Rx(-PI) Rz(bearing)`
+    /// is `Rz(roll - bearing)` with y and z flipped.
     fn decompose(&self) -> (LatLon, f64, f64, f64) {
         let target = self.target;
         let center = LatLon::new(
@@ -132,10 +138,12 @@ impl FreeGlobe {
         let m = |row: usize, column: usize| rotation[column][row];
         let tilt = m(2, 0).hypot(m(2, 1));
         let pitch = tilt.atan2(m(2, 2));
-        let (bearing, roll) = if tilt > 1e-12 {
+        let (bearing, roll) = if tilt > VERTICAL_TILT {
             ((-m(2, 0)).atan2(-m(2, 1)), (-m(0, 2)).atan2(m(1, 2)))
-        } else {
+        } else if m(2, 2) > 0.0 {
             (m(1, 0).atan2(m(0, 0)), 0.0)
+        } else {
+            (-(m(1, 0).atan2(m(0, 0))), 0.0)
         };
         (
             center,
@@ -201,9 +209,24 @@ impl ViewState {
         })
     }
 
+    /// Places the free-globe camera at `pose`, entering free navigation, for the projection the
+    /// map draws with, which must allow it; a stored pose is restored this way.
+    pub fn restore_globe_pose(
+        &mut self,
+        pose: GlobePose,
+        projection: &ProjectionType,
+    ) -> Result<(), NavigationError> {
+        supports_free_navigation(projection)?;
+        self.navigation_limit = None;
+        self.set_globe_pose(pose)
+    }
+
     /// Places the free-globe camera at `pose`, entering free navigation; the projection must
-    /// already allow it, as [`set_navigation_mode`](Self::set_navigation_mode) checks.
+    /// already allow it, as [`restore_globe_pose`](Self::restore_globe_pose) checks.
     pub fn set_globe_pose(&mut self, pose: GlobePose) -> Result<(), NavigationError> {
+        if self.has_external_view() {
+            return Err(NavigationError::ExternalView);
+        }
         let target = Vector3::from(pose.target);
         let orientation = Quaternion::new(
             pose.orientation[0],

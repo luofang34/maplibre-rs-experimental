@@ -268,3 +268,6 @@ fn geojson_symbol_layers_produce_symbol_buckets() {
 
 #[path = "tests/camera_fields.rs"]
 mod camera_fields;
+
+#[path = "tests/navigation.rs"]
+mod navigation;

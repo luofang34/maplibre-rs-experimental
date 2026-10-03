@@ -86,3 +86,45 @@ fn zoom_into_mercator_preserves_geographic_center() {
     assert!((actual.y - expected.y).abs() < 1e-6);
     assert!(active_globe_camera(&style, &view).is_none());
 }
+
+#[test]
+fn a_free_camera_is_dragged_and_zoomed_by_its_pose() {
+    use maplibre::render::view_state::NavigationMode;
+    let (_, mut view) = globe_view(5.0);
+    let style = Style {
+        projection: Some(ProjectionSpecification {
+            projection_type: ProjectionType::VerticalPerspective,
+        }),
+        ..Default::default()
+    };
+    view.set_navigation_mode(
+        NavigationMode::FreeGlobe,
+        &ProjectionType::VerticalPerspective,
+    )
+    .expect("free navigation");
+    let before = view.globe_pose().expect("pose");
+    assert!(super::pan_globe_by_pixels(
+        &style,
+        &mut view,
+        Vector2::new(400.0, 300.0),
+        Vector2::new(0.0, 40.0),
+    ));
+    let dragged = view.globe_pose().expect("pose");
+    assert_ne!(
+        dragged.target, before.target,
+        "the drag turned the free camera"
+    );
+    assert_eq!(dragged.distance_meters, before.distance_meters);
+    let next = Zoom::new(view.zoom().value() + 1.0);
+    assert!(zoom_globe_around_pixel(
+        &style,
+        &mut view,
+        Vector2::new(400.0, 300.0),
+        next,
+    ));
+    let zoomed = view.globe_pose().expect("pose");
+    assert!(
+        (zoomed.distance_meters / dragged.distance_meters - 0.5).abs() < 1e-9,
+        "the zoom halved the free camera's distance"
+    );
+}

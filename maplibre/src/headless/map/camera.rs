@@ -19,6 +19,14 @@ impl HeadlessMap {
         self.map_context.set_navigation_mode(mode)
     }
 
+    /// Restores a stored free-globe pose, for the style's projection.
+    pub fn restore_globe_pose(
+        &mut self,
+        pose: crate::render::view_state::GlobePose,
+    ) -> Result<(), crate::render::view_state::NavigationError> {
+        self.map_context.restore_globe_pose(pose)
+    }
+
     /// Sets the full vertical field of view, as the GL JS `verticalFieldOfView` map option.
     pub fn set_vertical_field_of_view(&mut self, field_of_view: cgmath::Deg<f64>) {
         self.map_context

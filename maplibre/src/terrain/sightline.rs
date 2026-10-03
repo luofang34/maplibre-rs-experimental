@@ -351,7 +351,6 @@ impl DrawnTerrain<'_> {
         bounded(above.min(track_budget(edge, probe.radius)), fine)
     }
 
-    /// The finest step any rendered tile asks for.
     /// Half the width of the finest rendered cell at `mercator`, measured on the pole-ward
     /// row of the finest zoom's tile there, the narrowest any rendered cell can be; over a cap,
     /// the last row's.

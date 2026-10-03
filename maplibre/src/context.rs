@@ -47,4 +47,20 @@ impl MapContext {
             });
         self.view_state.set_navigation_mode(mode, &projection)
     }
+
+    /// Restores a stored free-globe pose, for the style's projection: it must be the pure
+    /// `vertical-perspective` projection.
+    pub fn restore_globe_pose(
+        &mut self,
+        pose: crate::render::view_state::GlobePose,
+    ) -> Result<(), crate::render::view_state::NavigationError> {
+        let projection = self
+            .style
+            .projection
+            .as_ref()
+            .map_or_else(Default::default, |projection| {
+                projection.projection_type.clone()
+            });
+        self.view_state.restore_globe_pose(pose, &projection)
+    }
 }

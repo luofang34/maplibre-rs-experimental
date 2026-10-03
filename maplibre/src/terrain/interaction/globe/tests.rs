@@ -324,3 +324,36 @@ fn an_anchor_that_cannot_reach_its_pixel_leaves_the_view_as_it_was() {
     assert_eq!(state.zoom().value(), zoom);
     assert_eq!(state.camera().position(), position);
 }
+
+#[test]
+fn the_north_locked_terrain_gestures_stand_aside_for_a_free_camera() {
+    use crate::{projection::ProjectionType, render::view_state::NavigationMode};
+    let style: crate::style::Style = serde_json::from_str(
+        r#"{"version":8,"sources":{"dem":{"type":"raster-dem","tiles":["https://dem.example/{z}/{x}/{y}.png"],"encoding":"terrarium","tileSize":256}},"layers":[],"terrain":{"source":"dem"},"projection":{"type":"vertical-perspective"}}"#,
+    )
+    .expect("style");
+    let world = world(Ground::around(SCENE, |_| 1500.0));
+    // Low enough that a north-locked camera would be lifted out of the ground.
+    let mut state = view(14.0, 85.0, 90.0, 0.0);
+    state
+        .set_navigation_mode(
+            NavigationMode::FreeGlobe,
+            &ProjectionType::VerticalPerspective,
+        )
+        .expect("free navigation");
+    let pose = state.globe_pose().expect("pose");
+    assert_eq!(globe_pose(&state), None);
+    let pointer = Point2::new(1165.0, 1200.0);
+    assert_eq!(
+        super::terrain_anchor_at(&style, &state, &world, pointer),
+        None
+    );
+    assert!(!keep_globe_camera_above_terrain(&mut state, &world));
+    state.freeze_center_elevation();
+    super::super::finish_gesture(&style, &mut state, &world);
+    assert_eq!(state.globe_pose().expect("pose").target, pose.target);
+    assert_eq!(
+        state.globe_pose().expect("pose").distance_meters,
+        pose.distance_meters
+    );
+}

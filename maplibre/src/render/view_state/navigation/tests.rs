@@ -56,7 +56,14 @@ fn assert_same_matrix(left: [f64; 16], right: [f64; 16], case: &str) {
 #[test]
 fn free_navigation_starts_where_the_camera_is_and_its_pose_round_trips() {
     for latitude in [-85.0, 0.0, 45.0, 85.0] {
-        for (bearing, pitch, roll) in [(0.0, 0.0, 0.0), (137.0, 45.0, 20.0), (300.0, 80.0, -15.0)] {
+        // Straight down, roll and bearing turn about one axis and fold together.
+        for (bearing, pitch, roll) in [
+            (0.0, 0.0, 0.0),
+            (137.0, 0.0, 20.0),
+            (300.0, 0.0, -60.0),
+            (137.0, 45.0, 20.0),
+            (300.0, 80.0, -15.0),
+        ] {
             let case = format!("{latitude}, {bearing}, {pitch}, {roll}");
             let mut state = view(LatLon::new(latitude, 30.0), 5.0, bearing, pitch, roll);
             state.set_center_elevation(1200.0);
@@ -222,4 +229,60 @@ fn north_locked_navigation_ignores_the_free_gestures() {
     assert!(!state.zoom_free_globe(Point2::new(600.0, 400.0), 1.0));
     assert_eq!(matrix(&state), before);
     assert_eq!(state.globe_pose(), None);
+}
+
+#[test]
+fn a_pose_looking_straight_down_or_straight_up_rebuilds_its_orientation() {
+    use cgmath::{Matrix3, Quaternion};
+    // A pose turned past 90 degrees of pitch looks up from under its target, which no
+    // camera draws, but the decomposition still has to give it back.
+    for latitude in [0.0, 89.999_9, 90.0, -90.0] {
+        for pitch in [0.0, 1e-9, 1e-7, 90.0, 179.999_999_9, 180.0] {
+            for (bearing, roll) in [(0.0, 0.0), (137.0, 20.0), (-60.0, 250.0)] {
+                let center = LatLon::new(latitude, 30.0);
+                let rotation = super::view_rotation(center, bearing, pitch, roll);
+                let free = super::FreeGlobe {
+                    target: crate::projection::globe::lat_lon_to_unit_sphere(center),
+                    orientation: Quaternion::from(rotation),
+                    distance_meters: 50_000.0,
+                };
+                let (rebuilt_center, rebuilt_bearing, rebuilt_pitch, rebuilt_roll) =
+                    free.decompose();
+                let rebuilt: Matrix3<f64> = super::view_rotation(
+                    rebuilt_center,
+                    rebuilt_bearing,
+                    rebuilt_pitch,
+                    rebuilt_roll,
+                );
+                let case = format!("{latitude}, pitch {pitch}, bearing {bearing}, roll {roll}");
+                for (column, expected) in [
+                    (rebuilt.x, rotation.x),
+                    (rebuilt.y, rotation.y),
+                    (rebuilt.z, rotation.z),
+                ] {
+                    assert!(
+                        (column - expected).magnitude() < 1e-7,
+                        "{case}: {rebuilt:?} != {rotation:?}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_stored_pose_is_restored_only_where_the_projection_allows_free_navigation() {
+    let mut state = view(LatLon::new(40.0, 0.0), 5.0, 0.0, 30.0, 0.0);
+    state
+        .set_navigation_mode(NavigationMode::FreeGlobe, &VERTICAL)
+        .expect("free navigation");
+    let pose = state.globe_pose().expect("pose");
+    let mut other = view(LatLon::new(0.0, 0.0), 1.0, 0.0, 0.0, 0.0);
+    assert!(matches!(
+        other.restore_globe_pose(pose, &ProjectionType::Globe),
+        Err(NavigationError::ProjectionNotSupported { .. })
+    ));
+    assert_eq!(other.navigation_mode(), NavigationMode::NorthLocked);
+    other.restore_globe_pose(pose, &VERTICAL).expect("restore");
+    assert_same_matrix(matrix(&other), matrix(&state), "restored");
 }
