@@ -298,20 +298,30 @@ impl DrawnTerrain<'_> {
                 y: (probe.mercator.y * scale).floor() as i32,
                 z: crate::coords::ZoomLevel::new(zoom),
             };
-            let inside = TileFootprint::of(cell).distance_to_edge(probe.mercator);
-            let (step, _) = bounded(inside * probe.radius.min(1.0), self.finest_step());
+            let inside = track_budget(
+                TileFootprint::of(cell).distance_to_edge(probe.mercator),
+                probe.radius,
+            );
+            let (step, _) = bounded(inside, self.finest_step());
             // Nothing is drawn here, but a step past the cell may reach a rendered tile.
-            return (step, inside * probe.radius.min(1.0) >= step);
+            return (step, inside >= step);
         };
         let footprint = TileFootprint::of(tile);
-        let fine = footprint.width / (CELLS * STEPS_PER_CELL);
+        let edge = footprint.distance_to_edge(probe.mercator);
+        // Within a cell of the edge the neighbour may be several zooms finer, its cells a
+        // fraction of this tile's; a stretch into it advances half of the finest cell, so the
+        // cells under its ends still hold everything it passes over.
+        let fine = if edge < footprint.width / CELLS {
+            self.finest_step()
+        } else {
+            footprint.width / (CELLS * STEPS_PER_CELL)
+        };
         let highest = self
             .index
             .tile_elevation_range(tile)
             .map_or(self.ceiling(), |range| range.max_meters);
         let above = (probe.height - highest) / radius;
-        let inside = footprint.distance_to_edge(probe.mercator) * probe.radius.min(1.0);
-        bounded(above.min(inside), fine)
+        bounded(above.min(track_budget(edge, probe.radius)), fine)
     }
 
     /// The finest step any rendered tile asks for.
@@ -319,6 +329,13 @@ impl DrawnTerrain<'_> {
         let zoom = self.index.finest_zoom().unwrap_or(0);
         std::f64::consts::TAU / 2_f64.powi(i32::from(zoom)) / (CELLS * STEPS_PER_CELL)
     }
+}
+
+/// How far a point `radius` radii from the body's center can move along a straight line
+/// while its ground track moves at most `angle` radians: the track turns at most the distance
+/// over the radius, faster than the distance itself below the mean radius.
+fn track_budget(angle: f64, radius: f64) -> f64 {
+    angle * radius.min(1.0)
 }
 
 /// A tile's extent in Mercator units and the shortest ground widths it spans, in radians.
@@ -363,6 +380,14 @@ pub(crate) fn lat_lon_to_mercator(location: LatLon) -> Point2<f64> {
     let x = location.longitude / 360.0 + 0.5;
     let y = (1.0 - location.latitude.to_radians().tan().asinh() / std::f64::consts::PI) * 0.5;
     Point2::new(x, y.clamp(0.0, MAX_MERCATOR_Y))
+}
+
+/// The location of Mercator coordinates in `0..1`.
+pub(crate) fn mercator_to_lat_lon(mercator: Point2<f64>) -> LatLon {
+    LatLon::new(
+        mercator_y_to_latitude(mercator.y).to_degrees(),
+        mercator.x * 360.0 - 180.0,
+    )
 }
 
 fn mercator_y_to_latitude(y: f64) -> f64 {

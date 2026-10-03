@@ -167,3 +167,32 @@ fn rays_into_the_sky_and_onto_a_polar_cap_say_so() {
         hit.elevation
     );
 }
+
+#[test]
+fn unknown_ground_before_drawn_ground_beyond_it_is_unknown() {
+    let rendered = block(SCENE, ZOOM, 4);
+    let scale = 2_f64.powi(i32::from(DEM_ZOOM));
+    let column = (lat_lon_to_mercator(SCENE).x * scale).floor() as i32;
+    // Only the column east of the scene lacks its DEM; the ground beyond it is loaded.
+    let loaded: Vec<WorldTileCoords> = block(SCENE, DEM_ZOOM, 3)
+        .into_iter()
+        .filter(|tile| tile.x != column + 1)
+        .collect();
+    let ground = Ground::new(&rendered, &loaded, |_| 200.0);
+    let camera = camera(SCENE, 80.0, 90.0, 200.0);
+    let pixel = (600..900)
+        .step_by(20)
+        .map(|y| Point2::new(1165.0, f64::from(y)))
+        .find(|pixel| {
+            let everywhere = Ground::around(SCENE, |_| 200.0);
+            matches!(
+                pick_globe_terrain(&camera, everywhere.terrain(), *pixel),
+                TerrainPick::Ground(hit) if (hit.mercator.x * scale).floor() as i32 > column + 1
+            )
+        })
+        .expect("a pixel whose ground lies beyond the unloaded column");
+    assert_eq!(
+        pick_globe_terrain(&camera, ground.terrain(), pixel),
+        TerrainPick::Unknown
+    );
+}

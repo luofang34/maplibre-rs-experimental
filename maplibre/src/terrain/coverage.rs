@@ -145,6 +145,11 @@ impl TerrainCoverageIndex {
         })
     }
 
+    /// The rendered tiles.
+    pub fn rendered_tiles(&self) -> impl Iterator<Item = WorldTileCoords> + '_ {
+        self.rendered.keys().copied()
+    }
+
     /// Zoom of the finest rendered tiles.
     pub fn finest_zoom(&self) -> Option<u8> {
         self.zooms.first().copied()

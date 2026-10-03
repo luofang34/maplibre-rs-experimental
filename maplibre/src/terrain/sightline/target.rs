@@ -124,14 +124,35 @@ fn line_of_sight(
             .body
             .unit_radius_at(terrain.index.min_elevation().min(0.0))
     });
-    let reaches_core = ray_sphere_intersection(eye, direction, core)
-        .is_some_and(|hit| hit.t_min > 0.0 && hit.t_min < length * (1.0 - 1e-9));
-    if reaches_core {
-        return Visibility::BehindGlobe;
+    let core_hit = ray_sphere_intersection(eye, direction, core)
+        .filter(|hit| hit.t_min > 0.0 && hit.t_min < length * (1.0 - 1e-9));
+    if let Some(hit) = core_hit {
+        // Over a rendered tile without its DEM the ground may lie lower than any drawn.
+        let undescribed = terrain.is_some_and(|terrain| {
+            matches!(
+                terrain.probe(eye + direction * hit.t_min).tile,
+                Some((_, false))
+            )
+        });
+        return if undescribed {
+            Visibility::TerrainUnknown
+        } else {
+            Visibility::BehindGlobe
+        };
     }
     let Some(terrain) = terrain else {
         return Visibility::Visible;
     };
+    if terrain.index.is_empty() {
+        // Terrain is on but nothing is drawn yet: below the highest ground anything may stand.
+        let nearest = (-eye.dot(direction)).clamp(0.0, length);
+        let lowest = (eye + direction * nearest).magnitude();
+        return if lowest < terrain.body.unit_radius_at(terrain.ceiling()) {
+            Visibility::TerrainUnknown
+        } else {
+            Visibility::Visible
+        };
+    }
     // The target's own ground, within one DEM sample of it, is where it stands, not in the way.
     let own_ground = point.normalize();
     let mercator =

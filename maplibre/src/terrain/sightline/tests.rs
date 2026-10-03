@@ -11,6 +11,7 @@ use crate::{
     projection::body::Body,
 };
 
+mod boundaries;
 mod occlusion;
 mod picking;
 

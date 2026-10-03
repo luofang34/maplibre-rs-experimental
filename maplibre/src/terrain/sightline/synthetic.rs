@@ -31,6 +31,11 @@ pub(crate) const ZOOM: u8 = 11;
 pub(crate) const DEM_ZOOM: u8 = ZOOM - 1;
 
 pub(crate) fn source(maxzoom: u8) -> DemSource {
+    exaggerated_source(maxzoom, 1.0)
+}
+
+/// A Terrarium DEM source up to `maxzoom`, drawn `exaggeration` times as high.
+pub(crate) fn exaggerated_source(maxzoom: u8, exaggeration: f32) -> DemSource {
     DemSource {
         name: "dem".to_string(),
         source: SourceType::Raster(RasterSource::from_template(
@@ -41,7 +46,7 @@ pub(crate) fn source(maxzoom: u8) -> DemSource {
         unpack: TERRARIUM,
         minzoom: 0,
         maxzoom,
-        exaggeration: 1.0,
+        exaggeration,
     }
 }
 
@@ -107,6 +112,17 @@ impl Ground {
         Self { tiles, index }
     }
 
+    /// The same ground drawn `exaggeration` times as high.
+    pub(crate) fn exaggerated(self, exaggeration: f32) -> Self {
+        let rendered: Vec<WorldTileCoords> = self.index.rendered_tiles().collect();
+        let index = TerrainCoverageIndex::build(
+            rendered,
+            &self.tiles,
+            &exaggerated_source(ZOOM, exaggeration),
+        );
+        Self { index, ..self }
+    }
+
     /// Tiles rendered around `center` with all their DEM loaded.
     pub(crate) fn around(center: LatLon, height: impl Fn(Point2<f64>) -> f64) -> Self {
         Self::new(&block(center, ZOOM, 4), &block(center, DEM_ZOOM, 3), height)
@@ -151,10 +167,7 @@ pub(crate) fn offset(origin: LatLon, east: f64, north: f64) -> LatLon {
 
 /// The location of Mercator coordinates in `0..1`.
 pub(crate) fn location(mercator: Point2<f64>) -> LatLon {
-    LatLon::new(
-        super::mercator_y_to_latitude(mercator.y).to_degrees(),
-        mercator.x * 360.0 - 180.0,
-    )
+    super::mercator_to_lat_lon(mercator)
 }
 
 /// Rolling hills around 1500 m, varying on a scale of a few kilometres.

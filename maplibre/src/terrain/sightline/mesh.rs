@@ -8,10 +8,9 @@
 
 use cgmath::{InnerSpace, Point2, Vector3};
 
-use super::{DrawnTerrain, MAX_MERCATOR_Y};
+use super::{mercator_to_lat_lon, DrawnTerrain, MAX_MERCATOR_Y};
 use crate::{
-    coords::{LatLon, WorldTileCoords},
-    projection::globe::lat_lon_to_unit_sphere,
+    coords::WorldTileCoords, projection::globe::lat_lon_to_unit_sphere,
     terrain::mesh::TERRAIN_MESH_SIZE,
 };
 
@@ -122,11 +121,4 @@ pub(super) fn intersect(
         return None;
     }
     Some(ac.dot(q) * inverse)
-}
-
-fn mercator_to_lat_lon(mercator: Point2<f64>) -> LatLon {
-    LatLon::new(
-        super::mercator_y_to_latitude(mercator.y).to_degrees(),
-        mercator.x * 360.0 - 180.0,
-    )
 }
