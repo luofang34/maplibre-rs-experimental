@@ -56,6 +56,8 @@ pub struct TerrainCoverageIndex {
     exaggeration: f64,
     minzoom: u8,
     maxzoom: u8,
+    /// Samples along a DEM tile's side.
+    dem_tile_size: u32,
     edges: Arc<HashMap<WorldTileCoords, super::queue_system::edges::EdgeHeights>>,
 }
 
@@ -70,6 +72,7 @@ impl TerrainCoverageIndex {
             exaggeration: f64::from(dem.exaggeration),
             minzoom: dem.minzoom,
             maxzoom: dem.maxzoom,
+            dem_tile_size: dem.tile_size,
             ..Self::default()
         };
         for tile in tiles.tiles.values() {
@@ -142,52 +145,83 @@ impl TerrainCoverageIndex {
         })
     }
 
-    /// Samples the rendered surface at Mercator coordinates in `0..1`.
-    pub fn sample(&self, tiles: &Tiles, mercator_x: f64, mercator_y: f64) -> TerrainSample {
+    /// Zoom of the finest rendered tiles.
+    pub fn finest_zoom(&self) -> Option<u8> {
+        self.zooms.first().copied()
+    }
+
+    /// Samples along a DEM tile's side, the finest detail the terrain can have per tile.
+    pub fn dem_tile_size(&self) -> u32 {
+        self.dem_tile_size.max(1)
+    }
+
+    /// The rendered tile containing Mercator coordinates in `0..1`, finest first, as
+    /// [`sample`](Self::sample) picks it.
+    pub fn rendered_tile_at(&self, mercator_x: f64, mercator_y: f64) -> Option<WorldTileCoords> {
         if !(0.0..1.0).contains(&mercator_y) {
-            return TerrainSample::NOT_COVERED;
+            return None;
         }
         let wrapped_x = mercator_x - mercator_x.floor();
-        for &zoom in &self.zooms {
+        self.zooms.iter().find_map(|&zoom| {
             let scale = 2_f64.powi(i32::from(zoom));
             let coords = WorldTileCoords {
                 x: (wrapped_x * scale).floor() as i32,
                 y: (mercator_y * scale).floor() as i32,
                 z: ZoomLevel::new(zoom),
             };
-            let Some(source) = self.rendered.get(&coords) else {
-                continue;
-            };
-            let Some(dem_coords) = source else {
-                return TerrainSample {
-                    covered: true,
-                    dem_loaded: false,
-                    elevation: 0.0,
-                };
-            };
-            let Some(DemTileComponent::Loaded(dem)) = tiles.query::<&DemTileComponent>(*dem_coords)
-            else {
-                return TerrainSample {
-                    covered: true,
-                    dem_loaded: false,
-                    elevation: 0.0,
-                };
-            };
-            let dem_scale = 2_f64.powi(i32::from(u8::from(dem_coords.z)));
-            let x =
-                ((wrapped_x * dem_scale - f64::from(dem_coords.x)) * EXTENT).min(MAX_TILE_COORD);
-            let y =
-                ((mercator_y * dem_scale - f64::from(dem_coords.y)) * EXTENT).min(MAX_TILE_COORD);
-            return TerrainSample {
-                covered: true,
-                dem_loaded: true,
-                elevation: self
-                    .stitched_height(coords, *dem_coords, [wrapped_x, mercator_y], &dem.tile)
-                    .unwrap_or_else(|| dem.tile.elevation_at_tile_coords(x, y))
-                    * self.exaggeration,
-            };
+            self.rendered.contains_key(&coords).then_some(coords)
+        })
+    }
+
+    /// Samples the rendered surface at Mercator coordinates in `0..1`.
+    pub fn sample(&self, tiles: &Tiles, mercator_x: f64, mercator_y: f64) -> TerrainSample {
+        if !(0.0..1.0).contains(&mercator_y) {
+            return TerrainSample::NOT_COVERED;
         }
-        TerrainSample::NOT_COVERED
+        self.rendered_tile_at(mercator_x, mercator_y)
+            .map_or(TerrainSample::NOT_COVERED, |coords| {
+                self.sample_in(tiles, coords, mercator_x, mercator_y)
+            })
+    }
+
+    /// Samples the surface of the rendered tile `coords` at Mercator coordinates in `0..1`, on
+    /// or inside its edges, as that tile draws it.
+    pub fn sample_in(
+        &self,
+        tiles: &Tiles,
+        coords: WorldTileCoords,
+        mercator_x: f64,
+        mercator_y: f64,
+    ) -> TerrainSample {
+        let not_loaded = TerrainSample {
+            covered: true,
+            dem_loaded: false,
+            elevation: 0.0,
+        };
+        let Some(source) = self.rendered.get(&coords) else {
+            return TerrainSample::NOT_COVERED;
+        };
+        let Some(dem_coords) = source else {
+            return not_loaded;
+        };
+        let Some(DemTileComponent::Loaded(dem)) = tiles.query::<&DemTileComponent>(*dem_coords)
+        else {
+            return not_loaded;
+        };
+        // The world copy of `mercator_x` nearest the tile, so its east edge stays on the tile.
+        let west = f64::from(coords.x) / 2_f64.powi(i32::from(u8::from(coords.z)));
+        let wrapped_x = mercator_x - (mercator_x - west + 0.5).floor();
+        let dem_scale = 2_f64.powi(i32::from(u8::from(dem_coords.z)));
+        let x = ((wrapped_x * dem_scale - f64::from(dem_coords.x)) * EXTENT).min(MAX_TILE_COORD);
+        let y = ((mercator_y * dem_scale - f64::from(dem_coords.y)) * EXTENT).min(MAX_TILE_COORD);
+        TerrainSample {
+            covered: true,
+            dem_loaded: true,
+            elevation: self
+                .stitched_height(coords, *dem_coords, [wrapped_x, mercator_y], &dem.tile)
+                .unwrap_or_else(|| dem.tile.elevation_at_tile_coords(x, y))
+                * self.exaggeration,
+        }
     }
 
     /// Exaggerated elevation at Mercator coordinates, or `None` where no DEM has loaded.

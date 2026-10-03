@@ -15,25 +15,46 @@ use crate::{
 const WIDTH: u32 = 2330;
 const HEIGHT: u32 = 1800;
 
-/// Serves every elevation tile as level ground at one height, encoded as Terrarium.
+/// Serves elevation tiles of ground at `meters`, with hills of `relief` metres either side a
+/// few kilometres apart, encoded as Terrarium at the Mercator position of every sample.
 #[derive(Clone, Copy)]
-struct LevelDem {
+struct SyntheticDem {
     meters: f64,
+    relief: f64,
+}
+
+impl SyntheticDem {
+    fn height(&self, x: f64, y: f64) -> f64 {
+        self.meters + self.relief * (x * 9000.0).sin() * (y * 7000.0).cos()
+    }
 }
 
 #[cfg_attr(not(feature = "thread-safe-futures"), async_trait::async_trait(?Send))]
 #[cfg_attr(feature = "thread-safe-futures", async_trait::async_trait)]
-impl HttpClient for LevelDem {
-    async fn fetch(&self, _url: &str) -> Result<Vec<u8>, SourceFetchError> {
-        let encoded = ((self.meters + 32768.0) * 256.0).round() as u32;
-        let pixel = image::Rgba([
-            (encoded >> 16) as u8,
-            (encoded >> 8) as u8,
-            encoded as u8,
-            255,
-        ]);
+impl HttpClient for SyntheticDem {
+    async fn fetch(&self, url: &str) -> Result<Vec<u8>, SourceFetchError> {
+        let address: Vec<f64> = url
+            .trim_end_matches(".png")
+            .rsplit('/')
+            .take(3)
+            .map(|part| part.parse().expect("tile address"))
+            .collect();
+        let (y, x, scale) = (address[0], address[1], 2_f64.powf(address[2]));
+        let image = image::RgbaImage::from_fn(256, 256, |column, row| {
+            let height = self.height(
+                (x + (f64::from(column) + 0.5) / 256.0) / scale,
+                (y + (f64::from(row) + 0.5) / 256.0) / scale,
+            );
+            let encoded = ((height + 32768.0) * 256.0).round() as u32;
+            image::Rgba([
+                (encoded >> 16) as u8,
+                (encoded >> 8) as u8,
+                encoded as u8,
+                255,
+            ])
+        });
         let mut png = std::io::Cursor::new(Vec::new());
-        image::RgbaImage::from_pixel(256, 256, pixel)
+        image
             .write_to(&mut png, image::ImageFormat::Png)
             .expect("PNG");
         Ok(png.into_inner())
@@ -44,6 +65,7 @@ impl HttpClient for LevelDem {
 #[derive(Clone, Copy, Debug)]
 struct Scene {
     meters: f64,
+    relief: f64,
     exaggeration: f64,
     pitch: f64,
     zoom: f64,
@@ -57,7 +79,7 @@ struct LevelMap {
 impl LevelMap {
     async fn new(scene: Scene) -> Self {
         let style = format!(
-            r##"{{"version":8,"center":[88.05464359004759,27.765393137835165],"zoom":{zoom},"pitch":{pitch},"bearing":324.03714296701236,"sources":{{"dem":{{"type":"raster-dem","tiles":["https://dem.example/{{z}}/{{x}}/{{y}}.png"],"encoding":"terrarium"}}}},"layers":[{{"id":"background","type":"background","paint":{{"background-color":"#336699"}}}}],"terrain":{{"source":"dem","exaggeration":{exaggeration}}},"projection":{{"type":"vertical-perspective"}}}}"##,
+            r##"{{"version":8,"center":[88.05464359004759,27.765393137835165],"zoom":{zoom},"pitch":{pitch},"bearing":324.03714296701236,"sources":{{"dem":{{"type":"raster-dem","tiles":["https://dem.example/{{z}}/{{x}}/{{y}}.png"],"encoding":"terrarium","tileSize":256}}}},"layers":[{{"id":"background","type":"background","paint":{{"background-color":"#336699"}}}}],"terrain":{{"source":"dem","exaggeration":{exaggeration}}},"projection":{{"type":"vertical-perspective"}}}}"##,
             zoom = scene.zoom,
             pitch = scene.pitch,
             exaggeration = scene.exaggeration,
@@ -67,8 +89,9 @@ impl LevelMap {
             WIDTH,
             HEIGHT,
             Default::default(),
-            crate::io::resource_loader::SharedLoader::new(LevelDem {
+            crate::io::resource_loader::SharedLoader::new(SyntheticDem {
                 meters: scene.meters,
+                relief: scene.relief,
             }),
         )
         .await
@@ -106,9 +129,10 @@ impl LevelMap {
         Self { map, depth }
     }
 
-    /// Draws until the center stands on the loaded terrain and two depth readbacks agree, so
-    /// the check sees the settled frame rather than one still loading.
-    async fn settle(&mut self, expected_center: f64) -> Vec<f32> {
+    /// Draws until the center stands on the loaded terrain, at `expected_center` metres when
+    /// given, and two depth readbacks agree, so the check sees the settled frame rather than
+    /// one still loading.
+    async fn settle(&mut self, expected_center: Option<f64>) -> Vec<f32> {
         let mut previous: Option<Vec<f32>> = None;
         for _ in 0..40 {
             for _ in 0..4 {
@@ -118,14 +142,16 @@ impl LevelMap {
                 }
             }
             let depth = self.read_depth();
-            let centered = (self.map.view_state().center_elevation() - expected_center).abs() < 0.5;
+            let center = self.map.view_state().center_elevation();
+            let centered =
+                expected_center.map_or(center != 0.0, |expected| (center - expected).abs() < 0.5);
             if centered && previous.as_ref() == Some(&depth) {
                 return depth;
             }
             previous = Some(depth);
         }
         panic!(
-            "the frame never settled: center at {} m, expected {expected_center} m",
+            "the frame never settled: center at {} m, expected {expected_center:?} m",
             self.map.view_state().center_elevation()
         );
     }
@@ -182,7 +208,7 @@ impl LevelMap {
 async fn check(scene: Scene) {
     let ground = scene.meters * scene.exaggeration;
     let mut level = LevelMap::new(scene).await;
-    let depth = level.settle(ground).await;
+    let depth = level.settle(Some(ground)).await;
     let camera = globe_camera_for_view(level.map.view_state()).expect("camera");
     let (near, far) = camera.depth_range();
     let distance = |depth: f32| near * far / (f64::from(depth) * (far - near) + near);
@@ -248,11 +274,109 @@ async fn level_terrain_meets_the_camera_at_its_center_and_everywhere_in_view() {
         for pitch in [70.0, 85.0] {
             check(Scene {
                 meters,
+                relief: 0.0,
                 exaggeration,
                 pitch,
                 zoom: 11.67,
             })
             .await;
         }
+    }
+}
+
+/// Distance along the view axis to the ground picked through `pixel`: `None` for the sky or a
+/// polar cap, an error for ground without DEM.
+fn picked_distance(
+    camera: &crate::projection::globe::camera::GlobeCameraState,
+    terrain: crate::terrain::sightline::DrawnTerrain<'_>,
+    pixel: Point2<f64>,
+) -> Result<Option<f64>, ()> {
+    use crate::terrain::sightline::{pick_globe_terrain, TerrainPick};
+    match pick_globe_terrain(camera, terrain, pixel) {
+        TerrainPick::Ground(hit) => {
+            let location = crate::coords::LatLon::new(
+                (std::f64::consts::PI * (1.0 - 2.0 * hit.mercator.y))
+                    .sinh()
+                    .atan()
+                    .to_degrees(),
+                hit.mercator.x * 360.0 - 180.0,
+            );
+            let point = crate::projection::globe::lat_lon_to_unit_sphere(location)
+                * camera.body().unit_radius_at(hit.elevation);
+            let view = camera.view() * point.extend(1.0);
+            Ok(Some(-view.z / view.w))
+        }
+        TerrainPick::Unknown => Err(()),
+        TerrainPick::Sky | TerrainPick::PolarCap(_) => Ok(None),
+    }
+}
+
+/// Every sampled pixel's terrain pick lies where the frame drew the ground: at the depth the
+/// GPU stored there, on hills whose every sample differs.
+#[tokio::test]
+async fn picks_land_where_the_frame_draws_the_ground() {
+    use crate::terrain::{sightline::DrawnTerrain, TerrainCoverageIndex};
+    for pitch in [70.0, 85.0] {
+        let scene = Scene {
+            meters: 1500.0,
+            relief: 600.0,
+            exaggeration: 1.0,
+            pitch,
+            zoom: 11.67,
+        };
+        let mut hills = LevelMap::new(scene).await;
+        let depth = hills.settle(None).await;
+        let camera = globe_camera_for_view(hills.map.view_state()).expect("camera");
+        let (near, far) = camera.depth_range();
+        let world = hills.map.world();
+        let terrain = DrawnTerrain {
+            index: world
+                .resources
+                .get::<TerrainCoverageIndex>()
+                .expect("coverage index"),
+            tiles: &world.tiles,
+            body: camera.body(),
+        };
+        // The frame keeps the nearest of a pixel's samples, the standard four-sample pattern;
+        // at a grazing view one pixel spans a long stretch of ground.
+        let samples = [
+            (0.375, 0.125),
+            (0.875, 0.375),
+            (0.125, 0.625),
+            (0.625, 0.875),
+        ];
+        let distance_of = |pixel| picked_distance(&camera, terrain, pixel);
+        let (mut picked, mut unknown) = (0, 0);
+        for y in (0..HEIGHT).step_by(90) {
+            for x in (0..WIDTH).step_by(90) {
+                let picks: Result<Vec<Option<f64>>, ()> = samples
+                    .iter()
+                    .map(|(dx, dy)| distance_of(Point2::new(f64::from(x) + dx, f64::from(y) + dy)))
+                    .collect();
+                let Ok(picks) = picks else {
+                    unknown += 1;
+                    continue;
+                };
+                let Some(nearest) = picks.iter().flatten().copied().reduce(f64::min) else {
+                    continue;
+                };
+                let stored = depth[(y * WIDTH + x) as usize];
+                assert!(
+                    stored > 0.0,
+                    "{scene:?}: ({x},{y}) picks ground the frame left empty"
+                );
+                let drawn = near * far / (f64::from(stored) * (far - near) + near);
+                assert!(
+                    (drawn / nearest - 1.0).abs() < 2e-3,
+                    "{scene:?}: ({x},{y}) picks ground {nearest} px away, the frame drew it {drawn} px away"
+                );
+                picked += 1;
+            }
+        }
+        assert!(picked > 150, "{scene:?}: {picked} pixels picked ground");
+        assert_eq!(
+            unknown, 0,
+            "{scene:?}: the settled frame has ground without DEM"
+        );
     }
 }

@@ -8,32 +8,28 @@
 use cgmath::{EuclideanSpace, InnerSpace, Point2, Vector2, Vector3};
 
 use crate::{
-    coords::{LatLon, Zoom, TILE_SIZE},
-    projection::{
-        body::Body,
-        globe::{camera::GlobeCameraState, ray_sphere_intersection, unit_sphere_to_lat_lon},
-    },
+    coords::{Zoom, TILE_SIZE},
+    projection::{body::Body, globe::camera::GlobeCameraState},
     render::{
         projection::{globe_camera_for_view, mercator_world_to_lat_lon},
         view_state::ViewState,
     },
     style::Style,
     tcs::{tiles::Tiles, world::World},
-    terrain::coverage::{TerrainCoverageIndex, TerrainSample},
+    terrain::{
+        coverage::{TerrainCoverageIndex, TerrainSample},
+        sightline::{pick_globe_terrain, DrawnTerrain, TerrainPick},
+    },
 };
 
 /// World pixels between ray samples on the flat map.
 const TARGET_WORLD_STEP_PX: f64 = 4.0;
 const MAX_SAMPLES: usize = 512;
 const MERCATOR_BISECT_EPSILON_WORLD_PX: f64 = 1e-3;
-const GLOBE_SAMPLES: usize = 256;
-const GLOBE_BISECT_EPSILON_T: f64 = 1e-12;
 const MAX_BISECTIONS: usize = 40;
 const HIT_EPSILON_METERS: f64 = 1e-6;
 /// An anchor this close to the camera's altitude above the center is unusable for a gesture.
 const TERRAIN_ANCHOR_MAX_CAMERA_ALTITUDE_FRACTION: f64 = 0.9;
-const MAX_VALID_LATITUDE: f64 = 85.051_128_779_806_59;
-const MAX_MERCATOR_Y: f64 = 1.0 - 1e-9;
 /// Distance assumed to the center when the camera looks away from the ground.
 const DISTANCE_TO_CENTER_WHEN_LOOKING_UP_METERS: f64 = 10_000.0;
 
@@ -71,13 +67,6 @@ fn uses_globe(style: &Style, view_state: &ViewState) -> bool {
             .projection_type
             .uses_globe_rendering(view_state.zoom().value())
     })
-}
-
-/// Mercator coordinates in `0..1` of a geographic location.
-fn lat_lon_to_mercator(location: LatLon) -> Point2<f64> {
-    let x = location.longitude / 360.0 + 0.5;
-    let y = (1.0 - location.latitude.to_radians().tan().asinh() / std::f64::consts::PI) * 0.5;
-    Point2::new(x, y.clamp(0.0, MAX_MERCATOR_Y))
 }
 
 fn is_below_terrain(sample: TerrainSample, height: f64) -> bool {
@@ -181,6 +170,10 @@ pub fn screen_point_to_terrain_mercator(
 }
 
 /// Casts the ray through a pixel of the globe against the rendered terrain.
+///
+/// `None` unless the ray meets drawn ground, a tile's or a polar cap's, before any ground no
+/// DEM describes; [`pick_globe_terrain`](crate::terrain::sightline::pick_globe_terrain) tells
+/// the sky and unknown ground apart.
 pub fn screen_point_to_terrain_globe(
     camera: &GlobeCameraState,
     index: &TerrainCoverageIndex,
@@ -190,52 +183,15 @@ pub fn screen_point_to_terrain_globe(
     if index.is_empty() {
         return None;
     }
-    let origin = camera.camera_position();
-    let direction = camera.ray_direction_from_pixel(pixel)?;
-    let outer = ray_sphere_intersection(
-        origin,
-        direction,
-        camera.body().unit_radius_at(index.max_elevation()),
-    )?;
-    let inner = ray_sphere_intersection(
-        origin,
-        direction,
-        camera.body().unit_radius_at(index.min_elevation()),
-    );
-    let t_start = outer.t_min.max(0.0);
-    let t_end = inner.map_or(outer.t_max, |inner| inner.t_min);
-    if t_end <= t_start {
-        return None;
-    }
-    let sample_at = |t: f64| {
-        let position = origin + direction * t;
-        let radius = position.magnitude();
-        let location = unit_sphere_to_lat_lon(position / radius);
-        let mercator = lat_lon_to_mercator(location);
-        let mut sample = index.sample(tiles, mercator.x, mercator.y);
-        if location.latitude.abs() > MAX_VALID_LATITUDE {
-            sample.elevation = 0.0;
-        }
-        (sample, radius, mercator)
+    let terrain = DrawnTerrain {
+        index,
+        tiles,
+        body: camera.body(),
     };
-    let below = |t: f64| {
-        let (sample, radius, _) = sample_at(t);
-        is_below_terrain(sample, (radius - 1.0) * camera.body().radius_meters)
-    };
-    let mut previous = 0.0;
-    for step in 0..=GLOBE_SAMPLES {
-        let t = t_start + (t_end - t_start) * step as f64 / GLOBE_SAMPLES as f64;
-        if below(t) {
-            let (_, hi) = bisect(below, previous, t, GLOBE_BISECT_EPSILON_T);
-            let (sample, _, mercator) = sample_at(hi);
-            return Some(TerrainHit {
-                mercator,
-                elevation: sample.elevation,
-            });
-        }
-        previous = t;
+    match pick_globe_terrain(camera, terrain, pixel) {
+        TerrainPick::Ground(hit) | TerrainPick::PolarCap(hit) => Some(hit),
+        TerrainPick::Sky | TerrainPick::Unknown => None,
     }
-    None
 }
 
 /// Casts the ray through a pixel against the rendered terrain of the active projection.

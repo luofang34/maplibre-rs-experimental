@@ -14,6 +14,14 @@ use crate::{
 const HORIZON_FALLBACK_RAY_LENGTH: f64 = 2.0;
 
 impl GlobeCameraState {
+    /// The viewport pixel of a point in normalized device coordinates.
+    pub fn ndc_to_pixel(&self, ndc: Point2<f64>) -> Point2<f64> {
+        Point2::new(
+            (ndc.x * 0.5 + 0.5) * self.options.width,
+            (-ndc.y * 0.5 + 0.5) * self.options.height,
+        )
+    }
+
     /// Returns a normalized world-space ray from the camera through a viewport pixel.
     pub fn ray_direction_from_pixel(&self, pixel: Point2<f64>) -> Option<Vector3<f64>> {
         let clip = Vector4::new(
