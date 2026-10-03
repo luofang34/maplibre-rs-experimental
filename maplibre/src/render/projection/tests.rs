@@ -454,5 +454,44 @@ mod orbit_target {
         assert_eq!(low.camera_position(), high.camera_position());
         assert_eq!(low.view_projection(), high.view_projection());
         assert_eq!(low.clipping_plane(), high.clipping_plane());
+        assert_eq!(low.target(), high.target());
+        // Nor does the elevation reach the projection data drawn with the eye.
+        let style = vertical_perspective();
+        state.set_center_elevation(0.0);
+        let low = super::super::projection_data_for_view(&style, &state).expect("data");
+        state.set_center_elevation(4000.0);
+        let high = super::super::projection_data_for_view(&style, &state).expect("data");
+        assert_eq!(low.center_clip_w, high.center_clip_w);
+        assert_eq!(low.main_matrix, high.main_matrix);
+    }
+
+    fn vertical_perspective() -> crate::style::Style {
+        serde_json::from_str(
+            r#"{"version":8,"sources":{},"layers":[],"projection":{"type":"vertical-perspective"}}"#,
+        )
+        .expect("style")
+    }
+
+    #[test]
+    fn screen_sizes_scale_with_the_distance_to_the_raised_target() {
+        let style = vertical_perspective();
+        let mut state = view();
+        state.set_globe_orbits_terrain(true);
+        state.set_center_elevation(4000.0);
+        let data = super::super::projection_data_for_view(&style, &state).expect("data");
+        let camera = globe_camera_for_view(&state).expect("camera");
+        let target_w = (camera.wgpu_view_projection() * camera.target().extend(1.0)).w;
+        let sea_level = camera.wgpu_view_projection()
+            * crate::projection::globe::lat_lon_to_unit_sphere(camera.center()).extend(1.0);
+        assert!(
+            (f64::from(data.center_clip_w) / target_w - 1.0).abs() < 1e-6,
+            "center w {} is not the raised target's {target_w}",
+            data.center_clip_w
+        );
+        assert!(
+            (target_w - sea_level.w).abs() > 1.0,
+            "the raised target and the sea-level center lie apart: {target_w} and {}",
+            sea_level.w
+        );
     }
 }

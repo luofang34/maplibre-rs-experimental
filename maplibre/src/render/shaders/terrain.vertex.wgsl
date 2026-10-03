@@ -130,14 +130,9 @@ fn main(
         terrain_tile.tile_mercator_coords,
     );
     if terrain_tile.globe_origin.w > 0.0 && !north_cap && !south_cap {
-        let globe = tile_relative_globe(position, elevation);
-        let transition = projection.transition_and_padding.x;
-        if transition >= 1.0 {
-            projected.clip_position = globe;
-        } else {
-            let flat = terrain_tile.transform * vec4<f32>(surface_position_2d, elevation, 1.0);
-            projected.clip_position = mix(flat, globe, transition);
-        }
+        let flat = terrain_tile.transform * vec4<f32>(surface_position_2d, elevation, 1.0);
+        projected.clip_position = blend_clip(flat, tile_relative_globe(position, elevation),
+            projection.transition_and_padding.x);
     }
     // The fog follows from the eye depth per fragment: it is not linear in depth, and the
     // triangles of a far tile span hundreds of kilometres, so a value found per vertex

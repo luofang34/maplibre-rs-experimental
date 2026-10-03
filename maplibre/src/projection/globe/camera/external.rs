@@ -62,6 +62,12 @@ impl GlobeCameraState {
         eye: ExternalGlobeEye,
     ) -> Result<Self, GlobeCameraError> {
         validate_options(options)?;
+        // The eye is where the host placed it; it orbits nothing, so no elevation raises the
+        // point the camera reports as its target.
+        let options = GlobeCameraOptions {
+            target_elevation_meters: 0.0,
+            ..options
+        };
         let clipping_plane = super::horizon_plane(eye.position, 1.0)?;
         let radius = globe_radius_pixels(options.world_size, options.center.latitude);
         // The eye's axes are expressed in sphere space, so their transpose takes sphere

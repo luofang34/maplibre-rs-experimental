@@ -98,6 +98,16 @@ fn globe_horizon_distance(
     return mix(-1.0, surface_distance, pow(pole_transition, 8.0));
 }
 
+// Blends a flat clip position into the globe's, all four components. The pure globe takes
+// nothing from the flat projection, whose infinities at the poles would survive a weight of
+// zero.
+fn blend_clip(flat: vec4<f32>, globe: vec4<f32>, transition: f32) -> vec4<f32> {
+    if transition >= 1.0 {
+        return globe;
+    }
+    return mix(flat, globe, transition);
+}
+
 fn interpolate_clip_position(
     mercator_clip: vec4<f32>,
     globe_clip: vec4<f32>,
@@ -183,12 +193,8 @@ fn project_tile_position_3d(
     let globe_clip = projection.main_matrix * vec4<f32>(elevated, 1.0);
     let is_pole = is_north_pole_y(tile_position.y) || is_south_pole_y(tile_position.y);
     let horizon_distance = globe_horizon_distance(surface, transition, is_pole);
-    // The inactive Mercator projection is undefined at the geographic poles.
-    if transition >= 1.0 {
-        return ProjectedTilePosition(globe_clip, horizon_distance);
-    }
     let mercator_clip = fallback_matrix * vec4<f32>(tile_position, 1.0);
-    return ProjectedTilePosition(mix(mercator_clip, globe_clip, transition), horizon_distance);
+    return ProjectedTilePosition(blend_clip(mercator_clip, globe_clip, transition), horizon_distance);
 }
 
 // Differentiate the globe analytically: subtracting two projected metre-scale positions
@@ -209,11 +215,8 @@ fn project_tile_tangent_3d(
     let tangent = (east * delta.x + south * delta.y) * cos_latitude *
         (1.0 + tile_position.z / projection.transition_and_padding.z);
     let globe = projection.main_matrix * vec4<f32>(tangent, 0.0);
-    if projection.transition_and_padding.x >= 1.0 {
-        return globe;
-    }
     let flat = fallback_matrix * vec4<f32>(offset, 0.0, 0.0);
-    return mix(flat, globe, projection.transition_and_padding.x);
+    return blend_clip(flat, globe, projection.transition_and_padding.x);
 }
 
 // Turns a unit-sphere vector by angles toward the tile's east and south, as a circle lying on
