@@ -381,4 +381,5 @@ async fn picks_land_where_the_frame_draws_the_ground() {
     }
 }
 
+mod poles;
 mod zoom;
