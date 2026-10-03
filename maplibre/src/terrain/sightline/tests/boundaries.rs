@@ -337,3 +337,99 @@ fn a_line_crossing_cells_at_their_corners_meets_the_first_triangle() {
     }
     assert!(checked > 200, "{checked} lines checked");
 }
+
+/// A zoom-6 camera at 88.5 degrees with its radius given, as a camera crossing the pole has it:
+/// the derived radius grows towards the pole.
+fn near_the_pole(pitch: f64, bearing: f64) -> crate::projection::globe::camera::GlobeCameraState {
+    crate::projection::globe::camera::GlobeCameraState::new(
+        crate::projection::globe::camera::GlobeCameraOptions {
+            width: 2330.0,
+            height: 1800.0,
+            field_of_view_degrees: 36.869_897_645_844_02,
+            center: LatLon::new(88.5, 10.0),
+            world_size: 512.0 * 2_f64.powi(6),
+            bearing_degrees: bearing,
+            pitch_degrees: pitch,
+            roll_degrees: 0.0,
+            center_offset: Point2::new(0.0, 0.0),
+            body: Body::EARTH,
+            target_elevation_meters: 0.0,
+            radius_pixels: Some(crate::projection::globe::scale::radius_pixels(6.0, 85.0)),
+        },
+    )
+    .expect("camera")
+}
+
+#[test]
+fn a_line_grazing_a_pole_meets_the_first_sector_of_its_cap() {
+    // The top row of zoom-3 tiles all round the north pole, level at 500 m, so the cap is a
+    // fan of 1024 narrow sectors meeting at the pole.
+    let rendered: Vec<WorldTileCoords> = (0..8)
+        .map(|x| WorldTileCoords {
+            x,
+            y: 0,
+            z: ZoomLevel::new(3),
+        })
+        .collect();
+    let loaded: Vec<WorldTileCoords> = (0..4)
+        .map(|x| WorldTileCoords {
+            x,
+            y: 0,
+            z: ZoomLevel::new(2),
+        })
+        .collect();
+    let ground = Ground::new(&rendered, &loaded, |_| 500.0);
+    let terrain = ground.terrain();
+    let sectors: Vec<[Vector3<f64>; 3]> = rendered
+        .iter()
+        .flat_map(|tile| {
+            (0..TERRAIN_MESH_SIZE).map(move |column| Cell {
+                tile: *tile,
+                column,
+                row: None,
+            })
+        })
+        .flat_map(|cell| terrain.triangles(cell))
+        .collect();
+    let mut checked = 0;
+    for (pitch, bearing) in [(50.0, 0.0), (70.0, 30.0), (20.0, 200.0)] {
+        let camera = near_the_pole(pitch, bearing);
+        let eye = camera.camera_position();
+        for from_pole in [0.001, 0.01, 0.1] {
+            for step in 0..24 {
+                let aim = LatLon::new(90.0 - from_pole, f64::from(step) * 15.0 - 180.0);
+                let view =
+                    target_view(&camera, None, aim, TargetAltitude::Drawn { meters: -200.0 });
+                // Aimed under the sea-level sphere, at the cap's chord; only the pixel matters.
+                let Some(pixel) = view
+                    .pixel
+                    .filter(|_| view.visibility != Visibility::OutsideFrustum)
+                else {
+                    continue;
+                };
+                let direction = camera.ray_direction_from_pixel(pixel).expect("ray");
+                let Some(first) = sectors
+                    .iter()
+                    .filter_map(|triangle| intersect(eye, direction, *triangle))
+                    .filter(|t| *t > 0.0)
+                    .reduce(f64::min)
+                else {
+                    continue;
+                };
+                let TerrainPick::PolarCap(hit) = pick_globe_terrain(&camera, terrain, pixel) else {
+                    panic!("{aim:?}: the line meets the cap, the pick does not");
+                };
+                let point = crate::projection::globe::lat_lon_to_unit_sphere(hit.location)
+                    * Body::EARTH.unit_radius_at(hit.elevation);
+                let found = (point - eye).magnitude();
+                assert!(
+                    (found - first).abs() * Body::EARTH.radius_meters < 1.0,
+                    "{aim:?}, pitch {pitch}: the pick lies {} m from the first sector",
+                    (found - first) * Body::EARTH.radius_meters
+                );
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked > 60, "{checked} lines checked");
+}
