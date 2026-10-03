@@ -63,6 +63,7 @@ fn new_york_eye(height: f64, pitch: f64, zoom: f64) -> GlobeCameraState {
             center_offset: Point2::new(0.0, 0.0),
             body: Body::EARTH,
             target_elevation_meters: 0.0,
+            radius_pixels: None,
         },
         ExternalGlobeEye {
             position,

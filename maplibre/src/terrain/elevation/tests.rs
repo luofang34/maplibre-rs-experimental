@@ -83,7 +83,7 @@ fn falls_back_to_a_loaded_ancestor_and_reports_no_coverage() {
 }
 
 #[test]
-fn only_pure_vertical_perspective_with_terrain_orbits_the_terrain() {
+fn only_pure_vertical_perspective_orbits_the_center_elevation() {
     let style = |projection: &str, terrain: bool| -> crate::style::Style {
         let terrain = if terrain {
             r#","terrain":{"source":"dem"}"#
@@ -96,8 +96,9 @@ fn only_pure_vertical_perspective_with_terrain_orbits_the_terrain() {
         .expect("style")
     };
     let vertical = r#","projection":{"type":"vertical-perspective"}"#;
-    assert!(super::globe_orbits_terrain(&style(vertical, true)));
-    assert!(!super::globe_orbits_terrain(&style(vertical, false)));
+    assert!(super::globe_orbits_center(&style(vertical, true)));
+    // Without terrain the center rests at its altitude, which the globe camera orbits too.
+    assert!(super::globe_orbits_center(&style(vertical, false)));
     for other in [
         r#","projection":{"type":"globe"}"#,
         r#","projection":{"type":"mercator"}"#,
@@ -105,7 +106,7 @@ fn only_pure_vertical_perspective_with_terrain_orbits_the_terrain() {
         "",
     ] {
         assert!(
-            !super::globe_orbits_terrain(&style(other, true)),
+            !super::globe_orbits_center(&style(other, true)),
             "{other} keeps the sea-level orbit"
         );
     }

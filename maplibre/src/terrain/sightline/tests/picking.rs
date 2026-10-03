@@ -159,6 +159,14 @@ fn rays_into_the_sky_and_onto_a_polar_cap_say_so() {
     let TerrainPick::PolarCap(hit) = pick else {
         panic!("the ray beyond the last row of tiles meets {pick:?}");
     };
+    // The hit names the point on the cap, past the Mercator world its coordinates stop at;
+    // the ray aimed at sea level carries on to the cap's chord below it.
+    assert!(
+        hit.location.latitude > 85.06 && hit.location.latitude < 86.0,
+        "the cap is met at {:?}",
+        hit.location
+    );
+    assert!(hit.mercator.y >= 0.0);
     // The fan's flat triangles span the 550 km from the last row to the pole, chords that sag
     // up to 6 km under the sphere.
     assert!(

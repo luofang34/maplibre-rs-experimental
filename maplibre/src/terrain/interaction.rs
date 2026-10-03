@@ -36,8 +36,10 @@ const DISTANCE_TO_CENTER_WHEN_LOOKING_UP_METERS: f64 = 10_000.0;
 /// Where a screen ray meets the terrain surface.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TerrainHit {
-    /// Mercator coordinates in `0..1`.
+    /// Mercator coordinates in `0..1`, held within the Mercator world's last row of tiles.
     pub mercator: Point2<f64>,
+    /// The point itself, a polar cap's beyond the Mercator world included.
+    pub location: crate::coords::LatLon,
     /// Exaggerated elevation in metres.
     pub elevation: f64,
 }
@@ -156,11 +158,13 @@ pub fn screen_point_to_terrain_mercator(
             } else {
                 hi
             };
+            let mercator = Point2::new(
+                (near.x + hit * delta.x) / world_size,
+                (near.y + hit * delta.y) / world_size,
+            );
             return Some(TerrainHit {
-                mercator: Point2::new(
-                    (near.x + hit * delta.x) / world_size,
-                    (near.y + hit * delta.y) / world_size,
-                ),
+                mercator,
+                location: crate::terrain::sightline::mercator_to_lat_lon(mercator),
                 elevation: sample_at(hit).elevation,
             });
         }
@@ -293,7 +297,8 @@ pub fn finish_gesture(style: &Style, view_state: &mut ViewState, world: &World) 
         return;
     }
     view_state.thaw_center_elevation();
-    if style.terrain.is_none() {
+    // Off the ground the center keeps its altitude; GL JS recomputes only a clamped center.
+    if style.terrain.is_none() || !view_state.center_clamped_to_ground() {
         return;
     }
     let Some(index) = world.resources.get::<TerrainCoverageIndex>() else {

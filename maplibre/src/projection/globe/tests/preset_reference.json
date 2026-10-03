@@ -1,0 +1,14 @@
+{
+  "doc": "References the globe preset is checked against. The renderer follows the GL JS implementation, whose render goldens at zoom 11 expect a full globe; the style specification documents the same preset starting at zoom 10.",
+  "implementation": {
+    "source": "maplibre-gl-js src/geo/projection/projection_factory.ts",
+    "version": "6.6.0",
+    "commit": "1e9194fdb",
+    "expression": ["interpolate", ["linear"], ["zoom"], 11, "vertical-perspective", 12, "mercator"]
+  },
+  "specification": {
+    "source": "maplibre-style-spec docs/types.md, projectionDefinition",
+    "tag": "v26.4.0",
+    "expression": ["interpolate", ["linear"], ["zoom"], 10, "vertical-perspective", 12, "mercator"]
+  }
+}

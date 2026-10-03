@@ -228,7 +228,9 @@ impl Plugin<HeadlessEnvironment> for HeadlessPlugin {
         schedule.add_stage_before(
             RenderStageLabel::Prepare,
             RenderStageLabel::Extract,
-            SystemStage::default().with_system(frame_input_system),
+            SystemStage::default()
+                .with_system(frame_input_system)
+                .with_system(crate::terrain::elevation::center_target_system),
         );
         if !self.preserve_tile_sources {
             resources.get_mut::<ViewTileSources>().unwrap().clear();

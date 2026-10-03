@@ -7,7 +7,7 @@
 use cgmath::{InnerSpace, Matrix, Matrix3, Matrix4, SquareMatrix, Vector3, Vector4};
 
 use super::{validate_options, GlobeCameraError, GlobeCameraOptions, GlobeCameraState};
-use crate::{projection::globe::globe_radius_pixels, render::camera::EyeFrustum};
+use crate::render::camera::EyeFrustum;
 
 /// An eye placed in unit-sphere coordinates.
 #[derive(Clone, Copy, Debug)]
@@ -69,7 +69,7 @@ impl GlobeCameraState {
             ..options
         };
         let clipping_plane = super::horizon_plane(eye.position, 1.0)?;
-        let radius = globe_radius_pixels(options.world_size, options.center.latitude);
+        let radius = super::radius_pixels(options);
         // The eye's axes are expressed in sphere space, so their transpose takes sphere
         // space into the eye's; the sphere is scaled to pixels first.
         let view = Matrix4::from(eye.axes.transpose())

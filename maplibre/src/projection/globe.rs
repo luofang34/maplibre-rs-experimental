@@ -13,6 +13,7 @@ pub mod camera;
 pub mod covering;
 pub mod covering_tiles;
 pub mod interaction;
+pub mod scale;
 pub mod subdivision;
 pub mod tile_mesh;
 

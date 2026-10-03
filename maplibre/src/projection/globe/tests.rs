@@ -195,3 +195,38 @@ fn generated_surface_vectors_are_normalized() {
     let point = lat_lon_to_unit_sphere(LatLon::new(23.0, 47.0));
     assert_close(point.magnitude2(), 1.0);
 }
+
+#[test]
+fn the_globe_preset_is_the_implementation_s_expression_and_the_documented_one_stays_itself() {
+    use crate::projection::{ProjectionSpecification, ProjectionType};
+    let reference: serde_json::Value =
+        serde_json::from_str(include_str!("tests/preset_reference.json")).expect("reference");
+    let parse = |expression: &serde_json::Value| {
+        serde_json::from_value::<ProjectionSpecification>(serde_json::json!({ "type": expression }))
+            .expect("projection")
+            .projection_type
+    };
+    let implementation = parse(&reference["implementation"]["expression"]);
+    let documented = parse(&reference["specification"]["expression"]);
+    let preset = parse(&serde_json::json!("globe"));
+    assert_eq!(preset, ProjectionType::Globe, "the preset keeps its name");
+    for step in 0..=80 {
+        let zoom = 8.0 + f64::from(step) * 0.075;
+        assert_eq!(
+            preset.globe_transition(zoom),
+            implementation.globe_transition(zoom),
+            "zoom {zoom}: the preset departs from the implementation it follows"
+        );
+    }
+    // The documented expression, written out in a style, is evaluated as written.
+    assert_eq!(documented.globe_transition(11.0), 0.5);
+    assert_eq!(preset.globe_transition(11.0), 1.0);
+    assert_eq!(
+        serde_json::to_value(ProjectionSpecification {
+            projection_type: preset
+        })
+        .expect("serialize"),
+        serde_json::json!({"type": "globe"}),
+        "the preset is written back as its name, not expanded"
+    );
+}

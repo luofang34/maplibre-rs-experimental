@@ -419,7 +419,7 @@ mod orbit_target {
             1.0,
             "the preset orbits sea level"
         );
-        state.set_globe_orbits_terrain(true);
+        state.set_globe_orbits_center(true);
         let raised = globe_camera_for_view(&state).expect("camera");
         let expected = 1.0 + 4000.0 / state.body().radius_meters;
         assert!(
@@ -432,7 +432,7 @@ mod orbit_target {
     #[test]
     fn a_hosts_eye_stays_where_it_is_placed_whatever_the_center_elevation() {
         let mut state = view();
-        state.set_globe_orbits_terrain(true);
+        state.set_globe_orbits_center(true);
         let external = ExternalView {
             anchor: ExternalAnchor {
                 position: LatLon::new(27.765, 88.054),
@@ -477,7 +477,7 @@ mod orbit_target {
     fn screen_sizes_scale_with_the_distance_to_the_raised_target() {
         let style = vertical_perspective();
         let mut state = view();
-        state.set_globe_orbits_terrain(true);
+        state.set_globe_orbits_center(true);
         state.set_center_elevation(4000.0);
         let data = super::super::projection_data_for_view(&style, &state).expect("data");
         let camera = globe_camera_for_view(&state).expect("camera");

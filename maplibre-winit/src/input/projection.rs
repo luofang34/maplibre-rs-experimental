@@ -11,7 +11,10 @@ use maplibre::{
             GlobePanUpdate,
         },
     },
-    render::{projection::globe_camera_for_view, view_state::ViewState},
+    render::{
+        projection::globe_camera_for_view,
+        view_state::{NavigationMode, ViewState},
+    },
     style::Style,
     terrain::interaction::pan_mercator_by_pixels,
 };
@@ -65,6 +68,10 @@ pub fn pan_globe_by_pixels(
     cursor: Vector2<f64>,
     delta: Vector2<f64>,
 ) -> bool {
+    if view_state.navigation_mode() == NavigationMode::FreeGlobe {
+        let to = Point2::new(cursor.x, cursor.y);
+        return view_state.drag_free_globe(to - delta, to);
+    }
     let Some(camera) = active_globe_camera(style, view_state) else {
         return false;
     };
@@ -107,6 +114,10 @@ pub fn zoom_globe_around_pixel(
     screen: Vector2<f64>,
     next_zoom: Zoom,
 ) -> bool {
+    if view_state.navigation_mode() == NavigationMode::FreeGlobe {
+        let delta = next_zoom.value() - view_state.zoom().value();
+        return view_state.zoom_free_globe(Point2::new(screen.x, screen.y), delta);
+    }
     let Some(before) = active_globe_camera(style, view_state) else {
         return false;
     };

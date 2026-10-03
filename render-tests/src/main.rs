@@ -69,6 +69,8 @@ struct TestMeta {
     padding: camera_options::Padding,
     /// Elevation the fixture pins the camera's center at.
     center_elevation: Option<f64>,
+    /// Vertical field of view in degrees the fixture's operations leave.
+    vertical_field_of_view: Option<f64>,
     /// Sources whose tiles stop loading, with the zoom the camera was at when they were paused.
     paused_tiles: std::collections::HashMap<String, f64>,
     /// The zoom the last `setZoom` left, and when.
@@ -92,6 +94,7 @@ impl Default for TestMeta {
             query: None,
             padding: camera_options::Padding::default(),
             center_elevation: None,
+            vertical_field_of_view: None,
             paused_tiles: std::collections::HashMap::new(),
             zoom_change: None,
             waited: 0.0,
@@ -152,6 +155,7 @@ fn parse_test_meta(style_value: &Value) -> TestMeta {
         },
         padding: camera_options::Padding::default(),
         center_elevation: None,
+        vertical_field_of_view: None,
         paused_tiles: std::collections::HashMap::new(),
         zoom_change: None,
         waited: 0.0,

@@ -214,6 +214,12 @@ impl DrawnTerrain<'_> {
         drawn: &mut HashMap<Cell, Vec<[Vector3<f64>; 3]>>,
     ) -> Option<GroundCrossing> {
         let mut cells: Vec<Cell> = Vec::new();
+        let mut seen: std::collections::HashSet<Cell> = std::collections::HashSet::new();
+        let mut add = |cell: Cell| {
+            if seen.insert(cell) {
+                cells.push(cell);
+            }
+        };
         for end in ends {
             for cell in self.cells_at(end.mercator, end.polar) {
                 for other in ends {
@@ -235,10 +241,28 @@ impl DrawnTerrain<'_> {
                         },
                     ];
                     for crossed in crossed {
-                        if !cells.contains(&crossed) {
-                            cells.push(crossed);
-                        }
+                        add(crossed);
                     }
+                }
+            }
+        }
+        // Near a pole a short stretch sweeps across many sectors of the cap's fan; every sector
+        // between the longitudes of its ends is tested.
+        if let Some(polar) = ends.iter().find(|end| end.polar) {
+            let edge = if polar.mercator.y < 0.5 {
+                0.0
+            } else {
+                MAX_MERCATOR_Y
+            };
+            let sector =
+                1.0 / (2_f64.powi(i32::from(self.index.finest_zoom().unwrap_or(0))) * CELLS);
+            let from_x = ends[0].mercator.x;
+            let arc = (ends[1].mercator.x - from_x + 0.5).rem_euclid(1.0) - 0.5;
+            let steps = (arc.abs() / (sector * 0.5)).ceil() as usize;
+            for step in 0..=steps {
+                let x = from_x + arc * step as f64 / steps.max(1) as f64;
+                for cell in self.cells_at(Point2::new(x - x.floor(), edge), true) {
+                    add(cell);
                 }
             }
         }
@@ -286,7 +310,10 @@ impl DrawnTerrain<'_> {
         let minimum = MIN_STEP_METERS / radius;
         let bounded = |bound: f64, fine: f64| (bound.max(fine).max(minimum), bound >= fine);
         if probe.polar {
-            return bounded((probe.height - self.ceiling()) / radius, self.finest_step());
+            return bounded(
+                (probe.height - self.ceiling()) / radius,
+                self.finest_step(probe.mercator),
+            );
         }
         let Some((tile, _)) = probe.tile else {
             // Outside the rendered tiles nothing is drawn until the line enters one, and every
@@ -302,7 +329,7 @@ impl DrawnTerrain<'_> {
                 TileFootprint::of(cell).distance_to_edge(probe.mercator),
                 probe.radius,
             );
-            let (step, _) = bounded(inside, self.finest_step());
+            let (step, _) = bounded(inside, self.finest_step(probe.mercator));
             // Nothing is drawn here, but a step past the cell may reach a rendered tile.
             return (step, inside >= step);
         };
@@ -312,7 +339,7 @@ impl DrawnTerrain<'_> {
         // fraction of this tile's; a stretch into it advances half of the finest cell, so the
         // cells under its ends still hold everything it passes over.
         let fine = if edge < footprint.width / CELLS {
-            self.finest_step()
+            self.finest_step(probe.mercator)
         } else {
             footprint.width / (CELLS * STEPS_PER_CELL)
         };
@@ -324,10 +351,18 @@ impl DrawnTerrain<'_> {
         bounded(above.min(track_budget(edge, probe.radius)), fine)
     }
 
-    /// The finest step any rendered tile asks for.
-    fn finest_step(&self) -> f64 {
+    /// Half the width of the finest rendered cell at `mercator`, measured on the pole-ward
+    /// row of the finest zoom's tile there, the narrowest any rendered cell can be; over a cap,
+    /// the last row's.
+    fn finest_step(&self, mercator: Point2<f64>) -> f64 {
         let zoom = self.index.finest_zoom().unwrap_or(0);
-        std::f64::consts::TAU / 2_f64.powi(i32::from(zoom)) / (CELLS * STEPS_PER_CELL)
+        let scale = 2_f64.powi(i32::from(zoom));
+        let tile = WorldTileCoords {
+            x: ((mercator.x - mercator.x.floor()) * scale).floor() as i32,
+            y: (mercator.y.clamp(0.0, MAX_MERCATOR_Y) * scale).floor() as i32,
+            z: crate::coords::ZoomLevel::new(zoom),
+        };
+        TileFootprint::of(tile).width / (CELLS * STEPS_PER_CELL)
     }
 }
 

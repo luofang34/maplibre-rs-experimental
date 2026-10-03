@@ -16,10 +16,7 @@ use crate::{
     },
     render::{projection::globe_camera_for_view, view_state::ViewState},
     tcs::world::World,
-    terrain::{
-        coverage::TerrainCoverageIndex,
-        sightline::{lat_lon_to_mercator, mercator_to_lat_lon},
-    },
+    terrain::{coverage::TerrainCoverageIndex, sightline::lat_lon_to_mercator},
 };
 
 /// Corrections that place an anchor at its pixel; the zoom adjustment of each is small, so
@@ -37,10 +34,14 @@ pub struct TerrainAnchor {
     pub elevation: f64,
 }
 
-/// The eye and the raised target of a view whose globe camera orbits the terrain, in
-/// unit-sphere space; `None` for any other camera, a host's eye included.
+/// The eye and the raised target of a north-locked view whose globe camera orbits the
+/// terrain, in unit-sphere space; `None` for any other camera, a host's eye and a free-globe
+/// camera, which moves by its own pose, included.
 pub fn globe_pose(view_state: &ViewState) -> Option<(Vector3<f64>, Vector3<f64>)> {
-    if !view_state.globe_orbits_terrain() || view_state.has_external_view() {
+    if !view_state.globe_orbits_center()
+        || view_state.has_external_view()
+        || view_state.navigation_mode() == crate::render::view_state::NavigationMode::FreeGlobe
+    {
         return None;
     }
     let camera = globe_camera_for_view(view_state).ok()?;
@@ -207,7 +208,7 @@ pub fn terrain_anchor_at(
     globe_pose(view_state)?;
     let hit = super::screen_point_to_terrain(style, view_state, world, pixel)?;
     Some(TerrainAnchor {
-        location: mercator_to_lat_lon(hit.mercator),
+        location: hit.location,
         elevation: hit.elevation,
     })
 }

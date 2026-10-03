@@ -164,6 +164,16 @@ pub(super) fn draw_overlay(
         .map_err(|error| format!("Cannot save the padding overlay: {error}"))
 }
 
+/// The vertical field of view in degrees the last `setVerticalFieldOfView` leaves.
+pub(super) fn vertical_field_of_view(operations: &[Value]) -> Option<f64> {
+    operations
+        .iter()
+        .filter_map(Value::as_array)
+        .rfind(|items| items.first().and_then(Value::as_str) == Some("setVerticalFieldOfView"))
+        .and_then(|items| items.get(1))
+        .and_then(Value::as_f64)
+}
+
 /// The elevation of the camera's center that the last `setCenterElevation` leaves, when the
 /// fixture also unclamps the center from the ground so terrain cannot move it.
 pub(super) fn pinned_center_elevation(operations: &[Value]) -> Option<f64> {

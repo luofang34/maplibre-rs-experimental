@@ -152,6 +152,7 @@ pub(crate) fn camera(center: LatLon, pitch: f64, bearing: f64, elevation: f64) -
         center_offset: Point2::new(0.0, 0.0),
         body: Body::EARTH,
         target_elevation_meters: elevation,
+        radius_pixels: None,
     })
     .expect("camera")
 }

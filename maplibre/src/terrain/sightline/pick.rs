@@ -49,6 +49,7 @@ pub fn pick_globe_terrain(
         (Some(ground), None) => {
             let hit = TerrainHit {
                 mercator: lat_lon_to_mercator(ground.location),
+                location: ground.location,
                 elevation: ground.elevation,
             };
             if ground.polar {

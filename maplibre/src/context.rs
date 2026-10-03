@@ -31,4 +31,36 @@ impl MapContext {
         // A new surface holds nothing, even when the logical size and so the camera are unchanged.
         crate::render::frame_signals::mark_dirty(&mut self.world);
     }
+
+    /// Switches how the camera navigates the globe, for the style's projection: free-globe
+    /// navigation needs the pure `vertical-perspective` projection.
+    pub fn set_navigation_mode(
+        &mut self,
+        mode: crate::render::view_state::NavigationMode,
+    ) -> Result<(), crate::render::view_state::NavigationError> {
+        let projection = self
+            .style
+            .projection
+            .as_ref()
+            .map_or_else(Default::default, |projection| {
+                projection.projection_type.clone()
+            });
+        self.view_state.set_navigation_mode(mode, &projection)
+    }
+
+    /// Restores a stored free-globe pose, for the style's projection: it must be the pure
+    /// `vertical-perspective` projection.
+    pub fn restore_globe_pose(
+        &mut self,
+        pose: crate::render::view_state::GlobePose,
+    ) -> Result<(), crate::render::view_state::NavigationError> {
+        let projection = self
+            .style
+            .projection
+            .as_ref()
+            .map_or_else(Default::default, |projection| {
+                projection.projection_type.clone()
+            });
+        self.view_state.restore_globe_pose(pose, &projection)
+    }
 }

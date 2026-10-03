@@ -22,6 +22,7 @@ fn options() -> GlobeCameraOptions {
 
         body: Body::EARTH,
         target_elevation_meters: 0.0,
+        radius_pixels: None,
     }
 }
 
@@ -194,3 +195,6 @@ fn wgpu_view_projection_maps_near_to_one_and_far_to_zero() {
 
 #[path = "tests/target.rs"]
 mod target;
+
+#[path = "tests/radius.rs"]
+mod radius;

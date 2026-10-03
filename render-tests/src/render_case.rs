@@ -48,6 +48,9 @@ async fn render_fixture(test_dir: &Path) -> Result<(f64, f64), String> {
     if let Some(meters) = meta.center_elevation {
         map.pin_center_elevation(meters);
     }
+    if let Some(degrees) = meta.vertical_field_of_view {
+        map.set_vertical_field_of_view(cgmath::Deg(degrees));
+    }
     let mut coords = map
         .required_tile_coords()
         .map_err(|error| format!("Cannot select source tiles: {error}"))?;
@@ -147,6 +150,7 @@ fn load_style_blocking(
     let operations = crate::operations::operations_of(&value);
     meta.padding = crate::camera_options::padding_of(&operations);
     meta.center_elevation = crate::camera_options::pinned_center_elevation(&operations);
+    meta.vertical_field_of_view = crate::camera_options::vertical_field_of_view(&operations);
     let mut transitions = crate::transitions::Transitions::extract(&mut value);
     let mut style: Style = serde_json::from_value(value.clone())
         .map_err(|error| format!("Cannot deserialize Style: {error}"))?;
