@@ -432,6 +432,14 @@ impl HeadlessMap {
         view_state.set_center_altitude(meters);
     }
 
+    /// Switches how the camera navigates the globe, for the style's projection.
+    pub fn set_navigation_mode(
+        &mut self,
+        mode: crate::render::view_state::NavigationMode,
+    ) -> Result<(), crate::render::view_state::NavigationError> {
+        self.map_context.set_navigation_mode(mode)
+    }
+
     /// Sets the full vertical field of view, as the GL JS `verticalFieldOfView` map option.
     pub fn set_vertical_field_of_view(&mut self, field_of_view: cgmath::Deg<f64>) {
         self.map_context

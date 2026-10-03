@@ -61,6 +61,13 @@ pub fn center_target_system(
     }: &mut MapContext,
 ) -> SystemResult {
     view_state.set_globe_orbits_center(globe_orbits_center(style));
+    let projection = style
+        .projection
+        .as_ref()
+        .map_or_else(Default::default, |projection| {
+            projection.projection_type.clone()
+        });
+    view_state.enforce_navigation(&projection);
     let off_ground = style.terrain.is_none() || !view_state.center_clamped_to_ground();
     if off_ground && !view_state.center_elevation_frozen() {
         view_state.set_center_elevation(view_state.center_altitude());
@@ -89,8 +96,20 @@ pub fn center_elevation_system(
         return Ok(());
     };
     let zoom = view_state.zoom();
-    let center = view_state.camera().position();
     let world_size = TILE_SIZE * 2_f64.powf(zoom.value());
+    // A free-globe camera may look past the last row of tiles, where the cap closes the
+    // globe at sea level; the flat center stops at that row.
+    if let Some(pose) = view_state.pose_view() {
+        if pose.center.latitude.abs() > crate::projection::globe::scale::MERCATOR_LATITUDE_LIMIT {
+            let follows_ground =
+                view_state.center_clamped_to_ground() && !view_state.center_elevation_frozen();
+            if follows_ground {
+                view_state.set_center_elevation(0.0);
+            }
+            return Ok(());
+        }
+    }
+    let center = view_state.camera().position();
     // GL JS lifts the centre by the terrain tile at the integer zoom, not by the tile drawn
     // under it, which a coarser level may stand in for at a distance.
     let tile_zoom = zoom.value().floor().clamp(0.0, f64::from(u8::MAX)) as u8;

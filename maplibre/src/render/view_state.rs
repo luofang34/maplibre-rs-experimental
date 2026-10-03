@@ -53,6 +53,10 @@ pub struct ViewState {
     center: center::CenterElevation,
     /// Lowest terrain elevation in metres among visible tiles, used for the far plane.
     min_elevation: f64,
+    /// The free-globe camera, while navigation is free.
+    free_globe: Option<navigation::FreeGlobe>,
+    /// Why free navigation last ended without the host asking.
+    navigation_limit: Option<navigation::NavigationLimit>,
     /// The body the map is drawn on; its radius turns metres into pixels.
     body: Body,
     /// The eye a host supplied, which replaces the map's perspective and, on the globe, its
@@ -101,6 +105,8 @@ impl ViewState {
             },
             center: center::CenterElevation::default(),
             min_elevation: 0.0,
+            free_globe: None,
+            navigation_limit: None,
             body: Body::default(),
             external_eye: None,
             request_overscan: 1.0,
@@ -450,6 +456,7 @@ impl ViewState {
 mod center;
 mod external;
 mod horizon;
+mod navigation;
 mod pose;
 mod screen;
 mod unprojection;
@@ -457,6 +464,7 @@ mod unprojection;
 use external::ExternalEye;
 pub use external::{ExternalAnchor, ExternalView, ExternalViewError};
 pub use horizon::HorizonLine;
+pub use navigation::{GlobePose, NavigationError, NavigationLimit, NavigationMode};
 pub use pose::CameraPose;
 
 #[cfg(test)]

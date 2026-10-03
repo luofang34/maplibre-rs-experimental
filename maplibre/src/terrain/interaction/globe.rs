@@ -34,10 +34,14 @@ pub struct TerrainAnchor {
     pub elevation: f64,
 }
 
-/// The eye and the raised target of a view whose globe camera orbits the terrain, in
-/// unit-sphere space; `None` for any other camera, a host's eye included.
+/// The eye and the raised target of a north-locked view whose globe camera orbits the
+/// terrain, in unit-sphere space; `None` for any other camera, a host's eye and a free-globe
+/// camera, which moves by its own pose, included.
 pub fn globe_pose(view_state: &ViewState) -> Option<(Vector3<f64>, Vector3<f64>)> {
-    if !view_state.globe_orbits_center() || view_state.has_external_view() {
+    if !view_state.globe_orbits_center()
+        || view_state.has_external_view()
+        || view_state.navigation_mode() == crate::render::view_state::NavigationMode::FreeGlobe
+    {
         return None;
     }
     let camera = globe_camera_for_view(view_state).ok()?;

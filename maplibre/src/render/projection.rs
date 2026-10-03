@@ -264,10 +264,20 @@ pub fn projection_data_for_view(
 pub fn globe_camera_for_view(
     view_state: &ViewState,
 ) -> Result<GlobeCameraState, ProjectionStateError> {
-    let world_size = TILE_SIZE * 2.0_f64.powf(view_state.zoom().value());
-    let camera_position = view_state.camera().position();
-    let center = mercator_world_to_lat_lon(camera_position.x, camera_position.y, world_size);
     let external_eye = view_state.external_globe_eye();
+    // A free-globe camera is drawn from its pose; a host's eye replaces either.
+    let pose = view_state.pose_view().filter(|_| external_eye.is_none());
+    let world_size = TILE_SIZE
+        * 2.0_f64.powf(
+            pose.as_ref()
+                .map_or(view_state.zoom().value(), |pose| pose.style_zoom),
+        );
+    let camera_position = view_state.camera().position();
+    let center = pose.as_ref().map_or_else(
+        || mercator_world_to_lat_lon(camera_position.x, camera_position.y, world_size),
+        |pose| pose.center,
+    );
+    let angle = |free: Option<f64>, flat: f64| free.unwrap_or(flat);
     let options = GlobeCameraOptions {
         width: view_state.width(),
         height: view_state.height(),
@@ -277,9 +287,18 @@ pub fn globe_camera_for_view(
         ),
         center,
         world_size,
-        bearing_degrees: view_state.camera().get_bearing().0.to_degrees(),
-        pitch_degrees: view_state.camera().get_pitch().0.to_degrees(),
-        roll_degrees: view_state.camera().get_roll().0.to_degrees(),
+        bearing_degrees: angle(
+            pose.as_ref().map(|pose| pose.bearing_degrees),
+            view_state.camera().get_bearing().0.to_degrees(),
+        ),
+        pitch_degrees: angle(
+            pose.as_ref().map(|pose| pose.pitch_degrees),
+            view_state.camera().get_pitch().0.to_degrees(),
+        ),
+        roll_degrees: angle(
+            pose.as_ref().map(|pose| pose.roll_degrees),
+            view_state.camera().get_roll().0.to_degrees(),
+        ),
         center_offset: external_eye
             .map_or_else(|| view_state.center_offset(), |_| Point2::new(0.0, 0.0)),
         body: view_state.body(),
@@ -289,7 +308,7 @@ pub fn globe_camera_for_view(
         } else {
             0.0
         },
-        radius_pixels: None,
+        radius_pixels: pose.as_ref().map(|pose| pose.radius_pixels),
     };
     match external_eye {
         Some(eye) => GlobeCameraState::from_external_eye(options, eye),

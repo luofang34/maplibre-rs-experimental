@@ -70,7 +70,7 @@ pub struct FrameSignals {
     animating: bool,
     host_frame: u64,
     /// The camera each eye drew last, by eye index; a map without eyes is eye 0.
-    cameras: Vec<[f64; 16]>,
+    cameras: Vec<[f64; 24]>,
 }
 
 fn signals(world: &mut World) -> &mut FrameSignals {
@@ -164,15 +164,21 @@ pub(crate) fn host_frame_in_progress(world: &World) -> u64 {
     }
 }
 
-fn camera(context: &MapContext) -> [f64; 16] {
+fn camera(context: &MapContext) -> [f64; 24] {
     camera_of(&context.view_state)
 }
 
-fn camera_of(view_state: &crate::render::view_state::ViewState) -> [f64; 16] {
+fn camera_of(view_state: &crate::render::view_state::ViewState) -> [f64; 24] {
     let matrix: [[f64; 4]; 4] = view_state.view_projection().0.into();
-    let mut flat = [0.0; 16];
+    let mut flat = [0.0; 24];
     for (column, values) in matrix.iter().enumerate() {
         flat[column * 4..column * 4 + 4].copy_from_slice(values);
+    }
+    // Over a cap the flat camera stops at the last row of tiles while a free pose moves on.
+    if let Some(pose) = view_state.globe_pose() {
+        flat[16..19].copy_from_slice(&pose.target);
+        flat[19..23].copy_from_slice(&pose.orientation);
+        flat[23] = pose.distance_meters;
     }
     flat
 }
