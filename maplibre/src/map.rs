@@ -466,9 +466,7 @@ fn initial_view_state(
         .set_bearing(cgmath::Deg(style.bearing.unwrap_or_default()));
     view.camera_mut()
         .set_roll(cgmath::Deg(style.roll.unwrap_or_default()));
-    if let Some(meters) = style.center_altitude {
-        view.set_center_altitude(meters);
-    }
+    view.take_style_center(style);
     view
 }
 

@@ -18,6 +18,8 @@ pub(super) struct CenterElevation {
     clamped_to_ground: bool,
     /// Whether a gesture holds the elevation still, as GL JS `elevationFreeze` does.
     frozen: bool,
+    /// Whether terrain is drawn, so a clamped center rests on it.
+    terrain: bool,
     /// Whether the globe camera orbits the center's elevation rather than sea level.
     globe_orbits: bool,
 }
@@ -29,6 +31,7 @@ impl Default for CenterElevation {
             altitude: 0.0,
             clamped_to_ground: true,
             frozen: false,
+            terrain: false,
             globe_orbits: false,
         }
     }
@@ -60,6 +63,26 @@ impl ViewState {
             self.center.altitude = meters;
             self.center.elevation = meters;
         }
+    }
+
+    /// Takes the style's initial center altitude, and whether it draws terrain under the
+    /// center, as the view starts.
+    pub(crate) fn take_style_center(&mut self, style: &crate::style::Style) {
+        if let Some(meters) = style.center_altitude {
+            self.set_center_altitude(meters);
+        }
+        self.set_center_over_terrain(style.terrain.is_some());
+    }
+
+    /// Whether terrain holds the center: terrain is drawn and the center is clamped to it.
+    pub fn center_held_by_terrain(&self) -> bool {
+        self.center.terrain && self.center.clamped_to_ground
+    }
+
+    /// Records whether terrain is drawn, which decides with the clamp whether it holds the
+    /// center.
+    pub fn set_center_over_terrain(&mut self, terrain: bool) {
+        self.center.terrain = terrain;
     }
 
     /// Whether the center follows the terrain under it, as GL JS `centerClampedToGround`.

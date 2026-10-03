@@ -78,8 +78,8 @@ pub enum NavigationError {
         /// The latitude of the free camera's target.
         latitude: f64,
     },
-    /// The pose is not finite, its target or orientation has no direction, or its distance is
-    /// not positive.
+    /// The pose is not finite, its target or orientation has no direction, its distance is not
+    /// positive, or no globe camera can be drawn from it, as when its eye ends inside the body.
     #[error("invalid globe pose {pose:?}")]
     InvalidPose {
         /// The rejected pose.
@@ -264,21 +264,45 @@ impl ViewState {
         {
             return Err(NavigationError::InvalidPose { pose });
         }
-        self.free_globe = Some(FreeGlobe {
+        let free = FreeGlobe {
             target: target.normalize(),
             orientation: orientation.normalize(),
             distance_meters: pose.distance_meters,
+        };
+        // Off the ground the pose's target height is where the center rests from now on. On
+        // it the terrain under the target decides the height from the next frame, and the
+        // altitude the center rests at once off the ground again, the style's centerAltitude
+        // or the host's, stays as it was.
+        let placed = self.place_free_globe(free, |view| {
+            if view.center_held_by_terrain() {
+                view.set_center_elevation(pose.target_elevation_meters);
+            } else {
+                view.set_center_altitude(pose.target_elevation_meters);
+            }
         });
-        // The pose's target height is where the center rests off the ground; while terrain
-        // holds the center to the ground, the ground decides it from the next frame.
-        self.set_center_altitude(pose.target_elevation_meters);
+        if placed {
+            Ok(())
+        } else {
+            Err(NavigationError::InvalidPose { pose })
+        }
+    }
+
+    /// Puts the free-globe camera at `free`, with `height` applied, if the globe camera can be
+    /// drawn from it, as one past 90 degrees of pitch can when it looks up at a raised target,
+    /// but not one whose eye ends inside the body; otherwise the view stays as it was.
+    fn place_free_globe(&mut self, free: FreeGlobe, height: impl FnOnce(&mut Self)) -> bool {
+        let before = self.clone();
+        self.free_globe = Some(free);
+        height(self);
         self.sync_flat_camera();
-        Ok(())
+        self.keep_if_drawable(before)
     }
 
     /// Turns the free-globe camera of `from` about its target: its bearing by `bearing` and its
-    /// pitch by `pitch`, the pitch kept between straight down and the camera's limit. The target,
-    /// distance and roll stay. A drag hands the pose it started from with its whole turn so far.
+    /// pitch by `pitch`, the pitch kept between straight down and the camera's limit, or the
+    /// pose's own pitch where a host placed it past the limit, so a turn never jumps. The
+    /// target, distance and roll stay, and the center's height is left to whatever holds it. A
+    /// drag hands the pose it started from with its whole turn so far.
     pub fn orbit_globe_pose(
         &mut self,
         from: GlobePose,
@@ -297,23 +321,41 @@ impl ViewState {
             distance_meters: from.distance_meters,
         };
         let (center, start_bearing, start_pitch, roll) = start.decompose();
-        let limit = self.camera().max_pitch().0.to_degrees();
+        let limit = self
+            .camera()
+            .max_pitch()
+            .0
+            .to_degrees()
+            .max(start_pitch)
+            .min(180.0);
         let turned = view_rotation(
             center,
             start_bearing + bearing.0.to_degrees(),
             (start_pitch + pitch.0.to_degrees()).clamp(0.0, limit),
             roll,
         );
-        let orientation = Quaternion::from(turned);
-        self.set_globe_pose(GlobePose {
-            orientation: [
-                orientation.s,
-                orientation.v.x,
-                orientation.v.y,
-                orientation.v.z,
-            ],
-            ..from
-        })
+        if self.has_external_view() {
+            return Err(NavigationError::ExternalView);
+        }
+        let turned = FreeGlobe {
+            orientation: Quaternion::from(turned).normalize(),
+            ..start
+        };
+        if self.place_free_globe(turned, |_| {}) {
+            Ok(())
+        } else {
+            Err(NavigationError::InvalidPose {
+                pose: GlobePose {
+                    orientation: [
+                        turned.orientation.s,
+                        turned.orientation.v.x,
+                        turned.orientation.v.y,
+                        turned.orientation.v.z,
+                    ],
+                    ..from
+                },
+            })
+        }
     }
 
     /// Ends free navigation when the projection no longer allows it, recording why.

@@ -9,6 +9,10 @@ use crate::{projection::globe::lat_lon_to_unit_sphere, render::projection::globe
 /// Corrections that bring a zoom's anchor back under its pixel.
 const ANCHOR_PASSES: usize = 6;
 
+/// Times a zoom step that leaves no drawable camera is halved before the zoom stops, which
+/// brings it within a thousandth of the step of the last distance a camera can be drawn from.
+const ZOOM_HALVINGS: usize = 10;
+
 impl ViewState {
     /// The point of the sphere at the center's elevation under `pixel`, or on its horizon where
     /// the pixel's ray passes it, in the body's frame.
@@ -31,13 +35,15 @@ impl ViewState {
             return false;
         };
         // The camera sees a point turned by the opposite of its own turn; the point under `to`
-        // must turn onto the grabbed one.
+        // must turn onto the grabbed one. Eye and target turn together about the body's center,
+        // keeping their heights, so a camera that could be drawn still can.
         self.turn_free_globe(turn_between(under, grabbed));
         true
     }
 
-    /// Zooms the free-globe camera by `zoom_delta` keeping the ground under `pixel` there.
-    /// Returns whether it moved.
+    /// Zooms the free-globe camera by `zoom_delta` keeping the ground under `pixel` there, or
+    /// by as much of it as leaves a camera that can be drawn, as one looking up at a raised
+    /// target cannot once zooming out takes its eye under the ground. Returns whether it moved.
     pub fn zoom_free_globe(&mut self, pixel: Point2<f64>, zoom_delta: f64) -> bool {
         if self.navigation_mode() != super::NavigationMode::FreeGlobe {
             return false;
@@ -45,6 +51,20 @@ impl ViewState {
         let Some(anchor) = self.grabbed(pixel) else {
             return false;
         };
+        let mut delta = zoom_delta;
+        for _ in 0..=ZOOM_HALVINGS {
+            let before = self.clone();
+            self.zoom_free_globe_about(anchor, pixel, delta);
+            if self.keep_if_drawable(before) {
+                return true;
+            }
+            delta *= 0.5;
+        }
+        false
+    }
+
+    /// Zooms by `zoom_delta`, then turns the camera until `anchor` lies under `pixel` again.
+    fn zoom_free_globe_about(&mut self, anchor: Vector3<f64>, pixel: Point2<f64>, zoom_delta: f64) {
         self.scale_free_globe_distance(2_f64.powf(-zoom_delta));
         for _ in 0..ANCHOR_PASSES {
             let Some(under) = self.grabbed(pixel) else {
@@ -55,6 +75,16 @@ impl ViewState {
             }
             self.turn_free_globe(turn_between(under, anchor));
         }
-        true
+    }
+
+    /// Keeps a gesture's result if the globe camera can be drawn from it, the same rule
+    /// [`ViewState::set_globe_pose`] holds a placed pose to; otherwise puts back `before`.
+    pub(super) fn keep_if_drawable(&mut self, before: ViewState) -> bool {
+        if globe_camera_for_view(self).is_ok() {
+            true
+        } else {
+            *self = before;
+            false
+        }
     }
 }

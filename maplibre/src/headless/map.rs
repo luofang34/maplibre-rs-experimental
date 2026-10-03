@@ -610,9 +610,7 @@ fn initial_view_state(window_size: crate::window::PhysicalSize, style: &Style) -
         cgmath::Deg(style.pitch.unwrap_or_default()),
         cgmath::Rad(0.6435011087932844),
     );
-    if let Some(meters) = style.center_altitude {
-        view_state.set_center_altitude(meters);
-    }
+    view_state.take_style_center(style);
     view_state
         .camera_mut()
         .set_bearing(cgmath::Deg(style.bearing.unwrap_or_default()));

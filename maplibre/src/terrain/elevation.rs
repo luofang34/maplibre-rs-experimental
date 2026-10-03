@@ -61,6 +61,7 @@ pub fn center_target_system(
     }: &mut MapContext,
 ) -> SystemResult {
     view_state.set_globe_orbits_center(globe_orbits_center(style));
+    view_state.set_center_over_terrain(style.terrain.is_some());
     let projection = style
         .projection
         .as_ref()

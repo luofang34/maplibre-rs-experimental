@@ -10,6 +10,8 @@ use crate::{
     window::PhysicalSize,
 };
 
+mod past_ninety;
+
 const VERTICAL: ProjectionType = ProjectionType::VerticalPerspective;
 
 fn view(center: LatLon, zoom: f64, bearing: f64, pitch: f64, roll: f64) -> ViewState {
@@ -336,4 +338,70 @@ fn a_mode_stored_as_north_locked_reads_as_constrained() {
         serde_json::to_string(&NavigationMode::Constrained).expect("write"),
         r#""Constrained""#
     );
+}
+
+/// A free pose looking at `center` from `distance` metres with these angles.
+fn pose_at(center: LatLon, bearing: f64, pitch: f64, roll: f64) -> GlobePose {
+    let orientation = cgmath::Quaternion::from(super::view_rotation(center, bearing, pitch, roll));
+    GlobePose {
+        target: crate::projection::globe::lat_lon_to_unit_sphere(center).into(),
+        target_elevation_meters: 0.0,
+        orientation: [
+            orientation.s,
+            orientation.v.x,
+            orientation.v.y,
+            orientation.v.z,
+        ],
+        distance_meters: 80_000.0,
+    }
+}
+
+#[test]
+fn a_pose_placed_past_the_pitch_limit_turns_without_a_jump_and_never_further_up() {
+    use cgmath::Rad;
+    let center = LatLon::new(40.0, 10.0);
+    let mut state = view(center, 5.0, 0.0, 0.0, 0.0);
+    // The camera's limit is 85 degrees; the host places the camera at 88.
+    let placed = pose_at(center, 30.0, 88.0, 0.0);
+    state
+        .restore_globe_pose(placed, &VERTICAL)
+        .expect("restore");
+    state
+        .orbit_globe_pose(placed, Rad(10_f64.to_radians()), Rad(0.0))
+        .expect("orbit");
+    assert!(
+        (pitch_and_roll(&state).0 - 88.0).abs() < 1e-9,
+        "a bearing turn keeps 88"
+    );
+    state
+        .orbit_globe_pose(placed, Rad(0.0), Rad(5_f64.to_radians()))
+        .expect("orbit");
+    assert!(
+        (pitch_and_roll(&state).0 - 88.0).abs() < 1e-9,
+        "never further up"
+    );
+    state
+        .orbit_globe_pose(placed, Rad(0.0), Rad(-10_f64.to_radians()))
+        .expect("orbit");
+    assert!(
+        (pitch_and_roll(&state).0 - 78.0).abs() < 1e-9,
+        "down as asked"
+    );
+}
+
+#[test]
+fn an_orbit_leaves_the_center_height_to_whatever_holds_it() {
+    use cgmath::Rad;
+    let mut state = view(LatLon::new(40.0, 10.0), 5.0, 0.0, 30.0, 0.0);
+    state
+        .set_navigation_mode(NavigationMode::FreeGlobe, &VERTICAL)
+        .expect("free navigation");
+    let mut start = state.globe_pose().expect("pose");
+    // The ground under the target has risen since the drag began.
+    start.target_elevation_meters = 123.0;
+    state.set_center_elevation(777.0);
+    state
+        .orbit_globe_pose(start, Rad(0.2), Rad(0.1))
+        .expect("orbit");
+    assert_eq!(state.center_elevation(), 777.0);
 }
