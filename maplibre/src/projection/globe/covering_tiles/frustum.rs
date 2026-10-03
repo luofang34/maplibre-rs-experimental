@@ -187,6 +187,7 @@ mod tests {
 
             body: Body::EARTH,
             target_elevation_meters: 0.0,
+            radius_pixels: None,
         })
         .expect("reference camera should be valid");
         let frustum = GlobeFrustum::from_camera(&camera);

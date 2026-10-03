@@ -24,6 +24,7 @@ fn camera() -> GlobeCameraState {
 
         body: Body::EARTH,
         target_elevation_meters: 0.0,
+        radius_pixels: None,
     })
     .expect("camera should be valid")
 }

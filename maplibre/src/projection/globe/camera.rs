@@ -44,6 +44,10 @@ pub struct GlobeCameraOptions {
     /// Height in metres of the point the camera orbits above the center's sea level, as the
     /// terrain is drawn there, exaggeration included; zero orbits the sea-level surface.
     pub target_elevation_meters: f64,
+    /// Radius of the globe in screen pixels where the camera's distance sets it directly;
+    /// `None` derives it from the world size at the center's latitude, which grows without
+    /// bound towards a pole.
+    pub radius_pixels: Option<f64>,
 }
 
 /// Screen projection of a globe point.
@@ -144,7 +148,7 @@ impl GlobeCameraState {
     pub fn new(options: GlobeCameraOptions) -> Result<Self, GlobeCameraError> {
         validate_options(options)?;
         let camera_to_center_distance = camera_to_center_distance(options);
-        let radius = globe_radius_pixels(options.world_size, options.center.latitude);
+        let radius = radius_pixels(options);
         let target = target_scale(options)?;
         // The line of sight to the horizon of a sphere scaled by `target` is shorter than the
         // eye's distance to the globe center, and the tallest terrain beyond that horizon adds
@@ -274,14 +278,15 @@ impl GlobeCameraState {
         (self.near_z, self.far_z)
     }
 
-    /// Returns Mercator-to-globe pixel scaling at the map center.
+    /// Returns Mercator-to-globe pixel scaling at the map center: the globe's circumference in
+    /// pixels over the world size.
     pub fn pixel_scale(&self) -> f64 {
-        1.0 / self.options.center.latitude.to_radians().cos()
+        2.0 * std::f64::consts::PI * self.globe_radius_pixels / self.options.world_size
     }
 
     /// Returns circle-radius correction at the map center latitude.
     pub fn circle_radius_correction(&self) -> f64 {
-        self.options.center.latitude.to_radians().cos()
+        1.0 / self.pixel_scale()
     }
 
     /// Returns text-size correction for a tile-local anchor under globe projection.
@@ -377,6 +382,14 @@ impl GlobeCameraState {
     fn is_surface_point_visible(&self, surface: Vector3<f64>) -> bool {
         self.clipping_plane.truncate().dot(surface) + self.clipping_plane.w >= 0.0
     }
+}
+
+/// The globe's radius in screen pixels: the one the options give, or the world size's at the
+/// center's latitude.
+pub(super) fn radius_pixels(options: GlobeCameraOptions) -> f64 {
+    options
+        .radius_pixels
+        .unwrap_or_else(|| globe_radius_pixels(options.world_size, options.center.latitude))
 }
 
 /// The orbit target's distance from the globe center in radii.

@@ -289,6 +289,7 @@ pub fn globe_camera_for_view(
         } else {
             0.0
         },
+        radius_pixels: None,
     };
     match external_eye {
         Some(eye) => GlobeCameraState::from_external_eye(options, eye),
