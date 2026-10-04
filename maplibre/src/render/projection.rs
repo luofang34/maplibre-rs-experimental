@@ -49,8 +49,17 @@ pub struct ShaderProjectionData {
     /// Whether viewport symbols use a world-up basis for a tracked external eye.
     pub external_view: f32,
     /// x: the globe's angle per pixel relative to a world of 512 pixels at the zoom, which the
-    /// extent of a circle lying on the globe follows; the other lanes are padding.
+    /// extent of a circle lying on the globe follows; y: 1 when the globe centre references
+    /// below are set; the other lanes are padding.
     pub globe_circle: [f32; 4],
+    /// The Mercator position of the globe centre the shaders project relative to, in x and y,
+    /// exactly representable in f32 so tile origins difference from it without rounding; the
+    /// other lanes are padding.
+    pub globe_center: [f32; 4],
+    /// Clip position of that centre on the unit sphere.
+    pub globe_center_clip: [f32; 4],
+    /// Clip-space vector from the body's centre to it, which a height scales.
+    pub globe_center_radial: [f32; 4],
 }
 
 impl ShaderProjectionData {
@@ -64,6 +73,9 @@ impl ShaderProjectionData {
             radius_meters: Body::EARTH.radius_meters as f32,
             external_view: 0.0,
             globe_circle: [1.0, 0.0, 0.0, 0.0],
+            globe_center: [0.0; 4],
+            globe_center_clip: [0.0; 4],
+            globe_center_radial: [0.0; 4],
         }
     }
 }
@@ -78,6 +90,9 @@ impl Default for ShaderProjectionData {
             radius_meters: Body::EARTH.radius_meters as f32,
             external_view: 0.0,
             globe_circle: [1.0, 0.0, 0.0, 0.0],
+            globe_center: [0.0; 4],
+            globe_center_clip: [0.0; 4],
+            globe_center_radial: [0.0; 4],
         }
     }
 }
@@ -251,13 +266,61 @@ pub fn projection_data_for_view(
             ..ProjectionDataParams::default()
         },
     );
-    Ok(ShaderProjectionData {
+    let shader = ShaderProjectionData {
         external_view: f32::from(view_state.has_external_view()),
         center_clip_w: mercator_center_w + (globe_center_w - mercator_center_w) * transition,
         radius_meters,
         globe_circle: [globe.circle_radius_correction() as f32, 0.0, 0.0, 0.0],
         ..ShaderProjectionData::from_renderer_data(data)
+    };
+    // Below this zoom f32 rounding stays far under a pixel, and projecting from the global
+    // coordinates keeps every edge where GL JS, which does the same, draws it.
+    let references = (view_state.zoom().value() >= PRECISE_GLOBE_ZOOM)
+        .then(|| globe_center_references(&globe))
+        .flatten();
+    Ok(match references {
+        Some([center, clip, radial]) => ShaderProjectionData {
+            globe_circle: [shader.globe_circle[0], 1.0, 0.0, 0.0],
+            globe_center: center,
+            globe_center_clip: clip,
+            globe_center_radial: radial,
+            ..shader
+        },
+        None => shader,
     })
+}
+
+/// The zoom from which the shaders project globe positions relative to the view's centre: a
+/// pixel is about 20 m there, and the metres global f32 coordinates round to start to show.
+const PRECISE_GLOBE_ZOOM: f64 = 12.0;
+
+/// The centre the shaders project globe positions relative to: the f32 Mercator position
+/// nearest the globe camera's centre on the ground, with its clip position and body-centre
+/// vector computed in f64. Positions built from global f32 coordinates round to metres, which
+/// a close view of the globe draws as geometry that slides; relative to this centre they keep
+/// their separation.
+fn globe_center_references(globe: &GlobeCameraState) -> Option<[[f32; 4]; 3]> {
+    let center = crate::terrain::sightline::lat_lon_to_mercator(globe.center());
+    // The centre need only be near the view; one f32 can hold exactly is differenced exactly.
+    let (x_f32, y_f32) = (center.x as f32, center.y as f32);
+    let (x, y) = (f64::from(x_f32), f64::from(y_f32));
+    let longitude = x * std::f64::consts::TAU + std::f64::consts::PI;
+    let tangent_half_latitude = (std::f64::consts::PI - y * std::f64::consts::TAU).exp();
+    let denominator = tangent_half_latitude * tangent_half_latitude + 1.0;
+    let sin_latitude = (tangent_half_latitude * tangent_half_latitude - 1.0) / denominator;
+    let cos_latitude = 2.0 * tangent_half_latitude / denominator;
+    let surface = cgmath::Vector3::new(
+        longitude.sin() * cos_latitude,
+        sin_latitude,
+        longitude.cos() * cos_latitude,
+    );
+    let matrix = globe.wgpu_view_projection();
+    let clip = |w: f64| {
+        let clip = matrix * surface.extend(w);
+        let lanes = [clip.x as f32, clip.y as f32, clip.z as f32, clip.w as f32];
+        lanes.iter().all(|lane| lane.is_finite()).then_some(lanes)
+    };
+    Some([[x_f32, y_f32, 0.0, 0.0], clip(1.0)?, clip(0.0)?])
 }
 
 /// Constructs the vertical-perspective camera matching the current map view.

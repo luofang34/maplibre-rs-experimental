@@ -29,29 +29,35 @@ struct Vertex {
     at: OnScreen,
 }
 
-/// The vertex where the line from `from` toward `tile` crosses [`NEAR_W`], when `tile` itself
-/// lies behind the eye.
+/// The vertex just in front of the eye where the line from `from` toward `tile`, which lies
+/// behind it, crosses [`NEAR_W`]. Clip w is not affine along a line on the globe, so the
+/// crossing is bisected on the projection itself; a vertex that still ends up behind the eye
+/// is refused rather than placed.
 fn cut_at_eye(
     from: Vertex,
     tile: [f64; 2],
     project: &impl Fn([f64; 2]) -> Option<OnScreen>,
 ) -> Option<Vertex> {
-    let w_at = |t: f64| {
-        project([
+    let at = |t: f64| {
+        [
             from.tile[0] + (tile[0] - from.tile[0]) * t,
             from.tile[1] + (tile[1] - from.tile[1]) * t,
-        ])
+        ]
     };
-    let end = w_at(1.0)?;
-    // w is affine along the segment in tile space.
-    let t = (from.at.w - NEAR_W) / (from.at.w - end.w);
-    let point = [
-        from.tile[0] + (tile[0] - from.tile[0]) * t,
-        from.tile[1] + (tile[1] - from.tile[1]) * t,
-    ];
+    let (mut near, mut far) = (0.0_f64, 1.0_f64);
+    for _ in 0..60 {
+        let middle = 0.5 * (near + far);
+        if project(at(middle)).is_some_and(|point| point.w > NEAR_W) {
+            near = middle;
+        } else {
+            far = middle;
+        }
+    }
+    let point = at(near);
+    let on_screen = project(point).filter(|point| point.w > NEAR_W)?;
     Some(Vertex {
         tile: point,
-        at: project(point)?,
+        at: on_screen,
     })
 }
 

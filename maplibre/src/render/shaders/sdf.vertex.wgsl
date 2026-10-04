@@ -94,8 +94,13 @@ fn main(
     let anchor_angle = select(0.0, bitcast<f32>(a_pixeloffset.w), alignment.y > 0.5);
     var angle = alignment.z + select(anchor_angle, pose.z, has_pose);
     if alignment.y > 0.5 {
-        let tangent = project_tile_position_3d(vec3<f32>(anchor + vec2<f32>(cos(angle), sin(angle)) * 16.0, elevation), transform, tile_mercator_coords).clip_position;
-        let delta = (tangent.xy / tangent.w - projected.clip_position.xy / projected.clip_position.w)
+        // The screen direction of the line: its analytic tangent carried through the
+        // perspective divide. Subtracting two projected points a few metres apart loses the
+        // direction to f32 rounding in a close view of the globe.
+        let clip = projected.clip_position;
+        let tangent = project_tile_tangent_3d(vec3<f32>(anchor, elevation),
+            vec2<f32>(cos(angle), sin(angle)), transform, tile_mercator_coords);
+        let delta = (tangent.xy * clip.w - clip.xy * tangent.w) / (clip.w * clip.w)
             * vec2<f32>(viewport_width, -viewport_height);
         if alignment.x < 0.5 { angle = atan2(delta.y, delta.x); }
         let keep_upright = select(symbol.placement.w, symbol.placement.z, is_text);
