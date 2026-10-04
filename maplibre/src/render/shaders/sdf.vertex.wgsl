@@ -88,7 +88,9 @@ fn main(
     // The direction of a line a label sits on only turns a label that is aligned with the map.
     let anchor_angle = select(0.0, bitcast<f32>(a_pixeloffset.w), alignment.y > 0.5);
     var angle = alignment.z + select(anchor_angle, pose.z, has_pose);
-    if alignment.y > 0.5 {
+    // A posed glyph of text upright to the viewer carries its direction on the screen already.
+    let screen_pose = has_pose && alignment.x < 0.5;
+    if alignment.y > 0.5 && !screen_pose {
         let tangent = project_tile_position_3d(vec3<f32>(anchor + vec2<f32>(cos(angle), sin(angle)) * 16.0, elevation), transform, tile_mercator_coords).clip_position;
         let delta = (tangent.xy / tangent.w - projected.clip_position.xy / projected.clip_position.w)
             * vec2<f32>(viewport_width, -viewport_height);
