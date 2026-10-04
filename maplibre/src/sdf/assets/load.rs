@@ -13,7 +13,10 @@ use super::{
 use crate::{
     io::source_client::{HttpClient, SourceClient},
     sdf::glyphs::Glyphs,
-    style::{layer::LayerPaint, Style},
+    style::{
+        layer::{LayerPaint, StyleLayer},
+        Style, StyleImage,
+    },
     vector::feature_properties,
 };
 
@@ -31,32 +34,61 @@ pub struct SymbolAssetError {
     pub reason: String,
 }
 
-/// Loads the glyph ranges and sprites the tile's features use through the client's shared cache.
+/// The style's symbol settings every source shares: where glyphs and sprites come from, and
+/// the images a host added. Which layers want them is a source's own business.
+#[derive(Clone, Copy, Debug)]
+pub struct SymbolAssetConfig<'a> {
+    /// The glyph URL template.
+    pub glyphs: Option<&'a str>,
+    /// The style's `sprite`, one URL or a list of `{id, url}`.
+    pub sprite: Option<&'a serde_json::Value>,
+    /// Images a host added to the style.
+    pub images: &'a HashMap<String, StyleImage>,
+}
+
+impl<'a> SymbolAssetConfig<'a> {
+    /// The symbol settings of `style`.
+    pub fn of(style: &'a Style) -> Self {
+        Self {
+            glyphs: style.glyphs.as_deref(),
+            sprite: style.sprite.as_ref(),
+            images: &style.images,
+        }
+    }
+}
+
+/// Loads the glyph ranges and sprites that the features of one source's tile use under
+/// `layers` through the client's shared cache.
+///
+/// `layers` are the source's own layers as its tile is cut, so they are the ones its symbols
+/// are laid out with: a GeoJSON layer reads the source layer its tile is encoded under, and a
+/// layer of another source never matches this tile's layers, whatever their names.
 ///
 /// Missing or malformed assets are logged once and left out of the atlas. A transport or server
 /// failure is returned so the caller can retry the tile instead of keeping an incomplete atlas.
-pub async fn load_symbol_assets<HC: HttpClient>(
+pub async fn load_symbol_assets<'l, HC: HttpClient>(
     client: &SourceClient<HC>,
-    style: &Style,
+    config: SymbolAssetConfig<'_>,
+    layers: impl IntoIterator<Item = &'l StyleLayer>,
     data: &[u8],
     zoom: f64,
 ) -> Result<Arc<SymbolAtlas>, SymbolAssetError> {
-    let (fonts, icons) = requests(style, data, zoom);
+    let (fonts, icons) = requests(layers, data, zoom);
     let mut builder = AtlasBuilder::new();
     for (font, characters) in fonts {
         let ranges: BTreeSet<_> = characters.iter().map(|code| (code / 256) * 256).collect();
         for range in ranges {
-            if let Some(glyphs) = glyph_range(client, style, &font, range).await? {
+            if let Some(glyphs) = glyph_range(client, config.glyphs, &font, range).await? {
                 builder.glyph_subset(&font, &glyphs, Some(&characters));
             }
         }
     }
     if !icons.is_empty() {
-        for (prefix, url) in sprite_sources(style) {
+        for (prefix, url) in sprite_sources(config.sprite) {
             load_sprites(client, &mut builder, &prefix, &url, &icons).await?;
         }
     }
-    for (name, image) in &style.images {
+    for (name, image) in config.images {
         if icons.contains(name) {
             pack_style_image(&mut builder, name, image);
         }
@@ -108,12 +140,12 @@ fn pack_style_image(builder: &mut AtlasBuilder, name: &str, image: &crate::style
 /// The range from the style's glyph server, or the bundled Latin range when that is all there is.
 async fn glyph_range<HC: HttpClient>(
     client: &SourceClient<HC>,
-    style: &Style,
+    template: Option<&str>,
     font: &str,
     range: u32,
 ) -> Result<Option<Arc<Glyphs>>, SymbolAssetError> {
     let bundled = || client.assets().bundled_glyphs(BUNDLED_LATIN);
-    let Some(template) = &style.glyphs else {
+    let Some(template) = template else {
         return Ok(if range == 0 {
             bundled().await.ok()
         } else {
@@ -145,13 +177,17 @@ fn glyph_url(template: &str, font: &str, range: u32) -> String {
         .replace("{range}", &format!("{range}-{}", range + 255))
 }
 
-fn requests(style: &Style, data: &[u8], zoom: f64) -> (GlyphRequests, HashSet<String>) {
+fn requests<'l>(
+    layers: impl IntoIterator<Item = &'l StyleLayer>,
+    data: &[u8],
+    zoom: f64,
+) -> (GlyphRequests, HashSet<String>) {
     let mut fonts = GlyphRequests::new();
     let mut icons = HashSet::new();
     let Ok(tile) = geozero::mvt::Tile::decode(data) else {
         return (fonts, icons);
     };
-    for layer in &style.layers {
+    for layer in layers {
         if layer.is_hidden() {
             continue;
         }
@@ -221,8 +257,8 @@ fn requests(style: &Style, data: &[u8], zoom: f64) -> (GlyphRequests, HashSet<St
     (fonts, icons)
 }
 
-pub(super) fn sprite_sources(style: &Style) -> Vec<(String, String)> {
-    match &style.sprite {
+pub(super) fn sprite_sources(sprite: Option<&serde_json::Value>) -> Vec<(String, String)> {
+    match sprite {
         Some(serde_json::Value::String(url)) => vec![(String::new(), url.clone())],
         Some(serde_json::Value::Array(sources)) => sources
             .iter()

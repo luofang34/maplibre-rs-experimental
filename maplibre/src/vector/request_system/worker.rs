@@ -12,7 +12,7 @@ use crate::{
         tile_retry::{RequestDisposition, RequestKind, TileRequestOutcome},
         tile_sources::{source_layer_groups, SourceLayerGroup, TileKind},
     },
-    sdf::assets::{load_symbol_assets, SymbolAtlas},
+    sdf::assets::{load_symbol_assets, SymbolAssetConfig, SymbolAtlas},
     style::{layer::StyleLayer, Style},
     vector::{
         process_vector::process_vector_tile_with_assets,
@@ -131,9 +131,12 @@ async fn process_source<T: VectorTransferables, C: Context + Clone, H: HttpClien
     if symbols.is_empty() {
         return Ok(());
     }
+    // The assets are asked for by the very layers the symbols are laid out with: this source's,
+    // as its tile is cut.
     let atlas = load_symbol_assets(
         client,
-        style,
+        SymbolAssetConfig::of(style),
+        &symbols,
         data,
         f64::from(overscaled_zoom.max(u8::from(coords.z))),
     )
