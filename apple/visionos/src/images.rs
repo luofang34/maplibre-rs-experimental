@@ -32,9 +32,14 @@ pub struct MaplibreVisionOSImage {
     pub width: u32,
     /// Height in pixels.
     pub height: u32,
-    /// `width * height * 4` straight-alpha RGBA bytes, read before the callback's caller
-    /// returns.
+    /// `width * height * 4` straight-alpha RGBA bytes, which the map copies before it calls
+    /// `release`.
     pub rgba: *const u8,
+    /// Called once with `release_context` after the map has copied `rgba`, on the thread that
+    /// called the callback, whatever the callback answered; null when nothing needs freeing.
+    pub release: Option<unsafe extern "C" fn(release_context: *mut c_void)>,
+    /// Passed to `release`, such as the buffer `rgba` points into.
+    pub release_context: *mut c_void,
     /// Image pixels per layout pixel.
     pub pixel_ratio: f32,
     /// Whether `anchor_x` and `anchor_y` place the image instead of its centre.
@@ -76,6 +81,8 @@ impl CallbackProvider {
             width: 0,
             height: 0,
             rgba: std::ptr::null(),
+            release: None,
+            release_context: std::ptr::null_mut(),
             pixel_ratio: request.pixel_ratio,
             has_anchor: false,
             anchor_x: 0.0,
@@ -85,7 +92,7 @@ impl CallbackProvider {
         // thread; `id` and `image` live until it returns.
         let status =
             unsafe { (self.callback)(self.context, id.as_ptr(), request.pixel_ratio, &mut image) };
-        match status {
+        let answer = match status {
             MAPLIBRE_VISIONOS_IMAGE_READY => copied(&image).map(ImageResolution::Image),
             MAPLIBRE_VISIONOS_IMAGE_ABSENT => Ok(ImageResolution::Absent),
             MAPLIBRE_VISIONOS_IMAGE_UNAVAILABLE => Err(ImageProviderError::Unavailable(
@@ -94,7 +101,13 @@ impl CallbackProvider {
             other => Err(ImageProviderError::Failed(format!(
                 "the host's callback returned {other}"
             ))),
+        };
+        if let Some(release) = image.release {
+            // SAFETY: the host set `release` for `release_context`, and the pixels it frees
+            // were copied above.
+            unsafe { release(image.release_context) };
         }
+        answer
     }
 }
 
@@ -106,8 +119,8 @@ fn copied(image: &MaplibreVisionOSImage) -> Result<ProvidedImage, ImageProviderE
             "the callback drew no pixels".to_owned(),
         ));
     }
-    // SAFETY: a ready image holds `width * height * 4` readable bytes until the callback's
-    // caller returns, which is after this copy.
+    // SAFETY: a ready image holds `width * height * 4` readable bytes until its `release` is
+    // called, which is after this copy.
     let data = unsafe { std::slice::from_raw_parts(image.rgba, bytes) }.to_vec();
     Ok(ProvidedImage {
         image: StyleImage {

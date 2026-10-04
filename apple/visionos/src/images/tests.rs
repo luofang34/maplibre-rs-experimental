@@ -2,8 +2,18 @@ use std::ffi::CStr;
 
 use super::*;
 
+/// Counts the buffers given back.
+unsafe extern "C" fn give_back(context: *mut c_void) {
+    // SAFETY: the test passes a pointer to its counter.
+    let released = unsafe { &*(context as *const std::sync::atomic::AtomicUsize) };
+    released.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+}
+
+static RELEASED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 /// Answers by the id: `ok` draws a 2 x 1 image anchored at its right pixel, `none` has no
-/// image, `later` is unavailable and anything else fails.
+/// image, `later` is unavailable and anything else fails. Every answer hands over a buffer
+/// to release.
 unsafe extern "C" fn draw(
     context: *mut c_void,
     id: *const c_char,
@@ -14,6 +24,8 @@ unsafe extern "C" fn draw(
     let pixels = unsafe { &*(context as *const [u8; 8]) };
     // SAFETY: the provider passes a NUL-terminated id and a writable image.
     let (id, image) = unsafe { (CStr::from_ptr(id).to_str().unwrap_or(""), &mut *image) };
+    image.release = Some(give_back);
+    image.release_context = std::ptr::addr_of!(RELEASED).cast_mut().cast();
     match id {
         "ok" => {
             image.width = 2;

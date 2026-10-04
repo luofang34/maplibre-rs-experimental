@@ -106,8 +106,12 @@ void maplibre_visionos_destroy(MaplibreVisionOSMap *map);
 typedef struct {
     uint32_t width;
     uint32_t height;
-    // width * height * 4 straight-alpha RGBA bytes, read before the callback's caller returns.
+    // width * height * 4 straight-alpha RGBA bytes, copied by the map before it calls release.
     const uint8_t *rgba;
+    // Called once with release_context after the copy, on the callback's thread, whatever the
+    // callback answered; NULL when nothing needs freeing.
+    void (*release)(void *release_context);
+    void *release_context;
     // Image pixels per layout pixel.
     float pixel_ratio;
     // Whether anchor_x/anchor_y (image pixels from the top-left) are placed where the centre
