@@ -23,11 +23,20 @@ where
     /// such as after its provider's resource pack changed. Returns how many tiles are
     /// requested again; none before the renderer is ready.
     pub fn invalidate_provided_images(&mut self, namespace: &str) -> usize {
-        if let Some(providers) = self.kernel.apc().image_providers() {
-            providers.invalidate(namespace);
+        let kernel = self.kernel.clone();
+        match self.context_mut() {
+            Ok(context) => crate::sdf::provided::invalidate_namespace(
+                kernel.apc().image_providers(),
+                &mut context.world,
+                namespace,
+            ),
+            // Before the renderer is ready no tile has drawn anything yet.
+            Err(_) => {
+                if let Some(providers) = kernel.apc().image_providers() {
+                    providers.invalidate(namespace);
+                }
+                0
+            }
         }
-        self.context_mut().map_or(0, |context| {
-            crate::sdf::provided::invalidate(&mut context.world, namespace)
-        })
     }
 }

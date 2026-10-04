@@ -189,6 +189,19 @@ pub(crate) fn release_unwanted(world: &mut World, wanted: &HashSet<WorldTileCoor
     released
 }
 
+/// Forgets the answers of `namespace` in `providers` and requests again the tiles that drew
+/// them, returning how many: what a map does when a host invalidates a namespace.
+pub(crate) fn invalidate_namespace(
+    providers: Option<&crate::sdf::assets::ImageProviders>,
+    world: &mut World,
+    namespace: &str,
+) -> usize {
+    if let Some(providers) = providers {
+        providers.invalidate(namespace);
+    }
+    invalidate(world, namespace)
+}
+
 /// Requests again the tiles whose labels name an image of `namespace`, returning how many.
 pub(crate) fn invalidate(world: &mut World, namespace: &str) -> usize {
     let prefix = format!("{namespace}:");

@@ -186,6 +186,9 @@ async fn lay_out_sources<T: VectorTransferables, C: Context + Clone, H: HttpClie
         )
         .await
         .map_err(ProcessVectorError::SymbolAssets)?;
+        // An answer the cache dropped since it arrived is drawn as the fallback for now and
+        // asked for again when the tile is retried.
+        unavailable |= !assets.awaiting.is_empty();
         // The tile was completed already; these labels replace the ones it was drawn with.
         let mut processor = ProcessVectorContext::<T, C>::new(context.clone()).without_completion();
         process_vector_tile_with_assets(data, request.clone(), &mut processor, assets.atlas)?;

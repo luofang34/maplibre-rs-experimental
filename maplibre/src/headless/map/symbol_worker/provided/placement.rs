@@ -119,3 +119,41 @@ async fn tiles_panned_into_view_draw_known_shields_without_making_them_again() {
     );
     assert!(after.cache_hits > before.cache_hits, "{after:?}");
 }
+
+#[tokio::test]
+async fn a_tile_leaving_the_view_stops_making_its_shield() {
+    let (shields, _gate) = Shields::held(Answer::Shield(SHIELD));
+    let server = AssetServer::default();
+    // Roads only around the start, so the view panned away asks for no shield.
+    for x in 8188..8197 {
+        server.serve(
+            &format!("https://tiles.test/14/{x}/"),
+            road_tile("US:I", "287"),
+        );
+    }
+    let mut map = SymbolMap::serving(style("line", false), server).await;
+    let providers = map.map.image_providers().expect("registry");
+    providers.register("shield", shields.clone());
+    frames_until(&mut map, "the fallback", |pixels| {
+        shown(pixels, MARKER) > 100
+    })
+    .await;
+    assert_eq!(providers.stats().running, 1, "the shield is being made");
+    // Far east, where no tile carries a road.
+    map.map
+        .view_state_mut()
+        .camera_mut()
+        .move_relative(cgmath::Vector2::new(20_000.0, 0.0));
+    for _ in 0..120 {
+        map.frame().await;
+        if providers.stats().running == 0 {
+            break;
+        }
+    }
+    let stats = providers.stats();
+    assert_eq!(
+        (stats.running, stats.cancelled),
+        (0, 1),
+        "no tile in view waits for the shield, so its making stops: {stats:?}"
+    );
+}

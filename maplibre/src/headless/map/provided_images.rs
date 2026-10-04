@@ -13,9 +13,10 @@ impl HeadlessMap {
     /// such as after its provider's resource pack changed. Returns how many tiles are
     /// requested again.
     pub fn invalidate_provided_images(&mut self, namespace: &str) -> usize {
-        if let Some(providers) = self.kernel.apc().image_providers() {
-            providers.invalidate(namespace);
-        }
-        crate::sdf::provided::invalidate(&mut self.map_context.world, namespace)
+        crate::sdf::provided::invalidate_namespace(
+            self.kernel.apc().image_providers(),
+            &mut self.map_context.world,
+            namespace,
+        )
     }
 }

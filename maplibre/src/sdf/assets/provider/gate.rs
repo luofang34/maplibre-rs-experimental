@@ -98,3 +98,6 @@ impl Drop for Waiting {
         state.waiting = state.waiting.saturating_sub(1);
     }
 }
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests;
