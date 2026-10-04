@@ -19,6 +19,7 @@ use crate::{
 
 mod geojson;
 mod mvt;
+mod retry;
 
 /// The side of the square viewport, in physical pixels.
 pub(super) const SIZE: u32 = 512;
@@ -39,11 +40,18 @@ pub(super) const SHIELD: [u8; 3] = [255, 255, 0];
 /// Bodies served for every URL that starts with their prefix.
 type Served = Arc<Mutex<Vec<(String, Vec<u8>)>>>;
 
+/// A glyph range held back, and the gate that lets its requests through.
+type Hold = Arc<Mutex<Option<(&'static str, Arc<tokio::sync::Semaphore>)>>>;
+
 /// Serves the fixture font's ranges, a sprite sheet and vector tiles, recording every URL.
 #[derive(Clone, Default)]
 pub(super) struct AssetServer {
     urls: Arc<Mutex<Vec<String>>>,
     tiles: Served,
+    /// A glyph range that fails as a dropped connection would, until cleared.
+    outage: Arc<Mutex<Option<&'static str>>>,
+    /// A glyph range whose requests wait until the gate opens.
+    held: Hold,
 }
 
 #[cfg_attr(not(feature = "thread-safe-futures"), async_trait::async_trait(?Send))]
@@ -52,6 +60,21 @@ impl HttpClient for AssetServer {
     async fn fetch(&self, url: &str) -> Result<Vec<u8>, SourceFetchError> {
         self.urls.lock().expect("urls").push(url.to_owned());
         let font = "https://glyphs.test/Noto%20Sans%20Regular/";
+        let gate = self
+            .held
+            .lock()
+            .expect("held")
+            .as_ref()
+            .filter(|(range, _)| url.starts_with("https://glyphs.test/") && url.contains(range))
+            .map(|(_, gate)| gate.clone());
+        if let Some(gate) = gate {
+            gate.acquire().await.ok();
+        }
+        if let Some(range) = *self.outage.lock().expect("outage") {
+            if url.starts_with("https://glyphs.test/") && url.contains(range) {
+                return Err(SourceFetchError::temporary(std::io::Error::other("reset")));
+            }
+        }
         match url {
             _ if url == format!("{font}0-255.pbf") => Ok(include_bytes!(
                 "../../../../render-tests/src/assets/glyphs/Noto Sans Regular/0-255.pbf"
@@ -61,6 +84,7 @@ impl HttpClient for AssetServer {
                 "../../../../render-tests/src/assets/glyphs/Noto Sans Regular/1024-1279.pbf"
             )
             .to_vec()),
+            _ if url == format!("{font}256-511.pbf") => Ok(latin_extended()),
             "https://sprites.test/sprite.json" => Ok(br#"{
                 "marker":{"x":0,"y":0,"width":16,"height":16,"pixelRatio":1},
                 "shield":{"x":16,"y":0,"width":16,"height":16,"pixelRatio":1,
@@ -78,6 +102,28 @@ impl HttpClient for AssetServer {
                 .ok_or_else(|| SourceFetchError::not_found(url)),
         }
     }
+}
+
+/// The font's 256-511 range, with one glyph, a solid block for `Ā`.
+fn latin_extended() -> Vec<u8> {
+    use prost::Message as _;
+    let (width, height) = (14, 18);
+    crate::sdf::glyphs::Glyphs {
+        stacks: vec![crate::sdf::glyphs::Fontstack {
+            name: FONT.into(),
+            range: "256-511".into(),
+            glyphs: vec![crate::sdf::glyphs::Glyph {
+                id: u32::from('Ā'),
+                bitmap: Some(vec![255; ((width + 6) * (height + 6)) as usize]),
+                width,
+                height,
+                left: 1,
+                top: -6,
+                advance: 16,
+            }],
+        }],
+    }
+    .encode_to_vec()
 }
 
 fn sprite_sheet() -> Vec<u8> {
@@ -99,6 +145,18 @@ impl AssetServer {
             .lock()
             .expect("tiles")
             .push((prefix.to_owned(), body));
+    }
+
+    /// Makes `range`'s glyph requests fail temporarily, or, with `None`, succeed again.
+    pub(super) fn fail_glyphs(&self, range: Option<&'static str>) {
+        *self.outage.lock().expect("outage") = range;
+    }
+
+    /// Holds `range`'s glyph requests until the returned gate is closed.
+    pub(super) fn hold_glyphs(&self, range: &'static str) -> Arc<tokio::sync::Semaphore> {
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *self.held.lock().expect("held") = Some((range, gate.clone()));
+        gate
     }
 
     /// Every URL fetched so far.
@@ -170,13 +228,7 @@ impl SymbolMap {
         let mut quiet = 0;
         for _ in 0..600 {
             let requests = self.server.requested().len();
-            // Labels fade by the host's clock, which a host advances by its frame interval.
-            self.map.frame_input_mut().timestamp += std::time::Duration::from_millis(16);
-            self.map.run_frame().expect("frame");
-            for _ in 0..8 {
-                tokio::task::yield_now().await;
-            }
-            let ready = self.map.take_ready_resources();
+            let ready = self.frame().await;
             self.labels_ready |= ready
                 .iter()
                 .any(|ready| matches!(ready, ResourceReady::SymbolAtlas { .. }));
@@ -193,6 +245,19 @@ impl SymbolMap {
             self.labels_ready,
             self.server.requested()
         );
+    }
+
+    /// Draws one frame 16 ms after the last, lets the workers run, and returns what became
+    /// ready.
+    pub(super) async fn frame(&mut self) -> Vec<ResourceReady> {
+        // Labels fade and retries wait by the host's clock, which a host advances by its frame
+        // interval.
+        self.map.frame_input_mut().timestamp += std::time::Duration::from_millis(16);
+        self.map.run_frame().expect("frame");
+        for _ in 0..8 {
+            tokio::task::yield_now().await;
+        }
+        self.map.take_ready_resources()
     }
 
     /// The RGBA pixels of the last frame.

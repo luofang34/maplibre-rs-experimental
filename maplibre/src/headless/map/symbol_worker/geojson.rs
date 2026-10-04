@@ -5,19 +5,19 @@ use std::sync::Arc;
 use super::{count, SymbolMap, FONT, GLYPHS, MARKER, SIZE, SPRITE};
 use crate::style::{source::GeoJsonData, Style};
 
-const TEXT: [u8; 3] = [255, 0, 0];
+pub(super) const TEXT: [u8; 3] = [255, 0, 0];
 
-fn point(name: Option<&str>, icon: Option<&str>, at: [f64; 2]) -> serde_json::Value {
+pub(super) fn point(name: Option<&str>, icon: Option<&str>, at: [f64; 2]) -> serde_json::Value {
     serde_json::json!({"type":"Feature",
         "properties":{"name":name,"icon":icon},
         "geometry":{"type":"Point","coordinates":at}})
 }
 
-fn collection(features: Vec<serde_json::Value>) -> serde_json::Value {
+pub(super) fn collection(features: Vec<serde_json::Value>) -> serde_json::Value {
     serde_json::json!({"type":"FeatureCollection","features":features})
 }
 
-fn style(data: serde_json::Value) -> Style {
+pub(super) fn style(data: serde_json::Value) -> Style {
     serde_json::from_value(serde_json::json!({
         "version":8,"center":[0,0],"zoom":3,
         "glyphs":GLYPHS,"sprite":SPRITE,
@@ -35,13 +35,13 @@ fn style(data: serde_json::Value) -> Style {
 }
 
 /// Viewport quarters: `[left, top, right, bottom]`.
-const NORTH_WEST: [u32; 4] = [0, 0, SIZE / 2, SIZE / 2];
-const NORTH_EAST: [u32; 4] = [SIZE / 2, 0, SIZE, SIZE / 2];
-const SOUTH_WEST: [u32; 4] = [0, SIZE / 2, SIZE / 2, SIZE];
-const SOUTH_EAST: [u32; 4] = [SIZE / 2, SIZE / 2, SIZE, SIZE];
+pub(super) const NORTH_WEST: [u32; 4] = [0, 0, SIZE / 2, SIZE / 2];
+pub(super) const NORTH_EAST: [u32; 4] = [SIZE / 2, 0, SIZE, SIZE / 2];
+pub(super) const SOUTH_WEST: [u32; 4] = [0, SIZE / 2, SIZE / 2, SIZE];
+pub(super) const SOUTH_EAST: [u32; 4] = [SIZE / 2, SIZE / 2, SIZE, SIZE];
 
 /// The texts of the labels drawn in `region`, picked where its text pixels are.
-fn texts_in(map: &SymbolMap, pixels: &[u8], region: [u32; 4]) -> Vec<String> {
+pub(super) fn texts_in(map: &SymbolMap, pixels: &[u8], region: [u32; 4]) -> Vec<String> {
     let mut texts: Vec<String> = count(pixels, TEXT, region)
         .iter()
         .step_by(7)
