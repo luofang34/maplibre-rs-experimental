@@ -155,13 +155,16 @@ upstream commit `96b50a09d4925f46bd68e184e754d22ac3e356a2`.
   later version](LICENSE-AGPL). The fork as a whole is therefore distributed under
   AGPL-3.0-or-later; the upstream code it contains remains available under its own licenses.
 - Third-party material bundled in the fork keeps its own license:
-  - render fixtures and assets under `render-tests/` taken from maplibre-gl-js: BSD-3-Clause, see
-    [render-tests/LICENSE-maplibre-gl-js.txt](render-tests/LICENSE-maplibre-gl-js.txt);
+  - render fixtures and assets under `render-tests/` taken from maplibre-gl-js, under the terms
+    maplibre-gl-js distributes them on (see
+    [render-tests/LICENSE-maplibre-gl-js.txt](render-tests/LICENSE-maplibre-gl-js.txt)); the map
+    data, imagery, sprites and fonts within them remain under their owners' terms;
   - expression conformance cases under `maplibre/tests/expressions` taken from
     maplibre-style-spec: BSD-3-Clause, see
     [LICENSE-maplibre-style-spec.txt](maplibre/tests/expressions/LICENSE-maplibre-style-spec.txt);
   - the Indicate snapshot under `apple/visionos/MapLibreVision/IndicateOverlay/vendor/indicate`,
-    under the terms of its source repository recorded in its `SOURCE.json`;
+    from the repository its `SOURCE.json` records, is not covered by this repository's licenses;
+    no license has been granted for it;
   - the replay data listed in
     [ATTRIBUTION.txt](apple/visionos/MapLibreVision/MapLibreVision/Resources/ATTRIBUTION.txt),
     under the terms stated there.
