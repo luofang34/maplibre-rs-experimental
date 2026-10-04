@@ -167,3 +167,31 @@ fn malformed_tracking_headers_are_typed_errors() {
 }
 
 mod image_payloads;
+
+#[wasm_bindgen_test]
+fn a_provided_images_report_round_trips_with_its_attempt() {
+    use maplibre::sdf::provided::{ProvidedImagesReport, ProvidedImagesState};
+    for state in [
+        ProvidedImagesState::Awaiting,
+        ProvidedImagesState::Settled,
+        ProvidedImagesState::Retry,
+    ] {
+        let expected = ProvidedImagesReport {
+            coords: Default::default(),
+            attempt: Some(9),
+            names: vec!["roadshield:US:I=287".to_owned(), "roadshield:=609".to_owned()],
+            pixel_ratio: 2.0,
+            state,
+        };
+        let message = IntoMessage::into(expected.clone()).with_attempt(9);
+        let (tag, buffer) = prepare_message(message).expect("report encoded");
+        let wire_tag = WebMessageTag::from_u32(tag as u32).expect("wire tag");
+        let message = decode_message(wire_tag, buffer).expect("report decoded");
+        assert!(message.has_tag(ProvidedImagesReport::message_tag()));
+        assert_eq!(message.attempt(), Some(9));
+        let actual = message
+            .into_transferable::<ProvidedImagesReport>()
+            .expect("report payload");
+        assert_eq!(*actual, expected);
+    }
+}

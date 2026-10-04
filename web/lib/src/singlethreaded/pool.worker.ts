@@ -4,10 +4,37 @@ import {initializeWasm} from "../wasm-instance.mjs";
 type MessageData = { type: 'wasm_init', module: WebAssembly.Module }
     | { type: 'kernel_config', config: string }
     | { type: 'call', procedure_ptr: number, input: string }
+    | { type: 'image_provider_modules', urls: string[] }
 
 let initialised: Promise<maplibre.InitOutput> = null
 
+// Settles once `wasm_init` has started the module, which may come after the provider modules.
+let markStarted: () => void
+const started = new Promise<void>(resolve => markStarted = resolve)
+
+// Tile calls wait for the host's image providers, so no label is laid out without them.
+let providersRegistered: Promise<void> = Promise.resolve()
+
+/** Imports each module and lets its default export register image providers in this worker. */
+const registerProviders = async (urls: string[]) => {
+    await started
+    await initialised
+    for (const url of urls) {
+        const module = await import(/* @vite-ignore */ url)
+        await module.default({registerImageProvider: maplibre["register_image_provider"]})
+    }
+}
+
 onmessage = async (message: MessageEvent<MessageData>) => {
+
+    if (message.data.type === 'image_provider_modules') {
+        providersRegistered = registerProviders(message.data.urls).catch(err => {
+            setTimeout(() => {
+                throw err;
+            });
+        })
+        return
+    }
 
     if (initialised) {
         // This will queue further commands up until the module is fully initialised:
@@ -26,7 +53,9 @@ onmessage = async (message: MessageEvent<MessageData>) => {
             // Rethrow to keep promise rejected and prevent execution of further commands:
             throw err;
         });
+        markStarted();
     } else if (type === 'call') {
+        await providersRegistered;
         const data = message.data;
         // WARNING: Do not modify data passed from Rust!
         const procedure_ptr = data.procedure_ptr;
