@@ -57,6 +57,90 @@ pub(super) fn texts_in(map: &SymbolMap, pixels: &[u8], region: [u32; 4]) -> Vec<
     texts
 }
 
+/// Left, top, advance and atlas size of each of `text`'s glyphs, as the atlas packs them.
+fn shapes(glyphs: &crate::sdf::glyphs::Glyphs, text: &str) -> Vec<[f32; 5]> {
+    text.chars()
+        .map(|character| {
+            let glyph = glyphs
+                .stacks
+                .iter()
+                .flat_map(|stack| &stack.glyphs)
+                .find(|glyph| glyph.id == u32::from(character))
+                .expect("the range has the glyph");
+            [
+                glyph.left as f32 - 3.0,
+                glyph.top as f32 + 3.0,
+                glyph.advance as f32,
+                (glyph.width + 6) as f32,
+                (glyph.height + 6) as f32,
+            ]
+        })
+        .collect()
+}
+
+/// The shapes the labels' atlas holds for `text` in the fixture font.
+fn drawn_shapes(map: &SymbolMap, text: &str) -> Vec<[f32; 5]> {
+    let world = &map.map.map_context.world;
+    let atlas = world
+        .tiles
+        .tiles
+        .values()
+        .filter_map(|tile| {
+            world
+                .tiles
+                .query::<&crate::sdf::SymbolLayersDataComponent>(tile.coords)
+        })
+        .flat_map(|symbols| &symbols.layers)
+        .filter(|layer| !layer.buffer.buffer.indices.is_empty())
+        .filter_map(|layer| layer.atlas.as_ref())
+        .find(|atlas| {
+            atlas
+                .glyphs
+                .get(FONT)
+                .is_some_and(|glyphs| text.chars().all(|c| glyphs.contains_key(&u32::from(c))))
+        })
+        .expect("a drawn layer's atlas holds the text");
+    text.chars()
+        .map(|character| {
+            let entry = &atlas.glyphs[FONT][&u32::from(character)];
+            let [left, top, advance, _] = entry.metrics;
+            [
+                left,
+                top,
+                advance,
+                entry.rect[2] as f32,
+                entry.rect[3] as f32,
+            ]
+        })
+        .collect()
+}
+
+/// The width in screen pixels `shapes` set at `size` cover, from the first glyph's left edge
+/// to the last one's right, its bitmap's three-pixel border left out.
+fn set_width(shapes: &[[f32; 5]], size: f32) -> f32 {
+    let (Some(first), Some(last)) = (shapes.first(), shapes.last()) else {
+        return 0.0;
+    };
+    let advances: f32 = shapes[..shapes.len() - 1]
+        .iter()
+        .map(|shape| shape[2])
+        .sum();
+    let right = advances + last[0] + 3.0 + last[3] - 6.0;
+    (right - (first[0] + 3.0)) * size / 24.0
+}
+
+/// The width of the text pixels in `region`.
+fn drawn_width(pixels: &[u8], region: [u32; 4]) -> f32 {
+    let xs: Vec<u32> = count(pixels, TEXT, region)
+        .iter()
+        .map(|[x, _]| *x)
+        .collect();
+    match (xs.iter().min(), xs.iter().max()) {
+        (Some(left), Some(right)) => (right - left + 1) as f32,
+        _ => 0.0,
+    }
+}
+
 #[tokio::test]
 async fn geojson_labels_draw_with_the_font_and_sprite_they_ask_for_and_follow_set_data() {
     let mut map = SymbolMap::new(style(collection(vec![
@@ -84,8 +168,24 @@ async fn geojson_labels_draw_with_the_font_and_sprite_they_ask_for_and_follow_se
             "{sprite}: {requested:?}"
         );
     }
-    // Every glyph is the served font's: the Cyrillic range exists nowhere else, and the Latin
-    // one was served, so the bundled range is never fallen back on.
+    // Every glyph drawn is the served font's: the Cyrillic range exists nowhere else, and the
+    // Latin glyphs are spaced as only the served range spaces them.
+    use prost::Message as _;
+    let served = crate::sdf::glyphs::Glyphs::decode(&super::latin()[..]).expect("served range");
+    let bundled =
+        crate::sdf::glyphs::Glyphs::decode(&include_bytes!("../../../../../data/0-255.pbf")[..])
+            .expect("bundled range");
+    assert_ne!(shapes(&served, "Alps"), shapes(&bundled, "Alps"));
+    assert_eq!(drawn_shapes(&map, "Alps"), shapes(&served, "Alps"));
+    let width = drawn_width(&pixels, NORTH_WEST);
+    let (spaced, unspaced) = (
+        set_width(&shapes(&served, "Alps"), 28.0),
+        set_width(&shapes(&bundled, "Alps"), 28.0),
+    );
+    assert!(
+        (width - spaced).abs() < 3.0 && (width - unspaced).abs() > 4.0,
+        "'Alps' is {width} px wide: {spaced} px in the served spacing, {unspaced} px in the bundled"
+    );
     assert_eq!(texts_in(&map, &pixels, NORTH_WEST), ["Alps"]);
     assert_eq!(texts_in(&map, &pixels, NORTH_EAST), ["Жук"]);
     let icon = count(&pixels, MARKER, SOUTH_EAST);

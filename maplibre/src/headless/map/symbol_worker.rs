@@ -76,10 +76,7 @@ impl HttpClient for AssetServer {
             }
         }
         match url {
-            _ if url == format!("{font}0-255.pbf") => Ok(include_bytes!(
-                "../../../../render-tests/src/assets/glyphs/Noto Sans Regular/0-255.pbf"
-            )
-            .to_vec()),
+            _ if url == format!("{font}0-255.pbf") => Ok(latin()),
             _ if url == format!("{font}1024-1279.pbf") => Ok(include_bytes!(
                 "../../../../render-tests/src/assets/glyphs/Noto Sans Regular/1024-1279.pbf"
             )
@@ -102,6 +99,27 @@ impl HttpClient for AssetServer {
                 .ok_or_else(|| SourceFetchError::not_found(url)),
         }
     }
+}
+
+/// The extra advance, in glyph pixels, of every glyph of the served Latin range.
+pub(super) const LATIN_SPACING: i32 = 2;
+
+/// The font's 0-255 range: Noto's glyphs, each advancing [`LATIN_SPACING`] further. The bundled
+/// fallback range has the very same Noto glyphs, so only the spacing tells a label drawn from
+/// the served range from one the fallback would draw.
+pub(super) fn latin() -> Vec<u8> {
+    use prost::Message as _;
+    let mut glyphs =
+        crate::sdf::glyphs::Glyphs::decode(
+            &include_bytes!(
+                "../../../../render-tests/src/assets/glyphs/Noto Sans Regular/0-255.pbf"
+            )[..],
+        )
+        .expect("Noto's Latin range");
+    for glyph in glyphs.stacks.iter_mut().flat_map(|stack| &mut stack.glyphs) {
+        glyph.advance = glyph.advance.saturating_add_signed(LATIN_SPACING);
+    }
+    glyphs.encode_to_vec()
 }
 
 /// The font's 256-511 range, with one glyph, a solid block for `Ā`.
