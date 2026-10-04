@@ -18,6 +18,7 @@ use crate::{
 };
 
 mod geojson;
+mod mvt;
 
 /// The side of the square viewport, in physical pixels.
 pub(super) const SIZE: u32 = 512;
@@ -32,6 +33,8 @@ pub(super) const FONT: &str = "Noto Sans Regular";
 
 /// The colour of the sprite's `marker` icon.
 pub(super) const MARKER: [u8; 3] = [0, 255, 0];
+/// The colour of the sprite's `shield` icon, which stretches around its text.
+pub(super) const SHIELD: [u8; 3] = [255, 255, 0];
 
 /// Bodies served for every URL that starts with their prefix.
 type Served = Arc<Mutex<Vec<(String, Vec<u8>)>>>;
@@ -59,7 +62,9 @@ impl HttpClient for AssetServer {
             )
             .to_vec()),
             "https://sprites.test/sprite.json" => Ok(br#"{
-                "marker":{"x":0,"y":0,"width":16,"height":16,"pixelRatio":1}
+                "marker":{"x":0,"y":0,"width":16,"height":16,"pixelRatio":1},
+                "shield":{"x":16,"y":0,"width":16,"height":16,"pixelRatio":1,
+                    "stretchX":[[4,12]],"stretchY":[[4,12]],"content":[4,4,12,12]}
             }"#
             .to_vec()),
             "https://sprites.test/sprite.png" => Ok(sprite_sheet()),
@@ -76,15 +81,26 @@ impl HttpClient for AssetServer {
 }
 
 fn sprite_sheet() -> Vec<u8> {
-    let [red, green, blue] = MARKER;
+    let sheet = image::RgbaImage::from_fn(32, 16, |x, _| {
+        let [red, green, blue] = if x < 16 { MARKER } else { SHIELD };
+        image::Rgba([red, green, blue, 255])
+    });
     let mut png = std::io::Cursor::new(Vec::new());
-    image::RgbaImage::from_pixel(16, 16, image::Rgba([red, green, blue, 255]))
+    sheet
         .write_to(&mut png, image::ImageFormat::Png)
         .expect("PNG");
     png.into_inner()
 }
 
 impl AssetServer {
+    /// Answers every URL starting with `prefix` with `body`.
+    pub(super) fn serve(&self, prefix: &str, body: Vec<u8>) {
+        self.tiles
+            .lock()
+            .expect("tiles")
+            .push((prefix.to_owned(), body));
+    }
+
     /// Every URL fetched so far.
     pub(super) fn requested(&self) -> Vec<String> {
         self.urls.lock().expect("urls").clone()
@@ -113,7 +129,11 @@ pub(super) struct SymbolMap {
 
 impl SymbolMap {
     pub(super) async fn new(style: Style) -> Self {
-        let server = AssetServer::default();
+        Self::serving(style, AssetServer::default()).await
+    }
+
+    /// A map fetching from `server`, which may already serve tiles.
+    pub(super) async fn serving(style: Style, server: AssetServer) -> Self {
         let (kernel, renderer) = create_headless_renderer_with_loader(
             SIZE,
             SIZE,
@@ -129,6 +149,9 @@ impl SymbolMap {
             vec![
                 Box::new(RenderPlugin),
                 Box::new(crate::background::BackgroundPlugin),
+                Box::new(crate::terrain::TerrainPlugin::<
+                    crate::terrain::DefaultDemTransferables,
+                >::default()),
                 Box::new(VectorPlugin::<DefaultVectorTransferables>::default()),
                 Box::new(SdfPlugin::<DefaultVectorTransferables>::default()),
             ],
