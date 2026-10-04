@@ -296,7 +296,16 @@ impl LayerFrame<'_> {
             placed: visible.iter().any(|v| *v),
             text_shift,
             anchor,
-            opacity: opacity.map(|value| value * relevance),
+            opacity: {
+                let mut opacity = opacity.map(|value| value * relevance);
+                // Text that follows its line has no layout off it: while the line cannot hold
+                // it, its glyphs are hidden at once, as GL JS hides them, rather than fading out
+                // in the straight layout they were cut from.
+                if matches!(line, Some(LinePoses::DoesNotFit)) {
+                    opacity[0] = 0.0;
+                }
+                opacity
+            },
             ground,
             line,
         }

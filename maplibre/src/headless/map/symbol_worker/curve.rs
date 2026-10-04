@@ -307,3 +307,34 @@ async fn a_single_letter_on_a_leftward_street_turns_upright() {
         rows.len()
     );
 }
+
+#[tokio::test]
+async fn a_street_name_its_street_can_no_longer_hold_fades_out_without_leaving_it() {
+    let mut map = arch_map("Revere Road", 45.0, 20.0).await;
+    map.settle().await;
+    // Zoomed out at once, the arch is too short on the screen for the name, which fades out
+    // over the frames that follow.
+    map.map
+        .view_state_mut()
+        .zoom_to(crate::coords::Zoom::new(12.0));
+    for frame in 0..30 {
+        map.frame().await;
+        let pixels = map.read();
+        let road = count(&pixels, ROAD, [0, 0, SIZE, SIZE]);
+        let text = count(&pixels, [255, 0, 0], [0, 0, SIZE, SIZE]);
+        let stray = text
+            .iter()
+            .filter(|[x, y]| {
+                !road
+                    .iter()
+                    .any(|[rx, ry]| x.abs_diff(*rx) <= 14 && y.abs_diff(*ry) <= 14)
+            })
+            .count();
+        assert_eq!(
+            stray,
+            0,
+            "frame {frame}: {stray} of {} text pixels drawn away from the street",
+            text.len()
+        );
+    }
+}
