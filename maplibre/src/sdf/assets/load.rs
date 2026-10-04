@@ -4,8 +4,6 @@ use std::{
     sync::Arc,
 };
 
-use geozero::mvt::Message;
-
 use super::{
     cache::{AssetFailure, SpriteSheet},
     AtlasBuilder, AtlasEntry, IconStretch, SymbolAtlas, TextFit,
@@ -13,16 +11,13 @@ use super::{
 use crate::{
     io::source_client::{HttpClient, SourceClient},
     sdf::glyphs::Glyphs,
-    style::{
-        layer::{LayerPaint, StyleLayer},
-        Style, StyleImage,
-    },
-    vector::feature_properties,
+    style::{layer::StyleLayer, Style, StyleImage},
 };
 
-const BUNDLED_LATIN: &[u8] = include_bytes!("../../../../data/0-255.pbf");
+mod requests;
+use requests::requests;
 
-type GlyphRequests = HashMap<String, BTreeSet<u32>>;
+const BUNDLED_LATIN: &[u8] = include_bytes!("../../../../data/0-255.pbf");
 
 /// A symbol asset could not be loaded, and a later attempt can succeed.
 #[derive(Debug, thiserror::Error)]
@@ -175,86 +170,6 @@ fn glyph_url(template: &str, font: &str, range: u32) -> String {
     template
         .replace("{fontstack}", &encoded.replace('+', "%20"))
         .replace("{range}", &format!("{range}-{}", range + 255))
-}
-
-fn requests<'l>(
-    layers: impl IntoIterator<Item = &'l StyleLayer>,
-    data: &[u8],
-    zoom: f64,
-) -> (GlyphRequests, HashSet<String>) {
-    let mut fonts = GlyphRequests::new();
-    let mut icons = HashSet::new();
-    let Ok(tile) = geozero::mvt::Tile::decode(data) else {
-        return (fonts, icons);
-    };
-    for layer in layers {
-        if layer.is_hidden() {
-            continue;
-        }
-        let Some(LayerPaint::Symbol(paint)) = &layer.paint else {
-            continue;
-        };
-        let Some(source) = tile
-            .layers
-            .iter()
-            .find(|source| Some(&source.name) == layer.source_layer.as_ref())
-        else {
-            continue;
-        };
-        for feature in &source.features {
-            let properties = feature_properties(source, feature);
-            if let Some(filter) = &layer.filter {
-                let Ok(filter) = crate::style::filter::Filter::parse(filter) else {
-                    continue;
-                };
-                if !filter.evaluate(&crate::style::filter::FeatureContext {
-                    properties: &properties,
-                    geometry_type: crate::style::filter::GeometryType::from_mvt(
-                        feature.r#type.unwrap_or_default(),
-                    ),
-                    id: feature
-                        .id
-                        .map(|id| crate::style::expression::Value::Number(id as f64)),
-                    zoom,
-                }) {
-                    continue;
-                }
-            }
-            if let Some(text) = paint.label(&properties, zoom) {
-                fonts.entry(paint.font_stack()).or_default().extend(
-                    text.chars()
-                        .filter(|c| *c != crate::style::expression::FORMAT_IMAGE)
-                        .map(|c| c as u32),
-                );
-                // A section with a font of its own needs that font's glyphs for its characters.
-                let mut characters = text.chars();
-                for section in paint.label_sections(&properties, zoom) {
-                    let own: Vec<char> = characters.by_ref().take(section.length).collect();
-                    if let Some(font) = &section.font {
-                        fonts
-                            .entry(font.clone())
-                            .or_default()
-                            .extend(own.into_iter().map(|c| c as u32));
-                    }
-                }
-            }
-            if let Some(icon) = paint
-                .text("icon-image", &properties, zoom)
-                .filter(|icon| !icon.is_empty())
-            {
-                icons.insert(icon);
-            }
-            // An `image` expression may fall through to any image it names.
-            icons.extend(paint.icon_image_names());
-            icons.extend(
-                paint
-                    .label_sections(&properties, zoom)
-                    .into_iter()
-                    .filter_map(|section| section.image),
-            );
-        }
-    }
-    (fonts, icons)
 }
 
 pub(super) fn sprite_sources(sprite: Option<&serde_json::Value>) -> Vec<(String, String)> {
