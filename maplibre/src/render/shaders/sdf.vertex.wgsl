@@ -65,8 +65,13 @@ fn main(
     let elevation = feature.y * alignment.w + bitcast<f32>(a_pixeloffset.z);
     let transform = mat4x4<f32>(translate1, translate2, translate3, translate4);
     let projected = project_tile_position_3d(vec3<f32>(anchor, elevation), transform, tile_mercator_coords);
-    let distance_ratio = select(projection.transition_and_padding.y / max(projected.clip_position.w, 1e-6),
-        projected.clip_position.w / max(projection.transition_and_padding.y, 1e-6), alignment.x > 0.5);
+    // Every glyph of a label takes the size its anchor's depth gives, as GL JS sizes them, so
+    // a label along a receding line keeps one size and the spacing placement gave it.
+    let label_w = select(projected.clip_position.w, project_tile_position_3d(
+        vec3<f32>(vec2<f32>(a_pos_offset.xy), elevation), transform, tile_mercator_coords).clip_position.w,
+        has_pose);
+    let distance_ratio = select(projection.transition_and_padding.y / max(label_w, 1e-6),
+        label_w / max(projection.transition_and_padding.y, 1e-6), alignment.x > 0.5);
     // A tracked eye changes direction independently of map zoom. Viewport labels
     // retain their angular size; map-aligned text gets perspective from its geometry.
     let perspective_ratio = select(clamp(0.5 + 0.5 * distance_ratio, 0.0, 4.0),
