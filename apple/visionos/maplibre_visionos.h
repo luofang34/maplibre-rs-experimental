@@ -96,6 +96,43 @@ void maplibre_visionos_set_available_memory(MaplibreVisionOSMap *map, uint64_t a
 
 void maplibre_visionos_destroy(MaplibreVisionOSMap *map);
 
+// Images labels name in a namespace, made by the host on request, such as road shields drawn
+// from route attributes. The callback's statuses:
+#define MAPLIBRE_VISIONOS_IMAGE_READY 0        // drawn into *image
+#define MAPLIBRE_VISIONOS_IMAGE_ABSENT 1       // no image; the style's fallback is drawn
+#define MAPLIBRE_VISIONOS_IMAGE_FAILED 2       // cannot be drawn; kept until invalidated
+#define MAPLIBRE_VISIONOS_IMAGE_UNAVAILABLE 3  // not yet; asked for again later
+
+typedef struct {
+    uint32_t width;
+    uint32_t height;
+    // width * height * 4 straight-alpha RGBA bytes, read before the callback's caller returns.
+    const uint8_t *rgba;
+    // Image pixels per layout pixel.
+    float pixel_ratio;
+    // Whether anchor_x/anchor_y (image pixels from the top-left) are placed where the centre
+    // would be, such as the body of a shield with a banner above it.
+    bool has_anchor;
+    float anchor_x;
+    float anchor_y;
+} MaplibreVisionOSImage;
+
+// Draws the image named `id` (after "namespace:") for `pixel_ratio` device pixels per layout
+// pixel. Called on tile worker threads, several at once, never on the thread that draws.
+typedef int32_t (*MaplibreVisionOSImageCallback)(void *context, const char *id,
+                                                 float pixel_ratio,
+                                                 MaplibreVisionOSImage *image);
+
+/** Make `callback` draw the images named "namespace:..." that neither sprite nor style supply.
+ * `generation` names the resources they come from; `context` must outlive the map. */
+bool maplibre_visionos_register_image_provider(MaplibreVisionOSMap *map, const char *namespace_,
+                                               const char *generation,
+                                               MaplibreVisionOSImageCallback callback,
+                                               void *context);
+/** Forget a namespace's images and request again the tiles that drew one; returns their count. */
+size_t maplibre_visionos_invalidate_images(MaplibreVisionOSMap *map, const char *namespace_);
+
+
 #ifdef __cplusplus
 }
 #endif

@@ -9,8 +9,10 @@
 #![allow(unsafe_code)]
 
 mod api;
+mod images;
 mod selection;
 pub use api::*;
+pub use images::*;
 pub use selection::{maplibre_visionos_query_symbols, maplibre_visionos_set_opaque_environment};
 
 mod symbols;
