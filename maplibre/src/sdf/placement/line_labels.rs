@@ -17,9 +17,8 @@ pub(in crate::sdf) enum LinePoses {
     NotApplicable,
     /// The line cannot hold the label at this scale; it is not drawn.
     DoesNotFit,
-    /// A pose for each glyph, along the line and upright. Its angle is the line's direction
-    /// in tile space for text pitched with the map, and on the screen for text that stands
-    /// upright to the viewer.
+    /// A pose for each glyph, along the line and upright: its point on the line and the line's
+    /// direction there, both in tile units.
     Poses(Vec<GlyphPose>),
 }
 
@@ -232,7 +231,17 @@ fn viewport_poses(
             reads_backwards(at(first), at(last))
         }
         // A lone glyph reads backwards when its line runs leftward on the screen.
-        (Some(only), _) => only.angle.cos() < 0.0,
+        (Some(only), _) => {
+            let along = [
+                f64::from(only.point[0]) + f64::from(only.angle.cos()),
+                f64::from(only.point[1]) + f64::from(only.angle.sin()),
+            ];
+            let at = |point| on_screen(point).map_or([0.0; 2], |point| point.screen);
+            reads_backwards(
+                at([f64::from(only.point[0]), f64::from(only.point[1])]),
+                at(along),
+            )
+        }
         _ => false,
     };
     if !backwards {

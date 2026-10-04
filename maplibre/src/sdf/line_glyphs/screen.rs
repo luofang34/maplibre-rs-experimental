@@ -3,7 +3,10 @@
 //!
 //! Glyphs are spaced in screen pixels along the projected line, walking outward from the
 //! anchor, so a label keeps its pixel size however the line is foreshortened. Each glyph's
-//! centre is mapped back onto the line in tile units, where the vertex shader projects it.
+//! centre is mapped back onto the line in tile units, and its direction is the line's own in
+//! tile units, which the vertex shader turns to the screen every frame. A head-tracked view
+//! places labels less often than it draws, and a glyph so posed stays on its line and turned
+//! along it between placements.
 
 use super::GlyphPose;
 
@@ -77,8 +80,9 @@ fn anchor_segment(polyline: &[[f32; 2]], anchor_distance: f32) -> Option<(usize,
 /// Poses of glyphs whose centres lie `offsets` screen pixels (signed, along the text) from the
 /// anchor at `anchor_distance` along `polyline`, as `project` shows the line. `flip` reads the
 /// text against the line, each glyph walking the other way and turning half way around. A
-/// pose's point is tile units on the line and its angle is the screen direction (y down) of
-/// the segment it lies on. `None` when a glyph would lie beyond either end of the visible line.
+/// pose's point and angle are the tile-unit point on the line and the tile-unit direction of
+/// the segment it lies on, the way the text reads. `None` when a glyph would lie beyond
+/// either end of the visible line.
 pub(crate) fn place_glyphs_on_screen(
     polyline: &[[f32; 2]],
     anchor_distance: f32,
@@ -155,11 +159,9 @@ fn place_one(
         previous.tile[0] + (current.tile[0] - previous.tile[0]) * t,
         previous.tile[1] + (current.tile[1] - previous.tile[1]) * t,
     ];
-    let direction_on_screen = (current.at.screen[1] - previous.at.screen[1])
-        .atan2(current.at.screen[0] - previous.at.screen[0]);
+    let along = (current.tile[1] - previous.tile[1]).atan2(current.tile[0] - previous.tile[0]);
     // Within half a turn of zero, the range the line's own direction takes.
-    let angle = (angle + direction_on_screen + std::f64::consts::PI)
-        .rem_euclid(std::f64::consts::TAU)
+    let angle = (angle + along + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU)
         - std::f64::consts::PI;
     Some(GlyphPose {
         point: point.map(|value| value as f32),

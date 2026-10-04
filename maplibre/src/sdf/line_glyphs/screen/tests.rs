@@ -80,8 +80,8 @@ fn foreshortened_glyphs_keep_their_pixel_spacing_and_lie_on_the_line() {
             (pixels - offset.abs()).abs() < 1e-3,
             "{offset} px drawn {pixels} px away"
         );
-        // The line runs up the screen, away from the eye.
-        assert!((f64::from(pose.angle) + std::f64::consts::FRAC_PI_2).abs() < 1e-6);
+        // Its direction is the line's own, along +x, however the screen shows it.
+        assert!(pose.angle.abs() < 1e-6);
     }
     // Equal pixel steps cover more of the line where it is farther away.
     let spans: Vec<f32> = poses
