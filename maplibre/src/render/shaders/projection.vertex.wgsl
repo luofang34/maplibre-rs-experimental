@@ -4,8 +4,15 @@ struct ShaderProjectionData {
     // x: Mercator-to-globe transition, y: clip-space w of the view center,
     // z: radius of the body in metres.
     transition_and_padding: vec4<f32>,
-    // x: radius correction of a circle lying on the globe.
+    // x: radius correction of a circle lying on the globe; y: 1 when the globe centre
+    // references below are set.
     globe_circle: vec4<f32>,
+    // The Mercator position, exact in f32, of the centre globe positions are projected
+    // relative to; its clip position on the unit sphere; and the clip-space vector from the
+    // body's centre to it. The CPU computes the last two in f64.
+    globe_center: vec4<f32>,
+    globe_center_clip: vec4<f32>,
+    globe_center_radial: vec4<f32>,
 };
 
 struct ProjectedTilePosition {
@@ -52,6 +59,77 @@ fn tile_position_on_unit_sphere(
         surface = vec3<f32>(0.0, -1.0, 0.0);
     }
     return surface;
+}
+
+// exp(x) - 1 without the cancellation of the subtraction when x is small.
+fn projection_expm1(x: f32) -> f32 {
+    if abs(x) > 1e-2 {
+        return exp(x) - 1.0;
+    }
+    return x * (1.0 + x * (0.5 + x * (1.0 / 6.0 + x / 24.0)));
+}
+
+// The unit-sphere vector from the point at Mercator `base` to the point `delta` further on,
+// built from the differences of longitude and latitude so that it keeps its precision when it
+// is metres long. The base's own sines and cosines carry f32 rounding, which moves the result
+// only at second order.
+fn unit_sphere_offset(base: vec2<f32>, delta: vec2<f32>) -> vec3<f32> {
+    let longitude = base.x * PROJECTION_TWO_PI + PROJECTION_PI;
+    let d_longitude = delta.x * PROJECTION_TWO_PI;
+    // Latitude from the Mercator row: lat = 2 atan(t) - pi/2 with t = exp(pi - 2 pi y).
+    let t0 = exp(PROJECTION_PI - base.y * PROJECTION_TWO_PI);
+    let grow = projection_expm1(-delta.y * PROJECTION_TWO_PI);
+    let d_latitude = 2.0 * atan(t0 * grow / (1.0 + t0 * t0 * (1.0 + grow)));
+    let denominator = t0 * t0 + 1.0;
+    let sin_lat0 = (t0 * t0 - 1.0) / denominator;
+    let cos_lat0 = 2.0 * t0 / denominator;
+    let half_lat = sin(0.5 * d_latitude);
+    let versine_lat = -2.0 * half_lat * half_lat;
+    let d_sin_lat = sin_lat0 * versine_lat + cos_lat0 * sin(d_latitude);
+    let d_cos_lat = cos_lat0 * versine_lat - sin_lat0 * sin(d_latitude);
+    let sin_lon0 = sin(longitude);
+    let cos_lon0 = cos(longitude);
+    let half_lon = sin(0.5 * d_longitude);
+    let versine_lon = -2.0 * half_lon * half_lon;
+    let d_sin_lon = sin_lon0 * versine_lon + cos_lon0 * sin(d_longitude);
+    let d_cos_lon = cos_lon0 * versine_lon - sin_lon0 * sin(d_longitude);
+    return vec3<f32>(
+        sin_lon0 * d_cos_lat + d_sin_lon * cos_lat0 + d_sin_lon * d_cos_lat,
+        d_sin_lat,
+        cos_lon0 * d_cos_lat + d_cos_lon * cos_lat0 + d_cos_lon * d_cos_lat,
+    );
+}
+
+// The unit-sphere vector from the globe centre to `tile_position`. The centre is exact in f32
+// near the tile origins it is differenced from, so the origin's offset from it is exact, and
+// so is a tile edge's: the edge a tile shares with its neighbour comes out bit for bit as the
+// neighbour's origin, which keeps adjacent tiles watertight.
+fn unit_sphere_offset_from_center(
+    tile_position: vec2<f32>,
+    tile_mercator_coords: vec4<f32>,
+) -> vec3<f32> {
+    let center = projection.globe_center.xy;
+    let delta = (tile_mercator_coords.xy - center) + tile_position * tile_mercator_coords.zw;
+    return unit_sphere_offset(center, delta);
+}
+
+// The clip position of a point `height` body radii above the unit sphere at `tile_position`:
+// relative to the globe centre when its references are set, else from the position itself.
+fn globe_clip_position(
+    tile_position: vec2<f32>,
+    height: f32,
+    surface: vec3<f32>,
+    tile_mercator_coords: vec4<f32>,
+    is_pole: bool,
+) -> vec4<f32> {
+    if projection.globe_circle.y < 0.5 || is_pole {
+        return projection.main_matrix * vec4<f32>(surface * (1.0 + height), 1.0);
+    }
+    let offset = projection.main_matrix
+        * vec4<f32>(unit_sphere_offset_from_center(tile_position, tile_mercator_coords), 0.0);
+    // Raising a point by h scales its body-centre vector by 1 + h.
+    return projection.globe_center_clip + offset
+        + (projection.globe_center_radial + offset) * height;
 }
 
 fn globe_circumference_ratio_at_tile_y(
@@ -139,8 +217,9 @@ fn project_tile_position(
     let transition = projection.transition_and_padding.x;
     let surface = tile_position_on_unit_sphere(tile_position.xy, tile_mercator_coords);
     let mercator_clip = fallback_matrix * vec4<f32>(tile_position, 1.0);
-    let globe_clip = projection.main_matrix * vec4<f32>(surface, 1.0);
     let is_pole = is_north_pole_y(tile_position.y) || is_south_pole_y(tile_position.y);
+    let globe_clip =
+        globe_clip_position(tile_position.xy, 0.0, surface, tile_mercator_coords, is_pole);
     let horizon_distance = globe_horizon_distance(
         surface,
         transition,
@@ -166,8 +245,9 @@ fn project_tile_mesh_position(
     }
     let transition = projection.transition_and_padding.x;
     let mercator_clip = fallback_matrix * vec4<f32>(tile_position, 1.0);
-    let globe_clip = projection.main_matrix * vec4<f32>(surface, 1.0);
     let is_pole = raw_position.y < -32767 || raw_position.y > 32766;
+    let globe_clip =
+        globe_clip_position(tile_position.xy, 0.0, surface, tile_mercator_coords, is_pole);
     let horizon_distance = globe_horizon_distance(
         surface,
         transition,
@@ -189,9 +269,14 @@ fn project_tile_position_3d(
 ) -> ProjectedTilePosition {
     let transition = projection.transition_and_padding.x;
     let surface = tile_position_on_unit_sphere(tile_position.xy, tile_mercator_coords);
-    let elevated = surface * (1.0 + tile_position.z / projection.transition_and_padding.z);
-    let globe_clip = projection.main_matrix * vec4<f32>(elevated, 1.0);
     let is_pole = is_north_pole_y(tile_position.y) || is_south_pole_y(tile_position.y);
+    let globe_clip = globe_clip_position(
+        tile_position.xy,
+        tile_position.z / projection.transition_and_padding.z,
+        surface,
+        tile_mercator_coords,
+        is_pole,
+    );
     let horizon_distance = globe_horizon_distance(surface, transition, is_pole);
     let mercator_clip = fallback_matrix * vec4<f32>(tile_position, 1.0);
     return ProjectedTilePosition(blend_clip(mercator_clip, globe_clip, transition), horizon_distance);

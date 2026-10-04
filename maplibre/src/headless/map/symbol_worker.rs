@@ -19,6 +19,7 @@ use crate::{
 
 mod curve;
 mod geojson;
+mod globe_precision;
 mod horizon;
 mod motion;
 mod mvt;
