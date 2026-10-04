@@ -143,6 +143,29 @@ We established an RFC process which must be used to describe major changes to ma
 Current RFCs can be browsed in the [book](https://maplibre.org/maplibre-rs/docs/book/rfc/0001-rfc-process.html).
 
 
+## License
+
+This repository is a fork of [maplibre-rs](https://github.com/maplibre/maplibre-rs), taken at
+upstream commit `96b50a09d4925f46bd68e184e754d22ac3e356a2`.
+
+- Code as it stands at that upstream commit is licensed under either [MIT](LICENSE-MIT) or
+  [Apache-2.0](LICENSE-APACHE), at your option.
+- Changes and additions made in this fork since that commit are Copyright (C) 2026 Fang Luo and
+  Sokoly Systems, and licensed under the [GNU Affero General Public License, version 3 or any
+  later version](LICENSE-AGPL). The fork as a whole is therefore distributed under
+  AGPL-3.0-or-later; the upstream code it contains remains available under its own licenses.
+- Third-party material bundled in the fork keeps its own license:
+  - render fixtures and assets under `render-tests/` taken from maplibre-gl-js: BSD-3-Clause, see
+    [render-tests/LICENSE-maplibre-gl-js.txt](render-tests/LICENSE-maplibre-gl-js.txt);
+  - expression conformance cases under `maplibre/tests/expressions` taken from
+    maplibre-style-spec: BSD-3-Clause, see
+    [LICENSE-maplibre-style-spec.txt](maplibre/tests/expressions/LICENSE-maplibre-style-spec.txt);
+  - the Indicate snapshot under `apple/visionos/MapLibreVision/IndicateOverlay/vendor/indicate`,
+    under the terms of its source repository recorded in its `SOURCE.json`;
+  - the replay data listed in
+    [ATTRIBUTION.txt](apple/visionos/MapLibreVision/MapLibreVision/Resources/ATTRIBUTION.txt),
+    under the terms stated there.
+
 ## Acknowledgements
 
 The renderer of maplibre-rs is heavily based on the renderer of [bevy](https://bevyengine.org/). Bevy's renderer was 

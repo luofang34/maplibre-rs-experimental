@@ -20,7 +20,7 @@ version = "0.1.0"
 edition = "2021"
 # Keep this in sync with `rust-toolchain.toml` and `justfile`
 rust-version = "1.97.1"
-license = "MIT OR Apache-2.0"
+license = "AGPL-3.0-or-later AND (MIT OR Apache-2.0)"
 keywords = ["graphics", "maps", "webgl", "tiles"]
 categories = ["graphics", "science::geo"]
 authors = ["MapLibre"]
