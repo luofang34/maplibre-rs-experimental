@@ -6,6 +6,8 @@ use prost::Message as _;
 use super::*;
 use crate::io::source_client::{HttpSourceClient, SourceFetchError};
 
+mod scope;
+
 #[derive(Clone)]
 struct Assets {
     urls: Arc<Mutex<Vec<String>>>,
@@ -80,9 +82,15 @@ async fn style_assets_fetch_unicode_ranges_and_sprite_queries_without_hidden_lay
         }],
     }
     .encode_to_vec();
-    let atlas = load_symbol_assets(&client, &style, &tile, 12.)
-        .await
-        .expect("assets");
+    let atlas = load_symbol_assets(
+        &client,
+        SymbolAssetConfig::of(&style),
+        &style.layers,
+        &tile,
+        12.,
+    )
+    .await
+    .expect("assets");
     let urls = assets.urls.lock().expect("request list");
     assert_eq!(
         urls.len(),
@@ -176,12 +184,24 @@ fn labelled_tile_style(icon: &str) -> (Style, Vec<u8>) {
 async fn tiles_that_share_assets_fetch_and_decode_them_once() {
     let (server, client) = server(None);
     let (style, tile) = labelled_tile_style("marker");
-    let first = load_symbol_assets(&client, &style, &tile, 12.)
-        .await
-        .expect("first");
-    let second = load_symbol_assets(&client, &style, &tile, 12.)
-        .await
-        .expect("second");
+    let first = load_symbol_assets(
+        &client,
+        SymbolAssetConfig::of(&style),
+        &style.layers,
+        &tile,
+        12.,
+    )
+    .await
+    .expect("first");
+    let second = load_symbol_assets(
+        &client,
+        SymbolAssetConfig::of(&style),
+        &style.layers,
+        &tile,
+        12.,
+    )
+    .await
+    .expect("second");
     assert_eq!(
         server.urls.lock().expect("urls").len(),
         3,
@@ -196,9 +216,15 @@ async fn a_missing_glyph_range_leaves_the_tile_renderable_without_refetching() {
     let (server, client) = server(Some(Outage::NotFound("0-255")));
     let (style, tile) = labelled_tile_style("marker");
     for _ in 0..2 {
-        let atlas = load_symbol_assets(&client, &style, &tile, 12.)
-            .await
-            .expect("atlas");
+        let atlas = load_symbol_assets(
+            &client,
+            SymbolAssetConfig::of(&style),
+            &style.layers,
+            &tile,
+            12.,
+        )
+        .await
+        .expect("atlas");
         assert!(atlas.icons.contains_key("marker"), "sprites still load");
         assert!(
             atlas
@@ -222,9 +248,15 @@ async fn a_missing_glyph_range_leaves_the_tile_renderable_without_refetching() {
 async fn an_icon_absent_from_the_sprite_sheet_is_left_out() {
     let (_server, client) = server(None);
     let (style, tile) = labelled_tile_style("unknown-icon");
-    let atlas = load_symbol_assets(&client, &style, &tile, 12.)
-        .await
-        .expect("atlas");
+    let atlas = load_symbol_assets(
+        &client,
+        SymbolAssetConfig::of(&style),
+        &style.layers,
+        &tile,
+        12.,
+    )
+    .await
+    .expect("atlas");
     assert!(atlas.icons.is_empty());
     assert!(atlas.glyphs.contains_key("Font A"));
 }
@@ -233,14 +265,26 @@ async fn an_icon_absent_from_the_sprite_sheet_is_left_out() {
 async fn a_transient_glyph_failure_is_returned_so_the_tile_can_retry() {
     let (server, client) = server(Some(Outage::Transient("0-255")));
     let (style, tile) = labelled_tile_style("marker");
-    let error = load_symbol_assets(&client, &style, &tile, 12.)
-        .await
-        .expect_err("transient failure propagates");
+    let error = load_symbol_assets(
+        &client,
+        SymbolAssetConfig::of(&style),
+        &style.layers,
+        &tile,
+        12.,
+    )
+    .await
+    .expect_err("transient failure propagates");
     assert!(error.url.ends_with("Font%20A/0-255.pbf"), "{error}");
     *server.failing_range.lock().expect("script") = None;
-    let atlas = load_symbol_assets(&client, &style, &tile, 12.)
-        .await
-        .expect("retry");
+    let atlas = load_symbol_assets(
+        &client,
+        SymbolAssetConfig::of(&style),
+        &style.layers,
+        &tile,
+        12.,
+    )
+    .await
+    .expect("retry");
     assert!(atlas.glyphs["Font A"].contains_key(&65));
 }
 

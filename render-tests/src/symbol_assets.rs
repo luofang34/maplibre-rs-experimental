@@ -4,8 +4,8 @@ use std::{path::PathBuf, sync::Arc};
 
 use maplibre::{
     io::source_client::{HttpClient, HttpSourceClient, SourceClient, SourceFetchError},
-    sdf::assets::{load_symbol_assets, SymbolAtlas},
-    style::Style,
+    sdf::assets::{load_symbol_assets, SymbolAssetConfig, SymbolAtlas},
+    style::{layer::StyleLayer, Style},
 };
 
 /// Serves `local://glyphs/...` and `local://sprites/...` from `render-tests/src/assets`.
@@ -79,17 +79,24 @@ impl HttpClient for LocalAssets {
     }
 }
 
-/// The atlas of the glyphs and sprites the tile's symbols use, or `None` when no symbol layer
-/// draws from it. The loader is asynchronous but every read is a local file, so it is driven
-/// to completion here.
+/// The atlas of the glyphs and sprites the symbols of `layers`, one source's layers as its tile
+/// is cut, use in `tile`. The loader is asynchronous but every read is a local file, so it is
+/// driven to completion here.
 pub(super) fn load_atlas_blocking(
     style: &Style,
+    layers: &[StyleLayer],
     tile: &[u8],
     (zoom, pixel_ratio): (f64, f64),
 ) -> Result<Option<Arc<SymbolAtlas>>, String> {
     let client = SourceClient::new(HttpSourceClient::new(LocalAssets { pixel_ratio }));
     let atlas = tokio::task::block_in_place(|| {
-        tokio::runtime::Handle::current().block_on(load_symbol_assets(&client, style, tile, zoom))
+        tokio::runtime::Handle::current().block_on(load_symbol_assets(
+            &client,
+            SymbolAssetConfig::of(style),
+            layers,
+            tile,
+            zoom,
+        ))
     })
     .map_err(|error| format!("Cannot load symbol assets: {error:?}"))?;
     Ok(Some(atlas))

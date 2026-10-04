@@ -7,7 +7,7 @@ use geozero::mvt::Message;
 use super::{colored_bounds, render_with_atlas, style};
 use crate::{
     io::source_client::{HttpClient, HttpSourceClient, SourceClient, SourceFetchError},
-    sdf::assets::load_symbol_assets,
+    sdf::assets::{load_symbol_assets, SymbolAssetConfig},
 };
 
 /// Serves the bundled glyph range for every range and a one-icon sprite sheet.
@@ -58,14 +58,26 @@ async fn text_and_sprite_loaded_through_the_asset_cache_are_drawn() {
         }],
     }
     .encode_to_vec();
-    let atlas = load_symbol_assets(&client, &style, &tile, 12.)
-        .await
-        .expect("assets load");
+    let atlas = load_symbol_assets(
+        &client,
+        SymbolAssetConfig::of(&style),
+        &style.layers,
+        &tile,
+        12.,
+    )
+    .await
+    .expect("assets load");
     assert!(atlas.icons.contains_key("marker"));
     let fetches = server.urls.lock().expect("urls").len();
-    let again = load_symbol_assets(&client, &style, &tile, 12.)
-        .await
-        .expect("assets load again");
+    let again = load_symbol_assets(
+        &client,
+        SymbolAssetConfig::of(&style),
+        &style.layers,
+        &tile,
+        12.,
+    )
+    .await
+    .expect("assets load again");
     assert_eq!(
         server.urls.lock().expect("urls").len(),
         fetches,

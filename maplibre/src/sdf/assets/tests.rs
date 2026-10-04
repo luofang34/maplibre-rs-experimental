@@ -116,7 +116,7 @@ fn the_default_sprite_has_no_prefix_and_others_take_their_id() {
     }))
     .expect("style parses");
     assert_eq!(
-        super::load::sprite_sources(&style),
+        super::load::sprite_sources(style.sprite.as_ref()),
         [
             (String::new(), "https://a.test/one".to_string()),
             ("night:".to_string(), "https://a.test/two".to_string())

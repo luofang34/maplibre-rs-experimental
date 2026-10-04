@@ -47,6 +47,8 @@ mod raster;
 pub mod reference;
 mod signals;
 mod style;
+#[cfg(test)]
+mod symbol_worker;
 mod symbols;
 #[cfg(test)]
 mod terrain_coverage;

@@ -11,7 +11,7 @@ mod load;
 pub mod wire;
 pub(crate) use cache::fetch;
 pub use cache::{AssetCache, AssetFailure};
-pub use load::{load_symbol_assets, SymbolAssetError};
+pub use load::{load_symbol_assets, SymbolAssetConfig, SymbolAssetError};
 
 /// Coordinates and metrics of a glyph or sprite in the atlas.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

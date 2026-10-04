@@ -131,12 +131,16 @@ fn load_geojson_blocking(
     };
     // The glyphs a tile needs are found in the same tile the worker path would build, whose
     // one layer has a fixed name that the style's layers do not carry.
-    let mut symbol_style = style.clone();
-    for layer in &mut symbol_style.layers {
-        if layer.source.as_deref() == Some(name) {
-            layer.source_layer = Some(GEOJSON_LAYER.to_owned());
-        }
-    }
+    let symbol_layers: Vec<StyleLayer> = layers
+        .iter()
+        .cloned()
+        .map(|mut layer| {
+            layer
+                .source_layer
+                .get_or_insert_with(|| GEOJSON_LAYER.to_owned());
+            layer
+        })
+        .collect();
     let mut processed = ProcessedLayers::default();
     // Past its last zoom a GeoJSON source is drawn magnified from the tile of that zoom.
     let max_zoom = source.maxzoom.unwrap_or(GEOJSON_DEFAULT_MAXZOOM);
@@ -161,8 +165,8 @@ fn load_geojson_blocking(
             0
         };
         let atlas = symbol_atlas(
-            &symbol_style,
-            layers,
+            style,
+            &symbol_layers,
             &index.tile(*coords),
             (*coords, 0, pixel_ratio),
         )?;
@@ -423,6 +427,7 @@ fn symbol_atlas(
     }
     load_atlas_blocking(
         style,
+        layers,
         tile,
         (f64::from(magnified.max(u8::from(coords.z))), pixel_ratio),
     )
