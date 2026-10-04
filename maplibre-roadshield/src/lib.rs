@@ -35,4 +35,4 @@ pub use error::{PackLoadError, ShieldRenderError};
 pub use pack::load_pack_dir_blocking;
 pub use provider::{RoadShieldProvider, ShieldDisplay};
 pub use route::{RouteRequest, NAMESPACE};
-pub use style::{openmaptiles_shield_image, route_shield_image};
+pub use style::{openmaptiles_route_shield_image, openmaptiles_shield_image, route_shield_image};
