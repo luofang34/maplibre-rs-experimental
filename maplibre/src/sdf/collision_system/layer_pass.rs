@@ -222,6 +222,14 @@ impl LayerFrame<'_> {
             && relevance > 0.0
             && !matches!(line, Some(LinePoses::DoesNotFit))
             && !crate::sdf::placement::buried_in_terrain(self.world, layer, feature, ground)
+            && !crate::sdf::placement::beyond_perspective_cutoff(
+                layer,
+                feature,
+                ground,
+                view_state,
+                projection,
+                &self.uniforms,
+            )
             && local_zoom_visible(
                 layer.coords,
                 feature,

@@ -17,7 +17,10 @@ use crate::{
     vector::{DefaultVectorTransferables, VectorPlugin},
 };
 
+mod curve;
 mod geojson;
+mod horizon;
+mod motion;
 mod mvt;
 mod retry;
 

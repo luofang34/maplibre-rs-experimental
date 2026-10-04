@@ -96,6 +96,10 @@ pub(crate) fn reads_backwards(first: [f64; 2], last: [f64; 2]) -> bool {
     first[0] > last[0]
 }
 
+#[path = "line_glyphs/screen.rs"]
+mod screen;
+pub(crate) use screen::{place_glyphs_on_screen, OnScreen};
+
 #[cfg(test)]
 #[path = "line_glyphs/tests.rs"]
 mod tests;

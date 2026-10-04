@@ -24,11 +24,11 @@ pub(super) struct SymbolUniforms {
     pub translate: [f32; 4],
 }
 
-/// Whether text along a line is placed glyph by glyph: it lies on the map plane and turns with
-/// the map. Other alignments keep the straight layout at the anchor.
+/// Whether text along a line is placed glyph by glyph: it turns with the map, whether it lies
+/// on the map plane or stands upright to the viewer. Text aligned with the viewport keeps the
+/// straight layout at the anchor.
 pub(crate) fn text_follows_line(paint: &SymbolPaint, zoom: f64) -> bool {
-    let layout = SymbolUniforms::new(paint, zoom, [1, 1]).text_layout;
-    layout[0] > 0.5 && layout[1] > 0.5
+    SymbolUniforms::new(paint, zoom, [1, 1]).text_layout[1] > 0.5
 }
 
 impl SymbolUniforms {
