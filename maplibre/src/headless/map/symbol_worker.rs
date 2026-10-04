@@ -23,6 +23,7 @@ mod globe_precision;
 mod horizon;
 mod motion;
 mod mvt;
+mod provided;
 mod retry;
 
 /// The side of the square viewport, in physical pixels.
@@ -251,9 +252,6 @@ impl SymbolMap {
         for _ in 0..600 {
             let requests = self.server.requested().len();
             let ready = self.frame().await;
-            self.labels_ready |= ready
-                .iter()
-                .any(|ready| matches!(ready, ResourceReady::SymbolAtlas { .. }));
             let idle = ready.is_empty()
                 && !self.map.needs_redraw()
                 && self.server.requested().len() == requests;
@@ -279,7 +277,11 @@ impl SymbolMap {
         for _ in 0..8 {
             tokio::task::yield_now().await;
         }
-        self.map.take_ready_resources()
+        let ready = self.map.take_ready_resources();
+        self.labels_ready |= ready
+            .iter()
+            .any(|ready| matches!(ready, ResourceReady::SymbolAtlas { .. }));
+        ready
     }
 
     /// The RGBA pixels of the last frame.

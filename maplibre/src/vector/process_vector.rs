@@ -66,6 +66,7 @@ pub fn extent_scale(layer: &tile::Layer) -> f64 {
 }
 
 /// A request for a tile at the given coordinates and in the given layers.
+#[derive(Clone)]
 pub struct VectorTileRequest {
     /// Tile grid used to scale its geometry and index.
     pub coords: WorldTileCoords,

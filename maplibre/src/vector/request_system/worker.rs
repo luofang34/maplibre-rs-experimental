@@ -3,6 +3,8 @@
 use std::{collections::HashSet, sync::Arc};
 
 use super::group_tile::fetch_group_tile;
+
+mod provided;
 use crate::{
     coords::WorldTileCoords,
     environment::OffscreenKernel,
@@ -12,7 +14,7 @@ use crate::{
         tile_retry::{RequestDisposition, RequestKind, TileRequestOutcome},
         tile_sources::{source_layer_groups, SourceLayerGroup, TileKind},
     },
-    sdf::assets::{load_symbol_assets, SymbolAssetConfig, SymbolAtlas},
+    sdf::assets::{load_symbol_assets_awaiting, SymbolAssetConfig, SymbolAtlas},
     style::{layer::StyleLayer, Style},
     vector::{
         process_vector::process_vector_tile_with_assets,
@@ -28,6 +30,7 @@ pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context +
 ) -> AsyncProcedureFuture {
     Box::pin(async move {
         let overscaled_zoom = input.overscaled_zoom();
+        let pixel_ratio = input.pixel_ratio();
         let (coords, style, attempt) = input.into_tile_request();
         let context = AttemptContext::new(context, attempt);
         let client = kernel.source_client();
@@ -36,6 +39,7 @@ pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context +
             .peekable();
         let mut failed = false;
         let mut retry = false;
+        let mut images = provided::TileImages::new(coords, attempt, pixel_ratio);
         while let Some(group) = groups.next() {
             let data = match fetch_group_tile(&client, coords, &group).await {
                 Ok(data) => data,
@@ -55,11 +59,15 @@ pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context +
                 &client,
                 &group,
                 context.clone(),
-                (groups.peek().is_none() && !failed, overscaled_zoom),
+                SourcePass {
+                    last_source: groups.peek().is_none() && !failed,
+                    overscaled_zoom,
+                    pixel_ratio,
+                },
             )
             .await
             {
-                Ok(()) => {}
+                Ok(symbols) => images.add(symbols),
                 Err(ProcessVectorError::SendError(source)) => {
                     return Err(ProcedureError::Send(source))
                 }
@@ -77,8 +85,26 @@ pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context +
                 }
             }
         }
-        finish::<T, _>(&context, coords, attempt, failed, retry)
+        images
+            .report_first(&context)
+            .map_err(ProcedureError::Send)?;
+        finish::<T, _>(&context, coords, attempt, failed, retry)?;
+        // The tile is complete and drawn; its labels are laid out again as images arrive.
+        images
+            .lay_out_again::<T, _, K::HttpClient>(&client, &style, context)
+            .await
+            .map_err(ProcedureError::Send)
     })
+}
+
+/// How one source of a tile is processed.
+struct SourcePass {
+    /// Whether no other source follows, so this one completes the tile.
+    last_source: bool,
+    /// The zoom the tile is magnified to, or zero.
+    overscaled_zoom: u8,
+    /// Device pixels per layout pixel, which provided images are made for.
+    pixel_ratio: f32,
 }
 
 fn source_failed<T: VectorTransferables, C: Context>(
@@ -101,8 +127,13 @@ async fn process_source<T: VectorTransferables, C: Context + Clone, H: HttpClien
     client: &SourceClient<H>,
     group: &SourceLayerGroup,
     context: C,
-    (last_source, overscaled_zoom): (bool, u8),
-) -> Result<(), ProcessVectorError> {
+    pass: SourcePass,
+) -> Result<Option<provided::Symbols>, ProcessVectorError> {
+    let SourcePass {
+        last_source,
+        overscaled_zoom,
+        pixel_ratio,
+    } = pass;
     let projection = style
         .projection
         .as_ref()
@@ -129,13 +160,16 @@ async fn process_source<T: VectorTransferables, C: Context + Clone, H: HttpClien
         )?;
     }
     if symbols.is_empty() {
-        return Ok(());
+        return Ok(None);
     }
     // The assets are asked for by the very layers the symbols are laid out with: this source's,
     // as its tile is cut.
-    let atlas = load_symbol_assets(
+    let assets = load_symbol_assets_awaiting(
         client,
-        SymbolAssetConfig::of(style),
+        SymbolAssetConfig {
+            pixel_ratio,
+            ..SymbolAssetConfig::of(style)
+        },
         &symbols,
         data,
         f64::from(overscaled_zoom.max(u8::from(coords.z))),
@@ -143,17 +177,21 @@ async fn process_source<T: VectorTransferables, C: Context + Clone, H: HttpClien
     .await
     .map_err(ProcessVectorError::SymbolAssets)?;
     let mut processor = source_processor::<T, C>(context, last_source);
-    process_vector_tile_with_assets(
-        data,
-        VectorTileRequest {
-            coords,
-            layers: symbols,
-            projection,
-            overscaled_zoom,
-        },
-        &mut processor,
-        atlas,
-    )
+    let request = VectorTileRequest {
+        coords,
+        layers: symbols,
+        projection,
+        overscaled_zoom,
+    };
+    // Only a source still waiting for images keeps its tile and layers to lay out again.
+    let again = (!assets.awaiting.is_empty()).then(|| (data.to_vec(), request.clone()));
+    process_vector_tile_with_assets(data, request, &mut processor, assets.atlas)?;
+    Ok(Some(provided::Symbols {
+        again,
+        pixel_ratio,
+        provided: assets.provided,
+        awaiting: assets.awaiting,
+    }))
 }
 
 fn source_processor<T: VectorTransferables, C: Context>(

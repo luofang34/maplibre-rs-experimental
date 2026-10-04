@@ -18,7 +18,7 @@ pub struct HeadlessEnvironment;
 #[derive(Clone)]
 pub struct SuppliedTileClient;
 /// Offscreen kernel with no native runtime or I/O dependencies.
-pub struct SuppliedTileKernel;
+pub struct SuppliedTileKernel(crate::sdf::assets::ImageProviders);
 
 #[async_trait::async_trait(?Send)]
 impl HttpClient for SuppliedTileClient {
@@ -28,11 +28,12 @@ impl HttpClient for SuppliedTileClient {
 }
 impl OffscreenKernel for SuppliedTileKernel {
     type HttpClient = SuppliedTileClient;
-    fn create(_config: OffscreenKernelConfig) -> Self {
-        Self
+    fn create(config: OffscreenKernelConfig) -> Self {
+        Self(config.image_providers)
     }
     fn source_client(&self) -> SourceClient<Self::HttpClient> {
         SourceClient::new(HttpSourceClient::new(SuppliedTileClient))
+            .with_image_providers(self.0.clone())
     }
 }
 impl Environment for HeadlessEnvironment {

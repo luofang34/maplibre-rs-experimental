@@ -23,6 +23,7 @@ impl OffscreenKernel for WHATWGOffscreenKernelEnvironment {
     fn source_client(&self) -> SourceClient<Self::HttpClient> {
         SourceClient::new(HttpSourceClient::new(web_http_client()))
             .with_asset_cache(self.0.asset_cache.clone())
+            .with_image_providers(self.0.image_providers.clone())
     }
 }
 

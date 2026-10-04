@@ -150,11 +150,16 @@ pub(crate) fn needs_frame(world: &World) -> bool {
 
 /// Requests every requested tile of `kind` again, keeping what it shows until the new data lands.
 pub(crate) fn refresh(world: &mut World, kind: RequestKind) {
+    let coords: Vec<WorldTileCoords> = world.tiles.tiles.values().map(|tile| tile.coords).collect();
+    refresh_tiles(world, kind, &coords);
+}
+
+/// Requests `tiles` again for `kind`, keeping what they show until the new data lands.
+pub(crate) fn refresh_tiles(world: &mut World, kind: RequestKind, tiles: &[WorldTileCoords]) {
     crate::render::frame_signals::mark_dirty(world);
     let now = now(world);
-    let coords: Vec<WorldTileCoords> = world.tiles.tiles.values().map(|tile| tile.coords).collect();
-    for coords in coords {
-        let Some(retries) = world.tiles.query_mut::<&mut TileRequestRetries>(coords) else {
+    for coords in tiles {
+        let Some(retries) = world.tiles.query_mut::<&mut TileRequestRetries>(*coords) else {
             continue;
         };
         let state = &mut retries.0[kind.index()];
@@ -169,6 +174,25 @@ pub(crate) fn refresh(world: &mut World, kind: RequestKind) {
             state.deadline = Some(now);
         }
     }
+}
+
+/// Requests a finished tile again after `delay`, because part of what its worker sent later
+/// was unavailable for now.
+pub(crate) fn retry_later(
+    world: &mut World,
+    coords: WorldTileCoords,
+    kind: RequestKind,
+    delay: Duration,
+) {
+    let now = now(world);
+    let Some(retries) = world.tiles.query_mut::<&mut TileRequestRetries>(coords) else {
+        return;
+    };
+    let state = &mut retries.0[kind.index()];
+    if state.pending || state.deadline.is_some() {
+        return;
+    }
+    state.deadline = Some(now.saturating_add(delay));
 }
 
 pub(crate) fn due(world: &mut World, coords: WorldTileCoords, kind: RequestKind) -> bool {

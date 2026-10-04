@@ -32,12 +32,16 @@ impl<E: Environment, T: VectorTransferables> System for PopulateWorldSystem<E, T
     }
 
     fn run(&mut self, MapContext { world, style, .. }: &mut MapContext) -> SystemResult {
-        let messages = self
-            .kernel
-            .apc()
-            .receive(|message| message.has_tag(T::SymbolLayerTessellated::message_tag()));
+        let messages = self.kernel.apc().receive(|message| {
+            message.has_tag(T::SymbolLayerTessellated::message_tag())
+                || message.has_tag(super::provided::ProvidedImagesReport::message_tag())
+        });
         apply_worker_messages(messages, |message| {
-            if message.has_tag(T::SymbolLayerTessellated::message_tag()) {
+            if message.has_tag(super::provided::ProvidedImagesReport::message_tag()) {
+                let report =
+                    message.into_transferable::<super::provided::ProvidedImagesReport>()?;
+                super::provided::apply(world, *report);
+            } else if message.has_tag(T::SymbolLayerTessellated::message_tag()) {
                 let attempt = message.attempt();
                 let message = message.into_transferable::<T::SymbolLayerTessellated>()?;
                 let coords = message.coords();

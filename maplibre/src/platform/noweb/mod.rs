@@ -64,5 +64,6 @@ impl OffscreenKernel for ReqwestOffscreenKernelEnvironment {
         });
         SourceClient::new(HttpSourceClient::new(loader))
             .with_asset_cache(self.0.asset_cache.clone())
+            .with_image_providers(self.0.image_providers.clone())
     }
 }

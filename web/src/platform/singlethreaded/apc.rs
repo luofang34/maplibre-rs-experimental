@@ -12,6 +12,7 @@ use maplibre::{
         source_client::SourceClient,
         tile_retry::{RequestKind, TileRequestOutcome},
     },
+    sdf::provided::ProvidedImagesReport,
 };
 use rand::{prelude::SliceRandom, thread_rng};
 use thiserror::Error;
@@ -49,6 +50,7 @@ pub enum WebMessageTag {
     LayerDemMissing = 9,
     TileRequestOutcome = 10,
     TrackedPayload = 11,
+    ProvidedImages = 12,
 }
 
 impl WebMessageTag {
@@ -65,6 +67,7 @@ impl WebMessageTag {
             WebMessageTag::LayerDemMissing => &WebMessageTag::LayerDemMissing,
             WebMessageTag::TileRequestOutcome => &WebMessageTag::TileRequestOutcome,
             WebMessageTag::TrackedPayload => &WebMessageTag::TrackedPayload,
+            WebMessageTag::ProvidedImages => &WebMessageTag::ProvidedImages,
         }
     }
 
@@ -87,6 +90,7 @@ impl WebMessageTag {
                 Ok(WebMessageTag::TileRequestOutcome)
             }
             x if x == WebMessageTag::TrackedPayload as u32 => Ok(WebMessageTag::TrackedPayload),
+            x if x == WebMessageTag::ProvidedImages as u32 => Ok(WebMessageTag::ProvidedImages),
             _ => Err(MessageTagDeserializeError),
         }
     }
@@ -160,6 +164,17 @@ fn prepare_payload(message: Message) -> Result<(WebMessageTag, ArrayBuffer), Sen
             Uint8Array::from(data.as_slice()).buffer(),
         ));
     }
+    if message.has_tag(ProvidedImagesReport::message_tag()) {
+        let report = message.into_transferable::<ProvidedImagesReport>()?;
+        let data = serde_json::to_vec(&*report).map_err(|source| SendError::Transmission {
+            operation: "encoding a provided images report",
+            source: Box::new(source),
+        })?;
+        return Ok((
+            WebMessageTag::ProvidedImages,
+            Uint8Array::from(data.as_slice()).buffer(),
+        ));
+    }
     let tag = message
         .tag()
         .as_any()
@@ -203,6 +218,12 @@ pub(crate) fn decode_message(
         let outcome: TileRequestOutcome = serde_json::from_slice(&data)
             .map_err(|source| CallError::Deserialize(Box::new(source)))?;
         return Ok(IntoMessage::into(outcome));
+    }
+    if tag == WebMessageTag::ProvidedImages {
+        let data = Uint8Array::new(&buffer).to_vec();
+        let report: ProvidedImagesReport = serde_json::from_slice(&data)
+            .map_err(|source| CallError::Deserialize(Box::new(source)))?;
+        return Ok(IntoMessage::into(report));
     }
     Ok(Message::new(
         tag.to_static(),

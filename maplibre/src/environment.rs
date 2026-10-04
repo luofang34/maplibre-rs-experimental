@@ -10,7 +10,7 @@ use crate::{
         scheduler::Scheduler,
         source_client::{HttpClient, SourceClient},
     },
-    sdf::assets::AssetCache,
+    sdf::assets::{AssetCache, ImageProviders},
     window::MapWindowConfig,
 };
 
@@ -44,6 +44,10 @@ pub struct OffscreenKernelConfig {
     /// with its own empty cache.
     #[serde(skip)]
     pub asset_cache: AssetCache,
+    /// The providers of images labels name and no sprite supplies, shared like the asset
+    /// cache. A worker that receives its configuration over a channel registers its own.
+    #[serde(skip)]
+    pub image_providers: ImageProviders,
     /// The loader the map thread uses, so in-process workers fetch through the same one.
     /// Like the asset cache it is not serialized: a worker in another process or a browser
     /// worker builds its platform's own loader.

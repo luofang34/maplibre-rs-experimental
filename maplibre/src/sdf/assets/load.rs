@@ -6,6 +6,7 @@ use std::{
 
 use super::{
     cache::{AssetFailure, SpriteSheet},
+    provider::{ImageProviders, Resolved},
     AtlasBuilder, AtlasEntry, IconStretch, SymbolAtlas, TextFit,
 };
 use crate::{
@@ -39,17 +40,30 @@ pub struct SymbolAssetConfig<'a> {
     pub sprite: Option<&'a serde_json::Value>,
     /// Images a host added to the style.
     pub images: &'a HashMap<String, StyleImage>,
+    /// Device pixels per layout pixel of the display, which provided images are made for.
+    pub pixel_ratio: f32,
 }
 
 impl<'a> SymbolAssetConfig<'a> {
-    /// The symbol settings of `style`.
+    /// The symbol settings of `style`, for a display of one device pixel per layout pixel.
     pub fn of(style: &'a Style) -> Self {
         Self {
             glyphs: style.glyphs.as_deref(),
             sprite: style.sprite.as_ref(),
             images: &style.images,
+            pixel_ratio: 1.0,
         }
     }
+}
+
+/// A tile's atlas, and the provided images its labels name.
+pub(crate) struct LoadedSymbolAssets {
+    /// The glyphs and images that were ready.
+    pub(crate) atlas: Arc<SymbolAtlas>,
+    /// Every provided name the labels ask for, whether it was ready or not.
+    pub(crate) provided: Vec<String>,
+    /// The provided names with no answer yet, which a later load can pack once they have one.
+    pub(crate) awaiting: Vec<String>,
 }
 
 /// Loads the glyph ranges and sprites that the features of one source's tile use under
@@ -68,6 +82,22 @@ pub async fn load_symbol_assets<'l, HC: HttpClient>(
     data: &[u8],
     zoom: f64,
 ) -> Result<Arc<SymbolAtlas>, SymbolAssetError> {
+    Ok(
+        load_symbol_assets_awaiting(client, config, layers, data, zoom)
+            .await?
+            .atlas,
+    )
+}
+
+/// Like [`load_symbol_assets`], packing the provided images whose answers are known and
+/// listing the ones still to come instead of waiting for them.
+pub(crate) async fn load_symbol_assets_awaiting<'l, HC: HttpClient>(
+    client: &SourceClient<HC>,
+    config: SymbolAssetConfig<'_>,
+    layers: impl IntoIterator<Item = &'l StyleLayer>,
+    data: &[u8],
+    zoom: f64,
+) -> Result<LoadedSymbolAssets, SymbolAssetError> {
     let (fonts, icons) = requests(layers, data, zoom);
     let mut builder = AtlasBuilder::new();
     for (font, characters) in fonts {
@@ -85,10 +115,48 @@ pub async fn load_symbol_assets<'l, HC: HttpClient>(
     }
     for (name, image) in config.images {
         if icons.contains(name) {
-            pack_style_image(&mut builder, name, image);
+            pack_style_image(&mut builder, name, image, None);
         }
     }
-    Ok(builder.finish())
+    // The sprite and the style's own images come first; a provider fills only the gaps.
+    let (provided, awaiting) = pack_provided(
+        &mut builder,
+        client.image_providers(),
+        &icons,
+        config.pixel_ratio,
+    );
+    Ok(LoadedSymbolAssets {
+        atlas: builder.finish(),
+        provided,
+        awaiting,
+    })
+}
+
+/// Packs the provided images among `icons` that nothing else supplied and whose answers are
+/// known, returning every provided name and the ones without an answer yet.
+fn pack_provided(
+    builder: &mut AtlasBuilder,
+    providers: &ImageProviders,
+    icons: &HashSet<String>,
+    pixel_ratio: f32,
+) -> (Vec<String>, Vec<String>) {
+    let mut provided: Vec<String> = icons
+        .iter()
+        .filter(|name| !builder.atlas.icons.contains_key(*name) && providers.provides(name))
+        .cloned()
+        .collect();
+    provided.sort();
+    let mut awaiting = Vec::new();
+    for name in &provided {
+        match providers.known(name, pixel_ratio).as_deref() {
+            Some(Resolved::Image(image)) => {
+                pack_style_image(builder, name, &image.image, image.anchor);
+            }
+            Some(Resolved::None) => {}
+            None => awaiting.push(name.clone()),
+        }
+    }
+    (provided, awaiting)
 }
 
 /// RGBA bytes with each colour channel scaled by its alpha.
@@ -104,7 +172,13 @@ fn premultiply(data: &[u8]) -> Vec<u8> {
 }
 
 /// Packs an image the host added to the style, replacing a sprite icon of the same name.
-fn pack_style_image(builder: &mut AtlasBuilder, name: &str, image: &crate::style::StyleImage) {
+/// `anchor`, in image pixels, is the point placed where the image's centre would be.
+fn pack_style_image(
+    builder: &mut AtlasBuilder,
+    name: &str,
+    image: &StyleImage,
+    anchor: Option<[f32; 2]>,
+) {
     if image.width == 0
         || image.height == 0
         || image.data.len() != image.width as usize * image.height as usize * 4
@@ -121,11 +195,14 @@ fn pack_style_image(builder: &mut AtlasBuilder, name: &str, image: &crate::style
     let Some(rect) = builder.pack(image.width, image.height, data) else {
         return;
     };
+    let [shift_x, shift_y] = anchor.map_or([0.0, 0.0], |[x, y]| {
+        [x - image.width as f32 / 2.0, y - image.height as f32 / 2.0]
+    });
     builder.atlas.icons.insert(
         name.to_owned(),
         AtlasEntry {
             rect,
-            metrics: [0.0, 0.0, 0.0, image.pixel_ratio.max(0.01)],
+            metrics: [shift_x, shift_y, 0.0, image.pixel_ratio.max(0.01)],
             kind: if image.sdf { 2 } else { 1 },
             ..Default::default()
         },

@@ -138,7 +138,14 @@ pub enum Input {
         /// when it is drawn at its own zoom.
         #[serde(default)]
         overscaled_zoom: u8,
+        /// Device pixels per layout pixel of the display, which generated images are made for.
+        #[serde(default = "one")]
+        pixel_ratio: f32,
     },
+}
+
+fn one() -> f32 {
+    1.0
 }
 
 impl Input {
@@ -162,6 +169,14 @@ impl Input {
             Self::TrackedTileRequest {
                 overscaled_zoom, ..
             } => *overscaled_zoom,
+        }
+    }
+
+    /// Device pixels per layout pixel of the display the tile is drawn on.
+    pub fn pixel_ratio(&self) -> f32 {
+        match self {
+            Self::TileRequest { .. } => 1.0,
+            Self::TrackedTileRequest { pixel_ratio, .. } => *pixel_ratio,
         }
     }
 }
@@ -258,6 +273,12 @@ pub trait AsyncProcedureCall<K: OffscreenKernel>: 'static {
     /// Stops the tracked call with `attempt` if it is still running. A transport that cannot
     /// reach its worker lets the call finish; the map ignores a result it gave up on.
     fn cancel(&self, _attempt: u64) {}
+
+    /// The image providers the workers ask, when they share this transport's memory. A
+    /// transport whose workers build their own configuration has none to offer here.
+    fn image_providers(&self) -> Option<&crate::sdf::assets::ImageProviders> {
+        None
+    }
 }
 
 /// Reply sender whose clones share the scheduler-backed APC's receiving channel.
@@ -375,6 +396,10 @@ impl<K: OffscreenKernel, S: Scheduler> AsyncProcedureCall<K> for SchedulerAsyncP
         if let Some(abort) = self.running().remove(&attempt) {
             abort.abort();
         }
+    }
+
+    fn image_providers(&self) -> Option<&crate::sdf::assets::ImageProviders> {
+        Some(&self.offscreen_kernel_config.image_providers)
     }
 }
 

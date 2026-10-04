@@ -8,6 +8,7 @@ use super::*;
 use crate::io::source_client::{HttpSourceClient, SourceFetchError};
 
 mod names;
+mod provided;
 mod scope;
 
 #[derive(Clone)]
@@ -300,7 +301,7 @@ fn an_image_added_to_the_style_is_packed_with_its_ratio_and_kind() {
         pixel_ratio: 2.0,
         sdf: true,
     };
-    pack_style_image(&mut builder, "added", &image);
+    pack_style_image(&mut builder, "added", &image, None);
     // Bytes that do not match the size are left out rather than read past.
     pack_style_image(
         &mut builder,
@@ -309,6 +310,7 @@ fn an_image_added_to_the_style_is_packed_with_its_ratio_and_kind() {
             data: vec![0; 3],
             ..image.clone()
         },
+        None,
     );
     let atlas = builder.finish();
     let entry = atlas.icons.get("added").expect("the added image");

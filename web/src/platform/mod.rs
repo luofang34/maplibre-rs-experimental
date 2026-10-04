@@ -1,6 +1,20 @@
+use std::sync::OnceLock;
+
+use maplibre::sdf::assets::ImageProviders;
+
 use crate::WHATWGOffscreenKernelEnvironment;
 
 pub mod http_client;
+
+/// The providers of images that labels name and no sprite supplies, for every map and worker
+/// of this WebAssembly module. Workers of a single-threaded build run their own copy of the
+/// module, so a host registers its providers in each worker as well as on the page.
+static IMAGE_PROVIDERS: OnceLock<ImageProviders> = OnceLock::new();
+
+/// The registry this module's tile workers ask for provided images.
+pub fn image_providers() -> &'static ImageProviders {
+    IMAGE_PROVIDERS.get_or_init(ImageProviders::default)
+}
 
 #[cfg(target_feature = "atomics")]
 pub mod multithreaded;

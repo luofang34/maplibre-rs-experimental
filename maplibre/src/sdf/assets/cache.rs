@@ -239,6 +239,23 @@ impl AssetCache {
         }
     }
 
+    /// The asset under `key` if it is loaded, without loading it or waiting for a load.
+    pub(crate) fn peek<T: Any + Send + Sync>(&self, key: &str) -> Option<Arc<T>> {
+        let mut state = self.lock();
+        state.tick = state.tick.wrapping_add(1);
+        let tick = state.tick;
+        match state.entries.get_mut(key) {
+            Some(Entry {
+                slot: Slot::Ready { value, .. },
+                last_used,
+            }) => {
+                *last_used = tick;
+                value.clone().downcast::<T>().ok()
+            }
+            _ => None,
+        }
+    }
+
     fn lock(&self) -> MutexGuard<'_, State> {
         self.0.state.lock().unwrap_or_else(PoisonError::into_inner)
     }

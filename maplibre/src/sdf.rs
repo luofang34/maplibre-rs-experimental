@@ -34,6 +34,7 @@ mod line_glyphs;
 mod paint;
 mod placement;
 pub(crate) mod populate_world_system;
+pub mod provided;
 mod queue_system;
 mod render_commands;
 mod resource_system;

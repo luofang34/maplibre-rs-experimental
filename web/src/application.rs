@@ -72,6 +72,7 @@ fn create_kernel(
 
     let offscreen_kernel_config = OffscreenKernelConfig {
         cache_directory: None,
+        image_providers: crate::platform::image_providers().clone(),
         ..Default::default()
     };
 

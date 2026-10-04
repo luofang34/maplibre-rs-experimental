@@ -8,17 +8,26 @@ use crate::sdf::glyphs;
 
 mod cache;
 mod load;
+mod provider;
 pub mod wire;
 pub(crate) use cache::fetch;
 pub use cache::{AssetCache, AssetFailure};
+pub(crate) use load::load_symbol_assets_awaiting;
 pub use load::{load_symbol_assets, SymbolAssetConfig, SymbolAssetError};
+pub(crate) use provider::Resolved;
+pub use provider::{
+    ImageProviderError, ImageProviderStats, ImageProviders, ImageRequest, ImageResolution,
+    ProvideFuture, ProvidedImage, ProviderLimits, StyleImageProvider,
+};
 
 /// Coordinates and metrics of a glyph or sprite in the atlas.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct AtlasEntry {
     /// Pixel rectangle x, y, width, height.
     pub rect: [u32; 4],
-    /// Left bearing, top bearing, advance, pixel ratio.
+    /// Left bearing, top bearing, advance, pixel ratio. An icon has no bearings or advance;
+    /// its first two are instead the offset, in image pixels, from its centre to the point
+    /// placed where its centre would be.
     pub metrics: [f32; 4],
     /// Zero for text SDF, one for RGBA icons, two for SDF icons.
     pub kind: u32,
