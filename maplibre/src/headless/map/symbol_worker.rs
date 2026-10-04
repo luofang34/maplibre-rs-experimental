@@ -19,6 +19,7 @@ use crate::{
 
 mod curve;
 mod geojson;
+mod horizon;
 mod mvt;
 mod retry;
 

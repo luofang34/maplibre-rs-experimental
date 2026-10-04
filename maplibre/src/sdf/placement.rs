@@ -183,6 +183,38 @@ pub(super) fn text_perspective_scale(
     (0.5 + 0.5 * ratio).clamp(0.0, 4.0)
 }
 
+/// GL JS's `perspectiveRatioCutoff`: a label whose anchor lies so far beyond the view centre
+/// that the camera's perspective would draw it at less than this ratio of its size is not
+/// placed, so labels do not crowd the horizon of a pitched map.
+const PERSPECTIVE_RATIO_CUTOFF: f64 = 0.6;
+
+/// Whether the label's anchor lies too far toward the horizon to be placed, as GL JS's collision
+/// index decides from the anchor's perspective ratio whatever the label's alignment. A
+/// head-tracked view keeps labels at their angular size and leaves distance to the host's
+/// [`super::visibility::SymbolVisibility`].
+pub(super) fn beyond_perspective_cutoff(
+    layer: &SymbolLayerData,
+    feature: &Feature,
+    elevation: f32,
+    view: &ViewState,
+    projection: &ShaderProjectionData,
+    uniforms: &SymbolUniforms,
+) -> bool {
+    if view.has_external_view() {
+        return false;
+    }
+    let height = f64::from(elevation) * f64::from(uniforms.text_layout[3]);
+    let anchor = [
+        f64::from(feature.text_anchor.x),
+        f64::from(feature.text_anchor.y),
+    ];
+    project(layer.coords, anchor, height, view, projection)
+        .filter(|clip| clip.w > 0.0)
+        .is_some_and(|clip| {
+            0.5 + 0.5 * f64::from(projection.center_clip_w) / clip.w < PERSPECTIVE_RATIO_CUTOFF
+        })
+}
+
 /// The screen angle of a text's own axis, which a variable anchor's shift turns with.
 pub(super) fn text_rotation(
     layer: &SymbolLayerData,
