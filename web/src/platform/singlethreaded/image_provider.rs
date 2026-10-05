@@ -113,7 +113,10 @@ fn image(value: &JsValue, pixel_ratio: f32) -> Result<ImageResolution, ImageProv
     let anchor = js_sys::Array::is_array(&anchor)
         .then(|| {
             let anchor = js_sys::Array::from(&anchor);
-            Some([anchor.get(0).as_f64()? as f32, anchor.get(1).as_f64()? as f32])
+            Some([
+                anchor.get(0).as_f64()? as f32,
+                anchor.get(1).as_f64()? as f32,
+            ])
         })
         .flatten();
     Ok(ImageResolution::Image(ProvidedImage {

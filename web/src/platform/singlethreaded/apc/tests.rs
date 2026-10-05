@@ -179,7 +179,10 @@ fn a_provided_images_report_round_trips_with_its_attempt() {
         let expected = ProvidedImagesReport {
             coords: Default::default(),
             attempt: Some(9),
-            names: vec!["roadshield:US:I=287".to_owned(), "roadshield:=609".to_owned()],
+            names: vec![
+                "roadshield:US:I=287".to_owned(),
+                "roadshield:=609".to_owned(),
+            ],
             pixel_ratio: 2.0,
             state,
         };
