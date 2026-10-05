@@ -25,10 +25,20 @@ pub(super) struct SymbolUniforms {
 }
 
 /// Whether text along a line is placed glyph by glyph: it turns with the map, whether it lies
-/// on the map plane or stands upright to the viewer. Text aligned with the viewport keeps the
-/// straight layout at the anchor.
+/// on the map plane or stands upright to the viewer, or each glyph stands upright on the screen
+/// along the line (`viewport-glyph`). Text aligned with the viewport keeps the straight layout
+/// at the anchor.
 pub(crate) fn text_follows_line(paint: &SymbolPaint, zoom: f64) -> bool {
-    SymbolUniforms::new(paint, zoom, [1, 1]).text_layout[1] > 0.5
+    SymbolUniforms::new(paint, zoom, [1, 1]).text_layout[1] > 0.5 || glyphs_stay_upright(paint)
+}
+
+/// Whether the glyphs of text along a line are placed along it each upright on the screen, as
+/// GL JS's `viewport-glyph` rotation alignment places them: road shields in a row stay level
+/// while the row follows its road.
+pub(crate) fn glyphs_stay_upright(paint: &SymbolPaint) -> bool {
+    let read = |name: &str| paint.properties.get(name).and_then(|value| value.as_str());
+    read("text-rotation-alignment") == Some("viewport-glyph")
+        && read("symbol-placement").is_some_and(|value| matches!(value, "line" | "line-center"))
 }
 
 impl SymbolUniforms {

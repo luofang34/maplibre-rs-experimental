@@ -28,18 +28,39 @@ pub(in crate::sdf) enum LinePoses {
 /// units and neither pitch nor bearing changes them; the view only decides whether it would
 /// read upside down. Text standing upright to the viewer is spaced along the line as the
 /// screen shows it, see [`viewport_poses`].
+///
+/// With `upright` (`viewport-glyph`), glyphs are spaced along the line as the screen shows it
+/// and each keeps level on the screen, the way GL JS draws them: a row of road shields follows
+/// its road without any shield turning with it.
 pub(in crate::sdf) fn line_glyph_poses(
     layer: &SymbolLayerData,
     feature: &Feature,
     elevation: f32,
     view: &ViewState,
     projection: &ShaderProjectionData,
-    uniforms: &SymbolUniforms,
+    (uniforms, upright): (&SymbolUniforms, bool),
 ) -> LinePoses {
     let Some(line) = &feature.line else {
         return LinePoses::NotApplicable;
     };
     let alignment = uniforms.text_layout;
+    if upright {
+        return match viewport_poses(
+            layer,
+            line,
+            feature,
+            elevation,
+            (view, projection, uniforms),
+        ) {
+            LinePoses::Poses(poses) => LinePoses::Poses(
+                poses
+                    .into_iter()
+                    .map(|pose| GlyphPose { angle: 0.0, ..pose })
+                    .collect(),
+            ),
+            other => other,
+        };
+    }
     if alignment[1] <= 0.5 {
         return LinePoses::NotApplicable;
     }

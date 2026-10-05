@@ -61,10 +61,10 @@ fn property(name: &str) -> Option<Property> {
         "text-font" => Property::Font,
         "text-transform" => Property::Enum(&["none", "uppercase", "lowercase"]),
         "symbol-placement" => Property::Enum(&["point", "line", "line-center"]),
-        "text-pitch-alignment"
-        | "icon-pitch-alignment"
-        | "text-rotation-alignment"
-        | "icon-rotation-alignment" => Property::Enum(&["auto", "map", "viewport"]),
+        "text-pitch-alignment" | "icon-pitch-alignment" | "icon-rotation-alignment" => {
+            Property::Enum(&["auto", "map", "viewport"])
+        }
+        "text-rotation-alignment" => Property::Enum(&["auto", "map", "viewport", "viewport-glyph"]),
         "symbol-height-anchor" => Property::Enum(&["ground", "absolute"]),
         "text-translate" | "icon-translate" => Property::Pair(Zoom),
         "text-translate-anchor" | "icon-translate-anchor" => Property::Enum(&["map", "viewport"]),

@@ -215,7 +215,10 @@ impl LayerFrame<'_> {
                 ground,
                 view_state,
                 projection,
-                &self.uniforms,
+                (
+                    &self.uniforms,
+                    crate::sdf::paint::glyphs_stay_upright(self.paint),
+                ),
             )
         });
         let shown = !suppressed
