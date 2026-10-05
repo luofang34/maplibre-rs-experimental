@@ -15,13 +15,18 @@ struct VertexOutput {
 
 @group(2) @binding(0) var scene_depth: texture_2d<f32>;
 
-fn anchor_visibility(clip: vec4<f32>, viewport: vec2<f32>) -> f32 {
+fn anchor_visibility(clip: vec4<f32>) -> f32 {
     if clip.w <= 0.0 { return 0.0; }
-    let screen = (clip.xy / clip.w * vec2<f32>(0.5,-0.5) + vec2<f32>(0.5)) * viewport;
-    let pixel = clamp(vec2<i32>(screen),vec2<i32>(0),vec2<i32>(textureDimensions(scene_depth))-vec2<i32>(1));
+    // The snapshot holds one texel per device pixel of the whole target, which on a denser
+    // display is not the viewport's layout pixel.
+    let size = vec2<i32>(textureDimensions(scene_depth));
+    let screen = (clip.xy / clip.w * vec2<f32>(0.5,-0.5) + vec2<f32>(0.5)) * vec2<f32>(size);
+    let pixel = vec2<i32>(floor(screen));
+    // An anchor off the target has no depth of its own to be judged by; the edge holds other ground.
+    if any(pixel < vec2<i32>(0)) || any(pixel >= size) { return 1.0; }
     // A pixel covers a footprint; the farthest adjacent sample avoids self-occluding a ground anchor.
     var surface = textureLoad(scene_depth,pixel,0).r;
-    let limit = vec2<i32>(textureDimensions(scene_depth))-vec2<i32>(1);
+    let limit = size-vec2<i32>(1);
     for (var y = -1; y <= 1; y++) {
         for (var x = -1; x <= 1; x++) {
             surface = min(surface,textureLoad(scene_depth,clamp(pixel+vec2<i32>(x,y),vec2<i32>(0),limit),0).r);
@@ -141,7 +146,7 @@ fn main(
         let depth_radius = abs(x.w - projected.clip_position.w) + abs(y.w - projected.clip_position.w);
         near_visibility = select(0.0,1.0,projected.clip_position.w - depth_radius > 0.0);
     }
-    let visibility = feature.x * metrics.w * near_visibility * anchor_visibility(projected.clip_position,vec2<f32>(viewport_width,viewport_height));
+    let visibility = feature.x * metrics.w * near_visibility * anchor_visibility(projected.clip_position);
     // Hidden geometry must not cross the eye plane and produce unbounded clipped triangles.
     if visibility <= 0.0 || projected.clip_position.w <= 0.0 { position = vec4<f32>(0.0, 0.0, 0.0, 1.0); }
     return VertexOutput(vec2<f32>(a_data.xy) / symbol.atlas.xy, a_data.z, size,
