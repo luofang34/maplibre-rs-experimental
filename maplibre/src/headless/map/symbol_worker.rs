@@ -295,7 +295,7 @@ impl SymbolMap {
         let texture = self.map.head_texture().expect("color");
         let size = texture.size();
         assert!(
-            (size.width * 4) % wgpu::COPY_BYTES_PER_ROW_ALIGNMENT == 0,
+            (size.width * 4).is_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT),
             "a readback row of a {}-pixel-wide target is not aligned for a texture copy",
             size.width
         );
