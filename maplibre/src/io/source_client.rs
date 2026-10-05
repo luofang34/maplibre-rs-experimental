@@ -6,7 +6,7 @@ use thiserror::Error;
 use crate::{
     coords::WorldTileCoords,
     io::source_type::{InvalidTileCoords, SourceType},
-    sdf::assets::AssetCache,
+    sdf::assets::{AssetCache, ImageProviders},
 };
 
 /// A closure that returns a HTTP client.
@@ -186,6 +186,7 @@ where
 {
     http: HttpSourceClient<HC>,
     assets: AssetCache,
+    images: ImageProviders,
 }
 
 impl<HC> SourceClient<HC>
@@ -197,6 +198,7 @@ where
         Self {
             http,
             assets: AssetCache::default(),
+            images: ImageProviders::default(),
         }
     }
 
@@ -209,6 +211,17 @@ where
     /// The cache of decoded symbol assets this client loads through.
     pub fn assets(&self) -> &AssetCache {
         &self.assets
+    }
+
+    /// Asks `images` for the provided images labels name.
+    pub fn with_image_providers(mut self, images: ImageProviders) -> Self {
+        self.images = images;
+        self
+    }
+
+    /// The providers of images that labels name and no sprite supplies.
+    pub fn image_providers(&self) -> &ImageProviders {
+        &self.images
     }
 
     /// Resolves the source template for `coords` and fetches the response body.

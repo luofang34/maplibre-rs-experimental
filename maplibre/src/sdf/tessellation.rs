@@ -300,7 +300,7 @@ impl TextTessellator {
         // text size; an icon-only label has no text to bend, so its bends are not checked.
         let icon_width = self
             .paint
-            .text("icon-image", &self.properties, self.zoom)
+            .text_among_images("icon-image", &self.properties, self.zoom, &self.atlas.icons)
             .and_then(|name| self.atlas.icons.get(&name))
             .map_or(0.0, |icon| {
                 f64::from(icon.rect[2]) / f64::from(icon.metrics[3])

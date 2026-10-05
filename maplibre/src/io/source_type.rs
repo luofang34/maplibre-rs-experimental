@@ -134,8 +134,9 @@ pub struct ImageTileSource {
 /// Represents the tiles' different types of source.
 #[derive(Clone, Debug)]
 pub enum SourceType {
-    /// GeoJSON document tiled by the worker instead of fetched per tile.
-    GeoJson(GeoJsonTileSource),
+    /// GeoJSON document tiled by the worker instead of fetched per tile. Boxed because a
+    /// declaration holding its data is many times the size of the other variants.
+    GeoJson(Box<GeoJsonTileSource>),
     /// Raster image tile URL template.
     Raster(RasterSource),
     /// One picture resampled into raster tiles.

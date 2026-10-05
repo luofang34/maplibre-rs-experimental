@@ -43,6 +43,7 @@ mod injected_loader;
 pub use error::HeadlessMapOperationError;
 
 mod processed;
+mod provided_images;
 mod raster;
 pub mod reference;
 mod signals;
@@ -420,6 +421,7 @@ impl HeadlessMap {
         let context = &mut self.map_context;
         let physical = context.renderer.state().surface().size();
         context.view_state.resize(physical.to_logical(ratio));
+        crate::sdf::provided::set_pixel_ratio(&mut context.world, ratio);
     }
 
     /// Pads the viewport, which moves the apparent center the camera looks through.

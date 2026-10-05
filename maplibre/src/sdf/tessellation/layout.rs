@@ -94,11 +94,14 @@ pub(super) fn append(
             paint.height_offset("icon", &symbol.properties, zoom)
         };
         let icon_size = paint.number("icon-size", &symbol.properties, zoom, 1.0);
+        // An image whose anchor is not its centre, such as a shield with a banner above its
+        // body, is moved so that the anchor stands where the centre would.
+        let recentre = [icon.metrics[0] / ratio, icon.metrics[1] / ratio];
         let placed = [
-            -width * fractions[0] + offset[0],
-            -height * fractions[1] + offset[1],
-            width * (1.0 - fractions[0]) + offset[0],
-            height * (1.0 - fractions[1]) + offset[1],
+            -width * fractions[0] + offset[0] - recentre[0],
+            -height * fractions[1] + offset[1] - recentre[1],
+            width * (1.0 - fractions[0]) + offset[0] - recentre[0],
+            height * (1.0 - fractions[1]) + offset[1] - recentre[1],
         ];
         let fitted = fit_to_text(paint, symbol, zoom, atlas, [width, height], offset);
         let shift = crate::sdf::translation::tile_translation(paint, "icon", zoom);

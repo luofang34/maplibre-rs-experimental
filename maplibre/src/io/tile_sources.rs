@@ -144,10 +144,10 @@ pub fn source_layer_groups(style: &Style, kind: TileKind) -> Vec<SourceLayerGrou
         let (key, source) = match named {
             Some((name, Some(Source::GeoJson(geojson)))) if kind == TileKind::Vector => (
                 Some(name.clone()),
-                SourceType::GeoJson(GeoJsonTileSource {
+                SourceType::GeoJson(Box::new(GeoJsonTileSource {
                     name: name.clone(),
                     source: geojson.clone(),
-                }),
+                })),
             ),
             Some((name, Some(Source::Image(image)))) if kind == TileKind::Raster => (
                 Some(name.clone()),

@@ -54,28 +54,6 @@ impl SymbolPaint {
         property.evaluate(&context).map(|text| text.0)
     }
 
-    /// The names of the images the layer's `icon-image` can ask for with `image` expressions.
-    pub fn icon_image_names(&self) -> Vec<String> {
-        fn collect(value: &serde_json::Value, names: &mut Vec<String>) {
-            let Some(items) = value.as_array() else {
-                return;
-            };
-            if let [serde_json::Value::String(operator), serde_json::Value::String(name)] =
-                items.as_slice()
-            {
-                if operator == "image" {
-                    names.push(name.clone());
-                }
-            }
-            items.iter().for_each(|item| collect(item, names));
-        }
-        let mut names = Vec::new();
-        if let Some(value) = self.properties.get("icon-image") {
-            collect(value, &mut names);
-        }
-        names
-    }
-
     /// Whether shared symbol height is evaluated during placement rather than tile layout.
     pub fn uses_shared_height(&self) -> bool {
         self.properties.contains_key("symbol-height-offset")

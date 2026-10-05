@@ -51,10 +51,11 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
             style,
             view_state,
             world,
-            ..
+            renderer,
         }: &mut MapContext,
     ) -> SystemResult {
         tile_retry::stop_cancelled(world, self.kernel.apc());
+        let pixel_ratio = display_pixel_ratio(world, renderer, view_state);
         let view_region = view_region_for_projection(
             style,
             view_state,
@@ -118,11 +119,9 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                     }
                     _ => 0,
                 };
-                if let Some(tile) = world.tiles.query::<&VectorLayerBucketComponent>(coords) {
-                    let current = !magnifies || tile.overscaled_zoom == overscaled_zoom;
-                    if current && !tile_retry::due(world, coords, RequestKind::Vector) {
-                        continue;
-                    }
+                let laid_out_for = (magnifies.then_some(overscaled_zoom), pixel_ratio);
+                if is_current(world, coords, laid_out_for) {
+                    continue;
                 }
                 // The rest wait for a later frame, once tiles in flight have landed.
                 if budget == 0 {
@@ -130,21 +129,76 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                 }
                 budget -= 1;
 
-                self.request(coords, style, world, overscaled_zoom)?;
+                self.request(coords, style, world, (overscaled_zoom, pixel_ratio))?;
             }
             tile_retry::want(world, RequestKind::Vector, &requested);
+            self.release_unwanted(world, &requested);
         }
         Ok(())
     }
 }
 
+/// Whether the tile holds what a request would bring: laid out for the zoom it is magnified to,
+/// if that matters, and its provided images made for `pixel_ratio`, with no retry due.
+fn is_current(
+    world: &mut crate::tcs::world::World,
+    coords: crate::coords::WorldTileCoords,
+    (overscaled_zoom, pixel_ratio): (Option<u8>, f32),
+) -> bool {
+    let Some(tile) = world.tiles.query::<&VectorLayerBucketComponent>(coords) else {
+        return false;
+    };
+    overscaled_zoom.is_none_or(|zoom| tile.overscaled_zoom == zoom)
+        && !crate::sdf::provided::drawn_for_another_ratio(world, coords, pixel_ratio)
+        && !tile_retry::due(world, coords, RequestKind::Vector)
+}
+
+/// Device pixels per layout pixel of the display: as the host reported it, or else as the
+/// surface and viewport sizes give it.
+fn display_pixel_ratio(
+    world: &crate::tcs::world::World,
+    renderer: &crate::render::Renderer,
+    view_state: &crate::render::view_state::ViewState,
+) -> f32 {
+    world
+        .resources
+        .get::<crate::sdf::provided::DisplayPixelRatio>()
+        .map_or_else(
+            || {
+                pixel_ratio(
+                    renderer.state().surface().size().width(),
+                    view_state.width(),
+                )
+            },
+            |ratio| ratio.0,
+        )
+}
+
+/// Device pixels per layout pixel read from the surface and viewport, to the hundredth so that
+/// a ratio computed from rounded sizes does not ask for images again.
+fn pixel_ratio(physical_width: u32, logical_width: f64) -> f32 {
+    let ratio = f64::from(physical_width) / logical_width.max(1.0);
+    ((ratio * 100.0).round() / 100.0).clamp(0.25, 8.0) as f32
+}
+
 impl<E: Environment, T: VectorTransferables> RequestSystem<E, T> {
+    /// Stops the workers that wait for images for tiles no longer in view.
+    fn release_unwanted(
+        &self,
+        world: &mut crate::tcs::world::World,
+        wanted: &HashSet<crate::coords::WorldTileCoords>,
+    ) {
+        for attempt in crate::sdf::provided::release_unwanted(world, wanted) {
+            self.kernel.apc().cancel(attempt);
+        }
+    }
+
     fn request(
         &self,
         coords: crate::coords::WorldTileCoords,
         style: &crate::style::Style,
         world: &mut crate::tcs::world::World,
-        overscaled_zoom: u8,
+        (overscaled_zoom, pixel_ratio): (u8, f32),
     ) -> SystemResult {
         if world.tiles.spawn_mut(coords).is_none() {
             return Err(SystemError::InvalidTile { coords });
@@ -158,6 +212,7 @@ impl<E: Environment, T: VectorTransferables> RequestSystem<E, T> {
                     style: style.clone(),
                     attempt,
                     overscaled_zoom,
+                    pixel_ratio,
                 },
                 fetch_vector_apc::<E::OffscreenKernelEnvironment, T, _>,
             )
@@ -174,6 +229,9 @@ impl<E: Environment, T: VectorTransferables> RequestSystem<E, T> {
             tile.overscaled_zoom = overscaled_zoom;
         }
         tile_retry::started(world, coords, RequestKind::Vector, attempt);
+        if let Some(replaced) = crate::sdf::provided::restarted(world, coords, pixel_ratio) {
+            self.kernel.apc().cancel(replaced);
+        }
         tracing::debug!(%coords, "vector tile request accepted");
         Ok(())
     }

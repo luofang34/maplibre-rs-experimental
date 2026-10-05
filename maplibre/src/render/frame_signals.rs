@@ -223,7 +223,8 @@ impl MapContext {
     /// Whether the map should draw another frame: something changed or still animates since
     /// the last one, tiles are still loading, or the camera moved.
     pub fn needs_redraw(&self) -> bool {
-        let loading = crate::io::tile_retry::needs_frame(&self.world);
+        let loading = crate::io::tile_retry::needs_frame(&self.world)
+            || crate::sdf::provided::awaiting(&self.world);
         let Some(signals) = self.world.resources.get::<FrameSignals>() else {
             return true;
         };

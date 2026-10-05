@@ -86,7 +86,7 @@ pub struct MaplibreVisionOSEye {
 }
 
 /// Reads a C string argument; `None` for a null pointer or invalid UTF-8.
-unsafe fn c_str<'a>(pointer: *const c_char) -> Option<&'a str> {
+pub(crate) unsafe fn c_str<'a>(pointer: *const c_char) -> Option<&'a str> {
     if pointer.is_null() {
         return None;
     }

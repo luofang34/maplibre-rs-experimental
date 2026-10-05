@@ -4,25 +4,21 @@ use std::{
     sync::Arc,
 };
 
-use geozero::mvt::Message;
-
 use super::{
     cache::{AssetFailure, SpriteSheet},
+    provider::{ImageProviders, Resolved},
     AtlasBuilder, AtlasEntry, IconStretch, SymbolAtlas, TextFit,
 };
 use crate::{
     io::source_client::{HttpClient, SourceClient},
     sdf::glyphs::Glyphs,
-    style::{
-        layer::{LayerPaint, StyleLayer},
-        Style, StyleImage,
-    },
-    vector::feature_properties,
+    style::{layer::StyleLayer, Style, StyleImage},
 };
 
-const BUNDLED_LATIN: &[u8] = include_bytes!("../../../../data/0-255.pbf");
+mod requests;
+use requests::requests;
 
-type GlyphRequests = HashMap<String, BTreeSet<u32>>;
+const BUNDLED_LATIN: &[u8] = include_bytes!("../../../../data/0-255.pbf");
 
 /// A symbol asset could not be loaded, and a later attempt can succeed.
 #[derive(Debug, thiserror::Error)]
@@ -44,17 +40,30 @@ pub struct SymbolAssetConfig<'a> {
     pub sprite: Option<&'a serde_json::Value>,
     /// Images a host added to the style.
     pub images: &'a HashMap<String, StyleImage>,
+    /// Device pixels per layout pixel of the display, which provided images are made for.
+    pub pixel_ratio: f32,
 }
 
 impl<'a> SymbolAssetConfig<'a> {
-    /// The symbol settings of `style`.
+    /// The symbol settings of `style`, for a display of one device pixel per layout pixel.
     pub fn of(style: &'a Style) -> Self {
         Self {
             glyphs: style.glyphs.as_deref(),
             sprite: style.sprite.as_ref(),
             images: &style.images,
+            pixel_ratio: 1.0,
         }
     }
+}
+
+/// A tile's atlas, and the provided images its labels name.
+pub(crate) struct LoadedSymbolAssets {
+    /// The glyphs and images that were ready.
+    pub(crate) atlas: Arc<SymbolAtlas>,
+    /// Every provided name the labels ask for, whether it was ready or not.
+    pub(crate) provided: Vec<String>,
+    /// The provided names with no answer yet, which a later load can pack once they have one.
+    pub(crate) awaiting: Vec<String>,
 }
 
 /// Loads the glyph ranges and sprites that the features of one source's tile use under
@@ -73,6 +82,22 @@ pub async fn load_symbol_assets<'l, HC: HttpClient>(
     data: &[u8],
     zoom: f64,
 ) -> Result<Arc<SymbolAtlas>, SymbolAssetError> {
+    Ok(
+        load_symbol_assets_awaiting(client, config, layers, data, zoom)
+            .await?
+            .atlas,
+    )
+}
+
+/// Like [`load_symbol_assets`], packing the provided images whose answers are known and
+/// listing the ones still to come instead of waiting for them.
+pub(crate) async fn load_symbol_assets_awaiting<'l, HC: HttpClient>(
+    client: &SourceClient<HC>,
+    config: SymbolAssetConfig<'_>,
+    layers: impl IntoIterator<Item = &'l StyleLayer>,
+    data: &[u8],
+    zoom: f64,
+) -> Result<LoadedSymbolAssets, SymbolAssetError> {
     let (fonts, icons) = requests(layers, data, zoom);
     let mut builder = AtlasBuilder::new();
     for (font, characters) in fonts {
@@ -90,10 +115,48 @@ pub async fn load_symbol_assets<'l, HC: HttpClient>(
     }
     for (name, image) in config.images {
         if icons.contains(name) {
-            pack_style_image(&mut builder, name, image);
+            pack_style_image(&mut builder, name, image, None);
         }
     }
-    Ok(builder.finish())
+    // The sprite and the style's own images come first; a provider fills only the gaps.
+    let (provided, awaiting) = pack_provided(
+        &mut builder,
+        client.image_providers(),
+        &icons,
+        config.pixel_ratio,
+    );
+    Ok(LoadedSymbolAssets {
+        atlas: builder.finish(),
+        provided,
+        awaiting,
+    })
+}
+
+/// Packs the provided images among `icons` that nothing else supplied and whose answers are
+/// known, returning every provided name and the ones without an answer yet.
+fn pack_provided(
+    builder: &mut AtlasBuilder,
+    providers: &ImageProviders,
+    icons: &HashSet<String>,
+    pixel_ratio: f32,
+) -> (Vec<String>, Vec<String>) {
+    let mut provided: Vec<String> = icons
+        .iter()
+        .filter(|name| !builder.atlas.icons.contains_key(*name) && providers.provides(name))
+        .cloned()
+        .collect();
+    provided.sort();
+    let mut awaiting = Vec::new();
+    for name in &provided {
+        match providers.known(name, pixel_ratio).as_deref() {
+            Some(Resolved::Image(image)) => {
+                pack_style_image(builder, name, &image.image, image.anchor);
+            }
+            Some(Resolved::None) => {}
+            None => awaiting.push(name.clone()),
+        }
+    }
+    (provided, awaiting)
 }
 
 /// RGBA bytes with each colour channel scaled by its alpha.
@@ -109,7 +172,13 @@ fn premultiply(data: &[u8]) -> Vec<u8> {
 }
 
 /// Packs an image the host added to the style, replacing a sprite icon of the same name.
-fn pack_style_image(builder: &mut AtlasBuilder, name: &str, image: &crate::style::StyleImage) {
+/// `anchor`, in image pixels, is the point placed where the image's centre would be.
+fn pack_style_image(
+    builder: &mut AtlasBuilder,
+    name: &str,
+    image: &StyleImage,
+    anchor: Option<[f32; 2]>,
+) {
     if image.width == 0
         || image.height == 0
         || image.data.len() != image.width as usize * image.height as usize * 4
@@ -126,11 +195,14 @@ fn pack_style_image(builder: &mut AtlasBuilder, name: &str, image: &crate::style
     let Some(rect) = builder.pack(image.width, image.height, data) else {
         return;
     };
+    let [shift_x, shift_y] = anchor.map_or([0.0, 0.0], |[x, y]| {
+        [x - image.width as f32 / 2.0, y - image.height as f32 / 2.0]
+    });
     builder.atlas.icons.insert(
         name.to_owned(),
         AtlasEntry {
             rect,
-            metrics: [0.0, 0.0, 0.0, image.pixel_ratio.max(0.01)],
+            metrics: [shift_x, shift_y, 0.0, image.pixel_ratio.max(0.01)],
             kind: if image.sdf { 2 } else { 1 },
             ..Default::default()
         },
@@ -175,86 +247,6 @@ fn glyph_url(template: &str, font: &str, range: u32) -> String {
     template
         .replace("{fontstack}", &encoded.replace('+', "%20"))
         .replace("{range}", &format!("{range}-{}", range + 255))
-}
-
-fn requests<'l>(
-    layers: impl IntoIterator<Item = &'l StyleLayer>,
-    data: &[u8],
-    zoom: f64,
-) -> (GlyphRequests, HashSet<String>) {
-    let mut fonts = GlyphRequests::new();
-    let mut icons = HashSet::new();
-    let Ok(tile) = geozero::mvt::Tile::decode(data) else {
-        return (fonts, icons);
-    };
-    for layer in layers {
-        if layer.is_hidden() {
-            continue;
-        }
-        let Some(LayerPaint::Symbol(paint)) = &layer.paint else {
-            continue;
-        };
-        let Some(source) = tile
-            .layers
-            .iter()
-            .find(|source| Some(&source.name) == layer.source_layer.as_ref())
-        else {
-            continue;
-        };
-        for feature in &source.features {
-            let properties = feature_properties(source, feature);
-            if let Some(filter) = &layer.filter {
-                let Ok(filter) = crate::style::filter::Filter::parse(filter) else {
-                    continue;
-                };
-                if !filter.evaluate(&crate::style::filter::FeatureContext {
-                    properties: &properties,
-                    geometry_type: crate::style::filter::GeometryType::from_mvt(
-                        feature.r#type.unwrap_or_default(),
-                    ),
-                    id: feature
-                        .id
-                        .map(|id| crate::style::expression::Value::Number(id as f64)),
-                    zoom,
-                }) {
-                    continue;
-                }
-            }
-            if let Some(text) = paint.label(&properties, zoom) {
-                fonts.entry(paint.font_stack()).or_default().extend(
-                    text.chars()
-                        .filter(|c| *c != crate::style::expression::FORMAT_IMAGE)
-                        .map(|c| c as u32),
-                );
-                // A section with a font of its own needs that font's glyphs for its characters.
-                let mut characters = text.chars();
-                for section in paint.label_sections(&properties, zoom) {
-                    let own: Vec<char> = characters.by_ref().take(section.length).collect();
-                    if let Some(font) = &section.font {
-                        fonts
-                            .entry(font.clone())
-                            .or_default()
-                            .extend(own.into_iter().map(|c| c as u32));
-                    }
-                }
-            }
-            if let Some(icon) = paint
-                .text("icon-image", &properties, zoom)
-                .filter(|icon| !icon.is_empty())
-            {
-                icons.insert(icon);
-            }
-            // An `image` expression may fall through to any image it names.
-            icons.extend(paint.icon_image_names());
-            icons.extend(
-                paint
-                    .label_sections(&properties, zoom)
-                    .into_iter()
-                    .filter_map(|section| section.image),
-            );
-        }
-    }
-    (fonts, icons)
 }
 
 pub(super) fn sprite_sources(sprite: Option<&serde_json::Value>) -> Vec<(String, String)> {

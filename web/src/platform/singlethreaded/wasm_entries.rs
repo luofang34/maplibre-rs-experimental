@@ -27,7 +27,10 @@ use crate::{
 static CONFIG: OnceLock<OffscreenKernelConfig> = OnceLock::new();
 
 fn kernel_config() -> OffscreenKernelConfig {
-    CONFIG.get().cloned().unwrap_or_default()
+    let mut config = CONFIG.get().cloned().unwrap_or_default();
+    // The serialized configuration carries no providers; this worker's own registry does.
+    config.image_providers = crate::platform::image_providers().clone();
+    config
 }
 
 #[wasm_bindgen]

@@ -175,6 +175,7 @@ where
 
                 let mut world = World::default();
                 world.resources.insert(self.request_attempts.clone());
+                crate::sdf::provided::set_pixel_ratio(&mut world, self.window.scale_factor());
 
                 for plugin in &self.plugins {
                     plugin.build(
@@ -470,6 +471,7 @@ fn initial_view_state(
     view
 }
 
+mod provided_images;
 mod signals;
 mod sources;
 

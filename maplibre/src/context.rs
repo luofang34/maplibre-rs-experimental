@@ -27,6 +27,7 @@ impl MapContext {
     /// Logical dimensions remain at least one unit even below the device scale.
     pub fn resize(&mut self, size: PhysicalSize, scale_factor: f64) {
         self.view_state.resize(size.to_logical(scale_factor));
+        crate::sdf::provided::set_pixel_ratio(&mut self.world, scale_factor);
         self.renderer.resize_surface(size);
         // A new surface holds nothing, even when the logical size and so the camera are unchanged.
         crate::render::frame_signals::mark_dirty(&mut self.world);
