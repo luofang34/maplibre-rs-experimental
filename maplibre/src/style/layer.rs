@@ -9,7 +9,7 @@ use cint::{Alpha, EncodedSrgb};
 use serde::{Deserialize, Serialize};
 
 pub use crate::style::property::{
-    FormattedText, ImageName, PropertyValue, StyleProperty, TextField,
+    FormattedText, ImageName, PatternName, PropertyValue, StyleProperty, TextField,
 };
 use crate::style::{
     circle::CirclePaint,

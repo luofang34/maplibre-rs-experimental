@@ -6,7 +6,7 @@ use std::{
 };
 
 use crate::style::{
-    layer::{ImageName, LayerPaint, StyleProperty},
+    layer::{LayerPaint, PatternName, StyleProperty},
     Style, StyleImage,
 };
 
@@ -74,21 +74,21 @@ pub(crate) fn pattern_name(paint: &LayerPaint, zoom: f64) -> Option<String> {
         LayerPaint::Background(background) => background.background_pattern.as_ref()?,
         _ => return None,
     };
-    StyleProperty::<ImageName>::parse(value)
+    StyleProperty::<PatternName>::parse(value)
         .evaluate_at_zoom(zoom)
         .map(|name| name.0)
         .filter(|name| !name.is_empty())
 }
 
 /// The pattern property of a fill, extrusion or line layer when its image varies by feature.
-pub(crate) fn per_feature_pattern(paint: &LayerPaint) -> Option<StyleProperty<ImageName>> {
+pub(crate) fn per_feature_pattern(paint: &LayerPaint) -> Option<StyleProperty<PatternName>> {
     let value = match paint {
         LayerPaint::Fill(fill) => fill.fill_pattern.as_ref()?,
         LayerPaint::FillExtrusion(extrusion) => extrusion.fill_extrusion_pattern.as_ref()?,
         LayerPaint::Line(line) => line.line_pattern.as_ref()?,
         _ => return None,
     };
-    let property = StyleProperty::<ImageName>::parse(value);
+    let property = StyleProperty::<PatternName>::parse(value);
     (!property.is_feature_constant()).then_some(property)
 }
 
@@ -102,7 +102,7 @@ pub(crate) fn names_missing_image(paint: Option<&LayerPaint>, style: &Style, zoo
         _ => None,
     };
     value.is_some_and(|value| {
-        let property = StyleProperty::<ImageName>::parse(value);
+        let property = StyleProperty::<PatternName>::parse(value);
         // A feature's own name decides, where its geometry is drawn.
         property.is_feature_constant()
             && property

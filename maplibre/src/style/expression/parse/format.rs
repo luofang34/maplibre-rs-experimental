@@ -41,14 +41,12 @@ impl Parser {
             match (arg, sections.last_mut()) {
                 (Json::Object(options), Some(_)) if options_may_follow => {
                     options_may_follow = false;
-                    let parsed = self.parse_section_options(options, index)?;
+                    let styled = self.parse_section_options(options, index)?;
                     if let Some(section) = sections.last_mut() {
-                        (
-                            section.scale,
-                            section.font,
-                            section.color,
-                            section.vertical_align,
-                        ) = parsed;
+                        section.scale = styled.scale;
+                        section.font = styled.font;
+                        section.color = styled.color;
+                        section.vertical_align = styled.vertical_align;
                     }
                 }
                 _ => {
@@ -76,17 +74,13 @@ impl Parser {
         Ok(Expression::Format(sections))
     }
 
-    #[allow(clippy::type_complexity)]
+    /// The options object of a section: what each styles, parsed into an otherwise empty
+    /// section.
     fn parse_section_options(
         &mut self,
         options: &serde_json::Map<String, Json>,
         index: usize,
-    ) -> Result<(
-        Option<Expression>,
-        Option<Expression>,
-        Option<Expression>,
-        Option<Expression>,
-    )> {
+    ) -> Result<FormatSection> {
         let option = |parser: &mut Self, name: &str, expected: Type| {
             options
                 .get(name)
@@ -101,11 +95,12 @@ impl Parser {
                 )));
             }
         }
-        Ok((
-            option(self, "font-scale", Type::Number)?,
-            option(self, "text-font", Type::array(Type::String, None))?,
-            option(self, "text-color", Type::Color)?,
-            option(self, "vertical-align", Type::String)?,
-        ))
+        Ok(FormatSection {
+            content: Expression::Literal(crate::style::expression::Value::Null),
+            scale: option(self, "font-scale", Type::Number)?,
+            font: option(self, "text-font", Type::array(Type::String, None))?,
+            color: option(self, "text-color", Type::Color)?,
+            vertical_align: option(self, "vertical-align", Type::String)?,
+        })
     }
 }
