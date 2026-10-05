@@ -186,6 +186,9 @@ fn block<'a>(
 /// justifies differently for each of its variable anchors is laid out once per justification.
 pub(super) struct Laid {
     pub centres: Vec<f32>,
+    /// The size of each glyph at `centres` that is an image, in layout pixels at the 24-pixel
+    /// em; zero for a text glyph.
+    pub image_sizes: Vec<[f32; 2]>,
     /// Index range of each justification's glyphs; empty when the text has just one.
     pub sets: Vec<std::ops::Range<usize>>,
     /// Which of `sets` each variable anchor shows.
@@ -231,6 +234,7 @@ pub(super) fn append(
 ) -> Laid {
     let mut laid = Laid {
         centres: Vec::new(),
+        image_sizes: Vec::new(),
         sets: Vec::new(),
         anchor_sets: Vec::new(),
         colors: Vec::new(),
@@ -241,8 +245,10 @@ pub(super) fn append(
     let (values, anchor_sets) = justifications(paint, block.justify, &symbol.properties, zoom);
     for justify in &values {
         let start = buffer.indices.len();
-        let (centres, colors) = glyph_pass(symbol, paint, zoom, &block, *justify, buffer);
+        let (centres, image_sizes, colors) =
+            glyph_pass(symbol, paint, zoom, &block, *justify, buffer);
         laid.centres.extend(centres);
+        laid.image_sizes.extend(image_sizes);
         laid.colors.extend(colors);
         laid.sets.push(start..buffer.indices.len());
     }
@@ -264,6 +270,7 @@ struct Emitter<'a> {
     /// Whether each quad is placed by its centre along a line.
     along_line: bool,
     centres: Vec<f32>,
+    image_sizes: Vec<[f32; 2]>,
     colors: Vec<TextColorRun>,
 }
 
@@ -286,6 +293,12 @@ impl Emitter<'_> {
                 vertex.a_pixeloffset[0] = (centre * 32.0).round() as i32;
             }
             self.centres.push(centre);
+            // An image in the text collides by its own size; a glyph by the text size.
+            self.image_sizes.push(if entry.kind == 3 {
+                [bounds[2] - bounds[0], bounds[3] - bounds[1]]
+            } else {
+                [0.0; 2]
+            });
         }
     }
 
@@ -370,7 +383,7 @@ fn glyph_pass(
     block: &Block<'_>,
     justify: f32,
     buffer: &mut VertexBuffers<ShaderSymbolVertex, u32>,
-) -> (Vec<f32>, Vec<TextColorRun>) {
+) -> (Vec<f32>, Vec<[f32; 2]>, Vec<TextColorRun>) {
     let shift = crate::sdf::translation::tile_translation(paint, "text", zoom);
     let mut emit = Emitter {
         buffer,
@@ -386,6 +399,7 @@ fn glyph_pass(
             .to_radians(),
         along_line: symbol.line.is_some() && crate::sdf::paint::text_follows_line(paint, zoom),
         centres: Vec::new(),
+        image_sizes: Vec::new(),
         colors: Vec::new(),
     };
     let half_leading = (block.line_height - 24.0) / 2.0;
@@ -427,7 +441,7 @@ fn glyph_pass(
         }
         place_line(&mut emit, block, line.clone(), (baseline, content), pen);
     }
-    (emit.centres, emit.colors)
+    (emit.centres, emit.image_sizes, emit.colors)
 }
 
 #[cfg(test)]

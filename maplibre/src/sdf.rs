@@ -127,6 +127,9 @@ pub struct LineLabel {
     pub anchor_distance: f32,
     /// Distance of each glyph's centre from the anchor along the text, in layout pixels.
     pub glyph_offsets: Vec<f32>,
+    /// Size of each glyph that is an image, in layout pixels at the 24-pixel em; zero for a
+    /// text glyph, which collides by the text size.
+    pub image_sizes: Vec<[f32; 2]>,
     /// Position in the index buffer where the first glyph's triangles begin; each takes six.
     pub first_glyph_index: usize,
 }

@@ -5,6 +5,7 @@
 mod arrival;
 mod cost;
 mod formatted;
+mod groups;
 mod placement;
 
 use std::sync::{
@@ -43,7 +44,13 @@ pub(super) enum Answer {
     Failed,
     /// Unavailable for the first this many calls, then a shield.
     UnavailableFor(usize),
+    /// A shield coloured by its route's network: the first letter of the id picks from
+    /// [`ROUTE_COLOURS`].
+    PerRoute,
 }
+
+/// The colours of [`Answer::PerRoute`] shields for networks `A`, `B` and `C`.
+pub(super) const ROUTE_COLOURS: [[u8; 3]; 3] = [[255, 0, 255], [0, 255, 255], [255, 255, 0]];
 
 /// A provider that draws solid squares, counting its calls.
 pub(super) struct Shields {
@@ -135,6 +142,14 @@ impl StyleImageProvider for Shields {
             };
             match *self.answer.lock().expect("answer") {
                 Answer::Shield(color) => shield(color),
+                Answer::PerRoute => {
+                    let index = request
+                        .id
+                        .bytes()
+                        .next()
+                        .map_or(0, |b| b.saturating_sub(b'A'));
+                    shield(ROUTE_COLOURS[usize::from(index).min(2)])
+                }
                 Answer::UnavailableFor(times) if call < times => {
                     Err(ImageProviderError::Unavailable("pack downloading".into()))
                 }

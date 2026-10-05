@@ -43,6 +43,8 @@ pub struct LineLabelWire {
     polyline: Vec<[f32; 2]>,
     anchor_distance: f32,
     glyph_offsets: Vec<f32>,
+    #[serde(default)]
+    image_sizes: Vec<[f32; 2]>,
     first_glyph_index: usize,
 }
 
@@ -85,6 +87,7 @@ impl From<&Feature> for SymbolFeature {
                 polyline: line.polyline.to_vec(),
                 anchor_distance: line.anchor_distance,
                 glyph_offsets: line.glyph_offsets.clone(),
+                image_sizes: line.image_sizes.clone(),
                 first_glyph_index: line.first_glyph_index,
             }),
         }
@@ -125,6 +128,7 @@ impl From<SymbolFeature> for Feature {
                 polyline: line.polyline.into(),
                 anchor_distance: line.anchor_distance,
                 glyph_offsets: line.glyph_offsets,
+                image_sizes: line.image_sizes,
                 first_glyph_index: line.first_glyph_index,
             }),
         }

@@ -176,8 +176,9 @@ pub(super) fn append(
     }
     // Text collides by the box of its lines, not by the bitmaps of its glyphs, which reach
     // a few pixels beyond it.
-    // A label of images alone has no glyphs to measure, so its box is the layout's.
-    if parts[0].is_none() && symbol.line.is_none() {
+    // A label of images alone, such as a row of road shields along a road, has no glyphs to
+    // measure, so its box is the layout's.
+    if parts[0].is_none() {
         let image = buffer.vertices[first_vertex..]
             .iter()
             .find(|vertex| vertex.a_data[2] == 3);
@@ -225,6 +226,7 @@ pub(super) fn append(
                 polyline: polyline.clone(),
                 anchor_distance: *distance,
                 glyph_offsets,
+                image_sizes: laid.image_sizes,
                 first_glyph_index,
             }),
     });

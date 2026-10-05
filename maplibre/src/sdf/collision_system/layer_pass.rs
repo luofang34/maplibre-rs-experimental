@@ -334,7 +334,18 @@ fn label_boxes(
     let LinePoses::Poses(poses) = line.as_ref().unwrap_or(&LinePoses::NotApplicable) else {
         return (rectangles, Vec::new());
     };
-    let glyphs = line_glyph_boxes(layer, poses, ground, view_state, projection, uniforms);
+    let image_sizes = feature
+        .line
+        .as_ref()
+        .map_or(&[][..], |line| &line.image_sizes[..]);
+    let glyphs = line_glyph_boxes(
+        layer,
+        (poses, image_sizes),
+        ground,
+        view_state,
+        projection,
+        uniforms,
+    );
     if rectangles[0].is_some() {
         rectangles[0] = glyphs.iter().copied().reduce(|a, b| {
             [
@@ -430,6 +441,7 @@ mod tests {
             polyline: [[0.0, 0.0], [500.0, 0.0]].into(),
             anchor_distance: 250.0,
             glyph_offsets: vec![-10.0, 10.0],
+            image_sizes: vec![[0.0; 2]; 2],
             first_glyph_index: 6,
         };
         let poses = [
