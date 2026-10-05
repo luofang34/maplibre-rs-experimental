@@ -106,8 +106,18 @@ fn run_case(path: &Path) -> Outcome {
     // property accepts any value.
     let spec = spec.unwrap_or_else(|| LegacyPropertySpec::stepped(PropertyKind::Value));
     let parsed = Expression::parse_property(&case["expression"], &spec);
+    // An unknown operator passes a case expecting an error only when that error is the unknown
+    // operator itself; otherwise an operator the engine lacks would pass for a type error.
+    let expects_unknown = compiled["errors"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|error| error["error"].as_str())
+        .any(|message| message.starts_with("Unknown expression"));
     let expression = match (parsed, compiled["result"].as_str()) {
-        (Err(_), Some("error")) => return Outcome::Pass,
+        (Err(error), Some("error")) if !error.is_unknown_operator() || expects_unknown => {
+            return Outcome::Pass
+        }
         (Err(error), _) if error.is_unknown_operator() => {
             return Outcome::Unsupported(error.message)
         }

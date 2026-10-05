@@ -96,3 +96,60 @@ async fn shields_a_case_chooses_inside_format_are_drawn_as_images_never_as_their
     assert_eq!(shields.calls(), 2, "each shield is made once");
     assert_eq!(shields.during_frames.load(Ordering::SeqCst), 0);
 }
+
+#[tokio::test]
+async fn text_an_inline_image_and_an_icon_draw_together_once_the_images_arrive() {
+    let (shields, gate) = Shields::held(Answer::PerRoute);
+    let style: Style = serde_json::from_value(serde_json::json!({
+        "version":8,"center":[0.01,0.010986328],"zoom":14,"glyphs":GLYPHS,"sprite":SPRITE,
+        "sources":{"spot":{"type":"geojson","data":{"type":"Feature","properties":{"exit":"Exit"},
+            "geometry":{"type":"Point","coordinates":[0.01,0.010986328]}}}},
+        "layers":[
+            {"id":"background","type":"background","paint":{"background-color":"#223344"}},
+            {"id":"mixed","type":"symbol","source":"spot",
+                "layout":{"text-field":["format",["get","exit"],{},["image","shield:A=1"]],
+                    "icon-image":["case",["has","exit"],["image","shield:B=2"],""],
+                    "text-font":[FONT],"text-size":24,"text-offset":[0,2],
+                    "text-allow-overlap":true,"icon-allow-overlap":true},
+                "paint":{"text-color":"#ff0000"}}
+        ]
+    }))
+    .expect("style");
+    let mut map = SymbolMap::serving(style, AssetServer::default()).await;
+    map.map
+        .image_providers()
+        .expect("registry")
+        .register("shield", shields.clone());
+    let [inline, icon, _] = ROUTE_COLOURS;
+    // The text shows at once; the images are still being made.
+    let pixels = frames_until(&mut map, "the text", |pixels| shown(pixels, TEXT) > 50).await;
+    assert_eq!((shown(&pixels, inline), shown(&pixels, icon)), (0, 0));
+    gate.add_permits(64);
+    let pixels = frames_until(&mut map, "the inline image and the icon", |pixels| {
+        shown(pixels, inline) > 300 && shown(pixels, icon) > 300
+    })
+    .await;
+    assert!(
+        shown(&pixels, TEXT) > 50,
+        "the text stays drawn beside its image"
+    );
+    // The inline image stands in the line of text, below the icon the text is offset from.
+    let centre = |colour| {
+        let points = count(&pixels, colour, WHOLE);
+        let n = points.len() as f64;
+        [0, 1].map(|axis| points.iter().map(|p| f64::from(p[axis])).sum::<f64>() / n)
+    };
+    let (text, inline, icon) = (centre(TEXT), centre(inline), centre(icon));
+    assert!(
+        inline[0] > text[0],
+        "the image follows the text: {text:?} {inline:?}"
+    );
+    assert!(
+        (inline[1] - text[1]).abs() < 12.0,
+        "on its line: {text:?} {inline:?}"
+    );
+    assert!(
+        icon[1] < text[1] - 20.0,
+        "the icon above the offset text: {icon:?} {text:?}"
+    );
+}
