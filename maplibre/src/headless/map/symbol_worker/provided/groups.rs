@@ -115,111 +115,124 @@ async fn a_road_of_three_routes_shows_their_shields_in_a_row_that_collides_as_on
             0,
             "{case}: no request name drawn as text"
         );
-        let placed = map
-            .map
-            .map_context
-            .world
-            .resources
-            .get::<PlacedSymbols>()
-            .expect("placed symbols");
-        // The label nearest the middle of the view.
-        let middle = f64::from(SIZE) / 2.0;
-        let label = placed
-            .0
-            .iter()
-            .filter(|symbol| symbol.layer == "shields" && !symbol.glyph_boxes.is_empty())
-            .min_by(|a, b| {
-                let off = |boxes: &Vec<[f64; 4]>| {
-                    let [l, t, r, bottom] = boxes[boxes.len() / 2];
-                    ((l + r) / 2.0 - middle).hypot((t + bottom) / 2.0 - middle)
-                };
-                off(&a.glyph_boxes).total_cmp(&off(&b.glyph_boxes))
-            })
-            .expect("a row of shields placed glyph by glyph");
-        assert_eq!(label.glyph_boxes.len(), 3, "{case}: one box per shield");
-        // Each shield's own pixels near the label lie inside its box, in route order.
-        let mut centres = Vec::new();
-        for (index, colour) in ROUTE_COLOURS.iter().enumerate() {
-            let [l, t, r, b] = label.glyph_boxes[index];
-            let inside: Vec<[u32; 2]> = count(&pixels, *colour, WHOLE)
-                .into_iter()
-                .filter(|[x, y]| {
-                    let (x, y) = (f64::from(*x) + 0.5, f64::from(*y) + 0.5);
-                    x >= l - 2.0 && x <= r + 2.0 && y >= t - 2.0 && y <= b + 2.0
-                })
-                .collect();
-            assert!(
-                inside.len() as f32 > SIDE * SIDE * 0.8,
-                "{case}: shield {index} lies within its collision box: {} pixels",
-                inside.len()
-            );
-            let width = r - l;
-            // The text is half the shield's size, so only the shield's own size covers it.
-            assert!(
-                width >= f64::from(SIDE),
-                "{case}: shield {index}'s box is as wide as the shield: {width}"
-            );
-            centres.push((l + r) / 2.0);
-        }
-        assert!(
-            centres.windows(2).all(|pair| pair[0] < pair[1]),
-            "{case}: the shields read in route order: {centres:?}"
-        );
-        // The shields stand apart, not on top of each other.
-        for pair in centres.windows(2) {
-            assert!(pair[1] - pair[0] > f64::from(SIDE), "{case}: {centres:?}");
-        }
-        // One label: a hit on any of its shields finds the one feature.
-        let boxes = label.glyph_boxes.clone();
-        let hits: Vec<_> = boxes
-            .iter()
-            .map(|[l, t, r, b]| {
-                map.map
-                    .query_rendered_symbols([(l + r) / 2.0, (t + b) / 2.0], Some(&["shields"]))
-            })
-            .collect();
-        for hit in &hits {
-            assert_eq!(
-                hit.len(),
-                1,
-                "{case}: one label under each shield: {hits:?}"
-            );
-        }
-        assert!(
-            hits.iter()
-                .all(|hit| hit[0].properties == hits[0][0].properties),
-            "{case}: the road's one label under every shield"
-        );
+        let boxes = middle_row(&map);
+        assert_eq!(boxes.len(), 3, "{case}: one box per shield");
+        assert_shields_in_route_order(&pixels, &boxes, case);
+        assert_one_label_under_each_shield(&map, &boxes, case);
         assert_eq!(
             shields.calls(),
             3,
             "{case}: each route's shield is made once"
         );
         assert_rows_apart(&map, case);
-        // Zoomed past the source's last zoom, the tiles are magnified and their labels laid
-        // out again; repeated rows still keep apart.
-        map.map
-            .view_state_mut()
-            .zoom_to(crate::coords::Zoom::new(14.7));
-        map.settle().await;
-        assert_rows_apart(&map, &format!("{case} at zoom 14.7"));
-        // Zoomed out past a whole level, parent tiles replace their children; while both are
-        // held, the rows of the one road never stack on one another.
-        map.map
-            .view_state_mut()
-            .zoom_to(crate::coords::Zoom::new(13.2));
-        for frame in 0..90 {
-            map.frame().await;
-            assert_rows_do_not_overlap(&map, &format!("{case} zooming out, frame {frame}"));
-        }
-        map.settle().await;
-        assert_rows_apart(&map, &format!("{case} at zoom 13.2"));
+        assert_rows_keep_apart_across_zooms(&mut map, case).await;
         assert_eq!(
             shields.calls(),
             3,
             "{case}: no shield is made again for the zoom"
         );
     }
+}
+
+/// The glyph boxes of the row of shields nearest the middle of the view.
+fn middle_row(map: &SymbolMap) -> Vec<[f64; 4]> {
+    let placed = map
+        .map
+        .map_context
+        .world
+        .resources
+        .get::<PlacedSymbols>()
+        .expect("placed symbols");
+    let middle = f64::from(SIZE) / 2.0;
+    let off = |boxes: &Vec<[f64; 4]>| {
+        let [l, t, r, bottom] = boxes[boxes.len() / 2];
+        ((l + r) / 2.0 - middle).hypot((t + bottom) / 2.0 - middle)
+    };
+    placed
+        .0
+        .iter()
+        .filter(|symbol| symbol.layer == "shields" && !symbol.glyph_boxes.is_empty())
+        .min_by(|a, b| off(&a.glyph_boxes).total_cmp(&off(&b.glyph_boxes)))
+        .expect("a row of shields placed glyph by glyph")
+        .glyph_boxes
+        .clone()
+}
+
+/// Each shield's own pixels near the row lie inside its box, which is as big as the shield,
+/// and the shields stand apart in route order.
+fn assert_shields_in_route_order(pixels: &[u8], boxes: &[[f64; 4]], case: &str) {
+    let mut centres = Vec::new();
+    for (index, colour) in ROUTE_COLOURS.iter().enumerate() {
+        let [l, t, r, b] = boxes[index];
+        let inside: Vec<[u32; 2]> = count(pixels, *colour, WHOLE)
+            .into_iter()
+            .filter(|[x, y]| {
+                let (x, y) = (f64::from(*x) + 0.5, f64::from(*y) + 0.5);
+                x >= l - 2.0 && x <= r + 2.0 && y >= t - 2.0 && y <= b + 2.0
+            })
+            .collect();
+        assert!(
+            inside.len() as f32 > SIDE * SIDE * 0.8,
+            "{case}: shield {index} lies within its collision box: {} pixels",
+            inside.len()
+        );
+        let width = r - l;
+        // The text is half the shield's size, so only the shield's own size covers it.
+        assert!(
+            width >= f64::from(SIDE),
+            "{case}: shield {index}'s box is as wide as the shield: {width}"
+        );
+        centres.push((l + r) / 2.0);
+    }
+    for pair in centres.windows(2) {
+        assert!(
+            pair[1] - pair[0] > f64::from(SIDE),
+            "{case}: the shields read apart in route order: {centres:?}"
+        );
+    }
+}
+
+/// One label: a hit on any of its shields finds the one feature.
+fn assert_one_label_under_each_shield(map: &SymbolMap, boxes: &[[f64; 4]], case: &str) {
+    let hits: Vec<_> = boxes
+        .iter()
+        .map(|[l, t, r, b]| {
+            map.map
+                .query_rendered_symbols([(l + r) / 2.0, (t + b) / 2.0], Some(&["shields"]))
+        })
+        .collect();
+    for hit in &hits {
+        assert_eq!(
+            hit.len(),
+            1,
+            "{case}: one label under each shield: {hits:?}"
+        );
+    }
+    assert!(
+        hits.iter()
+            .all(|hit| hit[0].properties == hits[0][0].properties),
+        "{case}: the road's one label under every shield"
+    );
+}
+
+/// Zoomed past the source's last zoom the tiles are magnified and laid out again, and zoomed
+/// out past a whole level parent tiles replace their children; repeated rows keep apart
+/// throughout, and never stack while parent and child are both held.
+async fn assert_rows_keep_apart_across_zooms(map: &mut SymbolMap, case: &str) {
+    map.map
+        .view_state_mut()
+        .zoom_to(crate::coords::Zoom::new(14.7));
+    map.settle().await;
+    assert_rows_apart(map, &format!("{case} at zoom 14.7"));
+    map.map
+        .view_state_mut()
+        .zoom_to(crate::coords::Zoom::new(13.2));
+    for frame in 0..90 {
+        map.frame().await;
+        assert_rows_do_not_overlap(map, &format!("{case} zooming out, frame {frame}"));
+    }
+    map.settle().await;
+    assert_rows_apart(map, &format!("{case} at zoom 13.2"));
 }
 
 /// No two rows of shields drawn for the road overlap.

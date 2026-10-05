@@ -254,25 +254,41 @@ impl TextTessellator {
         }
     }
 
-    /// Whether a label with the same text already sits within `repeat_distance` of `point`; a
-    /// label that does not is remembered.
-    fn anchor_is_too_close(&mut self, point: [f64; 2], repeat_distance: f64) -> bool {
+    /// What makes two line labels repeats of each other: their text and, since images stand
+    /// in the text as one placeholder each, the images they show, so rows of different road
+    /// shields are told apart.
+    fn repeat_key(&self) -> Option<String> {
         let images = Some(&self.atlas.icons as &dyn crate::style::expression::ImageSet);
-        let Some(mut text) = self.paint.label_among(&self.properties, self.zoom, images) else {
-            return false;
-        };
-        // Images stand in the text as one placeholder each, so rows of different road shields
-        // would read as the same label; the images they show tell them apart.
+        let mut key = self
+            .paint
+            .label_among(&self.properties, self.zoom, images)?;
         for section in self
             .paint
             .label_sections_among(&self.properties, self.zoom, images)
         {
             if let Some(image) = section.image {
-                text.push('\u{0}');
-                text.push_str(&image);
+                key.push('\u{0}');
+                key.push_str(&image);
             }
         }
-        let others = self.line_anchors_by_text.entry(text).or_default();
+        Some(key)
+    }
+
+    /// Whether a label with the same repeat key already sits within `repeat_distance` of `point`; a
+    /// label that does not is remembered.
+    fn anchor_is_too_close(
+        &mut self,
+        key: Option<&str>,
+        point: [f64; 2],
+        repeat_distance: f64,
+    ) -> bool {
+        let Some(key) = key else {
+            return false;
+        };
+        let others = self
+            .line_anchors_by_text
+            .entry(key.to_string())
+            .or_default();
         let too_close = others
             .iter()
             .any(|other| (other[0] - point[0]).hypot(other[1] - point[1]) < repeat_distance);
@@ -344,6 +360,10 @@ impl TextTessellator {
             LinePlacement::Line => line_anchors::clip_to_tile(&lines),
             LinePlacement::Center => lines.into_iter().filter(|line| line.len() > 1).collect(),
         };
+        let repeat_key = match placement {
+            LinePlacement::Line => self.repeat_key(),
+            LinePlacement::Center => None,
+        };
         for part in parts {
             let anchors = match placement {
                 LinePlacement::Line => line_anchors::line_anchors(&part, params),
@@ -359,9 +379,11 @@ impl TextTessellator {
                 .map(|point| [point[0] as f32, point[1] as f32])
                 .collect();
             for anchor in anchors {
-                if placement == LinePlacement::Line
-                    && self.anchor_is_too_close(anchor.point, params.spacing / 2.0)
-                {
+                if self.anchor_is_too_close(
+                    repeat_key.as_deref(),
+                    anchor.point,
+                    params.spacing / 2.0,
+                ) {
                     continue;
                 }
                 let distance = line_anchors::distance_to(&part, anchor);
