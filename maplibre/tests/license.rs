@@ -10,9 +10,6 @@ const MIXED_CRATE: &str = "AGPL-3.0-or-later AND (MIT OR Apache-2.0)";
 const MIXED_PACKAGE: &str = "AGPL-3.0-or-later AND MIT";
 const FORK_ONLY: &str = "AGPL-3.0-or-later";
 
-/// Workspace members written in the fork alone, which no upstream license covers.
-const FORK_ONLY_MEMBERS: [&str; 1] = ["maplibre-roadshield"];
-
 fn read(path: &str) -> String {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     fs::read_to_string(root.join(path)).expect(path)
@@ -55,18 +52,10 @@ fn every_crate_declares_the_licenses_of_its_code() {
             continue;
         }
         let manifest = read(&format!("{member}/Cargo.toml"));
-        if FORK_ONLY_MEMBERS.contains(&member) {
-            assert_eq!(
-                cargo_license(&manifest).as_deref(),
-                Some(FORK_ONLY),
-                "{member}"
-            );
-        } else {
-            assert!(
-                manifest.contains("license.workspace = true"),
-                "{member} inherits the workspace license"
-            );
-        }
+        assert!(
+            manifest.contains("license.workspace = true"),
+            "{member} inherits the workspace license"
+        );
     }
     for crate_only_in_fork in [
         "apple/visionos/Cargo.toml",
