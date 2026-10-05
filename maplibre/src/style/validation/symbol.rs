@@ -15,6 +15,7 @@ enum Property {
     Color,
     Number(super::Evaluation),
     Text,
+    Image,
     Boolean,
     BooleanExpression,
     Pair(super::Evaluation),
@@ -46,9 +47,8 @@ fn property(name: &str) -> Option<Property> {
         | "symbol-height-offset"
         | "text-height-offset"
         | "icon-height-offset" => Property::Number(Feature),
-        "text-field" | "icon-image" | "text-anchor" | "icon-anchor" | "text-justify" => {
-            Property::Text
-        }
+        "text-field" | "text-anchor" | "icon-anchor" | "text-justify" => Property::Text,
+        "icon-image" => Property::Image,
         "text-allow-overlap"
         | "icon-allow-overlap"
         | "text-ignore-placement"
@@ -122,6 +122,7 @@ impl LayerValidation<'_> {
                 Some(Property::Pair(evaluation)) => self.property(&path, Some(&StyleProperty::<crate::style::translation::Pair>::parse(value)), evaluation),
                 Some(Property::Number(evaluation)) => self.property(&path, Some(&StyleProperty::<f32>::parse(value)), evaluation),
                 Some(Property::Text) => self.property(&path, Some(&StyleProperty::<TextField>::parse(value)), Feature),
+                Some(Property::Image) => self.property(&path, Some(&StyleProperty::<crate::style::layer::ImageName>::parse(value)), Feature),
                 Some(Property::BooleanExpression) => self.property(&path, Some(&StyleProperty::<bool>::parse(value)), Feature),
                 Some(kind) if valid_literal(&kind, value) => {}
                 Some(_) => self.unsupported(&path, "this property requires a supported literal value; expressions are not evaluated"),

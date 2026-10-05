@@ -48,8 +48,9 @@ impl SymbolPaint {
         property.evaluate(&context).map(|text| text.0)
     }
 
-    /// Evaluates a string or token template property that may name images, which `image`
-    /// expressions in it are checked against.
+    /// Evaluates the image property `name`, such as `icon-image`, against the images the map
+    /// holds: what an `image` expression in it resolves to, and so what a `coalesce` around it
+    /// chooses, depends on them.
     pub fn text_among_images(
         &self,
         name: &str,
@@ -60,7 +61,7 @@ impl SymbolPaint {
         let property = self
             .properties
             .get(name)
-            .map(StyleProperty::<TextField>::parse)?;
+            .map(StyleProperty::<crate::style::layer::ImageName>::parse)?;
         let context = crate::style::expression::EvaluationContext {
             available_images: Some(images),
             ..crate::style::expression::EvaluationContext::for_feature(zoom, properties)

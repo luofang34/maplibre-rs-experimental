@@ -301,9 +301,31 @@ impl PropertyValue for TextField {
     fn from_value(value: &Value) -> Option<Self> {
         match value {
             Value::String(text) => Some(Self::decode(text)),
-            // A string property such as `icon-image` names an image by its name.
-            Value::Image(image) => Some(Self::plain(image.name.clone())),
-            Value::Formatted(formatted) => Some(Self::plain(formatted.text())),
+            _ => None,
+        }
+    }
+}
+
+/// The image an image property names: `icon-image` or a pattern. A string names its image,
+/// and an `image` expression its image by name, whether or not the map holds it yet; where it
+/// does not, a `coalesce` around the expression chooses a fallback first.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct ImageName(pub String);
+
+impl PropertyValue for ImageName {
+    fn spec() -> LegacyPropertySpec {
+        LegacyPropertySpec {
+            kind: PropertyKind::ResolvedImage,
+            interpolated: false,
+            default: None,
+            tokens: true,
+        }
+    }
+
+    fn from_value(value: &Value) -> Option<Self> {
+        match value {
+            Value::Image(image) => Some(Self(image.name.clone())),
+            Value::String(name) => Some(Self(name.clone())),
             _ => None,
         }
     }

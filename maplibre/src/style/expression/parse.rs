@@ -184,6 +184,7 @@ impl Parser {
         }
         // Formatted text takes any text or an image as one section of it; an image property
         // takes a name. Coalesce operands stay bare, so it can skip an image the map lacks.
+        // An image or formatted text where a string is expected is a type error, as in GL JS.
         let into = match expected {
             Type::Formatted
                 if matches!(
@@ -195,10 +196,6 @@ impl Parser {
             }
             Type::ResolvedImage if matches!(actual, Type::Value | Type::String) => {
                 Some(Coercion::ResolvedImage)
-            }
-            // A string property such as `icon-image` names its image by the image's name.
-            Type::String if matches!(actual, Type::ResolvedImage | Type::Formatted) => {
-                Some(Coercion::String)
             }
             _ => None,
         };
