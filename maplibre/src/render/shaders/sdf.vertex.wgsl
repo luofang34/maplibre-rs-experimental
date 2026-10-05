@@ -153,7 +153,9 @@ fn main(
         let depth_radius = abs(x.w - projected.clip_position.w) + abs(y.w - projected.clip_position.w);
         near_visibility = select(0.0,1.0,projected.clip_position.w - depth_radius > 0.0);
     }
-    let visibility = feature.x * metrics.w * near_visibility * anchor_visibility(projected.clip_position);
+    // A label is hidden or faded as a whole, judged at its anchor as GL JS judges it, so ground
+    // under one glyph never takes part of a word and glyphs do not flicker one by one.
+    let visibility = feature.x * metrics.w * near_visibility * anchor_visibility(label_clip);
     // Hidden geometry must not cross the eye plane and produce unbounded clipped triangles.
     if visibility <= 0.0 || projected.clip_position.w <= 0.0 { position = vec4<f32>(0.0, 0.0, 0.0, 1.0); }
     return VertexOutput(vec2<f32>(a_data.xy) / symbol.atlas.xy, a_data.z, size,
