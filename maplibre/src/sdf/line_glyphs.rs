@@ -11,6 +11,10 @@ pub(crate) struct GlyphPose {
     pub point: [f32; 2],
     /// Direction of the line under the glyph in radians, turned half way around when flipped.
     pub angle: f32,
+    /// How far the line under the glyph stands above the ground under the label's anchor, in
+    /// metres, for a label that follows the ground: the ground under the ends of the glyph's
+    /// segment of the line, interpolated along it. Zero otherwise.
+    pub rise: f32,
 }
 
 /// Finds points by arc length along a polyline, resuming where the last one was found so that
@@ -85,6 +89,7 @@ pub(crate) fn place_glyphs(
             } else {
                 angle
             },
+            rise: 0.0,
         });
     }
     poses.into_iter().collect()

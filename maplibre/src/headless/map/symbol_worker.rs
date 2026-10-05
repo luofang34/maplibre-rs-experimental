@@ -19,9 +19,11 @@ use crate::{
 
 mod anchor_depth;
 mod curve;
+mod dem;
 mod geojson;
 mod globe_precision;
 mod horizon;
+mod line_ground;
 mod motion;
 mod mvt;
 mod provided;
@@ -235,6 +237,9 @@ impl SymbolMap {
             kernel,
             vec![
                 Box::new(RenderPlugin),
+                Box::new(crate::raster::RasterPlugin::<
+                    crate::raster::DefaultRasterTransferables,
+                >::default()),
                 Box::new(crate::background::BackgroundPlugin),
                 Box::new(crate::terrain::TerrainPlugin::<
                     crate::terrain::DefaultDemTransferables,

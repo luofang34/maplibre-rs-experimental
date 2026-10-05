@@ -8,8 +8,8 @@ use crate::{
         collision_grid::CollisionGrid,
         paint::SymbolUniforms,
         placement::{
-            line_glyph_boxes, line_glyph_poses, screen_boxes, symbol_elevation,
-            text_perspective_scale, text_rotation, LinePoses,
+            line_glyph_boxes, line_glyph_poses, screen_boxes, text_perspective_scale,
+            text_rotation, LabelGround, LinePoses,
         },
         query::{PlacedSymbol, PlacedSymbols},
     },
@@ -199,7 +199,8 @@ impl LayerFrame<'_> {
     ) -> FeaturePlacement {
         let (view_state, projection) = (self.view_state, self.projection);
         let zoom = view_state.style_zoom().value();
-        let ground = symbol_elevation(self.world, layer, feature, self.paint, zoom);
+        let label_ground = LabelGround::new(self.world, layer, feature, self.paint, zoom);
+        let ground = label_ground.elevation;
         let relevance = self
             .world
             .resources
@@ -212,7 +213,7 @@ impl LayerFrame<'_> {
             line_glyph_poses(
                 layer,
                 feature,
-                ground,
+                &label_ground,
                 view_state,
                 projection,
                 (
@@ -400,7 +401,7 @@ mod tests {
     use super::{metadata::write_glyph_poses, *};
     use crate::{
         coords::ZoomLevel,
-        render::shaders::ShaderSymbolVertex,
+        render::shaders::{ShaderSymbolVertex, POSED_GLYPH},
         sdf::{line_glyphs::GlyphPose, Feature, LineLabel},
         vector::tessellation::OverAlignedVertexBuffer,
     };
@@ -448,10 +449,12 @@ mod tests {
             GlyphPose {
                 point: [90.0, 200.0],
                 angle: 0.5,
+                rise: 0.0,
             },
             GlyphPose {
                 point: [110.0, 205.0],
                 angle: 0.75,
+                rise: 12.5,
             },
         ];
         let mut metadata = vec![SDFShaderFeatureMetadata::default(); 12];
@@ -462,10 +465,10 @@ mod tests {
         );
         assert!(metadata[4..8]
             .iter()
-            .all(|entry| entry.pose == [-10.0, 0.0, 0.5, 1.0]));
+            .all(|entry| entry.pose == [-10.0, 0.0, 0.5, POSED_GLYPH]));
         assert!(metadata[8..]
             .iter()
-            .all(|entry| entry.pose == [10.0, 5.0, 0.75, 1.0]));
+            .all(|entry| entry.pose == [10.0, 5.0, 0.75, POSED_GLYPH + 12.5]));
     }
 
     #[test]

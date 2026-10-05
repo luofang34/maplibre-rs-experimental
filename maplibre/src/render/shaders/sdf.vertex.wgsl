@@ -15,6 +15,9 @@ struct VertexOutput {
 
 @group(2) @binding(0) var scene_depth: texture_2d<f32>;
 
+// What a posed glyph's `pose.w` holds before its rise in metres is added; 0 means no pose.
+const POSED_GLYPH: f32 = 65536.0;
+
 fn anchor_visibility(clip: vec4<f32>) -> f32 {
     if clip.w <= 0.0 { return 0.0; }
     // The snapshot holds one texel per device pixel of the whole target, which on a denser
@@ -54,7 +57,8 @@ fn main(
     @location(11) viewport_height: f32,
     @location(12) feature: vec2<f32>,
     // For a glyph placed along a line: the offset of its centre from the vertex anchor in tile
-    // units, its direction, and 1 when it has such a pose.
+    // units, its direction, and POSED_GLYPH plus how far the ground under it rises above the
+    // ground under the label's anchor, in metres.
     @location(14) pose: vec4<f32>,
     // Fill colour, halo colour, and size, halo width, halo blur and opacity of this feature.
     @location(10) style_fill: vec4<f32>,
@@ -67,14 +71,17 @@ fn main(
     let metrics = style_metrics;
     let alignment = select(symbol.icon_layout, symbol.text_layout, is_text);
     let anchor = vec2<f32>(a_pos_offset.xy) + select(vec2<f32>(0.0), pose.xy, has_pose);
-    let elevation = feature.y * alignment.w + bitcast<f32>(a_pixeloffset.z);
+    let label_elevation = feature.y * alignment.w + bitcast<f32>(a_pixeloffset.z);
+    // A glyph along a line lies on the ground under it, so a label climbing a slope lies on it.
+    let elevation = label_elevation + select(0.0, pose.w - POSED_GLYPH, has_pose) * alignment.w;
     let transform = mat4x4<f32>(translate1, translate2, translate3, translate4);
     let projected = project_tile_position_3d(vec3<f32>(anchor, elevation), transform, tile_mercator_coords);
     // Every glyph of a label takes the size its anchor's depth gives, as GL JS sizes them, so
     // a label along a receding line keeps one size and the spacing placement gave it.
-    let label_w = select(projected.clip_position.w, project_tile_position_3d(
-        vec3<f32>(vec2<f32>(a_pos_offset.xy), elevation), transform, tile_mercator_coords).clip_position.w,
+    let label_clip = select(projected.clip_position, project_tile_position_3d(
+        vec3<f32>(vec2<f32>(a_pos_offset.xy), label_elevation), transform, tile_mercator_coords).clip_position,
         has_pose);
+    let label_w = label_clip.w;
     let distance_ratio = select(projection.transition_and_padding.y / max(label_w, 1e-6),
         label_w / max(projection.transition_and_padding.y, 1e-6), alignment.x > 0.5);
     // A tracked eye changes direction independently of map zoom. Viewport labels
@@ -146,7 +153,9 @@ fn main(
         let depth_radius = abs(x.w - projected.clip_position.w) + abs(y.w - projected.clip_position.w);
         near_visibility = select(0.0,1.0,projected.clip_position.w - depth_radius > 0.0);
     }
-    let visibility = feature.x * metrics.w * near_visibility * anchor_visibility(projected.clip_position);
+    // A label is hidden or faded as a whole, judged at its anchor as GL JS judges it, so ground
+    // under one glyph never takes part of a word and glyphs do not flicker one by one.
+    let visibility = feature.x * metrics.w * near_visibility * anchor_visibility(label_clip);
     // Hidden geometry must not cross the eye plane and produce unbounded clipped triangles.
     if visibility <= 0.0 || projected.clip_position.w <= 0.0 { position = vec4<f32>(0.0, 0.0, 0.0, 1.0); }
     return VertexOutput(vec2<f32>(a_data.xy) / symbol.atlas.xy, a_data.z, size,

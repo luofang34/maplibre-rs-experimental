@@ -54,6 +54,11 @@ pub struct FillShaderFeatureMetadata {
     pub color: Vec4f32,
 }
 
+/// What the fourth lane of [`SDFShaderFeatureMetadata::pose`] holds for a glyph with a pose,
+/// before the glyph's rise in metres is added; a vertex without a pose holds 0. At this
+/// magnitude an `f32` keeps any rise on Earth to within a centimetre.
+pub(crate) const POSED_GLYPH: f32 = 65536.0;
+
 /// Per-vertex collision visibility and sampled terrain height for symbols.
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Pod, Zeroable, Default)]
@@ -63,7 +68,9 @@ pub struct SDFShaderFeatureMetadata {
     /// Sampled ground elevation in meters; symbol height offsets are carried in the geometry.
     pub elevation: f32,
     /// Where a glyph placed along a line sits: the offset of its centre from the vertex anchor
-    /// in tile units, its direction in radians, and 1 when the glyph has such a pose.
+    /// in tile units, its direction in radians, and [`POSED_GLYPH`] plus how far the ground
+    /// under the glyph rises above the ground under the label's anchor, in metres, when the
+    /// glyph has such a pose.
     pub pose: [f32; 4],
     /// Fill colour of the symbol's text or icon, straight alpha, evaluated for its feature.
     pub color: [f32; 4],

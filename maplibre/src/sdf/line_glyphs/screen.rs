@@ -172,6 +172,7 @@ fn place_one(
     Some(GlyphPose {
         point: point.map(|value| value as f32),
         angle: angle as f32,
+        rise: 0.0,
     })
 }
 

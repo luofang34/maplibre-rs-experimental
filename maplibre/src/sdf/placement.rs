@@ -6,11 +6,11 @@ use crate::{
     coords::{TileCoords, WorldTileCoords, ZOOM_BOUNDS},
     render::{projection::ShaderProjectionData, view_state::ViewState},
     sdf::{Feature, SymbolLayerData},
-    tcs::world::World,
-    terrain::coverage::TerrainCoverageIndex,
 };
 
+mod ground;
 mod line_labels;
+pub(super) use ground::{buried_in_terrain, LabelGround};
 pub(super) use line_labels::{line_glyph_boxes, line_glyph_poses, LinePoses};
 
 pub(super) fn canonical_tile(coords: WorldTileCoords) -> Option<TileCoords> {
@@ -20,54 +20,6 @@ pub(super) fn canonical_tile(coords: WorldTileCoords) -> Option<TileCoords> {
         y: coords.y as u32,
         z: coords.z,
     })
-}
-
-pub(super) fn symbol_elevation(
-    world: &World,
-    layer: &SymbolLayerData,
-    feature: &Feature,
-    paint: &crate::style::layer::SymbolPaint,
-    zoom: f64,
-) -> f32 {
-    let terrain = elevation(world, layer, feature);
-    if !paint.uses_shared_height() {
-        return terrain;
-    }
-    let base = if paint.height_follows_ground("text") {
-        terrain
-    } else {
-        0.0
-    };
-    base + paint.height_offset("text", &feature.data.properties, zoom)
-}
-
-/// Whether the anchor at `height` is inside the terrain surface below it, where the depth test
-/// hides it. Such a label must not hold collision space or answer queries.
-pub(super) fn buried_in_terrain(
-    world: &World,
-    layer: &SymbolLayerData,
-    feature: &Feature,
-    height: f32,
-) -> bool {
-    elevation(world, layer, feature) - height > BURIAL_TOLERANCE_METERS
-}
-
-/// Heights within this of the ground count as on it, so DEM sampling noise never hides a label.
-const BURIAL_TOLERANCE_METERS: f32 = 1.0;
-
-pub(super) fn elevation(world: &World, layer: &SymbolLayerData, feature: &Feature) -> f32 {
-    let scale = 2_f64.powi(i32::from(u8::from(layer.coords.z)));
-    let x = (f64::from(layer.coords.x) + f64::from(feature.text_anchor.x) / 4096.0) / scale;
-    let y = (f64::from(layer.coords.y) + f64::from(feature.text_anchor.y) / 4096.0) / scale;
-    world
-        .resources
-        .get::<TerrainCoverageIndex>()
-        .and_then(|index| {
-            index
-                .elevation_at(&world.tiles, x, y)
-                .or_else(|| index.elevation_cached(&world.tiles, x, y))
-        })
-        .unwrap_or(0.0) as f32
 }
 
 pub(super) fn screen_boxes(
