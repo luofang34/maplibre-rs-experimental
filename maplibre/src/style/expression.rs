@@ -17,8 +17,8 @@ mod parse;
 mod value;
 
 pub use ast::{
-    Arithmetic, Coercion, Comparison, Expression, FeatureProperty, Global, MathFunction,
-    StringFunction,
+    Arithmetic, Coercion, Comparison, Expression, FeatureProperty, FormatSection, Global,
+    MathFunction, StringFunction,
 };
 pub use evaluate::{EvaluationContext, EvaluationError, FeatureProperties, ImageSet};
 pub use geometry::{Geometry, GEOMETRY_PROPERTY};
@@ -32,7 +32,7 @@ pub use parse::{
     IMAGE_PLACEHOLDER as FORMAT_IMAGE, SECTION as FORMAT_SECTION,
 };
 use parse::{Annotation, Parser};
-pub use value::{js_number, Color, Type, Value};
+pub use value::{js_number, Color, Formatted, FormattedSection, ResolvedImage, Type, Value};
 
 impl Expression {
     /// Parses an expression with no expectation about its type.

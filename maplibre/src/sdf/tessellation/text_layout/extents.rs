@@ -122,7 +122,7 @@ pub(in crate::sdf::tessellation) fn unwrapped_width(
     zoom: f64,
     atlas: &SymbolAtlas,
 ) -> f32 {
-    let Some(text) = paint.label(&symbol.properties, zoom) else {
+    let Some(text) = paint.label_among(&symbol.properties, zoom, Some(&atlas.icons)) else {
         return 0.0;
     };
     let chars: Vec<char> = text.chars().collect();

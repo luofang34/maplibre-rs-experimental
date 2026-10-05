@@ -182,6 +182,32 @@ impl Parser {
                 Annotation::Coerce | Annotation::Omit => parsed,
             });
         }
+        // Formatted text takes any text or an image as one section of it; an image property
+        // takes a name. Coalesce operands stay bare, so it can skip an image the map lacks.
+        // An image or formatted text where a string is expected is a type error, as in GL JS.
+        let into = match expected {
+            Type::Formatted
+                if matches!(
+                    actual,
+                    Type::Value | Type::String | Type::ResolvedImage | Type::Null
+                ) =>
+            {
+                Some(Coercion::Formatted)
+            }
+            Type::ResolvedImage if matches!(actual, Type::Value | Type::String) => {
+                Some(Coercion::ResolvedImage)
+            }
+            _ => None,
+        };
+        if let Some(coercion) = into {
+            return Ok(match annotation {
+                Annotation::Omit => parsed,
+                Annotation::Assert | Annotation::Coerce => Expression::Coerce {
+                    coercion,
+                    operands: vec![parsed],
+                },
+            });
+        }
         if *expected == Type::Color && matches!(actual, Type::Value | Type::String) {
             return Ok(match annotation {
                 Annotation::Omit => parsed,
@@ -234,10 +260,7 @@ impl Parser {
                 }
                 Ok(Expression::Literal(Value::from_json(&args[0])))
             }
-            "format" => match format::lower(args) {
-                Ok(lowered) => self.parse(&lowered, expected),
-                Err(message) => Err(self.error(message)),
-            },
+            "format" => self.parse_format(args),
             "zoom" => self.nullary(args, Expression::Global(Global::Zoom)),
             "elevation" => self.nullary(args, Expression::Global(Global::Elevation)),
             "heatmap-density" => self.nullary(args, Expression::Global(Global::HeatmapDensity)),

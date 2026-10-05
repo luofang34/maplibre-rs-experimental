@@ -15,7 +15,7 @@ use crate::{
     },
     style::{
         expression::FeatureProperties,
-        layer::{StyleProperty, SymbolPaint, TextField},
+        layer::{FormattedText, StyleProperty, SymbolPaint},
     },
     vector::tessellation::{property_value, IndexDataType},
 };
@@ -62,7 +62,7 @@ pub struct TextTessellator {
 
 impl TextTessellator {
     /// A text collector with the offline fallback font.
-    pub fn new(text_field: StyleProperty<TextField>, zoom: f64) -> Self {
+    pub fn new(text_field: StyleProperty<FormattedText>, zoom: f64) -> Self {
         Self {
             paint: SymbolPaint {
                 text_field: Some(text_field),
@@ -226,7 +226,10 @@ impl TextTessellator {
     ) {
         let ways = line
             .is_none()
-            .then(|| self.paint.label(&self.properties, self.zoom))
+            .then(|| {
+                self.paint
+                    .label_among(&self.properties, self.zoom, Some(&self.atlas.icons))
+            })
             .flatten()
             .and_then(|text| text_layout::both_orientations(&self.paint, &text));
         // A text that may be written both ways is laid out twice; the second shows when the
@@ -251,13 +254,41 @@ impl TextTessellator {
         }
     }
 
-    /// Whether a label with the same text already sits within `repeat_distance` of `point`; a
+    /// What makes two line labels repeats of each other: their text and, since images stand
+    /// in the text as one placeholder each, the images they show, so rows of different road
+    /// shields are told apart.
+    fn repeat_key(&self) -> Option<String> {
+        let images = Some(&self.atlas.icons as &dyn crate::style::expression::ImageSet);
+        let mut key = self
+            .paint
+            .label_among(&self.properties, self.zoom, images)?;
+        for section in self
+            .paint
+            .label_sections_among(&self.properties, self.zoom, images)
+        {
+            if let Some(image) = section.image {
+                key.push('\u{0}');
+                key.push_str(&image);
+            }
+        }
+        Some(key)
+    }
+
+    /// Whether a label with the same repeat key already sits within `repeat_distance` of `point`; a
     /// label that does not is remembered.
-    fn anchor_is_too_close(&mut self, point: [f64; 2], repeat_distance: f64) -> bool {
-        let Some(text) = self.paint.label(&self.properties, self.zoom) else {
+    fn anchor_is_too_close(
+        &mut self,
+        key: Option<&str>,
+        point: [f64; 2],
+        repeat_distance: f64,
+    ) -> bool {
+        let Some(key) = key else {
             return false;
         };
-        let others = self.line_anchors_by_text.entry(text).or_default();
+        let others = self
+            .line_anchors_by_text
+            .entry(key.to_string())
+            .or_default();
         let too_close = others
             .iter()
             .any(|other| (other[0] - point[0]).hypot(other[1] - point[1]) < repeat_distance);
@@ -329,6 +360,10 @@ impl TextTessellator {
             LinePlacement::Line => line_anchors::clip_to_tile(&lines),
             LinePlacement::Center => lines.into_iter().filter(|line| line.len() > 1).collect(),
         };
+        let repeat_key = match placement {
+            LinePlacement::Line => self.repeat_key(),
+            LinePlacement::Center => None,
+        };
         for part in parts {
             let anchors = match placement {
                 LinePlacement::Line => line_anchors::line_anchors(&part, params),
@@ -344,9 +379,11 @@ impl TextTessellator {
                 .map(|point| [point[0] as f32, point[1] as f32])
                 .collect();
             for anchor in anchors {
-                if placement == LinePlacement::Line
-                    && self.anchor_is_too_close(anchor.point, params.spacing / 2.0)
-                {
+                if self.anchor_is_too_close(
+                    repeat_key.as_deref(),
+                    anchor.point,
+                    params.spacing / 2.0,
+                ) {
                     continue;
                 }
                 let distance = line_anchors::distance_to(&part, anchor);
@@ -416,7 +453,11 @@ impl FeatureProcessor for TextTessellator {
             match (line_placement(&self.paint), lines) {
                 // Lines that continue one another are merged once all of them are known.
                 (Some(LinePlacement::Line), Some(lines)) => {
-                    let text = self.paint.label(&self.properties, self.zoom);
+                    let text = self.paint.label_among(
+                        &self.properties,
+                        self.zoom,
+                        Some(&self.atlas.icons),
+                    );
                     for line in lines.into_iter().filter(|line| line.len() > 1) {
                         self.pending_lines.push(line_merge::PendingLine {
                             text: text.clone(),

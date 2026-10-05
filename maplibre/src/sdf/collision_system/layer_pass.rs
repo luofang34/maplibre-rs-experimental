@@ -215,7 +215,10 @@ impl LayerFrame<'_> {
                 ground,
                 view_state,
                 projection,
-                &self.uniforms,
+                (
+                    &self.uniforms,
+                    crate::sdf::paint::glyphs_stay_upright(self.paint),
+                ),
             )
         });
         let shown = !suppressed
@@ -241,7 +244,7 @@ impl LayerFrame<'_> {
         let (rectangles, glyph_boxes) = if shown {
             label_boxes(
                 (layer, feature, ground),
-                &line,
+                (&line, crate::sdf::paint::glyphs_stay_upright(self.paint)),
                 (view_state, projection, &self.uniforms),
             )
         } else {
@@ -316,7 +319,7 @@ impl LayerFrame<'_> {
 /// rectangle of such a text then surrounds those boxes, not the straight layout.
 fn label_boxes(
     (layer, feature, ground): (&crate::sdf::SymbolLayerData, &crate::sdf::Feature, f32),
-    line: &Option<LinePoses>,
+    (line, upright): (&Option<LinePoses>, bool),
     (view_state, projection, uniforms): (
         &crate::render::view_state::ViewState,
         &crate::render::projection::ShaderProjectionData,
@@ -331,7 +334,18 @@ fn label_boxes(
     let LinePoses::Poses(poses) = line.as_ref().unwrap_or(&LinePoses::NotApplicable) else {
         return (rectangles, Vec::new());
     };
-    let glyphs = line_glyph_boxes(layer, poses, ground, view_state, projection, uniforms);
+    let image_sizes = feature
+        .line
+        .as_ref()
+        .map_or(&[][..], |line| &line.image_sizes[..]);
+    let glyphs = line_glyph_boxes(
+        layer,
+        (poses, image_sizes, upright),
+        ground,
+        view_state,
+        projection,
+        uniforms,
+    );
     if rectangles[0].is_some() {
         rectangles[0] = glyphs.iter().copied().reduce(|a, b| {
             [
@@ -427,6 +441,7 @@ mod tests {
             polyline: [[0.0, 0.0], [500.0, 0.0]].into(),
             anchor_distance: 250.0,
             glyph_offsets: vec![-10.0, 10.0],
+            image_sizes: vec![[0.0; 2]; 2],
             first_glyph_index: 6,
         };
         let poses = [

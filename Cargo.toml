@@ -5,7 +5,6 @@ resolver = "2"
 members = [
     "maplibre",
     "maplibre-winit",
-    "maplibre-roadshield",
     "maplibre-build-tools",
     "maplibre-demo",
     "android",

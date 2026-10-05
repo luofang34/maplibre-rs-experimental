@@ -38,7 +38,7 @@ fn road_tile() -> Vec<u8> {
 }
 
 /// A terrarium DEM 500 m high everywhere, 256 pixels across as its source declares.
-fn dem_tile() -> Vec<u8> {
+pub(super) fn dem_tile() -> Vec<u8> {
     let mut png = std::io::Cursor::new(Vec::new());
     image::RgbaImage::from_pixel(256, 256, image::Rgba([129, 244, 0, 255]))
         .write_to(&mut png, image::ImageFormat::Png)

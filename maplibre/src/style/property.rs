@@ -2,6 +2,9 @@
 
 use std::sync::Arc;
 
+mod text;
+pub use text::{FormattedText, ImageName, PatternName, TextField, TextSection};
+
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::style::expression::{
@@ -135,134 +138,6 @@ impl PropertyValue for String {
 
     fn from_value(value: &Value) -> Option<Self> {
         value.as_str().map(str::to_string)
-    }
-}
-
-/// A run of a formatted text that has its own size, colour or font.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct TextSection {
-    /// How many characters the run holds.
-    pub length: usize,
-    /// Factor on the layout size; `None` leaves the size unchanged.
-    pub scale: Option<f32>,
-    /// Straight RGBA text colour that replaces the layer's.
-    pub color: Option<[f32; 4]>,
-    /// Font stack, comma-joined, that replaces the layer's.
-    pub font: Option<String>,
-    /// The image the run is, drawn in the line of text in place of a character.
-    pub image: Option<String>,
-}
-
-/// The text of a symbol: a `{token}` template, a literal, or an expression producing text, in
-/// one section or, for a `format` expression, several.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct TextField(pub String, pub Vec<TextSection>);
-
-/// A text field with sections is written in the lowered form `decode` reads back, so a layer
-/// that is serialized and parsed again keeps its sections.
-impl Serialize for TextField {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&self.encode())
-    }
-}
-
-impl TextField {
-    /// A text that is all one section.
-    pub fn plain(text: impl Into<String>) -> Self {
-        Self(text.into(), Vec::new())
-    }
-
-    fn encode(&self) -> String {
-        use crate::style::expression::{FORMATTED_START, FORMAT_FIELD, FORMAT_SECTION};
-
-        if self.1.is_empty() {
-            return self.0.clone();
-        }
-        let mut encoded = FORMATTED_START.to_string();
-        let mut characters = self.0.chars();
-        for section in &self.1 {
-            let content: String = characters.by_ref().take(section.length).collect();
-            let color = section.color.map_or_else(String::new, |[r, g, b, a]| {
-                csscolorparser::Color::new(r.into(), g.into(), b.into(), a.into()).to_hex_string()
-            });
-            let font = section.font.as_ref().map_or_else(String::new, |font| {
-                serde_json::to_string(&font.split(',').collect::<Vec<_>>()).unwrap_or_default()
-            });
-            encoded.push(FORMAT_SECTION);
-            encoded.push_str(
-                &section
-                    .scale
-                    .map_or_else(String::new, |scale| scale.to_string()),
-            );
-            for field in [&color, &font, &content] {
-                encoded.push(FORMAT_FIELD);
-                encoded.push_str(field);
-            }
-            encoded.push(FORMAT_FIELD);
-            encoded.push_str(section.image.as_deref().unwrap_or_default());
-        }
-        encoded
-    }
-
-    /// Reads the text a `format` expression lowered to, or a plain string as it is.
-    fn decode(text: &str) -> Self {
-        use crate::style::expression::{FORMATTED_START, FORMAT_FIELD, FORMAT_SECTION};
-
-        let Some(body) = text.strip_prefix(FORMATTED_START) else {
-            return Self::plain(text);
-        };
-        let mut plain = String::new();
-        let mut sections = Vec::new();
-        for section in body
-            .split(FORMAT_SECTION)
-            .filter(|section| !section.is_empty())
-        {
-            let mut fields = section.splitn(5, FORMAT_FIELD);
-            let (scale, color, font, content, image) = (
-                fields.next().unwrap_or_default(),
-                fields.next().unwrap_or_default(),
-                fields.next().unwrap_or_default(),
-                fields.next().unwrap_or_default(),
-                fields.next().unwrap_or_default(),
-            );
-            plain.push_str(content);
-            sections.push(TextSection {
-                length: content.chars().count(),
-                scale: scale.parse().ok(),
-                color: csscolorparser::parse(color)
-                    .ok()
-                    .map(|color| color.to_array().map(|channel| channel as f32)),
-                font: serde_json::from_str::<Vec<String>>(font)
-                    .ok()
-                    .filter(|fonts| !fonts.is_empty())
-                    .map(|fonts| fonts.join(",")),
-                image: (!image.is_empty()).then(|| image.to_owned()),
-            });
-        }
-        if sections.iter().all(|section| {
-            section.scale.is_none()
-                && section.color.is_none()
-                && section.font.is_none()
-                && section.image.is_none()
-        }) {
-            return Self::plain(plain);
-        }
-        Self(plain, sections)
-    }
-}
-
-impl PropertyValue for TextField {
-    fn spec() -> LegacyPropertySpec {
-        LegacyPropertySpec {
-            kind: PropertyKind::String,
-            interpolated: false,
-            default: None,
-            tokens: true,
-        }
-    }
-
-    fn from_value(value: &Value) -> Option<Self> {
-        value.as_str().map(Self::decode)
     }
 }
 

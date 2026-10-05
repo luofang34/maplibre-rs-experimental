@@ -338,3 +338,87 @@ async fn a_street_name_its_street_can_no_longer_hold_fades_out_without_leaving_i
         );
     }
 }
+
+/// For each glyph of an all-`I` name, how far, in degrees, its stroke leans from upright on
+/// the screen.
+fn screen_leans(pixels: &[u8], glyphs: &[[f64; 2]]) -> Vec<f64> {
+    let text = count(pixels, [255, 0, 0], [0, 0, SIZE, SIZE]);
+    glyphs
+        .iter()
+        .map(|[cx, cy]| {
+            // The middle of the stroke only, clear of its neighbours and its own bars.
+            let stroke: Vec<[f64; 2]> = text
+                .iter()
+                .map(|[x, y]| [f64::from(*x) + 0.5 - cx, f64::from(*y) + 0.5 - cy])
+                .filter(|[ox, oy]| ox.abs() < 3.0 && oy.abs() < 4.5)
+                .collect();
+            let n = stroke.len() as f64;
+            let [mx, my] = [0, 1].map(|axis| stroke.iter().map(|p| p[axis]).sum::<f64>() / n);
+            let (yy, xy) = stroke.iter().fold((0.0, 0.0), |(yy, xy), [x, y]| {
+                (yy + (y - my) * (y - my), xy + (x - mx) * (y - my))
+            });
+            (xy / yy).atan().to_degrees().abs()
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn viewport_glyph_text_follows_its_curving_street_with_every_glyph_upright() {
+    // Turned with the map, the glyphs of the same name lean with the arch.
+    let mut map = arch_map("IIIIIIIIIII", 0.0, 0.0).await;
+    let pixels = map.settle().await;
+    let turned = screen_leans(&pixels, &glyph_centres(&map));
+    assert!(
+        turned.iter().copied().fold(0.0, f64::max) > 15.0,
+        "map-aligned glyphs turn along the arch: {turned:.1?}"
+    );
+    for (pitch, bearing) in [(0.0, 0.0), (45.0, 30.0), (30.0, 180.0)] {
+        let case = format!("pitch {pitch}, bearing {bearing}");
+        let mut map = arch_map("IIIIIIIIIII", pitch, bearing).await;
+        map.map
+            .mutate_style(|style| {
+                style.set_layout_property(
+                    "road-name",
+                    "text-rotation-alignment",
+                    "viewport-glyph".into(),
+                )
+            })
+            .expect("viewport-glyph");
+        let pixels = map.settle().await;
+        let glyphs = glyph_centres(&map);
+        let (first, last) = (glyphs[0], glyphs[glyphs.len() - 1]);
+        let bend = glyphs
+            .iter()
+            .map(|glyph| off_chord(*glyph, first, last))
+            .fold(0.0, f64::max);
+        assert!(
+            bend > 4.0,
+            "{case}: the row bends with its street by {bend} px"
+        );
+        assert!(
+            first[0] < last[0],
+            "{case}: the row reads left to right: {glyphs:?}"
+        );
+        // Where the street runs steeply up the screen, upright glyphs stand above one another
+        // and their bars overlap, as in GL JS; only glyphs with room beside them are measured.
+        let measurable: Vec<[f64; 2]> = glyphs
+            .iter()
+            .enumerate()
+            .filter(|(index, glyph)| {
+                [index.wrapping_sub(1), index + 1]
+                    .iter()
+                    .filter_map(|neighbour| glyphs.get(*neighbour))
+                    .all(|other| (other[0] - glyph[0]).abs() >= 5.0)
+            })
+            .map(|(_, glyph)| *glyph)
+            .collect();
+        assert!(measurable.len() >= 5, "{case}: {glyphs:.1?}");
+        let leans = screen_leans(&pixels, &measurable);
+        let worst = leans.iter().copied().fold(0.0, f64::max);
+        assert!(
+            worst < 5.0,
+            "{case}: every glyph stands upright on the screen, the worst leaning {worst:.1} \
+             degrees: {leans:.1?}"
+        );
+    }
+}

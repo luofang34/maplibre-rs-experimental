@@ -159,7 +159,7 @@ fn text_of(paint: &SymbolPaint, zoom: f64) -> Option<String> {
         .text_field
         .as_ref()?
         .evaluate_for(&properties, zoom)
-        .map(|text| text.0)
+        .map(|text| text.0 .0)
 }
 
 #[test]

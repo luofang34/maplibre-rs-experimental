@@ -80,6 +80,7 @@ fn worker_wire_roundtrip_preserves_exact_collision_ranges_and_anchor() {
             polyline: [[0.0, 0.0], [500.0, 0.0]].into(),
             anchor_distance: 250.0,
             glyph_offsets: vec![-5.0, 5.0],
+            image_sizes: vec![[0.0; 2], [30.0, 20.0]],
             first_glyph_index: 12,
         }),
     };
@@ -98,6 +99,7 @@ fn worker_wire_roundtrip_preserves_exact_collision_ranges_and_anchor() {
     assert_eq!(&*line.polyline, &[[0.0, 0.0], [500.0, 0.0]]);
     assert_eq!(line.anchor_distance, 250.0);
     assert_eq!(line.glyph_offsets, [-5.0, 5.0]);
+    assert_eq!(line.image_sizes, [[0.0; 2], [30.0, 20.0]]);
     assert_eq!(line.first_glyph_index, 12);
     assert_eq!(
         decoded.parts[0].as_ref().expect("bounds").bounds,

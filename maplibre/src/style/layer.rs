@@ -8,7 +8,9 @@ use std::{
 use cint::{Alpha, EncodedSrgb};
 use serde::{Deserialize, Serialize};
 
-pub use crate::style::property::{PropertyValue, StyleProperty, TextField};
+pub use crate::style::property::{
+    FormattedText, ImageName, PatternName, PropertyValue, StyleProperty, TextField,
+};
 use crate::style::{
     circle::CirclePaint,
     heatmap::HeatmapPaint,

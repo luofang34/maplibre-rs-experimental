@@ -3,7 +3,7 @@
 use csscolorparser::Color;
 use serde::{Deserialize, Serialize};
 
-use super::{StyleProperty, TextField};
+use super::{FormattedText, StyleProperty};
 
 /// Base background color; properties outside this model are retained by layer serialization.
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
@@ -342,10 +342,10 @@ pub struct SymbolPaint {
     #[serde(rename = "text-field")]
     #[serde(
         default,
-        deserialize_with = "StyleProperty::<TextField>::deserialize_or_none"
+        deserialize_with = "StyleProperty::<FormattedText>::deserialize_or_none"
     )]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub text_field: Option<StyleProperty<TextField>>,
+    pub text_field: Option<StyleProperty<FormattedText>>,
 
     /// Text em size in screen pixels, evaluated for each feature and zoom.
     #[serde(rename = "text-size")]

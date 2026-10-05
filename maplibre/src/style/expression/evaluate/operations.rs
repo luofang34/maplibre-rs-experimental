@@ -219,6 +219,11 @@ pub(super) fn coerce(
 ) -> Result<Value> {
     match coercion {
         Coercion::Boolean => Ok(Value::Bool(operands[0].evaluate(context)?.truthy())),
+        Coercion::Formatted => Ok(super::images::to_formatted(operands[0].evaluate(context)?)),
+        Coercion::ResolvedImage => Ok(super::images::to_image(
+            operands[0].evaluate(context)?,
+            context,
+        )),
         Coercion::String => Ok(Value::String(
             operands[0].evaluate(context)?.to_display_string(),
         )),

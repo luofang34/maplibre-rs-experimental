@@ -134,6 +134,7 @@ pub enum EvaluationError {
     InputNotANumber,
 }
 
+mod images;
 mod operations;
 
 use operations::*;
@@ -221,16 +222,7 @@ impl Expression {
                 }
                 fallback.evaluate(context)
             }
-            Self::Coalesce { operands, .. } => {
-                let mut result = Value::Null;
-                for operand in operands {
-                    result = operand.evaluate(context)?;
-                    if !result.is_null() {
-                        break;
-                    }
-                }
-                Ok(result)
-            }
+            Self::Coalesce { operands, .. } => images::coalesce(operands, context),
             Self::Compare {
                 operator,
                 left,
@@ -408,14 +400,8 @@ impl Expression {
                 }
                 Ok(Value::Null)
             }
-            Self::Image(name) => {
-                let name = name.evaluate(context)?;
-                let available = match (&name, context.available_images) {
-                    (Value::String(name), Some(images)) => images.contains_image(name),
-                    _ => true,
-                };
-                Ok(if available { name } else { Value::Null })
-            }
+            Self::Image(name) => images::image(name, context),
+            Self::Format(sections) => images::format(sections, context),
             Self::Coerce { coercion, operands } => coerce(*coercion, operands, context),
             Self::ToRgba(operand) => {
                 let color = expect_color(operand.evaluate(context)?)?;

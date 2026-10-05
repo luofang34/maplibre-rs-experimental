@@ -74,7 +74,9 @@ pub(super) fn append(
     let start = buffer.indices.len();
     let first_vertex = buffer.vertices.len();
     let mut icon_padding = 0.0_f32;
-    let text = paint.label(&symbol.properties, zoom).unwrap_or_default();
+    let text = paint
+        .label_among(&symbol.properties, zoom, Some(&atlas.icons))
+        .unwrap_or_default();
     if let Some(icon) = paint
         .text_among_images("icon-image", &symbol.properties, zoom, &atlas.icons)
         .and_then(|name| atlas.icons.get(&name))
@@ -174,8 +176,9 @@ pub(super) fn append(
     }
     // Text collides by the box of its lines, not by the bitmaps of its glyphs, which reach
     // a few pixels beyond it.
-    // A label of images alone has no glyphs to measure, so its box is the layout's.
-    if parts[0].is_none() && symbol.line.is_none() {
+    // A label of images alone, such as a row of road shields along a road, has no glyphs to
+    // measure, so its box is the layout's.
+    if parts[0].is_none() {
         let image = buffer.vertices[first_vertex..]
             .iter()
             .find(|vertex| vertex.a_data[2] == 3);
@@ -223,6 +226,7 @@ pub(super) fn append(
                 polyline: polyline.clone(),
                 anchor_distance: *distance,
                 glyph_offsets,
+                image_sizes: laid.image_sizes,
                 first_glyph_index,
             }),
     });

@@ -28,30 +28,67 @@ pub(in crate::sdf) enum LinePoses {
 /// units and neither pitch nor bearing changes them; the view only decides whether it would
 /// read upside down. Text standing upright to the viewer is spaced along the line as the
 /// screen shows it, see [`viewport_poses`].
+///
+/// With `upright` (`viewport-glyph`), glyphs are spaced along the line as the screen shows it
+/// and each keeps level on the screen, the way GL JS draws them: a row of road shields follows
+/// its road without any shield turning with it.
 pub(in crate::sdf) fn line_glyph_poses(
     layer: &SymbolLayerData,
     feature: &Feature,
     elevation: f32,
     view: &ViewState,
     projection: &ShaderProjectionData,
-    uniforms: &SymbolUniforms,
+    (uniforms, upright): (&SymbolUniforms, bool),
 ) -> LinePoses {
     let Some(line) = &feature.line else {
         return LinePoses::NotApplicable;
     };
-    let alignment = uniforms.text_layout;
-    if alignment[1] <= 0.5 {
-        return LinePoses::NotApplicable;
-    }
-    if alignment[0] <= 0.5 {
-        return viewport_poses(
+    let viewport = |line| {
+        viewport_poses(
             layer,
             line,
             feature,
             elevation,
             (view, projection, uniforms),
-        );
+        )
+    };
+    if upright {
+        return match viewport(line) {
+            LinePoses::Poses(poses) => LinePoses::Poses(
+                poses
+                    .into_iter()
+                    .map(|pose| GlyphPose { angle: 0.0, ..pose })
+                    .collect(),
+            ),
+            other => other,
+        };
     }
+    let alignment = uniforms.text_layout;
+    if alignment[1] <= 0.5 {
+        return LinePoses::NotApplicable;
+    }
+    if alignment[0] <= 0.5 {
+        return viewport(line);
+    }
+    map_plane_poses(
+        layer,
+        line,
+        feature,
+        elevation,
+        (view, projection, uniforms),
+    )
+}
+
+/// [`line_glyph_poses`] for text that lies on the map plane: glyphs are spaced along the line
+/// in tile units, and the view only decides whether the text would read upside down.
+fn map_plane_poses(
+    layer: &SymbolLayerData,
+    line: &LineLabel,
+    feature: &Feature,
+    elevation: f32,
+    (view, projection, uniforms): (&ViewState, &ShaderProjectionData, &SymbolUniforms),
+) -> LinePoses {
+    let alignment = uniforms.text_layout;
     let placement = Placement {
         coords: layer.coords,
         anchor: [
@@ -117,10 +154,13 @@ pub(in crate::sdf) fn line_glyph_poses(
 
 /// One square per glyph of a line label, as tall as the text and centred on the glyph, so a
 /// curved label collides along its curve instead of through the box around all of it. The
-/// squares of neighbouring glyphs overlap and cover the text without gaps.
+/// squares of neighbouring glyphs overlap and cover the text without gaps. A glyph that is an
+/// image, `image_sizes` giving its size at the 24-pixel em, collides by that size where it is
+/// larger: by its rectangle when the glyphs stand `upright` on the screen, else, turned with
+/// the line, by the square around it.
 pub(in crate::sdf) fn line_glyph_boxes(
     layer: &SymbolLayerData,
-    poses: &[GlyphPose],
+    (poses, image_sizes, upright): (&[GlyphPose], &[[f32; 2]], bool),
     elevation: f32,
     view: &ViewState,
     projection: &ShaderProjectionData,
@@ -141,7 +181,8 @@ pub(in crate::sdf) fn line_glyph_boxes(
     };
     poses
         .iter()
-        .filter_map(|pose| {
+        .enumerate()
+        .filter_map(|(index, pose)| {
             let clip = project(
                 layer.coords,
                 [f64::from(pose.point[0]), f64::from(pose.point[1])],
@@ -155,10 +196,25 @@ pub(in crate::sdf) fn line_glyph_boxes(
             } else {
                 clip.w / f64::from(projection.center_clip_w)
             };
-            let half =
-                f64::from(uniforms.text[0]) * (0.5 + 0.5 * ratio).clamp(0.0, 4.0) / 2.0 + padding;
+            let to_screen = f64::from(uniforms.text[0]) * (0.5 + 0.5 * ratio).clamp(0.0, 4.0);
+            let text = to_screen / 2.0;
+            let [width, height] = image_sizes
+                .get(index)
+                .copied()
+                .unwrap_or_default()
+                .map(|side| f64::from(side) / 24.0 * to_screen / 2.0);
+            let [half_x, half_y] = if upright {
+                [width.max(text), height.max(text)]
+            } else {
+                [width.max(height).max(text); 2]
+            };
             let [x, y] = placement.screen(clip);
-            Some([x - half, y - half, x + half, y + half])
+            Some([
+                x - half_x - padding,
+                y - half_y - padding,
+                x + half_x + padding,
+                y + half_y + padding,
+            ])
         })
         .collect()
 }

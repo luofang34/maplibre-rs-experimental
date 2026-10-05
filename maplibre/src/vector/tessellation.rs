@@ -186,7 +186,7 @@ pub struct ZeroTessellator<I: std::ops::Add + From<lyon::tessellation::VertexId>
     pub sharp_corner_offset: f32,
     /// A pattern that varies by feature, whose key each feature's colour carries.
     pub pattern_property:
-        Option<crate::style::layer::StyleProperty<crate::style::layer::TextField>>,
+        Option<crate::style::layer::StyleProperty<crate::style::layer::PatternName>>,
     /// A `line-join` that varies by feature, which replaces the stroke's own.
     pub join_property: Option<crate::style::layer::StyleProperty<String>>,
     line_length: f32,

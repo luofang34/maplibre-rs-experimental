@@ -8,7 +8,7 @@
 
 #![allow(clippy::expect_used, clippy::panic)]
 
-use std::{fs, path::Path};
+use std::{collections::HashMap, fs, path::Path};
 
 use maplibre::style::expression::{
     EvaluationContext, Expression, FeatureProperties, LegacyPropertySpec, PropertyKind, Type, Value,
@@ -16,12 +16,10 @@ use maplibre::style::expression::{
 use serde_json::Value as Json;
 
 /// Passing cases the vendored suite must keep producing.
-const MIN_PASSING_CASES: usize = 387;
+const MIN_PASSING_CASES: usize = 408;
 
 /// Types of the specification the engine has no value for.
 const UNSUPPORTED_TYPES: &[&str] = &[
-    "formatted",
-    "resolvedImage",
     "padding",
     "numberArray",
     "colorArray",
@@ -108,11 +106,21 @@ fn run_case(path: &Path) -> Outcome {
     // property accepts any value.
     let spec = spec.unwrap_or_else(|| LegacyPropertySpec::stepped(PropertyKind::Value));
     let parsed = Expression::parse_property(&case["expression"], &spec);
+    // An unknown operator passes a case expecting an error only when that error is the unknown
+    // operator itself; otherwise an operator the engine lacks would pass for a type error.
+    let expects_unknown = compiled["errors"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|error| error["error"].as_str())
+        .any(|message| message.starts_with("Unknown expression"));
     let expression = match (parsed, compiled["result"].as_str()) {
+        (Err(error), Some("error")) if !error.is_unknown_operator() || expects_unknown => {
+            return Outcome::Pass
+        }
         (Err(error), _) if error.is_unknown_operator() => {
             return Outcome::Unsupported(error.message)
         }
-        (Err(_), Some("error")) => return Outcome::Pass,
         (Err(error), _) => return Outcome::Fail(format!("parse error {error}")),
         (Ok(_), Some("error")) => return Outcome::Fail("parsed but an error was expected".into()),
         (Ok(expression), _) => expression,
@@ -160,6 +168,14 @@ fn run_case(path: &Path) -> Outcome {
                     .map(|(key, value)| (key.clone(), Value::from_json(value)))
                     .collect()
             });
+        let available_images: HashMap<String, ()> = globals
+            .get("availableImages")
+            .and_then(Json::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Json::as_str)
+            .map(|name| (name.to_owned(), ()))
+            .collect();
         let geometry_type = feature
             .get("geometry")
             .and_then(|geometry| geometry.get("type"))
@@ -182,7 +198,7 @@ fn run_case(path: &Path) -> Outcome {
             geometry_type,
             id: id.as_ref(),
             global_state: global_state.as_ref(),
-            available_images: None,
+            available_images: Some(&available_images),
         };
         let result = expression.evaluate(&context);
         let expects_error = expected.get("error").is_some();
@@ -215,6 +231,8 @@ fn property_spec(spec: Option<&Json>) -> Option<LegacyPropertySpec> {
         "string" => PropertyKind::String,
         "boolean" => PropertyKind::Boolean,
         "color" => PropertyKind::Color,
+        "formatted" => PropertyKind::Formatted,
+        "resolvedImage" => PropertyKind::ResolvedImage,
         "enum" => PropertyKind::Enum(
             spec.get("values")
                 .and_then(Json::as_object)
@@ -282,14 +300,51 @@ fn matches(value: &Value, expected: &Json) -> bool {
                         .is_some_and(|expected| matches(value, expected))
                 })
         }
+        (Value::Image(_) | Value::Formatted(_), expected) => {
+            json_matches(&value.to_json(), expected)
+        }
         (value, expected) => value.to_json() == *expected,
+    }
+}
+
+/// Whether two JSON documents agree, numbers within the precision the suite prints.
+fn json_matches(actual: &Json, expected: &Json) -> bool {
+    match (actual, expected) {
+        (Json::Number(actual), Json::Number(expected)) => {
+            let (actual, expected) = (
+                actual.as_f64().unwrap_or(f64::NAN),
+                expected.as_f64().unwrap_or(f64::NAN),
+            );
+            (actual - expected).abs() <= 1e-5 * expected.abs().max(1.0)
+        }
+        (Json::Array(actual), Json::Array(expected)) => {
+            actual.len() == expected.len()
+                && actual.iter().zip(expected).all(|(a, e)| json_matches(a, e))
+        }
+        (Json::Object(actual), Json::Object(expected)) => {
+            actual.len() == expected.len()
+                && actual
+                    .iter()
+                    .all(|(key, a)| expected.get(key).is_some_and(|e| json_matches(a, e)))
+        }
+        (actual, expected) => actual == expected,
     }
 }
 
 #[test]
 fn the_vendored_suite_covers_every_supported_operator() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/expressions");
-    for operator in ["match", "interpolate", "step", "legacy", "to-color", "let"] {
+    for operator in [
+        "match",
+        "interpolate",
+        "step",
+        "legacy",
+        "to-color",
+        "let",
+        "format",
+        "image",
+        "coalesce",
+    ] {
         assert!(
             root.join(operator).is_dir(),
             "{operator} cases are vendored"
