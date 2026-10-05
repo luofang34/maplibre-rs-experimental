@@ -1,7 +1,7 @@
 //! Where the glyphs of a label that follows its line go at the current view, and the boxes
 //! they collide with.
 
-use super::{project, Placement};
+use super::{project, LabelGround, Placement};
 use crate::{
     render::{projection::ShaderProjectionData, view_state::ViewState},
     sdf::{
@@ -32,10 +32,46 @@ pub(in crate::sdf) enum LinePoses {
 /// With `upright` (`viewport-glyph`), glyphs are spaced along the line as the screen shows it
 /// and each keeps level on the screen, the way GL JS draws them: a row of road shields follows
 /// its road without any shield turning with it.
+///
+/// The line is projected at the ground under each of its vertices, as GL JS projects a line
+/// label's vertices, and each pose records how far its glyph rises from the anchor's ground,
+/// see [`rise_along`].
 pub(in crate::sdf) fn line_glyph_poses(
     layer: &SymbolLayerData,
     feature: &Feature,
-    elevation: f32,
+    ground: &LabelGround,
+    view: &ViewState,
+    projection: &ShaderProjectionData,
+    (uniforms, upright): (&SymbolUniforms, bool),
+) -> LinePoses {
+    match poses_along_line(
+        layer,
+        feature,
+        ground,
+        view,
+        projection,
+        (uniforms, upright),
+    ) {
+        LinePoses::Poses(poses) => LinePoses::Poses(
+            poses
+                .into_iter()
+                .map(|pose| GlyphPose {
+                    rise: feature
+                        .line
+                        .as_ref()
+                        .map_or(0.0, |line| rise_along(ground, &line.polyline, pose.point)),
+                    ..pose
+                })
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
+fn poses_along_line(
+    layer: &SymbolLayerData,
+    feature: &Feature,
+    ground: &LabelGround,
     view: &ViewState,
     projection: &ShaderProjectionData,
     (uniforms, upright): (&SymbolUniforms, bool),
@@ -43,15 +79,8 @@ pub(in crate::sdf) fn line_glyph_poses(
     let Some(line) = &feature.line else {
         return LinePoses::NotApplicable;
     };
-    let viewport = |line| {
-        viewport_poses(
-            layer,
-            line,
-            feature,
-            elevation,
-            (view, projection, uniforms),
-        )
-    };
+    let viewport =
+        |line| viewport_poses(layer, line, feature, ground, (view, projection, uniforms));
     if upright {
         return match viewport(line) {
             LinePoses::Poses(poses) => LinePoses::Poses(
@@ -70,13 +99,40 @@ pub(in crate::sdf) fn line_glyph_poses(
     if alignment[0] <= 0.5 {
         return viewport(line);
     }
-    map_plane_poses(
-        layer,
-        line,
-        feature,
-        elevation,
-        (view, projection, uniforms),
-    )
+    map_plane_poses(layer, line, feature, ground, (view, projection, uniforms))
+}
+
+/// How far a glyph at `point` on `polyline` rises above the anchor's ground: the rises under
+/// the ends of its segment of the line, interpolated along it, as GL JS projects a line
+/// label's vertices at their ground and lays its glyphs between them.
+fn rise_along(ground: &LabelGround, polyline: &[[f32; 2]], point: [f32; 2]) -> f32 {
+    let on_segment = |pair: &[[f32; 2]]| {
+        let ([ax, ay], [bx, by]) = (pair[0], pair[1]);
+        let [dx, dy] = [bx - ax, by - ay];
+        let length = dx * dx + dy * dy;
+        let t = if length > 0.0 {
+            (((point[0] - ax) * dx + (point[1] - ay) * dy) / length).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let off = (ax + dx * t - point[0]).hypot(ay + dy * t - point[1]);
+        (pair[0], pair[1], t, off)
+    };
+    let rise = |[x, y]: [f32; 2]| ground.rise_at([f64::from(x), f64::from(y)]);
+    polyline
+        .windows(2)
+        .map(on_segment)
+        .min_by(|a, b| a.3.total_cmp(&b.3))
+        .map_or_else(
+            || rise(point),
+            |(a, b, t, _)| rise(a) + (rise(b) - rise(a)) * t,
+        )
+}
+
+/// The height a point of the label's line is projected at, in metres: the ground under it for
+/// a label that follows the ground.
+fn height_at(ground: &LabelGround, uniforms: &SymbolUniforms, point: [f64; 2]) -> f64 {
+    f64::from(ground.elevation + ground.rise_at(point)) * f64::from(uniforms.text_layout[3])
 }
 
 /// [`line_glyph_poses`] for text that lies on the map plane: glyphs are spaced along the line
@@ -85,7 +141,7 @@ fn map_plane_poses(
     layer: &SymbolLayerData,
     line: &LineLabel,
     feature: &Feature,
-    elevation: f32,
+    ground: &LabelGround,
     (view, projection, uniforms): (&ViewState, &ShaderProjectionData, &SymbolUniforms),
 ) -> LinePoses {
     let alignment = uniforms.text_layout;
@@ -95,12 +151,12 @@ fn map_plane_poses(
             f64::from(feature.text_anchor.x),
             f64::from(feature.text_anchor.y),
         ],
-        elevation: f64::from(elevation),
+        elevation: f64::from(ground.elevation),
         view,
         projection,
         uniforms,
     };
-    let height = f64::from(elevation) * f64::from(alignment[3]);
+    let height = f64::from(ground.elevation) * f64::from(alignment[3]);
     let Some(clip) = project(layer.coords, placement.anchor, height, view, projection) else {
         return LinePoses::DoesNotFit;
     };
@@ -127,10 +183,11 @@ fn map_plane_poses(
     };
     if uniforms.placement[2] > 0.5 {
         let screen = |pose: &GlyphPose| {
+            let point = [f64::from(pose.point[0]), f64::from(pose.point[1])];
             project(
                 layer.coords,
-                [f64::from(pose.point[0]), f64::from(pose.point[1])],
-                height,
+                point,
+                height_at(ground, uniforms, point),
                 view,
                 projection,
             )
@@ -166,7 +223,6 @@ pub(in crate::sdf) fn line_glyph_boxes(
     projection: &ShaderProjectionData,
     uniforms: &SymbolUniforms,
 ) -> Vec<[f64; 4]> {
-    let height = f64::from(elevation) * f64::from(uniforms.text_layout[3]);
     let padding = f64::from(uniforms.placement[0]);
     let anchor = poses.first().map_or([0.0; 2], |pose| {
         [f64::from(pose.point[0]), f64::from(pose.point[1])]
@@ -183,6 +239,7 @@ pub(in crate::sdf) fn line_glyph_boxes(
         .iter()
         .enumerate()
         .filter_map(|(index, pose)| {
+            let height = f64::from(elevation + pose.rise) * f64::from(uniforms.text_layout[3]);
             let clip = project(
                 layer.coords,
                 [f64::from(pose.point[0]), f64::from(pose.point[1])],
@@ -226,22 +283,22 @@ fn viewport_poses(
     layer: &SymbolLayerData,
     line: &LineLabel,
     feature: &Feature,
-    elevation: f32,
+    ground: &LabelGround,
     (view, projection, uniforms): (&ViewState, &ShaderProjectionData, &SymbolUniforms),
 ) -> LinePoses {
-    let height = f64::from(elevation) * f64::from(uniforms.text_layout[3]);
     let placement = Placement {
         coords: layer.coords,
         anchor: [
             f64::from(feature.text_anchor.x),
             f64::from(feature.text_anchor.y),
         ],
-        elevation: f64::from(elevation),
+        elevation: f64::from(ground.elevation),
         view,
         projection,
         uniforms,
     };
     let on_screen = |point: [f64; 2]| {
+        let height = height_at(ground, uniforms, point);
         project(layer.coords, point, height, view, projection).map(|clip| OnScreen {
             screen: if clip.w > 0.0 {
                 placement.screen(clip)

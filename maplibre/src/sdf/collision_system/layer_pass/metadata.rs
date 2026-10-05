@@ -1,7 +1,7 @@
 //! Writes the placement outcome of each feature into its per-vertex GPU metadata.
 
 use crate::{
-    render::shaders::SDFShaderFeatureMetadata,
+    render::shaders::{SDFShaderFeatureMetadata, POSED_GLYPH},
     sdf::{line_glyphs::GlyphPose, paint::feature_style},
 };
 
@@ -103,7 +103,7 @@ pub(super) fn write_glyph_poses(
                 pose.point[0] - vertex.a_pos_offset[0] as f32,
                 pose.point[1] - vertex.a_pos_offset[1] as f32,
                 pose.angle,
-                1.0,
+                POSED_GLYPH + pose.rise,
             ];
         }
     }
