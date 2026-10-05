@@ -43,15 +43,17 @@ pub(in crate::sdf) fn line_glyph_poses(
     let Some(line) = &feature.line else {
         return LinePoses::NotApplicable;
     };
-    let alignment = uniforms.text_layout;
-    if upright {
-        return match viewport_poses(
+    let viewport = |line| {
+        viewport_poses(
             layer,
             line,
             feature,
             elevation,
             (view, projection, uniforms),
-        ) {
+        )
+    };
+    if upright {
+        return match viewport(line) {
             LinePoses::Poses(poses) => LinePoses::Poses(
                 poses
                     .into_iter()
@@ -61,18 +63,32 @@ pub(in crate::sdf) fn line_glyph_poses(
             other => other,
         };
     }
+    let alignment = uniforms.text_layout;
     if alignment[1] <= 0.5 {
         return LinePoses::NotApplicable;
     }
     if alignment[0] <= 0.5 {
-        return viewport_poses(
-            layer,
-            line,
-            feature,
-            elevation,
-            (view, projection, uniforms),
-        );
+        return viewport(line);
     }
+    map_plane_poses(
+        layer,
+        line,
+        feature,
+        elevation,
+        (view, projection, uniforms),
+    )
+}
+
+/// [`line_glyph_poses`] for text that lies on the map plane: glyphs are spaced along the line
+/// in tile units, and the view only decides whether the text would read upside down.
+fn map_plane_poses(
+    layer: &SymbolLayerData,
+    line: &LineLabel,
+    feature: &Feature,
+    elevation: f32,
+    (view, projection, uniforms): (&ViewState, &ShaderProjectionData, &SymbolUniforms),
+) -> LinePoses {
+    let alignment = uniforms.text_layout;
     let placement = Placement {
         coords: layer.coords,
         anchor: [
@@ -140,10 +156,11 @@ pub(in crate::sdf) fn line_glyph_poses(
 /// curved label collides along its curve instead of through the box around all of it. The
 /// squares of neighbouring glyphs overlap and cover the text without gaps. A glyph that is an
 /// image, `image_sizes` giving its size at the 24-pixel em, collides by that size where it is
-/// larger: by its rectangle when it stands level on the screen, else by the square around it.
+/// larger: by its rectangle when the glyphs stand `upright` on the screen, else, turned with
+/// the line, by the square around it.
 pub(in crate::sdf) fn line_glyph_boxes(
     layer: &SymbolLayerData,
-    (poses, image_sizes): (&[GlyphPose], &[[f32; 2]]),
+    (poses, image_sizes, upright): (&[GlyphPose], &[[f32; 2]], bool),
     elevation: f32,
     view: &ViewState,
     projection: &ShaderProjectionData,
@@ -186,7 +203,7 @@ pub(in crate::sdf) fn line_glyph_boxes(
                 .copied()
                 .unwrap_or_default()
                 .map(|side| f64::from(side) / 24.0 * to_screen / 2.0);
-            let [half_x, half_y] = if pose.angle == 0.0 {
+            let [half_x, half_y] = if upright {
                 [width.max(text), height.max(text)]
             } else {
                 [width.max(height).max(text); 2]

@@ -257,12 +257,21 @@ impl TextTessellator {
     /// Whether a label with the same text already sits within `repeat_distance` of `point`; a
     /// label that does not is remembered.
     fn anchor_is_too_close(&mut self, point: [f64; 2], repeat_distance: f64) -> bool {
-        let Some(text) =
-            self.paint
-                .label_among(&self.properties, self.zoom, Some(&self.atlas.icons))
-        else {
+        let images = Some(&self.atlas.icons as &dyn crate::style::expression::ImageSet);
+        let Some(mut text) = self.paint.label_among(&self.properties, self.zoom, images) else {
             return false;
         };
+        // Images stand in the text as one placeholder each, so rows of different road shields
+        // would read as the same label; the images they show tell them apart.
+        for section in self
+            .paint
+            .label_sections_among(&self.properties, self.zoom, images)
+        {
+            if let Some(image) = section.image {
+                text.push('\u{0}');
+                text.push_str(&image);
+            }
+        }
         let others = self.line_anchors_by_text.entry(text).or_default();
         let too_close = others
             .iter()

@@ -244,7 +244,7 @@ impl LayerFrame<'_> {
         let (rectangles, glyph_boxes) = if shown {
             label_boxes(
                 (layer, feature, ground),
-                &line,
+                (&line, crate::sdf::paint::glyphs_stay_upright(self.paint)),
                 (view_state, projection, &self.uniforms),
             )
         } else {
@@ -319,7 +319,7 @@ impl LayerFrame<'_> {
 /// rectangle of such a text then surrounds those boxes, not the straight layout.
 fn label_boxes(
     (layer, feature, ground): (&crate::sdf::SymbolLayerData, &crate::sdf::Feature, f32),
-    line: &Option<LinePoses>,
+    (line, upright): (&Option<LinePoses>, bool),
     (view_state, projection, uniforms): (
         &crate::render::view_state::ViewState,
         &crate::render::projection::ShaderProjectionData,
@@ -340,7 +340,7 @@ fn label_boxes(
         .map_or(&[][..], |line| &line.image_sizes[..]);
     let glyphs = line_glyph_boxes(
         layer,
-        (poses, image_sizes),
+        (poses, image_sizes, upright),
         ground,
         view_state,
         projection,
