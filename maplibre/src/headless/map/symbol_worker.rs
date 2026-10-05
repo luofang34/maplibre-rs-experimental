@@ -17,6 +17,7 @@ use crate::{
     vector::{DefaultVectorTransferables, VectorPlugin},
 };
 
+mod anchor_depth;
 mod curve;
 mod geojson;
 mod globe_precision;
@@ -215,9 +216,14 @@ impl SymbolMap {
 
     /// A map fetching from `server`, which may already serve tiles.
     pub(super) async fn serving(style: Style, server: AssetServer) -> Self {
+        Self::serving_sized(style, server, [SIZE, SIZE]).await
+    }
+
+    /// A map fetching from `server` into a target of `size` device pixels.
+    pub(super) async fn serving_sized(style: Style, server: AssetServer, size: [u32; 2]) -> Self {
         let (kernel, renderer) = create_headless_renderer_with_loader(
-            SIZE,
-            SIZE,
+            size[0],
+            size[1],
             Default::default(),
             SharedLoader::new(server.clone()),
         )
@@ -287,9 +293,10 @@ impl SymbolMap {
     /// The RGBA pixels of the last frame.
     pub(super) fn read(&self) -> Vec<u8> {
         let texture = self.map.head_texture().expect("color");
+        let size = texture.size();
         let buffer = self.map.device().create_buffer(&wgpu::BufferDescriptor {
             label: Some("symbol worker pixels"),
-            size: u64::from(SIZE * SIZE * 4),
+            size: u64::from(size.width * size.height * 4),
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
         });
@@ -303,11 +310,11 @@ impl SymbolMap {
                 buffer: &buffer,
                 layout: wgpu::TexelCopyBufferLayout {
                     offset: 0,
-                    bytes_per_row: Some(SIZE * 4),
+                    bytes_per_row: Some(size.width * 4),
                     rows_per_image: None,
                 },
             },
-            texture.size(),
+            size,
         );
         self.map.queue().submit([encoder.finish()]);
         buffer
