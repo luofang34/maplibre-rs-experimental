@@ -31,14 +31,15 @@ impl ImageSet for NamesAsked {
     }
 }
 
-/// Adds the characters of a feature's label to the fonts that draw them.
+/// Adds the characters of a feature's label to the fonts that draw them, as the label reads
+/// with `images` held.
 fn glyphs(
     fonts: &mut GlyphRequests,
     paint: &crate::style::layer::SymbolPaint,
-    properties: &crate::style::expression::FeatureProperties,
-    zoom: f64,
+    (properties, zoom): (&crate::style::expression::FeatureProperties, f64),
+    images: &dyn ImageSet,
 ) {
-    let Some(text) = paint.label(properties, zoom) else {
+    let Some(text) = paint.label_among(properties, zoom, Some(images)) else {
         return;
     };
     fonts.entry(paint.font_stack()).or_default().extend(
@@ -48,7 +49,7 @@ fn glyphs(
     );
     // A section with a font of its own needs that font's glyphs for its characters.
     let mut characters = text.chars();
-    for section in paint.label_sections(properties, zoom) {
+    for section in paint.label_sections_among(properties, zoom, Some(images)) {
         let own: Vec<char> = characters.by_ref().take(section.length).collect();
         if let Some(font) = &section.font {
             fonts
@@ -108,21 +109,22 @@ pub(super) fn requests<'l>(
                     continue;
                 }
             }
-            glyphs(&mut fonts, paint, &properties, zoom);
+            // Every image the label or icon can reach is asked about, so each is requested.
             let asked = NamesAsked::default();
+            glyphs(&mut fonts, paint, (&properties, zoom), &asked);
             if let Some(icon) = paint
                 .text_among_images("icon-image", &properties, zoom, &asked)
                 .filter(|icon| !icon.is_empty())
             {
                 icons.insert(icon);
             }
-            icons.extend(asked.0.into_inner());
             icons.extend(
                 paint
-                    .label_sections(&properties, zoom)
+                    .label_sections_among(&properties, zoom, Some(&asked))
                     .into_iter()
                     .filter_map(|section| section.image),
             );
+            icons.extend(asked.0.into_inner());
         }
     }
     (fonts, icons)

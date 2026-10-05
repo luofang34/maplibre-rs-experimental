@@ -96,7 +96,7 @@ fn block<'a>(
     zoom: f64,
     atlas: &'a SymbolAtlas,
 ) -> Option<Block<'a>> {
-    let text = paint.label(&symbol.properties, zoom)?;
+    let text = paint.label_among(&symbol.properties, zoom, Some(&atlas.icons))?;
     let chars: Vec<char> = text.chars().collect();
     let styles = char_styles(paint, symbol, zoom, atlas, chars.len())?;
     let (mut chars, mut styles): (Vec<char>, Vec<_>) = chars

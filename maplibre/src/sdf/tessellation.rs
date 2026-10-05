@@ -15,7 +15,7 @@ use crate::{
     },
     style::{
         expression::FeatureProperties,
-        layer::{StyleProperty, SymbolPaint, TextField},
+        layer::{FormattedText, StyleProperty, SymbolPaint},
     },
     vector::tessellation::{property_value, IndexDataType},
 };
@@ -62,7 +62,7 @@ pub struct TextTessellator {
 
 impl TextTessellator {
     /// A text collector with the offline fallback font.
-    pub fn new(text_field: StyleProperty<TextField>, zoom: f64) -> Self {
+    pub fn new(text_field: StyleProperty<FormattedText>, zoom: f64) -> Self {
         Self {
             paint: SymbolPaint {
                 text_field: Some(text_field),
@@ -226,7 +226,10 @@ impl TextTessellator {
     ) {
         let ways = line
             .is_none()
-            .then(|| self.paint.label(&self.properties, self.zoom))
+            .then(|| {
+                self.paint
+                    .label_among(&self.properties, self.zoom, Some(&self.atlas.icons))
+            })
             .flatten()
             .and_then(|text| text_layout::both_orientations(&self.paint, &text));
         // A text that may be written both ways is laid out twice; the second shows when the
@@ -254,7 +257,10 @@ impl TextTessellator {
     /// Whether a label with the same text already sits within `repeat_distance` of `point`; a
     /// label that does not is remembered.
     fn anchor_is_too_close(&mut self, point: [f64; 2], repeat_distance: f64) -> bool {
-        let Some(text) = self.paint.label(&self.properties, self.zoom) else {
+        let Some(text) =
+            self.paint
+                .label_among(&self.properties, self.zoom, Some(&self.atlas.icons))
+        else {
             return false;
         };
         let others = self.line_anchors_by_text.entry(text).or_default();
@@ -416,7 +422,11 @@ impl FeatureProcessor for TextTessellator {
             match (line_placement(&self.paint), lines) {
                 // Lines that continue one another are merged once all of them are known.
                 (Some(LinePlacement::Line), Some(lines)) => {
-                    let text = self.paint.label(&self.properties, self.zoom);
+                    let text = self.paint.label_among(
+                        &self.properties,
+                        self.zoom,
+                        Some(&self.atlas.icons),
+                    );
                     for line in lines.into_iter().filter(|line| line.len() > 1) {
                         self.pending_lines.push(line_merge::PendingLine {
                             text: text.clone(),

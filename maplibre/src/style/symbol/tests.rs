@@ -116,7 +116,8 @@ fn an_image_in_a_format_is_a_placeholder_character_with_its_own_section() {
     assert_eq!(sections.len(), 2);
     assert_eq!(sections[0].image, None);
     assert_eq!(sections[1].image.as_deref(), Some("bus"));
-    assert_eq!(sections[1].scale, Some(2.0));
+    // As in GL JS, an image section keeps its own size; the font scale is for text.
+    assert_eq!(sections[1].scale, None);
     assert_eq!(sections[1].length, 1);
 }
 
@@ -142,7 +143,7 @@ fn a_formatted_text_field_survives_serialization() {
         _ => None,
     };
     assert_eq!(sections(&layer), sections(&again));
-    assert!(sections(&again).is_some_and(|field| field.1.len() == 3));
+    assert!(sections(&again).is_some_and(|field| field.0 .1.len() == 3));
 }
 
 #[test]

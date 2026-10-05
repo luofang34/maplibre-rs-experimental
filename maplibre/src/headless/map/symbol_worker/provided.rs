@@ -4,6 +4,7 @@
 
 mod arrival;
 mod cost;
+mod formatted;
 mod placement;
 
 use std::sync::{

@@ -22,16 +22,30 @@ impl SymbolPaint {
 
     /// Evaluates a string or token template property.
     pub fn text(&self, name: &str, properties: &FeatureProperties, zoom: f64) -> Option<String> {
-        let field = if name == "text-field" {
-            self.text_field.clone()
-        } else {
-            self.properties
-                .get(name)
-                .map(StyleProperty::<TextField>::parse)
-        };
-        field
+        if name == "text-field" {
+            return self.field(properties, zoom, None).map(|field| field.0);
+        }
+        self.properties
+            .get(name)
+            .map(StyleProperty::<TextField>::parse)
             .and_then(|value| value.evaluate_for(properties, zoom))
             .map(|text| text.0)
+    }
+
+    /// The text field, evaluated against `images` when given: what an `image` in it resolves
+    /// to, and so what a `coalesce` around it chooses, depends on the images the map holds.
+    fn field(
+        &self,
+        properties: &FeatureProperties,
+        zoom: f64,
+        images: Option<&dyn crate::style::expression::ImageSet>,
+    ) -> Option<TextField> {
+        let property = self.text_field.as_ref()?;
+        let context = crate::style::expression::EvaluationContext {
+            available_images: images,
+            ..crate::style::expression::EvaluationContext::for_feature(zoom, properties)
+        };
+        property.evaluate(&context).map(|text| text.0)
     }
 
     /// Evaluates a string or token template property that may name images, which `image`
@@ -97,7 +111,18 @@ impl SymbolPaint {
 
     /// Text transformed before both glyph requests and layout.
     pub fn label(&self, properties: &FeatureProperties, zoom: f64) -> Option<String> {
-        let (text, _) = self.shaped_field(properties, zoom)?;
+        self.label_among(properties, zoom, None)
+    }
+
+    /// [`Self::label`] with the images the map holds, which decide what an `image` in the
+    /// field resolves to.
+    pub fn label_among(
+        &self,
+        properties: &FeatureProperties,
+        zoom: f64,
+        images: Option<&dyn crate::style::expression::ImageSet>,
+    ) -> Option<String> {
+        let (text, _) = self.shaped_field(properties, zoom, images)?;
         let text = text.trim();
         (!text.is_empty()).then(|| text.to_string())
     }
@@ -109,8 +134,9 @@ impl SymbolPaint {
         &self,
         properties: &FeatureProperties,
         zoom: f64,
+        images: Option<&dyn crate::style::expression::ImageSet>,
     ) -> Option<(String, Vec<crate::style::property::TextSection>)> {
-        let text = self.text("text-field", properties, zoom)?;
+        let TextField(text, sections) = self.field(properties, zoom, images)?;
         let text = match self
             .properties
             .get("text-transform")
@@ -127,12 +153,6 @@ impl SymbolPaint {
                 text
             }
         };
-        let sections = self
-            .text_field
-            .as_ref()
-            .and_then(|field| field.evaluate_for(properties, zoom))
-            .map(|field| field.1)
-            .unwrap_or_default();
         let total: usize = sections.iter().map(|section| section.length).sum();
         // A case change that alters the length of the text leaves no way to tell which
         // characters belong to which section.
@@ -162,7 +182,17 @@ impl SymbolPaint {
         properties: &FeatureProperties,
         zoom: f64,
     ) -> Vec<crate::style::property::TextSection> {
-        let Some((text, sections)) = self.shaped_field(properties, zoom) else {
+        self.label_sections_among(properties, zoom, None)
+    }
+
+    /// [`Self::label_sections`] with the images the map holds.
+    pub fn label_sections_among(
+        &self,
+        properties: &FeatureProperties,
+        zoom: f64,
+        images: Option<&dyn crate::style::expression::ImageSet>,
+    ) -> Vec<crate::style::property::TextSection> {
+        let Some((text, sections)) = self.shaped_field(properties, zoom, images) else {
             return Vec::new();
         };
         if sections.is_empty() || text.trim().is_empty() {

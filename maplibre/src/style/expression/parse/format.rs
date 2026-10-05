@@ -1,13 +1,18 @@
-//! `["format", ...]`: text in sections that differ in size, colour and font, lowered to a
-//! string the text field reads back into its sections.
+//! `["format", ...]`: text in sections that differ in size, colour and font, any of which may
+//! be an image.
 //!
-//! Every section becomes its options and its text joined by control characters, and the whole
-//! starts with one more, so ordinary expressions (`concat`, `to-string`) carry the sections
-//! through an evaluation that only knows strings.
+//! The control characters below are the form a [`crate::style::property::TextField`] with
+//! sections is written in, so a layer serialized and parsed again keeps its sections.
 
-use serde_json::{json, Value as Json};
+use serde_json::Value as Json;
 
-/// Starts the lowered form of a formatted text.
+use super::{Parser, Result};
+use crate::style::expression::{
+    ast::{Expression, FormatSection},
+    value::Type,
+};
+
+/// Starts the written form of a formatted text.
 pub const FORMATTED_START: char = '\u{1}';
 /// Starts each section.
 pub const SECTION: char = '\u{2}';
@@ -16,58 +21,91 @@ pub const FIELD: char = '\u{3}';
 /// The character that stands for an image in the text of a section.
 pub const IMAGE_PLACEHOLDER: char = '\u{E000}';
 
-/// The expression a `format` with these arguments stands for, or what is wrong with them.
-pub(super) fn lower(args: &[Json]) -> Result<Json, String> {
-    if args.is_empty() {
-        return Err("Expected at least one argument, but found none.".to_owned());
+const VERTICAL_ALIGNMENTS: [&str; 3] = ["bottom", "center", "top"];
+
+impl Parser {
+    /// Parses the arguments of a `format` expression as GL JS does: each content, typed as any
+    /// value, may be followed by an object of options for its section.
+    pub(super) fn parse_format(&mut self, args: &[Json]) -> Result<Expression> {
+        match args.first() {
+            None => return Err(self.error("Expected at least one argument.")),
+            Some(Json::Object(_)) => {
+                return Err(self.error("First argument must be an image or text section."))
+            }
+            Some(_) => {}
+        }
+        let mut sections: Vec<FormatSection> = Vec::new();
+        let mut options_may_follow = false;
+        for (offset, arg) in args.iter().enumerate() {
+            let index = offset + 1;
+            match (arg, sections.last_mut()) {
+                (Json::Object(options), Some(_)) if options_may_follow => {
+                    options_may_follow = false;
+                    let parsed = self.parse_section_options(options, index)?;
+                    if let Some(section) = sections.last_mut() {
+                        (
+                            section.scale,
+                            section.font,
+                            section.color,
+                            section.vertical_align,
+                        ) = parsed;
+                    }
+                }
+                _ => {
+                    let content = self.parse_at(arg, index, Some(&Type::Value))?;
+                    let kind = content.output_type();
+                    if !matches!(
+                        kind,
+                        Type::String | Type::Value | Type::Null | Type::ResolvedImage
+                    ) {
+                        return Err(self.error(
+                            "Formatted text type must be 'string', 'value', 'image' or 'null'.",
+                        ));
+                    }
+                    options_may_follow = true;
+                    sections.push(FormatSection {
+                        content,
+                        scale: None,
+                        font: None,
+                        color: None,
+                        vertical_align: None,
+                    });
+                }
+            }
+        }
+        Ok(Expression::Format(sections))
     }
-    let mut parts = vec![json!("concat"), json!(FORMATTED_START.to_string())];
-    let mut rest = args;
-    while let Some((content, after)) = rest.split_first() {
-        let image = content
-            .is_array_with_operator("image")
-            .then(|| content.get(1).cloned())
-            .flatten();
-        let (options, after) = match after.split_first() {
-            Some((Json::Object(options), after)) => (Some(options), after),
-            _ => (None, after),
-        };
-        let field = |name: &str| {
+
+    #[allow(clippy::type_complexity)]
+    fn parse_section_options(
+        &mut self,
+        options: &serde_json::Map<String, Json>,
+        index: usize,
+    ) -> Result<(
+        Option<Expression>,
+        Option<Expression>,
+        Option<Expression>,
+        Option<Expression>,
+    )> {
+        let option = |parser: &mut Self, name: &str, expected: Type| {
             options
-                .and_then(|options| options.get(name))
-                .map_or_else(|| json!(""), |value| json!(["to-string", value]))
+                .get(name)
+                .map(|value| parser.parse_at(value, index, Some(&expected)))
+                .transpose()
         };
-        parts.push(json!([
-            "concat",
-            SECTION.to_string(),
-            field("font-scale"),
-            FIELD.to_string(),
-            field("text-color"),
-            FIELD.to_string(),
-            field("text-font"),
-            FIELD.to_string(),
-            if image.is_some() {
-                json!(IMAGE_PLACEHOLDER.to_string())
-            } else {
-                json!(["to-string", content])
-            },
-            FIELD.to_string(),
-            image.map_or_else(|| json!(""), |name| json!(["to-string", name])),
-        ]));
-        rest = after;
-    }
-    Ok(Json::Array(parts))
-}
-
-trait OperatorCheck {
-    fn is_array_with_operator(&self, operator: &str) -> bool;
-}
-
-impl OperatorCheck for Json {
-    fn is_array_with_operator(&self, operator: &str) -> bool {
-        self.as_array()
-            .and_then(|items| items.first())
-            .and_then(Json::as_str)
-            == Some(operator)
+        if let Some(Json::String(align)) = options.get("vertical-align") {
+            if !VERTICAL_ALIGNMENTS.contains(&align.as_str()) {
+                return Err(self.error(format!(
+                    "'vertical-align' must be one of: 'bottom', 'center', 'top' but found \
+                     '{align}' instead."
+                )));
+            }
+        }
+        Ok((
+            option(self, "font-scale", Type::Number)?,
+            option(self, "text-font", Type::array(Type::String, None))?,
+            option(self, "text-color", Type::Color)?,
+            option(self, "vertical-align", Type::String)?,
+        ))
     }
 }

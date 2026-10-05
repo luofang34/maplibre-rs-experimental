@@ -24,6 +24,10 @@ pub enum PropertyKind {
     Color,
     /// One of a fixed set of strings.
     Enum(Vec<String>),
+    /// Text in sections, any of which may be an image: what `text-field` holds.
+    Formatted,
+    /// An image name, with whether the map holds the image.
+    ResolvedImage,
     /// An array of one item kind, with a fixed length when given.
     Array {
         /// Kind of every item.
@@ -42,13 +46,16 @@ impl PropertyKind {
             Self::String | Self::Enum(_) => Type::String,
             Self::Boolean => Type::Boolean,
             Self::Color => Type::Color,
+            Self::Formatted => Type::Formatted,
+            Self::ResolvedImage => Type::ResolvedImage,
             Self::Array { item, length } => Type::array(item.expected_type(), *length),
         }
     }
 
     fn assertion_name(&self) -> &'static str {
         match self {
-            Self::Value => "coalesce",
+            // The root annotation turns whatever the function reads into the property's type.
+            Self::Value | Self::Formatted | Self::ResolvedImage => "coalesce",
             Self::Number => "number",
             Self::String | Self::Enum(_) => "string",
             Self::Boolean => "boolean",

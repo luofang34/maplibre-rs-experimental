@@ -204,7 +204,44 @@ impl TextField {
         encoded
     }
 
-    /// Reads the text a `format` expression lowered to, or a plain string as it is.
+    /// The text and sections of formatted text. An image section stands in the text as one
+    /// [`crate::style::expression::FORMAT_IMAGE`] character, whether or not the map holds it
+    /// yet; layout draws it once it does.
+    pub fn from_formatted(formatted: &crate::style::expression::Formatted) -> Self {
+        let mut plain = String::new();
+        let mut sections = Vec::with_capacity(formatted.sections.len());
+        for section in &formatted.sections {
+            let text = match &section.image {
+                Some(_) => crate::style::expression::FORMAT_IMAGE.to_string(),
+                None => section.text.clone(),
+            };
+            plain.push_str(&text);
+            sections.push(TextSection {
+                length: text.chars().count(),
+                scale: section.scale.map(|scale| scale as f32),
+                color: section
+                    .color
+                    .map(|color| color.straight().map(|channel| channel as f32)),
+                font: section
+                    .font
+                    .as_ref()
+                    .filter(|fonts| !fonts.is_empty())
+                    .map(|fonts| fonts.join(",")),
+                image: section.image.as_ref().map(|image| image.name.clone()),
+            });
+        }
+        if sections.iter().all(|section| {
+            section.scale.is_none()
+                && section.color.is_none()
+                && section.font.is_none()
+                && section.image.is_none()
+        }) {
+            return Self::plain(plain);
+        }
+        Self(plain, sections)
+    }
+
+    /// Reads the written form of a text with sections, or a plain string as it is.
     fn decode(text: &str) -> Self {
         use crate::style::expression::{FORMATTED_START, FORMAT_FIELD, FORMAT_SECTION};
 
@@ -262,7 +299,75 @@ impl PropertyValue for TextField {
     }
 
     fn from_value(value: &Value) -> Option<Self> {
-        value.as_str().map(Self::decode)
+        match value {
+            Value::String(text) => Some(Self::decode(text)),
+            // A string property such as `icon-image` names an image by its name.
+            Value::Image(image) => Some(Self::plain(image.name.clone())),
+            Value::Formatted(formatted) => Some(Self::plain(formatted.text())),
+            _ => None,
+        }
+    }
+}
+
+/// The text of `text-field`: a [`TextField`] evaluated as formatted text, so the sections and
+/// images a `case`, `match` or `coalesce` inside a `format` chooses stay sections and images.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct FormattedText(pub TextField);
+
+/// Text with sections is written as the `format` expression that makes it, so a layer that is
+/// serialized and parsed again keeps its sections and images.
+impl Serialize for FormattedText {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let TextField(text, sections) = &self.0;
+        if sections.is_empty() {
+            return serializer.serialize_str(text);
+        }
+        let mut format = vec![serde_json::json!("format")];
+        let mut characters = text.chars();
+        for section in sections {
+            let content: String = characters.by_ref().take(section.length).collect();
+            let Some(image) = &section.image else {
+                let mut options = serde_json::Map::new();
+                if let Some(scale) = section.scale {
+                    options.insert("font-scale".into(), serde_json::json!(scale));
+                }
+                if let Some([r, g, b, a]) = section.color {
+                    let color = csscolorparser::Color::new(r.into(), g.into(), b.into(), a.into());
+                    options.insert("text-color".into(), color.to_hex_string().into());
+                }
+                if let Some(font) = &section.font {
+                    let fonts: Vec<&str> = font.split(',').collect();
+                    options.insert("text-font".into(), serde_json::json!(["literal", fonts]));
+                }
+                format.extend([
+                    serde_json::json!(content),
+                    serde_json::Value::Object(options),
+                ]);
+                continue;
+            };
+            format.push(serde_json::json!(["image", image]));
+        }
+        serde_json::Value::Array(format).serialize(serializer)
+    }
+}
+
+impl PropertyValue for FormattedText {
+    fn spec() -> LegacyPropertySpec {
+        LegacyPropertySpec {
+            kind: PropertyKind::Formatted,
+            interpolated: false,
+            default: None,
+            tokens: true,
+        }
+    }
+
+    fn from_value(value: &Value) -> Option<Self> {
+        match value {
+            Value::Formatted(formatted) => Some(Self(TextField::from_formatted(formatted))),
+            // The written form of a text field with sections reads back into them.
+            Value::String(text) => Some(Self(TextField::decode(text))),
+            _ => None,
+        }
     }
 }
 

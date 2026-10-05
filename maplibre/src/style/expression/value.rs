@@ -5,6 +5,9 @@ use std::{collections::BTreeMap, fmt};
 
 use super::collation::Collation;
 
+mod formatted;
+pub use formatted::{Formatted, FormattedSection, ResolvedImage};
+
 /// A colour with straight (not premultiplied) components in `0..=1`.
 ///
 /// GL JS stores colours premultiplied; [`Color::premultiplied`] gives that form, which is also
@@ -87,6 +90,10 @@ pub enum Value {
     Object(BTreeMap<String, Value>),
     /// How strings compare, made by `collator`.
     Collator(Collation),
+    /// An image an `image` expression names.
+    Image(ResolvedImage),
+    /// Text in sections, made by `format`.
+    Formatted(Formatted),
 }
 
 impl Value {
@@ -140,6 +147,8 @@ impl Value {
                     .collect(),
             ),
             Self::Collator(_) => serde_json::Value::Null,
+            Self::Image(image) => image.to_json(),
+            Self::Formatted(formatted) => formatted.to_json(),
         }
     }
 
@@ -153,6 +162,8 @@ impl Value {
             Self::Color(_) => Type::Color,
             Self::Object(_) => Type::Object,
             Self::Collator(_) => Type::Collator,
+            Self::Image(_) => Type::ResolvedImage,
+            Self::Formatted(_) => Type::Formatted,
             Self::Array(items) => {
                 let mut item_type: Option<Type> = None;
                 for item in items {
@@ -207,7 +218,12 @@ impl Value {
             Self::Bool(flag) => *flag,
             Self::Number(number) => *number != 0.0 && !number.is_nan(),
             Self::String(text) => !text.is_empty(),
-            Self::Color(_) | Self::Array(_) | Self::Object(_) | Self::Collator(_) => true,
+            Self::Color(_)
+            | Self::Array(_)
+            | Self::Object(_)
+            | Self::Collator(_)
+            | Self::Image(_)
+            | Self::Formatted(_) => true,
         }
     }
 
@@ -221,6 +237,8 @@ impl Value {
             Self::Color(color) => color.css(),
             Self::Array(_) | Self::Object(_) => self.to_json().to_string(),
             Self::Collator(_) => String::new(),
+            Self::Image(image) => image.name.clone(),
+            Self::Formatted(formatted) => formatted.text(),
         }
     }
 }
@@ -301,6 +319,10 @@ pub enum Type {
     Object,
     /// A string comparison rule.
     Collator,
+    /// An image name and whether the map holds it.
+    ResolvedImage,
+    /// Text in sections.
+    Formatted,
     /// Any value; the type of a property read or an untyped branch.
     Value,
     /// An array, with an item type and, when known, a length.
@@ -352,6 +374,8 @@ impl Type {
             Self::Color => "color".to_string(),
             Self::Object => "object".to_string(),
             Self::Collator => "collator".to_string(),
+            Self::ResolvedImage => "resolvedImage".to_string(),
+            Self::Formatted => "formatted".to_string(),
             Self::Value => "value".to_string(),
             Self::Array { item, length } => match (item.as_ref(), length) {
                 (_, Some(length)) => format!("array<{}, {length}>", item.name()),

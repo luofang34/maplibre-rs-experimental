@@ -60,7 +60,7 @@ pub(super) fn char_styles<'a>(
     count: usize,
 ) -> Option<Vec<CharStyle<'a>>> {
     let default = glyphs_for(atlas, paint, None)?;
-    let sections = paint.label_sections(&symbol.properties, zoom);
+    let sections = paint.label_sections_among(&symbol.properties, zoom, Some(&atlas.icons));
     let text_size = paint
         .text_size
         .as_ref()

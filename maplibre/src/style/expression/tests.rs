@@ -379,9 +379,12 @@ fn an_image_expression_falls_through_to_the_first_image_that_exists() {
 
     assert_eq!(
         expression.evaluate(&context).expect("evaluates"),
-        Value::from("rocket")
+        Value::Image(crate::style::expression::ResolvedImage {
+            name: "rocket".to_owned(),
+            available: true
+        })
     );
-    // Without a set of images every one is taken to exist.
+    // Without a set of images none is held, so the first image asked for is named.
     assert_eq!(
         expression
             .evaluate(&EvaluationContext::for_feature(0.0, &properties))

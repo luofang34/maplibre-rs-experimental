@@ -74,7 +74,9 @@ pub(super) fn append(
     let start = buffer.indices.len();
     let first_vertex = buffer.vertices.len();
     let mut icon_padding = 0.0_f32;
-    let text = paint.label(&symbol.properties, zoom).unwrap_or_default();
+    let text = paint
+        .label_among(&symbol.properties, zoom, Some(&atlas.icons))
+        .unwrap_or_default();
     if let Some(icon) = paint
         .text_among_images("icon-image", &symbol.properties, zoom, &atlas.icons)
         .and_then(|name| atlas.icons.get(&name))

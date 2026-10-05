@@ -5,6 +5,9 @@ use super::{
     value::{Type, Value},
 };
 
+mod format;
+pub use format::FormatSection;
+
 /// A property of the map as a whole, the same for every feature.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Global {
@@ -126,6 +129,10 @@ pub enum Coercion {
     Boolean,
     /// `to-color`
     Color,
+    /// Text into one section of formatted text, as a `text-field` takes it.
+    Formatted,
+    /// A name into an image, as an image property takes it.
+    ResolvedImage,
 }
 
 /// One-operand string functions.
@@ -317,8 +324,10 @@ pub enum Expression {
         /// Candidates in order.
         operands: Vec<Expression>,
     },
-    /// An image by name: the name when the image is available, null otherwise.
+    /// An image by name, with whether the map holds it.
     Image(Box<Expression>),
+    /// `format`: text in sections, each of which may be an image.
+    Format(Vec<FormatSection>),
     /// `to-number`, `to-string`, `to-boolean` and `to-color`.
     Coerce {
         /// Conversion.
@@ -401,14 +410,17 @@ impl Expression {
             | Self::Concat(_)
             | Self::StringCase { .. }
             | Self::ResolvedLocale(_)
-            | Self::NumberFormat { .. }
-            | Self::Image(_) => Type::String,
+            | Self::NumberFormat { .. } => Type::String,
+            Self::Image(_) => Type::ResolvedImage,
+            Self::Format(_) => Type::Formatted,
             Self::Assert { required, .. } => required.clone(),
             Self::Coerce { coercion, .. } => match coercion {
                 Coercion::Number => Type::Number,
                 Coercion::String => Type::String,
                 Coercion::Boolean => Type::Boolean,
                 Coercion::Color => Type::Color,
+                Coercion::Formatted => Type::Formatted,
+                Coercion::ResolvedImage => Type::ResolvedImage,
             },
             Self::ToRgba(_) => Type::array(Type::Number, Some(4)),
             Self::Rgba(_) => Type::Color,
@@ -534,6 +546,7 @@ impl Expression {
                     visit(output);
                 }
             }
+            Self::Format(sections) => sections.iter().for_each(|section| section.for_each(visit)),
         }
     }
 
