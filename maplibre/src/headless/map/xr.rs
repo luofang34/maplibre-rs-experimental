@@ -50,9 +50,17 @@ pub enum XrFrameError {
 }
 
 impl HeadlessMap {
-    /// Resize the render attachments and viewport without discarding supplied tiles.
+    /// Resize the render attachments and viewport without discarding supplied tiles. The
+    /// display keeps the pixel ratio [`Self::set_pixel_ratio`] gave it, so the viewport is the
+    /// new size in layout pixels.
     pub fn resize(&mut self, size: crate::window::PhysicalSize) {
-        self.map_context.resize(size, 1.0);
+        let ratio = self
+            .map_context
+            .world
+            .resources
+            .get::<crate::sdf::provided::DisplayPixelRatio>()
+            .map_or(1.0, |ratio| f64::from(ratio.0));
+        self.map_context.resize(size, ratio);
     }
 
     /// Draws every eye of the frame into its own target, from the placement the host chose.
