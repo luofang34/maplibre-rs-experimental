@@ -115,6 +115,14 @@ async fn markers_stay_visible_as_the_view_and_the_display_change() {
         let pixels = map.settle().await;
         let texture = map.map.head_texture().expect("color").size();
         let size = [texture.width, texture.height];
+        let view = map.map.view_state();
+        assert!(
+            (view.width() * ratio - f64::from(size[0])).abs() < 1.0
+                && (view.height() * ratio - f64::from(size[1])).abs() < 1.0,
+            "after {step}, the {size:?} target is {} x {} layout pixels at {ratio}x",
+            view.width(),
+            view.height()
+        );
         let seen = seen_points(&map, &points, size, ratio);
         let anchors: Vec<[f64; 2]> = seen.iter().map(|(at, _)| *at).collect();
         let counts = counts_near(&pixels, size[0], &anchors, &SEEN.colours);

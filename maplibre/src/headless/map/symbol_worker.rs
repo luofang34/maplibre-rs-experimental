@@ -294,6 +294,11 @@ impl SymbolMap {
     pub(super) fn read(&self) -> Vec<u8> {
         let texture = self.map.head_texture().expect("color");
         let size = texture.size();
+        assert!(
+            (size.width * 4) % wgpu::COPY_BYTES_PER_ROW_ALIGNMENT == 0,
+            "a readback row of a {}-pixel-wide target is not aligned for a texture copy",
+            size.width
+        );
         let buffer = self.map.device().create_buffer(&wgpu::BufferDescriptor {
             label: Some("symbol worker pixels"),
             size: u64::from(size.width * size.height * 4),
