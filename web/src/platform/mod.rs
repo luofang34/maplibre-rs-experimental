@@ -1,10 +1,9 @@
 use std::sync::OnceLock;
 
+pub use maplibre::platform::http_client;
 use maplibre::sdf::assets::ImageProviders;
 
 use crate::WHATWGOffscreenKernelEnvironment;
-
-pub use maplibre::platform::http_client;
 
 /// The providers of images that labels name and no sprite supplies, for every map and worker
 /// of this WebAssembly module. Workers of a single-threaded build run their own copy of the

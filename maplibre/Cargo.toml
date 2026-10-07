@@ -124,6 +124,10 @@ name = "web_local_scheduler"
 required-features = ["headless"]
 
 [[test]]
+name = "web_sources"
+required-features = ["headless"]
+
+[[test]]
 name = "web_host_gpu_render"
 required-features = ["headless", "raster"]
 
