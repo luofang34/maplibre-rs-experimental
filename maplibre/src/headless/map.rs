@@ -63,6 +63,8 @@ pub use processed::{
 };
 pub use xr::XrFrameError;
 
+pub use crate::io::tile_json::resolve_tile_json_sources;
+
 /// A headless frame advances the frame clock by a nominal 60 Hz interval, so animated
 /// properties progress the same way in every run.
 const HEADLESS_FRAME_INTERVAL: Duration = Duration::from_millis(16);
@@ -77,6 +79,10 @@ pub struct HeadlessMap {
 impl HeadlessMap {
     /// Initializes the view from the style and builds plugins in their supplied order.
     /// The renderer and host kernel must already be initialized.
+    ///
+    /// Sources that name a TileJSON `url` draw nothing until it is resolved; await
+    /// [`resolve_tile_json_sources`] with the kernel's [`Kernel::source_client`] first. It needs
+    /// no blocking executor, so a browser host awaits it in its async startup.
     pub fn new(
         mut style: Style,
         mut renderer: Renderer,
