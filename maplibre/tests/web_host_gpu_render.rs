@@ -1,5 +1,5 @@
-//! A headless map on the page's WebGPU device fetches OpenFreeMap tiles and draws them. Needs
-//! the network; run with `CHROMEDRIVER=<path> cargo test -p maplibre --target
+//! A headless map on the page's WebGPU device fetches tiles and draws them. Needs the network;
+//! run with `CHROMEDRIVER=<path> cargo test -p maplibre --target
 //! wasm32-unknown-unknown --features headless --test web_host_gpu_render`.
 #![cfg(target_arch = "wasm32")]
 
@@ -12,12 +12,14 @@ use maplibre::{
         create_headless_renderer_on_host_gpu,
         map::{resolve_tile_json_sources, HeadlessMap},
     },
-    io::source_client::HttpClient,
+    hillshade::HillshadePlugin,
+    io::{source_client::HttpClient, tile_retry::RequestKind},
     platform::http_client::web_http_client,
     plugin::Plugin,
     raster::{DefaultRasterTransferables, RasterPlugin},
-    render::{host_gpu::HostGpu, RenderPlugin},
+    render::{frame_signals::ResourceReady, host_gpu::HostGpu, RenderPlugin},
     style::Style,
+    terrain::{DefaultDemTransferables, TerrainPlugin},
     vector::{DefaultVectorTransferables, VectorPlugin},
 };
 use wasm_bindgen::{closure::Closure, JsCast};
@@ -102,8 +104,22 @@ async fn read_pixels(map: &HeadlessMap) -> Vec<[u8; 4]> {
     pixels
 }
 
-#[wasm_bindgen_test]
-async fn openfreemap_tiles_reach_a_map_on_the_page_gpu() {
+/// Draws frames on the page's animation frames until the map has nothing left to load, and
+/// returns how many it drew and the resources reported ready.
+async fn settle(map: &mut HeadlessMap) -> (usize, Vec<ResourceReady>) {
+    let mut frames = 0;
+    let mut ready = Vec::new();
+    while frames < 600 && (frames == 0 || map.needs_redraw()) {
+        map.run_frame()
+            .expect("a frame with tiles in flight or failed succeeds");
+        ready.extend(map.take_ready_resources());
+        frames += 1;
+        next_animation_frame().await;
+    }
+    (frames, ready)
+}
+
+async fn openfreemap_map() -> HeadlessMap {
     let body = web_http_client()
         .fetch(STYLE_URL)
         .await
@@ -128,20 +144,119 @@ async fn openfreemap_tiles_reach_a_map_on_the_page_gpu() {
         Box::new(VectorPlugin::<DefaultVectorTransferables>::default()),
         Box::new(RasterPlugin::<DefaultRasterTransferables>::default()),
     ];
-    let mut map = HeadlessMap::new(style, renderer, kernel, plugins).expect("map");
+    HeadlessMap::new(style, renderer, kernel, plugins).expect("map")
+}
 
-    let mut frames = 0;
-    while frames < 600 && (frames == 0 || map.needs_redraw()) {
-        map.run_frame()
-            .expect("a frame with tiles in flight succeeds");
-        frames += 1;
-        next_animation_frame().await;
-    }
+async fn colours(map: &HeadlessMap) -> usize {
+    read_pixels(map)
+        .await
+        .into_iter()
+        .collect::<HashSet<[u8; 4]>>()
+        .len()
+}
 
-    let colors: HashSet<[u8; 4]> = read_pixels(&map).await.into_iter().collect();
+#[wasm_bindgen_test]
+async fn openfreemap_tiles_reach_a_map_on_the_page_gpu() {
+    let mut map = openfreemap_map().await;
+    let (frames, _) = settle(&mut map).await;
+
+    let colours = colours(&map).await;
     assert!(
-        colors.len() > 16,
-        "roads and water draw over the background after {frames} frames: {} colours",
-        colors.len()
+        colours > 16,
+        "roads and water draw over the background after {frames} frames: {colours} colours"
+    );
+}
+
+#[wasm_bindgen_test]
+async fn a_source_the_browser_refuses_is_reported_per_tile_without_failing_the_frame() {
+    let mut style: Style = serde_json::from_value(serde_json::json!({
+        "version": 8, "center": [4.9, 52.372], "zoom": 3,
+        "sources": {"refused": {"type": "vector",
+            "tiles": ["https://example.com/refused/{z}/{x}/{y}.pbf"]}},
+        "layers": [
+            {"id": "bg", "type": "background"},
+            {"id": "refused", "type": "line", "source": "refused", "source-layer": "roads"}
+        ]
+    }))
+    .expect("refused style");
+    let (kernel, renderer) = create_headless_renderer_on_host_gpu(
+        SIZE,
+        SIZE,
+        page_gpu().await,
+        Default::default(),
+        None,
+    )
+    .expect("renderer");
+    resolve_tile_json_sources(&mut style, kernel.source_client()).await;
+    let plugins: Vec<Box<dyn Plugin<_>>> = vec![
+        Box::new(RenderPlugin),
+        Box::new(BackgroundPlugin),
+        Box::new(VectorPlugin::<DefaultVectorTransferables>::default()),
+    ];
+    let mut map = HeadlessMap::new(style, renderer, kernel, plugins).expect("map");
+    let (frames, ready) = settle(&mut map).await;
+
+    assert!(
+        ready.iter().any(|resource| matches!(
+            resource,
+            ResourceReady::Tile {
+                kind: RequestKind::Vector,
+                loaded: false,
+                ..
+            }
+        )),
+        "the refused tiles are reported failed within {frames} frames: {ready:?}"
+    );
+}
+
+#[wasm_bindgen_test]
+async fn terrarium_elevation_shades_and_raises_a_map_on_the_page_gpu() {
+    let mut style: Style = serde_json::from_value(serde_json::json!({
+        "version": 8,
+        "center": [7.6586, 45.9763], "zoom": 11, "pitch": 60,
+        "sources": {"dem": {"type": "raster-dem", "encoding": "terrarium", "tileSize": 256,
+            "maxzoom": 14,
+            "tiles": ["https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"]}},
+        "terrain": {"source": "dem", "exaggeration": 1.5},
+        "layers": [
+            {"id": "bg", "type": "background", "paint": {"background-color": "#e0e0d0"}},
+            {"id": "shade", "type": "hillshade", "source": "dem"}
+        ]
+    }))
+    .expect("terrain style");
+    let (kernel, renderer) = create_headless_renderer_on_host_gpu(
+        SIZE,
+        SIZE,
+        page_gpu().await,
+        Default::default(),
+        None,
+    )
+    .expect("renderer");
+    resolve_tile_json_sources(&mut style, kernel.source_client()).await;
+    let plugins: Vec<Box<dyn Plugin<_>>> = vec![
+        Box::new(RenderPlugin),
+        Box::new(BackgroundPlugin),
+        Box::new(RasterPlugin::<DefaultRasterTransferables>::default()),
+        Box::new(TerrainPlugin::<DefaultDemTransferables>::default()),
+        Box::new(HillshadePlugin),
+    ];
+    let mut map = HeadlessMap::new(style, renderer, kernel, plugins).expect("map");
+    let (frames, ready) = settle(&mut map).await;
+
+    assert!(
+        ready.iter().any(|resource| matches!(
+            resource,
+            ResourceReady::Tile {
+                kind: RequestKind::Dem,
+                loaded: true,
+                ..
+            }
+        )),
+        "an elevation tile loads after {frames} frames"
+    );
+    let colours = colours(&map).await;
+    assert!(
+        colours > 16,
+        "hillshade shades the Matterhorn after {frames} frames: {colours} colours"
     );
 }
