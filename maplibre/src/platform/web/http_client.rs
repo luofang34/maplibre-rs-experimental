@@ -19,6 +19,18 @@ pub enum FetchError {
     /// JavaScript threw or rejected; a network or CORS failure surfaces as a `TypeError` here.
     #[error("JavaScript error: {0}")]
     Js(Cow<'static, str>),
+    /// `fetch` rejected without a response. Browsers report a refused connection, an offline
+    /// page and a response the server's CORS headers withhold from this origin alike.
+    #[error(
+        "no response from {url} ({reason}): the network failed or the server does not allow \
+         this origin (CORS)"
+    )]
+    Network {
+        /// The requested resource.
+        url: String,
+        /// What JavaScript reported.
+        reason: Cow<'static, str>,
+    },
     /// The value JavaScript returned is not the type `fetch` promises.
     #[error("unexpected fetch value: {0}")]
     InvalidResponse(&'static str),
@@ -32,14 +44,18 @@ pub enum FetchError {
     },
 }
 
+/// What a thrown or rejected JavaScript value says about itself.
+fn js_message(value: &JsValue) -> Cow<'static, str> {
+    value
+        .dyn_ref::<js_sys::Error>()
+        .and_then(|error| error.message().as_string())
+        .or_else(|| value.as_string())
+        .map_or(Cow::Borrowed("unknown JavaScript value"), Cow::Owned)
+}
+
 impl From<JsValue> for FetchError {
     fn from(value: JsValue) -> Self {
-        let message = value
-            .dyn_ref::<js_sys::Error>()
-            .and_then(|error| error.message().as_string())
-            .or_else(|| value.as_string())
-            .map_or(Cow::Borrowed("unknown JavaScript value"), Cow::Owned);
-        Self::Js(message)
+        Self::Js(js_message(&value))
     }
 }
 
@@ -89,7 +105,13 @@ impl WHATWGFetchHttpClient {
         };
         let response: Response = JsFuture::from(promise)
             .await
-            .map_err(|error| SourceFetchError::temporary(FetchError::from(error)))?
+            .map_err(|error| {
+                // Retried like any transient failure; a CORS refusal costs a backed-off retry.
+                SourceFetchError::temporary(FetchError::Network {
+                    url: url.to_owned(),
+                    reason: js_message(&error),
+                })
+            })?
             .dyn_into()
             .map_err(|_| invalid_response("not a Response"))?;
         if response.status() == 404 {
