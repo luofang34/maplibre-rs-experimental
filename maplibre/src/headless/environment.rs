@@ -27,8 +27,13 @@ impl Environment for HeadlessEnvironment {
     type OffscreenKernelEnvironment = ReqwestOffscreenKernelEnvironment;
 }
 
+mod loader_kernel;
+mod supplied;
 #[cfg(target_arch = "wasm32")]
 mod web;
+
+pub use loader_kernel::LoaderKernel;
+pub use supplied::SuppliedTileClient;
 #[cfg(target_arch = "wasm32")]
 pub(super) use web::create_kernel;
 #[cfg(target_arch = "wasm32")]

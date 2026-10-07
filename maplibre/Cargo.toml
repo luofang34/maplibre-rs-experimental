@@ -37,6 +37,12 @@ http-cache-reqwest.workspace = true
 reqwest-middleware.workspace = true
 tracing-tracy = { workspace = true, optional = true }
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen.workspace = true
+wasm-bindgen-futures.workspace = true
+js-sys.workspace = true
+web-sys = { workspace = true, features = ["Request", "RequestInit", "Response", "Headers", "Window", "WorkerGlobalScope"] }
+
 [target.'cfg(target_os = "android")'.dependencies]
 reqwest.workspace = true
 
@@ -105,9 +111,21 @@ prost = "0.13.1"
 # Shaders stay WGSL; a native render node gets them through naga's own backends.
 naga = { workspace = true, features = ["msl-out", "spv-out"] }
 
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test.workspace = true
+web-sys = { workspace = true, features = ["Window"] }
+
 [[test]]
 name = "headless_symbol_render"
 required-features = ["headless"]
+
+[[test]]
+name = "web_local_scheduler"
+required-features = ["headless"]
+
+[[test]]
+name = "web_host_gpu_render"
+required-features = ["headless", "raster"]
 
 [build-dependencies]
 maplibre-build-tools = { path = "../maplibre-build-tools", version = "0.1.0" }
