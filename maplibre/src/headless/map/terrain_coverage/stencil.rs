@@ -74,6 +74,15 @@ async fn map_with(
         msaa: Msaa { samples },
         ..Default::default()
     };
+    map_with_settings(style, processed, settings, coords).await
+}
+
+async fn map_with_settings(
+    style: Style,
+    processed: ProcessedLayers,
+    settings: RendererSettings,
+    coords: WorldTileCoords,
+) -> HeadlessMap {
     let (kernel, renderer) = create_headless_renderer_with_settings(SIZE, SIZE, None, settings)
         .await
         .expect("renderer");

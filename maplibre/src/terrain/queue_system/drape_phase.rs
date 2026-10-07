@@ -14,7 +14,6 @@ use crate::{
     tcs::tiles::Tile,
     terrain::{
         drape_targets::TargetSpec,
-        resources::DRAPE_SIZE,
         rtt::{drape_transform, EDGE_OVERLAP},
         DrapePhase, DrapeTarget,
     },
@@ -30,13 +29,14 @@ pub(super) fn drape_metadata(
     redraw: &[bool],
     capacity: usize,
     view_zoom: Zoom,
+    drape_size: u32,
 ) -> (Vec<ShaderTileMetadata>, Vec<TargetSlots>) {
     let mut metadata = Vec::new();
     let mut slots = Vec::with_capacity(specs.len());
     let mut skipped = 0_usize;
     for (spec, redraw) in specs.iter().zip(redraw) {
         let texture_zoom = Zoom::new(
-            f64::from(u8::from(spec.coords.z)) + (f64::from(DRAPE_SIZE) / TILE_SIZE).log2(),
+            f64::from(u8::from(spec.coords.z)) + (f64::from(drape_size) / TILE_SIZE).log2(),
         );
         let mut target_slots = Vec::with_capacity(spec.shapes.len());
         for shape in &spec.shapes {
@@ -57,8 +57,8 @@ pub(super) fn drape_metadata(
             metadata.push(ShaderTileMetadata {
                 transform: transform.into(),
                 zoom_factor: texture_zoom.scale_to_tile(&shape.source) as f32,
-                viewport_width: DRAPE_SIZE as f32,
-                viewport_height: DRAPE_SIZE as f32,
+                viewport_width: drape_size as f32,
+                viewport_height: drape_size as f32,
                 tile_mercator_coords: tile_mercator_coordinates(
                     shape.source.into_tile(TileAddressingScheme::XYZ),
                 )
