@@ -214,3 +214,39 @@ async fn globe_water_survives_dem_children_and_border_masks() {
         }
     }
 }
+
+#[tokio::test]
+async fn a_smaller_drape_paints_the_same_ground_in_less_memory() {
+    use crate::{
+        render::eventually::Eventually::Initialized,
+        terrain::resources::{TerrainResources, DRAPE_SIZE},
+    };
+    let style = water_style(true);
+    let processed = process(&polygon("water", 4096), &style.layers[2], target());
+    let settings = RendererSettings {
+        terrain_drape_size: 512,
+        ..Default::default()
+    };
+    let map = map_with_settings(style, processed, settings, target()).await;
+    let Some(Initialized(terrain)) =
+        map.map_context
+            .world
+            .resources
+            .get::<crate::render::eventually::Eventually<TerrainResources>>()
+    else {
+        panic!("terrain resources");
+    };
+    assert_eq!(terrain.drape_size(), 512);
+    let (drapes, _) = terrain.texture_bytes();
+    let one = 512 * 512 * 4 * 4 / 3;
+    assert!(
+        drapes >= one && drapes % one == 0,
+        "{drapes} bytes of drapes"
+    );
+    // A sixteenth of the default drape's texels.
+    assert!(one * 15 < (DRAPE_SIZE as usize).pow(2) * 4 * 4 / 3);
+    assert_color(
+        &read_stencil_blocking(&map, "stencil-small-drape"),
+        [0, 0, 255, 255],
+    );
+}

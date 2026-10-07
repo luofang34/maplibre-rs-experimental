@@ -77,6 +77,7 @@ pub fn resource_system(
             surface.surface_format(),
             settings.depth_texture_format,
             msaa,
+            settings.terrain_drape_size,
         )
     });
     Ok(())

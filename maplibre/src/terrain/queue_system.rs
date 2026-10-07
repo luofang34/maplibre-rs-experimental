@@ -509,7 +509,11 @@ fn encode_drapes(
         _ => return Err(SystemError::Dependencies),
     };
 
-    let (metadata, slots) = drape_metadata(specs, redraw, capacity, zoom);
+    let drape_size = match world.resources.get::<Eventually<TerrainResources>>() {
+        Some(Initialized(terrain)) => terrain.drape_size(),
+        _ => return Err(SystemError::Dependencies),
+    };
+    let (metadata, slots) = drape_metadata(specs, redraw, capacity, zoom, drape_size);
     let ranges = {
         let Some(Initialized(pattern)) =
             world.resources.get_mut::<Eventually<WgpuTileViewPattern>>()

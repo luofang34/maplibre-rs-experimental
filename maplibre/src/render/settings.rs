@@ -154,6 +154,11 @@ pub struct RendererSettings {
     pub depth_texture_format: TextureFormat,
     /// Present mode for surfaces if a surface is used.
     pub present_mode: PresentMode,
+    /// Edge, in pixels, of the texture each terrain tile's map is drawn into. Each texture
+    /// costs four bytes a texel and a third more for mipmaps, so the default of
+    /// [`DRAPE_SIZE`](crate::terrain::resources::DRAPE_SIZE) holds about 21 MiB a tile; a
+    /// phone, which shares its memory with the GPU, keeps more tiles in less.
+    pub terrain_drape_size: u32,
     /// Draws every layer fragment as an equal step of grey added to what is below, so the
     /// brightness of a pixel counts how often it was drawn, as GL JS's overdraw inspector does.
     pub overdraw_inspector: bool,
@@ -187,6 +192,7 @@ impl Default for RendererSettings {
             msaa: Msaa::default(),
             buffer_pools: BufferPoolSizes::default(),
             symbol_pools: BufferPoolSizes::default(),
+            terrain_drape_size: crate::terrain::resources::DRAPE_SIZE,
             texture_format: None,
 
             depth_texture_format: TextureFormat::Depth24PlusStencil8,
