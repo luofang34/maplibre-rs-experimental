@@ -1,63 +1,45 @@
-//! Supplied browser tiles have no network or native runtime dependency.
+//! Browser maps drawn on the host's GPU, fetching on the page's event loop.
 use crate::{
-    environment::{Environment, OffscreenKernel, OffscreenKernelConfig},
-    headless::window::HeadlessMapWindowConfig,
+    environment::{Environment, OffscreenKernelConfig},
+    headless::{environment::LoaderKernel, window::HeadlessMapWindowConfig},
     io::{
-        apc::SchedulerAsyncProcedureCall,
-        resource_loader::SharedLoader,
-        scheduler::NopScheduler,
-        source_client::{HttpClient, HttpSourceClient, SourceClient, SourceFetchError},
+        apc::SchedulerAsyncProcedureCall, resource_loader::SharedLoader, scheduler::LocalScheduler,
     },
     kernel::{Kernel, KernelBuilder},
     window::PhysicalSize,
 };
 
-/// Browser environment for decoded tiles supplied by the host.
+/// Browser environment whose tile calls run as local futures on the page's thread.
 pub struct HeadlessEnvironment;
-/// Rejects network requests because this environment has no source loader.
-#[derive(Clone)]
-pub struct SuppliedTileClient;
-/// Offscreen kernel with no native runtime or I/O dependencies.
-pub struct SuppliedTileKernel(crate::sdf::assets::ImageProviders);
 
-#[async_trait::async_trait(?Send)]
-impl HttpClient for SuppliedTileClient {
-    async fn fetch(&self, url: &str) -> Result<Vec<u8>, SourceFetchError> {
-        Err(SourceFetchError::not_found(url))
-    }
-}
-impl OffscreenKernel for SuppliedTileKernel {
-    type HttpClient = SuppliedTileClient;
-    fn create(config: OffscreenKernelConfig) -> Self {
-        Self(config.image_providers)
-    }
-    fn source_client(&self) -> SourceClient<Self::HttpClient> {
-        SourceClient::new(HttpSourceClient::new(SuppliedTileClient))
-            .with_image_providers(self.0.clone())
-    }
-}
 impl Environment for HeadlessEnvironment {
     type MapWindowConfig = HeadlessMapWindowConfig;
-    type AsyncProcedureCall = SchedulerAsyncProcedureCall<SuppliedTileKernel, NopScheduler>;
-    type Scheduler = NopScheduler;
+    type AsyncProcedureCall = SchedulerAsyncProcedureCall<LoaderKernel, LocalScheduler>;
+    type Scheduler = LocalScheduler;
     type HttpClient = SharedLoader;
-    type OffscreenKernelEnvironment = SuppliedTileKernel;
+    type OffscreenKernelEnvironment = LoaderKernel;
 }
+
 pub(crate) fn create_kernel(
     size: PhysicalSize,
-    _cache_path: Option<String>,
+    cache_path: Option<String>,
     loader: Option<SharedLoader>,
 ) -> Result<Kernel<HeadlessEnvironment>, crate::kernel::KernelBuildError> {
+    // One loader for the map and every call, so in-flight requests and PMTiles directories are
+    // shared instead of rebuilt per tile.
+    let loader =
+        loader.unwrap_or_else(|| super::loader_kernel::platform_loader(cache_path.clone()));
     KernelBuilder::new()
         .with_map_window_config(HeadlessMapWindowConfig::new(size))
-        .with_http_client(loader.unwrap_or_else(|| SharedLoader::new(SuppliedTileClient)))
+        .with_http_client(loader.clone())
         .with_apc(SchedulerAsyncProcedureCall::new(
-            NopScheduler,
+            LocalScheduler,
             OffscreenKernelConfig {
-                cache_directory: None,
+                cache_directory: cache_path,
+                loader: Some(loader),
                 ..Default::default()
             },
         ))
-        .with_scheduler(NopScheduler)
+        .with_scheduler(LocalScheduler)
         .build()
 }

@@ -10,11 +10,15 @@ pub use noweb::ReqwestOffscreenKernelEnvironment;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod noweb;
+#[cfg(target_arch = "wasm32")]
+mod web;
 
-/// Http client for non-web targets.
+/// The platform's HTTP transport: Reqwest natively, `fetch` in the browser.
 pub mod http_client {
     #[cfg(not(target_arch = "wasm32"))]
     pub use super::noweb::http_client::*;
+    #[cfg(target_arch = "wasm32")]
+    pub use super::web::http_client::*;
 }
 
 /// Scheduler for non-web targets.

@@ -1,15 +1,20 @@
 //! What a host of a headless map reads to render on demand.
 
 use super::HeadlessMap;
-use crate::render::{
-    frame_signals::{FrameStats, ResourceReady},
-    frame_trace::{FrameTrace, FrameTraceSlot},
+use crate::{
+    io::apc::AsyncProcedureCall,
+    render::{
+        frame_signals::{FrameStats, ResourceReady},
+        frame_trace::{FrameTrace, FrameTraceSlot},
+    },
 };
 
 impl HeadlessMap {
     /// Whether the map should draw another frame; see [`crate::context::MapContext::needs_redraw`].
+    /// Also true while worker results wait to be applied, which on the web arrive on this thread
+    /// between frames.
     pub fn needs_redraw(&self) -> bool {
-        self.map_context.needs_redraw()
+        self.map_context.needs_redraw() || self.kernel.apc().has_arrivals()
     }
 
     /// The statistics of the last frame drawn.
