@@ -84,10 +84,10 @@ fn main(
     let label_w = label_clip.w;
     let distance_ratio = select(projection.transition_and_padding.y / max(label_w, 1e-6),
         label_w / max(projection.transition_and_padding.y, 1e-6), alignment.x > 0.5);
-    // A tracked eye changes direction independently of map zoom. Viewport labels
+    // A free or tracked eye changes direction independently of map zoom. Viewport labels
     // retain their angular size; map-aligned text gets perspective from its geometry.
     let perspective_ratio = select(clamp(0.5 + 0.5 * distance_ratio, 0.0, 4.0),
-        1.0, projection.transition_and_padding.w > 0.5);
+        1.0, projection.globe_circle.z > 0.5 || projection.transition_and_padding.w > 0.5);
     let size = metrics.x * perspective_ratio;
     let scale = select(size, size / 24.0, is_text);
     var world_angle = 0.0;

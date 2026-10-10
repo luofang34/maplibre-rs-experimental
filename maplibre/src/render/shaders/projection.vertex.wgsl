@@ -5,7 +5,7 @@ struct ShaderProjectionData {
     // z: radius of the body in metres.
     transition_and_padding: vec4<f32>,
     // x: radius correction of a circle lying on the globe; y: 1 when the globe centre
-    // references below are set.
+    // references below are set; z: 1 for symbol sizes independent of target depth.
     globe_circle: vec4<f32>,
     // The Mercator position, exact in f32, of the centre globe positions are projected
     // relative to; its clip position on the unit sphere; and the clip-space vector from the
