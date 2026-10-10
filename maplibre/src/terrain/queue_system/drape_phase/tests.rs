@@ -2,7 +2,7 @@
 use super::*;
 use crate::{
     coords::{WorldTileCoords, ZoomLevel},
-    terrain::drape_targets::ShapeSpec,
+    terrain::{drape_targets::ShapeSpec, resources::DRAPE_SIZE},
 };
 
 #[test]
@@ -24,7 +24,7 @@ fn draped_road_width_has_the_same_world_size_at_every_target_lod() {
                 raster_layers: vec![],
             }],
         };
-        let (metadata, _) = drape_metadata(&[spec], &[true], 4, view_zoom);
+        let (metadata, _) = drape_metadata(&[spec], &[true], 4, view_zoom, DRAPE_SIZE);
         let width = 6.0 * metadata[0].line_width_scale as f64;
         let world_width = width / f64::from(DRAPE_SIZE) / 2_f64.powi(i32::from(target_zoom));
         let expected = 6.0 / TILE_SIZE / 2_f64.powf(view_zoom.value());

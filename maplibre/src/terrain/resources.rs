@@ -28,6 +28,8 @@ use elevation_textures::DemTexture;
 
 /// Edge length in pixels of one drape texture; twice the tile size, as GL JS `qualityFactor`.
 pub const DRAPE_SIZE: u32 = 2048;
+/// Smallest drape edge accepted; below it the ground is too coarse to read.
+pub const MIN_DRAPE_SIZE: u32 = 256;
 /// Byte stride between per-tile uniform blocks, the WebGPU dynamic offset alignment.
 pub const UNIFORM_STRIDE: u64 = 2560;
 // A block that outgrows its stride would overwrite the next tile's; the stride is a
@@ -139,6 +141,7 @@ pub struct TerrainResources {
     msaa: Msaa,
     color_format: wgpu::TextureFormat,
     depth_format: wgpu::TextureFormat,
+    drape_size: u32,
 }
 
 impl TerrainResources {
@@ -194,7 +197,12 @@ impl TerrainResources {
         color_format: wgpu::TextureFormat,
         depth_format: wgpu::TextureFormat,
         msaa: Msaa,
+        drape_size: u32,
     ) -> Self {
+        let drape_size = drape_size.clamp(
+            MIN_DRAPE_SIZE,
+            device.limits().max_texture_dimension_2d.max(MIN_DRAPE_SIZE),
+        );
         let mesh = create_terrain_mesh(TERRAIN_MESH_SIZE);
         let vertex_buffer = queue.create_buffer_init(
             device,
@@ -258,7 +266,13 @@ impl TerrainResources {
             msaa,
             color_format,
             depth_format,
+            drape_size,
         }
+    }
+
+    /// Edge in pixels of each drape texture and of the drape pass's attachments.
+    pub fn drape_size(&self) -> u32 {
+        self.drape_size
     }
 
     /// Terrain render pipeline.
@@ -290,7 +304,7 @@ impl TerrainResources {
     pub fn texture_bytes(&self) -> (usize, usize) {
         let (held, free) = self.drape_counts();
         // Four bytes a texel, and a mip chain adds a third.
-        let drape = (DRAPE_SIZE as usize).pow(2) * 4 * 4 / 3;
+        let drape = (self.drape_size as usize).pow(2) * 4 * 4 / 3;
         let dem = self
             .dem_textures
             .values()
@@ -309,8 +323,8 @@ impl TerrainResources {
                 Some("drape multisampled color"),
                 device,
                 self.color_format,
-                DRAPE_SIZE,
-                DRAPE_SIZE,
+                self.drape_size,
+                self.drape_size,
                 self.msaa,
                 wgpu::TextureUsages::RENDER_ATTACHMENT,
             )
@@ -319,8 +333,8 @@ impl TerrainResources {
             Some("drape depth stencil"),
             device,
             self.depth_format,
-            DRAPE_SIZE,
-            DRAPE_SIZE,
+            self.drape_size,
+            self.drape_size,
             self.msaa,
             wgpu::TextureUsages::RENDER_ATTACHMENT,
         );

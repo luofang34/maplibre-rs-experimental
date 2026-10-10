@@ -1,7 +1,7 @@
 //! Allocation and deferred content of terrain drape textures.
 use std::collections::HashSet;
 
-use super::{TerrainResources, DRAPE_SIZE};
+use super::TerrainResources;
 use crate::{coords::WorldTileCoords, render::resource::Texture, terrain::drape_cache::DrapeState};
 impl TerrainResources {
     /// Gives a view tile a drape texture and reports what it holds.
@@ -13,13 +13,14 @@ impl TerrainResources {
         may_create: bool,
     ) -> DrapeState {
         let format = self.color_format;
+        let size = self.drape_size;
         self.drapes.acquire(coords, fingerprint, may_create, || {
             Texture::new_mipmapped(
                 Some("drape texture"),
                 device,
                 format,
-                DRAPE_SIZE,
-                DRAPE_SIZE,
+                size,
+                size,
                 wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             )
         })
