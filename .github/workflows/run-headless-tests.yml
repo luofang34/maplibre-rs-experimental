@@ -1,0 +1,65 @@
+name: Run headless map tests
+
+on:
+  workflow_call:
+
+# Headless maps are what hosts embed, and their tests draw real frames on lavapipe: about half
+# an hour of one runner's CPU, most of it in a few tests. The test binary is built once and its
+# tests are spread over six runners, two at a time on each, which measured fastest. nextest
+# runs each test in its own process, so no process creates devices on several threads at once,
+# which lavapipe does not survive.
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.0
+      - name: Setup
+        uses: ./.github/actions/setup
+        with:
+          targets: x86_64-unknown-linux-gnu
+      - name: Install Dependencies
+        uses: ./.github/actions/install-system-dependencies
+      - name: Install nextest
+        uses: ./.github/actions/cargo-install
+        with:
+          name: cargo-nextest
+      - name: Build the tests
+        shell: bash
+        run: |
+          cargo nextest archive -p maplibre --lib --features "headless thread-safe-futures" \
+            --target x86_64-unknown-linux-gnu --archive-file headless-tests.tar.zst
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: headless-tests
+          path: headless-tests.tar.zst
+          retention-days: 1
+  test:
+    name: Test ${{ matrix.shard }}/6
+    needs: build
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # The count is also in the partition below.
+        shard: [1, 2, 3, 4, 5, 6]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.0
+      - name: Install Dependencies
+        uses: ./.github/actions/install-system-dependencies
+      - name: Install GPU Drivers
+        uses: ./.github/actions/install-driver
+        with:
+          wgpu-info: false
+      - name: Install nextest
+        uses: ./.github/actions/cargo-install
+        with:
+          name: cargo-nextest
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: headless-tests
+      - name: Test
+        shell: bash
+        run: |
+          WGPU_BACKEND=vulkan cargo nextest run --archive-file headless-tests.tar.zst \
+            --workspace-remap . --partition hash:${{ matrix.shard }}/6 -j 2 --no-fail-fast

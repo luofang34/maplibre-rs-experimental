@@ -23,6 +23,8 @@ jobs:
     uses: ./.github/workflows/run-benchmarks.yml
   run-tests:
     uses: ./.github/workflows/run-tests.yml
+  run-headless-tests:
+    uses: ./.github/workflows/run-headless-tests.yml
   build-deploy-docs:
     uses: ./.github/workflows/build-deploy-docs.yml
     # The deploy job pushes the docs to gh-pages; the repository's default token reads only.

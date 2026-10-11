@@ -33,6 +33,29 @@ export function checkConcurrency(workflows){
   }
 }
 
+// Each pull request of a stack runs on everything under it. The slow workflows run only on a
+// pull request into main, as each reaches it, and on every push to main; an edit that leaves
+// the base alone runs nothing.
+export const SLOW_WORKFLOWS=['run-headless-tests.yml','library-apple.yml','demo-macos.yml'];
+function jobBlocks(text){
+  const jobs=text.slice(text.search(/^jobs:$/m));
+  return jobs.split(/^(?=  [a-z][\w-]*:$)/m).slice(1).map(block=>[block.match(/^  ([a-z][\w-]*):/)[1],block]);
+}
+export function checkStackGating(workflows){
+  const files=new Map(workflows);
+  const pr=files.get('on_pull_request.yml'),main=files.get('on_main_push.yml');
+  if(pr===undefined||main===undefined)throw Error('on_pull_request.yml and on_main_push.yml are required');
+  for(const [job,block] of jobBlocks(pr)){
+    const condition=block.match(/^    if: (.*)$/m)?.[1]??'';
+    if(!condition.includes("github.event.action != 'edited' || github.event.changes.base"))throw Error(`on_pull_request.yml job ${job} must skip edits that keep the base`);
+    const slow=SLOW_WORKFLOWS.some(name=>block.includes(`./.github/workflows/${name}`));
+    if(slow&&!condition.includes("github.base_ref == 'main'"))throw Error(`on_pull_request.yml job ${job} is slow and must run only on pull requests into main`);
+  }
+  for(const name of SLOW_WORKFLOWS){
+    if(!main.includes(`./.github/workflows/${name}`))throw Error(`on_main_push.yml must run ${name}`);
+  }
+}
+
 async function loadAction(action){
   if(action.startsWith('./.github/')){
     if(action.includes('..'))throw Error('Invalid local action path');
@@ -55,6 +78,7 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).hr
   const files=(await readdir(directory)).filter(name=>/\.ya?ml$/.test(name));
   const workflows=await Promise.all(files.map(name=>readFile(new URL(name,directory),'utf8')));
   checkConcurrency(files.map((name,index)=>[name,workflows[index]]));
+  checkStackGating(files.map((name,index)=>[name,workflows[index]]));
   const actions=await checkActions(workflows,loadAction);
   console.log(`Verified ${actions.length} direct and transitive actions: Node.js 24, composite, or Docker.`);
 }
