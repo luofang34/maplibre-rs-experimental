@@ -13,12 +13,16 @@
 //! frame's depth as the map's own 3D geometry is tested, so terrain hides overlay content
 //! behind it at no cost per vertex.
 //!
-//! [`OverlayPlugin`] adds the pass; a map without it ignores the mesh.
+//! Content a host draws over the map's finished image instead, such as text, can be tested
+//! the same way with [`DepthProbe`]s, answered a frame or two later.
+//!
+//! [`OverlayPlugin`] adds the passes; a map without it ignores the mesh and the probes.
 
 #![deny(missing_docs)]
 
 mod pass;
 mod pipeline;
+mod probes;
 #[cfg(all(test, feature = "headless"))]
 mod tests;
 
@@ -26,6 +30,8 @@ use std::rc::Rc;
 
 pub use pass::OVERLAY_PASS;
 pub use pipeline::DEPTH_BIAS;
+pub(crate) use probes::ProbeGpu;
+pub use probes::{DEPTH_PROBE_PASS, MAX_PROBES};
 
 use crate::{
     environment::Environment,
@@ -56,6 +62,28 @@ pub struct OverlayVertex {
     pub color: [f32; 4],
 }
 
+/// A point a host draws over the map, to be tested against what the frame drew there.
+#[repr(C)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, bytemuck_derive::Pod, bytemuck_derive::Zeroable,
+)]
+pub struct DepthProbe {
+    /// Position in render-target pixels, from the top-left corner, y downward.
+    pub position: [f32; 2],
+    /// Depth the frame would store for the point, as [`OverlayVertex::depth`].
+    pub depth: f32,
+}
+
+/// Which probes of a request lie in sight.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ProbeResults {
+    /// The request answered, as [`HostOverlay::set_probes`] numbered it.
+    pub request: u64,
+    /// Whether each probe, in order, is not behind what the frame drew at its pixel (with
+    /// [`DEPTH_BIAS`], as overlay vertices); probes past [`MAX_PROBES`] are left out.
+    pub visible: Vec<bool>,
+}
+
 /// Indexed triangles, drawn in index order with premultiplied alpha blending.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct OverlayMesh {
@@ -77,6 +105,9 @@ impl OverlayMesh {
 pub struct HostOverlay {
     mesh: OverlayMesh,
     revision: u64,
+    probes: Vec<DepthProbe>,
+    probes_request: u64,
+    answers: Option<ProbeResults>,
 }
 
 impl HostOverlay {
@@ -93,6 +124,27 @@ impl HostOverlay {
 
     pub(crate) fn revision(&self) -> u64 {
         self.revision
+    }
+
+    /// Asks which of `probes` lie in sight in a coming frame, and returns the request's
+    /// number; the answer comes back as [`Self::take_answers`] a frame or two later.
+    pub fn set_probes(&mut self, probes: Vec<DepthProbe>) -> u64 {
+        self.probes = probes;
+        self.probes_request = self.probes_request.wrapping_add(1);
+        self.probes_request
+    }
+
+    /// The latest answered request, once.
+    pub fn take_answers(&mut self) -> Option<ProbeResults> {
+        self.answers.take()
+    }
+
+    pub(crate) fn probes(&self) -> (u64, &[DepthProbe]) {
+        (self.probes_request, &self.probes)
+    }
+
+    pub(crate) fn answer(&mut self, results: ProbeResults) {
+        self.answers = Some(results);
     }
 }
 
@@ -112,16 +164,22 @@ impl<E: Environment> Plugin<E> for OverlayPlugin {
         world
             .resources
             .insert(Eventually::<pipeline::OverlayGpu>::Uninitialized);
+        world
+            .resources
+            .insert(Eventually::<probes::ProbeGpu>::Uninitialized);
         schedule.add_system_to_stage(RenderStageLabel::Prepare, pipeline::prepare_system);
+        schedule.add_system_to_stage(RenderStageLabel::Prepare, probes::prepare_system);
 
         let Some(draw_graph) = graph.get_sub_graph_mut(draw_graph::NAME) else {
             tracing::error!("draw graph is missing; the host overlay will not be drawn");
             return;
         };
         draw_graph.add_node(OVERLAY_PASS, pass::OverlayPassNode);
+        draw_graph.add_node(DEPTH_PROBE_PASS, probes::DepthProbePassNode);
         let edges = [
             draw_graph.add_node_edge(draw_graph::node::MAIN_PASS, OVERLAY_PASS),
-            draw_graph.add_node_edge(OVERLAY_PASS, draw_graph::node::TRANSLUCENT_PASS),
+            draw_graph.add_node_edge(OVERLAY_PASS, DEPTH_PROBE_PASS),
+            draw_graph.add_node_edge(DEPTH_PROBE_PASS, draw_graph::node::TRANSLUCENT_PASS),
         ];
         for edge in edges {
             if let Err(error) = edge {

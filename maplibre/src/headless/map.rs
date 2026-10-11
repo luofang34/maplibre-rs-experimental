@@ -420,6 +420,28 @@ impl HeadlessMap {
         resources.insert(budget);
     }
 
+    /// Asks which of `probes` lie in sight; see [`HostOverlay::set_probes`](crate::overlay::HostOverlay::set_probes).
+    pub fn set_depth_probes(&mut self, probes: Vec<crate::overlay::DepthProbe>) -> u64 {
+        let request = self
+            .map_context
+            .world
+            .resources
+            .get_or_init_mut::<crate::overlay::HostOverlay>()
+            .set_probes(probes);
+        crate::render::frame_signals::mark_dirty(&mut self.map_context.world);
+        request
+    }
+
+    /// The latest answered depth probes, once; see
+    /// [`HostOverlay::take_answers`](crate::overlay::HostOverlay::take_answers).
+    pub fn depth_probe_results(&mut self) -> Option<crate::overlay::ProbeResults> {
+        self.map_context
+            .world
+            .resources
+            .get_mut::<crate::overlay::HostOverlay>()?
+            .take_answers()
+    }
+
     /// The terrain the last frame drew, for following lines of sight across it with
     /// [`target_view`](crate::terrain::sightline::target_view); `None` without terrain or
     /// before any of it is drawn. `body` is the camera's

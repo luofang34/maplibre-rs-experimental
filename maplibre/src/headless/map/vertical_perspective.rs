@@ -544,14 +544,29 @@ async fn drawn_terrain_sees_the_picked_ground_and_not_what_ridges_cover() {
     );
 }
 
-/// An overlay drawn at the depth of the ground it marks shows where that ground is in sight
-/// and not where nearer terrain covers it.
-#[tokio::test]
-async fn overlay_marks_on_hidden_ground_are_covered_by_the_terrain() {
-    use crate::{
-        overlay::{OverlayMesh, OverlayVertex},
-        terrain::sightline::{target_view, TargetAltitude, Visibility},
-    };
+/// A point of ground on a grid over hills, with how the frame should treat it.
+struct Mark {
+    x: f64,
+    y: f64,
+    /// The depth a host gives it, as projected without following the line of sight.
+    depth: f32,
+    in_sight: bool,
+    /// How much nearer than it the ground drawn at its pixel is, as a share of its
+    /// distance; zero where it is in sight.
+    covered_by: f64,
+}
+
+impl Mark {
+    /// Ground well behind a hill: more than twice the depth bias nearer.
+    fn well_hidden(&self) -> bool {
+        !self.in_sight && self.covered_by > 2.0 * f64::from(crate::overlay::DEPTH_BIAS)
+    }
+}
+
+/// Hills seen at 80° pitch, and ground points on a grid over the ground down the middle of
+/// the screen, out to where hills hide part of it, kept 8 px apart.
+async fn ground_marks() -> (LevelMap, Vec<Mark>) {
+    use crate::terrain::sightline::{target_view, TargetAltitude, Visibility};
     let scene = Scene {
         meters: 1500.0,
         relief: 600.0,
@@ -591,7 +606,7 @@ async fn overlay_marks_on_hidden_ground_are_covered_by_the_terrain() {
     // Marks on a grid of ground points, kept apart so none covers another, each a square
     // of 3 px at the depth of its ground; the ground's height comes from the terrain, its
     // depth as a host projects it, without following the line of sight.
-    let (mut marks, mut mesh) = (Vec::new(), OverlayMesh::default());
+    let mut marks = Vec::new();
     let mut taken: Vec<(f64, f64)> = Vec::new();
     for i in 0..80 {
         for j in 0..80 {
@@ -651,45 +666,97 @@ async fn overlay_marks_on_hidden_ground_are_covered_by_the_terrain() {
                 }
             };
             let covered_by = covered_at(0.0, 0.0);
-            marks.push((x, y, seen.visibility == Visibility::Visible, covered_by));
-            let base = mesh.vertices.len() as u32;
-            for (dx, dy) in [(-1.5, -1.5), (1.5, -1.5), (1.5, 1.5), (-1.5, 1.5)] {
-                mesh.vertices.push(OverlayVertex {
-                    position: [(x + dx) as f32, (y + dy) as f32],
-                    depth: depth as f32,
-                    color: [0.0, 1.0, 0.0, 1.0],
-                });
-            }
-            mesh.indices.extend([0, 1, 2, 0, 2, 3].map(|k| base + k));
+            marks.push(Mark {
+                x,
+                y,
+                depth: depth as f32,
+                in_sight: seen.visibility == Visibility::Visible,
+                covered_by,
+            });
         }
     }
-    let visible = marks.iter().filter(|m| m.2).count();
-    // Ground well behind a hill: more than twice the overlay's depth bias nearer.
-    let well_hidden = marks
-        .iter()
-        .filter(|m| !m.2 && m.3 > 2.0 * f64::from(crate::overlay::DEPTH_BIAS))
-        .count();
+    let in_sight = marks.iter().filter(|m| m.in_sight).count();
+    let well_hidden = marks.iter().filter(|m| m.well_hidden()).count();
     assert!(
-        visible > 30 && well_hidden > 30,
-        "{visible} marks in sight, {well_hidden} well behind hills"
+        in_sight > 30 && well_hidden > 30,
+        "{in_sight} marks in sight, {well_hidden} well behind hills"
     );
+    (hills, marks)
+}
+
+/// An overlay drawn at the depth of the ground it marks shows where that ground is in sight
+/// and not where nearer terrain covers it.
+#[tokio::test]
+async fn overlay_marks_on_hidden_ground_are_covered_by_the_terrain() {
+    use crate::overlay::{OverlayMesh, OverlayVertex};
+    let (mut hills, marks) = ground_marks().await;
+    let mut mesh = OverlayMesh::default();
+    for m in &marks {
+        let base = mesh.vertices.len() as u32;
+        for (dx, dy) in [(-1.5, -1.5), (1.5, -1.5), (1.5, 1.5), (-1.5, 1.5)] {
+            mesh.vertices.push(OverlayVertex {
+                position: [(m.x + dx) as f32, (m.y + dy) as f32],
+                depth: m.depth,
+                color: [0.0, 1.0, 0.0, 1.0],
+            });
+        }
+        mesh.indices.extend([0, 1, 2, 0, 2, 3].map(|k| base + k));
+    }
     hills.map.set_overlay(mesh);
     hills.map.run_frame().expect("frame");
     let color = hills.read_color();
-    let green = |x: f64, y: f64| {
-        let p = color[(y as u32 * WIDTH + x as u32) as usize];
+    let green = |m: &Mark| {
+        let p = color[(m.y as u32 * WIDTH + m.x as u32) as usize];
         p[1] > 200 && p[0] < 60 && p[2] < 60
     };
-    let shown_visible = marks.iter().filter(|m| m.2 && green(m.0, m.1)).count();
-    let shown_hidden = marks
+    check_shown(&marks, green);
+}
+
+/// Depth probes at ground points answer as the overlay draws them: in sight, or covered.
+#[tokio::test]
+async fn depth_probes_tell_ground_in_sight_from_ground_behind_hills() {
+    use crate::overlay::DepthProbe;
+    let (mut hills, marks) = ground_marks().await;
+    let probes = marks
         .iter()
-        .filter(|m| !m.2 && m.3 > 2.0 * f64::from(crate::overlay::DEPTH_BIAS) && green(m.0, m.1))
-        .count();
+        .map(|m| DepthProbe {
+            position: [m.x as f32, m.y as f32],
+            depth: m.depth,
+        })
+        .collect();
+    let request = hills.map.set_depth_probes(probes);
+    let mut answer = None;
+    for _ in 0..20 {
+        hills.map.run_frame().expect("frame");
+        tokio::task::yield_now().await;
+        if let Some(results) = hills.map.depth_probe_results() {
+            answer = Some(results);
+            break;
+        }
+    }
+    let answer = answer.expect("the probes are answered within a few frames");
+    assert_eq!(answer.request, request);
+    assert_eq!(answer.visible.len(), marks.len());
+    let by_mark: Vec<(&Mark, bool)> = marks.iter().zip(answer.visible).collect();
+    check_shown(&marks, |m| {
+        by_mark
+            .iter()
+            .find(|(n, _)| std::ptr::eq(*n, m))
+            .is_some_and(|(_, seen)| *seen)
+    });
+}
+
+/// At least 99 % of the marks in sight are shown, and at most 5 % of those well behind
+/// hills: a mark on a ridge's silhouette is partly covered, and may show at its centre.
+fn check_shown(marks: &[Mark], shown: impl Fn(&Mark) -> bool) {
+    let in_sight = marks.iter().filter(|m| m.in_sight).count();
+    let well_hidden = marks.iter().filter(|m| m.well_hidden()).count();
+    let shown_in_sight = marks.iter().filter(|m| m.in_sight && shown(m)).count();
+    let shown_hidden = marks.iter().filter(|m| m.well_hidden() && shown(m)).count();
     assert!(
-        shown_visible * 100 >= visible * 99,
-        "{shown_visible} of {visible} marks in sight are drawn"
+        shown_in_sight * 100 >= in_sight * 99,
+        "{shown_in_sight} of {in_sight} marks in sight are shown"
     );
-    // A mark on a ridge's silhouette is partly covered, and may show at its centre.
     assert!(
         shown_hidden * 100 <= well_hidden * 5,
         "of {well_hidden} marks well behind hills, {shown_hidden} show"
