@@ -420,6 +420,26 @@ impl HeadlessMap {
         resources.insert(budget);
     }
 
+    /// The terrain the last frame drew, for following lines of sight across it with
+    /// [`target_view`](crate::terrain::sightline::target_view); `None` without terrain or
+    /// before any of it is drawn. `body` is the camera's
+    /// ([`GlobeCameraState::body`](crate::projection::globe::GlobeCameraState::body)).
+    pub fn drawn_terrain(
+        &self,
+        body: crate::projection::body::Body,
+    ) -> Option<crate::terrain::sightline::DrawnTerrain<'_>> {
+        let world = &self.map_context.world;
+        let index = world
+            .resources
+            .get::<crate::terrain::coverage::TerrainCoverageIndex>()
+            .filter(|index| !index.is_empty())?;
+        Some(crate::terrain::sightline::DrawnTerrain {
+            index,
+            tiles: &world.tiles,
+            body,
+        })
+    }
+
     /// Replaces the triangles drawn over the map from the next frame on; see
     /// [`overlay`](crate::overlay). Drawn only when the map has the
     /// [`OverlayPlugin`](crate::overlay::OverlayPlugin).
