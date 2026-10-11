@@ -232,6 +232,8 @@ async fn something_else_at_the_url_is_not_an_archive() {
     );
 }
 
+/// A tile with one road, for drawing an archive in a headless map.
+#[cfg(feature = "headless")]
 fn road_tile() -> Vec<u8> {
     use geozero::mvt::Message as _;
     geozero::mvt::Tile {
@@ -250,6 +252,7 @@ fn road_tile() -> Vec<u8> {
     .encode_to_vec()
 }
 
+#[cfg(feature = "headless")]
 #[tokio::test]
 async fn a_map_draws_vector_tiles_out_of_an_archive() {
     use crate::{

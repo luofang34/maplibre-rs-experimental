@@ -11,7 +11,6 @@ mod vertical;
 pub(super) use extents::{
     both_orientations, extent, is_vertical, layout_extent, unwrapped_width, variable_shifts,
 };
-
 use styles::{char_styles, line_width, CharStyle};
 
 use super::{

@@ -1,0 +1,5 @@
+{
+  "goog:chromeOptions": {
+    "args": ["--disable-gpu", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"]
+  }
+}

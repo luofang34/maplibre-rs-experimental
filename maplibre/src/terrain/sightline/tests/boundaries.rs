@@ -3,11 +3,13 @@
 
 use cgmath::{InnerSpace, Point2, Vector3};
 
-use super::super::{
-    mesh::{intersect, Cell},
-    track_budget, DrawnTerrain, TileFootprint,
+use super::{
+    super::{
+        mesh::{intersect, Cell},
+        track_budget, DrawnTerrain, TileFootprint,
+    },
+    *,
 };
-use super::*;
 use crate::{
     coords::ZoomLevel,
     tcs::tiles::Tiles,

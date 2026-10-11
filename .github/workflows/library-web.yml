@@ -54,7 +54,9 @@ jobs:
         run: just nightly-check web wasm32-unknown-unknown ${{ inputs.webgl && 'web-webgl' || '""' }}
       - name: Test
         shell: bash
-        run: just web-test "web-webgl"
+        # Chrome draws WebGL in software (SwiftShader, set in web/webdriver.json), since the
+        # runner has no GPU; the runner's chromedriver matches its Chrome.
+        run: CHROMEDRIVER="$CHROMEWEBDRIVER/chromedriver" just web-test "web-webgl"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ inputs.name }}

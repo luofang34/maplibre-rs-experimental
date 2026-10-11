@@ -34,7 +34,10 @@ fn assert_gpu_matches_cpu(
         let x = (i % 9) as f64 * EXTENT / 8.0;
         let y = (i / 9) as f64 * EXTENT / 8.0;
         let expected = dem.elevation_at_tile_coords(x, y);
-        let tolerance = expected.abs().max(1.0) * 1e-6;
+        // The shader decodes in f32, subtracting the encoding's offset (up to terrarium's
+        // 32,768 m), so its rounding error is a few ulps of that offset whatever the
+        // height; software rasterisers such as lavapipe round differently from GPUs.
+        let tolerance = expected.abs().max(32_768.0) * 4.0 * f64::from(f32::EPSILON);
         assert!(
             (f64::from(actual) - expected).abs() <= tolerance,
             "at ({x}, {y}): GPU {actual} != CPU {expected}"

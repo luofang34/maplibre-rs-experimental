@@ -19,6 +19,9 @@ jobs:
     uses: ./.github/workflows/run-tests.yml
   build-deploy-docs:
     uses: ./.github/workflows/build-deploy-docs.yml
+    # The deploy job pushes the docs to gh-pages; the repository's default token reads only.
+    permissions:
+      contents: write
     with:
       deploy: true
     secrets: inherit

@@ -4,7 +4,6 @@ use std::{cell::RefCell, collections::BTreeMap, ops::Deref, rc::Rc, time::Durati
 
 use image::RgbaImage;
 
-use crate::vector::transferables::LayerIndexed;
 use crate::{
     context::MapContext,
     coords::{LatLon, WorldCoords, WorldTileCoords, Zoom},
@@ -31,8 +30,8 @@ use crate::{
     tcs::world::World,
     terrain::{backfill_neighbours, dem::DemTile, source::dem_source, DemTileComponent, LoadedDem},
     vector::{
-        transferables::SymbolLayerTessellated, AvailableVectorLayerBucket, VectorLayerBucket,
-        VectorLayerBucketComponent,
+        transferables::{LayerIndexed, SymbolLayerTessellated},
+        AvailableVectorLayerBucket, VectorLayerBucket, VectorLayerBucketComponent,
     },
 };
 
