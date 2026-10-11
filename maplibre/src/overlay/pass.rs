@@ -38,6 +38,10 @@ impl Node for OverlayPassNode {
         let Initialized(multisampling_texture) = &state.multisampling_texture else {
             return Ok(());
         };
+        let Initialized(depth_texture) = &state.depth_texture else {
+            return Ok(());
+        };
+        let has_stencil = depth_texture.texture.format().has_stencil_aspect();
         // As the symbol pass after it does: draw into the multisampled target and resolve.
         let (view, resolve_target) = match multisampling_texture {
             Some(texture) => (&*texture.view, Some(&**render_target)),
@@ -58,7 +62,18 @@ impl Node for OverlayPassNode {
                             store: StoreOp::Store,
                         },
                     })],
-                    depth_stencil_attachment: None,
+                    // The frame's depth, read to hide what terrain covers.
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &depth_texture.view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: StoreOp::Store,
+                        }),
+                        stencil_ops: has_stencil.then_some(wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: StoreOp::Store,
+                        }),
+                    }),
                     timestamp_writes: None,
                     occlusion_query_set: None,
                 });

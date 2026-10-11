@@ -9,6 +9,10 @@
 //! given, so a host that lists every casing before any line gets casings under all of its
 //! lines, and the map's labels stay readable over them.
 //!
+//! Each vertex carries the depth of the ground it draws, and the pass tests it against the
+//! frame's depth as the map's own 3D geometry is tested, so terrain hides overlay content
+//! behind it at no cost per vertex.
+//!
 //! [`OverlayPlugin`] adds the pass; a map without it ignores the mesh.
 
 #![deny(missing_docs)]
@@ -21,6 +25,7 @@ mod tests;
 use std::rc::Rc;
 
 pub use pass::OVERLAY_PASS;
+pub use pipeline::DEPTH_BIAS;
 
 use crate::{
     environment::Environment,
@@ -39,6 +44,13 @@ use crate::{
 pub struct OverlayVertex {
     /// Position in render-target pixels, from the top-left corner, y downward.
     pub position: [f32; 2],
+    /// Depth the frame would store for the point the vertex draws, in its reversed-Z
+    /// convention (one at the near plane, zero at the far plane), as
+    /// [`target_view`](crate::terrain::sightline::target_view) gives it. The vertex is
+    /// drawn where nothing nearer was, so terrain hides what lies behind it; the pass
+    /// brings every depth a little nearer ([`DEPTH_BIAS`]) so ground does not hide what
+    /// lies on it. One draws over everything.
+    pub depth: f32,
     /// Red, green, blue and alpha in 0..=1, the colour already multiplied by alpha, in the
     /// render target's encoding.
     pub color: [f32; 4],

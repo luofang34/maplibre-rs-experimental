@@ -42,7 +42,11 @@ async fn map(samples: u32) -> HeadlessMap {
 fn rect(mesh: &mut OverlayMesh, (x0, y0, x1, y1): (f32, f32, f32, f32), color: [f32; 4]) {
     let base = mesh.vertices.len() as u32;
     for position in [[x0, y0], [x1, y0], [x1, y1], [x0, y1]] {
-        mesh.vertices.push(OverlayVertex { position, color });
+        mesh.vertices.push(OverlayVertex {
+            position,
+            depth: 1.0,
+            color,
+        });
     }
     mesh.indices
         .extend([0, 1, 2, 0, 2, 3].iter().map(|i| base + i));

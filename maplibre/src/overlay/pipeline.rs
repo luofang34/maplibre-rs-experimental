@@ -15,6 +15,14 @@ use crate::{
 
 const SHADER: &str = include_str!("../render/shaders/overlay.wgsl");
 
+/// Share of a vertex's distance from the camera it is brought nearer before it is tested
+/// against the frame's depth. Overlay lines are straight chords between points on the
+/// ground, a few pixels apart, so over a convex slope they run a little under the drawn
+/// surface, and the ground under a point is sampled from the elevation tiles rather than
+/// from the drawn mesh; this keeps both from hiding what lies on the ground, while a ridge
+/// hides what lies behind it by far more.
+pub const DEPTH_BIAS: f32 = 0.01;
+
 /// The mesh last uploaded: its buffers and index count, and the revision they hold.
 pub(super) struct MeshBuffers {
     pub(super) vertices: wgpu::Buffer,
@@ -37,13 +45,14 @@ impl OverlayGpu {
         device: &wgpu::Device,
         queue: &UploadQueue,
         format: wgpu::TextureFormat,
+        depth_format: wgpu::TextureFormat,
         samples: u32,
     ) -> Self {
         let viewport = queue.create_buffer_init(
             device,
             &BufferInitDescriptor {
                 label: Some("overlay viewport"),
-                contents: bytemuck::cast_slice(&[1.0_f32; 4]),
+                contents: bytemuck::cast_slice(&[1.0_f32, 1.0, DEPTH_BIAS, 0.0]),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             },
         );
@@ -87,7 +96,7 @@ impl OverlayGpu {
                 buffers: &[Some(wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<OverlayVertex>() as wgpu::BufferAddress,
                     step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x4],
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32, 2 => Float32x4],
                 })],
             },
             fragment: Some(wgpu::FragmentState {
@@ -101,7 +110,15 @@ impl OverlayGpu {
                 })],
             }),
             primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
+            // Tested as the map's 3D geometry is (reversed Z), never written: content of the
+            // overlay does not hide other content of it.
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: depth_format,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
             multisample: wgpu::MultisampleState {
                 count: samples,
                 ..Default::default()
@@ -124,7 +141,7 @@ impl OverlayGpu {
         if self.size == Some(wanted) {
             return;
         }
-        let data = [wanted.0 as f32, wanted.1 as f32, 0.0, 0.0];
+        let data = [wanted.0 as f32, wanted.1 as f32, DEPTH_BIAS, 0.0];
         queue.write_buffer(&self.viewport, 0, bytemuck::cast_slice(&data));
         self.size = Some(wanted);
     }
@@ -195,8 +212,15 @@ pub(super) fn prepare_system(
     } else {
         Msaa { samples: 1 }
     };
-    let gpu = gpu
-        .initialize(|| OverlayGpu::new(device, queue, surface.surface_format(), samples.samples));
+    let gpu = gpu.initialize(|| {
+        OverlayGpu::new(
+            device,
+            queue,
+            surface.surface_format(),
+            settings.depth_texture_format,
+            samples.samples,
+        )
+    });
     gpu.set_size(queue, &surface.size());
     gpu.upload(device, queue, overlay);
     Ok(())
