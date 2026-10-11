@@ -24,6 +24,15 @@ export async function checkActions(workflows,load){
   return [...checked];
 }
 
+// Merging a stack of pull requests pushes main once per pull request and rebases each one
+// left; a workflow those start must cancel the run a newer push supersedes.
+export function checkConcurrency(workflows){
+  for(const [name,text] of workflows){
+    const started=/^  pull_request:/m.test(text)||/^  push:\n(?:    .*\n)*?    branches:/m.test(text);
+    if(started&&!/^  cancel-in-progress: true$/m.test(text))throw Error(`${name} must cancel superseded runs (concurrency with cancel-in-progress)`);
+  }
+}
+
 async function loadAction(action){
   if(action.startsWith('./.github/')){
     if(action.includes('..'))throw Error('Invalid local action path');
@@ -45,6 +54,7 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).hr
   const directory=new URL('../.github/workflows/',import.meta.url);
   const files=(await readdir(directory)).filter(name=>/\.ya?ml$/.test(name));
   const workflows=await Promise.all(files.map(name=>readFile(new URL(name,directory),'utf8')));
+  checkConcurrency(files.map((name,index)=>[name,workflows[index]]));
   const actions=await checkActions(workflows,loadAction);
   console.log(`Verified ${actions.length} direct and transitive actions: Node.js 24, composite, or Docker.`);
 }

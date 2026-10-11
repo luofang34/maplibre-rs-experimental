@@ -6,6 +6,12 @@ on:
     branches:
       - main
 
+# A newer push to a pull request or to main supersedes the run before it: merging a stack
+# pushes main once per pull request and rebases each one left.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   run-check:
     uses: ./.github/workflows/run-checks.yml

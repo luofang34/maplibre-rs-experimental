@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {checkActions} from './check-actions.mjs';
+import {checkActions,checkConcurrency} from './check-actions.mjs';
 const action=name=>`actions/${name}@${'a'.repeat(40)}`;
 const uses=name=>`- uses: ${action(name)} # pinned`;
 test('follows composite dependencies and rejects Node.js 20 with its chain',async()=>{
@@ -27,4 +27,12 @@ test('checks local reusable workflows and composite action dependencies',async()
   [action('checkout')]:"using: node20",
  };
  await assert.rejects(checkActions(['uses: ./.github/workflows/build.yml'],async key=>metadata[key]),/node20:.*workflows\/build.yml ->.*actions\/setup ->.*checkout/);
+});
+
+test('requires pull request and branch push workflows to cancel superseded runs',()=>{
+  const cancels='concurrency:\n  group: x\n  cancel-in-progress: true\n';
+  assert.throws(()=>checkConcurrency([['pr.yml','on:\n  pull_request:\njobs: {}\n']]),/pr\.yml must cancel/);
+  assert.throws(()=>checkConcurrency([['main.yml','on:\n  push:\n    branches: [main]\n']]),/main\.yml/);
+  checkConcurrency([['pr.yml','on:\n  pull_request:\n'+cancels]]);
+  checkConcurrency([['release.yml','on:\n  push:\n    tags: [\"v*\"]\n']]);
 });
