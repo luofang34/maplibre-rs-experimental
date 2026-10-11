@@ -420,6 +420,18 @@ impl HeadlessMap {
         resources.insert(budget);
     }
 
+    /// Replaces the triangles drawn over the map from the next frame on; see
+    /// [`overlay`](crate::overlay). Drawn only when the map has the
+    /// [`OverlayPlugin`](crate::overlay::OverlayPlugin).
+    pub fn set_overlay(&mut self, mesh: crate::overlay::OverlayMesh) {
+        self.map_context
+            .world
+            .resources
+            .get_or_init_mut::<crate::overlay::HostOverlay>()
+            .set(mesh);
+        crate::render::frame_signals::mark_dirty(&mut self.map_context.world);
+    }
+
     /// Draws at `ratio` physical pixels per logical pixel: the view measures its viewport, and
     /// so its layout units, in logical pixels while the frame keeps its physical size.
     pub fn set_pixel_ratio(&mut self, ratio: f64) {

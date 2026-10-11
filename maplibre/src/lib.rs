@@ -52,6 +52,7 @@ pub mod debug;
 pub mod geojson;
 pub mod heatmap;
 pub mod hillshade;
+pub mod overlay;
 pub mod raster;
 pub mod vector;
 

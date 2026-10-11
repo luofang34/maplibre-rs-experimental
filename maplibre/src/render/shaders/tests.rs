@@ -101,6 +101,7 @@ fn stages() -> Vec<Stage> {
         ),
         ("mipmap", include_str!("mipmap.vertex.wgsl")),
         ("mipmap", include_str!("mipmap.fragment.wgsl")),
+        ("overlay", include_str!("overlay.wgsl")),
     ] {
         stages.push((name, source.to_owned(), ""));
     }
