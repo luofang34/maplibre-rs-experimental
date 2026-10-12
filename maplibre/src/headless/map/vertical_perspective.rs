@@ -762,3 +762,6 @@ fn check_shown(marks: &[Mark], shown: impl Fn(&Mark) -> bool) {
         "of {well_hidden} marks well behind hills, {shown_hidden} show"
     );
 }
+
+/// The same marks, answered by the depth probes and by the CPU line of sight.
+mod occlusion;
