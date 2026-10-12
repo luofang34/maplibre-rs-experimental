@@ -56,6 +56,20 @@ export function checkStackGating(workflows){
   }
 }
 
+// A crate installed from crates.io without --locked resolves its dependencies afresh, and
+// some, such as cargo-nextest, refuse to build that way; binstall falls back to building
+// from source whenever it cannot reach a crate's release in time.
+export function checkLockedInstalls(files){
+  for(const [name,text] of files){
+    const lines=text.replace(/\\\n\s*/g,' ').split('\n');
+    for(const line of lines){
+      const command=line.match(/\bcargo b?install\b.*/)?.[0];
+      if(command===undefined||/\s(?:-V|--version|--help)\b/.test(command)||/\s--git\s/.test(command))continue;
+      if(!/\s--locked\b/.test(command))throw Error(`${name} must install with --locked: ${command.trim()}`);
+    }
+  }
+}
+
 async function loadAction(action){
   if(action.startsWith('./.github/')){
     if(action.includes('..'))throw Error('Invalid local action path');
@@ -79,6 +93,9 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).hr
   const workflows=await Promise.all(files.map(name=>readFile(new URL(name,directory),'utf8')));
   checkConcurrency(files.map((name,index)=>[name,workflows[index]]));
   checkStackGating(files.map((name,index)=>[name,workflows[index]]));
+  const actionsDirectory=new URL('../.github/actions/',import.meta.url);
+  const local=await Promise.all((await readdir(actionsDirectory)).map(async name=>[`actions/${name}`,await readFile(new URL(`${name}/action.yml`,actionsDirectory),'utf8')]));
+  checkLockedInstalls([...files.map((name,index)=>[name,workflows[index]]),...local]);
   const actions=await checkActions(workflows,loadAction);
   console.log(`Verified ${actions.length} direct and transitive actions: Node.js 24, composite, or Docker.`);
 }

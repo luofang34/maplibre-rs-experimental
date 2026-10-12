@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {checkActions,checkConcurrency,checkStackGating} from './check-actions.mjs';
+import {checkActions,checkConcurrency,checkLockedInstalls,checkStackGating} from './check-actions.mjs';
 const action=name=>`actions/${name}@${'a'.repeat(40)}`;
 const uses=name=>`- uses: ${action(name)} # pinned`;
 test('follows composite dependencies and rejects Node.js 20 with its chain',async()=>{
@@ -46,4 +46,11 @@ test('runs slow workflows on pull requests into main only, and on every push to 
   assert.throws(()=>checkStackGating(pr(job('headless','run-headless-tests.yml',edit))),/headless is slow/);
   assert.throws(()=>checkStackGating(pr('  tests:\n    uses: ./.github/workflows/run-tests.yml\n')),/tests must skip edits/);
   assert.throws(()=>checkStackGating([pr('')[0],['on_main_push.yml','jobs:\n']]),/must run run-headless-tests\.yml/);
+});
+
+test('installs crates from crates.io with --locked, across continued lines',()=>{
+  checkLockedInstalls([['a.yml','run: |\n  cargo binstall --no-confirm --locked \\\n    cargo-nextest\n  cargo binstall -V\n']]);
+  checkLockedInstalls([['b.yml','run: cargo install --force --git "https://example.com/x" --rev abc tool\n']]);
+  assert.throws(()=>checkLockedInstalls([['c.yml','run: cargo binstall --no-confirm cargo-nextest\n']]),/c\.yml must install with --locked/);
+  assert.throws(()=>checkLockedInstalls([['d.yml','run: |\n  cargo install --debug \\\n    tool\n']]),/d\.yml/);
 });
