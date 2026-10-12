@@ -68,7 +68,12 @@ pub fn target_view(
     location: LatLon,
     altitude: TargetAltitude,
 ) -> TargetView {
-    let ground = || terrain.map_or(Some(0.0), |terrain| terrain.ground_at(location));
+    // Ground outside the rendered tiles is as unknown as ground whose DEM has not loaded.
+    let ground = || {
+        terrain.map_or(Some(0.0), |terrain| {
+            terrain.ground_at(location).ok().flatten()
+        })
+    };
     let elevation = match altitude {
         TargetAltitude::Drawn { meters } => Some(meters),
         TargetAltitude::OnGround => ground(),

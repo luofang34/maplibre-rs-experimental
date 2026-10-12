@@ -245,21 +245,24 @@ impl HeadlessMap {
         let world = &self.map_context.world;
         let index = world.resources.get::<TerrainCoverageIndex>()?;
         let mercator = WorldCoords::from_lat_lon(position, Zoom::new(0.0));
-        index.elevation_cached(&world.tiles, mercator.x / TILE_SIZE, mercator.y / TILE_SIZE)
+        index.loaded_ground_cached(
+            &world.tiles,
+            mercator.x / TILE_SIZE,
+            mercator.y / TILE_SIZE,
+            crate::terrain::DemDetail::Finest,
+        )
     }
 
-    /// Samples the last rendered terrain surface at normalized Mercator coordinates.
-    /// A loaded DEM elsewhere in the cache does not make a fallback surface valid.
-    pub fn rendered_terrain_sample_cached(
+    /// Height of the ground the last frame drew at a location, for converting between the
+    /// screen and the ground: `Ok(None)` without terrain or outside the drawn tiles, and
+    /// [`TerrainUnknown`](crate::terrain::sightline::TerrainUnknown) over a drawn tile whose
+    /// DEM has not loaded. A DEM loaded elsewhere in the cache does not stand in for it.
+    pub fn drawn_ground_cached(
         &self,
-        mercator_xy: [f64; 2],
-    ) -> Option<crate::terrain::TerrainSample> {
-        if !mercator_xy.iter().all(|value| value.is_finite()) {
-            return None;
-        }
-        let world = &self.map_context.world;
-        let index = world.resources.get::<TerrainCoverageIndex>()?;
-        Some(index.sample(&world.tiles, mercator_xy[0], mercator_xy[1]))
+        position: LatLon,
+    ) -> Result<Option<f64>, crate::terrain::sightline::TerrainUnknown> {
+        self.drawn_terrain(self.map_context.view_state.body())
+            .map_or(Ok(None), |terrain| terrain.ground_at(position))
     }
 }
 

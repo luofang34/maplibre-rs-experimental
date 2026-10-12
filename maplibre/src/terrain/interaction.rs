@@ -383,11 +383,11 @@ pub fn keep_camera_above_terrain(style: &Style, view_state: &mut ViewState, worl
     let world_size = TILE_SIZE * 2_f64.powf(view_state.zoom().value());
     let (camera, altitude) = camera_ground_position(view_state);
     let zoom = u8::from(view_state.zoom().zoom_level(TILE_SIZE));
-    let Some(min_altitude) = index.elevation_at_zoom(
+    let Some(min_altitude) = index.loaded_ground_cached(
         &world.tiles,
         camera.x / world_size,
         camera.y / world_size,
-        zoom,
+        crate::terrain::DemDetail::Tile(zoom),
     ) else {
         return false;
     };

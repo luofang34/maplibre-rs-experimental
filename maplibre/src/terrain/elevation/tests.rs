@@ -2,13 +2,15 @@
 
 use image::{Rgba, RgbaImage};
 
-use super::elevation_at_world;
 use crate::{
-    coords::{WorldCoords, WorldTileCoords, Zoom, ZoomLevel, TILE_SIZE},
+    coords::{WorldTileCoords, ZoomLevel},
     io::source_type::{RasterSource, SourceType},
     style::source::TileAddressingScheme,
     tcs::tiles::Tiles,
-    terrain::{dem::DemTile, source::DemSource, DemTileComponent, LoadedDem},
+    terrain::{
+        dem::DemTile, source::DemSource, DemDetail, DemTileComponent, LoadedDem,
+        TerrainCoverageIndex,
+    },
 };
 
 const TERRARIUM: [f64; 4] = [256.0, 1.0, 1.0 / 256.0, 32768.0];
@@ -42,7 +44,7 @@ fn flat_tile(elevation: f64) -> DemTile {
 #[test]
 fn samples_the_dem_tile_under_the_position_with_exaggeration() {
     let mut tiles = Tiles::default();
-    // View zoom 5 samples DEM tiles at zoom 4; place the position inside tile (3, 2) at z4.
+    // A zoom 5 tile samples DEM tiles at zoom 4; place the position inside tile (3, 2) at z4.
     let dem_coords = WorldTileCoords {
         x: 3,
         y: 2,
@@ -52,11 +54,10 @@ fn samples_the_dem_tile_under_the_position_with_exaggeration() {
         .spawn_mut(dem_coords)
         .expect("valid coords")
         .insert(DemTileComponent::Loaded(LoadedDem::new(flat_tile(1500.0))));
-    let zoom = Zoom::new(5.0);
-    let tile_pixels = TILE_SIZE * 2.0; // a z4 tile spans two z5 tiles
-    let position = WorldCoords::at_ground(3.5 * tile_pixels, 2.25 * tile_pixels);
+    // Nothing rendered: the loaded DEM answers for ground outside the view too.
+    let index = TerrainCoverageIndex::build([], &tiles, &source(2.0));
 
-    let elevation = elevation_at_world(&tiles, &source(2.0), zoom, position);
+    let elevation = index.loaded_ground_cached(&tiles, 3.5 / 16.0, 2.25 / 16.0, DemDetail::Tile(5));
 
     assert!((elevation.expect("covered") - 3000.0).abs() < 1e-6);
 }
@@ -73,13 +74,14 @@ fn falls_back_to_a_loaded_ancestor_and_reports_no_coverage() {
         .spawn_mut(ancestor)
         .expect("valid coords")
         .insert(DemTileComponent::Loaded(LoadedDem::new(flat_tile(-100.0))));
-    let zoom = Zoom::new(5.0);
-    let inside = WorldCoords::at_ground(10.0, 10.0);
-    let outside = WorldCoords::at_ground(TILE_SIZE * 20.0, TILE_SIZE * 20.0);
-
-    let covered = elevation_at_world(&tiles, &source(1.0), zoom, inside);
-    assert!((covered.expect("ancestor covers") + 100.0).abs() < 1e-6);
-    assert!(elevation_at_world(&tiles, &source(1.0), zoom, outside).is_none());
+    let index = TerrainCoverageIndex::build([], &tiles, &source(1.0));
+    for detail in [DemDetail::Tile(5), DemDetail::Finest] {
+        let covered = index.loaded_ground_cached(&tiles, 0.01, 0.01, detail);
+        assert!((covered.expect("ancestor covers") + 100.0).abs() < 1e-6);
+        assert!(index
+            .loaded_ground_cached(&tiles, 0.6, 0.6, detail)
+            .is_none());
+    }
 }
 
 #[test]

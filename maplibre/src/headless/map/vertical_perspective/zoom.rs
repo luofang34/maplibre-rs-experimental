@@ -13,7 +13,11 @@ fn check_target_on_ground(
     scene: Scene,
 ) {
     let target = level.map.view_state().center_elevation();
-    let drawn = terrain.ground_at(center).expect("ground at the center");
+    let drawn = terrain
+        .ground_at(center)
+        .ok()
+        .flatten()
+        .expect("ground at the center");
     assert!(
         (drawn - target).abs() < 50.0,
         "{scene:?}: the target stands at {target} m over ground drawn at {drawn} m"

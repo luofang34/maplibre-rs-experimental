@@ -16,7 +16,10 @@ use crate::{
     },
     render::{projection::globe_camera_for_view, view_state::ViewState},
     tcs::world::World,
-    terrain::{coverage::TerrainCoverageIndex, sightline::lat_lon_to_mercator},
+    terrain::{
+        coverage::{DemDetail, TerrainCoverageIndex},
+        sightline::{lat_lon_to_mercator, DrawnTerrain},
+    },
 };
 
 /// Corrections that place an anchor at its pixel; the zoom adjustment of each is small, so
@@ -121,7 +124,8 @@ pub fn recalculate_globe_zoom_and_center(view_state: &mut ViewState, elevation: 
 
 /// Lifts the eye out of the ground under it, keeping the target, as GL JS raises its camera
 /// out of the terrain: the eye moves straight up onto the ground plus a small clearance, and
-/// pitch and zoom follow. Returns whether the camera moved.
+/// pitch and zoom follow. The ground is the higher of the best loaded DEM, which reaches past
+/// the drawn tiles, and the ground drawn there. Returns whether the camera moved.
 pub fn keep_globe_camera_above_terrain(view_state: &mut ViewState, world: &World) -> bool {
     let Some((eye, target)) = globe_pose(view_state) else {
         return false;
@@ -129,11 +133,23 @@ pub fn keep_globe_camera_above_terrain(view_state: &mut ViewState, world: &World
     let Some(index) = world.resources.get::<TerrainCoverageIndex>() else {
         return false;
     };
-    let under = lat_lon_to_mercator(unit_sphere_to_lat_lon(eye.normalize()));
-    let Some(ground) = index.elevation_cached(&world.tiles, under.x, under.y) else {
+    let body = view_state.body();
+    let location = unit_sphere_to_lat_lon(eye.normalize());
+    let under = lat_lon_to_mercator(location);
+    let loaded = index.loaded_ground_cached(&world.tiles, under.x, under.y, DemDetail::Finest);
+    // Between their vertices the drawn triangles can stand above the DEM sampled there, as
+    // over a sharp peak; an eye below them would see the inside of the terrain.
+    let drawn = DrawnTerrain {
+        index,
+        tiles: &world.tiles,
+        body,
+    }
+    .ground_at(location)
+    .ok()
+    .flatten();
+    let Some(ground) = loaded.into_iter().chain(drawn).reduce(f64::max) else {
         return false;
     };
-    let body = view_state.body();
     let floor = body.unit_radius_at(ground + GROUND_CLEARANCE_METERS);
     if eye.magnitude() >= floor {
         return false;

@@ -192,7 +192,12 @@ fn an_eye_inside_the_ground_is_lifted_onto_the_ground_under_itself() {
 fn a_picked_terrain_point_stays_under_the_pointer_through_a_zoom() {
     for center in [SCENE, ANTIMERIDIAN] {
         let ground = Ground::around(center, hills);
-        let elevation = ground.terrain().ground_at(center).expect("ground");
+        let elevation = ground
+            .terrain()
+            .ground_at(center)
+            .ok()
+            .flatten()
+            .expect("ground");
         for (pitch, bearing, pointer) in [
             (70.0, 324.037_142_967_012_36, Point2::new(1700.0, 1200.0)),
             (85.0, 324.037_142_967_012_36, Point2::new(700.0, 1000.0)),
@@ -356,4 +361,69 @@ fn the_constrained_terrain_gestures_stand_aside_for_a_free_camera() {
         state.globe_pose().expect("pose").distance_meters,
         pose.distance_meters
     );
+}
+
+#[test]
+fn an_eye_kept_off_a_peak_stands_above_the_ground_drawn_there() {
+    use super::GROUND_CLEARANCE_METERS;
+    use crate::{
+        projection::globe::unit_sphere_to_lat_lon,
+        terrain::{sightline::DrawnTerrain, DemDetail},
+    };
+    for bearing in [90.0, 200.0, 324.037_142_967_012_36] {
+        let mut state = view_at(SCENE, 14.0, 85.0, bearing, 0.0);
+        let (eye, _) = globe_pose(&state).expect("orbiting camera");
+        let radius = state.body().radius_meters;
+        let height = (eye.magnitude() - 1.0) * radius;
+        let under = unit_sphere_to_lat_lon(eye.normalize());
+        let apex = lat_lon_to_mercator(under);
+        // A sharp peak, raised until the DEM sampled under the eye stands a metre above it.
+        // Between their vertices the drawn triangles over it stand metres higher still.
+        let peak = |summit: f64| {
+            Ground::around(SCENE, move |mercator| {
+                let dx = (mercator.x - apex.x + 0.5).rem_euclid(1.0) - 0.5;
+                (summit - dx.hypot(mercator.y - apex.y) * 4.0e7).max(0.0)
+            })
+        };
+        let loaded = |ground: &Ground| {
+            ground
+                .index
+                .loaded_ground_cached(&ground.tiles, apex.x, apex.y, DemDetail::Finest)
+                .expect("loaded")
+        };
+        let smoothing = loaded(&peak(10_000.0)) - 10_000.0;
+        let ground = peak(height + 1.0 - smoothing);
+        let drawn = DrawnTerrain {
+            index: &ground.index,
+            tiles: &ground.tiles,
+            body: state.body(),
+        }
+        .ground_at(under)
+        .expect("known")
+        .expect("drawn");
+        assert!(
+            drawn > loaded(&ground) + GROUND_CLEARANCE_METERS,
+            "bearing {bearing}: the peak is drawn at {drawn} m over a DEM of {} m",
+            loaded(&ground)
+        );
+        let world = world(ground);
+        assert!(keep_globe_camera_above_terrain(&mut state, &world));
+        let (lifted, _) = globe_pose(&state).expect("orbiting camera");
+        let lifted_height = (lifted.magnitude() - 1.0) * radius;
+        let terrain = DrawnTerrain {
+            index: world.resources.get().expect("index"),
+            tiles: &world.tiles,
+            body: state.body(),
+        };
+        let drawn = terrain
+            .ground_at(crate::projection::globe::unit_sphere_to_lat_lon(
+                lifted.normalize(),
+            ))
+            .expect("known")
+            .expect("drawn");
+        assert!(
+            lifted_height > drawn,
+            "bearing {bearing}: the eye kept at {lifted_height} m is inside ground drawn at {drawn} m"
+        );
+    }
 }

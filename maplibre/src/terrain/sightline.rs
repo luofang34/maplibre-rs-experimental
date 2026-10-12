@@ -22,18 +22,17 @@ use cgmath::{InnerSpace, Point2, Vector3};
 
 use crate::{
     coords::{LatLon, WorldTileCoords},
-    projection::{
-        body::Body,
-        globe::{lat_lon_to_unit_sphere, unit_sphere_to_lat_lon},
-    },
+    projection::{body::Body, globe::unit_sphere_to_lat_lon},
     tcs::tiles::Tiles,
     terrain::coverage::TerrainCoverageIndex,
 };
 
+mod ground;
 mod mesh;
 mod pick;
 mod target;
 
+pub use ground::TerrainUnknown;
 use mesh::Cell;
 pub use pick::{pick_globe_terrain, TerrainPick};
 pub use target::{target_view, TargetAltitude, TargetView, Visibility};
@@ -101,45 +100,9 @@ impl DrawnTerrain<'_> {
             .max(self.body.highest_ground_meters * self.index.exaggeration().max(1.0))
     }
 
-    /// Height of the drawn ground at a location: where the line up from the body's center
-    /// meets the triangles drawn there. `None` outside the rendered tiles and where the DEM
-    /// has not loaded.
-    pub(crate) fn ground_at(&self, location: LatLon) -> Option<f64> {
-        let up = lat_lon_to_unit_sphere(location);
-        let mercator = lat_lon_to_mercator(location);
-        let cells = self.cells_at(mercator, location.latitude.abs() > MAX_VALID_LATITUDE);
-        cells
-            .into_iter()
-            .flat_map(|cell| self.triangles(cell))
-            .filter_map(|triangle| mesh::intersect(Vector3::new(0.0, 0.0, 0.0), up, triangle))
-            .reduce(f64::max)
-            .map(|radius| (radius - 1.0) * self.body.radius_meters)
-    }
-
-    /// The drawn cells over `mercator`: the rendered tile's grid cell, or under a polar cap
-    /// the fan of the last tile in its column.
+    /// The drawn cells over `mercator`, as [`cell_at`](Self::cell_at) finds them.
     fn cells_at(&self, mercator: Point2<f64>, polar: bool) -> Vec<Cell> {
-        if polar {
-            let edge = if mercator.y < 0.5 {
-                0.0
-            } else {
-                MAX_MERCATOR_Y
-            };
-            return self
-                .index
-                .rendered_tile_at(mercator.x, edge)
-                .map(|tile| Cell {
-                    row: None,
-                    ..Cell::of(tile, mercator)
-                })
-                .into_iter()
-                .collect();
-        }
-        self.index
-            .rendered_tile_at(mercator.x, mercator.y)
-            .map(|tile| Cell::of(tile, mercator))
-            .into_iter()
-            .collect()
+        self.cell_at(mercator, polar).into_iter().collect()
     }
 
     fn probe(&self, point: Vector3<f64>) -> Probe {

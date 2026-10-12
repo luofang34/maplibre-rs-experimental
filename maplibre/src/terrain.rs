@@ -54,12 +54,11 @@ pub enum TerrainSkirts {
     /// No skirts.
     None,
 }
-pub use coverage::{TerrainCoverageIndex, TerrainSample};
+pub use coverage::{DemDetail, TerrainCoverageIndex};
 pub use dem::{DemError, DemTile};
 use drape_pass::{DrapePassNode, DRAPE_PASS};
 pub use drape_targets::is_drapeable;
 pub use draw::draw_terrain;
-pub use elevation::elevation_at_world;
 pub use interaction::{GestureAnchor, TerrainHit};
 use loaded_dem::DemRevision;
 pub use loaded_dem::LoadedDem;
