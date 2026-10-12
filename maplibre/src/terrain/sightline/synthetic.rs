@@ -5,7 +5,7 @@
 use cgmath::Point2;
 use image::{Rgba, RgbaImage};
 
-use super::{lat_lon_to_mercator, DrawnTerrain};
+use super::{lat_lon_to_mercator, DrawnTerrain, LoadedGround};
 use crate::{
     coords::{LatLon, WorldTileCoords, ZoomLevel},
     io::source_type::{RasterSource, SourceType},
@@ -15,10 +15,7 @@ use crate::{
     },
     style::source::TileAddressingScheme,
     tcs::tiles::Tiles,
-    terrain::{
-        coverage::TerrainCoverageIndex, dem::DemTile, source::DemSource, DemTileComponent,
-        LoadedDem,
-    },
+    terrain::{coverage::TerrainCoverageIndex, dem::DemTile, source::DemSource},
 };
 
 pub(crate) const TERRARIUM: [f64; 4] = [256.0, 1.0, 1.0 / 256.0, 32768.0];
@@ -99,16 +96,14 @@ impl Ground {
         loaded: &[WorldTileCoords],
         height: impl Fn(Point2<f64>) -> f64,
     ) -> Self {
-        let mut tiles = Tiles::default();
-        for coords in loaded {
-            tiles
-                .spawn_mut(*coords)
-                .expect("valid coords")
-                .insert(DemTileComponent::Loaded(LoadedDem::new(dem_tile(
-                    *coords, &height,
-                ))));
-        }
-        let index = TerrainCoverageIndex::build(rendered.iter().copied(), &tiles, &source(ZOOM));
+        let LoadedGround { tiles, index } = LoadedGround::new(
+            rendered.iter().copied(),
+            loaded
+                .iter()
+                .map(|coords| (*coords, dem_tile(*coords, &height))),
+            &source(ZOOM),
+        )
+        .expect("valid tiles");
         Self { tiles, index }
     }
 
