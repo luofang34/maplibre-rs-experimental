@@ -28,11 +28,13 @@ use crate::{
 };
 
 mod ground;
+mod loaded_ground;
 mod mesh;
 mod pick;
 mod target;
 
 pub use ground::TerrainUnknown;
+pub use loaded_ground::{LoadedGround, LoadedGroundError};
 use mesh::Cell;
 pub use pick::{pick_globe_terrain, TerrainPick};
 pub use target::{target_view, TargetAltitude, TargetView, Visibility};
