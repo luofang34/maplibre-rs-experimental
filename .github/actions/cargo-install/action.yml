@@ -61,5 +61,13 @@ runs:
       shell: bash
     - name: Install ${{ inputs.name }}
       shell: bash
+      # Unauthenticated, binstall's lookup of a GitHub release can time out on a busy runner and
+      # fall back to building from source, which some crates, such as cargo-nextest, refuse
+      # without --locked. With the token the release is found; with --locked a build from
+      # source still succeeds.
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
       # Do not use symlinks because they behave weird on Windows(+Bash)
-      run: cargo binstall --no-confirm --force --no-symlinks ${{ inputs.name }}
+      run: |
+        cargo binstall --no-confirm --force --no-symlinks --locked \
+          --maximum-resolution-timeout 60 ${{ inputs.name }}
