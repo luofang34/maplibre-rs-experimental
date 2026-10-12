@@ -7,12 +7,13 @@
 //! camera follows its target; a gesture freezes it, keeps its terrain anchor under the
 //! pointer, and at its end keeps the eye where the gesture left it.
 
-use cgmath::{InnerSpace, Point2, Rad, Vector3};
+use cgmath::{InnerSpace, Point2, Rad, Vector3, Vector4};
 
 use crate::{
     coords::{LatLon, Zoom, TILE_SIZE},
     projection::globe::{
-        interaction::pan_center_to_anchor, lat_lon_to_unit_sphere, unit_sphere_to_lat_lon,
+        camera::GlobeCameraState, interaction::pan_center_to_anchor, lat_lon_to_unit_sphere,
+        unit_sphere_to_lat_lon,
     },
     render::{projection::globe_camera_for_view, view_state::ViewState},
     tcs::world::World,
@@ -27,6 +28,11 @@ use crate::{
 const ANCHOR_PASSES: usize = 8;
 /// Height the eye keeps above the ground under it.
 const GROUND_CLEARANCE_METERS: f64 = 2.0;
+/// Height the corners of the near plane keep above the ground under them.
+const NEAR_PLANE_CLEARANCE_METERS: f64 = 0.1;
+/// Passes that lift the eye until its near plane clears the ground; each lift tilts the view
+/// less than the one before.
+const NEAR_PLANE_PASSES: usize = 4;
 
 /// A terrain point a gesture keeps under the pointer.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -125,36 +131,74 @@ pub fn recalculate_globe_zoom_and_center(view_state: &mut ViewState, elevation: 
 /// Lifts the eye out of the ground under it, keeping the target, as GL JS raises its camera
 /// out of the terrain: the eye moves straight up onto the ground plus a small clearance, and
 /// pitch and zoom follow. The ground is the higher of the best loaded DEM, which reaches past
-/// the drawn tiles, and the ground drawn there. Returns whether the camera moved.
+/// the drawn tiles, and the ground drawn there. The near plane, a little ahead of the eye, is
+/// kept out of the ground too, as a slope rising just in front of a low eye would cut it open.
+/// Returns whether the camera moved.
 pub fn keep_globe_camera_above_terrain(view_state: &mut ViewState, world: &World) -> bool {
-    let Some((eye, target)) = globe_pose(view_state) else {
-        return false;
-    };
     let Some(index) = world.resources.get::<TerrainCoverageIndex>() else {
         return false;
     };
     let body = view_state.body();
-    let location = unit_sphere_to_lat_lon(eye.normalize());
-    let under = lat_lon_to_mercator(location);
-    let loaded = index.loaded_ground_cached(&world.tiles, under.x, under.y, DemDetail::Finest);
-    // Between their vertices the drawn triangles can stand above the DEM sampled there, as
-    // over a sharp peak; an eye below them would see the inside of the terrain.
-    let drawn = DrawnTerrain {
+    let terrain = DrawnTerrain {
         index,
         tiles: &world.tiles,
         body,
-    }
-    .ground_at(location)
-    .ok()
-    .flatten();
-    let Some(ground) = loaded.into_iter().chain(drawn).reduce(f64::max) else {
-        return false;
     };
-    let floor = body.unit_radius_at(ground + GROUND_CLEARANCE_METERS);
-    if eye.magnitude() >= floor {
-        return false;
+    // How far below `clearance` metres over the ground under it `point` stands, in units of
+    // the radius; `None` where no ground is known there.
+    let deficit = |point: Vector3<f64>, clearance: f64| {
+        let location = unit_sphere_to_lat_lon(point.normalize());
+        let under = lat_lon_to_mercator(location);
+        let loaded = index.loaded_ground_cached(&world.tiles, under.x, under.y, DemDetail::Finest);
+        // Between their vertices the drawn triangles can stand above the DEM sampled there, as
+        // over a sharp peak; an eye below them would see the inside of the terrain.
+        let drawn = terrain.ground_at(location).ok().flatten();
+        let ground = loaded.into_iter().chain(drawn).reduce(f64::max)?;
+        Some(body.unit_radius_at(ground + clearance) - point.magnitude())
+    };
+    let mut moved = false;
+    // Lifting the eye tilts the view toward its target, which moves the near plane's corners
+    // over other ground, so each pass checks them again.
+    for _ in 0..NEAR_PLANE_PASSES {
+        let Some((eye, target)) = globe_pose(view_state) else {
+            break;
+        };
+        let corners = globe_camera_for_view(view_state)
+            .map(|camera| near_plane_corners(&camera))
+            .unwrap_or_default();
+        let lift = deficit(eye, GROUND_CLEARANCE_METERS)
+            .into_iter()
+            .chain(
+                corners
+                    .into_iter()
+                    .filter_map(|corner| deficit(corner, NEAR_PLANE_CLEARANCE_METERS)),
+            )
+            .reduce(f64::max);
+        let Some(lift) = lift.filter(|lift| *lift > 0.0) else {
+            break;
+        };
+        if !look_from(
+            view_state,
+            eye.normalize() * (eye.magnitude() + lift),
+            target,
+        ) {
+            break;
+        }
+        moved = true;
     }
-    look_from(view_state, eye.normalize() * floor, target)
+    moved
+}
+
+/// The corners of `camera`'s near plane, in unit-globe coordinates.
+fn near_plane_corners(camera: &GlobeCameraState) -> Vec<Vector3<f64>> {
+    let inverse = camera.inverse_view_projection();
+    [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)]
+        .into_iter()
+        .filter_map(|(x, y)| {
+            let corner = inverse * Vector4::new(x, y, -1.0, 1.0);
+            (corner.w.abs() > f64::EPSILON).then(|| corner.truncate() / corner.w)
+        })
+        .collect()
 }
 
 /// Moves the center so `anchor` shows at `pixel`, keeping zoom, pitch and bearing; the globe
