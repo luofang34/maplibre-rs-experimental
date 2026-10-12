@@ -22,9 +22,9 @@ pub(in crate::sdf) fn elevation_at(world: &World, coords: WorldTileCoords, point
         .resources
         .get::<TerrainCoverageIndex>()
         .and_then(|index| {
-            index
-                .elevation_at(&world.tiles, x, y)
-                .or_else(|| index.elevation_cached(&world.tiles, x, y))
+            index.elevation_at(&world.tiles, x, y).or_else(|| {
+                index.loaded_ground_cached(&world.tiles, x, y, crate::terrain::DemDetail::Finest)
+            })
         })
         .unwrap_or(0.0) as f32
 }

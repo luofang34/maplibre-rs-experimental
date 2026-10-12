@@ -9,7 +9,11 @@ fn a_picked_point_projects_back_to_its_pixel_and_is_visible() {
     for center in [SCENE, antimeridian] {
         let ground = Ground::around(center, hills);
         let terrain = ground.terrain();
-        let elevation = terrain.ground_at(center).expect("loaded ground");
+        let elevation = terrain
+            .ground_at(center)
+            .ok()
+            .flatten()
+            .expect("loaded ground");
         for (pitch, bearing) in [(0.0, 0.0), (70.0, 324.037_142_967_012_36), (85.0, 90.0)] {
             let camera = camera(center, pitch, bearing, elevation);
             let mut picked = 0;
@@ -120,7 +124,10 @@ fn ground_without_any_dem_is_unknown_not_sea_level() {
     let ground = Ground::new(&rendered, &loaded, |_| 200.0);
     let terrain = ground.terrain();
     let unloaded = location(Point2::new((f64::from(column) + 1.5) / scale, scene.y));
-    assert_eq!(terrain.ground_at(unloaded), None);
+    assert!(
+        matches!(terrain.ground_at(unloaded), Err(TerrainUnknown { .. })),
+        "a rendered tile without its DEM is unknown ground, not sea level"
+    );
     // Looking east past the scene, the ray runs low over the unloaded column before it meets
     // any ground.
     let camera = camera(SCENE, 80.0, 90.0, 200.0);

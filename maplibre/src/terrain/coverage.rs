@@ -2,6 +2,14 @@
 //!
 //! Mirrors GL JS `TerrainCoverageIndex`: the index is rebuilt every frame from the tiles the
 //! terrain draws, so elevation queries, ray casts and tile culling all see the same surface.
+//!
+//! The ground at a point is asked one of two ways. The drawn ground, the triangles the frame
+//! draws, is [`DrawnTerrain::ground_at`](crate::terrain::sightline::DrawnTerrain::ground_at):
+//! it decides lines of sight, picking and conversion between the screen and the ground. The
+//! best loaded DEM, [`TerrainCoverageIndex::loaded_ground_cached`], reads whatever DEM has
+//! loaded, inside the view or not: it keeps the camera and the center above the terrain.
+//! Between them sits the crate's stitched DEM sample, the height the drawn mesh's vertices
+//! take, which the mesh and the flat camera's gestures are built from.
 
 use std::{collections::HashMap, sync::Arc};
 
@@ -20,12 +28,22 @@ use crate::{
 
 /// Metres added around the sampled minimum and maximum so ray casts bracket the surface.
 const BRACKET_PADDING_METERS: f64 = 10.0;
+/// How finely [`TerrainCoverageIndex::loaded_ground_cached`] reads the loaded DEM.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DemDetail {
+    /// As the terrain tile at this zoom samples it: its DEM tile, or the nearest loaded
+    /// ancestor, as GL JS lifts its center by the tile at the integer zoom.
+    Tile(u8),
+    /// The finest DEM loaded, down to the source's maxzoom.
+    Finest,
+}
+
 /// Largest tile-local coordinate, keeping samples inside the tile that contains them.
 const MAX_TILE_COORD: f64 = EXTENT * (1.0 - 1e-12);
 
-/// Result of sampling the terrain surface at one position.
+/// Result of sampling the stitched DEM of the rendered tiles at one position.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct TerrainSample {
+pub(crate) struct TerrainSample {
     /// Whether a rendered tile contains the position.
     pub covered: bool,
     /// Whether that tile's DEM has loaded, so the elevation is real rather than sea level.
@@ -160,8 +178,8 @@ impl TerrainCoverageIndex {
         self.dem_tile_size.max(1)
     }
 
-    /// The rendered tile containing Mercator coordinates in `0..1`, finest first, as
-    /// [`sample`](Self::sample) picks it.
+    /// The rendered tile containing Mercator coordinates in `0..1`, finest first, as the
+    /// stitched sample picks it.
     pub fn rendered_tile_at(&self, mercator_x: f64, mercator_y: f64) -> Option<WorldTileCoords> {
         if !(0.0..1.0).contains(&mercator_y) {
             return None;
@@ -178,8 +196,8 @@ impl TerrainCoverageIndex {
         })
     }
 
-    /// Samples the rendered surface at Mercator coordinates in `0..1`.
-    pub fn sample(&self, tiles: &Tiles, mercator_x: f64, mercator_y: f64) -> TerrainSample {
+    /// Samples the stitched DEM of the rendered tile containing Mercator coordinates in `0..1`.
+    pub(crate) fn sample(&self, tiles: &Tiles, mercator_x: f64, mercator_y: f64) -> TerrainSample {
         if !(0.0..1.0).contains(&mercator_y) {
             return TerrainSample::NOT_COVERED;
         }
@@ -189,9 +207,11 @@ impl TerrainCoverageIndex {
             })
     }
 
-    /// Samples the surface of the rendered tile `coords` at Mercator coordinates in `0..1`, on
-    /// or inside its edges, as that tile draws it.
-    pub fn sample_in(
+    /// Samples the DEM behind the rendered tile `coords` at Mercator coordinates in `0..1`, on
+    /// or inside its edges: bilinear within the DEM tile, stitched to the neighbours' heights
+    /// along the tile's edges. The drawn mesh takes these heights at its vertices and is flat
+    /// between them, so away from a vertex the drawn ground can differ from this sample.
+    pub(crate) fn sample_in(
         &self,
         tiles: &Tiles,
         coords: WorldTileCoords,
@@ -229,26 +249,32 @@ impl TerrainCoverageIndex {
         }
     }
 
-    /// Exaggerated elevation at Mercator coordinates, or `None` where no DEM has loaded.
-    pub fn elevation_at(&self, tiles: &Tiles, mercator_x: f64, mercator_y: f64) -> Option<f64> {
-        let sample = self.sample(tiles, mercator_x, mercator_y);
-        sample.dem_loaded.then_some(sample.elevation)
-    }
-
-    /// Finest cached elevation, including terrain outside the current view, for camera clearance.
-    pub fn elevation_cached(&self, tiles: &Tiles, x: f64, y: f64) -> Option<f64> {
-        self.elevation_at_zoom(tiles, x, y, self.maxzoom.saturating_add(1).min(24))
-    }
-
-    /// Exaggerated elevation at Mercator coordinates from any loaded DEM, rendered or not, as
-    /// the tile at `zoom` would sample it; `None` where nothing covering it has loaded.
-    pub fn elevation_at_zoom(
+    /// Exaggerated stitched elevation of the rendered tiles at Mercator coordinates, or `None`
+    /// where no DEM has loaded.
+    pub(crate) fn elevation_at(
         &self,
         tiles: &Tiles,
         mercator_x: f64,
         mercator_y: f64,
-        zoom: u8,
     ) -> Option<f64> {
+        let sample = self.sample(tiles, mercator_x, mercator_y);
+        sample.dem_loaded.then_some(sample.elevation)
+    }
+
+    /// Exaggerated elevation at Mercator coordinates in `0..1` from the best loaded DEM, rendered
+    /// or not, bilinear within one DEM tile; `None` where nothing covering it has loaded. This
+    /// keeps the camera above the ground, including ground the frame does not draw.
+    pub fn loaded_ground_cached(
+        &self,
+        tiles: &Tiles,
+        mercator_x: f64,
+        mercator_y: f64,
+        detail: DemDetail,
+    ) -> Option<f64> {
+        let zoom = match detail {
+            DemDetail::Tile(zoom) => zoom,
+            DemDetail::Finest => self.maxzoom.saturating_add(1).min(24),
+        };
         if !(0.0..1.0).contains(&mercator_y) {
             return None;
         }

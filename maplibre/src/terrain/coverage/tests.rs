@@ -198,13 +198,13 @@ fn camera_clearance_samples_fine_cached_terrain_outside_rendered_tiles() {
     assert_eq!(index.elevation_at(&tiles, 0.01, 0.01), None);
     assert!(
         index
-            .elevation_cached(&tiles, 0.01, 0.01)
+            .loaded_ground_cached(&tiles, 0.01, 0.01, crate::terrain::DemDetail::Finest)
             .expect("cached mountain")
             >= 5000.0
     );
     assert!(
         index
-            .elevation_cached(&tiles, 0.4, 0.4)
+            .loaded_ground_cached(&tiles, 0.4, 0.4, crate::terrain::DemDetail::Finest)
             .expect("coarse fallback")
             < 1000.0
     );

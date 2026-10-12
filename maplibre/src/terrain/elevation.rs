@@ -1,45 +1,11 @@
-//! Elevation queries against the loaded DEM tiles.
+//! The height of the point the camera orbits at the map center, from the loaded DEM tiles.
 
 use crate::{
     context::MapContext,
-    coords::{WorldCoords, WorldTileCoords, Zoom, EXTENT, TILE_SIZE},
-    tcs::{system::SystemResult, tiles::Tiles},
-    terrain::{
-        coverage::TerrainCoverageIndex, request_system::dem_tile_coords, source::DemSource,
-        DemTileComponent,
-    },
+    coords::{WorldCoords, TILE_SIZE},
+    tcs::system::SystemResult,
+    terrain::coverage::TerrainCoverageIndex,
 };
-
-/// Elevation in metres, including exaggeration, at a world position of the current zoom.
-///
-/// Samples the DEM tile the position's view tile drapes from, falling back to loaded ancestors
-/// while the tile is in flight. Returns `None` when no DEM covers the position yet.
-pub fn elevation_at_world(
-    tiles: &Tiles,
-    dem: &DemSource,
-    zoom: Zoom,
-    position: WorldCoords,
-) -> Option<f64> {
-    let view_tile = position.into_world_tile(zoom.zoom_level(TILE_SIZE), zoom);
-    let mut coords = dem_tile_coords(view_tile, dem.minzoom, dem.maxzoom)?;
-    loop {
-        if let Some(DemTileComponent::Loaded(dem_tile)) = tiles.query::<&DemTileComponent>(coords) {
-            let (x, y) = tile_local(position, coords, zoom);
-            return Some(
-                dem_tile.tile.elevation_at_tile_coords(x, y) * f64::from(dem.exaggeration),
-            );
-        }
-        coords = coords.get_parent()?;
-    }
-}
-
-/// Position inside `coords` in `0..=EXTENT` tile units.
-fn tile_local(position: WorldCoords, coords: WorldTileCoords, zoom: Zoom) -> (f64, f64) {
-    let tile_pixels = TILE_SIZE * Zoom::from(coords.z).scale_delta(&zoom);
-    let x = (position.x / tile_pixels - f64::from(coords.x)) * EXTENT;
-    let y = (position.y / tile_pixels - f64::from(coords.y)) * EXTENT;
-    (x.clamp(0.0, EXTENT), y.clamp(0.0, EXTENT))
-}
 
 /// Whether the globe camera of `style` orbits the center's elevation.
 ///
@@ -114,11 +80,11 @@ pub fn center_elevation_system(
     // GL JS lifts the centre by the terrain tile at the integer zoom, not by the tile drawn
     // under it, which a coarser level may stand in for at a distance.
     let tile_zoom = zoom.value().floor().clamp(0.0, f64::from(u8::MAX)) as u8;
-    let elevation = index.elevation_at_zoom(
+    let elevation = index.loaded_ground_cached(
         &world.tiles,
         center.x / world_size,
         center.y / world_size,
-        tile_zoom,
+        crate::terrain::DemDetail::Tile(tile_zoom),
     );
     let follows_ground =
         view_state.center_clamped_to_ground() && !view_state.center_elevation_frozen();
