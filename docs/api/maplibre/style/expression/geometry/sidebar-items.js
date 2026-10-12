@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["GEOMETRY_PROPERTY"],"enum":["Containment"],"fn":["cross","crosses_ring","on_segment","point_segment_distance","polygon_contains","position","positions","rings","segment_distance","segments_intersect"],"struct":["Geometry","LocalMetres"]};

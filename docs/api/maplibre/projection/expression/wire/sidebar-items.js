@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["append_stops","curve_number","curve_value","expression_value","invalid_number","is_zoom_input","named_value","parse_curve","parse_interpolate","parse_named","parse_projection","parse_projection_type","parse_step","parse_stops","parse_transition","projection_value","unsupported","zoom_value"],"struct":["ProjectionWire"]};

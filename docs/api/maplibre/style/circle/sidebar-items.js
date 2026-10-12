@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["CirclePitchAlignment","CirclePitchScale"],"fn":["number_at"],"struct":["CirclePaint"]};

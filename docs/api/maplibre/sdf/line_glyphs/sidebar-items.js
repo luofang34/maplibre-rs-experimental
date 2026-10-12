@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["place_glyphs","reads_backwards"],"mod":["screen"],"struct":["GlyphPose","LineWalker"]};

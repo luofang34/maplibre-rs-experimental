@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["Completion","ProcessVectorError"],"fn":["apply_filter_to_layer","decode_mvt","decode_tile","extent_scale","feature_properties","process_vector_tile","process_vector_tile_with_assets"],"mod":["geometry_tags","processing"],"struct":["ProcessVectorContext","VectorTileRequest"]};

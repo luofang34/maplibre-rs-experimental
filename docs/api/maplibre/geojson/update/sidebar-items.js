@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["SourceUpdateError"],"fn":["apply","feature_id","feature_list","geojson_source_mut","promoted_property"],"struct":["FeatureUpdate","GeoJsonDiff","PropertyValue"]};

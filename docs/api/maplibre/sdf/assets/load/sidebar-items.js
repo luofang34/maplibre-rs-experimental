@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["BUNDLED_LATIN"],"fn":["glyph_range","glyph_url","icon_stretch","load_sprites","load_symbol_assets","load_symbol_assets_awaiting","pack_provided","pack_sprites","pack_style_image","premultiply","ranges","sprite_sources","sprite_url","text_fit"],"mod":["requests"],"struct":["LoadedSymbolAssets","SymbolAssetConfig","SymbolAssetError"]};

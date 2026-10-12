@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["BASELINE"],"fn":["anchor_offsets","anchored_offset","from_radial","from_text_offset","variable_anchors"]};

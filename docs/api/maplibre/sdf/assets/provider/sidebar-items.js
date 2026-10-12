@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["ImageProviderError","ImageResolution","Resolved"],"mod":["gate"],"struct":["Call","Counters","ImageProviderStats","ImageProviders","ImageRequest","Namespace","ProvidedImage","ProviderLimits","Registry"],"trait":["StyleImageProvider"],"type":["ProvideFuture"]};

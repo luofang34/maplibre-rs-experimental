@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["distance_opacity"],"struct":["SymbolVisibility"]};

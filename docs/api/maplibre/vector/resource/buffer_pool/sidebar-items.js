@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["BackingBufferType"],"fn":["fitting_buffer_size"],"mod":["allocation_error","device","index","upload"],"struct":["BackingBuffer","BufferPool"],"type":["PatternRuns","SortRuns"]};

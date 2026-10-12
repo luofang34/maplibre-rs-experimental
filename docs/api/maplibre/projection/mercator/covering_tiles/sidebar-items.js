@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["MercatorCoveringError"],"fn":["covering_tiles","covering_tiles_with_history","lod_context","tile_intersection"],"struct":["MercatorCoveringOptions"]};

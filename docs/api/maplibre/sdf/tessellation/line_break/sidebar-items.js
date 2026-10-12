@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["allows_ideographic_breaking","badness","break_penalty","breakable","evaluate_break","is_whitespace","trimmed","wrap"],"struct":["Break"]};

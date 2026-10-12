@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["ANCHOR_PASSES","ZOOM_HALVINGS"]};

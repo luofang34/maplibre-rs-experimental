@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["layouts","view_layout_entries","world_layout"],"struct":["BackgroundPatternGpu","GlobePattern","ViewUniforms"]};

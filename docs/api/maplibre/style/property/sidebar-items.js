@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["StyleProperty"],"mod":["text"],"struct":["ColorList","FormattedText","ImageName","NumberList","PatternName","PropertyExpression","TextField","TextSection","UnsupportedProperty"],"trait":["PropertyValue"]};

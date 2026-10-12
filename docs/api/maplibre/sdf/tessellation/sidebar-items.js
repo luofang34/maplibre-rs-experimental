@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["TILE_UNITS_PER_PIXEL"],"enum":["LinePlacement"],"fn":["is_line_placed","line_placement","polygon_rings"],"mod":["draw_order","icon_quads","layout","line_anchors","line_break","line_merge","pole","text_layout","text_offset"],"struct":["TextTessellator"],"type":["GeoResult"]};

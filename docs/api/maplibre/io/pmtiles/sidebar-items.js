@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_DEPTH","SCHEME"],"enum":["PmtilesFormatError","PmtilesUrl"],"fn":["failed","range"],"mod":["format"],"struct":["Archive","PmtilesClient","PmtilesError","PmtilesReader"]};

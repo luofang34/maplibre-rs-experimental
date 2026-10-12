@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["merge_symbol_layout","parse_paint"],"struct":["LayerProperties","PaintWithExtras","StyleLayerDef"]};

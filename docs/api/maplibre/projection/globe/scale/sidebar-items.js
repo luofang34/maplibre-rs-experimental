@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MERCATOR_LATITUDE_LIMIT"],"fn":["parallel_scale","radius_pixels","style_zoom"]};

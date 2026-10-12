@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["ResourceReady"],"fn":["camera","camera_moved","camera_of","count_drape_redraws","eye_index","finish_frame","host_frame_in_progress","keep_animating","mark_dirty","record_gpu_time","record_stage","resource_ready","signals"],"struct":["FrameSignals","FrameStats"]};

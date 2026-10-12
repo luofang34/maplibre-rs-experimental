@@ -1,0 +1,110 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `maplibre/src/raster/dem_border.rs`."><title>dem_border.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="maplibre" data-themes="" data-resource-suffix="" data-rustdoc-version="1.97.1 (8bab26f4f 2026-07-14)" data-channel="1.97.1" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">maplibre/raster/</div>dem_border.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! One-pixel borders around DEM tiles so slope shading reads across tile edges.
+<a href=#2 id=2 data-nosnippet>2</a>//!
+<a href=#3 id=3 data-nosnippet>3</a>//! A tile's border holds the edge samples of its loaded neighbours, as GL JS backfills DEM
+<a href=#4 id=4 data-nosnippet>4</a>//! tiles, and its own edge where a neighbour is missing. Shaders that read these textures
+<a href=#5 id=5 data-nosnippet>5</a>//! address the interior at an offset of one texel.
+<a href=#6 id=6 data-nosnippet>6</a>
+<a href=#7 id=7 data-nosnippet>7</a></span><span class="kw">use </span>image::RgbaImage;
+<a href=#8 id=8 data-nosnippet>8</a>
+<a href=#9 id=9 data-nosnippet>9</a><span class="doccomment">/// Texels added on each side of a DEM tile.
+<a href=#10 id=10 data-nosnippet>10</a></span><span class="kw">pub const </span>BORDER: u32 = <span class="number">1</span>;
+<a href=#11 id=11 data-nosnippet>11</a>
+<a href=#12 id=12 data-nosnippet>12</a><span class="doccomment">/// The bit standing for the neighbour at offset (`dx`, `dy`) in a sides mask.
+<a href=#13 id=13 data-nosnippet>13</a></span><span class="kw">pub fn </span>side_bit(dx: i32, dy: i32) -&gt; u16 {
+<a href=#14 id=14 data-nosnippet>14</a>    <span class="number">1 </span>&lt;&lt; ((dy + <span class="number">1</span>) * <span class="number">3 </span>+ (dx + <span class="number">1</span>))
+<a href=#15 id=15 data-nosnippet>15</a>}
+<a href=#16 id=16 data-nosnippet>16</a>
+<a href=#17 id=17 data-nosnippet>17</a><span class="doccomment">/// The sides of a border filled from a neighbour of the tile's own size.
+<a href=#18 id=18 data-nosnippet>18</a></span><span class="kw">pub fn </span>filled_sides(image: <span class="kw-2">&amp;</span>RgbaImage, neighbours: <span class="kw-2">&amp;</span>[[<span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>RgbaImage&gt;; <span class="number">3</span>]; <span class="number">3</span>]) -&gt; u16 {
+<a href=#19 id=19 data-nosnippet>19</a>    <span class="kw">let </span><span class="kw-2">mut </span>sides = <span class="number">0</span>;
+<a href=#20 id=20 data-nosnippet>20</a>    <span class="kw">for </span>dy <span class="kw">in </span>-<span class="number">1</span>..=<span class="number">1_i32 </span>{
+<a href=#21 id=21 data-nosnippet>21</a>        <span class="kw">for </span>dx <span class="kw">in </span>-<span class="number">1</span>..=<span class="number">1_i32 </span>{
+<a href=#22 id=22 data-nosnippet>22</a>            <span class="kw">let </span>usable = neighbours[(dy + <span class="number">1</span>) <span class="kw">as </span>usize][(dx + <span class="number">1</span>) <span class="kw">as </span>usize]
+<a href=#23 id=23 data-nosnippet>23</a>                .is_some_and(|neighbour| neighbour.dimensions() == image.dimensions());
+<a href=#24 id=24 data-nosnippet>24</a>            <span class="kw">if </span>(dx, dy) != (<span class="number">0</span>, <span class="number">0</span>) &amp;&amp; usable {
+<a href=#25 id=25 data-nosnippet>25</a>                sides |= side_bit(dx, dy);
+<a href=#26 id=26 data-nosnippet>26</a>            }
+<a href=#27 id=27 data-nosnippet>27</a>        }
+<a href=#28 id=28 data-nosnippet>28</a>    }
+<a href=#29 id=29 data-nosnippet>29</a>    sides
+<a href=#30 id=30 data-nosnippet>30</a>}
+<a href=#31 id=31 data-nosnippet>31</a>
+<a href=#32 id=32 data-nosnippet>32</a><span class="doccomment">/// The image with a border of neighbour samples; `neighbours` is indexed `[dy + 1][dx + 1]`
+<a href=#33 id=33 data-nosnippet>33</a>/// and the centre entry is ignored. A neighbour of another size counts as missing.
+<a href=#34 id=34 data-nosnippet>34</a></span><span class="kw">pub fn </span>with_border(image: <span class="kw-2">&amp;</span>RgbaImage, neighbours: <span class="kw-2">&amp;</span>[[<span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>RgbaImage&gt;; <span class="number">3</span>]; <span class="number">3</span>]) -&gt; RgbaImage {
+<a href=#35 id=35 data-nosnippet>35</a>    <span class="kw">let </span>(width, height) = image.dimensions();
+<a href=#36 id=36 data-nosnippet>36</a>    <span class="kw">let </span>edge = i64::from(BORDER);
+<a href=#37 id=37 data-nosnippet>37</a>    RgbaImage::from_fn(width + <span class="number">2 </span>* BORDER, height + <span class="number">2 </span>* BORDER, |x, y| {
+<a href=#38 id=38 data-nosnippet>38</a>        <span class="kw">let </span>(column, row) = (i64::from(x) - edge, i64::from(y) - edge);
+<a href=#39 id=39 data-nosnippet>39</a>        <span class="kw">let </span>side = |value: i64, size: u32| <span class="kw">match </span>value {
+<a href=#40 id=40 data-nosnippet>40</a>            v <span class="kw">if </span>v &lt; <span class="number">0 </span>=&gt; -<span class="number">1</span>,
+<a href=#41 id=41 data-nosnippet>41</a>            v <span class="kw">if </span>v &gt;= i64::from(size) =&gt; <span class="number">1</span>,
+<a href=#42 id=42 data-nosnippet>42</a>            <span class="kw">_ </span>=&gt; <span class="number">0</span>,
+<a href=#43 id=43 data-nosnippet>43</a>        };
+<a href=#44 id=44 data-nosnippet>44</a>        <span class="kw">let </span>(dx, dy) = (side(column, width), side(row, height));
+<a href=#45 id=45 data-nosnippet>45</a>        <span class="kw">let </span>wrapped = |value: i64, size: u32| value.rem_euclid(i64::from(size)) <span class="kw">as </span>u32;
+<a href=#46 id=46 data-nosnippet>46</a>        <span class="kw">let </span>clamped = |value: i64, size: u32| value.clamp(<span class="number">0</span>, i64::from(size) - <span class="number">1</span>) <span class="kw">as </span>u32;
+<a href=#47 id=47 data-nosnippet>47</a>        <span class="kw">if </span>(dx, dy) != (<span class="number">0</span>, <span class="number">0</span>) {
+<a href=#48 id=48 data-nosnippet>48</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(neighbour) = neighbours[(dy + <span class="number">1</span>) <span class="kw">as </span>usize][(dx + <span class="number">1</span>) <span class="kw">as </span>usize]
+<a href=#49 id=49 data-nosnippet>49</a>                .filter(|neighbour| neighbour.dimensions() == (width, height))
+<a href=#50 id=50 data-nosnippet>50</a>            {
+<a href=#51 id=51 data-nosnippet>51</a>                <span class="kw">return </span><span class="kw-2">*</span>neighbour.get_pixel(wrapped(column, width), wrapped(row, height));
+<a href=#52 id=52 data-nosnippet>52</a>            }
+<a href=#53 id=53 data-nosnippet>53</a>        }
+<a href=#54 id=54 data-nosnippet>54</a>        <span class="kw-2">*</span>image.get_pixel(clamped(column, width), clamped(row, height))
+<a href=#55 id=55 data-nosnippet>55</a>    })
+<a href=#56 id=56 data-nosnippet>56</a>}
+<a href=#57 id=57 data-nosnippet>57</a>
+<a href=#58 id=58 data-nosnippet>58</a><span class="doccomment">/// A pixel value for tests that need to tell tiles apart.
+<a href=#59 id=59 data-nosnippet>59</a></span><span class="attr">#[cfg(test)]
+<a href=#60 id=60 data-nosnippet>60</a></span><span class="kw">fn </span>solid(value: u8) -&gt; RgbaImage {
+<a href=#61 id=61 data-nosnippet>61</a>    <span class="kw">use </span>image::Rgba;
+<a href=#62 id=62 data-nosnippet>62</a>    RgbaImage::from_pixel(<span class="number">4</span>, <span class="number">4</span>, Rgba([value, <span class="number">0</span>, <span class="number">0</span>, <span class="number">255</span>]))
+<a href=#63 id=63 data-nosnippet>63</a>}
+<a href=#64 id=64 data-nosnippet>64</a>
+<a href=#65 id=65 data-nosnippet>65</a><span class="attr">#[cfg(test)]
+<a href=#66 id=66 data-nosnippet>66</a></span><span class="kw">mod </span>tests {
+<a href=#67 id=67 data-nosnippet>67</a>    <span class="kw">use </span>image::Rgba;
+<a href=#68 id=68 data-nosnippet>68</a>
+<a href=#69 id=69 data-nosnippet>69</a>    <span class="kw">use super</span>::<span class="kw-2">*</span>;
+<a href=#70 id=70 data-nosnippet>70</a>
+<a href=#71 id=71 data-nosnippet>71</a>    <span class="attr">#[test]
+<a href=#72 id=72 data-nosnippet>72</a>    </span><span class="kw">fn </span>the_border_takes_neighbour_edges_and_replicates_where_none_loaded() {
+<a href=#73 id=73 data-nosnippet>73</a>        <span class="kw">let </span>centre = RgbaImage::from_fn(<span class="number">4</span>, <span class="number">4</span>, |x, y| Rgba([(x * <span class="number">10 </span>+ y) <span class="kw">as </span>u8, <span class="number">0</span>, <span class="number">0</span>, <span class="number">255</span>]));
+<a href=#74 id=74 data-nosnippet>74</a>        <span class="kw">let </span>east = solid(<span class="number">200</span>);
+<a href=#75 id=75 data-nosnippet>75</a>        <span class="kw">let </span><span class="kw-2">mut </span>neighbours: [[<span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>RgbaImage&gt;; <span class="number">3</span>]; <span class="number">3</span>] = Default::default();
+<a href=#76 id=76 data-nosnippet>76</a>        neighbours[<span class="number">1</span>][<span class="number">2</span>] = <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>east);
+<a href=#77 id=77 data-nosnippet>77</a>        <span class="kw">let </span>bordered = with_border(<span class="kw-2">&amp;</span>centre, <span class="kw-2">&amp;</span>neighbours);
+<a href=#78 id=78 data-nosnippet>78</a>        <span class="macro">assert_eq!</span>(bordered.dimensions(), (<span class="number">6</span>, <span class="number">6</span>));
+<a href=#79 id=79 data-nosnippet>79</a>        <span class="macro">assert_eq!</span>(
+<a href=#80 id=80 data-nosnippet>80</a>            bordered.get_pixel(<span class="number">3</span>, <span class="number">3</span>),
+<a href=#81 id=81 data-nosnippet>81</a>            centre.get_pixel(<span class="number">2</span>, <span class="number">2</span>),
+<a href=#82 id=82 data-nosnippet>82</a>            <span class="string">"interior is offset"
+<a href=#83 id=83 data-nosnippet>83</a>        </span>);
+<a href=#84 id=84 data-nosnippet>84</a>        <span class="macro">assert_eq!</span>(
+<a href=#85 id=85 data-nosnippet>85</a>            bordered.get_pixel(<span class="number">5</span>, <span class="number">3</span>)[<span class="number">0</span>],
+<a href=#86 id=86 data-nosnippet>86</a>            <span class="number">200</span>,
+<a href=#87 id=87 data-nosnippet>87</a>            <span class="string">"east border is the east tile"
+<a href=#88 id=88 data-nosnippet>88</a>        </span>);
+<a href=#89 id=89 data-nosnippet>89</a>        <span class="macro">assert_eq!</span>(
+<a href=#90 id=90 data-nosnippet>90</a>            bordered.get_pixel(<span class="number">0</span>, <span class="number">3</span>),
+<a href=#91 id=91 data-nosnippet>91</a>            centre.get_pixel(<span class="number">0</span>, <span class="number">2</span>),
+<a href=#92 id=92 data-nosnippet>92</a>            <span class="string">"an absent neighbour repeats the edge"
+<a href=#93 id=93 data-nosnippet>93</a>        </span>);
+<a href=#94 id=94 data-nosnippet>94</a>        <span class="macro">assert_eq!</span>(
+<a href=#95 id=95 data-nosnippet>95</a>            bordered.get_pixel(<span class="number">5</span>, <span class="number">0</span>),
+<a href=#96 id=96 data-nosnippet>96</a>            centre.get_pixel(<span class="number">3</span>, <span class="number">0</span>),
+<a href=#97 id=97 data-nosnippet>97</a>            <span class="string">"an absent corner repeats the nearest interior texel"
+<a href=#98 id=98 data-nosnippet>98</a>        </span>);
+<a href=#99 id=99 data-nosnippet>99</a>    }
+<a href=#100 id=100 data-nosnippet>100</a>
+<a href=#101 id=101 data-nosnippet>101</a>    <span class="attr">#[test]
+<a href=#102 id=102 data-nosnippet>102</a>    </span><span class="kw">fn </span>a_neighbour_of_another_size_is_ignored() {
+<a href=#103 id=103 data-nosnippet>103</a>        <span class="kw">let </span>centre = solid(<span class="number">7</span>);
+<a href=#104 id=104 data-nosnippet>104</a>        <span class="kw">let </span>wrong = RgbaImage::from_pixel(<span class="number">2</span>, <span class="number">2</span>, Rgba([<span class="number">99</span>, <span class="number">0</span>, <span class="number">0</span>, <span class="number">255</span>]));
+<a href=#105 id=105 data-nosnippet>105</a>        <span class="kw">let </span><span class="kw-2">mut </span>neighbours: [[<span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>RgbaImage&gt;; <span class="number">3</span>]; <span class="number">3</span>] = Default::default();
+<a href=#106 id=106 data-nosnippet>106</a>        neighbours[<span class="number">1</span>][<span class="number">0</span>] = <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>wrong);
+<a href=#107 id=107 data-nosnippet>107</a>        <span class="macro">assert_eq!</span>(with_border(<span class="kw-2">&amp;</span>centre, <span class="kw-2">&amp;</span>neighbours).get_pixel(<span class="number">0</span>, <span class="number">2</span>)[<span class="number">0</span>], <span class="number">7</span>);
+<a href=#108 id=108 data-nosnippet>108</a>    }
+<a href=#109 id=109 data-nosnippet>109</a>}
+</code></pre></div></section></main></body></html>

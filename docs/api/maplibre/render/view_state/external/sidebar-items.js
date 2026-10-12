@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["FOG_FAR_TO_NEAR","LEVEL_PITCH_THRESHOLD","MAX_FOG_FAR_METERS","MIN_FOG_FAR_METERS","MIN_FOG_HEIGHT_METERS","SETTLED_ZOOM_RATE"],"enum":["ExternalViewError"],"fn":["flat_pose_of","view_angles"],"mod":["spatial","sphere"],"struct":["ExternalAnchor","ExternalEye","ExternalView","EyeFrame"]};

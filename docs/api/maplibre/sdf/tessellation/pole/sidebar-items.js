@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["centroid_cell","pole_of_inaccessibility","segment_distance_squared","signed_distance"],"struct":["Cell"],"type":["Ring"]};

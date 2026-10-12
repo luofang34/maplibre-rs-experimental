@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["drape_paint_zoom","feature_metadata","frame_paint","layer_translate_tile_units","metadata_for_layer","painted_tiles","pattern_runs","refresh_layer_paint","sort_runs","sources_for_upload","upload_bucket","upload_size","upload_system","upload_tessellated_layer"],"mod":["paint","sources"],"struct":["VectorPaintFrame"]};

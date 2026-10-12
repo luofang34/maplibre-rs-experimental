@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["char_styles","glyphs_for","line_width"],"static":["NO_GLYPHS"],"struct":["CharStyle"]};

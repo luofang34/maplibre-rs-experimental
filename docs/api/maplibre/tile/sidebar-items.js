@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["GeomType"],"struct":["Feature","Layer","Value"]};

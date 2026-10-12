@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["Footprint"],"fn":["line_reach","offset_line","touches"]};

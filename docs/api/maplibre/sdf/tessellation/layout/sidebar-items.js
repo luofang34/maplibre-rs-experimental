@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["POLE_PRECISION"],"fn":["anchor_fractions","anchors","append","bounds","fit_to_text","offset","quad"],"struct":["CollectedSymbol","SourceFeature"],"type":["LineContext"]};

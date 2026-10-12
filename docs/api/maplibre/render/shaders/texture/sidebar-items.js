@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["DemShading"],"fn":["tile_texture_vertex_buffers"],"struct":["DemShader","RasterShader"]};

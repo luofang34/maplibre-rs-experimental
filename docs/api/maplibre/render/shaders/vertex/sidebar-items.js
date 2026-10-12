@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["POSED_GLYPH"],"struct":["FillShaderFeatureMetadata","SDFShaderFeatureMetadata","ShaderLayerMetadata","ShaderTileMetadata","ShaderVertex"]};

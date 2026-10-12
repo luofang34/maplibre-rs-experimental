@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["sealed"],"struct":["Tile","TileSpawnResult","Tiles"],"trait":["ComponentQuery","ComponentQueryMut","ComponentQueryUnsafe","TileComponent"]};

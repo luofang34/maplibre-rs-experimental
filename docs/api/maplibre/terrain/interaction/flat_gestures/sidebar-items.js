@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["pan_mercator_by_pixels","set_location_at_pixel","zoom_mercator_around"]};

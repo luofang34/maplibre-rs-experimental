@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["SHARP_TURN_DEGREES","UNMAGNIFIED_OFFSET"],"fn":["emit","is_sharp","offset_for","split","toward"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["is_global_state_reference","reads_global_state","substitute","substitute_layer"],"struct":["StateDeclaration"]};

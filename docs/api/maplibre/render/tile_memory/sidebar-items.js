@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["capacity","symbols","tile_bytes","value_bytes","vector_bytes"]};

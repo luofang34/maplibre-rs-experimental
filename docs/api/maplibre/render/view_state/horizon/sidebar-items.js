@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["HORIZON_MARGIN_PIXELS","OUT_OF_SIGHT_PIXELS"],"struct":["HorizonLine"]};

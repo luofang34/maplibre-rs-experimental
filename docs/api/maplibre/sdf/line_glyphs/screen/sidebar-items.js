@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["NEAR_W"],"fn":["anchor_segment","cut_at_eye","place_glyphs_on_screen","place_one"],"struct":["OnScreen","Vertex"]};

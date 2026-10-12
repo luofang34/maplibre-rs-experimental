@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["circle_layer_layout"],"struct":["CircleShader"]};

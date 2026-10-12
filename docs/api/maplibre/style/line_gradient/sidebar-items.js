@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["RAMP_TEXELS","STEP_RAMP_SPAN_BITS","STEP_RAMP_TEXELS"],"fn":["is_stepped","ramp","stepped_progress"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["pending_layer_data","prepare_atlas","upload_geometry","upload_symbol_layer","upload_system"]};

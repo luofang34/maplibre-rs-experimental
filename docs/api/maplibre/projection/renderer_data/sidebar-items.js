@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["ProjectionDataError"],"fn":["compose_projection_data","compute_globe_clipping_plane","rotate_globe_plane_normal","tile_mercator_coordinates","validate_view_geometry"],"struct":["GlobeViewGeometry","ProjectionDataParams","ProjectionMatrices","RendererProjectionData"]};

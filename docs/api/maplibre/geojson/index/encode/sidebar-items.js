@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CLOSE_PATH","LINE_TO","MOVE_TO"],"fn":["command","deduplicated","path","signed_area","step","zigzag"],"struct":["TileEncoder"]};

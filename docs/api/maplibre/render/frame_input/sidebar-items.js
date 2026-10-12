@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["FrameInputError","ViewSource"],"fn":["apply_frame_input","frame_input_system"],"struct":["FrameInput"]};

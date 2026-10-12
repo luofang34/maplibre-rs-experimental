@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["GL_BUFFER"],"fn":["slice"]};

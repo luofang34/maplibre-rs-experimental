@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_COLOR","RAMP_TEXELS"],"fn":["default_color"],"struct":["HeatmapPaint"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["glyphs","requests"],"struct":["NamesAsked"],"type":["GlyphRequests"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MIN_DIRECTION_LENGTH_SQUARED","NEAR_Z"],"enum":["GlobeCameraError"],"fn":["camera_position","camera_to_center_distance","globe_view_matrix","horizon_plane","projection_matrix","radius_pixels","target_scale"],"mod":["external","screen","validation"],"struct":["ExternalGlobeEye","GlobeCameraOptions","GlobeCameraState","GlobePointProjection"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["BILINEAR","BILINEAR_FORESHORTENING","EXTENT","PROJECTIVE_FORESHORTENING","SUBDIVIDED_QUAD_GRANULARITY"],"fn":["is_parallelogram","rounded_corners","terms","triangles","vertex"],"struct":["Terms"],"type":["Vertex"]};

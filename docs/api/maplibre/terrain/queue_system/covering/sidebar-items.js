@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["bounded_covering","for_frame","retained_textures"],"struct":["CachedCovering"]};

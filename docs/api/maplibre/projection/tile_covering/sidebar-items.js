@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["bounded","bounded_by","candidate","coarsen","covers"],"struct":["Candidate","Refinement"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["validate_angles","validate_options"]};

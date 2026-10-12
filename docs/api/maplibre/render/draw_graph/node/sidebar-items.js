@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEPTH_COPY","MAIN_PASS","TRANSLUCENT_PASS"]};

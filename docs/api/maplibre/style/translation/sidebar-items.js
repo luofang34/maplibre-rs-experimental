@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["layer_translate_pixels","translation_at"],"struct":["Pair","Translation"]};

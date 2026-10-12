@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CIRCLE_GRID_STEPS","CIRCLE_QUAD_INDICES"],"fn":["per_feature"],"struct":["CircleOptions"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["RenderCommandResult"],"macro":[["render_command_tuple_impl",1]],"struct":["DrawState"],"trait":["Draw","PhaseItem","RenderCommand"]};

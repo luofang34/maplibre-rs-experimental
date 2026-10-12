@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["PowerPreference","SurfaceType","TextureFormat"],"struct":["Backends","BufferPoolSizes","Features","Limits","Msaa","RendererSettings","WgpuSettings"]};

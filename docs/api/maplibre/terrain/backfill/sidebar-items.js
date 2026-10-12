@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["NEIGHBOUR_OFFSETS"],"fn":["backfill_neighbours","fill_border","neighbours"]};

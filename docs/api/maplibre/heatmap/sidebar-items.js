@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["density_pass","prepare_system","queue_system","render_commands","resource_system","resources"],"struct":["HeatmapDensityPhase","HeatmapPlugin"]};

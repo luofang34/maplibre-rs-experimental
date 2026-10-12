@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["Property"],"fn":["is_layout","property","supports","valid_literal"]};

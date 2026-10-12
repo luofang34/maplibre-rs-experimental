@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["fingerprint","layout_entries","names_missing_image","pattern_name","pattern_scale","per_feature_pattern","premultiplied","size"],"struct":["PatternBinding","PatternResources"]};

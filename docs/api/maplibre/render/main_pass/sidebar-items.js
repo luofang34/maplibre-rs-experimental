@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["EMPTY_STENCIL_REFERENCE"],"fn":["above_symbols","color_attachment","draw_group","draw_layers","same_layer","set_layer_masks"],"struct":["AboveSymbols","MainPassDriverNode","MainPassNode"]};

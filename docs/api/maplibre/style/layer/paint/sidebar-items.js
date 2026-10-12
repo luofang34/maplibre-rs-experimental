@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["RasterResampling","ResamplingMode","TranslateAnchor"],"struct":["BackgroundPaint","FillExtrusionPaint","FillPaint","LinePaint","RasterPaint","SymbolPaint"]};

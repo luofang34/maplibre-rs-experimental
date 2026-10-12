@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["FilterError","GeometryType"],"fn":["kind_name","properties_from_json","reads_feature_state"],"struct":["FeatureContext","Filter"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["google_mercator","tile_coordinates_bavaria"]};

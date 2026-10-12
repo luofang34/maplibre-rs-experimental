@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["is_bidi_control","is_rtl","reorder_lines","split_paragraphs","visual_order"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["N"],"fn":["build_edges","owner","sample_source","shared_height","touches"],"struct":["Dems","EdgeCache","EdgeHeights","Sources"],"type":["Signature"]};

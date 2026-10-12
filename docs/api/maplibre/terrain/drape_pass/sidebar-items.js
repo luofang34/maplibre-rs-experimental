@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DRAPE_PASS"],"fn":["color_attachment","draw_layers"],"struct":["DrapePassNode"]};

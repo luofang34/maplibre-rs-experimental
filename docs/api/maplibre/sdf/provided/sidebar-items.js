@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["RETRY_FIRST","RETRY_LAST"],"enum":["ProvidedImagesState"],"fn":["apply","awaiting","drawn_for_another_ratio","invalidate","invalidate_namespace","release_unwanted","restarted","set_pixel_ratio"],"struct":["DisplayPixelRatio","ProvidedImagesReport","ProvidedImagesTag","TileProvidedImages"]};

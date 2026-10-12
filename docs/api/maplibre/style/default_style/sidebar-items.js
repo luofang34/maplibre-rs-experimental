@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["color","default_layers","fill","layer","line","symbol"]};

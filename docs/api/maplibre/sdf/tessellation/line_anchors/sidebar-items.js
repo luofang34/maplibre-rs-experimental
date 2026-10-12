@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["bends_within_limit","center_anchor","clip_segment","clip_to_tile","direction","distance","distance_to","length","line_anchors","resample"],"struct":["AnchorSpacing","LineAnchor"],"type":["Point"]};

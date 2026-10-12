@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CRITICAL_MEMORY_BYTES","DRAPE_TEXTURES_WHEN_CRITICAL","DRAPE_TEXTURES_WHEN_LOW","DRAPE_TEXTURE_LIMIT","LOW_MEMORY_BYTES","TILES_IN_FLIGHT_WHEN_LOW","UPLOADS_PER_FRAME"],"enum":["MemoryPressure"],"struct":["MemoryBudget","MemoryBudgetTracker","UploadBudget"]};

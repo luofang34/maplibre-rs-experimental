@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["PERSPECTIVE_RATIO_CUTOFF"],"fn":["beyond_perspective_cutoff","canonical_tile","project","screen_boxes","screen_boxes_shifted","text_perspective_scale","text_rotation"],"mod":["ground","line_labels"],"struct":["Placement"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_VERTICES"],"enum":["StructureKind"],"fn":["elevate","elevate_span","fingerprint","for_frame","kind","number","prepare","profile","refresh_gpu"],"struct":["CachedProfiles"],"type":["SpatialBuffer"]};

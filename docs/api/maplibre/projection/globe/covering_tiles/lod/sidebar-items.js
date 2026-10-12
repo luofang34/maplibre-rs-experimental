@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["INTEGRATION_POINTS","MAX_MERCATOR_HORIZON_DEGREES","MAX_MERCATOR_LATITUDE_DEGREES","MAX_ZOOM_LEVELS_ON_SCREEN","TILE_COUNT_MAX_MIN_RATIO"],"fn":["calculate_tile_zoom","distance_to_tile_planar","integral_cos_power","mercator_center","mercator_point","pitch_tile_loading_behavior","radius_world_units"],"struct":["LodContext"]};

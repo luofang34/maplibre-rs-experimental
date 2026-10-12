@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["TerrainPick"],"fn":["pick_globe_terrain"]};

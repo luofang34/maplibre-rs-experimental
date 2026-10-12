@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_LIGHTS","MAX_RAMP_STOPS"],"enum":["HillshadeMethod","IlluminationAnchor"],"fn":["pad","premultiplied"],"struct":["ColorReliefPaint","HillshadePaint","Illumination"]};

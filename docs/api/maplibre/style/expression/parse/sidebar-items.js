@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["FEATURE_STATE_PREFIX"],"enum":["Annotation"],"fn":["json_kind"],"mod":["compound","curves","format","operators"],"struct":["ParseError","Parser"],"type":["Result"]};

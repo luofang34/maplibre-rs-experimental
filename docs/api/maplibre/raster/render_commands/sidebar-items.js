@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":["DrawRasterTile","SetRasterPaintBindGroup","SetRasterTilePipeline","SetRasterViewBindGroup"],"type":["DrawRasterTiles"]};

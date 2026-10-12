@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_FREE_TEXTURES","PARKED_TEXTURES"],"enum":["DrapeState"],"fn":["fingerprint"],"struct":["DrapeCache","Entry"],"trait":["SourceContent"]};

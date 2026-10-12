@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["GAZE_REACH_HEIGHTS","MISS_BLEND_RADII"],"fn":["first_surface_hit","gaze_center","local_axes","missed_center"],"struct":["SphereEye","SpherePose"]};

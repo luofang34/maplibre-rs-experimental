@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["Type","Value"],"fn":["js_number"],"mod":["formatted"],"struct":["Color"]};

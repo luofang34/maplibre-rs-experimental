@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_POSITION","MIN_DIRECTION_LENGTH_SQUARED"],"enum":["LightAnchor","LightError"],"fn":["default_anchor_property","default_position_property","evaluate_position","normalize","spherical_to_cartesian"],"struct":["ExtrusionLight","LightSpecification"]};

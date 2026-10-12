@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["OPERATORS"],"fn":["is_expression"]};

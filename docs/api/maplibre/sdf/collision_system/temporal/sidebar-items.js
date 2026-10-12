@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["key","matches","position"],"struct":["Key","PlacementHistory","State"]};

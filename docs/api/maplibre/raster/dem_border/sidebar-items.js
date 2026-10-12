@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["BORDER"],"fn":["filled_sides","side_bit","with_border"]};

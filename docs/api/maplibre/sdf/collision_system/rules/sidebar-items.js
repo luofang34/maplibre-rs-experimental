@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["VIEWPORT_PADDING"],"enum":["Overlap"],"struct":["PlacementRules"]};

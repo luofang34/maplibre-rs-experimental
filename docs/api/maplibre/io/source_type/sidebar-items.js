@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["SourceType"],"fn":["format_template"],"struct":["GeoJsonTileSource","ImageTileSource","InvalidTileCoords","RasterSource","TessellateSource"]};

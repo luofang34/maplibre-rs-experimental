@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["InterpolationCurve","NamedProjection","ProjectionExpressionError","ProjectionExpressionKind"],"fn":["cubic_bezier_y_for_x","cubic_coordinate","interpolate_stops","interpolation_factor","invalid_number","invalid_stops","mix_weights","step_stops","validate_curve","validate_stops"],"mod":["wire"],"struct":["ProjectionExpression","ProjectionStop"]};

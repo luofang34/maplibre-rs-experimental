@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["RequestDisposition","RequestKind"],"fn":["accepts","cancel_unwanted","completed","due","needs_frame","next_attempt","now","refresh","refresh_tiles","retry_later","started","stop_cancelled","waiting","want"],"struct":["CancelledAttempts","RequestAttempts","RequestClock","RetryState","TileRequestOutcome","TileRequestRetries","WantedRequests"]};

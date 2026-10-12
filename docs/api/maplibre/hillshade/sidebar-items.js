@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["dem_layer_kind"],"mod":["prepare_system","queue_system","render_commands","resource_system","resources"],"struct":["HillshadePlugin"]};

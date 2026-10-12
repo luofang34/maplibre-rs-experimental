@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_EDGE_DISTANCE"],"fn":["clip_ring","clipped","contains","extrude","is_hole","on_clipped_edge","push_wall","rings","signed_area","trapezoid_area"],"struct":["ExtrusionOptions","RoofVertex"],"type":["Ring"]};

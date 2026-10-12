@@ -1,0 +1,9 @@
+(function() {
+    const implementors = Object.fromEntries([["maplibre",[["impl FeatureProcessor for <a class=\"struct\" href=\"maplibre/io/geometry_index/struct.IndexProcessor.html\" title=\"struct maplibre::io::geometry_index::IndexProcessor\">IndexProcessor</a>",0],["impl FeatureProcessor for <a class=\"struct\" href=\"maplibre/sdf/tessellation/struct.TextTessellator.html\" title=\"struct maplibre::sdf::tessellation::TextTessellator\">TextTessellator</a>",0],["impl&lt;I&gt; FeatureProcessor for <a class=\"struct\" href=\"maplibre/vector/tessellation/struct.ZeroTessellator.html\" title=\"struct maplibre::vector::tessellation::ZeroTessellator\">ZeroTessellator</a>&lt;I&gt;<div class=\"where\">where\n    I: <a class=\"trait\" href=\"https://doc.rust-lang.org/1.97.1/core/ops/arith/trait.Add.html\" title=\"trait core::ops::arith::Add\">Add</a> + <a class=\"trait\" href=\"https://doc.rust-lang.org/1.97.1/core/convert/trait.From.html\" title=\"trait core::convert::From\">From</a>&lt;VertexId&gt; + MaxIndex + <a class=\"trait\" href=\"https://doc.rust-lang.org/1.97.1/core/marker/trait.Copy.html\" title=\"trait core::marker::Copy\">Copy</a> + <a class=\"trait\" href=\"https://doc.rust-lang.org/1.97.1/core/convert/trait.Into.html\" title=\"trait core::convert::Into\">Into</a>&lt;<a class=\"primitive\" href=\"https://doc.rust-lang.org/1.97.1/std/primitive.u32.html\">u32</a>&gt;,</div>",0],["impl&lt;T: FeatureProcessor&gt; FeatureProcessor for <a class=\"struct\" href=\"maplibre/geojson/struct.ProjectingTessellator.html\" title=\"struct maplibre::geojson::ProjectingTessellator\">ProjectingTessellator</a>&lt;T&gt;",0]]]]);
+    if (window.register_implementors) {
+        window.register_implementors(implementors);
+    } else {
+        window.pending_implementors = implementors;
+    }
+})()
+//{"start":59,"fragment_lengths":[1577]}

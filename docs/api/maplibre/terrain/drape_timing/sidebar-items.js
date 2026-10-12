@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["ASSUMED_DRAPE_COST","SMOOTHING"],"struct":["DrapeCost","DrapeTimerSlot"]};

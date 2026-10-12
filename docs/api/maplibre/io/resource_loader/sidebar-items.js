@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["Outcome"],"struct":["Failure","Inner","Leader","SharedFailure","SharedLoader"],"trait":["ResourceLoader"],"type":["Key"]};

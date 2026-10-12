@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["PREFETCH_BYTES"],"fn":["prepare","select"],"struct":["PrefetchCadence"]};

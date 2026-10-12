@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DETAIL_BITS","DETAIL_UNSET","NORMAL_EXPONENT","OFFSET_BIAS","OFFSET_BITS","OFFSET_STEPS","STROKE_EXPONENT","WIDTH_BITS","WIDTH_STEPS"],"fn":["varies"],"struct":["LineFeatureStyle","PackedLine"]};

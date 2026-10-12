@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_HEATMAP_RADIUS","DEFAULT_RADIUS"],"fn":["circle_hit","geometry_hit","heatmap_hit","heatmap_margin_pixels","heatmap_radius","margin_pixels","project","size_pixels"]};

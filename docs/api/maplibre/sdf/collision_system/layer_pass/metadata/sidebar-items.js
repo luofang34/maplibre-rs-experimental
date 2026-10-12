@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["write_feature_metadata","write_glyph_poses"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CENTER_TOLERANCE_METERS","EYE_CENTER_REACH_HEIGHTS","MAX_CENTER_ITERATIONS","MAX_EYE_CENTER_REACH_METERS","MIN_EYE_CENTER_REACH_METERS"],"fn":["lat_lon_at_mercator","latitude_at_mercator_y","mercator_from_lat_lon"],"struct":["CameraPose"]};

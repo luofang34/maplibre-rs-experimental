@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DIAL_MIN_RADIUS_PIXELS","MAX_INERTIA_LONGITUDE_DELTA","MAX_VALID_LATITUDE","MIN_ROTATION_AXIS_SQUARED","PAN_FALLOFF_BAND","PAN_MAX_ANGLE"],"fn":["clamp_pan_inertia_center","fixed_bearing_longitude","pan_camera_by_pixels","pan_center_to_anchor","pan_surface_location"],"mod":["animation","bounds","zoom"],"struct":["GlobePanUpdate"]};

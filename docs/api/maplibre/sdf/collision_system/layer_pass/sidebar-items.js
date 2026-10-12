@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["empty_metadata","label_boxes","local_zoom_visible","ordered_features","place_layer"],"mod":["anchors","metadata"],"struct":["FeaturePlacement","LayerFrame"],"type":["OrderedFeature"]};

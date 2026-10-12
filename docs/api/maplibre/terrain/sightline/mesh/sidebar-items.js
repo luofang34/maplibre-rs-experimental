@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CELLS","PARALLEL_EPSILON"],"fn":["intersect","local"],"struct":["Cell"]};

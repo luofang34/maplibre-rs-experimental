@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["UPRIGHT_BASELINE","UPRIGHT_CENTRE"],"fn":["advance","allows_vertical_writing","anchor_shift","emit_upright","has_upright_orientation","in_arabic_script","is_upright","line_length","orientations","place_line","prefers_vertical","turned_box"],"struct":["VerticalLine"]};

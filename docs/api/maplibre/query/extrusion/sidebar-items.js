@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["ScreenQuery"],"fn":["extruded_depth","face","intersection_depth","project"],"struct":["Projected"]};

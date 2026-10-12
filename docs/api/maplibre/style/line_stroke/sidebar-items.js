@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["STROKE_LAYOUT"],"enum":["LineCap","LineJoin"],"struct":["LineStroke"]};

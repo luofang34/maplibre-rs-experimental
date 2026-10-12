@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["BUFFER","EXTENT"],"fn":["entry_distances","entry_parameter","inside"],"struct":["StrokeOrigins"]};

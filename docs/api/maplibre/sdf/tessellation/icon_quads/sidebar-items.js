@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["apply_text_fit","cuts","icon_quads","total","within"],"struct":["Cut","IconQuad"]};

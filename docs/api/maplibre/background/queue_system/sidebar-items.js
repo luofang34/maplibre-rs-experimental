@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["background_color","queue_system","sky_metadata","world_rows"],"struct":["BackgroundBuffers"]};

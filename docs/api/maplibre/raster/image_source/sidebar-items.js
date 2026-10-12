@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["IMAGE_TILE_SIZE","MAX_WORLD_SHIFTS"],"enum":["PictureError"],"fn":["decode","fill","load_tile","mercator","reload","render_tile","render_tile_bounds_reach","sample"],"mod":["warp"]};

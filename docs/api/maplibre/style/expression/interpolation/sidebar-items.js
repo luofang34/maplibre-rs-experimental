@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["T0","T1","T2","T3","XN","YN","ZN"],"enum":["ColorSpace","Interpolation"],"fn":["constrain_angle","exponential_progress","hcl_to_rgb","interpolate_array","interpolate_number","lab_to_rgb","lab_to_xyz","rgb_to_hcl","rgb_to_lab","rgb_to_xyz","xyz_to_lab","xyz_to_rgb"],"struct":["UnitBezier"]};

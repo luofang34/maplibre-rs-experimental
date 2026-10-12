@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["append","block","glyph_pass","justifications","line_sizes","place_line"],"mod":["bidirectional","extents","styles","vertical"],"struct":["Block","Emitter","Laid"],"type":["TextColorRun"]};

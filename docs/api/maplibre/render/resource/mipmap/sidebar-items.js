@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["mip_level_count"],"struct":["MipmapGenerator"]};

@@ -1,0 +1,451 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `maplibre/src/render/systems/retention_system.rs`."><title>retention_system.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="maplibre" data-themes="" data-resource-suffix="" data-rustdoc-version="1.97.1 (8bab26f4f 2026-07-14)" data-channel="1.97.1" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">maplibre/render/systems/</div>retention_system.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Evicts tiles that left the view, keeping a recently used cache sized from the viewport.
+<a href=#2 id=2 data-nosnippet>2</a>//!
+<a href=#3 id=3 data-nosnippet>3</a>//! The tile store would otherwise grow for the whole session. GL JS keeps the tiles its
+<a href=#4 id=4 data-nosnippet>4</a>//! covering needs plus a cache of `MAX_TILE_CACHE_ZOOM_LEVELS` times the tiles in view and
+<a href=#5 id=5 data-nosnippet>5</a>//! unloads the rest; this system does the same once per frame in the Cleanup stage. A tile
+<a href=#6 id=6 data-nosnippet>6</a>//! whose worker request is still in flight is never evicted, so its result cannot land on a
+<a href=#7 id=7 data-nosnippet>7</a>//! re-requested tile and duplicate its layers. Tiles the frame requests but does not draw,
+<a href=#8 id=8 data-nosnippet>8</a>//! such as those around an external eye, count as in use too: evicting one would only have
+<a href=#9 id=9 data-nosnippet>9</a>//! the request systems fetch it again on the next frame. Only drawn tiles size the cache,
+<a href=#10 id=10 data-nosnippet>10</a>//! as GL JS sizes it from the viewport; a wide request would otherwise keep every tile a
+<a href=#11 id=11 data-nosnippet>11</a>//! flight passes resident.
+<a href=#12 id=12 data-nosnippet>12</a>
+<a href=#13 id=13 data-nosnippet>13</a></span><span class="kw">use </span>std::collections::{HashMap, HashSet};
+<a href=#14 id=14 data-nosnippet>14</a>
+<a href=#15 id=15 data-nosnippet>15</a><span class="kw">use crate</span>::{
+<a href=#16 id=16 data-nosnippet>16</a>    context::MapContext,
+<a href=#17 id=17 data-nosnippet>17</a>    coords::WorldTileCoords,
+<a href=#18 id=18 data-nosnippet>18</a>    io::{
+<a href=#19 id=19 data-nosnippet>19</a>        tile_backpressure::is_settled,
+<a href=#20 id=20 data-nosnippet>20</a>        tile_sources::{clamp_to_max_zoom, source_max_zoom, TileKind},
+<a href=#21 id=21 data-nosnippet>21</a>    },
+<a href=#22 id=22 data-nosnippet>22</a>    raster::resource::RasterResources,
+<a href=#23 id=23 data-nosnippet>23</a>    render::{
+<a href=#24 id=24 data-nosnippet>24</a>        eventually::{Eventually, Eventually::Initialized},
+<a href=#25 id=25 data-nosnippet>25</a>        memory_budget::{MemoryBudget, MemoryPressure},
+<a href=#26 id=26 data-nosnippet>26</a>        projection::view_region_for_projection,
+<a href=#27 id=27 data-nosnippet>27</a>        tile_memory::tile_bytes,
+<a href=#28 id=28 data-nosnippet>28</a>        tile_view_pattern::{WgpuTileViewPattern, DEFAULT_TILE_SIZE},
+<a href=#29 id=29 data-nosnippet>29</a>        view_state::{ViewState, ViewStatePadding},
+<a href=#30 id=30 data-nosnippet>30</a>    },
+<a href=#31 id=31 data-nosnippet>31</a>    style::Style,
+<a href=#32 id=32 data-nosnippet>32</a>    tcs::{
+<a href=#33 id=33 data-nosnippet>33</a>        system::{heap::live_bytes, timings::FrameTimings, SystemResult},
+<a href=#34 id=34 data-nosnippet>34</a>        world::World,
+<a href=#35 id=35 data-nosnippet>35</a>    },
+<a href=#36 id=36 data-nosnippet>36</a>    terrain::{dem_tile_coords, resources::TerrainResources, source::dem_source},
+<a href=#37 id=37 data-nosnippet>37</a>    vector::VectorBufferPool,
+<a href=#38 id=38 data-nosnippet>38</a>};
+<a href=#39 id=39 data-nosnippet>39</a>
+<a href=#40 id=40 data-nosnippet>40</a><span class="doccomment">/// Out-of-view tiles kept per tile in use, as GL JS `MAX_TILE_CACHE_ZOOM_LEVELS`.
+<a href=#41 id=41 data-nosnippet>41</a></span><span class="kw">const </span>CACHE_TILES_PER_VIEW_TILE: usize = <span class="number">5</span>;
+<a href=#42 id=42 data-nosnippet>42</a><span class="doccomment">/// Smallest cache, so a tiny viewport still keeps some history for panning back.
+<a href=#43 id=43 data-nosnippet>43</a></span><span class="kw">const </span>MIN_CACHE_TILES: usize = <span class="number">64</span>;
+<a href=#44 id=44 data-nosnippet>44</a><span class="doccomment">/// Tessellated geometry the out-of-view cache may hold. The tile count is GL JS's, sized for
+<a href=#45 id=45 data-nosnippet>45</a>/// a flat viewport of a few dozen tiles; an eye on terrain draws hundreds, and a planet tile
+<a href=#46 id=46 data-nosnippet>46</a>/// at low zoom weighs tens of megabytes, so the cache is bounded in bytes as well.
+<a href=#47 id=47 data-nosnippet>47</a></span><span class="kw">const </span>CACHE_BYTES: usize = <span class="number">128 </span>&lt;&lt; <span class="number">20</span>;
+<a href=#48 id=48 data-nosnippet>48</a><span class="doccomment">/// Frames between resident-memory summaries for hosts driving the map from an eye, which
+<a href=#49 id=49 data-nosnippet>49</a>/// run on devices with a memory limit.
+<a href=#50 id=50 data-nosnippet>50</a></span><span class="kw">const </span>SUMMARY_EVERY_FRAMES: u64 = <span class="number">90</span>;
+<a href=#51 id=51 data-nosnippet>51</a>
+<a href=#52 id=52 data-nosnippet>52</a><span class="doccomment">/// What the out-of-view cache may hold.
+<a href=#53 id=53 data-nosnippet>53</a></span><span class="attr">#[derive(Clone, Copy, Debug)]
+<a href=#54 id=54 data-nosnippet>54</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>CacheBudget {
+<a href=#55 id=55 data-nosnippet>55</a>    <span class="kw">pub </span>tiles: usize,
+<a href=#56 id=56 data-nosnippet>56</a>    <span class="kw">pub </span>bytes: usize,
+<a href=#57 id=57 data-nosnippet>57</a>}
+<a href=#58 id=58 data-nosnippet>58</a>
+<a href=#59 id=59 data-nosnippet>59</a><span class="doccomment">/// Last frame each tile was needed by the view pattern.
+<a href=#60 id=60 data-nosnippet>60</a></span><span class="attr">#[derive(Default)]
+<a href=#61 id=61 data-nosnippet>61</a></span><span class="kw">pub struct </span>TileRetention {
+<a href=#62 id=62 data-nosnippet>62</a>    last_used: HashMap&lt;WorldTileCoords, u64&gt;,
+<a href=#63 id=63 data-nosnippet>63</a>    frame: u64,
+<a href=#64 id=64 data-nosnippet>64</a>}
+<a href=#65 id=65 data-nosnippet>65</a>
+<a href=#66 id=66 data-nosnippet>66</a><span class="doccomment">/// Offline hosts cannot replace an evicted tile without an active source loader.
+<a href=#67 id=67 data-nosnippet>67</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>RetainLoadedTiles;
+<a href=#68 id=68 data-nosnippet>68</a>
+<a href=#69 id=69 data-nosnippet>69</a><span class="doccomment">/// Drops the least recently used tiles beyond the cache budget and releases their GPU data.
+<a href=#70 id=70 data-nosnippet>70</a></span><span class="kw">pub fn </span>retention_system(
+<a href=#71 id=71 data-nosnippet>71</a>    MapContext {
+<a href=#72 id=72 data-nosnippet>72</a>        world,
+<a href=#73 id=73 data-nosnippet>73</a>        style,
+<a href=#74 id=74 data-nosnippet>74</a>        view_state,
+<a href=#75 id=75 data-nosnippet>75</a>        <span class="attr">#[cfg(not(target_arch = <span class="string">"wasm32"</span>))]
+<a href=#76 id=76 data-nosnippet>76</a>        </span>renderer,
+<a href=#77 id=77 data-nosnippet>77</a>        ..
+<a href=#78 id=78 data-nosnippet>78</a>    }: <span class="kw-2">&amp;mut </span>MapContext,
+<a href=#79 id=79 data-nosnippet>79</a>) -&gt; SystemResult {
+<a href=#80 id=80 data-nosnippet>80</a>    <span class="kw">if </span><span class="kw">crate</span>::render::eye_covering::EyeInFrame::reuses_content(world) {
+<a href=#81 id=81 data-nosnippet>81</a>        <span class="kw">return </span><span class="prelude-val">Ok</span>(());
+<a href=#82 id=82 data-nosnippet>82</a>    }
+<a href=#83 id=83 data-nosnippet>83</a>    <span class="kw">let </span>drawn = drawn_tiles(world).len();
+<a href=#84 id=84 data-nosnippet>84</a>    <span class="kw">let </span>in_use = tiles_in_use(world, style, view_state);
+<a href=#85 id=85 data-nosnippet>85</a>    drop_cancelled(world, <span class="kw-2">&amp;</span>in_use);
+<a href=#86 id=86 data-nosnippet>86</a>    <span class="kw">let </span>evicted = evict_stale_tiles(world, <span class="kw-2">&amp;</span>in_use, drawn);
+<a href=#87 id=87 data-nosnippet>87</a>    <span class="kw">if </span>!evicted.is_empty() {
+<a href=#88 id=88 data-nosnippet>88</a>        <span class="macro">tracing::debug!</span>(count = evicted.len(), <span class="string">"evicted tiles that left the view"</span>);
+<a href=#89 id=89 data-nosnippet>89</a>        drop_gpu_data(world, <span class="kw-2">&amp;</span>evicted);
+<a href=#90 id=90 data-nosnippet>90</a>    }
+<a href=#91 id=91 data-nosnippet>91</a>    <span class="kw">if </span>view_state.has_external_view() {
+<a href=#92 id=92 data-nosnippet>92</a>        summarize_residency(world, drawn, in_use.len(), view_state.eye_settled());
+<a href=#93 id=93 data-nosnippet>93</a>        <span class="attr">#[cfg(not(target_arch = <span class="string">"wasm32"</span>))]
+<a href=#94 id=94 data-nosnippet>94</a>        </span>summarize_gpu_objects(world, renderer);
+<a href=#95 id=95 data-nosnippet>95</a>        summarize_timings(world);
+<a href=#96 id=96 data-nosnippet>96</a>    }
+<a href=#97 id=97 data-nosnippet>97</a>    <span class="prelude-val">Ok</span>(())
+<a href=#98 id=98 data-nosnippet>98</a>}
+<a href=#99 id=99 data-nosnippet>99</a>
+<a href=#100 id=100 data-nosnippet>100</a><span class="doccomment">/// Once a second, how many GPU objects the frame keeps alive, for a host whose footprint
+<a href=#101 id=101 data-nosnippet>101</a>/// climbs while nothing loads: the kind whose count climbs with it is the one leaking.
+<a href=#102 id=102 data-nosnippet>102</a></span><span class="attr">#[cfg(not(target_arch = <span class="string">"wasm32"</span>))]
+<a href=#103 id=103 data-nosnippet>103</a></span><span class="kw">fn </span>summarize_gpu_objects(world: <span class="kw-2">&amp;</span>World, renderer: <span class="kw-2">&amp;</span><span class="kw">crate</span>::render::Renderer) {
+<a href=#104 id=104 data-nosnippet>104</a>    <span class="kw">let </span>frame = world
+<a href=#105 id=105 data-nosnippet>105</a>        .resources
+<a href=#106 id=106 data-nosnippet>106</a>        .get::&lt;TileRetention&gt;()
+<a href=#107 id=107 data-nosnippet>107</a>        .map_or(<span class="number">0</span>, |retention| retention.frame);
+<a href=#108 id=108 data-nosnippet>108</a>    <span class="kw">if </span>!frame.is_multiple_of(SUMMARY_EVERY_FRAMES) {
+<a href=#109 id=109 data-nosnippet>109</a>        <span class="kw">return</span>;
+<a href=#110 id=110 data-nosnippet>110</a>    }
+<a href=#111 id=111 data-nosnippet>111</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(report) = renderer.instance.generate_report() <span class="kw">else </span>{
+<a href=#112 id=112 data-nosnippet>112</a>        <span class="kw">return</span>;
+<a href=#113 id=113 data-nosnippet>113</a>    };
+<a href=#114 id=114 data-nosnippet>114</a>    <span class="kw">let </span>hub = report.hub_report();
+<a href=#115 id=115 data-nosnippet>115</a>    <span class="macro">tracing::info!</span>(
+<a href=#116 id=116 data-nosnippet>116</a>        buffers = hub.buffers.num_allocated,
+<a href=#117 id=117 data-nosnippet>117</a>        textures = hub.textures.num_allocated,
+<a href=#118 id=118 data-nosnippet>118</a>        texture_views = hub.texture_views.num_allocated,
+<a href=#119 id=119 data-nosnippet>119</a>        bind_groups = hub.bind_groups.num_allocated,
+<a href=#120 id=120 data-nosnippet>120</a>        samplers = hub.samplers.num_allocated,
+<a href=#121 id=121 data-nosnippet>121</a>        command_buffers = hub.command_buffers.num_allocated,
+<a href=#122 id=122 data-nosnippet>122</a>        pipelines = hub.render_pipelines.num_allocated,
+<a href=#123 id=123 data-nosnippet>123</a>        <span class="string">"gpu objects"
+<a href=#124 id=124 data-nosnippet>124</a>    </span>);
+<a href=#125 id=125 data-nosnippet>125</a>}
+<a href=#126 id=126 data-nosnippet>126</a>
+<a href=#127 id=127 data-nosnippet>127</a><span class="doccomment">/// Once a second, the costliest systems and stages of the frame, for a host that cannot
+<a href=#128 id=128 data-nosnippet>128</a>/// attach a profiler.
+<a href=#129 id=129 data-nosnippet>129</a></span><span class="kw">fn </span>summarize_timings(world: <span class="kw-2">&amp;mut </span>World) {
+<a href=#130 id=130 data-nosnippet>130</a>    <span class="kw">let </span>frame = world
+<a href=#131 id=131 data-nosnippet>131</a>        .resources
+<a href=#132 id=132 data-nosnippet>132</a>        .get::&lt;TileRetention&gt;()
+<a href=#133 id=133 data-nosnippet>133</a>        .map_or(<span class="number">0</span>, |retention| retention.frame);
+<a href=#134 id=134 data-nosnippet>134</a>    <span class="kw">if </span>!frame.is_multiple_of(SUMMARY_EVERY_FRAMES) {
+<a href=#135 id=135 data-nosnippet>135</a>        <span class="kw">return</span>;
+<a href=#136 id=136 data-nosnippet>136</a>    }
+<a href=#137 id=137 data-nosnippet>137</a>    <span class="kw">let </span>timings = world.resources.get_or_init_mut::&lt;FrameTimings&gt;();
+<a href=#138 id=138 data-nosnippet>138</a>    <span class="kw">let </span>growers: Vec&lt;String&gt; = timings
+<a href=#139 id=139 data-nosnippet>139</a>        .top_growth(<span class="number">6</span>)
+<a href=#140 id=140 data-nosnippet>140</a>        .iter()
+<a href=#141 id=141 data-nosnippet>141</a>        .filter(|(<span class="kw">_</span>, kb)| <span class="kw-2">*</span>kb &gt; <span class="number">0.5</span>)
+<a href=#142 id=142 data-nosnippet>142</a>        .map(|(name, kb)| <span class="macro">format!</span>(<span class="string">"{name}={kb:.1}"</span>))
+<a href=#143 id=143 data-nosnippet>143</a>        .collect();
+<a href=#144 id=144 data-nosnippet>144</a>    <span class="kw">let </span>top = timings.take_top(<span class="number">8</span>);
+<a href=#145 id=145 data-nosnippet>145</a>    <span class="kw">let </span>costliest: Vec&lt;String&gt; = top
+<a href=#146 id=146 data-nosnippet>146</a>        .iter()
+<a href=#147 id=147 data-nosnippet>147</a>        .map(|(name, ms)| <span class="macro">format!</span>(<span class="string">"{name}={ms:.2}"</span>))
+<a href=#148 id=148 data-nosnippet>148</a>        .collect();
+<a href=#149 id=149 data-nosnippet>149</a>    <span class="macro">tracing::info!</span>(ms_per_frame = %costliest.join(<span class="string">" "</span>), <span class="string">"frame time by system"</span>);
+<a href=#150 id=150 data-nosnippet>150</a>    <span class="kw">if </span>!growers.is_empty() {
+<a href=#151 id=151 data-nosnippet>151</a>        <span class="macro">tracing::info!</span>(
+<a href=#152 id=152 data-nosnippet>152</a>            kb_per_frame = %growers.join(<span class="string">" "</span>),
+<a href=#153 id=153 data-nosnippet>153</a>            rust_heap_mb = live_bytes() &gt;&gt; <span class="number">20</span>,
+<a href=#154 id=154 data-nosnippet>154</a>            <span class="string">"heap growth by system"
+<a href=#155 id=155 data-nosnippet>155</a>        </span>);
+<a href=#156 id=156 data-nosnippet>156</a>    }
+<a href=#157 id=157 data-nosnippet>157</a>}
+<a href=#158 id=158 data-nosnippet>158</a>
+<a href=#159 id=159 data-nosnippet>159</a><span class="kw">fn </span>summarize_residency(world: <span class="kw-2">&amp;</span>World, drawn: usize, in_use: usize, settled: bool) {
+<a href=#160 id=160 data-nosnippet>160</a>    <span class="kw">let </span>frame = world
+<a href=#161 id=161 data-nosnippet>161</a>        .resources
+<a href=#162 id=162 data-nosnippet>162</a>        .get::&lt;TileRetention&gt;()
+<a href=#163 id=163 data-nosnippet>163</a>        .map_or(<span class="number">0</span>, |retention| retention.frame);
+<a href=#164 id=164 data-nosnippet>164</a>    <span class="kw">if </span>!frame.is_multiple_of(SUMMARY_EVERY_FRAMES) {
+<a href=#165 id=165 data-nosnippet>165</a>        <span class="kw">return</span>;
+<a href=#166 id=166 data-nosnippet>166</a>    }
+<a href=#167 id=167 data-nosnippet>167</a>    <span class="kw">let </span>tiles = world.tiles.tiles.len();
+<a href=#168 id=168 data-nosnippet>168</a>    <span class="kw">let </span>bytes: usize = world
+<a href=#169 id=169 data-nosnippet>169</a>        .tiles
+<a href=#170 id=170 data-nosnippet>170</a>        .tiles
+<a href=#171 id=171 data-nosnippet>171</a>        .values()
+<a href=#172 id=172 data-nosnippet>172</a>        .map(|tile| tile_bytes(<span class="kw-2">&amp;</span>world.tiles, tile.coords))
+<a href=#173 id=173 data-nosnippet>173</a>        .sum();
+<a href=#174 id=174 data-nosnippet>174</a>    <span class="kw">let </span>index_bytes = world.tiles.geometry_index.approximate_bytes();
+<a href=#175 id=175 data-nosnippet>175</a>    <span class="kw">let </span>pool_revision = <span class="kw">match </span>world.resources.get::&lt;Eventually&lt;VectorBufferPool&gt;&gt;() {
+<a href=#176 id=176 data-nosnippet>176</a>        <span class="prelude-val">Some</span>(Initialized(pool)) =&gt; pool.revision(),
+<a href=#177 id=177 data-nosnippet>177</a>        <span class="kw">_ </span>=&gt; <span class="number">0</span>,
+<a href=#178 id=178 data-nosnippet>178</a>    };
+<a href=#179 id=179 data-nosnippet>179</a>    <span class="kw">let </span>(drapes, free_drapes, drape_bytes, dem_textures, dem_bytes) =
+<a href=#180 id=180 data-nosnippet>180</a>        <span class="kw">match </span>world.resources.get::&lt;Eventually&lt;TerrainResources&gt;&gt;() {
+<a href=#181 id=181 data-nosnippet>181</a>            <span class="prelude-val">Some</span>(Initialized(terrain)) =&gt; {
+<a href=#182 id=182 data-nosnippet>182</a>                <span class="kw">let </span>(held, free) = terrain.drape_counts();
+<a href=#183 id=183 data-nosnippet>183</a>                <span class="kw">let </span>(drape_bytes, dem_bytes) = terrain.texture_bytes();
+<a href=#184 id=184 data-nosnippet>184</a>                (
+<a href=#185 id=185 data-nosnippet>185</a>                    held,
+<a href=#186 id=186 data-nosnippet>186</a>                    free,
+<a href=#187 id=187 data-nosnippet>187</a>                    drape_bytes,
+<a href=#188 id=188 data-nosnippet>188</a>                    terrain.dem_texture_count(),
+<a href=#189 id=189 data-nosnippet>189</a>                    dem_bytes,
+<a href=#190 id=190 data-nosnippet>190</a>                )
+<a href=#191 id=191 data-nosnippet>191</a>            }
+<a href=#192 id=192 data-nosnippet>192</a>            <span class="kw">_ </span>=&gt; (<span class="number">0</span>, <span class="number">0</span>, <span class="number">0</span>, <span class="number">0</span>, <span class="number">0</span>),
+<a href=#193 id=193 data-nosnippet>193</a>        };
+<a href=#194 id=194 data-nosnippet>194</a>    <span class="macro">tracing::info!</span>(
+<a href=#195 id=195 data-nosnippet>195</a>        tiles,
+<a href=#196 id=196 data-nosnippet>196</a>        pending = <span class="kw">crate</span>::io::tile_backpressure::tiles_in_flight(<span class="kw-2">&amp;</span>world.tiles),
+<a href=#197 id=197 data-nosnippet>197</a>        settled,
+<a href=#198 id=198 data-nosnippet>198</a>        geometry_mb = bytes &gt;&gt; <span class="number">20</span>,
+<a href=#199 id=199 data-nosnippet>199</a>        index_mb = index_bytes &gt;&gt; <span class="number">20</span>,
+<a href=#200 id=200 data-nosnippet>200</a>        pool_revision,
+<a href=#201 id=201 data-nosnippet>201</a>        drawn,
+<a href=#202 id=202 data-nosnippet>202</a>        in_use,
+<a href=#203 id=203 data-nosnippet>203</a>        drapes,
+<a href=#204 id=204 data-nosnippet>204</a>        free_drapes,
+<a href=#205 id=205 data-nosnippet>205</a>        drape_mb = drape_bytes &gt;&gt; <span class="number">20</span>,
+<a href=#206 id=206 data-nosnippet>206</a>        dem_textures,
+<a href=#207 id=207 data-nosnippet>207</a>        dem_mb = dem_bytes &gt;&gt; <span class="number">20</span>,
+<a href=#208 id=208 data-nosnippet>208</a>        finest_dem_zoom = finest_dem_zoom(world),
+<a href=#209 id=209 data-nosnippet>209</a>        symbol_revision = symbol_revision(world),
+<a href=#210 id=210 data-nosnippet>210</a>        <span class="string">"resident tiles"
+<a href=#211 id=211 data-nosnippet>211</a>    </span>);
+<a href=#212 id=212 data-nosnippet>212</a>}
+<a href=#213 id=213 data-nosnippet>213</a>
+<a href=#214 id=214 data-nosnippet>214</a><span class="doccomment">/// The tiles the frame draws from, with the tiles whose shapes stand in for them.
+<a href=#215 id=215 data-nosnippet>215</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>drawn_tiles(world: <span class="kw-2">&amp;</span>World) -&gt; HashSet&lt;WorldTileCoords&gt; {
+<a href=#216 id=216 data-nosnippet>216</a>    <span class="kw">let </span><span class="kw-2">mut </span>drawn = HashSet::new();
+<a href=#217 id=217 data-nosnippet>217</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(Initialized(pattern)) = world.resources.get::&lt;Eventually&lt;WgpuTileViewPattern&gt;&gt;() {
+<a href=#218 id=218 data-nosnippet>218</a>        <span class="kw">for </span>view_tile <span class="kw">in </span>pattern.iter() {
+<a href=#219 id=219 data-nosnippet>219</a>            drawn.insert(view_tile.coords());
+<a href=#220 id=220 data-nosnippet>220</a>            view_tile.render(|shape| {
+<a href=#221 id=221 data-nosnippet>221</a>                drawn.insert(shape.coords());
+<a href=#222 id=222 data-nosnippet>222</a>            });
+<a href=#223 id=223 data-nosnippet>223</a>        }
+<a href=#224 id=224 data-nosnippet>224</a>    }
+<a href=#225 id=225 data-nosnippet>225</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(covering) = world
+<a href=#226 id=226 data-nosnippet>226</a>        .resources
+<a href=#227 id=227 data-nosnippet>227</a>        .get::&lt;<span class="kw">crate</span>::sdf::covering::SymbolCovering&gt;()
+<a href=#228 id=228 data-nosnippet>228</a>    {
+<a href=#229 id=229 data-nosnippet>229</a>        drawn.extend(covering.tiles.iter().copied());
+<a href=#230 id=230 data-nosnippet>230</a>    }
+<a href=#231 id=231 data-nosnippet>231</a>    drawn
+<a href=#232 id=232 data-nosnippet>232</a>}
+<a href=#233 id=233 data-nosnippet>233</a>
+<a href=#234 id=234 data-nosnippet>234</a><span class="doccomment">/// Every tile the current frame draws from or requests, with the DEM tiles and ancestors
+<a href=#235 id=235 data-nosnippet>235</a>/// terrain reads.
+<a href=#236 id=236 data-nosnippet>236</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>tiles_in_use(
+<a href=#237 id=237 data-nosnippet>237</a>    world: <span class="kw-2">&amp;</span>World,
+<a href=#238 id=238 data-nosnippet>238</a>    style: <span class="kw-2">&amp;</span>Style,
+<a href=#239 id=239 data-nosnippet>239</a>    view_state: <span class="kw-2">&amp;</span>ViewState,
+<a href=#240 id=240 data-nosnippet>240</a>) -&gt; HashSet&lt;WorldTileCoords&gt; {
+<a href=#241 id=241 data-nosnippet>241</a>    <span class="kw">let </span><span class="kw-2">mut </span>in_use = drawn_tiles(world);
+<a href=#242 id=242 data-nosnippet>242</a>    <span class="kw">match </span>view_region_for_projection(
+<a href=#243 id=243 data-nosnippet>243</a>        style,
+<a href=#244 id=244 data-nosnippet>244</a>        view_state,
+<a href=#245 id=245 data-nosnippet>245</a>        world,
+<a href=#246 id=246 data-nosnippet>246</a>        view_state.zoom().zoom_level(DEFAULT_TILE_SIZE),
+<a href=#247 id=247 data-nosnippet>247</a>        ViewStatePadding::Loose,
+<a href=#248 id=248 data-nosnippet>248</a>    ) {
+<a href=#249 id=249 data-nosnippet>249</a>        <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(requested)) =&gt; {
+<a href=#250 id=250 data-nosnippet>250</a>            <span class="comment">// The request systems fetch the ancestor at the source's maximum zoom in place of
+<a href=#251 id=251 data-nosnippet>251</a>            // a finer tile, so that is the tile to keep.
+<a href=#252 id=252 data-nosnippet>252</a>            </span><span class="kw">let </span>max_zoom = source_max_zoom(style, TileKind::Vector);
+<a href=#253 id=253 data-nosnippet>253</a>            <span class="kw">for </span>coords <span class="kw">in </span>requested.iter() {
+<a href=#254 id=254 data-nosnippet>254</a>                in_use.insert(coords);
+<a href=#255 id=255 data-nosnippet>255</a>                in_use.insert(clamp_to_max_zoom(coords, max_zoom));
+<a href=#256 id=256 data-nosnippet>256</a>            }
+<a href=#257 id=257 data-nosnippet>257</a>        }
+<a href=#258 id=258 data-nosnippet>258</a>        <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>) =&gt; {}
+<a href=#259 id=259 data-nosnippet>259</a>        <span class="prelude-val">Err</span>(error) =&gt; <span class="macro">tracing::warn!</span>(%error, <span class="string">"cannot select the requested tiles to keep"</span>),
+<a href=#260 id=260 data-nosnippet>260</a>    }
+<a href=#261 id=261 data-nosnippet>261</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(requests) = world
+<a href=#262 id=262 data-nosnippet>262</a>        .resources
+<a href=#263 id=263 data-nosnippet>263</a>        .get::&lt;<span class="kw">crate</span>::terrain::request_system::DrapeRequests&gt;()
+<a href=#264 id=264 data-nosnippet>264</a>    {
+<a href=#265 id=265 data-nosnippet>265</a>        in_use.extend(requests.<span class="number">0</span>.iter().copied());
+<a href=#266 id=266 data-nosnippet>266</a>    }
+<a href=#267 id=267 data-nosnippet>267</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(prefetch) = world
+<a href=#268 id=268 data-nosnippet>268</a>        .resources
+<a href=#269 id=269 data-nosnippet>269</a>        .get::&lt;<span class="kw">crate</span>::terrain::request_system::DrapePrefetchRequests&gt;()
+<a href=#270 id=270 data-nosnippet>270</a>    {
+<a href=#271 id=271 data-nosnippet>271</a>        in_use.extend(prefetch.<span class="number">0</span>.iter().copied());
+<a href=#272 id=272 data-nosnippet>272</a>    }
+<a href=#273 id=273 data-nosnippet>273</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(dem) = dem_source(style) {
+<a href=#274 id=274 data-nosnippet>274</a>        <span class="kw">let </span>view: Vec&lt;WorldTileCoords&gt; = in_use.iter().copied().collect();
+<a href=#275 id=275 data-nosnippet>275</a>        <span class="kw">for </span>coords <span class="kw">in </span>view {
+<a href=#276 id=276 data-nosnippet>276</a>            <span class="kw">let </span><span class="prelude-val">Some</span>(<span class="kw-2">mut </span>dem_coords) = dem_tile_coords(coords, dem.minzoom, dem.maxzoom) <span class="kw">else </span>{
+<a href=#277 id=277 data-nosnippet>277</a>                <span class="kw">continue</span>;
+<a href=#278 id=278 data-nosnippet>278</a>            };
+<a href=#279 id=279 data-nosnippet>279</a>            <span class="comment">// The coverage index falls back through every ancestor while finer tiles load.
+<a href=#280 id=280 data-nosnippet>280</a>            </span><span class="kw">loop </span>{
+<a href=#281 id=281 data-nosnippet>281</a>                in_use.insert(dem_coords);
+<a href=#282 id=282 data-nosnippet>282</a>                <span class="kw">match </span>dem_coords.get_parent() {
+<a href=#283 id=283 data-nosnippet>283</a>                    <span class="prelude-val">Some</span>(parent) <span class="kw">if </span>u8::from(parent.z) &gt;= dem.minzoom =&gt; dem_coords = parent,
+<a href=#284 id=284 data-nosnippet>284</a>                    <span class="kw">_ </span>=&gt; <span class="kw">break</span>,
+<a href=#285 id=285 data-nosnippet>285</a>                }
+<a href=#286 id=286 data-nosnippet>286</a>            }
+<a href=#287 id=287 data-nosnippet>287</a>        }
+<a href=#288 id=288 data-nosnippet>288</a>    }
+<a href=#289 id=289 data-nosnippet>289</a>    in_use
+<a href=#290 id=290 data-nosnippet>290</a>}
+<a href=#291 id=291 data-nosnippet>291</a>
+<a href=#292 id=292 data-nosnippet>292</a><span class="doccomment">/// Removes the least recently used settled tiles beyond the cache budget and returns them;
+<a href=#293 id=293 data-nosnippet>293</a>/// the tile budget follows `view_tiles`, the tiles the frame draws.
+<a href=#294 id=294 data-nosnippet>294</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>evict_stale_tiles(
+<a href=#295 id=295 data-nosnippet>295</a>    world: <span class="kw-2">&amp;mut </span>World,
+<a href=#296 id=296 data-nosnippet>296</a>    in_use: <span class="kw-2">&amp;</span>HashSet&lt;WorldTileCoords&gt;,
+<a href=#297 id=297 data-nosnippet>297</a>    view_tiles: usize,
+<a href=#298 id=298 data-nosnippet>298</a>) -&gt; Vec&lt;WorldTileCoords&gt; {
+<a href=#299 id=299 data-nosnippet>299</a>    <span class="kw">if </span>world.resources.get::&lt;RetainLoadedTiles&gt;().is_some() {
+<a href=#300 id=300 data-nosnippet>300</a>        <span class="kw">return </span>evict_beyond(
+<a href=#301 id=301 data-nosnippet>301</a>            world,
+<a href=#302 id=302 data-nosnippet>302</a>            in_use,
+<a href=#303 id=303 data-nosnippet>303</a>            CacheBudget {
+<a href=#304 id=304 data-nosnippet>304</a>                tiles: usize::MAX,
+<a href=#305 id=305 data-nosnippet>305</a>                bytes: usize::MAX,
+<a href=#306 id=306 data-nosnippet>306</a>            },
+<a href=#307 id=307 data-nosnippet>307</a>        );
+<a href=#308 id=308 data-nosnippet>308</a>    }
+<a href=#309 id=309 data-nosnippet>309</a>    <span class="comment">// A host nearly out of memory keeps nothing beyond what the frame draws from.
+<a href=#310 id=310 data-nosnippet>310</a>    </span><span class="kw">let </span>critical = world
+<a href=#311 id=311 data-nosnippet>311</a>        .resources
+<a href=#312 id=312 data-nosnippet>312</a>        .get::&lt;MemoryBudget&gt;()
+<a href=#313 id=313 data-nosnippet>313</a>        .is_some_and(|budget| budget.pressure() == MemoryPressure::Critical);
+<a href=#314 id=314 data-nosnippet>314</a>    <span class="kw">let </span>budget = <span class="kw">if </span>critical {
+<a href=#315 id=315 data-nosnippet>315</a>        CacheBudget { tiles: <span class="number">0</span>, bytes: <span class="number">0 </span>}
+<a href=#316 id=316 data-nosnippet>316</a>    } <span class="kw">else </span>{
+<a href=#317 id=317 data-nosnippet>317</a>        CacheBudget {
+<a href=#318 id=318 data-nosnippet>318</a>            tiles: (view_tiles * CACHE_TILES_PER_VIEW_TILE).max(MIN_CACHE_TILES),
+<a href=#319 id=319 data-nosnippet>319</a>            bytes: CACHE_BYTES,
+<a href=#320 id=320 data-nosnippet>320</a>        }
+<a href=#321 id=321 data-nosnippet>321</a>    };
+<a href=#322 id=322 data-nosnippet>322</a>    evict_beyond(world, in_use, budget)
+<a href=#323 id=323 data-nosnippet>323</a>}
+<a href=#324 id=324 data-nosnippet>324</a>
+<a href=#325 id=325 data-nosnippet>325</a><span class="doccomment">/// Removes the least recently used settled tiles until the rest fit `budget`, in tiles and
+<a href=#326 id=326 data-nosnippet>326</a>/// in bytes of geometry, and returns them.
+<a href=#327 id=327 data-nosnippet>327</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>evict_beyond(
+<a href=#328 id=328 data-nosnippet>328</a>    world: <span class="kw-2">&amp;mut </span>World,
+<a href=#329 id=329 data-nosnippet>329</a>    in_use: <span class="kw-2">&amp;</span>HashSet&lt;WorldTileCoords&gt;,
+<a href=#330 id=330 data-nosnippet>330</a>    budget: CacheBudget,
+<a href=#331 id=331 data-nosnippet>331</a>) -&gt; Vec&lt;WorldTileCoords&gt; {
+<a href=#332 id=332 data-nosnippet>332</a>    <span class="kw">let </span>World { resources, tiles } = world;
+<a href=#333 id=333 data-nosnippet>333</a>    <span class="kw">let </span>retention = resources.get_or_init_mut::&lt;TileRetention&gt;();
+<a href=#334 id=334 data-nosnippet>334</a>    retention.frame = retention.frame.wrapping_add(<span class="number">1</span>);
+<a href=#335 id=335 data-nosnippet>335</a>    <span class="kw">let </span>frame = retention.frame;
+<a href=#336 id=336 data-nosnippet>336</a>    <span class="kw">for </span>coords <span class="kw">in </span>in_use {
+<a href=#337 id=337 data-nosnippet>337</a>        retention.last_used.insert(<span class="kw-2">*</span>coords, frame);
+<a href=#338 id=338 data-nosnippet>338</a>    }
+<a href=#339 id=339 data-nosnippet>339</a>
+<a href=#340 id=340 data-nosnippet>340</a>    <span class="kw">let </span><span class="kw-2">mut </span>candidates: Vec&lt;(u64, WorldTileCoords, usize)&gt; = tiles
+<a href=#341 id=341 data-nosnippet>341</a>        .tiles
+<a href=#342 id=342 data-nosnippet>342</a>        .values()
+<a href=#343 id=343 data-nosnippet>343</a>        .map(|tile| tile.coords)
+<a href=#344 id=344 data-nosnippet>344</a>        .filter(|coords| !in_use.contains(coords) &amp;&amp; is_settled(tiles, <span class="kw-2">*</span>coords))
+<a href=#345 id=345 data-nosnippet>345</a>        .map(|coords| {
+<a href=#346 id=346 data-nosnippet>346</a>            (
+<a href=#347 id=347 data-nosnippet>347</a>                retention.last_used.get(<span class="kw-2">&amp;</span>coords).copied().unwrap_or(<span class="number">0</span>),
+<a href=#348 id=348 data-nosnippet>348</a>                coords,
+<a href=#349 id=349 data-nosnippet>349</a>                tile_bytes(tiles, coords),
+<a href=#350 id=350 data-nosnippet>350</a>            )
+<a href=#351 id=351 data-nosnippet>351</a>        })
+<a href=#352 id=352 data-nosnippet>352</a>        .collect();
+<a href=#353 id=353 data-nosnippet>353</a>    <span class="kw">let </span><span class="kw-2">mut </span>kept = candidates.len();
+<a href=#354 id=354 data-nosnippet>354</a>    <span class="kw">let </span><span class="kw-2">mut </span>kept_bytes: usize = candidates.iter().map(|(<span class="kw">_</span>, <span class="kw">_</span>, bytes)| bytes).sum();
+<a href=#355 id=355 data-nosnippet>355</a>    <span class="kw">if </span>kept &lt;= budget.tiles &amp;&amp; kept_bytes &lt;= budget.bytes {
+<a href=#356 id=356 data-nosnippet>356</a>        <span class="kw">return </span>Vec::new();
+<a href=#357 id=357 data-nosnippet>357</a>    }
+<a href=#358 id=358 data-nosnippet>358</a>    candidates.sort_by_key(|(used, <span class="kw">_</span>, <span class="kw">_</span>)| <span class="kw-2">*</span>used);
+<a href=#359 id=359 data-nosnippet>359</a>    <span class="kw">let </span><span class="kw-2">mut </span>evicted = Vec::new();
+<a href=#360 id=360 data-nosnippet>360</a>    <span class="kw">for </span>(<span class="kw">_</span>, coords, bytes) <span class="kw">in </span>candidates {
+<a href=#361 id=361 data-nosnippet>361</a>        <span class="kw">if </span>kept &lt;= budget.tiles &amp;&amp; kept_bytes &lt;= budget.bytes {
+<a href=#362 id=362 data-nosnippet>362</a>            <span class="kw">break</span>;
+<a href=#363 id=363 data-nosnippet>363</a>        }
+<a href=#364 id=364 data-nosnippet>364</a>        kept -= <span class="number">1</span>;
+<a href=#365 id=365 data-nosnippet>365</a>        kept_bytes -= bytes;
+<a href=#366 id=366 data-nosnippet>366</a>        evicted.push(coords);
+<a href=#367 id=367 data-nosnippet>367</a>    }
+<a href=#368 id=368 data-nosnippet>368</a>    <span class="kw">for </span>coords <span class="kw">in </span><span class="kw-2">&amp;</span>evicted {
+<a href=#369 id=369 data-nosnippet>369</a>        tiles.remove(<span class="kw-2">*</span>coords);
+<a href=#370 id=370 data-nosnippet>370</a>        retention.last_used.remove(coords);
+<a href=#371 id=371 data-nosnippet>371</a>    }
+<a href=#372 id=372 data-nosnippet>372</a>    evicted
+<a href=#373 id=373 data-nosnippet>373</a>}
+<a href=#374 id=374 data-nosnippet>374</a>
+<a href=#375 id=375 data-nosnippet>375</a><span class="doccomment">/// Drops the tiles whose requests no one wants any more, freeing their slots for tiles in view.
+<a href=#376 id=376 data-nosnippet>376</a></span><span class="kw">fn </span>drop_cancelled(world: <span class="kw-2">&amp;mut </span>World, in_use: <span class="kw-2">&amp;</span>HashSet&lt;WorldTileCoords&gt;) {
+<a href=#377 id=377 data-nosnippet>377</a>    <span class="kw">let </span>cancelled = <span class="kw">crate</span>::io::tile_retry::cancel_unwanted(world, in_use);
+<a href=#378 id=378 data-nosnippet>378</a>    <span class="kw">if </span>cancelled.is_empty() {
+<a href=#379 id=379 data-nosnippet>379</a>        <span class="kw">return</span>;
+<a href=#380 id=380 data-nosnippet>380</a>    }
+<a href=#381 id=381 data-nosnippet>381</a>    <span class="macro">tracing::debug!</span>(
+<a href=#382 id=382 data-nosnippet>382</a>        count = cancelled.len(),
+<a href=#383 id=383 data-nosnippet>383</a>        <span class="string">"cancelled requests for tiles out of view"
+<a href=#384 id=384 data-nosnippet>384</a>    </span>);
+<a href=#385 id=385 data-nosnippet>385</a>    <span class="kw">let </span>retention = world.resources.get_or_init_mut::&lt;TileRetention&gt;();
+<a href=#386 id=386 data-nosnippet>386</a>    <span class="kw">for </span>coords <span class="kw">in </span><span class="kw-2">&amp;</span>cancelled {
+<a href=#387 id=387 data-nosnippet>387</a>        retention.last_used.remove(coords);
+<a href=#388 id=388 data-nosnippet>388</a>    }
+<a href=#389 id=389 data-nosnippet>389</a>    <span class="kw">for </span>coords <span class="kw">in </span><span class="kw-2">&amp;</span>cancelled {
+<a href=#390 id=390 data-nosnippet>390</a>        world.tiles.remove(<span class="kw-2">*</span>coords);
+<a href=#391 id=391 data-nosnippet>391</a>    }
+<a href=#392 id=392 data-nosnippet>392</a>    drop_gpu_data(world, <span class="kw-2">&amp;</span>cancelled);
+<a href=#393 id=393 data-nosnippet>393</a>}
+<a href=#394 id=394 data-nosnippet>394</a>
+<a href=#395 id=395 data-nosnippet>395</a><span class="kw">fn </span>drop_gpu_data(world: <span class="kw-2">&amp;mut </span>World, evicted: <span class="kw-2">&amp;</span>[WorldTileCoords]) {
+<a href=#396 id=396 data-nosnippet>396</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(Initialized(pool)) = world.resources.get_mut::&lt;Eventually&lt;VectorBufferPool&gt;&gt;() {
+<a href=#397 id=397 data-nosnippet>397</a>        <span class="kw">for </span>coords <span class="kw">in </span>evicted {
+<a href=#398 id=398 data-nosnippet>398</a>            pool.remove_tile(<span class="kw-2">*</span>coords);
+<a href=#399 id=399 data-nosnippet>399</a>        }
+<a href=#400 id=400 data-nosnippet>400</a>    }
+<a href=#401 id=401 data-nosnippet>401</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(Initialized(pool)) = world
+<a href=#402 id=402 data-nosnippet>402</a>        .resources
+<a href=#403 id=403 data-nosnippet>403</a>        .get_mut::&lt;Eventually&lt;<span class="kw">crate</span>::sdf::SymbolBufferPool&gt;&gt;()
+<a href=#404 id=404 data-nosnippet>404</a>    {
+<a href=#405 id=405 data-nosnippet>405</a>        <span class="kw">for </span>coords <span class="kw">in </span>evicted {
+<a href=#406 id=406 data-nosnippet>406</a>            pool.remove_tile(<span class="kw-2">*</span>coords);
+<a href=#407 id=407 data-nosnippet>407</a>        }
+<a href=#408 id=408 data-nosnippet>408</a>    }
+<a href=#409 id=409 data-nosnippet>409</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(Initialized(raster)) = world.resources.get_mut::&lt;Eventually&lt;RasterResources&gt;&gt;() {
+<a href=#410 id=410 data-nosnippet>410</a>        <span class="kw">for </span>coords <span class="kw">in </span>evicted {
+<a href=#411 id=411 data-nosnippet>411</a>            raster.remove_texture(<span class="kw-2">*</span>coords);
+<a href=#412 id=412 data-nosnippet>412</a>        }
+<a href=#413 id=413 data-nosnippet>413</a>    }
+<a href=#414 id=414 data-nosnippet>414</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(Initialized(terrain)) = world.resources.get_mut::&lt;Eventually&lt;TerrainResources&gt;&gt;() {
+<a href=#415 id=415 data-nosnippet>415</a>        <span class="kw">for </span>coords <span class="kw">in </span>evicted {
+<a href=#416 id=416 data-nosnippet>416</a>            terrain.drop_dem(<span class="kw-2">*</span>coords);
+<a href=#417 id=417 data-nosnippet>417</a>        }
+<a href=#418 id=418 data-nosnippet>418</a>    }
+<a href=#419 id=419 data-nosnippet>419</a>}
+<a href=#420 id=420 data-nosnippet>420</a>
+<a href=#421 id=421 data-nosnippet>421</a><span class="attr">#[cfg(test)]
+<a href=#422 id=422 data-nosnippet>422</a></span><span class="kw">mod </span>tests;
+<a href=#423 id=423 data-nosnippet>423</a>
+<a href=#424 id=424 data-nosnippet>424</a><span class="kw">fn </span>finest_dem_zoom(world: <span class="kw-2">&amp;</span>World) -&gt; u8 {
+<a href=#425 id=425 data-nosnippet>425</a>    world
+<a href=#426 id=426 data-nosnippet>426</a>        .tiles
+<a href=#427 id=427 data-nosnippet>427</a>        .tiles
+<a href=#428 id=428 data-nosnippet>428</a>        .values()
+<a href=#429 id=429 data-nosnippet>429</a>        .filter_map(|tile| {
+<a href=#430 id=430 data-nosnippet>430</a>            <span class="macro">matches!</span>(
+<a href=#431 id=431 data-nosnippet>431</a>                world
+<a href=#432 id=432 data-nosnippet>432</a>                    .tiles
+<a href=#433 id=433 data-nosnippet>433</a>                    .query::&lt;<span class="kw-2">&amp;</span><span class="kw">crate</span>::terrain::DemTileComponent&gt;(tile.coords),
+<a href=#434 id=434 data-nosnippet>434</a>                <span class="prelude-val">Some</span>(<span class="kw">crate</span>::terrain::DemTileComponent::Loaded(<span class="kw">_</span>))
+<a href=#435 id=435 data-nosnippet>435</a>            )
+<a href=#436 id=436 data-nosnippet>436</a>            .then_some(u8::from(tile.coords.z))
+<a href=#437 id=437 data-nosnippet>437</a>        })
+<a href=#438 id=438 data-nosnippet>438</a>        .max()
+<a href=#439 id=439 data-nosnippet>439</a>        .unwrap_or(<span class="number">0</span>)
+<a href=#440 id=440 data-nosnippet>440</a>}
+<a href=#441 id=441 data-nosnippet>441</a>
+<a href=#442 id=442 data-nosnippet>442</a><span class="kw">fn </span>symbol_revision(world: <span class="kw-2">&amp;</span>World) -&gt; u64 {
+<a href=#443 id=443 data-nosnippet>443</a>    <span class="kw">match </span>world
+<a href=#444 id=444 data-nosnippet>444</a>        .resources
+<a href=#445 id=445 data-nosnippet>445</a>        .get::&lt;Eventually&lt;<span class="kw">crate</span>::sdf::SymbolBufferPool&gt;&gt;()
+<a href=#446 id=446 data-nosnippet>446</a>    {
+<a href=#447 id=447 data-nosnippet>447</a>        <span class="prelude-val">Some</span>(Initialized(pool)) =&gt; pool.revision(),
+<a href=#448 id=448 data-nosnippet>448</a>        <span class="kw">_ </span>=&gt; <span class="number">0</span>,
+<a href=#449 id=449 data-nosnippet>449</a>    }
+<a href=#450 id=450 data-nosnippet>450</a>}
+</code></pre></div></section></main></body></html>

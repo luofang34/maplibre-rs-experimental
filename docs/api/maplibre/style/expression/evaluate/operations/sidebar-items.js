@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["arithmetic","clamp_index","coerce","compare","expect_bool","expect_color","expect_number","expect_object","expect_string","index_of","interpolate_values","js_round","math","rgba","searchable","slice","stop_at_or_below"]};

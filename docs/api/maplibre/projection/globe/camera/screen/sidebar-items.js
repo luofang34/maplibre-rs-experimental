@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["HORIZON_FALLBACK_RAY_LENGTH"]};

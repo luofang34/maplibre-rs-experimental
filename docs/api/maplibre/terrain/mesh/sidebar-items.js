@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["TERRAIN_MESH_SIZE"],"fn":["build_polar_caps","build_skirts","create_terrain_mesh","grid_coordinate"],"struct":["TerrainMesh","TerrainVertex"]};
