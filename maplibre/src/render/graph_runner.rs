@@ -98,6 +98,13 @@ impl RenderGraphRunner {
         for timer in timer.into_iter().chain(drape_timer) {
             timer.after_submit();
         }
+        if let Some(crate::render::eventually::Eventually::Initialized(probes)) =
+            world
+                .resources
+                .get::<crate::render::eventually::Eventually<crate::overlay::ProbeGpu>>()
+        {
+            probes.after_submit();
+        }
         Ok(())
     }
 
