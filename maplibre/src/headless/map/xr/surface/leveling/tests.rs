@@ -31,7 +31,11 @@ async fn level_transitions_keep_terrain_and_sky_drawable_for_both_eyes() {
         );
         let pixels = read_back_blocking(&map);
         assert!(
-            pixels.chunks_exact(4).all(|pixel| pixel[3] == 255),
+            pixels
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .all(|pixel| pixel[3] == 255),
             "ground and sky cover the whole frame at pitch {pitch}"
         );
     }

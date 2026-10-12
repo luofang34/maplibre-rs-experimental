@@ -258,7 +258,7 @@ async fn native_orbit_cameras_see_terrain_in_both_projections() {
         .expect("readback");
         harness.capture(&format!("native-{projection}"), &rgba);
         assert!(
-            rgba.chunks_exact(4).all(|pixel| pixel[3] == 255),
+            rgba.as_chunks::<4>().0.iter().all(|pixel| pixel[3] == 255),
             "native {projection} terrain is visible throughout the viewport"
         );
     }
@@ -324,11 +324,16 @@ async fn transition_cap(latitude: f64) {
         .expect("transition depth");
     harness.capture(&format!("half-transition-{latitude}"), &rgba);
     assert!(
-        rgba.chunks_exact(4).all(|p| p[3] == 255),
+        rgba.as_chunks::<4>().0.iter().all(|p| p[3] == 255),
         "projection transition opens the polar seam at {latitude}"
     );
     assert!(
-        depth.chunks_exact(4).map(metric_depth).all(|d| d > 0.0),
+        depth
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(metric_depth)
+            .all(|d| d > 0.0),
         "projection transition loses visible terrain depth at {latitude}"
     );
 }

@@ -25,7 +25,9 @@ async fn elevated_bridge_draws_over_terrain_and_buried_tunnel_is_occluded() {
         );
         let pixels = read_blocking(&map);
         let green = pixels
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .filter(|p| p[1] > 180 && p[0] < 80 && p[2] < 80)
             .count();
         assert_eq!(
@@ -112,7 +114,9 @@ async fn parent_road_uses_finer_terrain_when_the_dem_refines() {
         Matrix4::from_translation(Vector3::new(0.0, 0.0, 4000.0)),
     );
     let green = read_blocking(&map)
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .filter(|p| p[1] > 180 && p[0] < 80 && p[2] < 80)
         .count();
     assert!(
@@ -251,7 +255,9 @@ async fn coplanar_bridge_casing_cannot_hide_the_deck_during_head_motion() {
         );
         let pixels = read_blocking(&map);
         let green = pixels
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .filter(|p| p[1] > 180 && p[0] < 80 && p[2] < 80)
             .count();
         assert!(
@@ -301,7 +307,9 @@ async fn detailed_bridge_deck_survives_pitch_and_roll_near_innsbruck() {
             render_at_anchor(&mut map, eye, anchor);
             let pixels = read_blocking(&map);
             let green = pixels
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .filter(|p| p[1] > 160 && p[0] < 80 && p[2] < 80)
                 .count();
             assert!(

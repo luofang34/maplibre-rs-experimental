@@ -11,6 +11,6 @@ for overlay_target in "$@"; do
         aarch64-apple-visionos|aarch64-apple-visionos-sim) ;;
         *) echo "Unsupported Apple target: $overlay_target" >&2; exit 2 ;;
     esac
-    cargo +nightly-2026-08-06 build --locked --release -Z build-std=std,panic_abort \
+    cargo +nightly build --locked --release -Z build-std=std,panic_abort \
         --manifest-path "$overlay_manifest" -p indicate-svs-bridge --target "$overlay_target"
 done

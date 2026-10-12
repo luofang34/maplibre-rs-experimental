@@ -258,7 +258,11 @@ async fn full_immersion_has_sky_coverage_even_before_the_globe_transition() {
     map.run_xr_frame(view).expect("opaque globe environment");
     let pixels = read_back_blocking(&map);
     assert!(
-        pixels.chunks_exact(4).all(|pixel| pixel[3] == 255),
+        pixels
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|pixel| pixel[3] == 255),
         "the host requests coverage across the whole frame"
     );
 }

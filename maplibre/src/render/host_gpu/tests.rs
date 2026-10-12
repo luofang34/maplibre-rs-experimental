@@ -190,7 +190,9 @@ fn host_samples(gpu: &HostGpu, texture: &wgpu::Texture) -> Vec<u8> {
 
 fn all(pixels: &[u8], expected: [u8; 4]) -> bool {
     pixels
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .all(|pixel| pixel.iter().zip(expected).all(|(a, b)| a.abs_diff(b) <= 2))
 }
 

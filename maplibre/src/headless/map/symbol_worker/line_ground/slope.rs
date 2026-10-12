@@ -13,7 +13,9 @@ fn slope(grade: f64) -> impl Fn([f64; 2]) -> f64 {
 fn queried_share(map: &SymbolMap, pixels: &[u8], ratio: f64) -> f64 {
     let width = map.map.head_texture().expect("color").width() as usize;
     let text: Vec<[f64; 2]> = pixels
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .enumerate()
         .filter(|(_, pixel)| {
             pixel

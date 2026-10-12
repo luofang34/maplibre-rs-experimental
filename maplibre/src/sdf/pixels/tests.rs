@@ -60,7 +60,9 @@ async fn render_with_atlas(
     let map = fixture_map(style, layers, samples).await;
     let pixels = read_blocking(&map);
     if let Some(index) = pixels
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .position(|p| p[0] > 180 && p[1] < 80 && p[2] < 80)
     {
         let point = [
@@ -205,7 +207,7 @@ fn read_blocking(map: &HeadlessMap) -> Vec<u8> {
 fn colored_bounds(pixels: &[u8], channel: usize) -> (usize, [usize; 4]) {
     let mut count = 0;
     let mut bounds = [SIZE as usize, SIZE as usize, 0, 0];
-    for (index, pixel) in pixels.chunks_exact(4).enumerate() {
+    for (index, pixel) in pixels.as_chunks::<4>().0.iter().enumerate() {
         if pixel[channel] > 150 && pixel[(channel + 1) % 3] < 100 && pixel[(channel + 2) % 3] < 100
         {
             count += 1;

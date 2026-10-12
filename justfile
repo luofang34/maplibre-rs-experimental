@@ -5,12 +5,8 @@
 set shell := ["bash", "--noprofile", "--norc", "-c"]
 set windows-shell := ["cmd.exe", "/c"]
 
-# Keep this in sync with `android/gradle/lib/build.gradle`
-export NIGHTLY_TOOLCHAIN := "nightly-2026-08-06"
-
-# Keep this in sync with `rust-toolchain.toml` and `Cargo.toml`.
-# Make sure the above is newer than this.
-export STABLE_TOOLCHAIN := "1.97.1"
+export NIGHTLY_TOOLCHAIN := "nightly"
+export STABLE_TOOLCHAIN := "stable"
 export CARGO_TERM_COLOR := "always"
 export RUST_BACKTRACE := "1"
 

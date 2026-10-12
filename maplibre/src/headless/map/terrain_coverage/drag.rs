@@ -73,7 +73,9 @@ fn drag_frame(map: &mut HeadlessMap, name: &str) -> Frame {
     .expect("drag frame");
     let pixels = read_blocking(map, name);
     let holes = pixels
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .filter(|pixel| !(pixel[1] > 200 && pixel[0] < 40 && pixel[2] < 40))
         .count();
     assert_eq!(holes, 0, "{name}: every pixel shows a loaded tile");

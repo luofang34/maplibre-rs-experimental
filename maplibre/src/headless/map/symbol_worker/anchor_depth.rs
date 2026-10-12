@@ -199,7 +199,7 @@ fn counts_near(
     colours: &[[u8; 3]; 3],
 ) -> Vec<[usize; 3]> {
     let mut counts = vec![[0; 3]; anchors.len()];
-    for (index, pixel) in pixels.chunks_exact(4).enumerate() {
+    for (index, pixel) in pixels.as_chunks::<4>().0.iter().enumerate() {
         let Some(kind) = colours.iter().position(|colour| {
             pixel
                 .iter()

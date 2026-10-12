@@ -16,9 +16,7 @@ members = [
 
 [workspace.package]
 description = "Maps for Desktop, Mobile and Web"
-version = "0.1.0"
 edition = "2021"
-# Keep this in sync with `rust-toolchain.toml` and `justfile`
 rust-version = "1.97.1"
 license = "AGPL-3.0-or-later AND (MIT OR Apache-2.0)"
 keywords = ["graphics", "maps", "webgl", "tiles"]
@@ -56,7 +54,7 @@ js-sys = "0.3"
 log = "0.4.20"
 lyon = { version = "1.0.1", features = [] }
 unicode-normalization = { version = "0.1.24", default-features = false }
-# Pinned: later releases require a newer rustc than the workspace toolchain.
+# Keep this dependency compatible with the workspace MSRV.
 mlt-core = "=0.12.5"
 naga = { version = "30.0.1", features = ["wgsl-in"] }
 android_logger = "0.14.1"

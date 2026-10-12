@@ -24,6 +24,14 @@ jobs:
         uses: ./.github/actions/cargo-install
         with:
           name: cargo-nextest
+      # The toolchain follows stable, so a lint a new release adds fails here rather than
+      # only on the next contributor's machine.
+      - name: Lint
+        shell: bash
+        run: |
+          just stable-install-clippy
+          cargo clippy -p maplibre --all-targets --features "headless thread-safe-futures" \
+            --target x86_64-unknown-linux-gnu -- -D warnings
       - name: Build the tests
         shell: bash
         run: |

@@ -1,8 +1,2 @@
 [toolchain]
-# The CI will not use the rust-toolchain.toml file to build this project.
-# However, the CI might use it to build other Rust binaries, required for building maplibre-rs.
-# This file is here to give IDEs a hint about which Rust version to use.
-# The version is set here instead of using stable, so we can make sure that a predictable version is used.
-#
-# Keep this in sync with `justfile` and `Cargo.toml`
-channel = "1.97.1"
+channel = "stable"
