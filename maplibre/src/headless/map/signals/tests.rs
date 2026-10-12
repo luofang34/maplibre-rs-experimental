@@ -155,24 +155,34 @@ async fn a_stage_is_charged_the_time_its_systems_take() {
     map.render_sources(Default::default(), vec![picture()])
         .expect("loading frame");
     assert!(settle(&mut map));
-    map.schedule
-        .add_system_to_stage(RenderStageLabel::Queue, spend_twenty_milliseconds);
-    map.run_frame().expect("slow frame");
-    let stats = map.last_frame_stats();
-    let spent = |stage: &str| {
-        stats
-            .stages
-            .iter()
-            .find(|(name, _)| name == stage)
-            .map(|(_, spent)| *spent)
-            .expect("stage timed")
-    };
     let twenty = std::time::Duration::from_millis(20);
-    assert!(spent("Queue") >= twenty, "{stats:?}");
-    for stage in ["Extract", "Prepare", "Render"] {
-        assert!(spent(stage) < twenty, "{stage} is not charged: {stats:?}");
+    let mut slowed = Vec::new();
+    for (label, name) in [
+        (RenderStageLabel::Extract, "Extract"),
+        (RenderStageLabel::Prepare, "Prepare"),
+        (RenderStageLabel::Queue, "Queue"),
+        (RenderStageLabel::Render, "Render"),
+    ] {
+        map.schedule
+            .add_system_to_stage(label, spend_twenty_milliseconds);
+        slowed.push(name);
+        let started = std::time::Instant::now();
+        map.run_frame().expect("slow frame");
+        let frame = started.elapsed();
+        let stats = map.last_frame_stats();
+        for stage in &slowed {
+            let spent = stats
+                .stages
+                .iter()
+                .find(|(name, _)| name == stage)
+                .map(|(_, spent)| *spent)
+                .expect("stage timed");
+            assert!(spent >= twenty, "{stage} is not charged: {stats:?}");
+        }
+        // Stages run one after another inside the frame, so time charged to two stages would
+        // add up to more than the frame took, however loaded the machine is.
+        assert!(stats.cpu() <= frame, "{frame:?} < {stats:?}");
     }
-    assert!(stats.cpu() >= twenty);
 }
 
 /// A 1024² map of `layers` translucent backgrounds, on a device that can time passes.
