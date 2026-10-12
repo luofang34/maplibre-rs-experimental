@@ -56,3 +56,23 @@ impl Scheduler for NopScheduler {
         Err(ScheduleError::NotImplemented)
     }
 }
+
+/// Runs each task on the calling thread's browser event loop, between the host's frames.
+///
+/// The task is not `Send`, so it can hold `fetch` promises and other JavaScript values.
+#[cfg(target_arch = "wasm32")]
+pub struct LocalScheduler;
+
+#[cfg(target_arch = "wasm32")]
+impl Scheduler for LocalScheduler {
+    fn schedule<T>(
+        &self,
+        future_factory: impl FnOnce() -> T + Send + 'static,
+    ) -> Result<(), ScheduleError>
+    where
+        T: Future<Output = ()> + 'static,
+    {
+        wasm_bindgen_futures::spawn_local(future_factory());
+        Ok(())
+    }
+}

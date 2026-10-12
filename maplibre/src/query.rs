@@ -34,10 +34,11 @@ mod ground;
 mod overzoomed;
 mod tiles;
 
-use crate::coords::{WorldTileCoords, Zoom, ZoomLevel, EXTENT};
 use tiles::{
     camera_query_bounds, candidates_in, ground_corners, ground_region, tiles_in, QueryTile,
 };
+
+use crate::coords::{WorldTileCoords, Zoom, ZoomLevel, EXTENT};
 
 /// Deepest tile zoom a query looks at.
 const MAX_QUERY_ZOOM: i32 = 22;

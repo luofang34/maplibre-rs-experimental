@@ -1,8 +1,7 @@
 use geozero::{FeatureProcessor, GeomProcessor, PropertyProcessor};
 
-use crate::style::layer::StyleProperty;
-
 use super::{IndexDataType, ZeroTessellator};
+use crate::style::layer::StyleProperty;
 
 #[test]
 fn globe_line_tessellation_inserts_grid_crossings() {

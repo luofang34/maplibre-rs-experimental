@@ -189,7 +189,7 @@ impl RasterResources {
     }
 
     /// The number of tile textures bound for a source.
-    #[cfg(test)]
+    #[cfg(all(test, feature = "headless"))]
     pub(crate) fn texture_count(&self, source: &RasterSourceId) -> usize {
         self.bound_textures.get(source).map_or(0, HashMap::len)
     }

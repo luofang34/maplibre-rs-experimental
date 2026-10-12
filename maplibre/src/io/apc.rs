@@ -2,7 +2,7 @@
 
 use std::{
     any::{type_name, Any, TypeId},
-    cell::RefCell,
+    cell::{Cell, RefCell},
     collections::HashMap,
     fmt::Debug,
     future::Future,
@@ -274,6 +274,15 @@ pub trait AsyncProcedureCall<K: OffscreenKernel>: 'static {
     /// reach its worker lets the call finish; the map ignores a result it gave up on.
     fn cancel(&self, _attempt: u64) {}
 
+    /// Whether results arrived that no [`Self::receive`] has offered to its consumers yet, so
+    /// the next frame has something to apply. A transport that cannot tell answers `false`.
+    ///
+    /// Any receive counts as offering, which holds because every consumer receives in every
+    /// frame; ask between frames.
+    fn has_arrivals(&self) -> bool {
+        false
+    }
+
     /// The image providers the workers ask, when they share this transport's memory. A
     /// transport whose workers build their own configuration has none to offer here.
     fn image_providers(&self) -> Option<&crate::sdf::assets::ImageProviders> {
@@ -305,6 +314,9 @@ impl Context for SchedulerContext {
 pub struct SchedulerAsyncProcedureCall<K: OffscreenKernel, S: Scheduler> {
     channel: (Sender<Message>, Receiver<Message>),
     buffer: RefCell<Vec<Message>>,
+    /// Messages [`AsyncProcedureCall::has_arrivals`] moved into `buffer` that no receive has
+    /// offered to a consumer since.
+    unoffered: Cell<bool>,
     scheduler: S,
     phantom_k: PhantomData<K>,
     offscreen_kernel_config: OffscreenKernelConfig,
@@ -318,6 +330,7 @@ impl<K: OffscreenKernel, S: Scheduler> SchedulerAsyncProcedureCall<K, S> {
         Self {
             channel: mpsc::channel(),
             buffer: RefCell::new(Vec::new()),
+            unoffered: Cell::new(false),
             phantom_k: PhantomData,
             scheduler,
             offscreen_kernel_config,
@@ -335,6 +348,7 @@ impl<K: OffscreenKernel, S: Scheduler> AsyncProcedureCall<K> for SchedulerAsyncP
     type ReceiveIterator<F: FnMut(&Message) -> bool> = IntoIter<Message>;
 
     fn receive<F: FnMut(&Message) -> bool>(&self, mut filter: F) -> Self::ReceiveIterator<F> {
+        self.unoffered.set(false);
         let mut buffer = self.buffer.borrow_mut();
         // Partial and final tile completions must retain the worker's delivery order.
         let mut ret: Vec<_> = buffer.extract_if(.., |message| filter(message)).collect();
@@ -390,6 +404,16 @@ impl<K: OffscreenKernel, S: Scheduler> AsyncProcedureCall<K> for SchedulerAsyncP
                 }
             })
             .map_err(CallError::Schedule)
+    }
+
+    fn has_arrivals(&self) -> bool {
+        // The receiver cannot be peeked; buffered messages keep their order ahead of the channel.
+        let mut buffer = self.buffer.borrow_mut();
+        while let Ok(message) = self.channel.1.try_recv() {
+            buffer.push(message);
+            self.unoffered.set(true);
+        }
+        self.unoffered.get()
     }
 
     fn cancel(&self, attempt: u64) {

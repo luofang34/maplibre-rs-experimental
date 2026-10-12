@@ -21,7 +21,7 @@ use crate::{
     render::{
         render_phase::ProjectionBinding,
         shaders::{Mat4x4f32, Vec4f32},
-        view_state::ViewState,
+        view_state::{NavigationMode, ViewState},
     },
     style::Style,
 };
@@ -50,7 +50,7 @@ pub struct ShaderProjectionData {
     pub external_view: f32,
     /// x: the globe's angle per pixel relative to a world of 512 pixels at the zoom, which the
     /// extent of a circle lying on the globe follows; y: 1 when the globe centre references
-    /// below are set; the other lanes are padding.
+    /// below are set; z: 1 when symbol sizes are independent of target depth; w is padding.
     pub globe_circle: [f32; 4],
     /// The Mercator position of the globe centre the shaders project relative to, in x and y,
     /// exactly representable in f32 so tile origins difference from it without rounding; the
@@ -222,6 +222,11 @@ pub enum ProjectionStateError {
     },
 }
 
+/// A freely placed camera has no canonical map center for depth-based label scaling.
+pub(crate) fn fixed_symbol_scale(view: &ViewState) -> bool {
+    view.has_external_view() || view.navigation_mode() == NavigationMode::FreeGlobe
+}
+
 /// Derives the view-wide projection uniform from style and camera state.
 pub fn projection_data_for_view(
     style: &Style,
@@ -238,6 +243,7 @@ pub fn projection_data_for_view(
         return Ok(ShaderProjectionData {
             external_view: f32::from(view_state.has_external_view()),
             center_clip_w: mercator_center_w,
+            globe_circle: [1.0, 0.0, f32::from(fixed_symbol_scale(view_state)), 0.0],
             radius_meters,
             ..ShaderProjectionData::default()
         });
@@ -270,7 +276,12 @@ pub fn projection_data_for_view(
         external_view: f32::from(view_state.has_external_view()),
         center_clip_w: mercator_center_w + (globe_center_w - mercator_center_w) * transition,
         radius_meters,
-        globe_circle: [globe.circle_radius_correction() as f32, 0.0, 0.0, 0.0],
+        globe_circle: [
+            globe.circle_radius_correction() as f32,
+            0.0,
+            f32::from(fixed_symbol_scale(view_state)),
+            0.0,
+        ],
         ..ShaderProjectionData::from_renderer_data(data)
     };
     // Below this zoom f32 rounding stays far under a pixel, and projecting from the global
@@ -280,7 +291,7 @@ pub fn projection_data_for_view(
         .flatten();
     Ok(match references {
         Some([center, clip, radial]) => ShaderProjectionData {
-            globe_circle: [shader.globe_circle[0], 1.0, 0.0, 0.0],
+            globe_circle: [shader.globe_circle[0], 1.0, shader.globe_circle[2], 0.0],
             globe_center: center,
             globe_center_clip: clip,
             globe_center_radial: radial,

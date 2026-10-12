@@ -30,7 +30,6 @@ mod pick;
 mod target;
 
 use mesh::Cell;
-
 pub use pick::{pick_globe_terrain, TerrainPick};
 pub use target::{target_view, TargetAltitude, TargetView, Visibility};
 

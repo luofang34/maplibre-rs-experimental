@@ -19,11 +19,13 @@ jobs:
         uses: ./.github/actions/install-driver
       - name: Test Vulkan
         shell: bash
-        # TODO: Additional test runs for different targets
+        # One test at a time: lavapipe crashes now and then when tests create devices on
+        # several threads at once.
         run: |
-          WGPU_BACKEND=vulkan just test maplibre x86_64-unknown-linux-gnu
+          RUST_TEST_THREADS=1 WGPU_BACKEND=vulkan just test maplibre x86_64-unknown-linux-gnu
       - name: Test EGL
         shell: bash
-        # TODO: Additional test runs for different targets
+        # One test at a time: Mesa's GL crashes when tests create contexts on several
+        # threads at once.
         run: |
-          EGL_LOG_LEVEL=debug WGPU_BACKEND=gl just test maplibre x86_64-unknown-linux-gnu
+          RUST_TEST_THREADS=1 EGL_LOG_LEVEL=debug WGPU_BACKEND=gl just test maplibre x86_64-unknown-linux-gnu

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {checkActions} from './check-actions.mjs';
+import {checkActions,checkConcurrency,checkStackGating} from './check-actions.mjs';
 const action=name=>`actions/${name}@${'a'.repeat(40)}`;
 const uses=name=>`- uses: ${action(name)} # pinned`;
 test('follows composite dependencies and rejects Node.js 20 with its chain',async()=>{
@@ -27,4 +27,23 @@ test('checks local reusable workflows and composite action dependencies',async()
   [action('checkout')]:"using: node20",
  };
  await assert.rejects(checkActions(['uses: ./.github/workflows/build.yml'],async key=>metadata[key]),/node20:.*workflows\/build.yml ->.*actions\/setup ->.*checkout/);
+});
+
+test('requires pull request and branch push workflows to cancel superseded runs',()=>{
+  const cancels='concurrency:\n  group: x\n  cancel-in-progress: true\n';
+  assert.throws(()=>checkConcurrency([['pr.yml','on:\n  pull_request:\njobs: {}\n']]),/pr\.yml must cancel/);
+  assert.throws(()=>checkConcurrency([['main.yml','on:\n  push:\n    branches: [main]\n']]),/main\.yml/);
+  checkConcurrency([['pr.yml','on:\n  pull_request:\n'+cancels]]);
+  checkConcurrency([['release.yml','on:\n  push:\n    tags: [\"v*\"]\n']]);
+});
+
+test('runs slow workflows on pull requests into main only, and on every push to main',()=>{
+  const edit="github.event.action != 'edited' || github.event.changes.base";
+  const job=(name,uses,condition)=>`  ${name}:\n    if: \${{ ${condition} }}\n    uses: ./.github/workflows/${uses}\n`;
+  const main='jobs:\n'+['run-headless-tests.yml','library-apple.yml','demo-macos.yml'].map((uses,i)=>`  j${i}:\n    uses: ./.github/workflows/${uses}\n`).join('');
+  const pr=jobs=>[['on_pull_request.yml','on:\n  pull_request:\njobs:\n'+jobs],['on_main_push.yml',main]];
+  checkStackGating(pr(job('tests','run-tests.yml',edit)+job('headless','run-headless-tests.yml',`(${edit}) && (github.base_ref == 'main')`)));
+  assert.throws(()=>checkStackGating(pr(job('headless','run-headless-tests.yml',edit))),/headless is slow/);
+  assert.throws(()=>checkStackGating(pr('  tests:\n    uses: ./.github/workflows/run-tests.yml\n')),/tests must skip edits/);
+  assert.throws(()=>checkStackGating([pr('')[0],['on_main_push.yml','jobs:\n']]),/must run run-headless-tests\.yml/);
 });

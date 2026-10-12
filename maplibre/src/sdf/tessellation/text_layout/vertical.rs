@@ -7,8 +7,10 @@
 use std::ops::Range;
 
 use super::{styles::CharStyle, Emitter};
-use crate::sdf::tessellation::layout::anchor_fractions;
-use crate::{sdf::assets::AtlasEntry, style::layer::SymbolPaint};
+use crate::{
+    sdf::{assets::AtlasEntry, tessellation::layout::anchor_fractions},
+    style::layer::SymbolPaint,
+};
 
 /// Where a vertical glyph's box sits from its line, which GL JS measures from the em box rather
 /// than from the baseline.

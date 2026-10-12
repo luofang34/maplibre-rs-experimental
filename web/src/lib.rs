@@ -12,5 +12,8 @@ mod startup;
 
 pub use application::{run_maplibre, MapType};
 pub use environment::WHATWGOffscreenKernelEnvironment;
+pub use maplibre::platform::http_client::{
+    web_http_client, FetchError, WHATWGFetchHttpClient, WebHttpClient,
+};
 pub use platform::image_providers;
 pub use startup::wasm_bindgen_start;

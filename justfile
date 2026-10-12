@@ -110,7 +110,7 @@ web-test FEATURES: nightly-toolchain (nightly-targets "wasm32-unknown-unknown")
 
 build-android: build-android-lib build-android-demo
 
-ensure-android-toolchain: nightly-toolchain (nightly-targets "x86_64-linux-android" "aarch64-linux-android" "i686-linux-android")
+ensure-android-toolchain: nightly-toolchain (nightly-targets "x86_64-linux-android" "aarch64-linux-android")
 
 build-android-lib: ensure-android-toolchain print-android-env
     cd android/gradle && ./gradlew :lib:assembleDebug

@@ -1,8 +1,9 @@
 //! At a transition of one, every projection path returns the globe's clip position, however
 //! undefined the inactive flat projection is.
 
-use crate::render::projection::ShaderProjectionData;
 use bytemuck::{bytes_of, cast_slice};
+
+use crate::render::projection::ShaderProjectionData;
 
 /// Calls the shared projection functions with a flat projection of infinities and stores what
 /// they return.

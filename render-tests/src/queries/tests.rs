@@ -1,7 +1,7 @@
+use maplibre::{query::QueriedFeature, sdf::query::QueryGeometry};
 use serde_json::json;
 
 use super::{of, ours, theirs};
-use maplibre::{query::QueriedFeature, sdf::query::QueryGeometry};
 
 fn test(value: serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
     value.as_object().expect("object").clone()

@@ -4,7 +4,10 @@ use cgmath::{InnerSpace, Matrix4, Vector4};
 use super::{paint::SymbolUniforms, placement_geometry::SymbolBounds};
 use crate::{
     coords::{TileCoords, WorldTileCoords, ZOOM_BOUNDS},
-    render::{projection::ShaderProjectionData, view_state::ViewState},
+    render::{
+        projection::{fixed_symbol_scale, ShaderProjectionData},
+        view_state::ViewState,
+    },
     sdf::{Feature, SymbolLayerData},
 };
 
@@ -113,7 +116,7 @@ pub(super) fn text_perspective_scale(
     uniforms: &SymbolUniforms,
 ) -> f64 {
     let alignment = uniforms.text_layout;
-    if view.has_external_view() {
+    if fixed_symbol_scale(view) {
         return 1.0;
     }
     let height = f64::from(elevation) * f64::from(alignment[3]);
@@ -152,7 +155,7 @@ pub(super) fn beyond_perspective_cutoff(
     projection: &ShaderProjectionData,
     uniforms: &SymbolUniforms,
 ) -> bool {
-    if view.has_external_view() {
+    if fixed_symbol_scale(view) {
         return false;
     }
     let height = f64::from(elevation) * f64::from(uniforms.text_layout[3]);
@@ -244,7 +247,7 @@ impl Placement<'_> {
         if clip.w <= 0.0 {
             return None;
         }
-        let ratio = if self.view.has_external_view() {
+        let ratio = if fixed_symbol_scale(self.view) {
             1.0
         } else if alignment[0] > 0.5 {
             clip.w / f64::from(self.projection.center_clip_w)
@@ -421,3 +424,6 @@ pub(super) fn project(
         * (surface * (1.0 + elevation / f64::from(projection.radius_meters))).extend(1.0);
     Some(flat * (1.0 - f64::from(projection.transition)) + globe * f64::from(projection.transition))
 }
+
+#[cfg(test)]
+mod tests;

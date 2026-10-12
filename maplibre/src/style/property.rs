@@ -3,9 +3,8 @@
 use std::sync::Arc;
 
 mod text;
-pub use text::{FormattedText, ImageName, PatternName, TextField, TextSection};
-
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+pub use text::{FormattedText, ImageName, PatternName, TextField, TextSection};
 
 use crate::style::expression::{
     convert_token_string, EvaluationContext, Expression, FeatureProperties, LegacyPropertySpec,

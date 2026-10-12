@@ -3,7 +3,10 @@
 
 use super::{project, LabelGround, Placement};
 use crate::{
-    render::{projection::ShaderProjectionData, view_state::ViewState},
+    render::{
+        projection::{fixed_symbol_scale, ShaderProjectionData},
+        view_state::ViewState,
+    },
     sdf::{
         line_glyphs::{place_glyphs, place_glyphs_on_screen, reads_backwards, GlyphPose, OnScreen},
         paint::SymbolUniforms,
@@ -163,7 +166,7 @@ fn map_plane_poses(
     if clip.w <= 0.0 {
         return LinePoses::DoesNotFit;
     }
-    let ratio = if view.has_external_view() {
+    let ratio = if fixed_symbol_scale(view) {
         1.0
     } else {
         clip.w / f64::from(projection.center_clip_w)
@@ -248,7 +251,7 @@ pub(in crate::sdf) fn line_glyph_boxes(
                 projection,
             )
             .filter(|clip| clip.w > 0.0)?;
-            let ratio = if view.has_external_view() {
+            let ratio = if fixed_symbol_scale(view) {
                 1.0
             } else {
                 clip.w / f64::from(projection.center_clip_w)
@@ -311,7 +314,7 @@ fn viewport_poses(
     let Some(anchor) = on_screen(placement.anchor).filter(|anchor| anchor.w > 0.0) else {
         return LinePoses::DoesNotFit;
     };
-    let perspective = if view.has_external_view() {
+    let perspective = if fixed_symbol_scale(view) {
         1.0
     } else {
         (0.5 + 0.5 * f64::from(projection.center_clip_w) / anchor.w).clamp(0.0, 4.0)

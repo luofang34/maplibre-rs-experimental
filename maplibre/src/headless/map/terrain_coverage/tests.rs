@@ -424,12 +424,13 @@ async fn drape_time_is_measured_across_every_drape_a_frame_draws() {
     {
         return;
     }
-    // The pitch is a camera move; a generous time budget lets its frame draw every drape.
+    // The pitch is a camera move; a budget of an hour lets its frame draw every drape, even
+    // on a software rasterizer that takes most of a second for one.
     map.map_context
         .world
         .resources
         .insert(crate::terrain::DrapeBudget {
-            moving_time: std::time::Duration::from_secs(1),
+            moving_time: std::time::Duration::from_secs(3600),
             ..Default::default()
         });
     settle_drape_timer(&mut map);

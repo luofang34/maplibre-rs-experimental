@@ -31,7 +31,9 @@ android {
 
 cargo {
     module = "../../"
-    targets = ["arm64", "x86_64", "x86"]
+    // No 32-bit x86: mlt-core's fsst-rs asserts a table entry size that holds only where
+    // u64 is 8-byte aligned, which i686 is not.
+    targets = ["arm64", "x86_64"]
     libname = "maplibre_android"
     targetDirectory = "${module}/../target"
     profile = "debug"

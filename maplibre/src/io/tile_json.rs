@@ -95,6 +95,10 @@ fn apply_tile_json_to_source(source: &mut Source, tile_json: TileJson) {
 ///
 /// A source whose document cannot be fetched or parsed is left unchanged so its layers fall back
 /// to the crate default source instead of failing the whole style.
+///
+/// A windowed map does this when its renderer initializes; a headless map's host awaits it
+/// before `HeadlessMap::new`, passing the kernel's
+/// source client. Nothing in it blocks, so it runs on a browser's event loop.
 pub async fn resolve_tile_json_sources<HC: HttpClient>(
     style: &mut Style,
     client: &SourceClient<HC>,

@@ -4,7 +4,10 @@
 //! Layers that test depth are hidden behind it exactly as painter order hides them; a heatmap
 //! ignores depth and so shows over the opaque layers above it.
 
-use super::{layer::LayerPaint, layer::StyleLayer, Style};
+use super::{
+    layer::{LayerPaint, StyleLayer},
+    Style,
+};
 
 impl Style {
     /// The highest painter index of an opaque-pass layer drawn after `layer`, when `layer`

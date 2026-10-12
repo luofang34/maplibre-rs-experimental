@@ -5,21 +5,44 @@ on:
   pull_request:
     branches:
       - main
+    # A pull request whose base becomes main, as the next of a stack does once the one below it
+    # merges, is edited; other edits run nothing.
+    types: [opened, synchronize, reopened, edited]
 
+# A newer push to a pull request or to main supersedes the run before it: merging a stack
+# pushes main once per pull request and rebases each one left.
+concurrency:
+  # An edit that runs nothing must not cancel the pull request's run.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{ github.event.action == 'edited' && !github.event.changes.base && '-edited' || '' }}
+  cancel-in-progress: true
+
+# Every pull request of a stack runs the jobs below on everything under it, so the slow ones,
+# the headless map tests and the macOS builds whose runners queue for an hour, run only on a
+# pull request into main: the bottom of a stack, and each one above as it gets there. A
+# manual run and every push to main run them too.
 jobs:
   run-check:
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     uses: ./.github/workflows/run-checks.yml
   run-benchmarks:
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     uses: ./.github/workflows/run-benchmarks.yml
   run-tests:
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     uses: ./.github/workflows/run-tests.yml
+  run-headless-tests:
+    if: ${{ (github.event.action != 'edited' || github.event.changes.base) && (github.event_name != 'pull_request' || github.base_ref == 'main') }}
+    uses: ./.github/workflows/run-headless-tests.yml
   build-deploy-docs:
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     uses: ./.github/workflows/build-deploy-docs.yml
     with:
       deploy: false
   library-android:
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     uses: ./.github/workflows/library-android.yml
   library-web-webgl:
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     uses: ./.github/workflows/library-web.yml
     with:
       name: maplibre-rs-demo-webgl
@@ -27,6 +50,7 @@ jobs:
       multithreaded: false
       deploy: false
   library-web-webgl-multithreaded:
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     uses: ./.github/workflows/library-web.yml
     with:
       name: maplibre-rs-demo-webgl-multithreaded
@@ -34,6 +58,7 @@ jobs:
       multithreaded: true
       deploy: false
   library-web-webgpu:
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     uses: ./.github/workflows/library-web.yml
     with:
       name: maplibre-rs-demo-webgpu
@@ -41,11 +66,15 @@ jobs:
       multithreaded: false
       deploy: false
   library-apple:
+    if: ${{ (github.event.action != 'edited' || github.event.changes.base) && (github.event_name != 'pull_request' || github.base_ref == 'main') }}
     uses: ./.github/workflows/library-apple.yml
   demo-linux:
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     uses: ./.github/workflows/demo-linux.yml
   demo-windows:
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     uses: ./.github/workflows/demo-windows.yml
   demo-macos:
+    if: ${{ (github.event.action != 'edited' || github.event.changes.base) && (github.event_name != 'pull_request' || github.base_ref == 'main') }}
     uses: ./.github/workflows/demo-macos.yml
     secrets: inherit

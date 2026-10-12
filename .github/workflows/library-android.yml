@@ -13,7 +13,7 @@ jobs:
         uses: ./.github/actions/setup
         with:
           nightly: true
-          targets: x86_64-linux-android aarch64-linux-android i686-linux-android
+          targets: x86_64-linux-android aarch64-linux-android
       - name: Install Dependencies
         uses: ./.github/actions/install-system-dependencies
       - name: Build

@@ -469,9 +469,8 @@ mod external;
 mod screen;
 mod validation;
 
-use validation::validate_options;
-
 pub use external::ExternalGlobeEye;
+use validation::validate_options;
 
 #[cfg(test)]
 mod tests;
