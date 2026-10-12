@@ -445,7 +445,7 @@ impl HeadlessMap {
     /// The terrain the last frame drew, for following lines of sight across it with
     /// [`target_view`](crate::terrain::sightline::target_view); `None` without terrain or
     /// before any of it is drawn. `body` is the camera's
-    /// ([`GlobeCameraState::body`](crate::projection::globe::GlobeCameraState::body)).
+    /// ([`GlobeCameraState::body`](crate::projection::globe::camera::GlobeCameraState::body)).
     pub fn drawn_terrain(
         &self,
         body: crate::projection::body::Body,

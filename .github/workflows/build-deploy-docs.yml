@@ -28,6 +28,14 @@ jobs:
         run: |
           ./generate-summary.sh
           mdbook build
+      # The public API, as a host reads it, with and without the headless map.
+      - name: API documentation lints
+        shell: bash
+        env:
+          RUSTDOCFLAGS: -D missing_docs -D rustdoc::broken_intra_doc_links
+        run: |
+          cargo doc -p maplibre --no-deps --lib
+          cargo doc -p maplibre --no-deps --lib --features headless,thread-safe-futures
       - name: API Documentation
         shell: bash
         run: cargo doc -p maplibre --no-deps --lib --document-private-items

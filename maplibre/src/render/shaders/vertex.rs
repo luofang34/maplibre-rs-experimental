@@ -57,7 +57,7 @@ pub struct FillShaderFeatureMetadata {
 /// What the fourth lane of [`SDFShaderFeatureMetadata::pose`] holds for a glyph with a pose,
 /// before the glyph's rise in metres is added; a vertex without a pose holds 0. At this
 /// magnitude an `f32` keeps any rise on Earth to within a centimetre.
-pub(crate) const POSED_GLYPH: f32 = 65536.0;
+pub const POSED_GLYPH: f32 = 65536.0;
 
 /// Per-vertex collision visibility and sampled terrain height for symbols.
 #[repr(C)]
