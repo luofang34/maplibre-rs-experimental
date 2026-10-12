@@ -3,11 +3,11 @@
 <a href=#3 id=3 data-nosnippet>3</a>//! A host often draws content of its own over a map: lines and figures sized in screen
 <a href=#4 id=4 data-nosnippet>4</a>//! pixels, edit handles, previews. Drawing them over the map's finished image keeps them out
 <a href=#5 id=5 data-nosnippet>5</a>//! of the map's passes, so nothing the map draws can be ordered with them and every host
-<a href=#6 id=6 data-nosnippet>6</a>//! needs a compositor. A host instead hands the map one [`OverlayMesh`] per frame with
-<a href=#7 id=7 data-nosnippet>7</a>//! [`HeadlessMap::set_overlay`](crate::headless::map::HeadlessMap::set_overlay): triangles in
-<a href=#8 id=8 data-nosnippet>8</a>//! the render target's pixels, drawn over the map's layers and under its symbols in the order
-<a href=#9 id=9 data-nosnippet>9</a>//! given, so a host that lists every casing before any line gets casings under all of its
-<a href=#10 id=10 data-nosnippet>10</a>//! lines, and the map's labels stay readable over them.
+<a href=#6 id=6 data-nosnippet>6</a>//! needs a compositor. A host instead hands the map one [`OverlayMesh`] per frame with the
+<a href=#7 id=7 data-nosnippet>7</a>//! headless map's `set_overlay`: triangles in the render target's pixels, drawn over the
+<a href=#8 id=8 data-nosnippet>8</a>//! map's layers and under its symbols in the order given, so a host that lists every casing
+<a href=#9 id=9 data-nosnippet>9</a>//! before any line gets casings under all of its lines, and the map's labels stay readable
+<a href=#10 id=10 data-nosnippet>10</a>//! over them.
 <a href=#11 id=11 data-nosnippet>11</a>//!
 <a href=#12 id=12 data-nosnippet>12</a>//! Each vertex carries the depth of the ground it draws, and the pass tests it against the
 <a href=#13 id=13 data-nosnippet>13</a>//! frame's depth as the map's own 3D geometry is tested, so terrain hides overlay content
