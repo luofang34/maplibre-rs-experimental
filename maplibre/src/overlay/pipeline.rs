@@ -15,12 +15,12 @@ use crate::{
 
 const SHADER: &str = include_str!("../render/shaders/overlay.wgsl");
 
-/// Share of a vertex's distance from the camera it is brought nearer before it is tested
-/// against the frame's depth. Overlay lines are straight chords between points on the
-/// ground, a few pixels apart, so over a convex slope they run a little under the drawn
-/// surface, and the ground under a point is sampled from the elevation tiles rather than
-/// from the drawn mesh; this keeps both from hiding what lies on the ground, while a ridge
-/// hides what lies behind it by far more.
+/// Share by which a vertex's or probe's reversed-Z depth is raised before it is tested against
+/// the frame's depth. That brings it nearer by about `DEPTH_BIAS * (1 - distance / far)` of
+/// its distance from the camera: the full share close to the camera, less towards the far
+/// plane. Overlay lines are straight chords between points on the ground, a few pixels apart,
+/// so over a convex slope they run a little under the drawn surface; this keeps them from
+/// hiding what lies on the ground, while a ridge hides what lies behind it by far more.
 pub const DEPTH_BIAS: f32 = 0.01;
 
 /// The mesh last uploaded: its buffers and index count, and the revision they hold.

@@ -16,6 +16,15 @@
 //! Content a host draws over the map's finished image instead, such as text, can be tested
 //! the same way with [`DepthProbe`]s, answered a frame or two later.
 //!
+//! Whether a point is hidden is decided by its line of sight across the drawn terrain,
+//! [`target_view`](crate::terrain::sightline::target_view); the depth test here is a cheap
+//! stand-in for it, and differs from it in two ways only. It lets through ground less than
+//! [`DEPTH_BIAS`] of its depth behind nearer ground, which the line of sight calls hidden.
+//! And it compares a point with the nearest ground the frame drew anywhere in its pixel, at
+//! every sample of a multisampled frame, so a point beside a ridge's silhouette, or on ground
+//! seen at a grazing angle, can be hidden by ground in its pixel that does not lie on its own
+//! line. Over hills at 80° of pitch the two disagree for about 1 % of ground points.
+//!
 //! [`OverlayPlugin`] adds the passes; a map without it ignores the mesh and the probes.
 
 #![deny(missing_docs)]
@@ -54,8 +63,8 @@ pub struct OverlayVertex {
     /// convention (one at the near plane, zero at the far plane), as
     /// [`target_view`](crate::terrain::sightline::target_view) gives it. The vertex is
     /// drawn where nothing nearer was, so terrain hides what lies behind it; the pass
-    /// brings every depth a little nearer ([`DEPTH_BIAS`]) so ground does not hide what
-    /// lies on it. One draws over everything.
+    /// raises every depth a little ([`DEPTH_BIAS`]) so ground does not hide what lies on
+    /// it. One draws over everything.
     pub depth: f32,
     /// Red, green, blue and alpha in 0..=1, the colour already multiplied by alpha, in the
     /// render target's encoding.

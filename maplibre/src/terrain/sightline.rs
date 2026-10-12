@@ -10,6 +10,11 @@
 //! neither sea level nor clear: a line that passes below the body's highest ground there
 //! cannot be called unobstructed. Ground the frame does not draw at all, outside the rendered
 //! tiles, hides nothing, as in the picture.
+//!
+//! These lines of sight are the reference for what the frame hides. The overlay's depth test
+//! and its depth probes stand in for them on the GPU, at no cost per point, and differ from
+//! them only by the depth bias and the pixel the GPU tests a point at, as [`crate::overlay`]
+//! describes.
 
 use std::collections::HashMap;
 
