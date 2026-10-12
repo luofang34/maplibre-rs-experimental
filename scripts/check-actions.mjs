@@ -70,6 +70,17 @@ export function checkLockedInstalls(files){
   }
 }
 
+// A fork has none of the Cloudflare credentials; a deploy that needs them runs only with them.
+export function checkCredentialedDeploys(workflows){
+  for(const [name,text] of workflows){
+    for(const step of text.split(/^(?=\s*- )/m)){
+      if(!step.includes('uses: ./.github/actions/cloudflare-deploy'))continue;
+      if(!/^\s*if: env\.CAN_DEPLOY == 'true'$/m.test(step))throw Error(`${name} must deploy to Cloudflare only with its credentials (if: env.CAN_DEPLOY == 'true')`);
+      if(!/^\s*CAN_DEPLOY: \$\{\{ secrets\.CF_API_TOKEN != '' && secrets\.CF_ACCOUNT_ID != '' \}\}$/m.test(text))throw Error(`${name} must set CAN_DEPLOY from the Cloudflare secrets`);
+    }
+  }
+}
+
 async function loadAction(action){
   if(action.startsWith('./.github/')){
     if(action.includes('..'))throw Error('Invalid local action path');
@@ -93,6 +104,7 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).hr
   const workflows=await Promise.all(files.map(name=>readFile(new URL(name,directory),'utf8')));
   checkConcurrency(files.map((name,index)=>[name,workflows[index]]));
   checkStackGating(files.map((name,index)=>[name,workflows[index]]));
+  checkCredentialedDeploys(files.map((name,index)=>[name,workflows[index]]));
   const actionsDirectory=new URL('../.github/actions/',import.meta.url);
   const local=await Promise.all((await readdir(actionsDirectory)).map(async name=>[`actions/${name}`,await readFile(new URL(`${name}/action.yml`,actionsDirectory),'utf8')]));
   checkLockedInstalls([...files.map((name,index)=>[name,workflows[index]]),...local]);

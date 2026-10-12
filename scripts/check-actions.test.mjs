@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {checkActions,checkConcurrency,checkLockedInstalls,checkStackGating} from './check-actions.mjs';
+import {checkActions,checkConcurrency,checkCredentialedDeploys,checkLockedInstalls,checkStackGating} from './check-actions.mjs';
 const action=name=>`actions/${name}@${'a'.repeat(40)}`;
 const uses=name=>`- uses: ${action(name)} # pinned`;
 test('follows composite dependencies and rejects Node.js 20 with its chain',async()=>{
@@ -53,4 +53,12 @@ test('installs crates from crates.io with --locked, across continued lines',()=>
   checkLockedInstalls([['b.yml','run: cargo install --force --git "https://example.com/x" --rev abc tool\n']]);
   assert.throws(()=>checkLockedInstalls([['c.yml','run: cargo binstall --no-confirm cargo-nextest\n']]),/c\.yml must install with --locked/);
   assert.throws(()=>checkLockedInstalls([['d.yml','run: |\n  cargo install --debug \\\n    tool\n']]),/d\.yml/);
+});
+
+test('deploys to Cloudflare only where the credentials are set',()=>{
+  const env="    env:\n      CAN_DEPLOY: ${{ secrets.CF_API_TOKEN != '' && secrets.CF_ACCOUNT_ID != '' }}\n";
+  const step=gate=>`      - name: Deploy\n${gate}        uses: ./.github/actions/cloudflare-deploy\n`;
+  checkCredentialedDeploys([['a.yml',`jobs:\n  deploy:\n${env}    steps:\n${step("        if: env.CAN_DEPLOY == 'true'\n")}`]]);
+  assert.throws(()=>checkCredentialedDeploys([['b.yml',`jobs:\n  deploy:\n${env}    steps:\n${step('')}`]]),/b\.yml must deploy to Cloudflare only/);
+  assert.throws(()=>checkCredentialedDeploys([['c.yml',`jobs:\n  deploy:\n    steps:\n${step("        if: env.CAN_DEPLOY == 'true'\n")}`]]),/c\.yml must set CAN_DEPLOY/);
 });

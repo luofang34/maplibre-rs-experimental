@@ -67,6 +67,9 @@ jobs:
     if: inputs.deploy
     name: Deploy
     runs-on: ubuntu-22.04
+    env:
+      # A fork without the Cloudflare credentials builds the demo but publishes nothing.
+      CAN_DEPLOY: ${{ secrets.CF_API_TOKEN != '' && secrets.CF_ACCOUNT_ID != '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.0
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
@@ -80,7 +83,12 @@ jobs:
           echo "/*
             Cross-Origin-Opener-Policy: same-origin
             Cross-Origin-Embedder-Policy: require-corp" > demo/_headers
+      - name: Skip without credentials
+        if: env.CAN_DEPLOY != 'true'
+        shell: bash
+        run: echo "::notice::No Cloudflare credentials; ${{ inputs.name }} is built but not published."
       - name: Deploy
+        if: env.CAN_DEPLOY == 'true'
         uses: ./.github/actions/cloudflare-deploy
         with:
           project: ${{ inputs.name }}
