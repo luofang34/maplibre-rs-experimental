@@ -220,25 +220,30 @@ async fn heavy_map(layers: usize) -> Option<HeadlessMap> {
     Some(map)
 }
 
-/// The main pass's GPU time over a few frames of `layers` half-transparent backgrounds.
-async fn gpu_time_of(layers: usize) -> Option<std::time::Duration> {
-    let mut map = heavy_map(layers).await?;
-    let mut measured = Vec::new();
-    for _ in 0..8 {
-        map.device()
-            .poll(wgpu::PollType::wait_indefinitely())
-            .expect("device poll");
-        map.render_source_frames(Default::default(), Vec::new(), 1)
-            .expect("frame");
-        measured.extend(map.last_frame_stats().gpu);
-    }
-    measured.sort();
-    measured.get(measured.len() / 2).copied()
+/// The main pass's GPU time of one frame of `map`, or `None` where no time is reported.
+fn gpu_time_of_frame(map: &mut HeadlessMap) -> Option<std::time::Duration> {
+    map.device()
+        .poll(wgpu::PollType::wait_indefinitely())
+        .expect("device poll");
+    map.render_source_frames(Default::default(), Vec::new(), 1)
+        .expect("frame");
+    map.last_frame_stats().gpu
 }
 
 #[tokio::test]
 async fn gpu_time_grows_with_the_work_a_frame_draws() {
-    let (Some(light), Some(heavy)) = (gpu_time_of(1).await, gpu_time_of(96).await) else {
+    let (Some(mut light), Some(mut heavy)) = (heavy_map(1).await, heavy_map(96).await) else {
+        return;
+    };
+    // Work other processes give the GPU between a frame's timestamps only adds to its time,
+    // so the shortest of several frames is the frame's own work; taking the two maps' frames
+    // in turn puts both under the same load.
+    let (mut light_times, mut heavy_times) = (Vec::new(), Vec::new());
+    for _ in 0..12 {
+        light_times.extend(gpu_time_of_frame(&mut light));
+        heavy_times.extend(gpu_time_of_frame(&mut heavy));
+    }
+    let (Some(&light), Some(&heavy)) = (light_times.iter().min(), heavy_times.iter().min()) else {
         return;
     };
     assert!(
