@@ -181,8 +181,7 @@ pub fn screen_point_to_terrain_mercator(
 /// Casts the ray through a pixel of the globe against the rendered terrain.
 ///
 /// `None` unless the ray meets drawn ground, a tile's or a polar cap's, before any ground no
-/// DEM describes; [`pick_globe_terrain`](crate::terrain::sightline::pick_globe_terrain) tells
-/// the sky and unknown ground apart.
+/// DEM describes; [`pick_globe_terrain`] tells the sky and unknown ground apart.
 pub fn screen_point_to_terrain_globe(
     camera: &GlobeCameraState,
     index: &TerrainCoverageIndex,

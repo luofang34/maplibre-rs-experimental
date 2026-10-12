@@ -3,11 +3,11 @@
 //! A host often draws content of its own over a map: lines and figures sized in screen
 //! pixels, edit handles, previews. Drawing them over the map's finished image keeps them out
 //! of the map's passes, so nothing the map draws can be ordered with them and every host
-//! needs a compositor. A host instead hands the map one [`OverlayMesh`] per frame with
-//! [`HeadlessMap::set_overlay`](crate::headless::map::HeadlessMap::set_overlay): triangles in
-//! the render target's pixels, drawn over the map's layers and under its symbols in the order
-//! given, so a host that lists every casing before any line gets casings under all of its
-//! lines, and the map's labels stay readable over them.
+//! needs a compositor. A host instead hands the map one [`OverlayMesh`] per frame with the
+//! headless map's `set_overlay`: triangles in the render target's pixels, drawn over the
+//! map's layers and under its symbols in the order given, so a host that lists every casing
+//! before any line gets casings under all of its lines, and the map's labels stay readable
+//! over them.
 //!
 //! Each vertex carries the depth of the ground it draws, and the pass tests it against the
 //! frame's depth as the map's own 3D geometry is tested, so terrain hides overlay content

@@ -29,10 +29,9 @@ pub use symbol_vertex::ShaderSymbolVertex;
 pub use terrain::TerrainShader;
 pub use texture::{tile_texture_vertex_buffers, DemShader, DemShading, RasterShader};
 pub use tile_mask::TileMaskShader;
-pub(crate) use vertex::POSED_GLYPH;
 pub use vertex::{
     FillShaderFeatureMetadata, SDFShaderFeatureMetadata, ShaderLayerMetadata, ShaderTileMetadata,
-    ShaderVertex,
+    ShaderVertex, POSED_GLYPH,
 };
 
 use crate::{
