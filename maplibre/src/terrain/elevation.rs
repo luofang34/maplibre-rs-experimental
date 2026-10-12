@@ -86,29 +86,31 @@ pub fn ground_center(view_state: &mut ViewState, world: &World) -> bool {
     if !view_state.center_held_by_terrain() || view_state.center_elevation_frozen() {
         return false;
     }
-    let Some(index) = world.resources.get::<TerrainCoverageIndex>() else {
+    let Some(elevation) = center_ground(view_state, world) else {
         return false;
     };
+    view_state.set_center_elevation(elevation);
+    true
+}
+
+/// The loaded ground under the map center the center stands on, or `None` where it is not
+/// loaded: the DEM tile at the integer zoom, as GL JS lifts its center by, not the tile drawn
+/// under it, which a coarser level may stand in for at a distance.
+pub(crate) fn center_ground(view_state: &ViewState, world: &World) -> Option<f64> {
+    let index = world.resources.get::<TerrainCoverageIndex>()?;
     if past_mercator_rows(view_state) {
-        view_state.set_center_elevation(0.0);
-        return true;
+        return Some(0.0);
     }
     let zoom = view_state.zoom();
     let world_size = TILE_SIZE * 2_f64.powf(zoom.value());
     let center = view_state.camera().position();
-    // GL JS lifts the centre by the terrain tile at the integer zoom, not by the tile drawn
-    // under it, which a coarser level may stand in for at a distance.
     let tile_zoom = zoom.value().floor().clamp(0.0, f64::from(u8::MAX)) as u8;
-    let elevation = index.loaded_ground_cached(
+    index.loaded_ground_cached(
         &world.tiles,
         center.x / world_size,
         center.y / world_size,
         crate::terrain::DemDetail::Tile(tile_zoom),
-    );
-    if let Some(elevation) = elevation {
-        view_state.set_center_elevation(elevation);
-    }
-    elevation.is_some()
+    )
 }
 
 /// Whether a free-globe camera looks past the last row of tiles, where the cap closes the

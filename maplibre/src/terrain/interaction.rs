@@ -22,6 +22,11 @@ use crate::{
     },
 };
 
+/// Passes that reconcile a finished gesture's center with the ground it reaches; each leaves
+/// the next a change of the ground over a shorter stretch of the view.
+const GESTURE_GROUND_PASSES: usize = 8;
+/// How near the ground under a finished gesture's center its elevation must stand.
+const GESTURE_GROUND_TOLERANCE_METERS: f64 = 1e-3;
 /// World pixels between ray samples on the flat map.
 const TARGET_WORLD_STEP_PX: f64 = 4.0;
 const MAX_SAMPLES: usize = 512;
@@ -301,19 +306,23 @@ pub fn finish_gesture(style: &Style, view_state: &mut ViewState, world: &World) 
     if style.terrain.is_none() || !view_state.center_clamped_to_ground() {
         return;
     }
-    let Some(index) = world.resources.get::<TerrainCoverageIndex>() else {
-        return;
-    };
-    let world_size = TILE_SIZE * 2_f64.powf(view_state.zoom().value());
-    let center = view_state.camera().position();
-    let sample = index.sample(&world.tiles, center.x / world_size, center.y / world_size);
-    if !sample.dem_loaded {
-        return;
-    }
-    if globe::globe_pose(view_state).is_some() {
-        globe::recalculate_globe_zoom_and_center(view_state, sample.elevation);
-    } else {
-        recalculate_zoom_and_center(view_state, sample.elevation);
+    // Keeping the eye moves the center along the view onto other ground, so the center is
+    // reconciled again with the ground it reaches until the frame, which stands the center on
+    // the ground under it, has nothing left to move.
+    for _ in 0..GESTURE_GROUND_PASSES {
+        let Some(elevation) = crate::terrain::elevation::center_ground(view_state, world) else {
+            return;
+        };
+        if (elevation - view_state.center_elevation()).abs() < GESTURE_GROUND_TOLERANCE_METERS {
+            return;
+        }
+        if globe::globe_pose(view_state).is_some() {
+            if !globe::recalculate_globe_zoom_and_center(view_state, elevation) {
+                return;
+            }
+        } else {
+            recalculate_zoom_and_center(view_state, elevation);
+        }
     }
 }
 
