@@ -15,12 +15,12 @@
 <a href=#15 id=15 data-nosnippet>15</a>
 <a href=#16 id=16 data-nosnippet>16</a><span class="kw">const </span>SHADER: <span class="kw-2">&amp;</span>str = <span class="macro">include_str!</span>(<span class="string">"../render/shaders/overlay.wgsl"</span>);
 <a href=#17 id=17 data-nosnippet>17</a>
-<a href=#18 id=18 data-nosnippet>18</a><span class="doccomment">/// Share of a vertex's distance from the camera it is brought nearer before it is tested
-<a href=#19 id=19 data-nosnippet>19</a>/// against the frame's depth. Overlay lines are straight chords between points on the
-<a href=#20 id=20 data-nosnippet>20</a>/// ground, a few pixels apart, so over a convex slope they run a little under the drawn
-<a href=#21 id=21 data-nosnippet>21</a>/// surface, and the ground under a point is sampled from the elevation tiles rather than
-<a href=#22 id=22 data-nosnippet>22</a>/// from the drawn mesh; this keeps both from hiding what lies on the ground, while a ridge
-<a href=#23 id=23 data-nosnippet>23</a>/// hides what lies behind it by far more.
+<a href=#18 id=18 data-nosnippet>18</a><span class="doccomment">/// Share by which a vertex's or probe's reversed-Z depth is raised before it is tested against
+<a href=#19 id=19 data-nosnippet>19</a>/// the frame's depth. That brings it nearer by about `DEPTH_BIAS * (1 - distance / far)` of
+<a href=#20 id=20 data-nosnippet>20</a>/// its distance from the camera: the full share close to the camera, less towards the far
+<a href=#21 id=21 data-nosnippet>21</a>/// plane. Overlay lines are straight chords between points on the ground, a few pixels apart,
+<a href=#22 id=22 data-nosnippet>22</a>/// so over a convex slope they run a little under the drawn surface; this keeps them from
+<a href=#23 id=23 data-nosnippet>23</a>/// hiding what lies on the ground, while a ridge hides what lies behind it by far more.
 <a href=#24 id=24 data-nosnippet>24</a></span><span class="kw">pub const </span>DEPTH_BIAS: f32 = <span class="number">0.01</span>;
 <a href=#25 id=25 data-nosnippet>25</a>
 <a href=#26 id=26 data-nosnippet>26</a><span class="doccomment">/// The mesh last uploaded: its buffers and index count, and the revision they hold.
