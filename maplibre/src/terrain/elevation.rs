@@ -3,7 +3,8 @@
 use crate::{
     context::MapContext,
     coords::{WorldCoords, TILE_SIZE},
-    tcs::system::SystemResult,
+    render::view_state::ViewState,
+    tcs::{system::SystemResult, world::World},
     terrain::coverage::TerrainCoverageIndex,
 };
 
@@ -59,23 +60,41 @@ pub fn center_elevation_system(
     if style.terrain.is_none() {
         return Ok(());
     }
+    ground_center(view_state, world);
+    if past_mercator_rows(view_state) {
+        return Ok(());
+    }
     let Some(index) = world.resources.get::<TerrainCoverageIndex>() else {
         return Ok(());
     };
     let zoom = view_state.zoom();
-    let world_size = TILE_SIZE * 2_f64.powf(zoom.value());
-    // A free-globe camera may look past the last row of tiles, where the cap closes the
-    // globe at sea level; the flat center stops at that row.
-    if let Some(pose) = view_state.pose_view() {
-        if pose.center.latitude.abs() > crate::projection::globe::scale::MERCATOR_LATITUDE_LIMIT {
-            let follows_ground =
-                view_state.center_clamped_to_ground() && !view_state.center_elevation_frozen();
-            if follows_ground {
-                view_state.set_center_elevation(0.0);
-            }
-            return Ok(());
-        }
+    let center = view_state.camera().position();
+    let center_tile = WorldCoords::at_ground(center.x, center.y)
+        .into_world_tile(zoom.zoom_level(TILE_SIZE), zoom);
+    if let Some(range) = index.tile_elevation_range(center_tile) {
+        view_state.set_min_elevation(range.min_meters);
     }
+    Ok(())
+}
+
+/// Stands the center on the loaded ground under it, where terrain holds the center and no
+/// gesture freezes it, as the frame does; a host placing the camera between frames calls this
+/// so what it reads back already stands on the ground, as GL JS `jumpTo` grounds its center.
+/// Returns whether the center now stands on the ground; where the ground under it is not
+/// loaded, its elevation stays as it was.
+pub fn ground_center(view_state: &mut ViewState, world: &World) -> bool {
+    if !view_state.center_held_by_terrain() || view_state.center_elevation_frozen() {
+        return false;
+    }
+    let Some(index) = world.resources.get::<TerrainCoverageIndex>() else {
+        return false;
+    };
+    if past_mercator_rows(view_state) {
+        view_state.set_center_elevation(0.0);
+        return true;
+    }
+    let zoom = view_state.zoom();
+    let world_size = TILE_SIZE * 2_f64.powf(zoom.value());
     let center = view_state.camera().position();
     // GL JS lifts the centre by the terrain tile at the integer zoom, not by the tile drawn
     // under it, which a coarser level may stand in for at a distance.
@@ -86,17 +105,18 @@ pub fn center_elevation_system(
         center.y / world_size,
         crate::terrain::DemDetail::Tile(tile_zoom),
     );
-    let follows_ground =
-        view_state.center_clamped_to_ground() && !view_state.center_elevation_frozen();
-    if let Some(elevation) = elevation.filter(|_| follows_ground) {
+    if let Some(elevation) = elevation {
         view_state.set_center_elevation(elevation);
     }
-    let center_tile = WorldCoords::at_ground(center.x, center.y)
-        .into_world_tile(zoom.zoom_level(TILE_SIZE), zoom);
-    if let Some(range) = index.tile_elevation_range(center_tile) {
-        view_state.set_min_elevation(range.min_meters);
-    }
-    Ok(())
+    elevation.is_some()
+}
+
+/// Whether a free-globe camera looks past the last row of tiles, where the cap closes the
+/// globe at sea level; the flat center stops at that row.
+fn past_mercator_rows(view_state: &ViewState) -> bool {
+    view_state.pose_view().is_some_and(|pose| {
+        pose.center.latitude.abs() > crate::projection::globe::scale::MERCATOR_LATITUDE_LIMIT
+    })
 }
 
 #[cfg(test)]
