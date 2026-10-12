@@ -273,3 +273,42 @@ async fn a_restored_pose_stands_its_center_on_the_ground_before_any_frame() {
         "the frame stands the center where the restore did: {framed} m against {read_back} m"
     );
 }
+
+/// A gesture ending over terrain stands the center on the ground the frame stands it on, so
+/// the next frame leaves the camera where the gesture left it rather than lifting it again.
+#[tokio::test]
+async fn a_finished_gesture_stands_the_center_where_the_next_frame_does() {
+    let scene = Scene {
+        meters: 210.0,
+        relief: 150.0,
+        exaggeration: 1.0,
+        pitch: 60.0,
+        zoom: 11.67,
+    };
+    let mut level = LevelMap::new(scene).await;
+    level.settle(None).await;
+    let mut worst: f64 = 0.0;
+    for step in 0..12 {
+        let state = &mut level.map.map_context.view_state;
+        crate::terrain::interaction::begin_gesture(state);
+        let position = state.camera().position();
+        let shift = 37.0 + 11.0 * f64::from(step);
+        state.camera_mut().move_to(cgmath::Point2::new(
+            position.x + shift,
+            position.y - shift / 2.0,
+        ));
+        crate::terrain::interaction::finish_gesture(
+            &level.map.map_context.style,
+            &mut level.map.map_context.view_state,
+            &level.map.map_context.world,
+        );
+        let finished = level.map.view_state().center_elevation();
+        level.map.run_frame().expect("frame");
+        let framed = level.map.view_state().center_elevation();
+        worst = worst.max((framed - finished).abs());
+    }
+    assert!(
+        worst < 0.01,
+        "the frame after a gesture moves the center by up to {worst} m"
+    );
+}
