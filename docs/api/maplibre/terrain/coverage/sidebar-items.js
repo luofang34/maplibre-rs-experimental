@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["BRACKET_PADDING_METERS","MAX_TILE_COORD"],"fn":["coverage_system"],"mod":["surface"],"struct":["IndexedTileElevation","TerrainCoverageIndex","TerrainSample"]};
+window.SIDEBAR_ITEMS = {"constant":["BRACKET_PADDING_METERS","MAX_TILE_COORD"],"enum":["DemDetail"],"fn":["coverage_system"],"mod":["surface"],"struct":["IndexedTileElevation","TerrainCoverageIndex","TerrainSample"]};

@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["center_elevation_system","center_target_system","elevation_at_world","globe_orbits_center","tile_local"]};
+window.SIDEBAR_ITEMS = {"fn":["center_elevation_system","center_target_system","globe_orbits_center"]};

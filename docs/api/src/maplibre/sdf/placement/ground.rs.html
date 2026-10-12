@@ -22,9 +22,9 @@
 <a href=#22 id=22 data-nosnippet>22</a>        .resources
 <a href=#23 id=23 data-nosnippet>23</a>        .get::&lt;TerrainCoverageIndex&gt;()
 <a href=#24 id=24 data-nosnippet>24</a>        .and_then(|index| {
-<a href=#25 id=25 data-nosnippet>25</a>            index
-<a href=#26 id=26 data-nosnippet>26</a>                .elevation_at(<span class="kw-2">&amp;</span>world.tiles, x, y)
-<a href=#27 id=27 data-nosnippet>27</a>                .or_else(|| index.elevation_cached(<span class="kw-2">&amp;</span>world.tiles, x, y))
+<a href=#25 id=25 data-nosnippet>25</a>            index.elevation_at(<span class="kw-2">&amp;</span>world.tiles, x, y).or_else(|| {
+<a href=#26 id=26 data-nosnippet>26</a>                index.loaded_ground_cached(<span class="kw-2">&amp;</span>world.tiles, x, y, <span class="kw">crate</span>::terrain::DemDetail::Finest)
+<a href=#27 id=27 data-nosnippet>27</a>            })
 <a href=#28 id=28 data-nosnippet>28</a>        })
 <a href=#29 id=29 data-nosnippet>29</a>        .unwrap_or(<span class="number">0.0</span>) <span class="kw">as </span>f32
 <a href=#30 id=30 data-nosnippet>30</a>}

@@ -383,11 +383,11 @@
 <a href=#383 id=383 data-nosnippet>383</a>    <span class="kw">let </span>world_size = TILE_SIZE * <span class="number">2_f64</span>.powf(view_state.zoom().value());
 <a href=#384 id=384 data-nosnippet>384</a>    <span class="kw">let </span>(camera, altitude) = camera_ground_position(view_state);
 <a href=#385 id=385 data-nosnippet>385</a>    <span class="kw">let </span>zoom = u8::from(view_state.zoom().zoom_level(TILE_SIZE));
-<a href=#386 id=386 data-nosnippet>386</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(min_altitude) = index.elevation_at_zoom(
+<a href=#386 id=386 data-nosnippet>386</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(min_altitude) = index.loaded_ground_cached(
 <a href=#387 id=387 data-nosnippet>387</a>        <span class="kw-2">&amp;</span>world.tiles,
 <a href=#388 id=388 data-nosnippet>388</a>        camera.x / world_size,
 <a href=#389 id=389 data-nosnippet>389</a>        camera.y / world_size,
-<a href=#390 id=390 data-nosnippet>390</a>        zoom,
+<a href=#390 id=390 data-nosnippet>390</a>        <span class="kw">crate</span>::terrain::DemDetail::Tile(zoom),
 <a href=#391 id=391 data-nosnippet>391</a>    ) <span class="kw">else </span>{
 <a href=#392 id=392 data-nosnippet>392</a>        <span class="kw">return </span><span class="bool-val">false</span>;
 <a href=#393 id=393 data-nosnippet>393</a>    };
