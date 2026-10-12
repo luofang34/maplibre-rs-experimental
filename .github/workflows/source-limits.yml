@@ -1,0 +1,20 @@
+name: Source limits
+on:
+  pull_request:
+# A newer push to a pull request supersedes the run before it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+jobs:
+  file-length:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.0
+        with:
+          # The pull request's merge commit and its base, the first parent.
+          fetch-depth: 2
+      - run: node --test scripts/check-file-length.test.mjs
+      - run: node scripts/check-file-length.mjs HEAD^1
