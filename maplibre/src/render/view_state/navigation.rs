@@ -240,6 +240,10 @@ impl ViewState {
 
     /// Places the free-globe camera at `pose`, entering free navigation; the projection must
     /// already allow it, as [`restore_globe_pose`](Self::restore_globe_pose) checks.
+    ///
+    /// A center held by terrain keeps the pose's target height until the next frame stands it
+    /// on the ground; a host reading the view back before then grounds it first with
+    /// [`crate::terrain::elevation::ground_center`].
     pub fn set_globe_pose(&mut self, pose: GlobePose) -> Result<(), NavigationError> {
         if self.has_external_view() {
             return Err(NavigationError::ExternalView);
@@ -270,7 +274,8 @@ impl ViewState {
             distance_meters: pose.distance_meters,
         };
         // Off the ground the pose's target height is where the center rests from now on. On
-        // it the terrain under the target decides the height from the next frame, and the
+        // it the terrain under the target decides the height from the next frame, or at once
+        // through terrain::elevation::ground_center, which this view cannot reach; the
         // altitude the center rests at once off the ground again, the style's centerAltitude
         // or the host's, stays as it was.
         let placed = self.place_free_globe(free, |view| {

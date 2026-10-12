@@ -34,7 +34,9 @@ impl MapContext {
     }
 
     /// Switches how the camera navigates the globe, for the style's projection: free-globe
-    /// navigation needs the pure `vertical-perspective` projection.
+    /// navigation needs the pure `vertical-perspective` projection. A center held by
+    /// terrain stands on the loaded ground under it at once, as
+    /// [`crate::terrain::elevation::ground_center`] stands it.
     pub fn set_navigation_mode(
         &mut self,
         mode: crate::render::view_state::NavigationMode,
@@ -46,11 +48,15 @@ impl MapContext {
             .map_or_else(Default::default, |projection| {
                 projection.projection_type.clone()
             });
-        self.view_state.set_navigation_mode(mode, &projection)
+        self.view_state.set_navigation_mode(mode, &projection)?;
+        crate::terrain::elevation::ground_center(&mut self.view_state, &self.world);
+        Ok(())
     }
 
     /// Restores a stored free-globe pose, for the style's projection: it must be the pure
-    /// `vertical-perspective` projection.
+    /// `vertical-perspective` projection. A center held by terrain stands on the loaded
+    /// ground under the pose's target at once, rather than at the pose's own target height, as
+    /// [`crate::terrain::elevation::ground_center`] stands it.
     pub fn restore_globe_pose(
         &mut self,
         pose: crate::render::view_state::GlobePose,
@@ -62,6 +68,8 @@ impl MapContext {
             .map_or_else(Default::default, |projection| {
                 projection.projection_type.clone()
             });
-        self.view_state.restore_globe_pose(pose, &projection)
+        self.view_state.restore_globe_pose(pose, &projection)?;
+        crate::terrain::elevation::ground_center(&mut self.view_state, &self.world);
+        Ok(())
     }
 }

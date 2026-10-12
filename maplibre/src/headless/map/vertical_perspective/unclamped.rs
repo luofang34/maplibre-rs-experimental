@@ -173,10 +173,16 @@ async fn a_pose_free_follow_after_an_underground_target_stands_the_center_on_its
         .map
         .set_navigation_mode(NavigationMode::FreeGlobe)
         .expect("free navigation");
-    // A photograph's pose orbits a target along its line of sight, far under the ground.
+    // A photograph's pose orbits a target along its line of sight, far under the ground,
+    // placed on the view alone, which leaves the ground to the next frame.
     let mut pose = level.map.view_state().globe_pose().expect("pose");
     pose.target_elevation_meters = -1784.0;
-    level.map.restore_globe_pose(pose).expect("restore");
+    level
+        .map
+        .map_context
+        .view_state
+        .restore_globe_pose(pose, &ProjectionType::VerticalPerspective)
+        .expect("restore");
     // A camera without a pose, as a host seeds one: a fresh view elsewhere, entering free
     // navigation at the elevation the map's center has now.
     let view = &mut level.map.map_context.view_state;
@@ -215,5 +221,55 @@ async fn a_pose_free_follow_after_an_underground_target_stands_the_center_on_its
     assert!(
         (ground - dem.meters).abs() > 10.0,
         "the followed center stands on ground of its own, not the scene's mean height"
+    );
+}
+
+/// A host restoring a pose through the map reads back a center on the ground under the pose's
+/// target before any frame runs, so a camera it seeds from that center starts on the ground,
+/// not at the pose's target far under it.
+#[tokio::test]
+async fn a_restored_pose_stands_its_center_on_the_ground_before_any_frame() {
+    use crate::coords::TILE_SIZE;
+    let dem = SyntheticDem {
+        meters: 210.0,
+        relief: 150.0,
+    };
+    let scene = Scene {
+        meters: dem.meters,
+        relief: dem.relief,
+        exaggeration: 1.0,
+        pitch: 60.0,
+        zoom: 11.67,
+    };
+    let mut level = LevelMap::new(scene).await;
+    level.settle(None).await;
+    level
+        .map
+        .set_navigation_mode(crate::render::view_state::NavigationMode::FreeGlobe)
+        .expect("free navigation");
+    let mut pose = level.map.view_state().globe_pose().expect("pose");
+    pose.target_elevation_meters = -879.0;
+    level.map.restore_globe_pose(pose).expect("restore");
+    let state = level.map.view_state();
+    assert!(state.center_held_by_terrain());
+    let world_size = TILE_SIZE * 2_f64.powf(state.zoom().value());
+    let center = state.camera().position();
+    let ground = dem.height(center.x / world_size, center.y / world_size);
+    let read_back = state.globe_pose().expect("pose").target_elevation_meters;
+    // The DEM tile at the integer zoom, as GL JS lifts its center, stands within a few
+    // metres of the exact ground between its pixels.
+    assert!(
+        (read_back - ground).abs() < 5.0,
+        "the restored center reads back at {read_back} m over ground at {ground} m"
+    );
+    assert!(
+        (ground - dem.meters).abs() > 10.0,
+        "the center stands on ground of its own, not the scene's mean height"
+    );
+    level.map.run_frame().expect("frame");
+    let framed = level.map.view_state().center_elevation();
+    assert!(
+        (framed - read_back).abs() < 1e-6,
+        "the frame stands the center where the restore did: {framed} m against {read_back} m"
     );
 }
