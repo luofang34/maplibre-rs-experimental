@@ -1,9 +1,9 @@
 (function() {
-    var type_impls = Object.fromEntries([["maplibre",[]]]);
+    var type_impls = Object.fromEntries([["maplibre",[["<section id=\"impl-Iterator-for-%5BT;+N%5D\" class=\"impl\"><span class=\"rightside\"><span class=\"since\" title=\"Stable since Rust version 1.99.0\">1.99.0</span> · <a class=\"src\" href=\"https://doc.rust-lang.org/1.99.0/src/core/array/iter.rs.html#38\">Source</a></span><a href=\"#impl-Iterator-for-%5BT;+N%5D\" class=\"anchor\">§</a><h3 class=\"code-header\">impl&lt;T, const N: <a class=\"primitive\" href=\"https://doc.rust-lang.org/1.99.0/std/primitive.usize.html\">usize</a>&gt; !<a class=\"trait\" href=\"https://doc.rust-lang.org/1.99.0/core/iter/traits/iterator/trait.Iterator.html\" title=\"trait core::iter::traits::iterator::Iterator\">Iterator</a> for <a class=\"primitive\" href=\"https://doc.rust-lang.org/1.99.0/std/primitive.array.html\">[T; N]</a></h3></section>","Iterator","maplibre::render::shaders::Vec2f32","maplibre::render::shaders::Vec3f32","maplibre::render::shaders::Vec4f32","maplibre::render::shaders::Mat4x4f32","maplibre::geojson::index::Point","maplibre::sdf::tessellation::line_anchors::Point"]]],["maplibre",[["<section id=\"impl-Iterator-for-%5BT;+N%5D\" class=\"impl\"><span class=\"rightside\"><span class=\"since\" title=\"Stable since Rust version 1.99.0\">1.99.0</span> · <a class=\"src\" href=\"https://doc.rust-lang.org/1.99.0/src/core/array/iter.rs.html#38\">Source</a></span><a href=\"#impl-Iterator-for-%5BT;+N%5D\" class=\"anchor\">§</a><h3 class=\"code-header\">impl&lt;T, const N: <a class=\"primitive\" href=\"https://doc.rust-lang.org/1.99.0/std/primitive.usize.html\">usize</a>&gt; !<a class=\"trait\" href=\"https://doc.rust-lang.org/1.99.0/core/iter/traits/iterator/trait.Iterator.html\" title=\"trait core::iter::traits::iterator::Iterator\">Iterator</a> for <a class=\"primitive\" href=\"https://doc.rust-lang.org/1.99.0/std/primitive.array.html\">[T; N]</a></h3></section>","Iterator","maplibre::render::shaders::Vec2f32","maplibre::render::shaders::Vec3f32","maplibre::render::shaders::Vec4f32","maplibre::render::shaders::Mat4x4f32"]]]]);
     if (window.register_type_impls) {
         window.register_type_impls(type_impls);
     } else {
         window.pending_type_impls = type_impls;
     }
 })()
-//{"start":55,"fragment_lengths":[15]}
+//{"start":55,"fragment_lengths":[1050,966]}
