@@ -42,8 +42,10 @@ async fn viewport_light_bearing_refreshes_drapes_but_map_light_reuses_them() {
     let warm_pixels = read_blocking(&map, "uniform-light-warm");
     let cold_pixels = read_blocking(&cold, "uniform-light-cold");
     let mismatch = warm_pixels
-        .chunks_exact(4)
-        .zip(cold_pixels.chunks_exact(4))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(cold_pixels.as_chunks::<4>().0.iter())
         .enumerate()
         .find(|(_, (warm, cold))| warm != cold)
         .map(|(index, (warm, cold))| (index % SIZE as usize, index / SIZE as usize, warm, cold));

@@ -112,7 +112,7 @@ async fn stereo_ingests_and_refines_terrain_once_per_frame() {
         .get::<Observations>()
         .expect("observations");
     assert_eq!(observations.extractions, 2);
-    for pair in observations.eyes.chunks_exact(2) {
+    for pair in observations.eyes.as_chunks::<2>().0.iter() {
         assert_eq!(
             pair[0].0, pair[1].0,
             "both eyes have the same ingestion generation"

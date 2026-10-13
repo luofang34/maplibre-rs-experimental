@@ -137,7 +137,9 @@ fn found_in_layers(map: &HeadlessMap) -> Vec<(String, Option<u64>)> {
 
 fn drawn(map: &HeadlessMap) -> usize {
     super::read_blocking(map)
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .filter(|pixel| pixel[0] > 180 && pixel[1] < 80 && pixel[2] < 80)
         .count()
 }
@@ -232,7 +234,9 @@ fn coloured(map: &HeadlessMap) -> [usize; 2] {
     let pixels = super::read_blocking(map);
     let count = |channel: usize| {
         pixels
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .filter(|pixel| {
                 pixel[channel] > 180 && (0..3).all(|other| other == channel || pixel[other] < 80)
             })

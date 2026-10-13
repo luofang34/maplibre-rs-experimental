@@ -32,7 +32,9 @@ async fn rotated_text_keeps_antialiased_edges_without_msaa() {
             "stroke contrast at {angle} degrees"
         );
         let edges = pixels
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .filter(|p| p[0] > 110 && p[0] < 230 && p[1] < 70)
             .count();
         assert!(edges > 20, "subpixel coverage at {angle} degrees: {edges}");
@@ -123,7 +125,12 @@ async fn assert_halo_preserves_strokes(style: Style, case: &str) -> Vec<u8> {
     let baseline = read_blocking(&fixture_map(clear.clone(), layers(&clear), 1).await);
     let mut strokes = 0_usize;
     let mut halo_pixels = 0_usize;
-    for (with_halo, without) in actual.chunks_exact(4).zip(baseline.chunks_exact(4)) {
+    for (with_halo, without) in actual
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(baseline.as_chunks::<4>().0.iter())
+    {
         if without[..3] == [36, 55, 64] {
             strokes = strokes.wrapping_add(1);
             // Rounded RGBA8 fill colors can include a fractionally covered edge pixel.

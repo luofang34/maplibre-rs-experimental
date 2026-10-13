@@ -224,10 +224,12 @@ impl ReferenceTarget {
 
     fn assemble(&self, rgba: Vec<u8>, depth: &[u8]) -> ReferenceRender {
         let depth_m = depth
-            .chunks_exact(4)
-            .zip(rgba.chunks_exact(4))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .zip(rgba.as_chunks::<4>().0.iter())
             .map(|(raw, colour)| {
-                let raw = f32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]);
+                let raw = f32::from_le_bytes(*raw);
                 if colour[3] == 255 {
                     optical_depth_m(raw)
                 } else {

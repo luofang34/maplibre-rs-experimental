@@ -159,8 +159,10 @@ async fn root_tile_buffer_cannot_draw_outside_the_world_mask() {
         let map = map_with(style, buffered, samples, coords).await;
         let pixels = read_stencil_blocking(&map, "stencil-root-buffered");
         let changed = pixels
-            .chunks_exact(4)
-            .zip(reference.chunks_exact(4))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .zip(reference.as_chunks::<4>().0.iter())
             .enumerate()
             .find(|(_, (actual, expected))| {
                 actual
@@ -194,9 +196,11 @@ async fn globe_water_survives_dem_children_and_border_masks() {
         let mut map = map_with(style, processed, samples, coords).await;
         let before = read_stencil_blocking(&map, "stencil-globe-parent");
         let water: Vec<_> = before
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .enumerate()
-            .filter(|(_, rgba)| *rgba == [0, 0, 255, 255])
+            .filter(|(_, rgba)| **rgba == [0, 0, 255, 255])
             .map(|(index, _)| index)
             .collect();
         assert!(water.len() > 4096, "fixture must draw visible globe water");

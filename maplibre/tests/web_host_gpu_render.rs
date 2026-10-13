@@ -98,9 +98,9 @@ async fn read_pixels(map: &HeadlessMap) -> Vec<[u8; 4]> {
         .slice(..)
         .get_mapped_range()
         .expect("mapped range")
-        .chunks_exact(4)
-        .map(|pixel| [pixel[0], pixel[1], pixel[2], pixel[3]])
-        .collect();
+        .as_chunks::<4>()
+        .0
+        .to_vec();
     pixels
 }
 

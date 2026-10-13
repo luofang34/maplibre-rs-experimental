@@ -85,7 +85,9 @@ async fn line_map(style: Style, line: &[[f64; 2]]) -> HeadlessMap {
 /// Red text pixels as distances from a screen point.
 fn distances_from(pixels: &[u8], centre: [f64; 2]) -> Vec<f64> {
     pixels
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .enumerate()
         .filter(|(_, p)| p[0] > 180 && p[1] < 80 && p[2] < 80)
         .map(|(index, _)| {
@@ -142,7 +144,9 @@ async fn a_label_on_an_arc_bends_with_it() {
 
 fn red_mask(pixels: &[u8]) -> Vec<bool> {
     pixels
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|p| p[0] > 180 && p[1] < 80 && p[2] < 80)
         .collect()
 }
@@ -206,7 +210,9 @@ async fn a_curved_label_is_selectable_on_its_glyphs_but_not_under_the_curve() {
     let map = line_map(line_style(serde_json::json!({})), &top_arc()).await;
     let pixels = read_blocking(&map);
     let index = pixels
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .position(|p| p[0] > 180 && p[1] < 80 && p[2] < 80)
         .expect("the label draws");
     let on_glyph = [

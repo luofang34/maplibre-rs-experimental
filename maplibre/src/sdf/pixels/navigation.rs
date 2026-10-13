@@ -50,7 +50,9 @@ async fn map_aligned_symbols_crossing_the_eye_plane_cannot_stretch_into_spikes()
         .expect("visible frame");
     let red = |pixels: &[u8]| {
         pixels
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .filter(|p| p[0] > 180 && p[1] < 80 && p[2] < 80)
             .count()
     };

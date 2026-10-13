@@ -129,7 +129,9 @@ impl Harness {
         .expect("color readback");
         let depth = read_texture_blocking(&self.map, &self.depth, wgpu::TextureAspect::DepthOnly)
             .expect("depth readback")
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .map(metric_depth)
             .collect();
         let readback_ms = start.elapsed().as_secs_f64() * 1000.0;
@@ -273,8 +275,8 @@ fn depth_target(device: &wgpu::Device) -> wgpu::Texture {
     })
 }
 
-fn metric_depth(bytes: &[u8]) -> f64 {
-    let raw = f64::from(f32::from_le_bytes(bytes.try_into().expect("depth sample")));
+fn metric_depth(bytes: &[u8; 4]) -> f64 {
+    let raw = f64::from(f32::from_le_bytes(*bytes));
     assert!(
         raw.is_finite() && (0.0..=1.0).contains(&raw),
         "invalid GPU depth {raw}"
