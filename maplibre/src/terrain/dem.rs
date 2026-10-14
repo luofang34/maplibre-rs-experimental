@@ -75,6 +75,24 @@ pub struct DemTile {
 impl DemTile {
     /// Builds a tile from a decoded image and the source's unpack vector.
     pub fn from_image(image: &RgbaImage, unpack: [f64; 4]) -> Result<Self, DemError> {
+        Self::decode(image, unpack, None)
+    }
+
+    /// Builds a tile like [`from_image`](Self::from_image), lowering the samples that rise more
+    /// steeply than terrain on both flanks for a sample `sample_metres` across.
+    pub fn from_image_despiked(
+        image: &RgbaImage,
+        unpack: [f64; 4],
+        sample_metres: f64,
+    ) -> Result<Self, DemError> {
+        Self::decode(image, unpack, Some(sample_metres))
+    }
+
+    fn decode(
+        image: &RgbaImage,
+        unpack: [f64; 4],
+        sample_metres: Option<f64>,
+    ) -> Result<Self, DemError> {
         let (width, height) = image.dimensions();
         if width != height {
             return Err(DemError::NotSquare { width, height });
@@ -98,6 +116,12 @@ impl DemTile {
             let target_row = tile.byte_index(0, i64::from(y));
             tile.pixels[target_row..target_row + (dim * 4) as usize]
                 .copy_from_slice(&source[source_row..source_row + (dim * 4) as usize]);
+        }
+        if let Some(sample_metres) = sample_metres {
+            let replaced = tile.remove_spikes(sample_metres);
+            if replaced > 0 {
+                tracing::debug!(replaced, sample_metres, "removed DEM spike samples");
+            }
         }
         tile.replicate_border();
         for y in 0..dim {
@@ -290,6 +314,9 @@ impl DemTile {
         self.max
     }
 }
+
+mod spikes;
+pub(crate) use spikes::sample_metres;
 
 #[cfg(test)]
 mod tests;

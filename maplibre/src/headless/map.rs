@@ -158,13 +158,16 @@ impl HeadlessMap {
     ) -> Result<(), HeadlessMapOperationError> {
         let context = &mut self.map_context;
         let unpack = dem_source(&context.style).map(|dem| dem.unpack);
+        let circumference = context.view_state.body().circumference_meters();
         let tiles = &mut context.world.tiles;
         let mut dem_coords = Vec::new();
         for (coords, image) in dem_tiles {
             let Some(unpack) = unpack else {
                 break;
             };
-            let component = match DemTile::from_image(&image, unpack) {
+            let sample_metres =
+                crate::terrain::dem::sample_metres(coords, image.width(), circumference);
+            let component = match DemTile::from_image_despiked(&image, unpack, sample_metres) {
                 Ok(tile) => DemTileComponent::Loaded(LoadedDem::new(tile)),
                 Err(error) => {
                     tracing::warn!(%coords, %error, "DEM tile image is unusable");
