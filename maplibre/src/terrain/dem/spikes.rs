@@ -12,7 +12,11 @@ use std::f64::consts::PI;
 use super::DemTile;
 use crate::coords::WorldTileCoords;
 
-/// Rise per ground sample distance, on both flanks, beyond which a sample is a spike: about 72°.
+/// Policy: how many ground sample distances a sample may rise above its window median before it
+/// counts as a spike. Seam ringing is one or two samples wide and stands hundreds of metres proud.
+/// For terrain to rise three sample distances above the median of its five-sample window, it must
+/// climb steeper than atan(3), about 72°, on both flanks. Bare-earth DEMs average the ground over
+/// each sample and hold no such slopes, so steep real relief stays untouched.
 const SPIKE_SLOPE: f64 = 3.0;
 /// Samples on each side of a sample in its row and column windows. Two lets a spike two samples
 /// wide stay a minority of its window.
@@ -51,8 +55,7 @@ impl Encoding {
     }
 }
 
-/// Median of up to `2 * WINDOW_RADIUS + 1` samples, kept on the stack: it runs for every sample of
-/// every decoded tile.
+/// Median of up to `2 * WINDOW_RADIUS + 1` samples, kept on the stack.
 fn median(samples: impl Iterator<Item = f64>) -> f64 {
     let mut window = [0.0; 2 * WINDOW_RADIUS as usize + 1];
     let mut len = 0;
@@ -67,6 +70,20 @@ fn median(samples: impl Iterator<Item = f64>) -> f64 {
         0 if middle > 0 => (window[middle - 1] + window[middle]) / 2.0,
         _ => window.get(middle).copied().unwrap_or(f64::NAN),
     }
+}
+
+/// The median of a window when it lies below `ceiling`. A median can only lie below it when at
+/// least half the window does, so counting first skips the sort for almost every sample: the filter
+/// runs on every sample of every decoded tile.
+fn median_below(samples: impl Iterator<Item = f64> + Clone, ceiling: f64) -> Option<f64> {
+    let (below, len) = samples
+        .clone()
+        .fold((0_usize, 0_usize), |(below, len), sample| {
+            (below + usize::from(sample < ceiling), len + 1)
+        });
+    (below >= len.div_ceil(2))
+        .then(|| median(samples))
+        .filter(|median| *median < ceiling)
 }
 
 impl DemTile {
@@ -91,11 +108,10 @@ impl DemTile {
         let mut replaced = 0;
         for y in 0..dim {
             for x in 0..dim {
-                let elevation = at(x, y);
-                let row = median(window(x).map(|i| at(i, y)));
-                let column = median(window(y).map(|i| at(x, i)));
-                let median = row.min(column);
-                if elevation - median > threshold {
+                let ceiling = at(x, y) - threshold;
+                let row = median_below(window(x).map(|i| at(i, y)), ceiling);
+                let column = median_below(window(y).map(|i| at(x, i)), ceiling);
+                if let Some(median) = row.into_iter().chain(column).reduce(f64::min) {
                     let index = self.byte_index(x, y);
                     self.pixels[index..index + 3].copy_from_slice(&encoding.channels(median));
                     replaced += 1;

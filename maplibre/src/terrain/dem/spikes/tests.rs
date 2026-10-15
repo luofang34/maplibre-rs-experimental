@@ -17,12 +17,29 @@ const DIM: u32 = 64;
 const SEAM_ROW: [f64; 8] = [152.0, 159.0, 154.0, 119.0, 320.0, 582.0, 167.0, 168.0];
 const SEAM_COLUMN: u32 = 20;
 
-fn tile_metres(z: u8) -> f64 {
-    // The tile column with the seam, at 40.4° N.
+/// Profiles across the Delaware Water Gap and Kittatinny Ridge, about 41° N, where the ground
+/// climbs 270 m over 600 m: a wall rising from the river in 12/1193/1536, the ridge crest in the
+/// same tile, and the steepest row of 13/2386/3072.
+const WATER_GAP_WALL: [f64; 24] = [
+    87.0, 91.0, 104.0, 124.0, 152.0, 179.0, 204.0, 225.0, 243.0, 263.0, 283.0, 304.0, 319.0, 330.0,
+    337.0, 346.0, 351.0, 356.0, 358.0, 359.0, 358.0, 357.0, 356.0, 357.0,
+];
+const KITTATINNY_CREST: [f64; 24] = [
+    269.0, 269.0, 270.0, 271.0, 269.0, 269.0, 272.0, 279.0, 288.0, 296.0, 304.0, 314.0, 319.0,
+    317.0, 307.0, 290.0, 267.0, 238.0, 206.0, 182.0, 165.0, 151.0, 133.0, 113.0,
+];
+const WATER_GAP_STEEPEST: [f64; 14] = [
+    377.0, 363.0, 349.0, 338.0, 326.0, 322.0, 304.0, 263.0, 234.0, 222.0, 213.0, 203.0, 192.0,
+    182.0,
+];
+
+/// Ground size of a sample of a 256-sample tile in tile row `y` at zoom 12, or its descendant or
+/// ancestor row at zoom `z`.
+fn metres_at(z: u8, y: i32) -> f64 {
     let y = if z <= 12 {
-        1544 >> (12 - z)
+        y >> (12 - z)
     } else {
-        1544 << (z - 12)
+        y << (z - 12)
     };
     let coords = WorldTileCoords {
         x: 0,
@@ -30,6 +47,11 @@ fn tile_metres(z: u8) -> f64 {
         z: ZoomLevel::from(z),
     };
     sample_metres(coords, 256, Body::EARTH.circumference_meters())
+}
+
+/// Ground size of a sample in the tile row with the seam, at 40.4° N.
+fn tile_metres(z: u8) -> f64 {
+    metres_at(z, 1544)
 }
 
 fn encode(unpack: [f64; 4], elevation: f64) -> Rgba<u8> {
@@ -84,6 +106,40 @@ fn keeps_a_one_sample_peak_at_coarse_zoom() {
         DemTile::from_image(&image(TERRARIUM, seamed), TERRARIUM).expect("decodes")
     );
     assert_eq!(tile.max(), 582.0);
+}
+
+/// The profile along `x` from column 20, its end values held beyond it, the same in every row.
+fn profile(values: &[f64]) -> impl Fn(u32, u32) -> f64 + '_ {
+    move |x, _| {
+        let index = (x.saturating_sub(SEAM_COLUMN) as usize).min(values.len() - 1);
+        values[index]
+    }
+}
+
+fn assert_unchanged(elevation: impl Fn(u32, u32) -> f64, sample_metres: f64) {
+    let transposed = |x, y| elevation(y, x);
+    for image in [image(TERRARIUM, &elevation), image(TERRARIUM, transposed)] {
+        assert_eq!(
+            DemTile::from_image_despiked(&image, TERRARIUM, sample_metres).expect("decodes"),
+            DemTile::from_image(&image, TERRARIUM).expect("decodes")
+        );
+    }
+}
+
+#[test]
+fn keeps_the_steep_relief_of_the_delaware_water_gap() {
+    assert_unchanged(profile(&WATER_GAP_WALL), metres_at(12, 1536));
+    assert_unchanged(profile(&KITTATINNY_CREST), metres_at(12, 1536));
+    assert_unchanged(profile(&WATER_GAP_STEEPEST), metres_at(13, 1536));
+}
+
+#[test]
+fn keeps_an_isolated_peak_one_sample_wide_at_coarse_zoom() {
+    let peak = |x: u32, y: u32| if (x, y) == (30, 30) { 1_400.0 } else { 150.0 };
+    assert_unchanged(peak, tile_metres(8));
+    let fine = DemTile::from_image_despiked(&image(TERRARIUM, peak), TERRARIUM, tile_metres(12))
+        .expect("decodes");
+    assert_eq!(fine.max(), 150.0);
 }
 
 #[test]
