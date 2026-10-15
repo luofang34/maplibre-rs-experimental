@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_ENCODED","SPIKE_SLOPE","WINDOW_RADIUS"],"fn":["median","median_below","sample_metres"],"struct":["Encoding"]};

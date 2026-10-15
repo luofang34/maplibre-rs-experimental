@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["DemError"],"struct":["DemTile"]};
+window.SIDEBAR_ITEMS = {"enum":["DemError"],"mod":["spikes"],"struct":["DemTile"]};
