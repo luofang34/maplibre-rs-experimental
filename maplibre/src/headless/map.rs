@@ -28,7 +28,7 @@ use crate::{
     sdf::SymbolLayersDataComponent,
     style::{layer::StyleLayer, Style},
     tcs::world::World,
-    terrain::{backfill_neighbours, dem::DemTile, source::dem_source, DemTileComponent, LoadedDem},
+    terrain::{backfill_neighbours, source::dem_source},
     vector::{
         transferables::{LayerIndexed, SymbolLayerTessellated},
         AvailableVectorLayerBucket, VectorLayerBucket, VectorLayerBucketComponent,
@@ -36,6 +36,7 @@ use crate::{
 };
 
 mod camera;
+mod dem;
 mod error;
 #[cfg(test)]
 mod injected_loader;
@@ -158,19 +159,14 @@ impl HeadlessMap {
     ) -> Result<(), HeadlessMapOperationError> {
         let context = &mut self.map_context;
         let unpack = dem_source(&context.style).map(|dem| dem.unpack);
+        let circumference = context.view_state.body().circumference_meters();
         let tiles = &mut context.world.tiles;
         let mut dem_coords = Vec::new();
         for (coords, image) in dem_tiles {
             let Some(unpack) = unpack else {
                 break;
             };
-            let component = match DemTile::from_image(&image, unpack) {
-                Ok(tile) => DemTileComponent::Loaded(LoadedDem::new(tile)),
-                Err(error) => {
-                    tracing::warn!(%coords, %error, "DEM tile image is unusable");
-                    DemTileComponent::Missing
-                }
-            };
+            let component = dem::dem_component(coords, &image, unpack, circumference);
             tiles
                 .spawn_mut(coords)
                 .ok_or(HeadlessMapOperationError::InvalidTile { coords })?

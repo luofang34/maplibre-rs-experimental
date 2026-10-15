@@ -13,7 +13,7 @@ use crate::{
     tcs::system::{System, SystemResult},
     terrain::{
         backfill_neighbours,
-        dem::DemTile,
+        dem::{self, DemTile},
         source::dem_source,
         transferables::{DemTransferables, LayerDem, LayerDemMissing},
         DemTileComponent, LoadedDem,
@@ -39,8 +39,17 @@ impl<E: Environment, T: DemTransferables> System for PopulateWorldSystem<E, T> {
         "dem_populate_world".into()
     }
 
-    fn run(&mut self, MapContext { style, world, .. }: &mut MapContext) -> SystemResult {
+    fn run(
+        &mut self,
+        MapContext {
+            style,
+            world,
+            view_state,
+            ..
+        }: &mut MapContext,
+    ) -> SystemResult {
         let unpack = dem_source(style).map(|dem| dem.unpack);
+        let circumference = view_state.body().circumference_meters();
         let messages = self.kernel.apc().receive(|message| {
             message.has_tag(RequestKind::Dem.message_tag())
                 || message.has_tag(T::LayerDem::message_tag())
@@ -58,15 +67,18 @@ impl<E: Environment, T: DemTransferables> System for PopulateWorldSystem<E, T> {
                 if !tile_retry::accepts(world, coords, RequestKind::Dem, attempt) {
                     return Ok(());
                 }
-                let state =
-                    match unpack.map(|unpack| DemTile::from_image(&message.into_image(), unpack)) {
-                        Some(Ok(tile)) => DemTileComponent::Loaded(LoadedDem::new(tile)),
-                        Some(Err(error)) => {
-                            tracing::warn!(%coords, %error, "DEM tile image is unusable");
-                            DemTileComponent::Missing
-                        }
-                        None => DemTileComponent::Missing,
-                    };
+                let image = message.into_image();
+                let sample_metres = dem::sample_metres(coords, image.width(), circumference);
+                let state = match unpack
+                    .map(|unpack| DemTile::from_image_despiked(&image, unpack, sample_metres))
+                {
+                    Some(Ok(tile)) => DemTileComponent::Loaded(LoadedDem::new(tile)),
+                    Some(Err(error)) => {
+                        tracing::warn!(%coords, %error, "DEM tile image is unusable");
+                        DemTileComponent::Missing
+                    }
+                    None => DemTileComponent::Missing,
+                };
                 (coords, state)
             } else {
                 let message = message.into_transferable::<T::LayerDemMissing>()?;
