@@ -37,9 +37,10 @@ pub(super) struct CollectedSymbol {
     pub repeat_key: Option<std::sync::Arc<str>>,
 }
 
-/// What makes two line labels repeats of each other: their text and, since images stand in
-/// the text as one placeholder each, the images they show, so rows of different road shields
-/// are told apart.
+/// What makes two line labels repeats of each other: their text and the images they show,
+/// both those standing in the text as one placeholder each and the icon behind it, so the
+/// same number on an Interstate shield and on a US-route shield are different routes. A
+/// label without text, such as a one-way arrow, has no repeats to keep apart.
 pub(super) fn repeat_key(
     paint: &SymbolPaint,
     properties: &FeatureProperties,
@@ -53,6 +54,10 @@ pub(super) fn repeat_key(
             key.push('\u{0}');
             key.push_str(&image);
         }
+    }
+    if let Some(icon) = paint.text_among_images("icon-image", properties, zoom, &atlas.icons) {
+        key.push('\u{1}');
+        key.push_str(&icon);
     }
     Some(key)
 }

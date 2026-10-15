@@ -218,3 +218,5 @@ fn a_shield_past_the_edge_of_the_view_keeps_no_shield_in_view_from_its_place() {
     );
     assert_eq!(placed, [true, true]);
 }
+
+mod shields;
