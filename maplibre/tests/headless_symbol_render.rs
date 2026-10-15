@@ -124,3 +124,72 @@ async fn a_labelled_point_renders_its_text_headless() {
         "the label's glyphs leave ink at the tile centre, found {inked} inked pixels"
     );
 }
+
+#[tokio::test]
+#[ignore = "renders through the GPU adapter of the machine running the test"]
+async fn a_label_under_a_host_obstacle_is_not_placed() {
+    let style: Style = serde_json::from_value(serde_json::json!({
+        "version": 8,
+        "center": [0.0, 0.0],
+        "zoom": 0,
+        "sources": {
+            "chart": {"type": "vector", "tiles": ["http://127.0.0.1:1/{z}/{x}/{y}.mvt"]}
+        },
+        "layers": [
+            {"id": "paper", "type": "background", "paint": {"background-color": "#ffffff"}},
+            {
+                "id": "label", "type": "symbol", "source": "chart",
+                "source-layer": "route_points", "layout": {"text-field": "{label}"}
+            }
+        ]
+    }))
+    .expect("style parses");
+    let label = style
+        .layers
+        .iter()
+        .find(|layer| layer.id == "label")
+        .cloned()
+        .expect("label layer");
+    let (kernel, renderer) = create_headless_renderer(SIZE, SIZE, None)
+        .await
+        .expect("headless renderer");
+    let plugins: Vec<Box<dyn Plugin<_>>> = vec![
+        Box::new(RenderPlugin),
+        Box::new(BackgroundPlugin),
+        Box::new(VectorPlugin::<DefaultVectorTransferables>::default()),
+        Box::new(SdfPlugin::<DefaultVectorTransferables>::default()),
+        Box::new(HeadlessPlugin::new(true)),
+    ];
+    let mut map = HeadlessMap::new(style, renderer, kernel, plugins).expect("headless map");
+    let tile = || {
+        process_tile_layers(
+            &hex_bytes(LABELLED_POINT_TILE),
+            &label,
+            WorldTileCoords::default(),
+            ProjectionType::Mercator,
+        )
+        .expect("tile processes")
+    };
+    let centre = [f64::from(SIZE) / 2.0; 2];
+
+    map.render_tile(tile()).expect("frame renders");
+    assert_eq!(
+        map.query_rendered_symbols(centre, None).len(),
+        1,
+        "placed in the open"
+    );
+
+    let half = f64::from(SIZE) / 8.0;
+    map.set_label_obstacles(vec![[
+        centre[0] - half,
+        centre[1] - half,
+        centre[0] + half,
+        centre[1] + half,
+    ]]);
+    map.render_tile(tile()).expect("frame renders");
+    assert!(
+        map.query_rendered_symbols(centre, None).is_empty(),
+        "not placed under the host's obstacle"
+    );
+    std::fs::remove_file(FRAME).ok();
+}

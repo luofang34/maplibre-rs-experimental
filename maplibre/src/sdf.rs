@@ -31,6 +31,7 @@ pub mod collision_system;
 pub(crate) mod covering;
 pub(crate) mod depth;
 mod line_glyphs;
+pub mod obstacles;
 mod paint;
 mod placement;
 pub(crate) mod populate_world_system;
