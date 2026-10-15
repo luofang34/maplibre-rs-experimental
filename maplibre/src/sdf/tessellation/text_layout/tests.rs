@@ -32,6 +32,7 @@ fn letter_spacing_is_between_glyphs_and_does_not_shift_centered_text() {
         angle: 0.,
         vertical: None,
         fallback: false,
+        repeat_key: None,
     };
     let mut buffer = VertexBuffers::new();
     append(&symbol, &paint, 12., &atlas, &mut buffer);
@@ -85,6 +86,7 @@ fn label_top(anchor: &str, field: &str) -> i32 {
         angle: 0.,
         vertical: None,
         fallback: false,
+        repeat_key: None,
     };
     let mut buffer = VertexBuffers::new();
     append(&symbol, &paint, 12., &atlas, &mut buffer);
@@ -135,6 +137,7 @@ fn a_bidirectional_mark_is_not_drawn_even_where_the_font_has_a_glyph_for_it() {
         angle: 0.,
         vertical: None,
         fallback: false,
+        repeat_key: None,
     };
     let laid_out = |field: &str| {
         let paint: SymbolPaint = serde_json::from_value(serde_json::json!({

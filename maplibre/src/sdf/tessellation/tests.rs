@@ -101,6 +101,20 @@ fn line_center_places_one_label_and_repeat_distance_follows_the_style() {
 }
 
 #[test]
+fn only_labels_repeated_along_lines_carry_their_repeat_key() {
+    let line = [[0.0, 2048.0], [4000.0, 2048.0]];
+    let repeated = labelled("line", serde_json::json!({}), &line);
+    assert!(repeated
+        .features
+        .iter()
+        .all(|feature| feature.repeat_key.as_deref() == Some("AAAA")));
+    let center = labelled("line-center", serde_json::json!({}), &line);
+    assert!(center.features.iter().all(|f| f.repeat_key.is_none()));
+    let point = point_label(serde_json::json!({}));
+    assert!(point.features.iter().all(|f| f.repeat_key.is_none()));
+}
+
+#[test]
 fn every_part_of_a_multi_line_feature_is_labelled() {
     let mut tessellator = TextTessellator::default();
     tessellator.configure(

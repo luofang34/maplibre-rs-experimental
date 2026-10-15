@@ -12,6 +12,8 @@ const MAX_MERCATOR_LATITUDE_DEGREES: f64 = 85.051_129;
 const MAX_ZOOM_LEVELS_ON_SCREEN: f64 = 9.314;
 const TILE_COUNT_MAX_MIN_RATIO: f64 = 3.0;
 const INTEGRATION_POINTS: usize = 10;
+/// The vertical field of a map camera, `2 * atan(0.75)`, as in GL JS.
+const NORMAL_FIELD_OF_VIEW_DEGREES: f64 = 36.869_897_645_844_02;
 
 #[derive(Clone, Copy)]
 pub(crate) struct LodContext {
@@ -141,12 +143,20 @@ impl LodContext {
         rounding: ZoomRounding,
         history: Option<&crate::projection::lod_history::LodHistory>,
     ) -> ZoomLevel {
+        let desired = rounding
+            .apply(self.desired_zoom(tile) + history.map_or(0.0, |h| h.bias(tile)))
+            .clamp(0.0, (MAX_ZOOM - 1) as f64);
+        ZoomLevel::new(desired as u8)
+    }
+
+    /// The fractional level `tile` should be drawn at, before rounding.
+    fn desired_zoom(&self, tile: TileCoords) -> f64 {
         let distance_2d = if self.planar {
             distance_to_tile_planar(self.camera, tile)
         } else {
             distance_to_tile_2d(self.camera, tile)
         };
-        let desired = if let Some(focal) = self.eye_focal_pixels {
+        if let Some(focal) = self.eye_focal_pixels {
             let distance = distance_2d.hypot(self.distance_z).max(f64::EPSILON);
             // Bound the longest projected texel axis. A grazing-angle area estimate
             // would erase cross-slope detail on terrain and blur roads toward the horizon.
@@ -159,11 +169,7 @@ impl LodContext {
                 self.distance_to_center_3d,
                 self.field_of_view_degrees,
             )
-        };
-        let desired = rounding
-            .apply(desired + history.map_or(0.0, |h| h.bias(tile)))
-            .clamp(0.0, (MAX_ZOOM - 1) as f64);
-        ZoomLevel::new(desired as u8)
+        }
     }
 }
 
@@ -219,7 +225,12 @@ fn calculate_tile_zoom(
     distance_to_center_3d: f64,
     field_of_view_degrees: f64,
 ) -> f64 {
-    let pitch_behavior = pitch_tile_loading_behavior(field_of_view_degrees);
+    // GL JS's factor grows without bound as the field narrows, so a sensor's view of a few
+    // degrees, tilted, would load tiles levels coarser than its screen resolves. The factor
+    // holds back the tile count of a view spanning much of the ground toward the horizon; a
+    // field narrower than the normal one sees less ground and needs no more restraint.
+    let pitch_behavior =
+        pitch_tile_loading_behavior(field_of_view_degrees.max(NORMAL_FIELD_OF_VIEW_DEGREES));
     let center_pitch = (distance_to_tile_z / distance_to_center_3d).acos();
     let half_fov = (field_of_view_degrees * 0.5).to_radians();
     let tile_count_pitch_zero = 2.0 * integral_cos_power(pitch_behavior - 1.0, 0.0, half_fov);
@@ -253,3 +264,6 @@ fn integral_cos_power(power: f64, start: f64, end: f64) -> f64 {
         })
         .sum()
 }
+
+#[cfg(test)]
+mod tests;

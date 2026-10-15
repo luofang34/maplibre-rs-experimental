@@ -164,6 +164,9 @@ pub struct Feature {
     /// Whether the label is the other way of writing the one before it, which shows only when
     /// that one finds no place.
     pub fallback: bool,
+    /// What makes the label one of the repeats its layer places along lines: its text and the
+    /// images it shows. `None` for a label placed once.
+    pub repeat_key: Option<std::sync::Arc<str>>,
 }
 
 /// Coordinates measured on the canonical tile grid.

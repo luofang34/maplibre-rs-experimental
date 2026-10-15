@@ -1,6 +1,6 @@
 //! Places the features of one style layer across its tiles and writes their GPU metadata.
 
-use super::{rules, temporal};
+use super::{repeat_spacing::Repeat, rules, temporal};
 use crate::{
     coords::WorldTileCoords,
     render::shaders::SDFShaderFeatureMetadata,
@@ -281,8 +281,21 @@ impl LayerFrame<'_> {
                 ),
             ),
         );
+        let repeat = Repeat::of(layer, feature, &rectangles, viewport);
+        // A repeat too close to one already placed takes no room from labels after it.
+        let (rectangles, glyph_boxes) = if repeat
+            .as_ref()
+            .is_some_and(|repeat| history.repeats.too_close(repeat, was_visible))
+        {
+            ([None, None], Vec::new())
+        } else {
+            (rectangles, glyph_boxes)
+        };
         let visible = rules.place_along_line(rectangles, &glyph_boxes, boxes, viewport);
         let duplicate = history.shown_elsewhere(layer, feature);
+        if let Some(repeat) = repeat.filter(|_| visible.iter().any(|v| *v) && !duplicate) {
+            history.repeats.remember(repeat);
+        }
         let opacity = history.opacity(layer, feature, visible);
         history.remember_anchor(layer, feature, visible[0].then_some(anchor));
         // A placed label is found from its first frame, while it starts fading in, as GL JS
