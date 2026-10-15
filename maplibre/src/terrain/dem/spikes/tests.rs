@@ -201,3 +201,47 @@ fn leaves_custom_encodings_alone() {
         DemTile::from_image(&image, custom).expect("decodes")
     );
 }
+
+/// Ground with a north–south line of `width` samples from column 30 that rises `rise` metres
+/// above it, over `rows` rows from row 10.
+fn line(width: u32, rows: u32, rise: f64) -> impl Fn(u32, u32) -> f64 {
+    move |x, y| {
+        ground(x, y)
+            + if (30..30 + width).contains(&x) && (10..10 + rows).contains(&y) {
+                rise
+            } else {
+                0.0
+            }
+    }
+}
+
+#[test]
+fn removes_a_low_seam_down_a_column() {
+    // 60 m stays under the 87 m peak rise at zoom 12; a line of them is a seam.
+    let seam = line(2, 40, 60.0);
+    let tile = DemTile::from_image_despiked(&image(TERRARIUM, &seam), TERRARIUM, tile_metres(12))
+        .expect("decodes");
+    for y in 0..DIM {
+        for x in 28..34 {
+            let (x, y) = (i64::from(x), i64::from(y));
+            // The median of the sloping row is the ground one or two samples away.
+            let error = tile.get(x, y) - ground(x as u32, y as u32);
+            assert!(error.abs() <= 1.5, "({x}, {y}): {error}");
+        }
+    }
+}
+
+#[test]
+fn keeps_a_low_line_wider_than_a_seam() {
+    assert_unchanged(line(3, 40, 60.0), tile_metres(12));
+}
+
+#[test]
+fn keeps_a_low_line_shorter_than_a_seam() {
+    assert_unchanged(|x, y| line(2, 12, 60.0)(x, y), tile_metres(12));
+}
+
+#[test]
+fn keeps_a_seam_lower_than_its_floor() {
+    assert_unchanged(line(1, 40, 15.0), tile_metres(14));
+}
