@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["MAX_ENCODED","SPIKE_SLOPE","WINDOW_RADIUS"],"fn":["median","median_below","sample_metres"],"struct":["Encoding"]};
+window.SIDEBAR_ITEMS = {"constant":["MAX_ENCODED","SEAM_FLOOR_METRES","SEAM_FLOOR_SAMPLES","SEAM_ROWS","SEAM_SLACK","SPIKE_SLOPE","WINDOW_RADIUS"],"fn":["median","median_below","sample_metres","seam_columns","seam_rises"],"struct":["Encoding","Heights"]};
