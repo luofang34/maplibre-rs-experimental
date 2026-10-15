@@ -222,7 +222,7 @@ impl TextTessellator {
         anchor: Point<f64>,
         angle: f32,
         source: layout::SourceFeature,
-        line: Option<layout::LineContext>,
+        (line, repeat_key): (Option<layout::LineContext>, Option<&Arc<str>>),
     ) {
         let ways = line
             .is_none()
@@ -250,28 +250,9 @@ impl TextTessellator {
                 properties: self.properties.clone(),
                 vertical,
                 fallback: index == 1,
+                repeat_key: repeat_key.cloned(),
             });
         }
-    }
-
-    /// What makes two line labels repeats of each other: their text and, since images stand
-    /// in the text as one placeholder each, the images they show, so rows of different road
-    /// shields are told apart.
-    fn repeat_key(&self) -> Option<String> {
-        let images = Some(&self.atlas.icons as &dyn crate::style::expression::ImageSet);
-        let mut key = self
-            .paint
-            .label_among(&self.properties, self.zoom, images)?;
-        for section in self
-            .paint
-            .label_sections_among(&self.properties, self.zoom, images)
-        {
-            if let Some(image) = section.image {
-                key.push('\u{0}');
-                key.push_str(&image);
-            }
-        }
-        Some(key)
     }
 
     /// Whether a label with the same repeat key already sits within `repeat_distance` of `point`; a
@@ -313,6 +294,7 @@ impl TextTessellator {
             properties: self.properties.clone(),
             vertical: None,
             fallback: false,
+            repeat_key: None,
         };
         let text_size = self
             .paint
@@ -360,8 +342,11 @@ impl TextTessellator {
             LinePlacement::Line => line_anchors::clip_to_tile(&lines),
             LinePlacement::Center => lines.into_iter().filter(|line| line.len() > 1).collect(),
         };
-        let repeat_key = match placement {
-            LinePlacement::Line => self.repeat_key(),
+        let repeat_key: Option<Arc<str>> = match placement {
+            LinePlacement::Line => {
+                layout::repeat_key(&self.paint, &self.properties, self.zoom, &self.atlas)
+                    .map(Arc::from)
+            }
             LinePlacement::Center => None,
         };
         for part in parts {
@@ -391,7 +376,10 @@ impl TextTessellator {
                     Point::new(anchor.point[0], anchor.point[1]),
                     anchor.angle as f32,
                     source,
-                    Some((polyline.clone(), distance as f32)),
+                    (
+                        Some((polyline.clone(), distance as f32)),
+                        repeat_key.as_ref(),
+                    ),
                 );
             }
         }
@@ -480,7 +468,7 @@ impl FeatureProcessor for TextTessellator {
                         .into_iter()
                         .filter(|anchor| tile.contains(&anchor.x()) && tile.contains(&anchor.y()))
                     {
-                        self.collect(anchor, 0.0, source, None);
+                        self.collect(anchor, 0.0, source, (None, None));
                     }
                 }
             }

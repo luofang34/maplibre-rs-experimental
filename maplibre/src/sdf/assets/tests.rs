@@ -75,6 +75,7 @@ fn worker_wire_roundtrip_preserves_exact_collision_ranges_and_anchor() {
         anchor_sets: Vec::new(),
         text_colors: Vec::new(),
         fallback: false,
+        repeat_key: Some("Zürich\u{0}shield".into()),
         str: "Zürich".into(),
         line: Some(crate::sdf::LineLabel {
             polyline: [[0.0, 0.0], [500.0, 0.0]].into(),
@@ -91,6 +92,7 @@ fn worker_wire_roundtrip_preserves_exact_collision_ranges_and_anchor() {
     assert_eq!(decoded.bbox, feature.bbox);
     assert_eq!(decoded.text_anchor, feature.text_anchor);
     assert_eq!(decoded.str, feature.str);
+    assert_eq!(decoded.repeat_key, feature.repeat_key);
     assert_eq!(decoded.data.id, feature.data.id);
     assert_eq!(decoded.data.properties, feature.data.properties);
     assert_eq!(decoded.data.sort_key, feature.data.sort_key);

@@ -22,6 +22,7 @@ fn label(at: [f32; 2], indices: std::ops::Range<usize>) -> Feature {
         anchor_sets: Vec::new(),
         text_colors: Vec::new(),
         fallback: false,
+        repeat_key: None,
         str: String::new(),
         line: None,
     }

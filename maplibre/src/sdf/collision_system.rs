@@ -151,6 +151,7 @@ impl System for CollisionSystem {
 mod draw_sort;
 mod family;
 mod layer_pass;
+mod repeat_spacing;
 mod rules;
 mod temporal;
 

@@ -33,6 +33,28 @@ pub(super) struct CollectedSymbol {
     pub vertical: Option<bool>,
     /// Whether the label is the second way of writing a text that has two.
     pub fallback: bool,
+    /// What makes the label a repeat of the others along lines, see [`repeat_key`].
+    pub repeat_key: Option<std::sync::Arc<str>>,
+}
+
+/// What makes two line labels repeats of each other: their text and, since images stand in
+/// the text as one placeholder each, the images they show, so rows of different road shields
+/// are told apart.
+pub(super) fn repeat_key(
+    paint: &SymbolPaint,
+    properties: &FeatureProperties,
+    zoom: f64,
+    atlas: &SymbolAtlas,
+) -> Option<String> {
+    let images = Some(&atlas.icons as &dyn crate::style::expression::ImageSet);
+    let mut key = paint.label_among(properties, zoom, images)?;
+    for section in paint.label_sections_among(properties, zoom, images) {
+        if let Some(image) = section.image {
+            key.push('\u{0}');
+            key.push_str(&image);
+        }
+    }
+    Some(key)
 }
 
 /// Where the labels of a geometry go when they do not follow a line, as GL JS places them:
@@ -217,6 +239,7 @@ pub(super) fn append(
         anchor_sets: laid.anchor_sets,
         text_colors: laid.colors,
         fallback: symbol.fallback,
+        repeat_key: symbol.repeat_key.clone(),
         str: text,
         line: symbol
             .line

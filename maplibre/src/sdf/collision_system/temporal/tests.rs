@@ -30,6 +30,7 @@ fn feature(anchor: f32) -> Feature {
         anchor_sets: Vec::new(),
         text_colors: Vec::new(),
         fallback: false,
+        repeat_key: None,
         str: "Innsbruck".into(),
         line: None,
     }

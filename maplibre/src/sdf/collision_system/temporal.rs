@@ -30,12 +30,15 @@ pub(super) struct PlacementHistory {
     now: Duration,
     frame: u64,
     pub(super) fading: bool,
+    /// Where the repeats of labels along lines were placed on screen.
+    pub(super) repeats: super::repeat_spacing::RepeatSpacing,
 }
 impl PlacementHistory {
     pub(super) fn begin(&mut self, now: Duration) {
         self.now = now;
         self.frame = self.frame.wrapping_add(1);
         self.fading = false;
+        self.repeats.begin();
         self.states.retain(|_, states| {
             states.retain(|state| now.saturating_sub(state.last_seen) < Duration::from_secs(1));
             !states.is_empty()
