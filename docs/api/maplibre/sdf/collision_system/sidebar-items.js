@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["allocation","opacity_fingerprint","visible_layers"],"mod":["draw_sort","family","layer_pass","rules","temporal"],"struct":["CollisionSystem"],"type":["VisibleLayer"]};
+window.SIDEBAR_ITEMS = {"fn":["allocation","opacity_fingerprint","visible_layers"],"mod":["draw_sort","family","layer_pass","repeat_spacing","rules","temporal"],"struct":["CollisionSystem"],"type":["VisibleLayer"]};

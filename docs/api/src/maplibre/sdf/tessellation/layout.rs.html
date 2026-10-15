@@ -33,377 +33,405 @@
 <a href=#33 id=33 data-nosnippet>33</a>    </span><span class="kw">pub </span>vertical: <span class="prelude-ty">Option</span>&lt;bool&gt;,
 <a href=#34 id=34 data-nosnippet>34</a>    <span class="doccomment">/// Whether the label is the second way of writing a text that has two.
 <a href=#35 id=35 data-nosnippet>35</a>    </span><span class="kw">pub </span>fallback: bool,
-<a href=#36 id=36 data-nosnippet>36</a>}
-<a href=#37 id=37 data-nosnippet>37</a>
-<a href=#38 id=38 data-nosnippet>38</a><span class="doccomment">/// Where the labels of a geometry go when they do not follow a line, as GL JS places them:
-<a href=#39 id=39 data-nosnippet>39</a>/// at every point, at the first vertex of every line, and at the pole of inaccessibility of
-<a href=#40 id=40 data-nosnippet>40</a>/// every polygon.
-<a href=#41 id=41 data-nosnippet>41</a></span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>anchors(geometry: <span class="kw-2">&amp;</span>Geometry&lt;f64&gt;) -&gt; Vec&lt;Point&lt;f64&gt;&gt; {
-<a href=#42 id=42 data-nosnippet>42</a>    <span class="kw">let </span>polygon = |polygon: <span class="kw-2">&amp;</span>geo_types::Polygon&lt;f64&gt;| {
-<a href=#43 id=43 data-nosnippet>43</a>        <span class="kw">let </span>rings: Vec&lt;Vec&lt;[f64; <span class="number">2</span>]&gt;&gt; = std::iter::once(polygon.exterior())
-<a href=#44 id=44 data-nosnippet>44</a>            .chain(polygon.interiors())
-<a href=#45 id=45 data-nosnippet>45</a>            .map(|ring| ring.coords().map(|c| [c.x, c.y]).collect())
-<a href=#46 id=46 data-nosnippet>46</a>            .collect();
-<a href=#47 id=47 data-nosnippet>47</a>        <span class="kw">super</span>::pole::pole_of_inaccessibility(<span class="kw-2">&amp;</span>rings, POLE_PRECISION).map(|[x, y]| Point::new(x, y))
-<a href=#48 id=48 data-nosnippet>48</a>    };
-<a href=#49 id=49 data-nosnippet>49</a>    <span class="kw">let </span>first = |line: <span class="kw-2">&amp;</span>geo_types::LineString&lt;f64&gt;| {
-<a href=#50 id=50 data-nosnippet>50</a>        line.<span class="number">0</span>.first().map(|point| Point::new(point.x, point.y))
-<a href=#51 id=51 data-nosnippet>51</a>    };
-<a href=#52 id=52 data-nosnippet>52</a>    <span class="kw">match </span>geometry {
-<a href=#53 id=53 data-nosnippet>53</a>        Geometry::Point(point) =&gt; <span class="macro">vec!</span>[<span class="kw-2">*</span>point],
-<a href=#54 id=54 data-nosnippet>54</a>        Geometry::MultiPoint(points) =&gt; points.iter().copied().collect(),
-<a href=#55 id=55 data-nosnippet>55</a>        Geometry::LineString(line) =&gt; first(line).into_iter().collect(),
-<a href=#56 id=56 data-nosnippet>56</a>        Geometry::MultiLineString(lines) =&gt; lines.iter().filter_map(first).collect(),
-<a href=#57 id=57 data-nosnippet>57</a>        Geometry::Polygon(shape) =&gt; polygon(shape).into_iter().collect(),
-<a href=#58 id=58 data-nosnippet>58</a>        Geometry::MultiPolygon(shapes) =&gt; shapes.iter().filter_map(polygon).collect(),
-<a href=#59 id=59 data-nosnippet>59</a>        other =&gt; other.centroid().into_iter().collect(),
-<a href=#60 id=60 data-nosnippet>60</a>    }
-<a href=#61 id=61 data-nosnippet>61</a>}
-<a href=#62 id=62 data-nosnippet>62</a>
-<a href=#63 id=63 data-nosnippet>63</a><span class="doccomment">/// How close, in tile units, a polygon's label gets to its pole of inaccessibility: two pixels.
-<a href=#64 id=64 data-nosnippet>64</a></span><span class="kw">const </span>POLE_PRECISION: f64 = <span class="number">16.0</span>;
-<a href=#65 id=65 data-nosnippet>65</a>
-<a href=#66 id=66 data-nosnippet>66</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>append(
-<a href=#67 id=67 data-nosnippet>67</a>    symbol: <span class="kw-2">&amp;</span>CollectedSymbol,
-<a href=#68 id=68 data-nosnippet>68</a>    paint: <span class="kw-2">&amp;</span>SymbolPaint,
-<a href=#69 id=69 data-nosnippet>69</a>    zoom: f64,
-<a href=#70 id=70 data-nosnippet>70</a>    atlas: <span class="kw-2">&amp;</span>SymbolAtlas,
-<a href=#71 id=71 data-nosnippet>71</a>    buffer: <span class="kw-2">&amp;mut </span>VertexBuffers&lt;ShaderSymbolVertex, u32&gt;,
-<a href=#72 id=72 data-nosnippet>72</a>    features: <span class="kw-2">&amp;mut </span>Vec&lt;Feature&gt;,
-<a href=#73 id=73 data-nosnippet>73</a>) {
-<a href=#74 id=74 data-nosnippet>74</a>    <span class="kw">let </span>start = buffer.indices.len();
-<a href=#75 id=75 data-nosnippet>75</a>    <span class="kw">let </span>first_vertex = buffer.vertices.len();
-<a href=#76 id=76 data-nosnippet>76</a>    <span class="kw">let </span><span class="kw-2">mut </span>icon_padding = <span class="number">0.0_f32</span>;
-<a href=#77 id=77 data-nosnippet>77</a>    <span class="kw">let </span>text = paint
-<a href=#78 id=78 data-nosnippet>78</a>        .label_among(<span class="kw-2">&amp;</span>symbol.properties, zoom, <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>atlas.icons))
-<a href=#79 id=79 data-nosnippet>79</a>        .unwrap_or_default();
-<a href=#80 id=80 data-nosnippet>80</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(icon) = paint
-<a href=#81 id=81 data-nosnippet>81</a>        .text_among_images(<span class="string">"icon-image"</span>, <span class="kw-2">&amp;</span>symbol.properties, zoom, <span class="kw-2">&amp;</span>atlas.icons)
-<a href=#82 id=82 data-nosnippet>82</a>        .and_then(|name| atlas.icons.get(<span class="kw-2">&amp;</span>name))
-<a href=#83 id=83 data-nosnippet>83</a>    {
-<a href=#84 id=84 data-nosnippet>84</a>        <span class="kw">let </span>ratio = icon.metrics[<span class="number">3</span>];
-<a href=#85 id=85 data-nosnippet>85</a>        <span class="kw">let </span>width = icon.rect[<span class="number">2</span>] <span class="kw">as </span>f32 / ratio;
-<a href=#86 id=86 data-nosnippet>86</a>        <span class="kw">let </span>height = icon.rect[<span class="number">3</span>] <span class="kw">as </span>f32 / ratio;
-<a href=#87 id=87 data-nosnippet>87</a>        <span class="kw">let </span>offset = offset(paint, <span class="string">"icon-offset"</span>, <span class="number">1.0</span>, (<span class="kw-2">&amp;</span>symbol.properties, zoom));
-<a href=#88 id=88 data-nosnippet>88</a>        <span class="kw">let </span>fractions = anchor_fractions(
-<a href=#89 id=89 data-nosnippet>89</a>            <span class="kw-2">&amp;</span>paint
-<a href=#90 id=90 data-nosnippet>90</a>                .text(<span class="string">"icon-anchor"</span>, <span class="kw-2">&amp;</span>symbol.properties, zoom)
-<a href=#91 id=91 data-nosnippet>91</a>                .unwrap_or_else(|| <span class="string">"center"</span>.into()),
-<a href=#92 id=92 data-nosnippet>92</a>        );
-<a href=#93 id=93 data-nosnippet>93</a>        <span class="kw">let </span>height_offset = <span class="kw">if </span>paint.uses_shared_height() {
-<a href=#94 id=94 data-nosnippet>94</a>            <span class="number">0.0
-<a href=#95 id=95 data-nosnippet>95</a>        </span>} <span class="kw">else </span>{
-<a href=#96 id=96 data-nosnippet>96</a>            paint.height_offset(<span class="string">"icon"</span>, <span class="kw-2">&amp;</span>symbol.properties, zoom)
-<a href=#97 id=97 data-nosnippet>97</a>        };
-<a href=#98 id=98 data-nosnippet>98</a>        <span class="kw">let </span>icon_size = paint.number(<span class="string">"icon-size"</span>, <span class="kw-2">&amp;</span>symbol.properties, zoom, <span class="number">1.0</span>);
-<a href=#99 id=99 data-nosnippet>99</a>        <span class="comment">// An image whose anchor is not its centre, such as a shield with a banner above its
-<a href=#100 id=100 data-nosnippet>100</a>        // body, is moved so that the anchor stands where the centre would.
-<a href=#101 id=101 data-nosnippet>101</a>        </span><span class="kw">let </span>recentre = [icon.metrics[<span class="number">0</span>] / ratio, icon.metrics[<span class="number">1</span>] / ratio];
-<a href=#102 id=102 data-nosnippet>102</a>        <span class="kw">let </span>placed = [
-<a href=#103 id=103 data-nosnippet>103</a>            -width * fractions[<span class="number">0</span>] + offset[<span class="number">0</span>] - recentre[<span class="number">0</span>],
-<a href=#104 id=104 data-nosnippet>104</a>            -height * fractions[<span class="number">1</span>] + offset[<span class="number">1</span>] - recentre[<span class="number">1</span>],
-<a href=#105 id=105 data-nosnippet>105</a>            width * (<span class="number">1.0 </span>- fractions[<span class="number">0</span>]) + offset[<span class="number">0</span>] - recentre[<span class="number">0</span>],
-<a href=#106 id=106 data-nosnippet>106</a>            height * (<span class="number">1.0 </span>- fractions[<span class="number">1</span>]) + offset[<span class="number">1</span>] - recentre[<span class="number">1</span>],
-<a href=#107 id=107 data-nosnippet>107</a>        ];
-<a href=#108 id=108 data-nosnippet>108</a>        <span class="kw">let </span>fitted = fit_to_text(paint, symbol, zoom, atlas, [width, height], offset);
-<a href=#109 id=109 data-nosnippet>109</a>        <span class="kw">let </span>shift = <span class="kw">crate</span>::sdf::translation::tile_translation(paint, <span class="string">"icon"</span>, zoom);
-<a href=#110 id=110 data-nosnippet>110</a>        <span class="kw">let </span>anchor = Point::new(symbol.anchor.x() + shift[<span class="number">0</span>], symbol.anchor.y() + shift[<span class="number">1</span>]);
-<a href=#111 id=111 data-nosnippet>111</a>        <span class="kw">let </span>rotation = paint
-<a href=#112 id=112 data-nosnippet>112</a>            .number(<span class="string">"icon-rotate"</span>, <span class="kw-2">&amp;</span>symbol.properties, zoom, <span class="number">0.0</span>)
-<a href=#113 id=113 data-nosnippet>113</a>            .to_radians()
-<a href=#114 id=114 data-nosnippet>114</a>            + <span class="kw">if </span><span class="kw">super</span>::text_layout::is_vertical(symbol, paint, zoom, atlas) {
-<a href=#115 id=115 data-nosnippet>115</a>                std::f32::consts::FRAC_PI_2
-<a href=#116 id=116 data-nosnippet>116</a>            } <span class="kw">else </span>{
-<a href=#117 id=117 data-nosnippet>117</a>                <span class="number">0.0
-<a href=#118 id=118 data-nosnippet>118</a>            </span>};
-<a href=#119 id=119 data-nosnippet>119</a>        <span class="comment">// Layout pixels are drawn scaled by icon-size, which a fitted icon does not take.
-<a href=#120 id=120 data-nosnippet>120</a>        </span><span class="kw">let </span>undo_size = <span class="kw">if </span>fitted.is_some() {
-<a href=#121 id=121 data-nosnippet>121</a>            <span class="number">1.0 </span>/ icon_size
-<a href=#122 id=122 data-nosnippet>122</a>        } <span class="kw">else </span>{
-<a href=#123 id=123 data-nosnippet>123</a>            <span class="number">1.0
-<a href=#124 id=124 data-nosnippet>124</a>        </span>};
-<a href=#125 id=125 data-nosnippet>125</a>        <span class="kw">for </span>piece <span class="kw">in </span><span class="kw">super</span>::icon_quads::icon_quads(icon, fitted.unwrap_or(placed), fitted.is_some())
-<a href=#126 id=126 data-nosnippet>126</a>        {
-<a href=#127 id=127 data-nosnippet>127</a>            icon_padding = icon_padding.max(piece.padding * undo_size);
-<a href=#128 id=128 data-nosnippet>128</a>            <span class="kw">let </span>part = AtlasEntry {
-<a href=#129 id=129 data-nosnippet>129</a>                rect: piece.rect,
-<a href=#130 id=130 data-nosnippet>130</a>                ..icon.clone()
-<a href=#131 id=131 data-nosnippet>131</a>            };
-<a href=#132 id=132 data-nosnippet>132</a>            quad(
-<a href=#133 id=133 data-nosnippet>133</a>                buffer,
-<a href=#134 id=134 data-nosnippet>134</a>                anchor,
-<a href=#135 id=135 data-nosnippet>135</a>                piece.bounds.map(|edge| edge * undo_size),
-<a href=#136 id=136 data-nosnippet>136</a>                <span class="kw-2">&amp;</span>part,
-<a href=#137 id=137 data-nosnippet>137</a>                height_offset,
-<a href=#138 id=138 data-nosnippet>138</a>                symbol.angle,
-<a href=#139 id=139 data-nosnippet>139</a>                rotation,
-<a href=#140 id=140 data-nosnippet>140</a>            );
-<a href=#141 id=141 data-nosnippet>141</a>        }
-<a href=#142 id=142 data-nosnippet>142</a>    }
-<a href=#143 id=143 data-nosnippet>143</a>    <span class="kw">let </span>first_glyph_index = buffer.indices.len();
-<a href=#144 id=144 data-nosnippet>144</a>    <span class="kw">let </span>laid = <span class="kw">super</span>::text_layout::append(symbol, paint, zoom, atlas, buffer);
-<a href=#145 id=145 data-nosnippet>145</a>    <span class="kw">let </span>glyph_offsets = laid.centres;
-<a href=#146 id=146 data-nosnippet>146</a>    <span class="kw">if </span>start == buffer.indices.len() {
-<a href=#147 id=147 data-nosnippet>147</a>        <span class="kw">return</span>;
-<a href=#148 id=148 data-nosnippet>148</a>    }
-<a href=#149 id=149 data-nosnippet>149</a>    <span class="comment">// Collision follows the text where there is one, as the icon alone otherwise.
-<a href=#150 id=150 data-nosnippet>150</a>    </span><span class="kw">let </span>shift = <span class="kw">crate</span>::sdf::translation::tile_translation(
-<a href=#151 id=151 data-nosnippet>151</a>        paint,
-<a href=#152 id=152 data-nosnippet>152</a>        <span class="kw">if </span>text.is_empty() { <span class="string">"icon" </span>} <span class="kw">else </span>{ <span class="string">"text" </span>},
-<a href=#153 id=153 data-nosnippet>153</a>        zoom,
-<a href=#154 id=154 data-nosnippet>154</a>    );
-<a href=#155 id=155 data-nosnippet>155</a>    <span class="kw">let </span>anchor = Point2D::new(
-<a href=#156 id=156 data-nosnippet>156</a>        (symbol.anchor.x() + shift[<span class="number">0</span>]) <span class="kw">as </span>f32,
-<a href=#157 id=157 data-nosnippet>157</a>        (symbol.anchor.y() + shift[<span class="number">1</span>]) <span class="kw">as </span>f32,
-<a href=#158 id=158 data-nosnippet>158</a>    );
-<a href=#159 id=159 data-nosnippet>159</a>    <span class="kw">let </span>bbox = bounds(
-<a href=#160 id=160 data-nosnippet>160</a>        <span class="kw-2">&amp;</span>buffer.vertices,
-<a href=#161 id=161 data-nosnippet>161</a>        <span class="kw-2">&amp;</span>buffer.indices[start..],
-<a href=#162 id=162 data-nosnippet>162</a>        paint,
-<a href=#163 id=163 data-nosnippet>163</a>        <span class="kw-2">&amp;</span>symbol.properties,
-<a href=#164 id=164 data-nosnippet>164</a>        zoom,
-<a href=#165 id=165 data-nosnippet>165</a>    );
-<a href=#166 id=166 data-nosnippet>166</a>    <span class="kw">let </span><span class="kw-2">mut </span>parts = <span class="kw">crate</span>::sdf::placement_geometry::measure(<span class="kw-2">&amp;mut </span>buffer.vertices[first_vertex..]);
-<a href=#167 id=167 data-nosnippet>167</a>    <span class="comment">// An icon collides by its image, not by the clear border its quad reaches into.
-<a href=#168 id=168 data-nosnippet>168</a>    </span><span class="kw">for </span>part <span class="kw">in </span>parts[<span class="number">1</span>..].iter_mut().flatten() {
-<a href=#169 id=169 data-nosnippet>169</a>        <span class="kw">let </span>pad = f64::from(icon_padding);
-<a href=#170 id=170 data-nosnippet>170</a>        part.bounds = [
-<a href=#171 id=171 data-nosnippet>171</a>            part.bounds[<span class="number">0</span>] + pad,
-<a href=#172 id=172 data-nosnippet>172</a>            part.bounds[<span class="number">1</span>] + pad,
-<a href=#173 id=173 data-nosnippet>173</a>            part.bounds[<span class="number">2</span>] - pad,
-<a href=#174 id=174 data-nosnippet>174</a>            part.bounds[<span class="number">3</span>] - pad,
-<a href=#175 id=175 data-nosnippet>175</a>        ];
-<a href=#176 id=176 data-nosnippet>176</a>    }
-<a href=#177 id=177 data-nosnippet>177</a>    <span class="comment">// Text collides by the box of its lines, not by the bitmaps of its glyphs, which reach
-<a href=#178 id=178 data-nosnippet>178</a>    // a few pixels beyond it.
-<a href=#179 id=179 data-nosnippet>179</a>    // A label of images alone, such as a row of road shields along a road, has no glyphs to
-<a href=#180 id=180 data-nosnippet>180</a>    // measure, so its box is the layout's.
-<a href=#181 id=181 data-nosnippet>181</a>    </span><span class="kw">if </span>parts[<span class="number">0</span>].is_none() {
-<a href=#182 id=182 data-nosnippet>182</a>        <span class="kw">let </span>image = buffer.vertices[first_vertex..]
-<a href=#183 id=183 data-nosnippet>183</a>            .iter()
-<a href=#184 id=184 data-nosnippet>184</a>            .find(|vertex| vertex.a_data[<span class="number">2</span>] == <span class="number">3</span>);
-<a href=#185 id=185 data-nosnippet>185</a>        <span class="kw">if let </span>(<span class="prelude-val">Some</span>(vertex), <span class="prelude-val">Some</span>(extent)) = (
-<a href=#186 id=186 data-nosnippet>186</a>            image,
-<a href=#187 id=187 data-nosnippet>187</a>            <span class="kw">super</span>::text_layout::extent(symbol, paint, zoom, atlas),
-<a href=#188 id=188 data-nosnippet>188</a>        ) {
-<a href=#189 id=189 data-nosnippet>189</a>            parts[<span class="number">0</span>] = <span class="prelude-val">Some</span>(<span class="kw">crate</span>::sdf::placement_geometry::SymbolBounds {
-<a href=#190 id=190 data-nosnippet>190</a>                bounds: extent.map(f64::from),
-<a href=#191 id=191 data-nosnippet>191</a>                height: f64::from(f32::from_bits(vertex.a_pixeloffset[<span class="number">2</span>] <span class="kw">as </span>u32)),
-<a href=#192 id=192 data-nosnippet>192</a>                angle: f64::from(f32::from_bits(vertex.a_pixeloffset[<span class="number">3</span>] <span class="kw">as </span>u32)),
-<a href=#193 id=193 data-nosnippet>193</a>                text: <span class="bool-val">true</span>,
-<a href=#194 id=194 data-nosnippet>194</a>            });
-<a href=#195 id=195 data-nosnippet>195</a>        }
-<a href=#196 id=196 data-nosnippet>196</a>    }
-<a href=#197 id=197 data-nosnippet>197</a>    <span class="kw">if let </span>(<span class="prelude-val">Some</span>(text_part), <span class="prelude-val">None</span>) = (<span class="kw-2">&amp;mut </span>parts[<span class="number">0</span>], <span class="kw-2">&amp;</span>symbol.line) {
-<a href=#198 id=198 data-nosnippet>198</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>([left, top, right, bottom]) =
-<a href=#199 id=199 data-nosnippet>199</a>            <span class="kw">super</span>::text_layout::extent(symbol, paint, zoom, atlas)
-<a href=#200 id=200 data-nosnippet>200</a>        {
-<a href=#201 id=201 data-nosnippet>201</a>            text_part.bounds = [left, top, right, bottom].map(f64::from);
-<a href=#202 id=202 data-nosnippet>202</a>        }
+<a href=#36 id=36 data-nosnippet>36</a>    <span class="doccomment">/// What makes the label a repeat of the others along lines, see [`repeat_key`].
+<a href=#37 id=37 data-nosnippet>37</a>    </span><span class="kw">pub </span>repeat_key: <span class="prelude-ty">Option</span>&lt;std::sync::Arc&lt;str&gt;&gt;,
+<a href=#38 id=38 data-nosnippet>38</a>}
+<a href=#39 id=39 data-nosnippet>39</a>
+<a href=#40 id=40 data-nosnippet>40</a><span class="doccomment">/// What makes two line labels repeats of each other: their text and the images they show,
+<a href=#41 id=41 data-nosnippet>41</a>/// both those standing in the text as one placeholder each and the icon behind it, so the
+<a href=#42 id=42 data-nosnippet>42</a>/// same number on an Interstate shield and on a US-route shield are different routes. A
+<a href=#43 id=43 data-nosnippet>43</a>/// label without text, such as a one-way arrow, has no repeats to keep apart.
+<a href=#44 id=44 data-nosnippet>44</a></span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>repeat_key(
+<a href=#45 id=45 data-nosnippet>45</a>    paint: <span class="kw-2">&amp;</span>SymbolPaint,
+<a href=#46 id=46 data-nosnippet>46</a>    properties: <span class="kw-2">&amp;</span>FeatureProperties,
+<a href=#47 id=47 data-nosnippet>47</a>    zoom: f64,
+<a href=#48 id=48 data-nosnippet>48</a>    atlas: <span class="kw-2">&amp;</span>SymbolAtlas,
+<a href=#49 id=49 data-nosnippet>49</a>) -&gt; <span class="prelude-ty">Option</span>&lt;String&gt; {
+<a href=#50 id=50 data-nosnippet>50</a>    <span class="kw">let </span>images = <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>atlas.icons <span class="kw">as </span><span class="kw-2">&amp;</span><span class="kw">dyn </span><span class="kw">crate</span>::style::expression::ImageSet);
+<a href=#51 id=51 data-nosnippet>51</a>    <span class="kw">let </span><span class="kw-2">mut </span>key = paint.label_among(properties, zoom, images)<span class="question-mark">?</span>;
+<a href=#52 id=52 data-nosnippet>52</a>    <span class="kw">for </span>section <span class="kw">in </span>paint.label_sections_among(properties, zoom, images) {
+<a href=#53 id=53 data-nosnippet>53</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(image) = section.image {
+<a href=#54 id=54 data-nosnippet>54</a>            key.push(<span class="string">'\u{0}'</span>);
+<a href=#55 id=55 data-nosnippet>55</a>            key.push_str(<span class="kw-2">&amp;</span>image);
+<a href=#56 id=56 data-nosnippet>56</a>        }
+<a href=#57 id=57 data-nosnippet>57</a>    }
+<a href=#58 id=58 data-nosnippet>58</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(icon) = paint.text_among_images(<span class="string">"icon-image"</span>, properties, zoom, <span class="kw-2">&amp;</span>atlas.icons) {
+<a href=#59 id=59 data-nosnippet>59</a>        key.push(<span class="string">'\u{1}'</span>);
+<a href=#60 id=60 data-nosnippet>60</a>        key.push_str(<span class="kw-2">&amp;</span>icon);
+<a href=#61 id=61 data-nosnippet>61</a>    }
+<a href=#62 id=62 data-nosnippet>62</a>    <span class="prelude-val">Some</span>(key)
+<a href=#63 id=63 data-nosnippet>63</a>}
+<a href=#64 id=64 data-nosnippet>64</a>
+<a href=#65 id=65 data-nosnippet>65</a><span class="doccomment">/// Where the labels of a geometry go when they do not follow a line, as GL JS places them:
+<a href=#66 id=66 data-nosnippet>66</a>/// at every point, at the first vertex of every line, and at the pole of inaccessibility of
+<a href=#67 id=67 data-nosnippet>67</a>/// every polygon.
+<a href=#68 id=68 data-nosnippet>68</a></span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>anchors(geometry: <span class="kw-2">&amp;</span>Geometry&lt;f64&gt;) -&gt; Vec&lt;Point&lt;f64&gt;&gt; {
+<a href=#69 id=69 data-nosnippet>69</a>    <span class="kw">let </span>polygon = |polygon: <span class="kw-2">&amp;</span>geo_types::Polygon&lt;f64&gt;| {
+<a href=#70 id=70 data-nosnippet>70</a>        <span class="kw">let </span>rings: Vec&lt;Vec&lt;[f64; <span class="number">2</span>]&gt;&gt; = std::iter::once(polygon.exterior())
+<a href=#71 id=71 data-nosnippet>71</a>            .chain(polygon.interiors())
+<a href=#72 id=72 data-nosnippet>72</a>            .map(|ring| ring.coords().map(|c| [c.x, c.y]).collect())
+<a href=#73 id=73 data-nosnippet>73</a>            .collect();
+<a href=#74 id=74 data-nosnippet>74</a>        <span class="kw">super</span>::pole::pole_of_inaccessibility(<span class="kw-2">&amp;</span>rings, POLE_PRECISION).map(|[x, y]| Point::new(x, y))
+<a href=#75 id=75 data-nosnippet>75</a>    };
+<a href=#76 id=76 data-nosnippet>76</a>    <span class="kw">let </span>first = |line: <span class="kw-2">&amp;</span>geo_types::LineString&lt;f64&gt;| {
+<a href=#77 id=77 data-nosnippet>77</a>        line.<span class="number">0</span>.first().map(|point| Point::new(point.x, point.y))
+<a href=#78 id=78 data-nosnippet>78</a>    };
+<a href=#79 id=79 data-nosnippet>79</a>    <span class="kw">match </span>geometry {
+<a href=#80 id=80 data-nosnippet>80</a>        Geometry::Point(point) =&gt; <span class="macro">vec!</span>[<span class="kw-2">*</span>point],
+<a href=#81 id=81 data-nosnippet>81</a>        Geometry::MultiPoint(points) =&gt; points.iter().copied().collect(),
+<a href=#82 id=82 data-nosnippet>82</a>        Geometry::LineString(line) =&gt; first(line).into_iter().collect(),
+<a href=#83 id=83 data-nosnippet>83</a>        Geometry::MultiLineString(lines) =&gt; lines.iter().filter_map(first).collect(),
+<a href=#84 id=84 data-nosnippet>84</a>        Geometry::Polygon(shape) =&gt; polygon(shape).into_iter().collect(),
+<a href=#85 id=85 data-nosnippet>85</a>        Geometry::MultiPolygon(shapes) =&gt; shapes.iter().filter_map(polygon).collect(),
+<a href=#86 id=86 data-nosnippet>86</a>        other =&gt; other.centroid().into_iter().collect(),
+<a href=#87 id=87 data-nosnippet>87</a>    }
+<a href=#88 id=88 data-nosnippet>88</a>}
+<a href=#89 id=89 data-nosnippet>89</a>
+<a href=#90 id=90 data-nosnippet>90</a><span class="doccomment">/// How close, in tile units, a polygon's label gets to its pole of inaccessibility: two pixels.
+<a href=#91 id=91 data-nosnippet>91</a></span><span class="kw">const </span>POLE_PRECISION: f64 = <span class="number">16.0</span>;
+<a href=#92 id=92 data-nosnippet>92</a>
+<a href=#93 id=93 data-nosnippet>93</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>append(
+<a href=#94 id=94 data-nosnippet>94</a>    symbol: <span class="kw-2">&amp;</span>CollectedSymbol,
+<a href=#95 id=95 data-nosnippet>95</a>    paint: <span class="kw-2">&amp;</span>SymbolPaint,
+<a href=#96 id=96 data-nosnippet>96</a>    zoom: f64,
+<a href=#97 id=97 data-nosnippet>97</a>    atlas: <span class="kw-2">&amp;</span>SymbolAtlas,
+<a href=#98 id=98 data-nosnippet>98</a>    buffer: <span class="kw-2">&amp;mut </span>VertexBuffers&lt;ShaderSymbolVertex, u32&gt;,
+<a href=#99 id=99 data-nosnippet>99</a>    features: <span class="kw-2">&amp;mut </span>Vec&lt;Feature&gt;,
+<a href=#100 id=100 data-nosnippet>100</a>) {
+<a href=#101 id=101 data-nosnippet>101</a>    <span class="kw">let </span>start = buffer.indices.len();
+<a href=#102 id=102 data-nosnippet>102</a>    <span class="kw">let </span>first_vertex = buffer.vertices.len();
+<a href=#103 id=103 data-nosnippet>103</a>    <span class="kw">let </span><span class="kw-2">mut </span>icon_padding = <span class="number">0.0_f32</span>;
+<a href=#104 id=104 data-nosnippet>104</a>    <span class="kw">let </span>text = paint
+<a href=#105 id=105 data-nosnippet>105</a>        .label_among(<span class="kw-2">&amp;</span>symbol.properties, zoom, <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>atlas.icons))
+<a href=#106 id=106 data-nosnippet>106</a>        .unwrap_or_default();
+<a href=#107 id=107 data-nosnippet>107</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(icon) = paint
+<a href=#108 id=108 data-nosnippet>108</a>        .text_among_images(<span class="string">"icon-image"</span>, <span class="kw-2">&amp;</span>symbol.properties, zoom, <span class="kw-2">&amp;</span>atlas.icons)
+<a href=#109 id=109 data-nosnippet>109</a>        .and_then(|name| atlas.icons.get(<span class="kw-2">&amp;</span>name))
+<a href=#110 id=110 data-nosnippet>110</a>    {
+<a href=#111 id=111 data-nosnippet>111</a>        <span class="kw">let </span>ratio = icon.metrics[<span class="number">3</span>];
+<a href=#112 id=112 data-nosnippet>112</a>        <span class="kw">let </span>width = icon.rect[<span class="number">2</span>] <span class="kw">as </span>f32 / ratio;
+<a href=#113 id=113 data-nosnippet>113</a>        <span class="kw">let </span>height = icon.rect[<span class="number">3</span>] <span class="kw">as </span>f32 / ratio;
+<a href=#114 id=114 data-nosnippet>114</a>        <span class="kw">let </span>offset = offset(paint, <span class="string">"icon-offset"</span>, <span class="number">1.0</span>, (<span class="kw-2">&amp;</span>symbol.properties, zoom));
+<a href=#115 id=115 data-nosnippet>115</a>        <span class="kw">let </span>fractions = anchor_fractions(
+<a href=#116 id=116 data-nosnippet>116</a>            <span class="kw-2">&amp;</span>paint
+<a href=#117 id=117 data-nosnippet>117</a>                .text(<span class="string">"icon-anchor"</span>, <span class="kw-2">&amp;</span>symbol.properties, zoom)
+<a href=#118 id=118 data-nosnippet>118</a>                .unwrap_or_else(|| <span class="string">"center"</span>.into()),
+<a href=#119 id=119 data-nosnippet>119</a>        );
+<a href=#120 id=120 data-nosnippet>120</a>        <span class="kw">let </span>height_offset = <span class="kw">if </span>paint.uses_shared_height() {
+<a href=#121 id=121 data-nosnippet>121</a>            <span class="number">0.0
+<a href=#122 id=122 data-nosnippet>122</a>        </span>} <span class="kw">else </span>{
+<a href=#123 id=123 data-nosnippet>123</a>            paint.height_offset(<span class="string">"icon"</span>, <span class="kw-2">&amp;</span>symbol.properties, zoom)
+<a href=#124 id=124 data-nosnippet>124</a>        };
+<a href=#125 id=125 data-nosnippet>125</a>        <span class="kw">let </span>icon_size = paint.number(<span class="string">"icon-size"</span>, <span class="kw-2">&amp;</span>symbol.properties, zoom, <span class="number">1.0</span>);
+<a href=#126 id=126 data-nosnippet>126</a>        <span class="comment">// An image whose anchor is not its centre, such as a shield with a banner above its
+<a href=#127 id=127 data-nosnippet>127</a>        // body, is moved so that the anchor stands where the centre would.
+<a href=#128 id=128 data-nosnippet>128</a>        </span><span class="kw">let </span>recentre = [icon.metrics[<span class="number">0</span>] / ratio, icon.metrics[<span class="number">1</span>] / ratio];
+<a href=#129 id=129 data-nosnippet>129</a>        <span class="kw">let </span>placed = [
+<a href=#130 id=130 data-nosnippet>130</a>            -width * fractions[<span class="number">0</span>] + offset[<span class="number">0</span>] - recentre[<span class="number">0</span>],
+<a href=#131 id=131 data-nosnippet>131</a>            -height * fractions[<span class="number">1</span>] + offset[<span class="number">1</span>] - recentre[<span class="number">1</span>],
+<a href=#132 id=132 data-nosnippet>132</a>            width * (<span class="number">1.0 </span>- fractions[<span class="number">0</span>]) + offset[<span class="number">0</span>] - recentre[<span class="number">0</span>],
+<a href=#133 id=133 data-nosnippet>133</a>            height * (<span class="number">1.0 </span>- fractions[<span class="number">1</span>]) + offset[<span class="number">1</span>] - recentre[<span class="number">1</span>],
+<a href=#134 id=134 data-nosnippet>134</a>        ];
+<a href=#135 id=135 data-nosnippet>135</a>        <span class="kw">let </span>fitted = fit_to_text(paint, symbol, zoom, atlas, [width, height], offset);
+<a href=#136 id=136 data-nosnippet>136</a>        <span class="kw">let </span>shift = <span class="kw">crate</span>::sdf::translation::tile_translation(paint, <span class="string">"icon"</span>, zoom);
+<a href=#137 id=137 data-nosnippet>137</a>        <span class="kw">let </span>anchor = Point::new(symbol.anchor.x() + shift[<span class="number">0</span>], symbol.anchor.y() + shift[<span class="number">1</span>]);
+<a href=#138 id=138 data-nosnippet>138</a>        <span class="kw">let </span>rotation = paint
+<a href=#139 id=139 data-nosnippet>139</a>            .number(<span class="string">"icon-rotate"</span>, <span class="kw-2">&amp;</span>symbol.properties, zoom, <span class="number">0.0</span>)
+<a href=#140 id=140 data-nosnippet>140</a>            .to_radians()
+<a href=#141 id=141 data-nosnippet>141</a>            + <span class="kw">if </span><span class="kw">super</span>::text_layout::is_vertical(symbol, paint, zoom, atlas) {
+<a href=#142 id=142 data-nosnippet>142</a>                std::f32::consts::FRAC_PI_2
+<a href=#143 id=143 data-nosnippet>143</a>            } <span class="kw">else </span>{
+<a href=#144 id=144 data-nosnippet>144</a>                <span class="number">0.0
+<a href=#145 id=145 data-nosnippet>145</a>            </span>};
+<a href=#146 id=146 data-nosnippet>146</a>        <span class="comment">// Layout pixels are drawn scaled by icon-size, which a fitted icon does not take.
+<a href=#147 id=147 data-nosnippet>147</a>        </span><span class="kw">let </span>undo_size = <span class="kw">if </span>fitted.is_some() {
+<a href=#148 id=148 data-nosnippet>148</a>            <span class="number">1.0 </span>/ icon_size
+<a href=#149 id=149 data-nosnippet>149</a>        } <span class="kw">else </span>{
+<a href=#150 id=150 data-nosnippet>150</a>            <span class="number">1.0
+<a href=#151 id=151 data-nosnippet>151</a>        </span>};
+<a href=#152 id=152 data-nosnippet>152</a>        <span class="kw">for </span>piece <span class="kw">in </span><span class="kw">super</span>::icon_quads::icon_quads(icon, fitted.unwrap_or(placed), fitted.is_some())
+<a href=#153 id=153 data-nosnippet>153</a>        {
+<a href=#154 id=154 data-nosnippet>154</a>            icon_padding = icon_padding.max(piece.padding * undo_size);
+<a href=#155 id=155 data-nosnippet>155</a>            <span class="kw">let </span>part = AtlasEntry {
+<a href=#156 id=156 data-nosnippet>156</a>                rect: piece.rect,
+<a href=#157 id=157 data-nosnippet>157</a>                ..icon.clone()
+<a href=#158 id=158 data-nosnippet>158</a>            };
+<a href=#159 id=159 data-nosnippet>159</a>            quad(
+<a href=#160 id=160 data-nosnippet>160</a>                buffer,
+<a href=#161 id=161 data-nosnippet>161</a>                anchor,
+<a href=#162 id=162 data-nosnippet>162</a>                piece.bounds.map(|edge| edge * undo_size),
+<a href=#163 id=163 data-nosnippet>163</a>                <span class="kw-2">&amp;</span>part,
+<a href=#164 id=164 data-nosnippet>164</a>                height_offset,
+<a href=#165 id=165 data-nosnippet>165</a>                symbol.angle,
+<a href=#166 id=166 data-nosnippet>166</a>                rotation,
+<a href=#167 id=167 data-nosnippet>167</a>            );
+<a href=#168 id=168 data-nosnippet>168</a>        }
+<a href=#169 id=169 data-nosnippet>169</a>    }
+<a href=#170 id=170 data-nosnippet>170</a>    <span class="kw">let </span>first_glyph_index = buffer.indices.len();
+<a href=#171 id=171 data-nosnippet>171</a>    <span class="kw">let </span>laid = <span class="kw">super</span>::text_layout::append(symbol, paint, zoom, atlas, buffer);
+<a href=#172 id=172 data-nosnippet>172</a>    <span class="kw">let </span>glyph_offsets = laid.centres;
+<a href=#173 id=173 data-nosnippet>173</a>    <span class="kw">if </span>start == buffer.indices.len() {
+<a href=#174 id=174 data-nosnippet>174</a>        <span class="kw">return</span>;
+<a href=#175 id=175 data-nosnippet>175</a>    }
+<a href=#176 id=176 data-nosnippet>176</a>    <span class="comment">// Collision follows the text where there is one, as the icon alone otherwise.
+<a href=#177 id=177 data-nosnippet>177</a>    </span><span class="kw">let </span>shift = <span class="kw">crate</span>::sdf::translation::tile_translation(
+<a href=#178 id=178 data-nosnippet>178</a>        paint,
+<a href=#179 id=179 data-nosnippet>179</a>        <span class="kw">if </span>text.is_empty() { <span class="string">"icon" </span>} <span class="kw">else </span>{ <span class="string">"text" </span>},
+<a href=#180 id=180 data-nosnippet>180</a>        zoom,
+<a href=#181 id=181 data-nosnippet>181</a>    );
+<a href=#182 id=182 data-nosnippet>182</a>    <span class="kw">let </span>anchor = Point2D::new(
+<a href=#183 id=183 data-nosnippet>183</a>        (symbol.anchor.x() + shift[<span class="number">0</span>]) <span class="kw">as </span>f32,
+<a href=#184 id=184 data-nosnippet>184</a>        (symbol.anchor.y() + shift[<span class="number">1</span>]) <span class="kw">as </span>f32,
+<a href=#185 id=185 data-nosnippet>185</a>    );
+<a href=#186 id=186 data-nosnippet>186</a>    <span class="kw">let </span>bbox = bounds(
+<a href=#187 id=187 data-nosnippet>187</a>        <span class="kw-2">&amp;</span>buffer.vertices,
+<a href=#188 id=188 data-nosnippet>188</a>        <span class="kw-2">&amp;</span>buffer.indices[start..],
+<a href=#189 id=189 data-nosnippet>189</a>        paint,
+<a href=#190 id=190 data-nosnippet>190</a>        <span class="kw-2">&amp;</span>symbol.properties,
+<a href=#191 id=191 data-nosnippet>191</a>        zoom,
+<a href=#192 id=192 data-nosnippet>192</a>    );
+<a href=#193 id=193 data-nosnippet>193</a>    <span class="kw">let </span><span class="kw-2">mut </span>parts = <span class="kw">crate</span>::sdf::placement_geometry::measure(<span class="kw-2">&amp;mut </span>buffer.vertices[first_vertex..]);
+<a href=#194 id=194 data-nosnippet>194</a>    <span class="comment">// An icon collides by its image, not by the clear border its quad reaches into.
+<a href=#195 id=195 data-nosnippet>195</a>    </span><span class="kw">for </span>part <span class="kw">in </span>parts[<span class="number">1</span>..].iter_mut().flatten() {
+<a href=#196 id=196 data-nosnippet>196</a>        <span class="kw">let </span>pad = f64::from(icon_padding);
+<a href=#197 id=197 data-nosnippet>197</a>        part.bounds = [
+<a href=#198 id=198 data-nosnippet>198</a>            part.bounds[<span class="number">0</span>] + pad,
+<a href=#199 id=199 data-nosnippet>199</a>            part.bounds[<span class="number">1</span>] + pad,
+<a href=#200 id=200 data-nosnippet>200</a>            part.bounds[<span class="number">2</span>] - pad,
+<a href=#201 id=201 data-nosnippet>201</a>            part.bounds[<span class="number">3</span>] - pad,
+<a href=#202 id=202 data-nosnippet>202</a>        ];
 <a href=#203 id=203 data-nosnippet>203</a>    }
-<a href=#204 id=204 data-nosnippet>204</a>    features.push(Feature {
-<a href=#205 id=205 data-nosnippet>205</a>        parts,
-<a href=#206 id=206 data-nosnippet>206</a>        data: <span class="kw">crate</span>::sdf::SymbolFeatureData {
-<a href=#207 id=207 data-nosnippet>207</a>            id: symbol.source.id,
-<a href=#208 id=208 data-nosnippet>208</a>            geometry_type: symbol.source.kind,
-<a href=#209 id=209 data-nosnippet>209</a>            properties: symbol.properties.clone(),
-<a href=#210 id=210 data-nosnippet>210</a>            sort_key: paint.number(<span class="string">"symbol-sort-key"</span>, <span class="kw-2">&amp;</span>symbol.properties, zoom, <span class="number">0.0</span>),
-<a href=#211 id=211 data-nosnippet>211</a>        },
-<a href=#212 id=212 data-nosnippet>212</a>        bbox,
-<a href=#213 id=213 data-nosnippet>213</a>        indices: start..buffer.indices.len(),
-<a href=#214 id=214 data-nosnippet>214</a>        text_anchor: anchor,
-<a href=#215 id=215 data-nosnippet>215</a>        anchor_shifts: <span class="kw">super</span>::text_layout::variable_shifts(symbol, paint, zoom, atlas),
-<a href=#216 id=216 data-nosnippet>216</a>        text_sets: laid.sets,
-<a href=#217 id=217 data-nosnippet>217</a>        anchor_sets: laid.anchor_sets,
-<a href=#218 id=218 data-nosnippet>218</a>        text_colors: laid.colors,
-<a href=#219 id=219 data-nosnippet>219</a>        fallback: symbol.fallback,
-<a href=#220 id=220 data-nosnippet>220</a>        str: text,
-<a href=#221 id=221 data-nosnippet>221</a>        line: symbol
-<a href=#222 id=222 data-nosnippet>222</a>            .line
-<a href=#223 id=223 data-nosnippet>223</a>            .as_ref()
-<a href=#224 id=224 data-nosnippet>224</a>            .filter(|<span class="kw">_</span>| !glyph_offsets.is_empty())
-<a href=#225 id=225 data-nosnippet>225</a>            .map(|(polyline, distance)| <span class="kw">crate</span>::sdf::LineLabel {
-<a href=#226 id=226 data-nosnippet>226</a>                polyline: polyline.clone(),
-<a href=#227 id=227 data-nosnippet>227</a>                anchor_distance: <span class="kw-2">*</span>distance,
-<a href=#228 id=228 data-nosnippet>228</a>                glyph_offsets,
-<a href=#229 id=229 data-nosnippet>229</a>                image_sizes: laid.image_sizes,
-<a href=#230 id=230 data-nosnippet>230</a>                first_glyph_index,
-<a href=#231 id=231 data-nosnippet>231</a>            }),
-<a href=#232 id=232 data-nosnippet>232</a>    });
-<a href=#233 id=233 data-nosnippet>233</a>}
-<a href=#234 id=234 data-nosnippet>234</a>
-<a href=#235 id=235 data-nosnippet>235</a><span class="doccomment">/// The icon box `[left, top, right, bottom]` that `icon-text-fit` stretches around the text,
-<a href=#236 id=236 data-nosnippet>236</a>/// in text-size pixels, or `None` when the icon keeps its own size.
-<a href=#237 id=237 data-nosnippet>237</a></span><span class="kw">fn </span>fit_to_text(
-<a href=#238 id=238 data-nosnippet>238</a>    paint: <span class="kw-2">&amp;</span>SymbolPaint,
-<a href=#239 id=239 data-nosnippet>239</a>    symbol: <span class="kw-2">&amp;</span>CollectedSymbol,
-<a href=#240 id=240 data-nosnippet>240</a>    zoom: f64,
-<a href=#241 id=241 data-nosnippet>241</a>    atlas: <span class="kw-2">&amp;</span>SymbolAtlas,
-<a href=#242 id=242 data-nosnippet>242</a>    [icon_width, icon_height]: [f32; <span class="number">2</span>],
-<a href=#243 id=243 data-nosnippet>243</a>    offset: [f32; <span class="number">2</span>],
-<a href=#244 id=244 data-nosnippet>244</a>) -&gt; <span class="prelude-ty">Option</span>&lt;[f32; <span class="number">4</span>]&gt; {
-<a href=#245 id=245 data-nosnippet>245</a>    <span class="kw">let </span>fit = paint.text(<span class="string">"icon-text-fit"</span>, <span class="kw-2">&amp;</span>symbol.properties, zoom)<span class="question-mark">?</span>;
-<a href=#246 id=246 data-nosnippet>246</a>    <span class="kw">if </span>fit == <span class="string">"none" </span>{
-<a href=#247 id=247 data-nosnippet>247</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
-<a href=#248 id=248 data-nosnippet>248</a>    }
-<a href=#249 id=249 data-nosnippet>249</a>    <span class="kw">let </span>text_size = paint
-<a href=#250 id=250 data-nosnippet>250</a>        .text_size
-<a href=#251 id=251 data-nosnippet>251</a>        .as_ref()
-<a href=#252 id=252 data-nosnippet>252</a>        .and_then(|value| value.evaluate_for(<span class="kw-2">&amp;</span>symbol.properties, zoom))
-<a href=#253 id=253 data-nosnippet>253</a>        .unwrap_or(<span class="number">16.0</span>);
-<a href=#254 id=254 data-nosnippet>254</a>    <span class="kw">let </span>scale = text_size / <span class="number">24.0</span>;
-<a href=#255 id=255 data-nosnippet>255</a>    <span class="comment">// A vertical label's icon is fitted before the symbol turns.
-<a href=#256 id=256 data-nosnippet>256</a>    </span><span class="kw">let </span>[left, top, right, bottom] =
-<a href=#257 id=257 data-nosnippet>257</a>        <span class="kw">super</span>::text_layout::layout_extent(symbol, paint, zoom, atlas)<span class="question-mark">?</span>.map(|edge| edge * scale);
-<a href=#258 id=258 data-nosnippet>258</a>    <span class="kw">let </span>padding = paint
-<a href=#259 id=259 data-nosnippet>259</a>        .properties
-<a href=#260 id=260 data-nosnippet>260</a>        .get(<span class="string">"icon-text-fit-padding"</span>)
-<a href=#261 id=261 data-nosnippet>261</a>        .and_then(|value| value.as_array())
-<a href=#262 id=262 data-nosnippet>262</a>        .filter(|values| values.len() == <span class="number">4</span>)
-<a href=#263 id=263 data-nosnippet>263</a>        .map_or([<span class="number">0.0</span>; <span class="number">4</span>], |values| {
-<a href=#264 id=264 data-nosnippet>264</a>            <span class="kw">let </span>read = |index: usize| values[index].as_f64().unwrap_or(<span class="number">0.0</span>) <span class="kw">as </span>f32;
-<a href=#265 id=265 data-nosnippet>265</a>            [read(<span class="number">0</span>), read(<span class="number">1</span>), read(<span class="number">2</span>), read(<span class="number">3</span>)]
-<a href=#266 id=266 data-nosnippet>266</a>        });
-<a href=#267 id=267 data-nosnippet>267</a>    <span class="kw">let </span>(min_x, max_x) = <span class="kw">if </span><span class="macro">matches!</span>(fit.as_str(), <span class="string">"width" </span>| <span class="string">"both"</span>) {
-<a href=#268 id=268 data-nosnippet>268</a>        (
-<a href=#269 id=269 data-nosnippet>269</a>            offset[<span class="number">0</span>] + left - padding[<span class="number">3</span>],
-<a href=#270 id=270 data-nosnippet>270</a>            offset[<span class="number">0</span>] + right + padding[<span class="number">1</span>],
-<a href=#271 id=271 data-nosnippet>271</a>        )
-<a href=#272 id=272 data-nosnippet>272</a>    } <span class="kw">else </span>{
-<a href=#273 id=273 data-nosnippet>273</a>        <span class="kw">let </span>min = offset[<span class="number">0</span>] + (left + right - icon_width) / <span class="number">2.0</span>;
-<a href=#274 id=274 data-nosnippet>274</a>        (min, min + icon_width)
-<a href=#275 id=275 data-nosnippet>275</a>    };
-<a href=#276 id=276 data-nosnippet>276</a>    <span class="kw">let </span>(min_y, max_y) = <span class="kw">if </span><span class="macro">matches!</span>(fit.as_str(), <span class="string">"height" </span>| <span class="string">"both"</span>) {
-<a href=#277 id=277 data-nosnippet>277</a>        (
-<a href=#278 id=278 data-nosnippet>278</a>            offset[<span class="number">1</span>] + top - padding[<span class="number">0</span>],
-<a href=#279 id=279 data-nosnippet>279</a>            offset[<span class="number">1</span>] + bottom + padding[<span class="number">2</span>],
-<a href=#280 id=280 data-nosnippet>280</a>        )
-<a href=#281 id=281 data-nosnippet>281</a>    } <span class="kw">else </span>{
-<a href=#282 id=282 data-nosnippet>282</a>        <span class="kw">let </span>min = offset[<span class="number">1</span>] + (top + bottom - icon_height) / <span class="number">2.0</span>;
-<a href=#283 id=283 data-nosnippet>283</a>        (min, min + icon_height)
-<a href=#284 id=284 data-nosnippet>284</a>    };
-<a href=#285 id=285 data-nosnippet>285</a>    <span class="prelude-val">Some</span>([min_x, min_y, max_x, max_y])
-<a href=#286 id=286 data-nosnippet>286</a>}
-<a href=#287 id=287 data-nosnippet>287</a>
-<a href=#288 id=288 data-nosnippet>288</a><span class="doccomment">/// The `[x, y]` offset a layout property gives one symbol, times `scale`; zero without one.
-<a href=#289 id=289 data-nosnippet>289</a></span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>offset(
-<a href=#290 id=290 data-nosnippet>290</a>    paint: <span class="kw-2">&amp;</span>SymbolPaint,
-<a href=#291 id=291 data-nosnippet>291</a>    name: <span class="kw-2">&amp;</span>str,
-<a href=#292 id=292 data-nosnippet>292</a>    scale: f32,
-<a href=#293 id=293 data-nosnippet>293</a>    (properties, zoom): (<span class="kw-2">&amp;</span><span class="kw">crate</span>::style::expression::FeatureProperties, f64),
-<a href=#294 id=294 data-nosnippet>294</a>) -&gt; [f32; <span class="number">2</span>] {
-<a href=#295 id=295 data-nosnippet>295</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(value) = paint.properties.get(name) <span class="kw">else </span>{
-<a href=#296 id=296 data-nosnippet>296</a>        <span class="kw">return </span>[<span class="number">0.0</span>; <span class="number">2</span>];
-<a href=#297 id=297 data-nosnippet>297</a>    };
-<a href=#298 id=298 data-nosnippet>298</a>    <span class="comment">// A written pair is the common case and needs no expression.
-<a href=#299 id=299 data-nosnippet>299</a>    </span><span class="kw">let </span>[x, y] = <span class="kw">match </span><span class="kw">crate</span>::style::translation::Pair::from_json(value) {
-<a href=#300 id=300 data-nosnippet>300</a>        <span class="prelude-val">Some</span>(pair) =&gt; pair.<span class="number">0</span>,
-<a href=#301 id=301 data-nosnippet>301</a>        <span class="prelude-val">None </span>=&gt; {
-<a href=#302 id=302 data-nosnippet>302</a>            <span class="kw">crate</span>::style::property::StyleProperty::&lt;<span class="kw">crate</span>::style::translation::Pair&gt;::parse(value)
-<a href=#303 id=303 data-nosnippet>303</a>                .evaluate_for(properties, zoom)
-<a href=#304 id=304 data-nosnippet>304</a>                .map_or([<span class="number">0.0</span>; <span class="number">2</span>], |pair| pair.<span class="number">0</span>)
-<a href=#305 id=305 data-nosnippet>305</a>        }
-<a href=#306 id=306 data-nosnippet>306</a>    };
-<a href=#307 id=307 data-nosnippet>307</a>    [x <span class="kw">as </span>f32 * scale, y <span class="kw">as </span>f32 * scale]
-<a href=#308 id=308 data-nosnippet>308</a>}
-<a href=#309 id=309 data-nosnippet>309</a>
-<a href=#310 id=310 data-nosnippet>310</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>anchor_fractions(anchor: <span class="kw-2">&amp;</span>str) -&gt; [f32; <span class="number">2</span>] {
-<a href=#311 id=311 data-nosnippet>311</a>    [
-<a href=#312 id=312 data-nosnippet>312</a>        <span class="kw">if </span>anchor.contains(<span class="string">"left"</span>) {
-<a href=#313 id=313 data-nosnippet>313</a>            <span class="number">0.0
-<a href=#314 id=314 data-nosnippet>314</a>        </span>} <span class="kw">else if </span>anchor.contains(<span class="string">"right"</span>) {
-<a href=#315 id=315 data-nosnippet>315</a>            <span class="number">1.0
-<a href=#316 id=316 data-nosnippet>316</a>        </span>} <span class="kw">else </span>{
-<a href=#317 id=317 data-nosnippet>317</a>            <span class="number">0.5
-<a href=#318 id=318 data-nosnippet>318</a>        </span>},
-<a href=#319 id=319 data-nosnippet>319</a>        <span class="kw">if </span>anchor.contains(<span class="string">"top"</span>) {
-<a href=#320 id=320 data-nosnippet>320</a>            <span class="number">0.0
-<a href=#321 id=321 data-nosnippet>321</a>        </span>} <span class="kw">else if </span>anchor.contains(<span class="string">"bottom"</span>) {
-<a href=#322 id=322 data-nosnippet>322</a>            <span class="number">1.0
-<a href=#323 id=323 data-nosnippet>323</a>        </span>} <span class="kw">else </span>{
-<a href=#324 id=324 data-nosnippet>324</a>            <span class="number">0.5
-<a href=#325 id=325 data-nosnippet>325</a>        </span>},
-<a href=#326 id=326 data-nosnippet>326</a>    ]
-<a href=#327 id=327 data-nosnippet>327</a>}
-<a href=#328 id=328 data-nosnippet>328</a>
-<a href=#329 id=329 data-nosnippet>329</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>quad(
-<a href=#330 id=330 data-nosnippet>330</a>    buffer: <span class="kw-2">&amp;mut </span>VertexBuffers&lt;ShaderSymbolVertex, u32&gt;,
-<a href=#331 id=331 data-nosnippet>331</a>    anchor: Point&lt;f64&gt;,
-<a href=#332 id=332 data-nosnippet>332</a>    bounds: [f32; <span class="number">4</span>],
-<a href=#333 id=333 data-nosnippet>333</a>    image: <span class="kw-2">&amp;</span>AtlasEntry,
-<a href=#334 id=334 data-nosnippet>334</a>    height: f32,
-<a href=#335 id=335 data-nosnippet>335</a>    angle: f32,
-<a href=#336 id=336 data-nosnippet>336</a>    rotation: f32,
-<a href=#337 id=337 data-nosnippet>337</a>) {
-<a href=#338 id=338 data-nosnippet>338</a>    <span class="kw">let </span>base = buffer.vertices.len() <span class="kw">as </span>u32;
-<a href=#339 id=339 data-nosnippet>339</a>    <span class="kw">let </span>(sin, cos) = rotation.sin_cos();
-<a href=#340 id=340 data-nosnippet>340</a>    <span class="kw">let </span>[x, y, width, height_pixels] = image.rect;
-<a href=#341 id=341 data-nosnippet>341</a>    <span class="kw">for </span>(index, (u, v)) <span class="kw">in </span>[
-<a href=#342 id=342 data-nosnippet>342</a>        (x, y),
-<a href=#343 id=343 data-nosnippet>343</a>        (x + width, y),
-<a href=#344 id=344 data-nosnippet>344</a>        (x + width, y + height_pixels),
-<a href=#345 id=345 data-nosnippet>345</a>        (x, y + height_pixels),
-<a href=#346 id=346 data-nosnippet>346</a>    ]
-<a href=#347 id=347 data-nosnippet>347</a>    .into_iter()
-<a href=#348 id=348 data-nosnippet>348</a>    .enumerate()
-<a href=#349 id=349 data-nosnippet>349</a>    {
-<a href=#350 id=350 data-nosnippet>350</a>        <span class="kw">let </span>px = <span class="kw">if </span>index == <span class="number">0 </span>|| index == <span class="number">3 </span>{
-<a href=#351 id=351 data-nosnippet>351</a>            bounds[<span class="number">0</span>]
-<a href=#352 id=352 data-nosnippet>352</a>        } <span class="kw">else </span>{
-<a href=#353 id=353 data-nosnippet>353</a>            bounds[<span class="number">2</span>]
-<a href=#354 id=354 data-nosnippet>354</a>        };
-<a href=#355 id=355 data-nosnippet>355</a>        <span class="kw">let </span>py = <span class="kw">if </span>index &lt; <span class="number">2 </span>{ bounds[<span class="number">1</span>] } <span class="kw">else </span>{ bounds[<span class="number">3</span>] };
-<a href=#356 id=356 data-nosnippet>356</a>        <span class="comment">// The quad turns about the anchor, offsets included, as GL JS rotates its corners.
-<a href=#357 id=357 data-nosnippet>357</a>        </span><span class="kw">let </span>(px, py) = (px * cos - py * sin, px * sin + py * cos);
-<a href=#358 id=358 data-nosnippet>358</a>        buffer.vertices.push(ShaderSymbolVertex {
-<a href=#359 id=359 data-nosnippet>359</a>            a_pos_offset: [
-<a href=#360 id=360 data-nosnippet>360</a>                anchor.x().round() <span class="kw">as </span>i32,
-<a href=#361 id=361 data-nosnippet>361</a>                anchor.y().round() <span class="kw">as </span>i32,
-<a href=#362 id=362 data-nosnippet>362</a>                (px * <span class="number">32.0</span>).round() <span class="kw">as </span>i32,
-<a href=#363 id=363 data-nosnippet>363</a>                (py * <span class="number">32.0</span>).round() <span class="kw">as </span>i32,
-<a href=#364 id=364 data-nosnippet>364</a>            ],
-<a href=#365 id=365 data-nosnippet>365</a>            a_data: [u, v, image.kind, <span class="number">0</span>],
-<a href=#366 id=366 data-nosnippet>366</a>            a_pixeloffset: [<span class="number">0</span>, <span class="number">0</span>, height.to_bits() <span class="kw">as </span>i32, angle.to_bits() <span class="kw">as </span>i32],
-<a href=#367 id=367 data-nosnippet>367</a>        });
-<a href=#368 id=368 data-nosnippet>368</a>    }
-<a href=#369 id=369 data-nosnippet>369</a>    buffer
-<a href=#370 id=370 data-nosnippet>370</a>        .indices
-<a href=#371 id=371 data-nosnippet>371</a>        .extend([base, base + <span class="number">1</span>, base + <span class="number">2</span>, base, base + <span class="number">2</span>, base + <span class="number">3</span>]);
-<a href=#372 id=372 data-nosnippet>372</a>}
-<a href=#373 id=373 data-nosnippet>373</a>
-<a href=#374 id=374 data-nosnippet>374</a><span class="kw">fn </span>bounds(
-<a href=#375 id=375 data-nosnippet>375</a>    vertices: <span class="kw-2">&amp;</span>[ShaderSymbolVertex],
-<a href=#376 id=376 data-nosnippet>376</a>    indices: <span class="kw-2">&amp;</span>[u32],
-<a href=#377 id=377 data-nosnippet>377</a>    paint: <span class="kw-2">&amp;</span>SymbolPaint,
-<a href=#378 id=378 data-nosnippet>378</a>    properties: <span class="kw-2">&amp;</span>FeatureProperties,
-<a href=#379 id=379 data-nosnippet>379</a>    zoom: f64,
-<a href=#380 id=380 data-nosnippet>380</a>) -&gt; Box2D&lt;f32, <span class="kw">crate</span>::sdf::TileSpace&gt; {
-<a href=#381 id=381 data-nosnippet>381</a>    <span class="kw">let </span>text_size = paint
-<a href=#382 id=382 data-nosnippet>382</a>        .text_size
-<a href=#383 id=383 data-nosnippet>383</a>        .as_ref()
-<a href=#384 id=384 data-nosnippet>384</a>        .and_then(|value| value.evaluate_for(properties, zoom))
-<a href=#385 id=385 data-nosnippet>385</a>        .unwrap_or(<span class="number">16.0</span>);
-<a href=#386 id=386 data-nosnippet>386</a>    <span class="kw">let </span>icon_size = paint.number(<span class="string">"icon-size"</span>, properties, zoom, <span class="number">1.0</span>);
-<a href=#387 id=387 data-nosnippet>387</a>    <span class="kw">let </span><span class="kw-2">mut </span>bounds = Box2D::new(
-<a href=#388 id=388 data-nosnippet>388</a>        Point2D::new(f32::INFINITY, f32::INFINITY),
-<a href=#389 id=389 data-nosnippet>389</a>        Point2D::new(f32::NEG_INFINITY, f32::NEG_INFINITY),
-<a href=#390 id=390 data-nosnippet>390</a>    );
-<a href=#391 id=391 data-nosnippet>391</a>    <span class="kw">for </span>index <span class="kw">in </span>indices {
-<a href=#392 id=392 data-nosnippet>392</a>        <span class="kw">let </span>vertex = <span class="kw-2">&amp;</span>vertices[<span class="kw-2">*</span>index <span class="kw">as </span>usize];
-<a href=#393 id=393 data-nosnippet>393</a>        <span class="kw">let </span>scale = <span class="kw">if </span><span class="macro">matches!</span>(vertex.a_data[<span class="number">2</span>], <span class="number">0 </span>| <span class="number">3</span>) {
-<a href=#394 id=394 data-nosnippet>394</a>            text_size / <span class="number">24.0
-<a href=#395 id=395 data-nosnippet>395</a>        </span>} <span class="kw">else </span>{
-<a href=#396 id=396 data-nosnippet>396</a>            icon_size
-<a href=#397 id=397 data-nosnippet>397</a>        };
-<a href=#398 id=398 data-nosnippet>398</a>        <span class="kw">let </span>point: Point2D&lt;f32, <span class="kw">crate</span>::sdf::TileSpace&gt; = Point2D::new(
-<a href=#399 id=399 data-nosnippet>399</a>            vertex.a_pos_offset[<span class="number">2</span>] <span class="kw">as </span>f32 / <span class="number">32.0 </span>* scale,
-<a href=#400 id=400 data-nosnippet>400</a>            vertex.a_pos_offset[<span class="number">3</span>] <span class="kw">as </span>f32 / <span class="number">32.0 </span>* scale,
-<a href=#401 id=401 data-nosnippet>401</a>        );
-<a href=#402 id=402 data-nosnippet>402</a>        bounds.min.x = bounds.min.x.min(point.x);
-<a href=#403 id=403 data-nosnippet>403</a>        bounds.min.y = bounds.min.y.min(point.y);
-<a href=#404 id=404 data-nosnippet>404</a>        bounds.max.x = bounds.max.x.max(point.x);
-<a href=#405 id=405 data-nosnippet>405</a>        bounds.max.y = bounds.max.y.max(point.y);
-<a href=#406 id=406 data-nosnippet>406</a>    }
-<a href=#407 id=407 data-nosnippet>407</a>    bounds
-<a href=#408 id=408 data-nosnippet>408</a>}
+<a href=#204 id=204 data-nosnippet>204</a>    <span class="comment">// Text collides by the box of its lines, not by the bitmaps of its glyphs, which reach
+<a href=#205 id=205 data-nosnippet>205</a>    // a few pixels beyond it.
+<a href=#206 id=206 data-nosnippet>206</a>    // A label of images alone, such as a row of road shields along a road, has no glyphs to
+<a href=#207 id=207 data-nosnippet>207</a>    // measure, so its box is the layout's.
+<a href=#208 id=208 data-nosnippet>208</a>    </span><span class="kw">if </span>parts[<span class="number">0</span>].is_none() {
+<a href=#209 id=209 data-nosnippet>209</a>        <span class="kw">let </span>image = buffer.vertices[first_vertex..]
+<a href=#210 id=210 data-nosnippet>210</a>            .iter()
+<a href=#211 id=211 data-nosnippet>211</a>            .find(|vertex| vertex.a_data[<span class="number">2</span>] == <span class="number">3</span>);
+<a href=#212 id=212 data-nosnippet>212</a>        <span class="kw">if let </span>(<span class="prelude-val">Some</span>(vertex), <span class="prelude-val">Some</span>(extent)) = (
+<a href=#213 id=213 data-nosnippet>213</a>            image,
+<a href=#214 id=214 data-nosnippet>214</a>            <span class="kw">super</span>::text_layout::extent(symbol, paint, zoom, atlas),
+<a href=#215 id=215 data-nosnippet>215</a>        ) {
+<a href=#216 id=216 data-nosnippet>216</a>            parts[<span class="number">0</span>] = <span class="prelude-val">Some</span>(<span class="kw">crate</span>::sdf::placement_geometry::SymbolBounds {
+<a href=#217 id=217 data-nosnippet>217</a>                bounds: extent.map(f64::from),
+<a href=#218 id=218 data-nosnippet>218</a>                height: f64::from(f32::from_bits(vertex.a_pixeloffset[<span class="number">2</span>] <span class="kw">as </span>u32)),
+<a href=#219 id=219 data-nosnippet>219</a>                angle: f64::from(f32::from_bits(vertex.a_pixeloffset[<span class="number">3</span>] <span class="kw">as </span>u32)),
+<a href=#220 id=220 data-nosnippet>220</a>                text: <span class="bool-val">true</span>,
+<a href=#221 id=221 data-nosnippet>221</a>            });
+<a href=#222 id=222 data-nosnippet>222</a>        }
+<a href=#223 id=223 data-nosnippet>223</a>    }
+<a href=#224 id=224 data-nosnippet>224</a>    <span class="kw">if let </span>(<span class="prelude-val">Some</span>(text_part), <span class="prelude-val">None</span>) = (<span class="kw-2">&amp;mut </span>parts[<span class="number">0</span>], <span class="kw-2">&amp;</span>symbol.line) {
+<a href=#225 id=225 data-nosnippet>225</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>([left, top, right, bottom]) =
+<a href=#226 id=226 data-nosnippet>226</a>            <span class="kw">super</span>::text_layout::extent(symbol, paint, zoom, atlas)
+<a href=#227 id=227 data-nosnippet>227</a>        {
+<a href=#228 id=228 data-nosnippet>228</a>            text_part.bounds = [left, top, right, bottom].map(f64::from);
+<a href=#229 id=229 data-nosnippet>229</a>        }
+<a href=#230 id=230 data-nosnippet>230</a>    }
+<a href=#231 id=231 data-nosnippet>231</a>    features.push(Feature {
+<a href=#232 id=232 data-nosnippet>232</a>        parts,
+<a href=#233 id=233 data-nosnippet>233</a>        data: <span class="kw">crate</span>::sdf::SymbolFeatureData {
+<a href=#234 id=234 data-nosnippet>234</a>            id: symbol.source.id,
+<a href=#235 id=235 data-nosnippet>235</a>            geometry_type: symbol.source.kind,
+<a href=#236 id=236 data-nosnippet>236</a>            properties: symbol.properties.clone(),
+<a href=#237 id=237 data-nosnippet>237</a>            sort_key: paint.number(<span class="string">"symbol-sort-key"</span>, <span class="kw-2">&amp;</span>symbol.properties, zoom, <span class="number">0.0</span>),
+<a href=#238 id=238 data-nosnippet>238</a>        },
+<a href=#239 id=239 data-nosnippet>239</a>        bbox,
+<a href=#240 id=240 data-nosnippet>240</a>        indices: start..buffer.indices.len(),
+<a href=#241 id=241 data-nosnippet>241</a>        text_anchor: anchor,
+<a href=#242 id=242 data-nosnippet>242</a>        anchor_shifts: <span class="kw">super</span>::text_layout::variable_shifts(symbol, paint, zoom, atlas),
+<a href=#243 id=243 data-nosnippet>243</a>        text_sets: laid.sets,
+<a href=#244 id=244 data-nosnippet>244</a>        anchor_sets: laid.anchor_sets,
+<a href=#245 id=245 data-nosnippet>245</a>        text_colors: laid.colors,
+<a href=#246 id=246 data-nosnippet>246</a>        fallback: symbol.fallback,
+<a href=#247 id=247 data-nosnippet>247</a>        repeat_key: symbol.repeat_key.clone(),
+<a href=#248 id=248 data-nosnippet>248</a>        str: text,
+<a href=#249 id=249 data-nosnippet>249</a>        line: symbol
+<a href=#250 id=250 data-nosnippet>250</a>            .line
+<a href=#251 id=251 data-nosnippet>251</a>            .as_ref()
+<a href=#252 id=252 data-nosnippet>252</a>            .filter(|<span class="kw">_</span>| !glyph_offsets.is_empty())
+<a href=#253 id=253 data-nosnippet>253</a>            .map(|(polyline, distance)| <span class="kw">crate</span>::sdf::LineLabel {
+<a href=#254 id=254 data-nosnippet>254</a>                polyline: polyline.clone(),
+<a href=#255 id=255 data-nosnippet>255</a>                anchor_distance: <span class="kw-2">*</span>distance,
+<a href=#256 id=256 data-nosnippet>256</a>                glyph_offsets,
+<a href=#257 id=257 data-nosnippet>257</a>                image_sizes: laid.image_sizes,
+<a href=#258 id=258 data-nosnippet>258</a>                first_glyph_index,
+<a href=#259 id=259 data-nosnippet>259</a>            }),
+<a href=#260 id=260 data-nosnippet>260</a>    });
+<a href=#261 id=261 data-nosnippet>261</a>}
+<a href=#262 id=262 data-nosnippet>262</a>
+<a href=#263 id=263 data-nosnippet>263</a><span class="doccomment">/// The icon box `[left, top, right, bottom]` that `icon-text-fit` stretches around the text,
+<a href=#264 id=264 data-nosnippet>264</a>/// in text-size pixels, or `None` when the icon keeps its own size.
+<a href=#265 id=265 data-nosnippet>265</a></span><span class="kw">fn </span>fit_to_text(
+<a href=#266 id=266 data-nosnippet>266</a>    paint: <span class="kw-2">&amp;</span>SymbolPaint,
+<a href=#267 id=267 data-nosnippet>267</a>    symbol: <span class="kw-2">&amp;</span>CollectedSymbol,
+<a href=#268 id=268 data-nosnippet>268</a>    zoom: f64,
+<a href=#269 id=269 data-nosnippet>269</a>    atlas: <span class="kw-2">&amp;</span>SymbolAtlas,
+<a href=#270 id=270 data-nosnippet>270</a>    [icon_width, icon_height]: [f32; <span class="number">2</span>],
+<a href=#271 id=271 data-nosnippet>271</a>    offset: [f32; <span class="number">2</span>],
+<a href=#272 id=272 data-nosnippet>272</a>) -&gt; <span class="prelude-ty">Option</span>&lt;[f32; <span class="number">4</span>]&gt; {
+<a href=#273 id=273 data-nosnippet>273</a>    <span class="kw">let </span>fit = paint.text(<span class="string">"icon-text-fit"</span>, <span class="kw-2">&amp;</span>symbol.properties, zoom)<span class="question-mark">?</span>;
+<a href=#274 id=274 data-nosnippet>274</a>    <span class="kw">if </span>fit == <span class="string">"none" </span>{
+<a href=#275 id=275 data-nosnippet>275</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
+<a href=#276 id=276 data-nosnippet>276</a>    }
+<a href=#277 id=277 data-nosnippet>277</a>    <span class="kw">let </span>text_size = paint
+<a href=#278 id=278 data-nosnippet>278</a>        .text_size
+<a href=#279 id=279 data-nosnippet>279</a>        .as_ref()
+<a href=#280 id=280 data-nosnippet>280</a>        .and_then(|value| value.evaluate_for(<span class="kw-2">&amp;</span>symbol.properties, zoom))
+<a href=#281 id=281 data-nosnippet>281</a>        .unwrap_or(<span class="number">16.0</span>);
+<a href=#282 id=282 data-nosnippet>282</a>    <span class="kw">let </span>scale = text_size / <span class="number">24.0</span>;
+<a href=#283 id=283 data-nosnippet>283</a>    <span class="comment">// A vertical label's icon is fitted before the symbol turns.
+<a href=#284 id=284 data-nosnippet>284</a>    </span><span class="kw">let </span>[left, top, right, bottom] =
+<a href=#285 id=285 data-nosnippet>285</a>        <span class="kw">super</span>::text_layout::layout_extent(symbol, paint, zoom, atlas)<span class="question-mark">?</span>.map(|edge| edge * scale);
+<a href=#286 id=286 data-nosnippet>286</a>    <span class="kw">let </span>padding = paint
+<a href=#287 id=287 data-nosnippet>287</a>        .properties
+<a href=#288 id=288 data-nosnippet>288</a>        .get(<span class="string">"icon-text-fit-padding"</span>)
+<a href=#289 id=289 data-nosnippet>289</a>        .and_then(|value| value.as_array())
+<a href=#290 id=290 data-nosnippet>290</a>        .filter(|values| values.len() == <span class="number">4</span>)
+<a href=#291 id=291 data-nosnippet>291</a>        .map_or([<span class="number">0.0</span>; <span class="number">4</span>], |values| {
+<a href=#292 id=292 data-nosnippet>292</a>            <span class="kw">let </span>read = |index: usize| values[index].as_f64().unwrap_or(<span class="number">0.0</span>) <span class="kw">as </span>f32;
+<a href=#293 id=293 data-nosnippet>293</a>            [read(<span class="number">0</span>), read(<span class="number">1</span>), read(<span class="number">2</span>), read(<span class="number">3</span>)]
+<a href=#294 id=294 data-nosnippet>294</a>        });
+<a href=#295 id=295 data-nosnippet>295</a>    <span class="kw">let </span>(min_x, max_x) = <span class="kw">if </span><span class="macro">matches!</span>(fit.as_str(), <span class="string">"width" </span>| <span class="string">"both"</span>) {
+<a href=#296 id=296 data-nosnippet>296</a>        (
+<a href=#297 id=297 data-nosnippet>297</a>            offset[<span class="number">0</span>] + left - padding[<span class="number">3</span>],
+<a href=#298 id=298 data-nosnippet>298</a>            offset[<span class="number">0</span>] + right + padding[<span class="number">1</span>],
+<a href=#299 id=299 data-nosnippet>299</a>        )
+<a href=#300 id=300 data-nosnippet>300</a>    } <span class="kw">else </span>{
+<a href=#301 id=301 data-nosnippet>301</a>        <span class="kw">let </span>min = offset[<span class="number">0</span>] + (left + right - icon_width) / <span class="number">2.0</span>;
+<a href=#302 id=302 data-nosnippet>302</a>        (min, min + icon_width)
+<a href=#303 id=303 data-nosnippet>303</a>    };
+<a href=#304 id=304 data-nosnippet>304</a>    <span class="kw">let </span>(min_y, max_y) = <span class="kw">if </span><span class="macro">matches!</span>(fit.as_str(), <span class="string">"height" </span>| <span class="string">"both"</span>) {
+<a href=#305 id=305 data-nosnippet>305</a>        (
+<a href=#306 id=306 data-nosnippet>306</a>            offset[<span class="number">1</span>] + top - padding[<span class="number">0</span>],
+<a href=#307 id=307 data-nosnippet>307</a>            offset[<span class="number">1</span>] + bottom + padding[<span class="number">2</span>],
+<a href=#308 id=308 data-nosnippet>308</a>        )
+<a href=#309 id=309 data-nosnippet>309</a>    } <span class="kw">else </span>{
+<a href=#310 id=310 data-nosnippet>310</a>        <span class="kw">let </span>min = offset[<span class="number">1</span>] + (top + bottom - icon_height) / <span class="number">2.0</span>;
+<a href=#311 id=311 data-nosnippet>311</a>        (min, min + icon_height)
+<a href=#312 id=312 data-nosnippet>312</a>    };
+<a href=#313 id=313 data-nosnippet>313</a>    <span class="prelude-val">Some</span>([min_x, min_y, max_x, max_y])
+<a href=#314 id=314 data-nosnippet>314</a>}
+<a href=#315 id=315 data-nosnippet>315</a>
+<a href=#316 id=316 data-nosnippet>316</a><span class="doccomment">/// The `[x, y]` offset a layout property gives one symbol, times `scale`; zero without one.
+<a href=#317 id=317 data-nosnippet>317</a></span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>offset(
+<a href=#318 id=318 data-nosnippet>318</a>    paint: <span class="kw-2">&amp;</span>SymbolPaint,
+<a href=#319 id=319 data-nosnippet>319</a>    name: <span class="kw-2">&amp;</span>str,
+<a href=#320 id=320 data-nosnippet>320</a>    scale: f32,
+<a href=#321 id=321 data-nosnippet>321</a>    (properties, zoom): (<span class="kw-2">&amp;</span><span class="kw">crate</span>::style::expression::FeatureProperties, f64),
+<a href=#322 id=322 data-nosnippet>322</a>) -&gt; [f32; <span class="number">2</span>] {
+<a href=#323 id=323 data-nosnippet>323</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(value) = paint.properties.get(name) <span class="kw">else </span>{
+<a href=#324 id=324 data-nosnippet>324</a>        <span class="kw">return </span>[<span class="number">0.0</span>; <span class="number">2</span>];
+<a href=#325 id=325 data-nosnippet>325</a>    };
+<a href=#326 id=326 data-nosnippet>326</a>    <span class="comment">// A written pair is the common case and needs no expression.
+<a href=#327 id=327 data-nosnippet>327</a>    </span><span class="kw">let </span>[x, y] = <span class="kw">match </span><span class="kw">crate</span>::style::translation::Pair::from_json(value) {
+<a href=#328 id=328 data-nosnippet>328</a>        <span class="prelude-val">Some</span>(pair) =&gt; pair.<span class="number">0</span>,
+<a href=#329 id=329 data-nosnippet>329</a>        <span class="prelude-val">None </span>=&gt; {
+<a href=#330 id=330 data-nosnippet>330</a>            <span class="kw">crate</span>::style::property::StyleProperty::&lt;<span class="kw">crate</span>::style::translation::Pair&gt;::parse(value)
+<a href=#331 id=331 data-nosnippet>331</a>                .evaluate_for(properties, zoom)
+<a href=#332 id=332 data-nosnippet>332</a>                .map_or([<span class="number">0.0</span>; <span class="number">2</span>], |pair| pair.<span class="number">0</span>)
+<a href=#333 id=333 data-nosnippet>333</a>        }
+<a href=#334 id=334 data-nosnippet>334</a>    };
+<a href=#335 id=335 data-nosnippet>335</a>    [x <span class="kw">as </span>f32 * scale, y <span class="kw">as </span>f32 * scale]
+<a href=#336 id=336 data-nosnippet>336</a>}
+<a href=#337 id=337 data-nosnippet>337</a>
+<a href=#338 id=338 data-nosnippet>338</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>anchor_fractions(anchor: <span class="kw-2">&amp;</span>str) -&gt; [f32; <span class="number">2</span>] {
+<a href=#339 id=339 data-nosnippet>339</a>    [
+<a href=#340 id=340 data-nosnippet>340</a>        <span class="kw">if </span>anchor.contains(<span class="string">"left"</span>) {
+<a href=#341 id=341 data-nosnippet>341</a>            <span class="number">0.0
+<a href=#342 id=342 data-nosnippet>342</a>        </span>} <span class="kw">else if </span>anchor.contains(<span class="string">"right"</span>) {
+<a href=#343 id=343 data-nosnippet>343</a>            <span class="number">1.0
+<a href=#344 id=344 data-nosnippet>344</a>        </span>} <span class="kw">else </span>{
+<a href=#345 id=345 data-nosnippet>345</a>            <span class="number">0.5
+<a href=#346 id=346 data-nosnippet>346</a>        </span>},
+<a href=#347 id=347 data-nosnippet>347</a>        <span class="kw">if </span>anchor.contains(<span class="string">"top"</span>) {
+<a href=#348 id=348 data-nosnippet>348</a>            <span class="number">0.0
+<a href=#349 id=349 data-nosnippet>349</a>        </span>} <span class="kw">else if </span>anchor.contains(<span class="string">"bottom"</span>) {
+<a href=#350 id=350 data-nosnippet>350</a>            <span class="number">1.0
+<a href=#351 id=351 data-nosnippet>351</a>        </span>} <span class="kw">else </span>{
+<a href=#352 id=352 data-nosnippet>352</a>            <span class="number">0.5
+<a href=#353 id=353 data-nosnippet>353</a>        </span>},
+<a href=#354 id=354 data-nosnippet>354</a>    ]
+<a href=#355 id=355 data-nosnippet>355</a>}
+<a href=#356 id=356 data-nosnippet>356</a>
+<a href=#357 id=357 data-nosnippet>357</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>quad(
+<a href=#358 id=358 data-nosnippet>358</a>    buffer: <span class="kw-2">&amp;mut </span>VertexBuffers&lt;ShaderSymbolVertex, u32&gt;,
+<a href=#359 id=359 data-nosnippet>359</a>    anchor: Point&lt;f64&gt;,
+<a href=#360 id=360 data-nosnippet>360</a>    bounds: [f32; <span class="number">4</span>],
+<a href=#361 id=361 data-nosnippet>361</a>    image: <span class="kw-2">&amp;</span>AtlasEntry,
+<a href=#362 id=362 data-nosnippet>362</a>    height: f32,
+<a href=#363 id=363 data-nosnippet>363</a>    angle: f32,
+<a href=#364 id=364 data-nosnippet>364</a>    rotation: f32,
+<a href=#365 id=365 data-nosnippet>365</a>) {
+<a href=#366 id=366 data-nosnippet>366</a>    <span class="kw">let </span>base = buffer.vertices.len() <span class="kw">as </span>u32;
+<a href=#367 id=367 data-nosnippet>367</a>    <span class="kw">let </span>(sin, cos) = rotation.sin_cos();
+<a href=#368 id=368 data-nosnippet>368</a>    <span class="kw">let </span>[x, y, width, height_pixels] = image.rect;
+<a href=#369 id=369 data-nosnippet>369</a>    <span class="kw">for </span>(index, (u, v)) <span class="kw">in </span>[
+<a href=#370 id=370 data-nosnippet>370</a>        (x, y),
+<a href=#371 id=371 data-nosnippet>371</a>        (x + width, y),
+<a href=#372 id=372 data-nosnippet>372</a>        (x + width, y + height_pixels),
+<a href=#373 id=373 data-nosnippet>373</a>        (x, y + height_pixels),
+<a href=#374 id=374 data-nosnippet>374</a>    ]
+<a href=#375 id=375 data-nosnippet>375</a>    .into_iter()
+<a href=#376 id=376 data-nosnippet>376</a>    .enumerate()
+<a href=#377 id=377 data-nosnippet>377</a>    {
+<a href=#378 id=378 data-nosnippet>378</a>        <span class="kw">let </span>px = <span class="kw">if </span>index == <span class="number">0 </span>|| index == <span class="number">3 </span>{
+<a href=#379 id=379 data-nosnippet>379</a>            bounds[<span class="number">0</span>]
+<a href=#380 id=380 data-nosnippet>380</a>        } <span class="kw">else </span>{
+<a href=#381 id=381 data-nosnippet>381</a>            bounds[<span class="number">2</span>]
+<a href=#382 id=382 data-nosnippet>382</a>        };
+<a href=#383 id=383 data-nosnippet>383</a>        <span class="kw">let </span>py = <span class="kw">if </span>index &lt; <span class="number">2 </span>{ bounds[<span class="number">1</span>] } <span class="kw">else </span>{ bounds[<span class="number">3</span>] };
+<a href=#384 id=384 data-nosnippet>384</a>        <span class="comment">// The quad turns about the anchor, offsets included, as GL JS rotates its corners.
+<a href=#385 id=385 data-nosnippet>385</a>        </span><span class="kw">let </span>(px, py) = (px * cos - py * sin, px * sin + py * cos);
+<a href=#386 id=386 data-nosnippet>386</a>        buffer.vertices.push(ShaderSymbolVertex {
+<a href=#387 id=387 data-nosnippet>387</a>            a_pos_offset: [
+<a href=#388 id=388 data-nosnippet>388</a>                anchor.x().round() <span class="kw">as </span>i32,
+<a href=#389 id=389 data-nosnippet>389</a>                anchor.y().round() <span class="kw">as </span>i32,
+<a href=#390 id=390 data-nosnippet>390</a>                (px * <span class="number">32.0</span>).round() <span class="kw">as </span>i32,
+<a href=#391 id=391 data-nosnippet>391</a>                (py * <span class="number">32.0</span>).round() <span class="kw">as </span>i32,
+<a href=#392 id=392 data-nosnippet>392</a>            ],
+<a href=#393 id=393 data-nosnippet>393</a>            a_data: [u, v, image.kind, <span class="number">0</span>],
+<a href=#394 id=394 data-nosnippet>394</a>            a_pixeloffset: [<span class="number">0</span>, <span class="number">0</span>, height.to_bits() <span class="kw">as </span>i32, angle.to_bits() <span class="kw">as </span>i32],
+<a href=#395 id=395 data-nosnippet>395</a>        });
+<a href=#396 id=396 data-nosnippet>396</a>    }
+<a href=#397 id=397 data-nosnippet>397</a>    buffer
+<a href=#398 id=398 data-nosnippet>398</a>        .indices
+<a href=#399 id=399 data-nosnippet>399</a>        .extend([base, base + <span class="number">1</span>, base + <span class="number">2</span>, base, base + <span class="number">2</span>, base + <span class="number">3</span>]);
+<a href=#400 id=400 data-nosnippet>400</a>}
+<a href=#401 id=401 data-nosnippet>401</a>
+<a href=#402 id=402 data-nosnippet>402</a><span class="kw">fn </span>bounds(
+<a href=#403 id=403 data-nosnippet>403</a>    vertices: <span class="kw-2">&amp;</span>[ShaderSymbolVertex],
+<a href=#404 id=404 data-nosnippet>404</a>    indices: <span class="kw-2">&amp;</span>[u32],
+<a href=#405 id=405 data-nosnippet>405</a>    paint: <span class="kw-2">&amp;</span>SymbolPaint,
+<a href=#406 id=406 data-nosnippet>406</a>    properties: <span class="kw-2">&amp;</span>FeatureProperties,
+<a href=#407 id=407 data-nosnippet>407</a>    zoom: f64,
+<a href=#408 id=408 data-nosnippet>408</a>) -&gt; Box2D&lt;f32, <span class="kw">crate</span>::sdf::TileSpace&gt; {
+<a href=#409 id=409 data-nosnippet>409</a>    <span class="kw">let </span>text_size = paint
+<a href=#410 id=410 data-nosnippet>410</a>        .text_size
+<a href=#411 id=411 data-nosnippet>411</a>        .as_ref()
+<a href=#412 id=412 data-nosnippet>412</a>        .and_then(|value| value.evaluate_for(properties, zoom))
+<a href=#413 id=413 data-nosnippet>413</a>        .unwrap_or(<span class="number">16.0</span>);
+<a href=#414 id=414 data-nosnippet>414</a>    <span class="kw">let </span>icon_size = paint.number(<span class="string">"icon-size"</span>, properties, zoom, <span class="number">1.0</span>);
+<a href=#415 id=415 data-nosnippet>415</a>    <span class="kw">let </span><span class="kw-2">mut </span>bounds = Box2D::new(
+<a href=#416 id=416 data-nosnippet>416</a>        Point2D::new(f32::INFINITY, f32::INFINITY),
+<a href=#417 id=417 data-nosnippet>417</a>        Point2D::new(f32::NEG_INFINITY, f32::NEG_INFINITY),
+<a href=#418 id=418 data-nosnippet>418</a>    );
+<a href=#419 id=419 data-nosnippet>419</a>    <span class="kw">for </span>index <span class="kw">in </span>indices {
+<a href=#420 id=420 data-nosnippet>420</a>        <span class="kw">let </span>vertex = <span class="kw-2">&amp;</span>vertices[<span class="kw-2">*</span>index <span class="kw">as </span>usize];
+<a href=#421 id=421 data-nosnippet>421</a>        <span class="kw">let </span>scale = <span class="kw">if </span><span class="macro">matches!</span>(vertex.a_data[<span class="number">2</span>], <span class="number">0 </span>| <span class="number">3</span>) {
+<a href=#422 id=422 data-nosnippet>422</a>            text_size / <span class="number">24.0
+<a href=#423 id=423 data-nosnippet>423</a>        </span>} <span class="kw">else </span>{
+<a href=#424 id=424 data-nosnippet>424</a>            icon_size
+<a href=#425 id=425 data-nosnippet>425</a>        };
+<a href=#426 id=426 data-nosnippet>426</a>        <span class="kw">let </span>point: Point2D&lt;f32, <span class="kw">crate</span>::sdf::TileSpace&gt; = Point2D::new(
+<a href=#427 id=427 data-nosnippet>427</a>            vertex.a_pos_offset[<span class="number">2</span>] <span class="kw">as </span>f32 / <span class="number">32.0 </span>* scale,
+<a href=#428 id=428 data-nosnippet>428</a>            vertex.a_pos_offset[<span class="number">3</span>] <span class="kw">as </span>f32 / <span class="number">32.0 </span>* scale,
+<a href=#429 id=429 data-nosnippet>429</a>        );
+<a href=#430 id=430 data-nosnippet>430</a>        bounds.min.x = bounds.min.x.min(point.x);
+<a href=#431 id=431 data-nosnippet>431</a>        bounds.min.y = bounds.min.y.min(point.y);
+<a href=#432 id=432 data-nosnippet>432</a>        bounds.max.x = bounds.max.x.max(point.x);
+<a href=#433 id=433 data-nosnippet>433</a>        bounds.max.y = bounds.max.y.max(point.y);
+<a href=#434 id=434 data-nosnippet>434</a>    }
+<a href=#435 id=435 data-nosnippet>435</a>    bounds
+<a href=#436 id=436 data-nosnippet>436</a>}
 </code></pre></div></section></main></body></html>

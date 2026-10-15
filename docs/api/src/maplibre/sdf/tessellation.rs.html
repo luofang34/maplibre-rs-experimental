@@ -222,7 +222,7 @@
 <a href=#222 id=222 data-nosnippet>222</a>        anchor: Point&lt;f64&gt;,
 <a href=#223 id=223 data-nosnippet>223</a>        angle: f32,
 <a href=#224 id=224 data-nosnippet>224</a>        source: layout::SourceFeature,
-<a href=#225 id=225 data-nosnippet>225</a>        line: <span class="prelude-ty">Option</span>&lt;layout::LineContext&gt;,
+<a href=#225 id=225 data-nosnippet>225</a>        (line, repeat_key): (<span class="prelude-ty">Option</span>&lt;layout::LineContext&gt;, <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Arc&lt;str&gt;&gt;),
 <a href=#226 id=226 data-nosnippet>226</a>    ) {
 <a href=#227 id=227 data-nosnippet>227</a>        <span class="kw">let </span>ways = line
 <a href=#228 id=228 data-nosnippet>228</a>            .is_none()
@@ -250,246 +250,234 @@
 <a href=#250 id=250 data-nosnippet>250</a>                properties: <span class="self">self</span>.properties.clone(),
 <a href=#251 id=251 data-nosnippet>251</a>                vertical,
 <a href=#252 id=252 data-nosnippet>252</a>                fallback: index == <span class="number">1</span>,
-<a href=#253 id=253 data-nosnippet>253</a>            });
-<a href=#254 id=254 data-nosnippet>254</a>        }
-<a href=#255 id=255 data-nosnippet>255</a>    }
-<a href=#256 id=256 data-nosnippet>256</a>
-<a href=#257 id=257 data-nosnippet>257</a>    <span class="doccomment">/// What makes two line labels repeats of each other: their text and, since images stand
-<a href=#258 id=258 data-nosnippet>258</a>    /// in the text as one placeholder each, the images they show, so rows of different road
-<a href=#259 id=259 data-nosnippet>259</a>    /// shields are told apart.
-<a href=#260 id=260 data-nosnippet>260</a>    </span><span class="kw">fn </span>repeat_key(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;String&gt; {
-<a href=#261 id=261 data-nosnippet>261</a>        <span class="kw">let </span>images = <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.atlas.icons <span class="kw">as </span><span class="kw-2">&amp;</span><span class="kw">dyn </span><span class="kw">crate</span>::style::expression::ImageSet);
-<a href=#262 id=262 data-nosnippet>262</a>        <span class="kw">let </span><span class="kw-2">mut </span>key = <span class="self">self
-<a href=#263 id=263 data-nosnippet>263</a>            </span>.paint
-<a href=#264 id=264 data-nosnippet>264</a>            .label_among(<span class="kw-2">&amp;</span><span class="self">self</span>.properties, <span class="self">self</span>.zoom, images)<span class="question-mark">?</span>;
-<a href=#265 id=265 data-nosnippet>265</a>        <span class="kw">for </span>section <span class="kw">in </span><span class="self">self
-<a href=#266 id=266 data-nosnippet>266</a>            </span>.paint
-<a href=#267 id=267 data-nosnippet>267</a>            .label_sections_among(<span class="kw-2">&amp;</span><span class="self">self</span>.properties, <span class="self">self</span>.zoom, images)
-<a href=#268 id=268 data-nosnippet>268</a>        {
-<a href=#269 id=269 data-nosnippet>269</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(image) = section.image {
-<a href=#270 id=270 data-nosnippet>270</a>                key.push(<span class="string">'\u{0}'</span>);
-<a href=#271 id=271 data-nosnippet>271</a>                key.push_str(<span class="kw-2">&amp;</span>image);
-<a href=#272 id=272 data-nosnippet>272</a>            }
-<a href=#273 id=273 data-nosnippet>273</a>        }
-<a href=#274 id=274 data-nosnippet>274</a>        <span class="prelude-val">Some</span>(key)
-<a href=#275 id=275 data-nosnippet>275</a>    }
-<a href=#276 id=276 data-nosnippet>276</a>
-<a href=#277 id=277 data-nosnippet>277</a>    <span class="doccomment">/// Whether a label with the same repeat key already sits within `repeat_distance` of `point`; a
-<a href=#278 id=278 data-nosnippet>278</a>    /// label that does not is remembered.
-<a href=#279 id=279 data-nosnippet>279</a>    </span><span class="kw">fn </span>anchor_is_too_close(
-<a href=#280 id=280 data-nosnippet>280</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-<a href=#281 id=281 data-nosnippet>281</a>        key: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>str&gt;,
-<a href=#282 id=282 data-nosnippet>282</a>        point: [f64; <span class="number">2</span>],
-<a href=#283 id=283 data-nosnippet>283</a>        repeat_distance: f64,
-<a href=#284 id=284 data-nosnippet>284</a>    ) -&gt; bool {
-<a href=#285 id=285 data-nosnippet>285</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(key) = key <span class="kw">else </span>{
-<a href=#286 id=286 data-nosnippet>286</a>            <span class="kw">return </span><span class="bool-val">false</span>;
-<a href=#287 id=287 data-nosnippet>287</a>        };
-<a href=#288 id=288 data-nosnippet>288</a>        <span class="kw">let </span>others = <span class="self">self
-<a href=#289 id=289 data-nosnippet>289</a>            </span>.line_anchors_by_text
-<a href=#290 id=290 data-nosnippet>290</a>            .entry(key.to_string())
-<a href=#291 id=291 data-nosnippet>291</a>            .or_default();
-<a href=#292 id=292 data-nosnippet>292</a>        <span class="kw">let </span>too_close = others
-<a href=#293 id=293 data-nosnippet>293</a>            .iter()
-<a href=#294 id=294 data-nosnippet>294</a>            .any(|other| (other[<span class="number">0</span>] - point[<span class="number">0</span>]).hypot(other[<span class="number">1</span>] - point[<span class="number">1</span>]) &lt; repeat_distance);
-<a href=#295 id=295 data-nosnippet>295</a>        <span class="kw">if </span>!too_close {
-<a href=#296 id=296 data-nosnippet>296</a>            others.push(point);
-<a href=#297 id=297 data-nosnippet>297</a>        }
-<a href=#298 id=298 data-nosnippet>298</a>        too_close
-<a href=#299 id=299 data-nosnippet>299</a>    }
-<a href=#300 id=300 data-nosnippet>300</a>
-<a href=#301 id=301 data-nosnippet>301</a>    <span class="doccomment">/// Anchors along the lines of a feature, as many as the spacing allows.
-<a href=#302 id=302 data-nosnippet>302</a>    </span><span class="kw">fn </span>collect_along_lines(
-<a href=#303 id=303 data-nosnippet>303</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-<a href=#304 id=304 data-nosnippet>304</a>        lines: Vec&lt;Vec&lt;[f64; <span class="number">2</span>]&gt;&gt;,
-<a href=#305 id=305 data-nosnippet>305</a>        placement: LinePlacement,
-<a href=#306 id=306 data-nosnippet>306</a>        source: layout::SourceFeature,
-<a href=#307 id=307 data-nosnippet>307</a>    ) {
-<a href=#308 id=308 data-nosnippet>308</a>        <span class="kw">let </span>probe = CollectedSymbol {
-<a href=#309 id=309 data-nosnippet>309</a>            source,
-<a href=#310 id=310 data-nosnippet>310</a>            line: <span class="prelude-val">None</span>,
-<a href=#311 id=311 data-nosnippet>311</a>            anchor: Point::new(<span class="number">0.0</span>, <span class="number">0.0</span>),
-<a href=#312 id=312 data-nosnippet>312</a>            angle: <span class="number">0.0</span>,
-<a href=#313 id=313 data-nosnippet>313</a>            properties: <span class="self">self</span>.properties.clone(),
-<a href=#314 id=314 data-nosnippet>314</a>            vertical: <span class="prelude-val">None</span>,
-<a href=#315 id=315 data-nosnippet>315</a>            fallback: <span class="bool-val">false</span>,
-<a href=#316 id=316 data-nosnippet>316</a>        };
-<a href=#317 id=317 data-nosnippet>317</a>        <span class="kw">let </span>text_size = <span class="self">self
-<a href=#318 id=318 data-nosnippet>318</a>            </span>.paint
-<a href=#319 id=319 data-nosnippet>319</a>            .text_size
-<a href=#320 id=320 data-nosnippet>320</a>            .as_ref()
-<a href=#321 id=321 data-nosnippet>321</a>            <span class="comment">// GL JS lays a label out at the size of the zoom above the tile's, which the shader then scales down.
-<a href=#322 id=322 data-nosnippet>322</a>            </span>.and_then(|value| value.evaluate_at_zoom(<span class="self">self</span>.zoom + <span class="number">1.0</span>))
-<a href=#323 id=323 data-nosnippet>323</a>            .map_or(<span class="number">16.0</span>, f64::from);
-<a href=#324 id=324 data-nosnippet>324</a>        <span class="kw">let </span>text_width = f64::from(text_layout::unwrapped_width(
-<a href=#325 id=325 data-nosnippet>325</a>            <span class="kw-2">&amp;</span><span class="self">self</span>.paint,
-<a href=#326 id=326 data-nosnippet>326</a>            <span class="kw-2">&amp;</span>probe,
-<a href=#327 id=327 data-nosnippet>327</a>            <span class="self">self</span>.zoom,
-<a href=#328 id=328 data-nosnippet>328</a>            <span class="kw-2">&amp;</span><span class="self">self</span>.atlas,
-<a href=#329 id=329 data-nosnippet>329</a>        ));
-<a href=#330 id=330 data-nosnippet>330</a>        <span class="comment">// GL JS spaces labels by the longer of the text and the icon, and scales both by the
-<a href=#331 id=331 data-nosnippet>331</a>        // text size; an icon-only label has no text to bend, so its bends are not checked.
-<a href=#332 id=332 data-nosnippet>332</a>        </span><span class="kw">let </span>icon_width = <span class="self">self
-<a href=#333 id=333 data-nosnippet>333</a>            </span>.paint
-<a href=#334 id=334 data-nosnippet>334</a>            .text_among_images(<span class="string">"icon-image"</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.properties, <span class="self">self</span>.zoom, <span class="kw-2">&amp;</span><span class="self">self</span>.atlas.icons)
-<a href=#335 id=335 data-nosnippet>335</a>            .and_then(|name| <span class="self">self</span>.atlas.icons.get(<span class="kw-2">&amp;</span>name))
-<a href=#336 id=336 data-nosnippet>336</a>            .map_or(<span class="number">0.0</span>, |icon| {
-<a href=#337 id=337 data-nosnippet>337</a>                f64::from(icon.rect[<span class="number">2</span>]) / f64::from(icon.metrics[<span class="number">3</span>])
-<a href=#338 id=338 data-nosnippet>338</a>                    * f64::from(
-<a href=#339 id=339 data-nosnippet>339</a>                        <span class="self">self</span>.paint
-<a href=#340 id=340 data-nosnippet>340</a>                            .number(<span class="string">"icon-size"</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.properties, <span class="self">self</span>.zoom, <span class="number">1.0</span>),
-<a href=#341 id=341 data-nosnippet>341</a>                    )
-<a href=#342 id=342 data-nosnippet>342</a>            });
-<a href=#343 id=343 data-nosnippet>343</a>        <span class="kw">let </span>label_pixels = text_width.max(icon_width) * text_size / <span class="number">24.0</span>;
-<a href=#344 id=344 data-nosnippet>344</a>        <span class="kw">let </span>number = |name, fallback| {
-<a href=#345 id=345 data-nosnippet>345</a>            <span class="self">self</span>.paint
-<a href=#346 id=346 data-nosnippet>346</a>                .number(name, <span class="kw-2">&amp;</span><span class="self">self</span>.properties, <span class="self">self</span>.zoom, fallback)
-<a href=#347 id=347 data-nosnippet>347</a>        };
-<a href=#348 id=348 data-nosnippet>348</a>        <span class="kw">let </span>overscaling = <span class="self">self</span>.overscaling.max(<span class="number">1.0</span>);
-<a href=#349 id=349 data-nosnippet>349</a>        <span class="comment">// A magnified tile has fewer tile units under a pixel.
-<a href=#350 id=350 data-nosnippet>350</a>        </span><span class="kw">let </span>units_per_pixel = TILE_UNITS_PER_PIXEL / overscaling;
-<a href=#351 id=351 data-nosnippet>351</a>        <span class="kw">let </span>params = line_anchors::AnchorSpacing {
-<a href=#352 id=352 data-nosnippet>352</a>            spacing: f64::from(number(<span class="string">"symbol-spacing"</span>, <span class="number">250.0</span>)) * units_per_pixel,
-<a href=#353 id=353 data-nosnippet>353</a>            max_angle: f64::from(number(<span class="string">"text-max-angle"</span>, <span class="number">45.0</span>)).to_radians(),
-<a href=#354 id=354 data-nosnippet>354</a>            label_length: label_pixels * units_per_pixel,
-<a href=#355 id=355 data-nosnippet>355</a>            text_size: text_size * units_per_pixel,
-<a href=#356 id=356 data-nosnippet>356</a>            checks_bends: text_width &gt; <span class="number">0.0</span>,
-<a href=#357 id=357 data-nosnippet>357</a>            overscaling,
-<a href=#358 id=358 data-nosnippet>358</a>        };
-<a href=#359 id=359 data-nosnippet>359</a>        <span class="kw">let </span>parts: Vec&lt;Vec&lt;[f64; <span class="number">2</span>]&gt;&gt; = <span class="kw">match </span>placement {
-<a href=#360 id=360 data-nosnippet>360</a>            LinePlacement::Line =&gt; line_anchors::clip_to_tile(<span class="kw-2">&amp;</span>lines),
-<a href=#361 id=361 data-nosnippet>361</a>            LinePlacement::Center =&gt; lines.into_iter().filter(|line| line.len() &gt; <span class="number">1</span>).collect(),
-<a href=#362 id=362 data-nosnippet>362</a>        };
-<a href=#363 id=363 data-nosnippet>363</a>        <span class="kw">let </span>repeat_key = <span class="kw">match </span>placement {
-<a href=#364 id=364 data-nosnippet>364</a>            LinePlacement::Line =&gt; <span class="self">self</span>.repeat_key(),
-<a href=#365 id=365 data-nosnippet>365</a>            LinePlacement::Center =&gt; <span class="prelude-val">None</span>,
-<a href=#366 id=366 data-nosnippet>366</a>        };
-<a href=#367 id=367 data-nosnippet>367</a>        <span class="kw">for </span>part <span class="kw">in </span>parts {
-<a href=#368 id=368 data-nosnippet>368</a>            <span class="kw">let </span>anchors = <span class="kw">match </span>placement {
-<a href=#369 id=369 data-nosnippet>369</a>                LinePlacement::Line =&gt; line_anchors::line_anchors(<span class="kw-2">&amp;</span>part, params),
-<a href=#370 id=370 data-nosnippet>370</a>                LinePlacement::Center =&gt; line_anchors::center_anchor(<span class="kw-2">&amp;</span>part, params)
-<a href=#371 id=371 data-nosnippet>371</a>                    .into_iter()
-<a href=#372 id=372 data-nosnippet>372</a>                    .collect(),
-<a href=#373 id=373 data-nosnippet>373</a>            };
-<a href=#374 id=374 data-nosnippet>374</a>            <span class="kw">if </span>anchors.is_empty() {
-<a href=#375 id=375 data-nosnippet>375</a>                <span class="kw">continue</span>;
-<a href=#376 id=376 data-nosnippet>376</a>            }
-<a href=#377 id=377 data-nosnippet>377</a>            <span class="kw">let </span>polyline: Arc&lt;[[f32; <span class="number">2</span>]]&gt; = part
-<a href=#378 id=378 data-nosnippet>378</a>                .iter()
-<a href=#379 id=379 data-nosnippet>379</a>                .map(|point| [point[<span class="number">0</span>] <span class="kw">as </span>f32, point[<span class="number">1</span>] <span class="kw">as </span>f32])
-<a href=#380 id=380 data-nosnippet>380</a>                .collect();
-<a href=#381 id=381 data-nosnippet>381</a>            <span class="kw">for </span>anchor <span class="kw">in </span>anchors {
-<a href=#382 id=382 data-nosnippet>382</a>                <span class="kw">if </span><span class="self">self</span>.anchor_is_too_close(
-<a href=#383 id=383 data-nosnippet>383</a>                    repeat_key.as_deref(),
-<a href=#384 id=384 data-nosnippet>384</a>                    anchor.point,
-<a href=#385 id=385 data-nosnippet>385</a>                    params.spacing / <span class="number">2.0</span>,
-<a href=#386 id=386 data-nosnippet>386</a>                ) {
-<a href=#387 id=387 data-nosnippet>387</a>                    <span class="kw">continue</span>;
-<a href=#388 id=388 data-nosnippet>388</a>                }
-<a href=#389 id=389 data-nosnippet>389</a>                <span class="kw">let </span>distance = line_anchors::distance_to(<span class="kw-2">&amp;</span>part, anchor);
-<a href=#390 id=390 data-nosnippet>390</a>                <span class="self">self</span>.collect(
-<a href=#391 id=391 data-nosnippet>391</a>                    Point::new(anchor.point[<span class="number">0</span>], anchor.point[<span class="number">1</span>]),
-<a href=#392 id=392 data-nosnippet>392</a>                    anchor.angle <span class="kw">as </span>f32,
-<a href=#393 id=393 data-nosnippet>393</a>                    source,
-<a href=#394 id=394 data-nosnippet>394</a>                    <span class="prelude-val">Some</span>((polyline.clone(), distance <span class="kw">as </span>f32)),
-<a href=#395 id=395 data-nosnippet>395</a>                );
-<a href=#396 id=396 data-nosnippet>396</a>            }
-<a href=#397 id=397 data-nosnippet>397</a>        }
-<a href=#398 id=398 data-nosnippet>398</a>    }
-<a href=#399 id=399 data-nosnippet>399</a>}
-<a href=#400 id=400 data-nosnippet>400</a>
-<a href=#401 id=401 data-nosnippet>401</a><span class="doccomment">/// The rings of a polygon wound as GL JS winds them before it places labels: the outer ring
-<a href=#402 id=402 data-nosnippet>402</a>/// runs clockwise on screen and holes run counter-clockwise, so labels start at the same end.
-<a href=#403 id=403 data-nosnippet>403</a></span><span class="kw">fn </span>polygon_rings(polygon: <span class="kw-2">&amp;</span>geo_types::Polygon&lt;f64&gt;) -&gt; Vec&lt;Vec&lt;[f64; <span class="number">2</span>]&gt;&gt; {
-<a href=#404 id=404 data-nosnippet>404</a>    <span class="kw">let </span>wound = |ring: <span class="kw-2">&amp;</span>geo_types::LineString&lt;f64&gt;, outer: bool| {
-<a href=#405 id=405 data-nosnippet>405</a>        <span class="kw">let </span><span class="kw-2">mut </span>points: Vec&lt;[f64; <span class="number">2</span>]&gt; = ring.coords().map(|c| [c.x, c.y]).collect();
-<a href=#406 id=406 data-nosnippet>406</a>        <span class="kw">let </span>area: f64 = points
-<a href=#407 id=407 data-nosnippet>407</a>            .iter()
-<a href=#408 id=408 data-nosnippet>408</a>            .zip(points.iter().cycle().skip(<span class="number">1</span>))
-<a href=#409 id=409 data-nosnippet>409</a>            .map(|(a, b)| a[<span class="number">0</span>] * b[<span class="number">1</span>] - b[<span class="number">0</span>] * a[<span class="number">1</span>])
-<a href=#410 id=410 data-nosnippet>410</a>            .sum();
-<a href=#411 id=411 data-nosnippet>411</a>        <span class="comment">// Tile coordinates grow downwards, so positive area is clockwise on screen.
-<a href=#412 id=412 data-nosnippet>412</a>        </span><span class="kw">if </span>(area &gt; <span class="number">0.0</span>) != outer {
-<a href=#413 id=413 data-nosnippet>413</a>            points.reverse();
-<a href=#414 id=414 data-nosnippet>414</a>        }
-<a href=#415 id=415 data-nosnippet>415</a>        points
-<a href=#416 id=416 data-nosnippet>416</a>    };
-<a href=#417 id=417 data-nosnippet>417</a>    std::iter::once(wound(polygon.exterior(), <span class="bool-val">true</span>))
-<a href=#418 id=418 data-nosnippet>418</a>        .chain(polygon.interiors().iter().map(|ring| wound(ring, <span class="bool-val">false</span>)))
-<a href=#419 id=419 data-nosnippet>419</a>        .collect()
-<a href=#420 id=420 data-nosnippet>420</a>}
-<a href=#421 id=421 data-nosnippet>421</a>
-<a href=#422 id=422 data-nosnippet>422</a><span class="kw">impl </span>FeatureProcessor <span class="kw">for </span>TextTessellator {
-<a href=#423 id=423 data-nosnippet>423</a>    <span class="kw">fn </span>feature_end(<span class="kw-2">&amp;mut </span><span class="self">self</span>, idx: u64) -&gt; GeoResult&lt;()&gt; {
-<a href=#424 id=424 data-nosnippet>424</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(geometry) = <span class="self">self</span>.geo_writer.take_geometry() {
-<a href=#425 id=425 data-nosnippet>425</a>            <span class="kw">let </span>id = usize::try_from(idx)
-<a href=#426 id=426 data-nosnippet>426</a>                .ok()
-<a href=#427 id=427 data-nosnippet>427</a>                .and_then(|idx| <span class="self">self</span>.source_ids.get(idx).copied())
-<a href=#428 id=428 data-nosnippet>428</a>                .flatten();
-<a href=#429 id=429 data-nosnippet>429</a>            <span class="kw">let </span>kind = <span class="kw">match </span><span class="kw-2">&amp;</span>geometry {
-<a href=#430 id=430 data-nosnippet>430</a>                Geometry::Point(<span class="kw">_</span>) | Geometry::MultiPoint(<span class="kw">_</span>) =&gt; GeometryType::Point,
-<a href=#431 id=431 data-nosnippet>431</a>                Geometry::LineString(<span class="kw">_</span>) | Geometry::MultiLineString(<span class="kw">_</span>) =&gt; GeometryType::LineString,
-<a href=#432 id=432 data-nosnippet>432</a>                Geometry::Polygon(<span class="kw">_</span>) | Geometry::MultiPolygon(<span class="kw">_</span>) =&gt; GeometryType::Polygon,
-<a href=#433 id=433 data-nosnippet>433</a>                <span class="kw">_ </span>=&gt; GeometryType::Unknown,
-<a href=#434 id=434 data-nosnippet>434</a>            };
-<a href=#435 id=435 data-nosnippet>435</a>            <span class="kw">let </span>source = layout::SourceFeature { id, kind };
-<a href=#436 id=436 data-nosnippet>436</a>            <span class="kw">let </span>lines: <span class="prelude-ty">Option</span>&lt;Vec&lt;Vec&lt;[f64; <span class="number">2</span>]&gt;&gt;&gt; = <span class="kw">match </span><span class="kw-2">&amp;</span>geometry {
-<a href=#437 id=437 data-nosnippet>437</a>                Geometry::LineString(line) =&gt; {
-<a href=#438 id=438 data-nosnippet>438</a>                    <span class="prelude-val">Some</span>(<span class="macro">vec!</span>[line.coords().map(|c| [c.x, c.y]).collect()])
-<a href=#439 id=439 data-nosnippet>439</a>                }
-<a href=#440 id=440 data-nosnippet>440</a>                Geometry::MultiLineString(lines) =&gt; <span class="prelude-val">Some</span>(
-<a href=#441 id=441 data-nosnippet>441</a>                    lines
-<a href=#442 id=442 data-nosnippet>442</a>                        .iter()
-<a href=#443 id=443 data-nosnippet>443</a>                        .map(|line| line.coords().map(|c| [c.x, c.y]).collect())
-<a href=#444 id=444 data-nosnippet>444</a>                        .collect(),
-<a href=#445 id=445 data-nosnippet>445</a>                ),
-<a href=#446 id=446 data-nosnippet>446</a>                <span class="comment">// The rings of a polygon are lines to follow, as in GL JS.
-<a href=#447 id=447 data-nosnippet>447</a>                </span>Geometry::Polygon(polygon) =&gt; <span class="prelude-val">Some</span>(polygon_rings(polygon)),
-<a href=#448 id=448 data-nosnippet>448</a>                Geometry::MultiPolygon(polygons) =&gt; {
-<a href=#449 id=449 data-nosnippet>449</a>                    <span class="prelude-val">Some</span>(polygons.iter().flat_map(polygon_rings).collect())
-<a href=#450 id=450 data-nosnippet>450</a>                }
-<a href=#451 id=451 data-nosnippet>451</a>                <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
-<a href=#452 id=452 data-nosnippet>452</a>            };
-<a href=#453 id=453 data-nosnippet>453</a>            <span class="kw">match </span>(line_placement(<span class="kw-2">&amp;</span><span class="self">self</span>.paint), lines) {
-<a href=#454 id=454 data-nosnippet>454</a>                <span class="comment">// Lines that continue one another are merged once all of them are known.
-<a href=#455 id=455 data-nosnippet>455</a>                </span>(<span class="prelude-val">Some</span>(LinePlacement::Line), <span class="prelude-val">Some</span>(lines)) =&gt; {
-<a href=#456 id=456 data-nosnippet>456</a>                    <span class="kw">let </span>text = <span class="self">self</span>.paint.label_among(
-<a href=#457 id=457 data-nosnippet>457</a>                        <span class="kw-2">&amp;</span><span class="self">self</span>.properties,
-<a href=#458 id=458 data-nosnippet>458</a>                        <span class="self">self</span>.zoom,
-<a href=#459 id=459 data-nosnippet>459</a>                        <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.atlas.icons),
-<a href=#460 id=460 data-nosnippet>460</a>                    );
-<a href=#461 id=461 data-nosnippet>461</a>                    <span class="kw">for </span>line <span class="kw">in </span>lines.into_iter().filter(|line| line.len() &gt; <span class="number">1</span>) {
-<a href=#462 id=462 data-nosnippet>462</a>                        <span class="self">self</span>.pending_lines.push(line_merge::PendingLine {
-<a href=#463 id=463 data-nosnippet>463</a>                            text: text.clone(),
-<a href=#464 id=464 data-nosnippet>464</a>                            line,
-<a href=#465 id=465 data-nosnippet>465</a>                            source,
-<a href=#466 id=466 data-nosnippet>466</a>                            properties: <span class="self">self</span>.properties.clone(),
-<a href=#467 id=467 data-nosnippet>467</a>                        });
-<a href=#468 id=468 data-nosnippet>468</a>                    }
-<a href=#469 id=469 data-nosnippet>469</a>                }
-<a href=#470 id=470 data-nosnippet>470</a>                (<span class="prelude-val">Some</span>(placement), <span class="prelude-val">Some</span>(lines)) =&gt; {
-<a href=#471 id=471 data-nosnippet>471</a>                    <span class="self">self</span>.collect_along_lines(lines, placement, source)
-<a href=#472 id=472 data-nosnippet>472</a>                }
-<a href=#473 id=473 data-nosnippet>473</a>                <span class="comment">// A point has no line to follow.
-<a href=#474 id=474 data-nosnippet>474</a>                </span>(<span class="prelude-val">Some</span>(<span class="kw">_</span>), <span class="prelude-val">None</span>) =&gt; {}
-<a href=#475 id=475 data-nosnippet>475</a>                (<span class="prelude-val">None</span>, <span class="kw">_</span>) =&gt; {
-<a href=#476 id=476 data-nosnippet>476</a>                    <span class="comment">// The buffer around a tile repeats the labels of its neighbours, which draw
-<a href=#477 id=477 data-nosnippet>477</a>                    // them from their own tiles.
-<a href=#478 id=478 data-nosnippet>478</a>                    </span><span class="kw">let </span>tile = <span class="number">0.0</span>..<span class="kw">crate</span>::coords::EXTENT;
-<a href=#479 id=479 data-nosnippet>479</a>                    <span class="kw">for </span>anchor <span class="kw">in </span>layout::anchors(<span class="kw-2">&amp;</span>geometry)
-<a href=#480 id=480 data-nosnippet>480</a>                        .into_iter()
-<a href=#481 id=481 data-nosnippet>481</a>                        .filter(|anchor| tile.contains(<span class="kw-2">&amp;</span>anchor.x()) &amp;&amp; tile.contains(<span class="kw-2">&amp;</span>anchor.y()))
-<a href=#482 id=482 data-nosnippet>482</a>                    {
-<a href=#483 id=483 data-nosnippet>483</a>                        <span class="self">self</span>.collect(anchor, <span class="number">0.0</span>, source, <span class="prelude-val">None</span>);
-<a href=#484 id=484 data-nosnippet>484</a>                    }
-<a href=#485 id=485 data-nosnippet>485</a>                }
-<a href=#486 id=486 data-nosnippet>486</a>            }
-<a href=#487 id=487 data-nosnippet>487</a>        }
-<a href=#488 id=488 data-nosnippet>488</a>        <span class="self">self</span>.properties.clear();
-<a href=#489 id=489 data-nosnippet>489</a>        <span class="prelude-val">Ok</span>(())
-<a href=#490 id=490 data-nosnippet>490</a>    }
-<a href=#491 id=491 data-nosnippet>491</a>}
-<a href=#492 id=492 data-nosnippet>492</a>
-<a href=#493 id=493 data-nosnippet>493</a><span class="attr">#[cfg(test)]
-<a href=#494 id=494 data-nosnippet>494</a></span><span class="kw">mod </span>tests;
+<a href=#253 id=253 data-nosnippet>253</a>                repeat_key: repeat_key.cloned(),
+<a href=#254 id=254 data-nosnippet>254</a>            });
+<a href=#255 id=255 data-nosnippet>255</a>        }
+<a href=#256 id=256 data-nosnippet>256</a>    }
+<a href=#257 id=257 data-nosnippet>257</a>
+<a href=#258 id=258 data-nosnippet>258</a>    <span class="doccomment">/// Whether a label with the same repeat key already sits within `repeat_distance` of `point`; a
+<a href=#259 id=259 data-nosnippet>259</a>    /// label that does not is remembered.
+<a href=#260 id=260 data-nosnippet>260</a>    </span><span class="kw">fn </span>anchor_is_too_close(
+<a href=#261 id=261 data-nosnippet>261</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+<a href=#262 id=262 data-nosnippet>262</a>        key: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>str&gt;,
+<a href=#263 id=263 data-nosnippet>263</a>        point: [f64; <span class="number">2</span>],
+<a href=#264 id=264 data-nosnippet>264</a>        repeat_distance: f64,
+<a href=#265 id=265 data-nosnippet>265</a>    ) -&gt; bool {
+<a href=#266 id=266 data-nosnippet>266</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(key) = key <span class="kw">else </span>{
+<a href=#267 id=267 data-nosnippet>267</a>            <span class="kw">return </span><span class="bool-val">false</span>;
+<a href=#268 id=268 data-nosnippet>268</a>        };
+<a href=#269 id=269 data-nosnippet>269</a>        <span class="kw">let </span>others = <span class="self">self
+<a href=#270 id=270 data-nosnippet>270</a>            </span>.line_anchors_by_text
+<a href=#271 id=271 data-nosnippet>271</a>            .entry(key.to_string())
+<a href=#272 id=272 data-nosnippet>272</a>            .or_default();
+<a href=#273 id=273 data-nosnippet>273</a>        <span class="kw">let </span>too_close = others
+<a href=#274 id=274 data-nosnippet>274</a>            .iter()
+<a href=#275 id=275 data-nosnippet>275</a>            .any(|other| (other[<span class="number">0</span>] - point[<span class="number">0</span>]).hypot(other[<span class="number">1</span>] - point[<span class="number">1</span>]) &lt; repeat_distance);
+<a href=#276 id=276 data-nosnippet>276</a>        <span class="kw">if </span>!too_close {
+<a href=#277 id=277 data-nosnippet>277</a>            others.push(point);
+<a href=#278 id=278 data-nosnippet>278</a>        }
+<a href=#279 id=279 data-nosnippet>279</a>        too_close
+<a href=#280 id=280 data-nosnippet>280</a>    }
+<a href=#281 id=281 data-nosnippet>281</a>
+<a href=#282 id=282 data-nosnippet>282</a>    <span class="doccomment">/// Anchors along the lines of a feature, as many as the spacing allows.
+<a href=#283 id=283 data-nosnippet>283</a>    </span><span class="kw">fn </span>collect_along_lines(
+<a href=#284 id=284 data-nosnippet>284</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+<a href=#285 id=285 data-nosnippet>285</a>        lines: Vec&lt;Vec&lt;[f64; <span class="number">2</span>]&gt;&gt;,
+<a href=#286 id=286 data-nosnippet>286</a>        placement: LinePlacement,
+<a href=#287 id=287 data-nosnippet>287</a>        source: layout::SourceFeature,
+<a href=#288 id=288 data-nosnippet>288</a>    ) {
+<a href=#289 id=289 data-nosnippet>289</a>        <span class="kw">let </span>probe = CollectedSymbol {
+<a href=#290 id=290 data-nosnippet>290</a>            source,
+<a href=#291 id=291 data-nosnippet>291</a>            line: <span class="prelude-val">None</span>,
+<a href=#292 id=292 data-nosnippet>292</a>            anchor: Point::new(<span class="number">0.0</span>, <span class="number">0.0</span>),
+<a href=#293 id=293 data-nosnippet>293</a>            angle: <span class="number">0.0</span>,
+<a href=#294 id=294 data-nosnippet>294</a>            properties: <span class="self">self</span>.properties.clone(),
+<a href=#295 id=295 data-nosnippet>295</a>            vertical: <span class="prelude-val">None</span>,
+<a href=#296 id=296 data-nosnippet>296</a>            fallback: <span class="bool-val">false</span>,
+<a href=#297 id=297 data-nosnippet>297</a>            repeat_key: <span class="prelude-val">None</span>,
+<a href=#298 id=298 data-nosnippet>298</a>        };
+<a href=#299 id=299 data-nosnippet>299</a>        <span class="kw">let </span>text_size = <span class="self">self
+<a href=#300 id=300 data-nosnippet>300</a>            </span>.paint
+<a href=#301 id=301 data-nosnippet>301</a>            .text_size
+<a href=#302 id=302 data-nosnippet>302</a>            .as_ref()
+<a href=#303 id=303 data-nosnippet>303</a>            <span class="comment">// GL JS lays a label out at the size of the zoom above the tile's, which the shader then scales down.
+<a href=#304 id=304 data-nosnippet>304</a>            </span>.and_then(|value| value.evaluate_at_zoom(<span class="self">self</span>.zoom + <span class="number">1.0</span>))
+<a href=#305 id=305 data-nosnippet>305</a>            .map_or(<span class="number">16.0</span>, f64::from);
+<a href=#306 id=306 data-nosnippet>306</a>        <span class="kw">let </span>text_width = f64::from(text_layout::unwrapped_width(
+<a href=#307 id=307 data-nosnippet>307</a>            <span class="kw-2">&amp;</span><span class="self">self</span>.paint,
+<a href=#308 id=308 data-nosnippet>308</a>            <span class="kw-2">&amp;</span>probe,
+<a href=#309 id=309 data-nosnippet>309</a>            <span class="self">self</span>.zoom,
+<a href=#310 id=310 data-nosnippet>310</a>            <span class="kw-2">&amp;</span><span class="self">self</span>.atlas,
+<a href=#311 id=311 data-nosnippet>311</a>        ));
+<a href=#312 id=312 data-nosnippet>312</a>        <span class="comment">// GL JS spaces labels by the longer of the text and the icon, and scales both by the
+<a href=#313 id=313 data-nosnippet>313</a>        // text size; an icon-only label has no text to bend, so its bends are not checked.
+<a href=#314 id=314 data-nosnippet>314</a>        </span><span class="kw">let </span>icon_width = <span class="self">self
+<a href=#315 id=315 data-nosnippet>315</a>            </span>.paint
+<a href=#316 id=316 data-nosnippet>316</a>            .text_among_images(<span class="string">"icon-image"</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.properties, <span class="self">self</span>.zoom, <span class="kw-2">&amp;</span><span class="self">self</span>.atlas.icons)
+<a href=#317 id=317 data-nosnippet>317</a>            .and_then(|name| <span class="self">self</span>.atlas.icons.get(<span class="kw-2">&amp;</span>name))
+<a href=#318 id=318 data-nosnippet>318</a>            .map_or(<span class="number">0.0</span>, |icon| {
+<a href=#319 id=319 data-nosnippet>319</a>                f64::from(icon.rect[<span class="number">2</span>]) / f64::from(icon.metrics[<span class="number">3</span>])
+<a href=#320 id=320 data-nosnippet>320</a>                    * f64::from(
+<a href=#321 id=321 data-nosnippet>321</a>                        <span class="self">self</span>.paint
+<a href=#322 id=322 data-nosnippet>322</a>                            .number(<span class="string">"icon-size"</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.properties, <span class="self">self</span>.zoom, <span class="number">1.0</span>),
+<a href=#323 id=323 data-nosnippet>323</a>                    )
+<a href=#324 id=324 data-nosnippet>324</a>            });
+<a href=#325 id=325 data-nosnippet>325</a>        <span class="kw">let </span>label_pixels = text_width.max(icon_width) * text_size / <span class="number">24.0</span>;
+<a href=#326 id=326 data-nosnippet>326</a>        <span class="kw">let </span>number = |name, fallback| {
+<a href=#327 id=327 data-nosnippet>327</a>            <span class="self">self</span>.paint
+<a href=#328 id=328 data-nosnippet>328</a>                .number(name, <span class="kw-2">&amp;</span><span class="self">self</span>.properties, <span class="self">self</span>.zoom, fallback)
+<a href=#329 id=329 data-nosnippet>329</a>        };
+<a href=#330 id=330 data-nosnippet>330</a>        <span class="kw">let </span>overscaling = <span class="self">self</span>.overscaling.max(<span class="number">1.0</span>);
+<a href=#331 id=331 data-nosnippet>331</a>        <span class="comment">// A magnified tile has fewer tile units under a pixel.
+<a href=#332 id=332 data-nosnippet>332</a>        </span><span class="kw">let </span>units_per_pixel = TILE_UNITS_PER_PIXEL / overscaling;
+<a href=#333 id=333 data-nosnippet>333</a>        <span class="kw">let </span>params = line_anchors::AnchorSpacing {
+<a href=#334 id=334 data-nosnippet>334</a>            spacing: f64::from(number(<span class="string">"symbol-spacing"</span>, <span class="number">250.0</span>)) * units_per_pixel,
+<a href=#335 id=335 data-nosnippet>335</a>            max_angle: f64::from(number(<span class="string">"text-max-angle"</span>, <span class="number">45.0</span>)).to_radians(),
+<a href=#336 id=336 data-nosnippet>336</a>            label_length: label_pixels * units_per_pixel,
+<a href=#337 id=337 data-nosnippet>337</a>            text_size: text_size * units_per_pixel,
+<a href=#338 id=338 data-nosnippet>338</a>            checks_bends: text_width &gt; <span class="number">0.0</span>,
+<a href=#339 id=339 data-nosnippet>339</a>            overscaling,
+<a href=#340 id=340 data-nosnippet>340</a>        };
+<a href=#341 id=341 data-nosnippet>341</a>        <span class="kw">let </span>parts: Vec&lt;Vec&lt;[f64; <span class="number">2</span>]&gt;&gt; = <span class="kw">match </span>placement {
+<a href=#342 id=342 data-nosnippet>342</a>            LinePlacement::Line =&gt; line_anchors::clip_to_tile(<span class="kw-2">&amp;</span>lines),
+<a href=#343 id=343 data-nosnippet>343</a>            LinePlacement::Center =&gt; lines.into_iter().filter(|line| line.len() &gt; <span class="number">1</span>).collect(),
+<a href=#344 id=344 data-nosnippet>344</a>        };
+<a href=#345 id=345 data-nosnippet>345</a>        <span class="kw">let </span>repeat_key: <span class="prelude-ty">Option</span>&lt;Arc&lt;str&gt;&gt; = <span class="kw">match </span>placement {
+<a href=#346 id=346 data-nosnippet>346</a>            LinePlacement::Line =&gt; {
+<a href=#347 id=347 data-nosnippet>347</a>                layout::repeat_key(<span class="kw-2">&amp;</span><span class="self">self</span>.paint, <span class="kw-2">&amp;</span><span class="self">self</span>.properties, <span class="self">self</span>.zoom, <span class="kw-2">&amp;</span><span class="self">self</span>.atlas)
+<a href=#348 id=348 data-nosnippet>348</a>                    .map(Arc::from)
+<a href=#349 id=349 data-nosnippet>349</a>            }
+<a href=#350 id=350 data-nosnippet>350</a>            LinePlacement::Center =&gt; <span class="prelude-val">None</span>,
+<a href=#351 id=351 data-nosnippet>351</a>        };
+<a href=#352 id=352 data-nosnippet>352</a>        <span class="kw">for </span>part <span class="kw">in </span>parts {
+<a href=#353 id=353 data-nosnippet>353</a>            <span class="kw">let </span>anchors = <span class="kw">match </span>placement {
+<a href=#354 id=354 data-nosnippet>354</a>                LinePlacement::Line =&gt; line_anchors::line_anchors(<span class="kw-2">&amp;</span>part, params),
+<a href=#355 id=355 data-nosnippet>355</a>                LinePlacement::Center =&gt; line_anchors::center_anchor(<span class="kw-2">&amp;</span>part, params)
+<a href=#356 id=356 data-nosnippet>356</a>                    .into_iter()
+<a href=#357 id=357 data-nosnippet>357</a>                    .collect(),
+<a href=#358 id=358 data-nosnippet>358</a>            };
+<a href=#359 id=359 data-nosnippet>359</a>            <span class="kw">if </span>anchors.is_empty() {
+<a href=#360 id=360 data-nosnippet>360</a>                <span class="kw">continue</span>;
+<a href=#361 id=361 data-nosnippet>361</a>            }
+<a href=#362 id=362 data-nosnippet>362</a>            <span class="kw">let </span>polyline: Arc&lt;[[f32; <span class="number">2</span>]]&gt; = part
+<a href=#363 id=363 data-nosnippet>363</a>                .iter()
+<a href=#364 id=364 data-nosnippet>364</a>                .map(|point| [point[<span class="number">0</span>] <span class="kw">as </span>f32, point[<span class="number">1</span>] <span class="kw">as </span>f32])
+<a href=#365 id=365 data-nosnippet>365</a>                .collect();
+<a href=#366 id=366 data-nosnippet>366</a>            <span class="kw">for </span>anchor <span class="kw">in </span>anchors {
+<a href=#367 id=367 data-nosnippet>367</a>                <span class="kw">if </span><span class="self">self</span>.anchor_is_too_close(
+<a href=#368 id=368 data-nosnippet>368</a>                    repeat_key.as_deref(),
+<a href=#369 id=369 data-nosnippet>369</a>                    anchor.point,
+<a href=#370 id=370 data-nosnippet>370</a>                    params.spacing / <span class="number">2.0</span>,
+<a href=#371 id=371 data-nosnippet>371</a>                ) {
+<a href=#372 id=372 data-nosnippet>372</a>                    <span class="kw">continue</span>;
+<a href=#373 id=373 data-nosnippet>373</a>                }
+<a href=#374 id=374 data-nosnippet>374</a>                <span class="kw">let </span>distance = line_anchors::distance_to(<span class="kw-2">&amp;</span>part, anchor);
+<a href=#375 id=375 data-nosnippet>375</a>                <span class="self">self</span>.collect(
+<a href=#376 id=376 data-nosnippet>376</a>                    Point::new(anchor.point[<span class="number">0</span>], anchor.point[<span class="number">1</span>]),
+<a href=#377 id=377 data-nosnippet>377</a>                    anchor.angle <span class="kw">as </span>f32,
+<a href=#378 id=378 data-nosnippet>378</a>                    source,
+<a href=#379 id=379 data-nosnippet>379</a>                    (
+<a href=#380 id=380 data-nosnippet>380</a>                        <span class="prelude-val">Some</span>((polyline.clone(), distance <span class="kw">as </span>f32)),
+<a href=#381 id=381 data-nosnippet>381</a>                        repeat_key.as_ref(),
+<a href=#382 id=382 data-nosnippet>382</a>                    ),
+<a href=#383 id=383 data-nosnippet>383</a>                );
+<a href=#384 id=384 data-nosnippet>384</a>            }
+<a href=#385 id=385 data-nosnippet>385</a>        }
+<a href=#386 id=386 data-nosnippet>386</a>    }
+<a href=#387 id=387 data-nosnippet>387</a>}
+<a href=#388 id=388 data-nosnippet>388</a>
+<a href=#389 id=389 data-nosnippet>389</a><span class="doccomment">/// The rings of a polygon wound as GL JS winds them before it places labels: the outer ring
+<a href=#390 id=390 data-nosnippet>390</a>/// runs clockwise on screen and holes run counter-clockwise, so labels start at the same end.
+<a href=#391 id=391 data-nosnippet>391</a></span><span class="kw">fn </span>polygon_rings(polygon: <span class="kw-2">&amp;</span>geo_types::Polygon&lt;f64&gt;) -&gt; Vec&lt;Vec&lt;[f64; <span class="number">2</span>]&gt;&gt; {
+<a href=#392 id=392 data-nosnippet>392</a>    <span class="kw">let </span>wound = |ring: <span class="kw-2">&amp;</span>geo_types::LineString&lt;f64&gt;, outer: bool| {
+<a href=#393 id=393 data-nosnippet>393</a>        <span class="kw">let </span><span class="kw-2">mut </span>points: Vec&lt;[f64; <span class="number">2</span>]&gt; = ring.coords().map(|c| [c.x, c.y]).collect();
+<a href=#394 id=394 data-nosnippet>394</a>        <span class="kw">let </span>area: f64 = points
+<a href=#395 id=395 data-nosnippet>395</a>            .iter()
+<a href=#396 id=396 data-nosnippet>396</a>            .zip(points.iter().cycle().skip(<span class="number">1</span>))
+<a href=#397 id=397 data-nosnippet>397</a>            .map(|(a, b)| a[<span class="number">0</span>] * b[<span class="number">1</span>] - b[<span class="number">0</span>] * a[<span class="number">1</span>])
+<a href=#398 id=398 data-nosnippet>398</a>            .sum();
+<a href=#399 id=399 data-nosnippet>399</a>        <span class="comment">// Tile coordinates grow downwards, so positive area is clockwise on screen.
+<a href=#400 id=400 data-nosnippet>400</a>        </span><span class="kw">if </span>(area &gt; <span class="number">0.0</span>) != outer {
+<a href=#401 id=401 data-nosnippet>401</a>            points.reverse();
+<a href=#402 id=402 data-nosnippet>402</a>        }
+<a href=#403 id=403 data-nosnippet>403</a>        points
+<a href=#404 id=404 data-nosnippet>404</a>    };
+<a href=#405 id=405 data-nosnippet>405</a>    std::iter::once(wound(polygon.exterior(), <span class="bool-val">true</span>))
+<a href=#406 id=406 data-nosnippet>406</a>        .chain(polygon.interiors().iter().map(|ring| wound(ring, <span class="bool-val">false</span>)))
+<a href=#407 id=407 data-nosnippet>407</a>        .collect()
+<a href=#408 id=408 data-nosnippet>408</a>}
+<a href=#409 id=409 data-nosnippet>409</a>
+<a href=#410 id=410 data-nosnippet>410</a><span class="kw">impl </span>FeatureProcessor <span class="kw">for </span>TextTessellator {
+<a href=#411 id=411 data-nosnippet>411</a>    <span class="kw">fn </span>feature_end(<span class="kw-2">&amp;mut </span><span class="self">self</span>, idx: u64) -&gt; GeoResult&lt;()&gt; {
+<a href=#412 id=412 data-nosnippet>412</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(geometry) = <span class="self">self</span>.geo_writer.take_geometry() {
+<a href=#413 id=413 data-nosnippet>413</a>            <span class="kw">let </span>id = usize::try_from(idx)
+<a href=#414 id=414 data-nosnippet>414</a>                .ok()
+<a href=#415 id=415 data-nosnippet>415</a>                .and_then(|idx| <span class="self">self</span>.source_ids.get(idx).copied())
+<a href=#416 id=416 data-nosnippet>416</a>                .flatten();
+<a href=#417 id=417 data-nosnippet>417</a>            <span class="kw">let </span>kind = <span class="kw">match </span><span class="kw-2">&amp;</span>geometry {
+<a href=#418 id=418 data-nosnippet>418</a>                Geometry::Point(<span class="kw">_</span>) | Geometry::MultiPoint(<span class="kw">_</span>) =&gt; GeometryType::Point,
+<a href=#419 id=419 data-nosnippet>419</a>                Geometry::LineString(<span class="kw">_</span>) | Geometry::MultiLineString(<span class="kw">_</span>) =&gt; GeometryType::LineString,
+<a href=#420 id=420 data-nosnippet>420</a>                Geometry::Polygon(<span class="kw">_</span>) | Geometry::MultiPolygon(<span class="kw">_</span>) =&gt; GeometryType::Polygon,
+<a href=#421 id=421 data-nosnippet>421</a>                <span class="kw">_ </span>=&gt; GeometryType::Unknown,
+<a href=#422 id=422 data-nosnippet>422</a>            };
+<a href=#423 id=423 data-nosnippet>423</a>            <span class="kw">let </span>source = layout::SourceFeature { id, kind };
+<a href=#424 id=424 data-nosnippet>424</a>            <span class="kw">let </span>lines: <span class="prelude-ty">Option</span>&lt;Vec&lt;Vec&lt;[f64; <span class="number">2</span>]&gt;&gt;&gt; = <span class="kw">match </span><span class="kw-2">&amp;</span>geometry {
+<a href=#425 id=425 data-nosnippet>425</a>                Geometry::LineString(line) =&gt; {
+<a href=#426 id=426 data-nosnippet>426</a>                    <span class="prelude-val">Some</span>(<span class="macro">vec!</span>[line.coords().map(|c| [c.x, c.y]).collect()])
+<a href=#427 id=427 data-nosnippet>427</a>                }
+<a href=#428 id=428 data-nosnippet>428</a>                Geometry::MultiLineString(lines) =&gt; <span class="prelude-val">Some</span>(
+<a href=#429 id=429 data-nosnippet>429</a>                    lines
+<a href=#430 id=430 data-nosnippet>430</a>                        .iter()
+<a href=#431 id=431 data-nosnippet>431</a>                        .map(|line| line.coords().map(|c| [c.x, c.y]).collect())
+<a href=#432 id=432 data-nosnippet>432</a>                        .collect(),
+<a href=#433 id=433 data-nosnippet>433</a>                ),
+<a href=#434 id=434 data-nosnippet>434</a>                <span class="comment">// The rings of a polygon are lines to follow, as in GL JS.
+<a href=#435 id=435 data-nosnippet>435</a>                </span>Geometry::Polygon(polygon) =&gt; <span class="prelude-val">Some</span>(polygon_rings(polygon)),
+<a href=#436 id=436 data-nosnippet>436</a>                Geometry::MultiPolygon(polygons) =&gt; {
+<a href=#437 id=437 data-nosnippet>437</a>                    <span class="prelude-val">Some</span>(polygons.iter().flat_map(polygon_rings).collect())
+<a href=#438 id=438 data-nosnippet>438</a>                }
+<a href=#439 id=439 data-nosnippet>439</a>                <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+<a href=#440 id=440 data-nosnippet>440</a>            };
+<a href=#441 id=441 data-nosnippet>441</a>            <span class="kw">match </span>(line_placement(<span class="kw-2">&amp;</span><span class="self">self</span>.paint), lines) {
+<a href=#442 id=442 data-nosnippet>442</a>                <span class="comment">// Lines that continue one another are merged once all of them are known.
+<a href=#443 id=443 data-nosnippet>443</a>                </span>(<span class="prelude-val">Some</span>(LinePlacement::Line), <span class="prelude-val">Some</span>(lines)) =&gt; {
+<a href=#444 id=444 data-nosnippet>444</a>                    <span class="kw">let </span>text = <span class="self">self</span>.paint.label_among(
+<a href=#445 id=445 data-nosnippet>445</a>                        <span class="kw-2">&amp;</span><span class="self">self</span>.properties,
+<a href=#446 id=446 data-nosnippet>446</a>                        <span class="self">self</span>.zoom,
+<a href=#447 id=447 data-nosnippet>447</a>                        <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.atlas.icons),
+<a href=#448 id=448 data-nosnippet>448</a>                    );
+<a href=#449 id=449 data-nosnippet>449</a>                    <span class="kw">for </span>line <span class="kw">in </span>lines.into_iter().filter(|line| line.len() &gt; <span class="number">1</span>) {
+<a href=#450 id=450 data-nosnippet>450</a>                        <span class="self">self</span>.pending_lines.push(line_merge::PendingLine {
+<a href=#451 id=451 data-nosnippet>451</a>                            text: text.clone(),
+<a href=#452 id=452 data-nosnippet>452</a>                            line,
+<a href=#453 id=453 data-nosnippet>453</a>                            source,
+<a href=#454 id=454 data-nosnippet>454</a>                            properties: <span class="self">self</span>.properties.clone(),
+<a href=#455 id=455 data-nosnippet>455</a>                        });
+<a href=#456 id=456 data-nosnippet>456</a>                    }
+<a href=#457 id=457 data-nosnippet>457</a>                }
+<a href=#458 id=458 data-nosnippet>458</a>                (<span class="prelude-val">Some</span>(placement), <span class="prelude-val">Some</span>(lines)) =&gt; {
+<a href=#459 id=459 data-nosnippet>459</a>                    <span class="self">self</span>.collect_along_lines(lines, placement, source)
+<a href=#460 id=460 data-nosnippet>460</a>                }
+<a href=#461 id=461 data-nosnippet>461</a>                <span class="comment">// A point has no line to follow.
+<a href=#462 id=462 data-nosnippet>462</a>                </span>(<span class="prelude-val">Some</span>(<span class="kw">_</span>), <span class="prelude-val">None</span>) =&gt; {}
+<a href=#463 id=463 data-nosnippet>463</a>                (<span class="prelude-val">None</span>, <span class="kw">_</span>) =&gt; {
+<a href=#464 id=464 data-nosnippet>464</a>                    <span class="comment">// The buffer around a tile repeats the labels of its neighbours, which draw
+<a href=#465 id=465 data-nosnippet>465</a>                    // them from their own tiles.
+<a href=#466 id=466 data-nosnippet>466</a>                    </span><span class="kw">let </span>tile = <span class="number">0.0</span>..<span class="kw">crate</span>::coords::EXTENT;
+<a href=#467 id=467 data-nosnippet>467</a>                    <span class="kw">for </span>anchor <span class="kw">in </span>layout::anchors(<span class="kw-2">&amp;</span>geometry)
+<a href=#468 id=468 data-nosnippet>468</a>                        .into_iter()
+<a href=#469 id=469 data-nosnippet>469</a>                        .filter(|anchor| tile.contains(<span class="kw-2">&amp;</span>anchor.x()) &amp;&amp; tile.contains(<span class="kw-2">&amp;</span>anchor.y()))
+<a href=#470 id=470 data-nosnippet>470</a>                    {
+<a href=#471 id=471 data-nosnippet>471</a>                        <span class="self">self</span>.collect(anchor, <span class="number">0.0</span>, source, (<span class="prelude-val">None</span>, <span class="prelude-val">None</span>));
+<a href=#472 id=472 data-nosnippet>472</a>                    }
+<a href=#473 id=473 data-nosnippet>473</a>                }
+<a href=#474 id=474 data-nosnippet>474</a>            }
+<a href=#475 id=475 data-nosnippet>475</a>        }
+<a href=#476 id=476 data-nosnippet>476</a>        <span class="self">self</span>.properties.clear();
+<a href=#477 id=477 data-nosnippet>477</a>        <span class="prelude-val">Ok</span>(())
+<a href=#478 id=478 data-nosnippet>478</a>    }
+<a href=#479 id=479 data-nosnippet>479</a>}
+<a href=#480 id=480 data-nosnippet>480</a>
+<a href=#481 id=481 data-nosnippet>481</a><span class="attr">#[cfg(test)]
+<a href=#482 id=482 data-nosnippet>482</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>

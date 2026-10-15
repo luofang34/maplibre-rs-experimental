@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MIN_REPEAT_DISTANCE"],"struct":["Repeat","RepeatSpacing"],"type":["Positions"]};
