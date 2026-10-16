@@ -5,8 +5,8 @@ use super::{
     fill_extrusion::ExtrusionPass, texture::DemShading, AtmosphereShader, BackgroundPatternShader,
     BackgroundShader, CircleShader, FillExtrusionShader, FillPatternShader, FillShader,
     GlobeBackgroundPatternShader, GlobeBackgroundShader, HeatmapCompositeShader,
-    HeatmapDensityShader, LineShader, RasterShader, Shader, SkyShader, SymbolShader, TerrainShader,
-    TileMaskShader,
+    HeatmapDensityShader, LineShader, RasterShader, Shader, SkyShader, SymbolShader,
+    TerrainLineShader, TerrainShader, TileMaskShader,
 };
 
 /// A stage's WGSL and its entry point.
@@ -71,6 +71,7 @@ fn stages() -> Vec<Stage> {
             }),
         ),
         ("line", Box::new(LineShader { format })),
+        ("terrain line", Box::new(TerrainLineShader { format })),
         ("circle", Box::new(CircleShader { format })),
     ];
     let extrusions = [

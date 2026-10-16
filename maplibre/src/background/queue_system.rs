@@ -227,6 +227,7 @@ pub fn queue_system(
             clip_antimeridian: 1,
             line_width_scale: 1.0,
             line_units_per_pixel: 8.0 * view_state.zoom().scale_to_tile(&coords) as f32,
+            clip_region: crate::render::shaders::WHOLE_TILE,
         };
         let tile_metadata_buffer = renderer.queue.create_buffer_init(
             &renderer.device,

@@ -254,6 +254,7 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
                 line_width_scale: 1.0,
                 line_units_per_pixel: 8.0 * style_zoom.scale_to_tile(&shape.coords()) as f32,
                 clip_antimeridian: u32::from(u8::from(shape.coords().z) == 0),
+                clip_region: clip_region(shape),
             });
         };
 
@@ -426,4 +427,20 @@ fn ancestor_at(tile: WorldTileCoords, level: ZoomLevel) -> Option<WorldTileCoord
         current = current.get_parent()?;
     }
     Some(current)
+}
+
+/// The square of its tile a shape draws, in tile coordinates: that of the finer tile it is
+/// drawn within, or the whole tile.
+fn clip_region(shape: &TileShape) -> crate::render::shaders::Vec4f32 {
+    let Some(within) = shape.within else {
+        return crate::render::shaders::WHOLE_TILE;
+    };
+    let levels = i32::from(u8::from(within.z)) - i32::from(u8::from(shape.coords.z));
+    if levels <= 0 || within.x >> levels != shape.coords.x || within.y >> levels != shape.coords.y {
+        return crate::render::shaders::WHOLE_TILE;
+    }
+    let size = crate::coords::EXTENT / f64::from(1_u32 << levels);
+    let x = f64::from(within.x - (shape.coords.x << levels)) * size;
+    let y = f64::from(within.y - (shape.coords.y << levels)) * size;
+    [x as f32, y as f32, (x + size) as f32, (y + size) as f32]
 }

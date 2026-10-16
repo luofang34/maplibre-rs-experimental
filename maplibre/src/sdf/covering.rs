@@ -174,6 +174,7 @@ fn metadata(coords: WorldTileCoords, view: &ViewState) -> ShaderTileMetadata {
         line_width_scale: 1.0,
         line_units_per_pixel: 8.0 * zoom_factor,
         clip_antimeridian: u32::from(u8::from(coords.z) == 0),
+        clip_region: crate::render::shaders::WHOLE_TILE,
     }
 }
 

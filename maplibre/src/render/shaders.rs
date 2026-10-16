@@ -23,7 +23,7 @@ pub use circle::CircleShader;
 pub use fill::{FillPatternShader, FillShader};
 pub use fill_extrusion::{ExtrusionPass, FillExtrusionShader};
 pub use heatmap::{HeatmapCompositeShader, HeatmapDensityShader, DENSITY_FORMAT};
-pub use line::LineShader;
+pub use line::{LineShader, TerrainLineShader};
 pub use symbol::SymbolShader;
 pub use symbol_vertex::ShaderSymbolVertex;
 pub use terrain::TerrainShader;
@@ -31,7 +31,7 @@ pub use texture::{tile_texture_vertex_buffers, DemShader, DemShading, RasterShad
 pub use tile_mask::TileMaskShader;
 pub use vertex::{
     FillShaderFeatureMetadata, SDFShaderFeatureMetadata, ShaderLayerMetadata, ShaderTileMetadata,
-    ShaderVertex, POSED_GLYPH,
+    ShaderVertex, POSED_GLYPH, WHOLE_TILE,
 };
 
 use crate::{
