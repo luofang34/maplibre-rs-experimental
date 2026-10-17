@@ -17,10 +17,6 @@ use super::{
     validation::StyleValidationError,
     Style,
 };
-use crate::{
-    context::MapContext,
-    io::tile_retry::{self, RequestKind},
-};
 
 /// Why a change was refused.
 #[derive(Debug, Error)]
@@ -135,7 +131,8 @@ pub enum StyleMutationError {
 pub struct StyleChange {
     /// Layers that were added, removed, edited or moved.
     pub layers: Vec<String>,
-    /// Whether loaded vector tiles must be fetched again to show it.
+    /// Whether every loaded vector tile must be fetched again to show it. New data of a GeoJSON
+    /// source needs no flag: the map fetches again only the tiles the data changed in.
     pub redraw_tiles: bool,
     /// Layers that are gone, whose leftovers in loaded tiles must be dropped.
     pub removed_layers: Vec<String>,
@@ -538,31 +535,7 @@ fn set_member(document: &mut Value, section: &str, name: &str, value: Value) {
     }
 }
 
-impl MapContext {
-    /// Applies a style change and fetches loaded vector tiles again when it needs that; the old
-    /// content stays on screen until the new tiles arrive.
-    pub fn mutate_style(
-        &mut self,
-        apply: impl FnOnce(&mut Style) -> Result<StyleChange, StyleMutationError>,
-    ) -> Result<StyleChange, StyleMutationError> {
-        let change = apply(&mut self.style)?;
-        crate::render::frame_signals::mark_dirty(&mut self.world);
-        if !change.removed_layers.is_empty() {
-            crate::vector::content::purge_layers(&mut self.world, &change.removed_layers);
-        }
-        if change.redraw_tiles {
-            tile_retry::refresh(&mut self.world, RequestKind::Vector);
-        }
-        for name in &change.removed_raster_sources {
-            crate::raster::forget_source(&mut self.world, name);
-        }
-        for name in &change.reloaded_image_sources {
-            crate::raster::image_source::reload(&mut self.world, &self.style, name);
-        }
-        Ok(change)
-    }
-}
-
+mod apply;
 mod image_source;
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

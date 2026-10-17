@@ -259,18 +259,7 @@ impl GeoJsonIndex {
             .collect();
         if let Some(clusters) = clusters {
             let zoom = u32::from(u8::from(coords.z));
-            let tiles = f64::from(1_u32 << zoom.min(30));
-            let (west, north) = (
-                f64::from(coords.x.rem_euclid(1_i32 << zoom.min(30))) / tiles,
-                f64::from(coords.y) / tiles,
-            );
-            let margin = BUFFER / f64::from(EXTENT) / tiles;
-            let window = [
-                west - margin,
-                north - margin,
-                west + 1.0 / tiles + margin,
-                north + 1.0 / tiles + margin,
-            ];
+            let window = TileWindow::of(coords).bounds;
             let points = &self.clustered.as_ref()?.0;
             for item in clusters.within(zoom.min(24) as u8, window) {
                 let (position, id, properties) = match item {
@@ -298,15 +287,13 @@ impl GeoJsonIndex {
     /// Vector tile bytes with the features that touch `coords`, in document order.
     pub fn tile(&self, coords: WorldTileCoords) -> Vec<u8> {
         let zoom = u32::from(u8::from(coords.z));
-        let tiles = f64::from(1_u32 << zoom.min(30));
-        let column = f64::from(coords.x.rem_euclid(1_i32 << zoom.min(30)));
-        let row = f64::from(coords.y);
-        let margin = BUFFER / f64::from(EXTENT) / tiles;
-        let (west, north) = (column / tiles, row / tiles);
-        let window = AABB::from_corners(
-            [west - margin, north - margin],
-            [west + 1.0 / tiles + margin, north + 1.0 / tiles + margin],
-        );
+        let TileWindow {
+            tiles,
+            west,
+            north,
+            bounds,
+        } = TileWindow::of(coords);
+        let window = AABB::from_corners([bounds[0], bounds[1]], [bounds[2], bounds[3]]);
         let mut hits: Vec<u32> = self
             .tree
             .locate_in_envelope_intersecting(&window)
@@ -325,13 +312,7 @@ impl GeoJsonIndex {
             encoder.feature(feature, &to_tile);
         }
         if let Some((points, clusters)) = &self.clustered {
-            let window = [
-                window.lower()[0],
-                window.lower()[1],
-                window.upper()[0],
-                window.upper()[1],
-            ];
-            for item in clusters.within(zoom.min(24) as u8, window) {
+            for item in clusters.within(zoom.min(24) as u8, bounds) {
                 let feature = match item {
                     Clustered::Point(index, _) => points[index].clone(),
                     Clustered::Cluster(position, id, properties) => IndexedFeature {
@@ -483,7 +464,9 @@ fn bounds_of(geometry: &Geometry) -> Option<[f64; 4]> {
     })
 }
 
+pub(super) mod coverage;
 mod encode;
+use coverage::TileWindow;
 use encode::TileEncoder;
 
 use super::{
