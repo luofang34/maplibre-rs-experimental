@@ -112,12 +112,17 @@ pub fn terrain_region(
     dem_tile_size: u32,
     padding: ViewStatePadding,
 ) -> Result<Option<ViewRegion>, ProjectionStateError> {
-    covering_region(
+    let history = world
+        .resources
+        .get::<FrameLodHistory>()
+        .map(|history| &history.terrain);
+    covering_region_with_history(
         style,
         view_state,
         world,
         CoveringRequest::terrain(view_state.zoom().value(), f64::from(dem_tile_size)),
         padding,
+        history,
     )
 }
 
@@ -251,7 +256,6 @@ fn covering_region_with_history(
     padding: ViewStatePadding,
     history: Option<&LodHistory>,
 ) -> Result<Option<ViewRegion>, ProjectionStateError> {
-    let history = history.filter(|_| view_state.has_external_view());
     if !request.zoom_range.serves(request.level) {
         return Ok(None);
     }

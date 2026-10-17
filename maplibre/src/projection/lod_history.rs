@@ -13,18 +13,21 @@ pub(crate) struct LodHistory {
 
 impl LodHistory {
     pub(crate) fn new(tiles: &[WorldTileCoords]) -> Self {
+        // A tile is judged by its canonical coordinates, whichever copy of the world it was
+        // drawn in.
+        let leaves: HashSet<_> = tiles
+            .iter()
+            .filter_map(|tile| tile.wrapped().map(|(canonical, _)| canonical))
+            .collect();
         let mut refined = HashSet::new();
-        for tile in tiles {
+        for tile in &leaves {
             let mut parent = tile.get_parent();
             while let Some(tile) = parent {
                 refined.insert(tile);
                 parent = tile.get_parent();
             }
         }
-        Self {
-            leaves: tiles.iter().copied().collect(),
-            refined,
-        }
+        Self { leaves, refined }
     }
 
     pub(crate) fn bias(&self, tile: TileCoords) -> f64 {

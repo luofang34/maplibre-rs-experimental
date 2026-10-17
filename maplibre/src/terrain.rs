@@ -63,6 +63,7 @@ pub use interaction::{GestureAnchor, TerrainHit};
 use loaded_dem::DemRevision;
 pub use loaded_dem::LoadedDem;
 use populate_world_system::PopulateWorldSystem;
+pub(crate) use queue_system::surface_covering::drawn_surface_tiles;
 pub use queue_system::DrapeBudget;
 use request_system::RequestSystem;
 pub use request_system::{dem_ancestor_coords, dem_tile_coords, fetch_dem_apc};

@@ -271,3 +271,6 @@ mod camera_fields;
 
 #[path = "tests/navigation.rs"]
 mod navigation;
+
+#[path = "tests/lod_hysteresis.rs"]
+mod lod_hysteresis;
