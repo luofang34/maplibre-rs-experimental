@@ -132,22 +132,30 @@
 <a href=#132 id=132 data-nosnippet>132</a>    </span><span class="kw">pub </span>line_width_scale: f32,
 <a href=#133 id=133 data-nosnippet>133</a>    <span class="doccomment">/// Tile units per texture or viewport pixel for line dash lengths.
 <a href=#134 id=134 data-nosnippet>134</a>    </span><span class="kw">pub </span>line_units_per_pixel: f32,
-<a href=#135 id=135 data-nosnippet>135</a>}
-<a href=#136 id=136 data-nosnippet>136</a>
-<a href=#137 id=137 data-nosnippet>137</a><span class="kw">impl </span>ShaderTileMetadata {
-<a href=#138 id=138 data-nosnippet>138</a>    <span class="doccomment">/// Creates root-tile metadata for a 512-pixel viewport without antimeridian clipping.
-<a href=#139 id=139 data-nosnippet>139</a>    /// Callers drawing another tile or viewport must replace those fields before upload.
-<a href=#140 id=140 data-nosnippet>140</a>    </span><span class="kw">pub fn </span>new(transform: Mat4x4f32, zoom_factor: f32) -&gt; <span class="self">Self </span>{
-<a href=#141 id=141 data-nosnippet>141</a>        <span class="self">Self </span>{
-<a href=#142 id=142 data-nosnippet>142</a>            transform,
-<a href=#143 id=143 data-nosnippet>143</a>            zoom_factor,
-<a href=#144 id=144 data-nosnippet>144</a>            viewport_width: <span class="number">512.0</span>,
-<a href=#145 id=145 data-nosnippet>145</a>            viewport_height: <span class="number">512.0</span>,
-<a href=#146 id=146 data-nosnippet>146</a>            tile_mercator_coords: [<span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">1.0 </span>/ <span class="number">4096.0</span>, <span class="number">1.0 </span>/ <span class="number">4096.0</span>],
-<a href=#147 id=147 data-nosnippet>147</a>            clip_antimeridian: <span class="number">0</span>,
-<a href=#148 id=148 data-nosnippet>148</a>            line_width_scale: <span class="number">1.0</span>,
-<a href=#149 id=149 data-nosnippet>149</a>            line_units_per_pixel: <span class="number">8.0 </span>* zoom_factor,
-<a href=#150 id=150 data-nosnippet>150</a>        }
-<a href=#151 id=151 data-nosnippet>151</a>    }
-<a href=#152 id=152 data-nosnippet>152</a>}
+<a href=#135 id=135 data-nosnippet>135</a>    <span class="doccomment">/// The part of the tile the shape draws, as minimum and maximum tile coordinates: a tile
+<a href=#136 id=136 data-nosnippet>136</a>    /// drawn over a finer view tile covers only that tile's square of it. A line on the
+<a href=#137 id=137 data-nosnippet>137</a>    /// terrain clips itself to it, where a flat shape takes it from the stencil mask.
+<a href=#138 id=138 data-nosnippet>138</a>    </span><span class="kw">pub </span>clip_region: Vec4f32,
+<a href=#139 id=139 data-nosnippet>139</a>}
+<a href=#140 id=140 data-nosnippet>140</a>
+<a href=#141 id=141 data-nosnippet>141</a><span class="doccomment">/// The [`ShaderTileMetadata::clip_region`] of a shape that draws its whole tile.
+<a href=#142 id=142 data-nosnippet>142</a></span><span class="kw">pub const </span>WHOLE_TILE: Vec4f32 = [<span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">4096.0</span>, <span class="number">4096.0</span>];
+<a href=#143 id=143 data-nosnippet>143</a>
+<a href=#144 id=144 data-nosnippet>144</a><span class="kw">impl </span>ShaderTileMetadata {
+<a href=#145 id=145 data-nosnippet>145</a>    <span class="doccomment">/// Creates root-tile metadata for a 512-pixel viewport without antimeridian clipping.
+<a href=#146 id=146 data-nosnippet>146</a>    /// Callers drawing another tile or viewport must replace those fields before upload.
+<a href=#147 id=147 data-nosnippet>147</a>    </span><span class="kw">pub fn </span>new(transform: Mat4x4f32, zoom_factor: f32) -&gt; <span class="self">Self </span>{
+<a href=#148 id=148 data-nosnippet>148</a>        <span class="self">Self </span>{
+<a href=#149 id=149 data-nosnippet>149</a>            transform,
+<a href=#150 id=150 data-nosnippet>150</a>            zoom_factor,
+<a href=#151 id=151 data-nosnippet>151</a>            viewport_width: <span class="number">512.0</span>,
+<a href=#152 id=152 data-nosnippet>152</a>            viewport_height: <span class="number">512.0</span>,
+<a href=#153 id=153 data-nosnippet>153</a>            tile_mercator_coords: [<span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">1.0 </span>/ <span class="number">4096.0</span>, <span class="number">1.0 </span>/ <span class="number">4096.0</span>],
+<a href=#154 id=154 data-nosnippet>154</a>            clip_antimeridian: <span class="number">0</span>,
+<a href=#155 id=155 data-nosnippet>155</a>            line_width_scale: <span class="number">1.0</span>,
+<a href=#156 id=156 data-nosnippet>156</a>            line_units_per_pixel: <span class="number">8.0 </span>* zoom_factor,
+<a href=#157 id=157 data-nosnippet>157</a>            clip_region: WHOLE_TILE,
+<a href=#158 id=158 data-nosnippet>158</a>        }
+<a href=#159 id=159 data-nosnippet>159</a>    }
+<a href=#160 id=160 data-nosnippet>160</a>}
 </code></pre></div></section></main></body></html>

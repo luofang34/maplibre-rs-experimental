@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["POSED_GLYPH"],"struct":["FillShaderFeatureMetadata","SDFShaderFeatureMetadata","ShaderLayerMetadata","ShaderTileMetadata","ShaderVertex"]};
+window.SIDEBAR_ITEMS = {"constant":["POSED_GLYPH","WHOLE_TILE"],"struct":["FillShaderFeatureMetadata","SDFShaderFeatureMetadata","ShaderLayerMetadata","ShaderTileMetadata","ShaderVertex"]};
