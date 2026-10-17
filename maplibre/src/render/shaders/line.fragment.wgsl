@@ -17,6 +17,7 @@ struct FragmentInput {
     @location(9) across: f32,
     @location(10) blur: f32,
     @location(11) @interpolate(flat) floor_width: f32,
+    @location(12) tile_bounds: vec4<f32>,
 };
 
 struct Output {
@@ -25,6 +26,11 @@ struct Output {
 
 @fragment
 fn main(in: FragmentInput) -> Output {
+    // A line on the terrain draws once per terrain tile and view tile, each time only inside
+    // both, as the stencil masks of the flat map would clip it; those masks lie on the plane.
+    if any(in.tile_bounds < vec4<f32>(0.0)) || any(in.tile_bounds >= vec4<f32>(4096.0)) {
+        discard;
+    }
     // The distance from the line changes by this many nominal pixels per screen pixel, which
     // is how much the map-space line has narrowed or widened; the edge feather scales with it.
     let nominal_distance = length(in.v_normal) * in.v_width2.x;

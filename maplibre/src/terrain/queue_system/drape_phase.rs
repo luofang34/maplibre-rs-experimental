@@ -72,6 +72,7 @@ pub(super) fn drape_metadata(
                 } else {
                     (1.0 + EDGE_OVERLAP) as f32
                 },
+                clip_region: crate::render::shaders::WHOLE_TILE,
             });
         }
         slots.push(target_slots);

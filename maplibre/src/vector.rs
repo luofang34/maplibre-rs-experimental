@@ -64,13 +64,14 @@ impl Deref for VectorPipeline {
     }
 }
 
-struct LinePipeline(wgpu::RenderPipeline, wgpu::RenderPipeline);
-impl Deref for LinePipeline {
-    type Target = wgpu::RenderPipeline;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
+/// The pipelines of stroked lines, by where a line lies.
+struct LinePipeline {
+    /// On the map plane, or draped into the terrain textures.
+    flat: wgpu::RenderPipeline,
+    /// At heights of its own, as a bridge deck or tunnel is, tested against the terrain depth.
+    structure: wgpu::RenderPipeline,
+    /// On the terrain surface at its width in screen pixels, with a terrain tile bound third.
+    terrain: wgpu::RenderPipeline,
 }
 
 /// The passes of extruded polygons: depth, colour once per pixel, and the stencil reset.

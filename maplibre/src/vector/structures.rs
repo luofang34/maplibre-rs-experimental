@@ -4,6 +4,9 @@
 //! `tunnel`). This is renderer metadata, not a MapLibre line paint property. The profile
 //! joins sampled endpoints; the configured clearance is an inference, never an OSM `layer`
 //! converted to metres. A supplied absolute deck elevation overrides that inference.
+//!
+//! `overlay` instead keeps a line on the terrain surface at its style width in screen pixels,
+//! where a draped line has the ground width of that many pixels at the center of the view.
 use std::{
     hash::{Hash, Hasher},
     sync::Arc,
@@ -36,6 +39,9 @@ pub(crate) enum StructureKind {
     Surface,
     /// Rises from the terrain at the middle of its footprint, as a building does.
     Extrusion,
+    /// Lies on the terrain surface at the width its style gives in screen pixels, wherever on
+    /// the screen it is; the shader finds the surface under each vertex.
+    Overlay,
 }
 
 pub(crate) fn kind(layer: &StyleLayer) -> Option<StructureKind> {
@@ -56,8 +62,14 @@ pub(crate) fn kind(layer: &StyleLayer) -> Option<StructureKind> {
     {
         "bridge" => Some(StructureKind::Bridge),
         "tunnel" => Some(StructureKind::Tunnel),
+        "overlay" => Some(StructureKind::Overlay),
         _ => None,
     }
+}
+
+/// Whether a layer is drawn over the terrain surface rather than draped into its textures.
+pub(crate) fn is_overlay(layer: &StyleLayer) -> bool {
+    matches!(kind(layer), Some(StructureKind::Overlay))
 }
 
 #[derive(Default)]
@@ -131,7 +143,9 @@ fn prepare(tiles: &Tiles, style: &Style, sources: &[WorldTileCoords]) -> Vec<Spa
             let Some(layer) = style.layers.iter().find(|l| l.id == bucket.style_layer_id) else {
                 continue;
             };
-            let Some(kind) = kind(layer) else {
+            // An overlay finds the ground on the GPU, so its geometry stays as tessellated.
+            let Some(kind) = kind(layer).filter(|kind| !matches!(kind, StructureKind::Overlay))
+            else {
                 continue;
             };
             let count = bucket.buffer.buffer.vertices.len();
@@ -261,7 +275,7 @@ fn profile(kind: StructureKind, start: f64, end: f64, ground: f64, t: f64, clear
     match kind {
         StructureKind::Bridge => chord.max(ground + separation) + 0.5,
         StructureKind::Tunnel => chord.min(ground - separation) + 0.1,
-        StructureKind::Surface | StructureKind::Extrusion => ground,
+        StructureKind::Surface | StructureKind::Extrusion | StructureKind::Overlay => ground,
     }
 }
 

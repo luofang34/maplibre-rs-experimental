@@ -1,6 +1,6 @@
 #![allow(clippy::expect_used)]
 
-use super::super::{kind, number, StructureKind};
+use super::super::{is_overlay, kind, number, StructureKind};
 use crate::style::layer::StyleLayer;
 
 fn layer(metadata: serde_json::Value) -> StyleLayer {
@@ -23,6 +23,15 @@ fn string_structure_settings_retain_their_meaning() {
     );
     let tunnel = layer(serde_json::json!({"maplibre-rs:terrain-structure": "tunnel"}));
     assert!(matches!(kind(&tunnel), Some(StructureKind::Tunnel)));
+}
+
+#[test]
+fn an_overlay_line_lies_on_the_terrain_instead_of_its_drapes() {
+    let overlay = layer(serde_json::json!({"maplibre-rs:terrain-structure": "overlay"}));
+    assert!(matches!(kind(&overlay), Some(StructureKind::Overlay)));
+    assert!(is_overlay(&overlay));
+    let bridge = layer(serde_json::json!({"maplibre-rs:terrain-structure": "bridge"}));
+    assert!(!is_overlay(&bridge));
 }
 
 #[test]

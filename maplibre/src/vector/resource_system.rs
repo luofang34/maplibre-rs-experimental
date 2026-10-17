@@ -161,6 +161,32 @@ impl PipelineSetup<'_> {
         depth: bool,
         clipped: bool,
     ) -> wgpu::RenderPipeline {
+        self.describe(name, shader, depth, clipped)
+            .initialize_with_prefix_layouts(self.device, layouts)
+    }
+
+    /// The pipeline of a line on the terrain surface: tested against the terrain depth as a
+    /// structure is, with the terrain tile it lies on bound after the dash atlas. The stencil
+    /// masks lie on the map plane, below a line lifted onto hills, so the line clips itself to
+    /// its tiles instead.
+    fn create_terrain_line(&self, dashes: &wgpu::BindGroupLayout) -> wgpu::RenderPipeline {
+        let shader = shaders::TerrainLineShader {
+            format: self.format,
+        };
+        let mut descriptor = self.describe("terrain_line_pipeline", &shader, true, false);
+        descriptor.layout = Some(vec![
+            crate::terrain::resources::TerrainResources::bind_group_layout_entries(),
+        ]);
+        descriptor.initialize_with_prefix_layouts(self.device, &[self.projection, dashes])
+    }
+
+    fn describe(
+        &self,
+        name: &'static str,
+        shader: &impl Shader,
+        depth: bool,
+        clipped: bool,
+    ) -> crate::render::resource::RenderPipelineDescriptor {
         let pipeline = TilePipeline::new(
             name.into(),
             self.settings,
@@ -188,7 +214,7 @@ impl PipelineSetup<'_> {
                 state.depth_write_enabled = Some(false);
             }
         }
-        descriptor.initialize_with_prefix_layouts(self.device, layouts)
+        descriptor
     }
 
     fn create_pattern(&self) -> wgpu::RenderPipeline {
@@ -300,15 +326,16 @@ impl PipelineSetup<'_> {
             let shader = shaders::LineShader {
                 format: self.format,
             };
-            LinePipeline(
-                self.create("line_pipeline", &shader, &[self.projection, dashes], false),
-                self.create(
+            LinePipeline {
+                flat: self.create("line_pipeline", &shader, &[self.projection, dashes], false),
+                structure: self.create(
                     "spatial_line_pipeline",
                     &shader,
                     &[self.projection, dashes],
                     true,
                 ),
-            )
+                terrain: self.create_terrain_line(dashes),
+            }
         });
         circle.initialize(|| {
             // Circles cross tile boundaries, as in GL JS, where each point belongs to one tile.

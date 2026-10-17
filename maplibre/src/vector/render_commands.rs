@@ -1,5 +1,6 @@
 //! Fill, line and circle commands that skip draws until GPU geometry and paint are ready.
 use crate::{
+    coords::WorldTileCoords,
     render::{
         eventually::{Eventually, Eventually::Initialized},
         projection::ProjectionGpuResources,
@@ -144,7 +145,47 @@ impl<const RUNS: bool> RenderCommand<LayerItem> for DrawVectorTile<RUNS> {
     }
 }
 
-/// Binds the line pipeline and dash atlas; elevated structures use depth-aware drawing on terrain.
+/// Where a line lies this frame, which decides its pipeline and how it is drawn.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LineMode {
+    /// On the map plane, or draped into the terrain textures.
+    Flat,
+    /// At heights of its own over the terrain.
+    Structure,
+    /// On the terrain surface at its width in screen pixels.
+    Terrain,
+}
+
+fn line_mode(world: &World, item: &LayerItem) -> LineMode {
+    let terrain = world
+        .resources
+        .get::<crate::terrain::TerrainFrame>()
+        .is_some_and(|frame| frame.active);
+    if !terrain {
+        return LineMode::Flat;
+    }
+    let kind = world
+        .resources
+        .get::<Eventually<VectorBufferPool>>()
+        .and_then(|pool| match pool {
+            Initialized(pool) => pool.index().get_layers(item.tile.coords),
+            _ => None,
+        })
+        .and_then(|layers| {
+            layers
+                .iter()
+                .find(|entry| entry.style_layer.id == item.style_layer)
+        })
+        .and_then(|entry| super::structures::kind(&entry.style_layer));
+    match kind {
+        None => LineMode::Flat,
+        Some(super::structures::StructureKind::Overlay) => LineMode::Terrain,
+        Some(_) => LineMode::Structure,
+    }
+}
+
+/// Binds the line pipeline and dash atlas; elevated structures and lines on the terrain surface
+/// use depth-aware drawing on terrain.
 pub struct SetLineTilePipeline;
 impl RenderCommand<LayerItem> for SetLineTilePipeline {
     fn render<'w>(
@@ -161,24 +202,11 @@ impl RenderCommand<LayerItem> for SetLineTilePipeline {
             return RenderCommandResult::Failure;
         };
 
-        let spatial = world
-            .resources
-            .get::<crate::terrain::TerrainFrame>()
-            .is_some_and(|frame| frame.active)
-            && world
-                .resources
-                .get::<Eventually<VectorBufferPool>>()
-                .and_then(|pool| match pool {
-                    Initialized(pool) => pool.index().get_layers(item.tile.coords),
-                    _ => None,
-                })
-                .and_then(|layers| {
-                    layers
-                        .iter()
-                        .find(|entry| entry.style_layer.id == item.style_layer)
-                })
-                .is_some_and(|entry| super::structures::kind(&entry.style_layer).is_some());
-        pass.set_pipeline(if spatial { &pipeline.1 } else { &pipeline.0 });
+        pass.set_pipeline(match line_mode(world, item) {
+            LineMode::Flat => &pipeline.flat,
+            LineMode::Structure => &pipeline.structure,
+            LineMode::Terrain => &pipeline.terrain,
+        });
         pass.set_bind_group(
             0,
             projection_resources.bind_group_for(item.projection_binding()),
@@ -342,7 +370,52 @@ pub type DrawExtrusionClear = (
 );
 /// Binds and draws a polygon-fill bucket when both commands succeed.
 pub type DrawVectorTiles = (SetVectorTilePipeline, DrawVectorTile);
+/// Draws a stroked-line bucket. A line on the terrain is drawn once over each terrain tile its
+/// tile overlaps, with that tile's surface bound, since its vertices take their height from it.
+pub struct DrawLineTile;
+impl RenderCommand<LayerItem> for DrawLineTile {
+    fn render<'w>(
+        world: &'w World,
+        item: &LayerItem,
+        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
+    ) -> RenderCommandResult {
+        if line_mode(world, item) != LineMode::Terrain {
+            return DrawVectorTile::<true>::render(world, item, pass);
+        }
+        let Some(Initialized(terrain)) = world
+            .resources
+            .get::<Eventually<crate::terrain::resources::TerrainResources>>()
+        else {
+            return RenderCommandResult::Failure;
+        };
+        let tile = item.source_shape.coords();
+        for draw in terrain
+            .draws()
+            .iter()
+            .filter(|draw| overlaps(draw.coords, tile))
+        {
+            pass.set_bind_group(2, draw.bind_group.as_ref(), &[draw.uniform_offset]);
+            if let RenderCommandResult::Failure = DrawVectorTile::<true>::render(world, item, pass)
+            {
+                return RenderCommandResult::Failure;
+            }
+        }
+        RenderCommandResult::Success
+    }
+}
+
+/// Whether one tile contains the other.
+fn overlaps(a: WorldTileCoords, b: WorldTileCoords) -> bool {
+    let (coarse, fine) = if u8::from(a.z) <= u8::from(b.z) {
+        (a, b)
+    } else {
+        (b, a)
+    };
+    let levels = u8::from(fine.z) - u8::from(coarse.z);
+    fine.x >> levels == coarse.x && fine.y >> levels == coarse.y
+}
+
 /// Binds and draws a stroked-line bucket when both commands succeed.
-pub type DrawLineTiles = (SetLineTilePipeline, DrawVectorTile<true>);
+pub type DrawLineTiles = (SetLineTilePipeline, DrawLineTile);
 /// Binds and draws a circle bucket when both commands succeed.
 pub type DrawCircleTiles = (SetCircleTilePipeline, DrawVectorTile);
