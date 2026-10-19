@@ -12,7 +12,6 @@ use thiserror::Error;
 use super::index::{GeoJsonError, GeoJsonIndex};
 use crate::{
     context::MapContext,
-    io::tile_retry::{self, RequestKind},
     style::{
         source::{fresh_generation, GeoJsonData, GeoJsonSource, PromoteId, Source, GEOJSON_LAYER},
         Style,
@@ -115,7 +114,9 @@ pub struct GeoJsonDiff {
 }
 
 impl Style {
-    /// Replaces the data of a GeoJSON source, as GL JS `setData`.
+    /// Replaces the data of a GeoJSON source, as GL JS `setData`. Inside
+    /// [`MapContext::mutate_style`] this needs no `redraw_tiles`: the map fetches again only the
+    /// loaded tiles that features which changed lie in, as [`MapContext::set_geojson_data`] does.
     pub fn set_geojson_data(
         &mut self,
         source_name: &str,
@@ -164,26 +165,30 @@ impl Style {
 }
 
 impl MapContext {
-    /// Replaces a GeoJSON source's data and refreshes the tiles drawn from it. The old tiles stay
-    /// on screen until the new ones arrive.
+    /// Replaces a GeoJSON source's data and refreshes the loaded tiles it changes. The old tiles
+    /// stay on screen until the new ones arrive. For inline data without clusters those are the
+    /// tiles the added, changed and removed features lie in; otherwise every loaded tile.
     pub fn set_geojson_data(
         &mut self,
         source_name: &str,
         data: GeoJsonData,
     ) -> Result<(), SourceUpdateError> {
+        let before = GeoJsonVersions::of(&self.style);
         self.style.set_geojson_data(source_name, data)?;
-        tile_retry::refresh(&mut self.world, RequestKind::Vector);
+        before.refresh_changed(&self.style, &mut self.world);
         Ok(())
     }
 
-    /// Applies a feature diff to an inline GeoJSON source and refreshes its tiles.
+    /// Applies a feature diff to an inline GeoJSON source and refreshes the loaded tiles it
+    /// changes, as [`Self::set_geojson_data`] does.
     pub fn update_geojson_data(
         &mut self,
         source_name: &str,
         diff: &GeoJsonDiff,
     ) -> Result<(), SourceUpdateError> {
+        let before = GeoJsonVersions::of(&self.style);
         self.style.update_geojson_data(source_name, diff)?;
-        tile_retry::refresh(&mut self.world, RequestKind::Vector);
+        before.refresh_changed(&self.style, &mut self.world);
         Ok(())
     }
 }
@@ -288,6 +293,9 @@ fn apply(
     }
     Ok(())
 }
+
+mod refresh;
+pub(crate) use refresh::GeoJsonVersions;
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;

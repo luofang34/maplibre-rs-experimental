@@ -20,6 +20,7 @@ fn tile() -> Vec<u8> {
     .encode_to_vec()
 }
 
+mod geojson_data;
 mod render;
 mod rendered_query;
 mod tests;
