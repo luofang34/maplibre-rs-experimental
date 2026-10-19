@@ -12,283 +12,291 @@
 <a href=#12 id=12 data-nosnippet>12</a><span class="kw">use </span><span class="kw">super</span>::index::{GeoJsonError, GeoJsonIndex};
 <a href=#13 id=13 data-nosnippet>13</a><span class="kw">use crate</span>::{
 <a href=#14 id=14 data-nosnippet>14</a>    context::MapContext,
-<a href=#15 id=15 data-nosnippet>15</a>    io::tile_retry::{<span class="self">self</span>, RequestKind},
-<a href=#16 id=16 data-nosnippet>16</a>    style::{
-<a href=#17 id=17 data-nosnippet>17</a>        source::{fresh_generation, GeoJsonData, GeoJsonSource, PromoteId, Source, GEOJSON_LAYER},
-<a href=#18 id=18 data-nosnippet>18</a>        Style,
-<a href=#19 id=19 data-nosnippet>19</a>    },
-<a href=#20 id=20 data-nosnippet>20</a>};
-<a href=#21 id=21 data-nosnippet>21</a>
-<a href=#22 id=22 data-nosnippet>22</a><span class="doccomment">/// Why a source's data could not be changed. The source keeps its previous data.
-<a href=#23 id=23 data-nosnippet>23</a></span><span class="attr">#[derive(Debug, Error)]
-<a href=#24 id=24 data-nosnippet>24</a></span><span class="kw">pub enum </span>SourceUpdateError {
-<a href=#25 id=25 data-nosnippet>25</a>    <span class="doccomment">/// The style declares no source with this name.
-<a href=#26 id=26 data-nosnippet>26</a>    </span><span class="attr">#[error(<span class="string">"style has no source `{source_name}`"</span>)]
-<a href=#27 id=27 data-nosnippet>27</a>    </span>UnknownSource {
-<a href=#28 id=28 data-nosnippet>28</a>        <span class="doccomment">/// The requested name.
-<a href=#29 id=29 data-nosnippet>29</a>        </span>source_name: String,
-<a href=#30 id=30 data-nosnippet>30</a>    },
-<a href=#31 id=31 data-nosnippet>31</a>    <span class="doccomment">/// The source is not a GeoJSON source.
-<a href=#32 id=32 data-nosnippet>32</a>    </span><span class="attr">#[error(<span class="string">"source `{source_name}` is not a GeoJSON source"</span>)]
-<a href=#33 id=33 data-nosnippet>33</a>    </span>NotGeoJson {
-<a href=#34 id=34 data-nosnippet>34</a>        <span class="doccomment">/// The requested name.
-<a href=#35 id=35 data-nosnippet>35</a>        </span>source_name: String,
-<a href=#36 id=36 data-nosnippet>36</a>    },
-<a href=#37 id=37 data-nosnippet>37</a>    <span class="doccomment">/// A feature diff needs the document itself, which a URL source does not hold.
-<a href=#38 id=38 data-nosnippet>38</a>    </span><span class="attr">#[error(
-<a href=#39 id=39 data-nosnippet>39</a>        <span class="string">"source `{source_name}` loads its data from a URL, so it cannot be updated by feature"
-<a href=#40 id=40 data-nosnippet>40</a>    </span>)]
-<a href=#41 id=41 data-nosnippet>41</a>    </span>NotInline {
-<a href=#42 id=42 data-nosnippet>42</a>        <span class="doccomment">/// The requested name.
-<a href=#43 id=43 data-nosnippet>43</a>        </span>source_name: String,
-<a href=#44 id=44 data-nosnippet>44</a>    },
-<a href=#45 id=45 data-nosnippet>45</a>    <span class="doccomment">/// A feature to add carries no id to identify it by.
-<a href=#46 id=46 data-nosnippet>46</a>    </span><span class="attr">#[error(<span class="string">"a feature added to `{source_name}` has no id"</span>)]
-<a href=#47 id=47 data-nosnippet>47</a>    </span>MissingId {
-<a href=#48 id=48 data-nosnippet>48</a>        <span class="doccomment">/// The source being changed.
-<a href=#49 id=49 data-nosnippet>49</a>        </span>source_name: String,
-<a href=#50 id=50 data-nosnippet>50</a>    },
-<a href=#51 id=51 data-nosnippet>51</a>    <span class="doccomment">/// An update names a feature the source does not hold.
-<a href=#52 id=52 data-nosnippet>52</a>    </span><span class="attr">#[error(<span class="string">"source `{source_name}` has no feature with id {id}"</span>)]
-<a href=#53 id=53 data-nosnippet>53</a>    </span>UnknownFeature {
-<a href=#54 id=54 data-nosnippet>54</a>        <span class="doccomment">/// The source being changed.
-<a href=#55 id=55 data-nosnippet>55</a>        </span>source_name: String,
-<a href=#56 id=56 data-nosnippet>56</a>        <span class="doccomment">/// The id that matched nothing.
-<a href=#57 id=57 data-nosnippet>57</a>        </span>id: Value,
-<a href=#58 id=58 data-nosnippet>58</a>    },
-<a href=#59 id=59 data-nosnippet>59</a>    <span class="doccomment">/// The resulting document cannot be indexed.
-<a href=#60 id=60 data-nosnippet>60</a>    </span><span class="attr">#[error(<span class="string">"the new data of `{source_name}` is invalid"</span>)]
-<a href=#61 id=61 data-nosnippet>61</a>    </span>Invalid {
-<a href=#62 id=62 data-nosnippet>62</a>        <span class="doccomment">/// The source being changed.
-<a href=#63 id=63 data-nosnippet>63</a>        </span>source_name: String,
-<a href=#64 id=64 data-nosnippet>64</a>        <span class="doccomment">/// What is wrong with the document.
-<a href=#65 id=65 data-nosnippet>65</a>        </span><span class="attr">#[source]
-<a href=#66 id=66 data-nosnippet>66</a>        </span>source: GeoJsonError,
-<a href=#67 id=67 data-nosnippet>67</a>    },
-<a href=#68 id=68 data-nosnippet>68</a>}
-<a href=#69 id=69 data-nosnippet>69</a>
-<a href=#70 id=70 data-nosnippet>70</a><span class="doccomment">/// A property to set on a feature, as GL JS `addOrUpdateProperties`.
-<a href=#71 id=71 data-nosnippet>71</a></span><span class="attr">#[derive(Debug, Clone, Deserialize)]
-<a href=#72 id=72 data-nosnippet>72</a></span><span class="kw">pub struct </span>PropertyValue {
-<a href=#73 id=73 data-nosnippet>73</a>    <span class="doccomment">/// Property name.
-<a href=#74 id=74 data-nosnippet>74</a>    </span><span class="kw">pub </span>key: String,
-<a href=#75 id=75 data-nosnippet>75</a>    <span class="doccomment">/// New value.
-<a href=#76 id=76 data-nosnippet>76</a>    </span><span class="kw">pub </span>value: Value,
-<a href=#77 id=77 data-nosnippet>77</a>}
-<a href=#78 id=78 data-nosnippet>78</a>
-<a href=#79 id=79 data-nosnippet>79</a><span class="doccomment">/// A change to one feature, as GL JS `GeoJSONFeatureDiff`.
-<a href=#80 id=80 data-nosnippet>80</a></span><span class="attr">#[derive(Debug, Clone, Default, Deserialize)]
-<a href=#81 id=81 data-nosnippet>81</a>#[serde(rename_all = <span class="string">"camelCase"</span>)]
-<a href=#82 id=82 data-nosnippet>82</a></span><span class="kw">pub struct </span>FeatureUpdate {
-<a href=#83 id=83 data-nosnippet>83</a>    <span class="doccomment">/// Id of the feature to change.
-<a href=#84 id=84 data-nosnippet>84</a>    </span><span class="kw">pub </span>id: Value,
-<a href=#85 id=85 data-nosnippet>85</a>    <span class="doccomment">/// Replaces the geometry.
-<a href=#86 id=86 data-nosnippet>86</a>    </span><span class="attr">#[serde(default)]
-<a href=#87 id=87 data-nosnippet>87</a>    </span><span class="kw">pub </span>new_geometry: <span class="prelude-ty">Option</span>&lt;Value&gt;,
-<a href=#88 id=88 data-nosnippet>88</a>    <span class="doccomment">/// Properties to set.
-<a href=#89 id=89 data-nosnippet>89</a>    </span><span class="attr">#[serde(default)]
-<a href=#90 id=90 data-nosnippet>90</a>    </span><span class="kw">pub </span>add_or_update_properties: Vec&lt;PropertyValue&gt;,
-<a href=#91 id=91 data-nosnippet>91</a>    <span class="doccomment">/// Properties to drop.
-<a href=#92 id=92 data-nosnippet>92</a>    </span><span class="attr">#[serde(default)]
-<a href=#93 id=93 data-nosnippet>93</a>    </span><span class="kw">pub </span>remove_properties: Vec&lt;String&gt;,
-<a href=#94 id=94 data-nosnippet>94</a>    <span class="doccomment">/// Drops every property before the others are set.
-<a href=#95 id=95 data-nosnippet>95</a>    </span><span class="attr">#[serde(default)]
-<a href=#96 id=96 data-nosnippet>96</a>    </span><span class="kw">pub </span>remove_all_properties: bool,
-<a href=#97 id=97 data-nosnippet>97</a>}
-<a href=#98 id=98 data-nosnippet>98</a>
-<a href=#99 id=99 data-nosnippet>99</a><span class="doccomment">/// Feature-level changes to an inline source, as GL JS `GeoJSONSourceDiff`.
-<a href=#100 id=100 data-nosnippet>100</a></span><span class="attr">#[derive(Debug, Clone, Default, Deserialize)]
-<a href=#101 id=101 data-nosnippet>101</a>#[serde(rename_all = <span class="string">"camelCase"</span>)]
-<a href=#102 id=102 data-nosnippet>102</a></span><span class="kw">pub struct </span>GeoJsonDiff {
-<a href=#103 id=103 data-nosnippet>103</a>    <span class="doccomment">/// Drops every feature first.
-<a href=#104 id=104 data-nosnippet>104</a>    </span><span class="attr">#[serde(default)]
-<a href=#105 id=105 data-nosnippet>105</a>    </span><span class="kw">pub </span>remove_all: bool,
-<a href=#106 id=106 data-nosnippet>106</a>    <span class="doccomment">/// Ids of features to drop.
-<a href=#107 id=107 data-nosnippet>107</a>    </span><span class="attr">#[serde(default)]
-<a href=#108 id=108 data-nosnippet>108</a>    </span><span class="kw">pub </span>remove: Vec&lt;Value&gt;,
-<a href=#109 id=109 data-nosnippet>109</a>    <span class="doccomment">/// Features to add; one with an existing id replaces it.
-<a href=#110 id=110 data-nosnippet>110</a>    </span><span class="attr">#[serde(default)]
-<a href=#111 id=111 data-nosnippet>111</a>    </span><span class="kw">pub </span>add: Vec&lt;Value&gt;,
-<a href=#112 id=112 data-nosnippet>112</a>    <span class="doccomment">/// Features to change.
-<a href=#113 id=113 data-nosnippet>113</a>    </span><span class="attr">#[serde(default)]
-<a href=#114 id=114 data-nosnippet>114</a>    </span><span class="kw">pub </span>update: Vec&lt;FeatureUpdate&gt;,
-<a href=#115 id=115 data-nosnippet>115</a>}
-<a href=#116 id=116 data-nosnippet>116</a>
-<a href=#117 id=117 data-nosnippet>117</a><span class="kw">impl </span>Style {
-<a href=#118 id=118 data-nosnippet>118</a>    <span class="doccomment">/// Replaces the data of a GeoJSON source, as GL JS `setData`.
-<a href=#119 id=119 data-nosnippet>119</a>    </span><span class="kw">pub fn </span>set_geojson_data(
-<a href=#120 id=120 data-nosnippet>120</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-<a href=#121 id=121 data-nosnippet>121</a>        source_name: <span class="kw-2">&amp;</span>str,
-<a href=#122 id=122 data-nosnippet>122</a>        data: GeoJsonData,
-<a href=#123 id=123 data-nosnippet>123</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), SourceUpdateError&gt; {
-<a href=#124 id=124 data-nosnippet>124</a>        <span class="kw">let </span>source = geojson_source_mut(<span class="self">self</span>, source_name)<span class="question-mark">?</span>;
-<a href=#125 id=125 data-nosnippet>125</a>        <span class="kw">if let </span>GeoJsonData::Inline(document) = <span class="kw-2">&amp;</span>data {
-<a href=#126 id=126 data-nosnippet>126</a>            GeoJsonIndex::from_value(document, source).map_err(|source| {
-<a href=#127 id=127 data-nosnippet>127</a>                SourceUpdateError::Invalid {
-<a href=#128 id=128 data-nosnippet>128</a>                    source_name: source_name.to_owned(),
-<a href=#129 id=129 data-nosnippet>129</a>                    source,
-<a href=#130 id=130 data-nosnippet>130</a>                }
-<a href=#131 id=131 data-nosnippet>131</a>            })<span class="question-mark">?</span>;
-<a href=#132 id=132 data-nosnippet>132</a>        }
-<a href=#133 id=133 data-nosnippet>133</a>        source.data = data;
-<a href=#134 id=134 data-nosnippet>134</a>        source.generation = fresh_generation();
-<a href=#135 id=135 data-nosnippet>135</a>        <span class="prelude-val">Ok</span>(())
-<a href=#136 id=136 data-nosnippet>136</a>    }
-<a href=#137 id=137 data-nosnippet>137</a>
-<a href=#138 id=138 data-nosnippet>138</a>    <span class="doccomment">/// Adds, changes and removes features of an inline source, as GL JS `updateData`.
-<a href=#139 id=139 data-nosnippet>139</a>    </span><span class="kw">pub fn </span>update_geojson_data(
-<a href=#140 id=140 data-nosnippet>140</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-<a href=#141 id=141 data-nosnippet>141</a>        source_name: <span class="kw-2">&amp;</span>str,
-<a href=#142 id=142 data-nosnippet>142</a>        diff: <span class="kw-2">&amp;</span>GeoJsonDiff,
-<a href=#143 id=143 data-nosnippet>143</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), SourceUpdateError&gt; {
-<a href=#144 id=144 data-nosnippet>144</a>        <span class="kw">let </span>source = geojson_source_mut(<span class="self">self</span>, source_name)<span class="question-mark">?</span>;
-<a href=#145 id=145 data-nosnippet>145</a>        <span class="kw">let </span>GeoJsonData::Inline(document) = <span class="kw-2">&amp;</span>source.data <span class="kw">else </span>{
-<a href=#146 id=146 data-nosnippet>146</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(SourceUpdateError::NotInline {
-<a href=#147 id=147 data-nosnippet>147</a>                source_name: source_name.to_owned(),
-<a href=#148 id=148 data-nosnippet>148</a>            });
-<a href=#149 id=149 data-nosnippet>149</a>        };
-<a href=#150 id=150 data-nosnippet>150</a>        <span class="kw">let </span>promoted = promoted_property(source);
-<a href=#151 id=151 data-nosnippet>151</a>        <span class="kw">let </span><span class="kw-2">mut </span>features = feature_list(document).into_owned();
-<a href=#152 id=152 data-nosnippet>152</a>        apply(<span class="kw-2">&amp;mut </span>features, diff, promoted.as_deref(), source_name)<span class="question-mark">?</span>;
-<a href=#153 id=153 data-nosnippet>153</a>        <span class="kw">let </span>updated = <span class="macro">json!</span>({<span class="string">"type"</span>: <span class="string">"FeatureCollection"</span>, <span class="string">"features"</span>: features});
-<a href=#154 id=154 data-nosnippet>154</a>        GeoJsonIndex::from_value(<span class="kw-2">&amp;</span>updated, source).map_err(|source| {
-<a href=#155 id=155 data-nosnippet>155</a>            SourceUpdateError::Invalid {
-<a href=#156 id=156 data-nosnippet>156</a>                source_name: source_name.to_owned(),
-<a href=#157 id=157 data-nosnippet>157</a>                source,
-<a href=#158 id=158 data-nosnippet>158</a>            }
-<a href=#159 id=159 data-nosnippet>159</a>        })<span class="question-mark">?</span>;
-<a href=#160 id=160 data-nosnippet>160</a>        source.data = GeoJsonData::Inline(Arc::new(updated));
-<a href=#161 id=161 data-nosnippet>161</a>        source.generation = fresh_generation();
-<a href=#162 id=162 data-nosnippet>162</a>        <span class="prelude-val">Ok</span>(())
-<a href=#163 id=163 data-nosnippet>163</a>    }
-<a href=#164 id=164 data-nosnippet>164</a>}
-<a href=#165 id=165 data-nosnippet>165</a>
-<a href=#166 id=166 data-nosnippet>166</a><span class="kw">impl </span>MapContext {
-<a href=#167 id=167 data-nosnippet>167</a>    <span class="doccomment">/// Replaces a GeoJSON source's data and refreshes the tiles drawn from it. The old tiles stay
-<a href=#168 id=168 data-nosnippet>168</a>    /// on screen until the new ones arrive.
-<a href=#169 id=169 data-nosnippet>169</a>    </span><span class="kw">pub fn </span>set_geojson_data(
-<a href=#170 id=170 data-nosnippet>170</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-<a href=#171 id=171 data-nosnippet>171</a>        source_name: <span class="kw-2">&amp;</span>str,
-<a href=#172 id=172 data-nosnippet>172</a>        data: GeoJsonData,
-<a href=#173 id=173 data-nosnippet>173</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), SourceUpdateError&gt; {
-<a href=#174 id=174 data-nosnippet>174</a>        <span class="self">self</span>.style.set_geojson_data(source_name, data)<span class="question-mark">?</span>;
-<a href=#175 id=175 data-nosnippet>175</a>        tile_retry::refresh(<span class="kw-2">&amp;mut </span><span class="self">self</span>.world, RequestKind::Vector);
-<a href=#176 id=176 data-nosnippet>176</a>        <span class="prelude-val">Ok</span>(())
-<a href=#177 id=177 data-nosnippet>177</a>    }
-<a href=#178 id=178 data-nosnippet>178</a>
-<a href=#179 id=179 data-nosnippet>179</a>    <span class="doccomment">/// Applies a feature diff to an inline GeoJSON source and refreshes its tiles.
-<a href=#180 id=180 data-nosnippet>180</a>    </span><span class="kw">pub fn </span>update_geojson_data(
-<a href=#181 id=181 data-nosnippet>181</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-<a href=#182 id=182 data-nosnippet>182</a>        source_name: <span class="kw-2">&amp;</span>str,
-<a href=#183 id=183 data-nosnippet>183</a>        diff: <span class="kw-2">&amp;</span>GeoJsonDiff,
-<a href=#184 id=184 data-nosnippet>184</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), SourceUpdateError&gt; {
-<a href=#185 id=185 data-nosnippet>185</a>        <span class="self">self</span>.style.update_geojson_data(source_name, diff)<span class="question-mark">?</span>;
-<a href=#186 id=186 data-nosnippet>186</a>        tile_retry::refresh(<span class="kw-2">&amp;mut </span><span class="self">self</span>.world, RequestKind::Vector);
-<a href=#187 id=187 data-nosnippet>187</a>        <span class="prelude-val">Ok</span>(())
-<a href=#188 id=188 data-nosnippet>188</a>    }
-<a href=#189 id=189 data-nosnippet>189</a>}
-<a href=#190 id=190 data-nosnippet>190</a>
-<a href=#191 id=191 data-nosnippet>191</a><span class="kw">fn </span>geojson_source_mut&lt;<span class="lifetime">'a</span>&gt;(
-<a href=#192 id=192 data-nosnippet>192</a>    style: <span class="kw-2">&amp;</span><span class="lifetime">'a </span><span class="kw-2">mut </span>Style,
-<a href=#193 id=193 data-nosnippet>193</a>    name: <span class="kw-2">&amp;</span>str,
-<a href=#194 id=194 data-nosnippet>194</a>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">'a </span><span class="kw-2">mut </span>GeoJsonSource, SourceUpdateError&gt; {
-<a href=#195 id=195 data-nosnippet>195</a>    <span class="kw">match </span>style.sources.get_mut(name) {
-<a href=#196 id=196 data-nosnippet>196</a>        <span class="prelude-val">Some</span>(Source::GeoJson(source)) =&gt; <span class="prelude-val">Ok</span>(source),
-<a href=#197 id=197 data-nosnippet>197</a>        <span class="prelude-val">Some</span>(<span class="kw">_</span>) =&gt; <span class="prelude-val">Err</span>(SourceUpdateError::NotGeoJson {
-<a href=#198 id=198 data-nosnippet>198</a>            source_name: name.to_owned(),
-<a href=#199 id=199 data-nosnippet>199</a>        }),
-<a href=#200 id=200 data-nosnippet>200</a>        <span class="prelude-val">None </span>=&gt; <span class="prelude-val">Err</span>(SourceUpdateError::UnknownSource {
-<a href=#201 id=201 data-nosnippet>201</a>            source_name: name.to_owned(),
-<a href=#202 id=202 data-nosnippet>202</a>        }),
-<a href=#203 id=203 data-nosnippet>203</a>    }
-<a href=#204 id=204 data-nosnippet>204</a>}
-<a href=#205 id=205 data-nosnippet>205</a>
-<a href=#206 id=206 data-nosnippet>206</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>promoted_property(source: <span class="kw-2">&amp;</span>GeoJsonSource) -&gt; <span class="prelude-ty">Option</span>&lt;String&gt; {
-<a href=#207 id=207 data-nosnippet>207</a>    <span class="kw">match </span>source.promote_id.as_ref()<span class="question-mark">? </span>{
-<a href=#208 id=208 data-nosnippet>208</a>        PromoteId::Property(name) =&gt; <span class="prelude-val">Some</span>(name.clone()),
-<a href=#209 id=209 data-nosnippet>209</a>        PromoteId::PerLayer(map) =&gt; map.get(GEOJSON_LAYER).cloned(),
-<a href=#210 id=210 data-nosnippet>210</a>    }
-<a href=#211 id=211 data-nosnippet>211</a>}
-<a href=#212 id=212 data-nosnippet>212</a>
-<a href=#213 id=213 data-nosnippet>213</a><span class="doccomment">/// The features of a document, whichever GeoJSON root it has.
-<a href=#214 id=214 data-nosnippet>214</a></span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>feature_list(document: <span class="kw-2">&amp;</span>Value) -&gt; Cow&lt;<span class="lifetime">'_</span>, [Value]&gt; {
-<a href=#215 id=215 data-nosnippet>215</a>    <span class="kw">match </span>document.get(<span class="string">"type"</span>).and_then(Value::as_str) {
-<a href=#216 id=216 data-nosnippet>216</a>        <span class="prelude-val">Some</span>(<span class="string">"FeatureCollection"</span>) =&gt; document
-<a href=#217 id=217 data-nosnippet>217</a>            .get(<span class="string">"features"</span>)
-<a href=#218 id=218 data-nosnippet>218</a>            .and_then(Value::as_array)
-<a href=#219 id=219 data-nosnippet>219</a>            .map_or(Cow::Owned(Vec::new()), |features| {
-<a href=#220 id=220 data-nosnippet>220</a>                Cow::Borrowed(features.as_slice())
-<a href=#221 id=221 data-nosnippet>221</a>            }),
-<a href=#222 id=222 data-nosnippet>222</a>        <span class="prelude-val">Some</span>(<span class="string">"Feature"</span>) =&gt; Cow::Owned(<span class="macro">vec!</span>[document.clone()]),
-<a href=#223 id=223 data-nosnippet>223</a>        <span class="prelude-val">Some</span>(<span class="kw">_</span>) =&gt; Cow::Owned(<span class="macro">vec!</span>[
-<a href=#224 id=224 data-nosnippet>224</a>            <span class="macro">json!</span>({<span class="string">"type"</span>: <span class="string">"Feature"</span>, <span class="string">"properties"</span>: {}, <span class="string">"geometry"</span>: document}),
-<a href=#225 id=225 data-nosnippet>225</a>        ]),
-<a href=#226 id=226 data-nosnippet>226</a>        <span class="prelude-val">None </span>=&gt; Cow::Owned(Vec::new()),
-<a href=#227 id=227 data-nosnippet>227</a>    }
-<a href=#228 id=228 data-nosnippet>228</a>}
-<a href=#229 id=229 data-nosnippet>229</a>
-<a href=#230 id=230 data-nosnippet>230</a><span class="doccomment">/// The value a feature is addressed by: the promoted property, else its `id`.
-<a href=#231 id=231 data-nosnippet>231</a></span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>feature_id(feature: <span class="kw-2">&amp;</span>Value, promoted: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>str&gt;) -&gt; <span class="prelude-ty">Option</span>&lt;Value&gt; {
-<a href=#232 id=232 data-nosnippet>232</a>    promoted
-<a href=#233 id=233 data-nosnippet>233</a>        .and_then(|name| feature.get(<span class="string">"properties"</span>)<span class="question-mark">?</span>.get(name))
-<a href=#234 id=234 data-nosnippet>234</a>        .filter(|value| !value.is_null())
-<a href=#235 id=235 data-nosnippet>235</a>        .or_else(|| feature.get(<span class="string">"id"</span>))
-<a href=#236 id=236 data-nosnippet>236</a>        .cloned()
-<a href=#237 id=237 data-nosnippet>237</a>}
-<a href=#238 id=238 data-nosnippet>238</a>
-<a href=#239 id=239 data-nosnippet>239</a><span class="kw">fn </span>apply(
-<a href=#240 id=240 data-nosnippet>240</a>    features: <span class="kw-2">&amp;mut </span>Vec&lt;Value&gt;,
-<a href=#241 id=241 data-nosnippet>241</a>    diff: <span class="kw-2">&amp;</span>GeoJsonDiff,
-<a href=#242 id=242 data-nosnippet>242</a>    promoted: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>str&gt;,
-<a href=#243 id=243 data-nosnippet>243</a>    source_name: <span class="kw-2">&amp;</span>str,
-<a href=#244 id=244 data-nosnippet>244</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), SourceUpdateError&gt; {
-<a href=#245 id=245 data-nosnippet>245</a>    <span class="kw">if </span>diff.remove_all {
-<a href=#246 id=246 data-nosnippet>246</a>        features.clear();
-<a href=#247 id=247 data-nosnippet>247</a>    }
-<a href=#248 id=248 data-nosnippet>248</a>    features.retain(|feature| {
-<a href=#249 id=249 data-nosnippet>249</a>        feature_id(feature, promoted).is_none_or(|id| !diff.remove.contains(<span class="kw-2">&amp;</span>id))
-<a href=#250 id=250 data-nosnippet>250</a>    });
-<a href=#251 id=251 data-nosnippet>251</a>    <span class="kw">for </span>added <span class="kw">in </span><span class="kw-2">&amp;</span>diff.add {
-<a href=#252 id=252 data-nosnippet>252</a>        <span class="kw">let </span>id = feature_id(added, promoted).ok_or_else(|| SourceUpdateError::MissingId {
-<a href=#253 id=253 data-nosnippet>253</a>            source_name: source_name.to_owned(),
-<a href=#254 id=254 data-nosnippet>254</a>        })<span class="question-mark">?</span>;
-<a href=#255 id=255 data-nosnippet>255</a>        <span class="kw">match </span>features
-<a href=#256 id=256 data-nosnippet>256</a>            .iter_mut()
-<a href=#257 id=257 data-nosnippet>257</a>            .find(|feature| feature_id(feature, promoted).as_ref() == <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>id))
-<a href=#258 id=258 data-nosnippet>258</a>        {
-<a href=#259 id=259 data-nosnippet>259</a>            <span class="prelude-val">Some</span>(existing) =&gt; <span class="kw-2">*</span>existing = added.clone(),
-<a href=#260 id=260 data-nosnippet>260</a>            <span class="prelude-val">None </span>=&gt; features.push(added.clone()),
-<a href=#261 id=261 data-nosnippet>261</a>        }
-<a href=#262 id=262 data-nosnippet>262</a>    }
-<a href=#263 id=263 data-nosnippet>263</a>    <span class="kw">for </span>update <span class="kw">in </span><span class="kw-2">&amp;</span>diff.update {
-<a href=#264 id=264 data-nosnippet>264</a>        <span class="kw">let </span>feature = features
-<a href=#265 id=265 data-nosnippet>265</a>            .iter_mut()
-<a href=#266 id=266 data-nosnippet>266</a>            .find(|feature| feature_id(feature, promoted).as_ref() == <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>update.id))
-<a href=#267 id=267 data-nosnippet>267</a>            .ok_or_else(|| SourceUpdateError::UnknownFeature {
-<a href=#268 id=268 data-nosnippet>268</a>                source_name: source_name.to_owned(),
-<a href=#269 id=269 data-nosnippet>269</a>                id: update.id.clone(),
-<a href=#270 id=270 data-nosnippet>270</a>            })<span class="question-mark">?</span>;
-<a href=#271 id=271 data-nosnippet>271</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(geometry) = <span class="kw-2">&amp;</span>update.new_geometry {
-<a href=#272 id=272 data-nosnippet>272</a>            feature[<span class="string">"geometry"</span>] = geometry.clone();
-<a href=#273 id=273 data-nosnippet>273</a>        }
-<a href=#274 id=274 data-nosnippet>274</a>        <span class="kw">if </span>update.remove_all_properties {
-<a href=#275 id=275 data-nosnippet>275</a>            feature[<span class="string">"properties"</span>] = <span class="macro">json!</span>({});
-<a href=#276 id=276 data-nosnippet>276</a>        }
-<a href=#277 id=277 data-nosnippet>277</a>        <span class="kw">if </span>!feature[<span class="string">"properties"</span>].is_object() {
-<a href=#278 id=278 data-nosnippet>278</a>            feature[<span class="string">"properties"</span>] = <span class="macro">json!</span>({});
-<a href=#279 id=279 data-nosnippet>279</a>        }
-<a href=#280 id=280 data-nosnippet>280</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(properties) = feature[<span class="string">"properties"</span>].as_object_mut() {
-<a href=#281 id=281 data-nosnippet>281</a>            <span class="kw">for </span>name <span class="kw">in </span><span class="kw-2">&amp;</span>update.remove_properties {
-<a href=#282 id=282 data-nosnippet>282</a>                properties.remove(name);
-<a href=#283 id=283 data-nosnippet>283</a>            }
-<a href=#284 id=284 data-nosnippet>284</a>            <span class="kw">for </span>property <span class="kw">in </span><span class="kw-2">&amp;</span>update.add_or_update_properties {
-<a href=#285 id=285 data-nosnippet>285</a>                properties.insert(property.key.clone(), property.value.clone());
-<a href=#286 id=286 data-nosnippet>286</a>            }
-<a href=#287 id=287 data-nosnippet>287</a>        }
-<a href=#288 id=288 data-nosnippet>288</a>    }
-<a href=#289 id=289 data-nosnippet>289</a>    <span class="prelude-val">Ok</span>(())
-<a href=#290 id=290 data-nosnippet>290</a>}
-<a href=#291 id=291 data-nosnippet>291</a>
-<a href=#292 id=292 data-nosnippet>292</a><span class="attr">#[cfg(all(test, not(target_arch = <span class="string">"wasm32"</span>)))]
-<a href=#293 id=293 data-nosnippet>293</a></span><span class="kw">mod </span>tests;
+<a href=#15 id=15 data-nosnippet>15</a>    style::{
+<a href=#16 id=16 data-nosnippet>16</a>        source::{fresh_generation, GeoJsonData, GeoJsonSource, PromoteId, Source, GEOJSON_LAYER},
+<a href=#17 id=17 data-nosnippet>17</a>        Style,
+<a href=#18 id=18 data-nosnippet>18</a>    },
+<a href=#19 id=19 data-nosnippet>19</a>};
+<a href=#20 id=20 data-nosnippet>20</a>
+<a href=#21 id=21 data-nosnippet>21</a><span class="doccomment">/// Why a source's data could not be changed. The source keeps its previous data.
+<a href=#22 id=22 data-nosnippet>22</a></span><span class="attr">#[derive(Debug, Error)]
+<a href=#23 id=23 data-nosnippet>23</a></span><span class="kw">pub enum </span>SourceUpdateError {
+<a href=#24 id=24 data-nosnippet>24</a>    <span class="doccomment">/// The style declares no source with this name.
+<a href=#25 id=25 data-nosnippet>25</a>    </span><span class="attr">#[error(<span class="string">"style has no source `{source_name}`"</span>)]
+<a href=#26 id=26 data-nosnippet>26</a>    </span>UnknownSource {
+<a href=#27 id=27 data-nosnippet>27</a>        <span class="doccomment">/// The requested name.
+<a href=#28 id=28 data-nosnippet>28</a>        </span>source_name: String,
+<a href=#29 id=29 data-nosnippet>29</a>    },
+<a href=#30 id=30 data-nosnippet>30</a>    <span class="doccomment">/// The source is not a GeoJSON source.
+<a href=#31 id=31 data-nosnippet>31</a>    </span><span class="attr">#[error(<span class="string">"source `{source_name}` is not a GeoJSON source"</span>)]
+<a href=#32 id=32 data-nosnippet>32</a>    </span>NotGeoJson {
+<a href=#33 id=33 data-nosnippet>33</a>        <span class="doccomment">/// The requested name.
+<a href=#34 id=34 data-nosnippet>34</a>        </span>source_name: String,
+<a href=#35 id=35 data-nosnippet>35</a>    },
+<a href=#36 id=36 data-nosnippet>36</a>    <span class="doccomment">/// A feature diff needs the document itself, which a URL source does not hold.
+<a href=#37 id=37 data-nosnippet>37</a>    </span><span class="attr">#[error(
+<a href=#38 id=38 data-nosnippet>38</a>        <span class="string">"source `{source_name}` loads its data from a URL, so it cannot be updated by feature"
+<a href=#39 id=39 data-nosnippet>39</a>    </span>)]
+<a href=#40 id=40 data-nosnippet>40</a>    </span>NotInline {
+<a href=#41 id=41 data-nosnippet>41</a>        <span class="doccomment">/// The requested name.
+<a href=#42 id=42 data-nosnippet>42</a>        </span>source_name: String,
+<a href=#43 id=43 data-nosnippet>43</a>    },
+<a href=#44 id=44 data-nosnippet>44</a>    <span class="doccomment">/// A feature to add carries no id to identify it by.
+<a href=#45 id=45 data-nosnippet>45</a>    </span><span class="attr">#[error(<span class="string">"a feature added to `{source_name}` has no id"</span>)]
+<a href=#46 id=46 data-nosnippet>46</a>    </span>MissingId {
+<a href=#47 id=47 data-nosnippet>47</a>        <span class="doccomment">/// The source being changed.
+<a href=#48 id=48 data-nosnippet>48</a>        </span>source_name: String,
+<a href=#49 id=49 data-nosnippet>49</a>    },
+<a href=#50 id=50 data-nosnippet>50</a>    <span class="doccomment">/// An update names a feature the source does not hold.
+<a href=#51 id=51 data-nosnippet>51</a>    </span><span class="attr">#[error(<span class="string">"source `{source_name}` has no feature with id {id}"</span>)]
+<a href=#52 id=52 data-nosnippet>52</a>    </span>UnknownFeature {
+<a href=#53 id=53 data-nosnippet>53</a>        <span class="doccomment">/// The source being changed.
+<a href=#54 id=54 data-nosnippet>54</a>        </span>source_name: String,
+<a href=#55 id=55 data-nosnippet>55</a>        <span class="doccomment">/// The id that matched nothing.
+<a href=#56 id=56 data-nosnippet>56</a>        </span>id: Value,
+<a href=#57 id=57 data-nosnippet>57</a>    },
+<a href=#58 id=58 data-nosnippet>58</a>    <span class="doccomment">/// The resulting document cannot be indexed.
+<a href=#59 id=59 data-nosnippet>59</a>    </span><span class="attr">#[error(<span class="string">"the new data of `{source_name}` is invalid"</span>)]
+<a href=#60 id=60 data-nosnippet>60</a>    </span>Invalid {
+<a href=#61 id=61 data-nosnippet>61</a>        <span class="doccomment">/// The source being changed.
+<a href=#62 id=62 data-nosnippet>62</a>        </span>source_name: String,
+<a href=#63 id=63 data-nosnippet>63</a>        <span class="doccomment">/// What is wrong with the document.
+<a href=#64 id=64 data-nosnippet>64</a>        </span><span class="attr">#[source]
+<a href=#65 id=65 data-nosnippet>65</a>        </span>source: GeoJsonError,
+<a href=#66 id=66 data-nosnippet>66</a>    },
+<a href=#67 id=67 data-nosnippet>67</a>}
+<a href=#68 id=68 data-nosnippet>68</a>
+<a href=#69 id=69 data-nosnippet>69</a><span class="doccomment">/// A property to set on a feature, as GL JS `addOrUpdateProperties`.
+<a href=#70 id=70 data-nosnippet>70</a></span><span class="attr">#[derive(Debug, Clone, Deserialize)]
+<a href=#71 id=71 data-nosnippet>71</a></span><span class="kw">pub struct </span>PropertyValue {
+<a href=#72 id=72 data-nosnippet>72</a>    <span class="doccomment">/// Property name.
+<a href=#73 id=73 data-nosnippet>73</a>    </span><span class="kw">pub </span>key: String,
+<a href=#74 id=74 data-nosnippet>74</a>    <span class="doccomment">/// New value.
+<a href=#75 id=75 data-nosnippet>75</a>    </span><span class="kw">pub </span>value: Value,
+<a href=#76 id=76 data-nosnippet>76</a>}
+<a href=#77 id=77 data-nosnippet>77</a>
+<a href=#78 id=78 data-nosnippet>78</a><span class="doccomment">/// A change to one feature, as GL JS `GeoJSONFeatureDiff`.
+<a href=#79 id=79 data-nosnippet>79</a></span><span class="attr">#[derive(Debug, Clone, Default, Deserialize)]
+<a href=#80 id=80 data-nosnippet>80</a>#[serde(rename_all = <span class="string">"camelCase"</span>)]
+<a href=#81 id=81 data-nosnippet>81</a></span><span class="kw">pub struct </span>FeatureUpdate {
+<a href=#82 id=82 data-nosnippet>82</a>    <span class="doccomment">/// Id of the feature to change.
+<a href=#83 id=83 data-nosnippet>83</a>    </span><span class="kw">pub </span>id: Value,
+<a href=#84 id=84 data-nosnippet>84</a>    <span class="doccomment">/// Replaces the geometry.
+<a href=#85 id=85 data-nosnippet>85</a>    </span><span class="attr">#[serde(default)]
+<a href=#86 id=86 data-nosnippet>86</a>    </span><span class="kw">pub </span>new_geometry: <span class="prelude-ty">Option</span>&lt;Value&gt;,
+<a href=#87 id=87 data-nosnippet>87</a>    <span class="doccomment">/// Properties to set.
+<a href=#88 id=88 data-nosnippet>88</a>    </span><span class="attr">#[serde(default)]
+<a href=#89 id=89 data-nosnippet>89</a>    </span><span class="kw">pub </span>add_or_update_properties: Vec&lt;PropertyValue&gt;,
+<a href=#90 id=90 data-nosnippet>90</a>    <span class="doccomment">/// Properties to drop.
+<a href=#91 id=91 data-nosnippet>91</a>    </span><span class="attr">#[serde(default)]
+<a href=#92 id=92 data-nosnippet>92</a>    </span><span class="kw">pub </span>remove_properties: Vec&lt;String&gt;,
+<a href=#93 id=93 data-nosnippet>93</a>    <span class="doccomment">/// Drops every property before the others are set.
+<a href=#94 id=94 data-nosnippet>94</a>    </span><span class="attr">#[serde(default)]
+<a href=#95 id=95 data-nosnippet>95</a>    </span><span class="kw">pub </span>remove_all_properties: bool,
+<a href=#96 id=96 data-nosnippet>96</a>}
+<a href=#97 id=97 data-nosnippet>97</a>
+<a href=#98 id=98 data-nosnippet>98</a><span class="doccomment">/// Feature-level changes to an inline source, as GL JS `GeoJSONSourceDiff`.
+<a href=#99 id=99 data-nosnippet>99</a></span><span class="attr">#[derive(Debug, Clone, Default, Deserialize)]
+<a href=#100 id=100 data-nosnippet>100</a>#[serde(rename_all = <span class="string">"camelCase"</span>)]
+<a href=#101 id=101 data-nosnippet>101</a></span><span class="kw">pub struct </span>GeoJsonDiff {
+<a href=#102 id=102 data-nosnippet>102</a>    <span class="doccomment">/// Drops every feature first.
+<a href=#103 id=103 data-nosnippet>103</a>    </span><span class="attr">#[serde(default)]
+<a href=#104 id=104 data-nosnippet>104</a>    </span><span class="kw">pub </span>remove_all: bool,
+<a href=#105 id=105 data-nosnippet>105</a>    <span class="doccomment">/// Ids of features to drop.
+<a href=#106 id=106 data-nosnippet>106</a>    </span><span class="attr">#[serde(default)]
+<a href=#107 id=107 data-nosnippet>107</a>    </span><span class="kw">pub </span>remove: Vec&lt;Value&gt;,
+<a href=#108 id=108 data-nosnippet>108</a>    <span class="doccomment">/// Features to add; one with an existing id replaces it.
+<a href=#109 id=109 data-nosnippet>109</a>    </span><span class="attr">#[serde(default)]
+<a href=#110 id=110 data-nosnippet>110</a>    </span><span class="kw">pub </span>add: Vec&lt;Value&gt;,
+<a href=#111 id=111 data-nosnippet>111</a>    <span class="doccomment">/// Features to change.
+<a href=#112 id=112 data-nosnippet>112</a>    </span><span class="attr">#[serde(default)]
+<a href=#113 id=113 data-nosnippet>113</a>    </span><span class="kw">pub </span>update: Vec&lt;FeatureUpdate&gt;,
+<a href=#114 id=114 data-nosnippet>114</a>}
+<a href=#115 id=115 data-nosnippet>115</a>
+<a href=#116 id=116 data-nosnippet>116</a><span class="kw">impl </span>Style {
+<a href=#117 id=117 data-nosnippet>117</a>    <span class="doccomment">/// Replaces the data of a GeoJSON source, as GL JS `setData`. Inside
+<a href=#118 id=118 data-nosnippet>118</a>    /// [`MapContext::mutate_style`] this needs no `redraw_tiles`: the map fetches again only the
+<a href=#119 id=119 data-nosnippet>119</a>    /// loaded tiles that features which changed lie in, as [`MapContext::set_geojson_data`] does.
+<a href=#120 id=120 data-nosnippet>120</a>    </span><span class="kw">pub fn </span>set_geojson_data(
+<a href=#121 id=121 data-nosnippet>121</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+<a href=#122 id=122 data-nosnippet>122</a>        source_name: <span class="kw-2">&amp;</span>str,
+<a href=#123 id=123 data-nosnippet>123</a>        data: GeoJsonData,
+<a href=#124 id=124 data-nosnippet>124</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), SourceUpdateError&gt; {
+<a href=#125 id=125 data-nosnippet>125</a>        <span class="kw">let </span>source = geojson_source_mut(<span class="self">self</span>, source_name)<span class="question-mark">?</span>;
+<a href=#126 id=126 data-nosnippet>126</a>        <span class="kw">if let </span>GeoJsonData::Inline(document) = <span class="kw-2">&amp;</span>data {
+<a href=#127 id=127 data-nosnippet>127</a>            GeoJsonIndex::from_value(document, source).map_err(|source| {
+<a href=#128 id=128 data-nosnippet>128</a>                SourceUpdateError::Invalid {
+<a href=#129 id=129 data-nosnippet>129</a>                    source_name: source_name.to_owned(),
+<a href=#130 id=130 data-nosnippet>130</a>                    source,
+<a href=#131 id=131 data-nosnippet>131</a>                }
+<a href=#132 id=132 data-nosnippet>132</a>            })<span class="question-mark">?</span>;
+<a href=#133 id=133 data-nosnippet>133</a>        }
+<a href=#134 id=134 data-nosnippet>134</a>        source.data = data;
+<a href=#135 id=135 data-nosnippet>135</a>        source.generation = fresh_generation();
+<a href=#136 id=136 data-nosnippet>136</a>        <span class="prelude-val">Ok</span>(())
+<a href=#137 id=137 data-nosnippet>137</a>    }
+<a href=#138 id=138 data-nosnippet>138</a>
+<a href=#139 id=139 data-nosnippet>139</a>    <span class="doccomment">/// Adds, changes and removes features of an inline source, as GL JS `updateData`.
+<a href=#140 id=140 data-nosnippet>140</a>    </span><span class="kw">pub fn </span>update_geojson_data(
+<a href=#141 id=141 data-nosnippet>141</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+<a href=#142 id=142 data-nosnippet>142</a>        source_name: <span class="kw-2">&amp;</span>str,
+<a href=#143 id=143 data-nosnippet>143</a>        diff: <span class="kw-2">&amp;</span>GeoJsonDiff,
+<a href=#144 id=144 data-nosnippet>144</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), SourceUpdateError&gt; {
+<a href=#145 id=145 data-nosnippet>145</a>        <span class="kw">let </span>source = geojson_source_mut(<span class="self">self</span>, source_name)<span class="question-mark">?</span>;
+<a href=#146 id=146 data-nosnippet>146</a>        <span class="kw">let </span>GeoJsonData::Inline(document) = <span class="kw-2">&amp;</span>source.data <span class="kw">else </span>{
+<a href=#147 id=147 data-nosnippet>147</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(SourceUpdateError::NotInline {
+<a href=#148 id=148 data-nosnippet>148</a>                source_name: source_name.to_owned(),
+<a href=#149 id=149 data-nosnippet>149</a>            });
+<a href=#150 id=150 data-nosnippet>150</a>        };
+<a href=#151 id=151 data-nosnippet>151</a>        <span class="kw">let </span>promoted = promoted_property(source);
+<a href=#152 id=152 data-nosnippet>152</a>        <span class="kw">let </span><span class="kw-2">mut </span>features = feature_list(document).into_owned();
+<a href=#153 id=153 data-nosnippet>153</a>        apply(<span class="kw-2">&amp;mut </span>features, diff, promoted.as_deref(), source_name)<span class="question-mark">?</span>;
+<a href=#154 id=154 data-nosnippet>154</a>        <span class="kw">let </span>updated = <span class="macro">json!</span>({<span class="string">"type"</span>: <span class="string">"FeatureCollection"</span>, <span class="string">"features"</span>: features});
+<a href=#155 id=155 data-nosnippet>155</a>        GeoJsonIndex::from_value(<span class="kw-2">&amp;</span>updated, source).map_err(|source| {
+<a href=#156 id=156 data-nosnippet>156</a>            SourceUpdateError::Invalid {
+<a href=#157 id=157 data-nosnippet>157</a>                source_name: source_name.to_owned(),
+<a href=#158 id=158 data-nosnippet>158</a>                source,
+<a href=#159 id=159 data-nosnippet>159</a>            }
+<a href=#160 id=160 data-nosnippet>160</a>        })<span class="question-mark">?</span>;
+<a href=#161 id=161 data-nosnippet>161</a>        source.data = GeoJsonData::Inline(Arc::new(updated));
+<a href=#162 id=162 data-nosnippet>162</a>        source.generation = fresh_generation();
+<a href=#163 id=163 data-nosnippet>163</a>        <span class="prelude-val">Ok</span>(())
+<a href=#164 id=164 data-nosnippet>164</a>    }
+<a href=#165 id=165 data-nosnippet>165</a>}
+<a href=#166 id=166 data-nosnippet>166</a>
+<a href=#167 id=167 data-nosnippet>167</a><span class="kw">impl </span>MapContext {
+<a href=#168 id=168 data-nosnippet>168</a>    <span class="doccomment">/// Replaces a GeoJSON source's data and refreshes the loaded tiles it changes. The old tiles
+<a href=#169 id=169 data-nosnippet>169</a>    /// stay on screen until the new ones arrive. For inline data without clusters those are the
+<a href=#170 id=170 data-nosnippet>170</a>    /// tiles the added, changed and removed features lie in; otherwise every loaded tile.
+<a href=#171 id=171 data-nosnippet>171</a>    </span><span class="kw">pub fn </span>set_geojson_data(
+<a href=#172 id=172 data-nosnippet>172</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+<a href=#173 id=173 data-nosnippet>173</a>        source_name: <span class="kw-2">&amp;</span>str,
+<a href=#174 id=174 data-nosnippet>174</a>        data: GeoJsonData,
+<a href=#175 id=175 data-nosnippet>175</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), SourceUpdateError&gt; {
+<a href=#176 id=176 data-nosnippet>176</a>        <span class="kw">let </span>before = GeoJsonVersions::of(<span class="kw-2">&amp;</span><span class="self">self</span>.style);
+<a href=#177 id=177 data-nosnippet>177</a>        <span class="self">self</span>.style.set_geojson_data(source_name, data)<span class="question-mark">?</span>;
+<a href=#178 id=178 data-nosnippet>178</a>        before.refresh_changed(<span class="kw-2">&amp;</span><span class="self">self</span>.style, <span class="kw-2">&amp;mut </span><span class="self">self</span>.world);
+<a href=#179 id=179 data-nosnippet>179</a>        <span class="prelude-val">Ok</span>(())
+<a href=#180 id=180 data-nosnippet>180</a>    }
+<a href=#181 id=181 data-nosnippet>181</a>
+<a href=#182 id=182 data-nosnippet>182</a>    <span class="doccomment">/// Applies a feature diff to an inline GeoJSON source and refreshes the loaded tiles it
+<a href=#183 id=183 data-nosnippet>183</a>    /// changes, as [`Self::set_geojson_data`] does.
+<a href=#184 id=184 data-nosnippet>184</a>    </span><span class="kw">pub fn </span>update_geojson_data(
+<a href=#185 id=185 data-nosnippet>185</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+<a href=#186 id=186 data-nosnippet>186</a>        source_name: <span class="kw-2">&amp;</span>str,
+<a href=#187 id=187 data-nosnippet>187</a>        diff: <span class="kw-2">&amp;</span>GeoJsonDiff,
+<a href=#188 id=188 data-nosnippet>188</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), SourceUpdateError&gt; {
+<a href=#189 id=189 data-nosnippet>189</a>        <span class="kw">let </span>before = GeoJsonVersions::of(<span class="kw-2">&amp;</span><span class="self">self</span>.style);
+<a href=#190 id=190 data-nosnippet>190</a>        <span class="self">self</span>.style.update_geojson_data(source_name, diff)<span class="question-mark">?</span>;
+<a href=#191 id=191 data-nosnippet>191</a>        before.refresh_changed(<span class="kw-2">&amp;</span><span class="self">self</span>.style, <span class="kw-2">&amp;mut </span><span class="self">self</span>.world);
+<a href=#192 id=192 data-nosnippet>192</a>        <span class="prelude-val">Ok</span>(())
+<a href=#193 id=193 data-nosnippet>193</a>    }
+<a href=#194 id=194 data-nosnippet>194</a>}
+<a href=#195 id=195 data-nosnippet>195</a>
+<a href=#196 id=196 data-nosnippet>196</a><span class="kw">fn </span>geojson_source_mut&lt;<span class="lifetime">'a</span>&gt;(
+<a href=#197 id=197 data-nosnippet>197</a>    style: <span class="kw-2">&amp;</span><span class="lifetime">'a </span><span class="kw-2">mut </span>Style,
+<a href=#198 id=198 data-nosnippet>198</a>    name: <span class="kw-2">&amp;</span>str,
+<a href=#199 id=199 data-nosnippet>199</a>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">'a </span><span class="kw-2">mut </span>GeoJsonSource, SourceUpdateError&gt; {
+<a href=#200 id=200 data-nosnippet>200</a>    <span class="kw">match </span>style.sources.get_mut(name) {
+<a href=#201 id=201 data-nosnippet>201</a>        <span class="prelude-val">Some</span>(Source::GeoJson(source)) =&gt; <span class="prelude-val">Ok</span>(source),
+<a href=#202 id=202 data-nosnippet>202</a>        <span class="prelude-val">Some</span>(<span class="kw">_</span>) =&gt; <span class="prelude-val">Err</span>(SourceUpdateError::NotGeoJson {
+<a href=#203 id=203 data-nosnippet>203</a>            source_name: name.to_owned(),
+<a href=#204 id=204 data-nosnippet>204</a>        }),
+<a href=#205 id=205 data-nosnippet>205</a>        <span class="prelude-val">None </span>=&gt; <span class="prelude-val">Err</span>(SourceUpdateError::UnknownSource {
+<a href=#206 id=206 data-nosnippet>206</a>            source_name: name.to_owned(),
+<a href=#207 id=207 data-nosnippet>207</a>        }),
+<a href=#208 id=208 data-nosnippet>208</a>    }
+<a href=#209 id=209 data-nosnippet>209</a>}
+<a href=#210 id=210 data-nosnippet>210</a>
+<a href=#211 id=211 data-nosnippet>211</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>promoted_property(source: <span class="kw-2">&amp;</span>GeoJsonSource) -&gt; <span class="prelude-ty">Option</span>&lt;String&gt; {
+<a href=#212 id=212 data-nosnippet>212</a>    <span class="kw">match </span>source.promote_id.as_ref()<span class="question-mark">? </span>{
+<a href=#213 id=213 data-nosnippet>213</a>        PromoteId::Property(name) =&gt; <span class="prelude-val">Some</span>(name.clone()),
+<a href=#214 id=214 data-nosnippet>214</a>        PromoteId::PerLayer(map) =&gt; map.get(GEOJSON_LAYER).cloned(),
+<a href=#215 id=215 data-nosnippet>215</a>    }
+<a href=#216 id=216 data-nosnippet>216</a>}
+<a href=#217 id=217 data-nosnippet>217</a>
+<a href=#218 id=218 data-nosnippet>218</a><span class="doccomment">/// The features of a document, whichever GeoJSON root it has.
+<a href=#219 id=219 data-nosnippet>219</a></span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>feature_list(document: <span class="kw-2">&amp;</span>Value) -&gt; Cow&lt;<span class="lifetime">'_</span>, [Value]&gt; {
+<a href=#220 id=220 data-nosnippet>220</a>    <span class="kw">match </span>document.get(<span class="string">"type"</span>).and_then(Value::as_str) {
+<a href=#221 id=221 data-nosnippet>221</a>        <span class="prelude-val">Some</span>(<span class="string">"FeatureCollection"</span>) =&gt; document
+<a href=#222 id=222 data-nosnippet>222</a>            .get(<span class="string">"features"</span>)
+<a href=#223 id=223 data-nosnippet>223</a>            .and_then(Value::as_array)
+<a href=#224 id=224 data-nosnippet>224</a>            .map_or(Cow::Owned(Vec::new()), |features| {
+<a href=#225 id=225 data-nosnippet>225</a>                Cow::Borrowed(features.as_slice())
+<a href=#226 id=226 data-nosnippet>226</a>            }),
+<a href=#227 id=227 data-nosnippet>227</a>        <span class="prelude-val">Some</span>(<span class="string">"Feature"</span>) =&gt; Cow::Owned(<span class="macro">vec!</span>[document.clone()]),
+<a href=#228 id=228 data-nosnippet>228</a>        <span class="prelude-val">Some</span>(<span class="kw">_</span>) =&gt; Cow::Owned(<span class="macro">vec!</span>[
+<a href=#229 id=229 data-nosnippet>229</a>            <span class="macro">json!</span>({<span class="string">"type"</span>: <span class="string">"Feature"</span>, <span class="string">"properties"</span>: {}, <span class="string">"geometry"</span>: document}),
+<a href=#230 id=230 data-nosnippet>230</a>        ]),
+<a href=#231 id=231 data-nosnippet>231</a>        <span class="prelude-val">None </span>=&gt; Cow::Owned(Vec::new()),
+<a href=#232 id=232 data-nosnippet>232</a>    }
+<a href=#233 id=233 data-nosnippet>233</a>}
+<a href=#234 id=234 data-nosnippet>234</a>
+<a href=#235 id=235 data-nosnippet>235</a><span class="doccomment">/// The value a feature is addressed by: the promoted property, else its `id`.
+<a href=#236 id=236 data-nosnippet>236</a></span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>feature_id(feature: <span class="kw-2">&amp;</span>Value, promoted: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>str&gt;) -&gt; <span class="prelude-ty">Option</span>&lt;Value&gt; {
+<a href=#237 id=237 data-nosnippet>237</a>    promoted
+<a href=#238 id=238 data-nosnippet>238</a>        .and_then(|name| feature.get(<span class="string">"properties"</span>)<span class="question-mark">?</span>.get(name))
+<a href=#239 id=239 data-nosnippet>239</a>        .filter(|value| !value.is_null())
+<a href=#240 id=240 data-nosnippet>240</a>        .or_else(|| feature.get(<span class="string">"id"</span>))
+<a href=#241 id=241 data-nosnippet>241</a>        .cloned()
+<a href=#242 id=242 data-nosnippet>242</a>}
+<a href=#243 id=243 data-nosnippet>243</a>
+<a href=#244 id=244 data-nosnippet>244</a><span class="kw">fn </span>apply(
+<a href=#245 id=245 data-nosnippet>245</a>    features: <span class="kw-2">&amp;mut </span>Vec&lt;Value&gt;,
+<a href=#246 id=246 data-nosnippet>246</a>    diff: <span class="kw-2">&amp;</span>GeoJsonDiff,
+<a href=#247 id=247 data-nosnippet>247</a>    promoted: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>str&gt;,
+<a href=#248 id=248 data-nosnippet>248</a>    source_name: <span class="kw-2">&amp;</span>str,
+<a href=#249 id=249 data-nosnippet>249</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), SourceUpdateError&gt; {
+<a href=#250 id=250 data-nosnippet>250</a>    <span class="kw">if </span>diff.remove_all {
+<a href=#251 id=251 data-nosnippet>251</a>        features.clear();
+<a href=#252 id=252 data-nosnippet>252</a>    }
+<a href=#253 id=253 data-nosnippet>253</a>    features.retain(|feature| {
+<a href=#254 id=254 data-nosnippet>254</a>        feature_id(feature, promoted).is_none_or(|id| !diff.remove.contains(<span class="kw-2">&amp;</span>id))
+<a href=#255 id=255 data-nosnippet>255</a>    });
+<a href=#256 id=256 data-nosnippet>256</a>    <span class="kw">for </span>added <span class="kw">in </span><span class="kw-2">&amp;</span>diff.add {
+<a href=#257 id=257 data-nosnippet>257</a>        <span class="kw">let </span>id = feature_id(added, promoted).ok_or_else(|| SourceUpdateError::MissingId {
+<a href=#258 id=258 data-nosnippet>258</a>            source_name: source_name.to_owned(),
+<a href=#259 id=259 data-nosnippet>259</a>        })<span class="question-mark">?</span>;
+<a href=#260 id=260 data-nosnippet>260</a>        <span class="kw">match </span>features
+<a href=#261 id=261 data-nosnippet>261</a>            .iter_mut()
+<a href=#262 id=262 data-nosnippet>262</a>            .find(|feature| feature_id(feature, promoted).as_ref() == <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>id))
+<a href=#263 id=263 data-nosnippet>263</a>        {
+<a href=#264 id=264 data-nosnippet>264</a>            <span class="prelude-val">Some</span>(existing) =&gt; <span class="kw-2">*</span>existing = added.clone(),
+<a href=#265 id=265 data-nosnippet>265</a>            <span class="prelude-val">None </span>=&gt; features.push(added.clone()),
+<a href=#266 id=266 data-nosnippet>266</a>        }
+<a href=#267 id=267 data-nosnippet>267</a>    }
+<a href=#268 id=268 data-nosnippet>268</a>    <span class="kw">for </span>update <span class="kw">in </span><span class="kw-2">&amp;</span>diff.update {
+<a href=#269 id=269 data-nosnippet>269</a>        <span class="kw">let </span>feature = features
+<a href=#270 id=270 data-nosnippet>270</a>            .iter_mut()
+<a href=#271 id=271 data-nosnippet>271</a>            .find(|feature| feature_id(feature, promoted).as_ref() == <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>update.id))
+<a href=#272 id=272 data-nosnippet>272</a>            .ok_or_else(|| SourceUpdateError::UnknownFeature {
+<a href=#273 id=273 data-nosnippet>273</a>                source_name: source_name.to_owned(),
+<a href=#274 id=274 data-nosnippet>274</a>                id: update.id.clone(),
+<a href=#275 id=275 data-nosnippet>275</a>            })<span class="question-mark">?</span>;
+<a href=#276 id=276 data-nosnippet>276</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(geometry) = <span class="kw-2">&amp;</span>update.new_geometry {
+<a href=#277 id=277 data-nosnippet>277</a>            feature[<span class="string">"geometry"</span>] = geometry.clone();
+<a href=#278 id=278 data-nosnippet>278</a>        }
+<a href=#279 id=279 data-nosnippet>279</a>        <span class="kw">if </span>update.remove_all_properties {
+<a href=#280 id=280 data-nosnippet>280</a>            feature[<span class="string">"properties"</span>] = <span class="macro">json!</span>({});
+<a href=#281 id=281 data-nosnippet>281</a>        }
+<a href=#282 id=282 data-nosnippet>282</a>        <span class="kw">if </span>!feature[<span class="string">"properties"</span>].is_object() {
+<a href=#283 id=283 data-nosnippet>283</a>            feature[<span class="string">"properties"</span>] = <span class="macro">json!</span>({});
+<a href=#284 id=284 data-nosnippet>284</a>        }
+<a href=#285 id=285 data-nosnippet>285</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(properties) = feature[<span class="string">"properties"</span>].as_object_mut() {
+<a href=#286 id=286 data-nosnippet>286</a>            <span class="kw">for </span>name <span class="kw">in </span><span class="kw-2">&amp;</span>update.remove_properties {
+<a href=#287 id=287 data-nosnippet>287</a>                properties.remove(name);
+<a href=#288 id=288 data-nosnippet>288</a>            }
+<a href=#289 id=289 data-nosnippet>289</a>            <span class="kw">for </span>property <span class="kw">in </span><span class="kw-2">&amp;</span>update.add_or_update_properties {
+<a href=#290 id=290 data-nosnippet>290</a>                properties.insert(property.key.clone(), property.value.clone());
+<a href=#291 id=291 data-nosnippet>291</a>            }
+<a href=#292 id=292 data-nosnippet>292</a>        }
+<a href=#293 id=293 data-nosnippet>293</a>    }
+<a href=#294 id=294 data-nosnippet>294</a>    <span class="prelude-val">Ok</span>(())
+<a href=#295 id=295 data-nosnippet>295</a>}
+<a href=#296 id=296 data-nosnippet>296</a>
+<a href=#297 id=297 data-nosnippet>297</a><span class="kw">mod </span>refresh;
+<a href=#298 id=298 data-nosnippet>298</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>refresh::GeoJsonVersions;
+<a href=#299 id=299 data-nosnippet>299</a>
+<a href=#300 id=300 data-nosnippet>300</a><span class="attr">#[cfg(all(test, not(target_arch = <span class="string">"wasm32"</span>)))]
+<a href=#301 id=301 data-nosnippet>301</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>

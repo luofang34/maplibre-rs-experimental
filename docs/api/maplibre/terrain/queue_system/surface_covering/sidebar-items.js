@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["fit_metadata","for_frame","map_sources"],"struct":["SurfaceCopies","SurfaceTiles"]};
+window.SIDEBAR_ITEMS = {"fn":["drawn_surface_tiles","fit_metadata","for_frame","map_sources"],"struct":["SurfaceCopies","SurfaceTiles"]};

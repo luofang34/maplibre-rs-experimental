@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["features","kept","pairs_by_id","pairs_by_position","positions","reach","same_tiling","tiles_meeting"],"struct":["GeoJsonVersions"],"type":["Pair"]};
