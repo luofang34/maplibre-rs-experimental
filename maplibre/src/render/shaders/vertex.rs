@@ -132,7 +132,14 @@ pub struct ShaderTileMetadata {
     pub line_width_scale: f32,
     /// Tile units per texture or viewport pixel for line dash lengths.
     pub line_units_per_pixel: f32,
+    /// The part of the tile the shape draws, as minimum and maximum tile coordinates: a tile
+    /// drawn over a finer view tile covers only that tile's square of it. A line on the
+    /// terrain clips itself to it, where a flat shape takes it from the stencil mask.
+    pub clip_region: Vec4f32,
 }
+
+/// The [`ShaderTileMetadata::clip_region`] of a shape that draws its whole tile.
+pub const WHOLE_TILE: Vec4f32 = [0.0, 0.0, 4096.0, 4096.0];
 
 impl ShaderTileMetadata {
     /// Creates root-tile metadata for a 512-pixel viewport without antimeridian clipping.
@@ -147,6 +154,7 @@ impl ShaderTileMetadata {
             clip_antimeridian: 0,
             line_width_scale: 1.0,
             line_units_per_pixel: 8.0 * zoom_factor,
+            clip_region: WHOLE_TILE,
         }
     }
 }

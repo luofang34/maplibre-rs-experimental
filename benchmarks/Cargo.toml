@@ -12,11 +12,15 @@ categories.workspace = true
 authors.workspace = true
 
 [dependencies]
-maplibre = { path = "../maplibre", features = ["headless", "embed-static-tiles", "thread-safe-futures"] }
+maplibre = { path = "../maplibre", features = ["headless", "raster", "embed-static-tiles", "thread-safe-futures"] }
 
 [dev-dependencies]
+cgmath.workspace = true
 criterion.workspace = true
+image.workspace = true
+serde_json.workspace = true
 tokio.workspace = true
+wgpu.workspace = true
 
 [[bench]]
 name = "render"
@@ -24,4 +28,8 @@ harness = false
 
 [[bench]]
 name = "data"
+harness = false
+
+[[bench]]
+name = "xr_readback"
 harness = false

@@ -62,6 +62,18 @@ pub fn subdivide_line_segment(
     end: [f32; 2],
     granularity: u32,
 ) -> Result<Vec<[f32; 2]>, SubdivisionError> {
+    subdivide_line_segment_on_grid(start, end, granularity, false)
+}
+
+/// Inserts every grid-axis intersection along one line segment and, with `diagonals`, every
+/// crossing of a cell diagonal from its top-left to its bottom-right corner as well, where a
+/// terrain mesh splits its cells into triangles.
+pub fn subdivide_line_segment_on_grid(
+    start: [f32; 2],
+    end: [f32; 2],
+    granularity: u32,
+    diagonals: bool,
+) -> Result<Vec<[f32; 2]>, SubdivisionError> {
     if granularity < 2 || start == end {
         return Ok(vec![end]);
     }
@@ -70,6 +82,15 @@ pub fn subdivide_line_segment(
     let mut crossings = Vec::new();
     collect_axis_crossings(start[0], end[0], cell_size, &mut crossings);
     collect_axis_crossings(start[1], end[1], cell_size, &mut crossings);
+    if diagonals {
+        // The diagonals are the lines on which x - y is a whole number of cells.
+        collect_axis_crossings(
+            start[0] - start[1],
+            end[0] - end[1],
+            cell_size,
+            &mut crossings,
+        );
+    }
     crossings.sort_by(f32::total_cmp);
     crossings.dedup_by(|left, right| (*left - *right).abs() <= f32::EPSILON);
     if crossings.len() > MAX_GENERATED_VERTICES_PER_SEGMENT {

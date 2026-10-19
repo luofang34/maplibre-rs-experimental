@@ -1,26 +1,5 @@
 // @include projection.vertex.wgsl
-
-struct TerrainTileUniforms {
-    transform: mat4x4<f32>,
-    globe_transform: mat4x4<f32>,
-    globe_origin: vec4<f32>,
-    dem_matrix: mat4x4<f32>,
-    drape_matrix: mat4x4<f32>,
-    tile_mercator_coords: vec4<f32>,
-    dem_unpack: vec4<f32>,
-    dem_dim: f32,
-    exaggeration: f32,
-    skirt_length: f32,
-    relief_strength: f32,
-    fog_color: vec4<f32>,
-    horizon_color: vec4<f32>,
-    fog_range: vec4<f32>,
-    fog_opacity: vec4<f32>,
-    surface_color: vec4<f32>,
-    fog_position: vec4<f32>,
-    edge_heights: array<vec4<f32>, 128>,
-    edge_last: vec4<f32>,
-};
+// @include terrain_surface.wgsl.part
 
 struct VertexOutput {
     @location(0) tex_coords: vec2<f32>,
@@ -36,57 +15,6 @@ struct VertexOutput {
 
 @group(1) @binding(0) var<uniform> terrain_tile: TerrainTileUniforms;
 @group(1) @binding(1) var dem_texture: texture_2d<f32>;
-
-const TERRAIN_EXTENT: f32 = 4096.0;
-
-// Decodes one DEM sample; the border texels stand in beyond the tile edges.
-fn dem_sample(texel: vec2<i32>) -> f32 {
-    let last = vec2<i32>(textureDimensions(dem_texture)) - vec2<i32>(1, 1);
-    let rgb = textureLoad(dem_texture, clamp(texel, vec2<i32>(0, 0), last), 0).rgb * 255.0;
-    return dot(rgb, terrain_tile.dem_unpack.xyz) - terrain_tile.dem_unpack.w;
-}
-
-// Bilinear elevation in metres at a tile position, read from the DEM tile this tile falls in.
-fn terrain_height_gradient(position: vec2<f32>) -> vec3<f32> {
-    // The two border texels shift the index by two; a sample sits at its texel's integer coordinate,
-    // as in GL JS.
-    let coord = (terrain_tile.dem_matrix * vec4<f32>(position, 0.0, 1.0)).xy * terrain_tile.dem_dim + 2.0;
-    let f = fract(coord);
-    let corner = vec2<i32>(floor(coord));
-    let a = dem_sample(corner);
-    let b = dem_sample(corner + vec2<i32>(1, 0));
-    let c = dem_sample(corner + vec2<i32>(0, 1));
-    let d = dem_sample(corner + vec2<i32>(1, 1));
-    let units = terrain_tile.dem_matrix[0][0] * terrain_tile.dem_dim;
-    return vec3<f32>(mix(mix(a,b,f.x), mix(c,d,f.x), f.y),
-        mix(b-a,d-c,f.y)*units, mix(c-a,d-b,f.x)*units) * terrain_tile.exaggeration;
-}
-fn terrain_elevation(position: vec2<f32>) -> f32 { return terrain_height_gradient(position).x; }
-
-// Edge samples follow the coarsest touching mesh, so refinement never opens a crack.
-fn edge_height(t: f32, edge: u32) -> f32 {
-    let i = u32(clamp(round(t / 32.0), 0.0, 128.0));
-    if i == 128u { return terrain_tile.edge_last[edge] * terrain_tile.exaggeration; }
-    return terrain_tile.edge_heights[i][edge] * terrain_tile.exaggeration;
-}
-
-fn stitched_elevation(position: vec2<f32>, height: f32) -> f32 {
-    let p = clamp(position, vec2<f32>(0.0), vec2<f32>(TERRAIN_EXTENT));
-    let w = 1.0 - smoothstep(vec4<f32>(0.0), vec4<f32>(64.0),
-        vec4<f32>(p.y, TERRAIN_EXTENT - p.y, p.x, TERRAIN_EXTENT - p.x));
-    if all(w == vec4<f32>(0.0)) { return height; }
-    let delta = vec4<f32>(
-        edge_height(p.x, 0u) - terrain_elevation(vec2<f32>(p.x, 0.0)),
-        edge_height(p.x, 1u) - terrain_elevation(vec2<f32>(p.x, TERRAIN_EXTENT)),
-        edge_height(p.y, 2u) - terrain_elevation(vec2<f32>(0.0, p.y)),
-        edge_height(p.y, 3u) - terrain_elevation(vec2<f32>(TERRAIN_EXTENT, p.y)));
-    let corner = vec4<f32>(
-        edge_height(0.0, 0u) - terrain_elevation(vec2<f32>(0.0, 0.0)),
-        edge_height(TERRAIN_EXTENT, 0u) - terrain_elevation(vec2<f32>(TERRAIN_EXTENT, 0.0)),
-        edge_height(0.0, 1u) - terrain_elevation(vec2<f32>(0.0, TERRAIN_EXTENT)),
-        edge_height(TERRAIN_EXTENT, 1u) - terrain_elevation(vec2<f32>(TERRAIN_EXTENT)));
-    return height + dot(w, delta) - dot(corner, vec4<f32>(w.x*w.z, w.x*w.w, w.y*w.z, w.y*w.w));
-}
 
 // Small Mercator offsets avoid quantizing global longitude and sphere positions to metres.
 fn tile_relative_globe(position: vec2<f32>, elevation: f32) -> vec4<f32> {

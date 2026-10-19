@@ -6,7 +6,6 @@ use bytemuck::Pod;
 pub use circle::{CircleOptions, CIRCLE_QUAD_INDICES};
 use geozero::{error::GeozeroError, ColumnValue, FeatureProcessor, PropertyProcessor};
 use lyon::{
-    geom,
     path::{path::Builder, Path},
     tessellation::{
         geometry_builder::MaxIndex, BuffersBuilder, FillOptions, FillRule, FillTessellator,
@@ -15,7 +14,7 @@ use lyon::{
 };
 
 use crate::{
-    projection::globe::subdivision::{subdivide_line_segment, subdivide_triangles},
+    projection::globe::subdivision::subdivide_triangles,
     render::ShaderVertex,
     style::{
         expression::{FeatureProperties, Value},
@@ -48,6 +47,7 @@ mod outline;
 mod sharp_corners;
 pub use sharp_corners::offset_for as sharp_corner_offset;
 mod sort_key;
+mod stroke_grid;
 pub use extrusion::ExtrusionOptions;
 pub use sort_key::{sort_key_name, sort_key_of, SortKeys};
 
@@ -160,6 +160,8 @@ pub struct ZeroTessellator<I: std::ops::Add + From<lyon::tessellation::VertexId>
     contour_start: Option<[f32; 2]>,
     contour_last: Option<[f32; 2]>,
     subdivision_granularity: u32,
+    /// Whether strokes also split along the diagonals of the subdivision grid.
+    terrain_grid: bool,
     clip_x_to_tile: bool,
     extend_to_north_pole: bool,
     extend_to_south_pole: bool,
@@ -251,6 +253,7 @@ impl<I: std::ops::Add + From<lyon::tessellation::VertexId> + MaxIndex> Default
             contour_start: None,
             contour_last: None,
             subdivision_granularity: 1,
+            terrain_grid: false,
             clip_x_to_tile: false,
             extend_to_north_pole: false,
             extend_to_south_pole: false,
@@ -447,41 +450,6 @@ where
             },
         )
         .map_err(|error| GeozeroError::Geometry(error.to_string()))
-    }
-
-    fn append_coordinate(&mut self, coordinate: [f32; 2]) -> GeoResult<()> {
-        if let Some(previous) = self.contour_last {
-            let points = subdivide_line_segment(previous, coordinate, self.subdivision_granularity)
-                .map_err(|error| GeozeroError::Geometry(error.to_string()))?;
-            for point in points {
-                self.path_builder
-                    .borrow_mut()
-                    .line_to(geom::point(point[0], point[1]));
-            }
-        } else {
-            self.path_builder
-                .borrow_mut()
-                .begin(geom::point(coordinate[0], coordinate[1]));
-            self.contour_start = Some(coordinate);
-            self.path_open = true;
-        }
-        self.contour_last = Some(coordinate);
-        Ok(())
-    }
-
-    fn subdivide_closing_segment(&mut self) -> GeoResult<()> {
-        let (Some(start), Some(last)) = (self.contour_start, self.contour_last) else {
-            return Ok(());
-        };
-        let mut points = subdivide_line_segment(last, start, self.subdivision_granularity)
-            .map_err(|error| GeozeroError::Geometry(error.to_string()))?;
-        points.pop();
-        for point in points {
-            self.path_builder
-                .borrow_mut()
-                .line_to(geom::point(point[0], point[1]));
-        }
-        Ok(())
     }
 }
 
