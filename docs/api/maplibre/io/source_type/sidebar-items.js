@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["SourceType"],"fn":["format_template"],"struct":["GeoJsonTileSource","ImageTileSource","InvalidTileCoords","RasterSource","TessellateSource"]};
+window.SIDEBAR_ITEMS = {"constant":["MERCATOR_HALF_EXTENT_M"],"enum":["SourceType"],"fn":["bbox_epsg_3857","format_template"],"struct":["GeoJsonTileSource","ImageTileSource","InvalidTileCoords","RasterSource","TessellateSource"]};

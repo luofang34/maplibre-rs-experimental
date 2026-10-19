@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["DRAPEABLE_LAYER_TYPES"],"fn":["collect_layer_specs","is_drapeable","select_targets","vector_layer_specs"],"struct":["ShapeSource","ShapeSpec","TargetSpec","VectorLayerSpec"]};
+window.SIDEBAR_ITEMS = {"constant":["DRAPEABLE_LAYER_TYPES"],"fn":["collect_layer_specs","is_drapeable","raster_shapes","select_targets","source_tile_missing","vector_layer_specs"],"struct":["ShapeSource","ShapeSpec","TargetSpec","VectorLayerSpec"]};
