@@ -11,7 +11,7 @@ use crate::{
 fn shader_projection_data_has_uniform_safe_layout() {
     assert_eq!(size_of::<ShaderProjectionData>(), 160);
     assert_eq!(align_of::<ShaderProjectionData>(), 4);
-    assert_eq!(size_of::<ShaderTileMetadata>(), 104);
+    assert_eq!(size_of::<ShaderTileMetadata>(), 120);
 }
 
 #[test]

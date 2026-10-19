@@ -289,7 +289,7 @@ async fn the_host_device_draws_what_the_map_s_own_device_draws() {
     own.render_source_frames(Default::default(), Vec::new(), 1)
         .expect("frame");
     let read = |map: &HeadlessMap| {
-        crate::headless::map::reference::readback::read_blocking(
+        crate::headless::map::readback::read_blocking(
             map,
             map.head_texture().expect("texture"),
             wgpu::TextureAspect::All,

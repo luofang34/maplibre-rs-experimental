@@ -288,3 +288,7 @@ mod surface;
 #[cfg(test)]
 #[path = "xr/poles/tests.rs"]
 mod poles;
+
+#[cfg(test)]
+#[path = "xr/drape_sources/tests.rs"]
+mod drape_sources;

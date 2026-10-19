@@ -15,18 +15,34 @@ pub struct InvalidTileCoords {
     pub coords: WorldTileCoords,
 }
 
+/// Half the Web Mercator world's width, metres: the EPSG:3857 extent.
+const MERCATOR_HALF_EXTENT_M: f64 = 20_037_508.342_789_244;
+
+/// The tile's `minx,miny,maxx,maxy` in EPSG:3857 metres, as MapLibre's
+/// `{bbox-epsg-3857}` placeholder states it for WMS-style servers. The box
+/// is the tile's ground, so it does not depend on the row scheme.
+fn bbox_epsg_3857(coords: &WorldTileCoords) -> Option<String> {
+    let tile = coords.into_tile(TileAddressingScheme::XYZ)?;
+    let size = 2.0 * MERCATOR_HALF_EXTENT_M / f64::from(1_u32 << u8::from(tile.z));
+    let min_x = f64::from(tile.x) * size - MERCATOR_HALF_EXTENT_M;
+    let max_y = MERCATOR_HALF_EXTENT_M - f64::from(tile.y) * size;
+    Some(format!("{min_x},{},{},{max_y}", max_y - size, min_x + size))
+}
+
 fn format_template(
     template: &str,
     scheme: TileAddressingScheme,
     coords: &WorldTileCoords,
 ) -> Option<String> {
     let tile = coords.into_tile(scheme)?;
-    Some(
-        template
-            .replace("{z}", &u8::from(tile.z).to_string())
-            .replace("{x}", &tile.x.to_string())
-            .replace("{y}", &tile.y.to_string()),
-    )
+    let mut url = template
+        .replace("{z}", &u8::from(tile.z).to_string())
+        .replace("{x}", &tile.x.to_string())
+        .replace("{y}", &tile.y.to_string());
+    if url.contains("{bbox-epsg-3857}") {
+        url = url.replace("{bbox-epsg-3857}", &bbox_epsg_3857(coords)?);
+    }
+    Some(url)
 }
 
 /// Represents a source from which vector tiles are fetched.
@@ -45,7 +61,8 @@ impl TessellateSource {
         )
     }
 
-    /// Creates a source from a style tile URL template containing `{z}`, `{x}` and `{y}`.
+    /// Creates a source from a style tile URL template containing `{z}`, `{x}` and `{y}`, or
+    /// `{bbox-epsg-3857}`.
     pub fn from_template(template: impl Into<String>, scheme: TileAddressingScheme) -> Self {
         Self {
             template: template.into(),
@@ -86,7 +103,8 @@ impl RasterSource {
         )
     }
 
-    /// Creates a source from a style tile URL template containing `{z}`, `{x}` and `{y}`.
+    /// Creates a source from a style tile URL template containing `{z}`, `{x}` and `{y}`, or
+    /// `{bbox-epsg-3857}`.
     pub fn from_template(template: impl Into<String>, scheme: TileAddressingScheme) -> Self {
         Self {
             template: template.into(),

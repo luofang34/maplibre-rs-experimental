@@ -446,10 +446,7 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
                             crate::vector::tessellation::LineFeatureStyle::for_paint(p, style_zoom);
                         tessellator.sharp_corner_offset =
                             crate::vector::tessellation::sharp_corner_offset(request.overscaling());
-                        tessellator.stroke =
-                            crate::style::line_stroke::LineStroke::of_layer(style_layer);
-                        tessellator.join_property =
-                            crate::style::line_stroke::LineStroke::join_property(style_layer);
+                        tessellator.set_layer_strokes(style_layer);
                     }
                     LayerPaint::Background(p) => {
                         tessellator.style_property = p.background_color.clone()

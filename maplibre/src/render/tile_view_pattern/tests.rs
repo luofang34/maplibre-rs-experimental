@@ -197,7 +197,7 @@ fn bridge_width_units_follow_style_scale_independently_of_gaze_zoom() {
     for gaze_zoom in [10.0, 12.0, 14.0, 16.0] {
         let mut pattern = TileViewPattern::new(BackingBufferDescriptor {
             buffer: TestBuffer,
-            inner_size: 104 * 8,
+            inner_size: std::mem::size_of::<ShaderTileMetadata>() as u64 * 8,
         });
         pattern.update_pattern(vec![ViewTile {
             target: coords,
@@ -212,7 +212,9 @@ fn bridge_width_units_follow_style_scale_independently_of_gaze_zoom() {
             style_zoom,
         );
         let bytes = queue.0.borrow();
-        let metadata = bytemuck::pod_read_unaligned::<ShaderTileMetadata>(&bytes[..104]);
+        let metadata = bytemuck::pod_read_unaligned::<ShaderTileMetadata>(
+            &bytes[..std::mem::size_of::<ShaderTileMetadata>()],
+        );
         assert_eq!(metadata.line_units_per_pixel, 8.0, "gaze zoom {gaze_zoom}");
     }
 }

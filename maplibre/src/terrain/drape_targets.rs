@@ -97,58 +97,97 @@ pub(crate) fn select_targets(
                     })
                     .collect();
             for (source_id, covering) in raster_coverings {
-                let raster_sources = SourceTiles {
-                    source: source_id,
-                    availability: sources.of_kind(TileKind::Raster),
-                };
-                let wanted = covering_shapes_for(coords, covering);
-                if wanted.is_empty() && !covering.is_empty() {
-                    shapes.push(ShapeSource {
-                        coords,
-                        raster_source: Some(source_id.clone()),
-                        view_complete: true,
-                        absent: true,
-                    });
-                    continue;
-                }
-                let loaded: Vec<WorldTileCoords> = wanted
-                    .iter()
-                    .copied()
-                    .filter(|source| raster_sources.has_tile(*source, world))
-                    .collect();
-                // A partial child set would erase the uncovered part when the drape is cleared,
-                // so an ancestor goes underneath it; the set itself is what the view needs
-                // over this terrain tile.
-                let all_loaded = !wanted.is_empty() && loaded.len() == wanted.len();
-                let complete = coverage::complete_cover(coords, loaded.clone());
-                let (under, over, view_complete) = match complete {
-                    Some(complete) => (Vec::new(), complete, false),
-                    None if all_loaded => (
-                        coverage::loaded_cover(&raster_sources, coords, world).unwrap_or_default(),
-                        loaded,
-                        true,
-                    ),
-                    None => (
-                        coverage::loaded_cover(&raster_sources, coords, world).unwrap_or_default(),
-                        Vec::new(),
-                        false,
-                    ),
-                };
-                shapes.extend(under.into_iter().map(|source| ShapeSource {
-                    coords: source,
-                    raster_source: Some(source_id.clone()),
-                    view_complete: false,
-                    absent: false,
-                }));
-                shapes.extend(over.into_iter().map(|source| ShapeSource {
-                    coords: source,
-                    raster_source: Some(source_id.clone()),
-                    view_complete,
-                    absent: false,
-                }));
+                shapes.extend(raster_shapes(
+                    coords,
+                    source_id,
+                    covering,
+                    sources.of_kind(TileKind::Raster),
+                    world,
+                ));
             }
             (coords, shapes)
         })
+        .collect()
+}
+
+/// Whether a raster source's request for a tile completed without an image (not found,
+/// failed, or undecodable), so the tile will not arrive and must not be waited for.
+fn source_tile_missing(source: &RasterSourceId, coords: WorldTileCoords, world: &World) -> bool {
+    world
+        .tiles
+        .query::<&crate::raster::RasterLayersDataComponent>(coords)
+        .is_some_and(|component| component.source_is_missing(source))
+}
+
+/// The tiles of one raster source drawn into a terrain tile's drape.
+///
+/// A source with nothing over the terrain tile is absent, so its layers do not hold the
+/// drape back: one whose view covering is empty (the view is outside its zoom range or
+/// bounds) as well as one whose covering misses this tile. When every wanted tile has
+/// either loaded or completed without an image, the source has delivered all it will; its
+/// loaded ancestors and tiles are drawn as final, or it is absent when it has none.
+fn raster_shapes<H: HasTile>(
+    coords: WorldTileCoords,
+    source_id: &RasterSourceId,
+    covering: &[WorldTileCoords],
+    availability: H,
+    world: &World,
+) -> Vec<ShapeSource> {
+    let absent = || {
+        vec![ShapeSource {
+            coords,
+            raster_source: Some(source_id.clone()),
+            view_complete: true,
+            absent: true,
+        }]
+    };
+    let raster_sources = SourceTiles {
+        source: source_id,
+        availability,
+    };
+    let wanted = covering_shapes_for(coords, covering);
+    if wanted.is_empty() {
+        return absent();
+    }
+    let loaded: Vec<WorldTileCoords> = wanted
+        .iter()
+        .copied()
+        .filter(|source| raster_sources.has_tile(*source, world))
+        .collect();
+    // A partial child set would erase the uncovered part when the drape is cleared,
+    // so an ancestor goes underneath it; the set itself is what the view needs
+    // over this terrain tile.
+    let all_loaded = loaded.len() == wanted.len();
+    let settled = wanted
+        .iter()
+        .all(|tile| loaded.contains(tile) || source_tile_missing(source_id, *tile, world));
+    let complete = coverage::complete_cover(coords, loaded.clone());
+    let (under, over, view_complete) = match complete {
+        Some(complete) => (Vec::new(), complete, false),
+        None if all_loaded || settled => (
+            coverage::loaded_cover(&raster_sources, coords, world).unwrap_or_default(),
+            loaded,
+            true,
+        ),
+        None => (
+            coverage::loaded_cover(&raster_sources, coords, world).unwrap_or_default(),
+            Vec::new(),
+            false,
+        ),
+    };
+    if settled && !all_loaded && under.is_empty() && over.is_empty() {
+        return absent();
+    }
+    let shape = |coords, view_complete| ShapeSource {
+        coords,
+        raster_source: Some(source_id.clone()),
+        view_complete,
+        absent: false,
+    };
+    under
+        .into_iter()
+        .map(|source| shape(source, false))
+        .chain(over.into_iter().map(|source| shape(source, view_complete)))
         .collect()
 }
 

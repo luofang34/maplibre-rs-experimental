@@ -5,16 +5,16 @@
 //! a render. [`ReferenceTarget`] owns the depth attachment, draws the view, and
 //! reads it back. Depth is the distance along the optical axis in metres.
 
-pub(crate) mod readback;
-
 use std::time::Duration;
 
 use cgmath::{Matrix4, SquareMatrix};
-pub use readback::{read as read_texture, read_blocking as read_texture_blocking, ReadbackError};
 use thiserror::Error;
 
+pub use super::readback::{
+    read as read_texture, read_blocking as read_texture_blocking, ReadbackError,
+};
 use crate::{
-    headless::map::{xr::XrFrameError, HeadlessMap},
+    headless::map::{readback, xr::XrFrameError, HeadlessMap},
     render::{
         camera::EyeFrustum,
         view_state::ExternalAnchor,

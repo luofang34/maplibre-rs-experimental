@@ -70,3 +70,27 @@ fn keyed_raster_source_keeps_query_string() {
         "https://r.example/sat/0/0/0.jpg?key=secret"
     );
 }
+
+#[test]
+fn a_bbox_placeholder_states_the_tile_ground_in_web_mercator_metres() {
+    let source = TessellateSource::from_template(
+        "https://wms.example/export?bbox={bbox-epsg-3857}&size=256,256",
+        TileAddressingScheme::XYZ,
+    );
+    assert_eq!(
+        source.format(&coords(0, 0, 0)).expect("in range"),
+        "https://wms.example/export?bbox=-20037508.342789244,-20037508.342789244,20037508.342789244,20037508.342789244&size=256,256"
+    );
+    // The north-west quarter at zoom one.
+    assert_eq!(
+        source.format(&coords(0, 0, 1)).expect("in range"),
+        "https://wms.example/export?bbox=-20037508.342789244,0,0,20037508.342789244&size=256,256"
+    );
+    // A TMS row names the same ground as its XYZ row.
+    let tms = TessellateSource::from_template("{bbox-epsg-3857}", TileAddressingScheme::TMS);
+    let xyz = TessellateSource::from_template("{bbox-epsg-3857}", TileAddressingScheme::XYZ);
+    assert_eq!(
+        tms.format(&coords(3, 5, 4)).expect("in range"),
+        xyz.format(&coords(3, 5, 4)).expect("in range")
+    );
+}

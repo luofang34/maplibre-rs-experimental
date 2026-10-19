@@ -12,6 +12,7 @@ impl Shader for TerrainShader {
         VertexState {
             source: concat!(
                 include_str!("projection.vertex.wgsl"),
+                include_str!("terrain_surface.wgsl.part"),
                 include_str!("terrain.vertex.wgsl")
             ),
             entry_point: "main",
