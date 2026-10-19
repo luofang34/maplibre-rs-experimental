@@ -44,7 +44,7 @@ pub(crate) fn uses_uniform_texture_covering(view_state: &ViewState) -> bool {
     })
 }
 mod drape_phase;
-mod surface_covering;
+pub(crate) mod surface_covering;
 mod uniforms;
 use drape_phase::{background_clear_color, build_drape_phase, drape_metadata};
 use uniforms::{present_ancestors, TerrainEyeFrame};

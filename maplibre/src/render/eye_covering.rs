@@ -38,41 +38,51 @@ impl EyeInFrame {
 /// Tiles per raster source, as [`raster_source_regions`] selects them.
 pub type RasterCoverings = Vec<(RasterSourceId, Vec<WorldTileCoords>)>;
 
-/// An immutable snapshot used by every request and draw in the stereo frame.
+/// The tiles the previous frame drew, per covering, as one immutable snapshot every request
+/// and draw of this frame selects against. Each covering keeps its own history: the terrain
+/// surface, the view and each raster source split the quadtree at different levels, so one
+/// covering's leaves say nothing about where another split.
 #[derive(Default)]
 pub(crate) struct FrameLodHistory {
     pub(crate) view: LodHistory,
     pub(crate) raster: std::collections::HashMap<RasterSourceId, LodHistory>,
+    pub(crate) terrain: LodHistory,
 }
 
+/// Takes the snapshot for the frame about to select tiles. Every camera gets it, not only a
+/// host's eye: a map camera that moves a little each frame would otherwise switch a tile
+/// sitting on a level threshold between its fine and coarse version frame after frame.
 pub(crate) fn snapshot_lod_history(world: &mut World) {
     if EyeInFrame::reuses_content(world) {
         return;
     }
-    let history = world
-        .resources
-        .get::<SharedCovering>()
-        .map(|shared| FrameLodHistory {
-            view: LodHistory::new(
+    let shared = world.resources.get::<SharedCovering>();
+    let history = FrameLodHistory {
+        view: LodHistory::new(
+            shared
+                .and_then(|shared| shared.tiles.as_ref())
+                .map_or(&[], |(tiles, _)| tiles.as_slice()),
+        ),
+        raster: shared
+            .map(|shared| {
                 shared
-                    .tiles
-                    .as_ref()
-                    .map_or(&[], |(tiles, _)| tiles.as_slice()),
-            ),
-            raster: shared
-                .raster
-                .iter()
-                .map(|(name, tiles)| (name.clone(), LodHistory::new(tiles)))
-                .collect(),
-        })
-        .unwrap_or_default();
+                    .raster
+                    .iter()
+                    .map(|(name, tiles)| (name.clone(), LodHistory::new(tiles)))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        terrain: LodHistory::new(crate::terrain::drawn_surface_tiles(world)),
+    };
     world.resources.insert(history);
 }
 
-/// The drawn tiles the first eye of a frame selected.
+/// The drawn tiles a frame selected: the first eye's, which later eyes of the frame reuse, or
+/// the map camera's own.
 #[derive(Debug)]
 pub struct SharedCovering {
-    frame: u64,
+    /// The stereo frame whose eyes share the selection; none for a map camera's frame.
+    frame: Option<u64>,
     tiles: Option<(Vec<WorldTileCoords>, ZoomLevel)>,
     raster: RasterCoverings,
 }
@@ -93,7 +103,7 @@ impl SharedCovering {
 
 /// The tiles the frame draws at `level`, with the raster tiles each raster source draws:
 /// the first eye's selection when the schedule runs for a later eye of the same frame, and
-/// otherwise this view's own.
+/// otherwise this view's own, kept as the next frame's level history.
 pub(crate) fn drawn_covering(
     style: &Style,
     view_state: &ViewState,
@@ -105,7 +115,7 @@ pub(crate) fn drawn_covering(
         if let Some(shared) = world
             .resources
             .get::<SharedCovering>()
-            .filter(|shared| shared.frame == eye.frame)
+            .filter(|shared| shared.frame == Some(eye.frame))
         {
             return Ok((shared.region(), shared.raster.clone()));
         }
@@ -113,9 +123,9 @@ pub(crate) fn drawn_covering(
     let region =
         view_region_for_projection(style, view_state, world, level, ViewStatePadding::Tight)?;
     let raster = raster_source_regions(style, view_state, world, ViewStatePadding::Tight)?;
-    if let Some(eye) = eye.filter(|eye| eye.index == 0) {
+    if eye.is_none_or(|eye| eye.index == 0) {
         world.resources.insert(SharedCovering {
-            frame: eye.frame,
+            frame: eye.map(|eye| eye.frame),
             tiles: region
                 .as_ref()
                 .map(|region| (region.iter().collect(), region.zoom_level())),

@@ -4,6 +4,14 @@ use crate::{coords::WorldTileCoords, tcs::world::World, terrain::drape_targets::
 #[derive(Default)]
 pub(super) struct SurfaceTiles(pub Vec<WorldTileCoords>);
 
+/// The terrain surface tiles the last frame's own selection drew.
+pub(crate) fn drawn_surface_tiles(world: &World) -> &[WorldTileCoords] {
+    world
+        .resources
+        .get::<SurfaceTiles>()
+        .map_or(&[], |surface| surface.0.as_slice())
+}
+
 /// How many worlds over each surface tile is seen again: its copies beside the main world.
 #[derive(Default)]
 pub(super) struct SurfaceCopies(pub std::collections::HashMap<WorldTileCoords, Vec<i32>>);
