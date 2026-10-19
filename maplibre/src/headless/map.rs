@@ -42,10 +42,10 @@ mod error;
 mod injected_loader;
 mod labels;
 pub use error::HeadlessMapOperationError;
-
 mod processed;
 mod provided_images;
 mod raster;
+pub mod readback;
 pub mod reference;
 mod signals;
 mod style;
