@@ -64,57 +64,66 @@
 <a href=#64 id=64 data-nosnippet>64</a>    }
 <a href=#65 id=65 data-nosnippet>65</a>}
 <a href=#66 id=66 data-nosnippet>66</a>
-<a href=#67 id=67 data-nosnippet>67</a><span class="doccomment">/// Applies the frame input to the view state, with the style's projection deciding whether
-<a href=#68 id=68 data-nosnippet>68</a>/// an external eye is placed on the globe or over the flat map.
-<a href=#69 id=69 data-nosnippet>69</a>///
-<a href=#70 id=70 data-nosnippet>70</a>/// A map view keeps what the handlers set and drops any external eye. An external view that
-<a href=#71 id=71 data-nosnippet>71</a>/// cannot be applied leaves the view state as it was.
-<a href=#72 id=72 data-nosnippet>72</a></span><span class="kw">pub fn </span>apply_frame_input(
-<a href=#73 id=73 data-nosnippet>73</a>    input: <span class="kw-2">&amp;</span>FrameInput,
-<a href=#74 id=74 data-nosnippet>74</a>    view_state: <span class="kw-2">&amp;mut </span>ViewState,
-<a href=#75 id=75 data-nosnippet>75</a>    projection: <span class="kw-2">&amp;</span>ProjectionType,
-<a href=#76 id=76 data-nosnippet>76</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), FrameInputError&gt; {
-<a href=#77 id=77 data-nosnippet>77</a>    <span class="kw">match </span><span class="kw-2">&amp;</span>input.view {
-<a href=#78 id=78 data-nosnippet>78</a>        ViewSource::MapView =&gt; {
-<a href=#79 id=79 data-nosnippet>79</a>            view_state.clear_external_view();
-<a href=#80 id=80 data-nosnippet>80</a>            <span class="prelude-val">Ok</span>(())
-<a href=#81 id=81 data-nosnippet>81</a>        }
-<a href=#82 id=82 data-nosnippet>82</a>        ViewSource::External(external) =&gt; {
-<a href=#83 id=83 data-nosnippet>83</a>            view_state.set_external_view(<span class="kw-2">*</span>external, projection)<span class="question-mark">?</span>;
-<a href=#84 id=84 data-nosnippet>84</a>            view_state.set_request_overscan(input.request_overscan);
-<a href=#85 id=85 data-nosnippet>85</a>            <span class="prelude-val">Ok</span>(())
-<a href=#86 id=86 data-nosnippet>86</a>        }
-<a href=#87 id=87 data-nosnippet>87</a>    }
-<a href=#88 id=88 data-nosnippet>88</a>}
-<a href=#89 id=89 data-nosnippet>89</a>
-<a href=#90 id=90 data-nosnippet>90</a><span class="doccomment">/// Applies the [`FrameInput`] a host wrote; a host that writes none keeps the map view.
-<a href=#91 id=91 data-nosnippet>91</a>///
-<a href=#92 id=92 data-nosnippet>92</a>/// A rejected external view is logged and retains the last valid external view, so a
-<a href=#93 id=93 data-nosnippet>93</a>/// tracking failure cannot switch projection or start an unrelated tile covering.
-<a href=#94 id=94 data-nosnippet>94</a></span><span class="kw">pub fn </span>frame_input_system(
-<a href=#95 id=95 data-nosnippet>95</a>    MapContext {
-<a href=#96 id=96 data-nosnippet>96</a>        world,
-<a href=#97 id=97 data-nosnippet>97</a>        view_state,
-<a href=#98 id=98 data-nosnippet>98</a>        style,
-<a href=#99 id=99 data-nosnippet>99</a>        ..
-<a href=#100 id=100 data-nosnippet>100</a>    }: <span class="kw-2">&amp;mut </span>MapContext,
-<a href=#101 id=101 data-nosnippet>101</a>) -&gt; SystemResult {
-<a href=#102 id=102 data-nosnippet>102</a>    <span class="kw">super</span>::eye_covering::snapshot_lod_history(world);
-<a href=#103 id=103 data-nosnippet>103</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(input) = world.resources.get::&lt;FrameInput&gt;() <span class="kw">else </span>{
-<a href=#104 id=104 data-nosnippet>104</a>        <span class="kw">return </span><span class="prelude-val">Ok</span>(());
-<a href=#105 id=105 data-nosnippet>105</a>    };
-<a href=#106 id=106 data-nosnippet>106</a>    <span class="kw">let </span>projection = style
-<a href=#107 id=107 data-nosnippet>107</a>        .projection
-<a href=#108 id=108 data-nosnippet>108</a>        .as_ref()
-<a href=#109 id=109 data-nosnippet>109</a>        .map_or_else(ProjectionType::default, |specification| {
-<a href=#110 id=110 data-nosnippet>110</a>            specification.projection_type.clone()
-<a href=#111 id=111 data-nosnippet>111</a>        });
-<a href=#112 id=112 data-nosnippet>112</a>    <span class="kw">if let </span><span class="prelude-val">Err</span>(error) = apply_frame_input(input, view_state, <span class="kw-2">&amp;</span>projection) {
-<a href=#113 id=113 data-nosnippet>113</a>        <span class="macro">tracing::error!</span>(%error, <span class="string">"host view rejected; preserving the last valid view"</span>);
-<a href=#114 id=114 data-nosnippet>114</a>    }
-<a href=#115 id=115 data-nosnippet>115</a>    <span class="prelude-val">Ok</span>(())
-<a href=#116 id=116 data-nosnippet>116</a>}
-<a href=#117 id=117 data-nosnippet>117</a>
-<a href=#118 id=118 data-nosnippet>118</a><span class="attr">#[cfg(test)]
-<a href=#119 id=119 data-nosnippet>119</a></span><span class="kw">mod </span>tests;
+<a href=#67 id=67 data-nosnippet>67</a><span class="doccomment">/// The time of the frame being rendered, as the host wrote it, for systems that animate or
+<a href=#68 id=68 data-nosnippet>68</a>/// pace their work; zero until the host writes its first [`FrameInput`].
+<a href=#69 id=69 data-nosnippet>69</a></span><span class="kw">pub fn </span>frame_time(world: <span class="kw-2">&amp;</span><span class="kw">crate</span>::tcs::world::World) -&gt; Duration {
+<a href=#70 id=70 data-nosnippet>70</a>    world
+<a href=#71 id=71 data-nosnippet>71</a>        .resources
+<a href=#72 id=72 data-nosnippet>72</a>        .get::&lt;FrameInput&gt;()
+<a href=#73 id=73 data-nosnippet>73</a>        .map_or(Duration::ZERO, |input| input.timestamp)
+<a href=#74 id=74 data-nosnippet>74</a>}
+<a href=#75 id=75 data-nosnippet>75</a>
+<a href=#76 id=76 data-nosnippet>76</a><span class="doccomment">/// Applies the frame input to the view state, with the style's projection deciding whether
+<a href=#77 id=77 data-nosnippet>77</a>/// an external eye is placed on the globe or over the flat map.
+<a href=#78 id=78 data-nosnippet>78</a>///
+<a href=#79 id=79 data-nosnippet>79</a>/// A map view keeps what the handlers set and drops any external eye. An external view that
+<a href=#80 id=80 data-nosnippet>80</a>/// cannot be applied leaves the view state as it was.
+<a href=#81 id=81 data-nosnippet>81</a></span><span class="kw">pub fn </span>apply_frame_input(
+<a href=#82 id=82 data-nosnippet>82</a>    input: <span class="kw-2">&amp;</span>FrameInput,
+<a href=#83 id=83 data-nosnippet>83</a>    view_state: <span class="kw-2">&amp;mut </span>ViewState,
+<a href=#84 id=84 data-nosnippet>84</a>    projection: <span class="kw-2">&amp;</span>ProjectionType,
+<a href=#85 id=85 data-nosnippet>85</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), FrameInputError&gt; {
+<a href=#86 id=86 data-nosnippet>86</a>    <span class="kw">match </span><span class="kw-2">&amp;</span>input.view {
+<a href=#87 id=87 data-nosnippet>87</a>        ViewSource::MapView =&gt; {
+<a href=#88 id=88 data-nosnippet>88</a>            view_state.clear_external_view();
+<a href=#89 id=89 data-nosnippet>89</a>            <span class="prelude-val">Ok</span>(())
+<a href=#90 id=90 data-nosnippet>90</a>        }
+<a href=#91 id=91 data-nosnippet>91</a>        ViewSource::External(external) =&gt; {
+<a href=#92 id=92 data-nosnippet>92</a>            view_state.set_external_view(<span class="kw-2">*</span>external, projection)<span class="question-mark">?</span>;
+<a href=#93 id=93 data-nosnippet>93</a>            view_state.set_request_overscan(input.request_overscan);
+<a href=#94 id=94 data-nosnippet>94</a>            <span class="prelude-val">Ok</span>(())
+<a href=#95 id=95 data-nosnippet>95</a>        }
+<a href=#96 id=96 data-nosnippet>96</a>    }
+<a href=#97 id=97 data-nosnippet>97</a>}
+<a href=#98 id=98 data-nosnippet>98</a>
+<a href=#99 id=99 data-nosnippet>99</a><span class="doccomment">/// Applies the [`FrameInput`] a host wrote; a host that writes none keeps the map view.
+<a href=#100 id=100 data-nosnippet>100</a>///
+<a href=#101 id=101 data-nosnippet>101</a>/// A rejected external view is logged and retains the last valid external view, so a
+<a href=#102 id=102 data-nosnippet>102</a>/// tracking failure cannot switch projection or start an unrelated tile covering.
+<a href=#103 id=103 data-nosnippet>103</a></span><span class="kw">pub fn </span>frame_input_system(
+<a href=#104 id=104 data-nosnippet>104</a>    MapContext {
+<a href=#105 id=105 data-nosnippet>105</a>        world,
+<a href=#106 id=106 data-nosnippet>106</a>        view_state,
+<a href=#107 id=107 data-nosnippet>107</a>        style,
+<a href=#108 id=108 data-nosnippet>108</a>        ..
+<a href=#109 id=109 data-nosnippet>109</a>    }: <span class="kw-2">&amp;mut </span>MapContext,
+<a href=#110 id=110 data-nosnippet>110</a>) -&gt; SystemResult {
+<a href=#111 id=111 data-nosnippet>111</a>    <span class="kw">super</span>::eye_covering::snapshot_lod_history(world);
+<a href=#112 id=112 data-nosnippet>112</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(input) = world.resources.get::&lt;FrameInput&gt;() <span class="kw">else </span>{
+<a href=#113 id=113 data-nosnippet>113</a>        <span class="kw">return </span><span class="prelude-val">Ok</span>(());
+<a href=#114 id=114 data-nosnippet>114</a>    };
+<a href=#115 id=115 data-nosnippet>115</a>    <span class="kw">let </span>projection = style
+<a href=#116 id=116 data-nosnippet>116</a>        .projection
+<a href=#117 id=117 data-nosnippet>117</a>        .as_ref()
+<a href=#118 id=118 data-nosnippet>118</a>        .map_or_else(ProjectionType::default, |specification| {
+<a href=#119 id=119 data-nosnippet>119</a>            specification.projection_type.clone()
+<a href=#120 id=120 data-nosnippet>120</a>        });
+<a href=#121 id=121 data-nosnippet>121</a>    <span class="kw">if let </span><span class="prelude-val">Err</span>(error) = apply_frame_input(input, view_state, <span class="kw-2">&amp;</span>projection) {
+<a href=#122 id=122 data-nosnippet>122</a>        <span class="macro">tracing::error!</span>(%error, <span class="string">"host view rejected; preserving the last valid view"</span>);
+<a href=#123 id=123 data-nosnippet>123</a>    }
+<a href=#124 id=124 data-nosnippet>124</a>    <span class="prelude-val">Ok</span>(())
+<a href=#125 id=125 data-nosnippet>125</a>}
+<a href=#126 id=126 data-nosnippet>126</a>
+<a href=#127 id=127 data-nosnippet>127</a><span class="attr">#[cfg(test)]
+<a href=#128 id=128 data-nosnippet>128</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>

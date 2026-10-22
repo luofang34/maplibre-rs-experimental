@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["CurrentMapContext","MapError"],"fn":["initial_view_state"],"mod":["provided_images","signals","sources"],"struct":["Map","PendingMapContext"]};
+window.SIDEBAR_ITEMS = {"enum":["CurrentMapContext","MapError"],"mod":["camera","provided_images","signals","sources"],"struct":["Map","PendingMapContext"]};
