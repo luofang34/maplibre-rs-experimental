@@ -142,13 +142,21 @@ impl TileEncoder {
                 if points.len() > 1 && points.first() == points.last() {
                     points.pop();
                 }
-                if points.len() < 3 {
+                // A ring the grid flattens to a line or a point encloses nothing, and a reader
+                // takes a ring without area for a hole; without its exterior ring a polygon has
+                // no holes either.
+                let area = if points.len() < 3 {
+                    0
+                } else {
+                    signed_area(&points)
+                };
+                if area == 0 {
                     if ring_index == 0 {
                         break;
                     }
                     continue;
                 }
-                if (signed_area(&points) > 0) != (ring_index == 0) {
+                if (area > 0) != (ring_index == 0) {
                     points.reverse();
                 }
                 path(&mut polygons, &mut cursor, &points, true);

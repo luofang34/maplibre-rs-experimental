@@ -29,11 +29,18 @@ fn index(document: serde_json::Value, extra: serde_json::Value) -> GeoJsonIndex 
     GeoJsonIndex::from_value(&document, &source(extra)).expect("document indexes")
 }
 
+/// The tile's features, each with a geometry a vector tile reader accepts.
 fn features(bytes: &[u8]) -> Vec<geozero::mvt::tile::Feature> {
+    use geozero::{GeozeroGeometry, ProcessorSink};
     let decoded = Tile::decode(bytes).expect("valid vector tile");
     assert_eq!(decoded.layers.len(), 1);
     assert_eq!(decoded.layers[0].name, "_geojson");
     assert_eq!(decoded.layers[0].extent, Some(EXTENT));
+    for feature in &decoded.layers[0].features {
+        feature
+            .process_geom(&mut ProcessorSink)
+            .expect("the geometry of every encoded feature can be read");
+    }
     decoded.layers[0].features.clone()
 }
 
@@ -170,6 +177,15 @@ fn polygons_with_holes_and_reversed_winding_stay_fillable() {
         feature.r#type,
         Some(geozero::mvt::tile::GeomType::Polygon as i32)
     );
+    assert_eq!(
+        close_paths(feature),
+        2,
+        "the exterior ring and its hole are closed"
+    );
+}
+
+/// How many rings the feature's command stream closes.
+fn close_paths(feature: &geozero::mvt::tile::Feature) -> usize {
     let (mut closes, mut cursor) = (0, 0);
     while cursor < feature.geometry.len() {
         let word = feature.geometry[cursor];
@@ -182,7 +198,47 @@ fn polygons_with_holes_and_reversed_winding_stay_fillable() {
             _ => cursor += 1 + 2 * count,
         }
     }
-    assert_eq!(closes, 2, "the exterior ring and its hole are closed");
+    closes
+}
+
+#[test]
+fn rings_the_grid_flattens_enclose_nothing_and_the_rest_of_the_polygon_stays() {
+    // A strip a metre high is three distinct points on one row of the zoom 0 grid, a ring
+    // without area, which a reader would take for a hole without a polygon.
+    let strip = [
+        [0.0, 0.0],
+        [1.0, 0.0],
+        [2.0, 0.0],
+        [2.0, 0.00001],
+        [1.0, 0.00001],
+        [0.0, 0.00001],
+        [0.0, 0.0],
+    ];
+    let flattened = index(
+        json!({"type": "Polygon", "coordinates": [strip]}),
+        json!({}),
+    );
+    assert!(
+        features(&flattened.tile(tile(0, 0, 0))).is_empty(),
+        "a flattened exterior ring leaves no polygon"
+    );
+    let square = [
+        [-10.0, -10.0],
+        [10.0, -10.0],
+        [10.0, 10.0],
+        [-10.0, 10.0],
+        [-10.0, -10.0],
+    ];
+    let mixed = index(
+        json!({"type": "MultiPolygon", "coordinates": [[square, strip], [strip]]}),
+        json!({}),
+    );
+    let feature = &features(&mixed.tile(tile(0, 0, 0)))[0];
+    assert_eq!(
+        close_paths(feature),
+        1,
+        "the square stays without its flattened hole, and the flattened polygon is left out"
+    );
 }
 
 #[cfg(feature = "headless")]
