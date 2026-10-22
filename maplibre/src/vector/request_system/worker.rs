@@ -31,11 +31,22 @@ pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context +
     Box::pin(async move {
         let overscaled_zoom = input.overscaled_zoom();
         let pixel_ratio = input.pixel_ratio();
+        let only_sources = input.only_sources().map(<[String]>::to_vec);
         let (coords, style, attempt) = input.into_tile_request();
         let context = AttemptContext::new(context, attempt);
         let client = kernel.source_client();
+        // A request for a change to some sources' data leaves the tile's other sources as the
+        // tile shows them.
         let mut groups = source_layer_groups(&style, TileKind::Vector)
             .into_iter()
+            .filter(|group| {
+                only_sources.as_ref().is_none_or(|only| {
+                    group
+                        .source_name
+                        .as_ref()
+                        .is_some_and(|name| only.contains(name))
+                })
+            })
             .peekable();
         let mut failed = false;
         let mut retry = false;

@@ -298,13 +298,13 @@ async fn a_malformed_geojson_document_is_a_terminal_typed_failure_that_is_not_re
     );
 }
 
-fn inline(data: &str) -> crate::style::source::GeoJsonData {
+pub(super) fn inline(data: &str) -> crate::style::source::GeoJsonData {
     crate::style::source::GeoJsonData::Inline(std::sync::Arc::new(
         serde_json::from_str(data).expect("geojson"),
     ))
 }
 
-const NOTHING: &str = r#"{"type":"FeatureCollection","features":[]}"#;
+pub(super) const NOTHING: &str = r#"{"type":"FeatureCollection","features":[]}"#;
 
 #[tokio::test]
 async fn set_data_replaces_loaded_tiles_and_an_empty_source_clears_them() {

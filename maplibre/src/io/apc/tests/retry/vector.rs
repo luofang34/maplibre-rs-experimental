@@ -70,3 +70,5 @@ mod terrain;
 mod fallback;
 
 mod zoom_range;
+
+mod scoped_refresh;

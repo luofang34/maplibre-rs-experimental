@@ -196,6 +196,7 @@ impl<E: Environment, T: DemTransferables> RequestSystem<E, T> {
                     style: style.clone(),
                     overscaled_zoom: 0,
                     pixel_ratio: 1.0,
+                    only_sources: None,
                 },
                 fetch_dem_apc::<E::OffscreenKernelEnvironment, T, _>,
             )
@@ -207,7 +208,7 @@ impl<E: Environment, T: DemTransferables> RequestSystem<E, T> {
         if !exists {
             tile.insert(DemTileComponent::Pending);
         }
-        tile_retry::started(world, coords, RequestKind::Dem, attempt);
+        tile_retry::started(world, coords, RequestKind::Dem, attempt, None);
         tracing::debug!(%coords, "DEM tile request accepted");
         Ok(())
     }

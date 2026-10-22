@@ -141,6 +141,10 @@ pub enum Input {
         /// Device pixels per layout pixel of the display, which generated images are made for.
         #[serde(default = "one")]
         pixel_ratio: f32,
+        /// The sources to process, when the request is for a change to their data alone: the
+        /// tile keeps what it shows of the others. `None` processes every source.
+        #[serde(default)]
+        only_sources: Option<Vec<String>>,
     },
 }
 
@@ -177,6 +181,14 @@ impl Input {
         match self {
             Self::TileRequest { .. } => 1.0,
             Self::TrackedTileRequest { pixel_ratio, .. } => *pixel_ratio,
+        }
+    }
+
+    /// The sources the request is limited to, or `None` for every source.
+    pub fn only_sources(&self) -> Option<&[String]> {
+        match self {
+            Self::TileRequest { .. } => None,
+            Self::TrackedTileRequest { only_sources, .. } => only_sources.as_deref(),
         }
     }
 }

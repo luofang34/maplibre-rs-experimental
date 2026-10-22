@@ -43,7 +43,7 @@ fn tile(x: i32, y: i32, z: u8) -> WorldTileCoords {
 fn loaded(tiles: &[WorldTileCoords]) -> World {
     let mut world = World::default();
     for (attempt, coords) in (1..).zip(tiles) {
-        tile_retry::started(&mut world, *coords, RequestKind::Vector, attempt);
+        tile_retry::started(&mut world, *coords, RequestKind::Vector, attempt, None);
         tile_retry::completed(
             &mut world,
             TileRequestOutcome {
