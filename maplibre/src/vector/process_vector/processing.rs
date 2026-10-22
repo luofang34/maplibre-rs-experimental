@@ -134,31 +134,61 @@ fn vector_layer<T: VectorTransferables, C: Context>(
     request: &VectorTileRequest,
     context: &mut ProcessVectorContext<T, C>,
 ) -> Result<(), ProcessVectorError> {
-    let original = layer.clone();
-    let mut tessellator = tessellator(paint, request);
-    tessellator.set_layer_strokes(style);
-    tessellator.coordinate_scale = extent_scale(&layer);
-    tessellator.sort_key =
-        crate::vector::tessellation::SortKeys::by(crate::vector::tessellation::sort_key_of(style));
-    match layer.process(&mut tessellator) {
+    let build = |layer: &mut tile::Layer| {
+        let mut tessellator = tessellator(paint, request);
+        tessellator.set_layer_strokes(style);
+        tessellator.coordinate_scale = extent_scale(layer);
+        tessellator.sort_key = crate::vector::tessellation::SortKeys::by(
+            crate::vector::tessellation::sort_key_of(style),
+        );
+        layer.process(&mut tessellator)?;
+        Ok(tessellator)
+    };
+    let Some(mut tessellator) = tessellate_readable(&mut layer, request.coords, build) else {
+        return context.layer_missing(&request.coords, &layer.name);
+    };
+    tessellator.apply_sort_keys();
+    let sort_keys = tessellator.sort_key_values();
+    context.layer_tessellation_finished(
+        &request.coords,
+        tessellator.buffer.into(),
+        tessellator.feature_indices,
+        (tessellator.feature_colors, sort_keys),
+        layer,
+        style.id.clone(),
+    )
+}
+
+/// Tessellates the layer with `build`. When a feature's geometry cannot be read, the features
+/// whose geometry cannot are left out and the rest are tessellated, so one malformed feature
+/// does not take the layer with it; `None` when the layer cannot be tessellated even so.
+fn tessellate_readable<Tessellator>(
+    layer: &mut tile::Layer,
+    coords: WorldTileCoords,
+    mut build: impl FnMut(&mut tile::Layer) -> geozero::error::Result<Tessellator>,
+) -> Option<Tessellator> {
+    use geozero::{GeozeroGeometry, ProcessorSink};
+    let error = match build(layer) {
+        Ok(tessellator) => return Some(tessellator),
+        Err(error) => error,
+    };
+    let before = layer.features.len();
+    layer
+        .features
+        .retain(|feature| feature.process_geom(&mut ProcessorSink).is_ok());
+    let dropped = before - layer.features.len();
+    if dropped == 0 {
+        tracing::error!(%coords, layer = %layer.name, ?error, "vector tessellation failed");
+        return None;
+    }
+    tracing::warn!(%coords, layer = %layer.name, dropped, ?error, "features whose geometry cannot be read are left out");
+    match build(layer) {
+        Ok(tessellator) => Some(tessellator),
         Err(error) => {
-            context.layer_missing(&request.coords, &layer.name)?;
-            tracing::error!(coords = %request.coords, layer = %layer.name, ?error,"vector tessellation failed");
-        }
-        Ok(()) => {
-            tessellator.apply_sort_keys();
-            let sort_keys = tessellator.sort_key_values();
-            context.layer_tessellation_finished(
-                &request.coords,
-                tessellator.buffer.into(),
-                tessellator.feature_indices,
-                (tessellator.feature_colors, sort_keys),
-                original,
-                style.id.clone(),
-            )?
+            tracing::error!(%coords, layer = %layer.name, ?error, "vector tessellation failed");
+            None
         }
     }
-    Ok(())
 }
 
 fn symbol_layer<T: VectorTransferables, C: Context>(
@@ -169,30 +199,27 @@ fn symbol_layer<T: VectorTransferables, C: Context>(
     context: &mut ProcessVectorContext<T, C>,
     atlas: std::sync::Arc<crate::sdf::assets::SymbolAtlas>,
 ) -> Result<(), ProcessVectorError> {
-    let original = layer.clone();
     let zoom = request.style_zoom();
-    let mut tessellator = TextTessellator::with_assets(paint.clone(), zoom, atlas.clone());
-    tessellator.coordinate_scale = extent_scale(&layer);
-    tessellator.overscaling = request.overscaling();
-    tessellator.source_ids = layer.features.iter().map(|feature| feature.id).collect();
-    match layer.process(&mut tessellator) {
-        Err(error) => {
-            context.layer_missing(&request.coords, &layer.name)?;
-            tracing::error!(coords = %request.coords, layer = %layer.name, ?error,"symbol tessellation failed");
-        }
-        Ok(()) => {
-            tessellator.finish();
-            context.symbol_layer_tessellation_finished(
-                crate::vector::transferables::DefaultSymbolLayerTessellated {
-                    coords: request.coords,
-                    buffer: tessellator.quad_buffer.into(),
-                    features: tessellator.features,
-                    atlas: Some(atlas),
-                    layer_data: original,
-                    style_layer_id: style.id.clone(),
-                },
-            )?;
-        }
-    }
-    Ok(())
+    let build = |layer: &mut tile::Layer| {
+        let mut tessellator = TextTessellator::with_assets(paint.clone(), zoom, atlas.clone());
+        tessellator.coordinate_scale = extent_scale(layer);
+        tessellator.overscaling = request.overscaling();
+        tessellator.source_ids = layer.features.iter().map(|feature| feature.id).collect();
+        layer.process(&mut tessellator)?;
+        Ok(tessellator)
+    };
+    let Some(mut tessellator) = tessellate_readable(&mut layer, request.coords, build) else {
+        return context.layer_missing(&request.coords, &layer.name);
+    };
+    tessellator.finish();
+    context.symbol_layer_tessellation_finished(
+        crate::vector::transferables::DefaultSymbolLayerTessellated {
+            coords: request.coords,
+            buffer: tessellator.quad_buffer.into(),
+            features: tessellator.features,
+            atlas: Some(atlas),
+            layer_data: layer,
+            style_layer_id: style.id.clone(),
+        },
+    )
 }
