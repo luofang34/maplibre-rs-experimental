@@ -465,7 +465,7 @@ use external::ExternalEye;
 pub use external::{ExternalAnchor, ExternalView, ExternalViewError};
 pub use horizon::HorizonLine;
 pub use navigation::{GlobePose, NavigationError, NavigationLimit, NavigationMode};
-pub use pose::CameraPose;
+pub use pose::{CameraOptions, CameraPose};
 
 #[cfg(test)]
 mod tests;

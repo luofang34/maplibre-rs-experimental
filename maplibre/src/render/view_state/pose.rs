@@ -12,6 +12,7 @@ use cgmath::{Deg, Point2, Rad};
 
 use crate::{
     coords::{LatLon, Zoom, TILE_SIZE},
+    projection::globe::scale::MERCATOR_LATITUDE_LIMIT,
     render::view_state::ViewState,
     terrain::interaction::{
         camera_direction, camera_ground_position, distance_to_center_from_altitude,
@@ -31,6 +32,21 @@ pub struct CameraPose {
     pub pitch: Deg<f64>,
     /// Roll about the view axis.
     pub roll: Deg<f64>,
+}
+
+/// What a jump sets, as GL JS `CameraOptions`; what is left out keeps its value.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CameraOptions {
+    /// The map center.
+    pub center: Option<LatLon>,
+    /// The zoom.
+    pub zoom: Option<f64>,
+    /// Bearing, clockwise from north.
+    pub bearing: Option<Deg<f64>>,
+    /// Pitch away from looking straight down.
+    pub pitch: Option<Deg<f64>>,
+    /// Roll about the view axis.
+    pub roll: Option<Deg<f64>>,
 }
 
 /// Bound on the center search, as GL JS sets it; the search converges in about five passes.
@@ -154,6 +170,47 @@ impl ViewState {
         camera.set_bearing(bearing);
         camera.set_pitch(pitch);
         camera.set_roll(roll);
+    }
+
+    /// Moves the map at once, as GL JS `jumpTo`: to the center, zoom and angles given, with
+    /// the others kept as they are. The center's latitude is kept within the Mercator limit
+    /// and a zoom that is not a number is left out, as GL JS constrains a jump.
+    ///
+    /// In free-globe navigation the globe pose is what is drawn; this moves the flat camera,
+    /// as [`Self::set_camera_pose`] does, and [`Self::set_globe_pose`] moves the globe.
+    pub fn jump_to(&mut self, options: CameraOptions) {
+        let camera = self.camera();
+        let bearing = options
+            .bearing
+            .unwrap_or_else(|| camera.get_bearing().into());
+        let pitch = options.pitch.unwrap_or_else(|| camera.get_pitch().into());
+        let roll = options.roll.unwrap_or_else(|| camera.get_roll().into());
+        let center = options.center.map_or_else(
+            || self.center_lat_lon(),
+            |center| {
+                LatLon::new(
+                    center
+                        .latitude
+                        .clamp(-MERCATOR_LATITUDE_LIMIT, MERCATOR_LATITUDE_LIMIT),
+                    center.longitude,
+                )
+            },
+        );
+        let zoom = options
+            .zoom
+            .filter(|zoom| zoom.is_finite())
+            .map_or_else(|| self.zoom(), Zoom::new);
+        self.set_center_and_angles(center, zoom, bearing, pitch, roll);
+    }
+
+    /// The map center in latitude and longitude.
+    pub fn center_lat_lon(&self) -> LatLon {
+        let world_size = TILE_SIZE * 2f64.powf(self.zoom().value());
+        let position = self.camera().position();
+        lat_lon_at_mercator(Point2::new(
+            position.x / world_size,
+            position.y / world_size,
+        ))
     }
 
     /// Where the camera stands and where it looks.
