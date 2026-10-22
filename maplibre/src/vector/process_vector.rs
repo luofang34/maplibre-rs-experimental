@@ -171,7 +171,7 @@ mod processing;
 
 /// Decodes a tile, tolerating the zero padding some tile servers append: a zero tag is not a
 /// field, so a strict decoder rejects a tile that GL JS reads.
-pub(super) fn decode_tile(data: &[u8]) -> Result<geozero::mvt::Tile, Box<dyn std::error::Error>> {
+pub(crate) fn decode_tile(data: &[u8]) -> Result<geozero::mvt::Tile, Box<dyn std::error::Error>> {
     // A payload that is not a protobuf tile with layers is tried as a MapLibre Tile.
     #[cfg(feature = "mlt")]
     match decode_mvt(data) {

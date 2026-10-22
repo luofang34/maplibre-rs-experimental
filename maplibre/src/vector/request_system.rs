@@ -23,6 +23,7 @@ use crate::{
 };
 
 mod group_tile;
+mod rescale;
 mod worker;
 pub use worker::fetch_vector_apc;
 
@@ -98,8 +99,9 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                 .chain(view_region.iter().filter(|_| !draped))
                 .chain(prefetch)
             {
-                // Above the source maximum zoom the ancestor tile is fetched once and the
-                // view pattern scales it into every descendant in view.
+                // Past the deepest source zoom the ancestor tile is fetched once and the view
+                // pattern scales it into every descendant in view; a source that ends sooner
+                // is cut into the tile from its own last tile by the worker.
                 if min_zoom.is_some_and(|min_zoom| u8::from(coords.z) < min_zoom) {
                     continue;
                 }

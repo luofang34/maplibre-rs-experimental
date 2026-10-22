@@ -126,6 +126,9 @@ pub fn fresh_generation() -> u64 {
 /// The GL JS default for a GeoJSON source's `maxzoom`.
 pub const GEOJSON_DEFAULT_MAXZOOM: u8 = 18;
 
+/// The GL JS default for a vector source's `maxzoom`, past which its last tiles are magnified.
+pub const VECTOR_DEFAULT_MAXZOOM: u8 = 22;
+
 /// The deepest zoom GeoJSON is tiled at. Features are not clipped, so deeper tiles would place
 /// vertices beyond the vector tile grid's integer range; deeper views overzoom this level.
 pub const GEOJSON_MAX_TILED_ZOOM: u8 = 18;

@@ -2,12 +2,12 @@
 
 use super::{
     clamp_to_max_zoom, covering_zoom, missing_tile_fallback, source_layer_groups, source_max_zoom,
-    source_tiles_for, tile_in_bounds, TileKind,
+    source_min_zoom, source_tiles_for, tile_in_bounds, TileKind,
 };
 use crate::{
     coords::{WorldTileCoords, ZoomLevel},
     io::source_type::SourceType,
-    style::Style,
+    style::{source::Source, Style},
 };
 
 fn style() -> Style {
@@ -149,7 +149,6 @@ fn geojson_layers_form_a_group_reading_the_geojson_layer_and_background_is_left_
     assert_eq!(shapes.layers.len(), 1);
     assert_eq!(shapes.layers[0].source_layer.as_deref(), Some("_geojson"));
     assert!(groups.iter().flat_map(|g| &g.layers).all(|l| l.id != "bg"));
-    assert_eq!(source_max_zoom(&style(), TileKind::Vector), Some(6));
 }
 
 #[test]
@@ -162,9 +161,77 @@ fn raster_layers_group_separately() {
 }
 
 #[test]
-fn max_zoom_is_the_most_restrictive_source() {
-    assert_eq!(source_max_zoom(&style(), TileKind::Vector), Some(6));
+fn max_zoom_is_the_deepest_source_with_an_undeclared_vector_one_at_the_gl_js_default() {
+    // The catalogued source declares no last zoom, so it reaches the GL JS default of 22.
+    assert_eq!(source_max_zoom(&style(), TileKind::Vector), Some(22));
     assert_eq!(source_max_zoom(&style(), TileKind::Raster), Some(3));
+    let mut style = style();
+    style.layers.retain(|layer| layer.id != "catalogued");
+    assert_eq!(
+        source_max_zoom(&style, TileKind::Vector),
+        Some(18),
+        "the GeoJSON source is tiled deeper than the declared vector sources reach"
+    );
+}
+
+#[test]
+fn min_zoom_is_the_shallowest_declared_source_unless_one_declares_none() {
+    let mut style = style();
+    assert_eq!(source_min_zoom(&style, TileKind::Vector), None);
+    for (name, min_zoom) in [("world", 2), ("detail", 5), ("shapes", 3), ("catalog", 1)] {
+        match style.sources.get_mut(name) {
+            Some(Source::Vector(source)) => source.minzoom = Some(min_zoom),
+            Some(Source::GeoJson(source)) => source.minzoom = Some(min_zoom),
+            _ => panic!("vector or GeoJSON source"),
+        }
+    }
+    assert_eq!(source_min_zoom(&style, TileKind::Vector), Some(1));
+}
+
+#[test]
+fn each_group_carries_its_own_zoom_range_and_bounds() {
+    let mut style = style();
+    if let Some(Source::Vector(world)) = style.sources.get_mut("world") {
+        world.minzoom = Some(2);
+        world.bounds = Some((-10.0, -10.0, 10.0, 10.0));
+    }
+    let groups = source_layer_groups(&style, TileKind::Vector);
+    let group = |name: Option<&str>| {
+        groups
+            .iter()
+            .find(|group| group.source_name.as_deref() == name)
+            .expect("group")
+    };
+    let world = group(Some("world"));
+    assert_eq!((world.min_zoom, world.max_zoom), (Some(2), Some(6)));
+    assert_eq!(
+        world.source_tile(coords(37, 21, 8)),
+        coords(9, 5, 6),
+        "a deeper tile is drawn from the source's tile at its last zoom"
+    );
+    assert!(
+        world.has_nothing_at(coords(0, 0, 1)),
+        "shallower than the source's first zoom"
+    );
+    assert!(
+        world.has_nothing_at(coords(0, 0, 6)),
+        "beyond the source's bounds"
+    );
+    assert!(
+        !world.has_nothing_at(coords(32, 32, 6)),
+        "within the bounds at a zoom the source has"
+    );
+    assert_eq!(group(Some("shapes")).max_zoom, Some(18));
+    assert_eq!(
+        group(Some("detail")).max_zoom,
+        Some(14),
+        "a declared last zoom is the source's own"
+    );
+    let default = group(None);
+    assert_eq!(
+        (default.min_zoom, default.max_zoom, default.bounds),
+        (None, None, None)
+    );
 }
 
 #[test]
