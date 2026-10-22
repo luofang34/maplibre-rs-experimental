@@ -40,11 +40,11 @@ impl GeoJsonVersions {
         )
     }
 
-    /// Requests again the loaded vector tiles whose content the sources' new data changes; the
+    /// Requests again the loaded vector tiles whose content the sources' new data changes, for
+    /// the changed sources alone, so the tiles keep what they show of their other sources; the
     /// old content stays until the new tiles arrive. Sources added or removed since are left to
     /// the layer changes that draw them.
     pub(crate) fn refresh_changed(self, style: &Style, world: &mut World) {
-        let mut reached = Vec::new();
         for (name, before) in &self.0 {
             let Some(Source::GeoJson(after)) = style.sources.get(name) else {
                 continue;
@@ -52,22 +52,29 @@ impl GeoJsonVersions {
             if before.generation == after.generation {
                 continue;
             }
-            match reach(before, after) {
-                Some(bounds) => reached.extend(bounds),
+            let tiles = match reach(before, after) {
+                Some(bounds) => tiles_meeting(world, &bounds),
                 None => {
-                    tracing::debug!(source = %name, "GeoJSON change refreshes every loaded tile");
-                    tile_retry::refresh(world, RequestKind::Vector);
-                    return;
+                    tracing::debug!(source = %name, "GeoJSON change reaches every loaded tile");
+                    world.tiles.tiles.values().map(|tile| tile.coords).collect()
                 }
+            };
+            if tiles.is_empty() {
+                continue;
             }
-        }
-        let tiles = tiles_meeting(world, &reached);
-        if !tiles.is_empty() {
             tracing::debug!(
                 tiles = tiles.len(),
+                source = %name,
                 "GeoJSON change refreshes the tiles it reaches"
             );
-            tile_retry::refresh_tiles(world, RequestKind::Vector, &tiles);
+            // Each source refreshes the tiles its own change reaches, for itself alone; a tile
+            // several changes reach is requested once, for all of them.
+            tile_retry::refresh_tiles_for_sources(
+                world,
+                RequestKind::Vector,
+                &tiles,
+                std::slice::from_ref(name),
+            );
         }
     }
 }

@@ -12,7 +12,7 @@ fn tile(x: u32) -> WorldTileCoords {
 
 /// A world whose vector request for `coords` was made as `attempt` and has finished.
 fn loaded(world: &mut World, coords: WorldTileCoords, attempt: u64) {
-    started(world, coords, RequestKind::Vector, attempt);
+    started(world, coords, RequestKind::Vector, attempt, None);
     completed(
         world,
         TileRequestOutcome {

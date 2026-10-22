@@ -133,6 +133,15 @@ pub(crate) fn apply(world: &mut World, report: ProvidedImagesReport) {
     crate::render::frame_signals::mark_dirty(world);
 }
 
+/// Whether the tile's labels draw provided images or still wait for some, which a request
+/// that processes only part of the tile's sources could not account for.
+pub(crate) fn uses_images(world: &World, coords: WorldTileCoords) -> bool {
+    world
+        .tiles
+        .query::<&TileProvidedImages>(coords)
+        .is_some_and(|images| !images.names.is_empty() || images.awaiting.is_some())
+}
+
 /// Whether a tile's worker still waits for images, so frames must keep coming to show them.
 pub(crate) fn awaiting(world: &World) -> bool {
     world.tiles.tiles.values().any(|tile| {

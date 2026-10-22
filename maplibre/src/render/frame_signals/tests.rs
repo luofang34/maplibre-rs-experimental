@@ -14,7 +14,7 @@ fn outcome(coords: WorldTileCoords, disposition: RequestDisposition) -> TileRequ
 fn a_finished_request_tells_the_host_and_dirties_the_map() {
     let mut world = World::default();
     let coords = WorldTileCoords::default();
-    tile_retry::started(&mut world, coords, RequestKind::Raster, 7);
+    tile_retry::started(&mut world, coords, RequestKind::Raster, 7, None);
     assert!(
         tile_retry::needs_frame(&world),
         "a request in flight needs a frame"
@@ -42,7 +42,7 @@ fn a_finished_request_tells_the_host_and_dirties_the_map() {
 fn a_failed_request_is_reported_as_not_loaded() {
     let mut world = World::default();
     let coords = WorldTileCoords::default();
-    tile_retry::started(&mut world, coords, RequestKind::Raster, 7);
+    tile_retry::started(&mut world, coords, RequestKind::Raster, 7, None);
     tile_retry::completed(&mut world, outcome(coords, RequestDisposition::Retry));
     let signals = world.resources.get::<FrameSignals>().expect("signals");
     assert!(matches!(

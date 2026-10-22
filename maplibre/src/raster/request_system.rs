@@ -250,6 +250,7 @@ impl<E: Environment, T: RasterTransferables> RequestSystem<E, T> {
                     style: style.clone(),
                     overscaled_zoom: 0,
                     pixel_ratio: 1.0,
+                    only_sources: None,
                 },
                 fetch_raster_apc::<E::OffscreenKernelEnvironment, T, _>,
             )
@@ -261,7 +262,7 @@ impl<E: Environment, T: RasterTransferables> RequestSystem<E, T> {
         if !exists {
             tile.insert(RasterLayersDataComponent::default());
         }
-        tile_retry::started(world, coords, RequestKind::Raster, attempt);
+        tile_retry::started(world, coords, RequestKind::Raster, attempt, None);
         tracing::debug!(%coords, "raster tile request accepted");
         Ok(())
     }

@@ -131,7 +131,14 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                 }
                 budget -= 1;
 
-                self.request(coords, style, world, (overscaled_zoom, pixel_ratio))?;
+                let only_sources = refresh_only(world, coords, laid_out_for);
+                self.request(
+                    coords,
+                    style,
+                    world,
+                    (overscaled_zoom, pixel_ratio),
+                    only_sources,
+                )?;
             }
             tile_retry::want(world, RequestKind::Vector, &requested);
             self.release_unwanted(world, &requested);
@@ -153,6 +160,26 @@ fn is_current(
     overscaled_zoom.is_none_or(|zoom| tile.overscaled_zoom == zoom)
         && !crate::sdf::provided::drawn_for_another_ratio(world, coords, pixel_ratio)
         && !tile_retry::due(world, coords, RequestKind::Vector)
+}
+
+/// The sources the request for the tile is limited to: the ones a refresh of their data alone
+/// is pending for, when the tile otherwise holds what a request would bring and draws no
+/// provided images, whose bookkeeping a partial request would lose. A request for any other
+/// reason processes every source.
+fn refresh_only(
+    world: &mut crate::tcs::world::World,
+    coords: crate::coords::WorldTileCoords,
+    (overscaled_zoom, pixel_ratio): (Option<u8>, f32),
+) -> Option<Vec<String>> {
+    let sources = tile_retry::take_refresh_sources(world, coords)?;
+    let tile = world.tiles.query::<&VectorLayerBucketComponent>(coords)?;
+    let complete = tile.done
+        && !tile.failed
+        && overscaled_zoom.is_none_or(|zoom| tile.overscaled_zoom == zoom);
+    (complete
+        && !crate::sdf::provided::drawn_for_another_ratio(world, coords, pixel_ratio)
+        && !crate::sdf::provided::uses_images(world, coords))
+    .then_some(sources)
 }
 
 /// Device pixels per layout pixel of the display: as the host reported it, or else as the
@@ -201,11 +228,13 @@ impl<E: Environment, T: VectorTransferables> RequestSystem<E, T> {
         style: &crate::style::Style,
         world: &mut crate::tcs::world::World,
         (overscaled_zoom, pixel_ratio): (u8, f32),
+        only_sources: Option<Vec<String>>,
     ) -> SystemResult {
         if world.tiles.spawn_mut(coords).is_none() {
             return Err(SystemError::InvalidTile { coords });
         }
         let attempt = tile_retry::next_attempt(world);
+        let issued_for = only_sources.clone();
         self.kernel
             .apc()
             .call(
@@ -215,6 +244,7 @@ impl<E: Environment, T: VectorTransferables> RequestSystem<E, T> {
                     attempt,
                     overscaled_zoom,
                     pixel_ratio,
+                    only_sources,
                 },
                 fetch_vector_apc::<E::OffscreenKernelEnvironment, T, _>,
             )
@@ -230,7 +260,13 @@ impl<E: Environment, T: VectorTransferables> RequestSystem<E, T> {
         {
             tile.overscaled_zoom = overscaled_zoom;
         }
-        tile_retry::started(world, coords, RequestKind::Vector, attempt);
+        tile_retry::started(
+            world,
+            coords,
+            RequestKind::Vector,
+            attempt,
+            issued_for.as_deref(),
+        );
         if let Some(replaced) = crate::sdf::provided::restarted(world, coords, pixel_ratio) {
             self.kernel.apc().cancel(replaced);
         }

@@ -1,6 +1,11 @@
 //! Completion and bounded retry scheduling for vector, raster and elevation requests.
 
-use std::{cell::Cell, collections::HashSet, rc::Rc, time::Duration};
+use std::{
+    cell::Cell,
+    collections::{BTreeSet, HashSet},
+    rc::Rc,
+    time::Duration,
+};
 
 use instant::Instant;
 use serde::{Deserialize, Serialize};
@@ -84,6 +89,9 @@ struct RetryState {
     deadline: Option<Duration>,
     /// The style changed while this request was in flight, so its result is refetched.
     stale: bool,
+    /// The sources the attempt was limited to, so that a retry of it is for them again;
+    /// `None` for an attempt that processed every source.
+    issued_for: Option<Vec<String>>,
 }
 
 #[derive(Default)]
@@ -154,8 +162,78 @@ pub(crate) fn refresh(world: &mut World, kind: RequestKind) {
     refresh_tiles(world, kind, &coords);
 }
 
+/// What the pending refresh of a tile is for, so that the request made for it can leave the
+/// tile's other sources as they are.
+#[derive(Default)]
+enum RefreshSources {
+    /// No refresh is pending, or the request for it has been made.
+    #[default]
+    None,
+    /// The data of these sources changed.
+    Some(BTreeSet<String>),
+    /// Anything about the tile may have changed.
+    Every,
+}
+impl TileComponent for RefreshSources {}
+
+/// Like [`refresh_tiles`], for a change to the data of `sources` alone: a request made for
+/// the refresh processes those sources and keeps what the tile shows of the others.
+pub(crate) fn refresh_tiles_for_sources(
+    world: &mut World,
+    kind: RequestKind,
+    tiles: &[WorldTileCoords],
+    sources: &[String],
+) {
+    for coords in tiles {
+        mark_refresh_sources(world, *coords, Some(sources));
+    }
+    refresh_due(world, kind, tiles);
+}
+
+/// Notes which sources a pending refresh of the tile is for: those given add to the ones
+/// noted before, and a refresh for every source (`None`) outranks any for some, whichever
+/// comes first.
+fn mark_refresh_sources(world: &mut World, coords: WorldTileCoords, sources: Option<&[String]>) {
+    let marked = match sources {
+        None => RefreshSources::Every,
+        Some(sources) => RefreshSources::Some(sources.iter().cloned().collect()),
+    };
+    if let Some(existing) = world.tiles.query_mut::<&mut RefreshSources>(coords) {
+        match (existing, marked) {
+            (RefreshSources::Every, _) => {}
+            (RefreshSources::Some(scope), RefreshSources::Some(sources)) => scope.extend(sources),
+            (existing, marked) => *existing = marked,
+        }
+        return;
+    }
+    if let Some(mut tile) = world.tiles.spawn_mut(coords) {
+        tile.insert(marked);
+    }
+}
+
+/// The sources the pending refresh of the tile is for, cleared for the request that takes
+/// them; `None` when the refresh is for every source, or none is pending.
+pub(crate) fn take_refresh_sources(
+    world: &mut World,
+    coords: WorldTileCoords,
+) -> Option<Vec<String>> {
+    let pending = world.tiles.query_mut::<&mut RefreshSources>(coords)?;
+    match std::mem::take(pending) {
+        RefreshSources::Some(sources) => Some(sources.into_iter().collect()),
+        RefreshSources::None | RefreshSources::Every => None,
+    }
+}
+
 /// Requests `tiles` again for `kind`, keeping what they show until the new data lands.
 pub(crate) fn refresh_tiles(world: &mut World, kind: RequestKind, tiles: &[WorldTileCoords]) {
+    for coords in tiles {
+        mark_refresh_sources(world, *coords, None);
+    }
+    refresh_due(world, kind, tiles);
+}
+
+/// Makes the next request for each of `tiles` due now, or once the one in flight lands.
+fn refresh_due(world: &mut World, kind: RequestKind, tiles: &[WorldTileCoords]) {
     crate::render::frame_signals::mark_dirty(world);
     let now = now(world);
     for coords in tiles {
@@ -193,6 +271,8 @@ pub(crate) fn retry_later(
         return;
     }
     state.deadline = Some(now.saturating_add(delay));
+    // The retry brings what the whole tile was asked for, not what a later data change was.
+    mark_refresh_sources(world, coords, None);
 }
 
 pub(crate) fn due(world: &mut World, coords: WorldTileCoords, kind: RequestKind) -> bool {
@@ -223,7 +303,14 @@ pub(crate) fn next_attempt(world: &mut World) -> u64 {
     next
 }
 
-pub(crate) fn started(world: &mut World, coords: WorldTileCoords, kind: RequestKind, attempt: u64) {
+/// Records the attempt made for the tile, limited to `only_sources` or for every source.
+pub(crate) fn started(
+    world: &mut World,
+    coords: WorldTileCoords,
+    kind: RequestKind,
+    attempt: u64,
+    only_sources: Option<&[String]>,
+) {
     if world.tiles.query::<&TileRequestRetries>(coords).is_none() {
         if let Some(mut tile) = world.tiles.spawn_mut(coords) {
             tile.insert(TileRequestRetries::default());
@@ -235,6 +322,7 @@ pub(crate) fn started(world: &mut World, coords: WorldTileCoords, kind: RequestK
         state.pending = true;
         state.deadline = None;
         state.stale = false;
+        state.issued_for = only_sources.map(<[String]>::to_vec);
     }
 }
 
@@ -254,6 +342,7 @@ pub(crate) fn completed(world: &mut World, outcome: TileRequestOutcome) {
     state.pending = false;
     let stale = std::mem::take(&mut state.stale);
     let loaded = matches!(outcome.disposition, RequestDisposition::Complete);
+    let mut retried_for = None;
     match outcome.disposition {
         RequestDisposition::Complete => {
             state.delay = Duration::ZERO;
@@ -266,7 +355,13 @@ pub(crate) fn completed(world: &mut World, outcome: TileRequestOutcome) {
                 state.delay.saturating_mul(2).min(Duration::from_secs(30))
             };
             state.deadline = Some(now.saturating_add(state.delay));
+            retried_for = Some(state.issued_for.clone());
         }
+    }
+    // The retry is for what the attempt was for, so a data change noted since cannot
+    // narrow it to its own sources and lose the ones that failed.
+    if let Some(issued_for) = retried_for {
+        mark_refresh_sources(world, outcome.coords, issued_for.as_deref());
     }
     crate::render::frame_signals::resource_ready(
         world,
