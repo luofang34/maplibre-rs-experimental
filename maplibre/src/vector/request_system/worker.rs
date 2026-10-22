@@ -43,6 +43,15 @@ pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context +
         while let Some(group) = groups.next() {
             let data = match fetch_group_tile(&client, coords, &group).await {
                 Ok(data) => data,
+                // A source without a tile there has nothing to draw, as GL JS loads a vector
+                // tile that answered 404 empty: its layers are empty, and the tile's other
+                // sources are drawn as usual.
+                Err(error) if error.is_not_found() => {
+                    tracing::debug!(%coords, source = ?group.source_name, "no vector tile at the source; its layers are empty");
+                    source_empty::<T, _>(coords, &group.layers, &context)
+                        .map_err(ProcedureError::Send)?;
+                    continue;
+                }
                 Err(error) => {
                     tracing::warn!(%coords, source = ?group.source_name, error = %error.describe(), "vector tile unavailable");
                     failed = true;
@@ -107,7 +116,9 @@ struct SourcePass {
     pixel_ratio: f32,
 }
 
-fn source_failed<T: VectorTransferables, C: Context>(
+/// Reports every layer of a source as missing from the tile, which clears what an earlier
+/// generation drew there.
+fn source_empty<T: VectorTransferables, C: Context>(
     coords: WorldTileCoords,
     layers: &[StyleLayer],
     context: &C,
@@ -117,6 +128,15 @@ fn source_failed<T: VectorTransferables, C: Context>(
             context.send_back(T::LayerMissing::build_from(coords, source_layer.clone()))?;
         }
     }
+    Ok(())
+}
+
+fn source_failed<T: VectorTransferables, C: Context>(
+    coords: WorldTileCoords,
+    layers: &[StyleLayer],
+    context: &C,
+) -> Result<(), SendError> {
+    source_empty::<T, C>(coords, layers, context)?;
     context.send_back(T::TileTessellated::build_failed(coords, true))
 }
 
