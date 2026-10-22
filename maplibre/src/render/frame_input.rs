@@ -64,6 +64,15 @@ impl FrameInput {
     }
 }
 
+/// The time of the frame being rendered, as the host wrote it, for systems that animate or
+/// pace their work; zero until the host writes its first [`FrameInput`].
+pub fn frame_time(world: &crate::tcs::world::World) -> Duration {
+    world
+        .resources
+        .get::<FrameInput>()
+        .map_or(Duration::ZERO, |input| input.timestamp)
+}
+
 /// Applies the frame input to the view state, with the style's projection deciding whether
 /// an external eye is placed on the globe or over the flat map.
 ///
