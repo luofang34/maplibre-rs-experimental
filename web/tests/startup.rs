@@ -39,3 +39,27 @@ async fn malformed_style_rejects_with_parse_context_before_starting_workers() {
         "parse location is preserved: {message}"
     );
 }
+
+/// A plugin that registers nothing, standing for a host's own.
+struct Inert;
+
+impl maplibre::plugin::Plugin<web::CurrentEnvironment> for Inert {
+    fn build(
+        &self,
+        _: &mut maplibre::schedule::Schedule,
+        _: std::rc::Rc<maplibre::kernel::Kernel<web::CurrentEnvironment>>,
+        _: &mut maplibre::tcs::world::World,
+        _: &mut maplibre::render::graph::RenderGraph,
+    ) {
+    }
+}
+
+#[wasm_bindgen_test]
+fn a_host_adds_its_plugins_after_the_ones_the_style_needs() {
+    let style = maplibre::style::Style::default();
+    let needed = web::default_plugins(&style).len();
+    let mut host =
+        web::WebMapHost::default().with_plugins(|_| vec![Box::new(Inert), Box::new(Inert)]);
+    assert_eq!(host.plugins_for(&style).len(), needed + 2);
+    assert_eq!(web::WebMapHost::default().plugins_for(&style).len(), needed);
+}
