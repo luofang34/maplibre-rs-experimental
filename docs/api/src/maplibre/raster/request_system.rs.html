@@ -250,78 +250,79 @@
 <a href=#250 id=250 data-nosnippet>250</a>                    style: style.clone(),
 <a href=#251 id=251 data-nosnippet>251</a>                    overscaled_zoom: <span class="number">0</span>,
 <a href=#252 id=252 data-nosnippet>252</a>                    pixel_ratio: <span class="number">1.0</span>,
-<a href=#253 id=253 data-nosnippet>253</a>                },
-<a href=#254 id=254 data-nosnippet>254</a>                fetch_raster_apc::&lt;E::OffscreenKernelEnvironment, T, <span class="kw">_</span>&gt;,
-<a href=#255 id=255 data-nosnippet>255</a>            )
-<a href=#256 id=256 data-nosnippet>256</a>            .map_err(|source| SystemError::TileRequest {
-<a href=#257 id=257 data-nosnippet>257</a>                kind: <span class="string">"raster"</span>,
-<a href=#258 id=258 data-nosnippet>258</a>                coords,
-<a href=#259 id=259 data-nosnippet>259</a>                source,
-<a href=#260 id=260 data-nosnippet>260</a>            })<span class="question-mark">?</span>;
-<a href=#261 id=261 data-nosnippet>261</a>        <span class="kw">if </span>!exists {
-<a href=#262 id=262 data-nosnippet>262</a>            tile.insert(RasterLayersDataComponent::default());
-<a href=#263 id=263 data-nosnippet>263</a>        }
-<a href=#264 id=264 data-nosnippet>264</a>        tile_retry::started(world, coords, RequestKind::Raster, attempt);
-<a href=#265 id=265 data-nosnippet>265</a>        <span class="macro">tracing::debug!</span>(%coords, <span class="string">"raster tile request accepted"</span>);
-<a href=#266 id=266 data-nosnippet>266</a>        <span class="prelude-val">Ok</span>(())
-<a href=#267 id=267 data-nosnippet>267</a>    }
-<a href=#268 id=268 data-nosnippet>268</a>}
-<a href=#269 id=269 data-nosnippet>269</a>
-<a href=#270 id=270 data-nosnippet>270</a><span class="kw">fn </span>wanted_tiles(
-<a href=#271 id=271 data-nosnippet>271</a>    regions: Vec&lt;(RasterSourceId, Vec&lt;WorldTileCoords&gt;)&gt;,
-<a href=#272 id=272 data-nosnippet>272</a>    style: <span class="kw-2">&amp;</span><span class="kw">crate</span>::style::Style,
-<a href=#273 id=273 data-nosnippet>273</a>    world: <span class="kw-2">&amp;</span><span class="kw">crate</span>::tcs::world::World,
-<a href=#274 id=274 data-nosnippet>274</a>) -&gt; Vec&lt;WorldTileCoords&gt; {
-<a href=#275 id=275 data-nosnippet>275</a>    <span class="kw">let </span><span class="kw-2">mut </span>wanted = Vec::new();
-<a href=#276 id=276 data-nosnippet>276</a>    <span class="kw">for </span>(source, tiles) <span class="kw">in </span>regions {
-<a href=#277 id=277 data-nosnippet>277</a>        <span class="kw">let </span>minzoom = <span class="kw">match </span>source.name().and_then(|name| style.sources.get(name)) {
-<a href=#278 id=278 data-nosnippet>278</a>            <span class="prelude-val">Some</span>(<span class="kw">crate</span>::style::source::Source::Raster(source)) =&gt; source.minzoom,
-<a href=#279 id=279 data-nosnippet>279</a>            <span class="prelude-val">Some</span>(<span class="kw">crate</span>::style::source::Source::RasterDem(source)) =&gt; source.minzoom,
-<a href=#280 id=280 data-nosnippet>280</a>            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
-<a href=#281 id=281 data-nosnippet>281</a>        }
-<a href=#282 id=282 data-nosnippet>282</a>        .unwrap_or(<span class="number">0</span>);
-<a href=#283 id=283 data-nosnippet>283</a>        <span class="kw">let </span>bounds = <span class="kw">match </span>source.name().and_then(|name| style.sources.get(name)) {
-<a href=#284 id=284 data-nosnippet>284</a>            <span class="prelude-val">Some</span>(<span class="kw">crate</span>::style::source::Source::Raster(source)) =&gt; source.bounds,
-<a href=#285 id=285 data-nosnippet>285</a>            <span class="prelude-val">Some</span>(<span class="kw">crate</span>::style::source::Source::Image(image)) =&gt; image_bounds(image),
-<a href=#286 id=286 data-nosnippet>286</a>            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
-<a href=#287 id=287 data-nosnippet>287</a>        };
-<a href=#288 id=288 data-nosnippet>288</a>        <span class="kw">for </span>coords <span class="kw">in </span>tiles {
-<a href=#289 id=289 data-nosnippet>289</a>            <span class="comment">// Tiles outside the source's declared bounds are never requested.
-<a href=#290 id=290 data-nosnippet>290</a>            </span><span class="kw">if </span>bounds.is_some_and(|bounds| !<span class="kw">crate</span>::io::tile_sources::tile_in_bounds(coords, bounds))
-<a href=#291 id=291 data-nosnippet>291</a>            {
-<a href=#292 id=292 data-nosnippet>292</a>                <span class="kw">continue</span>;
-<a href=#293 id=293 data-nosnippet>293</a>            }
-<a href=#294 id=294 data-nosnippet>294</a>            wanted.push(coords);
-<a href=#295 id=295 data-nosnippet>295</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(parent) = missing_tile_fallback(coords, minzoom, |coords| {
-<a href=#296 id=296 data-nosnippet>296</a>                world
-<a href=#297 id=297 data-nosnippet>297</a>                    .tiles
-<a href=#298 id=298 data-nosnippet>298</a>                    .query::&lt;<span class="kw-2">&amp;</span>RasterLayersDataComponent&gt;(coords)
-<a href=#299 id=299 data-nosnippet>299</a>                    .is_some_and(|component| component.source_is_missing(<span class="kw-2">&amp;</span>source))
-<a href=#300 id=300 data-nosnippet>300</a>            }) {
-<a href=#301 id=301 data-nosnippet>301</a>                wanted.push(parent);
-<a href=#302 id=302 data-nosnippet>302</a>            }
-<a href=#303 id=303 data-nosnippet>303</a>        }
-<a href=#304 id=304 data-nosnippet>304</a>    }
-<a href=#305 id=305 data-nosnippet>305</a>    wanted
-<a href=#306 id=306 data-nosnippet>306</a>}
-<a href=#307 id=307 data-nosnippet>307</a>
-<a href=#308 id=308 data-nosnippet>308</a><span class="doccomment">/// The bounds `(west, south, east, north)` of an image's corners, so tiles it cannot reach are
-<a href=#309 id=309 data-nosnippet>309</a>/// not requested; none for a picture that reaches past the antimeridian, whose copies across it
-<a href=#310 id=310 data-nosnippet>310</a>/// a tile may show.
-<a href=#311 id=311 data-nosnippet>311</a></span><span class="kw">fn </span>image_bounds(image: <span class="kw-2">&amp;</span><span class="kw">crate</span>::style::source::ImageSource) -&gt; <span class="prelude-ty">Option</span>&lt;(f64, f64, f64, f64)&gt; {
-<a href=#312 id=312 data-nosnippet>312</a>    <span class="kw">let </span>longitudes = image.coordinates.map(|[longitude, <span class="kw">_</span>]| longitude);
-<a href=#313 id=313 data-nosnippet>313</a>    <span class="kw">let </span>latitudes = image.coordinates.map(|[<span class="kw">_</span>, latitude]| latitude);
-<a href=#314 id=314 data-nosnippet>314</a>    <span class="kw">let </span>fold = |values: [f64; <span class="number">4</span>]| {
-<a href=#315 id=315 data-nosnippet>315</a>        values
-<a href=#316 id=316 data-nosnippet>316</a>            .into_iter()
-<a href=#317 id=317 data-nosnippet>317</a>            .fold((f64::MAX, f64::MIN), |(lo, hi), value| {
-<a href=#318 id=318 data-nosnippet>318</a>                (lo.min(value), hi.max(value))
-<a href=#319 id=319 data-nosnippet>319</a>            })
-<a href=#320 id=320 data-nosnippet>320</a>    };
-<a href=#321 id=321 data-nosnippet>321</a>    <span class="kw">let </span>((west, east), (south, north)) = (fold(longitudes), fold(latitudes));
-<a href=#322 id=322 data-nosnippet>322</a>    (west &gt;= -<span class="number">180.0 </span>&amp;&amp; east &lt;= <span class="number">180.0</span>).then_some((west, south, east, north))
-<a href=#323 id=323 data-nosnippet>323</a>}
-<a href=#324 id=324 data-nosnippet>324</a>
-<a href=#325 id=325 data-nosnippet>325</a><span class="attr">#[cfg(test)]
-<a href=#326 id=326 data-nosnippet>326</a></span><span class="kw">mod </span>tests;
+<a href=#253 id=253 data-nosnippet>253</a>                    only_sources: <span class="prelude-val">None</span>,
+<a href=#254 id=254 data-nosnippet>254</a>                },
+<a href=#255 id=255 data-nosnippet>255</a>                fetch_raster_apc::&lt;E::OffscreenKernelEnvironment, T, <span class="kw">_</span>&gt;,
+<a href=#256 id=256 data-nosnippet>256</a>            )
+<a href=#257 id=257 data-nosnippet>257</a>            .map_err(|source| SystemError::TileRequest {
+<a href=#258 id=258 data-nosnippet>258</a>                kind: <span class="string">"raster"</span>,
+<a href=#259 id=259 data-nosnippet>259</a>                coords,
+<a href=#260 id=260 data-nosnippet>260</a>                source,
+<a href=#261 id=261 data-nosnippet>261</a>            })<span class="question-mark">?</span>;
+<a href=#262 id=262 data-nosnippet>262</a>        <span class="kw">if </span>!exists {
+<a href=#263 id=263 data-nosnippet>263</a>            tile.insert(RasterLayersDataComponent::default());
+<a href=#264 id=264 data-nosnippet>264</a>        }
+<a href=#265 id=265 data-nosnippet>265</a>        tile_retry::started(world, coords, RequestKind::Raster, attempt, <span class="prelude-val">None</span>);
+<a href=#266 id=266 data-nosnippet>266</a>        <span class="macro">tracing::debug!</span>(%coords, <span class="string">"raster tile request accepted"</span>);
+<a href=#267 id=267 data-nosnippet>267</a>        <span class="prelude-val">Ok</span>(())
+<a href=#268 id=268 data-nosnippet>268</a>    }
+<a href=#269 id=269 data-nosnippet>269</a>}
+<a href=#270 id=270 data-nosnippet>270</a>
+<a href=#271 id=271 data-nosnippet>271</a><span class="kw">fn </span>wanted_tiles(
+<a href=#272 id=272 data-nosnippet>272</a>    regions: Vec&lt;(RasterSourceId, Vec&lt;WorldTileCoords&gt;)&gt;,
+<a href=#273 id=273 data-nosnippet>273</a>    style: <span class="kw-2">&amp;</span><span class="kw">crate</span>::style::Style,
+<a href=#274 id=274 data-nosnippet>274</a>    world: <span class="kw-2">&amp;</span><span class="kw">crate</span>::tcs::world::World,
+<a href=#275 id=275 data-nosnippet>275</a>) -&gt; Vec&lt;WorldTileCoords&gt; {
+<a href=#276 id=276 data-nosnippet>276</a>    <span class="kw">let </span><span class="kw-2">mut </span>wanted = Vec::new();
+<a href=#277 id=277 data-nosnippet>277</a>    <span class="kw">for </span>(source, tiles) <span class="kw">in </span>regions {
+<a href=#278 id=278 data-nosnippet>278</a>        <span class="kw">let </span>minzoom = <span class="kw">match </span>source.name().and_then(|name| style.sources.get(name)) {
+<a href=#279 id=279 data-nosnippet>279</a>            <span class="prelude-val">Some</span>(<span class="kw">crate</span>::style::source::Source::Raster(source)) =&gt; source.minzoom,
+<a href=#280 id=280 data-nosnippet>280</a>            <span class="prelude-val">Some</span>(<span class="kw">crate</span>::style::source::Source::RasterDem(source)) =&gt; source.minzoom,
+<a href=#281 id=281 data-nosnippet>281</a>            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+<a href=#282 id=282 data-nosnippet>282</a>        }
+<a href=#283 id=283 data-nosnippet>283</a>        .unwrap_or(<span class="number">0</span>);
+<a href=#284 id=284 data-nosnippet>284</a>        <span class="kw">let </span>bounds = <span class="kw">match </span>source.name().and_then(|name| style.sources.get(name)) {
+<a href=#285 id=285 data-nosnippet>285</a>            <span class="prelude-val">Some</span>(<span class="kw">crate</span>::style::source::Source::Raster(source)) =&gt; source.bounds,
+<a href=#286 id=286 data-nosnippet>286</a>            <span class="prelude-val">Some</span>(<span class="kw">crate</span>::style::source::Source::Image(image)) =&gt; image_bounds(image),
+<a href=#287 id=287 data-nosnippet>287</a>            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+<a href=#288 id=288 data-nosnippet>288</a>        };
+<a href=#289 id=289 data-nosnippet>289</a>        <span class="kw">for </span>coords <span class="kw">in </span>tiles {
+<a href=#290 id=290 data-nosnippet>290</a>            <span class="comment">// Tiles outside the source's declared bounds are never requested.
+<a href=#291 id=291 data-nosnippet>291</a>            </span><span class="kw">if </span>bounds.is_some_and(|bounds| !<span class="kw">crate</span>::io::tile_sources::tile_in_bounds(coords, bounds))
+<a href=#292 id=292 data-nosnippet>292</a>            {
+<a href=#293 id=293 data-nosnippet>293</a>                <span class="kw">continue</span>;
+<a href=#294 id=294 data-nosnippet>294</a>            }
+<a href=#295 id=295 data-nosnippet>295</a>            wanted.push(coords);
+<a href=#296 id=296 data-nosnippet>296</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(parent) = missing_tile_fallback(coords, minzoom, |coords| {
+<a href=#297 id=297 data-nosnippet>297</a>                world
+<a href=#298 id=298 data-nosnippet>298</a>                    .tiles
+<a href=#299 id=299 data-nosnippet>299</a>                    .query::&lt;<span class="kw-2">&amp;</span>RasterLayersDataComponent&gt;(coords)
+<a href=#300 id=300 data-nosnippet>300</a>                    .is_some_and(|component| component.source_is_missing(<span class="kw-2">&amp;</span>source))
+<a href=#301 id=301 data-nosnippet>301</a>            }) {
+<a href=#302 id=302 data-nosnippet>302</a>                wanted.push(parent);
+<a href=#303 id=303 data-nosnippet>303</a>            }
+<a href=#304 id=304 data-nosnippet>304</a>        }
+<a href=#305 id=305 data-nosnippet>305</a>    }
+<a href=#306 id=306 data-nosnippet>306</a>    wanted
+<a href=#307 id=307 data-nosnippet>307</a>}
+<a href=#308 id=308 data-nosnippet>308</a>
+<a href=#309 id=309 data-nosnippet>309</a><span class="doccomment">/// The bounds `(west, south, east, north)` of an image's corners, so tiles it cannot reach are
+<a href=#310 id=310 data-nosnippet>310</a>/// not requested; none for a picture that reaches past the antimeridian, whose copies across it
+<a href=#311 id=311 data-nosnippet>311</a>/// a tile may show.
+<a href=#312 id=312 data-nosnippet>312</a></span><span class="kw">fn </span>image_bounds(image: <span class="kw-2">&amp;</span><span class="kw">crate</span>::style::source::ImageSource) -&gt; <span class="prelude-ty">Option</span>&lt;(f64, f64, f64, f64)&gt; {
+<a href=#313 id=313 data-nosnippet>313</a>    <span class="kw">let </span>longitudes = image.coordinates.map(|[longitude, <span class="kw">_</span>]| longitude);
+<a href=#314 id=314 data-nosnippet>314</a>    <span class="kw">let </span>latitudes = image.coordinates.map(|[<span class="kw">_</span>, latitude]| latitude);
+<a href=#315 id=315 data-nosnippet>315</a>    <span class="kw">let </span>fold = |values: [f64; <span class="number">4</span>]| {
+<a href=#316 id=316 data-nosnippet>316</a>        values
+<a href=#317 id=317 data-nosnippet>317</a>            .into_iter()
+<a href=#318 id=318 data-nosnippet>318</a>            .fold((f64::MAX, f64::MIN), |(lo, hi), value| {
+<a href=#319 id=319 data-nosnippet>319</a>                (lo.min(value), hi.max(value))
+<a href=#320 id=320 data-nosnippet>320</a>            })
+<a href=#321 id=321 data-nosnippet>321</a>    };
+<a href=#322 id=322 data-nosnippet>322</a>    <span class="kw">let </span>((west, east), (south, north)) = (fold(longitudes), fold(latitudes));
+<a href=#323 id=323 data-nosnippet>323</a>    (west &gt;= -<span class="number">180.0 </span>&amp;&amp; east &lt;= <span class="number">180.0</span>).then_some((west, south, east, north))
+<a href=#324 id=324 data-nosnippet>324</a>}
+<a href=#325 id=325 data-nosnippet>325</a>
+<a href=#326 id=326 data-nosnippet>326</a><span class="attr">#[cfg(test)]
+<a href=#327 id=327 data-nosnippet>327</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>

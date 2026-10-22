@@ -196,113 +196,114 @@
 <a href=#196 id=196 data-nosnippet>196</a>                    style: style.clone(),
 <a href=#197 id=197 data-nosnippet>197</a>                    overscaled_zoom: <span class="number">0</span>,
 <a href=#198 id=198 data-nosnippet>198</a>                    pixel_ratio: <span class="number">1.0</span>,
-<a href=#199 id=199 data-nosnippet>199</a>                },
-<a href=#200 id=200 data-nosnippet>200</a>                fetch_dem_apc::&lt;E::OffscreenKernelEnvironment, T, <span class="kw">_</span>&gt;,
-<a href=#201 id=201 data-nosnippet>201</a>            )
-<a href=#202 id=202 data-nosnippet>202</a>            .map_err(|source| SystemError::TileRequest {
-<a href=#203 id=203 data-nosnippet>203</a>                kind: <span class="string">"DEM"</span>,
-<a href=#204 id=204 data-nosnippet>204</a>                coords,
-<a href=#205 id=205 data-nosnippet>205</a>                source,
-<a href=#206 id=206 data-nosnippet>206</a>            })<span class="question-mark">?</span>;
-<a href=#207 id=207 data-nosnippet>207</a>        <span class="kw">if </span>!exists {
-<a href=#208 id=208 data-nosnippet>208</a>            tile.insert(DemTileComponent::Pending);
-<a href=#209 id=209 data-nosnippet>209</a>        }
-<a href=#210 id=210 data-nosnippet>210</a>        tile_retry::started(world, coords, RequestKind::Dem, attempt);
-<a href=#211 id=211 data-nosnippet>211</a>        <span class="macro">tracing::debug!</span>(%coords, <span class="string">"DEM tile request accepted"</span>);
-<a href=#212 id=212 data-nosnippet>212</a>        <span class="prelude-val">Ok</span>(())
-<a href=#213 id=213 data-nosnippet>213</a>    }
-<a href=#214 id=214 data-nosnippet>214</a>}
-<a href=#215 id=215 data-nosnippet>215</a>
-<a href=#216 id=216 data-nosnippet>216</a><span class="doccomment">/// Fetches and decodes one DEM tile on a worker.
-<a href=#217 id=217 data-nosnippet>217</a></span><span class="kw">pub fn </span>fetch_dem_apc&lt;K: OffscreenKernel, T: DemTransferables, C: Context + Clone + Send&gt;(
-<a href=#218 id=218 data-nosnippet>218</a>    input: Input,
-<a href=#219 id=219 data-nosnippet>219</a>    context: C,
-<a href=#220 id=220 data-nosnippet>220</a>    kernel: K,
-<a href=#221 id=221 data-nosnippet>221</a>) -&gt; AsyncProcedureFuture {
-<a href=#222 id=222 data-nosnippet>222</a>    Box::pin(<span class="kw">async move </span>{
-<a href=#223 id=223 data-nosnippet>223</a>        <span class="kw">let </span>(coords, style, attempt) = input.into_tile_request();
-<a href=#224 id=224 data-nosnippet>224</a>        <span class="kw">let </span>context = AttemptContext::new(context, attempt);
-<a href=#225 id=225 data-nosnippet>225</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(dem) = dem_source(<span class="kw-2">&amp;</span>style) <span class="kw">else </span>{
-<a href=#226 id=226 data-nosnippet>226</a>            <span class="kw">return </span><span class="prelude-val">Ok</span>(());
-<a href=#227 id=227 data-nosnippet>227</a>        };
-<a href=#228 id=228 data-nosnippet>228</a>        <span class="kw">let </span><span class="kw-2">mut </span>retry = <span class="bool-val">false</span>;
-<a href=#229 id=229 data-nosnippet>229</a>        <span class="kw">let </span>image = <span class="kw">match </span>kernel.source_client().fetch(<span class="kw-2">&amp;</span>coords, <span class="kw-2">&amp;</span>dem.source).<span class="kw">await </span>{
-<a href=#230 id=230 data-nosnippet>230</a>            <span class="prelude-val">Ok</span>(data) =&gt; <span class="kw">match </span>image::load_from_memory(<span class="kw-2">&amp;</span>data) {
-<a href=#231 id=231 data-nosnippet>231</a>                <span class="prelude-val">Ok</span>(image) =&gt; <span class="prelude-val">Some</span>(image.to_rgba8()),
-<a href=#232 id=232 data-nosnippet>232</a>                <span class="prelude-val">Err</span>(error) =&gt; {
-<a href=#233 id=233 data-nosnippet>233</a>                    <span class="macro">tracing::warn!</span>(%coords, source = %dem.name, %error, <span class="string">"DEM tile is not an image"</span>);
-<a href=#234 id=234 data-nosnippet>234</a>                    <span class="prelude-val">None
-<a href=#235 id=235 data-nosnippet>235</a>                </span>}
-<a href=#236 id=236 data-nosnippet>236</a>            },
-<a href=#237 id=237 data-nosnippet>237</a>            <span class="prelude-val">Err</span>(error) <span class="kw">if </span>error.is_not_found() =&gt; {
-<a href=#238 id=238 data-nosnippet>238</a>                <span class="macro">tracing::debug!</span>(%coords, source = %dem.name, <span class="string">"no DEM tile at the source; flat"</span>);
-<a href=#239 id=239 data-nosnippet>239</a>                <span class="prelude-val">None
-<a href=#240 id=240 data-nosnippet>240</a>            </span>}
-<a href=#241 id=241 data-nosnippet>241</a>            <span class="prelude-val">Err</span>(error) =&gt; {
-<a href=#242 id=242 data-nosnippet>242</a>                retry = error.is_retryable();
-<a href=#243 id=243 data-nosnippet>243</a>                <span class="macro">tracing::error!</span>(
-<a href=#244 id=244 data-nosnippet>244</a>                    %coords,
-<a href=#245 id=245 data-nosnippet>245</a>                    source = %dem.name,
-<a href=#246 id=246 data-nosnippet>246</a>                    error = %error.describe(),
-<a href=#247 id=247 data-nosnippet>247</a>                    <span class="string">"DEM tile fetch failed"
-<a href=#248 id=248 data-nosnippet>248</a>                </span>);
-<a href=#249 id=249 data-nosnippet>249</a>                <span class="prelude-val">None
-<a href=#250 id=250 data-nosnippet>250</a>            </span>}
-<a href=#251 id=251 data-nosnippet>251</a>        };
-<a href=#252 id=252 data-nosnippet>252</a>        <span class="kw">match </span>image {
-<a href=#253 id=253 data-nosnippet>253</a>            <span class="prelude-val">Some</span>(image) =&gt; context
-<a href=#254 id=254 data-nosnippet>254</a>                .send_back(T::LayerDem::build_from(coords, image))
-<a href=#255 id=255 data-nosnippet>255</a>                .map_err(ProcedureError::Send),
-<a href=#256 id=256 data-nosnippet>256</a>            <span class="prelude-val">None </span>=&gt; context
-<a href=#257 id=257 data-nosnippet>257</a>                .send_back(T::LayerDemMissing::build_from(coords))
-<a href=#258 id=258 data-nosnippet>258</a>                .map_err(ProcedureError::Send),
-<a href=#259 id=259 data-nosnippet>259</a>        }<span class="question-mark">?</span>;
-<a href=#260 id=260 data-nosnippet>260</a>        context
-<a href=#261 id=261 data-nosnippet>261</a>            .send_back(TileRequestOutcome {
-<a href=#262 id=262 data-nosnippet>262</a>                coords,
-<a href=#263 id=263 data-nosnippet>263</a>                kind: RequestKind::Dem,
-<a href=#264 id=264 data-nosnippet>264</a>                attempt,
-<a href=#265 id=265 data-nosnippet>265</a>                disposition: <span class="kw">if </span>retry {
-<a href=#266 id=266 data-nosnippet>266</a>                    RequestDisposition::Retry
-<a href=#267 id=267 data-nosnippet>267</a>                } <span class="kw">else </span>{
-<a href=#268 id=268 data-nosnippet>268</a>                    RequestDisposition::Complete
-<a href=#269 id=269 data-nosnippet>269</a>                },
-<a href=#270 id=270 data-nosnippet>270</a>            })
-<a href=#271 id=271 data-nosnippet>271</a>            .map_err(ProcedureError::Send)
-<a href=#272 id=272 data-nosnippet>272</a>    })
-<a href=#273 id=273 data-nosnippet>273</a>}
-<a href=#274 id=274 data-nosnippet>274</a>
-<a href=#275 id=275 data-nosnippet>275</a><span class="attr">#[cfg(test)]
-<a href=#276 id=276 data-nosnippet>276</a></span><span class="kw">mod </span>tests;
-<a href=#277 id=277 data-nosnippet>277</a>
-<a href=#278 id=278 data-nosnippet>278</a><span class="comment">// Foreground DEMs must not queue behind coarse textures: their resolutions are independent.
-<a href=#279 id=279 data-nosnippet>279</a></span><span class="kw">fn </span>request_order(
-<a href=#280 id=280 data-nosnippet>280</a>    tiles: <span class="kw">impl </span>Iterator&lt;Item = WorldTileCoords&gt;,
-<a href=#281 id=281 data-nosnippet>281</a>    loaded: <span class="kw-2">&amp;</span>Tiles,
-<a href=#282 id=282 data-nosnippet>282</a>    minzoom: u8,
-<a href=#283 id=283 data-nosnippet>283</a>    maxzoom: u8,
-<a href=#284 id=284 data-nosnippet>284</a>) -&gt; Vec&lt;WorldTileCoords&gt; {
-<a href=#285 id=285 data-nosnippet>285</a>    <span class="kw">let </span><span class="kw-2">mut </span>seen = HashSet::new();
-<a href=#286 id=286 data-nosnippet>286</a>    <span class="kw">let </span>fine: Vec&lt;<span class="kw">_</span>&gt; = tiles
-<a href=#287 id=287 data-nosnippet>287</a>        .filter_map(|coords| dem_tile_coords(coords, minzoom, maxzoom))
-<a href=#288 id=288 data-nosnippet>288</a>        .filter(|coords| seen.insert(<span class="kw-2">*</span>coords))
-<a href=#289 id=289 data-nosnippet>289</a>        .collect();
-<a href=#290 id=290 data-nosnippet>290</a>    <span class="kw">let </span><span class="kw-2">mut </span>result = Vec::new();
-<a href=#291 id=291 data-nosnippet>291</a>    <span class="kw">for </span>coords <span class="kw">in </span><span class="kw-2">&amp;</span>fine {
-<a href=#292 id=292 data-nosnippet>292</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(parent) = dem_ancestor_coords(<span class="kw-2">*</span>coords, minzoom) {
-<a href=#293 id=293 data-nosnippet>293</a>            <span class="kw">if </span>seen.insert(parent) {
-<a href=#294 id=294 data-nosnippet>294</a>                result.push(parent);
-<a href=#295 id=295 data-nosnippet>295</a>            }
-<a href=#296 id=296 data-nosnippet>296</a>        }
-<a href=#297 id=297 data-nosnippet>297</a>    }
-<a href=#298 id=298 data-nosnippet>298</a>    <span class="comment">// One coarse tile brackets the local terrain while fine tiles arrive.
-<a href=#299 id=299 data-nosnippet>299</a>    </span><span class="kw">let </span>remaining = result.split_off(result.len().min(<span class="number">1</span>));
-<a href=#300 id=300 data-nosnippet>300</a>    result.extend(fine.iter().copied());
-<a href=#301 id=301 data-nosnippet>301</a>    result.extend(remaining);
-<a href=#302 id=302 data-nosnippet>302</a>    result.extend(
-<a href=#303 id=303 data-nosnippet>303</a>        fine.into_iter()
-<a href=#304 id=304 data-nosnippet>304</a>            .filter_map(|coords| missing_dem_fallback(loaded, coords, minzoom)),
-<a href=#305 id=305 data-nosnippet>305</a>    );
-<a href=#306 id=306 data-nosnippet>306</a>    result
-<a href=#307 id=307 data-nosnippet>307</a>}
+<a href=#199 id=199 data-nosnippet>199</a>                    only_sources: <span class="prelude-val">None</span>,
+<a href=#200 id=200 data-nosnippet>200</a>                },
+<a href=#201 id=201 data-nosnippet>201</a>                fetch_dem_apc::&lt;E::OffscreenKernelEnvironment, T, <span class="kw">_</span>&gt;,
+<a href=#202 id=202 data-nosnippet>202</a>            )
+<a href=#203 id=203 data-nosnippet>203</a>            .map_err(|source| SystemError::TileRequest {
+<a href=#204 id=204 data-nosnippet>204</a>                kind: <span class="string">"DEM"</span>,
+<a href=#205 id=205 data-nosnippet>205</a>                coords,
+<a href=#206 id=206 data-nosnippet>206</a>                source,
+<a href=#207 id=207 data-nosnippet>207</a>            })<span class="question-mark">?</span>;
+<a href=#208 id=208 data-nosnippet>208</a>        <span class="kw">if </span>!exists {
+<a href=#209 id=209 data-nosnippet>209</a>            tile.insert(DemTileComponent::Pending);
+<a href=#210 id=210 data-nosnippet>210</a>        }
+<a href=#211 id=211 data-nosnippet>211</a>        tile_retry::started(world, coords, RequestKind::Dem, attempt, <span class="prelude-val">None</span>);
+<a href=#212 id=212 data-nosnippet>212</a>        <span class="macro">tracing::debug!</span>(%coords, <span class="string">"DEM tile request accepted"</span>);
+<a href=#213 id=213 data-nosnippet>213</a>        <span class="prelude-val">Ok</span>(())
+<a href=#214 id=214 data-nosnippet>214</a>    }
+<a href=#215 id=215 data-nosnippet>215</a>}
+<a href=#216 id=216 data-nosnippet>216</a>
+<a href=#217 id=217 data-nosnippet>217</a><span class="doccomment">/// Fetches and decodes one DEM tile on a worker.
+<a href=#218 id=218 data-nosnippet>218</a></span><span class="kw">pub fn </span>fetch_dem_apc&lt;K: OffscreenKernel, T: DemTransferables, C: Context + Clone + Send&gt;(
+<a href=#219 id=219 data-nosnippet>219</a>    input: Input,
+<a href=#220 id=220 data-nosnippet>220</a>    context: C,
+<a href=#221 id=221 data-nosnippet>221</a>    kernel: K,
+<a href=#222 id=222 data-nosnippet>222</a>) -&gt; AsyncProcedureFuture {
+<a href=#223 id=223 data-nosnippet>223</a>    Box::pin(<span class="kw">async move </span>{
+<a href=#224 id=224 data-nosnippet>224</a>        <span class="kw">let </span>(coords, style, attempt) = input.into_tile_request();
+<a href=#225 id=225 data-nosnippet>225</a>        <span class="kw">let </span>context = AttemptContext::new(context, attempt);
+<a href=#226 id=226 data-nosnippet>226</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(dem) = dem_source(<span class="kw-2">&amp;</span>style) <span class="kw">else </span>{
+<a href=#227 id=227 data-nosnippet>227</a>            <span class="kw">return </span><span class="prelude-val">Ok</span>(());
+<a href=#228 id=228 data-nosnippet>228</a>        };
+<a href=#229 id=229 data-nosnippet>229</a>        <span class="kw">let </span><span class="kw-2">mut </span>retry = <span class="bool-val">false</span>;
+<a href=#230 id=230 data-nosnippet>230</a>        <span class="kw">let </span>image = <span class="kw">match </span>kernel.source_client().fetch(<span class="kw-2">&amp;</span>coords, <span class="kw-2">&amp;</span>dem.source).<span class="kw">await </span>{
+<a href=#231 id=231 data-nosnippet>231</a>            <span class="prelude-val">Ok</span>(data) =&gt; <span class="kw">match </span>image::load_from_memory(<span class="kw-2">&amp;</span>data) {
+<a href=#232 id=232 data-nosnippet>232</a>                <span class="prelude-val">Ok</span>(image) =&gt; <span class="prelude-val">Some</span>(image.to_rgba8()),
+<a href=#233 id=233 data-nosnippet>233</a>                <span class="prelude-val">Err</span>(error) =&gt; {
+<a href=#234 id=234 data-nosnippet>234</a>                    <span class="macro">tracing::warn!</span>(%coords, source = %dem.name, %error, <span class="string">"DEM tile is not an image"</span>);
+<a href=#235 id=235 data-nosnippet>235</a>                    <span class="prelude-val">None
+<a href=#236 id=236 data-nosnippet>236</a>                </span>}
+<a href=#237 id=237 data-nosnippet>237</a>            },
+<a href=#238 id=238 data-nosnippet>238</a>            <span class="prelude-val">Err</span>(error) <span class="kw">if </span>error.is_not_found() =&gt; {
+<a href=#239 id=239 data-nosnippet>239</a>                <span class="macro">tracing::debug!</span>(%coords, source = %dem.name, <span class="string">"no DEM tile at the source; flat"</span>);
+<a href=#240 id=240 data-nosnippet>240</a>                <span class="prelude-val">None
+<a href=#241 id=241 data-nosnippet>241</a>            </span>}
+<a href=#242 id=242 data-nosnippet>242</a>            <span class="prelude-val">Err</span>(error) =&gt; {
+<a href=#243 id=243 data-nosnippet>243</a>                retry = error.is_retryable();
+<a href=#244 id=244 data-nosnippet>244</a>                <span class="macro">tracing::error!</span>(
+<a href=#245 id=245 data-nosnippet>245</a>                    %coords,
+<a href=#246 id=246 data-nosnippet>246</a>                    source = %dem.name,
+<a href=#247 id=247 data-nosnippet>247</a>                    error = %error.describe(),
+<a href=#248 id=248 data-nosnippet>248</a>                    <span class="string">"DEM tile fetch failed"
+<a href=#249 id=249 data-nosnippet>249</a>                </span>);
+<a href=#250 id=250 data-nosnippet>250</a>                <span class="prelude-val">None
+<a href=#251 id=251 data-nosnippet>251</a>            </span>}
+<a href=#252 id=252 data-nosnippet>252</a>        };
+<a href=#253 id=253 data-nosnippet>253</a>        <span class="kw">match </span>image {
+<a href=#254 id=254 data-nosnippet>254</a>            <span class="prelude-val">Some</span>(image) =&gt; context
+<a href=#255 id=255 data-nosnippet>255</a>                .send_back(T::LayerDem::build_from(coords, image))
+<a href=#256 id=256 data-nosnippet>256</a>                .map_err(ProcedureError::Send),
+<a href=#257 id=257 data-nosnippet>257</a>            <span class="prelude-val">None </span>=&gt; context
+<a href=#258 id=258 data-nosnippet>258</a>                .send_back(T::LayerDemMissing::build_from(coords))
+<a href=#259 id=259 data-nosnippet>259</a>                .map_err(ProcedureError::Send),
+<a href=#260 id=260 data-nosnippet>260</a>        }<span class="question-mark">?</span>;
+<a href=#261 id=261 data-nosnippet>261</a>        context
+<a href=#262 id=262 data-nosnippet>262</a>            .send_back(TileRequestOutcome {
+<a href=#263 id=263 data-nosnippet>263</a>                coords,
+<a href=#264 id=264 data-nosnippet>264</a>                kind: RequestKind::Dem,
+<a href=#265 id=265 data-nosnippet>265</a>                attempt,
+<a href=#266 id=266 data-nosnippet>266</a>                disposition: <span class="kw">if </span>retry {
+<a href=#267 id=267 data-nosnippet>267</a>                    RequestDisposition::Retry
+<a href=#268 id=268 data-nosnippet>268</a>                } <span class="kw">else </span>{
+<a href=#269 id=269 data-nosnippet>269</a>                    RequestDisposition::Complete
+<a href=#270 id=270 data-nosnippet>270</a>                },
+<a href=#271 id=271 data-nosnippet>271</a>            })
+<a href=#272 id=272 data-nosnippet>272</a>            .map_err(ProcedureError::Send)
+<a href=#273 id=273 data-nosnippet>273</a>    })
+<a href=#274 id=274 data-nosnippet>274</a>}
+<a href=#275 id=275 data-nosnippet>275</a>
+<a href=#276 id=276 data-nosnippet>276</a><span class="attr">#[cfg(test)]
+<a href=#277 id=277 data-nosnippet>277</a></span><span class="kw">mod </span>tests;
+<a href=#278 id=278 data-nosnippet>278</a>
+<a href=#279 id=279 data-nosnippet>279</a><span class="comment">// Foreground DEMs must not queue behind coarse textures: their resolutions are independent.
+<a href=#280 id=280 data-nosnippet>280</a></span><span class="kw">fn </span>request_order(
+<a href=#281 id=281 data-nosnippet>281</a>    tiles: <span class="kw">impl </span>Iterator&lt;Item = WorldTileCoords&gt;,
+<a href=#282 id=282 data-nosnippet>282</a>    loaded: <span class="kw-2">&amp;</span>Tiles,
+<a href=#283 id=283 data-nosnippet>283</a>    minzoom: u8,
+<a href=#284 id=284 data-nosnippet>284</a>    maxzoom: u8,
+<a href=#285 id=285 data-nosnippet>285</a>) -&gt; Vec&lt;WorldTileCoords&gt; {
+<a href=#286 id=286 data-nosnippet>286</a>    <span class="kw">let </span><span class="kw-2">mut </span>seen = HashSet::new();
+<a href=#287 id=287 data-nosnippet>287</a>    <span class="kw">let </span>fine: Vec&lt;<span class="kw">_</span>&gt; = tiles
+<a href=#288 id=288 data-nosnippet>288</a>        .filter_map(|coords| dem_tile_coords(coords, minzoom, maxzoom))
+<a href=#289 id=289 data-nosnippet>289</a>        .filter(|coords| seen.insert(<span class="kw-2">*</span>coords))
+<a href=#290 id=290 data-nosnippet>290</a>        .collect();
+<a href=#291 id=291 data-nosnippet>291</a>    <span class="kw">let </span><span class="kw-2">mut </span>result = Vec::new();
+<a href=#292 id=292 data-nosnippet>292</a>    <span class="kw">for </span>coords <span class="kw">in </span><span class="kw-2">&amp;</span>fine {
+<a href=#293 id=293 data-nosnippet>293</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(parent) = dem_ancestor_coords(<span class="kw-2">*</span>coords, minzoom) {
+<a href=#294 id=294 data-nosnippet>294</a>            <span class="kw">if </span>seen.insert(parent) {
+<a href=#295 id=295 data-nosnippet>295</a>                result.push(parent);
+<a href=#296 id=296 data-nosnippet>296</a>            }
+<a href=#297 id=297 data-nosnippet>297</a>        }
+<a href=#298 id=298 data-nosnippet>298</a>    }
+<a href=#299 id=299 data-nosnippet>299</a>    <span class="comment">// One coarse tile brackets the local terrain while fine tiles arrive.
+<a href=#300 id=300 data-nosnippet>300</a>    </span><span class="kw">let </span>remaining = result.split_off(result.len().min(<span class="number">1</span>));
+<a href=#301 id=301 data-nosnippet>301</a>    result.extend(fine.iter().copied());
+<a href=#302 id=302 data-nosnippet>302</a>    result.extend(remaining);
+<a href=#303 id=303 data-nosnippet>303</a>    result.extend(
+<a href=#304 id=304 data-nosnippet>304</a>        fine.into_iter()
+<a href=#305 id=305 data-nosnippet>305</a>            .filter_map(|coords| missing_dem_fallback(loaded, coords, minzoom)),
+<a href=#306 id=306 data-nosnippet>306</a>    );
+<a href=#307 id=307 data-nosnippet>307</a>    result
+<a href=#308 id=308 data-nosnippet>308</a>}
 </code></pre></div></section></main></body></html>
