@@ -22,6 +22,11 @@ pub struct MapContext {
 }
 
 impl MapContext {
+    /// The time of the frame being rendered, as the host wrote it; zero until it does.
+    pub fn frame_time(&self) -> std::time::Duration {
+        crate::render::frame_input::frame_time(&self.world)
+    }
+
     /// Updates the logical viewport and resizes the physical presentation surface.
     /// `scale_factor` is the number of physical pixels per logical unit.
     /// Logical dimensions remain at least one unit even below the device scale.

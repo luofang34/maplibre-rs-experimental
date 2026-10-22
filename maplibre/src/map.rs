@@ -8,7 +8,6 @@ use thiserror::Error;
 
 use crate::{
     context::MapContext,
-    coords::{LatLon, WorldCoords, Zoom},
     environment::Environment,
     geojson::{
         query::{SourceFeature, SourceQueryError, SourceQueryOptions},
@@ -18,8 +17,11 @@ use crate::{
     kernel::Kernel,
     plugin::Plugin,
     render::{
-        builder::RendererBuilder, camera::DEFAULT_MAX_PITCH, error::RenderError,
-        graph::RenderGraphError, view_state::ViewState,
+        builder::RendererBuilder,
+        camera::DEFAULT_MAX_PITCH,
+        error::RenderError,
+        graph::RenderGraphError,
+        view_state::{CameraOptions, ViewState},
     },
     schedule::{Schedule, Stage, StageError},
     sdf::query::{QueryError, QueryGeometry, QueryOptions, RenderedSymbol},
@@ -29,7 +31,7 @@ use crate::{
         Style,
     },
     tcs::world::World,
-    window::{HeadedMapWindow, MapWindow, MapWindowConfig, PhysicalSize, WindowCreateError},
+    window::{HeadedMapWindow, MapWindow, MapWindowConfig, WindowCreateError},
 };
 
 /// A window, renderer or scheduled update failed, or the map is in the wrong lifecycle state.
@@ -80,6 +82,8 @@ pub struct PendingMapContext {
     style: Style,
     renderer_builder: RendererBuilder,
     view_state: Option<ViewState>,
+    /// The jump made while the renderer is not ready, for the view it starts with.
+    jump: Option<CameraOptions>,
 }
 
 /// Owns a host window and the plugin schedule that updates and renders its map.
@@ -123,6 +127,7 @@ where
                 style,
                 renderer_builder,
                 view_state: None,
+                jump: None,
             })),
             window,
             plugins,
@@ -138,6 +143,18 @@ where
         self.max_pitch = max_pitch;
     }
 
+    /// Moves the map at once to the center, zoom and angles given, keeping the others, as GL
+    /// JS `jumpTo`. While the renderer is not ready the jump moves the view the map starts
+    /// with once it is; the style's own camera is left as written.
+    pub fn jump_to(&mut self, options: CameraOptions) {
+        match &mut self.map_context {
+            CurrentMapContext::Ready(context) => context.view_state.jump_to(options),
+            CurrentMapContext::Pending(pending) => {
+                pending.jump = Some(merged(pending.jump, options));
+            }
+        }
+    }
+
     /// Creates GPU state, resolves source metadata and builds plugins in their supplied order.
     /// Uses current logical window dimensions and restores any retained orbit camera.
     /// Returns [`MapError::RendererAlreadySet`] if ready, or a renderer failure while keeping
@@ -150,6 +167,7 @@ where
                     style,
                     renderer_builder,
                     view_state: retained_view,
+                    jump,
                 } = pending.as_mut();
                 let mut renderer = renderer_builder
                     .clone()
@@ -162,15 +180,13 @@ where
 
                 let window_size = self.window.size();
                 renderer.resize_surface(window_size);
-                let mut view_state = match retained_view {
-                    Some(view) => {
-                        let mut view = view.clone();
-                        view.clear_external_view();
-                        view.set_max_pitch(self.max_pitch);
-                        view
-                    }
-                    None => initial_view_state(style, window_size, self.max_pitch),
-                };
+                let mut view_state = starting_view(
+                    style,
+                    retained_view.as_ref(),
+                    window_size,
+                    self.max_pitch,
+                    jump.take(),
+                );
                 view_state.resize(window_size.to_logical(self.window.scale_factor()));
 
                 let mut world = World::default();
@@ -227,6 +243,7 @@ where
                     renderer_builder: RendererBuilder::new()
                         .with_renderer_settings(c.renderer.settings)
                         .with_wgpu_settings(c.renderer.wgpu_settings.clone()),
+                    jump: None,
                 }))
             }
             CurrentMapContext::Pending(_) => {}
@@ -446,34 +463,12 @@ where
     }
 }
 
-fn initial_view_state(
-    style: &Style,
-    window_size: PhysicalSize,
-    max_pitch: cgmath::Deg<f64>,
-) -> ViewState {
-    let center = style.center.unwrap_or_default();
-    let zoom = style.zoom.map(Zoom::new).unwrap_or_default();
-    let mut view = ViewState::new(
-        window_size,
-        WorldCoords::from_lat_lon(LatLon::new(center[1], center[0]), zoom),
-        zoom,
-        cgmath::Deg(style.pitch.unwrap_or_default()),
-        cgmath::Rad(0.6435011087932844),
-    );
-    view.set_max_pitch(max_pitch);
-    view.camera_mut()
-        .set_pitch(cgmath::Deg(style.pitch.unwrap_or_default()));
-    view.camera_mut()
-        .set_bearing(cgmath::Deg(style.bearing.unwrap_or_default()));
-    view.camera_mut()
-        .set_roll(cgmath::Deg(style.roll.unwrap_or_default()));
-    view.take_style_center(style);
-    view
-}
-
+mod camera;
 mod provided_images;
 mod signals;
 mod sources;
+
+use camera::{merged, starting_view};
 
 #[cfg(test)]
 mod tests;

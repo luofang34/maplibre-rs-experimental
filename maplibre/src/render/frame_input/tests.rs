@@ -118,3 +118,17 @@ fn the_frame_clock_advances_without_overflowing() {
     input.advance(Duration::from_secs(1));
     assert_eq!(input.timestamp, Duration::MAX);
 }
+
+#[test]
+fn the_frame_time_is_what_the_host_wrote_and_zero_before_it_writes() {
+    let mut world = crate::tcs::world::World::default();
+    assert_eq!(super::frame_time(&world), std::time::Duration::ZERO);
+    world.resources.insert(super::FrameInput {
+        timestamp: std::time::Duration::from_millis(1500),
+        ..Default::default()
+    });
+    assert_eq!(
+        super::frame_time(&world),
+        std::time::Duration::from_millis(1500)
+    );
+}
