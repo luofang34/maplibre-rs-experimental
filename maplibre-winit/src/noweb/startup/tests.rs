@@ -31,4 +31,36 @@ fn non_utf8_cache_path_is_rejected_before_starting_a_window() {
     assert_eq!(rejected, path);
 }
 
+/// A plugin that registers nothing, standing for a host's own.
+struct Inert;
+
+impl Plugin<NativeEnvironment> for Inert {
+    fn build(
+        &self,
+        _: &mut maplibre::schedule::Schedule,
+        _: std::rc::Rc<Kernel<NativeEnvironment>>,
+        _: &mut maplibre::tcs::world::World,
+        _: &mut maplibre::render::graph::RenderGraph,
+    ) {
+    }
+}
+
+#[test]
+fn a_host_adds_its_plugins_after_the_ones_the_style_needs() {
+    let style = Style::default();
+    let needed = default_plugins(&style, false).len();
+    let mut host =
+        HeadedMapHost::default().with_plugins(|_| vec![Box::new(Inert), Box::new(Inert)]);
+    assert_eq!(host.plugins_for(&style, false).len(), needed + 2);
+    assert_eq!(
+        host.plugins_for(&style, true).len(),
+        needed + 3,
+        "the tile outlines join the style's plugins and the host's are built again"
+    );
+    assert_eq!(
+        HeadedMapHost::default().plugins_for(&style, false).len(),
+        needed
+    );
+}
+
 mod no_unwind;

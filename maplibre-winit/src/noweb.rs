@@ -11,7 +11,10 @@ use winit::{dpi::Size, window::WindowAttributes};
 use super::WinitMapWindow;
 
 mod startup;
-pub use startup::{run_headed_map, HeadedMapError};
+pub use startup::{
+    default_plugins, run_headed_map, run_headed_map_with, HeadedMapError, HeadedMapHost, MapPlugin,
+    NativeEnvironment,
+};
 
 /// Native window title and binding used to construct maps during a resumed callback.
 #[derive(Clone)]

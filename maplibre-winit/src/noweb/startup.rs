@@ -22,13 +22,66 @@ use thiserror::Error;
 use super::{HeadedMapOptions, WinitMapWindowConfig};
 use crate::{WinitApplicationError, WinitEnvironment, WinitEventLoop, WinitHostError};
 
-type NativeEnvironment = WinitEnvironment<
+/// The environment of a windowed native map, which a host's plugins are written for.
+pub type NativeEnvironment = WinitEnvironment<
     TokioScheduler,
     SharedLoader,
     ReqwestOffscreenKernelEnvironment,
     SchedulerAsyncProcedureCall<ReqwestOffscreenKernelEnvironment, TokioScheduler>,
     (),
 >;
+
+/// A plugin of a windowed map.
+pub type MapPlugin = Box<dyn Plugin<NativeEnvironment>>;
+
+/// Builds a host's plugins for a style.
+type MapPlugins = Box<dyn FnMut(&Style) -> Vec<MapPlugin>>;
+
+/// Sets a map up once it exists.
+type Configure = Box<dyn FnMut(&mut Map<NativeEnvironment>)>;
+
+/// What a host adds to a windowed map beyond its style: plugins of its own, whose systems run
+/// every frame with the map context, and setup once the map exists.
+///
+/// The event loop creates the map again when a suspension interrupts its initialization, so
+/// both are callbacks it can call again.
+#[derive(Default)]
+pub struct HeadedMapHost {
+    plugins: Option<MapPlugins>,
+    configure: Option<Configure>,
+}
+
+impl HeadedMapHost {
+    /// Adds the plugins `plugins` returns for the style, after the ones the style needs.
+    pub fn with_plugins(mut self, plugins: impl FnMut(&Style) -> Vec<MapPlugin> + 'static) -> Self {
+        self.plugins = Some(Box::new(plugins));
+        self
+    }
+
+    /// Calls `configure` with each map the event loop creates, before it runs.
+    pub fn with_configure(
+        mut self,
+        configure: impl FnMut(&mut Map<NativeEnvironment>) + 'static,
+    ) -> Self {
+        self.configure = Some(Box::new(configure));
+        self
+    }
+
+    /// The plugins of a map for `style`: the ones the style needs, then the host's.
+    pub fn plugins_for(&mut self, style: &Style, debug_tiles: bool) -> Vec<MapPlugin> {
+        let mut plugins = default_plugins(style, debug_tiles);
+        if let Some(host_plugins) = &mut self.plugins {
+            plugins.extend(host_plugins(style));
+        }
+        plugins
+    }
+
+    fn configure(&mut self, map: &mut Map<NativeEnvironment>) {
+        if let Some(configure) = &mut self.configure {
+            configure(map);
+        }
+    }
+}
 
 /// A native map could not configure its host services, initialize, or run its event loop.
 #[derive(Debug, Error)]
@@ -63,6 +116,25 @@ pub fn run_headed_map<P: Into<PathBuf>>(
     style: Style,
     options: HeadedMapOptions,
 ) -> Result<(), HeadedMapError> {
+    run_headed_map_with(
+        cache_path,
+        window_config,
+        wgpu_settings,
+        style,
+        options,
+        HeadedMapHost::default(),
+    )
+}
+
+/// [`run_headed_map`] with what the host adds to the map.
+pub fn run_headed_map_with<P: Into<PathBuf>>(
+    cache_path: Option<P>,
+    window_config: WinitMapWindowConfig<()>,
+    wgpu_settings: WgpuSettings,
+    style: Style,
+    options: HeadedMapOptions,
+    mut host: HeadedMapHost,
+) -> Result<(), HeadedMapError> {
     let cache_path = cache_path.map(Into::into);
     let cache_directory = cache_directory(cache_path.as_ref())?;
     let event_loop = WinitEventLoop::new(&window_config)?;
@@ -74,9 +146,10 @@ pub fn run_headed_map<P: Into<PathBuf>>(
                     create_kernel(cache_path.clone(), cache_directory.clone(), bound_config)?;
                 let renderer_builder =
                     RendererBuilder::new().with_wgpu_settings(wgpu_settings.clone());
-                let plugins = map_plugins(&style, options.debug_tiles);
+                let plugins = host.plugins_for(&style, options.debug_tiles);
                 let mut map = Map::new(style.clone(), kernel, renderer_builder, plugins)?;
                 map.set_max_pitch(cgmath::Deg(options.max_pitch_degrees));
+                host.configure(&mut map);
                 Ok::<_, HeadedMapError>(map)
             },
             options.max_frames,
@@ -123,7 +196,9 @@ fn create_kernel(
         .build()
 }
 
-fn map_plugins(style: &Style, debug_tiles: bool) -> Vec<Box<dyn Plugin<NativeEnvironment>>> {
+/// The plugins a windowed map needs for `style`: rendering, the background, and the tile
+/// plugins of the source kinds the style draws, with the tile outlines when `debug_tiles`.
+pub fn default_plugins(style: &Style, debug_tiles: bool) -> Vec<MapPlugin> {
     // Only declared sources participate in the requirement that every tile plugin be ready.
     let has_vector_sources = style.sources.is_empty()
         || style
@@ -134,7 +209,7 @@ fn map_plugins(style: &Style, debug_tiles: bool) -> Vec<Box<dyn Plugin<NativeEnv
         .sources
         .values()
         .any(|source| matches!(source, Source::Raster(_) | Source::RasterDem(_)));
-    let mut plugins: Vec<Box<dyn Plugin<NativeEnvironment>>> = vec![
+    let mut plugins: Vec<MapPlugin> = vec![
         Box::new(RenderPlugin),
         Box::new(maplibre::background::BackgroundPlugin),
     ];
