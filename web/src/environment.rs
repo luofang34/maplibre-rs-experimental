@@ -27,8 +27,10 @@ impl OffscreenKernel for WHATWGOffscreenKernelEnvironment {
     }
 }
 
+/// The environment of a browser map, which a host's plugins are written for: workers reached
+/// by message passing in a single-threaded build, or a shared-memory pool with atomics.
 #[cfg(not(target_feature = "atomics"))]
-pub(crate) type CurrentEnvironment = WinitEnvironment<
+pub type CurrentEnvironment = WinitEnvironment<
     maplibre::io::scheduler::NopScheduler,
     WebHttpClient,
     UsedOffscreenKernelEnvironment,
@@ -36,8 +38,10 @@ pub(crate) type CurrentEnvironment = WinitEnvironment<
     (),
 >;
 
+/// The environment of a browser map, which a host's plugins are written for: workers reached
+/// by message passing in a single-threaded build, or a shared-memory pool with atomics.
 #[cfg(target_feature = "atomics")]
-pub(crate) type CurrentEnvironment = WinitEnvironment<
+pub type CurrentEnvironment = WinitEnvironment<
     platform::multithreaded::pool_scheduler::WebWorkerPoolScheduler,
     WebHttpClient,
     UsedOffscreenKernelEnvironment,

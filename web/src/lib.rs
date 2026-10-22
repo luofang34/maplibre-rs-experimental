@@ -10,8 +10,11 @@ mod error;
 mod platform;
 mod startup;
 
-pub use application::{run_maplibre, MapType};
-pub use environment::WHATWGOffscreenKernelEnvironment;
+pub use application::{
+    create_kernel, default_plugins, run_map, run_maplibre, MapPlugin, MapType, WebMapHost,
+};
+pub use environment::{CurrentEnvironment, WHATWGOffscreenKernelEnvironment};
+pub use error::JSError;
 pub use maplibre::platform::http_client::{
     web_http_client, FetchError, WHATWGFetchHttpClient, WebHttpClient,
 };
