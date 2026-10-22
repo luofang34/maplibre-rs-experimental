@@ -11,7 +11,7 @@ use crate::{
         layer::StyleLayer,
         source::{
             Source, TileAddressingScheme, VectorSource, GEOJSON_DEFAULT_MAXZOOM, GEOJSON_LAYER,
-            GEOJSON_MAX_TILED_ZOOM,
+            GEOJSON_MAX_TILED_ZOOM, VECTOR_DEFAULT_MAXZOOM,
         },
         Style,
     },
@@ -60,12 +60,14 @@ impl TileKind {
         }
     }
 
-    /// The largest zoom a source of this kind has tiles for.
+    /// The largest zoom a source of this kind has tiles for; a vector source that declares none
+    /// has them to the GL JS default.
     fn max_zoom_of(self, source: &Source) -> Option<u8> {
         match (self, source) {
-            (Self::Vector, Source::Vector(vector)) | (Self::Raster, Source::Raster(vector)) => {
-                vector.maxzoom
+            (Self::Vector, Source::Vector(vector)) => {
+                Some(vector.maxzoom.unwrap_or(VECTOR_DEFAULT_MAXZOOM))
             }
+            (Self::Raster, Source::Raster(vector)) => vector.maxzoom,
             (Self::Raster, Source::RasterDem(dem)) => dem.maxzoom,
             (Self::Vector, Source::GeoJson(geojson)) => Some(
                 geojson
@@ -118,6 +120,31 @@ pub struct SourceLayerGroup {
     pub source: SourceType,
     /// Layers rendered from tiles of this source.
     pub layers: Vec<StyleLayer>,
+    /// The shallowest zoom the source has tiles at, when it declares one.
+    pub min_zoom: Option<u8>,
+    /// The deepest zoom the source has tiles at, when it declares one; a deeper tile is cut
+    /// from the source's tile at that zoom.
+    pub max_zoom: Option<u8>,
+    /// The geographic bounds the source declares, `(west, south, east, north)`.
+    pub bounds: Option<(f64, f64, f64, f64)>,
+}
+
+impl SourceLayerGroup {
+    /// The tile of the source that `coords` is drawn from: itself, or its ancestor at the
+    /// source's last zoom.
+    pub fn source_tile(&self, coords: WorldTileCoords) -> WorldTileCoords {
+        clamp_to_max_zoom(coords, self.max_zoom)
+    }
+
+    /// Whether the source has nothing at `coords`: the tile is shallower than the source's
+    /// first zoom, or lies beyond its bounds.
+    pub fn has_nothing_at(&self, coords: WorldTileCoords) -> bool {
+        self.min_zoom
+            .is_some_and(|min_zoom| u8::from(coords.z) < min_zoom)
+            || self
+                .bounds
+                .is_some_and(|bounds| !tile_in_bounds(coords, bounds))
+    }
 }
 
 fn template_of(source: &VectorSource) -> Option<(&str, TileAddressingScheme)> {
@@ -141,6 +168,7 @@ pub fn source_layer_groups(style: &Style, kind: TileKind) -> Vec<SourceLayerGrou
             .source
             .as_ref()
             .map(|name| (name, style.sources.get(name)));
+        let declared = named.and_then(|(_, source)| source);
         let (key, source) = match named {
             Some((name, Some(Source::GeoJson(geojson)))) if kind == TileKind::Vector => (
                 Some(name.clone()),
@@ -176,12 +204,18 @@ pub fn source_layer_groups(style: &Style, kind: TileKind) -> Vec<SourceLayerGrou
         if matches!(source, SourceType::GeoJson(_)) && layer.source_layer.is_none() {
             layer.source_layer = Some(GEOJSON_LAYER.to_owned());
         }
+        // Only a named source has a zoom range and bounds of its own; the default source
+        // stands in for layers whose source cannot be resolved.
+        let declared = key.as_ref().and(declared);
         groups
             .entry(key.clone())
             .or_insert_with(|| SourceLayerGroup {
                 source_name: key,
                 source,
                 layers: Vec::new(),
+                min_zoom: declared.and_then(|source| kind.min_zoom_of(source)),
+                max_zoom: declared.and_then(|source| kind.max_zoom_of(source)),
+                bounds: declared.and_then(|source| kind.bounds_of(source)),
             })
             .layers
             .push(layer);
@@ -189,15 +223,25 @@ pub fn source_layer_groups(style: &Style, kind: TileKind) -> Vec<SourceLayerGrou
     groups.into_values().collect()
 }
 
-/// Returns the most restrictive maximum zoom among the tile sources used by the style.
-pub fn source_max_zoom(style: &Style, kind: TileKind) -> Option<u8> {
+/// The style sources the layers of one tile kind read from.
+fn used_sources(style: &Style, kind: TileKind) -> impl Iterator<Item = &Source> {
     style
         .layers
         .iter()
-        .filter(|layer| kind.accepts_layer(layer))
+        .filter(move |layer| kind.accepts_layer(layer))
         .filter_map(|layer| style.sources.get(layer.source.as_ref()?))
-        .filter_map(|source| kind.max_zoom_of(source))
-        .min()
+}
+
+/// The deepest zoom any tile source used by the style has tiles for, which requests are clamped
+/// to: a tile at it holds every source, the sources that end sooner cut from their tile at
+/// their last zoom. `None` when a source has no last zoom, so that it reaches every zoom.
+pub fn source_max_zoom(style: &Style, kind: TileKind) -> Option<u8> {
+    let mut deepest = None;
+    for source in used_sources(style, kind) {
+        let max_zoom = kind.max_zoom_of(source)?;
+        deepest = Some(deepest.map_or(max_zoom, |deepest: u8| deepest.max(max_zoom)));
+    }
+    deepest
 }
 
 /// Zoom level whose tiles cover the view for a source, as GL JS `coveringZoomLevel`: the map
@@ -249,17 +293,18 @@ pub fn source_tiles_for(
 /// Largest number of zoom levels source tiles may sit away from their view tile.
 const MAX_ZOOM_DELTA: i32 = 2;
 
-/// Returns the most restrictive minimum zoom among the tile sources used by the style.
+/// The shallowest zoom any tile source used by the style has tiles for.
 ///
-/// Tiles below it are not requested at all: a source shows nothing there, as in GL JS.
+/// Tiles below it are not requested at all: no source shows anything there, as in GL JS. A
+/// source above its own first zoom is empty in a tile the others fill. `None` when a source
+/// declares no first zoom, so that it starts at the root.
 pub fn source_min_zoom(style: &Style, kind: TileKind) -> Option<u8> {
-    style
-        .layers
-        .iter()
-        .filter(|layer| kind.accepts_layer(layer))
-        .filter_map(|layer| style.sources.get(layer.source.as_ref()?))
-        .filter_map(|source| kind.min_zoom_of(source))
-        .max()
+    let mut shallowest = None;
+    for source in used_sources(style, kind) {
+        let min_zoom = kind.min_zoom_of(source)?;
+        shallowest = Some(shallowest.map_or(min_zoom, |shallowest: u8| shallowest.min(min_zoom)));
+    }
+    shallowest
 }
 
 /// Whether every source of this kind that the style draws declares bounds that leave the tile
@@ -308,7 +353,7 @@ pub fn tile_in_bounds(
     tile_east > west && tile_west < east && tile_north > south && tile_south < north
 }
 
-/// Replaces coordinates above the source maximum zoom with their ancestor at that zoom.
+/// Replaces coordinates deeper than the source's last zoom with their ancestor at that zoom.
 pub fn clamp_to_max_zoom(coords: WorldTileCoords, max_zoom: Option<u8>) -> WorldTileCoords {
     let Some(max_zoom) = max_zoom else {
         return coords;

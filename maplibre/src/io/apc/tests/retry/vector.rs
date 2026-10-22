@@ -68,3 +68,5 @@ mod stale;
 mod terrain;
 
 mod fallback;
+
+mod zoom_range;

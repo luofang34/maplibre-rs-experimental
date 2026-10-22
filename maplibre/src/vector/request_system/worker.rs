@@ -41,6 +41,11 @@ pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context +
         let mut retry = false;
         let mut images = provided::TileImages::new(coords, attempt, pixel_ratio);
         while let Some(group) = groups.next() {
+            if group.has_nothing_at(coords) {
+                source_empty::<T, _>(coords, &group.layers, &context)
+                    .map_err(ProcedureError::Send)?;
+                continue;
+            }
             let data = match fetch_group_tile(&client, coords, &group).await {
                 Ok(data) => data,
                 // A source without a tile there has nothing to draw, as GL JS loads a vector

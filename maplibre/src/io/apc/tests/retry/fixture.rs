@@ -43,6 +43,8 @@ pub(super) type Procedure = AsyncProcedure<ReqwestOffscreenKernelEnvironment, Re
 pub(super) struct Calls {
     pending: RefCell<Vec<(Input, Procedure)>>,
     replies: Replies,
+    /// Cloned for every call, so the calls share one asset cache as a map's workers do.
+    config: OffscreenKernelConfig,
 }
 impl AsyncProcedureCall<ReqwestOffscreenKernelEnvironment> for Calls {
     type Context = Replies;
@@ -73,10 +75,7 @@ impl Calls {
             procedure(
                 input,
                 self.replies.clone(),
-                ReqwestOffscreenKernelEnvironment::create(OffscreenKernelConfig {
-                    cache_directory: None,
-                    ..Default::default()
-                }),
+                ReqwestOffscreenKernelEnvironment::create(self.config.clone()),
             )
             .await
             .expect("worker completed");

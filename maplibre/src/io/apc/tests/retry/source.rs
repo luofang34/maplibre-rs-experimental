@@ -117,6 +117,15 @@ impl Source {
     pub fn requests(&self) -> usize {
         self.requests.lock().expect("requests").len()
     }
+    /// How many requests for `path` reached the server.
+    pub fn requests_for(&self, path: &str) -> usize {
+        self.requests
+            .lock()
+            .expect("requests")
+            .iter()
+            .filter(|request| request.contains(path))
+            .count()
+    }
 }
 
 impl Drop for Source {
