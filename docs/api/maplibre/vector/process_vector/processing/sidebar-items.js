@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["process_layer","symbol_layer","tessellator","vector_layer"]};
+window.SIDEBAR_ITEMS = {"fn":["process_layer","symbol_layer","tessellate_readable","tessellator","vector_layer"]};
