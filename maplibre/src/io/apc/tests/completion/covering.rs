@@ -92,11 +92,10 @@ async fn corrupt_vector_child_releases_capacity_and_retains_parent_drape() {
 }
 
 #[tokio::test]
-async fn unavailable_vector_child_releases_capacity_and_retains_parent_drape() {
-    assert_eq!(
-        selected_source("missing").await.0,
-        WorldTileCoords::default()
-    );
+async fn missing_vector_child_loads_empty_and_replaces_parent_drape() {
+    // A vector tile that answered 404 is loaded empty, as in GL JS, not held back for its parent.
+    let (selected, child) = selected_source("missing").await;
+    assert_eq!(selected, child);
 }
 
 #[tokio::test]

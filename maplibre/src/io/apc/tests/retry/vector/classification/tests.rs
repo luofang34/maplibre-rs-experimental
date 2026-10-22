@@ -92,3 +92,33 @@ async fn healthy_vector_source_does_not_reset_the_failed_source_backoff() {
         "complete success cancels retries"
     );
 }
+
+#[tokio::test]
+async fn a_source_without_the_tile_leaves_its_layers_empty_and_the_others_drawn() {
+    let mut test = Fixture::new(Kind::Vector, true).await;
+    let mut frames = super::super::render::Frames::new(&mut test);
+    test.source
+        .set_healthy(Response::Bytes(super::super::tile()));
+    test.source.set(Response::Status(404));
+    test.frame(0);
+    test.receive().await;
+    assert_eq!(test.source.requests(), 2);
+    assert!(
+        test.loaded(),
+        "the tile is complete with the layers of the source that has it"
+    );
+    super::super::render::assert_center(
+        &frames.render(&mut test),
+        [255, 0, 0, 255],
+        "the healthy source's fill is drawn where the other source has no tile",
+    );
+    for time in [1000, 30000, 60000] {
+        test.frame(time);
+        test.receive().await;
+    }
+    assert_eq!(
+        test.source.requests(),
+        2,
+        "a source without the tile is not asked for it again"
+    );
+}

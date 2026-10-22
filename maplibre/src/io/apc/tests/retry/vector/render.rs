@@ -87,10 +87,14 @@ fn read_blocking(test: &Fixture) -> Vec<u8> {
 }
 
 pub(super) fn assert_green(pixels: &[u8]) {
-    let center = &pixels[(8 * 16 + 8) * 4..(8 * 16 + 8) * 4 + 4];
-    assert_eq!(
-        center,
+    assert_center(
+        pixels,
         [0, 255, 0, 255],
-        "recovered MVT must reach the actual draw"
+        "recovered MVT must reach the actual draw",
     );
+}
+
+pub(super) fn assert_center(pixels: &[u8], expected: [u8; 4], reason: &str) {
+    let center = &pixels[(8 * 16 + 8) * 4..(8 * 16 + 8) * 4 + 4];
+    assert_eq!(center, expected, "{reason}");
 }
