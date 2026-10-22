@@ -2,7 +2,7 @@
 
 use cgmath::{Deg, Point2, Rad, Vector4};
 
-use super::CameraPose;
+use super::{CameraOptions, CameraPose};
 use crate::{
     coords::{LatLon, WorldCoords, Zoom},
     render::view_state::ViewState,
@@ -132,4 +132,52 @@ fn a_roll_of_ninety_degrees_turns_east_onto_the_vertical_axis() {
         x.abs() < 1e-9 && y.abs() > 0.01,
         "east lies on the vertical axis: {x} {y}"
     );
+}
+
+#[test]
+fn a_jump_moves_what_it_names_and_keeps_the_rest() {
+    let mut view_state = view_state();
+    view_state.jump_to(CameraOptions {
+        center: Some(LatLon::new(48.1, 11.6)),
+        zoom: Some(12.0),
+        bearing: Some(Deg(30.0)),
+        ..Default::default()
+    });
+    let center = view_state.center_lat_lon();
+    assert!((center.latitude - 48.1).abs() < 1e-9, "{center}");
+    assert!((center.longitude - 11.6).abs() < 1e-9, "{center}");
+    assert!((view_state.zoom().value() - 12.0).abs() < 1e-12);
+    assert!((Deg::from(view_state.camera().get_bearing()).0 - 30.0).abs() < 1e-9);
+    assert_eq!(view_state.camera().get_pitch(), Rad(0.0));
+    view_state.jump_to(CameraOptions {
+        pitch: Some(Deg(40.0)),
+        ..Default::default()
+    });
+    let kept = view_state.center_lat_lon();
+    assert!((kept.latitude - 48.1).abs() < 1e-9 && (kept.longitude - 11.6).abs() < 1e-9);
+    assert!((view_state.zoom().value() - 12.0).abs() < 1e-12);
+    assert!((Deg::from(view_state.camera().get_bearing()).0 - 30.0).abs() < 1e-9);
+    assert!((Deg::from(view_state.camera().get_pitch()).0 - 40.0).abs() < 1e-9);
+}
+
+#[test]
+fn a_jump_keeps_the_center_on_the_map_and_leaves_out_a_zoom_that_is_not_a_number() {
+    let mut view_state = view_state();
+    view_state.jump_to(CameraOptions {
+        center: Some(LatLon::new(90.0, 10.0)),
+        zoom: Some(f64::NAN),
+        ..Default::default()
+    });
+    let center = view_state.center_lat_lon();
+    assert!(
+        center.latitude.is_finite() && center.latitude < 86.0,
+        "{center}"
+    );
+    assert!((center.longitude - 10.0).abs() < 1e-9, "{center}");
+    assert!(
+        (view_state.zoom().value() - 10.0).abs() < 1e-12,
+        "the zoom is kept"
+    );
+    assert!(view_state.camera().position().x.is_finite());
+    assert!(view_state.camera().position().y.is_finite());
 }
