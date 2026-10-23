@@ -34,7 +34,8 @@ pub struct InputController {
 }
 
 impl InputController {
-    /// Sets movement speed, camera/keyboard sensitivity and wheel zoom sensitivity.
+    /// Sets movement speed, camera/keyboard sensitivity and scroll zoom sensitivity, a factor
+    /// on GL JS's scroll zoom rates.
     pub fn new(speed: f64, sensitivity: f64, zoom_sensitivity: f64) -> Self {
         Self {
             pinch_handler: PinchHandler::default(),
@@ -102,7 +103,7 @@ impl InputController {
             },
             WindowEvent::MouseWheel { delta, .. } => {
                 self.shift_handler.process_scroll(delta);
-                self.zoom_handler.process_scroll(delta);
+                self.zoom_handler.process_scroll(delta, scale_factor);
                 true
             }
             WindowEvent::MouseInput { button, state, .. } => {
