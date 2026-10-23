@@ -13,10 +13,13 @@ use maplibre::{
 };
 use winit::keyboard::Key;
 
+use self::scroll::ScrollInput;
 use super::{
     projection::{center_pixel, zoom_globe_around_pixel},
     UpdateState,
 };
+
+mod scroll;
 
 /// Largest zoom change applied per frame, as GL JS caps the scroll scale per frame at two.
 const MAX_ZOOM_STEP_PER_FRAME: f64 = 1.0;
@@ -26,7 +29,7 @@ const GESTURE_END_DELAY: Duration = Duration::from_millis(200);
 pub struct ZoomHandler {
     window_position: Option<Vector2<f64>>,
     zoom_delta: Option<Zoom>,
-    sensitivity: f64,
+    scroll: ScrollInput,
     /// Elevation the running gesture anchors on, captured when it starts.
     gesture_elevation: Option<Option<f64>>,
     /// The terrain point a zoom on a globe orbiting the terrain keeps under the pointer,
@@ -47,6 +50,9 @@ impl UpdateState for ZoomHandler {
         _dt: Duration,
     ) {
         let now = Instant::now();
+        if let Some(zoom) = self.scroll.take_zoom(now) {
+            self.update_zoom(zoom);
+        }
         let Some(zoom_delta) = self.zoom_delta.take() else {
             let finished = self
                 .last_input
@@ -105,7 +111,7 @@ impl ZoomHandler {
         Self {
             window_position: None,
             zoom_delta: None,
-            sensitivity,
+            scroll: ScrollInput::new(sensitivity),
             gesture_elevation: None,
             globe_anchor: None,
             last_input: None,
@@ -125,18 +131,9 @@ impl ZoomHandler {
         self.zoom_delta = Some(self.zoom_delta.unwrap_or_default() + Zoom::new(delta));
     }
 
-    pub fn process_scroll(&mut self, delta: &winit::event::MouseScrollDelta) {
-        self.update_zoom(
-            match delta {
-                winit::event::MouseScrollDelta::LineDelta(_horizontal, vertical) => {
-                    *vertical as f64
-                }
-                winit::event::MouseScrollDelta::PixelDelta(winit::dpi::PhysicalPosition {
-                    y: scroll,
-                    ..
-                }) => *scroll / 100.0,
-            } * self.sensitivity,
-        );
+    /// Adds scroll input to the frame's, as GL JS's scroll zoom takes it.
+    pub fn process_scroll(&mut self, delta: &winit::event::MouseScrollDelta, scale_factor: f64) {
+        self.scroll.add(delta, scale_factor, Instant::now());
     }
 
     pub fn process_key_press(&mut self, key: &Key, state: winit::event::ElementState) -> bool {

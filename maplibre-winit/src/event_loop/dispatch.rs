@@ -36,7 +36,7 @@ where
         let scale_factor = map.window().scale_factor();
         Self {
             map,
-            input: InputController::new(0.2, 100.0, 0.1),
+            input: InputController::new(0.2, 100.0, 1.0),
             started: now,
             last_render: now,
             frame: 0,
