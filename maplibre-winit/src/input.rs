@@ -101,6 +101,10 @@ impl InputController {
                 }
                 TouchPhase::Cancelled => false,
             },
+            WindowEvent::PinchGesture { delta, .. } => {
+                self.zoom_handler.process_pinch(*delta);
+                true
+            }
             WindowEvent::MouseWheel { delta, .. } => {
                 self.shift_handler.process_scroll(delta);
                 self.zoom_handler.process_scroll(delta, scale_factor);
