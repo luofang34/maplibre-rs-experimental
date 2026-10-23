@@ -136,6 +136,15 @@ impl ZoomHandler {
         self.scroll.add(delta, scale_factor, Instant::now());
     }
 
+    /// Adds a trackpad pinch, whose magnification scales the map by `1 + magnification` so
+    /// that the map follows the fingers.
+    pub fn process_pinch(&mut self, magnification: f64) {
+        let scale = 1.0 + magnification;
+        if scale > 0.0 {
+            self.update_zoom(scale.log2());
+        }
+    }
+
     pub fn process_key_press(&mut self, key: &Key, state: winit::event::ElementState) -> bool {
         let amount = if state == winit::event::ElementState::Pressed {
             0.1
@@ -156,3 +165,6 @@ impl ZoomHandler {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
