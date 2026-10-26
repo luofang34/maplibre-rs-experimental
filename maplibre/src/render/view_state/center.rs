@@ -65,6 +65,16 @@ impl ViewState {
         }
     }
 
+    /// Rests the center at `meters`: held by terrain, until the ground under it is stood on;
+    /// otherwise as the altitude it rests at from now on.
+    pub(super) fn rest_center_at(&mut self, meters: f64) {
+        if self.center_held_by_terrain() {
+            self.set_center_elevation(meters);
+        } else {
+            self.set_center_altitude(meters);
+        }
+    }
+
     /// Takes the style's initial center altitude, and whether it draws terrain under the
     /// center, as the view starts.
     pub(crate) fn take_style_center(&mut self, style: &crate::style::Style) {

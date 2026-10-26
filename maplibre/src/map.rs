@@ -21,7 +21,7 @@ use crate::{
         camera::DEFAULT_MAX_PITCH,
         error::RenderError,
         graph::RenderGraphError,
-        view_state::{CameraOptions, ViewState},
+        view_state::{CameraOptions, NavigationError, ViewState},
     },
     schedule::{Schedule, Stage, StageError},
     sdf::query::{QueryError, QueryGeometry, QueryOptions, RenderedSymbol},
@@ -67,6 +67,9 @@ pub enum MapError {
     /// A style change was refused; the style is unchanged.
     #[error("changing the style failed")]
     StyleChange(#[from] StyleMutationError),
+    /// A camera move was refused; the camera is unchanged.
+    #[error("moving the camera failed")]
+    Navigation(#[from] NavigationError),
 }
 
 /// Initialization state of a map's renderer and frame data.
@@ -144,15 +147,16 @@ where
     }
 
     /// Moves the map at once to the center, zoom and angles given, keeping the others, as GL
-    /// JS `jumpTo`. While the renderer is not ready the jump moves the view the map starts
-    /// with once it is; the style's own camera is left as written.
-    pub fn jump_to(&mut self, options: CameraOptions) {
+    /// JS `jumpTo` and [`MapContext::jump_to`]. While the renderer is not ready the jump moves
+    /// the view the map starts with once it is; the style's own camera is left as written.
+    pub fn jump_to(&mut self, options: CameraOptions) -> Result<(), MapError> {
         match &mut self.map_context {
-            CurrentMapContext::Ready(context) => context.view_state.jump_to(options),
+            CurrentMapContext::Ready(context) => context.jump_to(options)?,
             CurrentMapContext::Pending(pending) => {
                 pending.jump = Some(merged(pending.jump, options));
             }
         }
+        Ok(())
     }
 
     /// Creates GPU state, resolves source metadata and builds plugins in their supplied order.
@@ -186,7 +190,7 @@ where
                     window_size,
                     self.max_pitch,
                     jump.take(),
-                );
+                )?;
                 view_state.resize(window_size.to_logical(self.window.scale_factor()));
 
                 let mut world = World::default();

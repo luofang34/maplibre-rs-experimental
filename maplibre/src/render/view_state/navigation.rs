@@ -21,10 +21,7 @@ use thiserror::Error;
 use super::ViewState;
 use crate::{
     coords::{LatLon, Zoom, TILE_SIZE},
-    projection::{
-        globe::{lat_lon_to_unit_sphere, scale},
-        ProjectionType,
-    },
+    projection::{globe::scale, ProjectionType},
 };
 
 /// Sine of the tilt below which the camera counts as looking straight down or up, its roll
@@ -205,7 +202,7 @@ impl ViewState {
                 if self.has_external_view() {
                     return Err(NavigationError::ExternalView);
                 }
-                let pose = self.constrained_pose();
+                let pose = self.globe_pose_for(super::CameraOptions::default());
                 self.set_globe_pose(pose)
             }
         }
@@ -279,11 +276,7 @@ impl ViewState {
         // altitude the center rests at once off the ground again, the style's centerAltitude
         // or the host's, stays as it was.
         let placed = self.place_free_globe(free, |view| {
-            if view.center_held_by_terrain() {
-                view.set_center_elevation(pose.target_elevation_meters);
-            } else {
-                view.set_center_altitude(pose.target_elevation_meters);
-            }
+            view.rest_center_at(pose.target_elevation_meters);
         });
         if placed {
             Ok(())
@@ -411,35 +404,6 @@ impl ViewState {
         self.height() * 0.5 / (self.field_of_view().0 * 0.5).tan()
     }
 
-    /// The pose of the current constrained view.
-    fn constrained_pose(&self) -> GlobePose {
-        let world_size = TILE_SIZE * 2_f64.powf(self.zoom().value());
-        let position = self.camera().position();
-        let center = crate::render::projection::mercator_world_to_lat_lon(
-            position.x, position.y, world_size,
-        );
-        let rotation = view_rotation(
-            center,
-            self.camera().get_bearing().0.to_degrees(),
-            self.camera().get_pitch().0.to_degrees(),
-            self.camera().get_roll().0.to_degrees(),
-        );
-        let radius = crate::projection::globe::globe_radius_pixels(world_size, center.latitude);
-        let orientation = Quaternion::from(rotation);
-        GlobePose {
-            target: lat_lon_to_unit_sphere(center).into(),
-            target_elevation_meters: self.center_elevation(),
-            orientation: [
-                orientation.s,
-                orientation.v.x,
-                orientation.v.y,
-                orientation.v.z,
-            ],
-            distance_meters: self.globe_camera_to_center_distance() / radius
-                * self.body().radius_meters,
-        }
-    }
-
     /// Points the flat camera's center, zoom and angles at what the free-globe camera shows,
     /// the center held within the Mercator world.
     fn sync_flat_camera(&mut self) {
@@ -484,6 +448,7 @@ pub(crate) fn turn_between(from: Vector3<f64>, to: Vector3<f64>) -> Quaternion<f
 }
 
 mod gestures;
+mod placement;
 
 #[cfg(test)]
 mod tests;

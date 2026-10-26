@@ -274,3 +274,6 @@ mod navigation;
 
 #[path = "tests/lod_hysteresis.rs"]
 mod lod_hysteresis;
+
+#[path = "tests/long_jump.rs"]
+mod long_jump;

@@ -2,7 +2,7 @@
 
 use crate::{
     coords::{LatLon, WorldCoords, Zoom},
-    render::view_state::{CameraOptions, ViewState},
+    render::view_state::{CameraOptions, NavigationError, ViewState},
     style::Style,
     window::PhysicalSize,
 };
@@ -17,6 +17,7 @@ pub(super) fn merged(earlier: Option<CameraOptions>, later: CameraOptions) -> Ca
         bearing: later.bearing.or(earlier.bearing),
         pitch: later.pitch.or(earlier.pitch),
         roll: later.roll.or(earlier.roll),
+        elevation: later.elevation.or(earlier.elevation),
     }
 }
 
@@ -28,7 +29,7 @@ pub(super) fn starting_view(
     window_size: PhysicalSize,
     max_pitch: cgmath::Deg<f64>,
     jump: Option<CameraOptions>,
-) -> ViewState {
+) -> Result<ViewState, NavigationError> {
     let mut view = match retained {
         Some(view) => {
             let mut view = view.clone();
@@ -39,9 +40,9 @@ pub(super) fn starting_view(
         None => initial_view_state(style, window_size, max_pitch),
     };
     if let Some(jump) = jump {
-        view.jump_to(jump);
+        view.jump_to(jump)?;
     }
-    view
+    Ok(view)
 }
 
 fn initial_view_state(

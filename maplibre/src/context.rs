@@ -58,6 +58,18 @@ impl MapContext {
         Ok(())
     }
 
+    /// Moves the map at once, as GL JS `jumpTo`, in either navigation mode, as
+    /// [`ViewState::jump_to`] moves it. A center held by terrain stands on the loaded ground
+    /// under it at once, or at sea level where none has loaded, never on the ground it left.
+    pub fn jump_to(
+        &mut self,
+        options: crate::render::view_state::CameraOptions,
+    ) -> Result<(), crate::render::view_state::NavigationError> {
+        self.view_state.jump_to(options)?;
+        crate::terrain::elevation::ground_center(&mut self.view_state, &self.world);
+        Ok(())
+    }
+
     /// Restores a stored free-globe pose, for the style's projection: it must be the pure
     /// `vertical-perspective` projection. A center held by terrain stands on the loaded
     /// ground under the pose's target at once, rather than at the pose's own target height, as
