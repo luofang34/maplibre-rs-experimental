@@ -71,6 +71,8 @@ pub struct FrameSignals {
     host_frame: u64,
     /// The camera each eye drew last, by eye index; a map without eyes is eye 0.
     cameras: Vec<[f64; 24]>,
+    /// Counts the frames whose first eye drew a camera other than the frame before.
+    camera_revision: u64,
 }
 
 fn signals(world: &mut World) -> &mut FrameSignals {
@@ -205,6 +207,9 @@ pub(crate) fn finish_frame(context: &mut MapContext) {
     finished.draws = draws;
     signals.last = finished;
     signals.dirty = std::mem::take(&mut signals.animating);
+    if eye == 0 && signals.cameras.first() != Some(&drawn) {
+        signals.camera_revision = signals.camera_revision.wrapping_add(1);
+    }
     if signals.cameras.len() <= eye {
         signals.cameras.resize(eye + 1, drawn);
     }
@@ -231,6 +236,15 @@ impl MapContext {
         signals.dirty
             || loading
             || signals.cameras.get(eye_index(&self.world)) != Some(&camera(self))
+    }
+
+    /// Changes whenever a frame draws the camera somewhere other than the frame before, from a
+    /// gesture, a jump or a move; a host watching the camera compares it with the one it saw.
+    pub fn camera_revision(&self) -> u64 {
+        self.world
+            .resources
+            .get::<FrameSignals>()
+            .map_or(0, |signals| signals.camera_revision)
     }
 
     /// The statistics of the last finished frame.

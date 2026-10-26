@@ -2,7 +2,7 @@
 
 use crate::{
     context::MapContext,
-    coords::{WorldCoords, TILE_SIZE},
+    coords::{LatLon, WorldCoords, Zoom, TILE_SIZE},
     render::view_state::ViewState,
     tcs::{system::SystemResult, world::World},
     terrain::coverage::TerrainCoverageIndex,
@@ -97,18 +97,37 @@ pub fn ground_center(view_state: &mut ViewState, world: &World) -> bool {
 /// loaded: the DEM tile at the integer zoom, as GL JS lifts its center by, not the tile drawn
 /// under it, which a coarser level may stand in for at a distance.
 pub(crate) fn center_ground(view_state: &ViewState, world: &World) -> Option<f64> {
-    let index = world.resources.get::<TerrainCoverageIndex>()?;
     if past_mercator_rows(view_state) {
-        return Some(0.0);
+        return world.resources.get::<TerrainCoverageIndex>().map(|_| 0.0);
     }
     let zoom = view_state.zoom();
     let world_size = TILE_SIZE * 2_f64.powf(zoom.value());
     let center = view_state.camera().position();
-    let tile_zoom = zoom.value().floor().clamp(0.0, f64::from(u8::MAX)) as u8;
-    index.loaded_ground_cached(
-        &world.tiles,
+    ground_at_mercator(
+        world,
         center.x / world_size,
         center.y / world_size,
+        zoom.value(),
+    )
+}
+
+/// The loaded ground a center at `position` and `zoom` stands on, as [`center_ground`] reads
+/// it; past the Mercator world's last row the cap closes the globe at sea level.
+pub(crate) fn ground_under(world: &World, position: LatLon, zoom: f64) -> Option<f64> {
+    if position.latitude.abs() > crate::projection::globe::scale::MERCATOR_LATITUDE_LIMIT {
+        return Some(0.0);
+    }
+    let mercator = WorldCoords::from_lat_lon(position, Zoom::new(0.0));
+    ground_at_mercator(world, mercator.x / TILE_SIZE, mercator.y / TILE_SIZE, zoom)
+}
+
+fn ground_at_mercator(world: &World, x: f64, y: f64, zoom: f64) -> Option<f64> {
+    let index = world.resources.get::<TerrainCoverageIndex>()?;
+    let tile_zoom = zoom.floor().clamp(0.0, f64::from(u8::MAX)) as u8;
+    index.loaded_ground_cached(
+        &world.tiles,
+        x,
+        y,
         crate::terrain::DemDetail::Tile(tile_zoom),
     )
 }

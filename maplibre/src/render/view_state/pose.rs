@@ -53,12 +53,30 @@ pub struct CameraOptions {
 }
 
 /// The center, zoom and angles a jump resolves to.
-pub(super) struct ResolvedJump {
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ResolvedJump {
     pub center: LatLon,
     pub zoom: Zoom,
     pub bearing: Deg<f64>,
     pub pitch: Deg<f64>,
     pub roll: Deg<f64>,
+}
+
+impl ResolvedJump {
+    /// Whether two cameras show the same, but for rounding.
+    pub(crate) fn same_as(&self, other: &Self) -> bool {
+        const TOLERANCE: f64 = 1e-9;
+        [
+            self.center.latitude - other.center.latitude,
+            self.center.longitude - other.center.longitude,
+            self.zoom.value() - other.zoom.value(),
+            self.bearing.0 - other.bearing.0,
+            self.pitch.0 - other.pitch.0,
+            self.roll.0 - other.roll.0,
+        ]
+        .iter()
+        .all(|difference| difference.abs() <= TOLERANCE)
+    }
 }
 
 /// Bound on the center search, as GL JS sets it; the search converges in about five passes.
@@ -231,7 +249,7 @@ impl ViewState {
 
     /// The center, zoom and angles a jump to `options` shows, the camera's own standing in for
     /// those left out.
-    pub(super) fn resolve_jump(&self, options: CameraOptions) -> ResolvedJump {
+    pub(crate) fn resolve_jump(&self, options: CameraOptions) -> ResolvedJump {
         let camera = self.camera();
         ResolvedJump {
             // A free-globe camera may look past the Mercator world the flat center stops at.
