@@ -69,6 +69,15 @@ impl MapContext {
         }
     }
 
+    /// Draws the globe's atmosphere in full, lit by the sun direction while one is set, even
+    /// when the style has no `sky`; `false` leaves the atmosphere to the style's `sky`.
+    pub fn set_atmosphere(&mut self, atmosphere: bool) {
+        if crate::celestial::lighting(&self.world).atmosphere != atmosphere {
+            crate::celestial::set_atmosphere(&mut self.world, atmosphere);
+            crate::render::frame_signals::mark_dirty(&mut self.world);
+        }
+    }
+
     /// The sun direction set with [`Self::set_sun_direction`].
     pub fn sun_direction(&self) -> Option<crate::celestial::EcefDirection> {
         crate::celestial::sun_direction(&self.world)

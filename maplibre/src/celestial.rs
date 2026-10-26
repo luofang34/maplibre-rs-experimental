@@ -143,6 +143,8 @@ pub struct CelestialLighting {
     pub sun: Option<EcefDirection>,
     /// Where the ground turns from night to day.
     pub twilight: TwilightBand,
+    /// Whether the globe's atmosphere is drawn in full whatever the style's `sky` says.
+    pub atmosphere: bool,
 }
 
 impl CelestialLighting {
@@ -180,6 +182,14 @@ pub fn set_twilight_band(world: &mut World, twilight: TwilightBand) {
         .resources
         .get_or_init_mut::<CelestialLighting>()
         .twilight = twilight;
+}
+
+/// Draws the globe's atmosphere without a style `sky`, or leaves it to the style.
+pub fn set_atmosphere(world: &mut World, atmosphere: bool) {
+    world
+        .resources
+        .get_or_init_mut::<CelestialLighting>()
+        .atmosphere = atmosphere;
 }
 
 /// Sets or clears the sun direction the render systems read.

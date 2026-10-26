@@ -58,6 +58,9 @@ pub fn queue_system(
     let sky_blend = style.sky.as_ref().map_or(0.0, |sky| {
         sky.atmosphere_blend_at_zoom(view_state.zoom().value())
     });
+    // A host that turns the atmosphere on shows it in full without a style sky.
+    let host_blend = f32::from(u8::from(crate::celestial::lighting(world).atmosphere));
+    let sky_blend = sky_blend.max(host_blend);
     let atmosphere_blend = sky_blend * projection_transition;
     let sky_metadata = style
         .sky

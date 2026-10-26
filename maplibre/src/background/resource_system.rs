@@ -211,6 +211,9 @@ pub fn resource_system(
                 textured: false,
             },
         )
+        // The scattering lies behind the globe, its terrain and everything else that writes
+        // depth, as GL JS draws it with a read-only depth test.
+        .with_depth_test()
         .describe_render_pipeline()
         .initialize_with_prefix_layouts(device, &[projection_resources.bind_group_layout()]);
         AtmosphereRenderPipeline(pipeline)
