@@ -10,6 +10,9 @@ struct VertexOutput {
     // 1 at a pole and 0 on the tile, so the polar cap's triangles are told apart from the
     // tile's: their texture coordinates would only repeat the tile's edge row to the pole.
     @location(4) polar_cap: f32,
+    // The ground's geographic up in globe world axes, which the sun's elevation is measured
+    // from on the globe and the flat map alike.
+    @location(5) globe_normal: vec3<f32>,
     @builtin(position) clip_position: vec4<f32>,
 };
 
@@ -78,6 +81,7 @@ fn main(
         terrain_tile.fog_position.xyz + vec3<f32>(position.x * terrain_tile.fog_position.w,
             -position.y * terrain_tile.fog_position.w, elevation),
         select(0.0, 1.0, north_cap || south_cap),
+        tile_position_on_unit_sphere(surface_position_2d, terrain_tile.tile_mercator_coords),
         projected.clip_position,
     );
 }

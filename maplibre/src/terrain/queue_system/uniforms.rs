@@ -29,6 +29,7 @@ pub(super) fn replay(
     queue: &crate::render::upload_queue::UploadQueue,
 ) -> SystemResult {
     let fog = terrain_fog(style, view);
+    let lighting = crate::celestial::lighting(world);
     let projection = view.gpu_view_projection();
     if let Some(frame) = world.resources.get_mut::<TerrainEyeFrame>() {
         for (coords, uniform) in &mut frame.0 {
@@ -41,7 +42,7 @@ pub(super) fn replay(
             uniform.fog_range = [fog.near, fog.far, fog.ground_blend, fog.horizon_blend];
             uniform.fog_opacity[0] = fog.opacity;
             uniform.fog_opacity[1] = f32::from(fog.globe);
-            surface_uniforms(uniform, *coords, style, view);
+            surface_uniforms(uniform, *coords, (style, lighting), view);
         }
     }
     if let (Some(frame), Some(Initialized(terrain))) = (
@@ -167,6 +168,8 @@ pub(super) fn tile_uniforms(
         edge_heights: Default::default(),
         surface_color: [0.0; 4],
         fog_position: [0.0; 4],
+        daylight: [0.0; 4],
+        twilight: [0.0; 4],
     })
 }
 
@@ -207,12 +210,30 @@ pub(super) struct PreparedTerrain {
     pub(super) sources: Vec<TileSources>,
 }
 
+/// The skirts and the host's sun the surface of every tile is drawn with this frame.
+pub(super) fn surface_settings(
+    world: &World,
+) -> (
+    crate::terrain::TerrainSkirts,
+    crate::celestial::CelestialLighting,
+) {
+    let skirts = world.resources.get::<crate::terrain::TerrainSkirts>();
+    (
+        skirts.copied().unwrap_or_default(),
+        crate::celestial::lighting(world),
+    )
+}
+
 pub(super) fn prepare_tiles(
     targets: (&[TargetSpec], &[Option<WorldTileCoords>]),
     style: &Style,
     view_state: &ViewState,
     terrain: &TerrainResources,
-    (dem, skirts): (&DemSource, crate::terrain::TerrainSkirts),
+    (dem, skirts, lighting): (
+        &DemSource,
+        crate::terrain::TerrainSkirts,
+        crate::celestial::CelestialLighting,
+    ),
 ) -> PreparedTerrain {
     let (specs, drape_sources) = targets;
     let zoom = view_state.zoom();
@@ -248,7 +269,7 @@ pub(super) fn prepare_tiles(
         ) else {
             continue;
         };
-        surface_uniforms(&mut block, spec.coords, style, view_state);
+        surface_uniforms(&mut block, spec.coords, (style, lighting), view_state);
         uniforms.push(block);
         sources.push((dem_coords, spec.coords, drape_source));
     }
@@ -299,10 +320,11 @@ pub(super) fn with_world_copies(
 fn surface_uniforms(
     block: &mut TerrainTileUniforms,
     coords: WorldTileCoords,
-    style: &Style,
+    (style, lighting): (&Style, crate::celestial::CelestialLighting),
     view: &ViewState,
 ) {
     globe::set_uniforms(block, coords, view);
+    [block.daylight, block.twilight] = lighting.daylight_uniforms();
     let color = super::background_clear_color(style);
     block.surface_color = [
         color.r as f32,
