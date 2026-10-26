@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["MapContext"]};
+window.SIDEBAR_ITEMS = {"mod":["ground"],"struct":["MapContext"]};
