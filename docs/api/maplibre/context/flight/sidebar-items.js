@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["FlightOutcome"],"fn":["camera_flight_system","destination_elevation","finish"],"struct":["CameraFlights","Flight","FlightId"]};

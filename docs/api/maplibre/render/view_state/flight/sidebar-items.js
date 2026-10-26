@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["EASING"],"enum":["Course","FlightCurve","Span"],"fn":["nearest_turn"],"struct":["FlightPath","FlyOptions","Stop"]};

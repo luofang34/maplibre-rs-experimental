@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["center_elevation_system","center_ground","center_target_system","globe_orbits_center","ground_center","past_mercator_rows"]};
+window.SIDEBAR_ITEMS = {"fn":["center_elevation_system","center_ground","center_target_system","globe_orbits_center","ground_at_mercator","ground_center","ground_under","past_mercator_rows"]};

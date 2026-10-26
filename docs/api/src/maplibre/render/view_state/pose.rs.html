@@ -53,252 +53,270 @@
 <a href=#53 id=53 data-nosnippet>53</a>}
 <a href=#54 id=54 data-nosnippet>54</a>
 <a href=#55 id=55 data-nosnippet>55</a><span class="doccomment">/// The center, zoom and angles a jump resolves to.
-<a href=#56 id=56 data-nosnippet>56</a></span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">struct </span>ResolvedJump {
-<a href=#57 id=57 data-nosnippet>57</a>    <span class="kw">pub </span>center: LatLon,
-<a href=#58 id=58 data-nosnippet>58</a>    <span class="kw">pub </span>zoom: Zoom,
-<a href=#59 id=59 data-nosnippet>59</a>    <span class="kw">pub </span>bearing: Deg&lt;f64&gt;,
-<a href=#60 id=60 data-nosnippet>60</a>    <span class="kw">pub </span>pitch: Deg&lt;f64&gt;,
-<a href=#61 id=61 data-nosnippet>61</a>    <span class="kw">pub </span>roll: Deg&lt;f64&gt;,
-<a href=#62 id=62 data-nosnippet>62</a>}
-<a href=#63 id=63 data-nosnippet>63</a>
-<a href=#64 id=64 data-nosnippet>64</a><span class="doccomment">/// Bound on the center search, as GL JS sets it; the search converges in about five passes.
-<a href=#65 id=65 data-nosnippet>65</a></span><span class="kw">const </span>MAX_CENTER_ITERATIONS: usize = <span class="number">10</span>;
-<a href=#66 id=66 data-nosnippet>66</a><span class="doccomment">/// Distance error in metres below which the center search stops.
-<a href=#67 id=67 data-nosnippet>67</a></span><span class="kw">const </span>CENTER_TOLERANCE_METERS: f64 = <span class="number">1e-12</span>;
-<a href=#68 id=68 data-nosnippet>68</a>
-<a href=#69 id=69 data-nosnippet>69</a><span class="doccomment">/// How many heights ahead an eye's center may lie; beyond that the ground near the horizon
-<a href=#70 id=70 data-nosnippet>70</a>/// would sling the center and the zoom by kilometres per degree of head pitch, and a glance
-<a href=#71 id=71 data-nosnippet>71</a>/// up would request tiles at a wildly different zoom.
-<a href=#72 id=72 data-nosnippet>72</a></span><span class="kw">const </span>EYE_CENTER_REACH_HEIGHTS: f64 = <span class="number">5.0</span>;
-<a href=#73 id=73 data-nosnippet>73</a><span class="doccomment">/// The reach in metres is kept within these bounds: near the ground the center stays far
-<a href=#74 id=74 data-nosnippet>74</a>/// enough ahead that the covering reaches the horizon, and from high up it stays near enough
-<a href=#75 id=75 data-nosnippet>75</a>/// that the center's latitude remains on the map.
-<a href=#76 id=76 data-nosnippet>76</a></span><span class="kw">const </span>MIN_EYE_CENTER_REACH_METERS: f64 = <span class="number">10_000.0</span>;
-<a href=#77 id=77 data-nosnippet>77</a><span class="kw">const </span>MAX_EYE_CENTER_REACH_METERS: f64 = <span class="number">50_000.0</span>;
-<a href=#78 id=78 data-nosnippet>78</a>
-<a href=#79 id=79 data-nosnippet>79</a><span class="kw">impl </span>ViewState {
-<a href=#80 id=80 data-nosnippet>80</a>    <span class="doccomment">/// Places the camera at `pose`.
-<a href=#81 id=81 data-nosnippet>81</a>    ///
-<a href=#82 id=82 data-nosnippet>82</a>    /// The map center moves to where the view ray meets the center elevation and the zoom
-<a href=#83 id=83 data-nosnippet>83</a>    /// follows the camera's distance to it, so a pose beyond the pitch limit is clamped to it.
-<a href=#84 id=84 data-nosnippet>84</a>    </span><span class="kw">pub fn </span>set_camera_pose(<span class="kw-2">&amp;mut </span><span class="self">self</span>, pose: CameraPose) {
-<a href=#85 id=85 data-nosnippet>85</a>        <span class="kw">let </span>pitch = Rad::from(pose.pitch).<span class="number">0</span>;
-<a href=#86 id=86 data-nosnippet>86</a>        <span class="kw">let </span>(distance_meters, elevation) =
-<a href=#87 id=87 data-nosnippet>87</a>            distance_to_center_from_altitude(pose.altitude_meters, <span class="self">self</span>.center_elevation(), pitch);
-<a href=#88 id=88 data-nosnippet>88</a>        <span class="self">self</span>.place_camera(pose, distance_meters, elevation);
-<a href=#89 id=89 data-nosnippet>89</a>    }
-<a href=#90 id=90 data-nosnippet>90</a>
-<a href=#91 id=91 data-nosnippet>91</a>    <span class="doccomment">/// Places a host's eye at `pose`. The center is where the gaze meets the anchor elevation,
-<a href=#92 id=92 data-nosnippet>92</a>    /// at most `EYE_CENTER_REACH_HEIGHTS` heights ahead; a gaze nearer the horizon than that
-<a href=#93 id=93 data-nosnippet>93</a>    /// keeps the center at that reach and leaves the center elevation alone, so a head
-<a href=#94 id=94 data-nosnippet>94</a>    /// turning up to the horizon moves the center smoothly instead of snapping it to a fixed
-<a href=#95 id=95 data-nosnippet>95</a>    /// distance in the air.
-<a href=#96 id=96 data-nosnippet>96</a>    </span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>set_eye_pose(<span class="kw-2">&amp;mut </span><span class="self">self</span>, pose: CameraPose, anchor_elevation: f64) {
-<a href=#97 id=97 data-nosnippet>97</a>        <span class="kw">let </span>pitch = Rad::from(pose.pitch).<span class="number">0</span>;
-<a href=#98 id=98 data-nosnippet>98</a>        <span class="kw">let </span>dz = -pitch.cos();
-<a href=#99 id=99 data-nosnippet>99</a>        <span class="kw">let </span>elevation = anchor_elevation;
-<a href=#100 id=100 data-nosnippet>100</a>        <span class="comment">// Sampled terrain at the gaze center must not feed back into the next frame's
-<a href=#101 id=101 data-nosnippet>101</a>        // center search: steep slopes can make a stationary eye oscillate between LODs.
-<a href=#102 id=102 data-nosnippet>102</a>        </span><span class="kw">let </span>above_ground = pose.altitude_meters - anchor_elevation;
-<a href=#103 id=103 data-nosnippet>103</a>        <span class="kw">let </span>reach = (EYE_CENTER_REACH_HEIGHTS * above_ground.abs())
-<a href=#104 id=104 data-nosnippet>104</a>            .clamp(MIN_EYE_CENTER_REACH_METERS, MAX_EYE_CENTER_REACH_METERS);
-<a href=#105 id=105 data-nosnippet>105</a>        <span class="kw">let </span>distance_meters = <span class="kw">if </span>dz * above_ground &lt; <span class="number">0.0 </span>{
-<a href=#106 id=106 data-nosnippet>106</a>            (-above_ground / dz).min(reach)
-<a href=#107 id=107 data-nosnippet>107</a>        } <span class="kw">else </span>{
-<a href=#108 id=108 data-nosnippet>108</a>            reach
-<a href=#109 id=109 data-nosnippet>109</a>        };
-<a href=#110 id=110 data-nosnippet>110</a>        <span class="self">self</span>.place_camera(pose, distance_meters, elevation);
-<a href=#111 id=111 data-nosnippet>111</a>    }
-<a href=#112 id=112 data-nosnippet>112</a>
-<a href=#113 id=113 data-nosnippet>113</a>    <span class="kw">fn </span>place_camera(<span class="kw-2">&amp;mut </span><span class="self">self</span>, pose: CameraPose, distance_meters: f64, elevation: f64) {
-<a href=#114 id=114 data-nosnippet>114</a>        <span class="kw">let </span>pitch = Rad::from(pose.pitch).<span class="number">0</span>;
-<a href=#115 id=115 data-nosnippet>115</a>        <span class="kw">let </span>bearing = Rad::from(pose.bearing).<span class="number">0</span>;
-<a href=#116 id=116 data-nosnippet>116</a>        <span class="kw">let </span>(dx, dy, <span class="kw">_</span>) = camera_direction(pitch, bearing);
-<a href=#117 id=117 data-nosnippet>117</a>        <span class="kw">let </span>camera = mercator_from_lat_lon(pose.position);
-<a href=#118 id=118 data-nosnippet>118</a>        <span class="kw">let </span>circumference = <span class="self">self</span>.body().circumference_meters();
-<a href=#119 id=119 data-nosnippet>119</a>        <span class="comment">// The Mercator scale changes with latitude, and the center's latitude is the one that
-<a href=#120 id=120 data-nosnippet>120</a>        // matters; starting from the camera's scale, every pass re-evaluates it at the center
-<a href=#121 id=121 data-nosnippet>121</a>        // found so far.
-<a href=#122 id=122 data-nosnippet>122</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>meters_per_unit = circumference * latitude_at_mercator_y(camera.y).cos();
-<a href=#123 id=123 data-nosnippet>123</a>        <span class="kw">let </span><span class="kw-2">mut </span>center = camera;
-<a href=#124 id=124 data-nosnippet>124</a>        <span class="kw">let </span><span class="kw-2">mut </span>distance_units = distance_meters / meters_per_unit;
-<a href=#125 id=125 data-nosnippet>125</a>        <span class="kw">for _ in </span><span class="number">0</span>..MAX_CENTER_ITERATIONS {
-<a href=#126 id=126 data-nosnippet>126</a>            distance_units = distance_meters / meters_per_unit;
-<a href=#127 id=127 data-nosnippet>127</a>            center = Point2::new(
-<a href=#128 id=128 data-nosnippet>128</a>                camera.x + dx * distance_units,
-<a href=#129 id=129 data-nosnippet>129</a>                camera.y + dy * distance_units,
-<a href=#130 id=130 data-nosnippet>130</a>            );
-<a href=#131 id=131 data-nosnippet>131</a>            meters_per_unit = circumference * latitude_at_mercator_y(center.y).cos();
-<a href=#132 id=132 data-nosnippet>132</a>            <span class="kw">if </span>(distance_meters - distance_units * meters_per_unit).abs() &lt;= CENTER_TOLERANCE_METERS
-<a href=#133 id=133 data-nosnippet>133</a>            {
-<a href=#134 id=134 data-nosnippet>134</a>                <span class="kw">break</span>;
-<a href=#135 id=135 data-nosnippet>135</a>            }
-<a href=#136 id=136 data-nosnippet>136</a>        }
-<a href=#137 id=137 data-nosnippet>137</a>        <span class="kw">let </span>zoom = <span class="self">self</span>.zoom_for_center_distance_units(distance_units);
-<a href=#138 id=138 data-nosnippet>138</a>        <span class="self">self</span>.set_center_elevation(elevation);
-<a href=#139 id=139 data-nosnippet>139</a>        <span class="self">self</span>.set_center_and_angles(
-<a href=#140 id=140 data-nosnippet>140</a>            lat_lon_at_mercator(center),
-<a href=#141 id=141 data-nosnippet>141</a>            zoom,
-<a href=#142 id=142 data-nosnippet>142</a>            pose.bearing,
-<a href=#143 id=143 data-nosnippet>143</a>            pose.pitch,
-<a href=#144 id=144 data-nosnippet>144</a>            pose.roll,
-<a href=#145 id=145 data-nosnippet>145</a>        );
-<a href=#146 id=146 data-nosnippet>146</a>    }
-<a href=#147 id=147 data-nosnippet>147</a>
-<a href=#148 id=148 data-nosnippet>148</a>    <span class="doccomment">/// The zoom at which the camera sits `distance_meters` from a center at `center`, the
-<a href=#149 id=149 data-nosnippet>149</a>    /// definition a pose and an external eye share.
-<a href=#150 id=150 data-nosnippet>150</a>    </span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>zoom_for_center_distance(<span class="kw-2">&amp;</span><span class="self">self</span>, distance_meters: f64, center: LatLon) -&gt; Zoom {
-<a href=#151 id=151 data-nosnippet>151</a>        <span class="kw">let </span>meters_per_unit =
-<a href=#152 id=152 data-nosnippet>152</a>            <span class="self">self</span>.body().circumference_meters() * center.latitude.to_radians().cos();
-<a href=#153 id=153 data-nosnippet>153</a>        <span class="self">self</span>.zoom_for_center_distance_units(distance_meters / meters_per_unit)
-<a href=#154 id=154 data-nosnippet>154</a>    }
-<a href=#155 id=155 data-nosnippet>155</a>
-<a href=#156 id=156 data-nosnippet>156</a>    <span class="doccomment">/// The zoom at which the camera sits `distance_units` Mercator units from the center.
-<a href=#157 id=157 data-nosnippet>157</a>    </span><span class="kw">fn </span>zoom_for_center_distance_units(<span class="kw-2">&amp;</span><span class="self">self</span>, distance_units: f64) -&gt; Zoom {
-<a href=#158 id=158 data-nosnippet>158</a>        Zoom::new(
-<a href=#159 id=159 data-nosnippet>159</a>            (<span class="self">self</span>.height()
-<a href=#160 id=160 data-nosnippet>160</a>                / <span class="number">2.0
-<a href=#161 id=161 data-nosnippet>161</a>                </span>/ (<span class="self">self</span>.field_of_view().<span class="number">0 </span>/ <span class="number">2.0</span>).tan()
-<a href=#162 id=162 data-nosnippet>162</a>                / distance_units
-<a href=#163 id=163 data-nosnippet>163</a>                / TILE_SIZE)
-<a href=#164 id=164 data-nosnippet>164</a>                .log2(),
-<a href=#165 id=165 data-nosnippet>165</a>        )
-<a href=#166 id=166 data-nosnippet>166</a>    }
-<a href=#167 id=167 data-nosnippet>167</a>
-<a href=#168 id=168 data-nosnippet>168</a>    <span class="doccomment">/// Moves the map center and the camera angles, leaving the center elevation as it is.
-<a href=#169 id=169 data-nosnippet>169</a>    </span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>set_center_and_angles(
-<a href=#170 id=170 data-nosnippet>170</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-<a href=#171 id=171 data-nosnippet>171</a>        center: LatLon,
-<a href=#172 id=172 data-nosnippet>172</a>        zoom: Zoom,
-<a href=#173 id=173 data-nosnippet>173</a>        bearing: Deg&lt;f64&gt;,
-<a href=#174 id=174 data-nosnippet>174</a>        pitch: Deg&lt;f64&gt;,
-<a href=#175 id=175 data-nosnippet>175</a>        roll: Deg&lt;f64&gt;,
-<a href=#176 id=176 data-nosnippet>176</a>    ) {
-<a href=#177 id=177 data-nosnippet>177</a>        <span class="kw">let </span>world_size = TILE_SIZE * <span class="number">2f64</span>.powf(zoom.value());
-<a href=#178 id=178 data-nosnippet>178</a>        <span class="kw">let </span>center = mercator_from_lat_lon(center);
-<a href=#179 id=179 data-nosnippet>179</a>        <span class="self">self</span>.update_zoom(zoom);
-<a href=#180 id=180 data-nosnippet>180</a>        <span class="kw">let </span>camera = <span class="self">self</span>.camera_mut();
-<a href=#181 id=181 data-nosnippet>181</a>        camera.move_to(Point2::new(center.x * world_size, center.y * world_size));
-<a href=#182 id=182 data-nosnippet>182</a>        camera.set_bearing(bearing);
-<a href=#183 id=183 data-nosnippet>183</a>        camera.set_pitch(pitch);
-<a href=#184 id=184 data-nosnippet>184</a>        camera.set_roll(roll);
-<a href=#185 id=185 data-nosnippet>185</a>    }
-<a href=#186 id=186 data-nosnippet>186</a>
-<a href=#187 id=187 data-nosnippet>187</a>    <span class="doccomment">/// Moves the map at once, as GL JS `jumpTo`: to the center, zoom and angles given, with
-<a href=#188 id=188 data-nosnippet>188</a>    /// the others kept as they are. A zoom that is not a number is left out, as GL JS
-<a href=#189 id=189 data-nosnippet>189</a>    /// constrains a jump.
-<a href=#190 id=190 data-nosnippet>190</a>    ///
-<a href=#191 id=191 data-nosnippet>191</a>    /// Constrained navigation keeps the center's latitude within the Mercator limit; free-globe
-<a href=#192 id=192 data-nosnippet>192</a>    /// navigation places the pose [`Self::globe_pose_for`] gives. The center rests at the
-<a href=#193 id=193 data-nosnippet>193</a>    /// height [`Self::jump_elevation`] gives, until terrain holding it stands it on the ground
-<a href=#194 id=194 data-nosnippet>194</a>    /// under it, as [`crate::context::MapContext::jump_to`] does at once.
-<a href=#195 id=195 data-nosnippet>195</a>    </span><span class="kw">pub fn </span>jump_to(<span class="kw-2">&amp;mut </span><span class="self">self</span>, options: CameraOptions) -&gt; <span class="prelude-ty">Result</span>&lt;(), NavigationError&gt; {
-<a href=#196 id=196 data-nosnippet>196</a>        <span class="kw">if </span><span class="self">self</span>.navigation_mode() == NavigationMode::FreeGlobe {
-<a href=#197 id=197 data-nosnippet>197</a>            <span class="kw">return </span><span class="self">self</span>.set_globe_pose(<span class="self">self</span>.globe_pose_for(options));
-<a href=#198 id=198 data-nosnippet>198</a>        }
-<a href=#199 id=199 data-nosnippet>199</a>        <span class="kw">let </span>jump = <span class="self">self</span>.resolve_jump(options);
-<a href=#200 id=200 data-nosnippet>200</a>        <span class="kw">let </span>center = LatLon::new(
-<a href=#201 id=201 data-nosnippet>201</a>            jump.center
-<a href=#202 id=202 data-nosnippet>202</a>                .latitude
-<a href=#203 id=203 data-nosnippet>203</a>                .clamp(-MERCATOR_LATITUDE_LIMIT, MERCATOR_LATITUDE_LIMIT),
-<a href=#204 id=204 data-nosnippet>204</a>            jump.center.longitude,
-<a href=#205 id=205 data-nosnippet>205</a>        );
-<a href=#206 id=206 data-nosnippet>206</a>        <span class="self">self</span>.set_center_and_angles(center, jump.zoom, jump.bearing, jump.pitch, jump.roll);
-<a href=#207 id=207 data-nosnippet>207</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(elevation) = <span class="self">self</span>.jump_elevation(options) {
-<a href=#208 id=208 data-nosnippet>208</a>            <span class="self">self</span>.rest_center_at(elevation);
-<a href=#209 id=209 data-nosnippet>209</a>        }
-<a href=#210 id=210 data-nosnippet>210</a>        <span class="prelude-val">Ok</span>(())
-<a href=#211 id=211 data-nosnippet>211</a>    }
-<a href=#212 id=212 data-nosnippet>212</a>
-<a href=#213 id=213 data-nosnippet>213</a>    <span class="doccomment">/// The height a jump to `options` rests its center at, `None` keeping the current one:
-<a href=#214 id=214 data-nosnippet>214</a>    /// the elevation given, or, for a center that moves without one, sea level where terrain
-<a href=#215 id=215 data-nosnippet>215</a>    /// holds it, as GL JS reads ground it has not loaded, and the center altitude otherwise.
-<a href=#216 id=216 data-nosnippet>216</a>    /// A new center never inherits the ground of the one it left.
-<a href=#217 id=217 data-nosnippet>217</a>    </span><span class="kw">pub fn </span>jump_elevation(<span class="kw-2">&amp;</span><span class="self">self</span>, options: CameraOptions) -&gt; <span class="prelude-ty">Option</span>&lt;f64&gt; {
-<a href=#218 id=218 data-nosnippet>218</a>        options
-<a href=#219 id=219 data-nosnippet>219</a>            .elevation
-<a href=#220 id=220 data-nosnippet>220</a>            .filter(|meters| meters.is_finite())
-<a href=#221 id=221 data-nosnippet>221</a>            .or_else(|| {
-<a href=#222 id=222 data-nosnippet>222</a>                options.center.map(|<span class="kw">_</span>| {
-<a href=#223 id=223 data-nosnippet>223</a>                    <span class="kw">if </span><span class="self">self</span>.center_held_by_terrain() {
-<a href=#224 id=224 data-nosnippet>224</a>                        <span class="number">0.0
-<a href=#225 id=225 data-nosnippet>225</a>                    </span>} <span class="kw">else </span>{
-<a href=#226 id=226 data-nosnippet>226</a>                        <span class="self">self</span>.center_altitude()
-<a href=#227 id=227 data-nosnippet>227</a>                    }
-<a href=#228 id=228 data-nosnippet>228</a>                })
-<a href=#229 id=229 data-nosnippet>229</a>            })
-<a href=#230 id=230 data-nosnippet>230</a>    }
-<a href=#231 id=231 data-nosnippet>231</a>
-<a href=#232 id=232 data-nosnippet>232</a>    <span class="doccomment">/// The center, zoom and angles a jump to `options` shows, the camera's own standing in for
-<a href=#233 id=233 data-nosnippet>233</a>    /// those left out.
-<a href=#234 id=234 data-nosnippet>234</a>    </span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>resolve_jump(<span class="kw-2">&amp;</span><span class="self">self</span>, options: CameraOptions) -&gt; ResolvedJump {
-<a href=#235 id=235 data-nosnippet>235</a>        <span class="kw">let </span>camera = <span class="self">self</span>.camera();
-<a href=#236 id=236 data-nosnippet>236</a>        ResolvedJump {
-<a href=#237 id=237 data-nosnippet>237</a>            <span class="comment">// A free-globe camera may look past the Mercator world the flat center stops at.
-<a href=#238 id=238 data-nosnippet>238</a>            </span>center: options.center.unwrap_or_else(|| {
-<a href=#239 id=239 data-nosnippet>239</a>                <span class="self">self</span>.pose_view()
-<a href=#240 id=240 data-nosnippet>240</a>                    .map_or_else(|| <span class="self">self</span>.center_lat_lon(), |view| view.center)
-<a href=#241 id=241 data-nosnippet>241</a>            }),
-<a href=#242 id=242 data-nosnippet>242</a>            zoom: options
-<a href=#243 id=243 data-nosnippet>243</a>                .zoom
-<a href=#244 id=244 data-nosnippet>244</a>                .filter(|zoom| zoom.is_finite())
-<a href=#245 id=245 data-nosnippet>245</a>                .map_or_else(|| <span class="self">self</span>.zoom(), Zoom::new),
-<a href=#246 id=246 data-nosnippet>246</a>            bearing: options
-<a href=#247 id=247 data-nosnippet>247</a>                .bearing
-<a href=#248 id=248 data-nosnippet>248</a>                .unwrap_or_else(|| camera.get_bearing().into()),
-<a href=#249 id=249 data-nosnippet>249</a>            pitch: options.pitch.unwrap_or_else(|| camera.get_pitch().into()),
-<a href=#250 id=250 data-nosnippet>250</a>            roll: options.roll.unwrap_or_else(|| camera.get_roll().into()),
-<a href=#251 id=251 data-nosnippet>251</a>        }
-<a href=#252 id=252 data-nosnippet>252</a>    }
-<a href=#253 id=253 data-nosnippet>253</a>
-<a href=#254 id=254 data-nosnippet>254</a>    <span class="doccomment">/// The map center in latitude and longitude.
-<a href=#255 id=255 data-nosnippet>255</a>    </span><span class="kw">pub fn </span>center_lat_lon(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; LatLon {
-<a href=#256 id=256 data-nosnippet>256</a>        <span class="kw">let </span>world_size = TILE_SIZE * <span class="number">2f64</span>.powf(<span class="self">self</span>.zoom().value());
-<a href=#257 id=257 data-nosnippet>257</a>        <span class="kw">let </span>position = <span class="self">self</span>.camera().position();
-<a href=#258 id=258 data-nosnippet>258</a>        lat_lon_at_mercator(Point2::new(
-<a href=#259 id=259 data-nosnippet>259</a>            position.x / world_size,
-<a href=#260 id=260 data-nosnippet>260</a>            position.y / world_size,
-<a href=#261 id=261 data-nosnippet>261</a>        ))
-<a href=#262 id=262 data-nosnippet>262</a>    }
-<a href=#263 id=263 data-nosnippet>263</a>
-<a href=#264 id=264 data-nosnippet>264</a>    <span class="doccomment">/// Where the camera stands and where it looks.
-<a href=#265 id=265 data-nosnippet>265</a>    </span><span class="kw">pub fn </span>camera_pose(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; CameraPose {
-<a href=#266 id=266 data-nosnippet>266</a>        <span class="kw">let </span>(position, altitude_meters) = camera_ground_position(<span class="self">self</span>);
-<a href=#267 id=267 data-nosnippet>267</a>        <span class="kw">let </span>world_size = TILE_SIZE * <span class="number">2f64</span>.powf(<span class="self">self</span>.zoom().value());
-<a href=#268 id=268 data-nosnippet>268</a>        <span class="kw">let </span>camera = <span class="self">self</span>.camera();
-<a href=#269 id=269 data-nosnippet>269</a>        CameraPose {
-<a href=#270 id=270 data-nosnippet>270</a>            position: lat_lon_at_mercator(Point2::new(
-<a href=#271 id=271 data-nosnippet>271</a>                position.x / world_size,
-<a href=#272 id=272 data-nosnippet>272</a>                position.y / world_size,
-<a href=#273 id=273 data-nosnippet>273</a>            )),
-<a href=#274 id=274 data-nosnippet>274</a>            altitude_meters,
-<a href=#275 id=275 data-nosnippet>275</a>            bearing: camera.get_bearing().into(),
-<a href=#276 id=276 data-nosnippet>276</a>            pitch: camera.get_pitch().into(),
-<a href=#277 id=277 data-nosnippet>277</a>            roll: camera.get_roll().into(),
-<a href=#278 id=278 data-nosnippet>278</a>        }
-<a href=#279 id=279 data-nosnippet>279</a>    }
-<a href=#280 id=280 data-nosnippet>280</a>}
+<a href=#56 id=56 data-nosnippet>56</a></span><span class="attr">#[derive(Clone, Copy, Debug)]
+<a href=#57 id=57 data-nosnippet>57</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>ResolvedJump {
+<a href=#58 id=58 data-nosnippet>58</a>    <span class="kw">pub </span>center: LatLon,
+<a href=#59 id=59 data-nosnippet>59</a>    <span class="kw">pub </span>zoom: Zoom,
+<a href=#60 id=60 data-nosnippet>60</a>    <span class="kw">pub </span>bearing: Deg&lt;f64&gt;,
+<a href=#61 id=61 data-nosnippet>61</a>    <span class="kw">pub </span>pitch: Deg&lt;f64&gt;,
+<a href=#62 id=62 data-nosnippet>62</a>    <span class="kw">pub </span>roll: Deg&lt;f64&gt;,
+<a href=#63 id=63 data-nosnippet>63</a>}
+<a href=#64 id=64 data-nosnippet>64</a>
+<a href=#65 id=65 data-nosnippet>65</a><span class="kw">impl </span>ResolvedJump {
+<a href=#66 id=66 data-nosnippet>66</a>    <span class="doccomment">/// Whether two cameras show the same, but for rounding.
+<a href=#67 id=67 data-nosnippet>67</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>same_as(<span class="kw-2">&amp;</span><span class="self">self</span>, other: <span class="kw-2">&amp;</span><span class="self">Self</span>) -&gt; bool {
+<a href=#68 id=68 data-nosnippet>68</a>        <span class="kw">const </span>TOLERANCE: f64 = <span class="number">1e-9</span>;
+<a href=#69 id=69 data-nosnippet>69</a>        [
+<a href=#70 id=70 data-nosnippet>70</a>            <span class="self">self</span>.center.latitude - other.center.latitude,
+<a href=#71 id=71 data-nosnippet>71</a>            <span class="self">self</span>.center.longitude - other.center.longitude,
+<a href=#72 id=72 data-nosnippet>72</a>            <span class="self">self</span>.zoom.value() - other.zoom.value(),
+<a href=#73 id=73 data-nosnippet>73</a>            <span class="self">self</span>.bearing.<span class="number">0 </span>- other.bearing.<span class="number">0</span>,
+<a href=#74 id=74 data-nosnippet>74</a>            <span class="self">self</span>.pitch.<span class="number">0 </span>- other.pitch.<span class="number">0</span>,
+<a href=#75 id=75 data-nosnippet>75</a>            <span class="self">self</span>.roll.<span class="number">0 </span>- other.roll.<span class="number">0</span>,
+<a href=#76 id=76 data-nosnippet>76</a>        ]
+<a href=#77 id=77 data-nosnippet>77</a>        .iter()
+<a href=#78 id=78 data-nosnippet>78</a>        .all(|difference| difference.abs() &lt;= TOLERANCE)
+<a href=#79 id=79 data-nosnippet>79</a>    }
+<a href=#80 id=80 data-nosnippet>80</a>}
+<a href=#81 id=81 data-nosnippet>81</a>
+<a href=#82 id=82 data-nosnippet>82</a><span class="doccomment">/// Bound on the center search, as GL JS sets it; the search converges in about five passes.
+<a href=#83 id=83 data-nosnippet>83</a></span><span class="kw">const </span>MAX_CENTER_ITERATIONS: usize = <span class="number">10</span>;
+<a href=#84 id=84 data-nosnippet>84</a><span class="doccomment">/// Distance error in metres below which the center search stops.
+<a href=#85 id=85 data-nosnippet>85</a></span><span class="kw">const </span>CENTER_TOLERANCE_METERS: f64 = <span class="number">1e-12</span>;
+<a href=#86 id=86 data-nosnippet>86</a>
+<a href=#87 id=87 data-nosnippet>87</a><span class="doccomment">/// How many heights ahead an eye's center may lie; beyond that the ground near the horizon
+<a href=#88 id=88 data-nosnippet>88</a>/// would sling the center and the zoom by kilometres per degree of head pitch, and a glance
+<a href=#89 id=89 data-nosnippet>89</a>/// up would request tiles at a wildly different zoom.
+<a href=#90 id=90 data-nosnippet>90</a></span><span class="kw">const </span>EYE_CENTER_REACH_HEIGHTS: f64 = <span class="number">5.0</span>;
+<a href=#91 id=91 data-nosnippet>91</a><span class="doccomment">/// The reach in metres is kept within these bounds: near the ground the center stays far
+<a href=#92 id=92 data-nosnippet>92</a>/// enough ahead that the covering reaches the horizon, and from high up it stays near enough
+<a href=#93 id=93 data-nosnippet>93</a>/// that the center's latitude remains on the map.
+<a href=#94 id=94 data-nosnippet>94</a></span><span class="kw">const </span>MIN_EYE_CENTER_REACH_METERS: f64 = <span class="number">10_000.0</span>;
+<a href=#95 id=95 data-nosnippet>95</a><span class="kw">const </span>MAX_EYE_CENTER_REACH_METERS: f64 = <span class="number">50_000.0</span>;
+<a href=#96 id=96 data-nosnippet>96</a>
+<a href=#97 id=97 data-nosnippet>97</a><span class="kw">impl </span>ViewState {
+<a href=#98 id=98 data-nosnippet>98</a>    <span class="doccomment">/// Places the camera at `pose`.
+<a href=#99 id=99 data-nosnippet>99</a>    ///
+<a href=#100 id=100 data-nosnippet>100</a>    /// The map center moves to where the view ray meets the center elevation and the zoom
+<a href=#101 id=101 data-nosnippet>101</a>    /// follows the camera's distance to it, so a pose beyond the pitch limit is clamped to it.
+<a href=#102 id=102 data-nosnippet>102</a>    </span><span class="kw">pub fn </span>set_camera_pose(<span class="kw-2">&amp;mut </span><span class="self">self</span>, pose: CameraPose) {
+<a href=#103 id=103 data-nosnippet>103</a>        <span class="kw">let </span>pitch = Rad::from(pose.pitch).<span class="number">0</span>;
+<a href=#104 id=104 data-nosnippet>104</a>        <span class="kw">let </span>(distance_meters, elevation) =
+<a href=#105 id=105 data-nosnippet>105</a>            distance_to_center_from_altitude(pose.altitude_meters, <span class="self">self</span>.center_elevation(), pitch);
+<a href=#106 id=106 data-nosnippet>106</a>        <span class="self">self</span>.place_camera(pose, distance_meters, elevation);
+<a href=#107 id=107 data-nosnippet>107</a>    }
+<a href=#108 id=108 data-nosnippet>108</a>
+<a href=#109 id=109 data-nosnippet>109</a>    <span class="doccomment">/// Places a host's eye at `pose`. The center is where the gaze meets the anchor elevation,
+<a href=#110 id=110 data-nosnippet>110</a>    /// at most `EYE_CENTER_REACH_HEIGHTS` heights ahead; a gaze nearer the horizon than that
+<a href=#111 id=111 data-nosnippet>111</a>    /// keeps the center at that reach and leaves the center elevation alone, so a head
+<a href=#112 id=112 data-nosnippet>112</a>    /// turning up to the horizon moves the center smoothly instead of snapping it to a fixed
+<a href=#113 id=113 data-nosnippet>113</a>    /// distance in the air.
+<a href=#114 id=114 data-nosnippet>114</a>    </span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>set_eye_pose(<span class="kw-2">&amp;mut </span><span class="self">self</span>, pose: CameraPose, anchor_elevation: f64) {
+<a href=#115 id=115 data-nosnippet>115</a>        <span class="kw">let </span>pitch = Rad::from(pose.pitch).<span class="number">0</span>;
+<a href=#116 id=116 data-nosnippet>116</a>        <span class="kw">let </span>dz = -pitch.cos();
+<a href=#117 id=117 data-nosnippet>117</a>        <span class="kw">let </span>elevation = anchor_elevation;
+<a href=#118 id=118 data-nosnippet>118</a>        <span class="comment">// Sampled terrain at the gaze center must not feed back into the next frame's
+<a href=#119 id=119 data-nosnippet>119</a>        // center search: steep slopes can make a stationary eye oscillate between LODs.
+<a href=#120 id=120 data-nosnippet>120</a>        </span><span class="kw">let </span>above_ground = pose.altitude_meters - anchor_elevation;
+<a href=#121 id=121 data-nosnippet>121</a>        <span class="kw">let </span>reach = (EYE_CENTER_REACH_HEIGHTS * above_ground.abs())
+<a href=#122 id=122 data-nosnippet>122</a>            .clamp(MIN_EYE_CENTER_REACH_METERS, MAX_EYE_CENTER_REACH_METERS);
+<a href=#123 id=123 data-nosnippet>123</a>        <span class="kw">let </span>distance_meters = <span class="kw">if </span>dz * above_ground &lt; <span class="number">0.0 </span>{
+<a href=#124 id=124 data-nosnippet>124</a>            (-above_ground / dz).min(reach)
+<a href=#125 id=125 data-nosnippet>125</a>        } <span class="kw">else </span>{
+<a href=#126 id=126 data-nosnippet>126</a>            reach
+<a href=#127 id=127 data-nosnippet>127</a>        };
+<a href=#128 id=128 data-nosnippet>128</a>        <span class="self">self</span>.place_camera(pose, distance_meters, elevation);
+<a href=#129 id=129 data-nosnippet>129</a>    }
+<a href=#130 id=130 data-nosnippet>130</a>
+<a href=#131 id=131 data-nosnippet>131</a>    <span class="kw">fn </span>place_camera(<span class="kw-2">&amp;mut </span><span class="self">self</span>, pose: CameraPose, distance_meters: f64, elevation: f64) {
+<a href=#132 id=132 data-nosnippet>132</a>        <span class="kw">let </span>pitch = Rad::from(pose.pitch).<span class="number">0</span>;
+<a href=#133 id=133 data-nosnippet>133</a>        <span class="kw">let </span>bearing = Rad::from(pose.bearing).<span class="number">0</span>;
+<a href=#134 id=134 data-nosnippet>134</a>        <span class="kw">let </span>(dx, dy, <span class="kw">_</span>) = camera_direction(pitch, bearing);
+<a href=#135 id=135 data-nosnippet>135</a>        <span class="kw">let </span>camera = mercator_from_lat_lon(pose.position);
+<a href=#136 id=136 data-nosnippet>136</a>        <span class="kw">let </span>circumference = <span class="self">self</span>.body().circumference_meters();
+<a href=#137 id=137 data-nosnippet>137</a>        <span class="comment">// The Mercator scale changes with latitude, and the center's latitude is the one that
+<a href=#138 id=138 data-nosnippet>138</a>        // matters; starting from the camera's scale, every pass re-evaluates it at the center
+<a href=#139 id=139 data-nosnippet>139</a>        // found so far.
+<a href=#140 id=140 data-nosnippet>140</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>meters_per_unit = circumference * latitude_at_mercator_y(camera.y).cos();
+<a href=#141 id=141 data-nosnippet>141</a>        <span class="kw">let </span><span class="kw-2">mut </span>center = camera;
+<a href=#142 id=142 data-nosnippet>142</a>        <span class="kw">let </span><span class="kw-2">mut </span>distance_units = distance_meters / meters_per_unit;
+<a href=#143 id=143 data-nosnippet>143</a>        <span class="kw">for _ in </span><span class="number">0</span>..MAX_CENTER_ITERATIONS {
+<a href=#144 id=144 data-nosnippet>144</a>            distance_units = distance_meters / meters_per_unit;
+<a href=#145 id=145 data-nosnippet>145</a>            center = Point2::new(
+<a href=#146 id=146 data-nosnippet>146</a>                camera.x + dx * distance_units,
+<a href=#147 id=147 data-nosnippet>147</a>                camera.y + dy * distance_units,
+<a href=#148 id=148 data-nosnippet>148</a>            );
+<a href=#149 id=149 data-nosnippet>149</a>            meters_per_unit = circumference * latitude_at_mercator_y(center.y).cos();
+<a href=#150 id=150 data-nosnippet>150</a>            <span class="kw">if </span>(distance_meters - distance_units * meters_per_unit).abs() &lt;= CENTER_TOLERANCE_METERS
+<a href=#151 id=151 data-nosnippet>151</a>            {
+<a href=#152 id=152 data-nosnippet>152</a>                <span class="kw">break</span>;
+<a href=#153 id=153 data-nosnippet>153</a>            }
+<a href=#154 id=154 data-nosnippet>154</a>        }
+<a href=#155 id=155 data-nosnippet>155</a>        <span class="kw">let </span>zoom = <span class="self">self</span>.zoom_for_center_distance_units(distance_units);
+<a href=#156 id=156 data-nosnippet>156</a>        <span class="self">self</span>.set_center_elevation(elevation);
+<a href=#157 id=157 data-nosnippet>157</a>        <span class="self">self</span>.set_center_and_angles(
+<a href=#158 id=158 data-nosnippet>158</a>            lat_lon_at_mercator(center),
+<a href=#159 id=159 data-nosnippet>159</a>            zoom,
+<a href=#160 id=160 data-nosnippet>160</a>            pose.bearing,
+<a href=#161 id=161 data-nosnippet>161</a>            pose.pitch,
+<a href=#162 id=162 data-nosnippet>162</a>            pose.roll,
+<a href=#163 id=163 data-nosnippet>163</a>        );
+<a href=#164 id=164 data-nosnippet>164</a>    }
+<a href=#165 id=165 data-nosnippet>165</a>
+<a href=#166 id=166 data-nosnippet>166</a>    <span class="doccomment">/// The zoom at which the camera sits `distance_meters` from a center at `center`, the
+<a href=#167 id=167 data-nosnippet>167</a>    /// definition a pose and an external eye share.
+<a href=#168 id=168 data-nosnippet>168</a>    </span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>zoom_for_center_distance(<span class="kw-2">&amp;</span><span class="self">self</span>, distance_meters: f64, center: LatLon) -&gt; Zoom {
+<a href=#169 id=169 data-nosnippet>169</a>        <span class="kw">let </span>meters_per_unit =
+<a href=#170 id=170 data-nosnippet>170</a>            <span class="self">self</span>.body().circumference_meters() * center.latitude.to_radians().cos();
+<a href=#171 id=171 data-nosnippet>171</a>        <span class="self">self</span>.zoom_for_center_distance_units(distance_meters / meters_per_unit)
+<a href=#172 id=172 data-nosnippet>172</a>    }
+<a href=#173 id=173 data-nosnippet>173</a>
+<a href=#174 id=174 data-nosnippet>174</a>    <span class="doccomment">/// The zoom at which the camera sits `distance_units` Mercator units from the center.
+<a href=#175 id=175 data-nosnippet>175</a>    </span><span class="kw">fn </span>zoom_for_center_distance_units(<span class="kw-2">&amp;</span><span class="self">self</span>, distance_units: f64) -&gt; Zoom {
+<a href=#176 id=176 data-nosnippet>176</a>        Zoom::new(
+<a href=#177 id=177 data-nosnippet>177</a>            (<span class="self">self</span>.height()
+<a href=#178 id=178 data-nosnippet>178</a>                / <span class="number">2.0
+<a href=#179 id=179 data-nosnippet>179</a>                </span>/ (<span class="self">self</span>.field_of_view().<span class="number">0 </span>/ <span class="number">2.0</span>).tan()
+<a href=#180 id=180 data-nosnippet>180</a>                / distance_units
+<a href=#181 id=181 data-nosnippet>181</a>                / TILE_SIZE)
+<a href=#182 id=182 data-nosnippet>182</a>                .log2(),
+<a href=#183 id=183 data-nosnippet>183</a>        )
+<a href=#184 id=184 data-nosnippet>184</a>    }
+<a href=#185 id=185 data-nosnippet>185</a>
+<a href=#186 id=186 data-nosnippet>186</a>    <span class="doccomment">/// Moves the map center and the camera angles, leaving the center elevation as it is.
+<a href=#187 id=187 data-nosnippet>187</a>    </span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>set_center_and_angles(
+<a href=#188 id=188 data-nosnippet>188</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+<a href=#189 id=189 data-nosnippet>189</a>        center: LatLon,
+<a href=#190 id=190 data-nosnippet>190</a>        zoom: Zoom,
+<a href=#191 id=191 data-nosnippet>191</a>        bearing: Deg&lt;f64&gt;,
+<a href=#192 id=192 data-nosnippet>192</a>        pitch: Deg&lt;f64&gt;,
+<a href=#193 id=193 data-nosnippet>193</a>        roll: Deg&lt;f64&gt;,
+<a href=#194 id=194 data-nosnippet>194</a>    ) {
+<a href=#195 id=195 data-nosnippet>195</a>        <span class="kw">let </span>world_size = TILE_SIZE * <span class="number">2f64</span>.powf(zoom.value());
+<a href=#196 id=196 data-nosnippet>196</a>        <span class="kw">let </span>center = mercator_from_lat_lon(center);
+<a href=#197 id=197 data-nosnippet>197</a>        <span class="self">self</span>.update_zoom(zoom);
+<a href=#198 id=198 data-nosnippet>198</a>        <span class="kw">let </span>camera = <span class="self">self</span>.camera_mut();
+<a href=#199 id=199 data-nosnippet>199</a>        camera.move_to(Point2::new(center.x * world_size, center.y * world_size));
+<a href=#200 id=200 data-nosnippet>200</a>        camera.set_bearing(bearing);
+<a href=#201 id=201 data-nosnippet>201</a>        camera.set_pitch(pitch);
+<a href=#202 id=202 data-nosnippet>202</a>        camera.set_roll(roll);
+<a href=#203 id=203 data-nosnippet>203</a>    }
+<a href=#204 id=204 data-nosnippet>204</a>
+<a href=#205 id=205 data-nosnippet>205</a>    <span class="doccomment">/// Moves the map at once, as GL JS `jumpTo`: to the center, zoom and angles given, with
+<a href=#206 id=206 data-nosnippet>206</a>    /// the others kept as they are. A zoom that is not a number is left out, as GL JS
+<a href=#207 id=207 data-nosnippet>207</a>    /// constrains a jump.
+<a href=#208 id=208 data-nosnippet>208</a>    ///
+<a href=#209 id=209 data-nosnippet>209</a>    /// Constrained navigation keeps the center's latitude within the Mercator limit; free-globe
+<a href=#210 id=210 data-nosnippet>210</a>    /// navigation places the pose [`Self::globe_pose_for`] gives. The center rests at the
+<a href=#211 id=211 data-nosnippet>211</a>    /// height [`Self::jump_elevation`] gives, until terrain holding it stands it on the ground
+<a href=#212 id=212 data-nosnippet>212</a>    /// under it, as [`crate::context::MapContext::jump_to`] does at once.
+<a href=#213 id=213 data-nosnippet>213</a>    </span><span class="kw">pub fn </span>jump_to(<span class="kw-2">&amp;mut </span><span class="self">self</span>, options: CameraOptions) -&gt; <span class="prelude-ty">Result</span>&lt;(), NavigationError&gt; {
+<a href=#214 id=214 data-nosnippet>214</a>        <span class="kw">if </span><span class="self">self</span>.navigation_mode() == NavigationMode::FreeGlobe {
+<a href=#215 id=215 data-nosnippet>215</a>            <span class="kw">return </span><span class="self">self</span>.set_globe_pose(<span class="self">self</span>.globe_pose_for(options));
+<a href=#216 id=216 data-nosnippet>216</a>        }
+<a href=#217 id=217 data-nosnippet>217</a>        <span class="kw">let </span>jump = <span class="self">self</span>.resolve_jump(options);
+<a href=#218 id=218 data-nosnippet>218</a>        <span class="kw">let </span>center = LatLon::new(
+<a href=#219 id=219 data-nosnippet>219</a>            jump.center
+<a href=#220 id=220 data-nosnippet>220</a>                .latitude
+<a href=#221 id=221 data-nosnippet>221</a>                .clamp(-MERCATOR_LATITUDE_LIMIT, MERCATOR_LATITUDE_LIMIT),
+<a href=#222 id=222 data-nosnippet>222</a>            jump.center.longitude,
+<a href=#223 id=223 data-nosnippet>223</a>        );
+<a href=#224 id=224 data-nosnippet>224</a>        <span class="self">self</span>.set_center_and_angles(center, jump.zoom, jump.bearing, jump.pitch, jump.roll);
+<a href=#225 id=225 data-nosnippet>225</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(elevation) = <span class="self">self</span>.jump_elevation(options) {
+<a href=#226 id=226 data-nosnippet>226</a>            <span class="self">self</span>.rest_center_at(elevation);
+<a href=#227 id=227 data-nosnippet>227</a>        }
+<a href=#228 id=228 data-nosnippet>228</a>        <span class="prelude-val">Ok</span>(())
+<a href=#229 id=229 data-nosnippet>229</a>    }
+<a href=#230 id=230 data-nosnippet>230</a>
+<a href=#231 id=231 data-nosnippet>231</a>    <span class="doccomment">/// The height a jump to `options` rests its center at, `None` keeping the current one:
+<a href=#232 id=232 data-nosnippet>232</a>    /// the elevation given, or, for a center that moves without one, sea level where terrain
+<a href=#233 id=233 data-nosnippet>233</a>    /// holds it, as GL JS reads ground it has not loaded, and the center altitude otherwise.
+<a href=#234 id=234 data-nosnippet>234</a>    /// A new center never inherits the ground of the one it left.
+<a href=#235 id=235 data-nosnippet>235</a>    </span><span class="kw">pub fn </span>jump_elevation(<span class="kw-2">&amp;</span><span class="self">self</span>, options: CameraOptions) -&gt; <span class="prelude-ty">Option</span>&lt;f64&gt; {
+<a href=#236 id=236 data-nosnippet>236</a>        options
+<a href=#237 id=237 data-nosnippet>237</a>            .elevation
+<a href=#238 id=238 data-nosnippet>238</a>            .filter(|meters| meters.is_finite())
+<a href=#239 id=239 data-nosnippet>239</a>            .or_else(|| {
+<a href=#240 id=240 data-nosnippet>240</a>                options.center.map(|<span class="kw">_</span>| {
+<a href=#241 id=241 data-nosnippet>241</a>                    <span class="kw">if </span><span class="self">self</span>.center_held_by_terrain() {
+<a href=#242 id=242 data-nosnippet>242</a>                        <span class="number">0.0
+<a href=#243 id=243 data-nosnippet>243</a>                    </span>} <span class="kw">else </span>{
+<a href=#244 id=244 data-nosnippet>244</a>                        <span class="self">self</span>.center_altitude()
+<a href=#245 id=245 data-nosnippet>245</a>                    }
+<a href=#246 id=246 data-nosnippet>246</a>                })
+<a href=#247 id=247 data-nosnippet>247</a>            })
+<a href=#248 id=248 data-nosnippet>248</a>    }
+<a href=#249 id=249 data-nosnippet>249</a>
+<a href=#250 id=250 data-nosnippet>250</a>    <span class="doccomment">/// The center, zoom and angles a jump to `options` shows, the camera's own standing in for
+<a href=#251 id=251 data-nosnippet>251</a>    /// those left out.
+<a href=#252 id=252 data-nosnippet>252</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>resolve_jump(<span class="kw-2">&amp;</span><span class="self">self</span>, options: CameraOptions) -&gt; ResolvedJump {
+<a href=#253 id=253 data-nosnippet>253</a>        <span class="kw">let </span>camera = <span class="self">self</span>.camera();
+<a href=#254 id=254 data-nosnippet>254</a>        ResolvedJump {
+<a href=#255 id=255 data-nosnippet>255</a>            <span class="comment">// A free-globe camera may look past the Mercator world the flat center stops at.
+<a href=#256 id=256 data-nosnippet>256</a>            </span>center: options.center.unwrap_or_else(|| {
+<a href=#257 id=257 data-nosnippet>257</a>                <span class="self">self</span>.pose_view()
+<a href=#258 id=258 data-nosnippet>258</a>                    .map_or_else(|| <span class="self">self</span>.center_lat_lon(), |view| view.center)
+<a href=#259 id=259 data-nosnippet>259</a>            }),
+<a href=#260 id=260 data-nosnippet>260</a>            zoom: options
+<a href=#261 id=261 data-nosnippet>261</a>                .zoom
+<a href=#262 id=262 data-nosnippet>262</a>                .filter(|zoom| zoom.is_finite())
+<a href=#263 id=263 data-nosnippet>263</a>                .map_or_else(|| <span class="self">self</span>.zoom(), Zoom::new),
+<a href=#264 id=264 data-nosnippet>264</a>            bearing: options
+<a href=#265 id=265 data-nosnippet>265</a>                .bearing
+<a href=#266 id=266 data-nosnippet>266</a>                .unwrap_or_else(|| camera.get_bearing().into()),
+<a href=#267 id=267 data-nosnippet>267</a>            pitch: options.pitch.unwrap_or_else(|| camera.get_pitch().into()),
+<a href=#268 id=268 data-nosnippet>268</a>            roll: options.roll.unwrap_or_else(|| camera.get_roll().into()),
+<a href=#269 id=269 data-nosnippet>269</a>        }
+<a href=#270 id=270 data-nosnippet>270</a>    }
+<a href=#271 id=271 data-nosnippet>271</a>
+<a href=#272 id=272 data-nosnippet>272</a>    <span class="doccomment">/// The map center in latitude and longitude.
+<a href=#273 id=273 data-nosnippet>273</a>    </span><span class="kw">pub fn </span>center_lat_lon(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; LatLon {
+<a href=#274 id=274 data-nosnippet>274</a>        <span class="kw">let </span>world_size = TILE_SIZE * <span class="number">2f64</span>.powf(<span class="self">self</span>.zoom().value());
+<a href=#275 id=275 data-nosnippet>275</a>        <span class="kw">let </span>position = <span class="self">self</span>.camera().position();
+<a href=#276 id=276 data-nosnippet>276</a>        lat_lon_at_mercator(Point2::new(
+<a href=#277 id=277 data-nosnippet>277</a>            position.x / world_size,
+<a href=#278 id=278 data-nosnippet>278</a>            position.y / world_size,
+<a href=#279 id=279 data-nosnippet>279</a>        ))
+<a href=#280 id=280 data-nosnippet>280</a>    }
 <a href=#281 id=281 data-nosnippet>281</a>
-<a href=#282 id=282 data-nosnippet>282</a><span class="doccomment">/// Position on the unit Mercator square, with y pointing south.
-<a href=#283 id=283 data-nosnippet>283</a></span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>mercator_from_lat_lon(position: LatLon) -&gt; Point2&lt;f64&gt; {
-<a href=#284 id=284 data-nosnippet>284</a>    <span class="kw">let </span>x = (position.longitude + <span class="number">180.0</span>) / <span class="number">360.0</span>;
-<a href=#285 id=285 data-nosnippet>285</a>    <span class="kw">let </span>latitude = position.latitude.to_radians();
-<a href=#286 id=286 data-nosnippet>286</a>    <span class="kw">let </span>y = <span class="number">0.5 </span>- (PI / <span class="number">4.0 </span>+ latitude / <span class="number">2.0</span>).tan().ln() / (<span class="number">2.0 </span>* PI);
-<a href=#287 id=287 data-nosnippet>287</a>    Point2::new(x, y)
-<a href=#288 id=288 data-nosnippet>288</a>}
-<a href=#289 id=289 data-nosnippet>289</a>
-<a href=#290 id=290 data-nosnippet>290</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>lat_lon_at_mercator(point: Point2&lt;f64&gt;) -&gt; LatLon {
-<a href=#291 id=291 data-nosnippet>291</a>    LatLon::new(
-<a href=#292 id=292 data-nosnippet>292</a>        latitude_at_mercator_y(point.y).to_degrees(),
-<a href=#293 id=293 data-nosnippet>293</a>        point.x * <span class="number">360.0 </span>- <span class="number">180.0</span>,
-<a href=#294 id=294 data-nosnippet>294</a>    )
-<a href=#295 id=295 data-nosnippet>295</a>}
-<a href=#296 id=296 data-nosnippet>296</a>
-<a href=#297 id=297 data-nosnippet>297</a><span class="doccomment">/// Latitude in radians at a unit Mercator y.
-<a href=#298 id=298 data-nosnippet>298</a></span><span class="kw">fn </span>latitude_at_mercator_y(y: f64) -&gt; f64 {
-<a href=#299 id=299 data-nosnippet>299</a>    (PI * (<span class="number">1.0 </span>- <span class="number">2.0 </span>* y)).sinh().atan()
-<a href=#300 id=300 data-nosnippet>300</a>}
-<a href=#301 id=301 data-nosnippet>301</a>
-<a href=#302 id=302 data-nosnippet>302</a><span class="attr">#[cfg(test)]
-<a href=#303 id=303 data-nosnippet>303</a></span><span class="kw">mod </span>tests;
+<a href=#282 id=282 data-nosnippet>282</a>    <span class="doccomment">/// Where the camera stands and where it looks.
+<a href=#283 id=283 data-nosnippet>283</a>    </span><span class="kw">pub fn </span>camera_pose(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; CameraPose {
+<a href=#284 id=284 data-nosnippet>284</a>        <span class="kw">let </span>(position, altitude_meters) = camera_ground_position(<span class="self">self</span>);
+<a href=#285 id=285 data-nosnippet>285</a>        <span class="kw">let </span>world_size = TILE_SIZE * <span class="number">2f64</span>.powf(<span class="self">self</span>.zoom().value());
+<a href=#286 id=286 data-nosnippet>286</a>        <span class="kw">let </span>camera = <span class="self">self</span>.camera();
+<a href=#287 id=287 data-nosnippet>287</a>        CameraPose {
+<a href=#288 id=288 data-nosnippet>288</a>            position: lat_lon_at_mercator(Point2::new(
+<a href=#289 id=289 data-nosnippet>289</a>                position.x / world_size,
+<a href=#290 id=290 data-nosnippet>290</a>                position.y / world_size,
+<a href=#291 id=291 data-nosnippet>291</a>            )),
+<a href=#292 id=292 data-nosnippet>292</a>            altitude_meters,
+<a href=#293 id=293 data-nosnippet>293</a>            bearing: camera.get_bearing().into(),
+<a href=#294 id=294 data-nosnippet>294</a>            pitch: camera.get_pitch().into(),
+<a href=#295 id=295 data-nosnippet>295</a>            roll: camera.get_roll().into(),
+<a href=#296 id=296 data-nosnippet>296</a>        }
+<a href=#297 id=297 data-nosnippet>297</a>    }
+<a href=#298 id=298 data-nosnippet>298</a>}
+<a href=#299 id=299 data-nosnippet>299</a>
+<a href=#300 id=300 data-nosnippet>300</a><span class="doccomment">/// Position on the unit Mercator square, with y pointing south.
+<a href=#301 id=301 data-nosnippet>301</a></span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>mercator_from_lat_lon(position: LatLon) -&gt; Point2&lt;f64&gt; {
+<a href=#302 id=302 data-nosnippet>302</a>    <span class="kw">let </span>x = (position.longitude + <span class="number">180.0</span>) / <span class="number">360.0</span>;
+<a href=#303 id=303 data-nosnippet>303</a>    <span class="kw">let </span>latitude = position.latitude.to_radians();
+<a href=#304 id=304 data-nosnippet>304</a>    <span class="kw">let </span>y = <span class="number">0.5 </span>- (PI / <span class="number">4.0 </span>+ latitude / <span class="number">2.0</span>).tan().ln() / (<span class="number">2.0 </span>* PI);
+<a href=#305 id=305 data-nosnippet>305</a>    Point2::new(x, y)
+<a href=#306 id=306 data-nosnippet>306</a>}
+<a href=#307 id=307 data-nosnippet>307</a>
+<a href=#308 id=308 data-nosnippet>308</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>lat_lon_at_mercator(point: Point2&lt;f64&gt;) -&gt; LatLon {
+<a href=#309 id=309 data-nosnippet>309</a>    LatLon::new(
+<a href=#310 id=310 data-nosnippet>310</a>        latitude_at_mercator_y(point.y).to_degrees(),
+<a href=#311 id=311 data-nosnippet>311</a>        point.x * <span class="number">360.0 </span>- <span class="number">180.0</span>,
+<a href=#312 id=312 data-nosnippet>312</a>    )
+<a href=#313 id=313 data-nosnippet>313</a>}
+<a href=#314 id=314 data-nosnippet>314</a>
+<a href=#315 id=315 data-nosnippet>315</a><span class="doccomment">/// Latitude in radians at a unit Mercator y.
+<a href=#316 id=316 data-nosnippet>316</a></span><span class="kw">fn </span>latitude_at_mercator_y(y: f64) -&gt; f64 {
+<a href=#317 id=317 data-nosnippet>317</a>    (PI * (<span class="number">1.0 </span>- <span class="number">2.0 </span>* y)).sinh().atan()
+<a href=#318 id=318 data-nosnippet>318</a>}
+<a href=#319 id=319 data-nosnippet>319</a>
+<a href=#320 id=320 data-nosnippet>320</a><span class="attr">#[cfg(test)]
+<a href=#321 id=321 data-nosnippet>321</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>
