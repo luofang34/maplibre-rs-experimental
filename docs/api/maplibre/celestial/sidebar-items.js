@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MIN_LENGTH_SQUARED"],"enum":["CelestialError"],"fn":["ecef_to_globe_world","set_sun_direction","sun_direction"],"struct":["CelestialLighting","EcefDirection"]};

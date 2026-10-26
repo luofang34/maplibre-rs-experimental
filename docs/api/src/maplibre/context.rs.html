@@ -50,56 +50,70 @@
 <a href=#50 id=50 data-nosnippet>50</a>        </span><span class="kw">crate</span>::render::frame_signals::mark_dirty(<span class="kw-2">&amp;mut </span><span class="self">self</span>.world);
 <a href=#51 id=51 data-nosnippet>51</a>    }
 <a href=#52 id=52 data-nosnippet>52</a>
-<a href=#53 id=53 data-nosnippet>53</a>    <span class="doccomment">/// Switches how the camera navigates the globe, for the style's projection: free-globe
-<a href=#54 id=54 data-nosnippet>54</a>    /// navigation needs the pure `vertical-perspective` projection. A center held by
-<a href=#55 id=55 data-nosnippet>55</a>    /// terrain stands on the loaded ground under it at once, as
-<a href=#56 id=56 data-nosnippet>56</a>    /// [`crate::terrain::elevation::ground_center`] stands it.
-<a href=#57 id=57 data-nosnippet>57</a>    </span><span class="kw">pub fn </span>set_navigation_mode(
-<a href=#58 id=58 data-nosnippet>58</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-<a href=#59 id=59 data-nosnippet>59</a>        mode: <span class="kw">crate</span>::render::view_state::NavigationMode,
-<a href=#60 id=60 data-nosnippet>60</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), <span class="kw">crate</span>::render::view_state::NavigationError&gt; {
-<a href=#61 id=61 data-nosnippet>61</a>        <span class="kw">let </span>projection = <span class="self">self
-<a href=#62 id=62 data-nosnippet>62</a>            </span>.style
-<a href=#63 id=63 data-nosnippet>63</a>            .projection
-<a href=#64 id=64 data-nosnippet>64</a>            .as_ref()
-<a href=#65 id=65 data-nosnippet>65</a>            .map_or_else(Default::default, |projection| {
-<a href=#66 id=66 data-nosnippet>66</a>                projection.projection_type.clone()
-<a href=#67 id=67 data-nosnippet>67</a>            });
-<a href=#68 id=68 data-nosnippet>68</a>        <span class="self">self</span>.view_state.set_navigation_mode(mode, <span class="kw-2">&amp;</span>projection)<span class="question-mark">?</span>;
-<a href=#69 id=69 data-nosnippet>69</a>        <span class="kw">crate</span>::terrain::elevation::ground_center(<span class="kw-2">&amp;mut </span><span class="self">self</span>.view_state, <span class="kw-2">&amp;</span><span class="self">self</span>.world);
-<a href=#70 id=70 data-nosnippet>70</a>        <span class="prelude-val">Ok</span>(())
-<a href=#71 id=71 data-nosnippet>71</a>    }
-<a href=#72 id=72 data-nosnippet>72</a>
-<a href=#73 id=73 data-nosnippet>73</a>    <span class="doccomment">/// Moves the map at once, as GL JS `jumpTo`, in either navigation mode, as
-<a href=#74 id=74 data-nosnippet>74</a>    /// [`ViewState::jump_to`] moves it. A center held by terrain stands on the loaded ground
-<a href=#75 id=75 data-nosnippet>75</a>    /// under it at once, or at sea level where none has loaded, never on the ground it left.
-<a href=#76 id=76 data-nosnippet>76</a>    </span><span class="kw">pub fn </span>jump_to(
-<a href=#77 id=77 data-nosnippet>77</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-<a href=#78 id=78 data-nosnippet>78</a>        options: <span class="kw">crate</span>::render::view_state::CameraOptions,
-<a href=#79 id=79 data-nosnippet>79</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), <span class="kw">crate</span>::render::view_state::NavigationError&gt; {
-<a href=#80 id=80 data-nosnippet>80</a>        <span class="self">self</span>.view_state.jump_to(options)<span class="question-mark">?</span>;
-<a href=#81 id=81 data-nosnippet>81</a>        <span class="kw">crate</span>::terrain::elevation::ground_center(<span class="kw-2">&amp;mut </span><span class="self">self</span>.view_state, <span class="kw-2">&amp;</span><span class="self">self</span>.world);
-<a href=#82 id=82 data-nosnippet>82</a>        <span class="prelude-val">Ok</span>(())
-<a href=#83 id=83 data-nosnippet>83</a>    }
-<a href=#84 id=84 data-nosnippet>84</a>
-<a href=#85 id=85 data-nosnippet>85</a>    <span class="doccomment">/// Restores a stored free-globe pose, for the style's projection: it must be the pure
-<a href=#86 id=86 data-nosnippet>86</a>    /// `vertical-perspective` projection. A center held by terrain stands on the loaded
-<a href=#87 id=87 data-nosnippet>87</a>    /// ground under the pose's target at once, rather than at the pose's own target height, as
-<a href=#88 id=88 data-nosnippet>88</a>    /// [`crate::terrain::elevation::ground_center`] stands it.
-<a href=#89 id=89 data-nosnippet>89</a>    </span><span class="kw">pub fn </span>restore_globe_pose(
-<a href=#90 id=90 data-nosnippet>90</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-<a href=#91 id=91 data-nosnippet>91</a>        pose: <span class="kw">crate</span>::render::view_state::GlobePose,
-<a href=#92 id=92 data-nosnippet>92</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), <span class="kw">crate</span>::render::view_state::NavigationError&gt; {
-<a href=#93 id=93 data-nosnippet>93</a>        <span class="kw">let </span>projection = <span class="self">self
-<a href=#94 id=94 data-nosnippet>94</a>            </span>.style
-<a href=#95 id=95 data-nosnippet>95</a>            .projection
-<a href=#96 id=96 data-nosnippet>96</a>            .as_ref()
-<a href=#97 id=97 data-nosnippet>97</a>            .map_or_else(Default::default, |projection| {
-<a href=#98 id=98 data-nosnippet>98</a>                projection.projection_type.clone()
-<a href=#99 id=99 data-nosnippet>99</a>            });
-<a href=#100 id=100 data-nosnippet>100</a>        <span class="self">self</span>.view_state.restore_globe_pose(pose, <span class="kw-2">&amp;</span>projection)<span class="question-mark">?</span>;
-<a href=#101 id=101 data-nosnippet>101</a>        <span class="kw">crate</span>::terrain::elevation::ground_center(<span class="kw-2">&amp;mut </span><span class="self">self</span>.view_state, <span class="kw-2">&amp;</span><span class="self">self</span>.world);
-<a href=#102 id=102 data-nosnippet>102</a>        <span class="prelude-val">Ok</span>(())
-<a href=#103 id=103 data-nosnippet>103</a>    }
-<a href=#104 id=104 data-nosnippet>104</a>}
+<a href=#53 id=53 data-nosnippet>53</a>    <span class="doccomment">/// Sets the direction towards the sun in ECEF axes, which drives the atmosphere in place
+<a href=#54 id=54 data-nosnippet>54</a>    /// of the style's root `light`; `None` returns it to the style's light.
+<a href=#55 id=55 data-nosnippet>55</a>    </span><span class="kw">pub fn </span>set_sun_direction(<span class="kw-2">&amp;mut </span><span class="self">self</span>, sun: <span class="prelude-ty">Option</span>&lt;<span class="kw">crate</span>::celestial::EcefDirection&gt;) {
+<a href=#56 id=56 data-nosnippet>56</a>        <span class="kw">if </span><span class="kw">crate</span>::celestial::sun_direction(<span class="kw-2">&amp;</span><span class="self">self</span>.world) != sun {
+<a href=#57 id=57 data-nosnippet>57</a>            <span class="kw">crate</span>::celestial::set_sun_direction(<span class="kw-2">&amp;mut </span><span class="self">self</span>.world, sun);
+<a href=#58 id=58 data-nosnippet>58</a>            <span class="kw">crate</span>::render::frame_signals::mark_dirty(<span class="kw-2">&amp;mut </span><span class="self">self</span>.world);
+<a href=#59 id=59 data-nosnippet>59</a>        }
+<a href=#60 id=60 data-nosnippet>60</a>    }
+<a href=#61 id=61 data-nosnippet>61</a>
+<a href=#62 id=62 data-nosnippet>62</a>    <span class="doccomment">/// The sun direction set with [`Self::set_sun_direction`].
+<a href=#63 id=63 data-nosnippet>63</a>    </span><span class="kw">pub fn </span>sun_direction(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw">crate</span>::celestial::EcefDirection&gt; {
+<a href=#64 id=64 data-nosnippet>64</a>        <span class="kw">crate</span>::celestial::sun_direction(<span class="kw-2">&amp;</span><span class="self">self</span>.world)
+<a href=#65 id=65 data-nosnippet>65</a>    }
+<a href=#66 id=66 data-nosnippet>66</a>
+<a href=#67 id=67 data-nosnippet>67</a>    <span class="doccomment">/// Switches how the camera navigates the globe, for the style's projection: free-globe
+<a href=#68 id=68 data-nosnippet>68</a>    /// navigation needs the pure `vertical-perspective` projection. A center held by
+<a href=#69 id=69 data-nosnippet>69</a>    /// terrain stands on the loaded ground under it at once, as
+<a href=#70 id=70 data-nosnippet>70</a>    /// [`crate::terrain::elevation::ground_center`] stands it.
+<a href=#71 id=71 data-nosnippet>71</a>    </span><span class="kw">pub fn </span>set_navigation_mode(
+<a href=#72 id=72 data-nosnippet>72</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+<a href=#73 id=73 data-nosnippet>73</a>        mode: <span class="kw">crate</span>::render::view_state::NavigationMode,
+<a href=#74 id=74 data-nosnippet>74</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), <span class="kw">crate</span>::render::view_state::NavigationError&gt; {
+<a href=#75 id=75 data-nosnippet>75</a>        <span class="kw">let </span>projection = <span class="self">self
+<a href=#76 id=76 data-nosnippet>76</a>            </span>.style
+<a href=#77 id=77 data-nosnippet>77</a>            .projection
+<a href=#78 id=78 data-nosnippet>78</a>            .as_ref()
+<a href=#79 id=79 data-nosnippet>79</a>            .map_or_else(Default::default, |projection| {
+<a href=#80 id=80 data-nosnippet>80</a>                projection.projection_type.clone()
+<a href=#81 id=81 data-nosnippet>81</a>            });
+<a href=#82 id=82 data-nosnippet>82</a>        <span class="self">self</span>.view_state.set_navigation_mode(mode, <span class="kw-2">&amp;</span>projection)<span class="question-mark">?</span>;
+<a href=#83 id=83 data-nosnippet>83</a>        <span class="kw">crate</span>::terrain::elevation::ground_center(<span class="kw-2">&amp;mut </span><span class="self">self</span>.view_state, <span class="kw-2">&amp;</span><span class="self">self</span>.world);
+<a href=#84 id=84 data-nosnippet>84</a>        <span class="prelude-val">Ok</span>(())
+<a href=#85 id=85 data-nosnippet>85</a>    }
+<a href=#86 id=86 data-nosnippet>86</a>
+<a href=#87 id=87 data-nosnippet>87</a>    <span class="doccomment">/// Moves the map at once, as GL JS `jumpTo`, in either navigation mode, as
+<a href=#88 id=88 data-nosnippet>88</a>    /// [`ViewState::jump_to`] moves it. A center held by terrain stands on the loaded ground
+<a href=#89 id=89 data-nosnippet>89</a>    /// under it at once, or at sea level where none has loaded, never on the ground it left.
+<a href=#90 id=90 data-nosnippet>90</a>    </span><span class="kw">pub fn </span>jump_to(
+<a href=#91 id=91 data-nosnippet>91</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+<a href=#92 id=92 data-nosnippet>92</a>        options: <span class="kw">crate</span>::render::view_state::CameraOptions,
+<a href=#93 id=93 data-nosnippet>93</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), <span class="kw">crate</span>::render::view_state::NavigationError&gt; {
+<a href=#94 id=94 data-nosnippet>94</a>        <span class="self">self</span>.view_state.jump_to(options)<span class="question-mark">?</span>;
+<a href=#95 id=95 data-nosnippet>95</a>        <span class="kw">crate</span>::terrain::elevation::ground_center(<span class="kw-2">&amp;mut </span><span class="self">self</span>.view_state, <span class="kw-2">&amp;</span><span class="self">self</span>.world);
+<a href=#96 id=96 data-nosnippet>96</a>        <span class="prelude-val">Ok</span>(())
+<a href=#97 id=97 data-nosnippet>97</a>    }
+<a href=#98 id=98 data-nosnippet>98</a>
+<a href=#99 id=99 data-nosnippet>99</a>    <span class="doccomment">/// Restores a stored free-globe pose, for the style's projection: it must be the pure
+<a href=#100 id=100 data-nosnippet>100</a>    /// `vertical-perspective` projection. A center held by terrain stands on the loaded
+<a href=#101 id=101 data-nosnippet>101</a>    /// ground under the pose's target at once, rather than at the pose's own target height, as
+<a href=#102 id=102 data-nosnippet>102</a>    /// [`crate::terrain::elevation::ground_center`] stands it.
+<a href=#103 id=103 data-nosnippet>103</a>    </span><span class="kw">pub fn </span>restore_globe_pose(
+<a href=#104 id=104 data-nosnippet>104</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+<a href=#105 id=105 data-nosnippet>105</a>        pose: <span class="kw">crate</span>::render::view_state::GlobePose,
+<a href=#106 id=106 data-nosnippet>106</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), <span class="kw">crate</span>::render::view_state::NavigationError&gt; {
+<a href=#107 id=107 data-nosnippet>107</a>        <span class="kw">let </span>projection = <span class="self">self
+<a href=#108 id=108 data-nosnippet>108</a>            </span>.style
+<a href=#109 id=109 data-nosnippet>109</a>            .projection
+<a href=#110 id=110 data-nosnippet>110</a>            .as_ref()
+<a href=#111 id=111 data-nosnippet>111</a>            .map_or_else(Default::default, |projection| {
+<a href=#112 id=112 data-nosnippet>112</a>                projection.projection_type.clone()
+<a href=#113 id=113 data-nosnippet>113</a>            });
+<a href=#114 id=114 data-nosnippet>114</a>        <span class="self">self</span>.view_state.restore_globe_pose(pose, <span class="kw-2">&amp;</span>projection)<span class="question-mark">?</span>;
+<a href=#115 id=115 data-nosnippet>115</a>        <span class="kw">crate</span>::terrain::elevation::ground_center(<span class="kw-2">&amp;mut </span><span class="self">self</span>.view_state, <span class="kw-2">&amp;</span><span class="self">self</span>.world);
+<a href=#116 id=116 data-nosnippet>116</a>        <span class="prelude-val">Ok</span>(())
+<a href=#117 id=117 data-nosnippet>117</a>    }
+<a href=#118 id=118 data-nosnippet>118</a>}
 </code></pre></div></section></main></body></html>
