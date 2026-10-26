@@ -28,6 +28,21 @@ impl HeadlessMap {
         self.map_context.jump_to(options)
     }
 
+    /// Moves the camera along `curve`, as [`crate::context::MapContext::fly_to`] does; read how
+    /// the move stands through [`Self::context`].
+    pub fn fly_to(
+        &mut self,
+        options: crate::render::view_state::CameraOptions,
+        curve: crate::render::view_state::FlightCurve,
+    ) -> crate::context::FlightId {
+        self.map_context.fly_to(options, curve)
+    }
+
+    /// Stops the camera move under way where the camera is.
+    pub fn stop_flight(&mut self) {
+        self.map_context.stop_flight();
+    }
+
     /// Restores a stored free-globe pose, for the style's projection.
     pub fn restore_globe_pose(
         &mut self,

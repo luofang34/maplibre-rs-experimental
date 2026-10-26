@@ -455,6 +455,7 @@ impl ViewState {
 
 mod center;
 mod external;
+mod flight;
 mod horizon;
 mod navigation;
 mod pose;
@@ -463,8 +464,10 @@ mod unprojection;
 
 use external::ExternalEye;
 pub use external::{ExternalAnchor, ExternalView, ExternalViewError};
+pub use flight::{FlightCurve, FlightPath, FlyOptions};
 pub use horizon::HorizonLine;
 pub use navigation::{GlobePose, NavigationError, NavigationLimit, NavigationMode};
+pub(crate) use pose::ResolvedJump;
 pub use pose::{CameraOptions, CameraPose};
 
 #[cfg(test)]
