@@ -22,6 +22,7 @@ pub mod euclid {
     pub use lyon::geom::euclid::*;
 }
 
+pub mod celestial;
 pub mod context;
 pub mod coords;
 #[cfg(feature = "headless")]

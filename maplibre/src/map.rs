@@ -100,6 +100,7 @@ pub struct Map<E: Environment> {
 
     plugins: Vec<Box<dyn Plugin<E>>>,
     max_pitch: cgmath::Deg<f64>,
+    sun: Option<crate::celestial::EcefDirection>,
 }
 
 impl<E: Environment> Map<E>
@@ -135,6 +136,7 @@ where
             window,
             plugins,
             max_pitch: DEFAULT_MAX_PITCH,
+            sun: None,
         };
         Ok(map)
     }
@@ -144,6 +146,15 @@ where
     /// Takes effect when the renderer initializes or restores the view state.
     pub fn set_max_pitch(&mut self, max_pitch: cgmath::Deg<f64>) {
         self.max_pitch = max_pitch;
+    }
+
+    /// Sets the direction towards the sun, as [`MapContext::set_sun_direction`], before or
+    /// after the renderer is initialized; it outlasts [`Self::reset`].
+    pub fn set_sun_direction(&mut self, sun: Option<crate::celestial::EcefDirection>) {
+        self.sun = sun;
+        if let CurrentMapContext::Ready(context) = &mut self.map_context {
+            context.set_sun_direction(sun);
+        }
     }
 
     /// Moves the map at once to the center, zoom and angles given, keeping the others, as GL
@@ -196,6 +207,7 @@ where
                 let mut world = World::default();
                 world.resources.insert(self.request_attempts.clone());
                 crate::sdf::provided::set_pixel_ratio(&mut world, self.window.scale_factor());
+                crate::celestial::set_sun_direction(&mut world, self.sun);
 
                 for plugin in &self.plugins {
                     plugin.build(

@@ -5,6 +5,7 @@ use thiserror::Error;
 
 use super::{Mat4x4f32, Shader, ShaderTileMetadata};
 use crate::{
+    celestial::EcefDirection,
     projection::{body::Body, globe::camera::GlobeCameraState},
     render::resource::{FragmentState, VertexBufferLayout, VertexState},
     style::light::{LightError, LightSpecification},
@@ -119,10 +120,12 @@ impl AtmosphereLayerMetadata {
         }
     }
 
-    /// Creates atmosphere inputs from the current globe camera and root light.
+    /// Creates atmosphere inputs from the current globe camera and the host's sun, or the root
+    /// light while the host has set none.
     pub fn from_view(
         camera: &GlobeCameraState,
         light: &LightSpecification,
+        sun: Option<EcefDirection>,
         zoom: f64,
         blend: f32,
     ) -> Result<Self, AtmosphereMetadataError> {
@@ -134,11 +137,15 @@ impl AtmosphereLayerMetadata {
             .globe_center_in_view()
             .cast::<f32>()
             .ok_or(AtmosphereMetadataError::FloatConversion)?;
-        let sun_direction = light
-            .sun_direction_in_view(camera, zoom)
-            .map_err(|source| AtmosphereMetadataError::Light { source })?
-            .cast::<f32>()
-            .ok_or(AtmosphereMetadataError::FloatConversion)?;
+        let sun_direction = match sun {
+            Some(sun) => camera
+                .world_direction_to_view(sun.globe_world())
+                .ok_or(LightError::InvalidViewDirection),
+            None => light.sun_direction_in_view(camera, zoom),
+        }
+        .map_err(|source| AtmosphereMetadataError::Light { source })?
+        .cast::<f32>()
+        .ok_or(AtmosphereMetadataError::FloatConversion)?;
         let radius = camera.globe_radius_pixels() as f32;
         if !radius.is_finite() || radius <= 0.0 || !blend.is_finite() {
             return Err(AtmosphereMetadataError::InvalidScalar { radius, blend });
