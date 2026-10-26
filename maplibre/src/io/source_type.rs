@@ -42,7 +42,28 @@ fn format_template(
     if url.contains("{bbox-epsg-3857}") {
         url = url.replace("{bbox-epsg-3857}", &bbox_epsg_3857(coords)?);
     }
+    if url.contains("{prefix}") || url.contains("{quadkey}") {
+        // GL JS reads both from the tile's XYZ row, whatever the source's scheme.
+        let xyz = coords.into_tile(TileAddressingScheme::XYZ)?;
+        let prefix = format!("{:x}{:x}", xyz.x % 16, xyz.y % 16);
+        url = url
+            .replace("{prefix}", &prefix)
+            .replace("{quadkey}", &quadkey(xyz.x, xyz.y, u8::from(xyz.z)));
+    }
     Some(url)
+}
+
+/// The tile's Bing Maps quadkey, one base-4 digit per zoom level from the top, as MapLibre's
+/// `{quadkey}` placeholder states it.
+fn quadkey(x: u32, y: u32, z: u8) -> String {
+    (1..=z)
+        .rev()
+        .map(|level| {
+            let mask = 1 << (level - 1);
+            let digit = u8::from(x & mask != 0) + 2 * u8::from(y & mask != 0);
+            char::from(b'0' + digit)
+        })
+        .collect()
 }
 
 /// Represents a source from which vector tiles are fetched.
@@ -61,8 +82,8 @@ impl TessellateSource {
         )
     }
 
-    /// Creates a source from a style tile URL template containing `{z}`, `{x}` and `{y}`, or
-    /// `{bbox-epsg-3857}`.
+    /// Creates a source from a style tile URL template containing `{z}`, `{x}` and `{y}`,
+    /// `{bbox-epsg-3857}`, `{quadkey}` or `{prefix}`, as MapLibre expands them.
     pub fn from_template(template: impl Into<String>, scheme: TileAddressingScheme) -> Self {
         Self {
             template: template.into(),
@@ -103,8 +124,8 @@ impl RasterSource {
         )
     }
 
-    /// Creates a source from a style tile URL template containing `{z}`, `{x}` and `{y}`, or
-    /// `{bbox-epsg-3857}`.
+    /// Creates a source from a style tile URL template containing `{z}`, `{x}` and `{y}`,
+    /// `{bbox-epsg-3857}`, `{quadkey}` or `{prefix}`, as MapLibre expands them.
     pub fn from_template(template: impl Into<String>, scheme: TileAddressingScheme) -> Self {
         Self {
             template: template.into(),

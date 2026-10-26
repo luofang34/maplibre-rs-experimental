@@ -25,7 +25,8 @@ fn parses_the_addressing_subset() {
         "minzoom": 0,
         "maxzoom": 6,
         "bounds": [-180.0, -85.0, 180.0, 85.0],
-        "vector_layers": [{"id": "countries"}]
+        "vector_layers": [{"id": "countries"}],
+        "attribution": "© Example"
     });
 
     let parsed: TileJson = serde_json::from_value(document).expect("parses");
@@ -37,6 +38,7 @@ fn parses_the_addressing_subset() {
             minzoom: Some(0),
             maxzoom: Some(6),
             bounds: Some((-180.0, -85.0, 180.0, 85.0)),
+            attribution: Some("© Example".to_string()),
         }
     );
 }
@@ -51,6 +53,7 @@ fn document_fills_only_unspecified_fields() {
             minzoom: Some(1),
             maxzoom: Some(9),
             bounds: None,
+            attribution: Some("© OpenStreetMap contributors".to_string()),
         },
     );
 
@@ -60,6 +63,11 @@ fn document_fills_only_unspecified_fields() {
     );
     assert_eq!(vector.minzoom, Some(1));
     assert_eq!(vector.maxzoom, Some(4));
+    // The provider's credit comes with its tiles, as GL JS copies it into the source.
+    assert_eq!(
+        vector.attribution.as_deref(),
+        Some("© OpenStreetMap contributors")
+    );
 }
 
 #[test]
@@ -72,6 +80,7 @@ fn explicit_tiles_are_never_replaced() {
             minzoom: None,
             maxzoom: None,
             bounds: None,
+            attribution: None,
         },
     );
 
