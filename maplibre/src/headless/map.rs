@@ -331,6 +331,12 @@ impl HeadlessMap {
         &self.map_context.world
     }
 
+    /// The map's frame state, for what a host reads of it, such as the ground under a place
+    /// ([`MapContext::loaded_ground_cached`], [`MapContext::drawn_ground_cached`]).
+    pub fn context(&self) -> &MapContext {
+        &self.map_context
+    }
+
     /// The view the map renders from.
     pub fn view_state(&self) -> &ViewState {
         &self.map_context.view_state
@@ -409,26 +415,6 @@ impl HeadlessMap {
             .resources
             .get_mut::<crate::overlay::HostOverlay>()?
             .take_answers()
-    }
-
-    /// The terrain the last frame drew, for following lines of sight across it with
-    /// [`target_view`](crate::terrain::sightline::target_view); `None` without terrain or
-    /// before any of it is drawn. `body` is the camera's
-    /// ([`GlobeCameraState::body`](crate::projection::globe::camera::GlobeCameraState::body)).
-    pub fn drawn_terrain(
-        &self,
-        body: crate::projection::body::Body,
-    ) -> Option<crate::terrain::sightline::DrawnTerrain<'_>> {
-        let world = &self.map_context.world;
-        let index = world
-            .resources
-            .get::<crate::terrain::coverage::TerrainCoverageIndex>()
-            .filter(|index| !index.is_empty())?;
-        Some(crate::terrain::sightline::DrawnTerrain {
-            index,
-            tiles: &world.tiles,
-            body,
-        })
     }
 
     /// Replaces the triangles drawn over the map from the next frame on; see

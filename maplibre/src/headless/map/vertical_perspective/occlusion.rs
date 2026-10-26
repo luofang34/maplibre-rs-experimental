@@ -54,7 +54,11 @@ async fn depth_probes_and_lines_of_sight_differ_only_by_the_bias_and_the_pixel()
     };
     let offsets = sample_offsets(depth.texture.sample_count());
     let camera = globe_camera_for_view(hills.map.view_state()).expect("camera");
-    let terrain = hills.map.drawn_terrain(camera.body()).expect("terrain");
+    let terrain = hills
+        .map
+        .context()
+        .drawn_terrain(camera.body())
+        .expect("terrain");
     // The nearest drawn ground the frame stores among the samples of a mark's pixel.
     let frame_depth = |m: &Mark| {
         offsets

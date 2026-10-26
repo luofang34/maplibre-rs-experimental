@@ -9,6 +9,8 @@ use crate::{
     window::PhysicalSize,
 };
 
+mod ground;
+
 /// Mutable frame state shared by scheduled systems, independent of host service types.
 pub struct MapContext {
     /// Style evaluated by rendering and tile request systems.
