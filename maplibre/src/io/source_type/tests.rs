@@ -94,3 +94,22 @@ fn a_bbox_placeholder_states_the_tile_ground_in_web_mercator_metres() {
         xyz.format(&coords(3, 5, 4)).expect("in range")
     );
 }
+
+#[test]
+fn quadkey_and_prefix_follow_the_xyz_row_as_maplibre_expands_them() {
+    for scheme in [TileAddressingScheme::XYZ, TileAddressingScheme::TMS] {
+        let source =
+            RasterSource::from_template("https://{prefix}.t.example/tiles/{quadkey}.png", scheme);
+        // x = 5 = 0b101, y = 2 = 0b010 at zoom 3: digits (1,0)->1, (0,1)->2, (1,0)->1.
+        assert_eq!(
+            source.format(&coords(5, 2, 3)).expect("in range"),
+            "https://52.t.example/tiles/121.png",
+            "{scheme:?}"
+        );
+    }
+    let deep = RasterSource::from_template("{prefix}/{quadkey}", TileAddressingScheme::XYZ);
+    assert_eq!(
+        deep.format(&coords(35, 18, 6)).expect("in range"),
+        "32/120031"
+    );
+}

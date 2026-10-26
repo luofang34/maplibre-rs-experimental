@@ -24,6 +24,9 @@ pub struct TileJson {
     /// Bounds in which tiles are available.
     #[serde(default)]
     pub bounds: Option<(f64, f64, f64, f64)>,
+    /// Credit the tiles' provider asks for.
+    #[serde(default)]
+    pub attribution: Option<String>,
 }
 
 /// The addressing fields a TileJSON document can fill in, shared by tile and DEM sources.
@@ -32,6 +35,7 @@ struct TileJsonFields<'a> {
     minzoom: &'a mut Option<u8>,
     maxzoom: &'a mut Option<u8>,
     bounds: &'a mut Option<(f64, f64, f64, f64)>,
+    attribution: &'a mut Option<String>,
 }
 
 impl TileJsonFields<'_> {
@@ -48,16 +52,21 @@ impl TileJsonFields<'_> {
         if self.bounds.is_none() {
             *self.bounds = tile_json.bounds;
         }
+        if self.attribution.is_none() {
+            *self.attribution = tile_json.attribution;
+        }
     }
 }
 
-/// Fills the tile URLs and zoom range a source leaves unspecified from its TileJSON document.
+/// Fills the tile URLs, zoom range and attribution a source leaves unspecified from its
+/// TileJSON document.
 pub fn apply_tile_json(source: &mut VectorSource, tile_json: TileJson) {
     TileJsonFields {
         tiles: &mut source.tiles,
         minzoom: &mut source.minzoom,
         maxzoom: &mut source.maxzoom,
         bounds: &mut source.bounds,
+        attribution: &mut source.attribution,
     }
     .apply(tile_json);
 }
@@ -69,6 +78,7 @@ pub fn apply_tile_json_to_dem(source: &mut RasterDemSource, tile_json: TileJson)
         minzoom: &mut source.minzoom,
         maxzoom: &mut source.maxzoom,
         bounds: &mut source.bounds,
+        attribution: &mut source.attribution,
     }
     .apply(tile_json);
 }

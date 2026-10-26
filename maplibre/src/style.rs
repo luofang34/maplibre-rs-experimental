@@ -8,6 +8,7 @@ pub use cint::*;
 use serde::{Deserialize, Serialize};
 
 pub(crate) mod arabic_shaping;
+mod attribution;
 pub mod circle;
 pub mod expression;
 pub mod filter;

@@ -33,6 +33,12 @@ impl MapContext {
         crate::render::frame_input::frame_time(&self.world)
     }
 
+    /// The credits of the sources drawn at the camera's zoom, for a host's credits panel; see
+    /// [`Style::attributions`].
+    pub fn attributions(&self) -> Vec<String> {
+        self.style.attributions(self.view_state.zoom().value())
+    }
+
     /// Updates the logical viewport and resizes the physical presentation surface.
     /// `scale_factor` is the number of physical pixels per logical unit.
     /// Logical dimensions remain at least one unit even below the device scale.
