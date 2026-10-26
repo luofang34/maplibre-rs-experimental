@@ -13,7 +13,7 @@ use cgmath::{Deg, Point2, Rad};
 use crate::{
     coords::{LatLon, Zoom, TILE_SIZE},
     projection::globe::scale::MERCATOR_LATITUDE_LIMIT,
-    render::view_state::ViewState,
+    render::view_state::{NavigationError, NavigationMode, ViewState},
     terrain::interaction::{
         camera_direction, camera_ground_position, distance_to_center_from_altitude,
     },
@@ -47,6 +47,18 @@ pub struct CameraOptions {
     pub pitch: Option<Deg<f64>>,
     /// Roll about the view axis.
     pub roll: Option<Deg<f64>>,
+    /// Elevation of the center in metres above sea level, as GL JS `elevation`. Terrain that
+    /// holds the center stands it on the loaded ground from the next frame.
+    pub elevation: Option<f64>,
+}
+
+/// The center, zoom and angles a jump resolves to.
+pub(super) struct ResolvedJump {
+    pub center: LatLon,
+    pub zoom: Zoom,
+    pub bearing: Deg<f64>,
+    pub pitch: Deg<f64>,
+    pub roll: Deg<f64>,
 }
 
 /// Bound on the center search, as GL JS sets it; the search converges in about five passes.
@@ -173,34 +185,70 @@ impl ViewState {
     }
 
     /// Moves the map at once, as GL JS `jumpTo`: to the center, zoom and angles given, with
-    /// the others kept as they are. The center's latitude is kept within the Mercator limit
-    /// and a zoom that is not a number is left out, as GL JS constrains a jump.
+    /// the others kept as they are. A zoom that is not a number is left out, as GL JS
+    /// constrains a jump.
     ///
-    /// In free-globe navigation the globe pose is what is drawn; this moves the flat camera,
-    /// as [`Self::set_camera_pose`] does, and [`Self::set_globe_pose`] moves the globe.
-    pub fn jump_to(&mut self, options: CameraOptions) {
-        let camera = self.camera();
-        let bearing = options
-            .bearing
-            .unwrap_or_else(|| camera.get_bearing().into());
-        let pitch = options.pitch.unwrap_or_else(|| camera.get_pitch().into());
-        let roll = options.roll.unwrap_or_else(|| camera.get_roll().into());
-        let center = options.center.map_or_else(
-            || self.center_lat_lon(),
-            |center| {
-                LatLon::new(
-                    center
-                        .latitude
-                        .clamp(-MERCATOR_LATITUDE_LIMIT, MERCATOR_LATITUDE_LIMIT),
-                    center.longitude,
-                )
-            },
+    /// Constrained navigation keeps the center's latitude within the Mercator limit; free-globe
+    /// navigation places the pose [`Self::globe_pose_for`] gives. The center rests at the
+    /// height [`Self::jump_elevation`] gives, until terrain holding it stands it on the ground
+    /// under it, as [`crate::context::MapContext::jump_to`] does at once.
+    pub fn jump_to(&mut self, options: CameraOptions) -> Result<(), NavigationError> {
+        if self.navigation_mode() == NavigationMode::FreeGlobe {
+            return self.set_globe_pose(self.globe_pose_for(options));
+        }
+        let jump = self.resolve_jump(options);
+        let center = LatLon::new(
+            jump.center
+                .latitude
+                .clamp(-MERCATOR_LATITUDE_LIMIT, MERCATOR_LATITUDE_LIMIT),
+            jump.center.longitude,
         );
-        let zoom = options
-            .zoom
-            .filter(|zoom| zoom.is_finite())
-            .map_or_else(|| self.zoom(), Zoom::new);
-        self.set_center_and_angles(center, zoom, bearing, pitch, roll);
+        self.set_center_and_angles(center, jump.zoom, jump.bearing, jump.pitch, jump.roll);
+        if let Some(elevation) = self.jump_elevation(options) {
+            self.rest_center_at(elevation);
+        }
+        Ok(())
+    }
+
+    /// The height a jump to `options` rests its center at, `None` keeping the current one:
+    /// the elevation given, or, for a center that moves without one, sea level where terrain
+    /// holds it, as GL JS reads ground it has not loaded, and the center altitude otherwise.
+    /// A new center never inherits the ground of the one it left.
+    pub fn jump_elevation(&self, options: CameraOptions) -> Option<f64> {
+        options
+            .elevation
+            .filter(|meters| meters.is_finite())
+            .or_else(|| {
+                options.center.map(|_| {
+                    if self.center_held_by_terrain() {
+                        0.0
+                    } else {
+                        self.center_altitude()
+                    }
+                })
+            })
+    }
+
+    /// The center, zoom and angles a jump to `options` shows, the camera's own standing in for
+    /// those left out.
+    pub(super) fn resolve_jump(&self, options: CameraOptions) -> ResolvedJump {
+        let camera = self.camera();
+        ResolvedJump {
+            // A free-globe camera may look past the Mercator world the flat center stops at.
+            center: options.center.unwrap_or_else(|| {
+                self.pose_view()
+                    .map_or_else(|| self.center_lat_lon(), |view| view.center)
+            }),
+            zoom: options
+                .zoom
+                .filter(|zoom| zoom.is_finite())
+                .map_or_else(|| self.zoom(), Zoom::new),
+            bearing: options
+                .bearing
+                .unwrap_or_else(|| camera.get_bearing().into()),
+            pitch: options.pitch.unwrap_or_else(|| camera.get_pitch().into()),
+            roll: options.roll.unwrap_or_else(|| camera.get_roll().into()),
+        }
     }
 
     /// The map center in latitude and longitude.

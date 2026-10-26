@@ -19,6 +19,15 @@ impl HeadlessMap {
         self.map_context.set_navigation_mode(mode)
     }
 
+    /// Moves the map at once, as GL JS `jumpTo`, standing a center held by terrain on the
+    /// loaded ground or at sea level, as [`crate::context::MapContext::jump_to`] does.
+    pub fn jump_to(
+        &mut self,
+        options: crate::render::view_state::CameraOptions,
+    ) -> Result<(), crate::render::view_state::NavigationError> {
+        self.map_context.jump_to(options)
+    }
+
     /// Restores a stored free-globe pose, for the style's projection.
     pub fn restore_globe_pose(
         &mut self,

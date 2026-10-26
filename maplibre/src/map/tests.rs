@@ -49,7 +49,8 @@ fn a_jump_before_the_renderer_is_ready_moves_the_view_the_map_starts_with() {
             bearing: Some(cgmath::Deg(45.0)),
             ..Default::default()
         }),
-    );
+    )
+    .expect("view");
     let center = view.center_lat_lon();
     assert!(
         center.latitude.is_finite() && center.latitude < 86.0,
@@ -66,7 +67,7 @@ fn a_jump_before_the_renderer_is_ready_moves_the_view_the_map_starts_with() {
     );
 
     // A map reset keeps its view, and a jump made before it comes back moves that view.
-    let retained = starting_view(&style, None, size, DEFAULT_MAX_PITCH, None);
+    let retained = starting_view(&style, None, size, DEFAULT_MAX_PITCH, None).expect("view");
     let moved = starting_view(
         &style,
         Some(&retained),
@@ -76,7 +77,8 @@ fn a_jump_before_the_renderer_is_ready_moves_the_view_the_map_starts_with() {
             zoom: Some(5.0),
             ..Default::default()
         }),
-    );
+    )
+    .expect("view");
     assert!((moved.zoom().value() - 5.0).abs() < 1e-12);
     assert_eq!(moved.center_lat_lon(), retained.center_lat_lon());
 

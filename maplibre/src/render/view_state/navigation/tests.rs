@@ -12,9 +12,9 @@ use crate::{
 
 mod past_ninety;
 
-const VERTICAL: ProjectionType = ProjectionType::VerticalPerspective;
+pub(super) const VERTICAL: ProjectionType = ProjectionType::VerticalPerspective;
 
-fn view(center: LatLon, zoom: f64, bearing: f64, pitch: f64, roll: f64) -> ViewState {
+pub(super) fn view(center: LatLon, zoom: f64, bearing: f64, pitch: f64, roll: f64) -> ViewState {
     let zoom = Zoom::new(zoom);
     let mut view = ViewState::new(
         PhysicalSize::new(1200, 900).expect("size"),
@@ -31,7 +31,7 @@ fn view(center: LatLon, zoom: f64, bearing: f64, pitch: f64, roll: f64) -> ViewS
     view
 }
 
-fn matrix(view: &ViewState) -> [f64; 16] {
+pub(super) fn matrix(view: &ViewState) -> [f64; 16] {
     let columns: [[f64; 4]; 4] = globe_camera_for_view(view)
         .expect("camera")
         .view_projection()
@@ -43,7 +43,7 @@ fn matrix(view: &ViewState) -> [f64; 16] {
     flat
 }
 
-fn assert_same_matrix(left: [f64; 16], right: [f64; 16], case: &str) {
+pub(super) fn assert_same_matrix(left: [f64; 16], right: [f64; 16], case: &str) {
     let scale = left
         .iter()
         .fold(0.0_f64, |most, value| most.max(value.abs()));
