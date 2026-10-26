@@ -50,6 +50,20 @@ impl MapContext {
         crate::render::frame_signals::mark_dirty(&mut self.world);
     }
 
+    /// Sets the direction towards the sun in ECEF axes, which drives the atmosphere in place
+    /// of the style's root `light`; `None` returns it to the style's light.
+    pub fn set_sun_direction(&mut self, sun: Option<crate::celestial::EcefDirection>) {
+        if crate::celestial::sun_direction(&self.world) != sun {
+            crate::celestial::set_sun_direction(&mut self.world, sun);
+            crate::render::frame_signals::mark_dirty(&mut self.world);
+        }
+    }
+
+    /// The sun direction set with [`Self::set_sun_direction`].
+    pub fn sun_direction(&self) -> Option<crate::celestial::EcefDirection> {
+        crate::celestial::sun_direction(&self.world)
+    }
+
     /// Switches how the camera navigates the globe, for the style's projection: free-globe
     /// navigation needs the pure `vertical-perspective` projection. A center held by
     /// terrain stands on the loaded ground under it at once, as

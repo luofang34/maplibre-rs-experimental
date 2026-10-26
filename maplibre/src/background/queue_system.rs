@@ -246,6 +246,7 @@ pub fn queue_system(
             AtmosphereLayerMetadata::from_view(
                 &camera,
                 &light,
+                crate::celestial::sun_direction(world),
                 view_state.zoom().value(),
                 atmosphere_blend,
             )
