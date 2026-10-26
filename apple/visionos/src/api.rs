@@ -283,7 +283,7 @@ pub unsafe extern "C" fn maplibre_visionos_terrain_elevation(
         .and_then(|handle| {
             handle
                 .map
-                .terrain_elevation_at(LatLon::new(latitude, longitude))
+                .context().loaded_ground_cached(LatLon::new(latitude, longitude))
         })
         .map_or(f32::NAN, |elevation| elevation as f32)
 }

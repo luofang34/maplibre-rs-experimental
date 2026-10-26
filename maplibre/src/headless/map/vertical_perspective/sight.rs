@@ -22,6 +22,7 @@ async fn drawn_terrain_sees_the_picked_ground_and_not_what_ridges_cover() {
     let camera = globe_camera_for_view(hills.map.view_state()).expect("camera");
     let terrain = hills
         .map
+        .context()
         .drawn_terrain(camera.body())
         .expect("terrain drawn");
     let mut picks = Vec::new();
@@ -147,7 +148,11 @@ pub(super) async fn ground_marks() -> (LevelMap, Vec<Mark>) {
     hills.settle(None).await;
     let camera = globe_camera_for_view(hills.map.view_state()).expect("camera");
     // Ground down the middle of the screen, out to where hills hide part of it.
-    let terrain = hills.map.drawn_terrain(camera.body()).expect("terrain");
+    let terrain = hills
+        .map
+        .context()
+        .drawn_terrain(camera.body())
+        .expect("terrain");
     let picked: Vec<_> = (HEIGHT / 3..HEIGHT)
         .step_by(3)
         .filter_map(|y| {

@@ -5,7 +5,6 @@ use thiserror::Error;
 mod motion;
 
 use crate::{
-    coords::{LatLon, WorldCoords, Zoom, TILE_SIZE},
     headless::map::HeadlessMap,
     projection::ProjectionType,
     render::{
@@ -17,7 +16,6 @@ use crate::{
         RenderStageLabel,
     },
     schedule::StageError,
-    terrain::coverage::TerrainCoverageIndex,
 };
 
 /// Why a frame for a head-mounted display could not be drawn.
@@ -236,33 +234,6 @@ impl HeadlessMap {
             view_state,
             placement: placement.copied(),
         });
-    }
-
-    /// Terrain elevation in metres at a location, from the DEM tiles loaded so far; `None`
-    /// without terrain or before a tile covering the location arrived. A host stands its
-    /// scene on it, so a height above the anchor is a height above the ground.
-    pub fn terrain_elevation_at(&self, position: LatLon) -> Option<f64> {
-        let world = &self.map_context.world;
-        let index = world.resources.get::<TerrainCoverageIndex>()?;
-        let mercator = WorldCoords::from_lat_lon(position, Zoom::new(0.0));
-        index.loaded_ground_cached(
-            &world.tiles,
-            mercator.x / TILE_SIZE,
-            mercator.y / TILE_SIZE,
-            crate::terrain::DemDetail::Finest,
-        )
-    }
-
-    /// Height of the ground the last frame drew at a location, for converting between the
-    /// screen and the ground: `Ok(None)` without terrain or outside the drawn tiles, and
-    /// [`TerrainUnknown`](crate::terrain::sightline::TerrainUnknown) over a drawn tile whose
-    /// DEM has not loaded. A DEM loaded elsewhere in the cache does not stand in for it.
-    pub fn drawn_ground_cached(
-        &self,
-        position: LatLon,
-    ) -> Result<Option<f64>, crate::terrain::sightline::TerrainUnknown> {
-        self.drawn_terrain(self.map_context.view_state.body())
-            .map_or(Ok(None), |terrain| terrain.ground_at(position))
     }
 }
 

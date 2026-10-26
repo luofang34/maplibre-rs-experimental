@@ -23,12 +23,14 @@ async fn a_host_reads_the_drawn_ground_and_the_loaded_dem_from_the_map() {
     let truth = dem.height(mercator.x, mercator.y);
     let drawn = level
         .map
+        .context()
         .drawn_ground_cached(center)
         .expect("the center's DEM has loaded")
         .expect("the frame draws the center");
     let loaded = level
         .map
-        .terrain_elevation_at(center)
+        .context()
+        .loaded_ground_cached(center)
         .expect("the center's DEM has loaded");
     // Both read DEM samples tens of metres apart, the mesh flat between its vertices; over
     // these hills they stay within metres of the ground the samples describe.
@@ -42,7 +44,10 @@ async fn a_host_reads_the_drawn_ground_and_the_loaded_dem_from_the_map() {
     );
     // Beyond the drawn tiles nothing is drawn, though a coarse DEM may describe it.
     assert_eq!(
-        level.map.drawn_ground_cached(LatLon::new(-40.0, -100.0)),
+        level
+            .map
+            .context()
+            .drawn_ground_cached(LatLon::new(-40.0, -100.0)),
         Ok(None)
     );
 }
