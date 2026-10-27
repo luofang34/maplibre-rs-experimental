@@ -100,36 +100,39 @@
 <a href=#100 id=100 data-nosnippet>100</a>                    occlusion_query_set: <span class="prelude-val">None</span>,
 <a href=#101 id=101 data-nosnippet>101</a>                });
 <a href=#102 id=102 data-nosnippet>102</a>        <span class="kw">let </span><span class="kw-2">mut </span>render_pass = <span class="kw">crate</span>::render::tracked_pass::TrackedRenderPass::new(render_pass);
-<a href=#103 id=103 data-nosnippet>103</a>
-<a href=#104 id=104 data-nosnippet>104</a>        <span class="comment">// TODO: Automatically raise error when items get linearly too many (+1k)
-<a href=#105 id=105 data-nosnippet>105</a>
-<a href=#106 id=106 data-nosnippet>106</a>        </span><span class="kw">if let </span><span class="prelude-val">Some</span>(mask_items) = world.resources.get::&lt;RenderPhase&lt;TranslucentItem&gt;&gt;() {
-<a href=#107 id=107 data-nosnippet>107</a>            <span class="macro">log::trace!</span>(
-<a href=#108 id=108 data-nosnippet>108</a>                <span class="string">"RenderPhase&lt;TranslucentItem&gt;::size() = {}"</span>,
-<a href=#109 id=109 data-nosnippet>109</a>                mask_items.size()
-<a href=#110 id=110 data-nosnippet>110</a>            );
-<a href=#111 id=111 data-nosnippet>111</a>            <span class="kw">let </span>above = <span class="kw">super</span>::main_pass::above_symbols(world);
-<a href=#112 id=112 data-nosnippet>112</a>            <span class="kw">let </span><span class="kw-2">mut </span>previous = above.as_ref().map_or(<span class="kw-2">&amp;</span>[][..], |above| above.previous);
-<a href=#113 id=113 data-nosnippet>113</a>            <span class="kw">let </span><span class="kw-2">mut </span>groups = above
-<a href=#114 id=114 data-nosnippet>114</a>                .as_ref()
-<a href=#115 id=115 data-nosnippet>115</a>                .map_or(<span class="kw-2">&amp;</span>[][..], |above| above.items)
-<a href=#116 id=116 data-nosnippet>116</a>                .chunk_by(<span class="kw">super</span>::main_pass::same_layer)
-<a href=#117 id=117 data-nosnippet>117</a>                .peekable();
-<a href=#118 id=118 data-nosnippet>118</a>            <span class="kw">for </span>item <span class="kw">in </span>mask_items {
-<a href=#119 id=119 data-nosnippet>119</a>                <span class="kw">while let </span><span class="prelude-val">Some</span>(group) = groups.next_if(|group| group[<span class="number">0</span>].index &lt; item.index) {
-<a href=#120 id=120 data-nosnippet>120</a>                    <span class="kw">super</span>::main_pass::draw_group(<span class="kw-2">&amp;mut </span>render_pass, world, previous, group);
-<a href=#121 id=121 data-nosnippet>121</a>                    previous = group;
-<a href=#122 id=122 data-nosnippet>122</a>                }
-<a href=#123 id=123 data-nosnippet>123</a>                item.draw_function.draw(<span class="kw-2">&amp;mut </span>render_pass, world, item);
-<a href=#124 id=124 data-nosnippet>124</a>            }
-<a href=#125 id=125 data-nosnippet>125</a>            <span class="kw">for </span>group <span class="kw">in </span>groups {
-<a href=#126 id=126 data-nosnippet>126</a>                <span class="kw">super</span>::main_pass::draw_group(<span class="kw-2">&amp;mut </span>render_pass, world, previous, group);
-<a href=#127 id=127 data-nosnippet>127</a>                previous = group;
-<a href=#128 id=128 data-nosnippet>128</a>            }
-<a href=#129 id=129 data-nosnippet>129</a>        }
-<a href=#130 id=130 data-nosnippet>130</a>        render_pass.finish(world);
-<a href=#131 id=131 data-nosnippet>131</a>
-<a href=#132 id=132 data-nosnippet>132</a>        <span class="prelude-val">Ok</span>(())
-<a href=#133 id=133 data-nosnippet>133</a>    }
-<a href=#134 id=134 data-nosnippet>134</a>}
+<a href=#103 id=103 data-nosnippet>103</a>        <span class="comment">// The sun and moon lie behind the translucent layers and under the atmosphere's glow.
+<a href=#104 id=104 data-nosnippet>104</a>        </span><span class="kw">crate</span>::starfield::sun::draw(<span class="kw-2">&amp;mut </span>render_pass, world);
+<a href=#105 id=105 data-nosnippet>105</a>        <span class="kw">crate</span>::starfield::moon::draw(<span class="kw-2">&amp;mut </span>render_pass, world);
+<a href=#106 id=106 data-nosnippet>106</a>
+<a href=#107 id=107 data-nosnippet>107</a>        <span class="comment">// TODO: Automatically raise error when items get linearly too many (+1k)
+<a href=#108 id=108 data-nosnippet>108</a>
+<a href=#109 id=109 data-nosnippet>109</a>        </span><span class="kw">if let </span><span class="prelude-val">Some</span>(mask_items) = world.resources.get::&lt;RenderPhase&lt;TranslucentItem&gt;&gt;() {
+<a href=#110 id=110 data-nosnippet>110</a>            <span class="macro">log::trace!</span>(
+<a href=#111 id=111 data-nosnippet>111</a>                <span class="string">"RenderPhase&lt;TranslucentItem&gt;::size() = {}"</span>,
+<a href=#112 id=112 data-nosnippet>112</a>                mask_items.size()
+<a href=#113 id=113 data-nosnippet>113</a>            );
+<a href=#114 id=114 data-nosnippet>114</a>            <span class="kw">let </span>above = <span class="kw">super</span>::main_pass::above_symbols(world);
+<a href=#115 id=115 data-nosnippet>115</a>            <span class="kw">let </span><span class="kw-2">mut </span>previous = above.as_ref().map_or(<span class="kw-2">&amp;</span>[][..], |above| above.previous);
+<a href=#116 id=116 data-nosnippet>116</a>            <span class="kw">let </span><span class="kw-2">mut </span>groups = above
+<a href=#117 id=117 data-nosnippet>117</a>                .as_ref()
+<a href=#118 id=118 data-nosnippet>118</a>                .map_or(<span class="kw-2">&amp;</span>[][..], |above| above.items)
+<a href=#119 id=119 data-nosnippet>119</a>                .chunk_by(<span class="kw">super</span>::main_pass::same_layer)
+<a href=#120 id=120 data-nosnippet>120</a>                .peekable();
+<a href=#121 id=121 data-nosnippet>121</a>            <span class="kw">for </span>item <span class="kw">in </span>mask_items {
+<a href=#122 id=122 data-nosnippet>122</a>                <span class="kw">while let </span><span class="prelude-val">Some</span>(group) = groups.next_if(|group| group[<span class="number">0</span>].index &lt; item.index) {
+<a href=#123 id=123 data-nosnippet>123</a>                    <span class="kw">super</span>::main_pass::draw_group(<span class="kw-2">&amp;mut </span>render_pass, world, previous, group);
+<a href=#124 id=124 data-nosnippet>124</a>                    previous = group;
+<a href=#125 id=125 data-nosnippet>125</a>                }
+<a href=#126 id=126 data-nosnippet>126</a>                item.draw_function.draw(<span class="kw-2">&amp;mut </span>render_pass, world, item);
+<a href=#127 id=127 data-nosnippet>127</a>            }
+<a href=#128 id=128 data-nosnippet>128</a>            <span class="kw">for </span>group <span class="kw">in </span>groups {
+<a href=#129 id=129 data-nosnippet>129</a>                <span class="kw">super</span>::main_pass::draw_group(<span class="kw-2">&amp;mut </span>render_pass, world, previous, group);
+<a href=#130 id=130 data-nosnippet>130</a>                previous = group;
+<a href=#131 id=131 data-nosnippet>131</a>            }
+<a href=#132 id=132 data-nosnippet>132</a>        }
+<a href=#133 id=133 data-nosnippet>133</a>        render_pass.finish(world);
+<a href=#134 id=134 data-nosnippet>134</a>
+<a href=#135 id=135 data-nosnippet>135</a>        <span class="prelude-val">Ok</span>(())
+<a href=#136 id=136 data-nosnippet>136</a>    }
+<a href=#137 id=137 data-nosnippet>137</a>}
 </code></pre></div></section></main></body></html>

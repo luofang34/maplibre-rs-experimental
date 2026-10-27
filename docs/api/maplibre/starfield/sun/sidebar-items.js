@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["GLARE_EXTENT"],"fn":["draw","queue_system","radius_pixels","resource_system"],"mod":["depth","pipeline"],"struct":["SunFrame","SunGpu","SunPipeline"]};

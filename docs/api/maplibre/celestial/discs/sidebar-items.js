@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_ANGULAR_RADIUS_DEGREES"],"fn":["discs","set_moon_disc","set_sun_angular_radius"],"struct":["AngularRadius","CelestialDiscs","Disc"]};

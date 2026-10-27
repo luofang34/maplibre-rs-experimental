@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["draw","queue_system","resource_system"],"mod":["pipeline"],"struct":["MoonFrame","MoonGpu","MoonPipeline"]};
