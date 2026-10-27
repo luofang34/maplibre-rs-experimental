@@ -377,7 +377,11 @@ pub fn globe_camera_for_view(
             .map_or_else(|| view_state.center_offset(), |_| Point2::new(0.0, 0.0)),
         body: view_state.body(),
         // A host's eye is placed where it is; the center's terrain must not move it.
-        target_elevation_meters: if external_eye.is_none() && view_state.globe_orbits_center() {
+        // A free-globe pose names its target's height, so it orbits that height from the
+        // first frame, before the terrain has decided what the flat camera orbits.
+        target_elevation_meters: if external_eye.is_none()
+            && (pose.is_some() || view_state.globe_orbits_center())
+        {
             view_state.center_elevation()
         } else {
             0.0

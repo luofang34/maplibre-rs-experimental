@@ -48,6 +48,8 @@ mod daylight;
 #[cfg(test)]
 mod host_atmosphere;
 #[cfg(test)]
+mod look_up;
+#[cfg(test)]
 mod moon;
 #[cfg(test)]
 mod starfield;

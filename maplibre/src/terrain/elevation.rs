@@ -78,8 +78,10 @@ pub fn center_elevation_system(
 }
 
 /// Stands the center on the loaded ground under it, where terrain holds the center and no
-/// gesture freezes it, as the frame does; a host placing the camera between frames calls this
-/// so what it reads back already stands on the ground, as GL JS `jumpTo` grounds its center.
+/// gesture freezes it, as the frame does; a free-globe pose whose eye that would carry onto
+/// or under the ground keeps its target in the air. A host placing the camera between frames
+/// calls this so what it reads back already stands on the ground, as GL JS `jumpTo` grounds
+/// its center.
 /// Returns whether the center now stands on the ground; where the ground under it is not
 /// loaded, its elevation stays as it was.
 pub fn ground_center(view_state: &mut ViewState, world: &World) -> bool {
@@ -89,6 +91,10 @@ pub fn ground_center(view_state: &mut ViewState, world: &World) -> bool {
     let Some(elevation) = center_ground(view_state, world) else {
         return false;
     };
+    // A free-globe pose looking up from near the ground keeps its target in the air.
+    if view_state.navigation_mode() == crate::render::view_state::NavigationMode::FreeGlobe {
+        return view_state.ground_free_globe_target(elevation);
+    }
     view_state.set_center_elevation(elevation);
     true
 }

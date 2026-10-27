@@ -364,6 +364,13 @@ impl ViewState {
         }
     }
 
+    /// The free-globe camera's pitch away from looking straight down, past 90 degrees looking
+    /// up; `None` while navigation is constrained. The flat camera's
+    /// [`crate::render::camera::Camera::get_pitch`] stops at its maximum pitch instead.
+    pub fn free_globe_pitch(&self) -> Option<cgmath::Deg<f64>> {
+        self.pose_view().map(|pose| cgmath::Deg(pose.pitch_degrees))
+    }
+
     /// The center, angles, radius and style zoom of the free-globe camera, while there is one.
     pub(crate) fn pose_view(&self) -> Option<PoseView> {
         let free = self.free_globe?;
@@ -448,6 +455,7 @@ pub(crate) fn turn_between(from: Vector3<f64>, to: Vector3<f64>) -> Quaternion<f
 }
 
 mod gestures;
+mod grounding;
 mod placement;
 
 #[cfg(test)]
