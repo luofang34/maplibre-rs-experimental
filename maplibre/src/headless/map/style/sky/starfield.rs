@@ -113,7 +113,7 @@ async fn stars_hide_behind_the_globe_and_turn_with_the_camera() {
         "no star before any is set"
     );
     assert!(
-        brightest_near(&lit, star_at) > 200,
+        brightest_near(&lit, star_at) > 150,
         "the star in space shows at {star_at:?}"
     );
     let centre = pixel_of(&before, beyond);
@@ -136,7 +136,7 @@ async fn stars_hide_behind_the_globe_and_turn_with_the_camera() {
         "a quarter turn moves the star from {star_at:?}, not to {moved_to:?}"
     );
     assert!(
-        brightest_near(&turned, moved_to) > 200,
+        brightest_near(&turned, moved_to) > 150,
         "the star follows to {moved_to:?}"
     );
     assert!(

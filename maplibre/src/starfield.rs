@@ -26,7 +26,7 @@ pub mod sun;
 mod upload;
 
 pub use pipeline::StarfieldPipeline;
-pub use upload::{star_instance, StarInstance, StarfieldGpu};
+pub use upload::{star_instance, StarInstance, StarfieldGpu, STAR_PEAK_BRIGHTNESS};
 
 /// Draws the host's stars, sun and moon behind a globe. Build it after
 /// [`crate::render::RenderPlugin`].
