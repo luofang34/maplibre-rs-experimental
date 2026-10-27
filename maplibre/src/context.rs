@@ -78,6 +78,12 @@ impl MapContext {
         }
     }
 
+    /// Replaces the stars drawn behind a globe; the starfield plugin draws them.
+    pub fn set_stars(&mut self, stars: Vec<crate::celestial::Star>) {
+        crate::celestial::set_stars(&mut self.world, stars);
+        crate::render::frame_signals::mark_dirty(&mut self.world);
+    }
+
     /// The sun direction set with [`Self::set_sun_direction`].
     pub fn sun_direction(&self) -> Option<crate::celestial::EcefDirection> {
         crate::celestial::sun_direction(&self.world)
