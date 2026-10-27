@@ -56,6 +56,31 @@ impl LodContext {
         )
     }
 
+    /// The level whose texels match the screen's pixels where the view meets each tile, seen
+    /// from where `camera` actually stands, for a viewport `viewport_height` pixels tall.
+    /// `level_offset` shifts every level, as a source's tile size shifts its request.
+    ///
+    /// A free-globe pose takes this instead of GL JS's pitch rule: a gaze at the horizon
+    /// derives a pitch near ninety degrees, at which that rule drops every distant tile
+    /// several levels for foreshortening, though a horizon's silhouette runs across the
+    /// line of sight and needs the full detail its pixels resolve.
+    pub(crate) fn screen_resolution(
+        camera: &GlobeCameraState,
+        viewport_height: f64,
+        level_offset: f64,
+    ) -> Self {
+        let position = camera.camera_position();
+        let beneath = unit_sphere_to_lat_lon(position);
+        let height_radii = (position.magnitude() - 1.0).max(0.0);
+        let focal =
+            0.5 * viewport_height / (0.5 * camera.field_of_view_degrees()).to_radians().tan();
+        Self::from_eye(
+            mercator_point(beneath),
+            height_radii * radius_world_units(beneath.latitude),
+            focal * 2_f64.powf(level_offset),
+        )
+    }
+
     /// Builds the context from the map center in Mercator `0..1` units, the camera distance to
     /// it in the same units, and the camera angles in GL JS's conventions.
     pub(crate) fn from_view(

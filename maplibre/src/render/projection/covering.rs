@@ -9,8 +9,8 @@ use crate::{
         globe::{
             covering::{TileElevationProvider, TileElevationRange},
             covering_tiles::{
-                covering_tiles_with_history, elevation_for_tile_culling, GlobeCoveringOptions,
-                SourceZoomRange, ZoomRounding,
+                covering_tiles_with_history, elevation_for_tile_culling, lod::LodContext, FarPlane,
+                GlobeCoveringOptions, SourceZoomRange, ZoomRounding,
             },
         },
         lod_history::LodHistory,
@@ -48,6 +48,11 @@ pub struct CoveringRequest {
     pub rounding: ZoomRounding,
     /// Levels the source serves.
     pub zoom_range: SourceZoomRange,
+    /// Whether the tiles carry the terrain surface. Its silhouette against the sky runs
+    /// across the line of sight, so a free-globe pose draws it at the detail its screen
+    /// resolves out to the ground beyond its horizon; textures lie on the ground and
+    /// foreshorten with it, so other requests keep GL JS's levels.
+    pub surface: bool,
 }
 
 impl CoveringRequest {
@@ -58,6 +63,7 @@ impl CoveringRequest {
             requested_zoom: zoom,
             rounding: ZoomRounding::Floor,
             zoom_range: SourceZoomRange::default(),
+            surface: false,
         }
     }
 
@@ -76,6 +82,7 @@ impl CoveringRequest {
             requested_zoom: zoom + (TILE_SIZE / tile_size).log2(),
             rounding: ZoomRounding::Round,
             zoom_range,
+            surface: false,
         }
     }
 }
@@ -100,6 +107,7 @@ impl CoveringRequest {
             requested_zoom,
             rounding: ZoomRounding::Floor,
             zoom_range,
+            surface: true,
         }
     }
 }
@@ -322,7 +330,25 @@ fn globe_view_region(
         max_meters: elevation_for_tile_culling(&camera, view_state.center_elevation()),
     };
     let elevation = tile_elevation(style, world, fallback);
-    let tiles = covering_tiles_with_history(&camera, options, elevation.as_ref(), history)
+    // A free-globe pose stands where it is, often near the ground and level. A host's eye
+    // replaces the pose, as `globe_camera_for_view` draws it.
+    let pose = view_state.pose_view().is_some() && !view_state.has_external_view();
+    let reach = if pose && request.surface {
+        (
+            LodContext::screen_resolution(
+                &camera,
+                view_state.height(),
+                request.requested_zoom - view_state.zoom().value(),
+            ),
+            FarPlane::HighestGround,
+        )
+    } else {
+        (
+            LodContext::new(&camera, request.requested_zoom),
+            FarPlane::Horizon,
+        )
+    };
+    let tiles = covering_tiles_with_history(&camera, options, reach, elevation.as_ref(), history)
         .map_err(|source| ProjectionStateError::GlobeCovering { source })?;
     Ok(Some(ViewRegion::from_tiles(tiles, visible_level, 512)))
 }
@@ -447,4 +473,4 @@ pub(super) fn mercator_elevation_range(
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

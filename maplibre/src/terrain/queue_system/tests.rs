@@ -70,3 +70,39 @@ fn terrain_tiles_draw_in_gl_js_covering_order() {
     // so tiles above that level come after every tile below it.
     assert_eq!(order, [9, 8, 7, 4, 10]);
 }
+
+#[test]
+fn a_level_eyes_drapes_fit_the_texture_budget_its_horizon_would_exceed() {
+    use crate::{
+        render::memory_budget::MemoryBudget, tcs::world::World,
+        terrain::request_system::DrapeRequests,
+    };
+    let (style, view) = crate::render::projection::sea_eye();
+    let mut world = World::default();
+    let surfaces = crate::render::projection::terrain_region(
+        &style,
+        &view,
+        &world,
+        256,
+        crate::render::view_state::ViewStatePadding::Tight,
+    )
+    .expect("covering")
+    .expect("region")
+    .iter()
+    .count();
+    let allowed = MemoryBudget::default().drape_textures_allowed();
+    // Past the budget, drapes not made would leave far ground drawn without its layers.
+    assert!(
+        surfaces > allowed,
+        "the eye sees {surfaces} surface tiles, too few to test the {allowed}-texture budget"
+    );
+    super::target_specs(&style, &view, &mut world).expect("targets");
+    let drapes = world
+        .resources
+        .get::<DrapeRequests>()
+        .map_or(0, |requests| requests.0.len());
+    assert!(
+        (1..=allowed).contains(&drapes),
+        "{drapes} drapes for {surfaces} surface tiles, {allowed} allowed"
+    );
+}
