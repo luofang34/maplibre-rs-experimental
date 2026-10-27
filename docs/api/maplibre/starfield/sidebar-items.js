@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["draw","star_instance"],"mod":["pipeline","upload"],"struct":["StarInstance","StarfieldGpu","StarfieldPipeline","StarfieldPlugin"]};

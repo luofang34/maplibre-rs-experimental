@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["MIN_LENGTH_SQUARED"],"enum":["CelestialError"],"fn":["ecef_to_globe_world","set_sun_direction","sun_direction"],"struct":["CelestialLighting","EcefDirection"]};
+window.SIDEBAR_ITEMS = {"constant":["MIN_LENGTH_SQUARED"],"enum":["CelestialError"],"fn":["ecef_to_globe_world","lighting","set_atmosphere","set_stars","set_sun_direction","set_twilight_band","sun_direction"],"mod":["stars"],"struct":["CelestialLighting","EcefDirection","Star","Starfield","TwilightBand"]};
