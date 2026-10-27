@@ -5,7 +5,8 @@
 //! they turn with the camera and never move with it. They are drawn first in the main pass at
 //! the far plane and test depth without writing it, so the globe, its terrain and every layer
 //! cover them. A globe whose style paints nothing on it, with no background and no terrain,
-//! shows the stars through its disc.
+//! shows the stars through its disc. Where the atmosphere is drawn, each star fades with the
+//! brightness of the sky in its direction, so a lit sky hides the stars a night sky shows.
 
 use crate::{
     environment::Environment,

@@ -30,6 +30,25 @@ use super::render_commands::{
     DrawGlobeBackgroundPattern, DrawSky,
 };
 
+/// How strongly the atmosphere is drawn this frame: as the style's `sky` blends it, or in full
+/// where the host turned it on, faded with the projection's globe transition.
+pub fn atmosphere_blend(
+    style: &crate::style::Style,
+    view_state: &crate::render::view_state::ViewState,
+    world: &crate::tcs::world::World,
+) -> f32 {
+    let zoom = view_state.zoom().value();
+    let transition = style.projection.as_ref().map_or(0.0, |specification| {
+        specification.projection_type.globe_transition(zoom)
+    });
+    let sky_blend = style
+        .sky
+        .as_ref()
+        .map_or(0.0, |sky| sky.atmosphere_blend_at_zoom(zoom));
+    let host_blend = f32::from(u8::from(crate::celestial::lighting(world).atmosphere));
+    sky_blend.max(host_blend) * transition
+}
+
 /// Appends visible background, sky and atmosphere items and uploads their frame metadata.
 /// Returns `Dependencies` if the required phases are absent, or `Setup` if atmosphere
 /// camera or shader metadata cannot be constructed. Existing phase items are not cleared.
@@ -55,13 +74,7 @@ pub fn queue_system(
             .globe_transition(view_state.zoom().value())
     });
     let uses_globe = projection_transition > 0.0;
-    let sky_blend = style.sky.as_ref().map_or(0.0, |sky| {
-        sky.atmosphere_blend_at_zoom(view_state.zoom().value())
-    });
-    // A host that turns the atmosphere on shows it in full without a style sky.
-    let host_blend = f32::from(u8::from(crate::celestial::lighting(world).atmosphere));
-    let sky_blend = sky_blend.max(host_blend);
-    let atmosphere_blend = sky_blend * projection_transition;
+    let atmosphere_blend = atmosphere_blend(style, view_state, world);
     let sky_metadata = style
         .sky
         .as_ref()
