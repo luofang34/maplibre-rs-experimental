@@ -172,7 +172,10 @@ pub(crate) type TerrainLight = (CelestialLighting, Option<Disc>);
 
 /// The Moon's light on the night side: its direction in globe world axes and, as w, the
 /// light it adds overhead: [`MOONLIGHT_GAIN`] times its lit fraction (1 − cos elongation) / 2,
-/// from the angle between the Sun and Moon directions. All zero without both bodies.
+/// from the angle between the Sun and Moon directions. All zero without both bodies. The
+/// Moon's direction is the one its disc is drawn along, seen from the camera's eye; lighting
+/// the whole globe from it ignores the Moon's parallax of up to a degree, which no shading
+/// shows.
 pub fn moonlight_uniform(sun: Option<EcefDirection>, moon: Option<Disc>) -> [f32; 4] {
     let (Some(sun), Some(moon)) = (sun, moon) else {
         return [0.0; 4];

@@ -251,17 +251,19 @@ async fn a_full_moon_overhead_lights_the_night_side() {
     let below = center_brightness(&mut map).await;
     assert!(below.abs_diff(night) <= 3, "{below} != {night}");
 
-    // Beside the sun the Moon is new and lights nothing.
-    map.set_sun_direction(sun(-0.6, 0.0, 0.8));
-    map.set_moon_disc(moon(-0.6, 0.0, 0.8));
-    let new_moon_night = {
-        map.set_moon_disc(None);
-        center_brightness(&mut map).await
-    };
-    map.set_moon_disc(moon(-0.6, 0.0, 0.8));
-    let new_moon = center_brightness(&mut map).await;
+    // A thin crescent 15° from the sun lights almost nothing: with the sun 10° below the
+    // ground's horizon (night) and the Moon 5° above it in the same azimuth, its lit share
+    // is (1 − cos 15°) / 2 ≈ 0.017.
+    let (sun_sine, sun_cosine) = (-10_f64).to_radians().sin_cos();
+    let (moon_sine, moon_cosine) = 5_f64.to_radians().sin_cos();
+    // At 0°N 180°E up is −x and north is +z.
+    map.set_sun_direction(sun(-sun_sine, 0.0, sun_cosine));
+    map.set_moon_disc(None);
+    let dark = center_brightness(&mut map).await;
+    map.set_moon_disc(moon(-moon_sine, 0.0, moon_cosine));
+    let crescent = center_brightness(&mut map).await;
     assert!(
-        new_moon.abs_diff(new_moon_night) <= 3,
-        "a new Moon {new_moon} adds nothing to {new_moon_night}"
+        crescent.abs_diff(dark) <= 3,
+        "a thin crescent {crescent} adds almost nothing to night {dark}"
     );
 }
