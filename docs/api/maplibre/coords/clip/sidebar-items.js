@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["line_within","ring_within","slabs"],"struct":["Slab"]};
