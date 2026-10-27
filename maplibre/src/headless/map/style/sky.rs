@@ -25,9 +25,10 @@ impl HeadlessMap {
         self.map_context.set_stars(stars);
     }
 
-    /// Sets or clears the sun's disc, as [`crate::context::MapContext::set_sun_disc`] does.
-    pub fn set_sun_disc(&mut self, sun: Option<crate::celestial::Disc>) {
-        self.map_context.set_sun_disc(sun);
+    /// Sets or clears the sun's angular radius, as
+    /// [`crate::context::MapContext::set_sun_angular_radius`] does.
+    pub fn set_sun_angular_radius(&mut self, radius: Option<crate::celestial::AngularRadius>) {
+        self.map_context.set_sun_angular_radius(radius);
     }
 
     /// Draws the globe's atmosphere without a style `sky`, as

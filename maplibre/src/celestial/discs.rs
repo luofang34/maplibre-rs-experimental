@@ -1,5 +1,5 @@
-//! The discs of bodies near enough to show a size, such as the sun: where they stand and how
-//! wide they look.
+//! The discs of bodies near enough to show a size: the sun, which stands where the sun direction
+//! points, and bodies with directions of their own.
 
 use super::{CelestialError, EcefDirection};
 use crate::tcs::world::World;
@@ -7,11 +7,33 @@ use crate::tcs::world::World;
 /// Widest angular radius a disc may have; a body wider than this is not a disc in the sky.
 const MAX_ANGULAR_RADIUS_DEGREES: f64 = 5.0;
 
-/// A body's disc: the direction to its centre and its angular radius.
+/// How wide a disc looks: its angular radius in degrees, above zero and at most five.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AngularRadius(f64);
+
+impl AngularRadius {
+    /// The angular radius of `degrees`, above zero and at most five.
+    pub fn new(degrees: f64) -> Result<Self, CelestialError> {
+        if degrees > 0.0 && degrees <= MAX_ANGULAR_RADIUS_DEGREES {
+            Ok(Self(degrees))
+        } else {
+            Err(CelestialError::InvalidDisc {
+                angular_radius_degrees: degrees,
+            })
+        }
+    }
+
+    /// The radius in degrees.
+    pub fn degrees(self) -> f64 {
+        self.0
+    }
+}
+
+/// A body's disc with a direction of its own: the direction to its centre and its radius.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Disc {
     direction: EcefDirection,
-    angular_radius_degrees: f64,
+    radius: AngularRadius,
 }
 
 impl Disc {
@@ -21,16 +43,10 @@ impl Disc {
         direction: EcefDirection,
         angular_radius_degrees: f64,
     ) -> Result<Self, CelestialError> {
-        if angular_radius_degrees > 0.0 && angular_radius_degrees <= MAX_ANGULAR_RADIUS_DEGREES {
-            Ok(Self {
-                direction,
-                angular_radius_degrees,
-            })
-        } else {
-            Err(CelestialError::InvalidDisc {
-                angular_radius_degrees,
-            })
-        }
+        Ok(Self {
+            direction,
+            radius: AngularRadius::new(angular_radius_degrees)?,
+        })
     }
 
     /// Direction to the disc's centre.
@@ -38,17 +54,18 @@ impl Disc {
         self.direction
     }
 
-    /// Angular radius in degrees.
-    pub fn angular_radius_degrees(&self) -> f64 {
-        self.angular_radius_degrees
+    /// Angular radius.
+    pub fn radius(&self) -> AngularRadius {
+        self.radius
     }
 }
 
 /// The discs the host set.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct CelestialDiscs {
-    /// The sun's disc, drawn with its glare.
-    pub sun: Option<Disc>,
+    /// The sun's radius. The disc stands where the sun direction points, so the disc and the
+    /// light on the ground and in the sky cannot disagree; with no sun direction it is not drawn.
+    pub sun_radius: Option<AngularRadius>,
 }
 
 /// The discs the host set; none until it sets one.
@@ -60,8 +77,10 @@ pub fn discs(world: &World) -> CelestialDiscs {
         .unwrap_or_default()
 }
 
-/// Sets or clears the sun's disc. Its direction is the host's to keep in step with the sun
-/// direction that lights the scene.
-pub fn set_sun_disc(world: &mut World, sun: Option<Disc>) {
-    world.resources.get_or_init_mut::<CelestialDiscs>().sun = sun;
+/// Sets or clears the sun's angular radius, which draws its disc along the sun direction.
+pub fn set_sun_angular_radius(world: &mut World, radius: Option<AngularRadius>) {
+    world
+        .resources
+        .get_or_init_mut::<CelestialDiscs>()
+        .sun_radius = radius;
 }

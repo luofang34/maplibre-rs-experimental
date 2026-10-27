@@ -59,7 +59,8 @@ pub fn radius_pixels(projection_y_scale: f64, height: f64, angular_radius_degree
     projection_y_scale * height / 2.0 * angular_radius_degrees.to_radians().tan()
 }
 
-/// Uploads the sun's frame values, when the host has set a sun disc and the map is a globe.
+/// Uploads the sun's frame values, when the host has set the sun's direction and radius and
+/// the map is a globe.
 pub(super) fn queue_system(
     MapContext {
         world,
@@ -80,31 +81,31 @@ pub(super) fn queue_system(
     };
     let frame_layout = pipeline.get_bind_group_layout(1);
     let size = renderer.state().surface().size();
-    let frame = discs(world)
-        .sun
-        .zip(globe_camera_for_view(view_state).ok())
-        .map(|(sun, camera)| {
-            let direction = sun.direction().globe_world();
-            let radius = radius_pixels(
-                camera.projection().y.y,
-                f64::from(size.height()),
-                sun.angular_radius_degrees(),
-            );
-            SunFrame {
-                direction_radius: [
-                    direction.x as f32,
-                    direction.y as f32,
-                    direction.z as f32,
-                    radius as f32,
-                ],
-                viewport_glare_transition: [
-                    size.width() as f32,
-                    size.height() as f32,
-                    GLARE_EXTENT,
-                    transition,
-                ],
-            }
-        });
+    let sun = crate::celestial::sun_direction(world).zip(discs(world).sun_radius);
+    let frame =
+        sun.zip(globe_camera_for_view(view_state).ok())
+            .map(|((direction, radius), camera)| {
+                let direction = direction.globe_world();
+                let radius = radius_pixels(
+                    camera.projection().y.y,
+                    f64::from(size.height()),
+                    radius.degrees(),
+                );
+                SunFrame {
+                    direction_radius: [
+                        direction.x as f32,
+                        direction.y as f32,
+                        direction.z as f32,
+                        radius as f32,
+                    ],
+                    viewport_glare_transition: [
+                        size.width() as f32,
+                        size.height() as f32,
+                        GLARE_EXTENT,
+                        transition,
+                    ],
+                }
+            });
     let gpu = world.resources.get_or_init_mut::<SunGpu>();
     gpu.drawn = frame.is_some() && transition > 0.0;
     let Some(frame) = frame else {

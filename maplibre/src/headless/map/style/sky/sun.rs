@@ -5,7 +5,7 @@
 use cgmath::{InnerSpace, Vector3};
 
 use crate::{
-    celestial::{Disc, EcefDirection},
+    celestial::{AngularRadius, EcefDirection},
     headless::map::{readback::read_blocking, HeadlessMap},
     projection::globe::{camera::GlobeCameraState, EARTH_RADIUS_METERS},
     render::{projection::globe_camera_for_view, view_state::CameraOptions, RenderPlugin},
@@ -49,6 +49,10 @@ async fn horizon_view() -> HeadlessMap {
         .set_field_of_view(cgmath::Deg(5.0).into());
     map.set_sun_direction(Some(sun()));
     map
+}
+
+fn radius() -> AngularRadius {
+    AngularRadius::new(SUN_RADIUS_DEGREES).expect("radius")
 }
 
 fn sun() -> EcefDirection {
@@ -105,8 +109,13 @@ fn frame(map: &mut HeadlessMap) -> Vec<u8> {
 
 /// Where the sun's centre falls in the frame and its radius in pixels.
 fn sun_in_frame(map: &HeadlessMap) -> ((f64, f64), f64) {
+    disc_in_frame(map, sun())
+}
+
+/// Where a disc of the sun's radius along `direction` falls in the frame, and its radius.
+fn disc_in_frame(map: &HeadlessMap, direction: EcefDirection) -> ((f64, f64), f64) {
     let camera = camera(map);
-    let clip = camera.view_projection() * sun().globe_world().extend(0.0);
+    let clip = camera.view_projection() * direction.globe_world().extend(0.0);
     assert!(clip.w > 0.0, "the sun lies ahead");
     let centre = (
         (clip.x / clip.w + 1.0) / 2.0 * f64::from(SIZE),
@@ -156,7 +165,7 @@ async fn share_from(altitude: f64) -> (f64, f64) {
     let mut map = horizon_view().await;
     look_from(&mut map, altitude).await;
     let without = frame(&mut map);
-    map.set_sun_disc(Some(Disc::new(sun(), SUN_RADIUS_DEGREES).expect("disc")));
+    map.set_sun_angular_radius(Some(radius()));
     let with = frame(&mut map);
     let share = disc_share(&without, &with, sun_in_frame(&map));
     (share, horizon_dip_degrees(altitude))
@@ -182,7 +191,7 @@ async fn glare_from(altitude: f64, sun: EcefDirection) -> u8 {
     look_from(&mut map, altitude).await;
     map.set_sun_direction(Some(sun));
     let without = frame(&mut map);
-    map.set_sun_disc(Some(Disc::new(sun, SUN_RADIUS_DEGREES).expect("disc")));
+    map.set_sun_angular_radius(Some(radius()));
     let with = frame(&mut map);
     let clip = camera(&map).view_projection() * sun.globe_world().extend(0.0);
     let (x, y) = (
@@ -231,4 +240,53 @@ async fn from_a_hundred_metres_the_whole_rising_sun_shows() {
         "dip {dip}°"
     );
     assert!(share > 0.95, "{share} of the disc shows");
+}
+
+/// The sunrise direction turned `degrees` clockwise about the observer's up, along the horizon.
+fn turned_sun(degrees: f64) -> EcefDirection {
+    let (latitude, longitude) = (41.07204_f64.to_radians(), (-71.85733_f64).to_radians());
+    let up = Vector3::new(
+        latitude.cos() * longitude.cos(),
+        latitude.cos() * longitude.sin(),
+        latitude.sin(),
+    );
+    let sunrise = Vector3::from(SUNRISE);
+    // Clockwise seen from above, as azimuth runs, is a negative turn about up.
+    let (sine, cosine) = (-degrees).to_radians().sin_cos();
+    let turned =
+        sunrise * cosine + up.cross(sunrise) * sine + up * up.dot(sunrise) * (1.0 - cosine);
+    EcefDirection::new(turned.x, turned.y, turned.z).expect("sun")
+}
+
+/// The disc stands where the sun direction points: turning the sun alone moves the disc, so
+/// the disc cannot part from the light it stands for.
+#[tokio::test]
+async fn turning_the_sun_direction_moves_its_disc() {
+    let mut map = horizon_view().await;
+    look_from(&mut map, 100.0).await;
+    let (before, after) = (sun(), turned_sun(1.0));
+    let mut shares = Vec::new();
+    for direction in [before, after] {
+        map.set_sun_direction(Some(direction));
+        map.set_sun_angular_radius(None);
+        let without = frame(&mut map);
+        map.set_sun_angular_radius(Some(radius()));
+        let with = frame(&mut map);
+        shares.push((
+            disc_share(&without, &with, disc_in_frame(&map, before)),
+            disc_share(&without, &with, disc_in_frame(&map, after)),
+        ));
+    }
+    assert!(
+        shares[0].0 > 0.95,
+        "the disc shows where the sun first points: {shares:?}"
+    );
+    assert!(
+        shares[1].1 > 0.95,
+        "the disc follows the turned sun: {shares:?}"
+    );
+    assert!(
+        shares[1].0 < 0.05,
+        "and leaves where the sun was: {shares:?}"
+    );
 }
