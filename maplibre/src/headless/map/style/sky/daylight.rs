@@ -1,11 +1,12 @@
 //! The host's sun lights the terrain: the ground under the sun is drawn as by day, its
-//! antipode at the night brightness, and the terminator in between.
+//! antipode at the night brightness, readable and cooler rather than black, raised by a lit
+//! Moon above it, and the terminator in between.
 #![allow(clippy::expect_used, clippy::panic)]
 
 use cgmath::{InnerSpace, Vector3};
 
 use crate::{
-    celestial::{EcefDirection, TwilightBand},
+    celestial::{Disc, EcefDirection, TwilightBand, NIGHT_BRIGHTNESS},
     coords::LatLon,
     headless::map::{readback::read_blocking, HeadlessMap},
     render::{view_state::CameraOptions, RenderPlugin},
@@ -61,6 +62,12 @@ async fn globe() -> HeadlessMap {
 /// The summed colour channels of the pixel at the centre of the view once the terrain has
 /// loaded and two frames agree.
 async fn center_brightness(map: &mut HeadlessMap) -> u32 {
+    center_color(map).await.iter().map(|&c| u32::from(c)).sum()
+}
+
+/// The colour of the pixel at the centre of the view once the terrain has loaded and two
+/// frames agree.
+async fn center_color(map: &mut HeadlessMap) -> [u8; 3] {
     let mut previous = None;
     for _ in 0..40 {
         for _ in 0..4 {
@@ -76,11 +83,11 @@ async fn center_brightness(map: &mut HeadlessMap) -> u32 {
         )
         .expect("readback");
         let at = ((SIZE / 2 * SIZE + SIZE / 2) * 4) as usize;
-        let brightness = pixels[at..at + 3].iter().map(|&c| u32::from(c)).sum();
-        if brightness > 0 && previous == Some(brightness) {
-            return brightness;
+        let color = [pixels[at], pixels[at + 1], pixels[at + 2]];
+        if color != [0; 3] && previous == Some(color) {
+            return color;
         }
-        previous = Some(brightness);
+        previous = Some(color);
     }
     panic!("the frame never settled");
 }
@@ -115,8 +122,8 @@ async fn the_subsolar_point_is_lit_and_its_antipode_dark() {
     look_at(&mut map, 180.0);
     let antipode = center_brightness(&mut map).await;
     assert!(
-        antipode * 5 < subsolar,
-        "the antipode {antipode} must be far darker than the subsolar point {subsolar}"
+        antipode * 3 < subsolar * 2,
+        "the antipode {antipode} must be darker than the subsolar point {subsolar}"
     );
 
     // With the sun over the north pole the equator lies on the terminator, at an elevation
@@ -130,7 +137,7 @@ async fn the_subsolar_point_is_lit_and_its_antipode_dark() {
     );
 
     // A band ending night above the horizon puts the same ground into full night.
-    map.set_twilight_band(TwilightBand::new(1.0, 3.0, 0.1).expect("band"));
+    map.set_twilight_band(TwilightBand::new(1.0, 3.0, NIGHT_BRIGHTNESS).expect("band"));
     let night = center_brightness(&mut map).await;
     assert!(night.abs_diff(antipode) <= 3, "{night} != {antipode}");
 
@@ -196,5 +203,65 @@ async fn sunrise_over_long_island_lies_on_the_terminator() {
     assert!(
         away.abs_diff(night) <= 3,
         "away from the sun {away} is night {night}"
+    );
+}
+
+/// Night is darker and cooler than day but never black, so a night map stays legible.
+#[tokio::test]
+async fn the_night_side_stays_readable_and_cooler() {
+    let mut map = globe().await;
+    let [r, g, b] = center_color(&mut map).await;
+    let day = f64::from(r) + f64::from(g) + f64::from(b);
+    map.set_sun_direction(sun(1.0, 0.0, 0.0));
+    look_at(&mut map, 180.0);
+    let [nr, ng, nb] = center_color(&mut map).await;
+    let night = f64::from(nr) + f64::from(ng) + f64::from(nb);
+    assert!(
+        (0.25..=0.5).contains(&(night / day)),
+        "night keeps {:.2} of the day's light",
+        night / day
+    );
+    assert!(nb > nr, "night turns toward blue: {nr} {ng} {nb}");
+}
+
+fn moon(x: f64, y: f64, z: f64) -> Option<Disc> {
+    Some(Disc::new(EcefDirection::new(x, y, z).expect("direction"), 0.26).expect("disc"))
+}
+
+/// A Moon above the night side lights it by its lit share: a full Moon overhead brightens it,
+/// a new Moon or one below the horizon adds nothing.
+#[tokio::test]
+async fn a_full_moon_overhead_lights_the_night_side() {
+    let mut map = globe().await;
+    // The sun over 0°N 0°E; the view's centre, 0°N 180°E, is the middle of the night.
+    map.set_sun_direction(sun(1.0, 0.0, 0.0));
+    look_at(&mut map, 180.0);
+    let night = center_brightness(&mut map).await;
+
+    // Opposite the sun the Moon is full, and it stands overhead at 0°N 180°E.
+    map.set_moon_disc(moon(-1.0, 0.0, 0.0));
+    let moonlit = center_brightness(&mut map).await;
+    assert!(
+        moonlit > night + night / 3,
+        "a full Moon overhead lifts night {night} to {moonlit}"
+    );
+
+    // The same full Moon cannot light ground from below its horizon.
+    map.set_moon_disc(moon(0.6, 0.0, -0.8));
+    let below = center_brightness(&mut map).await;
+    assert!(below.abs_diff(night) <= 3, "{below} != {night}");
+
+    // Beside the sun the Moon is new and lights nothing.
+    map.set_sun_direction(sun(-0.6, 0.0, 0.8));
+    map.set_moon_disc(moon(-0.6, 0.0, 0.8));
+    let new_moon_night = {
+        map.set_moon_disc(None);
+        center_brightness(&mut map).await
+    };
+    map.set_moon_disc(moon(-0.6, 0.0, 0.8));
+    let new_moon = center_brightness(&mut map).await;
+    assert!(
+        new_moon.abs_diff(new_moon_night) <= 3,
+        "a new Moon {new_moon} adds nothing to {new_moon_night}"
     );
 }

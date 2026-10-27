@@ -18,6 +18,7 @@ struct TerrainTileUniforms {
     fog_position: vec4<f32>,
     daylight: vec4<f32>,
     twilight: vec4<f32>,
+    moonlight: vec4<f32>,
     edge_heights: array<vec4<f32>, 128>,
     edge_last: vec4<f32>,
 };
@@ -40,16 +41,23 @@ fn gamma_to_linear(color: vec4<f32>) -> vec4<f32> {
     return pow(color, vec4<f32>(2.2));
 }
 
-// How much of the day's light reaches the ground: one with the sun above the twilight band,
-// the night brightness below it and a smooth ramp across it. Without a host sun the factor is
-// exactly one, so the ground is drawn as it is without one.
-fn daylight(globe_normal: vec3<f32>) -> f32 {
+// The ground under the host's sun: as drawn above the twilight band, and below it a night
+// that keeps the night brightness of the day's light, raised by a Moon above the horizon by
+// its lit share, slightly desaturated and turned toward blue, so night reads as night and the
+// map stays legible. A smooth ramp crosses the band. Without a host sun the colour is
+// unchanged, so the ground is drawn as it is without one.
+fn daylight(color: vec3<f32>, globe_normal: vec3<f32>) -> vec3<f32> {
     if terrain_tile.daylight.w < 0.5 {
-        return 1.0;
+        return color;
     }
-    let sun_elevation_sine = dot(normalize(globe_normal), terrain_tile.daylight.xyz);
+    let normal = normalize(globe_normal);
+    let sun_elevation_sine = dot(normal, terrain_tile.daylight.xyz);
     let day = smoothstep(terrain_tile.twilight.x, terrain_tile.twilight.y, sun_elevation_sine);
-    return mix(terrain_tile.twilight.z, 1.0, day);
+    let moon_elevation_sine = max(dot(normal, terrain_tile.moonlight.xyz), 0.0);
+    let night_level = terrain_tile.twilight.z + terrain_tile.moonlight.w * moon_elevation_sine;
+    let luminance = dot(color, vec3<f32>(0.2126, 0.7152, 0.0722));
+    let night = mix(color, vec3<f32>(luminance), 0.35) * vec3<f32>(0.85, 0.93, 1.1) * night_level;
+    return mix(night, color, day);
 }
 
 fn linear_to_gamma(color: vec4<f32>) -> vec4<f32> {
@@ -68,7 +76,7 @@ fn main(in: VertexOutput) -> @location(0) vec4<f32> {
     // the style's background colour, unlit, instead of the drape's edge stretched to the pole.
     let lit = select(vec4<f32>(draped.rgb * relief, draped.a), terrain_tile.surface_color,
         in.polar_cap > 0.0);
-    let surface = vec4<f32>(lit.rgb * daylight(in.globe_normal), lit.a);
+    let surface = vec4<f32>(daylight(lit.rgb, in.globe_normal), lit.a);
     let ground_blend = terrain_tile.fog_range.z;
     let horizon_blend = terrain_tile.fog_range.w;
     let opacity = terrain_tile.fog_opacity.x;

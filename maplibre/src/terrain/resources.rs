@@ -82,6 +82,9 @@ pub struct TerrainTileUniforms {
     pub daylight: [f32; 4],
     /// Sines of the solar elevations ending night and starting day, then the night brightness.
     pub twilight: [f32; 4],
+    /// Direction towards the Moon in globe world axes, with w the light it adds overhead;
+    /// all zero without a host Moon.
+    pub moonlight: [f32; 4],
     pub(crate) edge_heights: super::queue_system::edges::EdgeHeights,
 }
 
