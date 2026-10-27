@@ -1,10 +1,43 @@
 // @include ../render/shaders/projection.vertex.wgsl
+// @include ../render/shaders/atmosphere_scattering.wgsl.part
 
 // x, y: the viewport in physical pixels; z: physical pixels per logical pixel; w: how far the
-// map has turned into a globe, which the stars fade in with.
+// map has turned into a globe, which the stars fade in with. Then the rotation from globe world
+// axes into view axes, and the atmosphere's inputs: the globe's centre and the sun in view
+// axes, then the globe's radius in pixels, the atmosphere's blend and the body's radius.
 struct StarfieldFrame {
     viewport_ratio_transition: vec4<f32>,
+    view_x: vec4<f32>,
+    view_y: vec4<f32>,
+    view_z: vec4<f32>,
+    globe_position: vec4<f32>,
+    sun_direction: vec4<f32>,
+    radius_blend_body: vec4<f32>,
 };
+
+// Sky brightness, as the atmosphere draw adds it, at which a star starts to fade and at which
+// it is gone: a star shows against a night sky and not against a lit one.
+const STAR_FADE_START: f32 = 0.02;
+const STAR_FADE_END: f32 = 0.1;
+
+// How much of a star shows through the sky the atmosphere draws in direction `direction`.
+fn sky_visibility(direction: vec3<f32>) -> f32 {
+    let blend = starfield.radius_blend_body.y;
+    if blend <= 0.0 {
+        return 1.0;
+    }
+    let view_direction = mat3x3<f32>(
+        starfield.view_x.xyz,
+        starfield.view_y.xyz,
+        starfield.view_z.xyz,
+    ) * direction;
+    let body_radius = starfield.radius_blend_body.z;
+    let eye = -starfield.globe_position.xyz * body_radius / starfield.radius_blend_body.x;
+    let raw = scattering(view_direction, eye, starfield.sun_direction.xyz, body_radius);
+    let sky = displayed_scattering(raw).rgb * blend;
+    let luminance = dot(sky, vec3<f32>(0.2126, 0.7152, 0.0722));
+    return 1.0 - smoothstep(STAR_FADE_START, STAR_FADE_END, luminance);
+}
 
 @group(1) @binding(0) var<uniform> starfield: StarfieldFrame;
 
@@ -38,6 +71,6 @@ fn main(
     let offset = corner * radius * 2.0 / frame.xy;
     // Depth zero is the reversed-Z far plane, behind everything that writes depth.
     let position = vec4<f32>(clip.xy + offset * clip.w, 0.0, clip.w);
-    return VertexOutput(position, corner,
-        vec4<f32>(color_brightness.rgb, color_brightness.a * frame.w));
+    let brightness = color_brightness.a * frame.w * sky_visibility(direction_radius.xyz);
+    return VertexOutput(position, corner, vec4<f32>(color_brightness.rgb, brightness));
 }

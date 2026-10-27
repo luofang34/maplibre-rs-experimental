@@ -1,12 +1,16 @@
 //! The stars' GPU copy, rebuilt when the host changes them, and the frame's values.
 
 use bytemuck_derive::{Pod, Zeroable};
+use cgmath::InnerSpace;
 
 use super::StarfieldPipeline;
 use crate::{
     celestial::{Star, Starfield},
     context::MapContext,
-    render::eventually::{Eventually, Eventually::Initialized},
+    render::{
+        eventually::{Eventually, Eventually::Initialized},
+        shaders::AtmosphereLayerMetadata,
+    },
     tcs::system::SystemResult,
 };
 
@@ -45,6 +49,54 @@ pub fn star_instance(star: &Star) -> StarInstance {
         ],
         color_brightness: [red, green, blue, amplitude.min(1.0)],
     }
+}
+
+/// What the star shader needs of the frame: where the view looks and the sky it looks through.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+struct StarfieldFrame {
+    /// The viewport in physical pixels, physical pixels per logical one, and the globe transition.
+    viewport_ratio_transition: [f32; 4],
+    /// Columns of the rotation from globe world axes into view axes.
+    view_rotation: [[f32; 4]; 3],
+    /// The atmosphere's inputs, as [`AtmosphereLayerMetadata::sky_inputs`] gives them.
+    sky: [[f32; 4]; 3],
+}
+
+/// The frame's view rotation and sky, with no sky where the atmosphere is not drawn or the
+/// globe camera cannot be built.
+fn view_and_sky(
+    style: &crate::style::Style,
+    view_state: &crate::render::view_state::ViewState,
+    world: &crate::tcs::world::World,
+) -> ([[f32; 4]; 3], [[f32; 4]; 3]) {
+    let disabled = AtmosphereLayerMetadata::disabled().sky_inputs();
+    let Ok(camera) = crate::render::projection::globe_camera_for_view(view_state) else {
+        return (
+            [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+            ],
+            disabled,
+        );
+    };
+    let view = camera.view();
+    let column = |axis: cgmath::Vector4<f64>| {
+        let axis = axis.truncate().normalize();
+        [axis.x as f32, axis.y as f32, axis.z as f32, 0.0]
+    };
+    let rotation = [column(view.x), column(view.y), column(view.z)];
+    let blend = crate::background::queue_system::atmosphere_blend(style, view_state, world);
+    if blend <= 0.0 {
+        return (rotation, disabled);
+    }
+    let light = style.light.clone().unwrap_or_default();
+    let sun = crate::celestial::sun_direction(world);
+    let sky =
+        AtmosphereLayerMetadata::from_view(&camera, &light, sun, view_state.zoom().value(), blend)
+            .map_or(disabled, |metadata| metadata.sky_inputs());
+    (rotation, sky)
 }
 
 /// The stars on the GPU and the frame's viewport, pixel ratio and globe transition.
@@ -98,6 +150,7 @@ pub(super) fn queue_system(
         .get::<crate::sdf::provided::DisplayPixelRatio>()
         .map_or(1.0, |ratio| ratio.0);
     let size = renderer.state().surface().size();
+    let (view_rotation, sky) = view_and_sky(style, view_state, world);
     let gpu = world.resources.get_or_init_mut::<StarfieldGpu>();
     gpu.visible = transition > 0.0;
     if let Some(starfield) = starfield.filter(|field| Some(field.generation()) != gpu.generation) {
@@ -118,7 +171,7 @@ pub(super) fn queue_system(
     let (buffer, _) = gpu.frame.get_or_insert_with(|| {
         let buffer = renderer.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("starfield frame"),
-            size: std::mem::size_of::<[f32; 4]>() as u64,
+            size: std::mem::size_of::<StarfieldFrame>() as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -134,14 +187,18 @@ pub(super) fn queue_system(
             });
         (buffer, bind_group)
     });
-    let frame = [
-        size.width() as f32,
-        size.height() as f32,
-        pixel_ratio,
-        transition,
-    ];
+    let frame = StarfieldFrame {
+        viewport_ratio_transition: [
+            size.width() as f32,
+            size.height() as f32,
+            pixel_ratio,
+            transition,
+        ],
+        view_rotation,
+        sky,
+    };
     renderer
         .queue
-        .write_buffer(buffer, 0, bytemuck::cast_slice(&frame));
+        .write_buffer(buffer, 0, bytemuck::bytes_of(&frame));
     Ok(())
 }

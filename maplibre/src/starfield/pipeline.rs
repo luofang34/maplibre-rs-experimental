@@ -26,6 +26,7 @@ impl Shader for StarfieldShader {
         VertexState {
             source: concat!(
                 include_str!("../render/shaders/projection.vertex.wgsl"),
+                include_str!("../render/shaders/atmosphere_scattering.wgsl.part"),
                 include_str!("starfield.vertex.wgsl")
             ),
             entry_point: "main",

@@ -120,6 +120,16 @@ impl AtmosphereLayerMetadata {
         }
     }
 
+    /// The globe's centre in view axes, the sun's direction in view axes, and the globe's radius
+    /// in pixels, the blend and the body's radius in metres, as the scattering takes them.
+    pub fn sky_inputs(&self) -> [[f32; 4]; 3] {
+        [
+            self.globe_position,
+            self.sun_direction,
+            self.radius_blend_padding,
+        ]
+    }
+
     /// Creates atmosphere inputs from the current globe camera and the host's sun, or the root
     /// light while the host has set none.
     pub fn from_view(
@@ -259,7 +269,10 @@ impl Shader for AtmosphereShader {
 
     fn describe_fragment(&self) -> FragmentState {
         FragmentState {
-            source: include_str!("atmosphere.fragment.wgsl"),
+            source: concat!(
+                include_str!("atmosphere_scattering.wgsl.part"),
+                include_str!("atmosphere.fragment.wgsl")
+            ),
             entry_point: "main",
             targets: vec![Some(wgpu::ColorTargetState {
                 format: self.format,
