@@ -17,6 +17,7 @@ use crate::coords::{LatLon, TileCoords, WorldTileCoords, ZoomLevel, MAX_ZOOM};
 pub(crate) mod frustum;
 pub(crate) mod lod;
 
+pub(crate) use frustum::FarPlane;
 use frustum::GlobeFrustum;
 
 const ASSUMED_MAX_FEATURE_HEIGHT_METERS: f64 = 500.0;
@@ -136,12 +137,16 @@ pub fn covering_tiles(
     options: GlobeCoveringOptions,
     elevation: &dyn TileElevationProvider,
 ) -> Result<Vec<WorldTileCoords>, GlobeCoveringError> {
-    covering_tiles_with_history(camera, options, elevation, None)
+    let lod = lod::LodContext::new(camera, options.requested_zoom);
+    covering_tiles_with_history(camera, options, (lod, FarPlane::Horizon), elevation, None)
 }
 
+/// Selects the tiles as [`covering_tiles`] does, each at the level `lod` asks for it, out
+/// to `far`.
 pub(crate) fn covering_tiles_with_history(
     camera: &GlobeCameraState,
     options: GlobeCoveringOptions,
+    (lod, far): (lod::LodContext, FarPlane),
     elevation: &dyn TileElevationProvider,
     history: Option<&crate::projection::lod_history::LodHistory>,
 ) -> Result<Vec<WorldTileCoords>, GlobeCoveringError> {
@@ -153,8 +158,7 @@ pub(crate) fn covering_tiles_with_history(
     if options.max_tiles == 0 {
         return Ok(Vec::new());
     }
-    let lod = lod::LodContext::new(camera, options.requested_zoom);
-    let frustum = GlobeFrustum::from_camera(camera);
+    let frustum = GlobeFrustum::from_camera(camera, far);
     let priority = if camera.is_external_eye() {
         super::unit_sphere_to_lat_lon(camera.camera_position())
     } else {

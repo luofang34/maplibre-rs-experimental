@@ -25,6 +25,18 @@ const PLANE_POINT_INDICES: [[usize; 3]; 6] = [
     [0, 4, 5],
 ];
 
+/// How far past the sea-level horizon a covering looks for ground.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum FarPlane {
+    /// To the horizon, as GL JS covers a map view.
+    Horizon,
+    /// As far beyond it as the body's highest ground can rise into view: from an eye near
+    /// the ground the horizon is a few kilometres off, and an island or a range past it
+    /// still shows. The horizon test of each tile's own elevations culls what that ground
+    /// does not lift.
+    HighestGround,
+}
+
 pub(crate) struct GlobeFrustum {
     points: [Vector3<f64>; 8],
     planes: [Vector4<f64>; 6],
@@ -50,14 +62,23 @@ impl GlobeFrustum {
         Self { points, planes }
     }
 
-    pub(crate) fn from_camera(camera: &GlobeCameraState) -> Self {
+    pub(crate) fn from_camera(camera: &GlobeCameraState, far: FarPlane) -> Self {
         let inverse = camera.inverse_view_projection();
         let mut points = std::array::from_fn(|index| {
             let corner = CLIP_CORNERS[index];
             let projected = inverse * Vector4::new(corner[0], corner[1], -corner[2], corner[3]);
             projected.truncate() / projected.w
         });
-        adjust_far_plane(&mut points, camera.clipping_plane());
+        let beyond_horizon = match far {
+            FarPlane::Horizon => 0.0,
+            FarPlane::HighestGround => {
+                let highest = camera
+                    .body()
+                    .unit_radius_at(camera.body().highest_ground_meters);
+                (highest * highest - 1.0).sqrt()
+            }
+        };
+        adjust_far_plane(&mut points, camera.clipping_plane(), beyond_horizon);
         let planes = std::array::from_fn(|index| plane_from_points(points, index));
         Self { points, planes }
     }
@@ -96,7 +117,9 @@ fn plane_from_points(points: [Vector3<f64>; 8], index: usize) -> Vector4<f64> {
     normal.extend(-normal.dot(points[indices[1]]))
 }
 
-fn adjust_far_plane(points: &mut [Vector3<f64>; 8], horizon: Vector4<f64>) {
+/// Pulls the far plane in to the sea-level horizon, as GL JS does, then out again by
+/// `beyond_horizon` unit radii.
+fn adjust_far_plane(points: &mut [Vector3<f64>; 8], horizon: Vector4<f64>, beyond_horizon: f64) {
     let mut directions = [Vector3::new(0.0, 0.0, 0.0); 4];
     let mut lengths = [0.0; 4];
     let mut maximum_distance: f64 = 0.0;
@@ -115,6 +138,7 @@ fn adjust_far_plane(points: &mut [Vector3<f64>; 8], horizon: Vector4<f64>) {
         let ideal_ray_length = ideal_distance / directions[0].dot(near_plane.truncate());
         maximum_distance = maximum_distance.min(ideal_ray_length);
     }
+    maximum_distance += beyond_horizon;
     for index in 0..4 {
         let target = maximum_distance.min(lengths[index]);
         points[index] = points[index + 4] + directions[index] * target;
@@ -190,7 +214,7 @@ mod tests {
             radius_pixels: None,
         })
         .expect("reference camera should be valid");
-        let frustum = GlobeFrustum::from_camera(&camera);
+        let frustum = GlobeFrustum::from_camera(&camera, super::FarPlane::Horizon);
         let bounds = globe_tile_bounding_volume(
             TileCoords::from((511, 513, ZoomLevel::new(10))),
             TileElevationRange {

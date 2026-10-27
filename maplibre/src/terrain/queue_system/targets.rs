@@ -53,7 +53,9 @@ pub(super) fn target_specs(
             &view_region.iter().collect::<Vec<_>>(),
             memory.drape_textures_allowed(),
         )
-    } else if view_state.has_external_view() {
+    } else if view_state.has_external_view() || view_state.pose_view().is_some() {
+        // An eye's screen-resolution covering reaches its horizon in more tiles than the
+        // textures allow; the surfaces keep every tile, so only the drapes coarsen.
         covering::for_frame(
             world,
             view_region.iter().collect(),

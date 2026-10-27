@@ -26,6 +26,8 @@ use crate::{
     style::Style,
 };
 mod covering;
+#[cfg(test)]
+pub(crate) use covering::tests::sea_eye;
 pub use covering::{
     covering_region, raster_source_regions, terrain_region, view_region_for_projection,
     CoveringRequest,
