@@ -105,6 +105,16 @@ impl MapContext {
         }
     }
 
+    /// Sets the share of the sun's disc the moon leaves uncovered where the eye stands, 1
+    /// outside an eclipse. The sky's scattered sunlight and the day side's light scale with
+    /// it, so totality darkens the sky and the ground; the sun's disc and glare do not.
+    pub fn set_sun_visible_fraction(&mut self, fraction: crate::celestial::VisibleFraction) {
+        if crate::celestial::lighting(&self.world).sun_visible != fraction {
+            crate::celestial::set_sun_visible_fraction(&mut self.world, fraction);
+            crate::render::frame_signals::mark_dirty(&mut self.world);
+        }
+    }
+
     /// The sun direction set with [`Self::set_sun_direction`].
     pub fn sun_direction(&self) -> Option<crate::celestial::EcefDirection> {
         crate::celestial::sun_direction(&self.world)

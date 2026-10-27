@@ -44,8 +44,10 @@ fn gamma_to_linear(color: vec4<f32>) -> vec4<f32> {
 // The ground under the host's sun: as drawn above the twilight band, and below it a night
 // that keeps the night brightness of the day's light, raised by a Moon above the horizon by
 // its lit share, slightly desaturated and turned toward blue, so night reads as night and the
-// map stays legible. A smooth ramp crosses the band. Without a host sun the colour is
-// unchanged, so the ground is drawn as it is without one.
+// map stays legible. A smooth ramp crosses the band. An eclipse takes the day's light down
+// towards that night as the moon covers the sun, its share of the light shown through the
+// display's gamma. Without a host sun the colour is unchanged, so the ground is drawn as it is
+// without one.
 fn daylight(color: vec3<f32>, globe_normal: vec3<f32>) -> vec3<f32> {
     if terrain_tile.daylight.w < 0.5 {
         return color;
@@ -57,7 +59,8 @@ fn daylight(color: vec3<f32>, globe_normal: vec3<f32>) -> vec3<f32> {
     let night_level = terrain_tile.twilight.z + terrain_tile.moonlight.w * moon_elevation_sine;
     let luminance = dot(color, vec3<f32>(0.2126, 0.7152, 0.0722));
     let night = mix(color, vec3<f32>(luminance), 0.35) * vec3<f32>(0.85, 0.93, 1.1) * night_level;
-    return mix(night, color, day);
+    let sunlit = pow(terrain_tile.twilight.w, 1.0 / 2.2);
+    return mix(night, color, day * sunlit);
 }
 
 fn linear_to_gamma(color: vec4<f32>) -> vec4<f32> {

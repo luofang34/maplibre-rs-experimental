@@ -47,6 +47,12 @@ pub enum CelestialError {
         /// Colour given.
         color: Option<[f32; 3]>,
     },
+    /// The share of the sun's disc left uncovered lies outside 0..=1.
+    #[error("visible fraction {fraction} of the sun lies outside 0..=1")]
+    InvalidVisibleFraction {
+        /// Share given.
+        fraction: f32,
+    },
     /// A disc's angular radius is not above zero and at most five degrees.
     #[error("disc of angular radius {angular_radius_degrees}° cannot be drawn")]
     InvalidDisc {
@@ -165,6 +171,8 @@ pub struct CelestialLighting {
     pub twilight: TwilightBand,
     /// Whether the globe's atmosphere is drawn in full whatever the style's `sky` says.
     pub atmosphere: bool,
+    /// The share of the sun's disc the moon leaves uncovered where the eye stands.
+    pub sun_visible: VisibleFraction,
 }
 
 /// What lights the terrain: the host's sky and its Moon.
@@ -190,13 +198,16 @@ pub fn moonlight_uniform(sun: Option<EcefDirection>, moon: Option<Disc>) -> [f32
 
 impl CelestialLighting {
     /// The sun direction in globe world axes, with w 1 while a host has set one and all zero
-    /// otherwise, followed by the twilight band, as the terrain shader takes them.
+    /// otherwise, followed by the twilight band with the sun's visible fraction as w, as the
+    /// terrain shader takes them.
     pub fn daylight_uniforms(self) -> [[f32; 4]; 2] {
         let sun = self.sun.map_or([0.0; 4], |sun| {
             let world = sun.globe_world();
             [world.x as f32, world.y as f32, world.z as f32, 1.0]
         });
-        [sun, self.twilight.uniform()]
+        let mut twilight = self.twilight.uniform();
+        twilight[3] = self.sun_visible.get();
+        [sun, twilight]
     }
 }
 
@@ -239,11 +250,13 @@ pub fn set_sun_direction(world: &mut World, sun: Option<EcefDirection>) {
 }
 
 mod discs;
+mod eclipse;
 mod stars;
 
 pub use discs::{
     discs, set_moon_disc, set_sun_angular_radius, AngularRadius, CelestialDiscs, Disc,
 };
+pub use eclipse::{set_sun_visible_fraction, VisibleFraction};
 pub use stars::{set_stars, Star, Starfield};
 
 #[cfg(test)]
