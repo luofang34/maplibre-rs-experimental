@@ -1,8 +1,8 @@
 //! A GeoJSON document parsed once into a spatial index, tiled into vector tile bytes on demand.
 //!
 //! Tiles are cut from the index instead of re-reading the document, so a source is parsed once
-//! per generation however many tiles are requested. Geometry is not clipped or simplified: the
-//! tile boundary is applied by the renderer's stencil.
+//! per generation however many tiles are requested. Each tile carries its features' geometry
+//! cut to the tile and its buffer, unsimplified.
 
 use geozero::mvt::{Message, Tile};
 use rstar::{RTree, RTreeObject, AABB};
@@ -309,7 +309,7 @@ impl GeoJsonIndex {
         };
         for index in hits {
             let feature = &self.features[index as usize];
-            encoder.feature(feature, &to_tile);
+            encoder.feature(feature, &feature.geometry.within(bounds), &to_tile);
         }
         if let Some((points, clusters)) = &self.clustered {
             for item in clusters.within(zoom.min(24) as u8, bounds) {
@@ -324,7 +324,7 @@ impl GeoJsonIndex {
                         properties,
                     },
                 };
-                encoder.feature(&feature, &to_tile);
+                encoder.feature(&feature, &feature.geometry, &to_tile);
             }
         }
         Tile {
@@ -464,6 +464,7 @@ fn bounds_of(geometry: &Geometry) -> Option<[f64; 4]> {
     })
 }
 
+mod clip;
 pub(super) mod coverage;
 mod encode;
 use coverage::TileWindow;
