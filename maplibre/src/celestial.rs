@@ -214,7 +214,9 @@ pub fn set_sun_direction(world: &mut World, sun: Option<EcefDirection>) {
 mod discs;
 mod stars;
 
-pub use discs::{discs, set_sun_angular_radius, AngularRadius, CelestialDiscs, Disc};
+pub use discs::{
+    discs, set_moon_disc, set_sun_angular_radius, AngularRadius, CelestialDiscs, Disc,
+};
 pub use stars::{set_stars, Star, Starfield};
 
 #[cfg(test)]

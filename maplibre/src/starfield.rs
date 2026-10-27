@@ -20,6 +20,7 @@ use crate::{
     tcs::world::World,
 };
 
+pub mod moon;
 mod pipeline;
 pub mod sun;
 mod upload;
@@ -27,7 +28,7 @@ mod upload;
 pub use pipeline::StarfieldPipeline;
 pub use upload::{star_instance, StarInstance, StarfieldGpu};
 
-/// Draws the host's stars and sun behind a globe. Build it after
+/// Draws the host's stars, sun and moon behind a globe. Build it after
 /// [`crate::render::RenderPlugin`].
 #[derive(Default)]
 pub struct StarfieldPlugin;
@@ -49,10 +50,15 @@ impl<E: Environment> Plugin<E> for StarfieldPlugin {
         world
             .resources
             .insert(Eventually::<sun::depth::SunDepth>::Uninitialized);
+        world
+            .resources
+            .insert(Eventually::<moon::MoonPipeline>::Uninitialized);
         schedule.add_system_to_stage(RenderStageLabel::Prepare, pipeline::resource_system);
         schedule.add_system_to_stage(RenderStageLabel::Prepare, sun::resource_system);
+        schedule.add_system_to_stage(RenderStageLabel::Prepare, moon::resource_system);
         schedule.add_system_to_stage(RenderStageLabel::Queue, upload::queue_system);
         schedule.add_system_to_stage(RenderStageLabel::Queue, sun::queue_system);
+        schedule.add_system_to_stage(RenderStageLabel::Queue, moon::queue_system);
         add_sun_depth_copy(graph);
     }
 }

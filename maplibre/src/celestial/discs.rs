@@ -66,6 +66,9 @@ pub struct CelestialDiscs {
     /// The sun's radius. The disc stands where the sun direction points, so the disc and the
     /// light on the ground and in the sky cannot disagree; with no sun direction it is not drawn.
     pub sun_radius: Option<AngularRadius>,
+    /// The moon's disc, lit by the sun direction. The moon is near enough that its direction
+    /// is the one seen from the camera's eye, not from the Earth's centre.
+    pub moon: Option<Disc>,
 }
 
 /// The discs the host set; none until it sets one.
@@ -83,4 +86,9 @@ pub fn set_sun_angular_radius(world: &mut World, radius: Option<AngularRadius>) 
         .resources
         .get_or_init_mut::<CelestialDiscs>()
         .sun_radius = radius;
+}
+
+/// Sets or clears the moon's disc, whose direction is the one seen from the camera's eye.
+pub fn set_moon_disc(world: &mut World, moon: Option<Disc>) {
+    world.resources.get_or_init_mut::<CelestialDiscs>().moon = moon;
 }

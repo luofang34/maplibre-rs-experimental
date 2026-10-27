@@ -94,6 +94,17 @@ impl MapContext {
         }
     }
 
+    /// Sets or clears the moon's disc. Its direction is the one seen from the camera's eye: the
+    /// moon is near enough that the Earth's centre sees it elsewhere. Its phase follows
+    /// [`Self::set_sun_direction`]; with no sun set, the whole disc is drawn lit, a fallback
+    /// rather than a phase. The starfield plugin draws it.
+    pub fn set_moon_disc(&mut self, moon: Option<crate::celestial::Disc>) {
+        if crate::celestial::discs(&self.world).moon != moon {
+            crate::celestial::set_moon_disc(&mut self.world, moon);
+            crate::render::frame_signals::mark_dirty(&mut self.world);
+        }
+    }
+
     /// The sun direction set with [`Self::set_sun_direction`].
     pub fn sun_direction(&self) -> Option<crate::celestial::EcefDirection> {
         crate::celestial::sun_direction(&self.world)
