@@ -4,6 +4,7 @@
 
 use crate::{environment::Environment, plugin::Plugin};
 
+pub mod daylight;
 pub(crate) mod pattern;
 pub mod queue_system;
 pub mod render_commands;
@@ -25,7 +26,7 @@ impl<E: Environment> Plugin<E> for BackgroundPlugin {
         schedule: &mut crate::schedule::Schedule,
         _kernel: std::rc::Rc<crate::kernel::Kernel<E>>,
         world: &mut crate::tcs::world::World,
-        _graph: &mut crate::render::graph::RenderGraph,
+        graph: &mut crate::render::graph::RenderGraph,
     ) {
         world.resources.insert(
             crate::render::eventually::Eventually::<
@@ -48,10 +49,23 @@ impl<E: Environment> Plugin<E> for BackgroundPlugin {
             >::Uninitialized,
         );
 
+        world.resources.insert(
+            crate::render::eventually::Eventually::<daylight::GlobeDaylightPipeline>::Uninitialized,
+        );
+        world.resources.init::<daylight::GlobeDaylightGpu>();
         schedule.add_system_to_stage(
             crate::render::RenderStageLabel::Queue,
             queue_system::queue_system,
         );
+        schedule.add_system_to_stage(
+            crate::render::RenderStageLabel::Queue,
+            daylight::queue_system,
+        );
+        schedule.add_system_to_stage(
+            crate::render::RenderStageLabel::Prepare,
+            daylight::resource_system,
+        );
+        daylight::add_to_graph(graph);
         schedule.add_system_to_stage(
             crate::render::RenderStageLabel::Prepare,
             crate::background::resource_system::resource_system,
