@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["CLIP_CORNERS","PLANE_POINT_INDICES"],"fn":["adjust_far_plane","ideal_far_distance","normalized_near_plane","plane_from_points","ray_plane_distance"],"struct":["GlobeFrustum"]};
+window.SIDEBAR_ITEMS = {"constant":["CLIP_CORNERS","PLANE_POINT_INDICES"],"enum":["FarPlane"],"fn":["adjust_far_plane","ideal_far_distance","normalized_near_plane","plane_from_points","ray_plane_distance"],"struct":["GlobeFrustum"]};
