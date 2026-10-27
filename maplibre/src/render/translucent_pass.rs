@@ -100,8 +100,9 @@ impl Node for TranslucentPassNode {
                     occlusion_query_set: None,
                 });
         let mut render_pass = crate::render::tracked_pass::TrackedRenderPass::new(render_pass);
-        // The sun lies behind the translucent layers and under the atmosphere's glow.
+        // The sun and moon lie behind the translucent layers and under the atmosphere's glow.
         crate::starfield::sun::draw(&mut render_pass, world);
+        crate::starfield::moon::draw(&mut render_pass, world);
 
         // TODO: Automatically raise error when items get linearly too many (+1k)
 
