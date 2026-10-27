@@ -2,6 +2,7 @@
 
 #![deny(missing_docs)]
 
+pub(crate) mod clip;
 mod tile;
 use std::{
     f64::consts::PI,

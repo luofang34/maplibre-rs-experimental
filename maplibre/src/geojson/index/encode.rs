@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use geozero::mvt::tile::{Feature, GeomType, Layer, Value as MvtValue};
 use serde_json::Value;
 
-use super::{IndexedFeature, Point, EXTENT};
+use super::{Geometry, IndexedFeature, Point, EXTENT};
 use crate::style::source::GEOJSON_LAYER;
 
 const MOVE_TO: u32 = 1;
@@ -113,9 +113,9 @@ impl TileEncoder {
     pub(super) fn feature(
         &mut self,
         source: &IndexedFeature,
+        geometry: &Geometry,
         to_tile: &impl Fn(&Point) -> (i32, i32),
     ) {
-        let geometry = &source.geometry;
         if !geometry.points.is_empty() {
             let mut commands = Vec::new();
             let mut cursor = (0, 0);
