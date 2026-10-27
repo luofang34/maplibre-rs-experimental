@@ -25,6 +25,11 @@ impl HeadlessMap {
         self.map_context.set_stars(stars);
     }
 
+    /// Sets or clears the sun's disc, as [`crate::context::MapContext::set_sun_disc`] does.
+    pub fn set_sun_disc(&mut self, sun: Option<crate::celestial::Disc>) {
+        self.map_context.set_sun_disc(sun);
+    }
+
     /// Draws the globe's atmosphere without a style `sky`, as
     /// [`crate::context::MapContext::set_atmosphere`] does.
     pub fn set_atmosphere(&mut self, atmosphere: bool) {
@@ -38,3 +43,5 @@ mod daylight;
 mod host_atmosphere;
 #[cfg(test)]
 mod starfield;
+#[cfg(test)]
+mod sun;

@@ -47,6 +47,12 @@ pub enum CelestialError {
         /// Colour given.
         color: Option<[f32; 3]>,
     },
+    /// A disc's angular radius is not above zero and at most five degrees.
+    #[error("disc of angular radius {angular_radius_degrees}° cannot be drawn")]
+    InvalidDisc {
+        /// Angular radius given, in degrees.
+        angular_radius_degrees: f64,
+    },
 }
 
 /// A unit vector in ECEF (ITRF) axes: x towards 0°N 0°E, y towards 0°N 90°E, z towards the
@@ -205,8 +211,10 @@ pub fn set_sun_direction(world: &mut World, sun: Option<EcefDirection>) {
     world.resources.get_or_init_mut::<CelestialLighting>().sun = sun;
 }
 
+mod discs;
 mod stars;
 
+pub use discs::{discs, set_sun_disc, CelestialDiscs, Disc};
 pub use stars::{set_stars, Star, Starfield};
 
 #[cfg(test)]

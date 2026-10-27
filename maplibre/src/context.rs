@@ -84,6 +84,15 @@ impl MapContext {
         crate::render::frame_signals::mark_dirty(&mut self.world);
     }
 
+    /// Sets or clears the sun's disc, drawn with a glare that follows how much of it shows;
+    /// the starfield plugin draws it.
+    pub fn set_sun_disc(&mut self, sun: Option<crate::celestial::Disc>) {
+        if crate::celestial::discs(&self.world).sun != sun {
+            crate::celestial::set_sun_disc(&mut self.world, sun);
+            crate::render::frame_signals::mark_dirty(&mut self.world);
+        }
+    }
+
     /// The sun direction set with [`Self::set_sun_direction`].
     pub fn sun_direction(&self) -> Option<crate::celestial::EcefDirection> {
         crate::celestial::sun_direction(&self.world)

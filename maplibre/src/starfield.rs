@@ -21,12 +21,14 @@ use crate::{
 };
 
 mod pipeline;
+pub mod sun;
 mod upload;
 
 pub use pipeline::StarfieldPipeline;
 pub use upload::{star_instance, StarInstance, StarfieldGpu};
 
-/// Draws the host's stars behind a globe. Build it after [`crate::render::RenderPlugin`].
+/// Draws the host's stars and sun behind a globe. Build it after
+/// [`crate::render::RenderPlugin`].
 #[derive(Default)]
 pub struct StarfieldPlugin;
 
@@ -36,13 +38,45 @@ impl<E: Environment> Plugin<E> for StarfieldPlugin {
         schedule: &mut crate::schedule::Schedule,
         _kernel: std::rc::Rc<crate::kernel::Kernel<E>>,
         world: &mut World,
-        _graph: &mut crate::render::graph::RenderGraph,
+        graph: &mut crate::render::graph::RenderGraph,
     ) {
         world
             .resources
             .insert(Eventually::<StarfieldPipeline>::Uninitialized);
+        world
+            .resources
+            .insert(Eventually::<sun::SunPipeline>::Uninitialized);
+        world
+            .resources
+            .insert(Eventually::<sun::depth::SunDepth>::Uninitialized);
         schedule.add_system_to_stage(RenderStageLabel::Prepare, pipeline::resource_system);
+        schedule.add_system_to_stage(RenderStageLabel::Prepare, sun::resource_system);
         schedule.add_system_to_stage(RenderStageLabel::Queue, upload::queue_system);
+        schedule.add_system_to_stage(RenderStageLabel::Queue, sun::queue_system);
+        add_sun_depth_copy(graph);
+    }
+}
+
+/// Puts the sun's depth copy between the main and translucent passes, after everything the
+/// main pass draws and before the sun is drawn.
+fn add_sun_depth_copy(graph: &mut crate::render::graph::RenderGraph) {
+    use crate::render::draw_graph;
+    let Some(draw_graph) = graph.get_sub_graph_mut(draw_graph::NAME) else {
+        tracing::error!("draw graph is missing; the sun's glare will not see the ground");
+        return;
+    };
+    draw_graph.add_node(sun::depth::SUN_DEPTH_COPY, sun::depth::SunDepthCopyNode);
+    let edges = [
+        draw_graph.add_node_edge(draw_graph::node::MAIN_PASS, sun::depth::SUN_DEPTH_COPY),
+        draw_graph.add_node_edge(
+            sun::depth::SUN_DEPTH_COPY,
+            draw_graph::node::TRANSLUCENT_PASS,
+        ),
+    ];
+    for edge in edges {
+        if let Err(error) = edge {
+            tracing::error!(?error, "the sun's depth copy cannot be ordered");
+        }
     }
 }
 
