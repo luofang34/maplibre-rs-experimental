@@ -51,10 +51,20 @@ impl MapContext {
     }
 
     /// Sets the direction towards the sun in ECEF axes, which drives the atmosphere in place
-    /// of the style's root `light`; `None` returns it to the style's light.
+    /// of the style's root `light` and darkens the terrain's night side; `None` returns the
+    /// atmosphere to the style's light and lights all terrain as day.
     pub fn set_sun_direction(&mut self, sun: Option<crate::celestial::EcefDirection>) {
         if crate::celestial::sun_direction(&self.world) != sun {
             crate::celestial::set_sun_direction(&mut self.world, sun);
+            crate::render::frame_signals::mark_dirty(&mut self.world);
+        }
+    }
+
+    /// Sets the solar elevations over which the ground turns from night to day while a sun
+    /// direction is set.
+    pub fn set_twilight_band(&mut self, twilight: crate::celestial::TwilightBand) {
+        if crate::celestial::lighting(&self.world).twilight != twilight {
+            crate::celestial::set_twilight_band(&mut self.world, twilight);
             crate::render::frame_signals::mark_dirty(&mut self.world);
         }
     }

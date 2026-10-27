@@ -16,6 +16,8 @@ struct TerrainTileUniforms {
     fog_opacity: vec4<f32>,
     surface_color: vec4<f32>,
     fog_position: vec4<f32>,
+    daylight: vec4<f32>,
+    twilight: vec4<f32>,
     edge_heights: array<vec4<f32>, 128>,
     edge_last: vec4<f32>,
 };
@@ -26,6 +28,7 @@ struct VertexOutput {
     @location(2) surface_normal: vec3<f32>,
     @location(3) camera_relative_position: vec3<f32>,
     @location(4) polar_cap: f32,
+    @location(5) globe_normal: vec3<f32>,
     @builtin(position) position: vec4<f32>,
 };
 
@@ -35,6 +38,18 @@ struct VertexOutput {
 
 fn gamma_to_linear(color: vec4<f32>) -> vec4<f32> {
     return pow(color, vec4<f32>(2.2));
+}
+
+// How much of the day's light reaches the ground: one with the sun above the twilight band,
+// the night brightness below it and a smooth ramp across it. Without a host sun the factor is
+// exactly one, so the ground is drawn as it is without one.
+fn daylight(globe_normal: vec3<f32>) -> f32 {
+    if terrain_tile.daylight.w < 0.5 {
+        return 1.0;
+    }
+    let sun_elevation_sine = dot(normalize(globe_normal), terrain_tile.daylight.xyz);
+    let day = smoothstep(terrain_tile.twilight.x, terrain_tile.twilight.y, sun_elevation_sine);
+    return mix(terrain_tile.twilight.z, 1.0, day);
 }
 
 fn linear_to_gamma(color: vec4<f32>) -> vec4<f32> {
@@ -51,8 +66,9 @@ fn main(in: VertexOutput) -> @location(0) vec4<f32> {
         terrain_tile.surface_color, terrain_tile.fog_opacity.z > 0.5);
     // No tile holds the ground beyond the last row of tiles, so the cap closing the globe takes
     // the style's background colour, unlit, instead of the drape's edge stretched to the pole.
-    let surface = select(vec4<f32>(draped.rgb * relief, draped.a), terrain_tile.surface_color,
+    let lit = select(vec4<f32>(draped.rgb * relief, draped.a), terrain_tile.surface_color,
         in.polar_cap > 0.0);
+    let surface = vec4<f32>(lit.rgb * daylight(in.globe_normal), lit.a);
     let ground_blend = terrain_tile.fog_range.z;
     let horizon_blend = terrain_tile.fog_range.w;
     let opacity = terrain_tile.fog_opacity.x;

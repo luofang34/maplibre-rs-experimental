@@ -77,6 +77,11 @@ pub struct TerrainTileUniforms {
     pub surface_color: [f32; 4],
     /// Tile origin relative to the eye in metres, and metres per tile coordinate.
     pub fog_position: [f32; 4],
+    /// Direction towards the sun in globe world axes, with w 1 while a host has set one; all
+    /// zero leaves every tile lit as day.
+    pub daylight: [f32; 4],
+    /// Sines of the solar elevations ending night and starting day, then the night brightness.
+    pub twilight: [f32; 4],
     pub(crate) edge_heights: super::queue_system::edges::EdgeHeights,
 }
 

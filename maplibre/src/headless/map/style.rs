@@ -17,5 +17,6 @@ impl HeadlessMap {
     }
 }
 
+mod sky;
 #[cfg(test)]
 mod tests;

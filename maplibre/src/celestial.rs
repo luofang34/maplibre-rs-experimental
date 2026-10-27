@@ -24,6 +24,21 @@ pub enum CelestialError {
         /// ECEF z component as given.
         z: f64,
     },
+    /// The twilight band does not run upwards between finite elevations, or the night
+    /// brightness lies outside 0..=1.
+    #[error(
+        "twilight from {night_end_degrees}° to {day_start_degrees}° with night brightness \
+         {night_brightness} is not an ascending band of finite elevations with a brightness \
+         in 0..=1"
+    )]
+    InvalidTwilight {
+        /// Solar elevation given for the end of night, in degrees.
+        night_end_degrees: f64,
+        /// Solar elevation given for the start of full day, in degrees.
+        day_start_degrees: f64,
+        /// Brightness given for the night side.
+        night_brightness: f32,
+    },
 }
 
 /// A unit vector in ECEF (ITRF) axes: x towards 0°N 0°E, y towards 0°N 90°E, z towards the
@@ -61,11 +76,94 @@ pub fn ecef_to_globe_world(ecef: Vector3<f64>) -> Vector3<f64> {
     Vector3::new(ecef.y, ecef.z, ecef.x)
 }
 
+/// The solar elevations over which the ground turns from night to day, and how bright the
+/// night side stays.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TwilightBand {
+    night_end_degrees: f64,
+    day_start_degrees: f64,
+    night_brightness: f32,
+}
+
+impl Default for TwilightBand {
+    /// Night ends at civil dusk, 6° below the horizon, and full day begins with the sun 2°
+    /// above it.
+    fn default() -> Self {
+        Self {
+            night_end_degrees: -6.0,
+            day_start_degrees: 2.0,
+            night_brightness: 0.1,
+        }
+    }
+}
+
+impl TwilightBand {
+    /// A band from `night_end_degrees` to the higher `day_start_degrees` of solar elevation,
+    /// with the night side at `night_brightness` of the day side's light.
+    pub fn new(
+        night_end_degrees: f64,
+        day_start_degrees: f64,
+        night_brightness: f32,
+    ) -> Result<Self, CelestialError> {
+        let ascending = night_end_degrees.is_finite()
+            && day_start_degrees.is_finite()
+            && (-90.0..day_start_degrees).contains(&night_end_degrees)
+            && day_start_degrees <= 90.0;
+        if ascending && (0.0..=1.0).contains(&night_brightness) {
+            Ok(Self {
+                night_end_degrees,
+                day_start_degrees,
+                night_brightness,
+            })
+        } else {
+            Err(CelestialError::InvalidTwilight {
+                night_end_degrees,
+                day_start_degrees,
+                night_brightness,
+            })
+        }
+    }
+
+    /// The sines of the band's two elevations and the night brightness, as the shaders compare
+    /// them with the cosine between the surface normal and the sun.
+    fn uniform(self) -> [f32; 4] {
+        [
+            self.night_end_degrees.to_radians().sin() as f32,
+            self.day_start_degrees.to_radians().sin() as f32,
+            self.night_brightness,
+            0.0,
+        ]
+    }
+}
+
 /// What the host has said about the sky, kept as a world resource for the render systems.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct CelestialLighting {
     /// Direction from the Earth towards the sun; the style's light applies while it is unset.
     pub sun: Option<EcefDirection>,
+    /// Where the ground turns from night to day.
+    pub twilight: TwilightBand,
+}
+
+impl CelestialLighting {
+    /// The sun direction in globe world axes, with w 1 while a host has set one and all zero
+    /// otherwise, followed by the twilight band, as the terrain shader takes them.
+    pub fn daylight_uniforms(self) -> [[f32; 4]; 2] {
+        let sun = self.sun.map_or([0.0; 4], |sun| {
+            let world = sun.globe_world();
+            [world.x as f32, world.y as f32, world.z as f32, 1.0]
+        });
+        [sun, self.twilight.uniform()]
+    }
+}
+
+/// The host's sun and twilight band, or the defaults while it has set none.
+pub fn lighting(world: &World) -> CelestialLighting {
+    world
+        .resources
+        .get::<CelestialLighting>()
+        .copied()
+        .unwrap_or_default()
 }
 
 /// The sun direction the host set, if any.
@@ -74,6 +172,14 @@ pub fn sun_direction(world: &World) -> Option<EcefDirection> {
         .resources
         .get::<CelestialLighting>()
         .and_then(|lighting| lighting.sun)
+}
+
+/// Sets the band over which the ground turns from night to day.
+pub fn set_twilight_band(world: &mut World, twilight: TwilightBand) {
+    world
+        .resources
+        .get_or_init_mut::<CelestialLighting>()
+        .twilight = twilight;
 }
 
 /// Sets or clears the sun direction the render systems read.

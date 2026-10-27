@@ -20,6 +20,8 @@ struct TerrainTileUniforms {
     fog_opacity: vec4<f32>,
     surface_color: vec4<f32>,
     fog_position: vec4<f32>,
+    daylight: vec4<f32>,
+    twilight: vec4<f32>,
     edge_heights: array<vec4<f32>, 128>,
     edge_last: vec4<f32>,
 };
