@@ -152,6 +152,8 @@ fn draw_layers<'w>(
         .filter(|frame| frame.active)
         .copied();
     let mut terrain_pending = terrain.is_some();
+    // The stars lie behind everything, so every layer and the terrain cover them.
+    crate::starfield::draw(pass, world);
     let above = above_symbols(world);
     if let Some(layers) = world.resources.get::<RenderPhase<LayerItem>>() {
         let mut previous = &[][..];
