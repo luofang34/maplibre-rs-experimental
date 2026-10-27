@@ -33,7 +33,8 @@ impl VisibleFraction {
 
 /// Sets the share of the sun's disc left uncovered where the eye stands. The sky's scattered
 /// sunlight and the day side's light scale with it; the sun's disc and its glare do not, as the
-/// moon's disc covers the one and the other stands in for the corona.
+/// moon's disc covers the one and the other stands in for the corona. The ground has a day
+/// side only under a host's sun direction, so without one only the sky dims.
 pub fn set_sun_visible_fraction(world: &mut World, fraction: VisibleFraction) {
     world
         .resources
