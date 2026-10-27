@@ -44,6 +44,8 @@ impl HeadlessMap {
 }
 
 #[cfg(test)]
+mod bright_moon;
+#[cfg(test)]
 mod daylight;
 #[cfg(test)]
 mod host_atmosphere;

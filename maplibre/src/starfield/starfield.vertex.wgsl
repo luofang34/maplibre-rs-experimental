@@ -4,7 +4,8 @@
 // x, y: the viewport in physical pixels; z: physical pixels per logical pixel; w: how far the
 // map has turned into a globe, which the stars fade in with. Then the rotation from globe world
 // axes into view axes, and the atmosphere's inputs: the globe's centre and the sun in view
-// axes, then the globe's radius in pixels, the atmosphere's blend and the body's radius.
+// axes, then the globe's radius in pixels, the atmosphere's blend and the body's radius; and
+// the moon.
 struct StarfieldFrame {
     viewport_ratio_transition: vec4<f32>,
     view_x: vec4<f32>,
@@ -13,6 +14,8 @@ struct StarfieldFrame {
     globe_position: vec4<f32>,
     sun_direction: vec4<f32>,
     radius_blend_body: vec4<f32>,
+    // Direction to the moon in globe world axes, then its brightness relative to a full moon.
+    moon: vec4<f32>,
 };
 
 // Sky brightness, as the atmosphere draw adds it, at which a star starts to fade and at which
@@ -20,11 +23,29 @@ struct StarfieldFrame {
 const STAR_FADE_START: f32 = 0.02;
 const STAR_FADE_END: f32 = 0.1;
 
-// How much of a star shows through the sky the atmosphere draws in direction `direction`.
+// The sky a full moon brightens right beside it, and the angle in radians over which that
+// falls to half: its light scattered in the air washes out the stars around it.
+const MOON_SKY_BRIGHTNESS: f32 = 0.12;
+const MOON_SKY_HALF_ANGLE: f32 = 0.07;
+
+// The sky's brightness the moon adds in direction `direction`, as bright as the moon is.
+fn moon_sky(direction: vec3<f32>) -> f32 {
+    let brightness = starfield.moon.w;
+    if brightness <= 0.0 {
+        return 0.0;
+    }
+    let angle = acos(clamp(dot(normalize(direction), starfield.moon.xyz), -1.0, 1.0));
+    let falloff = angle / MOON_SKY_HALF_ANGLE;
+    return MOON_SKY_BRIGHTNESS * brightness / (1.0 + falloff * falloff);
+}
+
+// How much of a star shows through the sky in direction `direction`: the sky the atmosphere
+// draws, and the moon's light scattered around it.
 fn sky_visibility(direction: vec3<f32>) -> f32 {
+    let moonlit = moon_sky(direction);
     let blend = starfield.radius_blend_body.y;
     if blend <= 0.0 {
-        return 1.0;
+        return 1.0 - smoothstep(STAR_FADE_START, STAR_FADE_END, moonlit);
     }
     let view_direction = mat3x3<f32>(
         starfield.view_x.xyz,
@@ -35,7 +56,7 @@ fn sky_visibility(direction: vec3<f32>) -> f32 {
     let eye = -starfield.globe_position.xyz * body_radius / starfield.radius_blend_body.x;
     let raw = scattering(view_direction, eye, starfield.sun_direction.xyz, body_radius);
     let sky = displayed_scattering(raw).rgb * blend;
-    let luminance = dot(sky, vec3<f32>(0.2126, 0.7152, 0.0722));
+    let luminance = dot(sky, vec3<f32>(0.2126, 0.7152, 0.0722)) + moonlit;
     return 1.0 - smoothstep(STAR_FADE_START, STAR_FADE_END, luminance);
 }
 

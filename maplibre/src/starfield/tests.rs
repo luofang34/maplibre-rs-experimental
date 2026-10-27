@@ -1,4 +1,4 @@
-use super::star_instance;
+use super::{star_instance, STAR_PEAK_BRIGHTNESS};
 use crate::celestial::{EcefDirection, Star};
 
 fn star(magnitude: f32) -> Star {
@@ -24,7 +24,7 @@ fn brighter_stars_are_drawn_larger_and_no_dimmer() {
         instances[0].color_brightness[3] < 0.2,
         "a faint star stays faint"
     );
-    assert_eq!(instances[2].color_brightness[3], 1.0);
+    assert_eq!(instances[2].color_brightness[3], STAR_PEAK_BRIGHTNESS);
     assert!(
         instances[3].direction_radius[3] <= 4.0,
         "the brightest stars are capped"

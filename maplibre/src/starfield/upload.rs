@@ -20,6 +20,8 @@ const REFERENCE_MAGNITUDE: f32 = 1.0;
 const RADIUS_SCALE: f32 = 1.5;
 const MIN_RADIUS: f32 = 1.0;
 const MAX_RADIUS: f32 = 4.0;
+/// The brightness a star saturates at: short of white, so the moon outshines every star.
+pub const STAR_PEAK_BRIGHTNESS: f32 = 0.75;
 
 /// One star as the shader draws it.
 #[repr(C)]
@@ -32,8 +34,8 @@ pub struct StarInstance {
 }
 
 /// How a star is drawn: its flux relative to the reference magnitude, 10^(-0.4 Δm), sets both
-/// its brightness, which saturates at the reference, and its size, which keeps growing for the
-/// brightest stars until it is capped.
+/// its brightness, which saturates at the reference at [`STAR_PEAK_BRIGHTNESS`], and its size,
+/// which keeps growing for the brightest stars until it is capped.
 pub fn star_instance(star: &Star) -> StarInstance {
     let direction = star.direction().globe_world();
     let flux = 10_f32.powf(-0.4 * (star.magnitude() - REFERENCE_MAGNITUDE));
@@ -47,7 +49,7 @@ pub fn star_instance(star: &Star) -> StarInstance {
             direction.z as f32,
             radius,
         ],
-        color_brightness: [red, green, blue, amplitude.min(1.0)],
+        color_brightness: [red, green, blue, amplitude.min(1.0) * STAR_PEAK_BRIGHTNESS],
     }
 }
 
@@ -61,6 +63,9 @@ struct StarfieldFrame {
     view_rotation: [[f32; 4]; 3],
     /// The atmosphere's inputs, as [`AtmosphereLayerMetadata::sky_inputs`] gives them.
     sky: [[f32; 4]; 3],
+    /// Direction to the moon in globe world axes, then its brightness relative to a full moon;
+    /// all zero without a moon.
+    moon: [f32; 4],
 }
 
 /// The frame's view rotation and sky, with no sky where the atmosphere is not drawn or the
@@ -151,6 +156,19 @@ pub(super) fn queue_system(
         .map_or(1.0, |ratio| ratio.0);
     let size = renderer.state().surface().size();
     let (view_rotation, sky) = view_and_sky(style, view_state, world);
+    let moon = crate::celestial::discs(world)
+        .moon
+        .map_or([0.0; 4], |moon| {
+            let direction = moon.direction().globe_world();
+            let sun = crate::celestial::sun_direction(world).map(|sun| sun.globe_world());
+            let brightness = super::moon::relative_brightness(sun, direction);
+            [
+                direction.x as f32,
+                direction.y as f32,
+                direction.z as f32,
+                brightness as f32,
+            ]
+        });
     let gpu = world.resources.get_or_init_mut::<StarfieldGpu>();
     gpu.visible = transition > 0.0;
     if let Some(starfield) = starfield.filter(|field| Some(field.generation()) != gpu.generation) {
@@ -196,6 +214,7 @@ pub(super) fn queue_system(
         ],
         view_rotation,
         sky,
+        moon,
     };
     renderer
         .queue
