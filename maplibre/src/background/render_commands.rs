@@ -97,21 +97,45 @@ impl RenderCommand<LayerItem> for DrawGlobeBackgroundQuad {
         )>() else {
             return RenderCommandResult::Failure;
         };
-        let coords = crate::coords::WorldTileCoords::default();
-        let Some(mesh) = mesh_cache.get(coords, TileMeshUsage::Raster, false) else {
-            return RenderCommandResult::Failure;
-        };
-        pass.set_vertex_buffer(0, mesh.vertex_buffer().slice(..));
-        pass.set_vertex_buffer(1, buffers.tile_metadata_buffer.slice(..));
-        pass.set_vertex_buffer(2, buffers.metadata_buffer.slice(..));
-        pass.set_index_buffer(mesh.index_buffer().slice(..), mesh.index_format());
-        let instance = buffers
-            .instances
-            .get(&item.style_layer)
-            .copied()
-            .unwrap_or(0);
-        pass.draw_indexed(0..mesh.index_count(), 0, instance..instance + 1);
-        RenderCommandResult::Success
+        let instance = u64::from(
+            buffers
+                .instances
+                .get(&item.style_layer)
+                .copied()
+                .unwrap_or(0),
+        );
+        // Both the tile and the layer step per instance, so each is bound as a one-element
+        // slice and drawn as instance zero.
+        let stride = std::mem::size_of::<crate::render::shaders::ShaderTileMetadata>() as u64;
+        let layer_stride =
+            std::mem::size_of::<crate::render::shaders::BackgroundLayerMetadata>() as u64;
+        pass.set_vertex_buffer(
+            2,
+            buffers
+                .metadata_buffer
+                .slice(instance * layer_stride..(instance + 1) * layer_stride),
+        );
+        let mut drawn = false;
+        for (index, coords) in (0_u64..).zip(&buffers.globe_tiles) {
+            let Some(mesh) = mesh_cache.get(*coords, TileMeshUsage::Raster, false) else {
+                continue;
+            };
+            pass.set_vertex_buffer(0, mesh.vertex_buffer().slice(..));
+            pass.set_vertex_buffer(
+                1,
+                buffers
+                    .tile_metadata_buffer
+                    .slice(index * stride..(index + 1) * stride),
+            );
+            pass.set_index_buffer(mesh.index_buffer().slice(..), mesh.index_format());
+            pass.draw_indexed(0..mesh.index_count(), 0, 0..1);
+            drawn = true;
+        }
+        if drawn {
+            RenderCommandResult::Success
+        } else {
+            RenderCommandResult::Failure
+        }
     }
 }
 
