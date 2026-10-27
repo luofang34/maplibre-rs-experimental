@@ -1,6 +1,9 @@
 use cgmath::{InnerSpace, Vector3};
 
-use super::{ecef_to_globe_world, CelestialError, CelestialLighting, EcefDirection, TwilightBand};
+use super::{
+    ecef_to_globe_world, moonlight_uniform, CelestialError, CelestialLighting, Disc, EcefDirection,
+    TwilightBand, MOONLIGHT_GAIN, NIGHT_BRIGHTNESS,
+};
 use crate::{coords::LatLon, projection::globe::lat_lon_to_unit_sphere};
 
 /// The ECEF unit vector of a geocentric latitude and longitude, from the axes' definition.
@@ -91,5 +94,22 @@ fn daylight_uniforms_carry_the_globe_sun_and_the_band_sines() {
     assert_eq!(sun, [0.0, 0.0, 1.0, 1.0]);
     assert!((f64::from(twilight[0]) - (-6_f64).to_radians().sin()).abs() < 1e-6);
     assert!((f64::from(twilight[1]) - 2_f64.to_radians().sin()).abs() < 1e-6);
-    assert_eq!(twilight[2], 0.1);
+    assert_eq!(twilight[2], NIGHT_BRIGHTNESS);
+}
+
+#[test]
+fn moonlight_is_the_moon_direction_and_its_lit_share() {
+    let sun = EcefDirection::new(1.0, 0.0, 0.0).ok();
+    let disc = |x, y, z| Disc::new(EcefDirection::new(x, y, z).expect("direction"), 0.26).ok();
+    let full = moonlight_uniform(sun, disc(-1.0, 0.0, 0.0));
+    assert_eq!(full, [0.0, 0.0, -1.0, MOONLIGHT_GAIN]);
+    let quarter = moonlight_uniform(sun, disc(0.0, 1.0, 0.0));
+    assert!((quarter[3] - MOONLIGHT_GAIN / 2.0).abs() < 1e-6);
+    assert_eq!(
+        moonlight_uniform(sun, disc(1.0, 0.0, 0.0))[3],
+        0.0,
+        "new Moon"
+    );
+    assert_eq!(moonlight_uniform(None, disc(-1.0, 0.0, 0.0)), [0.0; 4]);
+    assert_eq!(moonlight_uniform(sun, None), [0.0; 4]);
 }

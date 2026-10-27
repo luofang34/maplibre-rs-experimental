@@ -90,6 +90,11 @@ pub fn ecef_to_globe_world(ecef: Vector3<f64>) -> Vector3<f64> {
     Vector3::new(ecef.y, ecef.z, ecef.x)
 }
 
+/// The night side's share of the day's light by default.
+pub const NIGHT_BRIGHTNESS: f32 = 0.35;
+/// What a full Moon overhead adds to the night side's share of the day's light.
+pub const MOONLIGHT_GAIN: f32 = 0.25;
+
 /// The solar elevations over which the ground turns from night to day, and how bright the
 /// night side stays.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -101,12 +106,13 @@ pub struct TwilightBand {
 
 impl Default for TwilightBand {
     /// Night ends at civil dusk, 6° below the horizon, and full day begins with the sun 2°
-    /// above it.
+    /// above it. The night side keeps a third of the day's light, so its roads, labels and
+    /// relief stay readable rather than turning black.
     fn default() -> Self {
         Self {
             night_end_degrees: -6.0,
             day_start_degrees: 2.0,
-            night_brightness: 0.1,
+            night_brightness: NIGHT_BRIGHTNESS,
         }
     }
 }
@@ -159,6 +165,27 @@ pub struct CelestialLighting {
     pub twilight: TwilightBand,
     /// Whether the globe's atmosphere is drawn in full whatever the style's `sky` says.
     pub atmosphere: bool,
+}
+
+/// What lights the terrain: the host's sky and its Moon.
+pub(crate) type TerrainLight = (CelestialLighting, Option<Disc>);
+
+/// The Moon's light on the night side: its direction in globe world axes and, as w, the
+/// light it adds overhead: [`MOONLIGHT_GAIN`] times its lit fraction (1 − cos elongation) / 2,
+/// from the angle between the Sun and Moon directions. All zero without both bodies.
+pub fn moonlight_uniform(sun: Option<EcefDirection>, moon: Option<Disc>) -> [f32; 4] {
+    let (Some(sun), Some(moon)) = (sun, moon) else {
+        return [0.0; 4];
+    };
+    let direction = moon.direction();
+    let lit_fraction = (1.0 - sun.ecef().dot(direction.ecef())) / 2.0;
+    let world = direction.globe_world();
+    [
+        world.x as f32,
+        world.y as f32,
+        world.z as f32,
+        MOONLIGHT_GAIN * lit_fraction as f32,
+    ]
 }
 
 impl CelestialLighting {

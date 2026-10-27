@@ -29,7 +29,10 @@ pub(super) fn replay(
     queue: &crate::render::upload_queue::UploadQueue,
 ) -> SystemResult {
     let fog = terrain_fog(style, view);
-    let lighting = crate::celestial::lighting(world);
+    let lighting = (
+        crate::celestial::lighting(world),
+        crate::celestial::discs(world).moon,
+    );
     let projection = view.gpu_view_projection();
     if let Some(frame) = world.resources.get_mut::<TerrainEyeFrame>() {
         for (coords, uniform) in &mut frame.0 {
@@ -170,6 +173,7 @@ pub(super) fn tile_uniforms(
         fog_position: [0.0; 4],
         daylight: [0.0; 4],
         twilight: [0.0; 4],
+        moonlight: [0.0; 4],
     })
 }
 
@@ -215,12 +219,15 @@ pub(super) fn surface_settings(
     world: &World,
 ) -> (
     crate::terrain::TerrainSkirts,
-    crate::celestial::CelestialLighting,
+    crate::celestial::TerrainLight,
 ) {
     let skirts = world.resources.get::<crate::terrain::TerrainSkirts>();
     (
         skirts.copied().unwrap_or_default(),
-        crate::celestial::lighting(world),
+        (
+            crate::celestial::lighting(world),
+            crate::celestial::discs(world).moon,
+        ),
     )
 }
 
@@ -232,7 +239,7 @@ pub(super) fn prepare_tiles(
     (dem, skirts, lighting): (
         &DemSource,
         crate::terrain::TerrainSkirts,
-        crate::celestial::CelestialLighting,
+        crate::celestial::TerrainLight,
     ),
 ) -> PreparedTerrain {
     let (specs, drape_sources) = targets;
@@ -320,11 +327,12 @@ pub(super) fn with_world_copies(
 fn surface_uniforms(
     block: &mut TerrainTileUniforms,
     coords: WorldTileCoords,
-    (style, lighting): (&Style, crate::celestial::CelestialLighting),
+    (style, (lighting, moon)): (&Style, crate::celestial::TerrainLight),
     view: &ViewState,
 ) {
     globe::set_uniforms(block, coords, view);
     [block.daylight, block.twilight] = lighting.daylight_uniforms();
+    block.moonlight = crate::celestial::moonlight_uniform(lighting.sun, moon);
     let color = super::background_clear_color(style);
     block.surface_color = [
         color.r as f32,
