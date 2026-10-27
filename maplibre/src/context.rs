@@ -84,6 +84,16 @@ impl MapContext {
         crate::render::frame_signals::mark_dirty(&mut self.world);
     }
 
+    /// Sets or clears the sun's angular radius. The disc stands where
+    /// [`Self::set_sun_direction`] points, with a glare that follows how much of it shows; with no
+    /// sun direction it is not drawn. The starfield plugin draws it.
+    pub fn set_sun_angular_radius(&mut self, radius: Option<crate::celestial::AngularRadius>) {
+        if crate::celestial::discs(&self.world).sun_radius != radius {
+            crate::celestial::set_sun_angular_radius(&mut self.world, radius);
+            crate::render::frame_signals::mark_dirty(&mut self.world);
+        }
+    }
+
     /// The sun direction set with [`Self::set_sun_direction`].
     pub fn sun_direction(&self) -> Option<crate::celestial::EcefDirection> {
         crate::celestial::sun_direction(&self.world)
