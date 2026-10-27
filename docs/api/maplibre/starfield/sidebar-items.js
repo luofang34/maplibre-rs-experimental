@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["add_sun_depth_copy","draw","star_instance"],"mod":["moon","pipeline","sun","upload"],"struct":["StarInstance","StarfieldGpu","StarfieldPipeline","StarfieldPlugin"]};
+window.SIDEBAR_ITEMS = {"constant":["STAR_PEAK_BRIGHTNESS"],"fn":["add_sun_depth_copy","draw","star_instance"],"mod":["moon","pipeline","sun","upload"],"struct":["StarInstance","StarfieldGpu","StarfieldPipeline","StarfieldPlugin"]};

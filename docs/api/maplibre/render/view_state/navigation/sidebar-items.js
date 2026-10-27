@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["VERTICAL_TILT"],"enum":["NavigationError","NavigationLimit","NavigationMode"],"fn":["frame_at","supports_free_navigation","turn_between","view_rotation"],"mod":["gestures","placement"],"struct":["FreeGlobe","GlobePose","PoseView"]};
+window.SIDEBAR_ITEMS = {"constant":["VERTICAL_TILT"],"enum":["NavigationError","NavigationLimit","NavigationMode"],"fn":["frame_at","supports_free_navigation","turn_between","view_rotation"],"mod":["gestures","grounding","placement"],"struct":["FreeGlobe","GlobePose","PoseView"]};

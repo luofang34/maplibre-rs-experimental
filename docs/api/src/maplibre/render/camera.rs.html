@@ -224,180 +224,182 @@
 <a href=#224 id=224 data-nosnippet>224</a>        <span class="self">self</span>.roll
 <a href=#225 id=225 data-nosnippet>225</a>    }
 <a href=#226 id=226 data-nosnippet>226</a>
-<a href=#227 id=227 data-nosnippet>227</a>    <span class="doccomment">/// Returns tilt away from a vertical map view in radians.
-<a href=#228 id=228 data-nosnippet>228</a>    </span><span class="kw">pub fn </span>get_pitch(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Rad&lt;f64&gt; {
-<a href=#229 id=229 data-nosnippet>229</a>        <span class="self">self</span>.pitch
-<a href=#230 id=230 data-nosnippet>230</a>    }
-<a href=#231 id=231 data-nosnippet>231</a>
-<a href=#232 id=232 data-nosnippet>232</a>    <span class="doccomment">/// Adds a pitch delta only if the result stays between -30 degrees and [`Self::max_pitch`].
-<a href=#233 id=233 data-nosnippet>233</a>    </span><span class="kw">pub fn </span>pitch&lt;P: Into&lt;Rad&lt;f64&gt;&gt;&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, delta: P) {
-<a href=#234 id=234 data-nosnippet>234</a>        <span class="kw">let </span>new_pitch = <span class="self">self</span>.pitch + delta.into();
-<a href=#235 id=235 data-nosnippet>235</a>
-<a href=#236 id=236 data-nosnippet>236</a>        <span class="kw">if </span>new_pitch &lt;= <span class="self">self</span>.max_pitch &amp;&amp; new_pitch &gt;= MIN_PITCH.into() {
-<a href=#237 id=237 data-nosnippet>237</a>            <span class="self">self</span>.pitch = new_pitch;
-<a href=#238 id=238 data-nosnippet>238</a>        }
-<a href=#239 id=239 data-nosnippet>239</a>    }
-<a href=#240 id=240 data-nosnippet>240</a>
-<a href=#241 id=241 data-nosnippet>241</a>    <span class="doccomment">/// Offsets the orbit center in world pixels, without rotating the delta by the camera bearing.
-<a href=#242 id=242 data-nosnippet>242</a>    </span><span class="kw">pub fn </span>move_relative(<span class="kw-2">&amp;mut </span><span class="self">self</span>, delta: Vector2&lt;f64&gt;) {
-<a href=#243 id=243 data-nosnippet>243</a>        <span class="self">self</span>.position += delta;
-<a href=#244 id=244 data-nosnippet>244</a>    }
-<a href=#245 id=245 data-nosnippet>245</a>
-<a href=#246 id=246 data-nosnippet>246</a>    <span class="doccomment">/// Replaces the orbit center in world pixels without changing orientation.
-<a href=#247 id=247 data-nosnippet>247</a>    </span><span class="kw">pub fn </span>move_to(<span class="kw-2">&amp;mut </span><span class="self">self</span>, new_position: Point2&lt;f64&gt;) {
-<a href=#248 id=248 data-nosnippet>248</a>        <span class="self">self</span>.position = new_position;
-<a href=#249 id=249 data-nosnippet>249</a>    }
-<a href=#250 id=250 data-nosnippet>250</a>
-<a href=#251 id=251 data-nosnippet>251</a>    <span class="doccomment">/// Returns the world-pixel orbit center as a vector from the world origin.
-<a href=#252 id=252 data-nosnippet>252</a>    </span><span class="kw">pub fn </span>position_vector(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vector2&lt;f64&gt; {
-<a href=#253 id=253 data-nosnippet>253</a>        <span class="self">self</span>.position.to_vec()
-<a href=#254 id=254 data-nosnippet>254</a>    }
-<a href=#255 id=255 data-nosnippet>255</a>
-<a href=#256 id=256 data-nosnippet>256</a>    <span class="doccomment">/// Appends a pixel height to the orbit center; this does not apply the camera's rotations.
-<a href=#257 id=257 data-nosnippet>257</a>    </span><span class="kw">pub fn </span>to_3d(<span class="kw-2">&amp;</span><span class="self">self</span>, camera_height: f64) -&gt; Point3&lt;f64&gt; {
-<a href=#258 id=258 data-nosnippet>258</a>        Point3::new(<span class="self">self</span>.position.x, <span class="self">self</span>.position.y, camera_height)
-<a href=#259 id=259 data-nosnippet>259</a>    }
-<a href=#260 id=260 data-nosnippet>260</a>    <span class="doccomment">/// Sets lateral rotation, clamped to -30 through 30 degrees.
-<a href=#261 id=261 data-nosnippet>261</a>    </span><span class="kw">pub fn </span>set_yaw&lt;P: Into&lt;Rad&lt;f64&gt;&gt;&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, yaw: P) {
-<a href=#262 id=262 data-nosnippet>262</a>        <span class="kw">let </span>new_yaw = yaw.into();
-<a href=#263 id=263 data-nosnippet>263</a>        <span class="kw">let </span>max: Rad&lt;<span class="kw">_</span>&gt; = MAX_YAW.into();
-<a href=#264 id=264 data-nosnippet>264</a>        <span class="kw">let </span>min: Rad&lt;<span class="kw">_</span>&gt; = MIN_YAW.into();
-<a href=#265 id=265 data-nosnippet>265</a>        <span class="self">self</span>.yaw = Rad(new_yaw.<span class="number">0</span>.min(max.<span class="number">0</span>).max(min.<span class="number">0</span>))
-<a href=#266 id=266 data-nosnippet>266</a>    }
-<a href=#267 id=267 data-nosnippet>267</a>    <span class="doccomment">/// Sets tilt, clamped to -30 degrees through [`Self::max_pitch`].
-<a href=#268 id=268 data-nosnippet>268</a>    </span><span class="kw">pub fn </span>set_pitch&lt;P: Into&lt;Rad&lt;f64&gt;&gt;&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, pitch: P) {
-<a href=#269 id=269 data-nosnippet>269</a>        <span class="kw">let </span>new_pitch = pitch.into();
-<a href=#270 id=270 data-nosnippet>270</a>        <span class="kw">let </span>min: Rad&lt;<span class="kw">_</span>&gt; = MIN_PITCH.into();
-<a href=#271 id=271 data-nosnippet>271</a>        <span class="self">self</span>.pitch = Rad(new_pitch.<span class="number">0</span>.min(<span class="self">self</span>.max_pitch.<span class="number">0</span>).max(min.<span class="number">0</span>))
-<a href=#272 id=272 data-nosnippet>272</a>    }
-<a href=#273 id=273 data-nosnippet>273</a>    <span class="doccomment">/// Sets clockwise rotation from north without normalizing the angle.
-<a href=#274 id=274 data-nosnippet>274</a>    </span><span class="kw">pub fn </span>set_bearing&lt;P: Into&lt;Rad&lt;f64&gt;&gt;&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, bearing: P) {
-<a href=#275 id=275 data-nosnippet>275</a>        <span class="self">self</span>.bearing = bearing.into();
-<a href=#276 id=276 data-nosnippet>276</a>    }
-<a href=#277 id=277 data-nosnippet>277</a>    <span class="doccomment">/// Sets rotation about the view axis without clamping or normalizing the angle.
-<a href=#278 id=278 data-nosnippet>278</a>    </span><span class="kw">pub fn </span>set_roll&lt;P: Into&lt;Rad&lt;f64&gt;&gt;&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, roll: P) {
-<a href=#279 id=279 data-nosnippet>279</a>        <span class="self">self</span>.roll = roll.into();
-<a href=#280 id=280 data-nosnippet>280</a>    }
-<a href=#281 id=281 data-nosnippet>281</a>}
-<a href=#282 id=282 data-nosnippet>282</a>
-<a href=#283 id=283 data-nosnippet>283</a><span class="attr">#[derive(PartialEq, Copy, Clone, Default)]
-<a href=#284 id=284 data-nosnippet>284</a></span><span class="doccomment">/// Viewport padding in pixels that shifts the apparent map center without resizing the viewport.
-<a href=#285 id=285 data-nosnippet>285</a></span><span class="kw">pub struct </span>EdgeInsets {
-<a href=#286 id=286 data-nosnippet>286</a>    <span class="doccomment">/// Padding measured down from the top edge.
-<a href=#287 id=287 data-nosnippet>287</a>    </span><span class="kw">pub </span>top: f64,
-<a href=#288 id=288 data-nosnippet>288</a>    <span class="doccomment">/// Padding measured up from the bottom edge.
-<a href=#289 id=289 data-nosnippet>289</a>    </span><span class="kw">pub </span>bottom: f64,
-<a href=#290 id=290 data-nosnippet>290</a>    <span class="doccomment">/// Padding measured right from the left edge.
-<a href=#291 id=291 data-nosnippet>291</a>    </span><span class="kw">pub </span>left: f64,
-<a href=#292 id=292 data-nosnippet>292</a>    <span class="doccomment">/// Padding measured left from the right edge.
-<a href=#293 id=293 data-nosnippet>293</a>    </span><span class="kw">pub </span>right: f64,
-<a href=#294 id=294 data-nosnippet>294</a>}
-<a href=#295 id=295 data-nosnippet>295</a>
-<a href=#296 id=296 data-nosnippet>296</a><span class="kw">impl </span>EdgeInsets {
-<a href=#297 id=297 data-nosnippet>297</a>    <span class="doccomment">/// Returns the padded center in viewport pixels, clamped to the viewport bounds.
-<a href=#298 id=298 data-nosnippet>298</a>    /// Coordinates start at the top left and increase rightward and downward.
-<a href=#299 id=299 data-nosnippet>299</a>    </span><span class="kw">pub fn </span>center(<span class="kw-2">&amp;</span><span class="self">self</span>, width: f64, height: f64) -&gt; Point2&lt;f64&gt; {
-<a href=#300 id=300 data-nosnippet>300</a>        <span class="comment">// Clamp insets so they never overflow width/height and always calculate a valid center
-<a href=#301 id=301 data-nosnippet>301</a>        </span><span class="kw">let </span>x = clamp((<span class="self">self</span>.left + width - <span class="self">self</span>.right) / <span class="number">2.0</span>, <span class="number">0.0</span>, width);
-<a href=#302 id=302 data-nosnippet>302</a>        <span class="kw">let </span>y = clamp((<span class="self">self</span>.top + height - <span class="self">self</span>.bottom) / <span class="number">2.0</span>, <span class="number">0.0</span>, height);
-<a href=#303 id=303 data-nosnippet>303</a>
-<a href=#304 id=304 data-nosnippet>304</a>        Point2::new(x, y)
-<a href=#305 id=305 data-nosnippet>305</a>    }
-<a href=#306 id=306 data-nosnippet>306</a>}
-<a href=#307 id=307 data-nosnippet>307</a>
-<a href=#308 id=308 data-nosnippet>308</a><span class="attr">#[derive(Clone)]
-<a href=#309 id=309 data-nosnippet>309</a></span><span class="doccomment">/// Vertical field of view used to construct OpenGL-convention perspective matrices.
-<a href=#310 id=310 data-nosnippet>310</a></span><span class="kw">pub struct </span>Perspective {
-<a href=#311 id=311 data-nosnippet>311</a>    fovy: Rad&lt;f64&gt;,
-<a href=#312 id=312 data-nosnippet>312</a>}
-<a href=#313 id=313 data-nosnippet>313</a>
-<a href=#314 id=314 data-nosnippet>314</a><span class="kw">impl </span>Perspective {
-<a href=#315 id=315 data-nosnippet>315</a>    <span class="doccomment">/// Stores a vertical field of view without validating its range.
-<a href=#316 id=316 data-nosnippet>316</a>    </span><span class="kw">pub fn </span>new&lt;F: Into&lt;Rad&lt;f64&gt;&gt;&gt;(fovy: F) -&gt; <span class="self">Self </span>{
-<a href=#317 id=317 data-nosnippet>317</a>        <span class="kw">let </span>rad = fovy.into();
-<a href=#318 id=318 data-nosnippet>318</a>        <span class="self">Self </span>{ fovy: rad }
-<a href=#319 id=319 data-nosnippet>319</a>    }
-<a href=#320 id=320 data-nosnippet>320</a>
-<a href=#321 id=321 data-nosnippet>321</a>    <span class="doccomment">/// Returns the full vertical viewing angle in radians.
-<a href=#322 id=322 data-nosnippet>322</a>    </span><span class="kw">pub fn </span>fovy(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Rad&lt;f64&gt; {
-<a href=#323 id=323 data-nosnippet>323</a>        <span class="self">self</span>.fovy
-<a href=#324 id=324 data-nosnippet>324</a>    }
-<a href=#325 id=325 data-nosnippet>325</a>    <span class="doccomment">/// Returns the horizontal viewing angle for a viewport with positive width and height.
-<a href=#326 id=326 data-nosnippet>326</a>    </span><span class="kw">pub fn </span>fovx(<span class="kw-2">&amp;</span><span class="self">self</span>, width: f64, height: f64) -&gt; Rad&lt;f64&gt; {
-<a href=#327 id=327 data-nosnippet>327</a>        <span class="kw">let </span>aspect = width / height;
-<a href=#328 id=328 data-nosnippet>328</a>        Rad(<span class="number">2.0 </span>* ((<span class="self">self</span>.fovy / <span class="number">2.0</span>).tan() * aspect).atan())
-<a href=#329 id=329 data-nosnippet>329</a>    }
-<a href=#330 id=330 data-nosnippet>330</a>
-<a href=#331 id=331 data-nosnippet>331</a>    <span class="doccomment">/// Returns the half-height of the frustum at unit distance from the eye.
-<a href=#332 id=332 data-nosnippet>332</a>    </span><span class="kw">pub fn </span>y_tan(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; f64 {
-<a href=#333 id=333 data-nosnippet>333</a>        <span class="kw">let </span>half_fovy = <span class="self">self</span>.fovy / <span class="number">2.0</span>;
-<a href=#334 id=334 data-nosnippet>334</a>        half_fovy.tan()
-<a href=#335 id=335 data-nosnippet>335</a>    }
-<a href=#336 id=336 data-nosnippet>336</a>    <span class="doccomment">/// Returns the half-width of the frustum at unit distance for the given viewport aspect.
-<a href=#337 id=337 data-nosnippet>337</a>    </span><span class="kw">pub fn </span>x_tan(<span class="kw-2">&amp;</span><span class="self">self</span>, width: f64, height: f64) -&gt; f64 {
-<a href=#338 id=338 data-nosnippet>338</a>        <span class="kw">let </span>half_fovx = <span class="self">self</span>.fovx(width, height) / <span class="number">2.0</span>;
-<a href=#339 id=339 data-nosnippet>339</a>        half_fovx.tan()
-<a href=#340 id=340 data-nosnippet>340</a>    }
-<a href=#341 id=341 data-nosnippet>341</a>
-<a href=#342 id=342 data-nosnippet>342</a>    <span class="doccomment">/// Expresses a pixel center offset as a fraction of the viewport's half-width.
-<a href=#343 id=343 data-nosnippet>343</a>    </span><span class="kw">pub fn </span>offset_x(<span class="kw-2">&amp;</span><span class="self">self</span>, center_offset: Point2&lt;f64&gt;, width: f64) -&gt; f64 {
-<a href=#344 id=344 data-nosnippet>344</a>        center_offset.x * <span class="number">2.0 </span>/ width
-<a href=#345 id=345 data-nosnippet>345</a>    }
-<a href=#346 id=346 data-nosnippet>346</a>
-<a href=#347 id=347 data-nosnippet>347</a>    <span class="doccomment">/// Expresses a pixel center offset as a fraction of the viewport's half-height.
-<a href=#348 id=348 data-nosnippet>348</a>    </span><span class="kw">pub fn </span>offset_y(<span class="kw-2">&amp;</span><span class="self">self</span>, center_offset: Point2&lt;f64&gt;, height: f64) -&gt; f64 {
-<a href=#349 id=349 data-nosnippet>349</a>        center_offset.y * <span class="number">2.0 </span>/ height
-<a href=#350 id=350 data-nosnippet>350</a>    }
-<a href=#351 id=351 data-nosnippet>351</a>
-<a href=#352 id=352 data-nosnippet>352</a>    <span class="doccomment">/// Builds a centered perspective matrix with OpenGL clip depth `[-w, w]`.
-<a href=#353 id=353 data-nosnippet>353</a>    /// `aspect` is width/height; clip distances must satisfy `0 &lt; near_z &lt; far_z`.
-<a href=#354 id=354 data-nosnippet>354</a>    ///
-<a href=#355 id=355 data-nosnippet>355</a>    /// # Panics
-<a href=#356 id=356 data-nosnippet>356</a>    /// Panics if the field of view is outside `(0, pi)`, the aspect is approximately zero,
-<a href=#357 id=357 data-nosnippet>357</a>    /// or clip distances are nonpositive or approximately equal, as checked by [`cgmath::perspective`].
-<a href=#358 id=358 data-nosnippet>358</a>    </span><span class="kw">pub fn </span>calc_matrix(<span class="kw-2">&amp;</span><span class="self">self</span>, aspect: f64, near_z: f64, far_z: f64) -&gt; Matrix4&lt;f64&gt; {
-<a href=#359 id=359 data-nosnippet>359</a>        perspective(<span class="self">self</span>.fovy, aspect, near_z, far_z)
-<a href=#360 id=360 data-nosnippet>360</a>    }
-<a href=#361 id=361 data-nosnippet>361</a>
-<a href=#362 id=362 data-nosnippet>362</a>    <span class="doccomment">/// Builds an off-center perspective matrix with OpenGL clip depth `[-w, w]`.
-<a href=#363 id=363 data-nosnippet>363</a>    /// Viewport dimensions and the center offset share pixel units; clip distances share world units.
-<a href=#364 id=364 data-nosnippet>364</a>    </span><span class="kw">pub fn </span>calc_matrix_with_center(
-<a href=#365 id=365 data-nosnippet>365</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
-<a href=#366 id=366 data-nosnippet>366</a>        width: f64,
-<a href=#367 id=367 data-nosnippet>367</a>        height: f64,
-<a href=#368 id=368 data-nosnippet>368</a>        near_z: f64,
-<a href=#369 id=369 data-nosnippet>369</a>        far_z: f64,
-<a href=#370 id=370 data-nosnippet>370</a>        center_offset: Point2&lt;f64&gt;,
-<a href=#371 id=371 data-nosnippet>371</a>    ) -&gt; Matrix4&lt;f64&gt; {
-<a href=#372 id=372 data-nosnippet>372</a>        <span class="kw">let </span>ymax = near_z * <span class="self">self</span>.y_tan();
-<a href=#373 id=373 data-nosnippet>373</a>
-<a href=#374 id=374 data-nosnippet>374</a>        <span class="comment">//TODO maybe just: let xmax = ymax * aspect;
-<a href=#375 id=375 data-nosnippet>375</a>        </span><span class="kw">let </span>xmax = near_z * <span class="self">self</span>.x_tan(width, height);
-<a href=#376 id=376 data-nosnippet>376</a>
-<a href=#377 id=377 data-nosnippet>377</a>        <span class="kw">let </span>offset_x = <span class="self">self</span>.offset_x(center_offset, width);
-<a href=#378 id=378 data-nosnippet>378</a>        <span class="kw">let </span>offset_y = <span class="self">self</span>.offset_y(center_offset, height);
-<a href=#379 id=379 data-nosnippet>379</a>        frustum(
-<a href=#380 id=380 data-nosnippet>380</a>            <span class="comment">// https://webglfundamentals.org/webgl/lessons/webgl-qna-how-can-i-move-the-perspective-vanishing-point-from-the-center-of-the-canvas-.html
-<a href=#381 id=381 data-nosnippet>381</a>            // Sliding the window one way moves the scene the other, so the window moves against
-<a href=#382 id=382 data-nosnippet>382</a>            // the offset for the scene's vanishing point to follow it.
-<a href=#383 id=383 data-nosnippet>383</a>            </span>xmax * (-<span class="number">1.0 </span>- offset_x),
-<a href=#384 id=384 data-nosnippet>384</a>            xmax * (<span class="number">1.0 </span>- offset_x),
-<a href=#385 id=385 data-nosnippet>385</a>            ymax * (-<span class="number">1.0 </span>- offset_y),
-<a href=#386 id=386 data-nosnippet>386</a>            ymax * (<span class="number">1.0 </span>- offset_y),
-<a href=#387 id=387 data-nosnippet>387</a>            near_z,
-<a href=#388 id=388 data-nosnippet>388</a>            far_z,
-<a href=#389 id=389 data-nosnippet>389</a>        )
-<a href=#390 id=390 data-nosnippet>390</a>    }
-<a href=#391 id=391 data-nosnippet>391</a>}
-<a href=#392 id=392 data-nosnippet>392</a>
-<a href=#393 id=393 data-nosnippet>393</a><span class="kw">mod </span>frustum;
+<a href=#227 id=227 data-nosnippet>227</a>    <span class="doccomment">/// Returns tilt away from a vertical map view in radians, within [`Self::max_pitch`]. A
+<a href=#228 id=228 data-nosnippet>228</a>    /// free-globe camera may look past it, up to the sky; its own pitch is
+<a href=#229 id=229 data-nosnippet>229</a>    /// [`crate::render::view_state::ViewState::free_globe_pitch`].
+<a href=#230 id=230 data-nosnippet>230</a>    </span><span class="kw">pub fn </span>get_pitch(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Rad&lt;f64&gt; {
+<a href=#231 id=231 data-nosnippet>231</a>        <span class="self">self</span>.pitch
+<a href=#232 id=232 data-nosnippet>232</a>    }
+<a href=#233 id=233 data-nosnippet>233</a>
+<a href=#234 id=234 data-nosnippet>234</a>    <span class="doccomment">/// Adds a pitch delta only if the result stays between -30 degrees and [`Self::max_pitch`].
+<a href=#235 id=235 data-nosnippet>235</a>    </span><span class="kw">pub fn </span>pitch&lt;P: Into&lt;Rad&lt;f64&gt;&gt;&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, delta: P) {
+<a href=#236 id=236 data-nosnippet>236</a>        <span class="kw">let </span>new_pitch = <span class="self">self</span>.pitch + delta.into();
+<a href=#237 id=237 data-nosnippet>237</a>
+<a href=#238 id=238 data-nosnippet>238</a>        <span class="kw">if </span>new_pitch &lt;= <span class="self">self</span>.max_pitch &amp;&amp; new_pitch &gt;= MIN_PITCH.into() {
+<a href=#239 id=239 data-nosnippet>239</a>            <span class="self">self</span>.pitch = new_pitch;
+<a href=#240 id=240 data-nosnippet>240</a>        }
+<a href=#241 id=241 data-nosnippet>241</a>    }
+<a href=#242 id=242 data-nosnippet>242</a>
+<a href=#243 id=243 data-nosnippet>243</a>    <span class="doccomment">/// Offsets the orbit center in world pixels, without rotating the delta by the camera bearing.
+<a href=#244 id=244 data-nosnippet>244</a>    </span><span class="kw">pub fn </span>move_relative(<span class="kw-2">&amp;mut </span><span class="self">self</span>, delta: Vector2&lt;f64&gt;) {
+<a href=#245 id=245 data-nosnippet>245</a>        <span class="self">self</span>.position += delta;
+<a href=#246 id=246 data-nosnippet>246</a>    }
+<a href=#247 id=247 data-nosnippet>247</a>
+<a href=#248 id=248 data-nosnippet>248</a>    <span class="doccomment">/// Replaces the orbit center in world pixels without changing orientation.
+<a href=#249 id=249 data-nosnippet>249</a>    </span><span class="kw">pub fn </span>move_to(<span class="kw-2">&amp;mut </span><span class="self">self</span>, new_position: Point2&lt;f64&gt;) {
+<a href=#250 id=250 data-nosnippet>250</a>        <span class="self">self</span>.position = new_position;
+<a href=#251 id=251 data-nosnippet>251</a>    }
+<a href=#252 id=252 data-nosnippet>252</a>
+<a href=#253 id=253 data-nosnippet>253</a>    <span class="doccomment">/// Returns the world-pixel orbit center as a vector from the world origin.
+<a href=#254 id=254 data-nosnippet>254</a>    </span><span class="kw">pub fn </span>position_vector(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vector2&lt;f64&gt; {
+<a href=#255 id=255 data-nosnippet>255</a>        <span class="self">self</span>.position.to_vec()
+<a href=#256 id=256 data-nosnippet>256</a>    }
+<a href=#257 id=257 data-nosnippet>257</a>
+<a href=#258 id=258 data-nosnippet>258</a>    <span class="doccomment">/// Appends a pixel height to the orbit center; this does not apply the camera's rotations.
+<a href=#259 id=259 data-nosnippet>259</a>    </span><span class="kw">pub fn </span>to_3d(<span class="kw-2">&amp;</span><span class="self">self</span>, camera_height: f64) -&gt; Point3&lt;f64&gt; {
+<a href=#260 id=260 data-nosnippet>260</a>        Point3::new(<span class="self">self</span>.position.x, <span class="self">self</span>.position.y, camera_height)
+<a href=#261 id=261 data-nosnippet>261</a>    }
+<a href=#262 id=262 data-nosnippet>262</a>    <span class="doccomment">/// Sets lateral rotation, clamped to -30 through 30 degrees.
+<a href=#263 id=263 data-nosnippet>263</a>    </span><span class="kw">pub fn </span>set_yaw&lt;P: Into&lt;Rad&lt;f64&gt;&gt;&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, yaw: P) {
+<a href=#264 id=264 data-nosnippet>264</a>        <span class="kw">let </span>new_yaw = yaw.into();
+<a href=#265 id=265 data-nosnippet>265</a>        <span class="kw">let </span>max: Rad&lt;<span class="kw">_</span>&gt; = MAX_YAW.into();
+<a href=#266 id=266 data-nosnippet>266</a>        <span class="kw">let </span>min: Rad&lt;<span class="kw">_</span>&gt; = MIN_YAW.into();
+<a href=#267 id=267 data-nosnippet>267</a>        <span class="self">self</span>.yaw = Rad(new_yaw.<span class="number">0</span>.min(max.<span class="number">0</span>).max(min.<span class="number">0</span>))
+<a href=#268 id=268 data-nosnippet>268</a>    }
+<a href=#269 id=269 data-nosnippet>269</a>    <span class="doccomment">/// Sets tilt, clamped to -30 degrees through [`Self::max_pitch`].
+<a href=#270 id=270 data-nosnippet>270</a>    </span><span class="kw">pub fn </span>set_pitch&lt;P: Into&lt;Rad&lt;f64&gt;&gt;&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, pitch: P) {
+<a href=#271 id=271 data-nosnippet>271</a>        <span class="kw">let </span>new_pitch = pitch.into();
+<a href=#272 id=272 data-nosnippet>272</a>        <span class="kw">let </span>min: Rad&lt;<span class="kw">_</span>&gt; = MIN_PITCH.into();
+<a href=#273 id=273 data-nosnippet>273</a>        <span class="self">self</span>.pitch = Rad(new_pitch.<span class="number">0</span>.min(<span class="self">self</span>.max_pitch.<span class="number">0</span>).max(min.<span class="number">0</span>))
+<a href=#274 id=274 data-nosnippet>274</a>    }
+<a href=#275 id=275 data-nosnippet>275</a>    <span class="doccomment">/// Sets clockwise rotation from north without normalizing the angle.
+<a href=#276 id=276 data-nosnippet>276</a>    </span><span class="kw">pub fn </span>set_bearing&lt;P: Into&lt;Rad&lt;f64&gt;&gt;&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, bearing: P) {
+<a href=#277 id=277 data-nosnippet>277</a>        <span class="self">self</span>.bearing = bearing.into();
+<a href=#278 id=278 data-nosnippet>278</a>    }
+<a href=#279 id=279 data-nosnippet>279</a>    <span class="doccomment">/// Sets rotation about the view axis without clamping or normalizing the angle.
+<a href=#280 id=280 data-nosnippet>280</a>    </span><span class="kw">pub fn </span>set_roll&lt;P: Into&lt;Rad&lt;f64&gt;&gt;&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, roll: P) {
+<a href=#281 id=281 data-nosnippet>281</a>        <span class="self">self</span>.roll = roll.into();
+<a href=#282 id=282 data-nosnippet>282</a>    }
+<a href=#283 id=283 data-nosnippet>283</a>}
+<a href=#284 id=284 data-nosnippet>284</a>
+<a href=#285 id=285 data-nosnippet>285</a><span class="attr">#[derive(PartialEq, Copy, Clone, Default)]
+<a href=#286 id=286 data-nosnippet>286</a></span><span class="doccomment">/// Viewport padding in pixels that shifts the apparent map center without resizing the viewport.
+<a href=#287 id=287 data-nosnippet>287</a></span><span class="kw">pub struct </span>EdgeInsets {
+<a href=#288 id=288 data-nosnippet>288</a>    <span class="doccomment">/// Padding measured down from the top edge.
+<a href=#289 id=289 data-nosnippet>289</a>    </span><span class="kw">pub </span>top: f64,
+<a href=#290 id=290 data-nosnippet>290</a>    <span class="doccomment">/// Padding measured up from the bottom edge.
+<a href=#291 id=291 data-nosnippet>291</a>    </span><span class="kw">pub </span>bottom: f64,
+<a href=#292 id=292 data-nosnippet>292</a>    <span class="doccomment">/// Padding measured right from the left edge.
+<a href=#293 id=293 data-nosnippet>293</a>    </span><span class="kw">pub </span>left: f64,
+<a href=#294 id=294 data-nosnippet>294</a>    <span class="doccomment">/// Padding measured left from the right edge.
+<a href=#295 id=295 data-nosnippet>295</a>    </span><span class="kw">pub </span>right: f64,
+<a href=#296 id=296 data-nosnippet>296</a>}
+<a href=#297 id=297 data-nosnippet>297</a>
+<a href=#298 id=298 data-nosnippet>298</a><span class="kw">impl </span>EdgeInsets {
+<a href=#299 id=299 data-nosnippet>299</a>    <span class="doccomment">/// Returns the padded center in viewport pixels, clamped to the viewport bounds.
+<a href=#300 id=300 data-nosnippet>300</a>    /// Coordinates start at the top left and increase rightward and downward.
+<a href=#301 id=301 data-nosnippet>301</a>    </span><span class="kw">pub fn </span>center(<span class="kw-2">&amp;</span><span class="self">self</span>, width: f64, height: f64) -&gt; Point2&lt;f64&gt; {
+<a href=#302 id=302 data-nosnippet>302</a>        <span class="comment">// Clamp insets so they never overflow width/height and always calculate a valid center
+<a href=#303 id=303 data-nosnippet>303</a>        </span><span class="kw">let </span>x = clamp((<span class="self">self</span>.left + width - <span class="self">self</span>.right) / <span class="number">2.0</span>, <span class="number">0.0</span>, width);
+<a href=#304 id=304 data-nosnippet>304</a>        <span class="kw">let </span>y = clamp((<span class="self">self</span>.top + height - <span class="self">self</span>.bottom) / <span class="number">2.0</span>, <span class="number">0.0</span>, height);
+<a href=#305 id=305 data-nosnippet>305</a>
+<a href=#306 id=306 data-nosnippet>306</a>        Point2::new(x, y)
+<a href=#307 id=307 data-nosnippet>307</a>    }
+<a href=#308 id=308 data-nosnippet>308</a>}
+<a href=#309 id=309 data-nosnippet>309</a>
+<a href=#310 id=310 data-nosnippet>310</a><span class="attr">#[derive(Clone)]
+<a href=#311 id=311 data-nosnippet>311</a></span><span class="doccomment">/// Vertical field of view used to construct OpenGL-convention perspective matrices.
+<a href=#312 id=312 data-nosnippet>312</a></span><span class="kw">pub struct </span>Perspective {
+<a href=#313 id=313 data-nosnippet>313</a>    fovy: Rad&lt;f64&gt;,
+<a href=#314 id=314 data-nosnippet>314</a>}
+<a href=#315 id=315 data-nosnippet>315</a>
+<a href=#316 id=316 data-nosnippet>316</a><span class="kw">impl </span>Perspective {
+<a href=#317 id=317 data-nosnippet>317</a>    <span class="doccomment">/// Stores a vertical field of view without validating its range.
+<a href=#318 id=318 data-nosnippet>318</a>    </span><span class="kw">pub fn </span>new&lt;F: Into&lt;Rad&lt;f64&gt;&gt;&gt;(fovy: F) -&gt; <span class="self">Self </span>{
+<a href=#319 id=319 data-nosnippet>319</a>        <span class="kw">let </span>rad = fovy.into();
+<a href=#320 id=320 data-nosnippet>320</a>        <span class="self">Self </span>{ fovy: rad }
+<a href=#321 id=321 data-nosnippet>321</a>    }
+<a href=#322 id=322 data-nosnippet>322</a>
+<a href=#323 id=323 data-nosnippet>323</a>    <span class="doccomment">/// Returns the full vertical viewing angle in radians.
+<a href=#324 id=324 data-nosnippet>324</a>    </span><span class="kw">pub fn </span>fovy(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Rad&lt;f64&gt; {
+<a href=#325 id=325 data-nosnippet>325</a>        <span class="self">self</span>.fovy
+<a href=#326 id=326 data-nosnippet>326</a>    }
+<a href=#327 id=327 data-nosnippet>327</a>    <span class="doccomment">/// Returns the horizontal viewing angle for a viewport with positive width and height.
+<a href=#328 id=328 data-nosnippet>328</a>    </span><span class="kw">pub fn </span>fovx(<span class="kw-2">&amp;</span><span class="self">self</span>, width: f64, height: f64) -&gt; Rad&lt;f64&gt; {
+<a href=#329 id=329 data-nosnippet>329</a>        <span class="kw">let </span>aspect = width / height;
+<a href=#330 id=330 data-nosnippet>330</a>        Rad(<span class="number">2.0 </span>* ((<span class="self">self</span>.fovy / <span class="number">2.0</span>).tan() * aspect).atan())
+<a href=#331 id=331 data-nosnippet>331</a>    }
+<a href=#332 id=332 data-nosnippet>332</a>
+<a href=#333 id=333 data-nosnippet>333</a>    <span class="doccomment">/// Returns the half-height of the frustum at unit distance from the eye.
+<a href=#334 id=334 data-nosnippet>334</a>    </span><span class="kw">pub fn </span>y_tan(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; f64 {
+<a href=#335 id=335 data-nosnippet>335</a>        <span class="kw">let </span>half_fovy = <span class="self">self</span>.fovy / <span class="number">2.0</span>;
+<a href=#336 id=336 data-nosnippet>336</a>        half_fovy.tan()
+<a href=#337 id=337 data-nosnippet>337</a>    }
+<a href=#338 id=338 data-nosnippet>338</a>    <span class="doccomment">/// Returns the half-width of the frustum at unit distance for the given viewport aspect.
+<a href=#339 id=339 data-nosnippet>339</a>    </span><span class="kw">pub fn </span>x_tan(<span class="kw-2">&amp;</span><span class="self">self</span>, width: f64, height: f64) -&gt; f64 {
+<a href=#340 id=340 data-nosnippet>340</a>        <span class="kw">let </span>half_fovx = <span class="self">self</span>.fovx(width, height) / <span class="number">2.0</span>;
+<a href=#341 id=341 data-nosnippet>341</a>        half_fovx.tan()
+<a href=#342 id=342 data-nosnippet>342</a>    }
+<a href=#343 id=343 data-nosnippet>343</a>
+<a href=#344 id=344 data-nosnippet>344</a>    <span class="doccomment">/// Expresses a pixel center offset as a fraction of the viewport's half-width.
+<a href=#345 id=345 data-nosnippet>345</a>    </span><span class="kw">pub fn </span>offset_x(<span class="kw-2">&amp;</span><span class="self">self</span>, center_offset: Point2&lt;f64&gt;, width: f64) -&gt; f64 {
+<a href=#346 id=346 data-nosnippet>346</a>        center_offset.x * <span class="number">2.0 </span>/ width
+<a href=#347 id=347 data-nosnippet>347</a>    }
+<a href=#348 id=348 data-nosnippet>348</a>
+<a href=#349 id=349 data-nosnippet>349</a>    <span class="doccomment">/// Expresses a pixel center offset as a fraction of the viewport's half-height.
+<a href=#350 id=350 data-nosnippet>350</a>    </span><span class="kw">pub fn </span>offset_y(<span class="kw-2">&amp;</span><span class="self">self</span>, center_offset: Point2&lt;f64&gt;, height: f64) -&gt; f64 {
+<a href=#351 id=351 data-nosnippet>351</a>        center_offset.y * <span class="number">2.0 </span>/ height
+<a href=#352 id=352 data-nosnippet>352</a>    }
+<a href=#353 id=353 data-nosnippet>353</a>
+<a href=#354 id=354 data-nosnippet>354</a>    <span class="doccomment">/// Builds a centered perspective matrix with OpenGL clip depth `[-w, w]`.
+<a href=#355 id=355 data-nosnippet>355</a>    /// `aspect` is width/height; clip distances must satisfy `0 &lt; near_z &lt; far_z`.
+<a href=#356 id=356 data-nosnippet>356</a>    ///
+<a href=#357 id=357 data-nosnippet>357</a>    /// # Panics
+<a href=#358 id=358 data-nosnippet>358</a>    /// Panics if the field of view is outside `(0, pi)`, the aspect is approximately zero,
+<a href=#359 id=359 data-nosnippet>359</a>    /// or clip distances are nonpositive or approximately equal, as checked by [`cgmath::perspective`].
+<a href=#360 id=360 data-nosnippet>360</a>    </span><span class="kw">pub fn </span>calc_matrix(<span class="kw-2">&amp;</span><span class="self">self</span>, aspect: f64, near_z: f64, far_z: f64) -&gt; Matrix4&lt;f64&gt; {
+<a href=#361 id=361 data-nosnippet>361</a>        perspective(<span class="self">self</span>.fovy, aspect, near_z, far_z)
+<a href=#362 id=362 data-nosnippet>362</a>    }
+<a href=#363 id=363 data-nosnippet>363</a>
+<a href=#364 id=364 data-nosnippet>364</a>    <span class="doccomment">/// Builds an off-center perspective matrix with OpenGL clip depth `[-w, w]`.
+<a href=#365 id=365 data-nosnippet>365</a>    /// Viewport dimensions and the center offset share pixel units; clip distances share world units.
+<a href=#366 id=366 data-nosnippet>366</a>    </span><span class="kw">pub fn </span>calc_matrix_with_center(
+<a href=#367 id=367 data-nosnippet>367</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#368 id=368 data-nosnippet>368</a>        width: f64,
+<a href=#369 id=369 data-nosnippet>369</a>        height: f64,
+<a href=#370 id=370 data-nosnippet>370</a>        near_z: f64,
+<a href=#371 id=371 data-nosnippet>371</a>        far_z: f64,
+<a href=#372 id=372 data-nosnippet>372</a>        center_offset: Point2&lt;f64&gt;,
+<a href=#373 id=373 data-nosnippet>373</a>    ) -&gt; Matrix4&lt;f64&gt; {
+<a href=#374 id=374 data-nosnippet>374</a>        <span class="kw">let </span>ymax = near_z * <span class="self">self</span>.y_tan();
+<a href=#375 id=375 data-nosnippet>375</a>
+<a href=#376 id=376 data-nosnippet>376</a>        <span class="comment">//TODO maybe just: let xmax = ymax * aspect;
+<a href=#377 id=377 data-nosnippet>377</a>        </span><span class="kw">let </span>xmax = near_z * <span class="self">self</span>.x_tan(width, height);
+<a href=#378 id=378 data-nosnippet>378</a>
+<a href=#379 id=379 data-nosnippet>379</a>        <span class="kw">let </span>offset_x = <span class="self">self</span>.offset_x(center_offset, width);
+<a href=#380 id=380 data-nosnippet>380</a>        <span class="kw">let </span>offset_y = <span class="self">self</span>.offset_y(center_offset, height);
+<a href=#381 id=381 data-nosnippet>381</a>        frustum(
+<a href=#382 id=382 data-nosnippet>382</a>            <span class="comment">// https://webglfundamentals.org/webgl/lessons/webgl-qna-how-can-i-move-the-perspective-vanishing-point-from-the-center-of-the-canvas-.html
+<a href=#383 id=383 data-nosnippet>383</a>            // Sliding the window one way moves the scene the other, so the window moves against
+<a href=#384 id=384 data-nosnippet>384</a>            // the offset for the scene's vanishing point to follow it.
+<a href=#385 id=385 data-nosnippet>385</a>            </span>xmax * (-<span class="number">1.0 </span>- offset_x),
+<a href=#386 id=386 data-nosnippet>386</a>            xmax * (<span class="number">1.0 </span>- offset_x),
+<a href=#387 id=387 data-nosnippet>387</a>            ymax * (-<span class="number">1.0 </span>- offset_y),
+<a href=#388 id=388 data-nosnippet>388</a>            ymax * (<span class="number">1.0 </span>- offset_y),
+<a href=#389 id=389 data-nosnippet>389</a>            near_z,
+<a href=#390 id=390 data-nosnippet>390</a>            far_z,
+<a href=#391 id=391 data-nosnippet>391</a>        )
+<a href=#392 id=392 data-nosnippet>392</a>    }
+<a href=#393 id=393 data-nosnippet>393</a>}
 <a href=#394 id=394 data-nosnippet>394</a>
-<a href=#395 id=395 data-nosnippet>395</a><span class="kw">pub use </span>frustum::EyeFrustum;
+<a href=#395 id=395 data-nosnippet>395</a><span class="kw">mod </span>frustum;
 <a href=#396 id=396 data-nosnippet>396</a>
-<a href=#397 id=397 data-nosnippet>397</a><span class="attr">#[cfg(test)]
-<a href=#398 id=398 data-nosnippet>398</a></span><span class="kw">mod </span>tests;
-<a href=#399 id=399 data-nosnippet>399</a>
-<a href=#400 id=400 data-nosnippet>400</a><span class="attr">#[cfg(test)]
-<a href=#401 id=401 data-nosnippet>401</a>#[path = <span class="string">"camera/inversion/tests.rs"</span>]
-<a href=#402 id=402 data-nosnippet>402</a></span><span class="kw">mod </span>inversion_tests;
+<a href=#397 id=397 data-nosnippet>397</a><span class="kw">pub use </span>frustum::EyeFrustum;
+<a href=#398 id=398 data-nosnippet>398</a>
+<a href=#399 id=399 data-nosnippet>399</a><span class="attr">#[cfg(test)]
+<a href=#400 id=400 data-nosnippet>400</a></span><span class="kw">mod </span>tests;
+<a href=#401 id=401 data-nosnippet>401</a>
+<a href=#402 id=402 data-nosnippet>402</a><span class="attr">#[cfg(test)]
+<a href=#403 id=403 data-nosnippet>403</a>#[path = <span class="string">"camera/inversion/tests.rs"</span>]
+<a href=#404 id=404 data-nosnippet>404</a></span><span class="kw">mod </span>inversion_tests;
 </code></pre></div></section></main></body></html>
