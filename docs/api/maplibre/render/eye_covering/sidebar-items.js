@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["drawn_covering","snapshot_lod_history"],"struct":["EyeInFrame","FrameLodHistory","SharedCovering"],"type":["RasterCoverings"]};
+window.SIDEBAR_ITEMS = {"fn":["drawn_covering","drawn_tiles","snapshot_lod_history"],"struct":["EyeInFrame","FrameLodHistory","SharedCovering"],"type":["RasterCoverings"]};

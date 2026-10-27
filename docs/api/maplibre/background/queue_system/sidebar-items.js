@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["atmosphere_blend","background_color","queue_system","sky_metadata","world_rows"],"struct":["BackgroundBuffers"]};
+window.SIDEBAR_ITEMS = {"fn":["atmosphere_blend","background_color","globe_tile_metadata","globe_tiles","queue_system","sky_metadata","world_rows"],"struct":["BackgroundBuffers"]};
