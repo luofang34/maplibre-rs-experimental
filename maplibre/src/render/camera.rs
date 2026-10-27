@@ -224,7 +224,9 @@ impl Camera {
         self.roll
     }
 
-    /// Returns tilt away from a vertical map view in radians.
+    /// Returns tilt away from a vertical map view in radians, within [`Self::max_pitch`]. A
+    /// free-globe camera may look past it, up to the sky; its own pitch is
+    /// [`crate::render::view_state::ViewState::free_globe_pitch`].
     pub fn get_pitch(&self) -> Rad<f64> {
         self.pitch
     }
