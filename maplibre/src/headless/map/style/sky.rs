@@ -1,5 +1,5 @@
-//! The sun and its light a host sets on the offscreen map in place of the style's `light`, as
-//! [`crate::map::Map`] sets its own.
+//! The sun, its light, the atmosphere and the stars a host sets on the offscreen map in place of the
+//! style's `light` and `sky`, as [`crate::map::Map`] sets its own.
 
 use crate::{
     celestial::{EcefDirection, TwilightBand},
@@ -18,7 +18,23 @@ impl HeadlessMap {
     pub fn set_twilight_band(&mut self, twilight: TwilightBand) {
         self.map_context.set_twilight_band(twilight);
     }
+
+    /// Replaces the stars drawn behind the globe, as
+    /// [`crate::context::MapContext::set_stars`] does.
+    pub fn set_stars(&mut self, stars: Vec<crate::celestial::Star>) {
+        self.map_context.set_stars(stars);
+    }
+
+    /// Draws the globe's atmosphere without a style `sky`, as
+    /// [`crate::context::MapContext::set_atmosphere`] does.
+    pub fn set_atmosphere(&mut self, atmosphere: bool) {
+        self.map_context.set_atmosphere(atmosphere);
+    }
 }
 
 #[cfg(test)]
 mod daylight;
+#[cfg(test)]
+mod host_atmosphere;
+#[cfg(test)]
+mod starfield;

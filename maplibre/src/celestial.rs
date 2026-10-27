@@ -1,8 +1,8 @@
 //! Sun and sky inputs a host supplies in Earth-centred, Earth-fixed axes.
 //!
-//! The renderer computes no astronomy: a host works out where the sun is and hands its
-//! direction over as an [`EcefDirection`]. While none is set, the style's root `light` drives
-//! the atmosphere as it does without this module.
+//! The renderer computes no astronomy: a host works out where the sun and the stars are and
+//! hands their directions over as [`EcefDirection`]s. While no sun is set, the style's root
+//! `light` drives the atmosphere as it does without this module.
 
 use cgmath::{InnerSpace, Vector3};
 use thiserror::Error;
@@ -38,6 +38,14 @@ pub enum CelestialError {
         day_start_degrees: f64,
         /// Brightness given for the night side.
         night_brightness: f32,
+    },
+    /// A star's magnitude is not finite, or its colour leaves 0..=1.
+    #[error("star of magnitude {magnitude} and colour {color:?} cannot be drawn")]
+    InvalidStar {
+        /// Magnitude given.
+        magnitude: f32,
+        /// Colour given.
+        color: Option<[f32; 3]>,
     },
 }
 
@@ -143,6 +151,8 @@ pub struct CelestialLighting {
     pub sun: Option<EcefDirection>,
     /// Where the ground turns from night to day.
     pub twilight: TwilightBand,
+    /// Whether the globe's atmosphere is drawn in full whatever the style's `sky` says.
+    pub atmosphere: bool,
 }
 
 impl CelestialLighting {
@@ -182,10 +192,22 @@ pub fn set_twilight_band(world: &mut World, twilight: TwilightBand) {
         .twilight = twilight;
 }
 
+/// Draws the globe's atmosphere without a style `sky`, or leaves it to the style.
+pub fn set_atmosphere(world: &mut World, atmosphere: bool) {
+    world
+        .resources
+        .get_or_init_mut::<CelestialLighting>()
+        .atmosphere = atmosphere;
+}
+
 /// Sets or clears the sun direction the render systems read.
 pub fn set_sun_direction(world: &mut World, sun: Option<EcefDirection>) {
     world.resources.get_or_init_mut::<CelestialLighting>().sun = sun;
 }
+
+mod stars;
+
+pub use stars::{set_stars, Star, Starfield};
 
 #[cfg(test)]
 mod tests;

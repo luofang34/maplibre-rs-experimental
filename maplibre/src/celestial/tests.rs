@@ -85,6 +85,7 @@ fn daylight_uniforms_carry_the_globe_sun_and_the_band_sines() {
     let lighting = CelestialLighting {
         sun: Some(EcefDirection::new(1.0, 0.0, 0.0).expect("direction")),
         twilight: TwilightBand::default(),
+        atmosphere: false,
     };
     let [sun, twilight] = lighting.daylight_uniforms();
     assert_eq!(sun, [0.0, 0.0, 1.0, 1.0]);

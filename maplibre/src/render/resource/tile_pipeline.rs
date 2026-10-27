@@ -31,6 +31,8 @@ pub struct TilePipeline {
     options: TilePipelineOptions,
     /// Writes and tests depth with the reversed-Z convention instead of painter's order.
     depth_write: bool,
+    /// Tests depth without writing it, so the draw stays behind whatever has written depth.
+    depth_test: bool,
     settings: RendererSettings,
 
     vertex_state: VertexState,
@@ -52,6 +54,7 @@ impl TilePipeline {
             name,
             options,
             depth_write: false,
+            depth_test: false,
             settings,
             vertex_state,
             fragment_state,
@@ -61,6 +64,13 @@ impl TilePipeline {
     /// Enables depth writes for 3D geometry such as terrain; painter's order no longer applies.
     pub fn with_depth_write(mut self) -> Self {
         self.depth_write = true;
+        self
+    }
+
+    /// Tests depth without writing it: a draw at the far plane then covers only the pixels no
+    /// geometry has written depth to.
+    pub fn with_depth_test(mut self) -> Self {
+        self.depth_test = true;
         self
     }
 }
@@ -207,7 +217,7 @@ impl TilePipeline {
                 // behavior, and stencil handles tile masking. Only 3D geometry writes
                 // depth, using reversed-Z where nearer fragments have greater depth.
                 depth_write_enabled: Some(self.depth_write),
-                depth_compare: Some(if self.depth_write {
+                depth_compare: Some(if self.depth_write || self.depth_test {
                     wgpu::CompareFunction::GreaterEqual
                 } else {
                     wgpu::CompareFunction::Always

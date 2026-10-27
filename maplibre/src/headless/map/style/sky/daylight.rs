@@ -16,7 +16,7 @@ const SIZE: u32 = 128;
 
 /// Serves every elevation tile as flat ground at sea level.
 #[derive(Clone)]
-struct FlatDem;
+pub(super) struct FlatDem;
 
 #[cfg_attr(not(feature = "thread-safe-futures"), async_trait::async_trait(?Send))]
 #[cfg_attr(feature = "thread-safe-futures", async_trait::async_trait)]
