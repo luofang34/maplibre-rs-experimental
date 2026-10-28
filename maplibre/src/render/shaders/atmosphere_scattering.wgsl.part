@@ -1,5 +1,6 @@
-// Rayleigh and Mie scattering along a ray through the atmosphere, as GL JS computes it, and
-// the exposure that turns it into the colour drawn. The atmosphere draw and the stars, which
+// Rayleigh and Mie scattering along a ray through the atmosphere, as GL JS computes it, with
+// the air near the eye lit by the share `sunlit` of the sun an eclipse leaves, and the exposure
+// that turns it into the colour drawn. The atmosphere draw and the stars, which
 // fade where the sky is lit, share it.
 
 const ATMOSPHERE_PI: f32 = 3.141592653589793;
@@ -12,6 +13,11 @@ const MIE_COEFFICIENT: f32 = 21.0e-6;
 const RAYLEIGH_SCALE_HEIGHT: f32 = 8000.0;
 const MIE_SCALE_HEIGHT: f32 = 1200.0;
 const MIE_DIRECTION: f32 = 0.758;
+// How far from the eye an eclipse's shadow takes the sunlight: air nearer than the first
+// distance has the share of the sun the eye sees, air beyond the second is in full sunlight.
+// The second lies beyond a typical umbra, so in totality the horizon keeps its glow.
+const SHADOW_NEAR: f32 = 50000.0;
+const SHADOW_FAR: f32 = 250000.0;
 
 fn ray_sphere_intersection(
     ray_origin: vec3<f32>,
@@ -34,6 +40,7 @@ fn scattering(
     ray_origin: vec3<f32>,
     raw_sun_direction: vec3<f32>,
     body_radius: f32,
+    sunlit: f32,
 ) -> vec4<f32> {
     let atmosphere_radius = body_radius + ATMOSPHERE_THICKNESS;
     let sun_direction = normalize(raw_sun_direction);
@@ -102,8 +109,9 @@ fn scattering(
             + RAYLEIGH_COEFFICIENT
                 * (primary_depth_rayleigh + secondary_depth_rayleigh)
         ));
-        total_rayleigh += depth_step_rayleigh * attenuation;
-        total_mie += depth_step_mie * attenuation;
+        let shadowed = mix(sunlit, 1.0, smoothstep(SHADOW_NEAR, SHADOW_FAR, primary_time));
+        total_rayleigh += depth_step_rayleigh * attenuation * shadowed;
+        total_mie += depth_step_mie * attenuation * shadowed;
         primary_time += primary_step_size;
     }
 

@@ -37,7 +37,10 @@ impl Shader for TerrainShader {
 
     fn describe_fragment(&self) -> FragmentState {
         FragmentState {
-            source: include_str!("terrain.fragment.wgsl"),
+            source: concat!(
+                include_str!("daylight.wgsl.part"),
+                include_str!("terrain.fragment.wgsl")
+            ),
             entry_point: "main",
             targets: vec![Some(wgpu::ColorTargetState {
                 format: self.format,

@@ -1,7 +1,7 @@
 struct VertexOutput {
     @location(0) view_direction: vec3<f32>,
     @location(1) @interpolate(flat) globe_position: vec3<f32>,
-    @location(2) @interpolate(flat) sun_direction: vec3<f32>,
+    @location(2) @interpolate(flat) sun_direction: vec4<f32>,
     @location(3) @interpolate(flat) globe_radius: f32,
     @location(4) @interpolate(flat) atmosphere_blend: f32,
     @location(5) @interpolate(flat) body_radius: f32,
@@ -38,7 +38,7 @@ fn main(
     return VertexOutput(
         view.xyz,
         globe_position.xyz,
-        sun_direction.xyz,
+        sun_direction,
         radius_blend_padding.x,
         radius_blend_padding.y,
         radius_blend_padding.z,

@@ -5,7 +5,7 @@ use thiserror::Error;
 
 use super::{Mat4x4f32, Shader, ShaderTileMetadata};
 use crate::{
-    celestial::EcefDirection,
+    celestial::CelestialLighting,
     projection::{body::Body, globe::camera::GlobeCameraState},
     render::resource::{FragmentState, VertexBufferLayout, VertexState},
     style::light::{LightError, LightSpecification},
@@ -115,13 +115,14 @@ impl AtmosphereLayerMetadata {
         Self {
             inverse_projection: cgmath::Matrix4::from_scale(1.0).into(),
             globe_position: [0.0; 4],
-            sun_direction: [0.0, 0.0, 1.0, 0.0],
+            sun_direction: [0.0, 0.0, 1.0, 1.0],
             radius_blend_padding: [1.0, 0.0, Body::EARTH.radius_meters as f32, 0.0],
         }
     }
 
-    /// The globe's centre in view axes, the sun's direction in view axes, and the globe's radius
-    /// in pixels, the blend and the body's radius in metres, as the scattering takes them.
+    /// The globe's centre in view axes, the sun's direction in view axes with the share of the
+    /// sun an eclipse leaves as w, and the globe's radius in pixels, the blend and the body's
+    /// radius in metres, as the scattering takes them.
     pub fn sky_inputs(&self) -> [[f32; 4]; 3] {
         [
             self.globe_position,
@@ -130,12 +131,12 @@ impl AtmosphereLayerMetadata {
         ]
     }
 
-    /// Creates atmosphere inputs from the current globe camera and the host's sun, or the root
-    /// light while the host has set none.
+    /// Creates atmosphere inputs from the current globe camera and the host's sky: its sun, or
+    /// the root light while the host has set none, and the share of the sun an eclipse leaves.
     pub fn from_view(
         camera: &GlobeCameraState,
         light: &LightSpecification,
-        sun: Option<EcefDirection>,
+        sky: CelestialLighting,
         zoom: f64,
         blend: f32,
     ) -> Result<Self, AtmosphereMetadataError> {
@@ -147,7 +148,7 @@ impl AtmosphereLayerMetadata {
             .globe_center_in_view()
             .cast::<f32>()
             .ok_or(AtmosphereMetadataError::FloatConversion)?;
-        let sun_direction = match sun {
+        let sun_direction = match sky.sun {
             Some(sun) => camera
                 .world_direction_to_view(sun.globe_world())
                 .ok_or(LightError::InvalidViewDirection),
@@ -163,7 +164,12 @@ impl AtmosphereLayerMetadata {
         Ok(Self {
             inverse_projection: inverse_projection.into(),
             globe_position: [globe_position.x, globe_position.y, globe_position.z, 0.0],
-            sun_direction: [sun_direction.x, sun_direction.y, sun_direction.z, 0.0],
+            sun_direction: [
+                sun_direction.x,
+                sun_direction.y,
+                sun_direction.z,
+                sky.sun_visible.get(),
+            ],
             radius_blend_padding: [
                 radius,
                 blend.clamp(0.0, 1.0),

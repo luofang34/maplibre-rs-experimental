@@ -105,6 +105,17 @@ impl MapContext {
         }
     }
 
+    /// Sets the share of the sun's disc the moon leaves uncovered where the eye stands, 1
+    /// outside an eclipse. The sky's scattered sunlight and the day side's light scale with
+    /// it, so totality darkens the sky and the ground; the sun's disc and glare do not. The
+    /// ground has a day side only once [`Self::set_sun_direction`] has set the sun.
+    pub fn set_sun_visible_fraction(&mut self, fraction: crate::celestial::VisibleFraction) {
+        if crate::celestial::lighting(&self.world).sun_visible != fraction {
+            crate::celestial::set_sun_visible_fraction(&mut self.world, fraction);
+            crate::render::frame_signals::mark_dirty(&mut self.world);
+        }
+    }
+
     /// Sets or clears the Earth's shadow the moon is lit through during a lunar eclipse, as
     /// the host computes it: the moon dims and turns copper in the umbra, as dark as the
     /// shadow's Danjon value, and its light on the night side dims with it.

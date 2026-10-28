@@ -97,10 +97,15 @@ fn view_and_sky(
         return (rotation, disabled);
     }
     let light = style.light.clone().unwrap_or_default();
-    let sun = crate::celestial::sun_direction(world);
-    let sky =
-        AtmosphereLayerMetadata::from_view(&camera, &light, sun, view_state.zoom().value(), blend)
-            .map_or(disabled, |metadata| metadata.sky_inputs());
+    let lighting = crate::celestial::lighting(world);
+    let sky = AtmosphereLayerMetadata::from_view(
+        &camera,
+        &light,
+        lighting,
+        view_state.zoom().value(),
+        blend,
+    )
+    .map_or(disabled, |metadata| metadata.sky_inputs());
     (rotation, sky)
 }
 

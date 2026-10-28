@@ -36,6 +36,12 @@ impl HeadlessMap {
         self.map_context.set_moon_disc(moon);
     }
 
+    /// Sets the share of the sun's disc left uncovered, as
+    /// [`crate::context::MapContext::set_sun_visible_fraction`] does.
+    pub fn set_sun_visible_fraction(&mut self, fraction: crate::celestial::VisibleFraction) {
+        self.map_context.set_sun_visible_fraction(fraction);
+    }
+
     /// Sets or clears the Earth's shadow the moon is lit through, as
     /// [`crate::context::MapContext::set_earth_shadow`] does.
     pub fn set_earth_shadow(&mut self, shadow: Option<crate::celestial::EarthShadow>) {
@@ -54,7 +60,11 @@ mod bright_moon;
 #[cfg(test)]
 mod daylight;
 #[cfg(test)]
+mod eclipse;
+#[cfg(test)]
 mod eye_ground;
+#[cfg(test)]
+mod globe_daylight;
 #[cfg(test)]
 mod host_atmosphere;
 #[cfg(test)]

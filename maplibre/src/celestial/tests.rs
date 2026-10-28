@@ -2,7 +2,7 @@ use cgmath::{InnerSpace, Vector3};
 
 use super::{
     ecef_to_globe_world, moonlight_uniform, CelestialError, CelestialLighting, Disc, EarthShadow,
-    EcefDirection, TwilightBand, MOONLIGHT_GAIN, NIGHT_BRIGHTNESS,
+    EcefDirection, TwilightBand, VisibleFraction, MOONLIGHT_GAIN, NIGHT_BRIGHTNESS,
 };
 use crate::{coords::LatLon, projection::globe::lat_lon_to_unit_sphere};
 
@@ -89,12 +89,26 @@ fn daylight_uniforms_carry_the_globe_sun_and_the_band_sines() {
         sun: Some(EcefDirection::new(1.0, 0.0, 0.0).expect("direction")),
         twilight: TwilightBand::default(),
         atmosphere: false,
+        sun_visible: VisibleFraction::new(0.25).expect("fraction"),
     };
     let [sun, twilight] = lighting.daylight_uniforms();
     assert_eq!(sun, [0.0, 0.0, 1.0, 1.0]);
     assert!((f64::from(twilight[0]) - (-6_f64).to_radians().sin()).abs() < 1e-6);
     assert!((f64::from(twilight[1]) - 2_f64.to_radians().sin()).abs() < 1e-6);
     assert_eq!(twilight[2], NIGHT_BRIGHTNESS);
+    assert_eq!(twilight[3], 0.25, "the share of the sun an eclipse leaves");
+}
+
+#[test]
+fn the_whole_sun_is_visible_until_a_host_says_otherwise() {
+    assert_eq!(CelestialLighting::default().sun_visible.get(), 1.0);
+    assert_eq!(CelestialLighting::default().daylight_uniforms()[1][3], 1.0);
+    for fraction in [-0.01, 1.01, f32::NAN] {
+        assert!(
+            VisibleFraction::new(fraction).is_err(),
+            "{fraction} is refused"
+        );
+    }
 }
 
 #[test]
