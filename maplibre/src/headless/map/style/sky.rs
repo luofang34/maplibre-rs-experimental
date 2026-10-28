@@ -36,6 +36,12 @@ impl HeadlessMap {
         self.map_context.set_moon_disc(moon);
     }
 
+    /// Sets or clears the Earth's shadow the moon is lit through, as
+    /// [`crate::context::MapContext::set_earth_shadow`] does.
+    pub fn set_earth_shadow(&mut self, shadow: Option<crate::celestial::EarthShadow>) {
+        self.map_context.set_earth_shadow(shadow);
+    }
+
     /// Draws the globe's atmosphere without a style `sky`, as
     /// [`crate::context::MapContext::set_atmosphere`] does.
     pub fn set_atmosphere(&mut self, atmosphere: bool) {
@@ -53,6 +59,8 @@ mod eye_ground;
 mod host_atmosphere;
 #[cfg(test)]
 mod look_up;
+#[cfg(test)]
+mod lunar_eclipse;
 #[cfg(test)]
 mod moon;
 #[cfg(test)]

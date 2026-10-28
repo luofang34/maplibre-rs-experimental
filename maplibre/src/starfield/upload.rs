@@ -156,19 +156,18 @@ pub(super) fn queue_system(
         .map_or(1.0, |ratio| ratio.0);
     let size = renderer.state().surface().size();
     let (view_rotation, sky) = view_and_sky(style, view_state, world);
-    let moon = crate::celestial::discs(world)
-        .moon
-        .map_or([0.0; 4], |moon| {
-            let direction = moon.direction().globe_world();
-            let sun = crate::celestial::sun_direction(world).map(|sun| sun.globe_world());
-            let brightness = super::moon::relative_brightness(sun, direction);
-            [
-                direction.x as f32,
-                direction.y as f32,
-                direction.z as f32,
-                brightness as f32,
-            ]
-        });
+    let discs = crate::celestial::discs(world);
+    let moon = discs.moon.map_or([0.0; 4], |moon| {
+        let direction = moon.direction().globe_world();
+        let sun = crate::celestial::sun_direction(world).map(|sun| sun.globe_world());
+        let brightness = super::moon::eclipsed_brightness(sun, moon, discs.earth_shadow);
+        [
+            direction.x as f32,
+            direction.y as f32,
+            direction.z as f32,
+            brightness as f32,
+        ]
+    });
     let gpu = world.resources.get_or_init_mut::<StarfieldGpu>();
     gpu.visible = transition > 0.0;
     if let Some(starfield) = starfield.filter(|field| Some(field.generation()) != gpu.generation) {

@@ -31,7 +31,7 @@ pub(super) fn replay(
     let fog = terrain_fog(style, view);
     let lighting = (
         crate::celestial::lighting(world),
-        crate::celestial::discs(world).moon,
+        crate::celestial::discs(world),
     );
     let projection = view.gpu_view_projection();
     if let Some(frame) = world.resources.get_mut::<TerrainEyeFrame>() {
@@ -226,7 +226,7 @@ pub(super) fn surface_settings(
         skirts.copied().unwrap_or_default(),
         (
             crate::celestial::lighting(world),
-            crate::celestial::discs(world).moon,
+            crate::celestial::discs(world),
         ),
     )
 }
@@ -327,12 +327,13 @@ pub(super) fn with_world_copies(
 fn surface_uniforms(
     block: &mut TerrainTileUniforms,
     coords: WorldTileCoords,
-    (style, (lighting, moon)): (&Style, crate::celestial::TerrainLight),
+    (style, (lighting, discs)): (&Style, crate::celestial::TerrainLight),
     view: &ViewState,
 ) {
     globe::set_uniforms(block, coords, view);
     [block.daylight, block.twilight] = lighting.daylight_uniforms();
-    block.moonlight = crate::celestial::moonlight_uniform(lighting.sun, moon);
+    block.moonlight =
+        crate::celestial::moonlight_uniform(lighting.sun, discs.moon, discs.earth_shadow);
     let color = super::background_clear_color(style);
     block.surface_color = [
         color.r as f32,

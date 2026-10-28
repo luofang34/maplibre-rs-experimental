@@ -1,8 +1,8 @@
 use cgmath::{InnerSpace, Vector3};
 
 use super::{
-    ecef_to_globe_world, moonlight_uniform, CelestialError, CelestialLighting, Disc, EcefDirection,
-    TwilightBand, MOONLIGHT_GAIN, NIGHT_BRIGHTNESS,
+    ecef_to_globe_world, moonlight_uniform, CelestialError, CelestialLighting, Disc, EarthShadow,
+    EcefDirection, TwilightBand, MOONLIGHT_GAIN, NIGHT_BRIGHTNESS,
 };
 use crate::{coords::LatLon, projection::globe::lat_lon_to_unit_sphere};
 
@@ -101,15 +101,56 @@ fn daylight_uniforms_carry_the_globe_sun_and_the_band_sines() {
 fn moonlight_is_the_moon_direction_and_its_lit_share() {
     let sun = EcefDirection::new(1.0, 0.0, 0.0).ok();
     let disc = |x, y, z| Disc::new(EcefDirection::new(x, y, z).expect("direction"), 0.26).ok();
-    let full = moonlight_uniform(sun, disc(-1.0, 0.0, 0.0));
+    let full = moonlight_uniform(sun, disc(-1.0, 0.0, 0.0), None);
     assert_eq!(full, [0.0, 0.0, -1.0, MOONLIGHT_GAIN]);
-    let quarter = moonlight_uniform(sun, disc(0.0, 1.0, 0.0));
+    let quarter = moonlight_uniform(sun, disc(0.0, 1.0, 0.0), None);
     assert!((quarter[3] - MOONLIGHT_GAIN / 2.0).abs() < 1e-6);
     assert_eq!(
-        moonlight_uniform(sun, disc(1.0, 0.0, 0.0))[3],
+        moonlight_uniform(sun, disc(1.0, 0.0, 0.0), None)[3],
         0.0,
         "new Moon"
     );
-    assert_eq!(moonlight_uniform(None, disc(-1.0, 0.0, 0.0)), [0.0; 4]);
-    assert_eq!(moonlight_uniform(sun, None), [0.0; 4]);
+    assert_eq!(
+        moonlight_uniform(None, disc(-1.0, 0.0, 0.0), None),
+        [0.0; 4]
+    );
+    assert_eq!(moonlight_uniform(sun, None, None), [0.0; 4]);
+}
+
+#[test]
+fn the_earths_shadow_takes_the_moon_its_sunlight() {
+    let axis = EcefDirection::new(1.0, 0.0, 0.0).expect("axis");
+    let shadow = EarthShadow::new(axis, 0.7, 1.3, None).expect("shadow");
+    assert_eq!(shadow.danjon(), 2.0, "L2 by default");
+    let at = |degrees: f64| {
+        let (sine, cosine) = degrees.to_radians().sin_cos();
+        shadow.sunlit_share(EcefDirection::new(cosine, sine, 0.0).expect("direction"))
+    };
+    assert_eq!(at(0.0), 0.0, "the umbra's centre");
+    assert_eq!(at(0.69), 0.0, "inside the umbra");
+    assert!((at(1.0) - 0.5).abs() < 1e-6, "halfway across the penumbra");
+    assert_eq!(at(1.31), 1.0, "beyond the penumbra");
+
+    // A full moon on the shadow's axis sends the ground no light.
+    let sun = EcefDirection::new(-1.0, 0.0, 0.0).ok();
+    let moon = Disc::new(axis, 0.26).ok();
+    assert_eq!(moonlight_uniform(sun, moon, Some(shadow))[3], 0.0);
+    assert_eq!(moonlight_uniform(sun, moon, None)[3], MOONLIGHT_GAIN);
+}
+
+#[test]
+fn an_earth_shadow_must_nest_its_umbra_in_its_penumbra() {
+    let axis = EcefDirection::new(1.0, 0.0, 0.0).expect("axis");
+    for (umbra, penumbra, danjon) in [
+        (0.0, 1.3, None),
+        (1.3, 0.7, None),
+        (0.7, 5.1, None),
+        (0.7, 1.3, Some(4.5)),
+        (0.7, 1.3, Some(f32::NAN)),
+    ] {
+        assert!(
+            EarthShadow::new(axis, umbra, penumbra, danjon).is_err(),
+            "{umbra}°, {penumbra}°, {danjon:?}"
+        );
+    }
 }

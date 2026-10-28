@@ -13,7 +13,7 @@ use bytemuck_derive::{Pod, Zeroable};
 use cgmath::{InnerSpace, Vector3};
 
 use crate::{
-    celestial::{discs, sun_direction},
+    celestial::{discs, sun_direction, Disc, EarthShadow},
     context::MapContext,
     render::{
         eventually::{Eventually, Eventually::Initialized},
@@ -53,6 +53,17 @@ pub fn relative_brightness(sun: Option<Vector3<f64>>, moon: Vector3<f64>) -> f64
     10_f64.powf(-0.4 * (magnitude_at_phase_angle(phase_angle) - FULL_MOON_MAGNITUDE))
 }
 
+/// The moon's brightness relative to a full moon at its phase, as [`relative_brightness`] gives
+/// it, times the share of sunlight the Earth's shadow lets reach the moon's centre.
+pub fn eclipsed_brightness(
+    sun: Option<Vector3<f64>>,
+    moon: Disc,
+    shadow: Option<EarthShadow>,
+) -> f64 {
+    let sunlit = shadow.map_or(1.0, |shadow| shadow.sunlit_share(moon.direction()));
+    relative_brightness(sun, moon.direction().globe_world()) * sunlit
+}
+
 /// What the moon's shaders take for the frame.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
@@ -64,6 +75,10 @@ struct MoonFrame {
     /// The globe transition the moon fades in with, its brightness relative to a full moon,
     /// and the halo's reach in disc radii.
     transition_flux_reach: [f32; 4],
+    /// The Earth's shadow's axis in globe world axes, then its umbra's radius in radians.
+    shadow_umbra: [f32; 4],
+    /// The penumbra's radius in radians, the umbra's Danjon value, then 1 while a shadow is set.
+    penumbra_danjon: [f32; 4],
 }
 
 /// The moon's frame values on the GPU, and whether a moon is drawn this frame.
@@ -106,7 +121,26 @@ pub(super) fn queue_system(
     let sun = sun_globe.map_or([0.0; 4], |sun| {
         [sun.x as f32, sun.y as f32, sun.z as f32, 1.0]
     });
-    let frame = discs(world).moon.map(|moon| {
+    let discs = discs(world);
+    let (shadow_umbra, penumbra_danjon) =
+        discs.earth_shadow.map_or(([0.0; 4], [0.0; 4]), |shadow| {
+            let axis = shadow.axis().globe_world();
+            (
+                [
+                    axis.x as f32,
+                    axis.y as f32,
+                    axis.z as f32,
+                    shadow.umbra_radius_degrees().to_radians() as f32,
+                ],
+                [
+                    shadow.penumbra_radius_degrees().to_radians() as f32,
+                    shadow.danjon(),
+                    1.0,
+                    0.0,
+                ],
+            )
+        });
+    let frame = discs.moon.map(|moon| {
         let direction = moon.direction().globe_world();
         MoonFrame {
             direction_radius: [
@@ -118,10 +152,12 @@ pub(super) fn queue_system(
             sun,
             transition_flux_reach: [
                 transition,
-                relative_brightness(sun_globe, direction) as f32,
+                eclipsed_brightness(sun_globe, moon, discs.earth_shadow) as f32,
                 HALO_REACH,
                 0.0,
             ],
+            shadow_umbra,
+            penumbra_danjon,
         }
     });
     let gpu = world.resources.get_or_init_mut::<MoonGpu>();
