@@ -56,6 +56,8 @@ mod daylight;
 #[cfg(test)]
 mod eclipse;
 #[cfg(test)]
+mod globe_daylight;
+#[cfg(test)]
 mod host_atmosphere;
 #[cfg(test)]
 mod look_up;

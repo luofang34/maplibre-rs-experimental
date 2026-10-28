@@ -31,6 +31,10 @@ fn stages() -> Vec<Stage> {
         ),
         ("sky", Box::new(SkyShader { format })),
         ("atmosphere", Box::new(AtmosphereShader { format })),
+        (
+            "globe daylight",
+            Box::new(crate::background::daylight::GlobeDaylightShader { format }),
+        ),
         ("heatmap density", Box::new(HeatmapDensityShader)),
         (
             "heatmap composite",
