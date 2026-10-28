@@ -89,7 +89,6 @@ pub struct SharedCovering {
 
 impl SharedCovering {
     /// The tiles the first eye selected, or `None` when it selected no region.
-    #[cfg(all(test, feature = "headless"))]
     pub(crate) fn tiles(&self) -> Option<&[WorldTileCoords]> {
         self.tiles.as_ref().map(|(tiles, _)| tiles.as_slice())
     }
@@ -99,6 +98,12 @@ impl SharedCovering {
             .as_ref()
             .map(|(tiles, level)| ViewRegion::from_tiles(tiles.clone(), *level, tiles.len()))
     }
+}
+
+/// The tiles the frame's covering selected, each once, or `None` before a covering is selected
+/// or when it selected no region.
+pub(crate) fn drawn_tiles(world: &World) -> Option<&[WorldTileCoords]> {
+    world.resources.get::<SharedCovering>()?.tiles()
 }
 
 /// The tiles the frame draws at `level`, with the raster tiles each raster source draws:

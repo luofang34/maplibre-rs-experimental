@@ -20,6 +20,7 @@ pub fn upload_system(
         ..
     }: &mut MapContext,
 ) -> SystemResult {
+    let background_tiles = crate::background::queue_system::globe_tiles(world);
     let Some((Initialized(tile_view_pattern), Initialized(projection_resources), tile_mesh_cache)) =
         world.resources.query_mut::<(
             &mut Eventually<WgpuTileViewPattern>,
@@ -45,13 +46,14 @@ pub fn upload_system(
     projection_resources.upload(queue, projection_data);
 
     if projection_data.transition > 0.0 {
-        let coords = crate::coords::WorldTileCoords::default();
-        tile_mesh_cache
-            .prepare(device, queue, coords, TileMeshUsage::Raster, false)
-            .map_err(|error| {
-                tracing::error!(%error, "unable to prepare globe background mesh");
-                SystemError::Setup
-            })?;
+        for coords in background_tiles {
+            tile_mesh_cache
+                .prepare(device, queue, coords, TileMeshUsage::Raster, false)
+                .map_err(|error| {
+                    tracing::error!(%error, %coords, "unable to prepare globe background mesh");
+                    SystemError::Setup
+                })?;
+        }
     }
 
     let mut visible_tiles = Vec::new();

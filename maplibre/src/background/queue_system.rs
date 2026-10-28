@@ -17,8 +17,10 @@ pub struct BackgroundBuffers {
     pub metadata_buffer: wgpu::Buffer,
     /// Instance of each background style layer in `metadata_buffer`.
     pub instances: std::collections::HashMap<String, u32>,
-    /// Zoom-zero tile transform used by globe meshes.
+    /// The tile transform of each of `globe_tiles`, in order, used by globe meshes.
     pub tile_metadata_buffer: wgpu::Buffer,
+    /// The tiles the globe's background is drawn on.
+    pub globe_tiles: Vec<crate::coords::WorldTileCoords>,
     /// Evaluated atmosphere opacity.
     pub atmosphere_metadata_buffer: wgpu::Buffer,
     /// Sky colours and horizon, when the style has a sky and the map is not a globe.
@@ -225,31 +227,16 @@ pub fn queue_system(
                 usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             },
         );
-        let coords = crate::coords::WorldTileCoords::default();
-        let transform = view_state
-            .gpu_view_projection()
-            .to_model_view_projection(coords.transform_for_zoom(view_state.zoom()))
-            .downcast()
-            .into();
-        let tile_metadata = ShaderTileMetadata {
-            transform,
-            zoom_factor: view_state.zoom().scale_to_tile(&coords) as f32,
-            viewport_width: view_state.width() as f32,
-            viewport_height: view_state.height() as f32,
-            tile_mercator_coords: crate::projection::renderer_data::tile_mercator_coordinates(
-                Some(crate::coords::TileCoords::default()),
-            )
-            .into(),
-            clip_antimeridian: 1,
-            line_width_scale: 1.0,
-            line_units_per_pixel: 8.0 * view_state.zoom().scale_to_tile(&coords) as f32,
-            clip_region: crate::render::shaders::WHOLE_TILE,
-        };
+        let globe_tiles = globe_tiles(world);
+        let tile_metadata: Vec<ShaderTileMetadata> = globe_tiles
+            .iter()
+            .map(|coords| globe_tile_metadata(view_state, *coords))
+            .collect();
         let tile_metadata_buffer = renderer.queue.create_buffer_init(
             &renderer.device,
             &wgpu::util::BufferInitDescriptor {
                 label: Some("Globe Background Tile Metadata Buffer"),
-                contents: bytemuck::bytes_of(&tile_metadata),
+                contents: bytemuck::cast_slice(&tile_metadata),
                 usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             },
         );
@@ -295,12 +282,55 @@ pub fn queue_system(
             metadata_buffer: buffer,
             instances,
             tile_metadata_buffer,
+            globe_tiles,
             atmosphere_metadata_buffer,
             sky_metadata_buffer,
         });
     }
 
     Ok(())
+}
+
+/// The tiles the globe's background is drawn on: the frame's covering, so that the ground
+/// near an eye standing on the globe follows the sphere as closely as the tiles drawn there;
+/// the world tile while no covering is selected.
+pub(crate) fn globe_tiles(world: &crate::tcs::world::World) -> Vec<crate::coords::WorldTileCoords> {
+    let covering: Vec<_> = crate::render::eye_covering::drawn_tiles(world)
+        .unwrap_or_default()
+        .iter()
+        .copied()
+        .filter(|coords| coords.wrapped().is_some())
+        .collect();
+    if covering.is_empty() {
+        vec![crate::coords::WorldTileCoords::default()]
+    } else {
+        covering
+    }
+}
+
+fn globe_tile_metadata(
+    view_state: &crate::render::view_state::ViewState,
+    coords: crate::coords::WorldTileCoords,
+) -> ShaderTileMetadata {
+    let scale = view_state.zoom().scale_to_tile(&coords) as f32;
+    ShaderTileMetadata {
+        transform: view_state
+            .gpu_view_projection()
+            .to_model_view_projection(coords.transform_for_zoom(view_state.zoom()))
+            .downcast()
+            .into(),
+        zoom_factor: scale,
+        viewport_width: view_state.width() as f32,
+        viewport_height: view_state.height() as f32,
+        tile_mercator_coords: crate::projection::renderer_data::tile_mercator_coordinates(
+            coords.into_tile(crate::style::source::TileAddressingScheme::XYZ),
+        )
+        .into(),
+        clip_antimeridian: u32::from(u8::from(coords.z) == 0),
+        line_width_scale: 1.0,
+        line_units_per_pixel: 8.0 * scale,
+        clip_region: crate::render::shaders::WHOLE_TILE,
+    }
 }
 
 /// The background colour at a zoom, with its opacity multiplied into premultiplied-free alpha.

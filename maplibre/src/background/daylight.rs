@@ -169,8 +169,9 @@ pub fn queue_system(
                 tracing::error!(?error, "the globe's daylight has no camera");
                 SystemError::Setup
             })?;
-            let moon = crate::celestial::discs(world).moon;
-            let moonlight = crate::celestial::moonlight_uniform(Some(sun), moon);
+            let discs = crate::celestial::discs(world);
+            let moonlight =
+                crate::celestial::moonlight_uniform(Some(sun), discs.moon, discs.earth_shadow);
             let in_view = |direction: cgmath::Vector3<f64>| {
                 camera
                     .world_direction_to_view(direction)

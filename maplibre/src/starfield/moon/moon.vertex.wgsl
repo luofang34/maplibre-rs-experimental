@@ -2,11 +2,15 @@
 
 // Direction to the moon in globe world axes, then the tangent of its angular radius; the sun's
 // direction, then 1 when a sun lights the phase; the globe transition, the moon's brightness
-// relative to a full moon, and the halo's reach in disc radii.
+// relative to a full moon, and the halo's reach in disc radii; the Earth's shadow's axis and its
+// umbra's radius in radians; its penumbra's radius, the umbra's Danjon value, and 1 while a
+// shadow is set.
 struct MoonFrame {
     direction_radius: vec4<f32>,
     sun: vec4<f32>,
     transition_flux_reach: vec4<f32>,
+    shadow_umbra: vec4<f32>,
+    penumbra_danjon: vec4<f32>,
 };
 
 @group(1) @binding(0) var<uniform> moon: MoonFrame;
