@@ -131,6 +131,10 @@ async fn a_moon_in_the_umbra_turns_dim_and_copper() {
         "a copper moon: {report}"
     );
     assert!(
+        total[0] > 70.0 && luminance(total) > 0.12 * luminance(full),
+        "an L2 moon stays a plain red disc against the night sky: {report}"
+    );
+    assert!(
         luminance(dark) < luminance(total) && luminance(total) < luminance(bright),
         "Danjon's scale orders the darkness: {report}"
     );
@@ -162,7 +166,8 @@ async fn a_moon_in_the_umbra_turns_dim_and_copper() {
     let blue_green = |[r, g, b]: [f64; 3]| (g + b) / (2.0 * r.max(1.0));
     let column_colour = |dx: i32| {
         let x = (centre.0 + f64::from(dx)) as u32;
-        let rows = (centre.1 - radius * 0.7) as u32..(centre.1 + radius * 0.7) as u32;
+        // Rows near the centre, where the umbra's curved edge runs nearly straight down.
+        let rows = (centre.1 - radius * 0.25) as u32..(centre.1 + radius * 0.25) as u32;
         let count = f64::from(rows.end - rows.start);
         let mut sum = [0.0; 3];
         for y in rows {

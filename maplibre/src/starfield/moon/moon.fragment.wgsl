@@ -30,19 +30,21 @@ const EXPOSURE: f32 = 3.0;
 // The halo's brightness one disc radius out, around a full moon.
 const HALO_STRENGTH: f32 = 0.4;
 // The umbra's light, refracted through the Earth's atmosphere, from Danjon's L0, dark brown and
-// barely seen, to L4, bright copper, as drawn at the umbra's centre.
-const UMBRA_DARK: vec3<f32> = vec3<f32>(0.45, 0.2, 0.13);
-const UMBRA_BRIGHT: vec3<f32> = vec3<f32>(1.0, 0.55, 0.3);
-const UMBRA_LEVEL_DARK: f32 = 0.01;
-const UMBRA_LEVEL_BRIGHT: f32 = 0.22;
+// barely seen, to L4, bright copper, as drawn at the umbra's centre. The levels are what an eye
+// adapted to the night sees rather than the umbra's share of sunlight, a few ten-thousandths, so
+// that an L2 moon stays a plain deep red disc, as it does to the naked eye.
+const UMBRA_DARK: vec3<f32> = vec3<f32>(0.5, 0.22, 0.15);
+const UMBRA_BRIGHT: vec3<f32> = vec3<f32>(1.0, 0.6, 0.35);
+const UMBRA_LEVEL_DARK: f32 = 0.12;
+const UMBRA_LEVEL_BRIGHT: f32 = 0.85;
 // The umbra brightens towards its edge, where the light has crossed less of the atmosphere.
-const UMBRA_EDGE_GAIN: f32 = 2.0;
+const UMBRA_EDGE_GAIN: f32 = 1.5;
 // Light grazing the Earth's limb crosses the ozone layer, which takes its red and orange, so a
 // turquoise band lines the umbra's edge. It reaches this share of the umbra's radius inward, is
 // this bright at its middle, and takes this share of the copper there.
 const OZONE_COLOR: vec3<f32> = vec3<f32>(0.3, 0.75, 0.8);
 const OZONE_WIDTH: f32 = 0.15;
-const OZONE_LEVEL: f32 = 0.2;
+const OZONE_LEVEL: f32 = 0.35;
 const OZONE_ABSORPTION: f32 = 0.7;
 
 // The share of the sun's light that reaches the moon along `ray`, and the light the umbra
@@ -59,7 +61,7 @@ fn earth_shadow(ray: vec3<f32>) -> vec4<f32> {
     let direct = smoothstep(umbra, moon.penumbra_danjon.x, angle);
     let danjon = moon.penumbra_danjon.y / 4.0;
     let edge = smoothstep(0.0, umbra, angle);
-    let level = mix(UMBRA_LEVEL_DARK, UMBRA_LEVEL_BRIGHT, pow(danjon, 1.5))
+    let level = mix(UMBRA_LEVEL_DARK, UMBRA_LEVEL_BRIGHT, pow(danjon, 1.2))
         * mix(1.0, UMBRA_EDGE_GAIN, edge * edge);
     let inside = (umbra - angle) / (umbra * OZONE_WIDTH);
     let band = smoothstep(0.0, 0.5, inside) * (1.0 - smoothstep(0.5, 1.0, inside));
