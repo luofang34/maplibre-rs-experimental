@@ -109,6 +109,11 @@ impl MapContext {
     /// outside an eclipse. The sky's scattered sunlight and the day side's light scale with
     /// it, so totality darkens the sky and the ground; the sun's disc and glare do not. The
     /// ground has a day side only once [`Self::set_sun_direction`] has set the sun.
+    ///
+    /// The share holds for the one place the eye stands, and the whole day side takes it: the
+    /// moon's shadow is not drawn as a spot on the globe. Set it for a view from the ground,
+    /// and leave it at 1 for a view of the globe, whose day side would otherwise darken
+    /// everywhere rather than along the eclipse's path.
     pub fn set_sun_visible_fraction(&mut self, fraction: crate::celestial::VisibleFraction) {
         if crate::celestial::lighting(&self.world).sun_visible != fraction {
             crate::celestial::set_sun_visible_fraction(&mut self.world, fraction);
