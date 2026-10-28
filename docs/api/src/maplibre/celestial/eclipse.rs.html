@@ -34,11 +34,13 @@
 <a href=#34 id=34 data-nosnippet>34</a><span class="doccomment">/// Sets the share of the sun's disc left uncovered where the eye stands. The sky's scattered
 <a href=#35 id=35 data-nosnippet>35</a>/// sunlight and the day side's light scale with it; the sun's disc and its glare do not, as the
 <a href=#36 id=36 data-nosnippet>36</a>/// moon's disc covers the one and the other stands in for the corona. The ground has a day
-<a href=#37 id=37 data-nosnippet>37</a>/// side only under a host's sun direction, so without one only the sky dims.
-<a href=#38 id=38 data-nosnippet>38</a></span><span class="kw">pub fn </span>set_sun_visible_fraction(world: <span class="kw-2">&amp;mut </span>World, fraction: VisibleFraction) {
-<a href=#39 id=39 data-nosnippet>39</a>    world
-<a href=#40 id=40 data-nosnippet>40</a>        .resources
-<a href=#41 id=41 data-nosnippet>41</a>        .get_or_init_mut::&lt;CelestialLighting&gt;()
-<a href=#42 id=42 data-nosnippet>42</a>        .sun_visible = fraction;
-<a href=#43 id=43 data-nosnippet>43</a>}
+<a href=#37 id=37 data-nosnippet>37</a>/// side only under a host's sun direction, so without one only the sky dims. The share is the
+<a href=#38 id=38 data-nosnippet>38</a>/// eye's alone and the whole day side takes it, so it suits a view from the ground; a view of
+<a href=#39 id=39 data-nosnippet>39</a>/// the globe leaves it at 1.
+<a href=#40 id=40 data-nosnippet>40</a></span><span class="kw">pub fn </span>set_sun_visible_fraction(world: <span class="kw-2">&amp;mut </span>World, fraction: VisibleFraction) {
+<a href=#41 id=41 data-nosnippet>41</a>    world
+<a href=#42 id=42 data-nosnippet>42</a>        .resources
+<a href=#43 id=43 data-nosnippet>43</a>        .get_or_init_mut::&lt;CelestialLighting&gt;()
+<a href=#44 id=44 data-nosnippet>44</a>        .sun_visible = fraction;
+<a href=#45 id=45 data-nosnippet>45</a>}
 </code></pre></div></section></main></body></html>
