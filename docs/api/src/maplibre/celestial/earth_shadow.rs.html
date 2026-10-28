@@ -1,0 +1,101 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `maplibre/src/celestial/earth_shadow.rs`."><title>earth_shadow.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-0c87338a.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="maplibre" data-themes="" data-resource-suffix="" data-rustdoc-version="1.99.1 (58cf8f9c3 2026-10-13)" data-channel="1.99.1" data-search-js="search-cf4fc35e.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-417ebf0a.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">maplibre/celestial/</div>earth_shadow.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! The Earth's shadow where the moon crosses it, as a host computes it for a lunar eclipse.
+<a href=#2 id=2 data-nosnippet>2</a>//!
+<a href=#3 id=3 data-nosnippet>3</a>//! The shadow's size is a convention a host chooses, such as the enlargement an eclipse canon
+<a href=#4 id=4 data-nosnippet>4</a>//! applies, so the host gives its axis and radii rather than the renderer deriving them.
+<a href=#5 id=5 data-nosnippet>5</a>
+<a href=#6 id=6 data-nosnippet>6</a></span><span class="kw">use </span>cgmath::InnerSpace;
+<a href=#7 id=7 data-nosnippet>7</a>
+<a href=#8 id=8 data-nosnippet>8</a><span class="kw">use super</span>::{CelestialDiscs, CelestialError, EcefDirection};
+<a href=#9 id=9 data-nosnippet>9</a><span class="kw">use </span><span class="kw">crate</span>::tcs::world::World;
+<a href=#10 id=10 data-nosnippet>10</a>
+<a href=#11 id=11 data-nosnippet>11</a><span class="doccomment">/// Widest angular radius the shadow's penumbra may have.
+<a href=#12 id=12 data-nosnippet>12</a></span><span class="kw">const </span>MAX_RADIUS_DEGREES: f64 = <span class="number">5.0</span>;
+<a href=#13 id=13 data-nosnippet>13</a><span class="doccomment">/// Danjon's scale runs from L0, a moon almost lost in totality, to L4, a bright copper one.
+<a href=#14 id=14 data-nosnippet>14</a></span><span class="kw">const </span>MAX_DANJON: f32 = <span class="number">4.0</span>;
+<a href=#15 id=15 data-nosnippet>15</a><span class="doccomment">/// A moon of middling darkness, deep red or rust, when the host gives no Danjon value.
+<a href=#16 id=16 data-nosnippet>16</a></span><span class="kw">const </span>DEFAULT_DANJON: f32 = <span class="number">2.0</span>;
+<a href=#17 id=17 data-nosnippet>17</a>
+<a href=#18 id=18 data-nosnippet>18</a><span class="doccomment">/// The Earth's shadow at the moon's distance, as seen from the eye: its axis and the angular
+<a href=#19 id=19 data-nosnippet>19</a>/// radii of its umbra and penumbra, and how dark the umbra is on Danjon's scale.
+<a href=#20 id=20 data-nosnippet>20</a></span><span class="attr">#[derive(Clone, Copy, Debug, PartialEq)]
+<a href=#21 id=21 data-nosnippet>21</a></span><span class="kw">pub struct </span>EarthShadow {
+<a href=#22 id=22 data-nosnippet>22</a>    axis: EcefDirection,
+<a href=#23 id=23 data-nosnippet>23</a>    umbra_degrees: f64,
+<a href=#24 id=24 data-nosnippet>24</a>    penumbra_degrees: f64,
+<a href=#25 id=25 data-nosnippet>25</a>    danjon: f32,
+<a href=#26 id=26 data-nosnippet>26</a>}
+<a href=#27 id=27 data-nosnippet>27</a>
+<a href=#28 id=28 data-nosnippet>28</a><span class="kw">impl </span>EarthShadow {
+<a href=#29 id=29 data-nosnippet>29</a>    <span class="doccomment">/// The shadow along `axis`, from the eye towards the shadow's centre at the moon's distance,
+<a href=#30 id=30 data-nosnippet>30</a>    /// with an umbra smaller than its penumbra, both above zero and at most five degrees, and a
+<a href=#31 id=31 data-nosnippet>31</a>    /// Danjon value in 0..=4, L2 when none is given.
+<a href=#32 id=32 data-nosnippet>32</a>    </span><span class="kw">pub fn </span>new(
+<a href=#33 id=33 data-nosnippet>33</a>        axis: EcefDirection,
+<a href=#34 id=34 data-nosnippet>34</a>        umbra_radius_degrees: f64,
+<a href=#35 id=35 data-nosnippet>35</a>        penumbra_radius_degrees: f64,
+<a href=#36 id=36 data-nosnippet>36</a>        danjon: <span class="prelude-ty">Option</span>&lt;f32&gt;,
+<a href=#37 id=37 data-nosnippet>37</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, CelestialError&gt; {
+<a href=#38 id=38 data-nosnippet>38</a>        <span class="kw">let </span>danjon_value = danjon.unwrap_or(DEFAULT_DANJON);
+<a href=#39 id=39 data-nosnippet>39</a>        <span class="kw">let </span>nested = umbra_radius_degrees &gt; <span class="number">0.0
+<a href=#40 id=40 data-nosnippet>40</a>            </span>&amp;&amp; umbra_radius_degrees &lt; penumbra_radius_degrees
+<a href=#41 id=41 data-nosnippet>41</a>            &amp;&amp; penumbra_radius_degrees &lt;= MAX_RADIUS_DEGREES;
+<a href=#42 id=42 data-nosnippet>42</a>        <span class="kw">if </span>nested &amp;&amp; (<span class="number">0.0</span>..=MAX_DANJON).contains(<span class="kw-2">&amp;</span>danjon_value) {
+<a href=#43 id=43 data-nosnippet>43</a>            <span class="prelude-val">Ok</span>(<span class="self">Self </span>{
+<a href=#44 id=44 data-nosnippet>44</a>                axis,
+<a href=#45 id=45 data-nosnippet>45</a>                umbra_degrees: umbra_radius_degrees,
+<a href=#46 id=46 data-nosnippet>46</a>                penumbra_degrees: penumbra_radius_degrees,
+<a href=#47 id=47 data-nosnippet>47</a>                danjon: danjon_value,
+<a href=#48 id=48 data-nosnippet>48</a>            })
+<a href=#49 id=49 data-nosnippet>49</a>        } <span class="kw">else </span>{
+<a href=#50 id=50 data-nosnippet>50</a>            <span class="prelude-val">Err</span>(CelestialError::InvalidEarthShadow {
+<a href=#51 id=51 data-nosnippet>51</a>                umbra_radius_degrees,
+<a href=#52 id=52 data-nosnippet>52</a>                penumbra_radius_degrees,
+<a href=#53 id=53 data-nosnippet>53</a>                danjon,
+<a href=#54 id=54 data-nosnippet>54</a>            })
+<a href=#55 id=55 data-nosnippet>55</a>        }
+<a href=#56 id=56 data-nosnippet>56</a>    }
+<a href=#57 id=57 data-nosnippet>57</a>
+<a href=#58 id=58 data-nosnippet>58</a>    <span class="doccomment">/// Direction from the eye to the shadow's centre.
+<a href=#59 id=59 data-nosnippet>59</a>    </span><span class="kw">pub fn </span>axis(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; EcefDirection {
+<a href=#60 id=60 data-nosnippet>60</a>        <span class="self">self</span>.axis
+<a href=#61 id=61 data-nosnippet>61</a>    }
+<a href=#62 id=62 data-nosnippet>62</a>
+<a href=#63 id=63 data-nosnippet>63</a>    <span class="doccomment">/// Angular radius of the umbra, in degrees.
+<a href=#64 id=64 data-nosnippet>64</a>    </span><span class="kw">pub fn </span>umbra_radius_degrees(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; f64 {
+<a href=#65 id=65 data-nosnippet>65</a>        <span class="self">self</span>.umbra_degrees
+<a href=#66 id=66 data-nosnippet>66</a>    }
+<a href=#67 id=67 data-nosnippet>67</a>
+<a href=#68 id=68 data-nosnippet>68</a>    <span class="doccomment">/// Angular radius of the penumbra, in degrees.
+<a href=#69 id=69 data-nosnippet>69</a>    </span><span class="kw">pub fn </span>penumbra_radius_degrees(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; f64 {
+<a href=#70 id=70 data-nosnippet>70</a>        <span class="self">self</span>.penumbra_degrees
+<a href=#71 id=71 data-nosnippet>71</a>    }
+<a href=#72 id=72 data-nosnippet>72</a>
+<a href=#73 id=73 data-nosnippet>73</a>    <span class="doccomment">/// How dark the umbra is, from 0 to 4 on Danjon's scale.
+<a href=#74 id=74 data-nosnippet>74</a>    </span><span class="kw">pub fn </span>danjon(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; f32 {
+<a href=#75 id=75 data-nosnippet>75</a>        <span class="self">self</span>.danjon
+<a href=#76 id=76 data-nosnippet>76</a>    }
+<a href=#77 id=77 data-nosnippet>77</a>
+<a href=#78 id=78 data-nosnippet>78</a>    <span class="doccomment">/// The share of the sun's light that reaches a point `direction` from the eye: none in the
+<a href=#79 id=79 data-nosnippet>79</a>    /// umbra, all beyond the penumbra, and a smooth ramp between, as the sun's disc emerges
+<a href=#80 id=80 data-nosnippet>80</a>    /// from behind the Earth.
+<a href=#81 id=81 data-nosnippet>81</a>    </span><span class="kw">pub fn </span>sunlit_share(<span class="kw-2">&amp;</span><span class="self">self</span>, direction: EcefDirection) -&gt; f64 {
+<a href=#82 id=82 data-nosnippet>82</a>        <span class="kw">let </span>angle = direction
+<a href=#83 id=83 data-nosnippet>83</a>            .ecef()
+<a href=#84 id=84 data-nosnippet>84</a>            .cross(<span class="self">self</span>.axis.ecef())
+<a href=#85 id=85 data-nosnippet>85</a>            .magnitude()
+<a href=#86 id=86 data-nosnippet>86</a>            .atan2(direction.ecef().dot(<span class="self">self</span>.axis.ecef()))
+<a href=#87 id=87 data-nosnippet>87</a>            .to_degrees();
+<a href=#88 id=88 data-nosnippet>88</a>        <span class="kw">let </span>t = ((angle - <span class="self">self</span>.umbra_degrees) / (<span class="self">self</span>.penumbra_degrees - <span class="self">self</span>.umbra_degrees))
+<a href=#89 id=89 data-nosnippet>89</a>            .clamp(<span class="number">0.0</span>, <span class="number">1.0</span>);
+<a href=#90 id=90 data-nosnippet>90</a>        t * t * (<span class="number">3.0 </span>- <span class="number">2.0 </span>* t)
+<a href=#91 id=91 data-nosnippet>91</a>    }
+<a href=#92 id=92 data-nosnippet>92</a>}
+<a href=#93 id=93 data-nosnippet>93</a>
+<a href=#94 id=94 data-nosnippet>94</a><span class="doccomment">/// Sets or clears the Earth's shadow the moon is lit through.
+<a href=#95 id=95 data-nosnippet>95</a></span><span class="kw">pub fn </span>set_earth_shadow(world: <span class="kw-2">&amp;mut </span>World, shadow: <span class="prelude-ty">Option</span>&lt;EarthShadow&gt;) {
+<a href=#96 id=96 data-nosnippet>96</a>    world
+<a href=#97 id=97 data-nosnippet>97</a>        .resources
+<a href=#98 id=98 data-nosnippet>98</a>        .get_or_init_mut::&lt;CelestialDiscs&gt;()
+<a href=#99 id=99 data-nosnippet>99</a>        .earth_shadow = shadow;
+<a href=#100 id=100 data-nosnippet>100</a>}
+</code></pre></div></section></main></body></html>

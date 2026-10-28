@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["FULL_MOON_MAGNITUDE","HALO_REACH"],"fn":["draw","magnitude_at_phase_angle","queue_system","relative_brightness","resource_system"],"mod":["pipeline"],"struct":["MoonFrame","MoonGpu","MoonPipeline"]};
+window.SIDEBAR_ITEMS = {"constant":["FULL_MOON_MAGNITUDE","HALO_REACH"],"fn":["draw","eclipsed_brightness","magnitude_at_phase_angle","queue_system","relative_brightness","resource_system"],"mod":["pipeline"],"struct":["MoonFrame","MoonGpu","MoonPipeline"]};

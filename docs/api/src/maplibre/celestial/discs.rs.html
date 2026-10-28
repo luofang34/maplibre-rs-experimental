@@ -69,27 +69,29 @@
 <a href=#69 id=69 data-nosnippet>69</a>    <span class="doccomment">/// The moon's disc, lit by the sun direction. The moon is near enough that its direction
 <a href=#70 id=70 data-nosnippet>70</a>    /// is the one seen from the camera's eye, not from the Earth's centre.
 <a href=#71 id=71 data-nosnippet>71</a>    </span><span class="kw">pub </span>moon: <span class="prelude-ty">Option</span>&lt;Disc&gt;,
-<a href=#72 id=72 data-nosnippet>72</a>}
-<a href=#73 id=73 data-nosnippet>73</a>
-<a href=#74 id=74 data-nosnippet>74</a><span class="doccomment">/// The discs the host set; none until it sets one.
-<a href=#75 id=75 data-nosnippet>75</a></span><span class="kw">pub fn </span>discs(world: <span class="kw-2">&amp;</span>World) -&gt; CelestialDiscs {
-<a href=#76 id=76 data-nosnippet>76</a>    world
-<a href=#77 id=77 data-nosnippet>77</a>        .resources
-<a href=#78 id=78 data-nosnippet>78</a>        .get::&lt;CelestialDiscs&gt;()
-<a href=#79 id=79 data-nosnippet>79</a>        .copied()
-<a href=#80 id=80 data-nosnippet>80</a>        .unwrap_or_default()
-<a href=#81 id=81 data-nosnippet>81</a>}
-<a href=#82 id=82 data-nosnippet>82</a>
-<a href=#83 id=83 data-nosnippet>83</a><span class="doccomment">/// Sets or clears the sun's angular radius, which draws its disc along the sun direction.
-<a href=#84 id=84 data-nosnippet>84</a></span><span class="kw">pub fn </span>set_sun_angular_radius(world: <span class="kw-2">&amp;mut </span>World, radius: <span class="prelude-ty">Option</span>&lt;AngularRadius&gt;) {
-<a href=#85 id=85 data-nosnippet>85</a>    world
-<a href=#86 id=86 data-nosnippet>86</a>        .resources
-<a href=#87 id=87 data-nosnippet>87</a>        .get_or_init_mut::&lt;CelestialDiscs&gt;()
-<a href=#88 id=88 data-nosnippet>88</a>        .sun_radius = radius;
-<a href=#89 id=89 data-nosnippet>89</a>}
-<a href=#90 id=90 data-nosnippet>90</a>
-<a href=#91 id=91 data-nosnippet>91</a><span class="doccomment">/// Sets or clears the moon's disc, whose direction is the one seen from the camera's eye.
-<a href=#92 id=92 data-nosnippet>92</a></span><span class="kw">pub fn </span>set_moon_disc(world: <span class="kw-2">&amp;mut </span>World, moon: <span class="prelude-ty">Option</span>&lt;Disc&gt;) {
-<a href=#93 id=93 data-nosnippet>93</a>    world.resources.get_or_init_mut::&lt;CelestialDiscs&gt;().moon = moon;
-<a href=#94 id=94 data-nosnippet>94</a>}
+<a href=#72 id=72 data-nosnippet>72</a>    <span class="doccomment">/// The Earth's shadow the moon is lit through, during a lunar eclipse.
+<a href=#73 id=73 data-nosnippet>73</a>    </span><span class="kw">pub </span>earth_shadow: <span class="prelude-ty">Option</span>&lt;<span class="kw">super</span>::EarthShadow&gt;,
+<a href=#74 id=74 data-nosnippet>74</a>}
+<a href=#75 id=75 data-nosnippet>75</a>
+<a href=#76 id=76 data-nosnippet>76</a><span class="doccomment">/// The discs the host set; none until it sets one.
+<a href=#77 id=77 data-nosnippet>77</a></span><span class="kw">pub fn </span>discs(world: <span class="kw-2">&amp;</span>World) -&gt; CelestialDiscs {
+<a href=#78 id=78 data-nosnippet>78</a>    world
+<a href=#79 id=79 data-nosnippet>79</a>        .resources
+<a href=#80 id=80 data-nosnippet>80</a>        .get::&lt;CelestialDiscs&gt;()
+<a href=#81 id=81 data-nosnippet>81</a>        .copied()
+<a href=#82 id=82 data-nosnippet>82</a>        .unwrap_or_default()
+<a href=#83 id=83 data-nosnippet>83</a>}
+<a href=#84 id=84 data-nosnippet>84</a>
+<a href=#85 id=85 data-nosnippet>85</a><span class="doccomment">/// Sets or clears the sun's angular radius, which draws its disc along the sun direction.
+<a href=#86 id=86 data-nosnippet>86</a></span><span class="kw">pub fn </span>set_sun_angular_radius(world: <span class="kw-2">&amp;mut </span>World, radius: <span class="prelude-ty">Option</span>&lt;AngularRadius&gt;) {
+<a href=#87 id=87 data-nosnippet>87</a>    world
+<a href=#88 id=88 data-nosnippet>88</a>        .resources
+<a href=#89 id=89 data-nosnippet>89</a>        .get_or_init_mut::&lt;CelestialDiscs&gt;()
+<a href=#90 id=90 data-nosnippet>90</a>        .sun_radius = radius;
+<a href=#91 id=91 data-nosnippet>91</a>}
+<a href=#92 id=92 data-nosnippet>92</a>
+<a href=#93 id=93 data-nosnippet>93</a><span class="doccomment">/// Sets or clears the moon's disc, whose direction is the one seen from the camera's eye.
+<a href=#94 id=94 data-nosnippet>94</a></span><span class="kw">pub fn </span>set_moon_disc(world: <span class="kw-2">&amp;mut </span>World, moon: <span class="prelude-ty">Option</span>&lt;Disc&gt;) {
+<a href=#95 id=95 data-nosnippet>95</a>    world.resources.get_or_init_mut::&lt;CelestialDiscs&gt;().moon = moon;
+<a href=#96 id=96 data-nosnippet>96</a>}
 </code></pre></div></section></main></body></html>
