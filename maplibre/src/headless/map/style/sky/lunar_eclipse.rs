@@ -1,5 +1,5 @@
 //! A full moon in the Earth's shadow: dim and copper in the umbra, as dark as its Danjon value
-//! says, and lit as before where the shadow does not reach.
+//! says, turquoise along the umbra's edge, and lit as before where the shadow does not reach.
 #![allow(clippy::expect_used, clippy::panic)]
 
 use cgmath::{InnerSpace, Vector3, Vector4};
@@ -18,6 +18,8 @@ const MOON_RADIUS_DEGREES: f64 = 3.0;
 /// A shadow scaled with the moon, keeping the umbra wider than it as the real one is.
 const UMBRA_DEGREES: f64 = 4.0;
 const PENUMBRA_DEGREES: f64 = 5.0;
+/// The share of the umbra's radius the moon's shader gives the ozone band.
+const OZONE_WIDTH: f64 = 0.15;
 
 async fn globe() -> HeadlessMap {
     let style: Style = serde_json::from_str(r##"{"version":8,"center":[0,0],"zoom":0,"sources":{},"layers":[{"id":"background","type":"background","paint":{"background-color":"#303030"}}],"projection":{"type":"globe"}}"##).expect("style");
@@ -152,5 +154,32 @@ async fn a_moon_in_the_umbra_turns_dim_and_copper() {
     assert!(
         luminance(left) > 0.8 * luminance(full),
         "the sunlit limb keeps its light: left {left:?}, full {full:?}"
+    );
+    // Just inside the umbra's edge the ozone band turns the copper toward turquoise. The
+    // edge lies near the moon's centre; the most turquoise column within a band's width of it
+    // shows the fringe, the umbra further in shows copper.
+    let band = UMBRA_DEGREES * OZONE_WIDTH * pixels_per_degree / 0.8;
+    let blue_green = |[r, g, b]: [f64; 3]| (g + b) / (2.0 * r.max(1.0));
+    let column_colour = |dx: i32| {
+        let x = (centre.0 + f64::from(dx)) as u32;
+        let rows = (centre.1 - radius * 0.7) as u32..(centre.1 + radius * 0.7) as u32;
+        let count = f64::from(rows.end - rows.start);
+        let mut sum = [0.0; 3];
+        for y in rows {
+            let at = ((y * SIZE + x) * 4) as usize;
+            for (channel, total) in sum.iter_mut().enumerate() {
+                *total += f64::from(partial[at + channel]) / count;
+            }
+        }
+        sum
+    };
+    let reach = band.ceil() as i32;
+    let fringe = (-reach..=reach)
+        .map(|dx| blue_green(column_colour(dx)))
+        .fold(0.0, f64::max);
+    let deep = blue_green(mean(&partial, centre, radius, |dx| dx > radius * 0.5));
+    assert!(
+        fringe > 1.2 && deep < 0.6,
+        "a turquoise fringe lines the copper umbra: fringe {fringe:.2}, deeper {deep:.2}"
     );
 }
