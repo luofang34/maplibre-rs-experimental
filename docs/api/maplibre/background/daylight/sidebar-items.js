@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["GLOBE_DAYLIGHT"],"fn":["add_to_graph","queue_system","resource_system"],"struct":["GlobeDaylightFrame","GlobeDaylightGpu","GlobeDaylightNode","GlobeDaylightPipeline","GlobeDaylightShader"]};

@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["pattern","queue_system","render_commands","resource_system"],"struct":["BackgroundPlugin"]};
+window.SIDEBAR_ITEMS = {"mod":["daylight","pattern","queue_system","render_commands","resource_system"],"struct":["BackgroundPlugin"]};
