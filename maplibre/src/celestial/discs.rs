@@ -69,6 +69,8 @@ pub struct CelestialDiscs {
     /// The moon's disc, lit by the sun direction. The moon is near enough that its direction
     /// is the one seen from the camera's eye, not from the Earth's centre.
     pub moon: Option<Disc>,
+    /// The Earth's shadow the moon is lit through, during a lunar eclipse.
+    pub earth_shadow: Option<super::EarthShadow>,
 }
 
 /// The discs the host set; none until it sets one.

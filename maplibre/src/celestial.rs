@@ -47,6 +47,19 @@ pub enum CelestialError {
         /// Colour given.
         color: Option<[f32; 3]>,
     },
+    /// The Earth's shadow has an umbra not inside its penumbra, a radius out of range, or a
+    /// Danjon value outside 0..=4.
+    #[error(
+        "Earth's shadow with umbra {umbra_radius_degrees}°, penumbra {penumbra_radius_degrees}°          and Danjon value {danjon:?} cannot be drawn"
+    )]
+    InvalidEarthShadow {
+        /// Umbra radius given, in degrees.
+        umbra_radius_degrees: f64,
+        /// Penumbra radius given, in degrees.
+        penumbra_radius_degrees: f64,
+        /// Danjon value given, if any.
+        danjon: Option<f32>,
+    },
     /// A disc's angular radius is not above zero and at most five degrees.
     #[error("disc of angular radius {angular_radius_degrees}° cannot be drawn")]
     InvalidDisc {
@@ -168,17 +181,23 @@ pub struct CelestialLighting {
 }
 
 /// What lights the terrain: the host's sky and its Moon.
-pub(crate) type TerrainLight = (CelestialLighting, Option<Disc>);
+pub(crate) type TerrainLight = (CelestialLighting, CelestialDiscs);
 
 /// The Moon's light on the night side: its direction in globe world axes and, as w, the
 /// light it adds overhead: [`MOONLIGHT_GAIN`] times its lit fraction (1 − cos elongation) / 2,
-/// from the angle between the Sun and Moon directions. All zero without both bodies.
-pub fn moonlight_uniform(sun: Option<EcefDirection>, moon: Option<Disc>) -> [f32; 4] {
+/// from the angle between the Sun and Moon directions, times the share of sunlight the Earth's
+/// shadow lets reach the Moon's centre. All zero without both bodies.
+pub fn moonlight_uniform(
+    sun: Option<EcefDirection>,
+    moon: Option<Disc>,
+    shadow: Option<EarthShadow>,
+) -> [f32; 4] {
     let (Some(sun), Some(moon)) = (sun, moon) else {
         return [0.0; 4];
     };
     let direction = moon.direction();
-    let lit_fraction = (1.0 - sun.ecef().dot(direction.ecef())) / 2.0;
+    let eclipsed = shadow.map_or(1.0, |shadow| shadow.sunlit_share(direction));
+    let lit_fraction = eclipsed * (1.0 - sun.ecef().dot(direction.ecef())) / 2.0;
     let world = direction.globe_world();
     [
         world.x as f32,
@@ -239,11 +258,13 @@ pub fn set_sun_direction(world: &mut World, sun: Option<EcefDirection>) {
 }
 
 mod discs;
+mod earth_shadow;
 mod stars;
 
 pub use discs::{
     discs, set_moon_disc, set_sun_angular_radius, AngularRadius, CelestialDiscs, Disc,
 };
+pub use earth_shadow::{set_earth_shadow, EarthShadow};
 pub use stars::{set_stars, Star, Starfield};
 
 #[cfg(test)]

@@ -105,6 +105,16 @@ impl MapContext {
         }
     }
 
+    /// Sets or clears the Earth's shadow the moon is lit through during a lunar eclipse, as
+    /// the host computes it: the moon dims and turns copper in the umbra, as dark as the
+    /// shadow's Danjon value, and its light on the night side dims with it.
+    pub fn set_earth_shadow(&mut self, shadow: Option<crate::celestial::EarthShadow>) {
+        if crate::celestial::discs(&self.world).earth_shadow != shadow {
+            crate::celestial::set_earth_shadow(&mut self.world, shadow);
+            crate::render::frame_signals::mark_dirty(&mut self.world);
+        }
+    }
+
     /// The sun direction set with [`Self::set_sun_direction`].
     pub fn sun_direction(&self) -> Option<crate::celestial::EcefDirection> {
         crate::celestial::sun_direction(&self.world)
