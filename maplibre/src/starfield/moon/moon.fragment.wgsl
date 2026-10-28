@@ -37,9 +37,17 @@ const UMBRA_LEVEL_DARK: f32 = 0.01;
 const UMBRA_LEVEL_BRIGHT: f32 = 0.22;
 // The umbra brightens towards its edge, where the light has crossed less of the atmosphere.
 const UMBRA_EDGE_GAIN: f32 = 2.0;
+// Light grazing the Earth's limb crosses the ozone layer, which takes its red and orange, so a
+// turquoise band lines the umbra's edge. It reaches this share of the umbra's radius inward, is
+// this bright at its middle, and takes this share of the copper there.
+const OZONE_COLOR: vec3<f32> = vec3<f32>(0.3, 0.75, 0.8);
+const OZONE_WIDTH: f32 = 0.15;
+const OZONE_LEVEL: f32 = 0.2;
+const OZONE_ABSORPTION: f32 = 0.7;
 
 // The share of the sun's light that reaches the moon along `ray`, and the light the umbra
-// refracts onto it there; all sunlight and no umbra while no shadow is set.
+// refracts onto it there, copper within and turquoise along its edge; all sunlight and no umbra
+// while no shadow is set.
 fn earth_shadow(ray: vec3<f32>) -> vec4<f32> {
     if moon.penumbra_danjon.z < 0.5 {
         return vec4<f32>(0.0, 0.0, 0.0, 1.0);
@@ -53,7 +61,11 @@ fn earth_shadow(ray: vec3<f32>) -> vec4<f32> {
     let edge = smoothstep(0.0, umbra, angle);
     let level = mix(UMBRA_LEVEL_DARK, UMBRA_LEVEL_BRIGHT, pow(danjon, 1.5))
         * mix(1.0, UMBRA_EDGE_GAIN, edge * edge);
-    let umbral = mix(UMBRA_DARK, UMBRA_BRIGHT, danjon) * level * (1.0 - direct);
+    let inside = (umbra - angle) / (umbra * OZONE_WIDTH);
+    let band = smoothstep(0.0, 0.5, inside) * (1.0 - smoothstep(0.5, 1.0, inside));
+    // The ozone takes the red from the copper light it lines, and leaves its turquoise.
+    let copper = mix(UMBRA_DARK, UMBRA_BRIGHT, danjon) * level * (1.0 - OZONE_ABSORPTION * band);
+    let umbral = (copper + OZONE_COLOR * OZONE_LEVEL * band) * (1.0 - direct);
     return vec4<f32>(umbral, direct);
 }
 
