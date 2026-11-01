@@ -20,7 +20,7 @@ struct VertexOutput {
 
 @group(1) @binding(0) var<uniform> terrain_tile: TerrainTileUniforms;
 @group(1) @binding(1) var dem_texture: texture_2d<f32>;
-@group(1) @binding(4) var<storage, read> edge_storage: array<EdgeHeights>;
+@group(1) @binding(4) var edge_heights: texture_2d<f32>;
 
 // Small Mercator offsets avoid quantizing global longitude and sphere positions to metres.
 fn tile_relative_globe(position: vec2<f32>, elevation: f32) -> vec4<f32> {

@@ -3,7 +3,7 @@ use super::*;
 use crate::render::resource::share_gpu;
 
 impl TerrainResources {
-    /// Bind group layout of group one: uniforms, DEM texture, drape texture, sampler, edge storage.
+    /// Bind group layout of group one: uniforms, DEM texture, drape texture, sampler, edge heights.
     pub fn bind_group_layout_entries() -> Vec<wgpu::BindGroupLayoutEntry> {
         vec![
             wgpu::BindGroupLayoutEntry {
@@ -47,17 +47,18 @@ impl TerrainResources {
             wgpu::BindGroupLayoutEntry {
                 binding: 4,
                 visibility: wgpu::ShaderStages::VERTEX,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
+                // A texture rather than a storage buffer: WebGL2 has no vertex storage.
+                ty: wgpu::BindingType::Texture {
+                    multisampled: false,
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    sample_type: wgpu::TextureSampleType::Float { filterable: false },
                 },
                 count: None,
             },
         ]
     }
 
-    /// Binds the uniform block window, a DEM texture, a drape texture, and edge storage for one tile.
+    /// Binds the uniform block window, a DEM texture, a drape texture, and the edge heights for one tile.
     pub fn create_bind_group(
         &self,
         device: &wgpu::Device,
@@ -90,7 +91,7 @@ impl TerrainResources {
                 },
                 wgpu::BindGroupEntry {
                     binding: 4,
-                    resource: self.edge_buffer.as_entire_binding(),
+                    resource: wgpu::BindingResource::TextureView(&self.edge_heights.view),
                 },
             ],
         })

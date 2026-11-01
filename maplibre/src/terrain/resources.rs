@@ -22,7 +22,10 @@ use crate::{
 
 mod bindings;
 mod drapes;
+mod edge_heights;
 mod elevation_textures;
+#[cfg(test)]
+mod tests;
 
 use elevation_textures::DemTexture;
 
@@ -152,7 +155,7 @@ pub struct TerrainResources {
     /// frame is a hundred a frame, and on Metal the memory behind them is returned only
     /// slowly, so the footprint climbs for as long as the map is looked at.
     bind_groups: HashMap<(wgpu::Texture, wgpu::Texture), Arc<wgpu::BindGroup>>,
-    edge_buffer: wgpu::Buffer,
+    edge_heights: edge_heights::EdgeHeightTexture,
     msaa: Msaa,
     color_format: wgpu::TextureFormat,
     depth_format: wgpu::TextureFormat,
@@ -232,13 +235,7 @@ impl TerrainResources {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let edge_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("terrain edge storage"),
-            size: (std::mem::size_of::<super::queue_system::edges::EdgeHeights>() as u64)
-                * UNIFORM_CAPACITY,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let edge_heights = edge_heights::EdgeHeightTexture::new(device);
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
@@ -275,7 +272,7 @@ impl TerrainResources {
             drape_scratch: None,
             draws: Vec::new(),
             bind_groups: HashMap::new(),
-            edge_buffer,
+            edge_heights,
             msaa,
             color_format,
             depth_format,
@@ -403,11 +400,12 @@ impl TerrainResources {
         queue: &crate::render::upload_queue::UploadQueue,
         uniforms: &[TerrainTileUniforms],
     ) -> usize {
-        let count = uniforms.len().min(UNIFORM_CAPACITY as usize);
+        let capacity = (UNIFORM_CAPACITY as usize).min(self.edge_heights.capacity());
+        let count = uniforms.len().min(capacity);
         if count < uniforms.len() {
             tracing::warn!(
                 requested = uniforms.len(),
-                capacity = UNIFORM_CAPACITY,
+                capacity,
                 "more terrain tiles than uniform blocks; distant tiles are skipped"
             );
         }
@@ -419,20 +417,6 @@ impl TerrainResources {
         }
         queue.write_buffer(&self.uniform_buffer, 0, &bytes);
         count
-    }
-
-    /// Writes the per-tile edge height blocks.
-    pub(crate) fn write_edges(
-        &self,
-        queue: &crate::render::upload_queue::UploadQueue,
-        edges: &[super::queue_system::edges::EdgeHeights],
-    ) {
-        let count = edges.len().min(UNIFORM_CAPACITY as usize);
-        if count == 0 {
-            return;
-        }
-        let bytes = bytemuck::cast_slice(&edges[..count]);
-        queue.write_buffer(&self.edge_buffer, 0, bytes);
     }
 
     /// Replaces this frame's terrain draws.

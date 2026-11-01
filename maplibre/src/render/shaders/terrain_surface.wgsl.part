@@ -28,11 +28,6 @@ struct TerrainTileUniforms {
     edge_index: vec4<f32>,
 };
 
-struct EdgeHeights {
-    samples: array<vec4<f32>, 128>,
-    last: vec4<f32>,
-};
-
 const TERRAIN_EXTENT: f32 = 4096.0;
 
 // Decodes one DEM sample; the border texels stand in beyond the tile edges.
@@ -63,8 +58,7 @@ fn terrain_elevation(position: vec2<f32>) -> f32 { return terrain_height_gradien
 fn edge_height(t: f32, edge: u32) -> f32 {
     let edge_idx = u32(terrain_tile.edge_index.x);
     let i = u32(clamp(round(t / 32.0), 0.0, 128.0));
-    if i == 128u { return edge_storage[edge_idx].last[edge] * terrain_tile.exaggeration; }
-    return edge_storage[edge_idx].samples[i][edge] * terrain_tile.exaggeration;
+    return textureLoad(edge_heights, vec2<u32>(i, edge_idx), 0)[edge] * terrain_tile.exaggeration;
 }
 
 fn stitched_elevation(position: vec2<f32>, height: f32) -> f32 {

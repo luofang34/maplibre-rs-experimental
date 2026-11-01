@@ -5,7 +5,7 @@
 // mesh drawn for that tile; the fragments beyond it come from the draws of its neighbours.
 @group(2) @binding(0) var<uniform> terrain_tile: TerrainTileUniforms;
 @group(2) @binding(1) var dem_texture: texture_2d<f32>;
-@group(2) @binding(4) var<storage, read> edge_storage: array<EdgeHeights>;
+@group(2) @binding(4) var edge_heights: texture_2d<f32>;
 
 fn line_ground(position: vec2<f32>, tile_mercator_coords: vec4<f32>) -> LineGround {
     let terrain = terrain_tile.tile_mercator_coords;
