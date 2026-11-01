@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["replace"],"struct":["BoundSlice","BoundState","DrawCapabilities","PassStats","RenderStats","TrackedRenderPass"]};
+window.SIDEBAR_ITEMS = {"struct":["BoundSlice","BoundState","DrawCapabilities","PassStats","RenderStats","TrackedRenderPass"]};

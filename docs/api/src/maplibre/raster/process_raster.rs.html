@@ -72,15 +72,26 @@
 <a href=#72 id=72 data-nosnippet>72</a>}
 <a href=#73 id=73 data-nosnippet>73</a>
 <a href=#74 id=74 data-nosnippet>74</a><span class="kw">impl</span>&lt;T: RasterTransferables, C: Context&gt; ProcessRasterContext&lt;T, C&gt; {
-<a href=#75 id=75 data-nosnippet>75</a>    <span class="kw">fn </span>layer_raster_finished(
-<a href=#76 id=76 data-nosnippet>76</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-<a href=#77 id=77 data-nosnippet>77</a>        coords: <span class="kw-2">&amp;</span>WorldTileCoords,
-<a href=#78 id=78 data-nosnippet>78</a>        source: RasterSourceId,
-<a href=#79 id=79 data-nosnippet>79</a>        image_data: RgbaImage,
-<a href=#80 id=80 data-nosnippet>80</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), ProcessRasterError&gt; {
-<a href=#81 id=81 data-nosnippet>81</a>        <span class="self">self</span>.context
-<a href=#82 id=82 data-nosnippet>82</a>            .send_back(T::LayerRaster::build_from(<span class="kw-2">*</span>coords, source, image_data))
-<a href=#83 id=83 data-nosnippet>83</a>            .map_err(ProcessRasterError::Send)
+<a href=#75 id=75 data-nosnippet>75</a>    <span class="doccomment">/// Delivers an already-decoded RGBA8 image for `(coords, source)`.
+<a href=#76 id=76 data-nosnippet>76</a>    </span><span class="attr">#[allow(dead_code)]
+<a href=#77 id=77 data-nosnippet>77</a>    </span><span class="kw">pub fn </span>finish_decoded(
+<a href=#78 id=78 data-nosnippet>78</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+<a href=#79 id=79 data-nosnippet>79</a>        coords: <span class="kw-2">&amp;</span>WorldTileCoords,
+<a href=#80 id=80 data-nosnippet>80</a>        source: RasterSourceId,
+<a href=#81 id=81 data-nosnippet>81</a>        image_data: RgbaImage,
+<a href=#82 id=82 data-nosnippet>82</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), ProcessRasterError&gt; {
+<a href=#83 id=83 data-nosnippet>83</a>        <span class="self">self</span>.layer_raster_finished(coords, source, image_data)
 <a href=#84 id=84 data-nosnippet>84</a>    }
-<a href=#85 id=85 data-nosnippet>85</a>}
+<a href=#85 id=85 data-nosnippet>85</a>
+<a href=#86 id=86 data-nosnippet>86</a>    <span class="kw">fn </span>layer_raster_finished(
+<a href=#87 id=87 data-nosnippet>87</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+<a href=#88 id=88 data-nosnippet>88</a>        coords: <span class="kw-2">&amp;</span>WorldTileCoords,
+<a href=#89 id=89 data-nosnippet>89</a>        source: RasterSourceId,
+<a href=#90 id=90 data-nosnippet>90</a>        image_data: RgbaImage,
+<a href=#91 id=91 data-nosnippet>91</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), ProcessRasterError&gt; {
+<a href=#92 id=92 data-nosnippet>92</a>        <span class="self">self</span>.context
+<a href=#93 id=93 data-nosnippet>93</a>            .send_back(T::LayerRaster::build_from(<span class="kw-2">*</span>coords, source, image_data))
+<a href=#94 id=94 data-nosnippet>94</a>            .map_err(ProcessRasterError::Send)
+<a href=#95 id=95 data-nosnippet>95</a>    }
+<a href=#96 id=96 data-nosnippet>96</a>}
 </code></pre></div></section></main></body></html>

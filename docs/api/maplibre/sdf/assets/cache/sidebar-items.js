@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["DEFAULT_BUDGET_BYTES","NEGATIVE_TTL"],"enum":["AssetFailure","Claim","Slot"],"fn":["decode_glyphs","fetch","take_waiters","wake"],"struct":["AssetCache","Entry","Flight","Shared","SpriteSheet","State"]};
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_BUDGET_BYTES","NEGATIVE_TTL"],"enum":["AssetFailure","Claim","Slot"],"fn":["decode_glyphs","fetch","take_waiters","wake"],"mod":["tiles"],"struct":["AssetCache","Entry","Flight","Shared","SpriteSheet","State"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["PassHookPoint"],"struct":["PassDrawHooks"],"trait":["PassDrawHook"]};

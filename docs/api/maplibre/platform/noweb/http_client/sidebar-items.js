@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["USER_AGENT"],"struct":["ReqwestHttpClient"]};
+window.SIDEBAR_ITEMS = {"constant":["USER_AGENT"],"fn":["register_in_process_handler","unregister_in_process_handler"],"static":["IN_PROCESS_HANDLERS"],"struct":["ReqwestHttpClient"],"type":["InProcessHandler"]};

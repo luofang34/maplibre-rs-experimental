@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["PowerPreference","SurfaceType","TextureFormat"],"struct":["Backends","BufferPoolSizes","Features","Limits","Msaa","RendererSettings","WgpuSettings"]};
+window.SIDEBAR_ITEMS = {"enum":["PowerPreference","SurfaceType","TerrainDrapeMode","TextureFormat"],"struct":["Backends","BufferPoolSizes","Features","Limits","Msaa","ProceduralReliefStyle","RendererSettings","WgpuSettings"]};

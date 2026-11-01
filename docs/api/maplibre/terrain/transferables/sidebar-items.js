@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["DemMessageTag"],"struct":["DefaultDemTransferables","DefaultLayerDem","DefaultLayerDemMissing"],"trait":["DemTransferables","LayerDem","LayerDemMissing"]};
+window.SIDEBAR_ITEMS = {"enum":["DefaultDemPayload","DemMessageTag"],"struct":["DefaultDemTransferables","DefaultLayerDem","DefaultLayerDemMissing"],"trait":["DemTransferables","LayerDem","LayerDemMissing"]};

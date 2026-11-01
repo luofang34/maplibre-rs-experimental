@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["prepare_system"]};
+window.SIDEBAR_ITEMS = {"fn":["density_target_size","prepare_system"]};

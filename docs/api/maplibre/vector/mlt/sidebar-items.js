@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["decode"]};
+window.SIDEBAR_ITEMS = {"fn":["convert_feature","convert_layer","decode","encode_geometry","encode_linestring","encode_point","encode_polygon","encode_ring","prop_to_value","zigzag"]};

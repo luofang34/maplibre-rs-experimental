@@ -88,10 +88,12 @@
 <a href=#88 id=88 data-nosnippet>88</a>        .resources
 <a href=#89 id=89 data-nosnippet>89</a>        .get_or_init_mut::&lt;CelestialDiscs&gt;()
 <a href=#90 id=90 data-nosnippet>90</a>        .sun_radius = radius;
-<a href=#91 id=91 data-nosnippet>91</a>}
-<a href=#92 id=92 data-nosnippet>92</a>
-<a href=#93 id=93 data-nosnippet>93</a><span class="doccomment">/// Sets or clears the moon's disc, whose direction is the one seen from the camera's eye.
-<a href=#94 id=94 data-nosnippet>94</a></span><span class="kw">pub fn </span>set_moon_disc(world: <span class="kw-2">&amp;mut </span>World, moon: <span class="prelude-ty">Option</span>&lt;Disc&gt;) {
-<a href=#95 id=95 data-nosnippet>95</a>    world.resources.get_or_init_mut::&lt;CelestialDiscs&gt;().moon = moon;
-<a href=#96 id=96 data-nosnippet>96</a>}
+<a href=#91 id=91 data-nosnippet>91</a>    <span class="kw">super</span>::sync_scene_lighting(world);
+<a href=#92 id=92 data-nosnippet>92</a>}
+<a href=#93 id=93 data-nosnippet>93</a>
+<a href=#94 id=94 data-nosnippet>94</a><span class="doccomment">/// Sets or clears the moon's disc, whose direction is the one seen from the camera's eye.
+<a href=#95 id=95 data-nosnippet>95</a></span><span class="kw">pub fn </span>set_moon_disc(world: <span class="kw-2">&amp;mut </span>World, moon: <span class="prelude-ty">Option</span>&lt;Disc&gt;) {
+<a href=#96 id=96 data-nosnippet>96</a>    world.resources.get_or_init_mut::&lt;CelestialDiscs&gt;().moon = moon;
+<a href=#97 id=97 data-nosnippet>97</a>    <span class="kw">super</span>::sync_scene_lighting(world);
+<a href=#98 id=98 data-nosnippet>98</a>}
 </code></pre></div></section></main></body></html>

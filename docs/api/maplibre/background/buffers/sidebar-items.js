@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["background_color","globe_tile_metadata","globe_tiles","sky_metadata","world_rows"],"struct":["AllocatedBuffers","BackgroundBuffers","BackgroundGpuBuffers"]};

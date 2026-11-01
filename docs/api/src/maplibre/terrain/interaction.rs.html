@@ -8,7 +8,7 @@
 <a href=#8 id=8 data-nosnippet>8</a></span><span class="kw">use </span>cgmath::{EuclideanSpace, InnerSpace, Point2, Vector2, Vector3};
 <a href=#9 id=9 data-nosnippet>9</a>
 <a href=#10 id=10 data-nosnippet>10</a><span class="kw">use crate</span>::{
-<a href=#11 id=11 data-nosnippet>11</a>    coords::{Zoom, TILE_SIZE},
+<a href=#11 id=11 data-nosnippet>11</a>    coords::{LatLon, Zoom, TILE_SIZE},
 <a href=#12 id=12 data-nosnippet>12</a>    projection::{body::Body, globe::camera::GlobeCameraState},
 <a href=#13 id=13 data-nosnippet>13</a>    render::{
 <a href=#14 id=14 data-nosnippet>14</a>        projection::{globe_camera_for_view, mercator_world_to_lat_lon},
@@ -169,7 +169,7 @@
 <a href=#169 id=169 data-nosnippet>169</a>            );
 <a href=#170 id=170 data-nosnippet>170</a>            <span class="kw">return </span><span class="prelude-val">Some</span>(TerrainHit {
 <a href=#171 id=171 data-nosnippet>171</a>                mercator,
-<a href=#172 id=172 data-nosnippet>172</a>                location: <span class="kw">crate</span>::terrain::sightline::mercator_to_lat_lon(mercator),
+<a href=#172 id=172 data-nosnippet>172</a>                location: LatLon::from_mercator(mercator),
 <a href=#173 id=173 data-nosnippet>173</a>                elevation: sample_at(hit).elevation,
 <a href=#174 id=174 data-nosnippet>174</a>            });
 <a href=#175 id=175 data-nosnippet>175</a>        }

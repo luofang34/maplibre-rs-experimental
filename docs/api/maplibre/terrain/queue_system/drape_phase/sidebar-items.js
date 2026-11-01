@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["background_clear_color","build_drape_phase","drape_metadata"],"type":["TargetSlots"]};
+window.SIDEBAR_ITEMS = {"fn":["background_clear_color","build_drape_phase","drape_metadata","encode_drapes"],"type":["TargetSlots"]};

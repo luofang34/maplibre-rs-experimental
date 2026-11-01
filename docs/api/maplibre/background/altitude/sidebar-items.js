@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["ATMOSPHERE_FADE_ALTITUDE_METERS"],"fn":["altitude_blend_for_camera","atmosphere_altitude_blend"]};

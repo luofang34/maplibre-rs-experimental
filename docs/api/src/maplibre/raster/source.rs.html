@@ -3,7 +3,7 @@
 <a href=#3 id=3 data-nosnippet>3</a></span><span class="kw">use </span>serde::{Deserialize, Serialize};
 <a href=#4 id=4 data-nosnippet>4</a>
 <a href=#5 id=5 data-nosnippet>5</a><span class="doccomment">/// Style source owning raster pixels. The fallback source is distinct from every named source.
-<a href=#6 id=6 data-nosnippet>6</a></span><span class="attr">#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+<a href=#6 id=6 data-nosnippet>6</a></span><span class="attr">#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 <a href=#7 id=7 data-nosnippet>7</a></span><span class="kw">pub struct </span>RasterSourceId(<span class="prelude-ty">Option</span>&lt;String&gt;);
 <a href=#8 id=8 data-nosnippet>8</a>
 <a href=#9 id=9 data-nosnippet>9</a><span class="kw">impl </span>RasterSourceId {
