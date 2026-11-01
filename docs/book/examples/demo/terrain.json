@@ -33,10 +33,7 @@
   ],
   "terrain": {
     "source": "terrainSource",
-    "exaggeration": 1
-  },
-  "projection": {
-    "type": "globe"
+    "exaggeration": 1.5
   },
   "center": [
     11.39085,

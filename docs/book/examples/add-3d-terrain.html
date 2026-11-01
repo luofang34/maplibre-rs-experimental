@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-bcaddcd3.js";
+            window.path_to_searchindex_js = "../searchindex-83e6a66e.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-8b613e14.js"></script>
@@ -224,7 +224,7 @@
   ],
   "terrain": {
     "source": "terrainSource",
-    "exaggeration": 1.0
+    "exaggeration": 1.5
   },
   "center": [11.39085, 47.27574],
   "zoom": 12.0,
@@ -264,7 +264,8 @@ pub fn create_terrain_map&lt;E: maplibre::environment::Environment&gt;(
         Box::new(TerrainPlugin::default()),
     ];
 
-    let map = Map::new(style, kernel, plugins)?;
+    let mut map = Map::new(style, kernel, plugins)?;
+    map.set_max_pitch_degrees(85.0);
     Ok(map)
 }
 <span class="boring">}</span></code></pre>

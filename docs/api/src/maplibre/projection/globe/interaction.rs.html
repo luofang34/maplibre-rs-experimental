@@ -166,16 +166,19 @@
 <a href=#166 id=166 data-nosnippet>166</a>    <span class="kw">let </span>orientation = orientation_from_lat_lon_bearing(current_center, bearing_degrees) * delta;
 <a href=#167 id=167 data-nosnippet>167</a>    <span class="kw">let </span>rotated = lat_lon_bearing_from_orientation(orientation);
 <a href=#168 id=168 data-nosnippet>168</a>    <span class="kw">let </span>center = LatLon::new(
-<a href=#169 id=169 data-nosnippet>169</a>        rotated.center.latitude.clamp(-<span class="number">90.0</span>, <span class="number">90.0</span>),
-<a href=#170 id=170 data-nosnippet>170</a>        wrap_longitude(rotated.center.longitude),
-<a href=#171 id=171 data-nosnippet>171</a>    );
-<a href=#172 id=172 data-nosnippet>172</a>
-<a href=#173 id=173 data-nosnippet>173</a>    GlobePanUpdate {
-<a href=#174 id=174 data-nosnippet>174</a>        center,
-<a href=#175 id=175 data-nosnippet>175</a>        zoom_adjustment: globe_zoom_adjustment(current_center.latitude, center.latitude),
-<a href=#176 id=176 data-nosnippet>176</a>    }
-<a href=#177 id=177 data-nosnippet>177</a>}
-<a href=#178 id=178 data-nosnippet>178</a>
-<a href=#179 id=179 data-nosnippet>179</a><span class="attr">#[cfg(test)]
-<a href=#180 id=180 data-nosnippet>180</a></span><span class="kw">mod </span>tests;
+<a href=#169 id=169 data-nosnippet>169</a>        rotated
+<a href=#170 id=170 data-nosnippet>170</a>            .center
+<a href=#171 id=171 data-nosnippet>171</a>            .latitude
+<a href=#172 id=172 data-nosnippet>172</a>            .clamp(-MAX_VALID_LATITUDE, MAX_VALID_LATITUDE),
+<a href=#173 id=173 data-nosnippet>173</a>        wrap_longitude(rotated.center.longitude),
+<a href=#174 id=174 data-nosnippet>174</a>    );
+<a href=#175 id=175 data-nosnippet>175</a>
+<a href=#176 id=176 data-nosnippet>176</a>    GlobePanUpdate {
+<a href=#177 id=177 data-nosnippet>177</a>        center,
+<a href=#178 id=178 data-nosnippet>178</a>        zoom_adjustment: globe_zoom_adjustment(current_center.latitude, center.latitude),
+<a href=#179 id=179 data-nosnippet>179</a>    }
+<a href=#180 id=180 data-nosnippet>180</a>}
+<a href=#181 id=181 data-nosnippet>181</a>
+<a href=#182 id=182 data-nosnippet>182</a><span class="attr">#[cfg(test)]
+<a href=#183 id=183 data-nosnippet>183</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>
