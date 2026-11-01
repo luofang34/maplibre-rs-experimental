@@ -389,43 +389,42 @@
 <a href=#389 id=389 data-nosnippet>389</a>    <span class="kw">fn </span>tile_units(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; f64 {
 <a href=#390 id=390 data-nosnippet>390</a>        <span class="kw">let </span>count = <span class="number">2_f64</span>.powi(i32::from(u8::from(<span class="self">self</span>.coords.z)));
 <a href=#391 id=391 data-nosnippet>391</a>        <span class="kw">let </span>y = (f64::from(<span class="self">self</span>.coords.y) + <span class="self">self</span>.anchor[<span class="number">1</span>] / <span class="number">4096.0</span>) / count;
-<a href=#392 id=392 data-nosnippet>392</a>        <span class="kw">let </span>cos_lat = (<span class="number">1.0 </span>/ (std::f64::consts::PI * (<span class="number">1.0 </span>- <span class="number">2.0 </span>* y)).cosh()).clamp(<span class="number">0.08627</span>, <span class="number">1.0</span>);
-<a href=#393 id=393 data-nosnippet>393</a>        <span class="kw">let </span>globe_scale = (f64::from(<span class="self">self</span>.projection.globe_circle[<span class="number">0</span>]) / cos_lat).clamp(<span class="number">0.25</span>, <span class="number">4.0</span>);
-<a href=#394 id=394 data-nosnippet>394</a>        <span class="number">8.0 </span>* <span class="self">self</span>.view.style_zoom().scale_to_tile(<span class="kw-2">&amp;</span><span class="self">self</span>.coords)
-<a href=#395 id=395 data-nosnippet>395</a>            * (<span class="number">1.0 </span>- f64::from(<span class="self">self</span>.projection.transition)
-<a href=#396 id=396 data-nosnippet>396</a>                + f64::from(<span class="self">self</span>.projection.transition) * globe_scale)
-<a href=#397 id=397 data-nosnippet>397</a>    }
-<a href=#398 id=398 data-nosnippet>398</a>}
-<a href=#399 id=399 data-nosnippet>399</a>
-<a href=#400 id=400 data-nosnippet>400</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>project(
-<a href=#401 id=401 data-nosnippet>401</a>    coords: WorldTileCoords,
-<a href=#402 id=402 data-nosnippet>402</a>    anchor: [f64; <span class="number">2</span>],
-<a href=#403 id=403 data-nosnippet>403</a>    elevation: f64,
-<a href=#404 id=404 data-nosnippet>404</a>    view: <span class="kw-2">&amp;</span>ViewState,
-<a href=#405 id=405 data-nosnippet>405</a>    projection: <span class="kw-2">&amp;</span>ShaderProjectionData,
-<a href=#406 id=406 data-nosnippet>406</a>) -&gt; <span class="prelude-ty">Option</span>&lt;Vector4&lt;f64&gt;&gt; {
-<a href=#407 id=407 data-nosnippet>407</a>    <span class="kw">let </span>tile = canonical_tile(coords)<span class="question-mark">?</span>;
-<a href=#408 id=408 data-nosnippet>408</a>    <span class="kw">let </span>surface = <span class="kw">crate</span>::projection::globe::project_tile_coordinates_to_unit_sphere(
-<a href=#409 id=409 data-nosnippet>409</a>        tile.x,
-<a href=#410 id=410 data-nosnippet>410</a>        tile.y,
-<a href=#411 id=411 data-nosnippet>411</a>        u8::from(tile.z),
-<a href=#412 id=412 data-nosnippet>412</a>        anchor[<span class="number">0</span>],
-<a href=#413 id=413 data-nosnippet>413</a>        anchor[<span class="number">1</span>],
-<a href=#414 id=414 data-nosnippet>414</a>    );
-<a href=#415 id=415 data-nosnippet>415</a>    <span class="kw">let </span>plane = Vector4::&lt;f32&gt;::from(projection.clipping_plane).cast::&lt;f64&gt;()<span class="question-mark">?</span>;
-<a href=#416 id=416 data-nosnippet>416</a>    <span class="kw">if </span>projection.transition &gt;= <span class="number">0.98 </span>&amp;&amp; plane.dot(surface.extend(<span class="number">1.0</span>)) &lt; <span class="number">0.0 </span>{
-<a href=#417 id=417 data-nosnippet>417</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
-<a href=#418 id=418 data-nosnippet>418</a>    }
-<a href=#419 id=419 data-nosnippet>419</a>    <span class="kw">let </span>flat = view
-<a href=#420 id=420 data-nosnippet>420</a>        .gpu_view_projection()
-<a href=#421 id=421 data-nosnippet>421</a>        .to_model_view_projection(coords.transform_for_zoom(view.zoom()))
-<a href=#422 id=422 data-nosnippet>422</a>        .get()
-<a href=#423 id=423 data-nosnippet>423</a>        * Vector4::new(anchor[<span class="number">0</span>], anchor[<span class="number">1</span>], elevation, <span class="number">1.0</span>);
-<a href=#424 id=424 data-nosnippet>424</a>    <span class="kw">let </span>globe = Matrix4::&lt;f32&gt;::from(projection.main_matrix).cast::&lt;f64&gt;()<span class="question-mark">?
-<a href=#425 id=425 data-nosnippet>425</a>        </span>* (surface * (<span class="number">1.0 </span>+ elevation / f64::from(projection.radius_meters))).extend(<span class="number">1.0</span>);
-<a href=#426 id=426 data-nosnippet>426</a>    <span class="prelude-val">Some</span>(flat * (<span class="number">1.0 </span>- f64::from(projection.transition)) + globe * f64::from(projection.transition))
-<a href=#427 id=427 data-nosnippet>427</a>}
-<a href=#428 id=428 data-nosnippet>428</a>
-<a href=#429 id=429 data-nosnippet>429</a><span class="attr">#[cfg(test)]
-<a href=#430 id=430 data-nosnippet>430</a></span><span class="kw">mod </span>tests;
+<a href=#392 id=392 data-nosnippet>392</a>        <span class="kw">let </span>cos_lat = <span class="number">1.0 </span>/ (std::f64::consts::PI * (<span class="number">1.0 </span>- <span class="number">2.0 </span>* y)).cosh();
+<a href=#393 id=393 data-nosnippet>393</a>        <span class="number">8.0 </span>* <span class="self">self</span>.view.style_zoom().scale_to_tile(<span class="kw-2">&amp;</span><span class="self">self</span>.coords)
+<a href=#394 id=394 data-nosnippet>394</a>            * (<span class="number">1.0 </span>- f64::from(<span class="self">self</span>.projection.transition)
+<a href=#395 id=395 data-nosnippet>395</a>                + f64::from(<span class="self">self</span>.projection.transition) / cos_lat.max(<span class="number">1e-6</span>))
+<a href=#396 id=396 data-nosnippet>396</a>    }
+<a href=#397 id=397 data-nosnippet>397</a>}
+<a href=#398 id=398 data-nosnippet>398</a>
+<a href=#399 id=399 data-nosnippet>399</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>project(
+<a href=#400 id=400 data-nosnippet>400</a>    coords: WorldTileCoords,
+<a href=#401 id=401 data-nosnippet>401</a>    anchor: [f64; <span class="number">2</span>],
+<a href=#402 id=402 data-nosnippet>402</a>    elevation: f64,
+<a href=#403 id=403 data-nosnippet>403</a>    view: <span class="kw-2">&amp;</span>ViewState,
+<a href=#404 id=404 data-nosnippet>404</a>    projection: <span class="kw-2">&amp;</span>ShaderProjectionData,
+<a href=#405 id=405 data-nosnippet>405</a>) -&gt; <span class="prelude-ty">Option</span>&lt;Vector4&lt;f64&gt;&gt; {
+<a href=#406 id=406 data-nosnippet>406</a>    <span class="kw">let </span>tile = canonical_tile(coords)<span class="question-mark">?</span>;
+<a href=#407 id=407 data-nosnippet>407</a>    <span class="kw">let </span>surface = <span class="kw">crate</span>::projection::globe::project_tile_coordinates_to_unit_sphere(
+<a href=#408 id=408 data-nosnippet>408</a>        tile.x,
+<a href=#409 id=409 data-nosnippet>409</a>        tile.y,
+<a href=#410 id=410 data-nosnippet>410</a>        u8::from(tile.z),
+<a href=#411 id=411 data-nosnippet>411</a>        anchor[<span class="number">0</span>],
+<a href=#412 id=412 data-nosnippet>412</a>        anchor[<span class="number">1</span>],
+<a href=#413 id=413 data-nosnippet>413</a>    );
+<a href=#414 id=414 data-nosnippet>414</a>    <span class="kw">let </span>plane = Vector4::&lt;f32&gt;::from(projection.clipping_plane).cast::&lt;f64&gt;()<span class="question-mark">?</span>;
+<a href=#415 id=415 data-nosnippet>415</a>    <span class="kw">if </span>projection.transition &gt;= <span class="number">0.98 </span>&amp;&amp; plane.dot(surface.extend(<span class="number">1.0</span>)) &lt; <span class="number">0.0 </span>{
+<a href=#416 id=416 data-nosnippet>416</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
+<a href=#417 id=417 data-nosnippet>417</a>    }
+<a href=#418 id=418 data-nosnippet>418</a>    <span class="kw">let </span>flat = view
+<a href=#419 id=419 data-nosnippet>419</a>        .gpu_view_projection()
+<a href=#420 id=420 data-nosnippet>420</a>        .to_model_view_projection(coords.transform_for_zoom(view.zoom()))
+<a href=#421 id=421 data-nosnippet>421</a>        .get()
+<a href=#422 id=422 data-nosnippet>422</a>        * Vector4::new(anchor[<span class="number">0</span>], anchor[<span class="number">1</span>], elevation, <span class="number">1.0</span>);
+<a href=#423 id=423 data-nosnippet>423</a>    <span class="kw">let </span>globe = Matrix4::&lt;f32&gt;::from(projection.main_matrix).cast::&lt;f64&gt;()<span class="question-mark">?
+<a href=#424 id=424 data-nosnippet>424</a>        </span>* (surface * (<span class="number">1.0 </span>+ elevation / f64::from(projection.radius_meters))).extend(<span class="number">1.0</span>);
+<a href=#425 id=425 data-nosnippet>425</a>    <span class="prelude-val">Some</span>(flat * (<span class="number">1.0 </span>- f64::from(projection.transition)) + globe * f64::from(projection.transition))
+<a href=#426 id=426 data-nosnippet>426</a>}
+<a href=#427 id=427 data-nosnippet>427</a>
+<a href=#428 id=428 data-nosnippet>428</a><span class="attr">#[cfg(test)]
+<a href=#429 id=429 data-nosnippet>429</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>
