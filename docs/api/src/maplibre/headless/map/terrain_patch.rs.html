@@ -107,8 +107,8 @@
 <a href=#107 id=107 data-nosnippet>107</a>    /// resident drape texture for `coords` if a covering DEM tile is resident in `World`.
 <a href=#108 id=108 data-nosnippet>108</a>    </span><span class="kw">pub fn </span>resident_terrain_patch(<span class="kw-2">&amp;</span><span class="self">self</span>, coords: WorldTileCoords) -&gt; <span class="prelude-ty">Option</span>&lt;TerrainPatchSnapshot&gt; {
 <a href=#109 id=109 data-nosnippet>109</a>        <span class="kw">let </span>context = <span class="kw-2">&amp;</span><span class="self">self</span>.map_context;
-<a href=#110 id=110 data-nosnippet>110</a>        <span class="kw">let </span>fallback_dem = dem_source(<span class="kw-2">&amp;</span>context.style)
-<a href=#111 id=111 data-nosnippet>111</a>            .map(|dem| (dem.minzoom, dem.maxzoom, dem.exaggeration));
+<a href=#110 id=110 data-nosnippet>110</a>        <span class="kw">let </span>fallback_dem =
+<a href=#111 id=111 data-nosnippet>111</a>            dem_source(<span class="kw-2">&amp;</span>context.style).map(|dem| (dem.minzoom, dem.maxzoom, dem.exaggeration));
 <a href=#112 id=112 data-nosnippet>112</a>        <span class="kw">let </span>empty_index = TerrainCoverageIndex::default();
 <a href=#113 id=113 data-nosnippet>113</a>        <span class="kw">let </span>index = context
 <a href=#114 id=114 data-nosnippet>114</a>            .world

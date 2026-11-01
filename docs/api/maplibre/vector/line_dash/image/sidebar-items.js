@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["LineImage"],"fn":["image_uniform","line_image","pattern_image","ramp_texture"]};

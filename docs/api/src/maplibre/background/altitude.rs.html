@@ -87,30 +87,31 @@
 <a href=#87 id=87 data-nosnippet>87</a>    <span class="attr">#[test]
 <a href=#88 id=88 data-nosnippet>88</a>    </span><span class="kw">fn </span>camera_altitude_blend_evaluation() {
 <a href=#89 id=89 data-nosnippet>89</a>        <span class="kw">use </span>cgmath::Point2;
-<a href=#90 id=90 data-nosnippet>90</a>        <span class="kw">use crate</span>::{
-<a href=#91 id=91 data-nosnippet>91</a>            coords::LatLon,
-<a href=#92 id=92 data-nosnippet>92</a>            projection::{body::Body, globe::camera::GlobeCameraOptions},
-<a href=#93 id=93 data-nosnippet>93</a>        };
-<a href=#94 id=94 data-nosnippet>94</a>
-<a href=#95 id=95 data-nosnippet>95</a>        <span class="comment">// Create a camera with sea-level orbit
-<a href=#96 id=96 data-nosnippet>96</a>        </span><span class="kw">let </span>options = GlobeCameraOptions {
-<a href=#97 id=97 data-nosnippet>97</a>            width: <span class="number">800.0</span>,
-<a href=#98 id=98 data-nosnippet>98</a>            height: <span class="number">600.0</span>,
-<a href=#99 id=99 data-nosnippet>99</a>            field_of_view_degrees: <span class="number">45.0</span>,
-<a href=#100 id=100 data-nosnippet>100</a>            center: LatLon::new(<span class="number">0.0</span>, <span class="number">0.0</span>),
-<a href=#101 id=101 data-nosnippet>101</a>            world_size: <span class="number">512.0</span>,
-<a href=#102 id=102 data-nosnippet>102</a>            bearing_degrees: <span class="number">0.0</span>,
-<a href=#103 id=103 data-nosnippet>103</a>            pitch_degrees: <span class="number">0.0</span>,
-<a href=#104 id=104 data-nosnippet>104</a>            roll_degrees: <span class="number">0.0</span>,
-<a href=#105 id=105 data-nosnippet>105</a>            center_offset: Point2::new(<span class="number">0.0</span>, <span class="number">0.0</span>),
-<a href=#106 id=106 data-nosnippet>106</a>            body: Body::EARTH,
-<a href=#107 id=107 data-nosnippet>107</a>            target_elevation_meters: <span class="number">0.0</span>,
-<a href=#108 id=108 data-nosnippet>108</a>            radius_pixels: <span class="prelude-val">None</span>,
-<a href=#109 id=109 data-nosnippet>109</a>        };
-<a href=#110 id=110 data-nosnippet>110</a>        <span class="kw">let </span>camera = GlobeCameraState::new(options).expect(<span class="string">"valid camera"</span>);
-<a href=#111 id=111 data-nosnippet>111</a>        <span class="kw">let </span>blend = altitude_blend_for_camera(<span class="kw-2">&amp;</span>camera);
-<a href=#112 id=112 data-nosnippet>112</a>        <span class="comment">// At world_size 512, zoom is around 1 (outer space view, distance &gt;&gt; 100 km)
-<a href=#113 id=113 data-nosnippet>113</a>        </span><span class="macro">assert_eq!</span>(blend, <span class="number">1.0</span>);
-<a href=#114 id=114 data-nosnippet>114</a>    }
-<a href=#115 id=115 data-nosnippet>115</a>}
+<a href=#90 id=90 data-nosnippet>90</a>
+<a href=#91 id=91 data-nosnippet>91</a>        <span class="kw">use crate</span>::{
+<a href=#92 id=92 data-nosnippet>92</a>            coords::LatLon,
+<a href=#93 id=93 data-nosnippet>93</a>            projection::{body::Body, globe::camera::GlobeCameraOptions},
+<a href=#94 id=94 data-nosnippet>94</a>        };
+<a href=#95 id=95 data-nosnippet>95</a>
+<a href=#96 id=96 data-nosnippet>96</a>        <span class="comment">// Create a camera with sea-level orbit
+<a href=#97 id=97 data-nosnippet>97</a>        </span><span class="kw">let </span>options = GlobeCameraOptions {
+<a href=#98 id=98 data-nosnippet>98</a>            width: <span class="number">800.0</span>,
+<a href=#99 id=99 data-nosnippet>99</a>            height: <span class="number">600.0</span>,
+<a href=#100 id=100 data-nosnippet>100</a>            field_of_view_degrees: <span class="number">45.0</span>,
+<a href=#101 id=101 data-nosnippet>101</a>            center: LatLon::new(<span class="number">0.0</span>, <span class="number">0.0</span>),
+<a href=#102 id=102 data-nosnippet>102</a>            world_size: <span class="number">512.0</span>,
+<a href=#103 id=103 data-nosnippet>103</a>            bearing_degrees: <span class="number">0.0</span>,
+<a href=#104 id=104 data-nosnippet>104</a>            pitch_degrees: <span class="number">0.0</span>,
+<a href=#105 id=105 data-nosnippet>105</a>            roll_degrees: <span class="number">0.0</span>,
+<a href=#106 id=106 data-nosnippet>106</a>            center_offset: Point2::new(<span class="number">0.0</span>, <span class="number">0.0</span>),
+<a href=#107 id=107 data-nosnippet>107</a>            body: Body::EARTH,
+<a href=#108 id=108 data-nosnippet>108</a>            target_elevation_meters: <span class="number">0.0</span>,
+<a href=#109 id=109 data-nosnippet>109</a>            radius_pixels: <span class="prelude-val">None</span>,
+<a href=#110 id=110 data-nosnippet>110</a>        };
+<a href=#111 id=111 data-nosnippet>111</a>        <span class="kw">let </span>camera = GlobeCameraState::new(options).expect(<span class="string">"valid camera"</span>);
+<a href=#112 id=112 data-nosnippet>112</a>        <span class="kw">let </span>blend = altitude_blend_for_camera(<span class="kw-2">&amp;</span>camera);
+<a href=#113 id=113 data-nosnippet>113</a>        <span class="comment">// At world_size 512, zoom is around 1 (outer space view, distance &gt;&gt; 100 km)
+<a href=#114 id=114 data-nosnippet>114</a>        </span><span class="macro">assert_eq!</span>(blend, <span class="number">1.0</span>);
+<a href=#115 id=115 data-nosnippet>115</a>    }
+<a href=#116 id=116 data-nosnippet>116</a>}
 </code></pre></div></section></main></body></html>

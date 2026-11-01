@@ -37,7 +37,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-f3d4cc00.js";
+            window.path_to_searchindex_js = "searchindex-6105c6c9.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-15490cdc.js"></script>
@@ -255,17 +255,19 @@ in progress</p>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="display-a-globe-with-a-vector-map"><a class="header" href="#display-a-globe-with-a-vector-map">Display a Globe with a Vector Map</a></h1>
-<p>This example demonstrates how to render an interactive 3D globe with a vector map in <strong>MapLibre Rust</strong>, matching the behavior, visual output, and API patterns of the <a href="https://maplibre.org/maplibre-gl-js/docs/examples/display-a-globe-with-a-vector-map/">MapLibre GL JS Display a Globe with a Vector Map</a> example.</p>
-<p>You will learn how to:</p>
-<ol>
-<li>Configure the globe projection in the MapLibre style JSON specification.</li>
-<li>Run the interactive globe vector map natively using modern, idiomatic Rust.</li>
-<li>Deploy and embed the map on the web using WebAssembly (WASM) with WebGPU and WebGL2.</li>
-</ol>
+<p>Display a 3D spherical globe with vector tile features using the <code>globe</code> projection.</p>
+<div class="map-container" style="position: relative; width: 100%; height: 520px; border-radius: 8px; overflow: hidden; margin: 1.5rem 0; border: 1px solid #30363d; background: #0b0e14;">
+  <iframe src="./demo/index.html" style="width: 100%; height: 100%; border: none; display: block;" title="MapLibre Globe Vector Map" allow="fullscreen"></iframe>
+  
+<div style="position: absolute; bottom: 12px; left: 12px; background: rgba(13, 17, 23, 0.85); color: #c9d1d9; padding: 6px 12px; border-radius: 6px; font-size: 12px; backdrop-filter: blur(4px); pointer-events: none; border: 1px solid rgba(255,255,255,0.1);">
+    <span>Drag to orbit • Scroll to zoom • Right-click drag to pitch/rotate</span>
+  </div>
+
+</div>
+
 <hr>
 <h2 id="1-style-specification"><a class="header" href="#1-style-specification">1. Style Specification</a></h2>
-<p>In MapLibre, the projection is declared as a root property of the style JSON. Setting <code>"type": "globe"</code> (or <code>"type": "vertical-perspective"</code>) switches the map renderer from planar Web Mercator to a 3D spherical globe with continuous level-of-detail (LOD) tile covering.</p>
-<p>Below is a complete style document using the public <a href="https://demotiles.maplibre.org/">MapLibre Demo Tiles</a>:</p>
+<p>The projection is declared in the root style JSON specification using the <code>projection</code> property. Setting <code>"type": "globe"</code> switches the map renderer from a flat Mercator projection to a continuous spherical globe.</p>
 <pre><code class="language-json">{
   "version": 8,
   "name": "MapLibre Globe Vector Map",
@@ -317,29 +319,18 @@ in progress</p>
   ]
 }
 </code></pre>
-<blockquote>
-<p><strong>Zoom Transition:</strong> As in MapLibre GL JS, the globe projection provides natural perspective curvature at global zoom levels ($z &lt; 12$) and seamlessly transitions to standard planar resolution as the camera approaches surface features ($z \ge 12$).</p>
-</blockquote>
 <hr>
 <h2 id="2-running-natively-in-rust"><a class="header" href="#2-running-natively-in-rust">2. Running Natively in Rust</a></h2>
-<h3 id="quick-start-via-cli"><a class="header" href="#quick-start-via-cli">Quick Start via CLI</a></h3>
-<p>You can run the interactive globe vector map immediately on macOS, Linux, or Windows via the included <code>maplibre-demo</code> package:</p>
-<pre><code class="language-bash"># Run with the default MapLibre demo style on the 3D globe:
+<h3 id="command-line"><a class="header" href="#command-line">Command Line</a></h3>
+<p>You can run the globe map locally using the <code>maplibre-demo</code> binary:</p>
+<pre><code class="language-bash"># Run with the default vector map on the globe:
 cargo run -p maplibre-demo -- headed --globe
 
-# Or load a remote style URL directly:
+# Or load a remote style JSON:
 cargo run -p maplibre-demo -- headed --style https://demotiles.maplibre.org/style.json --projection globe
 </code></pre>
-<h3 id="controls"><a class="header" href="#controls">Controls:</a></h3>
-<ul>
-<li><strong>Left click + drag:</strong> Pan / rotate around the globe.</li>
-<li><strong>Scroll wheel or <code>+</code> / <code>-</code>:</strong> Zoom in / out relative to the pointer.</li>
-<li><strong>Right click + drag:</strong> Adjust pitch and bearing.</li>
-<li><strong><code>W</code> / <code>A</code> / <code>S</code> / <code>D</code> or arrow keys:</strong> Orbit and translate view center.</li>
-</ul>
-<hr>
-<h3 id="idiomatic-rust-integration"><a class="header" href="#idiomatic-rust-integration">Idiomatic Rust Integration</a></h3>
-<p>When integrating <code>maplibre</code> into your own Rust application or windowing loop (using <code>winit</code> or a custom event loop), construct your <code>Map</code> and <code>Style</code> as follows:</p>
+<h3 id="native-api-example"><a class="header" href="#native-api-example">Native API Example</a></h3>
+<p>To instantiate a globe map in a Rust application:</p>
 <pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
 </span>use std::sync::Arc;
@@ -357,20 +348,16 @@ use maplibre::{
     window::PhysicalSize,
 };
 
-/// Initializes and configures an interactive globe map.
 pub fn create_globe_map&lt;E: maplibre::environment::Environment&gt;(
     kernel_builder: KernelBuilder&lt;E&gt;,
     style_json: &amp;str,
 ) -&gt; Result&lt;Map&lt;E&gt;, Box&lt;dyn std::error::Error&gt;&gt; {
-    // 1. Parse the style specification
     let mut style: Style = serde_json::from_str(style_json)?;
 
-    // 2. Ensure the projection is set to Globe
     style.projection = Some(ProjectionSpecification {
         projection_type: ProjectionType::Globe,
     });
 
-    // 3. Configure the kernel and instantiate plugins
     let kernel = kernel_builder.build()?;
     let plugins: Vec&lt;Box&lt;dyn Plugin&lt;E&gt;&gt;&gt; = vec![
         Box::new(maplibre::render::RenderPlugin),
@@ -379,101 +366,50 @@ pub fn create_globe_map&lt;E: maplibre::environment::Environment&gt;(
         Box::new(maplibre::sdf::SdfPlugin::&lt;maplibre::vector::DefaultVectorTransferables&gt;::default()),
     ];
 
-    // 4. Create the Map instance
     let map = Map::new(style, kernel, plugins)?;
     Ok(map)
 }
 <span class="boring">}</span></code></pre>
 <hr>
-<h2 id="3-webassembly-wasm-deployment--embedding"><a class="header" href="#3-webassembly-wasm-deployment--embedding">3. WebAssembly (WASM) Deployment &amp; Embedding</a></h2>
-<p>MapLibre Rust compiles directly to WebAssembly using <code>wasm-bindgen</code> and <code>wgpu</code>, supporting both <strong>WebGPU</strong> (for maximum performance and compute capability) and <strong>WebGL2</strong> (for universal browser compatibility).</p>
-<h3 id="building-the-wasm-library"><a class="header" href="#building-the-wasm-library">Building the WASM Library</a></h3>
-<p>From the repository root, use <code>just</code> to build the web distribution:</p>
-<pre><code class="language-bash"># Build for WebGPU (modern browsers):
+<h2 id="3-webassembly-wasm-deployment"><a class="header" href="#3-webassembly-wasm-deployment">3. WebAssembly (WASM) Deployment</a></h2>
+<p>MapLibre Rust compiles to WebAssembly via <code>wasm-bindgen</code> and <code>wgpu</code>, supporting WebGPU and WebGL2.</p>
+<h3 id="building-the-web-distribution"><a class="header" href="#building-the-web-distribution">Building the Web Distribution</a></h3>
+<pre><code class="language-bash"># Build for WebGPU:
 just web-lib build
 
-# Build for WebGL2 with multithreaded worker support:
-just web-lib build --webgl --multithreaded
+# Build for WebGL2:
+just web-lib build --webgl
 </code></pre>
-<p>The build produces an npm-compatible package in <code>web/lib/dist</code> that can be imported directly into any web application or bundler (Vite, Webpack, ESBuild).</p>
-<hr>
-<h3 id="typescript--javascript-integration"><a class="header" href="#typescript--javascript-integration">TypeScript / JavaScript Integration</a></h3>
-<p>To mount the interactive globe map on an HTML5 <code>&lt;canvas&gt;</code> element:</p>
+<h3 id="html--javascript-integration"><a class="header" href="#html--javascript-integration">HTML &amp; JavaScript Integration</a></h3>
 <pre><code class="language-html">&lt;!DOCTYPE html&gt;
 &lt;html lang="en"&gt;
 &lt;head&gt;
   &lt;meta charset="utf-8" /&gt;
-  &lt;title&gt;MapLibre Rust Globe Demo&lt;/title&gt;
+  &lt;title&gt;MapLibre Globe Demo&lt;/title&gt;
   &lt;style&gt;
-    html, body {
-      margin: 0;
-      padding: 0;
-      width: 100%;
-      height: 100%;
-      overflow: hidden;
-      background-color: #0b0e14;
-    }
-    #maplibre-canvas {
-      width: 100%;
-      height: 100%;
-      display: block;
-    }
+    body { margin: 0; width: 100vw; height: 100vh; overflow: hidden; background: #0b0e14; }
+    #maplibre { width: 100%; height: 100%; display: block; }
   &lt;/style&gt;
 &lt;/head&gt;
 &lt;body&gt;
-  &lt;canvas id="maplibre-canvas"&gt;&lt;/canvas&gt;
+  &lt;canvas id="maplibre"&gt;&lt;/canvas&gt;
 
   &lt;script type="module"&gt;
     import { startMapLibre } from 'maplibre-rs';
 
-    async function initGlobe() {
-      // 1. Fetch vector style
-      const response = await fetch('https://demotiles.maplibre.org/style.json');
-      const style = await response.json();
-
-      // 2. Set projection to globe
+    async function init() {
+      const res = await fetch('https://demotiles.maplibre.org/style.json');
+      const style = await res.json();
       style.projection = { type: 'globe' };
 
-      // 3. Initialize the WebAssembly runtime on the canvas
-      await startMapLibre(
-        undefined,                  // Default wasm binary path
-        undefined,                  // Default worker pool path
-        JSON.stringify(style)       // Globe style JSON
-      );
+      await startMapLibre(undefined, undefined, JSON.stringify(style));
     }
 
-    initGlobe().catch(console.error);
+    init().catch(console.error);
   &lt;/script&gt;
 &lt;/body&gt;
 &lt;/html&gt;
 </code></pre>
-<hr>
-<h3 id="embedded-wasm-deployment-in-mdbook"><a class="header" href="#embedded-wasm-deployment-in-mdbook">Embedded WASM Deployment in mdBook</a></h3>
-<p>You can embed the live interactive globe directly into documentation pages and web books.</p>
-<pre><code class="language-html">&lt;div class="map-container" style="position: relative; width: 100%; height: 520px; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,0.3); margin: 20px 0; background: #111;"&gt;
-  &lt;canvas id="maplibre" style="width: 100%; height: 100%; display: block;"&gt;&lt;/canvas&gt;
-  &lt;div style="position: absolute; bottom: 10px; right: 10px; background: rgba(0,0,0,0.65); color: #fff; padding: 4px 8px; border-radius: 4px; font-size: 12px; pointer-events: none;"&gt;
-    MapLibre Rust (WASM / WebGPU)
-  &lt;/div&gt;
-&lt;/div&gt;
-</code></pre>
-<hr>
-<h2 id="4-key-architectural--performance-advantages"><a class="header" href="#4-key-architectural--performance-advantages">4. Key Architectural &amp; Performance Advantages</a></h2>
-<p>MapLibre Rust’s globe engine includes several structural optimizations over both JavaScript and legacy C++ implementations:</p>
-<ol>
-<li>
-<p><strong>Zero-Allocation Subdivision</strong>:
-During Sutherland-Hodgman polygon clipping against spherical tile boundaries, MapLibre Rust uses stack-allocated <code>InlinePolygon</code> buffers and <code>GlobeTileMeshCache</code> scratch memory. This guarantees <strong>zero heap allocations</strong> per tile subdivision during camera motion.</p>
-</li>
-<li>
-<p><strong>Smooth Altitude-Dependent Atmosphere Shading</strong>:
-The atmospheric limb scattering dynamically evaluates a $C^1$-continuous Hermite fade curve ($t^2(3-2t)$) from camera altitude ($&lt; 100\text{ km}$), matching MapLibre GL JS visual fidelity without ground popping.</p>
-</li>
-<li>
-<p><strong>Sub-Millimeter Floating-Point Precision</strong>:
-At street and runway zoom levels ($z \ge 12$), large Earth-radius coordinates are resolved in double precision (<code>f64</code>) relative to the tile center before casting offsets to GPU 32-bit floats. This completely eliminates the vertex jitter commonly seen on high-zoom runways and taxiways in 32-bit engines.</p>
-</li>
-</ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="development-guide"><a class="header" href="#development-guide">Development Guide</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>

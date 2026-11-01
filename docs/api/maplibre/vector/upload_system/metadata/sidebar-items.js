@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["feature_metadata","metadata_for_layer"]};
