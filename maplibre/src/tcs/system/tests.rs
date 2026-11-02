@@ -12,6 +12,8 @@ fn tile_and_readiness_failures_are_recoverable() {
 #[test]
 fn renderer_failures_stop_the_map() {
     assert!(!SystemError::Setup.is_recoverable());
-    let graph = crate::render::error::RenderError::GraphRun(Box::new(std::fmt::Error));
+    let graph = crate::render::error::RenderError::Graph(
+        crate::render::graph::RenderGraphError::Cycle(Vec::new()),
+    );
     assert!(!SystemError::Render(graph).is_recoverable());
 }

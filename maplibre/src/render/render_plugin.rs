@@ -4,25 +4,8 @@
 
 use super::*;
 
-/// Labels in the root graph, which drives the draw subgraph after its dependencies.
-pub mod main_graph {
-    /// Input-label namespace; the root graph requires no named external slots.
-    pub mod input {}
-    /// Root nodes used to order work before drawing.
-    pub mod node {
-        /// Empty dependency node that must run before the draw-subgraph driver.
-        pub const MAIN_PASS_DEPENDENCIES: &str = "main_pass_dependencies";
-        /// Driver that invokes the draw subgraph with the frame's render context.
-        pub const MAIN_PASS_DRIVER: &str = "main_pass_driver";
-    }
-}
-
-/// Labels for the subgraph that draws map layers and exports their depth.
+/// Names of the render passes that draw map layers and export their depth.
 pub mod draw_graph {
-    /// Name used to register and look up this subgraph in the root graph.
-    pub const NAME: &str = "draw";
-    /// Input-label namespace; the draw subgraph declares no external input slots.
-    pub mod input {}
     /// Nodes ordered from opaque drawing through 3D scene entities and translucency to depth export.
     pub mod node {
         /// Draws tile masks and map-layer items into the frame attachments.
@@ -63,47 +46,9 @@ impl<E: Environment> Plugin<E> for RenderPlugin {
     ) {
         let resources = &mut world.resources;
 
-        let mut draw_graph = RenderGraph::default();
-        // Draw nodes
-        draw_graph.add_node(draw_graph::node::MAIN_PASS, MainPassNode::new());
-        draw_graph.add_node(draw_graph::node::SCENE_3D_PASS, EmptyNode);
-        // Draw nodes
-        draw_graph.add_node(
-            draw_graph::node::TRANSLUCENT_PASS,
-            TranslucentPassNode::new(),
-        );
-        // Input node
-        let input_node_id = draw_graph.set_input(vec![]);
-        // Edges
-        draw_graph
-            .add_node_edge(input_node_id, draw_graph::node::MAIN_PASS)
-            .expect("main pass or draw node does not exist");
-        draw_graph
-            .add_node_edge(draw_graph::node::MAIN_PASS, draw_graph::node::SCENE_3D_PASS)
-            .expect("main pass or scene 3d pass node does not exist");
-        draw_graph
-            .add_node_edge(
-                draw_graph::node::SCENE_3D_PASS,
-                draw_graph::node::TRANSLUCENT_PASS,
-            )
-            .expect("scene 3d pass or translucent pass node does not exist");
-        draw_graph.add_node(draw_graph::node::DEPTH_COPY, DepthCopyNode);
-        draw_graph
-            .add_node_edge(
-                draw_graph::node::TRANSLUCENT_PASS,
-                draw_graph::node::DEPTH_COPY,
-            )
-            .expect("translucent pass or depth copy node does not exist");
-
-        graph.add_sub_graph(draw_graph::NAME, draw_graph);
-        graph.add_node(main_graph::node::MAIN_PASS_DEPENDENCIES, EmptyNode);
-        graph.add_node(main_graph::node::MAIN_PASS_DRIVER, MainPassDriverNode);
-        graph
-            .add_node_edge(
-                main_graph::node::MAIN_PASS_DEPENDENCIES,
-                main_graph::node::MAIN_PASS_DRIVER,
-            )
-            .expect("main pass driver or dependencies do not exist");
+        if let Err(error) = add_draw_passes(graph) {
+            tracing::error!(%error, "unable to add the core render passes");
+        }
 
         // render graph dependency
         resources.init::<RenderPhase<LayerItem>>();
@@ -118,6 +63,13 @@ impl<E: Environment> Plugin<E> for RenderPlugin {
         // masks
         resources.insert(Eventually::<MaskPipeline>::Uninitialized);
         resources.insert(Eventually::<DepthCopyPipeline>::Uninitialized);
+        resources.init::<super::ground::FrameGround>();
+        resources
+            .get_or_init_mut::<super::BeforeSubmitHooks>()
+            .register(super::gpu_timer::resolve_before_submit);
+        resources
+            .get_or_init_mut::<super::AfterSubmitCallbacks>()
+            .register(super::gpu_timer::map_after_submit);
 
         // The frame input comes first: the request systems the plugins add to Extract must
         // already see the frame's view.
@@ -145,7 +97,9 @@ impl<E: Environment> Plugin<E> for RenderPlugin {
         );
         schedule.add_stage(
             RenderStageLabel::Render,
-            SystemStage::default().with_system(SystemContainer::new(GraphRunnerSystem)),
+            SystemStage::default()
+                .with_system(super::gpu_timer::gpu_timer_system)
+                .with_system(SystemContainer::new(GraphRunnerSystem)),
         );
         schedule.add_stage(
             RenderStageLabel::Cleanup,
@@ -157,4 +111,24 @@ impl<E: Environment> Plugin<E> for RenderPlugin {
         // draws its items twice.
         schedule.run_after_failure(RenderStageLabel::Cleanup);
     }
+}
+
+/// Adds the main, scene, translucent and depth-copy passes in that order.
+fn add_draw_passes(graph: &mut RenderGraph) -> Result<(), RenderGraphError> {
+    graph.add_node(draw_graph::node::MAIN_PASS, MainPassNode::new())?;
+    graph.add_node(draw_graph::node::SCENE_3D_PASS, EmptyNode)?;
+    graph.add_node(
+        draw_graph::node::TRANSLUCENT_PASS,
+        TranslucentPassNode::new(),
+    )?;
+    graph.add_node(draw_graph::node::DEPTH_COPY, DepthCopyNode)?;
+    graph.add_node_edge(draw_graph::node::MAIN_PASS, draw_graph::node::SCENE_3D_PASS)?;
+    graph.add_node_edge(
+        draw_graph::node::SCENE_3D_PASS,
+        draw_graph::node::TRANSLUCENT_PASS,
+    )?;
+    graph.add_node_edge(
+        draw_graph::node::TRANSLUCENT_PASS,
+        draw_graph::node::DEPTH_COPY,
+    )
 }

@@ -1,256 +1,39 @@
-//! Executes a [`RenderGraph`]
+//! Records the frame's render passes into one command buffer and submits it.
 
 #![deny(missing_docs)]
 
-use std::{
-    borrow::Cow,
-    collections::{HashMap, VecDeque},
-};
-
-use smallvec::{smallvec, SmallVec};
-use thiserror::Error;
-
 use crate::{
     render::{
-        graph::{
-            Edge, NodeId, NodeRunError, NodeState, RenderContext, RenderGraph, RenderGraphContext,
-            SlotLabel, SlotType, SlotValue,
-        },
-        RenderResources,
+        graph::{RenderContext, RenderGraph, RenderGraphError},
+        AfterSubmitCallbacks, BeforeSubmitHooks, RenderResources,
     },
     tcs::world::World,
 };
 
-pub(crate) struct RenderGraphRunner;
-
-#[derive(Error, Debug)]
-/// Graph execution failed before the runner could submit its recorded commands.
-pub enum RenderGraphRunnerError {
-    /// A node reported a slot or subgraph error.
-    #[error(transparent)]
-    NodeRunError(#[from] NodeRunError),
-    /// A node returned successfully without assigning one of its declared outputs.
-    #[error("node output slot not set (index {slot_index}, name {slot_name})")]
-    EmptyNodeOutputSlot {
-        /// Concrete node implementation that omitted the output.
-        type_name: &'static str,
-        /// Zero-based position of the unset output.
-        slot_index: usize,
-        /// Declared name of the unset output.
-        slot_name: Cow<'static, str>,
-    },
-    /// A graph input node requires a value not present in the supplied input vector.
-    #[error("graph (name: '{graph_name:?}') could not be run because slot '{slot_name}' at index {slot_index} has no value")]
-    MissingInput {
-        /// Zero-based position of the missing input value.
-        slot_index: usize,
-        /// Declared name of the missing input.
-        slot_name: Cow<'static, str>,
-        /// Subgraph name, or `None` for the root graph.
-        graph_name: Option<Cow<'static, str>>,
-    },
-    /// A graph input value has a different resource type from its declaration.
-    #[error("attempted to use the wrong type for input slot")]
-    MismatchedInputSlotType {
-        /// Zero-based position of the incompatible value.
-        slot_index: usize,
-        /// Declared name of the input slot.
-        label: SlotLabel,
-        /// Resource type required by the declaration.
-        expected: SlotType,
-        /// Resource type of the supplied value.
-        actual: SlotType,
-    },
-}
-
-impl RenderGraphRunner {
-    pub fn run(
-        graph: &RenderGraph,
-        device: &wgpu::Device,
-        queue: &crate::render::upload_queue::UploadQueue,
-        state: &RenderResources,
-        world: &World,
-    ) -> Result<(), RenderGraphRunnerError> {
-        let command_encoder =
-            device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-        let mut render_context = RenderContext {
-            device,
-            command_encoder,
-        };
-
-        Self::run_graph(graph, None, &mut render_context, state, world, &[])?;
-        let timer = world
-            .resources
-            .get::<crate::render::gpu_timer::GpuTimerSlot>()
-            .and_then(|slot| slot.0.as_ref());
-        let drape_timer = world
-            .resources
-            .get::<crate::terrain::drape_timing::DrapeTimerSlot>()
-            .and_then(|slot| slot.timer.as_ref());
-        for timer in timer.into_iter().chain(drape_timer) {
-            timer.resolve(&mut render_context.command_encoder);
-        }
-        {
-            #[cfg(feature = "trace")]
-            let _span = tracing::info_span!("submit_graph_commands").entered();
-            queue.submit(vec![render_context.command_encoder.finish()]);
-        }
-        for timer in timer.into_iter().chain(drape_timer) {
-            timer.after_submit();
-        }
-        if let Some(callbacks) = world.resources.get::<crate::render::AfterSubmitCallbacks>() {
-            callbacks.run(world);
-        }
-        Ok(())
+/// Records every pass, runs the [`BeforeSubmitHooks`], submits the frame and runs the
+/// [`AfterSubmitCallbacks`]. Nothing is submitted when the pass order cannot be resolved.
+pub(crate) fn run_graph(
+    graph: &RenderGraph,
+    device: &wgpu::Device,
+    queue: &crate::render::upload_queue::UploadQueue,
+    state: &RenderResources,
+    world: &World,
+) -> Result<(), RenderGraphError> {
+    let mut render_context = RenderContext {
+        device,
+        command_encoder: device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default()),
+    };
+    graph.run(&mut render_context, state, world)?;
+    if let Some(hooks) = world.resources.get::<BeforeSubmitHooks>() {
+        hooks.run(world, &mut render_context.command_encoder);
     }
-
-    fn run_graph(
-        graph: &RenderGraph,
-        graph_name: Option<Cow<'static, str>>,
-        render_context: &mut RenderContext,
-        state: &RenderResources,
-        world: &World,
-        inputs: &[SlotValue],
-    ) -> Result<(), RenderGraphRunnerError> {
-        let mut node_outputs: HashMap<NodeId, SmallVec<[SlotValue; 4]>> = HashMap::default();
+    {
         #[cfg(feature = "trace")]
-        let span = if let Some(name) = &graph_name {
-            tracing::info_span!("run_graph", name = name.as_ref())
-        } else {
-            tracing::info_span!("run_graph", name = "main_graph")
-        };
-        #[cfg(feature = "trace")]
-        let _guard = span.enter();
-
-        // Queue up nodes without inputs, which can be run immediately
-        let mut node_queue: VecDeque<&NodeState> = graph
-            .iter_nodes()
-            .filter(|node| node.input_slots.is_empty())
-            .collect();
-
-        // pass inputs into the graph
-        if let Some(input_node) = graph.input_node() {
-            let mut input_values: SmallVec<[SlotValue; 4]> = SmallVec::new();
-            for (i, input_slot) in input_node.input_slots.iter().enumerate() {
-                if let Some(input_value) = inputs.get(i) {
-                    if input_slot.slot_type != input_value.slot_type() {
-                        return Err(RenderGraphRunnerError::MismatchedInputSlotType {
-                            slot_index: i,
-                            actual: input_value.slot_type(),
-                            expected: input_slot.slot_type,
-                            label: input_slot.name.clone().into(),
-                        });
-                    } else {
-                        input_values.push(input_value.clone());
-                    }
-                } else {
-                    return Err(RenderGraphRunnerError::MissingInput {
-                        slot_index: i,
-                        slot_name: input_slot.name.clone(),
-                        graph_name: graph_name.clone(),
-                    });
-                }
-            }
-
-            node_outputs.insert(input_node.id, input_values);
-
-            for (_, node_state) in graph.iter_node_outputs(input_node.id).expect("node exists") {
-                node_queue.push_front(node_state);
-            }
-        }
-
-        'handle_node: while let Some(node_state) = node_queue.pop_back() {
-            // skip nodes that are already processed
-            if node_outputs.contains_key(&node_state.id) {
-                continue;
-            }
-
-            let mut slot_indices_and_inputs: SmallVec<[(usize, SlotValue); 4]> = SmallVec::new();
-            // check if all dependencies have finished running
-            for (edge, input_node) in graph
-                .iter_node_inputs(node_state.id)
-                .expect("node is in graph")
-            {
-                match edge {
-                    Edge::SlotEdge {
-                        output_index,
-                        input_index,
-                        ..
-                    } => {
-                        if let Some(outputs) = node_outputs.get(&input_node.id) {
-                            slot_indices_and_inputs
-                                .push((*input_index, outputs[*output_index].clone()));
-                        } else {
-                            node_queue.push_front(node_state);
-                            continue 'handle_node;
-                        }
-                    }
-                    Edge::NodeEdge { .. } => {
-                        if !node_outputs.contains_key(&input_node.id) {
-                            node_queue.push_front(node_state);
-                            continue 'handle_node;
-                        }
-                    }
-                }
-            }
-
-            // construct final sorted input list
-            slot_indices_and_inputs.sort_by_key(|(index, _)| *index);
-            let inputs: SmallVec<[SlotValue; 4]> = slot_indices_and_inputs
-                .into_iter()
-                .map(|(_, value)| value)
-                .collect();
-
-            assert_eq!(inputs.len(), node_state.input_slots.len());
-
-            let mut outputs: SmallVec<[Option<SlotValue>; 4]> =
-                smallvec![None; node_state.output_slots.len()];
-            {
-                let mut context = RenderGraphContext::new(graph, node_state, &inputs, &mut outputs);
-                {
-                    #[cfg(feature = "trace")]
-                    let _span = tracing::info_span!("node", name = node_state.type_name).entered();
-
-                    node_state
-                        .node
-                        .run(&mut context, render_context, state, world)?;
-                }
-
-                for run_sub_graph in context.finish() {
-                    let sub_graph = graph
-                        .get_sub_graph(&run_sub_graph.name)
-                        .expect("sub graph exists because it was validated when queued.");
-                    Self::run_graph(
-                        sub_graph,
-                        Some(run_sub_graph.name),
-                        render_context,
-                        state,
-                        world,
-                        &run_sub_graph.inputs,
-                    )?;
-                }
-            }
-
-            let mut values: SmallVec<[SlotValue; 4]> = SmallVec::new();
-            for (i, output) in outputs.into_iter().enumerate() {
-                if let Some(value) = output {
-                    values.push(value);
-                } else {
-                    let empty_slot = node_state.output_slots.get_slot(i).unwrap();
-                    return Err(RenderGraphRunnerError::EmptyNodeOutputSlot {
-                        type_name: node_state.type_name,
-                        slot_index: i,
-                        slot_name: empty_slot.name.clone(),
-                    });
-                }
-            }
-            node_outputs.insert(node_state.id, values);
-
-            for (_, node_state) in graph.iter_node_outputs(node_state.id).expect("node exists") {
-                node_queue.push_front(node_state);
-            }
-        }
-
-        Ok(())
+        let _span = tracing::info_span!("submit_graph_commands").entered();
+        queue.submit(vec![render_context.command_encoder.finish()]);
     }
+    if let Some(callbacks) = world.resources.get::<AfterSubmitCallbacks>() {
+        callbacks.run(world);
+    }
+    Ok(())
 }

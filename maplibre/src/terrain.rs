@@ -10,7 +10,7 @@ use crate::{
     render::{
         draw_graph,
         eventually::Eventually,
-        graph::{NodeLabel, RenderGraph},
+        graph::RenderGraph,
         render_phase::{LayerItem, TileMaskItem},
         RenderStageLabel,
     },
@@ -159,18 +159,27 @@ impl<E: Environment, T: DemTransferables> Plugin<E> for TerrainPlugin<T> {
         schedule.add_system_to_stage(RenderStageLabel::Prepare, resource_system::resource_system);
         schedule.add_system_to_stage(RenderStageLabel::Queue, upload_system::upload_system);
         schedule.add_system_to_stage(RenderStageLabel::Queue, queue_system::queue_system);
+        // Before the Render stage, so the last measurement is read before this frame's drape
+        // passes start the next one.
+        schedule.add_system_to_stage(
+            RenderStageLabel::PhaseSort,
+            drape_timing::drape_timer_system,
+        );
+        world
+            .resources
+            .get_or_init_mut::<crate::render::BeforeSubmitHooks>()
+            .register(drape_timing::resolve_before_submit);
+        world
+            .resources
+            .get_or_init_mut::<crate::render::AfterSubmitCallbacks>()
+            .register(drape_timing::map_after_submit);
 
-        let Some(draw_graph) = graph.get_sub_graph_mut(draw_graph::NAME) else {
-            tracing::error!("draw graph is missing; terrain will not be drawn");
-            return;
-        };
-        draw_graph.add_node(DRAPE_PASS, DrapePassNode);
-        let input = draw_graph.input_node().map(|node| node.id);
+        let draw_graph = &mut *graph;
         let edges = [
-            input.map(|input| draw_graph.add_node_edge(NodeLabel::Id(input), DRAPE_PASS)),
-            Some(draw_graph.add_node_edge(DRAPE_PASS, draw_graph::node::MAIN_PASS)),
+            draw_graph.add_node(DRAPE_PASS, DrapePassNode),
+            draw_graph.add_node_edge(DRAPE_PASS, draw_graph::node::MAIN_PASS),
         ];
-        for edge in edges.into_iter().flatten() {
+        for edge in edges {
             if let Err(error) = edge {
                 tracing::error!(
                     ?error,

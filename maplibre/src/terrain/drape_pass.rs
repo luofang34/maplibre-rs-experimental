@@ -5,7 +5,7 @@ use wgpu::StoreOp;
 use crate::{
     render::{
         eventually::{Eventually, Eventually::Initialized},
-        graph::{Node, NodeRunError, RenderContext, RenderGraphContext},
+        graph::{Node, RenderContext},
         render_commands::{DrawMask, SetMaskPipeline},
         render_phase::{RenderCommand, RenderCommandResult},
         RenderResources,
@@ -24,22 +24,16 @@ pub const DRAPE_PASS: &str = "drape_pass";
 pub struct DrapePassNode;
 
 impl Node for DrapePassNode {
-    fn run(
-        &self,
-        _graph: &mut RenderGraphContext,
-        render_context: &mut RenderContext,
-        _resources: &RenderResources,
-        world: &World,
-    ) -> Result<(), NodeRunError> {
+    fn run(&self, render_context: &mut RenderContext, _resources: &RenderResources, world: &World) {
         let Some(Initialized(terrain)) = world.resources.get::<Eventually<TerrainResources>>()
         else {
-            return Ok(());
+            return;
         };
         let Some(phase) = world.resources.get::<DrapePhase>() else {
-            return Ok(());
+            return;
         };
         let Some(scratch) = terrain.scratch() else {
-            return Ok(());
+            return;
         };
         tracing::trace!(targets = phase.targets.len(), "drape pass");
         let drawn: Vec<_> = phase
@@ -96,7 +90,6 @@ impl Node for DrapePassNode {
                 texture,
             );
         }
-        Ok(())
     }
 }
 

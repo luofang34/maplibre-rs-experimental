@@ -20,7 +20,7 @@ async fn test_render() {
     use log::LevelFilter;
 
     use crate::render::{
-        graph::RenderGraph, graph_runner::RenderGraphRunner, resource::Surface, RenderResources,
+        graph::RenderGraph, graph_runner::run_graph, resource::Surface, RenderResources,
         RendererSettings,
     };
 
@@ -62,8 +62,7 @@ async fn test_render() {
 
     let world = World::default();
     let queue = crate::render::upload_queue::UploadQueue::new(queue);
-    RenderGraphRunner::run(&graph, &device, &queue, &render_state, &world)
-        .expect("failed to run graph runner");
+    run_graph(&graph, &device, &queue, &render_state, &world).expect("failed to run graph runner");
 }
 
 fn limited_settings() -> super::settings::WgpuSettings {

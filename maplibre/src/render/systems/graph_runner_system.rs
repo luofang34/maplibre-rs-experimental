@@ -1,14 +1,16 @@
-//! Executes the [`RenderGraph`] current render graph.
+//! Records, submits and presents the frame.
 
 use std::borrow::Cow;
 
 use crate::{
     context::MapContext,
-    render::{eventually::Eventually::Initialized, graph_runner::RenderGraphRunner, Renderer},
+    render::{
+        error::RenderError, eventually::Eventually::Initialized, graph_runner::run_graph, Renderer,
+    },
     tcs::system::{System, SystemError, SystemResult},
 };
 
-/// Updates the [`RenderGraph`] with all of its nodes and then runs it to render the entire frame.
+/// Records the frame's render passes, submits them and presents the frame.
 #[derive(Default)]
 pub struct GraphRunnerSystem;
 
@@ -32,56 +34,8 @@ impl System for GraphRunnerSystem {
             ..
         }: &mut MapContext,
     ) -> SystemResult {
-        render_graph.update(state);
-        if world
-            .resources
-            .get::<crate::render::gpu_timer::GpuTimerSlot>()
-            .is_none()
-        {
-            world
-                .resources
-                .insert(crate::render::gpu_timer::GpuTimerSlot(
-                    crate::render::gpu_timer::GpuTimer::new(device),
-                ));
-        }
-        let timer = world
-            .resources
-            .get::<crate::render::gpu_timer::GpuTimerSlot>()
-            .and_then(|slot| slot.0.as_ref());
-        let measured = timer.and_then(|timer| {
-            Some((
-                timer.frame(),
-                timer.take(device, queue.get_timestamp_period())?,
-            ))
-        });
-        if let Some(timer) = timer {
-            timer.tag(crate::render::frame_signals::host_frame_in_progress(world));
-        }
-        if let Some((frame, spent)) = measured {
-            crate::render::frame_signals::record_gpu_time(world, frame, spent);
-        }
-        if world
-            .resources
-            .get::<crate::terrain::drape_timing::DrapeTimerSlot>()
-            .is_none()
-        {
-            world
-                .resources
-                .insert(crate::terrain::drape_timing::DrapeTimerSlot::new(device));
-        }
-        let per_drape = world
-            .resources
-            .get::<crate::terrain::drape_timing::DrapeTimerSlot>()
-            .and_then(|slot| slot.take(device, queue.get_timestamp_period()));
-        if let Some((spent, drapes)) = per_drape {
-            world
-                .resources
-                .get_or_init_mut::<crate::terrain::drape_timing::DrapeCost>()
-                .measured_frame(spent, drapes);
-        }
-
-        RenderGraphRunner::run(render_graph, device, queue, state, world)
-            .map_err(|error| crate::render::error::RenderError::GraphRun(Box::new(error)))?;
+        render_graph.prepare().map_err(RenderError::Graph)?;
+        run_graph(render_graph, device, queue, state, world).map_err(RenderError::Graph)?;
 
         {
             let _span = tracing::info_span!("present_frames").entered();

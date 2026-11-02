@@ -6,7 +6,7 @@ use crate::{
     heatmap::{queue_system::HeatmapDensityPhase, resources::HeatmapResources},
     render::{
         eventually::{Eventually, Eventually::Initialized},
-        graph::{Node, NodeRunError, RenderContext, RenderGraphContext},
+        graph::{Node, RenderContext},
         RenderResources,
     },
     tcs::world::World,
@@ -19,19 +19,13 @@ pub const DENSITY_PASS: &str = "heatmap_density_pass";
 pub struct DensityPassNode;
 
 impl Node for DensityPassNode {
-    fn run(
-        &self,
-        _graph: &mut RenderGraphContext,
-        render_context: &mut RenderContext,
-        _resources: &RenderResources,
-        world: &World,
-    ) -> Result<(), NodeRunError> {
+    fn run(&self, render_context: &mut RenderContext, _resources: &RenderResources, world: &World) {
         let Some(Initialized(resources)) = world.resources.get::<Eventually<HeatmapResources>>()
         else {
-            return Ok(());
+            return;
         };
         let Some(phase) = world.resources.get::<HeatmapDensityPhase>() else {
-            return Ok(());
+            return;
         };
         for layer in &phase.layers {
             let Some(view) = resources.density_view(&layer.layer) else {
@@ -63,6 +57,5 @@ impl Node for DensityPassNode {
             }
             pass.finish(world);
         }
-        Ok(())
     }
 }

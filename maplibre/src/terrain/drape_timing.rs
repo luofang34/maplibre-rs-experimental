@@ -95,5 +95,55 @@ impl DrapeCost {
     }
 }
 
+/// Starts the drape timer on first use and folds the last measured drape cost into the
+/// running average, before this frame's drape passes record how many drapes they time.
+pub(crate) fn drape_timer_system(
+    crate::context::MapContext {
+        world,
+        renderer: crate::render::Renderer { device, queue, .. },
+        ..
+    }: &mut crate::context::MapContext,
+) -> crate::tcs::system::SystemResult {
+    if world.resources.get::<DrapeTimerSlot>().is_none() {
+        world.resources.insert(DrapeTimerSlot::new(device));
+    }
+    let measured = world
+        .resources
+        .get::<DrapeTimerSlot>()
+        .and_then(|slot| slot.take(device, queue.get_timestamp_period()));
+    if let Some((spent, drapes)) = measured {
+        world
+            .resources
+            .get_or_init_mut::<DrapeCost>()
+            .measured_frame(spent, drapes);
+    }
+    Ok(())
+}
+
+/// Resolves the drape passes' timestamps into the frame's commands.
+pub(crate) fn resolve_before_submit(
+    world: &crate::tcs::world::World,
+    encoder: &mut wgpu::CommandEncoder,
+) {
+    if let Some(timer) = world
+        .resources
+        .get::<DrapeTimerSlot>()
+        .and_then(|slot| slot.timer.as_ref())
+    {
+        timer.resolve(encoder);
+    }
+}
+
+/// Maps the resolved drape timestamps once the frame is submitted.
+pub(crate) fn map_after_submit(world: &crate::tcs::world::World) {
+    if let Some(timer) = world
+        .resources
+        .get::<DrapeTimerSlot>()
+        .and_then(|slot| slot.timer.as_ref())
+    {
+        timer.after_submit();
+    }
+}
+
 #[cfg(test)]
 mod tests;

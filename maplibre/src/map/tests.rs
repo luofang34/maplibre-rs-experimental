@@ -6,19 +6,21 @@ use super::*;
 
 #[test]
 fn graph_initialization_error_exposes_its_original_cause() {
-    let error = MapError::RenderGraphInit(RenderGraphError::WrongNodeType);
+    let error = MapError::RenderGraphInit(RenderGraphError::InvalidNode("missing".into()));
     assert!(matches!(
         error
             .source()
             .expect("graph cause")
             .downcast_ref::<RenderGraphError>(),
-        Some(RenderGraphError::WrongNodeType)
+        Some(RenderGraphError::InvalidNode(name)) if name == "missing"
     ));
 }
 
 #[test]
 fn renderer_initialization_error_preserves_the_nested_graph_cause() {
-    let error = MapError::DeviceInit(RenderError::Graph(RenderGraphError::WrongNodeType));
+    let error = MapError::DeviceInit(RenderError::Graph(RenderGraphError::InvalidNode(
+        "missing".into(),
+    )));
     let renderer = error
         .source()
         .expect("renderer cause")
@@ -29,7 +31,7 @@ fn renderer_initialization_error_preserves_the_nested_graph_cause() {
             .source()
             .expect("graph cause")
             .downcast_ref::<RenderGraphError>(),
-        Some(RenderGraphError::WrongNodeType)
+        Some(RenderGraphError::InvalidNode(name)) if name == "missing"
     ));
 }
 

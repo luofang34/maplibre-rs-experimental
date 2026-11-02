@@ -90,12 +90,9 @@ impl<E: Environment> Plugin<E> for StarfieldPlugin {
 /// main pass draws and before the sun is drawn.
 fn add_sun_depth_copy(graph: &mut crate::render::graph::RenderGraph) {
     use crate::render::draw_graph;
-    let Some(draw_graph) = graph.get_sub_graph_mut(draw_graph::NAME) else {
-        tracing::error!("draw graph is missing; the sun's glare will not see the ground");
-        return;
-    };
-    draw_graph.add_node(sun::depth::SUN_DEPTH_COPY, sun::depth::SunDepthCopyNode);
+    let draw_graph = &mut *graph;
     let edges = [
+        draw_graph.add_node(sun::depth::SUN_DEPTH_COPY, sun::depth::SunDepthCopyNode),
         draw_graph.add_node_edge(draw_graph::node::SCENE_3D_PASS, sun::depth::SUN_DEPTH_COPY),
         draw_graph.add_node_edge(
             sun::depth::SUN_DEPTH_COPY,

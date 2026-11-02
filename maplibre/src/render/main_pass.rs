@@ -1,4 +1,4 @@
-//! Draws ordered style layers and terrain with each layer's own tile clipping masks.
+//! Draws ordered style layers and the ground surface with each layer's own tile clipping masks.
 
 use std::ops::Deref;
 
@@ -6,8 +6,7 @@ use wgpu::StoreOp;
 
 use crate::{
     render::{
-        draw_graph,
-        graph::{Node, NodeRunError, RenderContext, RenderGraphContext, SlotInfo},
+        graph::{Node, RenderContext},
         render_commands::{DrawMask, SetMaskPipeline},
         render_phase::{
             LayerItem, RenderCommand, RenderCommandResult, RenderPhase, TileMaskItem,
@@ -18,7 +17,6 @@ use crate::{
         RenderResources,
     },
     tcs::world::World,
-    terrain::{draw_terrain, TerrainFrame},
 };
 
 // Valid tiles use four references per zoom; this value is outside that range, including z0.
@@ -33,27 +31,15 @@ impl MainPassNode {
 }
 
 impl Node for MainPassNode {
-    fn input(&self) -> Vec<SlotInfo> {
-        vec![]
-    }
-
-    fn update(&mut self, _state: &mut RenderResources) {}
-
-    fn run(
-        &self,
-        _graph: &mut RenderGraphContext,
-        render_context: &mut RenderContext,
-        state: &RenderResources,
-        world: &World,
-    ) -> Result<(), NodeRunError> {
+    fn run(&self, render_context: &mut RenderContext, state: &RenderResources, world: &World) {
         let Initialized(render_target) = &state.render_target else {
-            return Ok(());
+            return;
         };
         let Initialized(multisampling_texture) = &state.multisampling_texture else {
-            return Ok(());
+            return;
         };
         let Initialized(depth_texture) = &state.depth_texture else {
-            return Ok(());
+            return;
         };
         let color = color_attachment(render_target.deref(), multisampling_texture.as_ref());
         let pass = render_context
@@ -83,7 +69,6 @@ impl Node for MainPassNode {
         let mut pass = crate::render::tracked_pass::TrackedRenderPass::new(pass);
         draw_layers(&mut pass, world);
         pass.finish(world);
-        Ok(())
     }
 }
 
@@ -91,7 +76,7 @@ impl Node for MainPassNode {
 ///
 /// Symbols draw in their own pass so they can read the depth the layers below them left; the
 /// layers above the first symbol layer join that pass in order, so they cover symbols as the
-/// style's order says. Terrain draws everything in the main pass.
+/// style's order says. A frame with a ground surface draws everything in the main pass.
 pub(super) struct AboveSymbols<'w> {
     /// The last group of layer items the main pass draws.
     pub previous: &'w [LayerItem],
@@ -102,8 +87,8 @@ pub(super) struct AboveSymbols<'w> {
 pub(super) fn above_symbols(world: &World) -> Option<AboveSymbols<'_>> {
     if world
         .resources
-        .get::<TerrainFrame>()
-        .is_some_and(|frame| frame.active)
+        .get::<crate::render::ground::FrameGround>()
+        .is_some_and(|ground| ground.0.is_some())
     {
         return None;
     }
@@ -146,12 +131,11 @@ fn draw_layers<'w>(
     pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     world: &'w World,
 ) {
-    let terrain = world
+    let ground = world
         .resources
-        .get::<TerrainFrame>()
-        .filter(|frame| frame.active)
-        .copied();
-    let mut terrain_pending = terrain.is_some();
+        .get::<crate::render::ground::FrameGround>()
+        .and_then(|ground| ground.0);
+    let mut ground_pending = ground.is_some();
     // Pass hooks at the beginning of main pass (e.g. starfield).
     let pass_hooks = world
         .resources
@@ -170,20 +154,21 @@ fn draw_layers<'w>(
         for group in all[..drawn].chunk_by(same_layer) {
             set_layer_masks(pass, world, previous, group);
             for layer in group {
-                // Terrain preserves depth for screen-space layers while remaining above the background.
-                if terrain_pending
-                    && terrain.is_some_and(|frame| layer.index > frame.draw_after_layer_index)
-                {
-                    draw_terrain(pass, world);
-                    terrain_pending = false;
+                // The ground preserves depth for screen-space layers while remaining above the
+                // background.
+                if let Some(surface) = ground.filter(|surface| {
+                    ground_pending && layer.index > surface.draw_after_layer_index
+                }) {
+                    (surface.draw)(pass, world);
+                    ground_pending = false;
                 }
                 layer.draw_function.draw(pass, world, layer);
             }
             previous = group;
         }
     }
-    if terrain_pending {
-        draw_terrain(pass, world);
+    if let Some(surface) = ground.filter(|_| ground_pending) {
+        (surface.draw)(pass, world);
     }
 }
 
@@ -235,20 +220,5 @@ fn color_attachment<'a>(
             load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
             store: StoreOp::Store,
         },
-    }
-}
-
-pub struct MainPassDriverNode;
-
-impl Node for MainPassDriverNode {
-    fn run(
-        &self,
-        graph: &mut RenderGraphContext,
-        _render_context: &mut RenderContext,
-        _resources: &RenderResources,
-        _world: &World,
-    ) -> Result<(), NodeRunError> {
-        graph.run_sub_graph(draw_graph::NAME, vec![])?;
-        Ok(())
     }
 }

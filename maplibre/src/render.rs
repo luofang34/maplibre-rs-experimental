@@ -29,8 +29,8 @@ use crate::{
     render::{
         error::RenderError,
         eventually::Eventually,
-        graph::{EmptyNode, RenderGraph},
-        main_pass::{MainPassDriverNode, MainPassNode},
+        graph::{EmptyNode, RenderGraph, RenderGraphError},
+        main_pass::MainPassNode,
         resource::{share_gpu, Head, Surface, Texture, TextureView},
         settings::{RendererSettings, WgpuSettings},
         systems::{
@@ -72,6 +72,7 @@ pub mod frame_input;
 pub mod frame_signals;
 pub mod frame_trace;
 pub mod gpu_timer;
+pub mod ground;
 #[cfg(feature = "headless")]
 pub mod host_gpu;
 pub mod pass_hooks;
@@ -213,7 +214,7 @@ pub struct Renderer {
 
     /// Presentation state and attachments shared by graph nodes.
     pub resources: RenderResources,
-    /// Pass dependencies and subgraphs executed by the render stage.
+    /// The render passes and their order, recorded by the render stage.
     pub render_graph: RenderGraph,
     /// Optional cross-instance shader and render-pipeline cache on this device.
     pub shared_pipelines: Option<resource::SharedPipelines>,
@@ -419,5 +420,5 @@ mod render_plugin;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;
 pub use placement_3d::{AltitudeReference, Orientation3d, Placement3d, ViewSlotMask};
-pub use render_plugin::{draw_graph, main_graph, MaskPipeline, RenderPlugin};
+pub use render_plugin::{draw_graph, MaskPipeline, RenderPlugin};
 pub(crate) mod tile_memory;

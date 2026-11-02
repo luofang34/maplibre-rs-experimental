@@ -155,5 +155,61 @@ impl GpuTimer {
     }
 }
 
+/// Starts the main-pass timer on first use, files the last measurement that came back and tags
+/// the measurement this frame starts with its host frame.
+pub(crate) fn gpu_timer_system(
+    crate::context::MapContext {
+        world,
+        renderer: crate::render::Renderer { device, queue, .. },
+        ..
+    }: &mut crate::context::MapContext,
+) -> crate::tcs::system::SystemResult {
+    if world.resources.get::<GpuTimerSlot>().is_none() {
+        world.resources.insert(GpuTimerSlot(GpuTimer::new(device)));
+    }
+    let timer = world
+        .resources
+        .get::<GpuTimerSlot>()
+        .and_then(|slot| slot.0.as_ref());
+    let measured = timer.and_then(|timer| {
+        Some((
+            timer.frame(),
+            timer.take(device, queue.get_timestamp_period())?,
+        ))
+    });
+    if let Some(timer) = timer {
+        timer.tag(crate::render::frame_signals::host_frame_in_progress(world));
+    }
+    if let Some((frame, spent)) = measured {
+        crate::render::frame_signals::record_gpu_time(world, frame, spent);
+    }
+    Ok(())
+}
+
+/// Resolves the main pass's timestamps into the frame's commands.
+pub(crate) fn resolve_before_submit(
+    world: &crate::tcs::world::World,
+    encoder: &mut wgpu::CommandEncoder,
+) {
+    if let Some(timer) = world
+        .resources
+        .get::<GpuTimerSlot>()
+        .and_then(|slot| slot.0.as_ref())
+    {
+        timer.resolve(encoder);
+    }
+}
+
+/// Maps the resolved timestamps once the frame is submitted.
+pub(crate) fn map_after_submit(world: &crate::tcs::world::World) {
+    if let Some(timer) = world
+        .resources
+        .get::<GpuTimerSlot>()
+        .and_then(|slot| slot.0.as_ref())
+    {
+        timer.after_submit();
+    }
+}
+
 #[cfg(test)]
 mod tests;

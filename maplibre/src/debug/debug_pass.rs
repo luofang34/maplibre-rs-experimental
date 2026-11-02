@@ -6,7 +6,7 @@ use crate::{
     debug::TileDebugItem,
     render::{
         eventually::Eventually::Initialized,
-        graph::{Node, NodeRunError, RenderContext, RenderGraphContext, SlotInfo},
+        graph::{Node, RenderContext},
         render_phase::RenderPhase,
         RenderResources,
     },
@@ -23,21 +23,9 @@ impl DebugPassNode {
 }
 
 impl Node for DebugPassNode {
-    fn input(&self) -> Vec<SlotInfo> {
-        vec![]
-    }
-
-    fn update(&mut self, _state: &mut RenderResources) {}
-
-    fn run(
-        &self,
-        _graph: &mut RenderGraphContext,
-        render_context: &mut RenderContext,
-        resources: &RenderResources,
-        world: &World,
-    ) -> Result<(), NodeRunError> {
+    fn run(&self, render_context: &mut RenderContext, resources: &RenderResources, world: &World) {
         let Initialized(render_target) = &resources.render_target else {
-            return Ok(());
+            return;
         };
 
         let color_attachment = wgpu::RenderPassColorAttachment {
@@ -74,7 +62,5 @@ impl Node for DebugPassNode {
             }
         }
         render_pass.finish(world);
-
-        Ok(())
     }
 }

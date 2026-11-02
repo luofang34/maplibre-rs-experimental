@@ -14,7 +14,7 @@ use crate::{
     context::MapContext,
     render::{
         eventually::{Eventually, Eventually::Initialized},
-        graph::{Node, NodeRunError, RenderContext, RenderGraphContext},
+        graph::{Node, RenderContext},
         projection::globe_camera_for_view,
         resource::{FragmentState, RenderPipeline, TilePipeline, TilePipelineOptions, VertexState},
         shaders::{Mat4x4f32, Shader},
@@ -227,13 +227,7 @@ pub fn queue_system(
 pub struct GlobeDaylightNode;
 
 impl Node for GlobeDaylightNode {
-    fn run(
-        &self,
-        _graph: &mut RenderGraphContext,
-        render_context: &mut RenderContext,
-        state: &RenderResources,
-        world: &World,
-    ) -> Result<(), NodeRunError> {
+    fn run(&self, render_context: &mut RenderContext, state: &RenderResources, world: &World) {
         let (
             Some(GlobeDaylightGpu(Some(frame))),
             Some(Initialized(GlobeDaylightPipeline(pipeline))),
@@ -248,7 +242,7 @@ impl Node for GlobeDaylightNode {
             &state.depth_texture,
         )
         else {
-            return Ok(());
+            return;
         };
         let load = wgpu::Operations {
             load: wgpu::LoadOp::Load,
@@ -288,19 +282,15 @@ impl Node for GlobeDaylightNode {
         pass.set_pipeline(pipeline);
         pass.set_vertex_buffer(0, frame.slice(..));
         pass.draw(0..3, 0..1);
-        Ok(())
     }
 }
 
 /// Puts the pass after the main pass and before the translucent pass.
 pub(super) fn add_to_graph(graph: &mut crate::render::graph::RenderGraph) {
     use crate::render::draw_graph;
-    let Some(draw_graph) = graph.get_sub_graph_mut(draw_graph::NAME) else {
-        tracing::error!("draw graph is missing; the globe will not turn from day to night");
-        return;
-    };
-    draw_graph.add_node(GLOBE_DAYLIGHT, GlobeDaylightNode);
+    let draw_graph = &mut *graph;
     let edges = [
+        draw_graph.add_node(GLOBE_DAYLIGHT, GlobeDaylightNode),
         draw_graph.add_node_edge(draw_graph::node::MAIN_PASS, GLOBE_DAYLIGHT),
         draw_graph.add_node_edge(GLOBE_DAYLIGHT, draw_graph::node::SCENE_3D_PASS),
     ];

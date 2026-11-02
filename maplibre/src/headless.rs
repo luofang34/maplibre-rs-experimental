@@ -183,10 +183,8 @@ async fn create_renderer(
     Ok((kernel, renderer))
 }
 
-/// Labels for the "draw" graph
+/// Names of the passes the headless map adds.
 mod draw_graph {
-    pub const NAME: &str = "draw";
-    // Labels for non-input nodes
     pub mod node {
         pub const TRANSLUCENT_PASS: &str = "translucent_pass";
         pub const COPY: &str = "copy_pass";
@@ -196,7 +194,7 @@ mod draw_graph {
 fn attach_surface_copy_node(
     draw_graph: &mut RenderGraph,
 ) -> Result<(), crate::render::graph::RenderGraphError> {
-    draw_graph.add_node(draw_graph::node::COPY, CopySurfaceBufferNode);
+    draw_graph.add_node(draw_graph::node::COPY, CopySurfaceBufferNode)?;
     draw_graph.add_node_edge(draw_graph::node::TRANSLUCENT_PASS, draw_graph::node::COPY)
 }
 
@@ -245,10 +243,7 @@ impl Plugin<HeadlessEnvironment> for HeadlessPlugin {
             resources.insert(crate::render::RetainLoadedTiles);
         }
 
-        let Some(draw_graph) = graph.get_sub_graph_mut(draw_graph::NAME) else {
-            tracing::error!("headless draw subgraph is unavailable");
-            return;
-        };
+        let draw_graph = &mut *graph;
         if self.write_to_disk {
             if let Err(error) = attach_surface_copy_node(draw_graph) {
                 tracing::error!(?error, "cannot attach headless surface copy node");
@@ -286,15 +281,17 @@ mod tests {
     #[allow(clippy::expect_used)]
     fn surface_copy_waits_for_translucent_rendering() {
         let mut graph = RenderGraph::default();
-        let translucent = graph.add_node(draw_graph::node::TRANSLUCENT_PASS, EmptyNode);
+        graph
+            .add_node("earlier_pass", EmptyNode)
+            .expect("unique pass");
+        graph
+            .add_node(draw_graph::node::TRANSLUCENT_PASS, EmptyNode)
+            .expect("unique pass");
 
         attach_surface_copy_node(&mut graph).expect("copy node should attach");
 
-        let predecessors = graph
-            .iter_node_inputs(draw_graph::node::COPY)
-            .expect("copy node should exist")
-            .map(|(_, node)| node.id)
-            .collect::<Vec<_>>();
-        assert_eq!(predecessors, vec![translucent]);
+        let order = graph.node_order().expect("acyclic");
+        let position = |name| order.iter().position(|pass| *pass == name);
+        assert!(position(draw_graph::node::TRANSLUCENT_PASS) < position(draw_graph::node::COPY));
     }
 }
