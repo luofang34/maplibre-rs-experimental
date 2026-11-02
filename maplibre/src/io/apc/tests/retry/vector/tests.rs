@@ -61,7 +61,7 @@ async fn evicted_vector_completions_cannot_finish_the_new_request() {
 #[tokio::test]
 async fn repeated_success_keeps_one_current_bucket_per_style_layer() {
     use crate::{
-        io::apc::{AsyncProcedureCall, Input},
+        io::apc::AsyncProcedureCall,
         sdf::SymbolLayersDataComponent,
         vector::{DefaultVectorTransferables, VectorLayerBucketComponent},
     };
@@ -75,13 +75,11 @@ async fn repeated_success_keeps_one_current_bucket_per_style_layer() {
         .insert(VectorLayerBucketComponent::default())
         .insert(SymbolLayersDataComponent::default());
     for _ in 0..2 {
+        let input = test.direct_vector_input();
         test.kernel
             .apc()
             .call(
-                Input::TileRequest {
-                    coords: Default::default(),
-                    style: test.context.style.clone(),
-                },
+                input,
                 crate::vector::request_system::fetch_vector_apc::<_, DefaultVectorTransferables, _>,
             )
             .expect("admitted direct worker");

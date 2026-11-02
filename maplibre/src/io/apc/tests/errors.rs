@@ -25,10 +25,7 @@ fn scheduling_failure_keeps_the_scheduler_cause() {
     );
     let error = apc
         .call(
-            Input::TileRequest {
-                coords: Default::default(),
-                style: Style::default(),
-            },
+            Input::new(Default::default(), Style::default(), 0),
             |_, _, _| Box::pin(async { Ok(()) }),
         )
         .expect_err("NopScheduler rejects the call");
@@ -56,14 +53,7 @@ fn rejected_tracked_call_is_not_left_running() {
         OffscreenKernelConfig::default(),
     );
     apc.call(
-        Input::TrackedTileRequest {
-            coords: Default::default(),
-            style: Style::default(),
-            attempt: 7,
-            overscaled_zoom: 0,
-            pixel_ratio: 1.0,
-            only_sources: None,
-        },
+        Input::new(Default::default(), Style::default(), 7),
         |_, _, _| Box::pin(async { Ok(()) }),
     )
     .expect_err("NopScheduler rejects the call");

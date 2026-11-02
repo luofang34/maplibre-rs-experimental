@@ -87,3 +87,19 @@ fn a_disconnected_caller_retains_the_channel_error_and_rejected_result() {
         .expect("typed channel cause");
     assert!(source.0.has_tag(&9_u32));
 }
+
+#[test]
+fn a_worker_input_needs_the_attempt_its_results_are_matched_by() {
+    use super::super::Input;
+    let input = Input::new(Default::default(), Default::default(), 9);
+    let mut json = serde_json::to_value(&input).expect("encode input");
+    let decoded: Input = serde_json::from_value(json.clone()).expect("decode input");
+    assert_eq!(decoded.attempt, 9);
+    json.as_object_mut()
+        .expect("input object")
+        .remove("attempt");
+    assert!(
+        serde_json::from_value::<Input>(json).is_err(),
+        "a worker cannot run a request no attempt owns"
+    );
+}

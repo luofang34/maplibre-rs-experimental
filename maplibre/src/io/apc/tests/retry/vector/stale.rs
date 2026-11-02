@@ -5,7 +5,7 @@ use super::super::{
 };
 use crate::{
     io::{
-        apc::{AsyncProcedureCall, Input},
+        apc::AsyncProcedureCall,
         tile_backpressure::{request_budget, MAX_TILES_IN_FLIGHT},
     },
     sdf::SymbolLayersDataComponent,
@@ -13,7 +13,7 @@ use crate::{
     vector::{DefaultVectorTransferables, SymbolLayerTessellated, VectorLayerBucketComponent},
 };
 
-async fn stale_success(tracked: bool) {
+async fn stale_success(through_request_system: bool) {
     let mut test = Fixture::new(Kind::Vector, false).await;
     test.context.style.layers.push(
         serde_json::from_value(serde_json::json!({
@@ -23,7 +23,7 @@ async fn stale_success(tracked: bool) {
         .expect("symbol style"),
     );
     test.source.set(Response::Bytes(super::tile()));
-    if tracked {
+    if through_request_system {
         test.frame(0);
     } else {
         test.context
@@ -33,13 +33,11 @@ async fn stale_success(tracked: bool) {
             .expect("tile")
             .insert(VectorLayerBucketComponent::default())
             .insert(SymbolLayersDataComponent::default());
+        let input = test.direct_vector_input();
         test.kernel
             .apc()
             .call(
-                Input::TileRequest {
-                    coords: Default::default(),
-                    style: test.context.style.clone(),
-                },
+                input,
                 crate::vector::request_system::fetch_vector_apc::<_, DefaultVectorTransferables, _>,
             )
             .expect("direct request");

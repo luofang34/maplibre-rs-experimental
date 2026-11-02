@@ -29,10 +29,14 @@ pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context +
     kernel: K,
 ) -> AsyncProcedureFuture {
     Box::pin(async move {
-        let overscaled_zoom = input.overscaled_zoom();
-        let pixel_ratio = input.pixel_ratio();
-        let only_sources = input.only_sources().map(<[String]>::to_vec);
-        let (coords, style, attempt) = input.into_tile_request();
+        let Input {
+            coords,
+            style,
+            attempt,
+            overscaled_zoom,
+            pixel_ratio,
+            only_sources,
+        } = input;
         let context = AttemptContext::new(context, attempt);
         let client = kernel.source_client();
         // A request for a change to some sources' data leaves the tile's other sources as the
@@ -50,7 +54,7 @@ pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context +
             .peekable();
         let mut failed = false;
         let mut retry = false;
-        let mut images = provided::TileImages::new(coords, attempt, pixel_ratio);
+        let mut images = provided::TileImages::new(coords, Some(attempt), pixel_ratio);
         while let Some(group) = groups.next() {
             if group.has_nothing_at(coords) {
                 source_empty::<T, _>(coords, &group.layers, &context)
@@ -113,7 +117,7 @@ pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context +
         images
             .report_first(&context)
             .map_err(ProcedureError::Send)?;
-        finish::<T, _>(&context, coords, attempt, failed, retry)?;
+        finish::<T, _>(&context, coords, Some(attempt), failed, retry)?;
         // The tile is complete and drawn; its labels are laid out again as images arrive.
         images
             .lay_out_again::<T, _, K::HttpClient>(&client, &style, context)

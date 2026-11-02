@@ -228,6 +228,20 @@ impl Fixture {
             .timestamp = Duration::from_millis(millis);
         self.request.run(&mut self.context).expect("request frame");
     }
+    /// Admits a vector request for the origin tile outside the request system, as it would.
+    pub fn direct_vector_input(&mut self) -> Input {
+        use crate::io::tile_retry::{next_attempt, started, RequestKind};
+        let world = &mut self.context.world;
+        let attempt = next_attempt(world);
+        started(
+            world,
+            Default::default(),
+            RequestKind::Vector,
+            attempt,
+            None,
+        );
+        Input::new(Default::default(), self.context.style.clone(), attempt)
+    }
     pub async fn receive(&mut self) {
         self.kernel.apc().complete().await;
         self.populate

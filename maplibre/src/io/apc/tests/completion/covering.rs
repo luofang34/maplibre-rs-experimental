@@ -22,6 +22,7 @@ async fn setup_covering() -> (
     std::rc::Rc<Kernel<HeadlessEnvironment>>,
     MapContext,
     WorldTileCoords,
+    u64,
 ) {
     let (kernel, mut context) = super::super::systems::setup().await;
     let mut schedule = Schedule::default();
@@ -66,17 +67,22 @@ async fn setup_covering() -> (
         .expect("child")
         .insert(VectorLayerBucketComponent::default())
         .insert(SymbolLayersDataComponent::default());
+    let attempt = tile_retry::next_attempt(&mut context.world);
+    tile_retry::started(
+        &mut context.world,
+        child,
+        RequestKind::Vector,
+        attempt,
+        None,
+    );
     assert_eq!(request_budget(&context.world), MAX_TILES_IN_FLIGHT - 1);
-    (kernel, context, child)
+    (kernel, context, child, attempt)
 }
 
 async fn selected_source(path: &str) -> (WorldTileCoords, WorldTileCoords) {
-    let (kernel, mut context, child) = setup_covering().await;
+    let (kernel, mut context, child, attempt) = setup_covering().await;
     crate::vector::request_system::fetch_vector_apc::<_, DefaultVectorTransferables, _>(
-        Input::TileRequest {
-            coords: child,
-            style: style(false, &[path]),
-        },
+        Input::new(child, style(false, &[path]), attempt),
         SchedulerContext {
             sender: kernel.apc().channel.0.clone(),
         },
@@ -118,16 +124,13 @@ fn covering_source(world: &World, child: WorldTileCoords) -> WorldTileCoords {
 }
 
 async fn coverage_while_a_later_source_loads(first: &str, expected: WorldTileCoords) {
-    let (kernel, mut context, child) = setup_covering().await;
+    let (kernel, mut context, child, attempt) = setup_covering().await;
     let gate = std::sync::Arc::new(super::fixture::FetchGate::default());
     let client = super::fixture::TileClient {
         gate: Some(gate.clone()),
     };
     let worker = crate::vector::request_system::fetch_vector_apc::<_, DefaultVectorTransferables, _>(
-        Input::TileRequest {
-            coords: child,
-            style: style(false, &[first, "blocked"]),
-        },
+        Input::new(child, style(false, &[first, "blocked"]), attempt),
         SchedulerContext {
             sender: kernel.apc().channel.0.clone(),
         },

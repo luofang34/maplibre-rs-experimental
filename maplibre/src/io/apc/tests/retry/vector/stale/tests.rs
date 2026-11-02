@@ -4,6 +4,6 @@ async fn old_successful_payloads_do_not_attach_to_a_reused_coordinate() {
 }
 
 #[tokio::test]
-async fn untracked_legacy_payloads_cannot_override_an_admitted_attempt() {
+async fn payloads_of_a_direct_request_cannot_override_a_later_attempt() {
     super::stale_success(false).await;
 }
