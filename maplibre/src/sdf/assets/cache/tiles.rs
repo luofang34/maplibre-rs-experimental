@@ -9,6 +9,7 @@ use super::{AssetCache, AssetFailure};
 use crate::{
     coords::WorldTileCoords,
     io::{
+        cpu_work::run_cpu_bound,
         source_client::{HttpClient, SourceClient},
         source_type::SourceType,
     },
@@ -174,9 +175,7 @@ impl AssetCache {
                     }
                 }
             })?;
-            let rgba = image::load_from_memory(&data)
-                .map_err(|error| CachedTileFailure::Decode(error.to_string()))?
-                .to_rgba8();
+            let rgba = decode_rgba(data).await?;
             self.0.raster_decodes.fetch_add(1, Ordering::Relaxed);
             return Ok(Arc::new(rgba));
         }
@@ -193,9 +192,9 @@ impl AssetCache {
                     .into_asset_failure()
                 }
             })?;
-            let rgba = image::load_from_memory(&data)
-                .map_err(|error| CachedTileFailure::Decode(error.to_string()).into_asset_failure())?
-                .to_rgba8();
+            let rgba = decode_rgba(data)
+                .await
+                .map_err(CachedTileFailure::into_asset_failure)?;
             self.0.raster_decodes.fetch_add(1, Ordering::Relaxed);
             let bytes = rgba.as_raw().len();
             Ok((rgba, bytes))
@@ -224,8 +223,7 @@ impl AssetCache {
         if is_mock {
             let image = self.load_raster_tile(client, source, coords).await?;
             let sample_metres = dem::sample_metres(*coords, image.width(), circumference_meters);
-            let tile = DemTile::from_image_despiked(&image, unpack, sample_metres)
-                .map_err(|error| CachedTileFailure::Decode(error.to_string()))?;
+            let tile = decode_dem(image.clone(), unpack, sample_metres).await?;
             self.0.dem_decodes.fetch_add(1, Ordering::Relaxed);
             return Ok(Arc::new(CachedDemEntry {
                 tile: Arc::new(tile),
@@ -240,10 +238,9 @@ impl AssetCache {
                 .await
                 .map_err(CachedTileFailure::into_asset_failure)?;
             let sample_metres = dem::sample_metres(*coords, image.width(), circumference_meters);
-            let tile =
-                DemTile::from_image_despiked(&image, unpack, sample_metres).map_err(|error| {
-                    CachedTileFailure::Decode(error.to_string()).into_asset_failure()
-                })?;
+            let tile = decode_dem(image.clone(), unpack, sample_metres)
+                .await
+                .map_err(CachedTileFailure::into_asset_failure)?;
             self.0.dem_decodes.fetch_add(1, Ordering::Relaxed);
             let bytes = tile.pixels().len();
             Ok((
@@ -258,4 +255,24 @@ impl AssetCache {
         .await
         .map_err(CachedTileFailure::from_asset_failure)
     }
+}
+
+/// Decodes PNG/JPEG/WebP bytes into RGBA8 pixels off the threads that drive fetches.
+async fn decode_rgba(data: Vec<u8>) -> Result<RgbaImage, CachedTileFailure> {
+    run_cpu_bound(move || image::load_from_memory(&data).map(|image| image.to_rgba8()))
+        .await
+        .map_err(|error| CachedTileFailure::Decode(error.to_string()))?
+        .map_err(|error| CachedTileFailure::Decode(error.to_string()))
+}
+
+/// Unpacks and despikes elevation samples off the threads that drive fetches.
+async fn decode_dem(
+    image: Arc<RgbaImage>,
+    unpack: [f64; 4],
+    sample_metres: f64,
+) -> Result<DemTile, CachedTileFailure> {
+    run_cpu_bound(move || DemTile::from_image_despiked(&image, unpack, sample_metres))
+        .await
+        .map_err(|error| CachedTileFailure::Decode(error.to_string()))?
+        .map_err(|error| CachedTileFailure::Decode(error.to_string()))
 }

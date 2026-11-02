@@ -11,6 +11,7 @@ use crate::{
             AsyncProcedureCall, AsyncProcedureFuture, AttemptContext, Context, Input,
             ProcedureError,
         },
+        cpu_work::run_cpu_bound_replying,
         source_type::SourceType,
         tile_backpressure::request_budget,
         tile_retry::{self, RequestDisposition, RequestKind, TileRequestOutcome},
@@ -154,16 +155,31 @@ pub fn fetch_raster_apc<K: OffscreenKernel, T: RasterTransferables, C: Context +
                     .await
                 {
                     Ok(rgba) => {
-                        let mut process_context =
-                            ProcessRasterContext::<T, _>::new(context.clone());
-                        if let Err(ProcessRasterError::Send(source)) = process_context
-                            .finish_decoded(
+                        let source = RasterSourceId::new(group.source_name.clone());
+                        // The shared image is copied into the reply, which is a full pass over
+                        // its pixels.
+                        let delivered = run_cpu_bound_replying(context.clone(), move |context| {
+                            ProcessRasterContext::<T, _>::new(context).finish_decoded(
                                 &coords,
-                                RasterSourceId::new(group.source_name.clone()),
+                                source,
                                 (*rgba).clone(),
                             )
-                        {
-                            return Err(ProcedureError::Send(source));
+                        })
+                        .await;
+                        match delivered {
+                            Ok(Err(ProcessRasterError::Send(source))) => {
+                                return Err(ProcedureError::Send(source))
+                            }
+                            Ok(_) => {}
+                            Err(error) => {
+                                tracing::warn!(%coords, source = ?group.source_name, %error, "raster tile not delivered");
+                                context
+                                    .send_back(T::LayerRasterMissing::build_from(
+                                        coords,
+                                        RasterSourceId::new(group.source_name.clone()),
+                                    ))
+                                    .map_err(ProcedureError::Send)?;
+                            }
                         }
                     }
                     Err(CachedTileFailure::Decode(error)) => {
@@ -207,32 +223,8 @@ pub fn fetch_raster_apc<K: OffscreenKernel, T: RasterTransferables, C: Context +
                 continue;
             }
 
-            match client.fetch(&coords, &group.source).await {
-                Ok(data) => {
-                    let mut process_context = ProcessRasterContext::<T, _>::new(context.clone());
-                    match process_raster_tile(
-                        &data,
-                        RasterTileRequest {
-                            coords,
-                            source: RasterSourceId::new(group.source_name.clone()),
-                        },
-                        &mut process_context,
-                    ) {
-                        Ok(()) => {}
-                        Err(ProcessRasterError::Send(source)) => {
-                            return Err(ProcedureError::Send(source))
-                        }
-                        Err(ProcessRasterError::Decoding { source }) => {
-                            tracing::warn!(%coords, source = ?group.source_name, error = %source, "invalid raster tile");
-                            context
-                                .send_back(T::LayerRasterMissing::build_from(
-                                    coords,
-                                    RasterSourceId::new(group.source_name.clone()),
-                                ))
-                                .map_err(ProcedureError::Send)?;
-                        }
-                    }
-                }
+            let data = match client.fetch(&coords, &group.source).await {
+                Ok(data) => data,
                 Err(error) => {
                     retry |= error.is_retryable();
                     if error.is_not_found() {
@@ -252,6 +244,33 @@ pub fn fetch_raster_apc<K: OffscreenKernel, T: RasterTransferables, C: Context +
 
                     context
                         .send_back(<T as RasterTransferables>::LayerRasterMissing::build_from(
+                            coords,
+                            RasterSourceId::new(group.source_name.clone()),
+                        ))
+                        .map_err(ProcedureError::Send)?;
+                    continue;
+                }
+            };
+            let request = RasterTileRequest {
+                coords,
+                source: RasterSourceId::new(group.source_name.clone()),
+            };
+            let processed = run_cpu_bound_replying(context.clone(), move |context| {
+                let mut process_context = ProcessRasterContext::<T, _>::new(context);
+                process_raster_tile(&data, request, &mut process_context)
+            })
+            .await
+            .map_err(ProcessRasterError::CpuWork)
+            .and_then(|processed| processed);
+            match processed {
+                Ok(()) => {}
+                Err(ProcessRasterError::Send(source)) => return Err(ProcedureError::Send(source)),
+                Err(
+                    error @ (ProcessRasterError::Decoding { .. } | ProcessRasterError::CpuWork(_)),
+                ) => {
+                    tracing::warn!(%coords, source = ?group.source_name, %error, "invalid raster tile");
+                    context
+                        .send_back(T::LayerRasterMissing::build_from(
                             coords,
                             RasterSourceId::new(group.source_name.clone()),
                         ))
