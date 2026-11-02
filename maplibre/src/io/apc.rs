@@ -168,7 +168,7 @@ pub enum SendError {
         operation: &'static str,
         /// Underlying channel or platform error.
         #[source]
-        source: Box<dyn std::error::Error>,
+        source: Box<dyn std::error::Error + Send>,
     },
     /// The result has a routing tag unsupported by this transport.
     #[error("worker transport does not support message tag {tag:?}")]
@@ -179,6 +179,9 @@ pub enum SendError {
     /// The result's payload is incompatible with the transport.
     #[error("worker result has an invalid payload")]
     Payload(#[from] MessageError),
+    /// The call the result belongs to was cancelled; the work producing it can stop.
+    #[error("the call this result belongs to was cancelled")]
+    Abandoned,
 }
 
 /// Allows sending messages from workers to back to the caller.

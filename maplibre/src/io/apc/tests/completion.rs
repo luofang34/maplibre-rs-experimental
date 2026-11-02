@@ -112,6 +112,28 @@ async fn corrupt_vector_source_does_not_stop_healthy_later_sources() {
     assert_eq!(completions.last(), Some(&false));
 }
 
+#[tokio::test]
+async fn vector_geometry_is_tessellated_off_the_thread_that_fetches() {
+    let replies = Replies::default();
+    fetch(false, &["vector"], replies.clone(), UNADMITTED)
+        .await
+        .expect("tile processed");
+    let messages = replies.messages.lock().expect("replies");
+    let threads = replies.threads.lock().expect("threads");
+    let fetching = std::thread::current().id();
+    let geometry: Vec<_> = messages
+        .iter()
+        .zip(threads.iter())
+        .filter(|(message, _)| message.has_tag(DefaultLayerTessellated::message_tag()))
+        .map(|(_, thread)| *thread)
+        .collect();
+    assert!(!geometry.is_empty(), "the tile has geometry");
+    assert!(
+        geometry.iter().all(|thread| *thread != fetching),
+        "tessellation holds a blocking thread, not the runtime's"
+    );
+}
+
 async fn raster_result(paths: &[&str]) -> World {
     let replies = Replies::default();
     let mut world = World::default();

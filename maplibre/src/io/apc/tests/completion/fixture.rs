@@ -17,6 +17,8 @@ pub(super) struct Replies {
     pub messages: Arc<Mutex<Vec<Message>>>,
     pub reject: bool,
     pub attempts: Arc<std::sync::atomic::AtomicUsize>,
+    /// The thread each delivered message was sent from, in delivery order.
+    pub threads: Arc<Mutex<Vec<std::thread::ThreadId>>>,
 }
 
 impl Context for Replies {
@@ -32,10 +34,12 @@ impl Context for Replies {
                 )),
             });
         }
-        self.messages
+        let mut messages = self.messages.lock().expect("reply queue");
+        messages.push(message.into());
+        self.threads
             .lock()
-            .expect("reply queue")
-            .push(message.into());
+            .expect("reply threads")
+            .push(std::thread::current().id());
         Ok(())
     }
 }

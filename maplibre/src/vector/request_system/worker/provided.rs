@@ -1,11 +1,15 @@
 //! Lays a tile's labels out again once the provided images they name have answers.
 
-use std::collections::{BTreeSet, HashSet};
+use std::{
+    collections::{BTreeSet, HashSet},
+    sync::Arc,
+};
 
 use crate::{
     coords::WorldTileCoords,
     io::{
         apc::{Context, SendError},
+        cpu_work::run_cpu_bound_replying,
         source_client::{HttpClient, SourceClient},
     },
     sdf::{
@@ -22,7 +26,7 @@ use crate::{
 /// What one source's symbols need from providers.
 pub(super) struct Symbols {
     /// The source's tile and symbol layers, kept while some images are still to come.
-    pub(super) again: Option<(Vec<u8>, VectorTileRequest)>,
+    pub(super) again: Option<(Arc<[u8]>, VectorTileRequest)>,
     /// Device pixels per layout pixel the images are made for.
     pub(super) pixel_ratio: f32,
     /// Every provided name the labels ask for.
@@ -89,7 +93,11 @@ impl TileImages {
 
     /// Waits for the images the labels lack, lays out again the labels of each source that
     /// gained one, and reports whether some provider was unavailable for now.
-    pub(super) async fn lay_out_again<T: VectorTransferables, C: Context + Clone, H: HttpClient>(
+    pub(super) async fn lay_out_again<
+        T: VectorTransferables,
+        C: Context + Clone + Send,
+        H: HttpClient,
+    >(
         self,
         client: &SourceClient<H>,
         style: &Style,
@@ -122,7 +130,7 @@ impl TileImages {
 
 /// Waits for the images `sources` lack and lays out again the labels of each source that
 /// gained one. Returns whether some provider was unavailable for now.
-async fn lay_out_sources<T: VectorTransferables, C: Context + Clone, H: HttpClient>(
+async fn lay_out_sources<T: VectorTransferables, C: Context + Clone + Send, H: HttpClient>(
     client: &SourceClient<H>,
     style: &Style,
     coords: WorldTileCoords,
@@ -190,8 +198,13 @@ async fn lay_out_sources<T: VectorTransferables, C: Context + Clone, H: HttpClie
         // asked for again when the tile is retried.
         unavailable |= !assets.awaiting.is_empty();
         // The tile was completed already; these labels replace the ones it was drawn with.
-        let mut processor = ProcessVectorContext::<T, C>::new(context.clone()).without_completion();
-        process_vector_tile_with_assets(data, request.clone(), &mut processor, assets.atlas)?;
+        let (data, request, atlas) = (data.clone(), request.clone(), assets.atlas);
+        run_cpu_bound_replying(context.clone(), move |context| {
+            let mut processor = ProcessVectorContext::<T, _>::new(context).without_completion();
+            process_vector_tile_with_assets(&data, request, &mut processor, atlas)
+        })
+        .await
+        .map_err(ProcessVectorError::CpuWork)??;
         providers.count_relaid();
         tracing::debug!(%coords, images = gained.len(), "labels laid out again with provided images");
     }

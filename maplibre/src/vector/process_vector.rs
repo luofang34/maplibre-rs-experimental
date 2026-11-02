@@ -49,11 +49,14 @@ pub enum ProcessVectorError {
         coords: WorldTileCoords,
         /// Underlying protocol-buffer decoder failure.
         #[source]
-        source: Box<dyn std::error::Error>,
+        source: Box<dyn std::error::Error + Send + Sync>,
     },
     /// A glyph range or sprite could not be fetched, so the tile's symbols would be incomplete.
     #[error("loading symbol assets failed")]
     SymbolAssets(#[source] SymbolAssetError),
+    /// Tessellation did not run to completion.
+    #[error("processing vector tile failed")]
+    CpuWork(#[source] crate::io::cpu_work::CpuWorkError),
 }
 
 /// Scale from a layer's declared coordinate extent to the 4096 grid the shaders expect, so a
@@ -171,7 +174,9 @@ mod processing;
 
 /// Decodes a tile, tolerating the zero padding some tile servers append: a zero tag is not a
 /// field, so a strict decoder rejects a tile that GL JS reads.
-pub(crate) fn decode_tile(data: &[u8]) -> Result<geozero::mvt::Tile, Box<dyn std::error::Error>> {
+pub(crate) fn decode_tile(
+    data: &[u8],
+) -> Result<geozero::mvt::Tile, Box<dyn std::error::Error + Send + Sync>> {
     // A payload that is not a protobuf tile with layers is tried as a MapLibre Tile.
     #[cfg(feature = "mlt")]
     match decode_mvt(data) {
@@ -183,7 +188,7 @@ pub(crate) fn decode_tile(data: &[u8]) -> Result<geozero::mvt::Tile, Box<dyn std
     decode_mvt(data)
 }
 
-fn decode_mvt(data: &[u8]) -> Result<geozero::mvt::Tile, Box<dyn std::error::Error>> {
+fn decode_mvt(data: &[u8]) -> Result<geozero::mvt::Tile, Box<dyn std::error::Error + Send + Sync>> {
     geozero::mvt::Tile::decode(data).or_else(|error| {
         let end = data
             .iter()
