@@ -3,7 +3,8 @@ import {initializeWasm} from "../wasm-instance.mjs";
 
 type MessageData = { type: 'wasm_init', module: WebAssembly.Module }
     | { type: 'kernel_config', config: string }
-    | { type: 'call', procedure_ptr: number, input: string }
+    | { type: 'call', procedure_ptr: number, attempt: bigint, input: string }
+    | { type: 'cancel', attempt: bigint }
     | { type: 'image_provider_modules', urls: string[] }
 
 let initialised: Promise<maplibre.InitOutput> = null
@@ -14,6 +15,12 @@ const started = new Promise<void>(resolve => markStarted = resolve)
 
 // Tile calls wait for the host's image providers, so no label is laid out without them.
 let providersRegistered: Promise<void> = Promise.resolve()
+
+// The calls this worker runs, made once the module has started.
+let calls: maplibre.TileWorkerCalls = null
+
+// Calls received but not yet started, so a cancel that arrives while one waits can drop it.
+const waiting = new Map<bigint, { cancelled: boolean }>()
 
 /** Imports each module and lets its default export register image providers in this worker. */
 const registerProviders = async (urls: string[]) => {
@@ -26,6 +33,19 @@ const registerProviders = async (urls: string[]) => {
 }
 
 onmessage = async (message: MessageEvent<MessageData>) => {
+    // Calls and cancels are noted before any await: the port delivers them in order, but
+    // their handlers resume in the order their awaits settle.
+    let call: { cancelled: boolean } = null
+    if (message.data.type === 'call') {
+        call = {cancelled: false}
+        waiting.set(message.data.attempt, call)
+    } else if (message.data.type === 'cancel') {
+        const waitingCall = waiting.get(message.data.attempt)
+        if (waitingCall) {
+            waitingCall.cancelled = true
+            return
+        }
+    }
 
     if (message.data.type === 'image_provider_modules') {
         providersRegistered = registerProviders(message.data.urls).catch(err => {
@@ -57,17 +77,25 @@ onmessage = async (message: MessageEvent<MessageData>) => {
     } else if (type === 'call') {
         await providersRegistered;
         const data = message.data;
+        waiting.delete(data.attempt)
+        if (call.cancelled) {
+            return
+        }
         // WARNING: Do not modify data passed from Rust!
         const procedure_ptr = data.procedure_ptr;
         const input = data.input;
 
-        const process_data: (procedure_ptr: number, input: string) => Promise<void> = maplibre["singlethreaded_process_data"];
-
-        if (!process_data) {
-            throw Error("singlethreaded_worker_entry is not defined. Maybe the Rust build used the wrong build configuration.")
+        if (!calls) {
+            const TileWorkerCalls: new () => maplibre.TileWorkerCalls = maplibre["TileWorkerCalls"];
+            if (!TileWorkerCalls) {
+                throw Error("TileWorkerCalls is not defined. Maybe the Rust build used the wrong build configuration.")
+            }
+            calls = new TileWorkerCalls()
         }
 
-        await process_data(procedure_ptr, input);
+        await calls.process(procedure_ptr, input);
+    } else if (type === 'cancel') {
+        calls?.cancel(message.data.attempt)
     } else if (type === 'kernel_config') {
         const data = message.data;
 

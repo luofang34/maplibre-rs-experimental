@@ -28,6 +28,15 @@ pub enum WebError {
     /// The kernel configuration sent to the tile workers could not be encoded.
     #[error("encoding the tile workers' kernel configuration failed")]
     KernelConfigEncoding(#[source] serde_json::Error),
+    /// A tile worker received a kernel configuration it cannot decode.
+    #[error("decoding the tile worker's kernel configuration failed")]
+    KernelConfigDecoding(#[source] serde_json::Error),
+    /// A tile worker received a second kernel configuration.
+    #[error("the tile worker already has a kernel configuration")]
+    KernelConfigAlreadySet,
+    /// A worker message arrived while the map was reading earlier ones.
+    #[error("worker results are being received; the message cannot be stored")]
+    ReceivedBusy,
 }
 
 impl From<JsValue> for WebError {

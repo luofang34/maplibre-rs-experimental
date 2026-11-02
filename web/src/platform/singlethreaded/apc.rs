@@ -19,11 +19,12 @@ use maplibre::{
     },
     sdf::provided::ProvidedImagesReport,
 };
-use rand::{prelude::SliceRandom, thread_rng};
+use rand::{thread_rng, Rng};
 use thiserror::Error;
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{DedicatedWorkerGlobalScope, Worker};
 
+use self::assignments::Assignments;
 use crate::{
     error::WebError,
     platform::singlethreaded::{
@@ -56,6 +57,8 @@ pub enum WebMessageTag {
     TileRequestOutcome = 10,
     TrackedPayload = 11,
     ProvidedImages = 12,
+    /// A worker stopped running the call for the attempt in the payload, either way.
+    CallFinished = 13,
 }
 
 impl WebMessageTag {
@@ -73,6 +76,7 @@ impl WebMessageTag {
             WebMessageTag::TileRequestOutcome => &WebMessageTag::TileRequestOutcome,
             WebMessageTag::TrackedPayload => &WebMessageTag::TrackedPayload,
             WebMessageTag::ProvidedImages => &WebMessageTag::ProvidedImages,
+            WebMessageTag::CallFinished => &WebMessageTag::CallFinished,
         }
     }
 
@@ -96,6 +100,7 @@ impl WebMessageTag {
             }
             x if x == WebMessageTag::TrackedPayload as u32 => Ok(WebMessageTag::TrackedPayload),
             x if x == WebMessageTag::ProvidedImages as u32 => Ok(WebMessageTag::ProvidedImages),
+            x if x == WebMessageTag::CallFinished as u32 => Ok(WebMessageTag::CallFinished),
             _ => Err(MessageTagDeserializeError),
         }
     }
@@ -236,15 +241,65 @@ pub(crate) fn decode_message(
     ))
 }
 
+/// Encodes the payload of a [`WebMessageTag::CallFinished`] message.
+pub(crate) fn encode_call_finished(attempt: u64) -> ArrayBuffer {
+    Uint8Array::from(attempt.to_le_bytes().as_slice()).buffer()
+}
+
+/// Reads the attempt from the payload of a [`WebMessageTag::CallFinished`] message.
+pub(crate) fn decode_call_finished(buffer: &ArrayBuffer) -> Result<u64, CallError> {
+    let bytes = Uint8Array::new(buffer).to_vec();
+    let attempt = <[u8; 8]>::try_from(bytes.as_slice()).map_err(|_| {
+        CallError::Deserialize(Box::new(TrackedPayloadError::Finished {
+            bytes: bytes.len(),
+        }))
+    })?;
+    Ok(u64::from_le_bytes(attempt))
+}
+
+/// Tells the main thread this worker stopped running the call for `attempt`.
+pub(crate) fn post_call_finished(attempt: u64) -> Result<(), SendError> {
+    let global: DedicatedWorkerGlobalScope =
+        js_sys::global()
+            .dyn_into()
+            .map_err(|_| SendError::Transmission {
+                operation: "accessing the worker global scope",
+                source: Box::new(WebError::TypeError(
+                    "not a dedicated worker global scope".into(),
+                )),
+            })?;
+    let buffer = encode_call_finished(attempt);
+    global
+        .post_message_with_transfer(
+            &js_sys::Array::of2(&JsValue::from(WebMessageTag::CallFinished as u32), &buffer),
+            &js_sys::Array::of1(&buffer),
+        )
+        .map_err(|source| SendError::Transmission {
+            operation: "posting a finished call",
+            source: Box::new(WebError::from(source)),
+        })
+}
+
 #[derive(Debug, Error)]
 enum TrackedPayloadError {
     #[error("tracked worker payload has {bytes} bytes; its header requires 12")]
     Header { bytes: usize },
     #[error("tracked worker payload contains a nested tracking envelope")]
     Nested,
+    #[error("finished call payload has {bytes} bytes; its attempt requires 8")]
+    Finished { bytes: usize },
 }
 
-pub type ReceivedType = RefCell<Vec<Message>>;
+/// What the workers sent since the last receive.
+#[derive(Default)]
+pub struct Received {
+    /// Results, in delivery order.
+    pub(crate) messages: Vec<Message>,
+    /// Attempts whose calls a worker stopped running.
+    pub(crate) finished: Vec<u64>,
+}
+
+pub type ReceivedType = RefCell<Received>;
 
 pub struct PassingAsyncProcedureCall {
     workers: Vec<Worker>,
@@ -252,6 +307,9 @@ pub struct PassingAsyncProcedureCall {
     buffer: RefCell<Vec<Message>>,
 
     received: Rc<ReceivedType>, // FIXME: Is RefCell fine?
+
+    /// The worker each running call was sent to, so a cancel reaches it.
+    assignments: RefCell<Assignments>,
 }
 
 impl PassingAsyncProcedureCall {
@@ -260,7 +318,7 @@ impl PassingAsyncProcedureCall {
         initial_workers: usize,
         config: OffscreenKernelConfig,
     ) -> Result<Self, WebError> {
-        let received = Rc::new(RefCell::new(vec![]));
+        let received = Rc::new(RefCell::new(Received::default()));
 
         let create_new_worker = || {
             new_worker
@@ -289,6 +347,7 @@ impl PassingAsyncProcedureCall {
             workers,
             buffer: RefCell::new(Vec::default()),
             received,
+            assignments: RefCell::default(),
         })
     }
 }
@@ -316,7 +375,11 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
         let Ok(mut received) = self.received.try_borrow_mut() else {
             return ret.into_iter();
         };
-        for message in received.drain(..) {
+        let mut assignments = self.assignments.borrow_mut();
+        for attempt in received.finished.drain(..) {
+            assignments.finished(attempt);
+        }
+        for message in received.messages.drain(..) {
             log::debug!("Data reached main thread: {message:?}");
 
             if filter(&message) {
@@ -335,28 +398,54 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
         procedure: AsyncProcedure<K, UsedContext>,
     ) -> Result<(), CallError> {
         let procedure_ptr = procedure as *mut AsyncProcedure<K, UsedContext>; // TODO: Verify how these pointer are converted to pointers
+        let attempt = input.attempt;
         let input = serde_json::to_string(&input).map_err(|e| CallError::Serialize(Box::new(e)))?;
 
-        let message = js_sys::Object::from_entries(&js_sys::Array::of3(
+        // The worker reads the attempt without decoding the input, so a cancel can overtake
+        // a call that waits for the worker to start.
+        let message = js_sys::Object::from_entries(&js_sys::Array::of4(
             &js_sys::Array::of2(&JsValue::from("type"), &JsValue::from("call")),
             &js_sys::Array::of2(
                 &JsValue::from("procedure_ptr"),
                 &JsValue::from(procedure_ptr),
             ),
+            &js_sys::Array::of2(&JsValue::from("attempt"), &JsValue::from(attempt)),
             &js_sys::Array::of2(&JsValue::from("input"), &JsValue::from(input)),
         ))
         .map_err(|error| CallError::Serialize(Box::new(WebError::from(error))))?;
 
+        if self.workers.is_empty() {
+            return Err(CallError::Schedule(ScheduleError::NoWorkers));
+        }
+        let index = thread_rng().gen_range(0..self.workers.len());
         let worker = self
             .workers
-            .choose(&mut thread_rng())
+            .get(index)
             .ok_or(CallError::Schedule(ScheduleError::NoWorkers))?;
 
         worker.post_message(&message).map_err(|error| {
             CallError::Schedule(ScheduleError::Scheduling(Box::new(WebError::from(error))))
-        })
+        })?;
+        self.assignments.borrow_mut().assign(attempt, index);
+        Ok(())
+    }
+
+    fn cancel(&self, attempt: u64) {
+        let Some(index) = self.assignments.borrow_mut().cancel(attempt) else {
+            return;
+        };
+        let Some(worker) = self.workers.get(index) else {
+            return;
+        };
+        let posted = worker_message("cancel", "attempt", &JsValue::from(attempt))
+            .and_then(|message| worker.post_message(&message).map_err(WebError::from));
+        if let Err(error) = posted {
+            // The call finishes and the map ignores its result.
+            tracing::warn!(attempt, %error, "cancelling a worker call failed");
+        }
     }
 }
 
+mod assignments;
 #[cfg(test)]
 mod tests;
