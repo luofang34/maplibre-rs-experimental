@@ -1,3 +1,8 @@
+//! Main-thread transport for tile calls served by single-threaded web workers.
+
+// A failure here must reach the map as a typed error: a panic on the render thread stops it.
+#![deny(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+
 use std::{cell::RefCell, rc::Rc, vec::IntoIter};
 
 use js_sys::{ArrayBuffer, Uint8Array};
@@ -269,39 +274,14 @@ impl PassingAsyncProcedureCall {
         };
 
         let mut workers = Vec::with_capacity(initial_workers);
+        let config = serde_json::to_string(&config).map_err(WebError::KernelConfigEncoding)?;
+        let init = worker_message("wasm_init", "module", &wasm_bindgen::module())?;
+        let configure = worker_message("kernel_config", "config", &JsValue::from(config))?;
 
         for _ in 0..initial_workers {
             let worker: Worker = create_new_worker()?;
-
-            worker
-                .post_message(
-                    &js_sys::Object::from_entries(&js_sys::Array::of2(
-                        &js_sys::Array::of2(
-                            &JsValue::from("type"),
-                            &js_sys::JsString::from("wasm_init"),
-                        ),
-                        &js_sys::Array::of2(&JsValue::from("module"), &wasm_bindgen::module()),
-                    ))
-                    .expect("can not fail"),
-                )
-                .map_err(WebError::from)?;
-
-            worker
-                .post_message(
-                    &js_sys::Object::from_entries(&js_sys::Array::of2(
-                        &js_sys::Array::of2(
-                            &JsValue::from("type"),
-                            &js_sys::JsString::from("kernel_config"),
-                        ),
-                        &js_sys::Array::of2(
-                            &JsValue::from("config"),
-                            &js_sys::JsString::from(serde_json::to_string(&config).expect("TODO")), // FIXME: Handle this error correctly
-                        ),
-                    ))
-                    .expect("can not fail"),
-                )
-                .map_err(WebError::from)?;
-
+            worker.post_message(&init).map_err(WebError::from)?;
+            worker.post_message(&configure).map_err(WebError::from)?;
             workers.push(worker);
         }
 
@@ -311,6 +291,15 @@ impl PassingAsyncProcedureCall {
             received,
         })
     }
+}
+
+/// Builds a worker control message `{ type, <key>: value }`.
+fn worker_message(kind: &str, key: &str, value: &JsValue) -> Result<js_sys::Object, WebError> {
+    js_sys::Object::from_entries(&js_sys::Array::of2(
+        &js_sys::Array::of2(&JsValue::from("type"), &JsValue::from(kind)),
+        &js_sys::Array::of2(&JsValue::from(key), value),
+    ))
+    .map_err(WebError::from)
 }
 
 impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
@@ -356,7 +345,7 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
             ),
             &js_sys::Array::of2(&JsValue::from("input"), &JsValue::from(input)),
         ))
-        .expect("can not fail");
+        .map_err(|error| CallError::Serialize(Box::new(WebError::from(error))))?;
 
         let worker = self
             .workers

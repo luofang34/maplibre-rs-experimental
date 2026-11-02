@@ -25,6 +25,9 @@ pub enum WebError {
     /// Any other Error
     #[error("JavaScript error: {0}")]
     GenericError(Cow<'static, str>),
+    /// The kernel configuration sent to the tile workers could not be encoded.
+    #[error("encoding the tile workers' kernel configuration failed")]
+    KernelConfigEncoding(#[source] serde_json::Error),
 }
 
 impl From<JsValue> for WebError {
