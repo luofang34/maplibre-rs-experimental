@@ -19,5 +19,6 @@ pub mod source_type;
 pub mod static_tile_fetcher;
 pub mod tile_backpressure;
 pub mod tile_json;
+pub(crate) mod tile_load;
 pub mod tile_retry;
 pub mod tile_sources;

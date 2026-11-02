@@ -171,7 +171,7 @@ async fn a_flight_from_the_table_requests_tiles_a_few_at_a_time() {
         };
         map.run_xr_frame(frame).expect("the frame renders");
         // No tile ever arrives here, so every request stays in flight.
-        let in_flight = tiles_in_flight(&map.world().tiles);
+        let in_flight = tiles_in_flight(map.world());
         assert!(
             in_flight <= MAX_TILES_IN_FLIGHT,
             "frame {frame_number}: {in_flight} tiles in flight, {} resident",

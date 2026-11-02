@@ -203,7 +203,7 @@ fn summarize_residency(world: &World, drawn: usize, in_use: usize, settled: bool
         };
     tracing::info!(
         tiles,
-        pending = crate::io::tile_backpressure::tiles_in_flight(&world.tiles),
+        pending = crate::io::tile_backpressure::tiles_in_flight(world),
         settled,
         geometry_mb = bytes >> 20,
         index_mb = index_bytes >> 20,

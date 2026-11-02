@@ -9,44 +9,22 @@
 
 use crate::{
     coords::WorldTileCoords,
-    raster::RasterLayersDataComponent,
+    io::tile_load,
     render::memory_budget::MemoryBudget,
     tcs::{tiles::Tiles, world::World},
-    terrain::DemTileComponent,
-    vector::VectorLayerBucketComponent,
 };
 
 /// Tiles that may be fetched or processed at the same time across every source.
 pub const MAX_TILES_IN_FLIGHT: usize = 12;
 
-/// Whether every request for the tile has produced a result.
+/// Whether every request for the tile has produced its outcome or was given up.
 pub(crate) fn is_settled(tiles: &Tiles, coords: WorldTileCoords) -> bool {
-    let retry_loading = tiles
-        .query::<&crate::io::tile_retry::TileRequestRetries>(coords)
-        .is_some_and(crate::io::tile_retry::TileRequestRetries::pending);
-    let vector_loading = tiles
-        .query::<&VectorLayerBucketComponent>(coords)
-        .is_some_and(|component| !component.done);
-    let raster_loading = tiles
-        .query::<&RasterLayersDataComponent>(coords)
-        .is_some_and(|component| component.layers.is_empty());
-    let dem_loading = matches!(
-        tiles.query::<&DemTileComponent>(coords),
-        Some(DemTileComponent::Pending)
-    );
-    let symbol_loading = tiles
-        .query::<&crate::sdf::SymbolLayersDataComponent>(coords)
-        .is_some_and(|component| component.pending_assets);
-    !(retry_loading || vector_loading || raster_loading || dem_loading || symbol_loading)
+    !tile_load::is_loading(tiles, coords)
 }
 
-/// Tiles with a request that has not produced its result yet.
-pub fn tiles_in_flight(tiles: &Tiles) -> usize {
-    tiles
-        .tiles
-        .values()
-        .filter(|tile| !is_settled(tiles, tile.coords))
-        .count()
+/// Tiles with a request that has not produced its outcome yet.
+pub fn tiles_in_flight(world: &World) -> usize {
+    tile_load::loading_count(world)
 }
 
 /// How many more tiles may be requested this frame: up to the in-flight bound, fewer
@@ -58,7 +36,7 @@ pub fn request_budget(world: &World) -> usize {
         .copied()
         .unwrap_or_default()
         .tiles_in_flight_allowed(MAX_TILES_IN_FLIGHT);
-    allowed.saturating_sub(tiles_in_flight(&world.tiles))
+    allowed.saturating_sub(tiles_in_flight(world))
 }
 
 /// Shares available requests with the DEM pass without starving vector tiles under pressure.

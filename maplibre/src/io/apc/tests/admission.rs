@@ -16,7 +16,7 @@ async fn preserves_budget(kind: Kind) {
     let result = system.run(&mut context);
     assert_eq!(admission.attempts.get(), 1);
     assert_eq!(
-        tiles_in_flight(&context.world.tiles),
+        tiles_in_flight(&context.world),
         0,
         "no rejected work is in flight"
     );
@@ -52,7 +52,7 @@ async fn retries(kind: Kind) {
         2,
         "stationary view retries rejected work"
     );
-    assert_eq!(tiles_in_flight(&context.world.tiles), 1);
+    assert_eq!(tiles_in_flight(&context.world), 1);
     assert_eq!(request_budget(&context.world), MAX_TILES_IN_FLIGHT - 1);
     system.run(&mut context).expect("pending work is retained");
     assert_eq!(
@@ -78,7 +78,7 @@ async fn preserves_projection_cause(kind: Kind) {
         Some(GlobeCameraError::InvalidFieldOfView { .. })
     ));
     assert_eq!(admission.attempts.get(), 0);
-    assert_eq!(tiles_in_flight(&context.world.tiles), 0);
+    assert_eq!(tiles_in_flight(&context.world), 0);
 }
 
 #[tokio::test]
