@@ -138,6 +138,12 @@ impl ScrollInput {
         self.frame.take().map(|scroll| scroll.zoom(sensitivity))
     }
 
+    /// Time until a held first scroll event is released as a wheel step, if one is waiting.
+    pub(super) fn next_wait(&self, now: Instant) -> Option<Duration> {
+        self.held
+            .map(|(_, at)| FIRST_EVENT_WAIT.saturating_sub(now.saturating_duration_since(at)))
+    }
+
     fn release_held(&mut self) {
         if let Some((pixels, _)) = self.held.take() {
             self.device = Some(ScrollDevice::Wheel);

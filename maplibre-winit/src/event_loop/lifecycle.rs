@@ -102,7 +102,7 @@ where
                 let config = self.config.clone().with_window(&window);
                 let map = (self.factory)(config).map_err(WinitApplicationError::CreateMap)?;
                 self.window = Arc::downgrade(map.window().handle());
-                Dispatch::new(map, self.max_frames)
+                Dispatch::new(map, self.max_frames, self.window.clone())
             }
             other => {
                 self.state = other;
@@ -159,6 +159,7 @@ where
         let state = std::mem::replace(&mut self.state, State::Dormant);
         self.state = match state {
             State::Ready(mut dispatch) => {
+                dispatch.clear_wake_timer();
                 dispatch.map.reset();
                 State::Suspended(dispatch)
             }
@@ -209,6 +210,13 @@ where
         if self.active {
             if let State::Ready(dispatch) = &mut self.state {
                 dispatch.device_event(&event);
+            }
+        }
+    }
+    fn about_to_wait(&mut self, active: &ActiveEventLoop) {
+        if self.active {
+            if let State::Ready(dispatch) = &mut self.state {
+                dispatch.poll_wake(active);
             }
         }
     }

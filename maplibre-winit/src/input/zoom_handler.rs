@@ -56,7 +56,7 @@ impl UpdateState for ZoomHandler {
         let Some(zoom_delta) = self.zoom_delta.take() else {
             let finished = self
                 .last_input
-                .is_some_and(|last| now.duration_since(last) >= GESTURE_END_DELAY);
+                .is_some_and(|last| now.saturating_duration_since(last) >= GESTURE_END_DELAY);
             if finished {
                 finish_gesture(style, view_state, world);
                 self.gesture_elevation = None;
@@ -65,6 +65,16 @@ impl UpdateState for ZoomHandler {
             }
             return;
         };
+        if (self.gesture_elevation.is_some() || self.globe_anchor.is_some())
+            && self
+                .last_input
+                .is_some_and(|last| now.saturating_duration_since(last) >= GESTURE_END_DELAY)
+        {
+            finish_gesture(style, view_state, world);
+            self.gesture_elevation = None;
+            self.globe_anchor = None;
+            self.last_input = None;
+        }
         let step = zoom_delta
             .value()
             .clamp(-MAX_ZOOM_STEP_PER_FRAME, MAX_ZOOM_STEP_PER_FRAME);
@@ -129,6 +139,23 @@ impl ZoomHandler {
 
     pub fn update_zoom(&mut self, delta: f64) {
         self.zoom_delta = Some(self.zoom_delta.unwrap_or_default() + Zoom::new(delta));
+    }
+
+    /// Shortest time until a pending scroll classification or gesture-end release needs a frame.
+    pub(super) fn next_wait(&self, now: Instant) -> Option<Duration> {
+        if self.zoom_delta.is_some() {
+            return Some(Duration::ZERO);
+        }
+        let scroll_wait = self.scroll.next_wait(now);
+        let finish_wait = self
+            .last_input
+            .map(|last| GESTURE_END_DELAY.saturating_sub(now.saturating_duration_since(last)));
+        match (scroll_wait, finish_wait) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (Some(a), None) => Some(a),
+            (None, Some(b)) => Some(b),
+            (None, None) => None,
+        }
     }
 
     /// Adds scroll input to the frame's, as GL JS's scroll zoom takes it.
