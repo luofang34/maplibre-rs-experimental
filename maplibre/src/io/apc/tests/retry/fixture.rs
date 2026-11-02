@@ -12,12 +12,9 @@ use crate::{
     coords::{WorldCoords, Zoom},
     environment::{Environment, OffscreenKernel, OffscreenKernelConfig},
     headless::{create_headless_renderer, window::HeadlessMapWindowConfig},
-    io::{
-        apc::{
-            AsyncProcedure, AsyncProcedureCall, CallError, Context, Input, IntoMessage, Message,
-            SendError,
-        },
-        scheduler::NopScheduler,
+    io::apc::{
+        AsyncProcedure, AsyncProcedureCall, CallError, Context, Input, IntoMessage, Message,
+        SendError,
     },
     kernel::{Kernel, KernelBuilder},
     platform::{http_client::ReqwestHttpClient, ReqwestOffscreenKernelEnvironment},
@@ -96,7 +93,6 @@ pub(super) struct TestEnvironment;
 impl Environment for TestEnvironment {
     type MapWindowConfig = HeadlessMapWindowConfig;
     type AsyncProcedureCall = Calls;
-    type Scheduler = NopScheduler;
     type HttpClient = ReqwestHttpClient;
     type OffscreenKernelEnvironment = ReqwestOffscreenKernelEnvironment;
 }
@@ -192,7 +188,6 @@ impl Fixture {
             KernelBuilder::new()
                 .with_map_window_config(HeadlessMapWindowConfig::new(size))
                 .with_http_client(ReqwestHttpClient::new::<String>(None))
-                .with_scheduler(NopScheduler)
                 .with_apc(Calls::default())
                 .build()
                 .expect("kernel"),

@@ -6,12 +6,9 @@ use std::{
 
 use maplibre::{
     environment::{OffscreenKernel, OffscreenKernelConfig},
-    io::{
-        apc::{
-            AsyncProcedure, AsyncProcedureCall, CallError, Context, Input, IntoMessage, Message,
-            SendError,
-        },
-        scheduler::NopScheduler,
+    io::apc::{
+        AsyncProcedure, AsyncProcedureCall, CallError, Context, Input, IntoMessage, Message,
+        SendError,
     },
     kernel::KernelBuilder,
     map::Map,
@@ -28,7 +25,7 @@ use tokio::{
 
 type Procedure = AsyncProcedure<ReqwestOffscreenKernelEnvironment, Replies>;
 pub(super) type Environment =
-    WinitEnvironment<NopScheduler, ReqwestHttpClient, ReqwestOffscreenKernelEnvironment, Calls, ()>;
+    WinitEnvironment<ReqwestHttpClient, ReqwestOffscreenKernelEnvironment, Calls, ()>;
 
 #[derive(Clone, Default)]
 pub struct Replies(Arc<Mutex<Vec<Message>>>);
@@ -123,7 +120,6 @@ pub(super) fn create_map(
     let kernel = KernelBuilder::new()
         .with_map_window_config(config)
         .with_http_client(ReqwestHttpClient::new::<String>(None))
-        .with_scheduler(NopScheduler)
         .with_apc(Calls::default())
         .build()
         .expect("map services");

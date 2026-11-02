@@ -27,7 +27,6 @@ use web::WHATWGOffscreenKernelEnvironment;
 wasm_bindgen_test_configure!(run_in_browser);
 
 type TestEnvironment = WinitEnvironment<
-    BrowserScheduler,
     <WHATWGOffscreenKernelEnvironment as OffscreenKernel>::HttpClient,
     WHATWGOffscreenKernelEnvironment,
     SchedulerAsyncProcedureCall<WHATWGOffscreenKernelEnvironment, BrowserScheduler>,
@@ -105,7 +104,6 @@ fn create_map(backend: wgpu::Backends, config: WinitMapWindowConfig<()>) -> Map<
     let kernel = KernelBuilder::new()
         .with_map_window_config(config)
         .with_http_client(Default::default())
-        .with_scheduler(BrowserScheduler)
         .with_apc(SchedulerAsyncProcedureCall::new(
             BrowserScheduler,
             OffscreenKernelConfig {

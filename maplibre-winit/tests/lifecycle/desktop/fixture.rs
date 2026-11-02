@@ -27,7 +27,6 @@ use winit::event_loop::EventLoopProxy;
 use super::Event;
 
 type Environment = WinitEnvironment<
-    TokioScheduler,
     ReqwestHttpClient,
     ReqwestOffscreenKernelEnvironment,
     SchedulerAsyncProcedureCall<ReqwestOffscreenKernelEnvironment, TokioScheduler>,
@@ -96,7 +95,6 @@ pub(super) fn create_map(
     let kernel = KernelBuilder::new()
         .with_map_window_config(config)
         .with_http_client(ReqwestHttpClient::new::<String>(None))
-        .with_scheduler(TokioScheduler::new())
         .with_apc(SchedulerAsyncProcedureCall::new(
             TokioScheduler::new(),
             OffscreenKernelConfig {

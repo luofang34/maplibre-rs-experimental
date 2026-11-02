@@ -2,10 +2,7 @@
 
 use super::*;
 use crate::{
-    io::{
-        apc::AsyncProcedureCall,
-        scheduler::{ScheduleError, Scheduler},
-    },
+    io::apc::AsyncProcedureCall,
     window::{MapWindow, MapWindowConfig},
 };
 
@@ -18,7 +15,6 @@ fn omitted_dependencies_return_the_named_configuration_error() {
     for (missing, expected) in [
         ("window", KernelBuildError::MissingWindowConfig),
         ("apc", KernelBuildError::MissingAsyncProcedureCall),
-        ("scheduler", KernelBuildError::MissingScheduler),
         ("http", KernelBuildError::MissingHttpClient),
     ] {
         let Err(error) = builder_without(missing).build() else {
@@ -60,9 +56,5 @@ async fn completed_builder_uses_the_supplied_services_and_latest_replacements() 
             .expect("source bytes"),
         b"replacement:tile"
     );
-    assert!(matches!(
-        kernel.scheduler().schedule(|| async {}),
-        Err(ScheduleError::NotImplemented)
-    ));
     assert!(kernel.apc().receive(|_| true).next().is_none());
 }

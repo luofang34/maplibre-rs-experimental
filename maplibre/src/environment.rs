@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use crate::{
     io::{
         apc::AsyncProcedureCall,
-        scheduler::Scheduler,
         source_client::{HttpClient, SourceClient},
     },
     sdf::assets::{AssetCache, ImageProviders},
@@ -22,9 +21,6 @@ pub trait Environment: 'static {
 
     /// Request/reply transport that runs procedures with the offscreen kernel.
     type AsyncProcedureCall: AsyncProcedureCall<Self::OffscreenKernelEnvironment>;
-
-    /// Executor available to systems running on the map thread.
-    type Scheduler: Scheduler;
 
     /// HTTP implementation used by this environment's source loader.
     type HttpClient: HttpClient;

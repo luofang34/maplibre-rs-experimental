@@ -21,8 +21,7 @@ pub struct HeadlessEnvironment;
 impl Environment for HeadlessEnvironment {
     type MapWindowConfig = HeadlessMapWindowConfig;
     type AsyncProcedureCall =
-        SchedulerAsyncProcedureCall<Self::OffscreenKernelEnvironment, Self::Scheduler>;
-    type Scheduler = TokioScheduler;
+        SchedulerAsyncProcedureCall<Self::OffscreenKernelEnvironment, TokioScheduler>;
     type HttpClient = crate::io::resource_loader::SharedLoader;
     type OffscreenKernelEnvironment = ReqwestOffscreenKernelEnvironment;
 }
@@ -63,6 +62,5 @@ pub(crate) fn create_kernel(
                 ..Default::default()
             },
         ))
-        .with_scheduler(TokioScheduler::new())
         .build()
 }
