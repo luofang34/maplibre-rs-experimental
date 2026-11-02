@@ -11,6 +11,9 @@ pub mod heap;
 pub mod stage;
 pub mod timings;
 
+#[cfg(test)]
+mod tests;
+
 /// Failure returned by a scheduled system; the stage stops before running later systems.
 #[derive(Error, Debug)]
 pub enum SystemError {
@@ -54,6 +57,25 @@ pub enum SystemError {
     /// A required resource is absent or has not been initialized.
     #[error("dependencies were not resolvable")]
     Dependencies,
+}
+
+impl SystemError {
+    /// Whether the map can keep rendering after a frame that failed with this error.
+    ///
+    /// Failures caused by the frame's view, a tile, a worker result or a resource that is not
+    /// ready yet clear with later frames; a broken renderer or offscreen target does not.
+    pub fn is_recoverable(&self) -> bool {
+        match self {
+            Self::Projection(_)
+            | Self::InvalidTile { .. }
+            | Self::TileRequest { .. }
+            | Self::WorkerMessage(_)
+            | Self::Dependencies => true,
+            #[cfg(feature = "headless")]
+            Self::Capture(_) | Self::Image(_) => false,
+            Self::Render(_) | Self::Setup => false,
+        }
+    }
 }
 
 /// Completion or failure of one scheduled system invocation.

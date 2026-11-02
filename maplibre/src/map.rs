@@ -23,7 +23,7 @@ use crate::{
         graph::RenderGraphError,
         view_state::{CameraOptions, NavigationError, ViewState},
     },
-    schedule::{Schedule, Stage, StageError},
+    schedule::{Schedule, StageError},
     sdf::query::{QueryError, QueryGeometry, QueryOptions, RenderedSymbol},
     style::{
         mutation::{StyleChange, StyleMutationError},
@@ -272,45 +272,6 @@ where
         }
     }
 
-    /// Runs one scheduled update when initialized, stopping on the first failing stage.
-    /// Unavailable presentation frames are skipped; a lost surface is recreated for a later frame.
-    /// Other failures retain the stage or renderer cause in [`MapError`].
-    #[tracing::instrument(name = "update_and_redraw", skip_all)]
-    pub fn run_schedule(&mut self) -> Result<(), MapError> {
-        match &mut self.map_context {
-            CurrentMapContext::Ready(map_context) => {
-                if let Err(error) = self.schedule.run(map_context) {
-                    use crate::{
-                        render::resource::{Head, SurfaceAcquireError},
-                        tcs::system::SystemError,
-                    };
-                    match error {
-                        StageError::System(SystemError::Render(RenderError::Surface(
-                            SurfaceAcquireError::Timeout
-                            | SurfaceAcquireError::Occluded
-                            | SurfaceAcquireError::Outdated,
-                        ))) => return Ok(()),
-                        StageError::System(SystemError::Render(RenderError::Surface(
-                            SurfaceAcquireError::Lost,
-                        ))) => {
-                            let renderer = &mut map_context.renderer;
-                            if let Head::Headed(surface) = renderer.resources.surface.head_mut() {
-                                surface
-                                    .recreate_surface(&self.window, &renderer.instance)
-                                    .map_err(MapError::DeviceInit)?;
-                                surface.configure(&renderer.device);
-                            }
-                            return Ok(());
-                        }
-                        error => return Err(error.into()),
-                    }
-                }
-                Ok(())
-            }
-            CurrentMapContext::Pending(_) => Err(MapError::RendererNotReady),
-        }
-    }
-
     /// Replaces the data of a GeoJSON source, before or after the renderer is initialized.
     pub fn set_geojson_data(
         &mut self,
@@ -486,6 +447,7 @@ where
 }
 
 mod camera;
+mod frame;
 mod provided_images;
 mod signals;
 mod sources;

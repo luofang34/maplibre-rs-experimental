@@ -153,5 +153,8 @@ impl<E: Environment> Plugin<E> for RenderPlugin {
                 .with_system(cleanup_system)
                 .with_system(retention_system),
         );
+        // A frame that fails part-way still clears its render phases, or the next frame
+        // draws its items twice.
+        schedule.run_after_failure(RenderStageLabel::Cleanup);
     }
 }

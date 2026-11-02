@@ -1,8 +1,6 @@
 //! Executes the [`RenderGraph`] current render graph.
 
-use std::{borrow::Cow, error::Error};
-
-use log::error;
+use std::borrow::Cow;
 
 use crate::{
     context::MapContext,
@@ -82,23 +80,8 @@ impl System for GraphRunnerSystem {
                 .measured_frame(spent, drapes);
         }
 
-        if let Err(e) = RenderGraphRunner::run(render_graph, device, queue, state, world) {
-            error!("Error running render graph:");
-            {
-                let mut src: &dyn Error = &e;
-                loop {
-                    error!("> {src}");
-                    match src.source() {
-                        Some(s) => src = s,
-                        None => break,
-                    }
-                }
-            }
-
-            // TODO: Replace panic with a graceful exit in the event loop
-            // if e.should_exit() { *control_flow = ControlFlow::Exit; }
-            panic!("Error running render graph: {e:?}");
-        }
+        RenderGraphRunner::run(render_graph, device, queue, state, world)
+            .map_err(|error| crate::render::error::RenderError::GraphRun(Box::new(error)))?;
 
         {
             let _span = tracing::info_span!("present_frames").entered();

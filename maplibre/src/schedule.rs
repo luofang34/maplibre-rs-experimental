@@ -120,12 +120,14 @@ pub trait Stage: Downcast {
 impl_downcast!(Stage);
 
 /// Owns labeled stages and runs them in insertion order against one mutable frame context.
-/// A stage error stops that run without rolling back earlier stages. Schedules can be nested
-/// because they also implement [`Stage`].
+/// A stage error skips the later stages, except those marked with
+/// [`Schedule::run_after_failure`], without rolling back earlier stages; the first error is
+/// returned. Schedules can be nested because they also implement [`Stage`].
 #[derive(Default)]
 pub struct Schedule {
     stages: HashMap<BoxedStageLabel, Box<dyn Stage>>,
     stage_order: Vec<BoxedStageLabel>,
+    after_failure: Vec<BoxedStageLabel>,
 }
 
 impl Schedule {
@@ -310,7 +312,8 @@ impl Schedule {
             .and_then(|stage| stage.downcast_mut::<T>())
     }
 
-    /// Executes stages in order until one fails; completed mutations remain in the context.
+    /// Executes stages in order; after a failure only stages marked with
+    /// [`Self::run_after_failure`] run. Completed mutations remain in the context.
     pub fn run_once(&mut self, context: &mut MapContext) -> StageResult {
         self.run_stages(context, |_| true)
     }
@@ -324,16 +327,30 @@ impl Schedule {
         let _pipeline_scope = crate::render::resource::SharedPipelines::enter(
             context.renderer.shared_pipelines.clone(),
         );
+        let mut failure = None;
         for label in &self.stage_order {
             if !include(&**label) {
                 continue;
             }
+            // After a failure only the stages that release the frame's state still run, so
+            // the next frame starts clean.
+            if failure.is_some() && !self.after_failure.contains(label) {
+                continue;
+            }
             #[cfg(feature = "trace")]
             let _stage_span = tracing::info_span!("stage", name = ?label).entered();
-            let stage = self.stages.get_mut(label).unwrap(); // TODO: Remove unwrap
+            let Some(stage) = self.stages.get_mut(label) else {
+                continue;
+            };
             let started = instant::Instant::now();
             let heap_before = live_bytes();
-            stage.run(context)?;
+            if let Err(error) = stage.run(context) {
+                if failure.is_none() {
+                    failure = Some(error);
+                } else {
+                    tracing::error!(%error, stage = ?label, "stage failed after an earlier failure");
+                }
+            }
             let spent = started.elapsed();
             let grown = live_bytes() - heap_before;
             let timings = context.world.resources.get_or_init_mut::<FrameTimings>();
@@ -351,13 +368,24 @@ impl Schedule {
             .resources
             .get_or_init_mut::<FrameTimings>()
             .end_frame();
-        Ok(())
+        failure.map_or(Ok(()), Err)
+    }
+
+    /// Marks the stage with `label` to run even when an earlier stage of the same update
+    /// failed, for stages that release per-frame state.
+    pub fn run_after_failure(&mut self, label: impl StageLabel) -> &mut Self {
+        let label: BoxedStageLabel = Box::new(label);
+        if !self.after_failure.contains(&label) {
+            self.after_failure.push(label);
+        }
+        self
     }
 
     /// Drops all stages and their labels without changing the frame context.
     pub fn clear(&mut self) {
         self.stage_order.clear();
         self.stages.clear();
+        self.after_failure.clear();
     }
 
     /// Iterates over all of schedule's stages and their labels, in execution order.

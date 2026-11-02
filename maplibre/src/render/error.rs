@@ -21,6 +21,9 @@ pub enum RenderError {
     /// A graph node or connection did not satisfy the graph's contract.
     #[error("error in render graph")]
     Graph(#[from] RenderGraphError),
+    /// A graph node failed while recording the frame; the frame was not submitted.
+    #[error("running the render graph failed")]
+    GraphRun(#[source] Box<dyn std::error::Error + Send + Sync>),
     /// The adapter could not create a device with the requested features and limits.
     #[error("error while requesting device")]
     RequestDevice(#[from] wgpu::RequestDeviceError),

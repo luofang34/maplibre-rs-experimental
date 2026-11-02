@@ -3,11 +3,7 @@
 use std::error::Error;
 
 use crate::{
-    io::{
-        apc::CallError,
-        scheduler::ScheduleError,
-        tile_backpressure::{request_budget, tiles_in_flight, MAX_TILES_IN_FLIGHT},
-    },
+    io::tile_backpressure::{request_budget, tiles_in_flight, MAX_TILES_IN_FLIGHT},
     projection::globe::camera::GlobeCameraError,
     render::projection::ProjectionStateError,
 };
@@ -34,7 +30,15 @@ async fn preserves_budget(kind: Kind) {
             .0,
         42
     );
-    assert!(result.is_err(), "admission failure reaches the caller");
+    assert!(
+        result.is_ok(),
+        "a rejected tile is logged and does not fail the frame"
+    );
+    crate::render::frame_signals::finish_frame(&mut context);
+    assert!(
+        context.needs_redraw(),
+        "a rejected tile asks for a later frame so a stationary map retries it"
+    );
 }
 
 async fn retries(kind: Kind) {
@@ -56,33 +60,6 @@ async fn retries(kind: Kind) {
         2,
         "admitted work is not requested twice"
     );
-}
-
-async fn preserves_admission_cause(kind: Kind) {
-    let (_, mut system, mut context) = setup(kind, false).await;
-    let error = system
-        .run(&mut context)
-        .expect_err("scheduler rejected work");
-    let call = error
-        .source()
-        .expect("call cause")
-        .downcast_ref::<CallError>()
-        .expect("typed call");
-    let schedule = call
-        .source()
-        .expect("schedule cause")
-        .downcast_ref::<ScheduleError>()
-        .expect("typed schedule");
-    let transport = schedule
-        .source()
-        .expect("transport cause")
-        .downcast_ref::<std::io::Error>()
-        .expect("typed transport");
-    assert_eq!(transport.kind(), std::io::ErrorKind::BrokenPipe);
-    assert_eq!(transport.to_string(), "worker unavailable");
-    assert!(error
-        .to_string()
-        .contains(&crate::coords::WorldTileCoords::default().to_string()));
 }
 
 async fn preserves_projection_cause(kind: Kind) {
@@ -127,18 +104,6 @@ async fn raster_retries_after_scheduler_recovers() {
 #[tokio::test]
 async fn dem_retries_after_scheduler_recovers() {
     retries(Kind::Dem).await;
-}
-#[tokio::test]
-async fn vector_admission_error_retains_cause() {
-    preserves_admission_cause(Kind::Vector).await;
-}
-#[tokio::test]
-async fn raster_admission_error_retains_cause() {
-    preserves_admission_cause(Kind::Raster).await;
-}
-#[tokio::test]
-async fn dem_admission_error_retains_cause() {
-    preserves_admission_cause(Kind::Dem).await;
 }
 #[tokio::test]
 async fn vector_projection_error_retains_cause() {

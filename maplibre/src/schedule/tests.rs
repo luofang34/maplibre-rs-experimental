@@ -74,3 +74,54 @@ async fn composed_stages_propagate_failure_without_running_later_stages() {
     );
     assert_eq!(context.world.resources.get::<Vec<u8>>(), Some(&vec![1, 2]));
 }
+
+#[tokio::test]
+async fn a_failed_stage_still_runs_cleanup_stages_and_finishes_the_frame() {
+    let mut context = context().await;
+    let mut schedule = crate::schedule::Schedule::default();
+    schedule
+        .add_stage("first", Record::<1>)
+        .add_stage("failing", Record::<2>)
+        .add_stage("skipped", Record::<3>)
+        .add_stage("cleanup", Record::<4>)
+        .run_after_failure("cleanup");
+
+    let error = schedule
+        .run_once(&mut context)
+        .expect_err("second stage fails");
+
+    assert!(matches!(
+        error,
+        StageError::System(SystemError::InvalidTile { .. })
+    ));
+    assert_eq!(
+        context.world.resources.get::<Vec<u8>>(),
+        Some(&vec![1, 2, 4])
+    );
+    let finished = context.last_frame_stats();
+    assert_eq!(finished.frame, 1);
+    assert_eq!(finished.stages.len(), 3);
+}
+
+#[tokio::test]
+async fn the_frame_after_a_failure_starts_from_the_first_stage() {
+    let mut context = context().await;
+    let mut schedule = crate::schedule::Schedule::default();
+    schedule
+        .add_stage("first", Record::<1>)
+        .add_stage("failing", Record::<2>)
+        .add_stage("cleanup", Record::<4>)
+        .run_after_failure("cleanup");
+
+    schedule
+        .run_once(&mut context)
+        .expect_err("first frame fails");
+    schedule
+        .run_once(&mut context)
+        .expect_err("second frame fails");
+
+    assert_eq!(
+        context.world.resources.get::<Vec<u8>>(),
+        Some(&vec![1, 2, 4, 1, 2, 4])
+    );
+}
