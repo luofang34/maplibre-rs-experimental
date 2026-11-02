@@ -49,7 +49,7 @@ use crate::{
     environment::Environment,
     kernel::Kernel,
     plugin::Plugin,
-    render::{draw_graph, eventually::Eventually, graph::RenderGraph, RenderStageLabel},
+    render::{draw_graph, eventually::Eventually, RenderStageLabel},
     schedule::Schedule,
     tcs::world::World,
 };
@@ -170,8 +170,8 @@ impl<E: Environment> Plugin<E> for OverlayPlugin {
         schedule: &mut Schedule,
         _kernel: Rc<Kernel<E>>,
         world: &mut World,
-        graph: &mut RenderGraph,
-    ) {
+        renderer: &mut crate::render::Renderer,
+    ) -> Result<(), crate::plugin::PluginError> {
         world.resources.init::<HostOverlay>();
         world
             .resources
@@ -179,8 +179,8 @@ impl<E: Environment> Plugin<E> for OverlayPlugin {
         world
             .resources
             .insert(Eventually::<probes::ProbeGpu>::Uninitialized);
-        schedule.add_system_to_stage(RenderStageLabel::Prepare, pipeline::prepare_system);
-        schedule.add_system_to_stage(RenderStageLabel::Prepare, probes::prepare_system);
+        schedule.add_system_to_stage(RenderStageLabel::Prepare, pipeline::prepare_system)?;
+        schedule.add_system_to_stage(RenderStageLabel::Prepare, probes::prepare_system)?;
         if let Some(callbacks) = world
             .resources
             .get_mut::<crate::render::AfterSubmitCallbacks>()
@@ -206,7 +206,7 @@ impl<E: Environment> Plugin<E> for OverlayPlugin {
             world.resources.insert(callbacks);
         }
 
-        let draw_graph = &mut *graph;
+        let draw_graph = &mut renderer.render_graph;
         let edges = [
             draw_graph.add_node(OVERLAY_PASS, pass::OverlayPassNode),
             draw_graph.add_node(DEPTH_PROBE_PASS, probes::DepthProbePassNode),
@@ -215,12 +215,8 @@ impl<E: Environment> Plugin<E> for OverlayPlugin {
             draw_graph.add_node_edge(DEPTH_PROBE_PASS, draw_graph::node::TRANSLUCENT_PASS),
         ];
         for edge in edges {
-            if let Err(error) = edge {
-                tracing::error!(
-                    ?error,
-                    "unable to order the overlay pass before the symbols"
-                );
-            }
+            edge?;
         }
+        Ok(())
     }
 }

@@ -13,7 +13,7 @@ use crate::{
     environment::Environment,
     kernel::Kernel,
     plugin::Plugin,
-    render::{draw_graph, eventually::Eventually, graph::RenderGraph, RenderStageLabel},
+    render::{draw_graph, eventually::Eventually, RenderStageLabel},
     schedule::Schedule,
     tcs::world::World,
 };
@@ -39,28 +39,25 @@ impl<E: Environment> Plugin<E> for HeatmapPlugin {
         schedule: &mut Schedule,
         _kernel: Rc<Kernel<E>>,
         world: &mut World,
-        graph: &mut RenderGraph,
-    ) {
+        renderer: &mut crate::render::Renderer,
+    ) -> Result<(), crate::plugin::PluginError> {
         world
             .resources
             .insert(Eventually::<HeatmapResources>::Uninitialized);
         world.resources.init::<HeatmapDensityPhase>();
-        schedule.add_system_to_stage(RenderStageLabel::Prepare, resource_system::resource_system);
-        schedule.add_system_to_stage(RenderStageLabel::Prepare, prepare_system::prepare_system);
-        schedule.add_system_to_stage(RenderStageLabel::Queue, queue_system::queue_system);
+        schedule
+            .add_system_to_stage(RenderStageLabel::Prepare, resource_system::resource_system)?;
+        schedule.add_system_to_stage(RenderStageLabel::Prepare, prepare_system::prepare_system)?;
+        schedule.add_system_to_stage(RenderStageLabel::Queue, queue_system::queue_system)?;
 
-        let draw_graph = &mut *graph;
+        let draw_graph = &mut renderer.render_graph;
         let edges = [
             draw_graph.add_node(density_pass::DENSITY_PASS, density_pass::DensityPassNode),
             draw_graph.add_node_edge(density_pass::DENSITY_PASS, draw_graph::node::MAIN_PASS),
         ];
         for edge in edges {
-            if let Err(error) = edge {
-                tracing::error!(
-                    ?error,
-                    "unable to order the density pass before the main pass"
-                );
-            }
+            edge?;
         }
+        Ok(())
     }
 }

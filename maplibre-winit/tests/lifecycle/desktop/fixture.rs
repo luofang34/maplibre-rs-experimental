@@ -132,8 +132,8 @@ impl Plugin<Environment> for PresentPlugin {
         schedule: &mut Schedule,
         _: Rc<Kernel<Environment>>,
         _: &mut World,
-        _: &mut RenderGraph,
-    ) {
+        _: &mut maplibre::render::Renderer,
+    ) -> Result<(), maplibre::plugin::PluginError> {
         let generation = self.generation.get().wrapping_add(1);
         self.generation.set(generation);
         schedule.add_stage(
@@ -142,7 +142,8 @@ impl Plugin<Environment> for PresentPlugin {
                 proxy: self.proxy.clone(),
                 generation,
             },
-        );
+        )?;
+        Ok(())
     }
 }
 struct Present {

@@ -12,7 +12,6 @@ use crate::{
     plugin::Plugin,
     render::{
         eventually::Eventually,
-        graph::RenderGraph,
         shaders::{SDFShaderFeatureMetadata, ShaderLayerMetadata, ShaderSymbolVertex},
         RenderStageLabel,
     },
@@ -81,8 +80,8 @@ impl<E: Environment, T: VectorTransferables> Plugin<E> for SdfPlugin<T> {
         schedule: &mut Schedule,
         kernel: Rc<Kernel<E>>,
         world: &mut World,
-        _graph: &mut RenderGraph,
-    ) {
+        _renderer: &mut crate::render::Renderer,
+    ) -> Result<(), crate::plugin::PluginError> {
         let resources = &mut world.resources;
 
         resources.insert(Eventually::<SymbolPipeline>::Uninitialized);
@@ -95,16 +94,18 @@ impl<E: Environment, T: VectorTransferables> Plugin<E> for SdfPlugin<T> {
             SystemContainer::new(populate_world_system::PopulateWorldSystem::<E, T>::new(
                 &kernel,
             )),
-        );
+        )?;
 
-        schedule.add_system_to_stage(RenderStageLabel::Prepare, resource_system::resource_system);
-        schedule.add_system_to_stage(RenderStageLabel::Queue, upload_system::upload_system);
-        schedule.add_system_to_stage(RenderStageLabel::Queue, queue_system::queue_system);
+        schedule
+            .add_system_to_stage(RenderStageLabel::Prepare, resource_system::resource_system)?;
+        schedule.add_system_to_stage(RenderStageLabel::Queue, upload_system::upload_system)?;
+        schedule.add_system_to_stage(RenderStageLabel::Queue, queue_system::queue_system)?;
 
         schedule.add_system_to_stage(
             RenderStageLabel::PhaseSort,
             SystemContainer::new(collision_system::CollisionSystem::new()),
-        );
+        )?;
+        Ok(())
     }
 }
 

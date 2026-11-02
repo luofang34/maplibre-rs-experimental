@@ -14,7 +14,6 @@ use crate::{
     plugin::Plugin,
     render::{
         eventually::Eventually,
-        graph::RenderGraph,
         render_phase::{Draw, PhaseItem, RenderPhase},
         tile_view_pattern::TileShape,
         RenderStageLabel,
@@ -75,11 +74,11 @@ impl<E: Environment> Plugin<E> for DebugPlugin {
         schedule: &mut Schedule,
         _kernel: Rc<Kernel<E>>,
         world: &mut World,
-        graph: &mut RenderGraph,
-    ) {
+        renderer: &mut crate::render::Renderer,
+    ) -> Result<(), crate::plugin::PluginError> {
         let resources = &mut world.resources;
 
-        let draw_graph = &mut *graph;
+        let draw_graph = &mut renderer.render_graph;
         let edges = [
             draw_graph.add_node(draw_graph::node::DEBUG_PASS, DebugPassNode::new()),
             draw_graph.add_node_edge(
@@ -88,19 +87,18 @@ impl<E: Environment> Plugin<E> for DebugPlugin {
             ),
         ];
         for edge in edges {
-            if let Err(error) = edge {
-                tracing::error!(%error, "the debug pass cannot be ordered after the translucent pass");
-            }
+            edge?;
         }
 
         resources.init::<RenderPhase<TileDebugItem>>();
         resources.insert(Eventually::<DebugPipeline>::Uninitialized);
 
-        schedule.add_system_to_stage(RenderStageLabel::Prepare, resource_system);
-        schedule.add_system_to_stage(RenderStageLabel::Queue, queue_system);
-        schedule.add_system_to_stage(RenderStageLabel::Cleanup, cleanup_system);
+        schedule.add_system_to_stage(RenderStageLabel::Prepare, resource_system)?;
+        schedule.add_system_to_stage(RenderStageLabel::Queue, queue_system)?;
+        schedule.add_system_to_stage(RenderStageLabel::Cleanup, cleanup_system)?;
 
         resources.insert(FPSMeter::new());
-        schedule.add_system_to_stage(RenderStageLabel::Cleanup, fps_system);
+        schedule.add_system_to_stage(RenderStageLabel::Cleanup, fps_system)?;
+        Ok(())
     }
 }

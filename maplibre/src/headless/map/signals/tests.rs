@@ -164,7 +164,8 @@ async fn a_stage_is_charged_the_time_its_systems_take() {
         (RenderStageLabel::Render, "Render"),
     ] {
         map.schedule
-            .add_system_to_stage(label, spend_twenty_milliseconds);
+            .add_system_to_stage(label, spend_twenty_milliseconds)
+            .expect("schedule");
         slowed.push(name);
         let started = std::time::Instant::now();
         map.run_frame().expect("slow frame");

@@ -33,6 +33,20 @@ pub enum StageError {
     System(#[from] SystemError),
 }
 
+/// A stage could not be added, found or extended.
+#[derive(Error, Debug, Clone, PartialEq, Eq)]
+pub enum ScheduleError {
+    /// A stage with this label already exists.
+    #[error("stage {0} already exists")]
+    DuplicateStage(String),
+    /// No stage has this label.
+    #[error("stage {0} does not exist")]
+    MissingStage(String),
+    /// Systems can only be added to a `SystemStage`, and this stage is absent or another kind.
+    #[error("stage {0} does not exist or does not run systems")]
+    NotASystemStage(String),
+}
+
 /// Completion status of a stage; an error prevents subsequent stages from running.
 pub type StageResult = Result<(), StageError>;
 
@@ -82,29 +96,23 @@ impl Schedule {
     /// # use maplibre::schedule::{Schedule, NopStage};
     /// #
     /// # let mut schedule = Schedule::default();
-    /// schedule.add_stage("my_stage", NopStage);
+    /// schedule.add_stage("my_stage", NopStage)?;
+    /// # Ok::<(), maplibre::schedule::ScheduleError>(())
     /// ```
-    ///
-    /// # Panics
-    /// Panics if the label is already registered.
-    pub fn add_stage<S: Stage>(&mut self, label: impl StageLabel, stage: S) -> &mut Self {
-        let label: BoxedStageLabel = Box::new(label);
-        assert!(
-            self.position(&*label).is_none(),
-            "Stage already exists: {label:?}."
-        );
-        self.entries.push(Entry::new(label, Box::new(stage)));
-        self
+    pub fn add_stage<S: Stage>(
+        &mut self,
+        label: impl StageLabel,
+        stage: S,
+    ) -> Result<&mut Self, ScheduleError> {
+        let index = self.entries.len();
+        self.insert(index, Box::new(label), Box::new(stage))
     }
 
     /// Drops the stage with `label` and removes it from the execution order.
-    ///
-    /// # Panics
-    /// Panics if the label is absent.
-    pub fn remove_stage(&mut self, label: impl StageLabel) -> &mut Self {
-        let index = self.position(&label).expect("stage not found");
+    pub fn remove_stage(&mut self, label: impl StageLabel) -> Result<&mut Self, ScheduleError> {
+        let index = self.existing(&label)?;
         self.entries.remove(index);
-        self
+        Ok(self)
     }
 
     /// Adds the given `stage` immediately after the `target` stage.
@@ -115,29 +123,18 @@ impl Schedule {
     /// # use maplibre::schedule::{Schedule, NopStage};
     /// #
     /// # let mut schedule = Schedule::default();
-    /// # schedule.add_stage("target_stage", NopStage);
-    /// schedule.add_stage_after("target_stage", "my_stage", NopStage);
+    /// # schedule.add_stage("target_stage", NopStage)?;
+    /// schedule.add_stage_after("target_stage", "my_stage", NopStage)?;
+    /// # Ok::<(), maplibre::schedule::ScheduleError>(())
     /// ```
-    ///
-    /// # Panics
-    /// Panics if the target is absent or the new label is already registered.
     pub fn add_stage_after<S: Stage>(
         &mut self,
         target: impl StageLabel,
         label: impl StageLabel,
         stage: S,
-    ) -> &mut Self {
-        let label: BoxedStageLabel = Box::new(label);
-        let target_index = self
-            .position(&target)
-            .unwrap_or_else(|| panic!("Target stage does not exist: {target:?}."));
-        assert!(
-            self.position(&*label).is_none(),
-            "Stage already exists: {label:?}."
-        );
-        self.entries
-            .insert(target_index + 1, Entry::new(label, Box::new(stage)));
-        self
+    ) -> Result<&mut Self, ScheduleError> {
+        let index = self.existing(&target)? + 1;
+        self.insert(index, Box::new(label), Box::new(stage))
     }
 
     /// Adds the given `stage` immediately before the `target` stage.
@@ -148,66 +145,36 @@ impl Schedule {
     /// # use maplibre::schedule::{Schedule, NopStage};
     /// #
     /// # let mut schedule = Schedule::default();
-    /// # schedule.add_stage("target_stage", NopStage);
-    /// #
-    /// schedule.add_stage_before("target_stage", "my_stage", NopStage);
+    /// # schedule.add_stage("target_stage", NopStage)?;
+    /// schedule.add_stage_before("target_stage", "my_stage", NopStage)?;
+    /// # Ok::<(), maplibre::schedule::ScheduleError>(())
     /// ```
-    ///
-    /// # Panics
-    /// Panics if the target is absent or the new label is already registered.
     pub fn add_stage_before<S: Stage>(
         &mut self,
         target: impl StageLabel,
         label: impl StageLabel,
         stage: S,
-    ) -> &mut Self {
-        let label: BoxedStageLabel = Box::new(label);
-        let target_index = self
-            .position(&target)
-            .unwrap_or_else(|| panic!("Target stage does not exist: {target:?}."));
-        assert!(
-            self.position(&*label).is_none(),
-            "Stage already exists: {label:?}."
-        );
-        self.entries
-            .insert(target_index, Entry::new(label, Box::new(stage)));
-        self
+    ) -> Result<&mut Self, ScheduleError> {
+        let index = self.existing(&target)?;
+        self.insert(index, Box::new(label), Box::new(stage))
     }
 
-    /// Fetches the [`Stage`] of type `T` marked with `label`, then executes the provided
-    /// `func` passing the fetched stage to it as an argument.
-    ///
-    /// The `func` argument should be a function or a closure that accepts a mutable reference
-    /// to a struct implementing `Stage` and returns the same type. That means that it should
-    /// also assume that the stage has already been fetched successfully.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// # use maplibre::schedule::{Schedule, NopStage};
-    /// # let mut schedule = Schedule::default();
-    ///
-    /// # schedule.add_stage("my_stage", NopStage);
-    /// #
-    /// schedule.stage("my_stage", |stage: &mut NopStage| {
-    ///     // modify stage
-    ///     stage
-    /// });
-    /// ```
-    ///
-    /// # Panics
-    ///
-    /// Panics if `label` refers to a non-existing stage, or if it's not of type `T`.
-    pub fn stage<T: Stage, F: FnOnce(&mut T) -> &mut T>(
+    fn insert(
         &mut self,
-        label: impl StageLabel,
-        func: F,
-    ) -> &mut Self {
-        let stage = self.get_stage_mut::<T>(&label).unwrap_or_else(move || {
-            panic!("stage '{label:?}' does not exist or is the wrong type")
-        });
-        func(stage);
-        self
+        index: usize,
+        label: BoxedStageLabel,
+        stage: Box<dyn Stage>,
+    ) -> Result<&mut Self, ScheduleError> {
+        if self.position(&*label).is_some() {
+            return Err(ScheduleError::DuplicateStage(format!("{label:?}")));
+        }
+        self.entries.insert(index, Entry::new(label, stage));
+        Ok(self)
+    }
+
+    fn existing(&self, label: &dyn StageLabel) -> Result<usize, ScheduleError> {
+        self.position(label)
+            .ok_or_else(|| ScheduleError::MissingStage(format!("{label:?}")))
     }
 
     /// Returns a shared reference to the stage identified by `label`, if it exists.
@@ -220,7 +187,7 @@ impl Schedule {
     /// # use maplibre::schedule::{Schedule, NopStage};
     /// #
     /// # let mut schedule = Schedule::default();
-    /// # schedule.add_stage("my_stage", NopStage);
+    /// # schedule.add_stage("my_stage", NopStage).expect("new stage");
     /// #
     /// let stage = schedule.get_stage::<NopStage>(&"my_stage").unwrap();
     /// ```
@@ -241,7 +208,7 @@ impl Schedule {
     /// # use maplibre::schedule::{Schedule, NopStage};
     /// #
     /// # let mut schedule = Schedule::default();
-    /// # schedule.add_stage("my_stage", NopStage);
+    /// # schedule.add_stage("my_stage", NopStage).expect("new stage");
     /// #
     /// let stage = schedule.get_stage_mut::<NopStage>(&"my_stage").unwrap();
     /// ```
@@ -297,11 +264,13 @@ impl Schedule {
 
     /// Marks the stage with `label` to run even when an earlier stage of the same update
     /// failed, for stages that release per-frame state.
-    pub fn run_after_failure(&mut self, label: impl StageLabel) -> &mut Self {
-        if let Some(index) = self.position(&label) {
-            self.entries[index].after_failure = true;
-        }
-        self
+    pub fn run_after_failure(
+        &mut self,
+        label: impl StageLabel,
+    ) -> Result<&mut Self, ScheduleError> {
+        let index = self.existing(&label)?;
+        self.entries[index].after_failure = true;
+        Ok(self)
     }
 
     /// Drops all stages and their labels without changing the frame context.
@@ -327,26 +296,23 @@ impl Schedule {
     /// # use maplibre::tcs::system::SystemError;
     /// #
     /// # let mut schedule = Schedule::default();
-    /// # schedule.add_stage("my_stage", SystemStage::default());
+    /// # schedule.add_stage("my_stage", SystemStage::default())?;
     /// # fn my_system(context: &mut MapContext) -> Result<(), SystemError> { Ok(()) }
     /// #
-    /// schedule.add_system_to_stage("my_stage", my_system);
+    /// schedule.add_system_to_stage("my_stage", my_system)?;
+    /// # Ok::<(), maplibre::schedule::ScheduleError>(())
     /// ```
     ///
-    /// # Panics
-    /// Panics if the label is absent or names a stage other than `SystemStage`.
     pub fn add_system_to_stage(
         &mut self,
         stage_label: impl StageLabel,
         system: impl IntoSystemContainer,
-    ) -> &mut Self {
+    ) -> Result<&mut Self, ScheduleError> {
         let stage = self
             .get_stage_mut::<SystemStage>(&stage_label)
-            .unwrap_or_else(move || {
-                panic!("Stage '{stage_label:?}' does not exist or is not a SystemStage")
-            });
+            .ok_or_else(|| ScheduleError::NotASystemStage(format!("{stage_label:?}")))?;
         stage.add_system(system);
-        self
+        Ok(self)
     }
 }
 

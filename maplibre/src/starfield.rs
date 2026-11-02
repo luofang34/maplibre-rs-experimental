@@ -39,8 +39,8 @@ impl<E: Environment> Plugin<E> for StarfieldPlugin {
         schedule: &mut crate::schedule::Schedule,
         _kernel: std::rc::Rc<crate::kernel::Kernel<E>>,
         world: &mut World,
-        graph: &mut crate::render::graph::RenderGraph,
-    ) {
+        renderer: &mut crate::render::Renderer,
+    ) -> Result<(), crate::plugin::PluginError> {
         world
             .resources
             .insert(Eventually::<StarfieldPipeline>::Uninitialized);
@@ -53,12 +53,12 @@ impl<E: Environment> Plugin<E> for StarfieldPlugin {
         world
             .resources
             .insert(Eventually::<moon::MoonPipeline>::Uninitialized);
-        schedule.add_system_to_stage(RenderStageLabel::Prepare, pipeline::resource_system);
-        schedule.add_system_to_stage(RenderStageLabel::Prepare, sun::resource_system);
-        schedule.add_system_to_stage(RenderStageLabel::Prepare, moon::resource_system);
-        schedule.add_system_to_stage(RenderStageLabel::Queue, upload::queue_system);
-        schedule.add_system_to_stage(RenderStageLabel::Queue, sun::queue_system);
-        schedule.add_system_to_stage(RenderStageLabel::Queue, moon::queue_system);
+        schedule.add_system_to_stage(RenderStageLabel::Prepare, pipeline::resource_system)?;
+        schedule.add_system_to_stage(RenderStageLabel::Prepare, sun::resource_system)?;
+        schedule.add_system_to_stage(RenderStageLabel::Prepare, moon::resource_system)?;
+        schedule.add_system_to_stage(RenderStageLabel::Queue, upload::queue_system)?;
+        schedule.add_system_to_stage(RenderStageLabel::Queue, sun::queue_system)?;
+        schedule.add_system_to_stage(RenderStageLabel::Queue, moon::queue_system)?;
         if let Some(hooks) = world.resources.get_mut::<crate::render::PassDrawHooks>() {
             hooks.register(crate::render::PassHookPoint::MainPassBegin, draw);
             hooks.register(
@@ -82,15 +82,18 @@ impl<E: Environment> Plugin<E> for StarfieldPlugin {
             );
             world.resources.insert(hooks);
         }
-        add_sun_depth_copy(graph);
+        add_sun_depth_copy(&mut renderer.render_graph)?;
+        Ok(())
     }
 }
 
 /// Puts the sun's depth copy between the main and translucent passes, after everything the
 /// main pass draws and before the sun is drawn.
-fn add_sun_depth_copy(graph: &mut crate::render::graph::RenderGraph) {
+fn add_sun_depth_copy(
+    graph: &mut crate::render::graph::RenderGraph,
+) -> Result<(), crate::render::graph::RenderGraphError> {
     use crate::render::draw_graph;
-    let draw_graph = &mut *graph;
+    let draw_graph = graph;
     let edges = [
         draw_graph.add_node(sun::depth::SUN_DEPTH_COPY, sun::depth::SunDepthCopyNode),
         draw_graph.add_node_edge(draw_graph::node::SCENE_3D_PASS, sun::depth::SUN_DEPTH_COPY),
@@ -99,11 +102,7 @@ fn add_sun_depth_copy(graph: &mut crate::render::graph::RenderGraph) {
             draw_graph::node::TRANSLUCENT_PASS,
         ),
     ];
-    for edge in edges {
-        if let Err(error) = edge {
-            tracing::error!(?error, "the sun's depth copy cannot be ordered");
-        }
-    }
+    edges.into_iter().collect()
 }
 
 /// Draws the stars queued for this frame, if any; the main pass calls it before any layer.

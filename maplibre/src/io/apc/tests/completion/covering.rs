@@ -9,7 +9,7 @@ use crate::{
     io::apc::SchedulerContext,
     kernel::Kernel,
     plugin::Plugin,
-    render::{graph::RenderGraph, RenderStageLabel},
+    render::RenderStageLabel,
     schedule::Schedule,
     sdf::SymbolLayersDataComponent,
     tcs::system::{stage::SystemStage, System},
@@ -31,14 +31,18 @@ async fn setup_covering() -> (
         RenderStageLabel::Prepare,
         RenderStageLabel::Queue,
     ] {
-        schedule.add_stage(stage, SystemStage::default());
+        schedule
+            .add_stage(stage, SystemStage::default())
+            .expect("schedule");
     }
-    VectorPlugin::<DefaultVectorTransferables>::default().build(
-        &mut schedule,
-        kernel.clone(),
-        &mut context.world,
-        &mut RenderGraph::default(),
-    );
+    VectorPlugin::<DefaultVectorTransferables>::default()
+        .build(
+            &mut schedule,
+            kernel.clone(),
+            &mut context.world,
+            &mut context.renderer,
+        )
+        .expect("vector plugin");
     let parent = WorldTileCoords::default();
     let child = WorldTileCoords {
         x: 0,

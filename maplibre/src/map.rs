@@ -20,7 +20,6 @@ use crate::{
         builder::RendererBuilder,
         camera::DEFAULT_MAX_PITCH,
         error::RenderError,
-        graph::RenderGraphError,
         view_state::{CameraOptions, NavigationError, ViewState},
     },
     schedule::{Schedule, StageError},
@@ -43,9 +42,9 @@ pub enum MapError {
     /// The requested operation requires an initialized renderer.
     #[error("renderer is not fully initialized")]
     RendererNotReady,
-    /// Render graph construction violated a node or connection contract.
-    #[error("initializing render graph failed")]
-    RenderGraphInit(#[source] RenderGraphError),
+    /// A plugin could not install its systems, render passes or GPU resources.
+    #[error("installing a plugin failed")]
+    Plugin(#[source] crate::plugin::PluginError),
     /// Renderer initialization or presentation surface recovery failed.
     #[error("initializing device failed")]
     DeviceInit(#[source] RenderError),
@@ -216,12 +215,16 @@ where
                 crate::celestial::set_sun_direction(&mut world, self.sun);
 
                 for plugin in &self.plugins {
-                    plugin.build(
+                    if let Err(error) = plugin.build(
                         &mut self.schedule,
                         self.kernel.clone(),
                         &mut world,
-                        &mut renderer.render_graph,
-                    );
+                        &mut renderer,
+                    ) {
+                        // A later attempt starts from an empty schedule.
+                        self.schedule.clear();
+                        return Err(MapError::Plugin(error));
+                    }
                 }
 
                 self.map_context = CurrentMapContext::Ready(Box::new(MapContext {

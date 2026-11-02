@@ -10,7 +10,6 @@ use crate::{
     render::{
         draw_graph,
         eventually::Eventually,
-        graph::RenderGraph,
         render_phase::{LayerItem, TileMaskItem},
         RenderStageLabel,
     },
@@ -131,8 +130,8 @@ impl<E: Environment, T: DemTransferables> Plugin<E> for TerrainPlugin<T> {
         schedule: &mut Schedule,
         kernel: Rc<Kernel<E>>,
         world: &mut World,
-        graph: &mut RenderGraph,
-    ) {
+        renderer: &mut crate::render::Renderer,
+    ) -> Result<(), crate::plugin::PluginError> {
         world
             .resources
             .insert(Eventually::<TerrainResources>::Uninitialized);
@@ -143,28 +142,29 @@ impl<E: Environment, T: DemTransferables> Plugin<E> for TerrainPlugin<T> {
         schedule.add_system_to_stage(
             RenderStageLabel::Request,
             SystemContainer::new(RequestSystem::<E, T>::new(&kernel)),
-        );
+        )?;
         schedule.add_system_to_stage(
             RenderStageLabel::Request,
             SystemContainer::new(PopulateWorldSystem::<E, T>::new(&kernel)),
-        );
+        )?;
         // Prepare rather than Request: headless rendering drops the Request stage, and the
         // elevation must be known before the Queue stage builds the view pattern. The index
         // runs first so the center elevation samples this frame's tiles.
-        schedule.add_system_to_stage(RenderStageLabel::Prepare, coverage::coverage_system);
+        schedule.add_system_to_stage(RenderStageLabel::Prepare, coverage::coverage_system)?;
         schedule.add_system_to_stage(
             RenderStageLabel::Prepare,
             elevation::center_elevation_system,
-        );
-        schedule.add_system_to_stage(RenderStageLabel::Prepare, resource_system::resource_system);
-        schedule.add_system_to_stage(RenderStageLabel::Queue, upload_system::upload_system);
-        schedule.add_system_to_stage(RenderStageLabel::Queue, queue_system::queue_system);
+        )?;
+        schedule
+            .add_system_to_stage(RenderStageLabel::Prepare, resource_system::resource_system)?;
+        schedule.add_system_to_stage(RenderStageLabel::Queue, upload_system::upload_system)?;
+        schedule.add_system_to_stage(RenderStageLabel::Queue, queue_system::queue_system)?;
         // Before the Render stage, so the last measurement is read before this frame's drape
         // passes start the next one.
         schedule.add_system_to_stage(
             RenderStageLabel::PhaseSort,
             drape_timing::drape_timer_system,
-        );
+        )?;
         world
             .resources
             .get_or_init_mut::<crate::render::BeforeSubmitHooks>()
@@ -174,18 +174,14 @@ impl<E: Environment, T: DemTransferables> Plugin<E> for TerrainPlugin<T> {
             .get_or_init_mut::<crate::render::AfterSubmitCallbacks>()
             .register(drape_timing::map_after_submit);
 
-        let draw_graph = &mut *graph;
+        let draw_graph = &mut renderer.render_graph;
         let edges = [
             draw_graph.add_node(DRAPE_PASS, DrapePassNode),
             draw_graph.add_node_edge(DRAPE_PASS, draw_graph::node::MAIN_PASS),
         ];
         for edge in edges {
-            if let Err(error) = edge {
-                tracing::error!(
-                    ?error,
-                    "unable to order the drape pass before the main pass"
-                );
-            }
+            edge?;
         }
+        Ok(())
     }
 }

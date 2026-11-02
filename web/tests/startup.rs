@@ -49,8 +49,9 @@ impl maplibre::plugin::Plugin<web::CurrentEnvironment> for Inert {
         _: &mut maplibre::schedule::Schedule,
         _: std::rc::Rc<maplibre::kernel::Kernel<web::CurrentEnvironment>>,
         _: &mut maplibre::tcs::world::World,
-        _: &mut maplibre::render::graph::RenderGraph,
-    ) {
+        _: &mut maplibre::render::Renderer,
+    ) -> Result<(), maplibre::plugin::PluginError> {
+        Ok(())
     }
 }
 

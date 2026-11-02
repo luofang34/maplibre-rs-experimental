@@ -29,8 +29,8 @@ impl<E: Environment> Plugin<E> for BackgroundPlugin {
         schedule: &mut crate::schedule::Schedule,
         _kernel: std::rc::Rc<crate::kernel::Kernel<E>>,
         world: &mut crate::tcs::world::World,
-        _graph: &mut crate::render::graph::RenderGraph,
-    ) {
+        renderer: &mut crate::render::Renderer,
+    ) -> Result<(), crate::plugin::PluginError> {
         world.resources.insert(
             crate::render::eventually::Eventually::<
                 crate::background::resource_system::BackgroundRenderPipeline,
@@ -63,22 +63,23 @@ impl<E: Environment> Plugin<E> for BackgroundPlugin {
         schedule.add_system_to_stage(
             crate::render::RenderStageLabel::Queue,
             queue_system::queue_system,
-        );
+        )?;
         #[cfg(feature = "experimental")]
         {
             schedule.add_system_to_stage(
                 crate::render::RenderStageLabel::Queue,
                 daylight::queue_system,
-            );
+            )?;
             schedule.add_system_to_stage(
                 crate::render::RenderStageLabel::Prepare,
                 daylight::resource_system,
-            );
-            daylight::add_to_graph(_graph);
+            )?;
+            daylight::add_to_graph(&mut renderer.render_graph)?;
         }
         schedule.add_system_to_stage(
             crate::render::RenderStageLabel::Prepare,
             crate::background::resource_system::resource_system,
-        );
+        )?;
+        Ok(())
     }
 }

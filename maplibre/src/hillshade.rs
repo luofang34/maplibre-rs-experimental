@@ -12,7 +12,7 @@ use crate::{
     environment::Environment,
     kernel::Kernel,
     plugin::Plugin,
-    render::{eventually::Eventually, graph::RenderGraph, RenderStageLabel},
+    render::{eventually::Eventually, RenderStageLabel},
     schedule::Schedule,
     tcs::world::World,
 };
@@ -36,14 +36,16 @@ impl<E: Environment> Plugin<E> for HillshadePlugin {
         schedule: &mut Schedule,
         _kernel: Rc<Kernel<E>>,
         world: &mut World,
-        _graph: &mut RenderGraph,
-    ) {
+        _renderer: &mut crate::render::Renderer,
+    ) -> Result<(), crate::plugin::PluginError> {
         world
             .resources
             .insert(Eventually::<HillshadeResources>::Uninitialized);
-        schedule.add_system_to_stage(RenderStageLabel::Prepare, resource_system::resource_system);
-        schedule.add_system_to_stage(RenderStageLabel::Prepare, prepare_system::prepare_system);
-        schedule.add_system_to_stage(RenderStageLabel::Queue, queue_system::queue_system);
+        schedule
+            .add_system_to_stage(RenderStageLabel::Prepare, resource_system::resource_system)?;
+        schedule.add_system_to_stage(RenderStageLabel::Prepare, prepare_system::prepare_system)?;
+        schedule.add_system_to_stage(RenderStageLabel::Queue, queue_system::queue_system)?;
+        Ok(())
     }
 }
 

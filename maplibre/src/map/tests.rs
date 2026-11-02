@@ -3,12 +3,20 @@
 use std::error::Error;
 
 use super::*;
+use crate::render::graph::RenderGraphError;
 
 #[test]
-fn graph_initialization_error_exposes_its_original_cause() {
-    let error = MapError::RenderGraphInit(RenderGraphError::InvalidNode("missing".into()));
+fn plugin_error_exposes_its_original_cause() {
+    let error = MapError::Plugin(crate::plugin::PluginError::Graph(
+        RenderGraphError::InvalidNode("missing".into()),
+    ));
+    let plugin = error
+        .source()
+        .expect("plugin cause")
+        .downcast_ref::<crate::plugin::PluginError>()
+        .expect("typed plugin error");
     assert!(matches!(
-        error
+        plugin
             .source()
             .expect("graph cause")
             .downcast_ref::<RenderGraphError>(),

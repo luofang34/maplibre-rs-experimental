@@ -16,9 +16,7 @@ use maplibre::{
     kernel::{Kernel, KernelBuilder},
     map::Map,
     plugin::Plugin,
-    render::{
-        builder::RendererBuilder, graph::RenderGraph, resource::Head, settings::WgpuSettings,
-    },
+    render::{builder::RendererBuilder, resource::Head, settings::WgpuSettings},
     schedule::{Schedule, Stage, StageResult},
     tcs::world::World,
 };
@@ -182,9 +180,10 @@ impl Plugin<Environment> for ReadyPlugin {
         _: &mut Schedule,
         _: Rc<Kernel<Environment>>,
         _: &mut World,
-        _: &mut RenderGraph,
-    ) {
+        _: &mut maplibre::render::Renderer,
+    ) -> Result<(), maplibre::plugin::PluginError> {
         self.ready.set(true);
+        Ok(())
     }
 }
 
@@ -206,8 +205,8 @@ impl Plugin<Environment> for PresentPlugin {
         schedule: &mut Schedule,
         _: Rc<Kernel<Environment>>,
         _: &mut World,
-        _: &mut RenderGraph,
-    ) {
+        _: &mut maplibre::render::Renderer,
+    ) -> Result<(), maplibre::plugin::PluginError> {
         let generation = self.generation.get().wrapping_add(1);
         self.generation.set(generation);
         schedule.add_stage(
@@ -216,7 +215,8 @@ impl Plugin<Environment> for PresentPlugin {
                 proxy: self.proxy.clone(),
                 generation,
             },
-        );
+        )?;
+        Ok(())
     }
 }
 struct Present {

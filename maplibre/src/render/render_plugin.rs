@@ -42,13 +42,11 @@ impl<E: Environment> Plugin<E> for RenderPlugin {
         schedule: &mut Schedule,
         _kernel: Rc<Kernel<E>>,
         world: &mut World,
-        graph: &mut RenderGraph,
-    ) {
+        renderer: &mut crate::render::Renderer,
+    ) -> Result<(), crate::plugin::PluginError> {
         let resources = &mut world.resources;
 
-        if let Err(error) = add_draw_passes(graph) {
-            tracing::error!(%error, "unable to add the core render passes");
-        }
+        add_draw_passes(&mut renderer.render_graph)?;
 
         // render graph dependency
         resources.init::<RenderPhase<LayerItem>>();
@@ -79,38 +77,39 @@ impl<E: Environment> Plugin<E> for RenderPlugin {
                 .with_system(frame_input::frame_input_system)
                 .with_system(crate::context::camera_flight_system)
                 .with_system(crate::terrain::elevation::center_target_system),
-        );
-        schedule.add_stage(RenderStageLabel::Request, SystemStage::default());
+        )?;
+        schedule.add_stage(RenderStageLabel::Request, SystemStage::default())?;
         schedule.add_stage(
             RenderStageLabel::Prepare,
             SystemStage::default().with_system(SystemContainer::new(ResourceSystem)),
-        );
+        )?;
         schedule.add_stage(
             RenderStageLabel::Queue,
             SystemStage::default()
                 .with_system(crate::vector::upload_system::upload_system)
                 .with_system(tile_view_pattern_system)
                 .with_system(upload_system),
-        );
+        )?;
         schedule.add_stage(
             RenderStageLabel::PhaseSort,
             SystemStage::default().with_system(sort_phase_system),
-        );
+        )?;
         schedule.add_stage(
             RenderStageLabel::Render,
             SystemStage::default()
                 .with_system(super::gpu_timer::gpu_timer_system)
                 .with_system(SystemContainer::new(GraphRunnerSystem)),
-        );
+        )?;
         schedule.add_stage(
             RenderStageLabel::Cleanup,
             SystemStage::default()
                 .with_system(cleanup_system)
                 .with_system(retention_system),
-        );
+        )?;
         // A frame that fails part-way still clears its render phases, or the next frame
         // draws its items twice.
-        schedule.run_after_failure(RenderStageLabel::Cleanup);
+        schedule.run_after_failure(RenderStageLabel::Cleanup)?;
+        Ok(())
     }
 }
 

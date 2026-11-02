@@ -17,16 +17,16 @@ fn runs_before(order: &[&str], first: &str, then: &str) -> bool {
 }
 
 #[cfg(feature = "headless")]
-#[test]
+#[tokio::test]
 #[cfg(feature = "experimental")]
-fn scene_3d_pass_locks_canonical_draw_graph_ordering_across_plugins() {
+async fn scene_3d_pass_locks_canonical_draw_graph_ordering_across_plugins() {
     use std::rc::Rc;
 
     use crate::{
         background::{daylight::GLOBE_DAYLIGHT, BackgroundPlugin},
         overlay::{OverlayPlugin, DEPTH_PROBE_PASS, OVERLAY_PASS},
         plugin::Plugin,
-        render::{draw_graph, graph::RenderGraph, RenderPlugin},
+        render::{draw_graph, RenderPlugin},
         schedule::Schedule,
         starfield::{sun::depth::SUN_DEPTH_COPY, StarfieldPlugin},
     };
@@ -36,14 +36,22 @@ fn scene_3d_pass_locks_canonical_draw_graph_ordering_across_plugins() {
     );
     let mut world = World::default();
     let mut schedule = Schedule::default();
-    let mut graph = RenderGraph::default();
+    let (_, mut renderer) = crate::headless::create_headless_renderer(64, 64, None)
+        .await
+        .expect("renderer");
+    let plugins: [&dyn Plugin<_>; 4] = [
+        &RenderPlugin,
+        &BackgroundPlugin,
+        &OverlayPlugin,
+        &StarfieldPlugin,
+    ];
+    for plugin in plugins {
+        plugin
+            .build(&mut schedule, Rc::clone(&kernel), &mut world, &mut renderer)
+            .expect("plugin");
+    }
 
-    RenderPlugin.build(&mut schedule, Rc::clone(&kernel), &mut world, &mut graph);
-    BackgroundPlugin.build(&mut schedule, Rc::clone(&kernel), &mut world, &mut graph);
-    OverlayPlugin.build(&mut schedule, Rc::clone(&kernel), &mut world, &mut graph);
-    StarfieldPlugin.build(&mut schedule, Rc::clone(&kernel), &mut world, &mut graph);
-
-    let draw = graph.node_order().expect("acyclic passes");
+    let draw = renderer.render_graph.node_order().expect("acyclic passes");
     assert!(runs_before(
         &draw,
         draw_graph::node::MAIN_PASS,

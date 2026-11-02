@@ -111,12 +111,9 @@ impl HeadlessMap {
         let kernel = Rc::new(kernel);
 
         for plugin in &plugins {
-            plugin.build(
-                &mut schedule,
-                kernel.clone(),
-                &mut world,
-                &mut renderer.render_graph,
-            );
+            plugin
+                .build(&mut schedule, kernel.clone(), &mut world, &mut renderer)
+                .map_err(MapError::Plugin)?;
         }
 
         Ok(Self {

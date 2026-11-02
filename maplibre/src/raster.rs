@@ -68,8 +68,6 @@ pub use transferables::{
     DefaultRasterTransferables, LayerRaster, LayerRasterMissing, RasterTransferables,
 };
 
-use crate::render::graph::RenderGraph;
-
 /// Registers raster requests, worker results, uploads and draws with the render schedule.
 /// `T` supplies the host-specific worker message representation.
 pub struct RasterPlugin<T>(PhantomData<T>);
@@ -86,8 +84,8 @@ impl<E: Environment, T: RasterTransferables> Plugin<E> for RasterPlugin<T> {
         schedule: &mut Schedule,
         kernel: Rc<Kernel<E>>,
         world: &mut World,
-        _graph: &mut RenderGraph,
-    ) {
+        _renderer: &mut crate::render::Renderer,
+    ) -> Result<(), crate::plugin::PluginError> {
         world
             .resources
             .insert(Eventually::<RasterResources>::Uninitialized);
@@ -100,14 +98,15 @@ impl<E: Environment, T: RasterTransferables> Plugin<E> for RasterPlugin<T> {
         schedule.add_system_to_stage(
             RenderStageLabel::Request,
             SystemContainer::new(RequestSystem::<E, T>::new(&kernel)),
-        );
+        )?;
         schedule.add_system_to_stage(
             RenderStageLabel::Request,
             SystemContainer::new(PopulateWorldSystem::<E, T>::new(&kernel)),
-        );
-        schedule.add_system_to_stage(RenderStageLabel::Prepare, resource_system);
-        schedule.add_system_to_stage(RenderStageLabel::Queue, upload_system);
-        schedule.add_system_to_stage(RenderStageLabel::Queue, queue_system);
+        )?;
+        schedule.add_system_to_stage(RenderStageLabel::Prepare, resource_system)?;
+        schedule.add_system_to_stage(RenderStageLabel::Queue, upload_system)?;
+        schedule.add_system_to_stage(RenderStageLabel::Queue, queue_system)?;
+        Ok(())
     }
 }
 

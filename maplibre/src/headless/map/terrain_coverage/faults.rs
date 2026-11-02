@@ -10,8 +10,8 @@ use crate::{
     plugin::Plugin,
     raster::resource::RasterResources,
     render::{
-        eventually::Eventually, graph::RenderGraph, resource::BackingBufferDescriptor,
-        shaders::ShaderTileMetadata, tile_view_pattern::WgpuTileViewPattern, RenderStageLabel,
+        eventually::Eventually, resource::BackingBufferDescriptor, shaders::ShaderTileMetadata,
+        tile_view_pattern::WgpuTileViewPattern, RenderStageLabel,
     },
     schedule::Schedule,
     tcs::{system::SystemResult, world::World},
@@ -33,11 +33,12 @@ impl Plugin<HeadlessEnvironment> for FaultPlugin {
         schedule: &mut Schedule,
         _kernel: Rc<Kernel<HeadlessEnvironment>>,
         world: &mut World,
-        _graph: &mut RenderGraph,
-    ) {
+        _renderer: &mut crate::render::Renderer,
+    ) -> Result<(), crate::plugin::PluginError> {
         world.resources.insert(Faults::default());
-        schedule.add_system_to_stage(RenderStageLabel::Queue, inject);
-        schedule.add_system_to_stage(RenderStageLabel::Cleanup, restore);
+        schedule.add_system_to_stage(RenderStageLabel::Queue, inject)?;
+        schedule.add_system_to_stage(RenderStageLabel::Cleanup, restore)?;
+        Ok(())
     }
 }
 
