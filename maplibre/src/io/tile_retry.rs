@@ -117,37 +117,49 @@ impl Default for RequestClock {
 }
 
 fn now(world: &mut World) -> Duration {
+    world.resources.get_or_init_mut::<RequestClock>();
+    let current = observed_now(world);
+    world.resources.get_or_init_mut::<RequestClock>().last = current;
+    current
+}
+
+fn observed_now(world: &World) -> Duration {
     let timestamp = world
         .resources
         .get::<FrameInput>()
         .map(|input| input.timestamp);
-    let clock = world.resources.get_or_init_mut::<RequestClock>();
-    clock.last = clock
-        .last
-        .max(timestamp.unwrap_or_else(|| clock.started.elapsed()));
-    clock.last
+    world.resources.get::<RequestClock>().map_or_else(
+        || timestamp.unwrap_or(Duration::ZERO),
+        |clock| {
+            clock
+                .last
+                .max(timestamp.unwrap_or_else(|| clock.started.elapsed()))
+        },
+    )
+}
+
+fn retry_states(world: &World) -> impl Iterator<Item = &RetryState> {
+    world
+        .tiles
+        .tiles
+        .values()
+        .filter_map(|tile| world.tiles.query::<&TileRequestRetries>(tile.coords))
+        .flat_map(|retries| retries.0.iter())
 }
 
 /// Whether a frame has request work: a request in flight, whose result the next frame applies,
 /// or a retry whose deadline has passed, which the next frame issues.
 pub(crate) fn needs_frame(world: &World) -> bool {
-    let now = world
-        .resources
-        .get::<RequestClock>()
-        .map_or(Duration::ZERO, |clock| {
-            clock.last.max(clock.started.elapsed())
-        });
-    world.tiles.tiles.values().any(|tile| {
-        world
-            .tiles
-            .query::<&TileRequestRetries>(tile.coords)
-            .is_some_and(|retries| {
-                retries
-                    .0
-                    .iter()
-                    .any(|state| state.pending || state.deadline.is_some_and(|due| due <= now))
-            })
-    })
+    let now = observed_now(world);
+    retry_states(world).any(|state| state.pending || state.deadline.is_some_and(|due| due <= now))
+}
+
+/// Shortest wait until a scheduled retry deadline is due, or `None` when no retry waits.
+pub(crate) fn next_retry_delay(world: &World) -> Option<Duration> {
+    let now = observed_now(world);
+    retry_states(world)
+        .filter_map(|state| state.deadline.map(|due| due.saturating_sub(now)))
+        .min()
 }
 
 /// Requests every requested tile of `kind` again, keeping what it shows until the new data lands.

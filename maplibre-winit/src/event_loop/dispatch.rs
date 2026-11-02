@@ -178,6 +178,7 @@ where
         let after = Instant::now();
         let next = NextFrame {
             map: self.map.needs_redraw(),
+            retry: self.map.next_retry_delay(),
             arrivals: self.map.kernel().apc().has_arrivals(),
             input: self.input.moved_view(),
             counting_frames: self.max_frames.is_some(),
@@ -254,6 +255,8 @@ enum NextAction {
 struct NextFrame {
     /// The map changed, animates or still loads since the frame it drew.
     map: bool,
+    /// Time until a failed tile's retry deadline is due, which only a frame notices.
+    retry: Option<Duration>,
     /// Worker results arrived that the next frame applies.
     arrivals: bool,
     /// Input moved the view, which inertia or a held key carries into the next frame.
@@ -264,16 +267,26 @@ struct NextFrame {
     wait: Option<Duration>,
 }
 
+fn earlier(a: Option<Duration>, b: Option<Duration>) -> Option<Duration> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (Some(a), None) => Some(a),
+        (None, Some(b)) => Some(b),
+        (None, None) => None,
+    }
+}
+
 impl NextFrame {
     fn action(self) -> NextAction {
+        let wait = earlier(self.wait, self.retry);
         if self.map
             || self.arrivals
             || self.input
             || self.counting_frames
-            || self.wait == Some(Duration::ZERO)
+            || wait == Some(Duration::ZERO)
         {
             NextAction::Redraw
-        } else if let Some(delay) = self.wait {
+        } else if let Some(delay) = wait {
             NextAction::Wait(delay)
         } else {
             NextAction::Sleep

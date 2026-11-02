@@ -241,6 +241,17 @@ pub(crate) fn finish_frame(context: &mut MapContext) {
 }
 
 impl MapContext {
+    /// Whether a failed tile request waits to be retried. Its deadline is noticed by a frame,
+    /// so a host that draws only on demand wakes when [`Self::next_retry_delay`] elapses.
+    pub fn has_scheduled_retries(&self) -> bool {
+        crate::io::tile_retry::next_retry_delay(&self.world).is_some()
+    }
+
+    /// Shortest wait until a scheduled tile retry is due, or `None` when none waits.
+    pub fn next_retry_delay(&self) -> Option<Duration> {
+        crate::io::tile_retry::next_retry_delay(&self.world)
+    }
+
     /// Whether the map should draw another frame: something changed or still animates since
     /// the last one, tiles are still loading, or the camera moved.
     pub fn needs_redraw(&self) -> bool {

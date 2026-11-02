@@ -15,6 +15,10 @@ fn each_immediate_reason_asks_for_a_frame() {
             ..NextFrame::default()
         },
         NextFrame {
+            retry: Some(Duration::ZERO),
+            ..NextFrame::default()
+        },
+        NextFrame {
             arrivals: true,
             ..NextFrame::default()
         },
@@ -37,20 +41,30 @@ fn each_immediate_reason_asks_for_a_frame() {
 }
 
 #[test]
-fn pending_timer_sleeps_until_due_unless_immediate_work_exists() {
-    let delay = Duration::from_millis(40);
+fn pending_input_and_retry_timers_sleep_until_the_earliest_deadline() {
+    let input_delay = Duration::from_millis(40);
+    let retry_delay = Duration::from_secs(1);
     assert_eq!(
         NextFrame {
-            wait: Some(delay),
+            retry: Some(retry_delay),
             ..NextFrame::default()
         }
         .action(),
-        NextAction::Wait(delay)
+        NextAction::Wait(retry_delay)
+    );
+    assert_eq!(
+        NextFrame {
+            wait: Some(input_delay),
+            retry: Some(retry_delay),
+            ..NextFrame::default()
+        }
+        .action(),
+        NextAction::Wait(input_delay)
     );
     assert_eq!(
         NextFrame {
             map: true,
-            wait: Some(delay),
+            retry: Some(retry_delay),
             ..NextFrame::default()
         }
         .action(),
