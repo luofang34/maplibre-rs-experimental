@@ -39,6 +39,40 @@ fn scheduling_failure_keeps_the_scheduler_cause() {
     ));
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn rejected_tracked_call_is_not_left_running() {
+    use crate::{
+        environment::OffscreenKernelConfig,
+        io::{
+            apc::{AsyncProcedureCall, Input, SchedulerAsyncProcedureCall},
+            scheduler::NopScheduler,
+        },
+        platform::ReqwestOffscreenKernelEnvironment,
+        style::Style,
+    };
+    let apc = SchedulerAsyncProcedureCall::<ReqwestOffscreenKernelEnvironment, _>::new(
+        NopScheduler,
+        OffscreenKernelConfig::default(),
+    );
+    apc.call(
+        Input::TrackedTileRequest {
+            coords: Default::default(),
+            style: Style::default(),
+            attempt: 7,
+            overscaled_zoom: 0,
+            pixel_ratio: 1.0,
+            only_sources: None,
+        },
+        |_, _, _| Box::pin(async { Ok(()) }),
+    )
+    .expect_err("NopScheduler rejects the call");
+    assert!(
+        apc.running().is_empty(),
+        "a call that never ran has nothing to cancel"
+    );
+}
+
 #[test]
 fn procedure_failures_keep_their_underlying_causes() {
     let execution = ProcedureError::Execution(Box::new(std::io::Error::other("decode failed")));

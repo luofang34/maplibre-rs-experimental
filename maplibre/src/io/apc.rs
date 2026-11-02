@@ -395,27 +395,32 @@ impl<K: OffscreenKernel, S: Scheduler> AsyncProcedureCall<K> for SchedulerAsyncP
         }
         let running = self.running.clone();
 
-        self.scheduler
-            .schedule(move || async move {
-                tracing::debug!(thread = ?std::thread::current().name(), "processing worker call");
+        let scheduled = self.scheduler.schedule(move || async move {
+            tracing::debug!(thread = ?std::thread::current().name(), "processing worker call");
 
-                let kernel = K::create(offscreen_kernel_config);
-                // A result that cannot be delivered, because the map already shut down, must
-                // not take the worker thread down with it.
-                let call = procedure(input, SchedulerContext { sender }, kernel);
-                match Abortable::new(call, registration).await {
-                    Ok(Err(error)) => tracing::warn!(?error, "procedure failed"),
-                    Ok(Ok(())) => {}
-                    Err(Aborted) => tracing::debug!(?attempt, "cancelled worker call stopped"),
-                }
-                if let Some(attempt) = attempt {
-                    running
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .remove(&attempt);
-                }
-            })
-            .map_err(CallError::Schedule)
+            let kernel = K::create(offscreen_kernel_config);
+            // A result that cannot be delivered, because the map already shut down, must
+            // not take the worker thread down with it.
+            let call = procedure(input, SchedulerContext { sender }, kernel);
+            match Abortable::new(call, registration).await {
+                Ok(Err(error)) => tracing::warn!(?error, "procedure failed"),
+                Ok(Ok(())) => {}
+                Err(Aborted) => tracing::debug!(?attempt, "cancelled worker call stopped"),
+            }
+            if let Some(attempt) = attempt {
+                running
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .remove(&attempt);
+            }
+        });
+        if scheduled.is_err() {
+            // A rejected factory never runs, so nothing else removes its entry.
+            if let Some(attempt) = attempt {
+                self.running().remove(&attempt);
+            }
+        }
+        scheduled.map_err(CallError::Schedule)
     }
 
     fn has_arrivals(&self) -> bool {
