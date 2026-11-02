@@ -123,7 +123,9 @@ pub struct Input {
     /// Tile grid location requested from the worker.
     pub coords: WorldTileCoords,
     /// Style snapshot used to choose and process the tile's layers, shared by the requests
-    /// made from the same style.
+    /// made from the same style. It is not serialized: a transport that serializes inputs
+    /// hands its workers the style once and sets it on each input they decode.
+    #[serde(skip)]
     pub style: Arc<Style>,
     /// Identifier distinguishing requests when coordinates are evicted and reused.
     pub attempt: u64,

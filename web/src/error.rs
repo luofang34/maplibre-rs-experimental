@@ -34,6 +34,12 @@ pub enum WebError {
     /// A tile worker received a second kernel configuration.
     #[error("the tile worker already has a kernel configuration")]
     KernelConfigAlreadySet,
+    /// A tile worker received a style it cannot decode.
+    #[error("decoding the tile worker's style failed")]
+    StyleDecoding(#[source] serde_json::Error),
+    /// A call names a style revision the tile worker no longer keeps.
+    #[error("the tile worker has no style revision {0}")]
+    StyleRevisionMissing(u64),
     /// A worker message arrived while the map was reading earlier ones.
     #[error("worker results are being received; the message cannot be stored")]
     ReceivedBusy,

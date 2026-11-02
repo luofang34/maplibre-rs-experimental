@@ -103,3 +103,17 @@ fn a_worker_input_needs_the_attempt_its_results_are_matched_by() {
         "a worker cannot run a request no attempt owns"
     );
 }
+
+#[test]
+fn a_serialized_input_leaves_its_style_to_the_transport() {
+    use super::super::Input;
+    let style = crate::style::Style {
+        glyphs: Some("https://example.invalid/{fontstack}/{range}.pbf".into()),
+        ..Default::default()
+    };
+    let json = serde_json::to_value(Input::new(Default::default(), style, 3)).expect("encode");
+    assert!(
+        json.get("style").is_none(),
+        "workers receive the style once, not with every call"
+    );
+}

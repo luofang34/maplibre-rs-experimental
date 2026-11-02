@@ -3,7 +3,8 @@ import {initializeWasm} from "../wasm-instance.mjs";
 
 type MessageData = { type: 'wasm_init', module: WebAssembly.Module }
     | { type: 'kernel_config', config: string }
-    | { type: 'call', procedure_ptr: number, attempt: bigint, input: string }
+    | { type: 'call', procedure_ptr: number, attempt: bigint, style_revision: bigint, input: string }
+    | { type: 'style', revision: bigint, style: string }
     | { type: 'cancel', attempt: bigint }
     | { type: 'image_provider_modules', urls: string[] }
 
@@ -30,6 +31,18 @@ const registerProviders = async (urls: string[]) => {
         const module = await import(/* @vite-ignore */ url)
         await module.default({registerImageProvider: maplibre["register_image_provider"]})
     }
+}
+
+/** The calls this worker runs, made once the module has started. */
+const workerCalls = (): maplibre.TileWorkerCalls => {
+    if (!calls) {
+        const TileWorkerCalls: new () => maplibre.TileWorkerCalls = maplibre["TileWorkerCalls"];
+        if (!TileWorkerCalls) {
+            throw Error("TileWorkerCalls is not defined. Maybe the Rust build used the wrong build configuration.")
+        }
+        calls = new TileWorkerCalls()
+    }
+    return calls
 }
 
 onmessage = async (message: MessageEvent<MessageData>) => {
@@ -85,15 +98,17 @@ onmessage = async (message: MessageEvent<MessageData>) => {
         const procedure_ptr = data.procedure_ptr;
         const input = data.input;
 
-        if (!calls) {
-            const TileWorkerCalls: new () => maplibre.TileWorkerCalls = maplibre["TileWorkerCalls"];
-            if (!TileWorkerCalls) {
-                throw Error("TileWorkerCalls is not defined. Maybe the Rust build used the wrong build configuration.")
-            }
-            calls = new TileWorkerCalls()
+        try {
+            await workerCalls().process(procedure_ptr, data.style_revision, input);
+        } catch (err) {
+            workerCalls().finish_failed(data.attempt);
+            throw err;
         }
-
-        await calls.process(procedure_ptr, input);
+    } else if (type === 'style') {
+        // Ordered behind `providersRegistered` like `call`, so queued startup calls see their
+        // style revision before later style updates can evict it.
+        await providersRegistered;
+        workerCalls().set_style(message.data.revision, message.data.style)
     } else if (type === 'cancel') {
         calls?.cancel(message.data.attempt)
     } else if (type === 'kernel_config') {
