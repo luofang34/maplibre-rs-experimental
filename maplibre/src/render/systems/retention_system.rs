@@ -268,6 +268,16 @@ pub(crate) fn tiles_in_use(
         Ok(None) => {}
         Err(error) => tracing::warn!(%error, "cannot select the requested tiles to keep"),
     }
+    if let Ok(regions) = crate::render::projection::raster_source_regions(
+        style,
+        view_state,
+        world,
+        ViewStatePadding::Loose,
+    ) {
+        for (_, tiles) in regions {
+            in_use.extend(tiles);
+        }
+    }
     if let Some(requests) = world
         .resources
         .get::<crate::terrain::request_system::DrapeRequests>()

@@ -99,16 +99,21 @@ impl RasterResources {
         )
     }
 
-    /// Fills the levels below the first from the level above.
+    /// Fills the levels below the first from the level above, for every texture in one
+    /// submission.
     pub fn generate_mipmaps(
         &self,
         device: &wgpu::Device,
         queue: &crate::render::upload_queue::UploadQueue,
-        texture: &Texture,
+        textures: &[wgpu::Texture],
     ) {
+        if textures.is_empty() {
+            return;
+        }
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-        self.mipmaps
-            .generate(device, &mut encoder, &texture.texture);
+        for texture in textures {
+            self.mipmaps.generate(device, &mut encoder, texture);
+        }
         queue.submit([encoder.finish()]);
     }
 

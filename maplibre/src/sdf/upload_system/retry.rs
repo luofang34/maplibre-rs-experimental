@@ -142,9 +142,8 @@ fn upload(context: &mut MapContext, zoom: f32) {
             pipeline: &pipeline.combined,
         },
         &mut context.world.tiles,
-        &context.style,
-        &[WorldTileCoords::default()],
-        zoom,
+        (&context.style, &[WorldTileCoords::default()], zoom),
+        &mut FrameUploads::default(),
     );
 }
 

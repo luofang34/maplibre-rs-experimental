@@ -1,5 +1,4 @@
 //! Uploads data to the GPU which is needed for rendering.
-use std::collections::BTreeSet;
 
 use crate::{
     context::MapContext,
@@ -11,6 +10,7 @@ use crate::{
     },
     render::{
         eventually::{Eventually, Eventually::Initialized},
+        memory_budget::{FrameUploads, UploadKind},
         Renderer,
     },
     tcs::{
@@ -26,34 +26,56 @@ pub fn upload_system(
         ..
     }: &mut MapContext,
 ) -> SystemResult {
+    let Some(raster_state) = world.resources.get::<Eventually<RasterResources>>() else {
+        return Ok(());
+    };
+    if !matches!(raster_state, Initialized(_)) {
+        return Err(SystemError::Dependencies);
+    }
     if crate::render::eye_covering::EyeInFrame::reuses_content(world) {
         return Ok(());
     }
-    let Some(Initialized(raster_resources)) = world
+    world.resources.get_or_init_mut::<FrameUploads>();
+    let Some((Initialized(raster_resources), budget)) = world
         .resources
-        .query_mut::<&mut Eventually<RasterResources>>()
+        .query_mut::<(&mut Eventually<RasterResources>, &mut FrameUploads)>()
     else {
         return Err(SystemError::Dependencies);
     };
 
-    // Every loaded tile gets its texture, as GL JS uploads a raster tile when it arrives; the
-    // retention system bounds the set by evicting tiles that left the view.
-    let source_tiles: BTreeSet<WorldTileCoords> =
+    // Every loaded tile gets its texture, as GL JS uploads a raster tile when it arrives, as
+    // far as the frame's image floor reaches; coarser tiles go first so an ancestor stand-in is
+    // ready before a burst of finer children exhausts the frame budget.
+    let mut source_tiles: Vec<WorldTileCoords> =
         world.tiles.tiles.values().map(|tile| tile.coords).collect();
-    upload_raster_layer(raster_resources, device, queue, &world.tiles, source_tiles);
+    source_tiles.sort_by_key(|coords| (u8::from(coords.z), *coords));
+    let deferred = upload_raster_layer(
+        raster_resources,
+        (device, queue),
+        &world.tiles,
+        source_tiles,
+        budget,
+    );
+    if deferred {
+        crate::render::frame_signals::keep_animating(world);
+    }
 
     Ok(())
 }
 
+/// Uploads the textures of loaded tiles that the frame's budget admits; `true` when some wait
+/// for a later frame.
 #[tracing::instrument(skip_all)]
 fn upload_raster_layer(
     raster_resources: &mut RasterResources,
-    device: &wgpu::Device,
-    queue: &crate::render::upload_queue::UploadQueue,
+    (device, queue): (&wgpu::Device, &crate::render::upload_queue::UploadQueue),
     tiles: &Tiles,
-    source_tiles: BTreeSet<WorldTileCoords>,
-) {
-    for coords in source_tiles {
+    source_tiles: Vec<WorldTileCoords>,
+    budget: &mut FrameUploads,
+) -> bool {
+    let mut mipmapped = Vec::new();
+    let mut deferred = false;
+    'tiles: for coords in source_tiles {
         let Some(layers) = tiles.query::<&RasterLayersDataComponent>(coords) else {
             continue;
         };
@@ -65,11 +87,22 @@ fn upload_raster_layer(
                         .get_bound_texture(&data.source, &coords)
                         .is_none()
                 {
-                    upload_image(raster_resources, device, queue, tiles, coords, data);
+                    if !budget.take(UploadKind::Image, data.image.as_raw().len()) {
+                        deferred = true;
+                        break 'tiles;
+                    }
+                    if let Some(texture) =
+                        upload_image(raster_resources, device, queue, tiles, coords, data)
+                    {
+                        mipmapped.push(texture);
+                    }
                 }
             }
         }
     }
+    // One submission fills every new texture's mip chain.
+    raster_resources.generate_mipmaps(device, queue, &mipmapped);
+    deferred
 }
 
 /// The image of `source` loaded at each tile around `coords`, indexed `[dy + 1][dx + 1]`.
@@ -92,9 +125,9 @@ fn neighbour_images<'a>(
     images
 }
 
-/// Uploads the image of the tile stored at `coords`. The texture is bound under that key, the
-/// one the upload check and the draws look up, rather than under the coordinates the image
-/// carries: were they to differ, the check would miss the binding and upload it every frame.
+/// Uploads the image of the tile stored at `coords` and binds it under that key, the one the
+/// upload check and the draws look up, rather than under the coordinates the image carries;
+/// returns the texture when its mip chain still needs filling.
 fn upload_image(
     raster_resources: &mut RasterResources,
     device: &wgpu::Device,
@@ -102,7 +135,7 @@ fn upload_image(
     tiles: &Tiles,
     coords: WorldTileCoords,
     data: &AvailableRasterLayerData,
-) {
+) -> Option<wgpu::Texture> {
     let bordered;
     let mut border_sides = None;
     let image = if raster_resources.has_border(&data.source) {
@@ -148,13 +181,12 @@ fn upload_image(
         texture.size,
     );
 
-    if mipmapped {
-        raster_resources.generate_mipmaps(device, queue, &texture);
-    }
+    let mips = mipmapped.then(|| texture.texture.clone());
     raster_resources.bind_texture(device, &data.source, &coords, texture);
     if let Some(sides) = border_sides {
         raster_resources.set_border_sides(&data.source, coords, sides);
     }
+    mips
 }
 
 #[cfg(test)]

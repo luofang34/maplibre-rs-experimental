@@ -2,7 +2,15 @@ use image::{Rgba, RgbaImage};
 
 use super::*;
 use crate::{
-    coords::ZoomLevel, raster::RasterSourceId, render::settings::Msaa, style::Style,
+    coords::ZoomLevel,
+    io::tile_sources::TileKind,
+    raster::RasterSourceId,
+    render::{
+        memory_budget::FRAME_UPLOAD_BYTES,
+        settings::Msaa,
+        tile_view_pattern::{HasTile, ViewTileSources},
+    },
+    style::Style,
     tcs::world::World,
 };
 
@@ -88,10 +96,10 @@ async fn a_bound_tile_is_not_uploaded_again() {
     let upload = |resources: &mut RasterResources| {
         upload_raster_layer(
             resources,
-            &device,
-            &queue,
+            (&device, &queue),
             &world.tiles,
-            std::iter::once(stored).collect(),
+            vec![stored],
+            &mut FrameUploads::default(),
         );
     };
     upload(&mut resources);
@@ -108,4 +116,108 @@ async fn a_bound_tile_is_not_uploaded_again() {
         0,
         "no texels were written again"
     );
+}
+
+/// A child tile whose CPU image has arrived but whose GPU upload was deferred by the frame
+/// budget does not claim coverage yet, keeping its uploaded ancestor eligible as a stand-in.
+#[tokio::test]
+async fn deferred_child_tile_waits_for_gpu_upload_before_claiming_coverage() {
+    let instance = wgpu::Instance::default();
+    let Ok(adapter) = instance
+        .request_adapter(&wgpu::RequestAdapterOptions::default())
+        .await
+    else {
+        return;
+    };
+    let (device, queue) = adapter
+        .request_device(&wgpu::DeviceDescriptor::default())
+        .await
+        .expect("device");
+    let queue = crate::render::upload_queue::UploadQueue::new(queue);
+    let style: Style = serde_json::from_value(serde_json::json!({"version": 8,
+        "sources": {"pic": {"type": "raster", "tiles": ["offline://{z}/{x}/{y}.png"]}},
+        "layers": [{"id": "pic", "type": "raster", "source": "pic"}]}))
+    .expect("style");
+    let mut resources = RasterResources::new(Msaa { samples: 1 }, &device, pipeline(&device));
+    resources.update_layer_sources(&style);
+    let source = RasterSourceId::from("pic");
+    let parent = WorldTileCoords {
+        x: 0,
+        y: 0,
+        z: ZoomLevel::from(0),
+    };
+    let child = WorldTileCoords {
+        x: 0,
+        y: 0,
+        z: ZoomLevel::from(1),
+    };
+    let mut world = World::default();
+    world
+        .resources
+        .get_or_init_mut::<ViewTileSources>()
+        .add::<crate::raster::RasterTilesDone>(TileKind::Raster);
+    for coords in [child, parent] {
+        world
+            .tiles
+            .spawn_mut(coords)
+            .expect("tile")
+            .insert(RasterLayersDataComponent {
+                layers: vec![RasterLayerData::Available(AvailableRasterLayerData {
+                    coords,
+                    source: source.clone(),
+                    image: RgbaImage::from_pixel(4, 4, Rgba([255, 0, 0, 255])),
+                })],
+            });
+    }
+
+    // Consume all but 64 bytes of the image budget so only the coarse parent fits this frame.
+    let mut budget = FrameUploads::default();
+    assert!(budget.take(UploadKind::Image, FRAME_UPLOAD_BYTES - 64));
+    let mut ordered = vec![child, parent];
+    ordered.sort_by_key(|coords| (u8::from(coords.z), *coords));
+    assert!(upload_raster_layer(
+        &mut resources,
+        (&device, &queue),
+        &world.tiles,
+        ordered.clone(),
+        &mut budget,
+    ));
+    world.resources.insert(Eventually::Initialized(resources));
+
+    let sources = world
+        .resources
+        .get::<ViewTileSources>()
+        .expect("sources")
+        .of_kind(TileKind::Raster);
+    assert!(
+        sources.has_source_tile(&source, parent, &world),
+        "uploaded parent stays ready as a stand-in"
+    );
+    assert!(
+        !sources.has_source_tile(&source, child, &world),
+        "deferred child does not displace its parent before GPU upload"
+    );
+
+    let Some(Eventually::Initialized(mut resources)) = world
+        .resources
+        .get_mut::<Eventually<RasterResources>>()
+        .map(|slot| std::mem::replace(slot, Eventually::Uninitialized))
+    else {
+        return;
+    };
+    budget.reset();
+    assert!(!upload_raster_layer(
+        &mut resources,
+        (&device, &queue),
+        &world.tiles,
+        ordered,
+        &mut budget,
+    ));
+    world.resources.insert(Eventually::Initialized(resources));
+    let sources = world
+        .resources
+        .get::<ViewTileSources>()
+        .expect("sources")
+        .of_kind(TileKind::Raster);
+    assert!(sources.has_source_tile(&source, child, &world));
 }

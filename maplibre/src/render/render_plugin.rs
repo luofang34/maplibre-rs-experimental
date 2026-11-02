@@ -87,6 +87,7 @@ impl<E: Environment> Plugin<E> for RenderPlugin {
             RenderStageLabel::Queue,
             SystemStage::default()
                 .with_system(crate::vector::upload_system::upload_system)
+                .with_system(crate::raster::upload_system::upload_system)
                 .with_system(tile_view_pattern_system)
                 .with_system(upload_system),
         )?;

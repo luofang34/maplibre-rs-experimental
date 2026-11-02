@@ -68,13 +68,46 @@ fn oscillating_host_reports_cannot_switch_drape_covering_each_frame() {
 }
 
 #[test]
-fn staging_budget_limits_bursts_and_eventually_admits_large_layers() {
-    let mut budget = super::UploadBudget::new(100);
-    assert!(budget.take(60));
-    assert!(!budget.take(60));
-    assert!(budget.take(40));
-    assert!(!budget.take(1));
-    let mut next = super::UploadBudget::new(100);
-    assert!(next.take(200));
-    assert!(!next.take(1));
+fn a_frame_admits_its_allowance_and_the_first_upload_of_each_kind() {
+    use super::{FrameUploads, UploadKind::*, FRAME_UPLOAD_BYTES, IMAGE_UPLOAD_FLOOR_BYTES};
+    let geometry_share = FRAME_UPLOAD_BYTES - IMAGE_UPLOAD_FLOOR_BYTES;
+    let mut frame = FrameUploads::default();
+    assert!(frame.take(Geometry, geometry_share - 10));
+    assert!(
+        !frame.take(Geometry, 11),
+        "geometry leaves the images their floor"
+    );
+    assert!(frame.take(Geometry, 10));
+    assert!(
+        frame.take(Image, IMAGE_UPLOAD_FLOOR_BYTES),
+        "images keep their floor"
+    );
+    assert!(!frame.take(Image, 1));
+    assert_eq!(frame.used(), FRAME_UPLOAD_BYTES);
+
+    frame.reset();
+    assert!(
+        frame.take(Geometry, 2 * FRAME_UPLOAD_BYTES),
+        "one oversized layer is admitted"
+    );
+    assert!(!frame.take(Geometry, 1));
+    assert!(
+        frame.take(Image, 2 * FRAME_UPLOAD_BYTES),
+        "and one oversized texture"
+    );
+    assert!(!frame.take(Image, 1));
 }
+
+#[test]
+fn images_use_what_geometry_leaves() {
+    use super::{FrameUploads, UploadKind::*, FRAME_UPLOAD_BYTES};
+    let mut frame = FrameUploads::default();
+    assert!(frame.take(Image, FRAME_UPLOAD_BYTES - 1));
+    assert!(frame.take(Image, 1));
+    assert!(!frame.take(Image, 1));
+    assert!(frame.take(Geometry, 1), "geometry still starts");
+    assert!(!frame.take(Geometry, 1));
+}
+
+#[cfg(all(feature = "headless", not(target_arch = "wasm32")))]
+mod uploads;

@@ -4,7 +4,7 @@ use crate::{
     context::MapContext,
     render::{
         eventually::{Eventually, Eventually::Initialized},
-        memory_budget::UPLOADS_PER_FRAME,
+        memory_budget::{FrameUploads, UploadKind},
         shaders::{FillShaderFeatureMetadata, Vec4f32},
         Renderer,
     },
@@ -63,7 +63,10 @@ pub fn upload_system(
     let (source_tiles, painted_tiles) =
         sources::frame_sources_and_painted(world, style, view_state)?;
     let (spatial, changed) = super::structures::for_frame(world, style, &painted_tiles);
-    let Some(Initialized(buffer_pool)) = world.resources.get_mut::<Eventually<VectorBufferPool>>()
+    world.resources.get_or_init_mut::<FrameUploads>();
+    let Some((Initialized(buffer_pool), budget)) = world
+        .resources
+        .query_mut::<(&mut Eventually<VectorBufferPool>, &mut FrameUploads)>()
     else {
         return Err(SystemError::Dependencies);
     };
@@ -85,8 +88,8 @@ pub fn upload_system(
         &mut world.tiles,
         style,
         source_tiles,
-        &spatial,
-        paint_frame,
+        (&spatial, paint_frame),
+        budget,
     );
     if deferred {
         crate::render::frame_signals::keep_animating(world);
@@ -169,11 +172,9 @@ fn upload_tessellated_layer(
     tiles: &mut Tiles,
     style: &Style,
     source_tiles: Vec<crate::coords::WorldTileCoords>,
-    spatial: &[super::structures::SpatialBuffer],
-    paint: VectorPaintFrame,
+    (spatial, paint): (&[super::structures::SpatialBuffer], VectorPaintFrame),
+    budget: &mut FrameUploads,
 ) -> bool {
-    let mut uploaded_tiles = 0;
-    let mut bytes = crate::render::memory_budget::UploadBudget::new(16 << 20);
     for coords in source_tiles {
         super::content::ensure(tiles, coords);
         let Some((layers, pending)) = tiles.query_mut::<(
@@ -210,7 +211,9 @@ fn upload_tessellated_layer(
             if bucket.buffer.buffer.indices.is_empty() {
                 buffer_pool.remove_layer(coords, &style_layer.id);
             } else {
-                if uploaded_tiles >= UPLOADS_PER_FRAME || !bytes.take(upload_size(bucket)) {
+                if budget.geometry_tiles_exhausted()
+                    || !budget.take(UploadKind::Geometry, upload_size(bucket))
+                {
                     return true;
                 }
                 if !upload_bucket(buffer_pool, queue, style_layer, bucket, spatial, paint) {
@@ -223,7 +226,7 @@ fn upload_tessellated_layer(
             }
         }
         if uploaded {
-            uploaded_tiles += 1;
+            budget.count_geometry_tile();
         }
     }
     false

@@ -27,6 +27,12 @@ pub const TILES_IN_FLIGHT_WHEN_LOW: usize = 4;
 /// Tiles whose geometry is uploaded in one frame; the rest wait for the next, so a burst of
 /// arrivals does not stage a hundred tiles' geometry at once.
 pub const UPLOADS_PER_FRAME: usize = 8;
+/// Bytes of tile geometry, labels and textures one frame uploads; the rest wait for the next
+/// frame, so a burst of arrivals is spread over frames instead of stalling one.
+pub const FRAME_UPLOAD_BYTES: usize = 32 << 20;
+/// Bytes of each frame's uploads that only raster and DEM textures may use. GL JS uploads a
+/// raster tile as soon as it arrives, so images keep this share however much geometry waits.
+pub const IMAGE_UPLOAD_FLOOR_BYTES: usize = 8 << 20;
 
 /// How much room the host has left.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -127,27 +133,79 @@ impl MemoryBudgetTracker {
 #[cfg(test)]
 mod tests;
 
-/// Bounds staging bursts without starving a single layer larger than the frame allowance.
-pub(crate) struct UploadBudget {
-    remaining: usize,
-    started: bool,
+/// What an upload puts on the GPU.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum UploadKind {
+    /// Vector and label geometry.
+    Geometry,
+    /// Raster and DEM textures.
+    Image,
 }
-impl UploadBudget {
-    pub(crate) fn new(bytes: usize) -> Self {
-        Self {
-            remaining: bytes,
-            started: false,
-        }
-    }
-    pub(crate) fn take(&mut self, bytes: usize) -> bool {
+
+/// The bytes the tile uploads of one frame share, across vector, label, raster and DEM
+/// tiles. [`crate::render::frame_input`] resets it when a new host frame starts.
+///
+/// The first upload of each kind in a frame is always admitted, so a layer or texture larger
+/// than the allowance still gets uploaded.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct FrameUploads {
+    geometry_bytes: usize,
+    image_bytes: usize,
+    geometry_started: bool,
+    image_started: bool,
+    geometry_tiles: usize,
+}
+
+impl FrameUploads {
+    /// Admits an upload of `bytes` of `kind`, counting it, or refuses it for a later frame.
+    pub(crate) fn take(&mut self, kind: UploadKind, bytes: usize) -> bool {
         if bytes == 0 {
             return true;
         }
-        if self.started && bytes > self.remaining {
+        let used = self.geometry_bytes + self.image_bytes;
+        let (allowed, started, counted) = match kind {
+            // Geometry leaves the images their floor.
+            UploadKind::Geometry => (
+                FRAME_UPLOAD_BYTES
+                    .saturating_sub(IMAGE_UPLOAD_FLOOR_BYTES.saturating_sub(self.image_bytes))
+                    .saturating_sub(used),
+                &mut self.geometry_started,
+                &mut self.geometry_bytes,
+            ),
+            UploadKind::Image => (
+                FRAME_UPLOAD_BYTES
+                    .saturating_sub(used)
+                    .max(IMAGE_UPLOAD_FLOOR_BYTES.saturating_sub(self.image_bytes)),
+                &mut self.image_started,
+                &mut self.image_bytes,
+            ),
+        };
+        if *started && bytes > allowed {
             return false;
         }
-        self.started = true;
-        self.remaining = self.remaining.saturating_sub(bytes);
+        *started = true;
+        *counted += bytes;
         true
+    }
+
+    /// Counts a tile whose geometry this frame uploaded, of [`UPLOADS_PER_FRAME`].
+    pub(crate) fn count_geometry_tile(&mut self) {
+        self.geometry_tiles += 1;
+    }
+
+    /// Whether this frame's geometry tile allowance is used up.
+    pub(crate) fn geometry_tiles_exhausted(&self) -> bool {
+        self.geometry_tiles >= UPLOADS_PER_FRAME
+    }
+
+    /// Bytes admitted this frame.
+    #[cfg(test)]
+    pub(crate) fn used(&self) -> usize {
+        self.geometry_bytes + self.image_bytes
+    }
+
+    /// Starts the next frame's allowance.
+    pub(crate) fn reset(&mut self) {
+        *self = Self::default();
     }
 }
