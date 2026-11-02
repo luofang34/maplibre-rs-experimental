@@ -2,7 +2,7 @@
 
 #![deny(missing_docs)]
 
-use std::{borrow::Cow, collections::HashMap};
+use std::sync::Arc;
 
 use downcast_rs::{impl_downcast, Downcast};
 use thiserror::Error;
@@ -10,10 +10,7 @@ use thiserror::Error;
 use crate::{
     context::MapContext,
     define_label,
-    tcs::system::{
-        heap::live_bytes, stage::SystemStage, timings::FrameTimings, IntoSystemContainer,
-        SystemError,
-    },
+    tcs::system::{stage::SystemStage, timings, IntoSystemContainer, SystemError},
 };
 
 /// A stage that succeeds without reading or changing the frame context.
@@ -21,77 +18,6 @@ pub struct NopStage;
 
 impl Stage for NopStage {
     fn run(&mut self, _context: &mut MapContext) -> StageResult {
-        Ok(())
-    }
-}
-
-/// Defines a sequence of default-constructible stages, run in declaration order.
-/// The first error stops execution and is returned without rolling back earlier stages.
-///
-/// ```
-/// #![deny(missing_docs)]
-/// //! An application frame composed from two schedules.
-/// maplibre::multi_stage!(FrameStages,
-///     first: maplibre::schedule::Schedule,
-///     second: maplibre::schedule::Schedule
-/// );
-/// # fn main() { let _stages = FrameStages::default(); }
-/// ```
-#[macro_export]
-macro_rules! multi_stage {
-    ($multi_stage:ident, $($stage:ident: $stage_ty:ty),*) => {
-        /// Runs its stages in declaration order and returns the first error.
-        pub struct $multi_stage {
-            $($stage: $stage_ty),*
-        }
-
-        impl $crate::schedule::Stage for $multi_stage {
-            fn run(
-                &mut self,
-                context: &mut $crate::context::MapContext,
-            ) -> $crate::schedule::StageResult {
-                $($crate::schedule::Stage::run(&mut self.$stage, context)?;)*
-                Ok(())
-            }
-        }
-
-        impl ::core::default::Default for $multi_stage {
-            fn default() -> Self {
-                $multi_stage {
-                     $($stage: <$stage_ty as ::core::default::Default>::default()),*
-                }
-            }
-        }
-    };
-}
-
-/// Runs a fixed-size array of stages in order, stopping at the first error.
-pub struct MultiStage<const I: usize, S>
-where
-    S: Stage,
-{
-    stages: [S; I],
-}
-
-impl<const I: usize, S> MultiStage<I, S>
-where
-    S: Stage,
-{
-    /// Takes ownership of stages in their execution order.
-    pub fn new(stages: [S; I]) -> Self {
-        Self { stages }
-    }
-}
-
-impl<const I: usize, S> Stage for MultiStage<I, S>
-where
-    S: Stage,
-{
-    fn run(&mut self, context: &mut MapContext) -> StageResult {
-        for stage in self.stages.iter_mut() {
-            stage.run(context)?
-        }
-
         Ok(())
     }
 }
@@ -125,9 +51,26 @@ impl_downcast!(Stage);
 /// returned. Schedules can be nested because they also implement [`Stage`].
 #[derive(Default)]
 pub struct Schedule {
-    stages: HashMap<BoxedStageLabel, Box<dyn Stage>>,
-    stage_order: Vec<BoxedStageLabel>,
-    after_failure: Vec<BoxedStageLabel>,
+    entries: Vec<Entry>,
+}
+
+struct Entry {
+    label: BoxedStageLabel,
+    /// The label's name in frame timings, formatted once when the stage is added.
+    name: Arc<str>,
+    stage: Box<dyn Stage>,
+    after_failure: bool,
+}
+
+impl Entry {
+    fn new(label: BoxedStageLabel, stage: Box<dyn Stage>) -> Self {
+        Self {
+            name: format!("{label:?}").into(),
+            label,
+            stage,
+            after_failure: false,
+        }
+    }
 }
 
 impl Schedule {
@@ -145,10 +88,12 @@ impl Schedule {
     /// # Panics
     /// Panics if the label is already registered.
     pub fn add_stage<S: Stage>(&mut self, label: impl StageLabel, stage: S) -> &mut Self {
-        let label: Box<dyn StageLabel> = Box::new(label);
-        self.stage_order.push(label.clone());
-        let prev = self.stages.insert(label.clone(), Box::new(stage));
-        assert!(prev.is_none(), "Stage already exists: {label:?}.");
+        let label: BoxedStageLabel = Box::new(label);
+        assert!(
+            self.position(&*label).is_none(),
+            "Stage already exists: {label:?}."
+        );
+        self.entries.push(Entry::new(label, Box::new(stage)));
         self
     }
 
@@ -157,9 +102,8 @@ impl Schedule {
     /// # Panics
     /// Panics if the label is absent.
     pub fn remove_stage(&mut self, label: impl StageLabel) -> &mut Self {
-        let remove: Box<dyn StageLabel> = Box::new(label);
-        self.stages.remove(&remove).expect("stage not found");
-        self.stage_order.retain(|label| label != &remove);
+        let index = self.position(&label).expect("stage not found");
+        self.entries.remove(index);
         self
     }
 
@@ -183,19 +127,16 @@ impl Schedule {
         label: impl StageLabel,
         stage: S,
     ) -> &mut Self {
-        let label: Box<dyn StageLabel> = Box::new(label);
-        let target = &target as &dyn StageLabel;
+        let label: BoxedStageLabel = Box::new(label);
         let target_index = self
-            .stage_order
-            .iter()
-            .enumerate()
-            .find(|(_i, stage_label)| &***stage_label == target)
-            .map(|(i, _)| i)
+            .position(&target)
             .unwrap_or_else(|| panic!("Target stage does not exist: {target:?}."));
-
-        self.stage_order.insert(target_index + 1, label.clone());
-        let prev = self.stages.insert(label.clone(), Box::new(stage));
-        assert!(prev.is_none(), "Stage already exists: {label:?}.");
+        assert!(
+            self.position(&*label).is_none(),
+            "Stage already exists: {label:?}."
+        );
+        self.entries
+            .insert(target_index + 1, Entry::new(label, Box::new(stage)));
         self
     }
 
@@ -220,19 +161,16 @@ impl Schedule {
         label: impl StageLabel,
         stage: S,
     ) -> &mut Self {
-        let label: Box<dyn StageLabel> = Box::new(label);
-        let target = &target as &dyn StageLabel;
+        let label: BoxedStageLabel = Box::new(label);
         let target_index = self
-            .stage_order
-            .iter()
-            .enumerate()
-            .find(|(_i, stage_label)| &***stage_label == target)
-            .map(|(i, _)| i)
+            .position(&target)
             .unwrap_or_else(|| panic!("Target stage does not exist: {target:?}."));
-
-        self.stage_order.insert(target_index, label.clone());
-        let prev = self.stages.insert(label.clone(), Box::new(stage));
-        assert!(prev.is_none(), "Stage already exists: {label:?}.");
+        assert!(
+            self.position(&*label).is_none(),
+            "Stage already exists: {label:?}."
+        );
+        self.entries
+            .insert(target_index, Entry::new(label, Box::new(stage)));
         self
     }
 
@@ -287,9 +225,10 @@ impl Schedule {
     /// let stage = schedule.get_stage::<NopStage>(&"my_stage").unwrap();
     /// ```
     pub fn get_stage<T: Stage>(&self, label: &dyn StageLabel) -> Option<&T> {
-        self.stages
-            .get(label)
-            .and_then(|stage| stage.downcast_ref::<T>())
+        self.entries
+            .iter()
+            .find(|entry| &*entry.label == label)
+            .and_then(|entry| entry.stage.downcast_ref::<T>())
     }
 
     /// Returns a unique, mutable reference to the stage identified by `label`, if it exists.
@@ -307,9 +246,10 @@ impl Schedule {
     /// let stage = schedule.get_stage_mut::<NopStage>(&"my_stage").unwrap();
     /// ```
     pub fn get_stage_mut<T: Stage>(&mut self, label: &dyn StageLabel) -> Option<&mut T> {
-        self.stages
-            .get_mut(label)
-            .and_then(|stage| stage.downcast_mut::<T>())
+        self.entries
+            .iter_mut()
+            .find(|entry| &*entry.label == label)
+            .and_then(|entry| entry.stage.downcast_mut::<T>())
     }
 
     /// Executes stages in order; after a failure only stages marked with
@@ -318,81 +258,62 @@ impl Schedule {
         self.run_stages(context, |_| true)
     }
 
-    /// Runs the selected stages, preserving their declared order.
+    /// Runs the selected stages, preserving their declared order, and records each stage's
+    /// time in the [`timings::FrameTimings`].
     pub(crate) fn run_stages(
         &mut self,
         context: &mut MapContext,
         include: impl Fn(&dyn StageLabel) -> bool,
     ) -> StageResult {
-        let _pipeline_scope = crate::render::resource::SharedPipelines::enter(
-            context.renderer.shared_pipelines.clone(),
-        );
         let mut failure = None;
-        for label in &self.stage_order {
-            if !include(&**label) {
+        for entry in &mut self.entries {
+            if !include(&*entry.label) {
                 continue;
             }
             // After a failure only the stages that release the frame's state still run, so
             // the next frame starts clean.
-            if failure.is_some() && !self.after_failure.contains(label) {
+            if failure.is_some() && !entry.after_failure {
                 continue;
             }
             #[cfg(feature = "trace")]
-            let _stage_span = tracing::info_span!("stage", name = ?label).entered();
-            let Some(stage) = self.stages.get_mut(label) else {
-                continue;
-            };
-            let started = instant::Instant::now();
-            let heap_before = live_bytes();
-            if let Err(error) = stage.run(context) {
+            let _stage_span = tracing::info_span!("stage", name = entry.name.as_ref()).entered();
+            let (result, spent) =
+                timings::measure(context, &entry.name, |context| entry.stage.run(context));
+            timings::stage_finished(&mut context.world, entry.name.clone(), spent);
+            if let Err(error) = result {
                 if failure.is_none() {
                     failure = Some(error);
                 } else {
-                    tracing::error!(%error, stage = ?label, "stage failed after an earlier failure");
+                    tracing::error!(%error, stage = entry.name.as_ref(), "stage failed after an earlier failure");
                 }
             }
-            let spent = started.elapsed();
-            let grown = live_bytes() - heap_before;
-            let timings = context.world.resources.get_or_init_mut::<FrameTimings>();
-            timings.record(Cow::Owned(format!("stage {label:?}")), spent);
-            timings.record_growth(Cow::Owned(format!("stage {label:?}")), grown);
-            crate::render::frame_signals::record_stage(
-                &mut context.world,
-                format!("{label:?}"),
-                spent,
-            );
         }
-        crate::render::frame_signals::finish_frame(context);
-        context
-            .world
-            .resources
-            .get_or_init_mut::<FrameTimings>()
-            .end_frame();
         failure.map_or(Ok(()), Err)
+    }
+
+    fn position(&self, label: &dyn StageLabel) -> Option<usize> {
+        self.entries.iter().position(|entry| &*entry.label == label)
     }
 
     /// Marks the stage with `label` to run even when an earlier stage of the same update
     /// failed, for stages that release per-frame state.
     pub fn run_after_failure(&mut self, label: impl StageLabel) -> &mut Self {
-        let label: BoxedStageLabel = Box::new(label);
-        if !self.after_failure.contains(&label) {
-            self.after_failure.push(label);
+        if let Some(index) = self.position(&label) {
+            self.entries[index].after_failure = true;
         }
         self
     }
 
     /// Drops all stages and their labels without changing the frame context.
     pub fn clear(&mut self) {
-        self.stage_order.clear();
-        self.stages.clear();
-        self.after_failure.clear();
+        self.entries.clear();
     }
 
     /// Iterates over all of schedule's stages and their labels, in execution order.
     pub fn iter_stages(&self) -> impl Iterator<Item = (&dyn StageLabel, &dyn Stage)> {
-        self.stage_order
+        self.entries
             .iter()
-            .map(move |label| (&**label, &*self.stages[label]))
+            .map(|entry| (&*entry.label, &*entry.stage))
     }
 
     /// Adds a system to the [`Stage`] identified by `stage_label`.

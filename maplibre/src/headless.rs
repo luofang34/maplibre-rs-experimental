@@ -16,14 +16,11 @@ use crate::{
     kernel::Kernel,
     plugin::Plugin,
     render::{
-        builder::RendererBuilder, frame_input::frame_input_system, graph::RenderGraph,
-        settings::RendererSettings, tile_view_pattern::ViewTileSources, RenderStageLabel, Renderer,
+        builder::RendererBuilder, graph::RenderGraph, settings::RendererSettings,
+        tile_view_pattern::ViewTileSources, RenderStageLabel, Renderer,
     },
     schedule::Schedule,
-    tcs::{
-        system::{stage::SystemStage, SystemContainer},
-        world::World,
-    },
+    tcs::{system::SystemContainer, world::World},
     window::{MapWindowConfig, PhysicalSize},
 };
 
@@ -255,17 +252,8 @@ impl Plugin<HeadlessEnvironment> for HeadlessPlugin {
             );
         }
 
-        schedule.remove_stage(RenderStageLabel::Extract);
-        // The headless map gets its tiles handed in, so nothing is requested, but the frame
-        // input still has to be applied before anything reads the view.
-        schedule.add_stage_before(
-            RenderStageLabel::Prepare,
-            RenderStageLabel::Extract,
-            SystemStage::default()
-                .with_system(frame_input_system)
-                .with_system(crate::context::camera_flight_system)
-                .with_system(crate::terrain::elevation::center_target_system),
-        );
+        // The headless map is handed its tiles, so nothing is requested.
+        schedule.remove_stage(RenderStageLabel::Request);
         if !self.preserve_tile_sources {
             resources.get_mut::<ViewTileSources>().unwrap().clear();
         }
@@ -293,5 +281,45 @@ mod tests {
         let order = graph.node_order().expect("acyclic");
         let position = |name| order.iter().position(|pass| *pass == name);
         assert!(position(draw_graph::node::TRANSLUCENT_PASS) < position(draw_graph::node::COPY));
+    }
+
+    #[test]
+    #[allow(clippy::expect_used)]
+    fn headless_maps_drop_only_the_request_stage() {
+        use std::rc::Rc;
+
+        use crate::{
+            plugin::Plugin,
+            render::{RenderPlugin, RenderStageLabel},
+            schedule::Schedule,
+            tcs::world::World,
+        };
+
+        let size = crate::window::PhysicalSize::new(8, 8).expect("size");
+        let kernel = Rc::new(
+            crate::headless::environment::create_kernel(size, None, None, None).expect("kernel"),
+        );
+        let mut world = World::default();
+        let mut schedule = Schedule::default();
+        let mut graph = RenderGraph::default();
+        RenderPlugin.build(&mut schedule, Rc::clone(&kernel), &mut world, &mut graph);
+        super::HeadlessPlugin::new(false).build(&mut schedule, kernel, &mut world, &mut graph);
+
+        let stages: Vec<String> = schedule
+            .iter_stages()
+            .map(|(label, _)| format!("{label:?}"))
+            .collect();
+        let expected: Vec<String> = [
+            RenderStageLabel::Input,
+            RenderStageLabel::Prepare,
+            RenderStageLabel::Queue,
+            RenderStageLabel::PhaseSort,
+            RenderStageLabel::Render,
+            RenderStageLabel::Cleanup,
+        ]
+        .iter()
+        .map(|label| format!("{label:?}"))
+        .collect();
+        assert_eq!(stages, expected);
     }
 }

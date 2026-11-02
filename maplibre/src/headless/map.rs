@@ -24,7 +24,7 @@ use crate::{
         view_state::{ViewState, ViewStatePadding},
         Renderer,
     },
-    schedule::{Schedule, Stage},
+    schedule::Schedule,
     sdf::SymbolLayersDataComponent,
     style::{layer::StyleLayer, Style},
     tcs::world::World,
@@ -187,7 +187,7 @@ impl HeadlessMap {
         for coords in dem_coords {
             backfill_neighbours(tiles, coords);
         }
-        if let Err(error) = self.schedule.run(context) {
+        if let Err(error) = crate::render::frame::run_frame(&mut self.schedule, context) {
             tracing::warn!(?error, "terrain index warm-up frame failed");
         }
         Ok(())
@@ -300,8 +300,7 @@ impl HeadlessMap {
                 .resources
                 .get_or_init_mut::<FrameInput>()
                 .advance(HEADLESS_FRAME_INTERVAL);
-            self.schedule
-                .run(&mut self.map_context)
+            crate::render::frame::run_frame(&mut self.schedule, &mut self.map_context)
                 .map_err(|source| HeadlessMapOperationError::Schedule { source })?;
         }
         Ok(())
@@ -312,8 +311,7 @@ impl HeadlessMap {
     /// A map built without the headless plugin keeps its request systems, so this is the
     /// frame step of a host that renders into the offscreen texture continuously.
     pub fn run_frame(&mut self) -> Result<(), HeadlessMapOperationError> {
-        self.schedule
-            .run(&mut self.map_context)
+        crate::render::frame::run_frame(&mut self.schedule, &mut self.map_context)
             .map_err(|source| HeadlessMapOperationError::Schedule { source })
     }
 

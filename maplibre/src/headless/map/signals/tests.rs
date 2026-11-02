@@ -103,9 +103,9 @@ async fn frame_statistics_count_the_work_of_each_frame() {
         "the new tile's texture is uploaded: {loading:?}"
     );
     assert!(loading.draws > 0, "{loading:?}");
-    for stage in ["Extract", "Prepare", "Queue", "Render"] {
+    for stage in ["Input", "Prepare", "Queue", "Render"] {
         assert!(
-            loading.stages.iter().any(|(name, _)| name == stage),
+            loading.stages.iter().any(|(name, _)| &**name == stage),
             "{stage} is timed: {:?}",
             loading.stages
         );
@@ -158,7 +158,7 @@ async fn a_stage_is_charged_the_time_its_systems_take() {
     let twenty = std::time::Duration::from_millis(20);
     let mut slowed = Vec::new();
     for (label, name) in [
-        (RenderStageLabel::Extract, "Extract"),
+        (RenderStageLabel::Input, "Input"),
         (RenderStageLabel::Prepare, "Prepare"),
         (RenderStageLabel::Queue, "Queue"),
         (RenderStageLabel::Render, "Render"),
@@ -174,7 +174,7 @@ async fn a_stage_is_charged_the_time_its_systems_take() {
             let spent = stats
                 .stages
                 .iter()
-                .find(|(name, _)| name == stage)
+                .find(|(name, _)| &**name == *stage)
                 .map(|(_, spent)| *spent)
                 .expect("stage timed");
             assert!(spent >= twenty, "{stage} is not charged: {stats:?}");
@@ -404,4 +404,30 @@ async fn the_main_pass_gpu_time_lands_in_the_frame_it_timed() {
         }
     }
     assert!(arrivals >= 1, "a GPU time came back: {arrivals}");
+}
+
+#[tokio::test]
+async fn later_eyes_preserve_earlier_eye_animation_signals() {
+    use crate::render::eye_covering::EyeInFrame;
+    let mut map = raster_map().await;
+    map.render_frames_with_terrain(Default::default(), vec![picture()], vec![], 1)
+        .expect("frame");
+    assert!(settle(&mut map), "still map settles");
+
+    map.map_context
+        .world
+        .resources
+        .insert(EyeInFrame { index: 0, frame: 1 });
+    crate::render::frame_signals::keep_animating(&mut map.map_context.world);
+    crate::render::frame_signals::finish_frame(&mut map.map_context);
+
+    map.map_context
+        .world
+        .resources
+        .insert(EyeInFrame { index: 1, frame: 1 });
+    crate::render::frame_signals::finish_frame(&mut map.map_context);
+    assert!(
+        map.needs_redraw(),
+        "second eye must not clear first eye's animation signal"
+    );
 }

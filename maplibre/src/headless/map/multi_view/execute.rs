@@ -146,16 +146,19 @@ impl HeadlessMap {
             input.view = ViewSource::MapView;
         }
 
-        self.schedule
-            .run_stages(&mut self.map_context, |label| {
-                label == &RenderStageLabel::Extract as &dyn StageLabel
-            })
-            .map_err(|source| {
-                self.map_context.view_state = saved_view_state.clone();
-                MultiViewError::SlotStage { slot: None, source }
-            })?;
+        crate::render::frame::run_stages_only(&mut self.schedule, &mut self.map_context, |label| {
+            label == &RenderStageLabel::Input as &dyn StageLabel
+                || label == &RenderStageLabel::Request as &dyn StageLabel
+        })
+        .map_err(|source| {
+            self.map_context.view_state = saved_view_state.clone();
+            MultiViewError::SlotStage { slot: None, source }
+        })?;
 
+        let mut had_active = false;
+        let mut dirty_across_slots = false;
         for (entry, slot_view) in active {
+            had_active = true;
             self.map_context.view_state = slot_view.clone();
             self.map_context
                 .world
@@ -233,10 +236,15 @@ impl HeadlessMap {
                     &mut self.map_context.renderer,
                     &mut self.map_context.world,
                 );
-                let res = self.schedule.run_stages(&mut self.map_context, |label| {
-                    label != &RenderStageLabel::Extract as &dyn StageLabel
-                        && label != &RenderStageLabel::Cleanup as &dyn StageLabel
-                });
+                let res = crate::render::frame::run_stages(
+                    &mut self.schedule,
+                    &mut self.map_context,
+                    |label| {
+                        label != &RenderStageLabel::Input as &dyn StageLabel
+                            && label != &RenderStageLabel::Request as &dyn StageLabel
+                            && label != &RenderStageLabel::Cleanup as &dyn StageLabel
+                    },
+                );
                 self.map_context.renderer.resources.render_target.take();
                 if let Some(slot_state) = registry.slots.get_mut(&entry.slot) {
                     swap_slot_resources(
@@ -255,6 +263,7 @@ impl HeadlessMap {
                     source,
                 });
             }
+            dirty_across_slots |= crate::render::frame_signals::is_dirty(&self.map_context.world);
 
             if matches!(entry.policy, CoveringPolicy::Independent) {
                 if let Some(slot_state) = registry.slots.get_mut(&entry.slot) {
@@ -274,15 +283,27 @@ impl HeadlessMap {
             frame: frame_number,
         });
         self.map_context.world.resources.insert(floor);
-        self.schedule
-            .run_stages(&mut self.map_context, |label| {
-                label == &RenderStageLabel::Cleanup as &dyn StageLabel
-            })
-            .map_err(|source| {
-                self.map_context.view_state = saved_view_state.clone();
-                MultiViewError::SlotStage { slot: None, source }
-            })?;
+        let cleanup = crate::render::frame::run_stages_only(
+            &mut self.schedule,
+            &mut self.map_context,
+            |label| label == &RenderStageLabel::Cleanup as &dyn StageLabel,
+        );
         self.map_context.view_state = saved_view_state;
+        cleanup.map_err(|source| MultiViewError::SlotStage { slot: None, source })?;
+        if !had_active {
+            crate::render::frame_signals::finish_frame(&mut self.map_context);
+        } else {
+            let timings = self
+                .map_context
+                .world
+                .resources
+                .get_or_init_mut::<crate::tcs::system::timings::FrameTimings>();
+            let _ = timings.take_stage_times();
+            timings.end_frame();
+            if dirty_across_slots {
+                crate::render::frame_signals::mark_dirty(&mut self.map_context.world);
+            }
+        }
         Ok(())
     }
 }

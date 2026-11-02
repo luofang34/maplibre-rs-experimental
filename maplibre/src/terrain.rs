@@ -141,14 +141,14 @@ impl<E: Environment, T: DemTransferables> Plugin<E> for TerrainPlugin<T> {
         world.resources.init::<TerrainCoverageIndex>();
 
         schedule.add_system_to_stage(
-            RenderStageLabel::Extract,
+            RenderStageLabel::Request,
             SystemContainer::new(RequestSystem::<E, T>::new(&kernel)),
         );
         schedule.add_system_to_stage(
-            RenderStageLabel::Extract,
+            RenderStageLabel::Request,
             SystemContainer::new(PopulateWorldSystem::<E, T>::new(&kernel)),
         );
-        // Prepare rather than Extract: headless rendering drops the Extract stage, and the
+        // Prepare rather than Request: headless rendering drops the Request stage, and the
         // elevation must be known before the Queue stage builds the view pattern. The index
         // runs first so the center elevation samples this frame's tiles.
         schedule.add_system_to_stage(RenderStageLabel::Prepare, coverage::coverage_system);

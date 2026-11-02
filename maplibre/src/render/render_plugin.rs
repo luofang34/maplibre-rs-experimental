@@ -71,15 +71,16 @@ impl<E: Environment> Plugin<E> for RenderPlugin {
             .get_or_init_mut::<super::AfterSubmitCallbacks>()
             .register(super::gpu_timer::map_after_submit);
 
-        // The frame input comes first: the request systems the plugins add to Extract must
+        // The frame input comes first: the request systems the plugins add to Request must
         // already see the frame's view.
         schedule.add_stage(
-            RenderStageLabel::Extract,
+            RenderStageLabel::Input,
             SystemStage::default()
                 .with_system(frame_input::frame_input_system)
                 .with_system(crate::context::camera_flight_system)
                 .with_system(crate::terrain::elevation::center_target_system),
         );
+        schedule.add_stage(RenderStageLabel::Request, SystemStage::default());
         schedule.add_stage(
             RenderStageLabel::Prepare,
             SystemStage::default().with_system(SystemContainer::new(ResourceSystem)),

@@ -181,7 +181,7 @@ impl FrameTrace {
         };
         for (stage, spent) in &stats.stages {
             record.spans.push(Span {
-                name: stage.clone(),
+                name: stage.to_string(),
                 clock: Clock::Cpu,
                 duration: *spent,
             });
