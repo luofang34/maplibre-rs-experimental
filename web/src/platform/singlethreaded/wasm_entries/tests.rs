@@ -18,8 +18,12 @@ fn never_finishes(
 async fn a_call_is_cancellable_as_soon_as_the_worker_starts_it() {
     let calls = TileWorkerCalls::new();
     let procedure: AsyncProcedure<UsedOffscreenKernelEnvironment, UsedContext> = never_finishes;
-    let input = serde_json::to_string(&Input::new(Default::default(), Default::default(), 11))
-        .expect("input");
+    let input = serde_json::to_string(&Input::new(
+        Default::default(),
+        maplibre::style::Style::default(),
+        11,
+    ))
+    .expect("input");
 
     let call = calls
         .process(procedure as usize as u32, input)

@@ -122,8 +122,9 @@ impl IntoMessage for Message {
 pub struct Input {
     /// Tile grid location requested from the worker.
     pub coords: WorldTileCoords,
-    /// Style snapshot used to choose and process the tile's layers.
-    pub style: Style,
+    /// Style snapshot used to choose and process the tile's layers, shared by the requests
+    /// made from the same style.
+    pub style: Arc<Style>,
     /// Identifier distinguishing requests when coordinates are evicted and reused.
     pub attempt: u64,
     /// The zoom a vector tile is drawn at when that is past its source's last zoom; zero
@@ -146,10 +147,10 @@ fn one() -> f32 {
 impl Input {
     /// Requests every source of a tile at its own zoom for a display of one pixel per
     /// layout pixel.
-    pub fn new(coords: WorldTileCoords, style: Style, attempt: u64) -> Self {
+    pub fn new(coords: WorldTileCoords, style: impl Into<Arc<Style>>, attempt: u64) -> Self {
         Self {
             coords,
-            style,
+            style: style.into(),
             attempt,
             overscaled_zoom: 0,
             pixel_ratio: 1.0,

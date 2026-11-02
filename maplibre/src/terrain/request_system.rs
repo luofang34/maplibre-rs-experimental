@@ -11,12 +11,14 @@ use crate::{
             AsyncProcedureCall, AsyncProcedureFuture, AttemptContext, Context, Input,
             ProcedureError,
         },
+        frame_style::FrameStyle,
         tile_backpressure::request_budget,
         tile_retry::{self, RequestDisposition, RequestKind, TileRequestOutcome},
         tile_sources::missing_tile_fallback,
     },
     kernel::Kernel,
     render::view_state::ViewStatePadding,
+    style::Style,
     tcs::{
         system::{System, SystemError, SystemResult},
         tiles::Tiles,
@@ -163,6 +165,7 @@ impl<E: Environment, T: DemTransferables> System for RequestSystem<E, T> {
             dem.minzoom,
             dem.maxzoom,
         ));
+        let mut frame_style = FrameStyle::new(style);
         for coords in wanted {
             if coords.build_quad_key().is_none() || !requested.insert(coords) {
                 continue;
@@ -178,7 +181,7 @@ impl<E: Environment, T: DemTransferables> System for RequestSystem<E, T> {
             }
             budget -= 1;
             // One rejected tile must not cost the frame its other tiles.
-            if let Err(error) = self.request(coords, style, world) {
+            if let Err(error) = self.request(coords, &mut frame_style, world) {
                 tracing::warn!(%error, "tile request rejected; a later frame requests the tile again");
                 crate::render::frame_signals::keep_animating(world);
             }
@@ -196,7 +199,7 @@ impl<E: Environment, T: DemTransferables> RequestSystem<E, T> {
     fn request(
         &self,
         coords: WorldTileCoords,
-        style: &crate::style::Style,
+        style: &mut FrameStyle,
         world: &mut crate::tcs::world::World,
     ) -> SystemResult {
         let exists = world.tiles.query::<&DemTileComponent>(coords).is_some();
@@ -207,7 +210,7 @@ impl<E: Environment, T: DemTransferables> RequestSystem<E, T> {
         self.kernel
             .apc()
             .call(
-                Input::new(coords, style.clone(), attempt),
+                Input::new(coords, style.share(Style::clone), attempt),
                 fetch_dem_apc::<E::OffscreenKernelEnvironment, T, _>,
             )
             .map_err(|source| SystemError::TileRequest {

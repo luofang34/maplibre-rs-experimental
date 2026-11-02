@@ -58,7 +58,7 @@ async fn a_call_delivers_its_message_back_to_the_map_thread() {
         LocalScheduler,
         OffscreenKernelConfig::default(),
     );
-    let input = Input::new(Default::default(), Default::default(), 0);
+    let input = Input::new(Default::default(), maplibre::style::Style::default(), 0);
     apc.call(input, answer).expect("the call is admitted");
     assert!(
         !apc.has_arrivals(),

@@ -11,3 +11,5 @@ mod vector;
 mod image_payloads;
 
 mod image_source;
+
+mod shared_style;
