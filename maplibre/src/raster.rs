@@ -98,11 +98,11 @@ impl<E: Environment, T: RasterTransferables> Plugin<E> for RasterPlugin<T> {
             .add::<RasterTilesDone>(TileKind::Raster);
 
         schedule.add_system_to_stage(
-            RenderStageLabel::Extract,
+            RenderStageLabel::Request,
             SystemContainer::new(RequestSystem::<E, T>::new(&kernel)),
         );
         schedule.add_system_to_stage(
-            RenderStageLabel::Extract,
+            RenderStageLabel::Request,
             SystemContainer::new(PopulateWorldSystem::<E, T>::new(&kernel)),
         );
         schedule.add_system_to_stage(RenderStageLabel::Prepare, resource_system);

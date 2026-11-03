@@ -30,9 +30,6 @@ impl<const ID: u8> crate::schedule::Stage for Record<ID> {
     }
 }
 
-crate::multi_stage!(Successful, first: Record<1>, last: Record<3>);
-crate::multi_stage!(Failing, first: Record<1>, failure: Record<2>, last: Record<3>);
-
 async fn context() -> MapContext {
     let (_, renderer) = crate::headless::create_headless_renderer(16, 16, None)
         .await
@@ -52,11 +49,16 @@ async fn context() -> MapContext {
 }
 
 #[tokio::test]
-async fn composed_stages_execute_in_order() {
+async fn nested_schedules_run_their_stages_in_order() {
     let mut context = context().await;
-    let mut stage = Successful::default();
-    crate::schedule::Stage::run(&mut stage, &mut context).expect("successful stages");
-    crate::schedule::Stage::run(&mut stage, &mut context).expect("another update");
+    let mut inner = crate::schedule::Schedule::default();
+    inner
+        .add_stage("first", Record::<1>)
+        .add_stage("last", Record::<3>);
+    let mut outer = crate::schedule::Schedule::default();
+    outer.add_stage("inner", inner);
+    outer.run_once(&mut context).expect("successful stages");
+    outer.run_once(&mut context).expect("another update");
     assert_eq!(
         context.world.resources.get::<Vec<u8>>(),
         Some(&vec![1, 3, 1, 3])
@@ -64,15 +66,25 @@ async fn composed_stages_execute_in_order() {
 }
 
 #[tokio::test]
-async fn composed_stages_propagate_failure_without_running_later_stages() {
+async fn stage_times_are_kept_in_run_order_without_frame_bookkeeping() {
     let mut context = context().await;
-    let error = crate::schedule::Stage::run(&mut Failing::default(), &mut context)
-        .expect_err("second stage fails");
-    assert!(
-        matches!(error, StageError::System(SystemError::InvalidTile { coords })
-        if coords == WorldTileCoords::default())
+    let mut schedule = crate::schedule::Schedule::default();
+    schedule
+        .add_stage("first", Record::<1>)
+        .add_stage("last", Record::<3>);
+    schedule.run_once(&mut context).expect("successful stages");
+    let stages = context
+        .world
+        .resources
+        .get_or_init_mut::<crate::tcs::system::timings::FrameTimings>()
+        .take_stage_times();
+    let names: Vec<&str> = stages.iter().map(|(name, _)| name.as_ref()).collect();
+    assert_eq!(names, ["\"first\"", "\"last\""]);
+    assert_eq!(
+        context.last_frame_stats().frame,
+        0,
+        "only a frame run finishes a frame"
     );
-    assert_eq!(context.world.resources.get::<Vec<u8>>(), Some(&vec![1, 2]));
 }
 
 #[tokio::test]
@@ -86,8 +98,7 @@ async fn a_failed_stage_still_runs_cleanup_stages_and_finishes_the_frame() {
         .add_stage("cleanup", Record::<4>)
         .run_after_failure("cleanup");
 
-    let error = schedule
-        .run_once(&mut context)
+    let error = crate::render::frame::run_frame(&mut schedule, &mut context)
         .expect_err("second stage fails");
 
     assert!(matches!(

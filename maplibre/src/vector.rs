@@ -202,11 +202,11 @@ impl<E: Environment, T: VectorTransferables> Plugin<E> for VectorPlugin<T> {
             .add::<VectorTilesDone>(TileKind::Vector);
 
         schedule.add_system_to_stage(
-            RenderStageLabel::Extract,
+            RenderStageLabel::Request,
             SystemContainer::new(RequestSystem::<E, T>::new(&kernel)),
         );
         schedule.add_system_to_stage(
-            RenderStageLabel::Extract,
+            RenderStageLabel::Request,
             SystemContainer::new(PopulateWorldSystem::<E, T>::new(&kernel)),
         );
 

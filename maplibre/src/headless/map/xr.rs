@@ -94,14 +94,24 @@ impl HeadlessMap {
             }
             resources.eye_depth_target = eye.target.depth;
             let result = if index == 0 {
-                self.schedule.run_once(&mut self.map_context)
+                crate::render::frame::run_frame(&mut self.schedule, &mut self.map_context)
             } else {
+                // Later eyes apply their own view; the camera advanced and the tiles were
+                // requested once, for the first eye.
                 frame_input_system(&mut self.map_context)
                     .map_err(StageError::from)
                     .and_then(|()| {
-                        self.schedule.run_stages(&mut self.map_context, |label| {
-                            label != &RenderStageLabel::Extract as &dyn crate::schedule::StageLabel
-                        })
+                        crate::render::frame::run_stages(
+                            &mut self.schedule,
+                            &mut self.map_context,
+                            |label| {
+                                label
+                                    != &RenderStageLabel::Input as &dyn crate::schedule::StageLabel
+                                    && label
+                                        != &RenderStageLabel::Request
+                                            as &dyn crate::schedule::StageLabel
+                            },
+                        )
                     })
             };
             let resources = &mut self.map_context.renderer.resources;

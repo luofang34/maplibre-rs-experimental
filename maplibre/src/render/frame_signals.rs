@@ -40,7 +40,7 @@ pub struct FrameStats {
     /// which a frame timeline records the frame under.
     pub host_frame: u64,
     /// CPU time of each schedule stage, in the order they ran.
-    pub stages: Vec<(String, Duration)>,
+    pub stages: Vec<(std::sync::Arc<str>, Duration)>,
     /// GPU time of the latest main pass whose timestamps came back, usually the previous
     /// frame's; absent when the device cannot time passes or none came back this frame.
     pub gpu: Option<Duration>,
@@ -89,6 +89,15 @@ pub(crate) fn keep_animating(world: &mut World) {
     signals(world).animating = true;
 }
 
+/// Whether the last finished pass left the map marked dirty for a follow-up frame.
+#[cfg(feature = "headless")]
+pub(crate) fn is_dirty(world: &World) -> bool {
+    world
+        .resources
+        .get::<FrameSignals>()
+        .is_some_and(|signals| signals.dirty)
+}
+
 /// A resource finished loading; the map is dirty and the host is told.
 pub(crate) fn resource_ready(world: &mut World, ready: ResourceReady) {
     let signals = signals(world);
@@ -117,10 +126,6 @@ fn eye_index(world: &World) -> usize {
 }
 
 /// Charges a stage's CPU time to the current frame.
-pub(crate) fn record_stage(world: &mut World, stage: String, spent: Duration) {
-    signals(world).current.stages.push((stage, spent));
-}
-
 /// Counts terrain drapes drawn again this frame.
 pub(crate) fn count_drape_redraws(world: &mut World, redraws: usize) {
     let current = &mut signals(world).current;
@@ -189,6 +194,11 @@ fn camera_of(view_state: &crate::render::view_state::ViewState) -> [f64; 24] {
 /// and the camera it drew is remembered.
 pub(crate) fn finish_frame(context: &mut MapContext) {
     let upload_bytes = context.renderer.queue.take_written_bytes();
+    let stages = context
+        .world
+        .resources
+        .get_or_init_mut::<crate::tcs::system::timings::FrameTimings>()
+        .take_stage_times();
     let draws = context
         .world
         .resources
@@ -204,9 +214,15 @@ pub(crate) fn finish_frame(context: &mut MapContext) {
     finished.frame = signals.frame;
     finished.host_frame = host_frame;
     finished.upload_bytes = upload_bytes;
+    finished.stages = stages;
     finished.draws = draws;
     signals.last = finished;
-    signals.dirty = std::mem::take(&mut signals.animating);
+    let animating = std::mem::take(&mut signals.animating);
+    if eye == 0 {
+        signals.dirty = animating;
+    } else {
+        signals.dirty |= animating;
+    }
     if eye == 0 && signals.cameras.first() != Some(&drawn) {
         signals.camera_revision = signals.camera_revision.wrapping_add(1);
     }

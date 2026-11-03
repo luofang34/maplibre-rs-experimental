@@ -26,7 +26,8 @@ async fn setup_covering() -> (
     let (kernel, mut context) = super::super::systems::setup().await;
     let mut schedule = Schedule::default();
     for stage in [
-        RenderStageLabel::Extract,
+        RenderStageLabel::Input,
+        RenderStageLabel::Request,
         RenderStageLabel::Prepare,
         RenderStageLabel::Queue,
     ] {

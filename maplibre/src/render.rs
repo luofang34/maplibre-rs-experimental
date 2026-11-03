@@ -68,6 +68,7 @@ pub(crate) use systems::retention_system::drawn_tiles;
 #[cfg(feature = "headless")]
 pub(crate) use systems::retention_system::RetainLoadedTiles;
 pub mod after_submit;
+pub mod frame;
 pub mod frame_input;
 pub mod frame_signals;
 pub mod frame_trace;
@@ -110,27 +111,31 @@ pub(crate) const INDEX_FORMAT: wgpu::IndexFormat = wgpu::IndexFormat::Uint32; //
 /// The labels of the default App rendering stages.
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub enum RenderStageLabel {
-    /// Extract data from the world.
-    Extract,
+    /// Applies the host's frame input and advances camera animation, so every later system
+    /// sees the frame's view.
+    Input,
 
-    /// Prepare render resources from the extracted data for the GPU.
-    /// For example during this phase textures are created, buffers are allocated and written.
+    /// Requests the tiles the view needs and applies the worker results that arrived. A map
+    /// that is handed its tiles, such as a headless one, has no request stage.
+    Request,
+
+    /// Creates or resizes GPU resources, such as pipelines and frame attachments, and writes
+    /// the frame's uniforms.
     Prepare,
 
-    /// Queues [PhaseItems](render_phase::PhaseItem) that depend on
-    /// [`Prepare`](RenderStageLabel::Prepare) data and queue up draw calls to run during the
-    /// [`Render`](RenderStageLabel::Render) stage.
-    /// For example data is uploaded to the GPU in this stage.
+    /// Uploads tile data and queues the [`PhaseItems`](render_phase::PhaseItem) the
+    /// [`Render`](RenderStageLabel::Render) stage draws.
     Queue,
 
-    /// Sort the [`RenderPhases`](crate::render::render_phase::RenderPhase) here.
+    /// Sorts the [`RenderPhases`](crate::render::render_phase::RenderPhase) and reads GPU
+    /// timings that came back from earlier frames.
     PhaseSort,
 
-    /// Actual rendering happens here.
-    /// In most cases, only the render backend should insert resources here.
+    /// Records, submits and presents the frame.
     Render,
 
-    /// Cleanup render resources here.
+    /// Clears the frame's render phases and evicts tiles that left the view; it runs even when
+    /// an earlier stage failed.
     Cleanup,
 }
 

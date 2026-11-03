@@ -4,7 +4,7 @@ use crate::{
     environment::Environment,
     map::{CurrentMapContext, Map, MapError},
     render::error::RenderError,
-    schedule::{Stage, StageError},
+    schedule::StageError,
     window::{HeadedMapWindow, MapWindowConfig},
 };
 
@@ -22,7 +22,8 @@ where
     pub fn run_schedule(&mut self) -> Result<(), MapError> {
         match &mut self.map_context {
             CurrentMapContext::Ready(map_context) => {
-                if let Err(error) = self.schedule.run(map_context) {
+                if let Err(error) = crate::render::frame::run_frame(&mut self.schedule, map_context)
+                {
                     use crate::{
                         render::resource::{Head, SurfaceAcquireError},
                         tcs::system::SystemError,
