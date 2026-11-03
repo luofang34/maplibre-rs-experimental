@@ -7,6 +7,7 @@ use crate::{
     io::{
         apc::{Input, ProcedureError},
         tile_backpressure::{request_budget, MAX_TILES_IN_FLIGHT},
+        tile_retry::{self, RequestKind},
     },
     raster::{DefaultRasterTransferables, RasterLayerData, RasterLayersDataComponent},
     tcs::world::World,
@@ -16,11 +17,16 @@ use crate::{
 mod fixture;
 use fixture::{style, Replies, TileKernel};
 
-async fn fetch(raster: bool, paths: &[&str], replies: Replies) -> Result<(), ProcedureError> {
-    let input = Input::TileRequest {
-        coords: WorldTileCoords::default(),
-        style: style(raster, paths),
-    };
+/// Attempt of requests whose results no map applies.
+const UNADMITTED: u64 = 1;
+
+async fn fetch(
+    raster: bool,
+    paths: &[&str],
+    replies: Replies,
+    attempt: u64,
+) -> Result<(), ProcedureError> {
+    let input = Input::new(WorldTileCoords::default(), style(raster, paths), attempt);
     if raster {
         crate::raster::request_system::fetch_raster_apc::<_, DefaultRasterTransferables, _>(
             input,
@@ -41,7 +47,7 @@ async fn fetch(raster: bool, paths: &[&str], replies: Replies) -> Result<(), Pro
 #[tokio::test]
 async fn corrupt_vector_source_finishes_after_reporting_missing_layers() {
     let replies = Replies::default();
-    fetch(false, &["bad"], replies.clone())
+    fetch(false, &["bad"], replies.clone(), UNADMITTED)
         .await
         .expect("failure completion delivered");
     let mut messages = std::mem::take(&mut *replies.messages.lock().expect("replies"));
@@ -54,8 +60,9 @@ async fn corrupt_vector_source_finishes_after_reporting_missing_layers() {
     assert_eq!(outcome.kind, crate::io::tile_retry::RequestKind::Vector);
     assert_eq!(outcome.coords, WorldTileCoords::default());
     assert_eq!(
-        outcome.attempt, None,
-        "direct legacy request has no tracked token"
+        outcome.attempt,
+        Some(UNADMITTED),
+        "the outcome names its request"
     );
     assert_eq!(
         outcome.disposition,
@@ -77,7 +84,7 @@ async fn corrupt_vector_source_finishes_after_reporting_missing_layers() {
 #[tokio::test]
 async fn corrupt_vector_source_does_not_stop_healthy_later_sources() {
     let replies = Replies::default();
-    fetch(false, &["bad", "vector"], replies.clone())
+    fetch(false, &["bad", "vector"], replies.clone(), UNADMITTED)
         .await
         .expect("later source processed");
     let messages = std::mem::take(&mut *replies.messages.lock().expect("replies"));
@@ -114,8 +121,10 @@ async fn raster_result(paths: &[&str]) -> World {
         .spawn_mut(coords)
         .expect("tile")
         .insert(RasterLayersDataComponent::default());
+    let attempt = tile_retry::next_attempt(&mut world);
+    tile_retry::started(&mut world, coords, RequestKind::Raster, attempt, None);
     assert_eq!(request_budget(&world), MAX_TILES_IN_FLIGHT - 1);
-    fetch(true, paths, replies.clone())
+    fetch(true, paths, replies.clone(), attempt)
         .await
         .expect("all raster results delivered");
     for message in std::mem::take(&mut *replies.messages.lock().expect("replies")) {
@@ -162,7 +171,7 @@ async fn delivery_failure(raster: bool, path: &str) {
         reject: true,
         ..Default::default()
     };
-    let error = fetch(raster, &[path], replies.clone())
+    let error = fetch(raster, &[path], replies.clone(), UNADMITTED)
         .await
         .expect_err("delivery rejected");
     let ProcedureError::Send(source) = error else {

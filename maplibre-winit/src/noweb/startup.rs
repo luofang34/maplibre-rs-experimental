@@ -24,7 +24,6 @@ use crate::{WinitApplicationError, WinitEnvironment, WinitEventLoop, WinitHostEr
 
 /// The environment of a windowed native map, which a host's plugins are written for.
 pub type NativeEnvironment = WinitEnvironment<
-    TokioScheduler,
     SharedLoader,
     ReqwestOffscreenKernelEnvironment,
     SchedulerAsyncProcedureCall<ReqwestOffscreenKernelEnvironment, TokioScheduler>,
@@ -192,7 +191,6 @@ fn create_kernel(
                 ..Default::default()
             },
         ))
-        .with_scheduler(TokioScheduler::new())
         .build()
 }
 

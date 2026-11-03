@@ -124,7 +124,12 @@ pub fn fetch_raster_apc<K: OffscreenKernel, T: RasterTransferables, C: Context +
     kernel: K,
 ) -> AsyncProcedureFuture {
     Box::pin(async move {
-        let (coords, style, attempt) = input.into_tile_request();
+        let Input {
+            coords,
+            style,
+            attempt,
+            ..
+        } = input;
         let context = AttemptContext::new(context, attempt);
 
         let client = kernel.source_client();
@@ -259,7 +264,7 @@ pub fn fetch_raster_apc<K: OffscreenKernel, T: RasterTransferables, C: Context +
             .send_back(TileRequestOutcome {
                 coords,
                 kind: RequestKind::Raster,
-                attempt,
+                attempt: Some(attempt),
                 disposition: if retry {
                     RequestDisposition::Retry
                 } else {
@@ -321,14 +326,7 @@ impl<E: Environment, T: RasterTransferables> RequestSystem<E, T> {
         self.kernel
             .apc()
             .call(
-                Input::TrackedTileRequest {
-                    attempt,
-                    coords,
-                    style: style.clone(),
-                    overscaled_zoom: 0,
-                    pixel_ratio: 1.0,
-                    only_sources: None,
-                },
+                Input::new(coords, style.clone(), attempt),
                 fetch_raster_apc::<E::OffscreenKernelEnvironment, T, _>,
             )
             .map_err(|source| SystemError::TileRequest {

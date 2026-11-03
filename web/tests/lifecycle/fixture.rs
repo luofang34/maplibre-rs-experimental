@@ -98,7 +98,6 @@ impl Scheduler for BrowserScheduler {
     }
 }
 type Environment = WinitEnvironment<
-    BrowserScheduler,
     GateClient,
     WHATWGOffscreenKernelEnvironment,
     SchedulerAsyncProcedureCall<WHATWGOffscreenKernelEnvironment, BrowserScheduler>,
@@ -142,7 +141,6 @@ fn map_with_plugins(
     let kernel = KernelBuilder::new()
         .with_map_window_config(config)
         .with_http_client(client)
-        .with_scheduler(BrowserScheduler)
         .with_apc(SchedulerAsyncProcedureCall::new(
             BrowserScheduler,
             OffscreenKernelConfig {

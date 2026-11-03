@@ -55,7 +55,6 @@ impl Environment for TestEnvironment {
     type MapWindowConfig = HeadlessMapWindowConfig;
     type AsyncProcedureCall =
         SchedulerAsyncProcedureCall<ReqwestOffscreenKernelEnvironment, TestScheduler>;
-    type Scheduler = TestScheduler;
     type HttpClient = ReqwestHttpClient;
     type OffscreenKernelEnvironment = ReqwestOffscreenKernelEnvironment;
 }
@@ -124,7 +123,6 @@ pub(super) async fn setup(
         KernelBuilder::new()
             .with_map_window_config(HeadlessMapWindowConfig::new(size))
             .with_http_client(ReqwestHttpClient::new::<String>(None))
-            .with_scheduler(scheduler.clone())
             .with_apc(SchedulerAsyncProcedureCall::new(
                 scheduler,
                 OffscreenKernelConfig {

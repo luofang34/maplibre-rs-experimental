@@ -10,6 +10,7 @@ use crate::{
     io::{
         apc::{tests::reply_context, AsyncProcedureFuture, Input},
         source_client::{HttpClient, HttpSourceClient, SourceClient, SourceFetchError},
+        tile_retry::{self, RequestKind},
     },
     raster::{populate_world_system::PopulateWorldSystem, RasterLayersDataComponent},
     tcs::system::System,
@@ -133,25 +134,27 @@ async fn source_map(relief_b: bool, terrain: bool) -> HeadlessMap {
     map
 }
 
-fn prepare_pending(map: &mut HeadlessMap) {
-    map.map_context
-        .world
+/// Admits a raster request for the target tile, returning the attempt its results carry.
+fn prepare_pending(map: &mut HeadlessMap) -> u64 {
+    let world = &mut map.map_context.world;
+    world
         .tiles
         .spawn_mut(target())
         .expect("tile")
         .insert(RasterLayersDataComponent::default());
+    let attempt = tile_retry::next_attempt(world);
+    tile_retry::started(world, target(), RequestKind::Raster, attempt, None);
+    attempt
 }
 
 fn source_request(
     map: &HeadlessMap,
     relief_b: bool,
     gate_b: Option<Arc<SourceGate>>,
+    attempt: u64,
 ) -> AsyncProcedureFuture {
     crate::raster::request_system::fetch_raster_apc::<_, DefaultRasterTransferables, _>(
-        Input::TileRequest {
-            coords: target(),
-            style: map.map_context.style.clone(),
-        },
+        Input::new(target(), map.map_context.style.clone(), attempt),
         reply_context(map.kernel.apc()),
         SourceKernel(SourceClientFixture { gate_b, relief_b }),
     )
@@ -165,8 +168,10 @@ fn apply_worker_sources(map: &mut HeadlessMap) {
 }
 
 async fn deliver_worker_sources(map: &mut HeadlessMap, relief_b: bool) {
-    prepare_pending(map);
-    source_request(map, relief_b, None).await.expect("worker");
+    let attempt = prepare_pending(map);
+    source_request(map, relief_b, None, attempt)
+        .await
+        .expect("worker");
     apply_worker_sources(map);
 }
 

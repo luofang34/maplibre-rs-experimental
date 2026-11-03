@@ -15,7 +15,6 @@ pub struct HeadlessEnvironment;
 impl Environment for HeadlessEnvironment {
     type MapWindowConfig = HeadlessMapWindowConfig;
     type AsyncProcedureCall = SchedulerAsyncProcedureCall<LoaderKernel, LocalScheduler>;
-    type Scheduler = LocalScheduler;
     type HttpClient = SharedLoader;
     type OffscreenKernelEnvironment = LoaderKernel;
 }
@@ -44,6 +43,5 @@ pub(crate) fn create_kernel(
                 ..Default::default()
             },
         ))
-        .with_scheduler(LocalScheduler)
         .build()
 }

@@ -13,9 +13,9 @@ async fn imagery_source_cannot_complete_missing_color_relief_coverage() {
 
 async fn assert_pending_b(relief_b: bool) {
     let mut map = empty_map(relief_b).await;
-    prepare_pending(&mut map);
+    let attempt = prepare_pending(&mut map);
     let gate = Arc::new(SourceGate::default());
-    let mut request = source_request(&map, relief_b, Some(gate.clone()));
+    let mut request = source_request(&map, relief_b, Some(gate.clone()), attempt);
     tokio::select! {
         () = gate.entered.notified() => {},
         result = &mut request => panic!("request finished before B's gate: {result:?}"),

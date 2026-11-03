@@ -149,29 +149,22 @@ pub fn create_kernel(
 
     #[cfg(target_feature = "atomics")]
     {
-        kernel_builder = kernel_builder
-            .with_apc(maplibre::io::apc::SchedulerAsyncProcedureCall::new(
-                platform::multithreaded::pool_scheduler::WebWorkerPoolScheduler::new(
-                    new_worker.clone(),
-                )?,
-                offscreen_kernel_config,
-            ))
-            .with_scheduler(
+        kernel_builder =
+            kernel_builder.with_apc(maplibre::io::apc::SchedulerAsyncProcedureCall::new(
                 platform::multithreaded::pool_scheduler::WebWorkerPoolScheduler::new(new_worker)?,
-            );
+                offscreen_kernel_config,
+            ));
     }
 
     #[cfg(not(target_feature = "atomics"))]
     {
-        kernel_builder = kernel_builder
-            .with_apc(
-                platform::singlethreaded::apc::PassingAsyncProcedureCall::new(
-                    new_worker,
-                    4,
-                    offscreen_kernel_config,
-                )?,
-            )
-            .with_scheduler(maplibre::io::scheduler::NopScheduler);
+        kernel_builder = kernel_builder.with_apc(
+            platform::singlethreaded::apc::PassingAsyncProcedureCall::new(
+                new_worker,
+                4,
+                offscreen_kernel_config,
+            )?,
+        );
     }
 
     Ok(kernel_builder.build()?)

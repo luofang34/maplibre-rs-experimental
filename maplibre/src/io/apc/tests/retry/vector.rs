@@ -40,15 +40,13 @@ async fn manual(multiple: bool) -> (super::fixture::Fixture, render::Frames) {
 }
 
 async fn deliver(test: &mut super::fixture::Fixture, response: super::source::Response) {
-    use crate::io::apc::{AsyncProcedureCall, Input};
+    use crate::io::apc::AsyncProcedureCall;
     test.source.set(response);
+    let input = test.direct_vector_input();
     test.kernel
         .apc()
         .call(
-            Input::TileRequest {
-                coords: Default::default(),
-                style: test.context.style.clone(),
-            },
+            input,
             crate::vector::request_system::fetch_vector_apc::<
                 _,
                 crate::vector::DefaultVectorTransferables,

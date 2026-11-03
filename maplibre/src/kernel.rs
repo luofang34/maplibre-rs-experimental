@@ -8,12 +8,11 @@ use crate::{
     sdf::assets::AssetCache,
 };
 
-/// Owns the window factory, executor, worker transport and source loader selected by [`Environment`].
+/// Owns the window factory, worker transport and source loader selected by [`Environment`].
 /// Maps share the kernel with their plugins for the lifetime of those services.
 pub struct Kernel<E: Environment> {
     map_window_config: E::MapWindowConfig,
     apc: E::AsyncProcedureCall,
-    scheduler: E::Scheduler,
     source_client: SourceClient<E::HttpClient>,
 }
 
@@ -26,11 +25,6 @@ impl<E: Environment> Kernel<E> {
     /// Worker request and reply transport for this map.
     pub fn apc(&self) -> &E::AsyncProcedureCall {
         &self.apc
-    }
-
-    /// Executor for asynchronous tasks submitted by map systems.
-    pub fn scheduler(&self) -> &E::Scheduler {
-        &self.scheduler
     }
 
     /// Source loader used by the map's calling thread.
@@ -48,19 +42,15 @@ pub enum KernelBuildError {
     /// No worker request and reply transport was supplied.
     #[error("kernel requires an asynchronous procedure call transport")]
     MissingAsyncProcedureCall,
-    /// No asynchronous executor was supplied.
-    #[error("kernel requires a scheduler")]
-    MissingScheduler,
     /// No HTTP implementation was supplied.
     #[error("kernel requires an HTTP client")]
     MissingHttpClient,
 }
 
-/// Collects the four required host services before constructing a [`Kernel`].
+/// Collects the three required host services before constructing a [`Kernel`].
 pub struct KernelBuilder<E: Environment> {
     map_window_config: Option<E::MapWindowConfig>,
     apc: Option<E::AsyncProcedureCall>,
-    scheduler: Option<E::Scheduler>,
     http_client: Option<E::HttpClient>,
     asset_cache: Option<AssetCache>,
 }
@@ -72,10 +62,9 @@ impl<E: Environment> Default for KernelBuilder<E> {
 }
 
 impl<E: Environment> KernelBuilder<E> {
-    /// Starts with no services; all four `with_*` methods are required before [`Self::build`].
+    /// Starts with no services; the window, transport and HTTP `with_*` methods are required before [`Self::build`].
     pub fn new() -> Self {
         Self {
-            scheduler: None,
             apc: None,
             http_client: None,
             map_window_config: None,
@@ -95,12 +84,6 @@ impl<E: Environment> KernelBuilder<E> {
         self
     }
 
-    /// Sets the executor, replacing any scheduler already supplied.
-    pub fn with_scheduler(mut self, scheduler: E::Scheduler) -> Self {
-        self.scheduler = Some(scheduler);
-        self
-    }
-
     /// Sets the worker transport, replacing any transport already supplied.
     pub fn with_apc(mut self, apc: E::AsyncProcedureCall) -> Self {
         self.apc = Some(apc);
@@ -114,7 +97,7 @@ impl<E: Environment> KernelBuilder<E> {
     }
 
     /// Consumes the services without creating a window or submitting work.
-    /// Returns the first missing dependency in window, transport, scheduler, HTTP order.
+    /// Returns the first missing dependency in window, transport, HTTP order.
     pub fn build(self) -> Result<Kernel<E>, KernelBuildError> {
         let map_window_config = self
             .map_window_config
@@ -122,7 +105,6 @@ impl<E: Environment> KernelBuilder<E> {
         let apc = self
             .apc
             .ok_or(KernelBuildError::MissingAsyncProcedureCall)?;
-        let scheduler = self.scheduler.ok_or(KernelBuildError::MissingScheduler)?;
         let http_client = self
             .http_client
             .ok_or(KernelBuildError::MissingHttpClient)?;
@@ -133,7 +115,6 @@ impl<E: Environment> KernelBuilder<E> {
         Ok(Kernel {
             map_window_config,
             apc,
-            scheduler,
             source_client,
         })
     }

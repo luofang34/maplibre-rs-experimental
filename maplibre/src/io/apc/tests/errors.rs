@@ -25,10 +25,7 @@ fn scheduling_failure_keeps_the_scheduler_cause() {
     );
     let error = apc
         .call(
-            Input::TileRequest {
-                coords: Default::default(),
-                style: Style::default(),
-            },
+            Input::new(Default::default(), Style::default(), 0),
             |_, _, _| Box::pin(async { Ok(()) }),
         )
         .expect_err("NopScheduler rejects the call");
@@ -37,6 +34,33 @@ fn scheduling_failure_keeps_the_scheduler_cause() {
         cause.downcast_ref::<ScheduleError>(),
         Some(ScheduleError::NotImplemented)
     ));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn rejected_tracked_call_is_not_left_running() {
+    use crate::{
+        environment::OffscreenKernelConfig,
+        io::{
+            apc::{AsyncProcedureCall, Input, SchedulerAsyncProcedureCall},
+            scheduler::NopScheduler,
+        },
+        platform::ReqwestOffscreenKernelEnvironment,
+        style::Style,
+    };
+    let apc = SchedulerAsyncProcedureCall::<ReqwestOffscreenKernelEnvironment, _>::new(
+        NopScheduler,
+        OffscreenKernelConfig::default(),
+    );
+    apc.call(
+        Input::new(Default::default(), Style::default(), 7),
+        |_, _, _| Box::pin(async { Ok(()) }),
+    )
+    .expect_err("NopScheduler rejects the call");
+    assert!(
+        apc.running().is_empty(),
+        "a call that never ran has nothing to cancel"
+    );
 }
 
 #[test]

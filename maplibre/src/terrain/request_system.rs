@@ -207,14 +207,7 @@ impl<E: Environment, T: DemTransferables> RequestSystem<E, T> {
         self.kernel
             .apc()
             .call(
-                Input::TrackedTileRequest {
-                    attempt,
-                    coords,
-                    style: style.clone(),
-                    overscaled_zoom: 0,
-                    pixel_ratio: 1.0,
-                    only_sources: None,
-                },
+                Input::new(coords, style.clone(), attempt),
                 fetch_dem_apc::<E::OffscreenKernelEnvironment, T, _>,
             )
             .map_err(|source| SystemError::TileRequest {
@@ -238,7 +231,12 @@ pub fn fetch_dem_apc<K: OffscreenKernel, T: DemTransferables, C: Context + Clone
     kernel: K,
 ) -> AsyncProcedureFuture {
     Box::pin(async move {
-        let (coords, style, attempt) = input.into_tile_request();
+        let Input {
+            coords,
+            style,
+            attempt,
+            ..
+        } = input;
         let context = AttemptContext::new(context, attempt);
         let Some(dem) = dem_source(&style) else {
             return Ok(());
@@ -289,7 +287,7 @@ pub fn fetch_dem_apc<K: OffscreenKernel, T: DemTransferables, C: Context + Clone
             .send_back(TileRequestOutcome {
                 coords,
                 kind: RequestKind::Dem,
-                attempt,
+                attempt: Some(attempt),
                 disposition: if retry {
                     RequestDisposition::Retry
                 } else {

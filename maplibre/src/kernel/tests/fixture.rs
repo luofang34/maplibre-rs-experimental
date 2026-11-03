@@ -47,7 +47,6 @@ impl OffscreenKernel for WorkerKernel {
 impl Environment for TestEnvironment {
     type MapWindowConfig = WindowConfig;
     type AsyncProcedureCall = SchedulerAsyncProcedureCall<WorkerKernel, NopScheduler>;
-    type Scheduler = NopScheduler;
     type HttpClient = Client;
     type OffscreenKernelEnvironment = WorkerKernel;
 }
@@ -65,9 +64,6 @@ pub(super) fn builder_without(missing: &str) -> KernelBuilder<TestEnvironment> {
                 ..Default::default()
             },
         ));
-    }
-    if missing != "scheduler" {
-        builder = builder.with_scheduler(NopScheduler);
     }
     if missing != "http" {
         builder = builder.with_http_client(Client("source"));

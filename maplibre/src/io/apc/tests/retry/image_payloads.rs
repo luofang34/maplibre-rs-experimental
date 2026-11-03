@@ -7,7 +7,6 @@ use super::{
     source::Response,
 };
 use crate::{
-    io::apc::Input,
     raster::{RasterLayerData, RasterLayersDataComponent},
     terrain::DemTileComponent,
 };
@@ -79,53 +78,6 @@ async fn missing_result(kind: Kind, response: Response, recovered: bool) {
         test.receive().await;
         assert_value(&test, kind, 100);
     }
-}
-
-async fn legacy(kind: Kind) {
-    let mut test = Fixture::new(kind, false).await;
-    test.source.set(Response::Bytes(png(200)));
-    test.frame(0);
-    let requests: Vec<_> = test
-        .kernel
-        .apc()
-        .take_requests()
-        .into_iter()
-        .map(|(input, procedure)| {
-            let (coords, style, _) = input.into_tile_request();
-            (Input::TileRequest { coords, style }, procedure)
-        })
-        .collect();
-    test.context.world.tiles.remove(Default::default());
-    let mut tile = test
-        .context
-        .world
-        .tiles
-        .spawn_mut(Default::default())
-        .expect("legacy tile");
-    match kind {
-        Kind::Raster => {
-            tile.insert(RasterLayersDataComponent::default());
-        }
-        Kind::Dem => {
-            tile.insert(DemTileComponent::Pending);
-        }
-        Kind::Vector => panic!("image request kind"),
-    }
-    test.kernel.apc().run_requests(requests.clone()).await;
-    test.populate
-        .run(&mut test.context)
-        .expect("valid untracked worker");
-    assert_value(&test, kind, 200);
-    test.context.world.tiles.remove(Default::default());
-    test.frame(1);
-    test.kernel.apc().run_requests(requests).await;
-    test.populate
-        .run(&mut test.context)
-        .expect("untracked worker during tracked request");
-    assert_pending(&test, kind);
-    test.source.set(Response::Bytes(png(100)));
-    test.receive().await;
-    assert_value(&test, kind, 100);
 }
 
 fn assert_pending(test: &Fixture, kind: Kind) {

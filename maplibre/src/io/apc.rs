@@ -116,36 +116,27 @@ impl IntoMessage for Message {
     }
 }
 
-/// Inputs for an [`AsyncProcedure`]
+/// A tile request for an [`AsyncProcedure`], carrying the map-owned attempt its results
+/// are matched by.
 #[derive(Clone, Serialize, Deserialize)]
-pub enum Input {
-    /// Requests source data and processing for a tile using the supplied style snapshot.
-    TileRequest {
-        /// Tile grid location requested from the worker.
-        coords: WorldTileCoords,
-        /// Style snapshot used to choose and process the tile's layers.
-        style: Style,
-    },
-    /// Requests a tile with a map-owned attempt token for final completion matching.
-    TrackedTileRequest {
-        /// Tile grid location requested from the worker.
-        coords: WorldTileCoords,
-        /// Style snapshot used to choose and process the tile's layers.
-        style: Style,
-        /// Identifier distinguishing requests when coordinates are evicted and reused.
-        attempt: u64,
-        /// The zoom a vector tile is drawn at when that is past its source's last zoom; zero
-        /// when it is drawn at its own zoom.
-        #[serde(default)]
-        overscaled_zoom: u8,
-        /// Device pixels per layout pixel of the display, which generated images are made for.
-        #[serde(default = "one")]
-        pixel_ratio: f32,
-        /// The sources to process, when the request is for a change to their data alone: the
-        /// tile keeps what it shows of the others. `None` processes every source.
-        #[serde(default)]
-        only_sources: Option<Vec<String>>,
-    },
+pub struct Input {
+    /// Tile grid location requested from the worker.
+    pub coords: WorldTileCoords,
+    /// Style snapshot used to choose and process the tile's layers.
+    pub style: Style,
+    /// Identifier distinguishing requests when coordinates are evicted and reused.
+    pub attempt: u64,
+    /// The zoom a vector tile is drawn at when that is past its source's last zoom; zero
+    /// when it is drawn at its own zoom.
+    #[serde(default)]
+    pub overscaled_zoom: u8,
+    /// Device pixels per layout pixel of the display, which generated images are made for.
+    #[serde(default = "one")]
+    pub pixel_ratio: f32,
+    /// The sources to process, when the request is for a change to their data alone: the
+    /// tile keeps what it shows of the others. `None` processes every source.
+    #[serde(default)]
+    pub only_sources: Option<Vec<String>>,
 }
 
 fn one() -> f32 {
@@ -153,42 +144,16 @@ fn one() -> f32 {
 }
 
 impl Input {
-    /// Consumes a tile request and its optional completion token.
-    pub fn into_tile_request(self) -> (WorldTileCoords, Style, Option<u64>) {
-        match self {
-            Self::TileRequest { coords, style } => (coords, style, None),
-            Self::TrackedTileRequest {
-                coords,
-                style,
-                attempt,
-                ..
-            } => (coords, style, Some(attempt)),
-        }
-    }
-
-    /// The zoom the requested tile is magnified to, or zero when it is not magnified.
-    pub fn overscaled_zoom(&self) -> u8 {
-        match self {
-            Self::TileRequest { .. } => 0,
-            Self::TrackedTileRequest {
-                overscaled_zoom, ..
-            } => *overscaled_zoom,
-        }
-    }
-
-    /// Device pixels per layout pixel of the display the tile is drawn on.
-    pub fn pixel_ratio(&self) -> f32 {
-        match self {
-            Self::TileRequest { .. } => 1.0,
-            Self::TrackedTileRequest { pixel_ratio, .. } => *pixel_ratio,
-        }
-    }
-
-    /// The sources the request is limited to, or `None` for every source.
-    pub fn only_sources(&self) -> Option<&[String]> {
-        match self {
-            Self::TileRequest { .. } => None,
-            Self::TrackedTileRequest { only_sources, .. } => only_sources.as_deref(),
+    /// Requests every source of a tile at its own zoom for a display of one pixel per
+    /// layout pixel.
+    pub fn new(coords: WorldTileCoords, style: Style, attempt: u64) -> Self {
+        Self {
+            coords,
+            style,
+            attempt,
+            overscaled_zoom: 0,
+            pixel_ratio: 1.0,
+            only_sources: None,
         }
     }
 }
@@ -385,37 +350,33 @@ impl<K: OffscreenKernel, S: Scheduler> AsyncProcedureCall<K> for SchedulerAsyncP
     ) -> Result<(), CallError> {
         let sender = self.channel.0.clone();
         let offscreen_kernel_config = self.offscreen_kernel_config.clone();
-        let attempt = match &input {
-            Input::TrackedTileRequest { attempt, .. } => Some(*attempt),
-            Input::TileRequest { .. } => None,
-        };
+        let attempt = input.attempt;
         let (abort, registration) = AbortHandle::new_pair();
-        if let Some(attempt) = attempt {
-            self.running().insert(attempt, abort);
-        }
+        self.running().insert(attempt, abort);
         let running = self.running.clone();
 
-        self.scheduler
-            .schedule(move || async move {
-                tracing::debug!(thread = ?std::thread::current().name(), "processing worker call");
+        let scheduled = self.scheduler.schedule(move || async move {
+            tracing::debug!(thread = ?std::thread::current().name(), "processing worker call");
 
-                let kernel = K::create(offscreen_kernel_config);
-                // A result that cannot be delivered, because the map already shut down, must
-                // not take the worker thread down with it.
-                let call = procedure(input, SchedulerContext { sender }, kernel);
-                match Abortable::new(call, registration).await {
-                    Ok(Err(error)) => tracing::warn!(?error, "procedure failed"),
-                    Ok(Ok(())) => {}
-                    Err(Aborted) => tracing::debug!(?attempt, "cancelled worker call stopped"),
-                }
-                if let Some(attempt) = attempt {
-                    running
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .remove(&attempt);
-                }
-            })
-            .map_err(CallError::Schedule)
+            let kernel = K::create(offscreen_kernel_config);
+            // A result that cannot be delivered, because the map already shut down, must
+            // not take the worker thread down with it.
+            let call = procedure(input, SchedulerContext { sender }, kernel);
+            match Abortable::new(call, registration).await {
+                Ok(Err(error)) => tracing::warn!(?error, "procedure failed"),
+                Ok(Ok(())) => {}
+                Err(Aborted) => tracing::debug!(attempt, "cancelled worker call stopped"),
+            }
+            running
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .remove(&attempt);
+        });
+        if scheduled.is_err() {
+            // A rejected factory never runs, so nothing else removes its entry.
+            self.running().remove(&attempt);
+        }
+        scheduled.map_err(CallError::Schedule)
     }
 
     fn has_arrivals(&self) -> bool {

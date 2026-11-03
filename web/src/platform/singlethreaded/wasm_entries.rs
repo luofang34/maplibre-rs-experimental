@@ -1,5 +1,11 @@
-use std::{mem, rc::Rc, sync::OnceLock};
+//! Entry points the single-threaded worker script and the page call into this module.
 
+// A panic in a worker entry takes the worker's module down with it; return typed errors.
+#![deny(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+
+use std::{cell::RefCell, mem, rc::Rc, sync::OnceLock};
+
+use futures::future::{Abortable, Aborted};
 use maplibre::{
     benchmarking::io::{
         apc::{AsyncProcedure, Input},
@@ -11,17 +17,20 @@ use maplibre::{
 use wasm_bindgen::prelude::*;
 use web_sys::DedicatedWorkerGlobalScope;
 
+use self::running_calls::RunningCalls;
 use crate::{
-    error::JSError,
+    error::{JSError, WebError},
     platform::{
         http_client::web_http_client,
         singlethreaded::{
-            apc::{ReceivedType, WebMessageTag},
+            apc::{decode_call_finished, post_call_finished, ReceivedType, WebMessageTag},
             PassingContext, UsedContext,
         },
         UsedOffscreenKernelEnvironment,
     },
 };
+
+mod running_calls;
 
 /// Parsed once so every call this worker serves shares the configuration's asset cache.
 static CONFIG: OnceLock<OffscreenKernelConfig> = OnceLock::new();
@@ -34,46 +43,86 @@ fn kernel_config() -> OffscreenKernelConfig {
 }
 
 #[wasm_bindgen]
-pub fn set_kernel_config(config: String) {
-    let config = serde_json::from_str(&config).expect("invalid kernel config");
-    CONFIG.set(config).expect("failed to set kernel config")
+pub fn set_kernel_config(config: String) -> Result<(), JSError> {
+    let config = serde_json::from_str(&config).map_err(WebError::KernelConfigDecoding)?;
+    CONFIG
+        .set(config)
+        .map_err(|_| WebError::KernelConfigAlreadySet)?;
+    Ok(())
 }
 
-/// Entry point invoked by the worker. Processes data and sends the result back to the main thread.
+/// The tile calls one worker runs, so the main thread can stop a call it gave up on.
 #[wasm_bindgen]
-pub async fn singlethreaded_process_data(procedure_ptr: u32, input: String) -> Result<(), JSError> {
-    let procedure: AsyncProcedure<UsedOffscreenKernelEnvironment, UsedContext> =
-        unsafe { mem::transmute(procedure_ptr) };
+#[derive(Default)]
+pub struct TileWorkerCalls {
+    running: Rc<RefCell<RunningCalls>>,
+}
 
-    let input = serde_json::from_str::<Input>(&input).map_err(|e| {
-        log::error!("DeserializeInput error: {e}");
-        CallError::DeserializeInput(Box::new(e))
-    })?;
-
-    let context = PassingContext {
-        source_client: SourceClient::new(HttpSourceClient::new(web_http_client())),
-    };
-
-    if let Ok(global) = js_sys::global().dyn_into::<DedicatedWorkerGlobalScope>() {
-        let name = global.name();
-        log::info!(
-            "Processing on web worker: {}",
-            if name.is_empty() {
-                "name not set"
-            } else {
-                name.as_str()
-            }
-        );
+#[wasm_bindgen]
+impl TileWorkerCalls {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    procedure(
-        input,
-        context,
-        UsedOffscreenKernelEnvironment::create(kernel_config()),
-    )
-    .await?;
+    /// Starts a call and sends its results back to the main thread. The call is registered
+    /// before this returns, so a cancel that arrives later stops it; the promise settles when
+    /// the call ends, whether it finished or was stopped.
+    pub fn process(&self, procedure_ptr: u32, input: String) -> Result<js_sys::Promise, JSError> {
+        // SAFETY: the main thread sends the address of an `AsyncProcedure` of this same module.
+        let procedure: AsyncProcedure<UsedOffscreenKernelEnvironment, UsedContext> =
+            unsafe { mem::transmute(procedure_ptr) };
 
-    Ok(())
+        let input = serde_json::from_str::<Input>(&input).map_err(|e| {
+            log::error!("DeserializeInput error: {e}");
+            CallError::DeserializeInput(Box::new(e))
+        })?;
+        let attempt = input.attempt;
+
+        let context = PassingContext {
+            source_client: SourceClient::new(HttpSourceClient::new(web_http_client())),
+        };
+
+        if let Ok(global) = js_sys::global().dyn_into::<DedicatedWorkerGlobalScope>() {
+            let name = global.name();
+            log::info!(
+                "Processing on web worker: {}",
+                if name.is_empty() {
+                    "name not set"
+                } else {
+                    name.as_str()
+                }
+            );
+        }
+
+        let registration = self.running.borrow_mut().start(attempt);
+        let running = self.running.clone();
+        let call = procedure(
+            input,
+            context,
+            UsedOffscreenKernelEnvironment::create(kernel_config()),
+        );
+        Ok(wasm_bindgen_futures::future_to_promise(async move {
+            let result = Abortable::new(call, registration).await;
+            running.borrow_mut().finish(attempt);
+            if let Err(error) = post_call_finished(attempt) {
+                tracing::warn!(attempt, %error, "reporting a finished call failed");
+            }
+            match result {
+                Ok(Ok(())) => Ok(JsValue::UNDEFINED),
+                Err(Aborted) => {
+                    log::debug!("cancelled worker call {attempt} stopped");
+                    Ok(JsValue::UNDEFINED)
+                }
+                Ok(Err(error)) => Err(JSError::from(error).into()),
+            }
+        }))
+    }
+
+    /// Stops the call for `attempt` at its next await; `false` when it is not running.
+    pub fn cancel(&self, attempt: u64) -> bool {
+        self.running.borrow_mut().cancel(attempt)
+    }
 }
 
 /// Entry point invoked by the main thread. Receives data on the main thread and makes it available
@@ -91,18 +140,24 @@ pub fn singlethreaded_receive_data(
         buffer.byte_length()
     );
 
-    let message = super::apc::decode_message(tag, buffer)?;
-
-    // FIXME: Can we make this call safe? check if it was cloned before?
-    let received: Rc<ReceivedType> = unsafe { Rc::from_raw(received_ptr) };
-
-    // MAJOR FIXME: Fix mutability
-    received
+    // SAFETY: the pointer comes from `Rc::into_raw` in `PassingAsyncProcedureCall::new`, whose
+    // count is never released, so the value outlives every worker message. Borrowing it leaves
+    // that count alone.
+    let received: &ReceivedType = unsafe { &*received_ptr };
+    let mut received = received
         .try_borrow_mut()
-        .expect("Failed to borrow in singlethreaded_main_entry")
-        .push(message);
+        .map_err(|_| WebError::ReceivedBusy)?;
 
-    mem::forget(received); // FIXME: Enforce this somehow
+    if tag == WebMessageTag::CallFinished {
+        received.finished.push(decode_call_finished(&buffer)?);
+    } else {
+        received
+            .messages
+            .push(super::apc::decode_message(tag, buffer)?);
+    }
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;
