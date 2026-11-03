@@ -360,7 +360,7 @@
 <a href=#360 id=360 data-nosnippet>360</a>        .resources
 <a href=#361 id=361 data-nosnippet>361</a>        .get::&lt;surface_covering::SurfaceCopies&gt;()
 <a href=#362 id=362 data-nosnippet>362</a>        .map(|copies| copies.<span class="number">0</span>.clone());
-<a href=#363 id=363 data-nosnippet>363</a>    <span class="kw">let </span>(skirts, lighting) = uniforms::surface_settings(world);
+<a href=#363 id=363 data-nosnippet>363</a>    <span class="kw">let </span>ctx = uniforms::surface_context(world, style, view_state, dem);
 <a href=#364 id=364 data-nosnippet>364</a>    {
 <a href=#365 id=365 data-nosnippet>365</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(Initialized(terrain)) = world.resources.get_mut::&lt;Eventually&lt;TerrainResources&gt;&gt;()
 <a href=#366 id=366 data-nosnippet>366</a>        <span class="kw">else </span>{
@@ -369,7 +369,7 @@
 <a href=#369 id=369 data-nosnippet>369</a>        <span class="kw">let </span>uniforms::PreparedTerrain {
 <a href=#370 id=370 data-nosnippet>370</a>            <span class="kw-2">mut </span>uniforms,
 <a href=#371 id=371 data-nosnippet>371</a>            sources,
-<a href=#372 id=372 data-nosnippet>372</a>        } = uniforms::prepare_tiles(targets, style, view_state, terrain, (dem, skirts, lighting));
+<a href=#372 id=372 data-nosnippet>372</a>        } = uniforms::prepare_tiles(targets, terrain, <span class="kw-2">&amp;</span>world.tiles, ctx);
 <a href=#373 id=373 data-nosnippet>373</a>        <span class="kw">let </span>edges = edge_cache.apply(<span class="kw-2">&amp;</span>sources, <span class="kw-2">&amp;mut </span>uniforms, <span class="kw-2">&amp;</span>world.tiles);
 <a href=#374 id=374 data-nosnippet>374</a>        <span class="kw">let </span>(sources, placed) =
 <a href=#375 id=375 data-nosnippet>375</a>            uniforms::with_world_copies(<span class="kw-2">&amp;mut </span>uniforms, sources, copies.as_ref(), view_state);

@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["initial_view_state","merged","starting_view"]};
+window.SIDEBAR_ITEMS = {"fn":["clamped_style_center","initial_view_state","merged","starting_view"]};

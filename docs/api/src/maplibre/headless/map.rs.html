@@ -6,7 +6,7 @@
 <a href=#6 id=6 data-nosnippet>6</a>
 <a href=#7 id=7 data-nosnippet>7</a><span class="kw">use crate</span>::{
 <a href=#8 id=8 data-nosnippet>8</a>    context::MapContext,
-<a href=#9 id=9 data-nosnippet>9</a>    coords::{LatLon, WorldCoords, WorldTileCoords, Zoom},
+<a href=#9 id=9 data-nosnippet>9</a>    coords::{WorldCoords, WorldTileCoords, Zoom},
 <a href=#10 id=10 data-nosnippet>10</a>    headless::environment::HeadlessEnvironment,
 <a href=#11 id=11 data-nosnippet>11</a>    io::{
 <a href=#12 id=12 data-nosnippet>12</a>        apc::{Context, IntoMessage, Message, SendError},
@@ -574,8 +574,8 @@
 <a href=#574 id=574 data-nosnippet>574</a>        (f64::from(window_size.height()) / <span class="kw">crate</span>::coords::TILE_SIZE).log2()
 <a href=#575 id=575 data-nosnippet>575</a>    };
 <a href=#576 id=576 data-nosnippet>576</a>    <span class="kw">let </span>zoom = Zoom::new(style.zoom.unwrap_or_default().max(lowest_zoom));
-<a href=#577 id=577 data-nosnippet>577</a>    <span class="kw">let </span>center = style.center.unwrap_or_default();
-<a href=#578 id=578 data-nosnippet>578</a>    <span class="kw">let </span><span class="kw-2">mut </span>center = WorldCoords::from_lat_lon(LatLon::new(center[<span class="number">1</span>], center[<span class="number">0</span>]), zoom);
+<a href=#577 id=577 data-nosnippet>577</a>    <span class="kw">let </span><span class="kw-2">mut </span>center =
+<a href=#578 id=578 data-nosnippet>578</a>        WorldCoords::from_lat_lon(<span class="kw">crate</span>::map::camera::clamped_style_center(style), zoom);
 <a href=#579 id=579 data-nosnippet>579</a>    <span class="kw">if </span>!globe {
 <a href=#580 id=580 data-nosnippet>580</a>        <span class="comment">// The view may not show past the poles of a flat world, as GL JS constrains the centre.
 <a href=#581 id=581 data-nosnippet>581</a>        </span><span class="kw">let </span>world = <span class="kw">crate</span>::coords::TILE_SIZE * <span class="number">2_f64</span>.powf(zoom.value());

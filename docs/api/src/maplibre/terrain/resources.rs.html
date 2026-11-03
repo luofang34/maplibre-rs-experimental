@@ -93,8 +93,8 @@
 <a href=#93 id=93 data-nosnippet>93</a>    </span><span class="kw">pub </span>procedural_relief: [f32; <span class="number">4</span>],
 <a href=#94 id=94 data-nosnippet>94</a>    <span class="doccomment">/// Procedural DEM grid &amp; TAWS controls: `[grid_spacing_m, grid_opacity, taws_enabled, tile_span_m]`.
 <a href=#95 id=95 data-nosnippet>95</a>    </span><span class="kw">pub </span>procedural_grid: [f32; <span class="number">4</span>],
-<a href=#96 id=96 data-nosnippet>96</a>    <span class="doccomment">/// Index into the per-frame edge storage buffer in `edge_index[0]`.
-<a href=#97 id=97 data-nosnippet>97</a>    </span><span class="kw">pub </span>edge_index: [f32; <span class="number">4</span>],
+<a href=#96 id=96 data-nosnippet>96</a>    <span class="doccomment">/// Edge buffer index in `[0]`, and packed RGBA8 north/south polar cap colours in `[1]`/`[2]`.
+<a href=#97 id=97 data-nosnippet>97</a>    </span><span class="kw">pub </span>edge_index: [u32; <span class="number">4</span>],
 <a href=#98 id=98 data-nosnippet>98</a>}
 <a href=#99 id=99 data-nosnippet>99</a>
 <a href=#100 id=100 data-nosnippet>100</a><span class="doccomment">/// The fog of a frame, shared by every terrain tile, as GL JS `terrainUniformValues` takes it.

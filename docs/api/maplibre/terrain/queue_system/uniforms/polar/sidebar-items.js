@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["cap_colors","find_pole_buckets","pack_rgba8","pole_color","pole_feature_color"]};

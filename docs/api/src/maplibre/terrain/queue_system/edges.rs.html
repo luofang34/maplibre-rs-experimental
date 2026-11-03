@@ -97,7 +97,7 @@
 <a href=#97 id=97 data-nosnippet>97</a>        <span class="kw">for </span>(index, ((<span class="kw">_</span>, tile, <span class="kw">_</span>), uniform)) <span class="kw">in </span>sources.iter().zip(uniforms.iter_mut()).enumerate()
 <a href=#98 id=98 data-nosnippet>98</a>        {
 <a href=#99 id=99 data-nosnippet>99</a>            <span class="kw">let </span>edge = <span class="self">self</span>.samples.get(tile).copied().unwrap_or_default();
-<a href=#100 id=100 data-nosnippet>100</a>            uniform.edge_index = [index <span class="kw">as </span>f32, <span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">0.0</span>];
+<a href=#100 id=100 data-nosnippet>100</a>            uniform.edge_index[<span class="number">0</span>] = index <span class="kw">as </span>u32;
 <a href=#101 id=101 data-nosnippet>101</a>            edges.push(edge);
 <a href=#102 id=102 data-nosnippet>102</a>        }
 <a href=#103 id=103 data-nosnippet>103</a>        edges
