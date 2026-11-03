@@ -123,24 +123,49 @@ impl Geometry {
         if ours.is_empty() || theirs.is_empty() {
             return None;
         }
-        let touching = ours.polygons.iter().any(|polygon| {
+        // Unwrapped lines and rings may reach past the antimeridian on either side of the origin,
+        // so the other geometry is also measured a turn of the globe east and west.
+        let turn = 360.0 * scale.per_degree[0];
+        let best = [0.0, -turn, turn]
+            .into_iter()
+            .map(|shift| ours.planar_distance(&theirs.shifted(shift)))
+            .fold(f64::INFINITY, f64::min);
+        Some(best)
+    }
+
+    /// The shortest distance between two projected geometries on the plane.
+    fn planar_distance(&self, theirs: &Geometry) -> f64 {
+        let touching = self.polygons.iter().any(|polygon| {
             theirs
                 .all_points()
                 .any(|point| polygon_contains(polygon, point) != Containment::Outside)
         }) || theirs.polygons.iter().any(|polygon| {
-            ours.all_points()
+            self.all_points()
                 .any(|point| polygon_contains(polygon, point) != Containment::Outside)
         });
         if touching {
-            return Some(0.0);
+            return 0.0;
         }
         let mut best = f64::INFINITY;
-        for (a, b) in ours.segments() {
+        for (a, b) in self.segments() {
             for (c, d) in theirs.segments() {
                 best = best.min(segment_distance(a, b, c, d));
             }
         }
-        Some(best)
+        best
+    }
+
+    fn shifted(&self, x: f64) -> Geometry {
+        let shift = |points: &Vec<[f64; 2]>| points.iter().map(|p| [p[0] + x, p[1]]).collect();
+        Geometry {
+            points: shift(&self.points),
+            lines: self.lines.iter().map(shift).collect(),
+            polygons: self
+                .polygons
+                .iter()
+                .map(|polygon| polygon.iter().map(shift).collect())
+                .collect(),
+        }
     }
 
     fn is_empty(&self) -> bool {
@@ -172,7 +197,9 @@ impl Geometry {
     }
 }
 
-/// Longitude-latitude to local metres, as a cheap ruler does around one latitude.
+/// Longitude-latitude to local metres around the first point of the feature, as the
+/// `CheapRuler` of MapLibre's style specification measures them: the WGS84 ellipsoid's curvature
+/// at that latitude, and longitudes taken the short way round the antimeridian.
 struct LocalMetres {
     origin: [f64; 2],
     per_degree: [f64; 2],
@@ -180,39 +207,66 @@ struct LocalMetres {
 
 impl LocalMetres {
     fn around(origin: [f64; 2]) -> Self {
-        let latitude = origin[1].to_radians();
+        const EQUATORIAL_RADIUS_KM: f64 = 6378.137;
+        const FLATTENING: f64 = 1.0 / 298.257_223_563;
+        const ECCENTRICITY_SQUARED: f64 = FLATTENING * (2.0 - FLATTENING);
+        let metres_per_degree_of_arc = std::f64::consts::PI / 180.0 * EQUATORIAL_RADIUS_KM * 1000.0;
+        let cos_latitude = origin[1].to_radians().cos();
+        let w2 = 1.0 / (1.0 - ECCENTRICITY_SQUARED * (1.0 - cos_latitude * cos_latitude));
+        let w = w2.sqrt();
         Self {
             origin,
-            per_degree: [111_319.490_793 * latitude.cos(), 110_574.0],
+            per_degree: [
+                metres_per_degree_of_arc * w * cos_latitude,
+                metres_per_degree_of_arc * w * w2 * (1.0 - ECCENTRICITY_SQUARED),
+            ],
         }
     }
 
-    fn point(&self, p: [f64; 2]) -> [f64; 2] {
-        [
-            (p[0] - self.origin[0]) * self.per_degree[0],
-            (p[1] - self.origin[1]) * self.per_degree[1],
-        ]
+    /// Each longitude is taken the short way round from the point before it, the origin for the
+    /// first, so a line or ring that crosses the antimeridian stays in one piece.
+    fn path(&self, path: &[[f64; 2]]) -> Vec<[f64; 2]> {
+        let mut previous = self.origin;
+        let mut longitude = self.origin[0];
+        path.iter()
+            .map(|p| {
+                longitude += wrap_longitude(p[0] - previous[0]);
+                previous = *p;
+                [
+                    (longitude - self.origin[0]) * self.per_degree[0],
+                    (p[1] - self.origin[1]) * self.per_degree[1],
+                ]
+            })
+            .collect()
     }
 
     fn project(&self, geometry: &Geometry) -> Geometry {
         Geometry {
-            points: geometry.points.iter().map(|p| self.point(*p)).collect(),
-            lines: geometry
-                .lines
+            points: geometry
+                .points
                 .iter()
-                .map(|line| line.iter().map(|p| self.point(*p)).collect())
+                .flat_map(|p| self.path(std::slice::from_ref(p)))
                 .collect(),
+            lines: geometry.lines.iter().map(|line| self.path(line)).collect(),
             polygons: geometry
                 .polygons
                 .iter()
-                .map(|polygon| {
-                    polygon
-                        .iter()
-                        .map(|ring| ring.iter().map(|p| self.point(*p)).collect())
-                        .collect()
-                })
+                .map(|polygon| polygon.iter().map(|ring| self.path(ring)).collect())
                 .collect(),
         }
+    }
+}
+
+/// A longitude difference taken the short way round, in `[-180, 180]`.
+fn wrap_longitude(degrees: f64) -> f64 {
+    if (-180.0..=180.0).contains(&degrees) {
+        return degrees;
+    }
+    let wrapped = (degrees + 180.0).rem_euclid(360.0) - 180.0;
+    if wrapped == -180.0 && degrees > 0.0 {
+        180.0
+    } else {
+        wrapped
     }
 }
 
