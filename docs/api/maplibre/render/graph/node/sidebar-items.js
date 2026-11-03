@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"enum":["NodeLabel","NodeRunError"],"struct":["Edges","EmptyNode","NodeId","NodeState","RenderContext"],"trait":["Node"]};

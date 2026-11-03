@@ -39,8 +39,8 @@
 <a href=#39 id=39 data-nosnippet>39</a>        schedule: <span class="kw-2">&amp;mut </span><span class="kw">crate</span>::schedule::Schedule,
 <a href=#40 id=40 data-nosnippet>40</a>        _kernel: std::rc::Rc&lt;<span class="kw">crate</span>::kernel::Kernel&lt;E&gt;&gt;,
 <a href=#41 id=41 data-nosnippet>41</a>        world: <span class="kw-2">&amp;mut </span>World,
-<a href=#42 id=42 data-nosnippet>42</a>        graph: <span class="kw-2">&amp;mut </span><span class="kw">crate</span>::render::graph::RenderGraph,
-<a href=#43 id=43 data-nosnippet>43</a>    ) {
+<a href=#42 id=42 data-nosnippet>42</a>        renderer: <span class="kw-2">&amp;mut </span><span class="kw">crate</span>::render::Renderer,
+<a href=#43 id=43 data-nosnippet>43</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), <span class="kw">crate</span>::plugin::PluginError&gt; {
 <a href=#44 id=44 data-nosnippet>44</a>        world
 <a href=#45 id=45 data-nosnippet>45</a>            .resources
 <a href=#46 id=46 data-nosnippet>46</a>            .insert(Eventually::&lt;StarfieldPipeline&gt;::Uninitialized);
@@ -53,12 +53,12 @@
 <a href=#53 id=53 data-nosnippet>53</a>        world
 <a href=#54 id=54 data-nosnippet>54</a>            .resources
 <a href=#55 id=55 data-nosnippet>55</a>            .insert(Eventually::&lt;moon::MoonPipeline&gt;::Uninitialized);
-<a href=#56 id=56 data-nosnippet>56</a>        schedule.add_system_to_stage(RenderStageLabel::Prepare, pipeline::resource_system);
-<a href=#57 id=57 data-nosnippet>57</a>        schedule.add_system_to_stage(RenderStageLabel::Prepare, sun::resource_system);
-<a href=#58 id=58 data-nosnippet>58</a>        schedule.add_system_to_stage(RenderStageLabel::Prepare, moon::resource_system);
-<a href=#59 id=59 data-nosnippet>59</a>        schedule.add_system_to_stage(RenderStageLabel::Queue, upload::queue_system);
-<a href=#60 id=60 data-nosnippet>60</a>        schedule.add_system_to_stage(RenderStageLabel::Queue, sun::queue_system);
-<a href=#61 id=61 data-nosnippet>61</a>        schedule.add_system_to_stage(RenderStageLabel::Queue, moon::queue_system);
+<a href=#56 id=56 data-nosnippet>56</a>        schedule.add_system_to_stage(RenderStageLabel::Prepare, pipeline::resource_system)<span class="question-mark">?</span>;
+<a href=#57 id=57 data-nosnippet>57</a>        schedule.add_system_to_stage(RenderStageLabel::Prepare, sun::resource_system)<span class="question-mark">?</span>;
+<a href=#58 id=58 data-nosnippet>58</a>        schedule.add_system_to_stage(RenderStageLabel::Prepare, moon::resource_system)<span class="question-mark">?</span>;
+<a href=#59 id=59 data-nosnippet>59</a>        schedule.add_system_to_stage(RenderStageLabel::Queue, upload::queue_system)<span class="question-mark">?</span>;
+<a href=#60 id=60 data-nosnippet>60</a>        schedule.add_system_to_stage(RenderStageLabel::Queue, sun::queue_system)<span class="question-mark">?</span>;
+<a href=#61 id=61 data-nosnippet>61</a>        schedule.add_system_to_stage(RenderStageLabel::Queue, moon::queue_system)<span class="question-mark">?</span>;
 <a href=#62 id=62 data-nosnippet>62</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(hooks) = world.resources.get_mut::&lt;<span class="kw">crate</span>::render::PassDrawHooks&gt;() {
 <a href=#63 id=63 data-nosnippet>63</a>            hooks.register(<span class="kw">crate</span>::render::PassHookPoint::MainPassBegin, draw);
 <a href=#64 id=64 data-nosnippet>64</a>            hooks.register(
@@ -82,54 +82,50 @@
 <a href=#82 id=82 data-nosnippet>82</a>            );
 <a href=#83 id=83 data-nosnippet>83</a>            world.resources.insert(hooks);
 <a href=#84 id=84 data-nosnippet>84</a>        }
-<a href=#85 id=85 data-nosnippet>85</a>        add_sun_depth_copy(graph);
-<a href=#86 id=86 data-nosnippet>86</a>    }
-<a href=#87 id=87 data-nosnippet>87</a>}
-<a href=#88 id=88 data-nosnippet>88</a>
-<a href=#89 id=89 data-nosnippet>89</a><span class="doccomment">/// Puts the sun's depth copy between the main and translucent passes, after everything the
-<a href=#90 id=90 data-nosnippet>90</a>/// main pass draws and before the sun is drawn.
-<a href=#91 id=91 data-nosnippet>91</a></span><span class="kw">fn </span>add_sun_depth_copy(graph: <span class="kw-2">&amp;mut </span><span class="kw">crate</span>::render::graph::RenderGraph) {
-<a href=#92 id=92 data-nosnippet>92</a>    <span class="kw">use </span><span class="kw">crate</span>::render::draw_graph;
-<a href=#93 id=93 data-nosnippet>93</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(draw_graph) = graph.get_sub_graph_mut(draw_graph::NAME) <span class="kw">else </span>{
-<a href=#94 id=94 data-nosnippet>94</a>        <span class="macro">tracing::error!</span>(<span class="string">"draw graph is missing; the sun's glare will not see the ground"</span>);
-<a href=#95 id=95 data-nosnippet>95</a>        <span class="kw">return</span>;
-<a href=#96 id=96 data-nosnippet>96</a>    };
-<a href=#97 id=97 data-nosnippet>97</a>    draw_graph.add_node(sun::depth::SUN_DEPTH_COPY, sun::depth::SunDepthCopyNode);
-<a href=#98 id=98 data-nosnippet>98</a>    <span class="kw">let </span>edges = [
+<a href=#85 id=85 data-nosnippet>85</a>        add_sun_depth_copy(<span class="kw-2">&amp;mut </span>renderer.render_graph)<span class="question-mark">?</span>;
+<a href=#86 id=86 data-nosnippet>86</a>        <span class="prelude-val">Ok</span>(())
+<a href=#87 id=87 data-nosnippet>87</a>    }
+<a href=#88 id=88 data-nosnippet>88</a>}
+<a href=#89 id=89 data-nosnippet>89</a>
+<a href=#90 id=90 data-nosnippet>90</a><span class="doccomment">/// Puts the sun's depth copy between the main and translucent passes, after everything the
+<a href=#91 id=91 data-nosnippet>91</a>/// main pass draws and before the sun is drawn.
+<a href=#92 id=92 data-nosnippet>92</a></span><span class="kw">fn </span>add_sun_depth_copy(
+<a href=#93 id=93 data-nosnippet>93</a>    graph: <span class="kw-2">&amp;mut </span><span class="kw">crate</span>::render::graph::RenderGraph,
+<a href=#94 id=94 data-nosnippet>94</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), <span class="kw">crate</span>::render::graph::RenderGraphError&gt; {
+<a href=#95 id=95 data-nosnippet>95</a>    <span class="kw">use </span><span class="kw">crate</span>::render::draw_graph;
+<a href=#96 id=96 data-nosnippet>96</a>    <span class="kw">let </span>draw_graph = graph;
+<a href=#97 id=97 data-nosnippet>97</a>    <span class="kw">let </span>edges = [
+<a href=#98 id=98 data-nosnippet>98</a>        draw_graph.add_node(sun::depth::SUN_DEPTH_COPY, sun::depth::SunDepthCopyNode),
 <a href=#99 id=99 data-nosnippet>99</a>        draw_graph.add_node_edge(draw_graph::node::SCENE_3D_PASS, sun::depth::SUN_DEPTH_COPY),
 <a href=#100 id=100 data-nosnippet>100</a>        draw_graph.add_node_edge(
 <a href=#101 id=101 data-nosnippet>101</a>            sun::depth::SUN_DEPTH_COPY,
 <a href=#102 id=102 data-nosnippet>102</a>            draw_graph::node::TRANSLUCENT_PASS,
 <a href=#103 id=103 data-nosnippet>103</a>        ),
 <a href=#104 id=104 data-nosnippet>104</a>    ];
-<a href=#105 id=105 data-nosnippet>105</a>    <span class="kw">for </span>edge <span class="kw">in </span>edges {
-<a href=#106 id=106 data-nosnippet>106</a>        <span class="kw">if let </span><span class="prelude-val">Err</span>(error) = edge {
-<a href=#107 id=107 data-nosnippet>107</a>            <span class="macro">tracing::error!</span>(<span class="question-mark">?</span>error, <span class="string">"the sun's depth copy cannot be ordered"</span>);
-<a href=#108 id=108 data-nosnippet>108</a>        }
-<a href=#109 id=109 data-nosnippet>109</a>    }
-<a href=#110 id=110 data-nosnippet>110</a>}
-<a href=#111 id=111 data-nosnippet>111</a>
-<a href=#112 id=112 data-nosnippet>112</a><span class="doccomment">/// Draws the stars queued for this frame, if any; the main pass calls it before any layer.
-<a href=#113 id=113 data-nosnippet>113</a></span><span class="kw">pub fn </span>draw&lt;<span class="lifetime">'w</span>&gt;(pass: <span class="kw-2">&amp;mut </span>TrackedRenderPass&lt;<span class="lifetime">'w</span>&gt;, world: <span class="kw-2">&amp;</span><span class="lifetime">'w </span>World) {
-<a href=#114 id=114 data-nosnippet>114</a>    <span class="kw">let </span><span class="prelude-val">Some</span>((Initialized(StarfieldPipeline(pipeline)), Initialized(projection), gpu)) =
-<a href=#115 id=115 data-nosnippet>115</a>        world.resources.query::&lt;(
-<a href=#116 id=116 data-nosnippet>116</a>            <span class="kw-2">&amp;</span>Eventually&lt;StarfieldPipeline&gt;,
-<a href=#117 id=117 data-nosnippet>117</a>            <span class="kw-2">&amp;</span>Eventually&lt;ProjectionGpuResources&gt;,
-<a href=#118 id=118 data-nosnippet>118</a>            <span class="kw-2">&amp;</span>StarfieldGpu,
-<a href=#119 id=119 data-nosnippet>119</a>        )&gt;()
-<a href=#120 id=120 data-nosnippet>120</a>    <span class="kw">else </span>{
-<a href=#121 id=121 data-nosnippet>121</a>        <span class="kw">return</span>;
-<a href=#122 id=122 data-nosnippet>122</a>    };
-<a href=#123 id=123 data-nosnippet>123</a>    <span class="kw">let </span><span class="prelude-val">Some</span>((instances, frame)) = gpu.drawable() <span class="kw">else </span>{
-<a href=#124 id=124 data-nosnippet>124</a>        <span class="kw">return</span>;
-<a href=#125 id=125 data-nosnippet>125</a>    };
-<a href=#126 id=126 data-nosnippet>126</a>    pass.set_pipeline(pipeline);
-<a href=#127 id=127 data-nosnippet>127</a>    pass.set_bind_group(<span class="number">0</span>, projection.bind_group(), <span class="kw-2">&amp;</span>[]);
-<a href=#128 id=128 data-nosnippet>128</a>    pass.set_bind_group(<span class="number">1</span>, frame, <span class="kw-2">&amp;</span>[]);
-<a href=#129 id=129 data-nosnippet>129</a>    pass.set_vertex_buffer(<span class="number">0</span>, instances.slice(..));
-<a href=#130 id=130 data-nosnippet>130</a>    pass.draw(<span class="number">0</span>..<span class="number">6</span>, <span class="number">0</span>..gpu.count());
-<a href=#131 id=131 data-nosnippet>131</a>}
-<a href=#132 id=132 data-nosnippet>132</a>
-<a href=#133 id=133 data-nosnippet>133</a><span class="attr">#[cfg(test)]
-<a href=#134 id=134 data-nosnippet>134</a></span><span class="kw">mod </span>tests;
+<a href=#105 id=105 data-nosnippet>105</a>    edges.into_iter().collect()
+<a href=#106 id=106 data-nosnippet>106</a>}
+<a href=#107 id=107 data-nosnippet>107</a>
+<a href=#108 id=108 data-nosnippet>108</a><span class="doccomment">/// Draws the stars queued for this frame, if any; the main pass calls it before any layer.
+<a href=#109 id=109 data-nosnippet>109</a></span><span class="kw">pub fn </span>draw&lt;<span class="lifetime">'w</span>&gt;(pass: <span class="kw-2">&amp;mut </span>TrackedRenderPass&lt;<span class="lifetime">'w</span>&gt;, world: <span class="kw-2">&amp;</span><span class="lifetime">'w </span>World) {
+<a href=#110 id=110 data-nosnippet>110</a>    <span class="kw">let </span><span class="prelude-val">Some</span>((Initialized(StarfieldPipeline(pipeline)), Initialized(projection), gpu)) =
+<a href=#111 id=111 data-nosnippet>111</a>        world.resources.query::&lt;(
+<a href=#112 id=112 data-nosnippet>112</a>            <span class="kw-2">&amp;</span>Eventually&lt;StarfieldPipeline&gt;,
+<a href=#113 id=113 data-nosnippet>113</a>            <span class="kw-2">&amp;</span>Eventually&lt;ProjectionGpuResources&gt;,
+<a href=#114 id=114 data-nosnippet>114</a>            <span class="kw-2">&amp;</span>StarfieldGpu,
+<a href=#115 id=115 data-nosnippet>115</a>        )&gt;()
+<a href=#116 id=116 data-nosnippet>116</a>    <span class="kw">else </span>{
+<a href=#117 id=117 data-nosnippet>117</a>        <span class="kw">return</span>;
+<a href=#118 id=118 data-nosnippet>118</a>    };
+<a href=#119 id=119 data-nosnippet>119</a>    <span class="kw">let </span><span class="prelude-val">Some</span>((instances, frame)) = gpu.drawable() <span class="kw">else </span>{
+<a href=#120 id=120 data-nosnippet>120</a>        <span class="kw">return</span>;
+<a href=#121 id=121 data-nosnippet>121</a>    };
+<a href=#122 id=122 data-nosnippet>122</a>    pass.set_pipeline(pipeline);
+<a href=#123 id=123 data-nosnippet>123</a>    pass.set_bind_group(<span class="number">0</span>, projection.bind_group(), <span class="kw-2">&amp;</span>[]);
+<a href=#124 id=124 data-nosnippet>124</a>    pass.set_bind_group(<span class="number">1</span>, frame, <span class="kw-2">&amp;</span>[]);
+<a href=#125 id=125 data-nosnippet>125</a>    pass.set_vertex_buffer(<span class="number">0</span>, instances.slice(..));
+<a href=#126 id=126 data-nosnippet>126</a>    pass.draw(<span class="number">0</span>..<span class="number">6</span>, <span class="number">0</span>..gpu.count());
+<a href=#127 id=127 data-nosnippet>127</a>}
+<a href=#128 id=128 data-nosnippet>128</a>
+<a href=#129 id=129 data-nosnippet>129</a><span class="attr">#[cfg(test)]
+<a href=#130 id=130 data-nosnippet>130</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>

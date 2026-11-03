@@ -27,7 +27,7 @@
 <a href=#27 id=27 data-nosnippet>27</a>    </span><span class="kw">pub </span>globe_tiles: Vec&lt;WorldTileCoords&gt;,
 <a href=#28 id=28 data-nosnippet>28</a>    <span class="doccomment">/// Evaluated atmosphere opacity.
 <a href=#29 id=29 data-nosnippet>29</a>    </span><span class="kw">pub </span>atmosphere_metadata_buffer: wgpu::Buffer,
-<a href=#30 id=30 data-nosnippet>30</a>    <span class="doccomment">/// Sky colours and horizon, when the style has a sky and the map is not a globe.
+<a href=#30 id=30 data-nosnippet>30</a>    <span class="doccomment">/// Sky colours and horizon, when the style has a sky the frame draws.
 <a href=#31 id=31 data-nosnippet>31</a>    </span><span class="kw">pub </span>sky_metadata_buffer: <span class="prelude-ty">Option</span>&lt;wgpu::Buffer&gt;,
 <a href=#32 id=32 data-nosnippet>32</a>}
 <a href=#33 id=33 data-nosnippet>33</a>
@@ -322,120 +322,122 @@
 <a href=#322 id=322 data-nosnippet>322</a>                <span class="number">0.0
 <a href=#323 id=323 data-nosnippet>323</a>            </span>},
 <a href=#324 id=324 data-nosnippet>324</a>        ],
-<a href=#325 id=325 data-nosnippet>325</a>    }
-<a href=#326 id=326 data-nosnippet>326</a>}
-<a href=#327 id=327 data-nosnippet>327</a>
-<a href=#328 id=328 data-nosnippet>328</a><span class="doccomment">/// The rows that tell a pixel's map row for the northern and southern edges of the flat map,
-<a href=#329 id=329 data-nosnippet>329</a>/// or ones that cut nothing where the map has no such edges.
-<a href=#330 id=330 data-nosnippet>330</a></span><span class="kw">pub fn </span>world_rows(view_state: <span class="kw-2">&amp;</span>ViewState, edges: bool) -&gt; [[f32; <span class="number">4</span>]; <span class="number">2</span>] {
-<a href=#331 id=331 data-nosnippet>331</a>    <span class="kw">const </span>OPEN: [[f32; <span class="number">4</span>]; <span class="number">2</span>] = [[<span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">0.0</span>, -<span class="number">1e30</span>], [<span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">1e30</span>]];
-<a href=#332 id=332 data-nosnippet>332</a>    <span class="kw">if </span>!edges {
-<a href=#333 id=333 data-nosnippet>333</a>        <span class="kw">return </span>OPEN;
-<a href=#334 id=334 data-nosnippet>334</a>    }
-<a href=#335 id=335 data-nosnippet>335</a>    <span class="kw">let </span>center = view_state.camera().position();
-<a href=#336 id=336 data-nosnippet>336</a>    <span class="kw">let </span>relative = view_state.view_projection().<span class="number">0
-<a href=#337 id=337 data-nosnippet>337</a>        </span>* Matrix4::from_translation(Vector3::new(center.x, center.y, <span class="number">0.0</span>));
-<a href=#338 id=338 data-nosnippet>338</a>    <span class="kw">let </span>plane = Matrix3::new(
-<a href=#339 id=339 data-nosnippet>339</a>        relative.x.x,
-<a href=#340 id=340 data-nosnippet>340</a>        relative.x.y,
-<a href=#341 id=341 data-nosnippet>341</a>        relative.x.w,
-<a href=#342 id=342 data-nosnippet>342</a>        relative.y.x,
-<a href=#343 id=343 data-nosnippet>343</a>        relative.y.y,
-<a href=#344 id=344 data-nosnippet>344</a>        relative.y.w,
-<a href=#345 id=345 data-nosnippet>345</a>        relative.w.x,
-<a href=#346 id=346 data-nosnippet>346</a>        relative.w.y,
-<a href=#347 id=347 data-nosnippet>347</a>        relative.w.w,
-<a href=#348 id=348 data-nosnippet>348</a>    );
-<a href=#349 id=349 data-nosnippet>349</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(inverse) = plane.invert() <span class="kw">else </span>{
-<a href=#350 id=350 data-nosnippet>350</a>        <span class="kw">return </span>OPEN;
-<a href=#351 id=351 data-nosnippet>351</a>    };
-<a href=#352 id=352 data-nosnippet>352</a>    <span class="kw">let </span>world = TILE_SIZE * <span class="number">2_f64</span>.powf(view_state.zoom().value());
-<a href=#353 id=353 data-nosnippet>353</a>    [
-<a href=#354 id=354 data-nosnippet>354</a>        [
-<a href=#355 id=355 data-nosnippet>355</a>            inverse.x.y <span class="kw">as </span>f32,
-<a href=#356 id=356 data-nosnippet>356</a>            inverse.y.y <span class="kw">as </span>f32,
-<a href=#357 id=357 data-nosnippet>357</a>            inverse.z.y <span class="kw">as </span>f32,
-<a href=#358 id=358 data-nosnippet>358</a>            (-center.y) <span class="kw">as </span>f32,
-<a href=#359 id=359 data-nosnippet>359</a>        ],
-<a href=#360 id=360 data-nosnippet>360</a>        [
-<a href=#361 id=361 data-nosnippet>361</a>            inverse.x.z <span class="kw">as </span>f32,
-<a href=#362 id=362 data-nosnippet>362</a>            inverse.y.z <span class="kw">as </span>f32,
-<a href=#363 id=363 data-nosnippet>363</a>            inverse.z.z <span class="kw">as </span>f32,
-<a href=#364 id=364 data-nosnippet>364</a>            (world - center.y) <span class="kw">as </span>f32,
-<a href=#365 id=365 data-nosnippet>365</a>        ],
-<a href=#366 id=366 data-nosnippet>366</a>    ]
-<a href=#367 id=367 data-nosnippet>367</a>}
-<a href=#368 id=368 data-nosnippet>368</a>
-<a href=#369 id=369 data-nosnippet>369</a><span class="attr">#[cfg(test)]
-<a href=#370 id=370 data-nosnippet>370</a></span><span class="kw">mod </span>tests {
-<a href=#371 id=371 data-nosnippet>371</a>    <span class="kw">use super</span>::<span class="kw-2">*</span>;
-<a href=#372 id=372 data-nosnippet>372</a>
-<a href=#373 id=373 data-nosnippet>373</a>    <span class="attr">#[tokio::test]
-<a href=#374 id=374 data-nosnippet>374</a>    </span><span class="kw">async fn </span>persistent_buffers_initialize_and_upload() {
-<a href=#375 id=375 data-nosnippet>375</a>        <span class="kw">let </span>instance = wgpu::Instance::default();
-<a href=#376 id=376 data-nosnippet>376</a>        <span class="kw">let </span><span class="prelude-val">Ok</span>(adapter) = instance
-<a href=#377 id=377 data-nosnippet>377</a>            .request_adapter(<span class="kw-2">&amp;</span>wgpu::RequestAdapterOptions::default())
-<a href=#378 id=378 data-nosnippet>378</a>            .<span class="kw">await
-<a href=#379 id=379 data-nosnippet>379</a>        else </span>{
-<a href=#380 id=380 data-nosnippet>380</a>            <span class="kw">return</span>;
-<a href=#381 id=381 data-nosnippet>381</a>        };
-<a href=#382 id=382 data-nosnippet>382</a>        <span class="kw">let </span>(device, queue) = adapter
-<a href=#383 id=383 data-nosnippet>383</a>            .request_device(<span class="kw-2">&amp;</span>wgpu::DeviceDescriptor::default())
-<a href=#384 id=384 data-nosnippet>384</a>            .<span class="kw">await
-<a href=#385 id=385 data-nosnippet>385</a>            </span>.expect(<span class="string">"device"</span>);
-<a href=#386 id=386 data-nosnippet>386</a>        <span class="kw">let </span>queue = UploadQueue::new(queue);
-<a href=#387 id=387 data-nosnippet>387</a>
-<a href=#388 id=388 data-nosnippet>388</a>        <span class="kw">let </span><span class="kw-2">mut </span>gpu_buffers = BackgroundGpuBuffers::new(<span class="kw-2">&amp;</span>device);
-<a href=#389 id=389 data-nosnippet>389</a>        <span class="macro">assert_eq!</span>(
-<a href=#390 id=390 data-nosnippet>390</a>            gpu_buffers.metadata_capacity(),
-<a href=#391 id=391 data-nosnippet>391</a>            BackgroundGpuBuffers::INITIAL_METADATA_CAPACITY
-<a href=#392 id=392 data-nosnippet>392</a>        );
-<a href=#393 id=393 data-nosnippet>393</a>        <span class="macro">assert_eq!</span>(
-<a href=#394 id=394 data-nosnippet>394</a>            gpu_buffers.tile_metadata_capacity(),
-<a href=#395 id=395 data-nosnippet>395</a>            BackgroundGpuBuffers::INITIAL_TILE_METADATA_CAPACITY
-<a href=#396 id=396 data-nosnippet>396</a>        );
-<a href=#397 id=397 data-nosnippet>397</a>
-<a href=#398 id=398 data-nosnippet>398</a>        <span class="kw">let </span>meta = BackgroundLayerMetadata {
-<a href=#399 id=399 data-nosnippet>399</a>            color: [<span class="number">1.0</span>, <span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">1.0</span>],
-<a href=#400 id=400 data-nosnippet>400</a>            z_index: <span class="number">0.0</span>,
-<a href=#401 id=401 data-nosnippet>401</a>            padding: [<span class="number">0.0</span>; <span class="number">3</span>],
-<a href=#402 id=402 data-nosnippet>402</a>            horizon: [<span class="number">0.0</span>; <span class="number">4</span>],
-<a href=#403 id=403 data-nosnippet>403</a>            viewport: [<span class="number">600.0</span>, <span class="number">0.0</span>, <span class="number">800.0</span>, <span class="number">600.0</span>],
-<a href=#404 id=404 data-nosnippet>404</a>            world_rows: [[<span class="number">0.0</span>; <span class="number">4</span>]; <span class="number">2</span>],
-<a href=#405 id=405 data-nosnippet>405</a>        };
-<a href=#406 id=406 data-nosnippet>406</a>        gpu_buffers.write_metadata(<span class="kw-2">&amp;</span>device, <span class="kw-2">&amp;</span>queue, <span class="kw-2">&amp;</span>[meta]);
-<a href=#407 id=407 data-nosnippet>407</a>        <span class="macro">assert!</span>(queue.take_written_bytes() &gt; <span class="number">0</span>);
-<a href=#408 id=408 data-nosnippet>408</a>
-<a href=#409 id=409 data-nosnippet>409</a>        <span class="kw">let </span>items: Vec&lt;BackgroundLayerMetadata&gt; = <span class="macro">vec!</span>[meta; <span class="number">32</span>];
-<a href=#410 id=410 data-nosnippet>410</a>        gpu_buffers.write_metadata(<span class="kw-2">&amp;</span>device, <span class="kw-2">&amp;</span>queue, <span class="kw-2">&amp;</span>items);
-<a href=#411 id=411 data-nosnippet>411</a>        <span class="macro">assert_eq!</span>(gpu_buffers.metadata_capacity(), <span class="number">32</span>);
-<a href=#412 id=412 data-nosnippet>412</a>
-<a href=#413 id=413 data-nosnippet>413</a>        <span class="kw">let </span>items_64: Vec&lt;BackgroundLayerMetadata&gt; = <span class="macro">vec!</span>[meta; <span class="number">33</span>];
-<a href=#414 id=414 data-nosnippet>414</a>        gpu_buffers.write_metadata(<span class="kw-2">&amp;</span>device, <span class="kw-2">&amp;</span>queue, <span class="kw-2">&amp;</span>items_64);
-<a href=#415 id=415 data-nosnippet>415</a>        <span class="macro">assert_eq!</span>(gpu_buffers.metadata_capacity(), <span class="number">64</span>);
-<a href=#416 id=416 data-nosnippet>416</a>    }
-<a href=#417 id=417 data-nosnippet>417</a>
-<a href=#418 id=418 data-nosnippet>418</a>    <span class="attr">#[test]
-<a href=#419 id=419 data-nosnippet>419</a>    </span><span class="kw">fn </span>opacity_scales_alpha() {
-<a href=#420 id=420 data-nosnippet>420</a>        <span class="kw">let </span>layer = <span class="macro">serde_json::json!</span>({<span class="string">"id"</span>: <span class="string">"b"</span>, <span class="string">"type"</span>: <span class="string">"background"</span>, <span class="string">"paint"</span>: {<span class="string">"background-color"</span>: <span class="string">"blue"</span>, <span class="string">"background-opacity"</span>: <span class="number">0.5</span>}});
-<a href=#421 id=421 data-nosnippet>421</a>        <span class="kw">let </span>layer: <span class="kw">crate</span>::style::layer::StyleLayer =
-<a href=#422 id=422 data-nosnippet>422</a>            serde_json::from_value(layer).expect(<span class="string">"valid background layer"</span>);
-<a href=#423 id=423 data-nosnippet>423</a>        <span class="kw">let </span>color = background_color(<span class="kw-2">&amp;</span>layer, <span class="number">0.0</span>);
-<a href=#424 id=424 data-nosnippet>424</a>        <span class="macro">assert_eq!</span>(color, [<span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">1.0</span>, <span class="number">0.5</span>]);
-<a href=#425 id=425 data-nosnippet>425</a>    }
-<a href=#426 id=426 data-nosnippet>426</a>
-<a href=#427 id=427 data-nosnippet>427</a>    <span class="attr">#[test]
-<a href=#428 id=428 data-nosnippet>428</a>    </span><span class="kw">fn </span>colour_follows_zoom() {
-<a href=#429 id=429 data-nosnippet>429</a>        <span class="kw">let </span>paint = <span class="macro">serde_json::json!</span>({<span class="string">"background-color"</span>: {
-<a href=#430 id=430 data-nosnippet>430</a>            <span class="string">"stops"</span>: [[<span class="number">0</span>, <span class="string">"red"</span>], [<span class="number">10</span>, <span class="string">"blue"</span>]], <span class="string">"base"</span>: <span class="number">1.0
-<a href=#431 id=431 data-nosnippet>431</a>        </span>}});
-<a href=#432 id=432 data-nosnippet>432</a>        <span class="kw">let </span>layer = <span class="macro">serde_json::json!</span>({<span class="string">"id"</span>: <span class="string">"b"</span>, <span class="string">"type"</span>: <span class="string">"background"</span>, <span class="string">"paint"</span>: paint});
-<a href=#433 id=433 data-nosnippet>433</a>        <span class="kw">let </span>layer: <span class="kw">crate</span>::style::layer::StyleLayer =
-<a href=#434 id=434 data-nosnippet>434</a>            serde_json::from_value(layer).expect(<span class="string">"valid background layer"</span>);
-<a href=#435 id=435 data-nosnippet>435</a>        <span class="kw">let </span>start = background_color(<span class="kw-2">&amp;</span>layer, <span class="number">0.0</span>);
-<a href=#436 id=436 data-nosnippet>436</a>        <span class="kw">let </span>end = background_color(<span class="kw-2">&amp;</span>layer, <span class="number">10.0</span>);
-<a href=#437 id=437 data-nosnippet>437</a>        <span class="macro">assert_eq!</span>(start[..<span class="number">3</span>], [<span class="number">1.0</span>, <span class="number">0.0</span>, <span class="number">0.0</span>]);
-<a href=#438 id=438 data-nosnippet>438</a>        <span class="macro">assert_eq!</span>(end[..<span class="number">3</span>], [<span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">1.0</span>]);
-<a href=#439 id=439 data-nosnippet>439</a>    }
-<a href=#440 id=440 data-nosnippet>440</a>}
+<a href=#325 id=325 data-nosnippet>325</a>        inverse_projection: cgmath::Matrix4::from_scale(<span class="number">1.0</span>).into(),
+<a href=#326 id=326 data-nosnippet>326</a>        up_and_horizon: [<span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">1.0</span>, <span class="number">0.0</span>],
+<a href=#327 id=327 data-nosnippet>327</a>    }
+<a href=#328 id=328 data-nosnippet>328</a>}
+<a href=#329 id=329 data-nosnippet>329</a>
+<a href=#330 id=330 data-nosnippet>330</a><span class="doccomment">/// The rows that tell a pixel's map row for the northern and southern edges of the flat map,
+<a href=#331 id=331 data-nosnippet>331</a>/// or ones that cut nothing where the map has no such edges.
+<a href=#332 id=332 data-nosnippet>332</a></span><span class="kw">pub fn </span>world_rows(view_state: <span class="kw-2">&amp;</span>ViewState, edges: bool) -&gt; [[f32; <span class="number">4</span>]; <span class="number">2</span>] {
+<a href=#333 id=333 data-nosnippet>333</a>    <span class="kw">const </span>OPEN: [[f32; <span class="number">4</span>]; <span class="number">2</span>] = [[<span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">0.0</span>, -<span class="number">1e30</span>], [<span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">1e30</span>]];
+<a href=#334 id=334 data-nosnippet>334</a>    <span class="kw">if </span>!edges {
+<a href=#335 id=335 data-nosnippet>335</a>        <span class="kw">return </span>OPEN;
+<a href=#336 id=336 data-nosnippet>336</a>    }
+<a href=#337 id=337 data-nosnippet>337</a>    <span class="kw">let </span>center = view_state.camera().position();
+<a href=#338 id=338 data-nosnippet>338</a>    <span class="kw">let </span>relative = view_state.view_projection().<span class="number">0
+<a href=#339 id=339 data-nosnippet>339</a>        </span>* Matrix4::from_translation(Vector3::new(center.x, center.y, <span class="number">0.0</span>));
+<a href=#340 id=340 data-nosnippet>340</a>    <span class="kw">let </span>plane = Matrix3::new(
+<a href=#341 id=341 data-nosnippet>341</a>        relative.x.x,
+<a href=#342 id=342 data-nosnippet>342</a>        relative.x.y,
+<a href=#343 id=343 data-nosnippet>343</a>        relative.x.w,
+<a href=#344 id=344 data-nosnippet>344</a>        relative.y.x,
+<a href=#345 id=345 data-nosnippet>345</a>        relative.y.y,
+<a href=#346 id=346 data-nosnippet>346</a>        relative.y.w,
+<a href=#347 id=347 data-nosnippet>347</a>        relative.w.x,
+<a href=#348 id=348 data-nosnippet>348</a>        relative.w.y,
+<a href=#349 id=349 data-nosnippet>349</a>        relative.w.w,
+<a href=#350 id=350 data-nosnippet>350</a>    );
+<a href=#351 id=351 data-nosnippet>351</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(inverse) = plane.invert() <span class="kw">else </span>{
+<a href=#352 id=352 data-nosnippet>352</a>        <span class="kw">return </span>OPEN;
+<a href=#353 id=353 data-nosnippet>353</a>    };
+<a href=#354 id=354 data-nosnippet>354</a>    <span class="kw">let </span>world = TILE_SIZE * <span class="number">2_f64</span>.powf(view_state.zoom().value());
+<a href=#355 id=355 data-nosnippet>355</a>    [
+<a href=#356 id=356 data-nosnippet>356</a>        [
+<a href=#357 id=357 data-nosnippet>357</a>            inverse.x.y <span class="kw">as </span>f32,
+<a href=#358 id=358 data-nosnippet>358</a>            inverse.y.y <span class="kw">as </span>f32,
+<a href=#359 id=359 data-nosnippet>359</a>            inverse.z.y <span class="kw">as </span>f32,
+<a href=#360 id=360 data-nosnippet>360</a>            (-center.y) <span class="kw">as </span>f32,
+<a href=#361 id=361 data-nosnippet>361</a>        ],
+<a href=#362 id=362 data-nosnippet>362</a>        [
+<a href=#363 id=363 data-nosnippet>363</a>            inverse.x.z <span class="kw">as </span>f32,
+<a href=#364 id=364 data-nosnippet>364</a>            inverse.y.z <span class="kw">as </span>f32,
+<a href=#365 id=365 data-nosnippet>365</a>            inverse.z.z <span class="kw">as </span>f32,
+<a href=#366 id=366 data-nosnippet>366</a>            (world - center.y) <span class="kw">as </span>f32,
+<a href=#367 id=367 data-nosnippet>367</a>        ],
+<a href=#368 id=368 data-nosnippet>368</a>    ]
+<a href=#369 id=369 data-nosnippet>369</a>}
+<a href=#370 id=370 data-nosnippet>370</a>
+<a href=#371 id=371 data-nosnippet>371</a><span class="attr">#[cfg(test)]
+<a href=#372 id=372 data-nosnippet>372</a></span><span class="kw">mod </span>tests {
+<a href=#373 id=373 data-nosnippet>373</a>    <span class="kw">use super</span>::<span class="kw-2">*</span>;
+<a href=#374 id=374 data-nosnippet>374</a>
+<a href=#375 id=375 data-nosnippet>375</a>    <span class="attr">#[tokio::test]
+<a href=#376 id=376 data-nosnippet>376</a>    </span><span class="kw">async fn </span>persistent_buffers_initialize_and_upload() {
+<a href=#377 id=377 data-nosnippet>377</a>        <span class="kw">let </span>instance = wgpu::Instance::default();
+<a href=#378 id=378 data-nosnippet>378</a>        <span class="kw">let </span><span class="prelude-val">Ok</span>(adapter) = instance
+<a href=#379 id=379 data-nosnippet>379</a>            .request_adapter(<span class="kw-2">&amp;</span>wgpu::RequestAdapterOptions::default())
+<a href=#380 id=380 data-nosnippet>380</a>            .<span class="kw">await
+<a href=#381 id=381 data-nosnippet>381</a>        else </span>{
+<a href=#382 id=382 data-nosnippet>382</a>            <span class="kw">return</span>;
+<a href=#383 id=383 data-nosnippet>383</a>        };
+<a href=#384 id=384 data-nosnippet>384</a>        <span class="kw">let </span>(device, queue) = adapter
+<a href=#385 id=385 data-nosnippet>385</a>            .request_device(<span class="kw-2">&amp;</span>wgpu::DeviceDescriptor::default())
+<a href=#386 id=386 data-nosnippet>386</a>            .<span class="kw">await
+<a href=#387 id=387 data-nosnippet>387</a>            </span>.expect(<span class="string">"device"</span>);
+<a href=#388 id=388 data-nosnippet>388</a>        <span class="kw">let </span>queue = UploadQueue::new(queue);
+<a href=#389 id=389 data-nosnippet>389</a>
+<a href=#390 id=390 data-nosnippet>390</a>        <span class="kw">let </span><span class="kw-2">mut </span>gpu_buffers = BackgroundGpuBuffers::new(<span class="kw-2">&amp;</span>device);
+<a href=#391 id=391 data-nosnippet>391</a>        <span class="macro">assert_eq!</span>(
+<a href=#392 id=392 data-nosnippet>392</a>            gpu_buffers.metadata_capacity(),
+<a href=#393 id=393 data-nosnippet>393</a>            BackgroundGpuBuffers::INITIAL_METADATA_CAPACITY
+<a href=#394 id=394 data-nosnippet>394</a>        );
+<a href=#395 id=395 data-nosnippet>395</a>        <span class="macro">assert_eq!</span>(
+<a href=#396 id=396 data-nosnippet>396</a>            gpu_buffers.tile_metadata_capacity(),
+<a href=#397 id=397 data-nosnippet>397</a>            BackgroundGpuBuffers::INITIAL_TILE_METADATA_CAPACITY
+<a href=#398 id=398 data-nosnippet>398</a>        );
+<a href=#399 id=399 data-nosnippet>399</a>
+<a href=#400 id=400 data-nosnippet>400</a>        <span class="kw">let </span>meta = BackgroundLayerMetadata {
+<a href=#401 id=401 data-nosnippet>401</a>            color: [<span class="number">1.0</span>, <span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">1.0</span>],
+<a href=#402 id=402 data-nosnippet>402</a>            z_index: <span class="number">0.0</span>,
+<a href=#403 id=403 data-nosnippet>403</a>            padding: [<span class="number">0.0</span>; <span class="number">3</span>],
+<a href=#404 id=404 data-nosnippet>404</a>            horizon: [<span class="number">0.0</span>; <span class="number">4</span>],
+<a href=#405 id=405 data-nosnippet>405</a>            viewport: [<span class="number">600.0</span>, <span class="number">0.0</span>, <span class="number">800.0</span>, <span class="number">600.0</span>],
+<a href=#406 id=406 data-nosnippet>406</a>            world_rows: [[<span class="number">0.0</span>; <span class="number">4</span>]; <span class="number">2</span>],
+<a href=#407 id=407 data-nosnippet>407</a>        };
+<a href=#408 id=408 data-nosnippet>408</a>        gpu_buffers.write_metadata(<span class="kw-2">&amp;</span>device, <span class="kw-2">&amp;</span>queue, <span class="kw-2">&amp;</span>[meta]);
+<a href=#409 id=409 data-nosnippet>409</a>        <span class="macro">assert!</span>(queue.take_written_bytes() &gt; <span class="number">0</span>);
+<a href=#410 id=410 data-nosnippet>410</a>
+<a href=#411 id=411 data-nosnippet>411</a>        <span class="kw">let </span>items: Vec&lt;BackgroundLayerMetadata&gt; = <span class="macro">vec!</span>[meta; <span class="number">32</span>];
+<a href=#412 id=412 data-nosnippet>412</a>        gpu_buffers.write_metadata(<span class="kw-2">&amp;</span>device, <span class="kw-2">&amp;</span>queue, <span class="kw-2">&amp;</span>items);
+<a href=#413 id=413 data-nosnippet>413</a>        <span class="macro">assert_eq!</span>(gpu_buffers.metadata_capacity(), <span class="number">32</span>);
+<a href=#414 id=414 data-nosnippet>414</a>
+<a href=#415 id=415 data-nosnippet>415</a>        <span class="kw">let </span>items_64: Vec&lt;BackgroundLayerMetadata&gt; = <span class="macro">vec!</span>[meta; <span class="number">33</span>];
+<a href=#416 id=416 data-nosnippet>416</a>        gpu_buffers.write_metadata(<span class="kw-2">&amp;</span>device, <span class="kw-2">&amp;</span>queue, <span class="kw-2">&amp;</span>items_64);
+<a href=#417 id=417 data-nosnippet>417</a>        <span class="macro">assert_eq!</span>(gpu_buffers.metadata_capacity(), <span class="number">64</span>);
+<a href=#418 id=418 data-nosnippet>418</a>    }
+<a href=#419 id=419 data-nosnippet>419</a>
+<a href=#420 id=420 data-nosnippet>420</a>    <span class="attr">#[test]
+<a href=#421 id=421 data-nosnippet>421</a>    </span><span class="kw">fn </span>opacity_scales_alpha() {
+<a href=#422 id=422 data-nosnippet>422</a>        <span class="kw">let </span>layer = <span class="macro">serde_json::json!</span>({<span class="string">"id"</span>: <span class="string">"b"</span>, <span class="string">"type"</span>: <span class="string">"background"</span>, <span class="string">"paint"</span>: {<span class="string">"background-color"</span>: <span class="string">"blue"</span>, <span class="string">"background-opacity"</span>: <span class="number">0.5</span>}});
+<a href=#423 id=423 data-nosnippet>423</a>        <span class="kw">let </span>layer: <span class="kw">crate</span>::style::layer::StyleLayer =
+<a href=#424 id=424 data-nosnippet>424</a>            serde_json::from_value(layer).expect(<span class="string">"valid background layer"</span>);
+<a href=#425 id=425 data-nosnippet>425</a>        <span class="kw">let </span>color = background_color(<span class="kw-2">&amp;</span>layer, <span class="number">0.0</span>);
+<a href=#426 id=426 data-nosnippet>426</a>        <span class="macro">assert_eq!</span>(color, [<span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">1.0</span>, <span class="number">0.5</span>]);
+<a href=#427 id=427 data-nosnippet>427</a>    }
+<a href=#428 id=428 data-nosnippet>428</a>
+<a href=#429 id=429 data-nosnippet>429</a>    <span class="attr">#[test]
+<a href=#430 id=430 data-nosnippet>430</a>    </span><span class="kw">fn </span>colour_follows_zoom() {
+<a href=#431 id=431 data-nosnippet>431</a>        <span class="kw">let </span>paint = <span class="macro">serde_json::json!</span>({<span class="string">"background-color"</span>: {
+<a href=#432 id=432 data-nosnippet>432</a>            <span class="string">"stops"</span>: [[<span class="number">0</span>, <span class="string">"red"</span>], [<span class="number">10</span>, <span class="string">"blue"</span>]], <span class="string">"base"</span>: <span class="number">1.0
+<a href=#433 id=433 data-nosnippet>433</a>        </span>}});
+<a href=#434 id=434 data-nosnippet>434</a>        <span class="kw">let </span>layer = <span class="macro">serde_json::json!</span>({<span class="string">"id"</span>: <span class="string">"b"</span>, <span class="string">"type"</span>: <span class="string">"background"</span>, <span class="string">"paint"</span>: paint});
+<a href=#435 id=435 data-nosnippet>435</a>        <span class="kw">let </span>layer: <span class="kw">crate</span>::style::layer::StyleLayer =
+<a href=#436 id=436 data-nosnippet>436</a>            serde_json::from_value(layer).expect(<span class="string">"valid background layer"</span>);
+<a href=#437 id=437 data-nosnippet>437</a>        <span class="kw">let </span>start = background_color(<span class="kw-2">&amp;</span>layer, <span class="number">0.0</span>);
+<a href=#438 id=438 data-nosnippet>438</a>        <span class="kw">let </span>end = background_color(<span class="kw-2">&amp;</span>layer, <span class="number">10.0</span>);
+<a href=#439 id=439 data-nosnippet>439</a>        <span class="macro">assert_eq!</span>(start[..<span class="number">3</span>], [<span class="number">1.0</span>, <span class="number">0.0</span>, <span class="number">0.0</span>]);
+<a href=#440 id=440 data-nosnippet>440</a>        <span class="macro">assert_eq!</span>(end[..<span class="number">3</span>], [<span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">1.0</span>]);
+<a href=#441 id=441 data-nosnippet>441</a>    }
+<a href=#442 id=442 data-nosnippet>442</a>}
 </code></pre></div></section></main></body></html>

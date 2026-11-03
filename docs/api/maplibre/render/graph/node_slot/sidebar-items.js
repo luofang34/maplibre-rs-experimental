@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"enum":["SlotLabel","SlotType","SlotValue"],"struct":["SlotInfo","SlotInfos"]};

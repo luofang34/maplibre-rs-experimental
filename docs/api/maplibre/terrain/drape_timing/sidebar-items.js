@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["ASSUMED_DRAPE_COST","SMOOTHING"],"struct":["DrapeCost","DrapeTimerSlot"]};
+window.SIDEBAR_ITEMS = {"constant":["ASSUMED_DRAPE_COST","SMOOTHING"],"fn":["drape_timer_system","map_after_submit","resolve_before_submit"],"struct":["DrapeCost","DrapeTimerSlot"]};

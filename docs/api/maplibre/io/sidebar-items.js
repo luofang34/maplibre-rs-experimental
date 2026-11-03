@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["apc","geometry_index","mlt","pmtiles","resource_loader","scheduler","source_client","source_type","tile_backpressure","tile_json","tile_retry","tile_sources"],"struct":["RawLayer"]};
+window.SIDEBAR_ITEMS = {"mod":["apc","cpu_work","frame_style","geometry_index","mlt","pmtiles","resource_loader","scheduler","source_client","source_type","tile_backpressure","tile_json","tile_load","tile_retry","tile_sources"],"struct":["RawLayer"]};

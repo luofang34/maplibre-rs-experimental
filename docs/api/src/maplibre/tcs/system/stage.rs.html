@@ -3,7 +3,7 @@
 <a href=#3 id=3 data-nosnippet>3</a></span><span class="kw">use crate</span>::{
 <a href=#4 id=4 data-nosnippet>4</a>    context::MapContext,
 <a href=#5 id=5 data-nosnippet>5</a>    schedule::{Stage, StageResult},
-<a href=#6 id=6 data-nosnippet>6</a>    tcs::system::{heap::live_bytes, timings::FrameTimings, IntoSystemContainer, SystemContainer},
+<a href=#6 id=6 data-nosnippet>6</a>    tcs::system::{timings, IntoSystemContainer, SystemContainer},
 <a href=#7 id=7 data-nosnippet>7</a>};
 <a href=#8 id=8 data-nosnippet>8</a>
 <a href=#9 id=9 data-nosnippet>9</a><span class="doccomment">/// Runs systems in insertion order, stopping at the first error without rollback.
@@ -33,16 +33,11 @@
 <a href=#33 id=33 data-nosnippet>33</a>            <span class="attr">#[cfg(feature = <span class="string">"trace"</span>)]
 <a href=#34 id=34 data-nosnippet>34</a>            </span><span class="kw">let </span>_span =
 <a href=#35 id=35 data-nosnippet>35</a>                <span class="macro">tracing::info_span!</span>(<span class="string">"system"</span>, name = container.system.name().as_ref()).entered();
-<a href=#36 id=36 data-nosnippet>36</a>            <span class="kw">let </span>started = instant::Instant::now();
-<a href=#37 id=37 data-nosnippet>37</a>            <span class="kw">let </span>heap_before = live_bytes();
-<a href=#38 id=38 data-nosnippet>38</a>            container.system.run(context)<span class="question-mark">?</span>;
-<a href=#39 id=39 data-nosnippet>39</a>            <span class="kw">let </span>spent = started.elapsed();
-<a href=#40 id=40 data-nosnippet>40</a>            <span class="kw">let </span>grown = live_bytes() - heap_before;
-<a href=#41 id=41 data-nosnippet>41</a>            <span class="kw">let </span>timings = context.world.resources.get_or_init_mut::&lt;FrameTimings&gt;();
-<a href=#42 id=42 data-nosnippet>42</a>            timings.record(container.system.name(), spent);
-<a href=#43 id=43 data-nosnippet>43</a>            timings.record_growth(container.system.name(), grown);
-<a href=#44 id=44 data-nosnippet>44</a>        }
-<a href=#45 id=45 data-nosnippet>45</a>        <span class="prelude-val">Ok</span>(())
-<a href=#46 id=46 data-nosnippet>46</a>    }
-<a href=#47 id=47 data-nosnippet>47</a>}
+<a href=#36 id=36 data-nosnippet>36</a>            <span class="kw">let </span>name = container.system.name();
+<a href=#37 id=37 data-nosnippet>37</a>            <span class="kw">let </span>system = <span class="kw-2">&amp;mut </span>container.system;
+<a href=#38 id=38 data-nosnippet>38</a>            timings::measure(context, <span class="kw-2">&amp;</span>name, |context| system.run(context)).<span class="number">0</span><span class="question-mark">?</span>;
+<a href=#39 id=39 data-nosnippet>39</a>        }
+<a href=#40 id=40 data-nosnippet>40</a>        <span class="prelude-val">Ok</span>(())
+<a href=#41 id=41 data-nosnippet>41</a>    }
+<a href=#42 id=42 data-nosnippet>42</a>}
 </code></pre></div></section></main></body></html>

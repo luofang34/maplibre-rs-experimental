@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["draw_graph","main_graph"],"struct":["MaskPipeline","RenderPlugin"]};
+window.SIDEBAR_ITEMS = {"fn":["add_draw_passes"],"mod":["draw_graph"],"struct":["MaskPipeline","RenderPlugin"]};

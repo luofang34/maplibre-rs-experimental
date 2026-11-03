@@ -49,7 +49,7 @@
 <a href=#49 id=49 data-nosnippet>49</a>    environment::Environment,
 <a href=#50 id=50 data-nosnippet>50</a>    kernel::Kernel,
 <a href=#51 id=51 data-nosnippet>51</a>    plugin::Plugin,
-<a href=#52 id=52 data-nosnippet>52</a>    render::{draw_graph, eventually::Eventually, graph::RenderGraph, RenderStageLabel},
+<a href=#52 id=52 data-nosnippet>52</a>    render::{draw_graph, eventually::Eventually, RenderStageLabel},
 <a href=#53 id=53 data-nosnippet>53</a>    schedule::Schedule,
 <a href=#54 id=54 data-nosnippet>54</a>    tcs::world::World,
 <a href=#55 id=55 data-nosnippet>55</a>};
@@ -170,8 +170,8 @@
 <a href=#170 id=170 data-nosnippet>170</a>        schedule: <span class="kw-2">&amp;mut </span>Schedule,
 <a href=#171 id=171 data-nosnippet>171</a>        _kernel: Rc&lt;Kernel&lt;E&gt;&gt;,
 <a href=#172 id=172 data-nosnippet>172</a>        world: <span class="kw-2">&amp;mut </span>World,
-<a href=#173 id=173 data-nosnippet>173</a>        graph: <span class="kw-2">&amp;mut </span>RenderGraph,
-<a href=#174 id=174 data-nosnippet>174</a>    ) {
+<a href=#173 id=173 data-nosnippet>173</a>        renderer: <span class="kw-2">&amp;mut </span><span class="kw">crate</span>::render::Renderer,
+<a href=#174 id=174 data-nosnippet>174</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), <span class="kw">crate</span>::plugin::PluginError&gt; {
 <a href=#175 id=175 data-nosnippet>175</a>        world.resources.init::&lt;HostOverlay&gt;();
 <a href=#176 id=176 data-nosnippet>176</a>        world
 <a href=#177 id=177 data-nosnippet>177</a>            .resources
@@ -179,8 +179,8 @@
 <a href=#179 id=179 data-nosnippet>179</a>        world
 <a href=#180 id=180 data-nosnippet>180</a>            .resources
 <a href=#181 id=181 data-nosnippet>181</a>            .insert(Eventually::&lt;probes::ProbeGpu&gt;::Uninitialized);
-<a href=#182 id=182 data-nosnippet>182</a>        schedule.add_system_to_stage(RenderStageLabel::Prepare, pipeline::prepare_system);
-<a href=#183 id=183 data-nosnippet>183</a>        schedule.add_system_to_stage(RenderStageLabel::Prepare, probes::prepare_system);
+<a href=#182 id=182 data-nosnippet>182</a>        schedule.add_system_to_stage(RenderStageLabel::Prepare, pipeline::prepare_system)<span class="question-mark">?</span>;
+<a href=#183 id=183 data-nosnippet>183</a>        schedule.add_system_to_stage(RenderStageLabel::Prepare, probes::prepare_system)<span class="question-mark">?</span>;
 <a href=#184 id=184 data-nosnippet>184</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(callbacks) = world
 <a href=#185 id=185 data-nosnippet>185</a>            .resources
 <a href=#186 id=186 data-nosnippet>186</a>            .get_mut::&lt;<span class="kw">crate</span>::render::AfterSubmitCallbacks&gt;()
@@ -206,25 +206,18 @@
 <a href=#206 id=206 data-nosnippet>206</a>            world.resources.insert(callbacks);
 <a href=#207 id=207 data-nosnippet>207</a>        }
 <a href=#208 id=208 data-nosnippet>208</a>
-<a href=#209 id=209 data-nosnippet>209</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(draw_graph) = graph.get_sub_graph_mut(draw_graph::NAME) <span class="kw">else </span>{
-<a href=#210 id=210 data-nosnippet>210</a>            <span class="macro">tracing::error!</span>(<span class="string">"draw graph is missing; the host overlay will not be drawn"</span>);
-<a href=#211 id=211 data-nosnippet>211</a>            <span class="kw">return</span>;
-<a href=#212 id=212 data-nosnippet>212</a>        };
-<a href=#213 id=213 data-nosnippet>213</a>        draw_graph.add_node(OVERLAY_PASS, pass::OverlayPassNode);
-<a href=#214 id=214 data-nosnippet>214</a>        draw_graph.add_node(DEPTH_PROBE_PASS, probes::DepthProbePassNode);
-<a href=#215 id=215 data-nosnippet>215</a>        <span class="kw">let </span>edges = [
-<a href=#216 id=216 data-nosnippet>216</a>            draw_graph.add_node_edge(draw_graph::node::SCENE_3D_PASS, OVERLAY_PASS),
-<a href=#217 id=217 data-nosnippet>217</a>            draw_graph.add_node_edge(OVERLAY_PASS, DEPTH_PROBE_PASS),
-<a href=#218 id=218 data-nosnippet>218</a>            draw_graph.add_node_edge(DEPTH_PROBE_PASS, draw_graph::node::TRANSLUCENT_PASS),
-<a href=#219 id=219 data-nosnippet>219</a>        ];
-<a href=#220 id=220 data-nosnippet>220</a>        <span class="kw">for </span>edge <span class="kw">in </span>edges {
-<a href=#221 id=221 data-nosnippet>221</a>            <span class="kw">if let </span><span class="prelude-val">Err</span>(error) = edge {
-<a href=#222 id=222 data-nosnippet>222</a>                <span class="macro">tracing::error!</span>(
-<a href=#223 id=223 data-nosnippet>223</a>                    <span class="question-mark">?</span>error,
-<a href=#224 id=224 data-nosnippet>224</a>                    <span class="string">"unable to order the overlay pass before the symbols"
-<a href=#225 id=225 data-nosnippet>225</a>                </span>);
-<a href=#226 id=226 data-nosnippet>226</a>            }
-<a href=#227 id=227 data-nosnippet>227</a>        }
-<a href=#228 id=228 data-nosnippet>228</a>    }
-<a href=#229 id=229 data-nosnippet>229</a>}
+<a href=#209 id=209 data-nosnippet>209</a>        <span class="kw">let </span>draw_graph = <span class="kw-2">&amp;mut </span>renderer.render_graph;
+<a href=#210 id=210 data-nosnippet>210</a>        <span class="kw">let </span>edges = [
+<a href=#211 id=211 data-nosnippet>211</a>            draw_graph.add_node(OVERLAY_PASS, pass::OverlayPassNode),
+<a href=#212 id=212 data-nosnippet>212</a>            draw_graph.add_node(DEPTH_PROBE_PASS, probes::DepthProbePassNode),
+<a href=#213 id=213 data-nosnippet>213</a>            draw_graph.add_node_edge(draw_graph::node::SCENE_3D_PASS, OVERLAY_PASS),
+<a href=#214 id=214 data-nosnippet>214</a>            draw_graph.add_node_edge(OVERLAY_PASS, DEPTH_PROBE_PASS),
+<a href=#215 id=215 data-nosnippet>215</a>            draw_graph.add_node_edge(DEPTH_PROBE_PASS, draw_graph::node::TRANSLUCENT_PASS),
+<a href=#216 id=216 data-nosnippet>216</a>        ];
+<a href=#217 id=217 data-nosnippet>217</a>        <span class="kw">for </span>edge <span class="kw">in </span>edges {
+<a href=#218 id=218 data-nosnippet>218</a>            edge<span class="question-mark">?</span>;
+<a href=#219 id=219 data-nosnippet>219</a>        }
+<a href=#220 id=220 data-nosnippet>220</a>        <span class="prelude-val">Ok</span>(())
+<a href=#221 id=221 data-nosnippet>221</a>    }
+<a href=#222 id=222 data-nosnippet>222</a>}
 </code></pre></div></section></main></body></html>

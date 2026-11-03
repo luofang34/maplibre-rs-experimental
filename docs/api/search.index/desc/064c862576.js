@@ -1,1 +1,0 @@
-rd_("CnAllows shaders to index sampled texture and storage buffer \xe2\x80\xa6CgAmount of individual acceleration structures within \xe2\x80\xa6")

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["EDGE_BYTES_PER_TILE","EDGE_TEXELS_PER_TILE"],"fn":["edge_row_capacity","edge_texture_size"],"struct":["EdgeHeightTexture"]};

@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["altitude","buffers","daylight","pattern","queue_system","render_commands","resource_system"],"struct":["BackgroundPlugin"]};
+window.SIDEBAR_ITEMS = {"mod":["altitude","buffers","daylight","globe_sky","pattern","queue_system","render_commands","resource_system"],"struct":["BackgroundPlugin"]};

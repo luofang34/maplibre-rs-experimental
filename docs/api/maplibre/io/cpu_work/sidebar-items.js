@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["run_cpu_bound","run_cpu_bound_replying"],"struct":["CpuWorkError","Wanted","WhileWanted"]};

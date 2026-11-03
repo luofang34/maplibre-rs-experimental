@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["FrameTimings"]};
+window.SIDEBAR_ITEMS = {"fn":["add","measure","stage_finished"],"struct":["FrameTimings"]};

@@ -14,7 +14,7 @@
 <a href=#14 id=14 data-nosnippet>14</a>    context::MapContext,
 <a href=#15 id=15 data-nosnippet>15</a>    render::{
 <a href=#16 id=16 data-nosnippet>16</a>        eventually::{Eventually, Eventually::Initialized},
-<a href=#17 id=17 data-nosnippet>17</a>        graph::{Node, NodeRunError, RenderContext, RenderGraphContext},
+<a href=#17 id=17 data-nosnippet>17</a>        graph::{Node, RenderContext},
 <a href=#18 id=18 data-nosnippet>18</a>        projection::globe_camera_for_view,
 <a href=#19 id=19 data-nosnippet>19</a>        resource::{FragmentState, RenderPipeline, TilePipeline, TilePipelineOptions, VertexState},
 <a href=#20 id=20 data-nosnippet>20</a>        shaders::{Mat4x4f32, Shader},
@@ -227,87 +227,75 @@
 <a href=#227 id=227 data-nosnippet>227</a></span><span class="kw">pub struct </span>GlobeDaylightNode;
 <a href=#228 id=228 data-nosnippet>228</a>
 <a href=#229 id=229 data-nosnippet>229</a><span class="kw">impl </span>Node <span class="kw">for </span>GlobeDaylightNode {
-<a href=#230 id=230 data-nosnippet>230</a>    <span class="kw">fn </span>run(
-<a href=#231 id=231 data-nosnippet>231</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
-<a href=#232 id=232 data-nosnippet>232</a>        _graph: <span class="kw-2">&amp;mut </span>RenderGraphContext,
-<a href=#233 id=233 data-nosnippet>233</a>        render_context: <span class="kw-2">&amp;mut </span>RenderContext,
-<a href=#234 id=234 data-nosnippet>234</a>        state: <span class="kw-2">&amp;</span>RenderResources,
-<a href=#235 id=235 data-nosnippet>235</a>        world: <span class="kw-2">&amp;</span>World,
-<a href=#236 id=236 data-nosnippet>236</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), NodeRunError&gt; {
-<a href=#237 id=237 data-nosnippet>237</a>        <span class="kw">let </span>(
-<a href=#238 id=238 data-nosnippet>238</a>            <span class="prelude-val">Some</span>(GlobeDaylightGpu(<span class="prelude-val">Some</span>(frame))),
-<a href=#239 id=239 data-nosnippet>239</a>            <span class="prelude-val">Some</span>(Initialized(GlobeDaylightPipeline(pipeline))),
-<a href=#240 id=240 data-nosnippet>240</a>            Initialized(render_target),
-<a href=#241 id=241 data-nosnippet>241</a>            Initialized(multisampling),
-<a href=#242 id=242 data-nosnippet>242</a>            Initialized(depth),
-<a href=#243 id=243 data-nosnippet>243</a>        ) = (
-<a href=#244 id=244 data-nosnippet>244</a>            world.resources.get::&lt;GlobeDaylightGpu&gt;(),
-<a href=#245 id=245 data-nosnippet>245</a>            world.resources.get::&lt;Eventually&lt;GlobeDaylightPipeline&gt;&gt;(),
-<a href=#246 id=246 data-nosnippet>246</a>            <span class="kw-2">&amp;</span>state.render_target,
-<a href=#247 id=247 data-nosnippet>247</a>            <span class="kw-2">&amp;</span>state.multisampling_texture,
-<a href=#248 id=248 data-nosnippet>248</a>            <span class="kw-2">&amp;</span>state.depth_texture,
-<a href=#249 id=249 data-nosnippet>249</a>        )
-<a href=#250 id=250 data-nosnippet>250</a>        <span class="kw">else </span>{
-<a href=#251 id=251 data-nosnippet>251</a>            <span class="kw">return </span><span class="prelude-val">Ok</span>(());
-<a href=#252 id=252 data-nosnippet>252</a>        };
-<a href=#253 id=253 data-nosnippet>253</a>        <span class="kw">let </span>load = wgpu::Operations {
-<a href=#254 id=254 data-nosnippet>254</a>            load: wgpu::LoadOp::Load,
-<a href=#255 id=255 data-nosnippet>255</a>            store: wgpu::StoreOp::Store,
-<a href=#256 id=256 data-nosnippet>256</a>        };
-<a href=#257 id=257 data-nosnippet>257</a>        <span class="kw">let </span>load_depth = wgpu::Operations {
-<a href=#258 id=258 data-nosnippet>258</a>            load: wgpu::LoadOp::Load,
-<a href=#259 id=259 data-nosnippet>259</a>            store: wgpu::StoreOp::Store,
-<a href=#260 id=260 data-nosnippet>260</a>        };
-<a href=#261 id=261 data-nosnippet>261</a>        <span class="comment">// The translucent pass resolves the multisampled colour after it.
-<a href=#262 id=262 data-nosnippet>262</a>        </span><span class="kw">let </span>view = multisampling
-<a href=#263 id=263 data-nosnippet>263</a>            .as_ref()
-<a href=#264 id=264 data-nosnippet>264</a>            .map_or(<span class="kw-2">&amp;**</span>render_target, |texture| <span class="kw-2">&amp;</span>texture.view);
-<a href=#265 id=265 data-nosnippet>265</a>        <span class="kw">let </span><span class="kw-2">mut </span>pass =
-<a href=#266 id=266 data-nosnippet>266</a>            render_context
-<a href=#267 id=267 data-nosnippet>267</a>                .command_encoder
-<a href=#268 id=268 data-nosnippet>268</a>                .begin_render_pass(<span class="kw-2">&amp;</span>wgpu::RenderPassDescriptor {
-<a href=#269 id=269 data-nosnippet>269</a>                    label: <span class="prelude-val">Some</span>(<span class="string">"globe_daylight_pass"</span>),
-<a href=#270 id=270 data-nosnippet>270</a>                    color_attachments: <span class="kw-2">&amp;</span>[<span class="prelude-val">Some</span>(wgpu::RenderPassColorAttachment {
-<a href=#271 id=271 data-nosnippet>271</a>                        view,
-<a href=#272 id=272 data-nosnippet>272</a>                        depth_slice: <span class="prelude-val">None</span>,
-<a href=#273 id=273 data-nosnippet>273</a>                        resolve_target: <span class="prelude-val">None</span>,
-<a href=#274 id=274 data-nosnippet>274</a>                        ops: load,
-<a href=#275 id=275 data-nosnippet>275</a>                    })],
-<a href=#276 id=276 data-nosnippet>276</a>                    depth_stencil_attachment: <span class="prelude-val">Some</span>(wgpu::RenderPassDepthStencilAttachment {
-<a href=#277 id=277 data-nosnippet>277</a>                        view: <span class="kw-2">&amp;</span>depth.view,
-<a href=#278 id=278 data-nosnippet>278</a>                        depth_ops: <span class="prelude-val">Some</span>(load_depth),
-<a href=#279 id=279 data-nosnippet>279</a>                        stencil_ops: <span class="prelude-val">Some</span>(wgpu::Operations {
-<a href=#280 id=280 data-nosnippet>280</a>                            load: wgpu::LoadOp::Load,
-<a href=#281 id=281 data-nosnippet>281</a>                            store: wgpu::StoreOp::Store,
-<a href=#282 id=282 data-nosnippet>282</a>                        }),
-<a href=#283 id=283 data-nosnippet>283</a>                    }),
-<a href=#284 id=284 data-nosnippet>284</a>                    timestamp_writes: <span class="prelude-val">None</span>,
-<a href=#285 id=285 data-nosnippet>285</a>                    occlusion_query_set: <span class="prelude-val">None</span>,
-<a href=#286 id=286 data-nosnippet>286</a>                    multiview_mask: <span class="prelude-val">None</span>,
-<a href=#287 id=287 data-nosnippet>287</a>                });
-<a href=#288 id=288 data-nosnippet>288</a>        pass.set_pipeline(pipeline);
-<a href=#289 id=289 data-nosnippet>289</a>        pass.set_vertex_buffer(<span class="number">0</span>, frame.slice(..));
-<a href=#290 id=290 data-nosnippet>290</a>        pass.draw(<span class="number">0</span>..<span class="number">3</span>, <span class="number">0</span>..<span class="number">1</span>);
-<a href=#291 id=291 data-nosnippet>291</a>        <span class="prelude-val">Ok</span>(())
-<a href=#292 id=292 data-nosnippet>292</a>    }
-<a href=#293 id=293 data-nosnippet>293</a>}
-<a href=#294 id=294 data-nosnippet>294</a>
-<a href=#295 id=295 data-nosnippet>295</a><span class="doccomment">/// Puts the pass after the main pass and before the translucent pass.
-<a href=#296 id=296 data-nosnippet>296</a></span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>add_to_graph(graph: <span class="kw-2">&amp;mut </span><span class="kw">crate</span>::render::graph::RenderGraph) {
-<a href=#297 id=297 data-nosnippet>297</a>    <span class="kw">use </span><span class="kw">crate</span>::render::draw_graph;
-<a href=#298 id=298 data-nosnippet>298</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(draw_graph) = graph.get_sub_graph_mut(draw_graph::NAME) <span class="kw">else </span>{
-<a href=#299 id=299 data-nosnippet>299</a>        <span class="macro">tracing::error!</span>(<span class="string">"draw graph is missing; the globe will not turn from day to night"</span>);
-<a href=#300 id=300 data-nosnippet>300</a>        <span class="kw">return</span>;
-<a href=#301 id=301 data-nosnippet>301</a>    };
-<a href=#302 id=302 data-nosnippet>302</a>    draw_graph.add_node(GLOBE_DAYLIGHT, GlobeDaylightNode);
-<a href=#303 id=303 data-nosnippet>303</a>    <span class="kw">let </span>edges = [
-<a href=#304 id=304 data-nosnippet>304</a>        draw_graph.add_node_edge(draw_graph::node::MAIN_PASS, GLOBE_DAYLIGHT),
-<a href=#305 id=305 data-nosnippet>305</a>        draw_graph.add_node_edge(GLOBE_DAYLIGHT, draw_graph::node::SCENE_3D_PASS),
-<a href=#306 id=306 data-nosnippet>306</a>    ];
-<a href=#307 id=307 data-nosnippet>307</a>    <span class="kw">for </span>edge <span class="kw">in </span>edges {
-<a href=#308 id=308 data-nosnippet>308</a>        <span class="kw">if let </span><span class="prelude-val">Err</span>(error) = edge {
-<a href=#309 id=309 data-nosnippet>309</a>            <span class="macro">tracing::error!</span>(<span class="question-mark">?</span>error, <span class="string">"the globe's daylight pass cannot be ordered"</span>);
-<a href=#310 id=310 data-nosnippet>310</a>        }
-<a href=#311 id=311 data-nosnippet>311</a>    }
-<a href=#312 id=312 data-nosnippet>312</a>}
+<a href=#230 id=230 data-nosnippet>230</a>    <span class="kw">fn </span>run(<span class="kw-2">&amp;</span><span class="self">self</span>, render_context: <span class="kw-2">&amp;mut </span>RenderContext, state: <span class="kw-2">&amp;</span>RenderResources, world: <span class="kw-2">&amp;</span>World) {
+<a href=#231 id=231 data-nosnippet>231</a>        <span class="kw">let </span>(
+<a href=#232 id=232 data-nosnippet>232</a>            <span class="prelude-val">Some</span>(GlobeDaylightGpu(<span class="prelude-val">Some</span>(frame))),
+<a href=#233 id=233 data-nosnippet>233</a>            <span class="prelude-val">Some</span>(Initialized(GlobeDaylightPipeline(pipeline))),
+<a href=#234 id=234 data-nosnippet>234</a>            Initialized(render_target),
+<a href=#235 id=235 data-nosnippet>235</a>            Initialized(multisampling),
+<a href=#236 id=236 data-nosnippet>236</a>            Initialized(depth),
+<a href=#237 id=237 data-nosnippet>237</a>        ) = (
+<a href=#238 id=238 data-nosnippet>238</a>            world.resources.get::&lt;GlobeDaylightGpu&gt;(),
+<a href=#239 id=239 data-nosnippet>239</a>            world.resources.get::&lt;Eventually&lt;GlobeDaylightPipeline&gt;&gt;(),
+<a href=#240 id=240 data-nosnippet>240</a>            <span class="kw-2">&amp;</span>state.render_target,
+<a href=#241 id=241 data-nosnippet>241</a>            <span class="kw-2">&amp;</span>state.multisampling_texture,
+<a href=#242 id=242 data-nosnippet>242</a>            <span class="kw-2">&amp;</span>state.depth_texture,
+<a href=#243 id=243 data-nosnippet>243</a>        )
+<a href=#244 id=244 data-nosnippet>244</a>        <span class="kw">else </span>{
+<a href=#245 id=245 data-nosnippet>245</a>            <span class="kw">return</span>;
+<a href=#246 id=246 data-nosnippet>246</a>        };
+<a href=#247 id=247 data-nosnippet>247</a>        <span class="kw">let </span>load = wgpu::Operations {
+<a href=#248 id=248 data-nosnippet>248</a>            load: wgpu::LoadOp::Load,
+<a href=#249 id=249 data-nosnippet>249</a>            store: wgpu::StoreOp::Store,
+<a href=#250 id=250 data-nosnippet>250</a>        };
+<a href=#251 id=251 data-nosnippet>251</a>        <span class="kw">let </span>load_depth = wgpu::Operations {
+<a href=#252 id=252 data-nosnippet>252</a>            load: wgpu::LoadOp::Load,
+<a href=#253 id=253 data-nosnippet>253</a>            store: wgpu::StoreOp::Store,
+<a href=#254 id=254 data-nosnippet>254</a>        };
+<a href=#255 id=255 data-nosnippet>255</a>        <span class="comment">// The translucent pass resolves the multisampled colour after it.
+<a href=#256 id=256 data-nosnippet>256</a>        </span><span class="kw">let </span>view = multisampling
+<a href=#257 id=257 data-nosnippet>257</a>            .as_ref()
+<a href=#258 id=258 data-nosnippet>258</a>            .map_or(<span class="kw-2">&amp;**</span>render_target, |texture| <span class="kw-2">&amp;</span>texture.view);
+<a href=#259 id=259 data-nosnippet>259</a>        <span class="kw">let </span><span class="kw-2">mut </span>pass =
+<a href=#260 id=260 data-nosnippet>260</a>            render_context
+<a href=#261 id=261 data-nosnippet>261</a>                .command_encoder
+<a href=#262 id=262 data-nosnippet>262</a>                .begin_render_pass(<span class="kw-2">&amp;</span>wgpu::RenderPassDescriptor {
+<a href=#263 id=263 data-nosnippet>263</a>                    label: <span class="prelude-val">Some</span>(<span class="string">"globe_daylight_pass"</span>),
+<a href=#264 id=264 data-nosnippet>264</a>                    color_attachments: <span class="kw-2">&amp;</span>[<span class="prelude-val">Some</span>(wgpu::RenderPassColorAttachment {
+<a href=#265 id=265 data-nosnippet>265</a>                        view,
+<a href=#266 id=266 data-nosnippet>266</a>                        depth_slice: <span class="prelude-val">None</span>,
+<a href=#267 id=267 data-nosnippet>267</a>                        resolve_target: <span class="prelude-val">None</span>,
+<a href=#268 id=268 data-nosnippet>268</a>                        ops: load,
+<a href=#269 id=269 data-nosnippet>269</a>                    })],
+<a href=#270 id=270 data-nosnippet>270</a>                    depth_stencil_attachment: <span class="prelude-val">Some</span>(wgpu::RenderPassDepthStencilAttachment {
+<a href=#271 id=271 data-nosnippet>271</a>                        view: <span class="kw-2">&amp;</span>depth.view,
+<a href=#272 id=272 data-nosnippet>272</a>                        depth_ops: <span class="prelude-val">Some</span>(load_depth),
+<a href=#273 id=273 data-nosnippet>273</a>                        stencil_ops: <span class="prelude-val">Some</span>(wgpu::Operations {
+<a href=#274 id=274 data-nosnippet>274</a>                            load: wgpu::LoadOp::Load,
+<a href=#275 id=275 data-nosnippet>275</a>                            store: wgpu::StoreOp::Store,
+<a href=#276 id=276 data-nosnippet>276</a>                        }),
+<a href=#277 id=277 data-nosnippet>277</a>                    }),
+<a href=#278 id=278 data-nosnippet>278</a>                    timestamp_writes: <span class="prelude-val">None</span>,
+<a href=#279 id=279 data-nosnippet>279</a>                    occlusion_query_set: <span class="prelude-val">None</span>,
+<a href=#280 id=280 data-nosnippet>280</a>                    multiview_mask: <span class="prelude-val">None</span>,
+<a href=#281 id=281 data-nosnippet>281</a>                });
+<a href=#282 id=282 data-nosnippet>282</a>        pass.set_pipeline(pipeline);
+<a href=#283 id=283 data-nosnippet>283</a>        pass.set_vertex_buffer(<span class="number">0</span>, frame.slice(..));
+<a href=#284 id=284 data-nosnippet>284</a>        pass.draw(<span class="number">0</span>..<span class="number">3</span>, <span class="number">0</span>..<span class="number">1</span>);
+<a href=#285 id=285 data-nosnippet>285</a>    }
+<a href=#286 id=286 data-nosnippet>286</a>}
+<a href=#287 id=287 data-nosnippet>287</a>
+<a href=#288 id=288 data-nosnippet>288</a><span class="doccomment">/// Puts the pass after the main pass and before the translucent pass.
+<a href=#289 id=289 data-nosnippet>289</a></span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>add_to_graph(
+<a href=#290 id=290 data-nosnippet>290</a>    graph: <span class="kw-2">&amp;mut </span><span class="kw">crate</span>::render::graph::RenderGraph,
+<a href=#291 id=291 data-nosnippet>291</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), <span class="kw">crate</span>::render::graph::RenderGraphError&gt; {
+<a href=#292 id=292 data-nosnippet>292</a>    <span class="kw">use </span><span class="kw">crate</span>::render::draw_graph;
+<a href=#293 id=293 data-nosnippet>293</a>    <span class="kw">let </span>draw_graph = graph;
+<a href=#294 id=294 data-nosnippet>294</a>    <span class="kw">let </span>edges = [
+<a href=#295 id=295 data-nosnippet>295</a>        draw_graph.add_node(GLOBE_DAYLIGHT, GlobeDaylightNode),
+<a href=#296 id=296 data-nosnippet>296</a>        draw_graph.add_node_edge(draw_graph::node::MAIN_PASS, GLOBE_DAYLIGHT),
+<a href=#297 id=297 data-nosnippet>297</a>        draw_graph.add_node_edge(GLOBE_DAYLIGHT, draw_graph::node::SCENE_3D_PASS),
+<a href=#298 id=298 data-nosnippet>298</a>    ];
+<a href=#299 id=299 data-nosnippet>299</a>    edges.into_iter().collect()
+<a href=#300 id=300 data-nosnippet>300</a>}
 </code></pre></div></section></main></body></html>

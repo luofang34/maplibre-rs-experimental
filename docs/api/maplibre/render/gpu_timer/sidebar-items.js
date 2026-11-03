@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["IDLE","MAPPED","MAPPING","RESOLVED_BYTES","WRITTEN"],"struct":["GpuTimer","GpuTimerSlot"]};
+window.SIDEBAR_ITEMS = {"constant":["IDLE","MAPPED","MAPPING","RESOLVED_BYTES","WRITTEN"],"fn":["gpu_timer_system","map_after_submit","resolve_before_submit"],"struct":["GpuTimer","GpuTimerSlot"]};

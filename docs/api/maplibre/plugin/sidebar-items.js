@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"trait":["Plugin"]};
+window.SIDEBAR_ITEMS = {"enum":["PluginError"],"trait":["Plugin"]};

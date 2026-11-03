@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["AfterSubmitCallbacks"],"trait":["AfterSubmitCallback"]};
+window.SIDEBAR_ITEMS = {"struct":["AfterSubmitCallbacks","BeforeSubmitHooks"],"trait":["AfterSubmitCallback"]};

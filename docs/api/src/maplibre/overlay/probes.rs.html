@@ -18,7 +18,7 @@
 <a href=#18 id=18 data-nosnippet>18</a>    context::MapContext,
 <a href=#19 id=19 data-nosnippet>19</a>    render::{
 <a href=#20 id=20 data-nosnippet>20</a>        eventually::{Eventually, Eventually::Initialized},
-<a href=#21 id=21 data-nosnippet>21</a>        graph::{Node, NodeRunError, RenderContext, RenderGraphContext},
+<a href=#21 id=21 data-nosnippet>21</a>        graph::{Node, RenderContext},
 <a href=#22 id=22 data-nosnippet>22</a>        settings::Msaa,
 <a href=#23 id=23 data-nosnippet>23</a>        upload_queue::UploadQueue,
 <a href=#24 id=24 data-nosnippet>24</a>        RenderResources, Renderer,
@@ -303,88 +303,81 @@
 <a href=#303 id=303 data-nosnippet>303</a></span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">struct </span>DepthProbePassNode;
 <a href=#304 id=304 data-nosnippet>304</a>
 <a href=#305 id=305 data-nosnippet>305</a><span class="kw">impl </span>Node <span class="kw">for </span>DepthProbePassNode {
-<a href=#306 id=306 data-nosnippet>306</a>    <span class="kw">fn </span>run(
-<a href=#307 id=307 data-nosnippet>307</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
-<a href=#308 id=308 data-nosnippet>308</a>        _graph: <span class="kw-2">&amp;mut </span>RenderGraphContext,
-<a href=#309 id=309 data-nosnippet>309</a>        render_context: <span class="kw-2">&amp;mut </span>RenderContext,
-<a href=#310 id=310 data-nosnippet>310</a>        state: <span class="kw-2">&amp;</span>RenderResources,
-<a href=#311 id=311 data-nosnippet>311</a>        world: <span class="kw-2">&amp;</span>World,
-<a href=#312 id=312 data-nosnippet>312</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), NodeRunError&gt; {
-<a href=#313 id=313 data-nosnippet>313</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(Initialized(gpu)) = world.resources.get::&lt;Eventually&lt;ProbeGpu&gt;&gt;() <span class="kw">else </span>{
-<a href=#314 id=314 data-nosnippet>314</a>            <span class="kw">return </span><span class="prelude-val">Ok</span>(());
-<a href=#315 id=315 data-nosnippet>315</a>        };
-<a href=#316 id=316 data-nosnippet>316</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(pending) = <span class="kw-2">&amp;</span>gpu.pending <span class="kw">else </span>{
-<a href=#317 id=317 data-nosnippet>317</a>            <span class="kw">return </span><span class="prelude-val">Ok</span>(());
+<a href=#306 id=306 data-nosnippet>306</a>    <span class="kw">fn </span>run(<span class="kw-2">&amp;</span><span class="self">self</span>, render_context: <span class="kw-2">&amp;mut </span>RenderContext, state: <span class="kw-2">&amp;</span>RenderResources, world: <span class="kw-2">&amp;</span>World) {
+<a href=#307 id=307 data-nosnippet>307</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(Initialized(gpu)) = world.resources.get::&lt;Eventually&lt;ProbeGpu&gt;&gt;() <span class="kw">else </span>{
+<a href=#308 id=308 data-nosnippet>308</a>            <span class="kw">return</span>;
+<a href=#309 id=309 data-nosnippet>309</a>        };
+<a href=#310 id=310 data-nosnippet>310</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(pending) = <span class="kw-2">&amp;</span>gpu.pending <span class="kw">else </span>{
+<a href=#311 id=311 data-nosnippet>311</a>            <span class="kw">return</span>;
+<a href=#312 id=312 data-nosnippet>312</a>        };
+<a href=#313 id=313 data-nosnippet>313</a>        <span class="kw">if </span>pending.state.load(Ordering::Acquire) != TO_ENCODE {
+<a href=#314 id=314 data-nosnippet>314</a>            <span class="kw">return</span>;
+<a href=#315 id=315 data-nosnippet>315</a>        }
+<a href=#316 id=316 data-nosnippet>316</a>        <span class="kw">let </span>Initialized(depth_texture) = <span class="kw-2">&amp;</span>state.depth_texture <span class="kw">else </span>{
+<a href=#317 id=317 data-nosnippet>317</a>            <span class="kw">return</span>;
 <a href=#318 id=318 data-nosnippet>318</a>        };
-<a href=#319 id=319 data-nosnippet>319</a>        <span class="kw">if </span>pending.state.load(Ordering::Acquire) != TO_ENCODE {
-<a href=#320 id=320 data-nosnippet>320</a>            <span class="kw">return </span><span class="prelude-val">Ok</span>(());
-<a href=#321 id=321 data-nosnippet>321</a>        }
-<a href=#322 id=322 data-nosnippet>322</a>        <span class="kw">let </span>Initialized(depth_texture) = <span class="kw-2">&amp;</span>state.depth_texture <span class="kw">else </span>{
-<a href=#323 id=323 data-nosnippet>323</a>            <span class="kw">return </span><span class="prelude-val">Ok</span>(());
-<a href=#324 id=324 data-nosnippet>324</a>        };
-<a href=#325 id=325 data-nosnippet>325</a>        <span class="comment">// The map's depth carries a stencil; a depth texture binding sees one aspect.
-<a href=#326 id=326 data-nosnippet>326</a>        </span><span class="kw">let </span>depth = depth_texture
-<a href=#327 id=327 data-nosnippet>327</a>            .texture
-<a href=#328 id=328 data-nosnippet>328</a>            .create_view(<span class="kw-2">&amp;</span>wgpu::TextureViewDescriptor {
-<a href=#329 id=329 data-nosnippet>329</a>                aspect: wgpu::TextureAspect::DepthOnly,
-<a href=#330 id=330 data-nosnippet>330</a>                ..Default::default()
-<a href=#331 id=331 data-nosnippet>331</a>            });
-<a href=#332 id=332 data-nosnippet>332</a>        <span class="kw">let </span>bind_group = render_context
-<a href=#333 id=333 data-nosnippet>333</a>            .device
-<a href=#334 id=334 data-nosnippet>334</a>            .create_bind_group(<span class="kw-2">&amp;</span>wgpu::BindGroupDescriptor {
-<a href=#335 id=335 data-nosnippet>335</a>                label: <span class="prelude-val">Some</span>(<span class="string">"depth probes"</span>),
-<a href=#336 id=336 data-nosnippet>336</a>                layout: <span class="kw-2">&amp;</span>gpu.layout,
-<a href=#337 id=337 data-nosnippet>337</a>                entries: <span class="kw-2">&amp;</span>[
-<a href=#338 id=338 data-nosnippet>338</a>                    wgpu::BindGroupEntry {
-<a href=#339 id=339 data-nosnippet>339</a>                        binding: <span class="number">0</span>,
-<a href=#340 id=340 data-nosnippet>340</a>                        resource: pending.uniform.as_entire_binding(),
-<a href=#341 id=341 data-nosnippet>341</a>                    },
-<a href=#342 id=342 data-nosnippet>342</a>                    wgpu::BindGroupEntry {
-<a href=#343 id=343 data-nosnippet>343</a>                        binding: <span class="number">1</span>,
-<a href=#344 id=344 data-nosnippet>344</a>                        resource: wgpu::BindingResource::TextureView(<span class="kw-2">&amp;</span>depth),
-<a href=#345 id=345 data-nosnippet>345</a>                    },
-<a href=#346 id=346 data-nosnippet>346</a>                ],
-<a href=#347 id=347 data-nosnippet>347</a>            });
-<a href=#348 id=348 data-nosnippet>348</a>        <span class="kw">let </span>answers = pending.target.create_view(<span class="kw-2">&amp;</span>Default::default());
-<a href=#349 id=349 data-nosnippet>349</a>        {
-<a href=#350 id=350 data-nosnippet>350</a>            <span class="kw">let </span><span class="kw-2">mut </span>pass =
-<a href=#351 id=351 data-nosnippet>351</a>                render_context
-<a href=#352 id=352 data-nosnippet>352</a>                    .command_encoder
-<a href=#353 id=353 data-nosnippet>353</a>                    .begin_render_pass(<span class="kw-2">&amp;</span>wgpu::RenderPassDescriptor {
-<a href=#354 id=354 data-nosnippet>354</a>                        multiview_mask: <span class="prelude-val">None</span>,
-<a href=#355 id=355 data-nosnippet>355</a>                        label: <span class="prelude-val">Some</span>(DEPTH_PROBE_PASS),
-<a href=#356 id=356 data-nosnippet>356</a>                        color_attachments: <span class="kw-2">&amp;</span>[<span class="prelude-val">Some</span>(wgpu::RenderPassColorAttachment {
-<a href=#357 id=357 data-nosnippet>357</a>                            depth_slice: <span class="prelude-val">None</span>,
-<a href=#358 id=358 data-nosnippet>358</a>                            view: <span class="kw-2">&amp;</span>answers,
-<a href=#359 id=359 data-nosnippet>359</a>                            resolve_target: <span class="prelude-val">None</span>,
-<a href=#360 id=360 data-nosnippet>360</a>                            ops: wgpu::Operations {
-<a href=#361 id=361 data-nosnippet>361</a>                                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-<a href=#362 id=362 data-nosnippet>362</a>                                store: wgpu::StoreOp::Store,
-<a href=#363 id=363 data-nosnippet>363</a>                            },
-<a href=#364 id=364 data-nosnippet>364</a>                        })],
-<a href=#365 id=365 data-nosnippet>365</a>                        depth_stencil_attachment: <span class="prelude-val">None</span>,
-<a href=#366 id=366 data-nosnippet>366</a>                        timestamp_writes: <span class="prelude-val">None</span>,
-<a href=#367 id=367 data-nosnippet>367</a>                        occlusion_query_set: <span class="prelude-val">None</span>,
-<a href=#368 id=368 data-nosnippet>368</a>                    });
-<a href=#369 id=369 data-nosnippet>369</a>            pass.set_pipeline(<span class="kw-2">&amp;</span>gpu.pipeline);
-<a href=#370 id=370 data-nosnippet>370</a>            pass.set_bind_group(<span class="number">0</span>, <span class="kw-2">&amp;</span>bind_group, <span class="kw-2">&amp;</span>[]);
-<a href=#371 id=371 data-nosnippet>371</a>            pass.set_vertex_buffer(<span class="number">0</span>, pending.vertices.slice(..));
-<a href=#372 id=372 data-nosnippet>372</a>            pass.draw(<span class="number">0</span>..pending.count, <span class="number">0</span>..<span class="number">1</span>);
-<a href=#373 id=373 data-nosnippet>373</a>        }
-<a href=#374 id=374 data-nosnippet>374</a>        render_context.command_encoder.copy_texture_to_buffer(
-<a href=#375 id=375 data-nosnippet>375</a>            pending.target.as_image_copy(),
-<a href=#376 id=376 data-nosnippet>376</a>            wgpu::TexelCopyBufferInfo {
-<a href=#377 id=377 data-nosnippet>377</a>                buffer: <span class="kw-2">&amp;</span>pending.readback,
-<a href=#378 id=378 data-nosnippet>378</a>                layout: wgpu::TexelCopyBufferLayout {
-<a href=#379 id=379 data-nosnippet>379</a>                    offset: <span class="number">0</span>,
-<a href=#380 id=380 data-nosnippet>380</a>                    bytes_per_row: <span class="prelude-val">Some</span>(WIDTH),
-<a href=#381 id=381 data-nosnippet>381</a>                    rows_per_image: <span class="prelude-val">None</span>,
-<a href=#382 id=382 data-nosnippet>382</a>                },
-<a href=#383 id=383 data-nosnippet>383</a>            },
-<a href=#384 id=384 data-nosnippet>384</a>            pending.target.size(),
-<a href=#385 id=385 data-nosnippet>385</a>        );
-<a href=#386 id=386 data-nosnippet>386</a>        pending.state.store(ENCODED, Ordering::Release);
-<a href=#387 id=387 data-nosnippet>387</a>        <span class="prelude-val">Ok</span>(())
-<a href=#388 id=388 data-nosnippet>388</a>    }
-<a href=#389 id=389 data-nosnippet>389</a>}
+<a href=#319 id=319 data-nosnippet>319</a>        <span class="comment">// The map's depth carries a stencil; a depth texture binding sees one aspect.
+<a href=#320 id=320 data-nosnippet>320</a>        </span><span class="kw">let </span>depth = depth_texture
+<a href=#321 id=321 data-nosnippet>321</a>            .texture
+<a href=#322 id=322 data-nosnippet>322</a>            .create_view(<span class="kw-2">&amp;</span>wgpu::TextureViewDescriptor {
+<a href=#323 id=323 data-nosnippet>323</a>                aspect: wgpu::TextureAspect::DepthOnly,
+<a href=#324 id=324 data-nosnippet>324</a>                ..Default::default()
+<a href=#325 id=325 data-nosnippet>325</a>            });
+<a href=#326 id=326 data-nosnippet>326</a>        <span class="kw">let </span>bind_group = render_context
+<a href=#327 id=327 data-nosnippet>327</a>            .device
+<a href=#328 id=328 data-nosnippet>328</a>            .create_bind_group(<span class="kw-2">&amp;</span>wgpu::BindGroupDescriptor {
+<a href=#329 id=329 data-nosnippet>329</a>                label: <span class="prelude-val">Some</span>(<span class="string">"depth probes"</span>),
+<a href=#330 id=330 data-nosnippet>330</a>                layout: <span class="kw-2">&amp;</span>gpu.layout,
+<a href=#331 id=331 data-nosnippet>331</a>                entries: <span class="kw-2">&amp;</span>[
+<a href=#332 id=332 data-nosnippet>332</a>                    wgpu::BindGroupEntry {
+<a href=#333 id=333 data-nosnippet>333</a>                        binding: <span class="number">0</span>,
+<a href=#334 id=334 data-nosnippet>334</a>                        resource: pending.uniform.as_entire_binding(),
+<a href=#335 id=335 data-nosnippet>335</a>                    },
+<a href=#336 id=336 data-nosnippet>336</a>                    wgpu::BindGroupEntry {
+<a href=#337 id=337 data-nosnippet>337</a>                        binding: <span class="number">1</span>,
+<a href=#338 id=338 data-nosnippet>338</a>                        resource: wgpu::BindingResource::TextureView(<span class="kw-2">&amp;</span>depth),
+<a href=#339 id=339 data-nosnippet>339</a>                    },
+<a href=#340 id=340 data-nosnippet>340</a>                ],
+<a href=#341 id=341 data-nosnippet>341</a>            });
+<a href=#342 id=342 data-nosnippet>342</a>        <span class="kw">let </span>answers = pending.target.create_view(<span class="kw-2">&amp;</span>Default::default());
+<a href=#343 id=343 data-nosnippet>343</a>        {
+<a href=#344 id=344 data-nosnippet>344</a>            <span class="kw">let </span><span class="kw-2">mut </span>pass =
+<a href=#345 id=345 data-nosnippet>345</a>                render_context
+<a href=#346 id=346 data-nosnippet>346</a>                    .command_encoder
+<a href=#347 id=347 data-nosnippet>347</a>                    .begin_render_pass(<span class="kw-2">&amp;</span>wgpu::RenderPassDescriptor {
+<a href=#348 id=348 data-nosnippet>348</a>                        multiview_mask: <span class="prelude-val">None</span>,
+<a href=#349 id=349 data-nosnippet>349</a>                        label: <span class="prelude-val">Some</span>(DEPTH_PROBE_PASS),
+<a href=#350 id=350 data-nosnippet>350</a>                        color_attachments: <span class="kw-2">&amp;</span>[<span class="prelude-val">Some</span>(wgpu::RenderPassColorAttachment {
+<a href=#351 id=351 data-nosnippet>351</a>                            depth_slice: <span class="prelude-val">None</span>,
+<a href=#352 id=352 data-nosnippet>352</a>                            view: <span class="kw-2">&amp;</span>answers,
+<a href=#353 id=353 data-nosnippet>353</a>                            resolve_target: <span class="prelude-val">None</span>,
+<a href=#354 id=354 data-nosnippet>354</a>                            ops: wgpu::Operations {
+<a href=#355 id=355 data-nosnippet>355</a>                                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+<a href=#356 id=356 data-nosnippet>356</a>                                store: wgpu::StoreOp::Store,
+<a href=#357 id=357 data-nosnippet>357</a>                            },
+<a href=#358 id=358 data-nosnippet>358</a>                        })],
+<a href=#359 id=359 data-nosnippet>359</a>                        depth_stencil_attachment: <span class="prelude-val">None</span>,
+<a href=#360 id=360 data-nosnippet>360</a>                        timestamp_writes: <span class="prelude-val">None</span>,
+<a href=#361 id=361 data-nosnippet>361</a>                        occlusion_query_set: <span class="prelude-val">None</span>,
+<a href=#362 id=362 data-nosnippet>362</a>                    });
+<a href=#363 id=363 data-nosnippet>363</a>            pass.set_pipeline(<span class="kw-2">&amp;</span>gpu.pipeline);
+<a href=#364 id=364 data-nosnippet>364</a>            pass.set_bind_group(<span class="number">0</span>, <span class="kw-2">&amp;</span>bind_group, <span class="kw-2">&amp;</span>[]);
+<a href=#365 id=365 data-nosnippet>365</a>            pass.set_vertex_buffer(<span class="number">0</span>, pending.vertices.slice(..));
+<a href=#366 id=366 data-nosnippet>366</a>            pass.draw(<span class="number">0</span>..pending.count, <span class="number">0</span>..<span class="number">1</span>);
+<a href=#367 id=367 data-nosnippet>367</a>        }
+<a href=#368 id=368 data-nosnippet>368</a>        render_context.command_encoder.copy_texture_to_buffer(
+<a href=#369 id=369 data-nosnippet>369</a>            pending.target.as_image_copy(),
+<a href=#370 id=370 data-nosnippet>370</a>            wgpu::TexelCopyBufferInfo {
+<a href=#371 id=371 data-nosnippet>371</a>                buffer: <span class="kw-2">&amp;</span>pending.readback,
+<a href=#372 id=372 data-nosnippet>372</a>                layout: wgpu::TexelCopyBufferLayout {
+<a href=#373 id=373 data-nosnippet>373</a>                    offset: <span class="number">0</span>,
+<a href=#374 id=374 data-nosnippet>374</a>                    bytes_per_row: <span class="prelude-val">Some</span>(WIDTH),
+<a href=#375 id=375 data-nosnippet>375</a>                    rows_per_image: <span class="prelude-val">None</span>,
+<a href=#376 id=376 data-nosnippet>376</a>                },
+<a href=#377 id=377 data-nosnippet>377</a>            },
+<a href=#378 id=378 data-nosnippet>378</a>            pending.target.size(),
+<a href=#379 id=379 data-nosnippet>379</a>        );
+<a href=#380 id=380 data-nosnippet>380</a>        pending.state.store(ENCODED, Ordering::Release);
+<a href=#381 id=381 data-nosnippet>381</a>    }
+<a href=#382 id=382 data-nosnippet>382</a>}
 </code></pre></div></section></main></body></html>

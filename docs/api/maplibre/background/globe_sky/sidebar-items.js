@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MIN_BLEND","MIN_HALF_FIELD_OF_VIEW"],"fn":["draws_globe_sky","globe_sky_metadata"]};

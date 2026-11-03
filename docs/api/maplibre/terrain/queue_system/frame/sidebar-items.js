@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["hide_draped_layers","set_frame"]};

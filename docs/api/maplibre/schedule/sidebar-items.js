@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["StageError"],"struct":["MultiStage","NopStage","Schedule"],"trait":["Stage","StageLabel"],"type":["BoxedStageLabel","StageResult"]};
+window.SIDEBAR_ITEMS = {"enum":["ScheduleError","StageError"],"struct":["Entry","NopStage","Schedule"],"trait":["Stage","StageLabel"],"type":["BoxedStageLabel","StageResult"]};

@@ -259,7 +259,7 @@
 <a href=#259 id=259 data-nosnippet>259</a>    source: <span class="kw-2">&amp;</span><span class="kw">crate</span>::style::source::ImageSource,
 <a href=#260 id=260 data-nosnippet>260</a>    coords: WorldTileCoords,
 <a href=#261 id=261 data-nosnippet>261</a>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;RgbaImage&gt;, <span class="kw">crate</span>::sdf::assets::AssetFailure&gt; {
-<a href=#262 id=262 data-nosnippet>262</a>    <span class="kw">use </span><span class="kw">crate</span>::sdf::assets::AssetFailure;
+<a href=#262 id=262 data-nosnippet>262</a>    <span class="kw">use crate</span>::{io::cpu_work::run_cpu_bound, sdf::assets::AssetFailure};
 <a href=#263 id=263 data-nosnippet>263</a>    <span class="kw">let </span>url = source.url.as_str();
 <a href=#264 id=264 data-nosnippet>264</a>    <span class="kw">let </span>picture = client
 <a href=#265 id=265 data-nosnippet>265</a>        .assets()
@@ -267,18 +267,24 @@
 <a href=#267 id=267 data-nosnippet>267</a>            <span class="macro">format!</span>(<span class="string">"image-source:{url}#{}"</span>, source.generation),
 <a href=#268 id=268 data-nosnippet>268</a>            || <span class="kw">async </span>{
 <a href=#269 id=269 data-nosnippet>269</a>                <span class="kw">let </span>bytes = <span class="kw">crate</span>::sdf::assets::fetch(client, url, <span class="string">"image source"</span>).<span class="kw">await</span><span class="question-mark">?</span>;
-<a href=#270 id=270 data-nosnippet>270</a>                <span class="kw">let </span>picture = decode(<span class="kw-2">&amp;</span>bytes).map_err(|error| {
-<a href=#271 id=271 data-nosnippet>271</a>                    <span class="macro">tracing::warn!</span>(%url, %error, <span class="string">"invalid image source picture"</span>);
-<a href=#272 id=272 data-nosnippet>272</a>                    AssetFailure::Terminal(<span class="macro">format!</span>(<span class="string">"invalid image {url}: {error}"</span>))
-<a href=#273 id=273 data-nosnippet>273</a>                })<span class="question-mark">?</span>;
-<a href=#274 id=274 data-nosnippet>274</a>                <span class="kw">let </span>bytes = picture.as_raw().len();
-<a href=#275 id=275 data-nosnippet>275</a>                <span class="prelude-val">Ok</span>((picture, bytes))
-<a href=#276 id=276 data-nosnippet>276</a>            },
-<a href=#277 id=277 data-nosnippet>277</a>        )
-<a href=#278 id=278 data-nosnippet>278</a>        .<span class="kw">await</span><span class="question-mark">?</span>;
-<a href=#279 id=279 data-nosnippet>279</a>    <span class="prelude-val">Ok</span>(render_tile(<span class="kw-2">&amp;</span>picture, source.coordinates, coords))
-<a href=#280 id=280 data-nosnippet>280</a>}
-<a href=#281 id=281 data-nosnippet>281</a>
-<a href=#282 id=282 data-nosnippet>282</a><span class="attr">#[cfg(test)]
-<a href=#283 id=283 data-nosnippet>283</a></span><span class="kw">mod </span>tests;
+<a href=#270 id=270 data-nosnippet>270</a>                <span class="kw">let </span>picture = run_cpu_bound(<span class="kw">move </span>|| decode(<span class="kw-2">&amp;</span>bytes))
+<a href=#271 id=271 data-nosnippet>271</a>                    .<span class="kw">await
+<a href=#272 id=272 data-nosnippet>272</a>                    </span>.map_err(|error| AssetFailure::Terminal(<span class="macro">format!</span>(<span class="string">"decoding {url}: {error}"</span>)))<span class="question-mark">?
+<a href=#273 id=273 data-nosnippet>273</a>                    </span>.map_err(|error| {
+<a href=#274 id=274 data-nosnippet>274</a>                        <span class="macro">tracing::warn!</span>(%url, %error, <span class="string">"invalid image source picture"</span>);
+<a href=#275 id=275 data-nosnippet>275</a>                        AssetFailure::Terminal(<span class="macro">format!</span>(<span class="string">"invalid image {url}: {error}"</span>))
+<a href=#276 id=276 data-nosnippet>276</a>                    })<span class="question-mark">?</span>;
+<a href=#277 id=277 data-nosnippet>277</a>                <span class="kw">let </span>bytes = picture.as_raw().len();
+<a href=#278 id=278 data-nosnippet>278</a>                <span class="prelude-val">Ok</span>((picture, bytes))
+<a href=#279 id=279 data-nosnippet>279</a>            },
+<a href=#280 id=280 data-nosnippet>280</a>        )
+<a href=#281 id=281 data-nosnippet>281</a>        .<span class="kw">await</span><span class="question-mark">?</span>;
+<a href=#282 id=282 data-nosnippet>282</a>    <span class="kw">let </span>coordinates = source.coordinates;
+<a href=#283 id=283 data-nosnippet>283</a>    run_cpu_bound(<span class="kw">move </span>|| render_tile(<span class="kw-2">&amp;</span>picture, coordinates, coords))
+<a href=#284 id=284 data-nosnippet>284</a>        .<span class="kw">await
+<a href=#285 id=285 data-nosnippet>285</a>        </span>.map_err(|error| AssetFailure::Terminal(<span class="macro">format!</span>(<span class="string">"resampling {url}: {error}"</span>)))
+<a href=#286 id=286 data-nosnippet>286</a>}
+<a href=#287 id=287 data-nosnippet>287</a>
+<a href=#288 id=288 data-nosnippet>288</a><span class="attr">#[cfg(test)]
+<a href=#289 id=289 data-nosnippet>289</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>

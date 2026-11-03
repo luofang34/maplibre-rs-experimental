@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["DRAPE_SIZE","MIN_DRAPE_SIZE","UNIFORM_CAPACITY","UNIFORM_STRIDE"],"mod":["bindings","drapes","elevation_textures"],"struct":["DrapeScratch","TerrainDraw","TerrainFog","TerrainResources","TerrainTileUniforms"]};
+window.SIDEBAR_ITEMS = {"constant":["DRAPE_SIZE","MIN_DRAPE_SIZE","UNIFORM_CAPACITY","UNIFORM_STRIDE"],"mod":["bindings","drapes","edge_heights","elevation_textures"],"struct":["DrapeScratch","TerrainDraw","TerrainFog","TerrainResources","TerrainTileUniforms"]};

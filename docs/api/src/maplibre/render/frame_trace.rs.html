@@ -181,7 +181,7 @@
 <a href=#181 id=181 data-nosnippet>181</a>        };
 <a href=#182 id=182 data-nosnippet>182</a>        <span class="kw">for </span>(stage, spent) <span class="kw">in </span><span class="kw-2">&amp;</span>stats.stages {
 <a href=#183 id=183 data-nosnippet>183</a>            record.spans.push(Span {
-<a href=#184 id=184 data-nosnippet>184</a>                name: stage.clone(),
+<a href=#184 id=184 data-nosnippet>184</a>                name: stage.to_string(),
 <a href=#185 id=185 data-nosnippet>185</a>                clock: Clock::Cpu,
 <a href=#186 id=186 data-nosnippet>186</a>                duration: <span class="kw-2">*</span>spent,
 <a href=#187 id=187 data-nosnippet>187</a>            });

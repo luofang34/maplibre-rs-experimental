@@ -383,161 +383,112 @@
 <a href=#383 id=383 data-nosnippet>383</a>        }
 <a href=#384 id=384 data-nosnippet>384</a>    }
 <a href=#385 id=385 data-nosnippet>385</a>
-<a href=#386 id=386 data-nosnippet>386</a>    <span class="doccomment">/// Checks what GL JS checks of a layer: that its source exists, is of a kind its type can draw
-<a href=#387 id=387 data-nosnippet>387</a>    /// from and, for vector sources, is read through a source layer, and that the zoom range is
-<a href=#388 id=388 data-nosnippet>388</a>    /// ordered.
-<a href=#389 id=389 data-nosnippet>389</a>    </span><span class="kw">fn </span>ensure_shape(<span class="kw-2">&amp;</span><span class="self">self</span>, layer: <span class="kw-2">&amp;</span>StyleLayer) -&gt; <span class="prelude-ty">Result</span>&lt;(), StyleMutationError&gt; {
-<a href=#390 id=390 data-nosnippet>390</a>        <span class="kw">let </span>id = layer.id.clone();
-<a href=#391 id=391 data-nosnippet>391</a>        ensure_zoom_range(layer)<span class="question-mark">?</span>;
-<a href=#392 id=392 data-nosnippet>392</a>        <span class="kw">if </span>layer.type_ == <span class="string">"background" </span>{
-<a href=#393 id=393 data-nosnippet>393</a>            <span class="kw">return </span><span class="prelude-val">Ok</span>(());
-<a href=#394 id=394 data-nosnippet>394</a>        }
-<a href=#395 id=395 data-nosnippet>395</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(source_name) = <span class="kw-2">&amp;</span>layer.source <span class="kw">else </span>{
-<a href=#396 id=396 data-nosnippet>396</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(StyleMutationError::SourceRequired { layer: id });
-<a href=#397 id=397 data-nosnippet>397</a>        };
-<a href=#398 id=398 data-nosnippet>398</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(source) = <span class="self">self</span>.sources.get(source_name) <span class="kw">else </span>{
-<a href=#399 id=399 data-nosnippet>399</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(StyleMutationError::MissingSource {
-<a href=#400 id=400 data-nosnippet>400</a>                layer: id,
-<a href=#401 id=401 data-nosnippet>401</a>                source_name: source_name.clone(),
-<a href=#402 id=402 data-nosnippet>402</a>            });
-<a href=#403 id=403 data-nosnippet>403</a>        };
-<a href=#404 id=404 data-nosnippet>404</a>        <span class="kw">let </span>fits = <span class="kw">match </span>layer.type_.as_str() {
-<a href=#405 id=405 data-nosnippet>405</a>            <span class="string">"raster" </span>=&gt; <span class="macro">matches!</span>(source, Source::Raster(<span class="kw">_</span>) | Source::RasterDem(<span class="kw">_</span>)),
-<a href=#406 id=406 data-nosnippet>406</a>            <span class="string">"hillshade" </span>| <span class="string">"color-relief" </span>=&gt; <span class="macro">matches!</span>(source, Source::RasterDem(<span class="kw">_</span>)),
-<a href=#407 id=407 data-nosnippet>407</a>            <span class="kw">_ </span>=&gt; <span class="macro">matches!</span>(source, Source::Vector(<span class="kw">_</span>) | Source::GeoJson(<span class="kw">_</span>)),
-<a href=#408 id=408 data-nosnippet>408</a>        };
-<a href=#409 id=409 data-nosnippet>409</a>        <span class="kw">if </span>!fits {
-<a href=#410 id=410 data-nosnippet>410</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(StyleMutationError::WrongSourceKind {
-<a href=#411 id=411 data-nosnippet>411</a>                layer: id,
-<a href=#412 id=412 data-nosnippet>412</a>                kind: layer.type_.clone(),
-<a href=#413 id=413 data-nosnippet>413</a>                source_name: source_name.clone(),
-<a href=#414 id=414 data-nosnippet>414</a>            });
-<a href=#415 id=415 data-nosnippet>415</a>        }
-<a href=#416 id=416 data-nosnippet>416</a>        <span class="kw">if </span><span class="macro">matches!</span>(source, Source::Vector(<span class="kw">_</span>)) &amp;&amp; layer.source_layer.is_none() {
-<a href=#417 id=417 data-nosnippet>417</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(StyleMutationError::SourceLayerRequired {
-<a href=#418 id=418 data-nosnippet>418</a>                layer: id,
-<a href=#419 id=419 data-nosnippet>419</a>                source_name: source_name.clone(),
-<a href=#420 id=420 data-nosnippet>420</a>            });
-<a href=#421 id=421 data-nosnippet>421</a>        }
-<a href=#422 id=422 data-nosnippet>422</a>        <span class="prelude-val">Ok</span>(())
-<a href=#423 id=423 data-nosnippet>423</a>    }
-<a href=#424 id=424 data-nosnippet>424</a>
-<a href=#425 id=425 data-nosnippet>425</a>    <span class="kw">fn </span>ensure_supported(<span class="kw-2">&amp;</span><span class="self">self</span>, layer: <span class="kw-2">&amp;</span>StyleLayer) -&gt; <span class="prelude-ty">Result</span>&lt;(), StyleMutationError&gt; {
-<a href=#426 id=426 data-nosnippet>426</a>        <span class="kw">let </span>findings = <span class="self">self</span>.validate_layer(layer);
-<a href=#427 id=427 data-nosnippet>427</a>        <span class="kw">if </span>findings.is_empty() {
-<a href=#428 id=428 data-nosnippet>428</a>            <span class="prelude-val">Ok</span>(())
-<a href=#429 id=429 data-nosnippet>429</a>        } <span class="kw">else </span>{
-<a href=#430 id=430 data-nosnippet>430</a>            <span class="prelude-val">Err</span>(StyleMutationError::Unsupported {
-<a href=#431 id=431 data-nosnippet>431</a>                layer: layer.id.clone(),
-<a href=#432 id=432 data-nosnippet>432</a>                findings,
-<a href=#433 id=433 data-nosnippet>433</a>            })
-<a href=#434 id=434 data-nosnippet>434</a>        }
-<a href=#435 id=435 data-nosnippet>435</a>    }
-<a href=#436 id=436 data-nosnippet>436</a>
-<a href=#437 id=437 data-nosnippet>437</a>    <span class="doccomment">/// Gives every layer the index of its position; returns the layers whose index changed.
-<a href=#438 id=438 data-nosnippet>438</a>    </span><span class="kw">fn </span>renumber(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; StyleChange {
-<a href=#439 id=439 data-nosnippet>439</a>        <span class="kw">let </span><span class="kw-2">mut </span>change = StyleChange::default();
-<a href=#440 id=440 data-nosnippet>440</a>        <span class="kw">for </span>(position, layer) <span class="kw">in </span><span class="self">self</span>.layers.iter_mut().enumerate() {
-<a href=#441 id=441 data-nosnippet>441</a>            <span class="kw">let </span>index = u32::try_from(position).unwrap_or(u32::MAX);
-<a href=#442 id=442 data-nosnippet>442</a>            <span class="kw">if </span>layer.index != index {
-<a href=#443 id=443 data-nosnippet>443</a>                layer.index = index;
-<a href=#444 id=444 data-nosnippet>444</a>                change.layers.push(layer.id.clone());
-<a href=#445 id=445 data-nosnippet>445</a>                change.redraw_tiles |= from_vector_tiles(layer);
-<a href=#446 id=446 data-nosnippet>446</a>            }
-<a href=#447 id=447 data-nosnippet>447</a>        }
-<a href=#448 id=448 data-nosnippet>448</a>        change
-<a href=#449 id=449 data-nosnippet>449</a>    }
-<a href=#450 id=450 data-nosnippet>450</a>
-<a href=#451 id=451 data-nosnippet>451</a>    <span class="kw">fn </span>finish(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut </span>change: StyleChange) -&gt; StyleChange {
-<a href=#452 id=452 data-nosnippet>452</a>        change.redraw_tiles |= change.layers.iter().any(|id| {
-<a href=#453 id=453 data-nosnippet>453</a>            <span class="self">self</span>.layers
-<a href=#454 id=454 data-nosnippet>454</a>                .iter()
-<a href=#455 id=455 data-nosnippet>455</a>                .find(|layer| <span class="kw-2">&amp;</span>layer.id == id)
-<a href=#456 id=456 data-nosnippet>456</a>                .is_some_and(from_vector_tiles)
-<a href=#457 id=457 data-nosnippet>457</a>        });
-<a href=#458 id=458 data-nosnippet>458</a>        change
-<a href=#459 id=459 data-nosnippet>459</a>    }
-<a href=#460 id=460 data-nosnippet>460</a>
-<a href=#461 id=461 data-nosnippet>461</a>    <span class="kw">fn </span>edit_layer(
-<a href=#462 id=462 data-nosnippet>462</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-<a href=#463 id=463 data-nosnippet>463</a>        id: <span class="kw-2">&amp;</span>str,
-<a href=#464 id=464 data-nosnippet>464</a>        edit: <span class="kw">impl </span>FnOnce(<span class="kw-2">&amp;mut </span>Value),
-<a href=#465 id=465 data-nosnippet>465</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;StyleChange, StyleMutationError&gt; {
-<a href=#466 id=466 data-nosnippet>466</a>        <span class="kw">let </span>position = <span class="self">self</span>.position_of(id)<span class="question-mark">?</span>;
-<a href=#467 id=467 data-nosnippet>467</a>        <span class="kw">let </span><span class="kw-2">mut </span>document =
-<a href=#468 id=468 data-nosnippet>468</a>            serde_json::to_value(<span class="self">self</span>.declared_layer_at(position)).map_err(|source| {
-<a href=#469 id=469 data-nosnippet>469</a>                StyleMutationError::InvalidLayer {
-<a href=#470 id=470 data-nosnippet>470</a>                    layer: id.to_owned(),
-<a href=#471 id=471 data-nosnippet>471</a>                    source,
-<a href=#472 id=472 data-nosnippet>472</a>                }
-<a href=#473 id=473 data-nosnippet>473</a>            })<span class="question-mark">?</span>;
-<a href=#474 id=474 data-nosnippet>474</a>        edit(<span class="kw-2">&amp;mut </span>document);
-<a href=#475 id=475 data-nosnippet>475</a>        <span class="kw">let </span><span class="kw-2">mut </span>edited: StyleLayer = serde_json::from_value(document).map_err(|source| {
-<a href=#476 id=476 data-nosnippet>476</a>            StyleMutationError::InvalidLayer {
-<a href=#477 id=477 data-nosnippet>477</a>                layer: id.to_owned(),
-<a href=#478 id=478 data-nosnippet>478</a>                source,
-<a href=#479 id=479 data-nosnippet>479</a>            }
-<a href=#480 id=480 data-nosnippet>480</a>        })<span class="question-mark">?</span>;
-<a href=#481 id=481 data-nosnippet>481</a>        edited.index = <span class="self">self</span>.layers[position].index;
-<a href=#482 id=482 data-nosnippet>482</a>        <span class="self">self</span>.ensure_supported(<span class="kw-2">&amp;</span>edited)<span class="question-mark">?</span>;
-<a href=#483 id=483 data-nosnippet>483</a>        <span class="comment">// Only the zoom range is checked: an edit does not change the layer's source, so a layer
-<a href=#484 id=484 data-nosnippet>484</a>        // loaded in a legacy shape stays editable.
-<a href=#485 id=485 data-nosnippet>485</a>        </span>ensure_zoom_range(<span class="kw-2">&amp;</span>edited)<span class="question-mark">?</span>;
-<a href=#486 id=486 data-nosnippet>486</a>        <span class="kw">let </span>before = serde_json::to_value(<span class="kw-2">&amp;</span><span class="self">self</span>.layers[position]).ok();
-<a href=#487 id=487 data-nosnippet>487</a>        <span class="self">self</span>.layers[position] = edited;
-<a href=#488 id=488 data-nosnippet>488</a>        <span class="self">self</span>.state_templates.remove(id);
-<a href=#489 id=489 data-nosnippet>489</a>        <span class="self">self</span>.resolve_global_state();
-<a href=#490 id=490 data-nosnippet>490</a>        <span class="kw">let </span>after = serde_json::to_value(<span class="kw-2">&amp;</span><span class="self">self</span>.layers[position]).ok();
-<a href=#491 id=491 data-nosnippet>491</a>        <span class="prelude-val">Ok</span>(<span class="kw">if </span>before == after {
-<a href=#492 id=492 data-nosnippet>492</a>            StyleChange::default()
-<a href=#493 id=493 data-nosnippet>493</a>        } <span class="kw">else </span>{
-<a href=#494 id=494 data-nosnippet>494</a>            <span class="self">self</span>.finish(StyleChange {
-<a href=#495 id=495 data-nosnippet>495</a>                layers: <span class="macro">vec!</span>[id.to_owned()],
-<a href=#496 id=496 data-nosnippet>496</a>                ..Default::default()
-<a href=#497 id=497 data-nosnippet>497</a>            })
-<a href=#498 id=498 data-nosnippet>498</a>        })
-<a href=#499 id=499 data-nosnippet>499</a>    }
-<a href=#500 id=500 data-nosnippet>500</a>}
-<a href=#501 id=501 data-nosnippet>501</a>
-<a href=#502 id=502 data-nosnippet>502</a><span class="kw">fn </span>ensure_zoom_range(layer: <span class="kw-2">&amp;</span>StyleLayer) -&gt; <span class="prelude-ty">Result</span>&lt;(), StyleMutationError&gt; {
-<a href=#503 id=503 data-nosnippet>503</a>    <span class="kw">match </span>(layer.minzoom, layer.maxzoom) {
-<a href=#504 id=504 data-nosnippet>504</a>        (<span class="prelude-val">Some</span>(minzoom), <span class="prelude-val">Some</span>(maxzoom)) <span class="kw">if </span>minzoom &gt; maxzoom =&gt; {
-<a href=#505 id=505 data-nosnippet>505</a>            <span class="prelude-val">Err</span>(StyleMutationError::InvalidZoomRange {
-<a href=#506 id=506 data-nosnippet>506</a>                layer: layer.id.clone(),
-<a href=#507 id=507 data-nosnippet>507</a>                minzoom,
-<a href=#508 id=508 data-nosnippet>508</a>                maxzoom,
-<a href=#509 id=509 data-nosnippet>509</a>            })
-<a href=#510 id=510 data-nosnippet>510</a>        }
-<a href=#511 id=511 data-nosnippet>511</a>        <span class="kw">_ </span>=&gt; <span class="prelude-val">Ok</span>(()),
-<a href=#512 id=512 data-nosnippet>512</a>    }
-<a href=#513 id=513 data-nosnippet>513</a>}
-<a href=#514 id=514 data-nosnippet>514</a>
-<a href=#515 id=515 data-nosnippet>515</a><span class="kw">fn </span>push_unique(ids: <span class="kw-2">&amp;mut </span>Vec&lt;String&gt;, id: <span class="kw-2">&amp;</span>str) {
-<a href=#516 id=516 data-nosnippet>516</a>    <span class="kw">if </span>!ids.iter().any(|existing| existing == id) {
-<a href=#517 id=517 data-nosnippet>517</a>        ids.push(id.to_owned());
-<a href=#518 id=518 data-nosnippet>518</a>    }
-<a href=#519 id=519 data-nosnippet>519</a>}
-<a href=#520 id=520 data-nosnippet>520</a>
-<a href=#521 id=521 data-nosnippet>521</a><span class="doccomment">/// Sets `document[section][name]`, or removes it for `null`.
-<a href=#522 id=522 data-nosnippet>522</a></span><span class="kw">fn </span>set_member(document: <span class="kw-2">&amp;mut </span>Value, section: <span class="kw-2">&amp;</span>str, name: <span class="kw-2">&amp;</span>str, value: Value) {
-<a href=#523 id=523 data-nosnippet>523</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(map) = document.as_object_mut() <span class="kw">else </span>{
-<a href=#524 id=524 data-nosnippet>524</a>        <span class="kw">return</span>;
-<a href=#525 id=525 data-nosnippet>525</a>    };
-<a href=#526 id=526 data-nosnippet>526</a>    <span class="kw">if </span>value.is_null() {
-<a href=#527 id=527 data-nosnippet>527</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(Value::Object(members)) = map.get_mut(section) {
-<a href=#528 id=528 data-nosnippet>528</a>            members.remove(name);
-<a href=#529 id=529 data-nosnippet>529</a>        }
-<a href=#530 id=530 data-nosnippet>530</a>        <span class="kw">return</span>;
-<a href=#531 id=531 data-nosnippet>531</a>    }
-<a href=#532 id=532 data-nosnippet>532</a>    <span class="kw">let </span>members = map.entry(section).or_insert_with(|| <span class="macro">json!</span>({}));
-<a href=#533 id=533 data-nosnippet>533</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(members) = members.as_object_mut() {
-<a href=#534 id=534 data-nosnippet>534</a>        members.insert(name.to_owned(), value);
-<a href=#535 id=535 data-nosnippet>535</a>    }
-<a href=#536 id=536 data-nosnippet>536</a>}
-<a href=#537 id=537 data-nosnippet>537</a>
-<a href=#538 id=538 data-nosnippet>538</a><span class="kw">mod </span>apply;
-<a href=#539 id=539 data-nosnippet>539</a><span class="kw">mod </span>image_source;
-<a href=#540 id=540 data-nosnippet>540</a>
-<a href=#541 id=541 data-nosnippet>541</a><span class="attr">#[cfg(all(test, not(target_arch = <span class="string">"wasm32"</span>)))]
-<a href=#542 id=542 data-nosnippet>542</a></span><span class="kw">mod </span>tests;
+<a href=#386 id=386 data-nosnippet>386</a>    <span class="kw">fn </span>ensure_supported(<span class="kw-2">&amp;</span><span class="self">self</span>, layer: <span class="kw-2">&amp;</span>StyleLayer) -&gt; <span class="prelude-ty">Result</span>&lt;(), StyleMutationError&gt; {
+<a href=#387 id=387 data-nosnippet>387</a>        <span class="kw">let </span>findings = <span class="self">self</span>.validate_layer(layer);
+<a href=#388 id=388 data-nosnippet>388</a>        <span class="kw">if </span>findings.is_empty() {
+<a href=#389 id=389 data-nosnippet>389</a>            <span class="prelude-val">Ok</span>(())
+<a href=#390 id=390 data-nosnippet>390</a>        } <span class="kw">else </span>{
+<a href=#391 id=391 data-nosnippet>391</a>            <span class="prelude-val">Err</span>(StyleMutationError::Unsupported {
+<a href=#392 id=392 data-nosnippet>392</a>                layer: layer.id.clone(),
+<a href=#393 id=393 data-nosnippet>393</a>                findings,
+<a href=#394 id=394 data-nosnippet>394</a>            })
+<a href=#395 id=395 data-nosnippet>395</a>        }
+<a href=#396 id=396 data-nosnippet>396</a>    }
+<a href=#397 id=397 data-nosnippet>397</a>
+<a href=#398 id=398 data-nosnippet>398</a>    <span class="doccomment">/// Gives every layer the index of its position; returns the layers whose index changed.
+<a href=#399 id=399 data-nosnippet>399</a>    </span><span class="kw">fn </span>renumber(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; StyleChange {
+<a href=#400 id=400 data-nosnippet>400</a>        <span class="kw">let </span><span class="kw-2">mut </span>change = StyleChange::default();
+<a href=#401 id=401 data-nosnippet>401</a>        <span class="kw">for </span>(position, layer) <span class="kw">in </span><span class="self">self</span>.layers.iter_mut().enumerate() {
+<a href=#402 id=402 data-nosnippet>402</a>            <span class="kw">let </span>index = u32::try_from(position).unwrap_or(u32::MAX);
+<a href=#403 id=403 data-nosnippet>403</a>            <span class="kw">if </span>layer.index != index {
+<a href=#404 id=404 data-nosnippet>404</a>                layer.index = index;
+<a href=#405 id=405 data-nosnippet>405</a>                change.layers.push(layer.id.clone());
+<a href=#406 id=406 data-nosnippet>406</a>                change.redraw_tiles |= from_vector_tiles(layer);
+<a href=#407 id=407 data-nosnippet>407</a>            }
+<a href=#408 id=408 data-nosnippet>408</a>        }
+<a href=#409 id=409 data-nosnippet>409</a>        change
+<a href=#410 id=410 data-nosnippet>410</a>    }
+<a href=#411 id=411 data-nosnippet>411</a>
+<a href=#412 id=412 data-nosnippet>412</a>    <span class="kw">fn </span>finish(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut </span>change: StyleChange) -&gt; StyleChange {
+<a href=#413 id=413 data-nosnippet>413</a>        change.redraw_tiles |= change.layers.iter().any(|id| {
+<a href=#414 id=414 data-nosnippet>414</a>            <span class="self">self</span>.layers
+<a href=#415 id=415 data-nosnippet>415</a>                .iter()
+<a href=#416 id=416 data-nosnippet>416</a>                .find(|layer| <span class="kw-2">&amp;</span>layer.id == id)
+<a href=#417 id=417 data-nosnippet>417</a>                .is_some_and(from_vector_tiles)
+<a href=#418 id=418 data-nosnippet>418</a>        });
+<a href=#419 id=419 data-nosnippet>419</a>        change
+<a href=#420 id=420 data-nosnippet>420</a>    }
+<a href=#421 id=421 data-nosnippet>421</a>
+<a href=#422 id=422 data-nosnippet>422</a>    <span class="kw">fn </span>edit_layer(
+<a href=#423 id=423 data-nosnippet>423</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+<a href=#424 id=424 data-nosnippet>424</a>        id: <span class="kw-2">&amp;</span>str,
+<a href=#425 id=425 data-nosnippet>425</a>        edit: <span class="kw">impl </span>FnOnce(<span class="kw-2">&amp;mut </span>Value),
+<a href=#426 id=426 data-nosnippet>426</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;StyleChange, StyleMutationError&gt; {
+<a href=#427 id=427 data-nosnippet>427</a>        <span class="kw">let </span>position = <span class="self">self</span>.position_of(id)<span class="question-mark">?</span>;
+<a href=#428 id=428 data-nosnippet>428</a>        <span class="kw">let </span><span class="kw-2">mut </span>document =
+<a href=#429 id=429 data-nosnippet>429</a>            serde_json::to_value(<span class="self">self</span>.declared_layer_at(position)).map_err(|source| {
+<a href=#430 id=430 data-nosnippet>430</a>                StyleMutationError::InvalidLayer {
+<a href=#431 id=431 data-nosnippet>431</a>                    layer: id.to_owned(),
+<a href=#432 id=432 data-nosnippet>432</a>                    source,
+<a href=#433 id=433 data-nosnippet>433</a>                }
+<a href=#434 id=434 data-nosnippet>434</a>            })<span class="question-mark">?</span>;
+<a href=#435 id=435 data-nosnippet>435</a>        edit(<span class="kw-2">&amp;mut </span>document);
+<a href=#436 id=436 data-nosnippet>436</a>        <span class="kw">let </span><span class="kw-2">mut </span>edited: StyleLayer = serde_json::from_value(document).map_err(|source| {
+<a href=#437 id=437 data-nosnippet>437</a>            StyleMutationError::InvalidLayer {
+<a href=#438 id=438 data-nosnippet>438</a>                layer: id.to_owned(),
+<a href=#439 id=439 data-nosnippet>439</a>                source,
+<a href=#440 id=440 data-nosnippet>440</a>            }
+<a href=#441 id=441 data-nosnippet>441</a>        })<span class="question-mark">?</span>;
+<a href=#442 id=442 data-nosnippet>442</a>        edited.index = <span class="self">self</span>.layers[position].index;
+<a href=#443 id=443 data-nosnippet>443</a>        <span class="self">self</span>.ensure_supported(<span class="kw-2">&amp;</span>edited)<span class="question-mark">?</span>;
+<a href=#444 id=444 data-nosnippet>444</a>        <span class="comment">// Only the zoom range is checked: an edit does not change the layer's source, so a layer
+<a href=#445 id=445 data-nosnippet>445</a>        // loaded in a legacy shape stays editable.
+<a href=#446 id=446 data-nosnippet>446</a>        </span>ensure_zoom_range(<span class="kw-2">&amp;</span>edited)<span class="question-mark">?</span>;
+<a href=#447 id=447 data-nosnippet>447</a>        <span class="kw">let </span>before = serde_json::to_value(<span class="kw-2">&amp;</span><span class="self">self</span>.layers[position]).ok();
+<a href=#448 id=448 data-nosnippet>448</a>        <span class="self">self</span>.layers[position] = edited;
+<a href=#449 id=449 data-nosnippet>449</a>        <span class="self">self</span>.state_templates.remove(id);
+<a href=#450 id=450 data-nosnippet>450</a>        <span class="self">self</span>.resolve_global_state();
+<a href=#451 id=451 data-nosnippet>451</a>        <span class="kw">let </span>after = serde_json::to_value(<span class="kw-2">&amp;</span><span class="self">self</span>.layers[position]).ok();
+<a href=#452 id=452 data-nosnippet>452</a>        <span class="prelude-val">Ok</span>(<span class="kw">if </span>before == after {
+<a href=#453 id=453 data-nosnippet>453</a>            StyleChange::default()
+<a href=#454 id=454 data-nosnippet>454</a>        } <span class="kw">else </span>{
+<a href=#455 id=455 data-nosnippet>455</a>            <span class="self">self</span>.finish(StyleChange {
+<a href=#456 id=456 data-nosnippet>456</a>                layers: <span class="macro">vec!</span>[id.to_owned()],
+<a href=#457 id=457 data-nosnippet>457</a>                ..Default::default()
+<a href=#458 id=458 data-nosnippet>458</a>            })
+<a href=#459 id=459 data-nosnippet>459</a>        })
+<a href=#460 id=460 data-nosnippet>460</a>    }
+<a href=#461 id=461 data-nosnippet>461</a>}
+<a href=#462 id=462 data-nosnippet>462</a>
+<a href=#463 id=463 data-nosnippet>463</a><span class="kw">fn </span>push_unique(ids: <span class="kw-2">&amp;mut </span>Vec&lt;String&gt;, id: <span class="kw-2">&amp;</span>str) {
+<a href=#464 id=464 data-nosnippet>464</a>    <span class="kw">if </span>!ids.iter().any(|existing| existing == id) {
+<a href=#465 id=465 data-nosnippet>465</a>        ids.push(id.to_owned());
+<a href=#466 id=466 data-nosnippet>466</a>    }
+<a href=#467 id=467 data-nosnippet>467</a>}
+<a href=#468 id=468 data-nosnippet>468</a>
+<a href=#469 id=469 data-nosnippet>469</a><span class="doccomment">/// Sets `document[section][name]`, or removes it for `null`.
+<a href=#470 id=470 data-nosnippet>470</a></span><span class="kw">fn </span>set_member(document: <span class="kw-2">&amp;mut </span>Value, section: <span class="kw-2">&amp;</span>str, name: <span class="kw-2">&amp;</span>str, value: Value) {
+<a href=#471 id=471 data-nosnippet>471</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(map) = document.as_object_mut() <span class="kw">else </span>{
+<a href=#472 id=472 data-nosnippet>472</a>        <span class="kw">return</span>;
+<a href=#473 id=473 data-nosnippet>473</a>    };
+<a href=#474 id=474 data-nosnippet>474</a>    <span class="kw">if </span>value.is_null() {
+<a href=#475 id=475 data-nosnippet>475</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(Value::Object(members)) = map.get_mut(section) {
+<a href=#476 id=476 data-nosnippet>476</a>            members.remove(name);
+<a href=#477 id=477 data-nosnippet>477</a>        }
+<a href=#478 id=478 data-nosnippet>478</a>        <span class="kw">return</span>;
+<a href=#479 id=479 data-nosnippet>479</a>    }
+<a href=#480 id=480 data-nosnippet>480</a>    <span class="kw">let </span>members = map.entry(section).or_insert_with(|| <span class="macro">json!</span>({}));
+<a href=#481 id=481 data-nosnippet>481</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(members) = members.as_object_mut() {
+<a href=#482 id=482 data-nosnippet>482</a>        members.insert(name.to_owned(), value);
+<a href=#483 id=483 data-nosnippet>483</a>    }
+<a href=#484 id=484 data-nosnippet>484</a>}
+<a href=#485 id=485 data-nosnippet>485</a>
+<a href=#486 id=486 data-nosnippet>486</a><span class="kw">mod </span>apply;
+<a href=#487 id=487 data-nosnippet>487</a><span class="kw">mod </span>image_source;
+<a href=#488 id=488 data-nosnippet>488</a><span class="kw">mod </span>shape;
+<a href=#489 id=489 data-nosnippet>489</a>
+<a href=#490 id=490 data-nosnippet>490</a><span class="kw">use </span>shape::ensure_zoom_range;
+<a href=#491 id=491 data-nosnippet>491</a>
+<a href=#492 id=492 data-nosnippet>492</a><span class="attr">#[cfg(all(test, not(target_arch = <span class="string">"wasm32"</span>)))]
+<a href=#493 id=493 data-nosnippet>493</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>
