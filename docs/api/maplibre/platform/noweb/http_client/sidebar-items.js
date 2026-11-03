@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["USER_AGENT"],"fn":["register_in_process_handler","unregister_in_process_handler"],"static":["IN_PROCESS_HANDLERS"],"struct":["ReqwestHttpClient"],"type":["InProcessHandler"]};
+window.SIDEBAR_ITEMS = {"constant":["USER_AGENT"],"enum":["TransportClassification"],"fn":["classify_error_chain","classify_middleware","classify_single_error","is_transient_io_error","register_in_process_handler","unregister_in_process_handler"],"static":["IN_PROCESS_HANDLERS"],"struct":["ReqwestHttpClient"],"type":["InProcessHandler"]};

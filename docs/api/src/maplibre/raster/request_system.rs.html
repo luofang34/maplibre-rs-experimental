@@ -209,217 +209,234 @@
 <a href=#209 id=209 data-nosnippet>209</a>                    }
 <a href=#210 id=210 data-nosnippet>210</a>                    <span class="prelude-val">Err</span>(CachedTileFailure::Transport { retryable, message }) =&gt; {
 <a href=#211 id=211 data-nosnippet>211</a>                        retry |= retryable;
-<a href=#212 id=212 data-nosnippet>212</a>                        <span class="macro">tracing::error!</span>(
-<a href=#213 id=213 data-nosnippet>213</a>                            %coords,
-<a href=#214 id=214 data-nosnippet>214</a>                            source = <span class="question-mark">?</span>group.source_name,
-<a href=#215 id=215 data-nosnippet>215</a>                            error = %message,
-<a href=#216 id=216 data-nosnippet>216</a>                            <span class="string">"raster tile fetch failed"
-<a href=#217 id=217 data-nosnippet>217</a>                        </span>);
-<a href=#218 id=218 data-nosnippet>218</a>                        context
-<a href=#219 id=219 data-nosnippet>219</a>                            .send_back(&lt;T <span class="kw">as </span>RasterTransferables&gt;::LayerRasterMissing::build_from(
-<a href=#220 id=220 data-nosnippet>220</a>                                coords,
-<a href=#221 id=221 data-nosnippet>221</a>                                RasterSourceId::new(group.source_name.clone()),
-<a href=#222 id=222 data-nosnippet>222</a>                            ))
-<a href=#223 id=223 data-nosnippet>223</a>                            .map_err(ProcedureError::Send)<span class="question-mark">?</span>;
-<a href=#224 id=224 data-nosnippet>224</a>                    }
-<a href=#225 id=225 data-nosnippet>225</a>                }
-<a href=#226 id=226 data-nosnippet>226</a>                <span class="kw">continue</span>;
-<a href=#227 id=227 data-nosnippet>227</a>            }
-<a href=#228 id=228 data-nosnippet>228</a>
-<a href=#229 id=229 data-nosnippet>229</a>            <span class="kw">let </span>data = <span class="kw">match </span>client.fetch(<span class="kw-2">&amp;</span>coords, <span class="kw-2">&amp;</span>group.source).<span class="kw">await </span>{
-<a href=#230 id=230 data-nosnippet>230</a>                <span class="prelude-val">Ok</span>(data) =&gt; data,
-<a href=#231 id=231 data-nosnippet>231</a>                <span class="prelude-val">Err</span>(error) =&gt; {
-<a href=#232 id=232 data-nosnippet>232</a>                    retry |= error.is_retryable();
-<a href=#233 id=233 data-nosnippet>233</a>                    <span class="kw">if </span>error.is_not_found() {
-<a href=#234 id=234 data-nosnippet>234</a>                        <span class="macro">tracing::debug!</span>(
-<a href=#235 id=235 data-nosnippet>235</a>                            %coords,
-<a href=#236 id=236 data-nosnippet>236</a>                            source = <span class="question-mark">?</span>group.source_name,
-<a href=#237 id=237 data-nosnippet>237</a>                            <span class="string">"no raster tile at the source; the layer is empty"
-<a href=#238 id=238 data-nosnippet>238</a>                        </span>);
-<a href=#239 id=239 data-nosnippet>239</a>                    } <span class="kw">else </span>{
-<a href=#240 id=240 data-nosnippet>240</a>                        <span class="macro">tracing::error!</span>(
-<a href=#241 id=241 data-nosnippet>241</a>                            %coords,
-<a href=#242 id=242 data-nosnippet>242</a>                            source = <span class="question-mark">?</span>group.source_name,
-<a href=#243 id=243 data-nosnippet>243</a>                            error = %error.describe(),
-<a href=#244 id=244 data-nosnippet>244</a>                            <span class="string">"raster tile fetch failed"
-<a href=#245 id=245 data-nosnippet>245</a>                        </span>);
-<a href=#246 id=246 data-nosnippet>246</a>                    }
-<a href=#247 id=247 data-nosnippet>247</a>
-<a href=#248 id=248 data-nosnippet>248</a>                    context
-<a href=#249 id=249 data-nosnippet>249</a>                        .send_back(&lt;T <span class="kw">as </span>RasterTransferables&gt;::LayerRasterMissing::build_from(
-<a href=#250 id=250 data-nosnippet>250</a>                            coords,
-<a href=#251 id=251 data-nosnippet>251</a>                            RasterSourceId::new(group.source_name.clone()),
-<a href=#252 id=252 data-nosnippet>252</a>                        ))
-<a href=#253 id=253 data-nosnippet>253</a>                        .map_err(ProcedureError::Send)<span class="question-mark">?</span>;
-<a href=#254 id=254 data-nosnippet>254</a>                    <span class="kw">continue</span>;
-<a href=#255 id=255 data-nosnippet>255</a>                }
-<a href=#256 id=256 data-nosnippet>256</a>            };
-<a href=#257 id=257 data-nosnippet>257</a>            <span class="kw">let </span>request = RasterTileRequest {
-<a href=#258 id=258 data-nosnippet>258</a>                coords,
-<a href=#259 id=259 data-nosnippet>259</a>                source: RasterSourceId::new(group.source_name.clone()),
-<a href=#260 id=260 data-nosnippet>260</a>            };
-<a href=#261 id=261 data-nosnippet>261</a>            <span class="kw">let </span>processed = run_cpu_bound_replying(context.clone(), <span class="kw">move </span>|context| {
-<a href=#262 id=262 data-nosnippet>262</a>                <span class="kw">let </span><span class="kw-2">mut </span>process_context = ProcessRasterContext::&lt;T, <span class="kw">_</span>&gt;::new(context);
-<a href=#263 id=263 data-nosnippet>263</a>                process_raster_tile(<span class="kw-2">&amp;</span>data, request, <span class="kw-2">&amp;mut </span>process_context)
-<a href=#264 id=264 data-nosnippet>264</a>            })
-<a href=#265 id=265 data-nosnippet>265</a>            .<span class="kw">await
-<a href=#266 id=266 data-nosnippet>266</a>            </span>.map_err(ProcessRasterError::CpuWork)
-<a href=#267 id=267 data-nosnippet>267</a>            .and_then(|processed| processed);
-<a href=#268 id=268 data-nosnippet>268</a>            <span class="kw">match </span>processed {
-<a href=#269 id=269 data-nosnippet>269</a>                <span class="prelude-val">Ok</span>(()) =&gt; {}
-<a href=#270 id=270 data-nosnippet>270</a>                <span class="prelude-val">Err</span>(ProcessRasterError::Send(source)) =&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(ProcedureError::Send(source)),
-<a href=#271 id=271 data-nosnippet>271</a>                <span class="prelude-val">Err</span>(
-<a href=#272 id=272 data-nosnippet>272</a>                    error @ (ProcessRasterError::Decoding { .. } | ProcessRasterError::CpuWork(<span class="kw">_</span>)),
-<a href=#273 id=273 data-nosnippet>273</a>                ) =&gt; {
-<a href=#274 id=274 data-nosnippet>274</a>                    <span class="macro">tracing::warn!</span>(%coords, source = <span class="question-mark">?</span>group.source_name, %error, <span class="string">"invalid raster tile"</span>);
-<a href=#275 id=275 data-nosnippet>275</a>                    context
-<a href=#276 id=276 data-nosnippet>276</a>                        .send_back(T::LayerRasterMissing::build_from(
-<a href=#277 id=277 data-nosnippet>277</a>                            coords,
-<a href=#278 id=278 data-nosnippet>278</a>                            RasterSourceId::new(group.source_name.clone()),
-<a href=#279 id=279 data-nosnippet>279</a>                        ))
-<a href=#280 id=280 data-nosnippet>280</a>                        .map_err(ProcedureError::Send)<span class="question-mark">?</span>;
-<a href=#281 id=281 data-nosnippet>281</a>                }
-<a href=#282 id=282 data-nosnippet>282</a>            }
-<a href=#283 id=283 data-nosnippet>283</a>        }
-<a href=#284 id=284 data-nosnippet>284</a>
-<a href=#285 id=285 data-nosnippet>285</a>        context
-<a href=#286 id=286 data-nosnippet>286</a>            .send_back(TileRequestOutcome {
-<a href=#287 id=287 data-nosnippet>287</a>                coords,
-<a href=#288 id=288 data-nosnippet>288</a>                kind: RequestKind::Raster,
-<a href=#289 id=289 data-nosnippet>289</a>                attempt: <span class="prelude-val">Some</span>(attempt),
-<a href=#290 id=290 data-nosnippet>290</a>                disposition: <span class="kw">if </span>retry {
-<a href=#291 id=291 data-nosnippet>291</a>                    RequestDisposition::Retry
-<a href=#292 id=292 data-nosnippet>292</a>                } <span class="kw">else </span>{
-<a href=#293 id=293 data-nosnippet>293</a>                    RequestDisposition::Complete
-<a href=#294 id=294 data-nosnippet>294</a>                },
-<a href=#295 id=295 data-nosnippet>295</a>            })
-<a href=#296 id=296 data-nosnippet>296</a>            .map_err(ProcedureError::Send)
-<a href=#297 id=297 data-nosnippet>297</a>    })
-<a href=#298 id=298 data-nosnippet>298</a>}
-<a href=#299 id=299 data-nosnippet>299</a>
-<a href=#300 id=300 data-nosnippet>300</a><span class="doccomment">/// Sends the tile of an image source back, empty where the picture does not reach it, and
-<a href=#301 id=301 data-nosnippet>301</a>/// returns whether a failed fetch is worth retrying.
-<a href=#302 id=302 data-nosnippet>302</a></span><span class="kw">async fn </span>send_image_tile&lt;
-<a href=#303 id=303 data-nosnippet>303</a>    T: RasterTransferables,
-<a href=#304 id=304 data-nosnippet>304</a>    HC: <span class="kw">crate</span>::io::source_client::HttpClient,
-<a href=#305 id=305 data-nosnippet>305</a>    C: Context,
-<a href=#306 id=306 data-nosnippet>306</a>&gt;(
-<a href=#307 id=307 data-nosnippet>307</a>    (client, image): (
-<a href=#308 id=308 data-nosnippet>308</a>        <span class="kw-2">&amp;</span><span class="kw">crate</span>::io::source_client::SourceClient&lt;HC&gt;,
-<a href=#309 id=309 data-nosnippet>309</a>        <span class="kw-2">&amp;</span><span class="kw">crate</span>::style::source::ImageSource,
-<a href=#310 id=310 data-nosnippet>310</a>    ),
-<a href=#311 id=311 data-nosnippet>311</a>    (coords, source): (WorldTileCoords, RasterSourceId),
-<a href=#312 id=312 data-nosnippet>312</a>    context: C,
-<a href=#313 id=313 data-nosnippet>313</a>) -&gt; <span class="prelude-ty">Result</span>&lt;bool, ProcedureError&gt; {
-<a href=#314 id=314 data-nosnippet>314</a>    <span class="kw">use </span><span class="kw">crate</span>::raster::transferables::LayerRaster;
-<a href=#315 id=315 data-nosnippet>315</a>    <span class="kw">match </span><span class="kw">crate</span>::raster::image_source::load_tile(client, image, coords).<span class="kw">await </span>{
-<a href=#316 id=316 data-nosnippet>316</a>        <span class="prelude-val">Ok</span>(tile) =&gt; {
-<a href=#317 id=317 data-nosnippet>317</a>            <span class="comment">// A tile the picture does not reach has loaded too; it is simply empty.
-<a href=#318 id=318 data-nosnippet>318</a>            </span><span class="kw">let </span>tile = tile.unwrap_or_else(|| image::RgbaImage::new(<span class="number">1</span>, <span class="number">1</span>));
-<a href=#319 id=319 data-nosnippet>319</a>            context
-<a href=#320 id=320 data-nosnippet>320</a>                .send_back(T::LayerRaster::build_from(coords, source, tile))
-<a href=#321 id=321 data-nosnippet>321</a>                .map_err(ProcedureError::Send)<span class="question-mark">?</span>;
-<a href=#322 id=322 data-nosnippet>322</a>            <span class="prelude-val">Ok</span>(<span class="bool-val">false</span>)
-<a href=#323 id=323 data-nosnippet>323</a>        }
-<a href=#324 id=324 data-nosnippet>324</a>        <span class="prelude-val">Err</span>(failure) =&gt; {
-<a href=#325 id=325 data-nosnippet>325</a>            context
-<a href=#326 id=326 data-nosnippet>326</a>                .send_back(T::LayerRasterMissing::build_from(coords, source))
-<a href=#327 id=327 data-nosnippet>327</a>                .map_err(ProcedureError::Send)<span class="question-mark">?</span>;
-<a href=#328 id=328 data-nosnippet>328</a>            <span class="prelude-val">Ok</span>(failure.is_retryable())
-<a href=#329 id=329 data-nosnippet>329</a>        }
-<a href=#330 id=330 data-nosnippet>330</a>    }
-<a href=#331 id=331 data-nosnippet>331</a>}
-<a href=#332 id=332 data-nosnippet>332</a>
-<a href=#333 id=333 data-nosnippet>333</a><span class="kw">impl</span>&lt;E: Environment, T: RasterTransferables&gt; RequestSystem&lt;E, T&gt; {
-<a href=#334 id=334 data-nosnippet>334</a>    <span class="kw">fn </span>request(
-<a href=#335 id=335 data-nosnippet>335</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
-<a href=#336 id=336 data-nosnippet>336</a>        coords: <span class="kw">crate</span>::coords::WorldTileCoords,
-<a href=#337 id=337 data-nosnippet>337</a>        style: <span class="kw-2">&amp;mut </span>FrameStyle,
-<a href=#338 id=338 data-nosnippet>338</a>        world: <span class="kw-2">&amp;mut </span><span class="kw">crate</span>::tcs::world::World,
-<a href=#339 id=339 data-nosnippet>339</a>    ) -&gt; SystemResult {
-<a href=#340 id=340 data-nosnippet>340</a>        <span class="kw">let </span>exists = world
-<a href=#341 id=341 data-nosnippet>341</a>            .tiles
-<a href=#342 id=342 data-nosnippet>342</a>            .query::&lt;<span class="kw-2">&amp;</span>RasterLayersDataComponent&gt;(coords)
-<a href=#343 id=343 data-nosnippet>343</a>            .is_some();
-<a href=#344 id=344 data-nosnippet>344</a>        <span class="kw">let </span>attempt = tile_retry::next_attempt(world);
-<a href=#345 id=345 data-nosnippet>345</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(<span class="kw-2">mut </span>tile) = world.tiles.spawn_mut(coords) <span class="kw">else </span>{
-<a href=#346 id=346 data-nosnippet>346</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(SystemError::InvalidTile { coords });
-<a href=#347 id=347 data-nosnippet>347</a>        };
-<a href=#348 id=348 data-nosnippet>348</a>        <span class="self">self</span>.kernel
-<a href=#349 id=349 data-nosnippet>349</a>            .apc()
-<a href=#350 id=350 data-nosnippet>350</a>            .call(
-<a href=#351 id=351 data-nosnippet>351</a>                Input::new(coords, style.share(Style::clone), attempt),
-<a href=#352 id=352 data-nosnippet>352</a>                fetch_raster_apc::&lt;E::OffscreenKernelEnvironment, T, <span class="kw">_</span>&gt;,
-<a href=#353 id=353 data-nosnippet>353</a>            )
-<a href=#354 id=354 data-nosnippet>354</a>            .map_err(|source| SystemError::TileRequest {
-<a href=#355 id=355 data-nosnippet>355</a>                kind: <span class="string">"raster"</span>,
-<a href=#356 id=356 data-nosnippet>356</a>                coords,
-<a href=#357 id=357 data-nosnippet>357</a>                source,
-<a href=#358 id=358 data-nosnippet>358</a>            })<span class="question-mark">?</span>;
-<a href=#359 id=359 data-nosnippet>359</a>        <span class="kw">if </span>!exists {
-<a href=#360 id=360 data-nosnippet>360</a>            tile.insert(RasterLayersDataComponent::default());
-<a href=#361 id=361 data-nosnippet>361</a>        }
-<a href=#362 id=362 data-nosnippet>362</a>        tile_retry::started(world, coords, RequestKind::Raster, attempt, <span class="prelude-val">None</span>);
-<a href=#363 id=363 data-nosnippet>363</a>        <span class="macro">tracing::debug!</span>(%coords, <span class="string">"raster tile request accepted"</span>);
-<a href=#364 id=364 data-nosnippet>364</a>        <span class="prelude-val">Ok</span>(())
-<a href=#365 id=365 data-nosnippet>365</a>    }
-<a href=#366 id=366 data-nosnippet>366</a>}
-<a href=#367 id=367 data-nosnippet>367</a>
-<a href=#368 id=368 data-nosnippet>368</a><span class="kw">fn </span>wanted_tiles(
-<a href=#369 id=369 data-nosnippet>369</a>    regions: Vec&lt;(RasterSourceId, Vec&lt;WorldTileCoords&gt;)&gt;,
-<a href=#370 id=370 data-nosnippet>370</a>    style: <span class="kw-2">&amp;</span><span class="kw">crate</span>::style::Style,
-<a href=#371 id=371 data-nosnippet>371</a>    world: <span class="kw-2">&amp;</span><span class="kw">crate</span>::tcs::world::World,
-<a href=#372 id=372 data-nosnippet>372</a>) -&gt; Vec&lt;WorldTileCoords&gt; {
-<a href=#373 id=373 data-nosnippet>373</a>    <span class="kw">let </span><span class="kw-2">mut </span>wanted = Vec::new();
-<a href=#374 id=374 data-nosnippet>374</a>    <span class="kw">for </span>(source, tiles) <span class="kw">in </span>regions {
-<a href=#375 id=375 data-nosnippet>375</a>        <span class="kw">let </span>minzoom = <span class="kw">match </span>source.name().and_then(|name| style.sources.get(name)) {
-<a href=#376 id=376 data-nosnippet>376</a>            <span class="prelude-val">Some</span>(<span class="kw">crate</span>::style::source::Source::Raster(source)) =&gt; source.minzoom,
-<a href=#377 id=377 data-nosnippet>377</a>            <span class="prelude-val">Some</span>(<span class="kw">crate</span>::style::source::Source::RasterDem(source)) =&gt; source.minzoom,
-<a href=#378 id=378 data-nosnippet>378</a>            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
-<a href=#379 id=379 data-nosnippet>379</a>        }
-<a href=#380 id=380 data-nosnippet>380</a>        .unwrap_or(<span class="number">0</span>);
-<a href=#381 id=381 data-nosnippet>381</a>        <span class="kw">let </span>bounds = <span class="kw">match </span>source.name().and_then(|name| style.sources.get(name)) {
-<a href=#382 id=382 data-nosnippet>382</a>            <span class="prelude-val">Some</span>(<span class="kw">crate</span>::style::source::Source::Raster(source)) =&gt; source.bounds,
-<a href=#383 id=383 data-nosnippet>383</a>            <span class="prelude-val">Some</span>(<span class="kw">crate</span>::style::source::Source::Image(image)) =&gt; image_bounds(image),
-<a href=#384 id=384 data-nosnippet>384</a>            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
-<a href=#385 id=385 data-nosnippet>385</a>        };
-<a href=#386 id=386 data-nosnippet>386</a>        <span class="kw">for </span>coords <span class="kw">in </span>tiles {
-<a href=#387 id=387 data-nosnippet>387</a>            <span class="comment">// Tiles outside the source's declared bounds are never requested.
-<a href=#388 id=388 data-nosnippet>388</a>            </span><span class="kw">if </span>bounds.is_some_and(|bounds| !<span class="kw">crate</span>::io::tile_sources::tile_in_bounds(coords, bounds))
-<a href=#389 id=389 data-nosnippet>389</a>            {
-<a href=#390 id=390 data-nosnippet>390</a>                <span class="kw">continue</span>;
-<a href=#391 id=391 data-nosnippet>391</a>            }
-<a href=#392 id=392 data-nosnippet>392</a>            wanted.push(coords);
-<a href=#393 id=393 data-nosnippet>393</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(parent) = missing_tile_fallback(coords, minzoom, |coords| {
-<a href=#394 id=394 data-nosnippet>394</a>                world
-<a href=#395 id=395 data-nosnippet>395</a>                    .tiles
-<a href=#396 id=396 data-nosnippet>396</a>                    .query::&lt;<span class="kw-2">&amp;</span>RasterLayersDataComponent&gt;(coords)
-<a href=#397 id=397 data-nosnippet>397</a>                    .is_some_and(|component| component.source_is_missing(<span class="kw-2">&amp;</span>source))
-<a href=#398 id=398 data-nosnippet>398</a>            }) {
-<a href=#399 id=399 data-nosnippet>399</a>                wanted.push(parent);
-<a href=#400 id=400 data-nosnippet>400</a>            }
-<a href=#401 id=401 data-nosnippet>401</a>        }
-<a href=#402 id=402 data-nosnippet>402</a>    }
-<a href=#403 id=403 data-nosnippet>403</a>    wanted
-<a href=#404 id=404 data-nosnippet>404</a>}
-<a href=#405 id=405 data-nosnippet>405</a>
-<a href=#406 id=406 data-nosnippet>406</a><span class="doccomment">/// The bounds `(west, south, east, north)` of an image's corners, so tiles it cannot reach are
-<a href=#407 id=407 data-nosnippet>407</a>/// not requested; none for a picture that reaches past the antimeridian, whose copies across it
-<a href=#408 id=408 data-nosnippet>408</a>/// a tile may show.
-<a href=#409 id=409 data-nosnippet>409</a></span><span class="kw">fn </span>image_bounds(image: <span class="kw-2">&amp;</span><span class="kw">crate</span>::style::source::ImageSource) -&gt; <span class="prelude-ty">Option</span>&lt;(f64, f64, f64, f64)&gt; {
-<a href=#410 id=410 data-nosnippet>410</a>    <span class="kw">let </span>longitudes = image.coordinates.map(|[longitude, <span class="kw">_</span>]| longitude);
-<a href=#411 id=411 data-nosnippet>411</a>    <span class="kw">let </span>latitudes = image.coordinates.map(|[<span class="kw">_</span>, latitude]| latitude);
-<a href=#412 id=412 data-nosnippet>412</a>    <span class="kw">let </span>fold = |values: [f64; <span class="number">4</span>]| {
-<a href=#413 id=413 data-nosnippet>413</a>        values
-<a href=#414 id=414 data-nosnippet>414</a>            .into_iter()
-<a href=#415 id=415 data-nosnippet>415</a>            .fold((f64::MAX, f64::MIN), |(lo, hi), value| {
-<a href=#416 id=416 data-nosnippet>416</a>                (lo.min(value), hi.max(value))
-<a href=#417 id=417 data-nosnippet>417</a>            })
-<a href=#418 id=418 data-nosnippet>418</a>    };
-<a href=#419 id=419 data-nosnippet>419</a>    <span class="kw">let </span>((west, east), (south, north)) = (fold(longitudes), fold(latitudes));
-<a href=#420 id=420 data-nosnippet>420</a>    (west &gt;= -<span class="number">180.0 </span>&amp;&amp; east &lt;= <span class="number">180.0</span>).then_some((west, south, east, north))
+<a href=#212 id=212 data-nosnippet>212</a>                        <span class="kw">if </span>retryable {
+<a href=#213 id=213 data-nosnippet>213</a>                            <span class="macro">tracing::warn!</span>(
+<a href=#214 id=214 data-nosnippet>214</a>                                %coords,
+<a href=#215 id=215 data-nosnippet>215</a>                                source = <span class="question-mark">?</span>group.source_name,
+<a href=#216 id=216 data-nosnippet>216</a>                                error = %message,
+<a href=#217 id=217 data-nosnippet>217</a>                                <span class="string">"raster tile fetch failed"
+<a href=#218 id=218 data-nosnippet>218</a>                            </span>);
+<a href=#219 id=219 data-nosnippet>219</a>                        } <span class="kw">else </span>{
+<a href=#220 id=220 data-nosnippet>220</a>                            <span class="macro">tracing::error!</span>(
+<a href=#221 id=221 data-nosnippet>221</a>                                %coords,
+<a href=#222 id=222 data-nosnippet>222</a>                                source = <span class="question-mark">?</span>group.source_name,
+<a href=#223 id=223 data-nosnippet>223</a>                                error = %message,
+<a href=#224 id=224 data-nosnippet>224</a>                                <span class="string">"raster tile fetch failed"
+<a href=#225 id=225 data-nosnippet>225</a>                            </span>);
+<a href=#226 id=226 data-nosnippet>226</a>                        }
+<a href=#227 id=227 data-nosnippet>227</a>                        context
+<a href=#228 id=228 data-nosnippet>228</a>                            .send_back(&lt;T <span class="kw">as </span>RasterTransferables&gt;::LayerRasterMissing::build_from(
+<a href=#229 id=229 data-nosnippet>229</a>                                coords,
+<a href=#230 id=230 data-nosnippet>230</a>                                RasterSourceId::new(group.source_name.clone()),
+<a href=#231 id=231 data-nosnippet>231</a>                            ))
+<a href=#232 id=232 data-nosnippet>232</a>                            .map_err(ProcedureError::Send)<span class="question-mark">?</span>;
+<a href=#233 id=233 data-nosnippet>233</a>                    }
+<a href=#234 id=234 data-nosnippet>234</a>                }
+<a href=#235 id=235 data-nosnippet>235</a>                <span class="kw">continue</span>;
+<a href=#236 id=236 data-nosnippet>236</a>            }
+<a href=#237 id=237 data-nosnippet>237</a>
+<a href=#238 id=238 data-nosnippet>238</a>            <span class="kw">let </span>data = <span class="kw">match </span>client.fetch(<span class="kw-2">&amp;</span>coords, <span class="kw-2">&amp;</span>group.source).<span class="kw">await </span>{
+<a href=#239 id=239 data-nosnippet>239</a>                <span class="prelude-val">Ok</span>(data) =&gt; data,
+<a href=#240 id=240 data-nosnippet>240</a>                <span class="prelude-val">Err</span>(error) =&gt; {
+<a href=#241 id=241 data-nosnippet>241</a>                    <span class="kw">let </span>retryable = error.is_retryable();
+<a href=#242 id=242 data-nosnippet>242</a>                    retry |= retryable;
+<a href=#243 id=243 data-nosnippet>243</a>                    <span class="kw">if </span>error.is_not_found() {
+<a href=#244 id=244 data-nosnippet>244</a>                        <span class="macro">tracing::debug!</span>(
+<a href=#245 id=245 data-nosnippet>245</a>                            %coords,
+<a href=#246 id=246 data-nosnippet>246</a>                            source = <span class="question-mark">?</span>group.source_name,
+<a href=#247 id=247 data-nosnippet>247</a>                            <span class="string">"no raster tile at the source; the layer is empty"
+<a href=#248 id=248 data-nosnippet>248</a>                        </span>);
+<a href=#249 id=249 data-nosnippet>249</a>                    } <span class="kw">else if </span>retryable {
+<a href=#250 id=250 data-nosnippet>250</a>                        <span class="macro">tracing::warn!</span>(
+<a href=#251 id=251 data-nosnippet>251</a>                            %coords,
+<a href=#252 id=252 data-nosnippet>252</a>                            source = <span class="question-mark">?</span>group.source_name,
+<a href=#253 id=253 data-nosnippet>253</a>                            error = %error.describe(),
+<a href=#254 id=254 data-nosnippet>254</a>                            <span class="string">"raster tile fetch failed"
+<a href=#255 id=255 data-nosnippet>255</a>                        </span>);
+<a href=#256 id=256 data-nosnippet>256</a>                    } <span class="kw">else </span>{
+<a href=#257 id=257 data-nosnippet>257</a>                        <span class="macro">tracing::error!</span>(
+<a href=#258 id=258 data-nosnippet>258</a>                            %coords,
+<a href=#259 id=259 data-nosnippet>259</a>                            source = <span class="question-mark">?</span>group.source_name,
+<a href=#260 id=260 data-nosnippet>260</a>                            error = %error.describe(),
+<a href=#261 id=261 data-nosnippet>261</a>                            <span class="string">"raster tile fetch failed"
+<a href=#262 id=262 data-nosnippet>262</a>                        </span>);
+<a href=#263 id=263 data-nosnippet>263</a>                    }
+<a href=#264 id=264 data-nosnippet>264</a>
+<a href=#265 id=265 data-nosnippet>265</a>                    context
+<a href=#266 id=266 data-nosnippet>266</a>                        .send_back(&lt;T <span class="kw">as </span>RasterTransferables&gt;::LayerRasterMissing::build_from(
+<a href=#267 id=267 data-nosnippet>267</a>                            coords,
+<a href=#268 id=268 data-nosnippet>268</a>                            RasterSourceId::new(group.source_name.clone()),
+<a href=#269 id=269 data-nosnippet>269</a>                        ))
+<a href=#270 id=270 data-nosnippet>270</a>                        .map_err(ProcedureError::Send)<span class="question-mark">?</span>;
+<a href=#271 id=271 data-nosnippet>271</a>                    <span class="kw">continue</span>;
+<a href=#272 id=272 data-nosnippet>272</a>                }
+<a href=#273 id=273 data-nosnippet>273</a>            };
+<a href=#274 id=274 data-nosnippet>274</a>            <span class="kw">let </span>request = RasterTileRequest {
+<a href=#275 id=275 data-nosnippet>275</a>                coords,
+<a href=#276 id=276 data-nosnippet>276</a>                source: RasterSourceId::new(group.source_name.clone()),
+<a href=#277 id=277 data-nosnippet>277</a>            };
+<a href=#278 id=278 data-nosnippet>278</a>            <span class="kw">let </span>processed = run_cpu_bound_replying(context.clone(), <span class="kw">move </span>|context| {
+<a href=#279 id=279 data-nosnippet>279</a>                <span class="kw">let </span><span class="kw-2">mut </span>process_context = ProcessRasterContext::&lt;T, <span class="kw">_</span>&gt;::new(context);
+<a href=#280 id=280 data-nosnippet>280</a>                process_raster_tile(<span class="kw-2">&amp;</span>data, request, <span class="kw-2">&amp;mut </span>process_context)
+<a href=#281 id=281 data-nosnippet>281</a>            })
+<a href=#282 id=282 data-nosnippet>282</a>            .<span class="kw">await
+<a href=#283 id=283 data-nosnippet>283</a>            </span>.map_err(ProcessRasterError::CpuWork)
+<a href=#284 id=284 data-nosnippet>284</a>            .and_then(|processed| processed);
+<a href=#285 id=285 data-nosnippet>285</a>            <span class="kw">match </span>processed {
+<a href=#286 id=286 data-nosnippet>286</a>                <span class="prelude-val">Ok</span>(()) =&gt; {}
+<a href=#287 id=287 data-nosnippet>287</a>                <span class="prelude-val">Err</span>(ProcessRasterError::Send(source)) =&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(ProcedureError::Send(source)),
+<a href=#288 id=288 data-nosnippet>288</a>                <span class="prelude-val">Err</span>(
+<a href=#289 id=289 data-nosnippet>289</a>                    error @ (ProcessRasterError::Decoding { .. } | ProcessRasterError::CpuWork(<span class="kw">_</span>)),
+<a href=#290 id=290 data-nosnippet>290</a>                ) =&gt; {
+<a href=#291 id=291 data-nosnippet>291</a>                    <span class="macro">tracing::warn!</span>(%coords, source = <span class="question-mark">?</span>group.source_name, %error, <span class="string">"invalid raster tile"</span>);
+<a href=#292 id=292 data-nosnippet>292</a>                    context
+<a href=#293 id=293 data-nosnippet>293</a>                        .send_back(T::LayerRasterMissing::build_from(
+<a href=#294 id=294 data-nosnippet>294</a>                            coords,
+<a href=#295 id=295 data-nosnippet>295</a>                            RasterSourceId::new(group.source_name.clone()),
+<a href=#296 id=296 data-nosnippet>296</a>                        ))
+<a href=#297 id=297 data-nosnippet>297</a>                        .map_err(ProcedureError::Send)<span class="question-mark">?</span>;
+<a href=#298 id=298 data-nosnippet>298</a>                }
+<a href=#299 id=299 data-nosnippet>299</a>            }
+<a href=#300 id=300 data-nosnippet>300</a>        }
+<a href=#301 id=301 data-nosnippet>301</a>
+<a href=#302 id=302 data-nosnippet>302</a>        context
+<a href=#303 id=303 data-nosnippet>303</a>            .send_back(TileRequestOutcome {
+<a href=#304 id=304 data-nosnippet>304</a>                coords,
+<a href=#305 id=305 data-nosnippet>305</a>                kind: RequestKind::Raster,
+<a href=#306 id=306 data-nosnippet>306</a>                attempt: <span class="prelude-val">Some</span>(attempt),
+<a href=#307 id=307 data-nosnippet>307</a>                disposition: <span class="kw">if </span>retry {
+<a href=#308 id=308 data-nosnippet>308</a>                    RequestDisposition::Retry
+<a href=#309 id=309 data-nosnippet>309</a>                } <span class="kw">else </span>{
+<a href=#310 id=310 data-nosnippet>310</a>                    RequestDisposition::Complete
+<a href=#311 id=311 data-nosnippet>311</a>                },
+<a href=#312 id=312 data-nosnippet>312</a>            })
+<a href=#313 id=313 data-nosnippet>313</a>            .map_err(ProcedureError::Send)
+<a href=#314 id=314 data-nosnippet>314</a>    })
+<a href=#315 id=315 data-nosnippet>315</a>}
+<a href=#316 id=316 data-nosnippet>316</a>
+<a href=#317 id=317 data-nosnippet>317</a><span class="doccomment">/// Sends the tile of an image source back, empty where the picture does not reach it, and
+<a href=#318 id=318 data-nosnippet>318</a>/// returns whether a failed fetch is worth retrying.
+<a href=#319 id=319 data-nosnippet>319</a></span><span class="kw">async fn </span>send_image_tile&lt;
+<a href=#320 id=320 data-nosnippet>320</a>    T: RasterTransferables,
+<a href=#321 id=321 data-nosnippet>321</a>    HC: <span class="kw">crate</span>::io::source_client::HttpClient,
+<a href=#322 id=322 data-nosnippet>322</a>    C: Context,
+<a href=#323 id=323 data-nosnippet>323</a>&gt;(
+<a href=#324 id=324 data-nosnippet>324</a>    (client, image): (
+<a href=#325 id=325 data-nosnippet>325</a>        <span class="kw-2">&amp;</span><span class="kw">crate</span>::io::source_client::SourceClient&lt;HC&gt;,
+<a href=#326 id=326 data-nosnippet>326</a>        <span class="kw-2">&amp;</span><span class="kw">crate</span>::style::source::ImageSource,
+<a href=#327 id=327 data-nosnippet>327</a>    ),
+<a href=#328 id=328 data-nosnippet>328</a>    (coords, source): (WorldTileCoords, RasterSourceId),
+<a href=#329 id=329 data-nosnippet>329</a>    context: C,
+<a href=#330 id=330 data-nosnippet>330</a>) -&gt; <span class="prelude-ty">Result</span>&lt;bool, ProcedureError&gt; {
+<a href=#331 id=331 data-nosnippet>331</a>    <span class="kw">use </span><span class="kw">crate</span>::raster::transferables::LayerRaster;
+<a href=#332 id=332 data-nosnippet>332</a>    <span class="kw">match </span><span class="kw">crate</span>::raster::image_source::load_tile(client, image, coords).<span class="kw">await </span>{
+<a href=#333 id=333 data-nosnippet>333</a>        <span class="prelude-val">Ok</span>(tile) =&gt; {
+<a href=#334 id=334 data-nosnippet>334</a>            <span class="comment">// A tile the picture does not reach has loaded too; it is simply empty.
+<a href=#335 id=335 data-nosnippet>335</a>            </span><span class="kw">let </span>tile = tile.unwrap_or_else(|| image::RgbaImage::new(<span class="number">1</span>, <span class="number">1</span>));
+<a href=#336 id=336 data-nosnippet>336</a>            context
+<a href=#337 id=337 data-nosnippet>337</a>                .send_back(T::LayerRaster::build_from(coords, source, tile))
+<a href=#338 id=338 data-nosnippet>338</a>                .map_err(ProcedureError::Send)<span class="question-mark">?</span>;
+<a href=#339 id=339 data-nosnippet>339</a>            <span class="prelude-val">Ok</span>(<span class="bool-val">false</span>)
+<a href=#340 id=340 data-nosnippet>340</a>        }
+<a href=#341 id=341 data-nosnippet>341</a>        <span class="prelude-val">Err</span>(failure) =&gt; {
+<a href=#342 id=342 data-nosnippet>342</a>            context
+<a href=#343 id=343 data-nosnippet>343</a>                .send_back(T::LayerRasterMissing::build_from(coords, source))
+<a href=#344 id=344 data-nosnippet>344</a>                .map_err(ProcedureError::Send)<span class="question-mark">?</span>;
+<a href=#345 id=345 data-nosnippet>345</a>            <span class="prelude-val">Ok</span>(failure.is_retryable())
+<a href=#346 id=346 data-nosnippet>346</a>        }
+<a href=#347 id=347 data-nosnippet>347</a>    }
+<a href=#348 id=348 data-nosnippet>348</a>}
+<a href=#349 id=349 data-nosnippet>349</a>
+<a href=#350 id=350 data-nosnippet>350</a><span class="kw">impl</span>&lt;E: Environment, T: RasterTransferables&gt; RequestSystem&lt;E, T&gt; {
+<a href=#351 id=351 data-nosnippet>351</a>    <span class="kw">fn </span>request(
+<a href=#352 id=352 data-nosnippet>352</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#353 id=353 data-nosnippet>353</a>        coords: <span class="kw">crate</span>::coords::WorldTileCoords,
+<a href=#354 id=354 data-nosnippet>354</a>        style: <span class="kw-2">&amp;mut </span>FrameStyle,
+<a href=#355 id=355 data-nosnippet>355</a>        world: <span class="kw-2">&amp;mut </span><span class="kw">crate</span>::tcs::world::World,
+<a href=#356 id=356 data-nosnippet>356</a>    ) -&gt; SystemResult {
+<a href=#357 id=357 data-nosnippet>357</a>        <span class="kw">let </span>exists = world
+<a href=#358 id=358 data-nosnippet>358</a>            .tiles
+<a href=#359 id=359 data-nosnippet>359</a>            .query::&lt;<span class="kw-2">&amp;</span>RasterLayersDataComponent&gt;(coords)
+<a href=#360 id=360 data-nosnippet>360</a>            .is_some();
+<a href=#361 id=361 data-nosnippet>361</a>        <span class="kw">let </span>attempt = tile_retry::next_attempt(world);
+<a href=#362 id=362 data-nosnippet>362</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(<span class="kw-2">mut </span>tile) = world.tiles.spawn_mut(coords) <span class="kw">else </span>{
+<a href=#363 id=363 data-nosnippet>363</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(SystemError::InvalidTile { coords });
+<a href=#364 id=364 data-nosnippet>364</a>        };
+<a href=#365 id=365 data-nosnippet>365</a>        <span class="self">self</span>.kernel
+<a href=#366 id=366 data-nosnippet>366</a>            .apc()
+<a href=#367 id=367 data-nosnippet>367</a>            .call(
+<a href=#368 id=368 data-nosnippet>368</a>                Input::new(coords, style.share(Style::clone), attempt),
+<a href=#369 id=369 data-nosnippet>369</a>                fetch_raster_apc::&lt;E::OffscreenKernelEnvironment, T, <span class="kw">_</span>&gt;,
+<a href=#370 id=370 data-nosnippet>370</a>            )
+<a href=#371 id=371 data-nosnippet>371</a>            .map_err(|source| SystemError::TileRequest {
+<a href=#372 id=372 data-nosnippet>372</a>                kind: <span class="string">"raster"</span>,
+<a href=#373 id=373 data-nosnippet>373</a>                coords,
+<a href=#374 id=374 data-nosnippet>374</a>                source,
+<a href=#375 id=375 data-nosnippet>375</a>            })<span class="question-mark">?</span>;
+<a href=#376 id=376 data-nosnippet>376</a>        <span class="kw">if </span>!exists {
+<a href=#377 id=377 data-nosnippet>377</a>            tile.insert(RasterLayersDataComponent::default());
+<a href=#378 id=378 data-nosnippet>378</a>        }
+<a href=#379 id=379 data-nosnippet>379</a>        tile_retry::started(world, coords, RequestKind::Raster, attempt, <span class="prelude-val">None</span>);
+<a href=#380 id=380 data-nosnippet>380</a>        <span class="macro">tracing::debug!</span>(%coords, <span class="string">"raster tile request accepted"</span>);
+<a href=#381 id=381 data-nosnippet>381</a>        <span class="prelude-val">Ok</span>(())
+<a href=#382 id=382 data-nosnippet>382</a>    }
+<a href=#383 id=383 data-nosnippet>383</a>}
+<a href=#384 id=384 data-nosnippet>384</a>
+<a href=#385 id=385 data-nosnippet>385</a><span class="kw">fn </span>wanted_tiles(
+<a href=#386 id=386 data-nosnippet>386</a>    regions: Vec&lt;(RasterSourceId, Vec&lt;WorldTileCoords&gt;)&gt;,
+<a href=#387 id=387 data-nosnippet>387</a>    style: <span class="kw-2">&amp;</span><span class="kw">crate</span>::style::Style,
+<a href=#388 id=388 data-nosnippet>388</a>    world: <span class="kw-2">&amp;</span><span class="kw">crate</span>::tcs::world::World,
+<a href=#389 id=389 data-nosnippet>389</a>) -&gt; Vec&lt;WorldTileCoords&gt; {
+<a href=#390 id=390 data-nosnippet>390</a>    <span class="kw">let </span><span class="kw-2">mut </span>wanted = Vec::new();
+<a href=#391 id=391 data-nosnippet>391</a>    <span class="kw">for </span>(source, tiles) <span class="kw">in </span>regions {
+<a href=#392 id=392 data-nosnippet>392</a>        <span class="kw">let </span>minzoom = <span class="kw">match </span>source.name().and_then(|name| style.sources.get(name)) {
+<a href=#393 id=393 data-nosnippet>393</a>            <span class="prelude-val">Some</span>(<span class="kw">crate</span>::style::source::Source::Raster(source)) =&gt; source.minzoom,
+<a href=#394 id=394 data-nosnippet>394</a>            <span class="prelude-val">Some</span>(<span class="kw">crate</span>::style::source::Source::RasterDem(source)) =&gt; source.minzoom,
+<a href=#395 id=395 data-nosnippet>395</a>            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+<a href=#396 id=396 data-nosnippet>396</a>        }
+<a href=#397 id=397 data-nosnippet>397</a>        .unwrap_or(<span class="number">0</span>);
+<a href=#398 id=398 data-nosnippet>398</a>        <span class="kw">let </span>bounds = <span class="kw">match </span>source.name().and_then(|name| style.sources.get(name)) {
+<a href=#399 id=399 data-nosnippet>399</a>            <span class="prelude-val">Some</span>(<span class="kw">crate</span>::style::source::Source::Raster(source)) =&gt; source.bounds,
+<a href=#400 id=400 data-nosnippet>400</a>            <span class="prelude-val">Some</span>(<span class="kw">crate</span>::style::source::Source::Image(image)) =&gt; image_bounds(image),
+<a href=#401 id=401 data-nosnippet>401</a>            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+<a href=#402 id=402 data-nosnippet>402</a>        };
+<a href=#403 id=403 data-nosnippet>403</a>        <span class="kw">for </span>coords <span class="kw">in </span>tiles {
+<a href=#404 id=404 data-nosnippet>404</a>            <span class="comment">// Tiles outside the source's declared bounds are never requested.
+<a href=#405 id=405 data-nosnippet>405</a>            </span><span class="kw">if </span>bounds.is_some_and(|bounds| !<span class="kw">crate</span>::io::tile_sources::tile_in_bounds(coords, bounds))
+<a href=#406 id=406 data-nosnippet>406</a>            {
+<a href=#407 id=407 data-nosnippet>407</a>                <span class="kw">continue</span>;
+<a href=#408 id=408 data-nosnippet>408</a>            }
+<a href=#409 id=409 data-nosnippet>409</a>            wanted.push(coords);
+<a href=#410 id=410 data-nosnippet>410</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(parent) = missing_tile_fallback(coords, minzoom, |coords| {
+<a href=#411 id=411 data-nosnippet>411</a>                world
+<a href=#412 id=412 data-nosnippet>412</a>                    .tiles
+<a href=#413 id=413 data-nosnippet>413</a>                    .query::&lt;<span class="kw-2">&amp;</span>RasterLayersDataComponent&gt;(coords)
+<a href=#414 id=414 data-nosnippet>414</a>                    .is_some_and(|component| component.source_is_missing(<span class="kw-2">&amp;</span>source))
+<a href=#415 id=415 data-nosnippet>415</a>            }) {
+<a href=#416 id=416 data-nosnippet>416</a>                wanted.push(parent);
+<a href=#417 id=417 data-nosnippet>417</a>            }
+<a href=#418 id=418 data-nosnippet>418</a>        }
+<a href=#419 id=419 data-nosnippet>419</a>    }
+<a href=#420 id=420 data-nosnippet>420</a>    wanted
 <a href=#421 id=421 data-nosnippet>421</a>}
 <a href=#422 id=422 data-nosnippet>422</a>
-<a href=#423 id=423 data-nosnippet>423</a><span class="attr">#[cfg(test)]
-<a href=#424 id=424 data-nosnippet>424</a></span><span class="kw">mod </span>tests;
+<a href=#423 id=423 data-nosnippet>423</a><span class="doccomment">/// The bounds `(west, south, east, north)` of an image's corners, so tiles it cannot reach are
+<a href=#424 id=424 data-nosnippet>424</a>/// not requested; none for a picture that reaches past the antimeridian, whose copies across it
+<a href=#425 id=425 data-nosnippet>425</a>/// a tile may show.
+<a href=#426 id=426 data-nosnippet>426</a></span><span class="kw">fn </span>image_bounds(image: <span class="kw-2">&amp;</span><span class="kw">crate</span>::style::source::ImageSource) -&gt; <span class="prelude-ty">Option</span>&lt;(f64, f64, f64, f64)&gt; {
+<a href=#427 id=427 data-nosnippet>427</a>    <span class="kw">let </span>longitudes = image.coordinates.map(|[longitude, <span class="kw">_</span>]| longitude);
+<a href=#428 id=428 data-nosnippet>428</a>    <span class="kw">let </span>latitudes = image.coordinates.map(|[<span class="kw">_</span>, latitude]| latitude);
+<a href=#429 id=429 data-nosnippet>429</a>    <span class="kw">let </span>fold = |values: [f64; <span class="number">4</span>]| {
+<a href=#430 id=430 data-nosnippet>430</a>        values
+<a href=#431 id=431 data-nosnippet>431</a>            .into_iter()
+<a href=#432 id=432 data-nosnippet>432</a>            .fold((f64::MAX, f64::MIN), |(lo, hi), value| {
+<a href=#433 id=433 data-nosnippet>433</a>                (lo.min(value), hi.max(value))
+<a href=#434 id=434 data-nosnippet>434</a>            })
+<a href=#435 id=435 data-nosnippet>435</a>    };
+<a href=#436 id=436 data-nosnippet>436</a>    <span class="kw">let </span>((west, east), (south, north)) = (fold(longitudes), fold(latitudes));
+<a href=#437 id=437 data-nosnippet>437</a>    (west &gt;= -<span class="number">180.0 </span>&amp;&amp; east &lt;= <span class="number">180.0</span>).then_some((west, south, east, north))
+<a href=#438 id=438 data-nosnippet>438</a>}
+<a href=#439 id=439 data-nosnippet>439</a>
+<a href=#440 id=440 data-nosnippet>440</a><span class="attr">#[cfg(test)]
+<a href=#441 id=441 data-nosnippet>441</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>
