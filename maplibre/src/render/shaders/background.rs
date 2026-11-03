@@ -206,6 +206,9 @@ pub enum AtmosphereMetadataError {
 }
 
 /// Per-frame values of the sky draw: colours, the horizon line on screen and the blends.
+///
+/// A negative `blend[2]` selects the globe sky, shaded by each pixel's elevation angle above
+/// the eye's sea-level horizon instead of its distance from a screen-space horizon line.
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 pub struct SkyLayerMetadata {
@@ -215,8 +218,19 @@ pub struct SkyLayerMetadata {
     pub horizon_color: [f32; 4],
     /// Horizon point in screen pixels with y up, then the unit normal pointing into the sky.
     pub horizon: [f32; 4],
-    /// Blend width in pixels, globe transition, viewport height, and reversed sky depth.
+    /// Blend width (pixels, or radians on the globe sky), globe transition, viewport height
+    /// (negative for the globe sky), and reversed sky depth.
     pub blend: [f32; 4],
+    /// Inverse OpenGL-convention projection turning a clip position into a view-space ray.
+    pub inverse_projection: Mat4x4f32,
+    /// The eye's local zenith in view axes, then the elevation of its sea-level horizon in
+    /// radians (zero or negative).
+    pub up_and_horizon: [f32; 4],
+}
+
+impl SkyLayerMetadata {
+    /// Shader location of [`Self::up_and_horizon`]; the sky's other attributes take 8..=15.
+    const UP_AND_HORIZON_LOCATION: u32 = 7;
 }
 
 /// Shader filling the screen above the horizon with the sky, as GL JS `drawSky` does.
@@ -233,11 +247,15 @@ impl Shader for SkyShader {
             buffers: vec![VertexBufferLayout {
                 array_stride: std::mem::size_of::<SkyLayerMetadata>() as u64,
                 step_mode: wgpu::VertexStepMode::Instance,
-                attributes: (0..4)
+                attributes: (0..9)
                     .map(|index| wgpu::VertexAttribute {
                         offset: index * wgpu::VertexFormat::Float32x4.size(),
                         format: wgpu::VertexFormat::Float32x4,
-                        shader_location: 8 + index as u32,
+                        shader_location: if index < 8 {
+                            8 + index as u32
+                        } else {
+                            SkyLayerMetadata::UP_AND_HORIZON_LOCATION
+                        },
                     })
                     .collect(),
             }],

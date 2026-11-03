@@ -27,7 +27,7 @@ pub struct BackgroundBuffers {
     pub globe_tiles: Vec<WorldTileCoords>,
     /// Evaluated atmosphere opacity.
     pub atmosphere_metadata_buffer: wgpu::Buffer,
-    /// Sky colours and horizon, when the style has a sky and the map is not a globe.
+    /// Sky colours and horizon, when the style has a sky the frame draws.
     pub sky_metadata_buffer: Option<wgpu::Buffer>,
 }
 
@@ -322,6 +322,8 @@ pub fn sky_metadata(
                 0.0
             },
         ],
+        inverse_projection: cgmath::Matrix4::from_scale(1.0).into(),
+        up_and_horizon: [0.0, 0.0, 1.0, 0.0],
     }
 }
 

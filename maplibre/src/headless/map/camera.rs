@@ -57,4 +57,58 @@ impl HeadlessMap {
             .view_state
             .set_field_of_view(cgmath::Rad::from(field_of_view));
     }
+
+    /// Drags a free-globe camera so the ground under `from` moves under `to`, as
+    /// [`crate::render::view_state::ViewState::drag_free_globe`] does, and marks the map for
+    /// redraw when it moved. Returns whether it moved.
+    pub fn drag_globe(&mut self, from: cgmath::Point2<f64>, to: cgmath::Point2<f64>) -> bool {
+        let moved = self.map_context.view_state.drag_free_globe(from, to);
+        if moved {
+            crate::render::frame_signals::mark_dirty(&mut self.map_context.world);
+        }
+        moved
+    }
+
+    /// Zooms a free-globe camera by `zoom_delta` about the ground under `pixel`, as
+    /// [`crate::render::view_state::ViewState::zoom_free_globe`] does, and marks the map for
+    /// redraw when it moved. Returns whether it moved.
+    pub fn zoom_globe(&mut self, pixel: cgmath::Point2<f64>, zoom_delta: f64) -> bool {
+        let moved = self
+            .map_context
+            .view_state
+            .zoom_free_globe(pixel, zoom_delta);
+        if moved {
+            crate::render::frame_signals::mark_dirty(&mut self.map_context.world);
+        }
+        moved
+    }
+
+    /// The sea-level location under a viewport pixel of the globe camera, or `None` where the
+    /// pixel shows space beyond the limb or the view has no globe camera.
+    pub fn screen_to_globe_lat_lon(
+        &self,
+        pixel: cgmath::Point2<f64>,
+    ) -> Option<crate::coords::LatLon> {
+        let camera =
+            crate::render::projection::globe_camera_for_view(&self.map_context.view_state).ok()?;
+        camera
+            .is_point_on_map_surface(pixel)
+            .then(|| camera.screen_point_to_location(pixel))
+            .flatten()
+    }
+
+    /// Where the globe camera draws `location` raised `elevation_meters`, in viewport pixels,
+    /// and whether the planet hides it; `None` when the view has no globe camera.
+    pub fn globe_lat_lon_to_screen(
+        &self,
+        location: crate::coords::LatLon,
+        elevation_meters: f64,
+    ) -> Option<(cgmath::Point2<f64>, bool)> {
+        let camera =
+            crate::render::projection::globe_camera_for_view(&self.map_context.view_state).ok()?;
+        Some((
+            camera.location_to_screen(location, elevation_meters),
+            camera.is_location_occluded(location),
+        ))
+    }
 }

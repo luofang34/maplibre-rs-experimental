@@ -8,6 +8,7 @@ pub mod altitude;
 pub mod buffers;
 #[cfg(feature = "experimental")]
 pub mod daylight;
+pub mod globe_sky;
 pub(crate) mod pattern;
 pub mod queue_system;
 pub mod render_commands;

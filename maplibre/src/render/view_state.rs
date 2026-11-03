@@ -73,6 +73,11 @@ impl ViewState {
         self.has_external_view() && self.opaque_environment
     }
 
+    /// Whether the host asked for an opaque environment, whatever view it draws.
+    pub fn opaque_environment_requested(&self) -> bool {
+        self.opaque_environment
+    }
+
     /// Sets the host's background coverage intent independently of the map projection.
     pub fn set_opaque_environment(&mut self, opaque: bool) {
         self.opaque_environment = opaque;

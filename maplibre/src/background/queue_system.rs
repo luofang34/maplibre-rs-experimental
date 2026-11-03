@@ -4,6 +4,7 @@ pub(crate) use super::buffers::globe_tiles;
 pub use super::buffers::{BackgroundBuffers, BackgroundGpuBuffers};
 use super::{
     buffers::{background_color, globe_tile_metadata, sky_metadata, world_rows},
+    globe_sky::{draws_globe_sky, globe_sky_metadata},
     render_commands::{
         DrawAtmosphere, DrawBackground, DrawBackgroundPattern, DrawGlobeBackground,
         DrawGlobeBackgroundPattern, DrawSky,
@@ -77,11 +78,19 @@ pub fn queue_system(
     });
     let uses_globe = projection_transition > 0.0;
     let atmosphere_blend = atmosphere_blend(style, view_state, world);
+    // Without an atmosphere a full globe still has a sky where the host wants the frame
+    // covered; with one, the atmosphere draws the sky.
+    let globe_sky = draws_globe_sky(view_state, projection_transition, atmosphere_blend);
     let sky_metadata = style
         .sky
         .as_ref()
-        .filter(|_| projection_transition < 1.0 || view_state.opaque_environment())
-        .map(|sky| sky_metadata(sky, view_state, projection_transition));
+        .filter(|_| projection_transition < 1.0 || view_state.opaque_environment() || globe_sky)
+        .map(|sky| {
+            globe_sky
+                .then(|| globe_sky_metadata(sky, view_state))
+                .flatten()
+                .unwrap_or_else(|| sky_metadata(sky, view_state, projection_transition))
+        });
 
     if let Some(gpu) = world
         .resources

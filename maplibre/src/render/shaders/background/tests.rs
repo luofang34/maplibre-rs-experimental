@@ -1,6 +1,6 @@
 use cgmath::Point2;
 
-use super::AtmosphereLayerMetadata;
+use super::{AtmosphereLayerMetadata, SkyLayerMetadata, SkyShader};
 use crate::{
     coords::LatLon,
     projection::{
@@ -97,4 +97,29 @@ fn host_sun_replaces_the_style_light() {
         assert!((f64::from(from_host.sun_direction[axis]) - expected).abs() < 1e-6);
     }
     assert_ne!(from_host.sun_direction, from_style.sun_direction);
+}
+
+#[test]
+fn sky_metadata_matches_its_vertex_layout() {
+    use crate::render::{resource::VertexBufferLayout, shaders::Shader};
+    assert_eq!(std::mem::size_of::<SkyLayerMetadata>(), 9 * 16);
+    let shader = SkyShader {
+        format: wgpu::TextureFormat::Rgba8Unorm,
+    };
+    let vertex = shader.describe_vertex();
+    let [VertexBufferLayout {
+        array_stride,
+        attributes,
+        ..
+    }] = vertex.buffers.as_slice()
+    else {
+        panic!("the sky reads one instance buffer");
+    };
+    assert_eq!(*array_stride, 9 * 16);
+    let mut locations: Vec<u32> = attributes.iter().map(|a| a.shader_location).collect();
+    locations.sort_unstable();
+    // WebGPU allows locations below 16 only.
+    assert_eq!(locations, (7..16).collect::<Vec<_>>());
+    let up = attributes.iter().find(|a| a.shader_location == 7);
+    assert_eq!(up.map(|a| a.offset), Some(8 * 16));
 }
