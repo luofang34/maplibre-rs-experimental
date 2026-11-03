@@ -360,7 +360,7 @@ fn queue_tiles(
         .resources
         .get::<surface_covering::SurfaceCopies>()
         .map(|copies| copies.0.clone());
-    let (skirts, lighting) = uniforms::surface_settings(world);
+    let ctx = uniforms::surface_context(world, style, view_state, dem);
     {
         let Some(Initialized(terrain)) = world.resources.get_mut::<Eventually<TerrainResources>>()
         else {
@@ -369,7 +369,7 @@ fn queue_tiles(
         let uniforms::PreparedTerrain {
             mut uniforms,
             sources,
-        } = uniforms::prepare_tiles(targets, style, view_state, terrain, (dem, skirts, lighting));
+        } = uniforms::prepare_tiles(targets, terrain, &world.tiles, ctx);
         let edges = edge_cache.apply(&sources, &mut uniforms, &world.tiles);
         let (sources, placed) =
             uniforms::with_world_copies(&mut uniforms, sources, copies.as_ref(), view_state);

@@ -23,7 +23,7 @@ struct TerrainTileUniforms {
     moonlight: vec4<f32>,
     procedural_relief: vec4<f32>,
     procedural_grid: vec4<f32>,
-    edge_index: vec4<f32>,
+    edge_index: vec4<u32>,
 };
 
 struct VertexOutput {
@@ -65,6 +65,15 @@ fn daylight(color: vec3<f32>, globe_normal: vec3<f32>) -> vec3<f32> {
 
 fn linear_to_gamma(color: vec4<f32>) -> vec4<f32> {
     return pow(color, vec4<f32>(1.0 / 2.2));
+}
+
+fn unpack_rgba8(packed: u32) -> vec4<f32> {
+    return vec4<f32>(
+        f32(packed & 0xffu),
+        f32((packed >> 8u) & 0xffu),
+        f32((packed >> 16u) & 0xffu),
+        f32((packed >> 24u) & 0xffu),
+    ) / 255.0;
 }
 
 fn hypsometric_color(elev_m: f32) -> vec3<f32> {
@@ -144,9 +153,14 @@ fn main(in: VertexOutput) -> @location(0) vec4<f32> {
         let relief = 1.0 + terrain_tile.relief_strength * (dot(up_normal, light) - light.z);
         let draped = select(sampled_drape, terrain_tile.surface_color,
             terrain_tile.fog_opacity.z > 0.5);
+        let polar_color = unpack_rgba8(select(
+            terrain_tile.edge_index.z,
+            terrain_tile.edge_index.y,
+            in.tex_coords.y < 0.5,
+        ));
         // No tile holds the ground beyond the last row of tiles, so the cap closing the globe takes
-        // the style's background colour, unlit, instead of the drape's edge stretched to the pole.
-        lit = select(vec4<f32>(draped.rgb * relief, draped.a), terrain_tile.surface_color,
+        // the pole's flat vector/background fill, unlit, instead of stretching the drape's edge.
+        lit = select(vec4<f32>(draped.rgb * relief, draped.a), polar_color,
             in.polar_cap > 0.0);
     }
     let surface = vec4<f32>(daylight(lit.rgb, in.globe_normal), lit.a);

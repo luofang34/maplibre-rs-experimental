@@ -2,6 +2,7 @@
 
 use crate::{
     coords::{LatLon, WorldCoords, Zoom},
+    projection::globe::scale::MERCATOR_LATITUDE_LIMIT,
     render::view_state::{CameraOptions, NavigationError, ViewState},
     style::Style,
     window::PhysicalSize,
@@ -45,16 +46,24 @@ pub(super) fn starting_view(
     Ok(view)
 }
 
+/// Returns `style.center` as [`LatLon`] with latitude clamped to [`MERCATOR_LATITUDE_LIMIT`].
+pub(crate) fn clamped_style_center(style: &Style) -> LatLon {
+    let [lon, lat] = style.center.unwrap_or_default();
+    LatLon::new(
+        lat.clamp(-MERCATOR_LATITUDE_LIMIT, MERCATOR_LATITUDE_LIMIT),
+        lon,
+    )
+}
+
 fn initial_view_state(
     style: &Style,
     window_size: PhysicalSize,
     max_pitch: cgmath::Deg<f64>,
 ) -> ViewState {
-    let center = style.center.unwrap_or_default();
     let zoom = style.zoom.map(Zoom::new).unwrap_or_default();
     let mut view = ViewState::new(
         window_size,
-        WorldCoords::from_lat_lon(LatLon::new(center[1], center[0]), zoom),
+        WorldCoords::from_lat_lon(clamped_style_center(style), zoom),
         zoom,
         cgmath::Deg(style.pitch.unwrap_or_default()),
         cgmath::Rad(0.6435011087932844),

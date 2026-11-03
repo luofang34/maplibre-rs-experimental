@@ -98,7 +98,7 @@ fn replacing_a_dem_refreshes_cached_mesh_edges() {
     let initial = edges1[0].samples;
     load(&mut tiles, coords, 2000);
     let edges2 = cache.apply(&sources, &mut uniforms, &tiles);
-    assert_eq!(uniforms[0].edge_index[0], 0.0);
+    assert_eq!(uniforms[0].edge_index[0], 0);
     for (before, after) in initial.iter().zip(edges2[0].samples) {
         for (before, after) in before.iter().zip(after) {
             assert!((after - before - 1000.0).abs() < 0.001);

@@ -13,7 +13,7 @@ fn pattern_color(opacity: Option<&StyleProperty<f32>>, zoom: f64) -> Option<[f32
     Some([1.0, 1.0, 1.0, opacity])
 }
 
-pub(super) fn uniform_color(layer: &StyleLayer, zoom: f64) -> Option<[f32; 4]> {
+pub(crate) fn uniform_color(layer: &StyleLayer, zoom: f64) -> Option<[f32; 4]> {
     let (color, opacity) = match layer.paint.as_ref()? {
         // A pattern takes only the opacity of the fill.
         LayerPaint::Fill(paint) if paint.fill_pattern.is_some() => {
