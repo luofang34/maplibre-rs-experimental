@@ -162,3 +162,70 @@ fn inline_polygon_capacity_guard_and_clearing() {
     poly.clear();
     assert_eq!(poly.len(), 0);
 }
+
+fn pole_vertex_indices(buffer: &VertexBuffers<ShaderVertex, u32>) -> Vec<(usize, f32)> {
+    buffer
+        .vertices
+        .iter()
+        .enumerate()
+        .filter(|(_, vertex)| {
+            vertex.position[1] == i16::MIN as f32 || vertex.position[1] == i16::MAX as f32
+        })
+        .map(|(index, vertex)| (index, vertex.position[1]))
+        .collect()
+}
+
+/// Appends one polygon's triangles to a buffer shared with earlier ones and subdivides them, as
+/// the tessellator does for each feature of a layer.
+fn subdivide_appended(
+    buffer: &mut VertexBuffers<ShaderVertex, u32>,
+    triangles: &[[[f32; 2]; 3]],
+    subdivision: FillSubdivisionOptions,
+) {
+    let index_start = buffer.indices.len();
+    for triangle in triangles {
+        for point in triangle {
+            buffer.indices.push(buffer.vertices.len() as u32);
+            buffer.vertices.push(ShaderVertex::new(*point, [0.0; 2]));
+        }
+    }
+    subdivide_triangles(buffer, index_start, subdivision).expect("polygon should subdivide");
+}
+
+#[test]
+fn later_polygons_leave_earlier_pole_vertices_exact() {
+    let mut subdivision = options(2);
+    subdivision.extend_to_north_pole = true;
+    subdivision.extend_to_south_pole = true;
+    let mut buffer = VertexBuffers::<ShaderVertex, u32>::new();
+    let whole_tile = [
+        [[0.0, 0.0], [4096.0, 0.0], [4096.0, 4096.0]],
+        [[0.0, 0.0], [4096.0, 4096.0], [0.0, 4096.0]],
+    ];
+    subdivide_appended(&mut buffer, &whole_tile, subdivision);
+    let poles = pole_vertex_indices(&buffer);
+    assert!(poles.iter().any(|(_, y)| *y == i16::MIN as f32));
+    assert!(poles.iter().any(|(_, y)| *y == i16::MAX as f32));
+
+    let lake = [[[1000.0, 1000.0], [1500.0, 1000.0], [1000.0, 1500.0]]];
+    subdivide_appended(&mut buffer, &lake, subdivision);
+
+    for (index, y) in &poles {
+        assert_eq!(
+            buffer.vertices[*index].position[1], *y,
+            "pole vertex {index}"
+        );
+    }
+}
+
+#[test]
+fn input_on_a_pole_sentinel_never_becomes_a_pole_vertex() {
+    let mut buffer = VertexBuffers::<ShaderVertex, u32>::new();
+    let reaching_past_the_tile = [[[0.0, -32_767.7], [4096.0, 32_767.0], [0.0, 32_766.6]]];
+    subdivide_appended(&mut buffer, &reaching_past_the_tile, options(2));
+
+    assert!(buffer.indices.iter().all(|index| {
+        let y = buffer.vertices[*index as usize].position[1];
+        y != i16::MIN as f32 && y != i16::MAX as f32
+    }));
+}

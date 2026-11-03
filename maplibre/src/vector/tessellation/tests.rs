@@ -77,6 +77,114 @@ fn features_with_greater_sort_keys_are_drawn_later() {
         .all(|index| *index < vertices));
 }
 
+/// The y of every vertex the globe shader draws at a pole, by vertex index.
+fn pole_vertices(tessellator: &ZeroTessellator<IndexDataType>) -> Vec<(usize, f32)> {
+    tessellator
+        .buffer
+        .vertices
+        .iter()
+        .enumerate()
+        .filter(|(_, vertex)| {
+            vertex.position[1] == i16::MIN as f32 || vertex.position[1] == i16::MAX as f32
+        })
+        .map(|(index, vertex)| (index, vertex.position[1]))
+        .collect()
+}
+
+fn square_ring(tessellator: &mut ZeroTessellator<IndexDataType>, min: f64, max: f64) {
+    tessellator
+        .polygon_begin(false, 1, 0)
+        .expect("polygon begins");
+    tessellator
+        .linestring_begin(false, 5, 0)
+        .expect("ring begins");
+    for (index, (x, y)) in [(min, min), (max, min), (max, max), (min, max), (min, min)]
+        .into_iter()
+        .enumerate()
+    {
+        tessellator.xy(x, y, index).expect("coordinate is valid");
+    }
+    tessellator.linestring_end(false, 0).expect("ring ends");
+    tessellator.polygon_end(false, 0).expect("polygon ends");
+}
+
+/// Tessellates a polygon covering the whole z0 tile, from pole edge to pole edge, then a lake
+/// inside it, each as a feature of its own or as the polygons of one multipolygon.
+fn tessellate_ocean_then_lake(
+    tessellator: &mut ZeroTessellator<IndexDataType>,
+    multipolygon: bool,
+) {
+    if multipolygon {
+        tessellator
+            .multipolygon_begin(2, 0)
+            .expect("multipolygon begins");
+    }
+    for (min, max) in [(0.0, 4096.0), (1000.0, 1500.0)] {
+        if !multipolygon {
+            tessellator
+                .multipolygon_begin(1, 0)
+                .expect("multipolygon begins");
+        }
+        square_ring(tessellator, min, max);
+        if !multipolygon {
+            tessellator.multipolygon_end(0).expect("multipolygon ends");
+            tessellator.feature_end(0).expect("feature ends");
+        }
+    }
+    if multipolygon {
+        tessellator.multipolygon_end(0).expect("multipolygon ends");
+        tessellator.feature_end(0).expect("feature ends");
+    }
+}
+
+fn assert_poles_survive_later_polygons(
+    mut tessellator: ZeroTessellator<IndexDataType>,
+    multipolygon: bool,
+) {
+    let mut ocean_only =
+        ZeroTessellator::<IndexDataType>::default().with_globe_subdivision(2, true, true, true);
+    ocean_only.extrusion = tessellator.extrusion.clone();
+    ocean_only
+        .multipolygon_begin(1, 0)
+        .expect("multipolygon begins");
+    square_ring(&mut ocean_only, 0.0, 4096.0);
+    ocean_only.multipolygon_end(0).expect("multipolygon ends");
+    let poles = pole_vertices(&ocean_only);
+    assert!(
+        poles.iter().any(|(_, y)| *y == i16::MIN as f32),
+        "north pole"
+    );
+    assert!(
+        poles.iter().any(|(_, y)| *y == i16::MAX as f32),
+        "south pole"
+    );
+
+    tessellate_ocean_then_lake(&mut tessellator, multipolygon);
+
+    assert_eq!(pole_vertices(&tessellator), poles);
+}
+
+#[test]
+fn later_fill_features_leave_both_poles_exact() {
+    let tessellator =
+        ZeroTessellator::<IndexDataType>::default().with_globe_subdivision(2, true, true, true);
+    assert_poles_survive_later_polygons(tessellator, false);
+}
+
+#[test]
+fn later_extrusion_polygons_leave_both_poles_exact() {
+    for multipolygon in [false, true] {
+        let tessellator = ZeroTessellator::<IndexDataType>::default()
+            .with_globe_subdivision(2, true, true, true)
+            .with_extrusion(super::ExtrusionOptions {
+                height: None,
+                base: None,
+                clip_buffer: None,
+            });
+        assert_poles_survive_later_polygons(tessellator, multipolygon);
+    }
+}
+
 fn tessellate_reference_line(tessellator: &mut ZeroTessellator<IndexDataType>) {
     tessellator
         .linestring_begin(true, 2, 0)

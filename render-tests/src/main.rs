@@ -175,8 +175,8 @@ struct TestOutcome {
 
 #[derive(Debug)]
 enum TestResult {
-    Pass { diff: f64 },
-    Fail { diff: f64 },
+    Pass(comparison::Difference),
+    Fail(comparison::Difference),
     Error(String),
 }
 
@@ -195,7 +195,7 @@ async fn run_test(test_dir: PathBuf) -> TestOutcome {
 
     let mut result = run_test_isolated(&test_dir);
     let mut attempts = 1_u8;
-    while matches!(result, TestResult::Fail { .. }) && attempts < 3 {
+    while matches!(result, TestResult::Fail(_)) && attempts < 3 {
         attempts = attempts.wrapping_add(1);
         result = run_test_isolated(&test_dir);
     }
@@ -277,8 +277,8 @@ async fn run_tests(test_root: PathBuf, tests: Vec<PathBuf>) -> Result<bool, Stri
         let elapsed = start.elapsed();
 
         let tag = match &outcome.result {
-            TestResult::Pass { diff } => format!("PASS  (diff={diff:.4})"),
-            TestResult::Fail { diff } => format!("FAIL  (diff={diff:.4})"),
+            TestResult::Pass(difference) => format!("PASS  ({difference})"),
+            TestResult::Fail(difference) => format!("FAIL  ({difference})"),
             TestResult::Error(msg) => format!("ERR   {msg}"),
         };
         let retry_label = if outcome.attempts > 1 {
@@ -294,11 +294,11 @@ async fn run_tests(test_root: PathBuf, tests: Vec<PathBuf>) -> Result<bool, Stri
 
     let passed = outcomes
         .iter()
-        .filter(|o| matches!(o.result, TestResult::Pass { .. }))
+        .filter(|o| matches!(o.result, TestResult::Pass(_)))
         .count();
     let failed = outcomes
         .iter()
-        .filter(|o| matches!(o.result, TestResult::Fail { .. }))
+        .filter(|o| matches!(o.result, TestResult::Fail(_)))
         .count();
     let errored = outcomes
         .iter()
