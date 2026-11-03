@@ -125,7 +125,9 @@ fn summarize_gpu_objects(world: &World, renderer: &crate::render::Renderer) {
     tracing::info!(
         buffers = hub.buffers.num_allocated,
         textures = hub.textures.num_allocated,
+        textures_live = hub.textures.num_kept_from_user,
         texture_views = hub.texture_views.num_allocated,
+        views_live = hub.texture_views.num_kept_from_user,
         bind_groups = hub.bind_groups.num_allocated,
         samplers = hub.samplers.num_allocated,
         command_buffers = hub.command_buffers.num_allocated,

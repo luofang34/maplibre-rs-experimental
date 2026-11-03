@@ -264,12 +264,21 @@ pub fn fetch_dem_apc<K: OffscreenKernel, T: DemTransferables, C: Context + Clone
             }
             Err(CachedTileFailure::Transport { retryable, message }) => {
                 retry = retryable;
-                tracing::error!(
-                    %coords,
-                    source = %dem.name,
-                    error = %message,
-                    "DEM tile fetch failed"
-                );
+                if retryable {
+                    tracing::warn!(
+                        %coords,
+                        source = %dem.name,
+                        error = %message,
+                        "DEM tile fetch failed"
+                    );
+                } else {
+                    tracing::error!(
+                        %coords,
+                        source = %dem.name,
+                        error = %message,
+                        "DEM tile fetch failed"
+                    );
+                }
                 None
             }
         };

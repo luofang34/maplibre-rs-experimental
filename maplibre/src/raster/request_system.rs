@@ -209,12 +209,21 @@ pub fn fetch_raster_apc<K: OffscreenKernel, T: RasterTransferables, C: Context +
                     }
                     Err(CachedTileFailure::Transport { retryable, message }) => {
                         retry |= retryable;
-                        tracing::error!(
-                            %coords,
-                            source = ?group.source_name,
-                            error = %message,
-                            "raster tile fetch failed"
-                        );
+                        if retryable {
+                            tracing::warn!(
+                                %coords,
+                                source = ?group.source_name,
+                                error = %message,
+                                "raster tile fetch failed"
+                            );
+                        } else {
+                            tracing::error!(
+                                %coords,
+                                source = ?group.source_name,
+                                error = %message,
+                                "raster tile fetch failed"
+                            );
+                        }
                         context
                             .send_back(<T as RasterTransferables>::LayerRasterMissing::build_from(
                                 coords,
@@ -229,12 +238,20 @@ pub fn fetch_raster_apc<K: OffscreenKernel, T: RasterTransferables, C: Context +
             let data = match client.fetch(&coords, &group.source).await {
                 Ok(data) => data,
                 Err(error) => {
-                    retry |= error.is_retryable();
+                    let retryable = error.is_retryable();
+                    retry |= retryable;
                     if error.is_not_found() {
                         tracing::debug!(
                             %coords,
                             source = ?group.source_name,
                             "no raster tile at the source; the layer is empty"
+                        );
+                    } else if retryable {
+                        tracing::warn!(
+                            %coords,
+                            source = ?group.source_name,
+                            error = %error.describe(),
+                            "raster tile fetch failed"
                         );
                     } else {
                         tracing::error!(

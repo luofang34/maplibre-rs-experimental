@@ -169,10 +169,13 @@ impl SourceFetchError {
     pub fn describe(&self) -> String {
         let mut text = self.to_string();
         let mut cause = std::error::Error::source(self);
-        while let Some(error) = cause {
-            text.push_str(": ");
-            text.push_str(&error.to_string());
-            cause = error.source();
+        while let Some(next) = cause {
+            let next_str = next.to_string();
+            if !next_str.is_empty() && !text.contains(&next_str) {
+                text.push_str(": ");
+                text.push_str(&next_str);
+            }
+            cause = next.source();
         }
         text
     }
