@@ -149,130 +149,169 @@
 <a href=#149 id=149 data-nosnippet>149</a>    <span class="kw">if </span>wanted.is_empty() {
 <a href=#150 id=150 data-nosnippet>150</a>        <span class="kw">return </span>absent();
 <a href=#151 id=151 data-nosnippet>151</a>    }
-<a href=#152 id=152 data-nosnippet>152</a>    <span class="kw">let </span>loaded: Vec&lt;WorldTileCoords&gt; = wanted
-<a href=#153 id=153 data-nosnippet>153</a>        .iter()
-<a href=#154 id=154 data-nosnippet>154</a>        .copied()
-<a href=#155 id=155 data-nosnippet>155</a>        .filter(|source| raster_sources.has_tile(<span class="kw-2">*</span>source, world))
-<a href=#156 id=156 data-nosnippet>156</a>        .collect();
-<a href=#157 id=157 data-nosnippet>157</a>    <span class="comment">// A partial child set would erase the uncovered part when the drape is cleared,
-<a href=#158 id=158 data-nosnippet>158</a>    // so an ancestor goes underneath it; the set itself is what the view needs
-<a href=#159 id=159 data-nosnippet>159</a>    // over this terrain tile.
-<a href=#160 id=160 data-nosnippet>160</a>    </span><span class="kw">let </span>all_loaded = loaded.len() == wanted.len();
-<a href=#161 id=161 data-nosnippet>161</a>    <span class="kw">let </span>settled = wanted
-<a href=#162 id=162 data-nosnippet>162</a>        .iter()
-<a href=#163 id=163 data-nosnippet>163</a>        .all(|tile| loaded.contains(tile) || source_tile_missing(source_id, <span class="kw-2">*</span>tile, world));
-<a href=#164 id=164 data-nosnippet>164</a>    <span class="kw">let </span>complete = coverage::complete_cover(coords, loaded.clone());
-<a href=#165 id=165 data-nosnippet>165</a>    <span class="kw">let </span>(under, over, view_complete) = <span class="kw">match </span>complete {
-<a href=#166 id=166 data-nosnippet>166</a>        <span class="prelude-val">Some</span>(complete) =&gt; (Vec::new(), complete, <span class="bool-val">false</span>),
-<a href=#167 id=167 data-nosnippet>167</a>        <span class="prelude-val">None </span><span class="kw">if </span>all_loaded || settled =&gt; (
-<a href=#168 id=168 data-nosnippet>168</a>            coverage::loaded_cover(<span class="kw-2">&amp;</span>raster_sources, coords, world).unwrap_or_default(),
-<a href=#169 id=169 data-nosnippet>169</a>            loaded,
-<a href=#170 id=170 data-nosnippet>170</a>            <span class="bool-val">true</span>,
-<a href=#171 id=171 data-nosnippet>171</a>        ),
-<a href=#172 id=172 data-nosnippet>172</a>        <span class="prelude-val">None </span>=&gt; (
-<a href=#173 id=173 data-nosnippet>173</a>            coverage::loaded_cover(<span class="kw-2">&amp;</span>raster_sources, coords, world).unwrap_or_default(),
-<a href=#174 id=174 data-nosnippet>174</a>            Vec::new(),
-<a href=#175 id=175 data-nosnippet>175</a>            <span class="bool-val">false</span>,
-<a href=#176 id=176 data-nosnippet>176</a>        ),
-<a href=#177 id=177 data-nosnippet>177</a>    };
-<a href=#178 id=178 data-nosnippet>178</a>    <span class="kw">if </span>settled &amp;&amp; !all_loaded &amp;&amp; under.is_empty() &amp;&amp; over.is_empty() {
-<a href=#179 id=179 data-nosnippet>179</a>        <span class="kw">return </span>absent();
-<a href=#180 id=180 data-nosnippet>180</a>    }
-<a href=#181 id=181 data-nosnippet>181</a>    <span class="kw">let </span>shape = |coords, view_complete| ShapeSource {
-<a href=#182 id=182 data-nosnippet>182</a>        coords,
-<a href=#183 id=183 data-nosnippet>183</a>        raster_source: <span class="prelude-val">Some</span>(source_id.clone()),
-<a href=#184 id=184 data-nosnippet>184</a>        view_complete,
-<a href=#185 id=185 data-nosnippet>185</a>        absent: <span class="bool-val">false</span>,
-<a href=#186 id=186 data-nosnippet>186</a>    };
-<a href=#187 id=187 data-nosnippet>187</a>    under
-<a href=#188 id=188 data-nosnippet>188</a>        .into_iter()
-<a href=#189 id=189 data-nosnippet>189</a>        .map(|source| shape(source, <span class="bool-val">false</span>))
-<a href=#190 id=190 data-nosnippet>190</a>        .chain(over.into_iter().map(|source| shape(source, view_complete)))
-<a href=#191 id=191 data-nosnippet>191</a>        .collect()
-<a href=#192 id=192 data-nosnippet>192</a>}
-<a href=#193 id=193 data-nosnippet>193</a>
-<a href=#194 id=194 data-nosnippet>194</a><span class="doccomment">/// Lists the drapeable layers each source tile currently holds.
-<a href=#195 id=195 data-nosnippet>195</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>collect_layer_specs(
-<a href=#196 id=196 data-nosnippet>196</a>    targets: Vec&lt;(WorldTileCoords, Vec&lt;ShapeSource&gt;)&gt;,
-<a href=#197 id=197 data-nosnippet>197</a>    style: <span class="kw-2">&amp;</span>Style,
-<a href=#198 id=198 data-nosnippet>198</a>    world: <span class="kw-2">&amp;</span>World,
-<a href=#199 id=199 data-nosnippet>199</a>    zoom: f64,
-<a href=#200 id=200 data-nosnippet>200</a>) -&gt; Vec&lt;TargetSpec&gt; {
-<a href=#201 id=201 data-nosnippet>201</a>    <span class="kw">let </span>vector = world.resources.get::&lt;Eventually&lt;VectorBufferPool&gt;&gt;();
-<a href=#202 id=202 data-nosnippet>202</a>    <span class="kw">let </span>raster = world.resources.get::&lt;Eventually&lt;RasterResources&gt;&gt;();
-<a href=#203 id=203 data-nosnippet>203</a>    <span class="kw">let </span>raster_layers: Vec&lt;<span class="kw">_</span>&gt; = style
-<a href=#204 id=204 data-nosnippet>204</a>        .layers
-<a href=#205 id=205 data-nosnippet>205</a>        .iter()
-<a href=#206 id=206 data-nosnippet>206</a>        .filter(|layer| {
-<a href=#207 id=207 data-nosnippet>207</a>            RASTER_LAYER_TYPES.contains(<span class="kw-2">&amp;</span>layer.type_.as_str()) &amp;&amp; layer.is_visible_at(zoom)
-<a href=#208 id=208 data-nosnippet>208</a>        })
-<a href=#209 id=209 data-nosnippet>209</a>        .filter_map(|layer| {
-<a href=#210 id=210 data-nosnippet>210</a>            <span class="kw">let </span><span class="prelude-val">Some</span>(Initialized(resources)) = raster <span class="kw">else </span>{
-<a href=#211 id=211 data-nosnippet>211</a>                <span class="kw">return </span><span class="prelude-val">None</span>;
-<a href=#212 id=212 data-nosnippet>212</a>            };
-<a href=#213 id=213 data-nosnippet>213</a>            <span class="prelude-val">Some</span>((
-<a href=#214 id=214 data-nosnippet>214</a>                layer.id.clone(),
-<a href=#215 id=215 data-nosnippet>215</a>                layer.index,
-<a href=#216 id=216 data-nosnippet>216</a>                resources.layer_source(<span class="kw-2">&amp;</span>layer.id)<span class="question-mark">?</span>.clone(),
-<a href=#217 id=217 data-nosnippet>217</a>                dem_layer_kind(<span class="kw-2">&amp;</span>layer.type_).is_some(),
-<a href=#218 id=218 data-nosnippet>218</a>            ))
-<a href=#219 id=219 data-nosnippet>219</a>        })
-<a href=#220 id=220 data-nosnippet>220</a>        .collect();
-<a href=#221 id=221 data-nosnippet>221</a>    targets
-<a href=#222 id=222 data-nosnippet>222</a>        .into_iter()
-<a href=#223 id=223 data-nosnippet>223</a>        .map(|(coords, shapes)| TargetSpec {
-<a href=#224 id=224 data-nosnippet>224</a>            coords,
-<a href=#225 id=225 data-nosnippet>225</a>            absent_sources: shapes
-<a href=#226 id=226 data-nosnippet>226</a>                .iter()
-<a href=#227 id=227 data-nosnippet>227</a>                .filter(|shape| shape.absent)
-<a href=#228 id=228 data-nosnippet>228</a>                .filter_map(|shape| shape.raster_source.clone())
-<a href=#229 id=229 data-nosnippet>229</a>                .collect(),
-<a href=#230 id=230 data-nosnippet>230</a>            shapes: shapes
-<a href=#231 id=231 data-nosnippet>231</a>                .into_iter()
-<a href=#232 id=232 data-nosnippet>232</a>                .filter(|shape| !shape.absent)
-<a href=#233 id=233 data-nosnippet>233</a>                .map(|shape| {
-<a href=#234 id=234 data-nosnippet>234</a>                    <span class="kw">let </span>raster_layers = raster_layers.iter()
-<a href=#235 id=235 data-nosnippet>235</a>                        .filter(|(<span class="kw">_</span>, <span class="kw">_</span>, source, <span class="kw">_</span>)| shape.raster_source.as_ref() == <span class="prelude-val">Some</span>(source))
-<a href=#236 id=236 data-nosnippet>236</a>                        .filter(|(id, <span class="kw">_</span>, <span class="kw">_</span>, <span class="kw">_</span>)| <span class="macro">matches!</span>(raster, <span class="prelude-val">Some</span>(Initialized(resources)) <span class="kw">if </span>resources.layer_texture(id, <span class="kw-2">&amp;</span>shape.coords).is_some()))
-<a href=#237 id=237 data-nosnippet>237</a>                        .map(|(id, index, <span class="kw">_</span>, dem)| (id.clone(), <span class="kw-2">*</span>index, <span class="kw-2">*</span>dem))
-<a href=#238 id=238 data-nosnippet>238</a>                        .collect();
-<a href=#239 id=239 data-nosnippet>239</a>                    ShapeSpec {
-<a href=#240 id=240 data-nosnippet>240</a>                        view_complete: shape.view_complete,
-<a href=#241 id=241 data-nosnippet>241</a>                        source: shape.coords,
-<a href=#242 id=242 data-nosnippet>242</a>                        vector_layers: <span class="kw">match </span>(<span class="kw-2">&amp;</span>shape.raster_source, vector) {
-<a href=#243 id=243 data-nosnippet>243</a>                            (<span class="prelude-val">None</span>, <span class="prelude-val">Some</span>(Initialized(pool))) =&gt; {
-<a href=#244 id=244 data-nosnippet>244</a>                                vector_layer_specs(pool, shape.coords, zoom)
-<a href=#245 id=245 data-nosnippet>245</a>                            }
-<a href=#246 id=246 data-nosnippet>246</a>                            <span class="kw">_ </span>=&gt; Vec::new(),
-<a href=#247 id=247 data-nosnippet>247</a>                        },
-<a href=#248 id=248 data-nosnippet>248</a>                        raster_layers,
-<a href=#249 id=249 data-nosnippet>249</a>                    }
-<a href=#250 id=250 data-nosnippet>250</a>                })
-<a href=#251 id=251 data-nosnippet>251</a>                .collect(),
-<a href=#252 id=252 data-nosnippet>252</a>        })
-<a href=#253 id=253 data-nosnippet>253</a>        .collect()
-<a href=#254 id=254 data-nosnippet>254</a>}
-<a href=#255 id=255 data-nosnippet>255</a>
-<a href=#256 id=256 data-nosnippet>256</a><span class="kw">fn </span>vector_layer_specs(
-<a href=#257 id=257 data-nosnippet>257</a>    pool: <span class="kw-2">&amp;</span>VectorBufferPool,
-<a href=#258 id=258 data-nosnippet>258</a>    source: WorldTileCoords,
-<a href=#259 id=259 data-nosnippet>259</a>    zoom: f64,
-<a href=#260 id=260 data-nosnippet>260</a>) -&gt; Vec&lt;VectorLayerSpec&gt; {
-<a href=#261 id=261 data-nosnippet>261</a>    pool.index()
-<a href=#262 id=262 data-nosnippet>262</a>        .get_layers(source)
-<a href=#263 id=263 data-nosnippet>263</a>        .into_iter()
-<a href=#264 id=264 data-nosnippet>264</a>        .flatten()
-<a href=#265 id=265 data-nosnippet>265</a>        .filter(|entry| {
-<a href=#266 id=266 data-nosnippet>266</a>            entry.style_layer.is_visible_at(zoom)
-<a href=#267 id=267 data-nosnippet>267</a>                &amp;&amp; is_drapeable(<span class="kw-2">&amp;</span>entry.style_layer.type_)
-<a href=#268 id=268 data-nosnippet>268</a>                &amp;&amp; <span class="kw">crate</span>::vector::structures::kind(<span class="kw-2">&amp;</span>entry.style_layer).is_none()
-<a href=#269 id=269 data-nosnippet>269</a>        })
-<a href=#270 id=270 data-nosnippet>270</a>        .map(|entry| VectorLayerSpec {
-<a href=#271 id=271 data-nosnippet>271</a>            id: entry.style_layer.id.clone(),
-<a href=#272 id=272 data-nosnippet>272</a>            index: entry.style_layer.index,
-<a href=#273 id=273 data-nosnippet>273</a>            is_line: entry.style_layer.type_ == <span class="string">"line"</span>,
-<a href=#274 id=274 data-nosnippet>274</a>            coords: entry.coords,
-<a href=#275 id=275 data-nosnippet>275</a>        })
-<a href=#276 id=276 data-nosnippet>276</a>        .collect()
-<a href=#277 id=277 data-nosnippet>277</a>}
+<a href=#152 id=152 data-nosnippet>152</a>    <span class="kw">let </span>shape = |coords, view_complete| ShapeSource {
+<a href=#153 id=153 data-nosnippet>153</a>        coords,
+<a href=#154 id=154 data-nosnippet>154</a>        raster_source: <span class="prelude-val">Some</span>(source_id.clone()),
+<a href=#155 id=155 data-nosnippet>155</a>        view_complete,
+<a href=#156 id=156 data-nosnippet>156</a>        absent: <span class="bool-val">false</span>,
+<a href=#157 id=157 data-nosnippet>157</a>    };
+<a href=#158 id=158 data-nosnippet>158</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(descendants) = loaded_descendant_level(coords, <span class="kw-2">&amp;</span>wanted, <span class="kw-2">&amp;</span>raster_sources, world) {
+<a href=#159 id=159 data-nosnippet>159</a>        <span class="kw">return </span>descendants
+<a href=#160 id=160 data-nosnippet>160</a>            .into_iter()
+<a href=#161 id=161 data-nosnippet>161</a>            .map(|source| shape(source, <span class="bool-val">false</span>))
+<a href=#162 id=162 data-nosnippet>162</a>            .collect();
+<a href=#163 id=163 data-nosnippet>163</a>    }
+<a href=#164 id=164 data-nosnippet>164</a>    <span class="kw">let </span>loaded: Vec&lt;WorldTileCoords&gt; = wanted
+<a href=#165 id=165 data-nosnippet>165</a>        .iter()
+<a href=#166 id=166 data-nosnippet>166</a>        .copied()
+<a href=#167 id=167 data-nosnippet>167</a>        .filter(|source| raster_sources.has_tile(<span class="kw-2">*</span>source, world))
+<a href=#168 id=168 data-nosnippet>168</a>        .collect();
+<a href=#169 id=169 data-nosnippet>169</a>    <span class="comment">// A partial child set would erase the uncovered part when the drape is cleared,
+<a href=#170 id=170 data-nosnippet>170</a>    // so an ancestor goes underneath it; the set itself is what the view needs
+<a href=#171 id=171 data-nosnippet>171</a>    // over this terrain tile.
+<a href=#172 id=172 data-nosnippet>172</a>    </span><span class="kw">let </span>all_loaded = loaded.len() == wanted.len();
+<a href=#173 id=173 data-nosnippet>173</a>    <span class="kw">let </span>settled = wanted
+<a href=#174 id=174 data-nosnippet>174</a>        .iter()
+<a href=#175 id=175 data-nosnippet>175</a>        .all(|tile| loaded.contains(tile) || source_tile_missing(source_id, <span class="kw-2">*</span>tile, world));
+<a href=#176 id=176 data-nosnippet>176</a>    <span class="kw">let </span>complete = coverage::complete_cover(coords, loaded.clone());
+<a href=#177 id=177 data-nosnippet>177</a>    <span class="kw">let </span>(under, over, view_complete) = <span class="kw">match </span>complete {
+<a href=#178 id=178 data-nosnippet>178</a>        <span class="prelude-val">Some</span>(complete) =&gt; (Vec::new(), complete, <span class="bool-val">false</span>),
+<a href=#179 id=179 data-nosnippet>179</a>        <span class="prelude-val">None </span><span class="kw">if </span>all_loaded || settled =&gt; (
+<a href=#180 id=180 data-nosnippet>180</a>            coverage::loaded_cover(<span class="kw-2">&amp;</span>raster_sources, coords, world).unwrap_or_default(),
+<a href=#181 id=181 data-nosnippet>181</a>            loaded,
+<a href=#182 id=182 data-nosnippet>182</a>            <span class="bool-val">true</span>,
+<a href=#183 id=183 data-nosnippet>183</a>        ),
+<a href=#184 id=184 data-nosnippet>184</a>        <span class="prelude-val">None </span>=&gt; (
+<a href=#185 id=185 data-nosnippet>185</a>            coverage::loaded_cover(<span class="kw-2">&amp;</span>raster_sources, coords, world).unwrap_or_default(),
+<a href=#186 id=186 data-nosnippet>186</a>            Vec::new(),
+<a href=#187 id=187 data-nosnippet>187</a>            <span class="bool-val">false</span>,
+<a href=#188 id=188 data-nosnippet>188</a>        ),
+<a href=#189 id=189 data-nosnippet>189</a>    };
+<a href=#190 id=190 data-nosnippet>190</a>    <span class="kw">if </span>settled &amp;&amp; !all_loaded &amp;&amp; under.is_empty() &amp;&amp; over.is_empty() {
+<a href=#191 id=191 data-nosnippet>191</a>        <span class="kw">return </span>absent();
+<a href=#192 id=192 data-nosnippet>192</a>    }
+<a href=#193 id=193 data-nosnippet>193</a>    under
+<a href=#194 id=194 data-nosnippet>194</a>        .into_iter()
+<a href=#195 id=195 data-nosnippet>195</a>        .map(|source| shape(source, <span class="bool-val">false</span>))
+<a href=#196 id=196 data-nosnippet>196</a>        .chain(over.into_iter().map(|source| shape(source, view_complete)))
+<a href=#197 id=197 data-nosnippet>197</a>        .collect()
+<a href=#198 id=198 data-nosnippet>198</a>}
+<a href=#199 id=199 data-nosnippet>199</a>
+<a href=#200 id=200 data-nosnippet>200</a><span class="doccomment">/// Levels below a terrain tile within which [`loaded_descendant_level`] looks: 64 tiles. Every
+<a href=#201 id=201 data-nosnippet>201</a>/// shape of a drape takes a slot of the tile metadata buffer the whole frame shares, so a
+<a href=#202 id=202 data-nosnippet>202</a>/// deeper level would let one drape crowd the others out of their updates.
+<a href=#203 id=203 data-nosnippet>203</a></span><span class="kw">const </span>DESCENDANT_LEVEL_DEPTH: u8 = <span class="number">3</span>;
+<a href=#204 id=204 data-nosnippet>204</a>
+<a href=#205 id=205 data-nosnippet>205</a><span class="doccomment">/// Every tile of the wanted level below a terrain tile, when all of them have loaded.
+<a href=#206 id=206 data-nosnippet>206</a>///
+<a href=#207 id=207 data-nosnippet>207</a>/// A view that sees only part of the terrain tile wants only the source tiles in sight, and
+<a href=#208 id=208 data-nosnippet>208</a>/// that subset changes as the view moves across it, which would redraw the drape each time.
+<a href=#209 id=209 data-nosnippet>209</a>/// The whole level, once resident, is what any such subset would complete to, so the drape
+<a href=#210 id=210 data-nosnippet>210</a>/// stays the same while the view pans. The wanted tiles must share one level finer than the
+<a href=#211 id=211 data-nosnippet>211</a>/// terrain tile; a mixed-level covering is left to the general selection.
+<a href=#212 id=212 data-nosnippet>212</a></span><span class="kw">fn </span>loaded_descendant_level(
+<a href=#213 id=213 data-nosnippet>213</a>    coords: WorldTileCoords,
+<a href=#214 id=214 data-nosnippet>214</a>    wanted: <span class="kw-2">&amp;</span>[WorldTileCoords],
+<a href=#215 id=215 data-nosnippet>215</a>    sources: <span class="kw-2">&amp;</span><span class="kw">impl </span>HasTile,
+<a href=#216 id=216 data-nosnippet>216</a>    world: <span class="kw-2">&amp;</span>World,
+<a href=#217 id=217 data-nosnippet>217</a>) -&gt; <span class="prelude-ty">Option</span>&lt;Vec&lt;WorldTileCoords&gt;&gt; {
+<a href=#218 id=218 data-nosnippet>218</a>    <span class="kw">let </span>level = wanted.first()<span class="question-mark">?</span>.z;
+<a href=#219 id=219 data-nosnippet>219</a>    <span class="kw">let </span>depth = u8::from(level).checked_sub(u8::from(coords.z))<span class="question-mark">?</span>;
+<a href=#220 id=220 data-nosnippet>220</a>    <span class="kw">if </span>depth == <span class="number">0 </span>|| depth &gt; DESCENDANT_LEVEL_DEPTH || wanted.iter().any(|tile| tile.z != level) {
+<a href=#221 id=221 data-nosnippet>221</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
+<a href=#222 id=222 data-nosnippet>222</a>    }
+<a href=#223 id=223 data-nosnippet>223</a>    <span class="kw">let </span><span class="kw-2">mut </span>tiles = <span class="macro">vec!</span>[coords];
+<a href=#224 id=224 data-nosnippet>224</a>    <span class="kw">for _ in </span><span class="number">0</span>..depth {
+<a href=#225 id=225 data-nosnippet>225</a>        tiles = tiles.iter().flat_map(|tile| tile.get_children()).collect();
+<a href=#226 id=226 data-nosnippet>226</a>    }
+<a href=#227 id=227 data-nosnippet>227</a>    tiles
+<a href=#228 id=228 data-nosnippet>228</a>        .iter()
+<a href=#229 id=229 data-nosnippet>229</a>        .all(|tile| sources.has_tile(<span class="kw-2">*</span>tile, world))
+<a href=#230 id=230 data-nosnippet>230</a>        .then_some(tiles)
+<a href=#231 id=231 data-nosnippet>231</a>}
+<a href=#232 id=232 data-nosnippet>232</a>
+<a href=#233 id=233 data-nosnippet>233</a><span class="doccomment">/// Lists the drapeable layers each source tile currently holds.
+<a href=#234 id=234 data-nosnippet>234</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>collect_layer_specs(
+<a href=#235 id=235 data-nosnippet>235</a>    targets: Vec&lt;(WorldTileCoords, Vec&lt;ShapeSource&gt;)&gt;,
+<a href=#236 id=236 data-nosnippet>236</a>    style: <span class="kw-2">&amp;</span>Style,
+<a href=#237 id=237 data-nosnippet>237</a>    world: <span class="kw-2">&amp;</span>World,
+<a href=#238 id=238 data-nosnippet>238</a>    zoom: f64,
+<a href=#239 id=239 data-nosnippet>239</a>) -&gt; Vec&lt;TargetSpec&gt; {
+<a href=#240 id=240 data-nosnippet>240</a>    <span class="kw">let </span>vector = world.resources.get::&lt;Eventually&lt;VectorBufferPool&gt;&gt;();
+<a href=#241 id=241 data-nosnippet>241</a>    <span class="kw">let </span>raster = world.resources.get::&lt;Eventually&lt;RasterResources&gt;&gt;();
+<a href=#242 id=242 data-nosnippet>242</a>    <span class="kw">let </span>raster_layers: Vec&lt;<span class="kw">_</span>&gt; = style
+<a href=#243 id=243 data-nosnippet>243</a>        .layers
+<a href=#244 id=244 data-nosnippet>244</a>        .iter()
+<a href=#245 id=245 data-nosnippet>245</a>        .filter(|layer| {
+<a href=#246 id=246 data-nosnippet>246</a>            RASTER_LAYER_TYPES.contains(<span class="kw-2">&amp;</span>layer.type_.as_str()) &amp;&amp; layer.is_visible_at(zoom)
+<a href=#247 id=247 data-nosnippet>247</a>        })
+<a href=#248 id=248 data-nosnippet>248</a>        .filter_map(|layer| {
+<a href=#249 id=249 data-nosnippet>249</a>            <span class="kw">let </span><span class="prelude-val">Some</span>(Initialized(resources)) = raster <span class="kw">else </span>{
+<a href=#250 id=250 data-nosnippet>250</a>                <span class="kw">return </span><span class="prelude-val">None</span>;
+<a href=#251 id=251 data-nosnippet>251</a>            };
+<a href=#252 id=252 data-nosnippet>252</a>            <span class="prelude-val">Some</span>((
+<a href=#253 id=253 data-nosnippet>253</a>                layer.id.clone(),
+<a href=#254 id=254 data-nosnippet>254</a>                layer.index,
+<a href=#255 id=255 data-nosnippet>255</a>                resources.layer_source(<span class="kw-2">&amp;</span>layer.id)<span class="question-mark">?</span>.clone(),
+<a href=#256 id=256 data-nosnippet>256</a>                dem_layer_kind(<span class="kw-2">&amp;</span>layer.type_).is_some(),
+<a href=#257 id=257 data-nosnippet>257</a>            ))
+<a href=#258 id=258 data-nosnippet>258</a>        })
+<a href=#259 id=259 data-nosnippet>259</a>        .collect();
+<a href=#260 id=260 data-nosnippet>260</a>    targets
+<a href=#261 id=261 data-nosnippet>261</a>        .into_iter()
+<a href=#262 id=262 data-nosnippet>262</a>        .map(|(coords, shapes)| TargetSpec {
+<a href=#263 id=263 data-nosnippet>263</a>            coords,
+<a href=#264 id=264 data-nosnippet>264</a>            absent_sources: shapes
+<a href=#265 id=265 data-nosnippet>265</a>                .iter()
+<a href=#266 id=266 data-nosnippet>266</a>                .filter(|shape| shape.absent)
+<a href=#267 id=267 data-nosnippet>267</a>                .filter_map(|shape| shape.raster_source.clone())
+<a href=#268 id=268 data-nosnippet>268</a>                .collect(),
+<a href=#269 id=269 data-nosnippet>269</a>            shapes: shapes
+<a href=#270 id=270 data-nosnippet>270</a>                .into_iter()
+<a href=#271 id=271 data-nosnippet>271</a>                .filter(|shape| !shape.absent)
+<a href=#272 id=272 data-nosnippet>272</a>                .map(|shape| {
+<a href=#273 id=273 data-nosnippet>273</a>                    <span class="kw">let </span>raster_layers = raster_layers.iter()
+<a href=#274 id=274 data-nosnippet>274</a>                        .filter(|(<span class="kw">_</span>, <span class="kw">_</span>, source, <span class="kw">_</span>)| shape.raster_source.as_ref() == <span class="prelude-val">Some</span>(source))
+<a href=#275 id=275 data-nosnippet>275</a>                        .filter(|(id, <span class="kw">_</span>, <span class="kw">_</span>, <span class="kw">_</span>)| <span class="macro">matches!</span>(raster, <span class="prelude-val">Some</span>(Initialized(resources)) <span class="kw">if </span>resources.layer_texture(id, <span class="kw-2">&amp;</span>shape.coords).is_some()))
+<a href=#276 id=276 data-nosnippet>276</a>                        .map(|(id, index, <span class="kw">_</span>, dem)| (id.clone(), <span class="kw-2">*</span>index, <span class="kw-2">*</span>dem))
+<a href=#277 id=277 data-nosnippet>277</a>                        .collect();
+<a href=#278 id=278 data-nosnippet>278</a>                    ShapeSpec {
+<a href=#279 id=279 data-nosnippet>279</a>                        view_complete: shape.view_complete,
+<a href=#280 id=280 data-nosnippet>280</a>                        source: shape.coords,
+<a href=#281 id=281 data-nosnippet>281</a>                        vector_layers: <span class="kw">match </span>(<span class="kw-2">&amp;</span>shape.raster_source, vector) {
+<a href=#282 id=282 data-nosnippet>282</a>                            (<span class="prelude-val">None</span>, <span class="prelude-val">Some</span>(Initialized(pool))) =&gt; {
+<a href=#283 id=283 data-nosnippet>283</a>                                vector_layer_specs(pool, shape.coords, zoom)
+<a href=#284 id=284 data-nosnippet>284</a>                            }
+<a href=#285 id=285 data-nosnippet>285</a>                            <span class="kw">_ </span>=&gt; Vec::new(),
+<a href=#286 id=286 data-nosnippet>286</a>                        },
+<a href=#287 id=287 data-nosnippet>287</a>                        raster_layers,
+<a href=#288 id=288 data-nosnippet>288</a>                    }
+<a href=#289 id=289 data-nosnippet>289</a>                })
+<a href=#290 id=290 data-nosnippet>290</a>                .collect(),
+<a href=#291 id=291 data-nosnippet>291</a>        })
+<a href=#292 id=292 data-nosnippet>292</a>        .collect()
+<a href=#293 id=293 data-nosnippet>293</a>}
+<a href=#294 id=294 data-nosnippet>294</a>
+<a href=#295 id=295 data-nosnippet>295</a><span class="kw">fn </span>vector_layer_specs(
+<a href=#296 id=296 data-nosnippet>296</a>    pool: <span class="kw-2">&amp;</span>VectorBufferPool,
+<a href=#297 id=297 data-nosnippet>297</a>    source: WorldTileCoords,
+<a href=#298 id=298 data-nosnippet>298</a>    zoom: f64,
+<a href=#299 id=299 data-nosnippet>299</a>) -&gt; Vec&lt;VectorLayerSpec&gt; {
+<a href=#300 id=300 data-nosnippet>300</a>    pool.index()
+<a href=#301 id=301 data-nosnippet>301</a>        .get_layers(source)
+<a href=#302 id=302 data-nosnippet>302</a>        .into_iter()
+<a href=#303 id=303 data-nosnippet>303</a>        .flatten()
+<a href=#304 id=304 data-nosnippet>304</a>        .filter(|entry| {
+<a href=#305 id=305 data-nosnippet>305</a>            entry.style_layer.is_visible_at(zoom)
+<a href=#306 id=306 data-nosnippet>306</a>                &amp;&amp; is_drapeable(<span class="kw-2">&amp;</span>entry.style_layer.type_)
+<a href=#307 id=307 data-nosnippet>307</a>                &amp;&amp; <span class="kw">crate</span>::vector::structures::kind(<span class="kw-2">&amp;</span>entry.style_layer).is_none()
+<a href=#308 id=308 data-nosnippet>308</a>        })
+<a href=#309 id=309 data-nosnippet>309</a>        .map(|entry| VectorLayerSpec {
+<a href=#310 id=310 data-nosnippet>310</a>            id: entry.style_layer.id.clone(),
+<a href=#311 id=311 data-nosnippet>311</a>            index: entry.style_layer.index,
+<a href=#312 id=312 data-nosnippet>312</a>            is_line: entry.style_layer.type_ == <span class="string">"line"</span>,
+<a href=#313 id=313 data-nosnippet>313</a>            coords: entry.coords,
+<a href=#314 id=314 data-nosnippet>314</a>        })
+<a href=#315 id=315 data-nosnippet>315</a>        .collect()
+<a href=#316 id=316 data-nosnippet>316</a>}
 </code></pre></div></section></main></body></html>

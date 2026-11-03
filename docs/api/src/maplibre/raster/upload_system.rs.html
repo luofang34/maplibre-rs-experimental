@@ -65,7 +65,7 @@
 <a href=#65 id=65 data-nosnippet>65</a>                        .get_bound_texture(<span class="kw-2">&amp;</span>data.source, <span class="kw-2">&amp;</span>coords)
 <a href=#66 id=66 data-nosnippet>66</a>                        .is_none()
 <a href=#67 id=67 data-nosnippet>67</a>                {
-<a href=#68 id=68 data-nosnippet>68</a>                    upload_image(raster_resources, device, queue, tiles, data);
+<a href=#68 id=68 data-nosnippet>68</a>                    upload_image(raster_resources, device, queue, tiles, coords, data);
 <a href=#69 id=69 data-nosnippet>69</a>                }
 <a href=#70 id=70 data-nosnippet>70</a>            }
 <a href=#71 id=71 data-nosnippet>71</a>        }
@@ -92,64 +92,71 @@
 <a href=#92 id=92 data-nosnippet>92</a>    images
 <a href=#93 id=93 data-nosnippet>93</a>}
 <a href=#94 id=94 data-nosnippet>94</a>
-<a href=#95 id=95 data-nosnippet>95</a><span class="kw">fn </span>upload_image(
-<a href=#96 id=96 data-nosnippet>96</a>    raster_resources: <span class="kw-2">&amp;mut </span>RasterResources,
-<a href=#97 id=97 data-nosnippet>97</a>    device: <span class="kw-2">&amp;</span>wgpu::Device,
-<a href=#98 id=98 data-nosnippet>98</a>    queue: <span class="kw-2">&amp;</span><span class="kw">crate</span>::render::upload_queue::UploadQueue,
-<a href=#99 id=99 data-nosnippet>99</a>    tiles: <span class="kw-2">&amp;</span>Tiles,
-<a href=#100 id=100 data-nosnippet>100</a>    data: <span class="kw-2">&amp;</span>AvailableRasterLayerData,
-<a href=#101 id=101 data-nosnippet>101</a>) {
-<a href=#102 id=102 data-nosnippet>102</a>    <span class="kw">let </span>bordered;
-<a href=#103 id=103 data-nosnippet>103</a>    <span class="kw">let </span><span class="kw-2">mut </span>border_sides = <span class="prelude-val">None</span>;
-<a href=#104 id=104 data-nosnippet>104</a>    <span class="kw">let </span>image = <span class="kw">if </span>raster_resources.has_border(<span class="kw-2">&amp;</span>data.source) {
-<a href=#105 id=105 data-nosnippet>105</a>        <span class="kw">let </span>neighbours = neighbour_images(tiles, <span class="kw-2">&amp;</span>data.source, data.coords);
-<a href=#106 id=106 data-nosnippet>106</a>        border_sides = <span class="prelude-val">Some</span>(filled_sides(<span class="kw-2">&amp;</span>data.image, <span class="kw-2">&amp;</span>neighbours));
-<a href=#107 id=107 data-nosnippet>107</a>        bordered = with_border(<span class="kw-2">&amp;</span>data.image, <span class="kw-2">&amp;</span>neighbours);
-<a href=#108 id=108 data-nosnippet>108</a>        <span class="kw-2">&amp;</span>bordered
-<a href=#109 id=109 data-nosnippet>109</a>    } <span class="kw">else </span>{
-<a href=#110 id=110 data-nosnippet>110</a>        <span class="kw-2">&amp;</span>data.image
-<a href=#111 id=111 data-nosnippet>111</a>    };
-<a href=#112 id=112 data-nosnippet>112</a>    <span class="kw">let </span>(width, height) = image.dimensions();
-<a href=#113 id=113 data-nosnippet>113</a>
-<a href=#114 id=114 data-nosnippet>114</a>    <span class="comment">// Raster style colors are sampled in the encoded color space, matching WebGL's default
-<a href=#115 id=115 data-nosnippet>115</a>    // RGBA upload path. An sRGB texture view would decode the texels to linear values before
-<a href=#116 id=116 data-nosnippet>116</a>    // writing them to the non-sRGB render target, making imagery too dark.
-<a href=#117 id=117 data-nosnippet>117</a>    </span><span class="kw">let </span>mipmapped = border_sides.is_none();
-<a href=#118 id=118 data-nosnippet>118</a>    <span class="kw">let </span>texture = <span class="kw">if </span>mipmapped {
-<a href=#119 id=119 data-nosnippet>119</a>        raster_resources.create_imagery_texture(device, width, height)
-<a href=#120 id=120 data-nosnippet>120</a>    } <span class="kw">else </span>{
-<a href=#121 id=121 data-nosnippet>121</a>        raster_resources.create_texture(
-<a href=#122 id=122 data-nosnippet>122</a>            <span class="prelude-val">None</span>,
-<a href=#123 id=123 data-nosnippet>123</a>            device,
-<a href=#124 id=124 data-nosnippet>124</a>            wgpu::TextureFormat::Rgba8Unorm,
-<a href=#125 id=125 data-nosnippet>125</a>            width,
-<a href=#126 id=126 data-nosnippet>126</a>            height,
-<a href=#127 id=127 data-nosnippet>127</a>            wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-<a href=#128 id=128 data-nosnippet>128</a>        )
-<a href=#129 id=129 data-nosnippet>129</a>    };
-<a href=#130 id=130 data-nosnippet>130</a>
-<a href=#131 id=131 data-nosnippet>131</a>    queue.write_texture(
-<a href=#132 id=132 data-nosnippet>132</a>        wgpu::TexelCopyTextureInfo {
-<a href=#133 id=133 data-nosnippet>133</a>            aspect: wgpu::TextureAspect::All,
-<a href=#134 id=134 data-nosnippet>134</a>            texture: <span class="kw-2">&amp;</span>texture.texture,
-<a href=#135 id=135 data-nosnippet>135</a>            mip_level: <span class="number">0</span>,
-<a href=#136 id=136 data-nosnippet>136</a>            origin: wgpu::Origin3d::ZERO,
-<a href=#137 id=137 data-nosnippet>137</a>        },
-<a href=#138 id=138 data-nosnippet>138</a>        image,
-<a href=#139 id=139 data-nosnippet>139</a>        wgpu::TexelCopyBufferLayout {
-<a href=#140 id=140 data-nosnippet>140</a>            offset: <span class="number">0</span>,
-<a href=#141 id=141 data-nosnippet>141</a>            bytes_per_row: <span class="prelude-val">Some</span>(<span class="number">4 </span>* width),
-<a href=#142 id=142 data-nosnippet>142</a>            rows_per_image: <span class="prelude-val">Some</span>(height),
-<a href=#143 id=143 data-nosnippet>143</a>        },
-<a href=#144 id=144 data-nosnippet>144</a>        texture.size,
-<a href=#145 id=145 data-nosnippet>145</a>    );
-<a href=#146 id=146 data-nosnippet>146</a>
-<a href=#147 id=147 data-nosnippet>147</a>    <span class="kw">if </span>mipmapped {
-<a href=#148 id=148 data-nosnippet>148</a>        raster_resources.generate_mipmaps(device, queue, <span class="kw-2">&amp;</span>texture);
-<a href=#149 id=149 data-nosnippet>149</a>    }
-<a href=#150 id=150 data-nosnippet>150</a>    raster_resources.bind_texture(device, <span class="kw-2">&amp;</span>data.source, <span class="kw-2">&amp;</span>data.coords, texture);
-<a href=#151 id=151 data-nosnippet>151</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(sides) = border_sides {
-<a href=#152 id=152 data-nosnippet>152</a>        raster_resources.set_border_sides(<span class="kw-2">&amp;</span>data.source, data.coords, sides);
+<a href=#95 id=95 data-nosnippet>95</a><span class="doccomment">/// Uploads the image of the tile stored at `coords`. The texture is bound under that key, the
+<a href=#96 id=96 data-nosnippet>96</a>/// one the upload check and the draws look up, rather than under the coordinates the image
+<a href=#97 id=97 data-nosnippet>97</a>/// carries: were they to differ, the check would miss the binding and upload it every frame.
+<a href=#98 id=98 data-nosnippet>98</a></span><span class="kw">fn </span>upload_image(
+<a href=#99 id=99 data-nosnippet>99</a>    raster_resources: <span class="kw-2">&amp;mut </span>RasterResources,
+<a href=#100 id=100 data-nosnippet>100</a>    device: <span class="kw-2">&amp;</span>wgpu::Device,
+<a href=#101 id=101 data-nosnippet>101</a>    queue: <span class="kw-2">&amp;</span><span class="kw">crate</span>::render::upload_queue::UploadQueue,
+<a href=#102 id=102 data-nosnippet>102</a>    tiles: <span class="kw-2">&amp;</span>Tiles,
+<a href=#103 id=103 data-nosnippet>103</a>    coords: WorldTileCoords,
+<a href=#104 id=104 data-nosnippet>104</a>    data: <span class="kw-2">&amp;</span>AvailableRasterLayerData,
+<a href=#105 id=105 data-nosnippet>105</a>) {
+<a href=#106 id=106 data-nosnippet>106</a>    <span class="kw">let </span>bordered;
+<a href=#107 id=107 data-nosnippet>107</a>    <span class="kw">let </span><span class="kw-2">mut </span>border_sides = <span class="prelude-val">None</span>;
+<a href=#108 id=108 data-nosnippet>108</a>    <span class="kw">let </span>image = <span class="kw">if </span>raster_resources.has_border(<span class="kw-2">&amp;</span>data.source) {
+<a href=#109 id=109 data-nosnippet>109</a>        <span class="kw">let </span>neighbours = neighbour_images(tiles, <span class="kw-2">&amp;</span>data.source, coords);
+<a href=#110 id=110 data-nosnippet>110</a>        border_sides = <span class="prelude-val">Some</span>(filled_sides(<span class="kw-2">&amp;</span>data.image, <span class="kw-2">&amp;</span>neighbours));
+<a href=#111 id=111 data-nosnippet>111</a>        bordered = with_border(<span class="kw-2">&amp;</span>data.image, <span class="kw-2">&amp;</span>neighbours);
+<a href=#112 id=112 data-nosnippet>112</a>        <span class="kw-2">&amp;</span>bordered
+<a href=#113 id=113 data-nosnippet>113</a>    } <span class="kw">else </span>{
+<a href=#114 id=114 data-nosnippet>114</a>        <span class="kw-2">&amp;</span>data.image
+<a href=#115 id=115 data-nosnippet>115</a>    };
+<a href=#116 id=116 data-nosnippet>116</a>    <span class="kw">let </span>(width, height) = image.dimensions();
+<a href=#117 id=117 data-nosnippet>117</a>
+<a href=#118 id=118 data-nosnippet>118</a>    <span class="comment">// Raster style colors are sampled in the encoded color space, matching WebGL's default
+<a href=#119 id=119 data-nosnippet>119</a>    // RGBA upload path. An sRGB texture view would decode the texels to linear values before
+<a href=#120 id=120 data-nosnippet>120</a>    // writing them to the non-sRGB render target, making imagery too dark.
+<a href=#121 id=121 data-nosnippet>121</a>    </span><span class="kw">let </span>mipmapped = border_sides.is_none();
+<a href=#122 id=122 data-nosnippet>122</a>    <span class="kw">let </span>texture = <span class="kw">if </span>mipmapped {
+<a href=#123 id=123 data-nosnippet>123</a>        raster_resources.create_imagery_texture(device, width, height)
+<a href=#124 id=124 data-nosnippet>124</a>    } <span class="kw">else </span>{
+<a href=#125 id=125 data-nosnippet>125</a>        raster_resources.create_texture(
+<a href=#126 id=126 data-nosnippet>126</a>            <span class="prelude-val">None</span>,
+<a href=#127 id=127 data-nosnippet>127</a>            device,
+<a href=#128 id=128 data-nosnippet>128</a>            wgpu::TextureFormat::Rgba8Unorm,
+<a href=#129 id=129 data-nosnippet>129</a>            width,
+<a href=#130 id=130 data-nosnippet>130</a>            height,
+<a href=#131 id=131 data-nosnippet>131</a>            wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+<a href=#132 id=132 data-nosnippet>132</a>        )
+<a href=#133 id=133 data-nosnippet>133</a>    };
+<a href=#134 id=134 data-nosnippet>134</a>
+<a href=#135 id=135 data-nosnippet>135</a>    queue.write_texture(
+<a href=#136 id=136 data-nosnippet>136</a>        wgpu::TexelCopyTextureInfo {
+<a href=#137 id=137 data-nosnippet>137</a>            aspect: wgpu::TextureAspect::All,
+<a href=#138 id=138 data-nosnippet>138</a>            texture: <span class="kw-2">&amp;</span>texture.texture,
+<a href=#139 id=139 data-nosnippet>139</a>            mip_level: <span class="number">0</span>,
+<a href=#140 id=140 data-nosnippet>140</a>            origin: wgpu::Origin3d::ZERO,
+<a href=#141 id=141 data-nosnippet>141</a>        },
+<a href=#142 id=142 data-nosnippet>142</a>        image,
+<a href=#143 id=143 data-nosnippet>143</a>        wgpu::TexelCopyBufferLayout {
+<a href=#144 id=144 data-nosnippet>144</a>            offset: <span class="number">0</span>,
+<a href=#145 id=145 data-nosnippet>145</a>            bytes_per_row: <span class="prelude-val">Some</span>(<span class="number">4 </span>* width),
+<a href=#146 id=146 data-nosnippet>146</a>            rows_per_image: <span class="prelude-val">Some</span>(height),
+<a href=#147 id=147 data-nosnippet>147</a>        },
+<a href=#148 id=148 data-nosnippet>148</a>        texture.size,
+<a href=#149 id=149 data-nosnippet>149</a>    );
+<a href=#150 id=150 data-nosnippet>150</a>
+<a href=#151 id=151 data-nosnippet>151</a>    <span class="kw">if </span>mipmapped {
+<a href=#152 id=152 data-nosnippet>152</a>        raster_resources.generate_mipmaps(device, queue, <span class="kw-2">&amp;</span>texture);
 <a href=#153 id=153 data-nosnippet>153</a>    }
-<a href=#154 id=154 data-nosnippet>154</a>}
+<a href=#154 id=154 data-nosnippet>154</a>    raster_resources.bind_texture(device, <span class="kw-2">&amp;</span>data.source, <span class="kw-2">&amp;</span>coords, texture);
+<a href=#155 id=155 data-nosnippet>155</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(sides) = border_sides {
+<a href=#156 id=156 data-nosnippet>156</a>        raster_resources.set_border_sides(<span class="kw-2">&amp;</span>data.source, coords, sides);
+<a href=#157 id=157 data-nosnippet>157</a>    }
+<a href=#158 id=158 data-nosnippet>158</a>}
+<a href=#159 id=159 data-nosnippet>159</a>
+<a href=#160 id=160 data-nosnippet>160</a><span class="attr">#[cfg(test)]
+<a href=#161 id=161 data-nosnippet>161</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>
