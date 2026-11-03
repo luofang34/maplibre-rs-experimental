@@ -286,17 +286,15 @@ impl Node for GlobeDaylightNode {
 }
 
 /// Puts the pass after the main pass and before the translucent pass.
-pub(super) fn add_to_graph(graph: &mut crate::render::graph::RenderGraph) {
+pub(super) fn add_to_graph(
+    graph: &mut crate::render::graph::RenderGraph,
+) -> Result<(), crate::render::graph::RenderGraphError> {
     use crate::render::draw_graph;
-    let draw_graph = &mut *graph;
+    let draw_graph = graph;
     let edges = [
         draw_graph.add_node(GLOBE_DAYLIGHT, GlobeDaylightNode),
         draw_graph.add_node_edge(draw_graph::node::MAIN_PASS, GLOBE_DAYLIGHT),
         draw_graph.add_node_edge(GLOBE_DAYLIGHT, draw_graph::node::SCENE_3D_PASS),
     ];
-    for edge in edges {
-        if let Err(error) = edge {
-            tracing::error!(?error, "the globe's daylight pass cannot be ordered");
-        }
-    }
+    edges.into_iter().collect()
 }

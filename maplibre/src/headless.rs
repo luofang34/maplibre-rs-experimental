@@ -16,8 +16,8 @@ use crate::{
     kernel::Kernel,
     plugin::Plugin,
     render::{
-        builder::RendererBuilder, graph::RenderGraph, settings::RendererSettings,
-        tile_view_pattern::ViewTileSources, RenderStageLabel, Renderer,
+        builder::RendererBuilder, settings::RendererSettings, tile_view_pattern::ViewTileSources,
+        RenderStageLabel, Renderer,
     },
     schedule::Schedule,
     tcs::{system::SystemContainer, world::World},
@@ -189,7 +189,7 @@ mod draw_graph {
 }
 
 fn attach_surface_copy_node(
-    draw_graph: &mut RenderGraph,
+    draw_graph: &mut crate::render::graph::RenderGraph,
 ) -> Result<(), crate::render::graph::RenderGraphError> {
     draw_graph.add_node(draw_graph::node::COPY, CopySurfaceBufferNode)?;
     draw_graph.add_node_edge(draw_graph::node::TRANSLUCENT_PASS, draw_graph::node::COPY)
@@ -233,30 +233,30 @@ impl Plugin<HeadlessEnvironment> for HeadlessPlugin {
         schedule: &mut Schedule,
         _kernel: Rc<Kernel<HeadlessEnvironment>>,
         world: &mut World,
-        graph: &mut RenderGraph,
-    ) {
+        renderer: &mut crate::render::Renderer,
+    ) -> Result<(), crate::plugin::PluginError> {
         let resources = &mut world.resources;
         if self.retain_supplied_tiles {
             resources.insert(crate::render::RetainLoadedTiles);
         }
 
-        let draw_graph = &mut *graph;
+        let draw_graph = &mut renderer.render_graph;
         if self.write_to_disk {
-            if let Err(error) = attach_surface_copy_node(draw_graph) {
-                tracing::error!(?error, "cannot attach headless surface copy node");
-                return;
-            }
+            attach_surface_copy_node(draw_graph)?;
             schedule.add_system_to_stage(
                 RenderStageLabel::Cleanup,
                 SystemContainer::new(WriteSurfaceBufferSystem::new(true)),
-            );
+            )?;
         }
 
         // The headless map is handed its tiles, so nothing is requested.
-        schedule.remove_stage(RenderStageLabel::Request);
+        schedule.remove_stage(RenderStageLabel::Request)?;
         if !self.preserve_tile_sources {
-            resources.get_mut::<ViewTileSources>().unwrap().clear();
+            if let Some(sources) = resources.get_mut::<ViewTileSources>() {
+                sources.clear();
+            }
         }
+        Ok(())
     }
 }
 
@@ -283,9 +283,9 @@ mod tests {
         assert!(position(draw_graph::node::TRANSLUCENT_PASS) < position(draw_graph::node::COPY));
     }
 
-    #[test]
+    #[tokio::test]
     #[allow(clippy::expect_used)]
-    fn headless_maps_drop_only_the_request_stage() {
+    async fn headless_maps_drop_only_the_request_stage() {
         use std::rc::Rc;
 
         use crate::{
@@ -301,9 +301,15 @@ mod tests {
         );
         let mut world = World::default();
         let mut schedule = Schedule::default();
-        let mut graph = RenderGraph::default();
-        RenderPlugin.build(&mut schedule, Rc::clone(&kernel), &mut world, &mut graph);
-        super::HeadlessPlugin::new(false).build(&mut schedule, kernel, &mut world, &mut graph);
+        let (_, mut renderer) = crate::headless::create_headless_renderer(8, 8, None)
+            .await
+            .expect("renderer");
+        RenderPlugin
+            .build(&mut schedule, Rc::clone(&kernel), &mut world, &mut renderer)
+            .expect("render plugin");
+        super::HeadlessPlugin::new(false)
+            .build(&mut schedule, kernel, &mut world, &mut renderer)
+            .expect("headless plugin");
 
         let stages: Vec<String> = schedule
             .iter_stages()

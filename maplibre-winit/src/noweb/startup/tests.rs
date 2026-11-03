@@ -40,8 +40,9 @@ impl Plugin<NativeEnvironment> for Inert {
         _: &mut maplibre::schedule::Schedule,
         _: std::rc::Rc<Kernel<NativeEnvironment>>,
         _: &mut maplibre::tcs::world::World,
-        _: &mut maplibre::render::graph::RenderGraph,
-    ) {
+        _: &mut maplibre::render::Renderer,
+    ) -> Result<(), maplibre::plugin::PluginError> {
+        Ok(())
     }
 }
 

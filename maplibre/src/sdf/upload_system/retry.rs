@@ -34,12 +34,9 @@ async fn context() -> MapContext {
     ];
     let kernel = Rc::new(kernel);
     for plugin in plugins {
-        plugin.build(
-            &mut schedule,
-            kernel.clone(),
-            &mut world,
-            &mut renderer.render_graph,
-        );
+        plugin
+            .build(&mut schedule, kernel.clone(), &mut world, &mut renderer)
+            .expect("plugin");
     }
     let style: Style =
         serde_json::from_value(serde_json::json!({"version":8,"sources":{},"layers":[{

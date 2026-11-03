@@ -25,12 +25,14 @@ impl Frames {
             >::default()));
         }
         for plugin in plugins {
-            plugin.build(
-                &mut schedule,
-                test.kernel.clone(),
-                &mut test.context.world,
-                &mut test.context.renderer.render_graph,
-            );
+            plugin
+                .build(
+                    &mut schedule,
+                    test.kernel.clone(),
+                    &mut test.context.world,
+                    &mut test.context.renderer,
+                )
+                .expect("plugin");
         }
         Self(schedule)
     }

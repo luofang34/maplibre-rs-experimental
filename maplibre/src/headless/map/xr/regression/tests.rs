@@ -93,14 +93,19 @@ async fn stereo_ingests_and_refines_terrain_once_per_frame() {
     )
     .expect("map");
     // Deterministic ingestion at the same stage as worker results, without network timing.
-    map.schedule.remove_stage(RenderStageLabel::Request);
-    map.schedule.add_stage_before(
-        RenderStageLabel::Prepare,
-        RenderStageLabel::Request,
-        SystemStage::default().with_system(ingest),
-    );
     map.schedule
-        .add_system_to_stage(RenderStageLabel::PhaseSort, observe);
+        .remove_stage(RenderStageLabel::Request)
+        .expect("schedule");
+    map.schedule
+        .add_stage_before(
+            RenderStageLabel::Prepare,
+            RenderStageLabel::Request,
+            SystemStage::default().with_system(ingest),
+        )
+        .expect("schedule");
+    map.schedule
+        .add_system_to_stage(RenderStageLabel::PhaseSort, observe)
+        .expect("schedule");
     map.run_xr_frame(frame(16)).expect("first stereo frame");
     map.run_xr_frame(frame(32)).expect("second stereo frame");
     let observations = map
@@ -314,7 +319,8 @@ async fn each_eye_of_a_still_stereo_view_is_at_rest() {
     let mut map =
         HeadlessMap::new(style, renderer, kernel, vec![Box::new(RenderPlugin)]).expect("map");
     map.schedule
-        .add_system_to_stage(RenderStageLabel::Queue, note_moved);
+        .add_system_to_stage(RenderStageLabel::Queue, note_moved)
+        .expect("schedule");
     // The same placement twice: each eye sees what it saw the frame before.
     map.run_xr_frame(frame(16)).expect("first stereo frame");
     map.run_xr_frame(frame(32)).expect("second stereo frame");

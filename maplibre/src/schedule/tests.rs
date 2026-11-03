@@ -54,9 +54,11 @@ async fn nested_schedules_run_their_stages_in_order() {
     let mut inner = crate::schedule::Schedule::default();
     inner
         .add_stage("first", Record::<1>)
-        .add_stage("last", Record::<3>);
+        .expect("schedule")
+        .add_stage("last", Record::<3>)
+        .expect("schedule");
     let mut outer = crate::schedule::Schedule::default();
-    outer.add_stage("inner", inner);
+    outer.add_stage("inner", inner).expect("schedule");
     outer.run_once(&mut context).expect("successful stages");
     outer.run_once(&mut context).expect("another update");
     assert_eq!(
@@ -71,7 +73,9 @@ async fn stage_times_are_kept_in_run_order_without_frame_bookkeeping() {
     let mut schedule = crate::schedule::Schedule::default();
     schedule
         .add_stage("first", Record::<1>)
-        .add_stage("last", Record::<3>);
+        .expect("schedule")
+        .add_stage("last", Record::<3>)
+        .expect("schedule");
     schedule.run_once(&mut context).expect("successful stages");
     let stages = context
         .world
@@ -93,10 +97,15 @@ async fn a_failed_stage_still_runs_cleanup_stages_and_finishes_the_frame() {
     let mut schedule = crate::schedule::Schedule::default();
     schedule
         .add_stage("first", Record::<1>)
+        .expect("schedule")
         .add_stage("failing", Record::<2>)
+        .expect("schedule")
         .add_stage("skipped", Record::<3>)
+        .expect("schedule")
         .add_stage("cleanup", Record::<4>)
-        .run_after_failure("cleanup");
+        .expect("schedule")
+        .run_after_failure("cleanup")
+        .expect("schedule");
 
     let error = crate::render::frame::run_frame(&mut schedule, &mut context)
         .expect_err("second stage fails");
@@ -120,9 +129,13 @@ async fn the_frame_after_a_failure_starts_from_the_first_stage() {
     let mut schedule = crate::schedule::Schedule::default();
     schedule
         .add_stage("first", Record::<1>)
+        .expect("schedule")
         .add_stage("failing", Record::<2>)
+        .expect("schedule")
         .add_stage("cleanup", Record::<4>)
-        .run_after_failure("cleanup");
+        .expect("schedule")
+        .run_after_failure("cleanup")
+        .expect("schedule");
 
     schedule
         .run_once(&mut context)
@@ -134,5 +147,28 @@ async fn the_frame_after_a_failure_starts_from_the_first_stage() {
     assert_eq!(
         context.world.resources.get::<Vec<u8>>(),
         Some(&vec![1, 2, 4, 1, 2, 4])
+    );
+}
+
+#[test]
+fn builders_report_missing_and_duplicate_stages() {
+    use crate::schedule::{NopStage, Schedule, ScheduleError};
+
+    let mut schedule = Schedule::default();
+    schedule.add_stage("only", NopStage).expect("new stage");
+
+    assert_eq!(
+        schedule.add_stage("only", NopStage).err(),
+        Some(ScheduleError::DuplicateStage("\"only\"".into()))
+    );
+    assert_eq!(
+        schedule.add_stage_after("missing", "new", NopStage).err(),
+        Some(ScheduleError::MissingStage("\"missing\"".into()))
+    );
+    assert_eq!(
+        schedule
+            .add_system_to_stage("only", |_: &mut MapContext| Ok(()))
+            .err(),
+        Some(ScheduleError::NotASystemStage("\"only\"".into()))
     );
 }

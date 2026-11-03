@@ -18,7 +18,6 @@ use crate::{
     plugin::Plugin,
     render::{
         eventually::Eventually,
-        graph::RenderGraph,
         shaders::{FillShaderFeatureMetadata, ShaderLayerMetadata},
         tile_view_pattern::{HasTile, ViewTileSources},
         RenderStageLabel, ShaderVertex,
@@ -187,8 +186,8 @@ impl<E: Environment, T: VectorTransferables> Plugin<E> for VectorPlugin<T> {
         schedule: &mut Schedule,
         kernel: Rc<Kernel<E>>,
         world: &mut World,
-        _graph: &mut RenderGraph,
-    ) {
+        _renderer: &mut crate::render::Renderer,
+    ) -> Result<(), crate::plugin::PluginError> {
         let resources = &mut world.resources;
 
         resources.insert(Eventually::<VectorBufferPool>::Uninitialized);
@@ -204,14 +203,15 @@ impl<E: Environment, T: VectorTransferables> Plugin<E> for VectorPlugin<T> {
         schedule.add_system_to_stage(
             RenderStageLabel::Request,
             SystemContainer::new(RequestSystem::<E, T>::new(&kernel)),
-        );
+        )?;
         schedule.add_system_to_stage(
             RenderStageLabel::Request,
             SystemContainer::new(PopulateWorldSystem::<E, T>::new(&kernel)),
-        );
+        )?;
 
-        schedule.add_system_to_stage(RenderStageLabel::Prepare, resource_system);
-        schedule.add_system_to_stage(RenderStageLabel::Queue, queue_system);
+        schedule.add_system_to_stage(RenderStageLabel::Prepare, resource_system)?;
+        schedule.add_system_to_stage(RenderStageLabel::Queue, queue_system)?;
+        Ok(())
     }
 }
 
