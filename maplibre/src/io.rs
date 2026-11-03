@@ -5,6 +5,8 @@
 pub use geozero::mvt::tile::Layer as RawLayer;
 
 pub mod apc;
+pub mod cpu_work;
+pub(crate) mod frame_style;
 pub mod geometry_index;
 #[cfg(feature = "mlt")]
 pub mod mlt;

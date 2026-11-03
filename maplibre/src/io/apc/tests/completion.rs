@@ -112,6 +112,49 @@ async fn corrupt_vector_source_does_not_stop_healthy_later_sources() {
     assert_eq!(completions.last(), Some(&false));
 }
 
+/// The threads the replies tagged `tag` were sent from.
+fn reply_threads(
+    replies: &Replies,
+    tag: &'static dyn crate::io::apc::MessageTag,
+) -> Vec<std::thread::ThreadId> {
+    let messages = replies.messages.lock().expect("replies");
+    let threads = replies.threads.lock().expect("threads");
+    messages
+        .iter()
+        .zip(threads.iter())
+        .filter(|(message, _)| message.has_tag(tag))
+        .map(|(_, thread)| *thread)
+        .collect()
+}
+
+#[tokio::test]
+async fn vector_geometry_is_tessellated_off_the_thread_that_fetches() {
+    let replies = Replies::default();
+    fetch(false, &["vector"], replies.clone(), UNADMITTED)
+        .await
+        .expect("tile processed");
+    let geometry = reply_threads(&replies, DefaultLayerTessellated::message_tag());
+    assert!(!geometry.is_empty(), "the tile has geometry");
+    let fetching = std::thread::current().id();
+    assert!(
+        geometry.iter().all(|thread| *thread != fetching),
+        "tessellation holds a blocking thread, not the runtime's"
+    );
+}
+
+#[tokio::test]
+async fn raster_pixels_are_prepared_off_the_thread_that_fetches() {
+    use crate::raster::{LayerRaster, RasterTransferables};
+    let replies = Replies::default();
+    fetch(true, &["image"], replies.clone(), UNADMITTED)
+        .await
+        .expect("tile processed");
+    let tag = <DefaultRasterTransferables as RasterTransferables>::LayerRaster::message_tag();
+    let pixels = reply_threads(&replies, tag);
+    assert_eq!(pixels.len(), 1, "the tile has an image");
+    assert_ne!(pixels[0], std::thread::current().id());
+}
+
 async fn raster_result(paths: &[&str]) -> World {
     let replies = Replies::default();
     let mut world = World::default();

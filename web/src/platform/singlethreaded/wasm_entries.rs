@@ -17,7 +17,7 @@ use maplibre::{
 use wasm_bindgen::prelude::*;
 use web_sys::DedicatedWorkerGlobalScope;
 
-use self::running_calls::RunningCalls;
+use self::{running_calls::RunningCalls, worker_styles::WorkerStyles};
 use crate::{
     error::{JSError, WebError},
     platform::{
@@ -31,6 +31,7 @@ use crate::{
 };
 
 mod running_calls;
+mod worker_styles;
 
 /// Parsed once so every call this worker serves shares the configuration's asset cache.
 static CONFIG: OnceLock<OffscreenKernelConfig> = OnceLock::new();
@@ -56,6 +57,7 @@ pub fn set_kernel_config(config: String) -> Result<(), JSError> {
 #[derive(Default)]
 pub struct TileWorkerCalls {
     running: Rc<RefCell<RunningCalls>>,
+    styles: WorkerStyles,
 }
 
 #[wasm_bindgen]
@@ -65,23 +67,54 @@ impl TileWorkerCalls {
         Self::default()
     }
 
-    /// Starts a call and sends its results back to the main thread. The call is registered
-    /// before this returns, so a cancel that arrives later stops it; the promise settles when
-    /// the call ends, whether it finished or was stopped.
-    pub fn process(&self, procedure_ptr: u32, input: String) -> Result<js_sys::Promise, JSError> {
+    /// Keeps the style the main thread sent as `revision` for the calls that name it.
+    pub fn set_style(&mut self, revision: u64, style: String) -> Result<(), JSError> {
+        let style = serde_json::from_str(&style).map_err(WebError::StyleDecoding)?;
+        self.styles.insert(revision, style);
+        Ok(())
+    }
+
+    /// Starts a call with the style kept as `style_revision` and sends its results back to the
+    /// main thread. The call is registered before this returns, so a cancel that arrives later
+    /// stops it; the promise settles when the call ends, whether it finished or was stopped.
+    pub fn process(
+        &self,
+        procedure_ptr: u32,
+        style_revision: u64,
+        input: String,
+    ) -> Result<js_sys::Promise, JSError> {
         // SAFETY: the main thread sends the address of an `AsyncProcedure` of this same module.
         let procedure: AsyncProcedure<UsedOffscreenKernelEnvironment, UsedContext> =
             unsafe { mem::transmute(procedure_ptr) };
 
-        let input = serde_json::from_str::<Input>(&input).map_err(|e| {
+        let mut input = serde_json::from_str::<Input>(&input).map_err(|e| {
             log::error!("DeserializeInput error: {e}");
             CallError::DeserializeInput(Box::new(e))
         })?;
         let attempt = input.attempt;
-
         let context = PassingContext {
             source_client: SourceClient::new(HttpSourceClient::new(web_http_client())),
         };
+        let Some(style) = self.styles.get(style_revision) else {
+            for kind in [
+                maplibre::io::tile_retry::RequestKind::Vector,
+                maplibre::io::tile_retry::RequestKind::Raster,
+                maplibre::io::tile_retry::RequestKind::Dem,
+            ] {
+                let _ = maplibre::io::apc::Context::send_back(
+                    &context,
+                    maplibre::io::tile_retry::TileRequestOutcome {
+                        coords: input.coords,
+                        kind,
+                        attempt: Some(attempt),
+                        disposition: maplibre::io::tile_retry::RequestDisposition::Retry,
+                    },
+                );
+            }
+            let _ = post_call_finished(attempt);
+            return Err(WebError::StyleRevisionMissing(style_revision).into());
+        };
+        input.style = style;
 
         if let Ok(global) = js_sys::global().dyn_into::<DedicatedWorkerGlobalScope>() {
             let name = global.name();
@@ -122,6 +155,12 @@ impl TileWorkerCalls {
     /// Stops the call for `attempt` at its next await; `false` when it is not running.
     pub fn cancel(&self, attempt: u64) -> bool {
         self.running.borrow_mut().cancel(attempt)
+    }
+
+    /// Releases main-thread assignment tracking when a call failed before starting its future.
+    pub fn finish_failed(&self, attempt: u64) {
+        self.running.borrow_mut().finish(attempt);
+        let _ = post_call_finished(attempt);
     }
 }
 

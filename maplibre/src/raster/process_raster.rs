@@ -29,6 +29,9 @@ pub enum ProcessRasterError {
     /// The caller could not receive the decoded image.
     #[error("sending raster result failed")]
     Send(#[source] SendError),
+    /// Decoding did not run to completion.
+    #[error("processing raster tile failed")]
+    CpuWork(#[source] crate::io::cpu_work::CpuWorkError),
 }
 
 /// Grid location associated with one source image.

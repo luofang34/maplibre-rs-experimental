@@ -7,6 +7,7 @@ use crate::{
     environment::Environment,
     io::{
         apc::{AsyncProcedureCall, Input},
+        frame_style::FrameStyle,
         tile_backpressure::vector_request_budget,
         tile_retry::{self, RequestKind},
         tile_sources::{
@@ -112,6 +113,7 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                 });
             let draped = style.terrain.is_some();
             let magnifies = depends_on_overscaling(style);
+            let mut frame_style = FrameStyle::new(style);
             for coords in overview
                 .into_iter()
                 .chain(drapes)
@@ -154,7 +156,7 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                 // One rejected tile must not cost the frame its other tiles.
                 if let Err(error) = self.request(
                     coords,
-                    style,
+                    &mut frame_style,
                     world,
                     (overscaled_zoom, pixel_ratio),
                     only_sources,
@@ -252,7 +254,7 @@ impl<E: Environment, T: VectorTransferables> RequestSystem<E, T> {
     fn request(
         &self,
         coords: crate::coords::WorldTileCoords,
-        style: &crate::style::Style,
+        style: &mut FrameStyle,
         world: &mut crate::tcs::world::World,
         (overscaled_zoom, pixel_ratio): (u8, f32),
         only_sources: Option<Vec<String>>,
@@ -263,13 +265,16 @@ impl<E: Environment, T: VectorTransferables> RequestSystem<E, T> {
         }
         let attempt = tile_retry::next_attempt(world);
         let issued_for = only_sources.clone();
-        let mut worker_style = style.clone();
-        if symbols_disabled {
-            worker_style.layers.retain(|layer| layer.type_ != "symbol");
-        }
-        if vectors_disabled {
-            worker_style.layers.retain(|layer| layer.type_ == "symbol");
-        }
+        let worker_style = style.share(|style| {
+            let mut worker_style = style.clone();
+            if symbols_disabled {
+                worker_style.layers.retain(|layer| layer.type_ != "symbol");
+            }
+            if vectors_disabled {
+                worker_style.layers.retain(|layer| layer.type_ == "symbol");
+            }
+            worker_style
+        });
         self.kernel
             .apc()
             .call(

@@ -122,8 +122,11 @@ impl IntoMessage for Message {
 pub struct Input {
     /// Tile grid location requested from the worker.
     pub coords: WorldTileCoords,
-    /// Style snapshot used to choose and process the tile's layers.
-    pub style: Style,
+    /// Style snapshot used to choose and process the tile's layers, shared by the requests
+    /// made from the same style. It is not serialized: a transport that serializes inputs
+    /// hands its workers the style once and sets it on each input they decode.
+    #[serde(skip)]
+    pub style: Arc<Style>,
     /// Identifier distinguishing requests when coordinates are evicted and reused.
     pub attempt: u64,
     /// The zoom a vector tile is drawn at when that is past its source's last zoom; zero
@@ -146,10 +149,10 @@ fn one() -> f32 {
 impl Input {
     /// Requests every source of a tile at its own zoom for a display of one pixel per
     /// layout pixel.
-    pub fn new(coords: WorldTileCoords, style: Style, attempt: u64) -> Self {
+    pub fn new(coords: WorldTileCoords, style: impl Into<Arc<Style>>, attempt: u64) -> Self {
         Self {
             coords,
-            style,
+            style: style.into(),
             attempt,
             overscaled_zoom: 0,
             pixel_ratio: 1.0,
@@ -168,7 +171,7 @@ pub enum SendError {
         operation: &'static str,
         /// Underlying channel or platform error.
         #[source]
-        source: Box<dyn std::error::Error>,
+        source: Box<dyn std::error::Error + Send>,
     },
     /// The result has a routing tag unsupported by this transport.
     #[error("worker transport does not support message tag {tag:?}")]
@@ -179,6 +182,9 @@ pub enum SendError {
     /// The result's payload is incompatible with the transport.
     #[error("worker result has an invalid payload")]
     Payload(#[from] MessageError),
+    /// The call the result belongs to was cancelled; the work producing it can stop.
+    #[error("the call this result belongs to was cancelled")]
+    Abandoned,
 }
 
 /// Allows sending messages from workers to back to the caller.

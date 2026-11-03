@@ -24,7 +24,7 @@ use thiserror::Error;
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{DedicatedWorkerGlobalScope, Worker};
 
-use self::assignments::Assignments;
+use self::{assignments::Assignments, style_revisions::StyleRevisions};
 use crate::{
     error::WebError,
     platform::singlethreaded::{
@@ -310,6 +310,9 @@ pub struct PassingAsyncProcedureCall {
 
     /// The worker each running call was sent to, so a cancel reaches it.
     assignments: RefCell<Assignments>,
+
+    /// The style the workers hold, so calls name it instead of carrying it.
+    styles: RefCell<StyleRevisions>,
 }
 
 impl PassingAsyncProcedureCall {
@@ -333,8 +336,8 @@ impl PassingAsyncProcedureCall {
 
         let mut workers = Vec::with_capacity(initial_workers);
         let config = serde_json::to_string(&config).map_err(WebError::KernelConfigEncoding)?;
-        let init = worker_message("wasm_init", "module", &wasm_bindgen::module())?;
-        let configure = worker_message("kernel_config", "config", &JsValue::from(config))?;
+        let init = worker_message("wasm_init", &[("module", &wasm_bindgen::module())])?;
+        let configure = worker_message("kernel_config", &[("config", &JsValue::from(config))])?;
 
         for _ in 0..initial_workers {
             let worker: Worker = create_new_worker()?;
@@ -348,17 +351,21 @@ impl PassingAsyncProcedureCall {
             buffer: RefCell::new(Vec::default()),
             received,
             assignments: RefCell::default(),
+            styles: RefCell::default(),
         })
     }
 }
 
-/// Builds a worker control message `{ type, <key>: value }`.
-fn worker_message(kind: &str, key: &str, value: &JsValue) -> Result<js_sys::Object, WebError> {
-    js_sys::Object::from_entries(&js_sys::Array::of2(
-        &js_sys::Array::of2(&JsValue::from("type"), &JsValue::from(kind)),
-        &js_sys::Array::of2(&JsValue::from(key), value),
-    ))
-    .map_err(WebError::from)
+/// Builds a worker message `{ type: kind, <key>: value, ... }`.
+fn worker_message(kind: &str, fields: &[(&str, &JsValue)]) -> Result<js_sys::Object, WebError> {
+    let entries = js_sys::Array::of1(&js_sys::Array::of2(
+        &JsValue::from("type"),
+        &JsValue::from(kind),
+    ));
+    for (key, value) in fields {
+        entries.push(&js_sys::Array::of2(&JsValue::from(*key), value));
+    }
+    js_sys::Object::from_entries(&entries).map_err(WebError::from)
 }
 
 impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
@@ -399,24 +406,41 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
     ) -> Result<(), CallError> {
         let procedure_ptr = procedure as *mut AsyncProcedure<K, UsedContext>; // TODO: Verify how these pointer are converted to pointers
         let attempt = input.attempt;
+        if self.workers.is_empty() {
+            return Err(CallError::Schedule(ScheduleError::NoWorkers));
+        }
+        // The input leaves its style out; the workers hold it, sent once per revision.
+        let style_revision = self
+            .styles
+            .borrow_mut()
+            .revision(&input.style, |revision, style| {
+                let message = worker_message(
+                    "style",
+                    &[
+                        ("revision", &JsValue::from(revision)),
+                        ("style", &JsValue::from(style)),
+                    ],
+                )?;
+                self.workers
+                    .iter()
+                    .try_for_each(|worker| worker.post_message(&message).map_err(WebError::from))
+            })
+            .map_err(|error| CallError::Serialize(Box::new(error)))?;
         let input = serde_json::to_string(&input).map_err(|e| CallError::Serialize(Box::new(e)))?;
 
         // The worker reads the attempt without decoding the input, so a cancel can overtake
         // a call that waits for the worker to start.
-        let message = js_sys::Object::from_entries(&js_sys::Array::of4(
-            &js_sys::Array::of2(&JsValue::from("type"), &JsValue::from("call")),
-            &js_sys::Array::of2(
-                &JsValue::from("procedure_ptr"),
-                &JsValue::from(procedure_ptr),
-            ),
-            &js_sys::Array::of2(&JsValue::from("attempt"), &JsValue::from(attempt)),
-            &js_sys::Array::of2(&JsValue::from("input"), &JsValue::from(input)),
-        ))
-        .map_err(|error| CallError::Serialize(Box::new(WebError::from(error))))?;
+        let message = worker_message(
+            "call",
+            &[
+                ("procedure_ptr", &JsValue::from(procedure_ptr)),
+                ("attempt", &JsValue::from(attempt)),
+                ("style_revision", &JsValue::from(style_revision)),
+                ("input", &JsValue::from(input)),
+            ],
+        )
+        .map_err(|error| CallError::Serialize(Box::new(error)))?;
 
-        if self.workers.is_empty() {
-            return Err(CallError::Schedule(ScheduleError::NoWorkers));
-        }
         let index = thread_rng().gen_range(0..self.workers.len());
         let worker = self
             .workers
@@ -437,7 +461,7 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
         let Some(worker) = self.workers.get(index) else {
             return;
         };
-        let posted = worker_message("cancel", "attempt", &JsValue::from(attempt))
+        let posted = worker_message("cancel", &[("attempt", &JsValue::from(attempt))])
             .and_then(|message| worker.post_message(&message).map_err(WebError::from));
         if let Err(error) = posted {
             // The call finishes and the map ignores its result.
@@ -447,5 +471,6 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
 }
 
 mod assignments;
+mod style_revisions;
 #[cfg(test)]
 mod tests;

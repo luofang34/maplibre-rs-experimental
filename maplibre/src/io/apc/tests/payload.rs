@@ -91,7 +91,7 @@ fn a_disconnected_caller_retains_the_channel_error_and_rejected_result() {
 #[test]
 fn a_worker_input_needs_the_attempt_its_results_are_matched_by() {
     use super::super::Input;
-    let input = Input::new(Default::default(), Default::default(), 9);
+    let input = Input::new(Default::default(), crate::style::Style::default(), 9);
     let mut json = serde_json::to_value(&input).expect("encode input");
     let decoded: Input = serde_json::from_value(json.clone()).expect("decode input");
     assert_eq!(decoded.attempt, 9);
@@ -101,5 +101,19 @@ fn a_worker_input_needs_the_attempt_its_results_are_matched_by() {
     assert!(
         serde_json::from_value::<Input>(json).is_err(),
         "a worker cannot run a request no attempt owns"
+    );
+}
+
+#[test]
+fn a_serialized_input_leaves_its_style_to_the_transport() {
+    use super::super::Input;
+    let style = crate::style::Style {
+        glyphs: Some("https://example.invalid/{fontstack}/{range}.pbf".into()),
+        ..Default::default()
+    };
+    let json = serde_json::to_value(Input::new(Default::default(), style, 3)).expect("encode");
+    assert!(
+        json.get("style").is_none(),
+        "workers receive the style once, not with every call"
     );
 }

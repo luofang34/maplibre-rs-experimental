@@ -259,7 +259,7 @@ pub(crate) async fn load_tile<HC: crate::io::source_client::HttpClient>(
     source: &crate::style::source::ImageSource,
     coords: WorldTileCoords,
 ) -> Result<Option<RgbaImage>, crate::sdf::assets::AssetFailure> {
-    use crate::sdf::assets::AssetFailure;
+    use crate::{io::cpu_work::run_cpu_bound, sdf::assets::AssetFailure};
     let url = source.url.as_str();
     let picture = client
         .assets()
@@ -267,16 +267,22 @@ pub(crate) async fn load_tile<HC: crate::io::source_client::HttpClient>(
             format!("image-source:{url}#{}", source.generation),
             || async {
                 let bytes = crate::sdf::assets::fetch(client, url, "image source").await?;
-                let picture = decode(&bytes).map_err(|error| {
-                    tracing::warn!(%url, %error, "invalid image source picture");
-                    AssetFailure::Terminal(format!("invalid image {url}: {error}"))
-                })?;
+                let picture = run_cpu_bound(move || decode(&bytes))
+                    .await
+                    .map_err(|error| AssetFailure::Terminal(format!("decoding {url}: {error}")))?
+                    .map_err(|error| {
+                        tracing::warn!(%url, %error, "invalid image source picture");
+                        AssetFailure::Terminal(format!("invalid image {url}: {error}"))
+                    })?;
                 let bytes = picture.as_raw().len();
                 Ok((picture, bytes))
             },
         )
         .await?;
-    Ok(render_tile(&picture, source.coordinates, coords))
+    let coordinates = source.coordinates;
+    run_cpu_bound(move || render_tile(&picture, coordinates, coords))
+        .await
+        .map_err(|error| AssetFailure::Terminal(format!("resampling {url}: {error}")))
 }
 
 #[cfg(test)]
