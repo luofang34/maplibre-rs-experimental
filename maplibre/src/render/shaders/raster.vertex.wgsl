@@ -50,8 +50,10 @@ fn main(
         tex_coords.y = 1.0;
     }
     var clip = projected.clip_position;
-    // The globe is not aligned: its clip positions are not those of a flat map.
-    if projection.transition_and_padding.x < 0.5 {
+    // The globe is not aligned: its clip positions are not those of a flat map. Neither is a
+    // drape texture, which marks its tiles with an overlap above one: the alignment is a screen
+    // offset, and moving a tile off its stencil mask there would expose the clear colour.
+    if projection.transition_and_padding.x < 0.5 && overlap <= 1.0 {
         clip = vec4<f32>(clip.xy + paint.align * clip.w, clip.zw);
     }
     return VertexOutput(

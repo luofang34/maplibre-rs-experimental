@@ -65,7 +65,7 @@ fn upload_raster_layer(
                         .get_bound_texture(&data.source, &coords)
                         .is_none()
                 {
-                    upload_image(raster_resources, device, queue, tiles, data);
+                    upload_image(raster_resources, device, queue, tiles, coords, data);
                 }
             }
         }
@@ -92,17 +92,21 @@ fn neighbour_images<'a>(
     images
 }
 
+/// Uploads the image of the tile stored at `coords`. The texture is bound under that key, the
+/// one the upload check and the draws look up, rather than under the coordinates the image
+/// carries: were they to differ, the check would miss the binding and upload it every frame.
 fn upload_image(
     raster_resources: &mut RasterResources,
     device: &wgpu::Device,
     queue: &crate::render::upload_queue::UploadQueue,
     tiles: &Tiles,
+    coords: WorldTileCoords,
     data: &AvailableRasterLayerData,
 ) {
     let bordered;
     let mut border_sides = None;
     let image = if raster_resources.has_border(&data.source) {
-        let neighbours = neighbour_images(tiles, &data.source, data.coords);
+        let neighbours = neighbour_images(tiles, &data.source, coords);
         border_sides = Some(filled_sides(&data.image, &neighbours));
         bordered = with_border(&data.image, &neighbours);
         &bordered
@@ -147,8 +151,11 @@ fn upload_image(
     if mipmapped {
         raster_resources.generate_mipmaps(device, queue, &texture);
     }
-    raster_resources.bind_texture(device, &data.source, &data.coords, texture);
+    raster_resources.bind_texture(device, &data.source, &coords, texture);
     if let Some(sides) = border_sides {
-        raster_resources.set_border_sides(&data.source, data.coords, sides);
+        raster_resources.set_border_sides(&data.source, coords, sides);
     }
 }
+
+#[cfg(test)]
+mod tests;

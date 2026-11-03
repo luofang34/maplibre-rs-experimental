@@ -3,6 +3,27 @@ use std::collections::HashSet;
 
 use super::TerrainResources;
 use crate::{coords::WorldTileCoords, render::resource::Texture, terrain::drape_cache::DrapeState};
+
+/// A drape texture with the view of its first level, which the drape pass draws into every
+/// time the drape is redrawn; the texture's own view spans every level, which an attachment
+/// may not.
+pub(crate) struct DrapeTexture {
+    texture: Texture,
+    top_level: wgpu::TextureView,
+}
+
+impl DrapeTexture {
+    fn new(texture: Texture) -> Self {
+        let top_level = texture.texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("drape top level"),
+            base_mip_level: 0,
+            mip_level_count: Some(1),
+            ..Default::default()
+        });
+        Self { texture, top_level }
+    }
+}
+
 impl TerrainResources {
     /// Gives a view tile a drape texture and reports what it holds.
     pub fn acquire_drape(
@@ -15,14 +36,14 @@ impl TerrainResources {
         let format = self.color_format;
         let size = self.drape_size;
         self.drapes.acquire(coords, fingerprint, may_create, || {
-            Texture::new_mipmapped(
+            DrapeTexture::new(Texture::new_mipmapped(
                 Some("drape texture"),
                 device,
                 format,
                 size,
                 size,
                 wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            )
+            ))
         })
     }
 
@@ -61,7 +82,17 @@ impl TerrainResources {
 
     /// Drape texture of a view tile.
     pub fn drape_texture(&self, coords: WorldTileCoords) -> Option<&Texture> {
-        self.drapes.get(coords)
+        self.drapes.get(coords).map(|drape| &drape.texture)
+    }
+
+    /// Drape texture of a view tile with the view of its first level, the one drawn into.
+    pub(crate) fn drape_target(
+        &self,
+        coords: WorldTileCoords,
+    ) -> Option<(&Texture, &wgpu::TextureView)> {
+        self.drapes
+            .get(coords)
+            .map(|drape| (&drape.texture, &drape.top_level))
     }
 
     /// Drape textures held for tiles, and parked or waiting in the free list.

@@ -91,3 +91,40 @@ fn mixed_lod_covering_switches_only_when_its_last_gap_is_loaded() {
         }
     }
 }
+
+#[test]
+fn a_view_panning_over_loaded_children_keeps_the_whole_set() {
+    let target = WorldTileCoords::from((2423, 1389, 12_u8.into()));
+    let grandchildren: Vec<_> = target
+        .get_children()
+        .iter()
+        .flat_map(|child| child.get_children())
+        .collect();
+    let whole: HashSet<_> = grandchildren.iter().copied().collect();
+    // Every window of the view over the terrain tile, from one tile to all of them.
+    for start in 0..grandchildren.len() {
+        for end in start + 1..=grandchildren.len() {
+            let selected = selected(
+                target,
+                grandchildren[start..end].to_vec(),
+                grandchildren.clone(),
+            );
+            assert_eq!(selected.len(), whole.len(), "window {start}..{end}");
+            assert_eq!(selected.into_iter().collect::<HashSet<_>>(), whole);
+        }
+    }
+}
+
+#[test]
+fn a_partly_loaded_level_still_follows_the_view() {
+    let target = WorldTileCoords::from((2423, 1389, 12_u8.into()));
+    let children = target.get_children();
+    let mut loaded = children[..3].to_vec();
+    loaded.push(target);
+    assert_eq!(
+        selected(target, children[..2].to_vec(), loaded)
+            .into_iter()
+            .collect::<HashSet<_>>(),
+        [target, children[0], children[1]].into_iter().collect()
+    );
+}

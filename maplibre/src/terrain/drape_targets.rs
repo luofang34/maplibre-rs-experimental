@@ -149,6 +149,18 @@ fn raster_shapes<H: HasTile>(
     if wanted.is_empty() {
         return absent();
     }
+    let shape = |coords, view_complete| ShapeSource {
+        coords,
+        raster_source: Some(source_id.clone()),
+        view_complete,
+        absent: false,
+    };
+    if let Some(descendants) = loaded_descendant_level(coords, &wanted, &raster_sources, world) {
+        return descendants
+            .into_iter()
+            .map(|source| shape(source, false))
+            .collect();
+    }
     let loaded: Vec<WorldTileCoords> = wanted
         .iter()
         .copied()
@@ -178,17 +190,44 @@ fn raster_shapes<H: HasTile>(
     if settled && !all_loaded && under.is_empty() && over.is_empty() {
         return absent();
     }
-    let shape = |coords, view_complete| ShapeSource {
-        coords,
-        raster_source: Some(source_id.clone()),
-        view_complete,
-        absent: false,
-    };
     under
         .into_iter()
         .map(|source| shape(source, false))
         .chain(over.into_iter().map(|source| shape(source, view_complete)))
         .collect()
+}
+
+/// Levels below a terrain tile within which [`loaded_descendant_level`] looks: 64 tiles. Every
+/// shape of a drape takes a slot of the tile metadata buffer the whole frame shares, so a
+/// deeper level would let one drape crowd the others out of their updates.
+const DESCENDANT_LEVEL_DEPTH: u8 = 3;
+
+/// Every tile of the wanted level below a terrain tile, when all of them have loaded.
+///
+/// A view that sees only part of the terrain tile wants only the source tiles in sight, and
+/// that subset changes as the view moves across it, which would redraw the drape each time.
+/// The whole level, once resident, is what any such subset would complete to, so the drape
+/// stays the same while the view pans. The wanted tiles must share one level finer than the
+/// terrain tile; a mixed-level covering is left to the general selection.
+fn loaded_descendant_level(
+    coords: WorldTileCoords,
+    wanted: &[WorldTileCoords],
+    sources: &impl HasTile,
+    world: &World,
+) -> Option<Vec<WorldTileCoords>> {
+    let level = wanted.first()?.z;
+    let depth = u8::from(level).checked_sub(u8::from(coords.z))?;
+    if depth == 0 || depth > DESCENDANT_LEVEL_DEPTH || wanted.iter().any(|tile| tile.z != level) {
+        return None;
+    }
+    let mut tiles = vec![coords];
+    for _ in 0..depth {
+        tiles = tiles.iter().flat_map(|tile| tile.get_children()).collect();
+    }
+    tiles
+        .iter()
+        .all(|tile| sources.has_tile(*tile, world))
+        .then_some(tiles)
 }
 
 /// Lists the drapeable layers each source tile currently holds.

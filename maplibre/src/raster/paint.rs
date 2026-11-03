@@ -20,7 +20,16 @@ pub fn layout() -> Vec<wgpu::BindGroupLayoutEntry> {
 
 /// The translation, in clip units per unit of `w`, that puts the centre of the view on a whole
 /// pixel for raster tiles, as GL JS aligns them while the map is at rest.
+///
+/// A pitched or host-driven eye has no single pixel scale across the view, so rounding its
+/// centre would only make the imagery jitter by a pixel as it moves; it gets no shift.
 pub fn pixel_alignment(view: &crate::render::view_state::ViewState) -> [f32; 2] {
+    if view.has_external_view()
+        || view.pose_view().is_some()
+        || view.camera().get_pitch().0.abs() > 1e-6
+    {
+        return [0.0; 2];
+    }
     let center = view.camera().position();
     let angle = view.camera().get_bearing().0;
     let (cos, sin) = (angle.cos(), angle.sin());
@@ -155,6 +164,47 @@ mod alignment_tests {
             (f64::from(turned[1]) + fraction[0]).abs() < 0.01,
             "{turned:?}"
         );
+    }
+
+    #[test]
+    fn a_pitched_view_is_not_shifted() {
+        let mut view = view(0.0);
+        assert_ne!(
+            pixel_alignment(&view),
+            [0.0; 2],
+            "the level view is shifted"
+        );
+        view.camera_mut().set_pitch(Deg(30.0));
+        assert_eq!(pixel_alignment(&view), [0.0; 2]);
+    }
+
+    #[test]
+    fn an_external_eye_is_not_shifted() {
+        use cgmath::{Matrix4, Rad, SquareMatrix, Vector3};
+
+        use crate::{
+            projection::ProjectionType,
+            render::{
+                camera::EyeFrustum,
+                view_state::{ExternalAnchor, ExternalView},
+            },
+        };
+        let mut view = view(0.0);
+        // Straight down, so only the external eye can explain a missing shift.
+        let external = ExternalView {
+            anchor: ExternalAnchor {
+                position: LatLon::new(52.499167, 13.418056),
+                altitude_meters: 0.0,
+            },
+            view: Matrix4::from_translation(Vector3::new(0.0, 0.0, 400.0))
+                .invert()
+                .expect("eye"),
+            frustum: EyeFrustum::symmetric(Rad(1.0), 2.0, 0.05, 1.0e8),
+        };
+        view.set_external_view(external, &ProjectionType::Mercator)
+            .expect("external view");
+        assert!(view.has_external_view());
+        assert_eq!(pixel_alignment(&view), [0.0; 2]);
     }
 }
 

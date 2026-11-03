@@ -145,7 +145,7 @@ pub struct TerrainResources {
     uniform_buffer: wgpu::Buffer,
     dem_textures: HashMap<WorldTileCoords, DemTexture>,
     empty_dem: Texture,
-    drapes: DrapeCache<Texture>,
+    drapes: DrapeCache<drapes::DrapeTexture>,
     drape_scratch: Option<DrapeScratch>,
     draws: Vec<TerrainDraw>,
     /// Bind groups by DEM and drape texture, kept across frames: creating one per tile per

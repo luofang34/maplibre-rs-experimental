@@ -45,13 +45,13 @@ impl Node for DrapePassNode {
         let drawn: Vec<_> = phase
             .targets
             .iter()
-            .filter_map(|target| Some((target, terrain.drape_texture(target.coords)?)))
+            .filter_map(|target| Some((target, terrain.drape_target(target.coords)?)))
             .collect();
         // The drape passes are timed together: the first writes the start, the last the end.
         let timer = world
             .resources
             .get::<crate::terrain::drape_timing::DrapeTimerSlot>();
-        for (index, (target, texture)) in drawn.iter().enumerate() {
+        for (index, (target, (texture, top_level))) in drawn.iter().enumerate() {
             let timestamp_writes = timer.and_then(|slot| {
                 let writes = slot
                     .timer
@@ -62,15 +62,8 @@ impl Node for DrapePassNode {
                 }
                 Some(writes)
             });
-            // The layers are drawn into the first level alone; the sampled view spans every
-            // level, which an attachment may not.
-            let top_level = texture.texture.create_view(&wgpu::TextureViewDescriptor {
-                label: Some("drape top level"),
-                base_mip_level: 0,
-                mip_level_count: Some(1),
-                ..Default::default()
-            });
-            let color_attachment = color_attachment(scratch, &top_level, target.clear_color);
+            // The layers are drawn into the first level alone.
+            let color_attachment = color_attachment(scratch, top_level, target.clear_color);
             let pass =
                 render_context
                     .command_encoder
