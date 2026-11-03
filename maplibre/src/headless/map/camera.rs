@@ -58,6 +58,14 @@ impl HeadlessMap {
             .set_field_of_view(cgmath::Rad::from(field_of_view));
     }
 
+    /// Asks for an opaque environment: on a full globe without atmosphere the style's sky
+    /// then fills everything the globe does not cover, as it does for a
+    /// [`crate::headless::MultiViewFrame`] that asks the same.
+    pub fn set_opaque_environment(&mut self, opaque: bool) {
+        self.map_context.view_state.set_opaque_environment(opaque);
+        crate::render::frame_signals::mark_dirty(&mut self.map_context.world);
+    }
+
     /// Drags a free-globe camera so the ground under `from` moves under `to`, as
     /// [`crate::render::view_state::ViewState::drag_free_globe`] does, and marks the map for
     /// redraw when it moved. Returns whether it moved.

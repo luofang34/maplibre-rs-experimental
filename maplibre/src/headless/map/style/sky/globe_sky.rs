@@ -82,7 +82,7 @@ async fn render(pose: GlobePose, opaque: bool) -> Vec<u8> {
         .expect("free navigation");
     map.set_vertical_field_of_view(cgmath::Deg(FIELD_OF_VIEW_DEGREES));
     map.restore_globe_pose(pose).expect("pose");
-    map.map_context.view_state.set_opaque_environment(opaque);
+    map.set_opaque_environment(opaque);
     for _ in 0..3 {
         map.run_frame().expect("frame");
     }
