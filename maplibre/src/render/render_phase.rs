@@ -1,12 +1,20 @@
-//! Ordered draw queues and projection bindings consumed by the render passes.
+//! Ordered draw queues, binned render phases, and projection bindings consumed by render passes.
 
 #![deny(missing_docs)]
 
+pub use batching::*;
+pub use binned::*;
 pub use draw::*;
+pub use indirect::*;
+pub use plugin::*;
 
 use crate::{render::tile_view_pattern::TileShape, tcs::tiles::Tile};
 
+mod batching;
+mod binned;
 mod draw;
+mod indirect;
+mod plugin;
 
 /// Which projection uniform a draw binds at group zero.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -189,5 +197,7 @@ impl PhaseItem for TileMaskItem {
     }
 }
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod gpu_tests;
 #[cfg(test)]
 mod tests;

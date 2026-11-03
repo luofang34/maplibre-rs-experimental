@@ -47,9 +47,11 @@ impl System for ResourceSystem {
             .get::<crate::render::tracked_pass::DrawCapabilities>()
             .is_none()
         {
-            world
-                .resources
-                .insert(crate::render::tracked_pass::DrawCapabilities::of(adapter));
+            world.resources.insert(
+                crate::render::tracked_pass::DrawCapabilities::from_adapter_and_device(
+                    adapter, device,
+                ),
+            );
         }
         let Some((tile_view_pattern, mask_pipeline, projection_resources, depth_copy)) =
             world.resources.query_mut::<(
