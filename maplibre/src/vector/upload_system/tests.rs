@@ -95,12 +95,15 @@ async fn empty_tiles_do_not_starve_later_geometry_uploads() {
         &mut tiles,
         &style,
         coords,
-        &[],
-        super::VectorPaintFrame {
-            zoom: 8.0,
-            bearing: 0.0,
-            light: Default::default(),
-        },
+        (
+            &[],
+            super::VectorPaintFrame {
+                zoom: 8.0,
+                bearing: 0.0,
+                light: Default::default(),
+            },
+        ),
+        &mut crate::render::memory_budget::FrameUploads::default(),
     );
     assert!(!deferred);
     assert!(
@@ -199,8 +202,8 @@ async fn deferred_uploads_keep_parent_stand_in_and_flag_animation() {
         &mut world.tiles,
         &style,
         vec![parent],
-        &[],
-        paint,
+        (&[], paint),
+        &mut crate::render::memory_budget::FrameUploads::default(),
     ));
 
     // Zooming in finishes more children than UPLOADS_PER_FRAME allows in one frame.
@@ -210,8 +213,8 @@ async fn deferred_uploads_keep_parent_stand_in_and_flag_animation() {
         &mut world.tiles,
         &style,
         children.clone(),
-        &[],
-        paint,
+        (&[], paint),
+        &mut crate::render::memory_budget::FrameUploads::default(),
     );
     assert!(deferred, "remaining children must request another frame");
 

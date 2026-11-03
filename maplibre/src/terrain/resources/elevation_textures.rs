@@ -21,18 +21,23 @@ impl TerrainResources {
         coords: WorldTileCoords,
         dem: &LoadedDem,
     ) {
-        let source = dem.revision_key();
-        if self
-            .dem_textures
-            .get(&coords)
-            .is_some_and(|entry| entry.source.as_ref() == Some(&source))
-        {
+        if !self.needs_dem_upload(coords, dem) {
             return;
         }
+        let source = dem.revision_key();
         self.upload_dem(device, queue, coords, &dem.tile, dem.revision);
         if let Some(entry) = self.dem_textures.get_mut(&coords) {
             entry.source = Some(source);
         }
+    }
+
+    /// Whether the uploaded copy of the DEM tile at `coords`, if any, is of another revision.
+    pub(crate) fn needs_dem_upload(&self, coords: WorldTileCoords, dem: &LoadedDem) -> bool {
+        let source = dem.revision_key();
+        !self
+            .dem_textures
+            .get(&coords)
+            .is_some_and(|entry| entry.source.as_ref() == Some(&source))
     }
 
     /// Whether a DEM tile has been uploaded.

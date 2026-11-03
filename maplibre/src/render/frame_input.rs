@@ -109,6 +109,14 @@ pub fn frame_input_system(
     }: &mut MapContext,
 ) -> SystemResult {
     super::eye_covering::snapshot_lod_history(world);
+    if !super::eye_covering::EyeInFrame::reuses_content(world) {
+        if let Some(uploads) = world
+            .resources
+            .get_mut::<super::memory_budget::FrameUploads>()
+        {
+            uploads.reset();
+        }
+    }
     let Some(input) = world.resources.get::<FrameInput>() else {
         return Ok(());
     };

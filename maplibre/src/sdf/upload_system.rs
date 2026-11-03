@@ -10,6 +10,7 @@ use crate::{
     context::MapContext,
     render::{
         eventually::{Eventually, Eventually::Initialized},
+        memory_budget::{FrameUploads, UploadKind},
         shaders::{SDFShaderFeatureMetadata, ShaderLayerMetadata},
         Renderer,
     },
@@ -45,11 +46,13 @@ pub fn upload_system(
         return Ok(());
     }
     let visible = super::covering::upload_tiles(world);
-    let Some((Initialized(symbol_buffer_pool), textures, Initialized(pipeline))) =
+    world.resources.get_or_init_mut::<FrameUploads>();
+    let Some((Initialized(symbol_buffer_pool), textures, Initialized(pipeline), budget)) =
         world.resources.query_mut::<(
             &mut Eventually<SymbolBufferPool>,
             &mut SymbolTextures,
             &Eventually<SymbolPipeline>,
+            &mut FrameUploads,
         )>()
     else {
         return Err(SystemError::Dependencies);
@@ -58,22 +61,23 @@ pub fn upload_system(
     textures.retain(&world.tiles);
     let zoom = view_state.style_zoom().level();
 
-    {
-        upload_symbol_layer(
-            symbol_buffer_pool,
-            textures,
-            &TextureContext {
-                device,
-                queue,
-                pipeline: &pipeline.combined,
-            },
-            &mut world.tiles,
-            style,
-            &visible,
-            zoom,
-        );
+    let deferred = upload_symbol_layer(
+        symbol_buffer_pool,
+        textures,
+        &TextureContext {
+            device,
+            queue,
+            pipeline: &pipeline.combined,
+        },
+        &mut world.tiles,
+        (style, &visible, zoom),
+        budget,
+    );
+    let bound = textures.take_bound();
+    if deferred {
+        crate::render::frame_signals::keep_animating(world);
     }
-    for coords in textures.take_bound() {
+    for coords in bound {
         crate::render::frame_signals::resource_ready(
             world,
             crate::render::frame_signals::ResourceReady::SymbolAtlas { coords },
@@ -83,16 +87,16 @@ pub fn upload_system(
     Ok(())
 }
 
+/// Uploads the labels of `visible` tiles that the frame's budget admits; `true` when some wait
+/// for a later frame.
 fn upload_symbol_layer(
     symbol_buffer_pool: &mut SymbolBufferPool,
     textures: &mut SymbolTextures,
     gpu: &TextureContext<'_>,
     tiles: &mut Tiles,
-    style: &Style,
-    visible: &[crate::coords::WorldTileCoords],
-    zoom: f32,
-) {
-    let mut bytes = crate::render::memory_budget::UploadBudget::new(8 << 20);
+    (style, visible, zoom): (&Style, &[crate::coords::WorldTileCoords], f32),
+    budget: &mut FrameUploads,
+) -> bool {
     for &coords in visible {
         crate::vector::content::ensure(tiles, coords);
         let Some((layers, pending)) = tiles.query_mut::<(
@@ -141,8 +145,8 @@ fn upload_symbol_layer(
                     * (size_of::<crate::render::shaders::ShaderSymbolVertex>()
                         + size_of::<SDFShaderFeatureMetadata>())
                     + buffer.buffer.indices.len() * size_of::<u32>();
-                if !bytes.take(size) {
-                    return;
+                if !budget.take(UploadKind::Geometry, size) {
+                    return true;
                 }
                 if !upload_geometry(symbol_buffer_pool, gpu, coords, style_layer, buffer) {
                     continue;
@@ -154,6 +158,7 @@ fn upload_symbol_layer(
             }
         }
     }
+    false
 }
 
 fn prepare_atlas(

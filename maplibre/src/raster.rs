@@ -15,7 +15,6 @@ use crate::{
     raster::{
         populate_world_system::PopulateWorldSystem, queue_system::queue_system,
         request_system::RequestSystem, resource::RasterResources, resource_system::resource_system,
-        upload_system::upload_system,
     },
     render::{
         eventually::Eventually,
@@ -62,7 +61,7 @@ mod resource_system;
 mod source;
 mod transferables;
 pub use source::RasterSourceId;
-mod upload_system;
+pub(crate) mod upload_system;
 
 pub use transferables::{
     DefaultRasterTransferables, LayerRaster, LayerRasterMissing, RasterTransferables,
@@ -104,7 +103,6 @@ impl<E: Environment, T: RasterTransferables> Plugin<E> for RasterPlugin<T> {
             SystemContainer::new(PopulateWorldSystem::<E, T>::new(&kernel)),
         )?;
         schedule.add_system_to_stage(RenderStageLabel::Prepare, resource_system)?;
-        schedule.add_system_to_stage(RenderStageLabel::Queue, upload_system)?;
         schedule.add_system_to_stage(RenderStageLabel::Queue, queue_system)?;
         Ok(())
     }
@@ -208,6 +206,15 @@ impl TileComponent for RasterLayersDataComponent {}
 #[derive(Default)]
 struct RasterTilesDone;
 
+fn source_texture_ready(source: &RasterSourceId, coords: WorldTileCoords, world: &World) -> bool {
+    match world.resources.get::<Eventually<RasterResources>>() {
+        Some(Eventually::Initialized(resources)) if resources.draws(source) => {
+            resources.get_bound_texture(source, &coords).is_some()
+        }
+        _ => true,
+    }
+}
+
 impl HasTile for RasterTilesDone {
     fn has_source_tile(
         &self,
@@ -219,12 +226,21 @@ impl HasTile for RasterTilesDone {
             .tiles
             .query::<&RasterLayersDataComponent>(coords)
             .is_some_and(|data| data.has_source_image(source))
+            && source_texture_ready(source, coords, world)
     }
 
     fn has_tile(&self, coords: WorldTileCoords, world: &World) -> bool {
         world
             .tiles
             .query::<&RasterLayersDataComponent>(coords)
-            .is_some_and(RasterLayersDataComponent::has_image)
+            .is_some_and(|data| {
+                data.layers.iter().any(|layer| {
+                    matches!(
+                        layer,
+                        RasterLayerData::Available(available)
+                            if source_texture_ready(&available.source, coords, world)
+                    )
+                })
+            })
     }
 }

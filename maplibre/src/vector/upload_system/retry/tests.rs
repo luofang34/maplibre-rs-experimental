@@ -44,12 +44,15 @@ fn upload(
         &mut world.tiles,
         style,
         coords,
-        &[],
-        VectorPaintFrame {
-            zoom: 4.0,
-            bearing: 0.0,
-            light: Default::default(),
-        },
+        (
+            &[],
+            VectorPaintFrame {
+                zoom: 4.0,
+                bearing: 0.0,
+                light: Default::default(),
+            },
+        ),
+        &mut crate::render::memory_budget::FrameUploads::default(),
     );
 }
 
@@ -84,7 +87,7 @@ async fn frame_upload_limit_retains_pending_bytes_and_committed_geometry() {
     let retained = tile_bytes(&world.tiles, target);
     assert!(retained > committed);
     let mut first = Vec::new();
-    for x in 0..UPLOADS_PER_FRAME as i32 {
+    for x in 0..crate::render::memory_budget::UPLOADS_PER_FRAME as i32 {
         let coords = WorldTileCoords::from((x, 0, 4_u8.into()));
         world
             .tiles
