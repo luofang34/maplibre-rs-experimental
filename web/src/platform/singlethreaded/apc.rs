@@ -468,6 +468,12 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
             tracing::warn!(attempt, %error, "cancelling a worker call failed");
         }
     }
+
+    fn has_arrivals(&self) -> bool {
+        self.received
+            .try_borrow()
+            .is_ok_and(|received| !received.messages.is_empty())
+    }
 }
 
 mod assignments;

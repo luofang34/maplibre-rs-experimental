@@ -432,3 +432,40 @@ async fn later_eyes_preserve_earlier_eye_animation_signals() {
         "second eye must not clear first eye's animation signal"
     );
 }
+
+#[tokio::test]
+async fn a_flight_asks_for_every_frame_until_it_lands_and_then_none() {
+    use std::time::Duration;
+
+    use crate::{
+        context::FlightOutcome,
+        render::view_state::{CameraOptions, FlightCurve},
+    };
+    let mut map = raster_map().await;
+    map.render_frames_with_terrain(Default::default(), vec![picture()], vec![], 1)
+        .expect("frame");
+    assert!(settle(&mut map), "a still map settles");
+
+    let flight = map.fly_to(
+        CameraOptions {
+            zoom: Some(2.0),
+            ..Default::default()
+        },
+        FlightCurve::Ease {
+            duration: Duration::from_millis(100),
+        },
+    );
+    let mut millis = 0;
+    while map.context().flight_outcome(flight) == FlightOutcome::Flying {
+        assert!(
+            map.needs_redraw(),
+            "a flight in progress needs frame {millis}"
+        );
+        millis += 16;
+        assert!(millis < 1000, "the flight lands");
+        map.frame_input_mut().timestamp = Duration::from_millis(millis);
+        map.run_frame().expect("frame");
+    }
+    assert_eq!(map.context().flight_outcome(flight), FlightOutcome::Arrived);
+    assert!(settle(&mut map), "the landed map stops asking for frames");
+}

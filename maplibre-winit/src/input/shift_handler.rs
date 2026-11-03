@@ -24,7 +24,7 @@ impl UpdateState for ShiftHandler {
         }: &mut MapContext,
         dt: Duration,
     ) {
-        let dt = dt.as_secs_f64() * (1.0 / self.speed);
+        let dt = (dt.as_secs_f64() / self.speed).min(1.0);
 
         let delta = self.camera_translate * dt;
         self.camera_translate -= delta;
@@ -84,5 +84,28 @@ impl ShiftHandler {
             }
             _ => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn long_idle_gap_clamps_decay_fraction_without_overshoot_or_sign_flip() {
+        let mut handler = ShiftHandler::new(0.2, 100.0);
+        assert!(handler.process_key_press(
+            &Key::Character("d".into()),
+            winit::event::ElementState::Pressed
+        ));
+        let initial_x = handler.camera_translate.x;
+        assert!(initial_x > 0.0);
+
+        // Even after a multi-second idle pause, the decay factor caps at 1.0 instead of flipping sign.
+        let factor = (Duration::from_secs(60).as_secs_f64() / handler.speed).min(1.0);
+        let delta = handler.camera_translate * factor;
+        handler.camera_translate -= delta;
+        assert_eq!(delta.x, initial_x);
+        assert_eq!(handler.camera_translate.x, 0.0);
     }
 }

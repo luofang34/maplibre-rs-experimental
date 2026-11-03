@@ -19,6 +19,24 @@ where
         }
     }
 
+    /// Whether a failed tile request waits to be retried; see
+    /// [`crate::context::MapContext::has_scheduled_retries`].
+    pub fn has_scheduled_retries(&self) -> bool {
+        match &self.map_context {
+            CurrentMapContext::Ready(context) => context.has_scheduled_retries(),
+            CurrentMapContext::Pending(_) => false,
+        }
+    }
+
+    /// Shortest wait until a scheduled tile retry is due; see
+    /// [`crate::context::MapContext::next_retry_delay`].
+    pub fn next_retry_delay(&self) -> Option<std::time::Duration> {
+        match &self.map_context {
+            CurrentMapContext::Ready(context) => context.next_retry_delay(),
+            CurrentMapContext::Pending(_) => None,
+        }
+    }
+
     /// The statistics of the last frame drawn.
     pub fn last_frame_stats(&self) -> FrameStats {
         match &self.map_context {

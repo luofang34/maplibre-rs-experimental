@@ -15,7 +15,7 @@ pub struct DebugHandler {
 
 impl UpdateState for DebugHandler {
     fn update_state(&mut self, MapContext { view_state, .. }: &mut MapContext, dt: Duration) {
-        let dt = dt.as_secs_f64() * 10.0;
+        let dt = (dt.as_secs_f64() * 10.0).min(1.0);
 
         let top_delta = self.top_delta * dt;
         let bottom_delta = self.bottom_delta * dt;

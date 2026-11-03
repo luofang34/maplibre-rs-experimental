@@ -195,3 +195,44 @@ fn a_provided_images_report_round_trips_with_its_attempt() {
         assert_eq!(*actual, expected);
     }
 }
+
+#[wasm_bindgen_test]
+fn passing_apc_reports_arrivals_until_receive_offers_them() {
+    use crate::platform::UsedOffscreenKernelEnvironment;
+
+    let received = Rc::new(RefCell::new(Received::default()));
+    let apc = PassingAsyncProcedureCall {
+        workers: Vec::new(),
+        buffer: RefCell::new(Vec::new()),
+        received: received.clone(),
+        assignments: RefCell::default(),
+        styles: RefCell::default(),
+    };
+    assert!(!<PassingAsyncProcedureCall as AsyncProcedureCall<
+        UsedOffscreenKernelEnvironment,
+    >>::has_arrivals(&apc));
+    received.borrow_mut().messages.push(Message::new(
+        &WebMessageTag::LayerDemMissing,
+        Box::new(1_u32),
+    ));
+    assert!(<PassingAsyncProcedureCall as AsyncProcedureCall<
+        UsedOffscreenKernelEnvironment,
+    >>::has_arrivals(&apc));
+    assert!(
+        <PassingAsyncProcedureCall as AsyncProcedureCall<
+            UsedOffscreenKernelEnvironment,
+        >>::has_arrivals(&apc),
+        "peeking arrivals does not consume them"
+    );
+    let matched: Vec<_> = <PassingAsyncProcedureCall as AsyncProcedureCall<
+        UsedOffscreenKernelEnvironment,
+    >>::receive(&apc, |_| false)
+    .collect();
+    assert!(matched.is_empty());
+    assert!(
+        !<PassingAsyncProcedureCall as AsyncProcedureCall<
+            UsedOffscreenKernelEnvironment,
+        >>::has_arrivals(&apc),
+        "buffered unmatched messages do not keep asking for frames after receive offered them"
+    );
+}

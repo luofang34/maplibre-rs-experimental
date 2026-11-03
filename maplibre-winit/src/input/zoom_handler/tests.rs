@@ -48,3 +48,39 @@ fn a_pinch_gesture_of_the_window_reaches_the_zoom() {
         "the pinch's zoom",
     );
 }
+
+#[test]
+fn zoom_handler_reports_wait_for_open_gesture_and_held_pixel_scroll() {
+    use std::time::Duration;
+
+    use instant::Instant;
+    use winit::{dpi::PhysicalPosition, event::MouseScrollDelta};
+
+    let mut handler = ZoomHandler::new(1.0);
+    let start = Instant::now();
+    assert_eq!(handler.next_wait(start), None);
+
+    handler.scroll.add(
+        &MouseScrollDelta::PixelDelta(PhysicalPosition::new(0.0, 200.0)),
+        2.0,
+        start,
+    );
+    assert_eq!(
+        handler.next_wait(start + Duration::from_millis(10)),
+        Some(Duration::from_millis(30))
+    );
+
+    handler.last_input = Some(start);
+    assert_eq!(
+        handler.next_wait(start + Duration::from_millis(10)),
+        Some(Duration::from_millis(30)),
+        "chooses the earlier scroll deadline"
+    );
+    let _ = handler.scroll.take_zoom(start + Duration::from_millis(45));
+    let _ = handler.zoom_delta.take();
+    assert_eq!(
+        handler.next_wait(start + Duration::from_millis(50)),
+        Some(Duration::from_millis(150)),
+        "keeps waiting for GESTURE_END_DELAY while the gesture is open"
+    );
+}

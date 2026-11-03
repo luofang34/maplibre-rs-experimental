@@ -31,11 +31,18 @@ fn a_browser_mouse_notch_waits_for_a_second_event_and_alone_zooms_as_a_wheel() {
     let start = Instant::now();
     input.add(&pixels(100.0), 2.0, start);
     assert_eq!(
+        input.next_wait(ms(start, 16)),
+        Some(Duration::from_millis(24)),
+        "reports remaining wait until FIRST_EVENT_WAIT"
+    );
+    assert_eq!(
         input.take_zoom(ms(start, 16)),
         None,
         "the device is not known yet"
     );
+    assert_eq!(input.next_wait(ms(start, 40)), Some(Duration::ZERO));
     assert_zoom(input.take_zoom(ms(start, 48)), 0.151_412_188, "one notch");
+    assert_eq!(input.next_wait(ms(start, 48)), None);
     input.add(&pixels(-100.0), 2.0, ms(start, 120));
     assert_zoom(
         input.take_zoom(ms(start, 130)),
