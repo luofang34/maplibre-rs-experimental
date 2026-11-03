@@ -13,6 +13,10 @@ import {
 } from "wasm-feature-detect"
 
 
+import {ensureWebGpuCompatibility} from "./webgpu-compat.mjs";
+
+export {ensureWebGpuCompatibility};
+
 export const checkRequirements = () => {
     if (MULTITHREADED) {
         if (!isSecureContext) {

@@ -6,7 +6,7 @@ use image::RgbaImage;
 
 use crate::{
     context::MapContext,
-    coords::{LatLon, WorldCoords, WorldTileCoords, Zoom},
+    coords::{WorldCoords, WorldTileCoords, Zoom},
     headless::environment::HeadlessEnvironment,
     io::{
         apc::{Context, IntoMessage, Message, SendError},
@@ -574,8 +574,8 @@ fn initial_view_state(window_size: crate::window::PhysicalSize, style: &Style) -
         (f64::from(window_size.height()) / crate::coords::TILE_SIZE).log2()
     };
     let zoom = Zoom::new(style.zoom.unwrap_or_default().max(lowest_zoom));
-    let center = style.center.unwrap_or_default();
-    let mut center = WorldCoords::from_lat_lon(LatLon::new(center[1], center[0]), zoom);
+    let mut center =
+        WorldCoords::from_lat_lon(crate::map::camera::clamped_style_center(style), zoom);
     if !globe {
         // The view may not show past the poles of a flat world, as GL JS constrains the centre.
         let world = crate::coords::TILE_SIZE * 2_f64.powf(zoom.value());

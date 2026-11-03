@@ -93,8 +93,8 @@ pub struct TerrainTileUniforms {
     pub procedural_relief: [f32; 4],
     /// Procedural DEM grid & TAWS controls: `[grid_spacing_m, grid_opacity, taws_enabled, tile_span_m]`.
     pub procedural_grid: [f32; 4],
-    /// Index into the per-frame edge storage buffer in `edge_index[0]`.
-    pub edge_index: [f32; 4],
+    /// Edge buffer index in `[0]`, and packed RGBA8 north/south polar cap colours in `[1]`/`[2]`.
+    pub edge_index: [u32; 4],
 }
 
 /// The fog of a frame, shared by every terrain tile, as GL JS `terrainUniformValues` takes it.

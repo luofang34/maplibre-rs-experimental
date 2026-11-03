@@ -97,7 +97,7 @@ impl EdgeCache {
         for (index, ((_, tile, _), uniform)) in sources.iter().zip(uniforms.iter_mut()).enumerate()
         {
             let edge = self.samples.get(tile).copied().unwrap_or_default();
-            uniform.edge_index = [index as f32, 0.0, 0.0, 0.0];
+            uniform.edge_index[0] = index as u32;
             edges.push(edge);
         }
         edges

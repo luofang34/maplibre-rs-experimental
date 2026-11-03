@@ -25,7 +25,7 @@ struct TerrainTileUniforms {
     moonlight: vec4<f32>,
     procedural_relief: vec4<f32>,
     procedural_grid: vec4<f32>,
-    edge_index: vec4<f32>,
+    edge_index: vec4<u32>,
 };
 
 const TERRAIN_EXTENT: f32 = 4096.0;
@@ -56,7 +56,7 @@ fn terrain_elevation(position: vec2<f32>) -> f32 { return terrain_height_gradien
 
 // Edge samples follow the coarsest touching mesh, so refinement never opens a crack.
 fn edge_height(t: f32, edge: u32) -> f32 {
-    let edge_idx = u32(terrain_tile.edge_index.x);
+    let edge_idx = terrain_tile.edge_index.x;
     let i = u32(clamp(round(t / 32.0), 0.0, 128.0));
     return textureLoad(edge_heights, vec2<u32>(i, edge_idx), 0)[edge] * terrain_tile.exaggeration;
 }

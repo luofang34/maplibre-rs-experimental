@@ -114,3 +114,31 @@ fn a_jump_before_the_renderer_is_ready_moves_the_view_the_map_starts_with() {
         "what it leaves out is kept"
     );
 }
+
+#[test]
+fn initial_style_center_at_poles_clamps_to_finite_mercator_latitude() {
+    use crate::{projection::globe::scale::MERCATOR_LATITUDE_LIMIT, window::PhysicalSize};
+
+    let size = PhysicalSize::new(800, 600).expect("size");
+    for (pole_lat, expected_lat) in [
+        (90.0, MERCATOR_LATITUDE_LIMIT),
+        (-90.0, -MERCATOR_LATITUDE_LIMIT),
+    ] {
+        let style = Style {
+            center: Some([15.0, pole_lat]),
+            zoom: Some(1.5),
+            ..Style::default()
+        };
+        let view = starting_view(&style, None, size, DEFAULT_MAX_PITCH, None).expect("view");
+        let center = view.center_lat_lon();
+        assert!(
+            center.latitude.is_finite() && center.longitude.is_finite(),
+            "pole style center must stay finite: {center}"
+        );
+        assert!(
+            (center.latitude - expected_lat).abs() < 1e-9,
+            "expected clamped latitude {expected_lat}, got {center}"
+        );
+        assert!((center.longitude - 15.0).abs() < 1e-9, "{center}");
+    }
+}

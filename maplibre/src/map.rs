@@ -449,7 +449,7 @@ where
     }
 }
 
-mod camera;
+pub(crate) mod camera;
 mod frame;
 mod provided_images;
 mod signals;

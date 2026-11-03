@@ -1,7 +1,7 @@
 import * as maplibre from "./wasm/maplibre"
 import {initializeWasm} from "./wasm-instance.mjs";
 import {Spector} from "spectorjs"
-import {checkRequirements, checkWasmFeatures} from "./browser";
+import {checkRequirements, checkWasmFeatures, ensureWebGpuCompatibility} from "./browser";
 import {preventDefaultTouchActions} from "./canvas";
 // @ts-ignore esbuild plugin is handling this
 import MultithreadedPoolWorker from './multithreaded/multithreaded-pool.worker.js';
@@ -31,6 +31,10 @@ export const startMapLibre = async (wasmPath: string | undefined, workerPath: st
     if (WEBGL) {
         let spector = new Spector()
         spector.displayUI()
+    }
+
+    if (!WEBGL) {
+        ensureWebGpuCompatibility();
     }
 
     preventDefaultTouchActions();

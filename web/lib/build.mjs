@@ -181,14 +181,18 @@ const wasmPack = () => {
         "--out-dir", outDirectory,
         "--typescript",
         "--target", "web",
-        "--debug",
+        ...(release ? [] : ["--debug"]),
     ]);
 
     if (wasmbindgen.status !== 0) {
         throw new Error("Failed to execute wasm-bindgen")
     }
 
-    const memoryTests = spawnTool('node', ['--test', 'test/wasm-instance.test.mjs']);
+    const memoryTests = spawnTool('node', [
+        '--test',
+        'test/wasm-instance.test.mjs',
+        'test/webgpu-compat.test.mjs',
+    ]);
     if (memoryTests.status !== 0) {
         throw new Error('Wasm instance initialization tests failed');
     }

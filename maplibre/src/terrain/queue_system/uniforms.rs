@@ -19,6 +19,7 @@ use crate::{
     },
 };
 mod globe;
+mod polar;
 #[derive(Clone, Default)]
 pub(crate) struct TerrainEyeFrame(pub Vec<(WorldTileCoords, TerrainTileUniforms)>);
 
@@ -180,7 +181,7 @@ pub(super) fn tile_uniforms(
             f32::from(textures.drape.is_none()),
             0.0,
         ],
-        edge_index: [0.0; 4],
+        edge_index: [0; 4],
         surface_color: [0.0; 4],
         fog_position: [0.0; 4],
         daylight: [0.0; 4],
@@ -228,30 +229,54 @@ pub(super) struct PreparedTerrain {
     pub(super) sources: Vec<TileSources>,
 }
 
-/// The skirts and the host's sun the surface of every tile is drawn with this frame.
-pub(super) fn surface_settings(
+pub(super) struct SurfaceContext<'a> {
+    style: &'a Style,
+    view_state: &'a ViewState,
+    dem: &'a DemSource,
+    skirts: crate::terrain::TerrainSkirts,
+    lighting: crate::render::SceneLighting,
+    paint_zoom: f64,
+}
+
+/// Captures style, view, DEM and host lighting inputs for preparing terrain tile uniforms.
+pub(super) fn surface_context<'a>(
     world: &World,
-) -> (crate::terrain::TerrainSkirts, crate::render::SceneLighting) {
+    style: &'a Style,
+    view_state: &'a ViewState,
+    dem: &'a DemSource,
+) -> SurfaceContext<'a> {
     let skirts = world.resources.get::<crate::terrain::TerrainSkirts>();
     let lighting = world
         .resources
         .get::<crate::render::SceneLighting>()
         .copied()
         .unwrap_or_default();
-    (skirts.copied().unwrap_or_default(), lighting)
+    let paint_zoom =
+        crate::vector::upload_system::paint::current_zoom(world, view_state.style_zoom().value());
+    SurfaceContext {
+        style,
+        view_state,
+        dem,
+        skirts: skirts.copied().unwrap_or_default(),
+        lighting,
+        paint_zoom,
+    }
 }
 
 pub(super) fn prepare_tiles(
     targets: (&[TargetSpec], &[Option<WorldTileCoords>]),
-    style: &Style,
-    view_state: &ViewState,
     terrain: &TerrainResources,
-    (dem, skirts, lighting): (
-        &DemSource,
-        crate::terrain::TerrainSkirts,
-        crate::render::SceneLighting,
-    ),
+    tiles: &crate::tcs::tiles::Tiles,
+    ctx: SurfaceContext<'_>,
 ) -> PreparedTerrain {
+    let SurfaceContext {
+        style,
+        view_state,
+        dem,
+        skirts,
+        lighting,
+        paint_zoom,
+    } = ctx;
     let (specs, drape_sources) = targets;
     let zoom = view_state.zoom();
     let gpu_view_projection = view_state.gpu_view_projection();
@@ -286,6 +311,9 @@ pub(super) fn prepare_tiles(
         ) else {
             continue;
         };
+        let [north_cap, south_cap] =
+            polar::cap_colors(spec.coords, drape_source, style, tiles, paint_zoom);
+        block.edge_index = [0, north_cap, south_cap, 0];
         surface_uniforms(
             &mut block,
             spec.coords,
