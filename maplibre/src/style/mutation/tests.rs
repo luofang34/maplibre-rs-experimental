@@ -390,3 +390,27 @@ fn adding_or_removing_an_image_marks_every_symbol_layer_changed() {
     style.remove_image("dot");
     assert!(style.images.is_empty());
 }
+
+#[test]
+fn a_raster_layer_draws_an_image_source() {
+    let mut style = style();
+    let image: Source = serde_json::from_value(json!({
+        "type": "image",
+        "url": "https://example.test/plate.png",
+        "coordinates": [[-74.3, 40.8], [-74.0, 40.8], [-74.0, 40.6], [-74.3, 40.6]]
+    }))
+    .expect("image source");
+    style.add_source("plate", image).expect("add source");
+    style
+        .add_layer(
+            json!({"id": "plate", "type": "raster", "source": "plate",
+            "paint": {"raster-opacity": 0.78}}),
+            None,
+        )
+        .expect("a raster layer can draw an image source");
+    assert_eq!(ids(&style).last().map(String::as_str), Some("plate"));
+    assert!(matches!(
+        style.add_layer(json!({"id": "x", "type": "fill", "source": "plate"}), None),
+        Err(StyleMutationError::WrongSourceKind { .. })
+    ));
+}
