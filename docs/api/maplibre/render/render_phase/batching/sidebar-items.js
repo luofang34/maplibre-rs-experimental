@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["BinnedRenderPhaseBatchSet","BinnedRenderPhaseBatchSets","FallbackInstanceBufferMode"],"mod":["instance_buffer","prepare","unbatched"],"struct":["BinnedRenderPhaseBatch"],"trait":["GetBatchData","GetFullBatchData"]};

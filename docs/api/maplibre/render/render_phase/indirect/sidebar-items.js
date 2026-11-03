@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["IndirectMeshMetadata"],"mod":["buffers"],"struct":["DrawIndexedIndirectArgs","DrawIndirectArgs","IndirectBatchSet","IndirectParametersCpuMetadata"]};

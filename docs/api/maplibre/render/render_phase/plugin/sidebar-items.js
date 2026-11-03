@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["cleanup_binned_phase_world","cleanup_binned_render_phase_system","prepare_binned_phase_world","prepare_binned_render_phase_system"],"struct":["BinnedRenderPhasePlugin"]};

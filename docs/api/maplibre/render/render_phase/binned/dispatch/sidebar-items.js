@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["DirectDrawGeometry"],"fn":["draw_binned_indexed","draw_binned_mesh","draw_binned_non_indexed"]};

@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["RenderCommandResult"],"macro":[["render_command_tuple_impl",1]],"struct":["DrawState"],"trait":["Draw","PhaseItem","RenderCommand"]};
+window.SIDEBAR_ITEMS = {"enum":["PhaseItemExtraIndex","RenderCommandResult"],"macro":[["render_command_tuple_impl",1]],"struct":["DrawFunctionId","DrawFunctions","DrawState"],"trait":["Draw","PhaseItem","RenderCommand"]};

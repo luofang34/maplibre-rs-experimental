@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MIN_INDIRECT_CAPACITY"],"fn":["ensure_indirect_buffer","upload_delta"],"struct":["BackingIndirectBuffer","IndirectParametersBuffers"]};
