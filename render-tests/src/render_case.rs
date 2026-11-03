@@ -19,22 +19,21 @@ use maplibre::{
 };
 
 use crate::{
-    comparison::{compare_and_diff, composite_opaque_background, unpremultiply},
+    comparison::{compare_and_diff, composite_opaque_background, unpremultiply, Difference},
     parse_test_meta,
     source_loading::{load_dem_tiles_blocking, load_sources_blocking, DepartingRasterTiles},
     TestMeta, TestResult,
 };
 
 pub(super) async fn run_test_inner(test_dir: &Path) -> TestResult {
-    let result = render_fixture(test_dir).await;
-    match result {
-        Ok((diff, limit)) if diff < limit => TestResult::Pass { diff },
-        Ok((diff, _)) => TestResult::Fail { diff },
+    match render_fixture(test_dir).await {
+        Ok((difference, limits)) if difference.within(limits) => TestResult::Pass(difference),
+        Ok((difference, _)) => TestResult::Fail(difference),
         Err(error) => TestResult::Error(error),
     }
 }
 
-async fn render_fixture(test_dir: &Path) -> Result<(f64, f64), String> {
+async fn render_fixture(test_dir: &Path) -> Result<(Difference, Difference), String> {
     let (mut style, meta, vector_states) = load_style_blocking(test_dir)?;
     let images = crate::image_sources::lower(&mut style)?;
     let mut map = create_map(&style, &meta).await?;
@@ -122,13 +121,23 @@ async fn render_fixture(test_dir: &Path) -> Result<(f64, f64), String> {
             std::fs::remove_file(path).ok();
         }
         // A query either returns what GL JS returns or it does not.
-        return Ok((if matched { 0.0 } else { 1.0 }, 0.5));
+        let mean = if matched { 0.0 } else { 1.0 };
+        return Ok((
+            Difference { mean, solid: 0 },
+            Difference {
+                mean: 0.5,
+                solid: 0,
+            },
+        ));
     }
-    let diff = compare_frame_blocking(last, test_dir, &meta)?;
+    let difference = compare_frame_blocking(last, test_dir, &meta)?;
     for path in &frames {
         std::fs::remove_file(path).ok();
     }
-    Ok((diff, meta.max_diff))
+    Ok((
+        difference,
+        Difference::limits(meta.max_diff, meta.pixel_ratio),
+    ))
 }
 
 fn load_style_blocking(
@@ -298,7 +307,11 @@ async fn create_map(style: &Style, meta: &TestMeta) -> Result<HeadlessMap, Strin
     Ok(map)
 }
 
-fn compare_frame_blocking(frame: &Path, test_dir: &Path, meta: &TestMeta) -> Result<f64, String> {
+fn compare_frame_blocking(
+    frame: &Path,
+    test_dir: &Path,
+    meta: &TestMeta,
+) -> Result<Difference, String> {
     if !frame.exists() {
         return Err("Renderer did not produce the requested final frame".into());
     }
@@ -327,21 +340,24 @@ fn compare_frame_blocking(frame: &Path, test_dir: &Path, meta: &TestMeta) -> Res
         ));
     }
     let diff_path = test_dir.join("diff.png");
-    let mut best: Option<(f64, PathBuf)> = None;
+    let mut best: Option<(Difference, PathBuf)> = None;
     for reference in references.drain(..) {
-        let diff = compare_and_diff(&actual, &reference, &diff_path)
+        let difference = compare_and_diff(&actual, &reference, &diff_path, meta.pixel_ratio)
             .map_err(|error| format!("Image comparison failed: {error}"))?;
-        if best.as_ref().is_none_or(|(smallest, _)| diff < *smallest) {
-            best = Some((diff, reference));
+        if best
+            .as_ref()
+            .is_none_or(|(closest, _)| difference.mean < closest.mean)
+        {
+            best = Some((difference, reference));
         }
     }
-    let Some((diff, reference)) = best else {
+    let Some((difference, reference)) = best else {
         return Err("no reference image".into());
     };
     // Leave the difference image of the closest reference.
-    compare_and_diff(&actual, &reference, &diff_path)
+    compare_and_diff(&actual, &reference, &diff_path, meta.pixel_ratio)
         .map_err(|error| format!("Image comparison failed: {error}"))?;
-    Ok(diff)
+    Ok(difference)
 }
 
 /// Every reference image of a fixture, `expected.png` first.

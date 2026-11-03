@@ -46,7 +46,7 @@ fn report_items(outcomes: &[TestOutcome]) -> (String, String, Vec<String>, Vec<S
         let item = report_item(outcome);
         let test_id = format!("tests/{}", outcome.id);
         match outcome.result {
-            TestResult::Fail { .. } => {
+            TestResult::Fail(_) => {
                 failed_items.push_str(&item);
                 failed_ids.push(test_id);
             }
@@ -54,7 +54,7 @@ fn report_items(outcomes: &[TestOutcome]) -> (String, String, Vec<String>, Vec<S
                 errored_items.push_str(&item);
                 errored_ids.push(test_id);
             }
-            TestResult::Pass { .. } => {}
+            TestResult::Pass(_) => {}
         }
     }
     (failed_items, errored_items, failed_ids, errored_ids)
@@ -63,8 +63,8 @@ fn report_items(outcomes: &[TestOutcome]) -> (String, String, Vec<String>, Vec<S
 fn report_item(outcome: &TestOutcome) -> String {
     let expected = format!("../tests/{}/expected.png", outcome.id);
     let status = match &outcome.result {
-        TestResult::Pass { diff } => format!("PASS (diff={diff:.4})"),
-        TestResult::Fail { diff } => format!("FAIL (diff={diff:.4})"),
+        TestResult::Pass(difference) => format!("PASS ({difference})"),
+        TestResult::Fail(difference) => format!("FAIL ({difference})"),
         TestResult::Error(message) => format!("ERROR: {message}"),
     };
     format!(
@@ -84,7 +84,7 @@ fn report_item(outcome: &TestOutcome) -> String {
 fn report_banner(outcomes: &[TestOutcome], failed: usize, errored: usize) -> String {
     let passed = outcomes
         .iter()
-        .filter(|outcome| matches!(outcome.result, TestResult::Pass { .. }))
+        .filter(|outcome| matches!(outcome.result, TestResult::Pass(_)))
         .count();
     if failed == 0 && errored == 0 {
         format!(r#"<h1 style="color: green">All {passed} tests passed!</h1>"#)

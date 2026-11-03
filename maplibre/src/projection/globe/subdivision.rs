@@ -127,7 +127,6 @@ where
     if options.granularity < 2 {
         return Ok(());
     }
-    sanitize_pole_sentinels(&mut buffer.vertices);
     let input = buffer.indices[index_start..].to_vec();
     buffer.indices.truncate(index_start);
     let mut vertices = HashMap::with_capacity(input.len());
@@ -145,14 +144,14 @@ where
     Ok(())
 }
 
-fn sanitize_pole_sentinels(vertices: &mut [ShaderVertex]) {
-    for vertex in vertices {
-        if vertex.position[1] == NORTH_POLE_Y {
-            vertex.position[1] = NORTH_POLE_Y + 1.0;
-        } else if vertex.position[1] == SOUTH_POLE_Y {
-            vertex.position[1] = SOUTH_POLE_Y - 1.0;
-        }
-    }
+/// Keeps a tessellated point strictly between the pole sentinels, even once rounded to a vertex,
+/// so only `append_pole_quads` makes vertices the shader draws at a pole. Only the copy read for
+/// clipping is changed: the buffer holds earlier polygons' pole vertices, which must stay exact.
+fn off_pole_sentinels(point: [f32; 2]) -> [f32; 2] {
+    [
+        point[0],
+        point[1].clamp(NORTH_POLE_Y + 1.0, SOUTH_POLE_Y - 1.0),
+    ]
 }
 
 fn collect_axis_crossings(start: f32, end: f32, cell_size: f32, output: &mut Vec<f32>) {
@@ -180,7 +179,7 @@ fn triangle_points<I: Copy + Into<u32>>(
             index,
             vertex_count: vertices.len(),
         })?;
-        *slot = vertex.position;
+        *slot = off_pole_sentinels(vertex.position);
     }
     Ok(points)
 }
