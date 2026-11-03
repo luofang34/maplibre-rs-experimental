@@ -5,7 +5,7 @@ use crate::{
     render::{
         depth_copy::DepthCopyPipeline,
         eventually::{Eventually, Eventually::Initialized, HasChanged},
-        graph::{Node, NodeRunError, RenderContext, RenderGraphContext},
+        graph::{Node, RenderContext},
         RenderResources,
     },
     tcs::world::World,
@@ -88,13 +88,7 @@ impl HasChanged for SunDepth {
 pub struct SunDepthCopyNode;
 
 impl Node for SunDepthCopyNode {
-    fn run(
-        &self,
-        _graph: &mut RenderGraphContext,
-        render_context: &mut RenderContext,
-        state: &RenderResources,
-        world: &World,
-    ) -> Result<(), NodeRunError> {
+    fn run(&self, render_context: &mut RenderContext, state: &RenderResources, world: &World) {
         let drawn = world
             .resources
             .get::<super::SunGpu>()
@@ -104,7 +98,7 @@ impl Node for SunDepthCopyNode {
             &state.depth_texture,
             drawn,
         ) else {
-            return Ok(());
+            return;
         };
         depth.copy.copy(
             render_context.device,
@@ -112,6 +106,5 @@ impl Node for SunDepthCopyNode {
             &source.texture,
             &depth.view,
         );
-        Ok(())
     }
 }

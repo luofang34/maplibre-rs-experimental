@@ -18,7 +18,7 @@ use crate::{
     context::MapContext,
     render::{
         eventually::{Eventually, Eventually::Initialized},
-        graph::{Node, NodeRunError, RenderContext, RenderGraphContext},
+        graph::{Node, RenderContext},
         settings::Msaa,
         upload_queue::UploadQueue,
         RenderResources, Renderer,
@@ -303,24 +303,18 @@ pub(super) fn prepare_system(
 pub(super) struct DepthProbePassNode;
 
 impl Node for DepthProbePassNode {
-    fn run(
-        &self,
-        _graph: &mut RenderGraphContext,
-        render_context: &mut RenderContext,
-        state: &RenderResources,
-        world: &World,
-    ) -> Result<(), NodeRunError> {
+    fn run(&self, render_context: &mut RenderContext, state: &RenderResources, world: &World) {
         let Some(Initialized(gpu)) = world.resources.get::<Eventually<ProbeGpu>>() else {
-            return Ok(());
+            return;
         };
         let Some(pending) = &gpu.pending else {
-            return Ok(());
+            return;
         };
         if pending.state.load(Ordering::Acquire) != TO_ENCODE {
-            return Ok(());
+            return;
         }
         let Initialized(depth_texture) = &state.depth_texture else {
-            return Ok(());
+            return;
         };
         // The map's depth carries a stencil; a depth texture binding sees one aspect.
         let depth = depth_texture
@@ -384,6 +378,5 @@ impl Node for DepthProbePassNode {
             pending.target.size(),
         );
         pending.state.store(ENCODED, Ordering::Release);
-        Ok(())
     }
 }

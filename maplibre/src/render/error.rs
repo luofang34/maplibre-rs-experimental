@@ -18,12 +18,9 @@ pub enum RenderError {
     /// A presentation surface could not be created from the host handles.
     #[error("error during surface creation")]
     CreateSurfaceError(#[from] wgpu::CreateSurfaceError),
-    /// A graph node or connection did not satisfy the graph's contract.
+    /// The render passes could not be added, ordered or resolved.
     #[error("error in render graph")]
     Graph(#[from] RenderGraphError),
-    /// A graph node failed while recording the frame; the frame was not submitted.
-    #[error("running the render graph failed")]
-    GraphRun(#[source] Box<dyn std::error::Error + Send + Sync>),
     /// The adapter could not create a device with the requested features and limits.
     #[error("error while requesting device")]
     RequestDevice(#[from] wgpu::RequestDeviceError),

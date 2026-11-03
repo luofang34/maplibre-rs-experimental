@@ -1,6 +1,6 @@
 use crate::{
     render::{
-        graph::{Node, NodeRunError, RenderContext, RenderGraphContext, SlotInfo},
+        graph::{Node, RenderContext},
         resource::Head,
         RenderResources,
     },
@@ -14,22 +14,15 @@ use crate::{
 pub struct CopySurfaceBufferNode;
 
 impl Node for CopySurfaceBufferNode {
-    fn input(&self) -> Vec<SlotInfo> {
-        vec![]
-    }
-
-    fn update(&mut self, _state: &mut RenderResources) {}
-
     fn run(
         &self,
-        _graph: &mut RenderGraphContext,
         RenderContext {
             device,
             command_encoder,
         }: &mut RenderContext,
         state: &RenderResources,
         _world: &World,
-    ) -> Result<(), NodeRunError> {
+    ) {
         let surface = state.surface();
         match surface.head() {
             Head::Headed(_) => {}
@@ -53,7 +46,5 @@ impl Node for CopySurfaceBufferNode {
                 );
             }
         }
-
-        Ok(())
     }
 }

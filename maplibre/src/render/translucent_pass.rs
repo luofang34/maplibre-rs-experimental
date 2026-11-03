@@ -4,7 +4,7 @@ use wgpu::StoreOp;
 
 use crate::{
     render::{
-        graph::{Node, NodeRunError, RenderContext, RenderGraphContext, SlotInfo},
+        graph::{Node, RenderContext},
         render_phase::{RenderPhase, TranslucentItem},
         Eventually::Initialized,
         RenderResources,
@@ -21,28 +21,16 @@ impl TranslucentPassNode {
 }
 
 impl Node for TranslucentPassNode {
-    fn input(&self) -> Vec<SlotInfo> {
-        vec![]
-    }
-
-    fn update(&mut self, _state: &mut RenderResources) {}
-
-    fn run(
-        &self,
-        _graph: &mut RenderGraphContext,
-        render_context: &mut RenderContext,
-        state: &RenderResources,
-        world: &World,
-    ) -> Result<(), NodeRunError> {
+    fn run(&self, render_context: &mut RenderContext, state: &RenderResources, world: &World) {
         let Initialized(render_target) = &state.render_target else {
-            return Ok(());
+            return;
         };
         let Initialized(multisampling_texture) = &state.multisampling_texture else {
-            return Ok(());
+            return;
         };
 
         let Initialized(depth_texture) = &state.depth_texture else {
-            return Ok(());
+            return;
         };
         if let Some(Initialized(symbol_depth)) =
             world
@@ -138,7 +126,5 @@ impl Node for TranslucentPassNode {
             }
         }
         render_pass.finish(world);
-
-        Ok(())
     }
 }

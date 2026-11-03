@@ -11,34 +11,9 @@ use crate::{
 };
 
 #[cfg(all(feature = "headless", feature = "experimental"))]
-fn reaches(
-    graph: &crate::render::graph::RenderGraph,
-    from: &'static str,
-    to: &'static str,
-) -> bool {
-    let Ok(target_state) = graph.get_node_state(to) else {
-        return false;
-    };
-    let target_id = target_state.id;
-    let Ok(start_state) = graph.get_node_state(from) else {
-        return false;
-    };
-    let mut stack: Vec<crate::render::graph::NodeId> = vec![start_state.id];
-    let mut visited = std::collections::HashSet::new();
-    while let Some(current) = stack.pop() {
-        if current == target_id && current != start_state.id {
-            return true;
-        }
-        if !visited.insert(current) {
-            continue;
-        }
-        if let Ok(outputs) = graph.iter_node_outputs(current) {
-            for (_, next) in outputs {
-                stack.push(next.id);
-            }
-        }
-    }
-    false
+fn runs_before(order: &[&str], first: &str, then: &str) -> bool {
+    let position = |name| order.iter().position(|pass| *pass == name);
+    matches!((position(first), position(then)), (Some(a), Some(b)) if a < b)
 }
 
 #[cfg(feature = "headless")]
@@ -68,45 +43,51 @@ fn scene_3d_pass_locks_canonical_draw_graph_ordering_across_plugins() {
     OverlayPlugin.build(&mut schedule, Rc::clone(&kernel), &mut world, &mut graph);
     StarfieldPlugin.build(&mut schedule, Rc::clone(&kernel), &mut world, &mut graph);
 
-    let draw = graph
-        .get_sub_graph(draw_graph::NAME)
-        .expect("draw subgraph");
-    assert!(reaches(draw, draw_graph::node::MAIN_PASS, GLOBE_DAYLIGHT));
-    assert!(reaches(
-        draw,
+    let draw = graph.node_order().expect("acyclic passes");
+    assert!(runs_before(
+        &draw,
+        draw_graph::node::MAIN_PASS,
+        GLOBE_DAYLIGHT
+    ));
+    assert!(runs_before(
+        &draw,
         GLOBE_DAYLIGHT,
         draw_graph::node::SCENE_3D_PASS
     ));
-    assert!(reaches(
-        draw,
+    assert!(runs_before(
+        &draw,
         draw_graph::node::MAIN_PASS,
         draw_graph::node::SCENE_3D_PASS
     ));
-    assert!(reaches(draw, draw_graph::node::SCENE_3D_PASS, OVERLAY_PASS));
-    assert!(reaches(draw, OVERLAY_PASS, DEPTH_PROBE_PASS));
-    assert!(reaches(
-        draw,
+    assert!(runs_before(
+        &draw,
+        draw_graph::node::SCENE_3D_PASS,
+        OVERLAY_PASS
+    ));
+    assert!(runs_before(&draw, OVERLAY_PASS, DEPTH_PROBE_PASS));
+    assert!(runs_before(
+        &draw,
         DEPTH_PROBE_PASS,
         draw_graph::node::TRANSLUCENT_PASS
     ));
-    assert!(reaches(
-        draw,
+    assert!(runs_before(
+        &draw,
         draw_graph::node::SCENE_3D_PASS,
         SUN_DEPTH_COPY
     ));
-    assert!(reaches(
-        draw,
+    assert!(runs_before(
+        &draw,
         SUN_DEPTH_COPY,
         draw_graph::node::TRANSLUCENT_PASS
     ));
-    assert!(reaches(
-        draw,
+    assert!(runs_before(
+        &draw,
         draw_graph::node::TRANSLUCENT_PASS,
         draw_graph::node::DEPTH_COPY
     ));
     assert!(
-        !reaches(
-            draw,
+        !runs_before(
+            &draw,
             draw_graph::node::TRANSLUCENT_PASS,
             draw_graph::node::SCENE_3D_PASS
         ),

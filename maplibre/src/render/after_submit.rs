@@ -1,4 +1,4 @@
-//! Callbacks invoked after command buffer submission to the GPU queue.
+//! Work done around the submission of the frame's command buffer.
 
 use crate::tcs::world::World;
 
@@ -38,6 +38,27 @@ impl AfterSubmitCallbacks {
     pub fn run(&self, world: &World) {
         for callback in &self.callbacks {
             callback.after_submit(world);
+        }
+    }
+}
+
+/// Commands recorded into the frame's encoder after every render pass and before the frame is
+/// submitted, such as resolving timestamp queries the passes wrote.
+#[derive(Default)]
+pub struct BeforeSubmitHooks {
+    hooks: Vec<fn(&World, &mut wgpu::CommandEncoder)>,
+}
+
+impl BeforeSubmitHooks {
+    /// Registers a hook; hooks run in registration order.
+    pub fn register(&mut self, hook: fn(&World, &mut wgpu::CommandEncoder)) {
+        self.hooks.push(hook);
+    }
+
+    /// Runs every hook against the frame's encoder.
+    pub fn run(&self, world: &World, encoder: &mut wgpu::CommandEncoder) {
+        for hook in &self.hooks {
+            hook(world, encoder);
         }
     }
 }

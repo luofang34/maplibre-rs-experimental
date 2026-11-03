@@ -206,13 +206,10 @@ impl<E: Environment> Plugin<E> for OverlayPlugin {
             world.resources.insert(callbacks);
         }
 
-        let Some(draw_graph) = graph.get_sub_graph_mut(draw_graph::NAME) else {
-            tracing::error!("draw graph is missing; the host overlay will not be drawn");
-            return;
-        };
-        draw_graph.add_node(OVERLAY_PASS, pass::OverlayPassNode);
-        draw_graph.add_node(DEPTH_PROBE_PASS, probes::DepthProbePassNode);
+        let draw_graph = &mut *graph;
         let edges = [
+            draw_graph.add_node(OVERLAY_PASS, pass::OverlayPassNode),
+            draw_graph.add_node(DEPTH_PROBE_PASS, probes::DepthProbePassNode),
             draw_graph.add_node_edge(draw_graph::node::SCENE_3D_PASS, OVERLAY_PASS),
             draw_graph.add_node_edge(OVERLAY_PASS, DEPTH_PROBE_PASS),
             draw_graph.add_node_edge(DEPTH_PROBE_PASS, draw_graph::node::TRANSLUCENT_PASS),

@@ -33,8 +33,6 @@ mod resource_system;
 
 /// Labels for the "draw" graph
 mod draw_graph {
-    pub const NAME: &str = "draw";
-    // Labels for non-input nodes
     pub mod node {
         pub const DEBUG_PASS: &str = "debug_pass";
     }
@@ -81,13 +79,19 @@ impl<E: Environment> Plugin<E> for DebugPlugin {
     ) {
         let resources = &mut world.resources;
 
-        let draw_graph = graph.get_sub_graph_mut(draw_graph::NAME).unwrap();
-        draw_graph.add_node(draw_graph::node::DEBUG_PASS, DebugPassNode::new());
-
-        // FIXME: remove this dependency to translucent pass
-        draw_graph
-            .add_node_edge("translucent_pass", draw_graph::node::DEBUG_PASS)
-            .unwrap();
+        let draw_graph = &mut *graph;
+        let edges = [
+            draw_graph.add_node(draw_graph::node::DEBUG_PASS, DebugPassNode::new()),
+            draw_graph.add_node_edge(
+                crate::render::draw_graph::node::TRANSLUCENT_PASS,
+                draw_graph::node::DEBUG_PASS,
+            ),
+        ];
+        for edge in edges {
+            if let Err(error) = edge {
+                tracing::error!(%error, "the debug pass cannot be ordered after the translucent pass");
+            }
+        }
 
         resources.init::<RenderPhase<TileDebugItem>>();
         resources.insert(Eventually::<DebugPipeline>::Uninitialized);

@@ -13,12 +13,7 @@ use crate::{
     environment::Environment,
     kernel::Kernel,
     plugin::Plugin,
-    render::{
-        draw_graph,
-        eventually::Eventually,
-        graph::{NodeLabel, RenderGraph},
-        RenderStageLabel,
-    },
+    render::{draw_graph, eventually::Eventually, graph::RenderGraph, RenderStageLabel},
     schedule::Schedule,
     tcs::world::World,
 };
@@ -54,19 +49,12 @@ impl<E: Environment> Plugin<E> for HeatmapPlugin {
         schedule.add_system_to_stage(RenderStageLabel::Prepare, prepare_system::prepare_system);
         schedule.add_system_to_stage(RenderStageLabel::Queue, queue_system::queue_system);
 
-        let Some(draw_graph) = graph.get_sub_graph_mut(draw_graph::NAME) else {
-            tracing::error!("draw graph is missing; heatmaps will not be drawn");
-            return;
-        };
-        draw_graph.add_node(density_pass::DENSITY_PASS, density_pass::DensityPassNode);
-        let input = draw_graph.input_node().map(|node| node.id);
+        let draw_graph = &mut *graph;
         let edges = [
-            input.map(|input| {
-                draw_graph.add_node_edge(NodeLabel::Id(input), density_pass::DENSITY_PASS)
-            }),
-            Some(draw_graph.add_node_edge(density_pass::DENSITY_PASS, draw_graph::node::MAIN_PASS)),
+            draw_graph.add_node(density_pass::DENSITY_PASS, density_pass::DensityPassNode),
+            draw_graph.add_node_edge(density_pass::DENSITY_PASS, draw_graph::node::MAIN_PASS),
         ];
-        for edge in edges.into_iter().flatten() {
+        for edge in edges {
             if let Err(error) = edge {
                 tracing::error!(
                     ?error,

@@ -6,7 +6,7 @@ use super::pipeline::OverlayGpu;
 use crate::{
     render::{
         eventually::Eventually::{self, Initialized},
-        graph::{Node, NodeRunError, RenderContext, RenderGraphContext},
+        graph::{Node, RenderContext},
         RenderResources,
     },
     tcs::world::World,
@@ -19,27 +19,21 @@ pub const OVERLAY_PASS: &str = "overlay_pass";
 pub(super) struct OverlayPassNode;
 
 impl Node for OverlayPassNode {
-    fn run(
-        &self,
-        _graph: &mut RenderGraphContext,
-        render_context: &mut RenderContext,
-        state: &RenderResources,
-        world: &World,
-    ) -> Result<(), NodeRunError> {
+    fn run(&self, render_context: &mut RenderContext, state: &RenderResources, world: &World) {
         let Some(Initialized(gpu)) = world.resources.get::<Eventually<OverlayGpu>>() else {
-            return Ok(());
+            return;
         };
         let Some(mesh) = &gpu.mesh else {
-            return Ok(());
+            return;
         };
         let Initialized(render_target) = &state.render_target else {
-            return Ok(());
+            return;
         };
         let Initialized(multisampling_texture) = &state.multisampling_texture else {
-            return Ok(());
+            return;
         };
         let Initialized(depth_texture) = &state.depth_texture else {
-            return Ok(());
+            return;
         };
         let has_stencil = depth_texture.texture.format().has_stencil_aspect();
         // As the symbol pass after it does: draw into the multisampled target and resolve.
@@ -82,6 +76,5 @@ impl Node for OverlayPassNode {
         pass.set_vertex_buffer(0, mesh.vertices.slice(..));
         pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
         pass.draw_indexed(0..mesh.count, 0, 0..1);
-        Ok(())
     }
 }
