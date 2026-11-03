@@ -104,7 +104,11 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
             }
             budget -= 1;
 
-            self.request(coords, style, world)?;
+            // One rejected tile must not cost the frame its other tiles.
+            if let Err(error) = self.request(coords, style, world) {
+                tracing::warn!(%error, "tile request rejected; a later frame requests the tile again");
+                crate::render::frame_signals::keep_animating(world);
+            }
         }
         if let Some(multi) = &multi {
             requested.extend(multi.skipped_wanted_raster.iter().copied());
