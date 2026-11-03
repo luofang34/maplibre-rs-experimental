@@ -46,3 +46,39 @@ fn retry_classification_preserves_status_and_original_failure_context() {
     assert!(!SourceFetchError::not_found("https://tiles.test/a").is_retryable());
     assert!(!SourceFetchError(Box::new(std::io::Error::other("unknown failure"))).is_retryable());
 }
+
+#[derive(Debug, thiserror::Error)]
+#[error("Middleware error: {0}")]
+struct OuterMiddlewareError(#[source] InnerRequestError);
+
+#[derive(Debug, thiserror::Error)]
+#[error("Request error: {0}")]
+struct InnerRequestError(#[source] LeafTransportError);
+
+#[derive(Debug, thiserror::Error)]
+#[error("error sending request for url (https://tiles.test/0/0/0.png)")]
+struct LeafTransportError(#[source] std::io::Error);
+
+#[test]
+fn describe_deduplicates_nested_messages_already_embedded_in_outer_display() {
+    let leaf = LeafTransportError(std::io::Error::new(
+        std::io::ErrorKind::TimedOut,
+        "dns lookup timed out",
+    ));
+    let nested = OuterMiddlewareError(InnerRequestError(leaf));
+    let error = SourceFetchError::temporary(nested);
+
+    let description = error.describe();
+    assert_eq!(
+        description
+            .matches("error sending request for url (https://tiles.test/0/0/0.png)")
+            .count(),
+        1,
+        "unexpected duplicate cause in description: {description}"
+    );
+    assert_eq!(description.matches("Request error:").count(), 1);
+    assert!(
+        description.contains("dns lookup timed out"),
+        "{description}"
+    );
+}
