@@ -44,7 +44,7 @@ impl RequestKind {
         }
     }
 
-    fn index(self) -> usize {
+    pub(crate) fn index(self) -> usize {
         match self {
             Self::Raster => 0,
             Self::Dem => 1,
@@ -97,12 +97,6 @@ struct RetryState {
 #[derive(Default)]
 pub(crate) struct TileRequestRetries([RetryState; 3]);
 impl TileComponent for TileRequestRetries {}
-
-impl TileRequestRetries {
-    pub(crate) fn pending(&self) -> bool {
-        self.0.iter().any(|state| state.pending)
-    }
-}
 
 // Workers retain the map transport while reset replaces the world and its deadlines.
 #[derive(Clone, Default)]
@@ -324,6 +318,7 @@ pub(crate) fn started(
         state.stale = false;
         state.issued_for = only_sources.map(<[String]>::to_vec);
     }
+    crate::io::tile_load::issued(world, coords, kind);
 }
 
 pub(crate) fn completed(world: &mut World, outcome: TileRequestOutcome) {
@@ -342,6 +337,14 @@ pub(crate) fn completed(world: &mut World, outcome: TileRequestOutcome) {
     state.pending = false;
     let stale = std::mem::take(&mut state.stale);
     let loaded = matches!(outcome.disposition, RequestDisposition::Complete);
+    crate::io::tile_load::landed(world, outcome.coords, outcome.kind, !loaded);
+    let Some(retries) = world
+        .tiles
+        .query_mut::<&mut TileRequestRetries>(outcome.coords)
+    else {
+        return;
+    };
+    let state = &mut retries.0[outcome.kind.index()];
     let mut retried_for = None;
     match outcome.disposition {
         RequestDisposition::Complete => {
@@ -424,20 +427,29 @@ pub(crate) fn cancel_unwanted(
         .collect();
     let mut cancelled = Vec::new();
     let mut tiles = Vec::new();
+    let mut given_up = Vec::new();
     for coords in coords {
         let Some(retries) = world.tiles.query_mut::<&mut TileRequestRetries>(coords) else {
             continue;
         };
-        for (state, wanted) in retries.0.iter_mut().zip(&wanted.0) {
+        for ((state, wanted), kind) in retries.0.iter_mut().zip(&wanted.0).zip([
+            RequestKind::Raster,
+            RequestKind::Dem,
+            RequestKind::Vector,
+        ]) {
             let unwanted = wanted.as_ref().is_some_and(|set| !set.contains(&coords));
             if state.pending && unwanted {
                 cancelled.extend(state.attempt);
                 *state = RetryState::default();
+                given_up.push((coords, kind));
                 if !tiles.contains(&coords) {
                     tiles.push(coords);
                 }
             }
         }
+    }
+    for (coords, kind) in given_up {
+        crate::io::tile_load::abandoned(world, coords, kind);
     }
     world
         .resources

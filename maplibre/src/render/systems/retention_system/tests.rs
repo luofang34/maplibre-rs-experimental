@@ -19,6 +19,7 @@ fn offline_tiles_survive_a_view_with_no_loaded_coverage() {
 }
 use crate::{
     coords::{WorldTileCoords, ZoomLevel},
+    io::tile_retry::{self, RequestKind},
     tcs::world::World,
     terrain::DemTileComponent,
     vector::{VectorLayerBucket, VectorLayerBucketComponent},
@@ -61,6 +62,13 @@ fn tiles_beyond_the_budget_are_evicted_but_loading_and_in_use_tiles_stay() {
         .spawn_mut(tile(700))
         .expect("valid coordinates")
         .insert(DemTileComponent::Pending);
+    for (coords, kind) in [
+        (loading, RequestKind::Vector),
+        (tile(700), RequestKind::Dem),
+    ] {
+        let attempt = tile_retry::next_attempt(&mut world);
+        tile_retry::started(&mut world, coords, kind, attempt, None);
+    }
 
     let evicted = evict_stale_tiles(&mut world, &HashSet::from([in_use]), 1);
 

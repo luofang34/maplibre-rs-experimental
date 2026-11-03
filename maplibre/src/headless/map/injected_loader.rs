@@ -265,7 +265,7 @@ async fn requests_for_tiles_out_of_view_stop_and_free_their_slots() {
         .map(|tile| tile.coords)
         .collect();
     assert_eq!(
-        tiles_in_flight(&map.world().tiles),
+        tiles_in_flight(map.world()),
         MAX_TILES_IN_FLIGHT,
         "the first view's requests take every slot"
     );
