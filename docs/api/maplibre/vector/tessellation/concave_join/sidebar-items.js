@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["recover_closed_start_normals","split_unclipped_concave_joins"],"struct":["SplitJoin"]};

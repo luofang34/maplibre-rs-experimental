@@ -77,37 +77,39 @@
 <a href=#77 id=77 data-nosnippet>77</a>            .ok()
 <a href=#78 id=78 data-nosnippet>78</a>            .flatten();
 <a href=#79 id=79 data-nosnippet>79</a>        <span class="kw">let </span>tiles = region.map_or_else(Vec::new, |region| region.iter().collect());
-<a href=#80 id=80 data-nosnippet>80</a>        <span class="kw">super</span>::covering::bounded_covering(
-<a href=#81 id=81 data-nosnippet>81</a>            tiles.into_iter(),
-<a href=#82 id=82 data-nosnippet>82</a>            memory.drape_textures_allowed().saturating_sub(<span class="number">8</span>).max(<span class="number">1</span>),
-<a href=#83 id=83 data-nosnippet>83</a>        )
-<a href=#84 id=84 data-nosnippet>84</a>    };
-<a href=#85 id=85 data-nosnippet>85</a>    <span class="kw">let </span>candidates = select(candidates, visible, limit, |tile| {
-<a href=#86 id=86 data-nosnippet>86</a>        tile_bytes(<span class="kw-2">&amp;</span>world.tiles, tile)
-<a href=#87 id=87 data-nosnippet>87</a>    });
-<a href=#88 id=88 data-nosnippet>88</a>    world.resources.insert(DrapePrefetchRequests(candidates));
-<a href=#89 id=89 data-nosnippet>89</a>}
-<a href=#90 id=90 data-nosnippet>90</a>
-<a href=#91 id=91 data-nosnippet>91</a><span class="kw">fn </span>select(
-<a href=#92 id=92 data-nosnippet>92</a>    candidates: Vec&lt;WorldTileCoords&gt;,
-<a href=#93 id=93 data-nosnippet>93</a>    visible: <span class="kw-2">&amp;</span>[WorldTileCoords],
-<a href=#94 id=94 data-nosnippet>94</a>    limit: usize,
-<a href=#95 id=95 data-nosnippet>95</a>    bytes: <span class="kw">impl </span>Fn(WorldTileCoords) -&gt; usize,
-<a href=#96 id=96 data-nosnippet>96</a>) -&gt; Vec&lt;WorldTileCoords&gt; {
-<a href=#97 id=97 data-nosnippet>97</a>    <span class="kw">let </span>visible: HashSet&lt;<span class="kw">_</span>&gt; = visible.iter().copied().collect();
-<a href=#98 id=98 data-nosnippet>98</a>    <span class="kw">let </span><span class="kw-2">mut </span>used = <span class="number">0usize</span>;
-<a href=#99 id=99 data-nosnippet>99</a>    candidates
-<a href=#100 id=100 data-nosnippet>100</a>        .into_iter()
-<a href=#101 id=101 data-nosnippet>101</a>        .filter(|tile| !visible.contains(tile))
-<a href=#102 id=102 data-nosnippet>102</a>        .take(limit)
-<a href=#103 id=103 data-nosnippet>103</a>        .take_while(|tile| {
-<a href=#104 id=104 data-nosnippet>104</a>            <span class="comment">// Reserve space for a not-yet-decoded tile instead of treating it as free.
-<a href=#105 id=105 data-nosnippet>105</a>            </span>used = used.saturating_add(bytes(<span class="kw-2">*</span>tile).max(<span class="number">8 </span>&lt;&lt; <span class="number">20</span>));
-<a href=#106 id=106 data-nosnippet>106</a>            used &lt;= PREFETCH_BYTES
-<a href=#107 id=107 data-nosnippet>107</a>        })
-<a href=#108 id=108 data-nosnippet>108</a>        .collect()
-<a href=#109 id=109 data-nosnippet>109</a>}
-<a href=#110 id=110 data-nosnippet>110</a>
-<a href=#111 id=111 data-nosnippet>111</a><span class="attr">#[cfg(test)]
-<a href=#112 id=112 data-nosnippet>112</a></span><span class="kw">mod </span>tests;
+<a href=#80 id=80 data-nosnippet>80</a>        <span class="kw">let </span>focus = <span class="kw">super</span>::covering::focus_for_view(style, request_view);
+<a href=#81 id=81 data-nosnippet>81</a>        <span class="kw">super</span>::covering::bounded_covering_with_focus(
+<a href=#82 id=82 data-nosnippet>82</a>            tiles.into_iter(),
+<a href=#83 id=83 data-nosnippet>83</a>            memory.drape_textures_allowed().saturating_sub(<span class="number">8</span>).max(<span class="number">1</span>),
+<a href=#84 id=84 data-nosnippet>84</a>            focus,
+<a href=#85 id=85 data-nosnippet>85</a>        )
+<a href=#86 id=86 data-nosnippet>86</a>    };
+<a href=#87 id=87 data-nosnippet>87</a>    <span class="kw">let </span>candidates = select(candidates, visible, limit, |tile| {
+<a href=#88 id=88 data-nosnippet>88</a>        tile_bytes(<span class="kw-2">&amp;</span>world.tiles, tile)
+<a href=#89 id=89 data-nosnippet>89</a>    });
+<a href=#90 id=90 data-nosnippet>90</a>    world.resources.insert(DrapePrefetchRequests(candidates));
+<a href=#91 id=91 data-nosnippet>91</a>}
+<a href=#92 id=92 data-nosnippet>92</a>
+<a href=#93 id=93 data-nosnippet>93</a><span class="kw">fn </span>select(
+<a href=#94 id=94 data-nosnippet>94</a>    candidates: Vec&lt;WorldTileCoords&gt;,
+<a href=#95 id=95 data-nosnippet>95</a>    visible: <span class="kw-2">&amp;</span>[WorldTileCoords],
+<a href=#96 id=96 data-nosnippet>96</a>    limit: usize,
+<a href=#97 id=97 data-nosnippet>97</a>    bytes: <span class="kw">impl </span>Fn(WorldTileCoords) -&gt; usize,
+<a href=#98 id=98 data-nosnippet>98</a>) -&gt; Vec&lt;WorldTileCoords&gt; {
+<a href=#99 id=99 data-nosnippet>99</a>    <span class="kw">let </span>visible: HashSet&lt;<span class="kw">_</span>&gt; = visible.iter().copied().collect();
+<a href=#100 id=100 data-nosnippet>100</a>    <span class="kw">let </span><span class="kw-2">mut </span>used = <span class="number">0usize</span>;
+<a href=#101 id=101 data-nosnippet>101</a>    candidates
+<a href=#102 id=102 data-nosnippet>102</a>        .into_iter()
+<a href=#103 id=103 data-nosnippet>103</a>        .filter(|tile| !visible.contains(tile))
+<a href=#104 id=104 data-nosnippet>104</a>        .take(limit)
+<a href=#105 id=105 data-nosnippet>105</a>        .take_while(|tile| {
+<a href=#106 id=106 data-nosnippet>106</a>            <span class="comment">// Reserve space for a not-yet-decoded tile instead of treating it as free.
+<a href=#107 id=107 data-nosnippet>107</a>            </span>used = used.saturating_add(bytes(<span class="kw-2">*</span>tile).max(<span class="number">8 </span>&lt;&lt; <span class="number">20</span>));
+<a href=#108 id=108 data-nosnippet>108</a>            used &lt;= PREFETCH_BYTES
+<a href=#109 id=109 data-nosnippet>109</a>        })
+<a href=#110 id=110 data-nosnippet>110</a>        .collect()
+<a href=#111 id=111 data-nosnippet>111</a>}
+<a href=#112 id=112 data-nosnippet>112</a>
+<a href=#113 id=113 data-nosnippet>113</a><span class="attr">#[cfg(test)]
+<a href=#114 id=114 data-nosnippet>114</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>

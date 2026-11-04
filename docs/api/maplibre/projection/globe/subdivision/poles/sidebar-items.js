@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MIN_BUFFERED_POLE_CLIP_SPAN"],"fn":["append_pole_quad","append_pole_quads","extrude_boundary_at_y"]};

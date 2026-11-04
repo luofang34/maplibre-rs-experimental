@@ -393,7 +393,7 @@
 <a href=#393 id=393 data-nosnippet>393</a>                })
 <a href=#394 id=394 data-nosnippet>394</a>            })
 <a href=#395 id=395 data-nosnippet>395</a>            .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
-<a href=#396 id=396 data-nosnippet>396</a>        <span class="kw">let </span>key = targets::draw_order_key(view_state, f64::from(dem.tile_size));
+<a href=#396 id=396 data-nosnippet>396</a>        <span class="kw">let </span>key = targets::draw_order_key(style, view_state, f64::from(dem.tile_size));
 <a href=#397 id=397 data-nosnippet>397</a>        <span class="kw">let </span><span class="kw-2">mut </span>draws = draws;
 <a href=#398 id=398 data-nosnippet>398</a>        draws.sort_by(|left, right| key(<span class="kw-2">&amp;</span>left.coords).total_cmp(<span class="kw-2">&amp;</span>key(<span class="kw-2">&amp;</span>right.coords)));
 <a href=#399 id=399 data-nosnippet>399</a>        terrain.set_draws(draws);

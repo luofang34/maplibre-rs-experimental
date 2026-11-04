@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["ExternalGlobeEye"]};
+window.SIDEBAR_ITEMS = {"constant":["GAZE_REACH_HEIGHTS"],"fn":["external_focus_unit_sphere","focus_unit_sphere"],"struct":["ExternalGlobeEye"]};

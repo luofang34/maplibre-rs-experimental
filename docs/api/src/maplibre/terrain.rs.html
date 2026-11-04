@@ -53,136 +53,146 @@
 <a href=#53 id=53 data-nosnippet>53</a>    <span class="doccomment">/// No skirts.
 <a href=#54 id=54 data-nosnippet>54</a>    </span><span class="prelude-val">None</span>,
 <a href=#55 id=55 data-nosnippet>55</a>}
-<a href=#56 id=56 data-nosnippet>56</a><span class="kw">pub use </span>coverage::{DemDetail, TerrainCoverageIndex};
-<a href=#57 id=57 data-nosnippet>57</a><span class="kw">pub use </span>dem::{DemError, DemTile};
-<a href=#58 id=58 data-nosnippet>58</a><span class="kw">use </span>drape_pass::{DrapePassNode, DRAPE_PASS};
-<a href=#59 id=59 data-nosnippet>59</a><span class="kw">pub use </span>drape_targets::is_drapeable;
-<a href=#60 id=60 data-nosnippet>60</a><span class="kw">pub use </span>draw::draw_terrain;
-<a href=#61 id=61 data-nosnippet>61</a><span class="kw">pub use </span>interaction::{GestureAnchor, TerrainHit};
-<a href=#62 id=62 data-nosnippet>62</a><span class="kw">use </span>loaded_dem::DemRevision;
-<a href=#63 id=63 data-nosnippet>63</a><span class="kw">pub use </span>loaded_dem::LoadedDem;
-<a href=#64 id=64 data-nosnippet>64</a><span class="kw">use </span>populate_world_system::PopulateWorldSystem;
-<a href=#65 id=65 data-nosnippet>65</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>queue_system::surface_covering::drawn_surface_tiles;
-<a href=#66 id=66 data-nosnippet>66</a><span class="kw">pub use </span>queue_system::DrapeBudget;
-<a href=#67 id=67 data-nosnippet>67</a><span class="kw">use </span>request_system::RequestSystem;
-<a href=#68 id=68 data-nosnippet>68</a><span class="kw">pub use </span>request_system::{dem_ancestor_coords, dem_tile_coords, fetch_dem_apc};
-<a href=#69 id=69 data-nosnippet>69</a><span class="kw">use </span>resources::TerrainResources;
-<a href=#70 id=70 data-nosnippet>70</a><span class="kw">pub use </span>transferables::{
-<a href=#71 id=71 data-nosnippet>71</a>    DefaultDemTransferables, DefaultLayerDem, DefaultLayerDemMissing, DemMessageTag,
-<a href=#72 id=72 data-nosnippet>72</a>    DemTransferables, LayerDem, LayerDemMissing,
-<a href=#73 id=73 data-nosnippet>73</a>};
-<a href=#74 id=74 data-nosnippet>74</a>
-<a href=#75 id=75 data-nosnippet>75</a><span class="doccomment">/// Elevation data of one `raster-dem` tile as it moves through the pipeline.
-<a href=#76 id=76 data-nosnippet>76</a>///
-<a href=#77 id=77 data-nosnippet>77</a>/// Stored at the DEM tile's own coordinates, which sit one zoom level below the tiles they drape.
-<a href=#78 id=78 data-nosnippet>78</a></span><span class="attr">#[derive(Debug)]
-<a href=#79 id=79 data-nosnippet>79</a></span><span class="kw">pub enum </span>DemTileComponent {
-<a href=#80 id=80 data-nosnippet>80</a>    <span class="doccomment">/// The tile has been requested and is being fetched or decoded.
-<a href=#81 id=81 data-nosnippet>81</a>    </span>Pending,
-<a href=#82 id=82 data-nosnippet>82</a>    <span class="doccomment">/// The tile is available for rendering and elevation queries.
-<a href=#83 id=83 data-nosnippet>83</a>    </span>Loaded(LoadedDem),
-<a href=#84 id=84 data-nosnippet>84</a>    <span class="doccomment">/// The tile could not be fetched or decoded; ancestors stand in for it.
-<a href=#85 id=85 data-nosnippet>85</a>    </span>Missing,
-<a href=#86 id=86 data-nosnippet>86</a>}
-<a href=#87 id=87 data-nosnippet>87</a>
-<a href=#88 id=88 data-nosnippet>88</a><span class="kw">impl </span>TileComponent <span class="kw">for </span>DemTileComponent {}
-<a href=#89 id=89 data-nosnippet>89</a>
-<a href=#90 id=90 data-nosnippet>90</a><span class="doccomment">/// Layers of one view tile rendered into that tile's drape texture.
-<a href=#91 id=91 data-nosnippet>91</a></span><span class="kw">pub struct </span>DrapeTarget {
-<a href=#92 id=92 data-nosnippet>92</a>    <span class="doccomment">/// View tile the texture belongs to.
-<a href=#93 id=93 data-nosnippet>93</a>    </span><span class="kw">pub </span>coords: WorldTileCoords,
-<a href=#94 id=94 data-nosnippet>94</a>    <span class="doccomment">/// Color the texture is cleared to before drawing.
-<a href=#95 id=95 data-nosnippet>95</a>    </span><span class="kw">pub </span>clear_color: wgpu::Color,
-<a href=#96 id=96 data-nosnippet>96</a>    <span class="doccomment">/// Stencil masks of the source shapes.
-<a href=#97 id=97 data-nosnippet>97</a>    </span><span class="kw">pub </span>masks: Vec&lt;TileMaskItem&gt;,
-<a href=#98 id=98 data-nosnippet>98</a>    <span class="doccomment">/// Drapeable layer draws in style order.
-<a href=#99 id=99 data-nosnippet>99</a>    </span><span class="kw">pub </span>layers: Vec&lt;LayerItem&gt;,
-<a href=#100 id=100 data-nosnippet>100</a>}
-<a href=#101 id=101 data-nosnippet>101</a>
-<a href=#102 id=102 data-nosnippet>102</a><span class="doccomment">/// Drape targets of the current frame.
-<a href=#103 id=103 data-nosnippet>103</a></span><span class="attr">#[derive(Default)]
-<a href=#104 id=104 data-nosnippet>104</a></span><span class="kw">pub struct </span>DrapePhase {
-<a href=#105 id=105 data-nosnippet>105</a>    <span class="doccomment">/// One entry per view tile whose texture is redrawn this frame.
-<a href=#106 id=106 data-nosnippet>106</a>    </span><span class="kw">pub </span>targets: Vec&lt;DrapeTarget&gt;,
-<a href=#107 id=107 data-nosnippet>107</a>}
-<a href=#108 id=108 data-nosnippet>108</a>
-<a href=#109 id=109 data-nosnippet>109</a><span class="doccomment">/// Where the main pass draws the terrain this frame.
-<a href=#110 id=110 data-nosnippet>110</a></span><span class="attr">#[derive(Clone, Copy, Debug, Default)]
-<a href=#111 id=111 data-nosnippet>111</a></span><span class="kw">pub struct </span>TerrainFrame {
-<a href=#112 id=112 data-nosnippet>112</a>    <span class="doccomment">/// Whether terrain tiles are queued at all.
-<a href=#113 id=113 data-nosnippet>113</a>    </span><span class="kw">pub </span>active: bool,
-<a href=#114 id=114 data-nosnippet>114</a>    <span class="doccomment">/// Layer index after which the terrain is drawn, so backgrounds stay beneath it.
-<a href=#115 id=115 data-nosnippet>115</a>    </span><span class="kw">pub </span>draw_after_layer_index: u32,
-<a href=#116 id=116 data-nosnippet>116</a>}
-<a href=#117 id=117 data-nosnippet>117</a>
-<a href=#118 id=118 data-nosnippet>118</a><span class="doccomment">/// Requests, stores, drapes and draws the DEM tiles of a style that declares `terrain`.
-<a href=#119 id=119 data-nosnippet>119</a></span><span class="kw">pub struct </span>TerrainPlugin&lt;T&gt;(PhantomData&lt;T&gt;);
-<a href=#120 id=120 data-nosnippet>120</a>
-<a href=#121 id=121 data-nosnippet>121</a><span class="kw">impl</span>&lt;T: DemTransferables&gt; Default <span class="kw">for </span>TerrainPlugin&lt;T&gt; {
-<a href=#122 id=122 data-nosnippet>122</a>    <span class="kw">fn </span>default() -&gt; <span class="self">Self </span>{
-<a href=#123 id=123 data-nosnippet>123</a>        <span class="self">Self</span>(PhantomData)
-<a href=#124 id=124 data-nosnippet>124</a>    }
-<a href=#125 id=125 data-nosnippet>125</a>}
-<a href=#126 id=126 data-nosnippet>126</a>
-<a href=#127 id=127 data-nosnippet>127</a><span class="kw">impl</span>&lt;E: Environment, T: DemTransferables&gt; Plugin&lt;E&gt; <span class="kw">for </span>TerrainPlugin&lt;T&gt; {
-<a href=#128 id=128 data-nosnippet>128</a>    <span class="kw">fn </span>build(
-<a href=#129 id=129 data-nosnippet>129</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
-<a href=#130 id=130 data-nosnippet>130</a>        schedule: <span class="kw-2">&amp;mut </span>Schedule,
-<a href=#131 id=131 data-nosnippet>131</a>        kernel: Rc&lt;Kernel&lt;E&gt;&gt;,
-<a href=#132 id=132 data-nosnippet>132</a>        world: <span class="kw-2">&amp;mut </span>World,
-<a href=#133 id=133 data-nosnippet>133</a>        renderer: <span class="kw-2">&amp;mut </span><span class="kw">crate</span>::render::Renderer,
-<a href=#134 id=134 data-nosnippet>134</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), <span class="kw">crate</span>::plugin::PluginError&gt; {
-<a href=#135 id=135 data-nosnippet>135</a>        world
-<a href=#136 id=136 data-nosnippet>136</a>            .resources
-<a href=#137 id=137 data-nosnippet>137</a>            .insert(Eventually::&lt;TerrainResources&gt;::Uninitialized);
-<a href=#138 id=138 data-nosnippet>138</a>        world.resources.init::&lt;DrapePhase&gt;();
-<a href=#139 id=139 data-nosnippet>139</a>        world.resources.init::&lt;TerrainFrame&gt;();
-<a href=#140 id=140 data-nosnippet>140</a>        world.resources.init::&lt;TerrainCoverageIndex&gt;();
-<a href=#141 id=141 data-nosnippet>141</a>
-<a href=#142 id=142 data-nosnippet>142</a>        schedule.add_system_to_stage(
-<a href=#143 id=143 data-nosnippet>143</a>            RenderStageLabel::Request,
-<a href=#144 id=144 data-nosnippet>144</a>            SystemContainer::new(RequestSystem::&lt;E, T&gt;::new(<span class="kw-2">&amp;</span>kernel)),
-<a href=#145 id=145 data-nosnippet>145</a>        )<span class="question-mark">?</span>;
-<a href=#146 id=146 data-nosnippet>146</a>        schedule.add_system_to_stage(
-<a href=#147 id=147 data-nosnippet>147</a>            RenderStageLabel::Request,
-<a href=#148 id=148 data-nosnippet>148</a>            SystemContainer::new(PopulateWorldSystem::&lt;E, T&gt;::new(<span class="kw-2">&amp;</span>kernel)),
-<a href=#149 id=149 data-nosnippet>149</a>        )<span class="question-mark">?</span>;
-<a href=#150 id=150 data-nosnippet>150</a>        <span class="comment">// Prepare rather than Request: headless rendering drops the Request stage, and the
-<a href=#151 id=151 data-nosnippet>151</a>        // elevation must be known before the Queue stage builds the view pattern. The index
-<a href=#152 id=152 data-nosnippet>152</a>        // runs first so the center elevation samples this frame's tiles.
-<a href=#153 id=153 data-nosnippet>153</a>        </span>schedule.add_system_to_stage(RenderStageLabel::Prepare, coverage::coverage_system)<span class="question-mark">?</span>;
-<a href=#154 id=154 data-nosnippet>154</a>        schedule.add_system_to_stage(
-<a href=#155 id=155 data-nosnippet>155</a>            RenderStageLabel::Prepare,
-<a href=#156 id=156 data-nosnippet>156</a>            elevation::center_elevation_system,
-<a href=#157 id=157 data-nosnippet>157</a>        )<span class="question-mark">?</span>;
-<a href=#158 id=158 data-nosnippet>158</a>        schedule
-<a href=#159 id=159 data-nosnippet>159</a>            .add_system_to_stage(RenderStageLabel::Prepare, resource_system::resource_system)<span class="question-mark">?</span>;
-<a href=#160 id=160 data-nosnippet>160</a>        schedule.add_system_to_stage(RenderStageLabel::Queue, upload_system::upload_system)<span class="question-mark">?</span>;
-<a href=#161 id=161 data-nosnippet>161</a>        schedule.add_system_to_stage(RenderStageLabel::Queue, queue_system::queue_system)<span class="question-mark">?</span>;
-<a href=#162 id=162 data-nosnippet>162</a>        <span class="comment">// Before the Render stage, so the last measurement is read before this frame's drape
-<a href=#163 id=163 data-nosnippet>163</a>        // passes start the next one.
-<a href=#164 id=164 data-nosnippet>164</a>        </span>schedule.add_system_to_stage(
-<a href=#165 id=165 data-nosnippet>165</a>            RenderStageLabel::PhaseSort,
-<a href=#166 id=166 data-nosnippet>166</a>            drape_timing::drape_timer_system,
+<a href=#56 id=56 data-nosnippet>56</a>
+<a href=#57 id=57 data-nosnippet>57</a><span class="doccomment">/// Elevation in metres above datum at the geographic north (`90° N`) and south (`90° S`)
+<a href=#58 id=58 data-nosnippet>58</a>/// poles, closing the globe beyond Web Mercator DEM coverage (`|lat| &lt;= 85.0511°`).
+<a href=#59 id=59 data-nosnippet>59</a></span><span class="attr">#[derive(Clone, Copy, Debug, Default, PartialEq)]
+<a href=#60 id=60 data-nosnippet>60</a></span><span class="kw">pub struct </span>PolarPoleElevations {
+<a href=#61 id=61 data-nosnippet>61</a>    <span class="doccomment">/// Elevation in metres at `90° N` (`0.0` by default).
+<a href=#62 id=62 data-nosnippet>62</a>    </span><span class="kw">pub </span>north_meters: f32,
+<a href=#63 id=63 data-nosnippet>63</a>    <span class="doccomment">/// Elevation in metres at `90° S` (`0.0` by default).
+<a href=#64 id=64 data-nosnippet>64</a>    </span><span class="kw">pub </span>south_meters: f32,
+<a href=#65 id=65 data-nosnippet>65</a>}
+<a href=#66 id=66 data-nosnippet>66</a><span class="kw">pub use </span>coverage::{DemDetail, TerrainCoverageIndex};
+<a href=#67 id=67 data-nosnippet>67</a><span class="kw">pub use </span>dem::{DemError, DemTile};
+<a href=#68 id=68 data-nosnippet>68</a><span class="kw">use </span>drape_pass::{DrapePassNode, DRAPE_PASS};
+<a href=#69 id=69 data-nosnippet>69</a><span class="kw">pub use </span>drape_targets::is_drapeable;
+<a href=#70 id=70 data-nosnippet>70</a><span class="kw">pub use </span>draw::draw_terrain;
+<a href=#71 id=71 data-nosnippet>71</a><span class="kw">pub use </span>interaction::{GestureAnchor, TerrainHit};
+<a href=#72 id=72 data-nosnippet>72</a><span class="kw">use </span>loaded_dem::DemRevision;
+<a href=#73 id=73 data-nosnippet>73</a><span class="kw">pub use </span>loaded_dem::LoadedDem;
+<a href=#74 id=74 data-nosnippet>74</a><span class="kw">use </span>populate_world_system::PopulateWorldSystem;
+<a href=#75 id=75 data-nosnippet>75</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>queue_system::surface_covering::drawn_surface_tiles;
+<a href=#76 id=76 data-nosnippet>76</a><span class="kw">pub use </span>queue_system::DrapeBudget;
+<a href=#77 id=77 data-nosnippet>77</a><span class="kw">use </span>request_system::RequestSystem;
+<a href=#78 id=78 data-nosnippet>78</a><span class="kw">pub use </span>request_system::{dem_ancestor_coords, dem_tile_coords, fetch_dem_apc};
+<a href=#79 id=79 data-nosnippet>79</a><span class="kw">use </span>resources::TerrainResources;
+<a href=#80 id=80 data-nosnippet>80</a><span class="kw">pub use </span>transferables::{
+<a href=#81 id=81 data-nosnippet>81</a>    DefaultDemTransferables, DefaultLayerDem, DefaultLayerDemMissing, DemMessageTag,
+<a href=#82 id=82 data-nosnippet>82</a>    DemTransferables, LayerDem, LayerDemMissing,
+<a href=#83 id=83 data-nosnippet>83</a>};
+<a href=#84 id=84 data-nosnippet>84</a>
+<a href=#85 id=85 data-nosnippet>85</a><span class="doccomment">/// Elevation data of one `raster-dem` tile as it moves through the pipeline.
+<a href=#86 id=86 data-nosnippet>86</a>///
+<a href=#87 id=87 data-nosnippet>87</a>/// Stored at the DEM tile's own coordinates, which sit one zoom level below the tiles they drape.
+<a href=#88 id=88 data-nosnippet>88</a></span><span class="attr">#[derive(Debug)]
+<a href=#89 id=89 data-nosnippet>89</a></span><span class="kw">pub enum </span>DemTileComponent {
+<a href=#90 id=90 data-nosnippet>90</a>    <span class="doccomment">/// The tile has been requested and is being fetched or decoded.
+<a href=#91 id=91 data-nosnippet>91</a>    </span>Pending,
+<a href=#92 id=92 data-nosnippet>92</a>    <span class="doccomment">/// The tile is available for rendering and elevation queries.
+<a href=#93 id=93 data-nosnippet>93</a>    </span>Loaded(LoadedDem),
+<a href=#94 id=94 data-nosnippet>94</a>    <span class="doccomment">/// The tile could not be fetched or decoded; ancestors stand in for it.
+<a href=#95 id=95 data-nosnippet>95</a>    </span>Missing,
+<a href=#96 id=96 data-nosnippet>96</a>}
+<a href=#97 id=97 data-nosnippet>97</a>
+<a href=#98 id=98 data-nosnippet>98</a><span class="kw">impl </span>TileComponent <span class="kw">for </span>DemTileComponent {}
+<a href=#99 id=99 data-nosnippet>99</a>
+<a href=#100 id=100 data-nosnippet>100</a><span class="doccomment">/// Layers of one view tile rendered into that tile's drape texture.
+<a href=#101 id=101 data-nosnippet>101</a></span><span class="kw">pub struct </span>DrapeTarget {
+<a href=#102 id=102 data-nosnippet>102</a>    <span class="doccomment">/// View tile the texture belongs to.
+<a href=#103 id=103 data-nosnippet>103</a>    </span><span class="kw">pub </span>coords: WorldTileCoords,
+<a href=#104 id=104 data-nosnippet>104</a>    <span class="doccomment">/// Color the texture is cleared to before drawing.
+<a href=#105 id=105 data-nosnippet>105</a>    </span><span class="kw">pub </span>clear_color: wgpu::Color,
+<a href=#106 id=106 data-nosnippet>106</a>    <span class="doccomment">/// Stencil masks of the source shapes.
+<a href=#107 id=107 data-nosnippet>107</a>    </span><span class="kw">pub </span>masks: Vec&lt;TileMaskItem&gt;,
+<a href=#108 id=108 data-nosnippet>108</a>    <span class="doccomment">/// Drapeable layer draws in style order.
+<a href=#109 id=109 data-nosnippet>109</a>    </span><span class="kw">pub </span>layers: Vec&lt;LayerItem&gt;,
+<a href=#110 id=110 data-nosnippet>110</a>}
+<a href=#111 id=111 data-nosnippet>111</a>
+<a href=#112 id=112 data-nosnippet>112</a><span class="doccomment">/// Drape targets of the current frame.
+<a href=#113 id=113 data-nosnippet>113</a></span><span class="attr">#[derive(Default)]
+<a href=#114 id=114 data-nosnippet>114</a></span><span class="kw">pub struct </span>DrapePhase {
+<a href=#115 id=115 data-nosnippet>115</a>    <span class="doccomment">/// One entry per view tile whose texture is redrawn this frame.
+<a href=#116 id=116 data-nosnippet>116</a>    </span><span class="kw">pub </span>targets: Vec&lt;DrapeTarget&gt;,
+<a href=#117 id=117 data-nosnippet>117</a>}
+<a href=#118 id=118 data-nosnippet>118</a>
+<a href=#119 id=119 data-nosnippet>119</a><span class="doccomment">/// Where the main pass draws the terrain this frame.
+<a href=#120 id=120 data-nosnippet>120</a></span><span class="attr">#[derive(Clone, Copy, Debug, Default)]
+<a href=#121 id=121 data-nosnippet>121</a></span><span class="kw">pub struct </span>TerrainFrame {
+<a href=#122 id=122 data-nosnippet>122</a>    <span class="doccomment">/// Whether terrain tiles are queued at all.
+<a href=#123 id=123 data-nosnippet>123</a>    </span><span class="kw">pub </span>active: bool,
+<a href=#124 id=124 data-nosnippet>124</a>    <span class="doccomment">/// Layer index after which the terrain is drawn, so backgrounds stay beneath it.
+<a href=#125 id=125 data-nosnippet>125</a>    </span><span class="kw">pub </span>draw_after_layer_index: u32,
+<a href=#126 id=126 data-nosnippet>126</a>}
+<a href=#127 id=127 data-nosnippet>127</a>
+<a href=#128 id=128 data-nosnippet>128</a><span class="doccomment">/// Requests, stores, drapes and draws the DEM tiles of a style that declares `terrain`.
+<a href=#129 id=129 data-nosnippet>129</a></span><span class="kw">pub struct </span>TerrainPlugin&lt;T&gt;(PhantomData&lt;T&gt;);
+<a href=#130 id=130 data-nosnippet>130</a>
+<a href=#131 id=131 data-nosnippet>131</a><span class="kw">impl</span>&lt;T: DemTransferables&gt; Default <span class="kw">for </span>TerrainPlugin&lt;T&gt; {
+<a href=#132 id=132 data-nosnippet>132</a>    <span class="kw">fn </span>default() -&gt; <span class="self">Self </span>{
+<a href=#133 id=133 data-nosnippet>133</a>        <span class="self">Self</span>(PhantomData)
+<a href=#134 id=134 data-nosnippet>134</a>    }
+<a href=#135 id=135 data-nosnippet>135</a>}
+<a href=#136 id=136 data-nosnippet>136</a>
+<a href=#137 id=137 data-nosnippet>137</a><span class="kw">impl</span>&lt;E: Environment, T: DemTransferables&gt; Plugin&lt;E&gt; <span class="kw">for </span>TerrainPlugin&lt;T&gt; {
+<a href=#138 id=138 data-nosnippet>138</a>    <span class="kw">fn </span>build(
+<a href=#139 id=139 data-nosnippet>139</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#140 id=140 data-nosnippet>140</a>        schedule: <span class="kw-2">&amp;mut </span>Schedule,
+<a href=#141 id=141 data-nosnippet>141</a>        kernel: Rc&lt;Kernel&lt;E&gt;&gt;,
+<a href=#142 id=142 data-nosnippet>142</a>        world: <span class="kw-2">&amp;mut </span>World,
+<a href=#143 id=143 data-nosnippet>143</a>        renderer: <span class="kw-2">&amp;mut </span><span class="kw">crate</span>::render::Renderer,
+<a href=#144 id=144 data-nosnippet>144</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), <span class="kw">crate</span>::plugin::PluginError&gt; {
+<a href=#145 id=145 data-nosnippet>145</a>        world
+<a href=#146 id=146 data-nosnippet>146</a>            .resources
+<a href=#147 id=147 data-nosnippet>147</a>            .insert(Eventually::&lt;TerrainResources&gt;::Uninitialized);
+<a href=#148 id=148 data-nosnippet>148</a>        world.resources.init::&lt;DrapePhase&gt;();
+<a href=#149 id=149 data-nosnippet>149</a>        world.resources.init::&lt;TerrainFrame&gt;();
+<a href=#150 id=150 data-nosnippet>150</a>        world.resources.init::&lt;TerrainCoverageIndex&gt;();
+<a href=#151 id=151 data-nosnippet>151</a>
+<a href=#152 id=152 data-nosnippet>152</a>        schedule.add_system_to_stage(
+<a href=#153 id=153 data-nosnippet>153</a>            RenderStageLabel::Request,
+<a href=#154 id=154 data-nosnippet>154</a>            SystemContainer::new(RequestSystem::&lt;E, T&gt;::new(<span class="kw-2">&amp;</span>kernel)),
+<a href=#155 id=155 data-nosnippet>155</a>        )<span class="question-mark">?</span>;
+<a href=#156 id=156 data-nosnippet>156</a>        schedule.add_system_to_stage(
+<a href=#157 id=157 data-nosnippet>157</a>            RenderStageLabel::Request,
+<a href=#158 id=158 data-nosnippet>158</a>            SystemContainer::new(PopulateWorldSystem::&lt;E, T&gt;::new(<span class="kw-2">&amp;</span>kernel)),
+<a href=#159 id=159 data-nosnippet>159</a>        )<span class="question-mark">?</span>;
+<a href=#160 id=160 data-nosnippet>160</a>        <span class="comment">// Prepare rather than Request: headless rendering drops the Request stage, and the
+<a href=#161 id=161 data-nosnippet>161</a>        // elevation must be known before the Queue stage builds the view pattern. The index
+<a href=#162 id=162 data-nosnippet>162</a>        // runs first so the center elevation samples this frame's tiles.
+<a href=#163 id=163 data-nosnippet>163</a>        </span>schedule.add_system_to_stage(RenderStageLabel::Prepare, coverage::coverage_system)<span class="question-mark">?</span>;
+<a href=#164 id=164 data-nosnippet>164</a>        schedule.add_system_to_stage(
+<a href=#165 id=165 data-nosnippet>165</a>            RenderStageLabel::Prepare,
+<a href=#166 id=166 data-nosnippet>166</a>            elevation::center_elevation_system,
 <a href=#167 id=167 data-nosnippet>167</a>        )<span class="question-mark">?</span>;
-<a href=#168 id=168 data-nosnippet>168</a>        world
-<a href=#169 id=169 data-nosnippet>169</a>            .resources
-<a href=#170 id=170 data-nosnippet>170</a>            .get_or_init_mut::&lt;<span class="kw">crate</span>::render::BeforeSubmitHooks&gt;()
-<a href=#171 id=171 data-nosnippet>171</a>            .register(drape_timing::resolve_before_submit);
-<a href=#172 id=172 data-nosnippet>172</a>        world
-<a href=#173 id=173 data-nosnippet>173</a>            .resources
-<a href=#174 id=174 data-nosnippet>174</a>            .get_or_init_mut::&lt;<span class="kw">crate</span>::render::AfterSubmitCallbacks&gt;()
-<a href=#175 id=175 data-nosnippet>175</a>            .register(drape_timing::map_after_submit);
-<a href=#176 id=176 data-nosnippet>176</a>
-<a href=#177 id=177 data-nosnippet>177</a>        <span class="kw">let </span>draw_graph = <span class="kw-2">&amp;mut </span>renderer.render_graph;
-<a href=#178 id=178 data-nosnippet>178</a>        <span class="kw">let </span>edges = [
-<a href=#179 id=179 data-nosnippet>179</a>            draw_graph.add_node(DRAPE_PASS, DrapePassNode),
-<a href=#180 id=180 data-nosnippet>180</a>            draw_graph.add_node_edge(DRAPE_PASS, draw_graph::node::MAIN_PASS),
-<a href=#181 id=181 data-nosnippet>181</a>        ];
-<a href=#182 id=182 data-nosnippet>182</a>        <span class="kw">for </span>edge <span class="kw">in </span>edges {
-<a href=#183 id=183 data-nosnippet>183</a>            edge<span class="question-mark">?</span>;
-<a href=#184 id=184 data-nosnippet>184</a>        }
-<a href=#185 id=185 data-nosnippet>185</a>        <span class="prelude-val">Ok</span>(())
-<a href=#186 id=186 data-nosnippet>186</a>    }
-<a href=#187 id=187 data-nosnippet>187</a>}
+<a href=#168 id=168 data-nosnippet>168</a>        schedule
+<a href=#169 id=169 data-nosnippet>169</a>            .add_system_to_stage(RenderStageLabel::Prepare, resource_system::resource_system)<span class="question-mark">?</span>;
+<a href=#170 id=170 data-nosnippet>170</a>        schedule.add_system_to_stage(RenderStageLabel::Queue, upload_system::upload_system)<span class="question-mark">?</span>;
+<a href=#171 id=171 data-nosnippet>171</a>        schedule.add_system_to_stage(RenderStageLabel::Queue, queue_system::queue_system)<span class="question-mark">?</span>;
+<a href=#172 id=172 data-nosnippet>172</a>        <span class="comment">// Before the Render stage, so the last measurement is read before this frame's drape
+<a href=#173 id=173 data-nosnippet>173</a>        // passes start the next one.
+<a href=#174 id=174 data-nosnippet>174</a>        </span>schedule.add_system_to_stage(
+<a href=#175 id=175 data-nosnippet>175</a>            RenderStageLabel::PhaseSort,
+<a href=#176 id=176 data-nosnippet>176</a>            drape_timing::drape_timer_system,
+<a href=#177 id=177 data-nosnippet>177</a>        )<span class="question-mark">?</span>;
+<a href=#178 id=178 data-nosnippet>178</a>        world
+<a href=#179 id=179 data-nosnippet>179</a>            .resources
+<a href=#180 id=180 data-nosnippet>180</a>            .get_or_init_mut::&lt;<span class="kw">crate</span>::render::BeforeSubmitHooks&gt;()
+<a href=#181 id=181 data-nosnippet>181</a>            .register(drape_timing::resolve_before_submit);
+<a href=#182 id=182 data-nosnippet>182</a>        world
+<a href=#183 id=183 data-nosnippet>183</a>            .resources
+<a href=#184 id=184 data-nosnippet>184</a>            .get_or_init_mut::&lt;<span class="kw">crate</span>::render::AfterSubmitCallbacks&gt;()
+<a href=#185 id=185 data-nosnippet>185</a>            .register(drape_timing::map_after_submit);
+<a href=#186 id=186 data-nosnippet>186</a>
+<a href=#187 id=187 data-nosnippet>187</a>        <span class="kw">let </span>draw_graph = <span class="kw-2">&amp;mut </span>renderer.render_graph;
+<a href=#188 id=188 data-nosnippet>188</a>        <span class="kw">let </span>edges = [
+<a href=#189 id=189 data-nosnippet>189</a>            draw_graph.add_node(DRAPE_PASS, DrapePassNode),
+<a href=#190 id=190 data-nosnippet>190</a>            draw_graph.add_node_edge(DRAPE_PASS, draw_graph::node::MAIN_PASS),
+<a href=#191 id=191 data-nosnippet>191</a>        ];
+<a href=#192 id=192 data-nosnippet>192</a>        <span class="kw">for </span>edge <span class="kw">in </span>edges {
+<a href=#193 id=193 data-nosnippet>193</a>            edge<span class="question-mark">?</span>;
+<a href=#194 id=194 data-nosnippet>194</a>        }
+<a href=#195 id=195 data-nosnippet>195</a>        <span class="prelude-val">Ok</span>(())
+<a href=#196 id=196 data-nosnippet>196</a>    }
+<a href=#197 id=197 data-nosnippet>197</a>}
 </code></pre></div></section></main></body></html>

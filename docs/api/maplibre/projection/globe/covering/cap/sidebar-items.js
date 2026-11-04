@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["closest_unit_sphere_point_on_tile","tile_spherical_cap"],"struct":["TileSphericalCap"]};

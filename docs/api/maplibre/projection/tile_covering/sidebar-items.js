@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["bounded","bounded_by","candidate","coarsen","covers"],"struct":["Candidate","Refinement"]};
+window.SIDEBAR_ITEMS = {"enum":["CoveringFocus"],"fn":["bounded_by","bounded_planar","bounded_spherical","candidate","coarsen_with_focus","covers","planar_tile_distance_squared","spherical_tile_distance"],"struct":["Candidate","Refinement"]};

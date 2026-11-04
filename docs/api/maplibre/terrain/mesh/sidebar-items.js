@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["TERRAIN_MESH_SIZE"],"fn":["build_polar_caps","build_skirts","create_terrain_mesh","grid_coordinate"],"struct":["TerrainMesh","TerrainVertex"]};
+window.SIDEBAR_ITEMS = {"constant":["POLAR_CAP_RINGS","TERRAIN_MESH_SIZE"],"fn":["build_polar_caps","build_skirts","create_terrain_mesh","grid_coordinate","polar_cap_colatitude_radians","polar_cap_ring_t","polar_cap_ring_y"],"struct":["TerrainMesh","TerrainVertex"]};

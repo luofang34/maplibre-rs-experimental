@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["bounded_covering","for_frame","retained_textures"],"struct":["CachedCovering"]};
+window.SIDEBAR_ITEMS = {"fn":["bounded_covering_with_focus","focus_for_view","for_frame","retained_textures"],"struct":["CachedCovering"]};
