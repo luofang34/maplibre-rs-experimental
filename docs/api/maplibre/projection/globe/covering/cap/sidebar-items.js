@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["closest_unit_sphere_point_on_tile","tile_spherical_cap"],"struct":["TileSphericalCap"]};
+window.SIDEBAR_ITEMS = {"fn":["closest_mercator_data_point_on_tile","closest_meridian","closest_unit_sphere_point_in_lat_band","closest_unit_sphere_point_on_tile","tile_spherical_cap"],"struct":["TileSphericalCap"]};

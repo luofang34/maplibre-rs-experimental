@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["DemLayerKind"],"struct":["ColorReliefUniforms","HillshadeResources","HillshadeUniforms","LayerBinding"]};
+window.SIDEBAR_ITEMS = {"constant":["UNSET_POLE_ELEVATION"],"enum":["DemLayerKind"],"struct":["ColorReliefUniforms","HillshadeResources","HillshadeUniforms","LayerBinding"]};
