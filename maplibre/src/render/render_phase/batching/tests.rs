@@ -30,7 +30,7 @@ pub(super) struct InstancePayload {
 }
 
 impl InstancePayload {
-    const fn of(transform_id: u32, material_id: u32) -> Self {
+    pub(super) const fn of(transform_id: u32, material_id: u32) -> Self {
         Self {
             transform_id,
             material_id,
@@ -58,8 +58,8 @@ impl PhaseItemBatchSetKey for BatchKey {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct PhaseItemA {
-    key: BatchKey,
-    bin: u32,
+    pub(super) key: BatchKey,
+    pub(super) bin: u32,
     rep: BinnedItemId,
     pub(super) range: Range<u32>,
     pub(super) extra: PhaseItemExtraIndex,
@@ -98,39 +98,9 @@ impl BinnedPhaseItem for PhaseItemA {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct PhaseItemB(pub(super) PhaseItemA);
-
-impl BinnedPhaseItem for PhaseItemB {
-    type BatchSetKey = BatchKey;
-    type BinKey = u32;
-
-    fn new(
-        key: Self::BatchSetKey,
-        bin: Self::BinKey,
-        rep: BinnedItemId,
-        range: Range<u32>,
-        extra: PhaseItemExtraIndex,
-    ) -> Self {
-        Self(PhaseItemA::new(key, bin, rep, range, extra))
-    }
-
-    fn batch_range(&self) -> &Range<u32> {
-        self.0.batch_range()
-    }
-
-    fn extra_index(&self) -> PhaseItemExtraIndex {
-        self.0.extra_index()
-    }
-
-    fn draw_function(&self) -> DrawFunctionId {
-        self.0.draw_function()
-    }
-}
-
 #[derive(Default)]
-struct SceneInputs {
-    rows: Vec<(InstancePayload, Option<IndirectMeshMetadata>)>,
+pub(super) struct SceneInputs {
+    pub(super) rows: Vec<(InstancePayload, Option<IndirectMeshMetadata>)>,
 }
 
 pub(super) struct SceneBatcher;
@@ -169,18 +139,6 @@ impl GetFullBatchData<PhaseItemA> for SceneBatcher {
             .resources
             .get::<SceneInputs>()
             .and_then(|s| s.rows.get(item.0 as usize).and_then(|(_, m)| m.clone()))
-    }
-}
-
-impl GetBatchData<PhaseItemB> for SceneBatcher {
-    type BufferData = InstancePayload;
-
-    fn get_batch_data(
-        world: &World,
-        item: BinnedItemId,
-        input_index: InputDataIndex,
-    ) -> Option<(Self::BufferData, Option<IndirectMeshMetadata>)> {
-        <Self as GetBatchData<PhaseItemA>>::get_batch_data(world, item, input_index)
     }
 }
 
@@ -421,4 +379,94 @@ fn cross_bin_multidraw_indirect_aggregates_exact_args_and_falls_back_cleanly() {
         .for_each_render_item(|item| emitted.push(item));
     assert_eq!(emitted.len(), 4);
     assert!(emitted.iter().all(|i| i.extra == PhaseItemExtraIndex::None));
+}
+
+#[test]
+fn mixed_multidrawable_and_batchable_bins_preserve_strict_bin_key_order() {
+    let run_mode = |caps: DrawCapabilities, with_meta_mismatch: bool| -> (Vec<u32>, Vec<u32>) {
+        let mut world = World::default();
+        let valid_meta = Some(IndirectMeshMetadata::Indexed {
+            index_range: 0..6,
+            base_vertex: 0,
+        });
+        let rows = vec![
+            (InstancePayload::of(1, 1), valid_meta.clone()),
+            (InstancePayload::of(3, 3), valid_meta.clone()),
+            (
+                InstancePayload::of(5, 5),
+                if with_meta_mismatch { None } else { valid_meta },
+            ),
+        ];
+        world.resources.insert(SceneInputs { rows });
+        world
+            .resources
+            .init::<BatchedInstanceBuffer<InstancePayload>>();
+        world.resources.init::<IndirectParametersBuffers>();
+
+        let key = BatchKey {
+            group: 1,
+            indexed: true,
+        };
+        let mut phase = BinnedRenderPhase::<PhaseItemA>::new();
+        phase.add(
+            key.clone(),
+            5,
+            BinnedItemId(50),
+            InputDataIndex(2),
+            BinnedRenderPhaseType::MultidrawableMesh,
+        );
+        phase.add(
+            key.clone(),
+            3,
+            BinnedItemId(30),
+            InputDataIndex(1),
+            BinnedRenderPhaseType::BatchableMesh,
+        );
+        phase.add(
+            key,
+            1,
+            BinnedItemId(10),
+            InputDataIndex(0),
+            BinnedRenderPhaseType::MultidrawableMesh,
+        );
+        world.resources.insert(phase);
+
+        batch_and_prepare_binned_render_phase_cpu::<PhaseItemA, SceneBatcher>(
+            &mut world, caps, 256,
+        );
+        let mut bins = Vec::new();
+        world
+            .resources
+            .get::<BinnedRenderPhase<PhaseItemA>>()
+            .unwrap()
+            .for_each_render_item(|item| bins.push(item.bin));
+        let transforms = world
+            .resources
+            .get::<BatchedInstanceBuffer<InstancePayload>>()
+            .unwrap()
+            .instances()
+            .iter()
+            .map(|i| i.transform_id)
+            .collect();
+        (bins, transforms)
+    };
+
+    let single_caps = DrawCapabilities {
+        base_vertex: true,
+        indirect_execution: true,
+        indirect_first_instance: true,
+        multi_draw_indirect: false,
+        multi_draw_indirect_count: false,
+        vertex_storage_buffers: true,
+    };
+    assert_eq!(run_mode(single_caps, false), (vec![1, 3, 5], vec![1, 3, 5]));
+    assert_eq!(
+        run_mode(DrawCapabilities::default(), false),
+        (vec![1, 3, 5], vec![1, 3, 5])
+    );
+    let md_caps = DrawCapabilities {
+        multi_draw_indirect: true,
+        ..single_caps
+    };
+    assert_eq!(run_mode(md_caps, true), (vec![1, 3, 5], vec![1, 3, 5]));
 }

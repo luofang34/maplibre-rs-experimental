@@ -60,8 +60,7 @@ impl IndirectParametersBuffers {
 
     /// Appends one indexed indirect command and returns its slot index.
     pub fn push_indexed(&mut self, args: DrawIndexedIndirectArgs) -> u32 {
-        let index = u32::try_from(self.indexed_data.len())
-            .expect("indexed indirect parameter count exceeded u32::MAX");
+        let index = u32::try_from(self.indexed_data.len()).unwrap_or(u32::MAX);
         self.indexed_data.push(args);
         index
     }
@@ -71,18 +70,15 @@ impl IndirectParametersBuffers {
         &mut self,
         iter: impl IntoIterator<Item = DrawIndexedIndirectArgs>,
     ) -> Range<u32> {
-        let start = u32::try_from(self.indexed_data.len())
-            .expect("indexed indirect parameter count exceeded u32::MAX");
+        let start = u32::try_from(self.indexed_data.len()).unwrap_or(u32::MAX);
         self.indexed_data.extend(iter);
-        let end = u32::try_from(self.indexed_data.len())
-            .expect("indexed indirect parameter count exceeded u32::MAX");
+        let end = u32::try_from(self.indexed_data.len()).unwrap_or(u32::MAX);
         start..end
     }
 
     /// Appends one non-indexed indirect command and returns its slot index.
     pub fn push_non_indexed(&mut self, args: DrawIndirectArgs) -> u32 {
-        let index = u32::try_from(self.non_indexed_data.len())
-            .expect("non-indexed indirect parameter count exceeded u32::MAX");
+        let index = u32::try_from(self.non_indexed_data.len()).unwrap_or(u32::MAX);
         self.non_indexed_data.push(args);
         index
     }
@@ -92,11 +88,9 @@ impl IndirectParametersBuffers {
         &mut self,
         iter: impl IntoIterator<Item = DrawIndirectArgs>,
     ) -> Range<u32> {
-        let start = u32::try_from(self.non_indexed_data.len())
-            .expect("non-indexed indirect parameter count exceeded u32::MAX");
+        let start = u32::try_from(self.non_indexed_data.len()).unwrap_or(u32::MAX);
         self.non_indexed_data.extend(iter);
-        let end = u32::try_from(self.non_indexed_data.len())
-            .expect("non-indexed indirect parameter count exceeded u32::MAX");
+        let end = u32::try_from(self.non_indexed_data.len()).unwrap_or(u32::MAX);
         start..end
     }
 
@@ -106,9 +100,8 @@ impl IndirectParametersBuffers {
             indirect_parameters_count: count,
             indirect_parameters_base: base,
         });
-        let one_based = u32::try_from(self.batch_sets_data.len())
-            .expect("indirect batch set count exceeded u32::MAX");
-        NonZeroU32::new(one_based).expect("len after push is non-zero")
+        let one_based = u32::try_from(self.batch_sets_data.len()).unwrap_or(u32::MAX);
+        NonZeroU32::new(one_based).unwrap_or(NonZeroU32::MIN)
     }
 
     /// Staged CPU indexed indirect commands for the current pass.
@@ -184,14 +177,14 @@ impl IndirectParametersBuffers {
         capabilities: DrawCapabilities,
     ) -> &wgpu::Buffer {
         let usages = Self::buffer_usages(device, capabilities);
-        ensure_indirect_buffer::<DrawIndexedIndirectArgs>(
+        let (backing, _) = ensure_indirect_buffer::<DrawIndexedIndirectArgs>(
             device,
             &mut self.indexed_gpu,
             min_elements.max(1),
             usages,
             "binned_indexed_indirect_buffer",
         );
-        &self.indexed_gpu.as_ref().expect("just allocated").buffer
+        &backing.buffer
     }
 
     /// Ensures the non-indexed indirect GPU buffer can hold at least `min_elements` entries for
@@ -203,18 +196,14 @@ impl IndirectParametersBuffers {
         capabilities: DrawCapabilities,
     ) -> &wgpu::Buffer {
         let usages = Self::buffer_usages(device, capabilities);
-        ensure_indirect_buffer::<DrawIndirectArgs>(
+        let (backing, _) = ensure_indirect_buffer::<DrawIndirectArgs>(
             device,
             &mut self.non_indexed_gpu,
             min_elements.max(1),
             usages,
             "binned_non_indexed_indirect_buffer",
         );
-        &self
-            .non_indexed_gpu
-            .as_ref()
-            .expect("just allocated")
-            .buffer
+        &backing.buffer
     }
 
     /// Uploads any newly staged indirect arguments and batch-set headers through `queue`.
@@ -258,13 +247,13 @@ impl IndirectParametersBuffers {
     }
 }
 
-fn ensure_indirect_buffer<T: bytemuck::Pod>(
+fn ensure_indirect_buffer<'a, T: bytemuck::Pod>(
     device: &wgpu::Device,
-    slot: &mut Option<BackingIndirectBuffer>,
+    slot: &'a mut Option<BackingIndirectBuffer>,
     required_elements: usize,
     usages: wgpu::BufferUsages,
     label: &'static str,
-) -> bool {
+) -> (&'a BackingIndirectBuffer, bool) {
     let needs_realloc = slot.as_ref().is_none_or(|existing| {
         existing.capacity_elements < required_elements || existing.usages != usages
     });
@@ -286,7 +275,21 @@ fn ensure_indirect_buffer<T: bytemuck::Pod>(
             usages,
         });
     }
-    needs_realloc
+    let backing = slot.get_or_insert_with(|| {
+        let capacity_elements = MIN_INDIRECT_CAPACITY;
+        let size = (capacity_elements * size_of::<T>()) as wgpu::BufferAddress;
+        BackingIndirectBuffer {
+            buffer: device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(label),
+                size,
+                usage: usages,
+                mapped_at_creation: false,
+            }),
+            capacity_elements,
+            usages,
+        }
+    });
+    (backing, needs_realloc)
 }
 
 fn upload_delta<T: bytemuck::Pod>(
@@ -301,8 +304,8 @@ fn upload_delta<T: bytemuck::Pod>(
     if data.len() <= *uploaded_len {
         return;
     }
-    let reallocated = ensure_indirect_buffer::<T>(device, slot, data.len(), usages, label);
-    let backing = slot.as_ref().expect("buffer initialized");
+    let (backing, reallocated) =
+        ensure_indirect_buffer::<T>(device, slot, data.len(), usages, label);
     let start = if reallocated { 0 } else { *uploaded_len };
     let byte_offset = (start * size_of::<T>()) as wgpu::BufferAddress;
     let slice_bytes = bytemuck::cast_slice(&data[start..]);

@@ -199,10 +199,7 @@ impl<P: 'static> DrawFunctions<P> {
         if let Some(&existing) = self.indices.get(&key_type) {
             return existing;
         }
-        let id = DrawFunctionId(
-            u32::try_from(self.draw_functions.len())
-                .expect("DrawFunctions capacity exceeded u32::MAX"),
-        );
+        let id = DrawFunctionId(u32::try_from(self.draw_functions.len()).unwrap_or(u32::MAX));
         self.draw_functions.push(Box::new(draw_function));
         self.indices.insert(key_type, id);
         self.indices.insert(TypeId::of::<D>(), id);
@@ -231,6 +228,10 @@ pub enum PhaseItemExtraIndex {
     /// No dynamic uniform offset or indirect parameter slot; draws directly via `batch_range`.
     #[default]
     None,
+    /// Instance data is bound as a per-batch `VertexStepMode::Instance` sub-slice via
+    /// [`BatchedInstanceBuffer::instance_slice`](super::BatchedInstanceBuffer::instance_slice),
+    /// so [`draw_binned_mesh`](super::draw_binned_mesh) dispatches `0..count` (`first_instance == 0`).
+    VertexInstance,
     /// Byte offset into a dynamic uniform buffer (used on WebGL2/downlevel backends or unbatchable items).
     DynamicOffset(u32),
     /// Contiguous slot range within [`IndirectParametersBuffers`](super::IndirectParametersBuffers).
@@ -255,12 +256,18 @@ impl PhaseItemExtraIndex {
         }
     }
 
+    /// Whether this batch uses a sub-sliced `VertexStepMode::Instance` buffer (`0..count`).
+    #[inline]
+    pub const fn is_vertex_instance(&self) -> bool {
+        matches!(self, Self::VertexInstance)
+    }
+
     /// Returns the dynamic uniform byte offset when this is [`Self::DynamicOffset`].
     #[inline]
     pub const fn dynamic_offset(&self) -> Option<u32> {
         match self {
             Self::DynamicOffset(offset) => Some(*offset),
-            Self::None | Self::IndirectParametersIndex { .. } => None,
+            Self::None | Self::VertexInstance | Self::IndirectParametersIndex { .. } => None,
         }
     }
 
@@ -269,7 +276,7 @@ impl PhaseItemExtraIndex {
     pub const fn indirect_parameters_range(&self) -> Option<&Range<u32>> {
         match self {
             Self::IndirectParametersIndex { range, .. } => Some(range),
-            Self::None | Self::DynamicOffset(_) => None,
+            Self::None | Self::VertexInstance | Self::DynamicOffset(_) => None,
         }
     }
 }

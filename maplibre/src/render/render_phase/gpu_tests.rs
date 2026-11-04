@@ -165,7 +165,6 @@ pub(super) struct SlabResources {
     pub(super) index_buffer: wgpu::Buffer,
     pub(super) target_view: wgpu::TextureView,
     pub(super) use_base_vertex: bool,
-    pub(super) vertex_instance_step: bool,
 }
 
 pub(super) fn bin_geometry(bin: u32, use_base_vertex: bool) -> (Range<u32>, i32) {
@@ -195,7 +194,7 @@ impl RenderCommand<PrimaryBinnedItem> for BindSharedSlab {
             }
         }
         pass.set_vertex_buffer(0, slab.vertex_buffer.slice(..));
-        if slab.vertex_instance_step {
+        if item.extra_index().is_vertex_instance() {
             let Some(ib) = world.resources.get::<BatchedInstanceBuffer<GpuInstance>>() else {
                 return RenderCommandResult::Failure;
             };
@@ -221,20 +220,21 @@ impl RenderCommand<PrimaryBinnedItem> for DrawSlabIndexed {
             return RenderCommandResult::Failure;
         };
         let (indices, base_vertex) = bin_geometry(item.bin, slab.use_base_vertex);
-        if slab.vertex_instance_step {
-            let count = item
-                .batch_range()
-                .end
-                .saturating_sub(item.batch_range().start);
-            pass.draw_indexed(indices, 0, 0..count);
-            RenderCommandResult::Success
-        } else {
-            draw_binned_indexed(pass, world, item, indices, base_vertex)
-        }
+        draw_binned_indexed(pass, world, item, indices, base_vertex)
     }
 }
 
 impl RenderCommand<SecondaryBinnedItem> for BindSharedSlab {
+    fn render<'w>(
+        world: &'w World,
+        item: &SecondaryBinnedItem,
+        pass: &mut TrackedRenderPass<'w>,
+    ) -> RenderCommandResult {
+        <Self as RenderCommand<PrimaryBinnedItem>>::render(world, &item.0, pass)
+    }
+}
+
+impl RenderCommand<SecondaryBinnedItem> for DrawSlabIndexed {
     fn render<'w>(
         world: &'w World,
         item: &SecondaryBinnedItem,
@@ -397,7 +397,6 @@ pub(super) fn create_slab(
         index_buffer,
         target_view,
         use_base_vertex,
-        vertex_instance_step,
     }
 }
 

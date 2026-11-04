@@ -71,14 +71,20 @@ impl<BPI, GBD> BinnedRenderPhasePlugin<BPI, GBD> {
         GBD: GetBatchData<BPI>,
     {
         world.resources.get_or_init_mut::<DrawFunctions<BPI>>();
-        world
+        {
+            let phase = world.resources.get_or_init_mut::<BinnedRenderPhase<BPI>>();
+            phase.set_max_inactive_generations(self.max_inactive_generations);
+            phase.set_fallback_mode(self.fallback_mode);
+        }
+        if !world
             .resources
-            .get_or_init_mut::<BinnedRenderPhase<BPI>>()
-            .set_max_inactive_generations(self.max_inactive_generations);
-        world
-            .resources
-            .get_or_init_mut::<BatchedInstanceBuffer<GBD::BufferData>>()
-            .set_fallback_mode(self.fallback_mode);
+            .exists::<BatchedInstanceBuffer<GBD::BufferData>>()
+        {
+            world.resources.insert(
+                BatchedInstanceBuffer::<GBD::BufferData>::new()
+                    .with_fallback_mode(self.fallback_mode),
+            );
+        }
         world
             .resources
             .get_or_init_mut::<IndirectParametersBuffers>();
@@ -133,10 +139,19 @@ where
     BPI: BinnedPhaseItem,
     GBD: GetBatchData<BPI>,
 {
+    let eye = world.resources.get::<EyeInFrame>().copied();
     let Some(phase) = world.resources.get_mut::<BinnedRenderPhase<BPI>>() else {
         return Err(SystemError::Dependencies);
     };
     phase.clear_entries();
+    if let Some(e) = eye.filter(|e| e.index > 0) {
+        phase.active_stamp_generation = phase
+            .xr_eye0_sweep
+            .and_then(|(swept_frame, gen_eye0)| (swept_frame == e.frame).then_some(gen_eye0));
+    } else {
+        phase.xr_eye0_sweep = None;
+        phase.active_stamp_generation = None;
+    }
 
     if let Some(instance_buffer) = world
         .resources
@@ -173,15 +188,12 @@ where
     // Always empty queued entries and prepared batches immediately so failed frames or subsequent
     // viewports never re-render stale items.
     phase.clear_entries();
+    phase.active_stamp_generation = None;
 
-    let same_multi_eye_frame = eye.is_some_and(|e| {
-        e.index > 0 || (e.frame > 0 && phase.last_swept_eye_frame == Some(e.frame))
-    });
-    if !same_multi_eye_frame {
-        if let Some(e) = eye.filter(|e| e.frame > 0) {
-            phase.last_swept_eye_frame = Some(e.frame);
-        }
+    if eye.is_none_or(|e| e.index == 0) {
+        let swept_gen = phase.generation();
         phase.sweep();
+        phase.xr_eye0_sweep = eye.map(|e| (e.frame, swept_gen));
     }
     Ok(())
 }

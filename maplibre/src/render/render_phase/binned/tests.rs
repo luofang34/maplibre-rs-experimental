@@ -26,8 +26,11 @@ pub(super) struct TestInstance {
     pad: [u32; 2],
 }
 
+#[derive(Default)]
+pub(super) struct InputTable(pub(super) Vec<(TestInstance, Option<IndirectMeshMetadata>)>);
+
 impl TestInstance {
-    const fn of(item_id: u32, slot: u32) -> Self {
+    pub(super) const fn of(item_id: u32, slot: u32) -> Self {
         Self {
             item_id,
             slot,
@@ -104,9 +107,6 @@ impl BinnedPhaseItem for TestBinnedItem {
         self.batch_set_key.draw_fn
     }
 }
-
-#[derive(Default)]
-struct InputTable(Vec<(TestInstance, Option<IndirectMeshMetadata>)>);
 
 pub(super) struct TestBatcher;
 

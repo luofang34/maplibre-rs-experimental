@@ -2,7 +2,8 @@ use std::num::NonZeroU32;
 
 use super::{
     create_slab, make_base_schedule, make_context, submit_pass, BindSharedSlab, DrawSlabIndexed,
-    GpuBatchKey, GpuBatcher, GpuInputs, GpuInstance, PrimaryBinnedItem, SlabResources,
+    GpuBatchKey, GpuBatcher, GpuInputs, GpuInstance, PrimaryBinnedItem, SecondaryBinnedItem,
+    SlabResources,
 };
 use crate::{
     context::MapContext,
@@ -10,13 +11,40 @@ use crate::{
         render_phase::{
             BatchedInstanceBuffer, BinnedItemId, BinnedRenderPhase, BinnedRenderPhasePlugin,
             BinnedRenderPhaseType, DrawFunctions, FallbackInstanceBufferMode,
-            IndirectParametersBuffers, InputDataIndex,
+            IndirectParametersBuffers, InputDataIndex, RenderCommand, RenderCommandResult,
         },
-        tracked_pass::{DrawCapabilities, RenderStats},
+        tracked_pass::{DrawCapabilities, RenderStats, TrackedRenderPass},
         RenderStageLabel,
     },
-    tcs::system::SystemResult,
+    tcs::{system::SystemResult, world::World},
 };
+
+struct VStepSlabResources(SlabResources);
+
+struct BindVStepSlab;
+
+impl RenderCommand<SecondaryBinnedItem> for BindVStepSlab {
+    fn render<'w>(
+        world: &'w World,
+        item: &SecondaryBinnedItem,
+        pass: &mut TrackedRenderPass<'w>,
+    ) -> RenderCommandResult {
+        let Some(VStepSlabResources(slab)) = world.resources.get::<VStepSlabResources>() else {
+            return RenderCommandResult::Failure;
+        };
+        let Some(ib) = world.resources.get::<BatchedInstanceBuffer<GpuInstance>>() else {
+            return RenderCommandResult::Failure;
+        };
+        let Some(slice) = ib.instance_slice(item.0.range.clone()) else {
+            return RenderCommandResult::Failure;
+        };
+        pass.set_pipeline(&slab.pipeline);
+        pass.set_vertex_buffer(0, slab.vertex_buffer.slice(..));
+        pass.set_vertex_buffer(1, slice);
+        pass.set_index_buffer(slab.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+        RenderCommandResult::Success
+    }
+}
 
 #[tokio::test]
 async fn simulated_webgl2_downlevel_fallbacks_and_compute_reserve_pass_validation() {
@@ -42,13 +70,18 @@ async fn simulated_webgl2_downlevel_fallbacks_and_compute_reserve_pass_validatio
     ctx.world.resources.insert(webgl_caps);
     ctx.world.resources.init::<RenderStats>();
 
-    // Mode A: DynamicUniform fallback
     let dyn_shader = "
         @group(0) @binding(0) var<uniform> inst: vec4<f32>;
         @vertex fn vs(@location(0) pos: vec2<f32>) -> @builtin(position) vec4<f32> {
             return vec4<f32>(pos * 0.2 + inst.xy, 0.0, 1.0);
         }
         @fragment fn fs() -> @location(0) vec4<f32> { return vec4<f32>(0.2, 0.5, 0.9, 1.0); }
+    ";
+    let vstep_shader = "
+        @vertex fn vs(@location(0) pos: vec2<f32>, @location(1) inst: vec4<f32>) -> @builtin(position) vec4<f32> {
+            return vec4<f32>(pos * 0.2 + inst.xy, 0.0, 1.0);
+        }
+        @fragment fn fs() -> @location(0) vec4<f32> { return vec4<f32>(0.9, 0.5, 0.2, 1.0); }
     ";
     let ubo_size = BatchedInstanceBuffer::<GpuInstance>::uniform_binding_size().unwrap();
     let dyn_bgl = ctx
@@ -74,50 +107,97 @@ async fn simulated_webgl2_downlevel_fallbacks_and_compute_reserve_pass_validatio
         false,
         false,
     ));
+    ctx.world.resources.insert(VStepSlabResources(create_slab(
+        &ctx.renderer,
+        vstep_shader,
+        None,
+        true,
+        false,
+    )));
     ctx.world.resources.insert(GpuInputs(vec![
         (GpuInstance([0.1, 0.0, 0.0, 1.0]), None),
         (GpuInstance([0.2, 0.0, 0.0, 1.0]), None),
         (GpuInstance([0.3, 0.0, 0.0, 1.0]), None),
     ]));
 
+    // Install BOTH DynamicUniform (PrimaryBinnedItem) and VertexInstance (SecondaryBinnedItem)
+    // sharing BatchedInstanceBuffer<GpuInstance> in the same schedule!
     let mut schedule = make_base_schedule();
     BinnedRenderPhasePlugin::<PrimaryBinnedItem, GpuBatcher>::new()
         .with_fallback_mode(FallbackInstanceBufferMode::DynamicUniform)
         .install(&mut schedule, &mut ctx.world)
         .unwrap();
-    let draw_id = ctx
+    BinnedRenderPhasePlugin::<SecondaryBinnedItem, GpuBatcher>::new()
+        .with_fallback_mode(FallbackInstanceBufferMode::VertexInstance)
+        .install(&mut schedule, &mut ctx.world)
+        .unwrap();
+
+    let draw_dyn = ctx
         .world
         .resources
         .get_mut::<DrawFunctions<PrimaryBinnedItem>>()
         .unwrap()
         .add_with::<(BindSharedSlab, DrawSlabIndexed)>();
+    let draw_vstep = ctx
+        .world
+        .resources
+        .get_mut::<DrawFunctions<SecondaryBinnedItem>>()
+        .unwrap()
+        .add_with::<(BindVStepSlab, DrawSlabIndexed)>();
 
     schedule
         .add_system_to_stage(
             RenderStageLabel::Queue,
             move |c: &mut MapContext| -> SystemResult {
-                let p = c
+                let p1 = c
                     .world
                     .resources
                     .get_mut::<BinnedRenderPhase<PrimaryBinnedItem>>()
                     .unwrap();
-                let key = GpuBatchKey {
+                let key1 = GpuBatchKey {
                     pipeline_id: 0,
                     indexed: true,
-                    draw_fn: draw_id,
+                    draw_fn: draw_dyn,
                 };
-                p.add_instanced(
-                    key.clone(),
+                p1.add_instanced(
+                    key1.clone(),
                     0,
                     BinnedItemId(1),
                     InputDataIndex(0),
                     NonZeroU32::new(2).unwrap(),
                     BinnedRenderPhaseType::MultidrawableMesh,
                 );
-                p.add(
-                    key,
+                p1.add(
+                    key1,
                     1,
                     BinnedItemId(2),
+                    InputDataIndex(2),
+                    BinnedRenderPhaseType::BatchableMesh,
+                );
+
+                let p2 = c
+                    .world
+                    .resources
+                    .get_mut::<BinnedRenderPhase<SecondaryBinnedItem>>()
+                    .unwrap();
+                let key2 = GpuBatchKey {
+                    pipeline_id: 1,
+                    indexed: true,
+                    draw_fn: draw_vstep,
+                };
+                p2.add_instanced(
+                    key2.clone(),
+                    0,
+                    BinnedItemId(3),
+                    InputDataIndex(0),
+                    NonZeroU32::new(2).unwrap(),
+                    BinnedRenderPhaseType::BatchableMesh,
+                );
+                // Bin 1 has non-zero start index in BatchedInstanceBuffer -> tests draw_binned_indexed 0..count!
+                p2.add(
+                    key2,
+                    1,
+                    BinnedItemId(4),
                     InputDataIndex(2),
                     BinnedRenderPhaseType::BatchableMesh,
                 );
@@ -130,14 +210,19 @@ async fn simulated_webgl2_downlevel_fallbacks_and_compute_reserve_pass_validatio
         .add_system_to_stage(
             RenderStageLabel::Render,
             move |c: &mut MapContext| -> SystemResult {
-                let ubo_buf = c
+                let ib = c
                     .world
                     .resources
                     .get::<BatchedInstanceBuffer<GpuInstance>>()
-                    .unwrap()
+                    .unwrap();
+                let ubo_buf = ib.uniform_buffer().unwrap().clone();
+                assert!(ib
                     .buffer()
                     .unwrap()
-                    .clone();
+                    .usage()
+                    .contains(wgpu::BufferUsages::VERTEX));
+                assert!(ubo_buf.usage().contains(wgpu::BufferUsages::UNIFORM));
+
                 let bg = c
                     .renderer
                     .device
@@ -164,93 +249,9 @@ async fn simulated_webgl2_downlevel_fallbacks_and_compute_reserve_pass_validatio
                         .get::<BinnedRenderPhase<PrimaryBinnedItem>>()
                         .unwrap()
                         .render(pass, world);
-                });
-                Ok(())
-            },
-        )
-        .unwrap();
-
-    let _ = ctx.renderer.queue.take_written_bytes();
-    let scope_dyn = ctx
-        .renderer
-        .device
-        .push_error_scope(wgpu::ErrorFilter::Validation);
-    schedule.run_once(&mut ctx).unwrap();
-    assert!(scope_dyn.pop().await.is_none());
-
-    let stride = ctx
-        .world
-        .resources
-        .get::<BatchedInstanceBuffer<GpuInstance>>()
-        .unwrap()
-        .aligned_uniform_stride() as u64;
-    assert_eq!(ctx.renderer.queue.take_written_bytes(), 3 * stride);
-    assert_eq!(
-        ctx.world
-            .resources
-            .get::<RenderStats>()
-            .unwrap()
-            .take()
-            .draws,
-        3
-    );
-
-    // Mode B: VertexStepMode::Instance fallback with zero dynamic uniforms & first_instance == 0
-    let vstep_shader = "
-        @vertex fn vs(@location(0) pos: vec2<f32>, @location(1) inst: vec4<f32>) -> @builtin(position) vec4<f32> {
-            return vec4<f32>(pos * 0.2 + inst.xy, 0.0, 1.0);
-        }
-        @fragment fn fs() -> @location(0) vec4<f32> { return vec4<f32>(0.9, 0.5, 0.2, 1.0); }
-    ";
-    ctx.world
-        .resources
-        .insert(create_slab(&ctx.renderer, vstep_shader, None, true, false));
-    let mut vstep_schedule = make_base_schedule();
-    BinnedRenderPhasePlugin::<PrimaryBinnedItem, GpuBatcher>::new()
-        .with_fallback_mode(FallbackInstanceBufferMode::VertexInstance)
-        .install(&mut vstep_schedule, &mut ctx.world)
-        .unwrap();
-    vstep_schedule
-        .add_system_to_stage(
-            RenderStageLabel::Queue,
-            move |c: &mut MapContext| -> SystemResult {
-                let p = c
-                    .world
-                    .resources
-                    .get_mut::<BinnedRenderPhase<PrimaryBinnedItem>>()
-                    .unwrap();
-                let key = GpuBatchKey {
-                    pipeline_id: 1,
-                    indexed: true,
-                    draw_fn: draw_id,
-                };
-                p.add_instanced(
-                    key.clone(),
-                    0,
-                    BinnedItemId(1),
-                    InputDataIndex(0),
-                    NonZeroU32::new(2).unwrap(),
-                    BinnedRenderPhaseType::BatchableMesh,
-                );
-                p.add(
-                    key,
-                    1,
-                    BinnedItemId(2),
-                    InputDataIndex(2),
-                    BinnedRenderPhaseType::BatchableMesh,
-                );
-                Ok(())
-            },
-        )
-        .unwrap();
-    vstep_schedule
-        .add_system_to_stage(
-            RenderStageLabel::Render,
-            |c: &mut MapContext| -> SystemResult {
-                submit_pass(c, |pass, world| {
                     world
                         .resources
-                        .get::<BinnedRenderPhase<PrimaryBinnedItem>>()
+                        .get::<BinnedRenderPhase<SecondaryBinnedItem>>()
                         .unwrap()
                         .render(pass, world);
                 });
@@ -260,13 +261,21 @@ async fn simulated_webgl2_downlevel_fallbacks_and_compute_reserve_pass_validatio
         .unwrap();
 
     let _ = ctx.renderer.queue.take_written_bytes();
-    let scope_vstep = ctx
+    let scope = ctx
         .renderer
         .device
         .push_error_scope(wgpu::ErrorFilter::Validation);
-    vstep_schedule.run_once(&mut ctx).unwrap();
-    assert!(scope_vstep.pop().await.is_none());
-    assert_eq!(ctx.renderer.queue.take_written_bytes(), 3 * 16);
+    schedule.run_once(&mut ctx).unwrap();
+    assert!(scope.pop().await.is_none());
+
+    let stride = ctx
+        .world
+        .resources
+        .get::<BatchedInstanceBuffer<GpuInstance>>()
+        .unwrap()
+        .aligned_uniform_stride() as u64;
+    // 3 dynamic uniform slots (3 * stride) + 6 packed instances in gpu_buffer (6 * 16)
+    assert_eq!(ctx.renderer.queue.take_written_bytes(), 3 * stride + 6 * 16);
     assert_eq!(
         ctx.world
             .resources
@@ -274,6 +283,6 @@ async fn simulated_webgl2_downlevel_fallbacks_and_compute_reserve_pass_validatio
             .unwrap()
             .take()
             .draws,
-        2
+        5
     );
 }

@@ -52,6 +52,28 @@ pub fn draw_binned_mesh<'w, BPI: BinnedPhaseItem>(
             }
             RenderCommandResult::Success
         }
+        PhaseItemExtraIndex::VertexInstance => {
+            let range = item.batch_range();
+            let count = range.end.saturating_sub(range.start);
+            if count == 0 {
+                return RenderCommandResult::Success;
+            }
+            let has_base_vertex = world
+                .resources
+                .get::<DrawCapabilities>()
+                .is_none_or(|caps| caps.base_vertex);
+            match geometry {
+                DirectDrawGeometry::Indexed {
+                    indices,
+                    base_vertex,
+                } => {
+                    let effective_base_vertex = if has_base_vertex { base_vertex } else { 0 };
+                    pass.draw_indexed(indices, effective_base_vertex, 0..count);
+                }
+                DirectDrawGeometry::NonIndexed { vertices } => pass.draw(vertices, 0..count),
+            }
+            RenderCommandResult::Success
+        }
         PhaseItemExtraIndex::IndirectParametersIndex {
             range,
             batch_set_index,

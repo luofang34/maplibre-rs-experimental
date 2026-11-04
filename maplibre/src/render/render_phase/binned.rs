@@ -13,13 +13,16 @@ pub use keys::{
 };
 
 use super::{
-    batching::{BinnedRenderPhaseBatchSet, BinnedRenderPhaseBatchSets},
+    batching::{BinnedRenderPhaseBatchSet, BinnedRenderPhaseBatchSets, FallbackInstanceBufferMode},
     draw::{DrawFunctions, PhaseItemExtraIndex},
 };
 use crate::{render::tracked_pass::TrackedRenderPass, tcs::world::World};
 
 /// Default number of inactive sweep generations an empty bin survives before its bucket is freed.
-pub const DEFAULT_MAX_INACTIVE_GENERATIONS: u64 = 2;
+///
+/// Sized at `16` so heterogeneous multi-view configurations (e.g. a 10–15 Hz sensor slot alongside
+/// a 120 Hz primary view) retain their pre-allocated bin capacities across skipped frames.
+pub const DEFAULT_MAX_INACTIVE_GENERATIONS: u64 = 16;
 
 #[derive(Clone, Debug)]
 pub(super) struct BinEntry {
@@ -51,12 +54,41 @@ impl RenderBin {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct PreparedSingleItem<BPI: BinnedPhaseItem> {
-    pub(super) batch_set_key: BPI::BatchSetKey,
-    pub(super) bin_key: BPI::BinKey,
+pub(super) struct PreparedSingleEntry {
     pub(super) item: BinnedItemId,
     pub(super) instance_range: Range<u32>,
     pub(super) extra_index: PhaseItemExtraIndex,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct PreparedBinGroupList<BPI: BinnedPhaseItem> {
+    pub(super) groups: Vec<(BPI::BatchSetKey, BPI::BinKey, Range<usize>)>,
+    pub(super) entries: Vec<PreparedSingleEntry>,
+}
+
+impl<BPI: BinnedPhaseItem> Default for PreparedBinGroupList<BPI> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<BPI: BinnedPhaseItem> PreparedBinGroupList<BPI> {
+    pub(super) const fn new() -> Self {
+        Self {
+            groups: Vec::new(),
+            entries: Vec::new(),
+        }
+    }
+
+    #[inline]
+    pub(super) fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    pub(super) fn clear(&mut self) {
+        self.groups.clear();
+        self.entries.clear();
+    }
 }
 
 /// O(1) binned render phase supporting instanced coalescing, multi-draw indirect submission,
@@ -67,11 +99,13 @@ pub struct BinnedRenderPhase<BPI: BinnedPhaseItem> {
     pub(super) unbatchable_meshes: HashMap<(BPI::BatchSetKey, BPI::BinKey), RenderBin>,
     pub(super) non_mesh_items: HashMap<(BPI::BatchSetKey, BPI::BinKey), RenderBin>,
     pub(super) batch_sets: BinnedRenderPhaseBatchSets<BPI>,
-    pub(super) prepared_unbatchable: Vec<PreparedSingleItem<BPI>>,
-    pub(super) prepared_non_mesh: Vec<PreparedSingleItem<BPI>>,
+    pub(super) prepared_unbatchable: PreparedBinGroupList<BPI>,
+    pub(super) prepared_non_mesh: PreparedBinGroupList<BPI>,
+    pub(super) fallback_mode: Option<FallbackInstanceBufferMode>,
     generation: u64,
     max_inactive_generations: u64,
-    pub(super) last_swept_eye_frame: Option<u64>,
+    pub(super) xr_eye0_sweep: Option<(u64, u64)>,
+    pub(super) active_stamp_generation: Option<u64>,
 }
 
 impl<BPI: BinnedPhaseItem> Default for BinnedRenderPhase<BPI> {
@@ -89,11 +123,13 @@ impl<BPI: BinnedPhaseItem> BinnedRenderPhase<BPI> {
             unbatchable_meshes: HashMap::new(),
             non_mesh_items: HashMap::new(),
             batch_sets: BinnedRenderPhaseBatchSets::default(),
-            prepared_unbatchable: Vec::new(),
-            prepared_non_mesh: Vec::new(),
+            prepared_unbatchable: PreparedBinGroupList::new(),
+            prepared_non_mesh: PreparedBinGroupList::new(),
+            fallback_mode: None,
             generation: 0,
             max_inactive_generations: DEFAULT_MAX_INACTIVE_GENERATIONS,
-            last_swept_eye_frame: None,
+            xr_eye0_sweep: None,
+            active_stamp_generation: None,
         }
     }
 
@@ -112,6 +148,24 @@ impl<BPI: BinnedPhaseItem> BinnedRenderPhase<BPI> {
     #[inline]
     pub const fn max_inactive_generations(&self) -> u64 {
         self.max_inactive_generations
+    }
+
+    /// Configures the phase-specific downlevel instance buffer strategy when vertex storage
+    /// buffers are unavailable, overriding any default on [`BatchedInstanceBuffer`](super::BatchedInstanceBuffer).
+    pub fn with_fallback_mode(mut self, mode: FallbackInstanceBufferMode) -> Self {
+        self.fallback_mode = Some(mode);
+        self
+    }
+
+    /// Updates the phase-specific downlevel instance buffer strategy.
+    pub fn set_fallback_mode(&mut self, mode: FallbackInstanceBufferMode) {
+        self.fallback_mode = Some(mode);
+    }
+
+    /// Phase-specific downlevel instance buffer strategy, if explicitly configured.
+    #[inline]
+    pub const fn fallback_mode(&self) -> Option<FallbackInstanceBufferMode> {
+        self.fallback_mode
     }
 
     /// Current sweep generation counter.
@@ -176,7 +230,7 @@ impl<BPI: BinnedPhaseItem> BinnedRenderPhase<BPI> {
         extra_index: PhaseItemExtraIndex,
         phase_type: BinnedRenderPhaseType,
     ) {
-        let generation = self.generation;
+        let generation = self.active_stamp_generation.unwrap_or(self.generation);
         let entry = BinEntry {
             item,
             input_index,
@@ -276,6 +330,31 @@ impl<BPI: BinnedPhaseItem> BinnedRenderPhase<BPI> {
         }
     }
 
+    /// Returns the `last_active_generation` stamp of a resident bin (used by lifecycle tests).
+    #[cfg(test)]
+    pub(super) fn bin_last_active_generation(
+        &self,
+        batch_set_key: &BPI::BatchSetKey,
+        bin_key: &BPI::BinKey,
+        phase_type: BinnedRenderPhaseType,
+    ) -> Option<u64> {
+        let lookup = |map: &HashMap<(BPI::BatchSetKey, BPI::BinKey), RenderBin>| -> Option<u64> {
+            map.iter().find_map(|((bsk, bk), bin)| {
+                (bsk == batch_set_key && bk == bin_key).then_some(bin.last_active_generation)
+            })
+        };
+        match phase_type {
+            BinnedRenderPhaseType::MultidrawableMesh => self
+                .multidrawable_meshes
+                .get(batch_set_key)
+                .and_then(|bins| bins.get(bin_key))
+                .map(|bin| bin.last_active_generation),
+            BinnedRenderPhaseType::BatchableMesh => lookup(&self.batchable_meshes),
+            BinnedRenderPhaseType::UnbatchableMesh => lookup(&self.unbatchable_meshes),
+            BinnedRenderPhaseType::NonMesh => lookup(&self.non_mesh_items),
+        }
+    }
+
     /// Clears all queued entries and prepared batches for the current pass/viewport while
     /// retaining every bin's hash node and `Vec` capacity.
     pub fn clear_entries(&mut self) {
@@ -361,23 +440,27 @@ impl<BPI: BinnedPhaseItem> BinnedRenderPhase<BPI> {
                 }
             }
         }
-        for entry in &self.prepared_unbatchable {
-            visit(BPI::new(
-                entry.batch_set_key.clone(),
-                entry.bin_key.clone(),
-                entry.item,
-                entry.instance_range.clone(),
-                entry.extra_index.clone(),
-            ));
+        for (batch_set_key, bin_key, range) in &self.prepared_unbatchable.groups {
+            for entry in &self.prepared_unbatchable.entries[range.clone()] {
+                visit(BPI::new(
+                    batch_set_key.clone(),
+                    bin_key.clone(),
+                    entry.item,
+                    entry.instance_range.clone(),
+                    entry.extra_index.clone(),
+                ));
+            }
         }
-        for entry in &self.prepared_non_mesh {
-            visit(BPI::new(
-                entry.batch_set_key.clone(),
-                entry.bin_key.clone(),
-                entry.item,
-                entry.instance_range.clone(),
-                entry.extra_index.clone(),
-            ));
+        for (batch_set_key, bin_key, range) in &self.prepared_non_mesh.groups {
+            for entry in &self.prepared_non_mesh.entries[range.clone()] {
+                visit(BPI::new(
+                    batch_set_key.clone(),
+                    bin_key.clone(),
+                    entry.item,
+                    entry.instance_range.clone(),
+                    entry.extra_index.clone(),
+                ));
+            }
         }
     }
 

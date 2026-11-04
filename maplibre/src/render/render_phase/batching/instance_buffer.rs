@@ -9,17 +9,23 @@ const MIN_UBO_BINDING_ALIGN: usize = 16;
 /// Contiguous CPU/GPU instance buffer for `BD`, supporting storage buffers, vertex-step
 /// instance buffers, and aligned dynamic uniform fallback buffers.
 ///
-/// Mirrors Bevy's `BatchedInstanceBuffer<BD>`.
+/// Mirrors Bevy's `BatchedInstanceBuffer<BD>`. Packed storage/vertex backing (`gpu_buffer`) and
+/// dynamic-uniform backing (`uniform_gpu_buffer`) are maintained independently so multiple phases
+/// sharing `BD` with different [`FallbackInstanceBufferMode`]s never clobber each other.
 pub struct BatchedInstanceBuffer<BD: bytemuck::Pod> {
     instances: Vec<BD>,
+    packed_end_len: usize,
     aligned_uniform_bytes: Vec<u8>,
     padded_upload_scratch: Vec<u8>,
     uploaded_bytes: usize,
+    uploaded_uniform_bytes: usize,
     aligned_stride: usize,
     fallback_mode: FallbackInstanceBufferMode,
     gpu_buffer: Option<wgpu::Buffer>,
     gpu_capacity_bytes: usize,
     gpu_usages: wgpu::BufferUsages,
+    uniform_gpu_buffer: Option<wgpu::Buffer>,
+    uniform_gpu_capacity_bytes: usize,
     _marker: PhantomData<BD>,
 }
 
@@ -34,30 +40,35 @@ impl<BD: bytemuck::Pod> BatchedInstanceBuffer<BD> {
     pub fn new() -> Self {
         Self {
             instances: Vec::new(),
+            packed_end_len: 0,
             aligned_uniform_bytes: Vec::new(),
             padded_upload_scratch: Vec::new(),
             uploaded_bytes: 0,
+            uploaded_uniform_bytes: 0,
             aligned_stride: align_up(size_of::<BD>().max(MIN_UBO_BINDING_ALIGN), 256),
             fallback_mode: FallbackInstanceBufferMode::DynamicUniform,
             gpu_buffer: None,
             gpu_capacity_bytes: 0,
             gpu_usages: wgpu::BufferUsages::empty(),
+            uniform_gpu_buffer: None,
+            uniform_gpu_capacity_bytes: 0,
             _marker: PhantomData,
         }
     }
 
-    /// Configures the fallback buffer mode used when `vertex_storage_buffers` is `false`.
+    /// Configures the default fallback buffer mode used when a phase does not specify its own.
     pub fn with_fallback_mode(mut self, mode: FallbackInstanceBufferMode) -> Self {
         self.fallback_mode = mode;
         self
     }
 
-    /// Updates the fallback buffer mode used when `vertex_storage_buffers` is `false`.
+    /// Updates the default fallback buffer mode used when a phase does not specify its own.
     pub fn set_fallback_mode(&mut self, mode: FallbackInstanceBufferMode) {
         self.fallback_mode = mode;
     }
 
-    /// Fallback buffer mode used when `vertex_storage_buffers` is `false`.
+    /// Default fallback buffer mode used when `vertex_storage_buffers` is `false` and a phase has
+    /// not configured an explicit override.
     #[inline]
     pub const fn fallback_mode(&self) -> FallbackInstanceBufferMode {
         self.fallback_mode
@@ -66,8 +77,10 @@ impl<BD: bytemuck::Pod> BatchedInstanceBuffer<BD> {
     /// Clears CPU-staged instances for a new pass while retaining CPU and GPU capacities.
     pub fn clear(&mut self) {
         self.instances.clear();
+        self.packed_end_len = 0;
         self.aligned_uniform_bytes.clear();
         self.uploaded_bytes = 0;
+        self.uploaded_uniform_bytes = 0;
     }
 
     /// Number of instances staged in the current pass.
@@ -111,23 +124,45 @@ impl<BD: bytemuck::Pod> BatchedInstanceBuffer<BD> {
         wgpu::BufferSize::new(aligned as u64)
     }
 
-    /// Borrows the underlying GPU buffer after [`Self::upload`] has run.
+    /// Borrows the packed storage/vertex GPU buffer, falling back to [`Self::uniform_buffer`]
+    /// when only dynamic-uniform staging is active.
     #[inline]
     pub fn buffer(&self) -> Option<&wgpu::Buffer> {
-        self.gpu_buffer.as_ref()
+        self.gpu_buffer
+            .as_ref()
+            .or(self.uniform_gpu_buffer.as_ref())
     }
 
-    /// Current GPU buffer capacity in bytes (`0` before first upload).
+    /// Borrows the dynamic-uniform GPU buffer (`UNIFORM | COPY_DST`) after [`Self::upload`] has
+    /// uploaded dynamic-uniform instances.
+    #[inline]
+    pub fn uniform_buffer(&self) -> Option<&wgpu::Buffer> {
+        self.uniform_gpu_buffer.as_ref()
+    }
+
+    /// Current packed storage/vertex GPU buffer capacity in bytes (or dynamic-uniform capacity
+    /// when only dynamic-uniform staging has been allocated).
     #[inline]
     pub const fn gpu_capacity_bytes(&self) -> usize {
-        self.gpu_capacity_bytes
+        if self.gpu_capacity_bytes > 0 {
+            self.gpu_capacity_bytes
+        } else {
+            self.uniform_gpu_capacity_bytes
+        }
     }
 
-    /// Returns the sub-slice covering `instance_range` for `VertexStepMode::Instance` binding.
+    /// Current dynamic-uniform GPU buffer capacity in bytes (`0` before first dynamic-uniform upload).
+    #[inline]
+    pub const fn uniform_gpu_capacity_bytes(&self) -> usize {
+        self.uniform_gpu_capacity_bytes
+    }
+
+    /// Returns the sub-slice covering `instance_range` in the packed storage/vertex GPU buffer for
+    /// `VertexStepMode::Instance` binding.
     ///
     /// Particularly useful on WebGL2 (`indirect_first_instance == false`), allowing a pass to
-    /// bind only `instance_range` at vertex slot `N` and issue `draw_indexed(..., 0..count)`
-    /// with `first_instance == 0`.
+    /// bind only `instance_range` at vertex slot `N` while [`draw_binned_mesh`](crate::render::render_phase::draw_binned_mesh)
+    /// dispatches `0..count` with `first_instance == 0`.
     pub fn instance_slice(&self, instance_range: Range<u32>) -> Option<wgpu::BufferSlice<'_>> {
         let buffer = self.gpu_buffer.as_ref()?;
         let elem_size = size_of::<BD>() as wgpu::BufferAddress;
@@ -139,11 +174,12 @@ impl<BD: bytemuck::Pod> BatchedInstanceBuffer<BD> {
         Some(buffer.slice(start..end))
     }
 
-    /// Appends one tightly packed instance and returns its instance index.
+    /// Appends one tightly packed instance for storage or `VertexStepMode::Instance` consumption
+    /// and returns its instance index.
     pub fn push(&mut self, value: BD) -> u32 {
-        let index =
-            u32::try_from(self.instances.len()).expect("BatchedInstanceBuffer exceeded u32::MAX");
+        let index = u32::try_from(self.instances.len()).unwrap_or(u32::MAX);
         self.instances.push(value);
+        self.packed_end_len = self.instances.len();
         index
     }
 
@@ -153,18 +189,18 @@ impl<BD: bytemuck::Pod> BatchedInstanceBuffer<BD> {
         let align = (min_uniform_alignment as usize).max(MIN_UBO_BINDING_ALIGN);
         let stride = align_up(size_of::<BD>().max(MIN_UBO_BINDING_ALIGN), align);
         self.aligned_stride = stride;
-        let index = self.push(value);
+        let index = u32::try_from(self.instances.len()).unwrap_or(u32::MAX);
         let byte_offset = self.aligned_uniform_bytes.len();
-        let offset_u32 = u32::try_from(byte_offset)
-            .expect("dynamic uniform buffer byte offset exceeded u32::MAX");
-        let bytes = bytemuck::bytes_of(self.instances.last().expect("just pushed"));
+        let offset_u32 = u32::try_from(byte_offset).unwrap_or(u32::MAX);
+        let bytes = bytemuck::bytes_of(&value);
         self.aligned_uniform_bytes.resize(byte_offset + stride, 0u8);
         self.aligned_uniform_bytes[byte_offset..byte_offset + bytes.len()].copy_from_slice(bytes);
+        self.instances.push(value);
         (index, offset_u32)
     }
 
-    /// Uploads staged instance data to the GPU via [`UploadQueue::write_buffer`], growing the
-    /// backing `wgpu::Buffer` by 2x whenever capacity is exceeded.
+    /// Uploads newly staged packed and/or dynamic-uniform instance slices to the GPU via
+    /// [`UploadQueue::write_buffer`], growing each backing `wgpu::Buffer` by 2x as needed.
     pub fn upload(
         &mut self,
         device: &wgpu::Device,
@@ -174,66 +210,121 @@ impl<BD: bytemuck::Pod> BatchedInstanceBuffer<BD> {
         if self.instances.is_empty() || size_of::<BD>() == 0 {
             return;
         }
-        let use_dynamic_uniform = !capabilities.vertex_storage_buffers
-            && self.fallback_mode == FallbackInstanceBufferMode::DynamicUniform;
-
-        let usages = if capabilities.vertex_storage_buffers {
-            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST
-        } else if use_dynamic_uniform {
-            wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST
-        } else {
-            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST
-        };
-
-        let raw_bytes: &[u8] = if use_dynamic_uniform {
-            &self.aligned_uniform_bytes
-        } else {
-            bytemuck::cast_slice(&self.instances)
-        };
-        if raw_bytes.len() <= self.uploaded_bytes {
+        if capabilities.vertex_storage_buffers {
+            let raw_bytes: &[u8] = bytemuck::cast_slice(&self.instances);
+            let usages = wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::VERTEX
+                | wgpu::BufferUsages::COPY_DST;
+            upload_delta_bytes(
+                device,
+                queue,
+                "batched_instance_buffer",
+                usages,
+                raw_bytes,
+                &mut self.gpu_buffer,
+                &mut self.gpu_capacity_bytes,
+                Some(&mut self.gpu_usages),
+                &mut self.uploaded_bytes,
+                &mut self.padded_upload_scratch,
+            );
             return;
         }
-        let copy_align = wgpu::COPY_BUFFER_ALIGNMENT as usize;
-        let total_padded_bytes = align_up(raw_bytes.len(), copy_align);
-        let reallocated = self.gpu_buffer.is_none()
-            || self.gpu_capacity_bytes < total_padded_bytes
-            || self.gpu_usages != usages;
-        if reallocated {
-            let mut new_cap = self.gpu_capacity_bytes.max(MIN_INSTANCE_BUFFER_BYTES);
-            while new_cap < total_padded_bytes {
-                new_cap = new_cap.saturating_mul(2).max(total_padded_bytes);
-            }
-            self.gpu_buffer = Some(device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("batched_instance_buffer"),
-                size: new_cap as wgpu::BufferAddress,
-                usage: usages,
-                mapped_at_creation: false,
-            }));
-            self.gpu_capacity_bytes = new_cap;
-            self.gpu_usages = usages;
+
+        if self.packed_end_len > 0 {
+            let raw_bytes: &[u8] = bytemuck::cast_slice(&self.instances[..self.packed_end_len]);
+            let usages = wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST;
+            upload_delta_bytes(
+                device,
+                queue,
+                "batched_instance_vertex_buffer",
+                usages,
+                raw_bytes,
+                &mut self.gpu_buffer,
+                &mut self.gpu_capacity_bytes,
+                Some(&mut self.gpu_usages),
+                &mut self.uploaded_bytes,
+                &mut self.padded_upload_scratch,
+            );
         }
 
-        let start_byte = if reallocated {
-            0
-        } else {
-            (self.uploaded_bytes / copy_align) * copy_align
-        };
-        let delta_raw = &raw_bytes[start_byte..];
-        let write_bytes: &[u8] = if delta_raw.len().is_multiple_of(copy_align) {
-            delta_raw
-        } else {
-            let padded_len = align_up(delta_raw.len(), copy_align);
-            self.padded_upload_scratch.clear();
-            self.padded_upload_scratch.resize(padded_len, 0u8);
-            self.padded_upload_scratch[..delta_raw.len()].copy_from_slice(delta_raw);
-            &self.padded_upload_scratch
-        };
-
-        if let Some(buffer) = &self.gpu_buffer {
-            queue.write_buffer(buffer, start_byte as wgpu::BufferAddress, write_bytes);
+        if !self.aligned_uniform_bytes.is_empty() {
+            let usages = wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST;
+            upload_delta_bytes(
+                device,
+                queue,
+                "batched_instance_uniform_buffer",
+                usages,
+                &self.aligned_uniform_bytes,
+                &mut self.uniform_gpu_buffer,
+                &mut self.uniform_gpu_capacity_bytes,
+                None,
+                &mut self.uploaded_uniform_bytes,
+                &mut self.padded_upload_scratch,
+            );
         }
-        self.uploaded_bytes = raw_bytes.len();
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn upload_delta_bytes(
+    device: &wgpu::Device,
+    queue: &UploadQueue,
+    label: &'static str,
+    usages: wgpu::BufferUsages,
+    raw_bytes: &[u8],
+    gpu_buffer: &mut Option<wgpu::Buffer>,
+    gpu_capacity_bytes: &mut usize,
+    tracked_usages: Option<&mut wgpu::BufferUsages>,
+    uploaded_bytes: &mut usize,
+    padded_upload_scratch: &mut Vec<u8>,
+) {
+    if raw_bytes.len() <= *uploaded_bytes {
+        return;
+    }
+    let copy_align = wgpu::COPY_BUFFER_ALIGNMENT as usize;
+    let total_padded_bytes = align_up(raw_bytes.len(), copy_align);
+    let usage_mismatch = tracked_usages
+        .as_deref()
+        .is_some_and(|prev| *prev != usages);
+    let reallocated =
+        gpu_buffer.is_none() || *gpu_capacity_bytes < total_padded_bytes || usage_mismatch;
+    if reallocated {
+        let mut new_cap = (*gpu_capacity_bytes).max(MIN_INSTANCE_BUFFER_BYTES);
+        while new_cap < total_padded_bytes {
+            new_cap = new_cap.saturating_mul(2).max(total_padded_bytes);
+        }
+        *gpu_buffer = Some(device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(label),
+            size: new_cap as wgpu::BufferAddress,
+            usage: usages,
+            mapped_at_creation: false,
+        }));
+        *gpu_capacity_bytes = new_cap;
+        if let Some(prev) = tracked_usages {
+            *prev = usages;
+        }
+    }
+
+    let start_byte = if reallocated {
+        0
+    } else {
+        (*uploaded_bytes / copy_align) * copy_align
+    };
+    let delta_raw = &raw_bytes[start_byte..];
+    let write_bytes: &[u8] = if delta_raw.len().is_multiple_of(copy_align) {
+        delta_raw
+    } else {
+        let padded_len = align_up(delta_raw.len(), copy_align);
+        padded_upload_scratch.clear();
+        padded_upload_scratch.resize(padded_len, 0u8);
+        padded_upload_scratch[..delta_raw.len()].copy_from_slice(delta_raw);
+        padded_upload_scratch.as_slice()
+    };
+
+    if let Some(buffer) = gpu_buffer.as_ref() {
+        queue.write_buffer(buffer, start_byte as wgpu::BufferAddress, write_bytes);
+    }
+    *uploaded_bytes = raw_bytes.len();
 }
 
 #[inline]
