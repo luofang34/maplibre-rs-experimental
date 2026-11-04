@@ -1,6 +1,8 @@
 //! Visible requests and speculative coverage under the active projection.
 use std::collections::HashSet;
 
+use cgmath::InnerSpace;
+
 use super::{globe_camera_for_view, ProjectionStateError};
 use crate::{
     coords::{ViewRegion, WorldTileCoords, ZoomLevel, TILE_SIZE},
@@ -413,7 +415,21 @@ fn nadir_ground_elevation(
     else {
         return 0.0;
     };
-    let nadir = crate::projection::globe::unit_sphere_to_lat_lon(camera.camera_position());
+    let position = camera.camera_position();
+    let len = position.magnitude();
+    if len > f64::EPSILON {
+        let sin_lat = position.y / len;
+        let sin_limit = crate::projection::globe::scale::MERCATOR_LATITUDE_LIMIT
+            .to_radians()
+            .sin();
+        if sin_lat > sin_limit {
+            return f64::from(index.poles().north_meters) * index.exaggeration();
+        }
+        if sin_lat < -sin_limit {
+            return f64::from(index.poles().south_meters) * index.exaggeration();
+        }
+    }
+    let nadir = crate::projection::globe::unit_sphere_to_lat_lon(position);
     let x = nadir.longitude / 360.0 + 0.5;
     let y = (1.0 - nadir.latitude.to_radians().tan().asinh() / std::f64::consts::PI) * 0.5;
     index

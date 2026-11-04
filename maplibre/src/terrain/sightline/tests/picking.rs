@@ -211,3 +211,43 @@ fn unknown_ground_before_drawn_ground_beyond_it_is_unknown() {
         TerrainPick::Unknown
     );
 }
+
+#[test]
+fn polar_cap_has_sub_25m_chord_sag_and_honors_polar_pole_elevations() {
+    let south_edge = LatLon::new(-85.03, -19.7);
+    let mut polar = Ground::around(south_edge, |_| 2_835.0);
+    polar.index = polar.index.with_poles(crate::terrain::PolarPoleElevations {
+        north_meters: 0.0,
+        south_meters: 2_835.0,
+    });
+    let terrain = polar.terrain();
+    let at_pole = terrain
+        .ground_at(LatLon::new(-90.0, -19.7))
+        .expect("known")
+        .expect("drawn south pole");
+    assert!(
+        (at_pole - 2_835.0).abs() < 1e-3,
+        "south pole ground_at={at_pole}"
+    );
+    // Midway across the polar cap (-87.5 deg), a single-ring chord sagged ~5,900 m below the
+    // sphere; 32 rings keep geometric chord sag under 25 m everywhere on the cap.
+    let mid_cap = terrain
+        .ground_at(LatLon::new(-87.5, -19.7))
+        .expect("known")
+        .expect("drawn mid-cap");
+    assert!(
+        (mid_cap - 2_835.0).abs() < 25.0,
+        "mid-cap chord sag should stay < 25 m, got ground_at={mid_cap}"
+    );
+
+    let pole_cam = super::camera(LatLon::new(-89.95, -19.7), 0.0, 0.0, 2_835.0);
+    let pick = pick_globe_terrain(&pole_cam, terrain, Point2::new(1165.0, 900.0));
+    let TerrainPick::PolarCap(hit) = pick else {
+        panic!("expected south polar cap hit, got {pick:?}");
+    };
+    assert!(
+        (hit.elevation - 2_835.0).abs() < 5.0,
+        "32-ring south polar cap elevation near pole should be ~2835 m, got {} m",
+        hit.elevation
+    );
+}

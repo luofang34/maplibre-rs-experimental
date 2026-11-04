@@ -1,7 +1,7 @@
 //! GPU-facing projection data shared by tile shaders.
 
 use bytemuck_derive::{Pod, Zeroable};
-use cgmath::{Matrix4, Point2};
+use cgmath::{InnerSpace, Matrix4, Point2};
 use thiserror::Error;
 
 use crate::{
@@ -11,6 +11,7 @@ use crate::{
         globe::{
             camera::{GlobeCameraError, GlobeCameraOptions, GlobeCameraState},
             covering_tiles::GlobeCoveringError,
+            unit_sphere_to_lat_lon,
         },
         mercator::MercatorCoveringError,
         renderer_data::{
@@ -288,10 +289,13 @@ pub fn projection_data_for_view(
         ..ShaderProjectionData::from_renderer_data(data)
     };
     // Below this zoom f32 rounding stays far under a pixel, and projecting from the global
-    // coordinates keeps every edge where GL JS, which does the same, draws it.
-    let references = (view_state.zoom().value() >= PRECISE_GLOBE_ZOOM)
-        .then(|| globe_center_references(&globe))
-        .flatten();
+    // coordinates keeps every edge where GL JS, which does the same, draws it. Host external
+    // eyes always project relative to the sub-camera point so polar and high-altitude 6-DoF
+    // views never drop out of f64 reference precision.
+    let references = (view_state.zoom().value() >= PRECISE_GLOBE_ZOOM
+        || view_state.has_external_view())
+    .then(|| globe_center_references(&globe))
+    .flatten();
     Ok(match references {
         Some([center, clip, radial]) => ShaderProjectionData {
             globe_circle: [shader.globe_circle[0], 1.0, shader.globe_circle[2], 0.0],
@@ -314,9 +318,26 @@ const PRECISE_GLOBE_ZOOM: f64 = 12.0;
 /// a close view of the globe draws as geometry that slides; relative to this centre they keep
 /// their separation.
 fn globe_center_references(globe: &GlobeCameraState) -> Option<[[f32; 4]; 3]> {
-    let center = globe.center().to_mercator();
+    let center_ll = if globe.is_external_eye() {
+        let mag = globe.camera_position().magnitude();
+        if mag > 1e-12 {
+            unit_sphere_to_lat_lon(globe.camera_position() / mag)
+        } else {
+            globe.center()
+        }
+    } else {
+        globe.center()
+    };
+    // Unclamped Web Mercator y keeps the reference right under polar cameras beyond 85.05°
+    // instead of 550 km away at the Mercator rim; clamping only 11 cm from ±90° keeps tan finite.
+    let lat_rad = center_ll
+        .latitude
+        .clamp(-89.999_999, 89.999_999)
+        .to_radians();
+    let x_unclamped = center_ll.longitude / 360.0 + 0.5;
+    let y_unclamped = (1.0 - lat_rad.tan().asinh() / std::f64::consts::PI) * 0.5;
     // The centre need only be near the view; one f32 can hold exactly is differenced exactly.
-    let (x_f32, y_f32) = (center.x as f32, center.y as f32);
+    let (x_f32, y_f32) = (x_unclamped as f32, y_unclamped as f32);
     let (x, y) = (f64::from(x_f32), f64::from(y_f32));
     let longitude = x * std::f64::consts::TAU + std::f64::consts::PI;
     let tangent_half_latitude = (std::f64::consts::PI - y * std::f64::consts::TAU).exp();

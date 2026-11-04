@@ -13,11 +13,11 @@ use crate::{
     projection::globe::{
         covering::{aabb_volume, TileElevationProvider},
         covering_tiles::{
-            add_padding, frustum::GlobeFrustum, lod::LodContext, sort_by_center,
-            unbounded_covering, Intersection, SourceZoomRange, ZoomRounding,
+            add_padding, frustum::GlobeFrustum, lod::LodContext, Intersection, SourceZoomRange,
+            ZoomRounding,
         },
     },
-    render::{projection::mercator_world_to_lat_lon, view_state::ViewState},
+    render::view_state::ViewState,
 };
 
 /// Inputs controlling Mercator tile selection.
@@ -86,12 +86,12 @@ pub(crate) fn covering_tiles_with_history(
     let center = view_state.camera().position();
     let eye = view_state.eye_position();
     let lod = lod_context(view_state, options.requested_zoom, world_size);
-    let priority = if view_state.has_external_view() {
+    let priority_px = if view_state.has_external_view() {
         Point2::new(eye.x, eye.y)
     } else {
         center
     };
-    let priority = mercator_world_to_lat_lon(priority.x, priority.y, world_size);
+    let priority_2d = Point2::new(priority_px.x / world_size, priority_px.y / world_size);
     let inspect = |placed: WorldTileCoords, fully_visible| -> Result<_, MercatorCoveringError> {
         let Some((canonical, wrap)) = placed.wrapped() else {
             return Ok(None);
@@ -116,18 +116,25 @@ pub(crate) fn covering_tiles_with_history(
             fully_visible: intersection == Intersection::Full,
         }))
     };
-    let mut visible = if view_state.has_external_view() {
-        crate::projection::tile_covering::bounded(
-            options.max_tiles,
-            options.zoom_range.min,
-            priority,
-            inspect,
-        )?
-    } else {
-        unbounded_covering(options.zoom_range.min, options.world_copies, inspect)?
-    };
-    sort_by_center(&mut visible, priority);
+    let mut visible = crate::projection::tile_covering::bounded_planar(
+        options.max_tiles,
+        options.zoom_range.min,
+        options.world_copies,
+        priority_2d,
+        inspect,
+    )?;
+    sort_by_planar(&mut visible, priority_2d);
     Ok(add_padding(visible, options.padding, options.max_tiles))
+}
+
+pub(crate) fn sort_by_planar(tiles: &mut [WorldTileCoords], focus_2d: Point2<f64>) {
+    tiles.sort_by(|left, right| {
+        crate::projection::tile_covering::planar_tile_distance_squared(*left, focus_2d)
+            .total_cmp(
+                &crate::projection::tile_covering::planar_tile_distance_squared(*right, focus_2d),
+            )
+            .then_with(|| left.cmp(right))
+    });
 }
 
 #[cfg(test)]

@@ -1,7 +1,10 @@
-use cgmath::{InnerSpace, Point2};
+use cgmath::{InnerSpace, Point2, Vector3};
 
 use super::{
-    super::{camera::GlobeCameraState, covering::distance_to_tile_2d, unit_sphere_to_lat_lon},
+    super::{
+        camera::GlobeCameraState,
+        covering::{closest_unit_sphere_point_on_tile, distance_to_tile_2d},
+    },
     ZoomRounding,
 };
 use crate::coords::{LatLon, TileCoords, ZoomLevel, MAX_ZOOM};
@@ -18,6 +21,7 @@ const NORMAL_FIELD_OF_VIEW_DEGREES: f64 = 36.869_897_645_844_02;
 #[derive(Clone, Copy)]
 pub(crate) struct LodContext {
     camera: Point2<f64>,
+    eye_sphere: Option<(Vector3<f64>, f64)>,
     eye_focal_pixels: Option<f64>,
     distance_z: f64,
     distance_to_center_3d: f64,
@@ -36,16 +40,25 @@ impl LodContext {
             // put the camera a few percent of its height above the ground and have every
             // tile counted as seen at grazing incidence, levels coarser than the eye sees.
             let position = camera.camera_position();
-            let beneath = unit_sphere_to_lat_lon(position);
+            let len = position.magnitude();
+            let eye_hat = if len > f64::EPSILON {
+                position / len
+            } else {
+                Vector3::unit_z()
+            };
             let min_clearance = 1.0 / camera.body().radius_meters;
-            let height_radii = (position.magnitude() - 1.0).max(min_clearance);
-            return Self::from_positions(
-                mercator_point(beneath),
-                mercator_center(camera),
-                height_radii * radius_world_units(beneath.latitude),
-                camera.field_of_view_degrees(),
+            let height_radii = (len - 1.0).max(min_clearance);
+            let focus_chord = (eye_hat - camera.focus_unit_sphere()).magnitude();
+            return Self {
+                camera: Point2::new(0.5, 0.5),
+                eye_sphere: Some((eye_hat, height_radii)),
+                eye_focal_pixels: None,
+                distance_z: height_radii,
+                distance_to_center_3d: focus_chord.hypot(height_radii),
                 requested_zoom,
-            );
+                field_of_view_degrees: camera.field_of_view_degrees(),
+                planar: false,
+            };
         }
         Self::from_view(
             mercator_center(camera),
@@ -85,16 +98,28 @@ impl LodContext {
         ground_elevation_meters: f64,
     ) -> Self {
         let position = camera.camera_position();
-        let beneath = unit_sphere_to_lat_lon(position);
+        let len = position.magnitude();
+        let eye_hat = if len > f64::EPSILON {
+            position / len
+        } else {
+            Vector3::unit_z()
+        };
         let body = camera.body();
         let ground_radius = body.unit_radius_at(ground_elevation_meters);
         let min_clearance = 1.0 / body.radius_meters;
-        let height_radii = (position.magnitude() - ground_radius).max(min_clearance);
-        Self::from_eye(
-            mercator_point(beneath),
-            height_radii * radius_world_units(beneath.latitude),
-            focal_pixels * 2_f64.powf(level_offset),
-        )
+        let height_radii = (len - ground_radius).max(min_clearance);
+        let parallel_cos = parallel_cos_from_sin_lat(eye_hat.y);
+        let height = height_radii / (std::f64::consts::TAU * parallel_cos);
+        Self {
+            camera: Point2::new(0.5, 0.5),
+            eye_sphere: Some((eye_hat, height_radii)),
+            distance_z: height,
+            eye_focal_pixels: Some(focal_pixels * 2_f64.powf(level_offset)),
+            distance_to_center_3d: height,
+            requested_zoom: 0.0,
+            field_of_view_degrees: 0.0,
+            planar: false,
+        }
     }
 
     /// Builds the context from the map center in Mercator `0..1` units, the camera distance to
@@ -137,6 +162,7 @@ impl LodContext {
         let distance_to_center_2d = (center.x - camera.x).hypot(center.y - camera.y);
         Self {
             camera,
+            eye_sphere: None,
             eye_focal_pixels: None,
             distance_z,
             distance_to_center_3d: distance_to_center_2d.hypot(distance_z),
@@ -155,6 +181,7 @@ impl LodContext {
     pub(crate) fn from_eye(camera: Point2<f64>, height: f64, focal_pixels: f64) -> Self {
         Self {
             camera,
+            eye_sphere: None,
             distance_z: height,
             eye_focal_pixels: Some(focal_pixels),
             distance_to_center_3d: height,
@@ -192,6 +219,30 @@ impl LodContext {
 
     /// The fractional level `tile` should be drawn at, before rounding.
     fn desired_zoom(&self, tile: TileCoords) -> f64 {
+        if !self.planar {
+            if let Some((eye_hat, height_radii)) = self.eye_sphere {
+                let (q_hat, chebyshev_chord) = closest_unit_sphere_point_on_tile(eye_hat, tile);
+                let chord_vec = eye_hat - q_hat;
+                if let Some(focal) = self.eye_focal_pixels {
+                    let d_radii_3d = (chord_vec + eye_hat * height_radii).magnitude();
+                    let parallel_cos = if u8::from(tile.z) == 0 {
+                        1.0
+                    } else {
+                        parallel_cos_from_sin_lat(q_hat.y)
+                    };
+                    let distance =
+                        (d_radii_3d / (std::f64::consts::TAU * parallel_cos)).max(f64::EPSILON);
+                    return (focal / (crate::coords::TILE_SIZE * distance)).log2();
+                }
+                return calculate_tile_zoom(
+                    self.requested_zoom,
+                    chebyshev_chord,
+                    self.distance_z,
+                    self.distance_to_center_3d,
+                    self.field_of_view_degrees,
+                );
+            }
+        }
         let distance_2d = if self.planar {
             distance_to_tile_planar(self.camera, tile)
         } else {
@@ -212,6 +263,11 @@ impl LodContext {
             )
         }
     }
+}
+
+fn parallel_cos_from_sin_lat(sin_lat: f64) -> f64 {
+    let min_cos = MAX_MERCATOR_LATITUDE_DEGREES.to_radians().cos();
+    (1.0 - sin_lat * sin_lat).max(0.0).sqrt().max(min_cos)
 }
 
 /// The straight distance from a point to a tile's rectangle in Mercator `0..1` units.
@@ -249,6 +305,7 @@ fn mercator_point(location: LatLon) -> Point2<f64> {
 
 /// The globe's radius in Mercator `0..1` units at a latitude, where a world unit spans the
 /// circumference scaled by the Mercator stretch there.
+#[cfg(test)]
 fn radius_world_units(latitude_degrees: f64) -> f64 {
     let latitude = latitude_degrees
         .clamp(

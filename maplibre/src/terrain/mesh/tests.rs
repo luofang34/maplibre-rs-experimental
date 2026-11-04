@@ -1,6 +1,8 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
-use super::{create_terrain_mesh, TERRAIN_MESH_SIZE};
+use super::{
+    create_terrain_mesh, polar_cap_colatitude_radians, POLAR_CAP_RINGS, TERRAIN_MESH_SIZE,
+};
 use crate::coords::EXTENT_SINT;
 
 #[test]
@@ -10,10 +12,13 @@ fn grid_and_skirts_have_the_expected_sizes() {
 
     let grid = (n + 1) * (n + 1);
     let skirts = 2 * (n + 1) + 4 * (n + 1);
-    assert_eq!(mesh.vertices.len() as u32, grid + skirts + 2 * (n + 1));
+    assert_eq!(
+        mesh.vertices.len() as u32,
+        grid + skirts + 2 * POLAR_CAP_RINGS * (n + 1)
+    );
     assert_eq!(
         mesh.indices.len() as u32,
-        n * n * 6 + n * 12 + n * 12 + n * 12
+        n * n * 6 + n * 12 + n * 12 + 2 * POLAR_CAP_RINGS * n * 6
     );
     assert_eq!(mesh.indices.len() % 3, 0);
 }
@@ -53,16 +58,32 @@ fn terrain_grid_and_polar_fans_face_outward() {
         if poles.len() == 2 && poles[0].y == poles[1].y {
             continue;
         }
-        let [a, b, c] = vertices.map(|vertex| match vertex.y {
-            i16::MIN => Vector3::unit_y(),
-            i16::MAX => -Vector3::unit_y(),
-            _ => crate::projection::globe::project_tile_coordinates_to_unit_sphere(
-                0,
-                0,
-                0,
-                f64::from(vertex.x),
-                f64::from(vertex.y),
-            ),
+        let [a, b, c] = vertices.map(|vertex| {
+            let lon = (f64::from(vertex.x) / f64::from(EXTENT_SINT)) * std::f64::consts::TAU
+                + std::f64::consts::PI;
+            match vertex.y {
+                i16::MIN => Vector3::unit_y(),
+                i16::MAX => -Vector3::unit_y(),
+                y if y < 0 => {
+                    let cap_t = (-f64::from(y) / 32768.0).clamp(0.0, 1.0);
+                    let lat = std::f64::consts::FRAC_PI_2 - polar_cap_colatitude_radians(cap_t);
+                    crate::projection::globe::angular_radians_to_unit_sphere(lon, lat)
+                }
+                y if i32::from(y) > EXTENT_SINT => {
+                    let cap_t = ((f64::from(y) - f64::from(EXTENT_SINT))
+                        / f64::from(i32::from(i16::MAX) - EXTENT_SINT))
+                    .clamp(0.0, 1.0);
+                    let lat = -(std::f64::consts::FRAC_PI_2 - polar_cap_colatitude_radians(cap_t));
+                    crate::projection::globe::angular_radians_to_unit_sphere(lon, lat)
+                }
+                _ => crate::projection::globe::project_tile_coordinates_to_unit_sphere(
+                    0,
+                    0,
+                    0,
+                    f64::from(vertex.x),
+                    f64::from(vertex.y),
+                ),
+            }
         });
         let outward = (b - a).cross(c - a).dot(a + b + c);
         assert!(
@@ -107,7 +128,10 @@ fn polar_caps_cover_their_interpolated_strips() {
     let mut twice_area = 0_i64;
     for triangle in mesh.indices.as_chunks::<3>().0 {
         let vertices: [_; 3] = std::array::from_fn(|i| mesh.vertices[triangle[i] as usize]);
-        if !vertices.iter().any(|v| matches!(v.y, i16::MIN | i16::MAX)) {
+        if !vertices
+            .iter()
+            .any(|v| v.y < 0 || i32::from(v.y) > EXTENT_SINT)
+        {
             continue;
         }
         let [a, b, c] = vertices.map(|v| [i64::from(v.x), i64::from(v.y)]);

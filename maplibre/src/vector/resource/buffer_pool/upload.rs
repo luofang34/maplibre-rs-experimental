@@ -11,6 +11,29 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         layer_metadata: TM,
         feature_metadata: &[FM],
     ) -> Result<(), AllocationError> {
+        self.allocate_layer_geometry_unless(
+            queue,
+            coords,
+            style_layer,
+            geometry,
+            layer_metadata,
+            feature_metadata,
+            |_| false,
+        )
+    }
+
+    /// Uploads a layer atomically, refusing to evict allocations of tiles matching `protect`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn allocate_layer_geometry_unless(
+        &mut self,
+        queue: &Q,
+        coords: WorldTileCoords,
+        style_layer: StyleLayer,
+        geometry: &OverAlignedVertexBuffer<V, I>,
+        layer_metadata: TM,
+        feature_metadata: &[FM],
+        mut protect: impl FnMut(WorldTileCoords) -> bool,
+    ) -> Result<(), AllocationError> {
         if coords.build_quad_key().is_none() {
             return Err(AllocationError::Coordinates { coords });
         }
@@ -31,16 +54,18 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         }
         // Vertices start on a whole element, so the layer draws from the whole buffer with
         // its first vertex as the base vertex; its feature records sit at the same index.
-        let buffer_vertices = self.reserve(
+        let buffer_vertices = self.reserve_unless(
             sizes[0],
             BackingBufferType::Vertices,
             (self.vertex_capacity(), vertex_stride),
+            &mut protect,
         )?;
         let first_vertex = buffer_vertices.start / vertex_stride;
-        let buffer_indices = self.reserve(
+        let buffer_indices = self.reserve_unless(
             sizes[1],
             BackingBufferType::Indices,
             (self.indices.inner_size, size_of::<I>() as u64),
+            &mut protect,
         )?;
         let entry = IndexEntry {
             allocation_id: self.revision.wrapping_add(1),
@@ -51,10 +76,11 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
             first_index: element_index(buffer_indices.start / size_of::<I>() as u64)?,
             buffer_vertices,
             buffer_indices,
-            buffer_layer_metadata: self.reserve(
+            buffer_layer_metadata: self.reserve_unless(
                 sizes[2],
                 BackingBufferType::Metadata,
                 (self.layer_metadata.inner_size, size_of::<TM>() as u64),
+                &mut protect,
             )?,
             buffer_feature_metadata: first_vertex * record_stride
                 ..first_vertex * record_stride + sizes[3],
@@ -94,14 +120,38 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         layer_metadata: TM,
         feature_metadata: &[FM],
     ) -> Result<(), AllocationError> {
-        let id = style_layer.id.clone();
-        self.allocate_layer_geometry(
+        self.replace_layer_geometry_unless(
             queue,
             coords,
             style_layer,
             geometry,
             layer_metadata,
             feature_metadata,
+            |_| false,
+        )
+    }
+
+    /// Replaces only this style layer while refusing to evict tiles matching `protect`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn replace_layer_geometry_unless(
+        &mut self,
+        queue: &Q,
+        coords: WorldTileCoords,
+        style_layer: StyleLayer,
+        geometry: &OverAlignedVertexBuffer<V, I>,
+        layer_metadata: TM,
+        feature_metadata: &[FM],
+        protect: impl FnMut(WorldTileCoords) -> bool,
+    ) -> Result<(), AllocationError> {
+        let id = style_layer.id.clone();
+        self.allocate_layer_geometry_unless(
+            queue,
+            coords,
+            style_layer,
+            geometry,
+            layer_metadata,
+            feature_metadata,
+            protect,
         )?;
         self.index.remove_layer(coords, &id, Some(self.revision));
         Ok(())
@@ -140,14 +190,15 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         elements * size_of::<V>() as u64
     }
 
-    fn reserve(
+    fn reserve_unless(
         &mut self,
         requested: u64,
         buffer: BackingBufferType,
         (capacity, align): (u64, u64),
+        protect: impl FnMut(WorldTileCoords) -> bool,
     ) -> Result<Range<u64>, AllocationError> {
         self.index
-            .make_room(requested, buffer, (capacity, align))
+            .make_room_unless(requested, buffer, (capacity, align), protect)
             .ok_or(AllocationError::Capacity {
                 buffer,
                 requested,

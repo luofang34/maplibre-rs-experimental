@@ -72,29 +72,87 @@ impl DrawnTerrain<'_> {
     pub(super) fn triangles(&self, cell: Cell) -> Vec<[Vector3<f64>; 3]> {
         let Cell { tile, column, row } = cell;
         let Some(row) = row else {
-            // The fan from the tile's outer edge to the pole.
-            let scale = 2_f64.powi(i32::from(u8::from(tile.z)));
-            let north = tile.y == 0;
-            let (edge, pole) = if north {
-                (0, Vector3::unit_y())
-            } else if f64::from(tile.y + 1) >= scale {
-                (TERRAIN_MESH_SIZE, -Vector3::unit_y())
-            } else {
-                return Vec::new();
-            };
-            return match (
-                self.vertex(tile, column, edge),
-                self.vertex(tile, column + 1, edge),
-            ) {
-                (Some((a, _)), Some((b, _))) => vec![[a, b, pole]],
-                _ => Vec::new(),
-            };
+            return self.polar_cap_triangles(tile, column);
         };
         let corner = |dx: u32, dy: u32| self.vertex(tile, column + dx, row + dy).map(|v| v.0);
         match (corner(0, 0), corner(0, 1), corner(1, 1), corner(1, 0)) {
             (Some(nw), Some(sw), Some(se), Some(ne)) => vec![[nw, sw, se], [nw, se, ne]],
             _ => Vec::new(),
         }
+    }
+
+    fn polar_cap_triangles(&self, tile: WorldTileCoords, column: u32) -> Vec<[Vector3<f64>; 3]> {
+        use crate::terrain::mesh::{
+            polar_cap_colatitude_radians, polar_cap_ring_t, POLAR_CAP_RINGS,
+        };
+        let scale = 2_f64.powi(i32::from(u8::from(tile.z)));
+        let poles = self.index.poles();
+        let (north, edge, pole_meters) = if tile.y == 0 {
+            (true, 0, poles.north_meters)
+        } else if f64::from(tile.y) + 1.0 >= scale {
+            (false, TERRAIN_MESH_SIZE, poles.south_meters)
+        } else {
+            return Vec::new();
+        };
+        let (Some((mut prev_a, elev_a)), Some((mut prev_b, elev_b))) = (
+            self.vertex(tile, column, edge),
+            self.vertex(tile, column + 1, edge),
+        ) else {
+            return Vec::new();
+        };
+        let exag = if self.index.exaggeration() > 0.0 {
+            self.index.exaggeration()
+        } else {
+            1.0
+        };
+        let pole_elev = f64::from(pole_meters) * exag;
+        let lon_a = ((f64::from(tile.x) + f64::from(column) / CELLS) / scale)
+            * std::f64::consts::TAU
+            + std::f64::consts::PI;
+        let lon_b = ((f64::from(tile.x) + f64::from(column + 1) / CELLS) / scale)
+            * std::f64::consts::TAU
+            + std::f64::consts::PI;
+        let mut out = Vec::with_capacity((POLAR_CAP_RINGS as usize) * 2 - 1);
+        for ring in 1..=POLAR_CAP_RINGS {
+            if ring == POLAR_CAP_RINGS {
+                let pole_dir = if north {
+                    Vector3::unit_y()
+                } else {
+                    -Vector3::unit_y()
+                };
+                let tip = pole_dir * self.body.unit_radius_at(pole_elev);
+                out.push(if north {
+                    [prev_a, prev_b, tip]
+                } else {
+                    [prev_b, prev_a, tip]
+                });
+                break;
+            }
+            let cap_t = polar_cap_ring_t(north, ring);
+            let rem = 1.0 - cap_t;
+            let radial_t = 1.0 - rem * rem;
+            let s = (radial_t / 0.35).clamp(0.0, 1.0);
+            let blend = s * s * (3.0 - 2.0 * s);
+            let ea = elev_a + (pole_elev - elev_a) * blend;
+            let eb = elev_b + (pole_elev - elev_b) * blend;
+            let theta = polar_cap_colatitude_radians(cap_t);
+            let sin_t = theta.sin();
+            let y_unit = if north { theta.cos() } else { -theta.cos() };
+            let curr_a = Vector3::new(lon_a.sin() * sin_t, y_unit, lon_a.cos() * sin_t)
+                * self.body.unit_radius_at(ea);
+            let curr_b = Vector3::new(lon_b.sin() * sin_t, y_unit, lon_b.cos() * sin_t)
+                * self.body.unit_radius_at(eb);
+            if north {
+                out.push([prev_a, prev_b, curr_a]);
+                out.push([prev_b, curr_b, curr_a]);
+            } else {
+                out.push([prev_b, prev_a, curr_a]);
+                out.push([curr_b, prev_b, curr_a]);
+            }
+            prev_a = curr_a;
+            prev_b = curr_b;
+        }
+        out
     }
 }
 

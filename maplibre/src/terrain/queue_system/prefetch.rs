@@ -77,9 +77,11 @@ pub(super) fn prepare(
             .ok()
             .flatten();
         let tiles = region.map_or_else(Vec::new, |region| region.iter().collect());
-        super::covering::bounded_covering(
+        let focus = super::covering::focus_for_view(style, request_view);
+        super::covering::bounded_covering_with_focus(
             tiles.into_iter(),
             memory.drape_textures_allowed().saturating_sub(8).max(1),
+            focus,
         )
     };
     let candidates = select(candidates, visible, limit, |tile| {

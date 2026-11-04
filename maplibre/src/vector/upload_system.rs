@@ -175,7 +175,9 @@ fn upload_tessellated_layer(
     (spatial, paint): (&[super::structures::SpatialBuffer], VectorPaintFrame),
     budget: &mut FrameUploads,
 ) -> bool {
+    let mut protected = std::collections::HashSet::with_capacity(source_tiles.len());
     for coords in source_tiles {
+        protected.insert(coords);
         super::content::ensure(tiles, coords);
         let Some((layers, pending)) = tiles.query_mut::<(
             &mut VectorLayerBucketComponent,
@@ -184,6 +186,7 @@ fn upload_tessellated_layer(
             continue;
         };
         let mut uploaded = false;
+        let mut saturated = false;
         for style_layer in &style.layers {
             let replacement = pending
                 .vector
@@ -216,10 +219,21 @@ fn upload_tessellated_layer(
                 {
                     return true;
                 }
-                if !upload_bucket(buffer_pool, queue, style_layer, bucket, spatial, paint) {
-                    continue;
+                match upload_bucket(
+                    buffer_pool,
+                    queue,
+                    style_layer,
+                    bucket,
+                    (spatial, paint),
+                    &protected,
+                ) {
+                    UploadOutcome::Uploaded => uploaded = true,
+                    UploadOutcome::PoolSaturated => {
+                        saturated = true;
+                        break;
+                    }
+                    UploadOutcome::Failed => continue,
                 }
-                uploaded = true;
             }
             if let Some(index) = replacement {
                 super::content::commit_vector(layers, pending.vector.remove(index));
@@ -228,8 +242,17 @@ fn upload_tessellated_layer(
         if uploaded {
             budget.count_geometry_tile();
         }
+        if saturated {
+            return false;
+        }
     }
     false
+}
+
+enum UploadOutcome {
+    Uploaded,
+    PoolSaturated,
+    Failed,
 }
 
 fn upload_size(bucket: &AvailableVectorLayerBucket) -> usize {
@@ -248,9 +271,9 @@ fn upload_bucket(
     queue: &crate::render::upload_queue::UploadQueue,
     style_layer: &crate::style::layer::StyleLayer,
     bucket: &AvailableVectorLayerBucket,
-    spatial: &[super::structures::SpatialBuffer],
-    paint: VectorPaintFrame,
-) -> bool {
+    (spatial, paint): (&[super::structures::SpatialBuffer], VectorPaintFrame),
+    protected: &std::collections::HashSet<crate::coords::WorldTileCoords>,
+) -> UploadOutcome {
     let VectorPaintFrame { zoom, .. } = paint;
     let AvailableVectorLayerBucket {
         coords,
@@ -291,20 +314,32 @@ fn upload_bucket(
         .then(|| sort_runs(feature_indices, feature_sort_keys, &buffer.buffer.indices));
 
     tracing::debug!(%coords, "allocating vector geometry");
-    if let Err(error) = buffer_pool.replace_layer_geometry(
+    if let Err(error) = buffer_pool.replace_layer_geometry_unless(
         queue,
         coords,
         style_layer.clone(),
         buffer,
         layer_metadata,
         &feature_metadata,
+        |candidate| protected.contains(&candidate),
     ) {
+        if matches!(
+            error,
+            crate::vector::resource::AllocationError::Capacity { .. }
+        ) {
+            tracing::debug!(
+                %coords,
+                %error,
+                "vector buffer pool saturated by higher-priority tiles; skipping peripheral upload"
+            );
+            return UploadOutcome::PoolSaturated;
+        }
         tracing::error!(%coords, %error, "tile geometry upload failed");
-        return false;
+        return UploadOutcome::Failed;
     }
     buffer_pool.set_pattern_runs(coords, &style_layer.id, runs);
     buffer_pool.set_sort_runs(coords, &style_layer.id, sort_runs);
-    true
+    UploadOutcome::Uploaded
 }
 
 /// The index range of each run of consecutive features that share a sort key.

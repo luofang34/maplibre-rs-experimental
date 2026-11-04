@@ -83,6 +83,23 @@ impl GlobeFrustum {
         Self { points, planes }
     }
 
+    pub(crate) fn intersects_cap(
+        &self,
+        cap: &super::super::covering::TileSphericalCap,
+        min_radius: f64,
+        max_radius: f64,
+    ) -> Intersection {
+        let mut result = Intersection::Full;
+        for plane in self.planes {
+            match cap.shell_intersects_plane(plane, min_radius, max_radius) {
+                Intersection::None => return Intersection::None,
+                Intersection::Partial => result = Intersection::Partial,
+                Intersection::Full => {}
+            }
+        }
+        result
+    }
+
     pub(crate) fn intersects(&self, bounds: &GlobeTileBoundingVolume) -> Intersection {
         let mut result = Intersection::Full;
         for plane in self.planes {

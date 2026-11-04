@@ -199,3 +199,68 @@ fn normal_and_wide_fields_keep_their_tile_zooms() {
         );
     }
 }
+
+#[test]
+fn polar_screen_resolution_focal_resolves_cross_pole_wedges_at_true_3d_distance() {
+    let build_lod = |center: LatLon, pitch_degrees: f64| {
+        let world_size = TILE_SIZE * 2_f64.powi(15);
+        let camera = GlobeCameraState::new(GlobeCameraOptions {
+            width: SCREEN[0],
+            height: SCREEN[1],
+            field_of_view_degrees: NORMAL_FIELD_DEGREES,
+            center,
+            world_size,
+            bearing_degrees: 159.0,
+            pitch_degrees,
+            roll_degrees: 0.0,
+            center_offset: Point2::new(0.0, 0.0),
+            body: Body::EARTH,
+            target_elevation_meters: 0.0,
+            radius_pixels: Some(crate::projection::globe::scale::radius_pixels(
+                15.0,
+                center.latitude,
+            )),
+        })
+        .expect("polar camera");
+        let focal = 0.5 * SCREEN[1] / (0.5 * NORMAL_FIELD_DEGREES).to_radians().tan();
+        LodContext::screen_resolution_focal(&camera, focal, 0.0, 0.0)
+    };
+
+    // Opposite-meridian southern wedge (+160.3 deg -> x = 3871 at z=12) touches the South Pole;
+    // planar Mercator dx=0.5 would falsely score it ~1,700 km away (zoom ~1.6).
+    let cross_pole_wedge = TileCoords {
+        x: 3871,
+        y: 4095,
+        z: ZoomLevel::new(12),
+    };
+    let same_meridian_wedge = TileCoords {
+        x: 1823,
+        y: 4095,
+        z: ZoomLevel::new(12),
+    };
+    let distant_mid_lat = TileCoords {
+        x: 1823,
+        y: 2800,
+        z: ZoomLevel::new(12),
+    };
+
+    // Pitched view at -89.95 deg (~5.56 km from South Pole) resolves cross-pole wedge at ~5.56 km
+    // true 3D slant distance rather than Mercator dx=0.5.
+    let lod_5km = build_lod(LatLon::new(-89.95, -19.7), 45.0);
+    let z_cross_5km = lod_5km.desired_zoom(cross_pole_wedge);
+    let z_distant = lod_5km.desired_zoom(distant_mid_lat);
+    assert!(
+        z_cross_5km > 10.5 && z_cross_5km > z_distant + 4.0,
+        "cross-pole polar wedge ({z_cross_5km:.2}) resolves far finer than mid-lat ({z_distant:.2})"
+    );
+
+    // Directly above the South Pole (-90.0 deg, pitch 0), all 360 deg polar wedges are equidistant
+    // on S^2 and receive identical desired zoom to machine precision.
+    let lod_pole = build_lod(LatLon::new(-90.0, -19.7), 0.0);
+    let z_cross_pole = lod_pole.desired_zoom(cross_pole_wedge);
+    let z_same_pole = lod_pole.desired_zoom(same_meridian_wedge);
+    assert!(
+        (z_cross_pole - 15.0).abs() < 1e-6 && (z_cross_pole - z_same_pole).abs() < 1e-12,
+        "exact-pole cross-meridian zoom {z_cross_pole:.12} equals {z_same_pole:.12}"
+    );
+}

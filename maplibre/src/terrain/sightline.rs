@@ -97,9 +97,13 @@ struct Probe {
 impl DrawnTerrain<'_> {
     /// Highest ground anywhere, drawn or not yet described, in metres.
     pub(crate) fn ceiling(&self) -> f64 {
+        let exag = self.index.exaggeration().max(1.0);
+        let poles = self.index.poles();
+        let pole_max = f64::from(poles.north_meters.max(poles.south_meters)) * exag;
         self.index
             .max_elevation()
-            .max(self.body.highest_ground_meters * self.index.exaggeration().max(1.0))
+            .max(self.body.highest_ground_meters * exag)
+            .max(pole_max)
     }
 
     /// The drawn cells over `mercator`, as [`cell_at`](Self::cell_at) finds them.

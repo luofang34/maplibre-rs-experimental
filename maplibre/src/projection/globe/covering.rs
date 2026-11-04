@@ -9,6 +9,10 @@ use crate::{
     projection::body::Body,
 };
 
+mod cap;
+pub(crate) use cap::closest_unit_sphere_point_on_tile;
+pub use cap::{tile_spherical_cap, TileSphericalCap};
+
 /// Minimum and maximum elevation included in a tile bounding volume.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct TileElevationRange {
@@ -115,7 +119,9 @@ pub fn globe_tile_bounding_volume(
     }
 }
 
-fn validate_elevation(elevation: TileElevationRange) -> Result<(), GlobeTileBoundsError> {
+pub(crate) fn validate_elevation(
+    elevation: TileElevationRange,
+) -> Result<(), GlobeTileBoundsError> {
     if !elevation.min_meters.is_finite() || !elevation.max_meters.is_finite() {
         return Err(GlobeTileBoundsError::InvalidElevation {
             min_meters: elevation.min_meters,
@@ -194,7 +200,7 @@ fn curved_tile_volume(
     if min_radius != max_radius {
         extremes.extend(corners.iter().map(|corner| *corner * min_radius));
     }
-    extend_pole_extremes(&mut extremes, tile);
+    extend_pole_extremes(&mut extremes, tile, min_radius, max_radius);
     let (min, max) = bounds(&extremes);
     let axes = tile_axes(tile, corners);
     extend_curved_edge_extremes(&mut extremes, tile, axes.center, max_radius);
@@ -218,13 +224,23 @@ fn tile_corners(tile: TileCoords) -> [Vector3<f64>; 4] {
     ]
 }
 
-fn extend_pole_extremes(extremes: &mut Vec<Vector3<f64>>, tile: TileCoords) {
+fn extend_pole_extremes(
+    extremes: &mut Vec<Vector3<f64>>,
+    tile: TileCoords,
+    min_radius: f64,
+    max_radius: f64,
+) {
     let tile_count = 2_u32.pow(u32::from(u8::from(tile.z)));
-    if tile.y == 0 {
-        extremes.push(Vector3::unit_y());
-    }
-    if tile.y == tile_count - 1 {
-        extremes.push(-Vector3::unit_y());
+    for (matches_pole, pole) in [
+        (tile.y == 0, Vector3::unit_y()),
+        (tile.y == tile_count - 1, -Vector3::unit_y()),
+    ] {
+        if matches_pole {
+            extremes.push(pole * max_radius);
+            if min_radius != max_radius {
+                extremes.push(pole * min_radius);
+            }
+        }
     }
 }
 

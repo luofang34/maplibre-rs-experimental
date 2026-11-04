@@ -63,11 +63,13 @@ pub(crate) fn target_specs(
     } else if view_state.has_external_view() || view_state.pose_view().is_some() {
         // An eye's screen-resolution covering reaches its horizon in more tiles than the
         // textures allow; the surfaces keep every tile, so only the drapes coarsen.
+        let focus = covering::focus_for_view(style, view_state);
         covering::for_frame(
             world,
             view_region.iter().collect(),
             // Reserve room for two sibling groups while their parents remain visible.
             memory.drape_textures_allowed().saturating_sub(8).max(1),
+            focus,
         )
     } else {
         view_region.iter().collect()
@@ -136,27 +138,51 @@ pub(crate) fn procedural_specs(
         .collect())
 }
 
-/// The key GL JS draws terrain tiles by, smallest first: `coveringTiles`' squared distance
-/// between the map centre, at the covering's nominal level, and the tile's own column and row,
-/// whatever its level. With translucent drapes the order decides which skirts show through.
+/// The key terrain tiles are drawn by, smallest first: `1.0 - c_hat.dot(focus_unit)` on `S^2`
+/// under Globe rendering, and GL JS's planar `(dx, dy)` squared distance at the nominal level
+/// under explicit 2D Mercator rendering. With translucent drapes the order decides which skirts
+/// show through.
 pub(super) fn draw_order_key(
+    style: &Style,
     view_state: &ViewState,
     dem_tile_size: f64,
 ) -> impl Fn(&WorldTileCoords) -> f64 {
-    let request = crate::render::projection::CoveringRequest::terrain(
-        view_state.zoom().value(),
-        dem_tile_size,
-    );
-    let tiles_across = 2_f64.powi(i32::from(u8::from(request.level)));
-    let world_size = crate::coords::TILE_SIZE * 2_f64.powf(view_state.zoom().value());
-    let center = view_state.camera().position();
-    let center = [
-        center.x / world_size * tiles_across - 0.5,
-        center.y / world_size * tiles_across - 0.5,
-    ];
-    move |tile: &WorldTileCoords| {
-        let dx = center[0] - f64::from(tile.x);
-        let dy = center[1] - f64::from(tile.y);
-        dx * dx + dy * dy
+    enum OrderMode {
+        Spherical(cgmath::Vector3<f64>),
+        Planar([f64; 2]),
+    }
+    let uses_globe = style.projection.as_ref().is_some_and(|p| {
+        p.projection_type
+            .uses_globe_rendering(view_state.zoom().value())
+    });
+    let mode = if uses_globe {
+        crate::render::projection::globe_camera_for_view(view_state)
+            .ok()
+            .map(|globe| OrderMode::Spherical(globe.focus_unit_sphere()))
+    } else {
+        None
+    }
+    .unwrap_or_else(|| {
+        let request = crate::render::projection::CoveringRequest::terrain(
+            view_state.zoom().value(),
+            dem_tile_size,
+        );
+        let tiles_across = 2_f64.powi(i32::from(u8::from(request.level)));
+        let world_size = crate::coords::TILE_SIZE * 2_f64.powf(view_state.zoom().value());
+        let center = view_state.camera().position();
+        OrderMode::Planar([
+            center.x / world_size * tiles_across - 0.5,
+            center.y / world_size * tiles_across - 0.5,
+        ])
+    });
+    move |tile: &WorldTileCoords| match mode {
+        OrderMode::Spherical(focus_unit) => {
+            crate::projection::tile_covering::spherical_tile_distance(*tile, focus_unit)
+        }
+        OrderMode::Planar(center) => {
+            let dx = center[0] - f64::from(tile.x);
+            let dy = center[1] - f64::from(tile.y);
+            dx * dx + dy * dy
+        }
     }
 }

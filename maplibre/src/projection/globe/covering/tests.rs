@@ -1,14 +1,17 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
-use cgmath::{Point2, Vector3, Vector4};
+use cgmath::{InnerSpace, Point2, Vector3, Vector4};
 
 use super::{
-    distance_to_tile_2d, globe_tile_bounding_volume, nearest_tile_wrap, GlobeTileBoundsError,
-    TileElevationRange,
+    closest_unit_sphere_point_on_tile, distance_to_tile_2d, globe_tile_bounding_volume,
+    nearest_tile_wrap, tile_spherical_cap, GlobeTileBoundsError, TileElevationRange,
 };
 use crate::{
-    coords::{TileCoords, ZoomLevel},
-    projection::body::Body,
+    coords::{TileCoords, ZoomLevel, EXTENT},
+    projection::{
+        body::Body,
+        globe::{covering_tiles::Intersection, project_tile_coordinates_to_unit_sphere},
+    },
 };
 
 fn tile(x: u32, y: u32, zoom: u8) -> TileCoords {
@@ -167,4 +170,107 @@ fn nearest_wrap_tracks_center_across_antimeridian() {
     assert_eq!(nearest_tile_wrap(0.99, western), 1);
     assert_eq!(nearest_tile_wrap(0.01, eastern), -1);
     assert_eq!(nearest_tile_wrap(0.1, western), 0);
+}
+
+#[test]
+fn tile_spherical_cap_encloses_surface_samples_and_polar_wedges() {
+    let root = tile_spherical_cap(tile(0, 0, 0));
+    assert_eq!(root.cos_alpha, -1.0);
+    assert_eq!(root.sin_alpha, 0.0);
+
+    for coords in [
+        tile(0, 0, 1),
+        tile(1, 1, 1),
+        tile(1, 1, 5),
+        tile(0, 0, 8),
+        tile(255, 255, 8),
+        tile(1823, 4095, 12),
+    ] {
+        let cap = tile_spherical_cap(coords);
+        assert_close(cap.center.magnitude(), 1.0);
+        let zoom = u8::from(coords.z);
+        if zoom >= 2 {
+            assert!(cap.cos_alpha > 0.0);
+        } else {
+            assert!(cap.cos_alpha >= -1e-11);
+        }
+        assert_close(cap.cos_alpha.hypot(cap.sin_alpha), 1.0);
+        for iy in 0..=8 {
+            for ix in 0..=8 {
+                let sample = project_tile_coordinates_to_unit_sphere(
+                    coords.x,
+                    coords.y,
+                    zoom,
+                    f64::from(ix) / 8.0 * EXTENT,
+                    f64::from(iy) / 8.0 * EXTENT,
+                );
+                assert!(
+                    cap.center.dot(sample) >= cap.cos_alpha,
+                    "sample ({ix}, {iy}) outside cap for {coords:?}"
+                );
+            }
+        }
+        if coords.y == 0 {
+            assert!(cap.center.dot(Vector3::unit_y()) >= cap.cos_alpha);
+        }
+        if coords.y + 1 == (1_u32 << u32::from(zoom)) {
+            assert!(cap.center.dot(-Vector3::unit_y()) >= cap.cos_alpha);
+        }
+    }
+}
+
+#[test]
+fn polar_tile_volume_scales_pole_extremes_and_cap_shell_matches_plane_test() {
+    let range = TileElevationRange {
+        min_meters: -200.0,
+        max_meters: 3_000.0,
+    };
+    let south_polar = globe_tile_bounding_volume(tile(5, 15, 4), range, Body::EARTH)
+        .expect("south polar bounds are valid");
+    let expected_pole_r = Body::EARTH.unit_radius_at(3_000.0);
+    assert_close(south_polar.min.y, -expected_pole_r);
+
+    let cap = tile_spherical_cap(tile(5, 15, 4));
+    let axis = Vector3::new(0.6, -0.5, 0.624_499_799_839_839_8).normalize();
+    let origin_plane = Vector4::new(axis.x, axis.y, axis.z, 0.0);
+    let dot = axis.dot(cap.center);
+    let expected = if dot < -cap.sin_alpha {
+        Intersection::None
+    } else if dot > cap.sin_alpha {
+        Intersection::Full
+    } else {
+        Intersection::Partial
+    };
+    assert_eq!(
+        cap.shell_intersects_plane(origin_plane, 1.0, 1.0),
+        expected,
+        "origin-plane cap classification matches n . c vs +-sin(alpha)"
+    );
+    let antipodal = Vector4::new(-cap.center.x, -cap.center.y, -cap.center.z, -0.5);
+    assert_eq!(
+        cap.shell_intersects_plane(antipodal, 1.0, expected_pole_r),
+        Intersection::None
+    );
+}
+
+#[test]
+fn closest_unit_sphere_point_handles_greenwich_antimeridian_and_poles() {
+    // Tile x=7 at z=4 has its eastern edge on the Greenwich meridian (lon = 0).
+    let greenwich_west = tile(7, 5, 4);
+    let near_greenwich =
+        crate::projection::globe::lat_lon_to_unit_sphere(crate::coords::LatLon::new(47.26, 2.0));
+    let (q_gw, cheb_gw) = closest_unit_sphere_point_on_tile(near_greenwich, greenwich_west);
+    assert_close(q_gw.magnitude(), 1.0);
+    assert!(
+        (near_greenwich - q_gw).magnitude() < 0.05 && cheb_gw < 0.05,
+        "point 2 deg east of Greenwich stays ~2 deg from x=7: q={q_gw:?}, cheb={cheb_gw}"
+    );
+
+    // Exact South Pole (-Y) is at zero distance from every southern row wedge across all longitudes.
+    for x in [0, 1024, 2048, 3072, 4095] {
+        let (q_pole, cheb_pole) =
+            closest_unit_sphere_point_on_tile(-Vector3::unit_y(), tile(x, 4095, 12));
+        assert_vector_close(q_pole, -Vector3::unit_y());
+        assert_close(cheb_pole, 0.0);
+    }
 }
