@@ -153,10 +153,13 @@ impl StyleLayer {
 
     /// Returns whether the layer is drawn at a continuous zoom: it is not hidden and the zoom
     /// lies in its range, using the style-spec rule that `minzoom` is inclusive and `maxzoom`
-    /// exclusive.
+    /// exclusive. A `minzoom` of `0` (the lowest tile zoom) stays visible at negative globe zooms,
+    /// matching MapLibre GL JS (`this.minzoom && zoom < this.minzoom`).
     pub fn is_visible_at(&self, zoom: f64) -> bool {
         !self.is_hidden()
-            && self.minzoom.is_none_or(|minzoom| zoom >= minzoom)
+            && self
+                .minzoom
+                .is_none_or(|minzoom| minzoom <= 0.0 || zoom >= minzoom)
             && self.maxzoom.is_none_or(|maxzoom| zoom < maxzoom)
     }
 }

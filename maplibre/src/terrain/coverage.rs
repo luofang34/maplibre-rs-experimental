@@ -76,6 +76,7 @@ pub struct TerrainCoverageIndex {
     maxzoom: u8,
     /// Samples along a DEM tile's side.
     dem_tile_size: u32,
+    poles: super::PolarPoleElevations,
     edges: Arc<HashMap<WorldTileCoords, super::queue_system::edges::EdgeHeights>>,
 }
 
@@ -141,6 +142,40 @@ impl TerrainCoverageIndex {
         self.exaggeration
     }
 
+    /// Configured polar cap datum elevations.
+    pub fn poles(&self) -> super::PolarPoleElevations {
+        self.poles
+    }
+
+    /// Configures the north and south polar cap datum elevations, updating rendered bounds.
+    pub fn with_poles(mut self, poles: super::PolarPoleElevations) -> Self {
+        self.poles = poles;
+        if self.rendered.is_empty() {
+            return self;
+        }
+        let mut min = self.min_elevation + BRACKET_PADDING_METERS;
+        let mut max = self.max_elevation - BRACKET_PADDING_METERS;
+        for coords in self.rendered.keys() {
+            let max_row = 1_i32
+                .checked_shl(u32::from(u8::from(coords.z)))
+                .unwrap_or(1)
+                - 1;
+            if coords.y == 0 {
+                let elev = f64::from(poles.north_meters) * self.exaggeration;
+                min = min.min(elev);
+                max = max.max(elev);
+            }
+            if coords.y == max_row {
+                let elev = f64::from(poles.south_meters) * self.exaggeration;
+                min = min.min(elev);
+                max = max.max(elev);
+            }
+        }
+        self.min_elevation = min - BRACKET_PADDING_METERS;
+        self.max_elevation = max + BRACKET_PADDING_METERS;
+        self
+    }
+
     /// The loaded DEM tile that stands in for `coords`: its own DEM tile or the nearest ancestor.
     pub fn loaded_dem_for(&self, coords: WorldTileCoords) -> Option<WorldTileCoords> {
         let mut current = dem_tile_coords(coords, self.minzoom, self.maxzoom)?;
@@ -157,9 +192,25 @@ impl TerrainCoverageIndex {
         let (min, max) = self
             .loaded_dem_for(coords)
             .and_then(|dem| self.dem_bounds.get(&dem))?;
+        let mut min_meters = min * self.exaggeration;
+        let mut max_meters = max * self.exaggeration;
+        let max_row = 1_i32
+            .checked_shl(u32::from(u8::from(coords.z)))
+            .unwrap_or(1)
+            - 1;
+        if coords.y == 0 && self.poles.north_meters != 0.0 {
+            let pole = f64::from(self.poles.north_meters) * self.exaggeration;
+            min_meters = min_meters.min(pole);
+            max_meters = max_meters.max(pole);
+        }
+        if coords.y == max_row && self.poles.south_meters != 0.0 {
+            let pole = f64::from(self.poles.south_meters) * self.exaggeration;
+            min_meters = min_meters.min(pole);
+            max_meters = max_meters.max(pole);
+        }
         Some(TileElevationRange {
-            min_meters: min * self.exaggeration,
-            max_meters: max * self.exaggeration,
+            min_meters,
+            max_meters,
         })
     }
 
@@ -341,6 +392,11 @@ pub fn coverage_system(
         tracing::error!(%error, "unable to select terrain coverage tiles");
         crate::tcs::system::SystemError::Setup
     })?;
+    let poles = world
+        .resources
+        .get::<super::PolarPoleElevations>()
+        .copied()
+        .unwrap_or_default();
     let index = match rendered {
         Some(region) => TerrainCoverageIndex::build(
             region
@@ -348,8 +404,9 @@ pub fn coverage_system(
                 .filter(|coords| coords.build_quad_key().is_some()),
             &world.tiles,
             &dem,
-        ),
-        None => TerrainCoverageIndex::default(),
+        )
+        .with_poles(poles),
+        None => TerrainCoverageIndex::default().with_poles(poles),
     };
     world.resources.insert(index);
     Ok(())

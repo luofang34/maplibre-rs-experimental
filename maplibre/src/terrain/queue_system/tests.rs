@@ -53,7 +53,7 @@ fn terrain_tiles_draw_in_gl_js_covering_order() {
         Deg(0.0),
         Deg(36.0),
     );
-    let key = super::targets::draw_order_key(&view, 256.0);
+    let key = super::targets::draw_order_key(&crate::style::Style::default(), &view, 256.0);
     let mut tiles: Vec<WorldTileCoords> = [
         (10, 188, 402),
         (4, 2, 5),

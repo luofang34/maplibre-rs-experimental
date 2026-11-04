@@ -121,5 +121,79 @@ impl GlobeCameraState {
     }
 }
 
+const GAZE_REACH_HEIGHTS: f64 = 2.0;
+
+pub(super) fn focus_unit_sphere(
+    eye: Vector3<f64>,
+    view: &Matrix4<f64>,
+    external_eye: bool,
+) -> Vector3<f64> {
+    let forward_raw = -Vector3::new(view.x.z, view.y.z, view.z.z);
+    let len2 = forward_raw.magnitude2();
+    if len2 <= super::MIN_DIRECTION_LENGTH_SQUARED || eye.magnitude2() <= 1.0 {
+        return if eye.magnitude2() > super::MIN_DIRECTION_LENGTH_SQUARED {
+            eye.normalize()
+        } else {
+            Vector3::unit_z()
+        };
+    }
+    let forward = forward_raw / len2.sqrt();
+    if external_eye {
+        return external_focus_unit_sphere(eye, forward);
+    }
+    let b = eye.dot(forward);
+    let disc = b * b - (eye.magnitude2() - 1.0);
+    let t = if b < 0.0 && disc >= 0.0 {
+        -b - disc.sqrt()
+    } else {
+        (-b).max(0.0)
+    };
+    (eye + forward * t).normalize()
+}
+
+fn external_focus_unit_sphere(origin: Vector3<f64>, direction: Vector3<f64>) -> Vector3<f64> {
+    let distance = origin.magnitude();
+    if distance <= 1.0 {
+        return if distance > super::MIN_DIRECTION_LENGTH_SQUARED.sqrt() {
+            origin / distance
+        } else {
+            Vector3::unit_z()
+        };
+    }
+    let beneath = origin / distance;
+    let along = origin.dot(direction);
+    let discriminant = along * along - (distance * distance - 1.0);
+    let reach = (GAZE_REACH_HEIGHTS * (distance - 1.0) / distance).atan();
+    if discriminant >= 0.0 {
+        let t = -along - discriminant.sqrt();
+        if t >= 0.0 {
+            let center = (origin + direction * t).normalize();
+            let cosine = beneath.dot(center).clamp(-1.0, 1.0);
+            if cosine.acos() <= reach {
+                return center;
+            }
+            let tangent = center - beneath * cosine;
+            if tangent.magnitude2() <= super::MIN_DIRECTION_LENGTH_SQUARED {
+                return beneath;
+            }
+            return beneath * reach.cos() + tangent.normalize() * reach.sin();
+        }
+    }
+    let up_dot = beneath.dot(direction);
+    let tangent = direction - beneath * up_dot;
+    let tangent_len = tangent.magnitude();
+    if tangent_len <= super::MIN_DIRECTION_LENGTH_SQUARED.sqrt() {
+        return beneath;
+    }
+    let limb_angle = (1.0 / distance).clamp(-1.0, 1.0).acos();
+    let base_angle = reach.min(limb_angle);
+    let angle = if up_dot > 0.0 {
+        base_angle * tangent_len.clamp(0.0, 1.0)
+    } else {
+        base_angle
+    };
+    beneath * angle.cos() + (tangent / tangent_len) * angle.sin()
+}
+
 #[cfg(test)]
 mod tests;

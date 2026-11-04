@@ -174,3 +174,28 @@ fn the_finest_tiles_sit_on_the_cameras_side_under_any_bearing() {
         "finest tiles are nearest to the camera"
     );
 }
+
+#[test]
+fn world_copies_keep_distinct_planar_distances_and_priorities() {
+    let view = view(1.5, Deg(0.0));
+    let mut opts = options(2, 1.5, false);
+    opts.world_copies = 1;
+    let tiles =
+        covering_tiles(&view, opts, &TileElevationRange::default()).expect("covering succeeds");
+    // Center is at x = 0.53 -> canonical tile (2, 1, 2) in wrap 0, vs (-2, 1, 2) in wrap -1 and
+    // (6, 1, 2) in wrap +1. Planar 2D Mercator must NOT fold wraps onto S^2.
+    let pos_of = |x: i32| {
+        tiles
+            .iter()
+            .position(|t| t.x == x && t.y == 1 && u8::from(t.z) == 2)
+    };
+    let p_center = pos_of(2).expect("wrap 0 center tile visible");
+    for wrapped_x in [-2, 6] {
+        if let Some(p_wrap) = pos_of(wrapped_x) {
+            assert!(
+                p_center < p_wrap,
+                "wrap 0 tile at {p_center} must rank ahead of wrapped tile x={wrapped_x} at {p_wrap}"
+            );
+        }
+    }
+}

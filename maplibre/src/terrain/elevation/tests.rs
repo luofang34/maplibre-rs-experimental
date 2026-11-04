@@ -113,3 +113,64 @@ fn only_pure_vertical_perspective_orbits_the_center_elevation() {
         );
     }
 }
+
+#[test]
+fn polar_pole_elevations_configure_north_and_south_cap_ground_datums() {
+    use crate::{
+        coords::{LatLon, WorldCoords, Zoom},
+        projection::ProjectionType,
+        render::view_state::{CameraOptions, NavigationMode, ViewState},
+        tcs::world::World,
+        terrain::PolarPoleElevations,
+        window::PhysicalSize,
+    };
+
+    let mut world = World::default();
+    assert_eq!(
+        super::ground_under(&world, LatLon::new(90.0, 0.0), 8.0),
+        Some(0.0)
+    );
+    assert_eq!(
+        super::ground_under(&world, LatLon::new(-90.0, 0.0), 8.0),
+        Some(0.0)
+    );
+
+    let poles = PolarPoleElevations {
+        north_meters: -15.0,
+        south_meters: 2_835.0,
+    };
+    world.resources.insert(poles);
+    world
+        .resources
+        .insert(TerrainCoverageIndex::build([], &world.tiles, &source(1.5)).with_poles(poles));
+
+    let north_ground =
+        super::ground_under(&world, LatLon::new(89.9, 45.0), 10.0).expect("north cap ground");
+    let south_ground =
+        super::ground_under(&world, LatLon::new(-90.0, -19.7), 10.0).expect("south cap ground");
+    assert!((north_ground - (-22.5)).abs() < 1e-6);
+    assert!((south_ground - 4_252.5).abs() < 1e-6);
+
+    let mut view_state = ViewState::new(
+        PhysicalSize::new(512, 512).expect("viewport"),
+        WorldCoords::at_ground(256.0, 256.0),
+        Zoom::new(10.0),
+        cgmath::Deg(0.0),
+        cgmath::Deg(36.87),
+    );
+    view_state
+        .set_navigation_mode(
+            NavigationMode::FreeGlobe,
+            &ProjectionType::VerticalPerspective,
+        )
+        .expect("free-globe navigation");
+    view_state
+        .jump_to(CameraOptions {
+            center: Some(LatLon::new(-89.95, -19.7)),
+            zoom: Some(10.0),
+            ..Default::default()
+        })
+        .expect("free-globe polar pose");
+    let center = super::center_ground(&view_state, &world).expect("south pole center ground");
+    assert!((center - 4_252.5).abs() < 1e-6);
+}

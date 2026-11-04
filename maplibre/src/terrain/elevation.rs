@@ -103,8 +103,21 @@ pub fn ground_center(view_state: &mut ViewState, world: &World) -> bool {
 /// loaded: the DEM tile at the integer zoom, as GL JS lifts its center by, not the tile drawn
 /// under it, which a coarser level may stand in for at a distance.
 pub(crate) fn center_ground(view_state: &ViewState, world: &World) -> Option<f64> {
-    if past_mercator_rows(view_state) {
-        return world.resources.get::<TerrainCoverageIndex>().map(|_| 0.0);
+    if let Some(pose) = view_state.pose_view() {
+        if pose.center.latitude.abs() > crate::projection::globe::scale::MERCATOR_LATITUDE_LIMIT {
+            let index = world.resources.get::<TerrainCoverageIndex>()?;
+            let poles = world
+                .resources
+                .get::<crate::terrain::PolarPoleElevations>()
+                .copied()
+                .unwrap_or_else(|| index.poles());
+            let meters = if pose.center.latitude > 0.0 {
+                poles.north_meters
+            } else {
+                poles.south_meters
+            };
+            return Some(f64::from(meters) * index.exaggeration());
+        }
     }
     let zoom = view_state.zoom();
     let world_size = TILE_SIZE * 2_f64.powf(zoom.value());
@@ -118,10 +131,29 @@ pub(crate) fn center_ground(view_state: &ViewState, world: &World) -> Option<f64
 }
 
 /// The loaded ground a center at `position` and `zoom` stands on, as [`center_ground`] reads
-/// it; past the Mercator world's last row the cap closes the globe at sea level.
+/// it; past the Mercator world's last row the cap closes the globe at the configured pole datum.
 pub(crate) fn ground_under(world: &World, position: LatLon, zoom: f64) -> Option<f64> {
     if position.latitude.abs() > crate::projection::globe::scale::MERCATOR_LATITUDE_LIMIT {
-        return Some(0.0);
+        let index = world.resources.get::<TerrainCoverageIndex>();
+        let poles = world
+            .resources
+            .get::<crate::terrain::PolarPoleElevations>()
+            .copied()
+            .or_else(|| index.map(TerrainCoverageIndex::poles))
+            .unwrap_or_default();
+        let meters = if position.latitude > 0.0 {
+            poles.north_meters
+        } else {
+            poles.south_meters
+        };
+        let exag = index.map_or(1.0, |idx| {
+            if idx.exaggeration() > 0.0 {
+                idx.exaggeration()
+            } else {
+                1.0
+            }
+        });
+        return Some(f64::from(meters) * exag);
     }
     let mercator = WorldCoords::from_lat_lon(position, Zoom::new(0.0));
     ground_at_mercator(world, mercator.x / TILE_SIZE, mercator.y / TILE_SIZE, zoom)

@@ -329,3 +329,116 @@ fn a_feature_without_indices_makes_no_run() {
     let runs = super::sort_runs(&[3, 0, 3], &[1.0, 1.0, 1.0], &[0, 1, 2, 3, 4, 5]);
     assert_eq!(runs, vec![(1.0, 0..6)]);
 }
+
+#[cfg(feature = "headless")]
+#[tokio::test]
+async fn peripheral_tiles_never_evict_focus_tile_or_thrash_saturated_pool() {
+    use crate::{
+        coords::WorldTileCoords,
+        headless::create_headless_renderer,
+        render::{settings::BufferPoolSizes, ShaderVertex},
+        style::Style,
+        tcs::tiles::Tiles,
+        vector::{
+            AvailableVectorLayerBucket, VectorBufferPool, VectorLayerBucket,
+            VectorLayerBucketComponent,
+        },
+    };
+    let (_, renderer) = create_headless_renderer(64, 64, None)
+        .await
+        .expect("renderer");
+    // OverAlignedVertexBuffer pads 3 vertices/indices to 4-byte alignment (4 vertices, 4 indices).
+    // Give the pool room for exactly 2 tiles (8 vertices / 8 indices) while offering 4 tiles in
+    // focus-first order.
+    let mut pool = VectorBufferPool::from_device_with_sizes(
+        &renderer.device,
+        BufferPoolSizes {
+            vertices: 8,
+            indices: 8,
+            feature_metadata: 8,
+            layer_metadata: 2,
+        },
+    );
+    let mut tiles = Tiles::default();
+    let style: Style = serde_json::from_str(
+        r##"{"version":8,"sources":{},"layers":[{"id":"land","type":"fill","paint":{"fill-color":"#718474"}}]}"##,
+    )
+    .expect("style");
+    let source_tiles: Vec<_> = (0..4)
+        .map(|x| WorldTileCoords {
+            x,
+            y: 390,
+            z: ZoomLevel::new(10),
+        })
+        .collect();
+    for &coords in &source_tiles {
+        tiles
+            .spawn_mut(coords)
+            .expect("tile")
+            .insert(VectorLayerBucketComponent {
+                failed: false,
+                done: true,
+                overscaled_zoom: 0,
+                layers: vec![VectorLayerBucket::AvailableLayer(
+                    AvailableVectorLayerBucket {
+                        coords,
+                        source_layer: "land".into(),
+                        style_layer_id: "land".into(),
+                        buffer: lyon::tessellation::VertexBuffers {
+                            vertices: vec![ShaderVertex::default(); 3],
+                            indices: vec![0, 1, 2],
+                        }
+                        .into(),
+                        feature_indices: vec![3],
+                        feature_colors: Vec::new(),
+                        feature_sort_keys: Vec::new(),
+                    },
+                )],
+            });
+    }
+    let paint = super::VectorPaintFrame {
+        zoom: 10.6,
+        bearing: 0.0,
+        light: Default::default(),
+    };
+    for _frame in 0..4 {
+        let deferred = super::upload_tessellated_layer(
+            &mut pool,
+            &renderer.queue,
+            &mut tiles,
+            &style,
+            source_tiles.clone(),
+            (&[], paint),
+            &mut crate::render::memory_budget::FrameUploads::default(),
+        );
+        assert!(
+            !deferred,
+            "pool saturation by higher-priority tiles must not request an infinite redraw loop"
+        );
+        assert!(
+            pool.get_loaded_style_layers_at(source_tiles[0])
+                .is_some_and(|layers| layers.contains("land")),
+            "focus tile must remain resident across frames"
+        );
+        assert!(
+            pool.get_loaded_style_layers_at(source_tiles[1])
+                .is_some_and(|layers| layers.contains("land")),
+            "second-closest tile must remain resident across frames"
+        );
+    }
+
+    // Once the camera pans so `source_tiles[2..4]` become the focus, the old tiles are evicted.
+    let panned = vec![source_tiles[2], source_tiles[3]];
+    let deferred = super::upload_tessellated_layer(
+        &mut pool,
+        &renderer.queue,
+        &mut tiles,
+        &style,
+        panned.clone(),
+        (&[], paint),
+        &mut crate::render::memory_budget::FrameUploads::default(),
+    );
+    assert!(!deferred);
+    assert!(pool.get_loaded_style_layers_at(panned[0]).is_some());
+    assert!(pool.get_loaded_style_layers_at(panned[1]).is_some());
+}

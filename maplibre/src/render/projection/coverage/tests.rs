@@ -138,3 +138,66 @@ fn pose_eye(
         .expect("the eye is accepted");
     eyed
 }
+
+#[test]
+fn polar_external_eye_keeps_shader_reference_at_south_pole_not_mercator_rim() {
+    use cgmath::{Deg, Matrix4, Rad, SquareMatrix, Vector3};
+
+    use crate::{
+        coords::{LatLon, WorldCoords, Zoom},
+        projection::ProjectionType,
+        render::{
+            camera::EyeFrustum,
+            projection::projection_data_for_view,
+            view_state::{ExternalAnchor, ExternalView, ViewState},
+        },
+        window::PhysicalSize,
+    };
+
+    let style: crate::style::Style = serde_json::from_str(
+        r#"{"version":8,"sources":{},"layers":[],"projection":{"type":"vertical-perspective"}}"#,
+    )
+    .expect("vertical-perspective style parses");
+    let nzsp = LatLon::new(-89.9975, 139.2729);
+    let zoom = Zoom::new(16.0);
+    let mut state = ViewState::new(
+        PhysicalSize::new(1280, 720).expect("viewport"),
+        WorldCoords::from_lat_lon(nzsp, zoom),
+        zoom,
+        Deg(20.0),
+        Deg(88.0),
+    );
+    let external = ExternalView {
+        anchor: ExternalAnchor {
+            position: nzsp,
+            altitude_meters: 2_836.5,
+        },
+        view: (Matrix4::from_translation(Vector3::new(0.0, 0.0, 0.0))
+            * Matrix4::from_angle_x(Deg(88.0)))
+        .invert()
+        .expect("invertible view"),
+        frustum: EyeFrustum::symmetric(Rad(0.96), 1280.0 / 720.0, 0.25, 350_000.0),
+    };
+    state
+        .set_external_view(external, &ProjectionType::VerticalPerspective)
+        .expect("external polar eye accepted");
+
+    let shader = projection_data_for_view(&style, &state).expect("shader projection data");
+    assert_eq!(
+        shader.globe_circle[1], 1.0,
+        "precise globe reference active"
+    );
+    assert!(
+        shader.globe_center[1] > 2.0,
+        "polar globe_center.y must stay unclamped near 90S (>2.0), not clamped to 1.0 (85.05S): {}",
+        shader.globe_center[1]
+    );
+    let ref_lat_deg = (std::f64::consts::PI * (1.0 - 2.0 * f64::from(shader.globe_center[1])))
+        .sinh()
+        .atan()
+        .to_degrees();
+    assert!(
+        (ref_lat_deg - nzsp.latitude).abs() < 1e-4,
+        "shader reference latitude must match NZSP (-89.9975), got {ref_lat_deg}"
+    );
+}

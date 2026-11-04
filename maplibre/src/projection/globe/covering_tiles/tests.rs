@@ -330,3 +330,83 @@ fn tile_priority_wraps_at_the_antimeridian() {
         assert_eq!(tiles[0], nearby);
     }
 }
+
+#[test]
+fn polar_camera_covering_stays_within_budget_without_missing_longitude_wedges() {
+    for (center, pitch_degrees) in [
+        (LatLon::new(-89.95, -19.7), 80.0),
+        (LatLon::new(-89.9995, -19.7), 0.0),
+    ] {
+        let zoom = 13.7;
+        let globe = GlobeCameraState::new(GlobeCameraOptions {
+            width: 384.0,
+            height: 288.0,
+            field_of_view_degrees: 36.869_897_645_844_02,
+            center,
+            world_size: TILE_SIZE * 2_f64.powf(zoom),
+            bearing_degrees: 159.0,
+            pitch_degrees,
+            roll_degrees: 0.0,
+            center_offset: Point2::new(0.0, 0.0),
+            body: Body::EARTH,
+            target_elevation_meters: 0.0,
+            radius_pixels: Some(crate::projection::globe::scale::radius_pixels(
+                zoom,
+                center.latitude,
+            )),
+        })
+        .expect("polar camera should be valid");
+        let covering_options = GlobeCoveringOptions {
+            zoom: ZoomLevel::new(13),
+            requested_zoom: zoom,
+            variable_zoom: true,
+            rounding: ZoomRounding::Floor,
+            zoom_range: SourceZoomRange::default(),
+            padding: 0,
+            max_tiles: 512,
+        };
+        let tiles =
+            covering_tiles(&globe, covering_options, &flat()).expect("covering should succeed");
+        assert!(!tiles.is_empty());
+        assert!(tiles.len() <= 512, "got {} tiles", tiles.len());
+        for x in 0..4096 {
+            let leaf = crate::coords::WorldTileCoords {
+                x,
+                y: 4095,
+                z: ZoomLevel::new(12),
+            };
+            assert!(
+                tiles.iter().any(|selected| {
+                    crate::projection::tile_covering::covers(*selected, leaf)
+                        || crate::projection::tile_covering::covers(leaf, *selected)
+                }),
+                "missing longitude wedge {x} around south pole for {center:?} pitch={pitch_degrees}"
+            );
+        }
+    }
+}
+
+#[test]
+fn polar_sort_by_center_ranks_cross_pole_southern_tile_ahead_of_mid_latitude_tile() {
+    let center = LatLon::new(-89.95, -19.7);
+    let count = 256_i32;
+    let cross_pole_x = (((139.27 + 180.0) / 360.0) * f64::from(count)).floor() as i32;
+    let same_lon_x = (((-19.7 + 180.0) / 360.0) * f64::from(count)).floor() as i32;
+    let mid_lat_y = ((1.0 - (-45.0_f64).to_radians().tan().asinh() / std::f64::consts::PI)
+        * 0.5
+        * f64::from(count))
+    .floor() as i32;
+    let cross_pole = crate::coords::WorldTileCoords {
+        x: cross_pole_x,
+        y: count - 1,
+        z: ZoomLevel::new(8),
+    };
+    let mid_latitude = crate::coords::WorldTileCoords {
+        x: same_lon_x,
+        y: mid_lat_y,
+        z: ZoomLevel::new(8),
+    };
+    let mut tiles = vec![mid_latitude, cross_pole];
+    super::sort_by_center(&mut tiles, center);
+    assert_eq!(tiles[0], cross_pole);
+}

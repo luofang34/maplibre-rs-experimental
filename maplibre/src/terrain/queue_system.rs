@@ -393,7 +393,7 @@ fn queue_tiles(
                 })
             })
             .collect::<Vec<_>>();
-        let key = targets::draw_order_key(view_state, f64::from(dem.tile_size));
+        let key = targets::draw_order_key(style, view_state, f64::from(dem.tile_size));
         let mut draws = draws;
         draws.sort_by(|left, right| key(&left.coords).total_cmp(&key(&right.coords)));
         terrain.set_draws(draws);

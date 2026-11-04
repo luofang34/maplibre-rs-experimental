@@ -53,6 +53,16 @@ pub enum TerrainSkirts {
     /// No skirts.
     None,
 }
+
+/// Elevation in metres above datum at the geographic north (`90° N`) and south (`90° S`)
+/// poles, closing the globe beyond Web Mercator DEM coverage (`|lat| <= 85.0511°`).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct PolarPoleElevations {
+    /// Elevation in metres at `90° N` (`0.0` by default).
+    pub north_meters: f32,
+    /// Elevation in metres at `90° S` (`0.0` by default).
+    pub south_meters: f32,
+}
 pub use coverage::{DemDetail, TerrainCoverageIndex};
 pub use dem::{DemError, DemTile};
 use drape_pass::{DrapePassNode, DRAPE_PASS};

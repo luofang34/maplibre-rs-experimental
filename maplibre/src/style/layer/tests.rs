@@ -24,8 +24,16 @@ fn zoom_range_is_min_inclusive_max_exclusive() {
 
     layer.minzoom = None;
     layer.maxzoom = None;
+    assert!(layer.is_visible_at(-3.0));
     assert!(layer.is_visible_at(0.0));
     assert!(layer.is_visible_at(24.0));
+
+    layer.minzoom = Some(0.0);
+    assert!(
+        layer.is_visible_at(-3.0),
+        "minzoom 0 stays visible at negative globe style zoom"
+    );
+    assert!(layer.is_visible_at(0.0));
 }
 
 #[test]

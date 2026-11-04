@@ -234,6 +234,7 @@ pub(super) struct SurfaceContext<'a> {
     view_state: &'a ViewState,
     dem: &'a DemSource,
     skirts: crate::terrain::TerrainSkirts,
+    poles: crate::terrain::PolarPoleElevations,
     lighting: crate::render::SceneLighting,
     paint_zoom: f64,
 }
@@ -246,6 +247,11 @@ pub(super) fn surface_context<'a>(
     dem: &'a DemSource,
 ) -> SurfaceContext<'a> {
     let skirts = world.resources.get::<crate::terrain::TerrainSkirts>();
+    let poles = world
+        .resources
+        .get::<crate::terrain::PolarPoleElevations>()
+        .copied()
+        .unwrap_or_default();
     let lighting = world
         .resources
         .get::<crate::render::SceneLighting>()
@@ -258,6 +264,7 @@ pub(super) fn surface_context<'a>(
         view_state,
         dem,
         skirts: skirts.copied().unwrap_or_default(),
+        poles,
         lighting,
         paint_zoom,
     }
@@ -274,6 +281,7 @@ pub(super) fn prepare_tiles(
         view_state,
         dem,
         skirts,
+        poles,
         lighting,
         paint_zoom,
     } = ctx;
@@ -313,7 +321,16 @@ pub(super) fn prepare_tiles(
         };
         let [north_cap, south_cap] =
             polar::cap_colors(spec.coords, drape_source, style, tiles, paint_zoom);
-        block.edge_index = [0, north_cap, south_cap, 0];
+        let z = u8::from(spec.coords.z);
+        let max_row = 1_i32.checked_shl(u32::from(z)).unwrap_or(1) - 1;
+        let pole_elev = if spec.coords.y == 0 {
+            poles.north_meters * dem.exaggeration
+        } else if spec.coords.y == max_row {
+            poles.south_meters * dem.exaggeration
+        } else {
+            0.0
+        };
+        block.edge_index = [0, north_cap, south_cap, pole_elev.to_bits()];
         surface_uniforms(
             &mut block,
             spec.coords,

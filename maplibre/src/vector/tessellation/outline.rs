@@ -13,6 +13,12 @@ const HALF_WIDTH_PIXELS: f32 = 0.5;
 /// Tile units the fill shader moves a vertex along a unit normal, per tile unit of zoom factor,
 /// as a multiple of one screen pixel (eight tile units).
 const NORMAL_UNITS_PER_PIXEL: f32 = 8.0 / 3.0;
+/// Miter limit passed to `lyon` (`|normal| <= 2.0 * OUTLINE_MITER_LIMIT == 2.0`), matching
+/// MapLibre GL JS's `2x` half-width threshold while keeping 90° corners crisp.
+pub(super) const OUTLINE_MITER_LIMIT: f32 = 1.0;
+/// Maximum scaled normal magnitude permitted on a `fill-outline-color` stroke vertex.
+pub(super) const MAX_OUTLINE_NORMAL: f32 =
+    2.0 * OUTLINE_MITER_LIMIT * HALF_WIDTH_PIXELS * NORMAL_UNITS_PER_PIXEL;
 
 impl StrokeVertexConstructor<ShaderVertex> for VertexConstructor {
     fn new_vertex(&mut self, vertex: StrokeVertex) -> ShaderVertex {

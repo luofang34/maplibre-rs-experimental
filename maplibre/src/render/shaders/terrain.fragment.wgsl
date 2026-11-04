@@ -123,7 +123,7 @@ fn procedural_surface(
     let spacing = terrain_tile.procedural_grid.x;
     let grid_opacity = clamp(terrain_tile.procedural_grid.y, 0.0, 1.0);
     let tile_span = terrain_tile.procedural_grid.w;
-    if spacing > 0.0 && grid_opacity > 0.0 && tile_span > 0.0 {
+    if spacing > 0.0 && grid_opacity > 0.0 && tile_span > 0.0 && in.polar_cap <= 0.0 {
         let cells = tile_span / spacing;
         let lod_fade = 1.0 - smoothstep(0.18, 0.45, max(uv_fw.x, uv_fw.y) * cells);
         let g = in.tex_coords * cells;
@@ -144,11 +144,7 @@ fn main(in: VertexOutput) -> @location(0) vec4<f32> {
     let sampled_drape = textureSample(drape_texture, drape_sampler, drape_uv);
     var lit: vec4<f32>;
     if terrain_tile.procedural_relief.x > 0.5 {
-        lit = select(
-            procedural_surface(in, up_normal, light, uv_fw),
-            terrain_tile.surface_color,
-            in.polar_cap > 0.0,
-        );
+        lit = procedural_surface(in, up_normal, light, uv_fw);
     } else {
         let relief = 1.0 + terrain_tile.relief_strength * (dot(up_normal, light) - light.z);
         let draped = select(sampled_drape, terrain_tile.surface_color,

@@ -178,12 +178,14 @@ impl RingIndex {
         }
     }
 
-    /// Frees the oldest allocations until `bytes` fit, starting at a multiple of `align`.
-    pub(super) fn make_room(
+    /// Frees the oldest allocations until `bytes` fit, stopping if the oldest allocation belongs
+    /// to a tile for which `protect` returns `true`.
+    pub(super) fn make_room_unless(
         &mut self,
         bytes: u64,
         typ: BackingBufferType,
         (size, align): (u64, u64),
+        mut protect: impl FnMut(WorldTileCoords) -> bool,
     ) -> Option<Range<u64>> {
         if bytes > size {
             return None;
@@ -193,6 +195,9 @@ impl RingIndex {
             let start = gap.start.div_ceil(align) * align;
             if start <= gap.end && bytes <= gap.end - start {
                 return Some(start..start + bytes);
+            }
+            if self.front().is_some_and(|first| protect(first.coords)) {
+                return None;
             }
             self.pop_front()?;
         }

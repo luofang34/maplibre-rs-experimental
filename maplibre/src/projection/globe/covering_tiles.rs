@@ -2,17 +2,19 @@
 
 use std::collections::HashSet;
 
-use cgmath::{InnerSpace, Vector4};
+use cgmath::{InnerSpace, Vector3, Vector4};
 use thiserror::Error;
 
 use super::{
     camera::GlobeCameraState,
     covering::{
-        globe_tile_bounding_volume, GlobeTileBoundingVolume, GlobeTileBoundsError,
-        TileElevationProvider,
+        globe_tile_bounding_volume, tile_spherical_cap, validate_elevation,
+        GlobeTileBoundingVolume, GlobeTileBoundsError, TileElevationProvider,
     },
 };
-use crate::coords::{LatLon, TileCoords, WorldTileCoords, ZoomLevel, MAX_ZOOM};
+#[cfg(test)]
+use crate::coords::LatLon;
+use crate::coords::{TileCoords, WorldTileCoords, ZoomLevel, MAX_ZOOM};
 
 pub(crate) mod frustum;
 pub(crate) mod lod;
@@ -159,20 +161,30 @@ pub(crate) fn covering_tiles_with_history(
         return Ok(Vec::new());
     }
     let frustum = GlobeFrustum::from_camera(camera, far);
-    let priority = if camera.is_external_eye() {
-        super::unit_sphere_to_lat_lon(camera.camera_position())
-    } else {
-        camera.center()
-    };
+    let focus_unit = camera.focus_unit_sphere();
     let inspect = |tile: WorldTileCoords, fully_visible| -> Result<_, GlobeCoveringError> {
         let tile = TileCoords::from((tile.x as u32, tile.y as u32, tile.z));
-        let bounds =
-            globe_tile_bounding_volume(tile, elevation.elevation_range(tile), camera.body())
-                .map_err(|source| GlobeCoveringError::TileBounds { source })?;
+        let range = elevation.elevation_range(tile);
+        validate_elevation(range).map_err(|source| GlobeCoveringError::TileBounds { source })?;
         let intersection = if fully_visible {
             Intersection::Full
         } else {
-            tile_intersection(&frustum, camera.clipping_plane(), &bounds)
+            let min_radius = camera.body().unit_radius_at(range.min_meters.min(0.0));
+            let max_radius = camera.body().unit_radius_at(range.max_meters.max(0.0));
+            let cap = tile_spherical_cap(tile);
+            let cap_intersection = combine_intersections(
+                frustum.intersects_cap(&cap, min_radius, max_radius),
+                cap.shell_intersects_plane(camera.clipping_plane(), min_radius, max_radius),
+            );
+            match cap_intersection {
+                Intersection::None => Intersection::None,
+                Intersection::Full => Intersection::Full,
+                Intersection::Partial => {
+                    let bounds = globe_tile_bounding_volume(tile, range, camera.body())
+                        .map_err(|source| GlobeCoveringError::TileBounds { source })?;
+                    tile_intersection(&frustum, camera.clipping_plane(), &bounds)
+                }
+            }
         };
         if intersection == Intersection::None {
             return Ok(None);
@@ -187,49 +199,14 @@ pub(crate) fn covering_tiles_with_history(
             fully_visible: intersection == Intersection::Full,
         }))
     };
-    let mut visible = if camera.is_external_eye() {
-        crate::projection::tile_covering::bounded(
-            options.max_tiles,
-            options.zoom_range.min,
-            priority,
-            inspect,
-        )?
-    } else {
-        unbounded_covering(options.zoom_range.min, 0, inspect)?
-    };
-    sort_by_center(&mut visible, priority);
+    let mut visible = crate::projection::tile_covering::bounded_spherical(
+        options.max_tiles,
+        options.zoom_range.min,
+        focus_unit,
+        inspect,
+    )?;
+    sort_by_focus(&mut visible, focus_unit);
     Ok(add_padding(visible, options.padding, options.max_tiles))
-}
-
-pub(crate) fn unbounded_covering<E>(
-    min_zoom: u8,
-    copies: i32,
-    mut inspect: impl FnMut(
-        WorldTileCoords,
-        bool,
-    ) -> Result<Option<crate::projection::tile_covering::Refinement>, E>,
-) -> Result<Vec<WorldTileCoords>, E> {
-    // Copies of the world to either side start from their own roots, as GL JS renders them.
-    let mut stack: Vec<_> = (-copies..=copies)
-        .map(|wrap| (WorldTileCoords::from((wrap, 0, ZoomLevel::new(0))), false))
-        .collect();
-    let mut visible = Vec::new();
-    while let Some((tile, fully_visible)) = stack.pop() {
-        let Some(refinement) = inspect(tile, fully_visible)? else {
-            continue;
-        };
-        if tile.z >= refinement.target {
-            if u8::from(tile.z) >= min_zoom {
-                visible.push(tile);
-            }
-        } else {
-            stack.extend(
-                tile.get_children()
-                    .map(|child| (child, refinement.fully_visible)),
-            );
-        }
-    }
-    Ok(visible)
 }
 
 /// Returns the conservative elevation used to retain features near the frustum horizon.
@@ -279,23 +256,19 @@ fn combine_intersections(left: Intersection, right: Intersection) -> Intersectio
     }
 }
 
-pub(crate) fn sort_by_center(tiles: &mut [WorldTileCoords], center: LatLon) {
-    let center_x = center.longitude / 360.0 + 0.5;
-    let latitude = center.latitude.to_radians();
-    let center_y = (1.0 - latitude.tan().asinh() / std::f64::consts::PI) * 0.5;
+pub(crate) fn sort_by_focus(tiles: &mut [WorldTileCoords], focus_unit: Vector3<f64>) {
     tiles.sort_by(|left, right| {
-        distance_squared(*left, center_x, center_y)
-            .total_cmp(&distance_squared(*right, center_x, center_y))
+        crate::projection::tile_covering::spherical_tile_distance(*left, focus_unit)
+            .total_cmp(&crate::projection::tile_covering::spherical_tile_distance(
+                *right, focus_unit,
+            ))
             .then_with(|| left.cmp(right))
     });
 }
 
-fn distance_squared(tile: WorldTileCoords, center_x: f64, center_y: f64) -> f64 {
-    let count = 2_f64.powi(i32::from(u8::from(tile.z)));
-    let dx = center_x - (f64::from(tile.x) + 0.5) / count;
-    let dx = dx - dx.round();
-    let dy = center_y - (f64::from(tile.y) + 0.5) / count;
-    dx * dx + dy * dy
+#[cfg(test)]
+pub(crate) fn sort_by_center(tiles: &mut [WorldTileCoords], center: LatLon) {
+    sort_by_focus(tiles, super::lat_lon_to_unit_sphere(center));
 }
 
 pub(crate) fn add_padding(
@@ -303,17 +276,14 @@ pub(crate) fn add_padding(
     padding: i32,
     max_tiles: usize,
 ) -> Vec<WorldTileCoords> {
-    if max_tiles == 0 {
+    if max_tiles == 0 || visible.is_empty() {
         return Vec::new();
     }
-    if padding <= 0 {
-        return visible.into_iter().take(max_tiles).collect();
+    if padding <= 0 || visible.len() >= max_tiles {
+        return visible;
     }
-    let mut padded: Vec<_> = visible.iter().take(max_tiles).copied().collect();
+    let mut padded = visible.clone();
     let mut seen: HashSet<_> = padded.iter().copied().collect();
-    if padded.len() == max_tiles {
-        return padded;
-    }
     for tile in visible {
         let count = 1_i64 << u8::from(tile.z);
         for delta_x in -padding..=padding {

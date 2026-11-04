@@ -5,6 +5,47 @@ use crate::coords::{EXTENT_SINT, EXTENT_UINT};
 /// Grid cells per tile edge, as in GL JS `meshSize`.
 pub const TERRAIN_MESH_SIZE: u32 = 128;
 
+/// Concentric ring count of each spherical polar cap between `±85.0511°` and `±90°`.
+pub const POLAR_CAP_RINGS: u32 = 32;
+
+/// Colatitude in radians from the pole (`0` at `±90°`) for a normalized polar cap parameter
+/// `cap_t` in `[0, 1]` (`0` at the Web Mercator boundary `±85.0511°`, `1` at the pole).
+pub fn polar_cap_colatitude_radians(cap_t: f64) -> f64 {
+    let cap_edge_colatitude = 2.0 * (-std::f64::consts::PI).exp().atan();
+    let rem = 1.0 - cap_t.clamp(0.0, 1.0);
+    cap_edge_colatitude * rem * rem
+}
+
+pub(crate) fn polar_cap_ring_y(north: bool, ring: u32) -> i32 {
+    if ring == 0 {
+        return if north { 0 } else { EXTENT_SINT };
+    }
+    if ring >= POLAR_CAP_RINGS {
+        return i32::from(if north { i16::MIN } else { i16::MAX });
+    }
+    if north {
+        -(ring as i32 * (-i32::from(i16::MIN))) / POLAR_CAP_RINGS as i32
+    } else {
+        EXTENT_SINT + ((i32::from(i16::MAX) - EXTENT_SINT) * ring as i32) / POLAR_CAP_RINGS as i32
+    }
+}
+
+pub(crate) fn polar_cap_ring_t(north: bool, ring: u32) -> f64 {
+    if ring == 0 {
+        return 0.0;
+    }
+    if ring >= POLAR_CAP_RINGS {
+        return 1.0;
+    }
+    let y = polar_cap_ring_y(north, ring);
+    if north {
+        (-f64::from(y) / 32768.0).clamp(0.0, 1.0)
+    } else {
+        ((f64::from(y) - f64::from(EXTENT_SINT)) / f64::from(i32::from(i16::MAX) - EXTENT_SINT))
+            .clamp(0.0, 1.0)
+    }
+}
+
 /// Vertex of the terrain grid in tile units with a skirt marker.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, bytemuck_derive::Pod, bytemuck_derive::Zeroable)]
@@ -136,26 +177,27 @@ fn build_skirts(mesh: &mut TerrainMesh, n: u32) {
 }
 
 fn build_polar_caps(mesh: &mut TerrainMesh, n: u32) {
-    for (edge, marker) in [(0, i16::MIN), (n * (n + 1), i16::MAX)] {
-        let start = mesh.vertices.len() as u32;
-        for x in 0..=n {
-            mesh.vertices.push(TerrainVertex::new(
-                grid_coordinate(x, n),
-                i32::from(marker),
-                0,
-            ));
-        }
-        for x in 0..n {
-            // Pole vertices coincide only at a fully spherical projection.
-            for mut triangle in [
-                [edge + x, edge + x + 1, start + x],
-                [edge + x + 1, start + x + 1, start + x],
-            ] {
-                if marker == i16::MAX {
-                    triangle.swap(0, 1);
-                }
-                mesh.indices.extend(triangle);
+    for (mut prev_row, north) in [(0, true), (n * (n + 1), false)] {
+        for ring in 1..=POLAR_CAP_RINGS {
+            let y = polar_cap_ring_y(north, ring);
+            let curr_row = mesh.vertices.len() as u32;
+            for x in 0..=n {
+                mesh.vertices
+                    .push(TerrainVertex::new(grid_coordinate(x, n), y, 0));
             }
+            for x in 0..n {
+                // Pole vertices coincide only at a fully spherical projection.
+                for mut triangle in [
+                    [prev_row + x, prev_row + x + 1, curr_row + x],
+                    [prev_row + x + 1, curr_row + x + 1, curr_row + x],
+                ] {
+                    if !north {
+                        triangle.swap(0, 1);
+                    }
+                    mesh.indices.extend(triangle);
+                }
+            }
+            prev_row = curr_row;
         }
     }
 }

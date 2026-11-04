@@ -68,9 +68,12 @@ pub use map::{
 };
 pub use shared_assets::SharedMapAssets;
 
-pub use crate::render::{
-    placement_3d::{AltitudeReference, Orientation3d, Placement3d, ViewSlotMask},
-    settings::{ProceduralReliefStyle, TerrainDrapeMode},
+pub use crate::{
+    render::{
+        placement_3d::{AltitudeReference, Orientation3d, Placement3d, ViewSlotMask},
+        settings::{ProceduralReliefStyle, TerrainDrapeMode},
+    },
+    terrain::PolarPoleElevations,
 };
 
 /// Creates a renderer with default GPU settings and nonzero physical-pixel dimensions.

@@ -233,6 +233,13 @@ impl GlobeCameraState {
         lat_lon_to_unit_sphere(self.options.center) * scale
     }
 
+    /// Singularity-free unit-sphere focus direction (`||f|| = 1`) from the camera's `SO(3)`
+    /// view orientation: the forward view-axis intersection with the unit sphere when the gaze
+    /// meets the globe, or the closest point along the forward ray projected onto `S^2`.
+    pub fn focus_unit_sphere(&self) -> Vector3<f64> {
+        external::focus_unit_sphere(self.camera_position, &self.view, self.external_eye)
+    }
+
     /// Returns the geographic center used to orient the globe.
     pub fn center(&self) -> LatLon {
         self.options.center
