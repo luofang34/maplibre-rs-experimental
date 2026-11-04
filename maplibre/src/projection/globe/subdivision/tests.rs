@@ -229,3 +229,60 @@ fn input_on_a_pole_sentinel_never_becomes_a_pole_vertex() {
         y != i16::MIN as f32 && y != i16::MAX as f32
     }));
 }
+
+#[test]
+fn buffered_polar_polygon_extrudes_once_from_outer_buffer_edge_without_double_overlap_at_extent() {
+    let mut subdivision = options(2);
+    subdivision.extend_to_south_pole = true;
+    let mut buffer = VertexBuffers::<ShaderVertex, u32>::new();
+    // Buffered Antarctica tile polygon spanning y = 3000..4176 across y = 4096.
+    let buffered_antarctica = [
+        [[0.0, 3000.0], [4096.0, 3000.0], [4096.0, 4176.0]],
+        [[0.0, 3000.0], [4096.0, 4176.0], [0.0, 4176.0]],
+    ];
+    subdivide_appended(&mut buffer, &buffered_antarctica, subdivision);
+
+    let south_pole = i16::MAX as f32;
+    let mut pole_triangles = 0;
+    for tri in buffer.indices.as_chunks::<3>().0 {
+        let ys = [
+            buffer.vertices[tri[0] as usize].position[1],
+            buffer.vertices[tri[1] as usize].position[1],
+            buffer.vertices[tri[2] as usize].position[1],
+        ];
+        if ys.contains(&south_pole) {
+            pole_triangles += 1;
+            // Every pole quad triangle must attach to the true buffered clip edge y = 4176,
+            // never to the interior y = 4096 subdivision line (which caused double-alpha overlap).
+            assert!(
+                ys.iter().all(|&y| y == south_pole || y == 4176.0),
+                "pole triangle attached to interior y instead of buffer clip: {ys:?}"
+            );
+        }
+    }
+    // At granularity=2 (cell_size=2048), [0, 4096] splits into 2 boundary edges -> 4 pole triangles.
+    assert_eq!(pole_triangles, 4);
+}
+
+#[test]
+fn closed_bay_crossing_extent_into_buffer_does_not_extrude_false_beam_to_pole() {
+    let mut subdivision = options(2);
+    subdivision.extend_to_north_pole = true;
+    subdivision.extend_to_south_pole = true;
+    let mut buffer = VertexBuffers::<ShaderVertex, u32>::new();
+    // Closed water bay crossing y = 4096 into the buffer and terminating at a natural tip y = 4145.
+    let closed_south_bay = [
+        [[1200.0, 3950.0], [1600.0, 3950.0], [1400.0, 4145.0]],
+        [[1200.0, 3950.0], [1400.0, 4145.0], [1280.0, 4080.0]],
+    ];
+    subdivide_appended(&mut buffer, &closed_south_bay, subdivision);
+
+    // Closed island/fjord crossing y = 0 into the northern buffer and terminating at y = -45.
+    let closed_north_bay = [[[2200.0, 120.0], [2500.0, 120.0], [2350.0, -45.0]]];
+    subdivide_appended(&mut buffer, &closed_north_bay, subdivision);
+
+    assert!(
+        pole_vertex_indices(&buffer).is_empty(),
+        "closed features dipping into tile buffer must never extrude to poles"
+    );
+}

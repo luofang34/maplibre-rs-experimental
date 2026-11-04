@@ -2,7 +2,7 @@
 
 use std::cell::RefCell;
 
-use bytemuck::Pod;
+pub use buffer::OverAlignedVertexBuffer;
 pub use circle::{CircleOptions, CIRCLE_QUAD_INDICES};
 use geozero::{error::GeozeroError, ColumnValue, FeatureProcessor, PropertyProcessor};
 use lyon::{
@@ -37,7 +37,9 @@ fn path_length(path: &Path) -> f32 {
         .sum()
 }
 
+mod buffer;
 mod circle;
+mod concave_join;
 mod geometry;
 mod line_origin;
 mod line_style;
@@ -64,91 +66,6 @@ pub struct VertexConstructor {}
 impl FillVertexConstructor<ShaderVertex> for VertexConstructor {
     fn new_vertex(&mut self, vertex: FillVertex) -> ShaderVertex {
         ShaderVertex::new(vertex.position().to_array(), [0.0, 0.0])
-    }
-}
-
-/// Geometry with a draw-index count separate from any GPU copy-alignment padding.
-/// Conversion from `VertexBuffers` pads indices and requires copy-aligned vertex bytes.
-#[derive(Clone)]
-pub struct OverAlignedVertexBuffer<V, I> {
-    /// Vertex and index storage, including any upload padding.
-    pub buffer: VertexBuffers<V, I>,
-    /// Number of leading indices to draw, excluding padding.
-    pub usable_indices: u32,
-}
-
-impl<V, I> OverAlignedVertexBuffer<V, I> {
-    /// Creates empty geometry with no drawable indices.
-    pub fn empty() -> Self {
-        Self {
-            buffer: VertexBuffers::with_capacity(0, 0),
-            usable_indices: 0,
-        }
-    }
-
-    /// Reconstructs buffers without adding padding or validating `usable_indices`.
-    /// Callers must supply copy-aligned storage and a draw count within the index buffer.
-    pub fn from_iters<IV, II>(vertices: IV, indices: II, usable_indices: u32) -> Self
-    where
-        IV: IntoIterator<Item = V>,
-        II: IntoIterator<Item = I>,
-        IV::IntoIter: ExactSizeIterator,
-        II::IntoIter: ExactSizeIterator,
-    {
-        let vertices = vertices.into_iter();
-        let indices = indices.into_iter();
-        let mut buffers = VertexBuffers::with_capacity(vertices.len(), indices.len());
-        buffers.vertices.extend(vertices);
-        buffers.indices.extend(indices);
-        Self {
-            buffer: buffers,
-            usable_indices,
-        }
-    }
-}
-
-impl<V: Pod, I: Pod> From<VertexBuffers<V, I>> for OverAlignedVertexBuffer<V, I> {
-    fn from(mut buffer: VertexBuffers<V, I>) -> Self {
-        let usable_indices = buffer.indices.len() as u32;
-        buffer.align_vertices();
-        buffer.align_indices();
-        Self {
-            buffer,
-            usable_indices,
-        }
-    }
-}
-
-trait Align<V: Pod, I: Pod> {
-    fn align_vertices(&mut self);
-    fn align_indices(&mut self);
-}
-
-impl<V: Pod, I: Pod> Align<V, I> for VertexBuffers<V, I> {
-    fn align_vertices(&mut self) {
-        let align = wgpu::COPY_BUFFER_ALIGNMENT;
-        let stride = std::mem::size_of::<V>() as wgpu::BufferAddress;
-        let unpadded_bytes = self.vertices.len() as wgpu::BufferAddress * stride;
-        let padding_bytes = (align - unpadded_bytes % align) % align;
-
-        if padding_bytes != 0 {
-            panic!(
-                "vertices are always aligned to wgpu::COPY_BUFFER_ALIGNMENT \
-                    because GpuVertexUniform is aligned"
-            )
-        }
-    }
-
-    fn align_indices(&mut self) {
-        let align = wgpu::COPY_BUFFER_ALIGNMENT;
-        let stride = std::mem::size_of::<I>() as wgpu::BufferAddress;
-        let unpadded_bytes = self.indices.len() as wgpu::BufferAddress * stride;
-        let padding_bytes = (align - unpadded_bytes % align) % align;
-        let overpad = padding_bytes.div_ceil(stride);
-
-        for _ in 0..overpad {
-            self.indices.push(I::zeroed());
-        }
     }
 }
 
@@ -334,6 +251,9 @@ where
                 }),
         };
 
+        let join = self.feature_join();
+        let vertex_start = self.buffer.vertices.len();
+        let stroke_index_start = self.buffer.indices.len();
         StrokeTessellator::new()
             .tessellate_path(
                 &path,
@@ -343,7 +263,7 @@ where
                         LineCap::Round => lyon::tessellation::LineCap::Round,
                         LineCap::Square => lyon::tessellation::LineCap::Square,
                     })
-                    .with_line_join(match self.feature_join() {
+                    .with_line_join(match join {
                         LineJoin::Miter => lyon::tessellation::LineJoin::Miter,
                         LineJoin::Bevel => lyon::tessellation::LineJoin::Bevel,
                         LineJoin::Round => lyon::tessellation::LineJoin::Round,
@@ -352,6 +272,17 @@ where
                 &mut BuffersBuilder::new(&mut self.buffer, constructor),
             )
             .map_err(|error| GeozeroError::Geometry(error.to_string()))?;
+        let max_normal = match join {
+            // Lyon's `miter_limit_is_exceeded` compares `|normal|` against `2.0 * miter_limit`.
+            LineJoin::Miter => (self.stroke.miter_limit * 2.0).max(2.0),
+            LineJoin::Bevel | LineJoin::Round => 2.0,
+        };
+        concave_join::split_unclipped_concave_joins(
+            &mut self.buffer,
+            vertex_start,
+            stroke_index_start,
+            max_normal,
+        );
         Ok(())
     }
 
@@ -422,14 +353,23 @@ where
         let index_start = self.buffer.indices.len();
         let path = path_builder.build();
         if self.outline_property.is_some() {
+            let outline_vertex_start = self.outline.vertices.len();
+            let outline_index_start = self.outline.indices.len();
             StrokeTessellator::new()
                 .tessellate_path(
                     &path,
                     &StrokeOptions::tolerance(DEFAULT_TOLERANCE)
-                        .with_line_width(outline::OUTLINE_WIDTH),
+                        .with_line_width(outline::OUTLINE_WIDTH)
+                        .with_miter_limit(outline::OUTLINE_MITER_LIMIT),
                     &mut BuffersBuilder::new(&mut self.outline, VertexConstructor {}),
                 )
                 .map_err(|error| GeozeroError::Geometry(error.to_string()))?;
+            concave_join::split_unclipped_concave_joins(
+                &mut self.outline,
+                outline_vertex_start,
+                outline_index_start,
+                outline::MAX_OUTLINE_NORMAL,
+            );
         }
 
         FillTessellator::new()

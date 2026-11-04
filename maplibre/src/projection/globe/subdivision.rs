@@ -12,6 +12,8 @@ const MAX_CELLS_PER_TRIANGLE: usize = 65_536;
 const NORTH_POLE_Y: f32 = i16::MIN as f32;
 const SOUTH_POLE_Y: f32 = i16::MAX as f32;
 
+mod poles;
+
 /// Controls fill-mesh subdivision and globe-only edge geometry.
 #[derive(Clone, Copy, Debug)]
 pub struct FillSubdivisionOptions {
@@ -140,7 +142,7 @@ where
             &mut vertices,
         )?;
     }
-    append_pole_quads(buffer, index_start, options, &mut vertices);
+    poles::append_pole_quads(buffer, index_start, options, &mut vertices);
     Ok(())
 }
 
@@ -327,10 +329,15 @@ pub(crate) fn clip_axis_into(
 }
 
 fn axis_intersection(start: [f32; 2], end: [f32; 2], axis: usize, boundary: f32) -> [f32; 2] {
-    let fraction = (boundary - start[axis]) / (end[axis] - start[axis]);
+    let (a, b) = if start[axis] <= end[axis] {
+        (start, end)
+    } else {
+        (end, start)
+    };
+    let fraction = (boundary - a[axis]) / (b[axis] - a[axis]);
     let mut point = [
-        (start[0] + (end[0] - start[0]) * fraction).round(),
-        (start[1] + (end[1] - start[1]) * fraction).round(),
+        (a[0] + (b[0] - a[0]) * fraction).round(),
+        (a[1] + (b[1] - a[1]) * fraction).round(),
     ];
     point[axis] = boundary;
     point
@@ -362,89 +369,7 @@ fn append_polygon<I: From<VertexId>>(
     }
 }
 
-fn append_pole_quads<I>(
-    buffer: &mut VertexBuffers<ShaderVertex, I>,
-    index_start: usize,
-    options: FillSubdivisionOptions,
-    cache: &mut HashMap<(i32, i32), usize>,
-) where
-    I: Copy + Into<u32> + From<VertexId>,
-{
-    let input_end = buffer.indices.len();
-    for offset in (index_start..input_end).step_by(3) {
-        let triangle = [
-            buffer.indices[offset].into() as usize,
-            buffer.indices[offset + 1].into() as usize,
-            buffer.indices[offset + 2].into() as usize,
-        ];
-        for edge in 0..3 {
-            let first = triangle[edge];
-            let second = triangle[(edge + 1) % 3];
-            let first_position = buffer.vertices[first].position;
-            let second_position = buffer.vertices[second].position;
-            if options.extend_to_north_pole && first_position[1] == 0.0 && second_position[1] == 0.0
-            {
-                append_pole_quad(
-                    buffer,
-                    first,
-                    second,
-                    first_position,
-                    second_position,
-                    NORTH_POLE_Y,
-                    cache,
-                );
-            }
-            if options.extend_to_south_pole
-                && first_position[1] == EXTENT_UINT as f32
-                && second_position[1] == EXTENT_UINT as f32
-            {
-                append_pole_quad(
-                    buffer,
-                    first,
-                    second,
-                    first_position,
-                    second_position,
-                    SOUTH_POLE_Y,
-                    cache,
-                );
-            }
-        }
-    }
-}
-
-fn append_pole_quad<I>(
-    buffer: &mut VertexBuffers<ShaderVertex, I>,
-    first: usize,
-    second: usize,
-    first_position: [f32; 2],
-    second_position: [f32; 2],
-    pole_y: f32,
-    cache: &mut HashMap<(i32, i32), usize>,
-) where
-    I: From<VertexId>,
-{
-    let first_pole = vertex_index(buffer, [first_position[0], pole_y], cache);
-    let second_pole = vertex_index(buffer, [second_position[0], pole_y], cache);
-    let flip = (first_position[0] > second_position[0]) != (pole_y == NORTH_POLE_Y);
-    let triangles = if flip {
-        [
-            [first, second, first_pole],
-            [second, second_pole, first_pole],
-        ]
-    } else {
-        [
-            [second, first, first_pole],
-            [second_pole, second, first_pole],
-        ]
-    };
-    for triangle in triangles {
-        buffer
-            .indices
-            .extend(triangle.map(|index| I::from(VertexId::from_usize(index))));
-    }
-}
-
-fn vertex_index<I>(
+pub(super) fn vertex_index<I>(
     buffer: &mut VertexBuffers<ShaderVertex, I>,
     point: [f32; 2],
     cache: &mut HashMap<(i32, i32), usize>,
