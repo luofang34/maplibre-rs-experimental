@@ -3,6 +3,8 @@ struct VertexOutput {
     @location(1) horizon_distance: f32,
     @location(2) mercator_y: f32,
     @location(3) zoom: f32,
+    @location(4) transition: f32,
+    @location(5) polar_cap: f32,
     @builtin(position) position: vec4<f32>,
 };
 
@@ -15,7 +17,8 @@ struct ColorReliefUniforms {
     unpack: vec4<f32>,
     opacity: f32,
     stop_count: u32,
-    padding: vec2<u32>,
+    // [north_meters, south_meters] from PolarPoleElevations, or <= -1e8 when unset.
+    pole_elevations: vec2<f32>,
     // Stop elevations, four per vector.
     elevations: array<vec4<f32>, 16>,
     // Premultiplied stop colours.
@@ -36,10 +39,25 @@ fn main(in: VertexOutput) -> @location(0) vec4<f32> {
     }
     let uv = in.tex_coords.xy / in.tex_coords.z;
     // The texture carries one texel of neighbour samples on every side.
-    let inner = vec2<f32>(textureDimensions(t_dem)) - vec2<f32>(2.0, 2.0);
-    let padded = (uv * inner + vec2<f32>(1.0, 1.0)) / (inner + vec2<f32>(2.0, 2.0));
+    let full = vec2<f32>(textureDimensions(t_dem));
+    let inner = full - vec2<f32>(2.0, 2.0);
+    let padded = (uv * inner + vec2<f32>(1.0, 1.0)) / full;
     let data = textureSample(t_dem, s_dem, padded) * 255.0;
-    let elevation = dot(vec4<f32>(data.rgb, -1.0), relief.unpack);
+    var elevation = dot(vec4<f32>(data.rgb, -1.0), relief.unpack);
+    let cap_t = clamp(abs(in.polar_cap), 0.0, 1.0);
+    if in.transition > 0.0 && cap_t > 0.0 {
+        let pole_elevation = select(
+            relief.pole_elevations.x,
+            relief.pole_elevations.y,
+            in.polar_cap < 0.0,
+        );
+        if pole_elevation > -1.0e8 {
+            let cap_rem = 1.0 - cap_t;
+            let cap_rem2 = cap_rem * cap_rem;
+            let cap_blend = (1.0 - cap_rem2 * cap_rem2) * in.transition;
+            elevation = mix(elevation, pole_elevation, cap_blend);
+        }
+    }
     let count = relief.stop_count;
     if count == 0u {
         discard;

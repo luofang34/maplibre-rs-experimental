@@ -75,6 +75,10 @@ impl HillshadeUniforms {
     }
 }
 
+/// Sentinel keeping `color-relief` polar blending disabled when no [`PolarPoleElevations`]
+/// resource is configured on the world.
+const UNSET_POLE_ELEVATION: f32 = -1.0e9;
+
 /// Per-layer values of the colour relief shader; the layout mirrors the WGSL struct.
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
@@ -85,8 +89,9 @@ pub struct ColorReliefUniforms {
     pub opacity: f32,
     /// Number of ramp stops in use.
     pub stop_count: u32,
-    /// Keeps the arrays sixteen-byte aligned.
-    pub padding: [u32; 2],
+    /// `[north_meters, south_meters]` polar elevations for closing globe polar caps, or
+    /// [`UNSET_POLE_ELEVATION`] when unconfigured; also keeps the arrays 16-byte aligned.
+    pub pole_elevations: [f32; 2],
     /// Stop elevations, four per vector.
     pub elevations: [[f32; 4]; MAX_RAMP_STOPS / 4],
     /// Premultiplied stop colours.
@@ -100,7 +105,7 @@ impl ColorReliefUniforms {
             unpack,
             opacity,
             stop_count: ramp.len().min(MAX_RAMP_STOPS) as u32,
-            padding: [0; 2],
+            pole_elevations: [UNSET_POLE_ELEVATION; 2],
             elevations: [[0.0; 4]; MAX_RAMP_STOPS / 4],
             colors: [[0.0; 4]; MAX_RAMP_STOPS],
         };
@@ -109,6 +114,12 @@ impl ColorReliefUniforms {
             uniforms.colors[index] = *color;
         }
         uniforms
+    }
+
+    /// Supplies geographic north and south pole elevations for undraped globe polar caps.
+    pub fn with_pole_elevations(mut self, poles: crate::terrain::PolarPoleElevations) -> Self {
+        self.pole_elevations = [poles.north_meters, poles.south_meters];
+        self
     }
 }
 

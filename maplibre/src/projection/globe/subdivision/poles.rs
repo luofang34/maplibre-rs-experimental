@@ -7,11 +7,6 @@ use lyon::tessellation::{VertexBuffers, VertexId};
 use super::{vertex_index, FillSubdivisionOptions, NORTH_POLE_Y, SOUTH_POLE_Y};
 use crate::{coords::EXTENT_UINT, render::ShaderVertex};
 
-/// Minimum horizontal span (in 4096-extent tile units) required to treat an unpaired horizontal
-/// edge inside the tile buffer (`y < 0` or `y > EXTENT`) as a tile-clipped polar boundary rather
-/// than a quantized natural tangent at the tip of a closed coastal bay or island.
-const MIN_BUFFERED_POLE_CLIP_SPAN: f32 = 8.0;
-
 pub(super) fn append_pole_quads<I>(
     buffer: &mut VertexBuffers<ShaderVertex, I>,
     index_start: usize,
@@ -59,7 +54,6 @@ pub(super) fn append_pole_quads<I>(
             buffer,
             index_start..input_end,
             min_y,
-            min_y < 0.0,
             NORTH_POLE_Y,
             &edge_counts,
             cache,
@@ -72,7 +66,6 @@ pub(super) fn append_pole_quads<I>(
             buffer,
             index_start..input_end,
             max_y,
-            max_y > south_extent,
             SOUTH_POLE_Y,
             &edge_counts,
             cache,
@@ -84,7 +77,6 @@ fn extrude_boundary_at_y<I>(
     buffer: &mut VertexBuffers<ShaderVertex, I>,
     index_range: Range<usize>,
     target_y: f32,
-    in_buffer: bool,
     pole_y: f32,
     edge_counts: &HashMap<(usize, usize), u32>,
     cache: &mut HashMap<(i32, i32), usize>,
@@ -93,6 +85,8 @@ fn extrude_boundary_at_y<I>(
 {
     let mut boundary_edges = Vec::new();
     let mut total_span = 0.0_f32;
+    let mut min_x = f32::INFINITY;
+    let mut max_x = f32::NEG_INFINITY;
     for offset in index_range.step_by(3) {
         let triangle = [
             buffer.indices[offset].into() as usize,
@@ -116,13 +110,20 @@ fn extrude_boundary_at_y<I>(
                 (second, first)
             };
             if edge_counts.get(&unordered).copied() == Some(1) {
+                min_x = min_x.min(first_pos[0].min(second_pos[0]));
+                max_x = max_x.max(first_pos[0].max(second_pos[0]));
                 total_span += (second_pos[0] - first_pos[0]).abs();
                 boundary_edges.push((first, second, first_pos, second_pos));
             }
         }
     }
 
-    if boundary_edges.is_empty() || (in_buffer && total_span < MIN_BUFFERED_POLE_CLIP_SPAN) {
+    // Only a polar-cap polygon spanning across the tile from its west meridian to its east
+    // meridian encloses the pole; coastal bays or islands clipped within (0, EXTENT) — such as
+    // the Ross Sea dipping past 85.05°S into the MVT south buffer — must not shoot wedges to 90°.
+    let full_extent = EXTENT_UINT as f32;
+    let spans_tile_width = min_x <= 0.0 && max_x >= full_extent && total_span >= full_extent * 0.5;
+    if boundary_edges.is_empty() || !spans_tile_width {
         return;
     }
 
