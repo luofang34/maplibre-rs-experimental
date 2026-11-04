@@ -9,6 +9,8 @@ struct VertexOutput {
     @location(3) zoom: f32,
     // How far the view has moved from the Mercator plane to the globe.
     @location(4) transition: f32,
+    // Signed polar-cap progress (+1 at 90°N, -1 at 90°S, 0 on tile body).
+    @location(5) polar_cap: f32,
     @builtin(position) clip_position: vec4<f32>,
 };
 
@@ -36,10 +38,13 @@ fn main(
         tile_mercator_coords,
     );
     var tex_coords = tile_position.xy / EXTENT;
+    var polar_cap = 0.0;
     if raw_position.y < -32767 {
         tex_coords.y = 0.0;
+        polar_cap = 1.0;
     } else if raw_position.y > 32766 {
         tex_coords.y = 1.0;
+        polar_cap = -1.0;
     }
     let mercator_y = tile_mercator_coords.y + tex_coords.y * EXTENT * tile_mercator_coords.w;
     let zoom = -log2(EXTENT * tile_mercator_coords.z);
@@ -49,6 +54,7 @@ fn main(
         mercator_y,
         zoom,
         projection.transition_and_padding.x,
+        polar_cap,
         projected.clip_position,
     );
 }

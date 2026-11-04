@@ -264,3 +264,62 @@ fn polar_screen_resolution_focal_resolves_cross_pole_wedges_at_true_3d_distance(
         "exact-pole cross-meridian zoom {z_cross_pole:.12} equals {z_same_pole:.12}"
     );
 }
+
+#[test]
+fn polar_free_globe_camera_resolves_all_360_deg_polar_wedges_uniformly() {
+    let build_camera = |center: LatLon, style_zoom: f64| {
+        GlobeCameraState::new(GlobeCameraOptions {
+            width: 600.0,
+            height: 350.0,
+            field_of_view_degrees: NORMAL_FIELD_DEGREES,
+            center,
+            world_size: TILE_SIZE * 2_f64.powf(style_zoom),
+            bearing_degrees: 0.0,
+            pitch_degrees: 0.0,
+            roll_degrees: 0.0,
+            center_offset: Point2::new(0.0, 0.0),
+            body: Body::EARTH,
+            target_elevation_meters: 0.0,
+            radius_pixels: Some(crate::projection::globe::scale::radius_pixels(
+                style_zoom,
+                center.latitude,
+            )),
+        })
+        .expect("polar free-globe camera")
+    };
+
+    // Low over 90°S (`-89.98°`, `550 km` south of the `85.0511°S` Web Mercator data rim), all
+    // 360° meridians resolve to the same coarse level without Mercator `dx` asymmetry or a 2^z
+    // request storm over data-free polar fans.
+    let pole_cam = build_camera(LatLon::new(-89.98, 169.38), 5.264);
+    let pole_lod = LodContext::new(&pole_cam, 6.264);
+    let levels: Vec<u8> = [0_u32, 16, 31, 48, 62]
+        .into_iter()
+        .map(|x| {
+            let tile = TileCoords {
+                x,
+                y: 63,
+                z: ZoomLevel::new(6),
+            };
+            u8::from(pole_lod.zoom_for_tile(tile, ZoomRounding::Round))
+        })
+        .collect();
+    assert!(
+        levels.iter().all(|&z| z == levels[0] && z <= 3),
+        "all 360° wedges around 90°S should share the same bounded zoom, got {levels:?}"
+    );
+
+    // Zoomed out so the `85.0511°S` Ross Sea coastline sits inside the view, the coast wedge
+    // resolves full requested detail.
+    let coast_cam = build_camera(LatLon::new(-85.05, 169.38), 5.264);
+    let coast_lod = LodContext::new(&coast_cam, 6.264);
+    let coast_tile = TileCoords {
+        x: 62,
+        y: 63,
+        z: ZoomLevel::new(6),
+    };
+    assert_eq!(
+        u8::from(coast_lod.zoom_for_tile(coast_tile, ZoomRounding::Round)),
+        6
+    );
+}

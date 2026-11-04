@@ -286,3 +286,24 @@ fn closed_bay_crossing_extent_into_buffer_does_not_extrude_false_beam_to_pole() 
         "closed features dipping into tile buffer must never extrude to poles"
     );
 }
+
+#[test]
+fn buffered_coastal_bay_clipped_horizontally_at_buffer_rim_does_not_extrude_to_pole() {
+    let mut subdivision = options(2);
+    subdivision.extend_to_south_pole = true;
+    let mut buffer = VertexBuffers::<ShaderVertex, u32>::new();
+    // Models the two Ross Sea lobes dipping past 85.0511°S and clipped flat along the MVT
+    // south buffer rim (y = 4160) across several hundred units within (0, 4096).
+    let ross_sea_lobes = [
+        [[600.0, 3900.0], [900.0, 3900.0], [900.0, 4160.0]],
+        [[600.0, 3900.0], [900.0, 4160.0], [600.0, 4160.0]],
+        [[1050.0, 3900.0], [1350.0, 3900.0], [1350.0, 4160.0]],
+        [[1050.0, 3900.0], [1350.0, 4160.0], [1050.0, 4160.0]],
+    ];
+    subdivide_appended(&mut buffer, &ross_sea_lobes, subdivision);
+
+    assert!(
+        pole_vertex_indices(&buffer).is_empty(),
+        "sub-tile coastal bays clipped at MVT buffer rim must not extrude wedges to 90°S"
+    );
+}

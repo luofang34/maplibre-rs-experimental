@@ -25,6 +25,10 @@ pub fn prepare_system(
         ..
     }: &mut MapContext,
 ) -> SystemResult {
+    let poles = world
+        .resources
+        .get::<crate::terrain::PolarPoleElevations>()
+        .copied();
     let Some(Initialized(resources)) = world
         .resources
         .query_mut::<&mut Eventually<HillshadeResources>>()
@@ -70,8 +74,11 @@ pub fn prepare_system(
                 );
             }
             (DemLayerKind::ColorRelief, Some(LayerPaint::ColorRelief(paint))) => {
-                let uniforms =
+                let mut uniforms =
                     ColorReliefUniforms::new(unpack, paint.opacity_at(zoom), &paint.ramp());
+                if let Some(poles) = poles {
+                    uniforms = uniforms.with_pole_elevations(poles);
+                }
                 resources.write_layer(
                     device,
                     queue,

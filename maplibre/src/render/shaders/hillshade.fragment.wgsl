@@ -4,6 +4,7 @@ struct VertexOutput {
     @location(2) mercator_y: f32,
     @location(3) zoom: f32,
     @location(4) transition: f32,
+    @location(5) polar_cap: f32,
     @builtin(position) position: vec4<f32>,
 };
 
@@ -187,21 +188,30 @@ fn main(in: VertexOutput) -> @location(0) vec4<f32> {
     let latitude = atan(sinh(PI * (1.0 - 2.0 * in.mercator_y)));
     deriv = deriv / mix(cos(latitude), 1.0, in.transition);
 
+    var shaded: vec4<f32>;
     switch hillshade.method {
         case BASIC: {
-            return basic_hillshade(deriv);
+            shaded = basic_hillshade(deriv);
         }
         case COMBINED: {
-            return combined_hillshade(deriv);
+            shaded = combined_hillshade(deriv);
         }
         case IGOR: {
-            return igor_hillshade(deriv);
+            shaded = igor_hillshade(deriv);
         }
         case MULTIDIRECTIONAL: {
-            return multidirectional_hillshade(deriv);
+            shaded = multidirectional_hillshade(deriv);
         }
         default: {
-            return standard_hillshade(deriv);
+            shaded = standard_hillshade(deriv);
         }
     }
+    let cap_t = clamp(abs(in.polar_cap), 0.0, 1.0);
+    if in.transition > 0.0 && cap_t > 0.0 {
+        let cap_rem = 1.0 - cap_t;
+        let radial_t = 1.0 - cap_rem * cap_rem;
+        let cap_fade = 1.0 - smoothstep(0.0, 0.10, radial_t) * in.transition;
+        shaded = shaded * cap_fade;
+    }
+    return shaded;
 }

@@ -10,7 +10,7 @@ use crate::{
 };
 
 mod cap;
-pub(crate) use cap::closest_unit_sphere_point_on_tile;
+pub(crate) use cap::{closest_mercator_data_point_on_tile, closest_unit_sphere_point_on_tile};
 pub use cap::{tile_spherical_cap, TileSphericalCap};
 
 /// Minimum and maximum elevation included in a tile bounding volume.

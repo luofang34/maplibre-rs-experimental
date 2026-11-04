@@ -3,11 +3,16 @@ use cgmath::{InnerSpace, Point2, Vector3};
 use super::{
     super::{
         camera::GlobeCameraState,
-        covering::{closest_unit_sphere_point_on_tile, distance_to_tile_2d},
+        covering::{
+            closest_mercator_data_point_on_tile, closest_unit_sphere_point_on_tile,
+            distance_to_tile_2d,
+        },
     },
     ZoomRounding,
 };
-use crate::coords::{LatLon, TileCoords, ZoomLevel, MAX_ZOOM};
+#[cfg(test)]
+use crate::coords::LatLon;
+use crate::coords::{TileCoords, ZoomLevel, MAX_ZOOM};
 
 const MAX_MERCATOR_HORIZON_DEGREES: f64 = 89.25;
 /// Latitude beyond which Mercator has no coordinates.
@@ -34,40 +39,34 @@ pub(crate) struct LodContext {
 
 impl LodContext {
     pub(crate) fn new(camera: &GlobeCameraState, requested_zoom: f64) -> Self {
-        if camera.is_external_eye() {
-            // The center, pitch and distance an eye derives to describe where it looks, not
-            // where it is: a level gaze derives to a pitch near ninety degrees, which would
-            // put the camera a few percent of its height above the ground and have every
-            // tile counted as seen at grazing incidence, levels coarser than the eye sees.
-            let position = camera.camera_position();
-            let len = position.magnitude();
-            let eye_hat = if len > f64::EPSILON {
-                position / len
-            } else {
-                Vector3::unit_z()
-            };
-            let min_clearance = 1.0 / camera.body().radius_meters;
-            let height_radii = (len - 1.0).max(min_clearance);
-            let focus_chord = (eye_hat - camera.focus_unit_sphere()).magnitude();
-            return Self {
-                camera: Point2::new(0.5, 0.5),
-                eye_sphere: Some((eye_hat, height_radii)),
-                eye_focal_pixels: None,
-                distance_z: height_radii,
-                distance_to_center_3d: focus_chord.hypot(height_radii),
-                requested_zoom,
-                field_of_view_degrees: camera.field_of_view_degrees(),
-                planar: false,
-            };
-        }
-        Self::from_view(
-            mercator_center(camera),
-            camera.camera_to_center_distance() / camera.world_size(),
-            camera.pitch_degrees(),
-            camera.bearing_degrees(),
-            camera.field_of_view_degrees(),
+        // Measure distance and foreshortening directly on S^2 from the camera's 3D unit-globe
+        // position and SO(3) focus direction so orbital, FreeGlobe, and external-eye cameras
+        // are all singularity-free across ±90° poles and ±180° antimeridian without Mercator dx.
+        let position = camera.camera_position();
+        let len = position.magnitude();
+        let eye_hat = if len > f64::EPSILON {
+            position / len
+        } else {
+            Vector3::unit_z()
+        };
+        let target_radius = if camera.is_external_eye() {
+            1.0
+        } else {
+            camera.target().magnitude()
+        };
+        let min_clearance = 1.0 / camera.body().radius_meters;
+        let height_radii = (len - target_radius).max(min_clearance);
+        let focus_chord = (eye_hat - camera.focus_unit_sphere()).magnitude();
+        Self {
+            camera: Point2::new(0.5, 0.5),
+            eye_sphere: Some((eye_hat, height_radii)),
+            eye_focal_pixels: None,
+            distance_z: height_radii,
+            distance_to_center_3d: focus_chord.hypot(height_radii),
             requested_zoom,
-        )
+            field_of_view_degrees: camera.field_of_view_degrees(),
+            planar: false,
+        }
     }
 
     /// The level whose texels match the screen's pixels where the view meets each tile, seen
@@ -120,34 +119,6 @@ impl LodContext {
             field_of_view_degrees: 0.0,
             planar: false,
         }
-    }
-
-    /// Builds the context from the map center in Mercator `0..1` units, the camera distance to
-    /// it in the same units, and the camera angles in GL JS's conventions.
-    pub(crate) fn from_view(
-        center: Point2<f64>,
-        distance: f64,
-        pitch_degrees: f64,
-        bearing_degrees: f64,
-        field_of_view_degrees: f64,
-        requested_zoom: f64,
-    ) -> Self {
-        let pitch = pitch_degrees.to_radians();
-        let bearing = bearing_degrees.to_radians();
-        let horizontal = pitch.sin();
-        let direction_x = horizontal * bearing.sin();
-        let direction_y = -horizontal * bearing.cos();
-        let camera_point = Point2::new(
-            center.x - distance * direction_x,
-            center.y - distance * direction_y,
-        );
-        Self::from_positions(
-            camera_point,
-            center,
-            distance * pitch.cos(),
-            field_of_view_degrees,
-            requested_zoom,
-        )
     }
 
     /// Builds the context from the camera's and the center's positions in Mercator `0..1`
@@ -221,9 +192,9 @@ impl LodContext {
     fn desired_zoom(&self, tile: TileCoords) -> f64 {
         if !self.planar {
             if let Some((eye_hat, height_radii)) = self.eye_sphere {
-                let (q_hat, chebyshev_chord) = closest_unit_sphere_point_on_tile(eye_hat, tile);
-                let chord_vec = eye_hat - q_hat;
                 if let Some(focal) = self.eye_focal_pixels {
+                    let (q_hat, _) = closest_unit_sphere_point_on_tile(eye_hat, tile);
+                    let chord_vec = eye_hat - q_hat;
                     let d_radii_3d = (chord_vec + eye_hat * height_radii).magnitude();
                     let parallel_cos = if u8::from(tile.z) == 0 {
                         1.0
@@ -234,6 +205,10 @@ impl LodContext {
                         (d_radii_3d / (std::f64::consts::TAU * parallel_cos)).max(f64::EPSILON);
                     return (focal / (crate::coords::TILE_SIZE * distance)).log2();
                 }
+                // Source tiles carry no raster/DEM/MVT texels or vertices poleward of ±85.051129°
+                // (the polar fan to ±90° is synthetic), so measure S^2 distance to the tile's
+                // actual Web Mercator data domain rather than demanding 2^z empty polar wedges.
+                let (_, chebyshev_chord) = closest_mercator_data_point_on_tile(eye_hat, tile);
                 return calculate_tile_zoom(
                     self.requested_zoom,
                     chebyshev_chord,
@@ -285,11 +260,8 @@ fn distance_to_tile_planar(point: Point2<f64>, tile: TileCoords) -> f64 {
     axis(point.x, f64::from(tile.x) / scale).hypot(axis(point.y, f64::from(tile.y) / scale))
 }
 
-fn mercator_center(camera: &GlobeCameraState) -> Point2<f64> {
-    mercator_point(camera.center())
-}
-
 /// A location in Mercator `0..1` units.
+#[cfg(test)]
 fn mercator_point(location: LatLon) -> Point2<f64> {
     let x = location.longitude / 360.0 + 0.5;
     let latitude = location
