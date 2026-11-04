@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["DEFAULT_MAX_INACTIVE_GENERATIONS"],"mod":["dispatch","keys"],"struct":["BinEntry","BinnedRenderPhase","PreparedSingleItem","RenderBin"]};
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_MAX_INACTIVE_GENERATIONS"],"mod":["dispatch","keys"],"struct":["BinEntry","BinnedRenderPhase","PreparedBinGroupList","PreparedSingleEntry","RenderBin"]};

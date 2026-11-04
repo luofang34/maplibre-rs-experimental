@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["prepare_non_mesh_bins","prepare_unbatchable_bins"]};
+window.SIDEBAR_ITEMS = {"fn":["prepare_non_mesh_bins","prepare_unbatchable_bins","sorted_active_bins"]};

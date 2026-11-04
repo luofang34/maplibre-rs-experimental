@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["append_dynamic_uniform_bins","build_single_extra_index","can_group_multidraw","first_bin_metadata","pack_contiguous_bins","prepare_multidraw_group","push_batches_coalesced"],"struct":["PreparedBinInfo"]};

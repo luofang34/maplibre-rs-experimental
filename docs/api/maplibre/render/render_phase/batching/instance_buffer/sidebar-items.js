@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["MIN_INSTANCE_BUFFER_BYTES","MIN_UBO_BINDING_ALIGN"],"fn":["align_up"],"struct":["BatchedInstanceBuffer"]};
+window.SIDEBAR_ITEMS = {"constant":["MIN_INSTANCE_BUFFER_BYTES","MIN_UBO_BINDING_ALIGN"],"fn":["align_up","upload_delta_bytes"],"struct":["BatchedInstanceBuffer"]};
