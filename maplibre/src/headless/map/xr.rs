@@ -9,7 +9,7 @@ use crate::{
     projection::ProjectionType,
     render::{
         eventually::Eventually,
-        eye_covering::EyeInFrame,
+        eye_covering::{EyeInFrame, EyePassCount},
         frame_input::{frame_input_system, ViewSource},
         resource::TextureView,
         xr::{PrefetchView, ScenePlacement, XrEye, XrFrame},
@@ -73,10 +73,12 @@ impl HeadlessMap {
             .view_state
             .set_opaque_environment(frame.opaque_environment);
         self.set_motion_prefetch(&frame, views.first().copied());
+        let eye_count = views.len();
         let resources = &mut self.map_context.world.resources;
         let frame_number = resources
             .get::<EyeInFrame>()
             .map_or(0, |eye| eye.frame.wrapping_add(1));
+        resources.insert(EyePassCount(eye_count));
         for (index, (eye, view)) in frame.eyes.into_iter().zip(views).enumerate() {
             // The first eye selects the frame's tiles; the others draw the same ones.
             self.map_context.world.resources.insert(EyeInFrame {
@@ -120,6 +122,7 @@ impl HeadlessMap {
             // the eye's texture behind for the next one.
             resources.render_target.take();
             if let Err(source) = result {
+                self.map_context.world.resources.remove::<EyePassCount>();
                 self.map_context.world.resources.insert(EyeInFrame {
                     index: 0,
                     frame: frame_number,
@@ -127,6 +130,7 @@ impl HeadlessMap {
                 return Err(XrFrameError::Eye { index, source });
             }
         }
+        self.map_context.world.resources.remove::<EyePassCount>();
         self.map_context.world.resources.insert(EyeInFrame {
             index: 0,
             frame: frame_number,

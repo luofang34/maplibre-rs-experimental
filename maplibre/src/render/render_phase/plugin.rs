@@ -16,7 +16,10 @@ use crate::{
     environment::Environment,
     kernel::Kernel,
     plugin::{Plugin, PluginError},
-    render::{eye_covering::EyeInFrame, RenderStageLabel, Renderer},
+    render::{
+        eye_covering::{EyeInFrame, EyePassCount},
+        RenderStageLabel, Renderer,
+    },
     schedule::Schedule,
     tcs::{
         system::{SystemError, SystemResult},
@@ -140,11 +143,15 @@ where
     GBD: GetBatchData<BPI>,
 {
     let eye = world.resources.get::<EyeInFrame>().copied();
+    let eye_count = world.resources.get::<EyePassCount>().map_or(1, |c| c.0);
     let Some(phase) = world.resources.get_mut::<BinnedRenderPhase<BPI>>() else {
         return Err(SystemError::Dependencies);
     };
     phase.clear_entries();
-    if let Some(e) = eye.filter(|e| e.index > 0) {
+    if eye_count > 1 {
+        phase.xr_eye0_sweep = None;
+        phase.active_stamp_generation = None;
+    } else if let Some(e) = eye.filter(|e| e.index > 0) {
         phase.active_stamp_generation = phase
             .xr_eye0_sweep
             .and_then(|(swept_frame, gen_eye0)| (swept_frame == e.frame).then_some(gen_eye0));
@@ -181,6 +188,7 @@ where
     BPI: BinnedPhaseItem,
 {
     let eye = world.resources.get::<EyeInFrame>().copied();
+    let eye_count = world.resources.get::<EyePassCount>().map_or(1, |c| c.0);
     let Some(phase) = world.resources.get_mut::<BinnedRenderPhase<BPI>>() else {
         return Err(SystemError::Dependencies);
     };
@@ -190,7 +198,12 @@ where
     phase.clear_entries();
     phase.active_stamp_generation = None;
 
-    if eye.is_none_or(|e| e.index == 0) {
+    if eye_count > 1 {
+        phase.xr_eye0_sweep = None;
+        if eye.is_some_and(|e| e.index + 1 >= eye_count) {
+            phase.sweep();
+        }
+    } else if eye.is_none_or(|e| e.index == 0) {
         let swept_gen = phase.generation();
         phase.sweep();
         phase.xr_eye0_sweep = eye.map(|e| (e.frame, swept_gen));

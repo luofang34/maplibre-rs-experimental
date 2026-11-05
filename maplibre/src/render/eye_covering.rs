@@ -58,6 +58,10 @@ pub(crate) struct MultiViewExtractCovering {
     pub(crate) skipped_wanted_dem: std::collections::HashSet<WorldTileCoords>,
 }
 
+/// Total number of eye passes executing in the current [`XrFrame`](crate::render::xr::XrFrame).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct EyePassCount(pub usize);
+
 /// Which eye of a frame the schedule is running for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EyeInFrame {

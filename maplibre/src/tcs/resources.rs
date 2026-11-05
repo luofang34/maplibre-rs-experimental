@@ -13,11 +13,11 @@ impl_downcast!(Resource);
 
 impl<T> Resource for T where T: 'static {}
 
-/// Owns resources until replacement or store destruction.
+/// Owns resources until replacement, removal, or store destruction.
 /// Returned references borrow the store, preventing insertion while those references are used.
 #[derive(Default)]
 pub struct Resources {
-    resources: Vec<UnsafeCell<Box<dyn Resource>>>,
+    resources: Vec<(TypeId, UnsafeCell<Box<dyn Resource>>)>,
     index: HashMap<TypeId, usize>,
 }
 
@@ -43,15 +43,30 @@ impl Resources {
     /// per-frame resources this way, so appending instead of replacing would keep every
     /// frame's value, and its GPU buffers, for the life of the map.
     pub fn insert<R: Resource>(&mut self, resource: R) {
+        let type_id = TypeId::of::<R>();
         let cell = UnsafeCell::new(Box::new(resource) as Box<dyn Resource>);
-        match self.index.get(&TypeId::of::<R>()) {
-            Some(index) => self.resources[*index] = cell,
+        match self.index.get(&type_id) {
+            Some(index) => self.resources[*index] = (type_id, cell),
             None => {
                 let index = self.resources.len();
-                self.resources.push(cell);
-                self.index.insert(TypeId::of::<R>(), index);
+                self.resources.push((type_id, cell));
+                self.index.insert(type_id, index);
             }
         }
+    }
+
+    /// Removes and returns the stored value of this concrete type, or `None` when absent.
+    pub fn remove<R: Resource>(&mut self) -> Option<R> {
+        let index = self.index.remove(&TypeId::of::<R>())?;
+        let (_, removed) = self.resources.swap_remove(index);
+        if let Some((moved_type_id, _)) = self.resources.get(index) {
+            self.index.insert(*moved_type_id, index);
+        }
+        removed
+            .into_inner()
+            .downcast::<R>()
+            .ok()
+            .map(|boxed| *boxed)
     }
 
     /// Whether a value of exactly this concrete type is stored.
@@ -64,13 +79,13 @@ impl Resources {
         let index = *self.index.get(&TypeId::of::<R>())?;
         // Safe callers share the store; mutable tuple queries check type access before
         // calling this method and cannot mutate the resource index during the borrow.
-        unsafe { (&*self.resources.get(index)?.get()).downcast_ref() }
+        unsafe { (&*self.resources.get(index)?.1.get()).downcast_ref() }
     }
 
     /// Exclusively borrows a value by concrete type, or returns `None` when absent.
     pub fn get_mut<R: Resource>(&mut self) -> Option<&mut R> {
         let index = *self.index.get(&TypeId::of::<R>())?;
-        self.resources.get_mut(index)?.get_mut().downcast_mut()
+        self.resources.get_mut(index)?.1.get_mut().downcast_mut()
     }
 
     /// Borrows `&R` or tuples of one through six shared resource references.
@@ -200,7 +215,7 @@ impl<R: Resource> ResourceQueryUnsafe for &mut R {
         let index = *resources.index.get(&TypeId::of::<R>())?;
         // The type index selects one stable slot; the shared query state excludes any
         // other reference to its value for the lifetime of this tuple.
-        unsafe { (&mut *resources.resources.get(index)?.get()).downcast_mut() }
+        unsafe { (&mut *resources.resources.get(index)?.1.get()).downcast_mut() }
     }
 }
 

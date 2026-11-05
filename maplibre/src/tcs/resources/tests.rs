@@ -94,3 +94,32 @@ fn a_failed_resource_query_leaves_later_queries_available() {
     *value = 2;
     assert_eq!(resources.query::<(&u32, &u32)>(), Some((&2, &2)));
 }
+
+#[test]
+fn removing_a_resource_updates_swapped_indices_and_drops_on_caller_drop() {
+    let drops = Arc::new(AtomicUsize::new(0));
+    let mut resources = Resources::default();
+    resources.insert(Counted {
+        drops: Arc::clone(&drops),
+        value: 7,
+    });
+    resources.insert(10_u16);
+    resources.insert(20_u32);
+
+    let removed = resources.remove::<Counted>().expect("removed Counted");
+    assert_eq!(removed.value, 7);
+    assert_eq!(drops.load(Ordering::SeqCst), 0);
+    drop(removed);
+    assert_eq!(drops.load(Ordering::SeqCst), 1);
+
+    assert!(!resources.exists::<Counted>());
+    assert!(resources.remove::<Counted>().is_none());
+    assert_eq!(resources.get::<u16>(), Some(&10));
+    assert_eq!(resources.get::<u32>(), Some(&20));
+
+    resources.insert(99_u64);
+    assert_eq!(
+        resources.query::<(&u16, &u32, &u64)>(),
+        Some((&10, &20, &99))
+    );
+}
