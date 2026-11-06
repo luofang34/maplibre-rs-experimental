@@ -188,14 +188,27 @@ pub(super) fn build_multi_view_coverings(
 
         let mut slot_wanted_dem = HashSet::new();
         if let Some(tile_size) = dem_tile_size {
-            if let Ok(Some(region)) =
+            if let Ok(region_opt) =
                 terrain_region(style, slot_view, world, tile_size, ViewStatePadding::Tight)
             {
-                for coords in region.iter() {
-                    slot_wanted_dem.insert(coords);
-                    if terrain_seen.insert(coords) {
-                        extract.terrain_tiles.push(coords);
+                if let Some(region) = &region_opt {
+                    for coords in region.iter() {
+                        slot_wanted_dem.insert(coords);
+                        if terrain_seen.insert(coords) {
+                            extract.terrain_tiles.push(coords);
+                        }
                     }
+                }
+                if !procedural_relief {
+                    let key = crate::terrain::coverage::PreparedTerrainKey::capture(
+                        slot_view, world, tile_size,
+                    );
+                    world
+                        .resources
+                        .insert(crate::terrain::coverage::PreparedTerrainRegion {
+                            key,
+                            region: region_opt,
+                        });
                 }
             }
             if !procedural_relief {

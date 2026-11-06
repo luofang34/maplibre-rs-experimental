@@ -144,6 +144,11 @@ impl ViewState {
         self.body = body;
     }
 
+    /// Lowest visible terrain elevation, which extends the far plane below sea level.
+    pub fn min_elevation(&self) -> f64 {
+        self.min_elevation
+    }
+
     /// Sets the lowest visible terrain elevation, which extends the far plane below sea level.
     pub fn set_min_elevation(&mut self, meters: f64) {
         if meters.is_finite() {

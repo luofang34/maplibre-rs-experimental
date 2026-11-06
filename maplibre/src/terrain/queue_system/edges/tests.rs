@@ -32,7 +32,10 @@ fn adjacent_tiles_with_different_dem_resolutions_have_identical_edges() {
     let mut tiles = Tiles::default();
     load(&mut tiles, left, 1000);
     load(&mut tiles, parent, 400);
-    let sources = Sources::new(HashMap::from([(left, Some(left)), (right, Some(parent))]));
+    let sources = Sources::new(FastTileMap::from_iter([
+        (left, Some(left)),
+        (right, Some(parent)),
+    ]));
     let a = build_edges(left, &sources, &Dems::new(&sources, &tiles));
     let b = build_edges(right, &sources, &Dems::new(&sources, &tiles));
     for i in 0..=N {
@@ -49,7 +52,7 @@ fn fine_vertices_interpolate_the_coarse_mesh_edge() {
     load(&mut tiles, coarse, 1000);
     load(&mut tiles, fine, 400);
     load(&mut tiles, fine_south, 2000);
-    let sources = Sources::new(HashMap::from([
+    let sources = Sources::new(FastTileMap::from_iter([
         (coarse, Some(coarse)),
         (fine, Some(fine)),
         (fine_south, Some(fine_south)),
@@ -76,7 +79,7 @@ fn wraparound_edges_agree() {
     let mut tiles = Tiles::default();
     load(&mut tiles, a, 1000);
     load(&mut tiles, b, 2000);
-    let sources = Sources::new(HashMap::from([(a, Some(a)), (b, Some(b))]));
+    let sources = Sources::new(FastTileMap::from_iter([(a, Some(a)), (b, Some(b))]));
     let aa = build_edges(a, &sources, &Dems::new(&sources, &tiles));
     let bb = build_edges(b, &sources, &Dems::new(&sources, &tiles));
     for i in 0..=N {
@@ -196,4 +199,62 @@ fn a_changed_coverage_rebuilds_only_the_edges_it_reaches_and_matches_a_full_rebu
         &cache.samples,
         &rebuilt_from_scratch(&coverage, &tiles)
     ));
+}
+
+#[test]
+fn side_sweep_matches_per_vertex_shared_height_across_four_way_corners_and_multizoom() {
+    let mut tiles = Tiles::default();
+    let diag_coarse = tile(0, 0, 2);
+    let north_med = tile(2, 1, 3);
+    let west_med = tile(1, 2, 3);
+    let fine_nw = tile(4, 4, 4);
+    let fine_ne = tile(5, 4, 4);
+    let fine_sw = tile(4, 5, 4);
+    let vfine = tile(10, 10, 5);
+    for (idx, coords) in [
+        diag_coarse,
+        north_med,
+        west_med,
+        fine_nw,
+        fine_ne,
+        fine_sw,
+        vfine,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        load(&mut tiles, coords, 500 + 333 * idx as u16);
+    }
+    let selection = Sources::new(FastTileMap::from_iter([
+        (diag_coarse, Some(diag_coarse)),
+        (north_med, Some(north_med)),
+        (west_med, Some(west_med)),
+        (fine_nw, Some(fine_nw)),
+        (fine_ne, Some(north_med)),
+        (fine_sw, Some(fine_sw)),
+        (vfine, Some(vfine)),
+    ]));
+    let dems = Dems::new(&selection, &tiles);
+    for &t in selection.tiles.keys() {
+        let fast = build_edges(t, &selection, &dems);
+        let scale = scale_of(u8::from(t.z));
+        for i in 0..=N {
+            let u = i as f64 / N as f64;
+            let expected = [[u, 0.0], [u, 1.0], [0.0, u], [1.0, u]].map(|uv| {
+                let p = [
+                    (f64::from(t.x) + uv[0]) / scale,
+                    (f64::from(t.y) + uv[1]) / scale,
+                ];
+                shared_height(p, t, &selection, &dems) as f32
+            });
+            for side in 0..4 {
+                assert!(
+                    (at(&fast, i, side) - expected[side]).abs() <= 1e-4,
+                    "tile {t:?} side {side} vertex {i}: fast={} expected={}",
+                    at(&fast, i, side),
+                    expected[side],
+                );
+            }
+        }
+    }
 }

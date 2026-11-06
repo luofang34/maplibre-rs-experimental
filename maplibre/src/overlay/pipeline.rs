@@ -23,13 +23,17 @@ const SHADER: &str = include_str!("../render/shaders/overlay.wgsl");
 /// hiding what lies on the ground, while a ridge hides what lies behind it by far more.
 pub const DEPTH_BIAS: f32 = 0.01;
 
-/// The mesh last uploaded: its buffers and index count, and the revision they hold.
+/// The mesh last uploaded: its reusable buffers, capacities, index count, and revision.
 pub(super) struct MeshBuffers {
     pub(super) vertices: wgpu::Buffer,
+    vertex_capacity: u64,
     pub(super) indices: wgpu::Buffer,
+    index_capacity: u64,
     pub(super) count: u32,
     revision: u64,
 }
+
+const MIN_OVERLAY_BUFFER_BYTES: u64 = 4096;
 
 /// What the overlay pass draws with.
 pub(crate) struct OverlayGpu {
@@ -146,43 +150,79 @@ impl OverlayGpu {
         self.size = Some(wanted);
     }
 
-    /// Uploads the host's mesh when it changed since the last upload.
+    /// Uploads the host's mesh when it changed since the last upload, reusing GPU buffers
+    /// whenever their capacity already fits the new geometry.
     fn upload(&mut self, device: &wgpu::Device, queue: &UploadQueue, overlay: &HostOverlay) {
         if self.mesh.as_ref().map(|m| m.revision) == Some(overlay.revision()) {
             return;
         }
         let mesh = overlay.mesh();
-        if mesh.is_empty() {
-            self.mesh = None;
-            return;
-        }
-        let buffer = |label, contents: &[u8], usage| {
-            queue.create_buffer_init(
-                device,
-                &BufferInitDescriptor {
-                    label: Some(label),
-                    contents,
-                    usage,
-                },
-            )
-        };
         // Whole triangles only: a trailing partial triangle would read past the mesh.
         let count = mesh.indices.len() - mesh.indices.len() % 3;
-        let indices = mesh.indices.get(..count).unwrap_or_default();
-        self.mesh = Some(MeshBuffers {
-            vertices: buffer(
-                "overlay vertices",
-                bytemuck::cast_slice(&mesh.vertices),
-                wgpu::BufferUsages::VERTEX,
-            ),
-            indices: buffer(
-                "overlay indices",
-                bytemuck::cast_slice(indices),
-                wgpu::BufferUsages::INDEX,
-            ),
-            count: count as u32,
-            revision: overlay.revision(),
-        });
+        if mesh.vertices.is_empty() || count == 0 {
+            if let Some(existing) = self.mesh.as_mut() {
+                existing.count = 0;
+                existing.revision = overlay.revision();
+            }
+            return;
+        }
+        let v_bytes: &[u8] = bytemuck::cast_slice(&mesh.vertices);
+        let i_bytes: &[u8] = bytemuck::cast_slice(mesh.indices.get(..count).unwrap_or_default());
+        let grow = |needed: usize| -> u64 {
+            (needed as u64)
+                .max(MIN_OVERLAY_BUFFER_BYTES)
+                .checked_next_power_of_two()
+                .unwrap_or(needed as u64)
+        };
+        let alloc = |label, capacity: u64, usage: wgpu::BufferUsages| {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(label),
+                size: capacity,
+                usage: usage | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
+        };
+        let buffers = match self.mesh.as_mut() {
+            Some(existing) => {
+                if v_bytes.len() as u64 > existing.vertex_capacity {
+                    existing.vertex_capacity = grow(v_bytes.len());
+                    existing.vertices = alloc(
+                        "overlay vertices",
+                        existing.vertex_capacity,
+                        wgpu::BufferUsages::VERTEX,
+                    );
+                }
+                if i_bytes.len() as u64 > existing.index_capacity {
+                    existing.index_capacity = grow(i_bytes.len());
+                    existing.indices = alloc(
+                        "overlay indices",
+                        existing.index_capacity,
+                        wgpu::BufferUsages::INDEX,
+                    );
+                }
+                existing
+            }
+            None => {
+                let vertex_capacity = grow(v_bytes.len());
+                let index_capacity = grow(i_bytes.len());
+                self.mesh.insert(MeshBuffers {
+                    vertices: alloc(
+                        "overlay vertices",
+                        vertex_capacity,
+                        wgpu::BufferUsages::VERTEX,
+                    ),
+                    vertex_capacity,
+                    indices: alloc("overlay indices", index_capacity, wgpu::BufferUsages::INDEX),
+                    index_capacity,
+                    count: 0,
+                    revision: 0,
+                })
+            }
+        };
+        queue.write_buffer(&buffers.vertices, 0, v_bytes);
+        queue.write_buffer(&buffers.indices, 0, i_bytes);
+        buffers.count = count as u32;
+        buffers.revision = overlay.revision();
     }
 }
 

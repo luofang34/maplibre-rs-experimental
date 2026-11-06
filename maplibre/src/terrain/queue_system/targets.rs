@@ -24,12 +24,11 @@ pub(crate) fn target_specs(
     let Some(dem) = crate::terrain::source::dem_source(style) else {
         return Ok(Vec::new());
     };
-    let view_region = crate::render::projection::terrain_region(
+    let view_region = crate::terrain::coverage::take_or_compute_tight_terrain_region(
         style,
         view_state,
         world,
         dem.tile_size,
-        crate::render::view_state::ViewStatePadding::Tight,
     )
     .map_err(|error| {
         tracing::error!(%error, "unable to select terrain tiles");
@@ -97,12 +96,11 @@ pub(crate) fn procedural_specs(
     let Some(dem) = crate::terrain::source::dem_source(style) else {
         return Ok(Vec::new());
     };
-    let view_region = crate::render::projection::terrain_region(
+    let view_region = crate::terrain::coverage::take_or_compute_tight_terrain_region(
         style,
         view_state,
         world,
         dem.tile_size,
-        crate::render::view_state::ViewStatePadding::Tight,
     )
     .map_err(|error| {
         tracing::error!(%error, "unable to select procedural terrain tiles");

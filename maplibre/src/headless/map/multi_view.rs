@@ -174,6 +174,7 @@ struct SlotState {
     overlay_gpu: Eventually<OverlayGpu>,
     #[cfg(feature = "experimental")]
     probe_gpu: Eventually<ProbeGpu>,
+    edge_cache: crate::terrain::queue_system::edges::EdgeCache,
     lod_history: FrameLodHistory,
     stereo_snapshot: Option<StereoSnapshot>,
     last_retained_tiles: HashSet<WorldTileCoords>,
@@ -228,6 +229,12 @@ fn swap_slot_resources(slot: &mut SlotState, renderer: &mut Renderer, world: &mu
     if let Some(probe_gpu) = world.resources.get_mut::<Eventually<ProbeGpu>>() {
         std::mem::swap(&mut slot.probe_gpu, probe_gpu);
     }
+    std::mem::swap(
+        &mut slot.edge_cache,
+        world
+            .resources
+            .get_or_init_mut::<crate::terrain::queue_system::edges::EdgeCache>(),
+    );
 }
 
 impl HeadlessMap {
@@ -264,6 +271,7 @@ impl HeadlessMap {
                 overlay_gpu: Eventually::Uninitialized,
                 #[cfg(feature = "experimental")]
                 probe_gpu: Eventually::Uninitialized,
+                edge_cache: crate::terrain::queue_system::edges::EdgeCache::default(),
                 lod_history: FrameLodHistory::default(),
                 stereo_snapshot: None,
                 last_retained_tiles: HashSet::new(),

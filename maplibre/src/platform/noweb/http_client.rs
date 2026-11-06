@@ -1,11 +1,14 @@
 //! Native HTTP source loading with optional disk caching and typed retry classification.
 
-use std::path::PathBuf;
+use std::collections::{HashMap, VecDeque};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, Weak};
 
 use async_trait::async_trait;
 use http_cache_reqwest::{CACacheManager, Cache, CacheMode, HttpCache, HttpCacheOptions};
 use reqwest::{Client, StatusCode};
 use reqwest_middleware::ClientWithMiddleware;
+use tokio::sync::Semaphore;
 
 use crate::io::source_client::{ByteRange, HttpClient, SourceFetchError};
 
@@ -14,12 +17,139 @@ const USER_AGENT: &str = concat!(
     env!("CARGO_PKG_VERSION"),
     " (+https://github.com/maplibre/maplibre-rs)"
 );
+const MEMORY_CACHE_CAP_BYTES: usize = 64 * 1024 * 1024;
+const MEMORY_CACHE_MAX_ITEM_BYTES: usize = 1024 * 1024;
+const DISK_CACHE_IO_CONCURRENCY: usize = 6;
+
+struct MemoryTileCacheState {
+    entries: HashMap<Arc<str>, (Arc<[u8]>, u64)>,
+    order: VecDeque<(Arc<str>, u64)>,
+    bytes: usize,
+    clock: u64,
+    cap_bytes: usize,
+}
+
+impl MemoryTileCacheState {
+    fn new(cap_bytes: usize) -> Self {
+        Self {
+            entries: HashMap::new(),
+            order: VecDeque::new(),
+            bytes: 0,
+            clock: 0,
+            cap_bytes,
+        }
+    }
+
+    fn get(&mut self, url: &str) -> Option<Arc<[u8]>> {
+        let (key, (body, stamp)) = self.entries.get_key_value(url)?;
+        let key = Arc::clone(key);
+        let body = Arc::clone(body);
+        let next_stamp = self.clock.wrapping_add(1);
+        self.clock = next_stamp;
+        if *stamp != next_stamp {
+            if let Some(entry) = self.entries.get_mut(url) {
+                entry.1 = next_stamp;
+            }
+            self.order.push_back((key, next_stamp));
+            self.compact_order_if_needed();
+        }
+        Some(body)
+    }
+
+    fn insert(&mut self, url: &str, body: &[u8]) {
+        if body.len() > MEMORY_CACHE_MAX_ITEM_BYTES || body.len() > self.cap_bytes {
+            return;
+        }
+        let next_stamp = self.clock.wrapping_add(1);
+        self.clock = next_stamp;
+        let payload: Arc<[u8]> = Arc::from(body);
+        if let Some((_, (old_body, _))) = self.entries.remove_entry(url) {
+            self.bytes = self.bytes.saturating_sub(old_body.len());
+        }
+        while self.bytes.saturating_add(payload.len()) > self.cap_bytes {
+            let Some((evict_key, evict_stamp)) = self.order.pop_front() else {
+                self.entries.clear();
+                self.bytes = 0;
+                break;
+            };
+            if self
+                .entries
+                .get(evict_key.as_ref())
+                .is_some_and(|(_, current_stamp)| *current_stamp == evict_stamp)
+            {
+                if let Some((evicted, _)) = self.entries.remove(evict_key.as_ref()) {
+                    self.bytes = self.bytes.saturating_sub(evicted.len());
+                }
+            }
+        }
+        let key: Arc<str> = Arc::from(url);
+        self.bytes = self.bytes.saturating_add(payload.len());
+        self.entries.insert(Arc::clone(&key), (payload, next_stamp));
+        self.order.push_back((key, next_stamp));
+        self.compact_order_if_needed();
+    }
+
+    fn compact_order_if_needed(&mut self) {
+        let limit = self.entries.len().saturating_mul(2).saturating_add(64);
+        if self.order.len() <= limit {
+            return;
+        }
+        let entries = &self.entries;
+        self.order.retain(|(key, stamp)| {
+            entries
+                .get(key.as_ref())
+                .is_some_and(|(_, current_stamp)| *current_stamp == *stamp)
+        });
+    }
+}
+
+struct SharedCacheFrontend {
+    memory: Mutex<MemoryTileCacheState>,
+    io_gate: Semaphore,
+}
+
+impl SharedCacheFrontend {
+    fn new(cap_bytes: usize) -> Self {
+        Self {
+            memory: Mutex::new(MemoryTileCacheState::new(cap_bytes)),
+            io_gate: Semaphore::new(DISK_CACHE_IO_CONCURRENCY),
+        }
+    }
+
+    fn get(&self, url: &str) -> Option<Arc<[u8]>> {
+        self.memory.lock().ok()?.get(url)
+    }
+
+    fn insert(&self, url: &str, body: &[u8]) {
+        if let Ok(mut guard) = self.memory.lock() {
+            guard.insert(url, body);
+        }
+    }
+}
+
+static SHARED_CACHE_FRONTENDS: Mutex<Option<HashMap<PathBuf, Weak<SharedCacheFrontend>>>> =
+    Mutex::new(None);
+
+fn shared_cache_frontend(path: &Path) -> Arc<SharedCacheFrontend> {
+    let Ok(mut guard) = SHARED_CACHE_FRONTENDS.lock() else {
+        return Arc::new(SharedCacheFrontend::new(MEMORY_CACHE_CAP_BYTES));
+    };
+    let table = guard.get_or_insert_with(HashMap::new);
+    table.retain(|_, weak| weak.strong_count() > 0);
+    if let Some(existing) = table.get(path).and_then(Weak::upgrade) {
+        return existing;
+    }
+    let created = Arc::new(SharedCacheFrontend::new(MEMORY_CACHE_CAP_BYTES));
+    table.insert(path.to_path_buf(), Arc::downgrade(&created));
+    created
+}
 
 /// Cloneable HTTP transport that fetches complete bodies and preserves HTTP or network causes.
 /// A configured cache directory enables the HTTP cache middleware; clones share the client.
 #[derive(Clone)]
 pub struct ReqwestHttpClient {
     client: ClientWithMiddleware,
+    frontend: Option<Arc<SharedCacheFrontend>>,
 }
 
 enum TransportClassification {
@@ -174,19 +304,21 @@ impl ReqwestHttpClient {
             }
         };
         let mut builder = reqwest_middleware::ClientBuilder::new(client);
-
-        if let Some(cache_path) = cache_path {
+        let frontend = if let Some(cache_path) = cache_path {
+            let path = cache_path.into();
+            let shared = shared_cache_frontend(&path);
             builder = builder.with(Cache(HttpCache {
                 mode: CacheMode::Default,
-                manager: CACacheManager {
-                    path: cache_path.into(),
-                },
+                manager: CACacheManager { path },
                 options: HttpCacheOptions::default(),
-            }))
-        }
+            }));
+            Some(shared)
+        } else {
+            None
+        };
         let client = builder.build();
 
-        Self { client }
+        Self { client, frontend }
     }
 }
 
@@ -234,6 +366,19 @@ pub fn unregister_in_process_handler(prefix: &str) {
 impl ReqwestHttpClient {
     /// A server that ignores the range answers with the whole body, cut down here.
     async fn get(&self, url: &str, range: Option<ByteRange>) -> Result<Vec<u8>, SourceFetchError> {
+        if range.is_none() {
+            if let Some(body) = self
+                .frontend
+                .as_deref()
+                .and_then(|frontend| frontend.get(url))
+            {
+                return Ok(body.to_vec());
+            }
+        }
+        let _io_permit = match &self.frontend {
+            Some(frontend) => frontend.io_gate.acquire().await.ok(),
+            None => None,
+        };
         let mut request = self.client.get(url);
         if let Some(range) = range {
             request = request.header(reqwest::header::RANGE, range.header());
@@ -269,7 +414,13 @@ impl ReqwestHttpClient {
                 let body = response.bytes().await?;
                 match range {
                     Some(range) if !partial => range.slice(url, &body).map(<[u8]>::to_vec),
-                    _ => Ok(Vec::from(body.as_ref())),
+                    Some(_) => Ok(Vec::from(body.as_ref())),
+                    None => {
+                        if let Some(frontend) = &self.frontend {
+                            frontend.insert(url, body.as_ref());
+                        }
+                        Ok(Vec::from(body.as_ref()))
+                    }
                 }
             }
             Err(error) => Err(SourceFetchError::http_response(url, status, error)),
@@ -380,5 +531,18 @@ mod tests {
             "malformed URL builder error must remain terminal: {}",
             bad_url_mw.describe()
         );
+    }
+
+    #[test]
+    fn memory_tile_cache_evicts_least_recently_used_entries_within_budget() {
+        let mut cache = MemoryTileCacheState::new(10);
+        cache.insert("a", &[1, 2, 3, 4]);
+        cache.insert("b", &[5, 6, 7, 8]);
+        assert_eq!(cache.get("a").as_deref(), Some(&[1, 2, 3, 4][..]));
+        cache.insert("c", &[9, 10, 11, 12]);
+        assert_eq!(cache.get("a").as_deref(), Some(&[1, 2, 3, 4][..]));
+        assert!(cache.get("b").is_none());
+        assert_eq!(cache.get("c").as_deref(), Some(&[9, 10, 11, 12][..]));
+        assert!(cache.bytes <= 10);
     }
 }

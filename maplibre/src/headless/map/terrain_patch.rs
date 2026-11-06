@@ -103,6 +103,27 @@ impl HeadlessMap {
         }
     }
 
+    /// Samples `(bilinear_msl_meters, cell_max_msl_meters)` in unexaggerated orthometric metres
+    /// at normalized `[0, 1]` tile coordinates `(u, v)` on `coords`'s `128 × 128` terrain mesh
+    /// without allocating a full `129 × 129` [`TerrainPatchSnapshot`].
+    pub fn sample_resident_dem_grid_cell(
+        &self,
+        coords: WorldTileCoords,
+        u: f64,
+        v: f64,
+    ) -> Option<(f64, f64)> {
+        let context = &self.map_context;
+        let fallback_dem =
+            dem_source(&context.style).map(|dem| (dem.minzoom, dem.maxzoom, dem.exaggeration));
+        let empty_index = TerrainCoverageIndex::default();
+        let index = context
+            .world
+            .resources
+            .get::<TerrainCoverageIndex>()
+            .unwrap_or(&empty_index);
+        index.sample_stitched_patch_cell_msl(&context.world.tiles, coords, (u, v), fallback_dem)
+    }
+
     /// Exports a stitched `129 × 129` (`TERRAIN_MESH_SIZE + 1`) elevation grid and optional
     /// resident drape texture for `coords` if a covering DEM tile is resident in `World`.
     pub fn resident_terrain_patch(&self, coords: WorldTileCoords) -> Option<TerrainPatchSnapshot> {
