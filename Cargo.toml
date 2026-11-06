@@ -80,6 +80,7 @@ wasm-bindgen-test = "0.3"
 web-sys = "0.3"  # Individual features are customized in each crate
 wgpu = { version = "30.0.1", features = ["trace"] }
 http-cache-reqwest = "0.14.0"
+rustc-hash = "2.1"
 
 [profile.release]
 lto = true

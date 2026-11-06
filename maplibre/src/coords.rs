@@ -53,8 +53,8 @@ const fn create_zoom_bounds<const DIM: usize>() -> [u32; DIM] {
 }
 
 /// Ordered tile key containing its zoom level and the quadrant digit for each coordinate bit pair.
-#[derive(Ord, PartialOrd, Eq, PartialEq, Clone, Copy)]
-pub struct Quadkey([ZoomLevel; MAX_ZOOM]);
+#[derive(Ord, PartialOrd, Eq, PartialEq, Hash, Clone, Copy)]
+pub struct Quadkey(pub(crate) u128);
 
 impl Quadkey {
     /// Builds a key from quadrant digits, starting with the least-significant coordinate bits.
@@ -63,25 +63,37 @@ impl Quadkey {
     /// # Panics
     /// Panics when the slice contains [`MAX_ZOOM`] or more digits.
     pub fn new(quad_encoded: &[ZoomLevel]) -> Self {
-        let mut key = [ZoomLevel::default(); MAX_ZOOM];
-        key[0] = (quad_encoded.len() as u8).into();
+        assert!(
+            quad_encoded.len() < MAX_ZOOM,
+            "quadkey length {} exceeds MAX_ZOOM - 1",
+            quad_encoded.len()
+        );
+        let mut bits = u128::from(quad_encoded.len() as u8) << 120;
         for (i, part) in quad_encoded.iter().enumerate() {
-            key[i + 1] = *part;
+            bits |= u128::from(part.0 & 0b11) << (118 - 2 * i);
         }
-        Self(key)
+        Self(bits)
     }
 }
 
 impl fmt::Debug for Quadkey {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        let key = self.0;
-        let ZoomLevel(level) = key[0];
-        let len = level as usize;
-        for part in &self.0[0..len] {
-            write!(f, "{part:?}")?;
+        let level = (self.0 >> 120) as u8;
+        if level > 0 {
+            write!(f, "{:?}", ZoomLevel(level))?;
+            for i in 0..(usize::from(level) - 1) {
+                let digit = ((self.0 >> (118 - 2 * i)) & 0b11) as u8;
+                write!(f, "{:?}", ZoomLevel(digit))?;
+            }
         }
         Ok(())
     }
+}
+
+/// Exact `2.0_f64.powi(i32::from(z))` via IEEE-754 binary64 exponent construction (`z` in `0..=255`).
+#[inline(always)]
+pub(crate) const fn exp2_u8(z: u8) -> f64 {
+    f64::from_bits((1023_u64 + (z as u64)) << 52)
 }
 
 /// Integer tile-grid level. Construction does not validate the bounds of a particular grid.
@@ -111,6 +123,11 @@ impl ZoomLevel {
     /// Whether this level consists of the single zoom-zero world tile.
     pub fn is_root(self) -> bool {
         self.0 == 0
+    }
+    /// Exact grid dimension `2.0^z` as `f64` without calling `libm::pow`.
+    #[inline(always)]
+    pub const fn grid_scale(self) -> f64 {
+        exp2_u8(self.0)
     }
 }
 
@@ -371,7 +388,7 @@ impl From<Point3<f64>> for WorldCoords {
 }
 
 /// Defines a bounding box on a tiled map with a [`ZoomLevel`] and a padding.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ViewRegion {
     min_tile: WorldTileCoords,
     max_tile: WorldTileCoords,

@@ -1,6 +1,8 @@
 //! Requests tiles which are currently in view
 
-use std::{borrow::Cow, collections::HashSet, marker::PhantomData, rc::Rc};
+use std::{borrow::Cow, marker::PhantomData, rc::Rc};
+
+use rustc_hash::FxHashSet;
 
 use crate::{
     context::MapContext,
@@ -71,9 +73,27 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
         let regions = if let Some(multi) = &multi {
             multi.raster_regions.clone()
         } else {
-            raster_source_regions(style, view_state, world, ViewStatePadding::Loose)?
+            let computed =
+                raster_source_regions(style, view_state, world, ViewStatePadding::Loose)?;
+            let host_frame = crate::render::frame_signals::host_frame_in_progress(world);
+            let flat: Vec<WorldTileCoords> = computed
+                .iter()
+                .flat_map(|(_, tiles)| tiles.iter().copied())
+                .collect();
+            let cache = world
+                .resources
+                .get_or_init_mut::<crate::render::eye_covering::FrameLooseCovering>();
+            if cache.host_frame != host_frame {
+                *cache = crate::render::eye_covering::FrameLooseCovering {
+                    host_frame,
+                    view_tiles: None,
+                    raster_tiles: None,
+                };
+            }
+            cache.raster_tiles = Some(flat);
+            computed
         };
-        let mut requested = HashSet::new();
+        let mut requested = FxHashSet::default();
         let mut budget = request_budget(world);
         let wanted = wanted_tiles(regions, style, world);
         let sources: Vec<_> = source_layer_groups(style, TileKind::Raster)

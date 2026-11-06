@@ -1,5 +1,5 @@
 //! Geometry uploads follow the actual sources selected for the view or terrain textures.
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 use crate::{
     coords::WorldTileCoords,
@@ -44,7 +44,7 @@ pub(super) fn frame_sources_and_painted(
         terrain_sources(world, style)
     } else {
         let mut sources = Vec::new();
-        let mut seen = HashSet::new();
+        let mut seen = FxHashSet::default();
         let mut targets = Vec::new();
         if let Some(region) = &view_region {
             for copy in region.copies() {
@@ -73,7 +73,7 @@ pub(super) fn frame_sources_and_painted(
         sources
     };
     let mut painted_tiles = source_tiles.clone();
-    let mut seen_painted: HashSet<_> = painted_tiles.iter().copied().collect();
+    let mut seen_painted: FxHashSet<_> = painted_tiles.iter().copied().collect();
     if let Some(region) = &view_region {
         for copy in region.copies() {
             let Some((coords, _)) = copy.wrapped() else {
@@ -111,7 +111,7 @@ pub(super) fn terrain_sources(world: &World, style: &Style) -> Vec<WorldTileCoor
                 .flat_map(|floor| floor.retained_drapes.iter().copied()),
         );
     let selected = select_targets(targets, world, &[]);
-    let mut seen = HashSet::new();
+    let mut seen = FxHashSet::default();
     let mut sources = Vec::new();
     for (target, shapes) in selected {
         // A CPU-ready ancestor or complete child cover must reach the GPU even when

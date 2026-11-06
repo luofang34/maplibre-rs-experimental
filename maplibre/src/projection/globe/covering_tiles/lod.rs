@@ -247,7 +247,7 @@ fn parallel_cos_from_sin_lat(sin_lat: f64) -> f64 {
 
 /// The straight distance from a point to a tile's rectangle in Mercator `0..1` units.
 fn distance_to_tile_planar(point: Point2<f64>, tile: TileCoords) -> f64 {
-    let scale = 2_f64.powi(i32::from(u8::from(tile.z)));
+    let scale = tile.z.grid_scale();
     let size = 1.0 / scale;
     let axis = |point: f64, corner: f64| {
         let delta = point - corner;

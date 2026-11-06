@@ -117,7 +117,7 @@ pub fn project_tile_coordinates_to_unit_sphere(
     in_tile_x: f64,
     in_tile_y: f64,
 ) -> Vector3<f64> {
-    let tile_count = 2_f64.powi(i32::from(zoom));
+    let tile_count = crate::coords::exp2_u8(zoom);
     let mercator_x = (f64::from(tile_x) + in_tile_x / EXTENT) / tile_count;
     let mercator_y = (f64::from(tile_y) + in_tile_y / EXTENT) / tile_count;
     let longitude = mercator_x * PI * 2.0 + PI;
@@ -129,12 +129,9 @@ pub fn project_tile_coordinates_to_unit_sphere(
     let denominator = tangent_half_latitude_squared + 1.0;
     let sin_latitude = (tangent_half_latitude_squared - 1.0) / denominator;
     let cos_latitude = (2.0 * tangent_half_latitude) / denominator;
+    let (sin_lon, cos_lon) = longitude.sin_cos();
 
-    Vector3::new(
-        longitude.sin() * cos_latitude,
-        sin_latitude,
-        longitude.cos() * cos_latitude,
-    )
+    Vector3::new(sin_lon * cos_latitude, sin_latitude, cos_lon * cos_latitude)
 }
 
 /// Converts a geographic location in degrees to a point on the unit sphere.

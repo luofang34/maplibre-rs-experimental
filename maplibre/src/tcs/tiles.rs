@@ -3,6 +3,7 @@
 use std::{cell::UnsafeCell, collections::BTreeMap};
 
 use downcast_rs::{impl_downcast, Downcast};
+use rustc_hash::FxHashMap;
 
 pub use crate::tcs::{EphemeralQueryState, GlobalQueryState, QueryState};
 use crate::{
@@ -29,7 +30,7 @@ pub struct Tiles {
     pub tiles: BTreeMap<Quadkey, Tile>,
     /// Component slots under each tile's key. Use [`TileSpawnResult::insert`] to preserve
     /// one component per type and release replaced values.
-    pub components: BTreeMap<Quadkey, Vec<UnsafeCell<Box<dyn TileComponent>>>>,
+    pub components: FxHashMap<Quadkey, Vec<UnsafeCell<Box<dyn TileComponent>>>>,
     /// Geometry available to rendered-feature queries; cleared with the owning tiles.
     pub geometry_index: GeometryIndex,
 }
@@ -55,21 +56,22 @@ impl Tiles {
     }
 
     /// Whether a record exists at these coordinates; invalid coordinates return `false`.
+    #[inline]
     pub fn exists(&self, coords: WorldTileCoords) -> bool {
-        if let Some(key) = coords.build_quad_key() {
-            self.tiles.contains_key(&key)
-        } else {
-            false
-        }
+        coords
+            .build_quad_key()
+            .is_some_and(|key| self.components.contains_key(&key))
     }
 
     /// Opens a tile for component insertion, preserving its components if it already exists.
     /// Coordinates outside the canonical tile grid return `None` without changing the store.
     pub fn spawn_mut(&mut self, coords: WorldTileCoords) -> Option<TileSpawnResult<'_>> {
         if let Some(key) = coords.build_quad_key() {
-            if let Some(tile) = self.tiles.get(&key) {
-                let tile = *tile;
-                Some(TileSpawnResult { tiles: self, tile })
+            if self.components.contains_key(&key) {
+                Some(TileSpawnResult {
+                    tiles: self,
+                    tile: Tile { coords },
+                })
             } else {
                 let tile = Tile { coords };
                 self.tiles.insert(key, tile);

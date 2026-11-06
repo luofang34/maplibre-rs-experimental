@@ -11,7 +11,7 @@ use thiserror::Error;
 use crate::{
     coords::{TileCoords, WorldTileCoords, ZoomLevel, MAX_ZOOM, TILE_SIZE},
     projection::globe::{
-        covering::{aabb_volume, TileElevationProvider},
+        covering::TileElevationProvider,
         covering_tiles::{
             add_padding, frustum::GlobeFrustum, lod::LodContext, Intersection, SourceZoomRange,
             ZoomRounding,
@@ -170,7 +170,7 @@ fn tile_intersection(
     world_size: f64,
     elevation: &dyn TileElevationProvider,
 ) -> Intersection {
-    let count = 2_f64.powi(i32::from(u8::from(tile.z)));
+    let count = tile.z.grid_scale();
     let size = world_size / count;
     let range = elevation.elevation_range(tile);
     let min = Vector3::new(
@@ -179,5 +179,6 @@ fn tile_intersection(
         range.min_meters.min(0.0),
     );
     let max = Vector3::new(min.x + size, min.y + size, range.max_meters.max(0.0));
-    frustum.intersects(&aabb_volume(min, max))
+    let vol = crate::projection::globe::covering::aabb_compact_volume(min, max);
+    frustum.intersects_volume(vol.points_slice(), &vol.planes)
 }

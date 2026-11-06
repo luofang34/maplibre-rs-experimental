@@ -6,11 +6,9 @@
 //! `Map2D` MFD) to share a single `World`, `VectorBufferPool`, `DrapeScratch`, `DrapeCache`,
 //! and compiled pipeline set without tile or drape thrashing.
 
-use std::{
-    collections::{BTreeMap, HashSet},
-    time::Duration,
-};
+use std::{collections::BTreeMap, time::Duration};
 
+use rustc_hash::FxHashSet;
 use thiserror::Error;
 
 mod covering;
@@ -177,11 +175,13 @@ struct SlotState {
     edge_cache: crate::terrain::queue_system::edges::EdgeCache,
     lod_history: FrameLodHistory,
     stereo_snapshot: Option<StereoSnapshot>,
-    last_retained_tiles: HashSet<WorldTileCoords>,
-    last_retained_drapes: HashSet<WorldTileCoords>,
-    last_wanted_vector: HashSet<WorldTileCoords>,
-    last_wanted_raster: HashSet<WorldTileCoords>,
-    last_wanted_dem: HashSet<WorldTileCoords>,
+    prepared_terrain: Option<crate::terrain::coverage::PreparedTerrainRegion>,
+    frame_loose_in_use: FxHashSet<WorldTileCoords>,
+    last_retained_tiles: FxHashSet<WorldTileCoords>,
+    last_retained_drapes: FxHashSet<WorldTileCoords>,
+    last_wanted_vector: FxHashSet<WorldTileCoords>,
+    last_wanted_raster: FxHashSet<WorldTileCoords>,
+    last_wanted_dem: FxHashSet<WorldTileCoords>,
     last_drawn_count: usize,
 }
 
@@ -274,11 +274,13 @@ impl HeadlessMap {
                 edge_cache: crate::terrain::queue_system::edges::EdgeCache::default(),
                 lod_history: FrameLodHistory::default(),
                 stereo_snapshot: None,
-                last_retained_tiles: HashSet::new(),
-                last_retained_drapes: HashSet::new(),
-                last_wanted_vector: HashSet::new(),
-                last_wanted_raster: HashSet::new(),
-                last_wanted_dem: HashSet::new(),
+                prepared_terrain: None,
+                frame_loose_in_use: FxHashSet::default(),
+                last_retained_tiles: FxHashSet::default(),
+                last_retained_drapes: FxHashSet::default(),
+                last_wanted_vector: FxHashSet::default(),
+                last_wanted_raster: FxHashSet::default(),
+                last_wanted_dem: FxHashSet::default(),
                 last_drawn_count: 0,
             },
         );

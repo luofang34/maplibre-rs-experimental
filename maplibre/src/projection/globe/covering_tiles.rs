@@ -8,8 +8,8 @@ use thiserror::Error;
 use super::{
     camera::GlobeCameraState,
     covering::{
-        globe_tile_bounding_volume, tile_spherical_cap, validate_elevation,
-        GlobeTileBoundingVolume, GlobeTileBoundsError, TileElevationProvider,
+        compact_tile_volume, tile_spherical_cap, validate_elevation, CompactTileVolume,
+        GlobeTileBoundsError, TileElevationProvider,
     },
 };
 #[cfg(test)]
@@ -180,7 +180,7 @@ pub(crate) fn covering_tiles_with_history(
                 Intersection::None => Intersection::None,
                 Intersection::Full => Intersection::Full,
                 Intersection::Partial => {
-                    let bounds = globe_tile_bounding_volume(tile, range, camera.body())
+                    let bounds = compact_tile_volume(tile, range, camera.body())
                         .map_err(|source| GlobeCoveringError::TileBounds { source })?;
                     tile_intersection(&frustum, camera.clipping_plane(), &bounds)
                 }
@@ -223,17 +223,16 @@ pub fn elevation_for_tile_culling(camera: &GlobeCameraState, center_elevation: f
 fn tile_intersection(
     frustum: &GlobeFrustum,
     clipping_plane: Vector4<f64>,
-    bounds: &GlobeTileBoundingVolume,
+    bounds: &CompactTileVolume,
 ) -> Intersection {
-    let result = frustum.intersects(bounds);
+    let points = bounds.points_slice();
+    let result = frustum.intersects_volume(points, &bounds.planes);
     if result == Intersection::None {
         return result;
     }
     combine_intersections(
         result,
-        classify_points(&bounds.points, |point| {
-            clipping_plane.dot(point.extend(1.0))
-        }),
+        classify_points(points, |point| clipping_plane.dot(point.extend(1.0))),
     )
 }
 

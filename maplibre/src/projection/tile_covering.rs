@@ -177,7 +177,7 @@ pub(crate) fn spherical_tile_distance(tile: WorldTileCoords, focus_unit: Vector3
 
 /// Planar 2D Web Mercator squared distance in world-copy coordinates (no wrap folding).
 pub(crate) fn planar_tile_distance_squared(tile: WorldTileCoords, focus_2d: Point2<f64>) -> f64 {
-    let count = 2_f64.powi(i32::from(u8::from(tile.z)));
+    let count = tile.z.grid_scale();
     let dx = focus_2d.x - (f64::from(tile.x) + 0.5) / count;
     let dy = focus_2d.y - (f64::from(tile.y) + 0.5) / count;
     dx * dx + dy * dy
@@ -248,7 +248,7 @@ pub(crate) fn coarsen_with_focus(
                 crate::projection::globe::covering::tile_spherical_cap(canonical).center,
             )
         } else {
-            let count = 2_f64.powi(i32::from(u8::from(first.z)));
+            let count = first.z.grid_scale();
             CoveringFocus::Planar(Point2::new(
                 (f64::from(first.x) + 0.5) / count,
                 (f64::from(first.y) + 0.5) / count,

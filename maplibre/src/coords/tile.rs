@@ -179,6 +179,7 @@ impl WorldTileCoords {
 
     /// Builds a key from least-significant coordinate bits first, or `None` outside the grid.
     /// Quadrant encoding follows [tilebelt](https://github.com/mapbox/tilebelt).
+    #[inline]
     pub fn build_quad_key(&self) -> Option<Quadkey> {
         let bounds = *ZOOM_BOUNDS.get(self.z.0 as usize)?;
         let x = self.x as u32;
@@ -188,22 +189,11 @@ impl WorldTileCoords {
             return None;
         }
 
-        let mut key = [ZoomLevel::default(); MAX_ZOOM];
-
-        key[0] = self.z;
-
-        for z in 1..self.z.0 + 1 {
-            let mut b = 0;
-            let mask: i32 = 1 << (z - 1);
-            if (self.x & mask) != 0 {
-                b += 1u8;
-            }
-            if (self.y & mask) != 0 {
-                b += 2u8;
-            }
-            key[z as usize] = ZoomLevel::from(b);
-        }
-        Some(Quadkey(key))
+        let rx = x.reverse_bits();
+        let ry = y.reverse_bits();
+        let morton = (spread_bits_32(ry) << 1) | spread_bits_32(rx);
+        let bits = (u128::from(self.z.0) << 120) | (u128::from(morton) << 56);
+        Some(Quadkey(bits))
     }
 
     /// Returns children clockwise from the upper left, without clipping to canonical bounds.
@@ -335,4 +325,15 @@ impl Display for WorldTileCoords {
             z = self.z
         )
     }
+}
+
+#[inline(always)]
+const fn spread_bits_32(v: u32) -> u64 {
+    let mut x = v as u64;
+    x = (x | (x << 16)) & 0x0000_FFFF_0000_FFFF;
+    x = (x | (x << 8)) & 0x00FF_00FF_00FF_00FF;
+    x = (x | (x << 4)) & 0x0F0F_0F0F_0F0F_0F0F;
+    x = (x | (x << 2)) & 0x3333_3333_3333_3333;
+    x = (x | (x << 1)) & 0x5555_5555_5555_5555;
+    x
 }

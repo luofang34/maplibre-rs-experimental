@@ -17,6 +17,16 @@ impl HeadlessMap {
         self.map_context.needs_redraw() || self.kernel.apc().has_arrivals()
     }
 
+    /// Whether the map has work ready to draw right now: dirty or animating frame state, a moved
+    /// camera, an expired retry backoff, or completed worker messages waiting in the APC queue.
+    ///
+    /// Unlike [`Self::needs_redraw`], this stays `false` while remote tile fetches are merely in
+    /// flight over the network with no arrived worker output yet, so VSync-driven hosts (such as
+    /// standalone or embedded EFB displays) do not spin at 120 Hz awaiting I/O.
+    pub fn has_ready_work(&self) -> bool {
+        self.map_context.has_ready_work() || self.kernel.apc().has_arrivals()
+    }
+
     /// The statistics of the last frame drawn.
     pub fn last_frame_stats(&self) -> FrameStats {
         self.map_context.last_frame_stats()

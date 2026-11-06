@@ -298,7 +298,7 @@ impl GlobeCameraState {
 
     /// Returns text-size correction for a tile-local anchor under globe projection.
     pub fn pitched_text_correction(&self, _x: f64, y: f64, tile: TileCoords) -> f64 {
-        let tile_count = 2_f64.powi(i32::from(u8::from(tile.z)));
+        let tile_count = tile.z.grid_scale();
         let mercator_y = (f64::from(tile.y) + y / EXTENT) / tile_count;
         let (_, latitude) = mercator_to_angular_radians(0.0, mercator_y);
         self.circle_radius_correction() / latitude.cos()

@@ -1,9 +1,6 @@
 use cgmath::{InnerSpace, Vector3, Vector4};
 
-use super::{
-    super::{camera::GlobeCameraState, covering::GlobeTileBoundingVolume},
-    classify_points, Intersection,
-};
+use super::{super::camera::GlobeCameraState, classify_points, Intersection};
 
 const CLIP_CORNERS: [[f64; 4]; 8] = [
     [-1.0, 1.0, -1.0, 1.0],
@@ -100,11 +97,14 @@ impl GlobeFrustum {
         result
     }
 
-    pub(crate) fn intersects(&self, bounds: &GlobeTileBoundingVolume) -> Intersection {
+    pub(crate) fn intersects_volume(
+        &self,
+        points: &[Vector3<f64>],
+        planes: &[Vector4<f64>; 6],
+    ) -> Intersection {
         let mut result = Intersection::Full;
         for plane in self.planes {
-            let classification =
-                classify_points(&bounds.points, |point| plane.dot(point.extend(1.0)));
+            let classification = classify_points(points, |point| plane.dot(point.extend(1.0)));
             if classification == Intersection::None {
                 return Intersection::None;
             }
@@ -115,7 +115,7 @@ impl GlobeFrustum {
         if result == Intersection::Full {
             return result;
         }
-        for plane in bounds.planes {
+        for plane in *planes {
             if classify_points(&self.points, |point| plane.dot(point.extend(1.0)))
                 == Intersection::None
             {

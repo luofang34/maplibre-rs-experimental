@@ -117,7 +117,7 @@ pub fn tile_mercator_coordinates(tile: Option<TileCoords>) -> Vector4<f32> {
         let scale = (1.0 / EXTENT) as f32;
         return Vector4::new(0.0, 0.0, scale, scale);
     };
-    let tile_count = 2_f64.powi(i32::from(u8::from(tile.z)));
+    let tile_count = tile.z.grid_scale();
     let extent_scale = 1.0 / (tile_count * EXTENT);
     Vector4::new(
         (f64::from(tile.x) / tile_count) as f32,

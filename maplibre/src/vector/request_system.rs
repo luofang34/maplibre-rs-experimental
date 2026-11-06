@@ -1,6 +1,8 @@
 //! Requests tiles which are currently in view
 
-use std::{borrow::Cow, collections::HashSet, marker::PhantomData, rc::Rc};
+use std::{borrow::Cow, marker::PhantomData, rc::Rc};
+
+use rustc_hash::FxHashSet;
 
 use crate::{
     context::MapContext,
@@ -71,7 +73,7 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
         let view_tiles_and_level = if let Some(multi) = &multi {
             Some((multi.vector_tiles.clone(), multi.max_view_level))
         } else {
-            view_region_for_projection(
+            let computed = view_region_for_projection(
                 style,
                 view_state,
                 world,
@@ -83,14 +85,31 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                     region.iter().collect::<Vec<_>>(),
                     u8::from(view_state.zoom().zoom_level(DEFAULT_TILE_SIZE)),
                 )
-            })
+            });
+            let host_frame = crate::render::frame_signals::host_frame_in_progress(world);
+            let cache = world
+                .resources
+                .get_or_init_mut::<crate::render::eye_covering::FrameLooseCovering>();
+            if cache.host_frame != host_frame {
+                *cache = crate::render::eye_covering::FrameLooseCovering {
+                    host_frame,
+                    view_tiles: None,
+                    raster_tiles: None,
+                };
+            }
+            cache.view_tiles = Some(
+                computed
+                    .as_ref()
+                    .map_or_else(Vec::new, |(tiles, _)| tiles.clone()),
+            );
+            computed
         };
 
         // Tile arrivals, eviction and a settling eye can change the covering without motion.
         if let Some((view_tiles, level)) = view_tiles_and_level {
             let max_zoom = source_max_zoom(style, TileKind::Vector);
             let min_zoom = source_min_zoom(style, TileKind::Vector);
-            let mut requested = HashSet::new();
+            let mut requested = FxHashSet::default();
             let mut budget = vector_request_budget(world, style.terrain.is_some());
 
             let drapes = world
@@ -244,7 +263,7 @@ impl<E: Environment, T: VectorTransferables> RequestSystem<E, T> {
     fn release_unwanted(
         &self,
         world: &mut crate::tcs::world::World,
-        wanted: &HashSet<crate::coords::WorldTileCoords>,
+        wanted: &FxHashSet<crate::coords::WorldTileCoords>,
     ) {
         for attempt in crate::sdf::provided::release_unwanted(world, wanted) {
             self.kernel.apc().cancel(attempt);

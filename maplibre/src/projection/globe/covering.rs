@@ -1,17 +1,69 @@
 //! Globe tile distance and convex-volume calculations used by tile covering.
 
+use std::cell::RefCell;
+
 use cgmath::{InnerSpace, Point2, Vector3, Vector4};
 use thiserror::Error;
 
 use super::project_tile_coordinates_to_unit_sphere;
 use crate::{
-    coords::{TileCoords, EXTENT},
+    coords::{TileCoords, ZoomLevel, EXTENT},
     projection::body::Body,
 };
 
 mod cap;
 pub(crate) use cap::{closest_mercator_data_point_on_tile, closest_unit_sphere_point_on_tile};
 pub use cap::{tile_spherical_cap, TileSphericalCap};
+
+const VOL_CACHE_LEN: usize = 2048;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct VolKey {
+    tile: TileCoords,
+    min_bits: u64,
+    max_bits: u64,
+}
+
+/// Stack-allocated bounding volume avoiding heap `Vec` allocations on hot covering walks.
+#[derive(Clone, Copy)]
+pub(crate) struct CompactTileVolume {
+    pub points: [Vector3<f64>; 8],
+    pub len: u8,
+    pub planes: [Vector4<f64>; 6],
+    pub min: Vector3<f64>,
+    pub max: Vector3<f64>,
+}
+
+impl CompactTileVolume {
+    #[inline]
+    pub fn points_slice(&self) -> &[Vector3<f64>] {
+        &self.points[..usize::from(self.len)]
+    }
+
+    fn into_public(self) -> GlobeTileBoundingVolume {
+        GlobeTileBoundingVolume {
+            points: self.points_slice().to_vec(),
+            planes: self.planes,
+            min: self.min,
+            max: self.max,
+        }
+    }
+}
+
+thread_local! {
+    static VOL_CACHE: RefCell<Vec<(VolKey, CompactTileVolume)>> = const { RefCell::new(Vec::new()) };
+}
+
+#[inline(always)]
+fn vol_cache_slot(key: VolKey) -> usize {
+    let mut h = u64::from(key.tile.x).wrapping_mul(0x517c_c1b7_2722_0a95)
+        ^ u64::from(key.tile.y).wrapping_mul(0x9e37_79b9_7f4a_7c15)
+        ^ u64::from(u8::from(key.tile.z)).wrapping_mul(0xbf58_476d_1ce4_e5b9)
+        ^ key.min_bits.wrapping_mul(0x94d0_49bb_1331_11eb)
+        ^ key.max_bits.rotate_left(17);
+    h ^= h >> 32;
+    (h as usize) & (VOL_CACHE_LEN - 1)
+}
 
 /// Minimum and maximum elevation included in a tile bounding volume.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -72,7 +124,7 @@ pub enum GlobeTileBoundsError {
 
 /// Returns the nearest wrapped, pole-aware Mercator distance from a point to a tile.
 pub fn distance_to_tile_2d(point: Point2<f64>, tile: TileCoords) -> f64 {
-    let scale = 2_f64.powi(i32::from(u8::from(tile.z)));
+    let scale = tile.z.grid_scale();
     let size = 1.0 / scale;
     let corner_x = f64::from(tile.x) / scale;
     let corner_y = f64::from(tile.y) / scale;
@@ -84,7 +136,7 @@ pub fn distance_to_tile_2d(point: Point2<f64>, tile: TileCoords) -> f64 {
 
 /// Selects the wrap nearest to a Mercator center so tiles persist across the antimeridian.
 pub fn nearest_tile_wrap(center_x: f64, tile: TileCoords) -> i8 {
-    let scale = 2_f64.powi(i32::from(u8::from(tile.z)));
+    let scale = tile.z.grid_scale();
     let size = 1.0 / scale;
     let tile_x = f64::from(tile.x) / scale;
     let current = distance_to_interval(center_x, tile_x, size);
@@ -106,15 +158,64 @@ pub fn globe_tile_bounding_volume(
     elevation: TileElevationRange,
     body: Body,
 ) -> Result<GlobeTileBoundingVolume, GlobeTileBoundsError> {
+    compact_tile_volume(tile, elevation, body).map(CompactTileVolume::into_public)
+}
+
+pub(crate) fn compact_tile_volume(
+    tile: TileCoords,
+    elevation: TileElevationRange,
+    body: Body,
+) -> Result<CompactTileVolume, GlobeTileBoundsError> {
     validate_elevation(elevation)?;
     let min_radius = body.unit_radius_at(elevation.min_meters.min(0.0));
     let max_radius = body.unit_radius_at(elevation.max_meters.max(0.0));
     match u8::from(tile.z) {
-        0 => Ok(aabb_volume(
+        0 => Ok(aabb_compact_volume(
             Vector3::new(-max_radius, -max_radius, -max_radius),
             Vector3::new(max_radius, max_radius, max_radius),
         )),
         1 => Ok(zoom_one_volume(tile, max_radius)),
+        z if z < 32 => {
+            let key = VolKey {
+                tile,
+                min_bits: min_radius.to_bits(),
+                max_bits: max_radius.to_bits(),
+            };
+            let slot = vol_cache_slot(key);
+            if let Some(hit) = VOL_CACHE.with(|cache| {
+                let borrow = cache.borrow();
+                borrow
+                    .get(slot)
+                    .filter(|(cached, _)| *cached == key)
+                    .map(|(_, vol)| *vol)
+            }) {
+                return Ok(hit);
+            }
+            let computed = curved_tile_volume(tile, min_radius, max_radius)?;
+            VOL_CACHE.with(|cache| {
+                let mut borrow = cache.borrow_mut();
+                if borrow.is_empty() {
+                    let sentinel = (
+                        VolKey {
+                            tile: TileCoords {
+                                x: u32::MAX,
+                                y: u32::MAX,
+                                z: ZoomLevel::new(u8::MAX),
+                            },
+                            min_bits: 0,
+                            max_bits: 0,
+                        },
+                        aabb_compact_volume(
+                            Vector3::new(0.0, 0.0, 0.0),
+                            Vector3::new(0.0, 0.0, 0.0),
+                        ),
+                    );
+                    borrow.resize(VOL_CACHE_LEN, sentinel);
+                }
+                borrow[slot] = (key, computed);
+            });
+            Ok(computed)
+        }
         _ => curved_tile_volume(tile, min_radius, max_radius),
     }
 }
@@ -152,7 +253,7 @@ fn distance_to_tile_wrap_x(point: Point2<f64>, corner_x: f64, corner_y: f64, siz
     distance_x.max(distance_to_interval(point.y, corner_y, size))
 }
 
-fn zoom_one_volume(tile: TileCoords, radius: f64) -> GlobeTileBoundingVolume {
+fn zoom_one_volume(tile: TileCoords, radius: f64) -> CompactTileVolume {
     let min = Vector3::new(
         if tile.x == 0 { -radius } else { 0.0 },
         if tile.y == 0 { 0.0 } else { -radius },
@@ -163,20 +264,20 @@ fn zoom_one_volume(tile: TileCoords, radius: f64) -> GlobeTileBoundingVolume {
         if tile.y == 0 { radius } else { 0.0 },
         radius,
     );
-    aabb_volume(min, max)
+    aabb_compact_volume(min, max)
 }
 
-pub(crate) fn aabb_volume(min: Vector3<f64>, max: Vector3<f64>) -> GlobeTileBoundingVolume {
-    let mut points = Vec::with_capacity(8);
-    for index in 0..8 {
-        points.push(Vector3::new(
+pub(crate) fn aabb_compact_volume(min: Vector3<f64>, max: Vector3<f64>) -> CompactTileVolume {
+    let points = std::array::from_fn(|index| {
+        Vector3::new(
             if index & 1 == 0 { min.x } else { max.x },
             if index & 2 == 0 { min.y } else { max.y },
             if index & 4 == 0 { min.z } else { max.z },
-        ));
-    }
-    GlobeTileBoundingVolume {
+        )
+    });
+    CompactTileVolume {
         points,
+        len: 8,
         planes: [
             Vector4::new(-1.0, 0.0, 0.0, max.x),
             Vector4::new(1.0, 0.0, 0.0, -min.x),
@@ -194,20 +295,29 @@ fn curved_tile_volume(
     tile: TileCoords,
     min_radius: f64,
     max_radius: f64,
-) -> Result<GlobeTileBoundingVolume, GlobeTileBoundsError> {
+) -> Result<CompactTileVolume, GlobeTileBoundsError> {
     let corners = tile_corners(tile);
-    let mut extremes: Vec<_> = corners.iter().map(|corner| *corner * max_radius).collect();
-    if min_radius != max_radius {
-        extremes.extend(corners.iter().map(|corner| *corner * min_radius));
+    let mut extremes = [Vector3::new(0.0, 0.0, 0.0); 14];
+    let mut ext_len = 0_usize;
+    for corner in &corners {
+        extremes[ext_len] = *corner * max_radius;
+        ext_len += 1;
     }
-    extend_pole_extremes(&mut extremes, tile, min_radius, max_radius);
-    let (min, max) = bounds(&extremes);
+    if min_radius != max_radius {
+        for corner in &corners {
+            extremes[ext_len] = *corner * min_radius;
+            ext_len += 1;
+        }
+    }
+    extend_pole_extremes(&mut extremes, &mut ext_len, tile, min_radius, max_radius);
+    let (min, max) = bounds(&extremes[..ext_len]);
     let axes = tile_axes(tile);
-    extend_curved_edge_extremes(&mut extremes, tile, axes.center, max_radius);
-    let planes = tile_planes(&extremes, axes);
-    let points = volume_points(tile, planes)?;
-    Ok(GlobeTileBoundingVolume {
+    extend_curved_edge_extremes(&mut extremes, &mut ext_len, tile, axes.center, max_radius);
+    let planes = tile_planes(&extremes[..ext_len], axes);
+    let (points, len) = volume_points(tile, planes)?;
+    Ok(CompactTileVolume {
         points,
+        len,
         planes,
         min,
         max,
@@ -225,20 +335,23 @@ fn tile_corners(tile: TileCoords) -> [Vector3<f64>; 4] {
 }
 
 fn extend_pole_extremes(
-    extremes: &mut Vec<Vector3<f64>>,
+    extremes: &mut [Vector3<f64>; 14],
+    ext_len: &mut usize,
     tile: TileCoords,
     min_radius: f64,
     max_radius: f64,
 ) {
-    let tile_count = 2_u32.pow(u32::from(u8::from(tile.z)));
+    let tile_count = 1_u32 << u32::from(u8::from(tile.z));
     for (matches_pole, pole) in [
         (tile.y == 0, Vector3::unit_y()),
         (tile.y == tile_count - 1, -Vector3::unit_y()),
     ] {
         if matches_pole {
-            extremes.push(pole * max_radius);
+            extremes[*ext_len] = pole * max_radius;
+            *ext_len += 1;
             if min_radius != max_radius {
-                extremes.push(pole * min_radius);
+                extremes[*ext_len] = pole * min_radius;
+                *ext_len += 1;
             }
         }
     }
@@ -267,7 +380,7 @@ struct TileAxes {
 }
 
 fn tile_axes(tile: TileCoords) -> TileAxes {
-    let tile_count = 2_f64.powi(i32::from(u8::from(tile.z)));
+    let tile_count = tile.z.grid_scale();
     let lon_west = (f64::from(tile.x) / tile_count) * std::f64::consts::TAU + std::f64::consts::PI;
     let lon_center =
         ((f64::from(tile.x) + 0.5) / tile_count) * std::f64::consts::TAU + std::f64::consts::PI;
@@ -280,22 +393,26 @@ fn tile_axes(tile: TileCoords) -> TileAxes {
     let sin_lat = (tangent_half_lat_sq - 1.0) / denom;
     let cos_lat = (2.0 * tangent_half_lat) / denom;
     let (sin_lon, cos_lon) = lon_center.sin_cos();
+    let (sin_east, cos_east) = lon_east.sin_cos();
+    let (sin_west, cos_west) = lon_west.sin_cos();
     TileAxes {
         center: Vector3::new(sin_lon * cos_lat, sin_lat, cos_lon * cos_lat),
         north: Vector3::new(-sin_lon * sin_lat, cos_lat, -cos_lon * sin_lat),
-        east: Vector3::new(-lon_east.cos(), 0.0, lon_east.sin()),
-        west: Vector3::new(lon_west.cos(), 0.0, -lon_west.sin()),
+        east: Vector3::new(-cos_east, 0.0, sin_east),
+        west: Vector3::new(cos_west, 0.0, -sin_west),
     }
 }
 
 fn extend_curved_edge_extremes(
-    extremes: &mut Vec<Vector3<f64>>,
+    extremes: &mut [Vector3<f64>; 14],
+    ext_len: &mut usize,
     tile: TileCoords,
     center: Vector3<f64>,
     max_radius: f64,
 ) {
-    extremes.push(center * max_radius);
-    let tile_count = 2_u32.pow(u32::from(u8::from(tile.z)));
+    extremes[*ext_len] = center * max_radius;
+    *ext_len += 1;
+    let tile_count = 1_u32 << u32::from(u8::from(tile.z));
     let edge_y = if tile.y >= tile_count / 2 {
         0.0
     } else {
@@ -308,7 +425,8 @@ fn extend_curved_edge_extremes(
         EXTENT / 2.0,
         edge_y,
     );
-    extremes.push(edge_midpoint * max_radius);
+    extremes[*ext_len] = edge_midpoint * max_radius;
+    *ext_len += 1;
 }
 
 fn tile_planes(points: &[Vector3<f64>], axes: TileAxes) -> [Vector4<f64>; 6] {
@@ -336,13 +454,16 @@ fn axis_min_max(axis: Vector3<f64>, points: &[Vector3<f64>]) -> (f64, f64) {
 fn volume_points(
     tile: TileCoords,
     planes: [Vector4<f64>; 6],
-) -> Result<Vec<Vector3<f64>>, GlobeTileBoundsError> {
+) -> Result<([Vector3<f64>; 8], u8), GlobeTileBoundsError> {
     let [up, down, north, south, east, west] = planes;
-    let tile_count = 2_u32.pow(u32::from(u8::from(tile.z)));
-    let mut points = Vec::with_capacity(8);
+    let tile_count = 1_u32 << u32::from(u8::from(tile.z));
+    let mut points = [Vector3::new(0.0, 0.0, 0.0); 8];
+    let mut len = 0_usize;
     if tile.y == 0 {
-        points.push(polar_axis_intersection(up).ok_or_else(|| bounds_error(tile))?);
-        points.push(polar_axis_intersection(down).ok_or_else(|| bounds_error(tile))?);
+        points[len] = polar_axis_intersection(up).ok_or_else(|| bounds_error(tile))?;
+        len += 1;
+        points[len] = polar_axis_intersection(down).ok_or_else(|| bounds_error(tile))?;
+        len += 1;
     } else {
         for (first, second, third) in [
             (north, east, up),
@@ -350,14 +471,16 @@ fn volume_points(
             (north, west, up),
             (north, west, down),
         ] {
-            points.push(
-                three_plane_intersection(first, second, third).ok_or_else(|| bounds_error(tile))?,
-            );
+            points[len] =
+                three_plane_intersection(first, second, third).ok_or_else(|| bounds_error(tile))?;
+            len += 1;
         }
     }
     if tile.y == tile_count - 1 {
-        points.push(polar_axis_intersection(up).ok_or_else(|| bounds_error(tile))?);
-        points.push(polar_axis_intersection(down).ok_or_else(|| bounds_error(tile))?);
+        points[len] = polar_axis_intersection(up).ok_or_else(|| bounds_error(tile))?;
+        len += 1;
+        points[len] = polar_axis_intersection(down).ok_or_else(|| bounds_error(tile))?;
+        len += 1;
     } else {
         for (first, second, third) in [
             (south, east, up),
@@ -365,12 +488,12 @@ fn volume_points(
             (south, west, up),
             (south, west, down),
         ] {
-            points.push(
-                three_plane_intersection(first, second, third).ok_or_else(|| bounds_error(tile))?,
-            );
+            points[len] =
+                three_plane_intersection(first, second, third).ok_or_else(|| bounds_error(tile))?;
+            len += 1;
         }
     }
-    Ok(points)
+    Ok((points, len as u8))
 }
 
 /// Intersects the globe's polar axis (`x = 0, z = 0`, the exact intersection line of any two

@@ -181,7 +181,10 @@ pub(crate) fn restarted(
 }
 
 /// Stops the waiting workers of tiles no longer wanted, returning their attempts.
-pub(crate) fn release_unwanted(world: &mut World, wanted: &HashSet<WorldTileCoords>) -> Vec<u64> {
+pub(crate) fn release_unwanted<S: std::hash::BuildHasher>(
+    world: &mut World,
+    wanted: &HashSet<WorldTileCoords, S>,
+) -> Vec<u64> {
     let coords: Vec<WorldTileCoords> = world
         .tiles
         .tiles

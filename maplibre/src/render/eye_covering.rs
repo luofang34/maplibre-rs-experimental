@@ -4,6 +4,8 @@
 //! that selection with its own projection, so a tile cannot change level or content between
 //! the left and right images.
 
+use rustc_hash::{FxHashMap, FxHashSet};
+
 use crate::{
     coords::{ViewRegion, WorldTileCoords, ZoomLevel},
     projection::lod_history::LodHistory,
@@ -40,8 +42,8 @@ pub struct CurrentViewSlot(pub Option<ViewSlotId>);
 #[derive(Clone, Debug, Default)]
 pub(crate) struct SlotResidencyFloor {
     pub(crate) drawn_count: usize,
-    pub(crate) retained_tiles: std::collections::HashSet<WorldTileCoords>,
-    pub(crate) retained_drapes: std::collections::HashSet<WorldTileCoords>,
+    pub(crate) retained_tiles: FxHashSet<WorldTileCoords>,
+    pub(crate) retained_drapes: FxHashSet<WorldTileCoords>,
 }
 
 /// Unioned tile requests computed across all active slots (plus skipped slots' in-flight sets)
@@ -53,9 +55,18 @@ pub(crate) struct MultiViewExtractCovering {
     pub(crate) max_view_level: u8,
     pub(crate) raster_regions: RasterCoverings,
     pub(crate) terrain_tiles: Vec<WorldTileCoords>,
-    pub(crate) skipped_wanted_vector: std::collections::HashSet<WorldTileCoords>,
-    pub(crate) skipped_wanted_raster: std::collections::HashSet<WorldTileCoords>,
-    pub(crate) skipped_wanted_dem: std::collections::HashSet<WorldTileCoords>,
+    pub(crate) skipped_wanted_vector: FxHashSet<WorldTileCoords>,
+    pub(crate) skipped_wanted_raster: FxHashSet<WorldTileCoords>,
+    pub(crate) skipped_wanted_dem: FxHashSet<WorldTileCoords>,
+}
+
+/// Per-frame `Loose` request coverings recorded during single-view `Request` systems so
+/// `retention_system` in `Cleanup` reuses them without re-walking the globe quadtree.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct FrameLooseCovering {
+    pub(crate) host_frame: u64,
+    pub(crate) view_tiles: Option<Vec<WorldTileCoords>>,
+    pub(crate) raster_tiles: Option<Vec<WorldTileCoords>>,
 }
 
 /// Total number of eye passes executing in the current [`XrFrame`](crate::render::xr::XrFrame).
@@ -91,7 +102,7 @@ pub type RasterCoverings = Vec<(RasterSourceId, Vec<WorldTileCoords>)>;
 #[derive(Clone, Default)]
 pub(crate) struct FrameLodHistory {
     pub(crate) view: LodHistory,
-    pub(crate) raster: std::collections::HashMap<RasterSourceId, LodHistory>,
+    pub(crate) raster: FxHashMap<RasterSourceId, LodHistory>,
     pub(crate) terrain: LodHistory,
 }
 

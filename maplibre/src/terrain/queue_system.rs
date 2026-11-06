@@ -250,7 +250,10 @@ fn loaded_content(world: &World) -> LoadedContent<'_> {
 mod tests;
 
 fn acquire_drapes(
-    (specs, extra_retained): (&[TargetSpec], Option<&HashSet<WorldTileCoords>>),
+    (specs, extra_retained): (
+        &[TargetSpec],
+        Option<&rustc_hash::FxHashSet<WorldTileCoords>>,
+    ),
     prints: &[u64],
     ready: &[bool],
     memory: MemoryBudget,

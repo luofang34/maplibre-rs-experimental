@@ -10,7 +10,9 @@
 //! as GL JS sizes it from the viewport; a wide request would otherwise keep every tile a
 //! flight passes resident.
 
-use std::collections::{HashMap, HashSet};
+use std::{collections::HashSet, hash::BuildHasher};
+
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
     context::MapContext,
@@ -59,7 +61,7 @@ pub(crate) struct CacheBudget {
 /// Last frame each tile was needed by the view pattern.
 #[derive(Default)]
 pub struct TileRetention {
-    last_used: HashMap<WorldTileCoords, u64>,
+    last_used: FxHashMap<WorldTileCoords, u64>,
     frame: u64,
 }
 
@@ -84,14 +86,30 @@ pub fn retention_system(
         .resources
         .get::<crate::render::eye_covering::SlotResidencyFloor>()
         .cloned();
-    let drawn = drawn_tiles(world)
+    let multi_active = world
+        .resources
+        .get::<crate::render::eye_covering::MultiViewExtractCovering>()
+        .is_some_and(|m| m.active);
+    let drawn_set = drawn_tiles(world);
+    let drawn = drawn_set
         .len()
         .max(floor.as_ref().map_or(0, |floor| floor.drawn_count));
-    let mut in_use = tiles_in_use(world, style, view_state);
-    if let Some(floor) = &floor {
-        in_use.extend(floor.retained_tiles.iter().copied());
-        in_use.extend(floor.retained_drapes.iter().copied());
-    }
+    let mut in_use = if multi_active {
+        let mut combined = drawn_set;
+        if let Some(floor) = &floor {
+            combined.extend(floor.retained_tiles.iter().copied());
+            combined.extend(floor.retained_drapes.iter().copied());
+        }
+        finish_tiles_in_use(world, style, combined)
+    } else {
+        let mut single = tiles_in_use(world, style, view_state);
+        if let Some(floor) = &floor {
+            single.extend(floor.retained_tiles.iter().copied());
+            single.extend(floor.retained_drapes.iter().copied());
+        }
+        single
+    };
+    let _ = &mut in_use;
     drop_cancelled(world, &in_use);
     let evicted = evict_stale_tiles(world, &in_use, drawn);
     if !evicted.is_empty() {
@@ -224,8 +242,8 @@ fn summarize_residency(world: &World, drawn: usize, in_use: usize, settled: bool
 }
 
 /// The tiles the frame draws from, with the tiles whose shapes stand in for them.
-pub(crate) fn drawn_tiles(world: &World) -> HashSet<WorldTileCoords> {
-    let mut drawn = HashSet::new();
+pub(crate) fn drawn_tiles(world: &World) -> FxHashSet<WorldTileCoords> {
+    let mut drawn = FxHashSet::default();
     if let Some(Initialized(pattern)) = world.resources.get::<Eventually<WgpuTileViewPattern>>() {
         for view_tile in pattern.iter() {
             drawn.insert(view_tile.coords());
@@ -243,43 +261,30 @@ pub(crate) fn drawn_tiles(world: &World) -> HashSet<WorldTileCoords> {
     drawn
 }
 
-/// Every tile the current frame draws from or requests, with the DEM tiles and ancestors
-/// terrain reads.
-pub(crate) fn tiles_in_use(
+/// Builds the retained tile set from already-computed `Loose` view and raster coverings,
+/// avoiding redundant globe quadtree traversals.
+pub(crate) fn tiles_in_use_from_loose(
     world: &World,
     style: &Style,
-    view_state: &ViewState,
-) -> HashSet<WorldTileCoords> {
+    loose_view: impl IntoIterator<Item = WorldTileCoords>,
+    loose_raster: impl IntoIterator<Item = WorldTileCoords>,
+) -> FxHashSet<WorldTileCoords> {
     let mut in_use = drawn_tiles(world);
-    match view_region_for_projection(
-        style,
-        view_state,
-        world,
-        view_state.zoom().zoom_level(DEFAULT_TILE_SIZE),
-        ViewStatePadding::Loose,
-    ) {
-        Ok(Some(requested)) => {
-            // The request systems fetch the ancestor at the source's maximum zoom in place of
-            // a finer tile, so that is the tile to keep.
-            let max_zoom = source_max_zoom(style, TileKind::Vector);
-            for coords in requested.iter() {
-                in_use.insert(coords);
-                in_use.insert(clamp_to_max_zoom(coords, max_zoom));
-            }
-        }
-        Ok(None) => {}
-        Err(error) => tracing::warn!(%error, "cannot select the requested tiles to keep"),
+    let max_zoom = source_max_zoom(style, TileKind::Vector);
+    for coords in loose_view {
+        in_use.insert(coords);
+        in_use.insert(clamp_to_max_zoom(coords, max_zoom));
     }
-    if let Ok(regions) = crate::render::projection::raster_source_regions(
-        style,
-        view_state,
-        world,
-        ViewStatePadding::Loose,
-    ) {
-        for (_, tiles) in regions {
-            in_use.extend(tiles);
-        }
-    }
+    in_use.extend(loose_raster);
+    finish_tiles_in_use(world, style, in_use)
+}
+
+/// Appends active drape requests, drape prefetch requests, and DEM ancestors to `in_use`.
+pub(crate) fn finish_tiles_in_use(
+    world: &World,
+    style: &Style,
+    mut in_use: FxHashSet<WorldTileCoords>,
+) -> FxHashSet<WorldTileCoords> {
     if let Some(requests) = world
         .resources
         .get::<crate::terrain::request_system::DrapeRequests>()
@@ -311,11 +316,67 @@ pub(crate) fn tiles_in_use(
     in_use
 }
 
+/// Every tile the current frame draws from or requests, with the DEM tiles and ancestors
+/// terrain reads.
+pub(crate) fn tiles_in_use(
+    world: &World,
+    style: &Style,
+    view_state: &ViewState,
+) -> FxHashSet<WorldTileCoords> {
+    let mut in_use = drawn_tiles(world);
+    let host_frame = crate::render::frame_signals::host_frame_in_progress(world);
+    let loose_cache = world
+        .resources
+        .get::<crate::render::eye_covering::FrameLooseCovering>()
+        .filter(|cache| cache.host_frame == host_frame);
+
+    let max_zoom = source_max_zoom(style, TileKind::Vector);
+    if let Some(cached_view) = loose_cache.and_then(|c| c.view_tiles.as_ref()) {
+        for &coords in cached_view {
+            in_use.insert(coords);
+            in_use.insert(clamp_to_max_zoom(coords, max_zoom));
+        }
+    } else {
+        match view_region_for_projection(
+            style,
+            view_state,
+            world,
+            view_state.zoom().zoom_level(DEFAULT_TILE_SIZE),
+            ViewStatePadding::Loose,
+        ) {
+            Ok(Some(requested)) => {
+                // The request systems fetch the ancestor at the source's maximum zoom in place of
+                // a finer tile, so that is the tile to keep.
+                for coords in requested.iter() {
+                    in_use.insert(coords);
+                    in_use.insert(clamp_to_max_zoom(coords, max_zoom));
+                }
+            }
+            Ok(None) => {}
+            Err(error) => tracing::warn!(%error, "cannot select the requested tiles to keep"),
+        }
+    }
+
+    if let Some(cached_raster) = loose_cache.and_then(|c| c.raster_tiles.as_ref()) {
+        in_use.extend(cached_raster.iter().copied());
+    } else if let Ok(regions) = crate::render::projection::raster_source_regions(
+        style,
+        view_state,
+        world,
+        ViewStatePadding::Loose,
+    ) {
+        for (_, tiles) in regions {
+            in_use.extend(tiles);
+        }
+    }
+    finish_tiles_in_use(world, style, in_use)
+}
+
 /// Removes the least recently used settled tiles beyond the cache budget and returns them;
 /// the tile budget follows `view_tiles`, the tiles the frame draws.
-pub(crate) fn evict_stale_tiles(
+pub(crate) fn evict_stale_tiles<S: BuildHasher>(
     world: &mut World,
-    in_use: &HashSet<WorldTileCoords>,
+    in_use: &HashSet<WorldTileCoords, S>,
     view_tiles: usize,
 ) -> Vec<WorldTileCoords> {
     if world.resources.get::<RetainLoadedTiles>().is_some() {
@@ -346,9 +407,9 @@ pub(crate) fn evict_stale_tiles(
 
 /// Removes the least recently used settled tiles until the rest fit `budget`, in tiles and
 /// in bytes of geometry, and returns them.
-pub(crate) fn evict_beyond(
+pub(crate) fn evict_beyond<S: BuildHasher>(
     world: &mut World,
-    in_use: &HashSet<WorldTileCoords>,
+    in_use: &HashSet<WorldTileCoords, S>,
     budget: CacheBudget,
 ) -> Vec<WorldTileCoords> {
     let World { resources, tiles } = world;
@@ -395,7 +456,7 @@ pub(crate) fn evict_beyond(
 }
 
 /// Drops the tiles whose requests no one wants any more, freeing their slots for tiles in view.
-fn drop_cancelled(world: &mut World, in_use: &HashSet<WorldTileCoords>) {
+fn drop_cancelled<S: BuildHasher>(world: &mut World, in_use: &HashSet<WorldTileCoords, S>) {
     let cancelled = crate::io::tile_retry::cancel_unwanted(world, in_use);
     if cancelled.is_empty() {
         return;

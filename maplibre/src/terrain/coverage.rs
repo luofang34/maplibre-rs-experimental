@@ -419,6 +419,7 @@ impl PreparedTerrainKey {
 /// Cached tight [`crate::coords::ViewRegion`] from `coverage_system` or `multi_view` covering so
 /// `Queue` (`target_specs` / `procedural_specs`) skips a duplicate S2 / frustum covering pass
 /// when neither the camera projection nor DEM elevation bounds changed.
+#[derive(Clone)]
 pub(crate) struct PreparedTerrainRegion {
     pub(crate) key: PreparedTerrainKey,
     pub(crate) region: Option<crate::coords::ViewRegion>,

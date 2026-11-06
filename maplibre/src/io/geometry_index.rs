@@ -4,16 +4,14 @@
 
 mod clip;
 mod processor;
-use std::{
-    collections::{BTreeMap, HashSet},
-    sync::Arc,
-};
+use std::{collections::BTreeMap, sync::Arc};
 
 use cgmath::{num_traits::Signed, Bounded};
 use geo::prelude::*;
 use geo_types::{Coord, CoordFloat, LineString, Point, Polygon};
 pub use processor::IndexProcessor;
 use rstar::{Envelope, PointDistance, RTree, RTreeObject, AABB};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
     coords::{
@@ -23,17 +21,24 @@ use crate::{
     util::math::bounds_from_points,
 };
 
+struct StoredTileIndex {
+    index: TileIndex,
+    bytes: usize,
+}
+
 /// Query indexes keyed by canonical tile quadkeys; each tile has one replaceable entry for every
 /// source that contributed to it.
 pub struct GeometryIndex {
-    index: BTreeMap<Quadkey, BTreeMap<Option<String>, TileIndex>>,
+    index: FxHashMap<Quadkey, BTreeMap<Option<String>, StoredTileIndex>>,
+    total_bytes: usize,
 }
 
 impl GeometryIndex {
     /// Creates an index with no tiles.
     pub fn new() -> Self {
         Self {
-            index: Default::default(),
+            index: FxHashMap::default(),
+            total_bytes: 0,
         }
     }
 
@@ -47,10 +52,17 @@ impl GeometryIndex {
         tile_index: TileIndex,
     ) {
         if let Some(key) = coords.build_quad_key() {
-            self.index
-                .entry(key)
-                .or_default()
-                .insert(source, tile_index);
+            let bytes = tile_index.approximate_bytes();
+            if let Some(replaced) = self.index.entry(key).or_default().insert(
+                source,
+                StoredTileIndex {
+                    index: tile_index,
+                    bytes,
+                },
+            ) {
+                self.total_bytes = self.total_bytes.saturating_sub(replaced.bytes);
+            }
+            self.total_bytes = self.total_bytes.saturating_add(bytes);
         }
     }
 
@@ -63,34 +75,33 @@ impl GeometryIndex {
         Some(
             sources
                 .iter()
-                .map(|(source, index)| (source.as_deref(), index)),
+                .map(|(source, stored)| (source.as_deref(), &stored.index)),
         )
     }
 
     /// Forgets a tile's index when the tile leaves the store.
     pub fn remove(&mut self, coords: &WorldTileCoords) {
         if let Some(key) = coords.build_quad_key() {
-            self.index.remove(&key);
+            if let Some(removed) = self.index.remove(&key) {
+                let bytes: usize = removed.values().map(|stored| stored.bytes).sum();
+                self.total_bytes = self.total_bytes.saturating_sub(bytes);
+            }
         }
     }
 
     /// Memory the index holds, estimated from its geometries and properties.
+    #[inline]
     pub fn approximate_bytes(&self) -> usize {
-        self.index
-            .values()
-            .flat_map(BTreeMap::values)
-            .map(TileIndex::approximate_bytes)
-            .sum()
+        self.total_bytes
     }
 
     /// Estimated memory retained by one tile's geometries and query properties.
+    #[inline]
     pub(crate) fn tile_bytes(&self, coords: WorldTileCoords) -> usize {
         coords
             .build_quad_key()
             .and_then(|key| self.index.get(&key))
-            .map_or(0, |sources| {
-                sources.values().map(TileIndex::approximate_bytes).sum()
-            })
+            .map_or(0, |sources| sources.values().map(|s| s.bytes).sum())
     }
 
     /// Finds geometries at world pixels measured at `zoom`, in the tile at grid level `z`.
@@ -120,7 +131,7 @@ impl GeometryIndex {
             Some(
                 sources
                     .values()
-                    .flat_map(|index| index.point_query(InnerCoords { x, y }))
+                    .flat_map(|stored| stored.index.point_query(InnerCoords { x, y }))
                     .collect(),
             )
         } else {
@@ -152,7 +163,7 @@ pub enum TileIndex {
 impl TileIndex {
     /// Memory the tile's index holds, estimated from its geometries and properties.
     pub fn approximate_bytes(&self) -> usize {
-        let mut shared = HashSet::new();
+        let mut shared = FxHashSet::default();
         let mut total = 0;
         let mut count = |geometry: &IndexedGeometry<f64>| {
             total += geometry.geometry_bytes();

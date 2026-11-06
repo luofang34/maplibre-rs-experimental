@@ -405,23 +405,28 @@ pub(crate) fn accepts(
 /// The tiles each request family considered this frame; a family that did not run leaves
 /// its requests alone.
 #[derive(Default)]
-struct WantedRequests([Option<HashSet<WorldTileCoords>>; 3]);
+struct WantedRequests([Option<rustc_hash::FxHashSet<WorldTileCoords>>; 3]);
 
 /// Attempts given up on, for the next request system to stop in its worker.
 #[derive(Default)]
 struct CancelledAttempts(Vec<u64>);
 
 /// Records the tiles a request family still wants, whether or not it requested them now.
-pub(crate) fn want(world: &mut World, kind: RequestKind, coords: &HashSet<WorldTileCoords>) {
-    world.resources.get_or_init_mut::<WantedRequests>().0[kind.index()] = Some(coords.clone());
+pub(crate) fn want<S: std::hash::BuildHasher>(
+    world: &mut World,
+    kind: RequestKind,
+    coords: &HashSet<WorldTileCoords, S>,
+) {
+    world.resources.get_or_init_mut::<WantedRequests>().0[kind.index()] =
+        Some(coords.iter().copied().collect());
 }
 
 /// Gives up the requests in flight that no request family wanted this frame, so they stop
 /// holding a slot, and returns the tiles they were for. Tiles in `in_use` keep theirs: the
 /// drape requests a family follows lag a frame behind what the view uses.
-pub(crate) fn cancel_unwanted(
+pub(crate) fn cancel_unwanted<S: std::hash::BuildHasher>(
     world: &mut World,
-    in_use: &HashSet<WorldTileCoords>,
+    in_use: &HashSet<WorldTileCoords, S>,
 ) -> Vec<WorldTileCoords> {
     let Some(wanted) = world
         .resources

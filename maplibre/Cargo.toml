@@ -99,6 +99,7 @@ cint.workspace = true
 # Required by bevy renderer
 downcast-rs.workspace = true
 smallvec.workspace = true
+rustc-hash.workspace = true
 
 # Headless
 png = { workspace = true, optional = true }

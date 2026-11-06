@@ -1,12 +1,29 @@
 //! Singularity-free unit-sphere spherical cap bounds for canonical globe tiles.
 
+use std::cell::RefCell;
+
 use cgmath::{InnerSpace, Vector3, Vector4};
 
 use super::super::{
     angular_radians_to_unit_sphere, covering_tiles::Intersection, mercator_to_angular_radians,
     project_tile_coordinates_to_unit_sphere,
 };
-use crate::coords::{TileCoords, EXTENT};
+use crate::coords::{TileCoords, ZoomLevel, EXTENT};
+
+const CAP_CACHE_LEN: usize = 2048;
+
+thread_local! {
+    static CAP_CACHE: RefCell<Vec<(TileCoords, TileSphericalCap)>> = const { RefCell::new(Vec::new()) };
+}
+
+#[inline(always)]
+fn cap_cache_slot(tile: TileCoords) -> usize {
+    let mut h = u64::from(tile.x).wrapping_mul(0x517c_c1b7_2722_0a95)
+        ^ u64::from(tile.y).wrapping_mul(0x9e37_79b9_7f4a_7c15)
+        ^ u64::from(u8::from(tile.z)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    h ^= h >> 32;
+    (h as usize) & (CAP_CACHE_LEN - 1)
+}
 
 /// Singularity-free unit-sphere spherical cap `{ x in S^2 : x . center >= cos_alpha }`
 /// enclosing a canonical globe tile (including its polar fan at `y == 0` or `y == 2^z - 1`).
@@ -89,6 +106,43 @@ pub fn tile_spherical_cap(tile: TileCoords) -> TileSphericalCap {
             sin_alpha: 0.0,
         };
     }
+    if zoom < 32 {
+        let slot = cap_cache_slot(tile);
+        if let Some(hit) = CAP_CACHE.with(|cache| {
+            let borrow = cache.borrow();
+            borrow
+                .get(slot)
+                .filter(|(cached, _)| *cached == tile)
+                .map(|(_, cap)| *cap)
+        }) {
+            return hit;
+        }
+        let computed = compute_tile_spherical_cap(tile, zoom);
+        CAP_CACHE.with(|cache| {
+            let mut borrow = cache.borrow_mut();
+            if borrow.is_empty() {
+                let sentinel = (
+                    TileCoords {
+                        x: u32::MAX,
+                        y: u32::MAX,
+                        z: ZoomLevel::new(u8::MAX),
+                    },
+                    TileSphericalCap {
+                        center: Vector3::unit_z(),
+                        cos_alpha: -1.0,
+                        sin_alpha: 0.0,
+                    },
+                );
+                borrow.resize(CAP_CACHE_LEN, sentinel);
+            }
+            borrow[slot] = (tile, computed);
+        });
+        return computed;
+    }
+    compute_tile_spherical_cap(tile, zoom)
+}
+
+fn compute_tile_spherical_cap(tile: TileCoords, zoom: u8) -> TileSphericalCap {
     let tile_count = 1_u32 << u32::from(zoom);
     let scale = f64::from(tile_count);
     let (lon_mid, _) = mercator_to_angular_radians((f64::from(tile.x) + 0.5) / scale, 0.5);

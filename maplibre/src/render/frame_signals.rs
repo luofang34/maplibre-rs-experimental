@@ -265,6 +265,19 @@ impl MapContext {
             || signals.cameras.get(eye_index(&self.world)) != Some(&camera(self))
     }
 
+    /// Whether the map has immediately actionable frame work: it has never drawn, something
+    /// changed or continues animating since the last frame, a retry backoff timer is due, or
+    /// the camera moved — excluding remote tile fetches that are merely in flight on the wire.
+    pub fn has_ready_work(&self) -> bool {
+        let retry_due = self.next_retry_delay() == Some(Duration::ZERO);
+        let Some(signals) = self.world.resources.get::<FrameSignals>() else {
+            return true;
+        };
+        signals.dirty
+            || retry_due
+            || signals.cameras.get(eye_index(&self.world)) != Some(&camera(self))
+    }
+
     /// Changes whenever a frame draws the camera somewhere other than the frame before, from a
     /// gesture, a jump or a move; a host watching the camera compares it with the one it saw.
     pub fn camera_revision(&self) -> u64 {

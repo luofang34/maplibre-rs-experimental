@@ -1,6 +1,6 @@
 //! Schedule execution across active and skipped [`ViewSlotId`]s for a [`MultiViewFrame`].
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 use super::{
     covering::{build_multi_view_coverings, build_slot_view_state, record_slot_post_render},
@@ -42,7 +42,7 @@ impl HeadlessMap {
             .get::<DisplayPixelRatio>()
             .map_or(1.0, |ratio| f64::from(ratio.0));
 
-        let mut seen_independent = HashSet::new();
+        let mut seen_independent = FxHashSet::default();
         let mut active = Vec::with_capacity(frame.slots.len());
         for entry in &frame.slots {
             let slot_size = self
@@ -171,6 +171,13 @@ impl HeadlessMap {
                         index: 0,
                         frame: frame_number,
                     });
+                    if let Some(prepared) = registry
+                        .slots
+                        .get_mut(&entry.slot)
+                        .and_then(|s| s.prepared_terrain.take())
+                    {
+                        self.map_context.world.resources.insert(prepared);
+                    }
                     if let Some(prev) = registry
                         .slots
                         .get(&entry.slot)
