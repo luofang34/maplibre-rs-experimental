@@ -382,7 +382,7 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
                                     .map(|buffer| {
                                         buffer as f32 * crate::coords::EXTENT as f32 / 512.0
                                     }),
-                                ..ExtrusionOptions::for_paint(extrusion)
+                                ..ExtrusionOptions::for_paint(extrusion, request.overscaling())
                             });
                         if use_globe_geometry {
                             // Roofs and the edges of walls follow the sphere as fills and lines do.

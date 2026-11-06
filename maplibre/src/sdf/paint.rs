@@ -26,16 +26,26 @@ pub(super) struct SymbolUniforms {
 /// along the line (`viewport-glyph`). Text aligned with the viewport keeps the straight layout
 /// at the anchor.
 pub(crate) fn text_follows_line(paint: &SymbolPaint, zoom: f64) -> bool {
-    SymbolUniforms::new(paint, zoom, [1, 1]).text_layout[1] > 0.5 || glyphs_stay_upright(paint)
+    SymbolUniforms::new(paint, zoom, [1, 1]).text_layout[1] > 0.5
+        || glyphs_stay_upright(paint, zoom)
+}
+
+/// Whether the layer places its symbols along lines at `zoom`.
+fn line_placed(paint: &SymbolPaint, zoom: f64) -> bool {
+    paint
+        .layout_enum("symbol-placement", zoom)
+        .is_some_and(|value| matches!(value.as_str(), "line" | "line-center"))
 }
 
 /// Whether the glyphs of text along a line are placed along it each upright on the screen, as
 /// GL JS's `viewport-glyph` rotation alignment places them: road shields in a row stay level
 /// while the row follows its road.
-pub(crate) fn glyphs_stay_upright(paint: &SymbolPaint) -> bool {
-    let read = |name: &str| paint.properties.get(name).and_then(|value| value.as_str());
-    read("text-rotation-alignment") == Some("viewport-glyph")
-        && read("symbol-placement").is_some_and(|value| matches!(value, "line" | "line-center"))
+pub(crate) fn glyphs_stay_upright(paint: &SymbolPaint, zoom: f64) -> bool {
+    paint
+        .layout_enum("text-rotation-alignment", zoom)
+        .as_deref()
+        == Some("viewport-glyph")
+        && line_placed(paint, zoom)
 }
 
 impl SymbolUniforms {
@@ -63,14 +73,14 @@ impl SymbolUniforms {
                 number("icon-halo-blur", 0.0),
                 number("icon-opacity", 1.0),
             ],
-            text_layout: layout(paint, "text"),
-            icon_layout: layout(paint, "icon"),
+            text_layout: layout(paint, "text", zoom),
+            icon_layout: layout(paint, "icon", zoom),
             atlas: [size[0] as f32, size[1] as f32, 0.0, 0.0],
             placement: [
                 number("text-padding", 2.0),
                 number("icon-padding", 2.0),
-                keep_upright(paint, "text", true),
-                keep_upright(paint, "icon", false),
+                keep_upright(paint, "text", true, zoom),
+                keep_upright(paint, "icon", false, zoom),
             ],
             translate: {
                 let [text_x, text_y] = crate::sdf::translation::viewport_shift(paint, "text", zoom);
@@ -182,23 +192,14 @@ fn color(paint: &SymbolPaint, name: &str, zoom: f64, fallback: [f32; 4]) -> [f32
     [r as f32, g as f32, b as f32, a as f32]
 }
 
-fn layout(paint: &SymbolPaint, prefix: &str) -> [f32; 4] {
-    let read = |suffix: &str| {
-        paint
-            .properties
-            .get(&format!("{prefix}-{suffix}"))
-            .and_then(|value| value.as_str())
-    };
+fn layout(paint: &SymbolPaint, prefix: &str, zoom: f64) -> [f32; 4] {
+    let read = |suffix: &str| paint.layout_enum(&format!("{prefix}-{suffix}"), zoom);
     let rotation = read("rotation-alignment");
-    let map_rotation = rotation == Some("map")
-        || (rotation.unwrap_or("auto") == "auto"
-            && paint
-                .properties
-                .get("symbol-placement")
-                .and_then(|value| value.as_str())
-                .is_some_and(|value| matches!(value, "line" | "line-center")));
+    let map_rotation = rotation.as_deref() == Some("map")
+        || (rotation.as_deref().unwrap_or("auto") == "auto" && line_placed(paint, zoom));
     let pitch = read("pitch-alignment");
-    let map_pitch = pitch == Some("map") || (pitch.unwrap_or("auto") == "auto" && map_rotation);
+    let map_pitch = pitch.as_deref() == Some("map")
+        || (pitch.as_deref().unwrap_or("auto") == "auto" && map_rotation);
     [
         u32::from(map_pitch) as f32,
         u32::from(map_rotation) as f32,
@@ -208,12 +209,8 @@ fn layout(paint: &SymbolPaint, prefix: &str) -> [f32; 4] {
     ]
 }
 
-fn keep_upright(paint: &SymbolPaint, prefix: &str, fallback: bool) -> f32 {
-    let line = paint
-        .properties
-        .get("symbol-placement")
-        .and_then(|v| v.as_str())
-        .is_some_and(|value| matches!(value, "line" | "line-center"));
+fn keep_upright(paint: &SymbolPaint, prefix: &str, fallback: bool, zoom: f64) -> f32 {
+    let line = line_placed(paint, zoom);
     f32::from(
         line && paint
             .properties

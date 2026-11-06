@@ -108,7 +108,7 @@ fn parses_the_gl_js_3d_terrain_example() {
     assert_eq!(terrain.source, "terrainSource");
     assert_eq!(terrain.exaggeration, 1.0);
     match style.sources.get("terrainSource") {
-        Some(Source::RasterDem(source)) => assert_eq!(source.tile_size, 256),
+        Some(Source::RasterDem(source)) => assert_eq!(source.tile_size(), 256),
         other => panic!("expected raster-dem source, got {other:?}"),
     }
 }

@@ -87,6 +87,16 @@ impl WHATWGFetchHttpClient {
     ) -> Result<(JsValue, bool), SourceFetchError> {
         let opts = RequestInit::new();
         opts.set_method("GET");
+        let global = js_sys::global();
+        let worker = global.dyn_into::<WorkerGlobalScope>().ok();
+        if let Some(scope) = &worker {
+            // A worker started from a `blob:` URL sends no `Referer`, and servers such as
+            // OpenStreetMap's tile servers refuse requests without one. The page's origin is
+            // what a main-thread fetch sends cross-origin, as GL JS's tile requests do.
+            if scope.location().protocol() == "blob:" {
+                opts.set_referrer(&format!("{}/", scope.origin()));
+            }
+        }
         let request = Request::new_with_str_and_init(url, &opts).map_err(rejected)?;
         if let Some(range) = range {
             request
@@ -96,10 +106,9 @@ impl WHATWGFetchHttpClient {
         }
 
         // Tile workers and the main-thread TileJSON loader use the same transport.
-        let global = js_sys::global();
-        let promise = match global.dyn_into::<WorkerGlobalScope>() {
-            Ok(scope) => scope.fetch_with_request(&request),
-            Err(_) => web_sys::window()
+        let promise = match worker {
+            Some(scope) => scope.fetch_with_request(&request),
+            None => web_sys::window()
                 .ok_or_else(|| invalid_response("no worker or window scope to fetch from"))?
                 .fetch_with_request(&request),
         };

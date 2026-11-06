@@ -229,9 +229,11 @@ fn raster_covering_request(zoom: f64, source: Option<&Source>) -> CoveringReques
             source.minzoom,
             source.maxzoom,
         ),
-        Some(Source::RasterDem(source)) => {
-            (f64::from(source.tile_size), source.minzoom, source.maxzoom)
-        }
+        Some(Source::RasterDem(source)) => (
+            f64::from(source.tile_size()),
+            source.minzoom,
+            source.maxzoom,
+        ),
         _ => (TILE_SIZE, None, None),
     };
     CoveringRequest::raster_source(zoom, tile_size, minzoom, maxzoom)

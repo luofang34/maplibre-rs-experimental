@@ -45,7 +45,7 @@ pub fn dem_source(style: &Style) -> Option<DemSource> {
             template,
             TileAddressingScheme::XYZ,
         )),
-        tile_size: dem.tile_size,
+        tile_size: dem.tile_size(),
         unpack: dem.unpack_vector(),
         minzoom: dem.minzoom.unwrap_or(0),
         maxzoom: dem.maxzoom.unwrap_or(DEFAULT_MAX_ZOOM),

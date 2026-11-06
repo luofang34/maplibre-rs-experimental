@@ -5,7 +5,7 @@ use serde::Deserialize;
 use crate::{
     io::source_client::{HttpClient, SourceClient},
     style::{
-        source::{RasterDemSource, Source, VectorSource},
+        source::{DemEncoding, RasterDemSource, Source, TileAddressingScheme, VectorSource},
         Style,
     },
 };
@@ -27,6 +27,15 @@ pub struct TileJson {
     /// Credit the tiles' provider asks for.
     #[serde(default)]
     pub attribution: Option<String>,
+    /// Y-axis convention of the tile URLs.
+    #[serde(default)]
+    pub scheme: Option<TileAddressingScheme>,
+    /// Edge length of a tile in pixels.
+    #[serde(default, rename = "tileSize")]
+    pub tile_size: Option<u32>,
+    /// Elevation packing of DEM tiles.
+    #[serde(default)]
+    pub encoding: Option<DemEncoding>,
 }
 
 /// The addressing fields a TileJSON document can fill in, shared by tile and DEM sources.
@@ -58,9 +67,15 @@ impl TileJsonFields<'_> {
     }
 }
 
-/// Fills the tile URLs, zoom range and attribution a source leaves unspecified from its
-/// TileJSON document.
+/// Fills the tile URLs, zoom range, attribution, scheme and tile size a source leaves
+/// unspecified from its TileJSON document, as GL JS's `loadTileJson` does.
 pub fn apply_tile_json(source: &mut VectorSource, tile_json: TileJson) {
+    if source.scheme.is_none() {
+        source.scheme = tile_json.scheme;
+    }
+    if source.tile_size.is_none() {
+        source.tile_size = tile_json.tile_size;
+    }
     TileJsonFields {
         tiles: &mut source.tiles,
         minzoom: &mut source.minzoom,
@@ -71,8 +86,15 @@ pub fn apply_tile_json(source: &mut VectorSource, tile_json: TileJson) {
     .apply(tile_json);
 }
 
-/// Fills the tile URLs and zoom range of a DEM source from its TileJSON document.
+/// Fills the tile URLs, zoom range, tile size and encoding of a DEM source from its TileJSON
+/// document; a document such as Mapterhorn's declares `"encoding": "terrarium"`.
 pub fn apply_tile_json_to_dem(source: &mut RasterDemSource, tile_json: TileJson) {
+    if source.tile_size.is_none() {
+        source.tile_size = tile_json.tile_size;
+    }
+    if source.encoding.is_none() {
+        source.encoding = tile_json.encoding;
+    }
     TileJsonFields {
         tiles: &mut source.tiles,
         minzoom: &mut source.minzoom,

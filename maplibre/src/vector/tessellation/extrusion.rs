@@ -3,7 +3,9 @@
 //! A vertex carries its place in the fields the fill and line shaders use otherwise: the
 //! wall's lighting normal in `normal`, scaled to length two on the top edge so the shader can
 //! tell it from the bottom edge, the base in `distance`, and the roof height in `elevation`.
-//! A roof vertex has the zero normal.
+//! A roof vertex has the zero normal. `corner_code` packs, as [`next_zoom_code`] does, how much
+//! the vertex rises one zoom above the tile's, which the shader blends in by the fractional
+//! zoom; being relative, it survives the ground elevation added to the heights later.
 
 use lyon::{
     path::{Event, Path},
@@ -29,29 +31,88 @@ pub struct ExtrusionOptions {
     /// Tile units past the tile's edge to which the polygons are clipped, for geometry that is
     /// not clipped already; a vector tile's polygons are.
     pub clip_buffer: Option<f32>,
+    /// Zoom levels the tile is drawn past its own: the zoom the heights are evaluated at less
+    /// the zoom of the tile's coordinates.
+    pub overscale: u8,
 }
 
 impl ExtrusionOptions {
-    /// Takes the height and base properties of a layer's paint.
-    pub fn for_paint(paint: &FillExtrusionPaint) -> Self {
+    /// Takes the height and base properties of a layer's paint, for a tile magnified
+    /// `overscaling` times past its own zoom (one when it is drawn at its own zoom).
+    pub fn for_paint(paint: &FillExtrusionPaint, overscaling: f64) -> Self {
         Self {
             height: paint.fill_extrusion_height.clone(),
             base: paint.fill_extrusion_base.clone(),
             clip_buffer: None,
+            overscale: overscaling.log2().round().clamp(0.0, f64::from(u8::MAX)) as u8,
         }
     }
 }
 
+/// Base and roof height in metres at the zoom a tile is evaluated at and at the zoom above.
+///
+/// GL JS evaluates a paint property that depends on both zoom and feature at those two zooms
+/// and interpolates between them by the fractional zoom, so a building whose height ramps in
+/// from zoom 15 to 16 stands at half its height at zoom 15.5.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ExtrusionHeights {
+    /// Base at the tile's zoom.
+    pub base: f32,
+    /// Roof height at the tile's zoom.
+    pub height: f32,
+    /// Base one zoom above.
+    pub base_next: f32,
+    /// Roof height one zoom above.
+    pub height_next: f32,
+    /// Zoom levels the tile is drawn past its own, see [`ExtrusionOptions::overscale`].
+    pub overscale: u8,
+}
+
+impl ExtrusionHeights {
+    /// Heights that do not change with zoom, on a tile drawn at its own zoom.
+    #[cfg(test)]
+    pub fn constant(base: f32, height: f32) -> Self {
+        Self {
+            base,
+            height,
+            base_next: base,
+            height_next: height,
+            overscale: 0,
+        }
+    }
+
+    fn apply(&self, vertex: &mut ShaderVertex, top: bool) {
+        vertex.distance = self.base;
+        vertex.elevation = self.height;
+        let rise = if top {
+            self.height_next - self.height
+        } else {
+            self.base_next - self.base
+        };
+        vertex.corner_code = next_zoom_code(rise, self.overscale);
+    }
+}
+
+/// The range of [`next_zoom_code`]'s rise, centred on zero, which one overscale step adds.
+pub const NEXT_ZOOM_CODE_SPAN: f32 = 65536.0;
+
+/// Packs how many metres a vertex rises one zoom above the tile's with the tile's overscale
+/// into one float: `overscale * SPAN + rise + SPAN / 2`, the rise kept within half the span.
+/// The shader needs both to blend by the zoom past the one the heights were evaluated at, and
+/// its vertex attributes are all taken.
+pub fn next_zoom_code(rise: f32, overscale: u8) -> f32 {
+    let half = NEXT_ZOOM_CODE_SPAN / 2.0;
+    f32::from(overscale) * NEXT_ZOOM_CODE_SPAN + rise.clamp(-half, half - 1.0) + half
+}
+
 struct RoofVertex {
-    base: f32,
-    height: f32,
+    heights: ExtrusionHeights,
 }
 
 impl FillVertexConstructor<ShaderVertex> for RoofVertex {
     fn new_vertex(&mut self, vertex: FillVertex) -> ShaderVertex {
         let mut output = ShaderVertex::new(vertex.position().to_array(), [0.0, 0.0]);
-        output.distance = self.base;
-        output.elevation = self.height;
+        self.heights.apply(&mut output, true);
         output
     }
 }
@@ -184,7 +245,7 @@ fn push_wall<I: From<VertexId>>(
     buffer: &mut VertexBuffers<ShaderVertex, I>,
     [a, b]: [[f32; 2]; 2],
     normal: [f32; 2],
-    (base, height): (f32, f32),
+    heights: ExtrusionHeights,
     edge_distances: [f32; 2],
 ) {
     let first = buffer.vertices.len() as u32;
@@ -197,8 +258,7 @@ fn push_wall<I: From<VertexId>>(
     ] {
         let scale = if top { 2.0 } else { 1.0 };
         let mut vertex = ShaderVertex::new(point, [normal[0] * scale, normal[1] * scale]);
-        vertex.distance = base;
-        vertex.elevation = height;
+        heights.apply(&mut vertex, top);
         vertex.edge_distance = distance;
         buffer.vertices.push(vertex);
     }
@@ -211,7 +271,7 @@ fn push_wall<I: From<VertexId>>(
 /// the roof follows the sphere; the vertices it adds take the roof's base and height.
 pub(super) fn extrude<I>(
     path: &Path,
-    heights: (f32, f32),
+    heights: ExtrusionHeights,
     buffer: &mut VertexBuffers<ShaderVertex, I>,
     (tolerance, refine_roof): (
         f32,
@@ -221,20 +281,18 @@ pub(super) fn extrude<I>(
 where
     I: From<VertexId> + std::ops::Add + MaxIndex,
 {
-    let (base, height) = heights;
     let roof_start = buffer.indices.len();
     let vertex_start = buffer.vertices.len();
     FillTessellator::new()
         .tessellate_path(
             path,
             &FillOptions::tolerance(tolerance).with_fill_rule(FillRule::EvenOdd),
-            &mut BuffersBuilder::new(buffer, RoofVertex { base, height }),
+            &mut BuffersBuilder::new(buffer, RoofVertex { heights }),
         )
         .map_err(|error| error.to_string())?;
     refine_roof(buffer, roof_start)?;
     for vertex in &mut buffer.vertices[vertex_start..] {
-        vertex.distance = base;
-        vertex.elevation = height;
+        heights.apply(vertex, true);
     }
     let rings = rings(path);
     for (index, ring) in rings.iter().enumerate() {

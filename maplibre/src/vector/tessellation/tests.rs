@@ -180,6 +180,7 @@ fn later_extrusion_polygons_leave_both_poles_exact() {
                 height: None,
                 base: None,
                 clip_buffer: None,
+                overscale: 0,
             });
         assert_poles_survive_later_polygons(tessellator, multipolygon);
     }

@@ -5,4 +5,4 @@ src = "src"
 title = "MapLibre Rust Documentation"
 
 [output.html]
-additional-css = ["diff.css"]
+additional-css = ["diff.css", "examples.css"]
