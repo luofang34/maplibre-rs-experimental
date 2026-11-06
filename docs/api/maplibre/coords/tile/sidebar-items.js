@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["AlignedWorldTileCoords","InnerCoords","TileCoords","WorldTileCoords"]};
+window.SIDEBAR_ITEMS = {"fn":["spread_bits_32"],"struct":["AlignedWorldTileCoords","InnerCoords","TileCoords","WorldTileCoords"]};

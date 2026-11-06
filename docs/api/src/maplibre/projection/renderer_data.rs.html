@@ -117,7 +117,7 @@
 <a href=#117 id=117 data-nosnippet>117</a>        <span class="kw">let </span>scale = (<span class="number">1.0 </span>/ EXTENT) <span class="kw">as </span>f32;
 <a href=#118 id=118 data-nosnippet>118</a>        <span class="kw">return </span>Vector4::new(<span class="number">0.0</span>, <span class="number">0.0</span>, scale, scale);
 <a href=#119 id=119 data-nosnippet>119</a>    };
-<a href=#120 id=120 data-nosnippet>120</a>    <span class="kw">let </span>tile_count = <span class="number">2_f64</span>.powi(i32::from(u8::from(tile.z)));
+<a href=#120 id=120 data-nosnippet>120</a>    <span class="kw">let </span>tile_count = tile.z.grid_scale();
 <a href=#121 id=121 data-nosnippet>121</a>    <span class="kw">let </span>extent_scale = <span class="number">1.0 </span>/ (tile_count * EXTENT);
 <a href=#122 id=122 data-nosnippet>122</a>    Vector4::new(
 <a href=#123 id=123 data-nosnippet>123</a>        (f64::from(tile.x) / tile_count) <span class="kw">as </span>f32,

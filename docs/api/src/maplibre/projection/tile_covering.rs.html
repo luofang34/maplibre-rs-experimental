@@ -177,7 +177,7 @@
 <a href=#177 id=177 data-nosnippet>177</a>
 <a href=#178 id=178 data-nosnippet>178</a><span class="doccomment">/// Planar 2D Web Mercator squared distance in world-copy coordinates (no wrap folding).
 <a href=#179 id=179 data-nosnippet>179</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>planar_tile_distance_squared(tile: WorldTileCoords, focus_2d: Point2&lt;f64&gt;) -&gt; f64 {
-<a href=#180 id=180 data-nosnippet>180</a>    <span class="kw">let </span>count = <span class="number">2_f64</span>.powi(i32::from(u8::from(tile.z)));
+<a href=#180 id=180 data-nosnippet>180</a>    <span class="kw">let </span>count = tile.z.grid_scale();
 <a href=#181 id=181 data-nosnippet>181</a>    <span class="kw">let </span>dx = focus_2d.x - (f64::from(tile.x) + <span class="number">0.5</span>) / count;
 <a href=#182 id=182 data-nosnippet>182</a>    <span class="kw">let </span>dy = focus_2d.y - (f64::from(tile.y) + <span class="number">0.5</span>) / count;
 <a href=#183 id=183 data-nosnippet>183</a>    dx * dx + dy * dy
@@ -248,7 +248,7 @@
 <a href=#248 id=248 data-nosnippet>248</a>                <span class="kw">crate</span>::projection::globe::covering::tile_spherical_cap(canonical).center,
 <a href=#249 id=249 data-nosnippet>249</a>            )
 <a href=#250 id=250 data-nosnippet>250</a>        } <span class="kw">else </span>{
-<a href=#251 id=251 data-nosnippet>251</a>            <span class="kw">let </span>count = <span class="number">2_f64</span>.powi(i32::from(u8::from(first.z)));
+<a href=#251 id=251 data-nosnippet>251</a>            <span class="kw">let </span>count = first.z.grid_scale();
 <a href=#252 id=252 data-nosnippet>252</a>            CoveringFocus::Planar(Point2::new(
 <a href=#253 id=253 data-nosnippet>253</a>                (f64::from(first.x) + <span class="number">0.5</span>) / count,
 <a href=#254 id=254 data-nosnippet>254</a>                (f64::from(first.y) + <span class="number">0.5</span>) / count,

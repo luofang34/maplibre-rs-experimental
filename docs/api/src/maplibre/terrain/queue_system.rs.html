@@ -250,263 +250,266 @@
 <a href=#250 id=250 data-nosnippet>250</a></span><span class="kw">mod </span>tests;
 <a href=#251 id=251 data-nosnippet>251</a>
 <a href=#252 id=252 data-nosnippet>252</a><span class="kw">fn </span>acquire_drapes(
-<a href=#253 id=253 data-nosnippet>253</a>    (specs, extra_retained): (<span class="kw-2">&amp;</span>[TargetSpec], <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>HashSet&lt;WorldTileCoords&gt;&gt;),
-<a href=#254 id=254 data-nosnippet>254</a>    prints: <span class="kw-2">&amp;</span>[u64],
-<a href=#255 id=255 data-nosnippet>255</a>    ready: <span class="kw-2">&amp;</span>[bool],
-<a href=#256 id=256 data-nosnippet>256</a>    memory: MemoryBudget,
-<a href=#257 id=257 data-nosnippet>257</a>    (budget, limit): (usize, usize),
-<a href=#258 id=258 data-nosnippet>258</a>    terrain: <span class="kw-2">&amp;mut </span>TerrainResources,
-<a href=#259 id=259 data-nosnippet>259</a>    device: <span class="kw-2">&amp;</span>wgpu::Device,
-<a href=#260 id=260 data-nosnippet>260</a>) -&gt; (Vec&lt;bool&gt;, Vec&lt;<span class="prelude-ty">Option</span>&lt;WorldTileCoords&gt;&gt;, bool) {
-<a href=#261 id=261 data-nosnippet>261</a>    <span class="kw">let </span>keep = covering::retained_textures(
-<a href=#262 id=262 data-nosnippet>262</a>        specs
-<a href=#263 id=263 data-nosnippet>263</a>            .iter()
-<a href=#264 id=264 data-nosnippet>264</a>            .map(|spec| spec.coords)
-<a href=#265 id=265 data-nosnippet>265</a>            .chain(extra_retained.into_iter().flatten().copied()),
-<a href=#266 id=266 data-nosnippet>266</a>        |coords| terrain.drape_texture(coords).is_some(),
-<a href=#267 id=267 data-nosnippet>267</a>    );
-<a href=#268 id=268 data-nosnippet>268</a>    terrain.retain_drapes(<span class="kw-2">&amp;</span>keep);
-<a href=#269 id=269 data-nosnippet>269</a>    <span class="comment">// Unready tiles keep their last valid texture or a background surface.
-<a href=#270 id=270 data-nosnippet>270</a>    </span><span class="kw">if </span>memory.is_tight() {
-<a href=#271 id=271 data-nosnippet>271</a>        terrain.shed_spare_drapes();
-<a href=#272 id=272 data-nosnippet>272</a>    }
-<a href=#273 id=273 data-nosnippet>273</a>    <span class="comment">// Targets come nearest first, so when textures run out it is the far tiles that
-<a href=#274 id=274 data-nosnippet>274</a>    // draw with an ancestor's drape.
-<a href=#275 id=275 data-nosnippet>275</a>    </span><span class="kw">let </span>states: Vec&lt;DrapeState&gt; = specs
-<a href=#276 id=276 data-nosnippet>276</a>        .iter()
-<a href=#277 id=277 data-nosnippet>277</a>        .zip(prints)
-<a href=#278 id=278 data-nosnippet>278</a>        .zip(ready)
-<a href=#279 id=279 data-nosnippet>279</a>        .map(|((spec, print), ready)| {
-<a href=#280 id=280 data-nosnippet>280</a>            <span class="kw">if </span><span class="kw-2">*</span>ready {
-<a href=#281 id=281 data-nosnippet>281</a>                <span class="kw">let </span>may_create = memory.allows_drape_texture(terrain.drape_texture_total());
-<a href=#282 id=282 data-nosnippet>282</a>                terrain.acquire_drape(device, spec.coords, <span class="kw-2">*</span>print, may_create)
-<a href=#283 id=283 data-nosnippet>283</a>            } <span class="kw">else </span>{
-<a href=#284 id=284 data-nosnippet>284</a>                DrapeState::Unchanged
-<a href=#285 id=285 data-nosnippet>285</a>            }
-<a href=#286 id=286 data-nosnippet>286</a>        })
-<a href=#287 id=287 data-nosnippet>287</a>        .collect();
-<a href=#288 id=288 data-nosnippet>288</a>    <span class="kw">let </span><span class="kw-2">mut </span>redraw = budget_redraws(<span class="kw-2">&amp;</span>states, budget);
-<a href=#289 id=289 data-nosnippet>289</a>    <span class="comment">// A new drape with no drawn ancestor would leave its tile blank, so it is drawn past the time
-<a href=#290 id=290 data-nosnippet>290</a>    // budget, up to the count a frame's command buffer holds.
-<a href=#291 id=291 data-nosnippet>291</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>drawn = redraw.iter().filter(|drawn| <span class="kw-2">**</span>drawn).count();
-<a href=#292 id=292 data-nosnippet>292</a>    <span class="kw">for </span>(index, (spec, state)) <span class="kw">in </span>specs.iter().zip(<span class="kw-2">&amp;</span>states).enumerate() {
-<a href=#293 id=293 data-nosnippet>293</a>        <span class="kw">if </span>drawn &gt;= limit {
-<a href=#294 id=294 data-nosnippet>294</a>            <span class="kw">break</span>;
-<a href=#295 id=295 data-nosnippet>295</a>        }
-<a href=#296 id=296 data-nosnippet>296</a>        <span class="kw">if </span><span class="kw-2">*</span>state == DrapeState::New
-<a href=#297 id=297 data-nosnippet>297</a>            &amp;&amp; !redraw[index]
-<a href=#298 id=298 data-nosnippet>298</a>            &amp;&amp; present_ancestors(spec.coords, terrain).is_empty()
-<a href=#299 id=299 data-nosnippet>299</a>        {
-<a href=#300 id=300 data-nosnippet>300</a>            redraw[index] = <span class="bool-val">true</span>;
-<a href=#301 id=301 data-nosnippet>301</a>            drawn += <span class="number">1</span>;
-<a href=#302 id=302 data-nosnippet>302</a>        }
-<a href=#303 id=303 data-nosnippet>303</a>    }
-<a href=#304 id=304 data-nosnippet>304</a>    <span class="kw">let </span><span class="kw-2">mut </span>deferred = <span class="bool-val">false</span>;
-<a href=#305 id=305 data-nosnippet>305</a>    <span class="kw">for </span>((spec, state), drawn) <span class="kw">in </span>specs.iter().zip(<span class="kw-2">&amp;</span>states).zip(<span class="kw-2">&amp;</span>redraw) {
-<a href=#306 id=306 data-nosnippet>306</a>        <span class="kw">if </span>!<span class="macro">matches!</span>(state, DrapeState::Unchanged | DrapeState::Withheld) &amp;&amp; !drawn {
-<a href=#307 id=307 data-nosnippet>307</a>            terrain.defer_drape(spec.coords, <span class="kw-2">*</span>state);
-<a href=#308 id=308 data-nosnippet>308</a>            deferred = <span class="bool-val">true</span>;
-<a href=#309 id=309 data-nosnippet>309</a>        }
-<a href=#310 id=310 data-nosnippet>310</a>    }
-<a href=#311 id=311 data-nosnippet>311</a>    <span class="kw">let </span>sources = drape_sources(specs, <span class="kw-2">&amp;</span>states, <span class="kw-2">&amp;</span>redraw, ready, terrain);
-<a href=#312 id=312 data-nosnippet>312</a>    (redraw, sources, deferred)
-<a href=#313 id=313 data-nosnippet>313</a>}
-<a href=#314 id=314 data-nosnippet>314</a>
-<a href=#315 id=315 data-nosnippet>315</a><span class="kw">fn </span>drape_sources(
-<a href=#316 id=316 data-nosnippet>316</a>    specs: <span class="kw-2">&amp;</span>[TargetSpec],
-<a href=#317 id=317 data-nosnippet>317</a>    states: <span class="kw-2">&amp;</span>[DrapeState],
-<a href=#318 id=318 data-nosnippet>318</a>    redraw: <span class="kw-2">&amp;</span>[bool],
-<a href=#319 id=319 data-nosnippet>319</a>    ready: <span class="kw-2">&amp;</span>[bool],
-<a href=#320 id=320 data-nosnippet>320</a>    terrain: <span class="kw-2">&amp;</span>TerrainResources,
-<a href=#321 id=321 data-nosnippet>321</a>) -&gt; Vec&lt;<span class="prelude-ty">Option</span>&lt;WorldTileCoords&gt;&gt; {
-<a href=#322 id=322 data-nosnippet>322</a>    <span class="kw">let </span>hidden: Vec&lt;bool&gt; = awaiting_first_draw(states, redraw)
-<a href=#323 id=323 data-nosnippet>323</a>        .into_iter()
-<a href=#324 id=324 data-nosnippet>324</a>        .zip(ready)
-<a href=#325 id=325 data-nosnippet>325</a>        .zip(states)
-<a href=#326 id=326 data-nosnippet>326</a>        .map(|((hidden, ready), state)| hidden || !ready || <span class="kw-2">*</span>state == DrapeState::Withheld)
-<a href=#327 id=327 data-nosnippet>327</a>        .collect();
-<a href=#328 id=328 data-nosnippet>328</a>    <span class="kw">let </span>undrawn: HashSet&lt;WorldTileCoords&gt; = specs
-<a href=#329 id=329 data-nosnippet>329</a>        .iter()
-<a href=#330 id=330 data-nosnippet>330</a>        .zip(<span class="kw-2">&amp;</span>hidden)
-<a href=#331 id=331 data-nosnippet>331</a>        .filter(|(<span class="kw">_</span>, hidden)| <span class="kw-2">**</span>hidden)
-<a href=#332 id=332 data-nosnippet>332</a>        .map(|(spec, <span class="kw">_</span>)| spec.coords)
-<a href=#333 id=333 data-nosnippet>333</a>        .collect();
-<a href=#334 id=334 data-nosnippet>334</a>    specs
-<a href=#335 id=335 data-nosnippet>335</a>        .iter()
-<a href=#336 id=336 data-nosnippet>336</a>        .zip(<span class="kw-2">&amp;</span>hidden)
-<a href=#337 id=337 data-nosnippet>337</a>        .map(|(spec, hidden)| {
-<a href=#338 id=338 data-nosnippet>338</a>            <span class="kw">if </span><span class="kw-2">*</span>hidden &amp;&amp; terrain.drape_texture(spec.coords).is_none() {
-<a href=#339 id=339 data-nosnippet>339</a>                present_ancestors(spec.coords, terrain)
-<a href=#340 id=340 data-nosnippet>340</a>                    .into_iter()
-<a href=#341 id=341 data-nosnippet>341</a>                    .find(|ancestor| !undrawn.contains(ancestor))
-<a href=#342 id=342 data-nosnippet>342</a>            } <span class="kw">else </span>{
-<a href=#343 id=343 data-nosnippet>343</a>                <span class="prelude-val">Some</span>(spec.coords)
-<a href=#344 id=344 data-nosnippet>344</a>            }
-<a href=#345 id=345 data-nosnippet>345</a>        })
-<a href=#346 id=346 data-nosnippet>346</a>        .collect()
-<a href=#347 id=347 data-nosnippet>347</a>}
-<a href=#348 id=348 data-nosnippet>348</a>
-<a href=#349 id=349 data-nosnippet>349</a><span class="kw">fn </span>queue_tiles(
-<a href=#350 id=350 data-nosnippet>350</a>    world: <span class="kw-2">&amp;mut </span>World,
-<a href=#351 id=351 data-nosnippet>351</a>    style: <span class="kw-2">&amp;</span>Style,
-<a href=#352 id=352 data-nosnippet>352</a>    view_state: <span class="kw-2">&amp;</span>ViewState,
-<a href=#353 id=353 data-nosnippet>353</a>    device: <span class="kw-2">&amp;</span>wgpu::Device,
-<a href=#354 id=354 data-nosnippet>354</a>    queue: <span class="kw-2">&amp;</span><span class="kw">crate</span>::render::upload_queue::UploadQueue,
-<a href=#355 id=355 data-nosnippet>355</a>    dem: <span class="kw-2">&amp;</span>DemSource,
-<a href=#356 id=356 data-nosnippet>356</a>    targets: (<span class="kw-2">&amp;</span>[TargetSpec], <span class="kw-2">&amp;</span>[<span class="prelude-ty">Option</span>&lt;WorldTileCoords&gt;]),
-<a href=#357 id=357 data-nosnippet>357</a>) -&gt; SystemResult {
-<a href=#358 id=358 data-nosnippet>358</a>    <span class="kw">let </span><span class="kw-2">mut </span>edge_cache = std::mem::take(world.resources.get_or_init_mut::&lt;edges::EdgeCache&gt;());
-<a href=#359 id=359 data-nosnippet>359</a>    <span class="kw">let </span>copies = world
-<a href=#360 id=360 data-nosnippet>360</a>        .resources
-<a href=#361 id=361 data-nosnippet>361</a>        .get::&lt;surface_covering::SurfaceCopies&gt;()
-<a href=#362 id=362 data-nosnippet>362</a>        .map(|copies| copies.<span class="number">0</span>.clone());
-<a href=#363 id=363 data-nosnippet>363</a>    <span class="kw">let </span>ctx = uniforms::surface_context(world, style, view_state, dem);
-<a href=#364 id=364 data-nosnippet>364</a>    {
-<a href=#365 id=365 data-nosnippet>365</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(Initialized(terrain)) = world.resources.get_mut::&lt;Eventually&lt;TerrainResources&gt;&gt;()
-<a href=#366 id=366 data-nosnippet>366</a>        <span class="kw">else </span>{
-<a href=#367 id=367 data-nosnippet>367</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(SystemError::Dependencies);
-<a href=#368 id=368 data-nosnippet>368</a>        };
-<a href=#369 id=369 data-nosnippet>369</a>        <span class="kw">let </span>uniforms::PreparedTerrain {
-<a href=#370 id=370 data-nosnippet>370</a>            <span class="kw-2">mut </span>uniforms,
-<a href=#371 id=371 data-nosnippet>371</a>            sources,
-<a href=#372 id=372 data-nosnippet>372</a>        } = uniforms::prepare_tiles(targets, terrain, <span class="kw-2">&amp;</span>world.tiles, ctx);
-<a href=#373 id=373 data-nosnippet>373</a>        <span class="kw">let </span>edges = edge_cache.apply(<span class="kw-2">&amp;</span>sources, <span class="kw-2">&amp;mut </span>uniforms, <span class="kw-2">&amp;</span>world.tiles);
-<a href=#374 id=374 data-nosnippet>374</a>        <span class="kw">let </span>(sources, placed) =
-<a href=#375 id=375 data-nosnippet>375</a>            uniforms::with_world_copies(<span class="kw-2">&amp;mut </span>uniforms, sources, copies.as_ref(), view_state);
-<a href=#376 id=376 data-nosnippet>376</a>        terrain.write_edges(queue, <span class="kw-2">&amp;</span>edges);
-<a href=#377 id=377 data-nosnippet>377</a>        <span class="kw">let </span>written = terrain.write_uniforms(queue, <span class="kw-2">&amp;</span>uniforms);
-<a href=#378 id=378 data-nosnippet>378</a>        <span class="macro">tracing::debug!</span>(
-<a href=#379 id=379 data-nosnippet>379</a>            targets = targets.<span class="number">0</span>.len(),
-<a href=#380 id=380 data-nosnippet>380</a>            dem_hits = sources.iter().filter(|(dem, <span class="kw">_</span>, <span class="kw">_</span>)| dem.is_some()).count(),
-<a href=#381 id=381 data-nosnippet>381</a>            written,
-<a href=#382 id=382 data-nosnippet>382</a>            <span class="string">"terrain frame queued"
-<a href=#383 id=383 data-nosnippet>383</a>        </span>);
-<a href=#384 id=384 data-nosnippet>384</a>        <span class="kw">let </span>draws = sources
-<a href=#385 id=385 data-nosnippet>385</a>            .iter()
-<a href=#386 id=386 data-nosnippet>386</a>            .take(written)
-<a href=#387 id=387 data-nosnippet>387</a>            .enumerate()
-<a href=#388 id=388 data-nosnippet>388</a>            .filter_map(|(index, (dem_coords, coords, drape_source))| {
-<a href=#389 id=389 data-nosnippet>389</a>                <span class="prelude-val">Some</span>(TerrainDraw {
-<a href=#390 id=390 data-nosnippet>390</a>                    coords: <span class="kw-2">*</span>coords,
-<a href=#391 id=391 data-nosnippet>391</a>                    bind_group: terrain.tile_bind_group(device, <span class="kw-2">*</span>dem_coords, <span class="kw-2">*</span>drape_source)<span class="question-mark">?</span>,
-<a href=#392 id=392 data-nosnippet>392</a>                    uniform_offset: (index <span class="kw">as </span>u64 * UNIFORM_STRIDE) <span class="kw">as </span>u32,
-<a href=#393 id=393 data-nosnippet>393</a>                })
-<a href=#394 id=394 data-nosnippet>394</a>            })
-<a href=#395 id=395 data-nosnippet>395</a>            .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
-<a href=#396 id=396 data-nosnippet>396</a>        <span class="kw">let </span>key = targets::draw_order_key(style, view_state, f64::from(dem.tile_size));
-<a href=#397 id=397 data-nosnippet>397</a>        <span class="kw">let </span><span class="kw-2">mut </span>draws = draws;
-<a href=#398 id=398 data-nosnippet>398</a>        draws.sort_by(|left, right| key(<span class="kw-2">&amp;</span>left.coords).total_cmp(<span class="kw-2">&amp;</span>key(<span class="kw-2">&amp;</span>right.coords)));
-<a href=#399 id=399 data-nosnippet>399</a>        terrain.set_draws(draws);
-<a href=#400 id=400 data-nosnippet>400</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(index) = world
-<a href=#401 id=401 data-nosnippet>401</a>            .resources
-<a href=#402 id=402 data-nosnippet>402</a>            .get_mut::&lt;<span class="kw">crate</span>::terrain::TerrainCoverageIndex&gt;()
-<a href=#403 id=403 data-nosnippet>403</a>        {
-<a href=#404 id=404 data-nosnippet>404</a>            index.set_surface_edges(<span class="kw-2">&amp;</span>sources, std::sync::Arc::clone(<span class="kw-2">&amp;</span>edge_cache.samples));
-<a href=#405 id=405 data-nosnippet>405</a>        }
-<a href=#406 id=406 data-nosnippet>406</a>        <span class="kw">let </span>kept = placed.into_iter().zip(uniforms).take(written).collect();
-<a href=#407 id=407 data-nosnippet>407</a>        world.resources.insert(TerrainEyeFrame(kept));
-<a href=#408 id=408 data-nosnippet>408</a>    }
-<a href=#409 id=409 data-nosnippet>409</a>    world.resources.insert(edge_cache);
-<a href=#410 id=410 data-nosnippet>410</a>
-<a href=#411 id=411 data-nosnippet>411</a>    <span class="prelude-val">Ok</span>(())
-<a href=#412 id=412 data-nosnippet>412</a>}
+<a href=#253 id=253 data-nosnippet>253</a>    (specs, extra_retained): (
+<a href=#254 id=254 data-nosnippet>254</a>        <span class="kw-2">&amp;</span>[TargetSpec],
+<a href=#255 id=255 data-nosnippet>255</a>        <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>rustc_hash::FxHashSet&lt;WorldTileCoords&gt;&gt;,
+<a href=#256 id=256 data-nosnippet>256</a>    ),
+<a href=#257 id=257 data-nosnippet>257</a>    prints: <span class="kw-2">&amp;</span>[u64],
+<a href=#258 id=258 data-nosnippet>258</a>    ready: <span class="kw-2">&amp;</span>[bool],
+<a href=#259 id=259 data-nosnippet>259</a>    memory: MemoryBudget,
+<a href=#260 id=260 data-nosnippet>260</a>    (budget, limit): (usize, usize),
+<a href=#261 id=261 data-nosnippet>261</a>    terrain: <span class="kw-2">&amp;mut </span>TerrainResources,
+<a href=#262 id=262 data-nosnippet>262</a>    device: <span class="kw-2">&amp;</span>wgpu::Device,
+<a href=#263 id=263 data-nosnippet>263</a>) -&gt; (Vec&lt;bool&gt;, Vec&lt;<span class="prelude-ty">Option</span>&lt;WorldTileCoords&gt;&gt;, bool) {
+<a href=#264 id=264 data-nosnippet>264</a>    <span class="kw">let </span>keep = covering::retained_textures(
+<a href=#265 id=265 data-nosnippet>265</a>        specs
+<a href=#266 id=266 data-nosnippet>266</a>            .iter()
+<a href=#267 id=267 data-nosnippet>267</a>            .map(|spec| spec.coords)
+<a href=#268 id=268 data-nosnippet>268</a>            .chain(extra_retained.into_iter().flatten().copied()),
+<a href=#269 id=269 data-nosnippet>269</a>        |coords| terrain.drape_texture(coords).is_some(),
+<a href=#270 id=270 data-nosnippet>270</a>    );
+<a href=#271 id=271 data-nosnippet>271</a>    terrain.retain_drapes(<span class="kw-2">&amp;</span>keep);
+<a href=#272 id=272 data-nosnippet>272</a>    <span class="comment">// Unready tiles keep their last valid texture or a background surface.
+<a href=#273 id=273 data-nosnippet>273</a>    </span><span class="kw">if </span>memory.is_tight() {
+<a href=#274 id=274 data-nosnippet>274</a>        terrain.shed_spare_drapes();
+<a href=#275 id=275 data-nosnippet>275</a>    }
+<a href=#276 id=276 data-nosnippet>276</a>    <span class="comment">// Targets come nearest first, so when textures run out it is the far tiles that
+<a href=#277 id=277 data-nosnippet>277</a>    // draw with an ancestor's drape.
+<a href=#278 id=278 data-nosnippet>278</a>    </span><span class="kw">let </span>states: Vec&lt;DrapeState&gt; = specs
+<a href=#279 id=279 data-nosnippet>279</a>        .iter()
+<a href=#280 id=280 data-nosnippet>280</a>        .zip(prints)
+<a href=#281 id=281 data-nosnippet>281</a>        .zip(ready)
+<a href=#282 id=282 data-nosnippet>282</a>        .map(|((spec, print), ready)| {
+<a href=#283 id=283 data-nosnippet>283</a>            <span class="kw">if </span><span class="kw-2">*</span>ready {
+<a href=#284 id=284 data-nosnippet>284</a>                <span class="kw">let </span>may_create = memory.allows_drape_texture(terrain.drape_texture_total());
+<a href=#285 id=285 data-nosnippet>285</a>                terrain.acquire_drape(device, spec.coords, <span class="kw-2">*</span>print, may_create)
+<a href=#286 id=286 data-nosnippet>286</a>            } <span class="kw">else </span>{
+<a href=#287 id=287 data-nosnippet>287</a>                DrapeState::Unchanged
+<a href=#288 id=288 data-nosnippet>288</a>            }
+<a href=#289 id=289 data-nosnippet>289</a>        })
+<a href=#290 id=290 data-nosnippet>290</a>        .collect();
+<a href=#291 id=291 data-nosnippet>291</a>    <span class="kw">let </span><span class="kw-2">mut </span>redraw = budget_redraws(<span class="kw-2">&amp;</span>states, budget);
+<a href=#292 id=292 data-nosnippet>292</a>    <span class="comment">// A new drape with no drawn ancestor would leave its tile blank, so it is drawn past the time
+<a href=#293 id=293 data-nosnippet>293</a>    // budget, up to the count a frame's command buffer holds.
+<a href=#294 id=294 data-nosnippet>294</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>drawn = redraw.iter().filter(|drawn| <span class="kw-2">**</span>drawn).count();
+<a href=#295 id=295 data-nosnippet>295</a>    <span class="kw">for </span>(index, (spec, state)) <span class="kw">in </span>specs.iter().zip(<span class="kw-2">&amp;</span>states).enumerate() {
+<a href=#296 id=296 data-nosnippet>296</a>        <span class="kw">if </span>drawn &gt;= limit {
+<a href=#297 id=297 data-nosnippet>297</a>            <span class="kw">break</span>;
+<a href=#298 id=298 data-nosnippet>298</a>        }
+<a href=#299 id=299 data-nosnippet>299</a>        <span class="kw">if </span><span class="kw-2">*</span>state == DrapeState::New
+<a href=#300 id=300 data-nosnippet>300</a>            &amp;&amp; !redraw[index]
+<a href=#301 id=301 data-nosnippet>301</a>            &amp;&amp; present_ancestors(spec.coords, terrain).is_empty()
+<a href=#302 id=302 data-nosnippet>302</a>        {
+<a href=#303 id=303 data-nosnippet>303</a>            redraw[index] = <span class="bool-val">true</span>;
+<a href=#304 id=304 data-nosnippet>304</a>            drawn += <span class="number">1</span>;
+<a href=#305 id=305 data-nosnippet>305</a>        }
+<a href=#306 id=306 data-nosnippet>306</a>    }
+<a href=#307 id=307 data-nosnippet>307</a>    <span class="kw">let </span><span class="kw-2">mut </span>deferred = <span class="bool-val">false</span>;
+<a href=#308 id=308 data-nosnippet>308</a>    <span class="kw">for </span>((spec, state), drawn) <span class="kw">in </span>specs.iter().zip(<span class="kw-2">&amp;</span>states).zip(<span class="kw-2">&amp;</span>redraw) {
+<a href=#309 id=309 data-nosnippet>309</a>        <span class="kw">if </span>!<span class="macro">matches!</span>(state, DrapeState::Unchanged | DrapeState::Withheld) &amp;&amp; !drawn {
+<a href=#310 id=310 data-nosnippet>310</a>            terrain.defer_drape(spec.coords, <span class="kw-2">*</span>state);
+<a href=#311 id=311 data-nosnippet>311</a>            deferred = <span class="bool-val">true</span>;
+<a href=#312 id=312 data-nosnippet>312</a>        }
+<a href=#313 id=313 data-nosnippet>313</a>    }
+<a href=#314 id=314 data-nosnippet>314</a>    <span class="kw">let </span>sources = drape_sources(specs, <span class="kw-2">&amp;</span>states, <span class="kw-2">&amp;</span>redraw, ready, terrain);
+<a href=#315 id=315 data-nosnippet>315</a>    (redraw, sources, deferred)
+<a href=#316 id=316 data-nosnippet>316</a>}
+<a href=#317 id=317 data-nosnippet>317</a>
+<a href=#318 id=318 data-nosnippet>318</a><span class="kw">fn </span>drape_sources(
+<a href=#319 id=319 data-nosnippet>319</a>    specs: <span class="kw-2">&amp;</span>[TargetSpec],
+<a href=#320 id=320 data-nosnippet>320</a>    states: <span class="kw-2">&amp;</span>[DrapeState],
+<a href=#321 id=321 data-nosnippet>321</a>    redraw: <span class="kw-2">&amp;</span>[bool],
+<a href=#322 id=322 data-nosnippet>322</a>    ready: <span class="kw-2">&amp;</span>[bool],
+<a href=#323 id=323 data-nosnippet>323</a>    terrain: <span class="kw-2">&amp;</span>TerrainResources,
+<a href=#324 id=324 data-nosnippet>324</a>) -&gt; Vec&lt;<span class="prelude-ty">Option</span>&lt;WorldTileCoords&gt;&gt; {
+<a href=#325 id=325 data-nosnippet>325</a>    <span class="kw">let </span>hidden: Vec&lt;bool&gt; = awaiting_first_draw(states, redraw)
+<a href=#326 id=326 data-nosnippet>326</a>        .into_iter()
+<a href=#327 id=327 data-nosnippet>327</a>        .zip(ready)
+<a href=#328 id=328 data-nosnippet>328</a>        .zip(states)
+<a href=#329 id=329 data-nosnippet>329</a>        .map(|((hidden, ready), state)| hidden || !ready || <span class="kw-2">*</span>state == DrapeState::Withheld)
+<a href=#330 id=330 data-nosnippet>330</a>        .collect();
+<a href=#331 id=331 data-nosnippet>331</a>    <span class="kw">let </span>undrawn: HashSet&lt;WorldTileCoords&gt; = specs
+<a href=#332 id=332 data-nosnippet>332</a>        .iter()
+<a href=#333 id=333 data-nosnippet>333</a>        .zip(<span class="kw-2">&amp;</span>hidden)
+<a href=#334 id=334 data-nosnippet>334</a>        .filter(|(<span class="kw">_</span>, hidden)| <span class="kw-2">**</span>hidden)
+<a href=#335 id=335 data-nosnippet>335</a>        .map(|(spec, <span class="kw">_</span>)| spec.coords)
+<a href=#336 id=336 data-nosnippet>336</a>        .collect();
+<a href=#337 id=337 data-nosnippet>337</a>    specs
+<a href=#338 id=338 data-nosnippet>338</a>        .iter()
+<a href=#339 id=339 data-nosnippet>339</a>        .zip(<span class="kw-2">&amp;</span>hidden)
+<a href=#340 id=340 data-nosnippet>340</a>        .map(|(spec, hidden)| {
+<a href=#341 id=341 data-nosnippet>341</a>            <span class="kw">if </span><span class="kw-2">*</span>hidden &amp;&amp; terrain.drape_texture(spec.coords).is_none() {
+<a href=#342 id=342 data-nosnippet>342</a>                present_ancestors(spec.coords, terrain)
+<a href=#343 id=343 data-nosnippet>343</a>                    .into_iter()
+<a href=#344 id=344 data-nosnippet>344</a>                    .find(|ancestor| !undrawn.contains(ancestor))
+<a href=#345 id=345 data-nosnippet>345</a>            } <span class="kw">else </span>{
+<a href=#346 id=346 data-nosnippet>346</a>                <span class="prelude-val">Some</span>(spec.coords)
+<a href=#347 id=347 data-nosnippet>347</a>            }
+<a href=#348 id=348 data-nosnippet>348</a>        })
+<a href=#349 id=349 data-nosnippet>349</a>        .collect()
+<a href=#350 id=350 data-nosnippet>350</a>}
+<a href=#351 id=351 data-nosnippet>351</a>
+<a href=#352 id=352 data-nosnippet>352</a><span class="kw">fn </span>queue_tiles(
+<a href=#353 id=353 data-nosnippet>353</a>    world: <span class="kw-2">&amp;mut </span>World,
+<a href=#354 id=354 data-nosnippet>354</a>    style: <span class="kw-2">&amp;</span>Style,
+<a href=#355 id=355 data-nosnippet>355</a>    view_state: <span class="kw-2">&amp;</span>ViewState,
+<a href=#356 id=356 data-nosnippet>356</a>    device: <span class="kw-2">&amp;</span>wgpu::Device,
+<a href=#357 id=357 data-nosnippet>357</a>    queue: <span class="kw-2">&amp;</span><span class="kw">crate</span>::render::upload_queue::UploadQueue,
+<a href=#358 id=358 data-nosnippet>358</a>    dem: <span class="kw-2">&amp;</span>DemSource,
+<a href=#359 id=359 data-nosnippet>359</a>    targets: (<span class="kw-2">&amp;</span>[TargetSpec], <span class="kw-2">&amp;</span>[<span class="prelude-ty">Option</span>&lt;WorldTileCoords&gt;]),
+<a href=#360 id=360 data-nosnippet>360</a>) -&gt; SystemResult {
+<a href=#361 id=361 data-nosnippet>361</a>    <span class="kw">let </span><span class="kw-2">mut </span>edge_cache = std::mem::take(world.resources.get_or_init_mut::&lt;edges::EdgeCache&gt;());
+<a href=#362 id=362 data-nosnippet>362</a>    <span class="kw">let </span>copies = world
+<a href=#363 id=363 data-nosnippet>363</a>        .resources
+<a href=#364 id=364 data-nosnippet>364</a>        .get::&lt;surface_covering::SurfaceCopies&gt;()
+<a href=#365 id=365 data-nosnippet>365</a>        .map(|copies| copies.<span class="number">0</span>.clone());
+<a href=#366 id=366 data-nosnippet>366</a>    <span class="kw">let </span>ctx = uniforms::surface_context(world, style, view_state, dem);
+<a href=#367 id=367 data-nosnippet>367</a>    {
+<a href=#368 id=368 data-nosnippet>368</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(Initialized(terrain)) = world.resources.get_mut::&lt;Eventually&lt;TerrainResources&gt;&gt;()
+<a href=#369 id=369 data-nosnippet>369</a>        <span class="kw">else </span>{
+<a href=#370 id=370 data-nosnippet>370</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(SystemError::Dependencies);
+<a href=#371 id=371 data-nosnippet>371</a>        };
+<a href=#372 id=372 data-nosnippet>372</a>        <span class="kw">let </span>uniforms::PreparedTerrain {
+<a href=#373 id=373 data-nosnippet>373</a>            <span class="kw-2">mut </span>uniforms,
+<a href=#374 id=374 data-nosnippet>374</a>            sources,
+<a href=#375 id=375 data-nosnippet>375</a>        } = uniforms::prepare_tiles(targets, terrain, <span class="kw-2">&amp;</span>world.tiles, ctx);
+<a href=#376 id=376 data-nosnippet>376</a>        <span class="kw">let </span>edges = edge_cache.apply(<span class="kw-2">&amp;</span>sources, <span class="kw-2">&amp;mut </span>uniforms, <span class="kw-2">&amp;</span>world.tiles);
+<a href=#377 id=377 data-nosnippet>377</a>        <span class="kw">let </span>(sources, placed) =
+<a href=#378 id=378 data-nosnippet>378</a>            uniforms::with_world_copies(<span class="kw-2">&amp;mut </span>uniforms, sources, copies.as_ref(), view_state);
+<a href=#379 id=379 data-nosnippet>379</a>        terrain.write_edges(queue, <span class="kw-2">&amp;</span>edges);
+<a href=#380 id=380 data-nosnippet>380</a>        <span class="kw">let </span>written = terrain.write_uniforms(queue, <span class="kw-2">&amp;</span>uniforms);
+<a href=#381 id=381 data-nosnippet>381</a>        <span class="macro">tracing::debug!</span>(
+<a href=#382 id=382 data-nosnippet>382</a>            targets = targets.<span class="number">0</span>.len(),
+<a href=#383 id=383 data-nosnippet>383</a>            dem_hits = sources.iter().filter(|(dem, <span class="kw">_</span>, <span class="kw">_</span>)| dem.is_some()).count(),
+<a href=#384 id=384 data-nosnippet>384</a>            written,
+<a href=#385 id=385 data-nosnippet>385</a>            <span class="string">"terrain frame queued"
+<a href=#386 id=386 data-nosnippet>386</a>        </span>);
+<a href=#387 id=387 data-nosnippet>387</a>        <span class="kw">let </span>draws = sources
+<a href=#388 id=388 data-nosnippet>388</a>            .iter()
+<a href=#389 id=389 data-nosnippet>389</a>            .take(written)
+<a href=#390 id=390 data-nosnippet>390</a>            .enumerate()
+<a href=#391 id=391 data-nosnippet>391</a>            .filter_map(|(index, (dem_coords, coords, drape_source))| {
+<a href=#392 id=392 data-nosnippet>392</a>                <span class="prelude-val">Some</span>(TerrainDraw {
+<a href=#393 id=393 data-nosnippet>393</a>                    coords: <span class="kw-2">*</span>coords,
+<a href=#394 id=394 data-nosnippet>394</a>                    bind_group: terrain.tile_bind_group(device, <span class="kw-2">*</span>dem_coords, <span class="kw-2">*</span>drape_source)<span class="question-mark">?</span>,
+<a href=#395 id=395 data-nosnippet>395</a>                    uniform_offset: (index <span class="kw">as </span>u64 * UNIFORM_STRIDE) <span class="kw">as </span>u32,
+<a href=#396 id=396 data-nosnippet>396</a>                })
+<a href=#397 id=397 data-nosnippet>397</a>            })
+<a href=#398 id=398 data-nosnippet>398</a>            .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
+<a href=#399 id=399 data-nosnippet>399</a>        <span class="kw">let </span>key = targets::draw_order_key(style, view_state, f64::from(dem.tile_size));
+<a href=#400 id=400 data-nosnippet>400</a>        <span class="kw">let </span><span class="kw-2">mut </span>draws = draws;
+<a href=#401 id=401 data-nosnippet>401</a>        draws.sort_by(|left, right| key(<span class="kw-2">&amp;</span>left.coords).total_cmp(<span class="kw-2">&amp;</span>key(<span class="kw-2">&amp;</span>right.coords)));
+<a href=#402 id=402 data-nosnippet>402</a>        terrain.set_draws(draws);
+<a href=#403 id=403 data-nosnippet>403</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(index) = world
+<a href=#404 id=404 data-nosnippet>404</a>            .resources
+<a href=#405 id=405 data-nosnippet>405</a>            .get_mut::&lt;<span class="kw">crate</span>::terrain::TerrainCoverageIndex&gt;()
+<a href=#406 id=406 data-nosnippet>406</a>        {
+<a href=#407 id=407 data-nosnippet>407</a>            index.set_surface_edges(<span class="kw-2">&amp;</span>sources, std::sync::Arc::clone(<span class="kw-2">&amp;</span>edge_cache.samples));
+<a href=#408 id=408 data-nosnippet>408</a>        }
+<a href=#409 id=409 data-nosnippet>409</a>        <span class="kw">let </span>kept = placed.into_iter().zip(uniforms).take(written).collect();
+<a href=#410 id=410 data-nosnippet>410</a>        world.resources.insert(TerrainEyeFrame(kept));
+<a href=#411 id=411 data-nosnippet>411</a>    }
+<a href=#412 id=412 data-nosnippet>412</a>    world.resources.insert(edge_cache);
 <a href=#413 id=413 data-nosnippet>413</a>
-<a href=#414 id=414 data-nosnippet>414</a><span class="kw">struct </span>PreparedDrapes {
-<a href=#415 id=415 data-nosnippet>415</a>    redraw: Vec&lt;bool&gt;,
-<a href=#416 id=416 data-nosnippet>416</a>    sources: Vec&lt;<span class="prelude-ty">Option</span>&lt;WorldTileCoords&gt;&gt;,
-<a href=#417 id=417 data-nosnippet>417</a>    clear_color: wgpu::Color,
-<a href=#418 id=418 data-nosnippet>418</a>}
-<a href=#419 id=419 data-nosnippet>419</a>
-<a href=#420 id=420 data-nosnippet>420</a><span class="kw">fn </span>prepare_drapes(
-<a href=#421 id=421 data-nosnippet>421</a>    specs: <span class="kw-2">&amp;</span>[TargetSpec],
-<a href=#422 id=422 data-nosnippet>422</a>    style: <span class="kw-2">&amp;</span>Style,
-<a href=#423 id=423 data-nosnippet>423</a>    view_state: <span class="kw-2">&amp;</span>ViewState,
-<a href=#424 id=424 data-nosnippet>424</a>    world: <span class="kw-2">&amp;mut </span>World,
-<a href=#425 id=425 data-nosnippet>425</a>    device: <span class="kw-2">&amp;</span>wgpu::Device,
-<a href=#426 id=426 data-nosnippet>426</a>) -&gt; <span class="prelude-ty">Result</span>&lt;PreparedDrapes, SystemError&gt; {
-<a href=#427 id=427 data-nosnippet>427</a>    <span class="kw">let </span>memory = world
-<a href=#428 id=428 data-nosnippet>428</a>        .resources
-<a href=#429 id=429 data-nosnippet>429</a>        .get::&lt;MemoryBudget&gt;()
-<a href=#430 id=430 data-nosnippet>430</a>        .copied()
-<a href=#431 id=431 data-nosnippet>431</a>        .unwrap_or_default();
-<a href=#432 id=432 data-nosnippet>432</a>    <span class="kw">let </span>clear_color = background_clear_color(style);
-<a href=#433 id=433 data-nosnippet>433</a>    <span class="kw">let </span>paint_zoom =
-<a href=#434 id=434 data-nosnippet>434</a>        <span class="kw">crate</span>::vector::upload_system::paint::current_zoom(world, view_state.style_zoom().value());
-<a href=#435 id=435 data-nosnippet>435</a>    <span class="kw">let </span>prints: Vec&lt;u64&gt; = {
-<a href=#436 id=436 data-nosnippet>436</a>        <span class="kw">let </span>content = loaded_content(world);
-<a href=#437 id=437 data-nosnippet>437</a>        specs
-<a href=#438 id=438 data-nosnippet>438</a>            .iter()
-<a href=#439 id=439 data-nosnippet>439</a>            .map(|spec| fingerprint(spec, <span class="kw-2">&amp;</span>content, clear_color, paint_zoom))
-<a href=#440 id=440 data-nosnippet>440</a>            .collect()
-<a href=#441 id=441 data-nosnippet>441</a>    };
-<a href=#442 id=442 data-nosnippet>442</a>    <span class="comment">// A tile whose vector sources are finished but not yet in the buffer pool would drape
-<a href=#443 id=443 data-nosnippet>443</a>    // blank; it shows an ancestor's drape until they are.
-<a href=#444 id=444 data-nosnippet>444</a>    </span><span class="kw">let </span>strict = world
-<a href=#445 id=445 data-nosnippet>445</a>        .resources
-<a href=#446 id=446 data-nosnippet>446</a>        .get::&lt;cohort::TextureCohort&gt;()
-<a href=#447 id=447 data-nosnippet>447</a>        .is_some_and(|state| state.enabled);
-<a href=#448 id=448 data-nosnippet>448</a>    <span class="kw">let </span><span class="kw-2">mut </span>ready: Vec&lt;bool&gt; = specs
-<a href=#449 id=449 data-nosnippet>449</a>        .iter()
-<a href=#450 id=450 data-nosnippet>450</a>        .map(|spec| readiness::ready(spec, style, view_state.style_zoom().value(), world, strict))
-<a href=#451 id=451 data-nosnippet>451</a>        .collect();
-<a href=#452 id=452 data-nosnippet>452</a>    <span class="kw">let </span>capacity = <span class="kw">match </span>world.resources.get::&lt;Eventually&lt;WgpuTileViewPattern&gt;&gt;() {
-<a href=#453 id=453 data-nosnippet>453</a>        <span class="prelude-val">Some</span>(Initialized(pattern)) =&gt; pattern.remaining_metadata_capacity(),
-<a href=#454 id=454 data-nosnippet>454</a>        <span class="kw">_ </span>=&gt; <span class="number">0</span>,
-<a href=#455 id=455 data-nosnippet>455</a>    };
-<a href=#456 id=456 data-nosnippet>456</a>    surface_covering::fit_metadata(specs, <span class="kw-2">&amp;mut </span>ready, capacity);
-<a href=#457 id=457 data-nosnippet>457</a>    <span class="kw">let </span>budget = world
-<a href=#458 id=458 data-nosnippet>458</a>        .resources
-<a href=#459 id=459 data-nosnippet>459</a>        .get::&lt;DrapeBudget&gt;()
-<a href=#460 id=460 data-nosnippet>460</a>        .copied()
-<a href=#461 id=461 data-nosnippet>461</a>        .unwrap_or_default();
-<a href=#462 id=462 data-nosnippet>462</a>    <span class="kw">let </span>limit = <span class="kw">if </span>view_state.has_external_view() {
-<a href=#463 id=463 data-nosnippet>463</a>        budget.per_eye_frame
-<a href=#464 id=464 data-nosnippet>464</a>    } <span class="kw">else </span>{
-<a href=#465 id=465 data-nosnippet>465</a>        budget.per_frame
-<a href=#466 id=466 data-nosnippet>466</a>    };
-<a href=#467 id=467 data-nosnippet>467</a>    <span class="comment">// A moving view draws what fits its time; the view at rest draws the rest at full pace.
-<a href=#468 id=468 data-nosnippet>468</a>    </span><span class="kw">let </span>budget = <span class="kw">if </span><span class="kw">crate</span>::render::frame_signals::camera_moved(world, view_state) {
-<a href=#469 id=469 data-nosnippet>469</a>        world
-<a href=#470 id=470 data-nosnippet>470</a>            .resources
-<a href=#471 id=471 data-nosnippet>471</a>            .get::&lt;<span class="kw">crate</span>::terrain::drape_timing::DrapeCost&gt;()
-<a href=#472 id=472 data-nosnippet>472</a>            .copied()
-<a href=#473 id=473 data-nosnippet>473</a>            .unwrap_or_default()
-<a href=#474 id=474 data-nosnippet>474</a>            .drapes_within(budget.moving_time, limit)
-<a href=#475 id=475 data-nosnippet>475</a>    } <span class="kw">else </span>{
-<a href=#476 id=476 data-nosnippet>476</a>        limit
-<a href=#477 id=477 data-nosnippet>477</a>    };
-<a href=#478 id=478 data-nosnippet>478</a>    <span class="kw">let </span>extra_retained = world
-<a href=#479 id=479 data-nosnippet>479</a>        .resources
-<a href=#480 id=480 data-nosnippet>480</a>        .get::&lt;<span class="kw">crate</span>::render::eye_covering::SlotResidencyFloor&gt;()
-<a href=#481 id=481 data-nosnippet>481</a>        .map(|floor| floor.retained_drapes.clone());
-<a href=#482 id=482 data-nosnippet>482</a>    <span class="kw">let </span>(redraw, drape_sources, deferred) = {
-<a href=#483 id=483 data-nosnippet>483</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(Initialized(terrain)) = world.resources.get_mut::&lt;Eventually&lt;TerrainResources&gt;&gt;()
-<a href=#484 id=484 data-nosnippet>484</a>        <span class="kw">else </span>{
-<a href=#485 id=485 data-nosnippet>485</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(SystemError::Dependencies);
-<a href=#486 id=486 data-nosnippet>486</a>        };
-<a href=#487 id=487 data-nosnippet>487</a>        terrain.ensure_scratch(device);
-<a href=#488 id=488 data-nosnippet>488</a>        acquire_drapes(
-<a href=#489 id=489 data-nosnippet>489</a>            (specs, extra_retained.as_ref()),
-<a href=#490 id=490 data-nosnippet>490</a>            <span class="kw-2">&amp;</span>prints,
-<a href=#491 id=491 data-nosnippet>491</a>            <span class="kw-2">&amp;</span>ready,
-<a href=#492 id=492 data-nosnippet>492</a>            memory,
-<a href=#493 id=493 data-nosnippet>493</a>            (budget, limit),
-<a href=#494 id=494 data-nosnippet>494</a>            terrain,
-<a href=#495 id=495 data-nosnippet>495</a>            device,
-<a href=#496 id=496 data-nosnippet>496</a>        )
-<a href=#497 id=497 data-nosnippet>497</a>    };
-<a href=#498 id=498 data-nosnippet>498</a>    <span class="kw">crate</span>::render::frame_signals::count_drape_redraws(
-<a href=#499 id=499 data-nosnippet>499</a>        world,
-<a href=#500 id=500 data-nosnippet>500</a>        redraw.iter().filter(|drawn| <span class="kw-2">**</span>drawn).count(),
-<a href=#501 id=501 data-nosnippet>501</a>    );
-<a href=#502 id=502 data-nosnippet>502</a>    <span class="comment">// A drape left for a later frame's budget needs that frame.
-<a href=#503 id=503 data-nosnippet>503</a>    </span><span class="kw">if </span>deferred {
-<a href=#504 id=504 data-nosnippet>504</a>        <span class="kw">crate</span>::render::frame_signals::keep_animating(world);
-<a href=#505 id=505 data-nosnippet>505</a>    }
-<a href=#506 id=506 data-nosnippet>506</a>    <span class="prelude-val">Ok</span>(PreparedDrapes {
-<a href=#507 id=507 data-nosnippet>507</a>        redraw,
-<a href=#508 id=508 data-nosnippet>508</a>        sources: drape_sources,
-<a href=#509 id=509 data-nosnippet>509</a>        clear_color,
-<a href=#510 id=510 data-nosnippet>510</a>    })
-<a href=#511 id=511 data-nosnippet>511</a>}
+<a href=#414 id=414 data-nosnippet>414</a>    <span class="prelude-val">Ok</span>(())
+<a href=#415 id=415 data-nosnippet>415</a>}
+<a href=#416 id=416 data-nosnippet>416</a>
+<a href=#417 id=417 data-nosnippet>417</a><span class="kw">struct </span>PreparedDrapes {
+<a href=#418 id=418 data-nosnippet>418</a>    redraw: Vec&lt;bool&gt;,
+<a href=#419 id=419 data-nosnippet>419</a>    sources: Vec&lt;<span class="prelude-ty">Option</span>&lt;WorldTileCoords&gt;&gt;,
+<a href=#420 id=420 data-nosnippet>420</a>    clear_color: wgpu::Color,
+<a href=#421 id=421 data-nosnippet>421</a>}
+<a href=#422 id=422 data-nosnippet>422</a>
+<a href=#423 id=423 data-nosnippet>423</a><span class="kw">fn </span>prepare_drapes(
+<a href=#424 id=424 data-nosnippet>424</a>    specs: <span class="kw-2">&amp;</span>[TargetSpec],
+<a href=#425 id=425 data-nosnippet>425</a>    style: <span class="kw-2">&amp;</span>Style,
+<a href=#426 id=426 data-nosnippet>426</a>    view_state: <span class="kw-2">&amp;</span>ViewState,
+<a href=#427 id=427 data-nosnippet>427</a>    world: <span class="kw-2">&amp;mut </span>World,
+<a href=#428 id=428 data-nosnippet>428</a>    device: <span class="kw-2">&amp;</span>wgpu::Device,
+<a href=#429 id=429 data-nosnippet>429</a>) -&gt; <span class="prelude-ty">Result</span>&lt;PreparedDrapes, SystemError&gt; {
+<a href=#430 id=430 data-nosnippet>430</a>    <span class="kw">let </span>memory = world
+<a href=#431 id=431 data-nosnippet>431</a>        .resources
+<a href=#432 id=432 data-nosnippet>432</a>        .get::&lt;MemoryBudget&gt;()
+<a href=#433 id=433 data-nosnippet>433</a>        .copied()
+<a href=#434 id=434 data-nosnippet>434</a>        .unwrap_or_default();
+<a href=#435 id=435 data-nosnippet>435</a>    <span class="kw">let </span>clear_color = background_clear_color(style);
+<a href=#436 id=436 data-nosnippet>436</a>    <span class="kw">let </span>paint_zoom =
+<a href=#437 id=437 data-nosnippet>437</a>        <span class="kw">crate</span>::vector::upload_system::paint::current_zoom(world, view_state.style_zoom().value());
+<a href=#438 id=438 data-nosnippet>438</a>    <span class="kw">let </span>prints: Vec&lt;u64&gt; = {
+<a href=#439 id=439 data-nosnippet>439</a>        <span class="kw">let </span>content = loaded_content(world);
+<a href=#440 id=440 data-nosnippet>440</a>        specs
+<a href=#441 id=441 data-nosnippet>441</a>            .iter()
+<a href=#442 id=442 data-nosnippet>442</a>            .map(|spec| fingerprint(spec, <span class="kw-2">&amp;</span>content, clear_color, paint_zoom))
+<a href=#443 id=443 data-nosnippet>443</a>            .collect()
+<a href=#444 id=444 data-nosnippet>444</a>    };
+<a href=#445 id=445 data-nosnippet>445</a>    <span class="comment">// A tile whose vector sources are finished but not yet in the buffer pool would drape
+<a href=#446 id=446 data-nosnippet>446</a>    // blank; it shows an ancestor's drape until they are.
+<a href=#447 id=447 data-nosnippet>447</a>    </span><span class="kw">let </span>strict = world
+<a href=#448 id=448 data-nosnippet>448</a>        .resources
+<a href=#449 id=449 data-nosnippet>449</a>        .get::&lt;cohort::TextureCohort&gt;()
+<a href=#450 id=450 data-nosnippet>450</a>        .is_some_and(|state| state.enabled);
+<a href=#451 id=451 data-nosnippet>451</a>    <span class="kw">let </span><span class="kw-2">mut </span>ready: Vec&lt;bool&gt; = specs
+<a href=#452 id=452 data-nosnippet>452</a>        .iter()
+<a href=#453 id=453 data-nosnippet>453</a>        .map(|spec| readiness::ready(spec, style, view_state.style_zoom().value(), world, strict))
+<a href=#454 id=454 data-nosnippet>454</a>        .collect();
+<a href=#455 id=455 data-nosnippet>455</a>    <span class="kw">let </span>capacity = <span class="kw">match </span>world.resources.get::&lt;Eventually&lt;WgpuTileViewPattern&gt;&gt;() {
+<a href=#456 id=456 data-nosnippet>456</a>        <span class="prelude-val">Some</span>(Initialized(pattern)) =&gt; pattern.remaining_metadata_capacity(),
+<a href=#457 id=457 data-nosnippet>457</a>        <span class="kw">_ </span>=&gt; <span class="number">0</span>,
+<a href=#458 id=458 data-nosnippet>458</a>    };
+<a href=#459 id=459 data-nosnippet>459</a>    surface_covering::fit_metadata(specs, <span class="kw-2">&amp;mut </span>ready, capacity);
+<a href=#460 id=460 data-nosnippet>460</a>    <span class="kw">let </span>budget = world
+<a href=#461 id=461 data-nosnippet>461</a>        .resources
+<a href=#462 id=462 data-nosnippet>462</a>        .get::&lt;DrapeBudget&gt;()
+<a href=#463 id=463 data-nosnippet>463</a>        .copied()
+<a href=#464 id=464 data-nosnippet>464</a>        .unwrap_or_default();
+<a href=#465 id=465 data-nosnippet>465</a>    <span class="kw">let </span>limit = <span class="kw">if </span>view_state.has_external_view() {
+<a href=#466 id=466 data-nosnippet>466</a>        budget.per_eye_frame
+<a href=#467 id=467 data-nosnippet>467</a>    } <span class="kw">else </span>{
+<a href=#468 id=468 data-nosnippet>468</a>        budget.per_frame
+<a href=#469 id=469 data-nosnippet>469</a>    };
+<a href=#470 id=470 data-nosnippet>470</a>    <span class="comment">// A moving view draws what fits its time; the view at rest draws the rest at full pace.
+<a href=#471 id=471 data-nosnippet>471</a>    </span><span class="kw">let </span>budget = <span class="kw">if </span><span class="kw">crate</span>::render::frame_signals::camera_moved(world, view_state) {
+<a href=#472 id=472 data-nosnippet>472</a>        world
+<a href=#473 id=473 data-nosnippet>473</a>            .resources
+<a href=#474 id=474 data-nosnippet>474</a>            .get::&lt;<span class="kw">crate</span>::terrain::drape_timing::DrapeCost&gt;()
+<a href=#475 id=475 data-nosnippet>475</a>            .copied()
+<a href=#476 id=476 data-nosnippet>476</a>            .unwrap_or_default()
+<a href=#477 id=477 data-nosnippet>477</a>            .drapes_within(budget.moving_time, limit)
+<a href=#478 id=478 data-nosnippet>478</a>    } <span class="kw">else </span>{
+<a href=#479 id=479 data-nosnippet>479</a>        limit
+<a href=#480 id=480 data-nosnippet>480</a>    };
+<a href=#481 id=481 data-nosnippet>481</a>    <span class="kw">let </span>extra_retained = world
+<a href=#482 id=482 data-nosnippet>482</a>        .resources
+<a href=#483 id=483 data-nosnippet>483</a>        .get::&lt;<span class="kw">crate</span>::render::eye_covering::SlotResidencyFloor&gt;()
+<a href=#484 id=484 data-nosnippet>484</a>        .map(|floor| floor.retained_drapes.clone());
+<a href=#485 id=485 data-nosnippet>485</a>    <span class="kw">let </span>(redraw, drape_sources, deferred) = {
+<a href=#486 id=486 data-nosnippet>486</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(Initialized(terrain)) = world.resources.get_mut::&lt;Eventually&lt;TerrainResources&gt;&gt;()
+<a href=#487 id=487 data-nosnippet>487</a>        <span class="kw">else </span>{
+<a href=#488 id=488 data-nosnippet>488</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(SystemError::Dependencies);
+<a href=#489 id=489 data-nosnippet>489</a>        };
+<a href=#490 id=490 data-nosnippet>490</a>        terrain.ensure_scratch(device);
+<a href=#491 id=491 data-nosnippet>491</a>        acquire_drapes(
+<a href=#492 id=492 data-nosnippet>492</a>            (specs, extra_retained.as_ref()),
+<a href=#493 id=493 data-nosnippet>493</a>            <span class="kw-2">&amp;</span>prints,
+<a href=#494 id=494 data-nosnippet>494</a>            <span class="kw-2">&amp;</span>ready,
+<a href=#495 id=495 data-nosnippet>495</a>            memory,
+<a href=#496 id=496 data-nosnippet>496</a>            (budget, limit),
+<a href=#497 id=497 data-nosnippet>497</a>            terrain,
+<a href=#498 id=498 data-nosnippet>498</a>            device,
+<a href=#499 id=499 data-nosnippet>499</a>        )
+<a href=#500 id=500 data-nosnippet>500</a>    };
+<a href=#501 id=501 data-nosnippet>501</a>    <span class="kw">crate</span>::render::frame_signals::count_drape_redraws(
+<a href=#502 id=502 data-nosnippet>502</a>        world,
+<a href=#503 id=503 data-nosnippet>503</a>        redraw.iter().filter(|drawn| <span class="kw-2">**</span>drawn).count(),
+<a href=#504 id=504 data-nosnippet>504</a>    );
+<a href=#505 id=505 data-nosnippet>505</a>    <span class="comment">// A drape left for a later frame's budget needs that frame.
+<a href=#506 id=506 data-nosnippet>506</a>    </span><span class="kw">if </span>deferred {
+<a href=#507 id=507 data-nosnippet>507</a>        <span class="kw">crate</span>::render::frame_signals::keep_animating(world);
+<a href=#508 id=508 data-nosnippet>508</a>    }
+<a href=#509 id=509 data-nosnippet>509</a>    <span class="prelude-val">Ok</span>(PreparedDrapes {
+<a href=#510 id=510 data-nosnippet>510</a>        redraw,
+<a href=#511 id=511 data-nosnippet>511</a>        sources: drape_sources,
+<a href=#512 id=512 data-nosnippet>512</a>        clear_color,
+<a href=#513 id=513 data-nosnippet>513</a>    })
+<a href=#514 id=514 data-nosnippet>514</a>}
 </code></pre></div></section></main></body></html>

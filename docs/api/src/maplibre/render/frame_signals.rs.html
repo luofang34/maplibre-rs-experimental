@@ -265,30 +265,43 @@
 <a href=#265 id=265 data-nosnippet>265</a>            || signals.cameras.get(eye_index(<span class="kw-2">&amp;</span><span class="self">self</span>.world)) != <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>camera(<span class="self">self</span>))
 <a href=#266 id=266 data-nosnippet>266</a>    }
 <a href=#267 id=267 data-nosnippet>267</a>
-<a href=#268 id=268 data-nosnippet>268</a>    <span class="doccomment">/// Changes whenever a frame draws the camera somewhere other than the frame before, from a
-<a href=#269 id=269 data-nosnippet>269</a>    /// gesture, a jump or a move; a host watching the camera compares it with the one it saw.
-<a href=#270 id=270 data-nosnippet>270</a>    </span><span class="kw">pub fn </span>camera_revision(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; u64 {
-<a href=#271 id=271 data-nosnippet>271</a>        <span class="self">self</span>.world
-<a href=#272 id=272 data-nosnippet>272</a>            .resources
-<a href=#273 id=273 data-nosnippet>273</a>            .get::&lt;FrameSignals&gt;()
-<a href=#274 id=274 data-nosnippet>274</a>            .map_or(<span class="number">0</span>, |signals| signals.camera_revision)
-<a href=#275 id=275 data-nosnippet>275</a>    }
-<a href=#276 id=276 data-nosnippet>276</a>
-<a href=#277 id=277 data-nosnippet>277</a>    <span class="doccomment">/// The statistics of the last finished frame.
-<a href=#278 id=278 data-nosnippet>278</a>    </span><span class="kw">pub fn </span>last_frame_stats(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; FrameStats {
-<a href=#279 id=279 data-nosnippet>279</a>        <span class="self">self</span>.world
-<a href=#280 id=280 data-nosnippet>280</a>            .resources
-<a href=#281 id=281 data-nosnippet>281</a>            .get::&lt;FrameSignals&gt;()
-<a href=#282 id=282 data-nosnippet>282</a>            .map(|signals| signals.last.clone())
-<a href=#283 id=283 data-nosnippet>283</a>            .unwrap_or_default()
-<a href=#284 id=284 data-nosnippet>284</a>    }
-<a href=#285 id=285 data-nosnippet>285</a>
-<a href=#286 id=286 data-nosnippet>286</a>    <span class="doccomment">/// The resources that became ready since the last call.
-<a href=#287 id=287 data-nosnippet>287</a>    </span><span class="kw">pub fn </span>take_ready_resources(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; Vec&lt;ResourceReady&gt; {
-<a href=#288 id=288 data-nosnippet>288</a>        std::mem::take(<span class="kw-2">&amp;mut </span>signals(<span class="kw-2">&amp;mut </span><span class="self">self</span>.world).events)
-<a href=#289 id=289 data-nosnippet>289</a>    }
-<a href=#290 id=290 data-nosnippet>290</a>}
-<a href=#291 id=291 data-nosnippet>291</a>
-<a href=#292 id=292 data-nosnippet>292</a><span class="attr">#[cfg(test)]
-<a href=#293 id=293 data-nosnippet>293</a></span><span class="kw">mod </span>tests;
+<a href=#268 id=268 data-nosnippet>268</a>    <span class="doccomment">/// Whether the map has immediately actionable frame work: it has never drawn, something
+<a href=#269 id=269 data-nosnippet>269</a>    /// changed or continues animating since the last frame, a retry backoff timer is due, or
+<a href=#270 id=270 data-nosnippet>270</a>    /// the camera moved — excluding remote tile fetches that are merely in flight on the wire.
+<a href=#271 id=271 data-nosnippet>271</a>    </span><span class="kw">pub fn </span>has_ready_work(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+<a href=#272 id=272 data-nosnippet>272</a>        <span class="kw">let </span>retry_due = <span class="self">self</span>.next_retry_delay() == <span class="prelude-val">Some</span>(Duration::ZERO);
+<a href=#273 id=273 data-nosnippet>273</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(signals) = <span class="self">self</span>.world.resources.get::&lt;FrameSignals&gt;() <span class="kw">else </span>{
+<a href=#274 id=274 data-nosnippet>274</a>            <span class="kw">return </span><span class="bool-val">true</span>;
+<a href=#275 id=275 data-nosnippet>275</a>        };
+<a href=#276 id=276 data-nosnippet>276</a>        signals.dirty
+<a href=#277 id=277 data-nosnippet>277</a>            || retry_due
+<a href=#278 id=278 data-nosnippet>278</a>            || signals.cameras.get(eye_index(<span class="kw-2">&amp;</span><span class="self">self</span>.world)) != <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>camera(<span class="self">self</span>))
+<a href=#279 id=279 data-nosnippet>279</a>    }
+<a href=#280 id=280 data-nosnippet>280</a>
+<a href=#281 id=281 data-nosnippet>281</a>    <span class="doccomment">/// Changes whenever a frame draws the camera somewhere other than the frame before, from a
+<a href=#282 id=282 data-nosnippet>282</a>    /// gesture, a jump or a move; a host watching the camera compares it with the one it saw.
+<a href=#283 id=283 data-nosnippet>283</a>    </span><span class="kw">pub fn </span>camera_revision(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; u64 {
+<a href=#284 id=284 data-nosnippet>284</a>        <span class="self">self</span>.world
+<a href=#285 id=285 data-nosnippet>285</a>            .resources
+<a href=#286 id=286 data-nosnippet>286</a>            .get::&lt;FrameSignals&gt;()
+<a href=#287 id=287 data-nosnippet>287</a>            .map_or(<span class="number">0</span>, |signals| signals.camera_revision)
+<a href=#288 id=288 data-nosnippet>288</a>    }
+<a href=#289 id=289 data-nosnippet>289</a>
+<a href=#290 id=290 data-nosnippet>290</a>    <span class="doccomment">/// The statistics of the last finished frame.
+<a href=#291 id=291 data-nosnippet>291</a>    </span><span class="kw">pub fn </span>last_frame_stats(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; FrameStats {
+<a href=#292 id=292 data-nosnippet>292</a>        <span class="self">self</span>.world
+<a href=#293 id=293 data-nosnippet>293</a>            .resources
+<a href=#294 id=294 data-nosnippet>294</a>            .get::&lt;FrameSignals&gt;()
+<a href=#295 id=295 data-nosnippet>295</a>            .map(|signals| signals.last.clone())
+<a href=#296 id=296 data-nosnippet>296</a>            .unwrap_or_default()
+<a href=#297 id=297 data-nosnippet>297</a>    }
+<a href=#298 id=298 data-nosnippet>298</a>
+<a href=#299 id=299 data-nosnippet>299</a>    <span class="doccomment">/// The resources that became ready since the last call.
+<a href=#300 id=300 data-nosnippet>300</a>    </span><span class="kw">pub fn </span>take_ready_resources(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; Vec&lt;ResourceReady&gt; {
+<a href=#301 id=301 data-nosnippet>301</a>        std::mem::take(<span class="kw-2">&amp;mut </span>signals(<span class="kw-2">&amp;mut </span><span class="self">self</span>.world).events)
+<a href=#302 id=302 data-nosnippet>302</a>    }
+<a href=#303 id=303 data-nosnippet>303</a>}
+<a href=#304 id=304 data-nosnippet>304</a>
+<a href=#305 id=305 data-nosnippet>305</a><span class="attr">#[cfg(test)]
+<a href=#306 id=306 data-nosnippet>306</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>

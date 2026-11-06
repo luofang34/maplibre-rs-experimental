@@ -405,87 +405,92 @@
 <a href=#405 id=405 data-nosnippet>405</a><span class="doccomment">/// The tiles each request family considered this frame; a family that did not run leaves
 <a href=#406 id=406 data-nosnippet>406</a>/// its requests alone.
 <a href=#407 id=407 data-nosnippet>407</a></span><span class="attr">#[derive(Default)]
-<a href=#408 id=408 data-nosnippet>408</a></span><span class="kw">struct </span>WantedRequests([<span class="prelude-ty">Option</span>&lt;HashSet&lt;WorldTileCoords&gt;&gt;; <span class="number">3</span>]);
+<a href=#408 id=408 data-nosnippet>408</a></span><span class="kw">struct </span>WantedRequests([<span class="prelude-ty">Option</span>&lt;rustc_hash::FxHashSet&lt;WorldTileCoords&gt;&gt;; <span class="number">3</span>]);
 <a href=#409 id=409 data-nosnippet>409</a>
 <a href=#410 id=410 data-nosnippet>410</a><span class="doccomment">/// Attempts given up on, for the next request system to stop in its worker.
 <a href=#411 id=411 data-nosnippet>411</a></span><span class="attr">#[derive(Default)]
 <a href=#412 id=412 data-nosnippet>412</a></span><span class="kw">struct </span>CancelledAttempts(Vec&lt;u64&gt;);
 <a href=#413 id=413 data-nosnippet>413</a>
 <a href=#414 id=414 data-nosnippet>414</a><span class="doccomment">/// Records the tiles a request family still wants, whether or not it requested them now.
-<a href=#415 id=415 data-nosnippet>415</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>want(world: <span class="kw-2">&amp;mut </span>World, kind: RequestKind, coords: <span class="kw-2">&amp;</span>HashSet&lt;WorldTileCoords&gt;) {
-<a href=#416 id=416 data-nosnippet>416</a>    world.resources.get_or_init_mut::&lt;WantedRequests&gt;().<span class="number">0</span>[kind.index()] = <span class="prelude-val">Some</span>(coords.clone());
-<a href=#417 id=417 data-nosnippet>417</a>}
-<a href=#418 id=418 data-nosnippet>418</a>
-<a href=#419 id=419 data-nosnippet>419</a><span class="doccomment">/// Gives up the requests in flight that no request family wanted this frame, so they stop
-<a href=#420 id=420 data-nosnippet>420</a>/// holding a slot, and returns the tiles they were for. Tiles in `in_use` keep theirs: the
-<a href=#421 id=421 data-nosnippet>421</a>/// drape requests a family follows lag a frame behind what the view uses.
-<a href=#422 id=422 data-nosnippet>422</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>cancel_unwanted(
-<a href=#423 id=423 data-nosnippet>423</a>    world: <span class="kw-2">&amp;mut </span>World,
-<a href=#424 id=424 data-nosnippet>424</a>    in_use: <span class="kw-2">&amp;</span>HashSet&lt;WorldTileCoords&gt;,
-<a href=#425 id=425 data-nosnippet>425</a>) -&gt; Vec&lt;WorldTileCoords&gt; {
-<a href=#426 id=426 data-nosnippet>426</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(wanted) = world
-<a href=#427 id=427 data-nosnippet>427</a>        .resources
-<a href=#428 id=428 data-nosnippet>428</a>        .get_mut::&lt;WantedRequests&gt;()
-<a href=#429 id=429 data-nosnippet>429</a>        .map(std::mem::take)
-<a href=#430 id=430 data-nosnippet>430</a>    <span class="kw">else </span>{
-<a href=#431 id=431 data-nosnippet>431</a>        <span class="kw">return </span>Vec::new();
-<a href=#432 id=432 data-nosnippet>432</a>    };
-<a href=#433 id=433 data-nosnippet>433</a>    <span class="kw">let </span>coords: Vec&lt;WorldTileCoords&gt; = world
-<a href=#434 id=434 data-nosnippet>434</a>        .tiles
-<a href=#435 id=435 data-nosnippet>435</a>        .tiles
-<a href=#436 id=436 data-nosnippet>436</a>        .values()
-<a href=#437 id=437 data-nosnippet>437</a>        .map(|tile| tile.coords)
-<a href=#438 id=438 data-nosnippet>438</a>        .filter(|coords| !in_use.contains(coords))
-<a href=#439 id=439 data-nosnippet>439</a>        .collect();
-<a href=#440 id=440 data-nosnippet>440</a>    <span class="kw">let </span><span class="kw-2">mut </span>cancelled = Vec::new();
-<a href=#441 id=441 data-nosnippet>441</a>    <span class="kw">let </span><span class="kw-2">mut </span>tiles = Vec::new();
-<a href=#442 id=442 data-nosnippet>442</a>    <span class="kw">let </span><span class="kw-2">mut </span>given_up = Vec::new();
-<a href=#443 id=443 data-nosnippet>443</a>    <span class="kw">for </span>coords <span class="kw">in </span>coords {
-<a href=#444 id=444 data-nosnippet>444</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(retries) = world.tiles.query_mut::&lt;<span class="kw-2">&amp;mut </span>TileRequestRetries&gt;(coords) <span class="kw">else </span>{
-<a href=#445 id=445 data-nosnippet>445</a>            <span class="kw">continue</span>;
-<a href=#446 id=446 data-nosnippet>446</a>        };
-<a href=#447 id=447 data-nosnippet>447</a>        <span class="kw">for </span>((state, wanted), kind) <span class="kw">in </span>retries.<span class="number">0</span>.iter_mut().zip(<span class="kw-2">&amp;</span>wanted.<span class="number">0</span>).zip([
-<a href=#448 id=448 data-nosnippet>448</a>            RequestKind::Raster,
-<a href=#449 id=449 data-nosnippet>449</a>            RequestKind::Dem,
-<a href=#450 id=450 data-nosnippet>450</a>            RequestKind::Vector,
-<a href=#451 id=451 data-nosnippet>451</a>        ]) {
-<a href=#452 id=452 data-nosnippet>452</a>            <span class="kw">let </span>unwanted = wanted.as_ref().is_some_and(|set| !set.contains(<span class="kw-2">&amp;</span>coords));
-<a href=#453 id=453 data-nosnippet>453</a>            <span class="kw">if </span>state.pending &amp;&amp; unwanted {
-<a href=#454 id=454 data-nosnippet>454</a>                cancelled.extend(state.attempt);
-<a href=#455 id=455 data-nosnippet>455</a>                <span class="kw-2">*</span>state = RetryState::default();
-<a href=#456 id=456 data-nosnippet>456</a>                given_up.push((coords, kind));
-<a href=#457 id=457 data-nosnippet>457</a>                <span class="kw">if </span>!tiles.contains(<span class="kw-2">&amp;</span>coords) {
-<a href=#458 id=458 data-nosnippet>458</a>                    tiles.push(coords);
-<a href=#459 id=459 data-nosnippet>459</a>                }
-<a href=#460 id=460 data-nosnippet>460</a>            }
-<a href=#461 id=461 data-nosnippet>461</a>        }
-<a href=#462 id=462 data-nosnippet>462</a>    }
-<a href=#463 id=463 data-nosnippet>463</a>    <span class="kw">for </span>(coords, kind) <span class="kw">in </span>given_up {
-<a href=#464 id=464 data-nosnippet>464</a>        <span class="kw">crate</span>::io::tile_load::abandoned(world, coords, kind);
-<a href=#465 id=465 data-nosnippet>465</a>    }
-<a href=#466 id=466 data-nosnippet>466</a>    world
-<a href=#467 id=467 data-nosnippet>467</a>        .resources
-<a href=#468 id=468 data-nosnippet>468</a>        .get_or_init_mut::&lt;CancelledAttempts&gt;()
-<a href=#469 id=469 data-nosnippet>469</a>        .<span class="number">0
-<a href=#470 id=470 data-nosnippet>470</a>        </span>.extend(cancelled);
-<a href=#471 id=471 data-nosnippet>471</a>    tiles
-<a href=#472 id=472 data-nosnippet>472</a>}
-<a href=#473 id=473 data-nosnippet>473</a>
-<a href=#474 id=474 data-nosnippet>474</a><span class="doccomment">/// Stops the worker calls of the attempts cancelled since the last call.
-<a href=#475 id=475 data-nosnippet>475</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>stop_cancelled&lt;K: <span class="kw">crate</span>::environment::OffscreenKernel&gt;(
-<a href=#476 id=476 data-nosnippet>476</a>    world: <span class="kw-2">&amp;mut </span>World,
-<a href=#477 id=477 data-nosnippet>477</a>    apc: <span class="kw-2">&amp;</span><span class="kw">impl </span><span class="kw">crate</span>::io::apc::AsyncProcedureCall&lt;K&gt;,
-<a href=#478 id=478 data-nosnippet>478</a>) {
-<a href=#479 id=479 data-nosnippet>479</a>    <span class="kw">let </span>cancelled = world
-<a href=#480 id=480 data-nosnippet>480</a>        .resources
-<a href=#481 id=481 data-nosnippet>481</a>        .get_mut::&lt;CancelledAttempts&gt;()
-<a href=#482 id=482 data-nosnippet>482</a>        .map(|cancelled| std::mem::take(<span class="kw-2">&amp;mut </span>cancelled.<span class="number">0</span>))
-<a href=#483 id=483 data-nosnippet>483</a>        .unwrap_or_default();
-<a href=#484 id=484 data-nosnippet>484</a>    <span class="kw">for </span>attempt <span class="kw">in </span>cancelled {
-<a href=#485 id=485 data-nosnippet>485</a>        apc.cancel(attempt);
-<a href=#486 id=486 data-nosnippet>486</a>    }
-<a href=#487 id=487 data-nosnippet>487</a>}
-<a href=#488 id=488 data-nosnippet>488</a>
-<a href=#489 id=489 data-nosnippet>489</a><span class="attr">#[cfg(test)]
-<a href=#490 id=490 data-nosnippet>490</a></span><span class="kw">mod </span>tests;
+<a href=#415 id=415 data-nosnippet>415</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>want&lt;S: std::hash::BuildHasher&gt;(
+<a href=#416 id=416 data-nosnippet>416</a>    world: <span class="kw-2">&amp;mut </span>World,
+<a href=#417 id=417 data-nosnippet>417</a>    kind: RequestKind,
+<a href=#418 id=418 data-nosnippet>418</a>    coords: <span class="kw-2">&amp;</span>HashSet&lt;WorldTileCoords, S&gt;,
+<a href=#419 id=419 data-nosnippet>419</a>) {
+<a href=#420 id=420 data-nosnippet>420</a>    world.resources.get_or_init_mut::&lt;WantedRequests&gt;().<span class="number">0</span>[kind.index()] =
+<a href=#421 id=421 data-nosnippet>421</a>        <span class="prelude-val">Some</span>(coords.iter().copied().collect());
+<a href=#422 id=422 data-nosnippet>422</a>}
+<a href=#423 id=423 data-nosnippet>423</a>
+<a href=#424 id=424 data-nosnippet>424</a><span class="doccomment">/// Gives up the requests in flight that no request family wanted this frame, so they stop
+<a href=#425 id=425 data-nosnippet>425</a>/// holding a slot, and returns the tiles they were for. Tiles in `in_use` keep theirs: the
+<a href=#426 id=426 data-nosnippet>426</a>/// drape requests a family follows lag a frame behind what the view uses.
+<a href=#427 id=427 data-nosnippet>427</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>cancel_unwanted&lt;S: std::hash::BuildHasher&gt;(
+<a href=#428 id=428 data-nosnippet>428</a>    world: <span class="kw-2">&amp;mut </span>World,
+<a href=#429 id=429 data-nosnippet>429</a>    in_use: <span class="kw-2">&amp;</span>HashSet&lt;WorldTileCoords, S&gt;,
+<a href=#430 id=430 data-nosnippet>430</a>) -&gt; Vec&lt;WorldTileCoords&gt; {
+<a href=#431 id=431 data-nosnippet>431</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(wanted) = world
+<a href=#432 id=432 data-nosnippet>432</a>        .resources
+<a href=#433 id=433 data-nosnippet>433</a>        .get_mut::&lt;WantedRequests&gt;()
+<a href=#434 id=434 data-nosnippet>434</a>        .map(std::mem::take)
+<a href=#435 id=435 data-nosnippet>435</a>    <span class="kw">else </span>{
+<a href=#436 id=436 data-nosnippet>436</a>        <span class="kw">return </span>Vec::new();
+<a href=#437 id=437 data-nosnippet>437</a>    };
+<a href=#438 id=438 data-nosnippet>438</a>    <span class="kw">let </span>coords: Vec&lt;WorldTileCoords&gt; = world
+<a href=#439 id=439 data-nosnippet>439</a>        .tiles
+<a href=#440 id=440 data-nosnippet>440</a>        .tiles
+<a href=#441 id=441 data-nosnippet>441</a>        .values()
+<a href=#442 id=442 data-nosnippet>442</a>        .map(|tile| tile.coords)
+<a href=#443 id=443 data-nosnippet>443</a>        .filter(|coords| !in_use.contains(coords))
+<a href=#444 id=444 data-nosnippet>444</a>        .collect();
+<a href=#445 id=445 data-nosnippet>445</a>    <span class="kw">let </span><span class="kw-2">mut </span>cancelled = Vec::new();
+<a href=#446 id=446 data-nosnippet>446</a>    <span class="kw">let </span><span class="kw-2">mut </span>tiles = Vec::new();
+<a href=#447 id=447 data-nosnippet>447</a>    <span class="kw">let </span><span class="kw-2">mut </span>given_up = Vec::new();
+<a href=#448 id=448 data-nosnippet>448</a>    <span class="kw">for </span>coords <span class="kw">in </span>coords {
+<a href=#449 id=449 data-nosnippet>449</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(retries) = world.tiles.query_mut::&lt;<span class="kw-2">&amp;mut </span>TileRequestRetries&gt;(coords) <span class="kw">else </span>{
+<a href=#450 id=450 data-nosnippet>450</a>            <span class="kw">continue</span>;
+<a href=#451 id=451 data-nosnippet>451</a>        };
+<a href=#452 id=452 data-nosnippet>452</a>        <span class="kw">for </span>((state, wanted), kind) <span class="kw">in </span>retries.<span class="number">0</span>.iter_mut().zip(<span class="kw-2">&amp;</span>wanted.<span class="number">0</span>).zip([
+<a href=#453 id=453 data-nosnippet>453</a>            RequestKind::Raster,
+<a href=#454 id=454 data-nosnippet>454</a>            RequestKind::Dem,
+<a href=#455 id=455 data-nosnippet>455</a>            RequestKind::Vector,
+<a href=#456 id=456 data-nosnippet>456</a>        ]) {
+<a href=#457 id=457 data-nosnippet>457</a>            <span class="kw">let </span>unwanted = wanted.as_ref().is_some_and(|set| !set.contains(<span class="kw-2">&amp;</span>coords));
+<a href=#458 id=458 data-nosnippet>458</a>            <span class="kw">if </span>state.pending &amp;&amp; unwanted {
+<a href=#459 id=459 data-nosnippet>459</a>                cancelled.extend(state.attempt);
+<a href=#460 id=460 data-nosnippet>460</a>                <span class="kw-2">*</span>state = RetryState::default();
+<a href=#461 id=461 data-nosnippet>461</a>                given_up.push((coords, kind));
+<a href=#462 id=462 data-nosnippet>462</a>                <span class="kw">if </span>!tiles.contains(<span class="kw-2">&amp;</span>coords) {
+<a href=#463 id=463 data-nosnippet>463</a>                    tiles.push(coords);
+<a href=#464 id=464 data-nosnippet>464</a>                }
+<a href=#465 id=465 data-nosnippet>465</a>            }
+<a href=#466 id=466 data-nosnippet>466</a>        }
+<a href=#467 id=467 data-nosnippet>467</a>    }
+<a href=#468 id=468 data-nosnippet>468</a>    <span class="kw">for </span>(coords, kind) <span class="kw">in </span>given_up {
+<a href=#469 id=469 data-nosnippet>469</a>        <span class="kw">crate</span>::io::tile_load::abandoned(world, coords, kind);
+<a href=#470 id=470 data-nosnippet>470</a>    }
+<a href=#471 id=471 data-nosnippet>471</a>    world
+<a href=#472 id=472 data-nosnippet>472</a>        .resources
+<a href=#473 id=473 data-nosnippet>473</a>        .get_or_init_mut::&lt;CancelledAttempts&gt;()
+<a href=#474 id=474 data-nosnippet>474</a>        .<span class="number">0
+<a href=#475 id=475 data-nosnippet>475</a>        </span>.extend(cancelled);
+<a href=#476 id=476 data-nosnippet>476</a>    tiles
+<a href=#477 id=477 data-nosnippet>477</a>}
+<a href=#478 id=478 data-nosnippet>478</a>
+<a href=#479 id=479 data-nosnippet>479</a><span class="doccomment">/// Stops the worker calls of the attempts cancelled since the last call.
+<a href=#480 id=480 data-nosnippet>480</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>stop_cancelled&lt;K: <span class="kw">crate</span>::environment::OffscreenKernel&gt;(
+<a href=#481 id=481 data-nosnippet>481</a>    world: <span class="kw-2">&amp;mut </span>World,
+<a href=#482 id=482 data-nosnippet>482</a>    apc: <span class="kw-2">&amp;</span><span class="kw">impl </span><span class="kw">crate</span>::io::apc::AsyncProcedureCall&lt;K&gt;,
+<a href=#483 id=483 data-nosnippet>483</a>) {
+<a href=#484 id=484 data-nosnippet>484</a>    <span class="kw">let </span>cancelled = world
+<a href=#485 id=485 data-nosnippet>485</a>        .resources
+<a href=#486 id=486 data-nosnippet>486</a>        .get_mut::&lt;CancelledAttempts&gt;()
+<a href=#487 id=487 data-nosnippet>487</a>        .map(|cancelled| std::mem::take(<span class="kw-2">&amp;mut </span>cancelled.<span class="number">0</span>))
+<a href=#488 id=488 data-nosnippet>488</a>        .unwrap_or_default();
+<a href=#489 id=489 data-nosnippet>489</a>    <span class="kw">for </span>attempt <span class="kw">in </span>cancelled {
+<a href=#490 id=490 data-nosnippet>490</a>        apc.cancel(attempt);
+<a href=#491 id=491 data-nosnippet>491</a>    }
+<a href=#492 id=492 data-nosnippet>492</a>}
+<a href=#493 id=493 data-nosnippet>493</a>
+<a href=#494 id=494 data-nosnippet>494</a><span class="attr">#[cfg(test)]
+<a href=#495 id=495 data-nosnippet>495</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>

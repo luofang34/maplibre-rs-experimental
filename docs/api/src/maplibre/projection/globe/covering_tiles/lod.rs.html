@@ -247,7 +247,7 @@
 <a href=#247 id=247 data-nosnippet>247</a>
 <a href=#248 id=248 data-nosnippet>248</a><span class="doccomment">/// The straight distance from a point to a tile's rectangle in Mercator `0..1` units.
 <a href=#249 id=249 data-nosnippet>249</a></span><span class="kw">fn </span>distance_to_tile_planar(point: Point2&lt;f64&gt;, tile: TileCoords) -&gt; f64 {
-<a href=#250 id=250 data-nosnippet>250</a>    <span class="kw">let </span>scale = <span class="number">2_f64</span>.powi(i32::from(u8::from(tile.z)));
+<a href=#250 id=250 data-nosnippet>250</a>    <span class="kw">let </span>scale = tile.z.grid_scale();
 <a href=#251 id=251 data-nosnippet>251</a>    <span class="kw">let </span>size = <span class="number">1.0 </span>/ scale;
 <a href=#252 id=252 data-nosnippet>252</a>    <span class="kw">let </span>axis = |point: f64, corner: f64| {
 <a href=#253 id=253 data-nosnippet>253</a>        <span class="kw">let </span>delta = point - corner;
