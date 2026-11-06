@@ -166,9 +166,12 @@ impl ViewState {
     /// The zoom at which the camera sits `distance_meters` from a center at `center`, the
     /// definition a pose and an external eye share.
     pub(super) fn zoom_for_center_distance(&self, distance_meters: f64, center: LatLon) -> Zoom {
+        let parallel_latitude = center
+            .latitude
+            .clamp(-MERCATOR_LATITUDE_LIMIT, MERCATOR_LATITUDE_LIMIT);
         let meters_per_unit =
-            self.body().circumference_meters() * center.latitude.to_radians().cos();
-        self.zoom_for_center_distance_units(distance_meters / meters_per_unit)
+            self.body().circumference_meters() * parallel_latitude.to_radians().cos();
+        self.zoom_for_center_distance_units(distance_meters.max(1e-3) / meters_per_unit)
     }
 
     /// The zoom at which the camera sits `distance_units` Mercator units from the center.
@@ -300,7 +303,10 @@ impl ViewState {
 /// Position on the unit Mercator square, with y pointing south.
 pub(super) fn mercator_from_lat_lon(position: LatLon) -> Point2<f64> {
     let x = (position.longitude + 180.0) / 360.0;
-    let latitude = position.latitude.to_radians();
+    let latitude = position
+        .latitude
+        .clamp(-89.999_999, 89.999_999)
+        .to_radians();
     let y = 0.5 - (PI / 4.0 + latitude / 2.0).tan().ln() / (2.0 * PI);
     Point2::new(x, y)
 }

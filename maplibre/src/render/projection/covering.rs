@@ -57,6 +57,27 @@ pub struct CoveringRequest {
     pub surface: bool,
 }
 
+/// Default deepest zoom view tiles subdivide to, matching GL JS's `transform.maxZoom` (22)
+/// unless a source explicitly declares a deeper `maxzoom`.
+const VIEW_DEFAULT_MAX_ZOOM: u8 = 22;
+
+fn view_max_zoom(style: &Style) -> u8 {
+    let declared = style
+        .sources
+        .values()
+        .filter_map(|source| match source {
+            Source::Vector(s) | Source::Raster(s) => s.maxzoom,
+            Source::RasterDem(s) => s.maxzoom,
+            Source::GeoJson(s) => s.maxzoom,
+            Source::Image(_) => None,
+        })
+        .max()
+        .unwrap_or(0);
+    VIEW_DEFAULT_MAX_ZOOM
+        .max(declared)
+        .min((crate::coords::MAX_ZOOM - 1) as u8)
+}
+
 impl CoveringRequest {
     /// The request for the view tiles at `level`.
     pub fn view(level: ZoomLevel, zoom: f64) -> Self {
@@ -65,6 +86,19 @@ impl CoveringRequest {
             requested_zoom: zoom,
             rounding: ZoomRounding::Floor,
             zoom_range: SourceZoomRange::default(),
+            surface: false,
+        }
+    }
+
+    /// The request for the view tiles at `level`, bounded by the deepest zoom `style` declares
+    /// (at least zoom 22, matching GL JS's default `maxZoom`).
+    pub fn view_for_style(style: &Style, level: ZoomLevel, zoom: f64) -> Self {
+        let zoom_range = SourceZoomRange::from_style(Some(0), Some(view_max_zoom(style)));
+        Self {
+            level: zoom_range.cap(level),
+            requested_zoom: zoom,
+            rounding: ZoomRounding::Floor,
+            zoom_range,
             surface: false,
         }
     }
@@ -144,13 +178,10 @@ pub fn view_region_for_projection(
     visible_level: ZoomLevel,
     padding: ViewStatePadding,
 ) -> Result<Option<ViewRegion>, ProjectionStateError> {
-    let mut region = covering_region(
-        style,
-        view_state,
-        world,
-        CoveringRequest::view(visible_level, view_state.zoom().value()),
-        padding,
-    )?;
+    let view_request =
+        CoveringRequest::view_for_style(style, visible_level, view_state.zoom().value());
+    let capped_level = view_request.level;
+    let mut region = covering_region(style, view_state, world, view_request, padding)?;
     if padding != ViewStatePadding::Loose {
         return Ok(region);
     }
@@ -159,10 +190,10 @@ pub fn view_region_for_projection(
             style,
             view_state,
             world,
-            CoveringRequest::view(visible_level, view_state.zoom().value()),
+            view_request,
             ViewStatePadding::Tight,
         )?;
-        region = union_regions(visible, region, visible_level, SURROUND_MAX_TILES);
+        region = union_regions(visible, region, capped_level, SURROUND_MAX_TILES);
     }
     // A flight in progress requests the frame it is heading for, at that frame's own level.
     let Some(ahead) = world
@@ -177,13 +208,13 @@ pub fn view_region_for_projection(
         style,
         ahead,
         world,
-        CoveringRequest::view(level, ahead.zoom().value()),
+        CoveringRequest::view_for_style(style, level, ahead.zoom().value()),
         ViewStatePadding::Tight,
     )?;
     Ok(union_regions(
         region,
         destination,
-        visible_level,
+        capped_level,
         PREFETCH_MAX_TILES,
     ))
 }

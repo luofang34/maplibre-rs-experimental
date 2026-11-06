@@ -86,7 +86,8 @@ impl<'a> Dems<'a> {
         );
         for source in sources.tiles.values().flatten() {
             if !map.contains_key(source) {
-                if let Some(DemTileComponent::Loaded(dem)) = tiles.query::<&DemTileComponent>(*source)
+                if let Some(DemTileComponent::Loaded(dem)) =
+                    tiles.query::<&DemTileComponent>(*source)
                 {
                     map.insert(*source, dem.tile.as_ref());
                 }
@@ -267,7 +268,12 @@ fn build_edges(tile: WorldTileCoords, sources: &Sources, dems: &Dems) -> EdgeHei
     let nw = shared_height([tx / scale, ty / scale], tile, sources, dems) as f32;
     let ne = shared_height([(tx + 1.0) / scale, ty / scale], tile, sources, dems) as f32;
     let sw = shared_height([tx / scale, (ty + 1.0) / scale], tile, sources, dems) as f32;
-    let se = shared_height([(tx + 1.0) / scale, (ty + 1.0) / scale], tile, sources, dems) as f32;
+    let se = shared_height(
+        [(tx + 1.0) / scale, (ty + 1.0) / scale],
+        tile,
+        sources,
+        dems,
+    ) as f32;
     result.samples[0] = [nw, sw, nw, ne];
     result.last = [ne, se, sw, se];
 
@@ -341,7 +347,9 @@ fn fill_horizontal_side(
         let px = (owner_x + gx / N as f64) / owner_scale;
         let interior = single_row && gx > 0.0 && gx < N as f64;
         let top = if interior {
-            owner_dem.map_or(0.0, |d| d.sample([px, (owner_y + gy0 / N as f64) / owner_scale]))
+            owner_dem.map_or(0.0, |d| {
+                d.sample([px, (owner_y + gy0 / N as f64) / owner_scale])
+            })
         } else {
             let p = [px, (owner_y + gy0 / N as f64) / owner_scale];
             let ep = owner(p, side_owner, sources);
@@ -427,7 +435,9 @@ fn fill_vertical_side(
         let py = (owner_y + gy / N as f64) / owner_scale;
         let interior = single_col && gy > 0.0 && gy < N as f64;
         let left = if interior {
-            owner_dem.map_or(0.0, |d| d.sample([(owner_x + gx0 / N as f64) / owner_scale, py]))
+            owner_dem.map_or(0.0, |d| {
+                d.sample([(owner_x + gx0 / N as f64) / owner_scale, py])
+            })
         } else {
             let p = [(owner_x + gx0 / N as f64) / owner_scale, py];
             let ep = owner(p, side_owner, sources);

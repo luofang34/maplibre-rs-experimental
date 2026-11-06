@@ -202,7 +202,7 @@ fn curved_tile_volume(
     }
     extend_pole_extremes(&mut extremes, tile, min_radius, max_radius);
     let (min, max) = bounds(&extremes);
-    let axes = tile_axes(tile, corners);
+    let axes = tile_axes(tile);
     extend_curved_edge_extremes(&mut extremes, tile, axes.center, max_radius);
     let planes = tile_planes(&extremes, axes);
     let points = volume_points(tile, planes)?;
@@ -266,20 +266,25 @@ struct TileAxes {
     west: Vector3<f64>,
 }
 
-fn tile_axes(tile: TileCoords, corners: [Vector3<f64>; 4]) -> TileAxes {
-    let center = project_tile_coordinates_to_unit_sphere(
-        tile.x,
-        tile.y,
-        u8::from(tile.z),
-        EXTENT / 2.0,
-        EXTENT / 2.0,
-    );
-    let center_east = Vector3::unit_y().cross(center).normalize();
+fn tile_axes(tile: TileCoords) -> TileAxes {
+    let tile_count = 2_f64.powi(i32::from(u8::from(tile.z)));
+    let lon_west = (f64::from(tile.x) / tile_count) * std::f64::consts::TAU + std::f64::consts::PI;
+    let lon_center =
+        ((f64::from(tile.x) + 0.5) / tile_count) * std::f64::consts::TAU + std::f64::consts::PI;
+    let lon_east =
+        (f64::from(tile.x + 1) / tile_count) * std::f64::consts::TAU + std::f64::consts::PI;
+    let mercator_y = (f64::from(tile.y) + 0.5) / tile_count;
+    let tangent_half_lat = (std::f64::consts::PI - mercator_y * std::f64::consts::TAU).exp();
+    let tangent_half_lat_sq = tangent_half_lat * tangent_half_lat;
+    let denom = tangent_half_lat_sq + 1.0;
+    let sin_lat = (tangent_half_lat_sq - 1.0) / denom;
+    let cos_lat = (2.0 * tangent_half_lat) / denom;
+    let (sin_lon, cos_lon) = lon_center.sin_cos();
     TileAxes {
-        center,
-        north: center.cross(center_east).normalize(),
-        east: corners[2].cross(corners[1]).normalize(),
-        west: corners[0].cross(corners[3]).normalize(),
+        center: Vector3::new(sin_lon * cos_lat, sin_lat, cos_lon * cos_lat),
+        north: Vector3::new(-sin_lon * sin_lat, cos_lat, -cos_lon * sin_lat),
+        east: Vector3::new(-lon_east.cos(), 0.0, lon_east.sin()),
+        west: Vector3::new(lon_west.cos(), 0.0, -lon_west.sin()),
     }
 }
 
@@ -334,33 +339,44 @@ fn volume_points(
 ) -> Result<Vec<Vector3<f64>>, GlobeTileBoundsError> {
     let [up, down, north, south, east, west] = planes;
     let tile_count = 2_u32.pow(u32::from(u8::from(tile.z)));
-    let mut triples = Vec::with_capacity(8);
+    let mut points = Vec::with_capacity(8);
     if tile.y == 0 {
-        triples.extend([(west, east, up), (west, east, down)]);
+        points.push(polar_axis_intersection(up).ok_or_else(|| bounds_error(tile))?);
+        points.push(polar_axis_intersection(down).ok_or_else(|| bounds_error(tile))?);
     } else {
-        triples.extend([
+        for (first, second, third) in [
             (north, east, up),
             (north, east, down),
             (north, west, up),
             (north, west, down),
-        ]);
+        ] {
+            points.push(
+                three_plane_intersection(first, second, third).ok_or_else(|| bounds_error(tile))?,
+            );
+        }
     }
     if tile.y == tile_count - 1 {
-        triples.extend([(west, east, up), (west, east, down)]);
+        points.push(polar_axis_intersection(up).ok_or_else(|| bounds_error(tile))?);
+        points.push(polar_axis_intersection(down).ok_or_else(|| bounds_error(tile))?);
     } else {
-        triples.extend([
+        for (first, second, third) in [
             (south, east, up),
             (south, east, down),
             (south, west, up),
             (south, west, down),
-        ]);
+        ] {
+            points.push(
+                three_plane_intersection(first, second, third).ok_or_else(|| bounds_error(tile))?,
+            );
+        }
     }
-    triples
-        .into_iter()
-        .map(|(first, second, third)| {
-            three_plane_intersection(first, second, third).ok_or_else(|| bounds_error(tile))
-        })
-        .collect()
+    Ok(points)
+}
+
+/// Intersects the globe's polar axis (`x = 0, z = 0`, the exact intersection line of any two
+/// distinct meridian planes) with `plane` without high-zoom `west.cross(east)` cancellation.
+fn polar_axis_intersection(plane: Vector4<f64>) -> Option<Vector3<f64>> {
+    (plane.y.abs() > f64::EPSILON).then(|| Vector3::new(0.0, -plane.w / plane.y, 0.0))
 }
 
 fn three_plane_intersection(

@@ -304,3 +304,98 @@ fn three_degree_final_approach_at_15m_agl_selects_runway_zoom_from_lod_focal_pix
         );
     }
 }
+
+#[test]
+fn external_view_crossing_sea_level_and_poles_keeps_covering_bounded() {
+    use crate::render::{
+        projection::view_region_for_projection, tile_view_pattern::DEFAULT_TILE_SIZE,
+    };
+
+    let style = globe_terrain_style();
+    let world = World::default();
+    let positions = [
+        LatLon::new(39.1295, -75.4660), // KDOV coastal sea-level plain
+        LatLon::new(52.3086, 4.7639),   // EHAM below-MSL threshold
+        LatLon::new(89.9999, 0.0),      // near North Pole
+        LatLon::new(90.0, 45.0),        // exact North Pole
+        LatLon::new(-90.0, -135.0),     // exact South Pole
+    ];
+    let altitudes = [
+        -3.0, -0.5, -0.01, -1e-4, -1e-9, 0.0, 1e-9, 1e-4, 0.005, 0.012, 0.5, 3.0,
+    ];
+    let attitudes = [
+        ("level", 0.0, 0.0),
+        ("touchdown flare", 5.0, -2.0),
+        ("nadir", -90.0, 0.0),
+    ];
+
+    for position in positions {
+        for altitude_meters in altitudes {
+            for (label, pitch_deg, roll_deg) in attitudes {
+                let mut view_state = ViewState::new(
+                    PhysicalSize::new(2560, 1440).expect("viewport"),
+                    WorldCoords::from((0.0, 0.0)),
+                    Zoom::new(14.0),
+                    Deg(0.0),
+                    Rad(0.6435),
+                );
+                let external = ExternalView {
+                    anchor: ExternalAnchor {
+                        position,
+                        altitude_meters,
+                    },
+                    view: view_from_attitude(pitch_deg, roll_deg, 14.0),
+                    frustum: EyeFrustum::symmetric(Rad(0.75), 16.0 / 9.0, 0.5, 250_000.0),
+                };
+                view_state
+                    .set_external_view(external, &GLOBE)
+                    .unwrap_or_else(|e| {
+                        panic!(
+                            "set_external_view failed at {position:?} alt={altitude_meters} ({label}): {e:?}"
+                        )
+                    });
+                assert!(
+                    view_state.zoom().value().is_finite(),
+                    "non-finite zoom at {position:?} alt={altitude_meters} ({label})"
+                );
+                let visible_level = view_state.zoom().zoom_level(DEFAULT_TILE_SIZE);
+                assert!(
+                    usize::from(u8::from(visible_level)) < crate::coords::MAX_ZOOM,
+                    "zoom_level out of bounds at {position:?} alt={altitude_meters}: {visible_level:?}"
+                );
+                projection_data_for_view(&style, &view_state).unwrap_or_else(|e| {
+                    panic!(
+                        "projection_data_for_view failed at {position:?} alt={altitude_meters} ({label}): {e:?}"
+                    )
+                });
+                for padding in [ViewStatePadding::Tight, ViewStatePadding::Loose] {
+                    let region = view_region_for_projection(
+                        &style,
+                        &view_state,
+                        &world,
+                        visible_level,
+                        padding,
+                    )
+                    .unwrap_or_else(|e| {
+                        panic!(
+                            "view_region_for_projection({padding:?}) failed at {position:?} alt={altitude_meters} ({label}): {e:?}"
+                        )
+                    });
+                    if let Some(region) = region {
+                        for coords in region.iter() {
+                            assert!(
+                                u8::from(coords.z) <= 22,
+                                "view tile exceeded z=22 cap: {coords:?} at {position:?} alt={altitude_meters}"
+                            );
+                        }
+                    }
+                    terrain_region(&style, &view_state, &world, 256, padding).unwrap_or_else(|e| {
+                        panic!(
+                            "terrain_region({padding:?}) failed at {position:?} alt={altitude_meters} ({label}): {e:?}"
+                        )
+                    });
+                }
+            }
+        }
+    }
+}

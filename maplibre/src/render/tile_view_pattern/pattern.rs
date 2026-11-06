@@ -23,7 +23,7 @@ use crate::{
 pub type RasterCoverings = [(RasterSourceId, Vec<WorldTileCoords>)];
 
 /// Default number of metadata entries allocated for a tile view pattern.
-pub const DEFAULT_TILE_VIEW_PATTERN_SIZE: wgpu::BufferAddress = 512;
+pub const DEFAULT_TILE_VIEW_PATTERN_SIZE: wgpu::BufferAddress = 2048;
 /// Maximum descendant depth used when no complete source coverage is loaded.
 pub const CHILDREN_SEARCH_DEPTH: usize = 4;
 /// How many zoom levels down a complete set of finer tiles is preferred over a coarser parent.

@@ -231,8 +231,16 @@ impl TerrainCoverageIndex {
         let ty = (gy - (y0 as f32)).clamp(0.0, 1.0);
 
         let h00 = vertex_exag_f32(x0, y0);
-        let h10 = if x1 == x0 { h00 } else { vertex_exag_f32(x1, y0) };
-        let h01 = if y1 == y0 { h00 } else { vertex_exag_f32(x0, y1) };
+        let h10 = if x1 == x0 {
+            h00
+        } else {
+            vertex_exag_f32(x1, y0)
+        };
+        let h01 = if y1 == y0 {
+            h00
+        } else {
+            vertex_exag_f32(x0, y1)
+        };
         let h11 = if x1 == x0 {
             h01
         } else if y1 == y0 {

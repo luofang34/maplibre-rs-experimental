@@ -274,3 +274,37 @@ fn closest_unit_sphere_point_handles_greenwich_antimeridian_and_poles() {
         assert_close(cheb_pole, 0.0);
     }
 }
+
+#[test]
+fn high_zoom_tile_bounding_volumes_remain_non_degenerate_including_polar_rows() {
+    let range = TileElevationRange {
+        min_meters: -50.0,
+        max_meters: 1_200.0,
+    };
+    for z in 26..=31_u8 {
+        let count = 1_u32 << u32::from(z);
+        for (x, y) in [
+            (0, 0),
+            (count / 3, 0),
+            (count / 2, count / 2),
+            (count - 1, count - 1),
+        ] {
+            let volume = globe_tile_bounding_volume(tile(x, y, z), range, Body::EARTH)
+                .unwrap_or_else(|e| panic!("bounding volume failed at z={z} ({x}, {y}): {e:?}"));
+            assert!(
+                volume
+                    .points
+                    .iter()
+                    .all(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite()),
+                "non-finite bounding points at z={z} ({x}, {y})"
+            );
+            assert!(
+                volume.planes.iter().all(|p| p.x.is_finite()
+                    && p.y.is_finite()
+                    && p.z.is_finite()
+                    && p.w.is_finite()),
+                "non-finite bounding planes at z={z} ({x}, {y})"
+            );
+        }
+    }
+}

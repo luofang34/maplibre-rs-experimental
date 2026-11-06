@@ -63,7 +63,7 @@ impl SphereEye {
         let (bearing, pitch, roll) = view_angles(in_local(self.axes.x), in_local(forward));
         SpherePose {
             center: location,
-            distance_meters: (self.position - center).magnitude() * body.radius_meters,
+            distance_meters: ((self.position - center).magnitude() * body.radius_meters).max(1.0),
             bearing: bearing.into(),
             pitch: pitch.into(),
             roll: roll.into(),

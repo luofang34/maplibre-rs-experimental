@@ -273,10 +273,12 @@ impl Zoom {
     /// Selects a tile level using `floor(zoom + log2(512 / tile_size))`.
     ///
     /// `tile_size` is the positive source tile width in pixels. A 256-pixel source selects one
-    /// level higher than a 512-pixel source. The result is not clamped to source min/max zoom.
+    /// level higher than a 512-pixel source. Clamped to `0..MAX_ZOOM`, not source min/max zoom.
     pub fn zoom_level(&self, tile_size: f64) -> ZoomLevel {
         // TODO: Also support round() instead of floor() here
-        let z = (self.0 + (TILE_SIZE / tile_size).ln() / 2.0_f64.ln()).floor() as u8;
+        let z = (self.0 + (TILE_SIZE / tile_size).log2())
+            .floor()
+            .clamp(0.0, (MAX_ZOOM - 1) as f64) as u8;
         ZoomLevel(z)
     }
 }
