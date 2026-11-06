@@ -382,7 +382,7 @@
 <a href=#382 id=382 data-nosnippet>382</a>                                    .map(|buffer| {
 <a href=#383 id=383 data-nosnippet>383</a>                                        buffer <span class="kw">as </span>f32 * <span class="kw">crate</span>::coords::EXTENT <span class="kw">as </span>f32 / <span class="number">512.0
 <a href=#384 id=384 data-nosnippet>384</a>                                    </span>}),
-<a href=#385 id=385 data-nosnippet>385</a>                                ..ExtrusionOptions::for_paint(extrusion)
+<a href=#385 id=385 data-nosnippet>385</a>                                ..ExtrusionOptions::for_paint(extrusion, request.overscaling())
 <a href=#386 id=386 data-nosnippet>386</a>                            });
 <a href=#387 id=387 data-nosnippet>387</a>                        <span class="kw">if </span>use_globe_geometry {
 <a href=#388 id=388 data-nosnippet>388</a>                            <span class="comment">// Roofs and the edges of walls follow the sphere as fills and lines do.

@@ -29,6 +29,7 @@
 
         <!-- Custom theme stylesheets -->
         <link rel="stylesheet" href="../diff-2cf15afe.css">
+        <link rel="stylesheet" href="../examples-71c88e22.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -36,10 +37,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-83e6a66e.js";
+            window.path_to_searchindex_js = "../searchindex-0a32b56e.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-8b613e14.js"></script>
+        <script src="../toc-e964a7da.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -176,13 +177,52 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="examples"><a class="header" href="#examples">Examples</a></h1>
-<p>Practical examples demonstrating MapLibre Rust features across native platforms and WebAssembly:</p>
+<p>Each example reproduces the map of a <a href="https://maplibre.org/maplibre-gl-js/docs/examples/">MapLibre GL JS example</a> with maplibre-rs compiled to WebAssembly.</p>
+<p>maplibre-rs is configured by a <a href="https://maplibre.org/maplibre-style-spec/">style document</a> alone. Where GL JS calls <code>addSource</code> and <code>addLayer</code> once the style has loaded, an example adds the same source and layer to the document before the map starts. Each example module exports a function returning the document, which the embedded page passes to <code>startMapLibre</code>:</p>
+<pre><code class="language-js">import { startMapLibre } from 'maplibre-rs'
+import style from './display-a-map.js'
+
+await startMapLibre(undefined, undefined, JSON.stringify(await style()))
+</code></pre>
+<p>Natively, the demo opens a document saved as JSON:</p>
+<pre><code class="language-bash">cargo run -p maplibre-demo -- headed --style style.json
+</code></pre>
+<p>DOM controls, popups and event handlers of the GL JS examples are left out.</p>
+<h2 id="getting-started"><a class="header" href="#getting-started">Getting Started</a></h2>
 <ul>
 <li><a href="./display-a-map.html">Display a Map</a></li>
+<li><a href="./display-a-satellite-map.html">Display a Satellite Map</a></li>
+</ul>
+<h2 id="globe"><a class="header" href="#globe">Globe</a></h2>
+<ul>
 <li><a href="./display-a-globe-with-a-vector-map.html">Display a Globe with a Vector Map</a></li>
-<li><a href="./add-3d-terrain.html">Add 3D Terrain to a Map</a></li>
+<li><a href="./display-a-globe-with-an-atmosphere.html">Display a Globe with an Atmosphere</a></li>
+</ul>
+<h2 id="terrain--hillshade"><a class="header" href="#terrain--hillshade">Terrain &amp; Hillshade</a></h2>
+<ul>
+<li><a href="./add-3d-terrain.html">Add 3D Terrain</a></li>
+<li><a href="./add-a-hillshade-layer.html">Add a Hillshade Layer</a></li>
+</ul>
+<h2 id="3d-models--buildings"><a class="header" href="#3d-models--buildings">3D Models &amp; Buildings</a></h2>
+<ul>
 <li><a href="./display-buildings-in-3d.html">Display Buildings in 3D</a></li>
+</ul>
+<h2 id="vector--geojson"><a class="header" href="#vector--geojson">Vector &amp; GeoJSON</a></h2>
+<ul>
 <li><a href="./add-a-geojson-line.html">Add a GeoJSON Line</a></li>
+<li><a href="./add-a-geojson-polygon.html">Add a GeoJSON Polygon</a></li>
+</ul>
+<h2 id="raster--imagery"><a class="header" href="#raster--imagery">Raster &amp; Imagery</a></h2>
+<ul>
+<li><a href="./add-a-raster-tile-source.html">Add a Raster Tile Source</a></li>
+</ul>
+<h2 id="expressions"><a class="header" href="#expressions">Expressions</a></h2>
+<ul>
+<li><a href="./style-lines-with-a-data-driven-property.html">Style Lines with a Data-Driven Property</a></li>
+</ul>
+<h2 id="heatmaps--clusters"><a class="header" href="#heatmaps--clusters">Heatmaps &amp; Clusters</a></h2>
+<ul>
+<li><a href="./create-a-heatmap-layer.html">Create a Heatmap Layer</a></li>
 <li><a href="./create-and-style-clusters.html">Create and Style Clusters</a></li>
 </ul>
 

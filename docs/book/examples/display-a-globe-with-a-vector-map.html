@@ -29,6 +29,7 @@
 
         <!-- Custom theme stylesheets -->
         <link rel="stylesheet" href="../diff-2cf15afe.css">
+        <link rel="stylesheet" href="../examples-71c88e22.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -36,10 +37,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-83e6a66e.js";
+            window.path_to_searchindex_js = "../searchindex-0a32b56e.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-8b613e14.js"></script>
+        <script src="../toc-e964a7da.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -176,171 +177,30 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="display-a-globe-with-a-vector-map"><a class="header" href="#display-a-globe-with-a-vector-map">Display a Globe with a Vector Map</a></h1>
-<p>Display a 3D spherical globe with vector tile features using the <code>globe</code> projection.</p>
-<div class="map-container" style="position: relative; width: 100%; height: 520px; border-radius: 8px; overflow: hidden; margin: 1.5rem 0; border: 1px solid #30363d; background: #0b0e14;">
-  <iframe src="./demo/index.html?lat=0&amp;lon=0&amp;zoom=2" style="width: 100%; height: 100%; border: none; display: block;" title="MapLibre Globe Vector Map" allow="fullscreen"></iframe>
-  
-<div style="position: absolute; bottom: 12px; left: 12px; background: rgba(13, 17, 23, 0.85); color: #c9d1d9; padding: 6px 12px; border-radius: 6px; font-size: 12px; backdrop-filter: blur(4px); pointer-events: none; border: 1px solid rgba(255,255,255,0.1);">
-    <span>Drag to orbit • Scroll to zoom • Right-click drag to pitch/rotate</span>
-  </div>
-
+<p>Display a globe with a vector map.</p>
+<div class="example-map">
+  <iframe src="./demo/index.html?example=../code/display-a-globe-with-a-vector-map.js" title="Display a Globe with a Vector Map" loading="lazy" allow="fullscreen"></iframe>
 </div>
 
-<hr>
-<h2 id="1-style-specification"><a class="header" href="#1-style-specification">1. Style Specification</a></h2>
-<p>The projection is declared in the root style JSON specification using the <code>projection</code> property. Setting <code>"type": "globe"</code> switches the map renderer from a flat Mercator projection to a continuous spherical globe.</p>
-<pre><code class="language-json">{
-  "version": 8,
-  "name": "MapLibre Globe Vector Map",
-  "sources": {
-    "openmaptiles": {
-      "type": "vector",
-      "url": "https://demotiles.maplibre.org/tiles/tiles.json"
-    }
-  },
-  "projection": {
-    "type": "globe"
-  },
-  "layers": [
-    {
-      "id": "background",
-      "type": "background",
-      "paint": {
-        "background-color": "#1a1e24"
-      }
-    },
-    {
-      "id": "water",
-      "type": "fill",
-      "source": "openmaptiles",
-      "source-layer": "water",
-      "paint": {
-        "fill-color": "#19334d"
-      }
-    },
-    {
-      "id": "land",
-      "type": "fill",
-      "source": "openmaptiles",
-      "source-layer": "landcover",
-      "paint": {
-        "fill-color": "#2c3e50"
-      }
-    },
-    {
-      "id": "admin-boundaries",
-      "type": "line",
-      "source": "openmaptiles",
-      "source-layer": "boundary",
-      "paint": {
-        "line-color": "#4a6984",
-        "line-width": 1.0
-      }
-    }
-  ]
+<pre><code class="language-js">export default async function style() {
+    const style = await (await fetch('https://demotiles.maplibre.org/style.json')).json();
+    style.projection = {type: 'globe'};
+    style.center = [0, 0];
+    style.zoom = 2;
+    return style;
 }
 </code></pre>
-<hr>
-<h2 id="2-running-natively-in-rust"><a class="header" href="#2-running-natively-in-rust">2. Running Natively in Rust</a></h2>
-<h3 id="command-line"><a class="header" href="#command-line">Command Line</a></h3>
-<p>You can run the globe map locally using the <code>maplibre-demo</code> binary:</p>
-<pre><code class="language-bash"># Run with the default vector map on the globe:
-cargo run -p maplibre-demo -- headed --globe
-
-# Or load a remote style JSON:
-cargo run -p maplibre-demo -- headed --style https://demotiles.maplibre.org/style.json --projection globe
-</code></pre>
-<h3 id="native-api-example"><a class="header" href="#native-api-example">Native API Example</a></h3>
-<p>To instantiate a globe map in a Rust application:</p>
-<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
-</span><span class="boring">fn main() {
-</span>use std::sync::Arc;
-use maplibre::{
-    coords::{LatLon, WorldCoords, Zoom},
-    kernel::KernelBuilder,
-    map::Map,
-    plugin::Plugin,
-    projection::{ProjectionSpecification, ProjectionType},
-    render::{
-        builder::RendererBuilder,
-        settings::{RendererSettings, WgpuSettings},
-    },
-    style::Style,
-    window::PhysicalSize,
-};
-
-pub fn create_globe_map&lt;E: maplibre::environment::Environment&gt;(
-    kernel_builder: KernelBuilder&lt;E&gt;,
-    style_json: &amp;str,
-) -&gt; Result&lt;Map&lt;E&gt;, Box&lt;dyn std::error::Error&gt;&gt; {
-    let mut style: Style = serde_json::from_str(style_json)?;
-
-    style.projection = Some(ProjectionSpecification {
-        projection_type: ProjectionType::Globe,
-    });
-
-    let kernel = kernel_builder.build()?;
-    let plugins: Vec&lt;Box&lt;dyn Plugin&lt;E&gt;&gt;&gt; = vec![
-        Box::new(maplibre::render::RenderPlugin),
-        Box::new(maplibre::background::BackgroundPlugin),
-        Box::new(maplibre::vector::VectorPlugin::&lt;maplibre::vector::DefaultVectorTransferables&gt;::default()),
-        Box::new(maplibre::sdf::SdfPlugin::&lt;maplibre::vector::DefaultVectorTransferables&gt;::default()),
-    ];
-
-    let map = Map::new(style, kernel, plugins)?;
-    Ok(map)
-}
-<span class="boring">}</span></code></pre>
-<hr>
-<h2 id="3-webassembly-wasm-deployment"><a class="header" href="#3-webassembly-wasm-deployment">3. WebAssembly (WASM) Deployment</a></h2>
-<p>MapLibre Rust compiles to WebAssembly via <code>wasm-bindgen</code> and <code>wgpu</code>, supporting WebGPU and WebGL2.</p>
-<h3 id="building-the-web-distribution"><a class="header" href="#building-the-web-distribution">Building the Web Distribution</a></h3>
-<pre><code class="language-bash"># Build for WebGPU:
-just web-lib build
-
-# Build for WebGL2:
-just web-lib build --webgl
-</code></pre>
-<h3 id="html--javascript-integration"><a class="header" href="#html--javascript-integration">HTML &amp; JavaScript Integration</a></h3>
-<pre><code class="language-html">&lt;!DOCTYPE html&gt;
-&lt;html lang="en"&gt;
-&lt;head&gt;
-  &lt;meta charset="utf-8" /&gt;
-  &lt;title&gt;MapLibre Globe Demo&lt;/title&gt;
-  &lt;style&gt;
-    body { margin: 0; width: 100vw; height: 100vh; overflow: hidden; background: #0b0e14; }
-    #maplibre { width: 100%; height: 100%; display: block; }
-  &lt;/style&gt;
-&lt;/head&gt;
-&lt;body&gt;
-  &lt;canvas id="maplibre"&gt;&lt;/canvas&gt;
-
-  &lt;script type="module"&gt;
-    import { startMapLibre } from 'maplibre-rs';
-
-    async function init() {
-      const res = await fetch('https://demotiles.maplibre.org/style.json');
-      const style = await res.json();
-      style.projection = { type: 'globe' };
-
-      await startMapLibre(undefined, undefined, JSON.stringify(style));
-    }
-
-    init().catch(console.error);
-  &lt;/script&gt;
-&lt;/body&gt;
-&lt;/html&gt;
-</code></pre>
+<p>GL JS: <a href="https://maplibre.org/maplibre-gl-js/docs/examples/display-a-globe-with-a-vector-map/">Display a Globe with a Vector Map</a></p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../examples/display-a-map.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../examples/display-a-satellite-map.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../examples/add-3d-terrain.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../examples/display-a-globe-with-an-atmosphere.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -350,11 +210,11 @@ just web-lib build --webgl
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../examples/display-a-map.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../examples/display-a-satellite-map.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../examples/add-3d-terrain.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../examples/display-a-globe-with-an-atmosphere.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>

@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["color","feature_style","glyphs_stay_upright","keep_upright","layout","text_follows_line"],"struct":["SymbolUniforms"]};
+window.SIDEBAR_ITEMS = {"fn":["color","feature_style","glyphs_stay_upright","keep_upright","layout","line_placed","text_follows_line"],"struct":["SymbolUniforms"]};

@@ -30,6 +30,7 @@
 
         <!-- Custom theme stylesheets -->
         <link rel="stylesheet" href="diff-2cf15afe.css">
+        <link rel="stylesheet" href="examples-71c88e22.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -37,10 +38,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-83e6a66e.js";
+            window.path_to_searchindex_js = "searchindex-0a32b56e.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-8b613e14.js"></script>
+        <script src="toc-e964a7da.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -249,825 +250,790 @@ in progress</p>
 <h1 id="user-guide"><a class="header" href="#user-guide">User Guide</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="examples"><a class="header" href="#examples">Examples</a></h1>
-<p>Practical examples demonstrating MapLibre Rust features across native platforms and WebAssembly:</p>
+<p>Each example reproduces the map of a <a href="https://maplibre.org/maplibre-gl-js/docs/examples/">MapLibre GL JS example</a> with maplibre-rs compiled to WebAssembly.</p>
+<p>maplibre-rs is configured by a <a href="https://maplibre.org/maplibre-style-spec/">style document</a> alone. Where GL JS calls <code>addSource</code> and <code>addLayer</code> once the style has loaded, an example adds the same source and layer to the document before the map starts. Each example module exports a function returning the document, which the embedded page passes to <code>startMapLibre</code>:</p>
+<pre><code class="language-js">import { startMapLibre } from 'maplibre-rs'
+import style from './display-a-map.js'
+
+await startMapLibre(undefined, undefined, JSON.stringify(await style()))
+</code></pre>
+<p>Natively, the demo opens a document saved as JSON:</p>
+<pre><code class="language-bash">cargo run -p maplibre-demo -- headed --style style.json
+</code></pre>
+<p>DOM controls, popups and event handlers of the GL JS examples are left out.</p>
+<h2 id="getting-started"><a class="header" href="#getting-started">Getting Started</a></h2>
 <ul>
 <li><a href="#display-a-map">Display a Map</a></li>
+<li><a href="#display-a-satellite-map">Display a Satellite Map</a></li>
+</ul>
+<h2 id="globe"><a class="header" href="#globe">Globe</a></h2>
+<ul>
 <li><a href="#display-a-globe-with-a-vector-map">Display a Globe with a Vector Map</a></li>
-<li><a href="#add-3d-terrain-to-a-map">Add 3D Terrain to a Map</a></li>
+<li><a href="#display-a-globe-with-an-atmosphere">Display a Globe with an Atmosphere</a></li>
+</ul>
+<h2 id="terrain--hillshade"><a class="header" href="#terrain--hillshade">Terrain &amp; Hillshade</a></h2>
+<ul>
+<li><a href="#add-3d-terrain">Add 3D Terrain</a></li>
+<li><a href="#add-a-hillshade-layer">Add a Hillshade Layer</a></li>
+</ul>
+<h2 id="3d-models--buildings"><a class="header" href="#3d-models--buildings">3D Models &amp; Buildings</a></h2>
+<ul>
 <li><a href="#display-buildings-in-3d">Display Buildings in 3D</a></li>
+</ul>
+<h2 id="vector--geojson"><a class="header" href="#vector--geojson">Vector &amp; GeoJSON</a></h2>
+<ul>
 <li><a href="#add-a-geojson-line">Add a GeoJSON Line</a></li>
+<li><a href="#add-a-geojson-polygon">Add a GeoJSON Polygon</a></li>
+</ul>
+<h2 id="raster--imagery"><a class="header" href="#raster--imagery">Raster &amp; Imagery</a></h2>
+<ul>
+<li><a href="#add-a-raster-tile-source">Add a Raster Tile Source</a></li>
+</ul>
+<h2 id="expressions"><a class="header" href="#expressions">Expressions</a></h2>
+<ul>
+<li><a href="#style-lines-with-a-data-driven-property">Style Lines with a Data-Driven Property</a></li>
+</ul>
+<h2 id="heatmaps--clusters"><a class="header" href="#heatmaps--clusters">Heatmaps &amp; Clusters</a></h2>
+<ul>
+<li><a href="#create-a-heatmap-layer">Create a Heatmap Layer</a></li>
 <li><a href="#create-and-style-clusters">Create and Style Clusters</a></li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="display-a-map"><a class="header" href="#display-a-map">Display a Map</a></h1>
-<p>Initialize and display a standard vector map in Mercator projection.</p>
-<div class="map-container" style="position: relative; width: 100%; height: 520px; border-radius: 8px; overflow: hidden; margin: 1.5rem 0; border: 1px solid #30363d; background: #0b0e14;">
-  <iframe src="./demo/index.html?projection=mercator" style="width: 100%; height: 100%; border: none; display: block;" title="MapLibre Vector Map" allow="fullscreen"></iframe>
-  
-<div style="position: absolute; bottom: 12px; left: 12px; background: rgba(13, 17, 23, 0.85); color: #c9d1d9; padding: 6px 12px; border-radius: 6px; font-size: 12px; backdrop-filter: blur(4px); pointer-events: none; border: 1px solid rgba(255,255,255,0.1);">
-    <span>Drag to pan • Scroll to zoom • Right-click drag to pitch/rotate</span>
-  </div>
-
+<p>Initialize a map with the MapLibre demo tiles style.</p>
+<div class="example-map">
+  <iframe src="./demo/index.html?example=../code/display-a-map.js" title="Display a Map" loading="lazy" allow="fullscreen"></iframe>
 </div>
 
-<hr>
-<h2 id="1-style-specification"><a class="header" href="#1-style-specification">1. Style Specification</a></h2>
-<p>The style specification defines vector tile sources, background colors, and vector layers:</p>
-<pre><code class="language-json">{
-  "version": 8,
-  "name": "MapLibre Vector Map",
-  "sources": {
-    "openmaptiles": {
-      "type": "vector",
-      "url": "https://demotiles.maplibre.org/tiles/tiles.json"
-    }
-  },
-  "layers": [
-    {
-      "id": "background",
-      "type": "background",
-      "paint": {
-        "background-color": "#d8e8f8"
-      }
-    },
-    {
-      "id": "water",
-      "type": "fill",
-      "source": "openmaptiles",
-      "source-layer": "water",
-      "paint": {
-        "fill-color": "#73b2ff"
-      }
-    },
-    {
-      "id": "land",
-      "type": "fill",
-      "source": "openmaptiles",
-      "source-layer": "landcover",
-      "paint": {
-        "fill-color": "#e0ebd8"
-      }
-    },
-    {
-      "id": "boundaries",
-      "type": "line",
-      "source": "openmaptiles",
-      "source-layer": "boundary",
-      "paint": {
-        "line-color": "#9ca7b5",
-        "line-width": 1.0
-      }
-    }
-  ],
-  "center": [0.0, 20.0],
-  "zoom": 1.5
+<pre><code class="language-js">export default async function style() {
+    const style = await (await fetch('https://demotiles.maplibre.org/style.json')).json();
+    style.center = [0, 0]; // starting position [lng, lat]
+    style.zoom = 1; // starting zoom
+    return style;
 }
 </code></pre>
-<hr>
-<h2 id="2-running-natively-in-rust"><a class="header" href="#2-running-natively-in-rust">2. Running Natively in Rust</a></h2>
-<h3 id="command-line"><a class="header" href="#command-line">Command Line</a></h3>
-<pre><code class="language-bash"># Run the default headed vector map:
-cargo run -p maplibre-demo -- headed
+<p>GL JS: <a href="https://maplibre.org/maplibre-gl-js/docs/examples/display-a-map/">Display a Map</a></p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="display-a-satellite-map"><a class="header" href="#display-a-satellite-map">Display a Satellite Map</a></h1>
+<p>Display a satellite raster baselayer.</p>
+<div class="example-map">
+  <iframe src="./demo/index.html?example=../code/display-a-satellite-map.js" title="Display a Satellite Map" loading="lazy" allow="fullscreen"></iframe>
+</div>
 
-# Or run with a custom remote or local style JSON:
-cargo run -p maplibre-demo -- headed --style https://demotiles.maplibre.org/style.json
-</code></pre>
-<h3 id="native-api-example"><a class="header" href="#native-api-example">Native API Example</a></h3>
-<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
-</span><span class="boring">fn main() {
-</span>use maplibre::{
-    kernel::KernelBuilder,
-    map::Map,
-    plugin::Plugin,
-    style::Style,
-};
-
-pub fn create_map&lt;E: maplibre::environment::Environment&gt;(
-    kernel_builder: KernelBuilder&lt;E&gt;,
-    style_json: &amp;str,
-) -&gt; Result&lt;Map&lt;E&gt;, Box&lt;dyn std::error::Error&gt;&gt; {
-    let style: Style = serde_json::from_str(style_json)?;
-    let kernel = kernel_builder.build()?;
-    let plugins: Vec&lt;Box&lt;dyn Plugin&lt;E&gt;&gt;&gt; = vec![
-        Box::new(maplibre::render::RenderPlugin),
-        Box::new(maplibre::background::BackgroundPlugin),
-        Box::new(maplibre::vector::VectorPlugin::&lt;maplibre::vector::DefaultVectorTransferables&gt;::default()),
-        Box::new(maplibre::sdf::SdfPlugin::&lt;maplibre::vector::DefaultVectorTransferables&gt;::default()),
-    ];
-
-    let map = Map::new(style, kernel, plugins)?;
-    Ok(map)
+<pre><code class="language-js">export default async function style() {
+    return {
+        'version': 8,
+        'sources': {
+            'satellite': {
+                'type': 'raster',
+                'tiles': [
+                    'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg'
+                ],
+                'tileSize': 256
+            }
+        },
+        'layers': [{
+            'id': 'satellite',
+            'type': 'raster',
+            'source': 'satellite'
+        }],
+        'center': [137.9150899566626, 36.25956997955441],
+        'zoom': 9
+    };
 }
-<span class="boring">}</span></code></pre>
-<hr>
-<h2 id="3-webassembly-wasm-deployment"><a class="header" href="#3-webassembly-wasm-deployment">3. WebAssembly (WASM) Deployment</a></h2>
-<h3 id="html--javascript-integration"><a class="header" href="#html--javascript-integration">HTML &amp; JavaScript Integration</a></h3>
-<pre><code class="language-html">&lt;!DOCTYPE html&gt;
-&lt;html lang="en"&gt;
-&lt;head&gt;
-  &lt;meta charset="utf-8" /&gt;
-  &lt;title&gt;MapLibre Vector Map&lt;/title&gt;
-  &lt;style&gt;
-    body { margin: 0; width: 100vw; height: 100vh; overflow: hidden; }
-    #maplibre { width: 100%; height: 100%; display: block; }
-  &lt;/style&gt;
-&lt;/head&gt;
-&lt;body&gt;
-  &lt;canvas id="maplibre"&gt;&lt;/canvas&gt;
-
-  &lt;script type="module"&gt;
-    import { startMapLibre } from 'maplibre-rs';
-
-    async function init() {
-      const res = await fetch('https://demotiles.maplibre.org/style.json');
-      const style = await res.json();
-      await startMapLibre(undefined, undefined, JSON.stringify(style));
-    }
-
-    init().catch(console.error);
-  &lt;/script&gt;
-&lt;/body&gt;
-&lt;/html&gt;
 </code></pre>
+<p>GL JS: <a href="https://maplibre.org/maplibre-gl-js/docs/examples/display-a-satellite-map/">Display a Satellite Map</a></p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="display-a-globe-with-a-vector-map"><a class="header" href="#display-a-globe-with-a-vector-map">Display a Globe with a Vector Map</a></h1>
-<p>Display a 3D spherical globe with vector tile features using the <code>globe</code> projection.</p>
-<div class="map-container" style="position: relative; width: 100%; height: 520px; border-radius: 8px; overflow: hidden; margin: 1.5rem 0; border: 1px solid #30363d; background: #0b0e14;">
-  <iframe src="./demo/index.html?lat=0&amp;lon=0&amp;zoom=2" style="width: 100%; height: 100%; border: none; display: block;" title="MapLibre Globe Vector Map" allow="fullscreen"></iframe>
-  
-<div style="position: absolute; bottom: 12px; left: 12px; background: rgba(13, 17, 23, 0.85); color: #c9d1d9; padding: 6px 12px; border-radius: 6px; font-size: 12px; backdrop-filter: blur(4px); pointer-events: none; border: 1px solid rgba(255,255,255,0.1);">
-    <span>Drag to orbit • Scroll to zoom • Right-click drag to pitch/rotate</span>
-  </div>
-
+<p>Display a globe with a vector map.</p>
+<div class="example-map">
+  <iframe src="./demo/index.html?example=../code/display-a-globe-with-a-vector-map.js" title="Display a Globe with a Vector Map" loading="lazy" allow="fullscreen"></iframe>
 </div>
 
-<hr>
-<h2 id="1-style-specification-1"><a class="header" href="#1-style-specification-1">1. Style Specification</a></h2>
-<p>The projection is declared in the root style JSON specification using the <code>projection</code> property. Setting <code>"type": "globe"</code> switches the map renderer from a flat Mercator projection to a continuous spherical globe.</p>
-<pre><code class="language-json">{
-  "version": 8,
-  "name": "MapLibre Globe Vector Map",
-  "sources": {
-    "openmaptiles": {
-      "type": "vector",
-      "url": "https://demotiles.maplibre.org/tiles/tiles.json"
-    }
-  },
-  "projection": {
-    "type": "globe"
-  },
-  "layers": [
-    {
-      "id": "background",
-      "type": "background",
-      "paint": {
-        "background-color": "#1a1e24"
-      }
-    },
-    {
-      "id": "water",
-      "type": "fill",
-      "source": "openmaptiles",
-      "source-layer": "water",
-      "paint": {
-        "fill-color": "#19334d"
-      }
-    },
-    {
-      "id": "land",
-      "type": "fill",
-      "source": "openmaptiles",
-      "source-layer": "landcover",
-      "paint": {
-        "fill-color": "#2c3e50"
-      }
-    },
-    {
-      "id": "admin-boundaries",
-      "type": "line",
-      "source": "openmaptiles",
-      "source-layer": "boundary",
-      "paint": {
-        "line-color": "#4a6984",
-        "line-width": 1.0
-      }
-    }
-  ]
+<pre><code class="language-js">export default async function style() {
+    const style = await (await fetch('https://demotiles.maplibre.org/style.json')).json();
+    style.projection = {type: 'globe'};
+    style.center = [0, 0];
+    style.zoom = 2;
+    return style;
 }
 </code></pre>
-<hr>
-<h2 id="2-running-natively-in-rust-1"><a class="header" href="#2-running-natively-in-rust-1">2. Running Natively in Rust</a></h2>
-<h3 id="command-line-1"><a class="header" href="#command-line-1">Command Line</a></h3>
-<p>You can run the globe map locally using the <code>maplibre-demo</code> binary:</p>
-<pre><code class="language-bash"># Run with the default vector map on the globe:
-cargo run -p maplibre-demo -- headed --globe
-
-# Or load a remote style JSON:
-cargo run -p maplibre-demo -- headed --style https://demotiles.maplibre.org/style.json --projection globe
-</code></pre>
-<h3 id="native-api-example-1"><a class="header" href="#native-api-example-1">Native API Example</a></h3>
-<p>To instantiate a globe map in a Rust application:</p>
-<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
-</span><span class="boring">fn main() {
-</span>use std::sync::Arc;
-use maplibre::{
-    coords::{LatLon, WorldCoords, Zoom},
-    kernel::KernelBuilder,
-    map::Map,
-    plugin::Plugin,
-    projection::{ProjectionSpecification, ProjectionType},
-    render::{
-        builder::RendererBuilder,
-        settings::{RendererSettings, WgpuSettings},
-    },
-    style::Style,
-    window::PhysicalSize,
-};
-
-pub fn create_globe_map&lt;E: maplibre::environment::Environment&gt;(
-    kernel_builder: KernelBuilder&lt;E&gt;,
-    style_json: &amp;str,
-) -&gt; Result&lt;Map&lt;E&gt;, Box&lt;dyn std::error::Error&gt;&gt; {
-    let mut style: Style = serde_json::from_str(style_json)?;
-
-    style.projection = Some(ProjectionSpecification {
-        projection_type: ProjectionType::Globe,
-    });
-
-    let kernel = kernel_builder.build()?;
-    let plugins: Vec&lt;Box&lt;dyn Plugin&lt;E&gt;&gt;&gt; = vec![
-        Box::new(maplibre::render::RenderPlugin),
-        Box::new(maplibre::background::BackgroundPlugin),
-        Box::new(maplibre::vector::VectorPlugin::&lt;maplibre::vector::DefaultVectorTransferables&gt;::default()),
-        Box::new(maplibre::sdf::SdfPlugin::&lt;maplibre::vector::DefaultVectorTransferables&gt;::default()),
-    ];
-
-    let map = Map::new(style, kernel, plugins)?;
-    Ok(map)
-}
-<span class="boring">}</span></code></pre>
-<hr>
-<h2 id="3-webassembly-wasm-deployment-1"><a class="header" href="#3-webassembly-wasm-deployment-1">3. WebAssembly (WASM) Deployment</a></h2>
-<p>MapLibre Rust compiles to WebAssembly via <code>wasm-bindgen</code> and <code>wgpu</code>, supporting WebGPU and WebGL2.</p>
-<h3 id="building-the-web-distribution"><a class="header" href="#building-the-web-distribution">Building the Web Distribution</a></h3>
-<pre><code class="language-bash"># Build for WebGPU:
-just web-lib build
-
-# Build for WebGL2:
-just web-lib build --webgl
-</code></pre>
-<h3 id="html--javascript-integration-1"><a class="header" href="#html--javascript-integration-1">HTML &amp; JavaScript Integration</a></h3>
-<pre><code class="language-html">&lt;!DOCTYPE html&gt;
-&lt;html lang="en"&gt;
-&lt;head&gt;
-  &lt;meta charset="utf-8" /&gt;
-  &lt;title&gt;MapLibre Globe Demo&lt;/title&gt;
-  &lt;style&gt;
-    body { margin: 0; width: 100vw; height: 100vh; overflow: hidden; background: #0b0e14; }
-    #maplibre { width: 100%; height: 100%; display: block; }
-  &lt;/style&gt;
-&lt;/head&gt;
-&lt;body&gt;
-  &lt;canvas id="maplibre"&gt;&lt;/canvas&gt;
-
-  &lt;script type="module"&gt;
-    import { startMapLibre } from 'maplibre-rs';
-
-    async function init() {
-      const res = await fetch('https://demotiles.maplibre.org/style.json');
-      const style = await res.json();
-      style.projection = { type: 'globe' };
-
-      await startMapLibre(undefined, undefined, JSON.stringify(style));
-    }
-
-    init().catch(console.error);
-  &lt;/script&gt;
-&lt;/body&gt;
-&lt;/html&gt;
-</code></pre>
+<p>GL JS: <a href="https://maplibre.org/maplibre-gl-js/docs/examples/display-a-globe-with-a-vector-map/">Display a Globe with a Vector Map</a></p>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="add-3d-terrain-to-a-map"><a class="header" href="#add-3d-terrain-to-a-map">Add 3D Terrain to a Map</a></h1>
-<p>Render 3D elevation and topography using digital elevation models (<code>raster-dem</code>) and camera pitch.</p>
-<div class="map-container" style="position: relative; width: 100%; height: 520px; border-radius: 8px; overflow: hidden; margin: 1.5rem 0; border: 1px solid #30363d; background: #0b0e14;">
-  <iframe src="./demo/index.html?style=./terrain.json" style="width: 100%; height: 100%; border: none; display: block;" title="MapLibre 3D Terrain" allow="fullscreen"></iframe>
-  
-<div style="position: absolute; bottom: 12px; left: 12px; background: rgba(13, 17, 23, 0.85); color: #c9d1d9; padding: 6px 12px; border-radius: 6px; font-size: 12px; backdrop-filter: blur(4px); pointer-events: none; border: 1px solid rgba(255,255,255,0.1);">
-    <span>Drag to pan/orbit • Scroll to zoom • Right-click drag to pitch/rotate</span>
-  </div>
-
+<h1 id="display-a-globe-with-an-atmosphere"><a class="header" href="#display-a-globe-with-an-atmosphere">Display a Globe with an Atmosphere</a></h1>
+<p>Display a globe with an atmosphere.</p>
+<div class="example-map">
+  <iframe src="./demo/index.html?example=../code/display-a-globe-with-an-atmosphere.js" title="Display a Globe with an Atmosphere" loading="lazy" allow="fullscreen"></iframe>
 </div>
 
-<hr>
-<h2 id="1-style-specification-2"><a class="header" href="#1-style-specification-2">1. Style Specification</a></h2>
-<p>The style specification configures a <code>raster-dem</code> elevation source and attaches it via the root <code>terrain</code> property:</p>
-<pre><code class="language-json">{
-  "version": 8,
-  "name": "MapLibre 3D Terrain",
-  "sources": {
-    "osm": {
-      "type": "raster",
-      "tiles": [
-        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-      ],
-      "tileSize": 256,
-      "attribution": "Tiles &amp;copy; Esri &amp;mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community",
-      "maxzoom": 19
-    },
-    "terrainSource": {
-      "type": "raster-dem",
-      "url": "https://demotiles.maplibre.org/terrain-tiles/tiles.json",
-      "tileSize": 256
-    }
-  },
-  "layers": [
-    {
-      "id": "background",
-      "type": "background",
-      "paint": {
-        "background-color": "#dfe6ea"
-      }
-    },
-    {
-      "id": "osm",
-      "type": "raster",
-      "source": "osm"
-    }
-  ],
-  "terrain": {
-    "source": "terrainSource",
-    "exaggeration": 1.5
-  },
-  "center": [11.39085, 47.27574],
-  "zoom": 12.0,
-  "pitch": 70.0
+<pre><code class="language-js">export default async function style() {
+    return {
+        'version': 8,
+        'projection': {
+            'type': 'globe'
+        },
+        'sources': {
+            'satellite': {
+                'tiles': ['https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg'],
+                'type': 'raster'
+            },
+        },
+        'layers': [
+            {
+                'id': 'Satellite',
+                'type': 'raster',
+                'source': 'satellite',
+            },
+        ],
+        'sky': {
+            'atmosphere-blend': [
+                'interpolate',
+                ['linear'],
+                ['zoom'],
+                0, 1,
+                5, 1,
+                7, 0
+            ]
+        },
+        'light': {
+            'anchor': 'map',
+            'position': [1.5, 90, 80]
+        },
+        'center': [137.9150899566626, 36.25956997955441],
+        'zoom': 0
+    };
 }
 </code></pre>
-<hr>
-<h2 id="2-running-natively-in-rust-2"><a class="header" href="#2-running-natively-in-rust-2">2. Running Natively in Rust</a></h2>
-<h3 id="command-line-2"><a class="header" href="#command-line-2">Command Line</a></h3>
-<pre><code class="language-bash"># Run with the bundled 3D terrain:
-cargo run -p maplibre-demo -- headed --terrain
+<p>GL JS: <a href="https://maplibre.org/maplibre-gl-js/docs/examples/display-a-globe-with-an-atmosphere/">Display a Globe with an Atmosphere</a></p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="add-3d-terrain"><a class="header" href="#add-3d-terrain">Add 3D Terrain</a></h1>
+<p>Go beyond hillshade and show elevation in actual 3D.</p>
+<div class="example-map">
+  <iframe src="./demo/index.html?example=../code/add-3d-terrain.js" title="Add 3D Terrain" loading="lazy" allow="fullscreen"></iframe>
+</div>
 
-# Run with custom max-pitch up to 85 degrees:
-cargo run -p maplibre-demo -- headed --terrain --max-pitch 85
-</code></pre>
-<h3 id="native-api-example-2"><a class="header" href="#native-api-example-2">Native API Example</a></h3>
-<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
-</span><span class="boring">fn main() {
-</span>use maplibre::{
-    kernel::KernelBuilder,
-    map::Map,
-    plugin::Plugin,
-    style::Style,
-    terrain::TerrainPlugin,
-};
-
-pub fn create_terrain_map&lt;E: maplibre::environment::Environment&gt;(
-    kernel_builder: KernelBuilder&lt;E&gt;,
-    style_json: &amp;str,
-) -&gt; Result&lt;Map&lt;E&gt;, Box&lt;dyn std::error::Error&gt;&gt; {
-    let style: Style = serde_json::from_str(style_json)?;
-    let kernel = kernel_builder.build()?;
-    let plugins: Vec&lt;Box&lt;dyn Plugin&lt;E&gt;&gt;&gt; = vec![
-        Box::new(maplibre::render::RenderPlugin),
-        Box::new(maplibre::background::BackgroundPlugin),
-        Box::new(maplibre::raster::RasterPlugin::default()),
-        Box::new(TerrainPlugin::default()),
-    ];
-
-    let mut map = Map::new(style, kernel, plugins)?;
-    map.set_max_pitch_degrees(85.0);
-    Ok(map)
+<pre><code class="language-js">export default async function style() {
+    return {
+        version: 8,
+        sources: {
+            osm: {
+                type: 'raster',
+                tiles: ['https://a.tile.openstreetmap.org/{z}/{x}/{y}.png'],
+                tileSize: 256,
+                attribution: '&amp;copy; OpenStreetMap Contributors',
+                maxzoom: 19
+            },
+            // Use a different source for terrain and hillshade layers, to improve render quality
+            terrainSource: {
+                type: 'raster-dem',
+                url: 'https://tiles.mapterhorn.com/tilejson.json'
+            },
+            hillshadeSource: {
+                type: 'raster-dem',
+                url: 'https://tiles.mapterhorn.com/tilejson.json'
+            }
+        },
+        layers: [
+            {
+                id: 'osm',
+                type: 'raster',
+                source: 'osm'
+            },
+            {
+                id: 'hills',
+                type: 'hillshade',
+                source: 'hillshadeSource',
+                layout: {visibility: 'visible'},
+                paint: {'hillshade-shadow-color': '#473B24'}
+            }
+        ],
+        terrain: {
+            source: 'terrainSource',
+            exaggeration: 1
+        },
+        sky: {},
+        center: [11.39085, 47.27574],
+        zoom: 12,
+        pitch: 70
+    };
 }
-<span class="boring">}</span></code></pre>
-<hr>
-<h2 id="3-webassembly-wasm-deployment-2"><a class="header" href="#3-webassembly-wasm-deployment-2">3. WebAssembly (WASM) Deployment</a></h2>
-<h3 id="html--javascript-integration-2"><a class="header" href="#html--javascript-integration-2">HTML &amp; JavaScript Integration</a></h3>
-<pre><code class="language-html">&lt;!DOCTYPE html&gt;
-&lt;html lang="en"&gt;
-&lt;head&gt;
-  &lt;meta charset="utf-8" /&gt;
-  &lt;title&gt;MapLibre 3D Terrain&lt;/title&gt;
-  &lt;style&gt;
-    body { margin: 0; width: 100vw; height: 100vh; overflow: hidden; background: #0b0e14; }
-    #maplibre { width: 100%; height: 100%; display: block; }
-  &lt;/style&gt;
-&lt;/head&gt;
-&lt;body&gt;
-  &lt;canvas id="maplibre"&gt;&lt;/canvas&gt;
-
-  &lt;script type="module"&gt;
-    import { startMapLibre } from 'maplibre-rs';
-
-    async function init() {
-      const res = await fetch('./terrain.json');
-      const style = await res.json();
-      await startMapLibre(undefined, undefined, JSON.stringify(style));
-    }
-
-    init().catch(console.error);
-  &lt;/script&gt;
-&lt;/body&gt;
-&lt;/html&gt;
 </code></pre>
+<p>GL JS: <a href="https://maplibre.org/maplibre-gl-js/docs/examples/3d-terrain/">Add 3D Terrain</a></p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="add-a-hillshade-layer"><a class="header" href="#add-a-hillshade-layer">Add a Hillshade Layer</a></h1>
+<p>Add a simple hillshade layer.</p>
+<div class="example-map">
+  <iframe src="./demo/index.html?example=../code/add-a-hillshade-layer.js" title="Add a Hillshade Layer" loading="lazy" allow="fullscreen"></iframe>
+</div>
+
+<pre><code class="language-js">export default async function style() {
+    return {
+        version: 8,
+        sources: {
+            hillshadeSource: {
+                type: 'raster-dem',
+                url: 'https://demotiles.maplibre.org/terrain-tiles/tiles.json',
+                tileSize: 256
+            }
+        },
+        layers: [
+            {
+                id: 'hillshade',
+                type: 'hillshade',
+                source: 'hillshadeSource',
+                paint: {
+                    'hillshade-method': 'standard',
+                    'hillshade-illumination-direction': 315,
+                    'hillshade-shadow-color': '#000000',
+                    'hillshade-highlight-color': '#FFFFFF',
+                    'hillshade-accent-color': '#000000',
+                    'hillshade-exaggeration': 0.5
+                }
+            }
+        ],
+        center: [11.491, 47.274],
+        zoom: 10,
+        pitch: 0
+    };
+}
+</code></pre>
+<blockquote>
+<p><strong>Note:</strong> The style has no background layer. GL JS leaves its canvas transparent, so the white page shows through the unshaded slopes; maplibre-rs draws them on black.</p>
+</blockquote>
+<p>GL JS: <a href="https://maplibre.org/maplibre-gl-js/docs/examples/add-a-hillshade-layer/">Add a Hillshade Layer</a></p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="display-buildings-in-3d"><a class="header" href="#display-buildings-in-3d">Display Buildings in 3D</a></h1>
-<p>Render 3D building models using <code>fill-extrusion</code> layers, configuring height, base offsets, and camera tilt.</p>
-<hr>
-<h2 id="1-style-specification-3"><a class="header" href="#1-style-specification-3">1. Style Specification</a></h2>
-<p>The <code>fill-extrusion</code> layer type converts 2D building footprints into 3D polygonal meshes using feature attributes (such as <code>render_height</code> and <code>render_min_height</code>):</p>
-<pre><code class="language-json">{
-  "version": 8,
-  "name": "MapLibre 3D Buildings",
-  "sources": {
-    "openmaptiles": {
-      "type": "vector",
-      "url": "https://demotiles.maplibre.org/tiles/tiles.json"
-    }
-  },
-  "layers": [
-    {
-      "id": "background",
-      "type": "background",
-      "paint": {
-        "background-color": "#f2efe9"
-      }
-    },
-    {
-      "id": "water",
-      "type": "fill",
-      "source": "openmaptiles",
-      "source-layer": "water",
-      "paint": {
-        "fill-color": "#a0c8f0"
-      }
-    },
-    {
-      "id": "3d-buildings",
-      "type": "fill-extrusion",
-      "source": "openmaptiles",
-      "source-layer": "building",
-      "paint": {
-        "fill-extrusion-color": "#aaa",
-        "fill-extrusion-height": [
-          "interpolate",
-          ["linear"],
-          ["zoom"],
-          15,
-          0,
-          15.05,
-          ["get", "render_height"]
-        ],
-        "fill-extrusion-base": [
-          "interpolate",
-          ["linear"],
-          ["zoom"],
-          15,
-          0,
-          15.05,
-          ["get", "render_min_height"]
-        ],
-        "fill-extrusion-opacity": 0.8
-      }
-    }
-  ],
-  "center": [-74.006, 40.7128],
-  "zoom": 15.5,
-  "pitch": 45.0,
-  "bearing": -17.6
+<p>Use extrusions to display buildings’ height in 3D.</p>
+<div class="example-map">
+  <iframe src="./demo/index.html?example=../code/display-buildings-in-3d.js" title="Display Buildings in 3D" loading="lazy" allow="fullscreen"></iframe>
+</div>
+
+<pre><code class="language-js">export default async function style() {
+    const style = await (await fetch('https://tiles.openfreemap.org/styles/bright')).json();
+    style.center = [-74.0066, 40.7135];
+    style.zoom = 15.5;
+    style.pitch = 45;
+    style.bearing = -17.6;
+
+    style.sources.openfreemap = {
+        url: 'https://tiles.openfreemap.org/planet',
+        type: 'vector'
+    };
+    // Insert the layer beneath the first symbol layer with labels.
+    const labelLayer = style.layers.findIndex(
+        (layer) =&gt; layer.type === 'symbol' &amp;&amp; layer.layout?.['text-field']
+    );
+    style.layers.splice(labelLayer &lt; 0 ? style.layers.length : labelLayer, 0, {
+        'id': '3d-buildings',
+        'source': 'openfreemap',
+        'source-layer': 'building',
+        'type': 'fill-extrusion',
+        'minzoom': 15,
+        'filter': ['!=', ['get', 'hide_3d'], true],
+        'paint': {
+            'fill-extrusion-color': [
+                'interpolate',
+                ['linear'],
+                ['get', 'render_height'], 0, 'lightgray', 200, 'royalblue', 400, 'lightblue'
+            ],
+            'fill-extrusion-height': [
+                'interpolate',
+                ['linear'],
+                ['zoom'],
+                15,
+                0,
+                16,
+                ['get', 'render_height']
+            ],
+            'fill-extrusion-base': [
+                'interpolate',
+                ['linear'],
+                ['zoom'],
+                15,
+                0,
+                16,
+                ['get', 'render_min_height']
+            ]
+        }
+    });
+    return style;
 }
 </code></pre>
-<hr>
-<h2 id="2-running-natively-in-rust-3"><a class="header" href="#2-running-natively-in-rust-3">2. Running Natively in Rust</a></h2>
-<h3 id="command-line-3"><a class="header" href="#command-line-3">Command Line</a></h3>
-<pre><code class="language-bash">cargo run -p maplibre-demo -- headed --style path/to/buildings-style.json
-</code></pre>
-<h3 id="native-api-example-3"><a class="header" href="#native-api-example-3">Native API Example</a></h3>
-<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
-</span><span class="boring">fn main() {
-</span>use maplibre::{
-    kernel::KernelBuilder,
-    map::Map,
-    plugin::Plugin,
-    style::Style,
-};
-
-pub fn create_buildings_map&lt;E: maplibre::environment::Environment&gt;(
-    kernel_builder: KernelBuilder&lt;E&gt;,
-    style_json: &amp;str,
-) -&gt; Result&lt;Map&lt;E&gt;, Box&lt;dyn std::error::Error&gt;&gt; {
-    let style: Style = serde_json::from_str(style_json)?;
-    let kernel = kernel_builder.build()?;
-    let plugins: Vec&lt;Box&lt;dyn Plugin&lt;E&gt;&gt;&gt; = vec![
-        Box::new(maplibre::render::RenderPlugin),
-        Box::new(maplibre::background::BackgroundPlugin),
-        Box::new(maplibre::vector::VectorPlugin::&lt;maplibre::vector::DefaultVectorTransferables&gt;::default()),
-    ];
-
-    let map = Map::new(style, kernel, plugins)?;
-    Ok(map)
-}
-<span class="boring">}</span></code></pre>
-<hr>
-<h2 id="3-webassembly-wasm-deployment-3"><a class="header" href="#3-webassembly-wasm-deployment-3">3. WebAssembly (WASM) Deployment</a></h2>
-<h3 id="html--javascript-integration-3"><a class="header" href="#html--javascript-integration-3">HTML &amp; JavaScript Integration</a></h3>
-<pre><code class="language-html">&lt;!DOCTYPE html&gt;
-&lt;html lang="en"&gt;
-&lt;head&gt;
-  &lt;meta charset="utf-8" /&gt;
-  &lt;title&gt;MapLibre 3D Buildings&lt;/title&gt;
-  &lt;style&gt;
-    body { margin: 0; width: 100vw; height: 100vh; overflow: hidden; }
-    #maplibre { width: 100%; height: 100%; display: block; }
-  &lt;/style&gt;
-&lt;/head&gt;
-&lt;body&gt;
-  &lt;canvas id="maplibre"&gt;&lt;/canvas&gt;
-
-  &lt;script type="module"&gt;
-    import { startMapLibre } from 'maplibre-rs';
-
-    async function init() {
-      const res = await fetch('./buildings-style.json');
-      const style = await res.json();
-      await startMapLibre(undefined, undefined, JSON.stringify(style));
-    }
-
-    init().catch(console.error);
-  &lt;/script&gt;
-&lt;/body&gt;
-&lt;/html&gt;
-</code></pre>
+<p>GL JS: <a href="https://maplibre.org/maplibre-gl-js/docs/examples/display-buildings-in-3d/">Display Buildings in 3D</a></p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="add-a-geojson-line"><a class="header" href="#add-a-geojson-line">Add a GeoJSON Line</a></h1>
-<p>Add a GeoJSON line to the map and style it with color, width, and join properties.</p>
-<hr>
-<h2 id="1-style-specification-4"><a class="header" href="#1-style-specification-4">1. Style Specification</a></h2>
-<p>The style specification defines an inline or remote <code>geojson</code> source with a <code>LineString</code> feature and a corresponding <code>line</code> layer:</p>
-<pre><code class="language-json">{
-  "version": 8,
-  "name": "MapLibre GeoJSON Line",
-  "sources": {
-    "route": {
-      "type": "geojson",
-      "data": {
-        "type": "Feature",
-        "properties": {},
-        "geometry": {
-          "type": "LineString",
-          "coordinates": [
-            [-122.483696, 37.833818],
-            [-122.483482, 37.833174],
-            [-122.483396, 37.8327],
-            [-122.483568, 37.832056],
-            [-122.48404, 37.831141],
-            [-122.48404, 37.830497],
-            [-122.48346, 37.82992],
-            [-122.483568, 37.829548],
-            [-122.48507, 37.829446],
-            [-122.4861, 37.828802],
-            [-122.486958, 37.82831],
-            [-122.487859, 37.825522],
-            [-122.488546, 37.824028],
-            [-122.488031, 37.823384],
-            [-122.48713, 37.823516],
-            [-122.486636, 37.824681],
-            [-122.486604, 37.8252],
-            [-122.487076, 37.8258]
-          ]
+<p>Add a GeoJSON line source and style it with a line layer.</p>
+<div class="example-map">
+  <iframe src="./demo/index.html?example=../code/add-a-geojson-line.js" title="Add a GeoJSON Line" loading="lazy" allow="fullscreen"></iframe>
+</div>
+
+<pre><code class="language-js">export default async function style() {
+    const style = await (await fetch('https://tiles.openfreemap.org/styles/bright')).json();
+    style.center = [-122.486052, 37.830348];
+    style.zoom = 15;
+
+    style.sources['route'] = {
+        'type': 'geojson',
+        'data': {
+            'type': 'Feature',
+            'properties': {},
+            'geometry': {
+                'type': 'LineString',
+                'coordinates': [
+                    [-122.48369693756104, 37.83381888486939],
+                    [-122.48348236083984, 37.83317489144141],
+                    [-122.48339653015138, 37.83270036637107],
+                    [-122.48356819152832, 37.832056363179625],
+                    [-122.48404026031496, 37.83114119107971],
+                    [-122.48404026031496, 37.83049717427869],
+                    [-122.48348236083984, 37.829920943955045],
+                    [-122.48356819152832, 37.82954808664175],
+                    [-122.48507022857666, 37.82944639795659],
+                    [-122.48610019683838, 37.82880236636284],
+                    [-122.48695850372314, 37.82931081282506],
+                    [-122.48700141906738, 37.83080223556934],
+                    [-122.48751640319824, 37.83168351665737],
+                    [-122.48803138732912, 37.832158048267786],
+                    [-122.48888969421387, 37.83297152392784],
+                    [-122.48987674713133, 37.83263257682617],
+                    [-122.49043464660643, 37.832937629287755],
+                    [-122.49125003814696, 37.832429207817725],
+                    [-122.49163627624512, 37.832564787218985],
+                    [-122.49223709106445, 37.83337825839438],
+                    [-122.49378204345702, 37.83368330777276]
+                ]
+            }
         }
-      }
-    }
-  },
-  "layers": [
-    {
-      "id": "background",
-      "type": "background",
-      "paint": {
-        "background-color": "#e0e4eb"
-      }
-    },
-    {
-      "id": "route-line",
-      "type": "line",
-      "source": "route",
-      "layout": {
-        "line-join": "round",
-        "line-cap": "round"
-      },
-      "paint": {
-        "line-color": "#1db7dd",
-        "line-width": 8.0
-      }
-    }
-  ],
-  "center": [-122.486052, 37.830348],
-  "zoom": 14.0
+    };
+    style.layers.push({
+        'id': 'route',
+        'type': 'line',
+        'source': 'route',
+        'layout': {
+            'line-join': 'round',
+            'line-cap': 'round'
+        },
+        'paint': {
+            'line-color': '#888',
+            'line-width': 8
+        }
+    });
+    return style;
 }
 </code></pre>
-<hr>
-<h2 id="2-running-natively-in-rust-4"><a class="header" href="#2-running-natively-in-rust-4">2. Running Natively in Rust</a></h2>
-<h3 id="command-line-4"><a class="header" href="#command-line-4">Command Line</a></h3>
-<pre><code class="language-bash">cargo run -p maplibre-demo -- headed --style path/to/geojson-line-style.json
-</code></pre>
-<h3 id="native-api-example-4"><a class="header" href="#native-api-example-4">Native API Example</a></h3>
-<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
-</span><span class="boring">fn main() {
-</span>use maplibre::{
-    kernel::KernelBuilder,
-    map::Map,
-    plugin::Plugin,
-    style::Style,
-};
+<p>GL JS: <a href="https://maplibre.org/maplibre-gl-js/docs/examples/add-a-geojson-line/">Add a GeoJSON Line</a></p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="add-a-geojson-polygon"><a class="header" href="#add-a-geojson-polygon">Add a GeoJSON Polygon</a></h1>
+<p>Style a polygon with the fill layer type.</p>
+<div class="example-map">
+  <iframe src="./demo/index.html?example=../code/add-a-geojson-polygon.js" title="Add a GeoJSON Polygon" loading="lazy" allow="fullscreen"></iframe>
+</div>
 
-pub fn create_geojson_map&lt;E: maplibre::environment::Environment&gt;(
-    kernel_builder: KernelBuilder&lt;E&gt;,
-    style_json: &amp;str,
-) -&gt; Result&lt;Map&lt;E&gt;, Box&lt;dyn std::error::Error&gt;&gt; {
-    let style: Style = serde_json::from_str(style_json)?;
-    let kernel = kernel_builder.build()?;
-    let plugins: Vec&lt;Box&lt;dyn Plugin&lt;E&gt;&gt;&gt; = vec![
-        Box::new(maplibre::render::RenderPlugin),
-        Box::new(maplibre::background::BackgroundPlugin),
-        Box::new(maplibre::vector::VectorPlugin::&lt;maplibre::vector::DefaultVectorTransferables&gt;::default()),
-    ];
+<pre><code class="language-js">export default async function style() {
+    const style = await (await fetch('https://demotiles.maplibre.org/style.json')).json();
+    style.center = [-68.13734351262877, 45.137451890638886];
+    style.zoom = 5;
 
-    let map = Map::new(style, kernel, plugins)?;
-    Ok(map)
+    style.sources['maine'] = {
+        'type': 'geojson',
+        'data': {
+            'type': 'Feature',
+            'geometry': {
+                'type': 'Polygon',
+                'coordinates': [
+                    [
+                        [-67.13734351262877, 45.137451890638886],
+                        [-66.96466, 44.8097],
+                        [-68.03252, 44.3252],
+                        [-69.06, 43.98],
+                        [-70.11617, 43.68405],
+                        [-70.64573401557249, 43.090083319667144],
+                        [-70.75102474636725, 43.08003225358635],
+                        [-70.79761105007827, 43.21973948828747],
+                        [-70.98176001655037, 43.36789581966826],
+                        [-70.94416541205806, 43.46633942318431],
+                        [-71.08482, 45.3052400000002],
+                        [-70.6600225491012, 45.46022288673396],
+                        [-70.30495378282376, 45.914794623389355],
+                        [-70.00014034695016, 46.69317088478567],
+                        [-69.23708614772835, 47.44777598732787],
+                        [-68.90478084987546, 47.184794623394396],
+                        [-68.23430497910454, 47.35462921812177],
+                        [-67.79035274928509, 47.066248887716995],
+                        [-67.79141211614706, 45.702585354182816],
+                        [-67.13734351262877, 45.137451890638886]
+                    ]
+                ]
+            }
+        }
+    };
+    style.layers.push({
+        'id': 'maine',
+        'type': 'fill',
+        'source': 'maine',
+        'layout': {},
+        'paint': {
+            'fill-color': '#088',
+            'fill-opacity': 0.8
+        }
+    });
+    return style;
 }
-<span class="boring">}</span></code></pre>
-<hr>
-<h2 id="3-webassembly-wasm-deployment-4"><a class="header" href="#3-webassembly-wasm-deployment-4">3. WebAssembly (WASM) Deployment</a></h2>
-<h3 id="html--javascript-integration-4"><a class="header" href="#html--javascript-integration-4">HTML &amp; JavaScript Integration</a></h3>
-<pre><code class="language-html">&lt;!DOCTYPE html&gt;
-&lt;html lang="en"&gt;
-&lt;head&gt;
-  &lt;meta charset="utf-8" /&gt;
-  &lt;title&gt;MapLibre GeoJSON Line&lt;/title&gt;
-  &lt;style&gt;
-    body { margin: 0; width: 100vw; height: 100vh; overflow: hidden; }
-    #maplibre { width: 100%; height: 100%; display: block; }
-  &lt;/style&gt;
-&lt;/head&gt;
-&lt;body&gt;
-  &lt;canvas id="maplibre"&gt;&lt;/canvas&gt;
-
-  &lt;script type="module"&gt;
-    import { startMapLibre } from 'maplibre-rs';
-
-    async function init() {
-      const res = await fetch('./geojson-line-style.json');
-      const style = await res.json();
-      await startMapLibre(undefined, undefined, JSON.stringify(style));
-    }
-
-    init().catch(console.error);
-  &lt;/script&gt;
-&lt;/body&gt;
-&lt;/html&gt;
 </code></pre>
+<p>GL JS: <a href="https://maplibre.org/maplibre-gl-js/docs/examples/add-a-geojson-polygon/">Add a GeoJSON Polygon</a></p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="add-a-raster-tile-source"><a class="header" href="#add-a-raster-tile-source">Add a Raster Tile Source</a></h1>
+<p>Add a third-party raster source to the map.</p>
+<div class="example-map">
+  <iframe src="./demo/index.html?example=../code/add-a-raster-tile-source.js" title="Add a Raster Tile Source" loading="lazy" allow="fullscreen"></iframe>
+</div>
+
+<pre><code class="language-js">export default async function style() {
+    return {
+        'version': 8,
+        'sources': {
+            'raster-tiles': {
+                'type': 'raster',
+                'tiles': ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+                'tileSize': 256,
+                'minzoom': 0,
+                'maxzoom': 19,
+                'attribution': '© OpenStreetMap contributors',
+            }
+        },
+        'layers': [
+            {
+                'id': 'simple-tiles',
+                'type': 'raster',
+                'source': 'raster-tiles',
+            }
+        ],
+        'id': 'blank',
+        'center': [0, 0], // starting position
+        'zoom': 0 // starting zoom
+    };
+}
+</code></pre>
+<p>GL JS: <a href="https://maplibre.org/maplibre-gl-js/docs/examples/add-a-raster-tile-source/">Add a Raster Tile Source</a></p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="style-lines-with-a-data-driven-property"><a class="header" href="#style-lines-with-a-data-driven-property">Style Lines with a Data-Driven Property</a></h1>
+<p>Create a visualization with a data expression for line-color.</p>
+<div class="example-map">
+  <iframe src="./demo/index.html?example=../code/style-lines-with-a-data-driven-property.js" title="Style Lines with a Data-Driven Property" loading="lazy" allow="fullscreen"></iframe>
+</div>
+
+<pre><code class="language-js">export default async function style() {
+    const style = await (await fetch('https://tiles.openfreemap.org/styles/bright')).json();
+    style.center = [-122.48383155304096, 37.82882682974591];
+    style.zoom = 16;
+
+    style.sources['lines'] = {
+        'type': 'geojson',
+        'data': {
+            'type': 'FeatureCollection',
+            'features': [
+                {
+                    'type': 'Feature',
+                    'properties': {
+                        'color': '#F7455D' // red
+                    },
+                    'geometry': {
+                        'type': 'LineString',
+                        'coordinates': [
+                            [-122.4833858013153, 37.829607404976734],
+                            [-122.4830961227417, 37.82932776098012],
+                            [-122.4830746650696, 37.82932776098012],
+                            [-122.48218417167662, 37.82889558180985],
+                            [-122.48218417167662, 37.82890193740421],
+                            [-122.48221099376678, 37.82868372835086],
+                            [-122.4822163581848, 37.82868372835086],
+                            [-122.48205006122589, 37.82801003030873]
+                        ]
+                    }
+                },
+                {
+                    'type': 'Feature',
+                    'properties': {
+                        'color': '#33C9EB' // blue
+                    },
+                    'geometry': {
+                        'type': 'LineString',
+                        'coordinates': [
+                            [-122.48393028974533, 37.829471820141016],
+                            [-122.48395174741744, 37.82940826466351],
+                            [-122.48395174741744, 37.829412501697064],
+                            [-122.48423874378203, 37.829357420242125],
+                            [-122.48422533273697, 37.829361657278575],
+                            [-122.48459815979002, 37.8293425906126],
+                            [-122.48458743095398, 37.8293447091313],
+                            [-122.4847564101219, 37.82932776098012],
+                            [-122.48474299907684, 37.829331998018276],
+                            [-122.4849334359169, 37.829298101706186],
+                            [-122.48492807149889, 37.82930022022615],
+                            [-122.48509705066681, 37.82920488676767],
+                            [-122.48509168624878, 37.82920912381288],
+                            [-122.48520433902739, 37.82905870855876],
+                            [-122.48519897460936, 37.82905870855876],
+                            [-122.4854403734207, 37.828594749716714],
+                            [-122.48543500900269, 37.82860534241688],
+                            [-122.48571664094925, 37.82808206121068],
+                            [-122.48570591211319, 37.82809689109353],
+                            [-122.4858346581459, 37.82797189627337],
+                            [-122.48582661151886, 37.82797825194729],
+                            [-122.4859634041786, 37.82788503534145],
+                            [-122.48595803976059, 37.82788927246246],
+                            [-122.48605459928514, 37.82786596829394]
+                        ]
+                    }
+                }
+            ]
+        }
+    };
+    style.layers.push({
+        'id': 'lines',
+        'type': 'line',
+        'source': 'lines',
+        'paint': {
+            'line-width': 3,
+            // Use a get expression (https://maplibre.org/maplibre-style-spec/expressions/#get)
+            // to set the line-color to a feature property value.
+            'line-color': ['get', 'color']
+        }
+    });
+    return style;
+}
+</code></pre>
+<p>GL JS: <a href="https://maplibre.org/maplibre-gl-js/docs/examples/style-lines-with-a-data-driven-property/">Style Lines with a Data-Driven Property</a></p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="create-a-heatmap-layer"><a class="header" href="#create-a-heatmap-layer">Create a Heatmap Layer</a></h1>
+<p>Visualize earthquake frequency by location using a heatmap layer.</p>
+<div class="example-map">
+  <iframe src="./demo/index.html?example=../code/create-a-heatmap-layer.js" title="Create a Heatmap Layer" loading="lazy" allow="fullscreen"></iframe>
+</div>
+
+<pre><code class="language-js">export default async function style() {
+    const style = await (await fetch('https://demotiles.maplibre.org/style.json')).json();
+    style.center = [-120, 50];
+    style.zoom = 2;
+
+    // Add a geojson point source.
+    // Heatmap layers also work with a vector tile source.
+    style.sources['earthquakes'] = {
+        'type': 'geojson',
+        'data':
+            'https://maplibre.org/maplibre-gl-js/docs/assets/earthquakes.geojson'
+    };
+
+    style.layers.push({
+        'id': 'earthquakes-heat',
+        'type': 'heatmap',
+        'source': 'earthquakes',
+        'maxzoom': 9,
+        'paint': {
+            // Increase the heatmap weight based on frequency and property magnitude
+            'heatmap-weight': [
+                'interpolate',
+                ['linear'],
+                ['get', 'mag'],
+                0,
+                0,
+                6,
+                1
+            ],
+            // Increase the heatmap color weight weight by zoom level
+            // heatmap-intensity is a multiplier on top of heatmap-weight
+            'heatmap-intensity': [
+                'interpolate',
+                ['linear'],
+                ['zoom'],
+                0,
+                1,
+                9,
+                3
+            ],
+            // Color ramp for heatmap.  Domain is 0 (low) to 1 (high).
+            // Begin color ramp at 0-stop with a 0-transparency color
+            // to create a blur-like effect.
+            'heatmap-color': [
+                'interpolate',
+                ['linear'],
+                ['heatmap-density'],
+                0,
+                'rgba(33,102,172,0)',
+                0.2,
+                'rgb(103,169,207)',
+                0.4,
+                'rgb(209,229,240)',
+                0.6,
+                'rgb(253,219,199)',
+                0.8,
+                'rgb(239,138,98)',
+                1,
+                'rgb(178,24,43)'
+            ],
+            // Adjust the heatmap radius by zoom level
+            'heatmap-radius': [
+                'interpolate',
+                ['linear'],
+                ['zoom'],
+                0,
+                2,
+                9,
+                20
+            ],
+            // Transition from heatmap to circle layer by zoom level
+            'heatmap-opacity': [
+                'interpolate',
+                ['linear'],
+                ['zoom'],
+                7,
+                1,
+                9,
+                0
+            ]
+        }
+    });
+
+    style.layers.push({
+        'id': 'earthquakes-point',
+        'type': 'circle',
+        'source': 'earthquakes',
+        'minzoom': 7,
+        'paint': {
+            // Size circle radius by earthquake magnitude and zoom level
+            'circle-radius': [
+                'interpolate',
+                ['linear'],
+                ['zoom'],
+                7,
+                ['interpolate', ['linear'], ['get', 'mag'], 1, 1, 6, 4],
+                16,
+                ['interpolate', ['linear'], ['get', 'mag'], 1, 5, 6, 50]
+            ],
+            // Color circle by earthquake magnitude
+            'circle-color': [
+                'interpolate',
+                ['linear'],
+                ['get', 'mag'],
+                1,
+                'rgba(33,102,172,0)',
+                2,
+                'rgb(103,169,207)',
+                3,
+                'rgb(209,229,240)',
+                4,
+                'rgb(253,219,199)',
+                5,
+                'rgb(239,138,98)',
+                6,
+                'rgb(178,24,43)'
+            ],
+            'circle-stroke-color': 'white',
+            'circle-stroke-width': 1,
+            // Transition from heatmap to circle layer by zoom level
+            'circle-opacity': [
+                'interpolate',
+                ['linear'],
+                ['zoom'],
+                7,
+                0,
+                8,
+                1
+            ]
+        }
+    });
+    return style;
+}
+</code></pre>
+<p>GL JS: <a href="https://maplibre.org/maplibre-gl-js/docs/examples/create-a-heatmap-layer/">Create a Heatmap Layer</a></p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="create-and-style-clusters"><a class="header" href="#create-and-style-clusters">Create and Style Clusters</a></h1>
-<p>Group dense point data into clusters and style them with point-count thresholds.</p>
-<hr>
-<h2 id="1-style-specification-5"><a class="header" href="#1-style-specification-5">1. Style Specification</a></h2>
-<p>The style specification enables clustering on a <code>geojson</code> source and uses <code>step</code> expressions to scale circle colors and radii by <code>point_count</code>:</p>
-<pre><code class="language-json">{
-  "version": 8,
-  "name": "MapLibre Point Clusters",
-  "sources": {
-    "earthquakes": {
-      "type": "geojson",
-      "data": "https://maplibre.org/maplibre-gl-js/docs/assets/earthquakes.geojson",
-      "cluster": true,
-      "clusterMaxZoom": 14,
-      "clusterRadius": 50
-    }
-  },
-  "layers": [
-    {
-      "id": "background",
-      "type": "background",
-      "paint": {
-        "background-color": "#111827"
-      }
-    },
-    {
-      "id": "clusters",
-      "type": "circle",
-      "source": "earthquakes",
-      "filter": ["has", "point_count"],
-      "paint": {
-        "circle-color": [
-          "step",
-          ["get", "point_count"],
-          "#51bbd6",
-          100,
-          "#f1f075",
-          750,
-          "#f28cb1"
-        ],
-        "circle-radius": [
-          "step",
-          ["get", "point_count"],
-          20,
-          100,
-          30,
-          750,
-          40
-        ]
-      }
-    },
-    {
-      "id": "cluster-count",
-      "type": "symbol",
-      "source": "earthquakes",
-      "filter": ["has", "point_count"],
-      "layout": {
-        "text-field": "{point_count_abbreviated}",
-        "text-size": 12
-      }
-    },
-    {
-      "id": "unclustered-point",
-      "type": "circle",
-      "source": "earthquakes",
-      "filter": ["!", ["has", "point_count"]],
-      "paint": {
-        "circle-color": "#11b4da",
-        "circle-radius": 4,
-        "circle-stroke-width": 1,
-        "circle-stroke-color": "#fff"
-      }
-    }
-  ],
-  "center": [-103.59179687499999, 40.66995747011755],
-  "zoom": 3.0
+<p>Cluster the points of a GeoJSON source and style the clusters by their point count.</p>
+<div class="example-map">
+  <iframe src="./demo/index.html?example=../code/create-and-style-clusters.js" title="Create and Style Clusters" loading="lazy" allow="fullscreen"></iframe>
+</div>
+
+<pre><code class="language-js">export default async function style() {
+    const style = await (await fetch('https://demotiles.maplibre.org/style.json')).json();
+    style.center = [-103.59179687498357, 40.66995747013945];
+    style.zoom = 3;
+
+    // Add a new source from our GeoJSON data and
+    // set the 'cluster' option to true. The source then
+    // adds the point_count property to your data.
+    style.sources['earthquakes'] = {
+        type: 'geojson',
+        // Point to GeoJSON data. This example visualizes all M1.0+ earthquakes
+        // from 12/22/15 to 1/21/16 as logged by USGS' Earthquake hazards program.
+        data: 'https://maplibre.org/maplibre-gl-js/docs/assets/earthquakes.geojson',
+        cluster: true,
+        clusterMaxZoom: 14, // Max zoom to cluster points on
+        clusterRadius: 50 // Radius of each cluster when clustering points (defaults to 50)
+    };
+
+    style.layers.push({
+        id: 'clusters',
+        type: 'circle',
+        source: 'earthquakes',
+        filter: ['has', 'point_count'],
+        paint: {
+            // Use step expressions (https://maplibre.org/maplibre-style-spec/#expressions-step)
+            // with three steps to implement three types of circles:
+            //   * Blue, 20px circles when point count is less than 100
+            //   * Yellow, 30px circles when point count is between 100 and 750
+            //   * Pink, 40px circles when point count is greater than or equal to 750
+            'circle-color': [
+                'step',
+                ['get', 'point_count'],
+                '#51bbd6',
+                100,
+                '#f1f075',
+                750,
+                '#f28cb1'
+            ],
+            'circle-radius': [
+                'step',
+                ['get', 'point_count'],
+                20,
+                100,
+                30,
+                750,
+                40
+            ]
+        }
+    });
+
+    style.layers.push({
+        id: 'cluster-count',
+        type: 'symbol',
+        source: 'earthquakes',
+        filter: ['has', 'point_count'],
+        layout: {
+            'text-field': '{point_count_abbreviated}',
+            'text-font': ['Noto Sans Regular'],
+            'text-size': 12
+        }
+    });
+
+    style.layers.push({
+        id: 'unclustered-point',
+        type: 'circle',
+        source: 'earthquakes',
+        filter: ['!', ['has', 'point_count']],
+        paint: {
+            'circle-color': '#11b4da',
+            'circle-radius': 4,
+            'circle-stroke-width': 1,
+            'circle-stroke-color': '#fff'
+        }
+    });
+    return style;
 }
 </code></pre>
-<hr>
-<h2 id="2-running-natively-in-rust-5"><a class="header" href="#2-running-natively-in-rust-5">2. Running Natively in Rust</a></h2>
-<h3 id="command-line-5"><a class="header" href="#command-line-5">Command Line</a></h3>
-<pre><code class="language-bash">cargo run -p maplibre-demo -- headed --style path/to/cluster-style.json
-</code></pre>
-<h3 id="native-api-example-5"><a class="header" href="#native-api-example-5">Native API Example</a></h3>
-<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
-</span><span class="boring">fn main() {
-</span>use maplibre::{
-    kernel::KernelBuilder,
-    map::Map,
-    plugin::Plugin,
-    style::Style,
-};
-
-pub fn create_cluster_map&lt;E: maplibre::environment::Environment&gt;(
-    kernel_builder: KernelBuilder&lt;E&gt;,
-    style_json: &amp;str,
-) -&gt; Result&lt;Map&lt;E&gt;, Box&lt;dyn std::error::Error&gt;&gt; {
-    let style: Style = serde_json::from_str(style_json)?;
-    let kernel = kernel_builder.build()?;
-    let plugins: Vec&lt;Box&lt;dyn Plugin&lt;E&gt;&gt;&gt; = vec![
-        Box::new(maplibre::render::RenderPlugin),
-        Box::new(maplibre::background::BackgroundPlugin),
-        Box::new(maplibre::vector::VectorPlugin::&lt;maplibre::vector::DefaultVectorTransferables&gt;::default()),
-        Box::new(maplibre::sdf::SdfPlugin::&lt;maplibre::vector::DefaultVectorTransferables&gt;::default()),
-    ];
-
-    let map = Map::new(style, kernel, plugins)?;
-    Ok(map)
-}
-<span class="boring">}</span></code></pre>
-<hr>
-<h2 id="3-webassembly-wasm-deployment-5"><a class="header" href="#3-webassembly-wasm-deployment-5">3. WebAssembly (WASM) Deployment</a></h2>
-<h3 id="html--javascript-integration-5"><a class="header" href="#html--javascript-integration-5">HTML &amp; JavaScript Integration</a></h3>
-<pre><code class="language-html">&lt;!DOCTYPE html&gt;
-&lt;html lang="en"&gt;
-&lt;head&gt;
-  &lt;meta charset="utf-8" /&gt;
-  &lt;title&gt;MapLibre Point Clusters&lt;/title&gt;
-  &lt;style&gt;
-    body { margin: 0; width: 100vw; height: 100vh; overflow: hidden; background: #111827; }
-    #maplibre { width: 100%; height: 100%; display: block; }
-  &lt;/style&gt;
-&lt;/head&gt;
-&lt;body&gt;
-  &lt;canvas id="maplibre"&gt;&lt;/canvas&gt;
-
-  &lt;script type="module"&gt;
-    import { startMapLibre } from 'maplibre-rs';
-
-    async function init() {
-      const res = await fetch('./cluster-style.json');
-      const style = await res.json();
-      await startMapLibre(undefined, undefined, JSON.stringify(style));
-    }
-
-    init().catch(console.error);
-  &lt;/script&gt;
-&lt;/body&gt;
-&lt;/html&gt;
-</code></pre>
+<blockquote>
+<p><strong>Note:</strong> The click handlers and popups of the GL JS example are left out.</p>
+</blockquote>
+<p>GL JS: <a href="https://maplibre.org/maplibre-gl-js/docs/examples/create-and-style-clusters/">Create and Style Clusters</a></p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="development-guide"><a class="header" href="#development-guide">Development Guide</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>

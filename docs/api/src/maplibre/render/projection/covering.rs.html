@@ -229,222 +229,224 @@
 <a href=#229 id=229 data-nosnippet>229</a>            source.minzoom,
 <a href=#230 id=230 data-nosnippet>230</a>            source.maxzoom,
 <a href=#231 id=231 data-nosnippet>231</a>        ),
-<a href=#232 id=232 data-nosnippet>232</a>        <span class="prelude-val">Some</span>(Source::RasterDem(source)) =&gt; {
-<a href=#233 id=233 data-nosnippet>233</a>            (f64::from(source.tile_size), source.minzoom, source.maxzoom)
-<a href=#234 id=234 data-nosnippet>234</a>        }
-<a href=#235 id=235 data-nosnippet>235</a>        <span class="kw">_ </span>=&gt; (TILE_SIZE, <span class="prelude-val">None</span>, <span class="prelude-val">None</span>),
-<a href=#236 id=236 data-nosnippet>236</a>    };
-<a href=#237 id=237 data-nosnippet>237</a>    CoveringRequest::raster_source(zoom, tile_size, minzoom, maxzoom)
-<a href=#238 id=238 data-nosnippet>238</a>}
-<a href=#239 id=239 data-nosnippet>239</a>
-<a href=#240 id=240 data-nosnippet>240</a><span class="kw">const </span>MERCATOR: ProjectionType = ProjectionType::Mercator;
-<a href=#241 id=241 data-nosnippet>241</a><span class="doccomment">/// How far an eye's surround covering reaches to every side, as a multiple of its height:
-<a href=#242 id=242 data-nosnippet>242</a>/// the ground a head turn reveals nearby. Farther ground comes as coarse tiles the frame
-<a href=#243 id=243 data-nosnippet>243</a>/// shares between directions.
-<a href=#244 id=244 data-nosnippet>244</a></span><span class="kw">const </span>SURROUND_REACH: f64 = <span class="number">2.0</span>;
-<a href=#245 id=245 data-nosnippet>245</a><span class="doccomment">/// Tiles a request may hold once the surround is added to what the eye sees; a flight
-<a href=#246 id=246 data-nosnippet>246</a>/// through several zoom levels lands every level's request, so each stays small.
-<a href=#247 id=247 data-nosnippet>247</a></span><span class="kw">const </span>SURROUND_MAX_TILES: usize = <span class="number">128</span>;
-<a href=#248 id=248 data-nosnippet>248</a>
-<a href=#249 id=249 data-nosnippet>249</a><span class="doccomment">/// Selects the tiles of a request under the projection declared by the current style.
-<a href=#250 id=250 data-nosnippet>250</a></span><span class="kw">pub fn </span>covering_region(
-<a href=#251 id=251 data-nosnippet>251</a>    style: <span class="kw-2">&amp;</span>Style,
-<a href=#252 id=252 data-nosnippet>252</a>    view_state: <span class="kw-2">&amp;</span>ViewState,
-<a href=#253 id=253 data-nosnippet>253</a>    world: <span class="kw-2">&amp;</span>World,
-<a href=#254 id=254 data-nosnippet>254</a>    request: CoveringRequest,
-<a href=#255 id=255 data-nosnippet>255</a>    padding: ViewStatePadding,
-<a href=#256 id=256 data-nosnippet>256</a>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;ViewRegion&gt;, ProjectionStateError&gt; {
-<a href=#257 id=257 data-nosnippet>257</a>    <span class="kw">let </span>history = world.resources.get::&lt;FrameLodHistory&gt;().map(|h| <span class="kw-2">&amp;</span>h.view);
-<a href=#258 id=258 data-nosnippet>258</a>    covering_region_with_history(style, view_state, world, request, padding, history)
-<a href=#259 id=259 data-nosnippet>259</a>}
-<a href=#260 id=260 data-nosnippet>260</a>
-<a href=#261 id=261 data-nosnippet>261</a><span class="kw">fn </span>covering_region_with_history(
-<a href=#262 id=262 data-nosnippet>262</a>    style: <span class="kw-2">&amp;</span>Style,
-<a href=#263 id=263 data-nosnippet>263</a>    view_state: <span class="kw-2">&amp;</span>ViewState,
-<a href=#264 id=264 data-nosnippet>264</a>    world: <span class="kw-2">&amp;</span>World,
-<a href=#265 id=265 data-nosnippet>265</a>    request: CoveringRequest,
-<a href=#266 id=266 data-nosnippet>266</a>    padding: ViewStatePadding,
-<a href=#267 id=267 data-nosnippet>267</a>    history: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>LodHistory&gt;,
-<a href=#268 id=268 data-nosnippet>268</a>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;ViewRegion&gt;, ProjectionStateError&gt; {
-<a href=#269 id=269 data-nosnippet>269</a>    <span class="kw">if </span>!request.zoom_range.serves(request.level) {
-<a href=#270 id=270 data-nosnippet>270</a>        <span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>);
-<a href=#271 id=271 data-nosnippet>271</a>    }
-<a href=#272 id=272 data-nosnippet>272</a>    <span class="comment">// A loose covering is a request for tiles; an external eye may ask for it to reach beyond
-<a href=#273 id=273 data-nosnippet>273</a>    // the frame so tiles are ready where the head turns next, once the eye has settled.
-<a href=#274 id=274 data-nosnippet>274</a>    </span><span class="kw">let </span>widened = <span class="kw">match </span>padding {
-<a href=#275 id=275 data-nosnippet>275</a>        ViewStatePadding::Loose <span class="kw">if </span>view_state.eye_settled() =&gt; {
-<a href=#276 id=276 data-nosnippet>276</a>            view_state.overscanned(view_state.request_overscan())
-<a href=#277 id=277 data-nosnippet>277</a>        }
-<a href=#278 id=278 data-nosnippet>278</a>        ViewStatePadding::Loose | ViewStatePadding::Tight =&gt; <span class="prelude-val">None</span>,
-<a href=#279 id=279 data-nosnippet>279</a>    };
-<a href=#280 id=280 data-nosnippet>280</a>    <span class="kw">let </span>view_state = widened.as_ref().unwrap_or(view_state);
-<a href=#281 id=281 data-nosnippet>281</a>    <span class="kw">let </span>projection_type = style
-<a href=#282 id=282 data-nosnippet>282</a>        .projection
-<a href=#283 id=283 data-nosnippet>283</a>        .as_ref()
-<a href=#284 id=284 data-nosnippet>284</a>        .map_or(<span class="kw-2">&amp;</span>MERCATOR, |specification| <span class="kw-2">&amp;</span>specification.projection_type);
-<a href=#285 id=285 data-nosnippet>285</a>    <span class="kw">let </span>uses_globe = projection_type.uses_globe_rendering(view_state.zoom().value());
-<a href=#286 id=286 data-nosnippet>286</a>    <span class="kw">if </span>!uses_globe {
-<a href=#287 id=287 data-nosnippet>287</a>        <span class="kw">let </span>region = mercator_view_region(style, view_state, world, request, padding, history)<span class="question-mark">?</span>;
-<a href=#288 id=288 data-nosnippet>288</a>        <span class="comment">// A head turns faster than tiles arrive, so an eye's requests also cover what
-<a href=#289 id=289 data-nosnippet>289</a>        // surrounds it on the ground.
-<a href=#290 id=290 data-nosnippet>290</a>        </span><span class="kw">let </span>surround = <span class="kw">match </span>padding {
-<a href=#291 id=291 data-nosnippet>291</a>            ViewStatePadding::Loose =&gt; view_state.surround(SURROUND_REACH, projection_type),
-<a href=#292 id=292 data-nosnippet>292</a>            ViewStatePadding::Tight =&gt; <span class="prelude-val">None</span>,
-<a href=#293 id=293 data-nosnippet>293</a>        };
-<a href=#294 id=294 data-nosnippet>294</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(surround) = surround <span class="kw">else </span>{
-<a href=#295 id=295 data-nosnippet>295</a>            <span class="kw">return </span><span class="prelude-val">Ok</span>(region);
-<a href=#296 id=296 data-nosnippet>296</a>        };
-<a href=#297 id=297 data-nosnippet>297</a>        <span class="kw">let </span>around = mercator_view_region(style, <span class="kw-2">&amp;</span>surround, world, request, padding, history)<span class="question-mark">?</span>;
-<a href=#298 id=298 data-nosnippet>298</a>        <span class="kw">return </span><span class="prelude-val">Ok</span>(union_regions(
-<a href=#299 id=299 data-nosnippet>299</a>            region,
-<a href=#300 id=300 data-nosnippet>300</a>            around,
-<a href=#301 id=301 data-nosnippet>301</a>            request.level,
-<a href=#302 id=302 data-nosnippet>302</a>            SURROUND_MAX_TILES,
-<a href=#303 id=303 data-nosnippet>303</a>        ));
-<a href=#304 id=304 data-nosnippet>304</a>    }
-<a href=#305 id=305 data-nosnippet>305</a>    globe_view_region(style, view_state, world, request, padding, history)
-<a href=#306 id=306 data-nosnippet>306</a>}
-<a href=#307 id=307 data-nosnippet>307</a>
-<a href=#308 id=308 data-nosnippet>308</a><span class="kw">fn </span>globe_view_region(
-<a href=#309 id=309 data-nosnippet>309</a>    style: <span class="kw-2">&amp;</span>Style,
-<a href=#310 id=310 data-nosnippet>310</a>    view_state: <span class="kw-2">&amp;</span>ViewState,
-<a href=#311 id=311 data-nosnippet>311</a>    world: <span class="kw-2">&amp;</span>World,
-<a href=#312 id=312 data-nosnippet>312</a>    request: CoveringRequest,
-<a href=#313 id=313 data-nosnippet>313</a>    padding: ViewStatePadding,
-<a href=#314 id=314 data-nosnippet>314</a>    history: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>LodHistory&gt;,
-<a href=#315 id=315 data-nosnippet>315</a>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;ViewRegion&gt;, ProjectionStateError&gt; {
-<a href=#316 id=316 data-nosnippet>316</a>    <span class="kw">let </span>visible_level = request.level;
-<a href=#317 id=317 data-nosnippet>317</a>    <span class="kw">let </span>camera = globe_camera_for_view(view_state)<span class="question-mark">?</span>;
-<a href=#318 id=318 data-nosnippet>318</a>    <span class="kw">let </span>options = GlobeCoveringOptions {
-<a href=#319 id=319 data-nosnippet>319</a>        zoom: visible_level,
-<a href=#320 id=320 data-nosnippet>320</a>        requested_zoom: request.requested_zoom,
-<a href=#321 id=321 data-nosnippet>321</a>        variable_zoom: u8::from(visible_level) &gt; <span class="number">4</span>,
-<a href=#322 id=322 data-nosnippet>322</a>        rounding: request.rounding,
-<a href=#323 id=323 data-nosnippet>323</a>        zoom_range: request.zoom_range,
-<a href=#324 id=324 data-nosnippet>324</a>        padding: <span class="kw">match </span>padding {
-<a href=#325 id=325 data-nosnippet>325</a>            ViewStatePadding::Loose =&gt; <span class="number">1</span>,
-<a href=#326 id=326 data-nosnippet>326</a>            ViewStatePadding::Tight =&gt; <span class="number">0</span>,
-<a href=#327 id=327 data-nosnippet>327</a>        },
-<a href=#328 id=328 data-nosnippet>328</a>        max_tiles: <span class="number">512</span>,
-<a href=#329 id=329 data-nosnippet>329</a>    };
-<a href=#330 id=330 data-nosnippet>330</a>    <span class="kw">let </span>fallback = TileElevationRange {
-<a href=#331 id=331 data-nosnippet>331</a>        min_meters: <span class="number">0.0</span>,
-<a href=#332 id=332 data-nosnippet>332</a>        max_meters: elevation_for_tile_culling(<span class="kw-2">&amp;</span>camera, view_state.center_elevation()),
-<a href=#333 id=333 data-nosnippet>333</a>    };
-<a href=#334 id=334 data-nosnippet>334</a>    <span class="kw">let </span>elevation = tile_elevation(style, world, fallback);
-<a href=#335 id=335 data-nosnippet>335</a>    <span class="comment">// Both free-globe poses and host-supplied external views stand where the eye is placed,
-<a href=#336 id=336 data-nosnippet>336</a>    // often near the ground and looking toward the horizon or distant mountains.
-<a href=#337 id=337 data-nosnippet>337</a>    </span><span class="kw">let </span>pose = view_state.pose_view().is_some() || view_state.has_external_view();
-<a href=#338 id=338 data-nosnippet>338</a>    <span class="kw">let </span>reach = <span class="kw">if </span>pose &amp;&amp; request.surface {
-<a href=#339 id=339 data-nosnippet>339</a>        <span class="kw">let </span>level_offset = request.requested_zoom - view_state.zoom().value();
-<a href=#340 id=340 data-nosnippet>340</a>        <span class="kw">let </span>lod = <span class="kw">if let </span><span class="prelude-val">Some</span>(focal) = view_state.external_lod_focal_pixels() {
-<a href=#341 id=341 data-nosnippet>341</a>            LodContext::screen_resolution_focal(
-<a href=#342 id=342 data-nosnippet>342</a>                <span class="kw-2">&amp;</span>camera,
-<a href=#343 id=343 data-nosnippet>343</a>                focal,
-<a href=#344 id=344 data-nosnippet>344</a>                level_offset,
-<a href=#345 id=345 data-nosnippet>345</a>                nadir_ground_elevation(style, world, <span class="kw-2">&amp;</span>camera),
-<a href=#346 id=346 data-nosnippet>346</a>            )
-<a href=#347 id=347 data-nosnippet>347</a>        } <span class="kw">else </span>{
-<a href=#348 id=348 data-nosnippet>348</a>            LodContext::screen_resolution(<span class="kw-2">&amp;</span>camera, view_state.height(), level_offset)
-<a href=#349 id=349 data-nosnippet>349</a>        };
-<a href=#350 id=350 data-nosnippet>350</a>        (lod, FarPlane::HighestGround)
-<a href=#351 id=351 data-nosnippet>351</a>    } <span class="kw">else </span>{
-<a href=#352 id=352 data-nosnippet>352</a>        (
-<a href=#353 id=353 data-nosnippet>353</a>            LodContext::new(<span class="kw-2">&amp;</span>camera, request.requested_zoom),
-<a href=#354 id=354 data-nosnippet>354</a>            FarPlane::Horizon,
-<a href=#355 id=355 data-nosnippet>355</a>        )
-<a href=#356 id=356 data-nosnippet>356</a>    };
-<a href=#357 id=357 data-nosnippet>357</a>    <span class="kw">let </span>tiles = covering_tiles_with_history(<span class="kw-2">&amp;</span>camera, options, reach, elevation.as_ref(), history)
-<a href=#358 id=358 data-nosnippet>358</a>        .map_err(|source| ProjectionStateError::GlobeCovering { source })<span class="question-mark">?</span>;
-<a href=#359 id=359 data-nosnippet>359</a>    <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(ViewRegion::from_tiles(tiles, visible_level, <span class="number">512</span>)))
-<a href=#360 id=360 data-nosnippet>360</a>}
-<a href=#361 id=361 data-nosnippet>361</a>
-<a href=#362 id=362 data-nosnippet>362</a><span class="doccomment">/// Tiles a request may hold once a flight's destination is added to what the eye sees. The
-<a href=#363 id=363 data-nosnippet>363</a>/// destination's covering comes nearest first, so this many tiles are the ground around
-<a href=#364 id=364 data-nosnippet>364</a>/// the arrival gaze; the rest load after landing, when they can be drawn.
-<a href=#365 id=365 data-nosnippet>365</a></span><span class="kw">const </span>PREFETCH_MAX_TILES: usize = <span class="number">96</span>;
-<a href=#366 id=366 data-nosnippet>366</a>
-<a href=#367 id=367 data-nosnippet>367</a><span class="doccomment">/// The tiles of both regions, those of `primary` first, as one region at `level`, at most
-<a href=#368 id=368 data-nosnippet>368</a>/// `max_tiles` of them, or all primary tiles when that view alone exceeds the limit.
-<a href=#369 id=369 data-nosnippet>369</a></span><span class="kw">fn </span>union_regions(
-<a href=#370 id=370 data-nosnippet>370</a>    primary: <span class="prelude-ty">Option</span>&lt;ViewRegion&gt;,
-<a href=#371 id=371 data-nosnippet>371</a>    secondary: <span class="prelude-ty">Option</span>&lt;ViewRegion&gt;,
-<a href=#372 id=372 data-nosnippet>372</a>    level: ZoomLevel,
-<a href=#373 id=373 data-nosnippet>373</a>    max_tiles: usize,
-<a href=#374 id=374 data-nosnippet>374</a>) -&gt; <span class="prelude-ty">Option</span>&lt;ViewRegion&gt; {
-<a href=#375 id=375 data-nosnippet>375</a>    <span class="kw">match </span>(primary, secondary) {
-<a href=#376 id=376 data-nosnippet>376</a>        (<span class="prelude-val">None</span>, other) | (other, <span class="prelude-val">None</span>) =&gt; other,
-<a href=#377 id=377 data-nosnippet>377</a>        (<span class="prelude-val">Some</span>(primary), <span class="prelude-val">Some</span>(secondary)) =&gt; {
-<a href=#378 id=378 data-nosnippet>378</a>            <span class="comment">// Speculative padding must never evict tiles the primary view actually draws.
-<a href=#379 id=379 data-nosnippet>379</a>            </span><span class="kw">let </span>max_tiles = max_tiles.max(primary.iter().count());
-<a href=#380 id=380 data-nosnippet>380</a>            <span class="kw">let </span><span class="kw-2">mut </span>seen = HashSet::new();
-<a href=#381 id=381 data-nosnippet>381</a>            <span class="kw">let </span>tiles: Vec&lt;WorldTileCoords&gt; = primary
-<a href=#382 id=382 data-nosnippet>382</a>                .iter()
-<a href=#383 id=383 data-nosnippet>383</a>                .chain(secondary.iter())
-<a href=#384 id=384 data-nosnippet>384</a>                .filter(|coords| seen.insert(<span class="kw-2">*</span>coords))
-<a href=#385 id=385 data-nosnippet>385</a>                .collect();
-<a href=#386 id=386 data-nosnippet>386</a>            <span class="prelude-val">Some</span>(ViewRegion::from_tiles(tiles, level, max_tiles))
-<a href=#387 id=387 data-nosnippet>387</a>        }
-<a href=#388 id=388 data-nosnippet>388</a>    }
-<a href=#389 id=389 data-nosnippet>389</a>}
-<a href=#390 id=390 data-nosnippet>390</a>
-<a href=#391 id=391 data-nosnippet>391</a><span class="doccomment">/// Culling bounds per tile: the loaded DEM's range where terrain has one, else `fallback`,
-<a href=#392 id=392 data-nosnippet>392</a>/// the range GL JS assumes for tiles without elevation data.
-<a href=#393 id=393 data-nosnippet>393</a></span><span class="kw">fn </span>tile_elevation&lt;<span class="lifetime">'a</span>&gt;(
-<a href=#394 id=394 data-nosnippet>394</a>    style: <span class="kw-2">&amp;</span>Style,
-<a href=#395 id=395 data-nosnippet>395</a>    world: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>World,
-<a href=#396 id=396 data-nosnippet>396</a>    fallback: TileElevationRange,
-<a href=#397 id=397 data-nosnippet>397</a>) -&gt; Box&lt;<span class="kw">dyn </span>TileElevationProvider + <span class="lifetime">'a</span>&gt; {
-<a href=#398 id=398 data-nosnippet>398</a>    <span class="kw">match </span>world.resources.get::&lt;TerrainCoverageIndex&gt;() {
-<a href=#399 id=399 data-nosnippet>399</a>        <span class="prelude-val">Some</span>(index) <span class="kw">if </span>style.terrain.is_some() =&gt; {
-<a href=#400 id=400 data-nosnippet>400</a>            Box::new(IndexedTileElevation { index, fallback })
-<a href=#401 id=401 data-nosnippet>401</a>        }
-<a href=#402 id=402 data-nosnippet>402</a>        <span class="kw">_ </span>=&gt; Box::new(fallback),
-<a href=#403 id=403 data-nosnippet>403</a>    }
-<a href=#404 id=404 data-nosnippet>404</a>}
-<a href=#405 id=405 data-nosnippet>405</a>
-<a href=#406 id=406 data-nosnippet>406</a><span class="kw">fn </span>nadir_ground_elevation(
-<a href=#407 id=407 data-nosnippet>407</a>    style: <span class="kw-2">&amp;</span>Style,
-<a href=#408 id=408 data-nosnippet>408</a>    world: <span class="kw-2">&amp;</span>World,
-<a href=#409 id=409 data-nosnippet>409</a>    camera: <span class="kw-2">&amp;</span><span class="kw">crate</span>::projection::globe::camera::GlobeCameraState,
-<a href=#410 id=410 data-nosnippet>410</a>) -&gt; f64 {
-<a href=#411 id=411 data-nosnippet>411</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(index) = world
-<a href=#412 id=412 data-nosnippet>412</a>        .resources
-<a href=#413 id=413 data-nosnippet>413</a>        .get::&lt;TerrainCoverageIndex&gt;()
-<a href=#414 id=414 data-nosnippet>414</a>        .filter(|<span class="kw">_</span>| style.terrain.is_some())
-<a href=#415 id=415 data-nosnippet>415</a>    <span class="kw">else </span>{
-<a href=#416 id=416 data-nosnippet>416</a>        <span class="kw">return </span><span class="number">0.0</span>;
-<a href=#417 id=417 data-nosnippet>417</a>    };
-<a href=#418 id=418 data-nosnippet>418</a>    <span class="kw">let </span>position = camera.camera_position();
-<a href=#419 id=419 data-nosnippet>419</a>    <span class="kw">let </span>len = position.magnitude();
-<a href=#420 id=420 data-nosnippet>420</a>    <span class="kw">if </span>len &gt; f64::EPSILON {
-<a href=#421 id=421 data-nosnippet>421</a>        <span class="kw">let </span>sin_lat = position.y / len;
-<a href=#422 id=422 data-nosnippet>422</a>        <span class="kw">let </span>sin_limit = <span class="kw">crate</span>::projection::globe::scale::MERCATOR_LATITUDE_LIMIT
-<a href=#423 id=423 data-nosnippet>423</a>            .to_radians()
-<a href=#424 id=424 data-nosnippet>424</a>            .sin();
-<a href=#425 id=425 data-nosnippet>425</a>        <span class="kw">if </span>sin_lat &gt; sin_limit {
-<a href=#426 id=426 data-nosnippet>426</a>            <span class="kw">return </span>f64::from(index.poles().north_meters) * index.exaggeration();
-<a href=#427 id=427 data-nosnippet>427</a>        }
-<a href=#428 id=428 data-nosnippet>428</a>        <span class="kw">if </span>sin_lat &lt; -sin_limit {
-<a href=#429 id=429 data-nosnippet>429</a>            <span class="kw">return </span>f64::from(index.poles().south_meters) * index.exaggeration();
-<a href=#430 id=430 data-nosnippet>430</a>        }
-<a href=#431 id=431 data-nosnippet>431</a>    }
-<a href=#432 id=432 data-nosnippet>432</a>    <span class="kw">let </span>nadir = <span class="kw">crate</span>::projection::globe::unit_sphere_to_lat_lon(position);
-<a href=#433 id=433 data-nosnippet>433</a>    <span class="kw">let </span>x = nadir.longitude / <span class="number">360.0 </span>+ <span class="number">0.5</span>;
-<a href=#434 id=434 data-nosnippet>434</a>    <span class="kw">let </span>y = (<span class="number">1.0 </span>- nadir.latitude.to_radians().tan().asinh() / std::f64::consts::PI) * <span class="number">0.5</span>;
-<a href=#435 id=435 data-nosnippet>435</a>    index
-<a href=#436 id=436 data-nosnippet>436</a>        .loaded_ground_cached(
-<a href=#437 id=437 data-nosnippet>437</a>            <span class="kw-2">&amp;</span>world.tiles,
-<a href=#438 id=438 data-nosnippet>438</a>            x,
-<a href=#439 id=439 data-nosnippet>439</a>            y,
-<a href=#440 id=440 data-nosnippet>440</a>            <span class="kw">crate</span>::terrain::coverage::DemDetail::Finest,
-<a href=#441 id=441 data-nosnippet>441</a>        )
-<a href=#442 id=442 data-nosnippet>442</a>        .unwrap_or(<span class="number">0.0</span>)
-<a href=#443 id=443 data-nosnippet>443</a>}
-<a href=#444 id=444 data-nosnippet>444</a>
-<a href=#445 id=445 data-nosnippet>445</a><span class="kw">mod </span>mercator;
-<a href=#446 id=446 data-nosnippet>446</a><span class="attr">#[cfg(test)]
-<a href=#447 id=447 data-nosnippet>447</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod </span>tests;
-<a href=#448 id=448 data-nosnippet>448</a>
-<a href=#449 id=449 data-nosnippet>449</a><span class="kw">use </span>mercator::mercator_view_region;
+<a href=#232 id=232 data-nosnippet>232</a>        <span class="prelude-val">Some</span>(Source::RasterDem(source)) =&gt; (
+<a href=#233 id=233 data-nosnippet>233</a>            f64::from(source.tile_size()),
+<a href=#234 id=234 data-nosnippet>234</a>            source.minzoom,
+<a href=#235 id=235 data-nosnippet>235</a>            source.maxzoom,
+<a href=#236 id=236 data-nosnippet>236</a>        ),
+<a href=#237 id=237 data-nosnippet>237</a>        <span class="kw">_ </span>=&gt; (TILE_SIZE, <span class="prelude-val">None</span>, <span class="prelude-val">None</span>),
+<a href=#238 id=238 data-nosnippet>238</a>    };
+<a href=#239 id=239 data-nosnippet>239</a>    CoveringRequest::raster_source(zoom, tile_size, minzoom, maxzoom)
+<a href=#240 id=240 data-nosnippet>240</a>}
+<a href=#241 id=241 data-nosnippet>241</a>
+<a href=#242 id=242 data-nosnippet>242</a><span class="kw">const </span>MERCATOR: ProjectionType = ProjectionType::Mercator;
+<a href=#243 id=243 data-nosnippet>243</a><span class="doccomment">/// How far an eye's surround covering reaches to every side, as a multiple of its height:
+<a href=#244 id=244 data-nosnippet>244</a>/// the ground a head turn reveals nearby. Farther ground comes as coarse tiles the frame
+<a href=#245 id=245 data-nosnippet>245</a>/// shares between directions.
+<a href=#246 id=246 data-nosnippet>246</a></span><span class="kw">const </span>SURROUND_REACH: f64 = <span class="number">2.0</span>;
+<a href=#247 id=247 data-nosnippet>247</a><span class="doccomment">/// Tiles a request may hold once the surround is added to what the eye sees; a flight
+<a href=#248 id=248 data-nosnippet>248</a>/// through several zoom levels lands every level's request, so each stays small.
+<a href=#249 id=249 data-nosnippet>249</a></span><span class="kw">const </span>SURROUND_MAX_TILES: usize = <span class="number">128</span>;
+<a href=#250 id=250 data-nosnippet>250</a>
+<a href=#251 id=251 data-nosnippet>251</a><span class="doccomment">/// Selects the tiles of a request under the projection declared by the current style.
+<a href=#252 id=252 data-nosnippet>252</a></span><span class="kw">pub fn </span>covering_region(
+<a href=#253 id=253 data-nosnippet>253</a>    style: <span class="kw-2">&amp;</span>Style,
+<a href=#254 id=254 data-nosnippet>254</a>    view_state: <span class="kw-2">&amp;</span>ViewState,
+<a href=#255 id=255 data-nosnippet>255</a>    world: <span class="kw-2">&amp;</span>World,
+<a href=#256 id=256 data-nosnippet>256</a>    request: CoveringRequest,
+<a href=#257 id=257 data-nosnippet>257</a>    padding: ViewStatePadding,
+<a href=#258 id=258 data-nosnippet>258</a>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;ViewRegion&gt;, ProjectionStateError&gt; {
+<a href=#259 id=259 data-nosnippet>259</a>    <span class="kw">let </span>history = world.resources.get::&lt;FrameLodHistory&gt;().map(|h| <span class="kw-2">&amp;</span>h.view);
+<a href=#260 id=260 data-nosnippet>260</a>    covering_region_with_history(style, view_state, world, request, padding, history)
+<a href=#261 id=261 data-nosnippet>261</a>}
+<a href=#262 id=262 data-nosnippet>262</a>
+<a href=#263 id=263 data-nosnippet>263</a><span class="kw">fn </span>covering_region_with_history(
+<a href=#264 id=264 data-nosnippet>264</a>    style: <span class="kw-2">&amp;</span>Style,
+<a href=#265 id=265 data-nosnippet>265</a>    view_state: <span class="kw-2">&amp;</span>ViewState,
+<a href=#266 id=266 data-nosnippet>266</a>    world: <span class="kw-2">&amp;</span>World,
+<a href=#267 id=267 data-nosnippet>267</a>    request: CoveringRequest,
+<a href=#268 id=268 data-nosnippet>268</a>    padding: ViewStatePadding,
+<a href=#269 id=269 data-nosnippet>269</a>    history: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>LodHistory&gt;,
+<a href=#270 id=270 data-nosnippet>270</a>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;ViewRegion&gt;, ProjectionStateError&gt; {
+<a href=#271 id=271 data-nosnippet>271</a>    <span class="kw">if </span>!request.zoom_range.serves(request.level) {
+<a href=#272 id=272 data-nosnippet>272</a>        <span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>);
+<a href=#273 id=273 data-nosnippet>273</a>    }
+<a href=#274 id=274 data-nosnippet>274</a>    <span class="comment">// A loose covering is a request for tiles; an external eye may ask for it to reach beyond
+<a href=#275 id=275 data-nosnippet>275</a>    // the frame so tiles are ready where the head turns next, once the eye has settled.
+<a href=#276 id=276 data-nosnippet>276</a>    </span><span class="kw">let </span>widened = <span class="kw">match </span>padding {
+<a href=#277 id=277 data-nosnippet>277</a>        ViewStatePadding::Loose <span class="kw">if </span>view_state.eye_settled() =&gt; {
+<a href=#278 id=278 data-nosnippet>278</a>            view_state.overscanned(view_state.request_overscan())
+<a href=#279 id=279 data-nosnippet>279</a>        }
+<a href=#280 id=280 data-nosnippet>280</a>        ViewStatePadding::Loose | ViewStatePadding::Tight =&gt; <span class="prelude-val">None</span>,
+<a href=#281 id=281 data-nosnippet>281</a>    };
+<a href=#282 id=282 data-nosnippet>282</a>    <span class="kw">let </span>view_state = widened.as_ref().unwrap_or(view_state);
+<a href=#283 id=283 data-nosnippet>283</a>    <span class="kw">let </span>projection_type = style
+<a href=#284 id=284 data-nosnippet>284</a>        .projection
+<a href=#285 id=285 data-nosnippet>285</a>        .as_ref()
+<a href=#286 id=286 data-nosnippet>286</a>        .map_or(<span class="kw-2">&amp;</span>MERCATOR, |specification| <span class="kw-2">&amp;</span>specification.projection_type);
+<a href=#287 id=287 data-nosnippet>287</a>    <span class="kw">let </span>uses_globe = projection_type.uses_globe_rendering(view_state.zoom().value());
+<a href=#288 id=288 data-nosnippet>288</a>    <span class="kw">if </span>!uses_globe {
+<a href=#289 id=289 data-nosnippet>289</a>        <span class="kw">let </span>region = mercator_view_region(style, view_state, world, request, padding, history)<span class="question-mark">?</span>;
+<a href=#290 id=290 data-nosnippet>290</a>        <span class="comment">// A head turns faster than tiles arrive, so an eye's requests also cover what
+<a href=#291 id=291 data-nosnippet>291</a>        // surrounds it on the ground.
+<a href=#292 id=292 data-nosnippet>292</a>        </span><span class="kw">let </span>surround = <span class="kw">match </span>padding {
+<a href=#293 id=293 data-nosnippet>293</a>            ViewStatePadding::Loose =&gt; view_state.surround(SURROUND_REACH, projection_type),
+<a href=#294 id=294 data-nosnippet>294</a>            ViewStatePadding::Tight =&gt; <span class="prelude-val">None</span>,
+<a href=#295 id=295 data-nosnippet>295</a>        };
+<a href=#296 id=296 data-nosnippet>296</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(surround) = surround <span class="kw">else </span>{
+<a href=#297 id=297 data-nosnippet>297</a>            <span class="kw">return </span><span class="prelude-val">Ok</span>(region);
+<a href=#298 id=298 data-nosnippet>298</a>        };
+<a href=#299 id=299 data-nosnippet>299</a>        <span class="kw">let </span>around = mercator_view_region(style, <span class="kw-2">&amp;</span>surround, world, request, padding, history)<span class="question-mark">?</span>;
+<a href=#300 id=300 data-nosnippet>300</a>        <span class="kw">return </span><span class="prelude-val">Ok</span>(union_regions(
+<a href=#301 id=301 data-nosnippet>301</a>            region,
+<a href=#302 id=302 data-nosnippet>302</a>            around,
+<a href=#303 id=303 data-nosnippet>303</a>            request.level,
+<a href=#304 id=304 data-nosnippet>304</a>            SURROUND_MAX_TILES,
+<a href=#305 id=305 data-nosnippet>305</a>        ));
+<a href=#306 id=306 data-nosnippet>306</a>    }
+<a href=#307 id=307 data-nosnippet>307</a>    globe_view_region(style, view_state, world, request, padding, history)
+<a href=#308 id=308 data-nosnippet>308</a>}
+<a href=#309 id=309 data-nosnippet>309</a>
+<a href=#310 id=310 data-nosnippet>310</a><span class="kw">fn </span>globe_view_region(
+<a href=#311 id=311 data-nosnippet>311</a>    style: <span class="kw-2">&amp;</span>Style,
+<a href=#312 id=312 data-nosnippet>312</a>    view_state: <span class="kw-2">&amp;</span>ViewState,
+<a href=#313 id=313 data-nosnippet>313</a>    world: <span class="kw-2">&amp;</span>World,
+<a href=#314 id=314 data-nosnippet>314</a>    request: CoveringRequest,
+<a href=#315 id=315 data-nosnippet>315</a>    padding: ViewStatePadding,
+<a href=#316 id=316 data-nosnippet>316</a>    history: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>LodHistory&gt;,
+<a href=#317 id=317 data-nosnippet>317</a>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;ViewRegion&gt;, ProjectionStateError&gt; {
+<a href=#318 id=318 data-nosnippet>318</a>    <span class="kw">let </span>visible_level = request.level;
+<a href=#319 id=319 data-nosnippet>319</a>    <span class="kw">let </span>camera = globe_camera_for_view(view_state)<span class="question-mark">?</span>;
+<a href=#320 id=320 data-nosnippet>320</a>    <span class="kw">let </span>options = GlobeCoveringOptions {
+<a href=#321 id=321 data-nosnippet>321</a>        zoom: visible_level,
+<a href=#322 id=322 data-nosnippet>322</a>        requested_zoom: request.requested_zoom,
+<a href=#323 id=323 data-nosnippet>323</a>        variable_zoom: u8::from(visible_level) &gt; <span class="number">4</span>,
+<a href=#324 id=324 data-nosnippet>324</a>        rounding: request.rounding,
+<a href=#325 id=325 data-nosnippet>325</a>        zoom_range: request.zoom_range,
+<a href=#326 id=326 data-nosnippet>326</a>        padding: <span class="kw">match </span>padding {
+<a href=#327 id=327 data-nosnippet>327</a>            ViewStatePadding::Loose =&gt; <span class="number">1</span>,
+<a href=#328 id=328 data-nosnippet>328</a>            ViewStatePadding::Tight =&gt; <span class="number">0</span>,
+<a href=#329 id=329 data-nosnippet>329</a>        },
+<a href=#330 id=330 data-nosnippet>330</a>        max_tiles: <span class="number">512</span>,
+<a href=#331 id=331 data-nosnippet>331</a>    };
+<a href=#332 id=332 data-nosnippet>332</a>    <span class="kw">let </span>fallback = TileElevationRange {
+<a href=#333 id=333 data-nosnippet>333</a>        min_meters: <span class="number">0.0</span>,
+<a href=#334 id=334 data-nosnippet>334</a>        max_meters: elevation_for_tile_culling(<span class="kw-2">&amp;</span>camera, view_state.center_elevation()),
+<a href=#335 id=335 data-nosnippet>335</a>    };
+<a href=#336 id=336 data-nosnippet>336</a>    <span class="kw">let </span>elevation = tile_elevation(style, world, fallback);
+<a href=#337 id=337 data-nosnippet>337</a>    <span class="comment">// Both free-globe poses and host-supplied external views stand where the eye is placed,
+<a href=#338 id=338 data-nosnippet>338</a>    // often near the ground and looking toward the horizon or distant mountains.
+<a href=#339 id=339 data-nosnippet>339</a>    </span><span class="kw">let </span>pose = view_state.pose_view().is_some() || view_state.has_external_view();
+<a href=#340 id=340 data-nosnippet>340</a>    <span class="kw">let </span>reach = <span class="kw">if </span>pose &amp;&amp; request.surface {
+<a href=#341 id=341 data-nosnippet>341</a>        <span class="kw">let </span>level_offset = request.requested_zoom - view_state.zoom().value();
+<a href=#342 id=342 data-nosnippet>342</a>        <span class="kw">let </span>lod = <span class="kw">if let </span><span class="prelude-val">Some</span>(focal) = view_state.external_lod_focal_pixels() {
+<a href=#343 id=343 data-nosnippet>343</a>            LodContext::screen_resolution_focal(
+<a href=#344 id=344 data-nosnippet>344</a>                <span class="kw-2">&amp;</span>camera,
+<a href=#345 id=345 data-nosnippet>345</a>                focal,
+<a href=#346 id=346 data-nosnippet>346</a>                level_offset,
+<a href=#347 id=347 data-nosnippet>347</a>                nadir_ground_elevation(style, world, <span class="kw-2">&amp;</span>camera),
+<a href=#348 id=348 data-nosnippet>348</a>            )
+<a href=#349 id=349 data-nosnippet>349</a>        } <span class="kw">else </span>{
+<a href=#350 id=350 data-nosnippet>350</a>            LodContext::screen_resolution(<span class="kw-2">&amp;</span>camera, view_state.height(), level_offset)
+<a href=#351 id=351 data-nosnippet>351</a>        };
+<a href=#352 id=352 data-nosnippet>352</a>        (lod, FarPlane::HighestGround)
+<a href=#353 id=353 data-nosnippet>353</a>    } <span class="kw">else </span>{
+<a href=#354 id=354 data-nosnippet>354</a>        (
+<a href=#355 id=355 data-nosnippet>355</a>            LodContext::new(<span class="kw-2">&amp;</span>camera, request.requested_zoom),
+<a href=#356 id=356 data-nosnippet>356</a>            FarPlane::Horizon,
+<a href=#357 id=357 data-nosnippet>357</a>        )
+<a href=#358 id=358 data-nosnippet>358</a>    };
+<a href=#359 id=359 data-nosnippet>359</a>    <span class="kw">let </span>tiles = covering_tiles_with_history(<span class="kw-2">&amp;</span>camera, options, reach, elevation.as_ref(), history)
+<a href=#360 id=360 data-nosnippet>360</a>        .map_err(|source| ProjectionStateError::GlobeCovering { source })<span class="question-mark">?</span>;
+<a href=#361 id=361 data-nosnippet>361</a>    <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(ViewRegion::from_tiles(tiles, visible_level, <span class="number">512</span>)))
+<a href=#362 id=362 data-nosnippet>362</a>}
+<a href=#363 id=363 data-nosnippet>363</a>
+<a href=#364 id=364 data-nosnippet>364</a><span class="doccomment">/// Tiles a request may hold once a flight's destination is added to what the eye sees. The
+<a href=#365 id=365 data-nosnippet>365</a>/// destination's covering comes nearest first, so this many tiles are the ground around
+<a href=#366 id=366 data-nosnippet>366</a>/// the arrival gaze; the rest load after landing, when they can be drawn.
+<a href=#367 id=367 data-nosnippet>367</a></span><span class="kw">const </span>PREFETCH_MAX_TILES: usize = <span class="number">96</span>;
+<a href=#368 id=368 data-nosnippet>368</a>
+<a href=#369 id=369 data-nosnippet>369</a><span class="doccomment">/// The tiles of both regions, those of `primary` first, as one region at `level`, at most
+<a href=#370 id=370 data-nosnippet>370</a>/// `max_tiles` of them, or all primary tiles when that view alone exceeds the limit.
+<a href=#371 id=371 data-nosnippet>371</a></span><span class="kw">fn </span>union_regions(
+<a href=#372 id=372 data-nosnippet>372</a>    primary: <span class="prelude-ty">Option</span>&lt;ViewRegion&gt;,
+<a href=#373 id=373 data-nosnippet>373</a>    secondary: <span class="prelude-ty">Option</span>&lt;ViewRegion&gt;,
+<a href=#374 id=374 data-nosnippet>374</a>    level: ZoomLevel,
+<a href=#375 id=375 data-nosnippet>375</a>    max_tiles: usize,
+<a href=#376 id=376 data-nosnippet>376</a>) -&gt; <span class="prelude-ty">Option</span>&lt;ViewRegion&gt; {
+<a href=#377 id=377 data-nosnippet>377</a>    <span class="kw">match </span>(primary, secondary) {
+<a href=#378 id=378 data-nosnippet>378</a>        (<span class="prelude-val">None</span>, other) | (other, <span class="prelude-val">None</span>) =&gt; other,
+<a href=#379 id=379 data-nosnippet>379</a>        (<span class="prelude-val">Some</span>(primary), <span class="prelude-val">Some</span>(secondary)) =&gt; {
+<a href=#380 id=380 data-nosnippet>380</a>            <span class="comment">// Speculative padding must never evict tiles the primary view actually draws.
+<a href=#381 id=381 data-nosnippet>381</a>            </span><span class="kw">let </span>max_tiles = max_tiles.max(primary.iter().count());
+<a href=#382 id=382 data-nosnippet>382</a>            <span class="kw">let </span><span class="kw-2">mut </span>seen = HashSet::new();
+<a href=#383 id=383 data-nosnippet>383</a>            <span class="kw">let </span>tiles: Vec&lt;WorldTileCoords&gt; = primary
+<a href=#384 id=384 data-nosnippet>384</a>                .iter()
+<a href=#385 id=385 data-nosnippet>385</a>                .chain(secondary.iter())
+<a href=#386 id=386 data-nosnippet>386</a>                .filter(|coords| seen.insert(<span class="kw-2">*</span>coords))
+<a href=#387 id=387 data-nosnippet>387</a>                .collect();
+<a href=#388 id=388 data-nosnippet>388</a>            <span class="prelude-val">Some</span>(ViewRegion::from_tiles(tiles, level, max_tiles))
+<a href=#389 id=389 data-nosnippet>389</a>        }
+<a href=#390 id=390 data-nosnippet>390</a>    }
+<a href=#391 id=391 data-nosnippet>391</a>}
+<a href=#392 id=392 data-nosnippet>392</a>
+<a href=#393 id=393 data-nosnippet>393</a><span class="doccomment">/// Culling bounds per tile: the loaded DEM's range where terrain has one, else `fallback`,
+<a href=#394 id=394 data-nosnippet>394</a>/// the range GL JS assumes for tiles without elevation data.
+<a href=#395 id=395 data-nosnippet>395</a></span><span class="kw">fn </span>tile_elevation&lt;<span class="lifetime">'a</span>&gt;(
+<a href=#396 id=396 data-nosnippet>396</a>    style: <span class="kw-2">&amp;</span>Style,
+<a href=#397 id=397 data-nosnippet>397</a>    world: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>World,
+<a href=#398 id=398 data-nosnippet>398</a>    fallback: TileElevationRange,
+<a href=#399 id=399 data-nosnippet>399</a>) -&gt; Box&lt;<span class="kw">dyn </span>TileElevationProvider + <span class="lifetime">'a</span>&gt; {
+<a href=#400 id=400 data-nosnippet>400</a>    <span class="kw">match </span>world.resources.get::&lt;TerrainCoverageIndex&gt;() {
+<a href=#401 id=401 data-nosnippet>401</a>        <span class="prelude-val">Some</span>(index) <span class="kw">if </span>style.terrain.is_some() =&gt; {
+<a href=#402 id=402 data-nosnippet>402</a>            Box::new(IndexedTileElevation { index, fallback })
+<a href=#403 id=403 data-nosnippet>403</a>        }
+<a href=#404 id=404 data-nosnippet>404</a>        <span class="kw">_ </span>=&gt; Box::new(fallback),
+<a href=#405 id=405 data-nosnippet>405</a>    }
+<a href=#406 id=406 data-nosnippet>406</a>}
+<a href=#407 id=407 data-nosnippet>407</a>
+<a href=#408 id=408 data-nosnippet>408</a><span class="kw">fn </span>nadir_ground_elevation(
+<a href=#409 id=409 data-nosnippet>409</a>    style: <span class="kw-2">&amp;</span>Style,
+<a href=#410 id=410 data-nosnippet>410</a>    world: <span class="kw-2">&amp;</span>World,
+<a href=#411 id=411 data-nosnippet>411</a>    camera: <span class="kw-2">&amp;</span><span class="kw">crate</span>::projection::globe::camera::GlobeCameraState,
+<a href=#412 id=412 data-nosnippet>412</a>) -&gt; f64 {
+<a href=#413 id=413 data-nosnippet>413</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(index) = world
+<a href=#414 id=414 data-nosnippet>414</a>        .resources
+<a href=#415 id=415 data-nosnippet>415</a>        .get::&lt;TerrainCoverageIndex&gt;()
+<a href=#416 id=416 data-nosnippet>416</a>        .filter(|<span class="kw">_</span>| style.terrain.is_some())
+<a href=#417 id=417 data-nosnippet>417</a>    <span class="kw">else </span>{
+<a href=#418 id=418 data-nosnippet>418</a>        <span class="kw">return </span><span class="number">0.0</span>;
+<a href=#419 id=419 data-nosnippet>419</a>    };
+<a href=#420 id=420 data-nosnippet>420</a>    <span class="kw">let </span>position = camera.camera_position();
+<a href=#421 id=421 data-nosnippet>421</a>    <span class="kw">let </span>len = position.magnitude();
+<a href=#422 id=422 data-nosnippet>422</a>    <span class="kw">if </span>len &gt; f64::EPSILON {
+<a href=#423 id=423 data-nosnippet>423</a>        <span class="kw">let </span>sin_lat = position.y / len;
+<a href=#424 id=424 data-nosnippet>424</a>        <span class="kw">let </span>sin_limit = <span class="kw">crate</span>::projection::globe::scale::MERCATOR_LATITUDE_LIMIT
+<a href=#425 id=425 data-nosnippet>425</a>            .to_radians()
+<a href=#426 id=426 data-nosnippet>426</a>            .sin();
+<a href=#427 id=427 data-nosnippet>427</a>        <span class="kw">if </span>sin_lat &gt; sin_limit {
+<a href=#428 id=428 data-nosnippet>428</a>            <span class="kw">return </span>f64::from(index.poles().north_meters) * index.exaggeration();
+<a href=#429 id=429 data-nosnippet>429</a>        }
+<a href=#430 id=430 data-nosnippet>430</a>        <span class="kw">if </span>sin_lat &lt; -sin_limit {
+<a href=#431 id=431 data-nosnippet>431</a>            <span class="kw">return </span>f64::from(index.poles().south_meters) * index.exaggeration();
+<a href=#432 id=432 data-nosnippet>432</a>        }
+<a href=#433 id=433 data-nosnippet>433</a>    }
+<a href=#434 id=434 data-nosnippet>434</a>    <span class="kw">let </span>nadir = <span class="kw">crate</span>::projection::globe::unit_sphere_to_lat_lon(position);
+<a href=#435 id=435 data-nosnippet>435</a>    <span class="kw">let </span>x = nadir.longitude / <span class="number">360.0 </span>+ <span class="number">0.5</span>;
+<a href=#436 id=436 data-nosnippet>436</a>    <span class="kw">let </span>y = (<span class="number">1.0 </span>- nadir.latitude.to_radians().tan().asinh() / std::f64::consts::PI) * <span class="number">0.5</span>;
+<a href=#437 id=437 data-nosnippet>437</a>    index
+<a href=#438 id=438 data-nosnippet>438</a>        .loaded_ground_cached(
+<a href=#439 id=439 data-nosnippet>439</a>            <span class="kw-2">&amp;</span>world.tiles,
+<a href=#440 id=440 data-nosnippet>440</a>            x,
+<a href=#441 id=441 data-nosnippet>441</a>            y,
+<a href=#442 id=442 data-nosnippet>442</a>            <span class="kw">crate</span>::terrain::coverage::DemDetail::Finest,
+<a href=#443 id=443 data-nosnippet>443</a>        )
+<a href=#444 id=444 data-nosnippet>444</a>        .unwrap_or(<span class="number">0.0</span>)
+<a href=#445 id=445 data-nosnippet>445</a>}
+<a href=#446 id=446 data-nosnippet>446</a>
+<a href=#447 id=447 data-nosnippet>447</a><span class="kw">mod </span>mercator;
+<a href=#448 id=448 data-nosnippet>448</a><span class="attr">#[cfg(test)]
+<a href=#449 id=449 data-nosnippet>449</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod </span>tests;
+<a href=#450 id=450 data-nosnippet>450</a>
+<a href=#451 id=451 data-nosnippet>451</a><span class="kw">use </span>mercator::mercator_view_region;
 </code></pre></div></section></main></body></html>

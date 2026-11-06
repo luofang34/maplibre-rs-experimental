@@ -29,6 +29,7 @@
 
         <!-- Custom theme stylesheets -->
         <link rel="stylesheet" href="../diff-2cf15afe.css">
+        <link rel="stylesheet" href="../examples-71c88e22.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -36,10 +37,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-83e6a66e.js";
+            window.path_to_searchindex_js = "../searchindex-0a32b56e.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-8b613e14.js"></script>
+        <script src="../toc-e964a7da.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -176,151 +177,98 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="create-and-style-clusters"><a class="header" href="#create-and-style-clusters">Create and Style Clusters</a></h1>
-<p>Group dense point data into clusters and style them with point-count thresholds.</p>
-<hr>
-<h2 id="1-style-specification"><a class="header" href="#1-style-specification">1. Style Specification</a></h2>
-<p>The style specification enables clustering on a <code>geojson</code> source and uses <code>step</code> expressions to scale circle colors and radii by <code>point_count</code>:</p>
-<pre><code class="language-json">{
-  "version": 8,
-  "name": "MapLibre Point Clusters",
-  "sources": {
-    "earthquakes": {
-      "type": "geojson",
-      "data": "https://maplibre.org/maplibre-gl-js/docs/assets/earthquakes.geojson",
-      "cluster": true,
-      "clusterMaxZoom": 14,
-      "clusterRadius": 50
-    }
-  },
-  "layers": [
-    {
-      "id": "background",
-      "type": "background",
-      "paint": {
-        "background-color": "#111827"
-      }
-    },
-    {
-      "id": "clusters",
-      "type": "circle",
-      "source": "earthquakes",
-      "filter": ["has", "point_count"],
-      "paint": {
-        "circle-color": [
-          "step",
-          ["get", "point_count"],
-          "#51bbd6",
-          100,
-          "#f1f075",
-          750,
-          "#f28cb1"
-        ],
-        "circle-radius": [
-          "step",
-          ["get", "point_count"],
-          20,
-          100,
-          30,
-          750,
-          40
-        ]
-      }
-    },
-    {
-      "id": "cluster-count",
-      "type": "symbol",
-      "source": "earthquakes",
-      "filter": ["has", "point_count"],
-      "layout": {
-        "text-field": "{point_count_abbreviated}",
-        "text-size": 12
-      }
-    },
-    {
-      "id": "unclustered-point",
-      "type": "circle",
-      "source": "earthquakes",
-      "filter": ["!", ["has", "point_count"]],
-      "paint": {
-        "circle-color": "#11b4da",
-        "circle-radius": 4,
-        "circle-stroke-width": 1,
-        "circle-stroke-color": "#fff"
-      }
-    }
-  ],
-  "center": [-103.59179687499999, 40.66995747011755],
-  "zoom": 3.0
+<p>Cluster the points of a GeoJSON source and style the clusters by their point count.</p>
+<div class="example-map">
+  <iframe src="./demo/index.html?example=../code/create-and-style-clusters.js" title="Create and Style Clusters" loading="lazy" allow="fullscreen"></iframe>
+</div>
+
+<pre><code class="language-js">export default async function style() {
+    const style = await (await fetch('https://demotiles.maplibre.org/style.json')).json();
+    style.center = [-103.59179687498357, 40.66995747013945];
+    style.zoom = 3;
+
+    // Add a new source from our GeoJSON data and
+    // set the 'cluster' option to true. The source then
+    // adds the point_count property to your data.
+    style.sources['earthquakes'] = {
+        type: 'geojson',
+        // Point to GeoJSON data. This example visualizes all M1.0+ earthquakes
+        // from 12/22/15 to 1/21/16 as logged by USGS' Earthquake hazards program.
+        data: 'https://maplibre.org/maplibre-gl-js/docs/assets/earthquakes.geojson',
+        cluster: true,
+        clusterMaxZoom: 14, // Max zoom to cluster points on
+        clusterRadius: 50 // Radius of each cluster when clustering points (defaults to 50)
+    };
+
+    style.layers.push({
+        id: 'clusters',
+        type: 'circle',
+        source: 'earthquakes',
+        filter: ['has', 'point_count'],
+        paint: {
+            // Use step expressions (https://maplibre.org/maplibre-style-spec/#expressions-step)
+            // with three steps to implement three types of circles:
+            //   * Blue, 20px circles when point count is less than 100
+            //   * Yellow, 30px circles when point count is between 100 and 750
+            //   * Pink, 40px circles when point count is greater than or equal to 750
+            'circle-color': [
+                'step',
+                ['get', 'point_count'],
+                '#51bbd6',
+                100,
+                '#f1f075',
+                750,
+                '#f28cb1'
+            ],
+            'circle-radius': [
+                'step',
+                ['get', 'point_count'],
+                20,
+                100,
+                30,
+                750,
+                40
+            ]
+        }
+    });
+
+    style.layers.push({
+        id: 'cluster-count',
+        type: 'symbol',
+        source: 'earthquakes',
+        filter: ['has', 'point_count'],
+        layout: {
+            'text-field': '{point_count_abbreviated}',
+            'text-font': ['Noto Sans Regular'],
+            'text-size': 12
+        }
+    });
+
+    style.layers.push({
+        id: 'unclustered-point',
+        type: 'circle',
+        source: 'earthquakes',
+        filter: ['!', ['has', 'point_count']],
+        paint: {
+            'circle-color': '#11b4da',
+            'circle-radius': 4,
+            'circle-stroke-width': 1,
+            'circle-stroke-color': '#fff'
+        }
+    });
+    return style;
 }
 </code></pre>
-<hr>
-<h2 id="2-running-natively-in-rust"><a class="header" href="#2-running-natively-in-rust">2. Running Natively in Rust</a></h2>
-<h3 id="command-line"><a class="header" href="#command-line">Command Line</a></h3>
-<pre><code class="language-bash">cargo run -p maplibre-demo -- headed --style path/to/cluster-style.json
-</code></pre>
-<h3 id="native-api-example"><a class="header" href="#native-api-example">Native API Example</a></h3>
-<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
-</span><span class="boring">fn main() {
-</span>use maplibre::{
-    kernel::KernelBuilder,
-    map::Map,
-    plugin::Plugin,
-    style::Style,
-};
-
-pub fn create_cluster_map&lt;E: maplibre::environment::Environment&gt;(
-    kernel_builder: KernelBuilder&lt;E&gt;,
-    style_json: &amp;str,
-) -&gt; Result&lt;Map&lt;E&gt;, Box&lt;dyn std::error::Error&gt;&gt; {
-    let style: Style = serde_json::from_str(style_json)?;
-    let kernel = kernel_builder.build()?;
-    let plugins: Vec&lt;Box&lt;dyn Plugin&lt;E&gt;&gt;&gt; = vec![
-        Box::new(maplibre::render::RenderPlugin),
-        Box::new(maplibre::background::BackgroundPlugin),
-        Box::new(maplibre::vector::VectorPlugin::&lt;maplibre::vector::DefaultVectorTransferables&gt;::default()),
-        Box::new(maplibre::sdf::SdfPlugin::&lt;maplibre::vector::DefaultVectorTransferables&gt;::default()),
-    ];
-
-    let map = Map::new(style, kernel, plugins)?;
-    Ok(map)
-}
-<span class="boring">}</span></code></pre>
-<hr>
-<h2 id="3-webassembly-wasm-deployment"><a class="header" href="#3-webassembly-wasm-deployment">3. WebAssembly (WASM) Deployment</a></h2>
-<h3 id="html--javascript-integration"><a class="header" href="#html--javascript-integration">HTML &amp; JavaScript Integration</a></h3>
-<pre><code class="language-html">&lt;!DOCTYPE html&gt;
-&lt;html lang="en"&gt;
-&lt;head&gt;
-  &lt;meta charset="utf-8" /&gt;
-  &lt;title&gt;MapLibre Point Clusters&lt;/title&gt;
-  &lt;style&gt;
-    body { margin: 0; width: 100vw; height: 100vh; overflow: hidden; background: #111827; }
-    #maplibre { width: 100%; height: 100%; display: block; }
-  &lt;/style&gt;
-&lt;/head&gt;
-&lt;body&gt;
-  &lt;canvas id="maplibre"&gt;&lt;/canvas&gt;
-
-  &lt;script type="module"&gt;
-    import { startMapLibre } from 'maplibre-rs';
-
-    async function init() {
-      const res = await fetch('./cluster-style.json');
-      const style = await res.json();
-      await startMapLibre(undefined, undefined, JSON.stringify(style));
-    }
-
-    init().catch(console.error);
-  &lt;/script&gt;
-&lt;/body&gt;
-&lt;/html&gt;
-</code></pre>
+<blockquote>
+<p><strong>Note:</strong> The click handlers and popups of the GL JS example are left out.</p>
+</blockquote>
+<p>GL JS: <a href="https://maplibre.org/maplibre-gl-js/docs/examples/create-and-style-clusters/">Create and Style Clusters</a></p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../examples/add-a-geojson-line.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../examples/create-a-heatmap-layer.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
@@ -334,7 +282,7 @@ pub fn create_cluster_map&lt;E: maplibre::environment::Environment&gt;(
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../examples/add-a-geojson-line.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../examples/create-a-heatmap-layer.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
