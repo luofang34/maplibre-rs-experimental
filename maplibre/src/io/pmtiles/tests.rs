@@ -309,11 +309,11 @@ async fn a_map_draws_vector_tiles_out_of_an_archive() {
                 )
             })
             .count();
-        if loaded >= 4 {
+        if loaded >= 4 && !map.needs_redraw() {
             break;
         }
         tokio::time::timeout(
-            std::time::Duration::from_millis(200),
+            std::time::Duration::from_millis(20),
             server.served.notified(),
         )
         .await

@@ -17,8 +17,15 @@ const started = new Promise<void>(resolve => markStarted = resolve)
 // Tile calls wait for the host's image providers, so no label is laid out without them.
 let providersRegistered: Promise<void> = Promise.resolve()
 
+interface TileWorkerCalls {
+    set_style(revision: bigint, style: string): void
+    process(procedure_ptr: number, style_revision: bigint, input: string): Promise<void>
+    cancel(attempt: bigint): boolean
+    finish_failed(attempt: bigint): void
+}
+
 // The calls this worker runs, made once the module has started.
-let calls: maplibre.TileWorkerCalls = null
+let calls: TileWorkerCalls = null
 
 // Calls received but not yet started, so a cancel that arrives while one waits can drop it.
 const waiting = new Map<bigint, { cancelled: boolean }>()
@@ -34,9 +41,9 @@ const registerProviders = async (urls: string[]) => {
 }
 
 /** The calls this worker runs, made once the module has started. */
-const workerCalls = (): maplibre.TileWorkerCalls => {
+const workerCalls = (): TileWorkerCalls => {
     if (!calls) {
-        const TileWorkerCalls: new () => maplibre.TileWorkerCalls = maplibre["TileWorkerCalls"];
+        const TileWorkerCalls: new () => TileWorkerCalls = maplibre["TileWorkerCalls"];
         if (!TileWorkerCalls) {
             throw Error("TileWorkerCalls is not defined. Maybe the Rust build used the wrong build configuration.")
         }
