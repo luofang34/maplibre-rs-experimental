@@ -63,7 +63,7 @@
 <a href=#63 id=63 data-nosnippet>63</a>        <span class="kw">let </span>(bearing, pitch, roll) = view_angles(in_local(<span class="self">self</span>.axes.x), in_local(forward));
 <a href=#64 id=64 data-nosnippet>64</a>        SpherePose {
 <a href=#65 id=65 data-nosnippet>65</a>            center: location,
-<a href=#66 id=66 data-nosnippet>66</a>            distance_meters: (<span class="self">self</span>.position - center).magnitude() * body.radius_meters,
+<a href=#66 id=66 data-nosnippet>66</a>            distance_meters: ((<span class="self">self</span>.position - center).magnitude() * body.radius_meters).max(<span class="number">1.0</span>),
 <a href=#67 id=67 data-nosnippet>67</a>            bearing: bearing.into(),
 <a href=#68 id=68 data-nosnippet>68</a>            pitch: pitch.into(),
 <a href=#69 id=69 data-nosnippet>69</a>            roll: roll.into(),
