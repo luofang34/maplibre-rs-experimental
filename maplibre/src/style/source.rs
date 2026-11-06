@@ -199,12 +199,14 @@ pub struct RasterDemSource {
     /// URL of a TileJSON document that supplies the tile URLs and zoom range.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<TileJSONUrl>,
-    /// Nominal tile size in pixels used for zoom selection; omission defaults to 512.
-    #[serde(rename = "tileSize", default = "default_dem_tile_size")]
-    pub tile_size: u32,
-    /// Elevation packing of the tile pixels.
-    #[serde(default)]
-    pub encoding: DemEncoding,
+    /// Nominal tile size in pixels used for zoom selection; [`Self::tile_size`] reads it.
+    /// Omission takes the TileJSON document's, else 512.
+    #[serde(rename = "tileSize", default, skip_serializing_if = "Option::is_none")]
+    pub tile_size: Option<u32>,
+    /// Elevation packing of the tile pixels; [`Self::encoding`] reads it. Omission takes the
+    /// TileJSON document's, else `mapbox`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encoding: Option<DemEncoding>,
     /// Red channel factor for the `custom` encoding.
     #[serde(rename = "redFactor", default = "default_channel_factor")]
     pub red_factor: f64,
@@ -219,19 +221,28 @@ pub struct RasterDemSource {
     pub base_shift: f64,
 }
 
-fn default_dem_tile_size() -> u32 {
-    512
-}
+/// Tile size of a `raster-dem` source that neither the style nor its TileJSON states.
+pub const DEM_DEFAULT_TILE_SIZE: u32 = 512;
 
 fn default_channel_factor() -> f64 {
     1.0
 }
 
 impl RasterDemSource {
+    /// Nominal tile size in pixels, defaulting as the style specification does.
+    pub fn tile_size(&self) -> u32 {
+        self.tile_size.unwrap_or(DEM_DEFAULT_TILE_SIZE)
+    }
+
+    /// Elevation packing of the tile pixels, defaulting as the style specification does.
+    pub fn encoding(&self) -> DemEncoding {
+        self.encoding.unwrap_or_default()
+    }
+
     /// Returns `[red, green, blue, base_shift]` such that
     /// `elevation = R * red + G * green + B * blue - base_shift` for 0..=255 channel values.
     pub fn unpack_vector(&self) -> [f64; 4] {
-        match self.encoding {
+        match self.encoding() {
             DemEncoding::Mapbox => [6553.6, 25.6, 0.1, 10000.0],
             DemEncoding::Terrarium => [256.0, 1.0, 1.0 / 256.0, 32768.0],
             DemEncoding::Custom => [

@@ -3,6 +3,16 @@
 pub(crate) mod compiled_cache;
 pub use compiled_cache::CompiledProperties;
 
+/// Symbol layout enumerations whose value may follow the zoom but not the feature, per the
+/// style specification's `"expression": {"parameters": ["zoom"]}`.
+pub const ZOOM_ONLY_ENUMS: &[&str] = &[
+    "symbol-placement",
+    "text-rotation-alignment",
+    "icon-rotation-alignment",
+    "text-pitch-alignment",
+    "icon-pitch-alignment",
+];
+
 use crate::style::{
     expression::FeatureProperties,
     layer::{SymbolPaint, TextField},
@@ -90,6 +100,43 @@ impl SymbolPaint {
     /// Whether shared symbol height is evaluated during placement rather than tile layout.
     pub fn uses_shared_height(&self) -> bool {
         self.properties.contains_key("symbol-height-offset")
+    }
+
+    /// The layout enumeration `name` at `zoom`: the literal, or the value of a zoom expression
+    /// such as `["step", ["zoom"], "point", 11, "line"]`, which the style specification allows
+    /// for the properties in [`ZOOM_ONLY_ENUMS`].
+    pub fn layout_enum(&self, name: &str, zoom: f64) -> Option<String> {
+        let value = self.properties.get(name)?;
+        if let Some(literal) = value.as_str() {
+            return Some(literal.to_owned());
+        }
+        if !ZOOM_ONLY_ENUMS.contains(&name) {
+            return None;
+        }
+        self.text(name, &FeatureProperties::new(), zoom)
+    }
+
+    /// Replaces the zoom expressions of [`ZOOM_ONLY_ENUMS`] with their value at `zoom`, as GL JS
+    /// evaluates the layout of a tile's bucket at the tile's zoom, so that what reads them as
+    /// literals lays out the tile as the style asks.
+    pub fn resolve_zoom_enums(&mut self, zoom: f64) {
+        for name in ZOOM_ONLY_ENUMS {
+            if self
+                .properties
+                .get(*name)
+                .is_some_and(|value| !value.is_string())
+            {
+                match self.layout_enum(name, zoom) {
+                    Some(value) => {
+                        self.properties
+                            .insert((*name).to_owned(), serde_json::Value::String(value));
+                    }
+                    None => {
+                        self.properties.remove(*name);
+                    }
+                }
+            }
+        }
     }
 
     /// Evaluates the shared point-symbol height, accepting component offsets as a fallback.

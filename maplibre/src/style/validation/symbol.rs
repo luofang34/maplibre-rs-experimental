@@ -125,6 +125,12 @@ impl LayerValidation<'_> {
                 Some(Property::Image) => self.property(&path, Some(&StyleProperty::<crate::style::layer::ImageName>::parse(value)), Feature),
                 Some(Property::BooleanExpression) => self.property(&path, Some(&StyleProperty::<bool>::parse(value)), Feature),
                 Some(kind) if valid_literal(&kind, value) => {}
+                // These follow the zoom; `SymbolPaint::layout_enum` evaluates them.
+                Some(Property::Enum(_))
+                    if crate::style::symbol::ZOOM_ONLY_ENUMS.contains(&name.as_str()) =>
+                {
+                    self.property(&path, Some(&StyleProperty::<TextField>::parse(value)), Zoom)
+                }
                 Some(_) => self.unsupported(&path, "this property requires a supported literal value; expressions are not evaluated"),
                 None => self.unsupported(&path, "property is not implemented"),
             }

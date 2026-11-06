@@ -57,9 +57,11 @@ impl Shader for FillExtrusionShader {
                             wgpu::VertexFormat::Float32,
                             11,
                         ),
+                        // The distance along the wall and, from `corner_code` after it, the
+                        // height one zoom up packed with the tile's overscale.
                         attribute(
                             std::mem::offset_of!(ShaderVertex, edge_distance) as u64,
-                            wgpu::VertexFormat::Float32,
+                            wgpu::VertexFormat::Float32x2,
                             10,
                         ),
                     ],

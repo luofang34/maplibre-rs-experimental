@@ -74,7 +74,8 @@ impl TextTessellator {
     }
 
     /// Collects features using an existing atlas without decoding fallback glyphs again.
-    pub fn with_assets(paint: SymbolPaint, zoom: f64, atlas: Arc<SymbolAtlas>) -> Self {
+    pub fn with_assets(mut paint: SymbolPaint, zoom: f64, atlas: Arc<SymbolAtlas>) -> Self {
+        paint.resolve_zoom_enums(zoom);
         Self {
             geo_writer: GeoWriter::default(),
             paint,
@@ -93,7 +94,9 @@ impl TextTessellator {
     }
 
     /// Sets the style and the assets used by this tile's symbols.
-    pub fn configure(&mut self, paint: SymbolPaint, atlas: Arc<SymbolAtlas>) {
+    pub fn configure(&mut self, mut paint: SymbolPaint, atlas: Arc<SymbolAtlas>) {
+        // Layout that follows the zoom is laid out at the tile's, as GL JS lays out a bucket.
+        paint.resolve_zoom_enums(self.zoom);
         self.paint = paint;
         self.atlas = atlas;
     }

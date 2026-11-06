@@ -169,3 +169,47 @@ fn each_section_of_a_formatted_label_is_shaped_on_its_own() {
         "lam and alef join into one presentation form: {arabic:?}"
     );
 }
+
+/// OpenFreeMap's road shields switch from point to line placement with
+/// `["step", ["zoom"], "point", 11, "line"]`; GL JS evaluates it at the tile's zoom.
+#[test]
+fn symbol_placement_follows_a_zoom_expression() {
+    let mut paint: SymbolPaint = serde_json::from_value(serde_json::json!({
+        "text-field": "{ref}",
+        "symbol-placement": ["step", ["zoom"], "point", 11, "line"],
+        "text-rotation-alignment": "viewport"
+    }))
+    .expect("paint");
+
+    assert_eq!(
+        paint.layout_enum("symbol-placement", 10.0).as_deref(),
+        Some("point")
+    );
+    assert_eq!(
+        paint.layout_enum("symbol-placement", 15.0).as_deref(),
+        Some("line")
+    );
+    assert_eq!(
+        paint
+            .layout_enum("text-rotation-alignment", 15.0)
+            .as_deref(),
+        Some("viewport")
+    );
+
+    paint.resolve_zoom_enums(15.0);
+    assert_eq!(
+        paint.properties.get("symbol-placement"),
+        Some(&serde_json::json!("line"))
+    );
+}
+
+/// Feature data cannot choose these, so a property that is not one of them stays unevaluated.
+#[test]
+fn only_zoom_only_enumerations_are_evaluated() {
+    let paint: SymbolPaint = serde_json::from_value(serde_json::json!({
+        "text-overlap": ["step", ["zoom"], "never", 11, "always"]
+    }))
+    .expect("paint");
+
+    assert_eq!(paint.layout_enum("text-overlap", 15.0), None);
+}

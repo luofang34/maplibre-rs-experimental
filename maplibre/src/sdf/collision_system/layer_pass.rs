@@ -218,7 +218,7 @@ impl LayerFrame<'_> {
                 projection,
                 (
                     &self.uniforms,
-                    crate::sdf::paint::glyphs_stay_upright(self.paint),
+                    crate::sdf::paint::glyphs_stay_upright(self.paint, zoom),
                 ),
             )
         });
@@ -245,7 +245,10 @@ impl LayerFrame<'_> {
         let (rectangles, glyph_boxes) = if shown {
             label_boxes(
                 (layer, feature, ground),
-                (&line, crate::sdf::paint::glyphs_stay_upright(self.paint)),
+                (
+                    &line,
+                    crate::sdf::paint::glyphs_stay_upright(self.paint, zoom),
+                ),
                 (view_state, projection, &self.uniforms),
             )
         } else {

@@ -12,6 +12,10 @@ struct VertexOutput {
     @builtin(position) @invariant position: vec4<f32>,
 };
 
+// The range of the packed rise, centred on zero, which one overscale step adds;
+// `NEXT_ZOOM_CODE_SPAN` on the CPU.
+const NEXT_ZOOM_CODE_SPAN: f32 = 65536.0;
+
 @vertex
 fn main(
     @location(0) position: vec2<f32>,
@@ -25,7 +29,9 @@ fn main(
     @location(7) translate4: vec4<f32>,
     @location(8) color: vec4<f32>,
     @location(9) zoom_factor: f32,
-    @location(10) edge_distance: f32,
+    // The distance along the wall, and how much the vertex rises one zoom above the tile's
+    // packed with how many zooms the tile is drawn past its own, as `next_zoom_code` packs them.
+    @location(10) edge_and_next: vec2<f32>,
     @location(11) height: f32,
     @location(12) light_color: vec4<f32>,
     // Opacity, vertical gradient and light intensity.
@@ -37,7 +43,15 @@ fn main(
     let is_wall = length_of_wall > 0.5;
     let top = select(1.0, select(0.0, 1.0, length_of_wall > 1.5), is_wall);
     let normal = select(vec3<f32>(0.0, 0.0, 1.0), vec3<f32>(wall / max(length_of_wall, 1e-6), 0.0), is_wall);
-    let z = select(base_in, height, top > 0.5);
+    let edge_distance = edge_and_next.x;
+    // Heights that depend on zoom and feature were evaluated at the tile's style zoom and the
+    // one above; GL JS interpolates between the two by the zoom past the first.
+    let overscale = floor(edge_and_next.y / NEXT_ZOOM_CODE_SPAN);
+    let rise = edge_and_next.y - overscale * NEXT_ZOOM_CODE_SPAN - 0.5 * NEXT_ZOOM_CODE_SPAN;
+    let zoom_blend = clamp(-log2(zoom_factor) - overscale, 0.0, 1.0);
+    let z = select(base_in, height, top > 0.5) + rise * zoom_blend;
+    let roof = select(height, z, top > 0.5);
+    let base = select(z, base_in, top > 0.5);
     let projected = project_tile_position_3d(
         vec3<f32>(position + layer_translate, z),
         mat4x4<f32>(translate1, translate2, translate3, translate4),
@@ -57,7 +71,7 @@ fn main(
     directional = mix(1.0 - intensity, max(1.0 - colorvalue + intensity, 1.0), directional);
     if graded {
         let gradient = clamp(
-            (top + base_in) * pow(height / 150.0, 0.5),
+            (top + base) * pow(roof / 150.0, 0.5),
             mix(0.7, 0.98, 1.0 - intensity),
             1.0,
         );
@@ -88,7 +102,7 @@ fn main(
     var pattern_directional = pattern_light;
     if graded {
         let gradient = clamp(
-            (top + base_in) * pow(height / 150.0, 0.5),
+            (top + base) * pow(roof / 150.0, 0.5),
             mix(0.7, 0.98, 1.0 - intensity),
             1.0,
         );

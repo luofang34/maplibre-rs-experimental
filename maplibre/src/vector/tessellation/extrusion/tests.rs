@@ -1,7 +1,7 @@
 #![allow(clippy::expect_used, clippy::panic)]
 use lyon::{math::point, path::Path, tessellation::VertexBuffers};
 
-use super::{clipped, extrude, rings};
+use super::{clipped, extrude, next_zoom_code, rings, ExtrusionHeights};
 use crate::render::ShaderVertex;
 
 fn square(builder: &mut lyon::path::path::Builder, [x0, y0, x1, y1]: [f32; 4]) {
@@ -20,7 +20,7 @@ fn extruded(squares: &[[f32; 4]]) -> VertexBuffers<ShaderVertex, u32> {
     let mut buffer = VertexBuffers::new();
     extrude(
         &builder.build(),
-        (2.0, 10.0),
+        ExtrusionHeights::constant(2.0, 10.0),
         &mut buffer,
         (0.02, |_: &mut VertexBuffers<ShaderVertex, u32>, _| Ok(())),
     )
@@ -115,4 +115,50 @@ fn clipping_keeps_a_polygon_inside_the_buffer() {
     let clipped = clipped(&builder.build(), 1024.0);
     let ring = &rings(&clipped)[0];
     assert_eq!(ring.len(), 5, "{ring:?}");
+}
+
+/// Every vertex carries how much it rises one zoom up, the roof and the top of a wall by the
+/// roof's rise and the bottom of a wall by the base's, with the tile's overscale.
+#[test]
+fn vertices_carry_their_rise_one_zoom_up() {
+    let mut builder = Path::builder();
+    square(&mut builder, [0.0, 0.0, 100.0, 100.0]);
+    let mut buffer: VertexBuffers<ShaderVertex, u32> = VertexBuffers::new();
+    extrude(
+        &builder.build(),
+        ExtrusionHeights {
+            base: 1.0,
+            height: 10.0,
+            base_next: 3.0,
+            height_next: 40.0,
+            overscale: 1,
+        },
+        &mut buffer,
+        (0.02, |_: &mut VertexBuffers<ShaderVertex, u32>, _| Ok(())),
+    )
+    .expect("extrudes");
+
+    for vertex in &buffer.vertices {
+        let length = vertex.normal[0].hypot(vertex.normal[1]);
+        let top = length == 0.0 || length > 1.5;
+        let expected = if top { 30.0 } else { 2.0 };
+        assert_eq!(vertex.corner_code, next_zoom_code(expected, 1));
+    }
+}
+
+/// The shader's decoding of the code, with a rise that is negative as when a building's height
+/// ramps down with zoom.
+#[test]
+fn the_code_keeps_rise_and_overscale_apart() {
+    let span = super::NEXT_ZOOM_CODE_SPAN;
+    let decode = |code: f32| {
+        let overscale = (code / span).floor();
+        (overscale, code - overscale * span - span / 2.0)
+    };
+    assert_eq!(decode(next_zoom_code(123.25, 3)), (3.0, 123.25));
+    assert_eq!(decode(next_zoom_code(-40.5, 0)), (0.0, -40.5));
+    assert_eq!(decode(next_zoom_code(0.0, 2)), (2.0, 0.0));
+    // Rises out of range are kept inside the span so they cannot change the overscale.
+    assert_eq!(decode(next_zoom_code(1.0e9, 1)).0, 1.0);
+    assert_eq!(decode(next_zoom_code(-1.0e9, 1)).0, 1.0);
 }

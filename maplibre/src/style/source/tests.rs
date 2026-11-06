@@ -13,8 +13,8 @@ fn parse(json: &str) -> RasterDemSource {
 fn raster_dem_defaults_follow_the_style_spec() {
     let source = parse(r#"{"type": "raster-dem", "url": "https://tiles.example/tiles.json"}"#);
 
-    assert_eq!(source.tile_size, 512);
-    assert_eq!(source.encoding, DemEncoding::Mapbox);
+    assert_eq!(source.tile_size(), 512);
+    assert_eq!(source.encoding(), DemEncoding::Mapbox);
     assert_eq!(source.unpack_vector(), [6553.6, 25.6, 0.1, 10000.0]);
     assert_eq!(
         source.url.as_deref(),
@@ -27,7 +27,7 @@ fn terrarium_and_custom_unpack_vectors() {
     let terrarium = parse(
         r#"{"type": "raster-dem", "tiles": ["t/{z}/{x}/{y}.png"], "encoding": "terrarium", "tileSize": 256}"#,
     );
-    assert_eq!(terrarium.tile_size, 256);
+    assert_eq!(terrarium.tile_size(), 256);
     assert_eq!(
         terrarium.unpack_vector(),
         [256.0, 1.0, 1.0 / 256.0, 32768.0]
