@@ -10,10 +10,17 @@
 
 - [Examples](./examples/index.md)
   - [Display a Map](./examples/display-a-map.md)
+  - [Display a Satellite Map](./examples/display-a-satellite-map.md)
   - [Display a Globe with a Vector Map](./examples/display-a-globe-with-a-vector-map.md)
-  - [Add 3D Terrain to a Map](./examples/add-3d-terrain.md)
+  - [Display a Globe with an Atmosphere](./examples/display-a-globe-with-an-atmosphere.md)
+  - [Add 3D Terrain](./examples/add-3d-terrain.md)
+  - [Add a Hillshade Layer](./examples/add-a-hillshade-layer.md)
   - [Display Buildings in 3D](./examples/display-buildings-in-3d.md)
   - [Add a GeoJSON Line](./examples/add-a-geojson-line.md)
+  - [Add a GeoJSON Polygon](./examples/add-a-geojson-polygon.md)
+  - [Add a Raster Tile Source](./examples/add-a-raster-tile-source.md)
+  - [Style Lines with a Data-Driven Property](./examples/style-lines-with-a-data-driven-property.md)
+  - [Create a Heatmap Layer](./examples/create-a-heatmap-layer.md)
   - [Create and Style Clusters](./examples/create-and-style-clusters.md)
 
 
