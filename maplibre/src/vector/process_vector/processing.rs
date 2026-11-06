@@ -60,10 +60,9 @@ fn tessellator(paint: &LayerPaint, request: &VectorTileRequest) -> ZeroTessellat
             ..CircleOptions::for_heatmap(heatmap, style_zoom)
         }),
         LayerPaint::FillExtrusion(extrusion) => {
-            let tessellator = ZeroTessellator::default().with_extrusion(ExtrusionOptions {
-                overscale: request.overscaled_zoom.saturating_sub(zoom),
-                ..ExtrusionOptions::for_paint(extrusion)
-            });
+            let tessellator = ZeroTessellator::default().with_extrusion(
+                ExtrusionOptions::for_paint(extrusion, request.overscaling()),
+            );
             if request.projection.uses_globe_rendering(style_zoom) {
                 // Roofs and the edges of walls follow the sphere as fills and lines do.
                 let last_tile = i64::from(crate::coords::ZOOM_BOUNDS[usize::from(zoom)]) - 1;

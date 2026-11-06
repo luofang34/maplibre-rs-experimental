@@ -37,13 +37,14 @@ pub struct ExtrusionOptions {
 }
 
 impl ExtrusionOptions {
-    /// Takes the height and base properties of a layer's paint.
-    pub fn for_paint(paint: &FillExtrusionPaint) -> Self {
+    /// Takes the height and base properties of a layer's paint, for a tile magnified
+    /// `overscaling` times past its own zoom (one when it is drawn at its own zoom).
+    pub fn for_paint(paint: &FillExtrusionPaint, overscaling: f64) -> Self {
         Self {
             height: paint.fill_extrusion_height.clone(),
             base: paint.fill_extrusion_base.clone(),
             clip_buffer: None,
-            overscale: 0,
+            overscale: overscaling.log2().round().clamp(0.0, f64::from(u8::MAX)) as u8,
         }
     }
 }
