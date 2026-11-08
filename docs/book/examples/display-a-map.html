@@ -29,7 +29,7 @@
 
         <!-- Custom theme stylesheets -->
         <link rel="stylesheet" href="../diff-2cf15afe.css">
-        <link rel="stylesheet" href="../examples-71c88e22.css">
+        <link rel="stylesheet" href="../examples-9e7349cf.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -37,7 +37,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-1acdef06.js";
+            window.path_to_searchindex_js = "../searchindex-0a240c6f.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-e964a7da.js"></script>
@@ -182,6 +182,38 @@
   <iframe src="./demo/index.html?example=../code/display-a-map.js" title="Display a Map" loading="lazy" allow="fullscreen"></iframe>
 </div>
 
+<div class="example-code-tabs">
+<pre class="playground"><code class="language-rust no_run">use std::path::PathBuf;
+
+use maplibre::{render::settings::WgpuSettings, style::Style};
+use maplibre_winit::{run_headed_map, HeadedMapOptions, WinitMapWindowConfig};
+
+const BASE_STYLE_URL: &amp;str = "https://demotiles.maplibre.org/style.json";
+
+pub fn build_style(mut style: Style) -&gt; Style {
+    style.center = Some([0.0, 0.0]);
+    style.zoom = Some(1.0);
+    for (index, layer) in style.layers.iter_mut().enumerate() {
+        layer.index = index as u32 + 1;
+    }
+    style
+}
+
+fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
+    let base: Style = maplibre::platform::run_multithreaded(async {
+        Ok::&lt;_, reqwest::Error&gt;(reqwest::get(BASE_STYLE_URL).await?.json().await?)
+    })?;
+    let style = build_style(base);
+
+    run_headed_map(
+        Some(PathBuf::from("./maplibre-cache")),
+        WinitMapWindowConfig::new("Display a Map".to_string()),
+        WgpuSettings::default(),
+        style,
+        HeadedMapOptions::default(),
+    )?;
+    Ok(())
+}</code></pre>
 <pre><code class="language-js">export default async function style() {
     const style = await (await fetch('https://demotiles.maplibre.org/style.json')).json();
     style.center = [0, 0]; // starting position [lng, lat]
@@ -189,6 +221,50 @@
     return style;
 }
 </code></pre>
+<pre><code class="language-html">&lt;!DOCTYPE html&gt;
+&lt;html lang="en"&gt;
+&lt;head&gt;
+    &lt;meta charset="utf-8" /&gt;
+    &lt;meta name="viewport" content="width=device-width, initial-scale=1.0" /&gt;
+    &lt;title&gt;Display a Map&lt;/title&gt;
+    &lt;style&gt;
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #0b0e14;
+        }
+        #maplibre {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+    &lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+    &lt;canvas id="maplibre"&gt;&lt;/canvas&gt;
+    &lt;script type="module"&gt;
+        import { startMapLibre } from 'maplibre-rs';
+
+        async function style() {
+            const style = await (await fetch('https://demotiles.maplibre.org/style.json')).json();
+            style.center = [0, 0]; // starting position [lng, lat]
+            style.zoom = 1; // starting zoom
+            return style;
+        }
+
+        startMapLibre(undefined, undefined, JSON.stringify(await style()));
+    &lt;/script&gt;
+&lt;/body&gt;
+&lt;/html&gt;
+</code></pre>
+</div>
+
 <p>GL JS: <a href="https://maplibre.org/maplibre-gl-js/docs/examples/display-a-map/">Display a Map</a></p>
 
                     </main>
@@ -242,6 +318,7 @@
         <script src="../book-609e4cb8.js"></script>
 
         <!-- Custom JS scripts -->
+        <script src="../examples-8252d1da.js"></script>
 
 
 

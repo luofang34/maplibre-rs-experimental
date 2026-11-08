@@ -29,7 +29,7 @@
 
         <!-- Custom theme stylesheets -->
         <link rel="stylesheet" href="../diff-2cf15afe.css">
-        <link rel="stylesheet" href="../examples-71c88e22.css">
+        <link rel="stylesheet" href="../examples-9e7349cf.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -37,7 +37,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-1acdef06.js";
+            window.path_to_searchindex_js = "../searchindex-0a240c6f.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-e964a7da.js"></script>
@@ -182,6 +182,84 @@
   <iframe src="./demo/index.html?example=../code/add-a-hillshade-layer.js" title="Add a Hillshade Layer" loading="lazy" allow="fullscreen"></iframe>
 </div>
 
+<div class="example-code-tabs">
+<pre class="playground"><code class="language-rust no_run">use std::{collections::HashMap, path::PathBuf};
+
+use maplibre::{
+    projection::{ProjectionSpecification, ProjectionType},
+    render::settings::WgpuSettings,
+    style::{
+        hillshade::{HillshadeMethod, HillshadePaint},
+        layer::{LayerPaint, StyleLayer, StyleProperty},
+        property::NumberList,
+        source::{RasterDemSource, Source},
+        Style,
+    },
+};
+use maplibre_winit::{run_headed_map, HeadedMapOptions, WinitMapWindowConfig};
+
+pub fn style() -&gt; Style {
+    Style {
+        version: 8,
+        sources: HashMap::from([(
+            "hillshadeSource".to_string(),
+            Source::RasterDem(RasterDemSource {
+                attribution: None,
+                bounds: None,
+                maxzoom: None,
+                minzoom: None,
+                tiles: None,
+                url: Some("https://demotiles.maplibre.org/terrain-tiles/tiles.json".to_string()),
+                tile_size: Some(256),
+                encoding: None,
+                red_factor: 1.0,
+                green_factor: 1.0,
+                blue_factor: 1.0,
+                base_shift: 0.0,
+            }),
+        )]),
+        layers: vec![StyleLayer {
+            index: 1,
+            id: "hillshade".to_string(),
+            type_: "hillshade".to_string(),
+            source: Some("hillshadeSource".to_string()),
+            paint: Some(LayerPaint::Hillshade(HillshadePaint {
+                hillshade_method: HillshadeMethod::Standard,
+                hillshade_illumination_direction: Some(StyleProperty::Constant(NumberList(vec![
+                    315.0,
+                ]))),
+                hillshade_shadow_color: Some(StyleProperty::parse(&amp;serde_json::json!("#000000"))),
+                hillshade_highlight_color: Some(StyleProperty::parse(&amp;serde_json::json!(
+                    "#FFFFFF"
+                ))),
+                hillshade_accent_color: Some(StyleProperty::parse(&amp;serde_json::json!(
+                    "#000000"
+                ))),
+                hillshade_exaggeration: Some(StyleProperty::Constant(0.5)),
+                ..Default::default()
+            })),
+            ..Default::default()
+        }],
+        projection: Some(ProjectionSpecification {
+            projection_type: ProjectionType::Globe,
+        }),
+        center: Some([11.491, 47.274]),
+        zoom: Some(10.0),
+        pitch: Some(0.0),
+        ..Default::default()
+    }
+}
+
+fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
+    run_headed_map(
+        Some(PathBuf::from("./maplibre-cache")),
+        WinitMapWindowConfig::new("Add a Hillshade Layer".to_string()),
+        WgpuSettings::default(),
+        style(),
+        HeadedMapOptions::default(),
+    )?;
+    Ok(())
+}</code></pre>
 <pre><code class="language-js">export default async function style() {
     return {
         version: 8,
@@ -216,6 +294,77 @@
     };
 }
 </code></pre>
+<pre><code class="language-html">&lt;!DOCTYPE html&gt;
+&lt;html lang="en"&gt;
+&lt;head&gt;
+    &lt;meta charset="utf-8" /&gt;
+    &lt;meta name="viewport" content="width=device-width, initial-scale=1.0" /&gt;
+    &lt;title&gt;Add a Hillshade Layer&lt;/title&gt;
+    &lt;style&gt;
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #0b0e14;
+        }
+        #maplibre {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+    &lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+    &lt;canvas id="maplibre"&gt;&lt;/canvas&gt;
+    &lt;script type="module"&gt;
+        import { startMapLibre } from 'maplibre-rs';
+
+        async function style() {
+            return {
+                version: 8,
+                sources: {
+                    hillshadeSource: {
+                        type: 'raster-dem',
+                        url: 'https://demotiles.maplibre.org/terrain-tiles/tiles.json',
+                        tileSize: 256
+                    }
+                },
+                layers: [
+                    {
+                        id: 'hillshade',
+                        type: 'hillshade',
+                        source: 'hillshadeSource',
+                        paint: {
+                            'hillshade-method': 'standard',
+                            'hillshade-illumination-direction': 315,
+                            'hillshade-shadow-color': '#000000',
+                            'hillshade-highlight-color': '#FFFFFF',
+                            'hillshade-accent-color': '#000000',
+                            'hillshade-exaggeration': 0.5
+                        }
+                    }
+                ],
+                projection: {
+                    type: 'globe'
+                },
+                center: [11.491, 47.274],
+                zoom: 10,
+                pitch: 0
+            };
+        }
+
+        startMapLibre(undefined, undefined, JSON.stringify(await style()));
+    &lt;/script&gt;
+&lt;/body&gt;
+&lt;/html&gt;
+</code></pre>
+</div>
+
 <blockquote>
 <p><strong>Note:</strong> The style has no background layer. GL JS leaves its canvas transparent, so the white page shows through the unshaded slopes; maplibre-rs draws them on black.</p>
 </blockquote>
@@ -272,6 +421,7 @@
         <script src="../book-609e4cb8.js"></script>
 
         <!-- Custom JS scripts -->
+        <script src="../examples-8252d1da.js"></script>
 
 
 

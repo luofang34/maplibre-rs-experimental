@@ -29,7 +29,7 @@
 
         <!-- Custom theme stylesheets -->
         <link rel="stylesheet" href="../diff-2cf15afe.css">
-        <link rel="stylesheet" href="../examples-71c88e22.css">
+        <link rel="stylesheet" href="../examples-9e7349cf.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -37,7 +37,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-1acdef06.js";
+            window.path_to_searchindex_js = "../searchindex-0a240c6f.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-e964a7da.js"></script>
@@ -182,6 +182,136 @@
   <iframe src="./demo/index.html?example=../code/create-and-style-clusters.js" title="Create and Style Clusters" loading="lazy" allow="fullscreen"></iframe>
 </div>
 
+<div class="example-code-tabs">
+<pre class="playground"><code class="language-rust no_run">use std::path::PathBuf;
+
+use maplibre::{
+    projection::{ProjectionSpecification, ProjectionType},
+    render::settings::WgpuSettings,
+    style::{
+        circle::CirclePaint,
+        layer::{LayerPaint, StyleLayer, StyleProperty, SymbolPaint},
+        source::{fresh_generation, GeoJsonData, GeoJsonSource, Source},
+        Style,
+    },
+};
+use maplibre_winit::{run_headed_map, HeadedMapOptions, WinitMapWindowConfig};
+use serde_json::json;
+
+const BASE_STYLE_URL: &amp;str = "https://demotiles.maplibre.org/style.json";
+
+pub fn build_style(mut style: Style) -&gt; Style {
+    style.projection = Some(ProjectionSpecification {
+        projection_type: ProjectionType::Globe,
+    });
+    style.center = Some([-103.59179687498357, 40.66995747013945]);
+    style.zoom = Some(3.0);
+
+    style.sources.insert(
+        "earthquakes".to_string(),
+        Source::GeoJson(GeoJsonSource {
+            data: GeoJsonData::Url(
+                "https://maplibre.org/maplibre-gl-js/docs/assets/earthquakes.geojson".to_string(),
+            ),
+            maxzoom: None,
+            buffer: None,
+            minzoom: None,
+            promote_id: None,
+            generate_id: false,
+            cluster: true,
+            cluster_radius: Some(50.0),
+            cluster_max_zoom: Some(14),
+            cluster_min_points: None,
+            cluster_properties: None,
+            filter: None,
+            generation: fresh_generation(),
+        }),
+    );
+
+    style.layers.push(StyleLayer {
+        id: "clusters".to_string(),
+        type_: "circle".to_string(),
+        source: Some("earthquakes".to_string()),
+        source_layer: None,
+        filter: Some(json!(["has", "point_count"])),
+        paint: Some(LayerPaint::Circle(CirclePaint {
+            circle_color: Some(StyleProperty::parse(&amp;json!([
+                "step",
+                ["get", "point_count"],
+                "#51bbd6",
+                100,
+                "#f1f075",
+                750,
+                "#f28cb1"
+            ]))),
+            circle_radius: Some(StyleProperty::parse(&amp;json!([
+                "step",
+                ["get", "point_count"],
+                20,
+                100,
+                30,
+                750,
+                40
+            ]))),
+            ..Default::default()
+        })),
+        ..Default::default()
+    });
+
+    let mut cluster_count_paint = SymbolPaint::default();
+    cluster_count_paint.text_field = Some(StyleProperty::parse(&amp;json!("{point_count_abbreviated}")));
+    cluster_count_paint.text_size = Some(StyleProperty::Constant(12.0));
+    cluster_count_paint
+        .properties
+        .insert("text-font".to_string(), json!(["Noto Sans Regular"]));
+
+    style.layers.push(StyleLayer {
+        id: "cluster-count".to_string(),
+        type_: "symbol".to_string(),
+        source: Some("earthquakes".to_string()),
+        source_layer: None,
+        filter: Some(json!(["has", "point_count"])),
+        paint: Some(LayerPaint::Symbol(cluster_count_paint)),
+        ..Default::default()
+    });
+
+    style.layers.push(StyleLayer {
+        id: "unclustered-point".to_string(),
+        type_: "circle".to_string(),
+        source: Some("earthquakes".to_string()),
+        source_layer: None,
+        filter: Some(json!(["!", ["has", "point_count"]])),
+        paint: Some(LayerPaint::Circle(CirclePaint {
+            circle_color: Some(StyleProperty::parse(&amp;json!("#11b4da"))),
+            circle_radius: Some(StyleProperty::Constant(4.0)),
+            circle_stroke_width: Some(StyleProperty::Constant(1.0)),
+            circle_stroke_color: Some(StyleProperty::parse(&amp;json!("#fff"))),
+            ..Default::default()
+        })),
+        ..Default::default()
+    });
+
+    for (index, layer) in style.layers.iter_mut().enumerate() {
+        layer.index = index as u32 + 1;
+    }
+    style
+}
+
+fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
+    let base: Style = maplibre::platform::run_multithreaded(async {
+        Ok::&lt;_, reqwest::Error&gt;(reqwest::get(BASE_STYLE_URL).await?.json().await?)
+    })?;
+    let style = build_style(base);
+
+    run_headed_map(
+        Some(PathBuf::from("./maplibre-cache")),
+        WinitMapWindowConfig::new("Create and Style Clusters".to_string()),
+        WgpuSettings::default(),
+        style,
+        HeadedMapOptions::default(),
+    )?;
+    Ok(())
+}</code></pre>
 <pre><code class="language-js">export default async function style() {
     const style = await (await fetch('https://demotiles.maplibre.org/style.json')).json();
     style.projection = { type: 'globe' };
@@ -260,6 +390,121 @@
     return style;
 }
 </code></pre>
+<pre><code class="language-html">&lt;!DOCTYPE html&gt;
+&lt;html lang="en"&gt;
+&lt;head&gt;
+    &lt;meta charset="utf-8" /&gt;
+    &lt;meta name="viewport" content="width=device-width, initial-scale=1.0" /&gt;
+    &lt;title&gt;Create and Style Clusters&lt;/title&gt;
+    &lt;style&gt;
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #0b0e14;
+        }
+        #maplibre {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+    &lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+    &lt;canvas id="maplibre"&gt;&lt;/canvas&gt;
+    &lt;script type="module"&gt;
+        import { startMapLibre } from 'maplibre-rs';
+
+        async function style() {
+            const style = await (await fetch('https://demotiles.maplibre.org/style.json')).json();
+            style.projection = { type: 'globe' };
+            style.center = [-103.59179687498357, 40.66995747013945];
+            style.zoom = 3;
+
+            // Add a new source from our GeoJSON data and
+            // set the 'cluster' option to true. The source then
+            // adds the point_count property to your data.
+            style.sources['earthquakes'] = {
+                type: 'geojson',
+                // Point to GeoJSON data. This example visualizes all M1.0+ earthquakes
+                // from 12/22/15 to 1/21/16 as logged by USGS' Earthquake hazards program.
+                data: 'https://maplibre.org/maplibre-gl-js/docs/assets/earthquakes.geojson',
+                cluster: true,
+                clusterMaxZoom: 14, // Max zoom to cluster points on
+                clusterRadius: 50 // Radius of each cluster when clustering points (defaults to 50)
+            };
+
+            style.layers.push({
+                id: 'clusters',
+                type: 'circle',
+                source: 'earthquakes',
+                filter: ['has', 'point_count'],
+                paint: {
+                    // Use step expressions (https://maplibre.org/maplibre-style-spec/#expressions-step)
+                    // with three steps to implement three types of circles:
+                    //   * Blue, 20px circles when point count is less than 100
+                    //   * Yellow, 30px circles when point count is between 100 and 750
+                    //   * Pink, 40px circles when point count is greater than or equal to 750
+                    'circle-color': [
+                        'step',
+                        ['get', 'point_count'],
+                        '#51bbd6',
+                        100,
+                        '#f1f075',
+                        750,
+                        '#f28cb1'
+                    ],
+                    'circle-radius': [
+                        'step',
+                        ['get', 'point_count'],
+                        20,
+                        100,
+                        30,
+                        750,
+                        40
+                    ]
+                }
+            });
+
+            style.layers.push({
+                id: 'cluster-count',
+                type: 'symbol',
+                source: 'earthquakes',
+                filter: ['has', 'point_count'],
+                layout: {
+                    'text-field': '{point_count_abbreviated}',
+                    'text-font': ['Noto Sans Regular'],
+                    'text-size': 12
+                }
+            });
+
+            style.layers.push({
+                id: 'unclustered-point',
+                type: 'circle',
+                source: 'earthquakes',
+                filter: ['!', ['has', 'point_count']],
+                paint: {
+                    'circle-color': '#11b4da',
+                    'circle-radius': 4,
+                    'circle-stroke-width': 1,
+                    'circle-stroke-color': '#fff'
+                }
+            });
+            return style;
+        }
+
+        startMapLibre(undefined, undefined, JSON.stringify(await style()));
+    &lt;/script&gt;
+&lt;/body&gt;
+&lt;/html&gt;
+</code></pre>
+</div>
+
 <blockquote>
 <p><strong>Note:</strong> The click handlers and popups of the GL JS example are left out.</p>
 </blockquote>
@@ -316,6 +561,7 @@
         <script src="../book-609e4cb8.js"></script>
 
         <!-- Custom JS scripts -->
+        <script src="../examples-8252d1da.js"></script>
 
 
 

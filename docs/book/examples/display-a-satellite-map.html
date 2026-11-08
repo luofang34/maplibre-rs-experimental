@@ -29,7 +29,7 @@
 
         <!-- Custom theme stylesheets -->
         <link rel="stylesheet" href="../diff-2cf15afe.css">
-        <link rel="stylesheet" href="../examples-71c88e22.css">
+        <link rel="stylesheet" href="../examples-9e7349cf.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -37,7 +37,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-1acdef06.js";
+            window.path_to_searchindex_js = "../searchindex-0a240c6f.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-e964a7da.js"></script>
@@ -182,6 +182,66 @@
   <iframe src="./demo/index.html?example=../code/display-a-satellite-map.js" title="Display a Satellite Map" loading="lazy" allow="fullscreen"></iframe>
 </div>
 
+<div class="example-code-tabs">
+<pre class="playground"><code class="language-rust no_run">use std::{collections::HashMap, path::PathBuf};
+
+use maplibre::{
+    projection::{ProjectionSpecification, ProjectionType},
+    render::settings::WgpuSettings,
+    style::{
+        layer::{LayerPaint, RasterPaint, StyleLayer},
+        source::{Source, VectorSource},
+        Style,
+    },
+};
+use maplibre_winit::{run_headed_map, HeadedMapOptions, WinitMapWindowConfig};
+
+pub fn style() -&gt; Style {
+    Style {
+        version: 8,
+        sources: HashMap::from([(
+            "satellite".to_string(),
+            Source::Raster(VectorSource {
+                attribution: None,
+                bounds: None,
+                maxzoom: None,
+                minzoom: None,
+                scheme: None,
+                tiles: Some(vec![
+                    "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg"
+                        .to_string(),
+                ]),
+                tile_size: Some(256),
+                url: None,
+            }),
+        )]),
+        layers: vec![StyleLayer {
+            index: 1,
+            id: "satellite".to_string(),
+            type_: "raster".to_string(),
+            source: Some("satellite".to_string()),
+            paint: Some(LayerPaint::Raster(RasterPaint::default())),
+            ..Default::default()
+        }],
+        projection: Some(ProjectionSpecification {
+            projection_type: ProjectionType::Globe,
+        }),
+        center: Some([137.9150899566626, 36.25956997955441]),
+        zoom: Some(9.0),
+        ..Default::default()
+    }
+}
+
+fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
+    run_headed_map(
+        Some(PathBuf::from("./maplibre-cache")),
+        WinitMapWindowConfig::new("Display a Satellite Map".to_string()),
+        WgpuSettings::default(),
+        style(),
+        HeadedMapOptions::default(),
+    )?;
+    Ok(())
+}</code></pre>
 <pre><code class="language-js">export default async function style() {
     return {
         'version': 8,
@@ -207,6 +267,68 @@
     };
 }
 </code></pre>
+<pre><code class="language-html">&lt;!DOCTYPE html&gt;
+&lt;html lang="en"&gt;
+&lt;head&gt;
+    &lt;meta charset="utf-8" /&gt;
+    &lt;meta name="viewport" content="width=device-width, initial-scale=1.0" /&gt;
+    &lt;title&gt;Display a Satellite Map&lt;/title&gt;
+    &lt;style&gt;
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #0b0e14;
+        }
+        #maplibre {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+    &lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+    &lt;canvas id="maplibre"&gt;&lt;/canvas&gt;
+    &lt;script type="module"&gt;
+        import { startMapLibre } from 'maplibre-rs';
+
+        async function style() {
+            return {
+                'version': 8,
+                'sources': {
+                    'satellite': {
+                        'type': 'raster',
+                        'tiles': [
+                            'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg'
+                        ],
+                        'tileSize': 256
+                    }
+                },
+                'layers': [{
+                    'id': 'satellite',
+                    'type': 'raster',
+                    'source': 'satellite'
+                }],
+                'projection': {
+                    'type': 'globe'
+                },
+                'center': [137.9150899566626, 36.25956997955441],
+                'zoom': 9
+            };
+        }
+
+        startMapLibre(undefined, undefined, JSON.stringify(await style()));
+    &lt;/script&gt;
+&lt;/body&gt;
+&lt;/html&gt;
+</code></pre>
+</div>
+
 <p>GL JS: <a href="https://maplibre.org/maplibre-gl-js/docs/examples/display-a-satellite-map/">Display a Satellite Map</a></p>
 
                     </main>
@@ -260,6 +382,7 @@
         <script src="../book-609e4cb8.js"></script>
 
         <!-- Custom JS scripts -->
+        <script src="../examples-8252d1da.js"></script>
 
 
 

@@ -29,7 +29,7 @@
 
         <!-- Custom theme stylesheets -->
         <link rel="stylesheet" href="../diff-2cf15afe.css">
-        <link rel="stylesheet" href="../examples-71c88e22.css">
+        <link rel="stylesheet" href="../examples-9e7349cf.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -37,7 +37,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-1acdef06.js";
+            window.path_to_searchindex_js = "../searchindex-0a240c6f.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-e964a7da.js"></script>
@@ -182,6 +182,119 @@
   <iframe src="./demo/index.html?example=../code/add-a-geojson-line.js" title="Add a GeoJSON Line" loading="lazy" allow="fullscreen"></iframe>
 </div>
 
+<div class="example-code-tabs">
+<pre class="playground"><code class="language-rust no_run">use std::{path::PathBuf, sync::Arc};
+
+use maplibre::{
+    projection::{ProjectionSpecification, ProjectionType},
+    render::settings::WgpuSettings,
+    style::{
+        layer::{LayerPaint, LayerProperties, LinePaint, StyleLayer, StyleProperty},
+        source::{fresh_generation, GeoJsonData, GeoJsonSource, Source},
+        Style,
+    },
+};
+use maplibre_winit::{run_headed_map, HeadedMapOptions, WinitMapWindowConfig};
+use serde_json::{json, Map};
+
+const BASE_STYLE_URL: &amp;str = "https://tiles.openfreemap.org/styles/bright";
+
+pub fn build_style(mut style: Style) -&gt; Style {
+    style.projection = Some(ProjectionSpecification {
+        projection_type: ProjectionType::Globe,
+    });
+    style.center = Some([-122.486052, 37.830348]);
+    style.zoom = Some(15.0);
+
+    style.sources.insert(
+        "route".to_string(),
+        Source::GeoJson(GeoJsonSource {
+            data: GeoJsonData::Inline(Arc::new(json!({
+                "type": "Feature",
+                "properties": {},
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [
+                        [-122.48369693756104, 37.83381888486939],
+                        [-122.48348236083984, 37.83317489144141],
+                        [-122.48339653015138, 37.83270036637107],
+                        [-122.48356819152832, 37.832056363179625],
+                        [-122.48404026031496, 37.83114119107971],
+                        [-122.48404026031496, 37.83049717427869],
+                        [-122.48348236083984, 37.829920943955045],
+                        [-122.48356819152832, 37.82954808664175],
+                        [-122.48507022857666, 37.82944639795659],
+                        [-122.48610019683838, 37.82880236636284],
+                        [-122.48695850372314, 37.82931081282506],
+                        [-122.48700141906738, 37.83080223556934],
+                        [-122.48751640319824, 37.83168351665737],
+                        [-122.48803138732912, 37.832158048267786],
+                        [-122.48888969421387, 37.83297152392784],
+                        [-122.48987674713133, 37.83263257682617],
+                        [-122.49043464660643, 37.832937629287755],
+                        [-122.49125003814696, 37.832429207817725],
+                        [-122.49163627624512, 37.832564787218985],
+                        [-122.49223709106445, 37.83337825839438],
+                        [-122.49378204345702, 37.83368330777276]
+                    ]
+                }
+            }))),
+            maxzoom: None,
+            buffer: None,
+            minzoom: None,
+            promote_id: None,
+            generate_id: false,
+            cluster: false,
+            cluster_radius: None,
+            cluster_max_zoom: None,
+            cluster_min_points: None,
+            cluster_properties: None,
+            filter: None,
+            generation: fresh_generation(),
+        }),
+    );
+
+    style.layers.push(StyleLayer {
+        id: "route".to_string(),
+        type_: "line".to_string(),
+        source: Some("route".to_string()),
+        source_layer: None,
+        paint: Some(LayerPaint::Line(LinePaint {
+            line_color: Some(StyleProperty::parse(&amp;json!("#888"))),
+            line_width: Some(StyleProperty::Constant(8.0)),
+            ..Default::default()
+        })),
+        unrecognized: LayerProperties {
+            paint: Map::new(),
+            layout: Map::from_iter([
+                ("line-join".to_string(), json!("round")),
+                ("line-cap".to_string(), json!("round")),
+            ]),
+        },
+        ..Default::default()
+    });
+
+    for (index, layer) in style.layers.iter_mut().enumerate() {
+        layer.index = index as u32 + 1;
+    }
+    style
+}
+
+fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
+    let base: Style = maplibre::platform::run_multithreaded(async {
+        Ok::&lt;_, reqwest::Error&gt;(reqwest::get(BASE_STYLE_URL).await?.json().await?)
+    })?;
+    let style = build_style(base);
+
+    run_headed_map(
+        Some(PathBuf::from("./maplibre-cache")),
+        WinitMapWindowConfig::new("Add a GeoJSON Line".to_string()),
+        WgpuSettings::default(),
+        style,
+        HeadedMapOptions::default(),
+    )?;
+    Ok(())
+}</code></pre>
 <pre><code class="language-js">export default async function style() {
     const style = await (await fetch('https://tiles.openfreemap.org/styles/bright')).json();
     style.projection = { type: 'globe' };
@@ -237,6 +350,98 @@
     return style;
 }
 </code></pre>
+<pre><code class="language-html">&lt;!DOCTYPE html&gt;
+&lt;html lang="en"&gt;
+&lt;head&gt;
+    &lt;meta charset="utf-8" /&gt;
+    &lt;meta name="viewport" content="width=device-width, initial-scale=1.0" /&gt;
+    &lt;title&gt;Add a GeoJSON Line&lt;/title&gt;
+    &lt;style&gt;
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #0b0e14;
+        }
+        #maplibre {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+    &lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+    &lt;canvas id="maplibre"&gt;&lt;/canvas&gt;
+    &lt;script type="module"&gt;
+        import { startMapLibre } from 'maplibre-rs';
+
+        async function style() {
+            const style = await (await fetch('https://tiles.openfreemap.org/styles/bright')).json();
+            style.projection = { type: 'globe' };
+            style.center = [-122.486052, 37.830348];
+            style.zoom = 15;
+
+            style.sources['route'] = {
+                'type': 'geojson',
+                'data': {
+                    'type': 'Feature',
+                    'properties': {},
+                    'geometry': {
+                        'type': 'LineString',
+                        'coordinates': [
+                            [-122.48369693756104, 37.83381888486939],
+                            [-122.48348236083984, 37.83317489144141],
+                            [-122.48339653015138, 37.83270036637107],
+                            [-122.48356819152832, 37.832056363179625],
+                            [-122.48404026031496, 37.83114119107971],
+                            [-122.48404026031496, 37.83049717427869],
+                            [-122.48348236083984, 37.829920943955045],
+                            [-122.48356819152832, 37.82954808664175],
+                            [-122.48507022857666, 37.82944639795659],
+                            [-122.48610019683838, 37.82880236636284],
+                            [-122.48695850372314, 37.82931081282506],
+                            [-122.48700141906738, 37.83080223556934],
+                            [-122.48751640319824, 37.83168351665737],
+                            [-122.48803138732912, 37.832158048267786],
+                            [-122.48888969421387, 37.83297152392784],
+                            [-122.48987674713133, 37.83263257682617],
+                            [-122.49043464660643, 37.832937629287755],
+                            [-122.49125003814696, 37.832429207817725],
+                            [-122.49163627624512, 37.832564787218985],
+                            [-122.49223709106445, 37.83337825839438],
+                            [-122.49378204345702, 37.83368330777276]
+                        ]
+                    }
+                }
+            };
+            style.layers.push({
+                'id': 'route',
+                'type': 'line',
+                'source': 'route',
+                'layout': {
+                    'line-join': 'round',
+                    'line-cap': 'round'
+                },
+                'paint': {
+                    'line-color': '#888',
+                    'line-width': 8
+                }
+            });
+            return style;
+        }
+
+        startMapLibre(undefined, undefined, JSON.stringify(await style()));
+    &lt;/script&gt;
+&lt;/body&gt;
+&lt;/html&gt;
+</code></pre>
+</div>
+
 <p>GL JS: <a href="https://maplibre.org/maplibre-gl-js/docs/examples/add-a-geojson-line/">Add a GeoJSON Line</a></p>
 
                     </main>
@@ -290,6 +495,7 @@
         <script src="../book-609e4cb8.js"></script>
 
         <!-- Custom JS scripts -->
+        <script src="../examples-8252d1da.js"></script>
 
 
 
