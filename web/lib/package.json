@@ -16,12 +16,12 @@
   "types": "dist/ts/index.d.ts",
   "dependencies": {
     "binaryen": "^118.0.0",
-    "spectorjs": "0.9.30",
+    "spectorjs": "0.9.33",
     "wasm-feature-detect": "^1.6.2"
   },
   "devDependencies": {
-    "@chialab/esbuild-plugin-meta-url": "^0.18.2",
-    "esbuild": "^0.19.12",
+    "@chialab/esbuild-plugin-meta-url": "^0.19.2",
+    "esbuild": "^0.28.2",
     "esbuild-plugin-inline-worker": "^0.1.1",
     "typescript": "^5.5.4",
     "yargs": "^17.7.2"
