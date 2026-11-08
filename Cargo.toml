@@ -65,7 +65,7 @@ rusqlite = { version = "0.32.0" }
 serde = { version = "1.0.188", features = ["derive", "rc"] }
 serde_json = "1.0.107"
 smallvec = "1.11.1"
-thiserror = "1.0.48"
+thiserror = "2.0.21"
 tile-grid = "0.6.1"
 tokio = "1.32.0"  # Individual features are customized in each crate
 tokio-util = { version = "0.7.9", features = ["rt"] }
