@@ -75,7 +75,7 @@ impl HillshadeUniforms {
     }
 }
 
-/// Sentinel keeping `color-relief` polar blending disabled when no [`PolarPoleElevations`]
+/// Sentinel keeping `color-relief` polar blending disabled when no [`PolarPoleElevations`](crate::terrain::PolarPoleElevations)
 /// resource is configured on the world.
 const UNSET_POLE_ELEVATION: f32 = -1.0e9;
 
@@ -90,7 +90,7 @@ pub struct ColorReliefUniforms {
     /// Number of ramp stops in use.
     pub stop_count: u32,
     /// `[north_meters, south_meters]` polar elevations for closing globe polar caps, or
-    /// [`UNSET_POLE_ELEVATION`] when unconfigured; also keeps the arrays 16-byte aligned.
+    /// `UNSET_POLE_ELEVATION` when unconfigured; also keeps the arrays 16-byte aligned.
     pub pole_elevations: [f32; 2],
     /// Stop elevations, four per vector.
     pub elevations: [[f32; 4]; MAX_RAMP_STOPS / 4],

@@ -1,5 +1,6 @@
 export default async function style() {
     const style = await (await fetch('https://tiles.openfreemap.org/styles/bright')).json();
+    style.projection = { type: 'globe' };
     style.center = [-74.0066, 40.7135];
     style.zoom = 15.5;
     style.pitch = 45;

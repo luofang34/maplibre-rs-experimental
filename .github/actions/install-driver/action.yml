@@ -21,8 +21,8 @@ runs:
     - name: Install wgpu-info
       if: inputs.wgpu-info == 'true'
       shell: bash
-      # Rev is for 0.14.1: https://github.com/gfx-rs/wgpu/tree/v0.14.1
-      run: cargo install --force --debug --git "https://github.com/gfx-rs/wgpu" --rev 77b9a99cf4c7ca2b6d46124f9e48e510c04b605d wgpu-info
+      # Rev is for v30.0.1: https://github.com/gfx-rs/wgpu/tree/v30.0.1
+      run: cargo install --force --debug --locked --git "https://github.com/gfx-rs/wgpu" --rev 40f4a34ebaf56f9a046231f54125ad046239d3f3 wgpu-info
     - name: wgpu-info
       if: inputs.wgpu-info == 'true'
       shell: bash

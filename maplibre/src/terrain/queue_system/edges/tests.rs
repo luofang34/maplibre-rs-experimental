@@ -247,12 +247,11 @@ fn side_sweep_matches_per_vertex_shared_height_across_four_way_corners_and_multi
                 ];
                 shared_height(p, t, &selection, &dems) as f32
             });
-            for side in 0..4 {
+            for (side, &exp) in expected.iter().enumerate() {
                 assert!(
-                    (at(&fast, i, side) - expected[side]).abs() <= 1e-4,
-                    "tile {t:?} side {side} vertex {i}: fast={} expected={}",
+                    (at(&fast, i, side) - exp).abs() <= 1e-4,
+                    "tile {t:?} side {side} vertex {i}: fast={} expected={exp}",
                     at(&fast, i, side),
-                    expected[side],
                 );
             }
         }

@@ -261,8 +261,8 @@ pub(crate) fn drawn_tiles(world: &World) -> FxHashSet<WorldTileCoords> {
     drawn
 }
 
-/// Builds the retained tile set from already-computed `Loose` view and raster coverings,
-/// avoiding redundant globe quadtree traversals.
+/// Builds the retained tile set from already-computed `Loose` view and raster coverings.
+#[cfg(feature = "headless")]
 pub(crate) fn tiles_in_use_from_loose(
     world: &World,
     style: &Style,

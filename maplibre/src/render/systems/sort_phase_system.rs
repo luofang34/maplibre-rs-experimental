@@ -4,7 +4,7 @@ use crate::{
     tcs::system::SystemResult,
 };
 
-/// This system sorts all [`RenderPhases`](RenderPhase) for the [`PhaseItem`] type.
+/// This system sorts all [`RenderPhases`](RenderPhase) for the [`PhaseItem`](crate::render::render_phase::PhaseItem) type.
 pub fn sort_phase_system(MapContext { world, .. }: &mut MapContext) -> SystemResult {
     world
         .resources

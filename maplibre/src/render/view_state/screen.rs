@@ -36,10 +36,10 @@ impl ViewState {
         self.clip_to_window_transform() * ndc
     }
 
-    /// Order of transformations reversed: https://computergraphics.stackexchange.com/questions/6087/screen-space-coordinates-to-eye-space-conversion/6093
+    /// Order of transformations reversed: <https://computergraphics.stackexchange.com/questions/6087/screen-space-coordinates-to-eye-space-conversion/6093>
     /// `w` is lost.
     ///
-    /// OpenGL explanation: https://www.khronos.org/opengl/wiki/Compute_eye_space_from_window_space#From_window_to_ndc
+    /// OpenGL explanation: <https://www.khronos.org/opengl/wiki/Compute_eye_space_from_window_space#From_window_to_ndc>
     pub(super) fn window_to_world(
         &self,
         window: &Vector3<f64>,

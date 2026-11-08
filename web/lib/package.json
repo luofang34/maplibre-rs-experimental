@@ -2,6 +2,7 @@
   "name": "maplibre-rs",
   "version": "0.0.1",
   "description": "",
+  "type": "module",
   "scripts": {
     "clean": "rm -rf dist && rm -rf src/wasm-pack",
     "build": "node build.mjs",

@@ -1,8 +1,10 @@
 //! Native HTTP source loading with optional disk caching and typed retry classification.
 
-use std::collections::{HashMap, VecDeque};
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, Weak};
+use std::{
+    collections::{HashMap, VecDeque},
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex, Weak},
+};
 
 use async_trait::async_trait;
 use http_cache_reqwest::{CACacheManager, Cache, CacheMode, HttpCache, HttpCacheOptions};

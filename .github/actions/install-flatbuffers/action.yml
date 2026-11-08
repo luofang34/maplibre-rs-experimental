@@ -7,11 +7,8 @@ runs:
     - name: Install flatbuffers
       shell: bash
       run: |
-        git clone https://github.com/google/flatbuffers.git
-        cd flatbuffers
-        git checkout v22.12.06
-        cmake -G "Unix Makefiles"
-        make
-        ./flattests
-        sudo make install
+        git clone --depth 1 --branch v24.3.25 https://github.com/google/flatbuffers.git
+        cmake -S flatbuffers -B flatbuffers/build -G "Unix Makefiles" -DFLATBUFFERS_BUILD_TESTS=OFF -DCMAKE_BUILD_TYPE=Release
+        cmake --build flatbuffers/build --parallel
+        sudo cmake --install flatbuffers/build
         flatc --version

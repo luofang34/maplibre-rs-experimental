@@ -1,4 +1,4 @@
-//! Schedule plugin wiring [`BinnedRenderPhase`](super::BinnedRenderPhase) into `Prepare`, `PhaseSort`, and `Cleanup`.
+//! Schedule plugin wiring [`BinnedRenderPhase`] into `Prepare`, `PhaseSort`, and `Cleanup`.
 
 use std::{marker::PhantomData, rc::Rc};
 

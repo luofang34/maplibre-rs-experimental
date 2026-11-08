@@ -19,6 +19,9 @@ export default async function style() {
             }
         ],
         'id': 'blank',
+        'projection': {
+            'type': 'globe'
+        },
         'center': [0, 0], // starting position
         'zoom': 0 // starting zoom
     };

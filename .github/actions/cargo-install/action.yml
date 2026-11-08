@@ -33,13 +33,13 @@ runs:
           fi
         else
           # Install with debug profile -> faster compilation
-          cargo install --debug --locked cargo-binstall@1.24.0
+          cargo install --debug --locked cargo-binstall@1.26.2
         fi
         
         if [ "$FILE" != "" ]; then
           # A pinned release from GitHub, unpacked onto the PATH: binstall upgrading itself
           # asks the crates.io API on every run, which refuses busy CI with HTTP 403.
-          URL="https://github.com/cargo-bins/cargo-binstall/releases/download/v1.24.0/$FILE"
+          URL="https://github.com/cargo-bins/cargo-binstall/releases/download/v1.26.2/$FILE"
           echo "Downloading binstall: $URL"
           curl --fail -L -o /tmp/binstall.bin "$URL"
           # Next to the cargo on the PATH: under Windows bash, $HOME is the shell's own home,
