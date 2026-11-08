@@ -79,225 +79,233 @@
 <a href=#79 id=79 data-nosnippet>79</a>    <span class="kw">let </span>uses_globe = projection_transition &gt; <span class="number">0.0</span>;
 <a href=#80 id=80 data-nosnippet>80</a>    <span class="kw">let </span>atmosphere_blend = atmosphere_blend(style, view_state, world);
 <a href=#81 id=81 data-nosnippet>81</a>    <span class="comment">// Without an atmosphere a full globe still has a sky where the host wants the frame
-<a href=#82 id=82 data-nosnippet>82</a>    // covered; with one, the atmosphere draws the sky.
-<a href=#83 id=83 data-nosnippet>83</a>    </span><span class="kw">let </span>globe_sky = draws_globe_sky(view_state, projection_transition, atmosphere_blend);
-<a href=#84 id=84 data-nosnippet>84</a>    <span class="kw">let </span>sky_metadata = style
-<a href=#85 id=85 data-nosnippet>85</a>        .sky
-<a href=#86 id=86 data-nosnippet>86</a>        .as_ref()
-<a href=#87 id=87 data-nosnippet>87</a>        .filter(|<span class="kw">_</span>| projection_transition &lt; <span class="number">1.0 </span>|| view_state.opaque_environment() || globe_sky)
-<a href=#88 id=88 data-nosnippet>88</a>        .map(|sky| {
-<a href=#89 id=89 data-nosnippet>89</a>            globe_sky
-<a href=#90 id=90 data-nosnippet>90</a>                .then(|| globe_sky_metadata(sky, view_state))
-<a href=#91 id=91 data-nosnippet>91</a>                .flatten()
-<a href=#92 id=92 data-nosnippet>92</a>                .unwrap_or_else(|| sky_metadata(sky, view_state, projection_transition, frame[<span class="number">1</span>]))
-<a href=#93 id=93 data-nosnippet>93</a>        });
-<a href=#94 id=94 data-nosnippet>94</a>
-<a href=#95 id=95 data-nosnippet>95</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(gpu) = world
-<a href=#96 id=96 data-nosnippet>96</a>        .resources
-<a href=#97 id=97 data-nosnippet>97</a>        .get::&lt;<span class="kw">super</span>::pattern::BackgroundPatternGpu&gt;()
-<a href=#98 id=98 data-nosnippet>98</a>    {
-<a href=#99 id=99 data-nosnippet>99</a>        <span class="kw">let </span>size = renderer.state().surface().size();
-<a href=#100 id=100 data-nosnippet>100</a>        gpu.write(
-<a href=#101 id=101 data-nosnippet>101</a>            <span class="kw-2">&amp;</span>renderer.queue,
-<a href=#102 id=102 data-nosnippet>102</a>            view_state,
-<a href=#103 id=103 data-nosnippet>103</a>            [size.width() <span class="kw">as </span>f32, size.height() <span class="kw">as </span>f32],
-<a href=#104 id=104 data-nosnippet>104</a>        );
-<a href=#105 id=105 data-nosnippet>105</a>    }
+<a href=#82 id=82 data-nosnippet>82</a>    // covered; with one, the atmosphere draws the sky. Standard map views curve and fade
+<a href=#83 id=83 data-nosnippet>83</a>    // the sky across the globe horizon in `sky.fragment.wgsl` as GL JS does.
+<a href=#84 id=84 data-nosnippet>84</a>    </span><span class="kw">let </span>external_or_free = view_state.has_external_view()
+<a href=#85 id=85 data-nosnippet>85</a>        || view_state.navigation_mode() == <span class="kw">crate</span>::render::view_state::NavigationMode::FreeGlobe;
+<a href=#86 id=86 data-nosnippet>86</a>    <span class="kw">let </span>globe_sky = draws_globe_sky(view_state, projection_transition, atmosphere_blend);
+<a href=#87 id=87 data-nosnippet>87</a>    <span class="kw">let </span>sky_metadata = style
+<a href=#88 id=88 data-nosnippet>88</a>        .sky
+<a href=#89 id=89 data-nosnippet>89</a>        .as_ref()
+<a href=#90 id=90 data-nosnippet>90</a>        .filter(|<span class="kw">_</span>| {
+<a href=#91 id=91 data-nosnippet>91</a>            !external_or_free
+<a href=#92 id=92 data-nosnippet>92</a>                || projection_transition &lt; <span class="number">1.0
+<a href=#93 id=93 data-nosnippet>93</a>                </span>|| view_state.opaque_environment()
+<a href=#94 id=94 data-nosnippet>94</a>                || globe_sky
+<a href=#95 id=95 data-nosnippet>95</a>        })
+<a href=#96 id=96 data-nosnippet>96</a>        .map(|sky| {
+<a href=#97 id=97 data-nosnippet>97</a>            globe_sky
+<a href=#98 id=98 data-nosnippet>98</a>                .then(|| globe_sky_metadata(sky, view_state))
+<a href=#99 id=99 data-nosnippet>99</a>                .flatten()
+<a href=#100 id=100 data-nosnippet>100</a>                .unwrap_or_else(|| sky_metadata(sky, view_state, projection_transition, frame[<span class="number">1</span>]))
+<a href=#101 id=101 data-nosnippet>101</a>        });
+<a href=#102 id=102 data-nosnippet>102</a>
+<a href=#103 id=103 data-nosnippet>103</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(gpu) = world
+<a href=#104 id=104 data-nosnippet>104</a>        .resources
+<a href=#105 id=105 data-nosnippet>105</a>        .get::&lt;<span class="kw">super</span>::pattern::BackgroundPatternGpu&gt;()
 <a href=#106 id=106 data-nosnippet>106</a>    {
-<a href=#107 id=107 data-nosnippet>107</a>        <span class="kw">let </span><span class="prelude-val">Some</span>((layer_item_phase, translucent_phase)) = world.resources.query_mut::&lt;(
-<a href=#108 id=108 data-nosnippet>108</a>            <span class="kw-2">&amp;mut </span>RenderPhase&lt;LayerItem&gt;,
-<a href=#109 id=109 data-nosnippet>109</a>            <span class="kw-2">&amp;mut </span>RenderPhase&lt;TranslucentItem&gt;,
-<a href=#110 id=110 data-nosnippet>110</a>        )&gt;() <span class="kw">else </span>{
-<a href=#111 id=111 data-nosnippet>111</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(SystemError::Dependencies);
-<a href=#112 id=112 data-nosnippet>112</a>        };
-<a href=#113 id=113 data-nosnippet>113</a>
-<a href=#114 id=114 data-nosnippet>114</a>        <span class="kw">let </span>patterned: std::collections::HashSet&lt;<span class="kw-2">&amp;</span>str&gt; = style
-<a href=#115 id=115 data-nosnippet>115</a>            .layers
-<a href=#116 id=116 data-nosnippet>116</a>            .iter()
-<a href=#117 id=117 data-nosnippet>117</a>            .filter(|layer| {
-<a href=#118 id=118 data-nosnippet>118</a>                layer.paint.as_ref().is_some_and(|paint| {
-<a href=#119 id=119 data-nosnippet>119</a>                    <span class="kw">crate</span>::vector::pattern::pattern_name(paint, view_state.style_zoom().value())
-<a href=#120 id=120 data-nosnippet>120</a>                        .is_some()
-<a href=#121 id=121 data-nosnippet>121</a>                })
-<a href=#122 id=122 data-nosnippet>122</a>            })
-<a href=#123 id=123 data-nosnippet>123</a>            .map(|layer| layer.id.as_str())
-<a href=#124 id=124 data-nosnippet>124</a>            .collect();
-<a href=#125 id=125 data-nosnippet>125</a>        <span class="kw">let </span><span class="kw-2">mut </span>background_index = <span class="number">0</span>;
-<a href=#126 id=126 data-nosnippet>126</a>        <span class="kw">for </span>layer <span class="kw">in </span><span class="kw-2">&amp;</span>style.layers {
-<a href=#127 id=127 data-nosnippet>127</a>            <span class="kw">if </span>layer.type_ != <span class="string">"background" </span>|| !layer.is_visible_at(view_state.zoom().value()) {
-<a href=#128 id=128 data-nosnippet>128</a>                <span class="kw">continue</span>;
-<a href=#129 id=129 data-nosnippet>129</a>            }
-<a href=#130 id=130 data-nosnippet>130</a>            <span class="comment">// Under terrain the drape of each terrain tile carries the background, so nothing
-<a href=#131 id=131 data-nosnippet>131</a>            // paints outside the world.
-<a href=#132 id=132 data-nosnippet>132</a>            </span><span class="kw">if </span>style.terrain.is_some() &amp;&amp; !uses_globe {
-<a href=#133 id=133 data-nosnippet>133</a>                <span class="kw">continue</span>;
-<a href=#134 id=134 data-nosnippet>134</a>            }
-<a href=#135 id=135 data-nosnippet>135</a>            <span class="comment">// A layer that names an image it does not have draws nothing, not its colour.
-<a href=#136 id=136 data-nosnippet>136</a>            </span><span class="kw">if </span><span class="kw">crate</span>::vector::pattern::names_missing_image(
-<a href=#137 id=137 data-nosnippet>137</a>                layer.paint.as_ref(),
-<a href=#138 id=138 data-nosnippet>138</a>                style,
-<a href=#139 id=139 data-nosnippet>139</a>                view_state.style_zoom().value(),
-<a href=#140 id=140 data-nosnippet>140</a>            ) {
+<a href=#107 id=107 data-nosnippet>107</a>        <span class="kw">let </span>size = renderer.state().surface().size();
+<a href=#108 id=108 data-nosnippet>108</a>        gpu.write(
+<a href=#109 id=109 data-nosnippet>109</a>            <span class="kw-2">&amp;</span>renderer.queue,
+<a href=#110 id=110 data-nosnippet>110</a>            view_state,
+<a href=#111 id=111 data-nosnippet>111</a>            [size.width() <span class="kw">as </span>f32, size.height() <span class="kw">as </span>f32],
+<a href=#112 id=112 data-nosnippet>112</a>        );
+<a href=#113 id=113 data-nosnippet>113</a>    }
+<a href=#114 id=114 data-nosnippet>114</a>    {
+<a href=#115 id=115 data-nosnippet>115</a>        <span class="kw">let </span><span class="prelude-val">Some</span>((layer_item_phase, translucent_phase)) = world.resources.query_mut::&lt;(
+<a href=#116 id=116 data-nosnippet>116</a>            <span class="kw-2">&amp;mut </span>RenderPhase&lt;LayerItem&gt;,
+<a href=#117 id=117 data-nosnippet>117</a>            <span class="kw-2">&amp;mut </span>RenderPhase&lt;TranslucentItem&gt;,
+<a href=#118 id=118 data-nosnippet>118</a>        )&gt;() <span class="kw">else </span>{
+<a href=#119 id=119 data-nosnippet>119</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(SystemError::Dependencies);
+<a href=#120 id=120 data-nosnippet>120</a>        };
+<a href=#121 id=121 data-nosnippet>121</a>
+<a href=#122 id=122 data-nosnippet>122</a>        <span class="kw">let </span>patterned: std::collections::HashSet&lt;<span class="kw-2">&amp;</span>str&gt; = style
+<a href=#123 id=123 data-nosnippet>123</a>            .layers
+<a href=#124 id=124 data-nosnippet>124</a>            .iter()
+<a href=#125 id=125 data-nosnippet>125</a>            .filter(|layer| {
+<a href=#126 id=126 data-nosnippet>126</a>                layer.paint.as_ref().is_some_and(|paint| {
+<a href=#127 id=127 data-nosnippet>127</a>                    <span class="kw">crate</span>::vector::pattern::pattern_name(paint, view_state.style_zoom().value())
+<a href=#128 id=128 data-nosnippet>128</a>                        .is_some()
+<a href=#129 id=129 data-nosnippet>129</a>                })
+<a href=#130 id=130 data-nosnippet>130</a>            })
+<a href=#131 id=131 data-nosnippet>131</a>            .map(|layer| layer.id.as_str())
+<a href=#132 id=132 data-nosnippet>132</a>            .collect();
+<a href=#133 id=133 data-nosnippet>133</a>        <span class="kw">let </span><span class="kw-2">mut </span>background_index = <span class="number">0</span>;
+<a href=#134 id=134 data-nosnippet>134</a>        <span class="kw">for </span>layer <span class="kw">in </span><span class="kw-2">&amp;</span>style.layers {
+<a href=#135 id=135 data-nosnippet>135</a>            <span class="kw">if </span>layer.type_ != <span class="string">"background" </span>|| !layer.is_visible_at(view_state.zoom().value()) {
+<a href=#136 id=136 data-nosnippet>136</a>                <span class="kw">continue</span>;
+<a href=#137 id=137 data-nosnippet>137</a>            }
+<a href=#138 id=138 data-nosnippet>138</a>            <span class="comment">// Under terrain the drape of each terrain tile carries the background, so nothing
+<a href=#139 id=139 data-nosnippet>139</a>            // paints outside the world.
+<a href=#140 id=140 data-nosnippet>140</a>            </span><span class="kw">if </span>style.terrain.is_some() &amp;&amp; !uses_globe {
 <a href=#141 id=141 data-nosnippet>141</a>                <span class="kw">continue</span>;
 <a href=#142 id=142 data-nosnippet>142</a>            }
-<a href=#143 id=143 data-nosnippet>143</a>            background_index = background_index.max(layer.index);
-<a href=#144 id=144 data-nosnippet>144</a>            <span class="kw">let </span>c = background_color(layer, view_state.zoom().value());
-<a href=#145 id=145 data-nosnippet>145</a>            <span class="kw">let </span>z_index = layer.index <span class="kw">as </span>f32;
-<a href=#146 id=146 data-nosnippet>146</a>            instances.insert(layer.id.clone(), metadatas.len() <span class="kw">as </span>u32);
-<a href=#147 id=147 data-nosnippet>147</a>            metadatas.push(BackgroundLayerMetadata {
-<a href=#148 id=148 data-nosnippet>148</a>                color: c,
-<a href=#149 id=149 data-nosnippet>149</a>                z_index,
-<a href=#150 id=150 data-nosnippet>150</a>                padding: [<span class="number">0.0</span>; <span class="number">3</span>],
-<a href=#151 id=151 data-nosnippet>151</a>                horizon: view_state.horizon_line().to_shader(),
-<a href=#152 id=152 data-nosnippet>152</a>                viewport: [
-<a href=#153 id=153 data-nosnippet>153</a>                    view_state.height() <span class="kw">as </span>f32,
-<a href=#154 id=154 data-nosnippet>154</a>                    f32::from(style.terrain.is_some()),
-<a href=#155 id=155 data-nosnippet>155</a>                    frame[<span class="number">0</span>],
-<a href=#156 id=156 data-nosnippet>156</a>                    frame[<span class="number">1</span>],
-<a href=#157 id=157 data-nosnippet>157</a>                ],
-<a href=#158 id=158 data-nosnippet>158</a>                world_rows,
-<a href=#159 id=159 data-nosnippet>159</a>            });
-<a href=#160 id=160 data-nosnippet>160</a>
-<a href=#161 id=161 data-nosnippet>161</a>            <span class="kw">let </span>draw_function: Box&lt;<span class="kw">dyn </span><span class="kw">crate</span>::render::render_phase::Draw&lt;LayerItem&gt;&gt; =
-<a href=#162 id=162 data-nosnippet>162</a>                <span class="kw">if </span>uses_globe &amp;&amp; patterned.contains(layer.id.as_str()) {
-<a href=#163 id=163 data-nosnippet>163</a>                    Box::new(DrawState::&lt;LayerItem, DrawGlobeBackgroundPattern&gt;::new())
-<a href=#164 id=164 data-nosnippet>164</a>                } <span class="kw">else if </span>uses_globe {
-<a href=#165 id=165 data-nosnippet>165</a>                    Box::new(DrawState::&lt;LayerItem, DrawGlobeBackground&gt;::new())
-<a href=#166 id=166 data-nosnippet>166</a>                } <span class="kw">else if </span>patterned.contains(layer.id.as_str()) {
-<a href=#167 id=167 data-nosnippet>167</a>                    Box::new(DrawState::&lt;LayerItem, DrawBackgroundPattern&gt;::new())
-<a href=#168 id=168 data-nosnippet>168</a>                } <span class="kw">else </span>{
-<a href=#169 id=169 data-nosnippet>169</a>                    Box::new(DrawState::&lt;LayerItem, DrawBackground&gt;::new())
-<a href=#170 id=170 data-nosnippet>170</a>                };
-<a href=#171 id=171 data-nosnippet>171</a>            layer_item_phase.add(LayerItem {
-<a href=#172 id=172 data-nosnippet>172</a>                projection: ProjectionBinding::View,
-<a href=#173 id=173 data-nosnippet>173</a>                draw_function,
-<a href=#174 id=174 data-nosnippet>174</a>                index: layer.index,
-<a href=#175 id=175 data-nosnippet>175</a>                generate_borders: <span class="bool-val">false</span>,
-<a href=#176 id=176 data-nosnippet>176</a>                style_layer: layer.id.clone(),
-<a href=#177 id=177 data-nosnippet>177</a>                source_shape: <span class="kw">crate</span>::render::tile_view_pattern::TileShape::default(),
-<a href=#178 id=178 data-nosnippet>178</a>
-<a href=#179 id=179 data-nosnippet>179</a>                <span class="comment">// We provide a dummy tile for background.
-<a href=#180 id=180 data-nosnippet>180</a>                </span>tile: <span class="kw">crate</span>::tcs::tiles::Tile {
-<a href=#181 id=181 data-nosnippet>181</a>                    coords: <span class="kw">crate</span>::coords::WorldTileCoords::default(),
-<a href=#182 id=182 data-nosnippet>182</a>                },
-<a href=#183 id=183 data-nosnippet>183</a>                run: <span class="prelude-val">None</span>,
-<a href=#184 id=184 data-nosnippet>184</a>            });
-<a href=#185 id=185 data-nosnippet>185</a>        }
-<a href=#186 id=186 data-nosnippet>186</a>        <span class="comment">// The sky follows the background layers and precedes everything else, as GL JS draws it
-<a href=#187 id=187 data-nosnippet>187</a>        // under the map; the flat map covers it below the horizon.
-<a href=#188 id=188 data-nosnippet>188</a>        </span><span class="kw">if </span>sky_metadata.is_some() {
-<a href=#189 id=189 data-nosnippet>189</a>            layer_item_phase.add(LayerItem {
-<a href=#190 id=190 data-nosnippet>190</a>                projection: ProjectionBinding::View,
-<a href=#191 id=191 data-nosnippet>191</a>                draw_function: Box::new(DrawState::&lt;LayerItem, DrawSky&gt;::new()),
-<a href=#192 id=192 data-nosnippet>192</a>                index: background_index,
-<a href=#193 id=193 data-nosnippet>193</a>                generate_borders: <span class="bool-val">false</span>,
-<a href=#194 id=194 data-nosnippet>194</a>                style_layer: <span class="string">"sky"</span>.to_string(),
-<a href=#195 id=195 data-nosnippet>195</a>                source_shape: <span class="kw">crate</span>::render::tile_view_pattern::TileShape::default(),
-<a href=#196 id=196 data-nosnippet>196</a>                tile: <span class="kw">crate</span>::tcs::tiles::Tile {
-<a href=#197 id=197 data-nosnippet>197</a>                    coords: <span class="kw">crate</span>::coords::WorldTileCoords::default(),
-<a href=#198 id=198 data-nosnippet>198</a>                },
-<a href=#199 id=199 data-nosnippet>199</a>                run: <span class="prelude-val">None</span>,
-<a href=#200 id=200 data-nosnippet>200</a>            });
-<a href=#201 id=201 data-nosnippet>201</a>        }
-<a href=#202 id=202 data-nosnippet>202</a>        <span class="kw">if </span>atmosphere_blend &gt; <span class="number">0.0 </span>{
-<a href=#203 id=203 data-nosnippet>203</a>            translucent_phase.add(TranslucentItem {
-<a href=#204 id=204 data-nosnippet>204</a>                draw_function: Box::new(DrawState::&lt;TranslucentItem, DrawAtmosphere&gt;::new()),
-<a href=#205 id=205 data-nosnippet>205</a>                index: u32::MAX,
-<a href=#206 id=206 data-nosnippet>206</a>                style_layer: <span class="string">"atmosphere"</span>.to_string(),
-<a href=#207 id=207 data-nosnippet>207</a>                tile: <span class="kw">crate</span>::tcs::tiles::Tile {
-<a href=#208 id=208 data-nosnippet>208</a>                    coords: <span class="kw">crate</span>::coords::WorldTileCoords::default(),
-<a href=#209 id=209 data-nosnippet>209</a>                },
-<a href=#210 id=210 data-nosnippet>210</a>                source_shape: <span class="kw">crate</span>::render::tile_view_pattern::TileShape::default(),
-<a href=#211 id=211 data-nosnippet>211</a>            });
-<a href=#212 id=212 data-nosnippet>212</a>        }
-<a href=#213 id=213 data-nosnippet>213</a>    }
-<a href=#214 id=214 data-nosnippet>214</a>
-<a href=#215 id=215 data-nosnippet>215</a>    <span class="kw">if </span>!metadatas.is_empty() || atmosphere_blend &gt; <span class="number">0.0 </span>|| sky_metadata.is_some() {
-<a href=#216 id=216 data-nosnippet>216</a>        <span class="kw">if </span>metadatas.is_empty() {
-<a href=#217 id=217 data-nosnippet>217</a>            metadatas.push(BackgroundLayerMetadata {
-<a href=#218 id=218 data-nosnippet>218</a>                color: [<span class="number">0.0</span>; <span class="number">4</span>],
-<a href=#219 id=219 data-nosnippet>219</a>                z_index: <span class="number">0.0</span>,
-<a href=#220 id=220 data-nosnippet>220</a>                padding: [<span class="number">0.0</span>; <span class="number">3</span>],
-<a href=#221 id=221 data-nosnippet>221</a>                horizon: view_state.horizon_line().to_shader(),
-<a href=#222 id=222 data-nosnippet>222</a>                viewport: [
-<a href=#223 id=223 data-nosnippet>223</a>                    view_state.height() <span class="kw">as </span>f32,
-<a href=#224 id=224 data-nosnippet>224</a>                    f32::from(style.terrain.is_some()),
-<a href=#225 id=225 data-nosnippet>225</a>                    frame[<span class="number">0</span>],
-<a href=#226 id=226 data-nosnippet>226</a>                    frame[<span class="number">1</span>],
-<a href=#227 id=227 data-nosnippet>227</a>                ],
-<a href=#228 id=228 data-nosnippet>228</a>                world_rows,
-<a href=#229 id=229 data-nosnippet>229</a>            });
-<a href=#230 id=230 data-nosnippet>230</a>        }
-<a href=#231 id=231 data-nosnippet>231</a>        <span class="kw">let </span>globe_tiles = globe_tiles(world);
-<a href=#232 id=232 data-nosnippet>232</a>        <span class="kw">let </span>tile_metadata: Vec&lt;ShaderTileMetadata&gt; = globe_tiles
-<a href=#233 id=233 data-nosnippet>233</a>            .iter()
-<a href=#234 id=234 data-nosnippet>234</a>            .map(|coords| globe_tile_metadata(view_state, <span class="kw-2">*</span>coords))
-<a href=#235 id=235 data-nosnippet>235</a>            .collect();
-<a href=#236 id=236 data-nosnippet>236</a>        <span class="kw">let </span>atmosphere_metadata = <span class="kw">if </span>atmosphere_blend &gt; <span class="number">0.0 </span>{
-<a href=#237 id=237 data-nosnippet>237</a>            <span class="kw">let </span>camera = globe_camera_for_view(view_state).map_err(|error| {
-<a href=#238 id=238 data-nosnippet>238</a>                <span class="macro">tracing::error!</span>(<span class="question-mark">?</span>error, <span class="string">"failed to build atmosphere globe camera"</span>);
-<a href=#239 id=239 data-nosnippet>239</a>                SystemError::Setup
-<a href=#240 id=240 data-nosnippet>240</a>            })<span class="question-mark">?</span>;
-<a href=#241 id=241 data-nosnippet>241</a>            <span class="kw">let </span>light = style.light.clone().unwrap_or_default();
-<a href=#242 id=242 data-nosnippet>242</a>            <span class="kw">let </span>scene_lighting = world
-<a href=#243 id=243 data-nosnippet>243</a>                .resources
-<a href=#244 id=244 data-nosnippet>244</a>                .get::&lt;<span class="kw">crate</span>::render::SceneLighting&gt;()
-<a href=#245 id=245 data-nosnippet>245</a>                .copied()
-<a href=#246 id=246 data-nosnippet>246</a>                .unwrap_or_default();
-<a href=#247 id=247 data-nosnippet>247</a>            AtmosphereLayerMetadata::from_view(
-<a href=#248 id=248 data-nosnippet>248</a>                <span class="kw-2">&amp;</span>camera,
-<a href=#249 id=249 data-nosnippet>249</a>                <span class="kw-2">&amp;</span>light,
-<a href=#250 id=250 data-nosnippet>250</a>                scene_lighting,
-<a href=#251 id=251 data-nosnippet>251</a>                view_state.zoom().value(),
-<a href=#252 id=252 data-nosnippet>252</a>                atmosphere_blend,
-<a href=#253 id=253 data-nosnippet>253</a>            )
-<a href=#254 id=254 data-nosnippet>254</a>            .map_err(|error| {
-<a href=#255 id=255 data-nosnippet>255</a>                <span class="macro">tracing::error!</span>(<span class="question-mark">?</span>error, <span class="string">"failed to build atmosphere shader metadata"</span>);
-<a href=#256 id=256 data-nosnippet>256</a>                SystemError::Setup
-<a href=#257 id=257 data-nosnippet>257</a>            })<span class="question-mark">?
-<a href=#258 id=258 data-nosnippet>258</a>        </span>} <span class="kw">else </span>{
-<a href=#259 id=259 data-nosnippet>259</a>            AtmosphereLayerMetadata::disabled()
-<a href=#260 id=260 data-nosnippet>260</a>        };
-<a href=#261 id=261 data-nosnippet>261</a>
-<a href=#262 id=262 data-nosnippet>262</a>        <span class="kw">let </span>(buffer, tile_metadata_buffer, atmosphere_metadata_buffer, sky_metadata_buffer) = {
-<a href=#263 id=263 data-nosnippet>263</a>            <span class="kw">let </span>gpu_buffers = world.resources.get_or_init_mut::&lt;BackgroundGpuBuffers&gt;();
-<a href=#264 id=264 data-nosnippet>264</a>            gpu_buffers.write_metadata(<span class="kw-2">&amp;</span>renderer.device, <span class="kw-2">&amp;</span>renderer.queue, <span class="kw-2">&amp;</span>metadatas);
-<a href=#265 id=265 data-nosnippet>265</a>            gpu_buffers.write_tile_metadata(<span class="kw-2">&amp;</span>renderer.device, <span class="kw-2">&amp;</span>renderer.queue, <span class="kw-2">&amp;</span>tile_metadata);
-<a href=#266 id=266 data-nosnippet>266</a>            gpu_buffers.write_atmosphere(<span class="kw-2">&amp;</span>renderer.device, <span class="kw-2">&amp;</span>renderer.queue, <span class="kw-2">&amp;</span>atmosphere_metadata);
-<a href=#267 id=267 data-nosnippet>267</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(sky) = <span class="kw-2">&amp;</span>sky_metadata {
-<a href=#268 id=268 data-nosnippet>268</a>                gpu_buffers.write_sky(<span class="kw-2">&amp;</span>renderer.device, <span class="kw-2">&amp;</span>renderer.queue, sky);
-<a href=#269 id=269 data-nosnippet>269</a>            }
-<a href=#270 id=270 data-nosnippet>270</a>            (
-<a href=#271 id=271 data-nosnippet>271</a>                gpu_buffers
-<a href=#272 id=272 data-nosnippet>272</a>                    .metadata_buffer()
-<a href=#273 id=273 data-nosnippet>273</a>                    .expect(<span class="string">"metadata buffer"</span>)
-<a href=#274 id=274 data-nosnippet>274</a>                    .clone(),
-<a href=#275 id=275 data-nosnippet>275</a>                gpu_buffers
-<a href=#276 id=276 data-nosnippet>276</a>                    .tile_metadata_buffer()
-<a href=#277 id=277 data-nosnippet>277</a>                    .expect(<span class="string">"tile metadata buffer"</span>)
-<a href=#278 id=278 data-nosnippet>278</a>                    .clone(),
+<a href=#143 id=143 data-nosnippet>143</a>            <span class="comment">// A layer that names an image it does not have draws nothing, not its colour.
+<a href=#144 id=144 data-nosnippet>144</a>            </span><span class="kw">if </span><span class="kw">crate</span>::vector::pattern::names_missing_image(
+<a href=#145 id=145 data-nosnippet>145</a>                layer.paint.as_ref(),
+<a href=#146 id=146 data-nosnippet>146</a>                style,
+<a href=#147 id=147 data-nosnippet>147</a>                view_state.style_zoom().value(),
+<a href=#148 id=148 data-nosnippet>148</a>            ) {
+<a href=#149 id=149 data-nosnippet>149</a>                <span class="kw">continue</span>;
+<a href=#150 id=150 data-nosnippet>150</a>            }
+<a href=#151 id=151 data-nosnippet>151</a>            background_index = background_index.max(layer.index);
+<a href=#152 id=152 data-nosnippet>152</a>            <span class="kw">let </span>c = background_color(layer, view_state.zoom().value());
+<a href=#153 id=153 data-nosnippet>153</a>            <span class="kw">let </span>z_index = layer.index <span class="kw">as </span>f32;
+<a href=#154 id=154 data-nosnippet>154</a>            instances.insert(layer.id.clone(), metadatas.len() <span class="kw">as </span>u32);
+<a href=#155 id=155 data-nosnippet>155</a>            metadatas.push(BackgroundLayerMetadata {
+<a href=#156 id=156 data-nosnippet>156</a>                color: c,
+<a href=#157 id=157 data-nosnippet>157</a>                z_index,
+<a href=#158 id=158 data-nosnippet>158</a>                padding: [<span class="number">0.0</span>; <span class="number">3</span>],
+<a href=#159 id=159 data-nosnippet>159</a>                horizon: view_state.horizon_line().to_shader(),
+<a href=#160 id=160 data-nosnippet>160</a>                viewport: [
+<a href=#161 id=161 data-nosnippet>161</a>                    view_state.height() <span class="kw">as </span>f32,
+<a href=#162 id=162 data-nosnippet>162</a>                    f32::from(style.terrain.is_some()),
+<a href=#163 id=163 data-nosnippet>163</a>                    frame[<span class="number">0</span>],
+<a href=#164 id=164 data-nosnippet>164</a>                    frame[<span class="number">1</span>],
+<a href=#165 id=165 data-nosnippet>165</a>                ],
+<a href=#166 id=166 data-nosnippet>166</a>                world_rows,
+<a href=#167 id=167 data-nosnippet>167</a>            });
+<a href=#168 id=168 data-nosnippet>168</a>
+<a href=#169 id=169 data-nosnippet>169</a>            <span class="kw">let </span>draw_function: Box&lt;<span class="kw">dyn </span><span class="kw">crate</span>::render::render_phase::Draw&lt;LayerItem&gt;&gt; =
+<a href=#170 id=170 data-nosnippet>170</a>                <span class="kw">if </span>uses_globe &amp;&amp; patterned.contains(layer.id.as_str()) {
+<a href=#171 id=171 data-nosnippet>171</a>                    Box::new(DrawState::&lt;LayerItem, DrawGlobeBackgroundPattern&gt;::new())
+<a href=#172 id=172 data-nosnippet>172</a>                } <span class="kw">else if </span>uses_globe {
+<a href=#173 id=173 data-nosnippet>173</a>                    Box::new(DrawState::&lt;LayerItem, DrawGlobeBackground&gt;::new())
+<a href=#174 id=174 data-nosnippet>174</a>                } <span class="kw">else if </span>patterned.contains(layer.id.as_str()) {
+<a href=#175 id=175 data-nosnippet>175</a>                    Box::new(DrawState::&lt;LayerItem, DrawBackgroundPattern&gt;::new())
+<a href=#176 id=176 data-nosnippet>176</a>                } <span class="kw">else </span>{
+<a href=#177 id=177 data-nosnippet>177</a>                    Box::new(DrawState::&lt;LayerItem, DrawBackground&gt;::new())
+<a href=#178 id=178 data-nosnippet>178</a>                };
+<a href=#179 id=179 data-nosnippet>179</a>            layer_item_phase.add(LayerItem {
+<a href=#180 id=180 data-nosnippet>180</a>                projection: ProjectionBinding::View,
+<a href=#181 id=181 data-nosnippet>181</a>                draw_function,
+<a href=#182 id=182 data-nosnippet>182</a>                index: layer.index,
+<a href=#183 id=183 data-nosnippet>183</a>                generate_borders: <span class="bool-val">false</span>,
+<a href=#184 id=184 data-nosnippet>184</a>                style_layer: layer.id.clone(),
+<a href=#185 id=185 data-nosnippet>185</a>                source_shape: <span class="kw">crate</span>::render::tile_view_pattern::TileShape::default(),
+<a href=#186 id=186 data-nosnippet>186</a>
+<a href=#187 id=187 data-nosnippet>187</a>                <span class="comment">// We provide a dummy tile for background.
+<a href=#188 id=188 data-nosnippet>188</a>                </span>tile: <span class="kw">crate</span>::tcs::tiles::Tile {
+<a href=#189 id=189 data-nosnippet>189</a>                    coords: <span class="kw">crate</span>::coords::WorldTileCoords::default(),
+<a href=#190 id=190 data-nosnippet>190</a>                },
+<a href=#191 id=191 data-nosnippet>191</a>                run: <span class="prelude-val">None</span>,
+<a href=#192 id=192 data-nosnippet>192</a>            });
+<a href=#193 id=193 data-nosnippet>193</a>        }
+<a href=#194 id=194 data-nosnippet>194</a>        <span class="comment">// The sky follows the background layers and precedes everything else, as GL JS draws it
+<a href=#195 id=195 data-nosnippet>195</a>        // under the map; the flat map covers it below the horizon.
+<a href=#196 id=196 data-nosnippet>196</a>        </span><span class="kw">if </span>sky_metadata.is_some() {
+<a href=#197 id=197 data-nosnippet>197</a>            layer_item_phase.add(LayerItem {
+<a href=#198 id=198 data-nosnippet>198</a>                projection: ProjectionBinding::View,
+<a href=#199 id=199 data-nosnippet>199</a>                draw_function: Box::new(DrawState::&lt;LayerItem, DrawSky&gt;::new()),
+<a href=#200 id=200 data-nosnippet>200</a>                index: background_index,
+<a href=#201 id=201 data-nosnippet>201</a>                generate_borders: <span class="bool-val">false</span>,
+<a href=#202 id=202 data-nosnippet>202</a>                style_layer: <span class="string">"sky"</span>.to_string(),
+<a href=#203 id=203 data-nosnippet>203</a>                source_shape: <span class="kw">crate</span>::render::tile_view_pattern::TileShape::default(),
+<a href=#204 id=204 data-nosnippet>204</a>                tile: <span class="kw">crate</span>::tcs::tiles::Tile {
+<a href=#205 id=205 data-nosnippet>205</a>                    coords: <span class="kw">crate</span>::coords::WorldTileCoords::default(),
+<a href=#206 id=206 data-nosnippet>206</a>                },
+<a href=#207 id=207 data-nosnippet>207</a>                run: <span class="prelude-val">None</span>,
+<a href=#208 id=208 data-nosnippet>208</a>            });
+<a href=#209 id=209 data-nosnippet>209</a>        }
+<a href=#210 id=210 data-nosnippet>210</a>        <span class="kw">if </span>atmosphere_blend &gt; <span class="number">0.0 </span>{
+<a href=#211 id=211 data-nosnippet>211</a>            translucent_phase.add(TranslucentItem {
+<a href=#212 id=212 data-nosnippet>212</a>                draw_function: Box::new(DrawState::&lt;TranslucentItem, DrawAtmosphere&gt;::new()),
+<a href=#213 id=213 data-nosnippet>213</a>                index: u32::MAX,
+<a href=#214 id=214 data-nosnippet>214</a>                style_layer: <span class="string">"atmosphere"</span>.to_string(),
+<a href=#215 id=215 data-nosnippet>215</a>                tile: <span class="kw">crate</span>::tcs::tiles::Tile {
+<a href=#216 id=216 data-nosnippet>216</a>                    coords: <span class="kw">crate</span>::coords::WorldTileCoords::default(),
+<a href=#217 id=217 data-nosnippet>217</a>                },
+<a href=#218 id=218 data-nosnippet>218</a>                source_shape: <span class="kw">crate</span>::render::tile_view_pattern::TileShape::default(),
+<a href=#219 id=219 data-nosnippet>219</a>            });
+<a href=#220 id=220 data-nosnippet>220</a>        }
+<a href=#221 id=221 data-nosnippet>221</a>    }
+<a href=#222 id=222 data-nosnippet>222</a>
+<a href=#223 id=223 data-nosnippet>223</a>    <span class="kw">if </span>!metadatas.is_empty() || atmosphere_blend &gt; <span class="number">0.0 </span>|| sky_metadata.is_some() {
+<a href=#224 id=224 data-nosnippet>224</a>        <span class="kw">if </span>metadatas.is_empty() {
+<a href=#225 id=225 data-nosnippet>225</a>            metadatas.push(BackgroundLayerMetadata {
+<a href=#226 id=226 data-nosnippet>226</a>                color: [<span class="number">0.0</span>; <span class="number">4</span>],
+<a href=#227 id=227 data-nosnippet>227</a>                z_index: <span class="number">0.0</span>,
+<a href=#228 id=228 data-nosnippet>228</a>                padding: [<span class="number">0.0</span>; <span class="number">3</span>],
+<a href=#229 id=229 data-nosnippet>229</a>                horizon: view_state.horizon_line().to_shader(),
+<a href=#230 id=230 data-nosnippet>230</a>                viewport: [
+<a href=#231 id=231 data-nosnippet>231</a>                    view_state.height() <span class="kw">as </span>f32,
+<a href=#232 id=232 data-nosnippet>232</a>                    f32::from(style.terrain.is_some()),
+<a href=#233 id=233 data-nosnippet>233</a>                    frame[<span class="number">0</span>],
+<a href=#234 id=234 data-nosnippet>234</a>                    frame[<span class="number">1</span>],
+<a href=#235 id=235 data-nosnippet>235</a>                ],
+<a href=#236 id=236 data-nosnippet>236</a>                world_rows,
+<a href=#237 id=237 data-nosnippet>237</a>            });
+<a href=#238 id=238 data-nosnippet>238</a>        }
+<a href=#239 id=239 data-nosnippet>239</a>        <span class="kw">let </span>globe_tiles = globe_tiles(world);
+<a href=#240 id=240 data-nosnippet>240</a>        <span class="kw">let </span>tile_metadata: Vec&lt;ShaderTileMetadata&gt; = globe_tiles
+<a href=#241 id=241 data-nosnippet>241</a>            .iter()
+<a href=#242 id=242 data-nosnippet>242</a>            .map(|coords| globe_tile_metadata(view_state, <span class="kw-2">*</span>coords))
+<a href=#243 id=243 data-nosnippet>243</a>            .collect();
+<a href=#244 id=244 data-nosnippet>244</a>        <span class="kw">let </span>atmosphere_metadata = <span class="kw">if </span>atmosphere_blend &gt; <span class="number">0.0 </span>{
+<a href=#245 id=245 data-nosnippet>245</a>            <span class="kw">let </span>camera = globe_camera_for_view(view_state).map_err(|error| {
+<a href=#246 id=246 data-nosnippet>246</a>                <span class="macro">tracing::error!</span>(<span class="question-mark">?</span>error, <span class="string">"failed to build atmosphere globe camera"</span>);
+<a href=#247 id=247 data-nosnippet>247</a>                SystemError::Setup
+<a href=#248 id=248 data-nosnippet>248</a>            })<span class="question-mark">?</span>;
+<a href=#249 id=249 data-nosnippet>249</a>            <span class="kw">let </span>light = style.light.clone().unwrap_or_default();
+<a href=#250 id=250 data-nosnippet>250</a>            <span class="kw">let </span>scene_lighting = world
+<a href=#251 id=251 data-nosnippet>251</a>                .resources
+<a href=#252 id=252 data-nosnippet>252</a>                .get::&lt;<span class="kw">crate</span>::render::SceneLighting&gt;()
+<a href=#253 id=253 data-nosnippet>253</a>                .copied()
+<a href=#254 id=254 data-nosnippet>254</a>                .unwrap_or_default();
+<a href=#255 id=255 data-nosnippet>255</a>            AtmosphereLayerMetadata::from_view(
+<a href=#256 id=256 data-nosnippet>256</a>                <span class="kw-2">&amp;</span>camera,
+<a href=#257 id=257 data-nosnippet>257</a>                <span class="kw-2">&amp;</span>light,
+<a href=#258 id=258 data-nosnippet>258</a>                scene_lighting,
+<a href=#259 id=259 data-nosnippet>259</a>                view_state.zoom().value(),
+<a href=#260 id=260 data-nosnippet>260</a>                atmosphere_blend,
+<a href=#261 id=261 data-nosnippet>261</a>            )
+<a href=#262 id=262 data-nosnippet>262</a>            .map_err(|error| {
+<a href=#263 id=263 data-nosnippet>263</a>                <span class="macro">tracing::error!</span>(<span class="question-mark">?</span>error, <span class="string">"failed to build atmosphere shader metadata"</span>);
+<a href=#264 id=264 data-nosnippet>264</a>                SystemError::Setup
+<a href=#265 id=265 data-nosnippet>265</a>            })<span class="question-mark">?
+<a href=#266 id=266 data-nosnippet>266</a>        </span>} <span class="kw">else </span>{
+<a href=#267 id=267 data-nosnippet>267</a>            AtmosphereLayerMetadata::disabled()
+<a href=#268 id=268 data-nosnippet>268</a>        };
+<a href=#269 id=269 data-nosnippet>269</a>
+<a href=#270 id=270 data-nosnippet>270</a>        <span class="kw">let </span>(buffer, tile_metadata_buffer, atmosphere_metadata_buffer, sky_metadata_buffer) = {
+<a href=#271 id=271 data-nosnippet>271</a>            <span class="kw">let </span>gpu_buffers = world.resources.get_or_init_mut::&lt;BackgroundGpuBuffers&gt;();
+<a href=#272 id=272 data-nosnippet>272</a>            gpu_buffers.write_metadata(<span class="kw-2">&amp;</span>renderer.device, <span class="kw-2">&amp;</span>renderer.queue, <span class="kw-2">&amp;</span>metadatas);
+<a href=#273 id=273 data-nosnippet>273</a>            gpu_buffers.write_tile_metadata(<span class="kw-2">&amp;</span>renderer.device, <span class="kw-2">&amp;</span>renderer.queue, <span class="kw-2">&amp;</span>tile_metadata);
+<a href=#274 id=274 data-nosnippet>274</a>            gpu_buffers.write_atmosphere(<span class="kw-2">&amp;</span>renderer.device, <span class="kw-2">&amp;</span>renderer.queue, <span class="kw-2">&amp;</span>atmosphere_metadata);
+<a href=#275 id=275 data-nosnippet>275</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(sky) = <span class="kw-2">&amp;</span>sky_metadata {
+<a href=#276 id=276 data-nosnippet>276</a>                gpu_buffers.write_sky(<span class="kw-2">&amp;</span>renderer.device, <span class="kw-2">&amp;</span>renderer.queue, sky);
+<a href=#277 id=277 data-nosnippet>277</a>            }
+<a href=#278 id=278 data-nosnippet>278</a>            (
 <a href=#279 id=279 data-nosnippet>279</a>                gpu_buffers
-<a href=#280 id=280 data-nosnippet>280</a>                    .atmosphere_metadata_buffer()
-<a href=#281 id=281 data-nosnippet>281</a>                    .expect(<span class="string">"atmosphere metadata buffer"</span>)
+<a href=#280 id=280 data-nosnippet>280</a>                    .metadata_buffer()
+<a href=#281 id=281 data-nosnippet>281</a>                    .expect(<span class="string">"metadata buffer"</span>)
 <a href=#282 id=282 data-nosnippet>282</a>                    .clone(),
-<a href=#283 id=283 data-nosnippet>283</a>                sky_metadata.as_ref().map(|<span class="kw">_</span>| {
-<a href=#284 id=284 data-nosnippet>284</a>                    gpu_buffers
-<a href=#285 id=285 data-nosnippet>285</a>                        .sky_metadata_buffer()
-<a href=#286 id=286 data-nosnippet>286</a>                        .expect(<span class="string">"sky metadata buffer"</span>)
-<a href=#287 id=287 data-nosnippet>287</a>                        .clone()
-<a href=#288 id=288 data-nosnippet>288</a>                }),
-<a href=#289 id=289 data-nosnippet>289</a>            )
-<a href=#290 id=290 data-nosnippet>290</a>        };
-<a href=#291 id=291 data-nosnippet>291</a>        world.resources.insert(BackgroundBuffers {
-<a href=#292 id=292 data-nosnippet>292</a>            metadata_buffer: buffer,
-<a href=#293 id=293 data-nosnippet>293</a>            instances,
-<a href=#294 id=294 data-nosnippet>294</a>            tile_metadata_buffer,
-<a href=#295 id=295 data-nosnippet>295</a>            globe_tiles,
-<a href=#296 id=296 data-nosnippet>296</a>            atmosphere_metadata_buffer,
-<a href=#297 id=297 data-nosnippet>297</a>            sky_metadata_buffer,
-<a href=#298 id=298 data-nosnippet>298</a>        });
-<a href=#299 id=299 data-nosnippet>299</a>    }
-<a href=#300 id=300 data-nosnippet>300</a>
-<a href=#301 id=301 data-nosnippet>301</a>    <span class="prelude-val">Ok</span>(())
-<a href=#302 id=302 data-nosnippet>302</a>}
+<a href=#283 id=283 data-nosnippet>283</a>                gpu_buffers
+<a href=#284 id=284 data-nosnippet>284</a>                    .tile_metadata_buffer()
+<a href=#285 id=285 data-nosnippet>285</a>                    .expect(<span class="string">"tile metadata buffer"</span>)
+<a href=#286 id=286 data-nosnippet>286</a>                    .clone(),
+<a href=#287 id=287 data-nosnippet>287</a>                gpu_buffers
+<a href=#288 id=288 data-nosnippet>288</a>                    .atmosphere_metadata_buffer()
+<a href=#289 id=289 data-nosnippet>289</a>                    .expect(<span class="string">"atmosphere metadata buffer"</span>)
+<a href=#290 id=290 data-nosnippet>290</a>                    .clone(),
+<a href=#291 id=291 data-nosnippet>291</a>                sky_metadata.as_ref().map(|<span class="kw">_</span>| {
+<a href=#292 id=292 data-nosnippet>292</a>                    gpu_buffers
+<a href=#293 id=293 data-nosnippet>293</a>                        .sky_metadata_buffer()
+<a href=#294 id=294 data-nosnippet>294</a>                        .expect(<span class="string">"sky metadata buffer"</span>)
+<a href=#295 id=295 data-nosnippet>295</a>                        .clone()
+<a href=#296 id=296 data-nosnippet>296</a>                }),
+<a href=#297 id=297 data-nosnippet>297</a>            )
+<a href=#298 id=298 data-nosnippet>298</a>        };
+<a href=#299 id=299 data-nosnippet>299</a>        world.resources.insert(BackgroundBuffers {
+<a href=#300 id=300 data-nosnippet>300</a>            metadata_buffer: buffer,
+<a href=#301 id=301 data-nosnippet>301</a>            instances,
+<a href=#302 id=302 data-nosnippet>302</a>            tile_metadata_buffer,
+<a href=#303 id=303 data-nosnippet>303</a>            globe_tiles,
+<a href=#304 id=304 data-nosnippet>304</a>            atmosphere_metadata_buffer,
+<a href=#305 id=305 data-nosnippet>305</a>            sky_metadata_buffer,
+<a href=#306 id=306 data-nosnippet>306</a>        });
+<a href=#307 id=307 data-nosnippet>307</a>    }
+<a href=#308 id=308 data-nosnippet>308</a>
+<a href=#309 id=309 data-nosnippet>309</a>    <span class="prelude-val">Ok</span>(())
+<a href=#310 id=310 data-nosnippet>310</a>}
 </code></pre></div></section></main></body></html>
