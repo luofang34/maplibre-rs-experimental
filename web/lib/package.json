@@ -15,7 +15,7 @@
   "main": "dist/esbuild-cjs/main.js",
   "types": "dist/ts/index.d.ts",
   "dependencies": {
-    "binaryen": "^118.0.0",
+    "binaryen": "^132.0.0",
     "spectorjs": "0.9.30",
     "wasm-feature-detect": "^1.6.2"
   },
