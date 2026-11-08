@@ -21,5 +21,3 @@ Display a globe with an atmosphere.
 ```
 
 </div>
-
-GL JS: [Display a Globe with an Atmosphere](https://maplibre.org/maplibre-gl-js/docs/examples/display-a-globe-with-an-atmosphere/)

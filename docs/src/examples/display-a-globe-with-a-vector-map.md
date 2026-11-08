@@ -21,5 +21,3 @@ Display a globe with a vector map.
 ```
 
 </div>
-
-GL JS: [Display a Globe with a Vector Map](https://maplibre.org/maplibre-gl-js/docs/examples/display-a-globe-with-a-vector-map/)

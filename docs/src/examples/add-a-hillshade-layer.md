@@ -23,5 +23,3 @@ Add a simple hillshade layer.
 </div>
 
 > **Note:** The style has no background layer. GL JS leaves its canvas transparent, so the white page shows through the unshaded slopes; maplibre-rs draws them on black.
-
-GL JS: [Add a Hillshade Layer](https://maplibre.org/maplibre-gl-js/docs/examples/add-a-hillshade-layer/)

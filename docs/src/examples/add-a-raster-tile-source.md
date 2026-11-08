@@ -21,5 +21,3 @@ Add a third-party raster source to the map.
 ```
 
 </div>
-
-GL JS: [Add a Raster Tile Source](https://maplibre.org/maplibre-gl-js/docs/examples/add-a-raster-tile-source/)

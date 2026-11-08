@@ -21,5 +21,3 @@ Style a polygon with the fill layer type.
 ```
 
 </div>
-
-GL JS: [Add a GeoJSON Polygon](https://maplibre.org/maplibre-gl-js/docs/examples/add-a-geojson-polygon/)

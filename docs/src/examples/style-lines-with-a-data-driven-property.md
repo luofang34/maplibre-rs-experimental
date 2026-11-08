@@ -21,5 +21,3 @@ Create a visualization with a data expression for line-color.
 ```
 
 </div>
-
-GL JS: [Style Lines with a Data-Driven Property](https://maplibre.org/maplibre-gl-js/docs/examples/style-lines-with-a-data-driven-property/)

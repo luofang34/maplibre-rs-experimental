@@ -21,5 +21,3 @@ Initialize a map with the MapLibre demo tiles style.
 ```
 
 </div>
-
-GL JS: [Display a Map](https://maplibre.org/maplibre-gl-js/docs/examples/display-a-map/)

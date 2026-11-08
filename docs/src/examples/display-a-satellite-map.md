@@ -21,5 +21,3 @@ Display a satellite raster baselayer.
 ```
 
 </div>
-
-GL JS: [Display a Satellite Map](https://maplibre.org/maplibre-gl-js/docs/examples/display-a-satellite-map/)

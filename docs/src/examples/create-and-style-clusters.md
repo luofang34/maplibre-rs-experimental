@@ -23,5 +23,3 @@ Cluster the points of a GeoJSON source and style the clusters by their point cou
 </div>
 
 > **Note:** The click handlers and popups of the GL JS example are left out.
-
-GL JS: [Create and Style Clusters](https://maplibre.org/maplibre-gl-js/docs/examples/create-and-style-clusters/)

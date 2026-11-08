@@ -21,5 +21,3 @@ Visualize earthquake frequency by location using a heatmap layer.
 ```
 
 </div>
-
-GL JS: [Create a Heatmap Layer](https://maplibre.org/maplibre-gl-js/docs/examples/create-a-heatmap-layer/)

@@ -15,6 +15,7 @@ function wasmMimePlugin(): Plugin {
 }
 
 export default defineConfig({
+  base: './',
   plugins: [wasmMimePlugin()],
   server: {
     host: '0.0.0.0',

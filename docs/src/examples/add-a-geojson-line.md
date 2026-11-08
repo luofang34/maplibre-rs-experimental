@@ -21,5 +21,3 @@ Add a GeoJSON line source and style it with a line layer.
 ```
 
 </div>
-
-GL JS: [Add a GeoJSON Line](https://maplibre.org/maplibre-gl-js/docs/examples/add-a-geojson-line/)

@@ -21,5 +21,3 @@ Go beyond hillshade and show elevation in actual 3D.
 ```
 
 </div>
-
-GL JS: [Add 3D Terrain](https://maplibre.org/maplibre-gl-js/docs/examples/3d-terrain/)

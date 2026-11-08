@@ -21,5 +21,3 @@ Use extrusions to display buildings' height in 3D.
 ```
 
 </div>
-
-GL JS: [Display Buildings in 3D](https://maplibre.org/maplibre-gl-js/docs/examples/display-buildings-in-3d/)
