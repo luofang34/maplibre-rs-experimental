@@ -51,7 +51,7 @@
 <a href=#51 id=51 data-nosnippet>51</a>                            .background_color
 <a href=#52 id=52 data-nosnippet>52</a>                            .as_ref()
 <a href=#53 id=53 data-nosnippet>53</a>                            .and_then(|color| color.evaluate_at_zoom(zoom))
-<a href=#54 id=54 data-nosnippet>54</a>                            .map(|color| color.a),
+<a href=#54 id=54 data-nosnippet>54</a>                            .map(|color| f64::from(color.a)),
 <a href=#55 id=55 data-nosnippet>55</a>                        paint
 <a href=#56 id=56 data-nosnippet>56</a>                            .background_opacity
 <a href=#57 id=57 data-nosnippet>57</a>                            .as_ref()
@@ -64,7 +64,7 @@
 <a href=#64 id=64 data-nosnippet>64</a>                    &amp;&amp; paint.fill_color.as_ref().is_some_and(|color| {
 <a href=#65 id=65 data-nosnippet>65</a>                        color.is_feature_constant()
 <a href=#66 id=66 data-nosnippet>66</a>                            &amp;&amp; opaque(
-<a href=#67 id=67 data-nosnippet>67</a>                                color.evaluate_at_zoom(zoom).map(|color| color.a),
+<a href=#67 id=67 data-nosnippet>67</a>                                color.evaluate_at_zoom(zoom).map(|color| f64::from(color.a)),
 <a href=#68 id=68 data-nosnippet>68</a>                                paint
 <a href=#69 id=69 data-nosnippet>69</a>                                    .fill_opacity
 <a href=#70 id=70 data-nosnippet>70</a>                                    .as_ref()

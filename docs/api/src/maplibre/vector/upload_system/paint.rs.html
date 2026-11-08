@@ -52,38 +52,33 @@
 <a href=#52 id=52 data-nosnippet>52</a>        .and_then(|v| v.evaluate_at_zoom(zoom))
 <a href=#53 id=53 data-nosnippet>53</a>        .unwrap_or(<span class="number">1.0</span>)
 <a href=#54 id=54 data-nosnippet>54</a>        .clamp(<span class="number">0.0</span>, <span class="number">1.0</span>);
-<a href=#55 id=55 data-nosnippet>55</a>    <span class="prelude-val">Some</span>([
-<a href=#56 id=56 data-nosnippet>56</a>        color.r <span class="kw">as </span>f32,
-<a href=#57 id=57 data-nosnippet>57</a>        color.g <span class="kw">as </span>f32,
-<a href=#58 id=58 data-nosnippet>58</a>        color.b <span class="kw">as </span>f32,
-<a href=#59 id=59 data-nosnippet>59</a>        color.a <span class="kw">as </span>f32 * opacity,
-<a href=#60 id=60 data-nosnippet>60</a>    ])
-<a href=#61 id=61 data-nosnippet>61</a>}
-<a href=#62 id=62 data-nosnippet>62</a>
-<a href=#63 id=63 data-nosnippet>63</a><span class="attr">#[cfg(test)]
-<a href=#64 id=64 data-nosnippet>64</a></span><span class="kw">mod </span>tests;
-<a href=#65 id=65 data-nosnippet>65</a>
-<a href=#66 id=66 data-nosnippet>66</a><span class="attr">#[derive(Default)]
-<a href=#67 id=67 data-nosnippet>67</a></span><span class="kw">struct </span>PaintZoom(<span class="prelude-ty">Option</span>&lt;f64&gt;);
-<a href=#68 id=68 data-nosnippet>68</a>
-<a href=#69 id=69 data-nosnippet>69</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>stabilize_zoom(world: <span class="kw-2">&amp;mut </span><span class="kw">crate</span>::tcs::world::World, requested: f64) -&gt; f64 {
-<a href=#70 id=70 data-nosnippet>70</a>    <span class="kw">let </span>state = world.resources.get_or_init_mut::&lt;PaintZoom&gt;();
-<a href=#71 id=71 data-nosnippet>71</a>    <span class="kw">let </span>zoom = next_zoom(state.<span class="number">0</span>, requested);
-<a href=#72 id=72 data-nosnippet>72</a>    state.<span class="number">0 </span>= <span class="prelude-val">Some</span>(zoom);
-<a href=#73 id=73 data-nosnippet>73</a>    zoom
-<a href=#74 id=74 data-nosnippet>74</a>}
-<a href=#75 id=75 data-nosnippet>75</a>
-<a href=#76 id=76 data-nosnippet>76</a><span class="kw">fn </span>next_zoom(previous: <span class="prelude-ty">Option</span>&lt;f64&gt;, requested: f64) -&gt; f64 {
-<a href=#77 id=77 data-nosnippet>77</a>    previous
-<a href=#78 id=78 data-nosnippet>78</a>        .filter(|previous| (requested - previous).abs() &lt; <span class="number">0.125</span>)
-<a href=#79 id=79 data-nosnippet>79</a>        .unwrap_or_else(|| <span class="kw">super</span>::drape_paint_zoom(requested))
-<a href=#80 id=80 data-nosnippet>80</a>}
-<a href=#81 id=81 data-nosnippet>81</a>
-<a href=#82 id=82 data-nosnippet>82</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>current_zoom(world: <span class="kw-2">&amp;</span><span class="kw">crate</span>::tcs::world::World, fallback: f64) -&gt; f64 {
-<a href=#83 id=83 data-nosnippet>83</a>    world
-<a href=#84 id=84 data-nosnippet>84</a>        .resources
-<a href=#85 id=85 data-nosnippet>85</a>        .get::&lt;PaintZoom&gt;()
-<a href=#86 id=86 data-nosnippet>86</a>        .and_then(|state| state.<span class="number">0</span>)
-<a href=#87 id=87 data-nosnippet>87</a>        .unwrap_or_else(|| <span class="kw">super</span>::drape_paint_zoom(fallback))
-<a href=#88 id=88 data-nosnippet>88</a>}
+<a href=#55 id=55 data-nosnippet>55</a>    <span class="prelude-val">Some</span>([color.r, color.g, color.b, color.a * opacity])
+<a href=#56 id=56 data-nosnippet>56</a>}
+<a href=#57 id=57 data-nosnippet>57</a>
+<a href=#58 id=58 data-nosnippet>58</a><span class="attr">#[cfg(test)]
+<a href=#59 id=59 data-nosnippet>59</a></span><span class="kw">mod </span>tests;
+<a href=#60 id=60 data-nosnippet>60</a>
+<a href=#61 id=61 data-nosnippet>61</a><span class="attr">#[derive(Default)]
+<a href=#62 id=62 data-nosnippet>62</a></span><span class="kw">struct </span>PaintZoom(<span class="prelude-ty">Option</span>&lt;f64&gt;);
+<a href=#63 id=63 data-nosnippet>63</a>
+<a href=#64 id=64 data-nosnippet>64</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>stabilize_zoom(world: <span class="kw-2">&amp;mut </span><span class="kw">crate</span>::tcs::world::World, requested: f64) -&gt; f64 {
+<a href=#65 id=65 data-nosnippet>65</a>    <span class="kw">let </span>state = world.resources.get_or_init_mut::&lt;PaintZoom&gt;();
+<a href=#66 id=66 data-nosnippet>66</a>    <span class="kw">let </span>zoom = next_zoom(state.<span class="number">0</span>, requested);
+<a href=#67 id=67 data-nosnippet>67</a>    state.<span class="number">0 </span>= <span class="prelude-val">Some</span>(zoom);
+<a href=#68 id=68 data-nosnippet>68</a>    zoom
+<a href=#69 id=69 data-nosnippet>69</a>}
+<a href=#70 id=70 data-nosnippet>70</a>
+<a href=#71 id=71 data-nosnippet>71</a><span class="kw">fn </span>next_zoom(previous: <span class="prelude-ty">Option</span>&lt;f64&gt;, requested: f64) -&gt; f64 {
+<a href=#72 id=72 data-nosnippet>72</a>    previous
+<a href=#73 id=73 data-nosnippet>73</a>        .filter(|previous| (requested - previous).abs() &lt; <span class="number">0.125</span>)
+<a href=#74 id=74 data-nosnippet>74</a>        .unwrap_or_else(|| <span class="kw">super</span>::drape_paint_zoom(requested))
+<a href=#75 id=75 data-nosnippet>75</a>}
+<a href=#76 id=76 data-nosnippet>76</a>
+<a href=#77 id=77 data-nosnippet>77</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>current_zoom(world: <span class="kw-2">&amp;</span><span class="kw">crate</span>::tcs::world::World, fallback: f64) -&gt; f64 {
+<a href=#78 id=78 data-nosnippet>78</a>    world
+<a href=#79 id=79 data-nosnippet>79</a>        .resources
+<a href=#80 id=80 data-nosnippet>80</a>        .get::&lt;PaintZoom&gt;()
+<a href=#81 id=81 data-nosnippet>81</a>        .and_then(|state| state.<span class="number">0</span>)
+<a href=#82 id=82 data-nosnippet>82</a>        .unwrap_or_else(|| <span class="kw">super</span>::drape_paint_zoom(fallback))
+<a href=#83 id=83 data-nosnippet>83</a>}
 </code></pre></div></section></main></body></html>

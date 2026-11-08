@@ -7,7 +7,7 @@
 <a href=#7 id=7 data-nosnippet>7</a><span class="kw">use </span>std::{collections::BTreeMap, sync::Arc};
 <a href=#8 id=8 data-nosnippet>8</a>
 <a href=#9 id=9 data-nosnippet>9</a><span class="kw">use </span>cgmath::{num_traits::Signed, Bounded};
-<a href=#10 id=10 data-nosnippet>10</a><span class="kw">use </span>geo::prelude::<span class="kw-2">*</span>;
+<a href=#10 id=10 data-nosnippet>10</a><span class="kw">use </span>geo::{prelude::<span class="kw-2">*</span>, Distance, Euclidean};
 <a href=#11 id=11 data-nosnippet>11</a><span class="kw">use </span>geo_types::{Coord, CoordFloat, LineString, Point, Polygon};
 <a href=#12 id=12 data-nosnippet>12</a><span class="kw">pub use </span>processor::IndexProcessor;
 <a href=#13 id=13 data-nosnippet>13</a><span class="kw">use </span>rstar::{Envelope, PointDistance, RTree, RTreeObject, AABB};
@@ -361,9 +361,9 @@
 <a href=#361 id=361 data-nosnippet>361</a>        point: <span class="kw-2">&amp;</span>&lt;<span class="self">Self</span>::Envelope <span class="kw">as </span>Envelope&gt;::Point,
 <a href=#362 id=362 data-nosnippet>362</a>    ) -&gt; &lt;&lt;<span class="self">Self</span>::Envelope <span class="kw">as </span>Envelope&gt;::Point <span class="kw">as </span>rstar::Point&gt;::Scalar {
 <a href=#363 id=363 data-nosnippet>363</a>        <span class="kw">let </span>distance = <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self</span>.exact {
-<a href=#364 id=364 data-nosnippet>364</a>            ExactGeometry::Polygon(polygon) =&gt; polygon.euclidean_distance(point),
-<a href=#365 id=365 data-nosnippet>365</a>            ExactGeometry::LineString(line) =&gt; line.euclidean_distance(point),
-<a href=#366 id=366 data-nosnippet>366</a>            ExactGeometry::Point(at) =&gt; at.euclidean_distance(point),
+<a href=#364 id=364 data-nosnippet>364</a>            ExactGeometry::Polygon(polygon) =&gt; Euclidean.distance(polygon, point),
+<a href=#365 id=365 data-nosnippet>365</a>            ExactGeometry::LineString(line) =&gt; Euclidean.distance(line, point),
+<a href=#366 id=366 data-nosnippet>366</a>            ExactGeometry::Point(at) =&gt; Euclidean.distance(at, point),
 <a href=#367 id=367 data-nosnippet>367</a>        };
 <a href=#368 id=368 data-nosnippet>368</a>        distance * distance
 <a href=#369 id=369 data-nosnippet>369</a>    }
