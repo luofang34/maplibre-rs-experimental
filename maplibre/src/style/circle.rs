@@ -138,12 +138,7 @@ impl CirclePaint {
     /// Stroke colour as straight (non-premultiplied) RGBA; black when unset or data-driven.
     pub fn stroke_color_rgba(&self) -> [f32; 4] {
         match &self.circle_stroke_color {
-            Some(StyleProperty::Constant(color)) => [
-                color.r as f32,
-                color.g as f32,
-                color.b as f32,
-                color.a as f32,
-            ],
+            Some(StyleProperty::Constant(color)) => [color.r, color.g, color.b, color.a],
             _ => [0.0, 0.0, 0.0, 1.0],
         }
     }

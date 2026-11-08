@@ -1,6 +1,6 @@
 #![deny(unused_imports)]
 
-use jni::{objects::JClass, JNIEnv};
+use jni::{objects::JClass, EnvUnowned};
 use log::Level;
 use maplibre::{render::settings::WgpuSettings, style::Style};
 use maplibre_winit::{android_activity, run_headed_map, HeadedMapOptions, WinitMapWindowConfig};
@@ -30,7 +30,7 @@ pub fn android_main(app: android_activity::AndroidApp) {
 
 #[no_mangle]
 pub extern "system" fn Java_org_maplibre_1rs_MapLibreRs_android_1main(
-    _env: JNIEnv,
+    _env: EnvUnowned,
     _class: JClass,
 ) {
     log::log!(Level::Warn, "maplibre WOORKING");

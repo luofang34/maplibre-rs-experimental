@@ -7,7 +7,7 @@ mod processor;
 use std::{collections::BTreeMap, sync::Arc};
 
 use cgmath::{num_traits::Signed, Bounded};
-use geo::prelude::*;
+use geo::{prelude::*, Distance, Euclidean};
 use geo_types::{Coord, CoordFloat, LineString, Point, Polygon};
 pub use processor::IndexProcessor;
 use rstar::{Envelope, PointDistance, RTree, RTreeObject, AABB};
@@ -361,9 +361,9 @@ where
         point: &<Self::Envelope as Envelope>::Point,
     ) -> <<Self::Envelope as Envelope>::Point as rstar::Point>::Scalar {
         let distance = match &self.exact {
-            ExactGeometry::Polygon(polygon) => polygon.euclidean_distance(point),
-            ExactGeometry::LineString(line) => line.euclidean_distance(point),
-            ExactGeometry::Point(at) => at.euclidean_distance(point),
+            ExactGeometry::Polygon(polygon) => Euclidean.distance(polygon, point),
+            ExactGeometry::LineString(line) => Euclidean.distance(line, point),
+            ExactGeometry::Point(at) => Euclidean.distance(at, point),
         };
         distance * distance
     }

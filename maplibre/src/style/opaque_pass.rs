@@ -51,7 +51,7 @@ impl StyleLayer {
                             .background_color
                             .as_ref()
                             .and_then(|color| color.evaluate_at_zoom(zoom))
-                            .map(|color| color.a),
+                            .map(|color| f64::from(color.a)),
                         paint
                             .background_opacity
                             .as_ref()
@@ -64,7 +64,7 @@ impl StyleLayer {
                     && paint.fill_color.as_ref().is_some_and(|color| {
                         color.is_feature_constant()
                             && opaque(
-                                color.evaluate_at_zoom(zoom).map(|color| color.a),
+                                color.evaluate_at_zoom(zoom).map(|color| f64::from(color.a)),
                                 paint
                                     .fill_opacity
                                     .as_ref()

@@ -17,7 +17,7 @@ use maplibre::{
         ReqwestOffscreenKernelEnvironment,
     },
     plugin::Plugin,
-    render::{builder::RendererBuilder, graph::RenderGraph, resource::Head},
+    render::{builder::RendererBuilder, resource::Head},
     schedule::{Schedule, Stage, StageResult},
     tcs::world::World,
 };

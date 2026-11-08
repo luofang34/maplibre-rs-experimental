@@ -257,7 +257,7 @@ fn prop_to_value(prop: &PropValue) -> Option<geozero::mvt::tile::Value> {
             ..Default::default()
         }),
         PropValue::Str(Some(s)) => Some(geozero::mvt::tile::Value {
-            string_value: Some(s.clone()),
+            string_value: Some(s.to_string()),
             ..Default::default()
         }),
         _ => None,

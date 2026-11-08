@@ -428,7 +428,7 @@ where
         }
         let mut color = if let Some(style) = &self.style_property {
             if let Some(c) = style.evaluate_for(&self.feature_properties, self.zoom) {
-                [c.r as f32, c.g as f32, c.b as f32, c.a as f32]
+                [c.r, c.g, c.b, c.a]
             } else {
                 tracing::debug!(
                     "Style evaluation failed for feature properties: {:?}, style: {:?}",

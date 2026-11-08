@@ -137,10 +137,7 @@ pub(crate) fn feature_style(
             } else {
                 prop.evaluate_for(properties, zoom)
             };
-            return res.map_or(fallback, |color| {
-                let [r, g, b, a] = color.to_array();
-                [r as f32, g as f32, b as f32, a as f32]
-            });
+            return res.map_or(fallback, |color| color.to_array());
         }
         fallback
     };
@@ -188,8 +185,7 @@ fn color(paint: &SymbolPaint, name: &str, zoom: f64, fallback: [f32; 4]) -> [f32
     else {
         return fallback;
     };
-    let [r, g, b, a] = color.to_array();
-    [r as f32, g as f32, b as f32, a as f32]
+    color.to_array()
 }
 
 fn layout(paint: &SymbolPaint, prefix: &str, zoom: f64) -> [f32; 4] {

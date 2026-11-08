@@ -66,11 +66,7 @@ where
                     .unwrap_or(1.0)
                     .clamp(0.0, 1.0)
             });
-        self.feature_colors.push([
-            colour.r as f32,
-            colour.g as f32,
-            colour.b as f32,
-            colour.a as f32 * opacity,
-        ]);
+        self.feature_colors
+            .push([colour.r, colour.g, colour.b, colour.a * opacity]);
     }
 }

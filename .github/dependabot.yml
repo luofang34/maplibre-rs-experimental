@@ -3,23 +3,26 @@ updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
-    groups:
-      github-actions:
-        patterns:
-          - "*"
+      interval: "monthly"
+    open-pull-requests-limit: 5
 
   - package-ecosystem: "cargo"
-    directories:
-      - "/"
-      - "/apple/visionos"
+    directory: "/"
     schedule:
-      interval: "weekly"
-    groups:
-      cargo-minor-patch:
-        update-types:
-          - "minor"
-          - "patch"
+      interval: "monthly"
+    open-pull-requests-limit: 5
+    ignore:
+      # geo 0.33 requires rstar 0.12
+      - dependency-name: "rstar"
+        versions:
+          - ">= 0.13.0"
+      # http-cache-reqwest 0.16 requires reqwest 0.12 and reqwest-middleware 0.4
+      - dependency-name: "reqwest"
+        versions:
+          - ">= 0.13.0"
+      - dependency-name: "reqwest-middleware"
+        versions:
+          - ">= 0.5.0"
 
   - package-ecosystem: "npm"
     directories:
@@ -27,19 +30,26 @@ updates:
       - "/web/demo"
       - "/web/xr"
     schedule:
-      interval: "weekly"
-    groups:
-      npm-minor-patch:
-        update-types:
-          - "minor"
-          - "patch"
+      interval: "monthly"
+    open-pull-requests-limit: 5
 
   - package-ecosystem: "gradle"
     directory: "/android/gradle"
     schedule:
-      interval: "weekly"
-    groups:
-      gradle-minor-patch:
-        update-types:
-          - "minor"
-          - "patch"
+      interval: "monthly"
+    open-pull-requests-limit: 5
+    ignore:
+      # org.mozilla.rust-android-gradle 0.10.0 uses BaseExtension removed in AGP 9
+      - dependency-name: "com.android.library"
+        versions:
+          - ">= 9.0.0"
+      - dependency-name: "com.android.application"
+        versions:
+          - ">= 9.0.0"
+      - dependency-name: "gradle-wrapper"
+        versions:
+          - ">= 9.0.0"
+      # androidx.core:core-ktx 1.19+ requires AGP >= 9.1.0
+      - dependency-name: "androidx.core:core-ktx"
+        versions:
+          - ">= 1.19.0"

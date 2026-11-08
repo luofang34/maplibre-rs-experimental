@@ -104,10 +104,10 @@ rustc-hash.workspace = true
 # Headless
 png = { workspace = true, optional = true }
 image = { workspace = true, optional = true }
-moxcms = { version = "0.8", optional = true }
+moxcms = { version = "0.9.1", optional = true }
 
 # Text/glyphs
-prost = "0.13.1"
+prost = "0.14.4"
 
 [dev-dependencies]
 # Shaders stay WGSL; a native render node gets them through naga's own backends.
@@ -135,4 +135,4 @@ required-features = ["headless", "raster"]
 
 [build-dependencies]
 maplibre-build-tools = { path = "../maplibre-build-tools", version = "0.1.0" }
-prost-build = "0.13.1"
+prost-build = "0.14.4"

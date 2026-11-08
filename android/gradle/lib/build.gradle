@@ -1,20 +1,18 @@
 plugins {
-    id 'org.mozilla.rust-android-gradle.rust-android' version '0.9.3' apply true
-    id 'com.android.library' version '7.2.0' apply true
-    id 'org.jetbrains.kotlin.android' version '1.7.20' apply true
+    id 'org.mozilla.rust-android-gradle.rust-android' version '0.10.0' apply true
+    id 'com.android.library'
+    id 'org.jetbrains.kotlin.android'
 }
-
-apply plugin: 'kotlin-android'
 
 android {
     // Also update NDK in library-android.yml
     ndkVersion "27.3.13750724"
 
-    compileSdkVersion 31
+    compileSdkVersion 36
     
     defaultConfig {
-        minSdkVersion 21
-        targetSdkVersion 31
+        minSdkVersion 23
+        targetSdkVersion 36
 
 
         testInstrumentationRunner "android.support.test.runner.AndroidJUnitRunner"
@@ -27,6 +25,13 @@ android {
         }
     }
     namespace 'org.maplibre_rs'
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+    kotlinOptions {
+        jvmTarget = '1.8'
+    }
 }
 
 cargo {
@@ -53,7 +58,7 @@ dependencies {
         exclude group: 'com.android.support', module: 'support-annotations'
     })
     testImplementation 'junit:junit:4.13.2'
-    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.6.21"
+    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:2.4.21"
 }
 
 tasks.whenTaskAdded { task ->

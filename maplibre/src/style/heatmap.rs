@@ -92,7 +92,7 @@ impl HeatmapPaint {
     /// never draws with an undefined colour.
     pub fn ramp(&self) -> Vec<[u8; 4]> {
         let colour_at = |property: &StyleProperty<Color>, density: f64| match property {
-            StyleProperty::Constant(color) => Some(ExpressionColor::from(color.clone())),
+            StyleProperty::Constant(color) => Some(ExpressionColor::from(*color)),
             StyleProperty::Expression(property) => {
                 let context = EvaluationContext {
                     heatmap_density: density,
