@@ -24,7 +24,7 @@
     "esbuild": "^0.19.12",
     "esbuild-plugin-inline-worker": "^0.1.1",
     "typescript": "^5.5.4",
-    "yargs": "^17.7.2"
+    "yargs": "^18.2.0"
   },
   "repository": {
     "type": "git",
