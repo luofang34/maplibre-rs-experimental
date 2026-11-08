@@ -1,10 +1,8 @@
 plugins {
     id 'org.mozilla.rust-android-gradle.rust-android' version '0.10.0' apply true
-    id 'com.android.library' version '8.9.1' apply true
-    id 'org.jetbrains.kotlin.android' version '2.4.21' apply true
+    id 'com.android.library'
+    id 'org.jetbrains.kotlin.android'
 }
-
-apply plugin: 'kotlin-android'
 
 android {
     // Also update NDK in library-android.yml
@@ -13,7 +11,7 @@ android {
     compileSdkVersion 36
     
     defaultConfig {
-        minSdkVersion 21
+        minSdkVersion 23
         targetSdkVersion 36
 
 
@@ -27,6 +25,13 @@ android {
         }
     }
     namespace 'org.maplibre_rs'
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+    kotlinOptions {
+        jvmTarget = '1.8'
+    }
 }
 
 cargo {
