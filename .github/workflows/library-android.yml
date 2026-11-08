@@ -18,6 +18,8 @@ jobs:
         uses: ./.github/actions/install-system-dependencies
       - name: Build
         shell: bash
+        env:
+          JAVA_HOME: ${{ env.JAVA_HOME_17_X64 }}
         run: just build-android
         # TODO: Additional clippy checks for different targets
       - name: Check x86_64

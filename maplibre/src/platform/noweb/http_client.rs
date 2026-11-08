@@ -311,7 +311,7 @@ impl ReqwestHttpClient {
             let shared = shared_cache_frontend(&path);
             builder = builder.with(Cache(HttpCache {
                 mode: CacheMode::Default,
-                manager: CACacheManager { path },
+                manager: CACacheManager::new(path, false),
                 options: HttpCacheOptions::default(),
             }));
             Some(shared)

@@ -130,11 +130,9 @@ impl Parser {
         let [Json::Object(options)] = args else {
             return Err(self.error("Collator options argument must be an object."));
         };
-        let mut flag = |name: &str, index: usize| {
-            options.get(name).map_or_else(
-                || Ok(Expression::Literal(Value::Bool(false))),
-                |json| self.parse_at(json, index, Some(&Type::Boolean)),
-            )
+        let mut flag = |name: &str, index: usize| match options.get(name) {
+            Some(json) => self.parse_at(json, index, Some(&Type::Boolean)),
+            None => Ok(Expression::Literal(Value::Bool(false))),
         };
         let case_sensitive = flag("case-sensitive", 1)?;
         let diacritic_sensitive = flag("diacritic-sensitive", 1)?;

@@ -3,6 +3,7 @@
   "version": "0.0.1",
   "description": "A maplibre demo",
   "private": true,
+  "type": "module",
   "scripts": {
     "clean": "rm -rf dist",
     "start": "vite",
@@ -17,8 +18,8 @@
     "maplibre-rs": "file:../lib"
   },
   "devDependencies": {
-    "typescript": "^5.5.4",
-    "vite": "8.0.0-beta.15"
+    "typescript": "^7.0.2",
+    "vite": "8.3.5"
   },
   "keywords": [
     "wasm",

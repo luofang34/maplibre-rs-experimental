@@ -134,9 +134,7 @@ impl LightSpecification {
             .color
             .as_ref()
             .and_then(|color| color.evaluate_at_zoom(zoom))
-            .map_or([1.0; 3], |color| {
-                [color.r as f32, color.g as f32, color.b as f32]
-            });
+            .map_or([1.0; 3], |color| [color.r, color.g, color.b]);
         let intensity = self
             .intensity
             .as_ref()

@@ -116,7 +116,7 @@ impl WorkerPool {
     /// message is sent to it.
     fn worker(&self) -> Result<Worker, WebError> {
         let workers = self.state.workers.borrow();
-        let result = workers.choose(&mut thread_rng());
+        let result = workers.choose(&mut rand::rng());
 
         if result.is_none() {
             self.spawn()?;

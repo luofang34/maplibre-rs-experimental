@@ -51,7 +51,9 @@ impl TextField {
         for section in &self.1 {
             let content: String = characters.by_ref().take(section.length).collect();
             let color = section.color.map_or_else(String::new, |[r, g, b, a]| {
-                csscolorparser::Color::new(r.into(), g.into(), b.into(), a.into()).to_hex_string()
+                csscolorparser::Color::new(r, g, b, a)
+                    .to_css_hex()
+                    .to_string()
             });
             let font = section.font.as_ref().map_or_else(String::new, |font| {
                 serde_json::to_string(&font.split(',').collect::<Vec<_>>()).unwrap_or_default()
@@ -136,7 +138,7 @@ impl TextField {
                 scale: scale.parse().ok(),
                 color: csscolorparser::parse(color)
                     .ok()
-                    .map(|color| color.to_array().map(|channel| channel as f32)),
+                    .map(|color| color.to_array()),
                 font: serde_json::from_str::<Vec<String>>(font)
                     .ok()
                     .filter(|fonts| !fonts.is_empty())
@@ -248,8 +250,8 @@ impl Serialize for FormattedText {
                     options.insert("font-scale".into(), serde_json::json!(scale));
                 }
                 if let Some([r, g, b, a]) = section.color {
-                    let color = csscolorparser::Color::new(r.into(), g.into(), b.into(), a.into());
-                    options.insert("text-color".into(), color.to_hex_string().into());
+                    let color = csscolorparser::Color::new(r, g, b, a);
+                    options.insert("text-color".into(), color.to_css_hex().to_string().into());
                 }
                 if let Some(font) = &section.font {
                     let fonts: Vec<&str> = font.split(',').collect();

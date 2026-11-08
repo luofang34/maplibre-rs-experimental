@@ -52,12 +52,7 @@ pub(crate) fn uniform_color(layer: &StyleLayer, zoom: f64) -> Option<[f32; 4]> {
         .and_then(|v| v.evaluate_at_zoom(zoom))
         .unwrap_or(1.0)
         .clamp(0.0, 1.0);
-    Some([
-        color.r as f32,
-        color.g as f32,
-        color.b as f32,
-        color.a as f32 * opacity,
-    ])
+    Some([color.r, color.g, color.b, color.a * opacity])
 }
 
 #[cfg(test)]

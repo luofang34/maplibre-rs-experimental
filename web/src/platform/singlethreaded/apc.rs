@@ -19,7 +19,7 @@ use maplibre::{
     },
     sdf::provided::ProvidedImagesReport,
 };
-use rand::{thread_rng, Rng};
+use rand::{rng, RngExt};
 use thiserror::Error;
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{DedicatedWorkerGlobalScope, Worker};
@@ -441,7 +441,7 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
         )
         .map_err(|error| CallError::Serialize(Box::new(error)))?;
 
-        let index = thread_rng().gen_range(0..self.workers.len());
+        let index = rng().random_range(0..self.workers.len());
         let worker = self
             .workers
             .get(index)

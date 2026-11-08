@@ -51,7 +51,7 @@ pub fn ramp(gradient: &StyleProperty<Color>) -> Vec<[u8; 4]> {
                 position
             };
             let color = match gradient {
-                StyleProperty::Constant(color) => Some(ExpressionColor::from(color.clone())),
+                StyleProperty::Constant(color) => Some(ExpressionColor::from(*color)),
                 StyleProperty::Expression(property) => {
                     let context = EvaluationContext {
                         line_progress: progress,

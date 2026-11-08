@@ -96,7 +96,7 @@ impl LayerPaint {
             | Self::Heatmap(_) => return None,
         };
         match property.as_ref()? {
-            StyleProperty::Constant(color) => Some(color.clone().into()),
+            StyleProperty::Constant(color) => Some((*color).into()),
             _ => None,
         }
     }

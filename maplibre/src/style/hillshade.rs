@@ -232,7 +232,7 @@ impl ColorReliefPaint {
         let mut ramp = Vec::new();
         match property {
             StyleProperty::Constant(color) => {
-                ramp.push((0.0, premultiplied(&(color.clone().into()))));
+                ramp.push((0.0, premultiplied(&((*color).into()))));
             }
             StyleProperty::Expression(property) => match property.expression() {
                 Expression::Interpolate { input, stops, .. }

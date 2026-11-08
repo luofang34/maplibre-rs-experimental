@@ -2,7 +2,6 @@
 use std::sync::Mutex;
 
 use geozero::mvt::Message as _;
-use prost::Message as _;
 
 use super::*;
 use crate::io::source_client::{HttpSourceClient, SourceFetchError};

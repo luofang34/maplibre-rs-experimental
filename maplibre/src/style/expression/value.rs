@@ -33,7 +33,12 @@ impl Color {
     /// Parses any CSS colour string, as GL JS `Color.parse` does.
     pub fn parse(text: &str) -> Option<Self> {
         let color = csscolorparser::parse(text).ok()?;
-        Some(Self::new(color.r, color.g, color.b, color.a))
+        Some(Self::new(
+            f64::from(color.r),
+            f64::from(color.g),
+            f64::from(color.b),
+            f64::from(color.a),
+        ))
     }
 
     /// Components with red, green and blue multiplied by alpha, as GL JS stores them.
@@ -61,13 +66,23 @@ impl Color {
 
 impl From<Color> for csscolorparser::Color {
     fn from(color: Color) -> Self {
-        csscolorparser::Color::new(color.r, color.g, color.b, color.a)
+        csscolorparser::Color::new(
+            color.r as f32,
+            color.g as f32,
+            color.b as f32,
+            color.a as f32,
+        )
     }
 }
 
 impl From<csscolorparser::Color> for Color {
     fn from(color: csscolorparser::Color) -> Self {
-        Self::new(color.r, color.g, color.b, color.a)
+        Self::new(
+            f64::from(color.r),
+            f64::from(color.g),
+            f64::from(color.b),
+            f64::from(color.a),
+        )
     }
 }
 

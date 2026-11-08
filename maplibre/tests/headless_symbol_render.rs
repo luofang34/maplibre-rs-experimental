@@ -35,9 +35,11 @@ fn hex_bytes(hex: &str) -> Vec<u8> {
 }
 
 fn read_rgba_png(path: &str) -> (u32, Vec<u8>) {
-    let decoder = png::Decoder::new(std::fs::File::open(path).expect("frame written"));
+    let decoder = png::Decoder::new(std::io::BufReader::new(
+        std::fs::File::open(path).expect("frame written"),
+    ));
     let mut reader = decoder.read_info().expect("frame is a png");
-    let mut pixels = vec![0; reader.output_buffer_size()];
+    let mut pixels = vec![0; reader.output_buffer_size().expect("buffer size")];
     let info = reader.next_frame(&mut pixels).expect("frame decodes");
     assert_eq!(info.color_type, png::ColorType::Rgba);
     assert_eq!((info.width, info.height), (SIZE, SIZE));

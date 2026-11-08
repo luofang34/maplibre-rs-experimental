@@ -5,7 +5,7 @@
 //! trapezoid; a translated layer moves it back by its translation, and a line is met within half
 //! its width of it once it is moved sideways by its offset.
 
-use geo::prelude::*;
+use geo::{prelude::*, Distance, Euclidean};
 use geo_types::{Coord, LineString, Point, Polygon};
 
 use crate::{
@@ -61,15 +61,15 @@ impl Footprint {
     /// `polygonIntersectsBufferedPoint`.
     pub(super) fn reaches(&self, point: Point<f64>, radius: f64) -> bool {
         match self {
-            Self::Point(at) => at.euclidean_distance(&point) < radius,
-            Self::Polygon(footprint) => footprint.euclidean_distance(&point) < radius,
+            Self::Point(at) => Euclidean.distance(at, &point) < radius,
+            Self::Polygon(footprint) => Euclidean.distance(footprint, &point) < radius,
         }
     }
 
     fn distance(&self, line: &LineString<f64>) -> f64 {
         match self {
-            Self::Point(point) => point.euclidean_distance(line),
-            Self::Polygon(footprint) => footprint.euclidean_distance(line),
+            Self::Point(point) => Euclidean.distance(point, line),
+            Self::Polygon(footprint) => Euclidean.distance(footprint, line),
         }
     }
 }

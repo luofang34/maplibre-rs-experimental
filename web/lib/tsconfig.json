@@ -1,6 +1,8 @@
 {
   "compilerOptions": {
+    "rootDir": "./src",
     "outDir": "./dist/",
+    "strict": false,
     "module": "es2022",
     "target": "es2022",
     "lib": [ "es6", "dom" ],
@@ -9,9 +11,9 @@
     "declarationMap": true,
     "allowJs": true,
     "skipLibCheck": true,
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "types": ["maplibre", "env"],
-    "typeRoots": ["@types"]
+    "typeRoots": ["./@types"]
   },
   "include": ["./src/**/*"]
 }
