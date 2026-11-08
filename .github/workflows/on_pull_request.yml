@@ -23,6 +23,8 @@ concurrency:
 jobs:
   run-check:
     if: ${{ github.event.action != 'edited' || github.event.changes.base }}
+    permissions:
+      contents: write
     uses: ./.github/workflows/run-checks.yml
   run-benchmarks:
     if: ${{ github.event.action != 'edited' || github.event.changes.base }}

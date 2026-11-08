@@ -7,10 +7,27 @@ jobs:
   run-checks:
     name: Check
     runs-on: ubuntu-22.04
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ startsWith(github.head_ref, 'dependabot/') && github.head_ref || '' }}
       - name: Setup
         uses: ./.github/actions/setup
+      - name: Run rustfmt for Dependabot PRs
+        if: ${{ github.event_name == 'pull_request' && (github.actor == 'dependabot[bot]' || startsWith(github.head_ref, 'dependabot/')) }}
+        shell: bash
+        run: |
+          just nightly-install-rustfmt
+          export RUSTUP_TOOLCHAIN=$NIGHTLY_TOOLCHAIN
+          cargo fmt --all
+          if ! git diff --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -am "style: run rustfmt"
+            git push origin "HEAD:${{ github.head_ref }}" || echo "Formatted in workspace (token is read-only for dependabot event)"
+          fi
       - name: Format
         shell: bash
         run: just fmt-check
