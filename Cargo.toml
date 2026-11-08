@@ -24,7 +24,7 @@ categories = ["graphics", "science::geo"]
 authors = ["MapLibre"]
 
 [workspace.dependencies]
-rand = { version = "0.8.5" }
+rand = { version = "0.10.3" }
 reqwest-middleware = "0.3.2"
 winit = { version = "0.30", default-features = false, features = ["rwh_06"] }
 async-trait = "0.1.73"
