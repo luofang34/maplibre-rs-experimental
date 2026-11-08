@@ -70,7 +70,10 @@ fn docs_rust_examples_build_valid_styles() {
     use maplibre::{projection::ProjectionType, style::Style};
 
     let styles = [
-        ("display-a-map", display_a_map::build_style(Style::default())),
+        (
+            "display-a-map",
+            display_a_map::build_style(Style::default()),
+        ),
         ("display-a-satellite-map", display_a_satellite_map::style()),
         (
             "display-a-globe-with-a-vector-map",
@@ -94,7 +97,10 @@ fn docs_rust_examples_build_valid_styles() {
             "add-a-geojson-polygon",
             add_a_geojson_polygon::build_style(Style::default()),
         ),
-        ("add-a-raster-tile-source", add_a_raster_tile_source::style()),
+        (
+            "add-a-raster-tile-source",
+            add_a_raster_tile_source::style(),
+        ),
         (
             "style-lines-with-a-data-driven-property",
             style_lines_with_a_data_driven_property::build_style(Style::default()),
