@@ -296,18 +296,28 @@ pub fn background_color(layer: &crate::style::layer::StyleLayer, zoom: f64) -> [
 }
 
 /// The sky draw's values for the frame: colours at the zoom and the horizon line on screen,
-/// as GL JS `skyUniformValues` computes them.
+/// scaled to the physical frame height that `@builtin(position)` uses in the fragment shader.
 pub fn sky_metadata(
     sky: &crate::style::sky::SkySpecification,
     view_state: &ViewState,
     projection_transition: f32,
+    frame_height: f32,
 ) -> SkyLayerMetadata {
     let colors = sky.colors_at(view_state.zoom().value());
-    let height = view_state.height();
+    let logical_height = view_state.height();
+    let scale = if logical_height > 0.0 && frame_height > 0.0 {
+        f64::from(frame_height) / logical_height
+    } else {
+        1.0
+    };
+    let height = logical_height * scale;
+    let mut horizon = view_state.horizon_line();
+    horizon.point.x *= scale;
+    horizon.point.y *= scale;
     SkyLayerMetadata {
         sky_color: colors.sky,
         horizon_color: colors.horizon,
-        horizon: view_state.horizon_line().to_shader(),
+        horizon: horizon.to_shader(),
         blend: [
             (f64::from(colors.sky_horizon_blend) * height / 2.0) as f32,
             if view_state.opaque_environment() {

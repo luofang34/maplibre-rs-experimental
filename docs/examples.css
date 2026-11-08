@@ -15,3 +15,56 @@
     height: 100%;
     border: none;
 }
+
+/* Tabbed code blocks (Rust / JavaScript / Full HTML) */
+.example-code-tabs {
+    margin: 1rem 0;
+}
+
+.example-code-tabs:not(.tabs-initialized) > pre:not(:first-of-type) {
+    display: none;
+}
+
+.example-code-tabs.tabs-initialized > pre:not(.active-tab) {
+    display: none;
+}
+
+.example-tab-bar {
+    display: flex;
+    gap: 0.25rem;
+    border-bottom: 1px solid var(--table-border-color);
+    margin-bottom: 0;
+}
+
+.example-tab-button {
+    appearance: none;
+    background: transparent;
+    color: var(--fg);
+    border: 1px solid transparent;
+    border-bottom: 2px solid transparent;
+    border-radius: 4px 4px 0 0;
+    padding: 0.45rem 0.9rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    opacity: 0.72;
+    transition: opacity 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.example-tab-button:hover {
+    opacity: 1;
+    background: var(--theme-hover);
+}
+
+.example-tab-button.active {
+    opacity: 1;
+    border-color: var(--table-border-color);
+    border-bottom-color: var(--links);
+    background: var(--quote-bg);
+}
+
+.example-code-tabs > pre {
+    margin-top: 0;
+    border-top-left-radius: 0;
+}

@@ -32,8 +32,10 @@ fn main(
     @location(4) @interpolate(flat) row_denominator: vec4<f32>,
     @builtin(position) position: vec4<f32>,
 ) -> Output {
-    let y = viewport.x - position.y;
-    let distance = (y - horizon.y) * horizon.w + (position.x - horizon.x) * horizon.z;
+    let scale = viewport.x / max(viewport.w, 1.0);
+    let x = position.x * scale;
+    let y = viewport.x - position.y * scale;
+    let distance = (y - horizon.y) * horizon.w + (x - horizon.x) * horizon.z;
     if distance > 0.0 {
         discard;
     }

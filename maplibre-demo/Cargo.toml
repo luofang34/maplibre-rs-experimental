@@ -23,3 +23,7 @@ maplibre-winit = { path = "../maplibre-winit", version = "0.1.0"  }
 tile-grid.workspace = true
 clap.workspace = true
 serde_json.workspace = true
+
+[dev-dependencies]
+reqwest = { workspace = true, features = ["json"] }
+

@@ -13,8 +13,10 @@ fn main(
 ) -> Output {
     // GL JS draws the background on the tiles of the flat map, which end at the horizon;
     // above it the sky or nothing shows. GL JS measures from the bottom of the screen.
-    let y = viewport.x - position.y;
-    let distance = (y - horizon.y) * horizon.w + (position.x - horizon.x) * horizon.z;
+    let scale = viewport.x / max(viewport.w, 1.0);
+    let x = position.x * scale;
+    let y = viewport.x - position.y * scale;
+    let distance = (y - horizon.y) * horizon.w + (x - horizon.x) * horizon.z;
     if distance > 0.0 {
         discard;
     }

@@ -6,8 +6,20 @@ Style a polygon with the fill layer type.
   <iframe src="./demo/index.html?example=../code/add-a-geojson-polygon.js" title="Add a GeoJSON Polygon" loading="lazy" allow="fullscreen"></iframe>
 </div>
 
+<div class="example-code-tabs">
+
+```rust,no_run
+{{#include code/add-a-geojson-polygon.rs}}
+```
+
 ```js
 {{#include code/add-a-geojson-polygon.js}}
 ```
+
+```html
+{{#include code/add-a-geojson-polygon.html}}
+```
+
+</div>
 
 GL JS: [Add a GeoJSON Polygon](https://maplibre.org/maplibre-gl-js/docs/examples/add-a-geojson-polygon/)

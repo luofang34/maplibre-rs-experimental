@@ -38,6 +38,10 @@ updates:
     schedule:
       interval: "monthly"
     open-pull-requests-limit: 5
+    groups:
+      android-gradle-plugin:
+        patterns:
+          - "com.android.*"
     ignore:
       # org.mozilla.rust-android-gradle 0.10.0 uses BaseExtension removed in AGP 9
       - dependency-name: "com.android.library"

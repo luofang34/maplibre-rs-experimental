@@ -123,3 +123,36 @@ fn sky_metadata_matches_its_vertex_layout() {
     let up = attributes.iter().find(|a| a.shader_location == 7);
     assert_eq!(up.map(|a| a.offset), Some(8 * 16));
 }
+
+#[test]
+fn sky_metadata_scales_horizon_and_blend_to_physical_frame_height() {
+    use cgmath::{Deg, Rad};
+
+    use crate::{
+        background::buffers::sky_metadata,
+        coords::{WorldCoords, Zoom},
+        render::view_state::ViewState,
+        style::sky::SkySpecification,
+        window::{LogicalSize, PhysicalSize},
+    };
+
+    let mut view = ViewState::new(
+        PhysicalSize::new(1600, 840).expect("physical size"),
+        WorldCoords::from_lat_lon(LatLon::new(47.27574, 11.39085), Zoom::new(12.0)),
+        Zoom::new(12.0),
+        Deg(0.0),
+        Rad(0.6435011087932844),
+    );
+    view.set_max_pitch(Deg(85.0));
+    view.camera_mut().set_pitch(Deg(70.0));
+    view.resize(LogicalSize::new(800, 420).expect("logical size"));
+
+    let sky = SkySpecification::default();
+    let one_x = sky_metadata(&sky, &view, 0.0, 420.0);
+    let two_x = sky_metadata(&sky, &view, 0.0, 840.0);
+
+    assert!((two_x.blend[2] - 840.0).abs() < 1e-4);
+    assert!((two_x.blend[0] - one_x.blend[0] * 2.0).abs() < 1e-4);
+    assert!((two_x.horizon[0] - one_x.horizon[0] * 2.0).abs() < 1e-4);
+    assert!((two_x.horizon[1] - one_x.horizon[1] * 2.0).abs() < 1e-4);
+}

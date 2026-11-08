@@ -89,7 +89,7 @@ pub fn queue_system(
             globe_sky
                 .then(|| globe_sky_metadata(sky, view_state))
                 .flatten()
-                .unwrap_or_else(|| sky_metadata(sky, view_state, projection_transition))
+                .unwrap_or_else(|| sky_metadata(sky, view_state, projection_transition, frame[1]))
         });
 
     if let Some(gpu) = world

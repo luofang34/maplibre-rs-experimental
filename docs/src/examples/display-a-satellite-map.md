@@ -6,8 +6,20 @@ Display a satellite raster baselayer.
   <iframe src="./demo/index.html?example=../code/display-a-satellite-map.js" title="Display a Satellite Map" loading="lazy" allow="fullscreen"></iframe>
 </div>
 
+<div class="example-code-tabs">
+
+```rust,no_run
+{{#include code/display-a-satellite-map.rs}}
+```
+
 ```js
 {{#include code/display-a-satellite-map.js}}
 ```
+
+```html
+{{#include code/display-a-satellite-map.html}}
+```
+
+</div>
 
 GL JS: [Display a Satellite Map](https://maplibre.org/maplibre-gl-js/docs/examples/display-a-satellite-map/)

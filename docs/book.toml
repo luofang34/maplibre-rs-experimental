@@ -6,3 +6,5 @@ title = "MapLibre Rust Documentation"
 
 [output.html]
 additional-css = ["diff.css", "examples.css"]
+additional-js = ["examples.js"]
+
