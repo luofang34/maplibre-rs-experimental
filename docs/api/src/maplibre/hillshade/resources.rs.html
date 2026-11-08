@@ -75,7 +75,7 @@
 <a href=#75 id=75 data-nosnippet>75</a>    }
 <a href=#76 id=76 data-nosnippet>76</a>}
 <a href=#77 id=77 data-nosnippet>77</a>
-<a href=#78 id=78 data-nosnippet>78</a><span class="doccomment">/// Sentinel keeping `color-relief` polar blending disabled when no [`PolarPoleElevations`]
+<a href=#78 id=78 data-nosnippet>78</a><span class="doccomment">/// Sentinel keeping `color-relief` polar blending disabled when no [`PolarPoleElevations`](crate::terrain::PolarPoleElevations)
 <a href=#79 id=79 data-nosnippet>79</a>/// resource is configured on the world.
 <a href=#80 id=80 data-nosnippet>80</a></span><span class="kw">const </span>UNSET_POLE_ELEVATION: f32 = -<span class="number">1.0e9</span>;
 <a href=#81 id=81 data-nosnippet>81</a>
@@ -90,7 +90,7 @@
 <a href=#90 id=90 data-nosnippet>90</a>    <span class="doccomment">/// Number of ramp stops in use.
 <a href=#91 id=91 data-nosnippet>91</a>    </span><span class="kw">pub </span>stop_count: u32,
 <a href=#92 id=92 data-nosnippet>92</a>    <span class="doccomment">/// `[north_meters, south_meters]` polar elevations for closing globe polar caps, or
-<a href=#93 id=93 data-nosnippet>93</a>    /// [`UNSET_POLE_ELEVATION`] when unconfigured; also keeps the arrays 16-byte aligned.
+<a href=#93 id=93 data-nosnippet>93</a>    /// `UNSET_POLE_ELEVATION` when unconfigured; also keeps the arrays 16-byte aligned.
 <a href=#94 id=94 data-nosnippet>94</a>    </span><span class="kw">pub </span>pole_elevations: [f32; <span class="number">2</span>],
 <a href=#95 id=95 data-nosnippet>95</a>    <span class="doccomment">/// Stop elevations, four per vector.
 <a href=#96 id=96 data-nosnippet>96</a>    </span><span class="kw">pub </span>elevations: [[f32; <span class="number">4</span>]; MAX_RAMP_STOPS / <span class="number">4</span>],

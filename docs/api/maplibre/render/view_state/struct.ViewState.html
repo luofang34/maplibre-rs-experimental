@@ -225,9 +225,9 @@ Adopted from <a href="https://docs.microsoft.com/en-us/windows/win32/direct3d9/v
     &amp;self,
     window: &amp;Vector3&lt;<a class="primitive" href="https://doc.rust-lang.org/1.99.1/std/primitive.f64.html">f64</a>&gt;,
     inverted_view_proj: &amp;<a class="struct" href="../camera/struct.InvertedViewProjection.html" title="struct maplibre::render::camera::InvertedViewProjection">InvertedViewProjection</a>,
-) -&gt; Vector3&lt;<a class="primitive" href="https://doc.rust-lang.org/1.99.1/std/primitive.f64.html">f64</a>&gt;</h4></section></summary><div class="docblock"><p>Order of transformations reversed: https://computergraphics.stackexchange.com/questions/6087/screen-space-coordinates-to-eye-space-conversion/6093
+) -&gt; Vector3&lt;<a class="primitive" href="https://doc.rust-lang.org/1.99.1/std/primitive.f64.html">f64</a>&gt;</h4></section></summary><div class="docblock"><p>Order of transformations reversed: <a href="https://computergraphics.stackexchange.com/questions/6087/screen-space-coordinates-to-eye-space-conversion/6093">https://computergraphics.stackexchange.com/questions/6087/screen-space-coordinates-to-eye-space-conversion/6093</a>
 <code>w</code> is lost.</p>
-<p>OpenGL explanation: https://www.khronos.org/opengl/wiki/Compute_eye_space_from_window_space#From_window_to_ndc</p>
+<p>OpenGL explanation: <a href="https://www.khronos.org/opengl/wiki/Compute_eye_space_from_window_space#From_window_to_ndc">https://www.khronos.org/opengl/wiki/Compute_eye_space_from_window_space#From_window_to_ndc</a></p>
 </div></details><details class="toggle method-toggle" open><summary><section id="method.window_to_world_at_depth" class="method"><a class="src rightside" href="../../../src/maplibre/render/view_state/screen.rs.html#73-80">Source</a><h4 class="code-header">pub fn <a href="#method.window_to_world_at_depth" class="fn">window_to_world_at_depth</a>(
     &amp;self,
     window: &amp;Vector2&lt;<a class="primitive" href="https://doc.rust-lang.org/1.99.1/std/primitive.f64.html">f64</a>&gt;,

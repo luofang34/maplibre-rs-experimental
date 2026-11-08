@@ -15,6 +15,9 @@ export default async function style() {
             'type': 'raster',
             'source': 'satellite'
         }],
+        'projection': {
+            'type': 'globe'
+        },
         'center': [137.9150899566626, 36.25956997955441],
         'zoom': 9
     };

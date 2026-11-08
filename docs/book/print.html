@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-0a32b56e.js";
+            window.path_to_searchindex_js = "searchindex-1acdef06.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-e964a7da.js"></script>
@@ -337,6 +337,9 @@ await startMapLibre(undefined, undefined, JSON.stringify(await style()))
             'type': 'raster',
             'source': 'satellite'
         }],
+        'projection': {
+            'type': 'globe'
+        },
         'center': [137.9150899566626, 36.25956997955441],
         'zoom': 9
     };
@@ -451,6 +454,9 @@ await startMapLibre(undefined, undefined, JSON.stringify(await style()))
             source: 'terrainSource',
             exaggeration: 1
         },
+        projection: {
+            type: 'globe'
+        },
         sky: {},
         center: [11.39085, 47.27574],
         zoom: 12,
@@ -491,6 +497,9 @@ await startMapLibre(undefined, undefined, JSON.stringify(await style()))
                 }
             }
         ],
+        projection: {
+            type: 'globe'
+        },
         center: [11.491, 47.274],
         zoom: 10,
         pitch: 0
@@ -510,6 +519,7 @@ await startMapLibre(undefined, undefined, JSON.stringify(await style()))
 
 <pre><code class="language-js">export default async function style() {
     const style = await (await fetch('https://tiles.openfreemap.org/styles/bright')).json();
+    style.projection = { type: 'globe' };
     style.center = [-74.0066, 40.7135];
     style.zoom = 15.5;
     style.pitch = 45;
@@ -569,6 +579,7 @@ await startMapLibre(undefined, undefined, JSON.stringify(await style()))
 
 <pre><code class="language-js">export default async function style() {
     const style = await (await fetch('https://tiles.openfreemap.org/styles/bright')).json();
+    style.projection = { type: 'globe' };
     style.center = [-122.486052, 37.830348];
     style.zoom = 15;
 
@@ -631,6 +642,7 @@ await startMapLibre(undefined, undefined, JSON.stringify(await style()))
 
 <pre><code class="language-js">export default async function style() {
     const style = await (await fetch('https://demotiles.maplibre.org/style.json')).json();
+    style.projection = { type: 'globe' };
     style.center = [-68.13734351262877, 45.137451890638886];
     style.zoom = 5;
 
@@ -709,6 +721,9 @@ await startMapLibre(undefined, undefined, JSON.stringify(await style()))
             }
         ],
         'id': 'blank',
+        'projection': {
+            'type': 'globe'
+        },
         'center': [0, 0], // starting position
         'zoom': 0 // starting zoom
     };
@@ -724,6 +739,7 @@ await startMapLibre(undefined, undefined, JSON.stringify(await style()))
 
 <pre><code class="language-js">export default async function style() {
     const style = await (await fetch('https://tiles.openfreemap.org/styles/bright')).json();
+    style.projection = { type: 'globe' };
     style.center = [-122.48383155304096, 37.82882682974591];
     style.zoom = 16;
 
@@ -813,6 +829,7 @@ await startMapLibre(undefined, undefined, JSON.stringify(await style()))
 
 <pre><code class="language-js">export default async function style() {
     const style = await (await fetch('https://demotiles.maplibre.org/style.json')).json();
+    style.projection = { type: 'globe' };
     style.center = [-120, 50];
     style.zoom = 2;
 
@@ -955,6 +972,7 @@ await startMapLibre(undefined, undefined, JSON.stringify(await style()))
 
 <pre><code class="language-js">export default async function style() {
     const style = await (await fetch('https://demotiles.maplibre.org/style.json')).json();
+    style.projection = { type: 'globe' };
     style.center = [-103.59179687498357, 40.66995747013945];
     style.zoom = 3;
 

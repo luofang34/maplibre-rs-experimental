@@ -1,5 +1,6 @@
 export default async function style() {
     const style = await (await fetch('https://demotiles.maplibre.org/style.json')).json();
+    style.projection = { type: 'globe' };
     style.center = [-103.59179687498357, 40.66995747013945];
     style.zoom = 3;
 

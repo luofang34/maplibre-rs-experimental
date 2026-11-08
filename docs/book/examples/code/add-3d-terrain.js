@@ -37,6 +37,9 @@ export default async function style() {
             source: 'terrainSource',
             exaggeration: 1
         },
+        projection: {
+            type: 'globe'
+        },
         sky: {},
         center: [11.39085, 47.27574],
         zoom: 12,

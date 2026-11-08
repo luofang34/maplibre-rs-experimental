@@ -23,6 +23,9 @@ export default async function style() {
                 }
             }
         ],
+        projection: {
+            type: 'globe'
+        },
         center: [11.491, 47.274],
         zoom: 10,
         pitch: 0
