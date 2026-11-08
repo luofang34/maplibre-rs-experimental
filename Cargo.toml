@@ -40,7 +40,7 @@ criterion = { version = "0.5.1", features = ["async_tokio"] }
 csscolorparser = { version = "0.6.2", features = ["serde", "cint"] }
 downcast-rs = "1.2.0"
 env_logger = "0.11.3"
-flatbuffers = "24.3.25"
+flatbuffers = "25.12.19"
 flatc-rust = "0.2.0"
 flate2 = "1.0.27"
 geo = "0.28.0"
