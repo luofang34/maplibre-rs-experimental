@@ -8,8 +8,11 @@ struct VertexOutput {
     @location(3) @interpolate(flat) blend: vec4<f32>,
     // View-space ray through the pixel, for the globe sky.
     @location(4) view_direction: vec3<f32>,
-    // The eye's zenith in view axes and the elevation of its sea-level horizon in radians.
+    // The eye's zenith in view axes and the elevation of its sea-level horizon in radians,
+    // or the globe center in view pixels when blending the Mercator sky onto a globe.
     @location(5) @interpolate(flat) up_and_horizon: vec4<f32>,
+    // Camera-to-center distance, device pixel ratio, globe radius in pixels, and atmosphere blend.
+    @location(6) @interpolate(flat) globe_params: vec4<f32>,
     @builtin(position) position: vec4<f32>,
 };
 
@@ -32,15 +35,13 @@ fn main(
     } else if vertex_index == 2u {
         position = vec2<f32>(-1.0, 3.0);
     }
-    let inverse_projection = mat4x4<f32>(
-        inverse_projection_0,
-        inverse_projection_1,
-        inverse_projection_2,
-        inverse_projection_3,
-    );
     // As for the atmosphere, the inverse perspective already returns the ray vector;
-    // dividing by W would only lose precision near the far plane.
-    let view = inverse_projection * vec4<f32>(position, 0.0, 1.0);
+    // dividing by W would only lose precision near the far plane. Since clip Z is 0,
+    // column 2 of the inverse projection does not contribute to the ray and carries
+    // `globe_params` for the fragment shader instead.
+    let view = inverse_projection_0 * position.x
+        + inverse_projection_1 * position.y
+        + inverse_projection_3;
     return VertexOutput(
         sky_color,
         horizon_color,
@@ -48,6 +49,7 @@ fn main(
         blend,
         view.xyz,
         up_and_horizon,
+        inverse_projection_2,
         vec4<f32>(position, blend.w, 1.0),
     );
 }

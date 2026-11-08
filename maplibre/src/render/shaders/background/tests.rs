@@ -155,4 +155,71 @@ fn sky_metadata_scales_horizon_and_blend_to_physical_frame_height() {
     assert!((two_x.blend[0] - one_x.blend[0] * 2.0).abs() < 1e-4);
     assert!((two_x.horizon[0] - one_x.horizon[0] * 2.0).abs() < 1e-4);
     assert!((two_x.horizon[1] - one_x.horizon[1] * 2.0).abs() < 1e-4);
+
+    let globe_sky = sky_metadata(&sky, &view, 0.5, 840.0);
+    assert!((globe_sky.blend[1] - 0.5).abs() < 1e-6);
+    assert!(globe_sky.inverse_projection[2][0] > 0.0);
+    assert!((globe_sky.inverse_projection[2][1] - 2.0).abs() < 1e-4);
+    assert!(globe_sky.inverse_projection[2][2] > 0.0);
+    assert!(globe_sky.up_and_horizon[..3].iter().any(|&v| v != 0.0));
+}
+
+#[test]
+fn terrain_fog_transitions_smoothly_across_globe_zoom_levels() {
+    use cgmath::{Deg, Rad};
+
+    use crate::{
+        coords::{WorldCoords, Zoom},
+        render::view_state::ViewState,
+        style::Style,
+        terrain::queue_system::uniforms::terrain_fog,
+        window::{LogicalSize, PhysicalSize},
+    };
+
+    let style: Style = serde_json::from_str(
+        r##"{
+            "version": 8,
+            "sources": {},
+            "layers": [],
+            "projection": { "type": "globe" },
+            "sky": {
+                "sky-color": "#88C6FC",
+                "horizon-color": "#ffffff",
+                "fog-color": "#ffffff",
+                "fog-ground-blend": 0.5,
+                "horizon-fog-blend": 0.8,
+                "sky-horizon-blend": 0.8,
+                "atmosphere-blend": ["interpolate", ["linear"], ["zoom"], 0, 1, 5, 1, 7, 0]
+            }
+        }"##,
+    )
+    .expect("style parses");
+
+    let fog_at = |zoom: f64| {
+        let mut view = ViewState::new(
+            PhysicalSize::new(800, 420).expect("physical size"),
+            WorldCoords::from_lat_lon(LatLon::new(47.27574, 11.39085), Zoom::new(zoom)),
+            Zoom::new(zoom),
+            Deg(0.0),
+            Rad(0.6435011087932844),
+        );
+        view.set_max_pitch(Deg(85.0));
+        view.camera_mut().set_pitch(Deg(70.0));
+        view.resize(LogicalSize::new(800, 420).expect("logical size"));
+        terrain_fog(&style, &view)
+    };
+
+    let z12 = fog_at(12.0);
+    let z11_99 = fog_at(11.99);
+    let z11_5 = fog_at(11.5);
+    let z11 = fog_at(11.0);
+    let z6 = fog_at(6.0);
+    let z4 = fog_at(4.0);
+
+    assert!(!z12.globe && (z12.opacity - 1.0).abs() < 1e-5);
+    assert!(!z11_99.globe && (z11_99.opacity - 1.0).abs() < 1e-5);
+    assert!(!z11_5.globe && (z11_5.opacity - 1.0).abs() < 1e-5);
+    assert!(!z11.globe && (z11.opacity - 1.0).abs() < 1e-5);
+    assert!(!z6.globe && z6.opacity > 0.3 && z6.opacity < 0.7);
+    assert!(z4.globe && z4.opacity == 0.0);
 }

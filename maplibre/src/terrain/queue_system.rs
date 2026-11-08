@@ -38,7 +38,7 @@ pub(crate) use targets::{procedural_specs, target_specs};
 mod drape_phase;
 mod frame;
 pub(crate) mod surface_covering;
-mod uniforms;
+pub(crate) mod uniforms;
 use drape_phase::{background_clear_color, encode_drapes};
 use frame::{hide_draped_layers, set_frame};
 use uniforms::present_ancestors;

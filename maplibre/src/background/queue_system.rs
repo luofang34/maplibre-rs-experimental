@@ -79,12 +79,20 @@ pub fn queue_system(
     let uses_globe = projection_transition > 0.0;
     let atmosphere_blend = atmosphere_blend(style, view_state, world);
     // Without an atmosphere a full globe still has a sky where the host wants the frame
-    // covered; with one, the atmosphere draws the sky.
+    // covered; with one, the atmosphere draws the sky. Standard map views curve and fade
+    // the sky across the globe horizon in `sky.fragment.wgsl` as GL JS does.
+    let external_or_free = view_state.has_external_view()
+        || view_state.navigation_mode() == crate::render::view_state::NavigationMode::FreeGlobe;
     let globe_sky = draws_globe_sky(view_state, projection_transition, atmosphere_blend);
     let sky_metadata = style
         .sky
         .as_ref()
-        .filter(|_| projection_transition < 1.0 || view_state.opaque_environment() || globe_sky)
+        .filter(|_| {
+            !external_or_free
+                || projection_transition < 1.0
+                || view_state.opaque_environment()
+                || globe_sky
+        })
         .map(|sky| {
             globe_sky
                 .then(|| globe_sky_metadata(sky, view_state))
