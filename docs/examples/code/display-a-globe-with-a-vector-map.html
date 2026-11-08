@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Display a Globe with a Vector Map</title>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #0b0e14;
+        }
+        #maplibre {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="maplibre"></canvas>
+    <script type="module">
+        import { startMapLibre } from 'maplibre-rs';
+
+        async function style() {
+            const style = await (await fetch('https://demotiles.maplibre.org/style.json')).json();
+            style.projection = {type: 'globe'};
+            style.center = [0, 0];
+            style.zoom = 2;
+            return style;
+        }
+
+        startMapLibre(undefined, undefined, JSON.stringify(await style()));
+    </script>
+</body>
+</html>
