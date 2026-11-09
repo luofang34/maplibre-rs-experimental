@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["acquire_drapes","awaiting_first_draw","budget_redraws","choose_redraws","drape_sources"]};

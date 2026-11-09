@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["draw_order_key","procedural_specs","target_specs","uses_uniform_texture_covering"]};
+window.SIDEBAR_ITEMS = {"fn":["draw_order_key","procedural_specs","target_specs","uses_uniform_texture_covering"],"struct":["PrefetchDrapes"]};
