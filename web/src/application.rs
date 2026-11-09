@@ -183,18 +183,21 @@ pub fn create_kernel(
 /// their symbols and heatmaps, and the raster and terrain plugins when the style draws them.
 pub fn default_plugins(style: &Style) -> Vec<MapPlugin> {
     let has_raster_sources = style.layers.iter().any(|layer| {
-        matches!(layer.type_.as_str(), "raster" | "hillshade")
-            || layer
-                .source
-                .as_ref()
-                .and_then(|name| style.sources.get(name))
-                .is_some_and(|source| {
-                    matches!(
-                        source,
-                        maplibre::style::source::Source::Raster(_)
-                            | maplibre::style::source::Source::RasterDem(_)
-                    )
-                })
+        matches!(
+            layer.type_.as_str(),
+            "raster" | "hillshade" | "color-relief"
+        ) || layer
+            .source
+            .as_ref()
+            .and_then(|name| style.sources.get(name))
+            .is_some_and(|source| {
+                matches!(
+                    source,
+                    maplibre::style::source::Source::Raster(_)
+                        | maplibre::style::source::Source::RasterDem(_)
+                        | maplibre::style::source::Source::Image(_)
+                )
+            })
     });
     let has_terrain = style.terrain.is_some();
     let mut plugins: Vec<MapPlugin> = vec![

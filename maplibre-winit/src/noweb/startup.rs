@@ -224,10 +224,12 @@ pub fn default_plugins(style: &Style, debug_tiles: bool) -> Vec<MapPlugin> {
             .sources
             .values()
             .any(|source| matches!(source, Source::Vector(_) | Source::GeoJson(_)));
-    let has_raster_sources = style
-        .sources
-        .values()
-        .any(|source| matches!(source, Source::Raster(_) | Source::RasterDem(_)));
+    let has_raster_sources = style.sources.values().any(|source| {
+        matches!(
+            source,
+            Source::Raster(_) | Source::RasterDem(_) | Source::Image(_)
+        )
+    });
     let mut plugins: Vec<MapPlugin> = vec![
         Box::new(RenderPlugin),
         Box::new(maplibre::background::BackgroundPlugin),

@@ -32,6 +32,11 @@ mod add_a_hillshade_layer {
 }
 
 #[allow(dead_code)]
+mod add_a_color_relief_layer {
+    include!("../../docs/src/examples/code/add-a-color-relief-layer.rs");
+}
+
+#[allow(dead_code)]
 mod display_buildings_in_3d {
     include!("../../docs/src/examples/code/display-buildings-in-3d.rs");
 }
@@ -52,8 +57,18 @@ mod add_a_raster_tile_source {
 }
 
 #[allow(dead_code)]
+mod add_an_image_source {
+    include!("../../docs/src/examples/code/add-an-image-source.rs");
+}
+
+#[allow(dead_code)]
 mod style_lines_with_a_data_driven_property {
     include!("../../docs/src/examples/code/style-lines-with-a-data-driven-property.rs");
+}
+
+#[allow(dead_code)]
+mod create_a_gradient_line {
+    include!("../../docs/src/examples/code/create-a-gradient-line.rs");
 }
 
 #[allow(dead_code)]
@@ -87,6 +102,10 @@ fn docs_rust_examples_build_valid_styles() {
         ("add-3d-terrain", add_3d_terrain::style()),
         ("add-a-hillshade-layer", add_a_hillshade_layer::style()),
         (
+            "add-a-color-relief-layer",
+            add_a_color_relief_layer::style(),
+        ),
+        (
             "display-buildings-in-3d",
             display_buildings_in_3d::build_style(Style::default()),
         ),
@@ -103,8 +122,16 @@ fn docs_rust_examples_build_valid_styles() {
             add_a_raster_tile_source::style(),
         ),
         (
+            "add-an-image-source",
+            add_an_image_source::build_style(Style::default()),
+        ),
+        (
             "style-lines-with-a-data-driven-property",
             style_lines_with_a_data_driven_property::build_style(Style::default()),
+        ),
+        (
+            "create-a-gradient-line",
+            create_a_gradient_line::build_style(Style::default()),
         ),
         (
             "create-and-style-clusters",

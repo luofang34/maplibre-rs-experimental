@@ -35,6 +35,8 @@ The Rust tab of an interactive example drives the map from Rust in the browser, 
 
 - [Get Features Under the Mouse Pointer](./get-features-under-the-mouse-pointer.md)
 - [Change a Layer's Color](./change-a-layers-color.md)
+- [Show and Hide Layers](./show-and-hide-layers.md)
+- [Filter Symbols by Toggling a List](./filter-symbols-by-toggling-a-list.md)
 
 ## Globe
 
@@ -45,6 +47,7 @@ The Rust tab of an interactive example drives the map from Rust in the browser, 
 
 - [Add 3D Terrain](./add-3d-terrain.md)
 - [Add a Hillshade Layer](./add-a-hillshade-layer.md)
+- [Add a Color Relief Layer](./add-a-color-relief-layer.md)
 
 ## 3D Models & Buildings
 
@@ -59,10 +62,12 @@ The Rust tab of an interactive example drives the map from Rust in the browser, 
 ## Raster & Imagery
 
 - [Add a Raster Tile Source](./add-a-raster-tile-source.md)
+- [Add an Image Source](./add-an-image-source.md)
 
 ## Expressions
 
 - [Style Lines with a Data-Driven Property](./style-lines-with-a-data-driven-property.md)
+- [Create a Gradient Line](./create-a-gradient-line.md)
 
 ## Heatmaps & Clusters
 

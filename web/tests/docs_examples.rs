@@ -23,6 +23,16 @@ mod change_a_layers_color {
 }
 
 #[allow(dead_code)]
+mod show_and_hide_layers {
+    include!("../../docs/src/examples/code/show-and-hide-layers.rs");
+}
+
+#[allow(dead_code)]
+mod filter_symbols_by_toggling_a_list {
+    include!("../../docs/src/examples/code/filter-symbols-by-toggling-a-list.rs");
+}
+
+#[allow(dead_code)]
 mod add_live_realtime_data {
     include!("../../docs/src/examples/code/add-live-realtime-data.rs");
 }
@@ -41,6 +51,15 @@ fn browser_examples_build_valid_styles() {
         (
             "change-a-layers-color",
             change_a_layers_color::build_style(Style::default()).expect("style document"),
+        ),
+        (
+            "show-and-hide-layers",
+            show_and_hide_layers::build_style(Style::default()),
+        ),
+        (
+            "filter-symbols-by-toggling-a-list",
+            filter_symbols_by_toggling_a_list::build_style(Style::default())
+                .expect("style document"),
         ),
         (
             "add-live-realtime-data",
