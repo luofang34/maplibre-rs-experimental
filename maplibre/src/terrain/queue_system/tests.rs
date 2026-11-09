@@ -1,4 +1,5 @@
-use super::{awaiting_first_draw, budget_redraws, DrapeState};
+use super::acquire::{awaiting_first_draw, budget_redraws};
+use crate::terrain::drape_cache::DrapeState;
 
 #[cfg(feature = "headless")]
 #[path = "tests/dem_uniforms.rs"]

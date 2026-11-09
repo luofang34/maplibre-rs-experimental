@@ -47,6 +47,29 @@ impl TerrainResources {
         })
     }
 
+    /// Like [`acquire_drape`](Self::acquire_drape), for a drape prepared ahead of the view.
+    pub fn acquire_ahead_drape(
+        &mut self,
+        device: &wgpu::Device,
+        coords: WorldTileCoords,
+        fingerprint: u64,
+        may_create: bool,
+    ) -> DrapeState {
+        let format = self.color_format;
+        let size = self.drape_size;
+        self.drapes
+            .acquire_ahead(coords, fingerprint, may_create, || {
+                DrapeTexture::new(Texture::new_mipmapped(
+                    Some("drape texture"),
+                    device,
+                    format,
+                    size,
+                    size,
+                    wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                ))
+            })
+    }
+
     /// Leaves a drape acquired this frame undrawn, to be drawn on the next.
     pub fn defer_drape(&mut self, coords: WorldTileCoords, state: DrapeState) {
         self.drapes.defer(coords, state);
@@ -81,6 +104,11 @@ impl TerrainResources {
     }
 
     /// Drape texture of a view tile.
+    /// Whether a view has drawn the tile's drape, in use or parked after it left the view.
+    pub fn holds_shown_drape(&self, coords: WorldTileCoords) -> bool {
+        self.drapes.holds_shown(coords)
+    }
+
     pub fn drape_texture(&self, coords: WorldTileCoords) -> Option<&Texture> {
         self.drapes.get(coords).map(|drape| &drape.texture)
     }

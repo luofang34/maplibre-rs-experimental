@@ -1,7 +1,5 @@
 //! Builds the drape targets and terrain draws for the current frame.
 
-use std::collections::HashSet;
-
 use crate::{
     context::MapContext,
     coords::WorldTileCoords,
@@ -20,7 +18,7 @@ use crate::{
         world::World,
     },
     terrain::{
-        drape_cache::{fingerprint, DrapeState, SourceContent},
+        drape_cache::{fingerprint, SourceContent},
         drape_targets::{collect_layer_specs, select_targets, TargetSpec},
         resources::{TerrainDraw, TerrainResources, UNIFORM_STRIDE},
         source::{dem_source, DemSource},
@@ -28,6 +26,7 @@ use crate::{
     },
     vector::VectorBufferPool,
 };
+mod acquire;
 mod cohort;
 mod covering;
 pub(crate) mod edges;
@@ -39,6 +38,7 @@ mod drape_phase;
 mod frame;
 pub(crate) mod surface_covering;
 pub(crate) mod uniforms;
+use acquire::acquire_drapes;
 use drape_phase::{background_clear_color, encode_drapes};
 use frame::{hide_draped_layers, set_frame};
 use uniforms::present_ancestors;
@@ -168,37 +168,6 @@ pub fn queue_system(
     Ok(())
 }
 
-/// Which of the acquired drapes to draw this frame, at most `budget`: tiles never drawn
-/// first, since a reused texture shows another tile's content until they are, then tiles
-/// whose content changed.
-fn budget_redraws(states: &[DrapeState], budget: usize) -> Vec<bool> {
-    let mut redraw = vec![false; states.len()];
-    let mut drawn = 0;
-    for wanted in [DrapeState::New, DrapeState::Changed] {
-        for (index, state) in states.iter().enumerate() {
-            if drawn >= budget {
-                return redraw;
-            }
-            if *state == wanted {
-                redraw[index] = true;
-                drawn += 1;
-            }
-        }
-    }
-    redraw
-}
-
-/// Tiles whose texture holds no content of their own yet. A new drape the budget deferred
-/// would show whatever tile last used the texture, so its surface uses an ancestor or the
-/// background color until its own texture is drawn.
-fn awaiting_first_draw(states: &[DrapeState], redraw: &[bool]) -> Vec<bool> {
-    states
-        .iter()
-        .zip(redraw)
-        .map(|(state, drawn)| *state == DrapeState::New && !drawn)
-        .collect()
-}
-
 /// The GPU content of source tiles, read from the vector pool and the raster textures.
 struct LoadedContent<'a> {
     pool: Option<&'a VectorBufferPool>,
@@ -248,106 +217,6 @@ fn loaded_content(world: &World) -> LoadedContent<'_> {
 
 #[cfg(test)]
 mod tests;
-
-fn acquire_drapes(
-    (specs, extra_retained): (
-        &[TargetSpec],
-        Option<&rustc_hash::FxHashSet<WorldTileCoords>>,
-    ),
-    prints: &[u64],
-    ready: &[bool],
-    memory: MemoryBudget,
-    (budget, limit): (usize, usize),
-    terrain: &mut TerrainResources,
-    device: &wgpu::Device,
-) -> (Vec<bool>, Vec<Option<WorldTileCoords>>, bool) {
-    let keep = covering::retained_textures(
-        specs
-            .iter()
-            .map(|spec| spec.coords)
-            .chain(extra_retained.into_iter().flatten().copied()),
-        |coords| terrain.drape_texture(coords).is_some(),
-    );
-    terrain.retain_drapes(&keep);
-    // Unready tiles keep their last valid texture or a background surface.
-    if memory.is_tight() {
-        terrain.shed_spare_drapes();
-    }
-    // Targets come nearest first, so when textures run out it is the far tiles that
-    // draw with an ancestor's drape.
-    let states: Vec<DrapeState> = specs
-        .iter()
-        .zip(prints)
-        .zip(ready)
-        .map(|((spec, print), ready)| {
-            if *ready {
-                let may_create = memory.allows_drape_texture(terrain.drape_texture_total());
-                terrain.acquire_drape(device, spec.coords, *print, may_create)
-            } else {
-                DrapeState::Unchanged
-            }
-        })
-        .collect();
-    let mut redraw = budget_redraws(&states, budget);
-    // A new drape with no drawn ancestor would leave its tile blank, so it is drawn past the time
-    // budget, up to the count a frame's command buffer holds.
-    let mut drawn = redraw.iter().filter(|drawn| **drawn).count();
-    for (index, (spec, state)) in specs.iter().zip(&states).enumerate() {
-        if drawn >= limit {
-            break;
-        }
-        if *state == DrapeState::New
-            && !redraw[index]
-            && present_ancestors(spec.coords, terrain).is_empty()
-        {
-            redraw[index] = true;
-            drawn += 1;
-        }
-    }
-    let mut deferred = false;
-    for ((spec, state), drawn) in specs.iter().zip(&states).zip(&redraw) {
-        if !matches!(state, DrapeState::Unchanged | DrapeState::Withheld) && !drawn {
-            terrain.defer_drape(spec.coords, *state);
-            deferred = true;
-        }
-    }
-    let sources = drape_sources(specs, &states, &redraw, ready, terrain);
-    (redraw, sources, deferred)
-}
-
-fn drape_sources(
-    specs: &[TargetSpec],
-    states: &[DrapeState],
-    redraw: &[bool],
-    ready: &[bool],
-    terrain: &TerrainResources,
-) -> Vec<Option<WorldTileCoords>> {
-    let hidden: Vec<bool> = awaiting_first_draw(states, redraw)
-        .into_iter()
-        .zip(ready)
-        .zip(states)
-        .map(|((hidden, ready), state)| hidden || !ready || *state == DrapeState::Withheld)
-        .collect();
-    let undrawn: HashSet<WorldTileCoords> = specs
-        .iter()
-        .zip(&hidden)
-        .filter(|(_, hidden)| **hidden)
-        .map(|(spec, _)| spec.coords)
-        .collect();
-    specs
-        .iter()
-        .zip(&hidden)
-        .map(|(spec, hidden)| {
-            if *hidden && terrain.drape_texture(spec.coords).is_none() {
-                present_ancestors(spec.coords, terrain)
-                    .into_iter()
-                    .find(|ancestor| !undrawn.contains(ancestor))
-            } else {
-                Some(spec.coords)
-            }
-        })
-        .collect()
-}
 
 fn queue_tiles(
     world: &mut World,
@@ -457,6 +326,13 @@ fn prepare_drapes(
         _ => 0,
     };
     surface_covering::fit_metadata(specs, &mut ready, capacity);
+    let prefetch: Vec<bool> = {
+        let ahead = world.resources.get::<targets::PrefetchDrapes>();
+        specs
+            .iter()
+            .map(|spec| ahead.is_some_and(|ahead| ahead.0.contains(&spec.coords)))
+            .collect()
+    };
     let budget = world
         .resources
         .get::<DrapeBudget>()
@@ -490,18 +366,21 @@ fn prepare_drapes(
         terrain.ensure_scratch(device);
         acquire_drapes(
             (specs, extra_retained.as_ref()),
-            &prints,
-            &ready,
+            (&prints, &ready, &prefetch),
             memory,
             (budget, limit),
             terrain,
             device,
         )
     };
-    crate::render::frame_signals::count_drape_redraws(
-        world,
-        redraw.iter().filter(|drawn| **drawn).count(),
-    );
+    let drawn = |ahead: bool| {
+        redraw
+            .iter()
+            .zip(&prefetch)
+            .filter(|(drawn, prefetched)| **drawn && **prefetched == ahead)
+            .count()
+    };
+    crate::render::frame_signals::count_drape_redraws(world, drawn(false), drawn(true));
     // A drape left for a later frame's budget needs that frame.
     if deferred {
         crate::render::frame_signals::keep_animating(world);

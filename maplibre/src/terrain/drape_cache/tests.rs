@@ -285,3 +285,60 @@ fn paint_changes_invalidate_cached_drapes_without_head_jitter_redraws() {
     assert_eq!(key(8.0), key(8.01));
     assert_ne!(key(8.0), key(8.5));
 }
+
+#[test]
+fn a_drape_prepared_ahead_keeps_its_content_until_a_view_shows_its_tile() {
+    let mut cache = DrapeCache::<u32>::default();
+    let ahead = tile(1, 0, 4);
+    assert_eq!(cache.acquire_ahead(ahead, 1, true, || 7), DrapeState::New);
+    // The looser covering it follows shifts as the view moves; that alone draws nothing.
+    assert_eq!(
+        cache.acquire_ahead(ahead, 2, true, || 8),
+        DrapeState::Unchanged
+    );
+    assert!(!cache.holds_shown(ahead));
+    // Once a view shows the tile, its own fingerprint decides.
+    assert_eq!(cache.acquire(ahead, 3, true, || 9), DrapeState::Changed);
+    assert!(cache.holds_shown(ahead));
+}
+
+#[test]
+fn only_drapes_a_view_has_shown_are_parked_when_their_tiles_leave() {
+    let mut cache = DrapeCache::<u32>::default();
+    let (shown, ahead) = (tile(0, 0, 4), tile(1, 0, 4));
+    cache.acquire(shown, 1, true, || 1);
+    cache.acquire_ahead(ahead, 1, true, || 2);
+    cache.retain(&HashSet::new());
+    assert_eq!(
+        cache.parked_len(),
+        1,
+        "the shown drape waits for its tile's return"
+    );
+    assert_eq!(
+        cache.free_len(),
+        1,
+        "the unshown one gives its texture back"
+    );
+    assert_eq!(cache.acquire(shown, 1, false, || 3), DrapeState::Unchanged);
+}
+
+#[test]
+fn a_view_takes_an_unshown_drape_s_texture_before_a_parked_one() {
+    let mut cache = DrapeCache::<u32>::default();
+    let (parked, ahead, needed) = (tile(0, 0, 4), tile(1, 0, 4), tile(2, 0, 4));
+    cache.acquire(parked, 1, true, || 1);
+    cache.retain(&HashSet::new());
+    cache.acquire_ahead(ahead, 1, true, || 2);
+    assert_eq!(cache.acquire(needed, 1, false, || 3), DrapeState::New);
+    assert_eq!(cache.get(needed), Some(&2));
+    assert_eq!(
+        cache.parked_len(),
+        1,
+        "the parked drape is kept for its tile"
+    );
+    // A drape prepared ahead takes neither from another prepared drape nor a parked one.
+    assert_eq!(
+        cache.acquire_ahead(tile(3, 0, 4), 1, false, || 4),
+        DrapeState::Withheld
+    );
+}

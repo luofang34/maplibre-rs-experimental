@@ -1,6 +1,11 @@
 //! Selects terrain textures and records their independent surface meshes.
 use super::*;
 
+/// The tiles a frame drapes ahead of the view: prepared, never redrawn, and drawn only with
+/// the time the view's own drapes leave.
+#[derive(Default)]
+pub(super) struct PrefetchDrapes(pub(super) rustc_hash::FxHashSet<WorldTileCoords>);
+
 pub(crate) fn uses_uniform_texture_covering(view_state: &ViewState) -> bool {
     use cgmath::InnerSpace;
     view_state.external_globe_eye().is_some_and(|eye| {
@@ -77,6 +82,7 @@ pub(crate) fn target_specs(
     world
         .resources
         .insert(crate::terrain::request_system::DrapeRequests(tiles.clone()));
+    world.resources.insert(PrefetchDrapes::default());
     let mut targets = select_targets(tiles.into_iter(), world, &raster_coverings);
     if !uniform_globe && !view_state.has_external_view() && view_state.pose_view().is_none() {
         let prefetch_tiles = world
@@ -91,11 +97,28 @@ pub(crate) fn target_specs(
                 world,
                 crate::render::view_state::ViewStatePadding::Loose,
             ) {
-                targets.extend(select_targets(
-                    prefetch_tiles.into_iter(),
-                    world,
-                    &loose_raster,
-                ));
+                // Prefetch prepares drapes ahead of the view, so they are ready when their tile
+                // scrolls in, and leaves alone those a view has drawn. A tile the view drapes
+                // keeps its view spec, as a second spec from the looser prefetch covering would
+                // alternate the drape's fingerprint and redraw it every frame, and a drape parked
+                // when its tile left the view keeps the content its view drew for its return.
+                let draped: rustc_hash::FxHashSet<WorldTileCoords> =
+                    targets.iter().map(|(coords, _)| *coords).collect();
+                let held = |coords: &WorldTileCoords| match world
+                    .resources
+                    .get::<Eventually<TerrainResources>>()
+                {
+                    Some(Eventually::Initialized(terrain)) => terrain.holds_shown_drape(*coords),
+                    _ => false,
+                };
+                let fresh: Vec<WorldTileCoords> = prefetch_tiles
+                    .into_iter()
+                    .filter(|coords| !draped.contains(coords) && !held(coords))
+                    .collect();
+                world
+                    .resources
+                    .insert(PrefetchDrapes(fresh.iter().copied().collect()));
+                targets.extend(select_targets(fresh.into_iter(), world, &loose_raster));
             }
         }
     }

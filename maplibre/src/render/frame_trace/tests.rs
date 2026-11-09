@@ -29,6 +29,7 @@ fn a_frame_gathers_the_map_s_and_the_host_s_measurements_under_one_number() {
         gpu: Some(ms(4)),
         upload_bytes: 1024,
         drape_redraws: 2,
+        prefetch_drapes: 0,
         draws: 10,
     });
     trace.record_span(3, "queue-wait", Clock::Cpu, ms(1));
