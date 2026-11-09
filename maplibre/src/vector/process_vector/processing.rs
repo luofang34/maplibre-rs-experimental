@@ -355,18 +355,18 @@ fn unhide_unreplaced_building_bases(layer: &mut tile::Layer) {
 }
 
 fn feature_bool_tag(feature: &tile::Feature, key: u32, values: &[tile::Value]) -> Option<bool> {
-    for pair in feature.tags.chunks_exact(2) {
-        if pair[0] == key {
-            return values.get(pair[1] as usize)?.bool_value;
+    for &[k, v] in feature.tags.as_chunks::<2>().0 {
+        if k == key {
+            return values.get(v as usize)?.bool_value;
         }
     }
     None
 }
 
 fn feature_number_tag(feature: &tile::Feature, key: u32, values: &[tile::Value]) -> Option<f64> {
-    for pair in feature.tags.chunks_exact(2) {
-        if pair[0] == key {
-            let v = values.get(pair[1] as usize)?;
+    for &[k, v] in feature.tags.as_chunks::<2>().0 {
+        if k == key {
+            let v = values.get(v as usize)?;
             return v
                 .double_value
                 .or_else(|| v.float_value.map(f64::from))
@@ -380,7 +380,7 @@ fn feature_number_tag(feature: &tile::Feature, key: u32, values: &[tile::Value])
 
 fn remove_feature_tag(tags: &mut Vec<u32>, key: u32) {
     let mut kept = Vec::with_capacity(tags.len());
-    for pair in tags.chunks_exact(2) {
+    for pair in tags.as_chunks::<2>().0 {
         if pair[0] != key {
             kept.extend_from_slice(pair);
         }
@@ -389,7 +389,7 @@ fn remove_feature_tag(tags: &mut Vec<u32>, key: u32) {
 }
 
 fn set_feature_tag(tags: &mut [u32], key: u32, value_index: u32) {
-    for pair in tags.chunks_exact_mut(2) {
+    for pair in tags.as_chunks_mut::<2>().0 {
         if pair[0] == key {
             pair[1] = value_index;
             return;
