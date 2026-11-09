@@ -1,4 +1,5 @@
-//! Verifies that every Rust example in `docs/src/examples/code/*.rs` compiles and builds a valid `Style`.
+//! Verifies that every native Rust example in `docs/src/examples/code/*.rs` compiles and builds a
+//! valid `Style`; the browser-side ones are checked by `web/tests/docs_examples.rs`.
 
 #[allow(dead_code)]
 mod display_a_map {

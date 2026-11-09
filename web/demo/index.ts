@@ -1,7 +1,8 @@
 import { startMapLibre } from 'maplibre-rs'
 
 // `?style=<url>` loads any style; `?example=<path>` instead imports a same-origin module whose
-// default export returns a style document. `?projection=globe|mercator|vertical-perspective`
+// default export returns a style document and whose `run` export, if any, is called with the
+// started map. `?projection=globe|mercator|vertical-perspective`
 // overrides the projection, and `?lat=`, `?lon=`, `?zoom=`, `?pitch=`, `?bearing=` override the
 // initial camera. Without a style URL or example the MapLibre demotiles world style is shown on
 // the globe.
@@ -33,14 +34,18 @@ const importExample = async (path: string): Promise<any> => {
   if (url.origin !== location.origin) {
     throw new Error(`example ${path} is not on ${location.origin}`)
   }
-  const module = await import(/* @vite-ignore */ url.href)
-  return typeof module.default === 'function' ? module.default() : module.default
+  return import(/* @vite-ignore */ url.href)
 }
+
+const example = examplePath ? importExample(examplePath) : null
 
 const loadStyle = async (): Promise<string | undefined> => {
   const source = examplePath ?? styleUrl
   try {
-    const style = examplePath ? await importExample(examplePath) : await fetchStyle()
+    const module = await example
+    const style = module
+      ? typeof module.default === 'function' ? await module.default() : module.default
+      : await fetchStyle()
     if (projection) {
       style.projection = { type: projection }
     }
@@ -63,4 +68,12 @@ const loadStyle = async (): Promise<string | undefined> => {
   }
 }
 
-loadStyle().then((styleJson) => startMapLibre(undefined, undefined, styleJson))
+const start = async () => {
+  const map = await startMapLibre(undefined, undefined, await loadStyle())
+  const module = await example?.catch(() => null)
+  if (map && typeof module?.run === 'function') {
+    await module.run(map)
+  }
+}
+
+start()
