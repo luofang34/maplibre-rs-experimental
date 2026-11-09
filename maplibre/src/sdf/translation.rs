@@ -17,9 +17,8 @@ fn translate(paint: &SymbolPaint, prefix: &str, zoom: f64) -> [f64; 2] {
 pub(crate) fn viewport_translation(paint: &SymbolPaint, prefix: &str, zoom: f64) -> bool {
     translate(paint, prefix, zoom) != [0.0; 2]
         && paint
-            .properties
-            .get(&format!("{prefix}-translate-anchor"))
-            .and_then(serde_json::Value::as_str)
+            .layout_enum(&format!("{prefix}-translate-anchor"), zoom)
+            .as_deref()
             == Some("viewport")
 }
 
@@ -59,5 +58,11 @@ mod tests {
         }));
         assert!(viewport_translation(&viewport, "icon", 0.0));
         assert_eq!(tile_translation(&viewport, "icon", 0.0), [0.0, 0.0]);
+        let stepped = paint(serde_json::json!({
+            "text-translate": [2, 0],
+            "text-translate-anchor": ["step", ["zoom"], "map", 10, "viewport"]
+        }));
+        assert!(!viewport_translation(&stepped, "text", 9.0));
+        assert!(viewport_translation(&stepped, "text", 10.0));
     }
 }

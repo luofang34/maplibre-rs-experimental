@@ -11,7 +11,15 @@ pub const ZOOM_ONLY_ENUMS: &[&str] = &[
     "icon-rotation-alignment",
     "text-pitch-alignment",
     "icon-pitch-alignment",
+    "text-overlap",
+    "icon-overlap",
+    "icon-text-fit",
+    "symbol-z-order",
 ];
+
+/// Symbol paint enumerations that may follow the zoom but not the feature. Paint follows the
+/// view's zoom, so unlike [`ZOOM_ONLY_ENUMS`] a tile's layout does not settle them.
+pub const ZOOM_ONLY_PAINT_ENUMS: &[&str] = &["text-translate-anchor", "icon-translate-anchor"];
 
 use crate::style::{
     expression::FeatureProperties,
@@ -102,15 +110,15 @@ impl SymbolPaint {
         self.properties.contains_key("symbol-height-offset")
     }
 
-    /// The layout enumeration `name` at `zoom`: the literal, or the value of a zoom expression
-    /// such as `["step", ["zoom"], "point", 11, "line"]`, which the style specification allows
-    /// for the properties in [`ZOOM_ONLY_ENUMS`].
+    /// The enumeration `name` at `zoom`: the literal, or the value of a zoom expression such as
+    /// `["step", ["zoom"], "point", 11, "line"]`, which the style specification allows for the
+    /// properties in [`ZOOM_ONLY_ENUMS`] and [`ZOOM_ONLY_PAINT_ENUMS`].
     pub fn layout_enum(&self, name: &str, zoom: f64) -> Option<String> {
         let value = self.properties.get(name)?;
         if let Some(literal) = value.as_str() {
             return Some(literal.to_owned());
         }
-        if !ZOOM_ONLY_ENUMS.contains(&name) {
+        if !ZOOM_ONLY_ENUMS.contains(&name) && !ZOOM_ONLY_PAINT_ENUMS.contains(&name) {
             return None;
         }
         self.text(name, &FeatureProperties::new(), zoom)
@@ -203,11 +211,8 @@ impl SymbolPaint {
         images: Option<&dyn crate::style::expression::ImageSet>,
     ) -> Option<(String, Vec<crate::style::property::TextSection>)> {
         let TextField(text, sections) = self.field(properties, zoom, images)?;
-        let text = match self
-            .properties
-            .get("text-transform")
-            .and_then(|value| value.as_str())
-        {
+        // The case may vary by feature, as the style specification allows.
+        let text = match self.text("text-transform", properties, zoom).as_deref() {
             Some("uppercase") => text.to_uppercase(),
             Some("lowercase") => text.to_lowercase(),
             _ => text,

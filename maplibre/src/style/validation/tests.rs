@@ -199,29 +199,39 @@ fn symbol_values_that_are_not_evaluated_are_reported() {
     let style = style_with_layer(serde_json::json!({
         "id": "labels", "type": "symbol",
         "paint": {"text-color": ["get", "color"]},
-        "layout": {"text-field": "label", "text-transform": ["get", "case"]}
+        "layout": {"text-field": "label", "text-transform": ["get", "case"],
+            "text-keep-upright": ["get", "upright"]}
     }));
     let errors = style.validate().expect_err("unsupported symbol values");
     assert_eq!(errors.len(), 1, "{errors:?}");
     assert!(errors
         .iter()
-        .any(|error| error.to_string().contains("layout.text-transform")));
+        .any(|error| error.to_string().contains("layout.text-keep-upright")));
 }
 
+/// The style specification lets each of these follow the zoom, and only `text-transform` the
+/// feature too.
 #[test]
-fn overlap_modes_are_accepted_as_literals_only() {
+fn symbol_enumerations_take_expressions_of_what_they_may_depend_on() {
     let accepted = style_with_layer(serde_json::json!({
         "id": "labels", "type": "symbol",
-        "layout": {"text-field": "label", "text-overlap": "cooperative", "icon-overlap": "always"}
+        "paint": {"text-translate-anchor": ["step", ["zoom"], "map", 8, "viewport"]},
+        "layout": {"text-field": "label", "text-overlap": "cooperative",
+            "icon-overlap": ["step", ["zoom"], "never", 8, "always"],
+            "icon-text-fit": ["step", ["zoom"], "none", 8, "both"],
+            "symbol-z-order": ["step", ["zoom"], "auto", 8, "source"],
+            "text-transform": ["match", ["get", "kind"], "capital", "uppercase", "none"]}
     }));
-    accepted.validate().expect("overlap literals are supported");
+    accepted
+        .validate()
+        .expect("expressions of the zoom and the feature are supported");
     let rejected = style_with_layer(serde_json::json!({
         "id": "labels", "type": "symbol",
-        "layout": {"text-field": "label", "text-overlap": ["step", ["zoom"], "never", 8, "always"],
-            "icon-overlap": "sometimes"}
+        "layout": {"text-field": "label", "text-overlap": ["get", "overlap"],
+            "symbol-z-order": ["get", "order"], "icon-overlap": "sometimes"}
     }));
     let errors = rejected.validate().expect_err("unsupported overlap values");
-    assert_eq!(errors.len(), 2, "{errors:?}");
+    assert_eq!(errors.len(), 3, "{errors:?}");
 }
 
 #[test]

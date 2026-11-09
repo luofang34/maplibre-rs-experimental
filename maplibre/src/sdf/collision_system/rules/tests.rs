@@ -105,6 +105,23 @@ fn overlap_modes_decide_who_may_share_space() {
     );
 }
 
+/// GL JS lays a tile out at its zoom, so a zoom expression decides the overlap of that zoom.
+#[test]
+fn an_overlap_mode_follows_a_zoom_expression() {
+    let rect = [Some([10.0, 10.0, 60.0, 30.0]), None];
+    let overlap = serde_json::json!({"text-overlap": ["step", ["zoom"], "never", 10, "always"]});
+    let mut grid = CollisionGrid::new(512.0, 512.0);
+    assert_eq!(
+        rules(serde_json::json!({})).place(rect, &mut grid, [512.0; 2]),
+        [true, false]
+    );
+    assert_eq!(
+        rules(overlap).place(rect, &mut grid, [512.0; 2]),
+        [true, false],
+        "at zoom 12 the step says always"
+    );
+}
+
 #[test]
 fn a_label_along_a_line_collides_through_its_glyph_boxes_not_the_box_around_them() {
     // Two glyph boxes far apart with a gap between, as at the ends of a curved label.

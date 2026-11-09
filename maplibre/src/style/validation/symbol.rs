@@ -25,6 +25,8 @@ enum Property {
     WritingModes,
     Font,
     Enum(&'static [&'static str]),
+    /// An enumeration whose value may also vary by feature.
+    FeatureEnum(&'static [&'static str]),
 }
 
 fn property(name: &str) -> Option<Property> {
@@ -59,7 +61,7 @@ fn property(name: &str) -> Option<Property> {
         "text-keep-upright" | "icon-keep-upright" => Property::Boolean,
         "text-offset" | "icon-offset" => Property::Pair(Feature),
         "text-font" => Property::Font,
-        "text-transform" => Property::Enum(&["none", "uppercase", "lowercase"]),
+        "text-transform" => Property::FeatureEnum(&["none", "uppercase", "lowercase"]),
         "symbol-placement" => Property::Enum(&["point", "line", "line-center"]),
         "text-pitch-alignment" | "icon-pitch-alignment" | "icon-rotation-alignment" => {
             Property::Enum(&["auto", "map", "viewport"])
@@ -125,10 +127,10 @@ impl LayerValidation<'_> {
                 Some(Property::Image) => self.property(&path, Some(&StyleProperty::<crate::style::layer::ImageName>::parse(value)), Feature),
                 Some(Property::BooleanExpression) => self.property(&path, Some(&StyleProperty::<bool>::parse(value)), Feature),
                 Some(kind) if valid_literal(&kind, value) => {}
+                // A string that is none of the values is no expression either.
+                Some(Property::FeatureEnum(_)) if !value.is_string() => self.property(&path, Some(&StyleProperty::<TextField>::parse(value)), Feature),
                 // These follow the zoom; `SymbolPaint::layout_enum` evaluates them.
-                Some(Property::Enum(_))
-                    if crate::style::symbol::ZOOM_ONLY_ENUMS.contains(&name.as_str()) =>
-                {
+                Some(Property::Enum(_)) if !value.is_string() && follows_zoom(name) => {
                     self.property(&path, Some(&StyleProperty::<TextField>::parse(value)), Zoom)
                 }
                 Some(_) => self.unsupported(&path, "this property requires a supported literal value; expressions are not evaluated"),
@@ -136,6 +138,11 @@ impl LayerValidation<'_> {
             }
         }
     }
+}
+
+fn follows_zoom(name: &str) -> bool {
+    use crate::style::symbol::{ZOOM_ONLY_ENUMS, ZOOM_ONLY_PAINT_ENUMS};
+    ZOOM_ONLY_ENUMS.contains(&name) || ZOOM_ONLY_PAINT_ENUMS.contains(&name)
 }
 
 fn valid_literal(property: &Property, value: &Value) -> bool {
@@ -181,7 +188,9 @@ fn valid_literal(property: &Property, value: &Value) -> bool {
                 && !crate::style::expression::is_expression(items)
                 && items.iter().all(Value::is_string)
         }),
-        Property::Enum(allowed) => value.as_str().is_some_and(|value| allowed.contains(&value)),
+        Property::Enum(allowed) | Property::FeatureEnum(allowed) => {
+            value.as_str().is_some_and(|value| allowed.contains(&value))
+        }
         _ => false,
     }
 }

@@ -203,13 +203,18 @@ fn symbol_placement_follows_a_zoom_expression() {
     );
 }
 
-/// Feature data cannot choose these, so a property that is not one of them stays unevaluated.
+/// A property whose value may vary by feature has no value without one.
 #[test]
 fn only_zoom_only_enumerations_are_evaluated() {
     let paint: SymbolPaint = serde_json::from_value(serde_json::json!({
-        "text-overlap": ["step", ["zoom"], "never", 11, "always"]
+        "text-overlap": ["step", ["zoom"], "never", 11, "always"],
+        "text-transform": ["step", ["zoom"], "none", 11, "uppercase"]
     }))
     .expect("paint");
 
-    assert_eq!(paint.layout_enum("text-overlap", 15.0), None);
+    assert_eq!(
+        paint.layout_enum("text-overlap", 15.0).as_deref(),
+        Some("always")
+    );
+    assert_eq!(paint.layout_enum("text-transform", 15.0), None);
 }
