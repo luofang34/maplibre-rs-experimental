@@ -1,6 +1,6 @@
 # Add 3D Terrain
 
-Go beyond hillshade and show elevation in actual 3D.
+Go beyond hillshade and show elevation in actual 3D with automatic zoom-driven tilt (`Auto-Tilt`), a floating GPU navigation HUD (`Compass`, `2D/3D`, `MAP/RTS`), and predictive nadir tile streaming.
 
 <div class="example-map">
   <iframe src="./demo/index.html?example=../code/add-3d-terrain.js" title="Add 3D Terrain" loading="lazy" allow="fullscreen"></iframe>
