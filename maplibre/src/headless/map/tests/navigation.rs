@@ -211,3 +211,48 @@ async fn navigation_controls_settle_the_compass_and_publish_the_hud() {
         "{bearing}"
     );
 }
+
+#[tokio::test]
+async fn the_hud_plugin_draws_the_controls_once_navigation_publishes_them() {
+    let style: crate::style::Style = serde_json::from_str(
+        r##"{"version":8,"center":[10,40],"zoom":3,"sources":{},
+            "layers":[{"id":"bg","type":"background","paint":{"background-color":"#000000"}}]}"##,
+    )
+    .expect("style");
+    let (kernel, renderer) = crate::headless::create_headless_renderer(256, 256, None)
+        .await
+        .expect("renderer");
+    let mut map = super::super::HeadlessMap::new(
+        style,
+        renderer,
+        kernel,
+        vec![
+            Box::new(crate::render::RenderPlugin),
+            Box::new(crate::background::BackgroundPlugin),
+            Box::new(crate::hud::NavigationHudPlugin),
+        ],
+    )
+    .expect("map");
+    let origin = crate::hud::NavigationHudState::panel_origin(
+        256.0,
+        256.0,
+        &crate::render::camera::EdgeInsets::default(),
+    );
+    // Sum of channels inside the capsule, where the zoom buttons sit.
+    let capsule = |map: &super::super::HeadlessMap| -> u64 {
+        let texture = map.head_texture().expect("head texture");
+        let pixels = super::super::readback::read_blocking(map, texture, wgpu::TextureAspect::All)
+            .expect("readback");
+        let (x0, y0) = (origin.x as usize + 8, origin.y as usize + 80);
+        (y0..y0 + 40)
+            .flat_map(|y| (x0..x0 + 20).map(move |x| (y * 256 + x) * 4))
+            .map(|i| pixels[i..i + 3].iter().map(|&c| u64::from(c)).sum::<u64>())
+            .sum()
+    };
+    map.run_frame().expect("frame");
+    assert_eq!(capsule(&map), 0, "no HUD before navigation publishes it");
+    let mut controls = crate::navigation::NavigationState::default();
+    map.navigate(&mut controls, std::time::Duration::from_millis(16));
+    map.run_frame().expect("frame");
+    assert!(capsule(&map) > 0, "HUD capsule should be drawn");
+}
