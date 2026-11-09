@@ -21,6 +21,17 @@ pub const CIRCLE_GRID_STEPS: [u32; 4] = [0, 2, 5, 7];
 /// Vertex order of a circle quad; corners follow the shader's `vertex_index % 4` decoding.
 pub const CIRCLE_QUAD_INDICES: [u32; 6] = [0, 1, 2, 0, 2, 3];
 
+/// The fraction of a circle vertex's `corner_code` that carries a per-feature stroke opacity:
+/// zero keeps the layer's own, and an opacity `o` is `0.25 + 0.5 o`. The integer part stays the
+/// corner, and the elevation slot stays free for the ground the circle stands on.
+fn stroke_opacity_fraction(stroke_opacity: f32) -> f32 {
+    if stroke_opacity < 0.0 {
+        0.0
+    } else {
+        0.25 + 0.5 * stroke_opacity.min(1.0)
+    }
+}
+
 /// What a circle layer needs to size each feature's quad.
 #[derive(Clone, Debug)]
 pub struct CircleOptions {
@@ -145,9 +156,8 @@ where
         let push = |code: f32, buffer: &mut Vec<ShaderVertex>| {
             let mut vertex = ShaderVertex::new([x, y], [radius, stroke_width]);
             vertex.distance = blur;
-            vertex.elevation = stroke_opacity;
             vertex.edge_distance = radius_next;
-            vertex.corner_code = code;
+            vertex.corner_code = code + stroke_opacity_fraction(stroke_opacity);
             buffer.push(vertex);
         };
         if options.grid {
@@ -175,3 +185,6 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

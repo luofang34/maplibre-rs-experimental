@@ -14,15 +14,16 @@ pub struct ShaderVertex {
     pub normal: Vec2f32,
     /// Distance along a stroked path, in tile units.
     pub distance: f32,
-    /// Height above the body datum for spatial lines; a float below -1e20 keeps cartographic
-    /// draping and then carries a stroke's side, gap width and blur.
+    /// Height above the body datum for spatial lines, and for circles and heatmap points the
+    /// ground under them; a float below -1e20 keeps cartographic draping and then carries a
+    /// stroke's side, gap width and blur.
     pub elevation: f32,
     /// Distance along the ring of an extruded wall, in tile units; a stroke packs its
     /// per-feature width and offset here instead. Zero elsewhere.
     pub edge_distance: f32,
     /// For a vertex of a subdivided circle or heatmap kernel, one plus the packed position of
     /// its corner on an eight-by-eight grid; zero where the shader decodes the corner from the
-    /// vertex index.
+    /// vertex index. A circle's fractional part carries a per-feature stroke opacity.
     pub corner_code: f32,
 }
 
