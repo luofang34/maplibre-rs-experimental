@@ -41,7 +41,7 @@ runs:
           # asks the crates.io API on every run, which refuses busy CI with HTTP 403.
           URL="https://github.com/cargo-bins/cargo-binstall/releases/download/v1.26.2/$FILE"
           echo "Downloading binstall: $URL"
-          curl --fail -L -o /tmp/binstall.bin "$URL"
+          curl --fail -L --retry 5 --retry-delay 2 --retry-all-errors -o /tmp/binstall.bin "$URL"
           # Next to the cargo on the PATH: under Windows bash, $HOME is the shell's own home,
           # not the one rustup installed into.
           INSTALL_PATH="$(dirname "$(command -v cargo)")"
