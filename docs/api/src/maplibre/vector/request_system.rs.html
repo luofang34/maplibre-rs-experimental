@@ -294,49 +294,66 @@
 <a href=#294 id=294 data-nosnippet>294</a>            }
 <a href=#295 id=295 data-nosnippet>295</a>            worker_style
 <a href=#296 id=296 data-nosnippet>296</a>        });
-<a href=#297 id=297 data-nosnippet>297</a>        <span class="self">self</span>.kernel
-<a href=#298 id=298 data-nosnippet>298</a>            .apc()
-<a href=#299 id=299 data-nosnippet>299</a>            .call(
-<a href=#300 id=300 data-nosnippet>300</a>                Input {
-<a href=#301 id=301 data-nosnippet>301</a>                    coords,
-<a href=#302 id=302 data-nosnippet>302</a>                    style: worker_style,
-<a href=#303 id=303 data-nosnippet>303</a>                    attempt,
-<a href=#304 id=304 data-nosnippet>304</a>                    overscaled_zoom,
-<a href=#305 id=305 data-nosnippet>305</a>                    pixel_ratio,
-<a href=#306 id=306 data-nosnippet>306</a>                    only_sources,
-<a href=#307 id=307 data-nosnippet>307</a>                },
-<a href=#308 id=308 data-nosnippet>308</a>                fetch_vector_apc::&lt;E::OffscreenKernelEnvironment, T, <span class="kw">_</span>&gt;,
-<a href=#309 id=309 data-nosnippet>309</a>            )
-<a href=#310 id=310 data-nosnippet>310</a>            .map_err(|source| SystemError::TileRequest {
-<a href=#311 id=311 data-nosnippet>311</a>                kind: <span class="string">"vector"</span>,
-<a href=#312 id=312 data-nosnippet>312</a>                coords,
-<a href=#313 id=313 data-nosnippet>313</a>                source,
-<a href=#314 id=314 data-nosnippet>314</a>            })<span class="question-mark">?</span>;
-<a href=#315 id=315 data-nosnippet>315</a>        <span class="kw">super</span>::content::begin(world, coords);
-<a href=#316 id=316 data-nosnippet>316</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(tile) = world
-<a href=#317 id=317 data-nosnippet>317</a>            .tiles
-<a href=#318 id=318 data-nosnippet>318</a>            .query_mut::&lt;<span class="kw-2">&amp;mut </span>VectorLayerBucketComponent&gt;(coords)
-<a href=#319 id=319 data-nosnippet>319</a>        {
-<a href=#320 id=320 data-nosnippet>320</a>            tile.overscaled_zoom = overscaled_zoom;
-<a href=#321 id=321 data-nosnippet>321</a>        }
-<a href=#322 id=322 data-nosnippet>322</a>        tile_retry::started(
-<a href=#323 id=323 data-nosnippet>323</a>            world,
-<a href=#324 id=324 data-nosnippet>324</a>            coords,
-<a href=#325 id=325 data-nosnippet>325</a>            RequestKind::Vector,
-<a href=#326 id=326 data-nosnippet>326</a>            attempt,
-<a href=#327 id=327 data-nosnippet>327</a>            issued_for.as_deref(),
-<a href=#328 id=328 data-nosnippet>328</a>        );
-<a href=#329 id=329 data-nosnippet>329</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(replaced) = <span class="kw">crate</span>::sdf::provided::restarted(world, coords, pixel_ratio) {
-<a href=#330 id=330 data-nosnippet>330</a>            <span class="self">self</span>.kernel.apc().cancel(replaced);
-<a href=#331 id=331 data-nosnippet>331</a>        }
-<a href=#332 id=332 data-nosnippet>332</a>        <span class="macro">tracing::debug!</span>(%coords, <span class="string">"vector tile request accepted"</span>);
-<a href=#333 id=333 data-nosnippet>333</a>        <span class="prelude-val">Ok</span>(())
-<a href=#334 id=334 data-nosnippet>334</a>    }
-<a href=#335 id=335 data-nosnippet>335</a>}
-<a href=#336 id=336 data-nosnippet>336</a>
-<a href=#337 id=337 data-nosnippet>337</a><span class="doccomment">/// Whether tiles are laid out for the zoom they are magnified to: layout and filter
-<a href=#338 id=338 data-nosnippet>338</a>/// expressions are evaluated at that zoom, and labels along a line space themselves by it.
-<a href=#339 id=339 data-nosnippet>339</a></span><span class="kw">pub fn </span>depends_on_overscaling(style: <span class="kw-2">&amp;</span><span class="kw">crate</span>::style::Style) -&gt; bool {
-<a href=#340 id=340 data-nosnippet>340</a>    style.layers.iter().any(|layer| layer.paint.is_some())
-<a href=#341 id=341 data-nosnippet>341</a>}
+<a href=#297 id=297 data-nosnippet>297</a>        <span class="comment">// What the worker is asked to build: its style's non-symbol layers, for the refreshed
+<a href=#298 id=298 data-nosnippet>298</a>        // sources alone when the request is limited to them.
+<a href=#299 id=299 data-nosnippet>299</a>        </span><span class="kw">let </span>requested: Vec&lt;String&gt; = worker_style
+<a href=#300 id=300 data-nosnippet>300</a>            .layers
+<a href=#301 id=301 data-nosnippet>301</a>            .iter()
+<a href=#302 id=302 data-nosnippet>302</a>            .filter(|layer| {
+<a href=#303 id=303 data-nosnippet>303</a>                layer.type_ != <span class="string">"symbol"
+<a href=#304 id=304 data-nosnippet>304</a>                    </span>&amp;&amp; <span class="kw">crate</span>::style::mutation::from_vector_tiles(layer)
+<a href=#305 id=305 data-nosnippet>305</a>                    &amp;&amp; only_sources.as_ref().is_none_or(|sources| {
+<a href=#306 id=306 data-nosnippet>306</a>                        layer
+<a href=#307 id=307 data-nosnippet>307</a>                            .source
+<a href=#308 id=308 data-nosnippet>308</a>                            .as_ref()
+<a href=#309 id=309 data-nosnippet>309</a>                            .is_some_and(|source| sources.contains(source))
+<a href=#310 id=310 data-nosnippet>310</a>                    })
+<a href=#311 id=311 data-nosnippet>311</a>            })
+<a href=#312 id=312 data-nosnippet>312</a>            .map(|layer| layer.id.clone())
+<a href=#313 id=313 data-nosnippet>313</a>            .collect();
+<a href=#314 id=314 data-nosnippet>314</a>        <span class="self">self</span>.kernel
+<a href=#315 id=315 data-nosnippet>315</a>            .apc()
+<a href=#316 id=316 data-nosnippet>316</a>            .call(
+<a href=#317 id=317 data-nosnippet>317</a>                Input {
+<a href=#318 id=318 data-nosnippet>318</a>                    coords,
+<a href=#319 id=319 data-nosnippet>319</a>                    style: worker_style,
+<a href=#320 id=320 data-nosnippet>320</a>                    attempt,
+<a href=#321 id=321 data-nosnippet>321</a>                    overscaled_zoom,
+<a href=#322 id=322 data-nosnippet>322</a>                    pixel_ratio,
+<a href=#323 id=323 data-nosnippet>323</a>                    only_sources,
+<a href=#324 id=324 data-nosnippet>324</a>                },
+<a href=#325 id=325 data-nosnippet>325</a>                fetch_vector_apc::&lt;E::OffscreenKernelEnvironment, T, <span class="kw">_</span>&gt;,
+<a href=#326 id=326 data-nosnippet>326</a>            )
+<a href=#327 id=327 data-nosnippet>327</a>            .map_err(|source| SystemError::TileRequest {
+<a href=#328 id=328 data-nosnippet>328</a>                kind: <span class="string">"vector"</span>,
+<a href=#329 id=329 data-nosnippet>329</a>                coords,
+<a href=#330 id=330 data-nosnippet>330</a>                source,
+<a href=#331 id=331 data-nosnippet>331</a>            })<span class="question-mark">?</span>;
+<a href=#332 id=332 data-nosnippet>332</a>        <span class="kw">super</span>::content::begin(world, coords, requested);
+<a href=#333 id=333 data-nosnippet>333</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(tile) = world
+<a href=#334 id=334 data-nosnippet>334</a>            .tiles
+<a href=#335 id=335 data-nosnippet>335</a>            .query_mut::&lt;<span class="kw-2">&amp;mut </span>VectorLayerBucketComponent&gt;(coords)
+<a href=#336 id=336 data-nosnippet>336</a>        {
+<a href=#337 id=337 data-nosnippet>337</a>            tile.overscaled_zoom = overscaled_zoom;
+<a href=#338 id=338 data-nosnippet>338</a>        }
+<a href=#339 id=339 data-nosnippet>339</a>        tile_retry::started(
+<a href=#340 id=340 data-nosnippet>340</a>            world,
+<a href=#341 id=341 data-nosnippet>341</a>            coords,
+<a href=#342 id=342 data-nosnippet>342</a>            RequestKind::Vector,
+<a href=#343 id=343 data-nosnippet>343</a>            attempt,
+<a href=#344 id=344 data-nosnippet>344</a>            issued_for.as_deref(),
+<a href=#345 id=345 data-nosnippet>345</a>        );
+<a href=#346 id=346 data-nosnippet>346</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(replaced) = <span class="kw">crate</span>::sdf::provided::restarted(world, coords, pixel_ratio) {
+<a href=#347 id=347 data-nosnippet>347</a>            <span class="self">self</span>.kernel.apc().cancel(replaced);
+<a href=#348 id=348 data-nosnippet>348</a>        }
+<a href=#349 id=349 data-nosnippet>349</a>        <span class="macro">tracing::debug!</span>(%coords, <span class="string">"vector tile request accepted"</span>);
+<a href=#350 id=350 data-nosnippet>350</a>        <span class="prelude-val">Ok</span>(())
+<a href=#351 id=351 data-nosnippet>351</a>    }
+<a href=#352 id=352 data-nosnippet>352</a>}
+<a href=#353 id=353 data-nosnippet>353</a>
+<a href=#354 id=354 data-nosnippet>354</a><span class="doccomment">/// Whether tiles are laid out for the zoom they are magnified to: layout and filter
+<a href=#355 id=355 data-nosnippet>355</a>/// expressions are evaluated at that zoom, and labels along a line space themselves by it.
+<a href=#356 id=356 data-nosnippet>356</a></span><span class="kw">pub fn </span>depends_on_overscaling(style: <span class="kw-2">&amp;</span><span class="kw">crate</span>::style::Style) -&gt; bool {
+<a href=#357 id=357 data-nosnippet>357</a>    style.layers.iter().any(|layer| layer.paint.is_some())
+<a href=#358 id=358 data-nosnippet>358</a>}
 </code></pre></div></section></main></body></html>
