@@ -55,6 +55,7 @@ pub mod geojson;
 pub mod heatmap;
 pub mod hillshade;
 pub mod hud;
+pub mod navigation;
 #[cfg(feature = "experimental")]
 pub mod overlay;
 pub mod raster;

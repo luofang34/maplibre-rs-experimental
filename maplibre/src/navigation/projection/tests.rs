@@ -1,15 +1,15 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 use cgmath::{Deg, Vector2};
-use maplibre::{
+
+use super::{active_globe_camera, zoom_globe_around_pixel};
+use crate::{
     coords::{LatLon, WorldCoords, Zoom},
     projection::{ProjectionSpecification, ProjectionType},
     render::view_state::ViewState,
     style::Style,
     window::PhysicalSize,
 };
-
-use super::{active_globe_camera, zoom_globe_around_pixel};
 
 fn globe_view(zoom: f64) -> (Style, ViewState) {
     let zoom = Zoom::new(zoom);
@@ -89,7 +89,7 @@ fn zoom_into_mercator_preserves_geographic_center() {
 
 #[test]
 fn a_free_camera_is_dragged_and_zoomed_by_its_pose() {
-    use maplibre::render::view_state::NavigationMode;
+    use crate::render::view_state::NavigationMode;
     let (_, mut view) = globe_view(5.0);
     let style = Style {
         projection: Some(ProjectionSpecification {

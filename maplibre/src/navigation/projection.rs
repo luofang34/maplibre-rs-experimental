@@ -1,7 +1,8 @@
-//! Projection-aware coordinate conversion for input handlers.
+//! Projection-aware pan, zoom and picking helpers for navigation gestures.
 
 use cgmath::{EuclideanSpace, Point2, Rad, Vector2};
-use maplibre::{
+
+use crate::{
     coords::{LatLon, WorldCoords, Zoom},
     projection::globe::{
         camera::GlobeCameraState,
@@ -226,7 +227,7 @@ pub fn zoom_mercator_around_with_pitch(
 fn apply_pan_update(view_state: &mut ViewState, current_latitude: f64, update: GlobePanUpdate) {
     let reachable = LatLon::from_mercator(update.center.to_mercator());
     let zoom = view_state.zoom().value()
-        + maplibre::projection::globe::globe_zoom_adjustment(current_latitude, reachable.latitude);
+        + crate::projection::globe::globe_zoom_adjustment(current_latitude, reachable.latitude);
     set_center(view_state, reachable, zoom);
 }
 

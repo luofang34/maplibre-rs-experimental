@@ -27,10 +27,10 @@ use crate::input::{
 mod camera_handler;
 mod debug_handler;
 mod inertia;
-pub mod navigation_state;
+pub use maplibre::navigation as navigation_state;
 mod pan_handler;
 mod pinch_handler;
-pub mod projection;
+pub use maplibre::navigation::projection;
 mod query_handler;
 mod shift_handler;
 mod zoom_handler;
