@@ -103,14 +103,27 @@ fn main(
         stroke_opacity_code > 0.125,
     );
     let antialiasblur = -max(1.0 / total, blur);
+    // A stroke colour that varies by feature rides packed with the fill in the feature colour.
+    var fill = color;
+    var stroke = stroke_color;
+    if circle_flags.z > 0.5 {
+        fill = vec4<f32>(unpack_byte_pair(color.x), unpack_byte_pair(color.y)) / 255.0;
+        stroke = vec4<f32>(unpack_byte_pair(color.z), unpack_byte_pair(color.w)) / 255.0;
+    }
     return VertexOutput(
         clip,
-        color,
-        stroke_color,
+        fill,
+        stroke,
         vec3<f32>(extrude, antialiasblur),
         vec4<f32>(radius / total, circle_params.x, stroke_opacity, stroke_width),
         horizon,
     );
+}
+
+// Two 8-bit channels packed into one float as `256 high + low`.
+fn unpack_byte_pair(packed: f32) -> vec2<f32> {
+    let high = floor(packed / 256.0);
+    return vec2<f32>(high, packed - high * 256.0);
 }
 
 // The centre of a circle, on the terrain at `height` metres when it stands there; off terrain

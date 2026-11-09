@@ -1,7 +1,7 @@
 //! Property evaluation capabilities of each paint path.
 
 use super::{
-    Evaluation::{Constant, Density, Elevation, Feature, Progress, Zoom},
+    Evaluation::{Density, Elevation, Feature, Progress, Zoom},
     LayerValidation,
 };
 use crate::style::{
@@ -98,7 +98,7 @@ impl LayerValidation<'_> {
         self.property(
             "paint.circle-stroke-color",
             p.circle_stroke_color.as_ref(),
-            Constant,
+            Feature,
         );
         self.property(
             "paint.circle-stroke-opacity",

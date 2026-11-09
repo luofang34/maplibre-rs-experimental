@@ -455,6 +455,7 @@ where
         if let Some(value) = pattern {
             color[0] = value;
         }
+        let color = self.circle_feature_color(color);
         for _ in 0..polygons.max(1) {
             self.feature_colors.push(color);
         }

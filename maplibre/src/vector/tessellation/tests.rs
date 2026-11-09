@@ -248,6 +248,7 @@ mod circles {
                 stroke_width_default: 0.0,
                 blur: None,
                 stroke_opacity: None,
+                stroke_color: None,
                 zoom: 3.0,
                 grid: false,
             })
@@ -309,6 +310,7 @@ mod circles {
                 stroke_width_default: 0.0,
                 blur: None,
                 stroke_opacity: None,
+                stroke_color: None,
                 zoom: 3.0,
                 grid: true,
             });

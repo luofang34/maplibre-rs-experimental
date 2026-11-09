@@ -5,6 +5,7 @@
 //! driven. Points outside the tile are skipped as GL JS does, since a neighbouring tile draws
 //! them.
 
+use csscolorparser::Color;
 use lyon::tessellation::{geometry_builder::MaxIndex, VertexId};
 
 use super::ZeroTessellator;
@@ -32,6 +33,21 @@ fn stroke_opacity_fraction(stroke_opacity: f32) -> f32 {
     }
 }
 
+/// Two colours, straight RGBA in 0..=1, in the four lanes of one feature colour: each lane holds
+/// two 8-bit channels as `256 a + b`, which an `f32` keeps exactly, as GL JS packs colours. The
+/// vertex slots of a circle are all taken, so a stroke colour that varies by feature shares the
+/// lanes of the fill's.
+pub fn pack_circle_colors(fill: [f32; 4], stroke: [f32; 4]) -> [f32; 4] {
+    let byte = |channel: f32| (channel.clamp(0.0, 1.0) * 255.0).round();
+    let pair = |high: f32, low: f32| byte(high) * 256.0 + byte(low);
+    [
+        pair(fill[0], fill[1]),
+        pair(fill[2], fill[3]),
+        pair(stroke[0], stroke[1]),
+        pair(stroke[2], stroke[3]),
+    ]
+}
+
 /// What a circle layer needs to size each feature's quad.
 #[derive(Clone, Debug)]
 pub struct CircleOptions {
@@ -47,6 +63,9 @@ pub struct CircleOptions {
     pub blur: Option<StyleProperty<f32>>,
     /// `circle-stroke-opacity`, when it varies by feature.
     pub stroke_opacity: Option<StyleProperty<f32>>,
+    /// `circle-stroke-color`, when it varies by feature; each feature's colour then carries
+    /// both its fill and its stroke, as `pack_circle_colors` lays them out.
+    pub stroke_color: Option<StyleProperty<Color>>,
     /// Zoom of the tile, at which zoom-driven properties are evaluated.
     pub zoom: f64,
     /// Whether each quad is a grid of vertices, so a circle lying on the globe follows its curve.
@@ -70,6 +89,7 @@ impl CircleOptions {
             stroke_width_default: 0.0,
             blur: per_feature(paint.circle_blur.as_ref()),
             stroke_opacity: per_feature(paint.circle_stroke_opacity.as_ref()),
+            stroke_color: paint.stroke_color_per_feature().cloned(),
             zoom,
             grid: false,
         }
@@ -95,6 +115,7 @@ impl CircleOptions {
             stroke_width_default: 1.0,
             blur: None,
             stroke_opacity: None,
+            stroke_color: None,
             zoom,
             grid: false,
         }
@@ -109,6 +130,21 @@ where
     pub fn with_circles(mut self, options: CircleOptions) -> Self {
         self.circle = Some(options);
         self
+    }
+
+    /// The colour a finished feature's vertices carry: its fill, or its fill and stroke packed
+    /// together when the stroke colour varies by feature.
+    pub(super) fn circle_feature_color(&self, fill: [f32; 4]) -> [f32; 4] {
+        let Some(options) = &self.circle else {
+            return fill;
+        };
+        let Some(stroke) = &options.stroke_color else {
+            return fill;
+        };
+        let stroke = stroke
+            .evaluate_for(&self.feature_properties, options.zoom)
+            .map_or([0.0, 0.0, 0.0, 1.0], |color| color.to_array());
+        pack_circle_colors(fill, stroke)
     }
 
     pub(super) fn emit_circle(&mut self, x: f32, y: f32) {

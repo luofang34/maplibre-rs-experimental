@@ -135,12 +135,21 @@ impl CirclePaint {
         number_at(self.circle_blur.as_ref(), zoom, 0.0)
     }
 
-    /// Stroke colour as straight (non-premultiplied) RGBA; black when unset or data-driven.
-    pub fn stroke_color_rgba(&self) -> [f32; 4] {
-        match &self.circle_stroke_color {
-            Some(StyleProperty::Constant(color)) => [color.r, color.g, color.b, color.a],
-            _ => [0.0, 0.0, 0.0, 1.0],
-        }
+    /// Stroke colour shared by the layer's features, as straight RGBA at a zoom; black when
+    /// unset or when it varies by feature, which [`Self::stroke_color_per_feature`] carries.
+    pub fn stroke_color_at(&self, zoom: f64) -> [f32; 4] {
+        self.circle_stroke_color
+            .as_ref()
+            .filter(|color| color.is_feature_constant())
+            .and_then(|color| color.evaluate_at_zoom(zoom))
+            .map_or([0.0, 0.0, 0.0, 1.0], |color| color.to_array())
+    }
+
+    /// The stroke colour when it varies by feature, so each feature's vertices carry it.
+    pub fn stroke_color_per_feature(&self) -> Option<&StyleProperty<Color>> {
+        self.circle_stroke_color
+            .as_ref()
+            .filter(|color| !color.is_feature_constant())
     }
 }
 
@@ -179,7 +188,7 @@ mod tests {
         );
         assert!(matches!(paint.radius(), StyleProperty::Constant(radius) if radius == 3.0));
         assert!(matches!(paint.stroke_width(), StyleProperty::Constant(width) if width == 2.0));
-        assert_eq!(paint.stroke_color_rgba(), [0.0, 1.0, 0.0, 1.0]);
+        assert_eq!(paint.stroke_color_at(4.0), [0.0, 1.0, 0.0, 1.0]);
         assert_eq!(paint.circle_pitch_alignment, CirclePitchAlignment::Map);
         assert_eq!(paint.circle_pitch_scale, CirclePitchScale::Viewport);
         assert_eq!(paint.blur_at(4.0), 0.5);
@@ -197,7 +206,7 @@ mod tests {
             assert!(matches!(paint.stroke_width(), StyleProperty::Constant(width) if width == 0.0));
             assert_eq!(paint.circle_pitch_scale, CirclePitchScale::Map);
             assert_eq!(paint.circle_pitch_alignment, CirclePitchAlignment::Viewport);
-            assert_eq!(paint.stroke_color_rgba(), [0.0, 0.0, 0.0, 1.0]);
+            assert_eq!(paint.stroke_color_at(4.0), [0.0, 0.0, 0.0, 1.0]);
         }
     }
 
@@ -206,9 +215,13 @@ mod tests {
         let paint = circle_layer(serde_json::json!({
             "id": "a", "type": "circle", "source": "s",
             "paint": {"circle-opacity": {"stops": [[2, 0.2], [4, 0.8]]},
-                      "circle-radius": ["interpolate", ["linear"], ["zoom"], 0, 2, 10, 12]}
+                      "circle-radius": ["interpolate", ["linear"], ["zoom"], 0, 2, 10, 12],
+                      "circle-stroke-color": ["step", ["zoom"], "#ff0000", 4, "#0000ff"]}
         }));
         assert!((paint.opacity_at(3.0) - 0.5).abs() < 1e-6);
+        assert_eq!(paint.stroke_color_at(3.0), [1.0, 0.0, 0.0, 1.0]);
+        assert_eq!(paint.stroke_color_at(4.0), [0.0, 0.0, 1.0, 1.0]);
+        assert!(paint.stroke_color_per_feature().is_none());
         assert!(
             (paint
                 .radius()
