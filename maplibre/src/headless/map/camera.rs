@@ -11,6 +11,45 @@ impl HeadlessMap {
         view_state.set_center_altitude(meters);
     }
 
+    /// Runs the shared navigation controls for `dt`, as the winit host does each frame: on first
+    /// use it captures the home camera, then applies HUD actions, North-Lock and settle
+    /// animations, and publishes the state [`crate::hud::NavigationHudPlugin`] draws. Marks the
+    /// map for redraw when the camera or controls changed, and returns whether the controls
+    /// still move the camera, so an on-demand host keeps drawing frames until they settle.
+    pub fn navigate(
+        &mut self,
+        state: &mut crate::navigation::NavigationState,
+        dt: std::time::Duration,
+    ) -> bool {
+        let before = self.navigation_snapshot();
+        let animating = state.wants_frame(&self.map_context.view_state);
+        state.update_frame(&mut self.map_context, dt);
+        if animating || before != self.navigation_snapshot() {
+            crate::render::frame_signals::mark_dirty(&mut self.map_context.world);
+        }
+        state.wants_frame(&self.map_context.view_state)
+    }
+
+    fn navigation_snapshot(&self) -> (Option<crate::hud::NavigationHudState>, [f64; 5]) {
+        let view = &self.map_context.view_state;
+        let camera = view.camera();
+        let position = camera.position();
+        (
+            self.map_context
+                .world
+                .resources
+                .get::<crate::hud::NavigationHudState>()
+                .copied(),
+            [
+                position.x,
+                position.y,
+                camera.get_bearing().0,
+                camera.get_pitch().0,
+                view.zoom().value(),
+            ],
+        )
+    }
+
     /// Switches how the camera navigates the globe, for the style's projection.
     pub fn set_navigation_mode(
         &mut self,

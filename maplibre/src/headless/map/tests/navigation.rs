@@ -176,3 +176,83 @@ async fn constrained_navigation_refuses_a_target_past_the_mercator_world() {
         NavigationMode::Constrained
     );
 }
+
+#[tokio::test]
+async fn navigation_controls_settle_the_compass_and_publish_the_hud() {
+    let mut map = free_map(LatLon::new(40.0, 10.0)).await;
+    map.jump_to(crate::render::view_state::CameraOptions {
+        bearing: Some(cgmath::Deg(40.0)),
+        ..Default::default()
+    })
+    .expect("bearing");
+    map.run_frame().expect("frame");
+    let mut controls = crate::navigation::NavigationState::default();
+    let step = std::time::Duration::from_millis(16);
+    assert!(!map.navigate(&mut controls, step));
+    let hud = map
+        .context()
+        .world
+        .resources
+        .get::<crate::hud::NavigationHudState>()
+        .copied()
+        .expect("published HUD state");
+    assert!(hud.visible);
+    controls.trigger_compass(map.view_state().camera().get_bearing());
+    let mut frames = 0;
+    while map.navigate(&mut controls, step) {
+        map.run_frame().expect("frame");
+        frames += 1;
+        assert!(frames < 600, "compass reset never settled");
+    }
+    assert!(frames > 1, "compass reset should animate");
+    let bearing = map.view_state().camera().get_bearing().0;
+    assert!(
+        crate::navigation::normalize_angle_signed(bearing).abs() < 1e-3,
+        "{bearing}"
+    );
+}
+
+#[tokio::test]
+async fn the_hud_plugin_draws_the_controls_once_navigation_publishes_them() {
+    let style: crate::style::Style = serde_json::from_str(
+        r##"{"version":8,"center":[10,40],"zoom":3,"sources":{},
+            "layers":[{"id":"bg","type":"background","paint":{"background-color":"#000000"}}]}"##,
+    )
+    .expect("style");
+    let (kernel, renderer) = crate::headless::create_headless_renderer(256, 256, None)
+        .await
+        .expect("renderer");
+    let mut map = super::super::HeadlessMap::new(
+        style,
+        renderer,
+        kernel,
+        vec![
+            Box::new(crate::render::RenderPlugin),
+            Box::new(crate::background::BackgroundPlugin),
+            Box::new(crate::hud::NavigationHudPlugin),
+        ],
+    )
+    .expect("map");
+    let origin = crate::hud::NavigationHudState::panel_origin(
+        256.0,
+        256.0,
+        &crate::render::camera::EdgeInsets::default(),
+    );
+    // Sum of channels inside the capsule, where the zoom buttons sit.
+    let capsule = |map: &super::super::HeadlessMap| -> u64 {
+        let texture = map.head_texture().expect("head texture");
+        let pixels = super::super::readback::read_blocking(map, texture, wgpu::TextureAspect::All)
+            .expect("readback");
+        let (x0, y0) = (origin.x as usize + 8, origin.y as usize + 80);
+        (y0..y0 + 40)
+            .flat_map(|y| (x0..x0 + 20).map(move |x| (y * 256 + x) * 4))
+            .map(|i| pixels[i..i + 3].iter().map(|&c| u64::from(c)).sum::<u64>())
+            .sum()
+    };
+    map.run_frame().expect("frame");
+    assert_eq!(capsule(&map), 0, "no HUD before navigation publishes it");
+    let mut controls = crate::navigation::NavigationState::default();
+    map.navigate(&mut controls, std::time::Duration::from_millis(16));
+    map.run_frame().expect("frame");
+    assert!(capsule(&map) > 0, "HUD capsule should be drawn");
+}
