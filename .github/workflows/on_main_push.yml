@@ -18,6 +18,8 @@ concurrency:
 
 jobs:
   run-check:
+    permissions:
+      contents: write
     uses: ./.github/workflows/run-checks.yml
   run-benchmarks:
     uses: ./.github/workflows/run-benchmarks.yml
