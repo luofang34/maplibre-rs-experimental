@@ -1,8 +1,10 @@
 //! Resumed window creation and event dispatch for native and browser hosts.
+#[cfg(target_arch = "wasm32")]
+use maplibre::map::handle::MapHandle;
 use maplibre::{
     environment::Environment,
     event_loop::{EventLoopProxy, SendEventError},
-    map::Map,
+    map::{handle::WakeHost, Map},
 };
 
 use crate::{WinitApplicationError, WinitHostError, WinitMapWindowConfig};
@@ -58,7 +60,8 @@ impl<ET: 'static + Clone> WinitEventLoop<ET> {
         app.finish()
     }
 
-    /// Starts browser dispatch and resolves after the first successful renderer initialization.
+    /// Starts browser dispatch and resolves after the first successful renderer initialization
+    /// with a handle that sends the map commands; each wakes the loop with `ET::default()`.
     /// Suspended initialization preserves its map and services for the next resume.
     #[cfg(target_arch = "wasm32")]
     pub async fn spawn_map<E, F, C>(
@@ -66,18 +69,21 @@ impl<ET: 'static + Clone> WinitEventLoop<ET> {
         config: WinitMapWindowConfig<ET>,
         factory: F,
         max_frames: Option<u64>,
-    ) -> Result<(), WinitApplicationError<C>>
+    ) -> Result<MapHandle<E>, WinitApplicationError<C>>
     where
         E: Environment<MapWindowConfig = WinitMapWindowConfig<ET>>,
         F: FnMut(WinitMapWindowConfig<ET>) -> Result<Map<E>, C> + 'static,
         C: std::error::Error + 'static,
+        ET: Default,
     {
         use winit::platform::web::EventLoopExtWebSys;
         let (callback, completion) = completion::channel();
         let mut app = lifecycle::Application::new(config, factory, max_frames);
         app.completion = Some(callback);
+        let handle = app.handle(self.create_proxy().waking_with(ET::default()));
         self.event_loop.spawn_app(app);
-        completion.await
+        completion.await?;
+        Ok(handle)
     }
 }
 
@@ -85,6 +91,27 @@ impl<ET: 'static + Clone> WinitEventLoop<ET> {
 pub struct WinitEventLoopProxy<ET: 'static> {
     proxy: RawEventLoopProxy<ET>,
 }
+impl<ET: 'static + Clone> WinitEventLoopProxy<ET> {
+    /// Wakes the loop for a map handle by sending `event`, which the loop's handler passes
+    /// to [`WinitApplication`]'s `user_event`.
+    pub fn waking_with(self, event: ET) -> ProxyWake<ET> {
+        ProxyWake { proxy: self, event }
+    }
+}
+
+/// Wakes an idle event loop so it applies a map handle's commands.
+pub struct ProxyWake<ET: 'static> {
+    proxy: WinitEventLoopProxy<ET>,
+    event: ET,
+}
+impl<ET: 'static + Clone> WakeHost for ProxyWake<ET> {
+    fn wake(&self) {
+        if self.proxy.send_event(self.event.clone()).is_err() {
+            tracing::debug!("the map's event loop closed before a command reached it");
+        }
+    }
+}
+
 impl<ET: 'static> EventLoopProxy<ET> for WinitEventLoopProxy<ET> {
     fn send_event(&self, event: ET) -> Result<(), SendEventError> {
         self.proxy

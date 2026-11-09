@@ -25,11 +25,14 @@ async fn pending_and_ready_surfaces_release_on_suspend_and_render_on_resume() {
     let canvas = create_canvas();
     let observed = Rc::new(RefCell::new(Observed::default()));
     let result = observed.clone();
+    let early = Rc::new(RefCell::new(None));
+    let early_reply = early.clone();
     let finished = js_sys::Promise::new(&mut move |resolve, _reject| {
         let events = EventLoop::<Event>::with_user_event()
             .build()
             .expect("browser loop");
         let proxy = events.create_proxy();
+        let wake = proxy.clone();
         let client = GateClient::new(proxy.clone());
         let config = WinitMapWindowConfig::new("lifecycle-test".into());
         let state = result.clone();
@@ -45,6 +48,11 @@ async fn pending_and_ready_surfaces_release_on_suspend_and_render_on_resume() {
             },
             None,
         );
+        let handle = app.handle(move || {
+            wake.send_event(Event::Commands).ok();
+        });
+        // Sent before the loop runs: its wake finds no ready map, so only readiness applies it.
+        *early_reply.borrow_mut() = Some(handle.call(|map| map.is_initialized()));
         events.spawn_app(Driver {
             app,
             client,
@@ -56,6 +64,15 @@ async fn pending_and_ready_surfaces_release_on_suspend_and_render_on_resume() {
         .await
         .expect("exited lifecycle loop");
     assert!(observed.borrow().complete, "resumed map presented a frame");
+    let early = early
+        .borrow_mut()
+        .take()
+        .expect("command sent before the loop");
+    assert_eq!(
+        early.await,
+        Ok(true),
+        "a command sent before the map is ready waits for, and runs on, a ready map"
+    );
     assert_eq!(
         observed.borrow().constructed,
         1,
@@ -191,6 +208,7 @@ impl<A: ApplicationHandler<Event>> ApplicationHandler<Event> for Driver<A> {
             Event::Blocked => self.blocked(active),
             Event::LateWake => self.late_wake(active),
             Event::Presented { generation, size } => self.presented(active, generation, size),
+            Event::Commands => self.app.user_event(active, Event::Commands),
         }
     }
     fn window_event(&mut self, active: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
@@ -212,7 +230,7 @@ async fn public_spawn_map_resolves_after_renderer_and_plugins_initialize() {
     let mut exit_callback = None;
     let exited = js_sys::Promise::new(&mut |resolve, _reject| exit_callback = Some(resolve));
     let on_exit = exit_callback.expect("exit resolver");
-    events
+    let handle = events
         .spawn_map(
             config,
             move |config| {
@@ -233,5 +251,11 @@ async fn public_spawn_map_resolves_after_renderer_and_plugins_initialize() {
     wasm_bindgen_futures::JsFuture::from(exited)
         .await
         .expect("host exited");
+    assert!(handle.is_closed(), "exiting closes the map's handle");
+    assert_eq!(
+        handle.call(|_| ()).await,
+        Err(maplibre::map::handle::MapClosed),
+        "a command after exit is refused instead of waiting forever"
+    );
     canvas.remove();
 }

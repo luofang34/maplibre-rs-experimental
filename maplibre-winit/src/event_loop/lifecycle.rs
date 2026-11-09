@@ -8,7 +8,14 @@ use std::{
     task::{Context, Poll, Wake, Waker},
 };
 
-use maplibre::{environment::Environment, map::Map, window::HeadedMapWindow};
+use maplibre::{
+    environment::Environment,
+    map::{
+        handle::{MapCommands, MapHandle, WakeHost},
+        Map,
+    },
+    window::HeadedMapWindow,
+};
 use winit::{
     application::ApplicationHandler,
     event::{DeviceEvent, DeviceId, WindowEvent},
@@ -50,6 +57,7 @@ where
     initialized: bool,
     error: Option<WinitApplicationError<C>>,
     pub(super) completion: Option<Completion<C>>,
+    commands: MapCommands<E>,
 }
 
 impl<E, F, ET, C> Application<E, F, ET, C>
@@ -72,6 +80,22 @@ where
             initialized: false,
             error: None,
             completion: None,
+            commands: MapCommands::default(),
+        }
+    }
+    /// A handle whose commands this handler applies once the map is ready. `wake` must make
+    /// the event loop deliver a user event to [`ApplicationHandler::user_event`], as
+    /// [`crate::WinitEventLoopProxy::waking_with`] does.
+    pub fn handle(&self, wake: impl WakeHost + 'static) -> MapHandle<E> {
+        self.commands.handle(wake)
+    }
+    /// Applies the host's commands between frames, then draws only if they changed the map.
+    fn apply_commands(&mut self) {
+        if let State::Ready(dispatch) = &mut self.state {
+            self.commands.apply(&mut dispatch.map);
+            if dispatch.map.needs_redraw() {
+                dispatch.map.window().request_redraw();
+            }
         }
     }
     /// Returns any initialization or frame error after the host event loop exits.
@@ -84,6 +108,7 @@ where
     }
     fn fail(&mut self, active: &ActiveEventLoop, error: WinitApplicationError<C>) {
         tracing::error!(%error,"windowed map lifecycle failed");
+        self.commands.close();
         self.state = State::Dormant;
         drop(self.recovery.borrow_mut().take());
         if let Some(completion) = self.completion.take() {
@@ -138,6 +163,8 @@ where
         if let Some(completion) = self.completion.take() {
             completion(Ok(()));
         }
+        // Commands sent while the map was not ready got no wake that finds it ready.
+        self.apply_commands();
     }
 }
 
@@ -198,13 +225,17 @@ where
                 return;
             }
             if let State::Ready(dispatch) = &mut self.state {
-                if let Err(error) = dispatch.redraw(active) {
-                    self.fail(active, WinitApplicationError::Frame(error));
+                match dispatch.redraw(active) {
+                    Ok(()) => self.commands.observe(&mut dispatch.map),
+                    Err(error) => self.fail(active, WinitApplicationError::Frame(error)),
                 }
             }
         } else if let State::Ready(dispatch) = &mut self.state {
             dispatch.window_event(&event, active);
         }
+    }
+    fn user_event(&mut self, _active: &ActiveEventLoop, _event: ET) {
+        self.apply_commands();
     }
     fn device_event(&mut self, _active: &ActiveEventLoop, _id: DeviceId, event: DeviceEvent) {
         if self.active {
@@ -221,6 +252,7 @@ where
         }
     }
     fn exiting(&mut self, _active: &ActiveEventLoop) {
+        self.commands.close();
         self.state = State::Dormant;
         drop(self.recovery.borrow_mut().take());
         if let Some(completion) = self.completion.take() {

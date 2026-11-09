@@ -451,10 +451,10 @@ where
 
 pub(crate) mod camera;
 mod frame;
+pub mod handle;
 mod provided_images;
 mod signals;
 mod sources;
-
 use camera::{merged, starting_view};
 
 #[cfg(test)]
