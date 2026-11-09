@@ -7,9 +7,9 @@ use std::sync::{
     Arc,
 };
 
-use crate::headless::map::HeadlessMap;
 use crate::{
     coords::LatLon,
+    headless::map::HeadlessMap,
     io::source_client::{HttpClient, SourceFetchError},
     render::{
         frame_signals::RedrawReasons,
@@ -156,6 +156,9 @@ async fn terrain_map(zoom: f64, pitch: f64, tiles: SyntheticTiles) -> HeadlessMa
     map.set_navigation_mode(NavigationMode::FreeGlobe)
         .expect("free globe");
     map.set_pixel_ratio(2.0);
+    // The host's frame clock stands still until a test moves it, so a backoff runs out only
+    // where a test says, however long a frame takes to draw on the machine running it.
+    map.frame_input_mut().timestamp = std::time::Duration::ZERO;
     map
 }
 
