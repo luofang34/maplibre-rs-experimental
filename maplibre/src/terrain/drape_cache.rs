@@ -71,6 +71,9 @@ struct Entry<T> {
     texture: T,
     fingerprint: Option<u64>,
     has_content: bool,
+    /// A view has drawn it, so it is parked with its content when its tile leaves the view;
+    /// a drape prepared ahead of the view that none has shown gives its texture back instead.
+    shown: bool,
 }
 
 impl<T> Entry<T> {
@@ -135,24 +138,59 @@ impl<T> DrapeCache<T> {
         may_create: bool,
         create: impl FnOnce() -> T,
     ) -> DrapeState {
+        self.acquire_as(coords, fingerprint, (may_create, true), create)
+    }
+
+    /// Like [`acquire`](Self::acquire), for a drape prepared ahead of the view, which a view
+    /// has not shown until one acquires it.
+    pub fn acquire_ahead(
+        &mut self,
+        coords: WorldTileCoords,
+        fingerprint: u64,
+        may_create: bool,
+        create: impl FnOnce() -> T,
+    ) -> DrapeState {
+        self.acquire_as(coords, fingerprint, (may_create, false), create)
+    }
+
+    fn acquire_as(
+        &mut self,
+        coords: WorldTileCoords,
+        fingerprint: u64,
+        (may_create, shown): (bool, bool),
+        create: impl FnOnce() -> T,
+    ) -> DrapeState {
         match self.entries.get_mut(&coords) {
-            Some(entry) => entry.acquire(fingerprint),
+            // A drape prepared ahead keeps what it was prepared with while it is out of view:
+            // the looser covering it follows shifts as the view moves, and redrawing it for
+            // that would draw what no one sees. The view checks it once it shows the tile.
+            Some(entry) if !shown && entry.has_content => DrapeState::Unchanged,
+            Some(entry) => {
+                entry.shown |= shown;
+                entry.acquire(fingerprint)
+            }
             None => {
                 if let Some(index) = self.parked.iter().position(|(parked, _)| *parked == coords) {
                     if let Some((_, mut entry)) = self.parked.remove(index) {
+                        entry.shown |= shown;
                         let state = entry.acquire(fingerprint);
                         self.entries.insert(coords, entry);
                         return state;
                     }
                 }
-                // A spare texture first, then a new one while the budget allows; past the
-                // budget the texture parked longest ago gives up its content, and with none
-                // parked the tile goes without.
+                // A spare texture first, then a new one while the budget allows. Past the budget
+                // a view takes the texture of a drape prepared ahead of it that none has shown,
+                // then the one parked longest ago; a drape prepared ahead takes neither, and a
+                // tile that finds none goes without.
                 let texture = match self.free.pop() {
                     Some(texture) => texture,
                     None if may_create => create(),
-                    None => match self.parked.pop_back() {
-                        Some((_, entry)) => entry.texture,
+                    None if !shown => return DrapeState::Withheld,
+                    None => match self
+                        .take_unshown()
+                        .or_else(|| self.parked.pop_back().map(|(_, entry)| entry.texture))
+                    {
+                        Some(texture) => texture,
                         None => return DrapeState::Withheld,
                     },
                 };
@@ -162,11 +200,22 @@ impl<T> DrapeCache<T> {
                         texture,
                         fingerprint: Some(fingerprint),
                         has_content: true,
+                        shown,
                     },
                 );
                 DrapeState::New
             }
         }
+    }
+
+    /// Removes a drape prepared ahead of the view that none has shown, for its texture.
+    fn take_unshown(&mut self) -> Option<T> {
+        let coords = self
+            .entries
+            .iter()
+            .find(|(_, entry)| !entry.shown)
+            .map(|(coords, _)| *coords)?;
+        self.entries.remove(&coords).map(|entry| entry.texture)
     }
 
     /// Textures held, parked and spare together.
@@ -198,8 +247,10 @@ impl<T> DrapeCache<T> {
             .copied()
             .collect();
         for coords in dropped {
-            if let Some(entry) = self.entries.remove(&coords) {
-                self.parked.push_front((coords, entry));
+            match self.entries.remove(&coords) {
+                Some(entry) if entry.shown => self.parked.push_front((coords, entry)),
+                Some(entry) if self.free.len() < MAX_FREE_TEXTURES => self.free.push(entry.texture),
+                _ => {}
             }
         }
         while self.parked.len() > PARKED_TEXTURES {
@@ -209,6 +260,12 @@ impl<T> DrapeCache<T> {
                 }
             }
         }
+    }
+
+    /// Whether a view has drawn the tile's drape, in use or parked after it left the view.
+    pub fn holds_shown(&self, coords: WorldTileCoords) -> bool {
+        self.entries.get(&coords).is_some_and(|entry| entry.shown)
+            || self.parked.iter().any(|(parked, _)| *parked == coords)
     }
 
     /// Texture of a view tile, if it has one.

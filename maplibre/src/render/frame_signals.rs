@@ -46,8 +46,10 @@ pub struct FrameStats {
     pub gpu: Option<Duration>,
     /// Bytes written to GPU buffers and textures.
     pub upload_bytes: u64,
-    /// Terrain drapes drawn again.
+    /// Terrain drapes a view shows that were drawn again.
     pub drape_redraws: u32,
+    /// Terrain drapes prepared ahead of the view, which no surface shows yet.
+    pub prefetch_drapes: u32,
     /// Draw calls recorded.
     pub draws: u32,
 }
@@ -127,11 +129,14 @@ fn eye_index(world: &World) -> usize {
 
 /// Charges a stage's CPU time to the current frame.
 /// Counts terrain drapes drawn again this frame.
-pub(crate) fn count_drape_redraws(world: &mut World, redraws: usize) {
+pub(crate) fn count_drape_redraws(world: &mut World, redraws: usize, prefetched: usize) {
     let current = &mut signals(world).current;
     current.drape_redraws = current
         .drape_redraws
         .saturating_add(u32::try_from(redraws).unwrap_or(u32::MAX));
+    current.prefetch_drapes = current
+        .prefetch_drapes
+        .saturating_add(u32::try_from(prefetched).unwrap_or(u32::MAX));
 }
 
 /// Records the GPU time of the latest measured main pass, which reaches the CPU a frame or more
