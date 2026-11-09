@@ -35,6 +35,8 @@ pub(crate) struct LodContext {
     /// Whether a tile's distance is the straight distance to its rectangle, as on the Mercator
     /// plane, instead of the farther of the two axis distances GL JS uses on the globe.
     planar: bool,
+    /// The parts of GL JS's tile zoom that depend on the view alone.
+    pitch: PitchTerms,
 }
 
 impl LodContext {
@@ -66,7 +68,9 @@ impl LodContext {
             requested_zoom,
             field_of_view_degrees: camera.field_of_view_degrees(),
             planar: false,
+            pitch: PitchTerms::default(),
         }
+        .with_pitch_terms()
     }
 
     /// The level whose texels match the screen's pixels where the view meets each tile, seen
@@ -118,6 +122,7 @@ impl LodContext {
             requested_zoom: 0.0,
             field_of_view_degrees: 0.0,
             planar: false,
+            pitch: PitchTerms::default(),
         }
     }
 
@@ -140,6 +145,20 @@ impl LodContext {
             requested_zoom,
             field_of_view_degrees,
             planar: false,
+            pitch: PitchTerms::default(),
+        }
+        .with_pitch_terms()
+    }
+
+    /// Works out the view's share of GL JS's tile zoom once, rather than for every tile.
+    fn with_pitch_terms(self) -> Self {
+        Self {
+            pitch: PitchTerms::new(
+                self.distance_z,
+                self.distance_to_center_3d,
+                self.field_of_view_degrees,
+            ),
+            ..self
         }
     }
 
@@ -159,6 +178,7 @@ impl LodContext {
             requested_zoom: 0.0,
             field_of_view_degrees: 0.0,
             planar: false,
+            pitch: PitchTerms::default(),
         }
     }
 
@@ -209,12 +229,11 @@ impl LodContext {
                 // (the polar fan to ±90° is synthetic), so measure S^2 distance to the tile's
                 // actual Web Mercator data domain rather than demanding 2^z empty polar wedges.
                 let (_, chebyshev_chord) = closest_mercator_data_point_on_tile(eye_hat, tile);
-                return calculate_tile_zoom(
+                return self.pitch.tile_zoom(
                     self.requested_zoom,
                     chebyshev_chord,
                     self.distance_z,
                     self.distance_to_center_3d,
-                    self.field_of_view_degrees,
                 );
             }
         }
@@ -229,12 +248,11 @@ impl LodContext {
             // would erase cross-slope detail on terrain and blur roads toward the horizon.
             (focal / (crate::coords::TILE_SIZE * distance)).log2()
         } else {
-            calculate_tile_zoom(
+            self.pitch.tile_zoom(
                 self.requested_zoom,
                 distance_2d,
                 self.distance_z,
                 self.distance_to_center_3d,
-                self.field_of_view_degrees,
             )
         }
     }
@@ -288,6 +306,7 @@ fn radius_world_units(latitude_degrees: f64) -> f64 {
     1.0 / (2.0 * std::f64::consts::PI * latitude.cos())
 }
 
+#[cfg(test)]
 fn calculate_tile_zoom(
     requested_center_zoom: f64,
     distance_to_tile_2d: f64,
@@ -295,26 +314,74 @@ fn calculate_tile_zoom(
     distance_to_center_3d: f64,
     field_of_view_degrees: f64,
 ) -> f64 {
-    // GL JS's factor grows without bound as the field narrows, so a sensor's view of a few
-    // degrees, tilted, would load tiles levels coarser than its screen resolves. The factor
-    // holds back the tile count of a view spanning much of the ground toward the horizon; a
-    // field narrower than the normal one sees less ground and needs no more restraint.
-    let pitch_behavior =
-        pitch_tile_loading_behavior(field_of_view_degrees.max(NORMAL_FIELD_OF_VIEW_DEGREES));
-    let center_pitch = (distance_to_tile_z / distance_to_center_3d).acos();
-    let half_fov = (field_of_view_degrees * 0.5).to_radians();
-    let tile_count_pitch_zero = 2.0 * integral_cos_power(pitch_behavior - 1.0, 0.0, half_fov);
-    let highest_pitch = (center_pitch + half_fov).min(MAX_MERCATOR_HORIZON_DEGREES.to_radians());
-    let lowest_pitch = (center_pitch - half_fov).min(highest_pitch);
-    let tile_count = integral_cos_power(pitch_behavior - 1.0, lowest_pitch, highest_pitch);
-    let tile_pitch = (distance_to_tile_2d / distance_to_tile_z).atan();
-    let distance_to_tile_3d = distance_to_tile_2d.hypot(distance_to_tile_z);
-    let distance_scale = distance_to_center_3d / distance_to_tile_3d / 0.5_f64.max(half_fov.cos());
-    requested_center_zoom + distance_scale.log2() + pitch_behavior * tile_pitch.cos().log2() * 0.5
-        - (tile_count / tile_count_pitch_zero / TILE_COUNT_MAX_MIN_RATIO)
-            .max(1.0)
-            .log2()
-            * 0.5
+    PitchTerms::new(
+        distance_to_tile_z,
+        distance_to_center_3d,
+        field_of_view_degrees,
+    )
+    .tile_zoom(
+        requested_center_zoom,
+        distance_to_tile_2d,
+        distance_to_tile_z,
+        distance_to_center_3d,
+    )
+}
+
+/// The terms of GL JS's tile zoom that depend only on the view: its pitch behaviour, the
+/// half-field cosine floor, and the correction for the tile count a pitched view loads. The
+/// count is two numeric integrals of a cosine power, twenty `powf` calls, which a covering
+/// would otherwise repeat for every candidate tile of every frame.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct PitchTerms {
+    behavior: f64,
+    half_fov_cos_floor: f64,
+    tile_count_correction: f64,
+}
+
+impl PitchTerms {
+    fn new(
+        distance_to_tile_z: f64,
+        distance_to_center_3d: f64,
+        field_of_view_degrees: f64,
+    ) -> Self {
+        // GL JS's factor grows without bound as the field narrows, so a sensor's view of a few
+        // degrees, tilted, would load tiles levels coarser than its screen resolves. The factor
+        // holds back the tile count of a view spanning much of the ground toward the horizon; a
+        // field narrower than the normal one sees less ground and needs no more restraint.
+        let behavior =
+            pitch_tile_loading_behavior(field_of_view_degrees.max(NORMAL_FIELD_OF_VIEW_DEGREES));
+        let center_pitch = (distance_to_tile_z / distance_to_center_3d).acos();
+        let half_fov = (field_of_view_degrees * 0.5).to_radians();
+        let tile_count_pitch_zero = 2.0 * integral_cos_power(behavior - 1.0, 0.0, half_fov);
+        let highest_pitch =
+            (center_pitch + half_fov).min(MAX_MERCATOR_HORIZON_DEGREES.to_radians());
+        let lowest_pitch = (center_pitch - half_fov).min(highest_pitch);
+        let tile_count = integral_cos_power(behavior - 1.0, lowest_pitch, highest_pitch);
+        Self {
+            behavior,
+            half_fov_cos_floor: 0.5_f64.max(half_fov.cos()),
+            tile_count_correction: (tile_count / tile_count_pitch_zero / TILE_COUNT_MAX_MIN_RATIO)
+                .max(1.0)
+                .log2()
+                * 0.5,
+        }
+    }
+
+    fn tile_zoom(
+        &self,
+        requested_center_zoom: f64,
+        distance_to_tile_2d: f64,
+        distance_to_tile_z: f64,
+        distance_to_center_3d: f64,
+    ) -> f64 {
+        let tile_pitch = (distance_to_tile_2d / distance_to_tile_z).atan();
+        let distance_to_tile_3d = distance_to_tile_2d.hypot(distance_to_tile_z);
+        let distance_scale = distance_to_center_3d / distance_to_tile_3d / self.half_fov_cos_floor;
+        requested_center_zoom
+            + distance_scale.log2()
+            + self.behavior * tile_pitch.cos().log2() * 0.5
+            - self.tile_count_correction
+    }
 }
 
 fn pitch_tile_loading_behavior(field_of_view_degrees: f64) -> f64 {
