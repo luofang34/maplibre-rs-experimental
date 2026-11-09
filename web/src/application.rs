@@ -118,7 +118,7 @@ pub async fn run_map(
                         p.projection_type != maplibre::projection::ProjectionType::Mercator
                     })
                 {
-                    map.set_max_pitch_degrees(style.pitch.unwrap_or(0.0).max(85.0));
+                    map.set_max_pitch_degrees(style.pitch.unwrap_or(0.0).max(70.0));
                 }
                 host.configure(&mut map);
                 Ok::<_, JSError>(map)

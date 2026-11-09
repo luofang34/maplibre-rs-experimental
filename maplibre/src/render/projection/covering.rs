@@ -304,16 +304,21 @@ fn covering_region_with_history(
     }
     let mut region = covering_region_single(style, view_state, world, request, padding, history)?;
     if padding == ViewStatePadding::Loose && !view_state.has_external_view() {
-        if let Some(apron) = view_state.pitched_nadir_apron() {
-            let apron_region = covering_region_single(
-                style,
-                &apron,
-                world,
-                request,
-                ViewStatePadding::Tight,
-                history,
-            )?;
-            region = union_regions(region, apron_region, request.level, PREFETCH_MAX_TILES);
+        let needs_nadir_apron = style.terrain.is_some()
+            || view_state.camera().get_pitch().0.to_degrees().abs()
+                > mercator::max_constant_zoom_pitch(view_state.field_of_view().0.to_degrees());
+        if needs_nadir_apron {
+            if let Some(apron) = view_state.pitched_nadir_apron() {
+                let apron_region = covering_region_single(
+                    style,
+                    &apron,
+                    world,
+                    request,
+                    ViewStatePadding::Tight,
+                    history,
+                )?;
+                region = union_regions(region, apron_region, request.level, PREFETCH_MAX_TILES);
+            }
         }
         if let Some(ahead) = world
             .resources

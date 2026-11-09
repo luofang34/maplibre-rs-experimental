@@ -65,11 +65,19 @@ pub(super) fn requests<'l>(
     data: &[u8],
     zoom: f64,
 ) -> (GlyphRequests, HashSet<String>) {
+    let Ok(tile) = geozero::mvt::Tile::decode(data) else {
+        return (GlyphRequests::new(), HashSet::new());
+    };
+    requests_from_tile(layers, &tile, zoom)
+}
+
+pub(super) fn requests_from_tile<'l>(
+    layers: impl IntoIterator<Item = &'l StyleLayer>,
+    tile: &geozero::mvt::Tile,
+    zoom: f64,
+) -> (GlyphRequests, HashSet<String>) {
     let mut fonts = GlyphRequests::new();
     let mut icons = HashSet::new();
-    let Ok(tile) = geozero::mvt::Tile::decode(data) else {
-        return (fonts, icons);
-    };
     for layer in layers {
         if layer.is_hidden() {
             continue;

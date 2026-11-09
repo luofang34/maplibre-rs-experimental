@@ -143,6 +143,10 @@ fn globe_circumference_ratio_at_tile_y(
 }
 
 fn project_symbol_scale(tile_y: f32, tile_mercator_coords: vec4<f32>) -> f32 {
+    let transition = projection.transition_and_padding.x;
+    if transition <= 0.0 {
+        return 1.0;
+    }
     let circumference = max(
         globe_circumference_ratio_at_tile_y(tile_y, tile_mercator_coords),
         1e-4,
@@ -150,7 +154,7 @@ fn project_symbol_scale(tile_y: f32, tile_mercator_coords: vec4<f32>) -> f32 {
     return mix(
         1.0,
         projection.globe_circle.x / circumference,
-        projection.transition_and_padding.x,
+        transition,
     );
 }
 
@@ -219,9 +223,15 @@ fn project_tile_position(
     tile_mercator_coords: vec4<f32>,
 ) -> ProjectedTilePosition {
     let transition = projection.transition_and_padding.x;
-    let surface = tile_position_on_unit_sphere(tile_position.xy, tile_mercator_coords);
     let mercator_clip = fallback_matrix * vec4<f32>(tile_position, 1.0);
     let is_pole = is_north_pole_y(tile_position.y) || is_south_pole_y(tile_position.y);
+    if transition <= 0.0 {
+        return ProjectedTilePosition(
+            vec4<f32>(mercator_clip.xy, 0.0, mercator_clip.w),
+            select(1.0, -1.0, is_pole),
+        );
+    }
+    let surface = tile_position_on_unit_sphere(tile_position.xy, tile_mercator_coords);
     let globe_clip =
         globe_clip_position(tile_position.xy, 0.0, surface, tile_mercator_coords, is_pole);
     let horizon_distance = globe_horizon_distance(
@@ -241,15 +251,21 @@ fn project_tile_mesh_position(
     fallback_matrix: mat4x4<f32>,
     tile_mercator_coords: vec4<f32>,
 ) -> ProjectedTilePosition {
+    let transition = projection.transition_and_padding.x;
+    let mercator_clip = fallback_matrix * vec4<f32>(tile_position, 1.0);
+    let is_pole = raw_position.y < -32767 || raw_position.y > 32766;
+    if transition <= 0.0 {
+        return ProjectedTilePosition(
+            vec4<f32>(mercator_clip.xy, 0.0, mercator_clip.w),
+            select(1.0, -1.0, is_pole),
+        );
+    }
     var surface = tile_position_on_unit_sphere(tile_position.xy, tile_mercator_coords);
     if raw_position.y < -32767 {
         surface = vec3<f32>(0.0, 1.0, 0.0);
     } else if raw_position.y > 32766 {
         surface = vec3<f32>(0.0, -1.0, 0.0);
     }
-    let transition = projection.transition_and_padding.x;
-    let mercator_clip = fallback_matrix * vec4<f32>(tile_position, 1.0);
-    let is_pole = raw_position.y < -32767 || raw_position.y > 32766;
     let globe_clip =
         globe_clip_position(tile_position.xy, 0.0, surface, tile_mercator_coords, is_pole);
     let horizon_distance = globe_horizon_distance(
@@ -272,8 +288,12 @@ fn project_tile_position_3d(
     tile_mercator_coords: vec4<f32>,
 ) -> ProjectedTilePosition {
     let transition = projection.transition_and_padding.x;
-    let surface = tile_position_on_unit_sphere(tile_position.xy, tile_mercator_coords);
+    let mercator_clip = fallback_matrix * vec4<f32>(tile_position, 1.0);
     let is_pole = is_north_pole_y(tile_position.y) || is_south_pole_y(tile_position.y);
+    if transition <= 0.0 {
+        return ProjectedTilePosition(mercator_clip, select(1.0, -1.0, is_pole));
+    }
+    let surface = tile_position_on_unit_sphere(tile_position.xy, tile_mercator_coords);
     let globe_clip = globe_clip_position(
         tile_position.xy,
         tile_position.z / projection.transition_and_padding.z,
@@ -282,7 +302,6 @@ fn project_tile_position_3d(
         is_pole,
     );
     let horizon_distance = globe_horizon_distance(surface, transition, is_pole);
-    let mercator_clip = fallback_matrix * vec4<f32>(tile_position, 1.0);
     return ProjectedTilePosition(blend_clip(mercator_clip, globe_clip, transition), horizon_distance);
 }
 
@@ -294,6 +313,10 @@ fn project_tile_tangent_3d(
     fallback_matrix: mat4x4<f32>,
     tile_mercator_coords: vec4<f32>,
 ) -> vec4<f32> {
+    let flat = fallback_matrix * vec4<f32>(offset, 0.0, 0.0);
+    if projection.transition_and_padding.x <= 0.0 {
+        return flat;
+    }
     let mercator = tile_mercator_coords.xy + tile_position.xy * tile_mercator_coords.zw;
     let longitude = mercator.x * PROJECTION_TWO_PI + PROJECTION_PI;
     let surface = tile_position_on_unit_sphere(tile_position.xy, tile_mercator_coords);
@@ -304,7 +327,6 @@ fn project_tile_tangent_3d(
     let tangent = (east * delta.x + south * delta.y) * cos_latitude *
         (1.0 + tile_position.z / projection.transition_and_padding.z);
     let globe = projection.main_matrix * vec4<f32>(tangent, 0.0);
-    let flat = fallback_matrix * vec4<f32>(offset, 0.0, 0.0);
     return blend_clip(flat, globe, projection.transition_and_padding.x);
 }
 

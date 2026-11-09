@@ -16,7 +16,7 @@ use crate::{
 };
 
 mod requests;
-use requests::requests;
+use requests::{requests, requests_from_tile};
 
 const BUNDLED_LATIN: &[u8] = include_bytes!("../../../../data/0-255.pbf");
 
@@ -99,6 +99,28 @@ pub(crate) async fn load_symbol_assets_awaiting<'l, HC: HttpClient>(
     zoom: f64,
 ) -> Result<LoadedSymbolAssets, SymbolAssetError> {
     let (fonts, icons) = requests(layers, data, zoom);
+    load_symbol_assets_for_requests(client, config, fonts, icons).await
+}
+
+/// Like [`load_symbol_assets_awaiting`], reading symbol glyph and icon requests from an
+/// already-decoded [`geozero::mvt::Tile`] so the worker does not decode the MVT protobuf again.
+pub(crate) async fn load_symbol_assets_awaiting_from_tile<'l, HC: HttpClient>(
+    client: &SourceClient<HC>,
+    config: SymbolAssetConfig<'_>,
+    layers: impl IntoIterator<Item = &'l StyleLayer>,
+    tile: &geozero::mvt::Tile,
+    zoom: f64,
+) -> Result<LoadedSymbolAssets, SymbolAssetError> {
+    let (fonts, icons) = requests_from_tile(layers, tile, zoom);
+    load_symbol_assets_for_requests(client, config, fonts, icons).await
+}
+
+async fn load_symbol_assets_for_requests<HC: HttpClient>(
+    client: &SourceClient<HC>,
+    config: SymbolAssetConfig<'_>,
+    fonts: requests::GlyphRequests,
+    icons: HashSet<String>,
+) -> Result<LoadedSymbolAssets, SymbolAssetError> {
     let mut builder = AtlasBuilder::new();
     for (font, characters) in fonts {
         let ranges: BTreeSet<_> = characters.iter().map(|code| (code / 256) * 256).collect();

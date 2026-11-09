@@ -6,20 +6,24 @@ export default async function style() {
     style.pitch = 45;
     style.bearing = -17.6;
 
-    style.sources.openfreemap = {
-        url: 'https://tiles.openfreemap.org/planet',
-        type: 'vector'
-    };
+    const buildingSource = style.sources.openmaptiles ? 'openmaptiles' : 'openfreemap';
+    if (!style.sources[buildingSource]) {
+        style.sources[buildingSource] = {
+            url: 'https://tiles.openfreemap.org/planet',
+            type: 'vector'
+        };
+    }
+    style.layers = style.layers.filter((layer) => layer.id !== 'building-top');
     // Insert the layer beneath the first symbol layer with labels.
     const labelLayer = style.layers.findIndex(
         (layer) => layer.type === 'symbol' && layer.layout?.['text-field']
     );
     style.layers.splice(labelLayer < 0 ? style.layers.length : labelLayer, 0, {
         'id': '3d-buildings',
-        'source': 'openfreemap',
+        'source': buildingSource,
         'source-layer': 'building',
         'type': 'fill-extrusion',
-        'minzoom': 15,
+        'minzoom': 14,
         'filter': ['!=', ['get', 'hide_3d'], true],
         'paint': {
             'fill-extrusion-color': [
@@ -27,24 +31,8 @@ export default async function style() {
                 ['linear'],
                 ['get', 'render_height'], 0, 'lightgray', 200, 'royalblue', 400, 'lightblue'
             ],
-            'fill-extrusion-height': [
-                'interpolate',
-                ['linear'],
-                ['zoom'],
-                15,
-                0,
-                16,
-                ['get', 'render_height']
-            ],
-            'fill-extrusion-base': [
-                'interpolate',
-                ['linear'],
-                ['zoom'],
-                15,
-                0,
-                16,
-                ['get', 'render_min_height']
-            ]
+            'fill-extrusion-height': ['get', 'render_height'],
+            'fill-extrusion-base': ['get', 'render_min_height']
         }
     });
     return style;

@@ -143,23 +143,40 @@ impl Context for PassingContext {
 
 fn prepare_message(message: Message) -> Result<(WebMessageTag, ArrayBuffer), SendError> {
     let attempt = message.attempt();
-    let (tag, buffer) = prepare_payload(message)?;
+    let (tag, payload) = prepare_payload_bytes(message)?;
     match attempt {
         Some(attempt) => {
-            let mut bytes = Vec::with_capacity(12 + buffer.byte_length() as usize);
-            bytes.extend_from_slice(&(tag as u32).to_le_bytes());
-            bytes.extend_from_slice(&attempt.to_le_bytes());
-            bytes.extend_from_slice(&Uint8Array::new(&buffer).to_vec());
-            Ok((
-                WebMessageTag::TrackedPayload,
-                Uint8Array::from(bytes.as_slice()).buffer(),
-            ))
+            let payload_slice = payload.as_slice();
+            let total_len = 12 + payload_slice.len();
+            let out = Uint8Array::new_with_length(total_len as u32);
+            let mut header = [0u8; 12];
+            header[0..4].copy_from_slice(&(tag as u32).to_le_bytes());
+            header[4..12].copy_from_slice(&attempt.to_le_bytes());
+            out.subarray(0, 12).copy_from(&header);
+            if !payload_slice.is_empty() {
+                out.subarray(12, total_len as u32).copy_from(payload_slice);
+            }
+            Ok((WebMessageTag::TrackedPayload, out.buffer()))
         }
-        None => Ok((tag, buffer)),
+        None => Ok((tag, Uint8Array::from(payload.as_slice()).buffer())),
     }
 }
 
-fn prepare_payload(message: Message) -> Result<(WebMessageTag, ArrayBuffer), SendError> {
+enum PayloadBytes {
+    Vec(Vec<u8>),
+    Transferable(Box<FlatBufferTransferable>),
+}
+
+impl PayloadBytes {
+    fn as_slice(&self) -> &[u8] {
+        match self {
+            Self::Vec(bytes) => bytes.as_slice(),
+            Self::Transferable(transferable) => transferable.data(),
+        }
+    }
+}
+
+fn prepare_payload_bytes(message: Message) -> Result<(WebMessageTag, PayloadBytes), SendError> {
     if message.has_tag(RequestKind::Raster.message_tag())
         || message.has_tag(RequestKind::Dem.message_tag())
         || message.has_tag(RequestKind::Vector.message_tag())
@@ -169,10 +186,7 @@ fn prepare_payload(message: Message) -> Result<(WebMessageTag, ArrayBuffer), Sen
             operation: "encoding a tile request outcome",
             source: Box::new(source),
         })?;
-        return Ok((
-            WebMessageTag::TileRequestOutcome,
-            Uint8Array::from(data.as_slice()).buffer(),
-        ));
+        return Ok((WebMessageTag::TileRequestOutcome, PayloadBytes::Vec(data)));
     }
     if message.has_tag(ProvidedImagesReport::message_tag()) {
         let report = message.into_transferable::<ProvidedImagesReport>()?;
@@ -180,10 +194,7 @@ fn prepare_payload(message: Message) -> Result<(WebMessageTag, ArrayBuffer), Sen
             operation: "encoding a provided images report",
             source: Box::new(source),
         })?;
-        return Ok((
-            WebMessageTag::ProvidedImages,
-            Uint8Array::from(data.as_slice()).buffer(),
-        ));
+        return Ok((WebMessageTag::ProvidedImages, PayloadBytes::Vec(data)));
     }
     let tag = message
         .tag()
@@ -192,26 +203,37 @@ fn prepare_payload(message: Message) -> Result<(WebMessageTag, ArrayBuffer), Sen
         .copied()
         .ok_or(SendError::UnsupportedTag { tag: message.tag() })?;
     let transferable = message.into_transferable::<FlatBufferTransferable>()?;
-    let data = transferable.data();
-    let buffer = Uint8Array::from(data).buffer();
-    tracing::debug!(?tag, bytes = data.len(), "sending worker result");
-    Ok((tag, buffer))
+    tracing::debug!(
+        ?tag,
+        bytes = transferable.data().len(),
+        "sending worker result"
+    );
+    Ok((tag, PayloadBytes::Transferable(transferable)))
 }
 
 pub(crate) fn decode_message(
     tag: WebMessageTag,
     buffer: ArrayBuffer,
 ) -> Result<Message, CallError> {
+    let bytes = Uint8Array::new(&buffer).to_vec();
+    decode_message_bytes(tag, bytes, 0)
+}
+
+fn decode_message_bytes(
+    tag: WebMessageTag,
+    bytes: Vec<u8>,
+    offset: usize,
+) -> Result<Message, CallError> {
+    let slice = bytes.get(offset..).unwrap_or_default();
     if tag == WebMessageTag::TrackedPayload {
-        let bytes = Uint8Array::new(&buffer).to_vec();
-        let header = bytes.first_chunk::<12>().ok_or_else(|| {
-            CallError::Deserialize(Box::new(TrackedPayloadError::Header { bytes: bytes.len() }))
+        let header = slice.first_chunk::<12>().ok_or_else(|| {
+            CallError::Deserialize(Box::new(TrackedPayloadError::Header { bytes: slice.len() }))
         })?;
-        let tag = WebMessageTag::from_u32(u32::from_le_bytes([
+        let inner_tag = WebMessageTag::from_u32(u32::from_le_bytes([
             header[0], header[1], header[2], header[3],
         ]))
         .map_err(|error| CallError::Deserialize(Box::new(error)))?;
-        if tag == WebMessageTag::TrackedPayload {
+        if inner_tag == WebMessageTag::TrackedPayload {
             return Err(CallError::Deserialize(Box::new(
                 TrackedPayloadError::Nested,
             )));
@@ -220,24 +242,22 @@ pub(crate) fn decode_message(
             header[4], header[5], header[6], header[7], header[8], header[9], header[10],
             header[11],
         ]);
-        let payload = Uint8Array::from(&bytes[12..]).buffer();
-        return decode_message(tag, payload).map(|message| message.with_attempt(attempt));
+        return decode_message_bytes(inner_tag, bytes, offset + 12)
+            .map(|message| message.with_attempt(attempt));
     }
     if tag == WebMessageTag::TileRequestOutcome {
-        let data = Uint8Array::new(&buffer).to_vec();
-        let outcome: TileRequestOutcome = serde_json::from_slice(&data)
+        let outcome: TileRequestOutcome = serde_json::from_slice(slice)
             .map_err(|source| CallError::Deserialize(Box::new(source)))?;
         return Ok(IntoMessage::into(outcome));
     }
     if tag == WebMessageTag::ProvidedImages {
-        let data = Uint8Array::new(&buffer).to_vec();
-        let report: ProvidedImagesReport = serde_json::from_slice(&data)
+        let report: ProvidedImagesReport = serde_json::from_slice(slice)
             .map_err(|source| CallError::Deserialize(Box::new(source)))?;
         return Ok(IntoMessage::into(report));
     }
     Ok(Message::new(
         tag.to_static(),
-        Box::new(FlatBufferTransferable::from_array_buffer(tag, buffer)),
+        Box::new(FlatBufferTransferable::from_vec(tag, bytes, offset)),
     ))
 }
 

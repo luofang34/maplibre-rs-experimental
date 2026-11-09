@@ -164,6 +164,9 @@ fn contains(ring: &Ring, [x, y]: [f32; 2]) -> bool {
 
 /// A ring inside an odd number of others is a hole.
 fn is_hole(index: usize, rings: &[Ring]) -> bool {
+    if rings.len() <= 1 {
+        return false;
+    }
     let Some(&point) = rings[index].first() else {
         return false;
     };
@@ -269,6 +272,7 @@ fn push_wall<I: From<VertexId>>(
 ///
 /// `refine_roof` may split the roof's triangles from the given index on, as a globe tile does so
 /// the roof follows the sphere; the vertices it adds take the roof's base and height.
+#[cfg(test)]
 pub(super) fn extrude<I>(
     path: &Path,
     heights: ExtrusionHeights,
@@ -281,17 +285,40 @@ pub(super) fn extrude<I>(
 where
     I: From<VertexId> + std::ops::Add + MaxIndex,
 {
+    let mut tessellator = FillTessellator::new();
+    extrude_with_tessellator(
+        &mut tessellator,
+        path,
+        heights,
+        buffer,
+        (tolerance, refine_roof),
+    )
+}
+
+pub(super) fn extrude_with_tessellator<I>(
+    tessellator: &mut FillTessellator,
+    path: &Path,
+    heights: ExtrusionHeights,
+    buffer: &mut VertexBuffers<ShaderVertex, I>,
+    (tolerance, refine_roof): (
+        f32,
+        impl FnOnce(&mut VertexBuffers<ShaderVertex, I>, usize) -> Result<(), String>,
+    ),
+) -> Result<(), String>
+where
+    I: From<VertexId> + std::ops::Add + MaxIndex,
+{
     let roof_start = buffer.indices.len();
-    let vertex_start = buffer.vertices.len();
-    FillTessellator::new()
+    tessellator
         .tessellate_path(
             path,
             &FillOptions::tolerance(tolerance).with_fill_rule(FillRule::EvenOdd),
             &mut BuffersBuilder::new(buffer, RoofVertex { heights }),
         )
         .map_err(|error| error.to_string())?;
+    let after_roof_vertices = buffer.vertices.len();
     refine_roof(buffer, roof_start)?;
-    for vertex in &mut buffer.vertices[vertex_start..] {
+    for vertex in &mut buffer.vertices[after_roof_vertices..] {
         heights.apply(vertex, true);
     }
     let rings = rings(path);

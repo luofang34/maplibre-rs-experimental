@@ -15,10 +15,10 @@ use crate::{
         tile_retry::{RequestDisposition, RequestKind, TileRequestOutcome},
         tile_sources::{source_layer_groups, SourceLayerGroup, TileKind},
     },
-    sdf::assets::{load_symbol_assets_awaiting, SymbolAssetConfig, SymbolAtlas},
+    sdf::assets::{load_symbol_assets_awaiting_from_tile, SymbolAssetConfig, SymbolAtlas},
     style::{layer::StyleLayer, Style},
     vector::{
-        process_vector::process_vector_tile_with_assets,
+        process_vector::process_decoded_vector_tile_with_assets,
         transferables::{LayerMissing, TileTessellated, VectorTransferables},
         ProcessVectorContext, ProcessVectorError, VectorTileRequest,
     },
@@ -62,8 +62,8 @@ pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context +
                     .map_err(ProcedureError::Send)?;
                 continue;
             }
-            let data: Arc<[u8]> = match fetch_group_tile(&client, coords, &group).await {
-                Ok(data) => data.into(),
+            let tile = match fetch_group_tile(&client, coords, &group).await {
+                Ok(tile) => tile,
                 // A source without a tile there has nothing to draw, as GL JS loads a vector
                 // tile that answered 404 empty: its layers are empty, and the tile's other
                 // sources are drawn as usual.
@@ -83,7 +83,7 @@ pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context +
                 }
             };
             match process_source::<T, _, K::HttpClient>(
-                data,
+                tile,
                 coords,
                 &style,
                 &client,
@@ -164,7 +164,7 @@ fn source_failed<T: VectorTransferables, C: Context>(
 }
 
 async fn process_source<T: VectorTransferables, C: Context + Clone + Send, H: HttpClient>(
-    data: Arc<[u8]>,
+    tile: Arc<geozero::mvt::Tile>,
     coords: WorldTileCoords,
     style: &Style,
     client: &SourceClient<H>,
@@ -188,6 +188,7 @@ async fn process_source<T: VectorTransferables, C: Context + Clone + Send, H: Ht
         .iter()
         .cloned()
         .partition(|layer| layer.type_ == "symbol");
+    let base_indexed = !base.is_empty();
     let request = VectorTileRequest {
         coords,
         layers: base,
@@ -196,8 +197,8 @@ async fn process_source<T: VectorTransferables, C: Context + Clone + Send, H: Ht
     };
     tessellate::<T, C>(
         context.clone(),
-        last_source,
-        (data.clone(), request),
+        (last_source, true),
+        (tile.clone(), request),
         Arc::new(SymbolAtlas::default()),
     )
     .await?;
@@ -206,14 +207,14 @@ async fn process_source<T: VectorTransferables, C: Context + Clone + Send, H: Ht
     }
     // The assets are asked for by the very layers the symbols are laid out with: this source's,
     // as its tile is cut.
-    let assets = load_symbol_assets_awaiting(
+    let assets = load_symbol_assets_awaiting_from_tile(
         client,
         SymbolAssetConfig {
             pixel_ratio,
             ..SymbolAssetConfig::of(style)
         },
         &symbols,
-        &data,
+        &tile,
         f64::from(overscaled_zoom.max(u8::from(coords.z))),
     )
     .await
@@ -225,8 +226,14 @@ async fn process_source<T: VectorTransferables, C: Context + Clone + Send, H: Ht
         overscaled_zoom,
     };
     // Only a source still waiting for images keeps its tile and layers to lay out again.
-    let again = (!assets.awaiting.is_empty()).then(|| (data.clone(), request.clone()));
-    tessellate::<T, C>(context, last_source, (data, request), assets.atlas).await?;
+    let again = (!assets.awaiting.is_empty()).then(|| (tile.clone(), request.clone()));
+    tessellate::<T, C>(
+        context,
+        (last_source, !base_indexed),
+        (tile, request),
+        assets.atlas,
+    )
+    .await?;
     Ok(Some(provided::Symbols {
         again,
         pixel_ratio,
@@ -235,17 +242,20 @@ async fn process_source<T: VectorTransferables, C: Context + Clone + Send, H: Ht
     }))
 }
 
-/// Decodes and tessellates the requested layers of one source's tile off the fetching threads,
+/// Tessellates the requested layers of one source's decoded tile off the fetching threads,
 /// replying with their geometry as it is made.
 async fn tessellate<T: VectorTransferables, C: Context + Send>(
     context: C,
-    last_source: bool,
-    (data, request): (Arc<[u8]>, VectorTileRequest),
+    (last_source, index_geometry): (bool, bool),
+    (tile, request): (Arc<geozero::mvt::Tile>, VectorTileRequest),
     atlas: Arc<SymbolAtlas>,
 ) -> Result<(), ProcessVectorError> {
     run_cpu_bound_replying(context, move |context| {
         let mut processor = source_processor::<T, _>(context, last_source);
-        process_vector_tile_with_assets(&data, request, &mut processor, atlas)
+        if !index_geometry {
+            processor = processor.without_indexing();
+        }
+        process_decoded_vector_tile_with_assets(&tile, request, &mut processor, atlas)
     })
     .await
     .map_err(ProcessVectorError::CpuWork)?

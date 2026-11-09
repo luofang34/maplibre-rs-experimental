@@ -14,7 +14,10 @@ impl SymbolLayerTessellated for FlatBufferTransferable {
         layer_data: Layer,
         style_layer_id: String,
     ) -> Self {
-        let mut inner_builder = FlatBufferBuilder::with_capacity(1024);
+        let estimated_capacity = 1024
+            + buffer.buffer.vertices.len() * std::mem::size_of::<FlatSymbolVertex>()
+            + buffer.buffer.indices.len() * 4;
+        let mut inner_builder = FlatBufferBuilder::with_capacity(estimated_capacity);
 
         let vertices = inner_builder.create_vector(&flat_vertices(&buffer.buffer.vertices));
         let indices = inner_builder.create_vector(&buffer.buffer.indices);

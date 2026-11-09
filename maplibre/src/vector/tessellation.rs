@@ -139,6 +139,8 @@ pub struct ZeroTessellator<I: std::ops::Add + From<lyon::tessellation::VertexId>
     /// The sort key of each entry of `feature_indices`, set by `apply_sort_keys`.
     pub entry_sort_keys: Vec<f32>,
     current_index: usize,
+    fill_tessellator: FillTessellator,
+    stroke_tessellator: StrokeTessellator,
 }
 
 impl<I: std::ops::Add + From<lyon::tessellation::VertexId> + MaxIndex> Default
@@ -182,6 +184,8 @@ impl<I: std::ops::Add + From<lyon::tessellation::VertexId> + MaxIndex> Default
             outline: VertexBuffers::new(),
             sort_key: Default::default(),
             entry_sort_keys: Vec::new(),
+            fill_tessellator: FillTessellator::new(),
+            stroke_tessellator: StrokeTessellator::new(),
         }
     }
 }
@@ -254,7 +258,7 @@ where
         let join = self.feature_join();
         let vertex_start = self.buffer.vertices.len();
         let stroke_index_start = self.buffer.indices.len();
-        StrokeTessellator::new()
+        self.stroke_tessellator
             .tessellate_path(
                 &path,
                 &StrokeOptions::tolerance(DEFAULT_TOLERANCE)
@@ -333,7 +337,8 @@ where
             extend_to_north_pole: self.extend_to_north_pole,
             extend_to_south_pole: self.extend_to_south_pole,
         };
-        extrusion::extrude(
+        extrusion::extrude_with_tessellator(
+            &mut self.fill_tessellator,
             &path,
             heights,
             &mut self.buffer,
@@ -362,7 +367,7 @@ where
         if self.outline_property.is_some() {
             let outline_vertex_start = self.outline.vertices.len();
             let outline_index_start = self.outline.indices.len();
-            StrokeTessellator::new()
+            self.stroke_tessellator
                 .tessellate_path(
                     &path,
                     &StrokeOptions::tolerance(DEFAULT_TOLERANCE)
@@ -379,7 +384,7 @@ where
             );
         }
 
-        FillTessellator::new()
+        self.fill_tessellator
             .tessellate_path(
                 &path,
                 &FillOptions::tolerance(DEFAULT_TOLERANCE).with_fill_rule(FillRule::NonZero),

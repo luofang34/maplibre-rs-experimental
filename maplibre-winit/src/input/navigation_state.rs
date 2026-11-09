@@ -145,13 +145,14 @@ impl NavigationState {
             .is_some_and(|p| p.projection_type != ProjectionType::Mercator);
         let style_pitch = map_context.style.pitch.unwrap_or(0.0);
         let has_3d_or_globe = has_terrain || has_globe || style_pitch > 0.5;
+        let auto_tilt_by_default = has_terrain || (has_globe && style_pitch <= 0.5);
 
         let zoom = map_context.view_state.zoom().value();
         let world_size = TILE_SIZE * 2.0_f64.powf(zoom);
         let pos = map_context.view_state.camera().position();
         let normalized_center = Point2::new(pos.x / world_size, pos.y / world_size);
         let bearing = map_context.view_state.camera().get_bearing();
-        let initial_pitch_deg = if has_terrain || has_globe {
+        let initial_pitch_deg = if auto_tilt_by_default {
             base_auto_tilt_degrees(zoom)
         } else {
             map_context.view_state.camera().get_pitch().0.to_degrees()
@@ -166,7 +167,7 @@ impl NavigationState {
             has_3d_or_globe,
         });
         self.three_dimensional = true;
-        self.auto_tilt = has_terrain || has_globe;
+        self.auto_tilt = auto_tilt_by_default;
 
         if let Some(hud) = map_context.world.resources.get::<NavigationHudState>() {
             self.show_hud = hud.visible;

@@ -13,20 +13,21 @@ use crate::{
         source_client::{HttpClient, SourceClient},
     },
     sdf::{
-        assets::{load_symbol_assets_awaiting, Resolved, SymbolAssetConfig},
+        assets::{load_symbol_assets_awaiting_from_tile, Resolved, SymbolAssetConfig},
         provided::{ProvidedImagesReport, ProvidedImagesState},
     },
     style::Style,
     vector::{
-        process_vector::process_vector_tile_with_assets, transferables::VectorTransferables,
-        ProcessVectorContext, ProcessVectorError, VectorTileRequest,
+        process_vector::process_decoded_vector_tile_with_assets,
+        transferables::VectorTransferables, ProcessVectorContext, ProcessVectorError,
+        VectorTileRequest,
     },
 };
 
 /// What one source's symbols need from providers.
 pub(super) struct Symbols {
-    /// The source's tile and symbol layers, kept while some images are still to come.
-    pub(super) again: Option<(Arc<[u8]>, VectorTileRequest)>,
+    /// The source's decoded tile and symbol layers, kept while some images are still to come.
+    pub(super) again: Option<(Arc<geozero::mvt::Tile>, VectorTileRequest)>,
     /// Device pixels per layout pixel the images are made for.
     pub(super) pixel_ratio: f32,
     /// Every provided name the labels ask for.
@@ -172,7 +173,7 @@ async fn lay_out_sources<T: VectorTransferables, C: Context + Clone + Send, H: H
         }
     }
     for source in sources {
-        let Some((data, request)) = &source.again else {
+        let Some((tile, request)) = &source.again else {
             continue;
         };
         if !source
@@ -182,14 +183,14 @@ async fn lay_out_sources<T: VectorTransferables, C: Context + Clone + Send, H: H
         {
             continue;
         }
-        let assets = load_symbol_assets_awaiting(
+        let assets = load_symbol_assets_awaiting_from_tile(
             client,
             SymbolAssetConfig {
                 pixel_ratio: source.pixel_ratio,
                 ..SymbolAssetConfig::of(style)
             },
             &request.layers,
-            data,
+            tile,
             f64::from(request.overscaled_zoom.max(u8::from(coords.z))),
         )
         .await
@@ -198,10 +199,12 @@ async fn lay_out_sources<T: VectorTransferables, C: Context + Clone + Send, H: H
         // asked for again when the tile is retried.
         unavailable |= !assets.awaiting.is_empty();
         // The tile was completed already; these labels replace the ones it was drawn with.
-        let (data, request, atlas) = (data.clone(), request.clone(), assets.atlas);
+        let (tile, request, atlas) = (tile.clone(), request.clone(), assets.atlas);
         run_cpu_bound_replying(context.clone(), move |context| {
-            let mut processor = ProcessVectorContext::<T, _>::new(context).without_completion();
-            process_vector_tile_with_assets(&data, request, &mut processor, atlas)
+            let mut processor = ProcessVectorContext::<T, _>::new(context)
+                .without_completion()
+                .without_indexing();
+            process_decoded_vector_tile_with_assets(&tile, request, &mut processor, atlas)
         })
         .await
         .map_err(ProcessVectorError::CpuWork)??;

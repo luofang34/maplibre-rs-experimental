@@ -1,8 +1,10 @@
-//! Bytes of one source layer group's vector tile: fetched from a URL, or cut from a GeoJSON
-//! index, and brought into the tile's grid from the source's last tile above it when the
-//! source ends sooner than the tile's zoom.
+//! Decoded vector tile of one source layer group: fetched from a URL or cut from a GeoJSON
+//! index, cached in the shared asset cache, and brought into the tile's grid from the source's
+//! last tile above it when the source ends sooner than the tile's zoom.
 
-use geozero::mvt::{Message, Tile};
+use std::sync::Arc;
+
+use geozero::mvt::Tile;
 
 use crate::{
     coords::WorldTileCoords,
@@ -19,7 +21,7 @@ pub(super) async fn fetch_group_tile<H: HttpClient>(
     client: &SourceClient<H>,
     coords: WorldTileCoords,
     group: &SourceLayerGroup,
-) -> Result<Vec<u8>, SourceFetchError> {
+) -> Result<Arc<Tile>, SourceFetchError> {
     let source_tile = group.source_tile(coords);
     if let SourceType::GeoJson(geojson) = &group.source {
         let index = client
@@ -28,21 +30,39 @@ pub(super) async fn fetch_group_tile<H: HttpClient>(
             .await
             .map_err(|failure| fetch_failure(failure, &geojson.name))?;
         let data = index.tile(source_tile);
-        return Ok(if source_tile == coords {
-            data
-        } else {
-            cut_from_ancestor(&data, source_tile, coords)
-        });
-    }
-    if source_tile == coords {
-        return client.fetch(&coords, &group.source).await;
+        let mut tile = decode_tile(&data).map_err(|error| {
+            fetch_failure(
+                AssetFailure::Terminal(format!(
+                    "geojson tile {} cannot be decoded: {error}",
+                    geojson.name
+                )),
+                &geojson.name,
+            )
+        })?;
+        if source_tile != coords {
+            super::rescale::into_descendant(&mut tile, source_tile, coords);
+        }
+        return Ok(Arc::new(tile));
     }
     let Some(url) = group.source.format(&source_tile) else {
-        return client.fetch(&source_tile, &group.source).await;
+        let bytes = client.fetch(&source_tile, &group.source).await?;
+        let mut tile = decode_tile(&bytes).map_err(|error| {
+            fetch_failure(
+                AssetFailure::Terminal(format!(
+                    "vector tile {source_tile} cannot be decoded: {error}"
+                )),
+                "vector tile",
+            )
+        })?;
+        if source_tile != coords {
+            super::rescale::into_descendant(&mut tile, source_tile, coords);
+        }
+        return Ok(Arc::new(tile));
     };
-    // Every descendant cuts its tile from the same ancestor, fetched and decoded once and kept
-    // with the symbol assets until the budget evicts it.
-    let ancestor = client
+    // Every request for the same source tile (including duplicate sources sharing a URL,
+    // overscaled zoom relayouts, and descendants cutting from an ancestor) fetches and decodes
+    // the protobuf once and keeps the decoded `Tile` in the asset cache until the budget evicts it.
+    let cached = client
         .assets()
         .load(format!("tile:{url}"), || async {
             let bytes = fetch(client, &url, "vector tile").await?;
@@ -53,9 +73,12 @@ pub(super) async fn fetch_group_tile<H: HttpClient>(
         })
         .await
         .map_err(|failure| fetch_failure(failure, &url))?;
-    let mut tile: Tile = (*ancestor).clone();
+    if source_tile == coords {
+        return Ok(cached);
+    }
+    let mut tile: Tile = (*cached).clone();
     super::rescale::into_descendant(&mut tile, source_tile, coords);
-    Ok(tile.encode_to_vec())
+    Ok(Arc::new(tile))
 }
 
 /// The fetch error a failure to load `what` through the asset cache stands for.
@@ -67,14 +90,4 @@ fn fetch_failure(failure: AssetFailure, what: &str) -> SourceFetchError {
         }
         AssetFailure::Terminal(reason) => SourceFetchError(Box::new(std::io::Error::other(reason))),
     }
-}
-
-/// The tile's bytes cut from its ancestor's. Bytes that are not a vector tile are passed on as
-/// they are, for the decoder to report.
-fn cut_from_ancestor(data: &[u8], from: WorldTileCoords, to: WorldTileCoords) -> Vec<u8> {
-    let Ok(mut tile) = decode_tile(data) else {
-        return data.to_vec();
-    };
-    super::rescale::into_descendant(&mut tile, from, to);
-    tile.encode_to_vec()
 }

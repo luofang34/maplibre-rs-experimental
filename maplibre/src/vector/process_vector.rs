@@ -207,10 +207,19 @@ pub(crate) fn process_vector_tile_with_assets<T: VectorTransferables, C: Context
     context: &mut ProcessVectorContext<T, C>,
     atlas: std::sync::Arc<crate::sdf::assets::SymbolAtlas>,
 ) -> Result<(), ProcessVectorError> {
-    let mut tile = decode_tile(data).map_err(|source| ProcessVectorError::Decoding {
+    let tile = decode_tile(data).map_err(|source| ProcessVectorError::Decoding {
         coords: tile_request.coords,
         source,
     })?;
+    process_decoded_vector_tile_with_assets(&tile, tile_request, context, atlas)
+}
+
+pub(crate) fn process_decoded_vector_tile_with_assets<T: VectorTransferables, C: Context>(
+    tile: &geozero::mvt::Tile,
+    tile_request: VectorTileRequest,
+    context: &mut ProcessVectorContext<T, C>,
+    atlas: std::sync::Arc<crate::sdf::assets::SymbolAtlas>,
+) -> Result<(), ProcessVectorError> {
     for style in &tile_request.layers {
         let (Some(_), Some(name)) = (&style.paint, &style.source_layer) else {
             tracing::error!(layer = %style.id, "vector style layer misses a required attribute");
@@ -230,23 +239,31 @@ pub(crate) fn process_vector_tile_with_assets<T: VectorTransferables, C: Context
             });
         processing::process_layer(layer, style, &tile_request, context, atlas.clone())?;
     }
-    let mut index = IndexProcessor::new();
-    for layer in &mut tile.layers {
-        index.set_coordinate_scale(extent_scale(layer));
-        index.begin_layer(
-            &layer.name,
-            layer.features.iter().map(|feature| feature.id).collect(),
-        );
-        // Query decoding cannot make successfully rendered geometry unavailable.
-        if let Err(error) = layer.process(&mut index) {
-            tracing::warn!(coords = %tile_request.coords, layer = %layer.name, ?error, "skipping query index for layer");
-        }
+    if context.index_geometry {
+        let geometries = if T::LayerIndexed::requires_geometry_index() {
+            let mut index = IndexProcessor::new();
+            for layer in &tile.layers {
+                index.set_coordinate_scale(extent_scale(layer));
+                index.begin_layer(
+                    &layer.name,
+                    layer.features.iter().map(|feature| feature.id).collect(),
+                );
+                let mut layer = layer.clone();
+                // Query decoding cannot make successfully rendered geometry unavailable.
+                if let Err(error) = layer.process(&mut index) {
+                    tracing::warn!(coords = %tile_request.coords, layer = %layer.name, ?error, "skipping query index for layer");
+                }
+            }
+            index.get_geometries()
+        } else {
+            Vec::new()
+        };
+        let source = tile_request
+            .layers
+            .iter()
+            .find_map(|layer| layer.source.clone());
+        context.layer_indexing_finished(&tile_request.coords, source, geometries)?;
     }
-    let source = tile_request
-        .layers
-        .iter()
-        .find_map(|layer| layer.source.clone());
-    context.layer_indexing_finished(&tile_request.coords, source, index.get_geometries())?;
     context.tile_finished(&tile_request.coords)?;
     Ok(())
 }
@@ -261,6 +278,7 @@ enum Completion {
 pub struct ProcessVectorContext<T: VectorTransferables, C: Context> {
     context: C,
     completion: Completion,
+    index_geometry: bool,
     phantom_t: PhantomData<T>,
 }
 
@@ -270,6 +288,7 @@ impl<T: VectorTransferables, C: Context> ProcessVectorContext<T, C> {
         Self {
             context,
             completion: Completion::Finished,
+            index_geometry: true,
             phantom_t: Default::default(),
         }
     }
@@ -283,6 +302,11 @@ impl<T: VectorTransferables, C: Context> ProcessVectorContext<T, C> {
 
     pub(crate) fn without_completion(mut self) -> Self {
         self.completion = Completion::Deferred;
+        self
+    }
+
+    pub(crate) fn without_indexing(mut self) -> Self {
+        self.index_geometry = false;
         self
     }
 

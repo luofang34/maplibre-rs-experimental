@@ -107,6 +107,10 @@ impl FlatBufferTransferable {
         }
     }
 
+    pub fn from_vec(tag: WebMessageTag, data: Vec<u8>, start: usize) -> Self {
+        FlatBufferTransferable { tag, data, start }
+    }
+
     pub fn data(&self) -> &[u8] {
         &self.data[self.start..]
     }
@@ -149,7 +153,7 @@ impl LayerMissing for FlatBufferTransferable {
     }
 
     fn build_from(coords: WorldTileCoords, layer_name: String) -> Self {
-        let mut inner_builder = FlatBufferBuilder::with_capacity(1024);
+        let mut inner_builder = FlatBufferBuilder::with_capacity(128);
         let layer_name = inner_builder.create_string(&layer_name);
 
         let mut builder = FlatLayerMissingBuilder::new(&mut inner_builder);
@@ -220,7 +224,13 @@ impl LayerTessellated for FlatBufferTransferable {
         layer_data: Layer,
         style_layer_id: String,
     ) -> Self {
-        let mut inner_builder = FlatBufferBuilder::with_capacity(1024);
+        let estimated_capacity = 256
+            + buffer.buffer.vertices.len() * 32
+            + buffer.buffer.indices.len() * 4
+            + feature_indices.len() * 4
+            + feature_colors.len() * 16
+            + feature_sort_keys.len() * 4;
+        let mut inner_builder = FlatBufferBuilder::with_capacity(estimated_capacity);
 
         let vertices = inner_builder.create_vector(
             &buffer
@@ -327,10 +337,17 @@ impl LayerTessellated for FlatBufferTransferable {
         let feature_colors: Vec<[f32; 4]> = data
             .feature_colors()
             .map(|fc| {
-                fc.iter()
-                    .collect::<Vec<f32>>()
-                    .chunks(4)
-                    .map(|c| [c[0], c[1], c[2], c[3]])
+                let count = fc.len() / 4;
+                (0..count)
+                    .map(|i| {
+                        let base = i * 4;
+                        [
+                            fc.get(base),
+                            fc.get(base + 1),
+                            fc.get(base + 2),
+                            fc.get(base + 3),
+                        ]
+                    })
                     .collect()
             })
             .unwrap_or_default();
@@ -354,8 +371,12 @@ impl LayerIndexed for FlatBufferTransferable {
         &WebMessageTag::LayerIndexed
     }
 
+    fn requires_geometry_index() -> bool {
+        false
+    }
+
     fn build_from(coords: WorldTileCoords, _source: Option<String>, _index: TileIndex) -> Self {
-        let mut inner_builder = FlatBufferBuilder::with_capacity(1024);
+        let mut inner_builder = FlatBufferBuilder::with_capacity(64);
         let mut builder = FlatLayerIndexedBuilder::new(&mut inner_builder);
 
         // TODO index

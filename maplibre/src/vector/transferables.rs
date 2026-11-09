@@ -155,6 +155,13 @@ pub trait LayerIndexed: IntoMessage + Debug + Send {
     /// Identifies this backend's spatial-index payload for message dispatch.
     fn message_tag() -> &'static dyn MessageTag;
 
+    /// Whether this backend transfers the spatial geometry index to the main thread.
+    /// Backends that ignore `_index` in [`Self::build_from`] can return `false` to skip
+    /// building the query index on the worker thread.
+    fn requires_geometry_index() -> bool {
+        true
+    }
+
     /// Associates an owned spatial index with its tile-grid coordinates and the source it was
     /// read from.
     fn build_from(coords: WorldTileCoords, source: Option<String>, index: TileIndex) -> Self

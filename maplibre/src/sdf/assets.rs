@@ -13,8 +13,9 @@ pub mod wire;
 #[allow(unused_imports)]
 pub(crate) use cache::{fetch, tiles};
 pub use cache::{AssetCache, AssetFailure};
-pub(crate) use load::load_symbol_assets_awaiting;
 pub use load::{load_symbol_assets, SymbolAssetConfig, SymbolAssetError};
+#[allow(unused_imports)]
+pub(crate) use load::{load_symbol_assets_awaiting, load_symbol_assets_awaiting_from_tile};
 pub(crate) use provider::Resolved;
 pub use provider::{
     ImageProviderError, ImageProviderStats, ImageProviders, ImageRequest, ImageResolution,
