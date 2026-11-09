@@ -34,8 +34,9 @@ impl<ET: 'static + Clone> WinitMapWindowConfig<ET> {
     ) -> Result<WinitMapWindow<ET>, WinitHostError> {
         let canvas = get_canvas(&self.canvas_id)?;
         let window = active
-            .create_window(WindowAttributes::default().with_canvas(Some(canvas)))
+            .create_window(WindowAttributes::default().with_canvas(Some(canvas.clone())))
             .map_err(WinitHostError::Window)?;
+        ensure_canvas_focus_on_wheel(&canvas);
         Ok(WinitMapWindow {
             window: Arc::new(window),
             display: active.owned_display_handle(),
@@ -53,6 +54,24 @@ impl<ET: 'static + Clone> MapWindowConfig for WinitMapWindowConfig<ET> {
     fn create(&self) -> Result<Self::MapWindow, WindowCreateError> {
         self.binding.create()
     }
+}
+
+/// Ensures the canvas has focus before `winit`'s bubble-phase `wheel` listener runs so
+/// `winit` always forwards `ModifiersChanged(CONTROL)` on browser trackpad pinch (`ctrlKey + wheel`).
+fn ensure_canvas_focus_on_wheel(canvas: &web_sys::HtmlCanvasElement) {
+    use wasm_bindgen::{closure::Closure, JsCast};
+    let _ = canvas.focus();
+    let target = canvas.clone();
+    let closure =
+        Closure::<dyn FnMut(web_sys::WheelEvent)>::new(move |_event: web_sys::WheelEvent| {
+            let _ = target.focus();
+        });
+    let _ = canvas.add_event_listener_with_callback_and_bool(
+        "wheel",
+        closure.as_ref().unchecked_ref(),
+        true,
+    );
+    closure.forget();
 }
 
 /// Resolves the configured canvas, preserving its ID in DOM selection errors.

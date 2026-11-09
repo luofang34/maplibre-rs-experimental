@@ -85,6 +85,10 @@ impl ScrollInput {
         }
     }
 
+    pub(super) fn sensitivity(&self) -> f64 {
+        self.sensitivity
+    }
+
     /// Adds a scroll event: a wheel's lines as pixels, and physical pixels as logical ones,
     /// the units GL JS's rates apply to.
     pub(super) fn add(&mut self, delta: &MouseScrollDelta, scale_factor: f64, now: Instant) {

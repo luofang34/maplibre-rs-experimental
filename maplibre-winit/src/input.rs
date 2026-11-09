@@ -260,9 +260,9 @@ impl InputController {
                     }
                 }
             }
-            WindowEvent::PinchGesture { delta, .. } => {
+            WindowEvent::PinchGesture { delta, phase, .. } => {
                 self.navigation_state.on_manual_pan_or_zoom();
-                self.zoom_handler.process_pinch(*delta);
+                self.zoom_handler.process_pinch_gesture(*delta, *phase);
                 true
             }
             WindowEvent::RotationGesture { delta, .. } => {
@@ -291,7 +291,14 @@ impl InputController {
                         (steps - steps.round()).abs() <= 1e-6 * steps.abs().max(1.0)
                             || (dy.abs() >= 40.0 && (dy % 10.0).abs() <= 1e-6)
                     };
-                    if !is_discrete_wheel && !self.navigation_state.ctrl_held {
+                    if !is_discrete_wheel {
+                        if self.navigation_state.ctrl_held {
+                            // Browsers encode trackpad two-finger pinch as ctrlKey + wheel
+                            // with deltaY = -magnification * 100.0 (winit negates deltaY into pos.y).
+                            self.zoom_handler.process_web_pinch_wheel(dy * 0.01);
+                            return true;
+                        }
+                        self.zoom_handler.cancel_pinch_inertia();
                         if self.navigation_state.alt_held {
                             self.camera_handler
                                 .process_trackpad_orbit_scroll(Vector2::new(dx, dy));
@@ -310,6 +317,7 @@ impl InputController {
                 let cursor = self.navigation_state.cursor_position;
                 match (*button, *state) {
                     (MouseButton::Left, ElementState::Pressed) => {
+                        self.zoom_handler.cancel_pinch_inertia();
                         if let Some(pos) = cursor {
                             if self.navigation_state.process_hud_press(
                                 pos,
