@@ -76,10 +76,32 @@ pub fn build_style(mut style: Style) -> Style {
                     400,
                     "lightblue"
                 ]))),
-                fill_extrusion_height: Some(StyleProperty::parse(&json!(["get", "render_height"]))),
+                fill_extrusion_height: Some(StyleProperty::parse(&json!([
+                    "interpolate",
+                    ["linear"],
+                    ["zoom"],
+                    14,
+                    0,
+                    14.5,
+                    ["get", "render_height"]
+                ]))),
                 fill_extrusion_base: Some(StyleProperty::parse(&json!([
-                    "get",
-                    "render_min_height"
+                    "interpolate",
+                    ["linear"],
+                    ["zoom"],
+                    14,
+                    0,
+                    14.5,
+                    ["get", "render_min_height"]
+                ]))),
+                fill_extrusion_opacity: Some(StyleProperty::parse(&json!([
+                    "interpolate",
+                    ["linear"],
+                    ["zoom"],
+                    14,
+                    0,
+                    14.5,
+                    1
                 ]))),
                 ..Default::default()
             })),

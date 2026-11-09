@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["key","matches","position"],"struct":["Key","PlacementHistory","State"]};
+window.SIDEBAR_ITEMS = {"fn":["feature_hash","matches","position"],"struct":["PlacementHistory","State"]};

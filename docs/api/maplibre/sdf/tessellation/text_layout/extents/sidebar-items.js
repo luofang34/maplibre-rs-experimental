@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["both_orientations","extent","is_vertical","layout_extent","unwrapped_width","variable_shifts"]};
+window.SIDEBAR_ITEMS = {"fn":["both_orientations","extent_from_block","layout_extent_from_block","unwrapped_width","variable_shifts_from_block"]};

@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["process_layer","symbol_layer","tessellate_readable","tessellator","vector_layer"]};
+window.SIDEBAR_ITEMS = {"fn":["decode_mvt_rings","feature_bool_tag","feature_number_tag","point_in_mvt_ring","process_layer","remove_feature_tag","rings_bbox","set_feature_tag","symbol_layer","tessellate_readable","tessellator","unhide_unreplaced_building_bases","vector_layer"]};

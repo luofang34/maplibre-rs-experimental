@@ -37,7 +37,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-bbe9512c.js";
+            window.path_to_searchindex_js = "../searchindex-0500c072.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-e964a7da.js"></script>
@@ -261,10 +261,32 @@ pub fn build_style(mut style: Style) -&gt; Style {
                     400,
                     "lightblue"
                 ]))),
-                fill_extrusion_height: Some(StyleProperty::parse(&amp;json!(["get", "render_height"]))),
+                fill_extrusion_height: Some(StyleProperty::parse(&amp;json!([
+                    "interpolate",
+                    ["linear"],
+                    ["zoom"],
+                    14,
+                    0,
+                    14.5,
+                    ["get", "render_height"]
+                ]))),
                 fill_extrusion_base: Some(StyleProperty::parse(&amp;json!([
-                    "get",
-                    "render_min_height"
+                    "interpolate",
+                    ["linear"],
+                    ["zoom"],
+                    14,
+                    0,
+                    14.5,
+                    ["get", "render_min_height"]
+                ]))),
+                fill_extrusion_opacity: Some(StyleProperty::parse(&amp;json!([
+                    "interpolate",
+                    ["linear"],
+                    ["zoom"],
+                    14,
+                    0,
+                    14.5,
+                    1
                 ]))),
                 ..Default::default()
             })),
@@ -326,8 +348,33 @@ fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
                 ['linear'],
                 ['get', 'render_height'], 0, 'lightgray', 200, 'royalblue', 400, 'lightblue'
             ],
-            'fill-extrusion-height': ['get', 'render_height'],
-            'fill-extrusion-base': ['get', 'render_min_height']
+            'fill-extrusion-height': [
+                'interpolate',
+                ['linear'],
+                ['zoom'],
+                14,
+                0,
+                14.5,
+                ['get', 'render_height']
+            ],
+            'fill-extrusion-base': [
+                'interpolate',
+                ['linear'],
+                ['zoom'],
+                14,
+                0,
+                14.5,
+                ['get', 'render_min_height']
+            ],
+            'fill-extrusion-opacity': [
+                'interpolate',
+                ['linear'],
+                ['zoom'],
+                14,
+                0,
+                14.5,
+                1
+            ]
         }
     });
     return style;

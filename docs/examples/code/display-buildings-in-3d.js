@@ -31,8 +31,33 @@ export default async function style() {
                 ['linear'],
                 ['get', 'render_height'], 0, 'lightgray', 200, 'royalblue', 400, 'lightblue'
             ],
-            'fill-extrusion-height': ['get', 'render_height'],
-            'fill-extrusion-base': ['get', 'render_min_height']
+            'fill-extrusion-height': [
+                'interpolate',
+                ['linear'],
+                ['zoom'],
+                14,
+                0,
+                14.5,
+                ['get', 'render_height']
+            ],
+            'fill-extrusion-base': [
+                'interpolate',
+                ['linear'],
+                ['zoom'],
+                14,
+                0,
+                14.5,
+                ['get', 'render_min_height']
+            ],
+            'fill-extrusion-opacity': [
+                'interpolate',
+                ['linear'],
+                ['zoom'],
+                14,
+                0,
+                14.5,
+                1
+            ]
         }
     });
     return style;

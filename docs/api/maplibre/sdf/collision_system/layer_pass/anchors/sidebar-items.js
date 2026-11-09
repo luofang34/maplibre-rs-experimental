@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {};
+window.SIDEBAR_ITEMS = {"fn":["beyond_perspective_cutoff_with_clip","label_boxes","local_zoom_visible_from_clip","ordered_features"],"type":["OrderedFeature"]};
