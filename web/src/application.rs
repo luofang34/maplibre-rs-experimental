@@ -112,7 +112,12 @@ pub async fn run_map(
                     RendererBuilder::new(),
                     plugins,
                 )?;
-                if style.terrain.is_some() || style.pitch.is_some_and(|pitch| pitch > 60.0) {
+                if style.terrain.is_some()
+                    || style.pitch.is_some_and(|pitch| pitch > 60.0)
+                    || style.projection.as_ref().is_some_and(|p| {
+                        p.projection_type != maplibre::projection::ProjectionType::Mercator
+                    })
+                {
                     map.set_max_pitch_degrees(style.pitch.unwrap_or(0.0).max(85.0));
                 }
                 host.configure(&mut map);
@@ -199,6 +204,7 @@ pub fn default_plugins(style: &Style) -> Vec<MapPlugin> {
             platform::UsedDemTransferables,
         >::default()));
     }
+    plugins.push(Box::new(maplibre::hud::NavigationHudPlugin));
     #[cfg(debug_assertions)]
     plugins.push(Box::<maplibre::debug::DebugPlugin>::default());
     plugins

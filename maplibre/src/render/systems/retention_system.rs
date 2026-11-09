@@ -300,6 +300,19 @@ pub(crate) fn finish_tiles_in_use(
     if let Some(dem) = dem_source(style) {
         let view: Vec<WorldTileCoords> = in_use.iter().copied().collect();
         for coords in view {
+            let target_coarse = u8::from(coords.z).saturating_sub(3);
+            let mut ancestor = coords;
+            while let Some(parent) = ancestor.get_parent() {
+                if u8::from(parent.z) == target_coarse
+                    || world
+                        .tiles
+                        .query::<&crate::raster::RasterLayersDataComponent>(parent)
+                        .is_some()
+                {
+                    in_use.insert(parent);
+                }
+                ancestor = parent;
+            }
             let Some(mut dem_coords) = dem_tile_coords(coords, dem.minzoom, dem.maxzoom) else {
                 continue;
             };

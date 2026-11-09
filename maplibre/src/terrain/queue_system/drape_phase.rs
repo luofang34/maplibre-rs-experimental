@@ -164,7 +164,8 @@ pub(super) fn build_drape_phase(
     phase
 }
 
-/// Color the drape textures start from: the constant background paint, or transparent.
+/// Color the drape textures start from: the constant background paint, a neutral cartographic
+/// terrain tone when terrain is active without a background layer, or transparent.
 pub(super) fn background_clear_color(style: &Style) -> wgpu::Color {
     style
         .layers
@@ -177,7 +178,18 @@ pub(super) fn background_clear_color(style: &Style) -> wgpu::Color {
             b: f64::from(color.color.b),
             a: f64::from(color.alpha),
         })
-        .unwrap_or(wgpu::Color::TRANSPARENT)
+        .unwrap_or_else(|| {
+            if style.terrain.is_some() {
+                wgpu::Color {
+                    r: 0.91,
+                    g: 0.89,
+                    b: 0.85,
+                    a: 1.0,
+                }
+            } else {
+                wgpu::Color::TRANSPARENT
+            }
+        })
 }
 
 pub(super) fn encode_drapes(

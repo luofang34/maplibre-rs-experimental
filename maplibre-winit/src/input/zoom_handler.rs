@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use cgmath::{Point2, Vector2};
+use cgmath::{Deg, Point2, Vector2};
 use instant::Instant;
 use maplibre::{
     context::MapContext,
@@ -15,6 +15,7 @@ use winit::keyboard::Key;
 
 use self::scroll::ScrollInput;
 use super::{
+    navigation_state::{set_pitch_keeping_center, NavigationState},
     projection::{center_pixel, zoom_globe_around_pixel},
     UpdateState,
 };
@@ -29,6 +30,10 @@ const GESTURE_END_DELAY: Duration = Duration::from_millis(200);
 pub struct ZoomHandler {
     window_position: Option<Vector2<f64>>,
     zoom_delta: Option<Zoom>,
+    /// Smoothly animated zoom remainder (used for `+`/`-` buttons, keys, and double-click).
+    smooth_zoom_remaining: f64,
+    /// Optional explicit anchor pixel for the active smooth zoom animation.
+    smooth_zoom_anchor: Option<Vector2<f64>>,
     scroll: ScrollInput,
     /// Elevation the running gesture anchors on, captured when it starts.
     gesture_elevation: Option<Option<f64>>,
@@ -39,7 +44,13 @@ pub struct ZoomHandler {
 }
 
 impl UpdateState for ZoomHandler {
-    fn update_state(
+    fn update_state(&mut self, map_context: &mut MapContext, dt: Duration) {
+        self.update_state_with_nav(map_context, dt, None);
+    }
+}
+
+impl ZoomHandler {
+    pub fn update_state_with_nav(
         &mut self,
         MapContext {
             style,
@@ -47,11 +58,27 @@ impl UpdateState for ZoomHandler {
             world,
             ..
         }: &mut MapContext,
-        _dt: Duration,
+        dt: Duration,
+        nav: Option<&mut NavigationState>,
     ) {
         let now = Instant::now();
         if let Some(zoom) = self.scroll.take_zoom(now) {
+            self.smooth_zoom_anchor = None;
             self.update_zoom(zoom);
+        }
+        if self.smooth_zoom_remaining.abs() > 1e-4 {
+            let alpha = (1.0 - (-dt.as_secs_f64() * 14.0).exp()).clamp(0.08, 1.0);
+            let step = if self.smooth_zoom_remaining.abs() < 0.01 {
+                let s = self.smooth_zoom_remaining;
+                self.smooth_zoom_remaining = 0.0;
+                self.smooth_zoom_anchor = None;
+                s
+            } else {
+                let s = self.smooth_zoom_remaining * alpha;
+                self.smooth_zoom_remaining -= s;
+                s
+            };
+            self.update_zoom(step);
         }
         let Some(zoom_delta) = self.zoom_delta.take() else {
             let finished = self
@@ -82,35 +109,69 @@ impl UpdateState for ZoomHandler {
         if remainder.abs() > f64::EPSILON {
             self.zoom_delta = Some(Zoom::new(remainder));
         }
+        let auto_tilt_active = nav
+            .as_ref()
+            .is_some_and(|n| n.three_dimensional && n.auto_tilt);
+        if style.terrain.is_some()
+            && (auto_tilt_active || view_state.center_elevation().abs() <= f64::EPSILON)
+        {
+            view_state.thaw_center_elevation();
+            maplibre::terrain::elevation::ground_center(view_state, world);
+        }
         let pointer = self
-            .window_position
+            .smooth_zoom_anchor
+            .or(self.window_position)
             .unwrap_or_else(|| center_pixel(view_state));
         let current =
             resolve_gesture_anchor(style, view_state, world, Point2::new(pointer.x, pointer.y));
-        let elevation = match self.gesture_elevation {
-            Some(elevation) => elevation,
-            None => {
-                self.globe_anchor = terrain_anchor_at(style, view_state, world, current.pixel);
-                begin_gesture(view_state);
-                self.gesture_elevation = Some(current.elevation);
-                current.elevation
+        let elevation = if auto_tilt_active {
+            // Re-resolve the terrain anchor each frame while Auto-Tilt is simultaneously
+            // tilting the camera so a stale elevation from many zoom levels ago never pulls
+            // the orbit center underground.
+            self.globe_anchor = terrain_anchor_at(style, view_state, world, current.pixel);
+            current.elevation
+        } else {
+            match self.gesture_elevation {
+                Some(elevation) => elevation,
+                None => {
+                    self.globe_anchor = terrain_anchor_at(style, view_state, world, current.pixel);
+                    begin_gesture(view_state);
+                    self.gesture_elevation = Some(current.elevation);
+                    current.elevation
+                }
             }
         };
         let anchor = GestureAnchor {
             pixel: current.pixel,
             elevation,
         };
-        let next_zoom = view_state.zoom() + Zoom::new(step);
+        let next_zoom = Zoom::new((view_state.zoom().value() + step).clamp(0.0, 22.0));
+        let mut zoomed_globe_anchor = false;
         if let Some(globe_anchor) = self.globe_anchor {
             if zoom_globe_keeping_anchor(view_state, globe_anchor, anchor.pixel, next_zoom.value())
             {
-                self.last_input = Some(now);
-                return;
+                zoomed_globe_anchor = true;
             }
         }
-        let screen = Vector2::new(anchor.pixel.x, anchor.pixel.y);
-        if !zoom_globe_around_pixel(style, view_state, screen, next_zoom) {
-            zoom_mercator_around(view_state, anchor, next_zoom);
+        if !zoomed_globe_anchor {
+            let screen = Vector2::new(anchor.pixel.x, anchor.pixel.y);
+            if !zoom_globe_around_pixel(style, view_state, screen, next_zoom) {
+                zoom_mercator_around(view_state, anchor, next_zoom);
+            }
+        }
+        if let Some(nav_state) = nav {
+            let actual_zoom = view_state.zoom().value();
+            nav_state.on_zoom_changed(actual_zoom);
+            if nav_state.three_dimensional && nav_state.auto_tilt {
+                if style.terrain.is_some() {
+                    view_state.thaw_center_elevation();
+                    maplibre::terrain::elevation::ground_center(view_state, world);
+                }
+                let max_pitch = view_state.camera().max_pitch().0.to_degrees();
+                let deg = nav_state.pitch_for_zoom(actual_zoom).clamp(0.0, max_pitch);
+                set_pitch_keeping_center(view_state, Deg(deg));
+                nav_state.cancel_pitch_animation();
+            }
         }
         self.last_input = Some(now);
     }
@@ -121,11 +182,18 @@ impl ZoomHandler {
         Self {
             window_position: None,
             zoom_delta: None,
+            smooth_zoom_remaining: 0.0,
+            smooth_zoom_anchor: None,
             scroll: ScrollInput::new(sensitivity),
             gesture_elevation: None,
             globe_anchor: None,
             last_input: None,
         }
+    }
+
+    /// Sets the scroll-wheel and trackpad zoom rate multiplier (`1.0` matches GL JS's default).
+    pub fn set_sensitivity(&mut self, sensitivity: f64) {
+        self.scroll.set_sensitivity(sensitivity);
     }
 
     pub fn process_window_position(
@@ -141,9 +209,15 @@ impl ZoomHandler {
         self.zoom_delta = Some(self.zoom_delta.unwrap_or_default() + Zoom::new(delta));
     }
 
+    /// Queues a smooth animated zoom step (for HUD `+`/`-` buttons, keys, or double-click).
+    pub fn add_smooth_zoom(&mut self, delta: f64, anchor: Option<Vector2<f64>>) {
+        self.smooth_zoom_remaining = (self.smooth_zoom_remaining + delta).clamp(-4.0, 4.0);
+        self.smooth_zoom_anchor = anchor;
+    }
+
     /// Shortest time until a pending scroll classification or gesture-end release needs a frame.
     pub(super) fn next_wait(&self, now: Instant) -> Option<Duration> {
-        if self.zoom_delta.is_some() {
+        if self.zoom_delta.is_some() || self.smooth_zoom_remaining.abs() > 1e-4 {
             return Some(Duration::ZERO);
         }
         let scroll_wait = self.scroll.next_wait(now);
@@ -173,19 +247,16 @@ impl ZoomHandler {
     }
 
     pub fn process_key_press(&mut self, key: &Key, state: winit::event::ElementState) -> bool {
-        let amount = if state == winit::event::ElementState::Pressed {
-            0.1
-        } else {
-            0.0
-        };
-
+        if state != winit::event::ElementState::Pressed {
+            return false;
+        }
         match key.as_ref() {
-            Key::Character("i") | Key::Character("+") => {
-                self.update_zoom(amount);
+            Key::Character("i") | Key::Character("+") | Key::Character("=") => {
+                self.add_smooth_zoom(0.65, None);
                 true
             }
-            Key::Character("k") | Key::Character("-") => {
-                self.update_zoom(-amount);
+            Key::Character("k") | Key::Character("-") | Key::Character("_") => {
+                self.add_smooth_zoom(-0.65, None);
                 true
             }
             _ => false,

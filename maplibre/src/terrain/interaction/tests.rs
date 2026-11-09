@@ -380,3 +380,22 @@ fn globe_rays_into_the_sky_miss_the_terrain() {
         "ground elevation",
     );
 }
+
+#[test]
+fn recalculating_when_new_terrain_rises_above_camera_altitude_preserves_zoom_and_pitch() {
+    let mut view = view(15.0, 70.0);
+    view.set_center_elevation(580.0);
+    let (_, altitude_before) = camera_ground_position(&view);
+    assert!(altitude_before < 2270.0);
+
+    recalculate_zoom_and_center(&mut view, 2270.0);
+
+    assert_close(view.center_elevation(), 2270.0, 1e-9, "center elevation");
+    assert_close(view.zoom().value(), 15.0, 1e-9, "zoom stays at 15.0");
+    assert_close(
+        view.camera().get_pitch().0.to_degrees(),
+        70.0,
+        1e-9,
+        "pitch stays at 70.0",
+    );
+}

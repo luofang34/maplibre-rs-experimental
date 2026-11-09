@@ -77,7 +77,28 @@ pub(crate) fn target_specs(
     world
         .resources
         .insert(crate::terrain::request_system::DrapeRequests(tiles.clone()));
-    let targets = select_targets(tiles.into_iter(), world, &raster_coverings);
+    let mut targets = select_targets(tiles.into_iter(), world, &raster_coverings);
+    if !uniform_globe && !view_state.has_external_view() && view_state.pose_view().is_none() {
+        let prefetch_tiles = world
+            .resources
+            .get::<crate::terrain::request_system::DrapePrefetchRequests>()
+            .map(|requests| requests.0.clone())
+            .unwrap_or_default();
+        if !prefetch_tiles.is_empty() {
+            if let Ok(loose_raster) = crate::render::projection::raster_source_regions(
+                style,
+                view_state,
+                world,
+                crate::render::view_state::ViewStatePadding::Loose,
+            ) {
+                targets.extend(select_targets(
+                    prefetch_tiles.into_iter(),
+                    world,
+                    &loose_raster,
+                ));
+            }
+        }
+    }
     Ok(collect_layer_specs(
         targets,
         style,

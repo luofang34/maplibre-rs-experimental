@@ -221,6 +221,34 @@ impl ViewState {
                 .min((MAX_MERCATOR_HORIZON_ANGLE.0 - pitch).tan())
     }
 
+    /// Returns a view shifted backward toward the camera's ground nadir when the camera is
+    /// pitched (`> 20°`), covering the high-detail foreground strip immediately below the
+    /// bottom edge of the screen so backward edge-scrolling never outruns tile loading.
+    pub fn pitched_nadir_apron(&self) -> Option<Self> {
+        if self.has_external_view() || self.navigation_mode() != NavigationMode::Constrained {
+            return None;
+        }
+        let pitch_deg = self.camera.get_pitch().0.to_degrees().abs();
+        if pitch_deg <= 20.0 {
+            return None;
+        }
+        let center = self.camera.position();
+        let eye = self.eye_position();
+        let to_nadir = Vector2::new(eye.x - center.x, eye.y - center.y);
+        if !to_nadir.x.is_finite()
+            || !to_nadir.y.is_finite()
+            || (to_nadir.x * to_nadir.x + to_nadir.y * to_nadir.y) < 1.0
+        {
+            return None;
+        }
+        let world_size = TILE_SIZE * 2_f64.powf(self.zoom.value());
+        let mut apron = self.clone();
+        let new_x = (center.x + to_nadir.x * 0.68).rem_euclid(world_size);
+        let new_y = (center.y + to_nadir.y * 0.68).clamp(0.0, world_size);
+        apron.camera.move_to(Point2::new(new_x, new_y));
+        Some(apron)
+    }
+
     /// Distances in pixels the fog depth spans: from the camera's distance to sea level, where
     /// the map center sits, to the far plane, as the GL JS fog matrix takes them. An external
     /// eye's fog is fixed by its height instead.

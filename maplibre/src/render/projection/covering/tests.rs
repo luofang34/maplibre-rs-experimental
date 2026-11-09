@@ -280,3 +280,55 @@ fn a_level_eyes_view_tiles_keep_gl_js_levels() {
     reference.sort();
     assert_eq!(drawn, reference);
 }
+
+#[test]
+fn pitched_camera_loose_covering_prefetches_nadir_apron_below_bottom_edge() {
+    use cgmath::Deg;
+
+    use crate::{
+        coords::{LatLon, WorldCoords, Zoom},
+        window::PhysicalSize,
+    };
+    let style: Style = serde_json::from_str(
+        r#"{"version":8,"layers":[],"terrain":{"source":"dem"},
+            "sources":{"dem":{"type":"raster-dem","tiles":["dem/{z}/{x}/{y}.png"],"tileSize":256}}}"#,
+    )
+    .expect("style");
+    let zoom = Zoom::new(13.0);
+    let mut view = ViewState::new(
+        PhysicalSize::new(1280, 800).expect("viewport"),
+        WorldCoords::from_lat_lon(LatLon::new(47.26, 11.39), zoom),
+        zoom,
+        Deg(60.0),
+        Deg(36.87),
+    );
+    view.camera_mut().set_pitch(Deg(60.0));
+    let world = World::default();
+
+    let apron = view
+        .pitched_nadir_apron()
+        .expect("pitched camera produces nadir apron");
+    let tight = terrain_region(&style, &view, &world, 256, ViewStatePadding::Tight)
+        .expect("tight covering")
+        .expect("tight region");
+    let loose = terrain_region(&style, &view, &world, 256, ViewStatePadding::Loose)
+        .expect("loose covering")
+        .expect("loose region");
+    let apron_tight = terrain_region(&style, &apron, &world, 256, ViewStatePadding::Tight)
+        .expect("apron covering")
+        .expect("apron region");
+
+    let tight_tiles: Vec<_> = tight.iter().collect();
+    let loose_tiles: Vec<_> = loose.iter().collect();
+    assert_eq!(
+        &loose_tiles[..tight_tiles.len()],
+        tight_tiles.as_slice(),
+        "visible tiles must remain first in loose requests"
+    );
+    for tile in apron_tight.iter() {
+        assert!(
+            loose_tiles.contains(&tile),
+            "loose terrain covering must include pitched nadir apron tile {tile:?}"
+        );
+    }
+}

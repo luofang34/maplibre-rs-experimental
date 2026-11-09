@@ -302,6 +302,50 @@ fn covering_region_with_history(
     if !request.zoom_range.serves(request.level) {
         return Ok(None);
     }
+    let mut region = covering_region_single(style, view_state, world, request, padding, history)?;
+    if padding == ViewStatePadding::Loose && !view_state.has_external_view() {
+        if let Some(apron) = view_state.pitched_nadir_apron() {
+            let apron_region = covering_region_single(
+                style,
+                &apron,
+                world,
+                request,
+                ViewStatePadding::Tight,
+                history,
+            )?;
+            region = union_regions(region, apron_region, request.level, PREFETCH_MAX_TILES);
+        }
+        if let Some(ahead) = world
+            .resources
+            .get::<PrefetchView>()
+            .and_then(|prefetch| prefetch.view_state.as_ref())
+            .filter(|ahead| !ahead.has_external_view())
+        {
+            let ahead_region = covering_region_single(
+                style,
+                ahead,
+                world,
+                request,
+                ViewStatePadding::Tight,
+                history,
+            )?;
+            region = union_regions(region, ahead_region, request.level, PREFETCH_MAX_TILES);
+        }
+    }
+    Ok(region)
+}
+
+fn covering_region_single(
+    style: &Style,
+    view_state: &ViewState,
+    world: &World,
+    request: CoveringRequest,
+    padding: ViewStatePadding,
+    history: Option<&LodHistory>,
+) -> Result<Option<ViewRegion>, ProjectionStateError> {
+    if !request.zoom_range.serves(request.level) {
+        return Ok(None);
+    }
     // A loose covering is a request for tiles; an external eye may ask for it to reach beyond
     // the frame so tiles are ready where the head turns next, once the eye has settled.
     let widened = match padding {

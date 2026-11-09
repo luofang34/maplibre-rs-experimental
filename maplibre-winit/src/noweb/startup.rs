@@ -147,7 +147,28 @@ pub fn run_headed_map_with<P: Into<PathBuf>>(
                     RendererBuilder::new().with_wgpu_settings(wgpu_settings.clone());
                 let plugins = host.plugins_for(&style, options.debug_tiles);
                 let mut map = Map::new(style.clone(), kernel, renderer_builder, plugins)?;
-                map.set_max_pitch(cgmath::Deg(options.max_pitch_degrees));
+                let has_3d_or_globe = style.terrain.is_some()
+                    || style.pitch.is_some_and(|pitch| pitch > 60.0)
+                    || style.projection.as_ref().is_some_and(|p| {
+                        p.projection_type != maplibre::projection::ProjectionType::Mercator
+                    });
+                let default_max = maplibre::render::camera::DEFAULT_MAX_PITCH.0;
+                if has_3d_or_globe && (options.max_pitch_degrees - default_max).abs() < f64::EPSILON
+                {
+                    map.set_max_pitch(cgmath::Deg(style.pitch.unwrap_or(0.0).max(85.0)));
+                } else {
+                    map.set_max_pitch(cgmath::Deg(options.max_pitch_degrees));
+                }
+                if let Ok(context) = map.context_mut() {
+                    let hud = context
+                        .world
+                        .resources
+                        .get_or_init_mut::<maplibre::hud::NavigationHudState>();
+                    hud.visible = options.show_navigation_controls;
+                    hud.zoom_sensitivity = options.zoom_sensitivity;
+                    hud.edge_scroll_speed_px_per_sec = options.edge_scroll_speed_px_per_sec;
+                    hud.edge_scroll_enabled = options.edge_scroll_enabled;
+                }
                 host.configure(&mut map);
                 Ok::<_, HeadedMapError>(map)
             },
@@ -234,6 +255,7 @@ pub fn default_plugins(style: &Style, debug_tiles: bool) -> Vec<MapPlugin> {
             maplibre::terrain::TerrainPlugin<maplibre::terrain::DefaultDemTransferables>,
         >::default());
     }
+    plugins.push(Box::new(maplibre::hud::NavigationHudPlugin));
     plugins
 }
 

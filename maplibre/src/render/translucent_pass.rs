@@ -125,6 +125,15 @@ impl Node for TranslucentPassNode {
                 previous = group;
             }
         }
+        let end_hooks = world
+            .resources
+            .get::<crate::render::PassDrawHooks>()
+            .map(|hooks| hooks.get_hooks(crate::render::PassHookPoint::TranslucentPassEnd));
+        if let Some(hooks) = end_hooks {
+            for hook in hooks {
+                hook.draw(&mut render_pass, world);
+            }
+        }
         render_pass.finish(world);
     }
 }

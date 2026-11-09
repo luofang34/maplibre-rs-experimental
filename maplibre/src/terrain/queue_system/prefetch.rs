@@ -16,6 +16,7 @@ use crate::{
 };
 
 const PREFETCH_BYTES: usize = 32 << 20;
+const STANDARD_PREFETCH_BYTES: usize = 64 << 20;
 
 #[derive(Default)]
 struct PrefetchCadence(Option<Duration>);
@@ -32,10 +33,19 @@ pub(super) fn prepare(
         MemoryPressure::Low => 4,
         MemoryPressure::Critical => 0,
     };
-    if limit == 0 || !view.has_external_view() {
+    if limit == 0 {
         world.resources.insert(DrapePrefetchRequests::default());
         return;
     }
+    let has_ahead = world
+        .resources
+        .get::<PrefetchView>()
+        .is_some_and(|prefetch| prefetch.view_state.is_some());
+    let min_interval = if !view.has_external_view() && has_ahead {
+        Duration::from_millis(32)
+    } else {
+        Duration::from_millis(100)
+    };
     let time = world
         .resources
         .get::<FrameInput>()
@@ -43,7 +53,7 @@ pub(super) fn prepare(
     let cadence = world.resources.get_or_init_mut::<PrefetchCadence>();
     if cadence
         .0
-        .is_some_and(|previous| time >= previous && time - previous < Duration::from_millis(100))
+        .is_some_and(|previous| time >= previous && time - previous < min_interval)
     {
         return;
     }
@@ -52,11 +62,17 @@ pub(super) fn prepare(
         .resources
         .get::<PrefetchView>()
         .and_then(|prefetch| prefetch.view_state.as_ref());
-    let request_view = ahead.unwrap_or(view);
-    let padding = if ahead.is_some() {
-        ViewStatePadding::Tight
+    let (request_view, padding) = if view.has_external_view() {
+        (
+            ahead.unwrap_or(view),
+            if ahead.is_some() {
+                ViewStatePadding::Tight
+            } else {
+                ViewStatePadding::Loose
+            },
+        )
     } else {
-        ViewStatePadding::Loose
+        (view, ViewStatePadding::Loose)
     };
     let candidates = {
         let region = crate::terrain::source::dem_source(style)
@@ -84,16 +100,32 @@ pub(super) fn prepare(
             focus,
         )
     };
-    let candidates = select(candidates, visible, limit, |tile| {
+    let max_bytes = if view.has_external_view() {
+        PREFETCH_BYTES
+    } else {
+        STANDARD_PREFETCH_BYTES
+    };
+    let candidates = select_with_budget(candidates, visible, limit, max_bytes, |tile| {
         tile_bytes(&world.tiles, tile)
     });
     world.resources.insert(DrapePrefetchRequests(candidates));
 }
 
+#[cfg(test)]
 fn select(
     candidates: Vec<WorldTileCoords>,
     visible: &[WorldTileCoords],
     limit: usize,
+    bytes: impl Fn(WorldTileCoords) -> usize,
+) -> Vec<WorldTileCoords> {
+    select_with_budget(candidates, visible, limit, PREFETCH_BYTES, bytes)
+}
+
+fn select_with_budget(
+    candidates: Vec<WorldTileCoords>,
+    visible: &[WorldTileCoords],
+    limit: usize,
+    max_bytes: usize,
     bytes: impl Fn(WorldTileCoords) -> usize,
 ) -> Vec<WorldTileCoords> {
     let visible: HashSet<_> = visible.iter().copied().collect();
@@ -105,7 +137,7 @@ fn select(
         .take_while(|tile| {
             // Reserve space for a not-yet-decoded tile instead of treating it as free.
             used = used.saturating_add(bytes(*tile).max(8 << 20));
-            used <= PREFETCH_BYTES
+            used <= max_bytes
         })
         .collect()
 }

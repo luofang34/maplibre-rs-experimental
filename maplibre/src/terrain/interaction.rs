@@ -359,6 +359,19 @@ pub fn recalculate_zoom_and_center(view_state: &mut ViewState, elevation: f64) {
     let center = view_state.camera().position().to_vec();
     let camera = center - Vector2::new(x, y) * distance;
     let camera_altitude = (current * pixels_per_meter + distance * z) / pixels_per_meter;
+    let dz = -pitch.cos();
+    let above_ground = camera_altitude - elevation;
+    let current_distance_meters = distance / pixels_per_meter;
+    let min_safe_distance =
+        (current_distance_meters * 0.25).max(DISTANCE_TO_CENTER_WHEN_LOOKING_UP_METERS);
+    // Where the view ray looks down (`dz < -0.1`) but the new terrain at the center sits above
+    // or nearly at the old camera altitude, sliding the center along the ray would collapse the
+    // orbit distance to 10 m (zoom ~22). Move the camera up with the terrain instead, keeping
+    // zoom, center and pitch, as `recalculate_globe_zoom_and_center` does.
+    if dz < -0.1 && -above_ground / dz < min_safe_distance {
+        view_state.set_center_elevation(elevation);
+        return;
+    }
     let (distance_meters, clamped_elevation) =
         distance_to_center_from_altitude(camera_altitude, elevation, pitch);
     let new_center = camera + Vector2::new(x, y) * (distance_meters * pixels_per_meter);
@@ -373,6 +386,62 @@ pub fn recalculate_zoom_and_center(view_state: &mut ViewState, elevation: f64) {
     view_state.set_center_elevation(clamped_elevation);
     view_state.update_zoom(Zoom::new(new_zoom));
     view_state.camera_mut().move_to(Point2::from_vec(position));
+}
+
+/// Lowers camera pitch along the constant-zoom orbit sphere when the current pitch places the
+/// camera below the loaded terrain under it, keeping `zoom` and `center` unchanged.
+/// Returns whether the pitch was adjusted.
+pub fn clamp_pitch_above_terrain_keeping_zoom(
+    style: &Style,
+    view_state: &mut ViewState,
+    world: &World,
+) -> bool {
+    if style.terrain.is_none() || globe::globe_pose(view_state).is_some() {
+        return false;
+    }
+    let Some(index) = world.resources.get::<TerrainCoverageIndex>() else {
+        return false;
+    };
+    let world_size = TILE_SIZE * 2_f64.powf(view_state.zoom().value());
+    let zoom = u8::from(view_state.zoom().zoom_level(TILE_SIZE));
+    let current_pitch = view_state.camera().get_pitch().0;
+    if current_pitch <= 1e-4 {
+        return false;
+    }
+    let is_clear = |view: &ViewState, clearance: f64| -> Option<bool> {
+        let (camera, altitude) = camera_ground_position(view);
+        let min_altitude = index.loaded_ground_cached(
+            &world.tiles,
+            camera.x / world_size,
+            camera.y / world_size,
+            crate::terrain::DemDetail::Tile(zoom),
+        )?;
+        Some(altitude >= min_altitude + clearance)
+    };
+    let Some(false) = is_clear(view_state, 0.0) else {
+        return false;
+    };
+    // Verify that tilting toward nadir (pitch = 0) clears the terrain at this zoom.
+    view_state.camera_mut().set_pitch(cgmath::Rad(0.0));
+    if is_clear(view_state, 0.5) != Some(true) {
+        view_state
+            .camera_mut()
+            .set_pitch(cgmath::Rad(current_pitch));
+        return false;
+    }
+    let mut lo = 0.0_f64;
+    let mut hi = current_pitch;
+    for _ in 0..12 {
+        let mid = 0.5 * (lo + hi);
+        view_state.camera_mut().set_pitch(cgmath::Rad(mid));
+        if is_clear(view_state, 0.5).unwrap_or(true) {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    view_state.camera_mut().set_pitch(cgmath::Rad(lo));
+    true
 }
 
 /// Lifts the camera above the terrain under it by raising the pitch and zooming out, keeping the

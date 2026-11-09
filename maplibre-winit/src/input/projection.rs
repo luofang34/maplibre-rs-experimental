@@ -1,6 +1,6 @@
 //! Projection-aware coordinate conversion for input handlers.
 
-use cgmath::{Point2, Vector2};
+use cgmath::{EuclideanSpace, Point2, Rad, Vector2};
 use maplibre::{
     coords::{LatLon, WorldCoords, Zoom},
     projection::globe::{
@@ -16,7 +16,7 @@ use maplibre::{
         view_state::{NavigationMode, ViewState},
     },
     style::Style,
-    terrain::interaction::pan_mercator_by_pixels,
+    terrain::interaction::{pan_mercator_by_pixels, set_location_at_pixel, GestureAnchor},
 };
 
 /// Returns the globe camera while any globe transition is active, or `None` for an invalid view.
@@ -114,6 +114,18 @@ pub fn zoom_globe_around_pixel(
     screen: Vector2<f64>,
     next_zoom: Zoom,
 ) -> bool {
+    zoom_globe_around_pixel_with_pitch(style, view_state, screen, next_zoom, None)
+}
+
+/// Zooms the globe around a screen point while optionally coupling a simultaneous pitch change
+/// (used by `Auto-Tilt`), keeping the surface location under `screen` pinned.
+pub fn zoom_globe_around_pixel_with_pitch(
+    style: &Style,
+    view_state: &mut ViewState,
+    screen: Vector2<f64>,
+    next_zoom: Zoom,
+    next_pitch: Option<Rad<f64>>,
+) -> bool {
     if view_state.navigation_mode() == NavigationMode::FreeGlobe {
         let delta = next_zoom.value() - view_state.zoom().value();
         return view_state.zoom_free_globe(Point2::new(screen.x, screen.y), delta);
@@ -133,6 +145,9 @@ pub fn zoom_globe_around_pixel(
     // The camera position is stored in world pixels, so it must scale with the zoom for the
     // camera built next to look at the same center.
     view_state.zoom_to(next_zoom);
+    if let Some(pitch) = next_pitch {
+        view_state.camera_mut().set_pitch(pitch);
+    }
     let Some(after) = active_globe_camera(style, view_state) else {
         return true;
     };
@@ -160,6 +175,52 @@ pub fn zoom_globe_around_pixel(
     });
     set_center(view_state, update.center, update.zoom);
     true
+}
+
+/// Zooms the flat Mercator map around `anchor` while optionally applying `next_pitch`
+/// simultaneously, keeping the ground point at `anchor.pixel` pinned under the cursor.
+pub fn zoom_mercator_around_with_pitch(
+    view_state: &mut ViewState,
+    anchor: GestureAnchor,
+    next_zoom: Zoom,
+    next_pitch: Option<Rad<f64>>,
+) {
+    let plane = anchor
+        .elevation
+        .unwrap_or_else(|| view_state.center_elevation());
+    let Ok(inverted) = view_state.inverted_view_projection() else {
+        return;
+    };
+    let scale = view_state.zoom().scale_delta(&next_zoom);
+    let center = view_state
+        .edge_insets()
+        .center(view_state.width(), view_state.height());
+    let (target_pixel, before) =
+        match view_state.window_to_world_at_elevation(&anchor.pixel.to_vec(), &inverted, plane) {
+            Some(before) => (anchor.pixel, Some(before)),
+            None => (
+                center,
+                view_state.window_to_world_at_elevation(&center.to_vec(), &inverted, plane),
+            ),
+        };
+    view_state.zoom_to(next_zoom);
+    if let Some(pitch) = next_pitch {
+        view_state.camera_mut().set_pitch(pitch);
+    }
+    if let Some(before) = before {
+        // If tilting up pushed `target_pixel` above the horizon, fall back to keeping the
+        // center ground point steady so the camera never jumps.
+        let can_unproject = view_state
+            .inverted_view_projection()
+            .ok()
+            .and_then(|inv| {
+                view_state.window_to_world_at_elevation(&target_pixel.to_vec(), &inv, plane)
+            })
+            .is_some();
+        if can_unproject {
+            set_location_at_pixel(view_state, before * scale, plane, target_pixel);
+        }
+    }
 }
 
 fn apply_pan_update(view_state: &mut ViewState, current_latitude: f64, update: GlobePanUpdate) {

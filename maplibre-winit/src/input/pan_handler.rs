@@ -25,6 +25,8 @@ pub struct PanHandler {
     start_window_position: Option<Vector2<f64>>,
     is_panning: bool,
     inertia: PanInertia,
+    /// Accumulated 2D pixel delta from a trackpad two-finger scroll pan (`PixelDelta`).
+    pending_scroll_pan: Option<Vector2<f64>>,
     /// Elevation of the plane the running gesture drags, captured when it starts.
     gesture_plane: Option<f64>,
     /// The terrain point a drag on a globe orbiting the terrain keeps under the pointer, and
@@ -44,6 +46,17 @@ impl UpdateState for PanHandler {
         _dt: Duration,
     ) {
         let now = Instant::now();
+        if let Some(delta) = self.pending_scroll_pan.take() {
+            if delta.x.abs() > f64::EPSILON || delta.y.abs() > f64::EPSILON {
+                let cursor = self
+                    .window_position
+                    .unwrap_or_else(|| center_pixel(view_state));
+                let plane = view_state.center_elevation();
+                if !pan_globe_by_pixels(style, view_state, cursor, delta) {
+                    pan_plane_by_pixels(view_state, cursor, delta, plane);
+                }
+            }
+        }
         if !self.is_panning {
             if let Some(delta) = self.inertia.step(now) {
                 if let Some((anchor, pixel)) = &mut self.globe_anchor {
@@ -74,6 +87,11 @@ impl UpdateState for PanHandler {
         self.last_window_position = Some(window_position);
         self.inertia.record(now, delta);
         let start = Point2::new(start_window_position.x, start_window_position.y);
+        if self.gesture_plane.is_some_and(|p| p.abs() <= f64::EPSILON)
+            && view_state.center_elevation().abs() > f64::EPSILON
+        {
+            self.gesture_plane = Some(view_state.center_elevation());
+        }
         let plane = match self.gesture_plane {
             Some(plane) => plane,
             None => {
@@ -134,6 +152,37 @@ impl PanHandler {
             self.end();
         }
         true
+    }
+
+    pub fn is_panning(&self) -> bool {
+        self.is_panning
+    }
+
+    /// Accumulates a 2D pixel pan delta from a trackpad two-finger scroll gesture (Apple Maps style).
+    pub fn process_trackpad_scroll_pan(&mut self, delta_pixels: Vector2<f64>) {
+        self.inertia.cancel();
+        let current = self.pending_scroll_pan.unwrap_or(Vector2::new(0.0, 0.0));
+        self.pending_scroll_pan = Some(current + delta_pixels);
+    }
+
+    pub fn begin_pan(&mut self, window_position: Option<Vector2<f64>>) {
+        self.begin(window_position);
+    }
+
+    pub fn end_pan(&mut self) {
+        self.end();
+    }
+
+    /// Rebases an active touch pan to a new finger position without releasing inertia, used when
+    /// a multi-finger pinch transitions cleanly back to a single finger.
+    pub fn rebase_touch(&mut self, window_position: Vector2<f64>) {
+        self.inertia.cancel();
+        self.is_panning = true;
+        self.gesture_plane = None;
+        self.globe_anchor = None;
+        self.start_window_position = Some(window_position);
+        self.last_window_position = Some(window_position);
+        self.window_position = Some(window_position);
     }
 
     fn begin(&mut self, window_position: Option<Vector2<f64>>) {

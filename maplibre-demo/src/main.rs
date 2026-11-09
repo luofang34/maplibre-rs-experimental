@@ -78,6 +78,9 @@ enum Commands {
         /// Outline every tile of the view pattern in red, to inspect tile selection.
         #[clap(long)]
         debug_tiles: bool,
+        /// Multiplier on scroll-wheel / trackpad zoom rate (`1.0` = default).
+        #[clap(long, default_value_t = 1.0)]
+        zoom_sensitivity: f64,
     },
     #[cfg(feature = "headless")]
     Headless {
@@ -159,6 +162,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             projection,
             frames,
             debug_tiles,
+            zoom_sensitivity,
         } => {
             let bundled = if *terrain {
                 BundledStyle::Terrain
@@ -185,6 +189,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     max_frames: *frames,
                     max_pitch_degrees: max_pitch.unwrap_or(default_max_pitch),
                     debug_tiles: *debug_tiles,
+                    zoom_sensitivity: *zoom_sensitivity,
+                    ..HeadedMapOptions::default()
                 },
             )?;
         }

@@ -402,12 +402,27 @@ impl<E: Environment, T: RasterTransferables> RequestSystem<E, T> {
     }
 }
 
+fn coarse_raster_ancestor(coords: WorldTileCoords, minzoom: u8) -> Option<WorldTileCoords> {
+    let target = u8::from(coords.z).saturating_sub(3).max(minzoom);
+    if target >= u8::from(coords.z) {
+        return None;
+    }
+    let mut current = coords;
+    while u8::from(current.z) > target {
+        current = current.get_parent()?;
+    }
+    Some(current)
+}
+
 fn wanted_tiles(
     regions: Vec<(RasterSourceId, Vec<WorldTileCoords>)>,
     style: &crate::style::Style,
     world: &crate::tcs::world::World,
 ) -> Vec<WorldTileCoords> {
     let mut wanted = Vec::new();
+    let mut coarse_ancestors = Vec::new();
+    let mut seen_coarse = FxHashSet::default();
+    let is_terrain = style.terrain.is_some();
     for (source, tiles) in regions {
         let minzoom = match source.name().and_then(|name| style.sources.get(name)) {
             Some(crate::style::source::Source::Raster(source)) => source.minzoom,
@@ -426,6 +441,13 @@ fn wanted_tiles(
             {
                 continue;
             }
+            if is_terrain {
+                if let Some(ancestor) = coarse_raster_ancestor(coords, minzoom) {
+                    if seen_coarse.insert(ancestor) {
+                        coarse_ancestors.push(ancestor);
+                    }
+                }
+            }
             wanted.push(coords);
             if let Some(parent) = missing_tile_fallback(coords, minzoom, |coords| {
                 world
@@ -436,6 +458,14 @@ fn wanted_tiles(
                 wanted.push(parent);
             }
         }
+    }
+    if !coarse_ancestors.is_empty() {
+        // Bracket the local terrain with one coarse raster overview tile first, then fine
+        // tiles, then any remaining coarse ancestors, matching DEM `request_order`.
+        let remaining = coarse_ancestors.split_off(coarse_ancestors.len().min(2));
+        coarse_ancestors.extend(wanted);
+        coarse_ancestors.extend(remaining);
+        return coarse_ancestors;
     }
     wanted
 }

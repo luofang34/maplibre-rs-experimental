@@ -11,6 +11,8 @@ pub enum PassHookPoint {
     MainPassBegin,
     /// Beginning of TRANSLUCENT_PASS, before translucent items.
     TranslucentPassBegin,
+    /// End of TRANSLUCENT_PASS, after all map layers and symbols have drawn.
+    TranslucentPassEnd,
 }
 
 /// A draw hook callable during render pass execution.
