@@ -5,187 +5,223 @@
 <a href=#5 id=5 data-nosnippet>5</a>//! driven. Points outside the tile are skipped as GL JS does, since a neighbouring tile draws
 <a href=#6 id=6 data-nosnippet>6</a>//! them.
 <a href=#7 id=7 data-nosnippet>7</a>
-<a href=#8 id=8 data-nosnippet>8</a></span><span class="kw">use </span>lyon::tessellation::{geometry_builder::MaxIndex, VertexId};
-<a href=#9 id=9 data-nosnippet>9</a>
-<a href=#10 id=10 data-nosnippet>10</a><span class="kw">use </span><span class="kw">super</span>::ZeroTessellator;
-<a href=#11 id=11 data-nosnippet>11</a><span class="kw">use crate</span>::{
-<a href=#12 id=12 data-nosnippet>12</a>    coords::EXTENT,
-<a href=#13 id=13 data-nosnippet>13</a>    render::ShaderVertex,
-<a href=#14 id=14 data-nosnippet>14</a>    style::{circle::CirclePaint, heatmap::HeatmapPaint, layer::StyleProperty},
-<a href=#15 id=15 data-nosnippet>15</a>};
-<a href=#16 id=16 data-nosnippet>16</a>
-<a href=#17 id=17 data-nosnippet>17</a><span class="doccomment">/// Positions on the eight-by-eight corner grid of a subdivided circle, which is four by four
-<a href=#18 id=18 data-nosnippet>18</a>/// vertices; GL JS uses these for circles and heatmap kernels that follow the globe.
-<a href=#19 id=19 data-nosnippet>19</a></span><span class="kw">pub const </span>CIRCLE_GRID_STEPS: [u32; <span class="number">4</span>] = [<span class="number">0</span>, <span class="number">2</span>, <span class="number">5</span>, <span class="number">7</span>];
-<a href=#20 id=20 data-nosnippet>20</a>
-<a href=#21 id=21 data-nosnippet>21</a><span class="doccomment">/// Vertex order of a circle quad; corners follow the shader's `vertex_index % 4` decoding.
-<a href=#22 id=22 data-nosnippet>22</a></span><span class="kw">pub const </span>CIRCLE_QUAD_INDICES: [u32; <span class="number">6</span>] = [<span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>, <span class="number">0</span>, <span class="number">2</span>, <span class="number">3</span>];
-<a href=#23 id=23 data-nosnippet>23</a>
-<a href=#24 id=24 data-nosnippet>24</a><span class="doccomment">/// The fraction of a circle vertex's `corner_code` that carries a per-feature stroke opacity:
-<a href=#25 id=25 data-nosnippet>25</a>/// zero keeps the layer's own, and an opacity `o` is `0.25 + 0.5 o`. The integer part stays the
-<a href=#26 id=26 data-nosnippet>26</a>/// corner, and the elevation slot stays free for the ground the circle stands on.
-<a href=#27 id=27 data-nosnippet>27</a></span><span class="kw">fn </span>stroke_opacity_fraction(stroke_opacity: f32) -&gt; f32 {
-<a href=#28 id=28 data-nosnippet>28</a>    <span class="kw">if </span>stroke_opacity &lt; <span class="number">0.0 </span>{
-<a href=#29 id=29 data-nosnippet>29</a>        <span class="number">0.0
-<a href=#30 id=30 data-nosnippet>30</a>    </span>} <span class="kw">else </span>{
-<a href=#31 id=31 data-nosnippet>31</a>        <span class="number">0.25 </span>+ <span class="number">0.5 </span>* stroke_opacity.min(<span class="number">1.0</span>)
-<a href=#32 id=32 data-nosnippet>32</a>    }
-<a href=#33 id=33 data-nosnippet>33</a>}
-<a href=#34 id=34 data-nosnippet>34</a>
-<a href=#35 id=35 data-nosnippet>35</a><span class="doccomment">/// What a circle layer needs to size each feature's quad.
-<a href=#36 id=36 data-nosnippet>36</a></span><span class="attr">#[derive(Clone, Debug)]
-<a href=#37 id=37 data-nosnippet>37</a></span><span class="kw">pub struct </span>CircleOptions {
-<a href=#38 id=38 data-nosnippet>38</a>    <span class="doccomment">/// Radius in screen pixels, evaluated per feature.
-<a href=#39 id=39 data-nosnippet>39</a>    </span><span class="kw">pub </span>radius: StyleProperty&lt;f32&gt;,
-<a href=#40 id=40 data-nosnippet>40</a>    <span class="doccomment">/// Stroke width in screen pixels, evaluated per feature.
-<a href=#41 id=41 data-nosnippet>41</a>    </span><span class="kw">pub </span>stroke_width: StyleProperty&lt;f32&gt;,
-<a href=#42 id=42 data-nosnippet>42</a>    <span class="doccomment">/// What the radius is when the property has no value for a feature.
-<a href=#43 id=43 data-nosnippet>43</a>    </span><span class="kw">pub </span>radius_default: f32,
-<a href=#44 id=44 data-nosnippet>44</a>    <span class="doccomment">/// What the stroke-width slot holds when the property has no value for a feature.
-<a href=#45 id=45 data-nosnippet>45</a>    </span><span class="kw">pub </span>stroke_width_default: f32,
-<a href=#46 id=46 data-nosnippet>46</a>    <span class="doccomment">/// `circle-blur`, when it varies by feature; otherwise the layer's value serves.
-<a href=#47 id=47 data-nosnippet>47</a>    </span><span class="kw">pub </span>blur: <span class="prelude-ty">Option</span>&lt;StyleProperty&lt;f32&gt;&gt;,
-<a href=#48 id=48 data-nosnippet>48</a>    <span class="doccomment">/// `circle-stroke-opacity`, when it varies by feature.
-<a href=#49 id=49 data-nosnippet>49</a>    </span><span class="kw">pub </span>stroke_opacity: <span class="prelude-ty">Option</span>&lt;StyleProperty&lt;f32&gt;&gt;,
-<a href=#50 id=50 data-nosnippet>50</a>    <span class="doccomment">/// Zoom of the tile, at which zoom-driven properties are evaluated.
-<a href=#51 id=51 data-nosnippet>51</a>    </span><span class="kw">pub </span>zoom: f64,
-<a href=#52 id=52 data-nosnippet>52</a>    <span class="doccomment">/// Whether each quad is a grid of vertices, so a circle lying on the globe follows its curve.
-<a href=#53 id=53 data-nosnippet>53</a>    </span><span class="kw">pub </span>grid: bool,
-<a href=#54 id=54 data-nosnippet>54</a>}
-<a href=#55 id=55 data-nosnippet>55</a>
-<a href=#56 id=56 data-nosnippet>56</a><span class="doccomment">/// The property when it needs each feature's attributes.
-<a href=#57 id=57 data-nosnippet>57</a></span><span class="kw">fn </span>per_feature(property: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>StyleProperty&lt;f32&gt;&gt;) -&gt; <span class="prelude-ty">Option</span>&lt;StyleProperty&lt;f32&gt;&gt; {
-<a href=#58 id=58 data-nosnippet>58</a>    property
-<a href=#59 id=59 data-nosnippet>59</a>        .filter(|property| !property.is_feature_constant())
-<a href=#60 id=60 data-nosnippet>60</a>        .cloned()
-<a href=#61 id=61 data-nosnippet>61</a>}
-<a href=#62 id=62 data-nosnippet>62</a>
-<a href=#63 id=63 data-nosnippet>63</a><span class="kw">impl </span>CircleOptions {
-<a href=#64 id=64 data-nosnippet>64</a>    <span class="doccomment">/// Options for a circle paint at a tile zoom.
-<a href=#65 id=65 data-nosnippet>65</a>    </span><span class="kw">pub fn </span>for_paint(paint: <span class="kw-2">&amp;</span>CirclePaint, zoom: f64) -&gt; <span class="self">Self </span>{
-<a href=#66 id=66 data-nosnippet>66</a>        <span class="self">Self </span>{
-<a href=#67 id=67 data-nosnippet>67</a>            radius: paint.radius(),
-<a href=#68 id=68 data-nosnippet>68</a>            radius_default: CirclePaint::DEFAULT_RADIUS,
-<a href=#69 id=69 data-nosnippet>69</a>            stroke_width: paint.stroke_width(),
-<a href=#70 id=70 data-nosnippet>70</a>            stroke_width_default: <span class="number">0.0</span>,
-<a href=#71 id=71 data-nosnippet>71</a>            blur: per_feature(paint.circle_blur.as_ref()),
-<a href=#72 id=72 data-nosnippet>72</a>            stroke_opacity: per_feature(paint.circle_stroke_opacity.as_ref()),
-<a href=#73 id=73 data-nosnippet>73</a>            zoom,
-<a href=#74 id=74 data-nosnippet>74</a>            grid: <span class="bool-val">false</span>,
-<a href=#75 id=75 data-nosnippet>75</a>        }
-<a href=#76 id=76 data-nosnippet>76</a>    }
-<a href=#77 id=77 data-nosnippet>77</a>
-<a href=#78 id=78 data-nosnippet>78</a>    <span class="doccomment">/// Options for a heatmap point: a quad whose weight travels in the slot circles use for
-<a href=#79 id=79 data-nosnippet>79</a>    /// the stroke width. A radius that does not depend on the feature is one value for the
-<a href=#80 id=80 data-nosnippet>80</a>    /// whole layer, taken from the layer's instance record, so the quad is one unit; a
-<a href=#81 id=81 data-nosnippet>81</a>    /// per-feature radius is the quad's own size, and the layer's factor is then one. A
-<a href=#82 id=82 data-nosnippet>82</a>    /// feature without a weight counts once.
-<a href=#83 id=83 data-nosnippet>83</a>    </span><span class="kw">pub fn </span>for_heatmap(paint: <span class="kw-2">&amp;</span>HeatmapPaint, zoom: f64) -&gt; <span class="self">Self </span>{
-<a href=#84 id=84 data-nosnippet>84</a>        <span class="kw">let </span>per_feature = paint.radius_per_feature();
+<a href=#8 id=8 data-nosnippet>8</a></span><span class="kw">use </span>csscolorparser::Color;
+<a href=#9 id=9 data-nosnippet>9</a><span class="kw">use </span>lyon::tessellation::{geometry_builder::MaxIndex, VertexId};
+<a href=#10 id=10 data-nosnippet>10</a>
+<a href=#11 id=11 data-nosnippet>11</a><span class="kw">use </span><span class="kw">super</span>::ZeroTessellator;
+<a href=#12 id=12 data-nosnippet>12</a><span class="kw">use crate</span>::{
+<a href=#13 id=13 data-nosnippet>13</a>    coords::EXTENT,
+<a href=#14 id=14 data-nosnippet>14</a>    render::ShaderVertex,
+<a href=#15 id=15 data-nosnippet>15</a>    style::{circle::CirclePaint, heatmap::HeatmapPaint, layer::StyleProperty},
+<a href=#16 id=16 data-nosnippet>16</a>};
+<a href=#17 id=17 data-nosnippet>17</a>
+<a href=#18 id=18 data-nosnippet>18</a><span class="doccomment">/// Positions on the eight-by-eight corner grid of a subdivided circle, which is four by four
+<a href=#19 id=19 data-nosnippet>19</a>/// vertices; GL JS uses these for circles and heatmap kernels that follow the globe.
+<a href=#20 id=20 data-nosnippet>20</a></span><span class="kw">pub const </span>CIRCLE_GRID_STEPS: [u32; <span class="number">4</span>] = [<span class="number">0</span>, <span class="number">2</span>, <span class="number">5</span>, <span class="number">7</span>];
+<a href=#21 id=21 data-nosnippet>21</a>
+<a href=#22 id=22 data-nosnippet>22</a><span class="doccomment">/// Vertex order of a circle quad; corners follow the shader's `vertex_index % 4` decoding.
+<a href=#23 id=23 data-nosnippet>23</a></span><span class="kw">pub const </span>CIRCLE_QUAD_INDICES: [u32; <span class="number">6</span>] = [<span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>, <span class="number">0</span>, <span class="number">2</span>, <span class="number">3</span>];
+<a href=#24 id=24 data-nosnippet>24</a>
+<a href=#25 id=25 data-nosnippet>25</a><span class="doccomment">/// The fraction of a circle vertex's `corner_code` that carries a per-feature stroke opacity:
+<a href=#26 id=26 data-nosnippet>26</a>/// zero keeps the layer's own, and an opacity `o` is `0.25 + 0.5 o`. The integer part stays the
+<a href=#27 id=27 data-nosnippet>27</a>/// corner, and the elevation slot stays free for the ground the circle stands on.
+<a href=#28 id=28 data-nosnippet>28</a></span><span class="kw">fn </span>stroke_opacity_fraction(stroke_opacity: f32) -&gt; f32 {
+<a href=#29 id=29 data-nosnippet>29</a>    <span class="kw">if </span>stroke_opacity &lt; <span class="number">0.0 </span>{
+<a href=#30 id=30 data-nosnippet>30</a>        <span class="number">0.0
+<a href=#31 id=31 data-nosnippet>31</a>    </span>} <span class="kw">else </span>{
+<a href=#32 id=32 data-nosnippet>32</a>        <span class="number">0.25 </span>+ <span class="number">0.5 </span>* stroke_opacity.min(<span class="number">1.0</span>)
+<a href=#33 id=33 data-nosnippet>33</a>    }
+<a href=#34 id=34 data-nosnippet>34</a>}
+<a href=#35 id=35 data-nosnippet>35</a>
+<a href=#36 id=36 data-nosnippet>36</a><span class="doccomment">/// Two colours, straight RGBA in 0..=1, in the four lanes of one feature colour: each lane holds
+<a href=#37 id=37 data-nosnippet>37</a>/// two 8-bit channels as `256 a + b`, which an `f32` keeps exactly, as GL JS packs colours. The
+<a href=#38 id=38 data-nosnippet>38</a>/// vertex slots of a circle are all taken, so a stroke colour that varies by feature shares the
+<a href=#39 id=39 data-nosnippet>39</a>/// lanes of the fill's.
+<a href=#40 id=40 data-nosnippet>40</a></span><span class="kw">pub fn </span>pack_circle_colors(fill: [f32; <span class="number">4</span>], stroke: [f32; <span class="number">4</span>]) -&gt; [f32; <span class="number">4</span>] {
+<a href=#41 id=41 data-nosnippet>41</a>    <span class="kw">let </span>byte = |channel: f32| (channel.clamp(<span class="number">0.0</span>, <span class="number">1.0</span>) * <span class="number">255.0</span>).round();
+<a href=#42 id=42 data-nosnippet>42</a>    <span class="kw">let </span>pair = |high: f32, low: f32| byte(high) * <span class="number">256.0 </span>+ byte(low);
+<a href=#43 id=43 data-nosnippet>43</a>    [
+<a href=#44 id=44 data-nosnippet>44</a>        pair(fill[<span class="number">0</span>], fill[<span class="number">1</span>]),
+<a href=#45 id=45 data-nosnippet>45</a>        pair(fill[<span class="number">2</span>], fill[<span class="number">3</span>]),
+<a href=#46 id=46 data-nosnippet>46</a>        pair(stroke[<span class="number">0</span>], stroke[<span class="number">1</span>]),
+<a href=#47 id=47 data-nosnippet>47</a>        pair(stroke[<span class="number">2</span>], stroke[<span class="number">3</span>]),
+<a href=#48 id=48 data-nosnippet>48</a>    ]
+<a href=#49 id=49 data-nosnippet>49</a>}
+<a href=#50 id=50 data-nosnippet>50</a>
+<a href=#51 id=51 data-nosnippet>51</a><span class="doccomment">/// What a circle layer needs to size each feature's quad.
+<a href=#52 id=52 data-nosnippet>52</a></span><span class="attr">#[derive(Clone, Debug)]
+<a href=#53 id=53 data-nosnippet>53</a></span><span class="kw">pub struct </span>CircleOptions {
+<a href=#54 id=54 data-nosnippet>54</a>    <span class="doccomment">/// Radius in screen pixels, evaluated per feature.
+<a href=#55 id=55 data-nosnippet>55</a>    </span><span class="kw">pub </span>radius: StyleProperty&lt;f32&gt;,
+<a href=#56 id=56 data-nosnippet>56</a>    <span class="doccomment">/// Stroke width in screen pixels, evaluated per feature.
+<a href=#57 id=57 data-nosnippet>57</a>    </span><span class="kw">pub </span>stroke_width: StyleProperty&lt;f32&gt;,
+<a href=#58 id=58 data-nosnippet>58</a>    <span class="doccomment">/// What the radius is when the property has no value for a feature.
+<a href=#59 id=59 data-nosnippet>59</a>    </span><span class="kw">pub </span>radius_default: f32,
+<a href=#60 id=60 data-nosnippet>60</a>    <span class="doccomment">/// What the stroke-width slot holds when the property has no value for a feature.
+<a href=#61 id=61 data-nosnippet>61</a>    </span><span class="kw">pub </span>stroke_width_default: f32,
+<a href=#62 id=62 data-nosnippet>62</a>    <span class="doccomment">/// `circle-blur`, when it varies by feature; otherwise the layer's value serves.
+<a href=#63 id=63 data-nosnippet>63</a>    </span><span class="kw">pub </span>blur: <span class="prelude-ty">Option</span>&lt;StyleProperty&lt;f32&gt;&gt;,
+<a href=#64 id=64 data-nosnippet>64</a>    <span class="doccomment">/// `circle-stroke-opacity`, when it varies by feature.
+<a href=#65 id=65 data-nosnippet>65</a>    </span><span class="kw">pub </span>stroke_opacity: <span class="prelude-ty">Option</span>&lt;StyleProperty&lt;f32&gt;&gt;,
+<a href=#66 id=66 data-nosnippet>66</a>    <span class="doccomment">/// `circle-stroke-color`, when it varies by feature; each feature's colour then carries
+<a href=#67 id=67 data-nosnippet>67</a>    /// both its fill and its stroke, as `pack_circle_colors` lays them out.
+<a href=#68 id=68 data-nosnippet>68</a>    </span><span class="kw">pub </span>stroke_color: <span class="prelude-ty">Option</span>&lt;StyleProperty&lt;Color&gt;&gt;,
+<a href=#69 id=69 data-nosnippet>69</a>    <span class="doccomment">/// Zoom of the tile, at which zoom-driven properties are evaluated.
+<a href=#70 id=70 data-nosnippet>70</a>    </span><span class="kw">pub </span>zoom: f64,
+<a href=#71 id=71 data-nosnippet>71</a>    <span class="doccomment">/// Whether each quad is a grid of vertices, so a circle lying on the globe follows its curve.
+<a href=#72 id=72 data-nosnippet>72</a>    </span><span class="kw">pub </span>grid: bool,
+<a href=#73 id=73 data-nosnippet>73</a>}
+<a href=#74 id=74 data-nosnippet>74</a>
+<a href=#75 id=75 data-nosnippet>75</a><span class="doccomment">/// The property when it needs each feature's attributes.
+<a href=#76 id=76 data-nosnippet>76</a></span><span class="kw">fn </span>per_feature(property: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>StyleProperty&lt;f32&gt;&gt;) -&gt; <span class="prelude-ty">Option</span>&lt;StyleProperty&lt;f32&gt;&gt; {
+<a href=#77 id=77 data-nosnippet>77</a>    property
+<a href=#78 id=78 data-nosnippet>78</a>        .filter(|property| !property.is_feature_constant())
+<a href=#79 id=79 data-nosnippet>79</a>        .cloned()
+<a href=#80 id=80 data-nosnippet>80</a>}
+<a href=#81 id=81 data-nosnippet>81</a>
+<a href=#82 id=82 data-nosnippet>82</a><span class="kw">impl </span>CircleOptions {
+<a href=#83 id=83 data-nosnippet>83</a>    <span class="doccomment">/// Options for a circle paint at a tile zoom.
+<a href=#84 id=84 data-nosnippet>84</a>    </span><span class="kw">pub fn </span>for_paint(paint: <span class="kw-2">&amp;</span>CirclePaint, zoom: f64) -&gt; <span class="self">Self </span>{
 <a href=#85 id=85 data-nosnippet>85</a>        <span class="self">Self </span>{
-<a href=#86 id=86 data-nosnippet>86</a>            radius: <span class="kw">match </span><span class="kw-2">&amp;</span>paint.heatmap_radius {
-<a href=#87 id=87 data-nosnippet>87</a>                <span class="prelude-val">Some</span>(radius) <span class="kw">if </span>per_feature =&gt; radius.clone(),
-<a href=#88 id=88 data-nosnippet>88</a>                <span class="kw">_ </span>=&gt; StyleProperty::Constant(<span class="number">1.0</span>),
-<a href=#89 id=89 data-nosnippet>89</a>            },
-<a href=#90 id=90 data-nosnippet>90</a>            radius_default: <span class="kw">if </span>per_feature { <span class="number">30.0 </span>} <span class="kw">else </span>{ <span class="number">1.0 </span>},
-<a href=#91 id=91 data-nosnippet>91</a>            stroke_width: paint
-<a href=#92 id=92 data-nosnippet>92</a>                .heatmap_weight
-<a href=#93 id=93 data-nosnippet>93</a>                .clone()
-<a href=#94 id=94 data-nosnippet>94</a>                .unwrap_or(StyleProperty::Constant(<span class="number">1.0</span>)),
-<a href=#95 id=95 data-nosnippet>95</a>            stroke_width_default: <span class="number">1.0</span>,
-<a href=#96 id=96 data-nosnippet>96</a>            blur: <span class="prelude-val">None</span>,
-<a href=#97 id=97 data-nosnippet>97</a>            stroke_opacity: <span class="prelude-val">None</span>,
-<a href=#98 id=98 data-nosnippet>98</a>            zoom,
-<a href=#99 id=99 data-nosnippet>99</a>            grid: <span class="bool-val">false</span>,
-<a href=#100 id=100 data-nosnippet>100</a>        }
-<a href=#101 id=101 data-nosnippet>101</a>    }
-<a href=#102 id=102 data-nosnippet>102</a>}
-<a href=#103 id=103 data-nosnippet>103</a>
-<a href=#104 id=104 data-nosnippet>104</a><span class="kw">impl</span>&lt;I&gt; ZeroTessellator&lt;I&gt;
-<a href=#105 id=105 data-nosnippet>105</a><span class="kw">where
-<a href=#106 id=106 data-nosnippet>106</a>    </span>I: std::ops::Add + From&lt;VertexId&gt; + MaxIndex + Copy + Into&lt;u32&gt;,
-<a href=#107 id=107 data-nosnippet>107</a>{
-<a href=#108 id=108 data-nosnippet>108</a>    <span class="doccomment">/// Turns every point of every feature into a circle quad instead of a path.
-<a href=#109 id=109 data-nosnippet>109</a>    </span><span class="kw">pub fn </span>with_circles(<span class="kw-2">mut </span><span class="self">self</span>, options: CircleOptions) -&gt; <span class="self">Self </span>{
-<a href=#110 id=110 data-nosnippet>110</a>        <span class="self">self</span>.circle = <span class="prelude-val">Some</span>(options);
-<a href=#111 id=111 data-nosnippet>111</a>        <span class="self">self
-<a href=#112 id=112 data-nosnippet>112</a>    </span>}
-<a href=#113 id=113 data-nosnippet>113</a>
-<a href=#114 id=114 data-nosnippet>114</a>    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>emit_circle(<span class="kw-2">&amp;mut </span><span class="self">self</span>, x: f32, y: f32) {
-<a href=#115 id=115 data-nosnippet>115</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(options) = <span class="kw-2">&amp;</span><span class="self">self</span>.circle <span class="kw">else </span>{
-<a href=#116 id=116 data-nosnippet>116</a>            <span class="kw">return</span>;
-<a href=#117 id=117 data-nosnippet>117</a>        };
-<a href=#118 id=118 data-nosnippet>118</a>        <span class="kw">let </span>extent = EXTENT <span class="kw">as </span>f32;
-<a href=#119 id=119 data-nosnippet>119</a>        <span class="kw">if </span>!(<span class="number">0.0</span>..extent).contains(<span class="kw-2">&amp;</span>x) || !(<span class="number">0.0</span>..extent).contains(<span class="kw-2">&amp;</span>y) {
-<a href=#120 id=120 data-nosnippet>120</a>            <span class="kw">return</span>;
+<a href=#86 id=86 data-nosnippet>86</a>            radius: paint.radius(),
+<a href=#87 id=87 data-nosnippet>87</a>            radius_default: CirclePaint::DEFAULT_RADIUS,
+<a href=#88 id=88 data-nosnippet>88</a>            stroke_width: paint.stroke_width(),
+<a href=#89 id=89 data-nosnippet>89</a>            stroke_width_default: <span class="number">0.0</span>,
+<a href=#90 id=90 data-nosnippet>90</a>            blur: per_feature(paint.circle_blur.as_ref()),
+<a href=#91 id=91 data-nosnippet>91</a>            stroke_opacity: per_feature(paint.circle_stroke_opacity.as_ref()),
+<a href=#92 id=92 data-nosnippet>92</a>            stroke_color: paint.stroke_color_per_feature().cloned(),
+<a href=#93 id=93 data-nosnippet>93</a>            zoom,
+<a href=#94 id=94 data-nosnippet>94</a>            grid: <span class="bool-val">false</span>,
+<a href=#95 id=95 data-nosnippet>95</a>        }
+<a href=#96 id=96 data-nosnippet>96</a>    }
+<a href=#97 id=97 data-nosnippet>97</a>
+<a href=#98 id=98 data-nosnippet>98</a>    <span class="doccomment">/// Options for a heatmap point: a quad whose weight travels in the slot circles use for
+<a href=#99 id=99 data-nosnippet>99</a>    /// the stroke width. A radius that does not depend on the feature is one value for the
+<a href=#100 id=100 data-nosnippet>100</a>    /// whole layer, taken from the layer's instance record, so the quad is one unit; a
+<a href=#101 id=101 data-nosnippet>101</a>    /// per-feature radius is the quad's own size, and the layer's factor is then one. A
+<a href=#102 id=102 data-nosnippet>102</a>    /// feature without a weight counts once.
+<a href=#103 id=103 data-nosnippet>103</a>    </span><span class="kw">pub fn </span>for_heatmap(paint: <span class="kw-2">&amp;</span>HeatmapPaint, zoom: f64) -&gt; <span class="self">Self </span>{
+<a href=#104 id=104 data-nosnippet>104</a>        <span class="kw">let </span>per_feature = paint.radius_per_feature();
+<a href=#105 id=105 data-nosnippet>105</a>        <span class="self">Self </span>{
+<a href=#106 id=106 data-nosnippet>106</a>            radius: <span class="kw">match </span><span class="kw-2">&amp;</span>paint.heatmap_radius {
+<a href=#107 id=107 data-nosnippet>107</a>                <span class="prelude-val">Some</span>(radius) <span class="kw">if </span>per_feature =&gt; radius.clone(),
+<a href=#108 id=108 data-nosnippet>108</a>                <span class="kw">_ </span>=&gt; StyleProperty::Constant(<span class="number">1.0</span>),
+<a href=#109 id=109 data-nosnippet>109</a>            },
+<a href=#110 id=110 data-nosnippet>110</a>            radius_default: <span class="kw">if </span>per_feature { <span class="number">30.0 </span>} <span class="kw">else </span>{ <span class="number">1.0 </span>},
+<a href=#111 id=111 data-nosnippet>111</a>            stroke_width: paint
+<a href=#112 id=112 data-nosnippet>112</a>                .heatmap_weight
+<a href=#113 id=113 data-nosnippet>113</a>                .clone()
+<a href=#114 id=114 data-nosnippet>114</a>                .unwrap_or(StyleProperty::Constant(<span class="number">1.0</span>)),
+<a href=#115 id=115 data-nosnippet>115</a>            stroke_width_default: <span class="number">1.0</span>,
+<a href=#116 id=116 data-nosnippet>116</a>            blur: <span class="prelude-val">None</span>,
+<a href=#117 id=117 data-nosnippet>117</a>            stroke_opacity: <span class="prelude-val">None</span>,
+<a href=#118 id=118 data-nosnippet>118</a>            stroke_color: <span class="prelude-val">None</span>,
+<a href=#119 id=119 data-nosnippet>119</a>            zoom,
+<a href=#120 id=120 data-nosnippet>120</a>            grid: <span class="bool-val">false</span>,
 <a href=#121 id=121 data-nosnippet>121</a>        }
-<a href=#122 id=122 data-nosnippet>122</a>        <span class="kw">let </span>radius = options
-<a href=#123 id=123 data-nosnippet>123</a>            .radius
-<a href=#124 id=124 data-nosnippet>124</a>            .evaluate_for(<span class="kw-2">&amp;</span><span class="self">self</span>.feature_properties, options.zoom)
-<a href=#125 id=125 data-nosnippet>125</a>            .unwrap_or(options.radius_default)
-<a href=#126 id=126 data-nosnippet>126</a>            .max(<span class="number">0.0</span>);
-<a href=#127 id=127 data-nosnippet>127</a>        <span class="comment">// A radius that varies by feature and by zoom is stored for the tile's zoom and the one
-<a href=#128 id=128 data-nosnippet>128</a>        // above it, which the shader blends by the fractional zoom, as GL JS does.
-<a href=#129 id=129 data-nosnippet>129</a>        </span><span class="kw">let </span>radius_next = <span class="kw">if </span>options.radius.is_feature_constant() {
-<a href=#130 id=130 data-nosnippet>130</a>            radius
-<a href=#131 id=131 data-nosnippet>131</a>        } <span class="kw">else </span>{
-<a href=#132 id=132 data-nosnippet>132</a>            options
-<a href=#133 id=133 data-nosnippet>133</a>                .radius
-<a href=#134 id=134 data-nosnippet>134</a>                .evaluate_for(<span class="kw-2">&amp;</span><span class="self">self</span>.feature_properties, options.zoom + <span class="number">1.0</span>)
-<a href=#135 id=135 data-nosnippet>135</a>                .unwrap_or(options.radius_default)
-<a href=#136 id=136 data-nosnippet>136</a>                .max(<span class="number">0.0</span>)
-<a href=#137 id=137 data-nosnippet>137</a>        };
-<a href=#138 id=138 data-nosnippet>138</a>        <span class="kw">let </span>stroke_width = options
-<a href=#139 id=139 data-nosnippet>139</a>            .stroke_width
-<a href=#140 id=140 data-nosnippet>140</a>            .evaluate_for(<span class="kw-2">&amp;</span><span class="self">self</span>.feature_properties, options.zoom)
-<a href=#141 id=141 data-nosnippet>141</a>            .unwrap_or(options.stroke_width_default)
-<a href=#142 id=142 data-nosnippet>142</a>            .max(<span class="number">0.0</span>);
-<a href=#143 id=143 data-nosnippet>143</a>
-<a href=#144 id=144 data-nosnippet>144</a>        <span class="comment">// Negative values tell the shader to keep the layer's own blur and stroke opacity.
-<a href=#145 id=145 data-nosnippet>145</a>        </span><span class="kw">let </span>per_feature = |property: <span class="kw-2">&amp;</span><span class="prelude-ty">Option</span>&lt;StyleProperty&lt;f32&gt;&gt;| {
-<a href=#146 id=146 data-nosnippet>146</a>            property
-<a href=#147 id=147 data-nosnippet>147</a>                .as_ref()
-<a href=#148 id=148 data-nosnippet>148</a>                .and_then(|property| property.evaluate_for(<span class="kw-2">&amp;</span><span class="self">self</span>.feature_properties, options.zoom))
-<a href=#149 id=149 data-nosnippet>149</a>                .map_or(-<span class="number">1.0</span>, |value| value.max(<span class="number">0.0</span>))
-<a href=#150 id=150 data-nosnippet>150</a>        };
-<a href=#151 id=151 data-nosnippet>151</a>        <span class="kw">let </span>(blur, stroke_opacity) = (
-<a href=#152 id=152 data-nosnippet>152</a>            per_feature(<span class="kw-2">&amp;</span>options.blur),
-<a href=#153 id=153 data-nosnippet>153</a>            per_feature(<span class="kw-2">&amp;</span>options.stroke_opacity),
-<a href=#154 id=154 data-nosnippet>154</a>        );
-<a href=#155 id=155 data-nosnippet>155</a>        <span class="kw">let </span>base = <span class="self">self</span>.buffer.vertices.len() <span class="kw">as </span>u32;
-<a href=#156 id=156 data-nosnippet>156</a>        <span class="kw">let </span>push = |code: f32, buffer: <span class="kw-2">&amp;mut </span>Vec&lt;ShaderVertex&gt;| {
-<a href=#157 id=157 data-nosnippet>157</a>            <span class="kw">let </span><span class="kw-2">mut </span>vertex = ShaderVertex::new([x, y], [radius, stroke_width]);
-<a href=#158 id=158 data-nosnippet>158</a>            vertex.distance = blur;
-<a href=#159 id=159 data-nosnippet>159</a>            vertex.edge_distance = radius_next;
-<a href=#160 id=160 data-nosnippet>160</a>            vertex.corner_code = code + stroke_opacity_fraction(stroke_opacity);
-<a href=#161 id=161 data-nosnippet>161</a>            buffer.push(vertex);
-<a href=#162 id=162 data-nosnippet>162</a>        };
-<a href=#163 id=163 data-nosnippet>163</a>        <span class="kw">if </span>options.grid {
-<a href=#164 id=164 data-nosnippet>164</a>            <span class="kw">for </span>ey <span class="kw">in </span>CIRCLE_GRID_STEPS {
-<a href=#165 id=165 data-nosnippet>165</a>                <span class="kw">for </span>ex <span class="kw">in </span>CIRCLE_GRID_STEPS {
-<a href=#166 id=166 data-nosnippet>166</a>                    push(<span class="number">1.0 </span>+ (ex * <span class="number">8 </span>+ ey) <span class="kw">as </span>f32, <span class="kw-2">&amp;mut </span><span class="self">self</span>.buffer.vertices);
-<a href=#167 id=167 data-nosnippet>167</a>                }
-<a href=#168 id=168 data-nosnippet>168</a>            }
-<a href=#169 id=169 data-nosnippet>169</a>            <span class="kw">for </span>row <span class="kw">in </span><span class="number">0</span>..<span class="number">3_u32 </span>{
-<a href=#170 id=170 data-nosnippet>170</a>                <span class="kw">for </span>column <span class="kw">in </span><span class="number">0</span>..<span class="number">3_u32 </span>{
-<a href=#171 id=171 data-nosnippet>171</a>                    <span class="kw">let </span>lower = base + row * <span class="number">4 </span>+ column;
-<a href=#172 id=172 data-nosnippet>172</a>                    <span class="kw">let </span>upper = lower + <span class="number">4</span>;
-<a href=#173 id=173 data-nosnippet>173</a>                    <span class="kw">for </span>offset <span class="kw">in </span>[lower, lower + <span class="number">1</span>, upper + <span class="number">1</span>, lower, upper + <span class="number">1</span>, upper] {
-<a href=#174 id=174 data-nosnippet>174</a>                        <span class="self">self</span>.buffer.indices.push(I::from(VertexId(offset)));
-<a href=#175 id=175 data-nosnippet>175</a>                    }
-<a href=#176 id=176 data-nosnippet>176</a>                }
-<a href=#177 id=177 data-nosnippet>177</a>            }
-<a href=#178 id=178 data-nosnippet>178</a>        } <span class="kw">else </span>{
-<a href=#179 id=179 data-nosnippet>179</a>            <span class="kw">for _ in </span><span class="number">0</span>..<span class="number">4 </span>{
-<a href=#180 id=180 data-nosnippet>180</a>                push(<span class="number">0.0</span>, <span class="kw-2">&amp;mut </span><span class="self">self</span>.buffer.vertices);
-<a href=#181 id=181 data-nosnippet>181</a>            }
-<a href=#182 id=182 data-nosnippet>182</a>            <span class="kw">for </span>offset <span class="kw">in </span>CIRCLE_QUAD_INDICES {
-<a href=#183 id=183 data-nosnippet>183</a>                <span class="self">self</span>.buffer.indices.push(I::from(VertexId(base + offset)));
-<a href=#184 id=184 data-nosnippet>184</a>            }
-<a href=#185 id=185 data-nosnippet>185</a>        }
-<a href=#186 id=186 data-nosnippet>186</a>    }
-<a href=#187 id=187 data-nosnippet>187</a>}
-<a href=#188 id=188 data-nosnippet>188</a>
-<a href=#189 id=189 data-nosnippet>189</a><span class="attr">#[cfg(test)]
-<a href=#190 id=190 data-nosnippet>190</a></span><span class="kw">mod </span>tests;
+<a href=#122 id=122 data-nosnippet>122</a>    }
+<a href=#123 id=123 data-nosnippet>123</a>}
+<a href=#124 id=124 data-nosnippet>124</a>
+<a href=#125 id=125 data-nosnippet>125</a><span class="kw">impl</span>&lt;I&gt; ZeroTessellator&lt;I&gt;
+<a href=#126 id=126 data-nosnippet>126</a><span class="kw">where
+<a href=#127 id=127 data-nosnippet>127</a>    </span>I: std::ops::Add + From&lt;VertexId&gt; + MaxIndex + Copy + Into&lt;u32&gt;,
+<a href=#128 id=128 data-nosnippet>128</a>{
+<a href=#129 id=129 data-nosnippet>129</a>    <span class="doccomment">/// Turns every point of every feature into a circle quad instead of a path.
+<a href=#130 id=130 data-nosnippet>130</a>    </span><span class="kw">pub fn </span>with_circles(<span class="kw-2">mut </span><span class="self">self</span>, options: CircleOptions) -&gt; <span class="self">Self </span>{
+<a href=#131 id=131 data-nosnippet>131</a>        <span class="self">self</span>.circle = <span class="prelude-val">Some</span>(options);
+<a href=#132 id=132 data-nosnippet>132</a>        <span class="self">self
+<a href=#133 id=133 data-nosnippet>133</a>    </span>}
+<a href=#134 id=134 data-nosnippet>134</a>
+<a href=#135 id=135 data-nosnippet>135</a>    <span class="doccomment">/// The colour a finished feature's vertices carry: its fill, or its fill and stroke packed
+<a href=#136 id=136 data-nosnippet>136</a>    /// together when the stroke colour varies by feature.
+<a href=#137 id=137 data-nosnippet>137</a>    </span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>circle_feature_color(<span class="kw-2">&amp;</span><span class="self">self</span>, fill: [f32; <span class="number">4</span>]) -&gt; [f32; <span class="number">4</span>] {
+<a href=#138 id=138 data-nosnippet>138</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(options) = <span class="kw-2">&amp;</span><span class="self">self</span>.circle <span class="kw">else </span>{
+<a href=#139 id=139 data-nosnippet>139</a>            <span class="kw">return </span>fill;
+<a href=#140 id=140 data-nosnippet>140</a>        };
+<a href=#141 id=141 data-nosnippet>141</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(stroke) = <span class="kw-2">&amp;</span>options.stroke_color <span class="kw">else </span>{
+<a href=#142 id=142 data-nosnippet>142</a>            <span class="kw">return </span>fill;
+<a href=#143 id=143 data-nosnippet>143</a>        };
+<a href=#144 id=144 data-nosnippet>144</a>        <span class="kw">let </span>stroke = stroke
+<a href=#145 id=145 data-nosnippet>145</a>            .evaluate_for(<span class="kw-2">&amp;</span><span class="self">self</span>.feature_properties, options.zoom)
+<a href=#146 id=146 data-nosnippet>146</a>            .map_or([<span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">1.0</span>], |color| color.to_array());
+<a href=#147 id=147 data-nosnippet>147</a>        pack_circle_colors(fill, stroke)
+<a href=#148 id=148 data-nosnippet>148</a>    }
+<a href=#149 id=149 data-nosnippet>149</a>
+<a href=#150 id=150 data-nosnippet>150</a>    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>emit_circle(<span class="kw-2">&amp;mut </span><span class="self">self</span>, x: f32, y: f32) {
+<a href=#151 id=151 data-nosnippet>151</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(options) = <span class="kw-2">&amp;</span><span class="self">self</span>.circle <span class="kw">else </span>{
+<a href=#152 id=152 data-nosnippet>152</a>            <span class="kw">return</span>;
+<a href=#153 id=153 data-nosnippet>153</a>        };
+<a href=#154 id=154 data-nosnippet>154</a>        <span class="kw">let </span>extent = EXTENT <span class="kw">as </span>f32;
+<a href=#155 id=155 data-nosnippet>155</a>        <span class="kw">if </span>!(<span class="number">0.0</span>..extent).contains(<span class="kw-2">&amp;</span>x) || !(<span class="number">0.0</span>..extent).contains(<span class="kw-2">&amp;</span>y) {
+<a href=#156 id=156 data-nosnippet>156</a>            <span class="kw">return</span>;
+<a href=#157 id=157 data-nosnippet>157</a>        }
+<a href=#158 id=158 data-nosnippet>158</a>        <span class="kw">let </span>radius = options
+<a href=#159 id=159 data-nosnippet>159</a>            .radius
+<a href=#160 id=160 data-nosnippet>160</a>            .evaluate_for(<span class="kw-2">&amp;</span><span class="self">self</span>.feature_properties, options.zoom)
+<a href=#161 id=161 data-nosnippet>161</a>            .unwrap_or(options.radius_default)
+<a href=#162 id=162 data-nosnippet>162</a>            .max(<span class="number">0.0</span>);
+<a href=#163 id=163 data-nosnippet>163</a>        <span class="comment">// A radius that varies by feature and by zoom is stored for the tile's zoom and the one
+<a href=#164 id=164 data-nosnippet>164</a>        // above it, which the shader blends by the fractional zoom, as GL JS does.
+<a href=#165 id=165 data-nosnippet>165</a>        </span><span class="kw">let </span>radius_next = <span class="kw">if </span>options.radius.is_feature_constant() {
+<a href=#166 id=166 data-nosnippet>166</a>            radius
+<a href=#167 id=167 data-nosnippet>167</a>        } <span class="kw">else </span>{
+<a href=#168 id=168 data-nosnippet>168</a>            options
+<a href=#169 id=169 data-nosnippet>169</a>                .radius
+<a href=#170 id=170 data-nosnippet>170</a>                .evaluate_for(<span class="kw-2">&amp;</span><span class="self">self</span>.feature_properties, options.zoom + <span class="number">1.0</span>)
+<a href=#171 id=171 data-nosnippet>171</a>                .unwrap_or(options.radius_default)
+<a href=#172 id=172 data-nosnippet>172</a>                .max(<span class="number">0.0</span>)
+<a href=#173 id=173 data-nosnippet>173</a>        };
+<a href=#174 id=174 data-nosnippet>174</a>        <span class="kw">let </span>stroke_width = options
+<a href=#175 id=175 data-nosnippet>175</a>            .stroke_width
+<a href=#176 id=176 data-nosnippet>176</a>            .evaluate_for(<span class="kw-2">&amp;</span><span class="self">self</span>.feature_properties, options.zoom)
+<a href=#177 id=177 data-nosnippet>177</a>            .unwrap_or(options.stroke_width_default)
+<a href=#178 id=178 data-nosnippet>178</a>            .max(<span class="number">0.0</span>);
+<a href=#179 id=179 data-nosnippet>179</a>
+<a href=#180 id=180 data-nosnippet>180</a>        <span class="comment">// Negative values tell the shader to keep the layer's own blur and stroke opacity.
+<a href=#181 id=181 data-nosnippet>181</a>        </span><span class="kw">let </span>per_feature = |property: <span class="kw-2">&amp;</span><span class="prelude-ty">Option</span>&lt;StyleProperty&lt;f32&gt;&gt;| {
+<a href=#182 id=182 data-nosnippet>182</a>            property
+<a href=#183 id=183 data-nosnippet>183</a>                .as_ref()
+<a href=#184 id=184 data-nosnippet>184</a>                .and_then(|property| property.evaluate_for(<span class="kw-2">&amp;</span><span class="self">self</span>.feature_properties, options.zoom))
+<a href=#185 id=185 data-nosnippet>185</a>                .map_or(-<span class="number">1.0</span>, |value| value.max(<span class="number">0.0</span>))
+<a href=#186 id=186 data-nosnippet>186</a>        };
+<a href=#187 id=187 data-nosnippet>187</a>        <span class="kw">let </span>(blur, stroke_opacity) = (
+<a href=#188 id=188 data-nosnippet>188</a>            per_feature(<span class="kw-2">&amp;</span>options.blur),
+<a href=#189 id=189 data-nosnippet>189</a>            per_feature(<span class="kw-2">&amp;</span>options.stroke_opacity),
+<a href=#190 id=190 data-nosnippet>190</a>        );
+<a href=#191 id=191 data-nosnippet>191</a>        <span class="kw">let </span>base = <span class="self">self</span>.buffer.vertices.len() <span class="kw">as </span>u32;
+<a href=#192 id=192 data-nosnippet>192</a>        <span class="kw">let </span>push = |code: f32, buffer: <span class="kw-2">&amp;mut </span>Vec&lt;ShaderVertex&gt;| {
+<a href=#193 id=193 data-nosnippet>193</a>            <span class="kw">let </span><span class="kw-2">mut </span>vertex = ShaderVertex::new([x, y], [radius, stroke_width]);
+<a href=#194 id=194 data-nosnippet>194</a>            vertex.distance = blur;
+<a href=#195 id=195 data-nosnippet>195</a>            vertex.edge_distance = radius_next;
+<a href=#196 id=196 data-nosnippet>196</a>            vertex.corner_code = code + stroke_opacity_fraction(stroke_opacity);
+<a href=#197 id=197 data-nosnippet>197</a>            buffer.push(vertex);
+<a href=#198 id=198 data-nosnippet>198</a>        };
+<a href=#199 id=199 data-nosnippet>199</a>        <span class="kw">if </span>options.grid {
+<a href=#200 id=200 data-nosnippet>200</a>            <span class="kw">for </span>ey <span class="kw">in </span>CIRCLE_GRID_STEPS {
+<a href=#201 id=201 data-nosnippet>201</a>                <span class="kw">for </span>ex <span class="kw">in </span>CIRCLE_GRID_STEPS {
+<a href=#202 id=202 data-nosnippet>202</a>                    push(<span class="number">1.0 </span>+ (ex * <span class="number">8 </span>+ ey) <span class="kw">as </span>f32, <span class="kw-2">&amp;mut </span><span class="self">self</span>.buffer.vertices);
+<a href=#203 id=203 data-nosnippet>203</a>                }
+<a href=#204 id=204 data-nosnippet>204</a>            }
+<a href=#205 id=205 data-nosnippet>205</a>            <span class="kw">for </span>row <span class="kw">in </span><span class="number">0</span>..<span class="number">3_u32 </span>{
+<a href=#206 id=206 data-nosnippet>206</a>                <span class="kw">for </span>column <span class="kw">in </span><span class="number">0</span>..<span class="number">3_u32 </span>{
+<a href=#207 id=207 data-nosnippet>207</a>                    <span class="kw">let </span>lower = base + row * <span class="number">4 </span>+ column;
+<a href=#208 id=208 data-nosnippet>208</a>                    <span class="kw">let </span>upper = lower + <span class="number">4</span>;
+<a href=#209 id=209 data-nosnippet>209</a>                    <span class="kw">for </span>offset <span class="kw">in </span>[lower, lower + <span class="number">1</span>, upper + <span class="number">1</span>, lower, upper + <span class="number">1</span>, upper] {
+<a href=#210 id=210 data-nosnippet>210</a>                        <span class="self">self</span>.buffer.indices.push(I::from(VertexId(offset)));
+<a href=#211 id=211 data-nosnippet>211</a>                    }
+<a href=#212 id=212 data-nosnippet>212</a>                }
+<a href=#213 id=213 data-nosnippet>213</a>            }
+<a href=#214 id=214 data-nosnippet>214</a>        } <span class="kw">else </span>{
+<a href=#215 id=215 data-nosnippet>215</a>            <span class="kw">for _ in </span><span class="number">0</span>..<span class="number">4 </span>{
+<a href=#216 id=216 data-nosnippet>216</a>                push(<span class="number">0.0</span>, <span class="kw-2">&amp;mut </span><span class="self">self</span>.buffer.vertices);
+<a href=#217 id=217 data-nosnippet>217</a>            }
+<a href=#218 id=218 data-nosnippet>218</a>            <span class="kw">for </span>offset <span class="kw">in </span>CIRCLE_QUAD_INDICES {
+<a href=#219 id=219 data-nosnippet>219</a>                <span class="self">self</span>.buffer.indices.push(I::from(VertexId(base + offset)));
+<a href=#220 id=220 data-nosnippet>220</a>            }
+<a href=#221 id=221 data-nosnippet>221</a>        }
+<a href=#222 id=222 data-nosnippet>222</a>    }
+<a href=#223 id=223 data-nosnippet>223</a>}
+<a href=#224 id=224 data-nosnippet>224</a>
+<a href=#225 id=225 data-nosnippet>225</a><span class="attr">#[cfg(test)]
+<a href=#226 id=226 data-nosnippet>226</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>
