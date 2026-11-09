@@ -1,9 +1,6 @@
 //! Text and icon overlap, dependency, and collision insertion rules.
 use super::super::collision_grid::CollisionGrid;
-use crate::style::{
-    expression::FeatureProperties,
-    layer::{StyleProperty, SymbolPaint},
-};
+use crate::style::{expression::FeatureProperties, layer::SymbolPaint};
 
 /// How a symbol treats overlap, from `text-overlap` and `icon-overlap`.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -16,6 +13,7 @@ enum Overlap {
     Cooperative,
 }
 
+#[derive(Clone, Copy)]
 pub(super) struct PlacementRules {
     overlap: [Overlap; 2],
     ignore: [bool; 2],
@@ -23,23 +21,52 @@ pub(super) struct PlacementRules {
 }
 
 impl PlacementRules {
+    pub(super) fn constant_for_layer(paint: &SymbolPaint, zoom: f64) -> Option<Self> {
+        let is_const = |name: &str| {
+            paint
+                .compiled_property::<bool>(name)
+                .is_none_or(|prop| prop.is_feature_constant())
+        };
+        if ![
+            "text-allow-overlap",
+            "icon-allow-overlap",
+            "text-ignore-placement",
+            "icon-ignore-placement",
+            "text-optional",
+            "icon-optional",
+        ]
+        .into_iter()
+        .all(is_const)
+        {
+            return None;
+        }
+        Some(Self::new(paint, &FeatureProperties::default(), zoom))
+    }
+
     pub(super) fn new(paint: &SymbolPaint, properties: &FeatureProperties, zoom: f64) -> Self {
-        let read = |suffix: &str| {
-            ["text", "icon"].map(|prefix| {
+        let read = |names: [&str; 2]| {
+            names.map(|name| {
                 paint
-                    .properties
-                    .get(&format!("{prefix}-{suffix}"))
-                    .and_then(|value| {
-                        StyleProperty::<bool>::parse(value).evaluate_for(properties, zoom)
+                    .compiled_property::<bool>(name)
+                    .and_then(|prop| {
+                        if prop.is_feature_constant() {
+                            prop.evaluate_at_zoom(zoom)
+                        } else {
+                            prop.evaluate_for(properties, zoom)
+                        }
                     })
                     .unwrap_or(false)
             })
         };
-        let allow = read("allow-overlap");
+        let allow = read(["text-allow-overlap", "icon-allow-overlap"]);
         // The newer property replaces the boolean when a style sets both.
+        let overlap_names = ["text-overlap", "icon-overlap"];
         let overlap = [0, 1].map(|i| {
-            let name = format!("{}-overlap", ["text", "icon"][i]);
-            match paint.properties.get(&name).and_then(|value| value.as_str()) {
+            match paint
+                .properties
+                .get(overlap_names[i])
+                .and_then(|value| value.as_str())
+            {
                 Some("always") => Overlap::Always,
                 Some("cooperative") => Overlap::Cooperative,
                 Some(_) => Overlap::Never,
@@ -49,8 +76,8 @@ impl PlacementRules {
         });
         Self {
             overlap,
-            ignore: read("ignore-placement"),
-            optional: read("optional"),
+            ignore: read(["text-ignore-placement", "icon-ignore-placement"]),
+            optional: read(["text-optional", "icon-optional"]),
         }
     }
 

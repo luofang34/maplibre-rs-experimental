@@ -327,6 +327,54 @@ impl StyleProperty<f32> {
     {
         Self::deserialize_or_none(deserializer)
     }
+
+    /// Lower and upper zoom stops when the property is a two-stop top-level zoom `interpolate`.
+    pub fn zoom_interpolation_bounds(&self) -> Option<(f64, f64)> {
+        let Expression::Interpolate { input, stops, .. } = self.expression()? else {
+            return None;
+        };
+        if !matches!(
+            **input,
+            Expression::Global(crate::style::expression::Global::Zoom)
+        ) {
+            return None;
+        }
+        let [(z0, _), (z1, _)] = stops.as_slice() else {
+            return None;
+        };
+        Some((*z0, *z1))
+    }
+
+    /// Continuous `[0.0, 1.0]` interpolation factor at `zoom` for a two-stop top-level zoom
+    /// `interpolate` expression.
+    pub fn zoom_interpolation_factor(&self, zoom: f64) -> Option<f32> {
+        let Expression::Interpolate {
+            interpolation,
+            input,
+            stops,
+            ..
+        } = self.expression()?
+        else {
+            return None;
+        };
+        if !matches!(
+            **input,
+            Expression::Global(crate::style::expression::Global::Zoom)
+        ) {
+            return None;
+        }
+        let [(z0, _), (z1, _)] = stops.as_slice() else {
+            return None;
+        };
+        let factor = if zoom <= *z0 {
+            0.0
+        } else if zoom >= *z1 {
+            1.0
+        } else {
+            interpolation.factor(zoom, *z0, *z1).clamp(0.0, 1.0)
+        };
+        Some(factor as f32)
+    }
 }
 
 impl<T: PropertyValue + Serialize> Serialize for StyleProperty<T> {

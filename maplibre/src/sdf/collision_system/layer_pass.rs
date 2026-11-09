@@ -2,14 +2,12 @@
 
 use super::{repeat_spacing::Repeat, rules, temporal};
 use crate::{
-    coords::WorldTileCoords,
     render::shaders::SDFShaderFeatureMetadata,
     sdf::{
         collision_grid::CollisionGrid,
         paint::SymbolUniforms,
         placement::{
-            line_glyph_boxes, line_glyph_poses, screen_boxes, text_perspective_scale,
-            text_rotation, LabelGround, LinePoses,
+            line_glyph_poses, text_perspective_scale, text_rotation, LabelGround, LinePoses,
         },
         query::{PlacedSymbol, PlacedSymbols},
     },
@@ -17,43 +15,11 @@ use crate::{
 
 mod anchors;
 mod metadata;
+use anchors::{
+    beyond_perspective_cutoff_with_clip, label_boxes, local_zoom_visible_from_clip,
+    ordered_features,
+};
 pub(super) use metadata::write_feature_metadata;
-
-type OrderedFeature<'a> = (usize, usize, &'a crate::sdf::Feature, bool);
-
-/// Features of all `layers` in placement order: ascending `symbol-sort-key`, equal keys in tile
-/// order, and within a tile the labels that were visible first so they keep their place.
-fn ordered_features<'a>(
-    layers: &[&'a crate::sdf::SymbolLayerData],
-    history: &temporal::PlacementHistory,
-) -> Vec<OrderedFeature<'a>> {
-    let mut features: Vec<_> = layers
-        .iter()
-        .enumerate()
-        .flat_map(|(position, layer)| {
-            layer
-                .features
-                .iter()
-                .enumerate()
-                .map(move |(i, feature)| (position, i, feature))
-        })
-        .map(|(position, i, feature)| {
-            (
-                position,
-                i,
-                feature,
-                history.was_visible(layers[position], feature),
-            )
-        })
-        .collect();
-    features.sort_by(|(pa, _, a, _), (pb, _, b, _)| {
-        a.data
-            .sort_key
-            .total_cmp(&b.data.sort_key)
-            .then_with(|| pa.cmp(pb))
-    });
-    features
-}
 
 /// What one frame's placement of a layer shares between its features.
 struct LayerFrame<'a> {
@@ -63,6 +29,12 @@ struct LayerFrame<'a> {
     paint: &'a crate::style::layer::SymbolPaint,
     uniforms: SymbolUniforms,
     zoom_limits: [f64; 2],
+    glyphs_stay_upright: bool,
+    has_data_driven_sizes: bool,
+    has_terrain_or_height: bool,
+    has_icon_text_fit: bool,
+    constant_rules: Option<rules::PlacementRules>,
+    visibility_policy: Option<&'a crate::sdf::visibility::SymbolVisibility>,
 }
 
 /// The GPU-visible outcome of placing one feature.
@@ -97,17 +69,36 @@ pub(super) fn place_layer(
 ) -> (Vec<Vec<SDFShaderFeatureMetadata>>, super::family::Outcomes) {
     let (boxes, placed, history) = placement;
     let mut metadata: Vec<_> = layers.iter().map(|layer| empty_metadata(layer)).collect();
-    let mut outcomes: super::family::Outcomes = layers
-        .iter()
-        .map(|layer| layer.features.iter().map(|_| None).collect())
-        .collect();
+    let mut outcomes: super::family::Outcomes = (0..layers.len()).map(|_| Vec::new()).collect();
+    let zoom = view_state.style_zoom().value();
+    let has_data_driven_sizes = paint
+        .text_size
+        .as_ref()
+        .is_some_and(|s| !s.is_feature_constant())
+        || paint
+            .compiled_property::<f32>("icon-size")
+            .is_some_and(|s| !s.is_feature_constant());
+    let has_terrain_or_height = world
+        .resources
+        .get::<crate::terrain::coverage::TerrainCoverageIndex>()
+        .is_some()
+        || paint.uses_shared_height();
+    let visibility_policy = world
+        .resources
+        .get::<crate::sdf::visibility::SymbolVisibility>();
     let frame = LayerFrame {
         world,
         view_state,
         projection,
         paint,
-        uniforms: SymbolUniforms::new(paint, view_state.style_zoom().value(), [1, 1]),
+        uniforms: SymbolUniforms::new(paint, zoom, [1, 1]),
         zoom_limits,
+        glyphs_stay_upright: crate::sdf::paint::glyphs_stay_upright(paint, zoom),
+        has_data_driven_sizes,
+        has_terrain_or_height,
+        has_icon_text_fit: paint.properties.contains_key("icon-text-fit"),
+        constant_rules: rules::PlacementRules::constant_for_layer(paint, zoom),
+        visibility_policy,
     };
     for (position, feature_index, feature, was_visible) in ordered_features(layers, history) {
         // A second way of writing a label is placed with the first, and only when that finds
@@ -119,11 +110,13 @@ pub(super) fn place_layer(
         let mut next = Some((feature_index, feature, was_visible, false));
         while let Some((index, feature, was_visible, suppressed)) = next.take() {
             let frame = LayerFrame {
-                uniforms: frame.uniforms.with_feature_sizes(
-                    paint,
-                    &feature.data.properties,
-                    view_state.style_zoom().value(),
-                ),
+                uniforms: if frame.has_data_driven_sizes {
+                    frame
+                        .uniforms
+                        .with_feature_sizes(paint, &feature.data.properties, zoom)
+                } else {
+                    frame.uniforms
+                },
                 ..frame
             };
             let outcome = frame.place_feature(
@@ -146,14 +139,19 @@ pub(super) fn place_layer(
                     &mut metadata[position],
                 ),
             );
-            if let Some(slot) = outcomes[position].get_mut(index) {
-                *slot = Some(super::family::Outcome {
-                    opacity: outcome.opacity,
-                    text_shift: outcome.text_shift,
-                    anchor: outcome.anchor,
-                    ground: outcome.ground,
-                    poses,
-                });
+            if outcome.opacity != [0.0, 0.0] {
+                if outcomes[position].is_empty() {
+                    outcomes[position].resize_with(layer.features.len(), || None);
+                }
+                if let Some(slot) = outcomes[position].get_mut(index) {
+                    *slot = Some(super::family::Outcome {
+                        opacity: outcome.opacity,
+                        text_shift: outcome.text_shift,
+                        anchor: outcome.anchor,
+                        ground: outcome.ground,
+                        poses,
+                    });
+                }
             }
             next = layer
                 .features
@@ -199,108 +197,166 @@ impl LayerFrame<'_> {
     ) -> FeaturePlacement {
         let (view_state, projection) = (self.view_state, self.projection);
         let zoom = view_state.style_zoom().value();
-        let label_ground = LabelGround::new(self.world, layer, feature, self.paint, zoom);
+        let label_ground = if self.has_terrain_or_height {
+            LabelGround::new(self.world, layer, feature, self.paint, zoom)
+        } else {
+            LabelGround::flat(self.world, layer.coords)
+        };
         let ground = label_ground.elevation;
-        let relevance = self
-            .world
-            .resources
-            .get::<crate::sdf::visibility::SymbolVisibility>()
-            .map_or(1.0, |policy| {
-                policy.opacity(layer, feature, ground, view_state)
-            });
-        let limits = self.limits_for(was_visible);
-        let line = feature.line.as_ref().map(|_| {
-            line_glyph_poses(
-                layer,
-                feature,
-                &label_ground,
-                view_state,
-                projection,
-                (
-                    &self.uniforms,
-                    crate::sdf::paint::glyphs_stay_upright(self.paint, zoom),
-                ),
-            )
+        let relevance = self.visibility_policy.map_or(1.0, |policy| {
+            policy.opacity(layer, feature, ground, view_state)
         });
-        let shown = !suppressed
+        let limits = self.limits_for(was_visible);
+        let anchor_clip = (!suppressed && relevance > 0.0)
+            .then(|| {
+                crate::sdf::placement::project(
+                    layer.coords,
+                    [
+                        f64::from(feature.text_anchor.x),
+                        f64::from(feature.text_anchor.y),
+                    ],
+                    f64::from(ground),
+                    view_state,
+                    projection,
+                )
+            })
+            .flatten();
+        let pre_shown = !suppressed
             && relevance > 0.0
-            && !matches!(line, Some(LinePoses::DoesNotFit))
-            && !crate::sdf::placement::buried_in_terrain(self.world, layer, feature, ground)
-            && !crate::sdf::placement::beyond_perspective_cutoff(
+            && (feature.line.is_some()
+                || self.uniforms.text_layout[0] > 0.5
+                || self.uniforms.icon_layout[0] > 0.5
+                || anchor_clip.is_some_and(|clip| {
+                    if clip.w <= 0.0 {
+                        return false;
+                    }
+                    let sx = (clip.x / clip.w + 1.0) * 0.5 * view_state.width();
+                    let sy = (1.0 - clip.y / clip.w) * 0.5 * view_state.height();
+                    sx >= -500.0
+                        && sx <= view_state.width() + 500.0
+                        && sy >= -500.0
+                        && sy <= view_state.height() + 500.0
+                }))
+            && local_zoom_visible_from_clip(anchor_clip, view_state, limits)
+            && !beyond_perspective_cutoff_with_clip(
                 layer,
                 feature,
                 ground,
                 view_state,
                 projection,
                 &self.uniforms,
+                anchor_clip.map(|clip| (f64::from(ground), clip)),
             )
-            && local_zoom_visible(
-                layer.coords,
-                feature,
-                ground,
-                view_state,
-                projection,
-                limits,
-            );
+            && (!self.has_terrain_or_height
+                || !crate::sdf::placement::buried_in_terrain(self.world, layer, feature, ground));
+        let line = if pre_shown || was_visible {
+            feature.line.as_ref().map(|_| {
+                line_glyph_poses(
+                    layer,
+                    feature,
+                    &label_ground,
+                    view_state,
+                    projection,
+                    (&self.uniforms, self.glyphs_stay_upright),
+                )
+            })
+        } else {
+            None
+        };
+        let shown = pre_shown && !matches!(line, Some(LinePoses::DoesNotFit));
         let (rectangles, glyph_boxes) = if shown {
             label_boxes(
                 (layer, feature, ground),
-                (
-                    &line,
-                    crate::sdf::paint::glyphs_stay_upright(self.paint, zoom),
-                ),
+                (&line, self.glyphs_stay_upright),
                 (view_state, projection, &self.uniforms),
+                anchor_clip.map(|clip| (f64::from(ground), clip)),
             )
         } else {
             ([None, None], Vec::new())
         };
-        let rules = rules::PlacementRules::new(self.paint, &feature.data.properties, zoom);
-        let viewport = [view_state.width(), view_state.height()];
-        let (rectangles, text_shift, anchor) = self.first_fitting_anchor(
-            (
-                layer,
-                feature,
-                ground,
-                history.previous_anchor(layer, feature),
-            ),
-            (rectangles, &glyph_boxes),
-            (&rules, &*boxes, viewport),
-            (
-                text_perspective_scale(
-                    layer,
-                    feature,
-                    ground,
-                    view_state,
-                    projection,
-                    &self.uniforms,
-                ),
-                text_rotation(
-                    layer,
-                    feature,
-                    ground,
-                    view_state,
-                    projection,
-                    &self.uniforms,
-                ),
-            ),
-        );
-        let repeat = Repeat::of(layer, feature, &rectangles, viewport);
-        // A repeat too close to one already placed takes no room from labels after it.
-        let (rectangles, glyph_boxes) = if repeat
-            .as_ref()
-            .is_some_and(|repeat| history.repeats.too_close(repeat, was_visible))
+        let (rectangles, glyph_boxes, text_shift, anchor, visible, duplicate) = if rectangles
+            == [None, None]
         {
-            ([None, None], Vec::new())
+            ([None, None], Vec::new(), [0.0; 2], 0, [false, false], false)
         } else {
-            (rectangles, glyph_boxes)
+            let rules = self.constant_rules.unwrap_or_else(|| {
+                rules::PlacementRules::new(self.paint, &feature.data.properties, zoom)
+            });
+            let viewport = [view_state.width(), view_state.height()];
+            let (rectangles, text_shift, anchor) =
+                if let (Some(text), true) = (rectangles[0], feature.anchor_shifts.len() > 1) {
+                    if self.uniforms.text_layout[0] <= 0.5
+                        && (text[2] < -400.0
+                            || text[3] < -400.0
+                            || text[0] > viewport[0] + 400.0
+                            || text[1] > viewport[1] + 400.0)
+                    {
+                        (rectangles, [0.0; 2], 0)
+                    } else {
+                        let clip_with_ground = anchor_clip.map(|clip| (f64::from(ground), clip));
+                        self.first_fitting_anchor(
+                            (
+                                layer,
+                                feature,
+                                ground,
+                                history.previous_anchor(layer, feature),
+                            ),
+                            (rectangles, &glyph_boxes),
+                            (&rules, &*boxes, viewport),
+                            (
+                                text_perspective_scale(
+                                    layer,
+                                    feature,
+                                    ground,
+                                    view_state,
+                                    projection,
+                                    &self.uniforms,
+                                    clip_with_ground,
+                                ),
+                                text_rotation(
+                                    layer,
+                                    feature,
+                                    ground,
+                                    view_state,
+                                    projection,
+                                    &self.uniforms,
+                                    clip_with_ground,
+                                ),
+                            ),
+                        )
+                    }
+                } else {
+                    (rectangles, [0.0; 2], 0)
+                };
+            let repeat = Repeat::of(layer, feature, &rectangles, viewport);
+            // A repeat too close to one already placed takes no room from labels after it.
+            let (rectangles, glyph_boxes) = if repeat
+                .as_ref()
+                .is_some_and(|repeat| history.repeats.too_close(repeat, was_visible))
+            {
+                ([None, None], Vec::new())
+            } else {
+                (rectangles, glyph_boxes)
+            };
+            let visible = rules.place_along_line(rectangles, &glyph_boxes, boxes, viewport);
+            let any_visible = visible[0] || visible[1];
+            let duplicate = any_visible && history.shown_elsewhere(layer, feature);
+            if let Some(repeat) = repeat.filter(|_| any_visible && !duplicate) {
+                history.repeats.remember(repeat);
+            }
+            (
+                rectangles,
+                glyph_boxes,
+                text_shift,
+                anchor,
+                visible,
+                duplicate,
+            )
         };
-        let visible = rules.place_along_line(rectangles, &glyph_boxes, boxes, viewport);
-        let duplicate = history.shown_elsewhere(layer, feature);
-        if let Some(repeat) = repeat.filter(|_| visible.iter().any(|v| *v) && !duplicate) {
-            history.repeats.remember(repeat);
-        }
         let opacity = history.opacity(layer, feature, visible);
-        history.remember_anchor(layer, feature, visible[0].then_some(anchor));
+        if visible[0] || was_visible {
+            history.remember_anchor(layer, feature, visible[0].then_some(anchor));
+        }
         // A placed label is found from its first frame, while it starts fading in, as GL JS
         // queries its collision index; a copy drawn by another tile is found once.
         if visible.iter().any(|v| *v) && !duplicate {
@@ -332,83 +388,10 @@ impl LayerFrame<'_> {
     }
 }
 
-/// The screen rectangles of a label, and for text along a line one box per glyph; the
-/// rectangle of such a text then surrounds those boxes, not the straight layout.
-fn label_boxes(
-    (layer, feature, ground): (&crate::sdf::SymbolLayerData, &crate::sdf::Feature, f32),
-    (line, upright): (&Option<LinePoses>, bool),
-    (view_state, projection, uniforms): (
-        &crate::render::view_state::ViewState,
-        &crate::render::projection::ShaderProjectionData,
-        &SymbolUniforms,
-    ),
-) -> ([Option<[f64; 4]>; 2], Vec<[f64; 4]>) {
-    let Some(mut rectangles) =
-        screen_boxes(layer, feature, ground, view_state, projection, uniforms)
-    else {
-        return ([None, None], Vec::new());
-    };
-    let LinePoses::Poses(poses) = line.as_ref().unwrap_or(&LinePoses::NotApplicable) else {
-        return (rectangles, Vec::new());
-    };
-    let image_sizes = feature
-        .line
-        .as_ref()
-        .map_or(&[][..], |line| &line.image_sizes[..]);
-    let glyphs = line_glyph_boxes(
-        layer,
-        (poses, image_sizes, upright),
-        ground,
-        view_state,
-        projection,
-        uniforms,
-    );
-    if rectangles[0].is_some() {
-        rectangles[0] = glyphs.iter().copied().reduce(|a, b| {
-            [
-                a[0].min(b[0]),
-                a[1].min(b[1]),
-                a[2].max(b[2]),
-                a[3].max(b[3]),
-            ]
-        });
-    }
-    (rectangles, glyphs)
-}
-fn local_zoom_visible(
-    coords: WorldTileCoords,
-    feature: &crate::sdf::Feature,
-    ground: f32,
-    view: &crate::render::view_state::ViewState,
-    projection: &crate::render::projection::ShaderProjectionData,
-    limits: [f64; 2],
-) -> bool {
-    let Some(clip) = crate::sdf::placement::project(
-        coords,
-        [
-            f64::from(feature.text_anchor.x),
-            f64::from(feature.text_anchor.y),
-        ],
-        f64::from(ground),
-        view,
-        projection,
-    ) else {
-        return false;
-    };
-    if clip.w <= 0.0 {
-        return false;
-    }
-    let zoom = view.style_zoom().value()
-        + if view.has_external_view() {
-            view.symbol_distance_ratio(clip).log2().min(0.0)
-        } else {
-            0.0
-        };
-    zoom >= limits[0] && zoom < limits[1]
-}
-
-pub(super) fn empty_metadata(layer: &crate::sdf::SymbolLayerData) -> Vec<SDFShaderFeatureMetadata> {
-    vec![SDFShaderFeatureMetadata::default(); layer.buffer.buffer.vertices.len()]
+pub(super) fn empty_metadata(
+    _layer: &crate::sdf::SymbolLayerData,
+) -> Vec<SDFShaderFeatureMetadata> {
+    Vec::new()
 }
 
 #[cfg(test)]

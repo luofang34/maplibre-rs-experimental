@@ -107,6 +107,13 @@ impl RingIndex {
             .map(|entry| &entry.layers)
     }
 
+    pub fn max_zoom(&self) -> Option<u8> {
+        self.tree_index
+            .values()
+            .filter_map(|entry| entry.layers.front().map(|layer| u8::from(layer.coords.z)))
+            .max()
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = impl Iterator<Item = &IndexEntry>> + '_ {
         self.linear_index
             .iter()

@@ -9,7 +9,8 @@ mod styles;
 mod vertical;
 
 pub(super) use extents::{
-    both_orientations, extent, is_vertical, layout_extent, unwrapped_width, variable_shifts,
+    both_orientations, extent_from_block, layout_extent_from_block, unwrapped_width,
+    variable_shifts_from_block,
 };
 use styles::{char_styles, line_width, CharStyle};
 
@@ -28,7 +29,7 @@ use crate::{
 pub(super) type TextColorRun = (Range<usize>, [f32; 4]);
 
 /// The wrapped lines of a label and where they sit around the anchor, in layout pixels.
-struct Block<'a> {
+pub(super) struct Block<'a> {
     chars: Vec<char>,
     styles: Vec<CharStyle<'a>>,
     lines: Vec<Range<usize>>,
@@ -46,7 +47,7 @@ struct Block<'a> {
     justify: f32,
     offset: [f32; 2],
     /// Whether the label is written top to bottom.
-    vertical: bool,
+    pub(super) vertical: bool,
 }
 
 /// The largest scale of any character in each line, how far each line grows past its height to
@@ -89,7 +90,7 @@ fn line_sizes(
     (line_scales, line_extras, line_contents)
 }
 
-fn block<'a>(
+pub(super) fn block<'a>(
     symbol: &CollectedSymbol,
     paint: &SymbolPaint,
     zoom: f64,
@@ -224,11 +225,23 @@ fn justifications(
     (values, taken)
 }
 
+#[cfg(test)]
 pub(super) fn append(
     symbol: &CollectedSymbol,
     paint: &SymbolPaint,
     zoom: f64,
     atlas: &SymbolAtlas,
+    buffer: &mut VertexBuffers<ShaderSymbolVertex, u32>,
+) -> Laid {
+    let block = block(symbol, paint, zoom, atlas);
+    append_block(symbol, paint, zoom, block.as_ref(), buffer)
+}
+
+pub(super) fn append_block(
+    symbol: &CollectedSymbol,
+    paint: &SymbolPaint,
+    zoom: f64,
+    block: Option<&Block<'_>>,
     buffer: &mut VertexBuffers<ShaderSymbolVertex, u32>,
 ) -> Laid {
     let mut laid = Laid {
@@ -238,14 +251,14 @@ pub(super) fn append(
         anchor_sets: Vec::new(),
         colors: Vec::new(),
     };
-    let Some(block) = block(symbol, paint, zoom, atlas) else {
+    let Some(block) = block else {
         return laid;
     };
     let (values, anchor_sets) = justifications(paint, block.justify, &symbol.properties, zoom);
     for justify in &values {
         let start = buffer.indices.len();
         let (centres, image_sizes, colors) =
-            glyph_pass(symbol, paint, zoom, &block, *justify, buffer);
+            glyph_pass(symbol, paint, zoom, block, *justify, buffer);
         laid.centres.extend(centres);
         laid.image_sizes.extend(image_sizes);
         laid.colors.extend(colors);

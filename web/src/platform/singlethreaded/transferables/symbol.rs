@@ -32,11 +32,7 @@ impl SymbolLayerTessellated for FlatBufferTransferable {
         let features = serde_json::to_vec(&features)
             .map_err(|error| tracing::error!(%error, "cannot encode symbol features"))
             .ok();
-        let atlas = atlas.and_then(|atlas| {
-            serde_json::to_vec(&*atlas)
-                .map_err(|error| tracing::error!(%error, "cannot encode symbol atlas"))
-                .ok()
-        });
+        let atlas = atlas.map(|atlas| encode_symbol_atlas(&atlas));
         let features = features
             .as_ref()
             .map(|bytes| inner_builder.create_vector(bytes));
@@ -108,8 +104,9 @@ impl SymbolLayerTessellated for FlatBufferTransferable {
             .style_layer_id()
             .map(|s| s.to_owned())
             .unwrap_or_else(|| layer_name.clone());
+        let coords = SymbolLayerTessellated::coords(&self);
         SymbolLayerData {
-            coords: SymbolLayerTessellated::coords(&self),
+            coords,
             source_layer: layer_name,
             style_layer_id,
             buffer: OverAlignedVertexBuffer::from_iters(vertices, indices, usable_indices),
@@ -128,14 +125,65 @@ impl SymbolLayerTessellated for FlatBufferTransferable {
                 .collect(),
             atlas: data
                 .symbol_atlas()
-                .and_then(|bytes| {
-                    serde_json::from_slice(bytes.bytes())
-                        .map_err(|error| tracing::error!(%error, "invalid symbol atlas"))
-                        .ok()
-                })
-                .map(std::sync::Arc::new),
+                .and_then(|bytes| decode_symbol_atlas(coords, bytes.bytes())),
         }
     }
+}
+
+fn encode_symbol_atlas(atlas: &maplibre::sdf::assets::SymbolAtlas) -> Vec<u8> {
+    let mut out = Vec::with_capacity(8 + atlas.pixels.len());
+    out.extend_from_slice(&atlas.size[0].to_le_bytes());
+    out.extend_from_slice(&atlas.size[1].to_le_bytes());
+    out.extend_from_slice(&atlas.pixels);
+    out
+}
+
+fn decode_symbol_atlas(
+    coords: WorldTileCoords,
+    bytes: &[u8],
+) -> Option<std::sync::Arc<maplibre::sdf::assets::SymbolAtlas>> {
+    if bytes.len() < 8 {
+        return serde_json::from_slice(bytes).ok().map(std::sync::Arc::new);
+    }
+    let width = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+    let height = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
+    let pixels = &bytes[8..];
+    if pixels.len()
+        != (width as usize)
+            .saturating_mul(height as usize)
+            .saturating_mul(4)
+    {
+        return serde_json::from_slice(bytes).ok().map(std::sync::Arc::new);
+    }
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    coords.hash(&mut hasher);
+    width.hash(&mut hasher);
+    height.hash(&mut hasher);
+    pixels.hash(&mut hasher);
+    let key = (coords, width, height, hasher.finish());
+    thread_local! {
+        static ATLAS_CACHE: std::cell::RefCell<
+            std::collections::HashMap<
+                (WorldTileCoords, u32, u32, u64),
+                std::sync::Weak<maplibre::sdf::assets::SymbolAtlas>,
+            >,
+        > = std::cell::RefCell::new(std::collections::HashMap::new());
+    }
+    ATLAS_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some(existing) = cache.get(&key).and_then(std::sync::Weak::upgrade) {
+            return Some(existing);
+        }
+        cache.retain(|_, weak| weak.strong_count() > 0);
+        let arc = std::sync::Arc::new(maplibre::sdf::assets::SymbolAtlas {
+            size: [width, height],
+            pixels: pixels.to_vec(),
+            ..Default::default()
+        });
+        cache.insert(key, std::sync::Arc::downgrade(&arc));
+        Some(arc)
+    })
 }
 
 fn flat_vertices(vertices: &[ShaderSymbolVertex]) -> Vec<FlatSymbolVertex> {

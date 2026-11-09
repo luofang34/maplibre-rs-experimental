@@ -1,13 +1,66 @@
 //! The ground under a label: the height its anchor is drawn at, and how far the terrain under
 //! each of its glyphs stands above or below the terrain under the anchor.
 
+use cgmath::{InnerSpace, Matrix4, Vector4};
+
 use crate::{
-    coords::WorldTileCoords,
+    coords::{TileCoords, WorldTileCoords, ZOOM_BOUNDS},
+    render::{projection::ShaderProjectionData, view_state::ViewState},
     sdf::{Feature, SymbolLayerData},
     style::layer::SymbolPaint,
     tcs::world::World,
     terrain::coverage::TerrainCoverageIndex,
 };
+
+pub(in crate::sdf) fn canonical_tile(coords: WorldTileCoords) -> Option<TileCoords> {
+    let count = i32::try_from(ZOOM_BOUNDS[usize::from(u8::from(coords.z))]).ok()?;
+    (coords.y >= 0 && coords.y < count).then_some(TileCoords {
+        x: coords.x.rem_euclid(count) as u32,
+        y: coords.y as u32,
+        z: coords.z,
+    })
+}
+
+pub(in crate::sdf) fn project(
+    coords: WorldTileCoords,
+    anchor: [f64; 2],
+    elevation: f64,
+    view: &ViewState,
+    projection: &ShaderProjectionData,
+) -> Option<Vector4<f64>> {
+    let tile = canonical_tile(coords)?;
+    let transition = f64::from(projection.transition);
+    if transition <= 0.0 {
+        return Some(
+            view.gpu_view_projection()
+                .to_model_view_projection(coords.transform_for_zoom(view.zoom()))
+                .get()
+                * Vector4::new(anchor[0], anchor[1], elevation, 1.0),
+        );
+    }
+    let surface = crate::projection::globe::project_tile_coordinates_to_unit_sphere(
+        tile.x,
+        tile.y,
+        u8::from(tile.z),
+        anchor[0],
+        anchor[1],
+    );
+    let plane = Vector4::<f32>::from(projection.clipping_plane).cast::<f64>()?;
+    if projection.transition >= 0.98 && plane.dot(surface.extend(1.0)) < 0.0 {
+        return None;
+    }
+    let globe = Matrix4::<f32>::from(projection.main_matrix).cast::<f64>()?
+        * (surface * (1.0 + elevation / f64::from(projection.radius_meters))).extend(1.0);
+    if transition >= 1.0 {
+        return Some(globe);
+    }
+    let flat = view
+        .gpu_view_projection()
+        .to_model_view_projection(coords.transform_for_zoom(view.zoom()))
+        .get()
+        * Vector4::new(anchor[0], anchor[1], elevation, 1.0);
+    Some(flat * (1.0 - transition) + globe * transition)
+}
 
 /// Heights within this of the ground count as on it, so DEM sampling noise never hides a label.
 const BURIAL_TOLERANCE_METERS: f32 = 1.0;
@@ -87,6 +140,15 @@ pub(in crate::sdf) struct LabelGround<'a> {
 }
 
 impl<'a> LabelGround<'a> {
+    pub(in crate::sdf) fn flat(world: &'a World, coords: WorldTileCoords) -> Self {
+        Self {
+            world,
+            coords,
+            elevation: 0.0,
+            anchor_terrain: None,
+        }
+    }
+
     pub(in crate::sdf) fn new(
         world: &'a World,
         layer: &SymbolLayerData,

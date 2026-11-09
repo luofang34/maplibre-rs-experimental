@@ -49,3 +49,95 @@ fn a_feature_whose_geometry_cannot_be_read_is_left_out_without_its_layer() {
         "the unreadable feature is left out of the layer data too"
     );
 }
+
+#[test]
+fn a_building_base_whose_parts_all_start_above_ground_is_not_hidden_by_hide_3d() {
+    let square_geom = |x0: i32, y0: i32, size: i32| {
+        let zz = |v: i32| ((v << 1) ^ (v >> 31)) as u32;
+        vec![
+            (1 << 3) | 1,
+            zz(x0),
+            zz(y0),
+            (3 << 3) | 2,
+            zz(size),
+            0,
+            0,
+            zz(size),
+            zz(-size),
+            0,
+            (1 << 3) | 7,
+        ]
+    };
+    let tile_bytes = Tile {
+        layers: vec![tile::Layer {
+            version: 2,
+            name: "building".into(),
+            extent: Some(4096),
+            keys: vec![
+                "hide_3d".into(),
+                "render_min_height".into(),
+                "render_height".into(),
+            ],
+            values: vec![
+                tile::Value {
+                    bool_value: Some(true),
+                    ..Default::default()
+                },
+                tile::Value {
+                    double_value: Some(0.0),
+                    ..Default::default()
+                },
+                tile::Value {
+                    double_value: Some(120.0),
+                    ..Default::default()
+                },
+                tile::Value {
+                    double_value: Some(238.0),
+                    ..Default::default()
+                },
+            ],
+            features: vec![
+                tile::Feature {
+                    id: Some(1),
+                    r#type: Some(3),
+                    tags: vec![0, 0, 1, 1, 2, 2],
+                    geometry: square_geom(100, 100, 200),
+                },
+                tile::Feature {
+                    id: Some(2),
+                    r#type: Some(3),
+                    tags: vec![1, 2, 2, 3],
+                    geometry: square_geom(150, 150, 80),
+                },
+                tile::Feature {
+                    id: Some(3),
+                    r#type: Some(3),
+                    tags: vec![0, 0, 1, 1, 2, 2],
+                    geometry: square_geom(1000, 1000, 200),
+                },
+                tile::Feature {
+                    id: Some(4),
+                    r#type: Some(3),
+                    tags: vec![1, 1, 2, 2],
+                    geometry: square_geom(1050, 1050, 80),
+                },
+            ],
+        }],
+    }
+    .encode_to_vec();
+
+    let layer: StyleLayer = serde_json::from_value(serde_json::json!({
+        "id": "3d-buildings",
+        "type": "fill-extrusion",
+        "source": "openmaptiles",
+        "source-layer": "building",
+        "filter": ["!=", ["get", "hide_3d"], true],
+        "paint": {
+            "fill-extrusion-height": ["get", "render_height"],
+            "fill-extrusion-base": ["get", "render_min_height"]
+        }
+    }))
+    .expect("valid extrusion layer");
+    let layers = tessellated(process(&tile_bytes, layer));
+    assert_eq!(layers[0].feature_indices.len(), 3);
+}

@@ -70,17 +70,33 @@ pub(super) fn metadata_for_layer(
     }
 
     if let Some(LayerPaint::FillExtrusion(paint)) = &style_layer.paint {
+        let zoom = f64::from(zoom);
         let opacity = paint
             .fill_extrusion_opacity
             .as_ref()
-            .and_then(|opacity| opacity.evaluate_at_zoom(f64::from(zoom)))
+            .and_then(|opacity| opacity.evaluate_at_zoom(zoom))
             .unwrap_or(1.0)
             .clamp(0.0, 1.0);
         let gradient = paint.fill_extrusion_vertical_gradient.unwrap_or(true);
+        let height_blend = paint
+            .fill_extrusion_height
+            .as_ref()
+            .and_then(|height| height.zoom_interpolation_factor(zoom))
+            .map_or(0.0, |factor| 1.0 + factor);
+        let base_blend = paint
+            .fill_extrusion_base
+            .as_ref()
+            .and_then(|base| base.zoom_interpolation_factor(zoom))
+            .map_or(0.0, |factor| 1.0 + factor);
         layer_metadata.stroke_color = [light.color[0], light.color[1], light.color[2], 1.0];
-        layer_metadata.circle_params = [opacity, f32::from(gradient), light.intensity, 0.0];
-        layer_metadata.circle_flags =
-            [light.position[0], light.position[1], light.position[2], 0.0];
+        layer_metadata.circle_params =
+            [opacity, f32::from(gradient), light.intensity, height_blend];
+        layer_metadata.circle_flags = [
+            light.position[0],
+            light.position[1],
+            light.position[2],
+            base_blend,
+        ];
     }
 
     layer_metadata

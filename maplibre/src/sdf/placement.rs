@@ -1,9 +1,9 @@
 //! Projects collision rectangles using the same elevated anchors as symbol vertices.
-use cgmath::{InnerSpace, Matrix4, Vector4};
+use cgmath::Vector4;
 
 use super::{paint::SymbolUniforms, placement_geometry::SymbolBounds};
 use crate::{
-    coords::{TileCoords, WorldTileCoords, ZOOM_BOUNDS},
+    coords::WorldTileCoords,
     render::{
         projection::{fixed_symbol_scale, ShaderProjectionData},
         view_state::ViewState,
@@ -13,17 +13,8 @@ use crate::{
 
 mod ground;
 mod line_labels;
-pub(super) use ground::{buried_in_terrain, LabelGround};
+pub(super) use ground::{buried_in_terrain, canonical_tile, project, LabelGround};
 pub(super) use line_labels::{line_glyph_boxes, line_glyph_poses, LinePoses};
-
-pub(super) fn canonical_tile(coords: WorldTileCoords) -> Option<TileCoords> {
-    let count = i32::try_from(ZOOM_BOUNDS[usize::from(u8::from(coords.z))]).ok()?;
-    (coords.y >= 0 && coords.y < count).then_some(TileCoords {
-        x: coords.x.rem_euclid(count) as u32,
-        y: coords.y as u32,
-        z: coords.z,
-    })
-}
 
 pub(super) fn screen_boxes(
     layer: &SymbolLayerData,
@@ -32,9 +23,17 @@ pub(super) fn screen_boxes(
     view: &ViewState,
     projection: &ShaderProjectionData,
     uniforms: &SymbolUniforms,
+    anchor_clip: Option<(f64, Vector4<f64>)>,
 ) -> Option<[Option<[f64; 4]>; 2]> {
-    screen_boxes_shifted(
-        layer, feature, elevation, view, projection, uniforms, [0.0; 2],
+    screen_boxes_shifted_with_clip(
+        layer,
+        feature,
+        elevation,
+        view,
+        projection,
+        uniforms,
+        [0.0; 2],
+        anchor_clip,
     )
 }
 
@@ -48,6 +47,22 @@ pub(super) fn screen_boxes_shifted(
     projection: &ShaderProjectionData,
     uniforms: &SymbolUniforms,
     text_shift: [f32; 2],
+) -> Option<[Option<[f64; 4]>; 2]> {
+    screen_boxes_shifted_with_clip(
+        layer, feature, elevation, view, projection, uniforms, text_shift, None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn screen_boxes_shifted_with_clip(
+    layer: &SymbolLayerData,
+    feature: &Feature,
+    elevation: f32,
+    view: &ViewState,
+    projection: &ShaderProjectionData,
+    uniforms: &SymbolUniforms,
+    text_shift: [f32; 2],
+    anchor_clip: Option<(f64, Vector4<f64>)>,
 ) -> Option<[Option<[f64; 4]>; 2]> {
     let mut result: [Option<[f64; 4]>; 2] = [None, None];
     for mut part in feature.parts.into_iter().flatten() {
@@ -70,6 +85,7 @@ pub(super) fn screen_boxes_shifted(
             view,
             projection,
             uniforms,
+            anchor_clip,
         };
         let mut bounds = placement.bounds(&part)?;
         // A translation in viewport axes moves the box on the screen.
@@ -114,19 +130,27 @@ pub(super) fn text_perspective_scale(
     view: &ViewState,
     projection: &ShaderProjectionData,
     uniforms: &SymbolUniforms,
+    anchor_clip: Option<(f64, Vector4<f64>)>,
 ) -> f64 {
     let alignment = uniforms.text_layout;
     if fixed_symbol_scale(view) {
         return 1.0;
     }
     let height = f64::from(elevation) * f64::from(alignment[3]);
-    let anchor = [
-        f64::from(feature.text_anchor.x),
-        f64::from(feature.text_anchor.y),
-    ];
-    let Some(clip) =
-        project(layer.coords, anchor, height, view, projection).filter(|clip| clip.w > 0.0)
-    else {
+    let clip = match anchor_clip {
+        Some((h, clip)) if (h - height).abs() < 1e-6 => Some(clip),
+        _ => project(
+            layer.coords,
+            [
+                f64::from(feature.text_anchor.x),
+                f64::from(feature.text_anchor.y),
+            ],
+            height,
+            view,
+            projection,
+        ),
+    };
+    let Some(clip) = clip.filter(|clip| clip.w > 0.0) else {
         return 1.0;
     };
     let center = f64::from(projection.center_clip_w);
@@ -178,11 +202,15 @@ pub(super) fn text_rotation(
     view: &ViewState,
     projection: &ShaderProjectionData,
     uniforms: &SymbolUniforms,
+    anchor_clip: Option<(f64, Vector4<f64>)>,
 ) -> f64 {
     let alignment = uniforms.text_layout;
     let Some(part) = feature.parts.into_iter().flatten().find(|part| part.text) else {
         return 0.0;
     };
+    if alignment[0] <= 0.5 && alignment[1] <= 0.5 && !view.has_external_view() {
+        return f64::from(alignment[2]) + part.angle;
+    }
     let placement = Placement {
         coords: layer.coords,
         anchor: [
@@ -193,9 +221,14 @@ pub(super) fn text_rotation(
         view,
         projection,
         uniforms,
+        anchor_clip,
     };
     let height = f64::from(elevation) * f64::from(alignment[3]) + part.height;
-    let Some(clip) = project(layer.coords, placement.anchor, height, view, projection) else {
+    let clip = match anchor_clip {
+        Some((h, clip)) if (h - height).abs() < 1e-6 => Some(clip),
+        _ => project(layer.coords, placement.anchor, height, view, projection),
+    };
+    let Some(clip) = clip else {
         return 0.0;
     };
     let rotation = if alignment[0] > 0.5 {
@@ -229,6 +262,7 @@ struct Placement<'a> {
     view: &'a ViewState,
     projection: &'a ShaderProjectionData,
     uniforms: &'a SymbolUniforms,
+    anchor_clip: Option<(f64, Vector4<f64>)>,
 }
 impl Placement<'_> {
     fn bounds(&self, part: &SymbolBounds) -> Option<[f64; 4]> {
@@ -243,7 +277,10 @@ impl Placement<'_> {
             self.uniforms.icon[0]
         };
         let height = self.elevation * f64::from(alignment[3]) + part.height;
-        let clip = project(self.coords, self.anchor, height, self.view, self.projection)?;
+        let clip = match self.anchor_clip {
+            Some((h, clip)) if (h - height).abs() < 1e-6 => clip,
+            _ => project(self.coords, self.anchor, height, self.view, self.projection)?,
+        };
         if clip.w <= 0.0 {
             return None;
         }
@@ -272,33 +309,59 @@ impl Placement<'_> {
         } else {
             (0.5 + 0.5 * ratio).clamp(0.0, 4.0)
         };
+        let (sin, cos) = angle.sin_cos();
+        if alignment[0] <= 0.5 {
+            let center = self.screen(clip);
+            if angle == 0.0 {
+                return Some([
+                    center[0] + part.bounds[0] * scale - padding,
+                    center[1] + part.bounds[1] * scale - padding,
+                    center[0] + part.bounds[2] * scale + padding,
+                    center[1] + part.bounds[3] * scale + padding,
+                ]);
+            }
+            let mut result = [
+                f64::INFINITY,
+                f64::INFINITY,
+                f64::NEG_INFINITY,
+                f64::NEG_INFINITY,
+            ];
+            for x in [part.bounds[0], part.bounds[2]] {
+                for y in [part.bounds[1], part.bounds[3]] {
+                    let dx = (x * cos - y * sin) * scale;
+                    let dy = (x * sin + y * cos) * scale;
+                    let px = center[0] + dx;
+                    let py = center[1] + dy;
+                    result[0] = result[0].min(px - padding);
+                    result[1] = result[1].min(py - padding);
+                    result[2] = result[2].max(px + padding);
+                    result[3] = result[3].max(py + padding);
+                }
+            }
+            return Some(result);
+        }
         let mut result = [
             f64::INFINITY,
             f64::INFINITY,
             f64::NEG_INFINITY,
             f64::NEG_INFINITY,
         ];
+        let units = self.tile_units();
         for x in [part.bounds[0], part.bounds[2]] {
             for y in [part.bounds[1], part.bounds[3]] {
-                let dx = (x * angle.cos() - y * angle.sin()) * scale;
-                let dy = (x * angle.sin() + y * angle.cos()) * scale;
-                let point = if alignment[0] > 0.5 {
-                    let units = self.tile_units();
-                    let point = project(
-                        self.coords,
-                        [self.anchor[0] + dx * units, self.anchor[1] + dy * units],
-                        height,
-                        self.view,
-                        self.projection,
-                    )?;
-                    if point.w <= 0.0 {
-                        return None;
-                    }
-                    self.screen(point)
-                } else {
-                    let center = self.screen(clip);
-                    [center[0] + dx, center[1] + dy]
-                };
+                let dx = (x * cos - y * sin) * scale;
+                let dy = (x * sin + y * cos) * scale;
+                let point = project(
+                    self.coords,
+                    [self.anchor[0] + dx * units, self.anchor[1] + dy * units],
+                    height,
+                    self.view,
+                    self.projection,
+                )?;
+                if point.w <= 0.0 {
+                    return None;
+                }
+                let point = self.screen(point);
                 result[0] = result[0].min(point[0] - padding);
                 result[1] = result[1].min(point[1] - padding);
                 result[2] = result[2].max(point[0] + padding);
@@ -395,35 +458,6 @@ impl Placement<'_> {
         8.0 * self.view.style_zoom().scale_to_tile(&self.coords)
             * (1.0 - transition + transition * globe_scale)
     }
-}
-
-pub(super) fn project(
-    coords: WorldTileCoords,
-    anchor: [f64; 2],
-    elevation: f64,
-    view: &ViewState,
-    projection: &ShaderProjectionData,
-) -> Option<Vector4<f64>> {
-    let tile = canonical_tile(coords)?;
-    let surface = crate::projection::globe::project_tile_coordinates_to_unit_sphere(
-        tile.x,
-        tile.y,
-        u8::from(tile.z),
-        anchor[0],
-        anchor[1],
-    );
-    let plane = Vector4::<f32>::from(projection.clipping_plane).cast::<f64>()?;
-    if projection.transition >= 0.98 && plane.dot(surface.extend(1.0)) < 0.0 {
-        return None;
-    }
-    let flat = view
-        .gpu_view_projection()
-        .to_model_view_projection(coords.transform_for_zoom(view.zoom()))
-        .get()
-        * Vector4::new(anchor[0], anchor[1], elevation, 1.0);
-    let globe = Matrix4::<f32>::from(projection.main_matrix).cast::<f64>()?
-        * (surface * (1.0 + elevation / f64::from(projection.radius_meters))).extend(1.0);
-    Some(flat * (1.0 - f64::from(projection.transition)) + globe * f64::from(projection.transition))
 }
 
 #[cfg(test)]

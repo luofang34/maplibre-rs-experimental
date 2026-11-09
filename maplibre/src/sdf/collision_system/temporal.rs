@@ -1,19 +1,20 @@
 //! Placement history follows a symbol across tile replacement, with bounded fades.
-use std::{collections::HashMap, time::Duration};
+use std::{
+    hash::{Hash, Hasher},
+    time::Duration,
+};
+
+use rustc_hash::{FxHashMap, FxHasher};
 
 use crate::{
     coords::WorldTileCoords,
     sdf::{Feature, SymbolLayerData},
 };
 
-#[derive(Clone, Hash, PartialEq, Eq)]
-struct Key {
-    layer: String,
-    text: String,
-    id: Option<u64>,
-}
 #[derive(Clone)]
 struct State {
+    text: String,
+    id: Option<u64>,
     position: [f64; 2],
     zoom: u8,
     opacity: [f32; 2],
@@ -26,7 +27,7 @@ struct State {
 }
 #[derive(Default)]
 pub(super) struct PlacementHistory {
-    states: HashMap<Key, Vec<State>>,
+    states: FxHashMap<String, FxHashMap<u64, Vec<State>>>,
     now: Duration,
     frame: u64,
     pub(super) fading: bool,
@@ -39,14 +40,20 @@ impl PlacementHistory {
         self.frame = self.frame.wrapping_add(1);
         self.fading = false;
         self.repeats.begin();
-        self.states.retain(|_, states| {
-            states.retain(|state| now.saturating_sub(state.last_seen) < Duration::from_secs(1));
-            !states.is_empty()
+        self.states.retain(|_, layer_states| {
+            layer_states.retain(|_, states| {
+                states.retain(|state| now.saturating_sub(state.last_seen) < Duration::from_secs(1));
+                !states.is_empty()
+            });
+            !layer_states.is_empty()
         });
     }
     pub(super) fn was_visible(&self, layer: &SymbolLayerData, feature: &Feature) -> bool {
-        self.states
-            .get(&key(layer, feature))
+        let Some(layer_states) = self.states.get(layer.style_layer_id.as_str()) else {
+            return false;
+        };
+        layer_states
+            .get(&feature_hash(feature))
             .and_then(|states| {
                 states
                     .iter()
@@ -57,16 +64,21 @@ impl PlacementHistory {
     /// Whether another tile's copy of the label already took it this frame, so this copy is
     /// neither drawn nor found by a query. Asked before [`Self::opacity`] takes it.
     pub(super) fn shown_elsewhere(&self, layer: &SymbolLayerData, feature: &Feature) -> bool {
+        let Some(layer_states) = self.states.get(layer.style_layer_id.as_str()) else {
+            return false;
+        };
         let frame = self.frame;
-        self.states.get(&key(layer, feature)).is_some_and(|states| {
-            states
-                .iter()
-                .find(|state| {
-                    matches(state, layer.coords, feature)
-                        && !(state.claimed == frame && state.claimed_by == layer.coords)
-                })
-                .is_some_and(|state| state.claimed == frame)
-        })
+        layer_states
+            .get(&feature_hash(feature))
+            .is_some_and(|states| {
+                states
+                    .iter()
+                    .find(|state| {
+                        matches(state, layer.coords, feature)
+                            && !(state.claimed == frame && state.claimed_by == layer.coords)
+                    })
+                    .is_some_and(|state| state.claimed == frame)
+            })
     }
 
     pub(super) fn opacity(
@@ -76,26 +88,47 @@ impl PlacementHistory {
         target: [bool; 2],
     ) -> [f32; 2] {
         let frame = self.frame;
-        let states = self.states.entry(key(layer, feature)).or_default();
+        let any_target = target[0] || target[1];
+        let hash = feature_hash(feature);
+        if !any_target {
+            let Some(layer_states) = self.states.get(layer.style_layer_id.as_str()) else {
+                return [0.0; 2];
+            };
+            if !layer_states.contains_key(&hash) {
+                return [0.0; 2];
+            }
+        }
+        let states = self
+            .states
+            .entry(layer.style_layer_id.clone())
+            .or_default()
+            .entry(hash)
+            .or_default();
         // A state a same-tile feature already took this frame belongs to that feature, so a
         // second feature of the tile with the same key is tracked separately.
         let existing = states.iter().position(|state| {
             matches(state, layer.coords, feature)
                 && !(state.claimed == frame && state.claimed_by == layer.coords)
         });
-        let index = existing.unwrap_or_else(|| {
-            states.push(State {
-                position: position(layer.coords, feature),
-                zoom: u8::from(layer.coords.z),
-                opacity: [0.0; 2],
-                target,
-                last_seen: self.now,
-                claimed: frame.wrapping_sub(1),
-                claimed_by: layer.coords,
-                anchor: None,
-            });
-            states.len() - 1
-        });
+        let Some(index) = existing.or_else(|| {
+            any_target.then(|| {
+                states.push(State {
+                    text: feature.str.clone(),
+                    id: feature.data.id,
+                    position: position(layer.coords, feature),
+                    zoom: u8::from(layer.coords.z),
+                    opacity: [0.0; 2],
+                    target,
+                    last_seen: self.now,
+                    claimed: frame.wrapping_sub(1),
+                    claimed_by: layer.coords,
+                    anchor: None,
+                });
+                states.len() - 1
+            })
+        }) else {
+            return [0.0; 2];
+        };
         let state = &mut states[index];
         // A label repeated across tiles is drawn once, so a parent and child that are both
         // visible do not double up.
@@ -126,7 +159,8 @@ impl PlacementHistory {
         feature: &Feature,
     ) -> Option<usize> {
         self.states
-            .get(&key(layer, feature))?
+            .get(layer.style_layer_id.as_str())?
+            .get(&feature_hash(feature))?
             .iter()
             .find(|state| matches(state, layer.coords, feature))?
             .anchor
@@ -144,7 +178,8 @@ impl PlacementHistory {
         let frame = self.frame;
         if let Some(state) = self
             .states
-            .get_mut(&key(layer, feature))
+            .get_mut(layer.style_layer_id.as_str())
+            .and_then(|layer_states| layer_states.get_mut(&feature_hash(feature)))
             .and_then(|states| {
                 states.iter_mut().find(|state| {
                     state.claimed == frame
@@ -160,12 +195,11 @@ impl PlacementHistory {
     }
 }
 
-fn key(layer: &SymbolLayerData, feature: &Feature) -> Key {
-    Key {
-        layer: layer.style_layer_id.clone(),
-        text: feature.str.clone(),
-        id: feature.data.id,
-    }
+fn feature_hash(feature: &Feature) -> u64 {
+    let mut hasher = FxHasher::default();
+    feature.str.hash(&mut hasher);
+    feature.data.id.hash(&mut hasher);
+    hasher.finish()
 }
 fn position(tile: WorldTileCoords, feature: &Feature) -> [f64; 2] {
     let scale = 2_f64.powi(i32::from(u8::from(tile.z)));
@@ -175,6 +209,9 @@ fn position(tile: WorldTileCoords, feature: &Feature) -> [f64; 2] {
     ]
 }
 fn matches(state: &State, tile: WorldTileCoords, feature: &Feature) -> bool {
+    if state.id != feature.data.id || state.text != feature.str {
+        return false;
+    }
     let point = position(tile, feature);
     let tolerance = 8.0 / (4096.0 * 2_f64.powi(i32::from(state.zoom.min(u8::from(tile.z)))));
     let dx = (point[0] - state.position[0] + 0.5).rem_euclid(1.0) - 0.5;

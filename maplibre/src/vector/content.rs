@@ -66,8 +66,7 @@ pub(crate) fn accept_vector(world: &mut World, bucket: AvailableVectorLayerBucke
         return;
     }
     let uploaded = matches!(world.resources.get::<Eventually<VectorBufferPool>>(),
-        Some(Eventually::Initialized(pool)) if pool.get_loaded_style_layers_at(coords)
-            .is_some_and(|layers| layers.contains(bucket.style_layer_id.as_str())));
+        Some(Eventually::Initialized(pool)) if pool.has_layer(coords, &bucket.style_layer_id));
     let clock = world.resources.get_or_init_mut::<ContentClock>();
     clock.0 = clock.0.wrapping_add(1);
     let revision = clock.0;
@@ -114,8 +113,7 @@ pub(crate) fn accept_symbols(world: &mut World, bucket: SymbolLayerData) {
         return;
     }
     let uploaded = matches!(world.resources.get::<Eventually<SymbolBufferPool>>(),
-        Some(Eventually::Initialized(pool)) if pool.get_loaded_style_layers_at(coords)
-            .is_some_and(|layers| layers.contains(bucket.style_layer_id.as_str())));
+        Some(Eventually::Initialized(pool)) if pool.has_layer(coords, &bucket.style_layer_id));
     ensure(&mut world.tiles, coords);
     if let Some((layers, pending)) = world
         .tiles

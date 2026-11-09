@@ -48,7 +48,10 @@ fn main(
     // one above; GL JS interpolates between the two by the zoom past the first.
     let overscale = floor(edge_and_next.y / NEXT_ZOOM_CODE_SPAN);
     let rise = edge_and_next.y - overscale * NEXT_ZOOM_CODE_SPAN - 0.5 * NEXT_ZOOM_CODE_SPAN;
-    let zoom_blend = clamp(-log2(zoom_factor) - overscale, 0.0, 1.0);
+    let default_blend = clamp(-log2(zoom_factor) - overscale, 0.0, 1.0);
+    let top_blend = select(default_blend, paint.w - 1.0, paint.w >= 1.0);
+    let base_blend = select(default_blend, light_position.w - 1.0, light_position.w >= 1.0);
+    let zoom_blend = select(base_blend, top_blend, top > 0.5);
     let z = select(base_in, height, top > 0.5) + rise * zoom_blend;
     let roof = select(height, z, top > 0.5);
     let base = select(z, base_in, top > 0.5);

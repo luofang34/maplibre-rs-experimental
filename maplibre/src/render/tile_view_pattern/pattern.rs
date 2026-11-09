@@ -143,17 +143,19 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
             sources.of_kind(TileKind::Vector),
             crate::vector::UploadedVectorGeometry::for_world(world),
         );
+        let vector_max_zoom = vector_availability.1.max_zoom;
 
         for seen in view_region.copies() {
             let Some((coords, wrap)) = seen.wrapped() else {
                 continue;
             };
-            let mut vector = source_shapes(
+            let mut vector = source_shapes_bounded(
                 &vector_availability,
                 coords,
                 zoom,
                 world,
                 vector_parents.entry(wrap).or_default(),
+                vector_max_zoom,
             );
             vector.for_each_mut(&mut |shape| shape.wrapped(wrap, zoom));
             let raster = covering
@@ -363,9 +365,38 @@ fn source_shapes<T: HasTile>(
     world: &World,
     used_parents: &mut HashSet<WorldTileCoords>,
 ) -> SourceShapes {
-    match super::coverage::loaded_cover(container, coords, world)
-        .or_else(|| container.get_available_children(coords, world, CHILDREN_SEARCH_DEPTH))
-    {
+    source_shapes_bounded(container, coords, zoom, world, used_parents, None)
+}
+
+fn source_shapes_bounded<T: HasTile>(
+    container: &T,
+    coords: WorldTileCoords,
+    zoom: Zoom,
+    world: &World,
+    used_parents: &mut HashSet<WorldTileCoords>,
+    max_zoom: Option<u8>,
+) -> SourceShapes {
+    let max_child_depth = max_zoom.map_or(usize::MAX, |max_z| {
+        usize::from(max_z.saturating_sub(u8::from(coords.z)))
+    });
+    let cover = if container.has_tile(coords, world) {
+        Some(vec![coords])
+    } else {
+        container
+            .get_complete_children(
+                coords,
+                world,
+                COMPLETE_CHILDREN_SEARCH_DEPTH.min(max_child_depth),
+            )
+            .or_else(|| {
+                container
+                    .get_available_parent(coords, world)
+                    .map(|parent| vec![parent])
+            })
+    };
+    match cover.or_else(|| {
+        container.get_available_children(coords, world, CHILDREN_SEARCH_DEPTH.min(max_child_depth))
+    }) {
         Some(tiles) => selected_shapes(coords, tiles, zoom, used_parents),
         None => SourceShapes::None,
     }

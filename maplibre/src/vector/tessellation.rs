@@ -316,21 +316,8 @@ where
         if let Some(buffer) = options.clip_buffer {
             path = extrusion::clipped(&path, buffer);
         }
-        let evaluate = |property: &Option<crate::style::layer::StyleProperty<f32>>, zoom| {
-            property
-                .as_ref()
-                .and_then(|property| property.evaluate_for(&self.feature_properties, zoom))
-                .unwrap_or(0.0)
-        };
-        // Evaluated at the tile's zoom and the one above, which the shader blends between.
-        let heights = extrusion::ExtrusionHeights {
-            // GL JS raises a negative base or height to the ground.
-            height: evaluate(&options.height, self.zoom).max(0.0),
-            base: evaluate(&options.base, self.zoom).max(0.0),
-            height_next: evaluate(&options.height, self.zoom + 1.0).max(0.0),
-            base_next: evaluate(&options.base, self.zoom + 1.0).max(0.0),
-            overscale: options.overscale,
-        };
+        let heights =
+            extrusion::ExtrusionHeights::for_feature(options, &self.feature_properties, self.zoom);
         let subdivision = crate::projection::globe::subdivision::FillSubdivisionOptions {
             granularity: self.subdivision_granularity,
             clip_x_to_tile: self.clip_x_to_tile,

@@ -712,7 +712,7 @@ pub fn set_pitch_keeping_center(view_state: &mut ViewState, pitch: impl Into<Rad
 
 /// Rotates camera bearing by `delta` around the ground point under `cursor` (falling back to
 /// the viewport center when the cursor is off the surface).
-fn rotate_bearing_around_cursor(
+pub(super) fn rotate_bearing_around_cursor(
     style: &maplibre::style::Style,
     view_state: &mut ViewState,
     cursor: Option<Vector2<f64>>,

@@ -69,6 +69,39 @@ pub struct ExtrusionHeights {
 }
 
 impl ExtrusionHeights {
+    /// Evaluates a feature's heights at the two zoom stops of a two-stop zoom ramp, or else at
+    /// `zoom` and `zoom + 1.0`.
+    pub fn for_feature(
+        options: &ExtrusionOptions,
+        properties: &crate::style::expression::FeatureProperties,
+        zoom: f64,
+    ) -> Self {
+        let evaluate = |property: &Option<StyleProperty<f32>>, z| {
+            property
+                .as_ref()
+                .and_then(|property| property.evaluate_for(properties, z))
+                .unwrap_or(0.0)
+                .max(0.0)
+        };
+        let (hz0, hz1) = options
+            .height
+            .as_ref()
+            .and_then(|p| p.zoom_interpolation_bounds())
+            .unwrap_or((zoom, zoom + 1.0));
+        let (bz0, bz1) = options
+            .base
+            .as_ref()
+            .and_then(|p| p.zoom_interpolation_bounds())
+            .unwrap_or((zoom, zoom + 1.0));
+        Self {
+            height: evaluate(&options.height, hz0),
+            base: evaluate(&options.base, bz0),
+            height_next: evaluate(&options.height, hz1),
+            base_next: evaluate(&options.base, bz1),
+            overscale: options.overscale,
+        }
+    }
+
     /// Heights that do not change with zoom, on a tile drawn at its own zoom.
     #[cfg(test)]
     pub fn constant(base: f32, height: f32) -> Self {

@@ -14,9 +14,18 @@ pub(in crate::sdf::collision_system) fn write_feature_metadata(
     (paint, zoom, metadata): (
         &crate::style::layer::SymbolPaint,
         f64,
-        &mut [SDFShaderFeatureMetadata],
+        &mut Vec<SDFShaderFeatureMetadata>,
     ),
 ) {
+    if opacity == [0.0, 0.0] {
+        return;
+    }
+    if metadata.is_empty() && !layer.buffer.buffer.vertices.is_empty() {
+        metadata.resize(
+            layer.buffer.buffer.vertices.len(),
+            SDFShaderFeatureMetadata::default(),
+        );
+    }
     let properties = &feature.data.properties;
     let styles = ["text", "icon"].map(|prefix| feature_style(paint, prefix, properties, zoom));
     let fitted = paint

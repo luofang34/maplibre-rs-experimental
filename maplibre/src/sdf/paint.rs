@@ -129,9 +129,26 @@ pub(crate) fn feature_style(
     properties: &FeatureProperties,
     zoom: f64,
 ) -> [[f32; 4]; 3] {
-    let color = |name: &str, fallback: [f32; 4]| {
-        let full_name = format!("{prefix}-{name}");
-        if let Some(prop) = paint.compiled_property::<csscolorparser::Color>(&full_name) {
+    let is_text = prefix == "text";
+    let (color_name, halo_color_name, halo_width_name, halo_blur_name, opacity_name) = if is_text {
+        (
+            "text-color",
+            "text-halo-color",
+            "text-halo-width",
+            "text-halo-blur",
+            "text-opacity",
+        )
+    } else {
+        (
+            "icon-color",
+            "icon-halo-color",
+            "icon-halo-width",
+            "icon-halo-blur",
+            "icon-opacity",
+        )
+    };
+    let color = |full_name: &str, fallback: [f32; 4]| {
+        if let Some(prop) = paint.compiled_property::<csscolorparser::Color>(full_name) {
             let res = if prop.is_feature_constant() {
                 prop.evaluate_at_zoom(zoom)
             } else {
@@ -141,9 +158,8 @@ pub(crate) fn feature_style(
         }
         fallback
     };
-    let number = |name: &str, fallback: f32| {
-        let full_name = format!("{prefix}-{name}");
-        if let Some(prop) = paint.compiled_property::<f32>(&full_name) {
+    let number = |full_name: &str, fallback: f32| {
+        if let Some(prop) = paint.compiled_property::<f32>(full_name) {
             let res = if prop.is_feature_constant() {
                 prop.evaluate_at_zoom(zoom)
             } else {
@@ -153,7 +169,7 @@ pub(crate) fn feature_style(
         }
         fallback
     };
-    let size = if prefix == "text" {
+    let size = if is_text {
         if let Some(prop) = &paint.text_size {
             if prop.is_feature_constant() {
                 prop.evaluate_at_zoom(zoom).unwrap_or(16.0)
@@ -164,16 +180,16 @@ pub(crate) fn feature_style(
             16.0
         }
     } else {
-        number("size", 1.0)
+        number("icon-size", 1.0)
     };
     [
-        color("color", [0.0, 0.0, 0.0, 1.0]),
-        color("halo-color", [0.0; 4]),
+        color(color_name, [0.0, 0.0, 0.0, 1.0]),
+        color(halo_color_name, [0.0; 4]),
         [
             size,
-            number("halo-width", 0.0),
-            number("halo-blur", 0.0),
-            number("opacity", 1.0),
+            number(halo_width_name, 0.0),
+            number(halo_blur_name, 0.0),
+            number(opacity_name, 1.0),
         ],
     ]
 }

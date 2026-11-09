@@ -73,7 +73,7 @@ impl InputController {
             pinch_handler: PinchHandler::default(),
             pan_handler: PanHandler::default(),
             zoom_handler: ZoomHandler::new(zoom_sensitivity),
-            camera_handler: CameraHandler::new(sensitivity),
+            camera_handler: CameraHandler::new(sensitivity * 3.2),
             shift_handler: ShiftHandler::new(speed, sensitivity),
             query_handler: QueryHandler::new(),
             debug_handler: DebugHandler::default(),
@@ -293,6 +293,10 @@ impl InputController {
                     };
                     if !is_discrete_wheel {
                         if self.navigation_state.ctrl_held {
+                            #[cfg(target_arch = "wasm32")]
+                            if crate::web::is_safari_gesture_active() {
+                                return true;
+                            }
                             // Browsers encode trackpad two-finger pinch as ctrlKey + wheel
                             // with deltaY = -magnification * 100.0 (winit negates deltaY into pos.y).
                             self.zoom_handler.process_web_pinch_wheel(dy * 0.01);
@@ -396,12 +400,10 @@ impl InputController {
                         }
                     }
                     (MouseButton::Middle, ElementState::Pressed) => {
-                        if self.navigation_state.pointer_profile == PointerProfile::Rts {
-                            // In RTS mode (C&C Generals style), middle-drag orbits both bearing and pitch.
-                            self.camera_handler.begin_orbit(false);
-                        } else {
-                            self.camera_handler.process_mouse_key_press(button, state);
-                        }
+                        self.zoom_handler.cancel_pinch_inertia();
+                        // Pressing the mouse wheel and moving rotates bearing (horizontal)
+                        // and pitch (vertical) across both Map and RTS profiles.
+                        self.camera_handler.begin_orbit(false);
                     }
                     (MouseButton::Middle, ElementState::Released) => {
                         self.camera_handler.end_orbit();
@@ -428,6 +430,18 @@ pub trait UpdateState {
 impl UpdateState for InputController {
     fn update_state(&mut self, map_context: &mut MapContext, dt: Duration) {
         self.navigation_state.ensure_initialized(map_context);
+        #[cfg(target_arch = "wasm32")]
+        {
+            let (safari_pinch, safari_rotate_deg) = crate::web::take_safari_trackpad_gesture();
+            if safari_pinch.abs() > 1e-5 {
+                self.navigation_state.on_manual_pan_or_zoom();
+                self.zoom_handler.process_web_pinch_wheel(safari_pinch);
+            }
+            if safari_rotate_deg.abs() > 1e-4 {
+                self.navigation_state
+                    .process_trackpad_rotate(safari_rotate_deg);
+            }
+        }
         let initial_pitch = map_context.view_state.camera().get_pitch().0;
         let pos_before = map_context.view_state.camera().position();
         let zoom_before = map_context.view_state.zoom().value();
@@ -509,15 +523,13 @@ impl UpdateState for InputController {
             let center_elev = view_state.center_elevation();
             if view_snapshot(map_context) != before {
                 tracing::debug!(
-                    zoom_handlers = format!("{zoom_after_handlers:.2}"),
-                    pitch_handlers = format!("{pitch_after_handlers:.1}"),
-                    zoom_final = format!("{zoom_final:.2}"),
-                    pitch_final = format!("{pitch_final:.1}"),
-                    center_elev = format!("{center_elev:.1}"),
+                    ?zoom_after_handlers,
+                    ?pitch_after_handlers,
+                    ?zoom_final,
+                    ?pitch_final,
+                    ?center_elev,
                     pitch_clamped,
                     lifted,
-                    three_d = self.navigation_state.three_dimensional,
-                    auto_tilt = self.navigation_state.auto_tilt,
                     "camera frame update"
                 );
             }
@@ -543,8 +555,7 @@ impl UpdateState for InputController {
 }
 
 /// Projects a velocity-predictive [`maplibre::render::xr::PrefetchView`] ahead of the camera
-/// while panning or edge-scrolling so incoming tiles (especially at the high-zoom bottom edge
-/// of a pitched view) are fetched and draped before entering the screen.
+/// while panning or edge-scrolling so incoming tiles are fetched before entering the screen.
 fn update_velocity_prefetch_view(
     smoothed_vel: &mut Vector2<f64>,
     pos_before: cgmath::Point2<f64>,
@@ -558,8 +569,8 @@ fn update_velocity_prefetch_view(
     let zoom_after = map_context.view_state.zoom().value();
     let pos_after = map_context.view_state.camera().position();
     let dt_sec = dt.as_secs_f64();
+    let world_size = maplibre::coords::TILE_SIZE * 2_f64.powf(zoom_after);
     if dt_sec > 1e-4 && (zoom_after - zoom_before).abs() < 0.05 {
-        let world_size = maplibre::coords::TILE_SIZE * 2_f64.powf(zoom_after);
         let mut dx = pos_after.x - pos_before.x;
         if dx > world_size * 0.5 {
             dx -= world_size;
@@ -567,44 +578,31 @@ fn update_velocity_prefetch_view(
             dx += world_size;
         }
         let dy = pos_after.y - pos_before.y;
-        let step_sec = dt_sec.max(1.0 / 240.0);
-        let inst_vel = Vector2::new(dx / step_sec, dy / step_sec);
+        let inst_vel = Vector2::new(dx, dy) / dt_sec.max(1.0 / 240.0);
         let alpha = (dt_sec * 14.0).clamp(0.0, 1.0);
         *smoothed_vel = *smoothed_vel * (1.0 - alpha) + inst_vel * alpha;
     } else {
         *smoothed_vel *= 0.5;
     }
-
     let speed = smoothed_vel.magnitude();
     if speed > 25.0 {
-        let max_reach = map_context
-            .view_state
-            .width()
-            .max(map_context.view_state.height())
-            * 0.9;
+        let view = &map_context.view_state;
+        let max_reach = view.width().max(view.height()) * 0.9;
         let mut lead = *smoothed_vel * 0.80;
-        let lead_mag = lead.magnitude();
-        if lead_mag > max_reach {
-            lead *= max_reach / lead_mag;
+        if lead.magnitude() > max_reach {
+            lead *= max_reach / lead.magnitude();
         }
-        let eye = map_context.view_state.eye_position();
+        let eye = view.eye_position();
         let to_nadir = Vector2::new(eye.x - pos_after.x, eye.y - pos_after.y);
-        let nadir_dist = to_nadir.magnitude();
-        if nadir_dist > 1.0 {
-            let nadir_dir = to_nadir / nadir_dist;
-            let vel_dir = *smoothed_vel / speed;
-            let backward_alignment = vel_dir.dot(nadir_dir).max(0.0);
-            if backward_alignment > 0.0 {
-                lead += to_nadir * (0.55 * backward_alignment);
-            }
+        if to_nadir.magnitude() > 1.0 {
+            let align = (*smoothed_vel / speed).dot(to_nadir / to_nadir.magnitude());
+            lead += to_nadir * (0.55 * align.max(0.0));
         }
-        let world_size = maplibre::coords::TILE_SIZE * 2_f64.powf(zoom_after);
-        let mut ahead = map_context.view_state.clone();
-        let new_x = (pos_after.x + lead.x).rem_euclid(world_size);
-        let new_y = (pos_after.y + lead.y).clamp(0.0, world_size);
-        ahead
-            .camera_mut()
-            .move_to(cgmath::Point2::new(new_x, new_y));
+        let mut ahead = view.clone();
+        ahead.camera_mut().move_to(cgmath::Point2::new(
+            (pos_after.x + lead.x).rem_euclid(world_size),
+            (pos_after.y + lead.y).clamp(0.0, world_size),
+        ));
         map_context
             .world
             .resources

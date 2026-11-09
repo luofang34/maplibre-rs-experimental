@@ -129,8 +129,9 @@ impl CameraHandler {
             camera.set_bearing(previous + bearing);
         }
         if !self.is_middle && !lock_pitch {
+            let max_pitch = camera.max_pitch().0;
             let previous = *self.start_delta_pitch.get_or_insert(camera.get_pitch());
-            camera.set_pitch(previous + pitch);
+            camera.set_pitch(Rad((previous + pitch).0.clamp(0.0, max_pitch)));
         }
     }
 }
@@ -182,6 +183,9 @@ impl CameraHandler {
             self.start_window_position = Some(*window_position);
             self.window_position = Some(*window_position);
         } else {
+            if self.start_window_position.is_none() {
+                self.start_window_position = Some(*window_position);
+            }
             self.window_position = Some(*window_position);
         }
 
@@ -194,10 +198,12 @@ impl CameraHandler {
             match *key {
                 MouseButton::Right => {
                     self.is_active = true;
+                    self.start_window_position = self.window_position;
                 }
                 MouseButton::Middle => {
                     self.is_active = true;
                     self.is_middle = true;
+                    self.start_window_position = self.window_position;
                 }
                 _ => return false,
             }
@@ -206,7 +212,6 @@ impl CameraHandler {
             self.is_active = false;
             self.is_middle = false;
             self.start_window_position = None;
-            self.window_position = None;
             self.start_delta_pitch = None;
             self.start_delta_roll = None;
             self.start_pose = None;

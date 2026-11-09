@@ -20,14 +20,15 @@ impl LayerFrame<'_> {
             return (rectangles, [0.0; 2], 0);
         };
         // An icon stretched around the text follows it to the anchor it took.
-        let fitted = self
-            .paint
-            .text(
-                "icon-text-fit",
-                &feature.data.properties,
-                self.view_state.style_zoom().value(),
-            )
-            .is_some_and(|fit| fit != "none");
+        let fitted = self.has_icon_text_fit
+            && self
+                .paint
+                .text(
+                    "icon-text-fit",
+                    &feature.data.properties,
+                    self.view_state.style_zoom().value(),
+                )
+                .is_some_and(|fit| fit != "none");
         let scale = f64::from(self.uniforms.text[0]) / 24.0 * perspective;
         let on_map = self.uniforms.text_layout[0] > 0.5;
         let moved = |shift: &[f32; 2]| {
@@ -93,4 +94,132 @@ impl LayerFrame<'_> {
         let shift = feature.anchor_shifts[index];
         (moved(&shift), shift, index)
     }
+}
+
+pub(super) type OrderedFeature<'a> = (usize, usize, &'a crate::sdf::Feature, bool);
+
+/// Features of all `layers` in placement order: ascending `symbol-sort-key`, equal keys in tile
+/// order, and within a tile the labels that were visible first so they keep their place.
+pub(super) fn ordered_features<'a>(
+    layers: &[&'a crate::sdf::SymbolLayerData],
+    history: &super::temporal::PlacementHistory,
+) -> Vec<OrderedFeature<'a>> {
+    let mut features: Vec<_> = layers
+        .iter()
+        .enumerate()
+        .flat_map(|(position, layer)| {
+            layer
+                .features
+                .iter()
+                .enumerate()
+                .map(move |(i, feature)| (position, i, feature))
+        })
+        .map(|(position, i, feature)| {
+            (
+                position,
+                i,
+                feature,
+                history.was_visible(layers[position], feature),
+            )
+        })
+        .collect();
+    features.sort_by(|(pa, _, a, _), (pb, _, b, _)| {
+        a.data
+            .sort_key
+            .total_cmp(&b.data.sort_key)
+            .then_with(|| pa.cmp(pb))
+    });
+    features
+}
+
+/// Text, icon and per-glyph screen rectangles for `feature`.
+pub(super) fn label_boxes(
+    (layer, feature, ground): (&crate::sdf::SymbolLayerData, &crate::sdf::Feature, f32),
+    (line, upright): (&Option<crate::sdf::placement::LinePoses>, bool),
+    (view_state, projection, uniforms): (
+        &crate::render::view_state::ViewState,
+        &crate::render::projection::ShaderProjectionData,
+        &crate::sdf::paint::SymbolUniforms,
+    ),
+    anchor_clip: Option<(f64, cgmath::Vector4<f64>)>,
+) -> ([Option<[f64; 4]>; 2], Vec<[f64; 4]>) {
+    let mut rectangles = crate::sdf::placement::screen_boxes(
+        layer,
+        feature,
+        ground,
+        view_state,
+        projection,
+        uniforms,
+        anchor_clip,
+    )
+    .unwrap_or([None, None]);
+    let Some(crate::sdf::placement::LinePoses::Poses(poses)) = line else {
+        return (rectangles, Vec::new());
+    };
+    let image_sizes = feature
+        .line
+        .as_ref()
+        .map_or(&[][..], |line| &line.image_sizes[..]);
+    let glyphs = crate::sdf::placement::line_glyph_boxes(
+        layer,
+        (poses, image_sizes, upright),
+        ground,
+        view_state,
+        projection,
+        uniforms,
+    );
+    if rectangles[0].is_some() {
+        rectangles[0] = glyphs.iter().copied().reduce(|a, b| {
+            [
+                a[0].min(b[0]),
+                a[1].min(b[1]),
+                a[2].max(b[2]),
+                a[3].max(b[3]),
+            ]
+        });
+    }
+    (rectangles, glyphs)
+}
+
+pub(super) fn local_zoom_visible_from_clip(
+    clip: Option<cgmath::Vector4<f64>>,
+    view: &crate::render::view_state::ViewState,
+    limits: [f64; 2],
+) -> bool {
+    let Some(clip) = clip else {
+        return false;
+    };
+    if clip.w <= 0.0 {
+        return false;
+    }
+    let zoom = view.style_zoom().value()
+        + if view.has_external_view() {
+            view.symbol_distance_ratio(clip).log2().min(0.0)
+        } else {
+            0.0
+        };
+    zoom >= limits[0] && zoom < limits[1]
+}
+
+pub(super) fn beyond_perspective_cutoff_with_clip(
+    layer: &crate::sdf::SymbolLayerData,
+    feature: &crate::sdf::Feature,
+    ground: f32,
+    view: &crate::render::view_state::ViewState,
+    projection: &crate::render::projection::ShaderProjectionData,
+    uniforms: &crate::sdf::paint::SymbolUniforms,
+    anchor_clip: Option<(f64, cgmath::Vector4<f64>)>,
+) -> bool {
+    let height = f64::from(ground) * f64::from(uniforms.text_layout[3]);
+    if let Some((h, clip)) = anchor_clip {
+        if (h - height).abs() < 1e-6 {
+            if crate::render::projection::fixed_symbol_scale(view) {
+                return false;
+            }
+            return clip.w > 0.0 && 0.5 + 0.5 * f64::from(projection.center_clip_w) / clip.w < 0.6;
+        }
+    }
+    crate::sdf::placement::beyond_perspective_cutoff(
+        layer, feature, ground, view, projection, uniforms,
+    )
 }

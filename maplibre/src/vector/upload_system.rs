@@ -205,9 +205,7 @@ fn upload_tessellated_layer(
             let Some(bucket) = bucket else {
                 continue;
             };
-            let loaded = buffer_pool
-                .get_loaded_style_layers_at(coords)
-                .is_some_and(|layers| layers.contains(style_layer.id.as_str()));
+            let loaded = buffer_pool.has_layer(coords, &style_layer.id);
             if replacement.is_none() && loaded {
                 continue;
             }

@@ -104,6 +104,7 @@ pub(super) fn append(
     let text = paint
         .label_among(&symbol.properties, zoom, Some(&atlas.icons))
         .unwrap_or_default();
+    let text_block = super::text_layout::block(symbol, paint, zoom, atlas);
     if let Some(icon) = paint
         .text_among_images("icon-image", &symbol.properties, zoom, &atlas.icons)
         .and_then(|name| atlas.icons.get(&name))
@@ -132,13 +133,20 @@ pub(super) fn append(
             width * (1.0 - fractions[0]) + offset[0] - recentre[0],
             height * (1.0 - fractions[1]) + offset[1] - recentre[1],
         ];
-        let fitted = fit_to_text(paint, symbol, zoom, atlas, [width, height], offset);
+        let fitted = fit_to_text(
+            paint,
+            symbol,
+            zoom,
+            text_block.as_ref(),
+            [width, height],
+            offset,
+        );
         let shift = crate::sdf::translation::tile_translation(paint, "icon", zoom);
         let anchor = Point::new(symbol.anchor.x() + shift[0], symbol.anchor.y() + shift[1]);
         let rotation = paint
             .number("icon-rotate", &symbol.properties, zoom, 0.0)
             .to_radians()
-            + if super::text_layout::is_vertical(symbol, paint, zoom, atlas) {
+            + if text_block.as_ref().is_some_and(|b| b.vertical) {
                 std::f32::consts::FRAC_PI_2
             } else {
                 0.0
@@ -168,7 +176,7 @@ pub(super) fn append(
         }
     }
     let first_glyph_index = buffer.indices.len();
-    let laid = super::text_layout::append(symbol, paint, zoom, atlas, buffer);
+    let laid = super::text_layout::append_block(symbol, paint, zoom, text_block.as_ref(), buffer);
     let glyph_offsets = laid.centres;
     if start == buffer.indices.len() {
         return;
@@ -205,14 +213,12 @@ pub(super) fn append(
     // a few pixels beyond it.
     // A label of images alone, such as a row of road shields along a road, has no glyphs to
     // measure, so its box is the layout's.
+    let block_extent = super::text_layout::extent_from_block(text_block.as_ref());
     if parts[0].is_none() {
         let image = buffer.vertices[first_vertex..]
             .iter()
             .find(|vertex| vertex.a_data[2] == 3);
-        if let (Some(vertex), Some(extent)) = (
-            image,
-            super::text_layout::extent(symbol, paint, zoom, atlas),
-        ) {
+        if let (Some(vertex), Some(extent)) = (image, block_extent) {
             parts[0] = Some(crate::sdf::placement_geometry::SymbolBounds {
                 bounds: extent.map(f64::from),
                 height: f64::from(f32::from_bits(vertex.a_pixeloffset[2] as u32)),
@@ -222,9 +228,7 @@ pub(super) fn append(
         }
     }
     if let (Some(text_part), None) = (&mut parts[0], &symbol.line) {
-        if let Some([left, top, right, bottom]) =
-            super::text_layout::extent(symbol, paint, zoom, atlas)
-        {
+        if let Some([left, top, right, bottom]) = block_extent {
             text_part.bounds = [left, top, right, bottom].map(f64::from);
         }
     }
@@ -239,7 +243,12 @@ pub(super) fn append(
         bbox,
         indices: start..buffer.indices.len(),
         text_anchor: anchor,
-        anchor_shifts: super::text_layout::variable_shifts(symbol, paint, zoom, atlas),
+        anchor_shifts: super::text_layout::variable_shifts_from_block(
+            symbol,
+            paint,
+            zoom,
+            text_block.as_ref(),
+        ),
         text_sets: laid.sets,
         anchor_sets: laid.anchor_sets,
         text_colors: laid.colors,
@@ -266,7 +275,7 @@ fn fit_to_text(
     paint: &SymbolPaint,
     symbol: &CollectedSymbol,
     zoom: f64,
-    atlas: &SymbolAtlas,
+    text_block: Option<&super::text_layout::Block<'_>>,
     [icon_width, icon_height]: [f32; 2],
     offset: [f32; 2],
 ) -> Option<[f32; 4]> {
@@ -282,7 +291,7 @@ fn fit_to_text(
     let scale = text_size / 24.0;
     // A vertical label's icon is fitted before the symbol turns.
     let [left, top, right, bottom] =
-        super::text_layout::layout_extent(symbol, paint, zoom, atlas)?.map(|edge| edge * scale);
+        super::text_layout::layout_extent_from_block(text_block)?.map(|edge| edge * scale);
     let padding = paint
         .properties
         .get("icon-text-fit-padding")

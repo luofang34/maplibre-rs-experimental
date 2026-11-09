@@ -65,6 +65,19 @@ fn main(
     @location(13) style_halo: vec4<f32>,
     @location(15) style_metrics: vec4<f32>,
 ) -> VertexOutput {
+    if feature.x <= 0.0 || style_metrics.w <= 0.0 {
+        return VertexOutput(
+            vec2<f32>(0.0),
+            a_data.z,
+            0.0,
+            0.0,
+            -1.0,
+            vec4<f32>(0.0),
+            vec4<f32>(0.0),
+            vec4<f32>(0.0),
+            vec4<f32>(0.0, 0.0, 0.0, 1.0),
+        );
+    }
     let has_pose = pose.w > 0.5;
     // An image in text (kind three) is laid out with the text and drawn as an icon.
     let is_text = a_data.z == 0u || a_data.z == 3u;

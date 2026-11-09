@@ -270,6 +270,14 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         })
     }
 
+    pub fn has_layer(&self, coords: WorldTileCoords, style_layer_id: &str) -> bool {
+        self.index.get_layers(coords).is_some_and(|layers| {
+            layers
+                .iter()
+                .any(|entry| entry.style_layer.id == style_layer_id)
+        })
+    }
+
     #[tracing::instrument(skip_all)]
     pub fn update_layer_metadata(&self, queue: &Q, entry: &IndexEntry, layer_metadata: TM) {
         let layer_metadata_stride = size_of::<TM>() as wgpu::BufferAddress; // TODO: deduplicate

@@ -2,7 +2,7 @@
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
-    hash::{DefaultHasher, Hash, Hasher},
+    hash::{Hash, Hasher},
 };
 
 use layer_pass::place_layer;
@@ -57,16 +57,20 @@ impl CollisionSystem {
 }
 
 fn opacity_fingerprint(metadata: &[SDFShaderFeatureMetadata]) -> u64 {
-    let mut hash = DefaultHasher::new();
-    for entry in metadata {
-        entry.opacity.to_bits().hash(&mut hash);
-        entry.elevation.to_bits().hash(&mut hash);
-        entry.pose.map(f32::to_bits).hash(&mut hash);
-        entry.color.map(f32::to_bits).hash(&mut hash);
-        entry.halo.map(f32::to_bits).hash(&mut hash);
-        entry.params.map(f32::to_bits).hash(&mut hash);
+    let mut hash = rustc_hash::FxHasher::default();
+    let mut non_empty = false;
+    for (i, entry) in metadata.iter().enumerate() {
+        if entry.opacity != 0.0 || entry.elevation != 0.0 || entry.pose != [0.0; 4] {
+            non_empty = true;
+            i.hash(&mut hash);
+            bytemuck::bytes_of(entry).hash(&mut hash);
+        }
     }
-    hash.finish()
+    if non_empty {
+        hash.finish()
+    } else {
+        0
+    }
 }
 
 impl System for CollisionSystem {
@@ -324,7 +328,7 @@ impl CollisionSystem {
             placed_layers.push((members, metadata));
         }
         for (members, metadata) in placed_layers {
-            for (layer, metadata) in members.into_iter().zip(metadata) {
+            for (layer, mut metadata) in members.into_iter().zip(metadata) {
                 let key = (layer.coords, layer.style_layer_id.clone());
                 let Some(generation) = allocation(world, layer.coords, &layer.style_layer_id)
                 else {
@@ -332,6 +336,12 @@ impl CollisionSystem {
                 };
                 let fingerprint = opacity_fingerprint(&metadata);
                 if self.uploaded.get(&key) != Some(&(generation, fingerprint)) {
+                    if metadata.is_empty() && !layer.buffer.buffer.vertices.is_empty() {
+                        metadata.resize(
+                            layer.buffer.buffer.vertices.len(),
+                            SDFShaderFeatureMetadata::default(),
+                        );
+                    }
                     updates.push((key.clone(), metadata));
                     self.uploaded.insert(key, (generation, fingerprint));
                 }

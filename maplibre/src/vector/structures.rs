@@ -83,6 +83,19 @@ pub(crate) fn for_frame(
     style: &Style,
     sources: &[WorldTileCoords],
 ) -> (Arc<Vec<SpatialBuffer>>, bool) {
+    if dem_source(style).is_none() {
+        if let Some(cached) = world.resources.get::<CachedProfiles>() {
+            if cached.key == 0 {
+                return (cached.buffers.clone(), false);
+            }
+        }
+        let buffers = Arc::new(Vec::new());
+        world.resources.insert(CachedProfiles {
+            key: 0,
+            buffers: buffers.clone(),
+        });
+        return (buffers, false);
+    }
     let key = fingerprint(&world.tiles, style, sources);
     if let Some(cached) = world.resources.get::<CachedProfiles>() {
         if cached.key == key {

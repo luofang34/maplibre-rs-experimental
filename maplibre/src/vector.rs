@@ -146,11 +146,10 @@ pub fn geometry_uploaded(coords: WorldTileCoords, world: &World) -> bool {
             if !pool.has_capacity() {
                 return true;
             }
-            let loaded = pool.get_loaded_style_layers_at(coords).unwrap_or_default();
             buckets.layers.iter().all(|layer| match layer {
                 VectorLayerBucket::AvailableLayer(bucket) => {
                     bucket.buffer.buffer.indices.is_empty()
-                        || loaded.contains(bucket.style_layer_id.as_str())
+                        || pool.has_layer(coords, &bucket.style_layer_id)
                 }
                 VectorLayerBucket::Missing(_) => true,
             })
@@ -162,15 +161,32 @@ pub fn geometry_uploaded(coords: WorldTileCoords, world: &World) -> bool {
 /// Checks that a tile's vector geometry has reached the active GPU buffer pool.
 pub(crate) struct UploadedVectorGeometry {
     check_gpu: bool,
+    pub(crate) max_zoom: Option<u8>,
 }
 
 impl UploadedVectorGeometry {
     pub(crate) fn for_world(world: &World) -> Self {
-        let check_gpu = matches!(
-            world.resources.get::<Eventually<VectorBufferPool>>(),
-            Some(Eventually::Initialized(pool)) if pool.has_capacity()
-        );
-        Self { check_gpu }
+        let (check_gpu, pool_max) = match world.resources.get::<Eventually<VectorBufferPool>>() {
+            Some(Eventually::Initialized(pool)) if pool.has_capacity() => {
+                (true, pool.index().max_zoom())
+            }
+            _ => (false, None),
+        };
+        let tiles_max = world
+            .tiles
+            .tiles
+            .values()
+            .map(|tile| u8::from(tile.coords.z))
+            .max();
+        let max_zoom = if check_gpu {
+            Some(pool_max.unwrap_or(0).max(tiles_max.unwrap_or(0)))
+        } else {
+            None
+        };
+        Self {
+            check_gpu,
+            max_zoom,
+        }
     }
 }
 

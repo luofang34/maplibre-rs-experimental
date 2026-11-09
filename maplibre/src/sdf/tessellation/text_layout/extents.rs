@@ -1,7 +1,6 @@
 //! The boxes a label takes: its layout extent, how far its variable anchors move it, and its
 //! width without wrapping.
 use super::{
-    block,
     styles::{char_styles, line_width},
     vertical,
 };
@@ -18,17 +17,17 @@ use crate::{
 
 /// How far the label moves, in layout pixels, when it takes each of its variable anchors
 /// instead of the first; empty unless the label has several.
-pub(in crate::sdf::tessellation) fn variable_shifts(
+pub(in crate::sdf::tessellation) fn variable_shifts_from_block(
     symbol: &CollectedSymbol,
     paint: &SymbolPaint,
     zoom: f64,
-    atlas: &SymbolAtlas,
+    block: Option<&super::Block<'_>>,
 ) -> Vec<[f32; 2]> {
     let anchors = variable_anchors(paint);
     if anchors.len() < 2 {
         return Vec::new();
     }
-    let Some(block) = block(symbol, paint, zoom, atlas) else {
+    let Some(block) = block else {
         return Vec::new();
     };
     let corner = |anchor: &str| {
@@ -67,25 +66,12 @@ pub(in crate::sdf::tessellation) fn both_orientations(
     vertical::orientations(paint)
 }
 
-/// Whether the label is written top to bottom, which turns the whole symbol a quarter clockwise.
-pub(in crate::sdf::tessellation) fn is_vertical(
-    symbol: &CollectedSymbol,
-    paint: &SymbolPaint,
-    zoom: f64,
-    atlas: &SymbolAtlas,
-) -> bool {
-    block(symbol, paint, zoom, atlas).is_some_and(|block| block.vertical)
-}
-
 /// The label's layout box `[left, top, right, bottom]` before a vertical label turns, in layout
 /// pixels.
-pub(in crate::sdf::tessellation) fn layout_extent(
-    symbol: &CollectedSymbol,
-    paint: &SymbolPaint,
-    zoom: f64,
-    atlas: &SymbolAtlas,
+pub(in crate::sdf::tessellation) fn layout_extent_from_block(
+    block: Option<&super::Block<'_>>,
 ) -> Option<[f32; 4]> {
-    let block = block(symbol, paint, zoom, atlas)?;
+    let block = block?;
     if block.max_line <= 0.0 {
         return None;
     }
@@ -95,13 +81,10 @@ pub(in crate::sdf::tessellation) fn layout_extent(
 }
 
 /// The label's layout box `[left, top, right, bottom]` around the anchor, in layout pixels.
-pub(in crate::sdf::tessellation) fn extent(
-    symbol: &CollectedSymbol,
-    paint: &SymbolPaint,
-    zoom: f64,
-    atlas: &SymbolAtlas,
+pub(in crate::sdf::tessellation) fn extent_from_block(
+    block: Option<&super::Block<'_>>,
 ) -> Option<[f32; 4]> {
-    let block = block(symbol, paint, zoom, atlas)?;
+    let block = block?;
     if block.max_line <= 0.0 {
         return None;
     }
