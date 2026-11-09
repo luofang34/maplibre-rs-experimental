@@ -57,14 +57,14 @@ pub(super) fn metadata_for_layer(
     }
     if let Some(LayerPaint::Circle(paint)) = &style_layer.paint {
         let zoom = f64::from(zoom);
-        layer_metadata.stroke_color = paint.stroke_color_rgba();
+        layer_metadata.stroke_color = paint.stroke_color_at(zoom);
         // Fill opacity is already folded into each feature's colour alpha.
         layer_metadata.circle_params =
             [1.0, paint.stroke_opacity_at(zoom), paint.blur_at(zoom), 0.0];
         layer_metadata.circle_flags = [
             f32::from(paint.circle_pitch_scale == CirclePitchScale::Map),
             f32::from(paint.circle_pitch_alignment == CirclePitchAlignment::Map),
-            0.0,
+            f32::from(paint.stroke_color_per_feature().is_some()),
             0.0,
         ];
     }

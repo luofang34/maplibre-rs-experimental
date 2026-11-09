@@ -107,7 +107,6 @@ impl Style {
 
 #[derive(Clone, Copy)]
 enum Evaluation {
-    Constant,
     Zoom,
     Feature,
     Elevation,
@@ -224,10 +223,7 @@ impl LayerValidation<'_> {
             );
         } else if matches!(
             evaluation,
-            Evaluation::Constant
-                | Evaluation::Elevation
-                | Evaluation::Density
-                | Evaluation::Progress
+            Evaluation::Elevation | Evaluation::Density | Evaluation::Progress
         ) && !property.is_zoom_constant()
         {
             self.unsupported(name, "this rendering path requires a constant value");

@@ -15,6 +15,7 @@ fn a_stroke_opacity_by_feature_rides_the_corner_code_and_leaves_the_ground_slot_
         stroke_width_default: 0.0,
         blur: None,
         stroke_opacity: Some(StyleProperty::parse(&serde_json::json!(["get", "edge"]))),
+        stroke_color: None,
         zoom: 3.0,
         grid: true,
     });

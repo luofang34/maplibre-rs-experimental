@@ -18,6 +18,7 @@ use crate::{
 };
 
 mod anchor_depth;
+mod circle_stroke;
 mod curve;
 mod dem;
 mod geojson;

@@ -95,7 +95,8 @@ pub struct ShaderLayerMetadata {
     pub stroke_color: Vec4f32,
     /// Circle opacity, stroke opacity and blur ratio; the last slot is padding.
     pub circle_params: Vec4f32,
-    /// Circle pitch-scale (x) and pitch-alignment (y), 1.0 for `map`; the rest is padding.
+    /// Circle pitch-scale (x) and pitch-alignment (y), 1.0 for `map`; z is 1.0 when each
+    /// feature's colour packs its fill and stroke colours together; w is padding.
     pub circle_flags: Vec4f32,
 }
 
