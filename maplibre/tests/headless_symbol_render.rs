@@ -195,3 +195,57 @@ async fn a_label_under_a_host_obstacle_is_not_placed() {
     );
     std::fs::remove_file(FRAME).ok();
 }
+
+#[tokio::test]
+#[ignore = "renders through the GPU adapter of the machine running the test"]
+async fn a_query_measures_in_logical_pixels_at_a_pixel_ratio_of_two() {
+    let style: Style = serde_json::from_value(serde_json::json!({
+        "version": 8,
+        "center": [0.0, 0.0],
+        "zoom": 0,
+        "sources": {
+            "chart": {"type": "vector", "tiles": ["http://127.0.0.1:1/{z}/{x}/{y}.mvt"]}
+        },
+        "layers": [
+            {
+                "id": "label", "type": "symbol", "source": "chart",
+                "source-layer": "route_points", "layout": {"text-field": "{label}"}
+            }
+        ]
+    }))
+    .expect("style parses");
+    let label = style.layers[0].clone();
+    let (kernel, renderer) = create_headless_renderer(SIZE, SIZE, None)
+        .await
+        .expect("headless renderer");
+    let plugins: Vec<Box<dyn Plugin<_>>> = vec![
+        Box::new(RenderPlugin),
+        Box::new(VectorPlugin::<DefaultVectorTransferables>::default()),
+        Box::new(SdfPlugin::<DefaultVectorTransferables>::default()),
+        Box::new(HeadlessPlugin::new(true)),
+    ];
+    let mut map = HeadlessMap::new(style, renderer, kernel, plugins).expect("headless map");
+    map.set_pixel_ratio(2.0);
+    let layers = process_tile_layers(
+        &hex_bytes(LABELLED_POINT_TILE),
+        &label,
+        WorldTileCoords::default(),
+        ProjectionType::Mercator,
+    )
+    .expect("tile processes");
+    map.render_tile(layers).expect("frame renders");
+    std::fs::remove_file(FRAME).ok();
+
+    // The page's CSS pixels: a browser host passes pointer positions through unscaled.
+    let logical_centre = [f64::from(SIZE) / 4.0; 2];
+    assert_eq!(
+        map.query_rendered_symbols(logical_centre, None).len(),
+        1,
+        "the label sits at the centre of the logical viewport"
+    );
+    let physical_centre = [f64::from(SIZE) / 2.0; 2];
+    assert!(
+        map.query_rendered_symbols(physical_centre, None).is_empty(),
+        "the physical centre is the logical viewport's far corner"
+    );
+}

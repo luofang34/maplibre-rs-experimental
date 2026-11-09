@@ -3,6 +3,7 @@ import {initializeWasm} from "./wasm-instance.mjs";
 import {Spector} from "spectorjs"
 import {checkRequirements, checkWasmFeatures, ensureWebGpuCompatibility} from "./browser";
 import {preventDefaultTouchActions} from "./canvas";
+import {MapLibreMap} from "./map";
 // @ts-ignore esbuild plugin is handling this
 import MultithreadedPoolWorker from './multithreaded/multithreaded-pool.worker.js';
 // @ts-ignore esbuild plugin is handling this
@@ -17,8 +18,11 @@ import PoolWorker from './singlethreaded/pool.worker.js';
  * is `(id, pixelRatio) => image | Promise<image>` and an image is `{width, height, data,
  * pixelRatio?, anchor?}`, `null` or `{status: "absent" | "unavailable" | "failed"}`. A
  * multithreaded build shares one registry with Rust providers instead.
+ *
+ * Resolves to the running map on the page's `maplibre` canvas, or to `undefined` when the
+ * browser lacks what the map needs, which is reported to the user instead.
  */
-export const startMapLibre = async (wasmPath: string | undefined, workerPath: string | undefined, styleJson?: string, imageProviderModules: string[] = []) => {
+export const startMapLibre = async (wasmPath: string | undefined, workerPath: string | undefined, styleJson?: string, imageProviderModules: string[] = []): Promise<MapLibreMap | undefined> => {
     await checkWasmFeatures()
 
     let message = checkRequirements();
@@ -44,13 +48,14 @@ export const startMapLibre = async (wasmPath: string | undefined, workerPath: st
         if (imageProviderModules.length > 0) {
             console.warn("JavaScript image providers need a single-threaded build; register Rust providers through image_providers() instead.")
         }
-        await maplibre.run_maplibre(() => {
+        const controller = await maplibre.run_maplibre(() => {
             return workerPath ? new Worker(workerPath, {
                 type: 'module',
             }) : MultithreadedPoolWorker();
         }, styleJson);
+        return new MapLibreMap(controller, mapCanvas())
     } else {
-        await maplibre.run_maplibre((received_ptr: number) => {
+        const controller = await maplibre.run_maplibre((received_ptr: number) => {
             let worker: Worker = workerPath ? new Worker(workerPath, {
                 type: 'module',
             }) : PoolWorker();  // Setting a "name" for this webworker is not yet supported, because it needs support from esbuild-plugin-inline-worker
@@ -79,5 +84,11 @@ export const startMapLibre = async (wasmPath: string | undefined, workerPath: st
 
             return worker;
         }, styleJson);
+        return new MapLibreMap(controller, mapCanvas())
     }
 }
+
+/** The canvas `run_maplibre` draws on. */
+const mapCanvas = (): HTMLCanvasElement => document.getElementById("maplibre") as HTMLCanvasElement
+
+export * from "./map"

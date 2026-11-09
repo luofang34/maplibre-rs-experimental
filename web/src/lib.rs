@@ -5,6 +5,7 @@
 compile_error!("web works only on wasm32.");
 
 mod application;
+mod controller;
 mod environment;
 mod error;
 mod platform;
@@ -13,8 +14,9 @@ mod startup;
 pub use application::{
     create_kernel, default_plugins, run_map, run_maplibre, MapPlugin, MapType, WebMapHost,
 };
+pub use controller::MapController;
 pub use environment::{CurrentEnvironment, WHATWGOffscreenKernelEnvironment};
-pub use error::JSError;
+pub use error::{ArgumentError, JSError};
 pub use maplibre::platform::http_client::{
     web_http_client, FetchError, WHATWGFetchHttpClient, WebHttpClient,
 };

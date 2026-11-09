@@ -84,10 +84,49 @@ pub enum JSError {
     Host(#[from] maplibre_winit::WinitHostError),
     #[error("event loop closed before map initialization completed")]
     ClosedBeforeReady,
+    /// The map stopped before it applied a command.
+    #[error(transparent)]
+    Closed(#[from] maplibre::map::handle::MapClosed),
+    /// A method of the map was called with an argument it cannot read.
+    #[error(transparent)]
+    Argument(#[from] ArgumentError),
+}
+
+/// Why an argument passed from JavaScript, or a result returned to it, could not cross.
+#[derive(Error, Debug)]
+pub enum ArgumentError {
+    /// The value has no JSON form, such as a function or a cyclic object.
+    #[error("the {what} cannot be represented as JSON")]
+    NotJson {
+        /// What the argument is.
+        what: &'static str,
+    },
+    /// The value is JSON of the wrong shape.
+    #[error("invalid {what}")]
+    Invalid {
+        /// What the argument is.
+        what: &'static str,
+        #[source]
+        source: serde_json::Error,
+    },
+    /// A result could not be encoded.
+    #[error("encoding a result for JavaScript failed")]
+    Unencodable(#[source] serde_json::Error),
 }
 
 impl From<JSError> for JsValue {
+    /// The message names every cause, since JavaScript sees only this string.
     fn from(val: JSError) -> Self {
-        JsValue::from_str(&val.to_string())
+        let mut message = val.to_string();
+        let mut source = std::error::Error::source(&val);
+        while let Some(cause) = source {
+            let cause_message = cause.to_string();
+            if !message.contains(&cause_message) {
+                message.push_str(": ");
+                message.push_str(&cause_message);
+            }
+            source = cause.source();
+        }
+        JsValue::from_str(&message)
     }
 }

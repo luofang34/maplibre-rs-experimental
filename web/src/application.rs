@@ -1,7 +1,7 @@
 use maplibre::{
     environment::OffscreenKernelConfig,
     kernel::{Kernel, KernelBuilder},
-    map::Map,
+    map::{handle::MapHandle, Map},
     plugin::Plugin,
     render::builder::RendererBuilder,
     style::Style,
@@ -10,6 +10,7 @@ use maplibre_winit::{WinitApplicationError, WinitEventLoop, WinitMapWindowConfig
 use wasm_bindgen::prelude::*;
 
 use crate::{
+    controller::MapController,
     environment::CurrentEnvironment,
     error::JSError,
     platform::{self, http_client::web_http_client},
@@ -78,28 +79,31 @@ fn parse_style(style_json: &str) -> Result<Style, JSError> {
 
 /// Starts a map with the supplied style, or the built-in style when omitted.
 ///
-/// Resolves once the renderer is initialized; the map goes on running on the browser's event
-/// loop. A host that adds plugins or sets the map up starts it with [`run_map`] instead.
+/// Resolves once the renderer is initialized with the controller of the map, which goes on
+/// running on the browser's event loop. A host that adds plugins or sets the map up starts it
+/// with [`run_map`] instead.
 #[wasm_bindgen]
 pub async fn run_maplibre(
     new_worker: js_sys::Function,
     style_json: Option<String>,
-) -> Result<(), JSError> {
+) -> Result<MapController, JSError> {
     let style = match style_json.as_deref() {
         Some(style_json) => parse_style(style_json)?,
         None => Style::default(),
     };
-    run_map(new_worker, style, WebMapHost::default()).await
+    let handle = run_map(new_worker, style, WebMapHost::default()).await?;
+    Ok(MapController::new(handle))
 }
 
 /// Starts a map on the page's `maplibre` canvas with `style` and what the host adds, and
-/// resolves once the renderer is initialized; the map goes on running on the browser's event
-/// loop, where the host's plugins see it every frame.
+/// resolves once the renderer is initialized with a handle that sends the map commands; the
+/// map goes on running on the browser's event loop, where the host's plugins see it every
+/// frame.
 pub async fn run_map(
     new_worker: js_sys::Function,
     style: Style,
     mut host: WebMapHost,
-) -> Result<(), JSError> {
+) -> Result<MapHandle<CurrentEnvironment>, JSError> {
     let config = WinitMapWindowConfig::new("maplibre".into());
     WinitEventLoop::new(&config)?
         .spawn_map(
@@ -126,7 +130,6 @@ pub async fn run_map(
             None,
         )
         .await
-        .map(drop)
         .map_err(|error| match error {
             WinitApplicationError::CreateMap(error) => error,
             WinitApplicationError::Host(error) => JSError::Host(error),

@@ -54,6 +54,8 @@ console_log.workspace = true
 tracing-wasm = { workspace = true, optional = true } # TODO: Low quality dependency (remove in a separate PR!)
 # For passing Inputs in AsyncProcedureCalls
 serde_json.workspace = true
+serde.workspace = true
+cgmath.workspace = true
 flatbuffers.workspace = true
 
 image.workspace = true # FIXME: Remove image, use browser capabilities
