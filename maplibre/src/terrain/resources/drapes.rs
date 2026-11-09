@@ -103,12 +103,12 @@ impl TerrainResources {
         self.drapes.retain(keep);
     }
 
-    /// Drape texture of a view tile.
     /// Whether a view has drawn the tile's drape, in use or parked after it left the view.
     pub fn holds_shown_drape(&self, coords: WorldTileCoords) -> bool {
         self.drapes.holds_shown(coords)
     }
 
+    /// Drape texture of a view tile.
     pub fn drape_texture(&self, coords: WorldTileCoords) -> Option<&Texture> {
         self.drapes.get(coords).map(|drape| &drape.texture)
     }
