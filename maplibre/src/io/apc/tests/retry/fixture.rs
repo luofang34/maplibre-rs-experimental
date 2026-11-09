@@ -176,6 +176,8 @@ pub(super) struct Fixture {
     pub request: Box<dyn System>,
     pub populate: Box<dyn System>,
     kind: Kind,
+    /// Direct vector requests made so far; each after the first refreshes the tile.
+    direct_requests: u32,
 }
 impl Fixture {
     pub async fn new(kind: Kind, multiple: bool) -> Self {
@@ -213,6 +215,7 @@ impl Fixture {
             kernel,
             context,
             kind,
+            direct_requests: 0,
         }
     }
     pub fn frame(&mut self, millis: u64) {
@@ -235,7 +238,12 @@ impl Fixture {
             attempt,
             None,
         );
-        Input::new(Default::default(), self.context.style.clone(), attempt)
+        let mut input = Input::new(Default::default(), self.context.style.clone(), attempt);
+        // A tile requested again stands for its data being due anew, as the request system
+        // marks a refresh or a retry.
+        input.refetch = self.direct_requests > 0;
+        self.direct_requests = self.direct_requests.wrapping_add(1);
+        input
     }
     pub async fn receive(&mut self) {
         self.kernel.apc().complete().await;

@@ -140,6 +140,10 @@ pub struct Input {
     /// tile keeps what it shows of the others. `None` processes every source.
     #[serde(default)]
     pub only_sources: Option<Vec<String>>,
+    /// The tile's data is due again, after a refresh or a retry, so the worker fetches it
+    /// anew instead of taking a decode cached by an earlier request.
+    #[serde(default)]
+    pub refetch: bool,
 }
 
 fn one() -> f32 {
@@ -157,6 +161,7 @@ impl Input {
             overscaled_zoom: 0,
             pixel_ratio: 1.0,
             only_sources: None,
+            refetch: false,
         }
     }
 }

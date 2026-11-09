@@ -37,6 +37,7 @@ pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context +
             overscaled_zoom,
             pixel_ratio,
             only_sources,
+            refetch,
         } = input;
         let context = AttemptContext::new(context, attempt);
         let client = kernel.source_client();
@@ -62,7 +63,7 @@ pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context +
                     .map_err(ProcedureError::Send)?;
                 continue;
             }
-            let tile = match fetch_group_tile(&client, coords, &group).await {
+            let tile = match fetch_group_tile(&client, coords, &group, refetch).await {
                 Ok(tile) => tile,
                 // A source without a tile there has nothing to draw, as GL JS loads a vector
                 // tile that answered 404 empty: its layers are empty, and the tile's other

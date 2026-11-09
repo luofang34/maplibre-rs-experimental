@@ -21,6 +21,7 @@ pub(super) async fn fetch_group_tile<H: HttpClient>(
     client: &SourceClient<H>,
     coords: WorldTileCoords,
     group: &SourceLayerGroup,
+    refetch: bool,
 ) -> Result<Arc<Tile>, SourceFetchError> {
     let source_tile = group.source_tile(coords);
     if let SourceType::GeoJson(geojson) = &group.source {
@@ -62,9 +63,13 @@ pub(super) async fn fetch_group_tile<H: HttpClient>(
     // Every request for the same source tile (including duplicate sources sharing a URL,
     // overscaled zoom relayouts, and descendants cutting from an ancestor) fetches and decodes
     // the protobuf once and keeps the decoded `Tile` in the asset cache until the budget evicts it.
+    let key = format!("tile:{url}");
+    if refetch {
+        client.assets().forget(&key);
+    }
     let cached = client
         .assets()
-        .load(format!("tile:{url}"), || async {
+        .load(key, || async {
             let bytes = fetch(client, &url, "vector tile").await?;
             let tile = decode_tile(&bytes).map_err(|error| {
                 AssetFailure::Terminal(format!("vector tile {url} cannot be decoded: {error}"))

@@ -243,6 +243,19 @@ impl AssetCache {
         }
     }
 
+    /// Drops the settled asset under `key`, loaded or failed, so the next load fetches it
+    /// again; a load in flight is left to finish for the tasks that wait on it.
+    pub(crate) fn forget(&self, key: &str) {
+        let mut state = self.lock();
+        let bytes = match state.entries.get(key).map(|entry| &entry.slot) {
+            Some(Slot::Ready { bytes, .. }) => *bytes,
+            Some(Slot::Failed { .. }) => 0,
+            Some(Slot::Loading { .. }) | None => return,
+        };
+        state.entries.remove(key);
+        state.bytes = state.bytes.saturating_sub(bytes);
+    }
+
     /// The asset under `key` if it is loaded, without loading it or waiting for a load.
     pub(crate) fn peek<T: Any + Send + Sync>(&self, key: &str) -> Option<Arc<T>> {
         let mut state = self.lock();
