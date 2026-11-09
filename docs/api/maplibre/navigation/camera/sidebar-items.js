@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["base_auto_tilt_degrees","normalize_angle_signed","rotate_bearing_around_cursor","set_bearing_keeping_center","set_pitch_keeping_center"]};

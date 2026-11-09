@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["PointerProfile"],"fn":["normalize_angle_signed","rotate_bearing_around_cursor","set_bearing_keeping_center","set_pitch_keeping_center"],"mod":["camera","frame","modes","pointer","projection"],"struct":["HomeCamera","NavigationState"]};
