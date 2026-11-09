@@ -26,11 +26,13 @@ use crate::{
     window::PhysicalSize,
 };
 
+/// What the workers sent back, and a signal for each message sent.
 #[derive(Clone, Default)]
-pub(super) struct Replies(Arc<Mutex<Vec<Message>>>);
+pub(super) struct Replies(Arc<Mutex<Vec<Message>>>, Arc<tokio::sync::Notify>);
 impl Context for Replies {
     fn send_back<T: IntoMessage>(&self, message: T) -> Result<(), SendError> {
         self.0.lock().expect("replies").push(message.into());
+        self.1.notify_one();
         Ok(())
     }
 }
@@ -61,6 +63,11 @@ impl AsyncProcedureCall<ReqwestOffscreenKernelEnvironment> for Calls {
     }
 }
 impl Calls {
+    /// Waits until a worker sends something back, or returns at once if one has since the
+    /// last wait.
+    pub async fn replied(&self) {
+        self.replies.1.notified().await;
+    }
     pub async fn complete(&self) {
         self.run_requests(self.take_requests()).await;
     }

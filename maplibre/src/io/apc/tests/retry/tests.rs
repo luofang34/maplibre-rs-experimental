@@ -263,10 +263,16 @@ async fn partial_raster_result_keeps_request_capacity_until_final_reply() {
     let worker = kernel.apc().complete();
     let observer = async {
         gate.entered.notified().await;
-        test.populate
-            .run(&mut test.context)
-            .expect("partial raster result");
-        assert!(test.loaded(), "first source supplied imagery");
+        // The sources are fetched together, so the healthy one may still be on its way.
+        loop {
+            test.populate
+                .run(&mut test.context)
+                .expect("partial raster result");
+            if test.loaded() {
+                break;
+            }
+            kernel.apc().replied().await;
+        }
         assert_eq!(
             request_budget(&test.context.world),
             MAX_TILES_IN_FLIGHT - 1,
