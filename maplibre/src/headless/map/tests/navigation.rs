@@ -176,3 +176,38 @@ async fn constrained_navigation_refuses_a_target_past_the_mercator_world() {
         NavigationMode::Constrained
     );
 }
+
+#[tokio::test]
+async fn navigation_controls_settle_the_compass_and_publish_the_hud() {
+    let mut map = free_map(LatLon::new(40.0, 10.0)).await;
+    map.jump_to(crate::render::view_state::CameraOptions {
+        bearing: Some(cgmath::Deg(40.0)),
+        ..Default::default()
+    })
+    .expect("bearing");
+    map.run_frame().expect("frame");
+    let mut controls = crate::navigation::NavigationState::default();
+    let step = std::time::Duration::from_millis(16);
+    assert!(!map.navigate(&mut controls, step));
+    let hud = map
+        .context()
+        .world
+        .resources
+        .get::<crate::hud::NavigationHudState>()
+        .copied()
+        .expect("published HUD state");
+    assert!(hud.visible);
+    controls.trigger_compass(map.view_state().camera().get_bearing());
+    let mut frames = 0;
+    while map.navigate(&mut controls, step) {
+        map.run_frame().expect("frame");
+        frames += 1;
+        assert!(frames < 600, "compass reset never settled");
+    }
+    assert!(frames > 1, "compass reset should animate");
+    let bearing = map.view_state().camera().get_bearing().0;
+    assert!(
+        crate::navigation::normalize_angle_signed(bearing).abs() < 1e-3,
+        "{bearing}"
+    );
+}
