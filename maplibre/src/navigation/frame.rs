@@ -20,41 +20,42 @@ use crate::{
     coords::{Zoom, TILE_SIZE},
     hud::{HudButton, NavigationHudState},
     render::view_state::ViewState,
+    style::Style,
 };
 
 /// Width of the band along each viewport edge that scrolls the map, in logical pixels.
 const EDGE_ZONE_PX: f64 = 24.0;
 
 impl NavigationState {
-    /// Advances HUD compass drag, smooth settle animations, fullscreen/RTS edge-scrolling,
-    /// and syncs `NavigationHudState` into `world.resources` for GPU rendering.
+    /// Captures the home camera on the first frame, advances the camera with
+    /// [`advance`](Self::advance), and syncs `NavigationHudState` into `world.resources` for
+    /// the GPU HUD overlay.
     pub fn update_frame(&mut self, map_context: &mut MapContext, dt: Duration) {
         self.ensure_initialized(map_context);
-        self.update_hover(&map_context.view_state);
-        self.apply_compass_drag(&mut map_context.view_state);
+        self.advance(&map_context.style, &mut map_context.view_state, dt);
+        self.sync_hud(map_context);
+    }
+
+    /// Moves the camera by `dt` of HUD compass drag, trackpad rotation, North-Lock, smooth
+    /// settle animations, and edge scrolling. A host that draws its own controls calls this
+    /// each frame while [`wants_frame`](Self::wants_frame) holds.
+    pub fn advance(&mut self, style: &Style, view: &mut ViewState, dt: Duration) {
+        self.update_hover(view);
+        self.apply_compass_drag(view);
         if self.pending_trackpad_rotation.0.abs() > 1e-6 {
             let delta = std::mem::replace(&mut self.pending_trackpad_rotation, Rad(0.0));
             if !self.north_locked {
-                rotate_bearing_around_cursor(
-                    &map_context.style,
-                    &mut map_context.view_state,
-                    self.cursor_position,
-                    delta,
-                );
+                rotate_bearing_around_cursor(style, view, self.cursor_position, delta);
             }
         }
-        if self.north_locked {
-            let bearing = map_context.view_state.camera().get_bearing().0;
-            if normalize_angle_signed(bearing).abs() > 1e-4 {
-                set_bearing_keeping_center(&mut map_context.view_state, Rad(0.0));
-            }
+        if self.north_locked && normalize_angle_signed(view.camera().get_bearing().0).abs() > 1e-4 {
+            set_bearing_keeping_center(view, Rad(0.0));
         }
         let alpha = (1.0 - (-dt.as_secs_f64() * 14.0).exp()).clamp(0.05, 1.0);
-        self.advance_fly_home(map_context, alpha);
-        self.advance_bearing(&mut map_context.view_state, alpha);
-        self.advance_pitch(&mut map_context.view_state, alpha);
-        self.edge_scroll(map_context, dt);
-        self.sync_hud(map_context);
+        self.advance_fly_home(style, view, alpha);
+        self.advance_bearing(view, alpha);
+        self.advance_pitch(view, alpha);
+        self.edge_scroll(style, view, dt);
     }
 
     /// Hit-tests the cursor against the HUD with the viewport's actual size and edge insets.
@@ -101,7 +102,7 @@ impl NavigationState {
     }
 
     /// Eases zoom and center toward the home camera.
-    fn advance_fly_home(&mut self, map_context: &mut MapContext, alpha: f64) {
+    fn advance_fly_home(&mut self, style: &Style, view: &mut ViewState, alpha: f64) {
         if !self.fly_home {
             return;
         }
@@ -109,18 +110,11 @@ impl NavigationState {
             self.fly_home = false;
             return;
         };
-        let view = &mut map_context.view_state;
         let current_zoom = view.zoom().value();
         let next_zoom = current_zoom + (home.zoom - current_zoom) * alpha;
         let center = center_pixel(view);
         // On Mercator views there is no globe to zoom around; `zoom_to` below covers both.
-        zoom_globe_around_pixel_with_pitch(
-            &map_context.style,
-            view,
-            center,
-            Zoom::new(next_zoom),
-            None,
-        );
+        zoom_globe_around_pixel_with_pitch(style, view, center, Zoom::new(next_zoom), None);
         view.zoom_to(Zoom::new(next_zoom));
         let world_size = TILE_SIZE * 2.0_f64.powf(view.zoom().value());
         let current = view.camera().position();
@@ -178,7 +172,7 @@ impl NavigationState {
 
     /// Scrolls the map while the cursor rests near a viewport edge in the RTS profile, or
     /// whenever edge scrolling is enabled.
-    fn edge_scroll(&mut self, map_context: &mut MapContext, dt: Duration) {
+    fn edge_scroll(&mut self, style: &Style, view: &mut ViewState, dt: Duration) {
         if !(self.pointer_profile == PointerProfile::Rts || self.edge_scroll_override)
             || self.pressed_button.is_some()
             || self.selection_drag.is_some()
@@ -188,7 +182,6 @@ impl NavigationState {
         let Some(cursor) = self.cursor_position else {
             return;
         };
-        let view = &mut map_context.view_state;
         let (w, h) = (view.width(), view.height());
         if w <= 100.0
             || h <= 100.0
@@ -207,7 +200,7 @@ impl NavigationState {
             velocity * (self.edge_scroll_speed_px_per_sec.max(0.0) * boost * dt.as_secs_f64());
         let center = center_pixel(view);
         let plane = view.center_elevation();
-        if !pan_globe_by_pixels(&map_context.style, view, center, -step) {
+        if !pan_globe_by_pixels(style, view, center, -step) {
             pan_plane_by_pixels(view, center, -step, plane);
         }
     }

@@ -173,3 +173,23 @@ fn bearing_turns_a_free_globe_by_its_pose() {
     assert!((view.camera().get_bearing().0.to_degrees() - 30.0).abs() < 1e-6);
     assert!(view.globe_pose().is_some());
 }
+
+#[test]
+fn advancing_eases_auto_tilt_onto_its_curve_and_then_stops_wanting_frames() {
+    let mut nav = NavigationState::default();
+    let mut view = innsbruck_view(10.0);
+    let style = crate::style::Style::default();
+    nav.set_auto_tilt(true, view.zoom().value());
+    let mut last = view.camera().get_pitch().0;
+    let mut frames = 0;
+    while nav.wants_frame(&view) {
+        nav.advance(&style, &mut view, std::time::Duration::from_millis(16));
+        let pitch = view.camera().get_pitch().0;
+        assert!(pitch >= last, "the tilt rises steadily");
+        last = pitch;
+        frames += 1;
+        assert!(frames < 200, "the ease settles");
+    }
+    let expected = nav.pitch_for_zoom(view.zoom().value());
+    assert!((view.camera().get_pitch().0.to_degrees() - expected).abs() < 0.12);
+}
