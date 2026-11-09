@@ -37,10 +37,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-0500c072.js";
+            window.path_to_searchindex_js = "../searchindex-9d373cfc.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-e964a7da.js"></script>
+        <script src="../toc-43e26ac9.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -178,20 +178,31 @@
                     <main>
                         <h1 id="examples"><a class="header" href="#examples">Examples</a></h1>
 <p>Each example reproduces the map of a <a href="https://maplibre.org/maplibre-gl-js/docs/examples/">MapLibre GL JS example</a> with maplibre-rs compiled to WebAssembly.</p>
-<p>maplibre-rs is configured by a <a href="https://maplibre.org/maplibre-style-spec/">style document</a> alone. Where GL JS calls <code>addSource</code> and <code>addLayer</code> once the style has loaded, an example adds the same source and layer to the document before the map starts. Each example module exports a function returning the document, which the embedded page passes to <code>startMapLibre</code>:</p>
+<p>A map starts from a <a href="https://maplibre.org/maplibre-style-spec/">style document</a>. Where GL JS calls <code>addSource</code> and <code>addLayer</code> once the style has loaded, an example adds the same source and layer to the document before the map starts. Each example module exports a function returning the document, which the embedded page passes to <code>startMapLibre</code>. <code>startMapLibre</code> resolves to the running map, whose methods carry GL JS’s names, such as <code>flyTo</code>, <code>setPaintProperty</code> and <code>queryRenderedFeatures</code>, and return promises that settle once the map has applied them; an interactive example also exports a <code>run</code> function that the page calls with the map:</p>
 <pre><code class="language-js">import { startMapLibre } from 'maplibre-rs'
-import style from './display-a-map.js'
+import style, { run } from './fly-to-a-location.js'
 
-await startMapLibre(undefined, undefined, JSON.stringify(await style()))
+const map = await startMapLibre(undefined, undefined, JSON.stringify(await style()))
+run(map)
 </code></pre>
 <p>Natively, the demo opens a document saved as JSON:</p>
 <pre><code class="language-bash">cargo run -p maplibre-demo -- headed --style style.json
 </code></pre>
-<p>DOM controls, popups and event handlers of the GL JS examples are left out.</p>
+<p>The map reports <code>click</code> and <code>mousemove</code> through <code>map.on</code>, with the point in CSS pixels that <code>queryRenderedFeatures</code> takes. Popups and markers of the GL JS examples are left out.</p>
+<p>The Rust tab of an interactive example drives the map from Rust in the browser, through the handle that <code>web::run_map</code> resolves to.</p>
 <h2 id="getting-started"><a class="header" href="#getting-started">Getting Started</a></h2>
 <ul>
 <li><a href="./display-a-map.html">Display a Map</a></li>
 <li><a href="./display-a-satellite-map.html">Display a Satellite Map</a></li>
+</ul>
+<h2 id="camera"><a class="header" href="#camera">Camera</a></h2>
+<ul>
+<li><a href="./fly-to-a-location.html">Fly to a Location</a></li>
+</ul>
+<h2 id="user-interaction"><a class="header" href="#user-interaction">User Interaction</a></h2>
+<ul>
+<li><a href="./get-features-under-the-mouse-pointer.html">Get Features Under the Mouse Pointer</a></li>
+<li><a href="./change-a-layers-color.html">Change a Layer’s Color</a></li>
 </ul>
 <h2 id="globe"><a class="header" href="#globe">Globe</a></h2>
 <ul>
@@ -211,6 +222,7 @@ await startMapLibre(undefined, undefined, JSON.stringify(await style()))
 <ul>
 <li><a href="./add-a-geojson-line.html">Add a GeoJSON Line</a></li>
 <li><a href="./add-a-geojson-polygon.html">Add a GeoJSON Polygon</a></li>
+<li><a href="./add-live-realtime-data.html">Add Live Realtime Data</a></li>
 </ul>
 <h2 id="raster--imagery"><a class="header" href="#raster--imagery">Raster &amp; Imagery</a></h2>
 <ul>

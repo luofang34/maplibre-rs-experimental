@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":["MapClosed","MapCommands","MapHandle","Queue","Reply","Sender","Shared"],"trait":["WakeHost"],"type":["Command","Watcher"]};

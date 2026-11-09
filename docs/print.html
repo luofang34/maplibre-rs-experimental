@@ -38,10 +38,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-0500c072.js";
+            window.path_to_searchindex_js = "searchindex-9d373cfc.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-e964a7da.js"></script>
+        <script src="toc-43e26ac9.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -360,20 +360,31 @@ fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="examples"><a class="header" href="#examples">Examples</a></h1>
 <p>Each example reproduces the map of a <a href="https://maplibre.org/maplibre-gl-js/docs/examples/">MapLibre GL JS example</a> with maplibre-rs compiled to WebAssembly.</p>
-<p>maplibre-rs is configured by a <a href="https://maplibre.org/maplibre-style-spec/">style document</a> alone. Where GL JS calls <code>addSource</code> and <code>addLayer</code> once the style has loaded, an example adds the same source and layer to the document before the map starts. Each example module exports a function returning the document, which the embedded page passes to <code>startMapLibre</code>:</p>
+<p>A map starts from a <a href="https://maplibre.org/maplibre-style-spec/">style document</a>. Where GL JS calls <code>addSource</code> and <code>addLayer</code> once the style has loaded, an example adds the same source and layer to the document before the map starts. Each example module exports a function returning the document, which the embedded page passes to <code>startMapLibre</code>. <code>startMapLibre</code> resolves to the running map, whose methods carry GL JS’s names, such as <code>flyTo</code>, <code>setPaintProperty</code> and <code>queryRenderedFeatures</code>, and return promises that settle once the map has applied them; an interactive example also exports a <code>run</code> function that the page calls with the map:</p>
 <pre><code class="language-js">import { startMapLibre } from 'maplibre-rs'
-import style from './display-a-map.js'
+import style, { run } from './fly-to-a-location.js'
 
-await startMapLibre(undefined, undefined, JSON.stringify(await style()))
+const map = await startMapLibre(undefined, undefined, JSON.stringify(await style()))
+run(map)
 </code></pre>
 <p>Natively, the demo opens a document saved as JSON:</p>
 <pre><code class="language-bash">cargo run -p maplibre-demo -- headed --style style.json
 </code></pre>
-<p>DOM controls, popups and event handlers of the GL JS examples are left out.</p>
+<p>The map reports <code>click</code> and <code>mousemove</code> through <code>map.on</code>, with the point in CSS pixels that <code>queryRenderedFeatures</code> takes. Popups and markers of the GL JS examples are left out.</p>
+<p>The Rust tab of an interactive example drives the map from Rust in the browser, through the handle that <code>web::run_map</code> resolves to.</p>
 <h2 id="getting-started"><a class="header" href="#getting-started">Getting Started</a></h2>
 <ul>
 <li><a href="#display-a-map">Display a Map</a></li>
 <li><a href="#display-a-satellite-map">Display a Satellite Map</a></li>
+</ul>
+<h2 id="camera"><a class="header" href="#camera">Camera</a></h2>
+<ul>
+<li><a href="#fly-to-a-location">Fly to a Location</a></li>
+</ul>
+<h2 id="user-interaction"><a class="header" href="#user-interaction">User Interaction</a></h2>
+<ul>
+<li><a href="#get-features-under-the-mouse-pointer">Get Features Under the Mouse Pointer</a></li>
+<li><a href="#change-a-layers-color">Change a Layer’s Color</a></li>
 </ul>
 <h2 id="globe"><a class="header" href="#globe">Globe</a></h2>
 <ul>
@@ -393,6 +404,7 @@ await startMapLibre(undefined, undefined, JSON.stringify(await style()))
 <ul>
 <li><a href="#add-a-geojson-line">Add a GeoJSON Line</a></li>
 <li><a href="#add-a-geojson-polygon">Add a GeoJSON Polygon</a></li>
+<li><a href="#add-live-realtime-data">Add Live Realtime Data</a></li>
 </ul>
 <h2 id="raster--imagery"><a class="header" href="#raster--imagery">Raster &amp; Imagery</a></h2>
 <ul>
@@ -3540,6 +3552,693 @@ fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
 <blockquote>
 <p><strong>Note:</strong> The click handlers and popups of the GL JS example are left out.</p>
 </blockquote>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="fly-to-a-location"><a class="header" href="#fly-to-a-location">Fly to a Location</a></h1>
+<p>Fly the camera to a random place near the start with <code>flyTo</code>, which resolves to whether the camera arrived.</p>
+<div class="example-map">
+  <iframe src="./demo/index.html?example=../code/fly-to-a-location.js" title="Fly to a Location" loading="lazy" allow="fullscreen"></iframe>
+</div>
+
+<div class="example-code-tabs">
+<pre class="playground"><code class="language-rust no_run"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// The same map driven from Rust in the browser: `web::run_map` resolves to a handle whose
+// commands the map applies between frames.
+use maplibre::{
+    context::FlightOutcome,
+    coords::LatLon,
+    render::view_state::{CameraOptions, FlightCurve, FlyOptions},
+    style::Style,
+};
+use web::{JSError, WebMapHost};
+
+pub fn build_style(mut style: Style) -&gt; Style {
+    style.center = Some([-74.5, 40.0]);
+    style.zoom = Some(9.0);
+    for (index, layer) in style.layers.iter_mut().enumerate() {
+        layer.index = index as u32 + 1;
+    }
+    style
+}
+
+/// Starts the map, flies to `[lng, lat]` and tells whether the camera arrived there.
+pub async fn fly(
+    new_worker: js_sys::Function,
+    base: Style,
+    [lng, lat]: [f64; 2],
+) -&gt; Result&lt;bool, JSError&gt; {
+    let map = web::run_map(new_worker, build_style(base), WebMapHost::default()).await?;
+    let destination = CameraOptions {
+        center: Some(LatLon::new(lat, lng)),
+        ..Default::default()
+    };
+    let flight = map
+        .call(move |map| map.fly_to(destination, FlightCurve::Fly(FlyOptions::default())))
+        .await??;
+    // Asked again after every frame until the move ends.
+    let arrived = map
+        .until(move |map| match map.flight_outcome(flight) {
+            FlightOutcome::Flying =&gt; None,
+            outcome =&gt; Some(outcome == FlightOutcome::Arrived),
+        })
+        .await?;
+    Ok(arrived)
+}
+<span class="boring">}</span></code></pre>
+<pre><code class="language-js">export default async function style() {
+    const style = await (await fetch('https://tiles.openfreemap.org/styles/bright')).json();
+    style.center = [-74.5, 40];
+    style.zoom = 9;
+    return style;
+}
+
+export function run(map) {
+    const button = document.createElement('button');
+    button.textContent = 'Fly';
+    button.style.cssText = 'position:absolute;top:10px;left:50%;transform:translateX(-50%);' +
+        'padding:10px 20px;font:bold 14px sans-serif;border:none;border-radius:4px;' +
+        'background:#ee8a65;color:#fff;cursor:pointer;';
+    document.body.append(button);
+
+    button.addEventListener('click', async () =&gt; {
+        // Somewhere within five degrees of the starting point.
+        const arrived = await map.flyTo({
+            center: [-74.5 + (Math.random() - 0.5) * 10, 40 + (Math.random() - 0.5) * 10],
+            essential: true
+        });
+        console.log(arrived ? 'arrived' : 'stopped on the way');
+    });
+}
+</code></pre>
+<pre><code class="language-html">&lt;!DOCTYPE html&gt;
+&lt;html lang="en"&gt;
+&lt;head&gt;
+    &lt;meta charset="utf-8" /&gt;
+    &lt;meta name="viewport" content="width=device-width, initial-scale=1.0" /&gt;
+    &lt;title&gt;Fly to a Location&lt;/title&gt;
+    &lt;style&gt;
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #0b0e14;
+        }
+        #maplibre {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+    &lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+    &lt;canvas id="maplibre"&gt;&lt;/canvas&gt;
+    &lt;script type="module"&gt;
+        import { startMapLibre } from 'maplibre-rs';
+
+        async function style() {
+            const style = await (await fetch('https://tiles.openfreemap.org/styles/bright')).json();
+            style.center = [-74.5, 40];
+            style.zoom = 9;
+            return style;
+        }
+
+        function run(map) {
+            const button = document.createElement('button');
+            button.textContent = 'Fly';
+            button.style.cssText = 'position:absolute;top:10px;left:50%;transform:translateX(-50%);' +
+                'padding:10px 20px;font:bold 14px sans-serif;border:none;border-radius:4px;' +
+                'background:#ee8a65;color:#fff;cursor:pointer;';
+            document.body.append(button);
+
+            button.addEventListener('click', async () =&gt; {
+                // Somewhere within five degrees of the starting point.
+                const arrived = await map.flyTo({
+                    center: [-74.5 + (Math.random() - 0.5) * 10, 40 + (Math.random() - 0.5) * 10],
+                    essential: true
+                });
+                console.log(arrived ? 'arrived' : 'stopped on the way');
+            });
+        }
+
+        const map = await startMapLibre(undefined, undefined, JSON.stringify(await style()));
+        if (map) {
+            run(map);
+        }
+    &lt;/script&gt;
+&lt;/body&gt;
+&lt;/html&gt;
+</code></pre>
+</div>
+
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="get-features-under-the-mouse-pointer"><a class="header" href="#get-features-under-the-mouse-pointer">Get Features Under the Mouse Pointer</a></h1>
+<p>Show the features under the pointer with <code>queryRenderedFeatures</code>. The page’s single-threaded build reports labels and icons, since its tile workers send no index of fill and line geometry.</p>
+<div class="example-map">
+  <iframe src="./demo/index.html?example=../code/get-features-under-the-mouse-pointer.js" title="Get Features Under the Mouse Pointer" loading="lazy" allow="fullscreen"></iframe>
+</div>
+
+<div class="example-code-tabs">
+<pre class="playground"><code class="language-rust no_run"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// The same query from Rust in the browser, through the handle `web::run_map` resolves to.
+use maplibre::{
+    map::handle::MapHandle,
+    query::QueriedFeature,
+    sdf::query::{QueryGeometry, QueryOptions},
+    style::Style,
+};
+use web::{CurrentEnvironment, JSError};
+
+pub fn build_style(mut style: Style) -&gt; Style {
+    style.center = Some([-74.006, 40.7128]);
+    style.zoom = Some(13.0);
+    for (index, layer) in style.layers.iter_mut().enumerate() {
+        layer.index = index as u32 + 1;
+    }
+    style
+}
+
+/// The features drawn under a pointer `[x, y]` in CSS pixels from the canvas's top left,
+/// topmost first.
+pub async fn features_under(
+    map: &amp;MapHandle&lt;CurrentEnvironment&gt;,
+    point: [f64; 2],
+) -&gt; Result&lt;Vec&lt;QueriedFeature&gt;, JSError&gt; {
+    let features = map
+        .call(move |map| {
+            map.query_rendered_features(QueryGeometry::Point(point), &amp;QueryOptions::default())
+        })
+        .await??;
+    Ok(features)
+}
+<span class="boring">}</span></code></pre>
+<pre><code class="language-js">export default async function style() {
+    const style = await (await fetch('https://tiles.openfreemap.org/styles/bright')).json();
+    style.center = [-74.006, 40.7128];
+    style.zoom = 13;
+    return style;
+}
+
+export function run(map) {
+    const panel = document.createElement('pre');
+    panel.style.cssText = 'position:absolute;top:0;left:0;margin:10px;padding:10px;' +
+        'width:40%;max-height:60%;overflow:auto;font:12px monospace;' +
+        'background:rgba(255,255,255,0.85);border-radius:4px;';
+    panel.textContent = 'Move the pointer over a label.';
+    document.body.append(panel);
+
+    // The latest move wins: an answer to an earlier one that arrives late is dropped.
+    let latest = 0;
+    map.on('mousemove', async (event) =&gt; {
+        const move = ++latest;
+        const features = await map.queryRenderedFeatures(event.point);
+        if (move !== latest) return;
+        panel.textContent = JSON.stringify(
+            features.map(({layer, sourceLayer, properties}) =&gt; ({layer: layer.id, sourceLayer, properties})),
+            null,
+            2
+        );
+    });
+}
+</code></pre>
+<pre><code class="language-html">&lt;!DOCTYPE html&gt;
+&lt;html lang="en"&gt;
+&lt;head&gt;
+    &lt;meta charset="utf-8" /&gt;
+    &lt;meta name="viewport" content="width=device-width, initial-scale=1.0" /&gt;
+    &lt;title&gt;Get Features Under the Mouse Pointer&lt;/title&gt;
+    &lt;style&gt;
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #0b0e14;
+        }
+        #maplibre {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+    &lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+    &lt;canvas id="maplibre"&gt;&lt;/canvas&gt;
+    &lt;script type="module"&gt;
+        import { startMapLibre } from 'maplibre-rs';
+
+        async function style() {
+            const style = await (await fetch('https://tiles.openfreemap.org/styles/bright')).json();
+            style.center = [-74.006, 40.7128];
+            style.zoom = 13;
+            return style;
+        }
+
+        function run(map) {
+            const panel = document.createElement('pre');
+            panel.style.cssText = 'position:absolute;top:0;left:0;margin:10px;padding:10px;' +
+                'width:40%;max-height:60%;overflow:auto;font:12px monospace;' +
+                'background:rgba(255,255,255,0.85);border-radius:4px;';
+            panel.textContent = 'Move the pointer over a label.';
+            document.body.append(panel);
+
+            // The latest move wins: an answer to an earlier one that arrives late is dropped.
+            let latest = 0;
+            map.on('mousemove', async (event) =&gt; {
+                const move = ++latest;
+                const features = await map.queryRenderedFeatures(event.point);
+                if (move !== latest) return;
+                panel.textContent = JSON.stringify(
+                    features.map(({layer, sourceLayer, properties}) =&gt; ({layer: layer.id, sourceLayer, properties})),
+                    null,
+                    2
+                );
+            });
+        }
+
+        const map = await startMapLibre(undefined, undefined, JSON.stringify(await style()));
+        if (map) {
+            run(map);
+        }
+    &lt;/script&gt;
+&lt;/body&gt;
+&lt;/html&gt;
+</code></pre>
+</div>
+
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="change-a-layers-color"><a class="header" href="#change-a-layers-color">Change a Layer’s Color</a></h1>
+<p>Recolor the water and buildings with <code>setPaintProperty</code>, and switch the background between day and night with <code>setGlobalStateProperty</code>.</p>
+<div class="example-map">
+  <iframe src="./demo/index.html?example=../code/change-a-layers-color.js" title="Change a Layer&#39;s Color" loading="lazy" allow="fullscreen"></iframe>
+</div>
+
+<div class="example-code-tabs">
+<pre class="playground"><code class="language-rust no_run"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// The same changes from Rust in the browser, through the handle `web::run_map` resolves to.
+use maplibre::{map::handle::MapHandle, style::Style};
+use serde_json::json;
+use web::{CurrentEnvironment, JSError};
+
+pub fn build_style(base: Style) -&gt; Result&lt;Style, serde_json::Error&gt; {
+    let mut document = serde_json::to_value(base)?;
+    document["center"] = json!([12.338, 45.4385]);
+    document["zoom"] = json!(14);
+    // The background follows a theme a page can switch without editing the layer.
+    document["state"] = json!({"theme": {"default": "day"}});
+    if let Some(layers) = document["layers"].as_array_mut() {
+        for layer in layers
+            .iter_mut()
+            .filter(|layer| layer["id"] == "background")
+        {
+            layer["paint"]["background-color"] = json!([
+                "match",
+                ["global-state", "theme"],
+                "night",
+                "#1d2330",
+                "#f8f4f0"
+            ]);
+        }
+    }
+    let mut style: Style = serde_json::from_value(document)?;
+    for (index, layer) in style.layers.iter_mut().enumerate() {
+        layer.index = index as u32 + 1;
+    }
+    Ok(style)
+}
+
+/// Paints the layer `layer` (`water` or `building`) with `color`.
+pub async fn recolor(
+    map: &amp;MapHandle&lt;CurrentEnvironment&gt;,
+    layer: &amp;'static str,
+    color: &amp;'static str,
+) -&gt; Result&lt;(), JSError&gt; {
+    map.call(move |map| map.set_paint_property(layer, "fill-color", json!(color)))
+        .await??;
+    Ok(())
+}
+
+/// Switches the background between its day and night colors.
+pub async fn set_night(map: &amp;MapHandle&lt;CurrentEnvironment&gt;, night: bool) -&gt; Result&lt;(), JSError&gt; {
+    let theme = if night { "night" } else { "day" };
+    map.call(move |map| map.set_global_state("theme", json!(theme)))
+        .await?;
+    Ok(())
+}
+<span class="boring">}</span></code></pre>
+<pre><code class="language-js">export default async function style() {
+    const style = await (await fetch('https://tiles.openfreemap.org/styles/bright')).json();
+    style.center = [12.338, 45.4385];
+    style.zoom = 14;
+
+    // The background follows a theme a page can switch without editing the layer.
+    style.state = {theme: {default: 'day'}};
+    const background = style.layers.find((layer) =&gt; layer.id === 'background');
+    background.paint['background-color'] =
+        ['match', ['global-state', 'theme'], 'night', '#1d2330', '#f8f4f0'];
+    return style;
+}
+
+const SWATCHES = ['#ffffcc', '#a1dab4', '#41b6c4', '#2c7fb8', '#253494', '#fed976', '#feb24c', '#fd8d3c', '#f03b20', '#bd0026'];
+
+export function run(map) {
+    const menu = document.createElement('div');
+    menu.style.cssText = 'position:absolute;top:10px;left:10px;padding:10px;width:150px;' +
+        'background:#fff;border-radius:4px;font:12px sans-serif;';
+    document.body.append(menu);
+
+    const layer = document.createElement('select');
+    layer.innerHTML = '&lt;option value="water"&gt;Water&lt;/option&gt;&lt;option value="building"&gt;Buildings&lt;/option&gt;';
+    menu.append(layer);
+
+    const swatches = document.createElement('div');
+    swatches.style.cssText = 'display:grid;grid-template-columns:repeat(5,1fr);gap:4px;margin:8px 0;';
+    for (const color of SWATCHES) {
+        const swatch = document.createElement('button');
+        swatch.style.cssText = `height:20px;border:none;border-radius:2px;background:${color};cursor:pointer;`;
+        swatch.addEventListener('click', () =&gt; map.setPaintProperty(layer.value, 'fill-color', color));
+        swatches.append(swatch);
+    }
+    menu.append(swatches);
+
+    const theme = document.createElement('button');
+    theme.textContent = 'Night';
+    theme.addEventListener('click', async () =&gt; {
+        const night = theme.textContent === 'Night';
+        await map.setGlobalStateProperty('theme', night ? 'night' : 'day');
+        theme.textContent = night ? 'Day' : 'Night';
+    });
+    menu.append(theme);
+}
+</code></pre>
+<pre><code class="language-html">&lt;!DOCTYPE html&gt;
+&lt;html lang="en"&gt;
+&lt;head&gt;
+    &lt;meta charset="utf-8" /&gt;
+    &lt;meta name="viewport" content="width=device-width, initial-scale=1.0" /&gt;
+    &lt;title&gt;Change a Layer's Color&lt;/title&gt;
+    &lt;style&gt;
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #0b0e14;
+        }
+        #maplibre {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+    &lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+    &lt;canvas id="maplibre"&gt;&lt;/canvas&gt;
+    &lt;script type="module"&gt;
+        import { startMapLibre } from 'maplibre-rs';
+
+        async function style() {
+            const style = await (await fetch('https://tiles.openfreemap.org/styles/bright')).json();
+            style.center = [12.338, 45.4385];
+            style.zoom = 14;
+
+            // The background follows a theme a page can switch without editing the layer.
+            style.state = {theme: {default: 'day'}};
+            const background = style.layers.find((layer) =&gt; layer.id === 'background');
+            background.paint['background-color'] =
+                ['match', ['global-state', 'theme'], 'night', '#1d2330', '#f8f4f0'];
+            return style;
+        }
+
+        const SWATCHES = ['#ffffcc', '#a1dab4', '#41b6c4', '#2c7fb8', '#253494', '#fed976', '#feb24c', '#fd8d3c', '#f03b20', '#bd0026'];
+
+        function run(map) {
+            const menu = document.createElement('div');
+            menu.style.cssText = 'position:absolute;top:10px;left:10px;padding:10px;width:150px;' +
+                'background:#fff;border-radius:4px;font:12px sans-serif;';
+            document.body.append(menu);
+
+            const layer = document.createElement('select');
+            layer.innerHTML = '&lt;option value="water"&gt;Water&lt;/option&gt;&lt;option value="building"&gt;Buildings&lt;/option&gt;';
+            menu.append(layer);
+
+            const swatches = document.createElement('div');
+            swatches.style.cssText = 'display:grid;grid-template-columns:repeat(5,1fr);gap:4px;margin:8px 0;';
+            for (const color of SWATCHES) {
+                const swatch = document.createElement('button');
+                swatch.style.cssText = `height:20px;border:none;border-radius:2px;background:${color};cursor:pointer;`;
+                swatch.addEventListener('click', () =&gt; map.setPaintProperty(layer.value, 'fill-color', color));
+                swatches.append(swatch);
+            }
+            menu.append(swatches);
+
+            const theme = document.createElement('button');
+            theme.textContent = 'Night';
+            theme.addEventListener('click', async () =&gt; {
+                const night = theme.textContent === 'Night';
+                await map.setGlobalStateProperty('theme', night ? 'night' : 'day');
+                theme.textContent = night ? 'Day' : 'Night';
+            });
+            menu.append(theme);
+        }
+
+        const map = await startMapLibre(undefined, undefined, JSON.stringify(await style()));
+        if (map) {
+            run(map);
+        }
+    &lt;/script&gt;
+&lt;/body&gt;
+&lt;/html&gt;
+</code></pre>
+</div>
+
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="add-live-realtime-data"><a class="header" href="#add-live-realtime-data">Add Live Realtime Data</a></h1>
+<p>Follow the International Space Station by replacing a GeoJSON source’s data every two seconds with <code>setGeoJsonData</code>.</p>
+<div class="example-map">
+  <iframe src="./demo/index.html?example=../code/add-live-realtime-data.js" title="Add Live Realtime Data" loading="lazy" allow="fullscreen"></iframe>
+</div>
+
+<div class="example-code-tabs">
+<pre class="playground"><code class="language-rust no_run"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// The same updates from Rust in the browser, through the handle `web::run_map` resolves to.
+use std::sync::Arc;
+
+use maplibre::{
+    coords::LatLon,
+    map::handle::MapHandle,
+    render::view_state::{CameraOptions, FlightCurve},
+    style::{source::GeoJsonData, Style},
+};
+use serde::Deserialize;
+use serde_json::json;
+use web::CurrentEnvironment;
+
+const ISS_URL: &amp;str = "https://api.wheretheiss.at/v1/satellites/25544";
+
+pub fn build_style(base: Style) -&gt; Result&lt;Style, serde_json::Error&gt; {
+    let mut document = serde_json::to_value(base)?;
+    document["center"] = json!([0, 0]);
+    document["zoom"] = json!(2);
+    document["sources"]["iss"] = json!({
+        "type": "geojson",
+        "data": {"type": "FeatureCollection", "features": []}
+    });
+    if let Some(layers) = document["layers"].as_array_mut() {
+        layers.push(json!({
+            "id": "iss",
+            "type": "circle",
+            "source": "iss",
+            "paint": {"circle-radius": 8, "circle-color": "#e55e5e"}
+        }));
+    }
+    let mut style: Style = serde_json::from_value(document)?;
+    for (index, layer) in style.layers.iter_mut().enumerate() {
+        layer.index = index as u32 + 1;
+    }
+    Ok(style)
+}
+
+#[derive(Deserialize)]
+struct Position {
+    longitude: f64,
+    latitude: f64,
+}
+
+/// Moves the point to where the International Space Station is now, and the camera with it.
+pub async fn update(map: &amp;MapHandle&lt;CurrentEnvironment&gt;) -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
+    let Position {
+        longitude,
+        latitude,
+    } = reqwest::get(ISS_URL).await?.json().await?;
+    let point = json!({
+        "type": "Feature",
+        "properties": {},
+        "geometry": {"type": "Point", "coordinates": [longitude, latitude]}
+    });
+    let camera = CameraOptions {
+        center: Some(LatLon::new(latitude, longitude)),
+        ..Default::default()
+    };
+    map.call(move |map| {
+        map.set_geojson_data("iss", GeoJsonData::Inline(Arc::new(point)))?;
+        map.fly_to(
+            camera,
+            FlightCurve::Ease {
+                duration: std::time::Duration::from_secs(1),
+            },
+        )
+    })
+    .await??;
+    Ok(())
+}
+
+/// Updates the point every two seconds for as long as the map runs.
+pub async fn follow(map: MapHandle&lt;CurrentEnvironment&gt;) {
+    while !map.is_closed() {
+        if let Err(error) = update(&amp;map).await {
+            tracing::warn!(%error, "the station's position could not be shown");
+        }
+        let delay = js_sys::Promise::new(&amp;mut |resolve, _| {
+            if let Some(window) = web_sys::window() {
+                window
+                    .set_timeout_with_callback_and_timeout_and_arguments_0(&amp;resolve, 2000)
+                    .ok();
+            }
+        });
+        wasm_bindgen_futures::JsFuture::from(delay).await.ok();
+    }
+}
+<span class="boring">}</span></code></pre>
+<pre><code class="language-js">export default async function style() {
+    const style = await (await fetch('https://tiles.openfreemap.org/styles/bright')).json();
+    style.center = [0, 0];
+    style.zoom = 2;
+
+    style.sources['iss'] = {
+        'type': 'geojson',
+        'data': {'type': 'FeatureCollection', 'features': []}
+    };
+    style.layers.push({
+        'id': 'iss',
+        'type': 'circle',
+        'source': 'iss',
+        'paint': {
+            'circle-radius': 8,
+            'circle-color': '#e55e5e'
+        }
+    });
+    return style;
+}
+
+export function run(map) {
+    const update = async () =&gt; {
+        // Where the International Space Station is now.
+        const response = await fetch('https://api.wheretheiss.at/v1/satellites/25544');
+        const {longitude, latitude} = await response.json();
+        await map.setGeoJsonData('iss', {
+            'type': 'Feature',
+            'properties': {},
+            'geometry': {'type': 'Point', 'coordinates': [longitude, latitude]}
+        });
+        await map.easeTo({center: [longitude, latitude], duration: 1000});
+    };
+    const tick = () =&gt; update().catch((error) =&gt; console.error(error)).finally(() =&gt; setTimeout(tick, 2000));
+    tick();
+}
+</code></pre>
+<pre><code class="language-html">&lt;!DOCTYPE html&gt;
+&lt;html lang="en"&gt;
+&lt;head&gt;
+    &lt;meta charset="utf-8" /&gt;
+    &lt;meta name="viewport" content="width=device-width, initial-scale=1.0" /&gt;
+    &lt;title&gt;Add Live Realtime Data&lt;/title&gt;
+    &lt;style&gt;
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #0b0e14;
+        }
+        #maplibre {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+    &lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+    &lt;canvas id="maplibre"&gt;&lt;/canvas&gt;
+    &lt;script type="module"&gt;
+        import { startMapLibre } from 'maplibre-rs';
+
+        async function style() {
+            const style = await (await fetch('https://tiles.openfreemap.org/styles/bright')).json();
+            style.center = [0, 0];
+            style.zoom = 2;
+
+            style.sources['iss'] = {
+                'type': 'geojson',
+                'data': {'type': 'FeatureCollection', 'features': []}
+            };
+            style.layers.push({
+                'id': 'iss',
+                'type': 'circle',
+                'source': 'iss',
+                'paint': {
+                    'circle-radius': 8,
+                    'circle-color': '#e55e5e'
+                }
+            });
+            return style;
+        }
+
+        function run(map) {
+            const update = async () =&gt; {
+                // Where the International Space Station is now.
+                const response = await fetch('https://api.wheretheiss.at/v1/satellites/25544');
+                const {longitude, latitude} = await response.json();
+                await map.setGeoJsonData('iss', {
+                    'type': 'Feature',
+                    'properties': {},
+                    'geometry': {'type': 'Point', 'coordinates': [longitude, latitude]}
+                });
+                await map.easeTo({center: [longitude, latitude], duration: 1000});
+            };
+            const tick = () =&gt; update().catch((error) =&gt; console.error(error)).finally(() =&gt; setTimeout(tick, 2000));
+            tick();
+        }
+
+        const map = await startMapLibre(undefined, undefined, JSON.stringify(await style()));
+        if (map) {
+            run(map);
+        }
+    &lt;/script&gt;
+&lt;/body&gt;
+&lt;/html&gt;
+</code></pre>
+</div>
+
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="development-guide"><a class="header" href="#development-guide">Development Guide</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
