@@ -22,6 +22,10 @@
   - [Style Lines with a Data-Driven Property](./examples/style-lines-with-a-data-driven-property.md)
   - [Create a Heatmap Layer](./examples/create-a-heatmap-layer.md)
   - [Create and Style Clusters](./examples/create-and-style-clusters.md)
+  - [Fly to a Location](./examples/fly-to-a-location.md)
+  - [Get Features Under the Mouse Pointer](./examples/get-features-under-the-mouse-pointer.md)
+  - [Change a Layer's Color](./examples/change-a-layers-color.md)
+  - [Add Live Realtime Data](./examples/add-live-realtime-data.md)
 
 
 - [Development Guide](./development-guide/index.md)
