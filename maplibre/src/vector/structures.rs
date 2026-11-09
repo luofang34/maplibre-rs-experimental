@@ -37,6 +37,9 @@ pub(crate) enum StructureKind {
     Tunnel,
     /// Stands on the terrain surface, as a heatmap's points do.
     Surface,
+    /// Stands on the ground the terrain draws under its centre, as a GL JS circle samples the
+    /// DEM of the terrain tile beneath it.
+    Marker,
     /// Rises from the terrain at the middle of its footprint, as a building does.
     Extrusion,
     /// Lies on the terrain surface at the width its style gives in screen pixels, wherever on
@@ -47,6 +50,9 @@ pub(crate) enum StructureKind {
 pub(crate) fn kind(layer: &StyleLayer) -> Option<StructureKind> {
     if layer.type_ == "heatmap" {
         return Some(StructureKind::Surface);
+    }
+    if layer.type_ == "circle" {
+        return Some(StructureKind::Marker);
     }
     if layer.type_ == "fill-extrusion" {
         return Some(StructureKind::Extrusion);
@@ -96,13 +102,15 @@ pub(crate) fn for_frame(
         });
         return (buffers, false);
     }
-    let key = fingerprint(&world.tiles, style, sources);
+    // The terrain this frame draws, which markers stand on.
+    let drawn = world.resources.get::<TerrainCoverageIndex>();
+    let key = fingerprint(&world.tiles, style, sources, drawn);
     if let Some(cached) = world.resources.get::<CachedProfiles>() {
         if cached.key == key {
             return (cached.buffers.clone(), false);
         }
     }
-    let buffers = Arc::new(prepare(&world.tiles, style, sources));
+    let buffers = Arc::new(prepare(&world.tiles, style, sources, drawn));
     world.resources.insert(CachedProfiles {
         key,
         buffers: buffers.clone(),
@@ -110,8 +118,27 @@ pub(crate) fn for_frame(
     (buffers, true)
 }
 
-fn fingerprint(tiles: &Tiles, style: &Style, sources: &[WorldTileCoords]) -> u64 {
+fn fingerprint(
+    tiles: &Tiles,
+    style: &Style,
+    sources: &[WorldTileCoords],
+    drawn: Option<&TerrainCoverageIndex>,
+) -> u64 {
     let mut hash = std::hash::DefaultHasher::new();
+    // A marker moves when the drawn terrain switches DEM tiles, even if none has loaded. The
+    // index is rebuilt every frame in no fixed order, so its tiles are sorted first.
+    let has_markers = style
+        .layers
+        .iter()
+        .any(|layer| matches!(kind(layer), Some(StructureKind::Marker)));
+    if let Some(drawn) = drawn.filter(|_| has_markers) {
+        let mut terrain: Vec<_> = drawn
+            .rendered_tiles()
+            .map(|coords| (coords, drawn.loaded_dem_for(coords)))
+            .collect();
+        terrain.sort_unstable();
+        terrain.hash(&mut hash);
+    }
     style
         .terrain
         .as_ref()
@@ -144,7 +171,12 @@ fn fingerprint(tiles: &Tiles, style: &Style, sources: &[WorldTileCoords]) -> u64
     hash.finish()
 }
 
-fn prepare(tiles: &Tiles, style: &Style, sources: &[WorldTileCoords]) -> Vec<SpatialBuffer> {
+fn prepare(
+    tiles: &Tiles,
+    style: &Style,
+    sources: &[WorldTileCoords],
+    drawn: Option<&TerrainCoverageIndex>,
+) -> Vec<SpatialBuffer> {
     let Some(dem) = dem_source(style) else {
         return Vec::new();
     };
@@ -182,12 +214,17 @@ fn prepare(tiles: &Tiles, style: &Style, sources: &[WorldTileCoords]) -> Vec<Spa
                 absolute,
                 |position| {
                     let scale = 2_f64.powi(i32::from(u8::from(coords.z)));
-                    index.loaded_ground_cached(
-                        tiles,
-                        (f64::from(coords.x) + f64::from(position[0]) / 4096.0) / scale,
-                        (f64::from(coords.y) + f64::from(position[1]) / 4096.0) / scale,
-                        crate::terrain::DemDetail::Finest,
-                    )
+                    let x = (f64::from(coords.x) + f64::from(position[0]) / 4096.0) / scale;
+                    let y = (f64::from(coords.y) + f64::from(position[1]) / 4096.0) / scale;
+                    let finest = || {
+                        index.loaded_ground_cached(tiles, x, y, crate::terrain::DemDetail::Finest)
+                    };
+                    match kind {
+                        StructureKind::Marker => drawn
+                            .and_then(|drawn| drawn.elevation_at(tiles, x, y))
+                            .or_else(finest),
+                        _ => finest(),
+                    }
                 },
             );
             remaining -= count;
@@ -244,7 +281,7 @@ fn elevate_span(
         }
         return;
     }
-    if matches!(kind, StructureKind::Surface) {
+    if matches!(kind, StructureKind::Surface | StructureKind::Marker) {
         for vertex in vertices {
             if let Some(ground) = sample(vertex.position) {
                 vertex.elevation = ground as f32;
@@ -288,7 +325,10 @@ fn profile(kind: StructureKind, start: f64, end: f64, ground: f64, t: f64, clear
     match kind {
         StructureKind::Bridge => chord.max(ground + separation) + 0.5,
         StructureKind::Tunnel => chord.min(ground - separation) + 0.1,
-        StructureKind::Surface | StructureKind::Extrusion | StructureKind::Overlay => ground,
+        StructureKind::Surface
+        | StructureKind::Marker
+        | StructureKind::Extrusion
+        | StructureKind::Overlay => ground,
     }
 }
 

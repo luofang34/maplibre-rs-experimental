@@ -19,7 +19,9 @@ fn main(
     @builtin(vertex_index) vertex_index: u32,
     @location(0) position: vec2<f32>,
     @location(1) normal: vec2<f32>,
-    // A blur and stroke opacity that vary by feature; negative ones leave the layer's own.
+    // A blur that varies by feature, negative to leave the layer's own; the ground under the
+    // circle, below -1e20 off terrain; the radius at the zoom above; and the corner code, whose
+    // fraction carries a stroke opacity that varies by feature.
     @location(10) per_feature: vec4<f32>,
     @location(2) tile_mercator_coords: vec4<f32>,
     @location(4) translate1: vec4<f32>,
@@ -41,9 +43,11 @@ fn main(
         select(-1.0, 1.0, corner == 1u || corner == 2u),
         select(-1.0, 1.0, corner >= 2u),
     );
+    let corner_code = floor(per_feature.w);
+    let stroke_opacity_code = per_feature.w - corner_code;
     // A subdivided circle names its corner on an eight-by-eight grid, to follow the globe.
-    if per_feature.w > 0.5 {
-        let cell = u32(per_feature.w - 0.5);
+    if corner_code > 0.5 {
+        let cell = u32(corner_code) - 1u;
         extrude = vec2<f32>(f32(cell / 8u), f32(cell % 8u)) / 7.0 * 2.0 - vec2<f32>(1.0);
     }
     // The radius of a feature that varies with zoom is blended toward the zoom above the tile's.
@@ -57,15 +61,14 @@ fn main(
     let center_distance = projection.transition_and_padding.y;
     let scale_with_map = circle_flags.x > 0.5;
     let pitch_with_map = circle_flags.y > 0.5;
+    // Over terrain the circle stands on the ground under its centre, as GL JS draws it.
+    let on_terrain = per_feature.y > -1e20;
+    let height = select(0.0, per_feature.y, on_terrain);
+    let projected_center = project_circle_center(center, height, on_terrain, transform, tile_mercator_coords);
 
     var clip: vec4<f32>;
     var horizon: f32;
     if pitch_with_map {
-        let projected_center = project_tile_position(
-            vec3<f32>(center, 0.0),
-            transform,
-            tile_mercator_coords,
-        );
         var pixels = total;
         if !scale_with_map {
             // Lying on the map already scales with distance; undo it at the center.
@@ -76,20 +79,16 @@ fn main(
         // On the globe the circle keeps its angular size, not the stretch of the Mercator
         // plane it was laid out in, so its corners are turned on the sphere from its center.
         let transition = projection.transition_and_padding.x;
-        let mercator_clip = transform * vec4<f32>(corner_position, 0.0, 1.0);
+        let mercator_clip = transform * vec4<f32>(corner_position, height, 1.0);
         let center_vector = tile_position_on_unit_sphere(center, tile_mercator_coords);
         let angles = corner_offset * tile_mercator_coords.z * PROJECTION_TWO_PI * projection.globe_circle.x;
-        let globe_clip = projection.main_matrix * vec4<f32>(globe_rotate_vector(center_vector, angles), 1.0);
+        let lift = 1.0 + height / projection.transition_and_padding.z;
+        let globe_clip = projection.main_matrix * vec4<f32>(globe_rotate_vector(center_vector, angles) * lift, 1.0);
         clip = interpolate_clip_position(mercator_clip, globe_clip, transition);
         horizon = projected_center.horizon_distance;
     } else {
-        let projected = project_tile_position(
-            vec3<f32>(center, 0.0),
-            transform,
-            tile_mercator_coords,
-        );
-        clip = projected.clip_position;
-        horizon = projected.horizon_distance;
+        clip = projected_center.clip_position;
+        horizon = projected_center.horizon_distance;
         let depth_scale = select(clip.w, center_distance, scale_with_map);
         let px_to_clip = vec2<f32>(2.0 / viewport_width, 2.0 / viewport_height);
         clip = vec4<f32>(clip.xy + extrude * total * px_to_clip * depth_scale, clip.z, clip.w);
@@ -98,7 +97,11 @@ fn main(
 
     // Roughly one pixel of blur keeps the edge antialiased whatever the radius.
     let blur = select(circle_params.z, per_feature.x, per_feature.x >= 0.0);
-    let stroke_opacity = select(circle_params.y, per_feature.y, per_feature.y >= 0.0);
+    let stroke_opacity = select(
+        circle_params.y,
+        (stroke_opacity_code - 0.25) * 2.0,
+        stroke_opacity_code > 0.125,
+    );
     let antialiasblur = -max(1.0 / total, blur);
     return VertexOutput(
         clip,
@@ -108,4 +111,19 @@ fn main(
         vec4<f32>(radius / total, circle_params.x, stroke_opacity, stroke_width),
         horizon,
     );
+}
+
+// The centre of a circle, on the terrain at `height` metres when it stands there; off terrain
+// it is projected exactly as on the map plane.
+fn project_circle_center(
+    center: vec2<f32>,
+    height: f32,
+    on_terrain: bool,
+    transform: mat4x4<f32>,
+    tile_mercator_coords: vec4<f32>,
+) -> ProjectedTilePosition {
+    if on_terrain {
+        return project_tile_position_3d(vec3<f32>(center, height), transform, tile_mercator_coords);
+    }
+    return project_tile_position(vec3<f32>(center, 0.0), transform, tile_mercator_coords);
 }
