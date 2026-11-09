@@ -37,7 +37,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-640a06c4.js";
+            window.path_to_searchindex_js = "../searchindex-754398f8.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-e964a7da.js"></script>
@@ -203,18 +203,22 @@ maplibre-rs project:</p>
 cargo run -p maplibre-demo -- headed --style path/to/style.json --projection globe
 cargo run -p maplibre-demo -- headed --terrain
 </code></pre>
-<p>Left-drag pans, the mouse wheel or <code>+</code>/<code>-</code> zooms around the pointer, right-drag rotates and tilts,
-and <code>W</code>/<code>A</code>/<code>S</code>/<code>D</code> or the arrow keys pan. <code>--frames &lt;n&gt;</code> closes the window after <code>n</code> frames.</p>
-<p><code>--terrain</code> opens the bundled 3D terrain style: OpenStreetMap imagery draped over the MapLibre
-demo elevation tiles around Innsbruck at pitch 70, the scene of the GL JS <code>3d-terrain</code> example,
-on the globe projection. As in GL JS the globe renders as Mercator from zoom 12 up, so the
-curvature appears when zooming out. Scrolling zooms around the terrain under the pointer, or
-around the center when the pointer is in the sky; dragging keeps the grabbed ground point under
-the cursor; the camera is kept above the terrain.
+<p>Left-drag pans, the mouse wheel or <code>+</code>/<code>-</code> zooms around the pointer, right-drag or middle-drag rotates and tilts,
+and <code>W</code>/<code>A</code>/<code>S</code>/<code>D</code> or the arrow keys pan along the camera’s current heading (hold <code>Shift</code> for <code>2.5×</code> turbo speed).
+On macOS trackpads, two-finger scrolling pans the map (like Apple Maps), pinch zooms, two-finger rotate turns the
+compass bearing, and <code>Option</code> + two-finger drag tilts/orbits. A floating GPU navigation HUD in the top-right corner
+provides one-click access to the 3D Compass, <code>2D</code>/<code>3D</code> (<code>AUTO</code> tilt), <code>+</code>/<code>-</code> zoom, <code>Home</code>, and <code>MAP</code>/<code>RTS</code> control
+modes (where <code>RTS</code> mode enables Red Alert-style screen-edge scrolling and right-click panning). <code>--frames &lt;n&gt;</code> closes
+the window after <code>n</code> frames.</p>
+<p><code>--terrain</code> opens the bundled 3D terrain style (<code>maplibre-demo/resources/terrain.json</code>): OpenStreetMap raster imagery
+and Mapterhorn hillshade draped over Mapterhorn <code>raster-dem</code> elevation tiles around Innsbruck at pitch 70, matching
+the GL JS <code>add-3d-terrain</code> example on the globe projection. Auto-Tilt is enabled by default on terrain and globe
+styles, smoothly tilting the camera as you zoom in past zoom 9 while allowing manual pitch override at any time.
+As in GL JS, the globe transitions smoothly to Mercator at high zoom levels, so Earth’s curvature appears when
+zooming out. Scrolling zooms around the terrain under the pointer, or around the center when the pointer is in the sky;
+dragging keeps the grabbed ground point under the cursor; and the camera is kept above the terrain.
 Any style with a <code>terrain</code> root property and a <code>raster-dem</code> source renders the same way; the
-pitch limit follows <code>--max-pitch</code> (85 degrees for <code>--terrain</code>, 60 otherwise, as in GL JS).
-Hillshade layers are parsed but not drawn yet, and 256-pixel raster tiles render one zoom level
-softer than in GL JS because <code>tileSize</code> does not shift the request zoom.</p>
+pitch limit follows <code>--max-pitch</code> (85 degrees for <code>--terrain</code>, 60 otherwise, as in GL JS).</p>
 <p>The web demo (<code>just web-lib build</code>, then <code>just web-demo start</code>) shows the MapLibre demotiles style
 on the globe by default. <code>?style=&lt;url&gt;</code> loads another style and <code>?projection=mercator</code> overrides
 the projection.</p>

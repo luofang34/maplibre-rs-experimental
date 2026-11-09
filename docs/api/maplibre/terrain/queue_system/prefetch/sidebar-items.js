@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["PREFETCH_BYTES"],"fn":["prepare","select"],"struct":["PrefetchCadence"]};
+window.SIDEBAR_ITEMS = {"constant":["PREFETCH_BYTES","STANDARD_PREFETCH_BYTES"],"fn":["prepare","select_with_budget"],"struct":["PrefetchCadence"]};

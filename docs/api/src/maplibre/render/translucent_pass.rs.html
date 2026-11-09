@@ -125,7 +125,16 @@
 <a href=#125 id=125 data-nosnippet>125</a>                previous = group;
 <a href=#126 id=126 data-nosnippet>126</a>            }
 <a href=#127 id=127 data-nosnippet>127</a>        }
-<a href=#128 id=128 data-nosnippet>128</a>        render_pass.finish(world);
-<a href=#129 id=129 data-nosnippet>129</a>    }
-<a href=#130 id=130 data-nosnippet>130</a>}
+<a href=#128 id=128 data-nosnippet>128</a>        <span class="kw">let </span>end_hooks = world
+<a href=#129 id=129 data-nosnippet>129</a>            .resources
+<a href=#130 id=130 data-nosnippet>130</a>            .get::&lt;<span class="kw">crate</span>::render::PassDrawHooks&gt;()
+<a href=#131 id=131 data-nosnippet>131</a>            .map(|hooks| hooks.get_hooks(<span class="kw">crate</span>::render::PassHookPoint::TranslucentPassEnd));
+<a href=#132 id=132 data-nosnippet>132</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(hooks) = end_hooks {
+<a href=#133 id=133 data-nosnippet>133</a>            <span class="kw">for </span>hook <span class="kw">in </span>hooks {
+<a href=#134 id=134 data-nosnippet>134</a>                hook.draw(<span class="kw-2">&amp;mut </span>render_pass, world);
+<a href=#135 id=135 data-nosnippet>135</a>            }
+<a href=#136 id=136 data-nosnippet>136</a>        }
+<a href=#137 id=137 data-nosnippet>137</a>        render_pass.finish(world);
+<a href=#138 id=138 data-nosnippet>138</a>    }
+<a href=#139 id=139 data-nosnippet>139</a>}
 </code></pre></div></section></main></body></html>

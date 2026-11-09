@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-640a06c4.js";
+            window.path_to_searchindex_js = "searchindex-754398f8.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-e964a7da.js"></script>
@@ -248,6 +248,115 @@ in progress</p>
 <h1 id="developer-log"><a class="header" href="#developer-log">Developer Log</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="user-guide"><a class="header" href="#user-guide">User Guide</a></h1>
+<p><code>maplibre-rs</code> provides a portable, GPU-accelerated vector and 3D terrain map renderer built on <code>wgpu</code>, running natively on <strong>macOS, Windows, Linux, iOS/iPadOS, Android, Apple Vision Pro</strong>, and in the browser via <strong>WebAssembly (WebGPU / WebGL2)</strong>.</p>
+<hr>
+<h2 id="navigation-hud--camera-controls"><a class="header" href="#navigation-hud--camera-controls">Navigation HUD &amp; Camera Controls</a></h2>
+<p>Windowed and web builds powered by <code>maplibre-winit</code> include a zero-dependency <strong>GPU-rendered floating Navigation HUD</strong> in the top-right corner of the viewport, paired with unified cross-platform input controls designed for both interactive cartography (<strong>MAP</strong> mode) and strategy / simulation games (<strong>RTS</strong> mode).</p>
+<h3 id="floating-navigation-toolbar"><a class="header" href="#floating-navigation-toolbar">Floating Navigation Toolbar</a></h3>
+<p>The top-right HUD pill (<code>maplibre::hud</code>) renders directly in the <code>wgpu</code> pass and adapts automatically to HiDPI scales and safe-area insets:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Button</th><th style="text-align: left">Function</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><strong>Compass</strong></td><td style="text-align: left">Displays a 3D-foreshortened north-south needle tilted by the current camera pitch. <strong>Single-click</strong> resets bearing to North (<code>0°</code>); <strong>double-click</strong> resets both bearing (<code>0°</code>) and pitch (<code>0°</code>, locking <code>2D</code>).</td></tr>
+<tr><td style="text-align: left"><strong><code>2D</code> / <code>3D</code> + <code>AUTO</code></strong></td><td style="text-align: left">Toggles between flat top-down (<code>0°</code> pitch) and tilted 3D perspective. On 3D Terrain and Globe styles, an illuminated <strong><code>AUTO</code></strong> sub-badge indicates that zoom-driven <strong>Auto-Tilt</strong> is active. Clicking <code>2D</code>/<code>3D</code> when <code>AUTO</code> is off re-engages Auto-Tilt on terrain/globe styles.</td></tr>
+<tr><td style="text-align: left"><strong><code>+</code> / <code>-</code></strong></td><td style="text-align: left">Smoothly zooms in or out by 1 zoom level around the viewport center.</td></tr>
+<tr><td style="text-align: left"><strong>Home (<code>⌂</code>)</strong></td><td style="text-align: left">Smoothly flies back to the style’s initial center, zoom, pitch, and bearing, and re-enables Auto-Tilt if supported by the style.</td></tr>
+<tr><td style="text-align: left"><strong><code>MAP</code> / <code>RTS</code></strong></td><td style="text-align: left">Switches the mouse and edge-scrolling control profile between standard map navigation (<strong><code>MAP</code></strong>) and Real-Time Strategy camera ergonomics (<strong><code>RTS</code></strong>).</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="automatic-zoom-driven-tilt-auto-tilt"><a class="header" href="#automatic-zoom-driven-tilt-auto-tilt">Automatic Zoom-Driven Tilt (<code>Auto-Tilt</code>)</a></h3>
+<p>On styles with 3D terrain (<code>"terrain"</code>) or <code>"globe"</code> projection, <strong>Auto-Tilt</strong> is enabled by default (<code>AUTO</code> badge lit in green):</p>
+<ul>
+<li><strong>Zoom <code>≤ 9.0</code></strong>: Camera remains flat (<code>0°</code> pitch) for an unobstructed global or regional overview.</li>
+<li><strong>Zoom <code>9.0 → 14.5</code></strong>: Camera smoothly interpolates pitch along a cubic Hermite curve from <code>0°</code> up to <code>58°</code> as you zoom in toward mountains, valleys, and city streets.</li>
+<li><strong>Zoom <code>14.5 → 16.5</code></strong>: Continues tilting smoothly up to <code>65°</code>.</li>
+<li><strong>Manual Override</strong>: Manually tilting the camera (via right/middle mouse drag, <code>Option</code> + trackpad drag, two-finger vertical touch drag, or <code>R</code>/<code>F</code> keys) automatically disengages <code>AUTO</code> and preserves your custom pitch until you click the <code>2D</code>/<code>3D</code> HUD button or <strong>Home (<code>⌂</code>)</strong>.</li>
+</ul>
+<hr>
+<h2 id="cross-platform-input-controls"><a class="header" href="#cross-platform-input-controls">Cross-Platform Input Controls</a></h2>
+<h3 id="desktop-mouse--keyboard"><a class="header" href="#desktop-mouse--keyboard">Desktop Mouse &amp; Keyboard</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Action</th><th style="text-align: left"><code>MAP</code> Profile (Default)</th><th style="text-align: left"><code>RTS</code> Profile (Strategy / Simulation)</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><strong>Pan Map</strong></td><td style="text-align: left"><strong>Left-click drag</strong> (ground-point anchored)</td><td style="text-align: left"><strong>Right-click drag</strong> or <strong>Left-click drag</strong></td></tr>
+<tr><td style="text-align: left"><strong>Orbit (Bearing &amp; Pitch)</strong></td><td style="text-align: left"><strong>Right-click drag</strong> or <strong>Middle-click drag</strong></td><td style="text-align: left"><strong>Middle-click drag</strong> or <strong><code>Alt</code>/<code>Option</code> + Left-drag</strong></td></tr>
+<tr><td style="text-align: left"><strong>Zoom</strong></td><td style="text-align: left"><strong>Mouse wheel</strong> (around cursor ground point)</td><td style="text-align: left"><strong>Mouse wheel</strong> (around cursor ground point)</td></tr>
+<tr><td style="text-align: left"><strong>Screen-Edge Scroll</strong></td><td style="text-align: left">Optional (<code>edge_scroll_enabled</code>)</td><td style="text-align: left"><strong>Active by default</strong> when cursor nears window edges (<code>36 px</code> zone)</td></tr>
+<tr><td style="text-align: left"><strong>Keyboard Pan</strong></td><td style="text-align: left"><strong><code>W</code>/<code>A</code>/<code>S</code>/<code>D</code></strong> or <strong>Arrow keys</strong></td><td style="text-align: left"><strong><code>W</code>/<code>A</code>/<code>S</code>/<code>D</code></strong> or <strong>Arrow keys</strong></td></tr>
+<tr><td style="text-align: left"><strong>Keyboard Orbit / Tilt</strong></td><td style="text-align: left"><strong><code>Q</code>/<code>E</code></strong> (rotate bearing), <strong><code>R</code>/<code>F</code></strong> (tilt pitch)</td><td style="text-align: left"><strong><code>Q</code>/<code>E</code></strong> (rotate bearing), <strong><code>R</code>/<code>F</code></strong> (tilt pitch)</td></tr>
+<tr><td style="text-align: left"><strong>Turbo Speed (<code>2.5×</code>)</strong></td><td style="text-align: left">Hold <strong><code>Shift</code></strong> during keyboard pan or edge-scroll</td><td style="text-align: left">Hold <strong><code>Shift</code></strong> during keyboard pan or edge-scroll</td></tr>
+<tr><td style="text-align: left"><strong>Reset Orientation</strong></td><td style="text-align: left"><strong><code>N</code></strong> (reset North), <strong><code>0</code></strong> or <strong><code>H</code></strong> (reset Home)</td><td style="text-align: left"><strong><code>N</code></strong> (reset North), <strong><code>0</code></strong> or <strong><code>H</code></strong> (reset Home)</td></tr>
+</tbody>
+</table>
+</div>
+<blockquote>
+<p><strong>Camera-Aligned Edge &amp; Keyboard Scrolling</strong>: Both keyboard panning and screen-edge scrolling follow the camera’s current <strong>bearing</strong> and <strong>pitch</strong>—pushing the mouse to the top edge always advances toward the horizon the camera is facing, and pushing to the bottom edge retreats toward the camera nadir.</p>
+</blockquote>
+<h3 id="macos-trackpad-winit-gesture-recognition"><a class="header" href="#macos-trackpad-winit-gesture-recognition">macOS Trackpad (<code>winit</code> Gesture Recognition)</a></h3>
+<p><code>maplibre-winit</code> automatically distinguishes multi-touch trackpad scroll streams from discrete mouse scroll wheels:</p>
+<ul>
+<li><strong>Two-Finger Scroll (Horizontal &amp; Vertical)</strong>: Smoothly pans the map in any direction (matching <strong>Apple Maps</strong> on macOS).</li>
+<li><strong>Two-Finger Pinch (<code>TouchpadMagnify</code>)</strong>: Smoothly zooms in/out anchored to the ground point under the pointer (or <strong><code>Cmd</code> / <code>Ctrl</code> + two-finger vertical scroll</strong>).</li>
+<li><strong>Two-Finger Rotate (<code>TouchpadRotate</code>)</strong>: Rotates the camera bearing around the pointer ground point.</li>
+<li><strong><code>Option</code> (<code>Alt</code>) + Two-Finger Scroll</strong>: Tilts camera pitch (vertical) and orbits bearing (horizontal), pausing Auto-Tilt for manual inspection.</li>
+</ul>
+<h3 id="touch-devices-iphone-ipad-android-touch-web"><a class="header" href="#touch-devices-iphone-ipad-android-touch-web">Touch Devices (iPhone, iPad, Android, Touch Web)</a></h3>
+<ul>
+<li><strong>1-Finger Drag</strong>: Ground-anchored pan.</li>
+<li><strong>2-Finger Pinch &amp; Rotate</strong>: Simultaneous zoom and bearing rotation around the pinch midpoint.</li>
+<li><strong>2-Finger Parallel Vertical Drag</strong>: Tilts the camera pitch (<code>0° ↔ max_pitch</code>), automatically disengaging Auto-Tilt.</li>
+<li><strong>Double-Tap (1 Finger)</strong>: Smoothly zooms in (<code>+1</code> level) at the tapped location.</li>
+<li><strong>Two-Finger Tap</strong>: Smoothly zooms out (<code>-1</code> level).</li>
+<li><strong>Double-Tap &amp; Drag (1 Finger)</strong>: One-handed continuous vertical zoom.</li>
+</ul>
+<hr>
+<h2 id="configuring-controls-in-downstream-applications"><a class="header" href="#configuring-controls-in-downstream-applications">Configuring Controls in Downstream Applications</a></h2>
+<p>Downstream applications and games using <a href="api/maplibre_winit/struct.HeadedMapOptions.html"><code>HeadedMapOptions</code></a> can customize the HUD visibility, Auto-Tilt behavior, zoom speed, and edge-scrolling parameters:</p>
+<pre class="playground"><code class="language-rust no_run">use std::path::PathBuf;
+use maplibre::{render::settings::WgpuSettings, style::Style};
+use maplibre_winit::{run_headed_map, HeadedMapOptions, WinitMapWindowConfig};
+
+fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
+    let style = Style::default();
+
+    run_headed_map(
+        Some(PathBuf::from("./maplibre-cache")),
+        WinitMapWindowConfig::new("Custom RTS Map".to_string()),
+        WgpuSettings::default(),
+        style,
+        HeadedMapOptions {
+            max_pitch_degrees: 85.0,
+            // Show or hide the top-right GPU navigation HUD
+            show_navigation_controls: true,
+            // Force Auto-Tilt on (`Some(true)`), off (`Some(false)`), or automatic per style (`None`)
+            auto_tilt_override: Some(true),
+            // Scale scroll-wheel and pinch zoom speed (1.0 = default)
+            zoom_sensitivity: 1.0,
+            // Enable RTS screen-edge scrolling and customize its base speed (physical px/sec)
+            edge_scroll_enabled: true,
+            edge_scroll_speed_px_per_sec: 1100.0,
+            ..Default::default()
+        },
+    )?;
+    Ok(())
+}</code></pre>
+<hr>
+<h2 id="predictive-tile-streaming-for-pitched-3d-views"><a class="header" href="#predictive-tile-streaming-for-pitched-3d-views">Predictive Tile Streaming for Pitched 3D Views</a></h2>
+<p>At steep camera pitches (<code>60°–85°</code>), tiles entering the bottom edge of the screen (near the camera nadir) are geometrically much closer to the eye than tiles near the top horizon—meaning each screen pixel at the bottom edge traverses world space several times faster during backward scrolling.</p>
+<p>To prevent blank or unbaked tiles when edge-scrolling backward (<code>S</code> / Down arrow / bottom screen edge), <code>maplibre-rs</code> employs a four-stage predictive streaming pipeline:</p>
+<ol>
+<li><strong>Pitched Nadir Apron (<code>ViewState::pitched_nadir_apron</code>)</strong>: Whenever camera pitch exceeds <code>20°</code>, the loose tile covering frustum automatically unions a nadir-shifted camera apron (<code>0.68 × d_nadir</code> behind the bottom viewport edge), pre-queuing DEM and vector/raster tiles before you even move.</li>
+<li><strong>Velocity-Predictive <code>PrefetchView</code></strong>: <code>maplibre-winit</code> tracks an exponentially smoothed pan velocity vector and projects a predictive camera <code>0.80 s</code> ahead of motion (plus an additional nadir lead when retreating), unioning its tile coverage into the loose request pass.</li>
+<li><strong>GPU Drape Pre-Baking (<code>DrapePrefetchRequests</code>)</strong>: Off-screen tiles in the loose covering ring are pre-baked into <code>2048×2048</code> terrain drape textures on the GPU (<code>64 MiB</code> cache budget) before they cross into the visible viewport.</li>
+<li><strong>Coarse <code>z - 3</code> Raster Overview Fallback</strong>: Terrain styles automatically prefetch and retain a low-cost <code>zoom - 3</code> coarse raster ancestor pyramid (<code>1 tile</code> per <code>64</code> fine tiles), guaranteeing instantaneous terrain-draped imagery even under rapid camera slews.</li>
+</ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="examples"><a class="header" href="#examples">Examples</a></h1>
 <p>Each example reproduces the map of a <a href="https://maplibre.org/maplibre-gl-js/docs/examples/">MapLibre GL JS example</a> with maplibre-rs compiled to WebAssembly.</p>
@@ -845,7 +954,7 @@ fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
 
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="add-3d-terrain"><a class="header" href="#add-3d-terrain">Add 3D Terrain</a></h1>
-<p>Go beyond hillshade and show elevation in actual 3D.</p>
+<p>Go beyond hillshade and show elevation in actual 3D with automatic zoom-driven tilt (<code>Auto-Tilt</code>), a floating GPU navigation HUD (<code>Compass</code>, <code>2D/3D</code>, <code>MAP/RTS</code>), and predictive nadir tile streaming.</p>
 <div class="example-map">
   <iframe src="./demo/index.html?example=../code/add-3d-terrain.js" title="Add 3D Terrain" loading="lazy" allow="fullscreen"></iframe>
 </div>
@@ -3445,18 +3554,22 @@ maplibre-rs project:</p>
 cargo run -p maplibre-demo -- headed --style path/to/style.json --projection globe
 cargo run -p maplibre-demo -- headed --terrain
 </code></pre>
-<p>Left-drag pans, the mouse wheel or <code>+</code>/<code>-</code> zooms around the pointer, right-drag rotates and tilts,
-and <code>W</code>/<code>A</code>/<code>S</code>/<code>D</code> or the arrow keys pan. <code>--frames &lt;n&gt;</code> closes the window after <code>n</code> frames.</p>
-<p><code>--terrain</code> opens the bundled 3D terrain style: OpenStreetMap imagery draped over the MapLibre
-demo elevation tiles around Innsbruck at pitch 70, the scene of the GL JS <code>3d-terrain</code> example,
-on the globe projection. As in GL JS the globe renders as Mercator from zoom 12 up, so the
-curvature appears when zooming out. Scrolling zooms around the terrain under the pointer, or
-around the center when the pointer is in the sky; dragging keeps the grabbed ground point under
-the cursor; the camera is kept above the terrain.
+<p>Left-drag pans, the mouse wheel or <code>+</code>/<code>-</code> zooms around the pointer, right-drag or middle-drag rotates and tilts,
+and <code>W</code>/<code>A</code>/<code>S</code>/<code>D</code> or the arrow keys pan along the camera’s current heading (hold <code>Shift</code> for <code>2.5×</code> turbo speed).
+On macOS trackpads, two-finger scrolling pans the map (like Apple Maps), pinch zooms, two-finger rotate turns the
+compass bearing, and <code>Option</code> + two-finger drag tilts/orbits. A floating GPU navigation HUD in the top-right corner
+provides one-click access to the 3D Compass, <code>2D</code>/<code>3D</code> (<code>AUTO</code> tilt), <code>+</code>/<code>-</code> zoom, <code>Home</code>, and <code>MAP</code>/<code>RTS</code> control
+modes (where <code>RTS</code> mode enables Red Alert-style screen-edge scrolling and right-click panning). <code>--frames &lt;n&gt;</code> closes
+the window after <code>n</code> frames.</p>
+<p><code>--terrain</code> opens the bundled 3D terrain style (<code>maplibre-demo/resources/terrain.json</code>): OpenStreetMap raster imagery
+and Mapterhorn hillshade draped over Mapterhorn <code>raster-dem</code> elevation tiles around Innsbruck at pitch 70, matching
+the GL JS <code>add-3d-terrain</code> example on the globe projection. Auto-Tilt is enabled by default on terrain and globe
+styles, smoothly tilting the camera as you zoom in past zoom 9 while allowing manual pitch override at any time.
+As in GL JS, the globe transitions smoothly to Mercator at high zoom levels, so Earth’s curvature appears when
+zooming out. Scrolling zooms around the terrain under the pointer, or around the center when the pointer is in the sky;
+dragging keeps the grabbed ground point under the cursor; and the camera is kept above the terrain.
 Any style with a <code>terrain</code> root property and a <code>raster-dem</code> source renders the same way; the
-pitch limit follows <code>--max-pitch</code> (85 degrees for <code>--terrain</code>, 60 otherwise, as in GL JS).
-Hillshade layers are parsed but not drawn yet, and 256-pixel raster tiles render one zoom level
-softer than in GL JS because <code>tileSize</code> does not shift the request zoom.</p>
+pitch limit follows <code>--max-pitch</code> (85 degrees for <code>--terrain</code>, 60 otherwise, as in GL JS).</p>
 <p>The web demo (<code>just web-lib build</code>, then <code>just web-demo start</code>) shows the MapLibre demotiles style
 on the globe by default. <code>?style=&lt;url&gt;</code> loads another style and <code>?projection=mercator</code> overrides
 the projection.</p>

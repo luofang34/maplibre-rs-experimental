@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["HUD_HEIGHT","HUD_MARGIN_RIGHT","HUD_MARGIN_TOP","HUD_WIDTH"],"enum":["HudButton"],"fn":["draw","queue_system","resource_system"],"struct":["HudFrame","HudShader","NavigationHudGpu","NavigationHudPipeline","NavigationHudPlugin","NavigationHudState"]};
