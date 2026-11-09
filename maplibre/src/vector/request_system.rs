@@ -282,6 +282,7 @@ impl<E: Environment, T: VectorTransferables> RequestSystem<E, T> {
         if world.tiles.spawn_mut(coords).is_none() {
             return Err(SystemError::InvalidTile { coords });
         }
+        let refetch = tile_retry::due(world, coords, RequestKind::Vector);
         let attempt = tile_retry::next_attempt(world);
         let issued_for = only_sources.clone();
         let worker_style = style.share(|style| {
@@ -321,6 +322,7 @@ impl<E: Environment, T: VectorTransferables> RequestSystem<E, T> {
                     overscaled_zoom,
                     pixel_ratio,
                     only_sources,
+                    refetch,
                 },
                 fetch_vector_apc::<E::OffscreenKernelEnvironment, T, _>,
             )
