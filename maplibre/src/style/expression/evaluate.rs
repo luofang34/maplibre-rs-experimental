@@ -7,6 +7,7 @@ use thiserror::Error;
 use super::{
     ast::{Expression, FeatureProperty, Global},
     collation::{is_supported_script, Collation},
+    feature_identity::{is_internal_property, GEOMETRY_TYPE_PROPERTY, ID_PROPERTY},
     geometry::{Geometry, GEOMETRY_PROPERTY},
     number_format,
     value::{Type, Value},
@@ -155,16 +156,24 @@ impl Expression {
                 .and_then(|state| state.get(key))
                 .cloned()
                 .unwrap_or(Value::Null)),
-            Self::Feature(FeatureProperty::Id) => Ok(context.id.cloned().unwrap_or(Value::Null)),
-            Self::Feature(FeatureProperty::GeometryType) => {
-                Ok(context.geometry_type.map_or(Value::Null, Value::from))
-            }
+            // Outside a filter, the feature's own properties carry its id and geometry type.
+            Self::Feature(FeatureProperty::Id) => Ok(context
+                .id
+                .or_else(|| context.properties?.get(ID_PROPERTY))
+                .cloned()
+                .unwrap_or(Value::Null)),
+            Self::Feature(FeatureProperty::GeometryType) => Ok(context
+                .geometry_type
+                .map(Value::from)
+                .or_else(|| context.properties?.get(GEOMETRY_TYPE_PROPERTY).cloned())
+                .unwrap_or(Value::Null)),
             Self::Feature(FeatureProperty::Properties) => Ok(Value::Object(
                 context
                     .properties
                     .map(|properties| {
                         properties
                             .iter()
+                            .filter(|(key, _)| !is_internal_property(key))
                             .map(|(key, value)| (key.clone(), value.clone()))
                             .collect()
                     })

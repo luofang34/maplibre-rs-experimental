@@ -76,14 +76,14 @@ impl From<RenderedSymbol> for QueriedFeature {
     }
 }
 
-/// A feature's properties as its source gives them, without the feature state an expression
-/// reads through them.
+/// A feature's properties as its source gives them, without the ones the renderer adds for
+/// expressions to read, such as feature state.
 pub(crate) fn source_properties(
     properties: &crate::style::expression::FeatureProperties,
 ) -> BTreeMap<String, serde_json::Value> {
     properties
         .iter()
-        .filter(|(key, _)| !key.starts_with(crate::style::expression::FEATURE_STATE_PREFIX))
+        .filter(|(key, _)| !crate::style::expression::is_internal_property(key))
         .map(|(key, value)| (key.clone(), value.to_json()))
         .collect()
 }

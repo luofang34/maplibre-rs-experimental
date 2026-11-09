@@ -234,7 +234,7 @@ impl LayerValidation<'_> {
 fn missing_input(expression: &Expression, evaluation: Evaluation) -> Option<&'static str> {
     let mut missing = match expression {
         Expression::Feature(FeatureProperty::Id | FeatureProperty::GeometryType)
-            if !matches!(evaluation, Evaluation::Filter) =>
+            if !matches!(evaluation, Evaluation::Filter | Evaluation::Feature) =>
         {
             Some("this property evaluation has no feature ID or geometry type")
         }

@@ -235,6 +235,48 @@ fn two_symbol_layers_on_one_source_layer_each_keep_their_bucket() {
     );
 }
 
+/// Layout reads a feature's id and geometry type, from a vector tile and from GeoJSON.
+#[test]
+fn labels_read_the_id_and_geometry_type_of_their_feature() {
+    let layer = |source: &str| {
+        let mut json = serde_json::json!({
+            "id": "label", "type": "symbol", "source": source,
+            "layout": {"text-field": ["concat", ["geometry-type"], ["to-string", ["id"]]]}
+        });
+        if source == "chart" {
+            json["source-layer"] = "route_points".into();
+        }
+        style_layer(json)
+    };
+    let style: Style = serde_json::from_value(serde_json::json!({
+        "version": 8, "sources": {}, "layers": [layer("chart")]
+    }))
+    .expect("style");
+    style
+        .validate()
+        .expect("layout reads the id and geometry type");
+
+    let tiled = processed(&hex_bytes(LABELLED_POINT_TILE), &layer("chart"));
+    assert_eq!(
+        label_texts(&tiled),
+        [("label".to_string(), vec!["Point1".to_string()])]
+    );
+    let geojson = serde_json::json!({"type": "Feature", "id": 7, "properties": {},
+        "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}});
+    let from_geojson = process_geojson_layers(
+        &geojson,
+        "pts",
+        vec![layer("pts")],
+        WorldTileCoords::default(),
+        ProjectionType::Mercator,
+    )
+    .expect("GeoJSON processes");
+    assert_eq!(
+        label_texts(&from_geojson),
+        [("label".to_string(), vec!["Point7".to_string()])]
+    );
+}
+
 #[test]
 fn geojson_symbol_layers_produce_symbol_buckets() {
     let geojson = serde_json::json!({
