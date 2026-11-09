@@ -37,7 +37,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-754398f8.js";
+            window.path_to_searchindex_js = "../searchindex-bbe9512c.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-e964a7da.js"></script>
@@ -208,19 +208,25 @@ pub fn build_style(mut style: Style) -&gt; Style {
     style.pitch = Some(45.0);
     style.bearing = Some(-17.6);
 
-    style.sources.insert(
-        "openfreemap".to_string(),
-        Source::Vector(VectorSource {
-            attribution: None,
-            bounds: None,
-            maxzoom: None,
-            minzoom: None,
-            scheme: None,
-            tiles: None,
-            tile_size: None,
-            url: Some("https://tiles.openfreemap.org/planet".to_string()),
-        }),
-    );
+    let building_source = if style.sources.contains_key("openmaptiles") {
+        "openmaptiles".to_string()
+    } else {
+        style.sources.insert(
+            "openfreemap".to_string(),
+            Source::Vector(VectorSource {
+                attribution: None,
+                bounds: None,
+                maxzoom: None,
+                minzoom: None,
+                scheme: None,
+                tiles: None,
+                tile_size: None,
+                url: Some("https://tiles.openfreemap.org/planet".to_string()),
+            }),
+        );
+        "openfreemap".to_string()
+    };
+    style.layers.retain(|layer| layer.id != "building-top");
 
     // Insert the layer beneath the first symbol layer with labels.
     let label_layer_index = style
@@ -239,9 +245,9 @@ pub fn build_style(mut style: Style) -&gt; Style {
         StyleLayer {
             id: "3d-buildings".to_string(),
             type_: "fill-extrusion".to_string(),
-            source: Some("openfreemap".to_string()),
+            source: Some(building_source),
             source_layer: Some("building".to_string()),
-            minzoom: Some(15.0),
+            minzoom: Some(14.0),
             filter: Some(json!(["!=", ["get", "hide_3d"], true])),
             paint: Some(LayerPaint::FillExtrusion(FillExtrusionPaint {
                 fill_extrusion_color: Some(StyleProperty::parse(&amp;json!([
@@ -255,23 +261,10 @@ pub fn build_style(mut style: Style) -&gt; Style {
                     400,
                     "lightblue"
                 ]))),
-                fill_extrusion_height: Some(StyleProperty::parse(&amp;json!([
-                    "interpolate",
-                    ["linear"],
-                    ["zoom"],
-                    15,
-                    0,
-                    16,
-                    ["get", "render_height"]
-                ]))),
+                fill_extrusion_height: Some(StyleProperty::parse(&amp;json!(["get", "render_height"]))),
                 fill_extrusion_base: Some(StyleProperty::parse(&amp;json!([
-                    "interpolate",
-                    ["linear"],
-                    ["zoom"],
-                    15,
-                    0,
-                    16,
-                    ["get", "render_min_height"]
+                    "get",
+                    "render_min_height"
                 ]))),
                 ..Default::default()
             })),
@@ -308,20 +301,24 @@ fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
     style.pitch = 45;
     style.bearing = -17.6;
 
-    style.sources.openfreemap = {
-        url: 'https://tiles.openfreemap.org/planet',
-        type: 'vector'
-    };
+    const buildingSource = style.sources.openmaptiles ? 'openmaptiles' : 'openfreemap';
+    if (!style.sources[buildingSource]) {
+        style.sources[buildingSource] = {
+            url: 'https://tiles.openfreemap.org/planet',
+            type: 'vector'
+        };
+    }
+    style.layers = style.layers.filter((layer) =&gt; layer.id !== 'building-top');
     // Insert the layer beneath the first symbol layer with labels.
     const labelLayer = style.layers.findIndex(
         (layer) =&gt; layer.type === 'symbol' &amp;&amp; layer.layout?.['text-field']
     );
     style.layers.splice(labelLayer &lt; 0 ? style.layers.length : labelLayer, 0, {
         'id': '3d-buildings',
-        'source': 'openfreemap',
+        'source': buildingSource,
         'source-layer': 'building',
         'type': 'fill-extrusion',
-        'minzoom': 15,
+        'minzoom': 14,
         'filter': ['!=', ['get', 'hide_3d'], true],
         'paint': {
             'fill-extrusion-color': [
@@ -329,24 +326,8 @@ fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
                 ['linear'],
                 ['get', 'render_height'], 0, 'lightgray', 200, 'royalblue', 400, 'lightblue'
             ],
-            'fill-extrusion-height': [
-                'interpolate',
-                ['linear'],
-                ['zoom'],
-                15,
-                0,
-                16,
-                ['get', 'render_height']
-            ],
-            'fill-extrusion-base': [
-                'interpolate',
-                ['linear'],
-                ['zoom'],
-                15,
-                0,
-                16,
-                ['get', 'render_min_height']
-            ]
+            'fill-extrusion-height': ['get', 'render_height'],
+            'fill-extrusion-base': ['get', 'render_min_height']
         }
     });
     return style;
@@ -390,20 +371,24 @@ fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
             style.pitch = 45;
             style.bearing = -17.6;
 
-            style.sources.openfreemap = {
-                url: 'https://tiles.openfreemap.org/planet',
-                type: 'vector'
-            };
+            const buildingSource = style.sources.openmaptiles ? 'openmaptiles' : 'openfreemap';
+            if (!style.sources[buildingSource]) {
+                style.sources[buildingSource] = {
+                    url: 'https://tiles.openfreemap.org/planet',
+                    type: 'vector'
+                };
+            }
+            style.layers = style.layers.filter((layer) =&gt; layer.id !== 'building-top');
             // Insert the layer beneath the first symbol layer with labels.
             const labelLayer = style.layers.findIndex(
                 (layer) =&gt; layer.type === 'symbol' &amp;&amp; layer.layout?.['text-field']
             );
             style.layers.splice(labelLayer &lt; 0 ? style.layers.length : labelLayer, 0, {
                 'id': '3d-buildings',
-                'source': 'openfreemap',
+                'source': buildingSource,
                 'source-layer': 'building',
                 'type': 'fill-extrusion',
-                'minzoom': 15,
+                'minzoom': 14,
                 'filter': ['!=', ['get', 'hide_3d'], true],
                 'paint': {
                     'fill-extrusion-color': [
@@ -411,24 +396,8 @@ fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
                         ['linear'],
                         ['get', 'render_height'], 0, 'lightgray', 200, 'royalblue', 400, 'lightblue'
                     ],
-                    'fill-extrusion-height': [
-                        'interpolate',
-                        ['linear'],
-                        ['zoom'],
-                        15,
-                        0,
-                        16,
-                        ['get', 'render_height']
-                    ],
-                    'fill-extrusion-base': [
-                        'interpolate',
-                        ['linear'],
-                        ['zoom'],
-                        15,
-                        0,
-                        16,
-                        ['get', 'render_min_height']
-                    ]
+                    'fill-extrusion-height': ['get', 'render_height'],
+                    'fill-extrusion-base': ['get', 'render_min_height']
                 }
             });
             return style;

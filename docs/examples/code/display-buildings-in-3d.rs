@@ -23,19 +23,25 @@ pub fn build_style(mut style: Style) -> Style {
     style.pitch = Some(45.0);
     style.bearing = Some(-17.6);
 
-    style.sources.insert(
-        "openfreemap".to_string(),
-        Source::Vector(VectorSource {
-            attribution: None,
-            bounds: None,
-            maxzoom: None,
-            minzoom: None,
-            scheme: None,
-            tiles: None,
-            tile_size: None,
-            url: Some("https://tiles.openfreemap.org/planet".to_string()),
-        }),
-    );
+    let building_source = if style.sources.contains_key("openmaptiles") {
+        "openmaptiles".to_string()
+    } else {
+        style.sources.insert(
+            "openfreemap".to_string(),
+            Source::Vector(VectorSource {
+                attribution: None,
+                bounds: None,
+                maxzoom: None,
+                minzoom: None,
+                scheme: None,
+                tiles: None,
+                tile_size: None,
+                url: Some("https://tiles.openfreemap.org/planet".to_string()),
+            }),
+        );
+        "openfreemap".to_string()
+    };
+    style.layers.retain(|layer| layer.id != "building-top");
 
     // Insert the layer beneath the first symbol layer with labels.
     let label_layer_index = style
@@ -54,9 +60,9 @@ pub fn build_style(mut style: Style) -> Style {
         StyleLayer {
             id: "3d-buildings".to_string(),
             type_: "fill-extrusion".to_string(),
-            source: Some("openfreemap".to_string()),
+            source: Some(building_source),
             source_layer: Some("building".to_string()),
-            minzoom: Some(15.0),
+            minzoom: Some(14.0),
             filter: Some(json!(["!=", ["get", "hide_3d"], true])),
             paint: Some(LayerPaint::FillExtrusion(FillExtrusionPaint {
                 fill_extrusion_color: Some(StyleProperty::parse(&json!([
@@ -70,23 +76,10 @@ pub fn build_style(mut style: Style) -> Style {
                     400,
                     "lightblue"
                 ]))),
-                fill_extrusion_height: Some(StyleProperty::parse(&json!([
-                    "interpolate",
-                    ["linear"],
-                    ["zoom"],
-                    15,
-                    0,
-                    16,
-                    ["get", "render_height"]
-                ]))),
+                fill_extrusion_height: Some(StyleProperty::parse(&json!(["get", "render_height"]))),
                 fill_extrusion_base: Some(StyleProperty::parse(&json!([
-                    "interpolate",
-                    ["linear"],
-                    ["zoom"],
-                    15,
-                    0,
-                    16,
-                    ["get", "render_min_height"]
+                    "get",
+                    "render_min_height"
                 ]))),
                 ..Default::default()
             })),

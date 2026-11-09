@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["glyphs","requests"],"struct":["NamesAsked"],"type":["GlyphRequests"]};
+window.SIDEBAR_ITEMS = {"fn":["glyphs","requests","requests_from_tile"],"struct":["NamesAsked"],"type":["GlyphRequests"]};
