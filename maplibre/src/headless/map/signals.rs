@@ -4,7 +4,7 @@ use super::HeadlessMap;
 use crate::{
     io::apc::AsyncProcedureCall,
     render::{
-        frame_signals::{FrameStats, ResourceReady},
+        frame_signals::{FrameStats, RedrawReasons, ResourceReady},
         frame_trace::{FrameTrace, FrameTraceSlot},
     },
 };
@@ -14,7 +14,16 @@ impl HeadlessMap {
     /// Also true while worker results wait to be applied, which on the web arrive on this thread
     /// between frames.
     pub fn needs_redraw(&self) -> bool {
-        self.map_context.needs_redraw() || self.kernel.apc().has_arrivals()
+        self.redraw_reasons().any()
+    }
+
+    /// What [`Self::needs_redraw`] asks for a frame for; a host logs it when the map does not
+    /// settle.
+    pub fn redraw_reasons(&self) -> RedrawReasons {
+        RedrawReasons {
+            worker_results: self.kernel.apc().has_arrivals(),
+            ..self.map_context.redraw_reasons()
+        }
     }
 
     /// Whether the map has work ready to draw right now: dirty or animating frame state, a moved

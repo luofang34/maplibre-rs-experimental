@@ -61,6 +61,33 @@ impl FrameStats {
     }
 }
 
+/// Why a map asks for another frame, so a host that never sees it settle can tell what keeps
+/// it drawing.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RedrawReasons {
+    /// The map never drew, or something changed or still animates since the last frame.
+    pub changed: bool,
+    /// A tile request is in flight, or a retry of one is due.
+    pub loading: bool,
+    /// Provided images a tile waits for are still being made.
+    pub awaiting_images: bool,
+    /// The camera differs from the one the last frame drew.
+    pub camera_moved: bool,
+    /// Worker results wait to be applied; only a host that owns the worker transport sees it.
+    pub worker_results: bool,
+}
+
+impl RedrawReasons {
+    /// Whether any reason asks for a frame.
+    pub fn any(&self) -> bool {
+        self.changed
+            || self.loading
+            || self.awaiting_images
+            || self.camera_moved
+            || self.worker_results
+    }
+}
+
 /// The signals a frame leaves for its host.
 #[derive(Default)]
 pub struct FrameSignals {
@@ -260,14 +287,21 @@ impl MapContext {
     /// Whether the map should draw another frame: something changed or still animates since
     /// the last one, tiles are still loading, or the camera moved.
     pub fn needs_redraw(&self) -> bool {
-        let loading = crate::io::tile_retry::needs_frame(&self.world)
-            || crate::sdf::provided::awaiting(&self.world);
-        let Some(signals) = self.world.resources.get::<FrameSignals>() else {
-            return true;
-        };
-        signals.dirty
-            || loading
-            || signals.cameras.get(eye_index(&self.world)) != Some(&camera(self))
+        self.redraw_reasons().any()
+    }
+
+    /// What [`Self::needs_redraw`] asks for a frame for.
+    pub fn redraw_reasons(&self) -> RedrawReasons {
+        let signals = self.world.resources.get::<FrameSignals>();
+        RedrawReasons {
+            changed: signals.is_none_or(|signals| signals.dirty),
+            loading: crate::io::tile_retry::needs_frame(&self.world),
+            awaiting_images: crate::sdf::provided::awaiting(&self.world),
+            camera_moved: signals.is_some_and(|signals| {
+                signals.cameras.get(eye_index(&self.world)) != Some(&camera(self))
+            }),
+            worker_results: false,
+        }
     }
 
     /// Whether the map has immediately actionable frame work: it has never drawn, something
