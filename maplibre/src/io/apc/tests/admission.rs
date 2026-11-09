@@ -36,8 +36,12 @@ async fn preserves_budget(kind: Kind) {
     );
     crate::render::frame_signals::finish_frame(&mut context);
     assert!(
-        context.needs_redraw(),
-        "a rejected tile asks for a later frame so a stationary map retries it"
+        !context.needs_redraw(),
+        "a rejected tile asks for no frame until its backoff passes"
+    );
+    assert!(
+        context.has_scheduled_retries(),
+        "a stationary map wakes to retry a rejected tile"
     );
 }
 
@@ -46,6 +50,17 @@ async fn retries(kind: Kind) {
     system.run(&mut context).ok();
     assert_eq!(admission.attempts.get(), 1);
     admission.reject.set(false);
+    system.run(&mut context).expect("backing off");
+    assert_eq!(
+        admission.attempts.get(),
+        1,
+        "rejected work waits out its backoff"
+    );
+    context
+        .world
+        .resources
+        .get_or_init_mut::<crate::render::frame_input::FrameInput>()
+        .advance(std::time::Duration::from_secs(2));
     system.run(&mut context).expect("admission recovered");
     assert_eq!(
         admission.attempts.get(),

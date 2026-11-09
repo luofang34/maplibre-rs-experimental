@@ -170,8 +170,9 @@ impl<E: Environment, T: DemTransferables> System for RequestSystem<E, T> {
             if coords.build_quad_key().is_none() || !requested.insert(coords) {
                 continue;
             }
-            if world.tiles.query::<&DemTileComponent>(coords).is_some()
-                && !tile_retry::due(world, coords, RequestKind::Dem)
+            if tile_retry::backing_off(world, coords, RequestKind::Dem)
+                || world.tiles.query::<&DemTileComponent>(coords).is_some()
+                    && !tile_retry::due(world, coords, RequestKind::Dem)
             {
                 continue;
             }
@@ -182,8 +183,8 @@ impl<E: Environment, T: DemTransferables> System for RequestSystem<E, T> {
             budget -= 1;
             // One rejected tile must not cost the frame its other tiles.
             if let Err(error) = self.request(coords, &mut frame_style, world) {
-                tracing::warn!(%error, "tile request rejected; a later frame requests the tile again");
-                crate::render::frame_signals::keep_animating(world);
+                tracing::warn!(%error, "tile request rejected; it is requested again after a backoff");
+                tile_retry::rejected(world, coords, RequestKind::Dem, None);
             }
         }
         if let Some(multi) = &multi {

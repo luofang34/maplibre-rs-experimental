@@ -73,5 +73,8 @@ impl HeadlessMap {
     }
 }
 
+// Its tiles reach the map only through a scheduler that runs worker futures.
+#[cfg(all(test, feature = "experimental", feature = "thread-safe-futures"))]
+mod terrain_idle;
 #[cfg(test)]
 mod tests;

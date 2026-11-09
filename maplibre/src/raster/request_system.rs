@@ -130,8 +130,8 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
 
             // One rejected tile must not cost the frame its other tiles.
             if let Err(error) = self.request(coords, &mut frame_style, world) {
-                tracing::warn!(%error, "tile request rejected; a later frame requests the tile again");
-                crate::render::frame_signals::keep_animating(world);
+                tracing::warn!(%error, "tile request rejected; it is requested again after a backoff");
+                tile_retry::rejected(world, coords, RequestKind::Raster, None);
             }
         }
         if let Some(multi) = &multi {

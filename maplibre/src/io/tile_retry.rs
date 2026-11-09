@@ -7,13 +7,11 @@ use std::{
     time::Duration,
 };
 
-use instant::Instant;
 use serde::{Deserialize, Serialize};
 
 use crate::{
     coords::WorldTileCoords,
     io::apc::{IntoMessage, Message, MessageTag},
-    render::frame_input::FrameInput,
     tcs::{tiles::TileComponent, world::World},
 };
 
@@ -92,6 +90,26 @@ struct RetryState {
     /// The sources the attempt was limited to, so that a retry of it is for them again;
     /// `None` for an attempt that processed every source.
     issued_for: Option<Vec<String>>,
+    /// The family left the tile out of what it wanted in its last frame, so a passed retry
+    /// deadline waits for the tile to come back into view instead of asking for frames.
+    out_of_view: bool,
+}
+
+impl RetryState {
+    /// Whether the next frame has a retry of this tile to issue.
+    fn retry_due(&self, now: Duration) -> bool {
+        !self.out_of_view && self.deadline.is_some_and(|due| due <= now)
+    }
+
+    /// Schedules the next attempt after a delay that doubles with each failure.
+    fn back_off(&mut self, now: Duration) {
+        self.delay = if self.delay.is_zero() {
+            Duration::from_secs(1)
+        } else {
+            self.delay.saturating_mul(2).min(Duration::from_secs(30))
+        };
+        self.deadline = Some(now.saturating_add(self.delay));
+    }
 }
 
 #[derive(Default)]
@@ -101,42 +119,6 @@ impl TileComponent for TileRequestRetries {}
 // Workers retain the map transport while reset replaces the world and its deadlines.
 #[derive(Clone, Default)]
 pub(crate) struct RequestAttempts(Rc<Cell<u64>>);
-
-struct RequestClock {
-    started: Instant,
-    last: Duration,
-}
-
-impl Default for RequestClock {
-    fn default() -> Self {
-        Self {
-            started: Instant::now(),
-            last: Duration::ZERO,
-        }
-    }
-}
-
-fn now(world: &mut World) -> Duration {
-    world.resources.get_or_init_mut::<RequestClock>();
-    let current = observed_now(world);
-    world.resources.get_or_init_mut::<RequestClock>().last = current;
-    current
-}
-
-fn observed_now(world: &World) -> Duration {
-    let timestamp = world
-        .resources
-        .get::<FrameInput>()
-        .map(|input| input.timestamp);
-    world.resources.get::<RequestClock>().map_or_else(
-        || timestamp.unwrap_or(Duration::ZERO),
-        |clock| {
-            clock
-                .last
-                .max(timestamp.unwrap_or_else(|| clock.started.elapsed()))
-        },
-    )
-}
 
 fn retry_states(world: &World) -> impl Iterator<Item = &RetryState> {
     world
@@ -151,13 +133,14 @@ fn retry_states(world: &World) -> impl Iterator<Item = &RetryState> {
 /// or a retry whose deadline has passed, which the next frame issues.
 pub(crate) fn needs_frame(world: &World) -> bool {
     let now = observed_now(world);
-    retry_states(world).any(|state| state.pending || state.deadline.is_some_and(|due| due <= now))
+    retry_states(world).any(|state| state.pending || state.retry_due(now))
 }
 
 /// Shortest wait until a scheduled retry deadline is due, or `None` when no retry waits.
 pub(crate) fn next_retry_delay(world: &World) -> Option<Duration> {
     let now = observed_now(world);
     retry_states(world)
+        .filter(|state| !state.out_of_view)
         .filter_map(|state| state.deadline.map(|due| due.saturating_sub(now)))
         .min()
 }
@@ -364,12 +347,7 @@ pub(crate) fn completed(world: &mut World, outcome: TileRequestOutcome) {
             state.deadline = stale.then_some(now);
         }
         RequestDisposition::Retry => {
-            state.delay = if state.delay.is_zero() {
-                Duration::from_secs(1)
-            } else {
-                state.delay.saturating_mul(2).min(Duration::from_secs(30))
-            };
-            state.deadline = Some(now.saturating_add(state.delay));
+            state.back_off(now);
             retried_for = Some(state.issued_for.clone());
         }
     }
@@ -417,6 +395,12 @@ pub(crate) fn want<S: std::hash::BuildHasher>(
     kind: RequestKind,
     coords: &HashSet<WorldTileCoords, S>,
 ) {
+    let held: Vec<WorldTileCoords> = world.tiles.tiles.values().map(|tile| tile.coords).collect();
+    for held in held {
+        if let Some(retries) = world.tiles.query_mut::<&mut TileRequestRetries>(held) {
+            retries.0[kind.index()].out_of_view = !coords.contains(&held);
+        }
+    }
     world.resources.get_or_init_mut::<WantedRequests>().0[kind.index()] =
         Some(coords.iter().copied().collect());
 }
@@ -490,6 +474,12 @@ pub(crate) fn stop_cancelled<K: crate::environment::OffscreenKernel>(
         apc.cancel(attempt);
     }
 }
+
+mod clock;
+mod rejection;
+
+use clock::{now, observed_now};
+pub(crate) use rejection::{backing_off, rejected};
 
 #[cfg(test)]
 mod tests;

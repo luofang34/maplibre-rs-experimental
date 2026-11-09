@@ -162,7 +162,9 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                     _ => 0,
                 };
                 let laid_out_for = (magnifies.then_some(overscaled_zoom), pixel_ratio);
-                if is_current(world, coords, laid_out_for) {
+                if tile_retry::backing_off(world, coords, RequestKind::Vector)
+                    || is_current(world, coords, laid_out_for)
+                {
                     continue;
                 }
                 // The rest wait for a later frame, once tiles in flight have landed.
@@ -178,11 +180,16 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                     &mut frame_style,
                     world,
                     (overscaled_zoom, pixel_ratio),
-                    only_sources,
+                    only_sources.clone(),
                     (vectors_disabled, symbols_disabled),
                 ) {
-                    tracing::warn!(%error, "tile request rejected; a later frame requests the tile again");
-                    crate::render::frame_signals::keep_animating(world);
+                    tracing::warn!(%error, "tile request rejected; it is requested again after a backoff");
+                    tile_retry::rejected(
+                        world,
+                        coords,
+                        RequestKind::Vector,
+                        only_sources.as_deref(),
+                    );
                 }
             }
             if let Some(multi) = &multi {
