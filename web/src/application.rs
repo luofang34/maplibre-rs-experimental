@@ -126,6 +126,7 @@ pub async fn run_map(
             None,
         )
         .await
+        .map(drop)
         .map_err(|error| match error {
             WinitApplicationError::CreateMap(error) => error,
             WinitApplicationError::Host(error) => JSError::Host(error),

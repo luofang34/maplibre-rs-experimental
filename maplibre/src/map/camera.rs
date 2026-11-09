@@ -1,11 +1,14 @@
-//! The camera a map starts with, and jumps made before the renderer is ready.
+//! The camera a map starts with, jumps made before the renderer is ready, and animated moves.
 
+use super::{Map, MapError};
 use crate::{
+    context::{FlightId, FlightOutcome},
     coords::{LatLon, WorldCoords, Zoom},
+    environment::Environment,
     projection::globe::scale::MERCATOR_LATITUDE_LIMIT,
-    render::view_state::{CameraOptions, NavigationError, ViewState},
+    render::view_state::{CameraOptions, FlightCurve, NavigationError, ViewState},
     style::Style,
-    window::PhysicalSize,
+    window::{HeadedMapWindow, MapWindowConfig, PhysicalSize},
 };
 
 /// The jumps made before the renderer is ready, as one: a later jump's fields replace an
@@ -77,4 +80,37 @@ fn initial_view_state(
         .set_roll(cgmath::Deg(style.roll.unwrap_or_default()));
     view.take_style_center(style);
     view
+}
+
+impl<E: Environment> Map<E>
+where
+    <<E as Environment>::MapWindowConfig as MapWindowConfig>::MapWindow: HeadedMapWindow,
+{
+    /// Moves the camera to `options` along `curve`, as
+    /// [`crate::context::MapContext::fly_to`]. Frames advance a move, so it needs an
+    /// initialized renderer.
+    pub fn fly_to(
+        &mut self,
+        options: CameraOptions,
+        curve: FlightCurve,
+    ) -> Result<FlightId, MapError> {
+        Ok(self.context_mut()?.fly_to(options, curve))
+    }
+
+    /// How the move `id` stands, as [`crate::context::MapContext::flight_outcome`]. A map
+    /// whose renderer is not ready keeps no moves, so every move reads as
+    /// [`FlightOutcome::Superseded`].
+    pub fn flight_outcome(&self, id: FlightId) -> FlightOutcome {
+        self.context().map_or(FlightOutcome::Superseded, |context| {
+            context.flight_outcome(id)
+        })
+    }
+
+    /// Stops the move under way where the camera is, as
+    /// [`crate::context::MapContext::stop_flight`].
+    pub fn stop_flight(&mut self) {
+        if let Ok(context) = self.context_mut() {
+            context.stop_flight();
+        }
+    }
 }

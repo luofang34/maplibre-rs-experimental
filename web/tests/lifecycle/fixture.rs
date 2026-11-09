@@ -24,11 +24,17 @@ use maplibre_winit::{RawWinitWindow, WinitEnvironment, WinitMapWindowConfig};
 use web::WHATWGOffscreenKernelEnvironment;
 use winit::event_loop::EventLoopProxy;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub(super) enum Event {
+    /// Wakes the loop to apply the commands a map handle sent.
+    #[default]
+    Commands,
     Blocked,
     LateWake,
-    Presented { generation: u64, size: (u32, u32) },
+    Presented {
+        generation: u64,
+        size: (u32, u32),
+    },
 }
 #[derive(Default)]
 pub(super) struct Observed {

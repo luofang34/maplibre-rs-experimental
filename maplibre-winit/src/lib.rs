@@ -10,7 +10,8 @@ mod window;
 
 pub use environment::WinitEnvironment;
 pub use event_loop::{
-    RawEventLoopProxy, RawWinitEventLoop, WinitApplication, WinitEventLoop, WinitEventLoopProxy,
+    ProxyWake, RawEventLoopProxy, RawWinitEventLoop, WinitApplication, WinitEventLoop,
+    WinitEventLoopProxy,
 };
 pub use window::{RawWinitWindow, WinitMapWindow};
 #[cfg(target_os = "android")]
