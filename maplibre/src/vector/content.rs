@@ -20,6 +20,11 @@ pub(crate) struct LayerReplacements {
     pub keep_vector: bool,
     pub keep_symbols: bool,
     pub revision: u64,
+    /// Non-symbol style layers the request in flight was asked to build; its result is the
+    /// tile's whole content for them, so those it leaves out are dropped when it finishes.
+    pub requested: Vec<String>,
+    /// Which of [`requested`](Self::requested) the request has delivered so far.
+    pub delivered: Vec<String>,
 }
 impl TileComponent for LayerReplacements {}
 
@@ -34,7 +39,7 @@ pub(crate) fn ensure(tiles: &mut Tiles, coords: WorldTileCoords) {
     }
 }
 
-pub(crate) fn begin(world: &mut World, coords: WorldTileCoords) {
+pub(crate) fn begin(world: &mut World, coords: WorldTileCoords, requested: Vec<String>) {
     let vector = world.tiles.query::<&VectorLayerBucketComponent>(coords);
     let keep_vector = vector.is_some_and(|tile| tile.done && !tile.failed);
     if vector.is_none() {
@@ -53,6 +58,26 @@ pub(crate) fn begin(world: &mut World, coords: WorldTileCoords) {
     if let Some(replacements) = world.tiles.query_mut::<&mut LayerReplacements>(coords) {
         replacements.keep_vector = keep_vector;
         replacements.keep_symbols = keep_symbols;
+        replacements.requested = requested;
+        replacements.delivered.clear();
+    }
+}
+
+/// Drops the layers the finished request was asked to build but did not deliver: hidden or
+/// filtered out since the tile was last made, or left without features by new source data.
+/// Buckets are otherwise only replaced by layer id, so such a layer would keep showing the
+/// geometry of an earlier request for as long as the tile stays loaded.
+pub(crate) fn drop_undelivered(world: &mut World, coords: WorldTileCoords) {
+    let Some(pending) = world.tiles.query_mut::<&mut LayerReplacements>(coords) else {
+        return;
+    };
+    let requested = std::mem::take(&mut pending.requested);
+    let omitted: Vec<String> = requested
+        .into_iter()
+        .filter(|id| !pending.delivered.contains(id))
+        .collect();
+    if !omitted.is_empty() {
+        purge_vector_layers(world, coords, &omitted);
     }
 }
 
@@ -76,6 +101,9 @@ pub(crate) fn accept_vector(world: &mut World, bucket: AvailableVectorLayerBucke
         .query_mut::<(&mut VectorLayerBucketComponent, &mut LayerReplacements)>(coords)
     {
         pending.revision = revision;
+        if !pending.delivered.contains(&bucket.style_layer_id) {
+            pending.delivered.push(bucket.style_layer_id.clone());
+        }
         if uploaded {
             pending
                 .vector
@@ -166,17 +194,7 @@ pub(crate) fn vector_layers(
 pub(crate) fn purge_layers(world: &mut World, removed: &[String]) {
     let coords: Vec<WorldTileCoords> = world.tiles.tiles.values().map(|tile| tile.coords).collect();
     for at in &coords {
-        if let Some(component) = world
-            .tiles
-            .query_mut::<&mut VectorLayerBucketComponent>(*at)
-        {
-            component.layers.retain(|layer| match layer {
-                VectorLayerBucket::AvailableLayer(bucket) => {
-                    !removed.contains(&bucket.style_layer_id)
-                }
-                VectorLayerBucket::Missing(_) => true,
-            });
-        }
+        purge_vector_layers(world, *at, removed);
         if let Some(component) = world.tiles.query_mut::<&mut SymbolLayersDataComponent>(*at) {
             component
                 .layers
@@ -184,20 +202,8 @@ pub(crate) fn purge_layers(world: &mut World, removed: &[String]) {
         }
         if let Some(pending) = world.tiles.query_mut::<&mut LayerReplacements>(*at) {
             pending
-                .vector
-                .retain(|layer| !removed.contains(&layer.style_layer_id));
-            pending
                 .symbols
                 .retain(|layer| !removed.contains(&layer.style_layer_id));
-        }
-    }
-    if let Some(Eventually::Initialized(pool)) =
-        world.resources.get_mut::<Eventually<VectorBufferPool>>()
-    {
-        for at in &coords {
-            for id in removed {
-                pool.remove_layer(*at, id);
-            }
         }
     }
     if let Some(Eventually::Initialized(pool)) =
@@ -207,6 +213,28 @@ pub(crate) fn purge_layers(world: &mut World, removed: &[String]) {
             for id in removed {
                 pool.remove_layer(*at, id);
             }
+        }
+    }
+}
+
+/// Drops the buckets, pending replacements and GPU buffers of the non-symbol `layers` in one tile.
+fn purge_vector_layers(world: &mut World, at: WorldTileCoords, layers: &[String]) {
+    if let Some(component) = world.tiles.query_mut::<&mut VectorLayerBucketComponent>(at) {
+        component.layers.retain(|layer| match layer {
+            VectorLayerBucket::AvailableLayer(bucket) => !layers.contains(&bucket.style_layer_id),
+            VectorLayerBucket::Missing(_) => true,
+        });
+    }
+    if let Some(pending) = world.tiles.query_mut::<&mut LayerReplacements>(at) {
+        pending
+            .vector
+            .retain(|layer| !layers.contains(&layer.style_layer_id));
+    }
+    if let Some(Eventually::Initialized(pool)) =
+        world.resources.get_mut::<Eventually<VectorBufferPool>>()
+    {
+        for id in layers {
+            pool.remove_layer(at, id);
         }
     }
 }

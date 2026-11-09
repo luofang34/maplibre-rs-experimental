@@ -294,6 +294,23 @@ impl<E: Environment, T: VectorTransferables> RequestSystem<E, T> {
             }
             worker_style
         });
+        // What the worker is asked to build: its style's non-symbol layers, for the refreshed
+        // sources alone when the request is limited to them.
+        let requested: Vec<String> = worker_style
+            .layers
+            .iter()
+            .filter(|layer| {
+                layer.type_ != "symbol"
+                    && crate::style::mutation::from_vector_tiles(layer)
+                    && only_sources.as_ref().is_none_or(|sources| {
+                        layer
+                            .source
+                            .as_ref()
+                            .is_some_and(|source| sources.contains(source))
+                    })
+            })
+            .map(|layer| layer.id.clone())
+            .collect();
         self.kernel
             .apc()
             .call(
@@ -312,7 +329,7 @@ impl<E: Environment, T: VectorTransferables> RequestSystem<E, T> {
                 coords,
                 source,
             })?;
-        super::content::begin(world, coords);
+        super::content::begin(world, coords, requested);
         if let Some(tile) = world
             .tiles
             .query_mut::<&mut VectorLayerBucketComponent>(coords)

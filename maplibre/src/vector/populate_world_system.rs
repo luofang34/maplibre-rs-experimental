@@ -126,6 +126,10 @@ fn finish_tile<T: TileTessellated>(world: &mut crate::tcs::world::World, message
     {
         component.pending_assets = message.pending_symbols() && !retained.1;
     }
+    // A request that could not read its data says nothing about which layers are empty.
+    if !message.failed() {
+        super::content::drop_undelivered(world, message.coords());
+    }
 }
 
 #[cfg(test)]
