@@ -323,3 +323,70 @@ fn polar_free_globe_camera_resolves_all_360_deg_polar_wedges_uniformly() {
         6
     );
 }
+
+/// GL JS's tile zoom worked out whole for one tile, as the covering did before the view's terms
+/// were hoisted out of it.
+fn tile_zoom_from_scratch(
+    requested_center_zoom: f64,
+    distance_to_tile_2d: f64,
+    distance_to_tile_z: f64,
+    distance_to_center_3d: f64,
+    field_of_view_degrees: f64,
+) -> f64 {
+    use super::{
+        integral_cos_power, pitch_tile_loading_behavior, MAX_MERCATOR_HORIZON_DEGREES,
+        TILE_COUNT_MAX_MIN_RATIO,
+    };
+    let pitch_behavior =
+        pitch_tile_loading_behavior(field_of_view_degrees.max(NORMAL_FIELD_DEGREES));
+    let center_pitch = (distance_to_tile_z / distance_to_center_3d).acos();
+    let half_fov = (field_of_view_degrees * 0.5).to_radians();
+    let tile_count_pitch_zero = 2.0 * integral_cos_power(pitch_behavior - 1.0, 0.0, half_fov);
+    let highest_pitch = (center_pitch + half_fov).min(MAX_MERCATOR_HORIZON_DEGREES.to_radians());
+    let lowest_pitch = (center_pitch - half_fov).min(highest_pitch);
+    let tile_count = integral_cos_power(pitch_behavior - 1.0, lowest_pitch, highest_pitch);
+    let tile_pitch = (distance_to_tile_2d / distance_to_tile_z).atan();
+    let distance_to_tile_3d = distance_to_tile_2d.hypot(distance_to_tile_z);
+    let distance_scale = distance_to_center_3d / distance_to_tile_3d / 0.5_f64.max(half_fov.cos());
+    requested_center_zoom + distance_scale.log2() + pitch_behavior * tile_pitch.cos().log2() * 0.5
+        - (tile_count / tile_count_pitch_zero / TILE_COUNT_MAX_MIN_RATIO)
+            .max(1.0)
+            .log2()
+            * 0.5
+}
+
+#[test]
+fn the_view_terms_worked_out_once_give_every_tile_its_zoom_exactly() {
+    let center = Point2::new(0.3, 0.4);
+    for field in [TURRET_FIELD_DEGREES, NORMAL_FIELD_DEGREES, 60.0] {
+        for (camera_offset, distance_z) in [(0.0, 1e-3), (2e-3, 1e-3), (8e-3, 5e-4)] {
+            let camera = Point2::new(center.x, center.y + camera_offset);
+            let lod = LodContext::from_positions(camera, center, distance_z, field, 12.0).planar();
+            let distance_to_center_3d = (center.x - camera.x)
+                .hypot(center.y - camera.y)
+                .hypot(distance_z);
+            for x in 1220..1240 {
+                for y in 1630..1650 {
+                    let tile = TileCoords {
+                        x,
+                        y,
+                        z: ZoomLevel::new(12),
+                    };
+                    let distance_2d = super::distance_to_tile_planar(camera, tile);
+                    let expected = tile_zoom_from_scratch(
+                        12.0,
+                        distance_2d,
+                        distance_z,
+                        distance_to_center_3d,
+                        field,
+                    );
+                    assert_eq!(
+                        lod.desired_zoom(tile).to_bits(),
+                        expected.to_bits(),
+                        "tile {x}/{y} with a {field}° field from {camera_offset} away"
+                    );
+                }
+            }
+        }
+    }
+}
