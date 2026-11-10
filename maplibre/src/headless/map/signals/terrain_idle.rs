@@ -153,9 +153,9 @@ async fn terrain_map(zoom: f64, pitch: f64, tiles: SyntheticTiles) -> HeadlessMa
     )
     .expect("map");
     map.set_max_pitch(cgmath::Deg(85.0));
+    map.set_pixel_ratio(2.0);
     map.set_navigation_mode(NavigationMode::FreeGlobe)
         .expect("free globe");
-    map.set_pixel_ratio(2.0);
     // The host's frame clock stands still until a test moves it, so a backoff runs out only
     // where a test says, however long a frame takes to draw on the machine running it.
     map.frame_input_mut().timestamp = std::time::Duration::ZERO;
@@ -198,7 +198,7 @@ async fn frames_until_idle(
 
 #[tokio::test]
 async fn a_resting_terrain_map_stops_asking_for_frames() {
-    for (zoom, pitch) in [(1.5, 0.0), (11.0, 70.0)] {
+    for (zoom, pitch) in [(1.2, 0.0), (11.0, 70.0)] {
         let tiles = SyntheticTiles::default();
         let mut map = terrain_map(zoom, pitch, tiles.clone()).await;
         let idle = frames_until_idle(&mut map, &tiles, 600).await;
@@ -216,7 +216,7 @@ async fn a_failed_tile_the_view_left_waits_for_the_view_to_return() {
         failing: Some("img.example/2/"),
         ..Default::default()
     };
-    let mut map = terrain_map(1.5, 0.0, tiles.clone()).await;
+    let mut map = terrain_map(1.2, 0.0, tiles.clone()).await;
     frames_until_idle(&mut map, &tiles, 300)
         .await
         .expect("the globe settles while its failed tiles back off");
@@ -236,7 +236,7 @@ async fn a_failed_tile_the_view_left_waits_for_the_view_to_return() {
     );
 
     let failures = tiles.failures.load(Ordering::SeqCst);
-    jump(&mut map, 1.5);
+    jump(&mut map, 1.2);
     frames_until_idle(&mut map, &tiles, 300)
         .await
         .expect("the globe settles again");
@@ -250,7 +250,7 @@ async fn a_failed_tile_the_view_left_waits_for_the_view_to_return() {
 #[test]
 fn refused_requests_wait_out_a_backoff_instead_of_asking_for_every_frame() {
     let tiles = SyntheticTiles::default();
-    let mut map = futures::executor::block_on(terrain_map(1.5, 0.0, tiles));
+    let mut map = futures::executor::block_on(terrain_map(1.2, 0.0, tiles));
     for _ in 0..4 {
         map.run_frame().expect("frame");
     }
