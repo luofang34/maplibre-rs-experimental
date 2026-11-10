@@ -234,15 +234,26 @@ fn symbol_enumerations_take_expressions_of_what_they_may_depend_on() {
     assert_eq!(errors.len(), 3, "{errors:?}");
 }
 
+/// A feature's id and geometry type reach whatever is evaluated per feature, and nothing else.
 #[test]
-fn filter_and_paint_feature_contexts_are_distinguished() {
+fn feature_identity_is_read_where_features_are_evaluated() {
     let style = style_with_layer(serde_json::json!({
         "id": "roads", "type": "line", "filter": ["==", ["id"], 1],
-        "paint": {"line-opacity": ["case", ["==", ["id"], 1], 1, 0]}
+        "paint": {"line-opacity": ["case", ["==", ["id"], 1], 1, 0],
+            "line-color": ["match", ["geometry-type"], "Polygon", "#ff0000", "#000000"]}
     }));
-    let errors = style.validate().expect_err("paint has no ID context");
+    style
+        .validate()
+        .expect("paint evaluated per feature reads the id");
+    let style = style_with_layer(serde_json::json!({
+        "id": "fills", "type": "fill-extrusion",
+        "paint": {"fill-extrusion-opacity": ["case", ["==", ["id"], 1], 1, 0]}
+    }));
+    let errors = style
+        .validate()
+        .expect_err("a layer-wide value has no feature");
     assert_eq!(errors.len(), 1, "{errors:?}");
-    assert!(errors[0].to_string().contains("paint.line-opacity"));
+    assert!(errors[0].to_string().contains("fill-extrusion-opacity"));
 }
 
 #[test]

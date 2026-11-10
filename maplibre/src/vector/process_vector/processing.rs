@@ -11,6 +11,9 @@ pub(super) fn process_layer<T: VectorTransferables, C: Context>(
     if crate::geojson::reads_geometry(style) {
         super::geometry_tags::add_geometry_tags(&mut layer, request.coords);
     }
+    if crate::geojson::reads_identity(style) {
+        super::geometry_tags::add_identity_tags(&mut layer);
+    }
     if matches!(style.paint, Some(LayerPaint::FillExtrusion(_))) {
         unhide_unreplaced_building_bases(&mut layer);
     }

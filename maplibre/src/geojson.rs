@@ -29,7 +29,7 @@ use crate::{
 
 mod cluster;
 mod geometry_property;
-pub(crate) use geometry_property::reads_geometry;
+pub(crate) use geometry_property::{reads_geometry, reads_identity};
 
 /// Failure reported while preparing or delivering GeoJSON tile geometry.
 #[derive(Error, Debug)]
@@ -298,7 +298,7 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
     let with_geometry = request
         .layers
         .iter()
-        .any(geometry_property::reads_geometry)
+        .any(geometry_property::reads_feature_inputs)
         .then(|| geometry_property::with_geometry_property(geojson_value));
 
     for style_layer in &request.layers {
@@ -316,7 +316,7 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
         };
 
         let (source_value, unfiltered) = match &with_geometry {
-            Some(annotated) if geometry_property::reads_geometry(style_layer) => {
+            Some(annotated) if geometry_property::reads_feature_inputs(style_layer) => {
                 (annotated, annotated.to_string())
             }
             _ => (geojson_value, unfiltered.clone()),

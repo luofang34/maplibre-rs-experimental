@@ -9,6 +9,7 @@
 mod ast;
 mod collation;
 mod evaluate;
+mod feature_identity;
 mod geometry;
 mod interpolation;
 mod legacy;
@@ -21,6 +22,9 @@ pub use ast::{
     MathFunction, StringFunction,
 };
 pub use evaluate::{EvaluationContext, EvaluationError, FeatureProperties, ImageSet};
+pub use feature_identity::{
+    is_internal_property, reads_identity, GEOMETRY_TYPE_PROPERTY, ID_PROPERTY,
+};
 pub use geometry::{Geometry, GEOMETRY_PROPERTY};
 pub use interpolation::{interpolate_number, ColorSpace, Interpolation};
 pub use legacy::{

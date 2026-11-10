@@ -1,13 +1,54 @@
-//! Gives each feature of a tile layer its geometry in longitude and latitude, as a tag the
-//! expression evaluator reads, for layers with `within` or `distance`.
+//! Gives each feature of a tile layer its geometry in longitude and latitude, for layers with
+//! `within` or `distance`, and its id and geometry type, for layers whose paint or layout reads
+//! them: tags the expression evaluator reads.
 
 use geo_types::Geometry as Geo;
 use geozero::{mvt::tile, ToGeo};
 
 use crate::{
     coords::WorldTileCoords,
-    style::expression::{Geometry, GEOMETRY_PROPERTY},
+    style::{
+        expression::{Geometry, GEOMETRY_PROPERTY, GEOMETRY_TYPE_PROPERTY, ID_PROPERTY},
+        filter::GeometryType,
+    },
 };
+
+/// Appends the id and geometry type tags to every feature of `layer`; a feature without an id
+/// gets none, so `["id"]` is null for it.
+pub(super) fn add_identity_tags(layer: &mut tile::Layer) {
+    let key = |layer: &mut tile::Layer, name: &str| {
+        layer.keys.push(name.to_owned());
+        u32::try_from(layer.keys.len() - 1).unwrap_or(u32::MAX)
+    };
+    let (id_key, type_key) = (key(layer, ID_PROPERTY), key(layer, GEOMETRY_TYPE_PROPERTY));
+    // One value per geometry type, shared by the features of that type.
+    let types = [1, 2, 3, 0].map(|kind| {
+        layer.values.push(tile::Value {
+            string_value: Some(GeometryType::from_mvt(kind).name().to_owned()),
+            ..Default::default()
+        });
+        (
+            kind,
+            u32::try_from(layer.values.len() - 1).unwrap_or(u32::MAX),
+        )
+    });
+    for feature in &mut layer.features {
+        let kind = feature.r#type.unwrap_or_default();
+        let type_value = types
+            .iter()
+            .find(|(each, _)| *each == kind)
+            .map_or(types[3].1, |(_, value)| *value);
+        feature.tags.extend([type_key, type_value]);
+        if let Some(id) = feature.id {
+            layer.values.push(tile::Value {
+                uint_value: Some(id),
+                ..Default::default()
+            });
+            let value = u32::try_from(layer.values.len() - 1).unwrap_or(u32::MAX);
+            feature.tags.extend([id_key, value]);
+        }
+    }
+}
 
 /// Appends the geometry tag to every feature of `layer`.
 pub(super) fn add_geometry_tags(layer: &mut tile::Layer, coords: WorldTileCoords) {
