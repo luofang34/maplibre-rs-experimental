@@ -106,7 +106,7 @@ fn main(
     // A stroke colour that varies by feature rides packed with the fill in the feature colour.
     var fill = color;
     var stroke = stroke_color;
-    if circle_flags.z > 0.5 {
+    if color.x < 0.0 {
         fill = vec4<f32>(unpack_byte_pair(color.x), unpack_byte_pair(color.y)) / 255.0;
         stroke = vec4<f32>(unpack_byte_pair(color.z), unpack_byte_pair(color.w)) / 255.0;
     }
@@ -120,10 +120,11 @@ fn main(
     );
 }
 
-// Two 8-bit channels packed into one float as `256 high + low`.
+// Two 8-bit channels packed into one float as `-(256 high + low) - 1`.
 fn unpack_byte_pair(packed: f32) -> vec2<f32> {
-    let high = floor(packed / 256.0);
-    return vec2<f32>(high, packed - high * 256.0);
+    let pair = -packed - 1.0;
+    let high = floor(pair / 256.0);
+    return vec2<f32>(high, pair - high * 256.0);
 }
 
 // The centre of a circle, on the terrain at `height` metres when it stands there; off terrain

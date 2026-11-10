@@ -64,7 +64,7 @@ pub(super) fn metadata_for_layer(
         layer_metadata.circle_flags = [
             f32::from(paint.circle_pitch_scale == CirclePitchScale::Map),
             f32::from(paint.circle_pitch_alignment == CirclePitchAlignment::Map),
-            f32::from(paint.stroke_color_per_feature().is_some()),
+            0.0,
             0.0,
         ];
     }
