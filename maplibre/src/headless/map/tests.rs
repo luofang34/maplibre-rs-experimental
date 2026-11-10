@@ -190,6 +190,21 @@ fn headless_processing_keeps_the_symbol_bucket_of_a_label_layer() {
     );
 }
 
+/// `text-transform` may vary by feature: each label is cased as its own feature asks.
+#[test]
+fn a_label_is_cased_as_its_feature_asks() {
+    let layer = style_layer(serde_json::json!({
+        "id": "label", "type": "symbol", "source": "chart", "source-layer": "route_points",
+        "layout": {"text-field": "{label}",
+            "text-transform": ["match", ["get", "name"], "FALLBACK", "lowercase", "none"]}
+    }));
+    let layers = processed(&hex_bytes(LABELLED_POINT_TILE), &layer);
+    assert_eq!(
+        label_texts(&layers),
+        [("label".to_string(), vec!["v12".to_string()])]
+    );
+}
+
 #[test]
 fn vector_and_symbol_buckets_of_mixed_layers_are_kept_apart() {
     let tile = mixed_tile();

@@ -61,19 +61,17 @@ impl PlacementRules {
         let allow = read(["text-allow-overlap", "icon-allow-overlap"]);
         // The newer property replaces the boolean when a style sets both.
         let overlap_names = ["text-overlap", "icon-overlap"];
-        let overlap = [0, 1].map(|i| {
-            match paint
-                .properties
-                .get(overlap_names[i])
-                .and_then(|value| value.as_str())
-            {
-                Some("always") => Overlap::Always,
-                Some("cooperative") => Overlap::Cooperative,
-                Some(_) => Overlap::Never,
-                None if allow[i] => Overlap::Always,
-                None => Overlap::Never,
-            }
-        });
+        // Layout follows the integer zoom a tile is laid out at, not the view's fraction.
+        let overlap =
+            [0, 1].map(
+                |i| match paint.layout_enum(overlap_names[i], zoom.floor()).as_deref() {
+                    Some("always") => Overlap::Always,
+                    Some("cooperative") => Overlap::Cooperative,
+                    Some(_) => Overlap::Never,
+                    None if allow[i] => Overlap::Always,
+                    None => Overlap::Never,
+                },
+            );
         Self {
             overlap,
             ignore: read(["text-ignore-placement", "icon-ignore-placement"]),

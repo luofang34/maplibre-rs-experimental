@@ -45,12 +45,8 @@ pub(crate) fn drawn_order(features: &[Feature], bearing: f64) -> Vec<usize> {
 /// Whether the layer draws its labels by screen height: `symbol-z-order: viewport-y`, or `auto`
 /// without a `symbol-sort-key`, for labels that may overlap.
 pub(crate) fn sorts_by_height(paint: &SymbolPaint, zoom: f64) -> bool {
-    let order = paint
-        .properties
-        .get("symbol-z-order")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("auto");
-    let by_height = match order {
+    let order = paint.layout_enum("symbol-z-order", zoom);
+    let by_height = match order.as_deref().unwrap_or("auto") {
         "viewport-y" => true,
         "auto" => !paint.properties.contains_key("symbol-sort-key"),
         _ => false,
@@ -72,9 +68,7 @@ fn may_overlap(paint: &SymbolPaint, zoom: f64) -> bool {
         flag(&format!("{prefix}-allow-overlap"))
             || flag(&format!("{prefix}-ignore-placement"))
             || paint
-                .properties
-                .get(&format!("{prefix}-overlap"))
-                .and_then(serde_json::Value::as_str)
+                .layout_enum(&format!("{prefix}-overlap"), zoom)
                 .is_some_and(|mode| mode != "never")
     })
 }
