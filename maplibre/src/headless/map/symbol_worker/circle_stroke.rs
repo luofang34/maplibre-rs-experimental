@@ -33,9 +33,13 @@ fn style() -> Style {
     .expect("style")
 }
 
-fn pixel(pixels: &[u8], x: f64, y: f64) -> [u8; 3] {
+/// Whether the pixel at `x`, `y` is `color`, within what rounding on another GPU may shift.
+fn is(pixels: &[u8], [x, y]: [f64; 2], color: [u8; 3]) -> bool {
     let index = ((y as u32 * SIZE + x as u32) * 4) as usize;
-    [pixels[index], pixels[index + 1], pixels[index + 2]]
+    pixels[index..index + 3]
+        .iter()
+        .zip(color)
+        .all(|(have, want)| have.abs_diff(want) <= 2)
 }
 
 #[tokio::test]
@@ -50,15 +54,13 @@ async fn each_circle_strokes_with_the_colour_its_feature_names() {
     let middle = f64::from(SIZE) / 2.0;
     for (longitude, stroke) in [(-10.0, [255, 0, 0]), (10.0, [0, 0, 255])] {
         let center = middle + longitude * PIXELS_PER_DEGREE;
-        assert_eq!(
-            pixel(&pixels, center, middle),
-            [0, 255, 0],
+        assert!(
+            is(&pixels, [center, middle], [0, 255, 0]),
             "the fill at {longitude}"
         );
         for ring in [center - 13.0, center + 13.0] {
-            assert_eq!(
-                pixel(&pixels, ring, middle),
-                stroke,
+            assert!(
+                is(&pixels, [ring, middle], stroke),
                 "the ring of the circle at {longitude}"
             );
         }

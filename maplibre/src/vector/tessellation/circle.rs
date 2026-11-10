@@ -34,12 +34,14 @@ fn stroke_opacity_fraction(stroke_opacity: f32) -> f32 {
 }
 
 /// Two colours, straight RGBA in 0..=1, in the four lanes of one feature colour: each lane holds
-/// two 8-bit channels as `256 a + b`, which an `f32` keeps exactly, as GL JS packs colours. The
-/// vertex slots of a circle are all taken, so a stroke colour that varies by feature shares the
-/// lanes of the fill's.
+/// two 8-bit channels as `-(256 a + b) - 1`, which an `f32` keeps exactly, as GL JS packs
+/// colours. The vertex slots of a circle are all taken, so a stroke colour that varies by
+/// feature shares the lanes of the fill's. A plain colour is never negative, so the sign tells
+/// the shader which a vertex holds, whatever the layer's style says now: a tile built before a
+/// paint change keeps drawing as it was built until its replacement arrives.
 pub fn pack_circle_colors(fill: [f32; 4], stroke: [f32; 4]) -> [f32; 4] {
     let byte = |channel: f32| (channel.clamp(0.0, 1.0) * 255.0).round();
-    let pair = |high: f32, low: f32| byte(high) * 256.0 + byte(low);
+    let pair = |high: f32, low: f32| -(byte(high) * 256.0 + byte(low)) - 1.0;
     [
         pair(fill[0], fill[1]),
         pair(fill[2], fill[3]),

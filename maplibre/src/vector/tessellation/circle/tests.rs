@@ -42,3 +42,19 @@ fn a_stroke_opacity_by_feature_rides_the_corner_code_and_leaves_the_ground_slot_
         "a missing value leaves the layer's"
     );
 }
+
+/// The sign marks packed lanes, so a tile built under one paint draws right under the next:
+/// a plain colour lane is never negative, a packed one always is, and each holds its channels.
+#[test]
+fn packed_circle_colours_are_negative_and_keep_both_colours() {
+    let packed = super::pack_circle_colors([1.0, 0.5, 0.0, 1.0], [0.0, 0.0, 0.0, 0.0]);
+    assert!(packed.iter().all(|lane| *lane < 0.0), "{packed:?}");
+    let unpack = |lane: f32| {
+        let pair = -lane - 1.0;
+        let high = (pair / 256.0).floor();
+        [high, pair - high * 256.0]
+    };
+    assert_eq!(unpack(packed[0]), [255.0, 128.0]);
+    assert_eq!(unpack(packed[1]), [0.0, 255.0]);
+    assert_eq!(unpack(packed[3]), [0.0, 0.0]);
+}
