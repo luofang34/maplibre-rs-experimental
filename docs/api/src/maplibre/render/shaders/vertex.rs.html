@@ -95,69 +95,68 @@
 <a href=#95 id=95 data-nosnippet>95</a>    </span><span class="kw">pub </span>stroke_color: Vec4f32,
 <a href=#96 id=96 data-nosnippet>96</a>    <span class="doccomment">/// Circle opacity, stroke opacity and blur ratio; the last slot is padding.
 <a href=#97 id=97 data-nosnippet>97</a>    </span><span class="kw">pub </span>circle_params: Vec4f32,
-<a href=#98 id=98 data-nosnippet>98</a>    <span class="doccomment">/// Circle pitch-scale (x) and pitch-alignment (y), 1.0 for `map`; z is 1.0 when each
-<a href=#99 id=99 data-nosnippet>99</a>    /// feature's colour packs its fill and stroke colours together; w is padding.
-<a href=#100 id=100 data-nosnippet>100</a>    </span><span class="kw">pub </span>circle_flags: Vec4f32,
-<a href=#101 id=101 data-nosnippet>101</a>}
-<a href=#102 id=102 data-nosnippet>102</a>
-<a href=#103 id=103 data-nosnippet>103</a><span class="kw">impl </span>ShaderLayerMetadata {
-<a href=#104 id=104 data-nosnippet>104</a>    <span class="doccomment">/// Metadata for a layer without circle paint.
-<a href=#105 id=105 data-nosnippet>105</a>    </span><span class="kw">pub fn </span>new(z_index: f32, line_width: f32, translate: Vec2f32) -&gt; <span class="self">Self </span>{
-<a href=#106 id=106 data-nosnippet>106</a>        <span class="self">Self </span>{
-<a href=#107 id=107 data-nosnippet>107</a>            z_index,
-<a href=#108 id=108 data-nosnippet>108</a>            line_width,
-<a href=#109 id=109 data-nosnippet>109</a>            translate,
-<a href=#110 id=110 data-nosnippet>110</a>            stroke_color: [<span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">1.0</span>],
-<a href=#111 id=111 data-nosnippet>111</a>            circle_params: [<span class="number">1.0</span>, <span class="number">1.0</span>, <span class="number">0.0</span>, <span class="number">0.0</span>],
-<a href=#112 id=112 data-nosnippet>112</a>            circle_flags: [<span class="number">0.0</span>; <span class="number">4</span>],
-<a href=#113 id=113 data-nosnippet>113</a>        }
-<a href=#114 id=114 data-nosnippet>114</a>    }
-<a href=#115 id=115 data-nosnippet>115</a>}
-<a href=#116 id=116 data-nosnippet>116</a>
-<a href=#117 id=117 data-nosnippet>117</a><span class="doccomment">/// Per-tile instance record with projection, viewport and line scaling inputs.
-<a href=#118 id=118 data-nosnippet>118</a></span><span class="attr">#[repr(C)]
-<a href=#119 id=119 data-nosnippet>119</a>#[derive(Copy, Clone, Pod, Zeroable)]
-<a href=#120 id=120 data-nosnippet>120</a></span><span class="kw">pub struct </span>ShaderTileMetadata {
-<a href=#121 id=121 data-nosnippet>121</a>    <span class="doccomment">/// Column-major tile-to-clip transform used by the flat projection path.
-<a href=#122 id=122 data-nosnippet>122</a>    </span><span class="kw">pub </span>transform: Mat4x4f32,
-<a href=#123 id=123 data-nosnippet>123</a>    <span class="doccomment">/// Scale from view zoom to tile zoom, normally `2^(tile_zoom - view_zoom)`.
-<a href=#124 id=124 data-nosnippet>124</a>    </span><span class="kw">pub </span>zoom_factor: f32,
-<a href=#125 id=125 data-nosnippet>125</a>    <span class="doccomment">/// Render viewport width in pixels.
-<a href=#126 id=126 data-nosnippet>126</a>    </span><span class="kw">pub </span>viewport_width: f32,
-<a href=#127 id=127 data-nosnippet>127</a>    <span class="doccomment">/// Render viewport height in pixels.
-<a href=#128 id=128 data-nosnippet>128</a>    </span><span class="kw">pub </span>viewport_height: f32,
-<a href=#129 id=129 data-nosnippet>129</a>    <span class="doccomment">/// Mercator world origin in XY and per-tile-unit scales in ZW.
-<a href=#130 id=130 data-nosnippet>130</a>    </span><span class="kw">pub </span>tile_mercator_coords: Vec4f32,
-<a href=#131 id=131 data-nosnippet>131</a>    <span class="doccomment">/// One clips geometry outside the root tile at the antimeridian; zero disables clipping.
-<a href=#132 id=132 data-nosnippet>132</a>    </span><span class="kw">pub </span>clip_antimeridian: u32,
-<a href=#133 id=133 data-nosnippet>133</a>    <span class="doccomment">/// Converts style pixels to pixels in an offscreen drape texture.
-<a href=#134 id=134 data-nosnippet>134</a>    </span><span class="kw">pub </span>line_width_scale: f32,
-<a href=#135 id=135 data-nosnippet>135</a>    <span class="doccomment">/// Tile units per texture or viewport pixel for line dash lengths.
-<a href=#136 id=136 data-nosnippet>136</a>    </span><span class="kw">pub </span>line_units_per_pixel: f32,
-<a href=#137 id=137 data-nosnippet>137</a>    <span class="doccomment">/// The part of the tile the shape draws, as minimum and maximum tile coordinates: a tile
-<a href=#138 id=138 data-nosnippet>138</a>    /// drawn over a finer view tile covers only that tile's square of it. A line on the
-<a href=#139 id=139 data-nosnippet>139</a>    /// terrain clips itself to it, where a flat shape takes it from the stencil mask.
-<a href=#140 id=140 data-nosnippet>140</a>    </span><span class="kw">pub </span>clip_region: Vec4f32,
-<a href=#141 id=141 data-nosnippet>141</a>}
-<a href=#142 id=142 data-nosnippet>142</a>
-<a href=#143 id=143 data-nosnippet>143</a><span class="doccomment">/// The [`ShaderTileMetadata::clip_region`] of a shape that draws its whole tile.
-<a href=#144 id=144 data-nosnippet>144</a></span><span class="kw">pub const </span>WHOLE_TILE: Vec4f32 = [<span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">4096.0</span>, <span class="number">4096.0</span>];
-<a href=#145 id=145 data-nosnippet>145</a>
-<a href=#146 id=146 data-nosnippet>146</a><span class="kw">impl </span>ShaderTileMetadata {
-<a href=#147 id=147 data-nosnippet>147</a>    <span class="doccomment">/// Creates root-tile metadata for a 512-pixel viewport without antimeridian clipping.
-<a href=#148 id=148 data-nosnippet>148</a>    /// Callers drawing another tile or viewport must replace those fields before upload.
-<a href=#149 id=149 data-nosnippet>149</a>    </span><span class="kw">pub fn </span>new(transform: Mat4x4f32, zoom_factor: f32) -&gt; <span class="self">Self </span>{
-<a href=#150 id=150 data-nosnippet>150</a>        <span class="self">Self </span>{
-<a href=#151 id=151 data-nosnippet>151</a>            transform,
-<a href=#152 id=152 data-nosnippet>152</a>            zoom_factor,
-<a href=#153 id=153 data-nosnippet>153</a>            viewport_width: <span class="number">512.0</span>,
-<a href=#154 id=154 data-nosnippet>154</a>            viewport_height: <span class="number">512.0</span>,
-<a href=#155 id=155 data-nosnippet>155</a>            tile_mercator_coords: [<span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">1.0 </span>/ <span class="number">4096.0</span>, <span class="number">1.0 </span>/ <span class="number">4096.0</span>],
-<a href=#156 id=156 data-nosnippet>156</a>            clip_antimeridian: <span class="number">0</span>,
-<a href=#157 id=157 data-nosnippet>157</a>            line_width_scale: <span class="number">1.0</span>,
-<a href=#158 id=158 data-nosnippet>158</a>            line_units_per_pixel: <span class="number">8.0 </span>* zoom_factor,
-<a href=#159 id=159 data-nosnippet>159</a>            clip_region: WHOLE_TILE,
-<a href=#160 id=160 data-nosnippet>160</a>        }
-<a href=#161 id=161 data-nosnippet>161</a>    }
-<a href=#162 id=162 data-nosnippet>162</a>}
+<a href=#98 id=98 data-nosnippet>98</a>    <span class="doccomment">/// Circle pitch-scale (x) and pitch-alignment (y), 1.0 for `map`; the rest is padding.
+<a href=#99 id=99 data-nosnippet>99</a>    </span><span class="kw">pub </span>circle_flags: Vec4f32,
+<a href=#100 id=100 data-nosnippet>100</a>}
+<a href=#101 id=101 data-nosnippet>101</a>
+<a href=#102 id=102 data-nosnippet>102</a><span class="kw">impl </span>ShaderLayerMetadata {
+<a href=#103 id=103 data-nosnippet>103</a>    <span class="doccomment">/// Metadata for a layer without circle paint.
+<a href=#104 id=104 data-nosnippet>104</a>    </span><span class="kw">pub fn </span>new(z_index: f32, line_width: f32, translate: Vec2f32) -&gt; <span class="self">Self </span>{
+<a href=#105 id=105 data-nosnippet>105</a>        <span class="self">Self </span>{
+<a href=#106 id=106 data-nosnippet>106</a>            z_index,
+<a href=#107 id=107 data-nosnippet>107</a>            line_width,
+<a href=#108 id=108 data-nosnippet>108</a>            translate,
+<a href=#109 id=109 data-nosnippet>109</a>            stroke_color: [<span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">1.0</span>],
+<a href=#110 id=110 data-nosnippet>110</a>            circle_params: [<span class="number">1.0</span>, <span class="number">1.0</span>, <span class="number">0.0</span>, <span class="number">0.0</span>],
+<a href=#111 id=111 data-nosnippet>111</a>            circle_flags: [<span class="number">0.0</span>; <span class="number">4</span>],
+<a href=#112 id=112 data-nosnippet>112</a>        }
+<a href=#113 id=113 data-nosnippet>113</a>    }
+<a href=#114 id=114 data-nosnippet>114</a>}
+<a href=#115 id=115 data-nosnippet>115</a>
+<a href=#116 id=116 data-nosnippet>116</a><span class="doccomment">/// Per-tile instance record with projection, viewport and line scaling inputs.
+<a href=#117 id=117 data-nosnippet>117</a></span><span class="attr">#[repr(C)]
+<a href=#118 id=118 data-nosnippet>118</a>#[derive(Copy, Clone, Pod, Zeroable)]
+<a href=#119 id=119 data-nosnippet>119</a></span><span class="kw">pub struct </span>ShaderTileMetadata {
+<a href=#120 id=120 data-nosnippet>120</a>    <span class="doccomment">/// Column-major tile-to-clip transform used by the flat projection path.
+<a href=#121 id=121 data-nosnippet>121</a>    </span><span class="kw">pub </span>transform: Mat4x4f32,
+<a href=#122 id=122 data-nosnippet>122</a>    <span class="doccomment">/// Scale from view zoom to tile zoom, normally `2^(tile_zoom - view_zoom)`.
+<a href=#123 id=123 data-nosnippet>123</a>    </span><span class="kw">pub </span>zoom_factor: f32,
+<a href=#124 id=124 data-nosnippet>124</a>    <span class="doccomment">/// Render viewport width in pixels.
+<a href=#125 id=125 data-nosnippet>125</a>    </span><span class="kw">pub </span>viewport_width: f32,
+<a href=#126 id=126 data-nosnippet>126</a>    <span class="doccomment">/// Render viewport height in pixels.
+<a href=#127 id=127 data-nosnippet>127</a>    </span><span class="kw">pub </span>viewport_height: f32,
+<a href=#128 id=128 data-nosnippet>128</a>    <span class="doccomment">/// Mercator world origin in XY and per-tile-unit scales in ZW.
+<a href=#129 id=129 data-nosnippet>129</a>    </span><span class="kw">pub </span>tile_mercator_coords: Vec4f32,
+<a href=#130 id=130 data-nosnippet>130</a>    <span class="doccomment">/// One clips geometry outside the root tile at the antimeridian; zero disables clipping.
+<a href=#131 id=131 data-nosnippet>131</a>    </span><span class="kw">pub </span>clip_antimeridian: u32,
+<a href=#132 id=132 data-nosnippet>132</a>    <span class="doccomment">/// Converts style pixels to pixels in an offscreen drape texture.
+<a href=#133 id=133 data-nosnippet>133</a>    </span><span class="kw">pub </span>line_width_scale: f32,
+<a href=#134 id=134 data-nosnippet>134</a>    <span class="doccomment">/// Tile units per texture or viewport pixel for line dash lengths.
+<a href=#135 id=135 data-nosnippet>135</a>    </span><span class="kw">pub </span>line_units_per_pixel: f32,
+<a href=#136 id=136 data-nosnippet>136</a>    <span class="doccomment">/// The part of the tile the shape draws, as minimum and maximum tile coordinates: a tile
+<a href=#137 id=137 data-nosnippet>137</a>    /// drawn over a finer view tile covers only that tile's square of it. A line on the
+<a href=#138 id=138 data-nosnippet>138</a>    /// terrain clips itself to it, where a flat shape takes it from the stencil mask.
+<a href=#139 id=139 data-nosnippet>139</a>    </span><span class="kw">pub </span>clip_region: Vec4f32,
+<a href=#140 id=140 data-nosnippet>140</a>}
+<a href=#141 id=141 data-nosnippet>141</a>
+<a href=#142 id=142 data-nosnippet>142</a><span class="doccomment">/// The [`ShaderTileMetadata::clip_region`] of a shape that draws its whole tile.
+<a href=#143 id=143 data-nosnippet>143</a></span><span class="kw">pub const </span>WHOLE_TILE: Vec4f32 = [<span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">4096.0</span>, <span class="number">4096.0</span>];
+<a href=#144 id=144 data-nosnippet>144</a>
+<a href=#145 id=145 data-nosnippet>145</a><span class="kw">impl </span>ShaderTileMetadata {
+<a href=#146 id=146 data-nosnippet>146</a>    <span class="doccomment">/// Creates root-tile metadata for a 512-pixel viewport without antimeridian clipping.
+<a href=#147 id=147 data-nosnippet>147</a>    /// Callers drawing another tile or viewport must replace those fields before upload.
+<a href=#148 id=148 data-nosnippet>148</a>    </span><span class="kw">pub fn </span>new(transform: Mat4x4f32, zoom_factor: f32) -&gt; <span class="self">Self </span>{
+<a href=#149 id=149 data-nosnippet>149</a>        <span class="self">Self </span>{
+<a href=#150 id=150 data-nosnippet>150</a>            transform,
+<a href=#151 id=151 data-nosnippet>151</a>            zoom_factor,
+<a href=#152 id=152 data-nosnippet>152</a>            viewport_width: <span class="number">512.0</span>,
+<a href=#153 id=153 data-nosnippet>153</a>            viewport_height: <span class="number">512.0</span>,
+<a href=#154 id=154 data-nosnippet>154</a>            tile_mercator_coords: [<span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">1.0 </span>/ <span class="number">4096.0</span>, <span class="number">1.0 </span>/ <span class="number">4096.0</span>],
+<a href=#155 id=155 data-nosnippet>155</a>            clip_antimeridian: <span class="number">0</span>,
+<a href=#156 id=156 data-nosnippet>156</a>            line_width_scale: <span class="number">1.0</span>,
+<a href=#157 id=157 data-nosnippet>157</a>            line_units_per_pixel: <span class="number">8.0 </span>* zoom_factor,
+<a href=#158 id=158 data-nosnippet>158</a>            clip_region: WHOLE_TILE,
+<a href=#159 id=159 data-nosnippet>159</a>        }
+<a href=#160 id=160 data-nosnippet>160</a>    }
+<a href=#161 id=161 data-nosnippet>161</a>}
 </code></pre></div></section></main></body></html>

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["GEOMETRY_TYPE_PROPERTY","ID_PROPERTY"],"fn":["is_internal_property","reads_identity"]};

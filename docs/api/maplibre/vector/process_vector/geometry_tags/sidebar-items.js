@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["add_geometry_tags","collect","lonlat"]};
+window.SIDEBAR_ITEMS = {"fn":["add_geometry_tags","add_identity_tags","collect","lonlat"]};

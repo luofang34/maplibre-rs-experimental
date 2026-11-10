@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["Property"],"fn":["is_layout","property","supports","valid_literal"]};
+window.SIDEBAR_ITEMS = {"enum":["Property"],"fn":["follows_zoom","is_layout","property","supports","valid_literal"]};

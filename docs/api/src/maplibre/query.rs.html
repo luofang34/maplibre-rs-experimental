@@ -76,14 +76,14 @@
 <a href=#76 id=76 data-nosnippet>76</a>    }
 <a href=#77 id=77 data-nosnippet>77</a>}
 <a href=#78 id=78 data-nosnippet>78</a>
-<a href=#79 id=79 data-nosnippet>79</a><span class="doccomment">/// A feature's properties as its source gives them, without the feature state an expression
-<a href=#80 id=80 data-nosnippet>80</a>/// reads through them.
+<a href=#79 id=79 data-nosnippet>79</a><span class="doccomment">/// A feature's properties as its source gives them, without the ones the renderer adds for
+<a href=#80 id=80 data-nosnippet>80</a>/// expressions to read, such as feature state.
 <a href=#81 id=81 data-nosnippet>81</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>source_properties(
 <a href=#82 id=82 data-nosnippet>82</a>    properties: <span class="kw-2">&amp;</span><span class="kw">crate</span>::style::expression::FeatureProperties,
 <a href=#83 id=83 data-nosnippet>83</a>) -&gt; BTreeMap&lt;String, serde_json::Value&gt; {
 <a href=#84 id=84 data-nosnippet>84</a>    properties
 <a href=#85 id=85 data-nosnippet>85</a>        .iter()
-<a href=#86 id=86 data-nosnippet>86</a>        .filter(|(key, <span class="kw">_</span>)| !key.starts_with(<span class="kw">crate</span>::style::expression::FEATURE_STATE_PREFIX))
+<a href=#86 id=86 data-nosnippet>86</a>        .filter(|(key, <span class="kw">_</span>)| !<span class="kw">crate</span>::style::expression::is_internal_property(key))
 <a href=#87 id=87 data-nosnippet>87</a>        .map(|(key, value)| (key.clone(), value.to_json()))
 <a href=#88 id=88 data-nosnippet>88</a>        .collect()
 <a href=#89 id=89 data-nosnippet>89</a>}

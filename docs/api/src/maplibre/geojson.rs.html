@@ -29,7 +29,7 @@
 <a href=#29 id=29 data-nosnippet>29</a>
 <a href=#30 id=30 data-nosnippet>30</a><span class="kw">mod </span>cluster;
 <a href=#31 id=31 data-nosnippet>31</a><span class="kw">mod </span>geometry_property;
-<a href=#32 id=32 data-nosnippet>32</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>geometry_property::reads_geometry;
+<a href=#32 id=32 data-nosnippet>32</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>geometry_property::{reads_geometry, reads_identity};
 <a href=#33 id=33 data-nosnippet>33</a>
 <a href=#34 id=34 data-nosnippet>34</a><span class="doccomment">/// Failure reported while preparing or delivering GeoJSON tile geometry.
 <a href=#35 id=35 data-nosnippet>35</a></span><span class="attr">#[derive(Error, Debug)]
@@ -298,7 +298,7 @@
 <a href=#298 id=298 data-nosnippet>298</a>    <span class="kw">let </span>with_geometry = request
 <a href=#299 id=299 data-nosnippet>299</a>        .layers
 <a href=#300 id=300 data-nosnippet>300</a>        .iter()
-<a href=#301 id=301 data-nosnippet>301</a>        .any(geometry_property::reads_geometry)
+<a href=#301 id=301 data-nosnippet>301</a>        .any(geometry_property::reads_feature_inputs)
 <a href=#302 id=302 data-nosnippet>302</a>        .then(|| geometry_property::with_geometry_property(geojson_value));
 <a href=#303 id=303 data-nosnippet>303</a>
 <a href=#304 id=304 data-nosnippet>304</a>    <span class="kw">for </span>style_layer <span class="kw">in </span><span class="kw-2">&amp;</span>request.layers {
@@ -316,7 +316,7 @@
 <a href=#316 id=316 data-nosnippet>316</a>        };
 <a href=#317 id=317 data-nosnippet>317</a>
 <a href=#318 id=318 data-nosnippet>318</a>        <span class="kw">let </span>(source_value, unfiltered) = <span class="kw">match </span><span class="kw-2">&amp;</span>with_geometry {
-<a href=#319 id=319 data-nosnippet>319</a>            <span class="prelude-val">Some</span>(annotated) <span class="kw">if </span>geometry_property::reads_geometry(style_layer) =&gt; {
+<a href=#319 id=319 data-nosnippet>319</a>            <span class="prelude-val">Some</span>(annotated) <span class="kw">if </span>geometry_property::reads_feature_inputs(style_layer) =&gt; {
 <a href=#320 id=320 data-nosnippet>320</a>                (annotated, annotated.to_string())
 <a href=#321 id=321 data-nosnippet>321</a>            }
 <a href=#322 id=322 data-nosnippet>322</a>            <span class="kw">_ </span>=&gt; (geojson_value, unfiltered.clone()),

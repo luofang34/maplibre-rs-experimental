@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["annotate","reads_geometry","with_geometry_property"]};
+window.SIDEBAR_ITEMS = {"fn":["annotate","reads_feature_inputs","reads_geometry","reads_identity","with_geometry_property"]};

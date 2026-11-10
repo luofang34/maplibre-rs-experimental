@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["ZOOM_ONLY_ENUMS"],"mod":["compiled_cache"],"struct":["CompiledProperties"]};
+window.SIDEBAR_ITEMS = {"constant":["ZOOM_ONLY_ENUMS","ZOOM_ONLY_PAINT_ENUMS"],"mod":["compiled_cache"],"struct":["CompiledProperties"]};
