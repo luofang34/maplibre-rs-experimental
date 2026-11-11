@@ -19,7 +19,9 @@ use crate::{
     },
     terrain::{
         drape_cache::{fingerprint, SourceContent},
-        drape_targets::{collect_layer_specs, select_targets, TargetSpec},
+        drape_targets::{
+            collect_layer_specs, select_targets, select_targets_as, Arrivals, TargetSpec,
+        },
         resources::{TerrainDraw, TerrainResources, UNIFORM_STRIDE},
         source::{dem_source, DemSource},
         DrapePhase, TerrainFrame,

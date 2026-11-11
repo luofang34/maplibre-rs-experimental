@@ -18,6 +18,15 @@ fn selected(
     covering: Vec<WorldTileCoords>,
     loaded: Vec<WorldTileCoords>,
 ) -> Vec<WorldTileCoords> {
+    selected_as(target, covering, loaded, Arrivals::Together)
+}
+
+fn selected_as(
+    target: WorldTileCoords,
+    covering: Vec<WorldTileCoords>,
+    loaded: Vec<WorldTileCoords>,
+    arrivals: Arrivals,
+) -> Vec<WorldTileCoords> {
     let mut world = World::default();
     let mut sources = ViewTileSources::default();
     sources.add_resource_query::<&LoadedTiles>(TileKind::Raster);
@@ -25,10 +34,11 @@ fn selected(
     world
         .resources
         .insert(LoadedTiles(loaded.into_iter().collect()));
-    select_targets(
+    select_targets_as(
         std::iter::once(target),
         &world,
         &[("relief".into(), covering)],
+        arrivals,
     )
     .pop()
     .expect("target")
@@ -127,4 +137,55 @@ fn a_partly_loaded_level_still_follows_the_view() {
             .collect::<HashSet<_>>(),
         [target, children[0], children[1]].into_iter().collect()
     );
+}
+
+/// An eye in flight may never hold every tile it wants under a terrain tile, so a tile that
+/// has arrived must not wait for the rest to show.
+#[test]
+fn an_eyes_mixed_lod_covering_shows_each_tile_over_its_ancestor_as_it_arrives() {
+    let target = WorldTileCoords::from((2423, 1389, 12_u8.into()));
+    let ancestor = target.get_parent().expect("ancestor");
+    let children = target.get_children();
+    let mut covering = children[..3].to_vec();
+    covering.extend(children[3].get_children());
+    for count in 0..=covering.len() {
+        let mut loaded = covering[..count].to_vec();
+        loaded.push(ancestor);
+        let selected = selected_as(target, covering.clone(), loaded, Arrivals::OverStandIn);
+        let expected: HashSet<_> = if count == covering.len() {
+            covering.iter().copied().collect()
+        } else {
+            covering[..count]
+                .iter()
+                .copied()
+                .chain([ancestor])
+                .collect()
+        };
+        if count < covering.len() {
+            assert_eq!(
+                selected.first(),
+                Some(&ancestor),
+                "the stand-in is drawn first"
+            );
+        }
+        assert_eq!(selected.len(), expected.len(), "{count} loaded");
+        assert_eq!(
+            selected.into_iter().collect::<HashSet<_>>(),
+            expected,
+            "{count} loaded"
+        );
+    }
+}
+
+#[test]
+fn an_eyes_partial_children_without_an_ancestor_wait_for_complete_coverage() {
+    let target = WorldTileCoords::from((2423, 1389, 12_u8.into()));
+    let children = target.get_children();
+    assert!(selected_as(
+        target,
+        children.to_vec(),
+        children[..3].to_vec(),
+        Arrivals::OverStandIn
+    )
+    .is_empty());
 }

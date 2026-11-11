@@ -83,7 +83,12 @@ pub(crate) fn target_specs(
         .resources
         .insert(crate::terrain::request_system::DrapeRequests(tiles.clone()));
     world.resources.insert(PrefetchDrapes::default());
-    let mut targets = select_targets(tiles.into_iter(), world, &raster_coverings);
+    let arrivals = if view_state.has_external_view() || view_state.pose_view().is_some() {
+        Arrivals::OverStandIn
+    } else {
+        Arrivals::Together
+    };
+    let mut targets = select_targets_as(tiles.into_iter(), world, &raster_coverings, arrivals);
     if !uniform_globe && !view_state.has_external_view() && view_state.pose_view().is_none() {
         let prefetch_tiles = world
             .resources
