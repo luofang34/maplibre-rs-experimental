@@ -6,7 +6,7 @@ use crate::{
     raster::{RasterLayerData, RasterLayersDataComponent},
     sdf::SymbolLayersDataComponent,
     tcs::tiles::Tiles,
-    terrain::DemTileComponent,
+    terrain::{DemLayersComponent, DemTileComponent},
     vector::{
         content::LayerReplacements, AvailableVectorLayerBucket, VectorLayerBucket,
         VectorLayerBucketComponent,
@@ -43,10 +43,20 @@ pub(crate) fn tile_bytes(tiles: &Tiles, coords: WorldTileCoords) -> usize {
                 })
                 .sum::<usize>()
         });
-    let dem = match tiles.query::<&DemTileComponent>(coords) {
-        Some(DemTileComponent::Loaded(dem)) => dem.tile.pixels().len(),
-        _ => 0,
-    };
+    let mut seen_dems = HashSet::new();
+    let mut dem = 0;
+    if let Some(DemTileComponent::Loaded(loaded)) = tiles.query::<&DemTileComponent>(coords) {
+        if seen_dems.insert(Arc::as_ptr(&loaded.tile)) {
+            dem += loaded.tile.pixels().len();
+        }
+    }
+    if let Some(layers) = tiles.query::<&DemLayersComponent>(coords) {
+        for (_, loaded) in layers.iter() {
+            if seen_dems.insert(Arc::as_ptr(&loaded.tile)) {
+                dem += loaded.tile.pixels().len();
+            }
+        }
+    }
     let pending = tiles
         .query::<&LayerReplacements>(coords)
         .map_or(0, |pending| {

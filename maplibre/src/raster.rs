@@ -23,10 +23,10 @@ use crate::{
     },
     schedule::Schedule,
     tcs::{system::SystemContainer, tiles::TileComponent, world::World},
+    terrain::{DemLayersComponent, GpuDemPool},
 };
 
 pub mod cross_fade;
-mod dem_border;
 pub mod image_source;
 
 /// Drops a source that left the style: its results on every tile and its textures, so neither
@@ -41,13 +41,24 @@ pub(crate) fn forget_source(world: &mut World, name: &str) {
         {
             component.layers.retain(|layer| layer.source() != &source);
         }
+        if let Some(dem) = world.tiles.query_mut::<&mut DemLayersComponent>(coords) {
+            dem.remove(&source);
+        }
     }
-    if let Some(crate::render::eventually::Eventually::Initialized(raster)) =
-        world
-            .resources
-            .get_mut::<crate::render::eventually::Eventually<resource::RasterResources>>()
+    if let Some(Eventually::Initialized(raster)) = world
+        .resources
+        .get_mut::<Eventually<resource::RasterResources>>()
     {
         raster.forget_source(&source);
+    }
+    let keep_for_terrain = world
+        .resources
+        .get::<Eventually<crate::terrain::resources::TerrainResources>>()
+        .is_some();
+    if !keep_for_terrain {
+        if let Some(pool) = world.resources.get_mut::<GpuDemPool>() {
+            pool.drop_source(&source);
+        }
     }
 }
 pub mod paint;
@@ -65,6 +76,7 @@ pub(crate) mod upload_system;
 
 pub use transferables::{
     DefaultRasterTransferables, LayerRaster, LayerRasterMissing, RasterTransferables,
+    SharedRasterDem,
 };
 
 /// Registers raster requests, worker results, uploads and draws with the render schedule.
@@ -222,15 +234,19 @@ impl HasTile for RasterTilesDone {
         coords: WorldTileCoords,
         world: &World,
     ) -> bool {
-        world
+        let cpu_ready = world
             .tiles
             .query::<&RasterLayersDataComponent>(coords)
             .is_some_and(|data| data.has_source_image(source))
-            && source_texture_ready(source, coords, world)
+            || world
+                .tiles
+                .query::<&DemLayersComponent>(coords)
+                .is_some_and(|dem| dem.contains(source));
+        cpu_ready && source_texture_ready(source, coords, world)
     }
 
     fn has_tile(&self, coords: WorldTileCoords, world: &World) -> bool {
-        world
+        let raster_ready = world
             .tiles
             .query::<&RasterLayersDataComponent>(coords)
             .is_some_and(|data| {
@@ -241,6 +257,53 @@ impl HasTile for RasterTilesDone {
                             if source_texture_ready(&available.source, coords, world)
                     )
                 })
-            })
+            });
+        let dem_ready = match world.resources.get::<Eventually<RasterResources>>() {
+            Some(Eventually::Initialized(resources)) => world
+                .tiles
+                .query::<&DemLayersComponent>(coords)
+                .is_some_and(|dem| {
+                    dem.iter().any(|(source, _)| {
+                        resources.draws(source)
+                            && resources.get_bound_texture(source, &coords).is_some()
+                    })
+                }),
+            _ => false,
+        };
+        raster_ready || dem_ready
+    }
+
+    fn nearest_ancestor_candidate(
+        &self,
+        coords: WorldTileCoords,
+        world: &World,
+    ) -> Option<WorldTileCoords> {
+        let raster = world
+            .tiles
+            .pyramid_of::<RasterLayersDataComponent>()
+            .nearest_ancestor(coords)
+            .map(|(ancestor, _)| ancestor);
+        let dem = world
+            .tiles
+            .pyramid_of::<DemLayersComponent>()
+            .nearest_ancestor(coords)
+            .map(|(ancestor, _)| ancestor);
+        raster.into_iter().chain(dem).max_by_key(|c| c.z)
+    }
+
+    fn has_descendant_candidates(
+        &self,
+        coords: WorldTileCoords,
+        max_depth: usize,
+        world: &World,
+    ) -> bool {
+        world
+            .tiles
+            .pyramid_of::<RasterLayersDataComponent>()
+            .has_descendants(coords, max_depth)
+            || world
+                .tiles
+                .pyramid_of::<DemLayersComponent>()
+                .has_descendants(coords, max_depth)
     }
 }

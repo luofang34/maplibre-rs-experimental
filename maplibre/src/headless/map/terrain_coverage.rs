@@ -208,3 +208,5 @@ mod heatmap;
 mod hillshade;
 
 mod uniforms;
+
+mod unified_dem;

@@ -28,7 +28,6 @@ use crate::{
     sdf::SymbolLayersDataComponent,
     style::{layer::StyleLayer, Style},
     tcs::world::World,
-    terrain::{backfill_neighbours, source::dem_source},
     vector::{
         transferables::{LayerIndexed, SymbolLayerTessellated},
         AvailableVectorLayerBucket, VectorLayerBucket, VectorLayerBucketComponent,
@@ -153,41 +152,6 @@ impl HeadlessMap {
         frame_count: u8,
     ) -> Result<(), HeadlessMapOperationError> {
         self.render_frames_with_terrain(layers, raster_layers, Vec::new(), frame_count)
-    }
-
-    /// Renders decoded source tiles together with DEM tiles for the style's terrain.
-    ///
-    /// DEM images are decoded with the terrain source's encoding; images that cannot be decoded
-    /// are skipped so the mesh falls back to an ancestor tile or sea level.
-    /// Inserts decoded DEM tiles, fills the borders between neighbours and settles the terrain
-    /// index with one schedule pass, so later tile selection sees the elevations they reveal.
-    pub fn load_dem_tiles(
-        &mut self,
-        dem_tiles: Vec<(WorldTileCoords, RgbaImage)>,
-    ) -> Result<(), HeadlessMapOperationError> {
-        let context = &mut self.map_context;
-        let unpack = dem_source(&context.style).map(|dem| dem.unpack);
-        let circumference = context.view_state.body().circumference_meters();
-        let tiles = &mut context.world.tiles;
-        let mut dem_coords = Vec::new();
-        for (coords, image) in dem_tiles {
-            let Some(unpack) = unpack else {
-                break;
-            };
-            let component = dem::dem_component(coords, &image, unpack, circumference);
-            tiles
-                .spawn_mut(coords)
-                .ok_or(HeadlessMapOperationError::InvalidTile { coords })?
-                .insert(component);
-            dem_coords.push(coords);
-        }
-        for coords in dem_coords {
-            backfill_neighbours(tiles, coords);
-        }
-        if let Err(error) = crate::render::frame::run_frame(&mut self.schedule, context) {
-            tracing::warn!(?error, "terrain index warm-up frame failed");
-        }
-        Ok(())
     }
 
     /// Loads processed vector, raster and DEM data, then runs `frame_count` offscreen frames.

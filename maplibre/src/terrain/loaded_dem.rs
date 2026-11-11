@@ -5,7 +5,7 @@ use std::sync::Arc;
 use super::DemTile;
 
 /// A decoded DEM tile and the revision of its GPU-visible samples.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct LoadedDem {
     /// Decoded samples, shared copy-on-write across maps until neighbour borders diverge.
     /// In-place changes must use [`Arc::make_mut`] and advance `revision`.

@@ -2,13 +2,18 @@
 
 use std::collections::BTreeMap;
 
+use image::RgbaImage;
+
 use super::{HeadlessMap, HeadlessMapOperationError};
 use crate::{
     raster::{
-        resource::RasterResources, AvailableRasterLayerData, RasterLayerData,
-        RasterLayersDataComponent,
+        resource::RasterResources, AvailableRasterLayerData, MissingRasterLayerData,
+        RasterLayerData, RasterLayersDataComponent,
     },
     render::eventually::Eventually,
+    terrain::dem_store::{
+        decode_image_to_dem, dem_unpack_for_source, ingest_source_dem, is_terrain_source,
+    },
 };
 
 impl HeadlessMap {
@@ -21,8 +26,10 @@ impl HeadlessMap {
             rasters_by_tile
                 .entry(layer.coords)
                 .or_insert_with(Vec::new)
-                .push(RasterLayerData::Available(layer));
+                .push(layer);
         }
+        let style = &self.map_context.style;
+        let circumference = self.map_context.view_state.body().circumference_meters();
         let world = &mut self.map_context.world;
         for (coords, layers) in rasters_by_tile {
             if world
@@ -37,17 +44,41 @@ impl HeadlessMap {
                     .insert(RasterLayersDataComponent::default());
             }
             for layer in layers {
-                let source = layer.source().clone();
-                if let Some(component) = world
+                let source = layer.source.clone();
+                let record = if let Some(unpack) = dem_unpack_for_source(style, &source) {
+                    match decode_image_to_dem(coords, &layer.image, unpack, circumference) {
+                        Some(dem) => {
+                            ingest_source_dem(
+                                &mut world.tiles,
+                                &source,
+                                coords,
+                                dem,
+                                is_terrain_source(style, &source),
+                            );
+                            RasterLayerData::Available(AvailableRasterLayerData {
+                                coords,
+                                source: source.clone(),
+                                image: RgbaImage::new(0, 0),
+                            })
+                        }
+                        None => RasterLayerData::Missing(MissingRasterLayerData {
+                            coords,
+                            source: source.clone(),
+                        }),
+                    }
+                } else {
+                    RasterLayerData::Available(layer)
+                };
+                let changed = world
                     .tiles
                     .query_mut::<&mut RasterLayersDataComponent>(coords)
-                {
-                    component.record(layer);
-                }
-                if let Some(Eventually::Initialized(raster)) =
-                    world.resources.get_mut::<Eventually<RasterResources>>()
-                {
-                    raster.tile_data_changed(&source, coords);
+                    .is_some_and(|component| component.record(record));
+                if changed {
+                    if let Some(Eventually::Initialized(raster)) =
+                        world.resources.get_mut::<Eventually<RasterResources>>()
+                    {
+                        raster.tile_data_changed(&source, coords);
+                    }
                 }
             }
         }

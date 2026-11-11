@@ -14,6 +14,23 @@ pub(super) struct DemTexture {
 }
 
 impl TerrainResources {
+    pub(crate) fn bind_shared_dem(
+        &mut self,
+        coords: WorldTileCoords,
+        texture: Texture,
+        revision: u32,
+        source: DemRevision,
+    ) {
+        self.dem_textures.insert(
+            coords,
+            DemTexture {
+                texture,
+                revision,
+                source: Some(source),
+            },
+        );
+    }
+
     pub(crate) fn upload_loaded_dem(
         &mut self,
         device: &wgpu::Device,

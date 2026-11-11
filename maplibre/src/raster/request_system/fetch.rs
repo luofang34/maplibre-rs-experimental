@@ -40,7 +40,17 @@ pub fn fetch_raster_apc<K: OffscreenKernel, T: RasterTransferables, C: Context +
         let client = kernel.source_client();
         let mut fetches: FuturesUnordered<_> = source_layer_groups(&style, TileKind::Raster)
             .into_iter()
-            .map(|group| fetch_source::<T, _, _>(&client, group, coords, context.clone()))
+            .map(|group| {
+                let dem_unpack = group
+                    .source_name
+                    .as_deref()
+                    .and_then(|name| style.sources.get(name))
+                    .and_then(|src| match src {
+                        crate::style::source::Source::RasterDem(dem) => Some(dem.unpack_vector()),
+                        _ => None,
+                    });
+                fetch_source::<T, _, _>(&client, group, dem_unpack, coords, context.clone())
+            })
             .collect();
         let mut retry = false;
         while let Some(fetched) = fetches.next().await {
@@ -66,6 +76,7 @@ pub fn fetch_raster_apc<K: OffscreenKernel, T: RasterTransferables, C: Context +
 async fn fetch_source<T: RasterTransferables, HC: HttpClient, C: Context + Clone + Send>(
     client: &SourceClient<HC>,
     group: SourceLayerGroup,
+    dem_unpack: Option<[f64; 4]>,
     coords: WorldTileCoords,
     context: C,
 ) -> Result<bool, ProcedureError> {
@@ -77,6 +88,11 @@ async fn fetch_source<T: RasterTransferables, HC: HttpClient, C: Context + Clone
             context,
         )
         .await;
+    }
+    if let Some(unpack) = dem_unpack {
+        if group.source.format(&coords).is_some() {
+            return fetch_dem_source::<T, _, _>(client, group, unpack, coords, context).await;
+        }
     }
     if group.source.format(&coords).is_some() {
         use crate::sdf::assets::tiles::CachedTileFailure;
@@ -224,6 +240,67 @@ async fn fetch_source<T: RasterTransferables, HC: HttpClient, C: Context + Clone
         }
     }
     Ok(retry)
+}
+
+/// Fetches, PNG-decodes, and despikes a `raster-dem` source tile on a worker through the shared
+/// [`AssetCache`](crate::sdf::assets::AssetCache), sharing the decoded [`DemTile`](crate::terrain::DemTile)
+/// with 3D terrain when both reference the same source.
+async fn fetch_dem_source<T: RasterTransferables, HC: HttpClient, C: Context>(
+    client: &SourceClient<HC>,
+    group: SourceLayerGroup,
+    unpack: [f64; 4],
+    coords: WorldTileCoords,
+    context: C,
+) -> Result<bool, ProcedureError> {
+    use crate::{
+        projection::body::Body, raster::transferables::LayerRaster,
+        sdf::assets::tiles::CachedTileFailure,
+    };
+    let source = RasterSourceId::new(group.source_name.clone());
+    let circumference = Body::EARTH.circumference_meters();
+    match client
+        .assets()
+        .load_dem_tile(client, &group.source, &coords, unpack, circumference)
+        .await
+    {
+        Ok(entry) => {
+            context
+                .send_back(T::LayerRaster::build_from_dem(
+                    coords,
+                    source,
+                    std::sync::Arc::clone(&entry.tile),
+                    entry.circumference_meters,
+                    std::sync::Arc::clone(&entry.image),
+                ))
+                .map_err(ProcedureError::Send)?;
+            Ok(false)
+        }
+        Err(CachedTileFailure::Decode(error)) => {
+            tracing::warn!(%coords, source = ?group.source_name, %error, "invalid DEM raster tile");
+            context
+                .send_back(T::LayerRasterMissing::build_from(coords, source))
+                .map_err(ProcedureError::Send)?;
+            Ok(false)
+        }
+        Err(CachedTileFailure::NotFound) => {
+            tracing::debug!(%coords, source = ?group.source_name, "no DEM raster tile at the source");
+            context
+                .send_back(T::LayerRasterMissing::build_from(coords, source))
+                .map_err(ProcedureError::Send)?;
+            Ok(false)
+        }
+        Err(CachedTileFailure::Transport { retryable, message }) => {
+            if retryable {
+                tracing::warn!(%coords, source = ?group.source_name, error = %message, "DEM raster tile fetch failed");
+            } else {
+                tracing::error!(%coords, source = ?group.source_name, error = %message, "DEM raster tile fetch failed");
+            }
+            context
+                .send_back(T::LayerRasterMissing::build_from(coords, source))
+                .map_err(ProcedureError::Send)?;
+            Ok(retryable)
+        }
+    }
 }
 
 /// Sends the tile of an image source back, empty where the picture does not reach it, and

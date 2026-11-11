@@ -38,10 +38,10 @@ fn main(in: VertexOutput) -> @location(0) vec4<f32> {
         discard;
     }
     let uv = in.tex_coords.xy / in.tex_coords.z;
-    // The texture carries one texel of neighbour samples on every side.
+    // The unified DEM texture carries two texels of neighbour samples on every side.
     let full = vec2<f32>(textureDimensions(t_dem));
-    let inner = full - vec2<f32>(2.0, 2.0);
-    let padded = (uv * inner + vec2<f32>(1.0, 1.0)) / full;
+    let inner = full - vec2<f32>(4.0, 4.0);
+    let padded = (uv * inner + vec2<f32>(2.0, 2.0)) / full;
     let data = textureSample(t_dem, s_dem, padded) * 255.0;
     var elevation = dot(vec4<f32>(data.rgb, -1.0), relief.unpack);
     let cap_t = clamp(abs(in.polar_cap), 0.0, 1.0);
