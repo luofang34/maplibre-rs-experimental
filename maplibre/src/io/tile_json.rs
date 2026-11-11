@@ -150,7 +150,12 @@ pub async fn resolve_tile_json_sources<HC: HttpClient>(
                 }
             },
             Err(error) => {
-                tracing::warn!(source = %name, %url, %error, "TileJSON document is unreachable");
+                tracing::warn!(
+                    source = %name,
+                    %url,
+                    error = %error.describe(),
+                    "TileJSON document is unreachable"
+                );
             }
         }
     }
