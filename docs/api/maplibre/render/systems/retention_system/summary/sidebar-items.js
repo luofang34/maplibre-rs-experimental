@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["finest_dem_zoom","summarize_gpu_objects","summarize_residency","summarize_timings"]};

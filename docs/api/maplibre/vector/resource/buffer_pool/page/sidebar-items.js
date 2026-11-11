@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_PAGE_VERTICES"],"struct":["BufferPage","ByteCapacities","ElementStrides","PageAllocation","PageFactory"]};

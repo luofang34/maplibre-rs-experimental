@@ -56,7 +56,7 @@
 <a href=#56 id=56 data-nosnippet>56</a>                <span class="prelude-val">Some</span>(bounds) =&gt; tiles_meeting(world, <span class="kw-2">&amp;</span>bounds),
 <a href=#57 id=57 data-nosnippet>57</a>                <span class="prelude-val">None </span>=&gt; {
 <a href=#58 id=58 data-nosnippet>58</a>                    <span class="macro">tracing::debug!</span>(source = %name, <span class="string">"GeoJSON change reaches every loaded tile"</span>);
-<a href=#59 id=59 data-nosnippet>59</a>                    world.tiles.tiles.values().map(|tile| tile.coords).collect()
+<a href=#59 id=59 data-nosnippet>59</a>                    world.tiles.pyramid().coords_coarse_to_fine().collect()
 <a href=#60 id=60 data-nosnippet>60</a>                }
 <a href=#61 id=61 data-nosnippet>61</a>            };
 <a href=#62 id=62 data-nosnippet>62</a>            <span class="kw">if </span>tiles.is_empty() {
@@ -86,119 +86,118 @@
 <a href=#86 id=86 data-nosnippet>86</a>    }
 <a href=#87 id=87 data-nosnippet>87</a>    world
 <a href=#88 id=88 data-nosnippet>88</a>        .tiles
-<a href=#89 id=89 data-nosnippet>89</a>        .tiles
-<a href=#90 id=90 data-nosnippet>90</a>        .values()
-<a href=#91 id=91 data-nosnippet>91</a>        .map(|tile| tile.coords)
-<a href=#92 id=92 data-nosnippet>92</a>        .filter(|coords| {
-<a href=#93 id=93 data-nosnippet>93</a>            <span class="kw">let </span>window = TileWindow::of(<span class="kw-2">*</span>coords);
-<a href=#94 id=94 data-nosnippet>94</a>            bounds.iter().any(|bounds| window.meets(bounds))
-<a href=#95 id=95 data-nosnippet>95</a>        })
-<a href=#96 id=96 data-nosnippet>96</a>        .collect()
-<a href=#97 id=97 data-nosnippet>97</a>}
-<a href=#98 id=98 data-nosnippet>98</a>
-<a href=#99 id=99 data-nosnippet>99</a><span class="doccomment">/// The bounds of every feature version a data change adds, alters or drops; `None` when the
-<a href=#100 id=100 data-nosnippet>100</a>/// change can reach any tile: data behind a URL, clusters, which a moved point can regroup
-<a href=#101 id=101 data-nosnippet>101</a>/// anywhere, other tiling options, or a document that cannot be read feature by feature.
-<a href=#102 id=102 data-nosnippet>102</a></span><span class="kw">fn </span>reach(before: <span class="kw-2">&amp;</span>GeoJsonSource, after: <span class="kw-2">&amp;</span>GeoJsonSource) -&gt; <span class="prelude-ty">Option</span>&lt;Vec&lt;[f64; <span class="number">4</span>]&gt;&gt; {
-<a href=#103 id=103 data-nosnippet>103</a>    <span class="kw">let </span>(GeoJsonData::Inline(old), GeoJsonData::Inline(new)) = (<span class="kw-2">&amp;</span>before.data, <span class="kw-2">&amp;</span>after.data) <span class="kw">else </span>{
-<a href=#104 id=104 data-nosnippet>104</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
-<a href=#105 id=105 data-nosnippet>105</a>    };
-<a href=#106 id=106 data-nosnippet>106</a>    <span class="kw">if </span>before.cluster || after.cluster || !same_tiling(before, after) {
-<a href=#107 id=107 data-nosnippet>107</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
-<a href=#108 id=108 data-nosnippet>108</a>    }
-<a href=#109 id=109 data-nosnippet>109</a>    <span class="kw">let </span>(old, new) = (features(old)<span class="question-mark">?</span>, features(new)<span class="question-mark">?</span>);
-<a href=#110 id=110 data-nosnippet>110</a>    <span class="comment">// A generated id is a feature's position, so every feature after a change of position moves.
-<a href=#111 id=111 data-nosnippet>111</a>    </span><span class="kw">let </span>promoted = promoted_property(after);
-<a href=#112 id=112 data-nosnippet>112</a>    <span class="kw">let </span>pairs = (!after.generate_id)
-<a href=#113 id=113 data-nosnippet>113</a>        .then(|| pairs_by_id(<span class="kw-2">&amp;</span>old, <span class="kw-2">&amp;</span>new, promoted.as_deref()))
-<a href=#114 id=114 data-nosnippet>114</a>        .flatten()
-<a href=#115 id=115 data-nosnippet>115</a>        .unwrap_or_else(|| pairs_by_position(<span class="kw-2">&amp;</span>old, <span class="kw-2">&amp;</span>new));
-<a href=#116 id=116 data-nosnippet>116</a>    <span class="kw">let </span><span class="kw-2">mut </span>bounds = Vec::new();
-<a href=#117 id=117 data-nosnippet>117</a>    <span class="kw">for </span>(old, new) <span class="kw">in </span>pairs.into_iter().filter(|(old, new)| old != new) {
-<a href=#118 id=118 data-nosnippet>118</a>        <span class="kw">for </span>feature <span class="kw">in </span>[old, new].into_iter().flatten() {
-<a href=#119 id=119 data-nosnippet>119</a>            bounds.extend(feature_bounds(feature).ok()<span class="question-mark">?</span>);
-<a href=#120 id=120 data-nosnippet>120</a>        }
-<a href=#121 id=121 data-nosnippet>121</a>    }
-<a href=#122 id=122 data-nosnippet>122</a>    <span class="prelude-val">Some</span>(bounds)
-<a href=#123 id=123 data-nosnippet>123</a>}
-<a href=#124 id=124 data-nosnippet>124</a>
-<a href=#125 id=125 data-nosnippet>125</a><span class="doccomment">/// Whether every option that decides which features a tile holds, and with which ids, is the
-<a href=#126 id=126 data-nosnippet>126</a>/// same.
-<a href=#127 id=127 data-nosnippet>127</a></span><span class="kw">fn </span>same_tiling(before: <span class="kw-2">&amp;</span>GeoJsonSource, after: <span class="kw-2">&amp;</span>GeoJsonSource) -&gt; bool {
-<a href=#128 id=128 data-nosnippet>128</a>    before.promote_id == after.promote_id
-<a href=#129 id=129 data-nosnippet>129</a>        &amp;&amp; before.generate_id == after.generate_id
-<a href=#130 id=130 data-nosnippet>130</a>        &amp;&amp; before.filter == after.filter
-<a href=#131 id=131 data-nosnippet>131</a>        &amp;&amp; before.buffer == after.buffer
-<a href=#132 id=132 data-nosnippet>132</a>        &amp;&amp; before.minzoom == after.minzoom
-<a href=#133 id=133 data-nosnippet>133</a>        &amp;&amp; before.maxzoom == after.maxzoom
-<a href=#134 id=134 data-nosnippet>134</a>}
-<a href=#135 id=135 data-nosnippet>135</a>
-<a href=#136 id=136 data-nosnippet>136</a><span class="doccomment">/// The features of a document the index reads, or `None` for a root it refuses.
-<a href=#137 id=137 data-nosnippet>137</a></span><span class="kw">fn </span>features(document: <span class="kw-2">&amp;</span>Value) -&gt; <span class="prelude-ty">Option</span>&lt;std::borrow::Cow&lt;<span class="lifetime">'_</span>, [Value]&gt;&gt; {
-<a href=#138 id=138 data-nosnippet>138</a>    <span class="kw">match </span>document.get(<span class="string">"type"</span>).and_then(Value::as_str)<span class="question-mark">? </span>{
-<a href=#139 id=139 data-nosnippet>139</a>        <span class="string">"FeatureCollection" </span>| <span class="string">"Feature" </span>| <span class="string">"Point" </span>| <span class="string">"MultiPoint" </span>| <span class="string">"LineString"
-<a href=#140 id=140 data-nosnippet>140</a>        </span>| <span class="string">"MultiLineString" </span>| <span class="string">"Polygon" </span>| <span class="string">"MultiPolygon" </span>| <span class="string">"GeometryCollection" </span>=&gt; {
-<a href=#141 id=141 data-nosnippet>141</a>            <span class="prelude-val">Some</span>(feature_list(document))
-<a href=#142 id=142 data-nosnippet>142</a>        }
-<a href=#143 id=143 data-nosnippet>143</a>        <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
-<a href=#144 id=144 data-nosnippet>144</a>    }
-<a href=#145 id=145 data-nosnippet>145</a>}
-<a href=#146 id=146 data-nosnippet>146</a>
-<a href=#147 id=147 data-nosnippet>147</a><span class="kw">type </span>Pair&lt;<span class="lifetime">'a</span>&gt; = (<span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">'a </span>Value&gt;, <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">'a </span>Value&gt;);
-<a href=#148 id=148 data-nosnippet>148</a>
-<a href=#149 id=149 data-nosnippet>149</a><span class="kw">fn </span>pairs_by_position&lt;<span class="lifetime">'a</span>&gt;(old: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>[Value], new: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>[Value]) -&gt; Vec&lt;Pair&lt;<span class="lifetime">'a</span>&gt;&gt; {
-<a href=#150 id=150 data-nosnippet>150</a>    (<span class="number">0</span>..old.len().max(new.len()))
-<a href=#151 id=151 data-nosnippet>151</a>        .map(|index| (old.get(index), new.get(index)))
-<a href=#152 id=152 data-nosnippet>152</a>        .collect()
-<a href=#153 id=153 data-nosnippet>153</a>}
-<a href=#154 id=154 data-nosnippet>154</a>
-<a href=#155 id=155 data-nosnippet>155</a><span class="doccomment">/// Each feature with the one of the same id, as feature edits address them; `None` unless every
-<a href=#156 id=156 data-nosnippet>156</a>/// feature has an id of its own and the features kept are still in the order tiles draw them in.
-<a href=#157 id=157 data-nosnippet>157</a></span><span class="kw">fn </span>pairs_by_id&lt;<span class="lifetime">'a</span>&gt;(
-<a href=#158 id=158 data-nosnippet>158</a>    old: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>[Value],
-<a href=#159 id=159 data-nosnippet>159</a>    new: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>[Value],
-<a href=#160 id=160 data-nosnippet>160</a>    promoted: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>str&gt;,
-<a href=#161 id=161 data-nosnippet>161</a>) -&gt; <span class="prelude-ty">Option</span>&lt;Vec&lt;Pair&lt;<span class="lifetime">'a</span>&gt;&gt;&gt; {
-<a href=#162 id=162 data-nosnippet>162</a>    <span class="kw">let </span>ids = |features: <span class="kw-2">&amp;</span>[Value]| -&gt; <span class="prelude-ty">Option</span>&lt;Vec&lt;String&gt;&gt; {
-<a href=#163 id=163 data-nosnippet>163</a>        features
-<a href=#164 id=164 data-nosnippet>164</a>            .iter()
-<a href=#165 id=165 data-nosnippet>165</a>            .map(|feature| feature_id(feature, promoted).map(|id| id.to_string()))
-<a href=#166 id=166 data-nosnippet>166</a>            .collect()
-<a href=#167 id=167 data-nosnippet>167</a>    };
-<a href=#168 id=168 data-nosnippet>168</a>    <span class="kw">let </span>(old_ids, new_ids) = (ids(old)<span class="question-mark">?</span>, ids(new)<span class="question-mark">?</span>);
-<a href=#169 id=169 data-nosnippet>169</a>    <span class="kw">let </span>(old_at, new_at) = (positions(<span class="kw-2">&amp;</span>old_ids), positions(<span class="kw-2">&amp;</span>new_ids));
-<a href=#170 id=170 data-nosnippet>170</a>    <span class="kw">if </span>old_at.len() != old_ids.len() || new_at.len() != new_ids.len() {
-<a href=#171 id=171 data-nosnippet>171</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
-<a href=#172 id=172 data-nosnippet>172</a>    }
-<a href=#173 id=173 data-nosnippet>173</a>    <span class="kw">if </span>kept(<span class="kw-2">&amp;</span>old_ids, <span class="kw-2">&amp;</span>new_at) != kept(<span class="kw-2">&amp;</span>new_ids, <span class="kw-2">&amp;</span>old_at) {
-<a href=#174 id=174 data-nosnippet>174</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
-<a href=#175 id=175 data-nosnippet>175</a>    }
-<a href=#176 id=176 data-nosnippet>176</a>    <span class="kw">let </span>changed = old_ids.iter().zip(old).map(|(id, feature)| {
-<a href=#177 id=177 data-nosnippet>177</a>        <span class="kw">let </span>replacement = new_at.get(id.as_str()).and_then(|<span class="kw-2">&amp;</span>index| new.get(index));
-<a href=#178 id=178 data-nosnippet>178</a>        (<span class="prelude-val">Some</span>(feature), replacement)
-<a href=#179 id=179 data-nosnippet>179</a>    });
-<a href=#180 id=180 data-nosnippet>180</a>    <span class="kw">let </span>added = new_ids
-<a href=#181 id=181 data-nosnippet>181</a>        .iter()
-<a href=#182 id=182 data-nosnippet>182</a>        .zip(new)
-<a href=#183 id=183 data-nosnippet>183</a>        .filter(|(id, <span class="kw">_</span>)| !old_at.contains_key(id.as_str()))
-<a href=#184 id=184 data-nosnippet>184</a>        .map(|(<span class="kw">_</span>, feature)| (<span class="prelude-val">None</span>, <span class="prelude-val">Some</span>(feature)));
-<a href=#185 id=185 data-nosnippet>185</a>    <span class="prelude-val">Some</span>(changed.chain(added).collect())
-<a href=#186 id=186 data-nosnippet>186</a>}
-<a href=#187 id=187 data-nosnippet>187</a>
-<a href=#188 id=188 data-nosnippet>188</a><span class="kw">fn </span>positions(ids: <span class="kw-2">&amp;</span>[String]) -&gt; HashMap&lt;<span class="kw-2">&amp;</span>str, usize&gt; {
-<a href=#189 id=189 data-nosnippet>189</a>    ids.iter()
-<a href=#190 id=190 data-nosnippet>190</a>        .enumerate()
-<a href=#191 id=191 data-nosnippet>191</a>        .map(|(index, id)| (id.as_str(), index))
-<a href=#192 id=192 data-nosnippet>192</a>        .collect()
-<a href=#193 id=193 data-nosnippet>193</a>}
-<a href=#194 id=194 data-nosnippet>194</a>
-<a href=#195 id=195 data-nosnippet>195</a><span class="kw">fn </span>kept&lt;<span class="lifetime">'a</span>&gt;(ids: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>[String], other: <span class="kw-2">&amp;</span>HashMap&lt;<span class="kw-2">&amp;</span>str, usize&gt;) -&gt; Vec&lt;<span class="kw-2">&amp;</span><span class="lifetime">'a </span>str&gt; {
-<a href=#196 id=196 data-nosnippet>196</a>    ids.iter()
-<a href=#197 id=197 data-nosnippet>197</a>        .map(String::as_str)
-<a href=#198 id=198 data-nosnippet>198</a>        .filter(|id| other.contains_key(id))
-<a href=#199 id=199 data-nosnippet>199</a>        .collect()
-<a href=#200 id=200 data-nosnippet>200</a>}
-<a href=#201 id=201 data-nosnippet>201</a>
-<a href=#202 id=202 data-nosnippet>202</a><span class="attr">#[cfg(all(test, not(target_arch = <span class="string">"wasm32"</span>)))]
-<a href=#203 id=203 data-nosnippet>203</a></span><span class="kw">mod </span>tests;
+<a href=#89 id=89 data-nosnippet>89</a>        .pyramid()
+<a href=#90 id=90 data-nosnippet>90</a>        .coords_coarse_to_fine()
+<a href=#91 id=91 data-nosnippet>91</a>        .filter(|coords| {
+<a href=#92 id=92 data-nosnippet>92</a>            <span class="kw">let </span>window = TileWindow::of(<span class="kw-2">*</span>coords);
+<a href=#93 id=93 data-nosnippet>93</a>            bounds.iter().any(|bounds| window.meets(bounds))
+<a href=#94 id=94 data-nosnippet>94</a>        })
+<a href=#95 id=95 data-nosnippet>95</a>        .collect()
+<a href=#96 id=96 data-nosnippet>96</a>}
+<a href=#97 id=97 data-nosnippet>97</a>
+<a href=#98 id=98 data-nosnippet>98</a><span class="doccomment">/// The bounds of every feature version a data change adds, alters or drops; `None` when the
+<a href=#99 id=99 data-nosnippet>99</a>/// change can reach any tile: data behind a URL, clusters, which a moved point can regroup
+<a href=#100 id=100 data-nosnippet>100</a>/// anywhere, other tiling options, or a document that cannot be read feature by feature.
+<a href=#101 id=101 data-nosnippet>101</a></span><span class="kw">fn </span>reach(before: <span class="kw-2">&amp;</span>GeoJsonSource, after: <span class="kw-2">&amp;</span>GeoJsonSource) -&gt; <span class="prelude-ty">Option</span>&lt;Vec&lt;[f64; <span class="number">4</span>]&gt;&gt; {
+<a href=#102 id=102 data-nosnippet>102</a>    <span class="kw">let </span>(GeoJsonData::Inline(old), GeoJsonData::Inline(new)) = (<span class="kw-2">&amp;</span>before.data, <span class="kw-2">&amp;</span>after.data) <span class="kw">else </span>{
+<a href=#103 id=103 data-nosnippet>103</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
+<a href=#104 id=104 data-nosnippet>104</a>    };
+<a href=#105 id=105 data-nosnippet>105</a>    <span class="kw">if </span>before.cluster || after.cluster || !same_tiling(before, after) {
+<a href=#106 id=106 data-nosnippet>106</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
+<a href=#107 id=107 data-nosnippet>107</a>    }
+<a href=#108 id=108 data-nosnippet>108</a>    <span class="kw">let </span>(old, new) = (features(old)<span class="question-mark">?</span>, features(new)<span class="question-mark">?</span>);
+<a href=#109 id=109 data-nosnippet>109</a>    <span class="comment">// A generated id is a feature's position, so every feature after a change of position moves.
+<a href=#110 id=110 data-nosnippet>110</a>    </span><span class="kw">let </span>promoted = promoted_property(after);
+<a href=#111 id=111 data-nosnippet>111</a>    <span class="kw">let </span>pairs = (!after.generate_id)
+<a href=#112 id=112 data-nosnippet>112</a>        .then(|| pairs_by_id(<span class="kw-2">&amp;</span>old, <span class="kw-2">&amp;</span>new, promoted.as_deref()))
+<a href=#113 id=113 data-nosnippet>113</a>        .flatten()
+<a href=#114 id=114 data-nosnippet>114</a>        .unwrap_or_else(|| pairs_by_position(<span class="kw-2">&amp;</span>old, <span class="kw-2">&amp;</span>new));
+<a href=#115 id=115 data-nosnippet>115</a>    <span class="kw">let </span><span class="kw-2">mut </span>bounds = Vec::new();
+<a href=#116 id=116 data-nosnippet>116</a>    <span class="kw">for </span>(old, new) <span class="kw">in </span>pairs.into_iter().filter(|(old, new)| old != new) {
+<a href=#117 id=117 data-nosnippet>117</a>        <span class="kw">for </span>feature <span class="kw">in </span>[old, new].into_iter().flatten() {
+<a href=#118 id=118 data-nosnippet>118</a>            bounds.extend(feature_bounds(feature).ok()<span class="question-mark">?</span>);
+<a href=#119 id=119 data-nosnippet>119</a>        }
+<a href=#120 id=120 data-nosnippet>120</a>    }
+<a href=#121 id=121 data-nosnippet>121</a>    <span class="prelude-val">Some</span>(bounds)
+<a href=#122 id=122 data-nosnippet>122</a>}
+<a href=#123 id=123 data-nosnippet>123</a>
+<a href=#124 id=124 data-nosnippet>124</a><span class="doccomment">/// Whether every option that decides which features a tile holds, and with which ids, is the
+<a href=#125 id=125 data-nosnippet>125</a>/// same.
+<a href=#126 id=126 data-nosnippet>126</a></span><span class="kw">fn </span>same_tiling(before: <span class="kw-2">&amp;</span>GeoJsonSource, after: <span class="kw-2">&amp;</span>GeoJsonSource) -&gt; bool {
+<a href=#127 id=127 data-nosnippet>127</a>    before.promote_id == after.promote_id
+<a href=#128 id=128 data-nosnippet>128</a>        &amp;&amp; before.generate_id == after.generate_id
+<a href=#129 id=129 data-nosnippet>129</a>        &amp;&amp; before.filter == after.filter
+<a href=#130 id=130 data-nosnippet>130</a>        &amp;&amp; before.buffer == after.buffer
+<a href=#131 id=131 data-nosnippet>131</a>        &amp;&amp; before.minzoom == after.minzoom
+<a href=#132 id=132 data-nosnippet>132</a>        &amp;&amp; before.maxzoom == after.maxzoom
+<a href=#133 id=133 data-nosnippet>133</a>}
+<a href=#134 id=134 data-nosnippet>134</a>
+<a href=#135 id=135 data-nosnippet>135</a><span class="doccomment">/// The features of a document the index reads, or `None` for a root it refuses.
+<a href=#136 id=136 data-nosnippet>136</a></span><span class="kw">fn </span>features(document: <span class="kw-2">&amp;</span>Value) -&gt; <span class="prelude-ty">Option</span>&lt;std::borrow::Cow&lt;<span class="lifetime">'_</span>, [Value]&gt;&gt; {
+<a href=#137 id=137 data-nosnippet>137</a>    <span class="kw">match </span>document.get(<span class="string">"type"</span>).and_then(Value::as_str)<span class="question-mark">? </span>{
+<a href=#138 id=138 data-nosnippet>138</a>        <span class="string">"FeatureCollection" </span>| <span class="string">"Feature" </span>| <span class="string">"Point" </span>| <span class="string">"MultiPoint" </span>| <span class="string">"LineString"
+<a href=#139 id=139 data-nosnippet>139</a>        </span>| <span class="string">"MultiLineString" </span>| <span class="string">"Polygon" </span>| <span class="string">"MultiPolygon" </span>| <span class="string">"GeometryCollection" </span>=&gt; {
+<a href=#140 id=140 data-nosnippet>140</a>            <span class="prelude-val">Some</span>(feature_list(document))
+<a href=#141 id=141 data-nosnippet>141</a>        }
+<a href=#142 id=142 data-nosnippet>142</a>        <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+<a href=#143 id=143 data-nosnippet>143</a>    }
+<a href=#144 id=144 data-nosnippet>144</a>}
+<a href=#145 id=145 data-nosnippet>145</a>
+<a href=#146 id=146 data-nosnippet>146</a><span class="kw">type </span>Pair&lt;<span class="lifetime">'a</span>&gt; = (<span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">'a </span>Value&gt;, <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">'a </span>Value&gt;);
+<a href=#147 id=147 data-nosnippet>147</a>
+<a href=#148 id=148 data-nosnippet>148</a><span class="kw">fn </span>pairs_by_position&lt;<span class="lifetime">'a</span>&gt;(old: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>[Value], new: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>[Value]) -&gt; Vec&lt;Pair&lt;<span class="lifetime">'a</span>&gt;&gt; {
+<a href=#149 id=149 data-nosnippet>149</a>    (<span class="number">0</span>..old.len().max(new.len()))
+<a href=#150 id=150 data-nosnippet>150</a>        .map(|index| (old.get(index), new.get(index)))
+<a href=#151 id=151 data-nosnippet>151</a>        .collect()
+<a href=#152 id=152 data-nosnippet>152</a>}
+<a href=#153 id=153 data-nosnippet>153</a>
+<a href=#154 id=154 data-nosnippet>154</a><span class="doccomment">/// Each feature with the one of the same id, as feature edits address them; `None` unless every
+<a href=#155 id=155 data-nosnippet>155</a>/// feature has an id of its own and the features kept are still in the order tiles draw them in.
+<a href=#156 id=156 data-nosnippet>156</a></span><span class="kw">fn </span>pairs_by_id&lt;<span class="lifetime">'a</span>&gt;(
+<a href=#157 id=157 data-nosnippet>157</a>    old: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>[Value],
+<a href=#158 id=158 data-nosnippet>158</a>    new: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>[Value],
+<a href=#159 id=159 data-nosnippet>159</a>    promoted: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>str&gt;,
+<a href=#160 id=160 data-nosnippet>160</a>) -&gt; <span class="prelude-ty">Option</span>&lt;Vec&lt;Pair&lt;<span class="lifetime">'a</span>&gt;&gt;&gt; {
+<a href=#161 id=161 data-nosnippet>161</a>    <span class="kw">let </span>ids = |features: <span class="kw-2">&amp;</span>[Value]| -&gt; <span class="prelude-ty">Option</span>&lt;Vec&lt;String&gt;&gt; {
+<a href=#162 id=162 data-nosnippet>162</a>        features
+<a href=#163 id=163 data-nosnippet>163</a>            .iter()
+<a href=#164 id=164 data-nosnippet>164</a>            .map(|feature| feature_id(feature, promoted).map(|id| id.to_string()))
+<a href=#165 id=165 data-nosnippet>165</a>            .collect()
+<a href=#166 id=166 data-nosnippet>166</a>    };
+<a href=#167 id=167 data-nosnippet>167</a>    <span class="kw">let </span>(old_ids, new_ids) = (ids(old)<span class="question-mark">?</span>, ids(new)<span class="question-mark">?</span>);
+<a href=#168 id=168 data-nosnippet>168</a>    <span class="kw">let </span>(old_at, new_at) = (positions(<span class="kw-2">&amp;</span>old_ids), positions(<span class="kw-2">&amp;</span>new_ids));
+<a href=#169 id=169 data-nosnippet>169</a>    <span class="kw">if </span>old_at.len() != old_ids.len() || new_at.len() != new_ids.len() {
+<a href=#170 id=170 data-nosnippet>170</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
+<a href=#171 id=171 data-nosnippet>171</a>    }
+<a href=#172 id=172 data-nosnippet>172</a>    <span class="kw">if </span>kept(<span class="kw-2">&amp;</span>old_ids, <span class="kw-2">&amp;</span>new_at) != kept(<span class="kw-2">&amp;</span>new_ids, <span class="kw-2">&amp;</span>old_at) {
+<a href=#173 id=173 data-nosnippet>173</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
+<a href=#174 id=174 data-nosnippet>174</a>    }
+<a href=#175 id=175 data-nosnippet>175</a>    <span class="kw">let </span>changed = old_ids.iter().zip(old).map(|(id, feature)| {
+<a href=#176 id=176 data-nosnippet>176</a>        <span class="kw">let </span>replacement = new_at.get(id.as_str()).and_then(|<span class="kw-2">&amp;</span>index| new.get(index));
+<a href=#177 id=177 data-nosnippet>177</a>        (<span class="prelude-val">Some</span>(feature), replacement)
+<a href=#178 id=178 data-nosnippet>178</a>    });
+<a href=#179 id=179 data-nosnippet>179</a>    <span class="kw">let </span>added = new_ids
+<a href=#180 id=180 data-nosnippet>180</a>        .iter()
+<a href=#181 id=181 data-nosnippet>181</a>        .zip(new)
+<a href=#182 id=182 data-nosnippet>182</a>        .filter(|(id, <span class="kw">_</span>)| !old_at.contains_key(id.as_str()))
+<a href=#183 id=183 data-nosnippet>183</a>        .map(|(<span class="kw">_</span>, feature)| (<span class="prelude-val">None</span>, <span class="prelude-val">Some</span>(feature)));
+<a href=#184 id=184 data-nosnippet>184</a>    <span class="prelude-val">Some</span>(changed.chain(added).collect())
+<a href=#185 id=185 data-nosnippet>185</a>}
+<a href=#186 id=186 data-nosnippet>186</a>
+<a href=#187 id=187 data-nosnippet>187</a><span class="kw">fn </span>positions(ids: <span class="kw-2">&amp;</span>[String]) -&gt; HashMap&lt;<span class="kw-2">&amp;</span>str, usize&gt; {
+<a href=#188 id=188 data-nosnippet>188</a>    ids.iter()
+<a href=#189 id=189 data-nosnippet>189</a>        .enumerate()
+<a href=#190 id=190 data-nosnippet>190</a>        .map(|(index, id)| (id.as_str(), index))
+<a href=#191 id=191 data-nosnippet>191</a>        .collect()
+<a href=#192 id=192 data-nosnippet>192</a>}
+<a href=#193 id=193 data-nosnippet>193</a>
+<a href=#194 id=194 data-nosnippet>194</a><span class="kw">fn </span>kept&lt;<span class="lifetime">'a</span>&gt;(ids: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>[String], other: <span class="kw-2">&amp;</span>HashMap&lt;<span class="kw-2">&amp;</span>str, usize&gt;) -&gt; Vec&lt;<span class="kw-2">&amp;</span><span class="lifetime">'a </span>str&gt; {
+<a href=#195 id=195 data-nosnippet>195</a>    ids.iter()
+<a href=#196 id=196 data-nosnippet>196</a>        .map(String::as_str)
+<a href=#197 id=197 data-nosnippet>197</a>        .filter(|id| other.contains_key(id))
+<a href=#198 id=198 data-nosnippet>198</a>        .collect()
+<a href=#199 id=199 data-nosnippet>199</a>}
+<a href=#200 id=200 data-nosnippet>200</a>
+<a href=#201 id=201 data-nosnippet>201</a><span class="attr">#[cfg(all(test, not(target_arch = <span class="string">"wasm32"</span>)))]
+<a href=#202 id=202 data-nosnippet>202</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>

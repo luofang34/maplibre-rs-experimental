@@ -144,95 +144,97 @@
 <a href=#144 id=144 data-nosnippet>144</a>
 <a href=#145 id=145 data-nosnippet>145</a><span class="doccomment">/// Whether a tile's worker still waits for images, so frames must keep coming to show them.
 <a href=#146 id=146 data-nosnippet>146</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>awaiting(world: <span class="kw-2">&amp;</span>World) -&gt; bool {
-<a href=#147 id=147 data-nosnippet>147</a>    world.tiles.tiles.values().any(|tile| {
-<a href=#148 id=148 data-nosnippet>148</a>        world
-<a href=#149 id=149 data-nosnippet>149</a>            .tiles
-<a href=#150 id=150 data-nosnippet>150</a>            .query::&lt;<span class="kw-2">&amp;</span>TileProvidedImages&gt;(tile.coords)
-<a href=#151 id=151 data-nosnippet>151</a>            .is_some_and(|images| images.awaiting.is_some())
-<a href=#152 id=152 data-nosnippet>152</a>    })
-<a href=#153 id=153 data-nosnippet>153</a>}
-<a href=#154 id=154 data-nosnippet>154</a>
-<a href=#155 id=155 data-nosnippet>155</a><span class="doccomment">/// Whether the tile drew provided images for another pixel ratio than `pixel_ratio`.
-<a href=#156 id=156 data-nosnippet>156</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>drawn_for_another_ratio(
-<a href=#157 id=157 data-nosnippet>157</a>    world: <span class="kw-2">&amp;</span>World,
-<a href=#158 id=158 data-nosnippet>158</a>    coords: WorldTileCoords,
-<a href=#159 id=159 data-nosnippet>159</a>    pixel_ratio: f32,
-<a href=#160 id=160 data-nosnippet>160</a>) -&gt; bool {
-<a href=#161 id=161 data-nosnippet>161</a>    world
-<a href=#162 id=162 data-nosnippet>162</a>        .tiles
-<a href=#163 id=163 data-nosnippet>163</a>        .query::&lt;<span class="kw-2">&amp;</span>TileProvidedImages&gt;(coords)
-<a href=#164 id=164 data-nosnippet>164</a>        .is_some_and(|images| !images.names.is_empty() &amp;&amp; images.pixel_ratio != pixel_ratio)
-<a href=#165 id=165 data-nosnippet>165</a>}
-<a href=#166 id=166 data-nosnippet>166</a>
-<a href=#167 id=167 data-nosnippet>167</a><span class="doccomment">/// Notes that a tile was requested anew for `pixel_ratio`, so it is not requested again for
-<a href=#168 id=168 data-nosnippet>168</a>/// that ratio before its worker reports, and forgets its wait, returning the attempt whose
-<a href=#169 id=169 data-nosnippet>169</a>/// worker waited: the new request reports its own images, and the old one's labels would be
-<a href=#170 id=170 data-nosnippet>170</a>/// refused.
-<a href=#171 id=171 data-nosnippet>171</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>restarted(
-<a href=#172 id=172 data-nosnippet>172</a>    world: <span class="kw-2">&amp;mut </span>World,
-<a href=#173 id=173 data-nosnippet>173</a>    coords: WorldTileCoords,
-<a href=#174 id=174 data-nosnippet>174</a>    pixel_ratio: f32,
-<a href=#175 id=175 data-nosnippet>175</a>) -&gt; <span class="prelude-ty">Option</span>&lt;u64&gt; {
-<a href=#176 id=176 data-nosnippet>176</a>    <span class="kw">let </span>images = world.tiles.query_mut::&lt;<span class="kw-2">&amp;mut </span>TileProvidedImages&gt;(coords)<span class="question-mark">?</span>;
-<a href=#177 id=177 data-nosnippet>177</a>    images.pixel_ratio = pixel_ratio;
-<a href=#178 id=178 data-nosnippet>178</a>    <span class="comment">// The new request reports the names it draws; a style that dropped them leaves none.
-<a href=#179 id=179 data-nosnippet>179</a>    </span>images.names.clear();
-<a href=#180 id=180 data-nosnippet>180</a>    images.awaiting.take()
-<a href=#181 id=181 data-nosnippet>181</a>}
-<a href=#182 id=182 data-nosnippet>182</a>
-<a href=#183 id=183 data-nosnippet>183</a><span class="doccomment">/// Stops the waiting workers of tiles no longer wanted, returning their attempts.
-<a href=#184 id=184 data-nosnippet>184</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>release_unwanted&lt;S: std::hash::BuildHasher&gt;(
-<a href=#185 id=185 data-nosnippet>185</a>    world: <span class="kw-2">&amp;mut </span>World,
-<a href=#186 id=186 data-nosnippet>186</a>    wanted: <span class="kw-2">&amp;</span>HashSet&lt;WorldTileCoords, S&gt;,
-<a href=#187 id=187 data-nosnippet>187</a>) -&gt; Vec&lt;u64&gt; {
-<a href=#188 id=188 data-nosnippet>188</a>    <span class="kw">let </span>coords: Vec&lt;WorldTileCoords&gt; = world
-<a href=#189 id=189 data-nosnippet>189</a>        .tiles
-<a href=#190 id=190 data-nosnippet>190</a>        .tiles
-<a href=#191 id=191 data-nosnippet>191</a>        .values()
-<a href=#192 id=192 data-nosnippet>192</a>        .map(|tile| tile.coords)
-<a href=#193 id=193 data-nosnippet>193</a>        .filter(|coords| !wanted.contains(coords))
-<a href=#194 id=194 data-nosnippet>194</a>        .collect();
-<a href=#195 id=195 data-nosnippet>195</a>    <span class="kw">let </span><span class="kw-2">mut </span>released = Vec::new();
-<a href=#196 id=196 data-nosnippet>196</a>    <span class="kw">for </span>coords <span class="kw">in </span>coords {
-<a href=#197 id=197 data-nosnippet>197</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(images) = world.tiles.query_mut::&lt;<span class="kw-2">&amp;mut </span>TileProvidedImages&gt;(coords) {
-<a href=#198 id=198 data-nosnippet>198</a>            released.extend(images.awaiting.take());
-<a href=#199 id=199 data-nosnippet>199</a>        }
-<a href=#200 id=200 data-nosnippet>200</a>    }
-<a href=#201 id=201 data-nosnippet>201</a>    released
-<a href=#202 id=202 data-nosnippet>202</a>}
-<a href=#203 id=203 data-nosnippet>203</a>
-<a href=#204 id=204 data-nosnippet>204</a><span class="doccomment">/// Forgets the answers of `namespace` in `providers` and requests again the tiles that drew
-<a href=#205 id=205 data-nosnippet>205</a>/// them, returning how many: what a map does when a host invalidates a namespace.
-<a href=#206 id=206 data-nosnippet>206</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>invalidate_namespace(
-<a href=#207 id=207 data-nosnippet>207</a>    providers: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="kw">crate</span>::sdf::assets::ImageProviders&gt;,
-<a href=#208 id=208 data-nosnippet>208</a>    world: <span class="kw-2">&amp;mut </span>World,
-<a href=#209 id=209 data-nosnippet>209</a>    namespace: <span class="kw-2">&amp;</span>str,
-<a href=#210 id=210 data-nosnippet>210</a>) -&gt; usize {
-<a href=#211 id=211 data-nosnippet>211</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(providers) = providers {
-<a href=#212 id=212 data-nosnippet>212</a>        providers.invalidate(namespace);
-<a href=#213 id=213 data-nosnippet>213</a>    }
-<a href=#214 id=214 data-nosnippet>214</a>    invalidate(world, namespace)
-<a href=#215 id=215 data-nosnippet>215</a>}
-<a href=#216 id=216 data-nosnippet>216</a>
-<a href=#217 id=217 data-nosnippet>217</a><span class="doccomment">/// Requests again the tiles whose labels name an image of `namespace`, returning how many.
-<a href=#218 id=218 data-nosnippet>218</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>invalidate(world: <span class="kw-2">&amp;mut </span>World, namespace: <span class="kw-2">&amp;</span>str) -&gt; usize {
-<a href=#219 id=219 data-nosnippet>219</a>    <span class="kw">let </span>prefix = <span class="macro">format!</span>(<span class="string">"{namespace}:"</span>);
-<a href=#220 id=220 data-nosnippet>220</a>    <span class="kw">let </span>tiles: Vec&lt;WorldTileCoords&gt; = world
-<a href=#221 id=221 data-nosnippet>221</a>        .tiles
-<a href=#222 id=222 data-nosnippet>222</a>        .tiles
-<a href=#223 id=223 data-nosnippet>223</a>        .values()
-<a href=#224 id=224 data-nosnippet>224</a>        .map(|tile| tile.coords)
-<a href=#225 id=225 data-nosnippet>225</a>        .filter(|coords| {
-<a href=#226 id=226 data-nosnippet>226</a>            world
-<a href=#227 id=227 data-nosnippet>227</a>                .tiles
-<a href=#228 id=228 data-nosnippet>228</a>                .query::&lt;<span class="kw-2">&amp;</span>TileProvidedImages&gt;(<span class="kw-2">*</span>coords)
-<a href=#229 id=229 data-nosnippet>229</a>                .is_some_and(|images| images.names.iter().any(|name| name.starts_with(<span class="kw-2">&amp;</span>prefix)))
-<a href=#230 id=230 data-nosnippet>230</a>        })
-<a href=#231 id=231 data-nosnippet>231</a>        .collect();
-<a href=#232 id=232 data-nosnippet>232</a>    tile_retry::refresh_tiles(world, RequestKind::Vector, <span class="kw-2">&amp;</span>tiles);
-<a href=#233 id=233 data-nosnippet>233</a>    tiles.len()
-<a href=#234 id=234 data-nosnippet>234</a>}
-<a href=#235 id=235 data-nosnippet>235</a>
-<a href=#236 id=236 data-nosnippet>236</a><span class="attr">#[cfg(test)]
-<a href=#237 id=237 data-nosnippet>237</a></span><span class="kw">mod </span>tests;
+<a href=#147 id=147 data-nosnippet>147</a>    world
+<a href=#148 id=148 data-nosnippet>148</a>        .tiles
+<a href=#149 id=149 data-nosnippet>149</a>        .pyramid_of::&lt;TileProvidedImages&gt;()
+<a href=#150 id=150 data-nosnippet>150</a>        .coords_coarse_to_fine()
+<a href=#151 id=151 data-nosnippet>151</a>        .any(|coords| {
+<a href=#152 id=152 data-nosnippet>152</a>            world
+<a href=#153 id=153 data-nosnippet>153</a>                .tiles
+<a href=#154 id=154 data-nosnippet>154</a>                .query::&lt;<span class="kw-2">&amp;</span>TileProvidedImages&gt;(coords)
+<a href=#155 id=155 data-nosnippet>155</a>                .is_some_and(|images| images.awaiting.is_some())
+<a href=#156 id=156 data-nosnippet>156</a>        })
+<a href=#157 id=157 data-nosnippet>157</a>}
+<a href=#158 id=158 data-nosnippet>158</a>
+<a href=#159 id=159 data-nosnippet>159</a><span class="doccomment">/// Whether the tile drew provided images for another pixel ratio than `pixel_ratio`.
+<a href=#160 id=160 data-nosnippet>160</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>drawn_for_another_ratio(
+<a href=#161 id=161 data-nosnippet>161</a>    world: <span class="kw-2">&amp;</span>World,
+<a href=#162 id=162 data-nosnippet>162</a>    coords: WorldTileCoords,
+<a href=#163 id=163 data-nosnippet>163</a>    pixel_ratio: f32,
+<a href=#164 id=164 data-nosnippet>164</a>) -&gt; bool {
+<a href=#165 id=165 data-nosnippet>165</a>    world
+<a href=#166 id=166 data-nosnippet>166</a>        .tiles
+<a href=#167 id=167 data-nosnippet>167</a>        .query::&lt;<span class="kw-2">&amp;</span>TileProvidedImages&gt;(coords)
+<a href=#168 id=168 data-nosnippet>168</a>        .is_some_and(|images| !images.names.is_empty() &amp;&amp; images.pixel_ratio != pixel_ratio)
+<a href=#169 id=169 data-nosnippet>169</a>}
+<a href=#170 id=170 data-nosnippet>170</a>
+<a href=#171 id=171 data-nosnippet>171</a><span class="doccomment">/// Notes that a tile was requested anew for `pixel_ratio`, so it is not requested again for
+<a href=#172 id=172 data-nosnippet>172</a>/// that ratio before its worker reports, and forgets its wait, returning the attempt whose
+<a href=#173 id=173 data-nosnippet>173</a>/// worker waited: the new request reports its own images, and the old one's labels would be
+<a href=#174 id=174 data-nosnippet>174</a>/// refused.
+<a href=#175 id=175 data-nosnippet>175</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>restarted(
+<a href=#176 id=176 data-nosnippet>176</a>    world: <span class="kw-2">&amp;mut </span>World,
+<a href=#177 id=177 data-nosnippet>177</a>    coords: WorldTileCoords,
+<a href=#178 id=178 data-nosnippet>178</a>    pixel_ratio: f32,
+<a href=#179 id=179 data-nosnippet>179</a>) -&gt; <span class="prelude-ty">Option</span>&lt;u64&gt; {
+<a href=#180 id=180 data-nosnippet>180</a>    <span class="kw">let </span>images = world.tiles.query_mut::&lt;<span class="kw-2">&amp;mut </span>TileProvidedImages&gt;(coords)<span class="question-mark">?</span>;
+<a href=#181 id=181 data-nosnippet>181</a>    images.pixel_ratio = pixel_ratio;
+<a href=#182 id=182 data-nosnippet>182</a>    <span class="comment">// The new request reports the names it draws; a style that dropped them leaves none.
+<a href=#183 id=183 data-nosnippet>183</a>    </span>images.names.clear();
+<a href=#184 id=184 data-nosnippet>184</a>    images.awaiting.take()
+<a href=#185 id=185 data-nosnippet>185</a>}
+<a href=#186 id=186 data-nosnippet>186</a>
+<a href=#187 id=187 data-nosnippet>187</a><span class="doccomment">/// Stops the waiting workers of tiles no longer wanted, returning their attempts.
+<a href=#188 id=188 data-nosnippet>188</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>release_unwanted&lt;S: std::hash::BuildHasher&gt;(
+<a href=#189 id=189 data-nosnippet>189</a>    world: <span class="kw-2">&amp;mut </span>World,
+<a href=#190 id=190 data-nosnippet>190</a>    wanted: <span class="kw-2">&amp;</span>HashSet&lt;WorldTileCoords, S&gt;,
+<a href=#191 id=191 data-nosnippet>191</a>) -&gt; Vec&lt;u64&gt; {
+<a href=#192 id=192 data-nosnippet>192</a>    <span class="kw">let </span>coords: Vec&lt;WorldTileCoords&gt; = world
+<a href=#193 id=193 data-nosnippet>193</a>        .tiles
+<a href=#194 id=194 data-nosnippet>194</a>        .pyramid_of::&lt;TileProvidedImages&gt;()
+<a href=#195 id=195 data-nosnippet>195</a>        .coords_coarse_to_fine()
+<a href=#196 id=196 data-nosnippet>196</a>        .filter(|coords| !wanted.contains(coords))
+<a href=#197 id=197 data-nosnippet>197</a>        .collect();
+<a href=#198 id=198 data-nosnippet>198</a>    <span class="kw">let </span><span class="kw-2">mut </span>released = Vec::new();
+<a href=#199 id=199 data-nosnippet>199</a>    <span class="kw">for </span>coords <span class="kw">in </span>coords {
+<a href=#200 id=200 data-nosnippet>200</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(images) = world.tiles.query_mut::&lt;<span class="kw-2">&amp;mut </span>TileProvidedImages&gt;(coords) {
+<a href=#201 id=201 data-nosnippet>201</a>            released.extend(images.awaiting.take());
+<a href=#202 id=202 data-nosnippet>202</a>        }
+<a href=#203 id=203 data-nosnippet>203</a>    }
+<a href=#204 id=204 data-nosnippet>204</a>    released
+<a href=#205 id=205 data-nosnippet>205</a>}
+<a href=#206 id=206 data-nosnippet>206</a>
+<a href=#207 id=207 data-nosnippet>207</a><span class="doccomment">/// Forgets the answers of `namespace` in `providers` and requests again the tiles that drew
+<a href=#208 id=208 data-nosnippet>208</a>/// them, returning how many: what a map does when a host invalidates a namespace.
+<a href=#209 id=209 data-nosnippet>209</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>invalidate_namespace(
+<a href=#210 id=210 data-nosnippet>210</a>    providers: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="kw">crate</span>::sdf::assets::ImageProviders&gt;,
+<a href=#211 id=211 data-nosnippet>211</a>    world: <span class="kw-2">&amp;mut </span>World,
+<a href=#212 id=212 data-nosnippet>212</a>    namespace: <span class="kw-2">&amp;</span>str,
+<a href=#213 id=213 data-nosnippet>213</a>) -&gt; usize {
+<a href=#214 id=214 data-nosnippet>214</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(providers) = providers {
+<a href=#215 id=215 data-nosnippet>215</a>        providers.invalidate(namespace);
+<a href=#216 id=216 data-nosnippet>216</a>    }
+<a href=#217 id=217 data-nosnippet>217</a>    invalidate(world, namespace)
+<a href=#218 id=218 data-nosnippet>218</a>}
+<a href=#219 id=219 data-nosnippet>219</a>
+<a href=#220 id=220 data-nosnippet>220</a><span class="doccomment">/// Requests again the tiles whose labels name an image of `namespace`, returning how many.
+<a href=#221 id=221 data-nosnippet>221</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>invalidate(world: <span class="kw-2">&amp;mut </span>World, namespace: <span class="kw-2">&amp;</span>str) -&gt; usize {
+<a href=#222 id=222 data-nosnippet>222</a>    <span class="kw">let </span>prefix = <span class="macro">format!</span>(<span class="string">"{namespace}:"</span>);
+<a href=#223 id=223 data-nosnippet>223</a>    <span class="kw">let </span>tiles: Vec&lt;WorldTileCoords&gt; = world
+<a href=#224 id=224 data-nosnippet>224</a>        .tiles
+<a href=#225 id=225 data-nosnippet>225</a>        .pyramid_of::&lt;TileProvidedImages&gt;()
+<a href=#226 id=226 data-nosnippet>226</a>        .coords_coarse_to_fine()
+<a href=#227 id=227 data-nosnippet>227</a>        .filter(|coords| {
+<a href=#228 id=228 data-nosnippet>228</a>            world
+<a href=#229 id=229 data-nosnippet>229</a>                .tiles
+<a href=#230 id=230 data-nosnippet>230</a>                .query::&lt;<span class="kw-2">&amp;</span>TileProvidedImages&gt;(<span class="kw-2">*</span>coords)
+<a href=#231 id=231 data-nosnippet>231</a>                .is_some_and(|images| images.names.iter().any(|name| name.starts_with(<span class="kw-2">&amp;</span>prefix)))
+<a href=#232 id=232 data-nosnippet>232</a>        })
+<a href=#233 id=233 data-nosnippet>233</a>        .collect();
+<a href=#234 id=234 data-nosnippet>234</a>    tile_retry::refresh_tiles(world, RequestKind::Vector, <span class="kw-2">&amp;</span>tiles);
+<a href=#235 id=235 data-nosnippet>235</a>    tiles.len()
+<a href=#236 id=236 data-nosnippet>236</a>}
+<a href=#237 id=237 data-nosnippet>237</a>
+<a href=#238 id=238 data-nosnippet>238</a><span class="attr">#[cfg(test)]
+<a href=#239 id=239 data-nosnippet>239</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>

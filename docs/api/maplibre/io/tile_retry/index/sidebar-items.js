@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["cancel_unwanted","needs_frame_indexed","next_retry_delay_indexed","stop_cancelled","want"],"struct":["CancelledAttempts","RetryIndex","WantedRequests"]};

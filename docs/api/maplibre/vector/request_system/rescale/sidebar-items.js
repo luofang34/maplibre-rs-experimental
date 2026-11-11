@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["BUFFER_DIVISOR","CLOSE_PATH","LINE_TO","MOVE_TO"],"enum":["Kind"],"fn":["command","decode","encode","flush","into_descendant","path","push_distinct","signed_area","step","zigzag","zigzag_decode"],"struct":["Frame"],"type":["Point"]};
+window.SIDEBAR_ITEMS = {"constant":["BUFFER_DIVISOR","CLOSE_PATH","LINE_TO","MOVE_TO"],"enum":["Kind"],"fn":["command","decode","encode","flush","into_descendant","path","push_distinct","signed_area","step","zigzag","zigzag_decode"],"mod":["slice"],"struct":["Frame"],"type":["Point"]};

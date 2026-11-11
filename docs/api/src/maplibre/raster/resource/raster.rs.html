@@ -9,7 +9,7 @@
 <a href=#9 id=9 data-nosnippet>9</a>        tile_view_pattern::HasTile,
 <a href=#10 id=10 data-nosnippet>10</a>    },
 <a href=#11 id=11 data-nosnippet>11</a>    style::Style,
-<a href=#12 id=12 data-nosnippet>12</a>    tcs::world::World,
+<a href=#12 id=12 data-nosnippet>12</a>    tcs::{pyramid::TilePyramid, world::World},
 <a href=#13 id=13 data-nosnippet>13</a>};
 <a href=#14 id=14 data-nosnippet>14</a>
 <a href=#15 id=15 data-nosnippet>15</a><span class="doccomment">/// Raster pipeline and sampler with independent bindings for each source and tile.
@@ -19,7 +19,7 @@
 <a href=#19 id=19 data-nosnippet>19</a>    mipmaps: MipmapGenerator,
 <a href=#20 id=20 data-nosnippet>20</a>    msaa: Msaa,
 <a href=#21 id=21 data-nosnippet>21</a>    pipeline: wgpu::RenderPipeline,
-<a href=#22 id=22 data-nosnippet>22</a>    bound_textures: HashMap&lt;RasterSourceId, HashMap&lt;WorldTileCoords, (wgpu::BindGroup, u64)&gt;&gt;,
+<a href=#22 id=22 data-nosnippet>22</a>    bound_textures: HashMap&lt;RasterSourceId, TilePyramid&lt;(wgpu::BindGroup, u64)&gt;&gt;,
 <a href=#23 id=23 data-nosnippet>23</a>    layer_sources: HashMap&lt;String, RasterSourceId&gt;,
 <a href=#24 id=24 data-nosnippet>24</a>    <span class="doccomment">/// Sources whose textures carry a border of neighbour samples for slope shading.
 <a href=#25 id=25 data-nosnippet>25</a>    </span>dem_sources: HashSet&lt;RasterSourceId&gt;,
@@ -125,21 +125,21 @@
 <a href=#125 id=125 data-nosnippet>125</a>    ) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>wgpu::BindGroup&gt; {
 <a href=#126 id=126 data-nosnippet>126</a>        <span class="self">self</span>.bound_textures
 <a href=#127 id=127 data-nosnippet>127</a>            .get(source)<span class="question-mark">?
-<a href=#128 id=128 data-nosnippet>128</a>            </span>.get(coords)
+<a href=#128 id=128 data-nosnippet>128</a>            </span>.get(<span class="kw-2">*</span>coords)
 <a href=#129 id=129 data-nosnippet>129</a>            .map(|(binding, <span class="kw">_</span>)| binding)
 <a href=#130 id=130 data-nosnippet>130</a>    }
 <a href=#131 id=131 data-nosnippet>131</a>
 <a href=#132 id=132 data-nosnippet>132</a>    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>texture_revision(<span class="kw-2">&amp;</span><span class="self">self</span>, layer: <span class="kw-2">&amp;</span>str, coords: WorldTileCoords) -&gt; <span class="prelude-ty">Option</span>&lt;u64&gt; {
 <a href=#133 id=133 data-nosnippet>133</a>        <span class="self">self</span>.bound_textures
 <a href=#134 id=134 data-nosnippet>134</a>            .get(<span class="self">self</span>.layer_sources.get(layer)<span class="question-mark">?</span>)<span class="question-mark">?
-<a href=#135 id=135 data-nosnippet>135</a>            </span>.get(<span class="kw-2">&amp;</span>coords)
+<a href=#135 id=135 data-nosnippet>135</a>            </span>.get(coords)
 <a href=#136 id=136 data-nosnippet>136</a>            .map(|(<span class="kw">_</span>, revision)| <span class="kw-2">*</span>revision)
 <a href=#137 id=137 data-nosnippet>137</a>    }
 <a href=#138 id=138 data-nosnippet>138</a>
 <a href=#139 id=139 data-nosnippet>139</a>    <span class="doccomment">/// Drops every source binding at these coordinates without advancing the insertion generation.
 <a href=#140 id=140 data-nosnippet>140</a>    </span><span class="kw">pub fn </span>remove_texture(<span class="kw-2">&amp;mut </span><span class="self">self</span>, coords: WorldTileCoords) {
 <a href=#141 id=141 data-nosnippet>141</a>        <span class="kw">for </span>textures <span class="kw">in </span><span class="self">self</span>.bound_textures.values_mut() {
-<a href=#142 id=142 data-nosnippet>142</a>            textures.remove(<span class="kw-2">&amp;</span>coords);
+<a href=#142 id=142 data-nosnippet>142</a>            textures.remove(coords);
 <a href=#143 id=143 data-nosnippet>143</a>        }
 <a href=#144 id=144 data-nosnippet>144</a>        <span class="kw">for </span>sides <span class="kw">in </span><span class="self">self</span>.border_sides.values_mut() {
 <a href=#145 id=145 data-nosnippet>145</a>            sides.remove(<span class="kw-2">&amp;</span>coords);
@@ -196,13 +196,13 @@
 <a href=#196 id=196 data-nosnippet>196</a>    <span class="doccomment">/// The number of tile textures bound for a source.
 <a href=#197 id=197 data-nosnippet>197</a>    </span><span class="attr">#[cfg(all(test, feature = <span class="string">"headless"</span>))]
 <a href=#198 id=198 data-nosnippet>198</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>texture_count(<span class="kw-2">&amp;</span><span class="self">self</span>, source: <span class="kw-2">&amp;</span>RasterSourceId) -&gt; usize {
-<a href=#199 id=199 data-nosnippet>199</a>        <span class="self">self</span>.bound_textures.get(source).map_or(<span class="number">0</span>, HashMap::len)
+<a href=#199 id=199 data-nosnippet>199</a>        <span class="self">self</span>.bound_textures.get(source).map_or(<span class="number">0</span>, TilePyramid::len)
 <a href=#200 id=200 data-nosnippet>200</a>    }
 <a href=#201 id=201 data-nosnippet>201</a>
 <a href=#202 id=202 data-nosnippet>202</a>    <span class="doccomment">/// Drops one source binding while retaining other sources at these coordinates.
 <a href=#203 id=203 data-nosnippet>203</a>    </span><span class="kw">pub fn </span>remove_source_texture(<span class="kw-2">&amp;mut </span><span class="self">self</span>, source: <span class="kw-2">&amp;</span>RasterSourceId, coords: WorldTileCoords) {
 <a href=#204 id=204 data-nosnippet>204</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(textures) = <span class="self">self</span>.bound_textures.get_mut(source) {
-<a href=#205 id=205 data-nosnippet>205</a>            textures.remove(<span class="kw-2">&amp;</span>coords);
+<a href=#205 id=205 data-nosnippet>205</a>            textures.remove(coords);
 <a href=#206 id=206 data-nosnippet>206</a>        }
 <a href=#207 id=207 data-nosnippet>207</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(sides) = <span class="self">self</span>.border_sides.get_mut(source) {
 <a href=#208 id=208 data-nosnippet>208</a>            sides.remove(<span class="kw-2">&amp;</span>coords);
@@ -368,7 +368,53 @@
 <a href=#368 id=368 data-nosnippet>368</a>    <span class="kw">fn </span>has_tile(<span class="kw-2">&amp;</span><span class="self">self</span>, coords: WorldTileCoords, _world: <span class="kw-2">&amp;</span>World) -&gt; bool {
 <a href=#369 id=369 data-nosnippet>369</a>        <span class="self">self</span>.bound_textures
 <a href=#370 id=370 data-nosnippet>370</a>            .values()
-<a href=#371 id=371 data-nosnippet>371</a>            .any(|textures| textures.contains_key(<span class="kw-2">&amp;</span>coords))
+<a href=#371 id=371 data-nosnippet>371</a>            .any(|textures| textures.contains(coords))
 <a href=#372 id=372 data-nosnippet>372</a>    }
-<a href=#373 id=373 data-nosnippet>373</a>}
+<a href=#373 id=373 data-nosnippet>373</a>
+<a href=#374 id=374 data-nosnippet>374</a>    <span class="kw">fn </span>nearest_source_ancestor_candidate(
+<a href=#375 id=375 data-nosnippet>375</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#376 id=376 data-nosnippet>376</a>        source: <span class="kw-2">&amp;</span>RasterSourceId,
+<a href=#377 id=377 data-nosnippet>377</a>        coords: WorldTileCoords,
+<a href=#378 id=378 data-nosnippet>378</a>        _world: <span class="kw-2">&amp;</span>World,
+<a href=#379 id=379 data-nosnippet>379</a>    ) -&gt; <span class="prelude-ty">Option</span>&lt;WorldTileCoords&gt; {
+<a href=#380 id=380 data-nosnippet>380</a>        <span class="self">self</span>.bound_textures
+<a href=#381 id=381 data-nosnippet>381</a>            .get(source)<span class="question-mark">?
+<a href=#382 id=382 data-nosnippet>382</a>            </span>.nearest_ancestor(coords)
+<a href=#383 id=383 data-nosnippet>383</a>            .map(|(ancestor, <span class="kw">_</span>)| ancestor)
+<a href=#384 id=384 data-nosnippet>384</a>    }
+<a href=#385 id=385 data-nosnippet>385</a>
+<a href=#386 id=386 data-nosnippet>386</a>    <span class="kw">fn </span>has_source_descendant_candidates(
+<a href=#387 id=387 data-nosnippet>387</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#388 id=388 data-nosnippet>388</a>        source: <span class="kw-2">&amp;</span>RasterSourceId,
+<a href=#389 id=389 data-nosnippet>389</a>        coords: WorldTileCoords,
+<a href=#390 id=390 data-nosnippet>390</a>        max_depth: usize,
+<a href=#391 id=391 data-nosnippet>391</a>        _world: <span class="kw-2">&amp;</span>World,
+<a href=#392 id=392 data-nosnippet>392</a>    ) -&gt; bool {
+<a href=#393 id=393 data-nosnippet>393</a>        <span class="self">self</span>.bound_textures
+<a href=#394 id=394 data-nosnippet>394</a>            .get(source)
+<a href=#395 id=395 data-nosnippet>395</a>            .is_some_and(|textures| textures.has_descendants(coords, max_depth))
+<a href=#396 id=396 data-nosnippet>396</a>    }
+<a href=#397 id=397 data-nosnippet>397</a>
+<a href=#398 id=398 data-nosnippet>398</a>    <span class="kw">fn </span>nearest_ancestor_candidate(
+<a href=#399 id=399 data-nosnippet>399</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#400 id=400 data-nosnippet>400</a>        coords: WorldTileCoords,
+<a href=#401 id=401 data-nosnippet>401</a>        _world: <span class="kw-2">&amp;</span>World,
+<a href=#402 id=402 data-nosnippet>402</a>    ) -&gt; <span class="prelude-ty">Option</span>&lt;WorldTileCoords&gt; {
+<a href=#403 id=403 data-nosnippet>403</a>        <span class="self">self</span>.bound_textures
+<a href=#404 id=404 data-nosnippet>404</a>            .values()
+<a href=#405 id=405 data-nosnippet>405</a>            .filter_map(|textures| textures.nearest_ancestor(coords).map(|(c, <span class="kw">_</span>)| c))
+<a href=#406 id=406 data-nosnippet>406</a>            .max_by_key(|c| c.z)
+<a href=#407 id=407 data-nosnippet>407</a>    }
+<a href=#408 id=408 data-nosnippet>408</a>
+<a href=#409 id=409 data-nosnippet>409</a>    <span class="kw">fn </span>has_descendant_candidates(
+<a href=#410 id=410 data-nosnippet>410</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#411 id=411 data-nosnippet>411</a>        coords: WorldTileCoords,
+<a href=#412 id=412 data-nosnippet>412</a>        max_depth: usize,
+<a href=#413 id=413 data-nosnippet>413</a>        _world: <span class="kw-2">&amp;</span>World,
+<a href=#414 id=414 data-nosnippet>414</a>    ) -&gt; bool {
+<a href=#415 id=415 data-nosnippet>415</a>        <span class="self">self</span>.bound_textures
+<a href=#416 id=416 data-nosnippet>416</a>            .values()
+<a href=#417 id=417 data-nosnippet>417</a>            .any(|textures| textures.has_descendants(coords, max_depth))
+<a href=#418 id=418 data-nosnippet>418</a>    }
+<a href=#419 id=419 data-nosnippet>419</a>}
 </code></pre></div></section></main></body></html>

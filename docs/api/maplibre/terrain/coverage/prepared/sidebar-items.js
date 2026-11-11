@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["take_or_compute_tight_terrain_region"],"struct":["PreparedTerrainKey","PreparedTerrainRegion"]};

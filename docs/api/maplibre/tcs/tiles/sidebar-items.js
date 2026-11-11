@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["sealed"],"struct":["Tile","TileSpawnResult","Tiles"],"trait":["ComponentQuery","ComponentQueryMut","ComponentQueryUnsafe","TileComponent"]};
+window.SIDEBAR_ITEMS = {"mod":["sealed"],"static":["EMPTY_PYRAMID"],"struct":["Tile","TileSpawnResult","Tiles"],"trait":["ComponentQuery","ComponentQueryMut","ComponentQueryUnsafe","TileComponent"]};

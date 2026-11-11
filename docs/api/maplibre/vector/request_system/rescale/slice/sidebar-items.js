@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["slice_descendant","slice_layer"]};
