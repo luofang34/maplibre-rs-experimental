@@ -10,6 +10,9 @@ use geozero::mvt::{tile, Tile};
 
 use crate::coords::WorldTileCoords;
 
+mod slice;
+pub use slice::slice_descendant;
+
 const MOVE_TO: u32 = 1;
 const LINE_TO: u32 = 2;
 const CLOSE_PATH: u32 = 7;
@@ -20,7 +23,7 @@ const BUFFER_DIVISOR: i64 = 32;
 type Point = (i64, i64);
 
 /// Brings the features of `tile`, cut for `from`, into the grid of its descendant `to`.
-pub(super) fn into_descendant(tile: &mut Tile, from: WorldTileCoords, to: WorldTileCoords) {
+pub fn into_descendant(tile: &mut Tile, from: WorldTileCoords, to: WorldTileCoords) {
     let levels = u32::from(u8::from(to.z).saturating_sub(u8::from(from.z))).min(31);
     if levels == 0 {
         return;
@@ -72,9 +75,16 @@ impl Frame {
         let Some(kind) = Kind::of(feature) else {
             return false;
         };
-        let Some(parts) = decode(&feature.geometry) else {
+        let Some(encoded) = self.cut_encoded(kind, &feature.geometry) else {
             return false;
         };
+        feature.geometry = encoded;
+        true
+    }
+
+    /// Decodes, rescales, clips, and re-encodes `geometry` for `kind`.
+    pub(super) fn cut_encoded(&self, kind: Kind, geometry: &[u32]) -> Option<Vec<u32>> {
+        let parts = decode(geometry)?;
         let parts: Vec<Vec<Point>> = parts
             .into_iter()
             .map(|part| part.into_iter().map(|point| self.place(point)).collect())
@@ -85,10 +95,9 @@ impl Frame {
             Kind::Polygon => self.polygons(parts),
         };
         if kept.is_empty() {
-            return false;
+            return None;
         }
-        feature.geometry = encode(kind, &kept);
-        true
+        Some(encode(kind, &kept))
     }
 
     /// Saturates rather than overflows for a malformed tile whose deltas run far past its

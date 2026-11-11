@@ -9,7 +9,7 @@ use crate::{
         tile_view_pattern::HasTile,
     },
     style::Style,
-    tcs::world::World,
+    tcs::{pyramid::TilePyramid, world::World},
 };
 
 /// Raster pipeline and sampler with independent bindings for each source and tile.
@@ -19,7 +19,7 @@ pub struct RasterResources {
     mipmaps: MipmapGenerator,
     msaa: Msaa,
     pipeline: wgpu::RenderPipeline,
-    bound_textures: HashMap<RasterSourceId, HashMap<WorldTileCoords, (wgpu::BindGroup, u64)>>,
+    bound_textures: HashMap<RasterSourceId, TilePyramid<(wgpu::BindGroup, u64)>>,
     layer_sources: HashMap<String, RasterSourceId>,
     /// Sources whose textures carry a border of neighbour samples for slope shading.
     dem_sources: HashSet<RasterSourceId>,
@@ -125,21 +125,21 @@ impl RasterResources {
     ) -> Option<&wgpu::BindGroup> {
         self.bound_textures
             .get(source)?
-            .get(coords)
+            .get(*coords)
             .map(|(binding, _)| binding)
     }
 
     pub(crate) fn texture_revision(&self, layer: &str, coords: WorldTileCoords) -> Option<u64> {
         self.bound_textures
             .get(self.layer_sources.get(layer)?)?
-            .get(&coords)
+            .get(coords)
             .map(|(_, revision)| *revision)
     }
 
     /// Drops every source binding at these coordinates without advancing the insertion generation.
     pub fn remove_texture(&mut self, coords: WorldTileCoords) {
         for textures in self.bound_textures.values_mut() {
-            textures.remove(&coords);
+            textures.remove(coords);
         }
         for sides in self.border_sides.values_mut() {
             sides.remove(&coords);
@@ -196,13 +196,13 @@ impl RasterResources {
     /// The number of tile textures bound for a source.
     #[cfg(all(test, feature = "headless"))]
     pub(crate) fn texture_count(&self, source: &RasterSourceId) -> usize {
-        self.bound_textures.get(source).map_or(0, HashMap::len)
+        self.bound_textures.get(source).map_or(0, TilePyramid::len)
     }
 
     /// Drops one source binding while retaining other sources at these coordinates.
     pub fn remove_source_texture(&mut self, source: &RasterSourceId, coords: WorldTileCoords) {
         if let Some(textures) = self.bound_textures.get_mut(source) {
-            textures.remove(&coords);
+            textures.remove(coords);
         }
         if let Some(sides) = self.border_sides.get_mut(source) {
             sides.remove(&coords);
@@ -368,6 +368,52 @@ impl HasTile for RasterResources {
     fn has_tile(&self, coords: WorldTileCoords, _world: &World) -> bool {
         self.bound_textures
             .values()
-            .any(|textures| textures.contains_key(&coords))
+            .any(|textures| textures.contains(coords))
+    }
+
+    fn nearest_source_ancestor_candidate(
+        &self,
+        source: &RasterSourceId,
+        coords: WorldTileCoords,
+        _world: &World,
+    ) -> Option<WorldTileCoords> {
+        self.bound_textures
+            .get(source)?
+            .nearest_ancestor(coords)
+            .map(|(ancestor, _)| ancestor)
+    }
+
+    fn has_source_descendant_candidates(
+        &self,
+        source: &RasterSourceId,
+        coords: WorldTileCoords,
+        max_depth: usize,
+        _world: &World,
+    ) -> bool {
+        self.bound_textures
+            .get(source)
+            .is_some_and(|textures| textures.has_descendants(coords, max_depth))
+    }
+
+    fn nearest_ancestor_candidate(
+        &self,
+        coords: WorldTileCoords,
+        _world: &World,
+    ) -> Option<WorldTileCoords> {
+        self.bound_textures
+            .values()
+            .filter_map(|textures| textures.nearest_ancestor(coords).map(|(c, _)| c))
+            .max_by_key(|c| c.z)
+    }
+
+    fn has_descendant_candidates(
+        &self,
+        coords: WorldTileCoords,
+        max_depth: usize,
+        _world: &World,
+    ) -> bool {
+        self.bound_textures
+            .values()
+            .any(|textures| textures.has_descendants(coords, max_depth))
     }
 }

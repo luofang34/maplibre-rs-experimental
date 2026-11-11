@@ -42,7 +42,10 @@ pub(crate) use process_vector::feature_properties;
 mod queue_system;
 pub mod render_commands;
 pub(crate) mod request_system;
-pub use request_system::depends_on_overscaling;
+pub use request_system::{
+    depends_on_overscaling,
+    rescale::{into_descendant as rescale_into_descendant, slice_descendant},
+};
 pub(crate) mod resource;
 pub use resource::{AllocationError, BackingBufferType, BufferPool, IndexEntry, RingIndex};
 mod resource_system;
@@ -122,6 +125,30 @@ impl HasTile for VectorTilesDone {
             .query::<&VectorLayerBucketComponent>(coords)
             .is_some_and(|buckets| buckets.done && !buckets.failed)
     }
+
+    fn nearest_ancestor_candidate(
+        &self,
+        coords: WorldTileCoords,
+        world: &World,
+    ) -> Option<WorldTileCoords> {
+        world
+            .tiles
+            .pyramid_of::<VectorLayerBucketComponent>()
+            .nearest_ancestor(coords)
+            .map(|(ancestor, _)| ancestor)
+    }
+
+    fn has_descendant_candidates(
+        &self,
+        coords: WorldTileCoords,
+        max_depth: usize,
+        world: &World,
+    ) -> bool {
+        world
+            .tiles
+            .pyramid_of::<VectorLayerBucketComponent>()
+            .has_descendants(coords, max_depth)
+    }
 }
 
 /// Whether a tile's geometry has reached the buffer pool, which the upload system fills in
@@ -172,12 +199,7 @@ impl UploadedVectorGeometry {
             }
             _ => (false, None),
         };
-        let tiles_max = world
-            .tiles
-            .tiles
-            .values()
-            .map(|tile| u8::from(tile.coords.z))
-            .max();
+        let tiles_max = world.tiles.pyramid().max_zoom();
         let max_zoom = if check_gpu {
             Some(pool_max.unwrap_or(0).max(tiles_max.unwrap_or(0)))
         } else {

@@ -56,7 +56,7 @@ impl GeoJsonVersions {
                 Some(bounds) => tiles_meeting(world, &bounds),
                 None => {
                     tracing::debug!(source = %name, "GeoJSON change reaches every loaded tile");
-                    world.tiles.tiles.values().map(|tile| tile.coords).collect()
+                    world.tiles.pyramid().coords_coarse_to_fine().collect()
                 }
             };
             if tiles.is_empty() {
@@ -86,9 +86,8 @@ fn tiles_meeting(world: &World, bounds: &[[f64; 4]]) -> Vec<WorldTileCoords> {
     }
     world
         .tiles
-        .tiles
-        .values()
-        .map(|tile| tile.coords)
+        .pyramid()
+        .coords_coarse_to_fine()
         .filter(|coords| {
             let window = TileWindow::of(*coords);
             bounds.iter().any(|bounds| window.meets(bounds))

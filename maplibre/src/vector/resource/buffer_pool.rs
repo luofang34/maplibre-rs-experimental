@@ -6,7 +6,7 @@
 //! are returned to the GPU automatically.
 
 use std::{
-    collections::{btree_map, BTreeMap, HashSet, VecDeque},
+    collections::{BTreeMap, HashSet, VecDeque},
     fmt::Debug,
     marker::PhantomData,
     mem::size_of,
@@ -19,14 +19,14 @@ use page::{
 };
 
 use crate::{
-    coords::{Quadkey, WorldTileCoords},
+    coords::WorldTileCoords,
     render::{
         resource::{BackingBufferDescriptor, Queue},
         settings::BufferPoolSizes,
         tile_view_pattern::HasTile,
     },
     style::layer::StyleLayer,
-    tcs::world::World,
+    tcs::{pyramid::TilePyramid, world::World},
     vector::tessellation::OverAlignedVertexBuffer,
 };
 
@@ -369,6 +369,26 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
 impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> HasTile for BufferPool<Q, B, V, I, TM, FM> {
     fn has_tile(&self, coords: WorldTileCoords, _world: &World) -> bool {
         self.index().get_layers(coords).is_some()
+    }
+
+    fn nearest_ancestor_candidate(
+        &self,
+        coords: WorldTileCoords,
+        _world: &World,
+    ) -> Option<WorldTileCoords> {
+        self.index()
+            .pyramid()
+            .nearest_ancestor(coords)
+            .map(|(ancestor, _)| ancestor)
+    }
+
+    fn has_descendant_candidates(
+        &self,
+        coords: WorldTileCoords,
+        max_depth: usize,
+        _world: &World,
+    ) -> bool {
+        self.index().pyramid().has_descendants(coords, max_depth)
     }
 }
 
