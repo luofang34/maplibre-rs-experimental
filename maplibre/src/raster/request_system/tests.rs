@@ -40,6 +40,7 @@ fn another_sources_image_and_minzoom_do_not_suppress_missing_source_fallback() {
     assert_eq!(
         wanted_tiles(
             vec![("a".into(), vec![coords]), ("b".into(), vec![coords])],
+            Vec::new(),
             &style,
             &world
         ),
@@ -53,9 +54,40 @@ fn another_sources_lower_minzoom_does_not_extend_missing_source_fallback() {
     assert_eq!(
         wanted_tiles(
             vec![("a".into(), vec![coords]), ("b".into(), vec![coords])],
+            Vec::new(),
             &style,
             &world
         ),
         vec![coords, coords],
     );
+}
+
+/// An eye in flight never finishes loading the detail under a terrain tile, so the tile that
+/// fills the whole terrain tile must not queue behind that detail.
+#[test]
+fn a_drape_targets_own_tile_is_requested_before_the_detail_under_it() {
+    let (style, world, coords) = source_results("a", "b");
+    let target = coords.get_parent().expect("parent");
+    assert_eq!(
+        wanted_tiles(
+            vec![("a".into(), vec![coords]), ("b".into(), vec![coords])],
+            vec![target],
+            &style,
+            &world
+        ),
+        vec![target, coords, coords],
+        "once, from the source whose zoom range holds it, ahead of every wanted tile"
+    );
+}
+
+#[test]
+fn a_stand_in_stays_within_the_levels_its_source_serves() {
+    let target = WorldTileCoords::from((9692, 5556, 14_u8.into()));
+    assert_eq!(stand_in_tile(target, 0, 18), Some(target));
+    assert_eq!(
+        stand_in_tile(target, 0, 12),
+        Some(WorldTileCoords::from((2423, 1389, 12_u8.into()))),
+        "a source that stops above the terrain tile fills it from its deepest level"
+    );
+    assert_eq!(stand_in_tile(target, 15, 18), None);
 }
