@@ -31,13 +31,12 @@ use crate::{
         view_state::{ViewState, ViewStatePadding},
     },
     style::Style,
-    tcs::{
-        system::{heap::live_bytes, timings::FrameTimings, SystemResult},
-        world::World,
-    },
+    tcs::{system::SystemResult, world::World},
     terrain::{dem_tile_coords, resources::TerrainResources, source::dem_source},
     vector::VectorBufferPool,
 };
+
+mod summary;
 
 /// Out-of-view tiles kept per tile in use, as GL JS `MAX_TILE_CACHE_ZOOM_LEVELS`.
 const CACHE_TILES_PER_VIEW_TILE: usize = 5;
@@ -116,129 +115,14 @@ pub fn retention_system(
         tracing::debug!(count = evicted.len(), "evicted tiles that left the view");
         drop_gpu_data(world, &evicted);
     }
+    reclaim_pool_pages(world);
     if view_state.has_external_view() {
-        summarize_residency(world, drawn, in_use.len(), view_state.eye_settled());
+        summary::summarize_residency(world, drawn, in_use.len(), view_state.eye_settled());
         #[cfg(not(target_arch = "wasm32"))]
-        summarize_gpu_objects(world, renderer);
-        summarize_timings(world);
+        summary::summarize_gpu_objects(world, renderer);
+        summary::summarize_timings(world);
     }
     Ok(())
-}
-
-/// Once a second, how many GPU objects the frame keeps alive, for a host whose footprint
-/// climbs while nothing loads: the kind whose count climbs with it is the one leaking.
-#[cfg(not(target_arch = "wasm32"))]
-fn summarize_gpu_objects(world: &World, renderer: &crate::render::Renderer) {
-    let frame = world
-        .resources
-        .get::<TileRetention>()
-        .map_or(0, |retention| retention.frame);
-    if !frame.is_multiple_of(SUMMARY_EVERY_FRAMES) {
-        return;
-    }
-    let Some(report) = renderer.instance.generate_report() else {
-        return;
-    };
-    let hub = report.hub_report();
-    tracing::info!(
-        buffers = hub.buffers.num_allocated,
-        textures = hub.textures.num_allocated,
-        textures_live = hub.textures.num_kept_from_user,
-        texture_views = hub.texture_views.num_allocated,
-        views_live = hub.texture_views.num_kept_from_user,
-        bind_groups = hub.bind_groups.num_allocated,
-        samplers = hub.samplers.num_allocated,
-        command_buffers = hub.command_buffers.num_allocated,
-        pipelines = hub.render_pipelines.num_allocated,
-        "gpu objects"
-    );
-}
-
-/// Once a second, the costliest systems and stages of the frame, for a host that cannot
-/// attach a profiler.
-fn summarize_timings(world: &mut World) {
-    let frame = world
-        .resources
-        .get::<TileRetention>()
-        .map_or(0, |retention| retention.frame);
-    if !frame.is_multiple_of(SUMMARY_EVERY_FRAMES) {
-        return;
-    }
-    let timings = world.resources.get_or_init_mut::<FrameTimings>();
-    let growers: Vec<String> = timings
-        .top_growth(6)
-        .iter()
-        .filter(|(_, kb)| *kb > 0.5)
-        .map(|(name, kb)| format!("{name}={kb:.1}"))
-        .collect();
-    let top = timings.take_top(8);
-    let costliest: Vec<String> = top
-        .iter()
-        .map(|(name, ms)| format!("{name}={ms:.2}"))
-        .collect();
-    tracing::info!(ms_per_frame = %costliest.join(" "), "frame time by system");
-    if !growers.is_empty() {
-        tracing::info!(
-            kb_per_frame = %growers.join(" "),
-            rust_heap_mb = live_bytes() >> 20,
-            "heap growth by system"
-        );
-    }
-}
-
-fn summarize_residency(world: &World, drawn: usize, in_use: usize, settled: bool) {
-    let frame = world
-        .resources
-        .get::<TileRetention>()
-        .map_or(0, |retention| retention.frame);
-    if !frame.is_multiple_of(SUMMARY_EVERY_FRAMES) {
-        return;
-    }
-    let tiles = world.tiles.tiles.len();
-    let bytes: usize = world
-        .tiles
-        .tiles
-        .values()
-        .map(|tile| tile_bytes(&world.tiles, tile.coords))
-        .sum();
-    let index_bytes = world.tiles.geometry_index.approximate_bytes();
-    let pool_revision = match world.resources.get::<Eventually<VectorBufferPool>>() {
-        Some(Initialized(pool)) => pool.revision(),
-        _ => 0,
-    };
-    let (drapes, free_drapes, drape_bytes, dem_textures, dem_bytes) =
-        match world.resources.get::<Eventually<TerrainResources>>() {
-            Some(Initialized(terrain)) => {
-                let (held, free) = terrain.drape_counts();
-                let (drape_bytes, dem_bytes) = terrain.texture_bytes();
-                (
-                    held,
-                    free,
-                    drape_bytes,
-                    terrain.dem_texture_count(),
-                    dem_bytes,
-                )
-            }
-            _ => (0, 0, 0, 0, 0),
-        };
-    tracing::info!(
-        tiles,
-        pending = crate::io::tile_backpressure::tiles_in_flight(world),
-        settled,
-        geometry_mb = bytes >> 20,
-        index_mb = index_bytes >> 20,
-        pool_revision,
-        drawn,
-        in_use,
-        drapes,
-        free_drapes,
-        drape_mb = drape_bytes >> 20,
-        dem_textures,
-        dem_mb = dem_bytes >> 20,
-        finest_dem_zoom = finest_dem_zoom(world),
-        symbol_revision = symbol_revision(world),
-        "resident tiles"
-    );
 }
 
 /// The tiles the frame draws from, with the tiles whose shapes stand in for them.
@@ -514,33 +398,23 @@ fn drop_gpu_data(world: &mut World, evicted: &[WorldTileCoords]) {
     }
 }
 
-#[cfg(test)]
-mod tests;
-
-fn finest_dem_zoom(world: &World) -> u8 {
-    world
-        .tiles
-        .tiles
-        .values()
-        .filter_map(|tile| {
-            matches!(
-                world
-                    .tiles
-                    .query::<&crate::terrain::DemTileComponent>(tile.coords),
-                Some(crate::terrain::DemTileComponent::Loaded(_))
-            )
-            .then_some(u8::from(tile.coords.z))
-        })
-        .max()
-        .unwrap_or(0)
-}
-
-fn symbol_revision(world: &World) -> u64 {
-    match world
+fn reclaim_pool_pages(world: &mut World) {
+    let keep_spare = usize::from(
+        !world
+            .resources
+            .get::<MemoryBudget>()
+            .is_some_and(MemoryBudget::is_tight),
+    );
+    if let Some(Initialized(pool)) = world.resources.get_mut::<Eventually<VectorBufferPool>>() {
+        pool.reclaim_empty_pages(keep_spare);
+    }
+    if let Some(Initialized(pool)) = world
         .resources
-        .get::<Eventually<crate::sdf::SymbolBufferPool>>()
+        .get_mut::<Eventually<crate::sdf::SymbolBufferPool>>()
     {
-        Some(Initialized(pool)) => pool.revision(),
-        _ => 0,
+        pool.reclaim_empty_pages(keep_spare);
     }
 }
+
+#[cfg(test)]
+mod tests;

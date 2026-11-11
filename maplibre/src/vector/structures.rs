@@ -356,11 +356,7 @@ pub(crate) fn refresh_gpu(
             .get_layers(*coords)
             .and_then(|layers| layers.iter().find(|entry| entry.style_layer.id == *id))
         {
-            let bytes = bytemuck::cast_slice(&buffer.buffer.vertices);
-            let range = entry.vertices_buffer_range();
-            if bytes.len() as u64 == range.end - range.start {
-                queue.write_buffer(pool.vertices(), range.start, bytes);
-            }
+            pool.update_vertices(queue, entry, &buffer.buffer.vertices);
         }
     }
 }

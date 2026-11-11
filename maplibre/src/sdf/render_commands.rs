@@ -98,7 +98,7 @@ impl RenderCommand<TranslucentItem> for DrawSymbol {
         pass.set_vertex_buffer(
             2,
             symbol_buffer_pool
-                .metadata()
+                .metadata_for(entry)
                 .slice(entry.layer_metadata_buffer_range()),
         );
         draw_indices(

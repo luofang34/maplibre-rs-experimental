@@ -33,3 +33,7 @@ harness = false
 [[bench]]
 name = "xr_readback"
 harness = false
+
+[[bench]]
+name = "buffer_pool"
+harness = false

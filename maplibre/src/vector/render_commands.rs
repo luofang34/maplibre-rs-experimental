@@ -103,7 +103,7 @@ impl<const RUNS: bool> RenderCommand<LayerItem> for DrawVectorTile<RUNS> {
         pass.set_vertex_buffer(
             2,
             buffer_pool
-                .metadata()
+                .metadata_for(entry)
                 .slice(entry.layer_metadata_buffer_range()),
         );
         if let Some(run) = &item.run {
