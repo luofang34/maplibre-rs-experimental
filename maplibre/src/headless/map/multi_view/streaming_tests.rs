@@ -3,9 +3,10 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 use std::{
+    collections::HashSet,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc,
+        Arc, Mutex,
     },
     time::Duration,
 };
@@ -16,7 +17,7 @@ use image::ImageEncoder;
 use super::*;
 use crate::{
     background::BackgroundPlugin,
-    coords::LatLon,
+    coords::{LatLon, WorldTileCoords},
     headless::create_headless_renderer_with_loader,
     io::{
         resource_loader::SharedLoader,
@@ -32,7 +33,7 @@ use crate::{
     style::Style,
     terrain::{
         queue_system::TerrainEyeFrame, transferables::DefaultDemTransferables, DrapeBudget,
-        TerrainPlugin,
+        DrapePhase, TerrainPlugin,
     },
     window::PhysicalSize,
 };
@@ -43,6 +44,11 @@ use crate::{
 struct LateTiles {
     frames: Arc<AtomicU64>,
     advanced: Arc<tokio::sync::Notify>,
+    /// How many imagery tiles from level 14 down, the first the map asks for, never answer.
+    /// Each holds a request in flight, so the count stays under the bound on those.
+    unanswered_detail: usize,
+    /// The imagery tiles left unanswered, as `(x, y, z)`.
+    unanswered: Arc<Mutex<HashSet<(u64, u64, u64)>>>,
 }
 
 impl LateTiles {
@@ -75,6 +81,16 @@ impl HttpClient for LateTiles {
             .collect();
         let (y, x, z) = (address[0], address[1], address[2]);
         self.arrive_after(4 + (z * 7 + x * 3 + y * 5) % 7).await;
+        if url.contains("ortho.example") && z >= 14 {
+            let withheld = {
+                let mut unanswered = self.unanswered.lock().expect("lock");
+                unanswered.contains(&(x, y, z))
+                    || (unanswered.len() < self.unanswered_detail && unanswered.insert((x, y, z)))
+            };
+            if withheld {
+                std::future::pending::<()>().await;
+            }
+        }
         let rgba = if url.contains("dem.example") {
             // Terrarium: about 250 m, the Ebro valley floor.
             [128, 250, 0, 255]
@@ -137,7 +153,7 @@ fn drawn_terrain(map: &HeadlessMap) -> (usize, usize) {
     (frame.0.len(), bare)
 }
 
-async fn flying_map(tiles: &LateTiles) -> (HeadlessMap, ViewSlotId) {
+async fn flying_map(tiles: &LateTiles, memory: Option<u64>) -> (HeadlessMap, ViewSlotId) {
     let settings = RendererSettings {
         msaa: Msaa { samples: 1 },
         symbol_pools: BufferPoolSizes::EMPTY,
@@ -160,12 +176,14 @@ async fn flying_map(tiles: &LateTiles) -> (HeadlessMap, ViewSlotId) {
         ],
     )
     .expect("map");
-    // A browser tab: a share of a frame for drapes, and memory short enough to coarsen them.
-    map.set_available_memory(Some(700 << 20));
+    // A browser tab: a few drapes a frame, and with `memory` short, coarser drapes and fewer
+    // requests in flight. The time a moving view allows its drapes is left wide open, so the
+    // count alone paces them on whatever GPU runs the test.
+    map.set_available_memory(memory);
     map.world_mut().resources.insert(DrapeBudget {
         per_frame: 4,
         per_eye_frame: 3,
-        moving_time: Duration::from_micros(2_000),
+        moving_time: Duration::from_secs(1),
     });
     let slot = map.register_view_slot(ViewSlotConfig {
         size: PhysicalSize::new(800, 450).expect("size"),
@@ -184,7 +202,7 @@ const COVERED_BY_FRAME: u64 = 120;
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_eye_in_flight_has_imagery_out_to_its_horizon_while_the_detail_streams_in() {
     let tiles = LateTiles::default();
-    let (mut map, slot) = flying_map(&tiles).await;
+    let (mut map, slot) = flying_map(&tiles, Some(700 << 20)).await;
     let metres_per_frame = 100.0 / 32.0;
     let degrees_per_metre = 1.0 / (111_320.0 * 41.66_f64.to_radians().cos());
     let mut covered_at = None;
@@ -221,5 +239,72 @@ async fn an_eye_in_flight_has_imagery_out_to_its_horizon_while_the_detail_stream
     assert_eq!(
         bare_after_covered, 0,
         "terrain coming into view holds imagery from its first frame"
+    );
+}
+
+/// Whether `tile` lies under `ancestor`.
+fn under(tile: WorldTileCoords, ancestor: WorldTileCoords) -> bool {
+    let mut current = tile;
+    while current.z > ancestor.z {
+        let Some(parent) = current.get_parent() else {
+            return false;
+        };
+        current = parent;
+    }
+    current == ancestor
+}
+
+/// The web page that reported the uniform band had loaded the tiles under it, yet its drapes
+/// stayed on their stand-ins: a drape whose set never completes must still show what arrived.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_eyes_drape_shows_the_detail_that_arrived_while_some_of_it_never_answers() {
+    let tiles = LateTiles {
+        unanswered_detail: 3,
+        ..LateTiles::default()
+    };
+    let (mut map, slot) = flying_map(&tiles, None).await;
+    let mut detail_over_stand_in = false;
+    for frame in 0..FLIGHT_FRAMES {
+        map.run_multi_view_frame(MultiViewFrame {
+            timestamp: Duration::from_micros(frame * 31_250),
+            opaque_environment: true,
+            request_overscan: 1.22,
+            slots: vec![ViewSlotEntry {
+                slot,
+                view: SlotView::External(eastbound_eye(LatLon::new(41.66, -1.0), 2_049.0)),
+                policy: CoveringPolicy::Independent,
+            }],
+        })
+        .expect("frame");
+        tiles.advance();
+        for _ in 0..16 {
+            tokio::task::yield_now().await;
+        }
+        let unanswered: Vec<WorldTileCoords> = tiles
+            .unanswered
+            .lock()
+            .expect("lock")
+            .iter()
+            .map(|&(x, y, z)| WorldTileCoords::from((x as i32, y as i32, (z as u8).into())))
+            .collect();
+        let Some(phase) = map.world().resources.get::<DrapePhase>() else {
+            continue;
+        };
+        detail_over_stand_in |= phase.targets.iter().any(|target| {
+            unanswered.iter().any(|tile| under(*tile, target.coords))
+                && target
+                    .layers
+                    .iter()
+                    .any(|layer| layer.tile.coords.z > target.coords.z)
+        });
+    }
+    assert_eq!(
+        tiles.unanswered.lock().expect("lock").len(),
+        3,
+        "the view wants detail the server never answers"
+    );
+    assert!(
+        detail_over_stand_in,
+        "a drape over an unanswered tile draws the tiles that did arrive"
     );
 }
