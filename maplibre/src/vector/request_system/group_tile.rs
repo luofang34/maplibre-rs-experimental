@@ -81,9 +81,11 @@ pub(super) async fn fetch_group_tile<H: HttpClient>(
     if source_tile == coords {
         return Ok(cached);
     }
-    let mut tile: Tile = (*cached).clone();
-    super::rescale::into_descendant(&mut tile, source_tile, coords);
-    Ok(Arc::new(tile))
+    Ok(Arc::new(super::rescale::slice_descendant(
+        &cached,
+        source_tile,
+        coords,
+    )))
 }
 
 /// The fetch error a failure to load `what` through the asset cache stands for.

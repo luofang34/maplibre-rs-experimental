@@ -144,9 +144,12 @@ fn fingerprint(
         .as_ref()
         .map(|terrain| terrain.exaggeration.to_bits())
         .hash(&mut hash);
-    for tile in tiles.tiles.values() {
-        if let Some(DemTileComponent::Loaded(dem)) = tiles.query::<&DemTileComponent>(tile.coords) {
-            tile.coords.hash(&mut hash);
+    for coords in tiles
+        .pyramid_of::<DemTileComponent>()
+        .coords_coarse_to_fine()
+    {
+        if let Some(DemTileComponent::Loaded(dem)) = tiles.query::<&DemTileComponent>(coords) {
+            coords.hash(&mut hash);
             dem.revision.hash(&mut hash);
             dem.tile.min().to_bits().hash(&mut hash);
             dem.tile.max().to_bits().hash(&mut hash);

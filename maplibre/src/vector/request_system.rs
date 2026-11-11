@@ -12,9 +12,7 @@ use crate::{
         frame_style::FrameStyle,
         tile_backpressure::vector_request_budget,
         tile_retry::{self, RequestKind},
-        tile_sources::{
-            clamp_to_max_zoom, outside_source_bounds, source_max_zoom, source_min_zoom, TileKind,
-        },
+        tile_sources::{outside_source_bounds, source_max_zoom, source_min_zoom, TileKind},
     },
     kernel::Kernel,
     render::{
@@ -26,7 +24,7 @@ use crate::{
 };
 
 mod group_tile;
-mod rescale;
+pub mod rescale;
 mod worker;
 pub use worker::fetch_vector_apc;
 
@@ -145,9 +143,13 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                 if min_zoom.is_some_and(|min_zoom| u8::from(coords.z) < min_zoom) {
                     continue;
                 }
-                let coords = clamp_to_max_zoom(coords, max_zoom);
-                if coords.build_quad_key().is_none()
-                    || outside_source_bounds(style, TileKind::Vector, coords)
+                let Some(target) =
+                    crate::coords::OverscaledTileId::for_source(coords, level, max_zoom, magnifies)
+                else {
+                    continue;
+                };
+                let coords = target.canonical;
+                if outside_source_bounds(style, TileKind::Vector, coords)
                     || !requested.insert(coords)
                 {
                     continue;
@@ -155,12 +157,12 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
 
                 // A source's last zoom is drawn magnified at the zooms past it, and what depends on
                 // that is laid out again when the magnification changes.
-                let overscaled_zoom = match max_zoom {
-                    Some(max_zoom) if magnifies && u8::from(coords.z) >= max_zoom => {
-                        level.max(u8::from(coords.z))
-                    }
-                    _ => 0,
-                };
+                let overscaled_zoom =
+                    if magnifies && max_zoom.is_some_and(|m| u8::from(coords.z) >= m) {
+                        target.overscaled_z
+                    } else {
+                        0
+                    };
                 let laid_out_for = (magnifies.then_some(overscaled_zoom), pixel_ratio);
                 if tile_retry::backing_off(world, coords, RequestKind::Vector)
                     || is_current(world, coords, laid_out_for)

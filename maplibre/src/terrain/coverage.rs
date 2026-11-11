@@ -68,7 +68,7 @@ pub struct TerrainCoverageIndex {
     /// Rendered tile to the DEM tile it samples, `None` while that DEM is still loading.
     rendered: HashMap<WorldTileCoords, Option<WorldTileCoords>>,
     /// Interior elevation bounds of every loaded DEM tile, without exaggeration.
-    dem_bounds: HashMap<WorldTileCoords, (f64, f64)>,
+    dem_bounds: crate::tcs::pyramid::TilePyramid<(f64, f64)>,
     min_elevation: f64,
     max_elevation: f64,
     exaggeration: f64,
@@ -94,13 +94,14 @@ impl TerrainCoverageIndex {
             dem_tile_size: dem.tile_size,
             ..Self::default()
         };
-        for tile in tiles.tiles.values() {
-            if let Some(DemTileComponent::Loaded(dem)) =
-                tiles.query::<&DemTileComponent>(tile.coords)
-            {
+        for coords in tiles
+            .pyramid_of::<DemTileComponent>()
+            .coords_coarse_to_fine()
+        {
+            if let Some(DemTileComponent::Loaded(dem)) = tiles.query::<&DemTileComponent>(coords) {
                 index
                     .dem_bounds
-                    .insert(tile.coords, (dem.tile.min(), dem.tile.max()));
+                    .insert(coords, (dem.tile.min(), dem.tile.max()));
             }
         }
         let (mut min, mut max) = (0.0_f64, 0.0_f64);
@@ -110,7 +111,7 @@ impl TerrainCoverageIndex {
                 index.zooms.push(zoom);
             }
             let source = index.loaded_dem_for(coords);
-            if let Some((tile_min, tile_max)) = source.and_then(|dem| index.dem_bounds.get(&dem)) {
+            if let Some((tile_min, tile_max)) = source.and_then(|dem| index.dem_bounds.get(dem)) {
                 min = min.min(tile_min * index.exaggeration);
                 max = max.max(tile_max * index.exaggeration);
             }
@@ -178,20 +179,17 @@ impl TerrainCoverageIndex {
 
     /// The loaded DEM tile that stands in for `coords`: its own DEM tile or the nearest ancestor.
     pub fn loaded_dem_for(&self, coords: WorldTileCoords) -> Option<WorldTileCoords> {
-        let mut current = dem_tile_coords(coords, self.minzoom, self.maxzoom)?;
-        loop {
-            if self.dem_bounds.contains_key(&current) {
-                return Some(current);
-            }
-            current = current.get_parent()?;
-        }
+        let current = dem_tile_coords(coords, self.minzoom, self.maxzoom)?;
+        self.dem_bounds
+            .nearest_ancestor_or_self(current)
+            .map(|(coords, _)| coords)
     }
 
     /// Exaggerated elevation bounds of a tile, from the loaded DEM that covers it.
     pub fn tile_elevation_range(&self, coords: WorldTileCoords) -> Option<TileElevationRange> {
         let (min, max) = self
             .loaded_dem_for(coords)
-            .and_then(|dem| self.dem_bounds.get(&dem))?;
+            .and_then(|dem| self.dem_bounds.get(dem))?;
         let mut min_meters = min * self.exaggeration;
         let mut max_meters = max * self.exaggeration;
         let max_row = 1_i32
@@ -368,84 +366,10 @@ impl TileElevationProvider for IndexedTileElevation<'_> {
     }
 }
 
-/// Exact view + DEM-bounds key for single-frame reuse of a tight [`crate::coords::ViewRegion`].
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) struct PreparedTerrainKey {
-    dem_tile_size: u32,
-    width_bits: u64,
-    height_bits: u64,
-    overscan_bits: u64,
-    body_radius_bits: u64,
-    external_view: bool,
-    vp_bits: [[u64; 4]; 4],
-    min_elev_bits: u64,
-    max_elev_bits: u64,
-    dem_bounds_len: usize,
-}
-
-impl PreparedTerrainKey {
-    pub(crate) fn capture(
-        view_state: &crate::render::view_state::ViewState,
-        world: &crate::tcs::world::World,
-        dem_tile_size: u32,
-    ) -> Self {
-        let m: [[f64; 4]; 4] = view_state.view_projection().0.into();
-        let vp_bits = m.map(|col| col.map(f64::to_bits));
-        let (min_elev_bits, max_elev_bits, dem_bounds_len) = world
-            .resources
-            .get::<TerrainCoverageIndex>()
-            .map_or((0, 0, 0), |idx| {
-                (
-                    idx.min_elevation.to_bits(),
-                    idx.max_elevation.to_bits(),
-                    idx.dem_bounds.len(),
-                )
-            });
-        Self {
-            dem_tile_size,
-            width_bits: view_state.width().to_bits(),
-            height_bits: view_state.height().to_bits(),
-            overscan_bits: view_state.request_overscan().to_bits(),
-            body_radius_bits: view_state.body().radius_meters.to_bits(),
-            external_view: view_state.has_external_view(),
-            vp_bits,
-            min_elev_bits,
-            max_elev_bits,
-            dem_bounds_len,
-        }
-    }
-}
-
-/// Cached tight [`crate::coords::ViewRegion`] from `coverage_system` or `multi_view` covering so
-/// `Queue` (`target_specs` / `procedural_specs`) skips a duplicate S2 / frustum covering pass
-/// when neither the camera projection nor DEM elevation bounds changed.
-#[derive(Clone)]
-pub(crate) struct PreparedTerrainRegion {
-    pub(crate) key: PreparedTerrainKey,
-    pub(crate) region: Option<crate::coords::ViewRegion>,
-}
-
-/// Takes the cached tight terrain region if its [`PreparedTerrainKey`] matches `view_state`
-/// and `world`, otherwise computes a fresh `terrain_region`.
-pub(crate) fn take_or_compute_tight_terrain_region(
-    style: &crate::style::Style,
-    view_state: &crate::render::view_state::ViewState,
-    world: &mut crate::tcs::world::World,
-    dem_tile_size: u32,
-) -> Result<Option<crate::coords::ViewRegion>, crate::render::projection::ProjectionStateError> {
-    if let Some(cached) = world.resources.remove::<PreparedTerrainRegion>() {
-        if cached.key == PreparedTerrainKey::capture(view_state, world, dem_tile_size) {
-            return Ok(cached.region);
-        }
-    }
-    crate::render::projection::terrain_region(
-        style,
-        view_state,
-        world,
-        dem_tile_size,
-        ViewStatePadding::Tight,
-    )
-}
+mod prepared;
+pub(crate) use prepared::{
+    take_or_compute_tight_terrain_region, PreparedTerrainKey, PreparedTerrainRegion,
+};
 
 /// Rebuilds the coverage index from the tiles the terrain will draw this frame.
 pub fn coverage_system(

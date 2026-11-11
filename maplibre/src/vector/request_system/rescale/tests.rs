@@ -2,7 +2,7 @@
 
 use geozero::mvt::{tile, Tile};
 
-use super::{decode, into_descendant, Kind};
+use super::{decode, into_descendant, slice_descendant, Kind};
 use crate::coords::{WorldTileCoords, ZoomLevel};
 
 fn coords(x: i32, y: i32, z: u8) -> WorldTileCoords {
@@ -200,4 +200,110 @@ fn command_streams_round_trip_through_the_decoder() {
         decode(&[4, 0, 0]).is_none(),
         "an unknown command is refused"
     );
+}
+
+#[test]
+fn slice_descendant_matches_into_descendant_and_compacts_tag_tables() {
+    let enclosing_poly = tile::Feature {
+        id: Some(10),
+        tags: vec![2, 2],
+        r#type: Some(tile::GeomType::Polygon as i32),
+        geometry: encoded(
+            Kind::Polygon,
+            &[vec![(0, 0), (4096, 0), (4096, 4096), (0, 4096)]],
+        ),
+    };
+    let out_of_view_point = tile::Feature {
+        id: Some(11),
+        tags: vec![0, 0, 1, 1],
+        r#type: Some(tile::GeomType::Point as i32),
+        geometry: encoded(Kind::Point, &[vec![(16, 16)]]),
+    };
+    let crossing_line = tile::Feature {
+        id: Some(12),
+        tags: vec![1, 3],
+        r#type: Some(tile::GeomType::Linestring as i32),
+        geometry: encoded(Kind::Line, &[vec![(2000, 2000), (2200, 2200)]]),
+    };
+    let source = Tile {
+        layers: vec![
+            tile::Layer {
+                version: 2,
+                name: "mixed".into(),
+                features: vec![enclosing_poly, out_of_view_point, crossing_line],
+                keys: vec!["unused_a".into(), "class".into(), "kind".into()],
+                values: vec![
+                    tile::Value {
+                        string_value: Some("drop_me_1".into()),
+                        ..Default::default()
+                    },
+                    tile::Value {
+                        string_value: Some("drop_me_2".into()),
+                        ..Default::default()
+                    },
+                    tile::Value {
+                        string_value: Some("water".into()),
+                        ..Default::default()
+                    },
+                    tile::Value {
+                        string_value: Some("canal".into()),
+                        ..Default::default()
+                    },
+                ],
+                extent: Some(4096),
+            },
+            tile::Layer {
+                version: 2,
+                name: "empty_in_child".into(),
+                features: vec![feature(
+                    tile::GeomType::Point,
+                    vec![9, zigzag(10), zigzag(10)],
+                )],
+                keys: vec!["heavy_key".into()],
+                values: vec![tile::Value {
+                    string_value: Some("heavy_val".into()),
+                    ..Default::default()
+                }],
+                extent: Some(4096),
+            },
+        ],
+    };
+
+    let from = coords(0, 0, 6);
+    let to = coords(8, 8, 10);
+    let mut expected = source.clone();
+    into_descendant(&mut expected, from, to);
+    let sliced = slice_descendant(&source, from, to);
+
+    assert_eq!(sliced.layers.len(), expected.layers.len());
+    assert_eq!(
+        sliced.layers[0].features.len(),
+        expected.layers[0].features.len()
+    );
+    for (got, want) in sliced.layers[0]
+        .features
+        .iter()
+        .zip(&expected.layers[0].features)
+    {
+        assert_eq!(got.id, want.id);
+        assert_eq!(got.r#type, want.r#type);
+        assert_eq!(got.geometry, want.geometry);
+        assert_eq!(
+            crate::vector::feature_properties(&sliced.layers[0], got),
+            crate::vector::feature_properties(&expected.layers[0], want),
+        );
+    }
+    assert_eq!(
+        sliced.layers[0].keys.len(),
+        2,
+        "unused keys are dropped from sliced layer"
+    );
+    assert_eq!(
+        sliced.layers[0].values.len(),
+        2,
+        "unused values are dropped from sliced layer"
+    );
+    assert!(sliced.layers[1].features.is_empty());
+    assert!(sliced.layers[1].keys.is_empty());
+    assert!(sliced.layers[1].values.is_empty());
 }

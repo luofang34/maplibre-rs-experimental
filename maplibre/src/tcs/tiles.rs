@@ -1,6 +1,6 @@
 //! Tile records, their typed CPU components and rendered-feature query geometry.
 
-use std::{cell::UnsafeCell, collections::BTreeMap};
+use std::{any::TypeId, cell::UnsafeCell, collections::BTreeMap};
 
 use downcast_rs::{impl_downcast, Downcast};
 use rustc_hash::FxHashMap;
@@ -9,7 +9,10 @@ pub use crate::tcs::{EphemeralQueryState, GlobalQueryState, QueryState};
 use crate::{
     coords::{Quadkey, WorldTileCoords},
     io::geometry_index::GeometryIndex,
+    tcs::pyramid::TilePyramid,
 };
+
+static EMPTY_PYRAMID: TilePyramid<()> = TilePyramid::new();
 
 /// Coordinates identifying one tile record in a [`Tiles`] store.
 #[derive(Copy, Clone, Debug)]
@@ -19,7 +22,12 @@ pub struct Tile {
 }
 
 /// Data associated with a [`Tile`], with at most one component of each type per tile.
-pub trait TileComponent: Downcast + 'static {}
+pub trait TileComponent: Downcast + 'static {
+    /// Concrete [`TypeId`] of this component value, used for per-component pyramid indexing.
+    fn component_type_id(&self) -> TypeId {
+        TypeId::of::<Self>()
+    }
+}
 impl_downcast!(TileComponent);
 
 /// Owns tile records, typed components and their feature-query index.
@@ -33,9 +41,25 @@ pub struct Tiles {
     pub components: FxHashMap<Quadkey, Vec<UnsafeCell<Box<dyn TileComponent>>>>,
     /// Geometry available to rendered-feature queries; cleared with the owning tiles.
     pub geometry_index: GeometryIndex,
+    pyramid: TilePyramid<()>,
+    component_pyramids: FxHashMap<TypeId, TilePyramid<()>>,
 }
 
 impl Tiles {
+    /// Hierarchical pyramid of every resident tile in this store.
+    #[inline]
+    pub fn pyramid(&self) -> &TilePyramid<()> {
+        &self.pyramid
+    }
+
+    /// Hierarchical pyramid of resident tiles carrying component `T`.
+    #[inline]
+    pub fn pyramid_of<T: TileComponent>(&self) -> &TilePyramid<()> {
+        self.component_pyramids
+            .get(&TypeId::of::<T>())
+            .unwrap_or(&EMPTY_PYRAMID)
+    }
+
     /// Borrows `&T` or a pair of shared component references from one tile.
     /// Built-in queries return `None` for invalid coordinates or missing components.
     pub fn query<Q: ComponentQuery>(&self, coords: WorldTileCoords) -> Option<Q::Item<'_>> {
@@ -76,6 +100,7 @@ impl Tiles {
                 let tile = Tile { coords };
                 self.tiles.insert(key, tile);
                 self.components.insert(key, Vec::new());
+                self.pyramid.insert(coords, ());
                 Some(TileSpawnResult { tiles: self, tile })
             }
         } else {
@@ -87,6 +112,10 @@ impl Tiles {
     pub fn clear(&mut self) {
         self.tiles.clear();
         self.components.clear();
+        self.pyramid.clear();
+        for pyramid in self.component_pyramids.values_mut() {
+            pyramid.clear();
+        }
         self.geometry_index = GeometryIndex::default();
     }
 
@@ -95,7 +124,15 @@ impl Tiles {
         let Some(key) = coords.build_quad_key() else {
             return false;
         };
-        self.components.remove(&key);
+        if let Some(removed_components) = self.components.remove(&key) {
+            for cell in removed_components {
+                let type_id = cell.into_inner().component_type_id();
+                if let Some(pyramid) = self.component_pyramids.get_mut(&type_id) {
+                    pyramid.remove(coords);
+                }
+            }
+        }
+        self.pyramid.remove(coords);
         self.geometry_index.remove(&coords);
         self.tiles.remove(&key).is_some()
     }
@@ -119,6 +156,11 @@ impl<'w> TileSpawnResult<'w> {
                 *value = component;
             } else {
                 components.push(UnsafeCell::new(Box::new(component)));
+                self.tiles
+                    .component_pyramids
+                    .entry(TypeId::of::<T>())
+                    .or_default()
+                    .insert(self.tile.coords, ());
             }
         }
         self

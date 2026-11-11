@@ -1,11 +1,6 @@
 //! Completion and bounded retry scheduling for vector, raster and elevation requests.
 
-use std::{
-    cell::Cell,
-    collections::{BTreeSet, HashSet},
-    rc::Rc,
-    time::Duration,
-};
+use std::{cell::Cell, collections::BTreeSet, rc::Rc, time::Duration};
 
 use serde::{Deserialize, Serialize};
 
@@ -120,34 +115,24 @@ impl TileComponent for TileRequestRetries {}
 #[derive(Clone, Default)]
 pub(crate) struct RequestAttempts(Rc<Cell<u64>>);
 
-fn retry_states(world: &World) -> impl Iterator<Item = &RetryState> {
-    world
-        .tiles
-        .tiles
-        .values()
-        .filter_map(|tile| world.tiles.query::<&TileRequestRetries>(tile.coords))
-        .flat_map(|retries| retries.0.iter())
-}
-
 /// Whether a frame has request work: a request in flight, whose result the next frame applies,
 /// or a retry whose deadline has passed, which the next frame issues.
 pub(crate) fn needs_frame(world: &World) -> bool {
-    let now = observed_now(world);
-    retry_states(world).any(|state| state.pending || state.retry_due(now))
+    index::needs_frame_indexed(world)
 }
 
 /// Shortest wait until a scheduled retry deadline is due, or `None` when no retry waits.
 pub(crate) fn next_retry_delay(world: &World) -> Option<Duration> {
-    let now = observed_now(world);
-    retry_states(world)
-        .filter(|state| !state.out_of_view)
-        .filter_map(|state| state.deadline.map(|due| due.saturating_sub(now)))
-        .min()
+    index::next_retry_delay_indexed(world)
 }
 
 /// Requests every requested tile of `kind` again, keeping what it shows until the new data lands.
 pub(crate) fn refresh(world: &mut World, kind: RequestKind) {
-    let coords: Vec<WorldTileCoords> = world.tiles.tiles.values().map(|tile| tile.coords).collect();
+    let coords: Vec<WorldTileCoords> = world
+        .tiles
+        .pyramid_of::<TileRequestRetries>()
+        .coords_coarse_to_fine()
+        .collect();
     refresh_tiles(world, kind, &coords);
 }
 
@@ -225,7 +210,12 @@ pub(crate) fn refresh_tiles(world: &mut World, kind: RequestKind, tiles: &[World
 fn refresh_due(world: &mut World, kind: RequestKind, tiles: &[WorldTileCoords]) {
     crate::render::frame_signals::mark_dirty(world);
     let now = now(world);
+    let mut newly_scheduled = Vec::new();
     for coords in tiles {
+        let out_of_view = world
+            .resources
+            .get::<index::RetryIndex>()
+            .is_some_and(|idx| idx.is_out_of_view(kind, *coords));
         let Some(retries) = world.tiles.query_mut::<&mut TileRequestRetries>(*coords) else {
             continue;
         };
@@ -239,6 +229,14 @@ fn refresh_due(world: &mut World, kind: RequestKind, tiles: &[WorldTileCoords]) 
             // A tile already backing off retries at its deadline with the new data.
             state.delay = Duration::ZERO;
             state.deadline = Some(now);
+            state.out_of_view = out_of_view;
+            newly_scheduled.push(*coords);
+        }
+    }
+    if !newly_scheduled.is_empty() {
+        let idx = world.resources.get_or_init_mut::<index::RetryIndex>();
+        for coords in newly_scheduled {
+            idx.mark_scheduled(kind, coords);
         }
     }
 }
@@ -252,6 +250,10 @@ pub(crate) fn retry_later(
     delay: Duration,
 ) {
     let now = now(world);
+    let out_of_view = world
+        .resources
+        .get::<index::RetryIndex>()
+        .is_some_and(|idx| idx.is_out_of_view(kind, coords));
     let Some(retries) = world.tiles.query_mut::<&mut TileRequestRetries>(coords) else {
         return;
     };
@@ -260,6 +262,11 @@ pub(crate) fn retry_later(
         return;
     }
     state.deadline = Some(now.saturating_add(delay));
+    state.out_of_view = out_of_view;
+    world
+        .resources
+        .get_or_init_mut::<index::RetryIndex>()
+        .mark_scheduled(kind, coords);
     // The retry brings what the whole tile was asked for, not what a later data change was.
     mark_refresh_sources(world, coords, None);
 }
@@ -300,6 +307,10 @@ pub(crate) fn started(
     attempt: u64,
     only_sources: Option<&[String]>,
 ) {
+    let out_of_view = world
+        .resources
+        .get::<index::RetryIndex>()
+        .is_some_and(|idx| idx.is_out_of_view(kind, coords));
     if world.tiles.query::<&TileRequestRetries>(coords).is_none() {
         if let Some(mut tile) = world.tiles.spawn_mut(coords) {
             tile.insert(TileRequestRetries::default());
@@ -311,7 +322,12 @@ pub(crate) fn started(
         state.pending = true;
         state.deadline = None;
         state.stale = false;
+        state.out_of_view = out_of_view;
         state.issued_for = only_sources.map(<[String]>::to_vec);
+        world
+            .resources
+            .get_or_init_mut::<index::RetryIndex>()
+            .mark_pending(kind, coords);
     }
     crate::io::tile_load::issued(world, coords, kind);
 }
@@ -337,6 +353,10 @@ pub(crate) fn completed(world: &mut World, outcome: TileRequestOutcome) {
         .tiles
         .query_mut::<&mut TileRequestRetries>(outcome.coords)
     else {
+        world
+            .resources
+            .get_or_init_mut::<index::RetryIndex>()
+            .clear_kind(outcome.kind, outcome.coords);
         return;
     };
     let state = &mut retries.0[outcome.kind.index()];
@@ -351,6 +371,11 @@ pub(crate) fn completed(world: &mut World, outcome: TileRequestOutcome) {
             retried_for = Some(state.issued_for.clone());
         }
     }
+    let has_deadline = state.deadline.is_some();
+    world
+        .resources
+        .get_or_init_mut::<index::RetryIndex>()
+        .finish_pending(outcome.kind, outcome.coords, has_deadline);
     // The retry is for what the attempt was for, so a data change noted since cannot
     // narrow it to its own sources and lose the ones that failed.
     if let Some(issued_for) = retried_for {
@@ -380,105 +405,12 @@ pub(crate) fn accepts(
         == attempt
 }
 
-/// The tiles each request family considered this frame; a family that did not run leaves
-/// its requests alone.
-#[derive(Default)]
-struct WantedRequests([Option<rustc_hash::FxHashSet<WorldTileCoords>>; 3]);
-
-/// Attempts given up on, for the next request system to stop in its worker.
-#[derive(Default)]
-struct CancelledAttempts(Vec<u64>);
-
-/// Records the tiles a request family still wants, whether or not it requested them now.
-pub(crate) fn want<S: std::hash::BuildHasher>(
-    world: &mut World,
-    kind: RequestKind,
-    coords: &HashSet<WorldTileCoords, S>,
-) {
-    let held: Vec<WorldTileCoords> = world.tiles.tiles.values().map(|tile| tile.coords).collect();
-    for held in held {
-        if let Some(retries) = world.tiles.query_mut::<&mut TileRequestRetries>(held) {
-            retries.0[kind.index()].out_of_view = !coords.contains(&held);
-        }
-    }
-    world.resources.get_or_init_mut::<WantedRequests>().0[kind.index()] =
-        Some(coords.iter().copied().collect());
-}
-
-/// Gives up the requests in flight that no request family wanted this frame, so they stop
-/// holding a slot, and returns the tiles they were for. Tiles in `in_use` keep theirs: the
-/// drape requests a family follows lag a frame behind what the view uses.
-pub(crate) fn cancel_unwanted<S: std::hash::BuildHasher>(
-    world: &mut World,
-    in_use: &HashSet<WorldTileCoords, S>,
-) -> Vec<WorldTileCoords> {
-    let Some(wanted) = world
-        .resources
-        .get_mut::<WantedRequests>()
-        .map(std::mem::take)
-    else {
-        return Vec::new();
-    };
-    let coords: Vec<WorldTileCoords> = world
-        .tiles
-        .tiles
-        .values()
-        .map(|tile| tile.coords)
-        .filter(|coords| !in_use.contains(coords))
-        .collect();
-    let mut cancelled = Vec::new();
-    let mut tiles = Vec::new();
-    let mut given_up = Vec::new();
-    for coords in coords {
-        let Some(retries) = world.tiles.query_mut::<&mut TileRequestRetries>(coords) else {
-            continue;
-        };
-        for ((state, wanted), kind) in retries.0.iter_mut().zip(&wanted.0).zip([
-            RequestKind::Raster,
-            RequestKind::Dem,
-            RequestKind::Vector,
-        ]) {
-            let unwanted = wanted.as_ref().is_some_and(|set| !set.contains(&coords));
-            if state.pending && unwanted {
-                cancelled.extend(state.attempt);
-                *state = RetryState::default();
-                given_up.push((coords, kind));
-                if !tiles.contains(&coords) {
-                    tiles.push(coords);
-                }
-            }
-        }
-    }
-    for (coords, kind) in given_up {
-        crate::io::tile_load::abandoned(world, coords, kind);
-    }
-    world
-        .resources
-        .get_or_init_mut::<CancelledAttempts>()
-        .0
-        .extend(cancelled);
-    tiles
-}
-
-/// Stops the worker calls of the attempts cancelled since the last call.
-pub(crate) fn stop_cancelled<K: crate::environment::OffscreenKernel>(
-    world: &mut World,
-    apc: &impl crate::io::apc::AsyncProcedureCall<K>,
-) {
-    let cancelled = world
-        .resources
-        .get_mut::<CancelledAttempts>()
-        .map(|cancelled| std::mem::take(&mut cancelled.0))
-        .unwrap_or_default();
-    for attempt in cancelled {
-        apc.cancel(attempt);
-    }
-}
-
 mod clock;
+mod index;
 mod rejection;
 
 use clock::{now, observed_now};
+pub(crate) use index::{cancel_unwanted, stop_cancelled, want};
 pub(crate) use rejection::{backing_off, rejected};
 
 #[cfg(test)]

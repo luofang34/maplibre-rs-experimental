@@ -75,42 +75,45 @@ impl IndexEntry {
     }
 }
 
-/// Uploaded layer entries belonging to a single tile quadkey.
+/// Uploaded layer entries belonging to a single canonical tile.
 #[derive(Debug)]
 pub struct RingIndexEntry {
     layers: VecDeque<IndexEntry>,
 }
 
-/// Spatial (`Quadkey`) and temporal (`allocation_id`) index of resident geometry allocations.
+/// Pyramid-backed spatial and temporal (`allocation_id`) index of resident geometry allocations.
 #[derive(Debug)]
 pub struct RingIndex {
-    tree_index: BTreeMap<Quadkey, RingIndexEntry>,
-    order: BTreeMap<u64, Quadkey>,
-    zoom_counts: [u32; 32],
+    pyramid: TilePyramid<RingIndexEntry>,
+    order: BTreeMap<u64, WorldTileCoords>,
 }
 
 impl RingIndex {
     /// Creates an empty index.
     pub fn new() -> Self {
         Self {
-            tree_index: BTreeMap::new(),
+            pyramid: TilePyramid::new(),
             order: BTreeMap::new(),
-            zoom_counts: [0; 32],
         }
+    }
+
+    /// Hierarchical [`TilePyramid`] of resident tile geometry queues.
+    #[inline]
+    pub fn pyramid(&self) -> &TilePyramid<RingIndexEntry> {
+        &self.pyramid
     }
 
     /// Removes all indexed entries in `O(1)` drop without per-entry rebalancing.
     pub fn clear(&mut self) {
-        self.tree_index.clear();
+        self.pyramid.clear();
         self.order.clear();
-        self.zoom_counts = [0; 32];
     }
 
     /// Oldest resident allocation in FIFO upload order.
     pub fn front(&self) -> Option<&IndexEntry> {
-        let (&alloc_id, key) = self.order.first_key_value()?;
-        self.tree_index
-            .get(key)?
+        let (&alloc_id, &coords) = self.order.first_key_value()?;
+        self.pyramid
+            .get(coords)?
             .layers
             .iter()
             .find(|entry| entry.allocation_id == alloc_id)
@@ -118,9 +121,9 @@ impl RingIndex {
 
     /// Newest resident allocation in FIFO upload order.
     pub fn back(&self) -> Option<&IndexEntry> {
-        let (&alloc_id, key) = self.order.last_key_value()?;
-        self.tree_index
-            .get(key)?
+        let (&alloc_id, &coords) = self.order.last_key_value()?;
+        self.pyramid
+            .get(coords)?
             .layers
             .iter()
             .rev()
@@ -128,52 +131,43 @@ impl RingIndex {
     }
 
     /// Resident layer allocations at `coords`, if any.
+    #[inline]
     pub fn get_layers(&self, coords: WorldTileCoords) -> Option<&VecDeque<IndexEntry>> {
-        coords
-            .build_quad_key()
-            .and_then(|key| self.tree_index.get(&key))
-            .map(|entry| &entry.layers)
+        self.pyramid.get(coords).map(|entry| &entry.layers)
     }
 
     /// Highest zoom level among all resident allocations in `O(1)`.
+    #[inline]
     pub fn max_zoom(&self) -> Option<u8> {
-        self.zoom_counts
-            .iter()
-            .rposition(|&count| count > 0)
-            .map(|z| z as u8)
+        self.pyramid.max_zoom()
     }
 
-    /// Iterates per-tile layer queues across the index.
+    /// Iterates per-tile layer queues across the index in coarse-to-fine Morton order.
     pub fn iter(&self) -> impl Iterator<Item = impl Iterator<Item = &IndexEntry>> + '_ {
-        self.tree_index.values().map(|entry| entry.layers.iter())
+        self.pyramid.values().map(|entry| entry.layers.iter())
     }
 
     pub(super) fn pop_front(&mut self) -> Option<IndexEntry> {
-        let (alloc_id, key) = self.order.pop_first()?;
-        let entry = self.tree_index.get_mut(&key)?;
+        let (alloc_id, coords) = self.order.pop_first()?;
+        let entry = self.pyramid.get_mut(coords)?;
         let pos = entry
             .layers
             .iter()
             .position(|layer| layer.allocation_id == alloc_id)?;
         let removed = entry.layers.remove(pos)?;
-        dec_zoom(&mut self.zoom_counts, removed.coords);
         if entry.layers.is_empty() {
-            self.tree_index.remove(&key);
+            self.pyramid.remove(coords);
         }
         Some(removed)
     }
 
     pub(super) fn remove_tile(&mut self, coords: WorldTileCoords) -> Vec<IndexEntry> {
-        let Some(key) = coords.build_quad_key() else {
-            return Vec::new();
-        };
-        let Some(entry) = self.tree_index.remove(&key) else {
+        let Some(entry) = self.pyramid.remove(coords) else {
             return Vec::new();
         };
         let mut removed = Vec::with_capacity(entry.layers.len());
         for layer in entry.layers {
             self.order.remove(&layer.allocation_id);
-            dec_zoom(&mut self.zoom_counts, layer.coords);
             removed.push(layer);
         }
         removed
@@ -185,10 +179,7 @@ impl RingIndex {
         id: &str,
         keep: Option<u64>,
     ) -> Vec<IndexEntry> {
-        let Some(key) = coords.build_quad_key() else {
-            return Vec::new();
-        };
-        let Some(entry) = self.tree_index.get_mut(&key) else {
+        let Some(entry) = self.pyramid.get_mut(coords) else {
             return Vec::new();
         };
         let mut removed = Vec::new();
@@ -199,7 +190,6 @@ impl RingIndex {
             if should_remove {
                 if let Some(layer) = entry.layers.remove(i) {
                     self.order.remove(&layer.allocation_id);
-                    dec_zoom(&mut self.zoom_counts, layer.coords);
                     removed.push(layer);
                 }
             } else {
@@ -207,39 +197,28 @@ impl RingIndex {
             }
         }
         if entry.layers.is_empty() {
-            self.tree_index.remove(&key);
+            self.pyramid.remove(coords);
         }
         removed
     }
 
     pub(super) fn push_back(&mut self, entry: IndexEntry) {
-        if let Some(key) = entry.coords.build_quad_key() {
-            self.order.insert(entry.allocation_id, key);
-            inc_zoom(&mut self.zoom_counts, entry.coords);
-            match self.tree_index.entry(key) {
-                btree_map::Entry::Vacant(index_entry) => {
-                    index_entry.insert(RingIndexEntry {
-                        layers: VecDeque::from([entry]),
-                    });
-                }
-                btree_map::Entry::Occupied(mut index_entry) => {
-                    index_entry.get_mut().layers.push_back(entry);
-                }
-            }
+        let coords = entry.coords;
+        if coords.build_quad_key().is_none() {
+            return;
+        }
+        self.order.insert(entry.allocation_id, coords);
+        if let Some(existing) = self.pyramid.get_mut(coords) {
+            existing.layers.push_back(entry);
+        } else {
+            self.pyramid.insert(
+                coords,
+                RingIndexEntry {
+                    layers: VecDeque::from([entry]),
+                },
+            );
         }
     }
-}
-
-#[inline]
-fn inc_zoom(zoom_counts: &mut [u32; 32], coords: WorldTileCoords) {
-    let z = usize::from(u8::from(coords.z)).min(31);
-    zoom_counts[z] = zoom_counts[z].saturating_add(1);
-}
-
-#[inline]
-fn dec_zoom(zoom_counts: &mut [u32; 32], coords: WorldTileCoords) {
-    let z = usize::from(u8::from(coords.z)).min(31);
-    zoom_counts[z] = zoom_counts[z].saturating_sub(1);
 }
 
 impl Default for RingIndex {

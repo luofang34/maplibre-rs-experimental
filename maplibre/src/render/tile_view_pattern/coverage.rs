@@ -42,7 +42,10 @@ fn loaded_descendants(
     world: &World,
     depth: usize,
 ) -> Vec<WorldTileCoords> {
-    if depth == 0 {
+    if depth == 0
+        || usize::from(u8::from(coords.z)) + 1 >= crate::coords::MAX_ZOOM
+        || !sources.has_descendant_candidates(coords, depth, world)
+    {
         return Vec::new();
     }
     coords

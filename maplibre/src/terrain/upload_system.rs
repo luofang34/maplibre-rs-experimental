@@ -34,8 +34,10 @@ pub fn upload_system(
     };
     let tiles = &world.tiles;
     let mut deferred = false;
-    for tile in tiles.tiles.values() {
-        let coords = tile.coords;
+    for coords in tiles
+        .pyramid_of::<DemTileComponent>()
+        .coords_coarse_to_fine()
+    {
         let Some(DemTileComponent::Loaded(dem)) = tiles.query::<&DemTileComponent>(coords) else {
             continue;
         };

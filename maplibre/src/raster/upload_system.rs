@@ -46,9 +46,10 @@ pub fn upload_system(
     // Every loaded tile gets its texture, as GL JS uploads a raster tile when it arrives, as
     // far as the frame's image floor reaches; coarser tiles go first so an ancestor stand-in is
     // ready before a burst of finer children exhausts the frame budget.
-    let mut source_tiles: Vec<WorldTileCoords> =
-        world.tiles.tiles.values().map(|tile| tile.coords).collect();
-    source_tiles.sort_by_key(|coords| (u8::from(coords.z), *coords));
+    let source_tiles = world
+        .tiles
+        .pyramid_of::<RasterLayersDataComponent>()
+        .coords_coarse_to_fine();
     let deferred = upload_raster_layer(
         raster_resources,
         (device, queue),
@@ -70,7 +71,7 @@ fn upload_raster_layer(
     raster_resources: &mut RasterResources,
     (device, queue): (&wgpu::Device, &crate::render::upload_queue::UploadQueue),
     tiles: &Tiles,
-    source_tiles: Vec<WorldTileCoords>,
+    source_tiles: impl IntoIterator<Item = WorldTileCoords>,
     budget: &mut FrameUploads,
 ) -> bool {
     let mut mipmapped = Vec::new();

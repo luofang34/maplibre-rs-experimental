@@ -17,6 +17,7 @@ maplibre = { path = "../maplibre", features = ["headless", "raster", "embed-stat
 [dev-dependencies]
 cgmath.workspace = true
 criterion.workspace = true
+geozero.workspace = true
 image.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
@@ -36,4 +37,8 @@ harness = false
 
 [[bench]]
 name = "buffer_pool"
+harness = false
+
+[[bench]]
+name = "tile_pyramid"
 harness = false

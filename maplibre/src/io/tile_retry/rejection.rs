@@ -1,7 +1,9 @@
 //! Requests the worker transport refused to take, which wait out a backoff like failed ones
 //! instead of being offered again every frame.
 
-use super::{mark_refresh_sources, now, observed_now, RequestKind, TileRequestRetries};
+use super::{
+    index::RetryIndex, mark_refresh_sources, now, observed_now, RequestKind, TileRequestRetries,
+};
 use crate::{coords::WorldTileCoords, tcs::world::World};
 
 /// Records that the transport refused the request for the tile, so it is offered again once
@@ -15,6 +17,10 @@ pub(crate) fn rejected(
     issued_for: Option<&[String]>,
 ) {
     let now = now(world);
+    let out_of_view = world
+        .resources
+        .get::<RetryIndex>()
+        .is_some_and(|index| index.is_out_of_view(kind, coords));
     if world.tiles.query::<&TileRequestRetries>(coords).is_none() {
         if let Some(mut tile) = world.tiles.spawn_mut(coords) {
             tile.insert(TileRequestRetries::default());
@@ -26,7 +32,12 @@ pub(crate) fn rejected(
     let state = &mut retries.0[kind.index()];
     state.pending = false;
     state.stale = false;
+    state.out_of_view = out_of_view;
     state.back_off(now);
+    world
+        .resources
+        .get_or_init_mut::<RetryIndex>()
+        .finish_pending(kind, coords, true);
     mark_refresh_sources(world, coords, issued_for);
 }
 

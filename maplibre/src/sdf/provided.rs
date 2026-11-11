@@ -144,12 +144,16 @@ pub(crate) fn uses_images(world: &World, coords: WorldTileCoords) -> bool {
 
 /// Whether a tile's worker still waits for images, so frames must keep coming to show them.
 pub(crate) fn awaiting(world: &World) -> bool {
-    world.tiles.tiles.values().any(|tile| {
-        world
-            .tiles
-            .query::<&TileProvidedImages>(tile.coords)
-            .is_some_and(|images| images.awaiting.is_some())
-    })
+    world
+        .tiles
+        .pyramid_of::<TileProvidedImages>()
+        .coords_coarse_to_fine()
+        .any(|coords| {
+            world
+                .tiles
+                .query::<&TileProvidedImages>(coords)
+                .is_some_and(|images| images.awaiting.is_some())
+        })
 }
 
 /// Whether the tile drew provided images for another pixel ratio than `pixel_ratio`.
@@ -187,9 +191,8 @@ pub(crate) fn release_unwanted<S: std::hash::BuildHasher>(
 ) -> Vec<u64> {
     let coords: Vec<WorldTileCoords> = world
         .tiles
-        .tiles
-        .values()
-        .map(|tile| tile.coords)
+        .pyramid_of::<TileProvidedImages>()
+        .coords_coarse_to_fine()
         .filter(|coords| !wanted.contains(coords))
         .collect();
     let mut released = Vec::new();
@@ -219,9 +222,8 @@ pub(crate) fn invalidate(world: &mut World, namespace: &str) -> usize {
     let prefix = format!("{namespace}:");
     let tiles: Vec<WorldTileCoords> = world
         .tiles
-        .tiles
-        .values()
-        .map(|tile| tile.coords)
+        .pyramid_of::<TileProvidedImages>()
+        .coords_coarse_to_fine()
         .filter(|coords| {
             world
                 .tiles

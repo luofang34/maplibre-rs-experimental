@@ -4,6 +4,7 @@
 
 use std::{any::TypeId, collections::HashSet};
 
+pub mod pyramid;
 pub mod resources;
 pub mod system;
 pub mod tiles;

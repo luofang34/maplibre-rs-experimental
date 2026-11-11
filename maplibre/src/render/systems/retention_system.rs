@@ -19,7 +19,7 @@ use crate::{
     coords::WorldTileCoords,
     io::{
         tile_backpressure::is_settled,
-        tile_sources::{clamp_to_max_zoom, source_max_zoom, TileKind},
+        tile_sources::{source_max_zoom, TileKind},
     },
     raster::resource::RasterResources,
     render::{
@@ -156,11 +156,27 @@ pub(crate) fn tiles_in_use_from_loose(
     let mut in_use = drawn_tiles(world);
     let max_zoom = source_max_zoom(style, TileKind::Vector);
     for coords in loose_view {
-        in_use.insert(coords);
-        in_use.insert(clamp_to_max_zoom(coords, max_zoom));
+        retain_loose_vector_tile(&mut in_use, coords, max_zoom);
     }
     in_use.extend(loose_raster);
     finish_tiles_in_use(world, style, in_use)
+}
+
+fn retain_loose_vector_tile(
+    in_use: &mut FxHashSet<WorldTileCoords>,
+    coords: WorldTileCoords,
+    max_zoom: Option<u8>,
+) {
+    if let Some((canonical, _)) = coords.wrapped() {
+        in_use.insert(canonical);
+    } else {
+        in_use.insert(coords);
+    }
+    if let Some(target) =
+        crate::coords::OverscaledTileId::for_source(coords, u8::from(coords.z), max_zoom, false)
+    {
+        in_use.insert(target.canonical);
+    }
 }
 
 /// Appends active drape requests, drape prefetch requests, and DEM ancestors to `in_use`.
@@ -230,8 +246,7 @@ pub(crate) fn tiles_in_use(
     let max_zoom = source_max_zoom(style, TileKind::Vector);
     if let Some(cached_view) = loose_cache.and_then(|c| c.view_tiles.as_ref()) {
         for &coords in cached_view {
-            in_use.insert(coords);
-            in_use.insert(clamp_to_max_zoom(coords, max_zoom));
+            retain_loose_vector_tile(&mut in_use, coords, max_zoom);
         }
     } else {
         match view_region_for_projection(
@@ -245,8 +260,7 @@ pub(crate) fn tiles_in_use(
                 // The request systems fetch the ancestor at the source's maximum zoom in place of
                 // a finer tile, so that is the tile to keep.
                 for coords in requested.iter() {
-                    in_use.insert(coords);
-                    in_use.insert(clamp_to_max_zoom(coords, max_zoom));
+                    retain_loose_vector_tile(&mut in_use, coords, max_zoom);
                 }
             }
             Ok(None) => {}
