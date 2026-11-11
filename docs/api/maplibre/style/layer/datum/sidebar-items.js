@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["ElevationDatum","ExtrusionPart"],"fn":["property_may_be_vertex_agl"]};

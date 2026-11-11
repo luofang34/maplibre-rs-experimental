@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["ScreenQuery"],"fn":["extruded_depth","face","intersection_depth_resolved","project_resolved"],"struct":["Projected"]};
+window.SIDEBAR_ITEMS = {"enum":["ScreenQuery"],"fn":["extruded_depth","face","intersection_depth_part","project_resolved"],"struct":["Projected"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["ELEVATED_3D_HEADROOM_METERS"],"fn":["nadir_ground_elevation","style_elevated_headroom_meters","tile_elevation"],"struct":["HeadroomTileElevation"]};

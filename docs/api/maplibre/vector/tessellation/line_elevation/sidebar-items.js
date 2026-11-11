@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["apply_elevation","clip_elevated_path","clip_segment_box","emit_clipped_subpath","flush_open","is_polygon_tile_border"],"struct":["LineElevationOptions"]};

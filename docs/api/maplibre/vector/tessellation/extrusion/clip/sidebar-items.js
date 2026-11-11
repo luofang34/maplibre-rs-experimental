@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["build_wound_rings","clip_ring","clipped","contains","is_hole","normalized_rings","on_clipped_edge","rings","signed_area","trapezoid_area"],"type":["Ring"]};
