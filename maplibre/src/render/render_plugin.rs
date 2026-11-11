@@ -76,7 +76,8 @@ impl<E: Environment> Plugin<E> for RenderPlugin {
             SystemStage::default()
                 .with_system(frame_input::frame_input_system)
                 .with_system(crate::context::camera_flight_system)
-                .with_system(crate::terrain::elevation::center_target_system),
+                .with_system(crate::terrain::elevation::center_target_system)
+                .with_system(resolved_view::resolve_frame_view_system),
         )?;
         schedule.add_stage(RenderStageLabel::Request, SystemStage::default())?;
         schedule.add_stage(

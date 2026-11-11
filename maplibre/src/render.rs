@@ -81,6 +81,7 @@ pub mod placement_3d;
 pub mod projection;
 pub mod render_commands;
 pub mod render_phase;
+pub mod resolved_view;
 pub mod scene_lighting;
 pub mod settings;
 pub mod tile_mesh;
@@ -92,6 +93,7 @@ pub mod xr;
 
 pub use after_submit::*;
 pub use pass_hooks::*;
+pub use resolved_view::{ProjectedWindowPoint, ProjectionMode, ResolvedFrameView};
 pub use scene_lighting::*;
 pub use shaders::ShaderVertex;
 

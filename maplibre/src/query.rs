@@ -1,8 +1,8 @@
 //! Features under a screen point or box, as GL JS `queryRenderedFeatures`.
 //!
-//! Symbols come from the latest placement pass. Fill and line features come from the geometry
-//! index each worker builds for a tile; style layers are resolved against the live style at query
-//! time, so filters, visibility, paint edits and layer removal never leave the index stale.
+//! Symbols come from the latest placement pass. Fill, line, circle, heatmap and extrusion features
+//! come from the geometry index each worker builds for a tile and are evaluated against the live
+//! style across flat Mercator, 3D terrain, and 3D globe / transition projections.
 
 use std::{
     cmp::Reverse,
@@ -12,33 +12,36 @@ use std::{
 use serde::Serialize;
 
 use crate::{
+    coords::{WorldTileCoords, ZoomLevel, EXTENT},
     io::geometry_index::{ExactGeometry, IndexedGeometry},
-    render::view_state::ViewState,
+    render::{resolved_view::ResolvedFrameView, view_state::ViewState},
     sdf::query::{
         query_rendered_symbols_in, QueryError, QueryGeometry, QueryOptions, RenderedSymbol,
     },
     style::{
         expression::Value,
         filter::{FeatureContext, Filter, GeometryType},
-        layer::{LayerPaint, LinePaint, StyleLayer},
+        layer::LayerPaint,
         source::GEOJSON_LAYER,
-        translation::layer_translate_pixels,
         Style,
     },
     tcs::world::World,
+    terrain::coverage::TerrainCoverageIndex,
 };
 
 mod circle;
 mod extrusion;
 mod ground;
+mod order;
 mod overzoomed;
+mod surface;
 mod tiles;
 
-use tiles::{
-    camera_query_bounds, candidates_in, ground_corners, ground_region, tiles_in, QueryTile,
+use order::{in_drawing_order, Candidate};
+use surface::{
+    camera_query_bounds, resolve_terrain_index, surface_footprint, visible_in_screen_box,
 };
-
-use crate::coords::{WorldTileCoords, Zoom, ZoomLevel, EXTENT};
+use tiles::{candidates_in, tiles_in, QueryTile};
 
 /// Deepest tile zoom a query looks at.
 const MAX_QUERY_ZOOM: i32 = 22;
@@ -88,12 +91,12 @@ pub(crate) fn source_properties(
         .collect()
 }
 
-/// Features under `geometry`, topmost style layer first.
+/// Features under `geometry`, topmost style layer first, across flat Mercator, 3D terrain, and
+/// 3D globe / Mercator-to-globe transition views.
 ///
-/// Symbols use their placement; fill and line features are located on the ground plane of a flat
-/// view and need the geometry index, which only native workers send. A fill or line query in a
-/// view with terrain or an active globe is refused rather than answered wrongly, and a point in
-/// the sky returns nothing.
+/// Symbols use their screen placement; vector layers use the per-tile [`crate::io::geometry_index::GeometryIndex`]
+/// and resolve surface intersections through [`ResolvedFrameView`]. A point in the sky or beyond
+/// the globe limb returns nothing.
 pub fn query_rendered_features(
     world: &World,
     style: &Style,
@@ -119,103 +122,11 @@ pub fn query_rendered_features(
     Ok(in_drawing_order(found))
 }
 
-/// Features topmost first, as GL JS `Style.queryRenderedFeatures` orders them: layer by layer
-/// from the top, where each fill extrusion layer gives out the nearest remaining extrusions
-/// for as long as the nearest is in that layer or above it.
-fn in_drawing_order(found: Vec<(u32, Option<f64>, QueriedFeature)>) -> Vec<QueriedFeature> {
-    let (mut extruded, flat): (Vec<_>, Vec<_>) =
-        found.into_iter().partition(|(_, depth, _)| depth.is_some());
-    // Nearest last, so the nearest is popped first.
-    extruded.sort_by(|a, b| b.1.unwrap_or(0.0).total_cmp(&a.1.unwrap_or(0.0)));
-    let extrusion_layers: HashSet<u32> = extruded.iter().map(|(layer, _, _)| *layer).collect();
-    let mut layers: Vec<u32> = flat
-        .iter()
-        .map(|(layer, _, _)| *layer)
-        .chain(extrusion_layers.iter().copied())
-        .collect();
-    layers.sort_unstable_by_key(|layer| Reverse(*layer));
-    layers.dedup();
-    let mut flat_by_layer: BTreeMap<u32, Vec<QueriedFeature>> = BTreeMap::new();
-    for (layer, _, feature) in flat {
-        flat_by_layer.entry(layer).or_default().push(feature);
-    }
-    let mut ordered = Vec::new();
-    for layer in layers {
-        if extrusion_layers.contains(&layer) {
-            while extruded
-                .last()
-                .is_some_and(|(nearest, _, _)| *nearest >= layer)
-            {
-                if let Some((_, _, feature)) = extruded.pop() {
-                    ordered.push(feature);
-                }
-            }
-        }
-        if let Some(features) = flat_by_layer.remove(&layer) {
-            ordered.extend(features);
-        }
-    }
-    ordered
-}
-
 /// A feature with its layer's index and, for a fill extrusion, its depth on screen.
 type Found = (u32, Option<f64>, QueriedFeature);
 
 /// Where a feature comes in GL JS's top-down order within its layer.
 type TopDown = (u8, i32, i32, i32, Reverse<u32>);
-
-/// A layer a fill or line feature can be reported for, with its filter parsed once.
-struct Candidate<'a> {
-    layer: &'a StyleLayer,
-    filter: Option<Filter>,
-    /// How far from a line, in screen pixels, its features can be drawn and still be met: half
-    /// its width and its offset.
-    reach_pixels: f64,
-    /// Where the layer draws its features from where they are, in screen pixels along the
-    /// map's axes: its `*-translate`.
-    translate: [f64; 2],
-}
-
-impl<'a> Candidate<'a> {
-    /// A layer whose filter cannot be parsed draws nothing, so it also matches nothing.
-    fn new(layer: &'a StyleLayer, zoom: f64, bearing: f64) -> Option<Self> {
-        let filter = match &layer.filter {
-            Some(filter) => Some(Filter::parse(filter).ok()?),
-            None => None,
-        };
-        let reach_pixels = match &layer.paint {
-            Some(LayerPaint::Line(paint)) => line_margin_pixels(paint, zoom),
-            Some(LayerPaint::Circle(paint)) => circle::margin_pixels(paint, zoom),
-            Some(LayerPaint::Heatmap(paint)) => circle::heatmap_margin_pixels(paint, zoom),
-            _ => 0.0,
-        };
-        Some(Self {
-            layer,
-            filter,
-            reach_pixels,
-            translate: layer_translate_pixels(layer.paint.as_ref(), zoom, bearing),
-        })
-    }
-
-    /// How far from the query, in screen pixels, a feature the layer draws there can lie.
-    fn margin_pixels(&self) -> f64 {
-        self.reach_pixels + self.translate[0].hypot(self.translate[1])
-    }
-}
-
-/// The farthest a line layer reaches from its features: half its width and its offset, at their
-/// widest where they vary by feature.
-fn line_margin_pixels(paint: &LinePaint, zoom: f64) -> f64 {
-    // A width or offset set by feature is not known before the feature is; this much covers
-    // what styles give them.
-    const BY_FEATURE: f64 = 64.0;
-    let [half_width, offset] = ground::line_reach(paint, &Default::default(), zoom);
-    let varies = [&paint.line_width, &paint.line_gap_width, &paint.line_offset]
-        .into_iter()
-        .flatten()
-        .any(|property| !property.is_feature_constant());
-    half_width + offset.abs() + if varies { BY_FEATURE } else { 0.0 }
-}
 
 /// What one query keeps while it walks tiles.
 struct Search<'a> {
@@ -225,32 +136,16 @@ struct Search<'a> {
     /// tile it is found in, merging only the copies of one tile in different worlds.
     seen: HashSet<(String, WorldTileCoords, Identity)>,
     /// Each feature with its layer's index and, for a fill extrusion, its depth on screen.
-    /// Each with GL JS's order within its layer: tiles from the lowest zoom, then top to bottom,
-    /// west copy of the world first, and west to east; then the features of a tile from the last
-    /// one in its data.
     found: Vec<(TopDown, Found)>,
-    /// The query in window pixels, which extrusions are met against as they stand.
+    /// The query in window pixels, which extrusions and viewport circles are met against.
     screen: extrusion::ScreenQuery,
     /// The corners of the ground the query covers, in world pixels.
     ground: Vec<[f64; 2]>,
-    view_state: &'a ViewState,
-}
-
-/// Fill and line features are located on a flat ground plane.
-fn refuse_unsupported_view(style: &Style, zoom: f64) -> Result<(), QueryError> {
-    if style.terrain.is_some() {
-        return Err(QueryError::UnsupportedView { reason: "terrain" });
-    }
-    if style
-        .projection
-        .as_ref()
-        .is_some_and(|projection| projection.projection_type.globe_transition(zoom) != 0.0)
-    {
-        return Err(QueryError::UnsupportedView {
-            reason: "an active globe",
-        });
-    }
-    Ok(())
+    /// Whether the query box surrounds the entire visible globe disc in space.
+    whole_visible_hemisphere: bool,
+    world: &'a World,
+    resolved: &'a ResolvedFrameView,
+    terrain_index: Option<&'a TerrainCoverageIndex>,
 }
 
 fn vector_features(
@@ -280,7 +175,6 @@ fn vector_features(
     if candidates.is_empty() {
         return Ok(Vec::new());
     }
-    refuse_unsupported_view(style, zoom.value())?;
     let query_filter = options
         .filter
         .as_ref()
@@ -290,8 +184,13 @@ fn vector_features(
     let Some(bounds) = geometry.bounds() else {
         return Err(QueryError::InvalidGeometry);
     };
+    let Ok(resolved) = ResolvedFrameView::get_or_resolve(world, style, view_state) else {
+        return Ok(Vec::new());
+    };
+    let terrain_index = resolve_terrain_index(world, style, &resolved);
+
     // An extrusion stands up from the ground, so it can meet the query far from where the
-    // query meets the ground: every tile in view is searched.
+    // query meets the ground: every tile between the camera nadir and the query is searched.
     let extrudes = candidates
         .iter()
         .any(|candidate| candidate.layer.type_ == "fill-extrusion");
@@ -299,14 +198,42 @@ fn vector_features(
         .iter()
         .map(Candidate::margin_pixels)
         .fold(0.0, f64::max);
-    let searched = if extrudes {
-        camera_query_bounds(view_state, bounds)
+
+    let (region, ground, whole_visible_hemisphere) = if extrudes {
+        let searched = camera_query_bounds(view_state, &resolved, bounds);
+        let Some(searched_fp) = surface_footprint(
+            world,
+            view_state,
+            &resolved,
+            terrain_index.as_deref(),
+            searched,
+        ) else {
+            return Ok(Vec::new());
+        };
+        let query_fp = surface_footprint(
+            world,
+            view_state,
+            &resolved,
+            terrain_index.as_deref(),
+            bounds,
+        );
+        let (corners, whole_hemi) = query_fp
+            .map(|fp| (fp.corners, fp.whole_visible_hemisphere))
+            .unwrap_or_default();
+        (searched_fp.region, corners, whole_hemi)
     } else {
-        bounds
+        let Some(fp) = surface_footprint(
+            world,
+            view_state,
+            &resolved,
+            terrain_index.as_deref(),
+            bounds,
+        ) else {
+            return Ok(Vec::new());
+        };
+        (fp.region, fp.corners, fp.whole_visible_hemisphere)
     };
-    let Some(region) = ground_region(view_state, searched) else {
-        return Ok(Vec::new());
-    };
+
     let screen = match geometry {
         QueryGeometry::Point(point) => extrusion::ScreenQuery::Point(point),
         QueryGeometry::Box { .. } => extrusion::ScreenQuery::Box(bounds),
@@ -317,10 +244,13 @@ fn vector_features(
         seen: HashSet::new(),
         found: Vec::new(),
         screen,
-        ground: ground_corners(view_state, bounds),
-        view_state,
+        ground,
+        whole_visible_hemisphere,
+        world,
+        resolved: &resolved,
+        terrain_index: terrain_index.as_deref(),
     };
-    search_tiles(world, (region, zoom, margin), &mut search);
+    search_tiles(world, (region, margin), &mut search);
     let mut found = search.found;
     found.sort_by_key(|(order, _)| *order);
     Ok(found.into_iter().map(|(_, feature)| feature).collect())
@@ -328,17 +258,20 @@ fn vector_features(
 
 /// Collects from the finest level of tiles that holds any index for the region, looking
 /// `margin` screen pixels beyond the query for features a layer draws within reach of it.
-fn search_tiles(world: &World, (region, zoom, margin): ([f64; 4], Zoom, f64), search: &mut Search) {
+fn search_tiles(world: &World, (region, margin): ([f64; 4], f64), search: &mut Search) {
+    let zoom = search.resolved.zoom;
     // One level above the view zoom covers sources whose tiles are finer than the view's.
     let top = (zoom.value().floor() as i32 + 1).clamp(0, MAX_QUERY_ZOOM);
     let Some(z) = (0..=top).rev().find(|&z| {
-        tiles_in(region, margin, zoom, z as u8).iter().any(|tile| {
-            world
-                .tiles
-                .geometry_index
-                .tile_indexes(&tile.coords)
-                .is_some()
-        })
+        tiles_in(region, margin, search.resolved, z as u8)
+            .iter()
+            .any(|tile| {
+                world
+                    .tiles
+                    .geometry_index
+                    .tile_indexes(&tile.coords)
+                    .is_some()
+            })
     }) else {
         return;
     };
@@ -346,7 +279,7 @@ fn search_tiles(world: &World, (region, zoom, margin): ([f64; 4], Zoom, f64), se
     // tiles of the view's zoom cut out of the coarser one.
     let view_z = (zoom.value().floor() as i32).clamp(0, MAX_QUERY_ZOOM);
     let tile_z = z.max(view_z) as u8;
-    for mut tile in tiles_in(region, margin, zoom, tile_z) {
+    for mut tile in tiles_in(region, margin, search.resolved, tile_z) {
         let depth = tile_z - z as u8;
         let source_coords = WorldTileCoords {
             x: tile.coords.x >> depth,
@@ -356,7 +289,11 @@ fn search_tiles(world: &World, (region, zoom, margin): ([f64; 4], Zoom, f64), se
         let Some(indexes) = world.tiles.geometry_index.tile_indexes(&source_coords) else {
             continue;
         };
-        tile.footprint = tile.footprint_of(&search.ground);
+        tile.footprint = if search.whole_visible_hemisphere {
+            ground::Footprint::of(&[[0.0, 0.0], [EXTENT, 0.0], [EXTENT, EXTENT], [0.0, EXTENT]])
+        } else {
+            tile.footprint_of(&search.ground)
+        };
         let tile = &tile;
         let scale = f64::from(1_u32 << depth);
         let offset = [
@@ -432,9 +369,13 @@ fn collect(
         seen,
         found,
         screen,
-        view_state,
+        whole_visible_hemisphere,
+        world,
+        resolved,
+        terrain_index,
         ..
     } = search;
+    let zoom_val = resolved.zoom.value();
     for candidate in candidates.iter() {
         let layer = candidate.layer;
         if layer.source.as_deref() != source
@@ -449,13 +390,29 @@ fn collect(
         {
             continue;
         }
+        let visible_check = |cand: &Candidate| {
+            !*whole_visible_hemisphere
+                || visible_in_screen_box(
+                    geometry,
+                    tile.origin,
+                    tile.world_per_unit,
+                    cand.translate,
+                    (world, resolved, *terrain_index, *screen),
+                )
+        };
         let depth = match (&geometry.exact, candidate.layer.type_.as_str()) {
             (ExactGeometry::Polygon(polygon), "fill-extrusion") => {
                 match extrusion::extruded_depth(
                     polygon,
                     tile,
                     candidate,
-                    (&geometry.properties, *screen, view_state),
+                    (
+                        &geometry.properties,
+                        *screen,
+                        world,
+                        resolved,
+                        *terrain_index,
+                    ),
                 ) {
                     Some(depth) => Some(depth),
                     None => continue,
@@ -467,8 +424,8 @@ fn collect(
                         exact,
                         tile,
                         (paint, &geometry.properties),
-                        view_state.zoom().value(),
-                    ) =>
+                        zoom_val,
+                    ) && visible_check(candidate) =>
                 {
                     None
                 }
@@ -480,14 +437,14 @@ fn collect(
                         exact,
                         (tile, candidate),
                         (paint, &geometry.properties),
-                        (*screen, view_state),
+                        (*screen, world, resolved, *terrain_index),
                     ) =>
                 {
                     None
                 }
                 _ => continue,
             },
-            _ if flat_hit(geometry, tile, candidate, view_state.zoom().value()) => None,
+            _ if flat_hit(geometry, tile, candidate, zoom_val) && visible_check(candidate) => None,
             _ => continue,
         };
         let identity = match geometry.id {

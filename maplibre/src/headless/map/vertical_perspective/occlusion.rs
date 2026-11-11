@@ -41,6 +41,11 @@ async fn depth_probes_and_lines_of_sight_differ_only_by_the_bias_and_the_pixel()
     let mut answer = None;
     for _ in 0..20 {
         hills.map.run_frame().expect("frame");
+        hills
+            .map
+            .device()
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("frame completes");
         tokio::task::yield_now().await;
         if let Some(results) = hills.map.depth_probe_results() {
             answer = Some(results);

@@ -4,6 +4,7 @@
 
 mod clip;
 mod processor;
+pub mod wire;
 use std::{collections::BTreeMap, sync::Arc};
 
 use cgmath::{num_traits::Signed, Bounded};
@@ -288,7 +289,8 @@ where
         std::mem::size_of::<Self>() + coordinates * std::mem::size_of::<Coord<T>>() + TREE_OVERHEAD
     }
 
-    fn from_polygon(polygon: Polygon<T>, meta: FeatureMeta) -> Option<Self> {
+    /// Builds an indexed polygon part when its exterior ring has finite, non-empty bounds.
+    pub fn from_polygon(polygon: Polygon<T>, meta: FeatureMeta) -> Option<Self> {
         let (min, max) = bounds_from_points(polygon.exterior().points())?;
 
         Some(Self {
@@ -300,7 +302,9 @@ where
             feature_index: meta.feature_index,
         })
     }
-    fn from_point(point: Point<T>, meta: FeatureMeta) -> Option<Self> {
+
+    /// Builds an indexed point part.
+    pub fn from_point(point: Point<T>, meta: FeatureMeta) -> Option<Self> {
         Some(Self {
             exact: ExactGeometry::Point(point),
             bounds: AABB::from_corners(point, point),
@@ -311,7 +315,8 @@ where
         })
     }
 
-    fn from_linestring(linestring: LineString<T>, meta: FeatureMeta) -> Option<Self> {
+    /// Builds an indexed line part when its vertices have finite, non-empty bounds.
+    pub fn from_linestring(linestring: LineString<T>, meta: FeatureMeta) -> Option<Self> {
         let (min, max) = bounds_from_points(linestring.points())?;
 
         Some(Self {

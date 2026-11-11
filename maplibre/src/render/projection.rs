@@ -231,29 +231,23 @@ pub(crate) fn fixed_symbol_scale(view: &ViewState) -> bool {
     view.has_external_view() || view.navigation_mode() == NavigationMode::FreeGlobe
 }
 
-/// Derives the view-wide projection uniform from style and camera state.
-pub fn projection_data_for_view(
-    style: &Style,
+pub(crate) fn flat_shader_projection(view_state: &ViewState) -> ShaderProjectionData {
+    ShaderProjectionData {
+        external_view: f32::from(view_state.has_external_view()),
+        center_clip_w: view_state.camera_to_center_distance() as f32,
+        globe_circle: [1.0, 0.0, f32::from(fixed_symbol_scale(view_state)), 0.0],
+        radius_meters: view_state.body().radius_meters as f32,
+        ..ShaderProjectionData::default()
+    }
+}
+
+pub(crate) fn globe_shader_projection(
     view_state: &ViewState,
+    transition: f32,
+    globe: &GlobeCameraState,
 ) -> Result<ShaderProjectionData, ProjectionStateError> {
-    let transition = style.projection.as_ref().map_or(0.0, |specification| {
-        specification
-            .projection_type
-            .globe_transition(view_state.zoom().value())
-    });
     let mercator_center_w = view_state.camera_to_center_distance() as f32;
     let radius_meters = view_state.body().radius_meters as f32;
-    if transition == 0.0 {
-        return Ok(ShaderProjectionData {
-            external_view: f32::from(view_state.has_external_view()),
-            center_clip_w: mercator_center_w,
-            globe_circle: [1.0, 0.0, f32::from(fixed_symbol_scale(view_state)), 0.0],
-            radius_meters,
-            ..ShaderProjectionData::default()
-        });
-    }
-
-    let globe = globe_camera_for_view(view_state)?;
     let globe_center_clip = globe.wgpu_view_projection() * globe.target().extend(1.0);
     let globe_center_w = globe_center_clip.w as f32;
     let globe_matrix = globe
@@ -294,7 +288,7 @@ pub fn projection_data_for_view(
     // views never drop out of f64 reference precision.
     let references = (view_state.zoom().value() >= PRECISE_GLOBE_ZOOM
         || view_state.has_external_view())
-    .then(|| globe_center_references(&globe))
+    .then(|| globe_center_references(globe))
     .flatten();
     Ok(match references {
         Some([center, clip, radial]) => ShaderProjectionData {
@@ -306,6 +300,23 @@ pub fn projection_data_for_view(
         },
         None => shader,
     })
+}
+
+/// Derives the view-wide projection uniform from style and camera state.
+pub fn projection_data_for_view(
+    style: &Style,
+    view_state: &ViewState,
+) -> Result<ShaderProjectionData, ProjectionStateError> {
+    let transition = style.projection.as_ref().map_or(0.0, |specification| {
+        specification
+            .projection_type
+            .globe_transition(view_state.zoom().value())
+    });
+    if transition == 0.0 {
+        return Ok(flat_shader_projection(view_state));
+    }
+    let globe = globe_camera_for_view(view_state)?;
+    globe_shader_projection(view_state, transition, &globe)
 }
 
 /// The zoom from which the shaders project globe positions relative to the view's centre: a

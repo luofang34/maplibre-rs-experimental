@@ -1,10 +1,28 @@
 include "basic.fbs";
 
-//namespace transferables;
+struct FlatIndexedGeometry {
+    id: ulong;
+    source_layer_idx: uint;
+    prop_group_idx: uint;
+    feature_index: uint;
+    ring_start: uint;
+    ring_count: uint;
+    coord_start: uint;
+    coord_count: uint;
+    kind: ubyte;
+    has_id: bool;
+}
 
 table FlatLayerIndexed {
     coords: FlatWorldTileCoords;
+    source: string;
+    is_spatial: bool;
+    strings: [string];
+    prop_blobs: [ubyte];
+    prop_offsets: [uint];
+    geometries: [FlatIndexedGeometry];
+    ring_ends: [uint];
+    xy: [double];
 }
 
 root_type FlatLayerIndexed;
-

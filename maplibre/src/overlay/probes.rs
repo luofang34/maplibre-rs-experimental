@@ -296,6 +296,10 @@ pub(super) fn prepare_system(
         overlay.answer(results);
     }
     gpu.send(device, queue, overlay);
+    let awaiting_probes = gpu.pending.is_some();
+    if awaiting_probes {
+        crate::render::frame_signals::keep_animating(world);
+    }
     Ok(())
 }
 
