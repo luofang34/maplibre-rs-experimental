@@ -151,6 +151,7 @@ fn shared_cache_frontend(path: &Path) -> Arc<SharedCacheFrontend> {
 #[derive(Clone)]
 pub struct ReqwestHttpClient {
     client: ClientWithMiddleware,
+    range_client: Client,
     frontend: Option<Arc<SharedCacheFrontend>>,
 }
 
@@ -305,6 +306,17 @@ impl ReqwestHttpClient {
                 Client::new()
             }
         };
+        // Byte-range requests (e.g. PMTiles archives) must read exact uncompressed byte offsets
+        // (`Accept-Encoding: identity` with automatic gunzip disabled) and bypass `http-cache`,
+        // whose cache key ignores `Range` headers and would otherwise serve the 127-byte header
+        // slice for subsequent directory/tile ranges on the same URL.
+        let range_client = match Client::builder().user_agent(USER_AGENT).no_gzip().build() {
+            Ok(client) => client,
+            Err(error) => {
+                tracing::warn!(%error, "cannot build the range HTTP client with no_gzip");
+                Client::new()
+            }
+        };
         let mut builder = reqwest_middleware::ClientBuilder::new(client);
         let frontend = if let Some(cache_path) = cache_path {
             let path = cache_path.into();
@@ -320,7 +332,11 @@ impl ReqwestHttpClient {
         };
         let client = builder.build();
 
-        Self { client, frontend }
+        Self {
+            client,
+            range_client,
+            frontend,
+        }
     }
 }
 
@@ -365,41 +381,59 @@ pub fn unregister_in_process_handler(prefix: &str) {
     }
 }
 
+fn lookup_in_process_handler(url: &str) -> Option<InProcessHandler> {
+    let handlers = IN_PROCESS_HANDLERS.read().ok()?;
+    handlers
+        .iter()
+        .find(|(prefix, _)| url.starts_with(prefix))
+        .map(|(_, handler)| handler.clone())
+}
+
 impl ReqwestHttpClient {
     /// A server that ignores the range answers with the whole body, cut down here.
     async fn get(&self, url: &str, range: Option<ByteRange>) -> Result<Vec<u8>, SourceFetchError> {
-        if range.is_none() {
-            if let Some(body) = self
-                .frontend
-                .as_deref()
-                .and_then(|frontend| frontend.get(url))
-            {
-                return Ok(body.to_vec());
+        let range_cache_key;
+        let cache_key: &str = match range {
+            Some(range) => {
+                range_cache_key = format!("{url}#{}", range.header());
+                &range_cache_key
             }
-        }
-        let _io_permit = match &self.frontend {
-            Some(frontend) => frontend.io_gate.acquire().await.ok(),
-            None => None,
+            None => url,
         };
-        let mut request = self.client.get(url);
-        if let Some(range) = range {
-            request = request.header(reqwest::header::RANGE, range.header());
+        if let Some(body) = self
+            .frontend
+            .as_deref()
+            .and_then(|frontend| frontend.get(cache_key))
+        {
+            return Ok(body.to_vec());
         }
-        let response = match request.send().await {
-            Ok(response) => response,
-            Err(err) => {
-                let handler = {
-                    let handlers = IN_PROCESS_HANDLERS.read().ok();
-                    handlers.and_then(|h| {
-                        h.iter()
-                            .find(|(prefix, _)| url.starts_with(prefix))
-                            .map(|(_, handler)| handler.clone())
-                    })
+        let response = match range {
+            Some(range) => match self
+                .range_client
+                .get(url)
+                .header(reqwest::header::RANGE, range.header())
+                .header(reqwest::header::ACCEPT_ENCODING, "identity")
+                .send()
+                .await
+            {
+                Ok(response) => response,
+                Err(err) => match lookup_in_process_handler(url) {
+                    Some(handler) => return handler(url, Some(range)).await,
+                    None => return Err(err.into()),
+                },
+            },
+            None => {
+                let _io_permit = match &self.frontend {
+                    Some(frontend) => frontend.io_gate.acquire().await.ok(),
+                    None => None,
                 };
-                if let Some(handler) = handler {
-                    return handler(url, range).await;
+                match self.client.get(url).send().await {
+                    Ok(response) => response,
+                    Err(err) => match lookup_in_process_handler(url) {
+                        Some(handler) => return handler(url, None).await,
+                        None => return Err(err.into()),
+                    },
                 }
-                return Err(err.into());
             }
         };
         if response.status() == StatusCode::NOT_FOUND {
@@ -414,16 +448,14 @@ impl ReqwestHttpClient {
 
                 let partial = response.status() == StatusCode::PARTIAL_CONTENT;
                 let body = response.bytes().await?;
-                match range {
-                    Some(range) if !partial => range.slice(url, &body).map(<[u8]>::to_vec),
-                    Some(_) => Ok(Vec::from(body.as_ref())),
-                    None => {
-                        if let Some(frontend) = &self.frontend {
-                            frontend.insert(url, body.as_ref());
-                        }
-                        Ok(Vec::from(body.as_ref()))
-                    }
+                let out = match range {
+                    Some(range) if !partial => range.slice(url, &body).map(<[u8]>::to_vec)?,
+                    Some(_) | None => Vec::from(body.as_ref()),
+                };
+                if let Some(frontend) = &self.frontend {
+                    frontend.insert(cache_key, &out);
                 }
+                Ok(out)
             }
             Err(error) => Err(SourceFetchError::http_response(url, status, error)),
         }
@@ -431,120 +463,4 @@ impl ReqwestHttpClient {
 }
 
 #[cfg(test)]
-mod tests {
-    #![allow(clippy::expect_used, clippy::panic)]
-
-    use std::io::ErrorKind;
-
-    use super::*;
-
-    #[derive(Debug, thiserror::Error)]
-    #[error("middleware transport wrapper: {0}")]
-    struct TransportWrapper(#[source] std::io::Error);
-
-    #[derive(Debug, thiserror::Error)]
-    #[error("cache metadata corrupt")]
-    struct CacheMetadataCorrupt;
-
-    #[test]
-    fn middleware_wrapping_transient_io_errors_is_retryable() {
-        for io_err in [
-            std::io::Error::new(ErrorKind::TimedOut, "socket timed out"),
-            std::io::Error::new(ErrorKind::ConnectionRefused, "connection refused"),
-            std::io::Error::new(ErrorKind::ConnectionReset, "connection reset by peer"),
-            std::io::Error::new(ErrorKind::NetworkUnreachable, "network unreachable"),
-            std::io::Error::new(ErrorKind::HostUnreachable, "no route to host"),
-            std::io::Error::other(
-                "failed to lookup address information: nodename nor servname provided, or not known",
-            ),
-        ] {
-            let mw_err = reqwest_middleware::Error::middleware(TransportWrapper(io_err));
-            let fetch_err = SourceFetchError::from(mw_err);
-            assert!(
-                fetch_err.is_retryable(),
-                "expected retryable for {}",
-                fetch_err.describe()
-            );
-        }
-    }
-
-    #[test]
-    fn non_network_middleware_errors_stay_non_retryable() {
-        for mw_err in [
-            reqwest_middleware::Error::middleware(CacheMetadataCorrupt),
-            reqwest_middleware::Error::middleware(std::io::Error::new(
-                ErrorKind::InvalidData,
-                "invalid cache entry",
-            )),
-            reqwest_middleware::Error::middleware(std::io::Error::other(
-                "unexpected header serialization error",
-            )),
-        ] {
-            let fetch_err = SourceFetchError::from(mw_err);
-            assert!(
-                !fetch_err.is_retryable(),
-                "expected non-retryable for {}",
-                fetch_err.describe()
-            );
-        }
-    }
-
-    #[tokio::test]
-    async fn cached_client_connect_or_dns_reqwest_error_in_middleware_is_retryable() {
-        let raw_client = Client::builder()
-            .timeout(std::time::Duration::from_millis(200))
-            .build()
-            .expect("reqwest client");
-        let connect_err = raw_client
-            .get("http://127.0.0.1:1/tiles/0/0/0.png")
-            .send()
-            .await
-            .expect_err("closed local port must fail");
-
-        let direct_mw = SourceFetchError::from(reqwest_middleware::Error::middleware(connect_err));
-        assert!(
-            direct_mw.is_retryable(),
-            "direct middleware reqwest connect error must be retryable: {}",
-            direct_mw.describe()
-        );
-
-        let cache_dir =
-            std::env::temp_dir().join(format!("maplibre-http-cache-test-{}", std::process::id()));
-        let cached_client = ReqwestHttpClient::new(Some(&cache_dir));
-        let cached_err = cached_client
-            .fetch("http://127.0.0.1:1/tiles/0/0/0.png")
-            .await
-            .expect_err("cached fetch against closed port must fail");
-        let _ = std::fs::remove_dir_all(&cache_dir);
-        assert!(
-            cached_err.is_retryable(),
-            "http-cache-reqwest wrapped transport error must be retryable: {}",
-            cached_err.describe()
-        );
-
-        let bad_url_err = raw_client
-            .get("://not-a-valid-url")
-            .send()
-            .await
-            .expect_err("malformed URL must fail");
-        let bad_url_mw = SourceFetchError::from(reqwest_middleware::Error::middleware(bad_url_err));
-        assert!(
-            !bad_url_mw.is_retryable(),
-            "malformed URL builder error must remain terminal: {}",
-            bad_url_mw.describe()
-        );
-    }
-
-    #[test]
-    fn memory_tile_cache_evicts_least_recently_used_entries_within_budget() {
-        let mut cache = MemoryTileCacheState::new(10);
-        cache.insert("a", &[1, 2, 3, 4]);
-        cache.insert("b", &[5, 6, 7, 8]);
-        assert_eq!(cache.get("a").as_deref(), Some(&[1, 2, 3, 4][..]));
-        cache.insert("c", &[9, 10, 11, 12]);
-        assert_eq!(cache.get("a").as_deref(), Some(&[1, 2, 3, 4][..]));
-        assert!(cache.get("b").is_none());
-        assert_eq!(cache.get("c").as_deref(), Some(&[9, 10, 11, 12][..]));
-        assert!(cache.bytes <= 10);
-    }
-}
+mod tests;
