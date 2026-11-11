@@ -169,6 +169,10 @@ impl<E: Environment, T: DemTransferables> Plugin<E> for TerrainPlugin<T> {
             RenderStageLabel::Prepare,
             elevation::center_elevation_system,
         )?;
+        schedule.add_system_to_stage(
+            RenderStageLabel::Prepare,
+            crate::render::resolved_view::resolve_frame_view_system,
+        )?;
         schedule
             .add_system_to_stage(RenderStageLabel::Prepare, resource_system::resource_system)?;
         schedule.add_system_to_stage(RenderStageLabel::Queue, upload_system::upload_system)?;

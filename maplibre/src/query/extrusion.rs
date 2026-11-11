@@ -5,11 +5,15 @@
 //! extrusion when it meets the projected top or one of the walls between the two. The
 //! distance at the meeting point orders extrusions nearest first.
 
-use cgmath::Vector4;
 use geo::{prelude::*, Coord, LineString, Point, Polygon, Rect};
 
-use super::{tiles::QueryTile, Candidate};
-use crate::{render::view_state::ViewState, style::layer::LayerPaint};
+use super::{surface::sample_ground_elevation, tiles::QueryTile, Candidate};
+use crate::{
+    render::resolved_view::ResolvedFrameView, style::layer::LayerPaint, tcs::world::World,
+    terrain::coverage::TerrainCoverageIndex,
+};
+#[cfg(test)]
+use crate::{render::view_state::ViewState, style::Style};
 
 /// A point projected to the window with its depth.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -19,21 +23,25 @@ struct Projected {
     depth: f64,
 }
 
-/// Projects a world-pixel position `metres` above the ground to the window, or `None` behind
-/// the camera.
-fn project(view_state: &ViewState, [x, y]: [f64; 2], metres: f64) -> Option<Projected> {
-    let clip = view_state
-        .view_projection()
-        .project(Vector4::new(x, y, metres, 1.0));
-    if clip.w <= 0.0 {
-        return None;
-    }
-    let window = view_state.clip_to_window(&clip);
+/// Projects a world-pixel position `metres` above sea level to the window, or `None` behind the
+/// camera or globe horizon.
+fn project_resolved(
+    resolved: &ResolvedFrameView,
+    [x, y]: [f64; 2],
+    metres: f64,
+) -> Option<Projected> {
+    let proj = resolved.project_world_point([x, y], metres)?;
     Some(Projected {
-        x: window.x,
-        y: window.y,
-        depth: clip.z / clip.w,
+        x: proj.window[0],
+        y: proj.window[1],
+        depth: proj.depth,
     })
+}
+
+#[cfg(test)]
+fn project(view_state: &ViewState, point: [f64; 2], metres: f64) -> Option<Projected> {
+    let resolved = ResolvedFrameView::resolve(&Style::default(), view_state).ok()?;
+    project_resolved(&resolved, point, metres)
 }
 
 /// The shape a query covers on screen.
@@ -58,7 +66,7 @@ impl ScreenQuery {
         dx.hypot(dy) < radius
     }
 
-    fn meets(&self, face: &Polygon<f64>) -> bool {
+    pub(super) fn meets(&self, face: &Polygon<f64>) -> bool {
         match self {
             Self::Point([x, y]) => face.intersects(&Point::new(*x, *y)),
             Self::Box([x0, y0, x1, y1]) => {
@@ -113,8 +121,8 @@ fn face(corners: &[Projected]) -> Polygon<f64> {
 
 /// The depth at which `query` meets the extrusion of `rings` (world pixels, outer ring first)
 /// from `base` to `top` metres, or `None` when it misses it.
-pub(super) fn intersection_depth(
-    view_state: &ViewState,
+pub(super) fn intersection_depth_resolved(
+    resolved: &ResolvedFrameView,
     rings: &[Vec<[f64; 2]>],
     (base, top): (f64, f64),
     query: ScreenQuery,
@@ -124,7 +132,7 @@ pub(super) fn intersection_depth(
             .iter()
             .map(|ring| {
                 ring.iter()
-                    .map(|point| project(view_state, *point, metres))
+                    .map(|point| project_resolved(resolved, *point, metres))
                     .collect()
             })
             .collect()
@@ -161,28 +169,41 @@ pub(super) fn intersection_depth(
     met.then_some(nearest)
 }
 
+#[cfg(test)]
+pub(super) fn intersection_depth(
+    view_state: &ViewState,
+    rings: &[Vec<[f64; 2]>],
+    span: (f64, f64),
+    query: ScreenQuery,
+) -> Option<f64> {
+    let resolved = ResolvedFrameView::resolve(&Style::default(), view_state).ok()?;
+    intersection_depth_resolved(&resolved, rings, span, query)
+}
+
 /// Where a fill extrusion stands: its rings in world pixels and its base and top in metres.
 pub(super) fn extruded_depth(
     polygon: &geo_types::Polygon<f64>,
     tile: &QueryTile,
     candidate: &Candidate,
-    (properties, screen, view_state): (
+    (properties, screen, world, resolved, terrain_index): (
         &crate::style::expression::FeatureProperties,
         ScreenQuery,
-        &ViewState,
+        &World,
+        &ResolvedFrameView,
+        Option<&TerrainCoverageIndex>,
     ),
 ) -> Option<f64> {
     let Some(LayerPaint::FillExtrusion(paint)) = &candidate.layer.paint else {
         return None;
     };
-    let zoom = view_state.zoom().value();
+    let zoom = resolved.zoom.value();
     let metres = |property: &Option<crate::style::property::StyleProperty<f32>>| {
         property
             .as_ref()
             .and_then(|value| value.evaluate_for(properties, zoom))
             .map_or(0.0, f64::from)
     };
-    let world = |ring: &geo_types::LineString<f64>| -> Vec<[f64; 2]> {
+    let world_ring = |ring: &geo_types::LineString<f64>| -> Vec<[f64; 2]> {
         ring.coords()
             .map(|point| {
                 [
@@ -194,11 +215,26 @@ pub(super) fn extruded_depth(
     };
     let rings: Vec<Vec<[f64; 2]>> = std::iter::once(polygon.exterior())
         .chain(polygon.interiors())
-        .map(world)
+        .map(world_ring)
         .collect();
-    let base = metres(&paint.fill_extrusion_base);
-    let top = metres(&paint.fill_extrusion_height).max(base);
-    intersection_depth(view_state, &rings, (base, top), screen)
+    let ground = if terrain_index.is_some() {
+        let ext = &rings[0];
+        let count = ext.len().saturating_sub(1).max(1);
+        let sum = ext[..count]
+            .iter()
+            .fold([0.0, 0.0], |acc, pt| [acc[0] + pt[0], acc[1] + pt[1]]);
+        sample_ground_elevation(
+            world,
+            resolved,
+            terrain_index,
+            [sum[0] / count as f64, sum[1] / count as f64],
+        )
+    } else {
+        0.0
+    };
+    let base = ground + metres(&paint.fill_extrusion_base);
+    let top = ground + metres(&paint.fill_extrusion_height).max(base - ground);
+    intersection_depth_resolved(resolved, &rings, (base, top), screen)
 }
 
 #[cfg(test)]

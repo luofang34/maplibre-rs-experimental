@@ -3,17 +3,22 @@
 //! that faces the viewport and on the ground for one that lies on the map, scaled by how far the
 //! centre is from the camera when the circle's size follows the other plane.
 
-use cgmath::Vector4;
 use geo_types::Point;
 
-use super::{extrusion::ScreenQuery, tiles::QueryTile, Candidate};
+use super::{
+    extrusion::ScreenQuery, surface::sample_ground_elevation, tiles::QueryTile, Candidate,
+};
 use crate::{
-    render::view_state::ViewState,
+    render::resolved_view::ResolvedFrameView,
     style::{
         circle::{CirclePaint, CirclePitchAlignment, CirclePitchScale},
         expression::FeatureProperties,
     },
+    tcs::world::World,
+    terrain::coverage::TerrainCoverageIndex,
 };
+#[cfg(test)]
+use crate::{render::view_state::ViewState, style::Style};
 
 /// The specification's default `circle-radius`.
 const DEFAULT_RADIUS: f64 = 5.0;
@@ -29,17 +34,11 @@ pub(super) fn size_pixels(paint: &CirclePaint, properties: &FeatureProperties, z
     value(&paint.circle_radius, DEFAULT_RADIUS) + value(&paint.circle_stroke_width, 0.0)
 }
 
-/// The window position of a world-pixel point on the ground and its clip `w`, the distance
-/// from the camera along its view, or `None` behind the camera.
+#[cfg(test)]
 fn project(view_state: &ViewState, [x, y]: [f64; 2]) -> Option<([f64; 2], f64)> {
-    let clip = view_state
-        .view_projection()
-        .project(Vector4::new(x, y, 0.0, 1.0));
-    if clip.w <= 0.0 {
-        return None;
-    }
-    let window = view_state.clip_to_window(&clip);
-    Some(([window.x, window.y], clip.w))
+    let resolved = ResolvedFrameView::resolve(&Style::default(), view_state).ok()?;
+    let proj = resolved.project_world_point([x, y], 0.0)?;
+    Some((proj.window, proj.clip_w))
 }
 
 /// Whether the circle centred on `point`, in tile units, meets the query.
@@ -47,18 +46,25 @@ pub(super) fn circle_hit(
     point: Point<f64>,
     (tile, candidate): (&QueryTile, &Candidate),
     (paint, properties): (&CirclePaint, &FeatureProperties),
-    (screen, view_state): (ScreenQuery, &ViewState),
+    (screen, world, resolved, terrain_index): (
+        ScreenQuery,
+        &World,
+        &ResolvedFrameView,
+        Option<&TerrainCoverageIndex>,
+    ),
 ) -> bool {
-    let size = size_pixels(paint, properties, view_state.zoom().value());
+    let size = size_pixels(paint, properties, resolved.zoom.value());
     // The layer draws the circle moved by its translation, so it is met where it is drawn.
-    let world = [
+    let world_pt = [
         tile.origin[0] + point.x() * tile.world_per_unit + candidate.translate[0],
         tile.origin[1] + point.y() * tile.world_per_unit + candidate.translate[1],
     ];
-    let Some((centre, w)) = project(view_state, world) else {
+    let ground = sample_ground_elevation(world, resolved, terrain_index, world_pt);
+    let Some(projected) = resolved.project_world_point(world_pt, ground) else {
         return false;
     };
-    let camera = view_state.camera_to_center_distance();
+    let (centre, w) = (projected.window, projected.clip_w);
+    let camera = resolved.center_clip_w();
     match paint.circle_pitch_alignment {
         CirclePitchAlignment::Viewport => {
             let scale = match paint.circle_pitch_scale {
@@ -90,7 +96,12 @@ pub(super) fn geometry_hit(
     geometry: &crate::io::geometry_index::ExactGeometry<f64>,
     (tile, candidate): (&QueryTile, &Candidate),
     (paint, properties): (&CirclePaint, &FeatureProperties),
-    (screen, view_state): (ScreenQuery, &ViewState),
+    (screen, world, resolved, terrain_index): (
+        ScreenQuery,
+        &World,
+        &ResolvedFrameView,
+        Option<&TerrainCoverageIndex>,
+    ),
 ) -> bool {
     use crate::io::geometry_index::ExactGeometry;
     let hit = |point: Point<f64>| {
@@ -98,7 +109,7 @@ pub(super) fn geometry_hit(
             point,
             (tile, candidate),
             (paint, properties),
-            (screen, view_state),
+            (screen, world, resolved, terrain_index),
         )
     };
     match geometry {

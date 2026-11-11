@@ -366,49 +366,7 @@ impl LayerTessellated for FlatBufferTransferable {
     }
 }
 
-impl LayerIndexed for FlatBufferTransferable {
-    fn message_tag() -> &'static dyn MessageTag {
-        &WebMessageTag::LayerIndexed
-    }
-
-    fn requires_geometry_index() -> bool {
-        false
-    }
-
-    fn build_from(coords: WorldTileCoords, _source: Option<String>, _index: TileIndex) -> Self {
-        let mut inner_builder = FlatBufferBuilder::with_capacity(64);
-        let mut builder = FlatLayerIndexedBuilder::new(&mut inner_builder);
-
-        // TODO index
-
-        builder.add_coords(&FlatWorldTileCoords::new(
-            coords.x,
-            coords.y,
-            coords.z.into(),
-        ));
-        let root = builder.finish();
-        inner_builder.finish(root, None);
-        let (data, start) = inner_builder.collapse();
-        FlatBufferTransferable {
-            tag: WebMessageTag::LayerIndexed,
-            data,
-            start,
-        }
-    }
-
-    fn coords(&self) -> WorldTileCoords {
-        let data = root_as_flat_layer_indexed(&self.data[self.start..]).unwrap();
-        data.coords().unwrap().into()
-    }
-
-    fn source(&self) -> Option<String> {
-        None
-    }
-
-    fn to_tile_index(self) -> TileIndex {
-        TileIndex::Linear { list: vec![] } // TODO index
-    }
-}
+mod indexed;
 
 mod raster;
 

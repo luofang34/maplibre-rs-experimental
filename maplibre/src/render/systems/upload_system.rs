@@ -3,7 +3,8 @@ use crate::{
     context::MapContext,
     render::{
         eventually::{Eventually, Eventually::Initialized},
-        projection::{projection_data_for_view, ProjectionGpuResources},
+        projection::ProjectionGpuResources,
+        resolved_view::ResolvedFrameView,
         tile_mesh::{GlobeTileMeshCache, TileMeshUsage},
         tile_view_pattern::WgpuTileViewPattern,
         Renderer,
@@ -21,6 +22,24 @@ pub fn upload_system(
     }: &mut MapContext,
 ) -> SystemResult {
     let background_tiles = crate::background::queue_system::globe_tiles(world);
+    if !world
+        .resources
+        .get::<ResolvedFrameView>()
+        .is_some_and(|cached| cached.matches(style, view_state))
+    {
+        let resolved = ResolvedFrameView::resolve(style, view_state).map_err(|error| {
+            tracing::error!(%error, "unable to prepare projection state");
+            SystemError::Setup
+        })?;
+        world.resources.insert(resolved);
+    }
+    let resolved_snapshot = world
+        .resources
+        .get::<ResolvedFrameView>()
+        .expect("resolved frame view inserted above");
+    let view_proj = resolved_snapshot.gpu_view_projection;
+    let projection_data = resolved_snapshot.shader_projection;
+
     let Some((Initialized(tile_view_pattern), Initialized(projection_resources), tile_mesh_cache)) =
         world.resources.query_mut::<(
             &mut Eventually<WgpuTileViewPattern>,
@@ -31,7 +50,6 @@ pub fn upload_system(
         return Err(SystemError::Dependencies);
     };
 
-    let view_proj = view_state.gpu_view_projection();
     tile_view_pattern.upload_pattern(
         queue,
         &view_proj,
@@ -39,10 +57,6 @@ pub fn upload_system(
         view_state.height() as f32,
         view_state.style_zoom(),
     );
-    let projection_data = projection_data_for_view(style, view_state).map_err(|error| {
-        tracing::error!(%error, "unable to prepare projection state");
-        SystemError::Setup
-    })?;
     projection_resources.upload(queue, projection_data);
 
     if projection_data.transition > 0.0 {

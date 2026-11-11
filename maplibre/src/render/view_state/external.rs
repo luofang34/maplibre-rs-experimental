@@ -208,7 +208,7 @@ impl ViewState {
     ///
     /// The camera space is in world pixels at the anchor, with y down as the map's own camera
     /// space has it, so the same projection conventions apply on top.
-    pub(super) fn external_camera_matrix(&self) -> Option<Matrix4<f64>> {
+    pub(crate) fn external_camera_matrix(&self) -> Option<Matrix4<f64>> {
         let eye = self.external_eye?;
         let world_size = TILE_SIZE * 2f64.powf(self.zoom().value());
         let pixels_per_meter = self.anchor_pixels_per_meter(eye.anchor);

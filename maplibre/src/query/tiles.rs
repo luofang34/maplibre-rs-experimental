@@ -1,66 +1,14 @@
 //! The tiles a query reads and the rectangle it covers in each.
 
-use cgmath::Vector2;
-
-use super::{ground::Footprint, ViewState};
+use super::ground::Footprint;
 use crate::{
-    coords::{WorldTileCoords, Zoom, ZoomLevel, EXTENT, TILE_SIZE},
+    coords::{WorldTileCoords, ZoomLevel, EXTENT, TILE_SIZE},
     io::geometry_index::{IndexedGeometry, TileIndex},
+    render::resolved_view::ResolvedFrameView,
 };
 
 /// Tiles a single query reads at one zoom before it uses a coarser one.
 const MAX_TILES: i64 = 256;
-
-/// The screen box with the point under the camera added, as GL JS `getCameraQueryGeometry`:
-/// the base of any extrusion that stands up into the query lies between the two.
-pub(super) fn camera_query_bounds(view_state: &ViewState, [x0, y0, x1, y1]: [f64; 4]) -> [f64; 4] {
-    let offset = view_state.camera().get_pitch().0.tan() * view_state.camera_to_center_distance();
-    let camera = [view_state.width() / 2.0, view_state.height() / 2.0 + offset];
-    [
-        x0.min(camera[0]),
-        y0.min(camera[1]),
-        x1.max(camera[0]),
-        y1.max(camera[1]),
-    ]
-}
-
-/// The rectangle of world pixels a screen box covers on the ground plane, or `None` when none of
-/// its corners reaches the ground (it is all sky).
-pub(super) fn ground_region(view_state: &ViewState, bounds: [f64; 4]) -> Option<[f64; 4]> {
-    ground_corners(view_state, bounds)
-        .into_iter()
-        .fold(None, |region, [x, y]| {
-            Some(match region {
-                None => [x, y, x, y],
-                Some(r) => [r[0].min(x), r[1].min(y), r[2].max(x), r[3].max(y)],
-            })
-        })
-}
-
-/// The corners of a screen box on the ground plane in world pixels, leaving out those in the
-/// sky.
-pub(super) fn ground_corners(view_state: &ViewState, bounds: [f64; 4]) -> Vec<[f64; 2]> {
-    let Ok(inverted) = view_state.inverted_view_projection() else {
-        return Vec::new();
-    };
-    let mut corners = Vec::with_capacity(4);
-    for (x, y) in [
-        (bounds[0], bounds[1]),
-        (bounds[2], bounds[1]),
-        (bounds[2], bounds[3]),
-        (bounds[0], bounds[3]),
-    ] {
-        let Some(point) =
-            view_state.window_to_world_at_ground(&Vector2::new(x, y), &inverted, true)
-        else {
-            continue;
-        };
-        if point.x.is_finite() && point.y.is_finite() {
-            corners.push([point.x, point.y]);
-        }
-    }
-    corners
-}
 
 /// One tile a query touches: its canonical coordinates and the query rectangle in its grid.
 pub(super) struct QueryTile {
@@ -96,23 +44,31 @@ impl QueryTile {
     }
 }
 
-/// The tiles at grid level `z` that a region of world pixels at view zoom `zoom` covers, or
-/// comes within `margin` world pixels of.
-pub(super) fn tiles_in(region: [f64; 4], margin: f64, zoom: Zoom, z: u8) -> Vec<QueryTile> {
-    let scale = zoom.scale_to_zoom_level(ZoomLevel::new(z));
+/// The tiles at grid level `z` that a region of world pixels covers, or comes within `margin`
+/// screen pixels of.
+pub(super) fn tiles_in(
+    region: [f64; 4],
+    margin: f64,
+    resolved: &ResolvedFrameView,
+    z: u8,
+) -> Vec<QueryTile> {
+    let scale = resolved.zoom.scale_to_zoom_level(ZoomLevel::new(z));
     let to_grid = |world: f64| world / TILE_SIZE * scale;
     let (x0, y0) = (to_grid(region[0]), to_grid(region[1]));
     let (x1, y1) = (to_grid(region[2]), to_grid(region[3]));
-    let reach = to_grid(margin);
+    let mid_my = (((region[1] + region[3]) * 0.5) / resolved.world_size).clamp(0.0, 1.0);
+    let reach = to_grid(margin * resolved.globe_scale_at_mercator_y(mid_my));
     let (tx0, tx1) = ((x0 - reach).floor() as i64, (x1 + reach).floor() as i64);
     let (ty0, ty1) = ((y0 - reach).floor() as i64, (y1 + reach).floor() as i64);
     let tiles_wide = 1_i64 << z;
     if (tx1 - tx0 + 1) * (ty1 - ty0 + 1) > MAX_TILES {
         return Vec::new();
     }
-    let units_per_pixel = EXTENT * scale / TILE_SIZE;
+    let base_units_per_pixel = EXTENT * scale / TILE_SIZE;
     let mut tiles = Vec::new();
     for ty in ty0.max(0)..=ty1.min(tiles_wide - 1) {
+        let row_my = ((ty as f64 + 0.5) / tiles_wide as f64).clamp(0.0, 1.0);
+        let units_per_pixel = base_units_per_pixel * resolved.globe_scale_at_mercator_y(row_my);
         for tx in tx0..=tx1 {
             let canonical = tx.rem_euclid(tiles_wide);
             tiles.push(QueryTile {

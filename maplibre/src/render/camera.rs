@@ -84,6 +84,7 @@ impl ViewProjection {
 }
 
 /// Clip-to-world transform with separate projection and camera factors for numerical precision.
+#[derive(Clone, Copy, Debug)]
 pub struct InvertedViewProjection {
     pub(crate) clip_to_camera: Matrix4<f64>,
     pub(crate) camera_to_world: Matrix4<f64>,

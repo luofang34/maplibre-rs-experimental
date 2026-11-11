@@ -46,3 +46,7 @@ harness = false
 [[bench]]
 name = "dem_pipeline"
 harness = false
+
+[[bench]]
+name = "view_and_query"
+harness = false
