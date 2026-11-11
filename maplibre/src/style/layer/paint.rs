@@ -129,6 +129,35 @@ pub struct FillExtrusionPaint {
     #[serde(rename = "fill-extrusion-vertical-gradient", default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fill_extrusion_vertical_gradient: Option<bool>,
+    /// Renders extrusions as closed translucent 3D volumes (with floor caps, per-feature opacity,
+    /// and depth-tested back/front shells without writing depth) so nested volumes remain visible.
+    #[serde(rename = "fill-extrusion-translucent", default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fill_extrusion_translucent: Option<bool>,
+    /// Vertical datum of `fill-extrusion-base`: `"centroid-agl"` (default), `"msl"`, or `"agl"`.
+    #[serde(
+        rename = "fill-extrusion-base-datum",
+        default,
+        deserialize_with = "StyleProperty::<String>::deserialize_or_none",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub fill_extrusion_base_datum: Option<StyleProperty<String>>,
+    /// Vertical datum of `fill-extrusion-height`: `"centroid-agl"` (default), `"msl"`, or `"agl"`.
+    #[serde(
+        rename = "fill-extrusion-height-datum",
+        default,
+        deserialize_with = "StyleProperty::<String>::deserialize_or_none",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub fill_extrusion_height_datum: Option<StyleProperty<String>>,
+    /// Shell component emitted per feature: `"full"` (default), `"walls"`, `"roof"`, or `"floor"`.
+    #[serde(
+        rename = "fill-extrusion-part",
+        default,
+        deserialize_with = "StyleProperty::<String>::deserialize_or_none",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub fill_extrusion_part: Option<StyleProperty<String>>,
     /// Translation in screen pixels before conversion to tile units.
     #[serde(rename = "fill-extrusion-translate", default)]
     pub fill_extrusion_translate: Option<crate::style::translation::Translation>,
@@ -214,6 +243,22 @@ pub struct LinePaint {
         skip_serializing_if = "Option::is_none"
     )]
     pub line_dasharray: Option<serde_json::Value>,
+    /// Altitude of the stroked path in metres, per feature where data driven.
+    #[serde(
+        rename = "line-elevation",
+        default,
+        deserialize_with = "StyleProperty::<f32>::deserialize_f32_or_none",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub line_elevation: Option<StyleProperty<f32>>,
+    /// Vertical datum of `line-elevation`: `"msl"` (default when `line-elevation` is set) or `"agl"`.
+    #[serde(
+        rename = "line-elevation-datum",
+        default,
+        deserialize_with = "StyleProperty::<String>::deserialize_or_none",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub line_elevation_datum: Option<StyleProperty<String>>,
 }
 
 /// Requested raster texture filter, a constant or a step function of zoom.

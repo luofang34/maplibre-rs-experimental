@@ -1,14 +1,14 @@
-//! Walls and roofs of extruded polygons.
+//! Walls, roofs and optional floor caps of extruded polygons.
 //!
 //! A vertex carries its place in the fields the fill and line shaders use otherwise: the
 //! wall's lighting normal in `normal`, scaled to length two on the top edge so the shader can
 //! tell it from the bottom edge, the base in `distance`, and the roof height in `elevation`.
-//! A roof vertex has the zero normal. `corner_code` packs, as [`next_zoom_code`] does, how much
-//! the vertex rises one zoom above the tile's, which the shader blends in by the fractional
-//! zoom; being relative, it survives the ground elevation added to the heights later.
+//! A roof vertex has the zero normal; a floating floor cap vertex carries [`FLOOR_NORMAL`].
+//! `corner_code` packs, as [`next_zoom_code`] and [`pack_extrusion_code`] do, how much the
+//! vertex rises one zoom above the tile's together with its `(base_datum, height_datum)` pair.
 
 use lyon::{
-    path::{Event, Path},
+    path::Path,
     tessellation::{
         geometry_builder::MaxIndex, BuffersBuilder, FillOptions, FillRule, FillTessellator,
         FillVertex, FillVertexConstructor, VertexBuffers, VertexId,
@@ -16,10 +16,26 @@ use lyon::{
 };
 
 use crate::{
-    coords::EXTENT,
     render::ShaderVertex,
-    style::layer::{FillExtrusionPaint, StyleProperty},
+    style::layer::{ElevationDatum, ExtrusionPart, FillExtrusionPaint, StyleProperty},
 };
+
+mod clip;
+pub(super) use clip::clipped;
+use clip::{is_hole, normalized_rings, on_clipped_edge, rings, signed_area};
+
+/// Normal marker distinguishing a bottom floor-cap vertex (`0.1 < |normal| < 0.5`) from a roof
+/// (`|normal| == 0.0`) or wall (`|normal| >= 1.0`).
+pub const FLOOR_NORMAL: [f32; 2] = [0.25, 0.0];
+
+/// The range of [`next_zoom_code`]'s rise, centred on zero, which one overscale step adds.
+pub const NEXT_ZOOM_CODE_SPAN: f32 = 65536.0;
+
+/// Maximum overscale steps stored below [`DATUM_CODE_SPAN`] so all 9 datum pairs stay exact in f32.
+pub const MAX_PACKED_OVERSCALE: u8 = 15;
+
+/// Stride in `corner_code` per `(base_datum, height_datum)` pair (`16 * NEXT_ZOOM_CODE_SPAN`).
+pub const DATUM_CODE_SPAN: f32 = 16.0 * NEXT_ZOOM_CODE_SPAN;
 
 /// The paint properties that shape an extrusion.
 #[derive(Clone)]
@@ -28,8 +44,17 @@ pub struct ExtrusionOptions {
     pub height: Option<StyleProperty<f32>>,
     /// Wall base in metres.
     pub base: Option<StyleProperty<f32>>,
+    /// Vertical datum of `base`.
+    pub base_datum: Option<StyleProperty<String>>,
+    /// Vertical datum of `height`.
+    pub height_datum: Option<StyleProperty<String>>,
+    /// Shell part selector (`"full"`, `"walls"`, `"roof"`, or `"floor"`).
+    pub part: Option<StyleProperty<String>>,
+    /// Closed translucent 3D volume mode: clips to `[0, 4096]`, omits tile-seam walls, and adds
+    /// a bottom floor cap when `base > 0`.
+    pub translucent: bool,
     /// Tile units past the tile's edge to which the polygons are clipped, for geometry that is
-    /// not clipped already; a vector tile's polygons are.
+    /// not clipped already; translucent volumes default to `0.0` so tiles partition cleanly.
     pub clip_buffer: Option<f32>,
     /// Zoom levels the tile is drawn past its own: the zoom the heights are evaluated at less
     /// the zoom of the tile's coordinates.
@@ -37,23 +62,24 @@ pub struct ExtrusionOptions {
 }
 
 impl ExtrusionOptions {
-    /// Takes the height and base properties of a layer's paint, for a tile magnified
-    /// `overscaling` times past its own zoom (one when it is drawn at its own zoom).
+    /// Takes the height, base, datum and translucency properties of a layer's paint, for a tile
+    /// magnified `overscaling` times past its own zoom (one when it is drawn at its own zoom).
     pub fn for_paint(paint: &FillExtrusionPaint, overscaling: f64) -> Self {
+        let translucent = paint.fill_extrusion_translucent.unwrap_or(false);
         Self {
             height: paint.fill_extrusion_height.clone(),
             base: paint.fill_extrusion_base.clone(),
-            clip_buffer: None,
+            base_datum: paint.fill_extrusion_base_datum.clone(),
+            height_datum: paint.fill_extrusion_height_datum.clone(),
+            part: paint.fill_extrusion_part.clone(),
+            translucent,
+            clip_buffer: translucent.then_some(0.0),
             overscale: overscaling.log2().round().clamp(0.0, f64::from(u8::MAX)) as u8,
         }
     }
 }
 
-/// Base and roof height in metres at the zoom a tile is evaluated at and at the zoom above.
-///
-/// GL JS evaluates a paint property that depends on both zoom and feature at those two zooms
-/// and interpolates between them by the fractional zoom, so a building whose height ramps in
-/// from zoom 15 to 16 stands at half its height at zoom 15.5.
+/// Base, roof height and vertical datums of a feature at the tile's zoom and one zoom above.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ExtrusionHeights {
     /// Base at the tile's zoom.
@@ -66,11 +92,21 @@ pub struct ExtrusionHeights {
     pub height_next: f32,
     /// Zoom levels the tile is drawn past its own, see [`ExtrusionOptions::overscale`].
     pub overscale: u8,
+    /// Vertical datum of `base`.
+    pub base_datum: ElevationDatum,
+    /// Vertical datum of `height`.
+    pub height_datum: ElevationDatum,
+    /// Shell part emitted for this feature.
+    pub part: ExtrusionPart,
+    /// Whether this extrusion is a closed translucent 3D volume.
+    pub translucent: bool,
+    /// Whether walls lying along `0` or `4096` are suppressed as tile-partition seams.
+    pub suppress_tile_boundary_walls: bool,
 }
 
 impl ExtrusionHeights {
-    /// Evaluates a feature's heights at the two zoom stops of a two-stop zoom ramp, or else at
-    /// `zoom` and `zoom + 1.0`.
+    /// Evaluates a feature's heights and datums at the two zoom stops of a two-stop zoom ramp,
+    /// or else at `zoom` and `zoom + 1.0`.
     pub fn for_feature(
         options: &ExtrusionOptions,
         properties: &crate::style::expression::FeatureProperties,
@@ -83,6 +119,21 @@ impl ExtrusionHeights {
                 .unwrap_or(0.0)
                 .max(0.0)
         };
+        let evaluate_datum = |property: &Option<StyleProperty<String>>| {
+            property
+                .as_ref()
+                .and_then(|property| property.evaluate_for(properties, zoom))
+                .map_or(ElevationDatum::CentroidAgl, |value| {
+                    ElevationDatum::from_extrusion_str(&value)
+                })
+        };
+        let part = options
+            .part
+            .as_ref()
+            .and_then(|property| property.evaluate_for(properties, zoom))
+            .map_or(ExtrusionPart::Full, |value| {
+                ExtrusionPart::from_extrusion_str(&value)
+            });
         let (hz0, hz1) = options
             .height
             .as_ref()
@@ -99,6 +150,11 @@ impl ExtrusionHeights {
             height_next: evaluate(&options.height, hz1),
             base_next: evaluate(&options.base, bz1),
             overscale: options.overscale,
+            base_datum: evaluate_datum(&options.base_datum),
+            height_datum: evaluate_datum(&options.height_datum),
+            part,
+            translucent: options.translucent,
+            suppress_tile_boundary_walls: options.clip_buffer == Some(0.0),
         }
     }
 
@@ -111,7 +167,16 @@ impl ExtrusionHeights {
             base_next: base,
             height_next: height,
             overscale: 0,
+            base_datum: ElevationDatum::CentroidAgl,
+            height_datum: ElevationDatum::CentroidAgl,
+            part: ExtrusionPart::Full,
+            translucent: false,
+            suppress_tile_boundary_walls: false,
         }
+    }
+
+    fn has_floor(self) -> bool {
+        self.translucent && (self.base > 0.0 || self.base_next > 0.0)
     }
 
     fn apply(&self, vertex: &mut ShaderVertex, top: bool) {
@@ -122,20 +187,28 @@ impl ExtrusionHeights {
         } else {
             self.base_next - self.base
         };
-        vertex.corner_code = next_zoom_code(rise, self.overscale);
+        let pair = ElevationDatum::pack_pair(self.base_datum, self.height_datum);
+        vertex.corner_code = pack_extrusion_code(rise, self.overscale, pair);
     }
 }
 
-/// The range of [`next_zoom_code`]'s rise, centred on zero, which one overscale step adds.
-pub const NEXT_ZOOM_CODE_SPAN: f32 = 65536.0;
-
 /// Packs how many metres a vertex rises one zoom above the tile's with the tile's overscale
 /// into one float: `overscale * SPAN + rise + SPAN / 2`, the rise kept within half the span.
-/// The shader needs both to blend by the zoom past the one the heights were evaluated at, and
-/// its vertex attributes are all taken.
 pub fn next_zoom_code(rise: f32, overscale: u8) -> f32 {
     let half = NEXT_ZOOM_CODE_SPAN / 2.0;
-    f32::from(overscale) * NEXT_ZOOM_CODE_SPAN + rise.clamp(-half, half - 1.0) + half
+    let clamped_overscale = overscale.min(MAX_PACKED_OVERSCALE);
+    f32::from(clamped_overscale) * NEXT_ZOOM_CODE_SPAN + rise.clamp(-half, half - 1.0) + half
+}
+
+/// Packs `(base_datum, height_datum)` above [`next_zoom_code`]; `(CentroidAgl, CentroidAgl)` adds 0.
+pub fn pack_extrusion_code(rise: f32, overscale: u8, datum_pair: u8) -> f32 {
+    f32::from(datum_pair) * DATUM_CODE_SPAN + next_zoom_code(rise, overscale)
+}
+
+/// Unpacks `(base_datum, height_datum)` from an extrusion vertex's `corner_code`.
+pub fn unpack_datum_pair(corner_code: f32) -> (ElevationDatum, ElevationDatum) {
+    let pair = (corner_code / DATUM_CODE_SPAN).floor().clamp(0.0, 8.0) as u8;
+    ElevationDatum::unpack_pair(pair)
 }
 
 struct RoofVertex {
@@ -152,130 +225,6 @@ impl FillVertexConstructor<ShaderVertex> for RoofVertex {
 
 /// The longest distance along a ring in tile units before it starts over, as GL JS stores it.
 const MAX_EDGE_DISTANCE: f32 = 32768.0 / 2.0;
-
-type Ring = Vec<[f32; 2]>;
-
-fn rings(path: &Path) -> Vec<Ring> {
-    let mut rings = Vec::new();
-    let mut current = Ring::new();
-    for event in path.iter() {
-        match event {
-            Event::Begin { at } => current = vec![at.to_array()],
-            Event::Line { to, .. } => current.push(to.to_array()),
-            Event::End { .. } => rings.push(std::mem::take(&mut current)),
-            Event::Quadratic { to, .. } | Event::Cubic { to, .. } => current.push(to.to_array()),
-        }
-    }
-    rings
-}
-
-/// The sum of `(x2 - x1) * (y1 + y2)` over the ring's edges, as geojson-vt measures the winding.
-fn trapezoid_area(ring: &Ring) -> f32 {
-    ring.iter()
-        .zip(ring.iter().cycle().skip(1))
-        .map(|(a, b)| (b[0] - a[0]) * (a[1] + b[1]))
-        .sum()
-}
-
-/// Twice the signed area in the raw coordinates; the sign tells which side the inside is on.
-fn signed_area(ring: &Ring) -> f32 {
-    ring.iter()
-        .zip(ring.iter().cycle().skip(1))
-        .map(|(a, b)| a[0] * b[1] - b[0] * a[1])
-        .sum()
-}
-
-fn contains(ring: &Ring, [x, y]: [f32; 2]) -> bool {
-    let mut inside = false;
-    for (a, b) in ring.iter().zip(ring.iter().cycle().skip(1)) {
-        if (a[1] > y) != (b[1] > y) && x < (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]) + a[0] {
-            inside = !inside;
-        }
-    }
-    inside
-}
-
-/// A ring inside an odd number of others is a hole.
-fn is_hole(index: usize, rings: &[Ring]) -> bool {
-    if rings.len() <= 1 {
-        return false;
-    }
-    let Some(&point) = rings[index].first() else {
-        return false;
-    };
-    rings
-        .iter()
-        .enumerate()
-        .filter(|(other, ring)| *other != index && contains(ring, point))
-        .count()
-        % 2
-        == 1
-}
-
-/// Walls along a tile's clipped edge would show a seam between tiles.
-fn on_clipped_edge(a: [f32; 2], b: [f32; 2]) -> bool {
-    let extent = EXTENT as f32;
-    (a[0] == b[0] && (a[0] < 0.0 || a[0] > extent))
-        || (a[1] == b[1] && (a[1] < 0.0 || a[1] > extent))
-}
-
-/// `ring` cut to the square from `low` to `high` on both axes, one edge of the square at a time.
-fn clip_ring(ring: &Ring, (low, high): (f32, f32)) -> Ring {
-    let mut clipped = ring.clone();
-    for axis in 0..2 {
-        for keep_above in [true, false] {
-            let bound = if keep_above { low } else { high };
-            let inside = |point: &[f32; 2]| {
-                if keep_above {
-                    point[axis] >= bound
-                } else {
-                    point[axis] <= bound
-                }
-            };
-            let mut next = Ring::new();
-            for (a, b) in clipped.iter().zip(clipped.iter().cycle().skip(1)) {
-                if inside(a) {
-                    next.push(*a);
-                }
-                if inside(a) != inside(b) {
-                    let t = (bound - a[axis]) / (b[axis] - a[axis]);
-                    let mut crossing = [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])];
-                    crossing[axis] = bound;
-                    next.push(crossing);
-                }
-            }
-            clipped = next;
-        }
-    }
-    clipped
-}
-
-/// `path` with each ring clipped to `buffer` tile units past the tile and wound the way a
-/// GeoJSON source winds them, outer rings counterclockwise on the map and holes the other way;
-/// a ring left with no area is dropped. The wall distance of a pattern runs along that winding.
-pub(super) fn clipped(path: &Path, buffer: f32) -> Path {
-    let bounds = (-buffer, EXTENT as f32 + buffer);
-    let rings: Vec<Ring> = rings(path)
-        .iter()
-        .map(|ring| clip_ring(ring, bounds))
-        .filter(|ring| ring.len() >= 3 && signed_area(ring) != 0.0)
-        .collect();
-    let mut builder = Path::builder();
-    for (index, ring) in rings.iter().enumerate() {
-        let mut ring = ring.clone();
-        // An outer ring keeps its order when its area is not positive, a hole when it is, as
-        // geojson-vt winds them.
-        if (trapezoid_area(&ring) > 0.0) != is_hole(index, &rings) {
-            ring[1..].reverse();
-        }
-        builder.begin(lyon::math::point(ring[0][0], ring[0][1]));
-        for point in &ring[1..] {
-            builder.line_to(lyon::math::point(point[0], point[1]));
-        }
-        builder.end(true);
-    }
-    builder.build()
-}
 
 fn push_wall<I: From<VertexId>>(
     buffer: &mut VertexBuffers<ShaderVertex, I>,
@@ -301,10 +250,7 @@ fn push_wall<I: From<VertexId>>(
     buffer.indices.extend([0, 1, 2, 0, 2, 3].map(index));
 }
 
-/// Appends the roof and walls of the polygons in `path` to `buffer`.
-///
-/// `refine_roof` may split the roof's triangles from the given index on, as a globe tile does so
-/// the roof follows the sphere; the vertices it adds take the roof's base and height.
+/// Appends the roof, optional floor cap, and walls of the polygons in `path` to `buffer`.
 #[cfg(test)]
 pub(super) fn extrude<I>(
     path: &Path,
@@ -316,7 +262,7 @@ pub(super) fn extrude<I>(
     ),
 ) -> Result<(), String>
 where
-    I: From<VertexId> + std::ops::Add + MaxIndex,
+    I: From<VertexId> + std::ops::Add + MaxIndex + Copy + Into<u32>,
 {
     let mut tessellator = FillTessellator::new();
     extrude_with_tessellator(
@@ -339,39 +285,69 @@ pub(super) fn extrude_with_tessellator<I>(
     ),
 ) -> Result<(), String>
 where
-    I: From<VertexId> + std::ops::Add + MaxIndex,
+    I: From<VertexId> + std::ops::Add + MaxIndex + Copy + Into<u32>,
 {
-    let roof_start = buffer.indices.len();
-    tessellator
-        .tessellate_path(
-            path,
-            &FillOptions::tolerance(tolerance).with_fill_rule(FillRule::EvenOdd),
-            &mut BuffersBuilder::new(buffer, RoofVertex { heights }),
-        )
-        .map_err(|error| error.to_string())?;
-    let after_roof_vertices = buffer.vertices.len();
-    refine_roof(buffer, roof_start)?;
-    for vertex in &mut buffer.vertices[after_roof_vertices..] {
-        heights.apply(vertex, true);
+    if heights.part != ExtrusionPart::Walls {
+        let cap_vertex_start = buffer.vertices.len();
+        let cap_index_start = buffer.indices.len();
+        tessellator
+            .tessellate_path(
+                path,
+                &FillOptions::tolerance(tolerance).with_fill_rule(FillRule::EvenOdd),
+                &mut BuffersBuilder::new(buffer, RoofVertex { heights }),
+            )
+            .map_err(|error| error.to_string())?;
+        let after_cap_vertices = buffer.vertices.len();
+        refine_roof(buffer, cap_index_start)?;
+        if heights.part == ExtrusionPart::Floor {
+            for vertex in &mut buffer.vertices[cap_vertex_start..] {
+                vertex.normal = FLOOR_NORMAL;
+                heights.apply(vertex, false);
+            }
+            orient_cap_triangles(buffer, cap_index_start..buffer.indices.len(), false);
+            return Ok(());
+        }
+        for vertex in &mut buffer.vertices[after_cap_vertices..] {
+            heights.apply(vertex, true);
+        }
+        orient_cap_triangles(buffer, cap_index_start..buffer.indices.len(), true);
+        if heights.part == ExtrusionPart::Roof {
+            return Ok(());
+        }
+        if heights.has_floor() {
+            append_floor_from_roof(
+                buffer,
+                cap_vertex_start..buffer.vertices.len(),
+                cap_index_start..buffer.indices.len(),
+                heights,
+            );
+        }
     }
-    let rings = rings(path);
-    for (index, ring) in rings.iter().enumerate() {
+
+    let raw_rings = rings(path);
+    let wound_rings;
+    let active_rings = if heights.translucent {
+        wound_rings = normalized_rings(&raw_rings);
+        &wound_rings
+    } else {
+        &raw_rings
+    };
+    for (index, ring) in active_rings.iter().enumerate() {
         let area = signed_area(ring);
         if area == 0.0 {
             continue;
         }
-        // The inside of the ring lies on the side `area` points to. GL JS lights a wall by the
-        // normal pointing into the extrusion, so the light meets the walls it shines on the
-        // other way round: the wall of an outer ring takes the inside direction and the wall
-        // of a hole the direction into the ring's outside.
-        let facing = if is_hole(index, &rings) { area } else { -area }.signum();
+        let facing = if is_hole(index, active_rings) {
+            area
+        } else {
+            -area
+        }
+        .signum();
         let mut travelled = 0.0;
         for (a, b) in ring.iter().zip(ring.iter().cycle().skip(1)) {
             let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
             let length = dx.hypot(dy);
-            // The distance along the ring counts only the walls drawn, and starts over before it
-            // outgrows what GL JS stores.
-            if on_clipped_edge(*a, *b) {
+            if on_clipped_edge(*a, *b, heights.suppress_tile_boundary_walls) {
                 continue;
             }
             if travelled + length > MAX_EDGE_DISTANCE {
@@ -383,12 +359,68 @@ where
                 continue;
             }
             let normal = [facing * dy / length, -facing * dx / length];
-            // GL JS gives the end of an edge the distance before it and the start the distance
-            // after it.
             push_wall(buffer, [*a, *b], normal, heights, [travelled, start]);
         }
     }
     Ok(())
+}
+
+/// Ensures every triangle in `range` winds counterclockwise when viewed from outside (`+Up` for
+/// the roof where `east × north` corresponds to `cross_xy < 0`, `-Up` for the floor).
+fn orient_cap_triangles<I>(
+    buffer: &mut VertexBuffers<ShaderVertex, I>,
+    range: std::ops::Range<usize>,
+    upward: bool,
+) where
+    I: Copy + Into<u32>,
+{
+    for tri in range.step_by(3) {
+        if tri + 2 >= buffer.indices.len() {
+            break;
+        }
+        let p0 = buffer.vertices[buffer.indices[tri].into() as usize].position;
+        let p1 = buffer.vertices[buffer.indices[tri + 1].into() as usize].position;
+        let p2 = buffer.vertices[buffer.indices[tri + 2].into() as usize].position;
+        let cross_xy = (p1[0] - p0[0]) * (p2[1] - p0[1]) - (p1[1] - p0[1]) * (p2[0] - p0[0]);
+        if (upward && cross_xy > 0.0) || (!upward && cross_xy < 0.0) {
+            buffer.indices.swap(tri + 1, tri + 2);
+        }
+    }
+}
+
+fn append_floor_from_roof<I>(
+    buffer: &mut VertexBuffers<ShaderVertex, I>,
+    roof_vertices: std::ops::Range<usize>,
+    roof_indices: std::ops::Range<usize>,
+    heights: ExtrusionHeights,
+) where
+    I: From<VertexId> + Copy + Into<u32>,
+{
+    let floor_vertex_base = buffer.vertices.len();
+    buffer.vertices.reserve(roof_vertices.len());
+    for index in roof_vertices.clone() {
+        let mut vertex = buffer.vertices[index];
+        vertex.normal = FLOOR_NORMAL;
+        heights.apply(&mut vertex, false);
+        buffer.vertices.push(vertex);
+    }
+    buffer.indices.reserve(roof_indices.len());
+    let remap = |idx: I| -> I {
+        let orig = idx.into() as usize;
+        I::from(VertexId::from_usize(
+            floor_vertex_base + (orig - roof_vertices.start),
+        ))
+    };
+    for tri in roof_indices.step_by(3) {
+        if tri + 2 >= buffer.indices.len() {
+            break;
+        }
+        let i0 = remap(buffer.indices[tri]);
+        let i1 = remap(buffer.indices[tri + 1]);
+        let i2 = remap(buffer.indices[tri + 2]);
+        // Roof triangles wind +Up (`cross_xy < 0`); swapping `i1` and `i2` winds the floor -Up.
+        buffer.indices.extend([i0, i2, i1]);
+    }
 }
 
 #[cfg(test)]

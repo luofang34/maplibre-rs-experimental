@@ -14,7 +14,7 @@ authors.workspace = true
 [features]
 web-webgl = ["maplibre/web-webgl"]
 trace = ["maplibre/trace"]
-headless = ["maplibre/headless"]
+headless = ["maplibre/headless", "dep:cgmath", "dep:png", "dep:tokio"]
 
 [dependencies]
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
@@ -23,6 +23,9 @@ maplibre-winit = { path = "../maplibre-winit", version = "0.1.0"  }
 tile-grid.workspace = true
 clap.workspace = true
 serde_json.workspace = true
+cgmath = { workspace = true, optional = true }
+png = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true, features = ["time"] }
 
 [dev-dependencies]
 reqwest = { workspace = true, features = ["json"] }

@@ -8,7 +8,7 @@ use maplibre::coords::LatLon;
 use maplibre::{
     projection::{ProjectionSpecification, ProjectionType},
     render::settings::WgpuSettings,
-    style::Style,
+    style::{source::Source, Style},
 };
 #[cfg(any(feature = "headless", test))]
 mod coordinates;
@@ -18,11 +18,14 @@ use maplibre_winit::{run_headed_map, HeadedMapOptions, WinitMapWindowConfig};
 
 #[cfg(feature = "headless")]
 mod headless;
+#[cfg(feature = "headless")]
+mod snapshot;
 
 /// World-scale style rendered on the globe, bundled so the demo works without any arguments.
 const GLOBE_STYLE: &str = include_str!("../res/globe.json");
 const TERRAIN_STYLE: &str = include_str!("../res/terrain.json");
-/// Pitch limit of the terrain demo, matching the GL JS 3d-terrain example's `maxPitch`.
+const AIRSPACE_VFR_STYLE: &str = include_str!("../res/airspace_vfr.json");
+/// Pitch limit of the terrain / 3D airspace demos, matching the GL JS 3d-terrain example's `maxPitch`.
 const TERRAIN_MAX_PITCH_DEGREES: f64 = 85.0;
 
 #[derive(Parser)]
@@ -66,7 +69,13 @@ enum Commands {
         /// Use the bundled 3D terrain style: OpenStreetMap imagery draped over elevation tiles.
         #[clap(long, conflicts_with_all = ["globe", "style"])]
         terrain: bool,
-        /// Largest camera pitch in degrees. Defaults to 60, or 85 with `--terrain`.
+        /// Use the bundled VFR Sectional 3D NASR airspace style over 3D terrain on the globe.
+        #[clap(long, conflicts_with_all = ["globe", "terrain", "style"])]
+        airspace: bool,
+        /// Local `.pmtiles` file path or `https://...` / `pmtiles://...` URL overriding `sources.airspace`.
+        #[clap(long)]
+        airspace_pmtiles: Option<String>,
+        /// Largest camera pitch in degrees. Defaults to 60, or 85 with `--terrain` / `--airspace`.
         #[clap(long)]
         max_pitch: Option<f64>,
         /// Override the projection declared by the style.
@@ -97,6 +106,49 @@ enum Commands {
         )]
         max: LatLon,
     },
+    /// Renders a single high-resolution offscreen PNG frame once all view tiles settle.
+    #[cfg(feature = "headless")]
+    Snapshot {
+        /// Path to a MapLibre style JSON file.
+        #[clap(long, conflicts_with_all = ["globe", "terrain", "airspace"])]
+        style: Option<PathBuf>,
+        /// Use the bundled world style rendered on the globe.
+        #[clap(long)]
+        globe: bool,
+        /// Use the bundled 3D terrain style.
+        #[clap(long, conflicts_with_all = ["globe", "airspace"])]
+        terrain: bool,
+        /// Use the bundled VFR Sectional 3D NASR airspace style over 3D terrain on the globe.
+        #[clap(long, conflicts_with_all = ["globe", "terrain"])]
+        airspace: bool,
+        /// Local `.pmtiles` file path or `https://...` / `pmtiles://...` URL overriding `sources.airspace`.
+        #[clap(long)]
+        airspace_pmtiles: Option<String>,
+        /// Override the projection declared by the style.
+        #[clap(long, value_enum)]
+        projection: Option<ProjectionArg>,
+        #[clap(long, default_value_t = 1280)]
+        width: u32,
+        #[clap(long, default_value_t = 800)]
+        height: u32,
+        #[clap(long, allow_hyphen_values = true)]
+        lat: Option<f64>,
+        #[clap(long, allow_hyphen_values = true)]
+        lon: Option<f64>,
+        #[clap(long)]
+        zoom: Option<f64>,
+        #[clap(long, allow_hyphen_values = true)]
+        pitch: Option<f64>,
+        #[clap(long, allow_hyphen_values = true)]
+        bearing: Option<f64>,
+        #[clap(long, default_value_t = 360)]
+        max_frames: usize,
+        #[clap(long, default_value_t = 30)]
+        timeout_secs: u64,
+        /// Output PNG path.
+        #[clap(long)]
+        out: PathBuf,
+    },
 }
 
 /// Which bundled style a run starts from when no style path is given.
@@ -105,12 +157,26 @@ enum BundledStyle {
     Default,
     Globe,
     Terrain,
+    AirspaceVfr,
+}
+
+fn pmtiles_source_url(spec: &str) -> Result<String, Box<dyn std::error::Error>> {
+    if spec.starts_with("pmtiles://") {
+        return Ok(spec.to_owned());
+    }
+    if spec.starts_with("https://") || spec.starts_with("http://") || spec.starts_with("file://") {
+        return Ok(format!("pmtiles://{spec}"));
+    }
+    let abs = std::fs::canonicalize(spec)
+        .map_err(|err| format!("cannot resolve airspace PMTiles path '{spec}': {err}"))?;
+    Ok(format!("pmtiles://file://{}", abs.display()))
 }
 
 fn load_style(
     path: Option<&PathBuf>,
     bundled: BundledStyle,
     projection: Option<ProjectionArg>,
+    airspace_pmtiles: Option<&str>,
 ) -> Result<Style, Box<dyn std::error::Error>> {
     let mut style = match (path, bundled) {
         (Some(path), _) => {
@@ -121,8 +187,16 @@ fn load_style(
         }
         (None, BundledStyle::Globe) => serde_json::from_str::<Style>(GLOBE_STYLE)?,
         (None, BundledStyle::Terrain) => serde_json::from_str::<Style>(TERRAIN_STYLE)?,
+        (None, BundledStyle::AirspaceVfr) => serde_json::from_str::<Style>(AIRSPACE_VFR_STYLE)?,
         (None, BundledStyle::Default) => Style::default(),
     };
+    if let Some(pmtiles_override) = airspace_pmtiles {
+        let resolved_url = pmtiles_source_url(pmtiles_override)?;
+        if let Some(Source::Vector(vec_src)) = style.sources.get_mut("airspace") {
+            vec_src.url = Some(resolved_url);
+            vec_src.tiles = None;
+        }
+    }
     if path.is_some() || bundled != BundledStyle::Default {
         // Layer order becomes render order; index 0 is reserved for the depth clear.
         for (index, layer) in style.layers.iter_mut().enumerate() {
@@ -135,6 +209,18 @@ fn load_style(
         });
     }
     Ok(style)
+}
+
+fn select_bundled(terrain: bool, airspace: bool, globe: bool) -> BundledStyle {
+    if airspace {
+        BundledStyle::AirspaceVfr
+    } else if terrain {
+        BundledStyle::Terrain
+    } else if globe {
+        BundledStyle::Globe
+    } else {
+        BundledStyle::Default
+    }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -151,28 +237,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let cli = Cli::parse();
 
-    // You can check for the existence of subcommands, and if found use their
-    // matches just as you would the top level cmd
     match &cli.command {
         Commands::Headed {
             style,
             globe,
             terrain,
+            airspace,
+            airspace_pmtiles,
             max_pitch,
             projection,
             frames,
             debug_tiles,
             zoom_sensitivity,
         } => {
-            let bundled = if *terrain {
-                BundledStyle::Terrain
-            } else if *globe {
-                BundledStyle::Globe
-            } else {
-                BundledStyle::Default
-            };
-            let style = load_style(style.as_ref(), bundled, *projection)?;
-            let default_max_pitch = if *terrain {
+            let bundled = select_bundled(*terrain, *airspace, *globe);
+            let style = load_style(
+                style.as_ref(),
+                bundled,
+                *projection,
+                airspace_pmtiles.as_deref(),
+            )?;
+            let default_max_pitch = if *terrain || *airspace {
                 TERRAIN_MAX_PITCH_DEGREES
             } else {
                 HeadedMapOptions::default().max_pitch_degrees
@@ -204,6 +289,63 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 headless::run_headless(*tile_size, *min, *max).await
             })?;
         }
+        #[cfg(feature = "headless")]
+        Commands::Snapshot {
+            style,
+            globe,
+            terrain,
+            airspace,
+            airspace_pmtiles,
+            projection,
+            width,
+            height,
+            lat,
+            lon,
+            zoom,
+            pitch,
+            bearing,
+            max_frames,
+            timeout_secs,
+            out,
+        } => {
+            let bundled = select_bundled(*terrain, *airspace, *globe);
+            let loaded_style = load_style(
+                style.as_ref(),
+                bundled,
+                *projection,
+                airspace_pmtiles.as_deref(),
+            )?;
+            let center = match (*lat, *lon) {
+                (Some(lat), Some(lon)) => Some(LatLon::new(lat, lon)),
+                _ => None,
+            };
+            maplibre::platform::run_multithreaded(async {
+                snapshot::render_snapshot(snapshot::SnapshotOptions {
+                    style: loaded_style,
+                    width: *width,
+                    height: *height,
+                    center,
+                    zoom: *zoom,
+                    pitch: *pitch,
+                    bearing: *bearing,
+                    max_frames: *max_frames,
+                    timeout_secs: *timeout_secs,
+                    out_path: out,
+                })
+                .await
+            })?;
+        }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bundled_airspace_vfr_style_parses_with_zero_validation_warnings() {
+        let style = load_style(None, BundledStyle::AirspaceVfr, None, None).expect("parse style");
+        assert_eq!(style.validate(), Ok(()));
+    }
 }

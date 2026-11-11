@@ -23,6 +23,7 @@ pub(super) fn mercator_view_region(
         style,
         world,
         mercator_elevation_range(view_state, pitch_degrees, fov_degrees),
+        request.headroom_meters,
     );
     let tiles = mercator_covering_tiles(
         view_state,

@@ -142,7 +142,7 @@ impl ViewTile {
 pub struct TileShape {
     coords: WorldTileCoords,
     /// How many worlds from the tile's own this shape is drawn, for a copy of the world.
-    wrap: i32,
+    pub(crate) wrap: i32,
 
     zoom_factor: f64,
     transform: Matrix4<f64>,

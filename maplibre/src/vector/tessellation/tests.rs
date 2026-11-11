@@ -179,6 +179,10 @@ fn later_extrusion_polygons_leave_both_poles_exact() {
             .with_extrusion(super::ExtrusionOptions {
                 height: None,
                 base: None,
+                base_datum: None,
+                height_datum: None,
+                part: None,
+                translucent: false,
                 clip_buffer: None,
                 overscale: 0,
             });

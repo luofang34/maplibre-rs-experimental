@@ -2,14 +2,16 @@
 //! `FillExtrusionStyleLayer.queryIntersectsFeature` decides it.
 //!
 //! The polygon's rings are projected at their base and at their top; the query meets the
-//! extrusion when it meets the projected top or one of the walls between the two. The
-//! distance at the meeting point orders extrusions nearest first.
+//! extrusion when it meets the projected top, floating floor, or one of the walls between the
+//! two. The distance at the meeting point orders extrusions nearest first.
 
 use geo::{prelude::*, Coord, LineString, Point, Polygon, Rect};
 
 use super::{surface::sample_ground_elevation, tiles::QueryTile, Candidate};
 use crate::{
-    render::resolved_view::ResolvedFrameView, style::layer::LayerPaint, tcs::world::World,
+    render::resolved_view::ResolvedFrameView,
+    style::layer::{ElevationDatum, ExtrusionPart, LayerPaint},
+    tcs::world::World,
     terrain::coverage::TerrainCoverageIndex,
 };
 #[cfg(test)]
@@ -119,12 +121,13 @@ fn face(corners: &[Projected]) -> Polygon<f64> {
     )
 }
 
-/// The depth at which `query` meets the extrusion of `rings` (world pixels, outer ring first)
-/// from `base` to `top` metres, or `None` when it misses it.
-pub(super) fn intersection_depth_resolved(
+/// The depth at which `query` meets `part` of the extrusion of `rings` (world pixels, outer ring
+/// first) from `base` to `top` metres, or `None` when it misses it.
+fn intersection_depth_part(
     resolved: &ResolvedFrameView,
     rings: &[Vec<[f64; 2]>],
     (base, top): (f64, f64),
+    (part, has_floating_floor): (ExtrusionPart, bool),
     query: ScreenQuery,
 ) -> Option<f64> {
     let projected = |metres: f64| -> Option<Vec<Vec<Projected>>> {
@@ -140,29 +143,46 @@ pub(super) fn intersection_depth_resolved(
     let (bases, tops) = (projected(base)?, projected(top)?);
     let mut nearest = f64::INFINITY;
     let mut met = false;
-    let roof = Polygon::new(
-        LineString::from(tops[0].iter().map(|c| (c.x, c.y)).collect::<Vec<_>>()),
-        tops[1..]
-            .iter()
-            .map(|ring| LineString::from(ring.iter().map(|c| (c.x, c.y)).collect::<Vec<_>>()))
-            .collect(),
-    );
-    if query.meets(&roof) {
-        met = true;
-        nearest = query.depth(&tops[0]);
+    if matches!(part, ExtrusionPart::Full | ExtrusionPart::Roof) {
+        let roof = Polygon::new(
+            LineString::from(tops[0].iter().map(|c| (c.x, c.y)).collect::<Vec<_>>()),
+            tops[1..]
+                .iter()
+                .map(|ring| LineString::from(ring.iter().map(|c| (c.x, c.y)).collect::<Vec<_>>()))
+                .collect(),
+        );
+        if query.meets(&roof) {
+            met = true;
+            nearest = query.depth(&tops[0]);
+        }
     }
-    for (top_ring, base_ring) in tops.iter().zip(&bases) {
-        for edge in 0..top_ring.len().saturating_sub(1) {
-            let wall = [
-                top_ring[edge],
-                top_ring[edge + 1],
-                base_ring[edge + 1],
-                base_ring[edge],
-                top_ring[edge],
-            ];
-            if query.meets(&face(&wall)) {
-                met = true;
-                nearest = nearest.min(query.depth(&wall));
+    if matches!(part, ExtrusionPart::Floor) || (part == ExtrusionPart::Full && has_floating_floor) {
+        let floor = Polygon::new(
+            LineString::from(bases[0].iter().map(|c| (c.x, c.y)).collect::<Vec<_>>()),
+            bases[1..]
+                .iter()
+                .map(|ring| LineString::from(ring.iter().map(|c| (c.x, c.y)).collect::<Vec<_>>()))
+                .collect(),
+        );
+        if query.meets(&floor) {
+            met = true;
+            nearest = nearest.min(query.depth(&bases[0]));
+        }
+    }
+    if matches!(part, ExtrusionPart::Full | ExtrusionPart::Walls) {
+        for (top_ring, base_ring) in tops.iter().zip(&bases) {
+            for edge in 0..top_ring.len().saturating_sub(1) {
+                let wall = [
+                    top_ring[edge],
+                    top_ring[edge + 1],
+                    base_ring[edge + 1],
+                    base_ring[edge],
+                    top_ring[edge],
+                ];
+                if query.meets(&face(&wall)) {
+                    met = true;
+                    nearest = nearest.min(query.depth(&wall));
+                }
             }
         }
     }
@@ -177,7 +197,13 @@ pub(super) fn intersection_depth(
     query: ScreenQuery,
 ) -> Option<f64> {
     let resolved = ResolvedFrameView::resolve(&Style::default(), view_state).ok()?;
-    intersection_depth_resolved(&resolved, rings, span, query)
+    intersection_depth_part(
+        &resolved,
+        rings,
+        span,
+        (ExtrusionPart::Full, span.0 > 0.0),
+        query,
+    )
 }
 
 /// Where a fill extrusion stands: its rings in world pixels and its base and top in metres.
@@ -203,6 +229,21 @@ pub(super) fn extruded_depth(
             .and_then(|value| value.evaluate_for(properties, zoom))
             .map_or(0.0, f64::from)
     };
+    let datum = |property: &Option<crate::style::property::StyleProperty<String>>| {
+        property
+            .as_ref()
+            .and_then(|value| value.evaluate_for(properties, zoom))
+            .map_or(ElevationDatum::CentroidAgl, |value| {
+                ElevationDatum::from_extrusion_str(&value)
+            })
+    };
+    let part = paint
+        .fill_extrusion_part
+        .as_ref()
+        .and_then(|value| value.evaluate_for(properties, zoom))
+        .map_or(ExtrusionPart::Full, |value| {
+            ExtrusionPart::from_extrusion_str(&value)
+        });
     let world_ring = |ring: &geo_types::LineString<f64>| -> Vec<[f64; 2]> {
         ring.coords()
             .map(|point| {
@@ -217,7 +258,11 @@ pub(super) fn extruded_depth(
         .chain(polygon.interiors())
         .map(world_ring)
         .collect();
-    let ground = if terrain_index.is_some() {
+    let base_datum = datum(&paint.fill_extrusion_base_datum);
+    let height_datum = datum(&paint.fill_extrusion_height_datum);
+    let ground = if terrain_index.is_some()
+        && (base_datum != ElevationDatum::Msl || height_datum != ElevationDatum::Msl)
+    {
         let ext = &rings[0];
         let count = ext.len().saturating_sub(1).max(1);
         let sum = ext[..count]
@@ -232,9 +277,28 @@ pub(super) fn extruded_depth(
     } else {
         0.0
     };
-    let base = ground + metres(&paint.fill_extrusion_base);
-    let top = ground + metres(&paint.fill_extrusion_height).max(base - ground);
-    intersection_depth_resolved(resolved, &rings, (base, top), screen)
+    let raw_base = metres(&paint.fill_extrusion_base);
+    let raw_top = metres(&paint.fill_extrusion_height);
+    let base = raw_base
+        + if base_datum == ElevationDatum::Msl {
+            0.0
+        } else {
+            ground
+        };
+    let top = (raw_top
+        + if height_datum == ElevationDatum::Msl {
+            0.0
+        } else {
+            ground
+        })
+    .max(base);
+    intersection_depth_part(
+        resolved,
+        &rings,
+        (base, top),
+        (part, raw_base > 0.0),
+        screen,
+    )
 }
 
 #[cfg(test)]

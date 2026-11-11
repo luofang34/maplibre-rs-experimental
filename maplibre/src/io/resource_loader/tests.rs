@@ -239,3 +239,49 @@ async fn different_ranges_of_one_resource_in_flight_together_each_fetch() {
         })
         .await;
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+#[tokio::test]
+async fn file_urls_support_whole_and_byte_range_reads_without_network() {
+    let path =
+        std::env::temp_dir().join(format!("maplibre_file_loader_{}.bin", std::process::id()));
+    std::fs::write(&path, b"0123456789abcdef").expect("write temp file");
+    let url = format!("file://{}", path.display());
+    let loader = SharedLoader::new(Bytes::default());
+
+    assert_eq!(
+        loader.fetch(&url).await.expect("whole file"),
+        b"0123456789abcdef"
+    );
+    assert_eq!(
+        loader
+            .fetch_range(
+                &url,
+                ByteRange {
+                    offset: 4,
+                    length: 6
+                }
+            )
+            .await
+            .expect("file range"),
+        b"456789"
+    );
+    let oob = loader
+        .fetch_range(
+            &url,
+            ByteRange {
+                offset: 12,
+                length: 8,
+            },
+        )
+        .await
+        .expect_err("range past EOF");
+    assert!(oob.describe().contains("past the end"));
+    let _ = std::fs::remove_file(&path);
+
+    let missing = loader
+        .fetch(&format!("file://{}", path.display()))
+        .await
+        .expect_err("missing file");
+    assert!(missing.is_not_found());
+}

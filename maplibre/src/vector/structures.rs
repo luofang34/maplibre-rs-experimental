@@ -13,25 +13,30 @@ use std::{
 };
 
 use super::{
-    tessellation::{IndexDataType, OverAlignedVertexBuffer},
+    tessellation::{
+        unpack_datum_pair, IndexDataType, LineElevationOptions, OverAlignedVertexBuffer,
+    },
     AvailableVectorLayerBucket, VectorBufferPool,
 };
 use crate::{
     coords::WorldTileCoords,
     render::ShaderVertex,
-    style::{layer::StyleLayer, Style},
+    style::{
+        layer::{ElevationDatum, LayerPaint, StyleLayer},
+        Style,
+    },
     tcs::{tiles::Tiles, world::World},
     terrain::{coverage::TerrainCoverageIndex, source::dem_source, DemTileComponent},
 };
 
-const MAX_VERTICES: usize = 65_536;
+const MAX_VERTICES: usize = 524_288;
 pub(crate) type SpatialBuffer = (
     WorldTileCoords,
     String,
     OverAlignedVertexBuffer<ShaderVertex, IndexDataType>,
 );
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum StructureKind {
     Bridge,
     Tunnel,
@@ -40,11 +45,14 @@ pub(crate) enum StructureKind {
     /// Stands on the ground the terrain draws under its centre, as a GL JS circle samples the
     /// DEM of the terrain tile beneath it.
     Marker,
-    /// Rises from the terrain at the middle of its footprint, as a building does.
+    /// Rises from the terrain or sea level according to its base and height datums.
     Extrusion,
     /// Lies on the terrain surface at the width its style gives in screen pixels, wherever on
     /// the screen it is; the shader finds the surface under each vertex.
     Overlay,
+    /// Lifts stroked line geometry to an altitude (`line-elevation`) in metres while keeping its
+    /// screen-pixel width.
+    ElevatedLine,
 }
 
 pub(crate) fn kind(layer: &StyleLayer) -> Option<StructureKind> {
@@ -59,6 +67,9 @@ pub(crate) fn kind(layer: &StyleLayer) -> Option<StructureKind> {
     }
     if layer.type_ != "line" {
         return None;
+    }
+    if matches!(&layer.paint, Some(LayerPaint::Line(paint)) if paint.line_elevation.is_some()) {
+        return Some(StructureKind::ElevatedLine);
     }
     match layer
         .metadata
@@ -161,10 +172,18 @@ fn fingerprint(
             pending.revision.hash(&mut hash);
         }
         for bucket in super::content::vector_layers(tiles, *coords) {
+            bucket.style_layer_id.hash(&mut hash);
             bucket.buffer.buffer.vertices.len().hash(&mut hash);
+            if let Some(first) = bucket.buffer.buffer.vertices.first() {
+                first.corner_code.to_bits().hash(&mut hash);
+                first.elevation.to_bits().hash(&mut hash);
+                first.distance.to_bits().hash(&mut hash);
+            }
         }
     }
     for layer in &style.layers {
+        layer.id.hash(&mut hash);
+        kind(layer).hash(&mut hash);
         if let Some(metadata) = &layer.metadata {
             let mut entries: Vec<_> = metadata.iter().collect();
             entries.sort_by_key(|(key, _)| *key);
@@ -172,6 +191,18 @@ fn fingerprint(
         }
     }
     hash.finish()
+}
+
+fn is_pure_msl_bucket(kind: StructureKind, vertices: &[ShaderVertex]) -> bool {
+    match kind {
+        StructureKind::Extrusion => vertices.iter().all(|v| {
+            unpack_datum_pair(v.corner_code) == (ElevationDatum::Msl, ElevationDatum::Msl)
+        }),
+        StructureKind::ElevatedLine => vertices
+            .iter()
+            .all(|v| LineElevationOptions::unpack_datum(v.corner_code) == ElevationDatum::Msl),
+        _ => false,
+    }
 }
 
 fn prepare(
@@ -197,7 +228,10 @@ fn prepare(
                 continue;
             };
             let count = bucket.buffer.buffer.vertices.len();
-            if count == 0 || count > remaining {
+            if count == 0
+                || count > remaining
+                || is_pure_msl_bucket(kind, &bucket.buffer.buffer.vertices)
+            {
                 continue;
             }
             let mut buffer = OverAlignedVertexBuffer::from_iters(
@@ -263,6 +297,17 @@ fn elevate(
     }
 }
 
+fn centroid_ground(
+    vertices: &[ShaderVertex],
+    sample: &impl Fn([f32; 2]) -> Option<f64>,
+) -> Option<f32> {
+    let count = vertices.len().max(1) as f32;
+    let middle = vertices.iter().fold([0.0_f32; 2], |sum, vertex| {
+        [sum[0] + vertex.position[0], sum[1] + vertex.position[1]]
+    });
+    sample([middle[0] / count, middle[1] / count]).map(|ground| ground as f32)
+}
+
 fn elevate_span(
     vertices: &mut [ShaderVertex],
     kind: StructureKind,
@@ -270,16 +315,58 @@ fn elevate_span(
     absolute: Option<f64>,
     sample: &impl Fn([f32; 2]) -> Option<f64>,
 ) {
+    let Some(first_vertex) = vertices.first() else {
+        return;
+    };
     if matches!(kind, StructureKind::Extrusion) {
-        // The footprint's middle decides the ground, so a building is not sheared by a slope.
-        let count = vertices.len().max(1) as f32;
-        let middle = vertices.iter().fold([0.0_f32; 2], |sum, vertex| {
-            [sum[0] + vertex.position[0], sum[1] + vertex.position[1]]
-        });
-        if let Some(ground) = sample([middle[0] / count, middle[1] / count]) {
-            for vertex in vertices {
-                vertex.distance += ground as f32;
-                vertex.elevation += ground as f32;
+        let (base_datum, height_datum) = unpack_datum_pair(first_vertex.corner_code);
+        if (base_datum, height_datum) == (ElevationDatum::Msl, ElevationDatum::Msl) {
+            return;
+        }
+        let middle_ground = if matches!(base_datum, ElevationDatum::CentroidAgl)
+            || matches!(height_datum, ElevationDatum::CentroidAgl)
+        {
+            centroid_ground(vertices, sample).unwrap_or(0.0)
+        } else {
+            0.0
+        };
+        let needs_vertex = matches!(base_datum, ElevationDatum::VertexAgl)
+            || matches!(height_datum, ElevationDatum::VertexAgl);
+        for vertex in vertices {
+            let vertex_ground = if needs_vertex {
+                sample(vertex.position).unwrap_or(0.0) as f32
+            } else {
+                0.0
+            };
+            let offset = |datum| match datum {
+                ElevationDatum::Msl => 0.0,
+                ElevationDatum::CentroidAgl => middle_ground,
+                ElevationDatum::VertexAgl => vertex_ground,
+            };
+            vertex.distance += offset(base_datum);
+            vertex.elevation += offset(height_datum);
+            if base_datum != height_datum {
+                vertex.elevation = vertex.elevation.max(vertex.distance);
+            }
+        }
+        return;
+    }
+    if matches!(kind, StructureKind::ElevatedLine) {
+        match LineElevationOptions::unpack_datum(first_vertex.corner_code) {
+            ElevationDatum::Msl => {}
+            ElevationDatum::CentroidAgl => {
+                if let Some(ground) = centroid_ground(vertices, sample) {
+                    for vertex in vertices {
+                        vertex.elevation += ground;
+                    }
+                }
+            }
+            ElevationDatum::VertexAgl => {
+                for vertex in vertices {
+                    if let Some(ground) = sample(vertex.position) {
+                        vertex.elevation += ground as f32;
+                    }
+                }
             }
         }
         return;
@@ -331,7 +418,8 @@ fn profile(kind: StructureKind, start: f64, end: f64, ground: f64, t: f64, clear
         StructureKind::Surface
         | StructureKind::Marker
         | StructureKind::Extrusion
-        | StructureKind::Overlay => ground,
+        | StructureKind::Overlay
+        | StructureKind::ElevatedLine => ground,
     }
 }
 

@@ -168,6 +168,12 @@ impl Inner {
                         key: key.clone(),
                         finished: false,
                     };
+                    #[cfg(not(target_arch = "wasm32"))]
+                    if let Some(raw_path) = url.strip_prefix("file://") {
+                        let result = load_local_file(url, raw_path, range);
+                        leader.finish(Outcome::new(&result));
+                        return result;
+                    }
                     let result = match range {
                         Some(range) => self.loader.load_range(url, range).await,
                         None => self.loader.load(url).await,
@@ -212,6 +218,87 @@ impl HttpClient for SharedLoader {
     async fn fetch_range(&self, url: &str, range: ByteRange) -> Result<Vec<u8>, SourceFetchError> {
         self.0.load(url, Some(range)).await
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn load_local_file(
+    url: &str,
+    raw_path: &str,
+    range: Option<ByteRange>,
+) -> Result<Vec<u8>, SourceFetchError> {
+    use std::io::{ErrorKind, Read, Seek, SeekFrom};
+
+    use crate::io::source_client::RangeOutOfBounds;
+
+    let stripped = raw_path.strip_prefix("localhost").unwrap_or(raw_path);
+    #[cfg(windows)]
+    let stripped = if stripped.as_bytes().get(2) == Some(&b':') && stripped.starts_with('/') {
+        &stripped[1..]
+    } else {
+        stripped
+    };
+    let decoded = percent_decode_path(stripped);
+    let mut file = std::fs::File::open(&decoded).map_err(|err| {
+        if err.kind() == ErrorKind::NotFound {
+            SourceFetchError::not_found(url)
+        } else {
+            SourceFetchError(Box::new(err))
+        }
+    })?;
+
+    match range {
+        None => {
+            let mut body = Vec::new();
+            file.read_to_end(&mut body)
+                .map_err(|err| SourceFetchError(Box::new(err)))?;
+            Ok(body)
+        }
+        Some(range) => {
+            let size_u64 = file
+                .metadata()
+                .map_err(|err| SourceFetchError(Box::new(err)))?
+                .len();
+            let end = range.offset.saturating_add(range.length);
+            if end > size_u64 {
+                return Err(SourceFetchError(Box::new(RangeOutOfBounds {
+                    url: url.to_owned(),
+                    offset: range.offset,
+                    end,
+                    size: usize::try_from(size_u64).unwrap_or(usize::MAX),
+                })));
+            }
+            let len =
+                usize::try_from(range.length).map_err(|err| SourceFetchError(Box::new(err)))?;
+            file.seek(SeekFrom::Start(range.offset))
+                .map_err(|err| SourceFetchError(Box::new(err)))?;
+            let mut buf = vec![0_u8; len];
+            file.read_exact(&mut buf)
+                .map_err(|err| SourceFetchError(Box::new(err)))?;
+            Ok(buf)
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn percent_decode_path(input: &str) -> std::path::PathBuf {
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut idx = 0;
+    while idx < bytes.len() {
+        if bytes[idx] == b'%' && idx + 2 < bytes.len() {
+            if let (Some(hi), Some(lo)) = (
+                (bytes[idx + 1] as char).to_digit(16),
+                (bytes[idx + 2] as char).to_digit(16),
+            ) {
+                out.push(((hi << 4) | lo) as u8);
+                idx += 3;
+                continue;
+            }
+        }
+        out.push(bytes[idx]);
+        idx += 1;
+    }
+    std::path::PathBuf::from(String::from_utf8_lossy(&out).into_owned())
 }
 
 #[cfg(test)]

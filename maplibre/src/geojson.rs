@@ -11,24 +11,22 @@ use thiserror::Error;
 use crate::{
     coords::{WorldTileCoords, EXTENT},
     io::apc::{Context, SendError},
-    projection::{globe::subdivision::granularity_for_zoom, ProjectionType},
+    projection::ProjectionType,
     sdf::tessellation::TextTessellator,
     style::{
         expression::Value,
         filter::{properties_from_json, FeatureContext, Filter, GeometryType},
         layer::{LayerPaint, StyleLayer},
     },
-    vector::{
-        tessellation::{CircleOptions, ExtrusionOptions, IndexDataType, ZeroTessellator},
-        transferables::{
-            LayerMissing, LayerTessellated, SymbolLayerTessellated, TileTessellated,
-            VectorTransferables,
-        },
+    vector::transferables::{
+        LayerMissing, LayerTessellated, SymbolLayerTessellated, TileTessellated,
+        VectorTransferables,
     },
 };
 
 mod cluster;
 mod geometry_property;
+mod tessellator;
 pub(crate) use geometry_property::{reads_geometry, reads_identity};
 
 /// Failure reported while preparing or delivering GeoJSON tile geometry.
@@ -315,17 +313,17 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
             continue;
         };
 
-        let (source_value, unfiltered) = match &with_geometry {
-            Some(annotated) if geometry_property::reads_feature_inputs(style_layer) => {
-                (annotated, annotated.to_string())
-            }
-            _ => (geojson_value, unfiltered.clone()),
+        let source_value = match &with_geometry {
+            Some(annotated) if geometry_property::reads_feature_inputs(style_layer) => annotated,
+            _ => geojson_value,
         };
         let json_str = match &style_layer.filter {
             Some(filter) => match Filter::parse(filter) {
-                Ok(filter) => {
-                    filter_geojson(source_value, &filter, f64::from(u8::from(coords.z))).to_string()
-                }
+                Ok(filter) => geometry_property::streamable_geojson(&filter_geojson(
+                    source_value,
+                    &filter,
+                    f64::from(u8::from(coords.z)),
+                )),
                 Err(error) => {
                     tracing::error!(
                         layer = %style_layer.id,
@@ -338,7 +336,7 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
                     continue;
                 }
             },
-            None => unfiltered,
+            None => geometry_property::streamable_geojson(source_value),
         };
 
         match paint {
@@ -348,112 +346,13 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
             | LayerPaint::Background(_)
             | LayerPaint::Circle(_)
             | LayerPaint::Heatmap(_) => {
-                let zoom = u8::from(coords.z);
-                let style_zoom = request.style_zoom();
-                let granularity = match paint {
-                    LayerPaint::Fill(_) => granularity_for_zoom(128, 2, zoom),
-                    LayerPaint::Line(_) => granularity_for_zoom(512, 0, zoom),
-                    _ => 1,
-                };
-                let use_globe_geometry = request.projection.uses_globe_rendering(f64::from(zoom));
-                let mut tessellator = match paint {
-                    LayerPaint::Circle(circle) => {
-                        ZeroTessellator::<IndexDataType>::default().with_circles(CircleOptions {
-                            // A circle lying on the map follows the globe's curve.
-                            grid: use_globe_geometry
-                                && circle.circle_pitch_alignment
-                                    == crate::style::circle::CirclePitchAlignment::Map,
-                            ..CircleOptions::for_paint(circle, style_zoom)
-                        })
-                    }
-                    LayerPaint::Heatmap(heatmap) => ZeroTessellator::<IndexDataType>::default()
-                        .with_circles(CircleOptions {
-                            grid: use_globe_geometry,
-                            ..CircleOptions::for_heatmap(heatmap, style_zoom)
-                        }),
-                    LayerPaint::FillExtrusion(extrusion) => {
-                        let tessellator = ZeroTessellator::<IndexDataType>::default()
-                            .with_extrusion(ExtrusionOptions {
-                                // Clipping decides where a pattern's walls start; a plain extrusion
-                                // keeps the copies that other tiles draw of it.
-                                clip_buffer: request
-                                    .buffer
-                                    .filter(|_| extrusion.fill_extrusion_pattern.is_some())
-                                    .map(|buffer| {
-                                        buffer as f32 * crate::coords::EXTENT as f32 / 512.0
-                                    }),
-                                ..ExtrusionOptions::for_paint(extrusion, request.overscaling())
-                            });
-                        if use_globe_geometry {
-                            // Roofs and the edges of walls follow the sphere as fills and lines do.
-                            let last_tile =
-                                i64::from(crate::coords::ZOOM_BOUNDS[usize::from(zoom)]) - 1;
-                            tessellator.with_globe_subdivision(
-                                granularity_for_zoom(128, 2, zoom),
-                                zoom == 0,
-                                coords.y == 0,
-                                i64::from(coords.y) == last_tile,
-                            )
-                        } else {
-                            tessellator
-                        }
-                    }
-                    _ if use_globe_geometry => {
-                        let last_tile =
-                            i64::from(crate::coords::ZOOM_BOUNDS[usize::from(zoom)]) - 1;
-                        ZeroTessellator::<IndexDataType>::default().with_globe_subdivision(
-                            granularity,
-                            zoom == 0,
-                            coords.y == 0,
-                            i64::from(coords.y) == last_tile,
-                        )
-                    }
-                    _ => ZeroTessellator::<IndexDataType>::default(),
-                }
-                .with_feature_opacity(paint.opacity(), style_zoom);
-                tessellator.sort_key = crate::vector::tessellation::SortKeys::by(
-                    crate::vector::tessellation::sort_key_of(style_layer),
+                let tessellator = tessellator::build_tessellator(
+                    paint,
+                    style_layer,
+                    coords,
+                    &request.projection,
+                    (request.style_zoom(), request.overscaling(), request.buffer),
                 );
-                match paint {
-                    LayerPaint::Fill(p) if p.fill_pattern.is_some() => {
-                        tessellator.fallback_color = [1.0; 4];
-                        tessellator.pattern_property =
-                            crate::vector::pattern::per_feature_pattern(paint);
-                    }
-                    LayerPaint::Fill(p) => {
-                        tessellator.style_property = p.fill_color.clone();
-                        tessellator.outline_property = p.outline_color();
-                    }
-                    LayerPaint::FillExtrusion(p) if p.fill_extrusion_pattern.is_some() => {
-                        tessellator.fallback_color = [1.0; 4];
-                        tessellator.pattern_property =
-                            crate::vector::pattern::per_feature_pattern(paint);
-                    }
-                    LayerPaint::FillExtrusion(p) => {
-                        tessellator.style_property = p.fill_extrusion_color.clone()
-                    }
-                    LayerPaint::Circle(p) => tessellator.style_property = p.circle_color.clone(),
-                    LayerPaint::Line(p) => {
-                        tessellator.pattern_property =
-                            crate::vector::pattern::per_feature_pattern(paint);
-                        tessellator.style_property = p.line_color.clone();
-                        tessellator.is_line_layer = true;
-                        tessellator.line_gradient = p.line_gradient.is_some();
-                        tessellator.split_corners = p.line_gradient.is_some()
-                            || p.line_pattern.is_some()
-                            || p.line_dasharray.is_some();
-                        tessellator.line_feature_style =
-                            crate::vector::tessellation::LineFeatureStyle::for_paint(p, style_zoom);
-                        tessellator.sharp_corner_offset =
-                            crate::vector::tessellation::sharp_corner_offset(request.overscaling());
-                        tessellator.set_layer_strokes(style_layer);
-                    }
-                    LayerPaint::Background(p) => {
-                        tessellator.style_property = p.background_color.clone()
-                    }
-                    _ => {}
-                }
-
                 let mut projecting = ProjectingTessellator::new(coords, tessellator);
 
                 let mut geojson_src = geozero::geojson::GeoJson(json_str.as_str());

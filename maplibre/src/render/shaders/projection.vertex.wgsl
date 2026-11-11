@@ -294,14 +294,16 @@ fn project_tile_position_3d(
         return ProjectedTilePosition(mercator_clip, select(1.0, -1.0, is_pole));
     }
     let surface = tile_position_on_unit_sphere(tile_position.xy, tile_mercator_coords);
+    let height = tile_position.z / projection.transition_and_padding.z;
     let globe_clip = globe_clip_position(
         tile_position.xy,
-        tile_position.z / projection.transition_and_padding.z,
+        height,
         surface,
         tile_mercator_coords,
         is_pole,
     );
-    let horizon_distance = globe_horizon_distance(surface, transition, is_pole);
+    let horizon_distance =
+        globe_horizon_distance(surface * (1.0 + max(height, 0.0)), transition, is_pole);
     return ProjectedTilePosition(blend_clip(mercator_clip, globe_clip, transition), horizon_distance);
 }
 

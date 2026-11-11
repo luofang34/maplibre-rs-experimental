@@ -41,8 +41,10 @@ mod buffer;
 mod circle;
 mod concave_join;
 mod geometry;
+mod line_elevation;
 mod line_origin;
 mod line_style;
+pub use line_elevation::LineElevationOptions;
 pub use line_style::{LineFeatureStyle, PackedLine};
 mod extrusion;
 mod outline;
@@ -50,7 +52,7 @@ mod sharp_corners;
 pub use sharp_corners::offset_for as sharp_corner_offset;
 mod sort_key;
 mod stroke_grid;
-pub use extrusion::ExtrusionOptions;
+pub use extrusion::{pack_extrusion_code, unpack_datum_pair, ExtrusionOptions};
 pub use sort_key::{sort_key_name, sort_key_of, SortKeys};
 
 const DEFAULT_TOLERANCE: f32 = 0.02;
@@ -130,6 +132,8 @@ pub struct ZeroTessellator<I: std::ops::Add + From<lyon::tessellation::VertexId>
     pub is_line_layer: bool,
     /// Set when a line's width or offset varies by feature; packed into each stroke vertex.
     pub line_feature_style: Option<LineFeatureStyle>,
+    /// Set when `line-elevation` lifts stroked paths to 3D altitudes in metres.
+    pub line_elevation: Option<LineElevationOptions>,
     /// Colour of a one-pixel outline drawn along the edges of each filled polygon.
     pub outline_property: Option<crate::style::layer::StyleProperty<csscolorparser::Color>>,
     /// The outline of the feature being processed, drawn after its fill.
@@ -158,6 +162,7 @@ impl<I: std::ops::Add + From<lyon::tessellation::VertexId> + MaxIndex> Default
             style_property: None,
             is_line_layer: false,
             line_feature_style: None,
+            line_elevation: None,
             line_gradient: false,
             stroke: Default::default(),
             join_property: None,
@@ -236,6 +241,9 @@ where
 
     fn tessellate_strokes(&mut self) -> GeoResult<()> {
         let mut path = self.path_builder.replace(Path::builder()).build();
+        if self.line_elevation.is_some() {
+            path = line_elevation::clip_elevated_path(&path);
+        }
         if self.split_corners {
             path = sharp_corners::split(&path, self.sharp_corner_offset);
         }
@@ -287,6 +295,14 @@ where
             stroke_index_start,
             max_normal,
         );
+        if let Some(options) = &self.line_elevation {
+            let (metres, datum) = options.evaluate(&self.feature_properties);
+            line_elevation::apply_elevation(
+                &mut self.buffer.vertices[vertex_start..],
+                metres,
+                datum,
+            );
+        }
         Ok(())
     }
 

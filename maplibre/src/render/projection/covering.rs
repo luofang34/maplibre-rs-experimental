@@ -1,15 +1,13 @@
 //! Visible requests and speculative coverage under the active projection.
 use std::collections::HashSet;
 
-use cgmath::InnerSpace;
-
 use super::{globe_camera_for_view, ProjectionStateError};
 use crate::{
     coords::{ViewRegion, WorldTileCoords, ZoomLevel, TILE_SIZE},
     io::tile_sources::{covering_zoom, source_layer_groups, TileKind},
     projection::{
         globe::{
-            covering::{TileElevationProvider, TileElevationRange},
+            covering::TileElevationRange,
             covering_tiles::{
                 covering_tiles_with_history, elevation_for_tile_culling, lod::LodContext, FarPlane,
                 GlobeCoveringOptions, SourceZoomRange, ZoomRounding,
@@ -31,7 +29,6 @@ use crate::{
     },
     style::{source::Source, Style},
     tcs::world::World,
-    terrain::coverage::{IndexedTileElevation, TerrainCoverageIndex},
 };
 const ASSUMED_MAX_FEATURE_HEIGHT_METERS: f64 = 500.0;
 const MAX_MERCATOR_HORIZON_DEGREES: f64 = 89.25;
@@ -55,6 +52,9 @@ pub struct CoveringRequest {
     /// resolves out to the ground beyond its horizon; textures lie on the ground and
     /// foreshorten with it, so other requests keep GL JS's levels.
     pub surface: bool,
+    /// Vertical headroom in metres added above ground when culling view tiles for elevated 3D
+    /// volumes or elevated 3D lines (`0.0` for terrain, raster, and non-elevated styles).
+    pub headroom_meters: f64,
 }
 
 /// Default deepest zoom view tiles subdivide to, matching GL JS's `transform.maxZoom` (22)
@@ -87,6 +87,7 @@ impl CoveringRequest {
             rounding: ZoomRounding::Floor,
             zoom_range: SourceZoomRange::default(),
             surface: false,
+            headroom_meters: 0.0,
         }
     }
 
@@ -100,6 +101,7 @@ impl CoveringRequest {
             rounding: ZoomRounding::Floor,
             zoom_range,
             surface: false,
+            headroom_meters: style_elevated_headroom_meters(style),
         }
     }
 
@@ -119,6 +121,7 @@ impl CoveringRequest {
             rounding: ZoomRounding::Round,
             zoom_range,
             surface: false,
+            headroom_meters: 0.0,
         }
     }
 }
@@ -144,6 +147,7 @@ impl CoveringRequest {
             rounding: ZoomRounding::Floor,
             zoom_range,
             surface: true,
+            headroom_meters: 0.0,
         }
     }
 }
@@ -413,7 +417,7 @@ fn globe_view_region(
         min_meters: 0.0,
         max_meters: elevation_for_tile_culling(&camera, view_state.center_elevation()),
     };
-    let elevation = tile_elevation(style, world, fallback);
+    let elevation = tile_elevation(style, world, fallback, request.headroom_meters);
     // Both free-globe poses and host-supplied external views stand where the eye is placed,
     // often near the ground and looking toward the horizon or distant mountains.
     let pose = view_state.pose_view().is_some() || view_state.has_external_view();
@@ -430,6 +434,11 @@ fn globe_view_region(
             LodContext::screen_resolution(&camera, view_state.height(), level_offset)
         };
         (lod, FarPlane::HighestGround)
+    } else if request.headroom_meters > 0.0 {
+        (
+            LodContext::new(&camera, request.requested_zoom),
+            FarPlane::ElevatedMeters(request.headroom_meters.round() as u32),
+        )
     } else {
         (
             LodContext::new(&camera, request.requested_zoom),
@@ -470,62 +479,10 @@ fn union_regions(
     }
 }
 
-/// Culling bounds per tile: the loaded DEM's range where terrain has one, else `fallback`,
-/// the range GL JS assumes for tiles without elevation data.
-fn tile_elevation<'a>(
-    style: &Style,
-    world: &'a World,
-    fallback: TileElevationRange,
-) -> Box<dyn TileElevationProvider + 'a> {
-    match world.resources.get::<TerrainCoverageIndex>() {
-        Some(index) if style.terrain.is_some() => {
-            Box::new(IndexedTileElevation { index, fallback })
-        }
-        _ => Box::new(fallback),
-    }
-}
-
-fn nadir_ground_elevation(
-    style: &Style,
-    world: &World,
-    camera: &crate::projection::globe::camera::GlobeCameraState,
-) -> f64 {
-    let Some(index) = world
-        .resources
-        .get::<TerrainCoverageIndex>()
-        .filter(|_| style.terrain.is_some())
-    else {
-        return 0.0;
-    };
-    let position = camera.camera_position();
-    let len = position.magnitude();
-    if len > f64::EPSILON {
-        let sin_lat = position.y / len;
-        let sin_limit = crate::projection::globe::scale::MERCATOR_LATITUDE_LIMIT
-            .to_radians()
-            .sin();
-        if sin_lat > sin_limit {
-            return f64::from(index.poles().north_meters) * index.exaggeration();
-        }
-        if sin_lat < -sin_limit {
-            return f64::from(index.poles().south_meters) * index.exaggeration();
-        }
-    }
-    let nadir = crate::projection::globe::unit_sphere_to_lat_lon(position);
-    let x = nadir.longitude / 360.0 + 0.5;
-    let y = (1.0 - nadir.latitude.to_radians().tan().asinh() / std::f64::consts::PI) * 0.5;
-    index
-        .loaded_ground_cached(
-            &world.tiles,
-            x,
-            y,
-            crate::terrain::coverage::DemDetail::Finest,
-        )
-        .unwrap_or(0.0)
-}
-
+mod elevation;
 mod mercator;
 #[cfg(test)]
 pub(crate) mod tests;
 
+use elevation::{nadir_ground_elevation, style_elevated_headroom_meters, tile_elevation};
 use mercator::mercator_view_region;

@@ -36,8 +36,28 @@ impl LayerValidation<'_> {
                 self.property("paint.fill-extrusion-height", height, Feature);
                 let base = p.fill_extrusion_base.as_ref();
                 self.property("paint.fill-extrusion-base", base, Feature);
+                self.property(
+                    "paint.fill-extrusion-base-datum",
+                    p.fill_extrusion_base_datum.as_ref(),
+                    Feature,
+                );
+                self.property(
+                    "paint.fill-extrusion-height-datum",
+                    p.fill_extrusion_height_datum.as_ref(),
+                    Feature,
+                );
+                self.property(
+                    "paint.fill-extrusion-part",
+                    p.fill_extrusion_part.as_ref(),
+                    Feature,
+                );
                 let opacity = p.fill_extrusion_opacity.as_ref();
-                self.property("paint.fill-extrusion-opacity", opacity, Zoom);
+                let opacity_scope = if p.fill_extrusion_translucent == Some(true) {
+                    Feature
+                } else {
+                    Zoom
+                };
+                self.property("paint.fill-extrusion-opacity", opacity, opacity_scope);
             }
             LayerPaint::Line(p) => {
                 self.property("paint.line-color", p.line_color.as_ref(), Feature);
@@ -47,6 +67,12 @@ impl LayerValidation<'_> {
                 self.property("paint.line-gap-width", p.line_gap_width.as_ref(), Feature);
                 self.property("paint.line-blur", p.line_blur.as_ref(), Feature);
                 self.property("paint.line-width", p.line_width.as_ref(), Feature);
+                self.property("paint.line-elevation", p.line_elevation.as_ref(), Feature);
+                self.property(
+                    "paint.line-elevation-datum",
+                    p.line_elevation_datum.as_ref(),
+                    Feature,
+                );
                 if let Some(value) = &p.line_dasharray {
                     self.property(
                         "paint.line-dasharray",

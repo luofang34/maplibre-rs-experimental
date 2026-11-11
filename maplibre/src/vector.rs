@@ -71,17 +71,24 @@ struct LinePipeline {
     flat: wgpu::RenderPipeline,
     /// At heights of its own, as a bridge deck or tunnel is, tested against the terrain depth.
     structure: wgpu::RenderPipeline,
+    /// Elevated 3D paths (`line-elevation`) clipped to `[0, 4096]`, depth-tested without 2D
+    /// ground stencil clipping so high-altitude rims project freely under pitch.
+    elevated: wgpu::RenderPipeline,
     /// On the terrain surface at its width in screen pixels, with a terrain tile bound third.
     terrain: wgpu::RenderPipeline,
 }
 
-/// The passes of extruded polygons: depth, colour once per pixel, and the stencil reset.
+/// The passes of extruded polygons: depth, colour once per pixel, stencil reset, and translucent shells.
 struct ExtrusionPipeline {
     depth: wgpu::RenderPipeline,
     color: wgpu::RenderPipeline,
     clear: wgpu::RenderPipeline,
     /// The colour pass with an image in place of the colour.
     pattern: wgpu::RenderPipeline,
+    /// Back-facing shell of a closed translucent 3D volume (`depth_write = false`).
+    translucent_back: wgpu::RenderPipeline,
+    /// Front-facing shell of a closed translucent 3D volume (`depth_write = false`).
+    translucent_front: wgpu::RenderPipeline,
 }
 
 struct CirclePipeline(wgpu::RenderPipeline);

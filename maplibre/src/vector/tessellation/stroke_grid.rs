@@ -24,6 +24,11 @@ where
         if crate::vector::structures::is_overlay(layer) {
             self.subdivision_granularity = self.subdivision_granularity.max(TERRAIN_MESH_SIZE);
             self.terrain_grid = true;
+        } else if matches!(
+            &layer.paint,
+            Some(crate::style::layer::LayerPaint::Line(paint)) if paint.may_use_vertex_agl()
+        ) {
+            self.subdivision_granularity = self.subdivision_granularity.max(32);
         }
     }
 
