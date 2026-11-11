@@ -230,7 +230,9 @@ impl PipelineSetup<'_> {
     }
 
     fn create_extrusion(&self, pass: shaders::ExtrusionPass) -> wgpu::RenderPipeline {
-        use shaders::ExtrusionPass::{Clear, Color, Depth, PatternColor};
+        use shaders::ExtrusionPass::{
+            Clear, Color, Depth, PatternColor, TranslucentBack, TranslucentFront,
+        };
 
         let shader = shaders::FillExtrusionShader {
             format: self.format,
@@ -242,6 +244,8 @@ impl PipelineSetup<'_> {
                 Color => "extrusion_color_pipeline",
                 PatternColor => "extrusion_pattern_pipeline",
                 Clear => "extrusion_clear_pipeline",
+                TranslucentBack => "extrusion_translucent_back_pipeline",
+                TranslucentFront => "extrusion_translucent_front_pipeline",
             }
             .into(),
             self.settings,
@@ -258,10 +262,17 @@ impl PipelineSetup<'_> {
         )
         .with_depth_write()
         .describe_render_pipeline();
+        descriptor.primitive.cull_mode = match pass {
+            TranslucentBack => Some(wgpu::Face::Front),
+            TranslucentFront => Some(wgpu::Face::Back),
+            _ => None,
+        };
         if let Some(state) = &mut descriptor.depth_stencil {
             state.depth_write_enabled = Some(pass == Depth);
             state.depth_compare = Some(match pass {
-                Depth | Color | PatternColor => wgpu::CompareFunction::GreaterEqual,
+                Depth | Color | PatternColor | TranslucentBack | TranslucentFront => {
+                    wgpu::CompareFunction::GreaterEqual
+                }
                 Clear => wgpu::CompareFunction::Always,
             });
             // Tile references use the low seven bits; the top bit marks the pixels the colour
@@ -279,14 +290,17 @@ impl PipelineSetup<'_> {
                 pass_op: wgpu::StencilOperation::Zero,
             };
             match pass {
-                Depth => {}
+                Depth | TranslucentBack | TranslucentFront => {}
                 Color | PatternColor => state.stencil.front = marked,
                 Clear => state.stencil.front = unmark,
             }
             state.stencil.back = state.stencil.front;
-            if pass != Depth {
+            if matches!(pass, Color | PatternColor | Clear) {
                 state.stencil.read_mask = STENCIL_MARK;
                 state.stencil.write_mask = STENCIL_MARK;
+            } else if matches!(pass, TranslucentBack | TranslucentFront) {
+                state.stencil.read_mask = 0;
+                state.stencil.write_mask = 0;
             }
         }
         let layouts: &[&wgpu::BindGroupLayout] = if pass == PatternColor {
@@ -303,6 +317,8 @@ impl PipelineSetup<'_> {
             color: self.create_extrusion(shaders::ExtrusionPass::Color),
             clear: self.create_extrusion(shaders::ExtrusionPass::Clear),
             pattern: self.create_extrusion(shaders::ExtrusionPass::PatternColor),
+            translucent_back: self.create_extrusion(shaders::ExtrusionPass::TranslucentBack),
+            translucent_front: self.create_extrusion(shaders::ExtrusionPass::TranslucentFront),
         });
     }
 
@@ -334,6 +350,13 @@ impl PipelineSetup<'_> {
                     &shader,
                     &[self.projection, dashes],
                     true,
+                ),
+                elevated: self.create_with_clipping(
+                    "elevated_line_pipeline",
+                    &shader,
+                    &[self.projection, dashes],
+                    true,
+                    false,
                 ),
                 terrain: self.create_terrain_line(dashes),
             }

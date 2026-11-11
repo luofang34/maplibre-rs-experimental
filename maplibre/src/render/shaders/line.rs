@@ -64,10 +64,10 @@ fn line_vertex(source: &'static str) -> VertexState {
                         wgpu::VertexFormat::Float32x4,
                         1,
                     ),
-                    // Packed per-feature width and offset; zero bits leave the layer's own.
+                    // Packed per-feature width and offset in x, plus elevated-line datum/side in y.
                     attribute(
                         std::mem::offset_of!(ShaderVertex, edge_distance) as u64,
-                        wgpu::VertexFormat::Float32,
+                        wgpu::VertexFormat::Float32x2,
                         10,
                     ),
                 ],

@@ -69,15 +69,22 @@ fn tessellator(paint: &LayerPaint, request: &VectorTileRequest) -> ZeroTessellat
             let tessellator = ZeroTessellator::default().with_extrusion(
                 ExtrusionOptions::for_paint(extrusion, request.overscaling()),
             );
+            let min_grid = if extrusion.may_use_vertex_agl() {
+                16
+            } else {
+                2
+            };
             if request.projection.uses_globe_rendering(style_zoom) {
                 // Roofs and the edges of walls follow the sphere as fills and lines do.
                 let last_tile = i64::from(crate::coords::ZOOM_BOUNDS[usize::from(zoom)]) - 1;
                 tessellator.with_globe_subdivision(
-                    granularity_for_zoom(128, 2, zoom),
+                    granularity_for_zoom(128, min_grid, zoom),
                     zoom == 0,
                     request.coords.y == 0,
                     i64::from(request.coords.y) == last_tile,
                 )
+            } else if extrusion.may_use_vertex_agl() {
+                tessellator.with_globe_subdivision(16, false, false, false)
             } else {
                 tessellator
             }
@@ -128,6 +135,8 @@ fn tessellator(paint: &LayerPaint, request: &VectorTileRequest) -> ZeroTessellat
                 || paint.line_dasharray.is_some();
             tessellator.line_feature_style =
                 super::super::tessellation::LineFeatureStyle::for_paint(paint, style_zoom);
+            tessellator.line_elevation =
+                super::super::tessellation::LineElevationOptions::for_paint(paint, style_zoom);
         }
         _ => {}
     }

@@ -64,7 +64,7 @@ fn main(
     @location(7) translate4: vec4<f32>,
     @location(8) color: vec4<f32>,
     @location(9) line_scale: vec2<f32>,
-    @location(10) packed_style: f32,
+    @location(10) packed_and_code: vec2<f32>,
     @location(11) viewport: vec2<f32>,
     // The square of the tile this draw covers, as minimum and maximum tile coordinates.
     @location(12) clip_region: vec4<f32>,
@@ -73,6 +73,10 @@ fn main(
     @location(15) layer_translate: vec2<f32>,
 ) -> VertexOutput {
     let normal = path.xy;
+    let packed_style = packed_and_code.x;
+    let style_flags = u32(line_style.w + 0.5);
+    let is_gradient = (style_flags & 1u) != 0u;
+    let elevated_line = (style_flags & 2u) != 0u;
     // A width or offset that varies by feature rides in the mantissa of `packed_style`.
     let payload = bitcast<u32>(packed_style) & 0x7fffffu;
     let per_feature = payload != 0u;
@@ -80,14 +84,18 @@ fn main(
     let feature_offset = f32(i32(payload & 0x7ffu) - 1024) / 8.0;
     let line_width_px = select(line_width, feature_width, per_feature) * line_scale.x;
     // A gradient line measures its dashes in pixels rather than line widths.
-    let dash_unit = select(line_width_px, 1.0, line_style.w > 0.5);
+    let dash_unit = select(line_width_px, 1.0, is_gradient);
     let line_offset = select(line_style.x, feature_offset, per_feature);
     // A stroke's elevation slot carries its side and, in the mantissa, the gap width and blur of
     // its feature in eighths of a pixel; all ones leaves the layer's own.
     // A spatial line has a real elevation there instead, and keeps the layer's values.
     let has_stroke_bits = path.w <= -1e20;
     let stroke_bits = select(0x3fffffu, bitcast<u32>(path.w) & 0x7fffffu, has_stroke_bits);
-    let negative_side = has_stroke_bits && ((stroke_bits >> 22u) & 1u) == 1u;
+    let negative_side = select(
+        fract(packed_and_code.y) > 0.25,
+        ((stroke_bits >> 22u) & 1u) == 1u,
+        has_stroke_bits,
+    );
     let gap_bits = (stroke_bits >> 11u) & 0x7ffu;
     let blur_bits = stroke_bits & 0x7ffu;
     let gap_width = select(f32(gap_bits) / 8.0, line_style.y, gap_bits == 0x7ffu);
@@ -126,7 +134,25 @@ fn main(
     // and the edge lies that much further out along it.
     let extent = length(normal);
     let moved = outset * max(extent, 1.0) + side * line_offset;
-    if spatial {
+    if spatial && elevated_line {
+        // Elevated 3D paths (`line-elevation`) keep crisp screen-pixel widths at all pitches and
+        // when viewed from above, eye level, or below by rotating the projected path tangent 90°
+        // in screen pixels (without flipping across the horizontal plane's horizon).
+        let position_3d = vec3<f32>(position + layer_translate, elevation);
+        let east = project_tile_tangent_3d(position_3d, vec2<f32>(1.0, 0.0), transform, tile_mercator_coords);
+        let south = project_tile_tangent_3d(position_3d, vec2<f32>(0.0, 1.0), transform, tile_mercator_coords);
+        let half_viewport = viewport * 0.5;
+        let w = max(center.w, 1e-6);
+        let east_px = (east.xy * w - center.xy * east.w) / (w * w) * half_viewport;
+        let south_px = (south.xy * w - center.xy * south.w) / (w * w) * half_viewport;
+        let unit_n = normal / max(extent, 1e-6);
+        let tangent_px = east_px * (-unit_n.y) + south_px * unit_n.x;
+        let perp_px = vec2<f32>(-tangent_px.y, tangent_px.x);
+        let perp_len = length(perp_px);
+        let direction = select(vec2<f32>(1.0, 0.0), perp_px / max(perp_len, 1e-12), perp_len > 1e-9);
+        center = vec4<f32>(center.xy + direction * moved / half_viewport * center.w, center.zw);
+        center.z += max(abs(center.z), 1e-8) * 5e-5;
+    } else if spatial {
         // Decks share the map-space width of adjoining draped roads, including foreshortening.
         // Casing and deck share the centerline tangent plane. Independently projecting
         // different widths onto a curved sphere gives them intersecting depth surfaces.
@@ -185,7 +211,7 @@ fn main(
         select(
             vec2<f32>(path.z / max(dash_scale * dash_unit, 1e-6), dash_unit),
             gradient_dash,
-            line_style.w > 0.5,
+            is_gradient,
         ),
         // A gradient layer carries the length of the line in the red channel of its colour.
         path.z / max(color.x, 1e-6),

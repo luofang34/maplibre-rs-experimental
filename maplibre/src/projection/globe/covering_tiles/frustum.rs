@@ -32,6 +32,10 @@ pub(crate) enum FarPlane {
     /// still shows. The horizon test of each tile's own elevations culls what that ground
     /// does not lift.
     HighestGround,
+    /// As far beyond the sea-level horizon as elevated 3D layers (`headroom_meters` above
+    /// `highest_ground_meters`, e.g. high-altitude airspace volumes) can rise into view,
+    /// keeping upward-pitched and over-the-horizon 3D frustums non-degenerate.
+    ElevatedMeters(u32),
 }
 
 pub(crate) struct GlobeFrustum {
@@ -72,6 +76,12 @@ impl GlobeFrustum {
                 let highest = camera
                     .body()
                     .unit_radius_at(camera.body().highest_ground_meters);
+                (highest * highest - 1.0).sqrt()
+            }
+            FarPlane::ElevatedMeters(headroom_meters) => {
+                let highest = camera.body().unit_radius_at(
+                    camera.body().highest_ground_meters + f64::from(headroom_meters),
+                );
                 (highest * highest - 1.0).sqrt()
             }
         };

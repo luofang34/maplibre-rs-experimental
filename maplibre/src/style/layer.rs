@@ -17,9 +17,11 @@ use crate::style::{
     hillshade::{ColorReliefPaint, HillshadePaint},
 };
 
+mod datum;
 mod fill_outline;
 mod paint;
 mod serialization;
+pub use datum::{ElevationDatum, ExtrusionPart};
 pub use paint::{
     BackgroundPaint, FillExtrusionPaint, FillPaint, LinePaint, RasterPaint, RasterResampling,
     SymbolPaint, TranslateAnchor,
@@ -67,6 +69,9 @@ impl LayerPaint {
     pub fn opacity(&self) -> Option<StyleProperty<f32>> {
         match self {
             LayerPaint::Fill(paint) => paint.fill_opacity.clone(),
+            LayerPaint::FillExtrusion(paint) if paint.fill_extrusion_translucent == Some(true) => {
+                paint.fill_extrusion_opacity.clone()
+            }
             LayerPaint::Line(paint) => paint.line_opacity.clone(),
             LayerPaint::Circle(paint) => paint.circle_opacity.clone(),
             LayerPaint::ColorRelief(paint) => paint.color_relief_opacity.clone(),

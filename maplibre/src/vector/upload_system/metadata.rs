@@ -48,11 +48,13 @@ pub(super) fn metadata_for_layer(
                 .and_then(|property| property.evaluate_at_zoom(f64::from(zoom)))
                 .unwrap_or(0.0)
         };
+        let flags = u8::from(paint.line_gradient.is_some())
+            | (u8::from(paint.line_elevation.is_some()) << 1);
         layer_metadata.circle_params = [
             value(&paint.line_offset),
             value(&paint.line_gap_width).max(0.0),
             value(&paint.line_blur).max(0.0),
-            f32::from(paint.line_gradient.is_some()),
+            f32::from(flags),
         ];
     }
     if let Some(LayerPaint::Circle(paint)) = &style_layer.paint {
@@ -71,12 +73,17 @@ pub(super) fn metadata_for_layer(
 
     if let Some(LayerPaint::FillExtrusion(paint)) = &style_layer.paint {
         let zoom = f64::from(zoom);
-        let opacity = paint
-            .fill_extrusion_opacity
-            .as_ref()
-            .and_then(|opacity| opacity.evaluate_at_zoom(zoom))
-            .unwrap_or(1.0)
-            .clamp(0.0, 1.0);
+        // Translucent volumes fold `fill-extrusion-opacity` into each feature's colour alpha.
+        let opacity = if paint.fill_extrusion_translucent == Some(true) {
+            1.0
+        } else {
+            paint
+                .fill_extrusion_opacity
+                .as_ref()
+                .and_then(|opacity| opacity.evaluate_at_zoom(zoom))
+                .unwrap_or(1.0)
+                .clamp(0.0, 1.0)
+        };
         let gradient = paint.fill_extrusion_vertical_gradient.unwrap_or(true);
         let height_blend = paint
             .fill_extrusion_height

@@ -17,6 +17,10 @@ pub enum ExtrusionPass {
     PatternColor,
     /// Nothing but the stencil reset of the pixels the colour pass marked.
     Clear,
+    /// Back-facing shell of a translucent 3D volume, depth-tested without writing depth.
+    TranslucentBack,
+    /// Front-facing shell of a translucent 3D volume, depth-tested without writing depth.
+    TranslucentFront,
 }
 
 /// Walls and roofs lit by the root light, with premultiplied-alpha output.
@@ -35,7 +39,11 @@ impl Shader for FillExtrusionShader {
                 include_str!("projection.vertex.wgsl"),
                 include_str!("fill_extrusion.vertex.wgsl")
             ),
-            entry_point: "main",
+            entry_point: match self.pass {
+                ExtrusionPass::TranslucentBack => "translucent_back_main",
+                ExtrusionPass::TranslucentFront => "translucent_front_main",
+                _ => "main",
+            },
             buffers: vec![
                 VertexBufferLayout {
                     array_stride: std::mem::size_of::<ShaderVertex>() as u64,
@@ -129,7 +137,10 @@ impl Shader for FillExtrusionShader {
                 blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
                 write_mask: match self.pass {
                     ExtrusionPass::Depth | ExtrusionPass::Clear => wgpu::ColorWrites::empty(),
-                    ExtrusionPass::Color | ExtrusionPass::PatternColor => wgpu::ColorWrites::ALL,
+                    ExtrusionPass::Color
+                    | ExtrusionPass::PatternColor
+                    | ExtrusionPass::TranslucentBack
+                    | ExtrusionPass::TranslucentFront => wgpu::ColorWrites::ALL,
                 },
             })],
         }

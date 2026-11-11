@@ -152,18 +152,13 @@ enum LineMode {
     Flat,
     /// At heights of its own over the terrain.
     Structure,
+    /// At `line-elevation` altitudes in 3D space without 2D ground stencil clipping.
+    Elevated,
     /// On the terrain surface at its width in screen pixels.
     Terrain,
 }
 
 fn line_mode(world: &World, item: &LayerItem) -> LineMode {
-    let terrain = world
-        .resources
-        .get::<crate::terrain::TerrainFrame>()
-        .is_some_and(|frame| frame.active);
-    if !terrain {
-        return LineMode::Flat;
-    }
     let kind = world
         .resources
         .get::<Eventually<VectorBufferPool>>()
@@ -177,6 +172,16 @@ fn line_mode(world: &World, item: &LayerItem) -> LineMode {
                 .find(|entry| entry.style_layer.id == item.style_layer)
         })
         .and_then(|entry| super::structures::kind(&entry.style_layer));
+    if matches!(kind, Some(super::structures::StructureKind::ElevatedLine)) {
+        return LineMode::Elevated;
+    }
+    let terrain = world
+        .resources
+        .get::<crate::terrain::TerrainFrame>()
+        .is_some_and(|frame| frame.active);
+    if !terrain {
+        return LineMode::Flat;
+    }
     match kind {
         None => LineMode::Flat,
         Some(super::structures::StructureKind::Overlay) => LineMode::Terrain,
@@ -205,6 +210,7 @@ impl RenderCommand<LayerItem> for SetLineTilePipeline {
         pass.set_pipeline(match line_mode(world, item) {
             LineMode::Flat => &pipeline.flat,
             LineMode::Structure => &pipeline.structure,
+            LineMode::Elevated => &pipeline.elevated,
             LineMode::Terrain => &pipeline.terrain,
         });
         pass.set_bind_group(
@@ -293,6 +299,10 @@ pub mod extrusion_pass {
     pub const CLEAR: u8 = 2;
     /// Colour from an image, once per pixel.
     pub const PATTERN: u8 = 3;
+    /// Back-facing shell of a translucent 3D volume.
+    pub const TRANSLUCENT_BACK: u8 = 4;
+    /// Front-facing shell of a translucent 3D volume.
+    pub const TRANSLUCENT_FRONT: u8 = 5;
 }
 
 impl<P: PhaseItem, const PASS: u8> RenderCommand<P> for SetExtrusionPipeline<PASS> {
@@ -314,6 +324,8 @@ impl<P: PhaseItem, const PASS: u8> RenderCommand<P> for SetExtrusionPipeline<PAS
             extrusion_pass::DEPTH => &pipeline.depth,
             extrusion_pass::COLOR => &pipeline.color,
             extrusion_pass::PATTERN => &pipeline.pattern,
+            extrusion_pass::TRANSLUCENT_BACK => &pipeline.translucent_back,
+            extrusion_pass::TRANSLUCENT_FRONT => &pipeline.translucent_front,
             _ => &pipeline.clear,
         });
         pass.set_bind_group(
@@ -366,6 +378,16 @@ pub type DrawExtrusionPatternColor = (
 /// Resets the stencil bit the colour draw marked.
 pub type DrawExtrusionClear = (
     SetExtrusionPipeline<{ extrusion_pass::CLEAR }>,
+    DrawVectorTile,
+);
+/// Draws the back-facing shell of a translucent 3D volume bucket.
+pub type DrawExtrusionTranslucentBack = (
+    SetExtrusionPipeline<{ extrusion_pass::TRANSLUCENT_BACK }>,
+    DrawVectorTile,
+);
+/// Draws the front-facing shell of a translucent 3D volume bucket.
+pub type DrawExtrusionTranslucentFront = (
+    SetExtrusionPipeline<{ extrusion_pass::TRANSLUCENT_FRONT }>,
     DrawVectorTile,
 );
 /// Binds and draws a polygon-fill bucket when both commands succeed.
