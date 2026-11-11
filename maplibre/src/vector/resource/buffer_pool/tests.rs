@@ -121,7 +121,7 @@ fn ring_wrap_preserves_live_allocations() {
         BackingBufferDescriptor::new(TestBuffer { size: 128 }, 128),
         BackingBufferDescriptor::new(TestBuffer { size: 128 }, 128),
     );
-    for (vertices, remaining) in [(2, 80), (2, 32), (1, 8), (1, 24), (1, 0), (1, 24), (1, 0)] {
+    for (vertices, remaining) in [(2, 72), (2, 24), (1, 0), (1, 24), (1, 0), (1, 24), (1, 0)] {
         pool.allocate_layer_geometry(
             &TestQueue,
             WorldTileCoords::default(),
@@ -339,3 +339,5 @@ fn more_feature_records_than_vertices_are_refused() {
         })
     ));
 }
+
+mod paging;

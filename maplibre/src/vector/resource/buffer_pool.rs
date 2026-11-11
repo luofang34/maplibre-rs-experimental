@@ -1,4 +1,9 @@
-//! A ring-buffer like pool of [buffers](wgpu::Buffer).
+//! Paged, coalescing GPU geometry buffer pool.
+//!
+//! Geometry layers suballocate vertices, indices, per-layer metadata, and per-vertex feature
+//! metadata from fixed-size GPU slab pages allocated on demand up to [`BufferPoolSizes`]. Freed
+//! ranges coalesce immediately in `O(log F)` within their page, and completely empty burst pages
+//! are returned to the GPU automatically.
 
 use std::{
     collections::{btree_map, BTreeMap, HashSet, VecDeque},
@@ -9,6 +14,9 @@ use std::{
 };
 
 use bytemuck::Pod;
+use page::{
+    BufferPage, ByteCapacities, ElementStrides, PageAllocation, PageFactory, DEFAULT_PAGE_VERTICES,
+};
 
 use crate::{
     coords::{Quadkey, WorldTileCoords},
@@ -28,14 +36,14 @@ pub type PatternRuns = Vec<(u32, Range<u32>)>;
 /// The sort key and index range of each run of features that share a key.
 pub type SortRuns = Vec<(f32, Range<u32>)>;
 
-/// This is inspired by the memory pool in Vulkan documented
-/// [here](https://gpuopen-librariesandsdks.github.io/VulkanMemoryAllocator/html/custom_memory_pools.html).
+/// Paged, address-coalescing pool of GPU geometry buffers inspired by Vulkan Memory Allocator
+/// custom pools (`VmaPool`).
 #[derive(Debug)]
 pub struct BufferPool<Q, B, V, I, TM, FM> {
-    vertices: BackingBuffer<B>,
-    indices: BackingBuffer<B>,
-    layer_metadata: BackingBuffer<B>,
-    feature_metadata: BackingBuffer<B>,
+    pages: Vec<Option<BufferPage<B>>>,
+    max_capacities: ByteCapacities,
+    max_page_bytes: wgpu::BufferAddress,
+    page_factory: Option<PageFactory<B>>,
 
     index: RingIndex,
     /// For layers whose pattern varies by feature: the pattern key and index range of each run
@@ -53,11 +61,16 @@ pub struct BufferPool<Q, B, V, I, TM, FM> {
     phantom_fm: PhantomData<FM>,
 }
 
-#[derive(Clone, Copy, Debug)]
+/// Identifies one of the four typed sub-buffers in a [`BufferPool`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BackingBufferType {
+    /// Per-vertex positions/normals/attributes.
     Vertices,
+    /// Indexed triangle list indices.
     Indices,
+    /// Per-layer paint/index metadata.
     Metadata,
+    /// Per-vertex feature paint metadata (indexed in lockstep with [`Self::Vertices`]).
     FeatureMetadata,
 }
 
@@ -65,18 +78,13 @@ pub enum BackingBufferType {
 struct BackingBuffer<B> {
     /// The internal structure which is used for storage
     inner: B,
-    /// The size of the `inner` buffer
+    /// The logical usable byte size of `inner`
     inner_size: wgpu::BufferAddress,
-    typ: BackingBufferType,
 }
 
 impl<B> BackingBuffer<B> {
-    fn new(inner: B, inner_size: wgpu::BufferAddress, typ: BackingBufferType) -> Self {
-        Self {
-            inner,
-            inner_size,
-            typ,
-        }
+    fn new(inner: B, inner_size: wgpu::BufferAddress) -> Self {
+        Self { inner, inner_size }
     }
 }
 
@@ -88,37 +96,28 @@ fn fitting_buffer_size(
     largest: wgpu::BufferAddress,
 ) -> wgpu::BufferAddress {
     let element = element as wgpu::BufferAddress;
-    (element * count).min(largest) / element * element
+    if element == 0 {
+        return 0;
+    }
+    element.saturating_mul(count).min(largest) / element * element
 }
 
 impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM, FM> {
+    /// Creates a fixed single-page pool backed by pre-created buffer descriptors.
     pub fn new(
         vertices: BackingBufferDescriptor<B>,
         indices: BackingBufferDescriptor<B>,
         layer_metadata: BackingBufferDescriptor<B>,
         feature_metadata: BackingBufferDescriptor<B>,
     ) -> Self {
+        let strides = ElementStrides::of::<V, I, TM, FM>();
+        let page = BufferPage::new(vertices, indices, layer_metadata, feature_metadata, strides);
+        let max_capacities = page.capacities();
         Self {
-            vertices: BackingBuffer::new(
-                vertices.buffer,
-                vertices.inner_size,
-                BackingBufferType::Vertices,
-            ),
-            indices: BackingBuffer::new(
-                indices.buffer,
-                indices.inner_size,
-                BackingBufferType::Indices,
-            ),
-            layer_metadata: BackingBuffer::new(
-                layer_metadata.buffer,
-                layer_metadata.inner_size,
-                BackingBufferType::Metadata,
-            ),
-            feature_metadata: BackingBuffer::new(
-                feature_metadata.buffer,
-                feature_metadata.inner_size,
-                BackingBufferType::FeatureMetadata,
-            ),
+            pages: vec![Some(page)],
+            max_capacities,
+            max_page_bytes: u64::MAX,
+            page_factory: None,
             index: RingIndex::new(),
             pattern_runs: Default::default(),
             sort_runs: Default::default(),
@@ -131,23 +130,94 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         }
     }
 
+    /// Creates an on-demand paged pool that allocates pages lazily through `factory` up to
+    /// `sizes` total elements, with each individual buffer capped at `max_page_bytes`.
+    pub fn with_page_factory(
+        sizes: BufferPoolSizes,
+        max_page_bytes: wgpu::BufferAddress,
+        factory: impl Fn(BackingBufferType, wgpu::BufferAddress) -> B + 'static,
+    ) -> Self {
+        let max_capacities = ByteCapacities {
+            vertices: sizes.vertices.saturating_mul(size_of::<V>() as u64),
+            indices: sizes.indices.saturating_mul(size_of::<I>() as u64),
+            layer_metadata: sizes.layer_metadata.saturating_mul(size_of::<TM>() as u64),
+            feature_metadata: sizes
+                .feature_metadata
+                .saturating_mul(size_of::<FM>() as u64),
+        };
+        Self {
+            pages: Vec::new(),
+            max_capacities,
+            max_page_bytes,
+            page_factory: (!max_capacities.is_empty()).then(|| PageFactory(Box::new(factory))),
+            index: RingIndex::new(),
+            pattern_runs: Default::default(),
+            sort_runs: Default::default(),
+            revision: 0,
+            phantom_v: Default::default(),
+            phantom_i: Default::default(),
+            phantom_q: Default::default(),
+            phantom_m: Default::default(),
+            phantom_fm: Default::default(),
+        }
+    }
+
+    /// Clears all resident geometry allocations and reclaims excess empty pages.
     pub fn clear(&mut self) {
         self.index.clear();
         self.pattern_runs.clear();
         self.sort_runs.clear();
+        for page in self.pages.iter_mut().flatten() {
+            page.clear();
+        }
+        self.reclaim_empty_pages(1);
         self.revision = self.revision.wrapping_add(1);
+    }
+
+    /// Drops empty pages beyond `keep_spare` when the pool owns a page factory.
+    ///
+    /// Passing `1` retains one warm page to avoid allocation churn across pan/reload boundaries;
+    /// passing `0` under memory pressure releases all unused GPU pages immediately.
+    pub fn reclaim_empty_pages(&mut self, keep_spare: usize) {
+        if self.page_factory.is_none() {
+            return;
+        }
+        let mut spare_kept = 0usize;
+        for slot in &mut self.pages {
+            let is_empty = slot.as_ref().is_some_and(BufferPage::is_empty);
+            if is_empty {
+                if spare_kept < keep_spare {
+                    spare_kept += 1;
+                } else {
+                    *slot = None;
+                }
+            }
+        }
+        while matches!(self.pages.last(), Some(None)) {
+            self.pages.pop();
+        }
+    }
+
+    /// Number of currently allocated backing pages.
+    pub fn page_count(&self) -> usize {
+        self.pages.iter().filter(|slot| slot.is_some()).count()
     }
 
     /// Whether the pool holds non-zero vertex and index backing capacity.
     pub fn has_capacity(&self) -> bool {
-        self.vertices.inner_size > 0 && self.indices.inner_size > 0
+        self.max_capacities.vertices > 0 && self.max_capacities.indices > 0
     }
 
     /// Releases GPU geometry when the tile data and its glyph atlas leave the CPU cache.
     pub fn remove_tile(&mut self, coords: WorldTileCoords) {
         self.pattern_runs.retain(|(tile, _), _| *tile != coords);
         self.sort_runs.retain(|(tile, _), _| *tile != coords);
-        if self.index.remove_tile(coords) {
+        let removed = self.index.remove_tile(coords);
+        if !removed.is_empty() {
+            for entry in &removed {
+                self.free_entry_ranges(entry);
+            }
+            self.reclaim_empty_pages(1);
             self.revision = self.revision.wrapping_add(1);
         }
     }
@@ -156,7 +226,12 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
     pub fn remove_layer(&mut self, coords: WorldTileCoords, id: &str) {
         self.pattern_runs.remove(&(coords, id.to_owned()));
         self.sort_runs.remove(&(coords, id.to_owned()));
-        if self.index.remove_layer(coords, id, None) {
+        let removed = self.index.remove_layer(coords, id, None);
+        if !removed.is_empty() {
+            for entry in &removed {
+                self.free_entry_ranges(entry);
+            }
+            self.reclaim_empty_pages(1);
             self.revision = self.revision.wrapping_add(1);
         }
     }
@@ -199,53 +274,61 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
 
     #[cfg(test)]
     fn available_space(&self, typ: BackingBufferType) -> wgpu::BufferAddress {
-        let gap = self.index.find_largest_gap(
-            typ,
-            match typ {
-                BackingBufferType::Vertices => &self.vertices,
-                BackingBufferType::Indices => &self.indices,
-                BackingBufferType::Metadata => &self.layer_metadata,
-                BackingBufferType::FeatureMetadata => &self.feature_metadata,
-            }
-            .inner_size,
-        );
-
-        gap.end - gap.start
+        let in_pages = self
+            .pages
+            .iter()
+            .flatten()
+            .map(|page| match typ {
+                BackingBufferType::Vertices => page.vertex_alloc.largest_free_block(),
+                BackingBufferType::Indices => page.index_alloc.largest_free_block(),
+                BackingBufferType::Metadata => page.layer_alloc.largest_free_block(),
+                BackingBufferType::FeatureMetadata => {
+                    let v_stride = size_of::<V>() as u64;
+                    let fm_stride = size_of::<FM>() as u64;
+                    page.vertex_alloc
+                        .largest_free_block()
+                        .checked_div(v_stride)
+                        .unwrap_or(0)
+                        * fm_stride
+                }
+            })
+            .max()
+            .unwrap_or(0);
+        if self.page_factory.is_some() {
+            let unallocated = self
+                .max_capacities
+                .saturating_sub(self.allocated_capacities())
+                .get(typ);
+            in_pages.max(unallocated.min(self.max_page_bytes))
+        } else {
+            in_pages
+        }
     }
 
-    pub fn vertices(&self) -> &B {
-        &self.vertices.inner
+    /// Backing vertex buffer of `entry`'s page.
+    pub fn vertices_for(&self, entry: &IndexEntry) -> &B {
+        &self.page_of(entry).vertices.inner
     }
 
-    pub fn indices(&self) -> &B {
-        &self.indices.inner
+    /// Backing index buffer of `entry`'s page.
+    pub fn indices_for(&self, entry: &IndexEntry) -> &B {
+        &self.page_of(entry).indices.inner
     }
 
-    pub fn metadata(&self) -> &B {
-        &self.layer_metadata.inner
+    /// Backing layer-metadata buffer of `entry`'s page.
+    pub fn metadata_for(&self, entry: &IndexEntry) -> &B {
+        &self.page_of(entry).layer_metadata.inner
     }
 
-    pub fn feature_metadata(&self) -> &B {
-        &self.feature_metadata.inner
+    /// Backing feature-metadata buffer of `entry`'s page.
+    pub fn feature_metadata_for(&self, entry: &IndexEntry) -> &B {
+        &self.page_of(entry).feature_metadata.inner
     }
 
-    /// The VertexBuffers can contain padding elements. Not everything from a VertexBuffers is usable.
-    /// The function returns the `bytes` and `aligned_bytes`. See [`OverAlignedVertexBuffer`].
-    fn align(
-        stride: wgpu::BufferAddress,
-        elements: wgpu::BufferAddress,
-        usable_elements: wgpu::BufferAddress,
-    ) -> (wgpu::BufferAddress, wgpu::BufferAddress) {
-        let bytes = elements * stride;
-
-        let usable_bytes = (usable_elements * stride) as wgpu::BufferAddress;
-
-        let align = wgpu::COPY_BUFFER_ALIGNMENT;
-        let padding = (align - usable_bytes % align) % align;
-
-        let aligned_bytes = usable_bytes + padding;
-
-        (bytes, aligned_bytes)
+    fn page_of(&self, entry: &IndexEntry) -> &BufferPage<B> {
+        self.pages[usize::from(entry.page)]
+            .as_ref()
+            .expect("live IndexEntry always references an allocated BufferPage")
     }
 
     /// Number of allocations so far; changes whenever the geometry held changes.
@@ -255,12 +338,10 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
 
     /// Returns `true` when all backing sub-allocation capacities are zero.
     pub fn is_empty(&self) -> bool {
-        self.vertices.inner_size == 0
-            && self.indices.inner_size == 0
-            && self.layer_metadata.inner_size == 0
-            && self.feature_metadata.inner_size == 0
+        self.max_capacities.is_empty()
     }
 
+    /// Style layer IDs currently resident at `coords`.
     pub fn get_loaded_style_layers_at(&self, coords: WorldTileCoords) -> Option<HashSet<&str>> {
         self.index.get_layers(coords).map(|layers| {
             layers
@@ -270,6 +351,7 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         })
     }
 
+    /// Whether `style_layer_id` has resident GPU geometry at `coords`.
     pub fn has_layer(&self, coords: WorldTileCoords, style_layer_id: &str) -> bool {
         self.index.get_layers(coords).is_some_and(|layers| {
             layers
@@ -278,86 +360,7 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         })
     }
 
-    #[tracing::instrument(skip_all)]
-    pub fn update_layer_metadata(&self, queue: &Q, entry: &IndexEntry, layer_metadata: TM) {
-        let layer_metadata_stride = size_of::<TM>() as wgpu::BufferAddress; // TODO: deduplicate
-        let (layer_metadata_bytes, aligned_layer_metadata_bytes) =
-            Self::align(layer_metadata_stride, 1, 1);
-
-        let allocated = entry.buffer_layer_metadata.end - entry.buffer_layer_metadata.start;
-        if allocated != layer_metadata_bytes {
-            tracing::error!(
-                coords = %entry.coords,
-                layer = %entry.style_layer.id,
-                allocated,
-                offered = layer_metadata_bytes,
-                "layer metadata update skipped: size differs from the allocation"
-            );
-            return;
-        }
-
-        queue.write_buffer(
-            &self.layer_metadata.inner,
-            entry.buffer_layer_metadata.start,
-            &bytemuck::cast_slice(&[layer_metadata])[0..aligned_layer_metadata_bytes as usize],
-        );
-    }
-
-    #[tracing::instrument(skip_all)]
-    pub fn update_feature_metadata(&self, queue: &Q, entry: &IndexEntry, feature_metadata: &[FM]) {
-        let feature_metadata_stride = size_of::<FM>() as wgpu::BufferAddress; // TODO: deduplicate
-
-        let (feature_metadata_bytes, aligned_feature_metadata_bytes) = Self::align(
-            feature_metadata_stride,
-            feature_metadata.len() as wgpu::BufferAddress,
-            feature_metadata.len() as wgpu::BufferAddress,
-        );
-
-        let allocated = entry.buffer_feature_metadata.end - entry.buffer_feature_metadata.start;
-        if allocated != feature_metadata_bytes
-            || feature_metadata_bytes != aligned_feature_metadata_bytes
-        {
-            // Writing past the allocation would corrupt a neighbouring layer's metadata.
-            tracing::error!(
-                coords = %entry.coords,
-                layer = %entry.style_layer.id,
-                allocated,
-                offered = feature_metadata_bytes,
-                aligned = aligned_feature_metadata_bytes,
-                "feature metadata update skipped: size differs from the allocation"
-            );
-            return;
-        }
-
-        queue.write_buffer(
-            &self.feature_metadata.inner,
-            entry.buffer_feature_metadata.start,
-            &bytemuck::cast_slice(feature_metadata)[0..aligned_feature_metadata_bytes as usize],
-        );
-    }
-
-    /// Rewrites a layer's indices in place, as when its labels are drawn in a new order; the
-    /// count must be the one it was uploaded with.
-    pub fn update_indices(&self, queue: &Q, entry: &IndexEntry, indices: &[I]) {
-        let bytes = std::mem::size_of_val(indices) as wgpu::BufferAddress;
-        let allocated = entry.buffer_indices.end - entry.buffer_indices.start;
-        if bytes > allocated || !bytes.is_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT) {
-            tracing::error!(
-                coords = %entry.coords,
-                layer = %entry.style_layer.id,
-                allocated,
-                offered = bytes,
-                "index update skipped: it does not fit the allocation"
-            );
-            return;
-        }
-        queue.write_buffer(
-            &self.indices.inner,
-            entry.buffer_indices.start,
-            bytemuck::cast_slice(indices),
-        );
-    }
-
+    /// Borrows the spatial/temporal index of resident allocations.
     pub fn index(&self) -> &RingIndex {
         &self.index
     }
@@ -369,11 +372,15 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> HasTile for BufferPool<Q,
     }
 }
 
-mod device;
-mod index;
-mod upload;
-pub use index::{IndexEntry, RingIndex};
 mod allocation_error;
+mod allocator;
+mod device;
+mod growth;
+mod index;
+mod page;
+mod updates;
+mod upload;
 pub use allocation_error::AllocationError;
+pub use index::{IndexEntry, RingIndex};
 #[cfg(test)]
 mod tests;

@@ -28,7 +28,6 @@ use crate::{
         populate_world_system::PopulateWorldSystem,
         queue_system::queue_system,
         request_system::RequestSystem,
-        resource::BufferPool,
         resource_system::resource_system,
         tessellation::{IndexDataType, OverAlignedVertexBuffer},
     },
@@ -45,6 +44,7 @@ pub mod render_commands;
 pub(crate) mod request_system;
 pub use request_system::depends_on_overscaling;
 pub(crate) mod resource;
+pub use resource::{AllocationError, BackingBufferType, BufferPool, IndexEntry, RingIndex};
 mod resource_system;
 pub(crate) mod structures;
 pub(crate) mod transferables;

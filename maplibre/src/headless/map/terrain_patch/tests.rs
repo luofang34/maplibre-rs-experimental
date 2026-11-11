@@ -189,11 +189,11 @@ async fn procedural_relief_svs_renders_with_zero_drape_allocations_and_taws_band
         + drape_bytes
         + dem_bytes;
     let vec_bytes = match map.world().resources.get::<Eventually<VectorBufferPool>>() {
-        Some(Initialized(p)) => p.vertices().size() + p.indices().size(),
+        Some(Initialized(p)) => p.device_buffer_bytes(),
         _ => 0,
     } as usize;
     let sym_bytes = match map.world().resources.get::<Eventually<SymbolBufferPool>>() {
-        Some(Initialized(p)) => p.vertices().size() + p.indices().size(),
+        Some(Initialized(p)) => p.device_buffer_bytes(),
         _ => 0,
     } as usize;
     let color_bytes = 960 * 540 * 4;
