@@ -99,16 +99,7 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
             if tile_retry::waiting(world, coords, RequestKind::Raster) && !retry_due {
                 continue;
             }
-            if !retry_due
-                && world
-                    .tiles
-                    .query::<&RasterLayersDataComponent>(coords)
-                    .is_some_and(|component| {
-                        sources
-                            .iter()
-                            .all(|source| component.has_source_result(source))
-                    })
-            {
+            if !retry_due && all_sources_ready(&world.tiles, &sources, coords) {
                 continue;
             }
             // The rest wait for a later frame, once tiles in flight have landed.
@@ -165,6 +156,22 @@ impl<E: Environment, T: RasterTransferables> RequestSystem<E, T> {
         tracing::debug!(%coords, "raster tile request accepted");
         Ok(())
     }
+}
+
+fn all_sources_ready(
+    tiles: &crate::tcs::tiles::Tiles,
+    sources: &[RasterSourceId],
+    coords: WorldTileCoords,
+) -> bool {
+    let raster = tiles.query::<&RasterLayersDataComponent>(coords);
+    let dem = tiles.query::<&crate::terrain::DemLayersComponent>(coords);
+    if raster.is_none() && dem.is_none() {
+        return false;
+    }
+    sources.iter().all(|source| {
+        raster.is_some_and(|component| component.has_source_result(source))
+            || dem.is_some_and(|component| component.contains(source))
+    })
 }
 
 fn coarse_raster_ancestor(coords: WorldTileCoords, minzoom: u8) -> Option<WorldTileCoords> {

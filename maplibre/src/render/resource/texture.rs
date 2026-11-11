@@ -148,6 +148,20 @@ impl Texture {
             view: TextureView::TextureView(view),
         }
     }
+
+    /// Clones the underlying GPU texture and view handles without allocating additional GPU memory.
+    ///
+    /// Returns `None` for presentation [`SurfaceTexture`](wgpu::SurfaceTexture) attachments.
+    pub fn clone_handle(&self) -> Option<Self> {
+        match &self.view {
+            TextureView::TextureView(view) => Some(Self {
+                size: self.size,
+                texture: self.texture.clone(),
+                view: TextureView::TextureView(view.clone()),
+            }),
+            TextureView::SurfaceTexture { .. } => None,
+        }
+    }
 }
 
 impl HasChanged for Texture {

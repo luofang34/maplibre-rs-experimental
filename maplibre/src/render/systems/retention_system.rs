@@ -208,6 +208,10 @@ pub(crate) fn finish_tiles_in_use(
                         .tiles
                         .query::<&crate::raster::RasterLayersDataComponent>(parent)
                         .is_some()
+                    || world
+                        .tiles
+                        .query::<&crate::terrain::DemLayersComponent>(parent)
+                        .is_some()
                 {
                     in_use.insert(parent);
                 }
@@ -408,6 +412,11 @@ fn drop_gpu_data(world: &mut World, evicted: &[WorldTileCoords]) {
     if let Some(Initialized(terrain)) = world.resources.get_mut::<Eventually<TerrainResources>>() {
         for coords in evicted {
             terrain.drop_dem(*coords);
+        }
+    }
+    if let Some(pool) = world.resources.get_mut::<crate::terrain::GpuDemPool>() {
+        for coords in evicted {
+            pool.drop_coords(*coords);
         }
     }
 }

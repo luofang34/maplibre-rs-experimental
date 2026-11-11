@@ -42,3 +42,7 @@ harness = false
 [[bench]]
 name = "tile_pyramid"
 harness = false
+
+[[bench]]
+name = "dem_pipeline"
+harness = false

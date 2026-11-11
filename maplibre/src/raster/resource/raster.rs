@@ -10,10 +10,11 @@ use crate::{
     },
     style::Style,
     tcs::{pyramid::TilePyramid, world::World},
+    terrain::{DemRevision, LoadedDem},
 };
 
 /// Raster pipeline and sampler with independent bindings for each source and tile.
-/// Raster imagery and DEM shading share storage without sharing source identities.
+/// Raster imagery allocates mipmapped textures; `raster-dem` layers bind views into [`GpuDemPool`](crate::terrain::GpuDemPool).
 pub struct RasterResources {
     sampler: wgpu::Sampler,
     mipmaps: MipmapGenerator,
@@ -21,14 +22,16 @@ pub struct RasterResources {
     pipeline: wgpu::RenderPipeline,
     bound_textures: HashMap<RasterSourceId, TilePyramid<(wgpu::BindGroup, u64)>>,
     layer_sources: HashMap<String, RasterSourceId>,
-    /// Sources whose textures carry a border of neighbour samples for slope shading.
+    /// Sources backed by 2-texel bordered `raster-dem` elevation textures.
     dem_sources: HashSet<RasterSourceId>,
-    /// For each bordered texture, the sides whose border holds a real neighbour's samples.
-    border_sides: HashMap<RasterSourceId, HashMap<WorldTileCoords, u16>>,
+    /// Tracks the GPU handle and [`DemRevision`] currently bound at each `(source, coords)` so
+    /// in-place border backfills reuse their existing `wgpu::BindGroup` without reallocating.
+    dem_bindings:
+        HashMap<RasterSourceId, HashMap<WorldTileCoords, (wgpu::Texture, Option<DemRevision>)>>,
     /// Uniform buffer and bind group of each raster layer's paint adjustments, and of the
     /// same paint for the layer's departing tiles.
     layer_paints: HashMap<(String, bool), (wgpu::Buffer, wgpu::BindGroup)>,
-    /// Advances whenever a texture is bound, so cached renders of raster tiles can refresh.
+    /// Advances whenever a texture is bound or updated, so cached renders of raster tiles refresh.
     revision: u64,
 }
 
@@ -54,7 +57,7 @@ impl RasterResources {
             bound_textures: Default::default(),
             layer_sources: Default::default(),
             dem_sources: Default::default(),
-            border_sides: Default::default(),
+            dem_bindings: Default::default(),
             layer_paints: Default::default(),
             revision: 0,
         }
@@ -141,8 +144,8 @@ impl RasterResources {
         for textures in self.bound_textures.values_mut() {
             textures.remove(coords);
         }
-        for sides in self.border_sides.values_mut() {
-            sides.remove(&coords);
+        for bindings in self.dem_bindings.values_mut() {
+            bindings.remove(&coords);
         }
     }
 
@@ -181,16 +184,88 @@ impl RasterResources {
             );
     }
 
+    /// Whether `(source, coords)` already binds the GPU texture matching `dem`'s sample revision.
+    pub(crate) fn dem_is_current(
+        &self,
+        source: &RasterSourceId,
+        coords: WorldTileCoords,
+        dem: &LoadedDem,
+    ) -> bool {
+        let expected = dem.revision_key();
+        self.get_bound_texture(source, &coords).is_some()
+            && self
+                .dem_bindings
+                .get(source)
+                .and_then(|bindings| bindings.get(&coords))
+                .is_some_and(|(_, rev)| rev.as_ref() == Some(&expected))
+    }
+
+    /// Binds a shared [`GpuDemPool`](crate::terrain::GpuDemPool) texture for `source` at `coords`,
+    /// reusing the existing `wgpu::BindGroup` in place when `texture` was updated without reallocation.
+    pub(crate) fn bind_dem_texture(
+        &mut self,
+        device: &wgpu::Device,
+        source: &RasterSourceId,
+        coords: WorldTileCoords,
+        texture: &Texture,
+        dem_rev: DemRevision,
+    ) {
+        self.revision = self.revision.wrapping_add(1);
+        let revision = self.revision;
+        let same_texture = self
+            .dem_bindings
+            .get(source)
+            .and_then(|bindings| bindings.get(&coords))
+            .is_some_and(|(prev, _)| prev == &texture.texture);
+        let reused = if same_texture {
+            if let Some((_, bound_rev)) = self
+                .bound_textures
+                .get_mut(source)
+                .and_then(|pyramid| pyramid.get_mut(coords))
+            {
+                *bound_rev = revision;
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+        if !reused {
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                layout: &self.pipeline.get_bind_group_layout(1),
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&texture.view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&self.sampler),
+                    },
+                ],
+                label: Some("DEM raster binding"),
+            });
+            self.bound_textures
+                .entry(source.clone())
+                .or_default()
+                .insert(coords, (bind_group, revision));
+        }
+        self.dem_bindings
+            .entry(source.clone())
+            .or_default()
+            .insert(coords, (texture.texture.clone(), Some(dem_rev)));
+    }
+
     /// Drops every texture of a source, as when it leaves the style.
     pub(crate) fn forget_source(&mut self, source: &RasterSourceId) {
         self.bound_textures.remove(source);
-        self.border_sides.remove(source);
+        self.dem_bindings.remove(source);
     }
 
     /// Whether a layer of the style draws from the source, so its tiles need textures.
     pub(crate) fn draws(&self, source: &RasterSourceId) -> bool {
-        self.dem_sources.contains(source)
-            || self.layer_sources.values().any(|drawn| drawn == source)
+        self.layer_sources.values().any(|drawn| drawn == source)
     }
 
     /// The number of tile textures bound for a source.
@@ -204,8 +279,8 @@ impl RasterResources {
         if let Some(textures) = self.bound_textures.get_mut(source) {
             textures.remove(coords);
         }
-        if let Some(sides) = self.border_sides.get_mut(source) {
-            sides.remove(&coords);
+        if let Some(bindings) = self.dem_bindings.get_mut(source) {
+            bindings.remove(&coords);
         }
     }
 
@@ -226,55 +301,31 @@ impl RasterResources {
                 self.layer_sources.insert(layer.id, source.clone());
             }
         }
-    }
-
-    /// Records which sides of a freshly uploaded bordered texture hold a neighbour's samples.
-    pub(crate) fn set_border_sides(
-        &mut self,
-        source: &RasterSourceId,
-        coords: WorldTileCoords,
-        sides: u16,
-    ) {
-        self.border_sides
-            .entry(source.clone())
-            .or_default()
-            .insert(coords, sides);
-    }
-
-    /// Drops the texture of a tile whose data changed, and the neighbour textures that carry
-    /// its old or replicated edge in their border.
-    pub(crate) fn tile_data_changed(&mut self, source: &RasterSourceId, coords: WorldTileCoords) {
-        let reloaded = self.get_bound_texture(source, &coords).is_some();
-        self.remove_source_texture(source, coords);
-        if self.has_border(source) {
-            self.refresh_neighbour_borders(source, coords, reloaded);
-        }
-    }
-
-    /// Drops the bordered textures around a tile whose samples they lack, so they upload again
-    /// with the real edge. A tile that already had a texture is reloading, and its neighbours
-    /// may hold stale samples, so all of them go.
-    pub(crate) fn refresh_neighbour_borders(
-        &mut self,
-        source: &RasterSourceId,
-        coords: WorldTileCoords,
-        reloaded: bool,
-    ) {
-        for (neighbour, (dx, dy)) in crate::terrain::backfill::neighbours(coords) {
-            let toward_tile = crate::raster::dem_border::side_bit(-dx, -dy);
-            let sides = self
-                .border_sides
-                .get(source)
-                .and_then(|sides| sides.get(&neighbour))
-                .copied()
-                .unwrap_or(0);
-            if reloaded || sides & toward_tile == 0 {
-                self.remove_source_texture(source, neighbour);
+        for layer in &style.layers {
+            if crate::io::tile_sources::RASTER_LAYER_TYPES.contains(&layer.type_.as_str()) {
+                self.layer_sources
+                    .entry(layer.id.clone())
+                    .or_insert_with(|| RasterSourceId::new(layer.source.clone()));
             }
         }
     }
 
-    /// Whether textures of this source are uploaded with a one-texel border.
+    /// Marks the texture of a tile whose CPU data changed for upload on the next Queue pass.
+    pub(crate) fn tile_data_changed(&mut self, source: &RasterSourceId, coords: WorldTileCoords) {
+        if self.has_border(source) {
+            if let Some((_, rev)) = self
+                .dem_bindings
+                .get_mut(source)
+                .and_then(|bindings| bindings.get_mut(&coords))
+            {
+                *rev = None;
+            }
+        } else {
+            self.remove_source_texture(source, coords);
+        }
+    }
+
+    /// Whether this source is a `raster-dem` source backed by 2-texel bordered DEM textures.
     pub(crate) fn has_border(&self, source: &RasterSourceId) -> bool {
         self.dem_sources.contains(source)
     }

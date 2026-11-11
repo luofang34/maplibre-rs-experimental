@@ -1,4 +1,6 @@
-use std::{borrow::Cow, marker::PhantomData, rc::Rc};
+use std::{borrow::Cow, marker::PhantomData, rc::Rc, sync::Arc};
+
+use image::RgbaImage;
 
 use crate::{
     context::MapContext,
@@ -11,12 +13,20 @@ use crate::{
     raster::{
         resource::RasterResources,
         transferables::{LayerRaster, LayerRasterMissing, RasterTransferables},
-        RasterLayerData, RasterLayersDataComponent,
+        AvailableRasterLayerData, MissingRasterLayerData, RasterLayerData,
+        RasterLayersDataComponent,
     },
     render::eventually::Eventually,
+    style::Style,
     tcs::{
         system::{System, SystemResult},
         world::World,
+    },
+    terrain::{
+        dem_store::{
+            decode_image_to_dem, dem_unpack_for_source, ingest_source_dem, is_terrain_source,
+        },
+        LoadedDem,
     },
 };
 
@@ -39,25 +49,50 @@ impl<E: Environment, T: RasterTransferables> System for PopulateWorldSystem<E, T
         "populate_world_system".into()
     }
 
-    fn run(&mut self, MapContext { world, .. }: &mut MapContext) -> SystemResult {
+    fn run(
+        &mut self,
+        MapContext {
+            style,
+            view_state,
+            world,
+            ..
+        }: &mut MapContext,
+    ) -> SystemResult {
+        let circumference = view_state.body().circumference_meters();
         let messages = self.kernel.apc().receive(|message| {
             message.has_tag(RequestKind::Raster.message_tag())
                 || message.has_tag(T::LayerRaster::message_tag())
                 || message.has_tag(T::LayerRasterMissing::message_tag())
         });
         apply_worker_messages(messages, |message| {
-            apply_raster_message::<T>(world, message)
+            apply_raster_message_with_style::<T>(world, Some(style), circumference, message)
         })?;
 
         Ok(())
     }
 }
 
-/// Records a worker's raster result on its tile. A fetched image becomes an available layer and
-/// a failed fetch a missing one. Final request results schedule retries independently of
-/// the pixels retained for drawing.
+/// Records a worker's raster result on its tile without consulting a style (`raster` imagery default).
+#[cfg(test)]
 pub(crate) fn apply_raster_message<T: RasterTransferables>(
     world: &mut World,
+    message: Message,
+) -> Result<(), MessageError> {
+    apply_raster_message_with_style::<T>(
+        world,
+        None,
+        crate::projection::body::Body::EARTH.circumference_meters(),
+        message,
+    )
+}
+
+/// Records a worker's raster or `raster-dem` result on its tile. `raster-dem` sources are stored
+/// once as 2-texel bordered [`LoadedDem`] tiles in [`DemLayersComponent`](crate::terrain::DemLayersComponent)
+/// and mirrored to 3D terrain when shared.
+pub(crate) fn apply_raster_message_with_style<T: RasterTransferables>(
+    world: &mut World,
+    style: Option<&Style>,
+    circumference_meters: f64,
     message: Message,
 ) -> Result<(), MessageError> {
     if message.has_tag(RequestKind::Raster.message_tag()) {
@@ -68,10 +103,70 @@ pub(crate) fn apply_raster_message<T: RasterTransferables>(
     let (coords, layer) = if message.has_tag(T::LayerRaster::message_tag()) {
         let message = message.into_transferable::<T::LayerRaster>()?;
         let coords = message.coords();
-        if !tile_retry::accepts(world, coords, RequestKind::Raster, attempt) {
+        if !tile_retry::accepts(world, coords, RequestKind::Raster, attempt)
+            || world
+                .tiles
+                .query::<&RasterLayersDataComponent>(coords)
+                .is_none()
+        {
             return Ok(());
         }
-        (coords, RasterLayerData::Available(message.to_layer()))
+        let payload = message.into_dem_or_layer();
+        let source = match &payload {
+            Ok(shared) => shared.source.clone(),
+            Err(layer) => layer.source.clone(),
+        };
+        if let Some((style, unpack)) =
+            style.and_then(|s| dem_unpack_for_source(s, &source).map(|u| (s, u)))
+        {
+            let loaded = match payload {
+                Ok(shared)
+                    if shared.tile.unpack() == unpack
+                        && (shared.circumference_meters - circumference_meters).abs() <= 1e-3 =>
+                {
+                    Some(LoadedDem::from_shared(shared.tile))
+                }
+                Ok(shared) => {
+                    decode_image_to_dem(coords, &shared.fallback, unpack, circumference_meters)
+                }
+                Err(layer) => {
+                    decode_image_to_dem(coords, &layer.image, unpack, circumference_meters)
+                }
+            };
+            match loaded {
+                Some(dem) => {
+                    ingest_source_dem(
+                        &mut world.tiles,
+                        &source,
+                        coords,
+                        dem,
+                        is_terrain_source(style, &source),
+                    );
+                    (
+                        coords,
+                        RasterLayerData::Available(AvailableRasterLayerData {
+                            coords,
+                            source,
+                            image: RgbaImage::new(0, 0),
+                        }),
+                    )
+                }
+                None => (
+                    coords,
+                    RasterLayerData::Missing(MissingRasterLayerData { coords, source }),
+                ),
+            }
+        } else {
+            let available = match payload {
+                Err(layer) => layer,
+                Ok(shared) => AvailableRasterLayerData {
+                    coords: shared.coords,
+                    source: shared.source,
+                    image: Arc::try_unwrap(shared.fallback).unwrap_or_else(|arc| (*arc).clone()),
+                },
+            };
+            (coords, RasterLayerData::Available(available))
+        }
     } else if message.has_tag(T::LayerRasterMissing::message_tag()) {
         let message = message.into_transferable::<T::LayerRasterMissing>()?;
         let coords = message.coords();

@@ -1,12 +1,11 @@
-//! Uploads data to the GPU which is needed for rendering.
+//! Uploads raster imagery and shared `raster-dem` elevation textures to the GPU.
 
 use crate::{
     context::MapContext,
     coords::WorldTileCoords,
     raster::{
-        dem_border::{filled_sides, with_border},
-        resource::RasterResources,
-        AvailableRasterLayerData, RasterLayerData, RasterLayersDataComponent,
+        resource::RasterResources, AvailableRasterLayerData, RasterLayerData,
+        RasterLayersDataComponent,
     },
     render::{
         eventually::{Eventually, Eventually::Initialized},
@@ -17,6 +16,7 @@ use crate::{
         system::{SystemError, SystemResult},
         tiles::Tiles,
     },
+    terrain::{DemLayersComponent, GpuDemPool},
 };
 
 pub fn upload_system(
@@ -36,10 +36,12 @@ pub fn upload_system(
         return Ok(());
     }
     world.resources.get_or_init_mut::<FrameUploads>();
-    let Some((Initialized(raster_resources), budget)) = world
-        .resources
-        .query_mut::<(&mut Eventually<RasterResources>, &mut FrameUploads)>()
-    else {
+    world.resources.get_or_init_mut::<GpuDemPool>();
+    let Some((Initialized(raster_resources), budget, gpu_dem_pool)) = world.resources.query_mut::<(
+        &mut Eventually<RasterResources>,
+        &mut FrameUploads,
+        &mut GpuDemPool,
+    )>() else {
         return Err(SystemError::Dependencies);
     };
 
@@ -50,13 +52,27 @@ pub fn upload_system(
         .tiles
         .pyramid_of::<RasterLayersDataComponent>()
         .coords_coarse_to_fine();
-    let deferred = upload_raster_layer(
+    let mut deferred = upload_raster_layer(
         raster_resources,
         (device, queue),
         &world.tiles,
         source_tiles,
         budget,
     );
+    if !deferred {
+        let dem_tiles = world
+            .tiles
+            .pyramid_of::<DemLayersComponent>()
+            .coords_coarse_to_fine();
+        deferred |= upload_dem_layers(
+            raster_resources,
+            gpu_dem_pool,
+            (device, queue),
+            &world.tiles,
+            dem_tiles,
+            budget,
+        );
+    }
     if deferred {
         crate::render::frame_signals::keep_animating(world);
     }
@@ -64,8 +80,8 @@ pub fn upload_system(
     Ok(())
 }
 
-/// Uploads the textures of loaded tiles that the frame's budget admits; `true` when some wait
-/// for a later frame.
+/// Uploads the imagery textures of loaded tiles that the frame's budget admits; `true` when some
+/// wait for a later frame.
 #[tracing::instrument(skip_all)]
 fn upload_raster_layer(
     raster_resources: &mut RasterResources,
@@ -82,6 +98,9 @@ fn upload_raster_layer(
         };
         for data in &layers.layers {
             if let RasterLayerData::Available(data) = data {
+                if raster_resources.has_border(&data.source) && data.image.is_empty() {
+                    continue;
+                }
                 // A result that lands after its source left the style is never drawn.
                 if raster_resources.draws(&data.source)
                     && raster_resources
@@ -92,11 +111,13 @@ fn upload_raster_layer(
                         deferred = true;
                         break 'tiles;
                     }
-                    if let Some(texture) =
-                        upload_image(raster_resources, device, queue, tiles, coords, data)
-                    {
-                        mipmapped.push(texture);
-                    }
+                    mipmapped.push(upload_imagery(
+                        raster_resources,
+                        device,
+                        queue,
+                        coords,
+                        data,
+                    ));
                 }
             }
         }
@@ -106,65 +127,67 @@ fn upload_raster_layer(
     deferred
 }
 
-/// The image of `source` loaded at each tile around `coords`, indexed `[dy + 1][dx + 1]`.
-fn neighbour_images<'a>(
-    tiles: &'a Tiles,
-    source: &crate::raster::RasterSourceId,
-    coords: WorldTileCoords,
-) -> [[Option<&'a image::RgbaImage>; 3]; 3] {
-    let mut images: [[Option<&image::RgbaImage>; 3]; 3] = Default::default();
-    for (neighbour, (dx, dy)) in crate::terrain::backfill::neighbours(coords) {
-        images[(dy + 1) as usize][(dx + 1) as usize] = tiles
-            .query::<&RasterLayersDataComponent>(neighbour)
-            .and_then(|component| {
-                component.layers.iter().find_map(|layer| match layer {
-                    RasterLayerData::Available(data) if &data.source == source => Some(&data.image),
-                    _ => None,
-                })
-            });
+/// Uploads or reuses shared `(dim + 4) x (dim + 4)` DEM textures in [`GpuDemPool`] for every
+/// `hillshade` and `color-relief` source drawn by the style.
+#[tracing::instrument(skip_all)]
+fn upload_dem_layers(
+    raster_resources: &mut RasterResources,
+    gpu_dem_pool: &mut GpuDemPool,
+    (device, queue): (&wgpu::Device, &crate::render::upload_queue::UploadQueue),
+    tiles: &Tiles,
+    dem_tiles: impl IntoIterator<Item = WorldTileCoords>,
+    budget: &mut FrameUploads,
+) -> bool {
+    let mut deferred = false;
+    'tiles: for coords in dem_tiles {
+        let Some(layers) = tiles.query::<&DemLayersComponent>(coords) else {
+            continue;
+        };
+        for (source, dem) in layers.iter() {
+            if !raster_resources.draws(source)
+                || raster_resources.dem_is_current(source, coords, dem)
+            {
+                continue;
+            }
+            let needs_gpu_write = gpu_dem_pool.needs_upload(source, coords, dem);
+            if needs_gpu_write && !budget.take(UploadKind::Image, dem.tile.pixels().len()) {
+                deferred = true;
+                break 'tiles;
+            }
+            let entry = if needs_gpu_write {
+                gpu_dem_pool.upload(device, queue, source, coords, dem)
+            } else if let Some(existing) = gpu_dem_pool.get(source, coords) {
+                existing
+            } else {
+                gpu_dem_pool.upload(device, queue, source, coords, dem)
+            };
+            raster_resources.bind_dem_texture(
+                device,
+                source,
+                coords,
+                &entry.texture,
+                dem.revision_key(),
+            );
+        }
     }
-    images
+    deferred
 }
 
-/// Uploads the image of the tile stored at `coords` and binds it under that key, the one the
-/// upload check and the draws look up, rather than under the coordinates the image carries;
-/// returns the texture when its mip chain still needs filling.
-fn upload_image(
+/// Uploads an imagery tile stored at `coords` and returns its `wgpu::Texture` handle for mipmap
+/// generation.
+fn upload_imagery(
     raster_resources: &mut RasterResources,
     device: &wgpu::Device,
     queue: &crate::render::upload_queue::UploadQueue,
-    tiles: &Tiles,
     coords: WorldTileCoords,
     data: &AvailableRasterLayerData,
-) -> Option<wgpu::Texture> {
-    let bordered;
-    let mut border_sides = None;
-    let image = if raster_resources.has_border(&data.source) {
-        let neighbours = neighbour_images(tiles, &data.source, coords);
-        border_sides = Some(filled_sides(&data.image, &neighbours));
-        bordered = with_border(&data.image, &neighbours);
-        &bordered
-    } else {
-        &data.image
-    };
-    let (width, height) = image.dimensions();
+) -> wgpu::Texture {
+    let (width, height) = data.image.dimensions();
 
     // Raster style colors are sampled in the encoded color space, matching WebGL's default
     // RGBA upload path. An sRGB texture view would decode the texels to linear values before
     // writing them to the non-sRGB render target, making imagery too dark.
-    let mipmapped = border_sides.is_none();
-    let texture = if mipmapped {
-        raster_resources.create_imagery_texture(device, width, height)
-    } else {
-        raster_resources.create_texture(
-            None,
-            device,
-            wgpu::TextureFormat::Rgba8Unorm,
-            width,
-            height,
-            wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        )
-    };
+    let texture = raster_resources.create_imagery_texture(device, width, height);
 
     queue.write_texture(
         wgpu::TexelCopyTextureInfo {
@@ -173,7 +196,7 @@ fn upload_image(
             mip_level: 0,
             origin: wgpu::Origin3d::ZERO,
         },
-        image,
+        &data.image,
         wgpu::TexelCopyBufferLayout {
             offset: 0,
             bytes_per_row: Some(4 * width),
@@ -182,11 +205,8 @@ fn upload_image(
         texture.size,
     );
 
-    let mips = mipmapped.then(|| texture.texture.clone());
+    let mips = texture.texture.clone();
     raster_resources.bind_texture(device, &data.source, &coords, texture);
-    if let Some(sides) = border_sides {
-        raster_resources.set_border_sides(&data.source, coords, sides);
-    }
     mips
 }
 

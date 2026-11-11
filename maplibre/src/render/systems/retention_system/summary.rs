@@ -103,6 +103,10 @@ pub(super) fn summarize_residency(world: &World, drawn: usize, in_use: usize, se
         Some(Initialized(pool)) => (pool.revision(), pool.device_buffer_bytes()),
         _ => (0, 0),
     };
+    let (pool_dem_textures, pool_dem_bytes) = world
+        .resources
+        .get::<crate::terrain::GpuDemPool>()
+        .map_or((0, 0), |pool| (pool.texture_count(), pool.texture_bytes()));
     let (drapes, free_drapes, drape_bytes, dem_textures, dem_bytes) =
         match world.resources.get::<Eventually<TerrainResources>>() {
             Some(Initialized(terrain)) => {
@@ -112,11 +116,11 @@ pub(super) fn summarize_residency(world: &World, drawn: usize, in_use: usize, se
                     held,
                     free,
                     drape_bytes,
-                    terrain.dem_texture_count(),
-                    dem_bytes,
+                    terrain.dem_texture_count().max(pool_dem_textures),
+                    dem_bytes.max(pool_dem_bytes),
                 )
             }
-            _ => (0, 0, 0, 0, 0),
+            _ => (0, 0, 0, pool_dem_textures, pool_dem_bytes),
         };
     tracing::info!(
         tiles,
