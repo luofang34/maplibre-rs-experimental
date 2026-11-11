@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["KIND_LINESTRING","KIND_POINT","KIND_POLYGON","TAG_ARRAY","TAG_COLOR","TAG_FALSE","TAG_NULL","TAG_NUMBER","TAG_OBJECT","TAG_STRING","TAG_TRUE"],"fn":["decode_properties","decode_value","encode_properties","encode_str","encode_value","read_f64","read_string","read_u32","read_u8","slice_linestring"],"struct":["WireGeometry","WireTileIndex"]};

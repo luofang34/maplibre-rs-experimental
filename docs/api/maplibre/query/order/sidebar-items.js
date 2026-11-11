@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["in_drawing_order","line_margin_pixels"],"struct":["Candidate"]};

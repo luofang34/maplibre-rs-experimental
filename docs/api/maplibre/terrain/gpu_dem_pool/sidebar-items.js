@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["allocate_dem_texture","write_dem_pixels"],"struct":["GpuDemEntry","GpuDemPool"]};

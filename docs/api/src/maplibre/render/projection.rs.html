@@ -231,207 +231,218 @@
 <a href=#231 id=231 data-nosnippet>231</a>    view.has_external_view() || view.navigation_mode() == NavigationMode::FreeGlobe
 <a href=#232 id=232 data-nosnippet>232</a>}
 <a href=#233 id=233 data-nosnippet>233</a>
-<a href=#234 id=234 data-nosnippet>234</a><span class="doccomment">/// Derives the view-wide projection uniform from style and camera state.
-<a href=#235 id=235 data-nosnippet>235</a></span><span class="kw">pub fn </span>projection_data_for_view(
-<a href=#236 id=236 data-nosnippet>236</a>    style: <span class="kw-2">&amp;</span>Style,
-<a href=#237 id=237 data-nosnippet>237</a>    view_state: <span class="kw-2">&amp;</span>ViewState,
-<a href=#238 id=238 data-nosnippet>238</a>) -&gt; <span class="prelude-ty">Result</span>&lt;ShaderProjectionData, ProjectionStateError&gt; {
-<a href=#239 id=239 data-nosnippet>239</a>    <span class="kw">let </span>transition = style.projection.as_ref().map_or(<span class="number">0.0</span>, |specification| {
-<a href=#240 id=240 data-nosnippet>240</a>        specification
-<a href=#241 id=241 data-nosnippet>241</a>            .projection_type
-<a href=#242 id=242 data-nosnippet>242</a>            .globe_transition(view_state.zoom().value())
-<a href=#243 id=243 data-nosnippet>243</a>    });
-<a href=#244 id=244 data-nosnippet>244</a>    <span class="kw">let </span>mercator_center_w = view_state.camera_to_center_distance() <span class="kw">as </span>f32;
-<a href=#245 id=245 data-nosnippet>245</a>    <span class="kw">let </span>radius_meters = view_state.body().radius_meters <span class="kw">as </span>f32;
-<a href=#246 id=246 data-nosnippet>246</a>    <span class="kw">if </span>transition == <span class="number">0.0 </span>{
-<a href=#247 id=247 data-nosnippet>247</a>        <span class="kw">return </span><span class="prelude-val">Ok</span>(ShaderProjectionData {
-<a href=#248 id=248 data-nosnippet>248</a>            external_view: f32::from(view_state.has_external_view()),
-<a href=#249 id=249 data-nosnippet>249</a>            center_clip_w: mercator_center_w,
-<a href=#250 id=250 data-nosnippet>250</a>            globe_circle: [<span class="number">1.0</span>, <span class="number">0.0</span>, f32::from(fixed_symbol_scale(view_state)), <span class="number">0.0</span>],
-<a href=#251 id=251 data-nosnippet>251</a>            radius_meters,
-<a href=#252 id=252 data-nosnippet>252</a>            ..ShaderProjectionData::default()
-<a href=#253 id=253 data-nosnippet>253</a>        });
-<a href=#254 id=254 data-nosnippet>254</a>    }
-<a href=#255 id=255 data-nosnippet>255</a>
-<a href=#256 id=256 data-nosnippet>256</a>    <span class="kw">let </span>globe = globe_camera_for_view(view_state)<span class="question-mark">?</span>;
-<a href=#257 id=257 data-nosnippet>257</a>    <span class="kw">let </span>globe_center_clip = globe.wgpu_view_projection() * globe.target().extend(<span class="number">1.0</span>);
-<a href=#258 id=258 data-nosnippet>258</a>    <span class="kw">let </span>globe_center_w = globe_center_clip.w <span class="kw">as </span>f32;
-<a href=#259 id=259 data-nosnippet>259</a>    <span class="kw">let </span>globe_matrix = globe
-<a href=#260 id=260 data-nosnippet>260</a>        .wgpu_view_projection()
-<a href=#261 id=261 data-nosnippet>261</a>        .cast::&lt;f32&gt;()
-<a href=#262 id=262 data-nosnippet>262</a>        .ok_or(ProjectionStateError::FloatConversion)<span class="question-mark">?</span>;
-<a href=#263 id=263 data-nosnippet>263</a>    <span class="kw">let </span>clipping_plane = globe
-<a href=#264 id=264 data-nosnippet>264</a>        .clipping_plane()
-<a href=#265 id=265 data-nosnippet>265</a>        .cast::&lt;f32&gt;()
-<a href=#266 id=266 data-nosnippet>266</a>        .ok_or(ProjectionStateError::FloatConversion)<span class="question-mark">?</span>;
-<a href=#267 id=267 data-nosnippet>267</a>    <span class="kw">let </span>data = compose_projection_data(
-<a href=#268 id=268 data-nosnippet>268</a>        ProjectionMatrices {
-<a href=#269 id=269 data-nosnippet>269</a>            mercator: Matrix4::from_scale(<span class="number">1.0</span>),
-<a href=#270 id=270 data-nosnippet>270</a>            globe: globe_matrix,
+<a href=#234 id=234 data-nosnippet>234</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>flat_shader_projection(view_state: <span class="kw-2">&amp;</span>ViewState) -&gt; ShaderProjectionData {
+<a href=#235 id=235 data-nosnippet>235</a>    ShaderProjectionData {
+<a href=#236 id=236 data-nosnippet>236</a>        external_view: f32::from(view_state.has_external_view()),
+<a href=#237 id=237 data-nosnippet>237</a>        center_clip_w: view_state.camera_to_center_distance() <span class="kw">as </span>f32,
+<a href=#238 id=238 data-nosnippet>238</a>        globe_circle: [<span class="number">1.0</span>, <span class="number">0.0</span>, f32::from(fixed_symbol_scale(view_state)), <span class="number">0.0</span>],
+<a href=#239 id=239 data-nosnippet>239</a>        radius_meters: view_state.body().radius_meters <span class="kw">as </span>f32,
+<a href=#240 id=240 data-nosnippet>240</a>        ..ShaderProjectionData::default()
+<a href=#241 id=241 data-nosnippet>241</a>    }
+<a href=#242 id=242 data-nosnippet>242</a>}
+<a href=#243 id=243 data-nosnippet>243</a>
+<a href=#244 id=244 data-nosnippet>244</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>globe_shader_projection(
+<a href=#245 id=245 data-nosnippet>245</a>    view_state: <span class="kw-2">&amp;</span>ViewState,
+<a href=#246 id=246 data-nosnippet>246</a>    transition: f32,
+<a href=#247 id=247 data-nosnippet>247</a>    globe: <span class="kw-2">&amp;</span>GlobeCameraState,
+<a href=#248 id=248 data-nosnippet>248</a>) -&gt; <span class="prelude-ty">Result</span>&lt;ShaderProjectionData, ProjectionStateError&gt; {
+<a href=#249 id=249 data-nosnippet>249</a>    <span class="kw">let </span>mercator_center_w = view_state.camera_to_center_distance() <span class="kw">as </span>f32;
+<a href=#250 id=250 data-nosnippet>250</a>    <span class="kw">let </span>radius_meters = view_state.body().radius_meters <span class="kw">as </span>f32;
+<a href=#251 id=251 data-nosnippet>251</a>    <span class="kw">let </span>globe_center_clip = globe.wgpu_view_projection() * globe.target().extend(<span class="number">1.0</span>);
+<a href=#252 id=252 data-nosnippet>252</a>    <span class="kw">let </span>globe_center_w = globe_center_clip.w <span class="kw">as </span>f32;
+<a href=#253 id=253 data-nosnippet>253</a>    <span class="kw">let </span>globe_matrix = globe
+<a href=#254 id=254 data-nosnippet>254</a>        .wgpu_view_projection()
+<a href=#255 id=255 data-nosnippet>255</a>        .cast::&lt;f32&gt;()
+<a href=#256 id=256 data-nosnippet>256</a>        .ok_or(ProjectionStateError::FloatConversion)<span class="question-mark">?</span>;
+<a href=#257 id=257 data-nosnippet>257</a>    <span class="kw">let </span>clipping_plane = globe
+<a href=#258 id=258 data-nosnippet>258</a>        .clipping_plane()
+<a href=#259 id=259 data-nosnippet>259</a>        .cast::&lt;f32&gt;()
+<a href=#260 id=260 data-nosnippet>260</a>        .ok_or(ProjectionStateError::FloatConversion)<span class="question-mark">?</span>;
+<a href=#261 id=261 data-nosnippet>261</a>    <span class="kw">let </span>data = compose_projection_data(
+<a href=#262 id=262 data-nosnippet>262</a>        ProjectionMatrices {
+<a href=#263 id=263 data-nosnippet>263</a>            mercator: Matrix4::from_scale(<span class="number">1.0</span>),
+<a href=#264 id=264 data-nosnippet>264</a>            globe: globe_matrix,
+<a href=#265 id=265 data-nosnippet>265</a>        },
+<a href=#266 id=266 data-nosnippet>266</a>        clipping_plane,
+<a href=#267 id=267 data-nosnippet>267</a>        transition,
+<a href=#268 id=268 data-nosnippet>268</a>        ProjectionDataParams {
+<a href=#269 id=269 data-nosnippet>269</a>            apply_globe_matrix: <span class="bool-val">true</span>,
+<a href=#270 id=270 data-nosnippet>270</a>            ..ProjectionDataParams::default()
 <a href=#271 id=271 data-nosnippet>271</a>        },
-<a href=#272 id=272 data-nosnippet>272</a>        clipping_plane,
-<a href=#273 id=273 data-nosnippet>273</a>        transition,
-<a href=#274 id=274 data-nosnippet>274</a>        ProjectionDataParams {
-<a href=#275 id=275 data-nosnippet>275</a>            apply_globe_matrix: <span class="bool-val">true</span>,
-<a href=#276 id=276 data-nosnippet>276</a>            ..ProjectionDataParams::default()
-<a href=#277 id=277 data-nosnippet>277</a>        },
-<a href=#278 id=278 data-nosnippet>278</a>    );
-<a href=#279 id=279 data-nosnippet>279</a>    <span class="kw">let </span>shader = ShaderProjectionData {
-<a href=#280 id=280 data-nosnippet>280</a>        external_view: f32::from(view_state.has_external_view()),
-<a href=#281 id=281 data-nosnippet>281</a>        center_clip_w: mercator_center_w + (globe_center_w - mercator_center_w) * transition,
-<a href=#282 id=282 data-nosnippet>282</a>        radius_meters,
-<a href=#283 id=283 data-nosnippet>283</a>        globe_circle: [
-<a href=#284 id=284 data-nosnippet>284</a>            globe.circle_radius_correction() <span class="kw">as </span>f32,
-<a href=#285 id=285 data-nosnippet>285</a>            <span class="number">0.0</span>,
-<a href=#286 id=286 data-nosnippet>286</a>            f32::from(fixed_symbol_scale(view_state)),
-<a href=#287 id=287 data-nosnippet>287</a>            <span class="number">0.0</span>,
-<a href=#288 id=288 data-nosnippet>288</a>        ],
-<a href=#289 id=289 data-nosnippet>289</a>        ..ShaderProjectionData::from_renderer_data(data)
-<a href=#290 id=290 data-nosnippet>290</a>    };
-<a href=#291 id=291 data-nosnippet>291</a>    <span class="comment">// Below this zoom f32 rounding stays far under a pixel, and projecting from the global
-<a href=#292 id=292 data-nosnippet>292</a>    // coordinates keeps every edge where GL JS, which does the same, draws it. Host external
-<a href=#293 id=293 data-nosnippet>293</a>    // eyes always project relative to the sub-camera point so polar and high-altitude 6-DoF
-<a href=#294 id=294 data-nosnippet>294</a>    // views never drop out of f64 reference precision.
-<a href=#295 id=295 data-nosnippet>295</a>    </span><span class="kw">let </span>references = (view_state.zoom().value() &gt;= PRECISE_GLOBE_ZOOM
-<a href=#296 id=296 data-nosnippet>296</a>        || view_state.has_external_view())
-<a href=#297 id=297 data-nosnippet>297</a>    .then(|| globe_center_references(<span class="kw-2">&amp;</span>globe))
-<a href=#298 id=298 data-nosnippet>298</a>    .flatten();
-<a href=#299 id=299 data-nosnippet>299</a>    <span class="prelude-val">Ok</span>(<span class="kw">match </span>references {
-<a href=#300 id=300 data-nosnippet>300</a>        <span class="prelude-val">Some</span>([center, clip, radial]) =&gt; ShaderProjectionData {
-<a href=#301 id=301 data-nosnippet>301</a>            globe_circle: [shader.globe_circle[<span class="number">0</span>], <span class="number">1.0</span>, shader.globe_circle[<span class="number">2</span>], <span class="number">0.0</span>],
-<a href=#302 id=302 data-nosnippet>302</a>            globe_center: center,
-<a href=#303 id=303 data-nosnippet>303</a>            globe_center_clip: clip,
-<a href=#304 id=304 data-nosnippet>304</a>            globe_center_radial: radial,
-<a href=#305 id=305 data-nosnippet>305</a>            ..shader
-<a href=#306 id=306 data-nosnippet>306</a>        },
-<a href=#307 id=307 data-nosnippet>307</a>        <span class="prelude-val">None </span>=&gt; shader,
-<a href=#308 id=308 data-nosnippet>308</a>    })
-<a href=#309 id=309 data-nosnippet>309</a>}
-<a href=#310 id=310 data-nosnippet>310</a>
-<a href=#311 id=311 data-nosnippet>311</a><span class="doccomment">/// The zoom from which the shaders project globe positions relative to the view's centre: a
-<a href=#312 id=312 data-nosnippet>312</a>/// pixel is about 20 m there, and the metres global f32 coordinates round to start to show.
-<a href=#313 id=313 data-nosnippet>313</a></span><span class="kw">const </span>PRECISE_GLOBE_ZOOM: f64 = <span class="number">12.0</span>;
-<a href=#314 id=314 data-nosnippet>314</a>
-<a href=#315 id=315 data-nosnippet>315</a><span class="doccomment">/// The centre the shaders project globe positions relative to: the f32 Mercator position
-<a href=#316 id=316 data-nosnippet>316</a>/// nearest the globe camera's centre on the ground, with its clip position and body-centre
-<a href=#317 id=317 data-nosnippet>317</a>/// vector computed in f64. Positions built from global f32 coordinates round to metres, which
-<a href=#318 id=318 data-nosnippet>318</a>/// a close view of the globe draws as geometry that slides; relative to this centre they keep
-<a href=#319 id=319 data-nosnippet>319</a>/// their separation.
-<a href=#320 id=320 data-nosnippet>320</a></span><span class="kw">fn </span>globe_center_references(globe: <span class="kw-2">&amp;</span>GlobeCameraState) -&gt; <span class="prelude-ty">Option</span>&lt;[[f32; <span class="number">4</span>]; <span class="number">3</span>]&gt; {
-<a href=#321 id=321 data-nosnippet>321</a>    <span class="kw">let </span>center_ll = <span class="kw">if </span>globe.is_external_eye() {
-<a href=#322 id=322 data-nosnippet>322</a>        <span class="kw">let </span>mag = globe.camera_position().magnitude();
-<a href=#323 id=323 data-nosnippet>323</a>        <span class="kw">if </span>mag &gt; <span class="number">1e-12 </span>{
-<a href=#324 id=324 data-nosnippet>324</a>            unit_sphere_to_lat_lon(globe.camera_position() / mag)
-<a href=#325 id=325 data-nosnippet>325</a>        } <span class="kw">else </span>{
-<a href=#326 id=326 data-nosnippet>326</a>            globe.center()
-<a href=#327 id=327 data-nosnippet>327</a>        }
-<a href=#328 id=328 data-nosnippet>328</a>    } <span class="kw">else </span>{
-<a href=#329 id=329 data-nosnippet>329</a>        globe.center()
-<a href=#330 id=330 data-nosnippet>330</a>    };
-<a href=#331 id=331 data-nosnippet>331</a>    <span class="comment">// Unclamped Web Mercator y keeps the reference right under polar cameras beyond 85.05°
-<a href=#332 id=332 data-nosnippet>332</a>    // instead of 550 km away at the Mercator rim; clamping only 11 cm from ±90° keeps tan finite.
-<a href=#333 id=333 data-nosnippet>333</a>    </span><span class="kw">let </span>lat_rad = center_ll
-<a href=#334 id=334 data-nosnippet>334</a>        .latitude
-<a href=#335 id=335 data-nosnippet>335</a>        .clamp(-<span class="number">89.999_999</span>, <span class="number">89.999_999</span>)
-<a href=#336 id=336 data-nosnippet>336</a>        .to_radians();
-<a href=#337 id=337 data-nosnippet>337</a>    <span class="kw">let </span>x_unclamped = center_ll.longitude / <span class="number">360.0 </span>+ <span class="number">0.5</span>;
-<a href=#338 id=338 data-nosnippet>338</a>    <span class="kw">let </span>y_unclamped = (<span class="number">1.0 </span>- lat_rad.tan().asinh() / std::f64::consts::PI) * <span class="number">0.5</span>;
-<a href=#339 id=339 data-nosnippet>339</a>    <span class="comment">// The centre need only be near the view; one f32 can hold exactly is differenced exactly.
-<a href=#340 id=340 data-nosnippet>340</a>    </span><span class="kw">let </span>(x_f32, y_f32) = (x_unclamped <span class="kw">as </span>f32, y_unclamped <span class="kw">as </span>f32);
-<a href=#341 id=341 data-nosnippet>341</a>    <span class="kw">let </span>(x, y) = (f64::from(x_f32), f64::from(y_f32));
-<a href=#342 id=342 data-nosnippet>342</a>    <span class="kw">let </span>longitude = x * std::f64::consts::TAU + std::f64::consts::PI;
-<a href=#343 id=343 data-nosnippet>343</a>    <span class="kw">let </span>tangent_half_latitude = (std::f64::consts::PI - y * std::f64::consts::TAU).exp();
-<a href=#344 id=344 data-nosnippet>344</a>    <span class="kw">let </span>denominator = tangent_half_latitude * tangent_half_latitude + <span class="number">1.0</span>;
-<a href=#345 id=345 data-nosnippet>345</a>    <span class="kw">let </span>sin_latitude = (tangent_half_latitude * tangent_half_latitude - <span class="number">1.0</span>) / denominator;
-<a href=#346 id=346 data-nosnippet>346</a>    <span class="kw">let </span>cos_latitude = <span class="number">2.0 </span>* tangent_half_latitude / denominator;
-<a href=#347 id=347 data-nosnippet>347</a>    <span class="kw">let </span>surface = cgmath::Vector3::new(
-<a href=#348 id=348 data-nosnippet>348</a>        longitude.sin() * cos_latitude,
-<a href=#349 id=349 data-nosnippet>349</a>        sin_latitude,
-<a href=#350 id=350 data-nosnippet>350</a>        longitude.cos() * cos_latitude,
-<a href=#351 id=351 data-nosnippet>351</a>    );
-<a href=#352 id=352 data-nosnippet>352</a>    <span class="kw">let </span>matrix = globe.wgpu_view_projection();
-<a href=#353 id=353 data-nosnippet>353</a>    <span class="kw">let </span>clip = |w: f64| {
-<a href=#354 id=354 data-nosnippet>354</a>        <span class="kw">let </span>clip = matrix * surface.extend(w);
-<a href=#355 id=355 data-nosnippet>355</a>        <span class="kw">let </span>lanes = [clip.x <span class="kw">as </span>f32, clip.y <span class="kw">as </span>f32, clip.z <span class="kw">as </span>f32, clip.w <span class="kw">as </span>f32];
-<a href=#356 id=356 data-nosnippet>356</a>        lanes.iter().all(|lane| lane.is_finite()).then_some(lanes)
-<a href=#357 id=357 data-nosnippet>357</a>    };
-<a href=#358 id=358 data-nosnippet>358</a>    <span class="prelude-val">Some</span>([[x_f32, y_f32, <span class="number">0.0</span>, <span class="number">0.0</span>], clip(<span class="number">1.0</span>)<span class="question-mark">?</span>, clip(<span class="number">0.0</span>)<span class="question-mark">?</span>])
-<a href=#359 id=359 data-nosnippet>359</a>}
-<a href=#360 id=360 data-nosnippet>360</a>
-<a href=#361 id=361 data-nosnippet>361</a><span class="doccomment">/// Constructs the vertical-perspective camera matching the current map view.
-<a href=#362 id=362 data-nosnippet>362</a></span><span class="kw">pub fn </span>globe_camera_for_view(
-<a href=#363 id=363 data-nosnippet>363</a>    view_state: <span class="kw-2">&amp;</span>ViewState,
-<a href=#364 id=364 data-nosnippet>364</a>) -&gt; <span class="prelude-ty">Result</span>&lt;GlobeCameraState, ProjectionStateError&gt; {
-<a href=#365 id=365 data-nosnippet>365</a>    <span class="kw">let </span>external_eye = view_state.external_globe_eye();
-<a href=#366 id=366 data-nosnippet>366</a>    <span class="comment">// A free-globe camera is drawn from its pose; a host's eye replaces either.
-<a href=#367 id=367 data-nosnippet>367</a>    </span><span class="kw">let </span>pose = view_state.pose_view().filter(|<span class="kw">_</span>| external_eye.is_none());
-<a href=#368 id=368 data-nosnippet>368</a>    <span class="kw">let </span>world_size = TILE_SIZE
-<a href=#369 id=369 data-nosnippet>369</a>        * <span class="number">2.0_f64</span>.powf(
-<a href=#370 id=370 data-nosnippet>370</a>            pose.as_ref()
-<a href=#371 id=371 data-nosnippet>371</a>                .map_or(view_state.zoom().value(), |pose| pose.style_zoom),
-<a href=#372 id=372 data-nosnippet>372</a>        );
-<a href=#373 id=373 data-nosnippet>373</a>    <span class="kw">let </span>camera_position = view_state.camera().position();
-<a href=#374 id=374 data-nosnippet>374</a>    <span class="kw">let </span>center = pose.as_ref().map_or_else(
-<a href=#375 id=375 data-nosnippet>375</a>        || mercator_world_to_lat_lon(camera_position.x, camera_position.y, world_size),
-<a href=#376 id=376 data-nosnippet>376</a>        |pose| pose.center,
-<a href=#377 id=377 data-nosnippet>377</a>    );
-<a href=#378 id=378 data-nosnippet>378</a>    <span class="kw">let </span>angle = |free: <span class="prelude-ty">Option</span>&lt;f64&gt;, flat: f64| free.unwrap_or(flat);
-<a href=#379 id=379 data-nosnippet>379</a>    <span class="kw">let </span>options = GlobeCameraOptions {
-<a href=#380 id=380 data-nosnippet>380</a>        width: view_state.width(),
-<a href=#381 id=381 data-nosnippet>381</a>        height: view_state.height(),
-<a href=#382 id=382 data-nosnippet>382</a>        field_of_view_degrees: external_eye.map_or_else(
-<a href=#383 id=383 data-nosnippet>383</a>            || view_state.field_of_view().<span class="number">0</span>.to_degrees(),
-<a href=#384 id=384 data-nosnippet>384</a>            |eye| eye.frustum.vertical_field_of_view().<span class="number">0</span>.to_degrees(),
-<a href=#385 id=385 data-nosnippet>385</a>        ),
-<a href=#386 id=386 data-nosnippet>386</a>        center,
-<a href=#387 id=387 data-nosnippet>387</a>        world_size,
-<a href=#388 id=388 data-nosnippet>388</a>        bearing_degrees: angle(
-<a href=#389 id=389 data-nosnippet>389</a>            pose.as_ref().map(|pose| pose.bearing_degrees),
-<a href=#390 id=390 data-nosnippet>390</a>            view_state.camera().get_bearing().<span class="number">0</span>.to_degrees(),
-<a href=#391 id=391 data-nosnippet>391</a>        ),
-<a href=#392 id=392 data-nosnippet>392</a>        pitch_degrees: angle(
-<a href=#393 id=393 data-nosnippet>393</a>            pose.as_ref().map(|pose| pose.pitch_degrees),
-<a href=#394 id=394 data-nosnippet>394</a>            view_state.camera().get_pitch().<span class="number">0</span>.to_degrees(),
-<a href=#395 id=395 data-nosnippet>395</a>        ),
-<a href=#396 id=396 data-nosnippet>396</a>        roll_degrees: angle(
-<a href=#397 id=397 data-nosnippet>397</a>            pose.as_ref().map(|pose| pose.roll_degrees),
-<a href=#398 id=398 data-nosnippet>398</a>            view_state.camera().get_roll().<span class="number">0</span>.to_degrees(),
-<a href=#399 id=399 data-nosnippet>399</a>        ),
-<a href=#400 id=400 data-nosnippet>400</a>        center_offset: external_eye
-<a href=#401 id=401 data-nosnippet>401</a>            .map_or_else(|| view_state.center_offset(), |<span class="kw">_</span>| Point2::new(<span class="number">0.0</span>, <span class="number">0.0</span>)),
-<a href=#402 id=402 data-nosnippet>402</a>        body: view_state.body(),
-<a href=#403 id=403 data-nosnippet>403</a>        <span class="comment">// A host's eye is placed where it is; the center's terrain must not move it.
-<a href=#404 id=404 data-nosnippet>404</a>        // A free-globe pose names its target's height, so it orbits that height from the
-<a href=#405 id=405 data-nosnippet>405</a>        // first frame, before the terrain has decided what the flat camera orbits.
-<a href=#406 id=406 data-nosnippet>406</a>        </span>target_elevation_meters: <span class="kw">if </span>external_eye.is_none()
-<a href=#407 id=407 data-nosnippet>407</a>            &amp;&amp; (pose.is_some() || view_state.globe_orbits_center())
-<a href=#408 id=408 data-nosnippet>408</a>        {
-<a href=#409 id=409 data-nosnippet>409</a>            view_state.center_elevation()
-<a href=#410 id=410 data-nosnippet>410</a>        } <span class="kw">else </span>{
-<a href=#411 id=411 data-nosnippet>411</a>            <span class="number">0.0
-<a href=#412 id=412 data-nosnippet>412</a>        </span>},
-<a href=#413 id=413 data-nosnippet>413</a>        radius_pixels: pose.as_ref().map(|pose| pose.radius_pixels),
-<a href=#414 id=414 data-nosnippet>414</a>    };
-<a href=#415 id=415 data-nosnippet>415</a>    <span class="kw">match </span>external_eye {
-<a href=#416 id=416 data-nosnippet>416</a>        <span class="prelude-val">Some</span>(eye) =&gt; GlobeCameraState::from_external_eye(options, eye),
-<a href=#417 id=417 data-nosnippet>417</a>        <span class="prelude-val">None </span>=&gt; GlobeCameraState::new(options),
-<a href=#418 id=418 data-nosnippet>418</a>    }
-<a href=#419 id=419 data-nosnippet>419</a>    .map_err(|source| ProjectionStateError::GlobeCamera { source })
-<a href=#420 id=420 data-nosnippet>420</a>}
-<a href=#421 id=421 data-nosnippet>421</a>
-<a href=#422 id=422 data-nosnippet>422</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>mercator_world_to_lat_lon(x: f64, y: f64, world_size: f64) -&gt; LatLon {
-<a href=#423 id=423 data-nosnippet>423</a>    <span class="kw">let </span>longitude = x / world_size * <span class="number">360.0 </span>- <span class="number">180.0</span>;
-<a href=#424 id=424 data-nosnippet>424</a>    <span class="kw">let </span>latitude = (std::f64::consts::PI * (<span class="number">1.0 </span>- <span class="number">2.0 </span>* y / world_size))
-<a href=#425 id=425 data-nosnippet>425</a>        .sinh()
-<a href=#426 id=426 data-nosnippet>426</a>        .atan()
-<a href=#427 id=427 data-nosnippet>427</a>        .to_degrees();
-<a href=#428 id=428 data-nosnippet>428</a>    LatLon::new(latitude, longitude)
-<a href=#429 id=429 data-nosnippet>429</a>}
-<a href=#430 id=430 data-nosnippet>430</a>
-<a href=#431 id=431 data-nosnippet>431</a><span class="attr">#[cfg(test)]
-<a href=#432 id=432 data-nosnippet>432</a></span><span class="kw">mod </span>tests;
-<a href=#433 id=433 data-nosnippet>433</a>
-<a href=#434 id=434 data-nosnippet>434</a><span class="attr">#[cfg(test)]
-<a href=#435 id=435 data-nosnippet>435</a>#[path = <span class="string">"projection/coverage/tests.rs"</span>]
-<a href=#436 id=436 data-nosnippet>436</a></span><span class="kw">mod </span>coverage_tests;
+<a href=#272 id=272 data-nosnippet>272</a>    );
+<a href=#273 id=273 data-nosnippet>273</a>    <span class="kw">let </span>shader = ShaderProjectionData {
+<a href=#274 id=274 data-nosnippet>274</a>        external_view: f32::from(view_state.has_external_view()),
+<a href=#275 id=275 data-nosnippet>275</a>        center_clip_w: mercator_center_w + (globe_center_w - mercator_center_w) * transition,
+<a href=#276 id=276 data-nosnippet>276</a>        radius_meters,
+<a href=#277 id=277 data-nosnippet>277</a>        globe_circle: [
+<a href=#278 id=278 data-nosnippet>278</a>            globe.circle_radius_correction() <span class="kw">as </span>f32,
+<a href=#279 id=279 data-nosnippet>279</a>            <span class="number">0.0</span>,
+<a href=#280 id=280 data-nosnippet>280</a>            f32::from(fixed_symbol_scale(view_state)),
+<a href=#281 id=281 data-nosnippet>281</a>            <span class="number">0.0</span>,
+<a href=#282 id=282 data-nosnippet>282</a>        ],
+<a href=#283 id=283 data-nosnippet>283</a>        ..ShaderProjectionData::from_renderer_data(data)
+<a href=#284 id=284 data-nosnippet>284</a>    };
+<a href=#285 id=285 data-nosnippet>285</a>    <span class="comment">// Below this zoom f32 rounding stays far under a pixel, and projecting from the global
+<a href=#286 id=286 data-nosnippet>286</a>    // coordinates keeps every edge where GL JS, which does the same, draws it. Host external
+<a href=#287 id=287 data-nosnippet>287</a>    // eyes always project relative to the sub-camera point so polar and high-altitude 6-DoF
+<a href=#288 id=288 data-nosnippet>288</a>    // views never drop out of f64 reference precision.
+<a href=#289 id=289 data-nosnippet>289</a>    </span><span class="kw">let </span>references = (view_state.zoom().value() &gt;= PRECISE_GLOBE_ZOOM
+<a href=#290 id=290 data-nosnippet>290</a>        || view_state.has_external_view())
+<a href=#291 id=291 data-nosnippet>291</a>    .then(|| globe_center_references(globe))
+<a href=#292 id=292 data-nosnippet>292</a>    .flatten();
+<a href=#293 id=293 data-nosnippet>293</a>    <span class="prelude-val">Ok</span>(<span class="kw">match </span>references {
+<a href=#294 id=294 data-nosnippet>294</a>        <span class="prelude-val">Some</span>([center, clip, radial]) =&gt; ShaderProjectionData {
+<a href=#295 id=295 data-nosnippet>295</a>            globe_circle: [shader.globe_circle[<span class="number">0</span>], <span class="number">1.0</span>, shader.globe_circle[<span class="number">2</span>], <span class="number">0.0</span>],
+<a href=#296 id=296 data-nosnippet>296</a>            globe_center: center,
+<a href=#297 id=297 data-nosnippet>297</a>            globe_center_clip: clip,
+<a href=#298 id=298 data-nosnippet>298</a>            globe_center_radial: radial,
+<a href=#299 id=299 data-nosnippet>299</a>            ..shader
+<a href=#300 id=300 data-nosnippet>300</a>        },
+<a href=#301 id=301 data-nosnippet>301</a>        <span class="prelude-val">None </span>=&gt; shader,
+<a href=#302 id=302 data-nosnippet>302</a>    })
+<a href=#303 id=303 data-nosnippet>303</a>}
+<a href=#304 id=304 data-nosnippet>304</a>
+<a href=#305 id=305 data-nosnippet>305</a><span class="doccomment">/// Derives the view-wide projection uniform from style and camera state.
+<a href=#306 id=306 data-nosnippet>306</a></span><span class="kw">pub fn </span>projection_data_for_view(
+<a href=#307 id=307 data-nosnippet>307</a>    style: <span class="kw-2">&amp;</span>Style,
+<a href=#308 id=308 data-nosnippet>308</a>    view_state: <span class="kw-2">&amp;</span>ViewState,
+<a href=#309 id=309 data-nosnippet>309</a>) -&gt; <span class="prelude-ty">Result</span>&lt;ShaderProjectionData, ProjectionStateError&gt; {
+<a href=#310 id=310 data-nosnippet>310</a>    <span class="kw">let </span>transition = style.projection.as_ref().map_or(<span class="number">0.0</span>, |specification| {
+<a href=#311 id=311 data-nosnippet>311</a>        specification
+<a href=#312 id=312 data-nosnippet>312</a>            .projection_type
+<a href=#313 id=313 data-nosnippet>313</a>            .globe_transition(view_state.zoom().value())
+<a href=#314 id=314 data-nosnippet>314</a>    });
+<a href=#315 id=315 data-nosnippet>315</a>    <span class="kw">if </span>transition == <span class="number">0.0 </span>{
+<a href=#316 id=316 data-nosnippet>316</a>        <span class="kw">return </span><span class="prelude-val">Ok</span>(flat_shader_projection(view_state));
+<a href=#317 id=317 data-nosnippet>317</a>    }
+<a href=#318 id=318 data-nosnippet>318</a>    <span class="kw">let </span>globe = globe_camera_for_view(view_state)<span class="question-mark">?</span>;
+<a href=#319 id=319 data-nosnippet>319</a>    globe_shader_projection(view_state, transition, <span class="kw-2">&amp;</span>globe)
+<a href=#320 id=320 data-nosnippet>320</a>}
+<a href=#321 id=321 data-nosnippet>321</a>
+<a href=#322 id=322 data-nosnippet>322</a><span class="doccomment">/// The zoom from which the shaders project globe positions relative to the view's centre: a
+<a href=#323 id=323 data-nosnippet>323</a>/// pixel is about 20 m there, and the metres global f32 coordinates round to start to show.
+<a href=#324 id=324 data-nosnippet>324</a></span><span class="kw">const </span>PRECISE_GLOBE_ZOOM: f64 = <span class="number">12.0</span>;
+<a href=#325 id=325 data-nosnippet>325</a>
+<a href=#326 id=326 data-nosnippet>326</a><span class="doccomment">/// The centre the shaders project globe positions relative to: the f32 Mercator position
+<a href=#327 id=327 data-nosnippet>327</a>/// nearest the globe camera's centre on the ground, with its clip position and body-centre
+<a href=#328 id=328 data-nosnippet>328</a>/// vector computed in f64. Positions built from global f32 coordinates round to metres, which
+<a href=#329 id=329 data-nosnippet>329</a>/// a close view of the globe draws as geometry that slides; relative to this centre they keep
+<a href=#330 id=330 data-nosnippet>330</a>/// their separation.
+<a href=#331 id=331 data-nosnippet>331</a></span><span class="kw">fn </span>globe_center_references(globe: <span class="kw-2">&amp;</span>GlobeCameraState) -&gt; <span class="prelude-ty">Option</span>&lt;[[f32; <span class="number">4</span>]; <span class="number">3</span>]&gt; {
+<a href=#332 id=332 data-nosnippet>332</a>    <span class="kw">let </span>center_ll = <span class="kw">if </span>globe.is_external_eye() {
+<a href=#333 id=333 data-nosnippet>333</a>        <span class="kw">let </span>mag = globe.camera_position().magnitude();
+<a href=#334 id=334 data-nosnippet>334</a>        <span class="kw">if </span>mag &gt; <span class="number">1e-12 </span>{
+<a href=#335 id=335 data-nosnippet>335</a>            unit_sphere_to_lat_lon(globe.camera_position() / mag)
+<a href=#336 id=336 data-nosnippet>336</a>        } <span class="kw">else </span>{
+<a href=#337 id=337 data-nosnippet>337</a>            globe.center()
+<a href=#338 id=338 data-nosnippet>338</a>        }
+<a href=#339 id=339 data-nosnippet>339</a>    } <span class="kw">else </span>{
+<a href=#340 id=340 data-nosnippet>340</a>        globe.center()
+<a href=#341 id=341 data-nosnippet>341</a>    };
+<a href=#342 id=342 data-nosnippet>342</a>    <span class="comment">// Unclamped Web Mercator y keeps the reference right under polar cameras beyond 85.05°
+<a href=#343 id=343 data-nosnippet>343</a>    // instead of 550 km away at the Mercator rim; clamping only 11 cm from ±90° keeps tan finite.
+<a href=#344 id=344 data-nosnippet>344</a>    </span><span class="kw">let </span>lat_rad = center_ll
+<a href=#345 id=345 data-nosnippet>345</a>        .latitude
+<a href=#346 id=346 data-nosnippet>346</a>        .clamp(-<span class="number">89.999_999</span>, <span class="number">89.999_999</span>)
+<a href=#347 id=347 data-nosnippet>347</a>        .to_radians();
+<a href=#348 id=348 data-nosnippet>348</a>    <span class="kw">let </span>x_unclamped = center_ll.longitude / <span class="number">360.0 </span>+ <span class="number">0.5</span>;
+<a href=#349 id=349 data-nosnippet>349</a>    <span class="kw">let </span>y_unclamped = (<span class="number">1.0 </span>- lat_rad.tan().asinh() / std::f64::consts::PI) * <span class="number">0.5</span>;
+<a href=#350 id=350 data-nosnippet>350</a>    <span class="comment">// The centre need only be near the view; one f32 can hold exactly is differenced exactly.
+<a href=#351 id=351 data-nosnippet>351</a>    </span><span class="kw">let </span>(x_f32, y_f32) = (x_unclamped <span class="kw">as </span>f32, y_unclamped <span class="kw">as </span>f32);
+<a href=#352 id=352 data-nosnippet>352</a>    <span class="kw">let </span>(x, y) = (f64::from(x_f32), f64::from(y_f32));
+<a href=#353 id=353 data-nosnippet>353</a>    <span class="kw">let </span>longitude = x * std::f64::consts::TAU + std::f64::consts::PI;
+<a href=#354 id=354 data-nosnippet>354</a>    <span class="kw">let </span>tangent_half_latitude = (std::f64::consts::PI - y * std::f64::consts::TAU).exp();
+<a href=#355 id=355 data-nosnippet>355</a>    <span class="kw">let </span>denominator = tangent_half_latitude * tangent_half_latitude + <span class="number">1.0</span>;
+<a href=#356 id=356 data-nosnippet>356</a>    <span class="kw">let </span>sin_latitude = (tangent_half_latitude * tangent_half_latitude - <span class="number">1.0</span>) / denominator;
+<a href=#357 id=357 data-nosnippet>357</a>    <span class="kw">let </span>cos_latitude = <span class="number">2.0 </span>* tangent_half_latitude / denominator;
+<a href=#358 id=358 data-nosnippet>358</a>    <span class="kw">let </span>surface = cgmath::Vector3::new(
+<a href=#359 id=359 data-nosnippet>359</a>        longitude.sin() * cos_latitude,
+<a href=#360 id=360 data-nosnippet>360</a>        sin_latitude,
+<a href=#361 id=361 data-nosnippet>361</a>        longitude.cos() * cos_latitude,
+<a href=#362 id=362 data-nosnippet>362</a>    );
+<a href=#363 id=363 data-nosnippet>363</a>    <span class="kw">let </span>matrix = globe.wgpu_view_projection();
+<a href=#364 id=364 data-nosnippet>364</a>    <span class="kw">let </span>clip = |w: f64| {
+<a href=#365 id=365 data-nosnippet>365</a>        <span class="kw">let </span>clip = matrix * surface.extend(w);
+<a href=#366 id=366 data-nosnippet>366</a>        <span class="kw">let </span>lanes = [clip.x <span class="kw">as </span>f32, clip.y <span class="kw">as </span>f32, clip.z <span class="kw">as </span>f32, clip.w <span class="kw">as </span>f32];
+<a href=#367 id=367 data-nosnippet>367</a>        lanes.iter().all(|lane| lane.is_finite()).then_some(lanes)
+<a href=#368 id=368 data-nosnippet>368</a>    };
+<a href=#369 id=369 data-nosnippet>369</a>    <span class="prelude-val">Some</span>([[x_f32, y_f32, <span class="number">0.0</span>, <span class="number">0.0</span>], clip(<span class="number">1.0</span>)<span class="question-mark">?</span>, clip(<span class="number">0.0</span>)<span class="question-mark">?</span>])
+<a href=#370 id=370 data-nosnippet>370</a>}
+<a href=#371 id=371 data-nosnippet>371</a>
+<a href=#372 id=372 data-nosnippet>372</a><span class="doccomment">/// Constructs the vertical-perspective camera matching the current map view.
+<a href=#373 id=373 data-nosnippet>373</a></span><span class="kw">pub fn </span>globe_camera_for_view(
+<a href=#374 id=374 data-nosnippet>374</a>    view_state: <span class="kw-2">&amp;</span>ViewState,
+<a href=#375 id=375 data-nosnippet>375</a>) -&gt; <span class="prelude-ty">Result</span>&lt;GlobeCameraState, ProjectionStateError&gt; {
+<a href=#376 id=376 data-nosnippet>376</a>    <span class="kw">let </span>external_eye = view_state.external_globe_eye();
+<a href=#377 id=377 data-nosnippet>377</a>    <span class="comment">// A free-globe camera is drawn from its pose; a host's eye replaces either.
+<a href=#378 id=378 data-nosnippet>378</a>    </span><span class="kw">let </span>pose = view_state.pose_view().filter(|<span class="kw">_</span>| external_eye.is_none());
+<a href=#379 id=379 data-nosnippet>379</a>    <span class="kw">let </span>world_size = TILE_SIZE
+<a href=#380 id=380 data-nosnippet>380</a>        * <span class="number">2.0_f64</span>.powf(
+<a href=#381 id=381 data-nosnippet>381</a>            pose.as_ref()
+<a href=#382 id=382 data-nosnippet>382</a>                .map_or(view_state.zoom().value(), |pose| pose.style_zoom),
+<a href=#383 id=383 data-nosnippet>383</a>        );
+<a href=#384 id=384 data-nosnippet>384</a>    <span class="kw">let </span>camera_position = view_state.camera().position();
+<a href=#385 id=385 data-nosnippet>385</a>    <span class="kw">let </span>center = pose.as_ref().map_or_else(
+<a href=#386 id=386 data-nosnippet>386</a>        || mercator_world_to_lat_lon(camera_position.x, camera_position.y, world_size),
+<a href=#387 id=387 data-nosnippet>387</a>        |pose| pose.center,
+<a href=#388 id=388 data-nosnippet>388</a>    );
+<a href=#389 id=389 data-nosnippet>389</a>    <span class="kw">let </span>angle = |free: <span class="prelude-ty">Option</span>&lt;f64&gt;, flat: f64| free.unwrap_or(flat);
+<a href=#390 id=390 data-nosnippet>390</a>    <span class="kw">let </span>options = GlobeCameraOptions {
+<a href=#391 id=391 data-nosnippet>391</a>        width: view_state.width(),
+<a href=#392 id=392 data-nosnippet>392</a>        height: view_state.height(),
+<a href=#393 id=393 data-nosnippet>393</a>        field_of_view_degrees: external_eye.map_or_else(
+<a href=#394 id=394 data-nosnippet>394</a>            || view_state.field_of_view().<span class="number">0</span>.to_degrees(),
+<a href=#395 id=395 data-nosnippet>395</a>            |eye| eye.frustum.vertical_field_of_view().<span class="number">0</span>.to_degrees(),
+<a href=#396 id=396 data-nosnippet>396</a>        ),
+<a href=#397 id=397 data-nosnippet>397</a>        center,
+<a href=#398 id=398 data-nosnippet>398</a>        world_size,
+<a href=#399 id=399 data-nosnippet>399</a>        bearing_degrees: angle(
+<a href=#400 id=400 data-nosnippet>400</a>            pose.as_ref().map(|pose| pose.bearing_degrees),
+<a href=#401 id=401 data-nosnippet>401</a>            view_state.camera().get_bearing().<span class="number">0</span>.to_degrees(),
+<a href=#402 id=402 data-nosnippet>402</a>        ),
+<a href=#403 id=403 data-nosnippet>403</a>        pitch_degrees: angle(
+<a href=#404 id=404 data-nosnippet>404</a>            pose.as_ref().map(|pose| pose.pitch_degrees),
+<a href=#405 id=405 data-nosnippet>405</a>            view_state.camera().get_pitch().<span class="number">0</span>.to_degrees(),
+<a href=#406 id=406 data-nosnippet>406</a>        ),
+<a href=#407 id=407 data-nosnippet>407</a>        roll_degrees: angle(
+<a href=#408 id=408 data-nosnippet>408</a>            pose.as_ref().map(|pose| pose.roll_degrees),
+<a href=#409 id=409 data-nosnippet>409</a>            view_state.camera().get_roll().<span class="number">0</span>.to_degrees(),
+<a href=#410 id=410 data-nosnippet>410</a>        ),
+<a href=#411 id=411 data-nosnippet>411</a>        center_offset: external_eye
+<a href=#412 id=412 data-nosnippet>412</a>            .map_or_else(|| view_state.center_offset(), |<span class="kw">_</span>| Point2::new(<span class="number">0.0</span>, <span class="number">0.0</span>)),
+<a href=#413 id=413 data-nosnippet>413</a>        body: view_state.body(),
+<a href=#414 id=414 data-nosnippet>414</a>        <span class="comment">// A host's eye is placed where it is; the center's terrain must not move it.
+<a href=#415 id=415 data-nosnippet>415</a>        // A free-globe pose names its target's height, so it orbits that height from the
+<a href=#416 id=416 data-nosnippet>416</a>        // first frame, before the terrain has decided what the flat camera orbits.
+<a href=#417 id=417 data-nosnippet>417</a>        </span>target_elevation_meters: <span class="kw">if </span>external_eye.is_none()
+<a href=#418 id=418 data-nosnippet>418</a>            &amp;&amp; (pose.is_some() || view_state.globe_orbits_center())
+<a href=#419 id=419 data-nosnippet>419</a>        {
+<a href=#420 id=420 data-nosnippet>420</a>            view_state.center_elevation()
+<a href=#421 id=421 data-nosnippet>421</a>        } <span class="kw">else </span>{
+<a href=#422 id=422 data-nosnippet>422</a>            <span class="number">0.0
+<a href=#423 id=423 data-nosnippet>423</a>        </span>},
+<a href=#424 id=424 data-nosnippet>424</a>        radius_pixels: pose.as_ref().map(|pose| pose.radius_pixels),
+<a href=#425 id=425 data-nosnippet>425</a>    };
+<a href=#426 id=426 data-nosnippet>426</a>    <span class="kw">match </span>external_eye {
+<a href=#427 id=427 data-nosnippet>427</a>        <span class="prelude-val">Some</span>(eye) =&gt; GlobeCameraState::from_external_eye(options, eye),
+<a href=#428 id=428 data-nosnippet>428</a>        <span class="prelude-val">None </span>=&gt; GlobeCameraState::new(options),
+<a href=#429 id=429 data-nosnippet>429</a>    }
+<a href=#430 id=430 data-nosnippet>430</a>    .map_err(|source| ProjectionStateError::GlobeCamera { source })
+<a href=#431 id=431 data-nosnippet>431</a>}
+<a href=#432 id=432 data-nosnippet>432</a>
+<a href=#433 id=433 data-nosnippet>433</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>mercator_world_to_lat_lon(x: f64, y: f64, world_size: f64) -&gt; LatLon {
+<a href=#434 id=434 data-nosnippet>434</a>    <span class="kw">let </span>longitude = x / world_size * <span class="number">360.0 </span>- <span class="number">180.0</span>;
+<a href=#435 id=435 data-nosnippet>435</a>    <span class="kw">let </span>latitude = (std::f64::consts::PI * (<span class="number">1.0 </span>- <span class="number">2.0 </span>* y / world_size))
+<a href=#436 id=436 data-nosnippet>436</a>        .sinh()
+<a href=#437 id=437 data-nosnippet>437</a>        .atan()
+<a href=#438 id=438 data-nosnippet>438</a>        .to_degrees();
+<a href=#439 id=439 data-nosnippet>439</a>    LatLon::new(latitude, longitude)
+<a href=#440 id=440 data-nosnippet>440</a>}
+<a href=#441 id=441 data-nosnippet>441</a>
+<a href=#442 id=442 data-nosnippet>442</a><span class="attr">#[cfg(test)]
+<a href=#443 id=443 data-nosnippet>443</a></span><span class="kw">mod </span>tests;
+<a href=#444 id=444 data-nosnippet>444</a>
+<a href=#445 id=445 data-nosnippet>445</a><span class="attr">#[cfg(test)]
+<a href=#446 id=446 data-nosnippet>446</a>#[path = <span class="string">"projection/coverage/tests.rs"</span>]
+<a href=#447 id=447 data-nosnippet>447</a></span><span class="kw">mod </span>coverage_tests;
 </code></pre></div></section></main></body></html>

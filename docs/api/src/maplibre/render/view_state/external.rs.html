@@ -208,7 +208,7 @@
 <a href=#208 id=208 data-nosnippet>208</a>    ///
 <a href=#209 id=209 data-nosnippet>209</a>    /// The camera space is in world pixels at the anchor, with y down as the map's own camera
 <a href=#210 id=210 data-nosnippet>210</a>    /// space has it, so the same projection conventions apply on top.
-<a href=#211 id=211 data-nosnippet>211</a>    </span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>external_camera_matrix(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Matrix4&lt;f64&gt;&gt; {
+<a href=#211 id=211 data-nosnippet>211</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>external_camera_matrix(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Matrix4&lt;f64&gt;&gt; {
 <a href=#212 id=212 data-nosnippet>212</a>        <span class="kw">let </span>eye = <span class="self">self</span>.external_eye<span class="question-mark">?</span>;
 <a href=#213 id=213 data-nosnippet>213</a>        <span class="kw">let </span>world_size = TILE_SIZE * <span class="number">2f64</span>.powf(<span class="self">self</span>.zoom().value());
 <a href=#214 id=214 data-nosnippet>214</a>        <span class="kw">let </span>pixels_per_meter = <span class="self">self</span>.anchor_pixels_per_meter(eye.anchor);

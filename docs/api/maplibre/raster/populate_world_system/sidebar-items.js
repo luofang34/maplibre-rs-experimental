@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["apply_raster_message"],"struct":["PopulateWorldSystem"]};
+window.SIDEBAR_ITEMS = {"fn":["apply_raster_message_with_style"],"struct":["PopulateWorldSystem"]};

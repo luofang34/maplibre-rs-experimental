@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["RasterMessageTag"],"struct":["DefaultLayerRaster","DefaultLayerRasterMissing","DefaultRasterTransferables"],"trait":["LayerRaster","LayerRasterMissing","RasterTransferables"]};
+window.SIDEBAR_ITEMS = {"enum":["DefaultRasterPayload","RasterMessageTag"],"struct":["DefaultLayerRaster","DefaultLayerRasterMissing","DefaultRasterTransferables","SharedRasterDem"],"trait":["LayerRaster","LayerRasterMissing","RasterTransferables"]};

@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["coarse_raster_ancestor","image_bounds","wanted_tiles"],"mod":["fetch"],"struct":["RequestSystem"]};
+window.SIDEBAR_ITEMS = {"fn":["all_sources_ready","coarse_raster_ancestor","image_bounds","wanted_tiles"],"mod":["fetch"],"struct":["RequestSystem"]};

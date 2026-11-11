@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["ExactGeometry","TileIndex"],"fn":["properties_bytes"],"mod":["clip","processor"],"struct":["FeatureMeta","GeometryIndex","IndexProcessor","IndexedGeometry","StoredTileIndex"]};
+window.SIDEBAR_ITEMS = {"enum":["ExactGeometry","TileIndex"],"fn":["properties_bytes"],"mod":["clip","processor","wire"],"struct":["FeatureMeta","GeometryIndex","IndexProcessor","IndexedGeometry","StoredTileIndex"]};

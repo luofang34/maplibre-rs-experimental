@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["MAX_TILES"],"fn":["camera_query_bounds","candidates_in","ground_corners","ground_region","tiles_in"],"struct":["QueryTile"]};
+window.SIDEBAR_ITEMS = {"constant":["MAX_TILES"],"fn":["candidates_in","tiles_in"],"struct":["QueryTile"]};

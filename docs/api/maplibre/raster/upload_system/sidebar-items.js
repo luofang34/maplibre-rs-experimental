@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["neighbour_images","upload_image","upload_raster_layer","upload_system"]};
+window.SIDEBAR_ITEMS = {"fn":["upload_dem_layers","upload_imagery","upload_raster_layer","upload_system"]};

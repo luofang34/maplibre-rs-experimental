@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["GLOBE_Z_CLIPPING_START"],"enum":["ProjectionMode"],"fn":["matrix_bits","resolve_frame_view_system"],"struct":["ProjectedWindowPoint","ResolvedFrameView","ViewSnapshotKey"]};

@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"constant":["BORDER"],"fn":["border_texel","filled_sides","side_bit","with_border"]};

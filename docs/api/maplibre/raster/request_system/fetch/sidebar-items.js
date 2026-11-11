@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["fetch_raster_apc","fetch_source","send_image_tile"]};
+window.SIDEBAR_ITEMS = {"fn":["fetch_dem_source","fetch_raster_apc","fetch_source","send_image_tile"]};

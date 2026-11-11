@@ -103,57 +103,61 @@
 <a href=#103 id=103 data-nosnippet>103</a>        <span class="prelude-val">Some</span>(Initialized(pool)) =&gt; (pool.revision(), pool.device_buffer_bytes()),
 <a href=#104 id=104 data-nosnippet>104</a>        <span class="kw">_ </span>=&gt; (<span class="number">0</span>, <span class="number">0</span>),
 <a href=#105 id=105 data-nosnippet>105</a>    };
-<a href=#106 id=106 data-nosnippet>106</a>    <span class="kw">let </span>(drapes, free_drapes, drape_bytes, dem_textures, dem_bytes) =
-<a href=#107 id=107 data-nosnippet>107</a>        <span class="kw">match </span>world.resources.get::&lt;Eventually&lt;TerrainResources&gt;&gt;() {
-<a href=#108 id=108 data-nosnippet>108</a>            <span class="prelude-val">Some</span>(Initialized(terrain)) =&gt; {
-<a href=#109 id=109 data-nosnippet>109</a>                <span class="kw">let </span>(held, free) = terrain.drape_counts();
-<a href=#110 id=110 data-nosnippet>110</a>                <span class="kw">let </span>(drape_bytes, dem_bytes) = terrain.texture_bytes();
-<a href=#111 id=111 data-nosnippet>111</a>                (
-<a href=#112 id=112 data-nosnippet>112</a>                    held,
-<a href=#113 id=113 data-nosnippet>113</a>                    free,
-<a href=#114 id=114 data-nosnippet>114</a>                    drape_bytes,
-<a href=#115 id=115 data-nosnippet>115</a>                    terrain.dem_texture_count(),
-<a href=#116 id=116 data-nosnippet>116</a>                    dem_bytes,
-<a href=#117 id=117 data-nosnippet>117</a>                )
-<a href=#118 id=118 data-nosnippet>118</a>            }
-<a href=#119 id=119 data-nosnippet>119</a>            <span class="kw">_ </span>=&gt; (<span class="number">0</span>, <span class="number">0</span>, <span class="number">0</span>, <span class="number">0</span>, <span class="number">0</span>),
-<a href=#120 id=120 data-nosnippet>120</a>        };
-<a href=#121 id=121 data-nosnippet>121</a>    <span class="macro">tracing::info!</span>(
-<a href=#122 id=122 data-nosnippet>122</a>        tiles,
-<a href=#123 id=123 data-nosnippet>123</a>        pending = <span class="kw">crate</span>::io::tile_backpressure::tiles_in_flight(world),
-<a href=#124 id=124 data-nosnippet>124</a>        settled,
-<a href=#125 id=125 data-nosnippet>125</a>        geometry_mb = bytes &gt;&gt; <span class="number">20</span>,
-<a href=#126 id=126 data-nosnippet>126</a>        gpu_pool_mb = (vec_pool_bytes + sym_pool_bytes) &gt;&gt; <span class="number">20</span>,
-<a href=#127 id=127 data-nosnippet>127</a>        index_mb = index_bytes &gt;&gt; <span class="number">20</span>,
-<a href=#128 id=128 data-nosnippet>128</a>        pool_revision,
-<a href=#129 id=129 data-nosnippet>129</a>        drawn,
-<a href=#130 id=130 data-nosnippet>130</a>        in_use,
-<a href=#131 id=131 data-nosnippet>131</a>        drapes,
-<a href=#132 id=132 data-nosnippet>132</a>        free_drapes,
-<a href=#133 id=133 data-nosnippet>133</a>        drape_mb = drape_bytes &gt;&gt; <span class="number">20</span>,
-<a href=#134 id=134 data-nosnippet>134</a>        dem_textures,
-<a href=#135 id=135 data-nosnippet>135</a>        dem_mb = dem_bytes &gt;&gt; <span class="number">20</span>,
-<a href=#136 id=136 data-nosnippet>136</a>        finest_dem_zoom = finest_dem_zoom(world),
-<a href=#137 id=137 data-nosnippet>137</a>        symbol_revision,
-<a href=#138 id=138 data-nosnippet>138</a>        <span class="string">"resident tiles"
-<a href=#139 id=139 data-nosnippet>139</a>    </span>);
-<a href=#140 id=140 data-nosnippet>140</a>}
-<a href=#141 id=141 data-nosnippet>141</a>
-<a href=#142 id=142 data-nosnippet>142</a><span class="kw">fn </span>finest_dem_zoom(world: <span class="kw-2">&amp;</span>World) -&gt; u8 {
-<a href=#143 id=143 data-nosnippet>143</a>    world
-<a href=#144 id=144 data-nosnippet>144</a>        .tiles
-<a href=#145 id=145 data-nosnippet>145</a>        .tiles
-<a href=#146 id=146 data-nosnippet>146</a>        .values()
-<a href=#147 id=147 data-nosnippet>147</a>        .filter_map(|tile| {
-<a href=#148 id=148 data-nosnippet>148</a>            <span class="macro">matches!</span>(
-<a href=#149 id=149 data-nosnippet>149</a>                world
-<a href=#150 id=150 data-nosnippet>150</a>                    .tiles
-<a href=#151 id=151 data-nosnippet>151</a>                    .query::&lt;<span class="kw-2">&amp;</span><span class="kw">crate</span>::terrain::DemTileComponent&gt;(tile.coords),
-<a href=#152 id=152 data-nosnippet>152</a>                <span class="prelude-val">Some</span>(<span class="kw">crate</span>::terrain::DemTileComponent::Loaded(<span class="kw">_</span>))
-<a href=#153 id=153 data-nosnippet>153</a>            )
-<a href=#154 id=154 data-nosnippet>154</a>            .then_some(u8::from(tile.coords.z))
-<a href=#155 id=155 data-nosnippet>155</a>        })
-<a href=#156 id=156 data-nosnippet>156</a>        .max()
-<a href=#157 id=157 data-nosnippet>157</a>        .unwrap_or(<span class="number">0</span>)
-<a href=#158 id=158 data-nosnippet>158</a>}
+<a href=#106 id=106 data-nosnippet>106</a>    <span class="kw">let </span>(pool_dem_textures, pool_dem_bytes) = world
+<a href=#107 id=107 data-nosnippet>107</a>        .resources
+<a href=#108 id=108 data-nosnippet>108</a>        .get::&lt;<span class="kw">crate</span>::terrain::GpuDemPool&gt;()
+<a href=#109 id=109 data-nosnippet>109</a>        .map_or((<span class="number">0</span>, <span class="number">0</span>), |pool| (pool.texture_count(), pool.texture_bytes()));
+<a href=#110 id=110 data-nosnippet>110</a>    <span class="kw">let </span>(drapes, free_drapes, drape_bytes, dem_textures, dem_bytes) =
+<a href=#111 id=111 data-nosnippet>111</a>        <span class="kw">match </span>world.resources.get::&lt;Eventually&lt;TerrainResources&gt;&gt;() {
+<a href=#112 id=112 data-nosnippet>112</a>            <span class="prelude-val">Some</span>(Initialized(terrain)) =&gt; {
+<a href=#113 id=113 data-nosnippet>113</a>                <span class="kw">let </span>(held, free) = terrain.drape_counts();
+<a href=#114 id=114 data-nosnippet>114</a>                <span class="kw">let </span>(drape_bytes, dem_bytes) = terrain.texture_bytes();
+<a href=#115 id=115 data-nosnippet>115</a>                (
+<a href=#116 id=116 data-nosnippet>116</a>                    held,
+<a href=#117 id=117 data-nosnippet>117</a>                    free,
+<a href=#118 id=118 data-nosnippet>118</a>                    drape_bytes,
+<a href=#119 id=119 data-nosnippet>119</a>                    terrain.dem_texture_count().max(pool_dem_textures),
+<a href=#120 id=120 data-nosnippet>120</a>                    dem_bytes.max(pool_dem_bytes),
+<a href=#121 id=121 data-nosnippet>121</a>                )
+<a href=#122 id=122 data-nosnippet>122</a>            }
+<a href=#123 id=123 data-nosnippet>123</a>            <span class="kw">_ </span>=&gt; (<span class="number">0</span>, <span class="number">0</span>, <span class="number">0</span>, pool_dem_textures, pool_dem_bytes),
+<a href=#124 id=124 data-nosnippet>124</a>        };
+<a href=#125 id=125 data-nosnippet>125</a>    <span class="macro">tracing::info!</span>(
+<a href=#126 id=126 data-nosnippet>126</a>        tiles,
+<a href=#127 id=127 data-nosnippet>127</a>        pending = <span class="kw">crate</span>::io::tile_backpressure::tiles_in_flight(world),
+<a href=#128 id=128 data-nosnippet>128</a>        settled,
+<a href=#129 id=129 data-nosnippet>129</a>        geometry_mb = bytes &gt;&gt; <span class="number">20</span>,
+<a href=#130 id=130 data-nosnippet>130</a>        gpu_pool_mb = (vec_pool_bytes + sym_pool_bytes) &gt;&gt; <span class="number">20</span>,
+<a href=#131 id=131 data-nosnippet>131</a>        index_mb = index_bytes &gt;&gt; <span class="number">20</span>,
+<a href=#132 id=132 data-nosnippet>132</a>        pool_revision,
+<a href=#133 id=133 data-nosnippet>133</a>        drawn,
+<a href=#134 id=134 data-nosnippet>134</a>        in_use,
+<a href=#135 id=135 data-nosnippet>135</a>        drapes,
+<a href=#136 id=136 data-nosnippet>136</a>        free_drapes,
+<a href=#137 id=137 data-nosnippet>137</a>        drape_mb = drape_bytes &gt;&gt; <span class="number">20</span>,
+<a href=#138 id=138 data-nosnippet>138</a>        dem_textures,
+<a href=#139 id=139 data-nosnippet>139</a>        dem_mb = dem_bytes &gt;&gt; <span class="number">20</span>,
+<a href=#140 id=140 data-nosnippet>140</a>        finest_dem_zoom = finest_dem_zoom(world),
+<a href=#141 id=141 data-nosnippet>141</a>        symbol_revision,
+<a href=#142 id=142 data-nosnippet>142</a>        <span class="string">"resident tiles"
+<a href=#143 id=143 data-nosnippet>143</a>    </span>);
+<a href=#144 id=144 data-nosnippet>144</a>}
+<a href=#145 id=145 data-nosnippet>145</a>
+<a href=#146 id=146 data-nosnippet>146</a><span class="kw">fn </span>finest_dem_zoom(world: <span class="kw-2">&amp;</span>World) -&gt; u8 {
+<a href=#147 id=147 data-nosnippet>147</a>    world
+<a href=#148 id=148 data-nosnippet>148</a>        .tiles
+<a href=#149 id=149 data-nosnippet>149</a>        .tiles
+<a href=#150 id=150 data-nosnippet>150</a>        .values()
+<a href=#151 id=151 data-nosnippet>151</a>        .filter_map(|tile| {
+<a href=#152 id=152 data-nosnippet>152</a>            <span class="macro">matches!</span>(
+<a href=#153 id=153 data-nosnippet>153</a>                world
+<a href=#154 id=154 data-nosnippet>154</a>                    .tiles
+<a href=#155 id=155 data-nosnippet>155</a>                    .query::&lt;<span class="kw-2">&amp;</span><span class="kw">crate</span>::terrain::DemTileComponent&gt;(tile.coords),
+<a href=#156 id=156 data-nosnippet>156</a>                <span class="prelude-val">Some</span>(<span class="kw">crate</span>::terrain::DemTileComponent::Loaded(<span class="kw">_</span>))
+<a href=#157 id=157 data-nosnippet>157</a>            )
+<a href=#158 id=158 data-nosnippet>158</a>            .then_some(u8::from(tile.coords.z))
+<a href=#159 id=159 data-nosnippet>159</a>        })
+<a href=#160 id=160 data-nosnippet>160</a>        .max()
+<a href=#161 id=161 data-nosnippet>161</a>        .unwrap_or(<span class="number">0</span>)
+<a href=#162 id=162 data-nosnippet>162</a>}
 </code></pre></div></section></main></body></html>
