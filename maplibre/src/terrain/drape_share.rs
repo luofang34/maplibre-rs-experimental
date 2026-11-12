@@ -27,10 +27,12 @@ const REGROUPING_TEXTURES: usize = 8;
 
 /// Textures a view is granted however many the views before it need, so its ground is draped,
 /// coarsely, rather than bare.
+#[cfg(any(feature = "headless", test))]
 const FLOOR_TEXTURES: usize = 4;
 
 /// Needs are granted in steps of this many textures, so a covering that gains or loses a tile
 /// from one frame to the next does not regroup the drapes of the views after it.
+#[cfg(any(feature = "headless", test))]
 const NEED_STEP: usize = 4;
 
 /// What each draping view needs and is granted of the drape texture allowance. A map drawn
@@ -45,6 +47,7 @@ pub(crate) struct DrapeShares {
 impl DrapeShares {
     /// Grants `allowed` textures to `views`, which come in the order of their priority. A view
     /// that has not draped yet is taken to need them all.
+    #[cfg(any(feature = "headless", test))]
     pub(crate) fn grant(&mut self, views: &[ViewSlotId], allowed: usize) {
         let needs: Vec<usize> = views
             .iter()

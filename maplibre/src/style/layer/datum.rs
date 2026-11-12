@@ -3,8 +3,8 @@
 use super::{FillExtrusionPaint, LinePaint, StyleProperty};
 
 /// Subset of an extruded prism's shell emitted by a `fill-extrusion` feature, allowing multi-tier
-/// 3D volumes (such as stepped Class B/C airspace shelves) to be sliced into watertight manifold
-/// exteriors without internal coplanar walls or duplicate horizontal caps.
+/// 3D volumes (such as stepped architectural terraces or elevated zones) to be sliced into
+/// watertight manifold exteriors without internal coplanar walls or duplicate horizontal caps.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum ExtrusionPart {
     /// Complete prism: roof cap, walls, and (when translucent with `base > 0`) bottom floor cap.
@@ -75,7 +75,7 @@ impl ElevationDatum {
     }
 
     /// Parses a `line-elevation-datum` value; defaults to [`Self::Msl`] when `line-elevation` is
-    /// present so elevated contour and airspace rims sit at fixed altitude unless `"agl"` is set.
+    /// present so elevated contour and volume rims sit at fixed altitude unless `"agl"` is set.
     pub fn from_line_str(value: &str) -> Self {
         let trimmed = value.trim();
         if trimmed.eq_ignore_ascii_case("agl")

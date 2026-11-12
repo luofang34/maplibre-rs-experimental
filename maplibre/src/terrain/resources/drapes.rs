@@ -45,6 +45,7 @@ impl TerrainResources {
     }
 
     /// Releases the drapes of a view that draws no more; their textures become spare.
+    #[cfg(any(feature = "headless", test))]
     pub(crate) fn release_drapes_of(&mut self, view: Option<ViewSlotId>) {
         self.drapes.retain(|(owner, _)| *owner != view);
     }

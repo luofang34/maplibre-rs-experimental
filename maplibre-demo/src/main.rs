@@ -5,11 +5,7 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand, ValueEnum};
 #[cfg(feature = "headless")]
 use maplibre::coords::LatLon;
-use maplibre::{
-    projection::{ProjectionSpecification, ProjectionType},
-    render::settings::WgpuSettings,
-    style::{source::Source, Style},
-};
+use maplibre::{projection::ProjectionType, render::settings::WgpuSettings};
 #[cfg(any(feature = "headless", test))]
 mod coordinates;
 #[cfg(feature = "headless")]
@@ -20,13 +16,12 @@ use maplibre_winit::{run_headed_map, HeadedMapOptions, WinitMapWindowConfig};
 mod headless;
 #[cfg(feature = "headless")]
 mod snapshot;
+mod style_loader;
 
-/// World-scale style rendered on the globe, bundled so the demo works without any arguments.
-const GLOBE_STYLE: &str = include_str!("../res/globe.json");
-const TERRAIN_STYLE: &str = include_str!("../res/terrain.json");
-const AIRSPACE_VFR_STYLE: &str = include_str!("../res/airspace_vfr.json");
-/// Pitch limit of the terrain / 3D airspace demos, matching the GL JS 3d-terrain example's `maxPitch`.
-const TERRAIN_MAX_PITCH_DEGREES: f64 = 85.0;
+use style_loader::{load_style, select_bundled, style_uses_3d_elevation};
+
+/// Pitch limit for styles with 3D terrain or extruded volumes, matching GL JS 3d-terrain `maxPitch`.
+const ELEVATED_MAX_PITCH_DEGREES: f64 = 85.0;
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -60,22 +55,19 @@ enum Commands {
     /// Controls: left-drag pans, wheel or +/- zooms around the pointer, right-drag rotates and
     /// tilts, W/A/S/D or the arrow keys pan, Escape quits.
     Headed {
-        /// Path to a MapLibre style JSON file. Defaults to the built-in style.
-        #[clap(long, conflicts_with = "globe")]
-        style: Option<PathBuf>,
+        /// Local file path or `http(s)://` / `file://` URL to a MapLibre style JSON document.
+        #[clap(long, conflicts_with_all = ["globe", "terrain"])]
+        style: Option<String>,
         /// Use the bundled world style rendered on the globe.
         #[clap(long)]
         globe: bool,
         /// Use the bundled 3D terrain style: OpenStreetMap imagery draped over elevation tiles.
-        #[clap(long, conflicts_with_all = ["globe", "style"])]
+        #[clap(long, conflicts_with = "globe")]
         terrain: bool,
-        /// Use the bundled VFR 3D NASR airspace style over 3D terrain on the globe (experimental prototype — not for navigation or flight).
-        #[clap(long, conflicts_with_all = ["globe", "terrain", "style"])]
-        airspace: bool,
-        /// Local `.pmtiles` file path or `https://...` / `pmtiles://...` URL overriding `sources.airspace`.
-        #[clap(long)]
-        airspace_pmtiles: Option<String>,
-        /// Largest camera pitch in degrees. Defaults to 60, or 85 with `--terrain` / `--airspace`.
+        /// Override a style source's URL (`NAME=URL_OR_PATH`, repeatable).
+        #[clap(long = "source-url", value_name = "NAME=URL_OR_PATH")]
+        source_urls: Vec<String>,
+        /// Largest camera pitch in degrees. Defaults to 85 for 3D terrain/extrusion styles, else 60.
         #[clap(long)]
         max_pitch: Option<f64>,
         /// Override the projection declared by the style.
@@ -109,21 +101,18 @@ enum Commands {
     /// Renders a single high-resolution offscreen PNG frame once all view tiles settle.
     #[cfg(feature = "headless")]
     Snapshot {
-        /// Path to a MapLibre style JSON file.
-        #[clap(long, conflicts_with_all = ["globe", "terrain", "airspace"])]
-        style: Option<PathBuf>,
+        /// Local file path or `http(s)://` / `file://` URL to a MapLibre style JSON document.
+        #[clap(long, conflicts_with_all = ["globe", "terrain"])]
+        style: Option<String>,
         /// Use the bundled world style rendered on the globe.
         #[clap(long)]
         globe: bool,
         /// Use the bundled 3D terrain style.
-        #[clap(long, conflicts_with_all = ["globe", "airspace"])]
+        #[clap(long, conflicts_with = "globe")]
         terrain: bool,
-        /// Use the bundled VFR 3D NASR airspace style over 3D terrain on the globe (experimental prototype — not for navigation or flight).
-        #[clap(long, conflicts_with_all = ["globe", "terrain"])]
-        airspace: bool,
-        /// Local `.pmtiles` file path or `https://...` / `pmtiles://...` URL overriding `sources.airspace`.
-        #[clap(long)]
-        airspace_pmtiles: Option<String>,
+        /// Override a style source's URL (`NAME=URL_OR_PATH`, repeatable).
+        #[clap(long = "source-url", value_name = "NAME=URL_OR_PATH")]
+        source_urls: Vec<String>,
         /// Override the projection declared by the style.
         #[clap(long, value_enum)]
         projection: Option<ProjectionArg>,
@@ -151,78 +140,6 @@ enum Commands {
     },
 }
 
-/// Which bundled style a run starts from when no style path is given.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum BundledStyle {
-    Default,
-    Globe,
-    Terrain,
-    AirspaceVfr,
-}
-
-fn pmtiles_source_url(spec: &str) -> Result<String, Box<dyn std::error::Error>> {
-    if spec.starts_with("pmtiles://") {
-        return Ok(spec.to_owned());
-    }
-    if spec.starts_with("https://") || spec.starts_with("http://") || spec.starts_with("file://") {
-        return Ok(format!("pmtiles://{spec}"));
-    }
-    let abs = std::fs::canonicalize(spec)
-        .map_err(|err| format!("cannot resolve airspace PMTiles path '{spec}': {err}"))?;
-    Ok(format!("pmtiles://file://{}", abs.display()))
-}
-
-fn load_style(
-    path: Option<&PathBuf>,
-    bundled: BundledStyle,
-    projection: Option<ProjectionArg>,
-    airspace_pmtiles: Option<&str>,
-) -> Result<Style, Box<dyn std::error::Error>> {
-    let mut style = match (path, bundled) {
-        (Some(path), _) => {
-            let json = std::fs::read_to_string(path)
-                .map_err(|error| format!("cannot read style {}: {error}", path.display()))?;
-            serde_json::from_str::<Style>(&json)
-                .map_err(|error| format!("cannot parse style {}: {error}", path.display()))?
-        }
-        (None, BundledStyle::Globe) => serde_json::from_str::<Style>(GLOBE_STYLE)?,
-        (None, BundledStyle::Terrain) => serde_json::from_str::<Style>(TERRAIN_STYLE)?,
-        (None, BundledStyle::AirspaceVfr) => serde_json::from_str::<Style>(AIRSPACE_VFR_STYLE)?,
-        (None, BundledStyle::Default) => Style::default(),
-    };
-    if let Some(pmtiles_override) = airspace_pmtiles {
-        let resolved_url = pmtiles_source_url(pmtiles_override)?;
-        if let Some(Source::Vector(vec_src)) = style.sources.get_mut("airspace") {
-            vec_src.url = Some(resolved_url);
-            vec_src.tiles = None;
-        }
-    }
-    if path.is_some() || bundled != BundledStyle::Default {
-        // Layer order becomes render order; index 0 is reserved for the depth clear.
-        for (index, layer) in style.layers.iter_mut().enumerate() {
-            layer.index = index as u32 + 1;
-        }
-    }
-    if let Some(projection) = projection {
-        style.projection = Some(ProjectionSpecification {
-            projection_type: projection.into(),
-        });
-    }
-    Ok(style)
-}
-
-fn select_bundled(terrain: bool, airspace: bool, globe: bool) -> BundledStyle {
-    if airspace {
-        BundledStyle::AirspaceVfr
-    } else if terrain {
-        BundledStyle::Terrain
-    } else if globe {
-        BundledStyle::Globe
-    } else {
-        BundledStyle::Default
-    }
-}
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Captures both tracing events and `log` records; RUST_LOG selects the level.
     tracing_subscriber::fmt()
@@ -242,23 +159,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             style,
             globe,
             terrain,
-            airspace,
-            airspace_pmtiles,
+            source_urls,
             max_pitch,
             projection,
             frames,
             debug_tiles,
             zoom_sensitivity,
         } => {
-            let bundled = select_bundled(*terrain, *airspace, *globe);
-            let style = load_style(
-                style.as_ref(),
+            let bundled = select_bundled(*terrain, *globe);
+            let loaded_style = load_style(
+                style.as_deref(),
                 bundled,
-                *projection,
-                airspace_pmtiles.as_deref(),
+                projection.map(Into::into),
+                source_urls,
             )?;
-            let default_max_pitch = if *terrain || *airspace {
-                TERRAIN_MAX_PITCH_DEGREES
+            let default_max_pitch = if style_uses_3d_elevation(&loaded_style) {
+                ELEVATED_MAX_PITCH_DEGREES
             } else {
                 HeadedMapOptions::default().max_pitch_degrees
             };
@@ -269,7 +185,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     backends: Some(maplibre::render::settings::Backends::all()),
                     ..WgpuSettings::default()
                 },
-                style,
+                loaded_style,
                 HeadedMapOptions {
                     max_frames: *frames,
                     max_pitch_degrees: max_pitch.unwrap_or(default_max_pitch),
@@ -294,8 +210,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             style,
             globe,
             terrain,
-            airspace,
-            airspace_pmtiles,
+            source_urls,
             projection,
             width,
             height,
@@ -308,12 +223,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             timeout_secs,
             out,
         } => {
-            let bundled = select_bundled(*terrain, *airspace, *globe);
+            let bundled = select_bundled(*terrain, *globe);
             let loaded_style = load_style(
-                style.as_ref(),
+                style.as_deref(),
                 bundled,
-                *projection,
-                airspace_pmtiles.as_deref(),
+                projection.map(Into::into),
+                source_urls,
             )?;
             let center = match (*lat, *lon) {
                 (Some(lat), Some(lon)) => Some(LatLon::new(lat, lon)),
@@ -341,11 +256,109 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use maplibre::style::{source::Source, Style};
+
+    use crate::style_loader::{
+        apply_source_url_overrides, parent_uri_base, resolve_relative_source_urls,
+        style_uses_3d_elevation, BundledStyle,
+    };
 
     #[test]
-    fn bundled_airspace_vfr_style_parses_with_zero_validation_warnings() {
-        let style = load_style(None, BundledStyle::AirspaceVfr, None, None).expect("parse style");
-        assert_eq!(style.validate(), Ok(()));
+    fn resolves_relative_pmtiles_and_http_urls_against_style_base() {
+        let mut style: Style = serde_json::from_value(serde_json::json!({
+            "version": 8,
+            "sources": {
+                "volumes": {"type": "vector", "url": "pmtiles://../cycles/current/volumes.pmtiles"},
+                "local_adj": {"type": "vector", "url": "pmtiles://./volumes.pmtiles"}
+            },
+            "layers": []
+        }))
+        .expect("parse style");
+
+        let base = parent_uri_base("https://example.org/repo/styles/default.json")
+            .expect("parent URI base");
+        assert_eq!(base, "https://example.org/repo/styles/");
+        resolve_relative_source_urls(&mut style, &base);
+
+        let Some(Source::Vector(v1)) = style.sources.get("volumes") else {
+            panic!("missing volumes source");
+        };
+        assert_eq!(
+            v1.url.as_deref(),
+            Some("pmtiles://https://example.org/repo/cycles/current/volumes.pmtiles")
+        );
+
+        let Some(Source::Vector(v2)) = style.sources.get("local_adj") else {
+            panic!("missing local_adj source");
+        };
+        assert_eq!(
+            v2.url.as_deref(),
+            Some("pmtiles://https://example.org/repo/styles/volumes.pmtiles")
+        );
+    }
+
+    #[test]
+    fn source_url_override_rewrites_named_source_and_rejects_unknown() {
+        let mut style: Style = serde_json::from_value(serde_json::json!({
+            "version": 8,
+            "sources": {
+                "volumes": {"type": "vector", "tiles": ["https://a.invalid/{z}/{x}/{y}.pbf"]}
+            },
+            "layers": []
+        }))
+        .expect("parse style");
+
+        apply_source_url_overrides(
+            &mut style,
+            &["volumes=https://cdn.example.org/data.pmtiles".to_owned()],
+        )
+        .expect("override valid source");
+
+        let Some(Source::Vector(vec_src)) = style.sources.get("volumes") else {
+            panic!("missing volumes source");
+        };
+        assert_eq!(
+            vec_src.url.as_deref(),
+            Some("pmtiles://https://cdn.example.org/data.pmtiles")
+        );
+        assert!(vec_src.tiles.is_none());
+
+        assert!(apply_source_url_overrides(
+            &mut style,
+            &["missing=https://cdn.example.org/x".into()]
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn bundled_terrain_and_extrusion_styles_use_elevated_pitch_limit() {
+        let terrain =
+            crate::style_loader::load_style(None, BundledStyle::Terrain, None, &[]).expect("load");
+        assert!(style_uses_3d_elevation(&terrain));
+
+        let globe =
+            crate::style_loader::load_style(None, BundledStyle::Globe, None, &[]).expect("load");
+        assert!(!style_uses_3d_elevation(&globe));
+
+        let extruded: Style = serde_json::from_value(serde_json::json!({
+            "version": 8,
+            "sources": {
+                "v": {"type": "vector", "tiles": ["https://a.invalid/{z}/{x}/{y}.pbf"]}
+            },
+            "layers": [{
+                "id": "prism",
+                "type": "fill-extrusion",
+                "source": "v",
+                "source-layer": "prism",
+                "paint": {
+                    "fill-extrusion-part": "walls",
+                    "fill-extrusion-height": 500.0,
+                    "fill-extrusion-height-datum": "msl"
+                }
+            }]
+        }))
+        .expect("parse extrusion style");
+        assert_eq!(extruded.validate(), Ok(()));
+        assert!(style_uses_3d_elevation(&extruded));
     }
 }
