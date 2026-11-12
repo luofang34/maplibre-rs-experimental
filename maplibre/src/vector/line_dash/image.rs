@@ -78,7 +78,7 @@ pub(super) fn ramp_texture(
     device: &wgpu::Device,
     queue: &crate::render::upload_queue::UploadQueue,
     image: &LineImage,
-) -> (wgpu::TextureView, wgpu::Sampler) {
+) -> (wgpu::Texture, wgpu::TextureView, wgpu::Sampler) {
     let white = [255_u8; 4];
     let (width, height, bytes): (u32, u32, &[u8]) = match image {
         LineImage::None => (1, 1, &white),
@@ -128,5 +128,6 @@ pub(super) fn ramp_texture(
         min_filter: filter,
         ..Default::default()
     });
-    (texture.create_view(&Default::default()), sampler)
+    let view = texture.create_view(&Default::default());
+    (texture, view, sampler)
 }

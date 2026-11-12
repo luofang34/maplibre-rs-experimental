@@ -159,6 +159,19 @@ impl<E: Environment, T: RasterTransferables> RequestSystem<E, T> {
     }
 }
 
+fn source_ready_at(
+    tiles: &crate::tcs::tiles::Tiles,
+    source: &RasterSourceId,
+    coords: WorldTileCoords,
+) -> bool {
+    tiles
+        .query::<&RasterLayersDataComponent>(coords)
+        .is_some_and(|component| component.has_source_result(source))
+        || tiles
+            .query::<&crate::terrain::DemLayersComponent>(coords)
+            .is_some_and(|component| component.contains(source))
+}
+
 fn all_sources_ready(
     tiles: &crate::tcs::tiles::Tiles,
     sources: &[RasterSourceId],
@@ -274,7 +287,7 @@ fn wanted_tiles(
             {
                 continue;
             }
-            if is_terrain {
+            if is_terrain && !source_ready_at(&world.tiles, &source, coords) {
                 if let Some(ancestor) = coarse_raster_ancestor(coords, minzoom) {
                     if seen_coarse.insert(ancestor) {
                         coarse_ancestors.push(ancestor);

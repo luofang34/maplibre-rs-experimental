@@ -26,7 +26,22 @@ pub struct BatchedInstanceBuffer<BD: bytemuck::Pod> {
     gpu_usages: wgpu::BufferUsages,
     uniform_gpu_buffer: Option<wgpu::Buffer>,
     uniform_gpu_capacity_bytes: usize,
+    retired_buffers: Vec<wgpu::Buffer>,
     _marker: PhantomData<BD>,
+}
+
+impl<BD: bytemuck::Pod> Drop for BatchedInstanceBuffer<BD> {
+    fn drop(&mut self) {
+        for buffer in self.retired_buffers.drain(..) {
+            buffer.destroy();
+        }
+        if let Some(buffer) = self.gpu_buffer.take() {
+            buffer.destroy();
+        }
+        if let Some(buffer) = self.uniform_gpu_buffer.take() {
+            buffer.destroy();
+        }
+    }
 }
 
 impl<BD: bytemuck::Pod> Default for BatchedInstanceBuffer<BD> {
@@ -52,6 +67,7 @@ impl<BD: bytemuck::Pod> BatchedInstanceBuffer<BD> {
             gpu_usages: wgpu::BufferUsages::empty(),
             uniform_gpu_buffer: None,
             uniform_gpu_capacity_bytes: 0,
+            retired_buffers: Vec::new(),
             _marker: PhantomData,
         }
     }
@@ -76,6 +92,9 @@ impl<BD: bytemuck::Pod> BatchedInstanceBuffer<BD> {
 
     /// Clears CPU-staged instances for a new pass while retaining CPU and GPU capacities.
     pub fn clear(&mut self) {
+        for buffer in self.retired_buffers.drain(..) {
+            buffer.destroy();
+        }
         self.instances.clear();
         self.packed_end_len = 0;
         self.aligned_uniform_bytes.clear();
@@ -226,6 +245,7 @@ impl<BD: bytemuck::Pod> BatchedInstanceBuffer<BD> {
                 Some(&mut self.gpu_usages),
                 &mut self.uploaded_bytes,
                 &mut self.padded_upload_scratch,
+                &mut self.retired_buffers,
             );
             return;
         }
@@ -244,6 +264,7 @@ impl<BD: bytemuck::Pod> BatchedInstanceBuffer<BD> {
                 Some(&mut self.gpu_usages),
                 &mut self.uploaded_bytes,
                 &mut self.padded_upload_scratch,
+                &mut self.retired_buffers,
             );
         }
 
@@ -260,6 +281,7 @@ impl<BD: bytemuck::Pod> BatchedInstanceBuffer<BD> {
                 None,
                 &mut self.uploaded_uniform_bytes,
                 &mut self.padded_upload_scratch,
+                &mut self.retired_buffers,
             );
         }
     }
@@ -277,6 +299,7 @@ fn upload_delta_bytes(
     tracked_usages: Option<&mut wgpu::BufferUsages>,
     uploaded_bytes: &mut usize,
     padded_upload_scratch: &mut Vec<u8>,
+    retired_buffers: &mut Vec<wgpu::Buffer>,
 ) {
     if raw_bytes.len() <= *uploaded_bytes {
         return;
@@ -293,12 +316,14 @@ fn upload_delta_bytes(
         while new_cap < total_padded_bytes {
             new_cap = new_cap.saturating_mul(2).max(total_padded_bytes);
         }
-        *gpu_buffer = Some(device.create_buffer(&wgpu::BufferDescriptor {
+        if let Some(old) = gpu_buffer.replace(device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(label),
             size: new_cap as wgpu::BufferAddress,
             usage: usages,
             mapped_at_creation: false,
-        }));
+        })) {
+            retired_buffers.push(old);
+        }
         *gpu_capacity_bytes = new_cap;
         if let Some(prev) = tracked_usages {
             *prev = usages;

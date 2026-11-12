@@ -340,3 +340,19 @@ fn a_view_takes_an_unshown_drape_s_texture_before_a_parked_one() {
         DrapeState::Withheld
     );
 }
+
+#[test]
+fn hard_max_drape_textures_caps_allocations_even_when_creation_is_allowed() {
+    let mut cache = DrapeCache::<u32>::default();
+    let mut created = 0_u32;
+    for index in 0..(super::HARD_MAX_DRAPE_TEXTURES as i32 + 12) {
+        cache.acquire(
+            tile(index % 16, index / 16, 5),
+            1,
+            true,
+            counting_create(&mut created),
+        );
+    }
+    assert_eq!(created as usize, super::HARD_MAX_DRAPE_TEXTURES);
+    assert_eq!(cache.total_textures(), super::HARD_MAX_DRAPE_TEXTURES);
+}

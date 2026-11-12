@@ -449,3 +449,13 @@ impl TerrainResources {
         self.draws.iter().find(|draw| draw.coords == coords)
     }
 }
+
+impl Drop for TerrainResources {
+    fn drop(&mut self) {
+        self.draws.clear();
+        self.bind_groups.clear();
+        self.vertex_buffer.destroy();
+        self.index_buffer.destroy();
+        self.uniform_buffer.destroy();
+    }
+}

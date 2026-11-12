@@ -242,7 +242,7 @@ impl AssetCache {
                 .await
                 .map_err(CachedTileFailure::into_asset_failure)?;
             self.0.dem_decodes.fetch_add(1, Ordering::Relaxed);
-            let bytes = tile.pixels().len();
+            let bytes = tile.pixels().len() + image.as_raw().len();
             Ok((
                 CachedDemEntry {
                     tile: Arc::new(tile),

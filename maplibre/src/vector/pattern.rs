@@ -15,10 +15,18 @@ struct PatternBinding {
     fingerprint: u64,
     bind_group: wgpu::BindGroup,
     size: wgpu::Buffer,
+    texture: wgpu::Texture,
     /// The image's display size in layout pixels.
     display: [f32; 2],
     /// How far the fractional zoom stretches the pattern the buffer holds.
     scale: f32,
+}
+
+impl Drop for PatternBinding {
+    fn drop(&mut self) {
+        self.size.destroy();
+        self.texture.destroy();
+    }
 }
 
 /// The pipeline and the per-layer bindings of layers that fill with a repeating image.
@@ -332,6 +340,7 @@ impl PatternResources {
             fingerprint,
             bind_group,
             size,
+            texture,
             display,
             scale,
         })

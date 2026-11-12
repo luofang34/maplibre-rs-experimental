@@ -45,10 +45,23 @@ pub struct BufferedTextureHead {
     pub(super) texture_view: wgpu::TextureView,
     pub(super) texture_format: wgpu::TextureFormat,
     pub(super) texture_format_features: TextureFormatFeatures,
+    pub(super) destroy_texture_on_drop: bool,
     #[cfg(feature = "headless")]
     output_buffer: std::sync::OnceLock<wgpu::Buffer>,
     #[cfg(feature = "headless")]
     buffer_dimensions: BufferDimensions,
+}
+
+impl Drop for BufferedTextureHead {
+    fn drop(&mut self) {
+        #[cfg(feature = "headless")]
+        if let Some(buffer) = self.output_buffer.get() {
+            buffer.destroy();
+        }
+        if self.destroy_texture_on_drop {
+            self.texture.destroy();
+        }
+    }
 }
 
 impl BufferedTextureHead {
@@ -57,6 +70,7 @@ impl BufferedTextureHead {
         size: PhysicalSize,
         format: wgpu::TextureFormat,
         features: TextureFormatFeatures,
+        destroy_texture_on_drop: bool,
     ) -> Self {
         #[cfg(feature = "headless")]
         let dimensions = BufferDimensions::new(size);
@@ -83,6 +97,7 @@ impl BufferedTextureHead {
             texture_view,
             texture_format: format,
             texture_format_features: features,
+            destroy_texture_on_drop,
             #[cfg(feature = "headless")]
             output_buffer: std::sync::OnceLock::new(),
             #[cfg(feature = "headless")]

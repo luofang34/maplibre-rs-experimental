@@ -16,7 +16,7 @@ impl<V: Pod, I: Pod, TM: Pod, FM: Pod>
     pub fn from_device_with_sizes(device: &wgpu::Device, sizes: BufferPoolSizes) -> Self {
         let max_page_bytes = device.limits().max_buffer_size;
         let device = device.clone();
-        Self::with_page_factory(sizes, max_page_bytes, move |typ, logical_bytes| {
+        let mut pool = Self::with_page_factory(sizes, max_page_bytes, move |typ, logical_bytes| {
             let physical = logical_bytes.max(16).next_multiple_of(16);
             let (label, usage) = match typ {
                 BackingBufferType::Vertices => (
@@ -42,7 +42,14 @@ impl<V: Pod, I: Pod, TM: Pod, FM: Pod>
                 usage,
                 mapped_at_creation: false,
             })
-        })
+        });
+        pool.page_destroyer = Some(page::PageDestroyer(|page| {
+            page.vertices.inner.destroy();
+            page.indices.inner.destroy();
+            page.layer_metadata.inner.destroy();
+            page.feature_metadata.inner.destroy();
+        }));
+        pool
     }
 
     /// Total GPU buffer bytes currently physically allocated on the device across all live pages.

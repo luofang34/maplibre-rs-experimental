@@ -1,5 +1,7 @@
 //! Uploads elevation samples while tracking replacements and border changes.
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use super::TerrainResources;
 use crate::{
     coords::WorldTileCoords,
@@ -7,13 +9,40 @@ use crate::{
     terrain::{DemRevision, DemTile, LoadedDem},
 };
 
+/// Hard LRU cap on terrain elevation textures bound simultaneously in [`TerrainResources`].
+const MAX_TERRAIN_DEM_TEXTURES: usize = crate::terrain::gpu_dem_pool::MAX_GPU_DEM_TEXTURES;
+
+static DEM_TOUCH_TICK: AtomicU64 = AtomicU64::new(0);
+
+fn next_dem_tick() -> u64 {
+    DEM_TOUCH_TICK
+        .fetch_add(1, Ordering::Relaxed)
+        .wrapping_add(1)
+}
+
 pub(super) struct DemTexture {
     pub(super) texture: Texture,
     revision: u32,
     source: Option<DemRevision>,
+    last_used: AtomicU64,
 }
 
 impl TerrainResources {
+    fn evict_excess_dem_textures(&mut self, keep: WorldTileCoords) {
+        while self.dem_textures.len() >= MAX_TERRAIN_DEM_TEXTURES {
+            let Some(oldest) = self
+                .dem_textures
+                .iter()
+                .filter(|(coords, _)| **coords != keep)
+                .min_by_key(|(_, entry)| entry.last_used.load(Ordering::Relaxed))
+                .map(|(coords, _)| *coords)
+            else {
+                break;
+            };
+            self.dem_textures.remove(&oldest);
+        }
+    }
+
     pub(crate) fn bind_shared_dem(
         &mut self,
         coords: WorldTileCoords,
@@ -21,12 +50,16 @@ impl TerrainResources {
         revision: u32,
         source: DemRevision,
     ) {
+        if !self.dem_textures.contains_key(&coords) {
+            self.evict_excess_dem_textures(coords);
+        }
         self.dem_textures.insert(
             coords,
             DemTexture {
                 texture,
                 revision,
                 source: Some(source),
+                last_used: AtomicU64::new(next_dem_tick()),
             },
         );
     }
@@ -81,6 +114,7 @@ impl TerrainResources {
             .remove(&coords)
             .map(|dem| dem.texture)
             .filter(|texture| texture.size.width == dem.stride());
+        self.evict_excess_dem_textures(coords);
         let texture = reusable.unwrap_or_else(|| {
             Texture::new(
                 Some("DEM tile"),
@@ -113,6 +147,7 @@ impl TerrainResources {
                 texture,
                 revision,
                 source: None,
+                last_used: AtomicU64::new(next_dem_tick()),
             },
         );
     }
@@ -126,7 +161,10 @@ impl TerrainResources {
     pub fn dem_texture(&self, coords: Option<WorldTileCoords>) -> &Texture {
         coords
             .and_then(|coords| self.dem_textures.get(&coords))
-            .map_or(&self.empty_dem, |dem| &dem.texture)
+            .map_or(&self.empty_dem, |dem| {
+                dem.last_used.store(next_dem_tick(), Ordering::Relaxed);
+                &dem.texture
+            })
     }
 
     /// DEM textures resident on the GPU.

@@ -243,7 +243,7 @@ impl HeadlessMap {
     /// Registers a new lightweight viewport slot owning its own `(width, height)` attachments,
     /// LOD history, and optional overlay / depth-probe state.
     pub fn register_view_slot(&mut self, config: ViewSlotConfig) -> ViewSlotId {
-        let surface = Surface::from_headless_size(
+        let surface = Surface::from_slot_size(
             &self.map_context.renderer.device,
             &self.map_context.renderer.adapter,
             config.size,

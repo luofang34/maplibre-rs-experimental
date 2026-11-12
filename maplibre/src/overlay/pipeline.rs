@@ -33,6 +33,13 @@ pub(super) struct MeshBuffers {
     revision: u64,
 }
 
+impl Drop for MeshBuffers {
+    fn drop(&mut self) {
+        self.vertices.destroy();
+        self.indices.destroy();
+    }
+}
+
 const MIN_OVERLAY_BUFFER_BYTES: u64 = 4096;
 
 /// What the overlay pass draws with.
@@ -42,6 +49,13 @@ pub(crate) struct OverlayGpu {
     viewport: wgpu::Buffer,
     size: Option<(u32, u32)>,
     pub(super) mesh: Option<MeshBuffers>,
+}
+
+impl Drop for OverlayGpu {
+    fn drop(&mut self) {
+        self.mesh = None;
+        self.viewport.destroy();
+    }
 }
 
 impl OverlayGpu {
@@ -185,6 +199,7 @@ impl OverlayGpu {
         let buffers = match self.mesh.as_mut() {
             Some(existing) => {
                 if v_bytes.len() as u64 > existing.vertex_capacity {
+                    existing.vertices.destroy();
                     existing.vertex_capacity = grow(v_bytes.len());
                     existing.vertices = alloc(
                         "overlay vertices",
@@ -193,6 +208,7 @@ impl OverlayGpu {
                     );
                 }
                 if i_bytes.len() as u64 > existing.index_capacity {
+                    existing.indices.destroy();
                     existing.index_capacity = grow(i_bytes.len());
                     existing.indices = alloc(
                         "overlay indices",

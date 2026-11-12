@@ -32,16 +32,22 @@ use crate::{
     },
     style::Style,
     tcs::{system::SystemResult, world::World},
-    terrain::{dem_tile_coords, resources::TerrainResources, source::dem_source},
+    terrain::resources::TerrainResources,
     vector::VectorBufferPool,
 };
 
+mod ancestors;
 mod summary;
+
+pub(crate) use ancestors::finish_tiles_in_use;
 
 /// Out-of-view tiles kept per tile in use, as GL JS `MAX_TILE_CACHE_ZOOM_LEVELS`.
 const CACHE_TILES_PER_VIEW_TILE: usize = 5;
 /// Smallest cache, so a tiny viewport still keeps some history for panning back.
 const MIN_CACHE_TILES: usize = 64;
+/// Hard ceiling on out-of-view cached tiles so wide oblique/globe coverings cannot accumulate
+/// hundreds of multi-megabyte raster/DEM tiles along a corridor.
+const MAX_CACHE_TILES: usize = 256;
 /// Tessellated geometry the out-of-view cache may hold. The tile count is GL JS's, sized for
 /// a flat viewport of a few dozen tiles; an eye on terrain draws hundreds, and a planet tile
 /// at low zoom weighs tens of megabytes, so the cache is bounded in bytes as well.
@@ -179,60 +185,6 @@ fn retain_loose_vector_tile(
     }
 }
 
-/// Appends active drape requests, drape prefetch requests, and DEM ancestors to `in_use`.
-pub(crate) fn finish_tiles_in_use(
-    world: &World,
-    style: &Style,
-    mut in_use: FxHashSet<WorldTileCoords>,
-) -> FxHashSet<WorldTileCoords> {
-    if let Some(requests) = world
-        .resources
-        .get::<crate::terrain::request_system::DrapeRequests>()
-    {
-        in_use.extend(requests.0.iter().copied());
-    }
-    if let Some(prefetch) = world
-        .resources
-        .get::<crate::terrain::request_system::DrapePrefetchRequests>()
-    {
-        in_use.extend(prefetch.0.iter().copied());
-    }
-    if let Some(dem) = dem_source(style) {
-        let view: Vec<WorldTileCoords> = in_use.iter().copied().collect();
-        for coords in view {
-            let target_coarse = u8::from(coords.z).saturating_sub(3);
-            let mut ancestor = coords;
-            while let Some(parent) = ancestor.get_parent() {
-                if u8::from(parent.z) == target_coarse
-                    || world
-                        .tiles
-                        .query::<&crate::raster::RasterLayersDataComponent>(parent)
-                        .is_some()
-                    || world
-                        .tiles
-                        .query::<&crate::terrain::DemLayersComponent>(parent)
-                        .is_some()
-                {
-                    in_use.insert(parent);
-                }
-                ancestor = parent;
-            }
-            let Some(mut dem_coords) = dem_tile_coords(coords, dem.minzoom, dem.maxzoom) else {
-                continue;
-            };
-            // The coverage index falls back through every ancestor while finer tiles load.
-            loop {
-                in_use.insert(dem_coords);
-                match dem_coords.get_parent() {
-                    Some(parent) if u8::from(parent.z) >= dem.minzoom => dem_coords = parent,
-                    _ => break,
-                }
-            }
-        }
-    }
-    in_use
-}
-
 /// Every tile the current frame draws from or requests, with the DEM tiles and ancestors
 /// terrain reads.
 pub(crate) fn tiles_in_use(
@@ -305,17 +257,20 @@ pub(crate) fn evict_stale_tiles<S: BuildHasher>(
         );
     }
     // A host nearly out of memory keeps nothing beyond what the frame draws from.
-    let critical = world
+    let pressure = world
         .resources
         .get::<MemoryBudget>()
-        .is_some_and(|budget| budget.pressure() == MemoryPressure::Critical);
-    let budget = if critical {
-        CacheBudget { tiles: 0, bytes: 0 }
-    } else {
-        CacheBudget {
-            tiles: (view_tiles * CACHE_TILES_PER_VIEW_TILE).max(MIN_CACHE_TILES),
+        .map_or(MemoryPressure::Comfortable, MemoryBudget::pressure);
+    let budget = match pressure {
+        MemoryPressure::Critical => CacheBudget { tiles: 0, bytes: 0 },
+        MemoryPressure::Low => CacheBudget {
+            tiles: MIN_CACHE_TILES,
+            bytes: CACHE_BYTES / 2,
+        },
+        MemoryPressure::Comfortable => CacheBudget {
+            tiles: (view_tiles * CACHE_TILES_PER_VIEW_TILE).clamp(MIN_CACHE_TILES, MAX_CACHE_TILES),
             bytes: CACHE_BYTES,
-        }
+        },
     };
     evict_beyond(world, in_use, budget)
 }
