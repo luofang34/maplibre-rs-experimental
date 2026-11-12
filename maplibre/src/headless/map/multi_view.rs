@@ -330,6 +330,24 @@ impl HeadlessMap {
         Ok(())
     }
 
+    /// Shows or hides the navigation HUD ([`crate::hud::NavigationHudPlugin`]) in `slot`.
+    ///
+    /// The HUD belongs to the map's own view, whose camera its controls steer, so a slot
+    /// draws none until asked to. A slot that shows it lays it out for its own size; pointer
+    /// input is still hit-tested against the map's own viewport.
+    pub fn set_view_slot_navigation_hud(
+        &mut self,
+        slot: ViewSlotId,
+        shown: bool,
+    ) -> Result<(), MultiViewError> {
+        self.slot_mut(slot)?;
+        let resources = &mut self.map_context.world.resources;
+        resources
+            .get_or_init_mut::<crate::hud::HudViewSlots>()
+            .set(slot, shown);
+        Ok(())
+    }
+
     /// Unregisters `slot` and releases its per-slot GPU attachments and terrain drapes.
     pub fn remove_view_slot(&mut self, slot: ViewSlotId) -> bool {
         let resources = &mut self.map_context.world.resources;
@@ -337,6 +355,9 @@ impl HeadlessMap {
             .get_mut::<MultiViewRegistry>()
             .is_some_and(|registry| registry.slots.remove(&slot).is_some());
         if removed {
+            if let Some(hud) = resources.get_mut::<crate::hud::HudViewSlots>() {
+                hud.set(slot, false);
+            }
             if let Some(Eventually::Initialized(terrain)) =
                 resources.get_mut::<Eventually<crate::terrain::resources::TerrainResources>>()
             {
@@ -437,6 +458,8 @@ impl HeadlessMap {
     }
 }
 
+#[cfg(test)]
+mod hud_tests;
 #[cfg(all(test, feature = "experimental"))]
 mod shared_assets_tests;
 #[cfg(all(test, feature = "experimental"))]
