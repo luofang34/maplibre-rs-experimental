@@ -51,7 +51,12 @@ pub(super) fn acquire_drapes(
     (budget, limit): (usize, usize),
     terrain: &mut TerrainResources,
     device: &wgpu::Device,
-) -> (Vec<bool>, Vec<Option<WorldTileCoords>>, bool) {
+) -> (
+    Vec<bool>,
+    Vec<Option<WorldTileCoords>>,
+    bool,
+    Vec<DrapeState>,
+) {
     let keep = covering::retained_textures(
         specs
             .iter()
@@ -92,7 +97,7 @@ pub(super) fn acquire_drapes(
         }
     }
     let sources = drape_sources(specs, &states, &redraw, ready, terrain);
-    (redraw, sources, deferred)
+    (redraw, sources, deferred, states)
 }
 
 /// The drapes to draw this frame. Those the view shows take the budget first; a new one with
