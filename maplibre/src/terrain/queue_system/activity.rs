@@ -23,6 +23,8 @@ pub(super) struct FrameDrapes<'a> {
     pub(super) specs: &'a [TargetSpec],
     pub(super) states: &'a [DrapeState],
     pub(super) ready: &'a [bool],
+    /// Drapes prepared ahead of the view, which no surface shows yet.
+    pub(super) prefetch: &'a [bool],
     pub(super) redraw: &'a [bool],
     pub(super) sources: &'a [Option<WorldTileCoords>],
     /// Drapes the frame may draw, and the count past which none is drawn.
@@ -55,6 +57,45 @@ pub(crate) struct DrapeActivity {
     views: FxHashMap<Option<ViewSlotId>, Window>,
 }
 
+/// How many of the drapes each view showed in its last frame were not yet drawn from all of
+/// their content; the map's own view is `None`. A host waits for a view's image to be final
+/// on this, since the drapes a frame draws are capped and the rest show older content or an
+/// ancestor meanwhile.
+#[derive(Default)]
+pub(crate) struct PendingDrapes(FxHashMap<Option<ViewSlotId>, usize>);
+
+impl PendingDrapes {
+    #[cfg(feature = "headless")]
+    pub(crate) fn of(&self, view: Option<ViewSlotId>) -> usize {
+        self.0.get(&view).copied().unwrap_or(0)
+    }
+
+    #[cfg(feature = "headless")]
+    pub(crate) fn forget(&mut self, view: Option<ViewSlotId>) {
+        self.0.remove(&view);
+    }
+}
+
+impl FrameDrapes<'_> {
+    /// Shown drapes whose content is still loading, or that wait for a later frame to be
+    /// drawn. A drape withheld for want of a texture is not counted: its tile keeps an
+    /// ancestor's drape for as long as the view's allowance stays spent.
+    fn pending(&self) -> usize {
+        (0..self.specs.len())
+            .filter(|index| !self.prefetch.get(*index).copied().unwrap_or(false))
+            .filter(|index| {
+                let unready = !self.ready.get(*index).copied().unwrap_or(false);
+                let drawn = self.redraw.get(*index).copied().unwrap_or(false);
+                let waiting = matches!(
+                    self.states.get(*index),
+                    Some(DrapeState::New | DrapeState::Changed)
+                ) && !drawn;
+                unready || waiting
+            })
+            .count()
+    }
+}
+
 /// Counts a frame's drapes and logs the window when it is full.
 pub(super) fn record(world: &mut World, frame: &FrameDrapes<'_>) {
     let view = world
@@ -66,6 +107,11 @@ pub(super) fn record(world: &mut World, frame: &FrameDrapes<'_>) {
         .get::<crate::terrain::drape_timing::DrapeCost>()
         .copied()
         .unwrap_or_default();
+    world
+        .resources
+        .get_or_init_mut::<PendingDrapes>()
+        .0
+        .insert(view, frame.pending());
     let activity = world.resources.get_or_init_mut::<DrapeActivity>();
     let window = activity.views.entry(view).or_default();
     window.count(frame);

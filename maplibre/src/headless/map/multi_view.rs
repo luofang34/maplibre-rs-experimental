@@ -319,6 +319,22 @@ impl HeadlessMap {
         Ok(())
     }
 
+    /// How many terrain drapes `slot` showed in the last frame it drew before they were drawn
+    /// from all of their content; see [`Self::pending_drapes`]. Zero for a slot that has not
+    /// drawn, so a host waiting for a settled view draws it first.
+    pub fn view_slot_pending_drapes(&self, slot: ViewSlotId) -> Result<usize, MultiViewError> {
+        let registered = self
+            .map_context
+            .world
+            .resources
+            .get::<MultiViewRegistry>()
+            .is_some_and(|registry| registry.slots.contains_key(&slot));
+        if !registered {
+            return Err(MultiViewError::UnknownSlot { slot });
+        }
+        Ok(self.pending_drapes_of(Some(slot)))
+    }
+
     /// Enables or disables the 1× `Depth32Float` readout attachment for `slot`.
     pub fn set_view_slot_depth_readout(
         &mut self,
@@ -355,6 +371,11 @@ impl HeadlessMap {
             .get_mut::<MultiViewRegistry>()
             .is_some_and(|registry| registry.slots.remove(&slot).is_some());
         if removed {
+            if let Some(pending) =
+                resources.get_mut::<crate::terrain::queue_system::PendingDrapes>()
+            {
+                pending.forget(Some(slot));
+            }
             if let Some(hud) = resources.get_mut::<crate::hud::HudViewSlots>() {
                 hud.set(slot, false);
             }
@@ -462,6 +483,8 @@ impl HeadlessMap {
 mod frame_stats_tests;
 #[cfg(test)]
 mod hud_tests;
+#[cfg(all(test, feature = "experimental"))]
+mod pending_drapes_tests;
 #[cfg(all(test, feature = "experimental"))]
 mod shared_assets_tests;
 #[cfg(all(test, feature = "experimental"))]
