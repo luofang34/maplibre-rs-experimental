@@ -69,7 +69,7 @@ enum Commands {
         /// Use the bundled 3D terrain style: OpenStreetMap imagery draped over elevation tiles.
         #[clap(long, conflicts_with_all = ["globe", "style"])]
         terrain: bool,
-        /// Use the bundled VFR Sectional 3D NASR airspace style over 3D terrain on the globe.
+        /// Use the bundled VFR 3D NASR airspace style over 3D terrain on the globe (experimental prototype — not for navigation or flight).
         #[clap(long, conflicts_with_all = ["globe", "terrain", "style"])]
         airspace: bool,
         /// Local `.pmtiles` file path or `https://...` / `pmtiles://...` URL overriding `sources.airspace`.
@@ -118,7 +118,7 @@ enum Commands {
         /// Use the bundled 3D terrain style.
         #[clap(long, conflicts_with_all = ["globe", "airspace"])]
         terrain: bool,
-        /// Use the bundled VFR Sectional 3D NASR airspace style over 3D terrain on the globe.
+        /// Use the bundled VFR 3D NASR airspace style over 3D terrain on the globe (experimental prototype — not for navigation or flight).
         #[clap(long, conflicts_with_all = ["globe", "terrain"])]
         airspace: bool,
         /// Local `.pmtiles` file path or `https://...` / `pmtiles://...` URL overriding `sources.airspace`.
