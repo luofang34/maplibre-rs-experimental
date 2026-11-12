@@ -278,6 +278,16 @@ impl<T, K: Copy + Eq + std::hash::Hash> DrapeCache<T, K> {
             .map(|entry| &entry.texture)
     }
 
+    /// Whether the key holds a texture, drawn or still to be.
+    pub fn holds(&self, coords: K) -> bool {
+        self.entries.contains_key(&coords)
+    }
+
+    /// Number of keys `counted` accepts that hold a texture.
+    pub fn count(&self, counted: impl Fn(&K) -> bool) -> usize {
+        self.entries.keys().filter(|key| counted(key)).count()
+    }
+
     /// Number of tiles holding a texture.
     pub fn len(&self) -> usize {
         self.entries.len()

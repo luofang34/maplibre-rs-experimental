@@ -26,7 +26,7 @@ pub(super) fn prepare(
     view: &ViewState,
     world: &mut World,
     visible: &[WorldTileCoords],
-    memory: MemoryBudget,
+    (memory, drape_targets): (MemoryBudget, usize),
 ) {
     let limit = match memory.pressure() {
         MemoryPressure::Comfortable => 8,
@@ -94,11 +94,7 @@ pub(super) fn prepare(
             .flatten();
         let tiles = region.map_or_else(Vec::new, |region| region.iter().collect());
         let focus = super::covering::focus_for_view(style, request_view);
-        super::covering::bounded_covering_with_focus(
-            tiles.into_iter(),
-            memory.drape_textures_allowed().saturating_sub(8).max(1),
-            focus,
-        )
+        super::covering::bounded_covering_with_focus(tiles.into_iter(), drape_targets, focus)
     };
     let max_bytes = if view.has_external_view() {
         PREFETCH_BYTES

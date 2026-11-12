@@ -99,6 +99,14 @@ impl TerrainResources {
         })
     }
 
+    /// Whether the view may take a texture for the tile while holding at most `allowed`: a
+    /// tile that has one keeps it.
+    pub(crate) fn within_drape_allowance(&self, coords: WorldTileCoords, allowed: usize) -> bool {
+        let view = self.drape_view;
+        self.drapes.holds(self.drape_key(coords))
+            || self.drapes.count(|(owner, _)| *owner == view) < allowed
+    }
+
     /// Leaves a drape acquired this frame undrawn, to be drawn on the next.
     pub fn defer_drape(&mut self, coords: WorldTileCoords, state: DrapeState) {
         let key = self.drape_key(coords);

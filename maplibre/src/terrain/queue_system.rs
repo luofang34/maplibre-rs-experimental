@@ -362,6 +362,7 @@ fn prepare_drapes(
     } else {
         limit
     };
+    let view_textures = crate::terrain::drape_share::textures(world, memory);
     let (redraw, drape_sources, deferred, states) = {
         let Some(Initialized(terrain)) = world.resources.get_mut::<Eventually<TerrainResources>>()
         else {
@@ -371,7 +372,7 @@ fn prepare_drapes(
         acquire_drapes(
             specs,
             (&prints, &ready, &prefetch),
-            memory,
+            (memory, view_textures),
             (budget, limit),
             terrain,
             device,

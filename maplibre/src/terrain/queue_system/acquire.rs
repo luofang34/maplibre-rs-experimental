@@ -44,7 +44,7 @@ pub(super) fn awaiting_first_draw(states: &[DrapeState], redraw: &[bool]) -> Vec
 pub(super) fn acquire_drapes(
     specs: &[TargetSpec],
     (prints, ready, prefetch): (&[u64], &[bool], &[bool]),
-    memory: MemoryBudget,
+    (memory, view_textures): (MemoryBudget, usize),
     (budget, limit): (usize, usize),
     terrain: &mut TerrainResources,
     device: &wgpu::Device,
@@ -72,6 +72,11 @@ pub(super) fn acquire_drapes(
         .map(|(((spec, print), ready), prefetch)| {
             if !*ready {
                 return DrapeState::Unchanged;
+            }
+            // Past its share of the textures a view goes without, as it does when the map's
+            // allowance is spent, rather than take what another view's share covers.
+            if !terrain.within_drape_allowance(spec.coords, view_textures) {
+                return DrapeState::Withheld;
             }
             let may_create = memory.allows_drape_texture(terrain.drape_texture_total());
             if *prefetch {

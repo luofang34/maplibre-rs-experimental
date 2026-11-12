@@ -183,6 +183,8 @@ struct SlotState {
     last_wanted_raster: FxHashSet<WorldTileCoords>,
     last_wanted_dem: FxHashSet<WorldTileCoords>,
     last_drawn_count: usize,
+    /// See [`HeadlessMap::set_view_slot_drape_priority`].
+    drape_priority: i32,
 }
 
 #[derive(Default)]
@@ -282,6 +284,7 @@ impl HeadlessMap {
                 last_wanted_raster: FxHashSet::default(),
                 last_wanted_dem: FxHashSet::default(),
                 last_drawn_count: 0,
+                drape_priority: 0,
             },
         );
         id
@@ -295,6 +298,24 @@ impl HeadlessMap {
     ) -> Result<(), MultiViewError> {
         let state = self.slot_mut(slot)?;
         state.surface.resize(size);
+        Ok(())
+    }
+
+    /// Ranks `slot` among the views for the terrain drape textures memory allows the map.
+    ///
+    /// Every view holds its own drapes, and the map's allowance of drape textures is granted
+    /// to the views at the start of each frame, by need, the highest priority first and slots
+    /// of equal priority in the order they were registered. The first view drapes its ground
+    /// at the detail it would have alone; each view after it has the textures that are left,
+    /// never fewer than a small floor, and covers its ground with fewer, coarser drapes when
+    /// they are short. Every slot starts at priority `0`, so the slot registered first is
+    /// served first until the host says otherwise.
+    pub fn set_view_slot_drape_priority(
+        &mut self,
+        slot: ViewSlotId,
+        priority: i32,
+    ) -> Result<(), MultiViewError> {
+        self.slot_mut(slot)?.drape_priority = priority;
         Ok(())
     }
 

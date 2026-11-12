@@ -54,7 +54,13 @@ fn moving_terrain_prepares_offscreen_tiles_and_clears_them_under_pressure() {
         view_state: Some(ahead),
         placement: None,
     });
-    prepare(&style, &view, &mut world, &visible, MemoryBudget::default());
+    prepare(
+        &style,
+        &view,
+        &mut world,
+        &visible,
+        (MemoryBudget::default(), 56),
+    );
     let requests = &world
         .resources
         .get::<DrapePrefetchRequests>()
@@ -68,9 +74,12 @@ fn moving_terrain_prepares_offscreen_tiles_and_clears_them_under_pressure() {
         &view,
         &mut world,
         &visible,
-        MemoryBudget {
-            available_bytes: Some(1),
-        },
+        (
+            MemoryBudget {
+                available_bytes: Some(1),
+            },
+            4,
+        ),
     );
     assert!(world
         .resources
