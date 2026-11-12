@@ -458,6 +458,8 @@ impl HeadlessMap {
     }
 }
 
+#[cfg(all(test, feature = "experimental"))]
+mod frame_stats_tests;
 #[cfg(test)]
 mod hud_tests;
 #[cfg(all(test, feature = "experimental"))]

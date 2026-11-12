@@ -59,6 +59,24 @@ impl FrameStats {
     pub fn cpu(&self) -> Duration {
         self.stages.iter().map(|(_, spent)| *spent).sum()
     }
+
+    /// Adds what the views drawn before this one in the same host frame cost, so a host that
+    /// draws several views in one call reads the cost of the call and not of its last view.
+    /// Draw calls are already counted across views, and the GPU time stays that of the
+    /// latest pass measured.
+    #[cfg(feature = "headless")]
+    fn add_earlier_views(&mut self, earlier: &FrameStats) {
+        for (stage, spent) in &earlier.stages {
+            match self.stages.iter_mut().find(|(name, _)| name == stage) {
+                Some((_, total)) => *total += *spent,
+                None => self.stages.push((stage.clone(), *spent)),
+            }
+        }
+        self.gpu = self.gpu.or(earlier.gpu);
+        self.upload_bytes = self.upload_bytes.saturating_add(earlier.upload_bytes);
+        self.drape_redraws = self.drape_redraws.saturating_add(earlier.drape_redraws);
+        self.prefetch_drapes = self.prefetch_drapes.saturating_add(earlier.prefetch_drapes);
+    }
 }
 
 /// Why a map asks for another frame, so a host that never sees it settle can tell what keeps
@@ -125,6 +143,17 @@ pub(crate) fn is_dirty(world: &World) -> bool {
         .resources
         .get::<FrameSignals>()
         .is_some_and(|signals| signals.dirty)
+}
+
+/// Folds the cost of the views drawn earlier in a host frame of several views into the
+/// statistics of the view that just finished, and returns the frame's cost so far.
+#[cfg(feature = "headless")]
+pub(crate) fn total_frame_stats(world: &mut World, earlier: Option<&FrameStats>) -> FrameStats {
+    let last = &mut signals(world).last;
+    if let Some(earlier) = earlier {
+        last.add_earlier_views(earlier);
+    }
+    last.clone()
 }
 
 /// A resource finished loading; the map is dirty and the host is told.
