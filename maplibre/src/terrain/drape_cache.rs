@@ -7,7 +7,7 @@
 //! for the next tile that needs one.
 
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, VecDeque},
     hash::{Hash, Hasher},
 };
 
@@ -95,15 +95,16 @@ impl<T> Entry<T> {
 /// and returns, as tiles do when the head turns, is not drawn again.
 const PARKED_TEXTURES: usize = 8;
 
-/// Drape textures by view tile, with the textures of tiles that left the view parked with
-/// their content and a free list of blank ones.
-pub struct DrapeCache<T> {
-    entries: HashMap<WorldTileCoords, Entry<T>>,
-    parked: VecDeque<(WorldTileCoords, Entry<T>)>,
+/// Drape textures by key, a view tile or a view tile of one of several views, with the
+/// textures of tiles that left their view parked with their content and a free list of blank
+/// ones, which every key shares.
+pub struct DrapeCache<T, K = WorldTileCoords> {
+    entries: HashMap<K, Entry<T>>,
+    parked: VecDeque<(K, Entry<T>)>,
     free: Vec<T>,
 }
 
-impl<T> Default for DrapeCache<T> {
+impl<T, K> Default for DrapeCache<T, K> {
     fn default() -> Self {
         Self {
             entries: HashMap::new(),
@@ -128,12 +129,12 @@ pub enum DrapeState {
     Withheld,
 }
 
-impl<T> DrapeCache<T> {
+impl<T, K: Copy + Eq + std::hash::Hash> DrapeCache<T, K> {
     /// Ensures `coords` has a texture and reports what it holds: a tile with an unchanged
     /// fingerprint keeps its content.
     pub fn acquire(
         &mut self,
-        coords: WorldTileCoords,
+        coords: K,
         fingerprint: u64,
         may_create: bool,
         create: impl FnOnce() -> T,
@@ -145,7 +146,7 @@ impl<T> DrapeCache<T> {
     /// has not shown until one acquires it.
     pub fn acquire_ahead(
         &mut self,
-        coords: WorldTileCoords,
+        coords: K,
         fingerprint: u64,
         may_create: bool,
         create: impl FnOnce() -> T,
@@ -155,7 +156,7 @@ impl<T> DrapeCache<T> {
 
     fn acquire_as(
         &mut self,
-        coords: WorldTileCoords,
+        coords: K,
         fingerprint: u64,
         (may_create, shown): (bool, bool),
         create: impl FnOnce() -> T,
@@ -230,20 +231,21 @@ impl<T> DrapeCache<T> {
     }
 
     /// Cancels an acquired draw, preserving whether the texture has valid tile content.
-    pub fn defer(&mut self, coords: WorldTileCoords, state: DrapeState) {
+    pub fn defer(&mut self, coords: K, state: DrapeState) {
         if let Some(entry) = self.entries.get_mut(&coords) {
             entry.fingerprint = None;
             entry.has_content = state != DrapeState::New;
         }
     }
 
-    /// Parks the textures of tiles not in `keep` with their content; the oldest parked ones
-    /// go to the free list, and beyond that are dropped.
-    pub fn retain(&mut self, keep: &HashSet<WorldTileCoords>) {
-        let dropped: Vec<WorldTileCoords> = self
+    /// Parks the textures of the tiles `keep` refuses with their content; the oldest parked
+    /// ones go to the free list, and beyond that are dropped. A test of the key, so one view's
+    /// tiles can be released without touching another's.
+    pub fn retain(&mut self, keep: impl Fn(&K) -> bool) {
+        let dropped: Vec<K> = self
             .entries
             .keys()
-            .filter(|coords| !keep.contains(coords))
+            .filter(|coords| !keep(coords))
             .copied()
             .collect();
         for coords in dropped {
@@ -263,13 +265,13 @@ impl<T> DrapeCache<T> {
     }
 
     /// Whether a view has drawn the tile's drape, in use or parked after it left the view.
-    pub fn holds_shown(&self, coords: WorldTileCoords) -> bool {
+    pub fn holds_shown(&self, coords: K) -> bool {
         self.entries.get(&coords).is_some_and(|entry| entry.shown)
             || self.parked.iter().any(|(parked, _)| *parked == coords)
     }
 
     /// Texture of a view tile, if it has one.
-    pub fn get(&self, coords: WorldTileCoords) -> Option<&T> {
+    pub fn get(&self, coords: K) -> Option<&T> {
         self.entries
             .get(&coords)
             .filter(|entry| entry.has_content)

@@ -1,8 +1,22 @@
 //! Allocation and deferred content of terrain drape textures.
+//!
+//! A drape belongs to a terrain tile of one view. Each view selects the source tiles of a
+//! drape from its own covering, so two views draping the same terrain tile want different
+//! content in it; with one texture between them each would find the other's content changed
+//! and draw it again every frame, and what a view shows would depend on which other views
+//! share its frame. The lookups by tile answer for the view chosen with
+//! [`TerrainResources::show_drapes_of`], and the spare textures are common to all.
 use std::collections::HashSet;
 
 use super::TerrainResources;
-use crate::{coords::WorldTileCoords, render::resource::Texture, terrain::drape_cache::DrapeState};
+use crate::{
+    coords::WorldTileCoords,
+    render::{eye_covering::ViewSlotId, resource::Texture},
+    terrain::drape_cache::DrapeState,
+};
+
+/// A view, `None` for a map drawn without view slots, and a terrain tile it drapes.
+pub(crate) type DrapeKey = (Option<ViewSlotId>, WorldTileCoords);
 
 /// A drape texture with the view of its first level, which the drape pass draws into every
 /// time the drape is redrawn; the texture's own view spans every level, which an attachment
@@ -25,6 +39,20 @@ impl DrapeTexture {
 }
 
 impl TerrainResources {
+    /// Chooses the view whose drapes the tile lookups answer with from here on.
+    pub(crate) fn show_drapes_of(&mut self, view: Option<ViewSlotId>) {
+        self.drape_view = view;
+    }
+
+    /// Releases the drapes of a view that draws no more; their textures become spare.
+    pub(crate) fn release_drapes_of(&mut self, view: Option<ViewSlotId>) {
+        self.drapes.retain(|(owner, _)| *owner != view);
+    }
+
+    fn drape_key(&self, coords: WorldTileCoords) -> DrapeKey {
+        (self.drape_view, coords)
+    }
+
     /// Gives a view tile a drape texture and reports what it holds.
     pub fn acquire_drape(
         &mut self,
@@ -35,7 +63,8 @@ impl TerrainResources {
     ) -> DrapeState {
         let format = self.color_format;
         let size = self.drape_size;
-        self.drapes.acquire(coords, fingerprint, may_create, || {
+        let key = self.drape_key(coords);
+        self.drapes.acquire(key, fingerprint, may_create, || {
             DrapeTexture::new(Texture::new_mipmapped(
                 Some("drape texture"),
                 device,
@@ -57,22 +86,23 @@ impl TerrainResources {
     ) -> DrapeState {
         let format = self.color_format;
         let size = self.drape_size;
-        self.drapes
-            .acquire_ahead(coords, fingerprint, may_create, || {
-                DrapeTexture::new(Texture::new_mipmapped(
-                    Some("drape texture"),
-                    device,
-                    format,
-                    size,
-                    size,
-                    wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-                ))
-            })
+        let key = self.drape_key(coords);
+        self.drapes.acquire_ahead(key, fingerprint, may_create, || {
+            DrapeTexture::new(Texture::new_mipmapped(
+                Some("drape texture"),
+                device,
+                format,
+                size,
+                size,
+                wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            ))
+        })
     }
 
     /// Leaves a drape acquired this frame undrawn, to be drawn on the next.
     pub fn defer_drape(&mut self, coords: WorldTileCoords, state: DrapeState) {
-        self.drapes.defer(coords, state);
+        let key = self.drape_key(coords);
+        self.drapes.defer(key, state);
     }
 
     /// Drape textures held, parked and spare together.
@@ -97,20 +127,25 @@ impl TerrainResources {
         }
     }
 
-    /// Keeps the requested tile drapes active and parks other textures with their content.
-    /// Older parked textures are recycled or dropped according to the cache's spare limits.
+    /// Keeps the requested tile drapes of the view active and parks its other textures with
+    /// their content; the drapes of other views stay as they are. Older parked textures are
+    /// recycled or dropped according to the cache's spare limits.
     pub fn retain_drapes(&mut self, keep: &HashSet<WorldTileCoords>) {
-        self.drapes.retain(keep);
+        let view = self.drape_view;
+        self.drapes
+            .retain(|(owner, coords)| *owner != view || keep.contains(coords));
     }
 
     /// Whether a view has drawn the tile's drape, in use or parked after it left the view.
     pub fn holds_shown_drape(&self, coords: WorldTileCoords) -> bool {
-        self.drapes.holds_shown(coords)
+        self.drapes.holds_shown(self.drape_key(coords))
     }
 
     /// Drape texture of a view tile.
     pub fn drape_texture(&self, coords: WorldTileCoords) -> Option<&Texture> {
-        self.drapes.get(coords).map(|drape| &drape.texture)
+        self.drapes
+            .get(self.drape_key(coords))
+            .map(|drape| &drape.texture)
     }
 
     /// Drape texture of a view tile with the view of its first level, the one drawn into.
@@ -119,7 +154,7 @@ impl TerrainResources {
         coords: WorldTileCoords,
     ) -> Option<(&Texture, &wgpu::TextureView)> {
         self.drapes
-            .get(coords)
+            .get(self.drape_key(coords))
             .map(|drape| (&drape.texture, &drape.top_level))
     }
 

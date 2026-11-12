@@ -309,13 +309,20 @@ impl HeadlessMap {
         Ok(())
     }
 
-    /// Unregisters `slot` and releases its per-slot GPU attachments.
+    /// Unregisters `slot` and releases its per-slot GPU attachments and terrain drapes.
     pub fn remove_view_slot(&mut self, slot: ViewSlotId) -> bool {
-        self.map_context
-            .world
-            .resources
+        let resources = &mut self.map_context.world.resources;
+        let removed = resources
             .get_mut::<MultiViewRegistry>()
-            .is_some_and(|registry| registry.slots.remove(&slot).is_some())
+            .is_some_and(|registry| registry.slots.remove(&slot).is_some());
+        if removed {
+            if let Some(Eventually::Initialized(terrain)) =
+                resources.get_mut::<Eventually<crate::terrain::resources::TerrainResources>>()
+            {
+                terrain.release_drapes_of(Some(slot));
+            }
+        }
+        removed
     }
 
     /// Replaces the host [`OverlayMesh`] drawn inside `slot` (`OverlayPlugin` required).
@@ -415,3 +422,5 @@ mod shared_assets_tests;
 mod streaming_tests;
 #[cfg(all(test, feature = "experimental"))]
 mod tests;
+#[cfg(all(test, feature = "experimental"))]
+mod view_independence_tests;

@@ -42,10 +42,7 @@ pub(super) fn awaiting_first_draw(states: &[DrapeState], redraw: &[bool]) -> Vec
 }
 
 pub(super) fn acquire_drapes(
-    (specs, extra_retained): (
-        &[TargetSpec],
-        Option<&rustc_hash::FxHashSet<WorldTileCoords>>,
-    ),
+    specs: &[TargetSpec],
     (prints, ready, prefetch): (&[u64], &[bool], &[bool]),
     memory: MemoryBudget,
     (budget, limit): (usize, usize),
@@ -57,13 +54,9 @@ pub(super) fn acquire_drapes(
     bool,
     Vec<DrapeState>,
 ) {
-    let keep = covering::retained_textures(
-        specs
-            .iter()
-            .map(|spec| spec.coords)
-            .chain(extra_retained.into_iter().flatten().copied()),
-        |coords| terrain.drape_texture(coords).is_some(),
-    );
+    let keep = covering::retained_textures(specs.iter().map(|spec| spec.coords), |coords| {
+        terrain.drape_texture(coords).is_some()
+    });
     terrain.retain_drapes(&keep);
     // Unready tiles keep their last valid texture or a background surface.
     if memory.is_tight() {

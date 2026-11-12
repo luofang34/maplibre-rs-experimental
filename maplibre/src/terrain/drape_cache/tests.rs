@@ -1,7 +1,5 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
-use std::collections::HashSet;
-
 use super::{fingerprint, DrapeCache, DrapeState, SourceContent, PARKED_TEXTURES};
 use crate::{
     coords::{WorldTileCoords, ZoomLevel},
@@ -84,7 +82,7 @@ fn tiles_leaving_the_view_are_parked_and_hand_their_textures_on_once_parking_is_
     cache.acquire(tile(1, 1, 3), 1, true, counting_create(&mut created));
     cache.acquire(tile(2, 1, 3), 2, true, counting_create(&mut created));
 
-    cache.retain(&HashSet::from([tile(2, 1, 3)]));
+    cache.retain(|coords| [tile(2, 1, 3)].contains(coords));
     assert_eq!(cache.len(), 1);
     assert_eq!(cache.parked_len(), 1, "the leaving tile keeps its texture");
     assert_eq!(cache.free_len(), 0);
@@ -103,7 +101,7 @@ fn tiles_leaving_the_view_are_parked_and_hand_their_textures_on_once_parking_is_
     for x in 4..(4 + PARKED_TEXTURES as i32) {
         cache.acquire(tile(x, 1, 3), 1, true, counting_create(&mut created));
     }
-    cache.retain(&HashSet::new());
+    cache.retain(|_| false);
     assert_eq!(cache.parked_len(), PARKED_TEXTURES);
     assert_eq!(cache.free_len(), 3);
     let before = created;
@@ -188,7 +186,7 @@ fn a_tile_that_leaves_the_view_and_returns_keeps_its_content() {
         cache.acquire(tile(1, 1, 3), 7, true, counting_create(&mut counter)),
         DrapeState::New
     );
-    cache.retain(&HashSet::new());
+    cache.retain(|_| false);
     assert_eq!(cache.len(), 0);
     assert_eq!(cache.parked_len(), 1);
 
@@ -198,7 +196,7 @@ fn a_tile_that_leaves_the_view_and_returns_keeps_its_content() {
         "the parked texture still holds the tile's content"
     );
     assert_eq!(counter, 1, "no texture was created for the return");
-    cache.retain(&HashSet::new());
+    cache.retain(|_| false);
     assert_eq!(
         cache.acquire(tile(1, 1, 3), 8, true, counting_create(&mut counter)),
         DrapeState::Changed,
@@ -224,7 +222,7 @@ fn a_texture_is_withheld_when_none_is_spare_and_the_budget_allows_no_new_one() {
         DrapeState::New
     );
     // The first tile leaves the view: its texture is parked with its content.
-    cache.retain(&HashSet::from([tile(1, 0, 4)]));
+    cache.retain(|coords| [tile(1, 0, 4)].contains(coords));
     assert_eq!(cache.total_textures(), 2);
     // With no new texture allowed, a third tile takes the parked one over.
     assert_eq!(
@@ -240,7 +238,7 @@ fn a_texture_is_withheld_when_none_is_spare_and_the_budget_allows_no_new_one() {
     assert!(cache.get(tile(3, 0, 4)).is_none());
     assert_eq!(created, 2, "no texture was created past the budget");
     // Shedding the spares drops what is parked and free.
-    cache.retain(&HashSet::new());
+    cache.retain(|_| false);
     cache.shed_spares();
     assert_eq!(cache.total_textures(), 0);
 }
@@ -254,7 +252,7 @@ fn deferred_new_textures_stay_hidden_across_frames_and_parking() {
         assert_eq!(state, DrapeState::New);
         cache.defer(coords, state);
         assert!(cache.get(coords).is_none());
-        cache.retain(&HashSet::new());
+        cache.retain(|_| false);
     }
     assert_eq!(
         cache.acquire(coords, u64::MAX, true, || 456),
@@ -308,7 +306,7 @@ fn only_drapes_a_view_has_shown_are_parked_when_their_tiles_leave() {
     let (shown, ahead) = (tile(0, 0, 4), tile(1, 0, 4));
     cache.acquire(shown, 1, true, || 1);
     cache.acquire_ahead(ahead, 1, true, || 2);
-    cache.retain(&HashSet::new());
+    cache.retain(|_| false);
     assert_eq!(
         cache.parked_len(),
         1,
@@ -327,7 +325,7 @@ fn a_view_takes_an_unshown_drape_s_texture_before_a_parked_one() {
     let mut cache = DrapeCache::<u32>::default();
     let (parked, ahead, needed) = (tile(0, 0, 4), tile(1, 0, 4), tile(2, 0, 4));
     cache.acquire(parked, 1, true, || 1);
-    cache.retain(&HashSet::new());
+    cache.retain(|_| false);
     cache.acquire_ahead(ahead, 1, true, || 2);
     assert_eq!(cache.acquire(needed, 1, false, || 3), DrapeState::New);
     assert_eq!(cache.get(needed), Some(&2));

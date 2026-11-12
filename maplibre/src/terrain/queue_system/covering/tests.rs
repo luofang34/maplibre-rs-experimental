@@ -88,7 +88,7 @@ fn completed_children_release_fallbacks_and_allow_further_refinement() {
         !kept.contains(&root),
         "completed descendants must release ancestor textures"
     );
-    cache.retain(&kept);
+    cache.retain(|coords| kept.contains(coords));
     let grandchild = children[0].get_children()[0];
     assert_eq!(cache.acquire(grandchild, 2, false, || 3), DrapeState::New);
     assert_eq!(
