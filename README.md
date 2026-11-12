@@ -110,10 +110,8 @@ Render the world on a globe instead of the flat default style
 ```bash
 cargo run -p maplibre-demo -- headed --globe
 cargo run -p maplibre-demo -- headed --terrain
-cargo run --release -p maplibre-demo -- headed --airspace
+cargo run -p maplibre-demo -- headed --style path/to/style.json
 ```
-
-> **Note (`--airspace` demo):** The bundled 3D US NASR airspace visualization is an **experimental prototype — not for navigation or flight**. It is intended strictly for rendering research and 3D cartographic visualization, never for real-world flight planning, navigation, or situational awareness.
 
 More information about running the demos on different platforms can be
 found [here](https://maplibre.org/maplibre-rs/docs/book/development-guide/how-to-run.html).

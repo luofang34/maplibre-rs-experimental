@@ -177,7 +177,7 @@ async fn cached_range_requests_request_identity_encoding_and_preserve_distinct_s
     ));
     let _ = std::fs::remove_dir_all(&cache_dir);
     let client = ReqwestHttpClient::new(Some(&cache_dir));
-    let url = format!("http://{addr}/airspace.pmtiles");
+    let url = format!("http://{addr}/archive.pmtiles");
 
     let first = client
         .fetch_range(

@@ -33,7 +33,7 @@ pub(crate) enum FarPlane {
     /// does not lift.
     HighestGround,
     /// As far beyond the sea-level horizon as elevated 3D layers (`headroom_meters` above
-    /// `highest_ground_meters`, e.g. high-altitude airspace volumes) can rise into view,
+    /// `highest_ground_meters`, e.g. tall extruded volumes) can rise into view,
     /// keeping upward-pitched and over-the-horizon 3D frustums non-degenerate.
     ElevatedMeters(u32),
 }

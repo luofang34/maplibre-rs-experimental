@@ -1,4 +1,4 @@
-//! GPU pixel tests for translucent 3D airspace volumes, floor caps, MSL/AGL datums, and
+//! GPU pixel tests for translucent 3D extruded volumes, floor caps, MSL/AGL datums, and
 //! elevated 3D rim lines (`line-elevation`).
 
 use cgmath::{Matrix4, Rad, Vector3};
@@ -95,7 +95,7 @@ async fn floating_translucent_volume_renders_from_above_and_floor_cap_from_below
         "projection": {"type": "globe"},
         "terrain": {"source": "dem"},
         "sources": {
-            "airspace": {"type": "vector", "tiles": ["https://airspace.example/{z}/{x}/{y}.pbf"]},
+            "volumes": {"type": "vector", "tiles": ["https://volumes.example/{z}/{x}/{y}.pbf"]},
             "dem": {"type": "raster-dem", "tiles": ["https://dem.example/{z}/{x}/{y}.png"], "encoding": "terrarium"}
         },
         "layers": [
@@ -103,8 +103,8 @@ async fn floating_translucent_volume_renders_from_above_and_floor_cap_from_below
             {
                 "id": "shelf",
                 "type": "fill-extrusion",
-                "source": "airspace",
-                "source-layer": "airspace",
+                "source": "volumes",
+                "source-layer": "volumes",
                 "paint": {
                     "fill-extrusion-translucent": true,
                     "fill-extrusion-color": "#0088ff",
@@ -126,7 +126,7 @@ async fn floating_translucent_volume_renders_from_above_and_floor_cap_from_below
             "coordinates": [[[0.020, 0.020], [0.068, 0.020], [0.068, 0.068], [0.020, 0.068], [0.020, 0.020]]]
         }
     });
-    let mut map = build_globe_map(style, SEA_LEVEL_DEM, &shelf, "airspace").await;
+    let mut map = build_globe_map(style, SEA_LEVEL_DEM, &shelf, "volumes").await;
 
     // Looking down from 2500 m: blue shelf blends translucently over the dark-red ground.
     render_at_anchor(
@@ -166,7 +166,7 @@ async fn nested_translucent_volumes_blend_through_outer_shell() {
         "projection": {"type": "globe"},
         "terrain": {"source": "dem"},
         "sources": {
-            "airspace": {"type": "vector", "tiles": ["https://airspace.example/{z}/{x}/{y}.pbf"]},
+            "volumes": {"type": "vector", "tiles": ["https://volumes.example/{z}/{x}/{y}.pbf"]},
             "dem": {"type": "raster-dem", "tiles": ["https://dem.example/{z}/{x}/{y}.png"], "encoding": "terrarium"}
         },
         "layers": [
@@ -174,8 +174,8 @@ async fn nested_translucent_volumes_blend_through_outer_shell() {
             {
                 "id": "volumes",
                 "type": "fill-extrusion",
-                "source": "airspace",
-                "source-layer": "airspace",
+                "source": "volumes",
+                "source-layer": "volumes",
                 "paint": {
                     "fill-extrusion-translucent": true,
                     "fill-extrusion-color": ["get", "color"],
@@ -210,7 +210,7 @@ async fn nested_translucent_volumes_blend_through_outer_shell() {
             }
         ]
     });
-    let mut map = build_globe_map(style, SEA_LEVEL_DEM, &nested, "airspace").await;
+    let mut map = build_globe_map(style, SEA_LEVEL_DEM, &nested, "volumes").await;
     render_at_anchor(
         &mut map,
         Matrix4::from_translation(Vector3::new(0.0, 0.0, 2500.0)),
@@ -242,7 +242,7 @@ async fn msl_shelf_stays_at_sea_level_while_agl_volume_rises_with_terrain() {
             "projection": {"type": "globe"},
             "terrain": {"source": "dem"},
             "sources": {
-                "airspace": {"type": "vector", "tiles": ["https://airspace.example/{z}/{x}/{y}.pbf"]},
+                "volumes": {"type": "vector", "tiles": ["https://volumes.example/{z}/{x}/{y}.pbf"]},
                 "dem": {"type": "raster-dem", "tiles": ["https://dem.example/{z}/{x}/{y}.png"], "encoding": "terrarium"}
             },
             "layers": [
@@ -250,8 +250,8 @@ async fn msl_shelf_stays_at_sea_level_while_agl_volume_rises_with_terrain() {
                 {
                     "id": "volume",
                     "type": "fill-extrusion",
-                    "source": "airspace",
-                    "source-layer": "airspace",
+                    "source": "volumes",
+                    "source-layer": "volumes",
                     "paint": {
                         "fill-extrusion-translucent": true,
                         "fill-extrusion-color": "#00ff88",
@@ -273,7 +273,7 @@ async fn msl_shelf_stays_at_sea_level_while_agl_volume_rises_with_terrain() {
                 "coordinates": [[[0.025, 0.025], [0.063, 0.025], [0.063, 0.063], [0.025, 0.063], [0.025, 0.025]]]
             }
         });
-        let mut map = build_globe_map(style, PLATEAU_500M_DEM, &box_feature, "airspace").await;
+        let mut map = build_globe_map(style, PLATEAU_500M_DEM, &box_feature, "volumes").await;
         render_at_anchor(
             &mut map,
             Matrix4::from_translation(Vector3::new(0.0, 0.0, 2800.0)),
@@ -301,7 +301,7 @@ async fn elevated_dashed_rim_renders_above_terrain_from_above_pitched_and_below(
             "projection": {"type": "globe"},
             "terrain": {"source": "dem"},
             "sources": {
-                "airspace": {"type": "vector", "tiles": ["https://airspace.example/{z}/{x}/{y}.pbf"]},
+                "volumes": {"type": "vector", "tiles": ["https://volumes.example/{z}/{x}/{y}.pbf"]},
                 "dem": {"type": "raster-dem", "tiles": ["https://dem.example/{z}/{x}/{y}.png"], "encoding": "terrarium"}
             },
             "layers": [
@@ -309,8 +309,8 @@ async fn elevated_dashed_rim_renders_above_terrain_from_above_pitched_and_below(
                 {
                     "id": "rim",
                     "type": "line",
-                    "source": "airspace",
-                    "source-layer": "airspace",
+                    "source": "volumes",
+                    "source-layer": "volumes",
                     "paint": {
                         "line-color": "#00ff44",
                         "line-width": 4,
@@ -327,7 +327,7 @@ async fn elevated_dashed_rim_renders_above_terrain_from_above_pitched_and_below(
             "properties": {"alt_m": alt_m},
             "geometry": {"type": "LineString", "coordinates": [[0.015, 0.044], [0.073, 0.044]]}
         });
-        let mut map = build_globe_map(style, PLATEAU_500M_DEM, &line, "airspace").await;
+        let mut map = build_globe_map(style, PLATEAU_500M_DEM, &line, "volumes").await;
 
         // Top-down view at 2500 m.
         render_at_anchor(
