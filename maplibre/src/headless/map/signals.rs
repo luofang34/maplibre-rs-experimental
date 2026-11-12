@@ -41,6 +41,24 @@ impl HeadlessMap {
         self.map_context.last_frame_stats()
     }
 
+    /// How many terrain drapes the map's own view showed in its last frame before they were
+    /// drawn from all of their content: their tiles still load, or the frame's drape budget
+    /// left them for a later frame. Zero once the view's terrain shows its final imagery.
+    pub fn pending_drapes(&self) -> usize {
+        self.pending_drapes_of(None)
+    }
+
+    pub(super) fn pending_drapes_of(
+        &self,
+        view: Option<crate::render::eye_covering::ViewSlotId>,
+    ) -> usize {
+        self.map_context
+            .world
+            .resources
+            .get::<crate::terrain::queue_system::PendingDrapes>()
+            .map_or(0, |pending| pending.of(view))
+    }
+
     /// The resources that became ready since the last call.
     pub fn take_ready_resources(&mut self) -> Vec<ResourceReady> {
         self.map_context.take_ready_resources()

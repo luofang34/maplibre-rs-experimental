@@ -30,6 +30,8 @@ use crate::{
 };
 mod acquire;
 mod activity;
+#[cfg(feature = "headless")]
+pub(crate) use activity::PendingDrapes;
 mod cohort;
 mod covering;
 pub(crate) mod edges;
@@ -392,6 +394,7 @@ fn prepare_drapes(
             specs,
             states: &states,
             ready: &ready,
+            prefetch: &prefetch,
             redraw: &redraw,
             sources: &drape_sources,
             budget: (budget, limit),
