@@ -3,8 +3,8 @@
 <a href=#3 id=3 data-nosnippet>3</a></span><span class="kw">use super</span>::{FillExtrusionPaint, LinePaint, StyleProperty};
 <a href=#4 id=4 data-nosnippet>4</a>
 <a href=#5 id=5 data-nosnippet>5</a><span class="doccomment">/// Subset of an extruded prism's shell emitted by a `fill-extrusion` feature, allowing multi-tier
-<a href=#6 id=6 data-nosnippet>6</a>/// 3D volumes (such as stepped Class B/C airspace shelves) to be sliced into watertight manifold
-<a href=#7 id=7 data-nosnippet>7</a>/// exteriors without internal coplanar walls or duplicate horizontal caps.
+<a href=#6 id=6 data-nosnippet>6</a>/// 3D volumes (such as stepped architectural terraces or elevated zones) to be sliced into
+<a href=#7 id=7 data-nosnippet>7</a>/// watertight manifold exteriors without internal coplanar walls or duplicate horizontal caps.
 <a href=#8 id=8 data-nosnippet>8</a></span><span class="attr">#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 <a href=#9 id=9 data-nosnippet>9</a></span><span class="kw">pub enum </span>ExtrusionPart {
 <a href=#10 id=10 data-nosnippet>10</a>    <span class="doccomment">/// Complete prism: roof cap, walls, and (when translucent with `base &gt; 0`) bottom floor cap.
@@ -75,7 +75,7 @@
 <a href=#75 id=75 data-nosnippet>75</a>    }
 <a href=#76 id=76 data-nosnippet>76</a>
 <a href=#77 id=77 data-nosnippet>77</a>    <span class="doccomment">/// Parses a `line-elevation-datum` value; defaults to [`Self::Msl`] when `line-elevation` is
-<a href=#78 id=78 data-nosnippet>78</a>    /// present so elevated contour and airspace rims sit at fixed altitude unless `"agl"` is set.
+<a href=#78 id=78 data-nosnippet>78</a>    /// present so elevated contour and volume rims sit at fixed altitude unless `"agl"` is set.
 <a href=#79 id=79 data-nosnippet>79</a>    </span><span class="kw">pub fn </span>from_line_str(value: <span class="kw-2">&amp;</span>str) -&gt; <span class="self">Self </span>{
 <a href=#80 id=80 data-nosnippet>80</a>        <span class="kw">let </span>trimmed = value.trim();
 <a href=#81 id=81 data-nosnippet>81</a>        <span class="kw">if </span>trimmed.eq_ignore_ascii_case(<span class="string">"agl"</span>)

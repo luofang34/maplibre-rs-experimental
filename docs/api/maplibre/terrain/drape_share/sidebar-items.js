@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["REGROUPING_TEXTURES"],"fn":["allowance","of_grant","textures"],"struct":["DrapeAllowance","DrapeShares"]};

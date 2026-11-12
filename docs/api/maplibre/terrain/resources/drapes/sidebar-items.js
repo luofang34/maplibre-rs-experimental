@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["DrapeTexture"]};
+window.SIDEBAR_ITEMS = {"struct":["DrapeTexture"],"type":["DrapeKey"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["WINDOW_FRAMES"],"fn":["record"],"struct":["DrapeActivity","FrameDrapes","Window"]};
