@@ -41,7 +41,7 @@ use crate::{
 /// Answers every tile a fixed number of frames after its request, staggered by tile, the way
 /// a tile server on a network does.
 #[derive(Clone, Default)]
-struct LateTiles {
+pub(super) struct LateTiles {
     frames: Arc<AtomicU64>,
     advanced: Arc<tokio::sync::Notify>,
     /// How many imagery tiles from level 14 down, the first the map asks for, never answer.
@@ -52,7 +52,7 @@ struct LateTiles {
 }
 
 impl LateTiles {
-    fn advance(&self) {
+    pub(super) fn advance(&self) {
         self.frames.fetch_add(1, Ordering::SeqCst);
         self.advanced.notify_waiters();
     }
@@ -95,7 +95,8 @@ impl HttpClient for LateTiles {
             // Terrarium: about 250 m, the Ebro valley floor.
             [128, 250, 0, 255]
         } else {
-            [40, 120, 200, 255]
+            // Told apart by tile and by level, so imagery drawn at another detail shows.
+            [(z * 37) as u8, (x * 53) as u8, (y * 91) as u8, 255]
         };
         let pixels: Vec<u8> = rgba.iter().copied().cycle().take(16 * 16 * 4).collect();
         let mut bytes = Vec::new();
@@ -127,7 +128,7 @@ fn style() -> Style {
 }
 
 /// A level eye heading east at `altitude` metres over `position`.
-fn eastbound_eye(position: LatLon, altitude: f64) -> ExternalView {
+pub(super) fn eastbound_eye(position: LatLon, altitude: f64) -> ExternalView {
     let eye_from_north_facing = Matrix3::new(1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 1.0, 0.0);
     let north_from_east = Matrix3::from_angle_z(Deg(90.0));
     ExternalView {
@@ -153,7 +154,10 @@ fn drawn_terrain(map: &HeadlessMap) -> (usize, usize) {
     (frame.0.len(), bare)
 }
 
-async fn flying_map(tiles: &LateTiles, memory: Option<u64>) -> (HeadlessMap, ViewSlotId) {
+pub(super) async fn flying_map(
+    tiles: &LateTiles,
+    memory: Option<u64>,
+) -> (HeadlessMap, ViewSlotId) {
     let settings = RendererSettings {
         msaa: Msaa { samples: 1 },
         symbol_pools: BufferPoolSizes::EMPTY,
@@ -307,4 +311,77 @@ async fn an_eyes_drape_shows_the_detail_that_arrived_while_some_of_it_never_answ
         detail_over_stand_in,
         "a drape over an unanswered tile draws the tiles that did arrive"
     );
+}
+
+/// How many drapes the last of two views draws over the last 200 of 500 frames of flight: an
+/// eye looking ahead and a sensor looking down and ahead from the same place, which drape the
+/// ground in front of them at different detail.
+async fn late_redraws_of_the_last_view(sensor_first: bool) -> usize {
+    let tiles = LateTiles::default();
+    let (mut map, eye_slot) = flying_map(&tiles, Some(700 << 20)).await;
+    let sensor_slot = map.register_view_slot(ViewSlotConfig {
+        size: PhysicalSize::new(800, 600).expect("size"),
+        depth_readout: false,
+    });
+    let degrees_per_metre = 1.0 / (111_320.0 * 41.66_f64.to_radians().cos());
+    let mut redraws = 0;
+    for frame in 0..500_u64 {
+        let longitude = -1.0 + frame as f64 * 1.5 * degrees_per_metre;
+        let eye = eastbound_eye(LatLon::new(41.66, longitude), 2_049.0);
+        let mut sensor = eye;
+        sensor.view = Matrix4::from(Matrix3::from_angle_x(Deg(60.0))) * sensor.view;
+        sensor.frustum = EyeFrustum::symmetric(Rad(40_f64.to_radians()), 4.0 / 3.0, 1.0, 350_000.0);
+        let mut slots = vec![
+            ViewSlotEntry {
+                slot: eye_slot,
+                view: SlotView::External(eye),
+                policy: CoveringPolicy::Independent,
+            },
+            ViewSlotEntry {
+                slot: sensor_slot,
+                view: SlotView::External(sensor),
+                policy: CoveringPolicy::Independent,
+            },
+        ];
+        if sensor_first {
+            slots.reverse();
+        }
+        map.run_multi_view_frame(MultiViewFrame {
+            timestamp: Duration::from_millis(frame * 25),
+            opaque_environment: true,
+            request_overscan: 1.22,
+            slots,
+        })
+        .expect("frame");
+        tiles.advance();
+        for _ in 0..16 {
+            tokio::task::yield_now().await;
+        }
+        if frame >= 300 {
+            redraws += map
+                .world()
+                .resources
+                .get::<DrapePhase>()
+                .map_or(0, |phase| phase.targets.len());
+        }
+    }
+    redraws
+}
+
+/// Each view selects a drape's source tiles from its own covering. Two views draping one
+/// terrain tile at different detail must not draw it again each frame in turn: that takes the
+/// frame's drape budget from every drape farther away, which then never refines.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn two_views_sharing_a_drape_do_not_redraw_it_every_frame() {
+    for sensor_first in [false, true] {
+        let redraws = late_redraws_of_the_last_view(sensor_first).await;
+        assert!(
+            {
+                println!("RD sensor_first={sensor_first} redraws={redraws}");
+                redraws <= 100
+            },
+            "the last view drew {redraws} drapes in 200 frames of steady flight \
+             (sensor first: {sensor_first})"
+        );
+    }
 }

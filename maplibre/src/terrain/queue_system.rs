@@ -100,7 +100,12 @@ pub fn queue_system(
         .get::<crate::render::settings::TerrainDrapeMode>()
         .copied()
         .unwrap_or_else(|| settings.effective_terrain_drape_mode());
+    let drape_view = world
+        .resources
+        .get::<crate::render::eye_covering::DrapeView>()
+        .and_then(|view| view.0);
     if let Some(Initialized(terrain)) = world.resources.get_mut::<Eventually<TerrainResources>>() {
+        terrain.show_drapes_of(drape_view);
         if terrain.drape_mode() != drape_mode {
             terrain.set_drape_mode(device, drape_mode);
         }
@@ -357,10 +362,7 @@ fn prepare_drapes(
     } else {
         limit
     };
-    let extra_retained = world
-        .resources
-        .get::<crate::render::eye_covering::SlotResidencyFloor>()
-        .map(|floor| floor.retained_drapes.clone());
+    let view_textures = crate::terrain::drape_share::textures(world, memory);
     let (redraw, drape_sources, deferred, states) = {
         let Some(Initialized(terrain)) = world.resources.get_mut::<Eventually<TerrainResources>>()
         else {
@@ -368,9 +370,9 @@ fn prepare_drapes(
         };
         terrain.ensure_scratch(device);
         acquire_drapes(
-            (specs, extra_retained.as_ref()),
+            specs,
             (&prints, &ready, &prefetch),
-            memory,
+            (memory, view_textures),
             (budget, limit),
             terrain,
             device,

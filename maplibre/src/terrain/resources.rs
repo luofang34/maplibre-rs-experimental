@@ -148,7 +148,9 @@ pub struct TerrainResources {
     uniform_buffer: wgpu::Buffer,
     dem_textures: HashMap<WorldTileCoords, DemTexture>,
     empty_dem: Texture,
-    drapes: DrapeCache<drapes::DrapeTexture>,
+    drapes: DrapeCache<drapes::DrapeTexture, drapes::DrapeKey>,
+    /// The view whose drapes the tile lookups below answer with.
+    drape_view: Option<crate::render::eye_covering::ViewSlotId>,
     drape_scratch: Option<DrapeScratch>,
     draws: Vec<TerrainDraw>,
     /// Bind groups by DEM and drape texture, kept across frames: creating one per tile per
@@ -269,6 +271,7 @@ impl TerrainResources {
             dem_textures: HashMap::new(),
             empty_dem,
             drapes: DrapeCache::default(),
+            drape_view: None,
             drape_scratch: None,
             draws: Vec::new(),
             bind_groups: HashMap::new(),

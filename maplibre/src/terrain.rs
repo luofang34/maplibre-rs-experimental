@@ -23,6 +23,7 @@ pub mod dem;
 pub mod dem_store;
 mod drape_cache;
 mod drape_pass;
+pub(crate) mod drape_share;
 pub(crate) mod drape_targets;
 pub mod drape_timing;
 mod draw;
