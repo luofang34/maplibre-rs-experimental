@@ -158,6 +158,8 @@ impl NavigationHudState {
 #[derive(Default)]
 pub(crate) struct HudViewSlots(FxHashSet<ViewSlotId>);
 
+// Only a map that draws view slots has any to list.
+#[cfg(feature = "headless")]
 impl HudViewSlots {
     pub(crate) fn set(&mut self, slot: ViewSlotId, shown: bool) {
         if shown {
