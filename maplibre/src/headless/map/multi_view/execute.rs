@@ -158,6 +158,7 @@ impl HeadlessMap {
 
         let mut had_active = false;
         let mut dirty_across_slots = false;
+        let mut frame_stats = None;
         for (entry, slot_view) in active {
             had_active = true;
             self.map_context.view_state = slot_view.clone();
@@ -271,6 +272,10 @@ impl HeadlessMap {
                 res
             };
 
+            frame_stats = Some(crate::render::frame_signals::total_frame_stats(
+                &mut self.map_context.world,
+                frame_stats.as_ref(),
+            ));
             if let Err(source) = stage_result {
                 self.map_context.view_state = saved_view_state;
                 return Err(MultiViewError::SlotStage {
