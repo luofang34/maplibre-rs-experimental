@@ -7,6 +7,7 @@
 
 use bytemuck_derive::{Pod, Zeroable};
 use cgmath::Vector2;
+use rustc_hash::FxHashSet;
 
 use crate::{
     context::MapContext,
@@ -15,6 +16,7 @@ use crate::{
     render::{
         camera::EdgeInsets,
         eventually::{Eventually, Eventually::Initialized},
+        eye_covering::{CurrentViewSlot, ViewSlotId},
         resource::{FragmentState, RenderPipeline, TilePipeline, TilePipelineOptions, VertexState},
         shaders::Shader,
         tracked_pass::TrackedRenderPass,
@@ -148,6 +150,33 @@ impl NavigationHudState {
             Some(HudButton::PointerMode)
         }
     }
+}
+
+/// The view slots that draw the HUD. The controls steer the map's own camera and are
+/// hit-tested against its viewport, so a slot, which has a camera of its own, shows them only
+/// where its host asks.
+#[derive(Default)]
+pub(crate) struct HudViewSlots(FxHashSet<ViewSlotId>);
+
+impl HudViewSlots {
+    pub(crate) fn set(&mut self, slot: ViewSlotId, shown: bool) {
+        if shown {
+            self.0.insert(slot);
+        } else {
+            self.0.remove(&slot);
+        }
+    }
+}
+
+/// Whether the view being drawn shows the HUD: the map's own view, or a slot asked to.
+fn shown_in_current_view(world: &World) -> bool {
+    let Some(slot) = world.resources.get::<CurrentViewSlot>().and_then(|s| s.0) else {
+        return true;
+    };
+    world
+        .resources
+        .get::<HudViewSlots>()
+        .is_some_and(|slots| slots.0.contains(&slot))
 }
 
 #[repr(C)]
@@ -296,9 +325,10 @@ fn queue_system(
         .copied()
         .unwrap_or_default();
     let frame_layout = pipeline.get_bind_group_layout(0);
+    let drawn = hud_state.visible && shown_in_current_view(world);
     let gpu = world.resources.get_or_init_mut::<NavigationHudGpu>();
-    gpu.drawn = hud_state.visible;
-    if !hud_state.visible {
+    gpu.drawn = drawn;
+    if !drawn {
         return Ok(());
     }
 
@@ -371,7 +401,10 @@ pub fn draw<'w>(pass: &mut TrackedRenderPass<'w>, world: &'w World) {
     else {
         return;
     };
-    let Some((_, bind_group)) = gpu.frame.as_ref().filter(|_| gpu.drawn) else {
+    // Checked here as well as when queueing: a view drawn without queueing must not inherit
+    // the answer of the view queued before it.
+    let drawn = gpu.drawn && shown_in_current_view(world);
+    let Some((_, bind_group)) = gpu.frame.as_ref().filter(|_| drawn) else {
         return;
     };
     pass.set_pipeline(pipeline);
