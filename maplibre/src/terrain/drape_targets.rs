@@ -78,6 +78,28 @@ pub(crate) fn select_targets(
     world: &World,
     raster_coverings: &RasterCoverings,
 ) -> Vec<(WorldTileCoords, Vec<ShapeSource>)> {
+    select_targets_as(coords, world, raster_coverings, Arrivals::Together)
+}
+
+/// When the raster tiles a view wants under a terrain tile show in its drape while some of
+/// them are still loading.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Arrivals {
+    /// The set replaces its stand-in once its last tile has loaded. A view at rest gets there
+    /// within moments, and the drape changes once.
+    Together,
+    /// Each tile is drawn over the stand-in as it arrives. An eye in flight keeps wanting new
+    /// tiles under a terrain tile, so its set may never be whole.
+    OverStandIn,
+}
+
+/// [`select_targets`] with the say over how a loading raster set shows.
+pub(crate) fn select_targets_as(
+    coords: impl Iterator<Item = WorldTileCoords>,
+    world: &World,
+    raster_coverings: &RasterCoverings,
+    arrivals: Arrivals,
+) -> Vec<(WorldTileCoords, Vec<ShapeSource>)> {
     let Some(sources) = world.resources.get::<ViewTileSources>() else {
         return Vec::new();
     };
@@ -99,10 +121,10 @@ pub(crate) fn select_targets(
             for (source_id, covering) in raster_coverings {
                 shapes.extend(raster_shapes(
                     coords,
-                    source_id,
-                    covering,
+                    (source_id, covering),
                     sources.of_kind(TileKind::Raster),
                     world,
+                    arrivals,
                 ));
             }
             (coords, shapes)
@@ -128,10 +150,10 @@ fn source_tile_missing(source: &RasterSourceId, coords: WorldTileCoords, world: 
 /// loaded ancestors and tiles are drawn as final, or it is absent when it has none.
 fn raster_shapes<H: HasTile>(
     coords: WorldTileCoords,
-    source_id: &RasterSourceId,
-    covering: &[WorldTileCoords],
+    (source_id, covering): (&RasterSourceId, &[WorldTileCoords]),
     availability: H,
     world: &World,
+    arrivals: Arrivals,
 ) -> Vec<ShapeSource> {
     let absent = || {
         vec![ShapeSource {
@@ -176,16 +198,18 @@ fn raster_shapes<H: HasTile>(
     let complete = coverage::complete_cover(coords, loaded.clone());
     let (under, over, view_complete) = match complete {
         Some(complete) => (Vec::new(), complete, false),
-        None if all_loaded || settled => (
-            coverage::loaded_cover(&raster_sources, coords, world).unwrap_or_default(),
-            loaded,
-            true,
-        ),
-        None => (
-            coverage::loaded_cover(&raster_sources, coords, world).unwrap_or_default(),
-            Vec::new(),
-            false,
-        ),
+        None => {
+            let under = coverage::loaded_cover(&raster_sources, coords, world).unwrap_or_default();
+            // Without a stand-in the drape waits whatever the view, since the gaps between
+            // the tiles that have arrived would show the cleared texture.
+            let over_stand_in = arrivals == Arrivals::OverStandIn && !under.is_empty();
+            let over = if all_loaded || settled || over_stand_in {
+                disjoint_from(loaded, &under)
+            } else {
+                Vec::new()
+            };
+            (under, over, all_loaded || settled)
+        }
     };
     if settled && !all_loaded && under.is_empty() && over.is_empty() {
         return absent();
@@ -194,6 +218,14 @@ fn raster_shapes<H: HasTile>(
         .into_iter()
         .map(|source| shape(source, false))
         .chain(over.into_iter().map(|source| shape(source, view_complete)))
+        .collect()
+}
+
+/// `tiles` without those the stand-in already holds.
+fn disjoint_from(tiles: Vec<WorldTileCoords>, under: &[WorldTileCoords]) -> Vec<WorldTileCoords> {
+    tiles
+        .into_iter()
+        .filter(|tile| !under.contains(tile))
         .collect()
 }
 

@@ -11,7 +11,7 @@ use crate::{
     raster::RasterSourceId,
     render::{
         eye_covering::{
-            FrameLodHistory, MultiViewExtractCovering, RasterCoverings, SharedCovering,
+            DrapeView, FrameLodHistory, MultiViewExtractCovering, RasterCoverings, SharedCovering,
             SlotResidencyFloor,
         },
         projection::{raster_source_regions, terrain_region, view_region_for_projection},
@@ -22,6 +22,7 @@ use crate::{
     style::Style,
     tcs::world::World,
     terrain::{
+        drape_share::DrapeShares,
         queue_system::{
             surface_covering::{SurfaceCopies, SurfaceTiles},
             target_specs, TerrainEyeFrame,
@@ -101,6 +102,30 @@ pub(super) fn build_multi_view_coverings(
         active: true,
         ..Default::default()
     };
+    // Every view that holds drapes is granted textures, the views the host ranks first before
+    // the others: those drawn this frame with a covering of their own, and those left out of
+    // it that keep what they last drew.
+    let mut draping: Vec<(i32, ViewSlotId)> = registry
+        .iter()
+        .filter(|(slot, state)| {
+            active.iter().any(|(entry, _)| {
+                entry.slot == **slot && matches!(entry.policy, CoveringPolicy::Independent)
+            }) || (!active_ids.contains(slot) && !state.last_retained_drapes.is_empty())
+        })
+        .map(|(slot, state)| (state.drape_priority, *slot))
+        .collect();
+    draping.sort_by_key(|(priority, slot)| (std::cmp::Reverse(*priority), *slot));
+    let draping: Vec<ViewSlotId> = draping.into_iter().map(|(_, slot)| slot).collect();
+    let allowed = world
+        .resources
+        .get::<crate::render::memory_budget::MemoryBudget>()
+        .copied()
+        .unwrap_or_default()
+        .drape_textures_allowed();
+    world
+        .resources
+        .get_or_init_mut::<DrapeShares>()
+        .grant(&draping, allowed);
     let mut floor = SlotResidencyFloor::default();
     let mut vector_seen = FxHashSet::default();
     let mut terrain_seen = FxHashSet::default();
@@ -158,6 +183,7 @@ pub(super) fn build_multi_view_coverings(
             .map(|state| state.lod_history.clone())
             .unwrap_or_default();
         world.resources.insert(lod_history);
+        world.resources.insert(DrapeView(Some(entry.slot)));
 
         let level = slot_view.zoom().zoom_level(DEFAULT_TILE_SIZE);
         extract.max_view_level = extract.max_view_level.max(u8::from(level));

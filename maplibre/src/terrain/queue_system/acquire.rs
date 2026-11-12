@@ -42,23 +42,21 @@ pub(super) fn awaiting_first_draw(states: &[DrapeState], redraw: &[bool]) -> Vec
 }
 
 pub(super) fn acquire_drapes(
-    (specs, extra_retained): (
-        &[TargetSpec],
-        Option<&rustc_hash::FxHashSet<WorldTileCoords>>,
-    ),
+    specs: &[TargetSpec],
     (prints, ready, prefetch): (&[u64], &[bool], &[bool]),
-    memory: MemoryBudget,
+    (memory, view_textures): (MemoryBudget, usize),
     (budget, limit): (usize, usize),
     terrain: &mut TerrainResources,
     device: &wgpu::Device,
-) -> (Vec<bool>, Vec<Option<WorldTileCoords>>, bool) {
-    let keep = covering::retained_textures(
-        specs
-            .iter()
-            .map(|spec| spec.coords)
-            .chain(extra_retained.into_iter().flatten().copied()),
-        |coords| terrain.drape_texture(coords).is_some(),
-    );
+) -> (
+    Vec<bool>,
+    Vec<Option<WorldTileCoords>>,
+    bool,
+    Vec<DrapeState>,
+) {
+    let keep = covering::retained_textures(specs.iter().map(|spec| spec.coords), |coords| {
+        terrain.drape_texture(coords).is_some()
+    });
     terrain.retain_drapes(&keep);
     // Unready tiles keep their last valid texture or a background surface.
     if memory.is_tight() {
@@ -74,6 +72,11 @@ pub(super) fn acquire_drapes(
         .map(|(((spec, print), ready), prefetch)| {
             if !*ready {
                 return DrapeState::Unchanged;
+            }
+            // Past its share of the textures a view goes without, as it does when the map's
+            // allowance is spent, rather than take what another view's share covers.
+            if !terrain.within_drape_allowance(spec.coords, view_textures) {
+                return DrapeState::Withheld;
             }
             let may_create = memory.allows_drape_texture(terrain.drape_texture_total());
             if *prefetch {
@@ -92,7 +95,7 @@ pub(super) fn acquire_drapes(
         }
     }
     let sources = drape_sources(specs, &states, &redraw, ready, terrain);
-    (redraw, sources, deferred)
+    (redraw, sources, deferred, states)
 }
 
 /// The drapes to draw this frame. Those the view shows take the budget first; a new one with

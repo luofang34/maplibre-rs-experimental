@@ -216,7 +216,7 @@ fn translucent_floating_volume_emits_outward_wound_roof_floor_and_walls() {
         let z = if top { v.elevation } else { v.distance };
         [v.position[0], -v.position[1], z]
     };
-    for tri in buffer.indices.chunks_exact(3) {
+    for tri in buffer.indices.as_chunks::<3>().0 {
         let a = pos3(&buffer.vertices[tri[0] as usize]);
         let b = pos3(&buffer.vertices[tri[1] as usize]);
         let c = pos3(&buffer.vertices[tri[2] as usize]);
@@ -342,7 +342,7 @@ fn extrusion_part_selectors_emit_only_requested_shell_components() {
     );
     let (roofs, floors, wall_verts, floor_buf) = counts(ExtrusionPart::Floor);
     assert_eq!((roofs, floors, wall_verts), (0, 4, 0));
-    for tri in floor_buf.indices.chunks_exact(3) {
+    for tri in floor_buf.indices.as_chunks::<3>().0 {
         let p0 = floor_buf.vertices[tri[0] as usize].position;
         let p1 = floor_buf.vertices[tri[1] as usize].position;
         let p2 = floor_buf.vertices[tri[2] as usize].position;

@@ -38,6 +38,11 @@ impl ViewSlotId {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct CurrentViewSlot(pub Option<ViewSlotId>);
 
+/// The view whose terrain drapes the slot being drawn shows: its own, or for the second eye
+/// of a stereo pair the first eye's, whose terrain it replays.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct DrapeView(pub Option<ViewSlotId>);
+
 /// Union of tiles and terrain drape coordinates retained across all active and skipped view slots.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct SlotResidencyFloor {

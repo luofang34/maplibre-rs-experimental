@@ -19,7 +19,9 @@ use crate::{
     },
     terrain::{
         drape_cache::{fingerprint, SourceContent},
-        drape_targets::{collect_layer_specs, select_targets, TargetSpec},
+        drape_targets::{
+            collect_layer_specs, select_targets, select_targets_as, Arrivals, TargetSpec,
+        },
         resources::{TerrainDraw, TerrainResources, UNIFORM_STRIDE},
         source::{dem_source, DemSource},
         DrapePhase, TerrainFrame,
@@ -27,6 +29,7 @@ use crate::{
     vector::VectorBufferPool,
 };
 mod acquire;
+mod activity;
 mod cohort;
 mod covering;
 pub(crate) mod edges;
@@ -97,7 +100,12 @@ pub fn queue_system(
         .get::<crate::render::settings::TerrainDrapeMode>()
         .copied()
         .unwrap_or_else(|| settings.effective_terrain_drape_mode());
+    let drape_view = world
+        .resources
+        .get::<crate::render::eye_covering::DrapeView>()
+        .and_then(|view| view.0);
     if let Some(Initialized(terrain)) = world.resources.get_mut::<Eventually<TerrainResources>>() {
+        terrain.show_drapes_of(drape_view);
         if terrain.drape_mode() != drape_mode {
             terrain.set_drape_mode(device, drape_mode);
         }
@@ -354,20 +362,17 @@ fn prepare_drapes(
     } else {
         limit
     };
-    let extra_retained = world
-        .resources
-        .get::<crate::render::eye_covering::SlotResidencyFloor>()
-        .map(|floor| floor.retained_drapes.clone());
-    let (redraw, drape_sources, deferred) = {
+    let view_textures = crate::terrain::drape_share::textures(world, memory);
+    let (redraw, drape_sources, deferred, states) = {
         let Some(Initialized(terrain)) = world.resources.get_mut::<Eventually<TerrainResources>>()
         else {
             return Err(SystemError::Dependencies);
         };
         terrain.ensure_scratch(device);
         acquire_drapes(
-            (specs, extra_retained.as_ref()),
+            specs,
             (&prints, &ready, &prefetch),
-            memory,
+            (memory, view_textures),
             (budget, limit),
             terrain,
             device,
@@ -381,6 +386,18 @@ fn prepare_drapes(
             .count()
     };
     crate::render::frame_signals::count_drape_redraws(world, drawn(false), drawn(true));
+    activity::record(
+        world,
+        &activity::FrameDrapes {
+            specs,
+            states: &states,
+            ready: &ready,
+            redraw: &redraw,
+            sources: &drape_sources,
+            budget: (budget, limit),
+            paint_zoom,
+        },
+    );
     // A drape left for a later frame's budget needs that frame.
     if deferred {
         crate::render::frame_signals::keep_animating(world);

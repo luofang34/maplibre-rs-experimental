@@ -84,7 +84,8 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
         };
         let mut requested = FxHashSet::default();
         let mut budget = request_budget(world);
-        let wanted = wanted_tiles(regions, style, world);
+        let stand_ins = drape_stand_ins(style, view_state, world);
+        let wanted = wanted_tiles(regions, stand_ins, style, world);
         let sources: Vec<_> = source_layer_groups(style, TileKind::Raster)
             .into_iter()
             .map(|group| RasterSourceId::new(group.source_name))
@@ -186,11 +187,52 @@ fn coarse_raster_ancestor(coords: WorldTileCoords, minzoom: u8) -> Option<WorldT
     Some(current)
 }
 
+/// The terrain tiles an eye's drapes are drawn into, nearest first; none for the map's own
+/// camera, whose drapes are as fine as its view tiles and need no coarser stand-in.
+fn drape_stand_ins(
+    style: &Style,
+    view_state: &crate::render::view_state::ViewState,
+    world: &crate::tcs::world::World,
+) -> Vec<WorldTileCoords> {
+    if style.terrain.is_none()
+        || !(view_state.has_external_view() || view_state.pose_view().is_some())
+    {
+        return Vec::new();
+    }
+    world
+        .resources
+        .get::<crate::terrain::request_system::DrapeRequests>()
+        .map(|requests| requests.0.clone())
+        .unwrap_or_default()
+}
+
+/// The tile of a source that fills a terrain tile by itself: the tile at its coordinates, or
+/// its ancestor at the deepest level the source serves.
+fn stand_in_tile(target: WorldTileCoords, minzoom: u8, maxzoom: u8) -> Option<WorldTileCoords> {
+    if u8::from(target.z) < minzoom {
+        return None;
+    }
+    let mut current = target;
+    while u8::from(current.z) > maxzoom {
+        current = current.get_parent()?;
+    }
+    Some(current)
+}
+
+/// The tiles to request, most urgent first.
+///
+/// An eye in flight keeps wanting new tiles near it, and a terrain tile's drape has nothing of
+/// its own to show until a tile covering all of it has loaded. Each of `drape_targets` is
+/// therefore requested from every source before any finer tile, so the ground out to the
+/// horizon holds imagery while the detail streams in behind it.
 fn wanted_tiles(
     regions: Vec<(RasterSourceId, Vec<WorldTileCoords>)>,
+    drape_targets: Vec<WorldTileCoords>,
     style: &crate::style::Style,
     world: &crate::tcs::world::World,
 ) -> Vec<WorldTileCoords> {
+    let mut stand_ins = Vec::new();
+    let mut seen_stand_ins = FxHashSet::default();
     let mut wanted = Vec::new();
     let mut coarse_ancestors = Vec::new();
     let mut seen_coarse = FxHashSet::default();
@@ -207,6 +249,25 @@ fn wanted_tiles(
             Some(crate::style::source::Source::Image(image)) => image_bounds(image),
             _ => None,
         };
+        let maxzoom = match source.name().and_then(|name| style.sources.get(name)) {
+            Some(crate::style::source::Source::Raster(source)) => source.maxzoom,
+            Some(crate::style::source::Source::RasterDem(source)) => source.maxzoom,
+            _ => None,
+        }
+        .unwrap_or(u8::MAX);
+        if !tiles.is_empty() {
+            stand_ins.extend(
+                drape_targets
+                    .iter()
+                    .filter_map(|target| stand_in_tile(*target, minzoom, maxzoom))
+                    .filter(|coords| {
+                        bounds.is_none_or(|bounds| {
+                            crate::io::tile_sources::tile_in_bounds(*coords, bounds)
+                        })
+                    })
+                    .filter(|coords| seen_stand_ins.insert(*coords)),
+            );
+        }
         for coords in tiles {
             // Tiles outside the source's declared bounds are never requested.
             if bounds.is_some_and(|bounds| !crate::io::tile_sources::tile_in_bounds(coords, bounds))
@@ -237,9 +298,11 @@ fn wanted_tiles(
         let remaining = coarse_ancestors.split_off(coarse_ancestors.len().min(2));
         coarse_ancestors.extend(wanted);
         coarse_ancestors.extend(remaining);
-        return coarse_ancestors;
+        stand_ins.extend(coarse_ancestors);
+        return stand_ins;
     }
-    wanted
+    stand_ins.extend(wanted);
+    stand_ins
 }
 
 /// The bounds `(west, south, east, north)` of an image's corners, so tiles it cannot reach are

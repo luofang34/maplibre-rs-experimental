@@ -11,7 +11,7 @@ use crate::{
     headless::map::HeadlessMap,
     render::{
         eye_covering::{
-            snapshot_lod_history, CurrentViewSlot, EyeInFrame, MultiViewExtractCovering,
+            snapshot_lod_history, CurrentViewSlot, DrapeView, EyeInFrame, MultiViewExtractCovering,
             SlotResidencyFloor,
         },
         frame_input::{FrameInput, ViewSource},
@@ -98,6 +98,7 @@ impl HeadlessMap {
             .world
             .resources
             .insert(CurrentViewSlot(None));
+        self.map_context.world.resources.insert(DrapeView(None));
         self.map_context.world.resources.insert(EyeInFrame {
             index: 0,
             frame: frame_number,
@@ -165,6 +166,13 @@ impl HeadlessMap {
                 .resources
                 .insert(CurrentViewSlot(Some(entry.slot)));
 
+            self.map_context
+                .world
+                .resources
+                .insert(DrapeView(Some(match entry.policy {
+                    CoveringPolicy::Independent => entry.slot,
+                    CoveringPolicy::StereoReuse(primary) => primary,
+                })));
             match entry.policy {
                 CoveringPolicy::Independent => {
                     self.map_context.world.resources.insert(EyeInFrame {

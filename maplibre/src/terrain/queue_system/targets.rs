@@ -58,11 +58,13 @@ pub(crate) fn target_specs(
         .resources
         .get_or_init_mut::<cohort::TextureCohort>()
         .enabled = uniform_globe;
+    let allowance =
+        crate::terrain::drape_share::allowance(world, memory, view_region.iter().count());
     let tiles: Vec<_> = if uniform_globe {
         cohort::targets(
             world,
             &view_region.iter().collect::<Vec<_>>(),
-            memory.drape_textures_allowed(),
+            allowance.textures,
         )
     } else if view_state.has_external_view() || view_state.pose_view().is_some() {
         // An eye's screen-resolution covering reaches its horizon in more tiles than the
@@ -71,19 +73,30 @@ pub(crate) fn target_specs(
         covering::for_frame(
             world,
             view_region.iter().collect(),
-            // Reserve room for two sibling groups while their parents remain visible.
-            memory.drape_textures_allowed().saturating_sub(8).max(1),
+            // The view's share of the textures, less those it regroups with.
+            allowance.targets,
             focus,
         )
     } else {
         view_region.iter().collect()
     };
-    super::prefetch::prepare(style, view_state, world, &tiles, memory);
+    super::prefetch::prepare(
+        style,
+        view_state,
+        world,
+        &tiles,
+        (memory, allowance.targets),
+    );
     world
         .resources
         .insert(crate::terrain::request_system::DrapeRequests(tiles.clone()));
     world.resources.insert(PrefetchDrapes::default());
-    let mut targets = select_targets(tiles.into_iter(), world, &raster_coverings);
+    let arrivals = if view_state.has_external_view() || view_state.pose_view().is_some() {
+        Arrivals::OverStandIn
+    } else {
+        Arrivals::Together
+    };
+    let mut targets = select_targets_as(tiles.into_iter(), world, &raster_coverings, arrivals);
     if !uniform_globe && !view_state.has_external_view() && view_state.pose_view().is_none() {
         let prefetch_tiles = world
             .resources
