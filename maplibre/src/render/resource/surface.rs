@@ -112,6 +112,28 @@ impl Surface {
         size: PhysicalSize,
         settings: &RendererSettings,
     ) -> Self {
+        Self::from_headless_size_owned(device, adapter, size, settings, false)
+    }
+
+    /// Allocates a single-sample offscreen target for an internal view slot whose color texture
+    /// is explicitly destroyed when replaced on resize or unregistered.
+    #[cfg(feature = "headless")]
+    pub(crate) fn from_slot_size(
+        device: &wgpu::Device,
+        adapter: &wgpu::Adapter,
+        size: PhysicalSize,
+        settings: &RendererSettings,
+    ) -> Self {
+        Self::from_headless_size_owned(device, adapter, size, settings, true)
+    }
+
+    fn from_headless_size_owned(
+        device: &wgpu::Device,
+        adapter: &wgpu::Adapter,
+        size: PhysicalSize,
+        settings: &RendererSettings,
+        destroy_texture_on_drop: bool,
+    ) -> Self {
         let format = settings
             .texture_format
             .unwrap_or(wgpu::TextureFormat::Rgba8Unorm);
@@ -122,6 +144,7 @@ impl Surface {
                 size,
                 format,
                 adapter.get_texture_format_features(format),
+                destroy_texture_on_drop,
             ))),
         }
     }
@@ -203,6 +226,7 @@ impl Surface {
                         self.size,
                         head.texture_format,
                         head.texture_format_features,
+                        head.destroy_texture_on_drop,
                     ));
                 }
             }

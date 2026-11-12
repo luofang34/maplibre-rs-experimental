@@ -201,6 +201,14 @@ pub struct NavigationHudGpu {
     vertex_count: u32,
 }
 
+impl Drop for NavigationHudGpu {
+    fn drop(&mut self) {
+        if let Some((buffer, _)) = self.frame.take() {
+            buffer.destroy();
+        }
+    }
+}
+
 struct HudShader {
     format: wgpu::TextureFormat,
 }

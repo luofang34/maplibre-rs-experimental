@@ -56,6 +56,18 @@ struct Pending {
     state: Arc<AtomicU8>,
 }
 
+impl Drop for Pending {
+    fn drop(&mut self) {
+        if self.state.load(Ordering::Acquire) == MAPPED {
+            self.readback.unmap();
+        }
+        self.vertices.destroy();
+        self.uniform.destroy();
+        self.target.destroy();
+        self.readback.destroy();
+    }
+}
+
 /// The probe pipeline and the request in flight.
 pub(crate) struct ProbeGpu {
     pipeline: wgpu::RenderPipeline,
@@ -178,6 +190,7 @@ impl ProbeGpu {
             })
             .unwrap_or_default();
         pending.readback.unmap();
+        pending.state.store(ENCODED, Ordering::Release);
         Some(ProbeResults {
             request: pending.request,
             visible,

@@ -103,6 +103,15 @@ impl<B> fmt::Debug for PageFactory<B> {
     }
 }
 
+/// Releases GPU device storage owned by a [`BufferPage`] when reclaimed or dropped.
+pub(super) struct PageDestroyer<B>(pub(super) fn(&BufferPage<B>));
+
+impl<B> fmt::Debug for PageDestroyer<B> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("PageDestroyer(..)")
+    }
+}
+
 /// One self-contained slab page of vertex, index, layer-metadata, and feature-metadata buffers.
 #[derive(Debug)]
 pub(super) struct BufferPage<B> {

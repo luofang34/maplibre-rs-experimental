@@ -57,6 +57,12 @@ impl EdgeHeightTexture {
     }
 }
 
+impl Drop for EdgeHeightTexture {
+    fn drop(&mut self) {
+        self.texture.destroy();
+    }
+}
+
 impl TerrainResources {
     /// Writes the per-tile edge height blocks.
     pub(crate) fn write_edges(

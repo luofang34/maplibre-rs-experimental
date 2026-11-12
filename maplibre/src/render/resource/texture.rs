@@ -1,8 +1,19 @@
 //! Texture allocations and attachment views that retain ownership of presentation frames.
 
-use std::ops::Deref;
+use std::{ops::Deref, sync::Arc};
 
 use crate::render::{eventually::HasChanged, settings::Msaa};
+
+/// Sole owner of a [`wgpu::Texture`] that calls [`wgpu::Texture::destroy`] once every
+/// [`Texture`] handle sharing the allocation has been dropped.
+#[derive(Debug)]
+struct OwnedTexture(wgpu::Texture);
+
+impl Drop for OwnedTexture {
+    fn drop(&mut self) {
+        self.0.destroy();
+    }
+}
 
 /// Describes a [`TextureView`].
 ///
@@ -74,6 +85,8 @@ pub struct Texture {
     pub texture: wgpu::Texture,
     /// View of the allocation for rendering or sampling, subject to its usages.
     pub view: TextureView,
+    /// Shared ownership guard; declared last so `view` drops before `wgpu::Texture::destroy`.
+    owner: Arc<OwnedTexture>,
 }
 
 impl Texture {
@@ -108,10 +121,12 @@ impl Texture {
             view_formats: &[format],
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let owner = super::shared::share_gpu(OwnedTexture(texture.clone()));
         Self {
             size,
             texture,
             view: TextureView::TextureView(view),
+            owner,
         }
     }
 
@@ -142,10 +157,12 @@ impl Texture {
             view_formats: &[format],
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let owner = super::shared::share_gpu(OwnedTexture(texture.clone()));
         Self {
             size,
             texture,
             view: TextureView::TextureView(view),
+            owner,
         }
     }
 
@@ -158,6 +175,7 @@ impl Texture {
                 size: self.size,
                 texture: self.texture.clone(),
                 view: TextureView::TextureView(view.clone()),
+                owner: Arc::clone(&self.owner),
             }),
             TextureView::SurfaceTexture { .. } => None,
         }

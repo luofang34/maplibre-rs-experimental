@@ -328,9 +328,15 @@ fn request_order(
         .collect();
     let mut result = Vec::new();
     for coords in &fine {
-        if let Some(parent) = dem_ancestor_coords(*coords, minzoom) {
-            if seen.insert(parent) {
-                result.push(parent);
+        let already_loaded = matches!(
+            loaded.query::<&DemTileComponent>(*coords),
+            Some(DemTileComponent::Loaded(_))
+        );
+        if !already_loaded {
+            if let Some(parent) = dem_ancestor_coords(*coords, minzoom) {
+                if seen.insert(parent) {
+                    result.push(parent);
+                }
             }
         }
     }

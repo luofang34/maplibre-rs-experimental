@@ -15,6 +15,8 @@ use crate::{coords::WorldTileCoords, terrain::drape_targets::TargetSpec};
 
 /// Largest number of released textures kept for reuse.
 const MAX_FREE_TEXTURES: usize = 8;
+/// Hard ceiling on total drape textures (`entries + parked + free`) held in [`DrapeCache`].
+pub const HARD_MAX_DRAPE_TEXTURES: usize = crate::render::memory_budget::DRAPE_TEXTURE_LIMIT;
 
 /// What of a source tile is on the GPU right now, so a drape redraws when its own tile's
 /// content arrives or leaves and not when any other tile's does.
@@ -183,9 +185,10 @@ impl<T, K: Copy + Eq + std::hash::Hash> DrapeCache<T, K> {
                 // a view takes the texture of a drape prepared ahead of it that none has shown,
                 // then the one parked longest ago; a drape prepared ahead takes neither, and a
                 // tile that finds none goes without.
+                let can_create = may_create && self.total_textures() < HARD_MAX_DRAPE_TEXTURES;
                 let texture = match self.free.pop() {
                     Some(texture) => texture,
-                    None if may_create => create(),
+                    None if can_create => create(),
                     None if !shown => return DrapeState::Withheld,
                     None => match self
                         .take_unshown()

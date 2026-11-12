@@ -65,3 +65,9 @@ impl crate::render::eventually::HasChanged for SymbolDepth {
         (self.texture.width(), self.texture.height(), self.samples) != *criteria
     }
 }
+
+impl Drop for SymbolDepth {
+    fn drop(&mut self) {
+        self.texture.destroy();
+    }
+}

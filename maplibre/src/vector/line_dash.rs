@@ -19,9 +19,19 @@ struct DashEntry {
     image: LineImage,
     binding: wgpu::BindGroup,
     uniform: wgpu::Buffer,
+    dash_texture: wgpu::Texture,
+    ramp_texture: wgpu::Texture,
     period: f32,
     /// The fractional-zoom scale of the dashes the uniform holds.
     scale: f32,
+}
+
+impl Drop for DashEntry {
+    fn drop(&mut self) {
+        self.uniform.destroy();
+        self.dash_texture.destroy();
+        self.ramp_texture.destroy();
+    }
 }
 pub(crate) struct LineDashResources {
     pub(crate) layout: wgpu::BindGroupLayout,
@@ -386,7 +396,7 @@ fn create_entry(
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         },
     );
-    let (ramp_view, ramp_sampler) = ramp_texture(device, queue, image);
+    let (ramp_texture, ramp_view, ramp_sampler) = ramp_texture(device, queue, image);
     let binding = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("line dash"),
         layout,
@@ -419,6 +429,8 @@ fn create_entry(
         image: image.clone(),
         binding,
         uniform,
+        dash_texture: texture,
+        ramp_texture,
         period,
         scale,
     }

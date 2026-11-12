@@ -20,14 +20,14 @@ pub struct RasterResources {
     mipmaps: MipmapGenerator,
     msaa: Msaa,
     pipeline: wgpu::RenderPipeline,
-    bound_textures: HashMap<RasterSourceId, TilePyramid<(wgpu::BindGroup, u64)>>,
+    bound_textures: HashMap<RasterSourceId, TilePyramid<(wgpu::BindGroup, u64, Option<Texture>)>>,
     layer_sources: HashMap<String, RasterSourceId>,
     /// Sources backed by 2-texel bordered `raster-dem` elevation textures.
     dem_sources: HashSet<RasterSourceId>,
-    /// Tracks the GPU handle and [`DemRevision`] currently bound at each `(source, coords)` so
-    /// in-place border backfills reuse their existing `wgpu::BindGroup` without reallocating.
-    dem_bindings:
-        HashMap<RasterSourceId, HashMap<WorldTileCoords, (wgpu::Texture, Option<DemRevision>)>>,
+    /// Tracks the shared [`Texture`] handle and [`DemRevision`] currently bound at each
+    /// `(source, coords)` so in-place border backfills reuse their existing `wgpu::BindGroup`
+    /// and shared GPU allocations remain alive until evicted from every consumer.
+    dem_bindings: HashMap<RasterSourceId, HashMap<WorldTileCoords, (Texture, Option<DemRevision>)>>,
     /// Uniform buffer and bind group of each raster layer's paint adjustments, and of the
     /// same paint for the layer's departing tiles.
     layer_paints: HashMap<(String, bool), (wgpu::Buffer, wgpu::BindGroup)>,
@@ -129,14 +129,14 @@ impl RasterResources {
         self.bound_textures
             .get(source)?
             .get(*coords)
-            .map(|(binding, _)| binding)
+            .map(|(binding, _, _)| binding)
     }
 
     pub(crate) fn texture_revision(&self, layer: &str, coords: WorldTileCoords) -> Option<u64> {
         self.bound_textures
             .get(self.layer_sources.get(layer)?)?
             .get(coords)
-            .map(|(_, revision)| *revision)
+            .map(|(_, revision, _)| *revision)
     }
 
     /// Drops every source binding at these coordinates without advancing the insertion generation.
@@ -149,8 +149,8 @@ impl RasterResources {
         }
     }
 
-    /// Inserts or replaces the texture/sampler binding at group one of the raster pipeline.
-    /// The bind group retains the texture view after the supplied wrapper is dropped.
+    /// Inserts or replaces the texture/sampler binding at group one of the raster pipeline,
+    /// retaining ownership of `texture` so eviction explicitly destroys its GPU allocation.
     pub fn bind_texture(
         &mut self,
         device: &wgpu::Device,
@@ -159,29 +159,24 @@ impl RasterResources {
         texture: Texture,
     ) {
         self.revision = self.revision.wrapping_add(1);
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &self.pipeline.get_bind_group_layout(1),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&texture.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                },
+            ],
+            label: None,
+        });
         self.bound_textures
             .entry(source.clone())
             .or_default()
-            .insert(
-                *coords,
-                (
-                    device.create_bind_group(&wgpu::BindGroupDescriptor {
-                        layout: &self.pipeline.get_bind_group_layout(1),
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: wgpu::BindingResource::TextureView(&texture.view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: wgpu::BindingResource::Sampler(&self.sampler),
-                            },
-                        ],
-                        label: None,
-                    }),
-                    self.revision,
-                ),
-            );
+            .insert(*coords, (bind_group, self.revision, Some(texture)));
     }
 
     /// Whether `(source, coords)` already binds the GPU texture matching `dem`'s sample revision.
@@ -216,9 +211,9 @@ impl RasterResources {
             .dem_bindings
             .get(source)
             .and_then(|bindings| bindings.get(&coords))
-            .is_some_and(|(prev, _)| prev == &texture.texture);
+            .is_some_and(|(prev, _)| prev.texture == texture.texture);
         let reused = if same_texture {
-            if let Some((_, bound_rev)) = self
+            if let Some((_, bound_rev, _)) = self
                 .bound_textures
                 .get_mut(source)
                 .and_then(|pyramid| pyramid.get_mut(coords))
@@ -249,12 +244,14 @@ impl RasterResources {
             self.bound_textures
                 .entry(source.clone())
                 .or_default()
-                .insert(coords, (bind_group, revision));
+                .insert(coords, (bind_group, revision, None));
         }
-        self.dem_bindings
-            .entry(source.clone())
-            .or_default()
-            .insert(coords, (texture.texture.clone(), Some(dem_rev)));
+        if let Some(shared) = texture.clone_handle() {
+            self.dem_bindings
+                .entry(source.clone())
+                .or_default()
+                .insert(coords, (shared, Some(dem_rev)));
+        }
     }
 
     /// Drops every texture of a source, as when it leaves the style.
@@ -308,6 +305,14 @@ impl RasterResources {
                     .or_insert_with(|| RasterSourceId::new(layer.source.clone()));
             }
         }
+        let active_layers = &self.layer_sources;
+        self.layer_paints.retain(|(layer_id, _), (buffer, _)| {
+            let keep = active_layers.contains_key(layer_id);
+            if !keep {
+                buffer.destroy();
+            }
+            keep
+        });
     }
 
     /// Marks the texture of a tile whose CPU data changed for upload on the next Queue pass.
@@ -403,6 +408,14 @@ impl RasterResources {
     /// Borrows the raster pipeline whose group-one layout defines the texture bindings.
     pub fn pipeline(&self) -> &wgpu::RenderPipeline {
         &self.pipeline
+    }
+}
+
+impl Drop for RasterResources {
+    fn drop(&mut self) {
+        for (_, (buffer, _)) in self.layer_paints.drain() {
+            buffer.destroy();
+        }
     }
 }
 

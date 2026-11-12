@@ -350,7 +350,12 @@ impl AssetCache {
         .await
     }
 
-    fn evict_to_budget(state: &mut State, budget_bytes: usize, keep: &str) {
+    fn evict_to_budget(state: &mut State, budget_bytes: usize, negative_ttl: Duration, keep: &str) {
+        if state.entries.len() > 256 {
+            state.entries.retain(|key, entry| {
+                key.as_str() == keep || !is_stale_failure(&entry.slot, negative_ttl)
+            });
+        }
         while state.bytes > budget_bytes {
             let oldest = state
                 .entries
@@ -395,7 +400,15 @@ impl Flight {
                             last_used: tick,
                         },
                     );
-                    AssetCache::evict_to_budget(&mut state, self.cache.0.budget_bytes, &self.key);
+                    AssetCache::evict_to_budget(
+                        &mut state,
+                        self.cache.0.budget_bytes,
+                        self.cache.0.negative_ttl,
+                        &self.key,
+                    );
+                }
+                Err(failure) if waiters.is_empty() && failure.is_retryable() => {
+                    state.entries.remove(&self.key);
                 }
                 Err(failure) => {
                     let tick = state.tick;
@@ -446,10 +459,12 @@ fn take_waiters(state: &mut State, key: &str, flight: u64) -> Option<Vec<Waker>>
     }
 }
 
+fn is_stale_failure(slot: &Slot, negative_ttl: Duration) -> bool {
+    matches!(slot, Slot::Failed { failure, at, .. } if failure.is_retryable() || at.elapsed() >= negative_ttl)
+}
+
 fn wake(waiters: Vec<Waker>) {
-    for waker in waiters {
-        waker.wake();
-    }
+    waiters.into_iter().for_each(Waker::wake);
 }
 
 pub(crate) async fn fetch<HC: HttpClient>(

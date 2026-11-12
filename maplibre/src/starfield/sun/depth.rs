@@ -84,6 +84,12 @@ impl HasChanged for SunDepth {
     }
 }
 
+impl Drop for SunDepth {
+    fn drop(&mut self) {
+        self.texture.destroy();
+    }
+}
+
 /// Copies the depth the main pass left, while a sun is drawn.
 pub struct SunDepthCopyNode;
 

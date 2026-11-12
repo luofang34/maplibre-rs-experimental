@@ -14,12 +14,24 @@ struct TileAtlas {
     texture: wgpu::Texture,
 }
 
+impl Drop for TileAtlas {
+    fn drop(&mut self) {
+        self.texture.destroy();
+    }
+}
+
 pub(super) struct DrawBinding {
     atlas: Arc<TileAtlas>,
     pub group: wgpu::BindGroup,
     pub separate_halo: bool,
     buffer: wgpu::Buffer,
     uniforms: SymbolUniforms,
+}
+
+impl Drop for DrawBinding {
+    fn drop(&mut self) {
+        self.buffer.destroy();
+    }
 }
 
 pub(super) struct TextureContext<'a> {

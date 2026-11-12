@@ -22,8 +22,8 @@ pub(crate) type DrapeKey = (Option<ViewSlotId>, WorldTileCoords);
 /// time the drape is redrawn; the texture's own view spans every level, which an attachment
 /// may not.
 pub(crate) struct DrapeTexture {
-    texture: Texture,
     top_level: wgpu::TextureView,
+    texture: Texture,
 }
 
 impl DrapeTexture {
@@ -34,7 +34,7 @@ impl DrapeTexture {
             mip_level_count: Some(1),
             ..Default::default()
         });
-        Self { texture, top_level }
+        Self { top_level, texture }
     }
 }
 

@@ -27,7 +27,25 @@ pub struct IndirectParametersBuffers {
     indexed_gpu: Option<BackingIndirectBuffer>,
     non_indexed_gpu: Option<BackingIndirectBuffer>,
     batch_sets_gpu: Option<BackingIndirectBuffer>,
+    retired_buffers: Vec<wgpu::Buffer>,
     gpu_count_enabled: bool,
+}
+
+impl Drop for IndirectParametersBuffers {
+    fn drop(&mut self) {
+        for buffer in self.retired_buffers.drain(..) {
+            buffer.destroy();
+        }
+        for slot in [
+            &mut self.indexed_gpu,
+            &mut self.non_indexed_gpu,
+            &mut self.batch_sets_gpu,
+        ] {
+            if let Some(backing) = slot.take() {
+                backing.buffer.destroy();
+            }
+        }
+    }
 }
 
 impl IndirectParametersBuffers {
@@ -38,6 +56,9 @@ impl IndirectParametersBuffers {
 
     /// Clears staged CPU indirect arguments while retaining allocated CPU and GPU capacities.
     pub fn clear(&mut self) {
+        for buffer in self.retired_buffers.drain(..) {
+            buffer.destroy();
+        }
         self.indexed_data.clear();
         self.non_indexed_data.clear();
         self.batch_sets_data.clear();
@@ -180,6 +201,7 @@ impl IndirectParametersBuffers {
         let (backing, _) = ensure_indirect_buffer::<DrawIndexedIndirectArgs>(
             device,
             &mut self.indexed_gpu,
+            &mut self.retired_buffers,
             min_elements.max(1),
             usages,
             "binned_indexed_indirect_buffer",
@@ -199,6 +221,7 @@ impl IndirectParametersBuffers {
         let (backing, _) = ensure_indirect_buffer::<DrawIndirectArgs>(
             device,
             &mut self.non_indexed_gpu,
+            &mut self.retired_buffers,
             min_elements.max(1),
             usages,
             "binned_non_indexed_indirect_buffer",
@@ -223,6 +246,7 @@ impl IndirectParametersBuffers {
             &self.indexed_data,
             &mut self.uploaded_indexed_len,
             &mut self.indexed_gpu,
+            &mut self.retired_buffers,
             usages,
             "binned_indexed_indirect_buffer",
         );
@@ -232,6 +256,7 @@ impl IndirectParametersBuffers {
             &self.non_indexed_data,
             &mut self.uploaded_non_indexed_len,
             &mut self.non_indexed_gpu,
+            &mut self.retired_buffers,
             usages,
             "binned_non_indexed_indirect_buffer",
         );
@@ -241,6 +266,7 @@ impl IndirectParametersBuffers {
             &self.batch_sets_data,
             &mut self.uploaded_batch_sets_len,
             &mut self.batch_sets_gpu,
+            &mut self.retired_buffers,
             usages,
             "binned_indirect_batch_sets_buffer",
         );
@@ -250,6 +276,7 @@ impl IndirectParametersBuffers {
 fn ensure_indirect_buffer<'a, T: bytemuck::Pod>(
     device: &wgpu::Device,
     slot: &'a mut Option<BackingIndirectBuffer>,
+    retired_buffers: &mut Vec<wgpu::Buffer>,
     required_elements: usize,
     usages: wgpu::BufferUsages,
     label: &'static str,
@@ -269,11 +296,13 @@ fn ensure_indirect_buffer<'a, T: bytemuck::Pod>(
             usage: usages,
             mapped_at_creation: false,
         });
-        *slot = Some(BackingIndirectBuffer {
+        if let Some(old) = slot.replace(BackingIndirectBuffer {
             buffer,
             capacity_elements,
             usages,
-        });
+        }) {
+            retired_buffers.push(old.buffer);
+        }
     }
     let backing = slot.get_or_insert_with(|| {
         let capacity_elements = MIN_INDIRECT_CAPACITY;
@@ -292,12 +321,14 @@ fn ensure_indirect_buffer<'a, T: bytemuck::Pod>(
     (backing, needs_realloc)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn upload_delta<T: bytemuck::Pod>(
     device: &wgpu::Device,
     queue: &UploadQueue,
     data: &[T],
     uploaded_len: &mut usize,
     slot: &mut Option<BackingIndirectBuffer>,
+    retired_buffers: &mut Vec<wgpu::Buffer>,
     usages: wgpu::BufferUsages,
     label: &'static str,
 ) {
@@ -305,7 +336,7 @@ fn upload_delta<T: bytemuck::Pod>(
         return;
     }
     let (backing, reallocated) =
-        ensure_indirect_buffer::<T>(device, slot, data.len(), usages, label);
+        ensure_indirect_buffer::<T>(device, slot, retired_buffers, data.len(), usages, label);
     let start = if reallocated { 0 } else { *uploaded_len };
     let byte_offset = (start * size_of::<T>()) as wgpu::BufferAddress;
     let slice_bytes = bytemuck::cast_slice(&data[start..]);

@@ -159,6 +159,19 @@ impl<E: Environment, T: RasterTransferables> RequestSystem<E, T> {
     }
 }
 
+fn source_ready_at(
+    tiles: &crate::tcs::tiles::Tiles,
+    source: &RasterSourceId,
+    coords: WorldTileCoords,
+) -> bool {
+    tiles
+        .query::<&RasterLayersDataComponent>(coords)
+        .is_some_and(|component| component.has_source_result(source))
+        || tiles
+            .query::<&crate::terrain::DemLayersComponent>(coords)
+            .is_some_and(|component| component.contains(source))
+}
+
 fn all_sources_ready(
     tiles: &crate::tcs::tiles::Tiles,
     sources: &[RasterSourceId],
@@ -236,6 +249,7 @@ fn wanted_tiles(
     let mut wanted = Vec::new();
     let mut coarse_ancestors = Vec::new();
     let mut seen_coarse = FxHashSet::default();
+    let mut needed_coarse = FxHashSet::default();
     let is_terrain = style.terrain.is_some();
     for (source, tiles) in regions {
         let minzoom = match source.name().and_then(|name| style.sources.get(name)) {
@@ -279,6 +293,9 @@ fn wanted_tiles(
                     if seen_coarse.insert(ancestor) {
                         coarse_ancestors.push(ancestor);
                     }
+                    if !source_ready_at(&world.tiles, &source, coords) {
+                        needed_coarse.insert(ancestor);
+                    }
                 }
             }
             wanted.push(coords);
@@ -292,6 +309,7 @@ fn wanted_tiles(
             }
         }
     }
+    coarse_ancestors.retain(|ancestor| needed_coarse.contains(ancestor));
     if !coarse_ancestors.is_empty() {
         // Bracket the local terrain with one coarse raster overview tile first, then fine
         // tiles, then any remaining coarse ancestors, matching DEM `request_order`.

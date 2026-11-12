@@ -373,3 +373,121 @@ fn wide_eye_view() -> crate::render::view_state::ViewState {
 
     eyed
 }
+
+#[test]
+fn settled_fine_tiles_stop_retaining_coarse_dem_and_raster_ancestors() {
+    use rustc_hash::FxHashSet;
+
+    use crate::{
+        raster::{
+            AvailableRasterLayerData, RasterLayerData, RasterLayersDataComponent, RasterSourceId,
+        },
+        terrain::{DemTile, LoadedDem},
+    };
+
+    let style: crate::style::Style = serde_json::from_str(
+        r#"{
+            "version": 8,
+            "sources": {
+                "ortho": { "type": "raster", "tiles": ["https://img.example/{z}/{x}/{y}.png"], "tileSize": 256, "maxzoom": 14 },
+                "dem": { "type": "raster-dem", "tiles": ["https://dem.example/{z}/{x}/{y}.png"], "tileSize": 256, "maxzoom": 12, "encoding": "terrarium" }
+            },
+            "layers": [{ "id": "ortho", "type": "raster", "source": "ortho" }],
+            "terrain": { "source": "dem", "exaggeration": 1 }
+        }"#,
+    )
+    .expect("style parses");
+
+    let mut world = World::default();
+    let fine_view = WorldTileCoords::from((256, 256, ZoomLevel::new(10)));
+    let fine_dem = WorldTileCoords::from((128, 128, ZoomLevel::new(9)));
+    let coarse_raster = WorldTileCoords::from((32, 32, ZoomLevel::new(7)));
+    let coarse_dem = WorldTileCoords::from((8, 8, ZoomLevel::new(5)));
+    let root = WorldTileCoords::from((0, 0, ZoomLevel::new(0)));
+
+    let ortho = RasterSourceId::from("ortho");
+    let img = image::RgbaImage::new(4, 4);
+    let dem = LoadedDem::new(
+        DemTile::from_image(&img, [256.0, 1.0, 1.0 / 256.0, -32768.0]).expect("dem"),
+    );
+
+    for coords in [root, coarse_dem, coarse_raster] {
+        world
+            .tiles
+            .spawn_mut(coords)
+            .expect("valid")
+            .insert(RasterLayersDataComponent {
+                layers: vec![RasterLayerData::Available(AvailableRasterLayerData {
+                    coords,
+                    source: ortho.clone(),
+                    image: img.clone(),
+                })],
+            })
+            .insert(DemTileComponent::Loaded(dem.clone()));
+    }
+
+    // While the fine view tile and its z9 DEM tile have not loaded, fallback ancestors stay in use.
+    let pending = super::finish_tiles_in_use(&world, &style, FxHashSet::from_iter([fine_view]));
+    assert!(
+        pending.contains(&coarse_raster),
+        "unsettled fine tile keeps z-3 raster ancestor"
+    );
+    assert!(
+        pending.contains(&coarse_dem),
+        "unsettled DEM tile keeps z5 culling ancestor"
+    );
+    assert!(
+        !pending.contains(&root),
+        "nearest loaded fallback suffices without pinning z0 forever"
+    );
+
+    // Once the fine view tile's raster and its z9 DEM settle, coarse ancestors leave `in_use`.
+    world
+        .tiles
+        .spawn_mut(fine_view)
+        .expect("valid")
+        .insert(RasterLayersDataComponent {
+            layers: vec![RasterLayerData::Available(AvailableRasterLayerData {
+                coords: fine_view,
+                source: ortho,
+                image: img,
+            })],
+        });
+    world
+        .tiles
+        .spawn_mut(fine_dem)
+        .expect("valid")
+        .insert(DemTileComponent::Loaded(dem));
+
+    let settled = super::finish_tiles_in_use(&world, &style, FxHashSet::from_iter([fine_view]));
+    assert!(settled.contains(&fine_view));
+    assert!(settled.contains(&fine_dem));
+    assert!(
+        !settled.contains(&coarse_raster),
+        "settled fine raster drops coarse ancestor"
+    );
+    assert!(
+        !settled.contains(&coarse_dem),
+        "settled fine DEM drops z5 ancestor"
+    );
+    assert!(
+        !settled.contains(&root),
+        "settled fine tile drops z0 ancestor"
+    );
+}
+
+#[test]
+fn wide_view_tile_cache_is_capped_at_max_cache_tiles() {
+    let mut world = World::default();
+    for index in 0..(super::MAX_CACHE_TILES + 40) as i32 {
+        let coords = WorldTileCoords {
+            x: index % 64,
+            y: index / 64,
+            z: ZoomLevel::new(7),
+        };
+        spawn_vector(&mut world, coords, true);
+    }
+    let evicted = evict_stale_tiles(&mut world, &HashSet::new(), 200);
+    assert_eq!(evicted.len(), 40);
+    assert_eq!(world.tiles.tiles.len(), super::MAX_CACHE_TILES);
+}

@@ -15,7 +15,8 @@ use std::{
 
 use bytemuck::Pod;
 use page::{
-    BufferPage, ByteCapacities, ElementStrides, PageAllocation, PageFactory, DEFAULT_PAGE_VERTICES,
+    BufferPage, ByteCapacities, ElementStrides, PageAllocation, PageDestroyer, PageFactory,
+    DEFAULT_PAGE_VERTICES,
 };
 
 use crate::{
@@ -44,6 +45,7 @@ pub struct BufferPool<Q, B, V, I, TM, FM> {
     max_capacities: ByteCapacities,
     max_page_bytes: wgpu::BufferAddress,
     page_factory: Option<PageFactory<B>>,
+    page_destroyer: Option<PageDestroyer<B>>,
 
     index: RingIndex,
     /// For layers whose pattern varies by feature: the pattern key and index range of each run
@@ -118,6 +120,7 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
             max_capacities,
             max_page_bytes: u64::MAX,
             page_factory: None,
+            page_destroyer: None,
             index: RingIndex::new(),
             pattern_runs: Default::default(),
             sort_runs: Default::default(),
@@ -150,6 +153,7 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
             max_capacities,
             max_page_bytes,
             page_factory: (!max_capacities.is_empty()).then(|| PageFactory(Box::new(factory))),
+            page_destroyer: None,
             index: RingIndex::new(),
             pattern_runs: Default::default(),
             sort_runs: Default::default(),
@@ -188,8 +192,10 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
             if is_empty {
                 if spare_kept < keep_spare {
                     spare_kept += 1;
-                } else {
-                    *slot = None;
+                } else if let Some(page) = slot.take() {
+                    if let Some(destroyer) = &self.page_destroyer {
+                        (destroyer.0)(&page);
+                    }
                 }
             }
         }
@@ -363,6 +369,16 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
     /// Borrows the spatial/temporal index of resident allocations.
     pub fn index(&self) -> &RingIndex {
         &self.index
+    }
+}
+
+impl<Q, B, V, I, TM, FM> Drop for BufferPool<Q, B, V, I, TM, FM> {
+    fn drop(&mut self) {
+        if let Some(destroyer) = &self.page_destroyer {
+            for page in self.pages.iter().flatten() {
+                (destroyer.0)(page);
+            }
+        }
     }
 }
 
