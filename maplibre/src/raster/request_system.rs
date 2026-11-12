@@ -249,6 +249,7 @@ fn wanted_tiles(
     let mut wanted = Vec::new();
     let mut coarse_ancestors = Vec::new();
     let mut seen_coarse = FxHashSet::default();
+    let mut needed_coarse = FxHashSet::default();
     let is_terrain = style.terrain.is_some();
     for (source, tiles) in regions {
         let minzoom = match source.name().and_then(|name| style.sources.get(name)) {
@@ -287,10 +288,13 @@ fn wanted_tiles(
             {
                 continue;
             }
-            if is_terrain && !source_ready_at(&world.tiles, &source, coords) {
+            if is_terrain {
                 if let Some(ancestor) = coarse_raster_ancestor(coords, minzoom) {
                     if seen_coarse.insert(ancestor) {
                         coarse_ancestors.push(ancestor);
+                    }
+                    if !source_ready_at(&world.tiles, &source, coords) {
+                        needed_coarse.insert(ancestor);
                     }
                 }
             }
@@ -305,6 +309,7 @@ fn wanted_tiles(
             }
         }
     }
+    coarse_ancestors.retain(|ancestor| needed_coarse.contains(ancestor));
     if !coarse_ancestors.is_empty() {
         // Bracket the local terrain with one coarse raster overview tile first, then fine
         // tiles, then any remaining coarse ancestors, matching DEM `request_order`.
