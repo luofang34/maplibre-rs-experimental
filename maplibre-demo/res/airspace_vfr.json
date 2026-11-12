@@ -1,6 +1,6 @@
 {
   "version": 8,
-  "name": "Flightbag US NASR 3D Airspace (VFR Sectional)",
+  "name": "Flightbag US NASR 3D Airspace (Experimental Prototype — Not for Navigation or Flight)",
   "sources": {
     "osm": {
       "type": "raster",
@@ -22,7 +22,7 @@
     "airspace": {
       "type": "vector",
       "url": "pmtiles://https://luofang34.github.io/Flightbag/cycles/current/airspace.pmtiles",
-      "attribution": "FAA NASR 28-Day Subscription (Flightbag)"
+      "attribution": "FAA NASR via Flightbag (EXPERIMENTAL PROTOTYPE — NOT FOR NAVIGATION OR FLIGHT)"
     }
   },
   "layers": [
