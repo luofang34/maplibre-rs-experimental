@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["all_sources_ready","coarse_raster_ancestor","drape_stand_ins","image_bounds","stand_in_tile","wanted_tiles"],"mod":["fetch"],"struct":["RequestSystem"]};
+window.SIDEBAR_ITEMS = {"fn":["all_sources_ready","coarse_raster_ancestor","drape_stand_ins","image_bounds","source_ready_at","stand_in_tile","wanted_tiles"],"mod":["fetch"],"struct":["RequestSystem"]};

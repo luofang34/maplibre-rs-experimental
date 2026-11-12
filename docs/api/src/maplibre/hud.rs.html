@@ -201,216 +201,224 @@
 <a href=#201 id=201 data-nosnippet>201</a>    vertex_count: u32,
 <a href=#202 id=202 data-nosnippet>202</a>}
 <a href=#203 id=203 data-nosnippet>203</a>
-<a href=#204 id=204 data-nosnippet>204</a><span class="kw">struct </span>HudShader {
-<a href=#205 id=205 data-nosnippet>205</a>    format: wgpu::TextureFormat,
-<a href=#206 id=206 data-nosnippet>206</a>}
-<a href=#207 id=207 data-nosnippet>207</a>
-<a href=#208 id=208 data-nosnippet>208</a><span class="kw">impl </span>Shader <span class="kw">for </span>HudShader {
-<a href=#209 id=209 data-nosnippet>209</a>    <span class="kw">fn </span>describe_vertex(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; VertexState {
-<a href=#210 id=210 data-nosnippet>210</a>        VertexState {
-<a href=#211 id=211 data-nosnippet>211</a>            source: <span class="macro">include_str!</span>(<span class="string">"hud/hud.vertex.wgsl"</span>),
-<a href=#212 id=212 data-nosnippet>212</a>            entry_point: <span class="string">"main"</span>,
-<a href=#213 id=213 data-nosnippet>213</a>            buffers: Vec::new(),
-<a href=#214 id=214 data-nosnippet>214</a>        }
-<a href=#215 id=215 data-nosnippet>215</a>    }
-<a href=#216 id=216 data-nosnippet>216</a>
-<a href=#217 id=217 data-nosnippet>217</a>    <span class="kw">fn </span>describe_fragment(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; FragmentState {
-<a href=#218 id=218 data-nosnippet>218</a>        FragmentState {
-<a href=#219 id=219 data-nosnippet>219</a>            source: <span class="macro">include_str!</span>(<span class="string">"hud/hud.fragment.wgsl"</span>),
+<a href=#204 id=204 data-nosnippet>204</a><span class="kw">impl </span>Drop <span class="kw">for </span>NavigationHudGpu {
+<a href=#205 id=205 data-nosnippet>205</a>    <span class="kw">fn </span>drop(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
+<a href=#206 id=206 data-nosnippet>206</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>((buffer, <span class="kw">_</span>)) = <span class="self">self</span>.frame.take() {
+<a href=#207 id=207 data-nosnippet>207</a>            buffer.destroy();
+<a href=#208 id=208 data-nosnippet>208</a>        }
+<a href=#209 id=209 data-nosnippet>209</a>    }
+<a href=#210 id=210 data-nosnippet>210</a>}
+<a href=#211 id=211 data-nosnippet>211</a>
+<a href=#212 id=212 data-nosnippet>212</a><span class="kw">struct </span>HudShader {
+<a href=#213 id=213 data-nosnippet>213</a>    format: wgpu::TextureFormat,
+<a href=#214 id=214 data-nosnippet>214</a>}
+<a href=#215 id=215 data-nosnippet>215</a>
+<a href=#216 id=216 data-nosnippet>216</a><span class="kw">impl </span>Shader <span class="kw">for </span>HudShader {
+<a href=#217 id=217 data-nosnippet>217</a>    <span class="kw">fn </span>describe_vertex(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; VertexState {
+<a href=#218 id=218 data-nosnippet>218</a>        VertexState {
+<a href=#219 id=219 data-nosnippet>219</a>            source: <span class="macro">include_str!</span>(<span class="string">"hud/hud.vertex.wgsl"</span>),
 <a href=#220 id=220 data-nosnippet>220</a>            entry_point: <span class="string">"main"</span>,
-<a href=#221 id=221 data-nosnippet>221</a>            targets: <span class="macro">vec!</span>[<span class="prelude-val">Some</span>(wgpu::ColorTargetState {
-<a href=#222 id=222 data-nosnippet>222</a>                format: <span class="self">self</span>.format,
-<a href=#223 id=223 data-nosnippet>223</a>                blend: <span class="prelude-val">Some</span>(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
-<a href=#224 id=224 data-nosnippet>224</a>                write_mask: wgpu::ColorWrites::ALL,
-<a href=#225 id=225 data-nosnippet>225</a>            })],
-<a href=#226 id=226 data-nosnippet>226</a>        }
-<a href=#227 id=227 data-nosnippet>227</a>    }
-<a href=#228 id=228 data-nosnippet>228</a>}
-<a href=#229 id=229 data-nosnippet>229</a>
-<a href=#230 id=230 data-nosnippet>230</a><span class="doccomment">/// Plugin that draws the cross-platform navigation HUD at the end of the translucent pass.
-<a href=#231 id=231 data-nosnippet>231</a></span><span class="attr">#[derive(Default)]
-<a href=#232 id=232 data-nosnippet>232</a></span><span class="kw">pub struct </span>NavigationHudPlugin;
-<a href=#233 id=233 data-nosnippet>233</a>
-<a href=#234 id=234 data-nosnippet>234</a><span class="kw">impl</span>&lt;E: Environment&gt; Plugin&lt;E&gt; <span class="kw">for </span>NavigationHudPlugin {
-<a href=#235 id=235 data-nosnippet>235</a>    <span class="kw">fn </span>build(
-<a href=#236 id=236 data-nosnippet>236</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
-<a href=#237 id=237 data-nosnippet>237</a>        schedule: <span class="kw-2">&amp;mut </span><span class="kw">crate</span>::schedule::Schedule,
-<a href=#238 id=238 data-nosnippet>238</a>        _kernel: std::rc::Rc&lt;<span class="kw">crate</span>::kernel::Kernel&lt;E&gt;&gt;,
-<a href=#239 id=239 data-nosnippet>239</a>        world: <span class="kw-2">&amp;mut </span>World,
-<a href=#240 id=240 data-nosnippet>240</a>        _renderer: <span class="kw-2">&amp;mut </span><span class="kw">crate</span>::render::Renderer,
-<a href=#241 id=241 data-nosnippet>241</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), <span class="kw">crate</span>::plugin::PluginError&gt; {
-<a href=#242 id=242 data-nosnippet>242</a>        world
-<a href=#243 id=243 data-nosnippet>243</a>            .resources
-<a href=#244 id=244 data-nosnippet>244</a>            .insert(Eventually::&lt;NavigationHudPipeline&gt;::Uninitialized);
-<a href=#245 id=245 data-nosnippet>245</a>        schedule.add_system_to_stage(RenderStageLabel::Prepare, resource_system)<span class="question-mark">?</span>;
-<a href=#246 id=246 data-nosnippet>246</a>        schedule.add_system_to_stage(RenderStageLabel::Queue, queue_system)<span class="question-mark">?</span>;
-<a href=#247 id=247 data-nosnippet>247</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(hooks) = world.resources.get_mut::&lt;<span class="kw">crate</span>::render::PassDrawHooks&gt;() {
-<a href=#248 id=248 data-nosnippet>248</a>            hooks.register(<span class="kw">crate</span>::render::PassHookPoint::TranslucentPassEnd, draw);
-<a href=#249 id=249 data-nosnippet>249</a>        } <span class="kw">else </span>{
-<a href=#250 id=250 data-nosnippet>250</a>            <span class="kw">let </span><span class="kw-2">mut </span>hooks = <span class="kw">crate</span>::render::PassDrawHooks::new();
-<a href=#251 id=251 data-nosnippet>251</a>            hooks.register(<span class="kw">crate</span>::render::PassHookPoint::TranslucentPassEnd, draw);
-<a href=#252 id=252 data-nosnippet>252</a>            world.resources.insert(hooks);
-<a href=#253 id=253 data-nosnippet>253</a>        }
-<a href=#254 id=254 data-nosnippet>254</a>        <span class="prelude-val">Ok</span>(())
-<a href=#255 id=255 data-nosnippet>255</a>    }
-<a href=#256 id=256 data-nosnippet>256</a>}
-<a href=#257 id=257 data-nosnippet>257</a>
-<a href=#258 id=258 data-nosnippet>258</a><span class="kw">fn </span>resource_system(
-<a href=#259 id=259 data-nosnippet>259</a>    MapContext {
-<a href=#260 id=260 data-nosnippet>260</a>        world, renderer, ..
-<a href=#261 id=261 data-nosnippet>261</a>    }: <span class="kw-2">&amp;mut </span>MapContext,
-<a href=#262 id=262 data-nosnippet>262</a>) -&gt; SystemResult {
-<a href=#263 id=263 data-nosnippet>263</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(pipeline) = world
-<a href=#264 id=264 data-nosnippet>264</a>        .resources
-<a href=#265 id=265 data-nosnippet>265</a>        .get_mut::&lt;Eventually&lt;NavigationHudPipeline&gt;&gt;()
-<a href=#266 id=266 data-nosnippet>266</a>    <span class="kw">else </span>{
-<a href=#267 id=267 data-nosnippet>267</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(SystemError::Dependencies);
-<a href=#268 id=268 data-nosnippet>268</a>    };
-<a href=#269 id=269 data-nosnippet>269</a>    <span class="kw">let </span>device = <span class="kw-2">&amp;</span>renderer.device;
-<a href=#270 id=270 data-nosnippet>270</a>    <span class="kw">let </span>settings = renderer.settings;
-<a href=#271 id=271 data-nosnippet>271</a>    <span class="kw">let </span>surface = <span class="kw-2">&amp;</span>renderer.resources.surface;
-<a href=#272 id=272 data-nosnippet>272</a>    pipeline.initialize(|| {
-<a href=#273 id=273 data-nosnippet>273</a>        <span class="kw">let </span>shader = HudShader {
-<a href=#274 id=274 data-nosnippet>274</a>            format: surface.surface_format(),
-<a href=#275 id=275 data-nosnippet>275</a>        };
-<a href=#276 id=276 data-nosnippet>276</a>        <span class="kw">let </span>frame_layout = device.create_bind_group_layout(<span class="kw-2">&amp;</span>wgpu::BindGroupLayoutDescriptor {
-<a href=#277 id=277 data-nosnippet>277</a>            label: <span class="prelude-val">Some</span>(<span class="string">"navigation hud frame layout"</span>),
-<a href=#278 id=278 data-nosnippet>278</a>            entries: <span class="kw-2">&amp;</span>[wgpu::BindGroupLayoutEntry {
-<a href=#279 id=279 data-nosnippet>279</a>                binding: <span class="number">0</span>,
-<a href=#280 id=280 data-nosnippet>280</a>                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-<a href=#281 id=281 data-nosnippet>281</a>                ty: wgpu::BindingType::Buffer {
-<a href=#282 id=282 data-nosnippet>282</a>                    ty: wgpu::BufferBindingType::Uniform,
-<a href=#283 id=283 data-nosnippet>283</a>                    has_dynamic_offset: <span class="bool-val">false</span>,
-<a href=#284 id=284 data-nosnippet>284</a>                    min_binding_size: <span class="prelude-val">None</span>,
-<a href=#285 id=285 data-nosnippet>285</a>                },
-<a href=#286 id=286 data-nosnippet>286</a>                count: <span class="prelude-val">None</span>,
-<a href=#287 id=287 data-nosnippet>287</a>            }],
-<a href=#288 id=288 data-nosnippet>288</a>        });
-<a href=#289 id=289 data-nosnippet>289</a>        NavigationHudPipeline(
-<a href=#290 id=290 data-nosnippet>290</a>            TilePipeline::new(
-<a href=#291 id=291 data-nosnippet>291</a>                <span class="string">"navigation_hud_pipeline"</span>.into(),
-<a href=#292 id=292 data-nosnippet>292</a>                settings,
-<a href=#293 id=293 data-nosnippet>293</a>                shader.describe_vertex(),
-<a href=#294 id=294 data-nosnippet>294</a>                shader.describe_fragment(),
-<a href=#295 id=295 data-nosnippet>295</a>                TilePipelineOptions {
-<a href=#296 id=296 data-nosnippet>296</a>                    depth_stencil_enabled: <span class="bool-val">true</span>,
-<a href=#297 id=297 data-nosnippet>297</a>                    update_stencil: <span class="bool-val">false</span>,
-<a href=#298 id=298 data-nosnippet>298</a>                    debug_stencil: <span class="bool-val">true</span>,
-<a href=#299 id=299 data-nosnippet>299</a>                    wireframe: <span class="bool-val">false</span>,
-<a href=#300 id=300 data-nosnippet>300</a>                    multisampling: surface.is_multisampling_supported(settings.msaa),
-<a href=#301 id=301 data-nosnippet>301</a>                    textured: <span class="bool-val">false</span>,
-<a href=#302 id=302 data-nosnippet>302</a>                },
-<a href=#303 id=303 data-nosnippet>303</a>            )
-<a href=#304 id=304 data-nosnippet>304</a>            .describe_render_pipeline()
-<a href=#305 id=305 data-nosnippet>305</a>            .initialize_with_prefix_layouts(device, <span class="kw-2">&amp;</span>[<span class="kw-2">&amp;</span>frame_layout]),
-<a href=#306 id=306 data-nosnippet>306</a>        )
-<a href=#307 id=307 data-nosnippet>307</a>    });
-<a href=#308 id=308 data-nosnippet>308</a>    <span class="prelude-val">Ok</span>(())
-<a href=#309 id=309 data-nosnippet>309</a>}
-<a href=#310 id=310 data-nosnippet>310</a>
-<a href=#311 id=311 data-nosnippet>311</a><span class="kw">fn </span>queue_system(
-<a href=#312 id=312 data-nosnippet>312</a>    MapContext {
-<a href=#313 id=313 data-nosnippet>313</a>        world,
-<a href=#314 id=314 data-nosnippet>314</a>        view_state,
-<a href=#315 id=315 data-nosnippet>315</a>        renderer,
-<a href=#316 id=316 data-nosnippet>316</a>        ..
-<a href=#317 id=317 data-nosnippet>317</a>    }: <span class="kw-2">&amp;mut </span>MapContext,
-<a href=#318 id=318 data-nosnippet>318</a>) -&gt; SystemResult {
-<a href=#319 id=319 data-nosnippet>319</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(Initialized(NavigationHudPipeline(pipeline))) =
-<a href=#320 id=320 data-nosnippet>320</a>        world.resources.get::&lt;Eventually&lt;NavigationHudPipeline&gt;&gt;()
-<a href=#321 id=321 data-nosnippet>321</a>    <span class="kw">else </span>{
-<a href=#322 id=322 data-nosnippet>322</a>        <span class="kw">return </span><span class="prelude-val">Ok</span>(());
-<a href=#323 id=323 data-nosnippet>323</a>    };
-<a href=#324 id=324 data-nosnippet>324</a>    <span class="kw">let </span>hud_state = world
-<a href=#325 id=325 data-nosnippet>325</a>        .resources
-<a href=#326 id=326 data-nosnippet>326</a>        .get::&lt;NavigationHudState&gt;()
-<a href=#327 id=327 data-nosnippet>327</a>        .copied()
-<a href=#328 id=328 data-nosnippet>328</a>        .unwrap_or_default();
-<a href=#329 id=329 data-nosnippet>329</a>    <span class="kw">let </span>frame_layout = pipeline.get_bind_group_layout(<span class="number">0</span>);
-<a href=#330 id=330 data-nosnippet>330</a>    <span class="kw">let </span>drawn = hud_state.visible &amp;&amp; shown_in_current_view(world);
-<a href=#331 id=331 data-nosnippet>331</a>    <span class="kw">let </span>gpu = world.resources.get_or_init_mut::&lt;NavigationHudGpu&gt;();
-<a href=#332 id=332 data-nosnippet>332</a>    gpu.drawn = drawn;
-<a href=#333 id=333 data-nosnippet>333</a>    <span class="kw">if </span>!drawn {
-<a href=#334 id=334 data-nosnippet>334</a>        <span class="kw">return </span><span class="prelude-val">Ok</span>(());
-<a href=#335 id=335 data-nosnippet>335</a>    }
-<a href=#336 id=336 data-nosnippet>336</a>
-<a href=#337 id=337 data-nosnippet>337</a>    <span class="kw">let </span>width = view_state.width();
-<a href=#338 id=338 data-nosnippet>338</a>    <span class="kw">let </span>height = view_state.height();
-<a href=#339 id=339 data-nosnippet>339</a>    <span class="kw">let </span>origin = NavigationHudState::panel_origin(width, height, view_state.edge_insets());
-<a href=#340 id=340 data-nosnippet>340</a>    <span class="kw">let </span><span class="kw-2">mut </span>flags = <span class="number">0u32</span>;
-<a href=#341 id=341 data-nosnippet>341</a>    <span class="kw">if </span>hud_state.three_dimensional {
-<a href=#342 id=342 data-nosnippet>342</a>        flags |= <span class="number">1</span>;
+<a href=#221 id=221 data-nosnippet>221</a>            buffers: Vec::new(),
+<a href=#222 id=222 data-nosnippet>222</a>        }
+<a href=#223 id=223 data-nosnippet>223</a>    }
+<a href=#224 id=224 data-nosnippet>224</a>
+<a href=#225 id=225 data-nosnippet>225</a>    <span class="kw">fn </span>describe_fragment(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; FragmentState {
+<a href=#226 id=226 data-nosnippet>226</a>        FragmentState {
+<a href=#227 id=227 data-nosnippet>227</a>            source: <span class="macro">include_str!</span>(<span class="string">"hud/hud.fragment.wgsl"</span>),
+<a href=#228 id=228 data-nosnippet>228</a>            entry_point: <span class="string">"main"</span>,
+<a href=#229 id=229 data-nosnippet>229</a>            targets: <span class="macro">vec!</span>[<span class="prelude-val">Some</span>(wgpu::ColorTargetState {
+<a href=#230 id=230 data-nosnippet>230</a>                format: <span class="self">self</span>.format,
+<a href=#231 id=231 data-nosnippet>231</a>                blend: <span class="prelude-val">Some</span>(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+<a href=#232 id=232 data-nosnippet>232</a>                write_mask: wgpu::ColorWrites::ALL,
+<a href=#233 id=233 data-nosnippet>233</a>            })],
+<a href=#234 id=234 data-nosnippet>234</a>        }
+<a href=#235 id=235 data-nosnippet>235</a>    }
+<a href=#236 id=236 data-nosnippet>236</a>}
+<a href=#237 id=237 data-nosnippet>237</a>
+<a href=#238 id=238 data-nosnippet>238</a><span class="doccomment">/// Plugin that draws the cross-platform navigation HUD at the end of the translucent pass.
+<a href=#239 id=239 data-nosnippet>239</a></span><span class="attr">#[derive(Default)]
+<a href=#240 id=240 data-nosnippet>240</a></span><span class="kw">pub struct </span>NavigationHudPlugin;
+<a href=#241 id=241 data-nosnippet>241</a>
+<a href=#242 id=242 data-nosnippet>242</a><span class="kw">impl</span>&lt;E: Environment&gt; Plugin&lt;E&gt; <span class="kw">for </span>NavigationHudPlugin {
+<a href=#243 id=243 data-nosnippet>243</a>    <span class="kw">fn </span>build(
+<a href=#244 id=244 data-nosnippet>244</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#245 id=245 data-nosnippet>245</a>        schedule: <span class="kw-2">&amp;mut </span><span class="kw">crate</span>::schedule::Schedule,
+<a href=#246 id=246 data-nosnippet>246</a>        _kernel: std::rc::Rc&lt;<span class="kw">crate</span>::kernel::Kernel&lt;E&gt;&gt;,
+<a href=#247 id=247 data-nosnippet>247</a>        world: <span class="kw-2">&amp;mut </span>World,
+<a href=#248 id=248 data-nosnippet>248</a>        _renderer: <span class="kw-2">&amp;mut </span><span class="kw">crate</span>::render::Renderer,
+<a href=#249 id=249 data-nosnippet>249</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), <span class="kw">crate</span>::plugin::PluginError&gt; {
+<a href=#250 id=250 data-nosnippet>250</a>        world
+<a href=#251 id=251 data-nosnippet>251</a>            .resources
+<a href=#252 id=252 data-nosnippet>252</a>            .insert(Eventually::&lt;NavigationHudPipeline&gt;::Uninitialized);
+<a href=#253 id=253 data-nosnippet>253</a>        schedule.add_system_to_stage(RenderStageLabel::Prepare, resource_system)<span class="question-mark">?</span>;
+<a href=#254 id=254 data-nosnippet>254</a>        schedule.add_system_to_stage(RenderStageLabel::Queue, queue_system)<span class="question-mark">?</span>;
+<a href=#255 id=255 data-nosnippet>255</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(hooks) = world.resources.get_mut::&lt;<span class="kw">crate</span>::render::PassDrawHooks&gt;() {
+<a href=#256 id=256 data-nosnippet>256</a>            hooks.register(<span class="kw">crate</span>::render::PassHookPoint::TranslucentPassEnd, draw);
+<a href=#257 id=257 data-nosnippet>257</a>        } <span class="kw">else </span>{
+<a href=#258 id=258 data-nosnippet>258</a>            <span class="kw">let </span><span class="kw-2">mut </span>hooks = <span class="kw">crate</span>::render::PassDrawHooks::new();
+<a href=#259 id=259 data-nosnippet>259</a>            hooks.register(<span class="kw">crate</span>::render::PassHookPoint::TranslucentPassEnd, draw);
+<a href=#260 id=260 data-nosnippet>260</a>            world.resources.insert(hooks);
+<a href=#261 id=261 data-nosnippet>261</a>        }
+<a href=#262 id=262 data-nosnippet>262</a>        <span class="prelude-val">Ok</span>(())
+<a href=#263 id=263 data-nosnippet>263</a>    }
+<a href=#264 id=264 data-nosnippet>264</a>}
+<a href=#265 id=265 data-nosnippet>265</a>
+<a href=#266 id=266 data-nosnippet>266</a><span class="kw">fn </span>resource_system(
+<a href=#267 id=267 data-nosnippet>267</a>    MapContext {
+<a href=#268 id=268 data-nosnippet>268</a>        world, renderer, ..
+<a href=#269 id=269 data-nosnippet>269</a>    }: <span class="kw-2">&amp;mut </span>MapContext,
+<a href=#270 id=270 data-nosnippet>270</a>) -&gt; SystemResult {
+<a href=#271 id=271 data-nosnippet>271</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(pipeline) = world
+<a href=#272 id=272 data-nosnippet>272</a>        .resources
+<a href=#273 id=273 data-nosnippet>273</a>        .get_mut::&lt;Eventually&lt;NavigationHudPipeline&gt;&gt;()
+<a href=#274 id=274 data-nosnippet>274</a>    <span class="kw">else </span>{
+<a href=#275 id=275 data-nosnippet>275</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(SystemError::Dependencies);
+<a href=#276 id=276 data-nosnippet>276</a>    };
+<a href=#277 id=277 data-nosnippet>277</a>    <span class="kw">let </span>device = <span class="kw-2">&amp;</span>renderer.device;
+<a href=#278 id=278 data-nosnippet>278</a>    <span class="kw">let </span>settings = renderer.settings;
+<a href=#279 id=279 data-nosnippet>279</a>    <span class="kw">let </span>surface = <span class="kw-2">&amp;</span>renderer.resources.surface;
+<a href=#280 id=280 data-nosnippet>280</a>    pipeline.initialize(|| {
+<a href=#281 id=281 data-nosnippet>281</a>        <span class="kw">let </span>shader = HudShader {
+<a href=#282 id=282 data-nosnippet>282</a>            format: surface.surface_format(),
+<a href=#283 id=283 data-nosnippet>283</a>        };
+<a href=#284 id=284 data-nosnippet>284</a>        <span class="kw">let </span>frame_layout = device.create_bind_group_layout(<span class="kw-2">&amp;</span>wgpu::BindGroupLayoutDescriptor {
+<a href=#285 id=285 data-nosnippet>285</a>            label: <span class="prelude-val">Some</span>(<span class="string">"navigation hud frame layout"</span>),
+<a href=#286 id=286 data-nosnippet>286</a>            entries: <span class="kw-2">&amp;</span>[wgpu::BindGroupLayoutEntry {
+<a href=#287 id=287 data-nosnippet>287</a>                binding: <span class="number">0</span>,
+<a href=#288 id=288 data-nosnippet>288</a>                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+<a href=#289 id=289 data-nosnippet>289</a>                ty: wgpu::BindingType::Buffer {
+<a href=#290 id=290 data-nosnippet>290</a>                    ty: wgpu::BufferBindingType::Uniform,
+<a href=#291 id=291 data-nosnippet>291</a>                    has_dynamic_offset: <span class="bool-val">false</span>,
+<a href=#292 id=292 data-nosnippet>292</a>                    min_binding_size: <span class="prelude-val">None</span>,
+<a href=#293 id=293 data-nosnippet>293</a>                },
+<a href=#294 id=294 data-nosnippet>294</a>                count: <span class="prelude-val">None</span>,
+<a href=#295 id=295 data-nosnippet>295</a>            }],
+<a href=#296 id=296 data-nosnippet>296</a>        });
+<a href=#297 id=297 data-nosnippet>297</a>        NavigationHudPipeline(
+<a href=#298 id=298 data-nosnippet>298</a>            TilePipeline::new(
+<a href=#299 id=299 data-nosnippet>299</a>                <span class="string">"navigation_hud_pipeline"</span>.into(),
+<a href=#300 id=300 data-nosnippet>300</a>                settings,
+<a href=#301 id=301 data-nosnippet>301</a>                shader.describe_vertex(),
+<a href=#302 id=302 data-nosnippet>302</a>                shader.describe_fragment(),
+<a href=#303 id=303 data-nosnippet>303</a>                TilePipelineOptions {
+<a href=#304 id=304 data-nosnippet>304</a>                    depth_stencil_enabled: <span class="bool-val">true</span>,
+<a href=#305 id=305 data-nosnippet>305</a>                    update_stencil: <span class="bool-val">false</span>,
+<a href=#306 id=306 data-nosnippet>306</a>                    debug_stencil: <span class="bool-val">true</span>,
+<a href=#307 id=307 data-nosnippet>307</a>                    wireframe: <span class="bool-val">false</span>,
+<a href=#308 id=308 data-nosnippet>308</a>                    multisampling: surface.is_multisampling_supported(settings.msaa),
+<a href=#309 id=309 data-nosnippet>309</a>                    textured: <span class="bool-val">false</span>,
+<a href=#310 id=310 data-nosnippet>310</a>                },
+<a href=#311 id=311 data-nosnippet>311</a>            )
+<a href=#312 id=312 data-nosnippet>312</a>            .describe_render_pipeline()
+<a href=#313 id=313 data-nosnippet>313</a>            .initialize_with_prefix_layouts(device, <span class="kw-2">&amp;</span>[<span class="kw-2">&amp;</span>frame_layout]),
+<a href=#314 id=314 data-nosnippet>314</a>        )
+<a href=#315 id=315 data-nosnippet>315</a>    });
+<a href=#316 id=316 data-nosnippet>316</a>    <span class="prelude-val">Ok</span>(())
+<a href=#317 id=317 data-nosnippet>317</a>}
+<a href=#318 id=318 data-nosnippet>318</a>
+<a href=#319 id=319 data-nosnippet>319</a><span class="kw">fn </span>queue_system(
+<a href=#320 id=320 data-nosnippet>320</a>    MapContext {
+<a href=#321 id=321 data-nosnippet>321</a>        world,
+<a href=#322 id=322 data-nosnippet>322</a>        view_state,
+<a href=#323 id=323 data-nosnippet>323</a>        renderer,
+<a href=#324 id=324 data-nosnippet>324</a>        ..
+<a href=#325 id=325 data-nosnippet>325</a>    }: <span class="kw-2">&amp;mut </span>MapContext,
+<a href=#326 id=326 data-nosnippet>326</a>) -&gt; SystemResult {
+<a href=#327 id=327 data-nosnippet>327</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(Initialized(NavigationHudPipeline(pipeline))) =
+<a href=#328 id=328 data-nosnippet>328</a>        world.resources.get::&lt;Eventually&lt;NavigationHudPipeline&gt;&gt;()
+<a href=#329 id=329 data-nosnippet>329</a>    <span class="kw">else </span>{
+<a href=#330 id=330 data-nosnippet>330</a>        <span class="kw">return </span><span class="prelude-val">Ok</span>(());
+<a href=#331 id=331 data-nosnippet>331</a>    };
+<a href=#332 id=332 data-nosnippet>332</a>    <span class="kw">let </span>hud_state = world
+<a href=#333 id=333 data-nosnippet>333</a>        .resources
+<a href=#334 id=334 data-nosnippet>334</a>        .get::&lt;NavigationHudState&gt;()
+<a href=#335 id=335 data-nosnippet>335</a>        .copied()
+<a href=#336 id=336 data-nosnippet>336</a>        .unwrap_or_default();
+<a href=#337 id=337 data-nosnippet>337</a>    <span class="kw">let </span>frame_layout = pipeline.get_bind_group_layout(<span class="number">0</span>);
+<a href=#338 id=338 data-nosnippet>338</a>    <span class="kw">let </span>drawn = hud_state.visible &amp;&amp; shown_in_current_view(world);
+<a href=#339 id=339 data-nosnippet>339</a>    <span class="kw">let </span>gpu = world.resources.get_or_init_mut::&lt;NavigationHudGpu&gt;();
+<a href=#340 id=340 data-nosnippet>340</a>    gpu.drawn = drawn;
+<a href=#341 id=341 data-nosnippet>341</a>    <span class="kw">if </span>!drawn {
+<a href=#342 id=342 data-nosnippet>342</a>        <span class="kw">return </span><span class="prelude-val">Ok</span>(());
 <a href=#343 id=343 data-nosnippet>343</a>    }
-<a href=#344 id=344 data-nosnippet>344</a>    <span class="kw">if </span>hud_state.auto_tilt {
-<a href=#345 id=345 data-nosnippet>345</a>        flags |= <span class="number">2</span>;
-<a href=#346 id=346 data-nosnippet>346</a>    }
-<a href=#347 id=347 data-nosnippet>347</a>    <span class="kw">if </span>hud_state.north_locked {
-<a href=#348 id=348 data-nosnippet>348</a>        flags |= <span class="number">4</span>;
-<a href=#349 id=349 data-nosnippet>349</a>    }
-<a href=#350 id=350 data-nosnippet>350</a>    <span class="kw">if </span>hud_state.rts_mode {
-<a href=#351 id=351 data-nosnippet>351</a>        flags |= <span class="number">8</span>;
-<a href=#352 id=352 data-nosnippet>352</a>    }
-<a href=#353 id=353 data-nosnippet>353</a>    <span class="kw">let </span>selection_active = u32::from(hud_state.selection_box.is_some());
-<a href=#354 id=354 data-nosnippet>354</a>    gpu.vertex_count = <span class="kw">if </span>selection_active != <span class="number">0 </span>{ <span class="number">12 </span>} <span class="kw">else </span>{ <span class="number">6 </span>};
-<a href=#355 id=355 data-nosnippet>355</a>
-<a href=#356 id=356 data-nosnippet>356</a>    <span class="kw">let </span>frame = HudFrame {
-<a href=#357 id=357 data-nosnippet>357</a>        viewport_and_panel: [
-<a href=#358 id=358 data-nosnippet>358</a>            width <span class="kw">as </span>f32,
-<a href=#359 id=359 data-nosnippet>359</a>            height <span class="kw">as </span>f32,
-<a href=#360 id=360 data-nosnippet>360</a>            origin.x <span class="kw">as </span>f32,
-<a href=#361 id=361 data-nosnippet>361</a>            origin.y <span class="kw">as </span>f32,
-<a href=#362 id=362 data-nosnippet>362</a>        ],
-<a href=#363 id=363 data-nosnippet>363</a>        angles_and_interaction: [
-<a href=#364 id=364 data-nosnippet>364</a>            view_state.camera().get_bearing().<span class="number">0 </span><span class="kw">as </span>f32,
-<a href=#365 id=365 data-nosnippet>365</a>            view_state.camera().get_pitch().<span class="number">0 </span><span class="kw">as </span>f32,
-<a href=#366 id=366 data-nosnippet>366</a>            hud_state.hovered.map_or(-<span class="number">1.0</span>, HudButton::slot_index),
-<a href=#367 id=367 data-nosnippet>367</a>            hud_state.pressed.map_or(-<span class="number">1.0</span>, HudButton::slot_index),
-<a href=#368 id=368 data-nosnippet>368</a>        ],
-<a href=#369 id=369 data-nosnippet>369</a>        state_flags: [flags, selection_active, <span class="number">0</span>, <span class="number">0</span>],
-<a href=#370 id=370 data-nosnippet>370</a>        selection_rect: hud_state.selection_box.unwrap_or([<span class="number">0.0</span>; <span class="number">4</span>]),
-<a href=#371 id=371 data-nosnippet>371</a>    };
-<a href=#372 id=372 data-nosnippet>372</a>
-<a href=#373 id=373 data-nosnippet>373</a>    <span class="kw">let </span>(buffer, <span class="kw">_</span>) = gpu.frame.get_or_insert_with(|| {
-<a href=#374 id=374 data-nosnippet>374</a>        <span class="kw">let </span>buffer = renderer.device.create_buffer(<span class="kw-2">&amp;</span>wgpu::BufferDescriptor {
-<a href=#375 id=375 data-nosnippet>375</a>            label: <span class="prelude-val">Some</span>(<span class="string">"navigation hud frame"</span>),
-<a href=#376 id=376 data-nosnippet>376</a>            size: std::mem::size_of::&lt;HudFrame&gt;() <span class="kw">as </span>u64,
-<a href=#377 id=377 data-nosnippet>377</a>            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-<a href=#378 id=378 data-nosnippet>378</a>            mapped_at_creation: <span class="bool-val">false</span>,
-<a href=#379 id=379 data-nosnippet>379</a>        });
-<a href=#380 id=380 data-nosnippet>380</a>        <span class="kw">let </span>bind_group = renderer
-<a href=#381 id=381 data-nosnippet>381</a>            .device
-<a href=#382 id=382 data-nosnippet>382</a>            .create_bind_group(<span class="kw-2">&amp;</span>wgpu::BindGroupDescriptor {
-<a href=#383 id=383 data-nosnippet>383</a>                label: <span class="prelude-val">Some</span>(<span class="string">"navigation hud bind group"</span>),
-<a href=#384 id=384 data-nosnippet>384</a>                layout: <span class="kw-2">&amp;</span>frame_layout,
-<a href=#385 id=385 data-nosnippet>385</a>                entries: <span class="kw-2">&amp;</span>[wgpu::BindGroupEntry {
-<a href=#386 id=386 data-nosnippet>386</a>                    binding: <span class="number">0</span>,
-<a href=#387 id=387 data-nosnippet>387</a>                    resource: buffer.as_entire_binding(),
-<a href=#388 id=388 data-nosnippet>388</a>                }],
-<a href=#389 id=389 data-nosnippet>389</a>            });
-<a href=#390 id=390 data-nosnippet>390</a>        (buffer, bind_group)
-<a href=#391 id=391 data-nosnippet>391</a>    });
-<a href=#392 id=392 data-nosnippet>392</a>    renderer
-<a href=#393 id=393 data-nosnippet>393</a>        .queue
-<a href=#394 id=394 data-nosnippet>394</a>        .write_buffer(buffer, <span class="number">0</span>, bytemuck::bytes_of(<span class="kw-2">&amp;</span>frame));
-<a href=#395 id=395 data-nosnippet>395</a>    <span class="prelude-val">Ok</span>(())
-<a href=#396 id=396 data-nosnippet>396</a>}
-<a href=#397 id=397 data-nosnippet>397</a>
-<a href=#398 id=398 data-nosnippet>398</a><span class="doccomment">/// Draws the navigation HUD at the end of the translucent pass.
-<a href=#399 id=399 data-nosnippet>399</a></span><span class="kw">pub fn </span>draw&lt;<span class="lifetime">'w</span>&gt;(pass: <span class="kw-2">&amp;mut </span>TrackedRenderPass&lt;<span class="lifetime">'w</span>&gt;, world: <span class="kw-2">&amp;</span><span class="lifetime">'w </span>World) {
-<a href=#400 id=400 data-nosnippet>400</a>    <span class="kw">let </span><span class="prelude-val">Some</span>((Initialized(NavigationHudPipeline(pipeline)), gpu)) = world
-<a href=#401 id=401 data-nosnippet>401</a>        .resources
-<a href=#402 id=402 data-nosnippet>402</a>        .query::&lt;(<span class="kw-2">&amp;</span>Eventually&lt;NavigationHudPipeline&gt;, <span class="kw-2">&amp;</span>NavigationHudGpu)&gt;()
-<a href=#403 id=403 data-nosnippet>403</a>    <span class="kw">else </span>{
-<a href=#404 id=404 data-nosnippet>404</a>        <span class="kw">return</span>;
-<a href=#405 id=405 data-nosnippet>405</a>    };
-<a href=#406 id=406 data-nosnippet>406</a>    <span class="comment">// Checked here as well as when queueing: a view drawn without queueing must not inherit
-<a href=#407 id=407 data-nosnippet>407</a>    // the answer of the view queued before it.
-<a href=#408 id=408 data-nosnippet>408</a>    </span><span class="kw">let </span>drawn = gpu.drawn &amp;&amp; shown_in_current_view(world);
-<a href=#409 id=409 data-nosnippet>409</a>    <span class="kw">let </span><span class="prelude-val">Some</span>((<span class="kw">_</span>, bind_group)) = gpu.frame.as_ref().filter(|<span class="kw">_</span>| drawn) <span class="kw">else </span>{
-<a href=#410 id=410 data-nosnippet>410</a>        <span class="kw">return</span>;
-<a href=#411 id=411 data-nosnippet>411</a>    };
-<a href=#412 id=412 data-nosnippet>412</a>    pass.set_pipeline(pipeline);
-<a href=#413 id=413 data-nosnippet>413</a>    pass.set_bind_group(<span class="number">0</span>, bind_group, <span class="kw-2">&amp;</span>[]);
-<a href=#414 id=414 data-nosnippet>414</a>    pass.draw(<span class="number">0</span>..gpu.vertex_count, <span class="number">0</span>..<span class="number">1</span>);
-<a href=#415 id=415 data-nosnippet>415</a>}
+<a href=#344 id=344 data-nosnippet>344</a>
+<a href=#345 id=345 data-nosnippet>345</a>    <span class="kw">let </span>width = view_state.width();
+<a href=#346 id=346 data-nosnippet>346</a>    <span class="kw">let </span>height = view_state.height();
+<a href=#347 id=347 data-nosnippet>347</a>    <span class="kw">let </span>origin = NavigationHudState::panel_origin(width, height, view_state.edge_insets());
+<a href=#348 id=348 data-nosnippet>348</a>    <span class="kw">let </span><span class="kw-2">mut </span>flags = <span class="number">0u32</span>;
+<a href=#349 id=349 data-nosnippet>349</a>    <span class="kw">if </span>hud_state.three_dimensional {
+<a href=#350 id=350 data-nosnippet>350</a>        flags |= <span class="number">1</span>;
+<a href=#351 id=351 data-nosnippet>351</a>    }
+<a href=#352 id=352 data-nosnippet>352</a>    <span class="kw">if </span>hud_state.auto_tilt {
+<a href=#353 id=353 data-nosnippet>353</a>        flags |= <span class="number">2</span>;
+<a href=#354 id=354 data-nosnippet>354</a>    }
+<a href=#355 id=355 data-nosnippet>355</a>    <span class="kw">if </span>hud_state.north_locked {
+<a href=#356 id=356 data-nosnippet>356</a>        flags |= <span class="number">4</span>;
+<a href=#357 id=357 data-nosnippet>357</a>    }
+<a href=#358 id=358 data-nosnippet>358</a>    <span class="kw">if </span>hud_state.rts_mode {
+<a href=#359 id=359 data-nosnippet>359</a>        flags |= <span class="number">8</span>;
+<a href=#360 id=360 data-nosnippet>360</a>    }
+<a href=#361 id=361 data-nosnippet>361</a>    <span class="kw">let </span>selection_active = u32::from(hud_state.selection_box.is_some());
+<a href=#362 id=362 data-nosnippet>362</a>    gpu.vertex_count = <span class="kw">if </span>selection_active != <span class="number">0 </span>{ <span class="number">12 </span>} <span class="kw">else </span>{ <span class="number">6 </span>};
+<a href=#363 id=363 data-nosnippet>363</a>
+<a href=#364 id=364 data-nosnippet>364</a>    <span class="kw">let </span>frame = HudFrame {
+<a href=#365 id=365 data-nosnippet>365</a>        viewport_and_panel: [
+<a href=#366 id=366 data-nosnippet>366</a>            width <span class="kw">as </span>f32,
+<a href=#367 id=367 data-nosnippet>367</a>            height <span class="kw">as </span>f32,
+<a href=#368 id=368 data-nosnippet>368</a>            origin.x <span class="kw">as </span>f32,
+<a href=#369 id=369 data-nosnippet>369</a>            origin.y <span class="kw">as </span>f32,
+<a href=#370 id=370 data-nosnippet>370</a>        ],
+<a href=#371 id=371 data-nosnippet>371</a>        angles_and_interaction: [
+<a href=#372 id=372 data-nosnippet>372</a>            view_state.camera().get_bearing().<span class="number">0 </span><span class="kw">as </span>f32,
+<a href=#373 id=373 data-nosnippet>373</a>            view_state.camera().get_pitch().<span class="number">0 </span><span class="kw">as </span>f32,
+<a href=#374 id=374 data-nosnippet>374</a>            hud_state.hovered.map_or(-<span class="number">1.0</span>, HudButton::slot_index),
+<a href=#375 id=375 data-nosnippet>375</a>            hud_state.pressed.map_or(-<span class="number">1.0</span>, HudButton::slot_index),
+<a href=#376 id=376 data-nosnippet>376</a>        ],
+<a href=#377 id=377 data-nosnippet>377</a>        state_flags: [flags, selection_active, <span class="number">0</span>, <span class="number">0</span>],
+<a href=#378 id=378 data-nosnippet>378</a>        selection_rect: hud_state.selection_box.unwrap_or([<span class="number">0.0</span>; <span class="number">4</span>]),
+<a href=#379 id=379 data-nosnippet>379</a>    };
+<a href=#380 id=380 data-nosnippet>380</a>
+<a href=#381 id=381 data-nosnippet>381</a>    <span class="kw">let </span>(buffer, <span class="kw">_</span>) = gpu.frame.get_or_insert_with(|| {
+<a href=#382 id=382 data-nosnippet>382</a>        <span class="kw">let </span>buffer = renderer.device.create_buffer(<span class="kw-2">&amp;</span>wgpu::BufferDescriptor {
+<a href=#383 id=383 data-nosnippet>383</a>            label: <span class="prelude-val">Some</span>(<span class="string">"navigation hud frame"</span>),
+<a href=#384 id=384 data-nosnippet>384</a>            size: std::mem::size_of::&lt;HudFrame&gt;() <span class="kw">as </span>u64,
+<a href=#385 id=385 data-nosnippet>385</a>            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+<a href=#386 id=386 data-nosnippet>386</a>            mapped_at_creation: <span class="bool-val">false</span>,
+<a href=#387 id=387 data-nosnippet>387</a>        });
+<a href=#388 id=388 data-nosnippet>388</a>        <span class="kw">let </span>bind_group = renderer
+<a href=#389 id=389 data-nosnippet>389</a>            .device
+<a href=#390 id=390 data-nosnippet>390</a>            .create_bind_group(<span class="kw-2">&amp;</span>wgpu::BindGroupDescriptor {
+<a href=#391 id=391 data-nosnippet>391</a>                label: <span class="prelude-val">Some</span>(<span class="string">"navigation hud bind group"</span>),
+<a href=#392 id=392 data-nosnippet>392</a>                layout: <span class="kw-2">&amp;</span>frame_layout,
+<a href=#393 id=393 data-nosnippet>393</a>                entries: <span class="kw-2">&amp;</span>[wgpu::BindGroupEntry {
+<a href=#394 id=394 data-nosnippet>394</a>                    binding: <span class="number">0</span>,
+<a href=#395 id=395 data-nosnippet>395</a>                    resource: buffer.as_entire_binding(),
+<a href=#396 id=396 data-nosnippet>396</a>                }],
+<a href=#397 id=397 data-nosnippet>397</a>            });
+<a href=#398 id=398 data-nosnippet>398</a>        (buffer, bind_group)
+<a href=#399 id=399 data-nosnippet>399</a>    });
+<a href=#400 id=400 data-nosnippet>400</a>    renderer
+<a href=#401 id=401 data-nosnippet>401</a>        .queue
+<a href=#402 id=402 data-nosnippet>402</a>        .write_buffer(buffer, <span class="number">0</span>, bytemuck::bytes_of(<span class="kw-2">&amp;</span>frame));
+<a href=#403 id=403 data-nosnippet>403</a>    <span class="prelude-val">Ok</span>(())
+<a href=#404 id=404 data-nosnippet>404</a>}
+<a href=#405 id=405 data-nosnippet>405</a>
+<a href=#406 id=406 data-nosnippet>406</a><span class="doccomment">/// Draws the navigation HUD at the end of the translucent pass.
+<a href=#407 id=407 data-nosnippet>407</a></span><span class="kw">pub fn </span>draw&lt;<span class="lifetime">'w</span>&gt;(pass: <span class="kw-2">&amp;mut </span>TrackedRenderPass&lt;<span class="lifetime">'w</span>&gt;, world: <span class="kw-2">&amp;</span><span class="lifetime">'w </span>World) {
+<a href=#408 id=408 data-nosnippet>408</a>    <span class="kw">let </span><span class="prelude-val">Some</span>((Initialized(NavigationHudPipeline(pipeline)), gpu)) = world
+<a href=#409 id=409 data-nosnippet>409</a>        .resources
+<a href=#410 id=410 data-nosnippet>410</a>        .query::&lt;(<span class="kw-2">&amp;</span>Eventually&lt;NavigationHudPipeline&gt;, <span class="kw-2">&amp;</span>NavigationHudGpu)&gt;()
+<a href=#411 id=411 data-nosnippet>411</a>    <span class="kw">else </span>{
+<a href=#412 id=412 data-nosnippet>412</a>        <span class="kw">return</span>;
+<a href=#413 id=413 data-nosnippet>413</a>    };
+<a href=#414 id=414 data-nosnippet>414</a>    <span class="comment">// Checked here as well as when queueing: a view drawn without queueing must not inherit
+<a href=#415 id=415 data-nosnippet>415</a>    // the answer of the view queued before it.
+<a href=#416 id=416 data-nosnippet>416</a>    </span><span class="kw">let </span>drawn = gpu.drawn &amp;&amp; shown_in_current_view(world);
+<a href=#417 id=417 data-nosnippet>417</a>    <span class="kw">let </span><span class="prelude-val">Some</span>((<span class="kw">_</span>, bind_group)) = gpu.frame.as_ref().filter(|<span class="kw">_</span>| drawn) <span class="kw">else </span>{
+<a href=#418 id=418 data-nosnippet>418</a>        <span class="kw">return</span>;
+<a href=#419 id=419 data-nosnippet>419</a>    };
+<a href=#420 id=420 data-nosnippet>420</a>    pass.set_pipeline(pipeline);
+<a href=#421 id=421 data-nosnippet>421</a>    pass.set_bind_group(<span class="number">0</span>, bind_group, <span class="kw-2">&amp;</span>[]);
+<a href=#422 id=422 data-nosnippet>422</a>    pass.draw(<span class="number">0</span>..gpu.vertex_count, <span class="number">0</span>..<span class="number">1</span>);
+<a href=#423 id=423 data-nosnippet>423</a>}
 </code></pre></div></section></main></body></html>

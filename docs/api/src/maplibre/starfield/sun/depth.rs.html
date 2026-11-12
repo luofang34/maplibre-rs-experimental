@@ -84,28 +84,34 @@
 <a href=#84 id=84 data-nosnippet>84</a>    }
 <a href=#85 id=85 data-nosnippet>85</a>}
 <a href=#86 id=86 data-nosnippet>86</a>
-<a href=#87 id=87 data-nosnippet>87</a><span class="doccomment">/// Copies the depth the main pass left, while a sun is drawn.
-<a href=#88 id=88 data-nosnippet>88</a></span><span class="kw">pub struct </span>SunDepthCopyNode;
-<a href=#89 id=89 data-nosnippet>89</a>
-<a href=#90 id=90 data-nosnippet>90</a><span class="kw">impl </span>Node <span class="kw">for </span>SunDepthCopyNode {
-<a href=#91 id=91 data-nosnippet>91</a>    <span class="kw">fn </span>run(<span class="kw-2">&amp;</span><span class="self">self</span>, render_context: <span class="kw-2">&amp;mut </span>RenderContext, state: <span class="kw-2">&amp;</span>RenderResources, world: <span class="kw-2">&amp;</span>World) {
-<a href=#92 id=92 data-nosnippet>92</a>        <span class="kw">let </span>drawn = world
-<a href=#93 id=93 data-nosnippet>93</a>            .resources
-<a href=#94 id=94 data-nosnippet>94</a>            .get::&lt;<span class="kw">super</span>::SunGpu&gt;()
-<a href=#95 id=95 data-nosnippet>95</a>            .is_some_and(|gpu| gpu.drawable().is_some());
-<a href=#96 id=96 data-nosnippet>96</a>        <span class="kw">let </span>(<span class="prelude-val">Some</span>(Initialized(depth)), Initialized(source), <span class="bool-val">true</span>) = (
-<a href=#97 id=97 data-nosnippet>97</a>            world.resources.get::&lt;Eventually&lt;SunDepth&gt;&gt;(),
-<a href=#98 id=98 data-nosnippet>98</a>            <span class="kw-2">&amp;</span>state.depth_texture,
-<a href=#99 id=99 data-nosnippet>99</a>            drawn,
-<a href=#100 id=100 data-nosnippet>100</a>        ) <span class="kw">else </span>{
-<a href=#101 id=101 data-nosnippet>101</a>            <span class="kw">return</span>;
-<a href=#102 id=102 data-nosnippet>102</a>        };
-<a href=#103 id=103 data-nosnippet>103</a>        depth.copy.copy(
-<a href=#104 id=104 data-nosnippet>104</a>            render_context.device,
-<a href=#105 id=105 data-nosnippet>105</a>            <span class="kw-2">&amp;mut </span>render_context.command_encoder,
-<a href=#106 id=106 data-nosnippet>106</a>            <span class="kw-2">&amp;</span>source.texture,
-<a href=#107 id=107 data-nosnippet>107</a>            <span class="kw-2">&amp;</span>depth.view,
-<a href=#108 id=108 data-nosnippet>108</a>        );
-<a href=#109 id=109 data-nosnippet>109</a>    }
-<a href=#110 id=110 data-nosnippet>110</a>}
+<a href=#87 id=87 data-nosnippet>87</a><span class="kw">impl </span>Drop <span class="kw">for </span>SunDepth {
+<a href=#88 id=88 data-nosnippet>88</a>    <span class="kw">fn </span>drop(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
+<a href=#89 id=89 data-nosnippet>89</a>        <span class="self">self</span>.texture.destroy();
+<a href=#90 id=90 data-nosnippet>90</a>    }
+<a href=#91 id=91 data-nosnippet>91</a>}
+<a href=#92 id=92 data-nosnippet>92</a>
+<a href=#93 id=93 data-nosnippet>93</a><span class="doccomment">/// Copies the depth the main pass left, while a sun is drawn.
+<a href=#94 id=94 data-nosnippet>94</a></span><span class="kw">pub struct </span>SunDepthCopyNode;
+<a href=#95 id=95 data-nosnippet>95</a>
+<a href=#96 id=96 data-nosnippet>96</a><span class="kw">impl </span>Node <span class="kw">for </span>SunDepthCopyNode {
+<a href=#97 id=97 data-nosnippet>97</a>    <span class="kw">fn </span>run(<span class="kw-2">&amp;</span><span class="self">self</span>, render_context: <span class="kw-2">&amp;mut </span>RenderContext, state: <span class="kw-2">&amp;</span>RenderResources, world: <span class="kw-2">&amp;</span>World) {
+<a href=#98 id=98 data-nosnippet>98</a>        <span class="kw">let </span>drawn = world
+<a href=#99 id=99 data-nosnippet>99</a>            .resources
+<a href=#100 id=100 data-nosnippet>100</a>            .get::&lt;<span class="kw">super</span>::SunGpu&gt;()
+<a href=#101 id=101 data-nosnippet>101</a>            .is_some_and(|gpu| gpu.drawable().is_some());
+<a href=#102 id=102 data-nosnippet>102</a>        <span class="kw">let </span>(<span class="prelude-val">Some</span>(Initialized(depth)), Initialized(source), <span class="bool-val">true</span>) = (
+<a href=#103 id=103 data-nosnippet>103</a>            world.resources.get::&lt;Eventually&lt;SunDepth&gt;&gt;(),
+<a href=#104 id=104 data-nosnippet>104</a>            <span class="kw-2">&amp;</span>state.depth_texture,
+<a href=#105 id=105 data-nosnippet>105</a>            drawn,
+<a href=#106 id=106 data-nosnippet>106</a>        ) <span class="kw">else </span>{
+<a href=#107 id=107 data-nosnippet>107</a>            <span class="kw">return</span>;
+<a href=#108 id=108 data-nosnippet>108</a>        };
+<a href=#109 id=109 data-nosnippet>109</a>        depth.copy.copy(
+<a href=#110 id=110 data-nosnippet>110</a>            render_context.device,
+<a href=#111 id=111 data-nosnippet>111</a>            <span class="kw-2">&amp;mut </span>render_context.command_encoder,
+<a href=#112 id=112 data-nosnippet>112</a>            <span class="kw-2">&amp;</span>source.texture,
+<a href=#113 id=113 data-nosnippet>113</a>            <span class="kw-2">&amp;</span>depth.view,
+<a href=#114 id=114 data-nosnippet>114</a>        );
+<a href=#115 id=115 data-nosnippet>115</a>    }
+<a href=#116 id=116 data-nosnippet>116</a>}
 </code></pre></div></section></main></body></html>

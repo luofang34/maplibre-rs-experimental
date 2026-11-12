@@ -243,7 +243,7 @@
 <a href=#243 id=243 data-nosnippet>243</a>    <span class="doccomment">/// Registers a new lightweight viewport slot owning its own `(width, height)` attachments,
 <a href=#244 id=244 data-nosnippet>244</a>    /// LOD history, and optional overlay / depth-probe state.
 <a href=#245 id=245 data-nosnippet>245</a>    </span><span class="kw">pub fn </span>register_view_slot(<span class="kw-2">&amp;mut </span><span class="self">self</span>, config: ViewSlotConfig) -&gt; ViewSlotId {
-<a href=#246 id=246 data-nosnippet>246</a>        <span class="kw">let </span>surface = Surface::from_headless_size(
+<a href=#246 id=246 data-nosnippet>246</a>        <span class="kw">let </span>surface = Surface::from_slot_size(
 <a href=#247 id=247 data-nosnippet>247</a>            <span class="kw-2">&amp;</span><span class="self">self</span>.map_context.renderer.device,
 <a href=#248 id=248 data-nosnippet>248</a>            <span class="kw-2">&amp;</span><span class="self">self</span>.map_context.renderer.adapter,
 <a href=#249 id=249 data-nosnippet>249</a>            config.size,

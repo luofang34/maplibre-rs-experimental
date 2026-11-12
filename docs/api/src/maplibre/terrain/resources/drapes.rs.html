@@ -22,8 +22,8 @@
 <a href=#22 id=22 data-nosnippet>22</a>/// time the drape is redrawn; the texture's own view spans every level, which an attachment
 <a href=#23 id=23 data-nosnippet>23</a>/// may not.
 <a href=#24 id=24 data-nosnippet>24</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>DrapeTexture {
-<a href=#25 id=25 data-nosnippet>25</a>    texture: Texture,
-<a href=#26 id=26 data-nosnippet>26</a>    top_level: wgpu::TextureView,
+<a href=#25 id=25 data-nosnippet>25</a>    top_level: wgpu::TextureView,
+<a href=#26 id=26 data-nosnippet>26</a>    texture: Texture,
 <a href=#27 id=27 data-nosnippet>27</a>}
 <a href=#28 id=28 data-nosnippet>28</a>
 <a href=#29 id=29 data-nosnippet>29</a><span class="kw">impl </span>DrapeTexture {
@@ -34,7 +34,7 @@
 <a href=#34 id=34 data-nosnippet>34</a>            mip_level_count: <span class="prelude-val">Some</span>(<span class="number">1</span>),
 <a href=#35 id=35 data-nosnippet>35</a>            ..Default::default()
 <a href=#36 id=36 data-nosnippet>36</a>        });
-<a href=#37 id=37 data-nosnippet>37</a>        <span class="self">Self </span>{ texture, top_level }
+<a href=#37 id=37 data-nosnippet>37</a>        <span class="self">Self </span>{ top_level, texture }
 <a href=#38 id=38 data-nosnippet>38</a>    }
 <a href=#39 id=39 data-nosnippet>39</a>}
 <a href=#40 id=40 data-nosnippet>40</a>

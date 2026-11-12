@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["allocate_dem_texture","write_dem_pixels"],"struct":["GpuDemEntry","GpuDemPool"]};
+window.SIDEBAR_ITEMS = {"constant":["MAX_GPU_DEM_TEXTURES"],"fn":["allocate_dem_texture","write_dem_pixels"],"struct":["GpuDemEntry","GpuDemPool"]};

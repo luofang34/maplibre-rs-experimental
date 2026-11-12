@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["DemTexture"]};
+window.SIDEBAR_ITEMS = {"constant":["MAX_TERRAIN_DEM_TEXTURES"],"fn":["next_dem_tick"],"static":["DEM_TOUCH_TICK"],"struct":["DemTexture"]};
