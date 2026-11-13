@@ -151,12 +151,21 @@ async fn feature_state_only_schedules_worker_retry_when_dependent_paint_store_is
             disposition: RequestDisposition::Complete,
         },
     );
+    let keeps_a_feature = map
+        .world()
+        .tiles
+        .query::<&TileFeaturePaintComponent>(tile())
+        .is_some_and(|store| {
+            store
+                .committed
+                .values()
+                .chain(store.pending.values())
+                .flatten()
+                .any(|entry| entry.raw_id.is_some() || !entry.properties.is_empty())
+        });
     assert!(
-        map.world()
-            .tiles
-            .query::<&TileFeaturePaintComponent>(tile())
-            .is_none(),
-        "constant-paint layers do not allocate a TileFeaturePaintComponent"
+        !keeps_a_feature,
+        "constant-paint layers keep slot kinds at most, never a feature's id or properties"
     );
 
     let target = FeatureStateTarget::geojson("parks");
@@ -225,4 +234,43 @@ async fn editing_one_style_layer_leaves_other_vector_entries_revisions_untouched
         top_before,
         "edited style layer must bump its content_revision"
     );
+}
+
+#[tokio::test]
+async fn recolouring_a_constant_fill_beside_its_outline_keeps_the_tile() {
+    let mut map = vector_map(json!({
+        "version": 8,
+        "center": [0.0, 0.0],
+        "zoom": 0.0,
+        "sources": {
+            "parks": {
+                "type": "geojson",
+                "data": {
+                    "type": "FeatureCollection",
+                    "features": [world_box_feature(json!({"kind": "park"}))]
+                }
+            }
+        },
+        "layers": [
+            {"id": "bg", "type": "background", "paint": {"background-color": "#000000"}},
+            {"id": "park-fill", "type": "fill", "source": "parks",
+             "paint": {"fill-color": "#ff0000", "fill-outline-color": "#0000ff"}}
+        ]
+    }))
+    .await;
+    assert_eq!(center_rgba(&map), [255, 0, 0, 255]);
+
+    let change = map
+        .mutate_style(|style| style.set_paint_property("park-fill", "fill-color", json!("#00ff00")))
+        .expect("constant paint update");
+    assert!(
+        !change.redraw_tiles,
+        "a constant fill colour is rewritten in place"
+    );
+    map.run_frame().expect("in-place paint frame");
+    assert!(
+        !tile_retry::waiting(map.world(), tile(), RequestKind::Vector),
+        "the fill and its outline are told apart without asking a worker for the tile again"
+    );
+    assert_eq!(center_rgba(&map), [0, 255, 0, 255]);
 }
