@@ -3,26 +3,17 @@
 use serde_json::{json, Value};
 
 use crate::style::{
-    expression::{GEOMETRY_PROPERTY, GEOMETRY_TYPE_PROPERTY, ID_PROPERTY},
+    expression::{
+        layer_reads_geometry, layer_reads_identity, GEOMETRY_PROPERTY, GEOMETRY_TYPE_PROPERTY,
+        ID_PROPERTY,
+    },
     filter::GeometryType,
     layer::StyleLayer,
 };
 
-/// Whether the layer's paint or layout reads the feature's id or geometry type.
-pub(crate) fn reads_identity(layer: &StyleLayer) -> bool {
-    serde_json::to_value(&layer.paint)
-        .is_ok_and(|paint| crate::style::expression::reads_identity(&paint))
-}
-
 /// Whether the layer reads anything the annotated GeoJSON adds to a feature's properties.
 pub(super) fn reads_feature_inputs(layer: &StyleLayer) -> bool {
-    reads_geometry(layer) || reads_identity(layer)
-}
-
-/// Whether the layer has an expression that reads the feature's geometry.
-pub(crate) fn reads_geometry(layer: &StyleLayer) -> bool {
-    serde_json::to_string(layer)
-        .is_ok_and(|text| text.contains("\"within\"") || text.contains("\"distance\""))
+    layer_reads_geometry(layer) || layer_reads_identity(layer)
 }
 
 /// The GeoJSON with each feature's geometry, id and geometry type also written into its

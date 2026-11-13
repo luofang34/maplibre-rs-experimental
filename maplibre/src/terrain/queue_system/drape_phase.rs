@@ -1,9 +1,7 @@
 //! Encodes the source layers and masks of terrain drape textures.
 use crate::{
     coords::{Zoom, TILE_SIZE},
-    hillshade::render_commands::DrawDemTiles,
     projection::renderer_data::tile_mercator_coordinates,
-    raster::render_commands::DrawRasterTiles,
     render::{
         eventually::{Eventually, Eventually::Initialized},
         render_commands::DrawMasks,
@@ -21,6 +19,8 @@ use crate::{
     },
     vector::render_commands::{DrawLineTiles, DrawVectorTiles},
 };
+#[cfg(feature = "raster")]
+use crate::{hillshade::render_commands::DrawDemTiles, raster::render_commands::DrawRasterTiles};
 type TargetSlots = Vec<Option<usize>>;
 /// Instance metadata placing each redrawn target's source shapes inside its drape texture.
 ///
@@ -138,6 +138,7 @@ pub(super) fn build_drape_phase(
                     run: None,
                 });
             }
+            #[cfg(feature = "raster")]
             for (id, index, dem) in &shape.raster_layers {
                 let draw_function: Box<dyn Draw<LayerItem>> = if *dem {
                     Box::new(DrawState::<LayerItem, DrawDemTiles>::new())

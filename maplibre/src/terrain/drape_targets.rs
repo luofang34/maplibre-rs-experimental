@@ -2,9 +2,7 @@
 
 use crate::{
     coords::WorldTileCoords,
-    hillshade::dem_layer_kind,
-    io::tile_sources::{TileKind, RASTER_LAYER_TYPES},
-    raster::{resource::RasterResources, RasterSourceId},
+    io::tile_sources::{RasterSourceId, TileKind},
     render::{
         eventually::{Eventually, Eventually::Initialized},
         tile_view_pattern::{
@@ -14,6 +12,11 @@ use crate::{
     style::Style,
     tcs::world::World,
     vector::VectorBufferPool,
+};
+#[cfg(feature = "raster")]
+use crate::{
+    hillshade::dem_layer_kind, io::tile_sources::RASTER_LAYER_TYPES,
+    raster::resource::RasterResources,
 };
 
 const DRAPEABLE_LAYER_TYPES: [&str; 5] = ["fill", "line", "raster", "hillshade", "color-relief"];
@@ -54,6 +57,7 @@ pub(crate) struct TargetSpec {
     pub(crate) shapes: Vec<ShapeSpec>,
     /// Raster sources that have tiles in the view but none over this terrain tile, which their
     /// layers therefore do not wait for.
+    #[cfg_attr(not(feature = "raster"), allow(dead_code))]
     pub(crate) absent_sources: Vec<RasterSourceId>,
 }
 
@@ -135,10 +139,18 @@ pub(crate) fn select_targets_as(
 /// Whether a raster source's request for a tile completed without an image (not found,
 /// failed, or undecodable), so the tile will not arrive and must not be waited for.
 fn source_tile_missing(source: &RasterSourceId, coords: WorldTileCoords, world: &World) -> bool {
-    world
-        .tiles
-        .query::<&crate::raster::RasterLayersDataComponent>(coords)
-        .is_some_and(|component| component.source_is_missing(source))
+    #[cfg(feature = "raster")]
+    {
+        world
+            .tiles
+            .query::<&crate::raster::RasterLayersDataComponent>(coords)
+            .is_some_and(|component| component.source_is_missing(source))
+    }
+    #[cfg(not(feature = "raster"))]
+    {
+        let _ = (source, coords, world);
+        false
+    }
 }
 
 /// The tiles of one raster source drawn into a terrain tile's drape.
@@ -270,7 +282,9 @@ pub(crate) fn collect_layer_specs(
     zoom: f64,
 ) -> Vec<TargetSpec> {
     let vector = world.resources.get::<Eventually<VectorBufferPool>>();
+    #[cfg(feature = "raster")]
     let raster = world.resources.get::<Eventually<RasterResources>>();
+    #[cfg(feature = "raster")]
     let raster_layers: Vec<_> = style
         .layers
         .iter()
@@ -289,6 +303,8 @@ pub(crate) fn collect_layer_specs(
             ))
         })
         .collect();
+    #[cfg(not(feature = "raster"))]
+    let _ = style;
     targets
         .into_iter()
         .map(|(coords, shapes)| TargetSpec {
@@ -302,11 +318,14 @@ pub(crate) fn collect_layer_specs(
                 .into_iter()
                 .filter(|shape| !shape.absent)
                 .map(|shape| {
+                    #[cfg(feature = "raster")]
                     let raster_layers = raster_layers.iter()
                         .filter(|(_, _, source, _)| shape.raster_source.as_ref() == Some(source))
                         .filter(|(id, _, _, _)| matches!(raster, Some(Initialized(resources)) if resources.layer_texture(id, &shape.coords).is_some()))
                         .map(|(id, index, _, dem)| (id.clone(), *index, *dem))
                         .collect();
+                    #[cfg(not(feature = "raster"))]
+                    let raster_layers = Vec::new();
                     ShapeSpec {
                         view_complete: shape.view_complete,
                         source: shape.coords,

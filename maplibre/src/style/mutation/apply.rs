@@ -7,7 +7,6 @@ use serde_json::{Map, Value};
 use super::{StyleChange, StyleMutationError};
 use crate::{
     context::MapContext,
-    geojson::update::GeoJsonVersions,
     io::tile_retry::{self, RequestKind},
     style::{
         feature_state::{FeatureId, FeatureStateTarget},
@@ -19,13 +18,14 @@ use crate::{
 impl MapContext {
     /// Applies a style change: updates resident GPU buffers in-place for layer order, zoom bounds,
     /// visibility hiding, and paint edits, and fetches loaded vector tiles again only when geometry,
-    /// filtering, or layout changed. GeoJSON data the change replaced, as with
-    /// [`Style::set_geojson_data`], refreshes the tiles it changed in by itself.
+    /// filtering, or layout changed. GeoJSON data the change replaced, when the `geojson` feature
+    /// is enabled, refreshes the tiles it changed in by itself.
     pub fn mutate_style(
         &mut self,
         apply: impl FnOnce(&mut Style) -> Result<StyleChange, StyleMutationError>,
     ) -> Result<StyleChange, StyleMutationError> {
-        let geojson = GeoJsonVersions::of(&self.style);
+        #[cfg(feature = "geojson")]
+        let geojson = crate::geojson::update::GeoJsonVersions::of(&self.style);
         let change = apply(&mut self.style)?;
         crate::render::frame_signals::mark_dirty(&mut self.world);
         if !change.removed_layers.is_empty() {
@@ -37,13 +37,17 @@ impl MapContext {
         if change.redraw_tiles {
             tile_retry::refresh(&mut self.world, RequestKind::Vector);
         } else {
+            #[cfg(feature = "geojson")]
             geojson.refresh_changed(&self.style, &mut self.world);
         }
-        for name in &change.removed_raster_sources {
-            crate::raster::forget_source(&mut self.world, name);
-        }
-        for name in &change.reloaded_image_sources {
-            crate::raster::image_source::reload(&mut self.world, &self.style, name);
+        #[cfg(feature = "raster")]
+        {
+            for name in &change.removed_raster_sources {
+                crate::raster::forget_source(&mut self.world, name);
+            }
+            for name in &change.reloaded_image_sources {
+                crate::raster::image_source::reload(&mut self.world, &self.style, name);
+            }
         }
         Ok(change)
     }

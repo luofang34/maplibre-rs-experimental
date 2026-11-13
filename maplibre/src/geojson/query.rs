@@ -170,16 +170,6 @@ impl MapContext {
     ) -> Result<Vec<SourceFeature>, SourceQueryError> {
         self.style.query_source_features(source_name, options)
     }
-
-    /// Placed symbols under a point or box, topmost first; see
-    /// [`crate::sdf::query::query_rendered_symbols_in`].
-    pub fn query_rendered_symbols(
-        &self,
-        geometry: crate::sdf::query::QueryGeometry,
-        options: &crate::sdf::query::QueryOptions,
-    ) -> Result<Vec<crate::sdf::query::RenderedSymbol>, crate::sdf::query::QueryError> {
-        crate::sdf::query::query_rendered_symbols_in(&self.world, &self.style, geometry, options)
-    }
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

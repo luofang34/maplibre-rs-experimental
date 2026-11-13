@@ -143,5 +143,16 @@ fn find_zoom_curve(expression: &Expression) -> Result<Option<&Expression>, Parse
     Ok(result)
 }
 
+/// Whether `layer`'s paint or layout reads the feature's id or geometry type.
+pub(crate) fn layer_reads_identity(layer: &super::layer::StyleLayer) -> bool {
+    serde_json::to_value(&layer.paint).is_ok_and(|paint| reads_identity(&paint))
+}
+
+/// Whether `layer` has an expression that reads the feature's geometry.
+pub(crate) fn layer_reads_geometry(layer: &super::layer::StyleLayer) -> bool {
+    serde_json::to_string(layer)
+        .is_ok_and(|text| text.contains("\"within\"") || text.contains("\"distance\""))
+}
+
 #[cfg(test)]
 mod tests;

@@ -14,6 +14,8 @@ use std::{collections::HashSet, hash::BuildHasher};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
+#[cfg(feature = "raster")]
+use crate::raster::resource::RasterResources;
 use crate::{
     context::MapContext,
     coords::WorldTileCoords,
@@ -21,7 +23,6 @@ use crate::{
         tile_backpressure::is_settled,
         tile_sources::{source_max_zoom, TileKind},
     },
-    raster::resource::RasterResources,
     render::{
         eventually::{Eventually, Eventually::Initialized},
         memory_budget::{MemoryBudget, MemoryPressure},
@@ -359,6 +360,7 @@ fn drop_gpu_data(world: &mut World, evicted: &[WorldTileCoords]) {
             pool.remove_tile(*coords);
         }
     }
+    #[cfg(feature = "raster")]
     if let Some(Initialized(raster)) = world.resources.get_mut::<Eventually<RasterResources>>() {
         for coords in evicted {
             raster.remove_texture(*coords);

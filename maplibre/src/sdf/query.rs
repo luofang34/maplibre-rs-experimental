@@ -273,5 +273,16 @@ pub fn query_rendered_symbols_in(
         .collect())
 }
 
+impl crate::context::MapContext {
+    /// Placed symbols under a point or box, topmost first; see [`query_rendered_symbols_in`].
+    pub fn query_rendered_symbols(
+        &self,
+        geometry: QueryGeometry,
+        options: &QueryOptions,
+    ) -> Result<Vec<RenderedSymbol>, QueryError> {
+        query_rendered_symbols_in(&self.world, &self.style, geometry, options)
+    }
+}
+
 #[cfg(test)]
 mod tests;

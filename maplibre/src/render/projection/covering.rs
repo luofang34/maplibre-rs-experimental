@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use super::{globe_camera_for_view, ProjectionStateError};
 use crate::{
     coords::{ViewRegion, WorldTileCoords, ZoomLevel, TILE_SIZE},
-    io::tile_sources::{covering_zoom, source_layer_groups, TileKind},
+    io::tile_sources::{covering_zoom, source_layer_groups, RasterSourceId, TileKind},
     projection::{
         globe::{
             covering::TileElevationRange,
@@ -20,7 +20,6 @@ use crate::{
         },
         ProjectionType,
     },
-    raster::RasterSourceId,
     render::{
         eye_covering::FrameLodHistory,
         tile_view_pattern::DEFAULT_TILE_SIZE,

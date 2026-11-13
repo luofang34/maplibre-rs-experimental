@@ -13,8 +13,7 @@ categories.workspace = true
 authors.workspace = true
 
 [features]
-# FIXME tcs: Remove raster from default
-default = ["native-io", "raster", "mlt", "experimental"]
+default = ["native-io", "raster", "geojson", "mlt"]
 # Enables the default native Tokio task scheduler and Reqwest HTTP transport.
 # Disable (`default-features = false`) to embed `maplibre` in pure-Rust apps with a custom runtime/loader.
 native-io = [
@@ -30,9 +29,9 @@ web-webgl = ["wgpu/webgl"]
 trace = ["tracing-subscriber", "tracing-tracy"]
 thread-safe-futures = []
 embed-static-tiles = ["maplibre-build-tools/sqlite"]
-headless = ["png", "raster"]
+headless = ["png"]
 raster = []
-geojson = []
+geojson = ["geozero/with-geojson"]
 # Reads MapLibre Tile (MLT) vector tiles. Its encoder dependencies reach `getrandom` 0.1,
 # which has no visionOS support, so a visionOS build turns it off.
 mlt = ["dep:mlt-core"]
@@ -72,7 +71,7 @@ cgmath.workspace = true
 geo.workspace = true
 geo-types.workspace = true
 rstar.workspace = true
-geozero = { workspace = true, features = ["with-geojson"] }
+geozero.workspace = true
 tile-grid.workspace = true
 mlt-core = { workspace = true, optional = true }
 unicode-normalization.workspace = true
@@ -118,6 +117,7 @@ moxcms = "0.9.1"
 prost = "0.14.4"
 
 [dev-dependencies]
+geozero = { workspace = true, features = ["with-geojson"] }
 # Shaders stay WGSL; a native render node gets them through naga's own backends.
 naga = { workspace = true, features = ["msl-out", "spv-out"] }
 

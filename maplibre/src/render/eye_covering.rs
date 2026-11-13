@@ -8,8 +8,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
     coords::{ViewRegion, WorldTileCoords, ZoomLevel},
+    io::tile_sources::RasterSourceId,
     projection::lod_history::LodHistory,
-    raster::RasterSourceId,
     render::{
         projection::{raster_source_regions, view_region_for_projection, ProjectionStateError},
         view_state::{ViewState, ViewStatePadding},
@@ -58,9 +58,11 @@ pub(crate) struct MultiViewExtractCovering {
     pub(crate) active: bool,
     pub(crate) vector_tiles: Vec<WorldTileCoords>,
     pub(crate) max_view_level: u8,
+    #[cfg_attr(not(feature = "raster"), allow(dead_code))]
     pub(crate) raster_regions: RasterCoverings,
     pub(crate) terrain_tiles: Vec<WorldTileCoords>,
     pub(crate) skipped_wanted_vector: FxHashSet<WorldTileCoords>,
+    #[cfg_attr(not(feature = "raster"), allow(dead_code))]
     pub(crate) skipped_wanted_raster: FxHashSet<WorldTileCoords>,
     pub(crate) skipped_wanted_dem: FxHashSet<WorldTileCoords>,
 }

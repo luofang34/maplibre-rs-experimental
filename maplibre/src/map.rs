@@ -9,10 +9,6 @@ use thiserror::Error;
 use crate::{
     context::MapContext,
     environment::Environment,
-    geojson::{
-        query::{SourceFeature, SourceQueryError, SourceQueryOptions},
-        update::{GeoJsonDiff, SourceUpdateError},
-    },
     io::{tile_json::resolve_tile_json_sources, tile_retry::RequestAttempts},
     kernel::Kernel,
     plugin::Plugin,
@@ -26,11 +22,18 @@ use crate::{
     sdf::query::{QueryError, QueryGeometry, QueryOptions, RenderedSymbol},
     style::{
         mutation::{StyleChange, StyleMutationError},
-        source::GeoJsonData,
         Style,
     },
     tcs::world::World,
     window::{HeadedMapWindow, MapWindow, MapWindowConfig, WindowCreateError},
+};
+#[cfg(feature = "geojson")]
+use crate::{
+    geojson::{
+        query::{SourceFeature, SourceQueryError, SourceQueryOptions},
+        update::{GeoJsonDiff, SourceUpdateError},
+    },
+    style::source::GeoJsonData,
 };
 
 /// A window, renderer or scheduled update failed, or the map is in the wrong lifecycle state.
@@ -55,9 +58,11 @@ pub enum MapError {
     #[error("executing map stage failed")]
     StageError(#[from] StageError),
     /// A source's data could not be replaced or edited; the source is unchanged.
+    #[cfg(feature = "geojson")]
     #[error("updating source data failed")]
     SourceUpdate(#[from] SourceUpdateError),
     /// A source's features could not be read.
+    #[cfg(feature = "geojson")]
     #[error("querying source features failed")]
     SourceQuery(#[from] SourceQueryError),
     /// A rendered-feature query was rejected.
@@ -276,6 +281,7 @@ where
     }
 
     /// Replaces the data of a GeoJSON source, before or after the renderer is initialized.
+    #[cfg(feature = "geojson")]
     pub fn set_geojson_data(
         &mut self,
         source_name: &str,
@@ -291,6 +297,7 @@ where
     }
 
     /// Adds, changes and removes features of an inline GeoJSON source.
+    #[cfg(feature = "geojson")]
     pub fn update_geojson_data(
         &mut self,
         source_name: &str,
@@ -396,6 +403,7 @@ where
 
     /// The features of an inline GeoJSON source, before or after the renderer is initialized;
     /// see [`crate::style::Style::query_source_features`].
+    #[cfg(feature = "geojson")]
     pub fn query_source_features(
         &self,
         source_name: &str,

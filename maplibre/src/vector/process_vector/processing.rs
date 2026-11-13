@@ -32,10 +32,10 @@ pub(super) fn process_layer<T: VectorTransferables, C: Context>(
             Cow::Borrowed(&empty_layer)
         }
     };
-    if crate::geojson::reads_geometry(style) && !layer.features.is_empty() {
+    if crate::style::expression::layer_reads_geometry(style) && !layer.features.is_empty() {
         super::geometry_tags::add_geometry_tags(layer.to_mut(), request.coords);
     }
-    if crate::geojson::reads_identity(style) && !layer.features.is_empty() {
+    if crate::style::expression::layer_reads_identity(style) && !layer.features.is_empty() {
         super::geometry_tags::add_identity_tags(layer.to_mut());
     }
     if matches!(style.paint, Some(LayerPaint::FillExtrusion(_)))

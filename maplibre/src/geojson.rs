@@ -27,7 +27,6 @@ use crate::{
 mod cluster;
 mod geometry_property;
 mod tessellator;
-pub(crate) use geometry_property::{reads_geometry, reads_identity};
 
 /// Failure reported while preparing or delivering GeoJSON tile geometry.
 #[derive(Error, Debug)]

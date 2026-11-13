@@ -2,7 +2,7 @@
 
 use crate::{
     context::MapContext,
-    raster::RasterSourceId,
+    io::tile_sources::RasterSourceId,
     render::{
         eventually::{Eventually, Eventually::Initialized},
         memory_budget::{FrameUploads, UploadKind},

@@ -2,10 +2,9 @@
 
 use thiserror::Error;
 
-use crate::{
-    coords::WorldTileCoords, geojson::ProcessGeoJsonError, schedule::StageError,
-    vector::ProcessVectorError,
-};
+#[cfg(feature = "geojson")]
+use crate::geojson::ProcessGeoJsonError;
+use crate::{coords::WorldTileCoords, schedule::StageError, vector::ProcessVectorError};
 
 /// Failure while processing or rendering data through a [`super::HeadlessMap`].
 #[derive(Debug, Error)]
@@ -30,6 +29,7 @@ pub enum HeadlessMapOperationError {
         source: ProcessVectorError,
     },
     /// GeoJSON source processing failed.
+    #[cfg(feature = "geojson")]
     #[error("headless GeoJSON source processing failed")]
     GeoJson {
         /// Underlying GeoJSON processor error.

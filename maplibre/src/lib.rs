@@ -52,6 +52,7 @@ pub mod plugin;
 pub mod tcs;
 
 pub mod debug;
+#[cfg(feature = "geojson")]
 pub mod geojson;
 pub mod heatmap;
 pub mod hillshade;
@@ -59,6 +60,7 @@ pub mod hud;
 pub mod navigation;
 #[cfg(feature = "experimental")]
 pub mod overlay;
+#[cfg(feature = "raster")]
 pub mod raster;
 pub mod vector;
 

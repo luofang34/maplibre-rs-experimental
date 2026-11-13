@@ -6,9 +6,10 @@
 
 use std::{collections::BTreeMap, ops::Deref, sync::Arc};
 
+#[cfg(feature = "geojson")]
+use crate::geojson::{process_geojson_features, GeoJsonTileRequest};
 use crate::{
     coords::WorldTileCoords,
-    geojson::{process_geojson_features, GeoJsonTileRequest},
     headless::map::{HeadlessContext, HeadlessMapOperationError},
     io::apc::Message,
     projection::ProjectionType,
@@ -255,6 +256,7 @@ fn process_tile_layers_with_state(
 }
 
 /// Tessellates inline GeoJSON for the style layers drawing a source.
+#[cfg(feature = "geojson")]
 pub fn process_geojson_layers(
     geojson: &serde_json::Value,
     source_name: &str,
@@ -275,6 +277,7 @@ pub fn process_geojson_layers(
 /// Tessellates inline GeoJSON for the style layers drawing a source; symbol layers use `atlas`
 /// for their glyphs and sprites, or the bundled fallback when it is `None`; the tile is drawn
 /// magnified to `overscaled_zoom` when that is past its own zoom.
+#[cfg(feature = "geojson")]
 pub fn process_geojson_layers_with_atlas(
     geojson: &serde_json::Value,
     source_name: &str,

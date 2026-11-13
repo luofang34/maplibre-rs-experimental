@@ -84,11 +84,13 @@ impl<E: Environment> Plugin<E> for RenderPlugin {
             RenderStageLabel::Prepare,
             SystemStage::default().with_system(SystemContainer::new(ResourceSystem)),
         )?;
+        let queue_stage =
+            SystemStage::default().with_system(crate::vector::upload_system::upload_system);
+        #[cfg(feature = "raster")]
+        let queue_stage = queue_stage.with_system(crate::raster::upload_system::upload_system);
         schedule.add_stage(
             RenderStageLabel::Queue,
-            SystemStage::default()
-                .with_system(crate::vector::upload_system::upload_system)
-                .with_system(crate::raster::upload_system::upload_system)
+            queue_stage
                 .with_system(tile_view_pattern_system)
                 .with_system(upload_system),
         )?;

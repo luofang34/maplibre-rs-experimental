@@ -5,8 +5,7 @@ use std::marker::PhantomData;
 use super::{coarser_ancestor, HasTile};
 use crate::{
     coords::WorldTileCoords,
-    io::tile_sources::TileKind,
-    raster::RasterSourceId,
+    io::tile_sources::{RasterSourceId, TileKind},
     tcs::{resources::ResourceQuery, world::World},
 };
 

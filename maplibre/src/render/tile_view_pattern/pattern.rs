@@ -7,9 +7,8 @@ use std::{
 
 use crate::{
     coords::{ViewRegion, WorldTileCoords, Zoom, ZoomLevel},
-    io::tile_sources::TileKind,
+    io::tile_sources::{RasterSourceId, TileKind},
     projection::renderer_data::tile_mercator_coordinates,
-    raster::RasterSourceId,
     render::{
         camera::ViewProjection,
         resource::{BackingBufferDescriptor, Queue},
@@ -288,6 +287,7 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
 /// The shown tiles with the loaded descendants their source is fading out drawn over each of
 /// them, as GL JS draws departing tiles over the tile that replaces them until the fade ends;
 /// `None` when nothing under these shapes is departing.
+#[cfg(feature = "raster")]
 fn with_departing<T: HasTile>(
     (availability, source, shapes): (&T, &RasterSourceId, &SourceShapes),
     zoom: Zoom,
@@ -325,6 +325,15 @@ fn with_departing<T: HasTile>(
         );
     }
     any.then_some(SourceShapes::Children(tiles))
+}
+
+#[cfg(not(feature = "raster"))]
+fn with_departing<T: HasTile>(
+    _args: (&T, &RasterSourceId, &SourceShapes),
+    _zoom: Zoom,
+    _world: &World,
+) -> Option<SourceShapes> {
+    None
 }
 
 fn raster_shapes<T: HasTile>(

@@ -1,9 +1,10 @@
 //! Builds the drape targets and terrain draws for the current frame.
 
+#[cfg(feature = "raster")]
+use crate::raster::resource::RasterResources;
 use crate::{
     context::MapContext,
     coords::WorldTileCoords,
-    raster::resource::RasterResources,
     render::{
         eventually::{Eventually, Eventually::Initialized},
         eye_covering::{drawn_covering, EyeInFrame},
@@ -181,6 +182,7 @@ pub fn queue_system(
 /// The GPU content of source tiles, read from the vector pool and the raster textures.
 struct LoadedContent<'a> {
     pool: Option<&'a VectorBufferPool>,
+    #[cfg(feature = "raster")]
     raster: Option<&'a RasterResources>,
     dem: Option<&'a crate::hillshade::HillshadeResources>,
 }
@@ -196,8 +198,16 @@ impl SourceContent for LoadedContent<'_> {
     }
 
     fn raster_revision(&self, coords: WorldTileCoords, layer: &str) -> Option<u64> {
-        self.raster
-            .and_then(|raster| raster.texture_revision(layer, coords))
+        #[cfg(feature = "raster")]
+        {
+            self.raster
+                .and_then(|raster| raster.texture_revision(layer, coords))
+        }
+        #[cfg(not(feature = "raster"))]
+        {
+            let _ = (coords, layer);
+            None
+        }
     }
 
     fn dem_layer_fingerprint(&self, layer: &str) -> Option<u64> {
@@ -211,6 +221,7 @@ fn loaded_content(world: &World) -> LoadedContent<'_> {
             Some(Initialized(pool)) => Some(pool),
             _ => None,
         },
+        #[cfg(feature = "raster")]
         raster: match world.resources.get::<Eventually<RasterResources>>() {
             Some(Initialized(raster)) => Some(raster),
             _ => None,

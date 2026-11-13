@@ -61,10 +61,11 @@ pub use multi_view::{
     CoveringPolicy, MultiViewError, MultiViewFrame, SlotView, ViewSlotConfig, ViewSlotEntry,
     ViewSlotId,
 };
+#[cfg(feature = "geojson")]
+pub use processed::{process_geojson_layers, process_geojson_layers_with_atlas};
 pub use processed::{
-    process_geojson_layers, process_geojson_layers_with_atlas, process_tile_layers,
-    process_tile_layers_for_style, process_tile_layers_with_atlas, ProcessedLayers, SymbolLayer,
-    VectorLayer,
+    process_tile_layers, process_tile_layers_for_style, process_tile_layers_with_atlas,
+    ProcessedLayers, SymbolLayer, VectorLayer,
 };
 pub use terrain_patch::TerrainPatchSnapshot;
 pub use xr::XrFrameError;
@@ -341,6 +342,7 @@ impl HeadlessMap {
     /// Process inline GeoJSON data for the given style layers and tile coordinates.
     ///
     /// Returns tessellated layers ready to be passed to [`Self::render_tile`].
+    #[cfg(feature = "geojson")]
     pub fn process_geojson(
         &mut self,
         geojson_value: &serde_json::Value,

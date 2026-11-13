@@ -94,7 +94,7 @@ where
 {
     fn has_source_tile(
         &self,
-        source: &crate::raster::RasterSourceId,
+        source: &crate::io::tile_sources::RasterSourceId,
         coords: WorldTileCoords,
         world: &World,
     ) -> bool {

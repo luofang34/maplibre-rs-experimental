@@ -7,7 +7,7 @@ pub use sources::{KindSources, QueryHasTile, ViewTileSources};
 
 use crate::{
     coords::{WorldTileCoords, MAX_ZOOM},
-    raster::RasterSourceId,
+    io::tile_sources::RasterSourceId,
     tcs::{pyramid::TilePyramid, world::World},
 };
 

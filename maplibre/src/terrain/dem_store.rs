@@ -6,7 +6,7 @@ use image::RgbaImage;
 
 use crate::{
     coords::WorldTileCoords,
-    raster::RasterSourceId,
+    io::tile_sources::RasterSourceId,
     style::{source::Source, Style},
     tcs::tiles::{TileComponent, Tiles},
     terrain::{

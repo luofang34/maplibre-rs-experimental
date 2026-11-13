@@ -7,7 +7,7 @@ use std::{
 
 use crate::{
     coords::WorldTileCoords,
-    raster::RasterSourceId,
+    io::tile_sources::RasterSourceId,
     render::{resource::Texture, settings::Msaa, upload_queue::UploadQueue},
     terrain::{DemRevision, DemTile, LoadedDem},
 };
@@ -26,7 +26,7 @@ pub struct GpuDemEntry {
 }
 
 /// Canonical GPU elevation texture registry shared by [`TerrainResources`](super::resources::TerrainResources)
-/// and [`RasterResources`](crate::raster::resource::RasterResources).
+/// and `RasterResources`.
 ///
 /// A `raster-dem` source shared by 3D terrain, `hillshade`, and `color-relief` allocates and
 /// uploads each `(source, coords)` DEM texture once on the GPU, updating it in place via
@@ -192,7 +192,7 @@ mod tests {
     use crate::{
         coords::{WorldTileCoords, ZoomLevel},
         headless::create_headless_renderer,
-        raster::RasterSourceId,
+        io::tile_sources::RasterSourceId,
         terrain::{DemTile, LoadedDem},
     };
 

@@ -18,8 +18,7 @@ pub use pattern::{
 
 use crate::{
     coords::{WorldTileCoords, Zoom},
-    io::tile_sources::TileKind,
-    raster::RasterSourceId,
+    io::tile_sources::{RasterSourceId, TileKind},
     render::shaders::ShaderTileMetadata,
 };
 
@@ -166,6 +165,7 @@ impl TileShape {
     }
 
     /// The shape drawn inside `tile`'s mask, over that tile.
+    #[cfg(feature = "raster")]
     fn within(mut self, tile: WorldTileCoords) -> Self {
         self.within = Some(tile);
         self

@@ -19,7 +19,7 @@ path = "src/main.rs"
 async-trait.workspace = true
 cgmath.workspace = true
 geozero.workspace = true
-maplibre = { path = "../maplibre", features = ["headless", "geojson", "thread-safe-futures"] }
+maplibre = { path = "../maplibre", features = ["headless", "raster", "geojson", "thread-safe-futures"] }
 serde_json.workspace = true
 image.workspace = true
 tracing.workspace = true

@@ -7,8 +7,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use super::{CoveringPolicy, SlotState, SlotView, ViewSlotEntry, ViewSlotId};
 use crate::{
     coords::WorldTileCoords,
+    io::tile_sources::RasterSourceId,
     projection::ProjectionType,
-    raster::RasterSourceId,
     render::{
         eye_covering::{
             DrapeView, FrameLodHistory, MultiViewExtractCovering, RasterCoverings, SharedCovering,

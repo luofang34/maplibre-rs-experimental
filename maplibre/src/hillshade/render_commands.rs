@@ -1,8 +1,9 @@
 //! Render commands of the DEM-shaded layers.
 
+#[cfg(feature = "raster")]
+use crate::raster::render_commands::{DrawRasterTile, SetRasterViewBindGroup};
 use crate::{
     hillshade::resources::HillshadeResources,
-    raster::render_commands::{DrawRasterTile, SetRasterViewBindGroup},
     render::{
         eventually::{Eventually, Eventually::Initialized},
         projection::ProjectionGpuResources,
@@ -57,6 +58,7 @@ impl RenderCommand<LayerItem> for SetDemLayerBindGroup {
 }
 
 /// Draws one DEM tile shape with the layer's shading.
+#[cfg(feature = "raster")]
 pub type DrawDemTiles = (
     SetDemPipeline,
     SetRasterViewBindGroup,

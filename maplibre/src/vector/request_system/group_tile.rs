@@ -24,6 +24,7 @@ pub(super) async fn fetch_group_tile<H: HttpClient>(
     refetch: bool,
 ) -> Result<Arc<Tile>, SourceFetchError> {
     let source_tile = group.source_tile(coords);
+    #[cfg(feature = "geojson")]
     if let SourceType::GeoJson(geojson) = &group.source {
         let index = client
             .assets()
@@ -44,6 +45,16 @@ pub(super) async fn fetch_group_tile<H: HttpClient>(
             super::rescale::into_descendant(&mut tile, source_tile, coords);
         }
         return Ok(Arc::new(tile));
+    }
+    #[cfg(not(feature = "geojson"))]
+    if let SourceType::GeoJson(geojson) = &group.source {
+        return Err(fetch_failure(
+            AssetFailure::Terminal(format!(
+                "geojson source {} requires the `geojson` Cargo feature",
+                geojson.name
+            )),
+            &geojson.name,
+        ));
     }
     let Some(url) = group.source.format(&source_tile) else {
         let bytes = client.fetch(&source_tile, &group.source).await?;

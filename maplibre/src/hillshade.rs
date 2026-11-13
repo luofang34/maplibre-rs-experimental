@@ -18,6 +18,7 @@ use crate::{
 };
 
 mod prepare_system;
+#[cfg(feature = "raster")]
 mod queue_system;
 pub mod render_commands;
 mod resource_system;
@@ -44,6 +45,7 @@ impl<E: Environment> Plugin<E> for HillshadePlugin {
         schedule
             .add_system_to_stage(RenderStageLabel::Prepare, resource_system::resource_system)?;
         schedule.add_system_to_stage(RenderStageLabel::Prepare, prepare_system::prepare_system)?;
+        #[cfg(feature = "raster")]
         schedule.add_system_to_stage(RenderStageLabel::Queue, queue_system::queue_system)?;
         Ok(())
     }

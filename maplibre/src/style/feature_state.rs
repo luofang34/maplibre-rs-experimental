@@ -7,9 +7,11 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+#[cfg(feature = "geojson")]
+pub(crate) use sync::resolve_geojson_state_id;
 pub(crate) use sync::{
     extract_feature_state, extract_source_properties, layer_geometry_reads_feature_state,
-    layer_paint_reads_feature_state, resolve_geojson_state_id, sync_arc_properties_feature_state,
+    layer_paint_reads_feature_state, sync_arc_properties_feature_state,
     sync_properties_feature_state, FeatureStateArcMemo,
 };
 

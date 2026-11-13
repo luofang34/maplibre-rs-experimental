@@ -4,7 +4,10 @@ use rustc_hash::FxHashSet;
 
 use crate::{
     coords::WorldTileCoords,
-    io::{tile_backpressure::is_settled, tile_sources::TileKind},
+    io::{
+        tile_backpressure::is_settled,
+        tile_sources::{RasterSourceId, TileKind},
+    },
     style::Style,
     tcs::{tiles::Tiles, world::World},
     terrain::{dem_tile_coords, source::dem_source},
@@ -53,7 +56,7 @@ pub(crate) fn finish_tiles_in_use(
     in_use
 }
 
-fn active_raster_sources(style: &Style) -> Vec<(crate::raster::RasterSourceId, u8)> {
+fn active_raster_sources(style: &Style) -> Vec<(RasterSourceId, u8)> {
     let mut seen = FxHashSet::default();
     let mut out = Vec::new();
     for group in crate::io::tile_sources::source_layer_groups(style, TileKind::Raster) {
@@ -66,7 +69,7 @@ fn active_raster_sources(style: &Style) -> Vec<(crate::raster::RasterSourceId, u
             Some(crate::style::source::Source::RasterDem(s)) => s.minzoom.unwrap_or(0),
             _ => 0,
         };
-        let id = crate::raster::RasterSourceId::new(group.source_name);
+        let id = RasterSourceId::new(group.source_name);
         if seen.insert(id.clone()) {
             out.push((id, minzoom));
         }
@@ -74,12 +77,9 @@ fn active_raster_sources(style: &Style) -> Vec<(crate::raster::RasterSourceId, u
     out
 }
 
-fn tile_has_raster_data(
-    tiles: &Tiles,
-    source: &crate::raster::RasterSourceId,
-    coords: WorldTileCoords,
-) -> bool {
-    tiles
+fn tile_has_raster_data(tiles: &Tiles, source: &RasterSourceId, coords: WorldTileCoords) -> bool {
+    #[cfg(feature = "raster")]
+    let has_raster = tiles
         .query::<&crate::raster::RasterLayersDataComponent>(coords)
         .is_some_and(|c| {
             c.layers.iter().any(|layer| {
@@ -88,20 +88,23 @@ fn tile_has_raster_data(
                     crate::raster::RasterLayerData::Available(avail) if &avail.source == source
                 )
             })
-        })
+        });
+    #[cfg(not(feature = "raster"))]
+    let has_raster = false;
+    has_raster
         || tiles
             .query::<&crate::terrain::DemLayersComponent>(coords)
             .is_some_and(|c| c.contains(source))
 }
 
-fn tile_raster_settled(
-    tiles: &Tiles,
-    source: &crate::raster::RasterSourceId,
-    coords: WorldTileCoords,
-) -> bool {
-    tiles
+fn tile_raster_settled(tiles: &Tiles, source: &RasterSourceId, coords: WorldTileCoords) -> bool {
+    #[cfg(feature = "raster")]
+    let settled = tiles
         .query::<&crate::raster::RasterLayersDataComponent>(coords)
-        .is_some_and(|c| c.has_source_result(source))
+        .is_some_and(|c| c.has_source_result(source));
+    #[cfg(not(feature = "raster"))]
+    let settled = false;
+    settled
         || tiles
             .query::<&crate::terrain::DemLayersComponent>(coords)
             .is_some_and(|c| c.contains(source))
@@ -111,7 +114,7 @@ fn retain_raster_fallback_ancestors(
     tiles: &Tiles,
     in_use: &mut FxHashSet<WorldTileCoords>,
     coords: WorldTileCoords,
-    source: &crate::raster::RasterSourceId,
+    source: &RasterSourceId,
     minzoom: u8,
     is_terrain: bool,
 ) {

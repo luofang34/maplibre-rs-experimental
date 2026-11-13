@@ -14,6 +14,7 @@ use crate::style::{
 impl HeadlessMap {
     /// Replaces a GeoJSON source's data and refreshes the loaded tiles it changes, as
     /// [`crate::context::MapContext::set_geojson_data`] does.
+    #[cfg(feature = "geojson")]
     pub fn set_geojson_data(
         &mut self,
         source_name: &str,
@@ -23,6 +24,7 @@ impl HeadlessMap {
     }
 
     /// Replaces a GeoJSON source's data with the inline document `geojson`.
+    #[cfg(feature = "geojson")]
     pub fn set_geojson_source(
         &mut self,
         source_name: &str,

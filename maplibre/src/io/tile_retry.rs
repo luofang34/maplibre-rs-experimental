@@ -152,6 +152,7 @@ impl TileComponent for RefreshSources {}
 
 /// Like [`refresh_tiles`], for a change to the data of `sources` alone: a request made for
 /// the refresh processes those sources and keeps what the tile shows of the others.
+#[cfg(any(test, feature = "geojson"))]
 pub(crate) fn refresh_tiles_for_sources(
     world: &mut World,
     kind: RequestKind,
@@ -282,6 +283,7 @@ pub(crate) fn due(world: &mut World, coords: WorldTileCoords, kind: RequestKind)
         })
 }
 
+#[cfg(any(test, feature = "raster"))]
 pub(crate) fn waiting(world: &World, coords: WorldTileCoords, kind: RequestKind) -> bool {
     world
         .tiles

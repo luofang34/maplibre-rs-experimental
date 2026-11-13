@@ -1,16 +1,13 @@
 //! A cached drape is replaced only by a complete, uploaded set of visible layers.
 
 use crate::{
-    io::tile_sources::RASTER_LAYER_TYPES,
+    io::tile_sources::RASTER_LAYER_TYPES, render::tile_view_pattern::coverage::covers_target,
+    style::Style, tcs::world::World, terrain::drape_targets::TargetSpec, vector::geometry_uploaded,
+};
+#[cfg(feature = "raster")]
+use crate::{
     raster::resource::RasterResources,
-    render::{
-        eventually::{Eventually, Eventually::Initialized},
-        tile_view_pattern::coverage::covers_target,
-    },
-    style::Style,
-    tcs::world::World,
-    terrain::drape_targets::TargetSpec,
-    vector::geometry_uploaded,
+    render::eventually::{Eventually, Eventually::Initialized},
 };
 
 pub(super) fn ready(
@@ -39,6 +36,7 @@ pub(super) fn ready(
                     .filter(|shape| shape.raster_layers.iter().any(|(id, _, _)| id == &layer.id))
                     .collect();
                 let sources: Vec<_> = shapes.iter().map(|shape| shape.source).collect();
+                #[cfg(feature = "raster")]
                 let absent = matches!(
                     world.resources.get::<Eventually<RasterResources>>(),
                     Some(Initialized(resources))
@@ -46,6 +44,8 @@ pub(super) fn ready(
                             .layer_source(&layer.id)
                             .is_some_and(|source| spec.absent_sources.contains(source))
                 );
+                #[cfg(not(feature = "raster"))]
+                let absent = true;
                 absent
                     || covers_target(spec.coords, &sources)
                     || (!shapes.is_empty() && shapes.iter().all(|shape| shape.view_complete))

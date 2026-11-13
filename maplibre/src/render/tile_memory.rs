@@ -3,9 +3,10 @@ use std::{collections::HashSet, mem::size_of, sync::Arc};
 
 use rustc_hash::FxHashSet;
 
+#[cfg(feature = "raster")]
+use crate::raster::{RasterLayerData, RasterLayersDataComponent};
 use crate::{
     coords::WorldTileCoords,
-    raster::{RasterLayerData, RasterLayersDataComponent},
     sdf::SymbolLayersDataComponent,
     style::expression::FeatureProperties,
     tcs::tiles::Tiles,
@@ -35,6 +36,7 @@ pub(crate) fn tile_bytes(tiles: &Tiles, coords: WorldTileCoords) -> usize {
                 })
                 .sum::<usize>()
         });
+    #[cfg(feature = "raster")]
     let raster = tiles
         .query::<&RasterLayersDataComponent>(coords)
         .map_or(0, |bucket| {
@@ -47,6 +49,8 @@ pub(crate) fn tile_bytes(tiles: &Tiles, coords: WorldTileCoords) -> usize {
                 })
                 .sum::<usize>()
         });
+    #[cfg(not(feature = "raster"))]
+    let raster = 0;
     let mut seen_dems = HashSet::new();
     let mut dem = 0;
     if let Some(DemTileComponent::Loaded(loaded)) = tiles.query::<&DemTileComponent>(coords) {
