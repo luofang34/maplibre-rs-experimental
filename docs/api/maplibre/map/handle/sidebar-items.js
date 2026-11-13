@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["MapClosed","MapCommands","MapHandle","Queue","Reply","Sender","Shared"],"trait":["WakeHost"],"type":["Command","Watcher"]};
+window.SIDEBAR_ITEMS = {"mod":["sync_handle"],"struct":["MapClosed","MapCommands","MapHandle","Queue","Reply","Sender","Shared","SyncCommandQueue","SyncHandle","SyncMapCommands"],"trait":["SyncWakeHost","WakeHost"],"type":["Command","SyncMapHandle","Watcher"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["lock"],"struct":["SyncCommandQueue","SyncHandle","SyncMapCommands","SyncShared"],"trait":["SyncWakeHost"],"type":["SyncCommand","SyncMapHandle","SyncWatcher"]};
