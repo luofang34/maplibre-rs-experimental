@@ -23,8 +23,8 @@ mod paint;
 mod serialization;
 pub use datum::{ElevationDatum, ExtrusionPart};
 pub use paint::{
-    BackgroundPaint, FillExtrusionPaint, FillPaint, LinePaint, RasterPaint, RasterResampling,
-    SymbolPaint, TranslateAnchor,
+    BackgroundPaint, CustomPaint, FillExtrusionPaint, FillPaint, LinePaint, RasterPaint,
+    RasterResampling, SymbolPaint, TranslateAnchor,
 };
 pub use serialization::LayerProperties;
 
@@ -62,6 +62,9 @@ pub enum LayerPaint {
     /// Point density radius, weight, intensity, opacity and colour ramp.
     #[serde(rename = "heatmap")]
     Heatmap(HeatmapPaint),
+    /// Host-provided GPU custom style layer (`"type": "custom"`).
+    #[serde(rename = "custom")]
+    Custom(CustomPaint),
 }
 
 impl LayerPaint {
@@ -80,7 +83,8 @@ impl LayerPaint {
             | LayerPaint::Raster(_)
             | LayerPaint::Hillshade(_)
             | LayerPaint::Symbol(_)
-            | LayerPaint::Heatmap(_) => None,
+            | LayerPaint::Heatmap(_)
+            | LayerPaint::Custom(_) => None,
         }
     }
 
@@ -98,7 +102,8 @@ impl LayerPaint {
             | Self::Hillshade(_)
             | Self::ColorRelief(_)
             | Self::Symbol(_)
-            | Self::Heatmap(_) => return None,
+            | Self::Heatmap(_)
+            | Self::Custom(_) => return None,
         };
         match property.as_ref()? {
             StyleProperty::Constant(color) => Some((*color).into()),

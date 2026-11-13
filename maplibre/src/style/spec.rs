@@ -250,7 +250,7 @@ include!(concat!(env!("OUT_DIR"), "/style_spec_v8.rs"));
 impl SpecLayerType {
     /// Whether `maplibre`'s layer pipeline renders layers of this `type` directly.
     pub const fn is_rendered_layer(self) -> bool {
-        !matches!(self, Self::Sky | Self::Custom)
+        !matches!(self, Self::Sky)
     }
 }
 

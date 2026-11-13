@@ -14,6 +14,14 @@ use crate::{
     },
     window::{HeadedMapWindow, MapWindowConfig},
 };
+#[cfg(feature = "geojson")]
+use crate::{
+    geojson::{
+        query::{SourceFeature, SourceQueryOptions},
+        update::GeoJsonDiff,
+    },
+    style::source::GeoJsonData,
+};
 
 impl<E: Environment> Map<E>
 where
@@ -93,5 +101,80 @@ where
                 pending.style.remove_feature_state(target, id, key);
             }
         }
+    }
+
+    /// Replaces the data of a GeoJSON source, before or after the renderer is initialized.
+    #[cfg(feature = "geojson")]
+    pub fn set_geojson_data(
+        &mut self,
+        source_name: &str,
+        data: GeoJsonData,
+    ) -> Result<(), MapError> {
+        let result = match &mut self.map_context {
+            CurrentMapContext::Ready(context) => context.set_geojson_data(source_name, data),
+            CurrentMapContext::Pending(pending) => {
+                pending.style.set_geojson_data(source_name, data)
+            }
+        };
+        match result {
+            Ok(()) => {
+                self.event_bus.mark_busy();
+                self.event_bus
+                    .emit(crate::event::MapEvent::SourceDataLoaded {
+                        source: source_name.to_owned(),
+                    });
+                Ok(())
+            }
+            Err(error) => {
+                self.event_bus
+                    .emit_error(crate::event::MapErrorKind::Source, error.to_string());
+                Err(MapError::SourceUpdate(error))
+            }
+        }
+    }
+
+    /// Adds, changes and removes features of an inline GeoJSON source.
+    #[cfg(feature = "geojson")]
+    pub fn update_geojson_data(
+        &mut self,
+        source_name: &str,
+        diff: &GeoJsonDiff,
+    ) -> Result<(), MapError> {
+        let result = match &mut self.map_context {
+            CurrentMapContext::Ready(context) => context.update_geojson_data(source_name, diff),
+            CurrentMapContext::Pending(pending) => {
+                pending.style.update_geojson_data(source_name, diff)
+            }
+        };
+        match result {
+            Ok(()) => {
+                self.event_bus.mark_busy();
+                self.event_bus
+                    .emit(crate::event::MapEvent::SourceDataLoaded {
+                        source: source_name.to_owned(),
+                    });
+                Ok(())
+            }
+            Err(error) => {
+                self.event_bus
+                    .emit_error(crate::event::MapErrorKind::Source, error.to_string());
+                Err(MapError::SourceUpdate(error))
+            }
+        }
+    }
+
+    /// The features of an inline GeoJSON source, before or after the renderer is initialized;
+    /// see [`crate::style::Style::query_source_features`].
+    #[cfg(feature = "geojson")]
+    pub fn query_source_features(
+        &self,
+        source_name: &str,
+        options: &SourceQueryOptions,
+    ) -> Result<Vec<SourceFeature>, MapError> {
+        let style = match &self.map_context {
+            CurrentMapContext::Ready(context) => &context.style,
+            CurrentMapContext::Pending(pending) => &pending.style,
+        };
+        Ok(style.query_source_features(source_name, options)?)
     }
 }

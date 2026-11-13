@@ -144,12 +144,14 @@ async fn load_symbol_assets_for_requests<HC: HttpClient>(
         }
     }
     // The sprite and the style's own images come first; a provider fills only the gaps.
-    let (provided, awaiting) = pack_provided(
-        &mut builder,
-        client.image_providers(),
-        &icons,
-        config.pixel_ratio,
-    );
+    let providers = client.image_providers();
+    let (provided, awaiting) = pack_provided(&mut builder, providers, &icons, config.pixel_ratio);
+    for name in &icons {
+        if !name.is_empty() && !builder.atlas.icons.contains_key(name) && !providers.provides(name)
+        {
+            providers.record_missing(name);
+        }
+    }
     Ok(LoadedSymbolAssets {
         atlas: builder.finish(),
         provided,

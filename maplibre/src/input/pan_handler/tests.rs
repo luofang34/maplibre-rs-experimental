@@ -1,11 +1,14 @@
-use maplibre::{coords::LatLon, terrain::interaction::globe::TerrainAnchor};
-use winit::event::{ElementState, MouseButton};
+use instant::Instant;
 
 use super::PanHandler;
+use crate::{
+    coords::LatLon,
+    input::events::{ButtonState, PointerButton},
+    terrain::interaction::globe::TerrainAnchor,
+};
 
 #[test]
 fn a_press_while_inertia_carries_the_last_drag_grabs_anew() {
-    // A drag has ended and its inertia still runs on its plane and anchor.
     let mut handler = PanHandler {
         gesture_plane: Some(1500.0),
         globe_anchor: Some((
@@ -17,9 +20,14 @@ fn a_press_while_inertia_carries_the_last_drag_grabs_anew() {
         )),
         ..PanHandler::default()
     };
-    assert!(handler.process_mouse_key_press(&MouseButton::Left, &ElementState::Pressed));
+    assert!(handler.process_pointer_button_at(
+        PointerButton::Primary,
+        ButtonState::Pressed,
+        Instant::now()
+    ));
     assert_eq!(handler.gesture_plane, None);
     assert_eq!(handler.globe_anchor, None);
+
     let mut touched = PanHandler {
         gesture_plane: Some(0.0),
         ..PanHandler::default()

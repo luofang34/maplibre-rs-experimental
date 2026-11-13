@@ -20,7 +20,20 @@ impl HeadlessMap {
         source_name: &str,
         data: crate::style::source::GeoJsonData,
     ) -> Result<(), crate::geojson::update::SourceUpdateError> {
-        self.map_context.set_geojson_data(source_name, data)
+        let bus = self.map_context.event_bus();
+        match self.map_context.set_geojson_data(source_name, data) {
+            Ok(()) => {
+                bus.mark_busy();
+                bus.emit(crate::event::MapEvent::SourceDataLoaded {
+                    source: source_name.to_owned(),
+                });
+                Ok(())
+            }
+            Err(error) => {
+                bus.emit_error(crate::event::MapErrorKind::Source, error.to_string());
+                Err(error)
+            }
+        }
     }
 
     /// Replaces a GeoJSON source's data with the inline document `geojson`.
@@ -42,7 +55,18 @@ impl HeadlessMap {
         &mut self,
         apply: impl FnOnce(&mut Style) -> Result<StyleChange, StyleMutationError>,
     ) -> Result<StyleChange, StyleMutationError> {
-        self.map_context.mutate_style(apply)
+        let bus = self.map_context.event_bus();
+        match self.map_context.mutate_style(apply) {
+            Ok(change) => {
+                bus.mark_busy();
+                bus.emit(crate::event::MapEvent::StyleDataLoaded);
+                Ok(change)
+            }
+            Err(error) => {
+                bus.emit_error(crate::event::MapErrorKind::Style, error.to_string());
+                Err(error)
+            }
+        }
     }
 
     /// Merges `state` into the runtime state of feature `id` in `target`, updating resident GPU

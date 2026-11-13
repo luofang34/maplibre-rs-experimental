@@ -108,6 +108,7 @@ impl LayerValidation<'_> {
             }
             LayerPaint::Symbol(p) => self.symbol(p),
             LayerPaint::Raster(p) => self.raster(p),
+            LayerPaint::Custom(_) => {}
         }
     }
 

@@ -1,12 +1,15 @@
+//! Viewport edge-inset debug keyboard handler.
+
 use std::time::Duration;
 
-use maplibre::context::MapContext;
-use winit::keyboard::Key;
-
-use super::UpdateState;
+use super::{
+    events::{ButtonState, NavKey},
+    UpdateState,
+};
+use crate::context::MapContext;
 
 #[derive(Default)]
-pub struct DebugHandler {
+pub(crate) struct DebugHandler {
     top_delta: f64,
     bottom_delta: f64,
     left_delta: f64,
@@ -15,6 +18,16 @@ pub struct DebugHandler {
 
 impl UpdateState for DebugHandler {
     fn update_state(&mut self, MapContext { view_state, .. }: &mut MapContext, dt: Duration) {
+        self.update_parts(view_state, dt);
+    }
+}
+
+impl DebugHandler {
+    pub(crate) fn update_parts(
+        &mut self,
+        view_state: &mut crate::render::view_state::ViewState,
+        dt: Duration,
+    ) {
         let dt = (dt.as_secs_f64() * 10.0).min(1.0);
 
         let top_delta = self.top_delta * dt;
@@ -33,30 +46,28 @@ impl UpdateState for DebugHandler {
         self.right_delta -= right_delta;
         self.left_delta -= left_delta;
     }
-}
 
-impl DebugHandler {
-    pub fn process_key_press(&mut self, key: &Key, state: winit::event::ElementState) -> bool {
-        let amount = if state == winit::event::ElementState::Pressed {
+    pub(crate) fn process_key(&mut self, key: NavKey, state: ButtonState) -> bool {
+        let amount = if state == ButtonState::Pressed {
             100.0
         } else {
             0.0
         };
 
-        match key.as_ref() {
-            Key::Character("v") => {
+        match key {
+            NavKey::DebugInsetLeft => {
                 self.left_delta += amount;
                 true
             }
-            Key::Character("b") => {
+            NavKey::DebugInsetTop => {
                 self.top_delta += amount;
                 true
             }
-            Key::Character("n") => {
+            NavKey::DebugInsetBottom => {
                 self.bottom_delta += amount;
                 true
             }
-            Key::Character("m") => {
+            NavKey::DebugInsetRight => {
                 self.right_delta += amount;
                 true
             }

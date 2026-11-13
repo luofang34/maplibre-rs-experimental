@@ -28,6 +28,11 @@ pub struct PanInertia {
 }
 
 impl PanInertia {
+    /// Whether an inertial ease-out animation is currently running.
+    pub fn is_active(&self) -> bool {
+        self.motion.is_some()
+    }
+
     /// Records one pointer movement while dragging.
     pub fn record(&mut self, now: Instant, delta: Vector2<f64>) {
         self.motion = None;

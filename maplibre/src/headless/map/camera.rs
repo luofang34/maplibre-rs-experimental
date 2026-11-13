@@ -89,6 +89,53 @@ impl HeadlessMap {
         self.map_context.stop_flight();
     }
 
+    /// Returns the active zoom and geographic center bounds enforced on the camera.
+    pub fn camera_bounds(&self) -> crate::render::view_state::CameraBounds {
+        self.map_context.camera_bounds()
+    }
+
+    /// Replaces the zoom and geographic center bounds and clamps the camera if needed.
+    pub fn set_camera_bounds(&mut self, bounds: crate::render::view_state::CameraBounds) {
+        self.map_context.set_camera_bounds(bounds);
+    }
+
+    /// Sets or clears the minimum continuous zoom level enforced on the camera.
+    pub fn set_min_zoom(&mut self, min_zoom: Option<f64>) {
+        self.map_context.set_min_zoom(min_zoom);
+    }
+
+    /// Sets or clears the maximum continuous zoom level enforced on the camera.
+    pub fn set_max_zoom(&mut self, max_zoom: Option<f64>) {
+        self.map_context.set_max_zoom(max_zoom);
+    }
+
+    /// Sets or clears the geographic bounding box restricting the camera's center.
+    pub fn set_max_bounds(&mut self, max_bounds: Option<crate::render::view_state::LatLonBounds>) {
+        self.map_context.set_max_bounds(max_bounds);
+    }
+
+    /// Computes the center and maximum zoom that frame `bounds` within `padding`.
+    pub fn camera_for_bounds(
+        &self,
+        bounds: crate::render::view_state::LatLonBounds,
+        padding: crate::render::view_state::EdgePadding,
+        bearing: Option<cgmath::Deg<f64>>,
+        pitch: Option<cgmath::Deg<f64>>,
+    ) -> crate::render::view_state::CameraFit {
+        self.map_context
+            .camera_for_bounds(bounds, padding, bearing, pitch)
+    }
+
+    /// Moves the camera immediately to frame `bounds` within `padding`.
+    pub fn fit_bounds(
+        &mut self,
+        bounds: crate::render::view_state::LatLonBounds,
+        padding: crate::render::view_state::EdgePadding,
+    ) -> Result<crate::render::view_state::CameraFit, crate::render::view_state::NavigationError>
+    {
+        self.map_context.fit_bounds(bounds, padding)
+    }
+
     /// Restores a stored free-globe pose, for the style's projection.
     pub fn restore_globe_pose(
         &mut self,

@@ -61,7 +61,9 @@ impl HeadlessMap {
 
     /// The resources that became ready since the last call.
     pub fn take_ready_resources(&mut self) -> Vec<ResourceReady> {
-        self.map_context.take_ready_resources()
+        let mut ready = self.map_context.event_bus().take_buffered_ready_resources();
+        ready.extend(self.map_context.take_ready_resources());
+        ready
     }
 
     /// Starts recording a timeline of the last `capacity` frames, each under the number of its

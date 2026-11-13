@@ -73,6 +73,7 @@ pub struct ViewState {
     /// Factor on the external eye's frustum tangents for tile requests.
     request_overscan: f64,
     opaque_environment: bool,
+    bounds: CameraBounds,
 }
 
 impl ViewState {
@@ -100,7 +101,8 @@ impl ViewState {
         pitch: P,
         fovy: F,
     ) -> Self {
-        let camera = Camera::new((position.x, position.y), Deg(0.0), pitch.into());
+        let mut camera = Camera::new((position.x, position.y), Deg(0.0), pitch.into());
+        camera.set_world_size(TILE_SIZE * 2.0_f64.powf(zoom.value()));
 
         let perspective = Perspective::new(fovy);
 
@@ -124,6 +126,7 @@ impl ViewState {
             external_eye: None,
             request_overscan: 1.0,
             opaque_environment: false,
+            bounds: CameraBounds::default(),
         }
     }
 
@@ -338,8 +341,11 @@ impl ViewState {
 
     /// Sets zoom without rescaling the world-pixel center; [`Self::zoom_to`] preserves its location.
     pub fn update_zoom(&mut self, new_zoom: Zoom) {
-        *self.zoom = new_zoom;
-        tracing::debug!(zoom = new_zoom.value(), "zoom changed");
+        let clamped = self.clamp_zoom(new_zoom);
+        *self.zoom = clamped;
+        self.camera
+            .set_world_size(TILE_SIZE * 2.0_f64.powf(clamped.value()));
+        tracing::debug!(zoom = clamped.value(), "zoom changed");
     }
 
     /// Changes the zoom while the map center stays on the same geographic location.
@@ -347,10 +353,11 @@ impl ViewState {
     /// The camera position is stored in world pixels of the current zoom, so it scales with
     /// the zoom change; [`update_zoom`](Self::update_zoom) leaves it as it is.
     pub fn zoom_to(&mut self, new_zoom: Zoom) {
-        let scale = self.zoom.scale_delta(&new_zoom);
+        let clamped = self.clamp_zoom(new_zoom);
+        let scale = self.zoom.scale_delta(&clamped);
         let position = self.camera.position().to_vec() * scale;
+        self.update_zoom(clamped);
         self.camera.move_to(Point2::from_vec(position));
-        self.update_zoom(new_zoom);
     }
 
     /// Borrows the map's orbit camera, which is retained while an external view is active.
@@ -385,6 +392,7 @@ impl ViewState {
     }
 }
 
+mod bounds;
 mod center;
 mod depth;
 mod external;
@@ -395,6 +403,7 @@ mod pose;
 mod screen;
 mod unprojection;
 
+pub use bounds::{CameraBounds, CameraFit, EdgePadding, LatLonBounds};
 use external::ExternalEye;
 pub use external::{ExternalAnchor, ExternalView, ExternalViewError};
 pub use flight::{FlightCurve, FlightPath, FlyOptions};

@@ -217,13 +217,16 @@ impl ViewState {
     /// GL JS `flyTo`'s path from `from` to `to`.
     fn fly_path(&self, from: Stop, to: Stop, fly: FlyOptions) -> FlightPath {
         let world_size = TILE_SIZE * 2_f64.powf(from.zoom);
+        let min_zoom = self
+            .clamp_zoom(crate::coords::Zoom::new(fly.min_zoom))
+            .value();
         let globe = GlobeFly::new(
             world_size,
             from.center,
             from.zoom,
             to.center,
             Some(to.zoom),
-            fly.min_zoom,
+            min_zoom,
         );
         let w0 = self.width().max(self.height());
         let w1 = w0 / globe.scale_of_zoom;

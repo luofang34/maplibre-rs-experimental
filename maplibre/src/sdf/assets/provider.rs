@@ -9,6 +9,7 @@
 //! provider lives in the runtime, beside the worker's other services.
 
 use std::{
+    collections::BTreeSet,
     fmt,
     future::Future,
     pin::Pin,
@@ -187,6 +188,7 @@ struct Registry {
     cache: AssetCache,
     gate: Arc<Gate>,
     counters: Counters,
+    missing: Mutex<BTreeSet<String>>,
 }
 
 /// The providers a map's workers ask for images; clones share providers, answers and limits.
@@ -238,7 +240,30 @@ impl ImageProviders {
             cache: AssetCache::with_budget(limits.cache_bytes),
             gate: Arc::default(),
             counters: Counters::default(),
+            missing: Mutex::default(),
         }))
+    }
+
+    /// Records a requested icon or pattern identifier that neither the sprite, the style's
+    /// images, nor any registered provider supplied.
+    pub(crate) fn record_missing(&self, name: &str) {
+        if !name.is_empty() {
+            self.0
+                .missing
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert(name.to_owned());
+        }
+    }
+
+    /// Drains missing image identifiers recorded since the last call.
+    pub(crate) fn take_missing(&self) -> Vec<String> {
+        let mut guard = self
+            .0
+            .missing
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        std::mem::take(&mut *guard).into_iter().collect()
     }
 
     fn namespaces(&self) -> MutexGuard<'_, Vec<Namespace>> {

@@ -1,15 +1,20 @@
+//! Pointer orbit/tilt and `Alt`+trackpad orbit handler.
+
 use std::time::Duration;
 
 use cgmath::{Deg, MetricSpace, Rad, Vector2};
-use maplibre::{
+
+use super::{
+    events::{ButtonState, PointerButton},
+    navigation_state::NavigationState,
+    UpdateState,
+};
+use crate::{
     context::MapContext,
     render::view_state::{GlobePose, NavigationMode, ViewState},
 };
-use winit::event::{ElementState, MouseButton};
 
-use super::{navigation_state::NavigationState, UpdateState};
-
-pub struct CameraHandler {
+pub(crate) struct CameraHandler {
     window_position: Option<Vector2<f64>>,
     start_window_position: Option<Vector2<f64>>,
     is_active: bool,
@@ -34,7 +39,11 @@ impl UpdateState for CameraHandler {
 impl CameraHandler {
     /// Updates camera orbit while respecting `NavigationState` (`north_locked`, `2D` mode, and
     /// disengaging `Auto-Tilt` when the user manually tilts pitch).
-    pub fn update_state_with_nav(&mut self, view_state: &mut ViewState, nav: &mut NavigationState) {
+    pub(crate) fn update_state_with_nav(
+        &mut self,
+        view_state: &mut ViewState,
+        nav: &mut NavigationState,
+    ) {
         if self.pending_trackpad_orbit.x.abs() > f64::EPSILON
             || self.pending_trackpad_orbit.y.abs() > f64::EPSILON
         {
@@ -76,7 +85,7 @@ impl CameraHandler {
     /// Turns the camera by the drag so far: the bearing by its horizontal travel, or by its
     /// length with the middle button, and the pitch by its vertical travel. A free-globe camera
     /// turns its pose about its target from the pose the drag started with.
-    fn turn(&mut self, view_state: &mut ViewState) {
+    pub(crate) fn turn(&mut self, view_state: &mut ViewState) {
         self.turn_constrained(view_state, false, false);
     }
 
@@ -134,10 +143,8 @@ impl CameraHandler {
             camera.set_pitch(Rad((previous + pitch).0.clamp(0.0, max_pitch)));
         }
     }
-}
 
-impl CameraHandler {
-    pub fn new(sensitivity: f64) -> Self {
+    pub(crate) fn new(sensitivity: f64) -> Self {
         Self {
             window_position: None,
             start_window_position: None,
@@ -152,15 +159,15 @@ impl CameraHandler {
     }
 
     /// Accumulates an `Alt` + two-finger trackpad scroll delta for manual bearing/pitch orbit.
-    pub fn process_trackpad_orbit_scroll(&mut self, delta: Vector2<f64>) {
+    pub(crate) fn process_trackpad_orbit_scroll(&mut self, delta: Vector2<f64>) {
         self.pending_trackpad_orbit += delta;
     }
 
-    pub fn is_active(&self) -> bool {
+    pub(crate) fn is_active(&self) -> bool {
         self.is_active
     }
 
-    pub fn begin_orbit(&mut self, is_middle: bool) {
+    pub(crate) fn begin_orbit(&mut self, is_middle: bool) {
         self.is_active = true;
         self.is_middle = is_middle;
         self.start_window_position = self.window_position;
@@ -169,7 +176,7 @@ impl CameraHandler {
         self.start_pose = None;
     }
 
-    pub fn end_orbit(&mut self) {
+    pub(crate) fn end_orbit(&mut self) {
         self.is_active = false;
         self.is_middle = false;
         self.start_window_position = None;
@@ -178,7 +185,11 @@ impl CameraHandler {
         self.start_pose = None;
     }
 
-    pub fn process_window_position(&mut self, window_position: &Vector2<f64>, touch: bool) -> bool {
+    pub(crate) fn process_window_position(
+        &mut self,
+        window_position: &Vector2<f64>,
+        touch: bool,
+    ) -> bool {
         if !self.is_active && !touch {
             self.start_window_position = Some(*window_position);
             self.window_position = Some(*window_position);
@@ -188,19 +199,21 @@ impl CameraHandler {
             }
             self.window_position = Some(*window_position);
         }
-
         true
     }
 
-    pub fn process_mouse_key_press(&mut self, key: &MouseButton, state: &ElementState) -> bool {
-        if *state == ElementState::Pressed {
-            // currently panning or starting to pan
-            match *key {
-                MouseButton::Right => {
+    pub(crate) fn process_pointer_button(
+        &mut self,
+        button: PointerButton,
+        state: ButtonState,
+    ) -> bool {
+        if state == ButtonState::Pressed {
+            match button {
+                PointerButton::Secondary => {
                     self.is_active = true;
                     self.start_window_position = self.window_position;
                 }
-                MouseButton::Middle => {
+                PointerButton::Middle => {
                     self.is_active = true;
                     self.is_middle = true;
                     self.start_window_position = self.window_position;
@@ -208,13 +221,7 @@ impl CameraHandler {
                 _ => return false,
             }
         } else {
-            // finished panning
-            self.is_active = false;
-            self.is_middle = false;
-            self.start_window_position = None;
-            self.start_delta_pitch = None;
-            self.start_delta_roll = None;
-            self.start_pose = None;
+            self.end_orbit();
         }
         true
     }

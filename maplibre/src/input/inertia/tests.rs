@@ -68,6 +68,7 @@ fn motion_delivers_the_eased_distance_in_the_drag_direction() {
     let released = start + Duration::from_millis(100);
 
     assert!(inertia.release(released));
+    assert!(inertia.is_active());
     let mut total = Vector2::new(0.0, 0.0);
     for frame in 1..=40 {
         if let Some(delta) = inertia.step(released + Duration::from_millis(frame * 10)) {
@@ -77,6 +78,7 @@ fn motion_delivers_the_eased_distance_in_the_drag_direction() {
     // 100 px in 100 ms eases out over 60 px along the same direction.
     assert!((total.x - 36.0).abs() < 1e-6, "{total:?}");
     assert!((total.y - 48.0).abs() < 1e-6, "{total:?}");
+    assert!(!inertia.is_active());
     assert!(inertia.step(released + Duration::from_secs(1)).is_none());
 }
 

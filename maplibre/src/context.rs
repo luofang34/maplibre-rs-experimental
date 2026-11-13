@@ -177,6 +177,62 @@ impl MapContext {
         Ok(())
     }
 
+    /// Returns the active zoom and geographic center bounds enforced on [`Self::view_state`].
+    pub fn camera_bounds(&self) -> crate::render::view_state::CameraBounds {
+        self.view_state.camera_bounds()
+    }
+
+    /// Replaces the zoom and geographic center bounds and clamps the camera if needed.
+    pub fn set_camera_bounds(&mut self, bounds: crate::render::view_state::CameraBounds) {
+        self.view_state.set_camera_bounds(bounds);
+        crate::terrain::elevation::ground_center(&mut self.view_state, &self.world);
+        crate::render::frame_signals::mark_dirty(&mut self.world);
+    }
+
+    /// Sets or clears the minimum continuous zoom level enforced on the camera.
+    pub fn set_min_zoom(&mut self, min_zoom: Option<f64>) {
+        self.view_state.set_min_zoom(min_zoom);
+        crate::render::frame_signals::mark_dirty(&mut self.world);
+    }
+
+    /// Sets or clears the maximum continuous zoom level enforced on the camera.
+    pub fn set_max_zoom(&mut self, max_zoom: Option<f64>) {
+        self.view_state.set_max_zoom(max_zoom);
+        crate::render::frame_signals::mark_dirty(&mut self.world);
+    }
+
+    /// Sets or clears the geographic bounding box restricting the camera's center.
+    pub fn set_max_bounds(&mut self, max_bounds: Option<crate::render::view_state::LatLonBounds>) {
+        self.view_state.set_max_bounds(max_bounds);
+        crate::terrain::elevation::ground_center(&mut self.view_state, &self.world);
+        crate::render::frame_signals::mark_dirty(&mut self.world);
+    }
+
+    /// Computes the center and maximum zoom that frame `bounds` within `padding`.
+    pub fn camera_for_bounds(
+        &self,
+        bounds: crate::render::view_state::LatLonBounds,
+        padding: crate::render::view_state::EdgePadding,
+        bearing: Option<cgmath::Deg<f64>>,
+        pitch: Option<cgmath::Deg<f64>>,
+    ) -> crate::render::view_state::CameraFit {
+        self.view_state
+            .camera_for_bounds(bounds, padding, bearing, pitch)
+    }
+
+    /// Moves the camera immediately to frame `bounds` within `padding`.
+    pub fn fit_bounds(
+        &mut self,
+        bounds: crate::render::view_state::LatLonBounds,
+        padding: crate::render::view_state::EdgePadding,
+    ) -> Result<crate::render::view_state::CameraFit, crate::render::view_state::NavigationError>
+    {
+        let fit = self.view_state.fit_bounds(bounds, padding)?;
+        crate::terrain::elevation::ground_center(&mut self.view_state, &self.world);
+        crate::render::frame_signals::mark_dirty(&mut self.world);
+        Ok(fit)
+    }
+
     /// Restores a stored free-globe pose, for the style's projection: it must be the pure
     /// `vertical-perspective` projection. A center held by terrain stands on the loaded
     /// ground under the pose's target at once, rather than at the pose's own target height, as

@@ -1,8 +1,11 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 use cgmath::{Deg, Vector2};
-use maplibre::{
+
+use super::CameraHandler;
+use crate::{
     coords::{LatLon, WorldCoords, Zoom},
+    input::events::{ButtonState, PointerButton},
     projection::ProjectionType,
     render::{
         projection::globe_camera_for_view,
@@ -10,9 +13,6 @@ use maplibre::{
     },
     window::PhysicalSize,
 };
-use winit::event::{ElementState, MouseButton};
-
-use super::CameraHandler;
 
 /// A view at 60 degrees north, 40 degrees of pitch, in free navigation when `free`.
 fn view(free: bool) -> ViewState {
@@ -36,17 +36,15 @@ fn view(free: bool) -> ViewState {
     view
 }
 
-/// Drags with `button` from `from` through `through`, turning the view after each move, as
-/// the input loop does; 100 sensitivity is 0.1 degrees a pixel.
-fn drag(view: &mut ViewState, button: MouseButton, from: Vector2<f64>, through: &[Vector2<f64>]) {
+fn drag(view: &mut ViewState, button: PointerButton, from: Vector2<f64>, through: &[Vector2<f64>]) {
     let mut handler = CameraHandler::new(100.0);
     handler.process_window_position(&from, false);
-    handler.process_mouse_key_press(&button, &ElementState::Pressed);
+    handler.process_pointer_button(button, ButtonState::Pressed);
     for position in through {
         handler.process_window_position(position, false);
         handler.turn(view);
     }
-    handler.process_mouse_key_press(&button, &ElementState::Released);
+    handler.process_pointer_button(button, ButtonState::Released);
     assert_eq!(
         handler.start_pose, None,
         "a release forgets the drag's start"
@@ -63,10 +61,9 @@ fn a_right_drag_turns_a_free_camera_about_its_target() {
     let mut free = view(true);
     let before = free.globe_pose().expect("pose");
     let (bearing, pitch) = angles(&free);
-    // Left by 200 pixels and up by 100: 20 degrees of bearing and 10 of pitch.
     drag(
         &mut free,
-        MouseButton::Right,
+        PointerButton::Secondary,
         Vector2::new(400.0, 300.0),
         &[Vector2::new(300.0, 250.0), Vector2::new(200.0, 200.0)],
     );
@@ -80,11 +77,10 @@ fn a_right_drag_turns_a_free_camera_about_its_target() {
         (turned_pitch - pitch - 10.0).abs() < 1e-6,
         "pitch {pitch} -> {turned_pitch}"
     );
-    // One move to the end turns as far as the same drag in steps: the turn is from the start.
     let mut once = view(true);
     drag(
         &mut once,
-        MouseButton::Right,
+        PointerButton::Secondary,
         Vector2::new(400.0, 300.0),
         &[Vector2::new(200.0, 200.0)],
     );
@@ -100,7 +96,7 @@ fn a_middle_drag_turns_only_the_bearing_and_a_constrained_camera_turns_as_before
     let (bearing, pitch) = angles(&free);
     drag(
         &mut free,
-        MouseButton::Middle,
+        PointerButton::Middle,
         Vector2::new(400.0, 300.0),
         &[Vector2::new(400.0, 150.0)],
     );
@@ -108,10 +104,11 @@ fn a_middle_drag_turns_only_the_bearing_and_a_constrained_camera_turns_as_before
     let turn = (turned_bearing - bearing + 540.0).rem_euclid(360.0) - 180.0;
     assert!((turn - 15.0).abs() < 1e-6, "bearing turned by {turn}");
     assert!((turned_pitch - pitch).abs() < 1e-6);
+
     let mut constrained = view(false);
     drag(
         &mut constrained,
-        MouseButton::Right,
+        PointerButton::Secondary,
         Vector2::new(400.0, 300.0),
         &[Vector2::new(200.0, 200.0)],
     );

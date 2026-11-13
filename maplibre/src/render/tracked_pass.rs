@@ -382,6 +382,13 @@ impl<'w> TrackedRenderPass<'w> {
             max_count,
         );
     }
+
+    /// Invokes `f` with direct mutable access to the underlying [`wgpu::RenderPass`], clearing
+    /// cached pipeline/buffer bindings afterward so subsequent tracked draws rebind cleanly.
+    pub(crate) fn with_raw_pass(&mut self, f: impl FnOnce(&mut wgpu::RenderPass<'w>)) {
+        f(&mut self.pass);
+        self.bound = BoundState::default();
+    }
 }
 
 #[cfg(test)]

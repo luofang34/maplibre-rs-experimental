@@ -1,16 +1,18 @@
+//! Continuous keyboard pan (`WASD` / arrows) and bearing orbit (`Q` / `E`) handler.
+
 use std::time::Duration;
 
 use cgmath::{Deg, InnerSpace, Rad, Vector2, Zero};
-use maplibre::context::MapContext;
-use winit::keyboard::{Key, NamedKey};
 
 use super::{
+    events::{ButtonState, NavKey},
     navigation_state::{set_pitch_keeping_center, NavigationState},
     projection::{center_pixel, pan_globe_by_pixels, pan_plane_by_pixels},
     UpdateState,
 };
+use crate::context::MapContext;
 
-pub struct ShiftHandler {
+pub(crate) struct ShiftHandler {
     camera_translate: Vector2<f64>,
     held_up: bool,
     held_down: bool,
@@ -30,7 +32,7 @@ impl UpdateState for ShiftHandler {
 }
 
 impl ShiftHandler {
-    pub fn new(speed: f64, sensitivity: f64) -> Self {
+    pub(crate) fn new(speed: f64, sensitivity: f64) -> Self {
         Self {
             camera_translate: Vector2::zero(),
             held_up: false,
@@ -45,7 +47,7 @@ impl ShiftHandler {
     }
 
     /// Whether any directional or orbit key is currently held down or decaying.
-    pub fn is_active(&self) -> bool {
+    pub(crate) fn is_active(&self) -> bool {
         self.held_up
             || self.held_down
             || self.held_left
@@ -55,11 +57,19 @@ impl ShiftHandler {
             || self.camera_translate.magnitude2() > 0.01
     }
 
-    pub fn update_state_with_nav(
+    pub(crate) fn update_state_with_nav(
         &mut self,
-        MapContext {
-            style, view_state, ..
-        }: &mut MapContext,
+        state: &mut MapContext,
+        dt: Duration,
+        nav: &mut NavigationState,
+    ) {
+        self.update_parts_with_nav(&state.style, &mut state.view_state, dt, nav);
+    }
+
+    pub(crate) fn update_parts_with_nav(
+        &mut self,
+        style: &crate::style::Style,
+        view_state: &mut crate::render::view_state::ViewState,
         dt: Duration,
         nav: &mut NavigationState,
     ) {
@@ -139,41 +149,39 @@ impl ShiftHandler {
         }
     }
 
-    pub fn process_scroll(&mut self, _delta: &winit::event::MouseScrollDelta) {}
-
-    pub fn process_key_press(&mut self, key: &Key, state: winit::event::ElementState) -> bool {
-        let pressed = state == winit::event::ElementState::Pressed;
+    pub(crate) fn process_key(&mut self, key: NavKey, state: ButtonState) -> bool {
+        let pressed = state == ButtonState::Pressed;
         let amount = if pressed {
-            10.0 * self.sensitivity // left, right is the same as panning 10px
+            10.0 * self.sensitivity
         } else {
             0.0
         };
-        match key.as_ref() {
-            Key::Character("w") | Key::Character("W") | Key::Named(NamedKey::ArrowUp) => {
+        match key {
+            NavKey::Up => {
                 self.held_up = pressed;
                 self.camera_translate.y -= amount;
                 true
             }
-            Key::Character("s") | Key::Character("S") | Key::Named(NamedKey::ArrowDown) => {
+            NavKey::Down => {
                 self.held_down = pressed;
                 self.camera_translate.y += amount;
                 true
             }
-            Key::Character("a") | Key::Character("A") | Key::Named(NamedKey::ArrowLeft) => {
+            NavKey::Left => {
                 self.held_left = pressed;
                 self.camera_translate.x -= amount;
                 true
             }
-            Key::Character("d") | Key::Character("D") | Key::Named(NamedKey::ArrowRight) => {
+            NavKey::Right => {
                 self.held_right = pressed;
                 self.camera_translate.x += amount;
                 true
             }
-            Key::Character("q") | Key::Character("Q") => {
+            NavKey::OrbitCcw => {
                 self.held_orbit_ccw = pressed;
                 true
             }
-            Key::Character("e") | Key::Character("E") => {
+            NavKey::OrbitCw => {
                 self.held_orbit_cw = pressed;
                 true
             }
@@ -189,14 +197,10 @@ mod tests {
     #[test]
     fn long_idle_gap_clamps_decay_fraction_without_overshoot_or_sign_flip() {
         let mut handler = ShiftHandler::new(0.2, 100.0);
-        assert!(handler.process_key_press(
-            &Key::Character("d".into()),
-            winit::event::ElementState::Pressed
-        ));
+        assert!(handler.process_key(NavKey::Right, ButtonState::Pressed));
         let initial_x = handler.camera_translate.x;
         assert!(initial_x > 0.0);
 
-        // Even after a multi-second idle pause, the decay factor caps at 1.0 instead of flipping sign.
         let factor = (Duration::from_secs(60).as_secs_f64() / handler.speed).min(1.0);
         let delta = handler.camera_translate * factor;
         handler.camera_translate -= delta;

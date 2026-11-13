@@ -1,41 +1,41 @@
+//! Pointer-click rendered-geometry query logger.
+
 use std::time::Duration;
 
 use cgmath::Vector2;
-use maplibre::{
-    context::MapContext, coords::WorldCoords, io::geometry_index::IndexedGeometry,
-    render::tile_view_pattern::DEFAULT_TILE_SIZE,
-};
-use winit::event::{ElementState, MouseButton};
 
-use crate::input::{
+use super::{
+    events::{ButtonState, PointerButton},
     projection::{globe_world_at_screen, uses_globe},
     UpdateState,
 };
+use crate::{
+    context::MapContext, coords::WorldCoords, io::geometry_index::IndexedGeometry,
+    render::tile_view_pattern::DEFAULT_TILE_SIZE,
+};
 
-pub struct QueryHandler {
+#[derive(Default)]
+pub(crate) struct QueryHandler {
     window_position: Option<Vector2<f64>>,
     clicking: bool,
 }
 
 impl QueryHandler {
-    pub fn new() -> Self {
-        Self {
-            window_position: None,
-            clicking: false,
-        }
+    pub(crate) fn new() -> Self {
+        Self::default()
     }
 
-    pub fn process_touch_start(&mut self) -> bool {
+    pub(crate) fn process_touch_start(&mut self) -> bool {
         self.clicking = true;
         true
     }
 
-    pub fn process_touch_end(&mut self) -> bool {
+    pub(crate) fn process_touch_end(&mut self) -> bool {
         self.clicking = false;
         true
     }
 
-    pub fn process_window_position(
+    pub(crate) fn process_window_position(
         &mut self,
         window_position: &Vector2<f64>,
         _touch: bool,
@@ -44,12 +44,15 @@ impl QueryHandler {
         true
     }
 
-    pub fn process_mouse_key_press(&mut self, key: &MouseButton, state: &ElementState) -> bool {
-        if *key != MouseButton::Left {
+    pub(crate) fn process_pointer_button(
+        &mut self,
+        button: PointerButton,
+        state: ButtonState,
+    ) -> bool {
+        if button != PointerButton::Primary {
             return false;
         }
-
-        self.clicking = *state == ElementState::Pressed;
+        self.clicking = state == ButtonState::Pressed;
         true
     }
 }
@@ -65,13 +68,24 @@ impl UpdateState for QueryHandler {
         }: &mut MapContext,
         _dt: Duration,
     ) {
+        self.update_parts(style, view_state, world);
+    }
+}
+
+impl QueryHandler {
+    pub(crate) fn update_parts(
+        &mut self,
+        style: &crate::style::Style,
+        view_state: &mut crate::render::view_state::ViewState,
+        world: &crate::tcs::world::World,
+    ) {
         if self.clicking {
             if let Some(window_position) = self.window_position {
                 let Ok(inverted_view_proj) = view_state.inverted_view_projection() else {
                     return;
                 };
 
-                let z = view_state.zoom().zoom_level(DEFAULT_TILE_SIZE); // FIXME: can be wrong, if tiles of different z are visible
+                let z = view_state.zoom().zoom_level(DEFAULT_TILE_SIZE);
                 let zoom = view_state.zoom();
 
                 let coordinates = if uses_globe(style, view_state) {
@@ -104,7 +118,7 @@ impl UpdateState for QueryHandler {
                                 .collect::<Vec<IndexedGeometry<f64>>>()
                         })
                     {
-                        log::info!(
+                        tracing::info!(
                             "Clicked on geometry: {:?}",
                             geometries
                                 .iter()
@@ -112,7 +126,7 @@ impl UpdateState for QueryHandler {
                                 .collect::<Vec<_>>()
                         );
                     } else {
-                        log::info!("No geometry found.",);
+                        tracing::info!("No geometry found.");
                     }
                 }
             }

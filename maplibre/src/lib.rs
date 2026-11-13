@@ -27,8 +27,11 @@ pub mod euclid {
 pub mod celestial;
 pub mod context;
 pub mod coords;
+pub mod custom_layer;
+pub mod event;
 #[cfg(feature = "headless")]
 pub mod headless;
+pub mod input;
 pub mod io;
 pub mod platform;
 pub mod projection;

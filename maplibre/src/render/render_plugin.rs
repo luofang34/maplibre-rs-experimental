@@ -109,7 +109,8 @@ impl<E: Environment> Plugin<E> for RenderPlugin {
             RenderStageLabel::Queue,
             queue_stage
                 .with_system(tile_view_pattern_system)
-                .with_system(upload_system),
+                .with_system(upload_system)
+                .with_system(crate::custom_layer::queue_custom_layers_system),
         )?;
         schedule.add_stage(
             RenderStageLabel::PhaseSort,

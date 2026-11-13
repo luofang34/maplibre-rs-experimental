@@ -1,8 +1,17 @@
+//! Single-pointer drag-pan, trackpad two-finger scroll pan, and inertial ease-out handler.
+
 use std::time::Duration;
 
 use cgmath::{Point2, Vector2};
 use instant::Instant;
-use maplibre::{
+
+use super::{
+    events::{ButtonState, PointerButton},
+    inertia::PanInertia,
+    projection::{center_pixel, pan_globe_by_pixels, pan_plane_by_pixels},
+    UpdateState,
+};
+use crate::{
     context::MapContext,
     terrain::interaction::{
         begin_gesture, finish_gesture,
@@ -10,16 +19,9 @@ use maplibre::{
         resolve_gesture_anchor,
     },
 };
-use winit::event::{ElementState, MouseButton};
-
-use super::{
-    inertia::PanInertia,
-    projection::{center_pixel, pan_globe_by_pixels, pan_plane_by_pixels},
-    UpdateState,
-};
 
 #[derive(Default)]
-pub struct PanHandler {
+pub(crate) struct PanHandler {
     window_position: Option<Vector2<f64>>,
     last_window_position: Option<Vector2<f64>>,
     start_window_position: Option<Vector2<f64>>,
@@ -35,17 +37,23 @@ pub struct PanHandler {
 }
 
 impl UpdateState for PanHandler {
-    fn update_state(
+    fn update_state(&mut self, state: &mut MapContext, dt: Duration) {
+        self.update_state_at(state, dt, Instant::now());
+    }
+}
+
+impl PanHandler {
+    pub(crate) fn update_state_at(&mut self, state: &mut MapContext, _dt: Duration, now: Instant) {
+        self.update_parts_at(&state.style, &mut state.view_state, &mut state.world, now);
+    }
+
+    pub(crate) fn update_parts_at(
         &mut self,
-        MapContext {
-            style,
-            view_state,
-            world,
-            ..
-        }: &mut MapContext,
-        _dt: Duration,
+        style: &crate::style::Style,
+        view_state: &mut crate::render::view_state::ViewState,
+        world: &mut crate::tcs::world::World,
+        now: Instant,
     ) {
-        let now = Instant::now();
         if let Some(delta) = self.pending_scroll_pan.take() {
             if delta.x.abs() > f64::EPSILON || delta.y.abs() > f64::EPSILON {
                 let cursor = self
@@ -118,20 +126,26 @@ impl UpdateState for PanHandler {
         }
         pan_plane_by_pixels(view_state, window_position, delta, plane);
     }
-}
 
-impl PanHandler {
-    pub fn process_touch_start(&mut self, window_position: &Vector2<f64>) -> bool {
+    pub(crate) fn is_coasting(&self) -> bool {
+        self.inertia.is_active()
+    }
+
+    pub(crate) fn process_touch_start(&mut self, window_position: &Vector2<f64>) -> bool {
         self.begin(Some(*window_position));
         true
     }
 
-    pub fn process_touch_end(&mut self) -> bool {
-        self.end();
+    pub(crate) fn process_touch_end_at(&mut self, now: Instant) -> bool {
+        self.end_at(now);
         true
     }
 
-    pub fn process_window_position(&mut self, window_position: &Vector2<f64>, touch: bool) -> bool {
+    pub(crate) fn process_window_position(
+        &mut self,
+        window_position: &Vector2<f64>,
+        touch: bool,
+    ) -> bool {
         if !self.is_panning && !touch {
             self.start_window_position = Some(*window_position);
             self.last_window_position = Some(*window_position);
@@ -142,40 +156,54 @@ impl PanHandler {
         true
     }
 
-    pub fn process_mouse_key_press(&mut self, key: &MouseButton, state: &ElementState) -> bool {
-        if *key != MouseButton::Left {
+    pub(crate) fn process_pointer_button_at(
+        &mut self,
+        button: PointerButton,
+        state: ButtonState,
+        now: Instant,
+    ) -> bool {
+        if button != PointerButton::Primary {
             return false;
         }
-        if *state == ElementState::Pressed {
+        if state == ButtonState::Pressed {
             self.begin(None);
         } else {
-            self.end();
+            self.end_at(now);
         }
         true
     }
 
-    pub fn is_panning(&self) -> bool {
+    pub(crate) fn is_panning(&self) -> bool {
         self.is_panning
     }
 
-    /// Accumulates a 2D pixel pan delta from a trackpad two-finger scroll gesture (Apple Maps style).
-    pub fn process_trackpad_scroll_pan(&mut self, delta_pixels: Vector2<f64>) {
+    /// Accumulates a 2D pixel pan delta from a trackpad two-finger scroll gesture.
+    pub(crate) fn process_trackpad_scroll_pan(&mut self, delta_pixels: Vector2<f64>) {
         self.inertia.cancel();
         let current = self.pending_scroll_pan.unwrap_or(Vector2::new(0.0, 0.0));
         self.pending_scroll_pan = Some(current + delta_pixels);
     }
 
-    pub fn begin_pan(&mut self, window_position: Option<Vector2<f64>>) {
+    pub(crate) fn begin_pan(&mut self, window_position: Option<Vector2<f64>>) {
         self.begin(window_position);
     }
 
-    pub fn end_pan(&mut self) {
-        self.end();
+    pub(crate) fn end_pan_at(&mut self, now: Instant) {
+        self.end_at(now);
+    }
+
+    /// Stops an active 1-finger pan without starting inertia (e.g. when a second finger lands).
+    pub(crate) fn cancel_pan(&mut self) {
+        self.inertia.cancel();
+        self.start_window_position = None;
+        self.last_window_position = None;
+        self.window_position = None;
+        self.is_panning = false;
     }
 
     /// Rebases an active touch pan to a new finger position without releasing inertia, used when
     /// a multi-finger pinch transitions cleanly back to a single finger.
-    pub fn rebase_touch(&mut self, window_position: Vector2<f64>) {
+    pub(crate) fn rebase_touch(&mut self, window_position: Vector2<f64>) {
         self.inertia.cancel();
         self.is_panning = true;
         self.gesture_plane = None;
@@ -188,8 +216,6 @@ impl PanHandler {
     fn begin(&mut self, window_position: Option<Vector2<f64>>) {
         self.inertia.cancel();
         self.is_panning = true;
-        // A press while inertia still carries the last drag starts a new one, which grabs
-        // whatever is under the new press.
         self.gesture_plane = None;
         self.globe_anchor = None;
         if let Some(window_position) = window_position {
@@ -199,8 +225,8 @@ impl PanHandler {
         }
     }
 
-    fn end(&mut self) {
-        self.inertia.release(Instant::now());
+    fn end_at(&mut self, now: Instant) {
+        self.inertia.release(now);
         self.start_window_position = None;
         self.last_window_position = None;
         self.window_position = None;

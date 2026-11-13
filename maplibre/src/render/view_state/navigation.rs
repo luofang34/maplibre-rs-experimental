@@ -424,13 +424,15 @@ impl ViewState {
         let Some(view) = self.pose_view() else {
             return;
         };
-        let zoom = Zoom::new(view.style_zoom);
-        let world_size = TILE_SIZE * 2_f64.powf(view.style_zoom);
+        let zoom = self.clamp_zoom(Zoom::new(view.style_zoom));
+        let world_size = TILE_SIZE * 2_f64.powf(zoom.value());
         let latitude = view.center.latitude.clamp(
             -scale::MERCATOR_LATITUDE_LIMIT,
             scale::MERCATOR_LATITUDE_LIMIT,
         );
-        let mercator = LatLon::new(latitude, view.center.longitude).to_mercator();
+        let mercator = self
+            .clamp_center(LatLon::new(latitude, view.center.longitude))
+            .to_mercator();
         self.update_zoom(zoom);
         let camera = self.camera_mut();
         camera.move_to(Point2::new(

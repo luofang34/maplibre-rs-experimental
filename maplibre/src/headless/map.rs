@@ -27,8 +27,10 @@ use crate::{
 };
 
 mod camera;
+mod custom_layers;
 mod dem;
 mod error;
+mod events;
 #[cfg(test)]
 mod injected_loader;
 mod labels;
@@ -103,6 +105,10 @@ impl HeadlessMap {
         let view_state = initial_view_state(window_size, &style);
 
         let mut world = World::default();
+        world.resources.insert(crate::event::MapEventBus::new());
+        world
+            .resources
+            .insert(crate::custom_layer::CustomLayerRegistry::new());
         let mut schedule = Schedule::default();
         let kernel = Rc::new(kernel);
 
@@ -130,7 +136,24 @@ impl HeadlessMap {
         layers: ProcessedLayers,
     ) -> Result<(), HeadlessMapOperationError> {
         let context = &mut self.map_context;
-        layers.insert_into_tiles(&context.style, &mut context.world.tiles)?;
+        if let Err(error) = layers.insert_into_tiles(&context.style, &mut context.world.tiles) {
+            context
+                .event_bus()
+                .emit_error(crate::event::MapErrorKind::Source, error.to_string());
+            return Err(error);
+        }
+        let bus = context.event_bus();
+        bus.mark_busy();
+        for (name, source) in &context.style.sources {
+            if matches!(
+                source,
+                crate::style::source::Source::Vector(_) | crate::style::source::Source::GeoJson(_)
+            ) {
+                bus.emit(crate::event::MapEvent::SourceDataLoaded {
+                    source: name.clone(),
+                });
+            }
+        }
         self.advance_frames(1)
     }
 
@@ -144,8 +167,7 @@ impl HeadlessMap {
                 .resources
                 .get_or_init_mut::<FrameInput>()
                 .advance(HEADLESS_FRAME_INTERVAL);
-            crate::render::frame::run_frame(&mut self.schedule, &mut self.map_context)
-                .map_err(|source| HeadlessMapOperationError::Schedule { source })?;
+            self.run_frame()?;
         }
         Ok(())
     }
@@ -155,8 +177,22 @@ impl HeadlessMap {
     /// A map built without the headless plugin keeps its request systems, so this is the
     /// frame step of a host that renders into the offscreen texture continuously.
     pub fn run_frame(&mut self) -> Result<(), HeadlessMapOperationError> {
-        crate::render::frame::run_frame(&mut self.schedule, &mut self.map_context)
-            .map_err(|source| HeadlessMapOperationError::Schedule { source })
+        use crate::io::apc::AsyncProcedureCall as _;
+        self.map_context
+            .mark_busy_if_needed(self.kernel.apc().has_arrivals());
+        if let Err(source) =
+            crate::render::frame::run_frame(&mut self.schedule, &mut self.map_context)
+        {
+            self.map_context
+                .event_bus()
+                .emit_error(crate::event::MapErrorKind::Schedule, source.to_string());
+            return Err(HeadlessMapOperationError::Schedule { source });
+        }
+        self.map_context.sync_frame_events(
+            self.kernel.apc().image_providers(),
+            self.kernel.apc().has_arrivals(),
+        );
+        Ok(())
     }
 
     /// The frame clock and view source the next frame applies.

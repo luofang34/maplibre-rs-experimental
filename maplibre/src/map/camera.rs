@@ -1,14 +1,17 @@
 //! The camera a map starts with, jumps made before the renderer is ready, and animated moves.
 
-use super::{Map, MapError};
+use super::{CurrentMapContext, Map, MapError};
 use crate::{
     context::{FlightId, FlightOutcome},
     coords::{LatLon, WorldCoords, Zoom},
     environment::Environment,
     projection::globe::scale::MERCATOR_LATITUDE_LIMIT,
-    render::view_state::{CameraOptions, FlightCurve, NavigationError, ViewState},
+    render::view_state::{
+        CameraBounds, CameraFit, CameraOptions, EdgePadding, FlightCurve, LatLonBounds,
+        NavigationError, ViewState,
+    },
     style::Style,
-    window::{HeadedMapWindow, MapWindowConfig, PhysicalSize},
+    window::{HeadedMapWindow, MapWindow, MapWindowConfig, PhysicalSize},
 };
 
 /// The jumps made before the renderer is ready, as one: a later jump's fields replace an
@@ -32,6 +35,7 @@ pub(super) fn starting_view(
     retained: Option<&ViewState>,
     window_size: PhysicalSize,
     max_pitch: cgmath::Deg<f64>,
+    camera_bounds: CameraBounds,
     jump: Option<CameraOptions>,
 ) -> Result<ViewState, NavigationError> {
     let mut view = match retained {
@@ -39,9 +43,14 @@ pub(super) fn starting_view(
             let mut view = view.clone();
             view.clear_external_view();
             view.set_max_pitch(max_pitch);
+            view.set_camera_bounds(camera_bounds);
             view
         }
-        None => initial_view_state(style, window_size, max_pitch),
+        None => {
+            let mut view = initial_view_state(style, window_size, max_pitch);
+            view.set_camera_bounds(camera_bounds);
+            view
+        }
     };
     if let Some(jump) = jump {
         view.jump_to(jump)?;
@@ -111,6 +120,105 @@ where
     pub fn stop_flight(&mut self) {
         if let Ok(context) = self.context_mut() {
             context.stop_flight();
+        }
+    }
+
+    /// Returns the active zoom and geographic center bounds enforced on the camera.
+    pub fn camera_bounds(&self) -> CameraBounds {
+        match &self.map_context {
+            CurrentMapContext::Ready(context) => context.camera_bounds(),
+            CurrentMapContext::Pending(_) => self.camera_bounds,
+        }
+    }
+
+    /// Replaces the zoom and geographic center bounds, before or after renderer initialization.
+    pub fn set_camera_bounds(&mut self, bounds: CameraBounds) {
+        self.camera_bounds = bounds;
+        if let CurrentMapContext::Ready(context) = &mut self.map_context {
+            context.set_camera_bounds(bounds);
+        }
+    }
+
+    /// Sets or clears the minimum continuous zoom level enforced on the camera.
+    pub fn set_min_zoom(&mut self, min_zoom: Option<f64>) {
+        self.camera_bounds.min_zoom = min_zoom.filter(|v| v.is_finite());
+        if let CurrentMapContext::Ready(context) = &mut self.map_context {
+            context.set_min_zoom(min_zoom);
+        }
+    }
+
+    /// Sets or clears the maximum continuous zoom level enforced on the camera.
+    pub fn set_max_zoom(&mut self, max_zoom: Option<f64>) {
+        self.camera_bounds.max_zoom = max_zoom.filter(|v| v.is_finite());
+        if let CurrentMapContext::Ready(context) = &mut self.map_context {
+            context.set_max_zoom(max_zoom);
+        }
+    }
+
+    /// Sets or clears the geographic bounding box restricting the camera's center.
+    pub fn set_max_bounds(&mut self, max_bounds: Option<LatLonBounds>) {
+        self.camera_bounds.max_bounds = max_bounds;
+        if let CurrentMapContext::Ready(context) = &mut self.map_context {
+            context.set_max_bounds(max_bounds);
+        }
+    }
+
+    /// Computes the center and maximum zoom that frame `bounds` within `padding`, before or after
+    /// renderer initialization.
+    pub fn camera_for_bounds(
+        &self,
+        bounds: LatLonBounds,
+        padding: EdgePadding,
+        bearing: Option<cgmath::Deg<f64>>,
+        pitch: Option<cgmath::Deg<f64>>,
+    ) -> Result<CameraFit, MapError> {
+        match &self.map_context {
+            CurrentMapContext::Ready(context) => {
+                Ok(context.camera_for_bounds(bounds, padding, bearing, pitch))
+            }
+            CurrentMapContext::Pending(pending) => {
+                let window_size = self.window.size();
+                let mut temp_view = starting_view(
+                    &pending.style,
+                    pending.view_state.as_ref(),
+                    window_size,
+                    self.max_pitch,
+                    self.camera_bounds,
+                    pending.jump,
+                )?;
+                temp_view.resize(window_size.to_logical(self.window.scale_factor()));
+                Ok(temp_view.camera_for_bounds(bounds, padding, bearing, pitch))
+            }
+        }
+    }
+
+    /// Moves the camera immediately to frame `bounds` within `padding`, before or after renderer
+    /// initialization.
+    pub fn fit_bounds(
+        &mut self,
+        bounds: LatLonBounds,
+        padding: EdgePadding,
+    ) -> Result<CameraFit, MapError> {
+        let window_size = self.window.size();
+        let scale_factor = self.window.scale_factor();
+        let max_pitch = self.max_pitch;
+        let camera_bounds = self.camera_bounds;
+        match &mut self.map_context {
+            CurrentMapContext::Ready(context) => Ok(context.fit_bounds(bounds, padding)?),
+            CurrentMapContext::Pending(pending) => {
+                let mut temp_view = starting_view(
+                    &pending.style,
+                    pending.view_state.as_ref(),
+                    window_size,
+                    max_pitch,
+                    camera_bounds,
+                    pending.jump,
+                )?;
+                temp_view.resize(window_size.to_logical(scale_factor));
+                let fit = temp_view.camera_for_bounds(bounds, padding, None, None);
+                pending.jump = Some(merged(pending.jump, fit.into()));
+                Ok(fit)
+            }
         }
     }
 }

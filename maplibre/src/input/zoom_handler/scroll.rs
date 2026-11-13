@@ -4,7 +4,8 @@
 use std::time::Duration;
 
 use instant::Instant;
-use winit::event::MouseScrollDelta;
+
+use crate::input::events::MouseScrollDelta;
 
 /// Pixels one line of a wheel counts as: a browser's line as GL JS counts it, and macOS's
 /// lines as Chrome counts them, a slow notch of a tenth of a line making one wheel step;
@@ -30,15 +31,12 @@ const FIRST_EVENT_WAIT: Duration = Duration::from_millis(40);
 /// trackpad's: many small deltas in quick succession.
 const TRACKPAD_PACE: f64 = 200.0;
 
-/// The device scroll input came from, which sets its zoom rate.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum ScrollDevice {
     Wheel,
     Trackpad,
 }
 
-/// Scroll input of one frame, in logical pixels before the sensitivity, positive towards
-/// zooming in.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Scroll {
     device: ScrollDevice,
@@ -46,9 +44,6 @@ struct Scroll {
 }
 
 impl Scroll {
-    /// The zoom change, by GL JS's sigmoid of the frame's scroll: small scrolls move the map
-    /// in proportion, and a frame doubles or halves its scale at most. The rate is chosen by
-    /// the scroll as the device sent it, as GL JS chooses it.
     fn zoom(self, sensitivity: f64) -> f64 {
         let rate = match self.device {
             ScrollDevice::Wheel if self.pixels.abs() > WHEEL_ZOOM_DELTA => WHEEL_ZOOM_RATE,
@@ -89,23 +84,20 @@ impl ScrollInput {
         self.sensitivity
     }
 
-    /// Adds a scroll event: a wheel's lines as pixels, and physical pixels as logical ones,
-    /// the units GL JS's rates apply to.
-    pub(super) fn add(&mut self, delta: &MouseScrollDelta, scale_factor: f64, now: Instant) {
-        match delta {
-            MouseScrollDelta::LineDelta(_horizontal, vertical) => {
+    /// Adds a scroll event in logical coordinates (`LineDelta` or logical `PixelDelta`).
+    pub(super) fn add(&mut self, delta: &MouseScrollDelta, now: Instant) {
+        match *delta {
+            MouseScrollDelta::LineDelta { y, .. } => {
                 self.last_event = Some(now);
                 self.device = Some(ScrollDevice::Wheel);
-                self.push(ScrollDevice::Wheel, f64::from(*vertical) * PIXELS_PER_LINE);
+                self.push(ScrollDevice::Wheel, f64::from(y) * PIXELS_PER_LINE);
             }
-            MouseScrollDelta::PixelDelta(position) => {
-                self.add_pixels(position.y / scale_factor, now);
+            MouseScrollDelta::PixelDelta { y, .. } => {
+                self.add_pixels(y, now);
             }
         }
     }
 
-    /// Tells the device of pixel deltas as GL JS's scroll zoom does, which sees the same
-    /// deltas from a browser.
     fn add_pixels(&mut self, pixels: f64, now: Instant) {
         let gap = self
             .last_event
@@ -135,8 +127,6 @@ impl ScrollInput {
         self.push(device, held + pixels);
     }
 
-    /// The zoom change of the frame's scroll, if any; the first event of a gesture that no
-    /// second one followed in time counts as a wheel's.
     pub(super) fn take_zoom(&mut self, now: Instant) -> Option<f64> {
         if self
             .held
@@ -148,7 +138,6 @@ impl ScrollInput {
         self.frame.take().map(|scroll| scroll.zoom(sensitivity))
     }
 
-    /// Time until a held first scroll event is released as a wheel step, if one is waiting.
     pub(super) fn next_wait(&self, now: Instant) -> Option<Duration> {
         self.held
             .map(|(_, at)| FIRST_EVENT_WAIT.saturating_sub(now.saturating_duration_since(at)))
@@ -161,8 +150,6 @@ impl ScrollInput {
         }
     }
 
-    /// The frame's input counts as the device that sent the last of it, as GL JS keeps one
-    /// device for a gesture.
     fn push(&mut self, device: ScrollDevice, pixels: f64) {
         let before = self.frame.map_or(0.0, |scroll| scroll.pixels);
         self.frame = Some(Scroll {
@@ -172,7 +159,6 @@ impl ScrollInput {
     }
 }
 
-/// Whether the delta is a whole number of a wheel's steps.
 fn is_wheel_step(pixels: f64) -> bool {
     let steps = pixels / WHEEL_ZOOM_DELTA;
     (steps - steps.round()).abs() <= 1e-9 * steps.abs().max(1.0)

@@ -136,6 +136,8 @@ pub struct Camera {
     bearing: Rad<f64>,
     roll: Rad<f64>,
     max_pitch: Rad<f64>,
+    world_size: f64,
+    mercator_bounds: Option<(Point2<f64>, Point2<f64>)>,
 }
 
 impl SignificantlyDifferent for Camera {
@@ -167,7 +169,38 @@ impl Camera {
             bearing: Rad::zero(),
             roll: Rad::zero(),
             max_pitch,
+            world_size: 0.0,
+            mercator_bounds: None,
         }
+    }
+
+    pub(crate) fn set_world_size(&mut self, world_size: f64) {
+        if world_size.is_finite() && world_size > 0.0 {
+            self.world_size = world_size;
+            self.position = self.clamp_position(self.position);
+        }
+    }
+
+    pub(crate) fn set_mercator_bounds(&mut self, bounds: Option<(Point2<f64>, Point2<f64>)>) {
+        self.mercator_bounds = bounds;
+        self.position = self.clamp_position(self.position);
+    }
+
+    fn clamp_position(&self, position: Point2<f64>) -> Point2<f64> {
+        let Some((min_m, max_m)) = self.mercator_bounds else {
+            return position;
+        };
+        if self.world_size <= 0.0 {
+            return position;
+        }
+        let min_x = min_m.x * self.world_size;
+        let max_x = max_m.x * self.world_size;
+        let min_y = min_m.y * self.world_size;
+        let max_y = max_m.y * self.world_size;
+        Point2::new(
+            position.x.clamp(min_x, max_x),
+            position.y.clamp(min_y, max_y),
+        )
     }
 
     /// Returns the largest pitch the camera accepts.
@@ -243,12 +276,12 @@ impl Camera {
 
     /// Offsets the orbit center in world pixels, without rotating the delta by the camera bearing.
     pub fn move_relative(&mut self, delta: Vector2<f64>) {
-        self.position += delta;
+        self.position = self.clamp_position(self.position + delta);
     }
 
     /// Replaces the orbit center in world pixels without changing orientation.
     pub fn move_to(&mut self, new_position: Point2<f64>) {
-        self.position = new_position;
+        self.position = self.clamp_position(new_position);
     }
 
     /// Returns the world-pixel orbit center as a vector from the world origin.

@@ -6,6 +6,8 @@ use std::rc::Rc;
 
 use thiserror::Error;
 
+#[cfg(feature = "geojson")]
+use crate::geojson::{query::SourceQueryError, update::SourceUpdateError};
 use crate::{
     context::MapContext,
     environment::Environment,
@@ -26,14 +28,6 @@ use crate::{
     },
     tcs::world::World,
     window::{HeadedMapWindow, MapWindow, MapWindowConfig, WindowCreateError},
-};
-#[cfg(feature = "geojson")]
-use crate::{
-    geojson::{
-        query::{SourceFeature, SourceQueryError, SourceQueryOptions},
-        update::{GeoJsonDiff, SourceUpdateError},
-    },
-    style::source::GeoJsonData,
 };
 
 /// A window, renderer or scheduled update failed, or the map is in the wrong lifecycle state.
@@ -103,7 +97,10 @@ pub struct Map<E: Environment> {
     window: <E::MapWindowConfig as MapWindowConfig>::MapWindow,
 
     plugins: Vec<Box<dyn Plugin<E>>>,
+    event_bus: crate::event::MapEventBus,
+    custom_layers: crate::custom_layer::CustomLayerRegistry,
     max_pitch: cgmath::Deg<f64>,
+    camera_bounds: crate::render::view_state::CameraBounds,
     #[cfg(feature = "experimental")]
     sun: Option<crate::celestial::EcefDirection>,
 }
@@ -138,7 +135,10 @@ where
             })),
             window,
             plugins,
+            event_bus: crate::event::MapEventBus::new(),
+            custom_layers: crate::custom_layer::CustomLayerRegistry::new(),
             max_pitch: DEFAULT_MAX_PITCH,
+            camera_bounds: crate::render::view_state::CameraBounds::default(),
             #[cfg(feature = "experimental")]
             sun: None,
         };
@@ -209,12 +209,17 @@ where
                     retained_view.as_ref(),
                     window_size,
                     self.max_pitch,
+                    self.camera_bounds,
                     jump.take(),
                 )?;
                 view_state.resize(window_size.to_logical(self.window.scale_factor()));
 
                 let mut world = World::default();
                 world.resources.insert(self.request_attempts.clone());
+                world.resources.insert(self.event_bus.clone());
+                world
+                    .resources
+                    .insert(std::mem::take(&mut self.custom_layers));
                 crate::sdf::provided::set_pixel_ratio(&mut world, self.window.scale_factor());
                 #[cfg(feature = "experimental")]
                 crate::celestial::set_sun_direction(&mut world, self.sun);
@@ -226,6 +231,12 @@ where
                         &mut world,
                         &mut renderer,
                     ) {
+                        if let Some(reg) = world
+                            .resources
+                            .remove::<crate::custom_layer::CustomLayerRegistry>()
+                        {
+                            self.custom_layers = reg;
+                        }
                         // A later attempt starts from an empty schedule.
                         self.schedule.clear();
                         return Err(MapError::Plugin(error));
@@ -265,51 +276,39 @@ where
     /// Call [`Self::initialize_renderer`] before drawing again.
     pub fn reset(&mut self) {
         self.schedule.clear();
-        match &self.map_context {
-            CurrentMapContext::Ready(c) => {
+        self.event_bus.reset_style_state();
+        let prev = std::mem::replace(
+            &mut self.map_context,
+            CurrentMapContext::Pending(Box::new(PendingMapContext {
+                style: Style::default(),
+                renderer_builder: RendererBuilder::new(),
+                view_state: None,
+                jump: None,
+            })),
+        );
+        match prev {
+            CurrentMapContext::Ready(mut c) => {
+                if let Some(mut reg) = c
+                    .world
+                    .resources
+                    .remove::<crate::custom_layer::CustomLayerRegistry>()
+                {
+                    reg.mark_all_uninitialized();
+                    self.custom_layers = reg;
+                }
                 self.map_context = CurrentMapContext::Pending(Box::new(PendingMapContext {
-                    style: c.style.clone(),
-                    view_state: Some(c.view_state.clone()),
+                    style: c.style,
+                    view_state: Some(c.view_state),
                     renderer_builder: RendererBuilder::new()
                         .with_renderer_settings(c.renderer.settings)
                         .with_wgpu_settings(c.renderer.wgpu_settings.clone()),
                     jump: None,
-                }))
+                }));
             }
-            CurrentMapContext::Pending(_) => {}
-        }
-    }
-
-    /// Replaces the data of a GeoJSON source, before or after the renderer is initialized.
-    #[cfg(feature = "geojson")]
-    pub fn set_geojson_data(
-        &mut self,
-        source_name: &str,
-        data: GeoJsonData,
-    ) -> Result<(), MapError> {
-        match &mut self.map_context {
-            CurrentMapContext::Ready(context) => context.set_geojson_data(source_name, data)?,
             CurrentMapContext::Pending(pending) => {
-                pending.style.set_geojson_data(source_name, data)?
+                self.map_context = CurrentMapContext::Pending(pending);
             }
         }
-        Ok(())
-    }
-
-    /// Adds, changes and removes features of an inline GeoJSON source.
-    #[cfg(feature = "geojson")]
-    pub fn update_geojson_data(
-        &mut self,
-        source_name: &str,
-        diff: &GeoJsonDiff,
-    ) -> Result<(), MapError> {
-        match &mut self.map_context {
-            CurrentMapContext::Ready(context) => context.update_geojson_data(source_name, diff)?,
-            CurrentMapContext::Pending(pending) => {
-                pending.style.update_geojson_data(source_name, diff)?
-            }
-        }
-        Ok(())
     }
 
     /// Applies a style change before or after the renderer is initialized; when it needs loaded
@@ -318,9 +317,21 @@ where
         &mut self,
         apply: impl FnOnce(&mut Style) -> Result<StyleChange, StyleMutationError>,
     ) -> Result<StyleChange, MapError> {
-        match &mut self.map_context {
-            CurrentMapContext::Ready(context) => Ok(context.mutate_style(apply)?),
-            CurrentMapContext::Pending(pending) => Ok(apply(&mut pending.style)?),
+        let result = match &mut self.map_context {
+            CurrentMapContext::Ready(context) => context.mutate_style(apply),
+            CurrentMapContext::Pending(pending) => apply(&mut pending.style),
+        };
+        match result {
+            Ok(change) => {
+                self.event_bus.mark_busy();
+                self.event_bus.emit(crate::event::MapEvent::StyleDataLoaded);
+                Ok(change)
+            }
+            Err(error) => {
+                self.event_bus
+                    .emit_error(crate::event::MapErrorKind::Style, error.to_string());
+                Err(MapError::StyleChange(error))
+            }
         }
     }
 
@@ -401,21 +412,6 @@ where
         }
     }
 
-    /// The features of an inline GeoJSON source, before or after the renderer is initialized;
-    /// see [`crate::style::Style::query_source_features`].
-    #[cfg(feature = "geojson")]
-    pub fn query_source_features(
-        &self,
-        source_name: &str,
-        options: &SourceQueryOptions,
-    ) -> Result<Vec<SourceFeature>, MapError> {
-        let style = match &self.map_context {
-            CurrentMapContext::Ready(context) => &context.style,
-            CurrentMapContext::Pending(pending) => &pending.style,
-        };
-        Ok(style.query_source_features(source_name, options)?)
-    }
-
     /// Placed symbols under a point or box, topmost first. Requires an initialized renderer.
     pub fn query_rendered_symbols(
         &self,
@@ -458,6 +454,8 @@ where
 }
 
 pub(crate) mod camera;
+mod custom_layers;
+mod events;
 mod frame;
 pub mod handle;
 mod provided_images;

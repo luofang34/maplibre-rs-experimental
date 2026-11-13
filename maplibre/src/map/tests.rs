@@ -3,7 +3,7 @@
 use std::error::Error;
 
 use super::*;
-use crate::render::graph::RenderGraphError;
+use crate::render::{graph::RenderGraphError, view_state::CameraBounds};
 
 #[test]
 fn plugin_error_exposes_its_original_cause() {
@@ -53,6 +53,7 @@ fn a_jump_before_the_renderer_is_ready_moves_the_view_the_map_starts_with() {
         None,
         size,
         DEFAULT_MAX_PITCH,
+        CameraBounds::default(),
         Some(CameraOptions {
             center: Some(LatLon::new(90.0, 11.6)),
             zoom: Some(12.0),
@@ -77,12 +78,21 @@ fn a_jump_before_the_renderer_is_ready_moves_the_view_the_map_starts_with() {
     );
 
     // A map reset keeps its view, and a jump made before it comes back moves that view.
-    let retained = starting_view(&style, None, size, DEFAULT_MAX_PITCH, None).expect("view");
+    let retained = starting_view(
+        &style,
+        None,
+        size,
+        DEFAULT_MAX_PITCH,
+        CameraBounds::default(),
+        None,
+    )
+    .expect("view");
     let moved = starting_view(
         &style,
         Some(&retained),
         size,
         DEFAULT_MAX_PITCH,
+        CameraBounds::default(),
         Some(CameraOptions {
             zoom: Some(5.0),
             ..Default::default()
@@ -129,7 +139,15 @@ fn initial_style_center_at_poles_clamps_to_finite_mercator_latitude() {
             zoom: Some(1.5),
             ..Style::default()
         };
-        let view = starting_view(&style, None, size, DEFAULT_MAX_PITCH, None).expect("view");
+        let view = starting_view(
+            &style,
+            None,
+            size,
+            DEFAULT_MAX_PITCH,
+            CameraBounds::default(),
+            None,
+        )
+        .expect("view");
         let center = view.center_lat_lon();
         assert!(
             center.latitude.is_finite() && center.longitude.is_finite(),

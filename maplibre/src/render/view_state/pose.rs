@@ -195,6 +195,8 @@ impl ViewState {
         pitch: Deg<f64>,
         roll: Deg<f64>,
     ) {
+        let zoom = self.clamp_zoom(zoom);
+        let center = self.clamp_center(center);
         let world_size = TILE_SIZE * 2f64.powf(zoom.value());
         let center = mercator_from_lat_lon(center);
         self.update_zoom(zoom);
@@ -254,16 +256,18 @@ impl ViewState {
     /// those left out.
     pub(crate) fn resolve_jump(&self, options: CameraOptions) -> ResolvedJump {
         let camera = self.camera();
+        // A free-globe camera may look past the Mercator world the flat center stops at.
+        let raw_center = options.center.unwrap_or_else(|| {
+            self.pose_view()
+                .map_or_else(|| self.center_lat_lon(), |view| view.center)
+        });
+        let raw_zoom = options
+            .zoom
+            .filter(|zoom| zoom.is_finite())
+            .map_or_else(|| self.zoom(), Zoom::new);
         ResolvedJump {
-            // A free-globe camera may look past the Mercator world the flat center stops at.
-            center: options.center.unwrap_or_else(|| {
-                self.pose_view()
-                    .map_or_else(|| self.center_lat_lon(), |view| view.center)
-            }),
-            zoom: options
-                .zoom
-                .filter(|zoom| zoom.is_finite())
-                .map_or_else(|| self.zoom(), Zoom::new),
+            center: self.clamp_center(raw_center),
+            zoom: self.clamp_zoom(raw_zoom),
             bearing: options
                 .bearing
                 .unwrap_or_else(|| camera.get_bearing().into()),

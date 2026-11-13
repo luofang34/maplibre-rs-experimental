@@ -11,7 +11,7 @@ impl Style {
     pub(super) fn ensure_shape(&self, layer: &StyleLayer) -> Result<(), StyleMutationError> {
         let id = layer.id.clone();
         ensure_zoom_range(layer)?;
-        if layer.type_ == "background" {
+        if layer.type_ == "background" || layer.type_ == "custom" {
             return Ok(());
         }
         let Some(source_name) = &layer.source else {

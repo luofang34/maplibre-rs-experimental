@@ -1,8 +1,18 @@
+//! Scroll-wheel, trackpad pinch, smooth button/double-tap zoom, and post-pinch momentum handler.
+
 use std::time::Duration;
 
 use cgmath::{Deg, Point2, Vector2};
 use instant::Instant;
-use maplibre::{
+
+use self::scroll::ScrollInput;
+use super::{
+    events::{ButtonState, MouseScrollDelta, NavKey, TouchPhase},
+    navigation_state::{set_pitch_keeping_center, NavigationState},
+    projection::{center_pixel, zoom_globe_around_pixel},
+    UpdateState,
+};
+use crate::{
     context::MapContext,
     coords::Zoom,
     terrain::interaction::{
@@ -11,47 +21,24 @@ use maplibre::{
         resolve_gesture_anchor, zoom_mercator_around, GestureAnchor,
     },
 };
-use winit::{event::TouchPhase, keyboard::Key};
-
-use self::scroll::ScrollInput;
-use super::{
-    navigation_state::{set_pitch_keeping_center, NavigationState},
-    projection::{center_pixel, zoom_globe_around_pixel},
-    UpdateState,
-};
 
 mod scroll;
 
-/// Largest zoom change applied per frame, as GL JS caps the scroll scale per frame at two.
 const MAX_ZOOM_STEP_PER_FRAME: f64 = 1.0;
-/// Quiet time after the last scroll input before the zoom gesture counts as finished.
 const GESTURE_END_DELAY: Duration = Duration::from_millis(200);
-/// Pause threshold (`MKMapGestureController` `0.15s`) after which a trackpad pinch rebases its
-/// cumulative scale and drops stale release velocity.
 const PINCH_PAUSE_RESET: Duration = Duration::from_millis(150);
-/// Quiet time after the last browser `ctrlKey + wheel` pinch event before triggering release inertia.
 const WEB_PINCH_WHEEL_END_DELAY: Duration = Duration::from_millis(55);
-/// Trackpad pinch-apart (zoom-in) magnification gain before Apple Maps' `1 + M` scale mapping.
-const PINCH_ZOOM_IN_GAIN: f64 = 1.65;
-/// Trackpad pinch-together (zoom-out) magnification gain before Apple Maps' non-linear power curve.
-const PINCH_ZOOM_OUT_GAIN: f64 = 1.35;
-/// Apple Maps (`UITransformEvent.scale`) zoom-out multiplier `K = 1.9` in `1 / (1 + K * (-M)^E)`.
-const PINCH_ZOOM_OUT_K: f64 = 1.9;
-/// Apple Maps (`UITransformEvent.scale`) zoom-out exponent `E = 1.1` in `1 / (1 + K * (-M)^E)`.
-const PINCH_ZOOM_OUT_EXP: f64 = 1.1;
-/// Exponential decay rate (`s^-1`) for post-pinch momentum (`VectorKit.dynamicValueAnimation`).
+pub(crate) const PINCH_ZOOM_IN_GAIN: f64 = 1.65;
+pub(crate) const PINCH_ZOOM_OUT_GAIN: f64 = 1.35;
+pub(crate) const PINCH_ZOOM_OUT_K: f64 = 1.9;
+pub(crate) const PINCH_ZOOM_OUT_EXP: f64 = 1.1;
 const PINCH_INERTIA_DECAY_RATE: f64 = 6.0;
-/// Release velocity transfer factor into post-pinch inertia.
-const PINCH_INERTIA_GAIN: f64 = 0.55;
-/// Minimum pinch release speed (zoom levels / sec) required to trigger post-pinch inertia.
+pub(crate) const PINCH_INERTIA_GAIN: f64 = 0.55;
 const PINCH_INERTIA_MIN_VELOCITY: f64 = 0.30;
-/// Maximum post-pinch inertia speed (zoom levels / sec), matching `_MKZoomingGestureControlConfiguration`.
 const PINCH_INERTIA_MAX_VELOCITY: f64 = 7.0;
 
-/// Apple Maps (`UITransformEvent.scale`) asymmetric magnification-to-scale mapping:
-/// linear `1 + M` when spreading fingers apart (`M >= 0`), and `1 / (1 + 1.9 * (-M)^1.1)`
-/// when pinching fingers together (`M < 0`) so fingers do not collide before completing a zoom-out.
-fn apple_pinch_scale(cumulative_mag: f64) -> f64 {
+/// Apple Maps (`UITransformEvent.scale`) asymmetric magnification-to-scale mapping.
+pub(crate) fn apple_pinch_scale(cumulative_mag: f64) -> f64 {
     if cumulative_mag >= 0.0 {
         1.0 + cumulative_mag
     } else {
@@ -59,9 +46,9 @@ fn apple_pinch_scale(cumulative_mag: f64) -> f64 {
     }
 }
 
-pub struct ZoomHandler {
+pub(crate) struct ZoomHandler {
     window_position: Option<Vector2<f64>>,
-    zoom_delta: Option<Zoom>,
+    pub(crate) zoom_delta: Option<Zoom>,
     /// Smoothly animated zoom remainder (used for `+`/`-` buttons, keys, and double-click).
     smooth_zoom_remaining: f64,
     /// Optional explicit anchor pixel for the active smooth zoom animation.
@@ -69,43 +56,56 @@ pub struct ZoomHandler {
     scroll: ScrollInput,
     /// Cumulative scaled magnification `M` within the current unidirectional pinch stroke.
     pinch_cumulative_mag: f64,
-    /// Scale factor at the previous pinch update (`_lastScale` in `MKMapGestureController`).
+    /// Scale factor at the previous pinch update.
     pinch_last_scale: f64,
-    /// Filtered zoom velocity (zoom levels / sec) during an active pinch (`_UIPinchGestureRecognizerDriver`).
+    /// Filtered zoom velocity (zoom levels / sec) during an active pinch.
     pinch_velocity: f64,
-    /// Timestamp of the last non-trivial pinch movement (`_lastPinchUpdateTimestamp`).
+    /// Timestamp of the last non-trivial pinch movement.
     last_pinch_move: Option<Instant>,
     /// Active post-pinch momentum velocity (zoom levels / sec) decaying via `PINCH_INERTIA_DECAY_RATE`.
-    pinch_inertia_velocity: f64,
+    pub(crate) pinch_inertia_velocity: f64,
     /// Whether a browser `ctrlKey + wheel` trackpad pinch is currently open and awaiting release.
     web_pinch_wheel_active: bool,
     /// Elevation the running gesture anchors on, captured when it starts.
     gesture_elevation: Option<Option<f64>>,
-    /// The terrain point a zoom on a globe orbiting the terrain keeps under the pointer,
-    /// captured when the gesture starts.
+    /// The terrain point a zoom on a globe orbiting the terrain keeps under the pointer.
     globe_anchor: Option<TerrainAnchor>,
     last_input: Option<Instant>,
 }
 
 impl UpdateState for ZoomHandler {
     fn update_state(&mut self, map_context: &mut MapContext, dt: Duration) {
-        self.update_state_with_nav(map_context, dt, None);
+        self.update_state_with_nav_at(map_context, dt, None, Instant::now());
     }
 }
 
 impl ZoomHandler {
-    pub fn update_state_with_nav(
+    pub(crate) fn update_state_with_nav_at(
         &mut self,
-        MapContext {
-            style,
-            view_state,
-            world,
-            ..
-        }: &mut MapContext,
+        state: &mut MapContext,
         dt: Duration,
         nav: Option<&mut NavigationState>,
+        now: Instant,
     ) {
-        let now = Instant::now();
+        self.update_parts_with_nav_at(
+            &state.style,
+            &mut state.view_state,
+            &mut state.world,
+            dt,
+            nav,
+            now,
+        );
+    }
+
+    pub(crate) fn update_parts_with_nav_at(
+        &mut self,
+        style: &crate::style::Style,
+        view_state: &mut crate::render::view_state::ViewState,
+        world: &mut crate::tcs::world::World,
+        dt: Duration,
+        nav: Option<&mut NavigationState>,
+        now: Instant,
+    ) {
         if self.web_pinch_wheel_active
             && self
                 .last_pinch_move
@@ -179,7 +179,7 @@ impl ZoomHandler {
             && (auto_tilt_active || view_state.center_elevation().abs() <= f64::EPSILON)
         {
             view_state.thaw_center_elevation();
-            maplibre::terrain::elevation::ground_center(view_state, world);
+            crate::terrain::elevation::ground_center(view_state, world);
         }
         let pointer = self
             .smooth_zoom_anchor
@@ -188,9 +188,6 @@ impl ZoomHandler {
         let current =
             resolve_gesture_anchor(style, view_state, world, Point2::new(pointer.x, pointer.y));
         let elevation = if auto_tilt_active {
-            // Re-resolve the terrain anchor each frame while Auto-Tilt is simultaneously
-            // tilting the camera so a stale elevation from many zoom levels ago never pulls
-            // the orbit center underground.
             self.globe_anchor = terrain_anchor_at(style, view_state, world, current.pixel);
             current.elevation
         } else {
@@ -208,7 +205,9 @@ impl ZoomHandler {
             pixel: current.pixel,
             elevation,
         };
-        let next_zoom = Zoom::new((view_state.zoom().value() + step).clamp(0.0, 22.0));
+        let next_zoom = view_state.clamp_zoom(Zoom::new(
+            (view_state.zoom().value() + step).clamp(0.0, 22.0),
+        ));
         let mut zoomed_globe_anchor = false;
         if let Some(globe_anchor) = self.globe_anchor {
             if zoom_globe_keeping_anchor(view_state, globe_anchor, anchor.pixel, next_zoom.value())
@@ -228,7 +227,7 @@ impl ZoomHandler {
             if nav_state.three_dimensional && nav_state.auto_tilt {
                 if style.terrain.is_some() {
                     view_state.thaw_center_elevation();
-                    maplibre::terrain::elevation::ground_center(view_state, world);
+                    crate::terrain::elevation::ground_center(view_state, world);
                 }
                 let max_pitch = view_state.camera().max_pitch().0.to_degrees();
                 let deg = nav_state.pitch_for_zoom(actual_zoom).clamp(0.0, max_pitch);
@@ -238,10 +237,8 @@ impl ZoomHandler {
         }
         self.last_input = Some(now);
     }
-}
 
-impl ZoomHandler {
-    pub fn new(sensitivity: f64) -> Self {
+    pub(crate) fn new(sensitivity: f64) -> Self {
         Self {
             window_position: None,
             zoom_delta: None,
@@ -260,12 +257,11 @@ impl ZoomHandler {
         }
     }
 
-    /// Sets the scroll-wheel and trackpad zoom rate multiplier (`1.0` matches GL JS's default).
-    pub fn set_sensitivity(&mut self, sensitivity: f64) {
+    pub(crate) fn set_sensitivity(&mut self, sensitivity: f64) {
         self.scroll.set_sensitivity(sensitivity);
     }
 
-    pub fn process_window_position(
+    pub(crate) fn process_window_position(
         &mut self,
         window_position: &Vector2<f64>,
         _touch: bool,
@@ -274,25 +270,22 @@ impl ZoomHandler {
         true
     }
 
-    pub fn update_zoom(&mut self, delta: f64) {
+    pub(crate) fn update_zoom(&mut self, delta: f64) {
         self.zoom_delta = Some(self.zoom_delta.unwrap_or_default() + Zoom::new(delta));
     }
 
-    /// Stops any active post-pinch momentum coasting (e.g. when a pan or click starts).
-    pub fn cancel_pinch_inertia(&mut self) {
+    pub(crate) fn cancel_pinch_inertia(&mut self) {
         self.pinch_inertia_velocity = 0.0;
         self.web_pinch_wheel_active = false;
     }
 
-    /// Queues a smooth animated zoom step (for HUD `+`/`-` buttons, keys, or double-click).
-    pub fn add_smooth_zoom(&mut self, delta: f64, anchor: Option<Vector2<f64>>) {
+    pub(crate) fn add_smooth_zoom(&mut self, delta: f64, anchor: Option<Vector2<f64>>) {
         self.pinch_inertia_velocity = 0.0;
         self.smooth_zoom_remaining = (self.smooth_zoom_remaining + delta).clamp(-4.0, 4.0);
         self.smooth_zoom_anchor = anchor;
     }
 
-    /// Shortest time until a pending scroll classification or gesture-end release needs a frame.
-    pub(super) fn next_wait(&self, now: Instant) -> Option<Duration> {
+    pub(crate) fn next_wait(&self, now: Instant) -> Option<Duration> {
         if self.zoom_delta.is_some()
             || self.smooth_zoom_remaining.abs() > 1e-4
             || self.pinch_inertia_velocity.abs() > 0.05
@@ -314,20 +307,12 @@ impl ZoomHandler {
             .min()
     }
 
-    /// Adds scroll input to the frame's, as GL JS's scroll zoom takes it.
-    pub fn process_scroll(&mut self, delta: &winit::event::MouseScrollDelta, scale_factor: f64) {
+    pub(crate) fn process_scroll_at(&mut self, delta: &MouseScrollDelta, now: Instant) {
         self.pinch_inertia_velocity = 0.0;
-        self.scroll.add(delta, scale_factor, Instant::now());
+        self.scroll.add(delta, now);
     }
 
-    /// Processes a trackpad pinch delta with phase (`Started`, `Moved`, `Ended`, `Cancelled`),
-    /// applying Apple Maps' asymmetric scale curve (`UITransformEvent.scale`) and dynamic
-    /// release momentum (`VectorKit.dynamicValueAnimation`).
-    pub fn process_pinch_gesture(&mut self, magnification: f64, phase: TouchPhase) {
-        self.process_pinch_gesture_at(magnification, phase, Instant::now());
-    }
-
-    pub(super) fn process_pinch_gesture_at(
+    pub(crate) fn process_pinch_gesture_at(
         &mut self,
         magnification: f64,
         phase: TouchPhase,
@@ -428,10 +413,7 @@ impl ZoomHandler {
         }
     }
 
-    /// Processes a browser `ctrlKey + WheelEvent` trackpad pinch step, where browsers report
-    /// `deltaY = -magnification * 100.0` without explicit gesture start/end phases.
-    pub fn process_web_pinch_wheel(&mut self, magnification: f64) {
-        let now = Instant::now();
+    pub(crate) fn process_web_pinch_wheel_at(&mut self, magnification: f64, now: Instant) {
         if !self.web_pinch_wheel_active
             || self
                 .last_pinch_move
@@ -443,22 +425,21 @@ impl ZoomHandler {
         self.process_pinch_gesture_at(magnification, TouchPhase::Moved, now);
     }
 
-    /// Adds a trackpad pinch delta (shorthand for `TouchPhase::Moved`).
     #[cfg(test)]
-    pub fn process_pinch(&mut self, magnification: f64) {
-        self.process_pinch_gesture(magnification, TouchPhase::Moved);
+    pub(crate) fn process_pinch(&mut self, magnification: f64) {
+        self.process_pinch_gesture_at(magnification, TouchPhase::Moved, Instant::now());
     }
 
-    pub fn process_key_press(&mut self, key: &Key, state: winit::event::ElementState) -> bool {
-        if state != winit::event::ElementState::Pressed {
+    pub(crate) fn process_key(&mut self, key: NavKey, state: ButtonState) -> bool {
+        if state != ButtonState::Pressed {
             return false;
         }
-        match key.as_ref() {
-            Key::Character("i") | Key::Character("+") | Key::Character("=") => {
+        match key {
+            NavKey::ZoomIn => {
                 self.add_smooth_zoom(0.65, None);
                 true
             }
-            Key::Character("k") | Key::Character("-") | Key::Character("_") => {
+            NavKey::ZoomOut => {
                 self.add_smooth_zoom(-0.65, None);
                 true
             }

@@ -407,3 +407,7 @@ pub struct SymbolPaint {
     #[serde(skip)]
     pub(crate) compiled: crate::style::symbol::CompiledProperties,
 }
+
+/// Empty typed paint marker for `"type": "custom"` layers rendered by host [`CustomStyleLayer`](crate::custom_layer::CustomStyleLayer) implementations.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CustomPaint {}

@@ -47,9 +47,10 @@ where
 
     /// The resources that became ready since the last call.
     pub fn take_ready_resources(&mut self) -> Vec<ResourceReady> {
-        match &mut self.map_context {
-            CurrentMapContext::Ready(context) => context.take_ready_resources(),
-            CurrentMapContext::Pending(_) => Vec::new(),
+        let mut ready = self.event_bus.take_buffered_ready_resources();
+        if let CurrentMapContext::Ready(context) = &mut self.map_context {
+            ready.extend(context.take_ready_resources());
         }
+        ready
     }
 }

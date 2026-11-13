@@ -65,6 +65,7 @@ impl StyleLayerDef {
                 "hillshade" => Some(LayerPaint::Hillshade(Default::default())),
                 "color-relief" => Some(LayerPaint::ColorRelief(Default::default())),
                 "symbol" => Some(LayerPaint::Symbol(Default::default())),
+                "custom" => Some(LayerPaint::Custom(Default::default())),
                 _ => None,
             });
         };
@@ -79,6 +80,7 @@ impl StyleLayerDef {
             "circle" => parse_paint(paint, extra, LayerPaint::Circle)?,
             "heatmap" => parse_paint(paint, extra, LayerPaint::Heatmap)?,
             "symbol" => LayerPaint::Symbol(serde_json::from_value(paint)?),
+            "custom" => parse_paint(paint, extra, LayerPaint::Custom)?,
             _ => {
                 *extra = serde_json::from_value(paint)?;
                 return Ok(None);

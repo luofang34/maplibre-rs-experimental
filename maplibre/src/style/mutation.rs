@@ -145,6 +145,7 @@ pub struct StyleChange {
 /// Whether a layer's content lives in per-tile buffers built from vector tiles.
 pub(crate) fn from_vector_tiles(layer: &StyleLayer) -> bool {
     layer.type_ != "background"
+        && layer.type_ != "custom"
         && !crate::io::tile_sources::RASTER_LAYER_TYPES.contains(&layer.type_.as_str())
 }
 
