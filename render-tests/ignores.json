@@ -1,10 +1,10 @@
 {
   "baseline": {
     "total": 1701,
-    "passed": 1619,
-    "ignored": 82,
+    "passed": 1621,
+    "ignored": 80,
     "render_total": 1564,
-    "render_passed": 1489,
+    "render_passed": 1491,
     "query_total": 137,
     "query_passed": 130
   },
@@ -43,7 +43,6 @@
     "projection/globe/custom/tent-3d-globe": "Style-level JS `addCustomLayer` operation on globe is not supported",
     "projection/globe/custom/tent-3d-globe-occlusion": "Style-level JS `addCustomLayer` operation on globe is not supported",
     "projection/globe/custom/tent-3d-globe-zoomed": "Style-level JS `addCustomLayer` operation on globe is not supported",
-    "projection/globe/fill-extrusion": "3D `fill-extrusion` radial extrusion on curved globe projection differs from GL JS",
     "projection/globe/fill-seams/ocean": "Sub-pixel globe tile seam antialiasing on ocean polygons differs from GL JS",
     "projection/globe/terrain/atmosphere/atmosphere-blend/base": "GL JS `atmosphere-blend` fog curve on globe terrain differs from `maplibre-rs` physical atmosphere",
     "projection/globe/terrain/atmosphere/atmosphere-blend/interpolate-to-0.5": "GL JS `atmosphere-blend` interpolation on globe terrain differs from `maplibre-rs` physical atmosphere",
@@ -53,7 +52,6 @@
     "projection/globe/terrain/atmosphere/zoom": "GL JS zoom-dependent atmosphere halo on globe terrain differs from `maplibre-rs` sky scattering",
     "projection/globe/terrain/custom/tent-3d-globe": "Style-level JS `addCustomLayer` operation on globe terrain is not supported",
     "projection/globe/terrain/custom/tent-3d-globe-occlusion": "Style-level JS `addCustomLayer` operation on globe terrain is not supported",
-    "projection/globe/terrain/fill-extrusion": "3D `fill-extrusion` geometry over curved globe terrain differs from GL JS",
     "projection/globe/terrain/fill-planet-tiles-no-background": "Globe terrain limb clear without a `background` layer differs from GL JS",
     "projection/globe/terrain/fill-seams/checkerboard": "Globe terrain drape tile boundary sampling on checkerboard fills differs from GL JS",
     "projection/globe/terrain/fill-seams/ocean": "Globe terrain drape tile boundary seam antialiasing on ocean fills differs from GL JS",
