@@ -23,11 +23,6 @@ they start with another directory.
 | --- | --- | --- |
 | Property transitions (`*-transition`, root `transition`) | Missing in the core; `render-tests/src/transitions.rs` interpolates in the harness | M |
 | Whole-style replacement with diffing | Missing; granular mutations only (`style/mutation.rs`) | M |
-| Camera bounds: fit to bounds, max bounds, min and max zoom | Missing; only `set_max_pitch` | M |
-| Typed event stream (load, idle, error, style and source changes) | Partial; polled signals in `map/signals.rs`, `render/frame_signals.rs` | M |
-| Style-level custom layer | Partial; plugins and host GPU only | M |
-| `styleimagemissing` event | Partial; pull-based `StyleImageProvider` | S |
-| Gesture recogniser independent of winit | Partial; handlers live in `maplibre-winit/src/input` | M |
 | `resampling` on hillshade and color-relief, `line-round-limit`, `fill-extrusion-rounded-corner-distance`, GeoJSON `lineMetrics` and `tolerance` | Missing | S each |
 | `video` and `canvas` sources | Missing | M |
 
