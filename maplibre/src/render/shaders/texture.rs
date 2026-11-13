@@ -3,59 +3,23 @@ use crate::render::resource::{FragmentState, VertexBufferLayout, VertexState};
 
 /// Raster and DEM draws bind the subdivided tile mesh at slot zero and tile metadata at slot one.
 pub fn tile_texture_vertex_buffers() -> Vec<VertexBufferLayout> {
+    let mut tile_attrs = ShaderTileMetadata::transform_attributes().to_vec();
+    tile_attrs.extend([
+        // How far a tile drawn into a drape texture is enlarged; one elsewhere.
+        super::attribute(
+            std::mem::offset_of!(ShaderTileMetadata, line_width_scale) as u64,
+            wgpu::VertexFormat::Float32,
+            9,
+        ),
+        super::attribute(
+            std::mem::offset_of!(ShaderTileMetadata, tile_mercator_coords) as u64,
+            wgpu::VertexFormat::Float32x4,
+            2,
+        ),
+    ]);
     vec![
-        // subdivided tile mesh
-        VertexBufferLayout {
-            array_stride: std::mem::size_of::<crate::projection::globe::tile_mesh::TileMeshVertex>()
-                as u64,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: vec![wgpu::VertexAttribute {
-                offset: 0,
-                format: wgpu::VertexFormat::Sint16x2,
-                shader_location: 0,
-            }],
-        },
-        // tile metadata
-        VertexBufferLayout {
-            array_stride: std::mem::size_of::<ShaderTileMetadata>() as u64,
-            step_mode: wgpu::VertexStepMode::Instance,
-            attributes: vec![
-                // translate
-                wgpu::VertexAttribute {
-                    offset: 0,
-                    format: wgpu::VertexFormat::Float32x4,
-                    shader_location: 4,
-                },
-                wgpu::VertexAttribute {
-                    offset: wgpu::VertexFormat::Float32x4.size(),
-                    format: wgpu::VertexFormat::Float32x4,
-                    shader_location: 5,
-                },
-                wgpu::VertexAttribute {
-                    offset: 2 * wgpu::VertexFormat::Float32x4.size(),
-                    format: wgpu::VertexFormat::Float32x4,
-                    shader_location: 6,
-                },
-                wgpu::VertexAttribute {
-                    offset: 3 * wgpu::VertexFormat::Float32x4.size(),
-                    format: wgpu::VertexFormat::Float32x4,
-                    shader_location: 7,
-                },
-                // How far a tile drawn into a drape texture is enlarged; one elsewhere.
-                wgpu::VertexAttribute {
-                    offset: std::mem::offset_of!(ShaderTileMetadata, line_width_scale) as u64,
-                    format: wgpu::VertexFormat::Float32,
-                    shader_location: 9,
-                },
-                // tile_mercator_coords
-                wgpu::VertexAttribute {
-                    offset: 4 * wgpu::VertexFormat::Float32x4.size()
-                        + 3 * wgpu::VertexFormat::Float32.size(),
-                    format: wgpu::VertexFormat::Float32x4,
-                    shader_location: 2,
-                },
-            ],
-        },
+        crate::render::tile_mesh::GpuTileMeshVertex::vertex_buffer_layout(),
+        ShaderTileMetadata::instance_layout(tile_attrs),
     ]
 }
 

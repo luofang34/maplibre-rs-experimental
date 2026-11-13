@@ -273,6 +273,7 @@ pub fn globe_tile_metadata(view_state: &ViewState, coords: WorldTileCoords) -> S
         line_width_scale: 1.0,
         line_units_per_pixel: 8.0 * scale,
         clip_region: WHOLE_TILE,
+        _pad: [0; 2],
     }
 }
 

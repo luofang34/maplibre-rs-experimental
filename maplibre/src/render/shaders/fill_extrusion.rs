@@ -33,7 +33,6 @@ pub struct FillExtrusionShader {
 
 impl Shader for FillExtrusionShader {
     fn describe_vertex(&self) -> VertexState {
-        let vec4 = wgpu::VertexFormat::Float32x4.size();
         VertexState {
             source: concat!(
                 include_str!("projection.vertex.wgsl"),
@@ -74,22 +73,7 @@ impl Shader for FillExtrusionShader {
                         ),
                     ],
                 },
-                VertexBufferLayout {
-                    array_stride: std::mem::size_of::<ShaderTileMetadata>() as u64,
-                    step_mode: wgpu::VertexStepMode::Instance,
-                    attributes: vec![
-                        attribute(0, wgpu::VertexFormat::Float32x4, 4),
-                        attribute(vec4, wgpu::VertexFormat::Float32x4, 5),
-                        attribute(2 * vec4, wgpu::VertexFormat::Float32x4, 6),
-                        attribute(3 * vec4, wgpu::VertexFormat::Float32x4, 7),
-                        attribute(4 * vec4, wgpu::VertexFormat::Float32, 9),
-                        attribute(
-                            4 * vec4 + 3 * wgpu::VertexFormat::Float32.size(),
-                            wgpu::VertexFormat::Float32x4,
-                            2,
-                        ),
-                    ],
-                },
+                ShaderTileMetadata::basic_layout(),
                 VertexBufferLayout {
                     array_stride: std::mem::size_of::<ShaderLayerMetadata>() as u64,
                     step_mode: wgpu::VertexStepMode::Instance,

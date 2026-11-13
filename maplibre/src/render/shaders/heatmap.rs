@@ -42,17 +42,7 @@ impl Shader for HeatmapDensityShader {
                         },
                     ],
                 },
-                VertexBufferLayout {
-                    array_stride: std::mem::size_of::<ShaderTileMetadata>() as u64,
-                    step_mode: wgpu::VertexStepMode::Instance,
-                    // The viewport size sits between the zoom factor and the mercator extent, and
-                    // only listing it puts the extent at its offset.
-                    attributes: wgpu::vertex_attr_array![
-                        4 => Float32x4, 5 => Float32x4, 6 => Float32x4, 7 => Float32x4,
-                        9 => Float32, 11 => Float32, 12 => Float32, 2 => Float32x4
-                    ]
-                    .to_vec(),
-                },
+                ShaderTileMetadata::basic_layout(),
                 VertexBufferLayout {
                     array_stride: std::mem::size_of::<ShaderLayerMetadata>() as u64,
                     step_mode: wgpu::VertexStepMode::Instance,

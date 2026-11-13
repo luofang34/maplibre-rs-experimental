@@ -10,6 +10,13 @@ export default async function style() {
         },
         layers: [
             {
+                id: 'background',
+                type: 'background',
+                paint: {
+                    'background-color': '#1b263b'
+                }
+            },
+            {
                 id: 'color-relief',
                 type: 'color-relief',
                 source: 'elevationSource',

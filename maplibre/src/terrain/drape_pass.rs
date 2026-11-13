@@ -72,7 +72,7 @@ impl Node for DrapePassNode {
                                 store: StoreOp::Discard,
                             }),
                             stencil_ops: Some(wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(0),
+                                load: wgpu::LoadOp::Clear(crate::render::EMPTY_STENCIL_REFERENCE),
                                 store: StoreOp::Discard,
                             }),
                         }),
@@ -114,7 +114,12 @@ fn draw_layers<'w>(
         // The source of a layer can use a different tile pyramid. Old stencil values must
         // not clip its geometry or admit buffered geometry outside the current tile masks.
         for mask in &target.masks {
-            DrawMask::render_with_reference(world, mask, pass, 0);
+            DrawMask::render_with_reference(
+                world,
+                mask,
+                pass,
+                crate::render::EMPTY_STENCIL_REFERENCE,
+            );
         }
         for mask in &target.masks {
             if layers

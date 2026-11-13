@@ -9,7 +9,7 @@ struct VertexOutput {
 
 @vertex
 fn main(
-    @location(0) raw_position: vec2<i32>,
+    @location(0) raw_position: vec2<f32>,
     @location(2) tile_mercator_coords: vec4<f32>,
     @location(4) translate1: vec4<f32>,
     @location(5) translate2: vec4<f32>,
@@ -19,7 +19,7 @@ fn main(
     @location(10) z_index: f32,
     @location(11) viewport: vec4<f32>,
 ) -> VertexOutput {
-    let tile_position = vec3<f32>(vec2<f32>(raw_position), 0.0);
+    let tile_position = vec3<f32>(raw_position, 0.0);
     let projected = project_tile_position_3d(
         tile_position,
         mat4x4<f32>(translate1, translate2, translate3, translate4),

@@ -69,7 +69,19 @@ fn pole_extensions_follow_first_and_last_rows() {
 fn globe_tile_mesh_cache_scratch_is_available() {
     use super::GlobeTileMeshCache;
 
-    let cache = GlobeTileMeshCache::new();
+    let mut cache = GlobeTileMeshCache::new();
     assert_eq!(cache.scratch().vertices.len(), 0);
     assert_eq!(cache.scratch().indices_u16.len(), 0);
+
+    let flat_key = cache.key_for(coords(0, 0, 0), TileMeshUsage::Raster, true);
+    assert_eq!(flat_key.granularity, 1);
+    assert!(!flat_key.extend_to_north_pole);
+    assert!(!flat_key.extend_to_south_pole);
+    assert!(flat_key.generate_borders);
+
+    cache.set_globe_active(true);
+    let globe_key = cache.key_for(coords(0, 0, 0), TileMeshUsage::Raster, true);
+    assert_eq!(globe_key.granularity, 128);
+    assert!(globe_key.extend_to_north_pole);
+    assert!(globe_key.extend_to_south_pole);
 }

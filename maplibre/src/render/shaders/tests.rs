@@ -4,9 +4,9 @@
 use super::{
     fill_extrusion::ExtrusionPass, texture::DemShading, AtmosphereShader, BackgroundPatternShader,
     BackgroundShader, CircleShader, FillExtrusionShader, FillPatternShader, FillShader,
-    GlobeBackgroundPatternShader, GlobeBackgroundShader, HeatmapCompositeShader,
-    HeatmapDensityShader, LineShader, RasterShader, Shader, SkyShader, SymbolShader,
-    TerrainLineShader, TerrainShader, TileMaskShader,
+    FlatTileMaskShader, GlobeBackgroundPatternShader, GlobeBackgroundShader,
+    HeatmapCompositeShader, HeatmapDensityShader, LineShader, RasterShader, Shader,
+    ShaderTileMetadata, SkyShader, SymbolShader, TerrainLineShader, TerrainShader, TileMaskShader,
 };
 
 /// A stage's WGSL and its entry point.
@@ -44,6 +44,7 @@ fn stages() -> Vec<Stage> {
         ("fill", Box::new(FillShader { format })),
         ("fill pattern", Box::new(FillPatternShader { format })),
         ("symbol", Box::new(SymbolShader { format })),
+        ("tile mask flat", Box::new(FlatTileMaskShader { format })),
         (
             "tile mask",
             Box::new(TileMaskShader {
@@ -188,6 +189,45 @@ fn every_shader_file_is_part_of_a_pipeline() {
             path.display()
         );
     }
+}
+
+#[test]
+fn shader_tile_metadata_and_globe_mesh_vertex_satisfy_mobile_vulkan_alignments() {
+    use std::mem::{offset_of, size_of};
+
+    use crate::render::tile_mesh::GpuTileMeshVertex;
+
+    assert_eq!(size_of::<ShaderTileMetadata>(), 128);
+    assert_eq!(size_of::<ShaderTileMetadata>() % 16, 0);
+
+    // Every Vec4f32 / mat4x4 column in ShaderTileMetadata sits on a 16-byte boundary.
+    assert_eq!(offset_of!(ShaderTileMetadata, transform) % 16, 0);
+    assert_eq!(offset_of!(ShaderTileMetadata, tile_mercator_coords) % 16, 0);
+    assert_eq!(offset_of!(ShaderTileMetadata, clip_region) % 16, 0);
+
+    // Paired Float32x2 scalar attributes sit contiguously on 8-byte boundaries.
+    assert_eq!(offset_of!(ShaderTileMetadata, viewport_width) % 8, 0);
+    assert_eq!(
+        offset_of!(ShaderTileMetadata, viewport_height),
+        offset_of!(ShaderTileMetadata, viewport_width) + 4
+    );
+    assert_eq!(offset_of!(ShaderTileMetadata, line_width_scale) % 8, 0);
+    assert_eq!(
+        offset_of!(ShaderTileMetadata, line_units_per_pixel),
+        offset_of!(ShaderTileMetadata, line_width_scale) + 4
+    );
+    assert_eq!(offset_of!(ShaderTileMetadata, zoom_factor) % 4, 0);
+    assert_eq!(offset_of!(ShaderTileMetadata, clip_antimeridian) % 4, 0);
+
+    // GlobeTileMesh vertices use 8-byte Float32x2 positions (32-bit aligned).
+    assert_eq!(size_of::<GpuTileMeshVertex>(), 8);
+    let mesh_layout = GpuTileMeshVertex::vertex_buffer_layout();
+    assert_eq!(mesh_layout.array_stride, 8);
+    assert_eq!(
+        mesh_layout.attributes[0].format,
+        wgpu::VertexFormat::Float32x2
+    );
+    assert_eq!(mesh_layout.attributes[0].offset, 0);
 }
 
 #[path = "tests/pure_globe.rs"]

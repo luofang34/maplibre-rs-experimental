@@ -130,52 +130,34 @@ fn line_fragment(format: wgpu::TextureFormat) -> FragmentState {
 }
 
 fn tile_layout() -> VertexBufferLayout {
-    VertexBufferLayout {
-        array_stride: std::mem::size_of::<ShaderTileMetadata>() as u64,
-        step_mode: wgpu::VertexStepMode::Instance,
-        attributes: vec![
-            attribute(0, wgpu::VertexFormat::Float32x4, 4),
-            attribute(
-                wgpu::VertexFormat::Float32x4.size(),
-                wgpu::VertexFormat::Float32x4,
-                5,
-            ),
-            attribute(
-                2 * wgpu::VertexFormat::Float32x4.size(),
-                wgpu::VertexFormat::Float32x4,
-                6,
-            ),
-            attribute(
-                3 * wgpu::VertexFormat::Float32x4.size(),
-                wgpu::VertexFormat::Float32x4,
-                7,
-            ),
-            attribute(
-                std::mem::offset_of!(ShaderTileMetadata, line_width_scale) as u64,
-                wgpu::VertexFormat::Float32x2,
-                9,
-            ),
-            // Viewport width and height, read together to leave a location for the clip region.
-            attribute(
-                std::mem::offset_of!(ShaderTileMetadata, viewport_width) as u64,
-                wgpu::VertexFormat::Float32x2,
-                11,
-            ),
-            attribute(
-                std::mem::offset_of!(ShaderTileMetadata, clip_region) as u64,
-                wgpu::VertexFormat::Float32x4,
-                12,
-            ),
-            attribute(
-                4 * wgpu::VertexFormat::Float32x4.size() + 3 * wgpu::VertexFormat::Float32.size(),
-                wgpu::VertexFormat::Float32x4,
-                2,
-            ),
-            attribute(
-                5 * wgpu::VertexFormat::Float32x4.size() + 3 * wgpu::VertexFormat::Float32.size(),
-                wgpu::VertexFormat::Uint32,
-                14,
-            ),
-        ],
-    }
+    let mut attrs = ShaderTileMetadata::transform_attributes().to_vec();
+    attrs.extend([
+        attribute(
+            std::mem::offset_of!(ShaderTileMetadata, line_width_scale) as u64,
+            wgpu::VertexFormat::Float32x2,
+            9,
+        ),
+        // Viewport width and height, read together to leave a location for the clip region.
+        attribute(
+            std::mem::offset_of!(ShaderTileMetadata, viewport_width) as u64,
+            wgpu::VertexFormat::Float32x2,
+            11,
+        ),
+        attribute(
+            std::mem::offset_of!(ShaderTileMetadata, clip_region) as u64,
+            wgpu::VertexFormat::Float32x4,
+            12,
+        ),
+        attribute(
+            std::mem::offset_of!(ShaderTileMetadata, tile_mercator_coords) as u64,
+            wgpu::VertexFormat::Float32x4,
+            2,
+        ),
+        attribute(
+            std::mem::offset_of!(ShaderTileMetadata, clip_antimeridian) as u64,
+            wgpu::VertexFormat::Uint32,
+            14,
+        ),
+    ]);
+    ShaderTileMetadata::instance_layout(attrs)
 }

@@ -54,6 +54,7 @@ pub(crate) mod systems;
 
 mod graph_runner;
 mod main_pass;
+pub(crate) use main_pass::{EMPTY_STENCIL_REFERENCE, STENCIL_MARK};
 pub mod shaders;
 mod translucent_pass;
 
@@ -264,12 +265,13 @@ impl Renderer {
         let settings = settings
             .with_float_depth_if_supported(device.features())
             .with_backend_msaa(adapter.get_info().backend);
-        let surface = Surface::from_surface(surface, &adapter, window, &settings);
+        let mut surface = Surface::from_surface(surface, &adapter, window, &settings);
 
-        match surface.head() {
-            Head::Headed(window) => window.configure(&device),
-            Head::Headless(_) => {}
+        let initial_size = surface.size();
+        if let Head::Headed(window) = surface.head_mut() {
+            window.resize_and_configure(initial_size.width(), initial_size.height(), &device);
         }
+        surface.reconfigure(&device);
 
         Ok(Self {
             instance,
@@ -344,14 +346,12 @@ impl Renderer {
     }
 
     /// Requests a device
-    async fn request_device(
+    pub(crate) async fn request_device(
         instance: &wgpu::Instance,
         settings: &WgpuSettings,
         request_adapter_options: &wgpu::RequestAdapterOptions<'_, '_>,
     ) -> Result<(wgpu::Adapter, wgpu::Device, wgpu::Queue), RenderError> {
         let adapter = instance.request_adapter(request_adapter_options).await?;
-
-        let adapter_info = adapter.get_info();
 
         let trace = if settings.record_trace {
             wgpu::Trace::Directory("wgpu_trace".into())
@@ -359,14 +359,17 @@ impl Renderer {
             wgpu::Trace::Off
         };
 
-        let mut features = adapter.features() - wgpu::Features::all_experimental_mask();
-        if adapter_info.device_type == wgpu::DeviceType::DiscreteGpu {
-            // `MAPPABLE_PRIMARY_BUFFERS` can have a significant, negative performance impact for
-            // discrete GPUs due to having to transfer data across the PCI-E bus and so it
-            // should not be automatically enabled in this case. It is however beneficial for
-            // integrated GPUs.
-            features.remove(wgpu::Features::MAPPABLE_PRIMARY_BUFFERS);
-        }
+        // Enable only the optional GPU features the renderer actually consumes rather than every
+        // non-experimental capability advertised by the adapter (such as `shader-f16`, clip
+        // distances, or texture compression extensions on mobile browsers).
+        const ENGINE_FEATURES: wgpu::Features = wgpu::Features::DEPTH32FLOAT_STENCIL8
+            .union(wgpu::Features::INDIRECT_FIRST_INSTANCE)
+            .union(wgpu::Features::MULTI_DRAW_INDIRECT_COUNT)
+            .union(wgpu::Features::POLYGON_MODE_LINE)
+            .union(wgpu::Features::TIMESTAMP_QUERY)
+            .union(wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES);
+
+        let mut features = adapter.features() & ENGINE_FEATURES;
         let mut limits = settings.limits.clone();
 
         // Enforce the disabled features

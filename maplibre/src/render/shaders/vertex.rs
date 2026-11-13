@@ -2,7 +2,8 @@
 
 use bytemuck_derive::{Pod, Zeroable};
 
-use super::{Mat4x4f32, Vec2f32, Vec4f32};
+use super::{attribute, Mat4x4f32, Vec2f32, Vec4f32};
+use crate::render::resource::VertexBufferLayout;
 
 /// Tile-space geometry shared by fills, lines and circles.
 #[repr(C)]
@@ -114,29 +115,36 @@ impl ShaderLayerMetadata {
 }
 
 /// Per-tile instance record with projection, viewport and line scaling inputs.
+///
+/// Every `Vec4f32` field sits on a 16-byte boundary, `Float32x2` scalar pairs sit on 8-byte
+/// boundaries, and explicit tail padding rounds the record to 128 bytes so per-tile buffer slices
+/// preserve 16-byte vector attribute alignment on mobile Vulkan drivers.
 #[repr(C)]
 #[derive(Copy, Clone, Pod, Zeroable)]
 pub struct ShaderTileMetadata {
     /// Column-major tile-to-clip transform used by the flat projection path.
     pub transform: Mat4x4f32,
-    /// Scale from view zoom to tile zoom, normally `2^(tile_zoom - view_zoom)`.
-    pub zoom_factor: f32,
-    /// Render viewport width in pixels.
-    pub viewport_width: f32,
-    /// Render viewport height in pixels.
-    pub viewport_height: f32,
     /// Mercator world origin in XY and per-tile-unit scales in ZW.
     pub tile_mercator_coords: Vec4f32,
-    /// One clips geometry outside the root tile at the antimeridian; zero disables clipping.
-    pub clip_antimeridian: u32,
-    /// Converts style pixels to pixels in an offscreen drape texture.
-    pub line_width_scale: f32,
-    /// Tile units per texture or viewport pixel for line dash lengths.
-    pub line_units_per_pixel: f32,
     /// The part of the tile the shape draws, as minimum and maximum tile coordinates: a tile
     /// drawn over a finer view tile covers only that tile's square of it. A line on the
     /// terrain clips itself to it, where a flat shape takes it from the stencil mask.
     pub clip_region: Vec4f32,
+    /// Render viewport width in pixels.
+    pub viewport_width: f32,
+    /// Render viewport height in pixels.
+    pub viewport_height: f32,
+    /// Converts style pixels to pixels in an offscreen drape texture.
+    pub line_width_scale: f32,
+    /// Tile units per texture or viewport pixel for line dash lengths.
+    pub line_units_per_pixel: f32,
+    /// Scale from view zoom to tile zoom, normally `2^(tile_zoom - view_zoom)`.
+    pub zoom_factor: f32,
+    /// One clips geometry outside the root tile at the antimeridian; zero disables clipping.
+    pub clip_antimeridian: u32,
+    /// Explicit tail padding keeping `size_of::<ShaderTileMetadata>() == 128`.
+    #[doc(hidden)]
+    pub _pad: [u32; 2],
 }
 
 /// The [`ShaderTileMetadata::clip_region`] of a shape that draws its whole tile.
@@ -148,14 +156,53 @@ impl ShaderTileMetadata {
     pub fn new(transform: Mat4x4f32, zoom_factor: f32) -> Self {
         Self {
             transform,
-            zoom_factor,
+            tile_mercator_coords: [0.0, 0.0, 1.0 / 4096.0, 1.0 / 4096.0],
+            clip_region: WHOLE_TILE,
             viewport_width: 512.0,
             viewport_height: 512.0,
-            tile_mercator_coords: [0.0, 0.0, 1.0 / 4096.0, 1.0 / 4096.0],
-            clip_antimeridian: 0,
             line_width_scale: 1.0,
             line_units_per_pixel: 8.0 * zoom_factor,
-            clip_region: WHOLE_TILE,
+            zoom_factor,
+            clip_antimeridian: 0,
+            _pad: [0; 2],
         }
+    }
+
+    /// Builds an instance-stepped [`VertexBufferLayout`] over `ShaderTileMetadata` with `attributes`.
+    pub fn instance_layout(attributes: Vec<wgpu::VertexAttribute>) -> VertexBufferLayout {
+        VertexBufferLayout {
+            array_stride: std::mem::size_of::<Self>() as u64,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes,
+        }
+    }
+
+    /// Column attributes (`@location(4..=7)`) for [`Self::transform`].
+    pub fn transform_attributes() -> [wgpu::VertexAttribute; 4] {
+        let base = std::mem::offset_of!(Self, transform) as u64;
+        let col = wgpu::VertexFormat::Float32x4.size();
+        [
+            attribute(base, wgpu::VertexFormat::Float32x4, 4),
+            attribute(base + col, wgpu::VertexFormat::Float32x4, 5),
+            attribute(base + 2 * col, wgpu::VertexFormat::Float32x4, 6),
+            attribute(base + 3 * col, wgpu::VertexFormat::Float32x4, 7),
+        ]
+    }
+
+    /// Shared instance layout binding `transform` (`4..=7`), `tile_mercator_coords` (`2`), and
+    /// `zoom_factor` (`9`), used by fill, fill-extrusion, heatmap, and tile-mask shaders.
+    pub fn basic_layout() -> VertexBufferLayout {
+        let mut attrs = Self::transform_attributes().to_vec();
+        attrs.push(attribute(
+            std::mem::offset_of!(Self, zoom_factor) as u64,
+            wgpu::VertexFormat::Float32,
+            9,
+        ));
+        attrs.push(attribute(
+            std::mem::offset_of!(Self, tile_mercator_coords) as u64,
+            wgpu::VertexFormat::Float32x4,
+            2,
+        ));
+        Self::instance_layout(attrs)
     }
 }

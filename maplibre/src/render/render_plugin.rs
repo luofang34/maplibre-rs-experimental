@@ -21,13 +21,30 @@ pub mod draw_graph {
     }
 }
 
-/// GPU pipeline that writes tile identities into stencil for later clipped draws.
-pub struct MaskPipeline(pub wgpu::RenderPipeline);
+/// GPU pipelines writing tile identities into stencil for flat/drape vs globe clipped draws.
+pub struct MaskPipeline {
+    /// Early-stencil Mercator/drape pipeline with no fragment `discard`.
+    pub flat: wgpu::RenderPipeline,
+    /// Globe pipeline discarding back-hemisphere fragments (`horizon_distance < 0.0`).
+    pub globe: wgpu::RenderPipeline,
+}
+
+impl MaskPipeline {
+    /// Selects the globe horizon-clipping variant when `globe` is active, or the early-stencil flat variant.
+    pub fn for_globe(&self, globe: bool) -> &wgpu::RenderPipeline {
+        if globe {
+            &self.globe
+        } else {
+            &self.flat
+        }
+    }
+}
+
 impl Deref for MaskPipeline {
     type Target = wgpu::RenderPipeline;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.flat
     }
 }
 

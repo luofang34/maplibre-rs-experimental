@@ -57,6 +57,7 @@ pub fn upload_system(
         view_state.style_zoom(),
     );
     projection_resources.upload(queue, projection_data);
+    tile_mesh_cache.set_globe_active(projection_data.transition > 0.0);
 
     if projection_data.transition > 0.0 {
         for coords in background_tiles {

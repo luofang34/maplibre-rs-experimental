@@ -66,9 +66,9 @@ impl System for ResourceSystem {
 
         let surface = &mut state.surface;
 
-        let size = surface.size();
-
         surface.reconfigure(device);
+
+        let size = surface.size();
 
         let projection_resources =
             projection_resources.initialize(|| ProjectionGpuResources::new(device, queue));
@@ -164,29 +164,43 @@ impl System for ResourceSystem {
         });
 
         mask_pipeline.initialize(|| {
-            let mask_shader = shaders::TileMaskShader {
+            let options = crate::render::resource::TilePipelineOptions {
+                depth_stencil_enabled: true,
+                update_stencil: true,
+                debug_stencil: false,
+                wireframe: false,
+                multisampling: surface.is_multisampling_supported(settings.msaa),
+                textured: false,
+            };
+            let flat_shader = shaders::FlatTileMaskShader {
+                format: surface.surface_format(),
+            };
+            let flat = TilePipeline::new(
+                "mask_pipeline_flat".into(),
+                *settings,
+                flat_shader.describe_vertex(),
+                flat_shader.describe_fragment(),
+                options,
+            )
+            .describe_render_pipeline()
+            .initialize_with_prefix_layouts(device, &[projection_resources.bind_group_layout()]);
+
+            let globe_shader = shaders::TileMaskShader {
                 format: surface.surface_format(),
                 draw_colors: false,
                 debug_lines: false,
             };
-
-            let pipeline = TilePipeline::new(
+            let globe = TilePipeline::new(
                 "mask_pipeline".into(),
                 *settings,
-                mask_shader.describe_vertex(),
-                mask_shader.describe_fragment(),
-                crate::render::resource::TilePipelineOptions {
-                    depth_stencil_enabled: true,
-                    update_stencil: true,
-                    debug_stencil: false,
-                    wireframe: false,
-                    multisampling: surface.is_multisampling_supported(settings.msaa),
-                    textured: false,
-                },
+                globe_shader.describe_vertex(),
+                globe_shader.describe_fragment(),
+                options,
             )
             .describe_render_pipeline()
             .initialize_with_prefix_layouts(device, &[projection_resources.bind_group_layout()]);
-            MaskPipeline(pipeline)
+
+            MaskPipeline { flat, globe }
         });
 
         Ok(())

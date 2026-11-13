@@ -29,12 +29,9 @@ impl<P: PhaseItem> RenderCommand<P> for SetMaskPipeline {
         else {
             return RenderCommandResult::Failure;
         };
-        pass.set_pipeline(pipeline);
-        pass.set_bind_group(
-            0,
-            projection_resources.bind_group_for(item.projection_binding()),
-            &[],
-        );
+        let binding = item.projection_binding();
+        pass.set_pipeline(pipeline.for_globe(projection_resources.is_globe_active(binding)));
+        pass.set_bind_group(0, projection_resources.bind_group_for(binding), &[]);
         RenderCommandResult::Success
     }
 }

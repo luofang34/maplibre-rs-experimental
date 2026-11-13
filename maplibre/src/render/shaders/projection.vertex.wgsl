@@ -247,23 +247,31 @@ fn project_tile_position(
 
 fn project_tile_mesh_position(
     tile_position: vec3<f32>,
-    raw_position: vec2<i32>,
+    raw_position: vec2<f32>,
     fallback_matrix: mat4x4<f32>,
     tile_mercator_coords: vec4<f32>,
 ) -> ProjectedTilePosition {
     let transition = projection.transition_and_padding.x;
-    let mercator_clip = fallback_matrix * vec4<f32>(tile_position, 1.0);
-    let is_pole = raw_position.y < -32767 || raw_position.y > 32766;
+    let is_north = is_north_pole_y(raw_position.y);
+    let is_south = is_south_pole_y(raw_position.y);
+    let is_pole = is_north || is_south;
     if transition <= 0.0 {
+        let flat_y = select(
+            tile_position.y,
+            select(4096.0, 0.0, is_north),
+            is_pole,
+        );
+        let flat_clip = fallback_matrix * vec4<f32>(tile_position.x, flat_y, tile_position.z, 1.0);
         return ProjectedTilePosition(
-            vec4<f32>(mercator_clip.xy, 0.0, mercator_clip.w),
+            vec4<f32>(flat_clip.xy, 0.0, flat_clip.w),
             select(1.0, -1.0, is_pole),
         );
     }
+    let mercator_clip = fallback_matrix * vec4<f32>(tile_position, 1.0);
     var surface = tile_position_on_unit_sphere(tile_position.xy, tile_mercator_coords);
-    if raw_position.y < -32767 {
+    if is_north {
         surface = vec3<f32>(0.0, 1.0, 0.0);
-    } else if raw_position.y > 32766 {
+    } else if is_south {
         surface = vec3<f32>(0.0, -1.0, 0.0);
     }
     let globe_clip =

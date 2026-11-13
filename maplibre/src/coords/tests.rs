@@ -236,3 +236,39 @@ fn lat_lon_mercator_roundtrip() {
     assert!((sf_back.latitude - sf.latitude).abs() < 1e-10);
     assert!((sf_back.longitude - sf.longitude).abs() < 1e-10);
 }
+
+#[test]
+fn stencil_references_keep_mark_bit_clear_and_never_collide_with_empty_clear_value() {
+    use crate::render::{EMPTY_STENCIL_REFERENCE, STENCIL_MARK};
+
+    assert_eq!(EMPTY_STENCIL_REFERENCE, 0x7f);
+    assert_eq!(EMPTY_STENCIL_REFERENCE & STENCIL_MARK, 0);
+
+    for z in (0..=32).chain(std::iter::once(u8::MAX)) {
+        for x in -2..=2 {
+            for y in -2..=2 {
+                let coords = WorldTileCoords::from((x, y, ZoomLevel::new(z)));
+                let reference = u32::from(coords.stencil_reference_value_3d());
+                assert!(
+                    reference <= 123,
+                    "tile {coords:?} exceeded 0..=123 range: {reference}"
+                );
+                assert_ne!(
+                    reference, EMPTY_STENCIL_REFERENCE,
+                    "tile {coords:?} collided with EMPTY_STENCIL_REFERENCE"
+                );
+                assert_eq!(
+                    reference & STENCIL_MARK,
+                    0,
+                    "tile {coords:?} set STENCIL_MARK bit 7: {reference:#x}"
+                );
+                let inverted = u32::from(!coords.stencil_reference_value_3d());
+                assert!(
+                    inverted >= 132,
+                    "inverted stencil for {coords:?} overlapped tile/empty range: {inverted}"
+                );
+                assert_ne!(inverted, EMPTY_STENCIL_REFERENCE);
+            }
+        }
+    }
+}

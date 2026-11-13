@@ -237,12 +237,16 @@ impl WorldTileCoords {
         })
     }
 
-    /// Returns unique stencil reference values for WorldTileCoords which are 3D.
-    /// Tiles from arbitrary `z` can lie next to each other, because we mix tiles from
-    /// different levels based on availability.
+    /// Returns 7-bit stencil reference values (`0..=123`) for 3D-compatible tile clipping.
+    ///
+    /// Wrapping zoom modulo `31` reserves `0x7f` (`127`) for `EMPTY_STENCIL_REFERENCE` while
+    /// keeping bit 7 (`0x80`) clear for `STENCIL_MARK` in `extrusion_color_pipeline` and
+    /// ensuring bitwise-inverted consumed raster stencils (`!ref` in `132..=255`) never match
+    /// any tile or empty stencil reference.
     pub fn stencil_reference_value_3d(&self) -> u8 {
         const CASES: u8 = 4;
-        let z = u8::from(self.z);
+        const STENCIL_ZOOM_MODULO: u8 = 31;
+        let z = u8::from(self.z) % STENCIL_ZOOM_MODULO;
         match (self.x % 2 == 0, self.y % 2 == 0) {
             (true, true) => z * CASES,
             (true, false) => 1 + z * CASES,

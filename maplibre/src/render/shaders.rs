@@ -28,7 +28,7 @@ pub use symbol::SymbolShader;
 pub use symbol_vertex::ShaderSymbolVertex;
 pub use terrain::TerrainShader;
 pub use texture::{tile_texture_vertex_buffers, DemShader, DemShading, RasterShader};
-pub use tile_mask::TileMaskShader;
+pub use tile_mask::{FlatTileMaskShader, TileMaskShader};
 pub use vertex::{
     FillShaderFeatureMetadata, SDFShaderFeatureMetadata, ShaderLayerMetadata, ShaderTileMetadata,
     ShaderVertex, POSED_GLYPH, WHOLE_TILE,

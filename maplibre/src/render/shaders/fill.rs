@@ -64,39 +64,7 @@ impl Shader for FillShader {
                     ],
                 },
                 // tile metadata
-                VertexBufferLayout {
-                    array_stride: std::mem::size_of::<ShaderTileMetadata>() as u64,
-                    step_mode: wgpu::VertexStepMode::Instance,
-                    attributes: vec![
-                        attribute(0, wgpu::VertexFormat::Float32x4, 4),
-                        attribute(
-                            wgpu::VertexFormat::Float32x4.size(),
-                            wgpu::VertexFormat::Float32x4,
-                            5,
-                        ),
-                        attribute(
-                            2 * wgpu::VertexFormat::Float32x4.size(),
-                            wgpu::VertexFormat::Float32x4,
-                            6,
-                        ),
-                        attribute(
-                            3 * wgpu::VertexFormat::Float32x4.size(),
-                            wgpu::VertexFormat::Float32x4,
-                            7,
-                        ),
-                        attribute(
-                            4 * wgpu::VertexFormat::Float32x4.size(),
-                            wgpu::VertexFormat::Float32,
-                            9,
-                        ),
-                        attribute(
-                            4 * wgpu::VertexFormat::Float32x4.size()
-                                + 3 * wgpu::VertexFormat::Float32.size(),
-                            wgpu::VertexFormat::Float32x4,
-                            2,
-                        ),
-                    ],
-                },
+                ShaderTileMetadata::basic_layout(),
                 // layer metadata
                 VertexBufferLayout {
                     array_stride: std::mem::size_of::<ShaderLayerMetadata>() as u64,

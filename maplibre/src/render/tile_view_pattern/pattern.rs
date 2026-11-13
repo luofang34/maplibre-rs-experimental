@@ -261,6 +261,7 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
                 line_units_per_pixel: 8.0 * style_zoom.scale_to_tile(&shape.coords()) as f32,
                 clip_antimeridian: u32::from(u8::from(shape.coords().z) == 0),
                 clip_region: clip_region(shape),
+                _pad: [0; 2],
             });
         };
 

@@ -7,7 +7,7 @@ use crate::{
         resource::{RenderPipeline, TilePipeline},
         shaders,
         shaders::Shader,
-        RenderResources, Renderer,
+        RenderResources, Renderer, STENCIL_MARK,
     },
     tcs::system::{SystemError, SystemResult},
     vector::{
@@ -15,9 +15,6 @@ use crate::{
         VectorPipeline,
     },
 };
-
-/// The stencil bit no tile reference uses.
-const STENCIL_MARK: u32 = 0x80;
 
 pub fn resource_system(
     MapContext {

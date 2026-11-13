@@ -311,6 +311,14 @@ impl Shader for AtmosphereShader {
     }
 }
 
+fn matrix_attribute(column: u64, shader_location: u32) -> wgpu::VertexAttribute {
+    wgpu::VertexAttribute {
+        offset: column * wgpu::VertexFormat::Float32x4.size(),
+        format: wgpu::VertexFormat::Float32x4,
+        shader_location,
+    }
+}
+
 fn atmosphere_buffers() -> Vec<VertexBufferLayout> {
     vec![VertexBufferLayout {
         array_stride: std::mem::size_of::<AtmosphereLayerMetadata>() as u64,
@@ -365,24 +373,15 @@ impl Shader for GlobeBackgroundShader {
 }
 
 fn globe_background_buffers() -> Vec<VertexBufferLayout> {
+    let mut tile_attrs = ShaderTileMetadata::transform_attributes().to_vec();
+    tile_attrs.push(wgpu::VertexAttribute {
+        offset: std::mem::offset_of!(ShaderTileMetadata, tile_mercator_coords) as u64,
+        format: wgpu::VertexFormat::Float32x4,
+        shader_location: 2,
+    });
     vec![
-        tile_mesh_layout(),
-        VertexBufferLayout {
-            array_stride: std::mem::size_of::<ShaderTileMetadata>() as u64,
-            step_mode: wgpu::VertexStepMode::Instance,
-            attributes: vec![
-                matrix_attribute(0, 4),
-                matrix_attribute(1, 5),
-                matrix_attribute(2, 6),
-                matrix_attribute(3, 7),
-                wgpu::VertexAttribute {
-                    offset: 4 * wgpu::VertexFormat::Float32x4.size()
-                        + 3 * wgpu::VertexFormat::Float32.size(),
-                    format: wgpu::VertexFormat::Float32x4,
-                    shader_location: 2,
-                },
-            ],
-        },
+        crate::render::tile_mesh::GpuTileMeshVertex::vertex_buffer_layout(),
+        ShaderTileMetadata::instance_layout(tile_attrs),
         VertexBufferLayout {
             array_stride: std::mem::size_of::<BackgroundLayerMetadata>() as u64,
             step_mode: wgpu::VertexStepMode::Instance,
@@ -405,27 +404,6 @@ fn globe_background_buffers() -> Vec<VertexBufferLayout> {
             ],
         },
     ]
-}
-
-fn tile_mesh_layout() -> VertexBufferLayout {
-    VertexBufferLayout {
-        array_stride: std::mem::size_of::<crate::projection::globe::tile_mesh::TileMeshVertex>()
-            as u64,
-        step_mode: wgpu::VertexStepMode::Vertex,
-        attributes: vec![wgpu::VertexAttribute {
-            offset: 0,
-            format: wgpu::VertexFormat::Sint16x2,
-            shader_location: 0,
-        }],
-    }
-}
-
-fn matrix_attribute(column: u64, shader_location: u32) -> wgpu::VertexAttribute {
-    wgpu::VertexAttribute {
-        offset: column * wgpu::VertexFormat::Float32x4.size(),
-        format: wgpu::VertexFormat::Float32x4,
-        shader_location,
-    }
 }
 
 impl Shader for BackgroundShader {

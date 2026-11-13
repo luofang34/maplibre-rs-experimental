@@ -29,14 +29,31 @@ impl Shader for CircleShader {
                         wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 10 => Float32x4]
                             .to_vec(),
                 },
-                VertexBufferLayout {
-                    array_stride: std::mem::size_of::<ShaderTileMetadata>() as u64,
-                    step_mode: wgpu::VertexStepMode::Instance,
-                    attributes: wgpu::vertex_attr_array![
-                        4 => Float32x4, 5 => Float32x4, 6 => Float32x4, 7 => Float32x4,
-                        9 => Float32, 11 => Float32, 12 => Float32, 2 => Float32x4
-                    ]
-                    .to_vec(),
+                {
+                    let mut tile_attrs = ShaderTileMetadata::transform_attributes().to_vec();
+                    tile_attrs.extend([
+                        super::attribute(
+                            std::mem::offset_of!(ShaderTileMetadata, zoom_factor) as u64,
+                            wgpu::VertexFormat::Float32,
+                            9,
+                        ),
+                        super::attribute(
+                            std::mem::offset_of!(ShaderTileMetadata, viewport_width) as u64,
+                            wgpu::VertexFormat::Float32,
+                            11,
+                        ),
+                        super::attribute(
+                            std::mem::offset_of!(ShaderTileMetadata, viewport_height) as u64,
+                            wgpu::VertexFormat::Float32,
+                            12,
+                        ),
+                        super::attribute(
+                            std::mem::offset_of!(ShaderTileMetadata, tile_mercator_coords) as u64,
+                            wgpu::VertexFormat::Float32x4,
+                            2,
+                        ),
+                    ]);
+                    ShaderTileMetadata::instance_layout(tile_attrs)
                 },
                 circle_layer_layout(),
                 VertexBufferLayout {

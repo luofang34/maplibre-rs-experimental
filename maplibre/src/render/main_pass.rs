@@ -19,8 +19,14 @@ use crate::{
     tcs::world::World,
 };
 
-// Valid tiles use four references per zoom; this value is outside that range, including z0.
-const EMPTY_STENCIL_REFERENCE: u32 = crate::coords::MAX_ZOOM as u32 * 4;
+// Valid tiles use `0..=123` (`(z % 31) * 4 + quadrant`). `0x7f` (`127`) stays outside all tile
+// references while keeping bit 7 (`0x80`, `STENCIL_MARK`) clear so 3D extrusions rising above
+// unmasked horizon/background pixels are not rejected by `extrusion_color_pipeline`.
+pub(crate) const EMPTY_STENCIL_REFERENCE: u32 = 0x7f;
+
+/// High stencil bit (`0x80`) marking pixels already drawn by the extrusion color pass.
+/// Both tile references (`0..=123`) and `EMPTY_STENCIL_REFERENCE` (`0x7f`) keep this bit zero.
+pub(crate) const STENCIL_MARK: u32 = 0x80;
 
 pub struct MainPassNode {}
 

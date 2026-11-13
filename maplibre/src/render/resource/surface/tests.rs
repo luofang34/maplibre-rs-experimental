@@ -106,3 +106,55 @@ async fn resizing_allocates_new_storage_and_retains_existing_capture_handles() {
         "unchanged size reuses storage"
     );
 }
+
+#[tokio::test]
+async fn oversized_surface_dimensions_clamp_to_device_max_texture_dimension_2d() {
+    use crate::render::settings::WgpuSettings;
+
+    let wgpu_settings = WgpuSettings {
+        constrained_limits: Some(wgpu::Limits {
+            max_texture_dimension_2d: 512,
+            ..wgpu::Limits::default()
+        }),
+        ..Default::default()
+    };
+    let instance = wgpu::Instance::default();
+    let (adapter, device, _) = crate::render::Renderer::request_device(
+        &instance,
+        &wgpu_settings,
+        &wgpu::RequestAdapterOptions::default(),
+    )
+    .await
+    .expect("constrained device");
+    assert_eq!(device.limits().max_texture_dimension_2d, 512);
+
+    let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let mut surface = Surface::from_headless_size(
+        &device,
+        &adapter,
+        PhysicalSize::new(2048, 1024).expect("nonzero size"),
+        &RendererSettings::default(),
+    );
+    assert_eq!(
+        (surface.size().width(), surface.size().height()),
+        (512, 512)
+    );
+
+    surface.resize(PhysicalSize::new(4096, 300).expect("nonzero size"));
+    surface.reconfigure(&device);
+    assert_eq!(
+        (surface.size().width(), surface.size().height()),
+        (512, 300)
+    );
+    let Head::Headless(head) = surface.head() else {
+        panic!("offscreen surface");
+    };
+    assert_eq!(
+        (head.texture().width(), head.texture().height()),
+        (512, 300)
+    );
+    assert!(
+        scope.pop().await.is_none(),
+        "clamped resize must not fail validation"
+    );
+}

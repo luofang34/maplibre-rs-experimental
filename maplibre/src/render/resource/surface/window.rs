@@ -37,12 +37,15 @@ pub(super) fn strip_srgb(format: wgpu::TextureFormat) -> wgpu::TextureFormat {
 impl WindowHead {
     /// Configures a new physical-pixel size using the selected format and presentation mode.
     ///
-    /// # Panics
-    /// Panics if either dimension is zero. Wgpu also rejects unsupported dimensions or
-    /// configurations, and outstanding acquired frames must be dropped before this call.
-    #[allow(clippy::expect_used)]
+    /// Zero dimensions are ignored without panicking, and dimensions above
+    /// `device.limits().max_texture_dimension_2d` are clamped to the device limit.
+    /// Outstanding acquired frames must be dropped before this call.
     pub fn resize_and_configure(&mut self, width: u32, height: u32, device: &wgpu::Device) {
-        self.size = PhysicalSize::new(width, height).expect("non-zero window surface dimensions");
+        let max_dim = device.limits().max_texture_dimension_2d.max(1);
+        let Some(size) = PhysicalSize::new(width.min(max_dim), height.min(max_dim)) else {
+            return;
+        };
+        self.size = size;
         self.configure(device);
     }
 
@@ -56,12 +59,13 @@ impl WindowHead {
             view_formats.push(self.render_format);
         }
 
+        let max_dim = device.limits().max_texture_dimension_2d.max(1);
         let surface_config = wgpu::SurfaceConfiguration {
             alpha_mode: wgpu::CompositeAlphaMode::Auto,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: self.texture_format,
-            width: self.size.width(),
-            height: self.size.height(),
+            width: self.size.width().clamp(1, max_dim),
+            height: self.size.height().clamp(1, max_dim),
             present_mode: self.present_mode,
             view_formats,
             desired_maximum_frame_latency: 2,

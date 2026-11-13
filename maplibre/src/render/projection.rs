@@ -108,6 +108,8 @@ pub struct ProjectionGpuResources {
     buffer: wgpu::Buffer,
     /// Never-updated default projection for draws into drape textures.
     flat_bind_group: wgpu::BindGroup,
+    /// Latest uploaded `ShaderProjectionData::transition` (`f32::to_bits`) for pipeline selection.
+    transition_bits: std::sync::atomic::AtomicU32,
 }
 
 impl ProjectionGpuResources {
@@ -167,7 +169,17 @@ impl ProjectionGpuResources {
             bind_group,
             buffer,
             flat_bind_group,
+            transition_bits: std::sync::atomic::AtomicU32::new(initial_data.transition.to_bits()),
         }
+    }
+
+    /// Returns whether `binding` resolves to an active globe projection (`transition > 0.0`).
+    pub fn is_globe_active(&self, binding: ProjectionBinding) -> bool {
+        matches!(binding, ProjectionBinding::View)
+            && f32::from_bits(
+                self.transition_bits
+                    .load(std::sync::atomic::Ordering::Relaxed),
+            ) > 0.0
     }
 
     /// Returns the bind group a draw asks for: the camera's projection or the flat default.
@@ -194,6 +206,10 @@ impl ProjectionGpuResources {
         queue: &crate::render::upload_queue::UploadQueue,
         data: ShaderProjectionData,
     ) {
+        self.transition_bits.store(
+            data.transition.to_bits(),
+            std::sync::atomic::Ordering::Relaxed,
+        );
         queue.write_buffer(&self.buffer, 0, bytemuck::bytes_of(&data));
     }
 }

@@ -37,6 +37,13 @@ pub struct Surface {
     head: Head,
 }
 
+/// Clamps drawable dimensions to `1..=max_dim.max(1)`.
+fn clamp_size(size: PhysicalSize, max_dim: u32) -> PhysicalSize {
+    let max_dim = max_dim.max(1);
+    PhysicalSize::new(size.width().min(max_dim), size.height().min(max_dim))
+        .unwrap_or(PhysicalSize::MIN)
+}
+
 impl Surface {
     /// Wraps an unconfigured window surface using the window's physical dimensions.
     ///
@@ -52,7 +59,7 @@ impl Surface {
     where
         MW: MapWindow + HeadedMapWindow,
     {
-        let size = window.size();
+        let size = clamp_size(window.size(), adapter.limits().max_texture_dimension_2d);
 
         let capabilities = surface.get_capabilities(adapter);
         log::info!("adapter capabilities on surface: {capabilities:?}");
@@ -134,6 +141,7 @@ impl Surface {
         settings: &RendererSettings,
         destroy_texture_on_drop: bool,
     ) -> Self {
+        let size = clamp_size(size, device.limits().max_texture_dimension_2d);
         let format = settings
             .texture_format
             .unwrap_or(wgpu::TextureFormat::Rgba8Unorm);
@@ -211,6 +219,7 @@ impl Surface {
     /// texture and readback buffer; existing [`Arc`] clones retain the previous allocation.
     /// This does not recreate dependent depth or multisample attachments.
     pub fn reconfigure(&mut self, device: &wgpu::Device) {
+        self.size = clamp_size(self.size, device.limits().max_texture_dimension_2d);
         match &mut self.head {
             Head::Headed(window) => {
                 if window.has_changed(&(self.size.width(), self.size.height())) {

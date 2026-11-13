@@ -50,7 +50,9 @@ impl Node for TranslucentPassNode {
                 view: &texture.view,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Load,
-                    store: StoreOp::Store,
+                    // Resolved into `render_target`; discarding the transient MSAA surface avoids
+                    // writing multisampled tile memory back to DRAM on mobile TBDR GPUs.
+                    store: StoreOp::Discard,
                 },
                 resolve_target: Some(render_target.deref()),
             }
@@ -66,6 +68,8 @@ impl Node for TranslucentPassNode {
             }
         };
 
+        let needs_depth_after_pass = state.eye_depth_target.is_some()
+            || matches!(state.depth_readout_texture, Initialized(_));
         let render_pass =
             render_context
                 .command_encoder
@@ -77,11 +81,19 @@ impl Node for TranslucentPassNode {
                         view: &depth_texture.view,
                         depth_ops: Some(wgpu::Operations {
                             load: wgpu::LoadOp::Load,
-                            store: StoreOp::Store,
+                            store: if needs_depth_after_pass {
+                                StoreOp::Store
+                            } else {
+                                StoreOp::Discard
+                            },
                         }),
                         stencil_ops: Some(wgpu::Operations {
                             load: wgpu::LoadOp::Load,
-                            store: StoreOp::Store,
+                            store: if needs_depth_after_pass {
+                                StoreOp::Store
+                            } else {
+                                StoreOp::Discard
+                            },
                         }),
                     }),
                     timestamp_writes: None,
