@@ -86,9 +86,12 @@ fn multiple_style_layers_and_query_index_share_one_feature_properties_allocation
                 .into_transferable::<DefaultLayerTessellated>()
                 .expect("tessellated layer");
             if layer.style_layer_id() == "park-constant" {
+                let entries = layer.take_feature_paint().unwrap_or_default();
                 assert!(
-                    layer.take_feature_paint().is_none(),
-                    "constant-paint layers must not retain per-feature property entries"
+                    entries
+                        .iter()
+                        .all(|entry| entry.raw_id.is_none() && entry.properties.is_empty()),
+                    "constant-paint layers keep slot kinds at most, never a feature's id or properties"
                 );
                 saw_constant = true;
             } else {

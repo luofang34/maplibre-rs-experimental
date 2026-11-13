@@ -83,8 +83,8 @@ pub(super) fn build_tessellator(
     }
     .with_feature_opacity(paint.opacity(), style_zoom);
     tessellator.sort_key = SortKeys::by(sort_key_of(style_layer));
-    tessellator.retain_feature_paint =
-        crate::vector::feature_paint::layer_retains_feature_paint(style_layer);
+    tessellator.feature_paint_retention =
+        crate::vector::feature_paint::feature_paint_retention(style_layer);
     match paint {
         LayerPaint::Fill(p) if p.fill_pattern.is_some() => {
             tessellator.fallback_color = [1.0; 4];

@@ -30,6 +30,35 @@ pub(crate) fn layer_retains_feature_paint(layer: &StyleLayer) -> bool {
     layer_paint_varies_by_feature(paint)
 }
 
+/// How much of each feature a layer's retained [`BucketFeatureEntry`]s keep.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum FeaturePaintRetention {
+    /// Every slot of a bucket shares one colour, so nothing is kept.
+    #[default]
+    None,
+    /// Slots differ only by [`BucketEntryKind`] (a fill beside its outline, a gradient line's
+    /// length), so entries keep the kind and share one empty property map.
+    SlotKinds,
+    /// Paint reads feature properties or `feature-state`, so entries keep both.
+    Full,
+}
+
+/// The retention `layer`'s buckets need for their paint to be refreshed in place.
+pub(crate) fn feature_paint_retention(layer: &StyleLayer) -> FeaturePaintRetention {
+    if layer_retains_feature_paint(layer) {
+        return FeaturePaintRetention::Full;
+    }
+    match layer.paint.as_ref() {
+        Some(LayerPaint::Fill(fill)) if fill.outline_color().is_some() => {
+            FeaturePaintRetention::SlotKinds
+        }
+        Some(LayerPaint::Line(line)) if line.line_gradient.is_some() => {
+            FeaturePaintRetention::SlotKinds
+        }
+        _ => FeaturePaintRetention::None,
+    }
+}
+
 /// Returns `true` when any GPU-evaluated paint property in `paint` varies by feature.
 pub(crate) fn layer_paint_varies_by_feature(paint: &LayerPaint) -> bool {
     if paint

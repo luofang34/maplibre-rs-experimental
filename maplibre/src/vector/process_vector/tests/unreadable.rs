@@ -48,9 +48,25 @@ fn a_feature_whose_geometry_cannot_be_read_is_left_out_without_its_layer() {
         2,
         "only the readable feature produces tessellated fill + default-outline metadata (2 entries, not 4)"
     );
-    assert!(
-        layers[0].feature_paint.is_none(),
-        "constant-paint layers do not retain per-feature property maps"
+    let entries = layers[0].feature_paint.as_deref().unwrap_or_default();
+    assert_eq!(
+        entries
+            .iter()
+            .map(|entry| (entry.kind, entry.raw_id, entry.properties.is_empty()))
+            .collect::<Vec<_>>(),
+        [
+            (
+                crate::vector::feature_paint::BucketEntryKind::Feature,
+                None,
+                true
+            ),
+            (
+                crate::vector::feature_paint::BucketEntryKind::FillOutline,
+                None,
+                true
+            )
+        ],
+        "a constant fill keeps which slot is the outline, and no feature's id or properties"
     );
     assert!(layers[0].layer_data.features.is_empty());
 }

@@ -7,7 +7,7 @@ use lyon::tessellation::{geometry_builder::MaxIndex, VertexId};
 use super::ZeroTessellator;
 use crate::{
     style::feature_state::{sync_properties_feature_state, SourceFeatureState},
-    vector::feature_paint::{BucketEntryKind, BucketFeatureEntry},
+    vector::feature_paint::{BucketEntryKind, BucketFeatureEntry, FeaturePaintRetention},
 };
 
 /// Source `promoteId` and active runtime `feature-state` used while tessellating one source layer.
@@ -118,7 +118,14 @@ where
             first_entry..self.feature_indices.len(),
             (self.buffer.indices.len(), pattern),
         );
-        if self.retain_feature_paint {
+        let retention = self.feature_paint_retention;
+        if retention != FeaturePaintRetention::None {
+            // Slot-kind entries name no feature: one shared empty map stands in for them all.
+            let (raw_id, props) = if retention == FeaturePaintRetention::Full {
+                (self.current_raw_id, props)
+            } else {
+                (None, Arc::clone(&self.slot_kind_properties))
+            };
             let main_kind = if self.is_line_layer {
                 BucketEntryKind::Line {
                     length: line_length,
@@ -128,14 +135,14 @@ where
             };
             for _ in 0..main_count {
                 self.feature_paint.push(BucketFeatureEntry {
-                    raw_id: self.current_raw_id,
+                    raw_id,
                     properties: props.clone(),
                     kind: main_kind,
                 });
             }
             if outline_added {
                 self.feature_paint.push(BucketFeatureEntry {
-                    raw_id: self.current_raw_id,
+                    raw_id,
                     properties: props,
                     kind: BucketEntryKind::FillOutline,
                 });

@@ -80,26 +80,16 @@ pub(crate) fn needs_tile_redraw(before: &StyleLayer, after: &StyleLayer) -> bool
     {
         return true;
     }
-    needs_paint_retessellation(before, before.paint.as_ref(), after.paint.as_ref())
+    needs_paint_retessellation(before.paint.as_ref(), after.paint.as_ref())
 }
 
-fn needs_paint_retessellation(
-    before_layer: &StyleLayer,
-    before: Option<&LayerPaint>,
-    after: Option<&LayerPaint>,
-) -> bool {
-    let retained_paint = crate::vector::feature_paint::layer_retains_feature_paint(before_layer);
+fn needs_paint_retessellation(before: Option<&LayerPaint>, after: Option<&LayerPaint>) -> bool {
     match (before, after) {
         (None, None) => false,
         (Some(bp @ LayerPaint::Fill(a)), Some(ap @ LayerPaint::Fill(b))) => {
             a.outline_color().is_some() != b.outline_color().is_some()
                 || ((per_feature_pattern(bp).is_some() || per_feature_pattern(ap).is_some())
                     && a.fill_pattern != b.fill_pattern)
-                || (!retained_paint
-                    && a.outline_color().is_some()
-                    && (!same_prop(&a.fill_color, &b.fill_color)
-                        || !same_prop(&a.fill_opacity, &b.fill_opacity)
-                        || !same_prop(&a.fill_outline_color, &b.fill_outline_color)))
         }
         (Some(bp @ LayerPaint::Line(a)), Some(ap @ LayerPaint::Line(b))) => {
             let per_feature_stroke = is_data_driven(a.line_width.as_ref())
@@ -116,9 +106,6 @@ fn needs_paint_retessellation(
                     || !same_prop(&a.line_gap_width, &b.line_gap_width)
                     || !same_prop(&a.line_blur, &b.line_blur)))
                 || a.line_gradient.is_some() != b.line_gradient.is_some()
-                || (!retained_paint
-                    && a.line_gradient.is_some()
-                    && !same_prop(&a.line_opacity, &b.line_opacity))
                 || a.line_dasharray.is_some() != b.line_dasharray.is_some()
                 || a.line_pattern.is_some() != b.line_pattern.is_some()
                 || ((per_feature_pattern(bp).is_some() || per_feature_pattern(ap).is_some())
