@@ -141,3 +141,243 @@ fn a_dropped_reply_still_applies_its_command() {
     commands.apply(&mut value);
     assert_eq!(value, 5);
 }
+
+#[test]
+fn sync_handles_are_send_and_sync_even_for_non_send_targets() {
+    fn assert_send_sync<T: Send + Sync + Clone + 'static>() {}
+    assert_send_sync::<super::SyncHandle<Rc<Cell<i32>>>>();
+    #[cfg(feature = "headless")]
+    assert_send_sync::<super::SyncHeadlessHandle>();
+}
+
+#[test]
+fn sync_queue_never_holds_mutex_while_running_or_dropping_closures() {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    struct QueryOnDrop {
+        handle: super::SyncHandle<i32>,
+        drops: Arc<AtomicUsize>,
+    }
+
+    impl Drop for QueryOnDrop {
+        fn drop(&mut self) {
+            // Re-acquires the queue mutex inside Drop; would deadlock if close() or push()
+            // dropped closures while holding the mutex.
+            let _ = self.handle.is_closed();
+            self.drops.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    let queue = super::SyncCommandQueue::<i32>::new();
+    let wakes = Arc::new(AtomicUsize::new(0));
+    let wake_counter = Arc::clone(&wakes);
+    let handle = queue.handle(move || {
+        wake_counter.fetch_add(1, Ordering::SeqCst);
+    });
+
+    // Re-entrant send while running apply().
+    let nested_handle = handle.clone();
+    let outer = handle.call(move |target| {
+        *target += 3;
+        nested_handle.send_fire_and_forget(|inner| *inner *= 4);
+        *target
+    });
+    let mut state = 2;
+    queue.apply(&mut state);
+    assert_eq!(outer.now_or_never(), Some(Ok(5)));
+    assert_eq!(state, 20);
+
+    // Closure + watcher drop outside mutex on close() and on post-close push().
+    let drops = Arc::new(AtomicUsize::new(0));
+    let guard_watch = QueryOnDrop {
+        handle: handle.clone(),
+        drops: Arc::clone(&drops),
+    };
+    let watching = handle.until(move |_| {
+        let _keep = &guard_watch;
+        None::<i32>
+    });
+    queue.apply(&mut state);
+
+    let guard_queued = QueryOnDrop {
+        handle: handle.clone(),
+        drops: Arc::clone(&drops),
+    };
+    let queued = handle.call(move |target| {
+        let _keep = &guard_queued;
+        *target
+    });
+    queue.close();
+    assert_eq!(queued.now_or_never(), Some(Err(MapClosed)));
+    assert_eq!(watching.now_or_never(), Some(Err(MapClosed)));
+
+    let guard_late = QueryOnDrop {
+        handle: handle.clone(),
+        drops: Arc::clone(&drops),
+    };
+    let late = handle.call(move |target| {
+        let _keep = &guard_late;
+        *target
+    });
+    assert_eq!(late.now_or_never(), Some(Err(MapClosed)));
+    assert_eq!(drops.load(Ordering::SeqCst), 3);
+}
+
+#[test]
+fn sync_queue_processes_concurrent_multithreaded_calls_and_watchers() {
+    use std::{
+        sync::{Arc, Condvar, Mutex},
+        thread,
+    };
+
+    let pair = Arc::new((Mutex::new(false), Condvar::new()));
+    let wake_pair = Arc::clone(&pair);
+    let queue = Arc::new(super::SyncCommandQueue::<i32>::new());
+    let handle = queue.handle(move || {
+        let (lock, cvar) = &*wake_pair;
+        if let Ok(mut woken) = lock.lock() {
+            *woken = true;
+            cvar.notify_one();
+        }
+    });
+
+    const THREADS: i32 = 6;
+    const OPS_PER_THREAD: i32 = 25;
+    let total_expected = THREADS * OPS_PER_THREAD;
+
+    let mut worker_joins = Vec::new();
+    for t in 1..=THREADS {
+        let h = handle.clone();
+        worker_joins.push(thread::spawn(move || {
+            let threshold = t * OPS_PER_THREAD;
+            let watcher = h.until(move |val| (*val >= threshold).then_some(*val));
+            for _ in 0..OPS_PER_THREAD {
+                let updated = h.call_blocking(|val| {
+                    *val += 1;
+                    *val
+                });
+                assert!(updated.is_ok());
+            }
+            let reached = futures::executor::block_on(watcher).expect("watcher satisfied");
+            assert!(reached >= threshold);
+        }));
+    }
+
+    let late_watcher = handle.until(move |val| (*val > total_expected + 100).then_some(*val));
+
+    let owner_queue = Arc::clone(&queue);
+    let owner_pair = Arc::clone(&pair);
+    let owner = thread::spawn(move || {
+        let mut state = 0_i32;
+        while state < total_expected {
+            owner_queue.apply(&mut state);
+            if state >= total_expected {
+                break;
+            }
+            let (lock, cvar) = &*owner_pair;
+            let mut woken = lock.lock().expect("lock");
+            if !*woken && !owner_queue.has_pending_commands() {
+                woken = cvar.wait(woken).expect("wait");
+            }
+            *woken = false;
+        }
+        owner_queue.apply(&mut state);
+        owner_queue.close();
+        state
+    });
+
+    for join in worker_joins {
+        join.join().expect("worker thread panicked");
+    }
+    let final_state = owner.join().expect("owner thread panicked");
+    assert_eq!(final_state, total_expected);
+    assert_eq!(
+        futures::executor::block_on(late_watcher),
+        Err(MapClosed),
+        "unsatisfied watcher resolves to MapClosed on shutdown"
+    );
+    assert_eq!(handle.call_blocking(|v| *v), Err(MapClosed));
+}
+
+#[cfg(all(
+    feature = "headless",
+    feature = "native-io",
+    not(target_arch = "wasm32")
+))]
+#[test]
+fn headless_runtime_thread_drives_map_across_os_threads_and_closes_cleanly() {
+    use std::thread;
+
+    use cgmath::Deg;
+
+    use crate::{
+        coords::LatLon,
+        map::handle::{HeadlessRuntimeConfig, HeadlessRuntimeThread},
+        render::view_state::CameraOptions,
+        style::Style,
+    };
+
+    let style: Style = serde_json::from_value(serde_json::json!({
+        "version": 8,
+        "layers": [
+            {
+                "id": "bg",
+                "type": "background",
+                "paint": { "background-color": "#112233" }
+            }
+        ]
+    }))
+    .expect("valid style");
+
+    let runtime_thread = HeadlessRuntimeThread::spawn(HeadlessRuntimeConfig {
+        width: 32,
+        height: 32,
+        pixel_ratio: 1.0,
+        style,
+        cache_dir: None,
+        max_pitch_deg: Some(75.0),
+        ..HeadlessRuntimeConfig::default()
+    })
+    .expect("spawn headless runtime thread");
+
+    let handle = runtime_thread.handle();
+    let mut joins = Vec::new();
+    for idx in 0..4 {
+        let thread_handle = handle.clone();
+        joins.push(thread::spawn(move || {
+            let zoom = 3.0 + f64::from(idx);
+            thread_handle
+                .call_blocking(move |map| {
+                    map.jump_to(CameraOptions {
+                        center: Some(LatLon::new(10.0 + f64::from(idx), 20.0)),
+                        zoom: Some(zoom),
+                        pitch: Some(Deg(15.0)),
+                        ..CameraOptions::default()
+                    })
+                    .expect("jump_to");
+                    map.view_state().zoom().value()
+                })
+                .expect("call succeeded")
+        }));
+    }
+    for join in joins {
+        let reported_zoom = join.join().expect("thread join");
+        assert!(reported_zoom >= 3.0);
+    }
+
+    // Exercise until_blocking watcher waiting for a settled frame on the worker thread.
+    let frame_number = handle
+        .until_blocking(|map| {
+            let stats = map.last_frame_stats();
+            (stats.frame >= 1 && !map.needs_redraw()).then_some(stats.frame)
+        })
+        .expect("settled frame watcher");
+    assert!(frame_number >= 1);
+
+    runtime_thread.shutdown();
+    assert!(handle.is_closed());
+    assert_eq!(handle.call_blocking(|_| ()), Err(MapClosed));
+}

@@ -33,6 +33,14 @@
       "todo": 0,
       "unimplemented": 0
     },
+    "maplibre-ffi": {
+      "total": 0,
+      "unwrap": 0,
+      "expect": 0,
+      "panic": 0,
+      "todo": 0,
+      "unimplemented": 0
+    },
     "android": {
       "total": 0,
       "unwrap": 0,

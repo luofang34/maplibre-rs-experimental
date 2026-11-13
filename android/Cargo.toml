@@ -12,13 +12,16 @@ categories.workspace = true
 authors.workspace = true
 
 [dependencies]
-maplibre = { path = "../maplibre", features = ["thread-safe-futures"] }
+maplibre = { path = "../maplibre", features = ["headless", "thread-safe-futures"] }
+maplibre-ffi = { path = "../maplibre-ffi" }
 maplibre-winit = { path = "../maplibre-winit", version = "0.1.0" }
+bytemuck.workspace = true
 env_logger.workspace = true
 tracing = { workspace = true, features = ["log"] }
 log.workspace = true
 android_logger.workspace = true
 jni.workspace = true
+thiserror.workspace = true
 
 [lib]
 #name = "maplibre_android" Currently not supported: https://github.com/rust-windowing/android-ndk-rs/issues/136
