@@ -2,15 +2,22 @@
 
 use std::collections::HashMap;
 
-use thiserror::Error;
-
 use super::{
     ast::{Expression, FeatureProperty, Global},
     collation::{is_supported_script, Collation},
     feature_identity::{is_internal_property, GEOMETRY_TYPE_PROPERTY, ID_PROPERTY},
     geometry::{Geometry, GEOMETRY_PROPERTY},
-    value::{Type, Value},
+    value::Value,
 };
+
+mod coercions;
+mod error;
+mod images;
+mod operations;
+
+use coercions::{coerce, interpolate_values, rgba};
+pub use error::EvaluationError;
+use operations::*;
 
 /// The typed properties of a feature.
 pub type FeatureProperties = HashMap<String, Value>;
@@ -32,6 +39,8 @@ pub struct EvaluationContext<'a> {
     pub geometry_type: Option<&'a str>,
     /// Id of the feature, when the source assigned one.
     pub id: Option<&'a Value>,
+    /// Accumulated cluster property value read by `accumulated`; `None` outside cluster reduction.
+    pub accumulated: Option<&'a Value>,
     /// Map-level state read by `global-state`; the map keeps none, so it is normally absent.
     pub global_state: Option<&'a FeatureProperties>,
     /// The images a layout can draw, which `image` expressions are checked against; absent when
@@ -76,81 +85,6 @@ fn feature_geometry(context: &EvaluationContext<'_>) -> Option<Geometry> {
     Geometry::from_geojson(&serde_json::from_str(text).ok()?)
 }
 
-/// Why an expression could not produce a value.
-#[derive(Error, Debug, Clone, PartialEq)]
-pub enum EvaluationError {
-    /// A value had the wrong type for the operator that received it.
-    #[error("expected value to be of type {expected}, but found {found} instead")]
-    Expected {
-        /// Type the operator needed.
-        expected: Type,
-        /// Type of the value it received.
-        found: Type,
-    },
-    /// A value could not be read as a colour.
-    #[error("could not parse color from value '{value}'")]
-    InvalidColor {
-        /// The value, as `to-string` would print it.
-        value: String,
-    },
-    /// An `rgba` component was out of range.
-    #[error("invalid rgba value {value}: {reason}")]
-    InvalidRgba {
-        /// The components.
-        value: String,
-        /// Which component and range failed.
-        reason: String,
-    },
-    /// A value could not be read as a number.
-    #[error("could not convert {value} to number")]
-    NotANumber {
-        /// The value, as JSON.
-        value: String,
-    },
-    /// An ordering comparison received operands of different or unordered types.
-    #[error("expected arguments for \"{operator}\" to be (string, string) or (number, number), but found ({left}, {right}) instead")]
-    Incomparable {
-        /// The operator.
-        operator: &'static str,
-        /// Type of the left operand.
-        left: Type,
-        /// Type of the right operand.
-        right: Type,
-    },
-    /// `in` or `index-of` received a needle that cannot be searched for.
-    #[error("expected first argument to be of type boolean, string, number or null, but found {found} instead")]
-    NotSearchable {
-        /// Type of the needle.
-        found: Type,
-    },
-    /// A string or array operation received something else.
-    #[error("expected value to be of type string or array, but found {found} instead")]
-    NotIndexable {
-        /// Type of the value.
-        found: Type,
-    },
-    /// A `step` or `interpolate` input was not a number, such as the result of dividing by zero.
-    #[error("input is not a number")]
-    InputNotANumber,
-    /// `["error", ...]` was reached during evaluation.
-    #[error("{message}")]
-    UserError {
-        /// User-provided error message.
-        message: String,
-    },
-    /// `at` received a non-integer or out-of-bounds array index.
-    #[error("{reason}")]
-    InvalidArrayIndex {
-        /// Diagnostic message describing the invalid index.
-        reason: String,
-    },
-}
-
-mod images;
-mod operations;
-
-use operations::*;
-
 type Result<T> = std::result::Result<T, EvaluationError>;
 
 impl Expression {
@@ -162,6 +96,7 @@ impl Expression {
             Self::Global(Global::Elevation) => Ok(Value::Number(context.elevation)),
             Self::Global(Global::HeatmapDensity) => Ok(Value::Number(context.heatmap_density)),
             Self::Global(Global::LineProgress) => Ok(Value::Number(context.line_progress)),
+            Self::Accumulated => Ok(context.accumulated.cloned().unwrap_or(Value::Null)),
             Self::GlobalState(key) => Ok(context
                 .global_state
                 .and_then(|state| state.get(key))
@@ -287,7 +222,7 @@ impl Expression {
             )),
             Self::NumberFormat { input, options } => eval_number_format(input, options, context),
             Self::ResolvedLocale(collator) => Ok(match collator.evaluate(context)? {
-                Value::Collator(collation) => Value::String(collation.resolved_locale().to_owned()),
+                Value::Collator(collation) => Value::String(collation.resolved_locale()),
                 _ => Value::Null,
             }),
             Self::IsSupportedScript(text) => Ok(Value::Bool(

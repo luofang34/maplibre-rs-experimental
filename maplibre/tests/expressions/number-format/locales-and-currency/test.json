@@ -1,0 +1,86 @@
+{
+  "expression": [
+    "number-format",
+    [
+      "get",
+      "n"
+    ],
+    {
+      "locale": [
+        "get",
+        "locale"
+      ],
+      "currency": [
+        "get",
+        "currency"
+      ]
+    }
+  ],
+  "inputs": [
+    [
+      {},
+      {
+        "properties": {
+          "n": 1234567.89,
+          "locale": "en-US",
+          "currency": ""
+        }
+      }
+    ],
+    [
+      {},
+      {
+        "properties": {
+          "n": 1234567.89,
+          "locale": "de-DE",
+          "currency": ""
+        }
+      }
+    ],
+    [
+      {},
+      {
+        "properties": {
+          "n": 1234567.89,
+          "locale": "hi-IN",
+          "currency": ""
+        }
+      }
+    ],
+    [
+      {},
+      {
+        "properties": {
+          "n": 1234.5,
+          "locale": "de-DE",
+          "currency": "EUR"
+        }
+      }
+    ],
+    [
+      {},
+      {
+        "properties": {
+          "n": 1234.5,
+          "locale": "ja-JP",
+          "currency": "JPY"
+        }
+      }
+    ]
+  ],
+  "expected": {
+    "compiled": {
+      "result": "success",
+      "isFeatureConstant": false,
+      "isZoomConstant": true,
+      "type": "string"
+    },
+    "outputs": [
+      "1,234,567.89",
+      "1.234.567,89",
+      "12,34,567.89",
+      "1.234,50\u00a0€",
+      "¥1,235"
+    ]
+  }
+}

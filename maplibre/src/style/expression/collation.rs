@@ -1,9 +1,13 @@
-//! The `collator` value: string comparison that can ignore case or diacritics, and the script
-//! check behind `is-supported-script`.
+//! The `collator` value: locale-aware string comparison via ICU4X, and the script check behind
+//! `is-supported-script`.
 
 use std::cmp::Ordering;
 
-use unicode_normalization::{char::is_combining_mark, UnicodeNormalization};
+use icu_collator::{
+    options::{CaseLevel, CollatorOptions, Strength},
+    CollatorBorrowed,
+};
+use icu_locale_core::{locale, Locale};
 
 /// How two strings are compared, as `Intl.Collator` sensitivities do.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -17,63 +21,54 @@ pub struct Collation {
 }
 
 impl Collation {
-    /// The locale the collation resolves to; one the style does not name is English.
-    pub fn resolved_locale(&self) -> &str {
-        self.locale.as_deref().unwrap_or("en")
+    /// The canonical BCP-47 locale tag the collation resolves to; unset or invalid tags fall back
+    /// to `"en"`.
+    pub fn resolved_locale(&self) -> String {
+        self.parsed_locale().to_string()
     }
 
-    /// Orders two strings. Base letters decide first, then accents and then case when they are
-    /// significant, with lowercase before uppercase.
+    /// Orders two strings using ICU4X compiled collation data and ECMA-402 sensitivity rules.
     pub fn compare(&self, a: &str, b: &str) -> Ordering {
-        let (base_a, accents_a) = split_accents(a);
-        let (base_b, accents_b) = split_accents(b);
-        let lowered = |text: &str| {
-            text.chars()
-                .flat_map(char::to_lowercase)
-                .collect::<String>()
-        };
-        lowered(&base_a)
-            .cmp(&lowered(&base_b))
-            .then_with(|| {
-                if self.diacritic_sensitive {
-                    accents_a.cmp(&accents_b)
-                } else {
-                    Ordering::Equal
-                }
-            })
-            .then_with(|| {
-                if self.case_sensitive {
-                    case_order(&base_a, &base_b)
-                } else {
-                    Ordering::Equal
-                }
-            })
-    }
-}
-
-/// The text without its combining marks, and the marks with the position of their letter.
-fn split_accents(text: &str) -> (String, Vec<(usize, char)>) {
-    let mut base = String::new();
-    let mut accents = Vec::new();
-    for character in text.nfd() {
-        if is_combining_mark(character) {
-            accents.push((base.chars().count(), character));
-        } else {
-            base.push(character);
+        let locale = self.parsed_locale();
+        let options = self.collator_options();
+        match CollatorBorrowed::try_new((&locale).into(), options)
+            .or_else(|_| CollatorBorrowed::try_new(Default::default(), options))
+        {
+            Ok(collator) => collator.compare(a, b),
+            Err(_) => a.cmp(b),
         }
     }
-    (base, accents)
-}
 
-fn case_order(a: &str, b: &str) -> Ordering {
-    for (left, right) in a.chars().zip(b.chars()) {
-        match (left.is_uppercase(), right.is_uppercase()) {
-            (false, true) => return Ordering::Less,
-            (true, false) => return Ordering::Greater,
-            _ => {}
-        }
+    fn parsed_locale(&self) -> Locale {
+        self.locale
+            .as_deref()
+            .and_then(|tag| Locale::try_from_str(tag.trim()).ok())
+            .filter(|locale| !locale.id.language.is_unknown())
+            .unwrap_or(locale!("en"))
     }
-    Ordering::Equal
+
+    fn collator_options(&self) -> CollatorOptions {
+        let mut options = CollatorOptions::default();
+        match (self.case_sensitive, self.diacritic_sensitive) {
+            (false, false) => {
+                options.strength = Some(Strength::Primary);
+                options.case_level = Some(CaseLevel::Off);
+            }
+            (false, true) => {
+                options.strength = Some(Strength::Secondary);
+                options.case_level = Some(CaseLevel::Off);
+            }
+            (true, false) => {
+                options.strength = Some(Strength::Primary);
+                options.case_level = Some(CaseLevel::On);
+            }
+            (true, true) => {
+                options.strength = Some(Strength::Tertiary);
+                options.case_level = Some(CaseLevel::Off);
+            }
+        }
+        options
+    }
 }
 
 /// Blocks of the scripts that need shaping the renderer does not do, as GL JS lists them; the

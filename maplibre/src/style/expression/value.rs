@@ -1,12 +1,19 @@
 //! Typed values an expression consumes and produces, with the GL JS semantics of `typeof`,
 //! strict equality and string conversion.
 
-use std::{collections::BTreeMap, fmt};
+use std::collections::BTreeMap;
 
 use super::collation::Collation;
 
+mod composite;
 mod formatted;
+mod types;
+
+pub use composite::{
+    ColorArray, NumberArray, Padding, ProjectionDefinition, VariableAnchorOffsetCollection,
+};
 pub use formatted::{Formatted, FormattedSection, ResolvedImage};
+pub use types::Type;
 
 /// A colour with straight (not premultiplied) components in `0..=1`.
 ///
@@ -109,6 +116,16 @@ pub enum Value {
     Image(ResolvedImage),
     /// Text in sections, made by `format`.
     Formatted(Formatted),
+    /// Directional `[top, right, bottom, left]` box padding (`padding`).
+    Padding(Padding),
+    /// Variable-length numeric list (`numberArray`).
+    NumberArray(NumberArray),
+    /// Variable-length colour list (`colorArray`).
+    ColorArray(ColorArray),
+    /// Map projection name or blend (`projectionDefinition`).
+    ProjectionDefinition(ProjectionDefinition),
+    /// Alternating anchor and `[x, y]` offset pairs (`variableAnchorOffsetCollection`).
+    VariableAnchorOffsetCollection(VariableAnchorOffsetCollection),
 }
 
 impl Value {
@@ -164,6 +181,11 @@ impl Value {
             Self::Collator(_) => serde_json::Value::Null,
             Self::Image(image) => image.to_json(),
             Self::Formatted(formatted) => formatted.to_json(),
+            Self::Padding(padding) => padding.to_json(),
+            Self::NumberArray(numbers) => numbers.to_json(),
+            Self::ColorArray(colors) => colors.to_json(),
+            Self::ProjectionDefinition(projection) => projection.to_json(),
+            Self::VariableAnchorOffsetCollection(offsets) => offsets.to_json(),
         }
     }
 
@@ -179,6 +201,11 @@ impl Value {
             Self::Collator(_) => Type::Collator,
             Self::Image(_) => Type::ResolvedImage,
             Self::Formatted(_) => Type::Formatted,
+            Self::Padding(_) => Type::Padding,
+            Self::NumberArray(_) => Type::NumberArray,
+            Self::ColorArray(_) => Type::ColorArray,
+            Self::ProjectionDefinition(_) => Type::ProjectionDefinition,
+            Self::VariableAnchorOffsetCollection(_) => Type::VariableAnchorOffsetCollection,
             Self::Array(items) => {
                 let mut item_type: Option<Type> = None;
                 for item in items {
@@ -238,7 +265,12 @@ impl Value {
             | Self::Object(_)
             | Self::Collator(_)
             | Self::Image(_)
-            | Self::Formatted(_) => true,
+            | Self::Formatted(_)
+            | Self::Padding(_)
+            | Self::NumberArray(_)
+            | Self::ColorArray(_)
+            | Self::ProjectionDefinition(_)
+            | Self::VariableAnchorOffsetCollection(_) => true,
         }
     }
 
@@ -250,7 +282,14 @@ impl Value {
             Self::Number(number) => js_number(*number),
             Self::String(text) => text.clone(),
             Self::Color(color) => color.css(),
-            Self::Array(_) | Self::Object(_) => self.to_json().to_string(),
+            Self::ProjectionDefinition(ProjectionDefinition::Named(name)) => name.clone(),
+            Self::Array(_)
+            | Self::Object(_)
+            | Self::Padding(_)
+            | Self::NumberArray(_)
+            | Self::ColorArray(_)
+            | Self::ProjectionDefinition(_)
+            | Self::VariableAnchorOffsetCollection(_) => self.to_json().to_string(),
             Self::Collator(_) => String::new(),
             Self::Image(image) => image.name.clone(),
             Self::Formatted(formatted) => formatted.text(),
@@ -314,99 +353,5 @@ pub fn js_number(number: f64) -> String {
             format!("{mantissa}e+{exponent}")
         }
         _ => scientific,
-    }
-}
-
-/// The static type of an expression or the dynamic type of a value.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Type {
-    /// `null`.
-    Null,
-    /// A number.
-    Number,
-    /// A string.
-    String,
-    /// A boolean.
-    Boolean,
-    /// A colour.
-    Color,
-    /// An object.
-    Object,
-    /// A string comparison rule.
-    Collator,
-    /// An image name and whether the map holds it.
-    ResolvedImage,
-    /// Text in sections.
-    Formatted,
-    /// Bottom type produced by `["error", ...]` expressions; subtypes every type.
-    Error,
-    /// Any value; the type of a property read or an untyped branch.
-    Value,
-    /// An array, with an item type and, when known, a length.
-    Array {
-        /// Type of every item.
-        item: Box<Type>,
-        /// Number of items, when the type fixes it.
-        length: Option<usize>,
-    },
-}
-
-impl Type {
-    /// An array type.
-    pub fn array(item: Type, length: Option<usize>) -> Self {
-        Self::Array {
-            item: Box::new(item),
-            length,
-        }
-    }
-
-    /// Whether a value of this type is acceptable where `expected` is required, as GL JS
-    /// `checkSubtype` decides.
-    pub fn is_subtype_of(&self, expected: &Type) -> bool {
-        match (expected, self) {
-            (_, Type::Error) => true,
-            (
-                Type::Array {
-                    item: expected_item,
-                    length: expected_length,
-                },
-                Type::Array { item, length },
-            ) => {
-                let items_fit = (*length == Some(0) && **item == Type::Value)
-                    || item.is_subtype_of(expected_item);
-                items_fit && expected_length.is_none_or(|expected| Some(expected) == *length)
-            }
-            (Type::Array { .. }, _) => false,
-            (Type::Value, _) => true,
-            (expected, actual) => expected == actual,
-        }
-    }
-
-    /// The name GL JS prints, such as `array<number, 3>`.
-    pub fn name(&self) -> String {
-        match self {
-            Self::Null => "null".to_string(),
-            Self::Number => "number".to_string(),
-            Self::String => "string".to_string(),
-            Self::Boolean => "boolean".to_string(),
-            Self::Color => "color".to_string(),
-            Self::Object => "object".to_string(),
-            Self::Collator => "collator".to_string(),
-            Self::ResolvedImage => "resolvedImage".to_string(),
-            Self::Formatted => "formatted".to_string(),
-            Self::Error => "error".to_string(),
-            Self::Value => "value".to_string(),
-            Self::Array { item, length } => match (item.as_ref(), length) {
-                (_, Some(length)) => format!("array<{}, {length}>", item.name()),
-                (Type::Value, None) => "array".to_string(),
-                (item, None) => format!("array<{}>", item.name()),
-            },
-        }
-    }
-}
-
-impl fmt::Display for Type {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.name())
     }
 }

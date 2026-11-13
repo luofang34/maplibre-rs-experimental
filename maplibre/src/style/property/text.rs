@@ -184,13 +184,9 @@ pub struct ImageName(pub String);
 
 impl PropertyValue for ImageName {
     fn spec() -> LegacyPropertySpec {
-        LegacyPropertySpec {
-            kind: PropertyKind::ResolvedImage,
-            interpolated: false,
-            default: None,
-            // `icon-image` may name its image with `{token}` references to feature properties.
-            tokens: true,
-        }
+        crate::style::spec::SymbolLayoutProperty::IconImage
+            .metadata()
+            .legacy_property_spec()
     }
 
     fn from_value(value: &Value) -> Option<Self> {
@@ -205,12 +201,9 @@ pub struct PatternName(pub String);
 
 impl PropertyValue for PatternName {
     fn spec() -> LegacyPropertySpec {
-        LegacyPropertySpec {
-            kind: PropertyKind::ResolvedImage,
-            interpolated: false,
-            default: None,
-            tokens: false,
-        }
+        crate::style::spec::FillPaintProperty::FillPattern
+            .metadata()
+            .legacy_property_spec()
     }
 
     fn from_value(value: &Value) -> Option<Self> {
@@ -271,12 +264,9 @@ impl Serialize for FormattedText {
 
 impl PropertyValue for FormattedText {
     fn spec() -> LegacyPropertySpec {
-        LegacyPropertySpec {
-            kind: PropertyKind::Formatted,
-            interpolated: false,
-            default: None,
-            tokens: true,
-        }
+        crate::style::spec::SymbolLayoutProperty::TextField
+            .metadata()
+            .legacy_property_spec()
     }
 
     fn from_value(value: &Value) -> Option<Self> {

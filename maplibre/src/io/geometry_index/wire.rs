@@ -321,7 +321,14 @@ fn encode_value(value: &Value, out: &mut Vec<u8>) {
                 encode_value(v, out);
             }
         }
-        Value::Collator(_) | Value::Image(_) | Value::Formatted(_) => {
+        Value::Collator(_)
+        | Value::Image(_)
+        | Value::Formatted(_)
+        | Value::Padding(_)
+        | Value::NumberArray(_)
+        | Value::ColorArray(_)
+        | Value::ProjectionDefinition(_)
+        | Value::VariableAnchorOffsetCollection(_) => {
             out.push(TAG_NULL);
         }
     }

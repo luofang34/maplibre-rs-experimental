@@ -20,53 +20,11 @@ use maplibre::style::expression::{
 };
 use serde_json::Value as Json;
 
-/// Types of the specification the engine has no runtime `Value` variant for.
-const UNSUPPORTED_TYPES: &[&str] = &[
-    "padding",
-    "numberArray",
-    "colorArray",
-    "projectionDefinition",
-    "variableAnchorOffsetCollection",
-];
-
-const REASON_COLOR_ARRAY: &str = "uses unsupported `colorArray` property value type";
-const REASON_NUMBER_ARRAY: &str = "uses unsupported `numberArray` property value type";
-const REASON_PADDING: &str = "uses unsupported `padding` property value type";
-const REASON_PROJECTION: &str = "uses unsupported `projectionDefinition` property value type";
+/// Passing cases the vendored suite must keep producing.
+const MIN_PASSING_CASES: usize = 451;
 
 /// Ratcheted map of exact `<group>/<case>` IDs expected not to pass, paired with explicit reasons.
-const EXPECTED_FAILURES: &[(&str, &str)] = &[
-    ("interpolate-hcl/linear-color-array", REASON_COLOR_ARRAY),
-    (
-        "interpolate-hcl/uninterpolable-output/number-array",
-        REASON_NUMBER_ARRAY,
-    ),
-    (
-        "interpolate-hcl/uninterpolable-output/projection",
-        REASON_PROJECTION,
-    ),
-    ("interpolate-lab/linear-color-array", REASON_COLOR_ARRAY),
-    (
-        "interpolate-lab/uninterpolable-output/number-array",
-        REASON_NUMBER_ARRAY,
-    ),
-    (
-        "interpolate-lab/uninterpolable-output/projection",
-        REASON_PROJECTION,
-    ),
-    ("interpolate/linear-color-array", REASON_COLOR_ARRAY),
-    ("interpolate/linear-number-array", REASON_NUMBER_ARRAY),
-    ("interpolate/projection/global-state", REASON_PROJECTION),
-    ("interpolate/projection/higher-than-stop", REASON_PROJECTION),
-    ("interpolate/projection/linear", REASON_PROJECTION),
-    ("interpolate/projection/lower-than-stop", REASON_PROJECTION),
-    ("interpolate/projection/same-from-to", REASON_PROJECTION),
-    ("legacy/identity/color_array", REASON_COLOR_ARRAY),
-    ("legacy/identity/number_array", REASON_NUMBER_ARRAY),
-    ("legacy/identity/padding", REASON_PADDING),
-    ("step/projection/step-array", REASON_PROJECTION),
-    ("step/projection/step-primitive", REASON_PROJECTION),
-];
+const EXPECTED_FAILURES: &[(&str, &str)] = &[];
 
 enum Outcome {
     Pass,
@@ -158,6 +116,10 @@ fn the_engine_agrees_with_the_style_specification() {
         "unexpected expression conformance failures:\n{}",
         unexpected_failures.join("\n")
     );
+    assert!(
+        passed >= MIN_PASSING_CASES,
+        "only {passed} cases pass; the floor is {MIN_PASSING_CASES}"
+    );
 }
 
 fn collect_cases(directory: &Path, cases: &mut Vec<std::path::PathBuf>) {
@@ -174,13 +136,6 @@ fn collect_cases(directory: &Path, cases: &mut Vec<std::path::PathBuf>) {
 fn run_case(path: &Path) -> Outcome {
     let case: Json = serde_json::from_str(&fs::read_to_string(path).expect("readable case"))
         .expect("valid JSON");
-    let text = case.to_string();
-    if let Some(unsupported) = UNSUPPORTED_TYPES
-        .iter()
-        .find(|kind| text.contains(&format!("\"{kind}\"")))
-    {
-        return Outcome::Unsupported(format!("uses the {unsupported} type"));
-    }
     let spec = property_spec(case.get("propertySpec"));
     let expected = &case["expected"];
     let compiled = &expected["compiled"];
@@ -198,10 +153,10 @@ fn run_case(path: &Path) -> Outcome {
         .any(|message| message.starts_with("Unknown expression"));
     let expression = match (parsed, compiled["result"].as_str()) {
         (Err(error), Some("error")) if !error.is_unknown_operator() || expects_unknown => {
-            return Outcome::Pass
+            return Outcome::Pass;
         }
         (Err(error), _) if error.is_unknown_operator() => {
-            return Outcome::Unsupported(error.message)
+            return Outcome::Unsupported(error.message);
         }
         (Err(error), _) => return Outcome::Fail(format!("parse error {error}")),
         (Ok(_), Some("error")) => return Outcome::Fail("parsed but an error was expected".into()),
@@ -217,10 +172,10 @@ fn run_case(path: &Path) -> Outcome {
         ("isFeatureConstant", expression.is_feature_constant()),
         ("isZoomConstant", expression.is_zoom_constant()),
     ] {
-        if let Some(expected) = compiled[flag].as_bool() {
-            if expected != actual {
-                return Outcome::Fail(format!("{flag} is {actual}, expected {expected}"));
-            }
+        if let Some(expected) = compiled[flag].as_bool()
+            && expected != actual
+        {
+            return Outcome::Fail(format!("{flag} is {actual}, expected {expected}"));
         }
     }
     let inputs = case["inputs"].as_array().cloned().unwrap_or_default();
@@ -280,6 +235,7 @@ fn run_case(path: &Path) -> Outcome {
             .get("geometry")
             .and_then(|geometry| geometry.get("type"))
             .and_then(Json::as_str);
+        let accumulated = globals.get("accumulated").map(Value::from_json);
         let context = EvaluationContext {
             zoom: globals.get("zoom").and_then(Json::as_f64).unwrap_or(0.0),
             elevation: globals
@@ -297,6 +253,7 @@ fn run_case(path: &Path) -> Outcome {
             properties: Some(&properties),
             geometry_type,
             id: id.as_ref(),
+            accumulated: accumulated.as_ref(),
             global_state: global_state.as_ref(),
             available_images: Some(&available_images),
         };
@@ -309,7 +266,7 @@ fn run_case(path: &Path) -> Outcome {
                 return Outcome::Fail(format!(
                     "input {index}: got {} but an error was expected",
                     value.to_json()
-                ))
+                ));
             }
             (Ok(value), false) => {
                 if !matches(&value, expected) {
@@ -333,6 +290,11 @@ fn property_spec(spec: Option<&Json>) -> Option<LegacyPropertySpec> {
         "color" => PropertyKind::Color,
         "formatted" => PropertyKind::Formatted,
         "resolvedImage" => PropertyKind::ResolvedImage,
+        "padding" => PropertyKind::Padding,
+        "numberArray" => PropertyKind::NumberArray,
+        "colorArray" => PropertyKind::ColorArray,
+        "projectionDefinition" => PropertyKind::ProjectionDefinition,
+        "variableAnchorOffsetCollection" => PropertyKind::VariableAnchorOffsetCollection,
         "enum" => PropertyKind::Enum(
             spec.get("values")
                 .and_then(Json::as_object)
@@ -400,9 +362,16 @@ fn matches(value: &Value, expected: &Json) -> bool {
                         .is_some_and(|expected| matches(value, expected))
                 })
         }
-        (Value::Image(_) | Value::Formatted(_), expected) => {
-            json_matches(&value.to_json(), expected)
-        }
+        (
+            Value::Image(_)
+            | Value::Formatted(_)
+            | Value::Padding(_)
+            | Value::NumberArray(_)
+            | Value::ColorArray(_)
+            | Value::ProjectionDefinition(_)
+            | Value::VariableAnchorOffsetCollection(_),
+            expected,
+        ) => json_matches(&value.to_json(), expected),
         (value, expected) => value.to_json() == *expected,
     }
 }
@@ -454,6 +423,7 @@ fn the_vendored_suite_covers_every_supported_operator() {
         "number-format",
         "feature-state",
         "global-state",
+        "accumulated",
     ] {
         assert!(
             root.join(operator).is_dir(),

@@ -1,0 +1,99 @@
+{
+  "expression": {
+    "type": "identity",
+    "property": "offsets"
+  },
+  "inputs": [
+    [
+      {},
+      {
+        "properties": {}
+      }
+    ],
+    [
+      {},
+      {
+        "properties": {
+          "offsets": [
+            "top-left",
+            [
+              0.5,
+              1.5
+            ],
+            "bottom-right",
+            [
+              -0.5,
+              -1.5
+            ]
+          ]
+        }
+      }
+    ],
+    [
+      {},
+      {
+        "properties": {
+          "offsets": []
+        }
+      }
+    ],
+    [
+      {},
+      {
+        "properties": {
+          "offsets": [
+            "invalid-anchor",
+            [
+              0,
+              0
+            ]
+          ]
+        }
+      }
+    ]
+  ],
+  "propertySpec": {
+    "type": "variableAnchorOffsetCollection",
+    "property-type": "data-driven",
+    "expression": {
+      "interpolated": false,
+      "parameters": [
+        "zoom",
+        "feature"
+      ]
+    }
+  },
+  "expected": {
+    "compiled": {
+      "result": "success",
+      "isFeatureConstant": false,
+      "isZoomConstant": true,
+      "type": "variableAnchorOffsetCollection"
+    },
+    "outputs": [
+      {
+        "error": "Could not parse variableAnchorOffsetCollection from null"
+      },
+      {
+        "values": [
+          "top-left",
+          [
+            0.5,
+            1.5
+          ],
+          "bottom-right",
+          [
+            -0.5,
+            -1.5
+          ]
+        ]
+      },
+      {
+        "error": "Could not parse variableAnchorOffsetCollection from []"
+      },
+      {
+        "error": "Could not parse variableAnchorOffsetCollection from invalid anchor"
+      }
+    ]
+  }
+}

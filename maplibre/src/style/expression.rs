@@ -36,7 +36,10 @@ pub use parse::{
     IMAGE_PLACEHOLDER as FORMAT_IMAGE, SECTION as FORMAT_SECTION,
 };
 use parse::{Annotation, Parser};
-pub use value::{js_number, Color, Formatted, FormattedSection, ResolvedImage, Type, Value};
+pub use value::{
+    js_number, Color, ColorArray, Formatted, FormattedSection, NumberArray, Padding,
+    ProjectionDefinition, ResolvedImage, Type, Value, VariableAnchorOffsetCollection,
+};
 
 impl Expression {
     /// Parses an expression with no expectation about its type.

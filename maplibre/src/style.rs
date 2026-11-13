@@ -24,6 +24,7 @@ mod opaque_pass;
 pub mod property;
 pub mod sky;
 pub mod source;
+pub mod spec;
 pub mod symbol;
 pub mod terrain;
 pub mod translation;

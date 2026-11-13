@@ -1,0 +1,181 @@
+{
+  "propertySpec": {
+    "type": "variableAnchorOffsetCollection",
+    "property-type": "data-driven",
+    "expression": {
+      "interpolated": true,
+      "parameters": [
+        "zoom",
+        "feature"
+      ]
+    }
+  },
+  "expression": [
+    "interpolate",
+    [
+      "linear"
+    ],
+    [
+      "get",
+      "x"
+    ],
+    0,
+    [
+      "literal",
+      [
+        "top",
+        [
+          0,
+          1
+        ],
+        "bottom",
+        [
+          0,
+          -1
+        ]
+      ]
+    ],
+    10,
+    [
+      "get",
+      "b"
+    ]
+  ],
+  "inputs": [
+    [
+      {},
+      {
+        "properties": {
+          "x": 0,
+          "b": [
+            "top",
+            [
+              2,
+              3
+            ],
+            "bottom",
+            [
+              -2,
+              -3
+            ]
+          ]
+        }
+      }
+    ],
+    [
+      {},
+      {
+        "properties": {
+          "x": 5,
+          "b": [
+            "top",
+            [
+              2,
+              3
+            ],
+            "bottom",
+            [
+              -2,
+              -3
+            ]
+          ]
+        }
+      }
+    ],
+    [
+      {},
+      {
+        "properties": {
+          "x": 10,
+          "b": [
+            "top",
+            [
+              2,
+              3
+            ],
+            "bottom",
+            [
+              -2,
+              -3
+            ]
+          ]
+        }
+      }
+    ],
+    [
+      {},
+      {
+        "properties": {
+          "x": 5,
+          "b": [
+            "left",
+            [
+              2,
+              3
+            ],
+            "bottom",
+            [
+              -2,
+              -3
+            ]
+          ]
+        }
+      }
+    ]
+  ],
+  "expected": {
+    "compiled": {
+      "result": "success",
+      "isFeatureConstant": false,
+      "isZoomConstant": true,
+      "type": "variableAnchorOffsetCollection"
+    },
+    "outputs": [
+      {
+        "values": [
+          "top",
+          [
+            0,
+            1
+          ],
+          "bottom",
+          [
+            0,
+            -1
+          ]
+        ]
+      },
+      {
+        "values": [
+          "top",
+          [
+            1,
+            2
+          ],
+          "bottom",
+          [
+            -1,
+            -2
+          ]
+        ]
+      },
+      {
+        "values": [
+          "top",
+          [
+            2,
+            3
+          ],
+          "bottom",
+          [
+            -2,
+            -3
+          ]
+        ]
+      },
+      {
+        "error": "Cannot interpolate mismatched variableAnchorOffsetCollection anchors."
+      }
+    ]
+  }
+}

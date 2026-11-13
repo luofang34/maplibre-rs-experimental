@@ -285,15 +285,30 @@ impl Parser {
             _ => ColorSpace::Rgb,
         };
         let seed = if space != ColorSpace::Rgb {
-            Some(Type::Color)
+            if expected == Some(&Type::ColorArray) {
+                Some(Type::ColorArray)
+            } else {
+                Some(Type::Color)
+            }
         } else {
             expected.cloned()
         };
         let (stops, output) = self.parse_stops(&args[2..], 3, "interpolate", seed)?;
-        // Arrays interpolate item by item, which needs a length both stops share.
-        let interpolatable = output == Type::Number
-            || output == Type::Color
-            || matches!(&output, Type::Array { item, length: Some(_) } if **item == Type::Number);
+        // Arrays and composite types interpolate item by item; non-RGB spaces accept colours only.
+        let interpolatable = if space != ColorSpace::Rgb {
+            matches!(output, Type::Color | Type::ColorArray)
+        } else {
+            matches!(
+                output,
+                Type::Number
+                    | Type::Color
+                    | Type::Padding
+                    | Type::NumberArray
+                    | Type::ColorArray
+                    | Type::ProjectionDefinition
+                    | Type::VariableAnchorOffsetCollection
+            ) || matches!(&output, Type::Array { item, length: Some(_) } if **item == Type::Number)
+        };
         if !interpolatable {
             return Err(self.error(format!("Type {output} is not interpolatable.")));
         }

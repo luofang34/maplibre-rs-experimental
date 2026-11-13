@@ -10,6 +10,7 @@ impl Expression {
             | Self::Folded { .. }
             | Self::Global(_)
             | Self::Feature(_)
+            | Self::Accumulated
             | Self::Within(_)
             | Self::Distance(_)
             | Self::GlobalState(_) => {}

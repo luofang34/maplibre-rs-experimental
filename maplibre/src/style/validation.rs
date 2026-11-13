@@ -1,5 +1,7 @@
 //! Diagnostics for unsupported layer types, properties and expression evaluation contexts.
 
+use std::str::FromStr;
+
 use thiserror::Error;
 
 use crate::style::{
@@ -7,6 +9,7 @@ use crate::style::{
     filter::{Filter, FilterError},
     layer::StyleLayer,
     property::{PropertyValue, StyleProperty},
+    spec::{lookup_layout_property, lookup_paint_property, SpecLayerType},
     Style,
 };
 
@@ -122,19 +125,8 @@ struct LayerValidation<'a> {
 
 impl LayerValidation<'_> {
     fn validate(&mut self) {
-        if !matches!(
-            self.layer.type_.as_str(),
-            "background"
-                | "fill"
-                | "fill-extrusion"
-                | "line"
-                | "circle"
-                | "symbol"
-                | "raster"
-                | "hillshade"
-                | "color-relief"
-                | "heatmap"
-        ) {
+        let spec_layer = SpecLayerType::from_str(&self.layer.type_).ok();
+        if !spec_layer.is_some_and(SpecLayerType::is_rendered_layer) {
             self.errors.push(StyleValidationError::LayerType {
                 layer: self.layer.id.clone(),
                 kind: self.layer.type_.clone(),
@@ -157,8 +149,15 @@ impl LayerValidation<'_> {
                 {
                     continue;
                 }
+                let known_in_spec = if scope == "paint" {
+                    lookup_paint_property(&self.layer.type_, name).is_some()
+                } else {
+                    lookup_layout_property(&self.layer.type_, name).is_some()
+                };
                 let reason = if stroke {
                     "this rendering path requires a supported literal value"
+                } else if spec_layer.is_some() && !known_in_spec {
+                    "unknown style-spec property"
                 } else {
                     "property is not implemented"
                 };

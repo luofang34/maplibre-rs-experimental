@@ -116,8 +116,12 @@ png = { workspace = true, optional = true }
 image.workspace = true
 moxcms = "0.9.1"
 
-# Text/glyphs
+# Text/glyphs & locale-aware collation / number formatting
 prost = "0.14.4"
+fixed_decimal = { version = "0.7", features = ["ryu"] }
+icu_collator = "2.4"
+icu_decimal = { version = "2.4", features = ["alloc", "ryu"] }
+icu_locale_core = "2.4"
 
 [dev-dependencies]
 geozero = { workspace = true, features = ["with-geojson"] }
@@ -150,3 +154,4 @@ required-features = ["headless", "raster"]
 [build-dependencies]
 maplibre-build-tools = { path = "../maplibre-build-tools", version = "0.1.0" }
 prost-build = "0.14.4"
+serde_json.workspace = true

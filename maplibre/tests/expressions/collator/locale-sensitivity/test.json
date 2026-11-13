@@ -1,0 +1,76 @@
+{
+  "expression": [
+    "concat",
+    [
+      "to-string",
+      [
+        "<",
+        "ä",
+        "z",
+        [
+          "collator",
+          {
+            "case-sensitive": false,
+            "diacritic-sensitive": false,
+            "locale": [
+              "get",
+              "locale"
+            ]
+          }
+        ]
+      ]
+    ],
+    ":",
+    [
+      "resolved-locale",
+      [
+        "collator",
+        {
+          "locale": [
+            "get",
+            "locale"
+          ]
+        }
+      ]
+    ]
+  ],
+  "inputs": [
+    [
+      {},
+      {
+        "properties": {
+          "locale": "sv-SE"
+        }
+      }
+    ],
+    [
+      {},
+      {
+        "properties": {
+          "locale": "de-DE"
+        }
+      }
+    ],
+    [
+      {},
+      {
+        "properties": {
+          "locale": "INVALID_LOCALE!"
+        }
+      }
+    ]
+  ],
+  "expected": {
+    "compiled": {
+      "result": "success",
+      "isFeatureConstant": false,
+      "isZoomConstant": true,
+      "type": "string"
+    },
+    "outputs": [
+      "false:sv-SE",
+      "true:de-DE",
+      "true:en"
+    ]
+  }
+}

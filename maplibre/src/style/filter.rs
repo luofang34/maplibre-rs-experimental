@@ -139,14 +139,10 @@ impl Filter {
     pub fn evaluate(&self, feature: &FeatureContext) -> bool {
         let context = EvaluationContext {
             zoom: feature.zoom,
-            elevation: 0.0,
-            heatmap_density: 0.0,
-            line_progress: 0.0,
             properties: Some(feature.properties),
             geometry_type: Some(feature.geometry_type.name()),
             id: feature.id.as_ref(),
-            global_state: None,
-            available_images: None,
+            ..EvaluationContext::default()
         };
         self.expression
             .evaluate(&context)

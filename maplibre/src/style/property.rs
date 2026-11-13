@@ -3,14 +3,16 @@
 use std::sync::Arc;
 
 pub mod compiled;
+mod spec_bridge;
 mod text;
 pub use compiled::{CompiledProperty, ZoomCurve};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+pub use spec_bridge::lookup_legacy_property_spec;
 pub use text::{FormattedText, ImageName, PatternName, TextField, TextSection};
 
 use crate::style::expression::{
-    convert_token_string, EvaluationContext, Expression, FeatureProperties, LegacyPropertySpec,
-    ParseError, PropertyKind, Value,
+    EvaluationContext, Expression, FeatureProperties, LegacyPropertySpec, ParseError, PropertyKind,
+    Value,
 };
 
 /// A type a style property can hold, with the specification the expression engine needs to
@@ -35,11 +37,12 @@ pub struct NumberList(pub Vec<f64>);
 
 impl PropertyValue for NumberList {
     fn spec() -> LegacyPropertySpec {
-        LegacyPropertySpec::interpolated(PropertyKind::Number)
+        LegacyPropertySpec::interpolated(PropertyKind::NumberArray)
     }
 
     fn from_value(value: &Value) -> Option<Self> {
         match value {
+            Value::NumberArray(numbers) => Some(Self(numbers.0.clone())),
             Value::Number(number) => Some(Self(vec![*number])),
             Value::Array(items) => items
                 .iter()
@@ -71,11 +74,12 @@ impl Serialize for ColorList {
 
 impl PropertyValue for ColorList {
     fn spec() -> LegacyPropertySpec {
-        LegacyPropertySpec::interpolated(PropertyKind::Color)
+        LegacyPropertySpec::interpolated(PropertyKind::ColorArray)
     }
 
     fn from_value(value: &Value) -> Option<Self> {
         match value {
+            Value::ColorArray(colors) => Some(Self(colors.0.clone())),
             Value::Color(color) => Some(Self(vec![*color])),
             Value::String(text) => {
                 crate::style::expression::Color::parse(text).map(|color| Self(vec![color]))
@@ -220,44 +224,7 @@ pub enum StyleProperty<T> {
 impl<T: PropertyValue> StyleProperty<T> {
     /// Parses a property value: a constant, a legacy function object or an expression.
     pub fn parse(json: &serde_json::Value) -> Self {
-        if let Some(constant) = T::from_literal(json) {
-            return Self::Constant(constant);
-        }
-        let spec = T::spec();
-        // A `{token}` string reads feature properties, as GL JS lowers it before parsing.
-        let lowered = match json.as_str() {
-            Some(text) if spec.tokens => convert_token_string(text),
-            _ => json.clone(),
-        };
-        match Expression::parse_property(&lowered, &spec) {
-            Ok(Expression::Literal(value)) | Ok(Expression::Folded { value, .. }) => {
-                match T::from_value(&value) {
-                    Some(constant) => Self::Constant(constant),
-                    None => Self::Unsupported(Arc::new(UnsupportedProperty {
-                        source: json.clone(),
-                        error: ParseError {
-                            key: String::new(),
-                            message: format!(
-                                "expected {}, found {}",
-                                spec.expected_type(),
-                                value.type_of()
-                            ),
-                        },
-                    })),
-                }
-            }
-            Ok(expression) => Self::Expression(Arc::new(PropertyExpression {
-                source: json.clone(),
-                expression,
-            })),
-            Err(error) => {
-                tracing::error!(source = %json, %error, "unsupported style property value");
-                Self::Unsupported(Arc::new(UnsupportedProperty {
-                    source: json.clone(),
-                    error,
-                }))
-            }
-        }
+        Self::parse_with_spec(json, &T::spec())
     }
 
     /// Evaluates the property; `None` when the expression fails or was unsupported, so the

@@ -1,0 +1,40 @@
+{
+  "expression": [
+    "coalesce",
+    [
+      "accumulated"
+    ],
+    [
+      "get",
+      "fallback"
+    ]
+  ],
+  "inputs": [
+    [
+      {},
+      {
+        "properties": {
+          "fallback": "outside-cluster"
+        }
+      }
+    ],
+    [
+      {},
+      {
+        "properties": {}
+      }
+    ]
+  ],
+  "expected": {
+    "compiled": {
+      "result": "success",
+      "isFeatureConstant": false,
+      "isZoomConstant": true,
+      "type": "value"
+    },
+    "outputs": [
+      "outside-cluster",
+      null
+    ]
+  }
+}

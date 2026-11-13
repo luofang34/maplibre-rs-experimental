@@ -8,15 +8,16 @@ use super::{
     ast::{
         Arithmetic, Coercion, Expression, FeatureProperty, Global, MathFunction, StringFunction,
     },
-    evaluate::EvaluationContext,
     value::{Type, Value},
 };
 
+mod annotate;
 mod compound;
 mod curves;
 mod format;
 mod operators;
 
+pub(super) use annotate::Annotation;
 pub use format::{FIELD, FORMATTED_START, IMAGE_PLACEHOLDER, SECTION};
 pub use operators::is_expression;
 
@@ -42,17 +43,6 @@ impl ParseError {
 
 pub(super) type Result<T> = std::result::Result<T, ParseError>;
 
-/// How a parsed expression is fitted to the type its context expects.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum Annotation {
-    /// Wrap an untyped value in an assertion, a string in a colour coercion.
-    Assert,
-    /// Wrap an untyped value in a coercion, what GL JS does at the root of string properties.
-    Coerce,
-    /// Check the type but leave the expression bare; `coalesce` operands take this.
-    Omit,
-}
-
 /// Parser state: the path being parsed and the variables in scope.
 pub(super) struct Parser {
     pub(super) key: String,
@@ -60,7 +50,7 @@ pub(super) struct Parser {
     /// Whether a `null` literal may stand where a typed value is expected. A lowered legacy
     /// function without a default falls back to `null`, which evaluates to nothing so the
     /// caller applies the property's own default; user-written expressions stay strict.
-    null_fallbacks: bool,
+    pub(super) null_fallbacks: bool,
 }
 
 impl Parser {
@@ -155,94 +145,6 @@ impl Parser {
         }
     }
 
-    fn annotate(
-        &self,
-        parsed: Expression,
-        expected: Option<&Type>,
-        annotation: Annotation,
-    ) -> Result<Expression> {
-        let Some(expected) = expected else {
-            return Ok(parsed);
-        };
-        let actual = parsed.output_type();
-        let assertable = matches!(
-            expected,
-            Type::String | Type::Number | Type::Boolean | Type::Object | Type::Array { .. }
-        );
-        if assertable && actual == Type::Value {
-            return Ok(match annotation {
-                Annotation::Assert => Expression::Assert {
-                    required: expected.clone(),
-                    operands: vec![parsed],
-                },
-                Annotation::Coerce if *expected == Type::String => Expression::Coerce {
-                    coercion: Coercion::String,
-                    operands: vec![parsed],
-                },
-                Annotation::Coerce | Annotation::Omit => parsed,
-            });
-        }
-        // Formatted text takes any text or an image as one section of it; an image property
-        // takes a name. Coalesce operands stay bare, so it can skip an image the map lacks.
-        // An image or formatted text where a string is expected is a type error, as in GL JS.
-        let into = match expected {
-            Type::Formatted
-                if matches!(
-                    actual,
-                    Type::Value | Type::String | Type::ResolvedImage | Type::Null
-                ) =>
-            {
-                Some(Coercion::Formatted)
-            }
-            Type::ResolvedImage if matches!(actual, Type::Value | Type::String) => {
-                Some(Coercion::ResolvedImage)
-            }
-            _ => None,
-        };
-        if let Some(coercion) = into {
-            return Ok(match annotation {
-                Annotation::Omit => parsed,
-                Annotation::Assert | Annotation::Coerce => Expression::Coerce {
-                    coercion,
-                    operands: vec![parsed],
-                },
-            });
-        }
-        if *expected == Type::Color && matches!(actual, Type::Value | Type::String) {
-            return Ok(match annotation {
-                Annotation::Omit => parsed,
-                _ => Expression::Coerce {
-                    coercion: Coercion::Color,
-                    operands: vec![parsed],
-                },
-            });
-        }
-        if self.null_fallbacks && actual == Type::Null {
-            return Ok(parsed);
-        }
-        if !actual.is_subtype_of(expected) {
-            return Err(self.error(format!("Expected {expected} but found {actual} instead.")));
-        }
-        Ok(parsed)
-    }
-
-    /// Evaluates an expression that depends on nothing, as GL JS does while parsing, so an
-    /// error in it surfaces once rather than per feature.
-    fn fold(&self, parsed: Expression) -> Result<Expression> {
-        if matches!(
-            parsed,
-            Expression::Literal(_) | Expression::Folded { .. } | Expression::Error(_)
-        ) || !parsed.is_constant()
-        {
-            return Ok(parsed);
-        }
-        let output = parsed.output_type();
-        match parsed.evaluate(&EvaluationContext::default()) {
-            Ok(value) => Ok(Expression::Folded { value, output }),
-            Err(error) => Err(self.error(error.to_string())),
-        }
-    }
-
     fn parse_operator(
         &mut self,
         operator: &str,
@@ -267,12 +169,18 @@ impl Parser {
             "elevation" => self.nullary(args, Expression::Global(Global::Elevation)),
             "heatmap-density" => self.nullary(args, Expression::Global(Global::HeatmapDensity)),
             "line-progress" => self.nullary(args, Expression::Global(Global::LineProgress)),
+            "accumulated" => self.nullary(args, Expression::Accumulated),
             "id" => self.nullary(args, Expression::Feature(FeatureProperty::Id)),
-            "geometry-type" => self.nullary(args, Expression::Feature(FeatureProperty::GeometryType)),
+            "geometry-type" => {
+                self.nullary(args, Expression::Feature(FeatureProperty::GeometryType))
+            }
             "properties" => self.nullary(args, Expression::Feature(FeatureProperty::Properties)),
             "pi" => self.nullary(args, Expression::Literal(Value::Number(std::f64::consts::PI))),
             "e" => self.nullary(args, Expression::Literal(Value::Number(std::f64::consts::E))),
-            "ln2" => self.nullary(args, Expression::Literal(Value::Number(std::f64::consts::LN_2))),
+            "ln2" => self.nullary(
+                args,
+                Expression::Literal(Value::Number(std::f64::consts::LN_2)),
+            ),
             "get" | "has" => self.parse_lookup(operator, args),
             // A feature's state is kept among its properties under a reserved name, so a
             // host that sets state writes properties and every property path reads it.
@@ -305,7 +213,9 @@ impl Parser {
                     Expression::Any(operands)
                 })
             }
-            "!" => Ok(Expression::Not(Box::new(self.parse_single(args, &Type::Boolean)?))),
+            "!" => Ok(Expression::Not(Box::new(
+                self.parse_single(args, &Type::Boolean)?,
+            ))),
             "collator" => self.parse_collator(args),
             "within" => self.parse_geometry(args, true),
             "distance" => self.parse_geometry(args, false),
@@ -330,7 +240,9 @@ impl Parser {
             "*" => self.parse_arithmetic(Arithmetic::Multiply, args, None),
             "-" => match args.len() {
                 1 | 2 => self.parse_arithmetic(Arithmetic::Subtract, args, None),
-                found => Err(self.error(format!("Expected 1 or 2 arguments, but found {found} instead."))),
+                found => Err(self.error(format!(
+                    "Expected 1 or 2 arguments, but found {found} instead."
+                ))),
             },
             "/" => self.parse_arithmetic(Arithmetic::Divide, args, Some(2)),
             "%" => self.parse_arithmetic(Arithmetic::Remainder, args, Some(2)),
@@ -362,7 +274,9 @@ impl Parser {
                 max: operator == "max",
                 operands: self.parse_varargs(args, &Type::Number)?,
             }),
-            "typeof" => Ok(Expression::TypeOf(Box::new(self.parse_single(args, &Type::Value)?))),
+            "typeof" => Ok(Expression::TypeOf(Box::new(
+                self.parse_single(args, &Type::Value)?,
+            ))),
             "number" | "string" | "boolean" | "object" => {
                 let required = match operator {
                     "number" => Type::Number,
@@ -399,8 +313,12 @@ impl Parser {
                     operands,
                 })
             }
-            "image" => Ok(Expression::Image(Box::new(self.parse_single(args, &Type::String)?))),
-            "to-rgba" => Ok(Expression::ToRgba(Box::new(self.parse_single(args, &Type::Color)?))),
+            "image" => Ok(Expression::Image(Box::new(
+                self.parse_single(args, &Type::String)?,
+            ))),
+            "to-rgba" => Ok(Expression::ToRgba(Box::new(
+                self.parse_single(args, &Type::Color)?,
+            ))),
             "rgb" => Ok(Expression::Rgba(self.parse_exactly(args, 3, &Type::Number)?)),
             "rgba" => Ok(Expression::Rgba(self.parse_exactly(args, 4, &Type::Number)?)),
             "concat" => Ok(Expression::Concat(self.parse_varargs(args, &Type::Value)?)),

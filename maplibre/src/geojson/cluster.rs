@@ -10,8 +10,8 @@ use crate::style::expression::{EvaluationContext, Expression, FeatureProperties,
 /// Side of the tile the radius is measured on, in pixels.
 const TILE_PIXELS: f64 = 512.0;
 
-/// How a cluster property combines the values of the points it holds.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// How a cluster property combines the values of the points and sub-clusters it holds.
+#[derive(Clone, Debug)]
 enum Reduce {
     Sum,
     Product,
@@ -19,10 +19,11 @@ enum Reduce {
     Min,
     Any,
     All,
+    Expression(Expression),
 }
 
 impl Reduce {
-    fn parse(operator: &str) -> Option<Self> {
+    fn parse_builtin(operator: &str) -> Option<Self> {
         Some(match operator {
             "+" => Self::Sum,
             "*" => Self::Product,
@@ -34,8 +35,8 @@ impl Reduce {
         })
     }
 
-    fn combine(self, left: &Value, right: &Value) -> Value {
-        let numbers = || Some((left.as_f64()?, right.as_f64()?));
+    fn combine(&self, left: &Datum, right: &Datum, context: &EvaluationContext<'_>) -> Datum {
+        let numbers = || Some((left.as_number()?, right.as_number()?));
         let flags = || {
             (
                 left.as_bool().unwrap_or(false),
@@ -43,21 +44,33 @@ impl Reduce {
             )
         };
         match self {
-            Self::Sum => numbers().map_or(Value::Null, |(a, b)| json!(a + b)),
-            Self::Product => numbers().map_or(Value::Null, |(a, b)| json!(a * b)),
-            Self::Max => numbers().map_or(Value::Null, |(a, b)| json!(a.max(b))),
-            Self::Min => numbers().map_or(Value::Null, |(a, b)| json!(a.min(b))),
-            Self::Any => Value::Bool(flags().0 || flags().1),
-            Self::All => Value::Bool(flags().0 && flags().1),
+            Self::Sum => numbers().map_or(Datum::Null, |(a, b)| Datum::Number(a + b)),
+            Self::Product => numbers().map_or(Datum::Null, |(a, b)| Datum::Number(a * b)),
+            Self::Max => numbers().map_or(Datum::Null, |(a, b)| Datum::Number(a.max(b))),
+            Self::Min => numbers().map_or(Datum::Null, |(a, b)| Datum::Number(a.min(b))),
+            Self::Any => Datum::Bool(flags().0 || flags().1),
+            Self::All => Datum::Bool(flags().0 && flags().1),
+            Self::Expression(expr) => expr.evaluate(context).unwrap_or(Datum::Null),
         }
     }
 }
 
-/// One cluster property: the expression mapping a point to its value and how values combine.
+/// One cluster property: the expression mapping a point to its initial value and how values combine.
 struct Property {
     name: String,
     map: Expression,
+    source_key: Option<String>,
     reduce: Reduce,
+}
+
+fn direct_property_key(expr: &Expression) -> Option<String> {
+    match expr {
+        Expression::Get { key, object: None } => match key.as_ref() {
+            Expression::Literal(Datum::String(name)) => Some(name.clone()),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 /// The clustering a source asks for.
@@ -93,39 +106,50 @@ impl ClusterOptions {
         }
     }
 
-    /// `[operator, map]` or `[operator, ["accumulated"], map]`, as the style specification
-    /// writes a cluster property.
+    /// Parses `[operator, map]`, `[operator, ["accumulated"], map]`, or `[reduce_expr, map_expr]`.
     fn property(name: &str, spec: &Value) -> Option<Property> {
         let items = spec.as_array()?;
-        let operator = match items.first()? {
-            Value::String(operator) => Reduce::parse(operator)?,
+        let (reduce, map_json) = match items.as_slice() {
+            [Value::String(op), map_json] => (Reduce::parse_builtin(op)?, map_json),
+            [Value::String(op), acc, map_json]
+                if acc
+                    .as_array()
+                    .is_some_and(|a| a.as_slice() == [json!("accumulated")]) =>
+            {
+                (Reduce::parse_builtin(op)?, map_json)
+            }
+            [reduce_json, map_json] => {
+                let reduce_expr = Expression::parse(reduce_json).ok()?;
+                (Reduce::Expression(reduce_expr), map_json)
+            }
             _ => return None,
         };
-        let map = items
-            .get(1)
-            .filter(|value| value.get(0) != Some(&json!("accumulated")))?;
-        let map = if items.len() == 3 { items.get(2)? } else { map };
+        let map = Expression::parse(map_json).ok()?;
+        let source_key = direct_property_key(&map);
         Some(Property {
             name: name.to_owned(),
-            map: Expression::parse(map).ok()?,
-            reduce: operator,
+            map,
+            source_key,
+            reduce,
         })
     }
 
-    fn values(&self, properties: &[(String, Value)]) -> Vec<Value> {
+    fn values(&self, properties: &[(String, Value)]) -> (FeatureProperties, Vec<Datum>) {
         let feature: FeatureProperties = properties
             .iter()
             .map(|(key, value)| (key.clone(), Datum::from_json(value)))
             .collect();
-        self.properties
+        let mapped = self
+            .properties
             .iter()
             .map(|property| {
                 property
                     .map
                     .evaluate(&EvaluationContext::for_feature(0.0, &feature))
-                    .map_or(Value::Null, |value| value.to_json())
+                    .unwrap_or(Datum::Null)
             })
-            .collect()
+            .collect();
+        (feature, mapped)
     }
 }
 
@@ -137,8 +161,10 @@ struct Item {
     count: usize,
     /// The point's index, or the cluster's identifier.
     id: usize,
+    /// Original feature properties when `count == 0`.
+    point_props: Option<FeatureProperties>,
     /// Cluster property values, in the order of the options.
-    values: Vec<Value>,
+    values: Vec<Datum>,
 }
 
 struct Level {
@@ -180,14 +206,22 @@ pub struct Clusters {
 impl Clusters {
     /// Clusters `points`, given as world positions with their properties.
     pub fn new(points: &[ClusterInput<'_>], options: ClusterOptions) -> Self {
+        let has_custom_reduce = options
+            .properties
+            .iter()
+            .any(|prop| matches!(prop.reduce, Reduce::Expression(_)));
         let mut items: Vec<Item> = points
             .iter()
             .enumerate()
-            .map(|(index, (position, properties))| Item {
-                position: *position,
-                count: 0,
-                id: index,
-                values: options.values(properties),
+            .map(|(index, (position, properties))| {
+                let (feature, values) = options.values(properties);
+                Item {
+                    position: *position,
+                    count: 0,
+                    id: index,
+                    point_props: has_custom_reduce.then_some(feature),
+                    values,
+                }
             })
             .collect();
         let max_zoom = usize::from(options.max_zoom);
@@ -239,16 +273,43 @@ impl Clusters {
                     let weight = other.count.max(1) as f64;
                     weighted[0] += other.position[0] * weight;
                     weighted[1] += other.position[1] * weight;
-                    for (index, property) in options.properties.iter().enumerate() {
-                        values[index] = property
-                            .reduce
-                            .combine(&values[index], &other.values[index]);
+                    for (prop_idx, property) in options.properties.iter().enumerate() {
+                        if matches!(property.reduce, Reduce::Expression(_)) {
+                            let mut props = other.point_props.clone().unwrap_or_default();
+                            for (j, other_prop) in options.properties.iter().enumerate() {
+                                props.insert(other_prop.name.clone(), other.values[j].clone());
+                            }
+                            if let Some(src_key) = &property.source_key {
+                                props
+                                    .entry(src_key.clone())
+                                    .or_insert_with(|| other.values[prop_idx].clone());
+                            }
+                            props.insert(property.name.clone(), other.values[prop_idx].clone());
+                            let ctx = EvaluationContext {
+                                zoom: zoom as f64,
+                                properties: Some(&props),
+                                accumulated: Some(&values[prop_idx]),
+                                ..EvaluationContext::default()
+                            };
+                            values[prop_idx] = property.reduce.combine(
+                                &values[prop_idx],
+                                &other.values[prop_idx],
+                                &ctx,
+                            );
+                        } else {
+                            values[prop_idx] = property.reduce.combine(
+                                &values[prop_idx],
+                                &other.values[prop_idx],
+                                &EvaluationContext::default(),
+                            );
+                        }
                     }
                 }
                 result.push(Item {
                     position: [weighted[0] / total as f64, weighted[1] / total as f64],
                     count: total,
                     id: (index << 5) + zoom + 1 + previous.items.len(),
+                    point_props: None,
                     values,
                 });
             } else {
@@ -293,7 +354,7 @@ impl Clusters {
                     ),
                 ];
                 for (property, value) in self.options.properties.iter().zip(&item.values) {
-                    properties.push((property.name.clone(), value.clone()));
+                    properties.push((property.name.clone(), value.to_json()));
                 }
                 Clustered::Cluster(item.position, item.id as u64, properties)
             })
@@ -323,6 +384,8 @@ pub fn unproject(position: [f64; 2]) -> [f64; 2] {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::panic)]
+
     use super::*;
 
     fn options() -> ClusterOptions {
@@ -357,5 +420,48 @@ mod tests {
         assert_eq!(abbreviated(999), json!(999));
         assert_eq!(abbreviated(1234), json!("1.2k"));
         assert_eq!(abbreviated(12_400), json!("12k"));
+    }
+
+    #[test]
+    fn cluster_properties_support_shorthand_and_arbitrary_accumulated_reduce_expressions() {
+        let prop_defs = json!({
+            "sum_short": ["+", ["get", "mag"]],
+            "max_legacy": ["max", ["accumulated"], ["get", "mag"]],
+            "sum_expr": [["+", ["accumulated"], ["get", "sum_expr"]], ["get", "mag"]],
+            "sum_by_field": [["+", ["accumulated"], ["get", "mag"]], ["get", "mag"]],
+            "capped_max": [
+                ["case", [">", ["get", "capped_max"], ["accumulated"]], ["get", "capped_max"], ["accumulated"]],
+                ["min", ["get", "mag"], 8]
+            ]
+        });
+        let opts = ClusterOptions::new(Some(60.0), Some(6), None, Some(&prop_defs), None);
+        let p1 = [("mag".to_owned(), json!(3))];
+        let p2 = [("mag".to_owned(), json!(10))];
+        let p3 = [("mag".to_owned(), json!(5))];
+        // p1 and p2 merge at zoom 4, then merge with p3 at zoom 0 (hierarchical multi-level merge!).
+        let points = [
+            ([0.5, 0.5], &p1[..]),
+            ([0.5001, 0.5], &p2[..]),
+            ([0.51, 0.5], &p3[..]),
+        ];
+        let clusters = Clusters::new(&points, opts);
+        let items = clusters.within(0, [0.0, 0.0, 1.0, 1.0]);
+        assert_eq!(items.len(), 1);
+        let Clustered::Cluster(_, _, cluster_props) = &items[0] else {
+            panic!("expected single merged cluster");
+        };
+        let lookup = |key: &str| {
+            cluster_props
+                .iter()
+                .find(|(k, _)| k == key)
+                .map(|(_, v)| v.clone())
+                .expect("cluster property present")
+        };
+        assert_eq!(lookup("point_count"), json!(3));
+        assert_eq!(lookup("sum_short"), json!(18));
+        assert_eq!(lookup("max_legacy"), json!(10));
+        assert_eq!(lookup("sum_expr"), json!(18));
+        assert_eq!(lookup("sum_by_field"), json!(18));
+        assert_eq!(lookup("capped_max"), json!(8));
     }
 }

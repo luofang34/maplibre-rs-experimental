@@ -28,6 +28,16 @@ pub enum PropertyKind {
     Formatted,
     /// An image name, with whether the map holds the image.
     ResolvedImage,
+    /// Directional `[top, right, bottom, left]` box padding (`padding`).
+    Padding,
+    /// Variable-length numeric list (`numberArray`).
+    NumberArray,
+    /// Variable-length colour list (`colorArray`).
+    ColorArray,
+    /// Map projection name or blend (`projectionDefinition`).
+    ProjectionDefinition,
+    /// Alternating anchor and `[x, y]` offset pairs (`variableAnchorOffsetCollection`).
+    VariableAnchorOffsetCollection,
     /// An array of one item kind, with a fixed length when given.
     Array {
         /// Kind of every item.
@@ -48,6 +58,11 @@ impl PropertyKind {
             Self::Color => Type::Color,
             Self::Formatted => Type::Formatted,
             Self::ResolvedImage => Type::ResolvedImage,
+            Self::Padding => Type::Padding,
+            Self::NumberArray => Type::NumberArray,
+            Self::ColorArray => Type::ColorArray,
+            Self::ProjectionDefinition => Type::ProjectionDefinition,
+            Self::VariableAnchorOffsetCollection => Type::VariableAnchorOffsetCollection,
             Self::Array { item, length } => Type::array(item.expected_type(), *length),
         }
     }
@@ -55,7 +70,14 @@ impl PropertyKind {
     fn assertion_name(&self) -> &'static str {
         match self {
             // The root annotation turns whatever the function reads into the property's type.
-            Self::Value | Self::Formatted | Self::ResolvedImage => "coalesce",
+            Self::Value
+            | Self::Formatted
+            | Self::ResolvedImage
+            | Self::Padding
+            | Self::NumberArray
+            | Self::ColorArray
+            | Self::ProjectionDefinition
+            | Self::VariableAnchorOffsetCollection => "coalesce",
             Self::Number => "number",
             Self::String | Self::Enum(_) => "string",
             Self::Boolean => "boolean",
