@@ -1,8 +1,20 @@
-//! HTTP client.
+//! HTTP client, request transform hooks, and connectivity-aware source fetching.
+
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use thiserror::Error;
 
+pub mod network;
+pub mod request;
+
+use self::request::{decode_data_url, TransformSlot};
+pub use self::{
+    network::{Connectivity, NetworkState, NetworkStatus, OfflineError},
+    request::{
+        is_remote_http_url, CachePolicy, DataUrlError, HttpRequest, RequestTransform, ResourceKind,
+    },
+};
 use crate::{
     coords::WorldTileCoords,
     io::source_type::{InvalidTileCoords, SourceType},
@@ -12,11 +24,11 @@ use crate::{
 /// A closure that returns a HTTP client.
 pub type HTTPClientFactory<HC> = dyn Fn() -> HC;
 
-/// Fetches complete response bodies through a platform-specific HTTP transport.
+/// Fetches complete or partial response bodies through a platform-specific HTTP transport.
 ///
 /// Implementations distinguish missing resources with [`SourceFetchError::not_found`],
-/// transient transport failures with [`SourceFetchError::temporary`], and status failures
-/// with [`SourceFetchError::http_response`]. Unclassified errors are not retried.
+/// transient transport failures with [`SourceFetchError::temporary`], offline blocks with
+/// [`SourceFetchError::offline`], and status failures with [`SourceFetchError::http_response`].
 /// Returned futures need `Send` only when `thread-safe-futures` is enabled; clients themselves
 /// can be cloned and shared across threads.
 #[cfg_attr(not(feature = "thread-safe-futures"), async_trait(?Send))]
@@ -30,6 +42,32 @@ pub trait HttpClient: Clone + Sync + Send + 'static {
     async fn fetch_range(&self, url: &str, range: ByteRange) -> Result<Vec<u8>, SourceFetchError> {
         let body = self.fetch(url).await?;
         range.slice(url, &body).map(<[u8]>::to_vec)
+    }
+
+    /// Executes a structured [`HttpRequest`] carrying headers, range, and [`CachePolicy`].
+    ///
+    /// Defaults to delegating to [`Self::fetch_range`] or [`Self::fetch`] so existing
+    /// [`HttpClient`] implementations remain source-compatible.
+    async fn fetch_request(&self, req: &HttpRequest) -> Result<Vec<u8>, SourceFetchError> {
+        match req.range {
+            Some(range) => self.fetch_range(&req.url, range).await,
+            None => self.fetch(&req.url).await,
+        }
+    }
+
+    /// Executes `req` under the given [`NetworkStatus`].
+    ///
+    /// Cache-backed transports override this to serve in-memory, disk, or offline-store hits
+    /// while [`NetworkStatus::Offline`] and reject remote misses with [`SourceFetchError::offline`].
+    async fn fetch_request_with_status(
+        &self,
+        req: &HttpRequest,
+        status: NetworkStatus,
+    ) -> Result<Vec<u8>, SourceFetchError> {
+        if status.is_offline() && is_remote_http_url(&req.url) {
+            return Err(SourceFetchError::offline(&req.url));
+        }
+        self.fetch_request(req).await
     }
 }
 
@@ -84,13 +122,16 @@ impl ByteRange {
     }
 }
 
-/// Resolves tile URL templates and delegates requests to an HTTP transport.
+/// Resolves tile URL templates, applies [`RequestTransform`] hooks, enforces [`NetworkState`],
+/// and delegates requests to an HTTP transport.
 #[derive(Clone)]
 pub struct HttpSourceClient<HC>
 where
     HC: HttpClient,
 {
     inner_client: HC,
+    transform: TransformSlot,
+    network: NetworkState,
 }
 
 /// A source URL could not be resolved or fetched; retains the underlying cause.
@@ -139,10 +180,23 @@ impl SourceFetchError {
         }))
     }
 
-    /// Whether retrying can recover a transport failure, timeout, rate limit or server error.
+    /// Returns a retryable error indicating a remote URL was blocked because [`NetworkState`] is offline.
+    pub fn offline(url: &str) -> Self {
+        Self(Box::new(OfflineError {
+            url: url.to_owned(),
+        }))
+    }
+
+    /// Whether this failure resulted from [`NetworkStatus::Offline`] blocking a remote request.
+    pub fn is_offline(&self) -> bool {
+        self.0.downcast_ref::<OfflineError>().is_some()
+    }
+
+    /// Whether retrying can recover a transport failure, offline block, timeout, rate limit or server error.
     /// Unclassified failures, malformed URLs, decode errors and other client errors are terminal.
     pub fn is_retryable(&self) -> bool {
         self.0.is::<TemporarySourceError>()
+            || self.is_offline()
             || self
                 .0
                 .downcast_ref::<HttpResponseError>()
@@ -205,6 +259,54 @@ where
         }
     }
 
+    /// Borrows the underlying [`HttpSourceClient`].
+    pub fn http_client(&self) -> &HttpSourceClient<HC> {
+        &self.http
+    }
+
+    /// Attaches a [`RequestTransform`] hook shared across clones of this client.
+    pub fn with_request_transform(
+        self,
+        transform: impl Fn(HttpRequest) -> HttpRequest + Send + Sync + 'static,
+    ) -> Self {
+        self.http.set_request_transform(transform);
+        self
+    }
+
+    /// Installs or replaces the [`RequestTransform`] hook for this client and all its clones.
+    pub fn set_request_transform(
+        &self,
+        transform: impl Fn(HttpRequest) -> HttpRequest + Send + Sync + 'static,
+    ) {
+        self.http.set_request_transform(transform);
+    }
+
+    /// Removes any installed [`RequestTransform`] hook.
+    pub fn clear_request_transform(&self) {
+        self.http.clear_request_transform();
+    }
+
+    /// Shares the supplied [`NetworkState`] handle with this client.
+    pub fn with_network_state(mut self, network: NetworkState) -> Self {
+        self.http = self.http.with_network_state(network);
+        self
+    }
+
+    /// Returns the shared [`NetworkState`] handle governing online/offline transitions.
+    pub fn network_state(&self) -> &NetworkState {
+        self.http.network_state()
+    }
+
+    /// Updates online/offline status on this client's [`NetworkState`].
+    pub fn set_online(&self, online: bool) {
+        self.http.set_online(online);
+    }
+
+    /// Whether this client currently permits remote network sockets.
+    pub fn is_online(&self) -> bool {
+        self.http.is_online()
+    }
+
     /// Shares decoded glyphs and sprites with every client that received the same handle.
     pub fn with_asset_cache(mut self, assets: AssetCache) -> Self {
         self.assets = assets;
@@ -241,6 +343,20 @@ where
     pub async fn fetch_url(&self, url: &str) -> Result<Vec<u8>, SourceFetchError> {
         self.http.fetch_url(url).await
     }
+
+    /// Fetches a source metadata document (such as TileJSON) respecting `volatile` cache policy.
+    pub async fn fetch_source_url(
+        &self,
+        url: &str,
+        volatile: bool,
+    ) -> Result<Vec<u8>, SourceFetchError> {
+        self.http.fetch_source_url(url, volatile).await
+    }
+
+    /// Executes an explicit [`HttpRequest`] through transform hooks and connectivity checks.
+    pub async fn fetch_request(&self, req: HttpRequest) -> Result<Vec<u8>, SourceFetchError> {
+        self.http.fetch_request(req).await
+    }
 }
 
 impl<HC> HttpSourceClient<HC>
@@ -251,7 +367,83 @@ where
     pub fn new(http_client: HC) -> Self {
         Self {
             inner_client: http_client,
+            transform: TransformSlot::default(),
+            network: NetworkState::new(),
         }
+    }
+
+    /// Borrows the wrapped inner [`HttpClient`].
+    pub fn inner(&self) -> &HC {
+        &self.inner_client
+    }
+
+    /// Configures a [`RequestTransform`] callback shared across clones of this client.
+    pub fn with_request_transform(
+        self,
+        transform: impl Fn(HttpRequest) -> HttpRequest + Send + Sync + 'static,
+    ) -> Self {
+        self.set_request_transform(transform);
+        self
+    }
+
+    /// Installs or replaces the [`RequestTransform`] callback on this client and all its clones.
+    pub fn set_request_transform(
+        &self,
+        transform: impl Fn(HttpRequest) -> HttpRequest + Send + Sync + 'static,
+    ) {
+        self.transform.set(Arc::new(transform));
+    }
+
+    /// Installs a pre-boxed [`RequestTransform`] arc on this client and all its clones.
+    pub fn set_request_transform_arc(&self, transform: RequestTransform) {
+        self.transform.set(transform);
+    }
+
+    /// Clears any installed [`RequestTransform`] callback on this client and all its clones.
+    pub fn clear_request_transform(&self) {
+        self.transform.clear();
+    }
+
+    /// Replaces the [`NetworkState`] handle used by this client.
+    pub fn with_network_state(mut self, network: NetworkState) -> Self {
+        self.network = network;
+        self
+    }
+
+    /// Borrows the shared [`NetworkState`] handle governing connectivity.
+    pub fn network_state(&self) -> &NetworkState {
+        &self.network
+    }
+
+    /// Toggles online (`true`) vs offline (`false`) mode on this client's [`NetworkState`].
+    pub fn set_online(&self, online: bool) {
+        self.network.set_online(online);
+    }
+
+    /// Whether remote HTTP/HTTPS network sockets are currently permitted.
+    pub fn is_online(&self) -> bool {
+        self.network.is_online()
+    }
+
+    /// Current [`Connectivity`] (`Online` vs `Offline`) of this client.
+    pub fn connectivity(&self) -> Connectivity {
+        self.network.status()
+    }
+
+    /// Applies any installed [`RequestTransform`] hook to `req`.
+    pub fn apply_transform(&self, req: HttpRequest) -> HttpRequest {
+        self.transform.apply(req)
+    }
+
+    /// Executes `req` after running [`RequestTransform`] and enforcing [`NetworkState`].
+    pub async fn fetch_request(&self, req: HttpRequest) -> Result<Vec<u8>, SourceFetchError> {
+        let req = self.apply_transform(req);
+        if let Some(local) = decode_data_url(&req.url, req.range) {
+            return local;
+        }
+        self.inner_client
+            .fetch_request_with_status(&req, self.network.status())
+            .await
     }
 
     /// Resolves the source template for `coords` and fetches the response body.
@@ -264,13 +456,27 @@ where
         let url = source_type
             .format(coords)
             .ok_or_else(|| SourceFetchError(Box::new(InvalidTileCoords { coords: *coords })))?;
-        tracing::debug!(%coords, %url, "fetching tile");
-        self.inner_client.fetch(url.as_str()).await
+        tracing::debug!(%coords, %url, volatile = source_type.is_volatile(), "fetching tile");
+        let req = HttpRequest::new(url, ResourceKind::Tile)
+            .with_cache_policy(CachePolicy::from_volatile(source_type.is_volatile()));
+        self.fetch_request(req).await
     }
 
-    /// Fetches an arbitrary URL through the inner client.
+    /// Fetches an arbitrary URL through the inner client, inferring [`ResourceKind`] from the URL.
     pub async fn fetch_url(&self, url: &str) -> Result<Vec<u8>, SourceFetchError> {
-        self.inner_client.fetch(url).await
+        let req = HttpRequest::new(url, ResourceKind::infer_from_url(url));
+        self.fetch_request(req).await
+    }
+
+    /// Fetches a source metadata document (such as TileJSON) with `volatile` cache policy.
+    pub async fn fetch_source_url(
+        &self,
+        url: &str,
+        volatile: bool,
+    ) -> Result<Vec<u8>, SourceFetchError> {
+        let req = HttpRequest::new(url, ResourceKind::Source)
+            .with_cache_policy(CachePolicy::from_volatile(volatile));
+        self.fetch_request(req).await
     }
 }
 

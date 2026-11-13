@@ -8,8 +8,11 @@ pub mod apc;
 pub mod cpu_work;
 pub(crate) mod frame_style;
 pub mod geometry_index;
+#[cfg(all(not(target_arch = "wasm32"), feature = "native-io"))]
+pub mod mbtiles;
 #[cfg(feature = "mlt")]
 pub mod mlt;
+pub mod offline;
 pub mod pmtiles;
 pub mod resource_loader;
 pub mod scheduler;

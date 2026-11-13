@@ -19,7 +19,7 @@ const ARCHIVE: &str =
 async fn a_refused_cross_origin_request_names_its_url_and_is_retried() {
     // The server answers, but without CORS headers the page may not read the response.
     let url = "https://example.com/tiles/0/0/0.pbf";
-    let error = WHATWGFetchHttpClient
+    let error = WHATWGFetchHttpClient::new()
         .fetch(url)
         .await
         .expect_err("the browser withholds the response");
@@ -36,7 +36,7 @@ async fn a_refused_cross_origin_request_names_its_url_and_is_retried() {
 
 #[wasm_bindgen_test]
 async fn a_range_request_reads_only_the_archive_header() {
-    let header = WHATWGFetchHttpClient
+    let header = WHATWGFetchHttpClient::new()
         .fetch_range(
             ARCHIVE,
             ByteRange {

@@ -129,6 +129,9 @@ pub struct GeoJsonSource {
     /// Keeps only the features this filter accepts, before any clustering.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filter: Option<serde_json::Value>,
+    /// Bypasses persistent HTTP caching so live feeds are fetched afresh across sessions.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub volatile: bool,
     /// Identifies this version of the data. It is unique per parsed style and per change, so
     /// workers that share one cache never mix up two documents of the same source name, and a
     /// changed value makes them load and index the data again. It is serialized, so the tile
@@ -187,6 +190,9 @@ pub struct VectorSource {
     /// URL of a TileJSON document that supplies the tile URLs and zoom range.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<TileJSONUrl>,
+    /// Bypasses persistent HTTP caching so tiles are not stored on disk across sessions.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub volatile: bool,
 }
 
 /// How elevation in meters is packed into 8-bit RGB channels of a `raster-dem` tile.
@@ -245,6 +251,29 @@ pub struct RasterDemSource {
     /// Value subtracted after channel weighting for the `custom` encoding.
     #[serde(rename = "baseShift", default)]
     pub base_shift: f64,
+    /// Bypasses persistent HTTP caching so elevation tiles are not stored on disk across sessions.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub volatile: bool,
+}
+
+impl Default for RasterDemSource {
+    fn default() -> Self {
+        Self {
+            attribution: None,
+            bounds: None,
+            maxzoom: None,
+            minzoom: None,
+            tiles: None,
+            url: None,
+            tile_size: None,
+            encoding: None,
+            red_factor: default_channel_factor(),
+            green_factor: default_channel_factor(),
+            blue_factor: default_channel_factor(),
+            base_shift: 0.0,
+            volatile: false,
+        }
+    }
 }
 
 /// Tile size of a `raster-dem` source that neither the style nor its TileJSON states.
@@ -300,6 +329,18 @@ pub enum Source {
     /// One image stretched over four geographic corners.
     #[serde(rename = "image")]
     Image(ImageSource),
+}
+
+impl Source {
+    /// Whether this source opts out of persistent HTTP caching (`"volatile": true`).
+    pub fn is_volatile(&self) -> bool {
+        match self {
+            Self::Vector(source) | Self::Raster(source) => source.volatile,
+            Self::RasterDem(source) => source.volatile,
+            Self::GeoJson(source) => source.volatile,
+            Self::Image(_) => false,
+        }
+    }
 }
 
 /// An image placed on the map by the longitude and latitude of its corners.

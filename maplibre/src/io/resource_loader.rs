@@ -3,7 +3,8 @@
 //! A host injects a loader once; the map thread fetches TileJSON with it and native tile
 //! workers fetch tiles, glyphs and sprites with clones of the same handle. Any
 //! [`HttpClient`] is a loader, so a host can pass its own transport or an in-process fake;
-//! `pmtiles://` URLs are read out of their archive with range requests through it.
+//! `pmtiles://` URLs are read out of their archive with range requests through it, and native
+//! builds with `native-io` also serve local SQLite `mbtiles://` archives directly.
 
 use std::{
     collections::HashMap,
@@ -14,9 +15,14 @@ use std::{
 use async_trait::async_trait;
 use futures::channel::oneshot;
 
+#[cfg(all(not(target_arch = "wasm32"), feature = "native-io"))]
+use crate::io::mbtiles::{MbtilesReader, MbtilesUrl};
 use crate::io::{
     pmtiles::{PmtilesReader, PmtilesUrl},
-    source_client::{ByteRange, HttpClient, SourceFetchError},
+    source_client::{
+        is_remote_http_url, request::decode_data_url, ByteRange, CachePolicy, HttpClient,
+        HttpRequest, NetworkStatus, ResourceKind, SourceFetchError,
+    },
 };
 
 /// Fetches whole resources and byte ranges of them.
@@ -29,6 +35,26 @@ pub trait ResourceLoader: Send + Sync + 'static {
     async fn load(&self, url: &str) -> Result<Vec<u8>, SourceFetchError>;
     /// `range` of the resource's body.
     async fn load_range(&self, url: &str, range: ByteRange) -> Result<Vec<u8>, SourceFetchError>;
+
+    /// Executes a structured [`HttpRequest`], defaulting to [`Self::load_range`] or [`Self::load`].
+    async fn load_request(&self, req: &HttpRequest) -> Result<Vec<u8>, SourceFetchError> {
+        match req.range {
+            Some(range) => self.load_range(&req.url, range).await,
+            None => self.load(&req.url).await,
+        }
+    }
+
+    /// Executes `req` under `status`, rejecting remote HTTP(S) misses when [`NetworkStatus::Offline`].
+    async fn load_request_with_status(
+        &self,
+        req: &HttpRequest,
+        status: NetworkStatus,
+    ) -> Result<Vec<u8>, SourceFetchError> {
+        if status.is_offline() && is_remote_http_url(&req.url) {
+            return Err(SourceFetchError::offline(&req.url));
+        }
+        self.load_request(req).await
+    }
 }
 
 #[cfg_attr(not(feature = "thread-safe-futures"), async_trait(?Send))]
@@ -40,6 +66,18 @@ impl<T: HttpClient> ResourceLoader for T {
 
     async fn load_range(&self, url: &str, range: ByteRange) -> Result<Vec<u8>, SourceFetchError> {
         self.fetch_range(url, range).await
+    }
+
+    async fn load_request(&self, req: &HttpRequest) -> Result<Vec<u8>, SourceFetchError> {
+        self.fetch_request(req).await
+    }
+
+    async fn load_request_with_status(
+        &self,
+        req: &HttpRequest,
+        status: NetworkStatus,
+    ) -> Result<Vec<u8>, SourceFetchError> {
+        self.fetch_request_with_status(req, status).await
     }
 }
 
@@ -54,9 +92,18 @@ struct Inner {
     loader: Box<dyn ResourceLoader>,
     in_flight: Mutex<HashMap<Key, Vec<oneshot::Sender<Outcome>>>>,
     pmtiles: PmtilesReader,
+    #[cfg(all(not(target_arch = "wasm32"), feature = "native-io"))]
+    mbtiles: MbtilesReader,
 }
 
-type Key = (String, Option<ByteRange>);
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct Key {
+    url: String,
+    range: Option<ByteRange>,
+    headers: Vec<(String, String)>,
+    cache_policy: CachePolicy,
+    status: NetworkStatus,
+}
 
 /// What the request in flight delivers to the requests waiting for it.
 #[derive(Clone)]
@@ -71,6 +118,7 @@ enum Outcome {
 struct Failure {
     description: String,
     not_found: bool,
+    offline: bool,
     retryable: bool,
 }
 
@@ -81,6 +129,7 @@ impl Outcome {
             Err(error) => Self::Failed(Arc::new(Failure {
                 description: error.describe(),
                 not_found: error.is_not_found(),
+                offline: error.is_offline(),
                 retryable: error.is_retryable(),
             })),
         }
@@ -90,6 +139,7 @@ impl Outcome {
         match self {
             Self::Body(body) => Ok(body.to_vec()),
             Self::Failed(failure) if failure.not_found => Err(SourceFetchError::not_found(url)),
+            Self::Failed(failure) if failure.offline => Err(SourceFetchError::offline(url)),
             Self::Failed(failure) if failure.retryable => {
                 Err(SourceFetchError::temporary(SharedFailure(failure)))
             }
@@ -139,8 +189,18 @@ impl Inner {
         self.table().remove(key).unwrap_or_default()
     }
 
-    async fn load(&self, url: &str, range: Option<ByteRange>) -> Result<Vec<u8>, SourceFetchError> {
-        let key = (url.to_owned(), range);
+    async fn load_request(
+        &self,
+        req: &HttpRequest,
+        status: NetworkStatus,
+    ) -> Result<Vec<u8>, SourceFetchError> {
+        let key = Key {
+            url: req.url.clone(),
+            range: req.range,
+            headers: req.headers.clone(),
+            cache_policy: req.cache_policy,
+            status,
+        };
         loop {
             let waiting = {
                 let mut table = self.table();
@@ -158,7 +218,7 @@ impl Inner {
             };
             match waiting {
                 Some(receiver) => match receiver.await {
-                    Ok(outcome) => return outcome.into_result(url),
+                    Ok(outcome) => return outcome.into_result(&req.url),
                     // The request waited on was cancelled; the next fetches in its place.
                     Err(oneshot::Canceled) => continue,
                 },
@@ -169,15 +229,12 @@ impl Inner {
                         finished: false,
                     };
                     #[cfg(not(target_arch = "wasm32"))]
-                    if let Some(raw_path) = url.strip_prefix("file://") {
-                        let result = load_local_file(url, raw_path, range);
+                    if let Some(raw_path) = req.url.strip_prefix("file://") {
+                        let result = load_local_file(&req.url, raw_path, req.range);
                         leader.finish(Outcome::new(&result));
                         return result;
                     }
-                    let result = match range {
-                        Some(range) => self.loader.load_range(url, range).await,
-                        None => self.loader.load(url).await,
-                    };
+                    let result = self.loader.load_request_with_status(req, status).await;
                     leader.finish(Outcome::new(&result));
                     return result;
                 }
@@ -193,6 +250,8 @@ impl SharedLoader {
             loader: Box::new(loader),
             in_flight: Mutex::default(),
             pmtiles: PmtilesReader::default(),
+            #[cfg(all(not(target_arch = "wasm32"), feature = "native-io"))]
+            mbtiles: MbtilesReader::default(),
         }))
     }
 }
@@ -207,16 +266,46 @@ impl fmt::Debug for SharedLoader {
 #[cfg_attr(feature = "thread-safe-futures", async_trait)]
 impl HttpClient for SharedLoader {
     async fn fetch(&self, url: &str) -> Result<Vec<u8>, SourceFetchError> {
-        // An archive's range requests come back through this loader, so concurrent readers of
-        // one archive share them.
-        match PmtilesUrl::parse(url) {
-            Some(request) => self.0.pmtiles.fetch(self, url, request).await,
-            None => self.0.load(url, None).await,
-        }
+        let req = HttpRequest::new(url, ResourceKind::infer_from_url(url));
+        self.fetch_request_with_status(&req, NetworkStatus::Online)
+            .await
     }
 
     async fn fetch_range(&self, url: &str, range: ByteRange) -> Result<Vec<u8>, SourceFetchError> {
-        self.0.load(url, Some(range)).await
+        let req = HttpRequest::new(url, ResourceKind::infer_from_url(url)).with_range(range);
+        self.fetch_request_with_status(&req, NetworkStatus::Online)
+            .await
+    }
+
+    async fn fetch_request(&self, req: &HttpRequest) -> Result<Vec<u8>, SourceFetchError> {
+        self.fetch_request_with_status(req, NetworkStatus::Online)
+            .await
+    }
+
+    async fn fetch_request_with_status(
+        &self,
+        req: &HttpRequest,
+        status: NetworkStatus,
+    ) -> Result<Vec<u8>, SourceFetchError> {
+        if let Some(local) = decode_data_url(&req.url, req.range) {
+            return local;
+        }
+        // An archive's range requests come back through this loader, so concurrent readers of
+        // one archive share them.
+        if req.range.is_none() {
+            if let Some(pmtiles_req) = PmtilesUrl::parse(&req.url) {
+                return self
+                    .0
+                    .pmtiles
+                    .fetch_with_context(self, req, status, pmtiles_req)
+                    .await;
+            }
+        }
+        #[cfg(all(not(target_arch = "wasm32"), feature = "native-io"))]
+        if let Some(mbtiles_req) = MbtilesUrl::parse(&req.url) {
+            return self.0.mbtiles.fetch_with_context(req, mbtiles_req).await;
+        }
+        self.0.load_request(req, status).await
     }
 }
 

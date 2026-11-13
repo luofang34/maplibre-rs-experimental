@@ -265,3 +265,177 @@ async fn in_process_routes_are_isolated_per_client_and_shared_frontend_hits_memo
         b"cached-payload"
     );
 }
+
+#[tokio::test]
+async fn volatile_policy_bypasses_disk_and_memory_caches_while_offline_serves_cached_hits() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use crate::io::source_client::{HttpSourceClient, NetworkState};
+
+    let Ok(listener) = TcpListener::bind("127.0.0.1:0").await else {
+        return;
+    };
+    let addr = listener.local_addr().expect("local addr");
+    let hits = Arc::new(AtomicUsize::new(0));
+    let server_hits = Arc::clone(&hits);
+
+    let server = tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            let n_hit = server_hits.fetch_add(1, Ordering::SeqCst) + 1;
+            let mut buf = vec![0_u8; 4096];
+            let n = stream.read(&mut buf).await.unwrap_or(0);
+            let req_text = String::from_utf8_lossy(&buf[..n]);
+            let first_line = req_text.lines().next().unwrap_or_default();
+            let body = format!("payload-{n_hit}:{first_line}");
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\n\
+                 Content-Type: application/octet-stream\r\n\
+                 Cache-Control: public, max-age=3600\r\n\
+                 Content-Length: {}\r\n\
+                 Connection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            let _ = stream.write_all(resp.as_bytes()).await;
+        }
+    });
+
+    let cache_dir = std::env::temp_dir().join(format!(
+        "maplibre-volatile-offline-cache-test-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&cache_dir);
+
+    let normal_url = format!("http://{addr}/normal/0/0/0.pbf");
+    let volatile_url = format!("http://{addr}/volatile/0/0/0.pbf");
+    let uncached_url = format!("http://{addr}/uncached/0/0/0.pbf");
+
+    // Session 1: populate normal URL in disk cache; fetch volatile URL twice.
+    {
+        let client1 = HttpSourceClient::new(ReqwestHttpClient::new(Some(&cache_dir)));
+        let normal_1 = client1
+            .fetch_source_url(&normal_url, false)
+            .await
+            .expect("normal online fetch");
+        assert!(normal_1.starts_with(b"payload-1:"));
+
+        let vol_1 = client1
+            .fetch_source_url(&volatile_url, true)
+            .await
+            .expect("volatile fetch 1");
+        let vol_2 = client1
+            .fetch_source_url(&volatile_url, true)
+            .await
+            .expect("volatile fetch 2 must bypass memory & disk cache");
+        assert_ne!(
+            vol_1, vol_2,
+            "volatile source must re-hit origin rather than serving cached response"
+        );
+        assert_eq!(hits.load(Ordering::SeqCst), 3);
+    }
+
+    // Session 2 (fresh client sharing `cache_dir`, initially Offline):
+    let net = NetworkState::offline();
+    let client2 = HttpSourceClient::new(ReqwestHttpClient::new(Some(&cache_dir)))
+        .with_network_state(net.clone());
+
+    // Normal URL succeeds from persistent `CACacheManager` on disk with ZERO new network sockets!
+    let cached_offline = client2
+        .fetch_source_url(&normal_url, false)
+        .await
+        .expect("normal cached URL must load from disk while offline");
+    assert!(cached_offline.starts_with(b"payload-1:"));
+    assert_eq!(hits.load(Ordering::SeqCst), 3);
+
+    // Volatile URL was never persisted to disk, so offline fetch fails with `OfflineError`.
+    let vol_offline_err = client2
+        .fetch_source_url(&volatile_url, true)
+        .await
+        .expect_err("volatile URL must not be in persistent disk cache");
+    assert!(vol_offline_err.is_offline());
+    assert!(vol_offline_err.is_retryable());
+    assert_eq!(hits.load(Ordering::SeqCst), 3);
+
+    // Uncached remote URL fails immediately with `OfflineError` and opens zero TCP connections.
+    let uncached_err = client2
+        .fetch_url(&uncached_url)
+        .await
+        .expect_err("uncached URL must fail while offline");
+    assert!(uncached_err.is_offline());
+    assert!(uncached_err.is_retryable());
+    assert_eq!(hits.load(Ordering::SeqCst), 3);
+
+    // Flipping `set_online(true)` recovers immediately without reconstructing clients.
+    net.set_online(true);
+    let recovered = client2
+        .fetch_url(&uncached_url)
+        .await
+        .expect("online recovery must fetch uncached URL");
+    assert!(recovered.starts_with(b"payload-4:"));
+    assert_eq!(hits.load(Ordering::SeqCst), 4);
+
+    server.abort();
+    let _ = std::fs::remove_dir_all(&cache_dir);
+}
+
+#[tokio::test]
+async fn request_transform_rewrites_custom_scheme_and_injects_headers_on_wire() {
+    use crate::io::source_client::{HttpSourceClient, ResourceKind};
+
+    let Ok(listener) = TcpListener::bind("127.0.0.1:0").await else {
+        return;
+    };
+    let addr = listener.local_addr().expect("local addr");
+
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.expect("accept");
+        let mut buf = vec![0_u8; 4096];
+        let n = stream.read(&mut buf).await.expect("read");
+        let req_text = String::from_utf8_lossy(&buf[..n]);
+        let lower = req_text.to_ascii_lowercase();
+        assert!(
+            req_text.starts_with("GET /v4/mapbox.streets.json?access_token=pk.test HTTP/1.1"),
+            "unexpected request line: {req_text}"
+        );
+        assert!(
+            lower.contains("authorization: bearer secret-jwt"),
+            "missing Authorization header: {req_text}"
+        );
+        assert!(
+            lower.contains("x-api-key: key-123"),
+            "missing X-Api-Key header: {req_text}"
+        );
+        let body = br#"{"tiles":["https://example.test/{z}/{x}/{y}.pbf"]}"#;
+        let resp = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        );
+        stream.write_all(resp.as_bytes()).await.expect("write hdr");
+        stream.write_all(body).await.expect("write body");
+    });
+
+    let base_client = HttpSourceClient::new(ReqwestHttpClient::new::<String>(None));
+    let cloned_client = base_client.clone();
+
+    // Install transform on `base_client`; `cloned_client` shares the same `Arc<RwLock<...>>` slot.
+    base_client.set_request_transform(move |mut req| {
+        if let Some(rest) = req.url.strip_prefix("mapbox://") {
+            req.url = format!("http://{addr}/v4/{rest}.json?access_token=pk.test");
+        }
+        if req.resource_kind == ResourceKind::Source {
+            req.headers
+                .push(("Authorization".to_owned(), "Bearer secret-jwt".to_owned()));
+            req.headers
+                .push(("X-Api-Key".to_owned(), "key-123".to_owned()));
+        }
+        req
+    });
+
+    let body = cloned_client
+        .fetch_source_url("mapbox://mapbox.streets", false)
+        .await
+        .expect("transformed request succeeds");
+    assert!(body.starts_with(b"{\"tiles\":"));
+
+    server.await.expect("server verified headers and path");
+}

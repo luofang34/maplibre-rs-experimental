@@ -54,3 +54,50 @@ fn unpack_vectors_recover_known_elevations() {
     let elevation = 128.0 * r + 0.0 * g + 0.0 * b - base;
     assert!((elevation - 0.0).abs() < 1e-9, "sea level, got {elevation}");
 }
+
+#[test]
+fn volatile_flag_defaults_false_and_round_trips_json_across_sources() {
+    for (default_json, volatile_json) in [
+        (
+            r#"{"type":"vector","url":"https://tiles.example/v.json"}"#,
+            r#"{"type":"vector","url":"https://tiles.example/v.json","volatile":true}"#,
+        ),
+        (
+            r#"{"type":"raster","tiles":["https://tiles.example/{z}/{x}/{y}.png"]}"#,
+            r#"{"type":"raster","tiles":["https://tiles.example/{z}/{x}/{y}.png"],"volatile":true}"#,
+        ),
+        (
+            r#"{"type":"raster-dem","url":"https://tiles.example/dem.json"}"#,
+            r#"{"type":"raster-dem","url":"https://tiles.example/dem.json","volatile":true}"#,
+        ),
+        (
+            r#"{"type":"geojson","data":"https://tiles.example/live.geojson"}"#,
+            r#"{"type":"geojson","data":"https://tiles.example/live.geojson","volatile":true}"#,
+        ),
+    ] {
+        let normal: Source = serde_json::from_str(default_json).expect("normal source parses");
+        assert!(!normal.is_volatile(), "{default_json}");
+        let serialized_normal = serde_json::to_value(&normal).expect("serializes");
+        assert!(
+            serialized_normal.get("volatile").is_none(),
+            "false volatile should be omitted when serializing: {serialized_normal}"
+        );
+
+        let volatile: Source = serde_json::from_str(volatile_json).expect("volatile source parses");
+        assert!(volatile.is_volatile(), "{volatile_json}");
+        let serialized_volatile = serde_json::to_value(&volatile).expect("serializes");
+        assert_eq!(
+            serialized_volatile.get("volatile"),
+            Some(&serde_json::json!(true))
+        );
+        let round_trip: Source =
+            serde_json::from_value(serialized_volatile).expect("round-trip parses");
+        assert!(round_trip.is_volatile());
+    }
+
+    let image: Source = serde_json::from_str(
+        r#"{"type":"image","url":"https://tiles.example/a.png","coordinates":[[0,1],[1,1],[1,0],[0,0]]}"#,
+    )
+    .expect("image source parses");
+    assert!(!image.is_volatile());
+}

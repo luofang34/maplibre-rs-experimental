@@ -13,7 +13,7 @@ use crate::{
         source_type::SourceType,
         tile_sources::SourceLayerGroup,
     },
-    sdf::assets::{fetch, AssetFailure},
+    sdf::assets::AssetFailure,
     vector::process_vector::decode_tile,
 };
 
@@ -81,7 +81,19 @@ pub(super) async fn fetch_group_tile<H: HttpClient>(
     let cached = client
         .assets()
         .load(key, || async {
-            let bytes = fetch(client, &url, "vector tile").await?;
+            let bytes = client
+                .fetch(&source_tile, &group.source)
+                .await
+                .map_err(|error| {
+                    tracing::warn!(%url, error = %error.describe(), "vector tile unavailable");
+                    if error.is_not_found() {
+                        AssetFailure::NotFound
+                    } else if error.is_retryable() {
+                        AssetFailure::Retryable(error.describe())
+                    } else {
+                        AssetFailure::Terminal(error.describe())
+                    }
+                })?;
             let tile = decode_tile(&bytes).map_err(|error| {
                 AssetFailure::Terminal(format!("vector tile {url} cannot be decoded: {error}"))
             })?;

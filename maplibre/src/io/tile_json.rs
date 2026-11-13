@@ -139,7 +139,7 @@ pub async fn resolve_tile_json_sources<HC: HttpClient>(
         let Some(url) = pending_tile_json_url(source) else {
             continue;
         };
-        match client.fetch_url(&url).await {
+        match client.fetch_source_url(&url, source.is_volatile()).await {
             Ok(bytes) => match serde_json::from_slice::<TileJson>(&bytes) {
                 Ok(tile_json) => {
                     tracing::info!(source = %name, %url, "resolved TileJSON source");

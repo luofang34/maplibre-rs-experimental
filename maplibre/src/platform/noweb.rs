@@ -10,6 +10,8 @@ use std::{
 use crate::{
     environment::{OffscreenKernel, OffscreenKernelConfig},
     io::{
+        mbtiles::MbtilesClient,
+        pmtiles::PmtilesClient,
         resource_loader::SharedLoader,
         source_client::{HttpSourceClient, SourceClient},
     },
@@ -19,6 +21,14 @@ use crate::{
 pub mod http_client;
 pub mod scheduler;
 pub mod trace;
+
+/// Default native HTTP transport stack supporting `mbtiles://`, `pmtiles://`, and HTTP(S).
+pub type NativeHttpClient = MbtilesClient<PmtilesClient<ReqwestHttpClient>>;
+
+/// Constructs a [`NativeHttpClient`] with optional disk cache directory `cache_path`.
+pub fn native_http_client<P: Into<std::path::PathBuf>>(cache_path: Option<P>) -> NativeHttpClient {
+    MbtilesClient::new(PmtilesClient::new(ReqwestHttpClient::new(cache_path)))
+}
 
 /// Creates an I/O- and timer-enabled Tokio runtime and blocks until `future` completes.
 /// The runtime is dropped before this function returns; detached work must finish before
@@ -83,9 +93,7 @@ impl OffscreenKernel for ReqwestOffscreenKernelEnvironment {
 
     fn source_client(&self) -> SourceClient<Self::HttpClient> {
         let loader = self.0.loader.clone().unwrap_or_else(|| {
-            SharedLoader::new(ReqwestHttpClient::new::<String>(
-                self.0.cache_directory.clone(),
-            ))
+            SharedLoader::new(native_http_client::<String>(self.0.cache_directory.clone()))
         });
         SourceClient::new(HttpSourceClient::new(loader))
             .with_asset_cache(self.0.asset_cache.clone())

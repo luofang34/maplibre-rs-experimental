@@ -82,3 +82,90 @@ fn describe_deduplicates_nested_messages_already_embedded_in_outer_display() {
         "{description}"
     );
 }
+
+#[tokio::test]
+async fn data_urls_and_local_files_succeed_while_network_state_is_offline() {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    use async_trait::async_trait;
+
+    use super::{
+        ByteRange, HttpClient, HttpRequest, HttpSourceClient, NetworkState, NetworkStatus,
+        ResourceKind,
+    };
+    use crate::io::resource_loader::SharedLoader;
+
+    #[derive(Clone, Default)]
+    struct FailHttp;
+
+    #[cfg_attr(not(feature = "thread-safe-futures"), async_trait(?Send))]
+    #[cfg_attr(feature = "thread-safe-futures", async_trait)]
+    impl HttpClient for FailHttp {
+        async fn fetch(&self, url: &str) -> Result<Vec<u8>, SourceFetchError> {
+            Err(SourceFetchError(Box::new(std::io::Error::other(format!(
+                "unexpected network call for {url}"
+            )))))
+        }
+    }
+
+    let transitions = Arc::new(AtomicUsize::new(0));
+    let transitions_clone = Arc::clone(&transitions);
+    let net = NetworkState::new();
+    net.on_change(move |_status: NetworkStatus| {
+        transitions_clone.fetch_add(1, Ordering::SeqCst);
+    });
+    assert!(net.is_online());
+    assert_eq!(net.generation(), 0);
+
+    let client = HttpSourceClient::new(SharedLoader::new(FailHttp)).with_network_state(net.clone());
+    client.set_online(false);
+    assert!(!client.is_online());
+    assert_eq!(net.generation(), 1);
+    assert_eq!(transitions.load(Ordering::SeqCst), 1);
+
+    // Inline GeoJSON / data: URLs (both plain percent-encoded and base64) work while offline.
+    let plain_data = client
+        .fetch_url("data:application/geo+json,%7B%22type%22%3A%22FeatureCollection%22%7D")
+        .await
+        .expect("percent-encoded data URL");
+    assert_eq!(plain_data, br#"{"type":"FeatureCollection"}"#);
+
+    let b64_data = client
+        .fetch_request(
+            HttpRequest::new(
+                "data:application/octet-stream;base64,aGVsbG8gd29ybGQ=",
+                ResourceKind::Tile,
+            )
+            .with_range(ByteRange {
+                offset: 6,
+                length: 5,
+            }),
+        )
+        .await
+        .expect("base64 data URL range");
+    assert_eq!(b64_data, b"world");
+
+    // Local `file://` URLs also succeed while offline.
+    let temp_file = std::env::temp_dir().join(format!(
+        "maplibre-offline-file-{}.geojson",
+        std::process::id()
+    ));
+    std::fs::write(&temp_file, br#"{"type":"Point","coordinates":[0,0]}"#).expect("write temp");
+    let file_bytes = client
+        .fetch_url(&format!("file://{}", temp_file.display()))
+        .await
+        .expect("file:// URL while offline");
+    let _ = std::fs::remove_file(&temp_file);
+    assert_eq!(file_bytes, br#"{"type":"Point","coordinates":[0,0]}"#);
+
+    // Remote HTTP miss fails immediately with `OfflineError` (retryable).
+    let remote_err = client
+        .fetch_url("https://tiles.example.test/1/0/0.pbf")
+        .await
+        .expect_err("remote HTTP must fail while offline");
+    assert!(remote_err.is_offline());
+    assert!(remote_err.is_retryable());
+}

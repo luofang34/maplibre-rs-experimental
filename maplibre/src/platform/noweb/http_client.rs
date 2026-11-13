@@ -1,156 +1,79 @@
 //! Native HTTP source loading with optional disk caching and typed retry classification.
 
+mod cache;
 mod classify;
 
 use std::{
-    collections::{HashMap, VecDeque},
     future::Future,
     path::PathBuf,
     pin::Pin,
-    sync::{Arc, Mutex, RwLock},
+    sync::{Arc, RwLock},
 };
 
 use async_trait::async_trait;
 use http_cache_reqwest::{CACacheManager, Cache, CacheMode, HttpCache, HttpCacheOptions};
-use reqwest::{Client, StatusCode};
+use reqwest::{
+    header::{HeaderMap, HeaderName, HeaderValue},
+    Client, StatusCode,
+};
 use reqwest_middleware::ClientWithMiddleware;
-use tokio::sync::Semaphore;
 
-use crate::io::source_client::{ByteRange, HttpClient, SourceFetchError};
+pub use self::cache::HttpCacheFrontend;
+#[cfg(test)]
+use self::cache::MemoryTileCacheState;
+use self::cache::{SharedCacheFrontend, MEMORY_CACHE_CAP_BYTES};
+use crate::io::source_client::{
+    is_remote_http_url, ByteRange, CachePolicy, HttpClient, HttpRequest, NetworkStatus,
+    ResourceKind, SourceFetchError,
+};
 
 const USER_AGENT: &str = concat!(
     "maplibre-rs/",
     env!("CARGO_PKG_VERSION"),
     " (+https://github.com/maplibre/maplibre-rs)"
 );
-const MEMORY_CACHE_CAP_BYTES: usize = 64 * 1024 * 1024;
-const MEMORY_CACHE_MAX_ITEM_BYTES: usize = 1024 * 1024;
-const DISK_CACHE_IO_CONCURRENCY: usize = 6;
 
-struct MemoryTileCacheState {
-    entries: HashMap<Arc<str>, (Arc<[u8]>, u64)>,
-    order: VecDeque<(Arc<str>, u64)>,
-    bytes: usize,
-    clock: u64,
-    cap_bytes: usize,
+#[derive(Debug, thiserror::Error)]
+#[error("invalid HTTP request header `{name}`: {reason}")]
+struct InvalidHeaderError {
+    name: String,
+    reason: String,
 }
 
-impl MemoryTileCacheState {
-    fn new(cap_bytes: usize) -> Self {
-        Self {
-            entries: HashMap::new(),
-            order: VecDeque::new(),
-            bytes: 0,
-            clock: 0,
-            cap_bytes,
-        }
+fn build_header_map(headers: &[(String, String)]) -> Result<HeaderMap, SourceFetchError> {
+    let mut map = HeaderMap::with_capacity(headers.len());
+    for (name, value) in headers {
+        let header_name = HeaderName::from_bytes(name.as_bytes()).map_err(|err| {
+            SourceFetchError(Box::new(InvalidHeaderError {
+                name: name.clone(),
+                reason: err.to_string(),
+            }))
+        })?;
+        let header_val = HeaderValue::from_str(value).map_err(|err| {
+            SourceFetchError(Box::new(InvalidHeaderError {
+                name: name.clone(),
+                reason: err.to_string(),
+            }))
+        })?;
+        map.append(header_name, header_val);
     }
-
-    fn get(&mut self, url: &str) -> Option<Arc<[u8]>> {
-        let (key, (body, stamp)) = self.entries.get_key_value(url)?;
-        let key = Arc::clone(key);
-        let body = Arc::clone(body);
-        let next_stamp = self.clock.wrapping_add(1);
-        self.clock = next_stamp;
-        if *stamp != next_stamp {
-            if let Some(entry) = self.entries.get_mut(url) {
-                entry.1 = next_stamp;
-            }
-            self.order.push_back((key, next_stamp));
-            self.compact_order_if_needed();
-        }
-        Some(body)
-    }
-
-    fn insert(&mut self, url: &str, body: &[u8]) {
-        if body.len() > MEMORY_CACHE_MAX_ITEM_BYTES || body.len() > self.cap_bytes {
-            return;
-        }
-        let next_stamp = self.clock.wrapping_add(1);
-        self.clock = next_stamp;
-        let payload: Arc<[u8]> = Arc::from(body);
-        if let Some((_, (old_body, _))) = self.entries.remove_entry(url) {
-            self.bytes = self.bytes.saturating_sub(old_body.len());
-        }
-        while self.bytes.saturating_add(payload.len()) > self.cap_bytes {
-            let Some((evict_key, evict_stamp)) = self.order.pop_front() else {
-                self.entries.clear();
-                self.bytes = 0;
-                break;
-            };
-            if self
-                .entries
-                .get(evict_key.as_ref())
-                .is_some_and(|(_, current_stamp)| *current_stamp == evict_stamp)
-            {
-                if let Some((evicted, _)) = self.entries.remove(evict_key.as_ref()) {
-                    self.bytes = self.bytes.saturating_sub(evicted.len());
-                }
-            }
-        }
-        let key: Arc<str> = Arc::from(url);
-        self.bytes = self.bytes.saturating_add(payload.len());
-        self.entries.insert(Arc::clone(&key), (payload, next_stamp));
-        self.order.push_back((key, next_stamp));
-        self.compact_order_if_needed();
-    }
-
-    fn compact_order_if_needed(&mut self) {
-        let limit = self.entries.len().saturating_mul(2).saturating_add(64);
-        if self.order.len() <= limit {
-            return;
-        }
-        let entries = &self.entries;
-        self.order.retain(|(key, stamp)| {
-            entries
-                .get(key.as_ref())
-                .is_some_and(|(_, current_stamp)| *current_stamp == *stamp)
-        });
-    }
+    Ok(map)
 }
 
-struct SharedCacheFrontend {
-    memory: Mutex<MemoryTileCacheState>,
-    io_gate: Semaphore,
-}
-
-impl SharedCacheFrontend {
-    fn new(cap_bytes: usize) -> Self {
-        Self {
-            memory: Mutex::new(MemoryTileCacheState::new(cap_bytes)),
-            io_gate: Semaphore::new(DISK_CACHE_IO_CONCURRENCY),
+fn format_cache_key(url: &str, range: Option<ByteRange>, headers: &[(String, String)]) -> String {
+    let mut key = match range {
+        Some(r) => format!("{url}#{}", r.header()),
+        None => url.to_owned(),
+    };
+    if !headers.is_empty() {
+        for (k, v) in headers {
+            key.push('|');
+            key.push_str(&k.to_ascii_lowercase());
+            key.push(':');
+            key.push_str(v);
         }
     }
-
-    fn get(&self, url: &str) -> Option<Arc<[u8]>> {
-        self.memory.lock().ok()?.get(url)
-    }
-
-    fn insert(&self, url: &str, body: &[u8]) {
-        if let Ok(mut guard) = self.memory.lock() {
-            guard.insert(url, body);
-        }
-    }
-}
-
-/// Shareable in-memory LRU cache and disk-I/O concurrency gate for [`ReqwestHttpClient`].
-///
-/// Cloning a [`ReqwestHttpClient`] already shares its own frontend; construct and pass an
-/// [`HttpCacheFrontend`] explicitly when two independently built clients should share one.
-#[derive(Clone)]
-pub struct HttpCacheFrontend(Arc<SharedCacheFrontend>);
-
-impl Default for HttpCacheFrontend {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl HttpCacheFrontend {
-    /// Creates a fresh in-memory cache frontend with the default 64 MiB budget.
-    pub fn new() -> Self {
-        Self(Arc::new(SharedCacheFrontend::new(MEMORY_CACHE_CAP_BYTES)))
-    }
+    key
 }
 
 /// An in-process HTTP handler for local test servers when network sockets are unavailable.
@@ -204,6 +127,8 @@ impl InProcessRoutes {
 #[derive(Clone)]
 pub struct ReqwestHttpClient {
     client: ClientWithMiddleware,
+    offline_cache_client: Option<ClientWithMiddleware>,
+    direct_client: Client,
     range_client: Client,
     frontend: Option<Arc<SharedCacheFrontend>>,
     in_process: Option<InProcessRoutes>,
@@ -250,7 +175,7 @@ impl ReqwestHttpClient {
         in_process: Option<InProcessRoutes>,
     ) -> Self {
         // Public tile servers such as OpenStreetMap reject requests without a User-Agent.
-        let client = match Client::builder().user_agent(USER_AGENT).build() {
+        let direct_client = match Client::builder().user_agent(USER_AGENT).build() {
             Ok(client) => client,
             Err(error) => {
                 tracing::warn!(%error, "cannot build the HTTP client with a user agent");
@@ -268,7 +193,16 @@ impl ReqwestHttpClient {
                 Client::new()
             }
         };
-        let mut builder = reqwest_middleware::ClientBuilder::new(client);
+        let mut builder = reqwest_middleware::ClientBuilder::new(direct_client.clone());
+        let offline_cache_client = cache_path.as_ref().map(|path| {
+            reqwest_middleware::ClientBuilder::new(direct_client.clone())
+                .with(Cache(HttpCache {
+                    mode: CacheMode::OnlyIfCached,
+                    manager: CACacheManager::new(path.clone(), false),
+                    options: HttpCacheOptions::default(),
+                }))
+                .build()
+        });
         if let Some(path) = cache_path {
             builder = builder.with(Cache(HttpCache {
                 mode: CacheMode::Default,
@@ -278,6 +212,8 @@ impl ReqwestHttpClient {
         }
         Self {
             client: builder.build(),
+            offline_cache_client,
+            direct_client,
             range_client,
             frontend,
             in_process,
@@ -288,44 +224,65 @@ impl ReqwestHttpClient {
         self.in_process.as_ref()?.lookup(url)
     }
 
-    /// A server that ignores the range answers with the whole body, cut down here.
-    async fn get(&self, url: &str, range: Option<ByteRange>) -> Result<Vec<u8>, SourceFetchError> {
-        let range_cache_key;
-        let cache_key: &str = match range {
-            Some(range) => {
-                range_cache_key = format!("{url}#{}", range.header());
-                &range_cache_key
-            }
-            None => url,
-        };
-        if let Some(body) = self
-            .frontend
-            .as_deref()
-            .and_then(|frontend| frontend.get(cache_key))
-        {
-            return Ok(body.to_vec());
-        }
-        let response = match range {
-            Some(range) => match self
-                .range_client
-                .get(url)
-                .header(reqwest::header::RANGE, range.header())
-                .header(reqwest::header::ACCEPT_ENCODING, "identity")
-                .send()
-                .await
+    /// Executes `req` under `status`. A server that ignores `Range` answers with the whole body,
+    /// sliced down here.
+    async fn execute(
+        &self,
+        req: &HttpRequest,
+        status: NetworkStatus,
+    ) -> Result<Vec<u8>, SourceFetchError> {
+        let url = req.url.as_str();
+        let range = req.range;
+        let volatile = req.cache_policy.is_volatile();
+        let header_map = build_header_map(&req.headers)?;
+        let cache_key = format_cache_key(url, range, &req.headers);
+
+        if !volatile {
+            if let Some(body) = self
+                .frontend
+                .as_deref()
+                .and_then(|frontend| frontend.get(&cache_key))
             {
-                Ok(response) => response,
-                Err(err) => match self.lookup_in_process_handler(url) {
-                    Some(handler) => return handler(url, Some(range)).await,
-                    None => return Err(err.into()),
-                },
-            },
-            None => {
+                return Ok(body.to_vec());
+            }
+        }
+
+        if status.is_offline() {
+            return self.execute_offline(req, &header_map, &cache_key).await;
+        }
+
+        let response = match (range, volatile) {
+            (Some(range), _) => {
+                let request_builder = self
+                    .range_client
+                    .get(url)
+                    .headers(header_map)
+                    .header(reqwest::header::RANGE, range.header())
+                    .header(reqwest::header::ACCEPT_ENCODING, "identity");
+                match request_builder.send().await {
+                    Ok(response) => response,
+                    Err(err) => match self.lookup_in_process_handler(url) {
+                        Some(handler) => return handler(url, Some(range)).await,
+                        None => return Err(err.into()),
+                    },
+                }
+            }
+            (None, true) => {
+                // Volatile sources bypass `CACacheManager` and `SharedCacheFrontend` completely.
+                match self.direct_client.get(url).headers(header_map).send().await {
+                    Ok(response) => response,
+                    Err(err) => match self.lookup_in_process_handler(url) {
+                        Some(handler) => return handler(url, None).await,
+                        None => return Err(err.into()),
+                    },
+                }
+            }
+            (None, false) => {
                 let _io_permit = match &self.frontend {
                     Some(frontend) => frontend.io_gate.acquire().await.ok(),
                     None => None,
                 };
-                match self.client.get(url).send().await {
+                match self.client.get(url).headers(header_map).send().await {
                     Ok(response) => response,
                     Err(err) => match self.lookup_in_process_handler(url) {
                         Some(handler) => return handler(url, None).await,
@@ -334,6 +291,56 @@ impl ReqwestHttpClient {
                 }
             }
         };
+
+        self.decode_response(url, range, req.cache_policy, &cache_key, response)
+            .await
+    }
+
+    async fn execute_offline(
+        &self,
+        req: &HttpRequest,
+        header_map: &HeaderMap,
+        cache_key: &str,
+    ) -> Result<Vec<u8>, SourceFetchError> {
+        let url = req.url.as_str();
+        if !req.cache_policy.is_volatile() && req.range.is_none() {
+            if let Some(offline_client) = &self.offline_cache_client {
+                let _io_permit = match &self.frontend {
+                    Some(frontend) => frontend.io_gate.acquire().await.ok(),
+                    None => None,
+                };
+                if let Ok(response) = offline_client
+                    .get(url)
+                    .headers(header_map.clone())
+                    .send()
+                    .await
+                {
+                    if response.status() != StatusCode::GATEWAY_TIMEOUT {
+                        return self
+                            .decode_response(url, None, req.cache_policy, cache_key, response)
+                            .await;
+                    }
+                }
+            }
+        }
+        if is_remote_http_url(url) {
+            return Err(SourceFetchError::offline(url));
+        }
+        // Non-HTTP custom scheme fallback if registered in-process.
+        if let Some(handler) = self.lookup_in_process_handler(url) {
+            return handler(url, req.range).await;
+        }
+        Err(SourceFetchError::offline(url))
+    }
+
+    async fn decode_response(
+        &self,
+        url: &str,
+        range: Option<ByteRange>,
+        policy: CachePolicy,
+        cache_key: &str,
+        response: reqwest::Response,
+    ) -> Result<Vec<u8>, SourceFetchError> {
         if response.status() == StatusCode::NOT_FOUND {
             return Err(SourceFetchError::not_found(url));
         }
@@ -350,8 +357,10 @@ impl ReqwestHttpClient {
                     Some(range) if !partial => range.slice(url, &body).map(<[u8]>::to_vec)?,
                     Some(_) | None => Vec::from(body.as_ref()),
                 };
-                if let Some(frontend) = &self.frontend {
-                    frontend.insert(cache_key, &out);
+                if !policy.is_volatile() {
+                    if let Some(frontend) = &self.frontend {
+                        frontend.insert(cache_key, &out);
+                    }
                 }
                 Ok(out)
             }
@@ -364,11 +373,25 @@ impl ReqwestHttpClient {
 #[cfg_attr(feature = "thread-safe-futures", async_trait)]
 impl HttpClient for ReqwestHttpClient {
     async fn fetch(&self, url: &str) -> Result<Vec<u8>, SourceFetchError> {
-        self.get(url, None).await
+        let req = HttpRequest::new(url, ResourceKind::infer_from_url(url));
+        self.execute(&req, NetworkStatus::Online).await
     }
 
     async fn fetch_range(&self, url: &str, range: ByteRange) -> Result<Vec<u8>, SourceFetchError> {
-        self.get(url, Some(range)).await
+        let req = HttpRequest::new(url, ResourceKind::infer_from_url(url)).with_range(range);
+        self.execute(&req, NetworkStatus::Online).await
+    }
+
+    async fn fetch_request(&self, req: &HttpRequest) -> Result<Vec<u8>, SourceFetchError> {
+        self.execute(req, NetworkStatus::Online).await
+    }
+
+    async fn fetch_request_with_status(
+        &self,
+        req: &HttpRequest,
+        status: NetworkStatus,
+    ) -> Result<Vec<u8>, SourceFetchError> {
+        self.execute(req, status).await
     }
 }
 

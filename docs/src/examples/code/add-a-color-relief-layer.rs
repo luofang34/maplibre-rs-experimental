@@ -19,18 +19,9 @@ pub fn style() -> Style {
         sources: HashMap::from([(
             "elevationSource".to_string(),
             Source::RasterDem(RasterDemSource {
-                attribution: None,
-                bounds: None,
-                maxzoom: None,
-                minzoom: None,
-                tiles: None,
                 url: Some("https://demotiles.maplibre.org/terrain-tiles/tiles.json".to_string()),
                 tile_size: Some(256),
-                encoding: None,
-                red_factor: 1.0,
-                green_factor: 1.0,
-                blue_factor: 1.0,
-                base_shift: 0.0,
+                ..Default::default()
             }),
         )]),
         layers: vec![

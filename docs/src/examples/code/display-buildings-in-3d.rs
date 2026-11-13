@@ -29,15 +29,8 @@ pub fn build_style(mut style: Style) -> Style {
         style.sources.insert(
             "openfreemap".to_string(),
             Source::Vector(VectorSource {
-                attribution: None,
-                bounds: None,
-                maxzoom: None,
-                minzoom: None,
-                scheme: None,
-                tiles: None,
-                tile_size: None,
                 url: Some("https://tiles.openfreemap.org/planet".to_string()),
-                promote_id: None,
+                ..Default::default()
             }),
         );
         "openfreemap".to_string()

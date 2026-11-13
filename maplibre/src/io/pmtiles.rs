@@ -17,7 +17,9 @@ pub use self::format::PmtilesFormatError;
 use self::format::{
     decompress, find, parse_directory, tile_id, Entry, Found, Header, HEADER_BYTES,
 };
-use crate::io::source_client::{ByteRange, HttpClient, SourceFetchError};
+use crate::io::source_client::{
+    ByteRange, HttpClient, HttpRequest, NetworkStatus, ResourceKind, SourceFetchError,
+};
 
 mod format;
 
@@ -93,11 +95,16 @@ pub struct PmtilesReader {
 
 async fn range<C: HttpClient>(
     client: &C,
+    base: &HttpRequest,
+    status: NetworkStatus,
     url: &str,
     offset: u64,
     length: u64,
 ) -> Result<Vec<u8>, SourceFetchError> {
-    client.fetch_range(url, ByteRange { offset, length }).await
+    let mut sub = base.clone();
+    sub.url = url.to_owned();
+    sub.range = Some(ByteRange { offset, length });
+    client.fetch_request_with_status(&sub, status).await
 }
 
 impl PmtilesReader {
@@ -108,16 +115,34 @@ impl PmtilesReader {
         url: &str,
         request: PmtilesUrl,
     ) -> Result<Vec<u8>, SourceFetchError> {
+        let base = HttpRequest::new(url, ResourceKind::Unknown);
+        self.fetch_with_context(client, &base, NetworkStatus::Online, request)
+            .await
+    }
+
+    /// Answers a `pmtiles://` request forwarding `base`'s headers, [`CachePolicy`](crate::io::source_client::CachePolicy), and `status`.
+    pub async fn fetch_with_context<C: HttpClient>(
+        &self,
+        client: &C,
+        base: &HttpRequest,
+        status: NetworkStatus,
+        request: PmtilesUrl,
+    ) -> Result<Vec<u8>, SourceFetchError> {
         match request {
-            PmtilesUrl::Archive(archive) => self.tile_json(client, &archive).await,
+            PmtilesUrl::Archive(archive) => self.tile_json(client, base, status, &archive).await,
             PmtilesUrl::Tile { archive, z, x, y } => {
                 let id = tile_id(z, x, y).map_err(|error| failed(&archive, error))?;
-                let opened = self.open(client, &archive).await?;
-                let Some(entry) = self.locate(client, &archive, &opened, id).await? else {
-                    return Err(SourceFetchError::not_found(url));
+                let opened = self.open(client, base, status, &archive).await?;
+                let Some(entry) = self
+                    .locate(client, base, status, &archive, &opened, id)
+                    .await?
+                else {
+                    return Err(SourceFetchError::not_found(&base.url));
                 };
                 let bytes = range(
                     client,
+                    base,
+                    status,
                     &archive,
                     opened.header.tiles_offset + entry.offset,
                     entry.length,
@@ -132,25 +157,39 @@ impl PmtilesReader {
     async fn open<C: HttpClient>(
         &self,
         client: &C,
+        base: &HttpRequest,
+        status: NetworkStatus,
         archive: &str,
     ) -> Result<Arc<Archive>, SourceFetchError> {
-        if let Some(opened) = self.cached(archive) {
-            return Ok(opened);
+        if !base.cache_policy.is_volatile() {
+            if let Some(opened) = self.cached(archive) {
+                return Ok(opened);
+            }
         }
-        let bytes = range(client, archive, 0, HEADER_BYTES).await?;
+        let bytes = range(client, base, status, archive, 0, HEADER_BYTES).await?;
         let header = Header::parse(&bytes).map_err(|error| failed(archive, error))?;
         let root = self
-            .directory(client, archive, &header, header.root.0, header.root.1)
+            .directory(
+                client,
+                base,
+                status,
+                archive,
+                &header,
+                header.root.0,
+                header.root.1,
+            )
             .await?;
         let opened = Arc::new(Archive {
             header,
             root,
             leaves: Mutex::default(),
         });
-        self.archives
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(archive.to_owned(), opened.clone());
+        if !base.cache_policy.is_volatile() {
+            self.archives
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert(archive.to_owned(), opened.clone());
+        }
         Ok(opened)
     }
 
@@ -162,15 +201,18 @@ impl PmtilesReader {
             .cloned()
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn directory<C: HttpClient>(
         &self,
         client: &C,
+        base: &HttpRequest,
+        status: NetworkStatus,
         archive: &str,
         header: &Header,
         offset: u64,
         length: u64,
     ) -> Result<Vec<Entry>, SourceFetchError> {
-        let bytes = range(client, archive, offset, length).await?;
+        let bytes = range(client, base, status, archive, offset, length).await?;
         decompress(header.internal_compression, bytes, "directory")
             .and_then(|bytes| parse_directory(&bytes))
             .map_err(|error| failed(archive, error))
@@ -179,6 +221,8 @@ impl PmtilesReader {
     async fn locate<C: HttpClient>(
         &self,
         client: &C,
+        base: &HttpRequest,
+        status: NetworkStatus,
         archive: &str,
         opened: &Archive,
         id: u64,
@@ -202,6 +246,8 @@ impl PmtilesReader {
                             let entries = Arc::new(
                                 self.directory(
                                     client,
+                                    base,
+                                    status,
                                     archive,
                                     &opened.header,
                                     offset,
@@ -228,11 +274,21 @@ impl PmtilesReader {
     async fn tile_json<C: HttpClient>(
         &self,
         client: &C,
+        base: &HttpRequest,
+        status: NetworkStatus,
         archive: &str,
     ) -> Result<Vec<u8>, SourceFetchError> {
-        let opened = self.open(client, archive).await?;
+        let opened = self.open(client, base, status, archive).await?;
         let header = &opened.header;
-        let metadata = range(client, archive, header.metadata.0, header.metadata.1).await?;
+        let metadata = range(
+            client,
+            base,
+            status,
+            archive,
+            header.metadata.0,
+            header.metadata.1,
+        )
+        .await?;
         let metadata = decompress(header.internal_compression, metadata, "metadata")
             .map_err(|error| failed(archive, error))?;
         let mut document = match serde_json::from_slice::<serde_json::Value>(&metadata) {
@@ -296,6 +352,27 @@ impl<HC: HttpClient> HttpClient for PmtilesClient<HC> {
 
     async fn fetch_range(&self, url: &str, range: ByteRange) -> Result<Vec<u8>, SourceFetchError> {
         self.inner.fetch_range(url, range).await
+    }
+
+    async fn fetch_request(&self, req: &HttpRequest) -> Result<Vec<u8>, SourceFetchError> {
+        self.fetch_request_with_status(req, NetworkStatus::Online)
+            .await
+    }
+
+    async fn fetch_request_with_status(
+        &self,
+        req: &HttpRequest,
+        status: NetworkStatus,
+    ) -> Result<Vec<u8>, SourceFetchError> {
+        if req.range.is_none() {
+            if let Some(pmtiles_req) = PmtilesUrl::parse(&req.url) {
+                return self
+                    .reader
+                    .fetch_with_context(&self.inner, req, status, pmtiles_req)
+                    .await;
+            }
+        }
+        self.inner.fetch_request_with_status(req, status).await
     }
 }
 

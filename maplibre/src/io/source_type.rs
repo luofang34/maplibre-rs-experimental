@@ -71,6 +71,7 @@ fn quadkey(x: u32, y: u32, z: u8) -> String {
 pub struct TessellateSource {
     template: String,
     scheme: TileAddressingScheme,
+    volatile: bool,
 }
 
 impl TessellateSource {
@@ -88,7 +89,19 @@ impl TessellateSource {
         Self {
             template: template.into(),
             scheme,
+            volatile: false,
         }
+    }
+
+    /// Marks whether tiles of this source bypass persistent caching across sessions.
+    pub fn with_volatile(mut self, volatile: bool) -> Self {
+        self.volatile = volatile;
+        self
+    }
+
+    /// Whether tiles of this source opt out of persistent caching.
+    pub fn is_volatile(&self) -> bool {
+        self.volatile
     }
 
     /// Returns the URL template with unexpanded placeholders.
@@ -113,6 +126,7 @@ impl Default for TessellateSource {
 pub struct RasterSource {
     template: String,
     scheme: TileAddressingScheme,
+    volatile: bool,
 }
 
 impl RasterSource {
@@ -130,7 +144,19 @@ impl RasterSource {
         Self {
             template: template.into(),
             scheme,
+            volatile: false,
         }
+    }
+
+    /// Marks whether tiles of this source bypass persistent caching across sessions.
+    pub fn with_volatile(mut self, volatile: bool) -> Self {
+        self.volatile = volatile;
+        self
+    }
+
+    /// Whether tiles of this source opt out of persistent caching.
+    pub fn is_volatile(&self) -> bool {
+        self.volatile
     }
 
     /// Returns the URL template with unexpanded placeholders.
@@ -191,6 +217,16 @@ impl SourceType {
             SourceType::GeoJson(_) | SourceType::Image(_) => None,
             SourceType::Raster(raster_source) => raster_source.format(coords),
             SourceType::Tessellate(tessellate_source) => tessellate_source.format(coords),
+        }
+    }
+
+    /// Whether requests for this source opt out of persistent HTTP caching (`"volatile": true`).
+    pub fn is_volatile(&self) -> bool {
+        match self {
+            SourceType::GeoJson(geojson) => geojson.source.volatile,
+            SourceType::Raster(raster_source) => raster_source.is_volatile(),
+            SourceType::Image(_) => false,
+            SourceType::Tessellate(tessellate_source) => tessellate_source.is_volatile(),
         }
     }
 }

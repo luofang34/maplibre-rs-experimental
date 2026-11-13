@@ -18,16 +18,13 @@ pub fn style() -> Style {
             "raster-tiles".to_string(),
             Source::Raster(VectorSource {
                 attribution: Some("© OpenStreetMap contributors".to_string()),
-                bounds: None,
                 maxzoom: Some(19),
                 minzoom: Some(0),
-                scheme: None,
                 tiles: Some(vec![
                     "https://tile.openstreetmap.org/{z}/{x}/{y}.png".to_string()
                 ]),
                 tile_size: Some(256),
-                url: None,
-                promote_id: None,
+                ..Default::default()
             }),
         )]),
         layers: vec![StyleLayer {

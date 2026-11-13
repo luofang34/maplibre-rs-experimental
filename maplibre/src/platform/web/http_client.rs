@@ -1,4 +1,7 @@
-//! The browser `fetch` transport, usable from a page or a dedicated worker.
+//! The browser `fetch` transport, usable from a page or a dedicated worker, with a two-tier
+//! in-memory LRU + persistent Cache Storage tile cache.
+
+pub mod cache;
 
 use std::borrow::Cow;
 
@@ -6,11 +9,20 @@ use async_trait::async_trait;
 use js_sys::{ArrayBuffer, Uint8Array};
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
-use web_sys::{Request, RequestInit, Response, WorkerGlobalScope};
+use web_sys::{Request, RequestCache, RequestInit, Response, WorkerGlobalScope};
 
+use self::cache::{
+    match_browser_cache, memory_cache_key, put_browser_cache, should_store_in_browser_cache,
+};
+pub use self::cache::{
+    BrowserMemoryCache, BROWSER_MEMORY_CACHE_CAP_BYTES, BROWSER_TILE_CACHE_NAME,
+};
 use crate::io::{
     pmtiles::PmtilesClient,
-    source_client::{ByteRange, HttpClient, SourceFetchError},
+    source_client::{
+        is_remote_http_url, ByteRange, HttpClient, HttpRequest, NetworkStatus, ResourceKind,
+        SourceFetchError,
+    },
 };
 
 /// A browser request failed before a usable body arrived.
@@ -59,16 +71,19 @@ impl From<JsValue> for FetchError {
     }
 }
 
-/// Fetches with the global `fetch` of the window or the worker it runs in.
+/// Fetches with the global `fetch` of the window or dedicated worker, backed by a shared
+/// in-memory LRU byte cache and persistent browser `CacheStorage` (`"maplibre-rs-tiles-v1"`).
 #[derive(Clone, Default)]
-pub struct WHATWGFetchHttpClient;
+pub struct WHATWGFetchHttpClient {
+    memory: BrowserMemoryCache,
+}
 
 /// The browser transport, also reading tiles out of PMTiles archives with range requests.
 pub type WebHttpClient = PmtilesClient<WHATWGFetchHttpClient>;
 
-/// A browser client with an empty archive cache.
+/// A browser client with fresh in-memory LRU and PMTiles archive caches.
 pub fn web_http_client() -> WebHttpClient {
-    PmtilesClient::new(WHATWGFetchHttpClient)
+    PmtilesClient::new(WHATWGFetchHttpClient::new())
 }
 
 fn rejected(error: JsValue) -> SourceFetchError {
@@ -79,14 +94,35 @@ fn invalid_response(message: &'static str) -> SourceFetchError {
     SourceFetchError(Box::new(FetchError::InvalidResponse(message)))
 }
 
+struct WirePayload {
+    bytes: Vec<u8>,
+    status: u16,
+    cache_control: Option<String>,
+}
+
 impl WHATWGFetchHttpClient {
-    /// The body and whether it is only the range asked for.
-    async fn fetch_array_buffer(
-        url: &str,
-        range: Option<ByteRange>,
-    ) -> Result<(JsValue, bool), SourceFetchError> {
+    /// Creates a browser HTTP client with the default 32 MiB in-memory LRU cache.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Creates a browser HTTP client backed by an explicit [`BrowserMemoryCache`].
+    pub fn with_memory_cache(memory: BrowserMemoryCache) -> Self {
+        Self { memory }
+    }
+
+    /// Borrows the shared in-memory LRU byte cache.
+    pub fn memory_cache(&self) -> &BrowserMemoryCache {
+        &self.memory
+    }
+
+    async fn fetch_wire(req: &HttpRequest) -> Result<WirePayload, SourceFetchError> {
+        let url = req.url.as_str();
         let opts = RequestInit::new();
         opts.set_method("GET");
+        if req.cache_policy.is_volatile() {
+            opts.set_cache(RequestCache::NoStore);
+        }
         let global = js_sys::global();
         let worker = global.dyn_into::<WorkerGlobalScope>().ok();
         if let Some(scope) = &worker {
@@ -98,9 +134,12 @@ impl WHATWGFetchHttpClient {
             }
         }
         let request = Request::new_with_str_and_init(url, &opts).map_err(rejected)?;
-        if let Some(range) = range {
-            request
-                .headers()
+        let headers_obj = request.headers();
+        for (name, value) in &req.headers {
+            headers_obj.set(name, value).map_err(rejected)?;
+        }
+        if let Some(range) = req.range {
+            headers_obj
                 .set("Range", &range.header())
                 .map_err(rejected)?;
         }
@@ -123,38 +162,80 @@ impl WHATWGFetchHttpClient {
             })?
             .dyn_into()
             .map_err(|_| invalid_response("not a Response"))?;
-        if response.status() == 404 {
+        let status = response.status();
+        if status == 404 {
             return Err(SourceFetchError::not_found(url));
         }
         if !response.ok() {
             return Err(SourceFetchError::http_response(
                 url,
-                response.status(),
+                status,
                 FetchError::Status {
-                    status: response.status(),
+                    status,
                     status_text: response.status_text(),
                 },
             ));
         }
-        let partial = response.status() == 206;
+        let cache_control = response.headers().get("cache-control").ok().flatten();
         let buffer = response.array_buffer().map_err(rejected)?;
         let body = JsFuture::from(buffer)
             .await
             .map_err(|error| SourceFetchError::temporary(FetchError::from(error)))?;
-        Ok((body, partial))
-    }
-
-    async fn get(url: &str, range: Option<ByteRange>) -> Result<Vec<u8>, SourceFetchError> {
-        let (body, partial) = Self::fetch_array_buffer(url, range).await?;
         let array_buffer: ArrayBuffer = body
             .dyn_into()
             .map_err(|_| invalid_response("not an ArrayBuffer"))?;
-        let body = Uint8Array::new(&array_buffer).to_vec();
-        // A server that ignores the range answers with the whole body.
-        match range {
-            Some(range) if !partial => range.slice(url, &body).map(<[u8]>::to_vec),
-            _ => Ok(body),
+        let raw_bytes = Uint8Array::new(&array_buffer).to_vec();
+        // A server that ignores `Range` answers with `200 OK` and the whole body; slice it here.
+        let bytes = match req.range {
+            Some(range) if status != 206 => range.slice(url, &raw_bytes).map(<[u8]>::to_vec)?,
+            _ => raw_bytes,
+        };
+        Ok(WirePayload {
+            bytes,
+            status,
+            cache_control,
+        })
+    }
+
+    async fn execute(
+        &self,
+        req: &HttpRequest,
+        status: NetworkStatus,
+    ) -> Result<Vec<u8>, SourceFetchError> {
+        let volatile = req.cache_policy.is_volatile();
+        let mem_key = memory_cache_key(&req.url, req.range, &req.headers);
+
+        if !volatile {
+            if let Some(hit) = self.memory.get(&mem_key) {
+                return Ok(hit.to_vec());
+            }
+            if req.range.is_none() && req.headers.is_empty() {
+                if let Some(persisted) = match_browser_cache(&req.url).await {
+                    self.memory.insert(&mem_key, &persisted);
+                    return Ok(persisted);
+                }
+            }
         }
+
+        if status.is_offline() && is_remote_http_url(&req.url) {
+            return Err(SourceFetchError::offline(&req.url));
+        }
+
+        let payload = Self::fetch_wire(req).await?;
+        if !volatile {
+            self.memory.insert(&mem_key, &payload.bytes);
+            if req.headers.is_empty()
+                && should_store_in_browser_cache(
+                    payload.status,
+                    req.range,
+                    req.cache_policy,
+                    payload.cache_control.as_deref(),
+                )
+            {
+                put_browser_cache(&req.url, &payload.bytes).await;
+            }
+        }
+        Ok(payload.bytes)
     }
 }
 
@@ -162,10 +243,24 @@ impl WHATWGFetchHttpClient {
 #[cfg_attr(feature = "thread-safe-futures", async_trait)]
 impl HttpClient for WHATWGFetchHttpClient {
     async fn fetch(&self, url: &str) -> Result<Vec<u8>, SourceFetchError> {
-        Self::get(url, None).await
+        let req = HttpRequest::new(url, ResourceKind::infer_from_url(url));
+        self.execute(&req, NetworkStatus::Online).await
     }
 
     async fn fetch_range(&self, url: &str, range: ByteRange) -> Result<Vec<u8>, SourceFetchError> {
-        Self::get(url, Some(range)).await
+        let req = HttpRequest::new(url, ResourceKind::infer_from_url(url)).with_range(range);
+        self.execute(&req, NetworkStatus::Online).await
+    }
+
+    async fn fetch_request(&self, req: &HttpRequest) -> Result<Vec<u8>, SourceFetchError> {
+        self.execute(req, NetworkStatus::Online).await
+    }
+
+    async fn fetch_request_with_status(
+        &self,
+        req: &HttpRequest,
+        status: NetworkStatus,
+    ) -> Result<Vec<u8>, SourceFetchError> {
+        self.execute(req, status).await
     }
 }

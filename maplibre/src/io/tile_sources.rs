@@ -131,12 +131,19 @@ impl TileKind {
         }
     }
 
-    fn source_from_template(self, template: &str, scheme: TileAddressingScheme) -> SourceType {
+    fn source_from_template(
+        self,
+        template: &str,
+        scheme: TileAddressingScheme,
+        volatile: bool,
+    ) -> SourceType {
         match self {
-            Self::Vector => {
-                SourceType::Tessellate(TessellateSource::from_template(template, scheme))
-            }
-            Self::Raster => SourceType::Raster(RasterSource::from_template(template, scheme)),
+            Self::Vector => SourceType::Tessellate(
+                TessellateSource::from_template(template, scheme).with_volatile(volatile),
+            ),
+            Self::Raster => SourceType::Raster(
+                RasterSource::from_template(template, scheme).with_volatile(volatile),
+            ),
         }
     }
 }
@@ -216,7 +223,7 @@ pub fn source_layer_groups(style: &Style, kind: TileKind) -> Vec<SourceLayerGrou
             Some((name, Some(source))) => match kind.template_of(source) {
                 Some((template, scheme)) => (
                     Some(name.clone()),
-                    kind.source_from_template(&template, scheme),
+                    kind.source_from_template(&template, scheme, source.is_volatile()),
                 ),
                 None if matches!(
                     (kind, source),

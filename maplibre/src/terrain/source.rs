@@ -41,10 +41,10 @@ pub fn dem_source(style: &Style) -> Option<DemSource> {
     let template = dem.tiles.as_ref()?.first()?;
     Some(DemSource {
         name: terrain.source.clone(),
-        source: SourceType::Raster(RasterSource::from_template(
-            template,
-            TileAddressingScheme::XYZ,
-        )),
+        source: SourceType::Raster(
+            RasterSource::from_template(template, TileAddressingScheme::XYZ)
+                .with_volatile(dem.volatile),
+        ),
         tile_size: dem.tile_size(),
         unpack: dem.unpack_vector(),
         minzoom: dem.minzoom.unwrap_or(0),
