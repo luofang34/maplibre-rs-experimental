@@ -1,8 +1,13 @@
-// The same filter update from Rust in the browser, through the handle `web::run_map`
-// resolves to.
+// Dynamic layer filter updates through `MapHandle`.
 use maplibre::{map::handle::MapHandle, style::Style};
+#[cfg(not(target_arch = "wasm32"))]
+use maplibre_winit::NativeEnvironment as CurrentEnvironment;
 use serde_json::json;
+#[cfg(target_arch = "wasm32")]
 use web::{CurrentEnvironment, JSError};
+
+#[cfg(not(target_arch = "wasm32"))]
+type JSError = Box<dyn std::error::Error>;
 
 pub fn build_style(base: Style) -> Result<Style, serde_json::Error> {
     let mut document = serde_json::to_value(base)?;

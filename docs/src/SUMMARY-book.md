@@ -45,6 +45,7 @@
   - [Font Rendering](./development-documents/font-rendering.md)
   - [Library Packaging](./development-documents/library-packaging.md)
     - [Apple](./development-documents/library-packaging/apple.md)
+    - [visionOS](./development-documents/library-packaging/visionos.md)
     - [Android](./development-documents/library-packaging/android.md)
     - [Web](./development-documents/library-packaging/web.md)
 
