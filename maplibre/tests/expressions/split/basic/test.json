@@ -1,0 +1,29 @@
+{
+  "expression": [
+    "split",
+    ["get", "text"],
+    ["get", "sep"]
+  ],
+  "inputs": [
+    [{}, {"properties": {"text": "north,south,east", "sep": ","}}],
+    [{}, {"properties": {"text": "abc", "sep": ""}}],
+    [{}, {"properties": {"text": "foo--bar--baz", "sep": "--"}}],
+    [{}, {"properties": {"text": "single", "sep": "|"}}],
+    [{}, {"properties": {"text": "", "sep": ","}}]
+  ],
+  "expected": {
+    "compiled": {
+      "result": "success",
+      "isFeatureConstant": false,
+      "isZoomConstant": true,
+      "type": "array<string>"
+    },
+    "outputs": [
+      ["north", "south", "east"],
+      ["a", "b", "c"],
+      ["foo", "bar", "baz"],
+      ["single"],
+      [""]
+    ]
+  }
+}

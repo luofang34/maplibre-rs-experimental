@@ -1,0 +1,48 @@
+{
+  "expression": [
+    "number-format",
+    ["number", ["get", "amount"]],
+    {
+      "currency": ["string", ["get", "currency"]],
+      "locale": "en-US"
+    }
+  ],
+  "inputs": [
+    [
+      {},
+      {
+        "properties": {
+          "amount": 1234.5,
+          "currency": "USD"
+        }
+      }
+    ],
+    [
+      {},
+      {
+        "properties": {
+          "amount": -3,
+          "currency": "EUR"
+        }
+      }
+    ],
+    [
+      {},
+      {
+        "properties": {
+          "amount": 99.995,
+          "currency": "GBP"
+        }
+      }
+    ]
+  ],
+  "expected": {
+    "compiled": {
+      "result": "success",
+      "isFeatureConstant": false,
+      "isZoomConstant": true,
+      "type": "string"
+    },
+    "outputs": ["$1,234.50", "-€3.00", "£100.00"]
+  }
+}

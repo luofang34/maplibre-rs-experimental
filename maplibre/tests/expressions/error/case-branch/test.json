@@ -1,0 +1,24 @@
+{
+  "expression": [
+    "case",
+    ["has", "elevation"],
+    ["number", ["get", "elevation"]],
+    ["error", "elevation required"]
+  ],
+  "inputs": [
+    [{}, {"properties": {"elevation": 420}}],
+    [{}, {"properties": {}}]
+  ],
+  "expected": {
+    "compiled": {
+      "result": "success",
+      "isFeatureConstant": false,
+      "isZoomConstant": true,
+      "type": "number"
+    },
+    "outputs": [
+      420,
+      {"error": "elevation required"}
+    ]
+  }
+}

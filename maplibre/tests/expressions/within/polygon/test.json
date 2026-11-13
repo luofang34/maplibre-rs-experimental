@@ -1,0 +1,79 @@
+{
+  "expression": [
+    "within",
+    {
+      "type": "Polygon",
+      "coordinates": [
+        [
+          [0, 0],
+          [10, 0],
+          [10, 10],
+          [0, 10],
+          [0, 0]
+        ]
+      ]
+    }
+  ],
+  "inputs": [
+    [
+      {},
+      {
+        "geometry": {
+          "type": "Point",
+          "coordinates": [5, 5]
+        }
+      }
+    ],
+    [
+      {},
+      {
+        "geometry": {
+          "type": "Point",
+          "coordinates": [15, 5]
+        }
+      }
+    ],
+    [
+      {},
+      {
+        "geometry": {
+          "type": "Point",
+          "coordinates": [0, 5]
+        }
+      }
+    ],
+    [
+      {},
+      {
+        "geometry": {
+          "type": "LineString",
+          "coordinates": [
+            [2, 2],
+            [8, 8]
+          ]
+        }
+      }
+    ],
+    [
+      {},
+      {
+        "geometry": {
+          "type": "LineString",
+          "coordinates": [
+            [2, 2],
+            [12, 8]
+          ]
+        }
+      }
+    ]
+  ],
+  "expected": {
+    "compiled": {
+      "result": "success",
+      "isFeatureConstant": false,
+      "isZoomConstant": true,
+      "type": "boolean"
+    },
+    "outputs": [true, false, false, true, false]
+  }
+}

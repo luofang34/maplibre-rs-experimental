@@ -1,0 +1,50 @@
+{
+  "expression": [
+    "distance",
+    {
+      "type": "Point",
+      "coordinates": [0, 0]
+    }
+  ],
+  "inputs": [
+    [
+      {},
+      {
+        "geometry": {
+          "type": "Point",
+          "coordinates": [0, 0]
+        }
+      }
+    ],
+    [
+      {},
+      {
+        "geometry": {
+          "type": "Point",
+          "coordinates": [1, 0]
+        }
+      }
+    ],
+    [
+      {},
+      {
+        "geometry": {
+          "type": "LineString",
+          "coordinates": [
+            [0.5, 0],
+            [0.5, 1]
+          ]
+        }
+      }
+    ]
+  ],
+  "expected": {
+    "compiled": {
+      "result": "success",
+      "isFeatureConstant": false,
+      "isZoomConstant": true,
+      "type": "number"
+    },
+    "outputs": [0, 111319.490793, 55659.745397]
+  }
+}

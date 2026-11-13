@@ -1,0 +1,34 @@
+{
+  "globalState": {
+    "theme": "light",
+    "scale": 2
+  },
+  "expression": [
+    "concat",
+    ["string", ["coalesce", ["global-state", "theme"], "default"]],
+    ":",
+    ["to-string", ["number", ["coalesce", ["global-state", "scale"], 1]]],
+    ":",
+    ["string", ["coalesce", ["global-state", "missing"], "none"]]
+  ],
+  "inputs": [
+    [{}, {}],
+    [
+      {
+        "globalState": {
+          "theme": "dark"
+        }
+      },
+      {}
+    ]
+  ],
+  "expected": {
+    "compiled": {
+      "result": "success",
+      "isFeatureConstant": true,
+      "isZoomConstant": true,
+      "type": "string"
+    },
+    "outputs": ["light:2:none", "dark:1:none"]
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "expression": [
+    "at",
+    ["get", "index"],
+    ["literal", ["alpha", "beta", "gamma"]]
+  ],
+  "inputs": [
+    [{}, {"properties": {"index": 0}}],
+    [{}, {"properties": {"index": 1}}],
+    [{}, {"properties": {"index": 2}}],
+    [{}, {"properties": {"index": -1}}],
+    [{}, {"properties": {"index": 3}}],
+    [{}, {"properties": {"index": 1.5}}],
+    [{}, {"properties": {"index": "bad"}}]
+  ],
+  "expected": {
+    "compiled": {
+      "result": "success",
+      "isFeatureConstant": false,
+      "isZoomConstant": true,
+      "type": "string"
+    },
+    "outputs": [
+      "alpha",
+      "beta",
+      "gamma",
+      {"error": "Array index out of bounds"},
+      {"error": "Array index out of bounds"},
+      {"error": "Array index must be an integer"},
+      {"error": "Expected value to be of type number"}
+    ]
+  }
+}

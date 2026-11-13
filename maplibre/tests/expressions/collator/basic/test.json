@@ -1,0 +1,61 @@
+{
+  "expression": [
+    "all",
+    [
+      "==",
+      ["get", "a"],
+      ["get", "b"],
+      [
+        "collator",
+        {
+          "case-sensitive": false,
+          "diacritic-sensitive": false
+        }
+      ]
+    ],
+    [
+      "==",
+      [
+        "resolved-locale",
+        [
+          "collator",
+          {
+            "case-sensitive": true,
+            "diacritic-sensitive": true,
+            "locale": "en"
+          }
+        ]
+      ],
+      "en"
+    ]
+  ],
+  "inputs": [
+    [
+      {},
+      {
+        "properties": {
+          "a": "Café",
+          "b": "cafe"
+        }
+      }
+    ],
+    [
+      {},
+      {
+        "properties": {
+          "a": "Café",
+          "b": "tea"
+        }
+      }
+    ]
+  ],
+  "expected": {
+    "compiled": {
+      "result": "success",
+      "isFeatureConstant": false,
+      "isZoomConstant": true,
+      "type": "boolean"
+    },
+    "outputs": [true, false]
+  }
+}

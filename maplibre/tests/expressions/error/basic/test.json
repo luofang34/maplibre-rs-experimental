@@ -1,0 +1,26 @@
+{
+  "expression": [
+    "coalesce",
+    ["get", "name"],
+    ["get", "fallback"],
+    ["error", "missing feature label"]
+  ],
+  "inputs": [
+    [{}, {"properties": {"name": "Berlin"}}],
+    [{}, {"properties": {"fallback": "Brandenburg"}}],
+    [{}, {"properties": {}}]
+  ],
+  "expected": {
+    "compiled": {
+      "result": "success",
+      "isFeatureConstant": false,
+      "isZoomConstant": true,
+      "type": "value"
+    },
+    "outputs": [
+      "Berlin",
+      "Brandenburg",
+      {"error": "missing feature label"}
+    ]
+  }
+}

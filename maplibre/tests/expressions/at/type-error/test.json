@@ -1,0 +1,19 @@
+{
+  "expression": [
+    "at",
+    "not-a-number",
+    ["literal", [10, 20]]
+  ],
+  "inputs": [],
+  "expected": {
+    "compiled": {
+      "result": "error",
+      "errors": [
+        {
+          "key": "[1]",
+          "error": "Expected number but found string instead."
+        }
+      ]
+    }
+  }
+}

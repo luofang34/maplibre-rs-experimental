@@ -1,30 +1,71 @@
-//! Runs the expression conformance cases of the maplibre style specification, vendored under
+//! Runs the expression conformance cases of the MapLibre Style Specification, vendored under
 //! `tests/expressions`, against the expression engine through its public API.
 //!
 //! Each case parses one expression, checks its compiled classification and type, and
-//! evaluates it for a list of inputs. Cases that use operators or types the engine does not
-//! implement are counted as unsupported rather than failed; the floor on passing cases keeps
-//! the supported subset from shrinking silently.
+//! evaluates it for a list of inputs. Unsupported specification types and known deviations are
+//! tracked in a ratcheted `EXPECTED_FAILURES` list mapping `<group>/<case>` to an explicit
+//! reason: any unlisted failure OR any listed case that starts passing fails the test.
 
 #![allow(clippy::expect_used, clippy::panic)]
 
-use std::{collections::HashMap, fs, path::Path};
+use std::{
+    collections::{BTreeMap, BTreeSet, HashMap},
+    fs,
+    path::Path,
+};
 
 use maplibre::style::expression::{
-    EvaluationContext, Expression, FeatureProperties, LegacyPropertySpec, PropertyKind, Type, Value,
+    EvaluationContext, Expression, FeatureProperties, LegacyPropertySpec, PropertyKind, Type,
+    Value, FEATURE_STATE_PREFIX, GEOMETRY_PROPERTY,
 };
 use serde_json::Value as Json;
 
-/// Passing cases the vendored suite must keep producing.
-const MIN_PASSING_CASES: usize = 411;
-
-/// Types of the specification the engine has no value for.
+/// Types of the specification the engine has no runtime `Value` variant for.
 const UNSUPPORTED_TYPES: &[&str] = &[
     "padding",
     "numberArray",
     "colorArray",
     "projectionDefinition",
     "variableAnchorOffsetCollection",
+];
+
+const REASON_COLOR_ARRAY: &str = "uses unsupported `colorArray` property value type";
+const REASON_NUMBER_ARRAY: &str = "uses unsupported `numberArray` property value type";
+const REASON_PADDING: &str = "uses unsupported `padding` property value type";
+const REASON_PROJECTION: &str = "uses unsupported `projectionDefinition` property value type";
+
+/// Ratcheted map of exact `<group>/<case>` IDs expected not to pass, paired with explicit reasons.
+const EXPECTED_FAILURES: &[(&str, &str)] = &[
+    ("interpolate-hcl/linear-color-array", REASON_COLOR_ARRAY),
+    (
+        "interpolate-hcl/uninterpolable-output/number-array",
+        REASON_NUMBER_ARRAY,
+    ),
+    (
+        "interpolate-hcl/uninterpolable-output/projection",
+        REASON_PROJECTION,
+    ),
+    ("interpolate-lab/linear-color-array", REASON_COLOR_ARRAY),
+    (
+        "interpolate-lab/uninterpolable-output/number-array",
+        REASON_NUMBER_ARRAY,
+    ),
+    (
+        "interpolate-lab/uninterpolable-output/projection",
+        REASON_PROJECTION,
+    ),
+    ("interpolate/linear-color-array", REASON_COLOR_ARRAY),
+    ("interpolate/linear-number-array", REASON_NUMBER_ARRAY),
+    ("interpolate/projection/global-state", REASON_PROJECTION),
+    ("interpolate/projection/higher-than-stop", REASON_PROJECTION),
+    ("interpolate/projection/linear", REASON_PROJECTION),
+    ("interpolate/projection/lower-than-stop", REASON_PROJECTION),
+    ("interpolate/projection/same-from-to", REASON_PROJECTION),
+    ("legacy/identity/color_array", REASON_COLOR_ARRAY),
+    ("legacy/identity/number_array", REASON_NUMBER_ARRAY),
+    ("legacy/identity/padding", REASON_PADDING),
+    ("step/projection/step-array", REASON_PROJECTION),
+    ("step/projection/step-primitive", REASON_PROJECTION),
 ];
 
 enum Outcome {
@@ -41,40 +82,81 @@ fn the_engine_agrees_with_the_style_specification() {
     cases.sort();
     assert!(!cases.is_empty(), "no cases under {}", root.display());
 
-    let mut passed = 0;
-    let mut unsupported = Vec::new();
-    let mut failures = Vec::new();
+    let mut expected_map = BTreeMap::new();
+    for (id, reason) in EXPECTED_FAILURES {
+        assert!(
+            !reason.trim().is_empty(),
+            "EXPECTED_FAILURES entry `{id}` must have a non-empty reason"
+        );
+        assert!(
+            expected_map.insert(*id, *reason).is_none(),
+            "duplicate EXPECTED_FAILURES entry `{id}`"
+        );
+    }
+
+    let mut passed = 0_usize;
+    let mut expected_non_passing = 0_usize;
+    let mut unexpected_failures = Vec::new();
+    let mut unexpected_passes = Vec::new();
+    let mut seen_ids = BTreeSet::new();
+
     for case in &cases {
         let name = case
             .strip_prefix(&root)
             .expect("under root")
             .parent()
             .expect("a directory")
-            .display()
-            .to_string();
-        match run_case(case) {
-            Outcome::Pass => passed += 1,
-            Outcome::Unsupported(reason) => unsupported.push(format!("{name}: {reason}")),
-            Outcome::Fail(reason) => failures.push(format!("{name}: {reason}")),
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join("/");
+        seen_ids.insert(name.clone());
+
+        let expected_reason = expected_map.get(name.as_str()).copied();
+        match (run_case(case), expected_reason) {
+            (Outcome::Pass, None) => passed += 1,
+            (Outcome::Pass, Some(reason)) => {
+                unexpected_passes.push(format!("{name} (listed as: {reason})"));
+            }
+            (Outcome::Unsupported(_), Some(_)) | (Outcome::Fail(_), Some(_)) => {
+                expected_non_passing += 1;
+            }
+            (Outcome::Unsupported(reason), None) => {
+                unexpected_failures.push(format!("{name}: unsupported ({reason})"));
+            }
+            (Outcome::Fail(reason), None) => {
+                unexpected_failures.push(format!("{name}: {reason}"));
+            }
         }
     }
+
+    let stale_entries: Vec<&str> = expected_map
+        .keys()
+        .copied()
+        .filter(|id| !seen_ids.contains(*id))
+        .collect();
+
     eprintln!(
-        "expression conformance: {passed} passed, {} unsupported, {} failed of {}",
-        unsupported.len(),
-        failures.len(),
+        "expression conformance: {passed} passed, {expected_non_passing} expected-unsupported, {} unexpected failures, {} unexpected passes of {}",
+        unexpected_failures.len(),
+        unexpected_passes.len(),
         cases.len()
     );
-    for reason in &unsupported {
-        eprintln!("unsupported {reason}");
-    }
+
     assert!(
-        failures.is_empty(),
-        "failed cases:\n{}",
-        failures.join("\n")
+        stale_entries.is_empty(),
+        "stale EXPECTED_FAILURES entries missing from disk:\n{}",
+        stale_entries.join("\n")
     );
     assert!(
-        passed >= MIN_PASSING_CASES,
-        "only {passed} cases pass; the floor is {MIN_PASSING_CASES}"
+        unexpected_passes.is_empty(),
+        "cases in EXPECTED_FAILURES now pass — remove them from EXPECTED_FAILURES:\n{}",
+        unexpected_passes.join("\n")
+    );
+    assert!(
+        unexpected_failures.is_empty(),
+        "unexpected expression conformance failures:\n{}",
+        unexpected_failures.join("\n")
     );
 }
 
@@ -146,7 +228,7 @@ fn run_case(path: &Path) -> Outcome {
     for (index, (input, expected)) in inputs.iter().zip(&outputs).enumerate() {
         let globals = &input[0];
         let feature = &input[1];
-        let properties: FeatureProperties = feature
+        let mut properties: FeatureProperties = feature
             .get("properties")
             .and_then(Json::as_object)
             .map(|object| {
@@ -156,11 +238,29 @@ fn run_case(path: &Path) -> Outcome {
                     .collect()
             })
             .unwrap_or_default();
+        if let Some(geometry) = feature.get("geometry") {
+            properties.insert(
+                GEOMETRY_PROPERTY.to_owned(),
+                Value::String(geometry.to_string()),
+            );
+        }
+        if let Some(feature_state) = globals
+            .get("featureState")
+            .or_else(|| feature.get("state"))
+            .and_then(Json::as_object)
+        {
+            for (key, value) in feature_state {
+                properties.insert(
+                    format!("{FEATURE_STATE_PREFIX}{key}"),
+                    Value::from_json(value),
+                );
+            }
+        }
         let id = feature.get("id").map(Value::from_json);
-        // The suite keeps the map-level state at the case root.
-        let global_state: Option<FeatureProperties> = case
+        // Per-input `globals.globalState` overrides a root `case.globalState` default.
+        let global_state: Option<FeatureProperties> = globals
             .get("globalState")
-            .or_else(|| globals.get("globalState"))
+            .or_else(|| case.get("globalState"))
             .and_then(Json::as_object)
             .map(|state| {
                 state
@@ -344,6 +444,16 @@ fn the_vendored_suite_covers_every_supported_operator() {
         "format",
         "image",
         "coalesce",
+        "at",
+        "split",
+        "join",
+        "error",
+        "within",
+        "distance",
+        "collator",
+        "number-format",
+        "feature-state",
+        "global-state",
     ] {
         assert!(
             root.join(operator).is_dir(),

@@ -1,0 +1,46 @@
+{
+  "expression": [
+    "case",
+    ["boolean", ["feature-state", "hover"], false],
+    ["+", ["number", ["feature-state", "boost"], 0], 10],
+    0
+  ],
+  "inputs": [
+    [
+      {
+        "featureState": {
+          "hover": true,
+          "boost": 5
+        }
+      },
+      {}
+    ],
+    [
+      {
+        "featureState": {
+          "hover": true
+        }
+      },
+      {}
+    ],
+    [
+      {
+        "featureState": {
+          "hover": false,
+          "boost": 99
+        }
+      },
+      {}
+    ],
+    [{}, {}]
+  ],
+  "expected": {
+    "compiled": {
+      "result": "success",
+      "isFeatureConstant": false,
+      "isZoomConstant": true,
+      "type": "number"
+    },
+    "outputs": [15, 10, 0, 0]
+  }
+}

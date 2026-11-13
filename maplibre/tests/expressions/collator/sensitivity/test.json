@@ -1,0 +1,69 @@
+{
+  "expression": [
+    "==",
+    ["string", ["get", "a"]],
+    ["string", ["get", "b"]],
+    [
+      "collator",
+      {
+        "case-sensitive": ["boolean", ["get", "cs"]],
+        "diacritic-sensitive": ["boolean", ["get", "ds"]]
+      }
+    ]
+  ],
+  "inputs": [
+    [
+      {},
+      {
+        "properties": {
+          "a": "Cafe",
+          "b": "cafe",
+          "cs": true,
+          "ds": false
+        }
+      }
+    ],
+    [
+      {},
+      {
+        "properties": {
+          "a": "Café",
+          "b": "cafe",
+          "cs": false,
+          "ds": true
+        }
+      }
+    ],
+    [
+      {},
+      {
+        "properties": {
+          "a": "Café",
+          "b": "café",
+          "cs": false,
+          "ds": true
+        }
+      }
+    ],
+    [
+      {},
+      {
+        "properties": {
+          "a": "Cafe",
+          "b": "Café",
+          "cs": true,
+          "ds": false
+        }
+      }
+    ]
+  ],
+  "expected": {
+    "compiled": {
+      "result": "success",
+      "isFeatureConstant": false,
+      "isZoomConstant": true,
+      "type": "boolean"
+    },
+    "outputs": [false, false, true, true]
+  }
+}

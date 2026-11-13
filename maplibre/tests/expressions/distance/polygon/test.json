@@ -1,0 +1,46 @@
+{
+  "expression": [
+    "distance",
+    {
+      "type": "Polygon",
+      "coordinates": [
+        [
+          [0, -1],
+          [2, -1],
+          [2, 1],
+          [0, 1],
+          [0, -1]
+        ]
+      ]
+    }
+  ],
+  "inputs": [
+    [
+      {},
+      {
+        "geometry": {
+          "type": "Point",
+          "coordinates": [1, 0]
+        }
+      }
+    ],
+    [
+      {},
+      {
+        "geometry": {
+          "type": "Point",
+          "coordinates": [3, 0]
+        }
+      }
+    ]
+  ],
+  "expected": {
+    "compiled": {
+      "result": "success",
+      "isFeatureConstant": false,
+      "isZoomConstant": true,
+      "type": "number"
+    },
+    "outputs": [0, 111319.490793]
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "expression": [
+    "number-format",
+    ["number", ["get", "n"]],
+    {
+      "locale": "en-US",
+      "min-fraction-digits": ["number", ["get", "min"]],
+      "max-fraction-digits": ["number", ["get", "max"]]
+    }
+  ],
+  "inputs": [
+    [
+      {},
+      {
+        "properties": {
+          "n": 1234567.8916,
+          "min": 0,
+          "max": 3
+        }
+      }
+    ],
+    [
+      {},
+      {
+        "properties": {
+          "n": 42,
+          "min": 2,
+          "max": 4
+        }
+      }
+    ],
+    [
+      {},
+      {
+        "properties": {
+          "n": -0.5,
+          "min": 0,
+          "max": 2
+        }
+      }
+    ]
+  ],
+  "expected": {
+    "compiled": {
+      "result": "success",
+      "isFeatureConstant": false,
+      "isZoomConstant": true,
+      "type": "string"
+    },
+    "outputs": ["1,234,567.892", "42.00", "-0.5"]
+  }
+}

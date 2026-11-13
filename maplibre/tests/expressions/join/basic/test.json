@@ -1,0 +1,29 @@
+{
+  "expression": [
+    "join",
+    ["get", "items"],
+    ["get", "sep"]
+  ],
+  "inputs": [
+    [{}, {"properties": {"items": ["I-95", "US-1", "SR-9"], "sep": " / "}}],
+    [{}, {"properties": {"items": [], "sep": ","}}],
+    [{}, {"properties": {"items": ["a", "b", "c"], "sep": ""}}],
+    [{}, {"properties": {"items": [1, true, "ok"], "sep": ":"}}],
+    [{}, {"properties": {"items": "not-an-array", "sep": ","}}]
+  ],
+  "expected": {
+    "compiled": {
+      "result": "success",
+      "isFeatureConstant": false,
+      "isZoomConstant": true,
+      "type": "string"
+    },
+    "outputs": [
+      "I-95 / US-1 / SR-9",
+      "",
+      "abc",
+      "1:true:ok",
+      {"error": "Expected array"}
+    ]
+  }
+}
