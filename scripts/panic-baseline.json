@@ -1,0 +1,77 @@
+{
+  "description": "Monotonic ceiling on non-test .unwrap(), .expect(), panic!(), todo!(), and unimplemented!() sites per workspace crate.",
+  "crates": {
+    "maplibre": {
+      "total": 823,
+      "unwrap": 67,
+      "expect": 712,
+      "panic": 44,
+      "todo": 0,
+      "unimplemented": 0
+    },
+    "maplibre-winit": {
+      "total": 0,
+      "unwrap": 0,
+      "expect": 0,
+      "panic": 0,
+      "todo": 0,
+      "unimplemented": 0
+    },
+    "maplibre-build-tools": {
+      "total": 0,
+      "unwrap": 0,
+      "expect": 0,
+      "panic": 0,
+      "todo": 0,
+      "unimplemented": 0
+    },
+    "maplibre-demo": {
+      "total": 0,
+      "unwrap": 0,
+      "expect": 0,
+      "panic": 0,
+      "todo": 0,
+      "unimplemented": 0
+    },
+    "android": {
+      "total": 0,
+      "unwrap": 0,
+      "expect": 0,
+      "panic": 0,
+      "todo": 0,
+      "unimplemented": 0
+    },
+    "apple": {
+      "total": 0,
+      "unwrap": 0,
+      "expect": 0,
+      "panic": 0,
+      "todo": 0,
+      "unimplemented": 0
+    },
+    "web": {
+      "total": 41,
+      "unwrap": 38,
+      "expect": 3,
+      "panic": 0,
+      "todo": 0,
+      "unimplemented": 0
+    },
+    "benchmarks": {
+      "total": 0,
+      "unwrap": 0,
+      "expect": 0,
+      "panic": 0,
+      "todo": 0,
+      "unimplemented": 0
+    },
+    "render-tests": {
+      "total": 0,
+      "unwrap": 0,
+      "expect": 0,
+      "panic": 0,
+      "todo": 0,
+      "unimplemented": 0
+    }
+  }
+}
