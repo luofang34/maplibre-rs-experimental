@@ -80,82 +80,69 @@
 <a href=#80 id=80 data-nosnippet>80</a>    {
 <a href=#81 id=81 data-nosnippet>81</a>        <span class="kw">return </span><span class="bool-val">true</span>;
 <a href=#82 id=82 data-nosnippet>82</a>    }
-<a href=#83 id=83 data-nosnippet>83</a>    needs_paint_retessellation(before, before.paint.as_ref(), after.paint.as_ref())
+<a href=#83 id=83 data-nosnippet>83</a>    needs_paint_retessellation(before.paint.as_ref(), after.paint.as_ref())
 <a href=#84 id=84 data-nosnippet>84</a>}
 <a href=#85 id=85 data-nosnippet>85</a>
-<a href=#86 id=86 data-nosnippet>86</a><span class="kw">fn </span>needs_paint_retessellation(
-<a href=#87 id=87 data-nosnippet>87</a>    before_layer: <span class="kw-2">&amp;</span>StyleLayer,
-<a href=#88 id=88 data-nosnippet>88</a>    before: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>LayerPaint&gt;,
-<a href=#89 id=89 data-nosnippet>89</a>    after: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>LayerPaint&gt;,
-<a href=#90 id=90 data-nosnippet>90</a>) -&gt; bool {
-<a href=#91 id=91 data-nosnippet>91</a>    <span class="kw">let </span>retained_paint = <span class="kw">crate</span>::vector::feature_paint::layer_retains_feature_paint(before_layer);
-<a href=#92 id=92 data-nosnippet>92</a>    <span class="kw">match </span>(before, after) {
-<a href=#93 id=93 data-nosnippet>93</a>        (<span class="prelude-val">None</span>, <span class="prelude-val">None</span>) =&gt; <span class="bool-val">false</span>,
-<a href=#94 id=94 data-nosnippet>94</a>        (<span class="prelude-val">Some</span>(bp @ LayerPaint::Fill(a)), <span class="prelude-val">Some</span>(ap @ LayerPaint::Fill(b))) =&gt; {
-<a href=#95 id=95 data-nosnippet>95</a>            a.outline_color().is_some() != b.outline_color().is_some()
-<a href=#96 id=96 data-nosnippet>96</a>                || ((per_feature_pattern(bp).is_some() || per_feature_pattern(ap).is_some())
-<a href=#97 id=97 data-nosnippet>97</a>                    &amp;&amp; a.fill_pattern != b.fill_pattern)
-<a href=#98 id=98 data-nosnippet>98</a>                || (!retained_paint
-<a href=#99 id=99 data-nosnippet>99</a>                    &amp;&amp; a.outline_color().is_some()
-<a href=#100 id=100 data-nosnippet>100</a>                    &amp;&amp; (!same_prop(<span class="kw-2">&amp;</span>a.fill_color, <span class="kw-2">&amp;</span>b.fill_color)
-<a href=#101 id=101 data-nosnippet>101</a>                        || !same_prop(<span class="kw-2">&amp;</span>a.fill_opacity, <span class="kw-2">&amp;</span>b.fill_opacity)
-<a href=#102 id=102 data-nosnippet>102</a>                        || !same_prop(<span class="kw-2">&amp;</span>a.fill_outline_color, <span class="kw-2">&amp;</span>b.fill_outline_color)))
-<a href=#103 id=103 data-nosnippet>103</a>        }
-<a href=#104 id=104 data-nosnippet>104</a>        (<span class="prelude-val">Some</span>(bp @ LayerPaint::Line(a)), <span class="prelude-val">Some</span>(ap @ LayerPaint::Line(b))) =&gt; {
-<a href=#105 id=105 data-nosnippet>105</a>            <span class="kw">let </span>per_feature_stroke = is_data_driven(a.line_width.as_ref())
-<a href=#106 id=106 data-nosnippet>106</a>                || is_data_driven(b.line_width.as_ref())
-<a href=#107 id=107 data-nosnippet>107</a>                || is_data_driven(a.line_offset.as_ref())
-<a href=#108 id=108 data-nosnippet>108</a>                || is_data_driven(b.line_offset.as_ref())
-<a href=#109 id=109 data-nosnippet>109</a>                || is_data_driven(a.line_gap_width.as_ref())
-<a href=#110 id=110 data-nosnippet>110</a>                || is_data_driven(b.line_gap_width.as_ref())
-<a href=#111 id=111 data-nosnippet>111</a>                || is_data_driven(a.line_blur.as_ref())
-<a href=#112 id=112 data-nosnippet>112</a>                || is_data_driven(b.line_blur.as_ref());
-<a href=#113 id=113 data-nosnippet>113</a>            (per_feature_stroke
-<a href=#114 id=114 data-nosnippet>114</a>                &amp;&amp; (!same_prop(<span class="kw-2">&amp;</span>a.line_width, <span class="kw-2">&amp;</span>b.line_width)
-<a href=#115 id=115 data-nosnippet>115</a>                    || !same_prop(<span class="kw-2">&amp;</span>a.line_offset, <span class="kw-2">&amp;</span>b.line_offset)
-<a href=#116 id=116 data-nosnippet>116</a>                    || !same_prop(<span class="kw-2">&amp;</span>a.line_gap_width, <span class="kw-2">&amp;</span>b.line_gap_width)
-<a href=#117 id=117 data-nosnippet>117</a>                    || !same_prop(<span class="kw-2">&amp;</span>a.line_blur, <span class="kw-2">&amp;</span>b.line_blur)))
-<a href=#118 id=118 data-nosnippet>118</a>                || a.line_gradient.is_some() != b.line_gradient.is_some()
-<a href=#119 id=119 data-nosnippet>119</a>                || (!retained_paint
-<a href=#120 id=120 data-nosnippet>120</a>                    &amp;&amp; a.line_gradient.is_some()
-<a href=#121 id=121 data-nosnippet>121</a>                    &amp;&amp; !same_prop(<span class="kw-2">&amp;</span>a.line_opacity, <span class="kw-2">&amp;</span>b.line_opacity))
-<a href=#122 id=122 data-nosnippet>122</a>                || a.line_dasharray.is_some() != b.line_dasharray.is_some()
-<a href=#123 id=123 data-nosnippet>123</a>                || a.line_pattern.is_some() != b.line_pattern.is_some()
-<a href=#124 id=124 data-nosnippet>124</a>                || ((per_feature_pattern(bp).is_some() || per_feature_pattern(ap).is_some())
-<a href=#125 id=125 data-nosnippet>125</a>                    &amp;&amp; a.line_pattern != b.line_pattern)
-<a href=#126 id=126 data-nosnippet>126</a>                || !same_prop(<span class="kw-2">&amp;</span>a.line_elevation, <span class="kw-2">&amp;</span>b.line_elevation)
-<a href=#127 id=127 data-nosnippet>127</a>                || !same_prop(<span class="kw-2">&amp;</span>a.line_elevation_datum, <span class="kw-2">&amp;</span>b.line_elevation_datum)
-<a href=#128 id=128 data-nosnippet>128</a>        }
-<a href=#129 id=129 data-nosnippet>129</a>        (<span class="prelude-val">Some</span>(LayerPaint::Circle(a)), <span class="prelude-val">Some</span>(LayerPaint::Circle(b))) =&gt; {
-<a href=#130 id=130 data-nosnippet>130</a>            !same_prop(<span class="kw-2">&amp;</span>a.circle_radius, <span class="kw-2">&amp;</span>b.circle_radius)
-<a href=#131 id=131 data-nosnippet>131</a>                || !same_prop(<span class="kw-2">&amp;</span>a.circle_stroke_width, <span class="kw-2">&amp;</span>b.circle_stroke_width)
-<a href=#132 id=132 data-nosnippet>132</a>                || a.circle_pitch_alignment != b.circle_pitch_alignment
-<a href=#133 id=133 data-nosnippet>133</a>                || ((is_data_driven(a.circle_blur.as_ref())
-<a href=#134 id=134 data-nosnippet>134</a>                    || is_data_driven(b.circle_blur.as_ref()))
-<a href=#135 id=135 data-nosnippet>135</a>                    &amp;&amp; !same_prop(<span class="kw-2">&amp;</span>a.circle_blur, <span class="kw-2">&amp;</span>b.circle_blur))
-<a href=#136 id=136 data-nosnippet>136</a>                || ((is_data_driven(a.circle_stroke_opacity.as_ref())
-<a href=#137 id=137 data-nosnippet>137</a>                    || is_data_driven(b.circle_stroke_opacity.as_ref()))
-<a href=#138 id=138 data-nosnippet>138</a>                    &amp;&amp; !same_prop(<span class="kw-2">&amp;</span>a.circle_stroke_opacity, <span class="kw-2">&amp;</span>b.circle_stroke_opacity))
-<a href=#139 id=139 data-nosnippet>139</a>        }
-<a href=#140 id=140 data-nosnippet>140</a>        (<span class="prelude-val">Some</span>(LayerPaint::FillExtrusion(a)), <span class="prelude-val">Some</span>(LayerPaint::FillExtrusion(b))) =&gt; {
-<a href=#141 id=141 data-nosnippet>141</a>            !same_prop(<span class="kw-2">&amp;</span>a.fill_extrusion_height, <span class="kw-2">&amp;</span>b.fill_extrusion_height)
-<a href=#142 id=142 data-nosnippet>142</a>                || !same_prop(<span class="kw-2">&amp;</span>a.fill_extrusion_base, <span class="kw-2">&amp;</span>b.fill_extrusion_base)
-<a href=#143 id=143 data-nosnippet>143</a>                || !same_prop(<span class="kw-2">&amp;</span>a.fill_extrusion_base_datum, <span class="kw-2">&amp;</span>b.fill_extrusion_base_datum)
-<a href=#144 id=144 data-nosnippet>144</a>                || !same_prop(
-<a href=#145 id=145 data-nosnippet>145</a>                    <span class="kw-2">&amp;</span>a.fill_extrusion_height_datum,
-<a href=#146 id=146 data-nosnippet>146</a>                    <span class="kw-2">&amp;</span>b.fill_extrusion_height_datum,
-<a href=#147 id=147 data-nosnippet>147</a>                )
-<a href=#148 id=148 data-nosnippet>148</a>                || !same_prop(<span class="kw-2">&amp;</span>a.fill_extrusion_part, <span class="kw-2">&amp;</span>b.fill_extrusion_part)
-<a href=#149 id=149 data-nosnippet>149</a>                || a.fill_extrusion_translucent != b.fill_extrusion_translucent
-<a href=#150 id=150 data-nosnippet>150</a>                || a.fill_extrusion_pattern != b.fill_extrusion_pattern
-<a href=#151 id=151 data-nosnippet>151</a>        }
-<a href=#152 id=152 data-nosnippet>152</a>        (<span class="prelude-val">Some</span>(LayerPaint::Heatmap(a)), <span class="prelude-val">Some</span>(LayerPaint::Heatmap(b))) =&gt; {
-<a href=#153 id=153 data-nosnippet>153</a>            !same_prop(<span class="kw-2">&amp;</span>a.heatmap_weight, <span class="kw-2">&amp;</span>b.heatmap_weight)
-<a href=#154 id=154 data-nosnippet>154</a>                || ((a.radius_per_feature() || b.radius_per_feature())
-<a href=#155 id=155 data-nosnippet>155</a>                    &amp;&amp; !same_prop(<span class="kw-2">&amp;</span>a.heatmap_radius, <span class="kw-2">&amp;</span>b.heatmap_radius))
-<a href=#156 id=156 data-nosnippet>156</a>        }
-<a href=#157 id=157 data-nosnippet>157</a>        (<span class="prelude-val">Some</span>(LayerPaint::Symbol(<span class="kw">_</span>)), <span class="prelude-val">Some</span>(LayerPaint::Symbol(<span class="kw">_</span>))) =&gt; <span class="bool-val">false</span>,
-<a href=#158 id=158 data-nosnippet>158</a>        <span class="kw">_ </span>=&gt; <span class="bool-val">true</span>,
-<a href=#159 id=159 data-nosnippet>159</a>    }
-<a href=#160 id=160 data-nosnippet>160</a>}
+<a href=#86 id=86 data-nosnippet>86</a><span class="kw">fn </span>needs_paint_retessellation(before: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>LayerPaint&gt;, after: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>LayerPaint&gt;) -&gt; bool {
+<a href=#87 id=87 data-nosnippet>87</a>    <span class="kw">match </span>(before, after) {
+<a href=#88 id=88 data-nosnippet>88</a>        (<span class="prelude-val">None</span>, <span class="prelude-val">None</span>) =&gt; <span class="bool-val">false</span>,
+<a href=#89 id=89 data-nosnippet>89</a>        (<span class="prelude-val">Some</span>(bp @ LayerPaint::Fill(a)), <span class="prelude-val">Some</span>(ap @ LayerPaint::Fill(b))) =&gt; {
+<a href=#90 id=90 data-nosnippet>90</a>            a.outline_color().is_some() != b.outline_color().is_some()
+<a href=#91 id=91 data-nosnippet>91</a>                || ((per_feature_pattern(bp).is_some() || per_feature_pattern(ap).is_some())
+<a href=#92 id=92 data-nosnippet>92</a>                    &amp;&amp; a.fill_pattern != b.fill_pattern)
+<a href=#93 id=93 data-nosnippet>93</a>        }
+<a href=#94 id=94 data-nosnippet>94</a>        (<span class="prelude-val">Some</span>(bp @ LayerPaint::Line(a)), <span class="prelude-val">Some</span>(ap @ LayerPaint::Line(b))) =&gt; {
+<a href=#95 id=95 data-nosnippet>95</a>            <span class="kw">let </span>per_feature_stroke = is_data_driven(a.line_width.as_ref())
+<a href=#96 id=96 data-nosnippet>96</a>                || is_data_driven(b.line_width.as_ref())
+<a href=#97 id=97 data-nosnippet>97</a>                || is_data_driven(a.line_offset.as_ref())
+<a href=#98 id=98 data-nosnippet>98</a>                || is_data_driven(b.line_offset.as_ref())
+<a href=#99 id=99 data-nosnippet>99</a>                || is_data_driven(a.line_gap_width.as_ref())
+<a href=#100 id=100 data-nosnippet>100</a>                || is_data_driven(b.line_gap_width.as_ref())
+<a href=#101 id=101 data-nosnippet>101</a>                || is_data_driven(a.line_blur.as_ref())
+<a href=#102 id=102 data-nosnippet>102</a>                || is_data_driven(b.line_blur.as_ref());
+<a href=#103 id=103 data-nosnippet>103</a>            (per_feature_stroke
+<a href=#104 id=104 data-nosnippet>104</a>                &amp;&amp; (!same_prop(<span class="kw-2">&amp;</span>a.line_width, <span class="kw-2">&amp;</span>b.line_width)
+<a href=#105 id=105 data-nosnippet>105</a>                    || !same_prop(<span class="kw-2">&amp;</span>a.line_offset, <span class="kw-2">&amp;</span>b.line_offset)
+<a href=#106 id=106 data-nosnippet>106</a>                    || !same_prop(<span class="kw-2">&amp;</span>a.line_gap_width, <span class="kw-2">&amp;</span>b.line_gap_width)
+<a href=#107 id=107 data-nosnippet>107</a>                    || !same_prop(<span class="kw-2">&amp;</span>a.line_blur, <span class="kw-2">&amp;</span>b.line_blur)))
+<a href=#108 id=108 data-nosnippet>108</a>                || a.line_gradient.is_some() != b.line_gradient.is_some()
+<a href=#109 id=109 data-nosnippet>109</a>                || a.line_dasharray.is_some() != b.line_dasharray.is_some()
+<a href=#110 id=110 data-nosnippet>110</a>                || a.line_pattern.is_some() != b.line_pattern.is_some()
+<a href=#111 id=111 data-nosnippet>111</a>                || ((per_feature_pattern(bp).is_some() || per_feature_pattern(ap).is_some())
+<a href=#112 id=112 data-nosnippet>112</a>                    &amp;&amp; a.line_pattern != b.line_pattern)
+<a href=#113 id=113 data-nosnippet>113</a>                || !same_prop(<span class="kw-2">&amp;</span>a.line_elevation, <span class="kw-2">&amp;</span>b.line_elevation)
+<a href=#114 id=114 data-nosnippet>114</a>                || !same_prop(<span class="kw-2">&amp;</span>a.line_elevation_datum, <span class="kw-2">&amp;</span>b.line_elevation_datum)
+<a href=#115 id=115 data-nosnippet>115</a>        }
+<a href=#116 id=116 data-nosnippet>116</a>        (<span class="prelude-val">Some</span>(LayerPaint::Circle(a)), <span class="prelude-val">Some</span>(LayerPaint::Circle(b))) =&gt; {
+<a href=#117 id=117 data-nosnippet>117</a>            !same_prop(<span class="kw-2">&amp;</span>a.circle_radius, <span class="kw-2">&amp;</span>b.circle_radius)
+<a href=#118 id=118 data-nosnippet>118</a>                || !same_prop(<span class="kw-2">&amp;</span>a.circle_stroke_width, <span class="kw-2">&amp;</span>b.circle_stroke_width)
+<a href=#119 id=119 data-nosnippet>119</a>                || a.circle_pitch_alignment != b.circle_pitch_alignment
+<a href=#120 id=120 data-nosnippet>120</a>                || ((is_data_driven(a.circle_blur.as_ref())
+<a href=#121 id=121 data-nosnippet>121</a>                    || is_data_driven(b.circle_blur.as_ref()))
+<a href=#122 id=122 data-nosnippet>122</a>                    &amp;&amp; !same_prop(<span class="kw-2">&amp;</span>a.circle_blur, <span class="kw-2">&amp;</span>b.circle_blur))
+<a href=#123 id=123 data-nosnippet>123</a>                || ((is_data_driven(a.circle_stroke_opacity.as_ref())
+<a href=#124 id=124 data-nosnippet>124</a>                    || is_data_driven(b.circle_stroke_opacity.as_ref()))
+<a href=#125 id=125 data-nosnippet>125</a>                    &amp;&amp; !same_prop(<span class="kw-2">&amp;</span>a.circle_stroke_opacity, <span class="kw-2">&amp;</span>b.circle_stroke_opacity))
+<a href=#126 id=126 data-nosnippet>126</a>        }
+<a href=#127 id=127 data-nosnippet>127</a>        (<span class="prelude-val">Some</span>(LayerPaint::FillExtrusion(a)), <span class="prelude-val">Some</span>(LayerPaint::FillExtrusion(b))) =&gt; {
+<a href=#128 id=128 data-nosnippet>128</a>            !same_prop(<span class="kw-2">&amp;</span>a.fill_extrusion_height, <span class="kw-2">&amp;</span>b.fill_extrusion_height)
+<a href=#129 id=129 data-nosnippet>129</a>                || !same_prop(<span class="kw-2">&amp;</span>a.fill_extrusion_base, <span class="kw-2">&amp;</span>b.fill_extrusion_base)
+<a href=#130 id=130 data-nosnippet>130</a>                || !same_prop(<span class="kw-2">&amp;</span>a.fill_extrusion_base_datum, <span class="kw-2">&amp;</span>b.fill_extrusion_base_datum)
+<a href=#131 id=131 data-nosnippet>131</a>                || !same_prop(
+<a href=#132 id=132 data-nosnippet>132</a>                    <span class="kw-2">&amp;</span>a.fill_extrusion_height_datum,
+<a href=#133 id=133 data-nosnippet>133</a>                    <span class="kw-2">&amp;</span>b.fill_extrusion_height_datum,
+<a href=#134 id=134 data-nosnippet>134</a>                )
+<a href=#135 id=135 data-nosnippet>135</a>                || !same_prop(<span class="kw-2">&amp;</span>a.fill_extrusion_part, <span class="kw-2">&amp;</span>b.fill_extrusion_part)
+<a href=#136 id=136 data-nosnippet>136</a>                || a.fill_extrusion_translucent != b.fill_extrusion_translucent
+<a href=#137 id=137 data-nosnippet>137</a>                || a.fill_extrusion_pattern != b.fill_extrusion_pattern
+<a href=#138 id=138 data-nosnippet>138</a>        }
+<a href=#139 id=139 data-nosnippet>139</a>        (<span class="prelude-val">Some</span>(LayerPaint::Heatmap(a)), <span class="prelude-val">Some</span>(LayerPaint::Heatmap(b))) =&gt; {
+<a href=#140 id=140 data-nosnippet>140</a>            !same_prop(<span class="kw-2">&amp;</span>a.heatmap_weight, <span class="kw-2">&amp;</span>b.heatmap_weight)
+<a href=#141 id=141 data-nosnippet>141</a>                || ((a.radius_per_feature() || b.radius_per_feature())
+<a href=#142 id=142 data-nosnippet>142</a>                    &amp;&amp; !same_prop(<span class="kw-2">&amp;</span>a.heatmap_radius, <span class="kw-2">&amp;</span>b.heatmap_radius))
+<a href=#143 id=143 data-nosnippet>143</a>        }
+<a href=#144 id=144 data-nosnippet>144</a>        (<span class="prelude-val">Some</span>(LayerPaint::Symbol(<span class="kw">_</span>)), <span class="prelude-val">Some</span>(LayerPaint::Symbol(<span class="kw">_</span>))) =&gt; <span class="bool-val">false</span>,
+<a href=#145 id=145 data-nosnippet>145</a>        <span class="kw">_ </span>=&gt; <span class="bool-val">true</span>,
+<a href=#146 id=146 data-nosnippet>146</a>    }
+<a href=#147 id=147 data-nosnippet>147</a>}
 </code></pre></div></section></main></body></html>

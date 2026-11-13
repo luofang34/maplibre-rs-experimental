@@ -213,8 +213,8 @@
 <a href=#213 id=213 data-nosnippet>213</a>        tessellator.source_ids = source_ids_for_slice(layer, slice);
 <a href=#214 id=214 data-nosnippet>214</a>        tessellator.shared_properties = shared_props_for_slice(shared_props, slice);
 <a href=#215 id=215 data-nosnippet>215</a>        tessellator.feature_state_ctx = state_ctx.clone();
-<a href=#216 id=216 data-nosnippet>216</a>        tessellator.retain_feature_paint =
-<a href=#217 id=217 data-nosnippet>217</a>            <span class="kw">crate</span>::vector::feature_paint::layer_retains_feature_paint(style);
+<a href=#216 id=216 data-nosnippet>216</a>        tessellator.feature_paint_retention =
+<a href=#217 id=217 data-nosnippet>217</a>            <span class="kw">crate</span>::vector::feature_paint::feature_paint_retention(style);
 <a href=#218 id=218 data-nosnippet>218</a>        tessellator.sort_key = <span class="kw">crate</span>::vector::tessellation::SortKeys::by(
 <a href=#219 id=219 data-nosnippet>219</a>            <span class="kw">crate</span>::vector::tessellation::sort_key_of(style),
 <a href=#220 id=220 data-nosnippet>220</a>        );

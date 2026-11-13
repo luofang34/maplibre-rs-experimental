@@ -83,8 +83,8 @@
 <a href=#83 id=83 data-nosnippet>83</a>    }
 <a href=#84 id=84 data-nosnippet>84</a>    .with_feature_opacity(paint.opacity(), style_zoom);
 <a href=#85 id=85 data-nosnippet>85</a>    tessellator.sort_key = SortKeys::by(sort_key_of(style_layer));
-<a href=#86 id=86 data-nosnippet>86</a>    tessellator.retain_feature_paint =
-<a href=#87 id=87 data-nosnippet>87</a>        <span class="kw">crate</span>::vector::feature_paint::layer_retains_feature_paint(style_layer);
+<a href=#86 id=86 data-nosnippet>86</a>    tessellator.feature_paint_retention =
+<a href=#87 id=87 data-nosnippet>87</a>        <span class="kw">crate</span>::vector::feature_paint::feature_paint_retention(style_layer);
 <a href=#88 id=88 data-nosnippet>88</a>    <span class="kw">match </span>paint {
 <a href=#89 id=89 data-nosnippet>89</a>        LayerPaint::Fill(p) <span class="kw">if </span>p.fill_pattern.is_some() =&gt; {
 <a href=#90 id=90 data-nosnippet>90</a>            tessellator.fallback_color = [<span class="number">1.0</span>; <span class="number">4</span>];
