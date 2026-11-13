@@ -1,7 +1,7 @@
 - Feature Name: (fill me in with a unique ident, `my_awesome_feature`)
 - Start Date: (fill me in with today's date, YYYY-MM-DD)
-- RFC PR: [maplibre/maplibre-rs#0000](https://github.com/maplibre/maplibre-rs/pull/0000)
-- maplibre-rs Issue: [maplibre/maplibre-rs#0000](https://github.com/maplibre/maplibre-rs/issues/0000)
+- RFC PR: [luofang34/maplibre-rs-experimental#0000](https://github.com/luofang34/maplibre-rs-experimental/pull/0000)
+- maplibre-rs Issue: [luofang34/maplibre-rs-experimental#0000](https://github.com/luofang34/maplibre-rs-experimental/issues/0000)
 
 # Summary
 
