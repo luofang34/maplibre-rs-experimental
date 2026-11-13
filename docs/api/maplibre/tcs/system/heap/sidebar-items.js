@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["account","live_bytes"],"static":["LIVE_BYTES"]};
+window.SIDEBAR_ITEMS = {"fn":["live_bytes"],"struct":["HeapSampler"]};

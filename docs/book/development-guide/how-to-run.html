@@ -37,10 +37,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-6fbf5afb.js";
+            window.path_to_searchindex_js = "../searchindex-04576098.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-d6816547.js"></script>
+        <script src="../toc-ae8692d6.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -188,10 +188,10 @@ There are multiple demos of maplibre-rs for different targets. Some targets have
 depending on your operating system.</p>
 <ul>
 <li><strong>maplibre-demo</strong> - targets Windows, macOS and Linux, it is built directly with cargo.</li>
-<li><strong>apple</strong> - targets iOS and macOS and relies on the xcode IDE.</li>
-<li><strong>android</strong> - targets Android devices and builds in Android Studio.</li>
-<li><strong>web</strong> - targets the web using a WASM binary.</li>
-<li><strong>maplibre-headless</strong> - <em>TBD</em></li>
+<li><strong>apple</strong> - targets iOS and macOS and relies on the xcode IDE (<code>apple/visionos</code> targets Apple Vision Pro via C ABI + Metal).</li>
+<li><strong>android</strong> - targets 64-bit Android devices and emulators (<code>arm64-v8a</code> and <code>x86_64</code>, <code>minSdk 23</code>) in Android Studio / Gradle.</li>
+<li><strong>web</strong> - targets browsers via WebAssembly (<code>wasm32-unknown-unknown</code>) with WebGPU and WebGL2 backends.</li>
+<li><strong>maplibre (<code>--features headless</code>)</strong> - renders maps offscreen without a windowing system via <code>maplibre::headless::map::HeadlessMap</code> (used by server rendering, multi-view hosts, and the <code>render-tests</code> conformance runner).</li>
 </ul>
 <p>All the targets below require you to install <a href="https://rustup.rs/">rustup</a> to manage your Rust toolchain.</p>
 <blockquote>
@@ -216,7 +216,7 @@ compass bearing, and <code>Option</code> + two-finger drag tilts/orbits. A float
 provides one-click access to the 3D Compass, <code>2D</code>/<code>3D</code> (<code>AUTO</code> tilt), <code>+</code>/<code>-</code> zoom, <code>Home</code>, and <code>MAP</code>/<code>RTS</code> control
 modes (where <code>RTS</code> mode enables Red Alert-style screen-edge scrolling and right-click panning). <code>--frames &lt;n&gt;</code> closes
 the window after <code>n</code> frames.</p>
-<p><code>--terrain</code> opens the bundled 3D terrain style (<code>maplibre-demo/resources/terrain.json</code>): OpenStreetMap raster imagery
+<p><code>--terrain</code> opens the bundled 3D terrain style (<code>maplibre-demo/res/terrain.json</code>): OpenStreetMap raster imagery
 and Mapterhorn hillshade draped over Mapterhorn <code>raster-dem</code> elevation tiles around Innsbruck at pitch 70, matching
 the GL JS <code>add-3d-terrain</code> example on the globe projection. Auto-Tilt is enabled by default on terrain and globe
 styles, smoothly tilting the camera as you zoom in past zoom 9 while allowing manual pitch override at any time.
@@ -250,18 +250,15 @@ you to use C and C++ code with Android. You have to install manually the version
 <code>./android/gradle/lib/build.gradle</code>.</p>
 <pre><code>ANDROID STUDIO -&gt; tools -&gt; SDK manager -&gt; SDK tools -&gt; tick show package details -&gt; ndk (side by side)
 </code></pre>
-<p>Open the project within <code>./android/gradle</code> and create a new virtual device with the device manager. Minimum SDK version
-should be 21. This was tested on an x86_64 emulator. Finally, run the demo configuration. It should open your virtual device and
-run the maplibre-rs Android demo on it. Alternatively you can also run it on your own Android device.</p>
+<p>Open the project within <code>./android/gradle</code> and create a new virtual device with the device manager. Both <code>./android/gradle/lib/build.gradle</code> and <code>./android/gradle/demo/build.gradle</code> specify <code>minSdk 23</code> (Android 6.0+) and build exclusively for 64-bit targets (<code>arm64-v8a</code> / <code>aarch64-linux-android</code> and <code>x86_64</code> / <code>x86_64-linux-android</code>; 32-bit <code>i686</code> and <code>armeabi-v7a</code> are not supported). Install the Rust targets you need before building:</p>
+<pre><code class="language-bash">rustup target add aarch64-linux-android x86_64-linux-android
+</code></pre>
+<p>Finally, run the <code>demo</code> configuration in Android Studio to launch the maplibre-rs Android demo on an <code>x86_64</code> emulator or a physical <code>arm64-v8a</code> Android device.</p>
 <blockquote>
-<p>Note: If you are building for an x86 Android device, you probably need to install the following target using<br>rustup with the following command <code>rustup target add i686-linux-android</code>.</p>
-</blockquote>
-<blockquote>
-<p>Note: Android is configured to support OpenGL ES 3.1 (This API specification is supported by Android 5.0 (API level 21) and higher).
-Your Android device is required to support OpenGL ES 3.1 at least. There are some issues
+<p>Note: Android is configured with <code>minSdk 23</code> and requires OpenGL ES 3.1 or Vulkan support on the target device or emulator. There are some notes
 <a href="https://stackoverflow.com/questions/40797975/android-emulator-and-opengl-es3-egl-bad-config">here</a> and
 <a href="https://www.reddit.com/r/Arcore/comments/8squbo/opengl_es_31_is_required_for_android_emulator_to/">here</a> that
-discuss configuration of Android Studio for OpenGL ES 3.1 support in emulators.</p>
+discuss configuring Android Studio emulators for OpenGL ES 3.1 support.</p>
 </blockquote>
 <h2 id="apple"><a class="header" href="#apple">Apple</a></h2>
 <p>Apple builds rely on the <a href="https://apps.apple.com/us/app/xcode/id497799835?ls=1&amp;mt=12">XCode IDE</a>.
@@ -301,6 +298,14 @@ just web-lib build --webgl --multithreaded # WebGL + multithreaded
 </code></pre>
 <p>After building the library you can run the demo server:</p>
 <pre><code class="language-bash">just web-demo start
+</code></pre>
+<h2 id="headless-rendering-maplibre---features-headless"><a class="header" href="#headless-rendering-maplibre---features-headless">Headless Rendering (<code>maplibre --features headless</code>)</a></h2>
+<p>Offscreen rendering lives directly in the core <code>maplibre</code> crate behind <code>--features headless</code> (<code>maplibre::headless::create_headless_renderer</code> and <code>maplibre::headless::map::HeadlessMap</code>), rather than a separate crate. It renders into offscreen GPU textures or PNG/RGBA buffers on Vulkan (including Mesa Lavapipe software rasterization in CI), Metal, and DirectX 12 without creating a window:</p>
+<pre><code class="language-bash"># Run headless unit and integration tests
+cargo test -p maplibre --features headless
+
+# Run the MapLibre GL JS pixel + query conformance suite headlessly
+cargo run --release -p render-tests -- --ci
 </code></pre>
 
                     </main>

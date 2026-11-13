@@ -1,11 +1,17 @@
-// The same query from Rust in the browser, through the handle `web::run_map` resolves to.
+// Query rendered features through `MapHandle` (`web::run_map` on web or `HeadedMapHost` natively).
 use maplibre::{
     map::handle::MapHandle,
     query::QueriedFeature,
     sdf::query::{QueryGeometry, QueryOptions},
     style::Style,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use maplibre_winit::NativeEnvironment as CurrentEnvironment;
+#[cfg(target_arch = "wasm32")]
 use web::{CurrentEnvironment, JSError};
+
+#[cfg(not(target_arch = "wasm32"))]
+type JSError = Box<dyn std::error::Error>;
 
 pub fn build_style(mut style: Style) -> Style {
     style.center = Some([-74.006, 40.7128]);
@@ -16,7 +22,7 @@ pub fn build_style(mut style: Style) -> Style {
     style
 }
 
-/// The features drawn under a pointer `[x, y]` in CSS pixels from the canvas's top left,
+/// The features drawn under a pointer `[x, y]` in logical pixels from the viewport's top left,
 /// topmost first.
 pub async fn features_under(
     map: &MapHandle<CurrentEnvironment>,

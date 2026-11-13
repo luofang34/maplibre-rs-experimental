@@ -37,10 +37,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-6fbf5afb.js";
+            window.path_to_searchindex_js = "../searchindex-04576098.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-d6816547.js"></script>
+        <script src="../toc-ae8692d6.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -191,7 +191,7 @@
 <div class="example-code-tabs">
 <pre class="playground"><code class="language-rust no_run"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
-</span>// The same updates from Rust in the browser, through the handle `web::run_map` resolves to.
+</span>// Live GeoJSON replacement and camera easing through `MapHandle`.
 use std::sync::Arc;
 
 use maplibre::{
@@ -200,8 +200,10 @@ use maplibre::{
     render::view_state::{CameraOptions, FlightCurve},
     style::{source::GeoJsonData, Style},
 };
-use serde::Deserialize;
-use serde_json::json;
+#[cfg(not(target_arch = "wasm32"))]
+use maplibre_winit::NativeEnvironment as CurrentEnvironment;
+use serde_json::{json, Value};
+#[cfg(target_arch = "wasm32")]
 use web::CurrentEnvironment;
 
 const ISS_URL: &amp;str = "https://api.wheretheiss.at/v1/satellites/25544";
@@ -229,18 +231,15 @@ pub fn build_style(base: Style) -&gt; Result&lt;Style, serde_json::Error&gt; {
     Ok(style)
 }
 
-#[derive(Deserialize)]
-struct Position {
-    longitude: f64,
-    latitude: f64,
-}
-
 /// Moves the point to where the International Space Station is now, and the camera with it.
 pub async fn update(map: &amp;MapHandle&lt;CurrentEnvironment&gt;) -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
-    let Position {
-        longitude,
-        latitude,
-    } = reqwest::get(ISS_URL).await?.json().await?;
+    let body: Value = reqwest::get(ISS_URL).await?.json().await?;
+    let longitude = body["longitude"]
+        .as_f64()
+        .ok_or("missing numeric `longitude` field")?;
+    let latitude = body["latitude"]
+        .as_f64()
+        .ok_or("missing numeric `latitude` field")?;
     let point = json!({
         "type": "Feature",
         "properties": {},
@@ -263,7 +262,8 @@ pub async fn update(map: &amp;MapHandle&lt;CurrentEnvironment&gt;) -&gt; Result&
     Ok(())
 }
 
-/// Updates the point every two seconds for as long as the map runs.
+/// Updates the point every two seconds in the browser for as long as the map runs.
+#[cfg(target_arch = "wasm32")]
 pub async fn follow(map: MapHandle&lt;CurrentEnvironment&gt;) {
     while !map.is_closed() {
         if let Err(error) = update(&amp;map).await {

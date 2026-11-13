@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"constant":["SUN_DEPTH_COPY"],"struct":["SunDepth","SunDepthCopyNode"]};

@@ -2,35 +2,35 @@
 <a href=#2 id=2 data-nosnippet>2</a>
 <a href=#3 id=3 data-nosnippet>3</a></span><span class="kw">use </span>thiserror::Error;
 <a href=#4 id=4 data-nosnippet>4</a>
-<a href=#5 id=5 data-nosnippet>5</a><span class="kw">use crate</span>::{
-<a href=#6 id=6 data-nosnippet>6</a>    coords::WorldTileCoords, geojson::ProcessGeoJsonError, schedule::StageError,
-<a href=#7 id=7 data-nosnippet>7</a>    vector::ProcessVectorError,
-<a href=#8 id=8 data-nosnippet>8</a>};
-<a href=#9 id=9 data-nosnippet>9</a>
-<a href=#10 id=10 data-nosnippet>10</a><span class="doccomment">/// Failure while processing or rendering data through a [`super::HeadlessMap`].
-<a href=#11 id=11 data-nosnippet>11</a></span><span class="attr">#[derive(Debug, Error)]
-<a href=#12 id=12 data-nosnippet>12</a></span><span class="kw">pub enum </span>HeadlessMapOperationError {
-<a href=#13 id=13 data-nosnippet>13</a>    <span class="doccomment">/// A processor returned a payload incompatible with its routing tag.
-<a href=#14 id=14 data-nosnippet>14</a>    </span><span class="attr">#[error(<span class="string">"headless worker result has an invalid payload"</span>)]
-<a href=#15 id=15 data-nosnippet>15</a>    </span>WorkerMessage(<span class="attr">#[from] </span><span class="kw">crate</span>::io::apc::MessageError),
-<a href=#16 id=16 data-nosnippet>16</a>    <span class="doccomment">/// At least one frame is required for a render request.
-<a href=#17 id=17 data-nosnippet>17</a>    </span><span class="attr">#[error(<span class="string">"headless render frame count must be positive"</span>)]
-<a href=#18 id=18 data-nosnippet>18</a>    </span>InvalidFrameCount,
-<a href=#19 id=19 data-nosnippet>19</a>    <span class="doccomment">/// Tile coordinates cannot be represented by the tile store.
-<a href=#20 id=20 data-nosnippet>20</a>    </span><span class="attr">#[error(<span class="string">"cannot spawn headless tile {coords}"</span>)]
-<a href=#21 id=21 data-nosnippet>21</a>    </span>InvalidTile {
-<a href=#22 id=22 data-nosnippet>22</a>        <span class="doccomment">/// Invalid source-tile coordinates.
-<a href=#23 id=23 data-nosnippet>23</a>        </span>coords: WorldTileCoords,
-<a href=#24 id=24 data-nosnippet>24</a>    },
-<a href=#25 id=25 data-nosnippet>25</a>    <span class="doccomment">/// Vector source processing failed.
-<a href=#26 id=26 data-nosnippet>26</a>    </span><span class="attr">#[error(<span class="string">"headless vector source processing failed"</span>)]
-<a href=#27 id=27 data-nosnippet>27</a>    </span>Vector {
-<a href=#28 id=28 data-nosnippet>28</a>        <span class="doccomment">/// Underlying vector processor error.
-<a href=#29 id=29 data-nosnippet>29</a>        </span><span class="attr">#[source]
-<a href=#30 id=30 data-nosnippet>30</a>        </span>source: ProcessVectorError,
-<a href=#31 id=31 data-nosnippet>31</a>    },
-<a href=#32 id=32 data-nosnippet>32</a>    <span class="doccomment">/// GeoJSON source processing failed.
-<a href=#33 id=33 data-nosnippet>33</a>    </span><span class="attr">#[error(<span class="string">"headless GeoJSON source processing failed"</span>)]
+<a href=#5 id=5 data-nosnippet>5</a><span class="attr">#[cfg(feature = <span class="string">"geojson"</span>)]
+<a href=#6 id=6 data-nosnippet>6</a></span><span class="kw">use </span><span class="kw">crate</span>::geojson::ProcessGeoJsonError;
+<a href=#7 id=7 data-nosnippet>7</a><span class="kw">use crate</span>::{coords::WorldTileCoords, schedule::StageError, vector::ProcessVectorError};
+<a href=#8 id=8 data-nosnippet>8</a>
+<a href=#9 id=9 data-nosnippet>9</a><span class="doccomment">/// Failure while processing or rendering data through a [`super::HeadlessMap`].
+<a href=#10 id=10 data-nosnippet>10</a></span><span class="attr">#[derive(Debug, Error)]
+<a href=#11 id=11 data-nosnippet>11</a></span><span class="kw">pub enum </span>HeadlessMapOperationError {
+<a href=#12 id=12 data-nosnippet>12</a>    <span class="doccomment">/// A processor returned a payload incompatible with its routing tag.
+<a href=#13 id=13 data-nosnippet>13</a>    </span><span class="attr">#[error(<span class="string">"headless worker result has an invalid payload"</span>)]
+<a href=#14 id=14 data-nosnippet>14</a>    </span>WorkerMessage(<span class="attr">#[from] </span><span class="kw">crate</span>::io::apc::MessageError),
+<a href=#15 id=15 data-nosnippet>15</a>    <span class="doccomment">/// At least one frame is required for a render request.
+<a href=#16 id=16 data-nosnippet>16</a>    </span><span class="attr">#[error(<span class="string">"headless render frame count must be positive"</span>)]
+<a href=#17 id=17 data-nosnippet>17</a>    </span>InvalidFrameCount,
+<a href=#18 id=18 data-nosnippet>18</a>    <span class="doccomment">/// Tile coordinates cannot be represented by the tile store.
+<a href=#19 id=19 data-nosnippet>19</a>    </span><span class="attr">#[error(<span class="string">"cannot spawn headless tile {coords}"</span>)]
+<a href=#20 id=20 data-nosnippet>20</a>    </span>InvalidTile {
+<a href=#21 id=21 data-nosnippet>21</a>        <span class="doccomment">/// Invalid source-tile coordinates.
+<a href=#22 id=22 data-nosnippet>22</a>        </span>coords: WorldTileCoords,
+<a href=#23 id=23 data-nosnippet>23</a>    },
+<a href=#24 id=24 data-nosnippet>24</a>    <span class="doccomment">/// Vector source processing failed.
+<a href=#25 id=25 data-nosnippet>25</a>    </span><span class="attr">#[error(<span class="string">"headless vector source processing failed"</span>)]
+<a href=#26 id=26 data-nosnippet>26</a>    </span>Vector {
+<a href=#27 id=27 data-nosnippet>27</a>        <span class="doccomment">/// Underlying vector processor error.
+<a href=#28 id=28 data-nosnippet>28</a>        </span><span class="attr">#[source]
+<a href=#29 id=29 data-nosnippet>29</a>        </span>source: ProcessVectorError,
+<a href=#30 id=30 data-nosnippet>30</a>    },
+<a href=#31 id=31 data-nosnippet>31</a>    <span class="doccomment">/// GeoJSON source processing failed.
+<a href=#32 id=32 data-nosnippet>32</a>    </span><span class="attr">#[cfg(feature = <span class="string">"geojson"</span>)]
+<a href=#33 id=33 data-nosnippet>33</a>    #[error(<span class="string">"headless GeoJSON source processing failed"</span>)]
 <a href=#34 id=34 data-nosnippet>34</a>    </span>GeoJson {
 <a href=#35 id=35 data-nosnippet>35</a>        <span class="doccomment">/// Underlying GeoJSON processor error.
 <a href=#36 id=36 data-nosnippet>36</a>        </span><span class="attr">#[source]

@@ -37,10 +37,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-6fbf5afb.js";
+            window.path_to_searchindex_js = "../searchindex-04576098.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-d6816547.js"></script>
+        <script src="../toc-ae8692d6.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -191,14 +191,20 @@
 <div class="example-code-tabs">
 <pre class="playground"><code class="language-rust no_run"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
-</span>// The same query from Rust in the browser, through the handle `web::run_map` resolves to.
+</span>// Query rendered features through `MapHandle` (`web::run_map` on web or `HeadedMapHost` natively).
 use maplibre::{
     map::handle::MapHandle,
     query::QueriedFeature,
     sdf::query::{QueryGeometry, QueryOptions},
     style::Style,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use maplibre_winit::NativeEnvironment as CurrentEnvironment;
+#[cfg(target_arch = "wasm32")]
 use web::{CurrentEnvironment, JSError};
+
+#[cfg(not(target_arch = "wasm32"))]
+type JSError = Box&lt;dyn std::error::Error&gt;;
 
 pub fn build_style(mut style: Style) -&gt; Style {
     style.center = Some([-74.006, 40.7128]);
@@ -209,7 +215,7 @@ pub fn build_style(mut style: Style) -&gt; Style {
     style
 }
 
-/// The features drawn under a pointer `[x, y]` in CSS pixels from the canvas's top left,
+/// The features drawn under a pointer `[x, y]` in logical pixels from the viewport's top left,
 /// topmost first.
 pub async fn features_under(
     map: &amp;MapHandle&lt;CurrentEnvironment&gt;,

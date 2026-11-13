@@ -38,10 +38,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-6fbf5afb.js";
+            window.path_to_searchindex_js = "searchindex-04576098.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-d6816547.js"></script>
+        <script src="toc-ae8692d6.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -190,177 +190,137 @@
 <p>The name of the library is “maplibre-rs”. The camel-case version of it is “MapLibreRs”.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="supported-platforms"><a class="header" href="#supported-platforms">Supported Platforms</a></h1>
-<p>For development the following platforms are recommended:</p>
-<ul>
-<li>Linux X11/Wayland</li>
-<li>MacOS</li>
-<li>Latest Firefox Nightly/Chrome Canary with WebGPU (Because WebGPU is a living spec, sometimes a bleeding-edge browser
-release is required)</li>
-</ul>
-<h2 id="short-term-obstacles"><a class="header" href="#short-term-obstacles">Short-term Obstacles</a></h2>
+<p><code>maplibre</code> runs across desktop, browser, mobile, spatial/XR, and headless server environments on top of <code>wgpu</code>.</p>
+<h2 id="platform-matrix"><a class="header" href="#platform-matrix">Platform Matrix</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>Platform</th><th>Obstacles</th></tr>
+<tr><th>Platform</th><th>Crate / Target</th><th>Graphics Backend</th><th>Async &amp; Worker Model</th><th>CI Status</th></tr>
 </thead>
 <tbody>
-<tr><td>Linux X11</td><td></td></tr>
-<tr><td>Linux Wayland</td><td></td></tr>
-<tr><td>Windows</td><td></td></tr>
-<tr><td>MacOS</td><td></td></tr>
-<tr><td>Android</td><td>* Unable to get window size before resume</td></tr>
-<tr><td>iOS</td><td>* Touches are crashing the app on real devices <br /> * Instanced indices drawing is not supported <br /> * Drawing zero-length indices is prohibited<br /></td></tr>
-<tr><td>Firefox</td><td>* Shared Memory is currently not working because it a parallel web worker corrupts memory</td></tr>
-<tr><td>Chrome</td><td></td></tr>
-<tr><td>Safari</td><td></td></tr>
-<tr><td>Mobile Firefox</td><td></td></tr>
-<tr><td>Mobile Chrome</td><td></td></tr>
-<tr><td>Mobile Safari</td><td></td></tr>
+<tr><td><strong>Linux</strong></td><td><code>maplibre-winit</code>, <code>maplibre-demo</code> (<code>x86_64</code> / <code>aarch64</code>)</td><td>Vulkan, OpenGL ES (<code>wgpu</code>)</td><td>Multi-threaded Tokio + <code>reqwest</code> (<code>SharedLoader</code>)</td><td>Tested on every PR (Vulkan + validation layers + Lavapipe conformance)</td></tr>
+<tr><td><strong>macOS</strong></td><td><code>maplibre-winit</code>, <code>maplibre-demo</code>, <code>apple</code> (<code>aarch64</code> / <code>x86_64</code>)</td><td>Metal</td><td>Multi-threaded Tokio + <code>reqwest</code> (<code>SharedLoader</code>)</td><td>Tested on every PR (<code>macos-15</code> with Metal shader &amp; debug validation)</td></tr>
+<tr><td><strong>Windows</strong></td><td><code>maplibre-winit</code>, <code>maplibre-demo</code> (<code>x86_64</code>)</td><td>DirectX 12, Vulkan</td><td>Multi-threaded Tokio + <code>reqwest</code> (<code>SharedLoader</code>)</td><td>Built and tested in CI</td></tr>
+<tr><td><strong>Web (Wasm)</strong></td><td><code>web</code> (<code>wasm32-unknown-unknown</code>)</td><td>WebGPU (default) and WebGL2 (<code>--features web-webgl</code>)</td><td>Browser <code>fetch</code> + dedicated Web Workers (<code>FlatBufferTransferable</code> or shared-memory atomics)</td><td>Built, dependency-audited (<code>check-wasm-deps.py</code>), and tested in headless browsers</td></tr>
+<tr><td><strong>visionOS</strong></td><td><code>apple/visionos</code> (<code>aarch64-apple-visionos</code>, <code>aarch64-apple-visionos-sim</code>)</td><td>Shared <code>MTLDevice</code> / <code>MTLCommandQueue</code> + CompositorServices stereo <code>MTLTexture</code> targets</td><td>Tokio worker pool + disk/bundle <code>SharedLoader</code></td><td>Checked &amp; clippy-gated on <code>macos-15</code> (<code>build-visionos</code>)</td></tr>
+<tr><td><strong>iOS</strong></td><td><code>apple</code> (<code>aarch64-apple-ios</code>, <code>aarch64-apple-ios-sim</code>)</td><td>Metal (<code>.xcframework</code>)</td><td>Multi-threaded Tokio + <code>reqwest</code></td><td>Built in <code>library-apple</code> workflow</td></tr>
+<tr><td><strong>Android</strong></td><td><code>android</code> (<code>aarch64-linux-android</code> / <code>arm64-v8a</code>, <code>x86_64-linux-android</code> / <code>x86_64</code>; <code>minSdk 23</code>)</td><td>Vulkan, OpenGL ES 3.1+ (<code>ndk</code> / JNI)</td><td>Multi-threaded Tokio + <code>reqwest</code></td><td>Built in Android packaging workflow</td></tr>
+<tr><td><strong>Headless / Server</strong></td><td><code>maplibre</code> (<code>--features headless</code>)</td><td>Offscreen Vulkan (including Mesa Lavapipe software rasterizer), Metal, DX12, or shared <code>HostGpu</code></td><td>Deterministic settle loop + optional <code>SharedMapAssets</code> across worlds</td><td>6-shard unit + integration suite and 1,701-case MapLibre render/query conformance gate</td></tr>
 </tbody>
 </table>
 </div>
-<h2 id="long-term-goals"><a class="header" href="#long-term-goals">Long-term Goals</a></h2>
-<p><a href="https://caniuse.com/webgpu">WebGPU</a> is not enabled by default for all platforms.</p>
-<p>WebGPU Status:</p>
+<h2 id="feature-flags-maplibre"><a class="header" href="#feature-flags-maplibre">Feature Flags (<code>maplibre</code>)</a></h2>
+<p>The core <code>maplibre</code> crate keeps platform I/O and optional subsystems modular so embedded, WebAssembly, and custom-loader hosts pull only what they need:</p>
 <ul>
-<li><a href="https://github.com/gpuweb/gpuweb/wiki/Implementation-Status#firefox-and-servo">Firefox</a></li>
-<li><a href="https://chromestatus.com/feature/6213121689518080">Chrome</a></li>
-<li><a href="https://webkit.org/status/#specification-webgpu">WebKit</a></li>
+<li><code>native-io</code> <em>(enabled by default)</em> — enables Tokio (<code>platform/noweb</code>), <code>reqwest</code>, <code>reqwest-middleware</code>, and HTTP disk caching (<code>http-cache-reqwest</code>). Disabling default features (<code>--no-default-features</code>) compiles <code>maplibre</code> cleanly without native socket or TLS crates.</li>
+<li><code>raster</code> <em>(enabled by default)</em> — enables raster imagery tile decoding, upload, and rendering (<code>RasterPlugin</code>).</li>
+<li><code>geojson</code> <em>(enabled by default)</em> — enables inline/URL GeoJSON source parsing, clustering, and tessellation (<code>GeoJsonPlugin</code>).</li>
+<li><code>mlt</code> <em>(enabled by default)</em> — decodes MapLibre Tiles (<code>.mlt</code>) alongside classic Mapbox Vector Tiles (<code>.mvt</code> / <code>.pbf</code>).</li>
+<li><code>headless</code> — enables <code>maplibre::headless</code> (<code>HeadlessMap</code>, <code>HostGpu</code>, <code>SharedMapAssets</code>, <code>MultiViewFrame</code>, and PNG readback). Works both with <code>native-io</code> and with <code>--no-default-features --features headless</code> using a custom <code>ResourceLoader</code>.</li>
+<li><code>experimental</code> <em>(opt-in)</em> — enables experimental spatial/astronomical plugins (<code>celestial</code>, <code>starfield</code>, and <code>overlay</code>).</li>
+<li><code>web-webgl</code> — configures <code>wgpu</code> limits and downlevel compatibility for WebGL2 contexts on <code>wasm32-unknown-unknown</code>.</li>
+<li><code>thread-safe-futures</code> — requires <code>Send</code> bounds on <code>Scheduler</code> and <code>HttpClient</code> futures for multi-threaded native hosts (omitted on single-threaded <code>wasm32</code>).</li>
+<li><code>pmtiles</code> — supports HTTP range-request reading from single-file <code>.pmtiles</code> archives.</li>
+<li><code>trace</code> — emits <code>tracing</code> spans per schedule stage and render pass for profiling.</li>
 </ul>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Platform</th><th>Linux &amp; Android</th><th>Graphics API</th><th>Note</th></tr>
-</thead>
-<tbody>
-<tr><td>Linux X11</td><td>✅</td><td>Vulkan</td><td></td></tr>
-<tr><td>Linux Wayland</td><td>✅</td><td>Vulkan</td><td></td></tr>
-<tr><td>Windows</td><td>❓</td><td>❓</td><td></td></tr>
-<tr><td>MacOS</td><td>✅</td><td>❓</td><td></td></tr>
-<tr><td>Android</td><td>✅</td><td>Vulkan/OpenGL ES/Angle</td><td>Not tested, but should work on all devices if <a href="https://github.com/gfx-rs/wgpu/blob/master/README.md#supported-platforms">Angle</a> is used. <a href="https://developer.android.com/about/dashboards">Vulkan</a> is not yet supported widely.</td></tr>
-<tr><td>iOS</td><td>✅</td><td>Metal</td><td>Not tested.</td></tr>
-<tr><td>Firefox</td><td>✅</td><td>WebGL/WebGPU</td><td></td></tr>
-<tr><td>Chrome</td><td>✅</td><td>WebGL/WebGPU</td><td>WebGPU is significantly faster because WASM output is smaller.</td></tr>
-<tr><td>Safari</td><td>🛠️</td><td>WebGL/WebGPU</td><td>Safari does not yet support <a href="https://caniuse.com/sharedarraybuffer">Shared Array Buffer</a></td></tr>
-<tr><td>Mobile Firefox</td><td>🆗</td><td>WebGL/WebGPU</td><td></td></tr>
-<tr><td>Mobile Chrome</td><td>🆗</td><td>WebGL</td><td><a href="https://caniuse.com/webgpu">WebGPU</a> is not implemented.</td></tr>
-<tr><td>Mobile Safari</td><td>🛠️</td><td>WebGL</td><td><a href="https://caniuse.com/webgpu">WebGPU</a> is not implemented. Safari does not yet support <a href="https://caniuse.com/sharedarraybuffer">Shared Array Buffer</a></td></tr>
-</tbody>
-</table>
-</div>
-<p>✅ = First Class Support — 🆗= Best Effort Support — 🛠️  = Unsupported, but support
-in progress</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="user-guide"><a class="header" href="#user-guide">User Guide</a></h1>
-<p><code>maplibre-rs</code> provides a portable, GPU-accelerated vector and 3D terrain map renderer built on <code>wgpu</code>, running natively on <strong>macOS, Windows, Linux, iOS/iPadOS, Android, Apple Vision Pro</strong>, and in the browser via <strong>WebAssembly (WebGPU / WebGL2)</strong>.</p>
-<hr>
-<h2 id="navigation-hud--camera-controls"><a class="header" href="#navigation-hud--camera-controls">Navigation HUD &amp; Camera Controls</a></h2>
-<p>Windowed and web builds powered by <code>maplibre-winit</code> include a zero-dependency <strong>GPU-rendered floating Navigation HUD</strong> in the top-right corner of the viewport, paired with unified cross-platform input controls designed for both interactive cartography (<strong>MAP</strong> mode) and strategy / simulation games (<strong>RTS</strong> mode).</p>
-<h3 id="floating-navigation-toolbar"><a class="header" href="#floating-navigation-toolbar">Floating Navigation Toolbar</a></h3>
-<p>The top-right HUD pill (<code>maplibre::hud</code>) renders directly in the <code>wgpu</code> pass and adapts automatically to HiDPI scales and safe-area insets:</p>
+<p><code>maplibre</code> can be embedded in native desktop/mobile applications, compiled to WebAssembly for browsers, or driven offscreen in headless servers, CLI tools, and XR compositors.</p>
+<h2 id="crate-overview"><a class="header" href="#crate-overview">Crate Overview</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th style="text-align: left">Button</th><th style="text-align: left">Function</th></tr>
+<tr><th>Crate</th><th>Purpose</th></tr>
 </thead>
 <tbody>
-<tr><td style="text-align: left"><strong>Compass</strong></td><td style="text-align: left">Displays a 3D-foreshortened north-south needle tilted by the current camera pitch. <strong>Single-click</strong> resets bearing to North (<code>0°</code>); <strong>double-click</strong> resets both bearing (<code>0°</code>) and pitch (<code>0°</code>, locking <code>2D</code>).</td></tr>
-<tr><td style="text-align: left"><strong><code>2D</code> / <code>3D</code> + <code>AUTO</code></strong></td><td style="text-align: left">Toggles between flat top-down (<code>0°</code> pitch) and tilted 3D perspective. On 3D Terrain and Globe styles, an illuminated <strong><code>AUTO</code></strong> sub-badge indicates that zoom-driven <strong>Auto-Tilt</strong> is active. Clicking <code>2D</code>/<code>3D</code> when <code>AUTO</code> is off re-engages Auto-Tilt on terrain/globe styles.</td></tr>
-<tr><td style="text-align: left"><strong><code>+</code> / <code>-</code></strong></td><td style="text-align: left">Smoothly zooms in or out by 1 zoom level around the viewport center.</td></tr>
-<tr><td style="text-align: left"><strong>Home (<code>⌂</code>)</strong></td><td style="text-align: left">Smoothly flies back to the style’s initial center, zoom, pitch, and bearing, and re-enables Auto-Tilt if supported by the style.</td></tr>
-<tr><td style="text-align: left"><strong><code>MAP</code> / <code>RTS</code></strong></td><td style="text-align: left">Switches the mouse and edge-scrolling control profile between standard map navigation (<strong><code>MAP</code></strong>) and Real-Time Strategy camera ergonomics (<strong><code>RTS</code></strong>).</td></tr>
+<tr><td><code>maplibre</code></td><td>Core engine: style parser &amp; expression evaluator, Tile Component System (<code>tcs</code>), <code>wgpu</code> renderer, 3D terrain, globe/Mercator projections, and <code>headless</code> offscreen / multi-view / XR APIs.</td></tr>
+<tr><td><code>maplibre-winit</code></td><td>Cross-platform windowed event loop (<code>winit</code>), pointer/touch/keyboard navigation, floating HUD controls, and native Tokio + <code>reqwest</code> tile workers.</td></tr>
+<tr><td><code>web</code></td><td>Browser <code>wasm-bindgen</code> bindings supporting WebGPU and WebGL2 (<code>web-webgl</code>) with dedicated Web Worker tile decoding.</td></tr>
+<tr><td><code>apple/visionos</code></td><td>C ABI (<code>maplibre_visionos.h</code>) sharing a host <code>MTLDevice</code> / <code>MTLCommandQueue</code> and per-eye <code>MTLTexture</code> targets for Apple Vision Pro.</td></tr>
 </tbody>
 </table>
 </div>
-<h3 id="automatic-zoom-driven-tilt-auto-tilt"><a class="header" href="#automatic-zoom-driven-tilt-auto-tilt">Automatic Zoom-Driven Tilt (<code>Auto-Tilt</code>)</a></h3>
-<p>On styles with 3D terrain (<code>"terrain"</code>) or <code>"globe"</code> projection, <strong>Auto-Tilt</strong> is enabled by default (<code>AUTO</code> badge lit in green):</p>
-<ul>
-<li><strong>Zoom <code>≤ 9.0</code></strong>: Camera remains flat (<code>0°</code> pitch) for an unobstructed global or regional overview.</li>
-<li><strong>Zoom <code>9.0 → 14.5</code></strong>: Camera smoothly interpolates pitch along a cubic Hermite curve from <code>0°</code> up to <code>58°</code> as you zoom in toward mountains, valleys, and city streets.</li>
-<li><strong>Zoom <code>14.5 → 16.5</code></strong>: Continues tilting smoothly up to <code>65°</code>.</li>
-<li><strong>Manual Override</strong>: Manually tilting the camera (via right/middle mouse drag, <code>Option</code> + trackpad drag, two-finger vertical touch drag, or <code>R</code>/<code>F</code> keys) automatically disengages <code>AUTO</code> and preserves your custom pitch until you click the <code>2D</code>/<code>3D</code> HUD button or <strong>Home (<code>⌂</code>)</strong>.</li>
-</ul>
-<hr>
-<h2 id="cross-platform-input-controls"><a class="header" href="#cross-platform-input-controls">Cross-Platform Input Controls</a></h2>
-<h3 id="desktop-mouse--keyboard"><a class="header" href="#desktop-mouse--keyboard">Desktop Mouse &amp; Keyboard</a></h3>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th style="text-align: left">Action</th><th style="text-align: left"><code>MAP</code> Profile (Default)</th><th style="text-align: left"><code>RTS</code> Profile (Strategy / Simulation)</th></tr>
-</thead>
-<tbody>
-<tr><td style="text-align: left"><strong>Pan Map</strong></td><td style="text-align: left"><strong>Left-click drag</strong> (ground-point anchored)</td><td style="text-align: left"><strong>Right-click drag</strong> or <strong>Left-click drag</strong></td></tr>
-<tr><td style="text-align: left"><strong>Orbit (Bearing &amp; Pitch)</strong></td><td style="text-align: left"><strong>Right-click drag</strong> or <strong>Middle-click drag</strong></td><td style="text-align: left"><strong>Middle-click drag</strong> or <strong><code>Alt</code>/<code>Option</code> + Left-drag</strong></td></tr>
-<tr><td style="text-align: left"><strong>Zoom</strong></td><td style="text-align: left"><strong>Mouse wheel</strong> (around cursor ground point)</td><td style="text-align: left"><strong>Mouse wheel</strong> (around cursor ground point)</td></tr>
-<tr><td style="text-align: left"><strong>Screen-Edge Scroll</strong></td><td style="text-align: left">Optional (<code>edge_scroll_enabled</code>)</td><td style="text-align: left"><strong>Active by default</strong> when cursor nears window edges (<code>36 px</code> zone)</td></tr>
-<tr><td style="text-align: left"><strong>Keyboard Pan</strong></td><td style="text-align: left"><strong><code>W</code>/<code>A</code>/<code>S</code>/<code>D</code></strong> or <strong>Arrow keys</strong></td><td style="text-align: left"><strong><code>W</code>/<code>A</code>/<code>S</code>/<code>D</code></strong> or <strong>Arrow keys</strong></td></tr>
-<tr><td style="text-align: left"><strong>Keyboard Orbit / Tilt</strong></td><td style="text-align: left"><strong><code>Q</code>/<code>E</code></strong> (rotate bearing), <strong><code>R</code>/<code>F</code></strong> (tilt pitch)</td><td style="text-align: left"><strong><code>Q</code>/<code>E</code></strong> (rotate bearing), <strong><code>R</code>/<code>F</code></strong> (tilt pitch)</td></tr>
-<tr><td style="text-align: left"><strong>Turbo Speed (<code>2.5×</code>)</strong></td><td style="text-align: left">Hold <strong><code>Shift</code></strong> during keyboard pan or edge-scroll</td><td style="text-align: left">Hold <strong><code>Shift</code></strong> during keyboard pan or edge-scroll</td></tr>
-<tr><td style="text-align: left"><strong>Reset Orientation</strong></td><td style="text-align: left"><strong><code>N</code></strong> (reset North), <strong><code>0</code></strong> or <strong><code>H</code></strong> (reset Home)</td><td style="text-align: left"><strong><code>N</code></strong> (reset North), <strong><code>0</code></strong> or <strong><code>H</code></strong> (reset Home)</td></tr>
-</tbody>
-</table>
-</div>
-<blockquote>
-<p><strong>Camera-Aligned Edge &amp; Keyboard Scrolling</strong>: Both keyboard panning and screen-edge scrolling follow the camera’s current <strong>bearing</strong> and <strong>pitch</strong>—pushing the mouse to the top edge always advances toward the horizon the camera is facing, and pushing to the bottom edge retreats toward the camera nadir.</p>
-</blockquote>
-<h3 id="macos-trackpad-winit-gesture-recognition"><a class="header" href="#macos-trackpad-winit-gesture-recognition">macOS Trackpad (<code>winit</code> Gesture Recognition)</a></h3>
-<p><code>maplibre-winit</code> automatically distinguishes multi-touch trackpad scroll streams from discrete mouse scroll wheels:</p>
-<ul>
-<li><strong>Two-Finger Scroll (Horizontal &amp; Vertical)</strong>: Smoothly pans the map in any direction (matching <strong>Apple Maps</strong> on macOS).</li>
-<li><strong>Two-Finger Pinch (<code>TouchpadMagnify</code>)</strong>: Smoothly zooms in/out anchored to the ground point under the pointer (or <strong><code>Cmd</code> / <code>Ctrl</code> + two-finger vertical scroll</strong>).</li>
-<li><strong>Two-Finger Rotate (<code>TouchpadRotate</code>)</strong>: Rotates the camera bearing around the pointer ground point.</li>
-<li><strong><code>Option</code> (<code>Alt</code>) + Two-Finger Scroll</strong>: Tilts camera pitch (vertical) and orbits bearing (horizontal), pausing Auto-Tilt for manual inspection.</li>
-</ul>
-<h3 id="touch-devices-iphone-ipad-android-touch-web"><a class="header" href="#touch-devices-iphone-ipad-android-touch-web">Touch Devices (iPhone, iPad, Android, Touch Web)</a></h3>
-<ul>
-<li><strong>1-Finger Drag</strong>: Ground-anchored pan.</li>
-<li><strong>2-Finger Pinch &amp; Rotate</strong>: Simultaneous zoom and bearing rotation around the pinch midpoint.</li>
-<li><strong>2-Finger Parallel Vertical Drag</strong>: Tilts the camera pitch (<code>0° ↔ max_pitch</code>), automatically disengaging Auto-Tilt.</li>
-<li><strong>Double-Tap (1 Finger)</strong>: Smoothly zooms in (<code>+1</code> level) at the tapped location.</li>
-<li><strong>Two-Finger Tap</strong>: Smoothly zooms out (<code>-1</code> level).</li>
-<li><strong>Double-Tap &amp; Drag (1 Finger)</strong>: One-handed continuous vertical zoom.</li>
-</ul>
-<hr>
-<h2 id="configuring-controls-in-downstream-applications"><a class="header" href="#configuring-controls-in-downstream-applications">Configuring Controls in Downstream Applications</a></h2>
-<p>Downstream applications and games using <a href="api/maplibre_winit/struct.HeadedMapOptions.html"><code>HeadedMapOptions</code></a> can customize the HUD visibility, Auto-Tilt behavior, zoom speed, and edge-scrolling parameters:</p>
+<h2 id="desktop-quickstart-maplibre-winit"><a class="header" href="#desktop-quickstart-maplibre-winit">Desktop Quickstart (<code>maplibre-winit</code>)</a></h2>
+<p>Add <code>maplibre</code> and <code>maplibre-winit</code> to your binary crate and call <code>maplibre_winit::run_headed_map</code>:</p>
 <pre class="playground"><code class="language-rust no_run">use std::path::PathBuf;
+
 use maplibre::{render::settings::WgpuSettings, style::Style};
 use maplibre_winit::{run_headed_map, HeadedMapOptions, WinitMapWindowConfig};
 
+const STYLE_URL: &amp;str = "https://demotiles.maplibre.org/style.json";
+
 fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
-    let style = Style::default();
+    let mut style: Style = maplibre::platform::run_multithreaded(async {
+        reqwest::get(STYLE_URL).await?.json().await
+    })?;
+    style.center = Some([-74.006, 40.7128]);
+    style.zoom = Some(11.0);
+    for (index, layer) in style.layers.iter_mut().enumerate() {
+        layer.index = index as u32 + 1;
+    }
+
+    let options = HeadedMapOptions {
+        max_pitch_degrees: 75.0,
+        show_navigation_controls: true,
+        ..HeadedMapOptions::default()
+    };
 
     run_headed_map(
         Some(PathBuf::from("./maplibre-cache")),
-        WinitMapWindowConfig::new("Custom RTS Map".to_string()),
+        WinitMapWindowConfig::new("MapLibre Quickstart".to_string()),
         WgpuSettings::default(),
         style,
-        HeadedMapOptions {
-            max_pitch_degrees: 85.0,
-            // Show or hide the top-right GPU navigation HUD
-            show_navigation_controls: true,
-            // Force Auto-Tilt on (`Some(true)`), off (`Some(false)`), or automatic per style (`None`)
-            auto_tilt_override: Some(true),
-            // Scale scroll-wheel and pinch zoom speed (1.0 = default)
-            zoom_sensitivity: 1.0,
-            // Enable RTS screen-edge scrolling and customize its base speed (physical px/sec)
-            edge_scroll_enabled: true,
-            edge_scroll_speed_px_per_sec: 1100.0,
-            ..Default::default()
-        },
+        options,
     )?;
     Ok(())
 }</code></pre>
-<hr>
-<h2 id="predictive-tile-streaming-for-pitched-3d-views"><a class="header" href="#predictive-tile-streaming-for-pitched-3d-views">Predictive Tile Streaming for Pitched 3D Views</a></h2>
-<p>At steep camera pitches (<code>60°–85°</code>), tiles entering the bottom edge of the screen (near the camera nadir) are geometrically much closer to the eye than tiles near the top horizon—meaning each screen pixel at the bottom edge traverses world space several times faster during backward scrolling.</p>
-<p>To prevent blank or unbaked tiles when edge-scrolling backward (<code>S</code> / Down arrow / bottom screen edge), <code>maplibre-rs</code> employs a four-stage predictive streaming pipeline:</p>
-<ol>
-<li><strong>Pitched Nadir Apron (<code>ViewState::pitched_nadir_apron</code>)</strong>: Whenever camera pitch exceeds <code>20°</code>, the loose tile covering frustum automatically unions a nadir-shifted camera apron (<code>0.68 × d_nadir</code> behind the bottom viewport edge), pre-queuing DEM and vector/raster tiles before you even move.</li>
-<li><strong>Velocity-Predictive <code>PrefetchView</code></strong>: <code>maplibre-winit</code> tracks an exponentially smoothed pan velocity vector and projects a predictive camera <code>0.80 s</code> ahead of motion (plus an additional nadir lead when retreating), unioning its tile coverage into the loose request pass.</li>
-<li><strong>GPU Drape Pre-Baking (<code>DrapePrefetchRequests</code>)</strong>: Off-screen tiles in the loose covering ring are pre-baked into <code>2048×2048</code> terrain drape textures on the GPU (<code>64 MiB</code> cache budget) before they cross into the visible viewport.</li>
-<li><strong>Coarse <code>z - 3</code> Raster Overview Fallback</strong>: Terrain styles automatically prefetch and retain a low-cost <code>zoom - 3</code> coarse raster ancestor pyramid (<code>1 tile</code> per <code>64</code> fine tiles), guaranteeing instantaneous terrain-draped imagery even under rapid camera slews.</li>
-</ol>
+<h3 id="runtime-options-headedmapoptions"><a class="header" href="#runtime-options-headedmapoptions">Runtime Options (<code>HeadedMapOptions</code>)</a></h3>
+<p><code>HeadedMapOptions</code> configures host behaviour not carried by the MapLibre Style JSON:</p>
+<ul>
+<li><code>max_frames: Option&lt;u64&gt;</code> — exits cleanly after rendering a fixed number of frames (useful for smoke tests).</li>
+<li><code>max_pitch_degrees: f64</code> — clamps maximum camera tilt (<code>DEFAULT_MAX_PITCH</code> by default; raised automatically to <code>85°</code> when <code>style.terrain</code> or <code>Globe</code> projection is active unless overridden).</li>
+<li><code>debug_tiles: bool</code> — installs <code>DebugPlugin</code> to draw tile borders and coordinates.</li>
+<li><code>show_navigation_controls: bool</code> — toggles the interactive compass/zoom HUD in the top-right corner.</li>
+<li><code>zoom_sensitivity: f64</code> — scales wheel and trackpad zoom speed (<code>1.0</code> matches MapLibre GL JS).</li>
+<li><code>edge_scroll_enabled: bool</code> and <code>edge_scroll_speed_px_per_sec: f64</code> — enables cursor-at-window-edge panning.</li>
+</ul>
+<h3 id="custom-plugins-and-live-mutations-headedmaphost--maphandle"><a class="header" href="#custom-plugins-and-live-mutations-headedmaphost--maphandle">Custom Plugins and Live Mutations (<code>HeadedMapHost</code> &amp; <code>MapHandle</code>)</a></h3>
+<p>Use <code>run_headed_map_with</code> and <code>HeadedMapHost</code> when your application registers custom <a href="#architecture"><code>Plugin</code></a>s or configures the <code>Map</code> once initialized:</p>
+<pre class="playground"><code class="language-rust no_run">use std::path::PathBuf;
+
+use maplibre::{render::settings::WgpuSettings, style::Style};
+use maplibre_winit::{
+    run_headed_map_with, HeadedMapHost, HeadedMapOptions, WinitMapWindowConfig,
+};
+
+fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
+    let host = HeadedMapHost::default().with_configure(|map| {
+        let _ = map.set_global_state("theme", serde_json::json!("day"));
+    });
+
+    run_headed_map_with(
+        None::&lt;PathBuf&gt;,
+        WinitMapWindowConfig::new("Configured Map".to_string()),
+        WgpuSettings::default(),
+        Style::default(),
+        HeadedMapOptions::default(),
+        host,
+    )?;
+    Ok(())
+}</code></pre>
+<p>While a map is running (on desktop or in the browser via <code>web::run_map</code>), callers interact with it through a clonable <code>MapHandle&lt;E&gt;</code>:</p>
+<ul>
+<li><code>map.call(|map| map.set_paint_property(layer, name, value)).await</code> updates paint properties, layout <code>visibility</code>, layer filters (<code>set_filter</code>), feature state (<code>set_feature_state</code>), global state (<code>set_global_state</code>), or inline GeoJSON (<code>set_geojson_data</code>) in place without rebuilding unaffected layers.</li>
+<li><code>map.call(|map| map.fly_to(camera, curve)).await</code> starts smooth camera flights, and <code>map.until(|map| ...)</code> awaits frame-driven conditions such as flight arrival.</li>
+<li><code>map.call(|map| map.query_rendered_features(geometry, &amp;options)).await</code> queries visible vector and symbol features.</li>
+</ul>
+<h2 id="headless-rendering-maplibreheadless"><a class="header" href="#headless-rendering-maplibreheadless">Headless Rendering (<code>maplibre::headless</code>)</a></h2>
+<p>Enable the <code>headless</code> feature on <code>maplibre</code> to render maps to PNG buffers, host GPU textures (<code>HostGpu</code>), or synchronized multi-view slots (<code>MultiViewFrame</code>) without a display server:</p>
+<pre><code class="language-toml">[dependencies]
+maplibre = { version = "0.1.0", features = ["headless"] }
+</code></pre>
+<p><code>create_headless_renderer(width, height, cache_path)</code> initializes an offscreen <code>Kernel</code> and <code>Renderer</code> (backed by Metal on macOS, DX12/Vulkan on Windows, or Vulkan/Lavapipe on Linux CI), and <code>HeadlessMap</code> renders deterministic frames once all requested tiles settle.</p>
+<p>See the <a href="#examples">Examples</a> chapter for 22 runnable style, terrain, globe, clustering, heatmap, and interactive <code>MapHandle</code> examples.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="examples"><a class="header" href="#examples">Examples</a></h1>
 <p>Each example reproduces the map of a <a href="https://maplibre.org/maplibre-gl-js/docs/examples/">MapLibre GL JS example</a> with maplibre-rs compiled to WebAssembly.</p>
@@ -4299,15 +4259,22 @@ fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
 <div class="example-code-tabs">
 <pre class="playground"><code class="language-rust no_run"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
-</span>// The same map driven from Rust in the browser: `web::run_map` resolves to a handle whose
-// commands the map applies between frames.
+</span>// Driven through a `MapHandle`: `web::run_map` (or `HeadedMapHost` on desktop) yields a handle
+// whose commands the map applies between frames.
 use maplibre::{
     context::FlightOutcome,
     coords::LatLon,
+    map::handle::MapHandle,
     render::view_state::{CameraOptions, FlightCurve, FlyOptions},
     style::Style,
 };
-use web::{JSError, WebMapHost};
+#[cfg(not(target_arch = "wasm32"))]
+use maplibre_winit::NativeEnvironment as CurrentEnvironment;
+#[cfg(target_arch = "wasm32")]
+use web::{CurrentEnvironment, JSError, WebMapHost};
+
+#[cfg(not(target_arch = "wasm32"))]
+type JSError = Box&lt;dyn std::error::Error&gt;;
 
 pub fn build_style(mut style: Style) -&gt; Style {
     style.center = Some([-74.5, 40.0]);
@@ -4318,13 +4285,11 @@ pub fn build_style(mut style: Style) -&gt; Style {
     style
 }
 
-/// Starts the map, flies to `[lng, lat]` and tells whether the camera arrived there.
-pub async fn fly(
-    new_worker: js_sys::Function,
-    base: Style,
+/// Flies an active map handle to `[lng, lat]` and reports whether the camera arrived there.
+pub async fn fly_camera(
+    map: &amp;MapHandle&lt;CurrentEnvironment&gt;,
     [lng, lat]: [f64; 2],
 ) -&gt; Result&lt;bool, JSError&gt; {
-    let map = web::run_map(new_worker, build_style(base), WebMapHost::default()).await?;
     let destination = CameraOptions {
         center: Some(LatLon::new(lat, lng)),
         ..Default::default()
@@ -4340,6 +4305,17 @@ pub async fn fly(
         })
         .await?;
     Ok(arrived)
+}
+
+/// Starts the map in the browser, flies to `[lng, lat]` and tells whether the camera arrived.
+#[cfg(target_arch = "wasm32")]
+pub async fn fly(
+    new_worker: js_sys::Function,
+    base: Style,
+    destination: [f64; 2],
+) -&gt; Result&lt;bool, JSError&gt; {
+    let map = web::run_map(new_worker, build_style(base), WebMapHost::default()).await?;
+    fly_camera(&amp;map, destination).await
 }
 <span class="boring">}</span></code></pre>
 <pre><code class="language-js">export default async function style() {
@@ -4442,14 +4418,20 @@ export function run(map) {
 <div class="example-code-tabs">
 <pre class="playground"><code class="language-rust no_run"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
-</span>// The same query from Rust in the browser, through the handle `web::run_map` resolves to.
+</span>// Query rendered features through `MapHandle` (`web::run_map` on web or `HeadedMapHost` natively).
 use maplibre::{
     map::handle::MapHandle,
     query::QueriedFeature,
     sdf::query::{QueryGeometry, QueryOptions},
     style::Style,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use maplibre_winit::NativeEnvironment as CurrentEnvironment;
+#[cfg(target_arch = "wasm32")]
 use web::{CurrentEnvironment, JSError};
+
+#[cfg(not(target_arch = "wasm32"))]
+type JSError = Box&lt;dyn std::error::Error&gt;;
 
 pub fn build_style(mut style: Style) -&gt; Style {
     style.center = Some([-74.006, 40.7128]);
@@ -4460,7 +4442,7 @@ pub fn build_style(mut style: Style) -&gt; Style {
     style
 }
 
-/// The features drawn under a pointer `[x, y]` in CSS pixels from the canvas's top left,
+/// The features drawn under a pointer `[x, y]` in logical pixels from the viewport's top left,
 /// topmost first.
 pub async fn features_under(
     map: &amp;MapHandle&lt;CurrentEnvironment&gt;,
@@ -4582,16 +4564,22 @@ export function run(map) {
 <div class="example-code-tabs">
 <pre class="playground"><code class="language-rust no_run"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
-</span>// The same changes from Rust in the browser, through the handle `web::run_map` resolves to.
+</span>// Live paint and global-state updates through `MapHandle`.
 use maplibre::{map::handle::MapHandle, style::Style};
+#[cfg(not(target_arch = "wasm32"))]
+use maplibre_winit::NativeEnvironment as CurrentEnvironment;
 use serde_json::json;
+#[cfg(target_arch = "wasm32")]
 use web::{CurrentEnvironment, JSError};
+
+#[cfg(not(target_arch = "wasm32"))]
+type JSError = Box&lt;dyn std::error::Error&gt;;
 
 pub fn build_style(base: Style) -&gt; Result&lt;Style, serde_json::Error&gt; {
     let mut document = serde_json::to_value(base)?;
     document["center"] = json!([12.338, 45.4385]);
     document["zoom"] = json!(14);
-    // The background follows a theme a page can switch without editing the layer.
+    // The background follows a theme a host can switch without editing the layer.
     document["state"] = json!({"theme": {"default": "day"}});
     if let Some(layers) = document["layers"].as_array_mut() {
         for layer in layers
@@ -4773,11 +4761,16 @@ export function run(map) {
 <div class="example-code-tabs">
 <pre class="playground"><code class="language-rust no_run"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
-</span>// The same visibility toggle from Rust in the browser, through the handle `web::run_map`
-// resolves to.
+</span>// Layer visibility toggles through `MapHandle`.
 use maplibre::{map::handle::MapHandle, style::Style};
+#[cfg(not(target_arch = "wasm32"))]
+use maplibre_winit::NativeEnvironment as CurrentEnvironment;
 use serde_json::json;
+#[cfg(target_arch = "wasm32")]
 use web::{CurrentEnvironment, JSError};
+
+#[cfg(not(target_arch = "wasm32"))]
+type JSError = Box&lt;dyn std::error::Error&gt;;
 
 pub fn build_style(mut style: Style) -&gt; Style {
     style.center = Some([-71.977221, -13.517379]);
@@ -4922,11 +4915,16 @@ export function run(map) {
 <div class="example-code-tabs">
 <pre class="playground"><code class="language-rust no_run"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
-</span>// The same filter update from Rust in the browser, through the handle `web::run_map`
-// resolves to.
+</span>// Dynamic layer filter updates through `MapHandle`.
 use maplibre::{map::handle::MapHandle, style::Style};
+#[cfg(not(target_arch = "wasm32"))]
+use maplibre_winit::NativeEnvironment as CurrentEnvironment;
 use serde_json::json;
+#[cfg(target_arch = "wasm32")]
 use web::{CurrentEnvironment, JSError};
+
+#[cfg(not(target_arch = "wasm32"))]
+type JSError = Box&lt;dyn std::error::Error&gt;;
 
 pub fn build_style(base: Style) -&gt; Result&lt;Style, serde_json::Error&gt; {
     let mut document = serde_json::to_value(base)?;
@@ -5243,7 +5241,7 @@ export function run(map) {
 <div class="example-code-tabs">
 <pre class="playground"><code class="language-rust no_run"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
-</span>// The same updates from Rust in the browser, through the handle `web::run_map` resolves to.
+</span>// Live GeoJSON replacement and camera easing through `MapHandle`.
 use std::sync::Arc;
 
 use maplibre::{
@@ -5252,8 +5250,10 @@ use maplibre::{
     render::view_state::{CameraOptions, FlightCurve},
     style::{source::GeoJsonData, Style},
 };
-use serde::Deserialize;
-use serde_json::json;
+#[cfg(not(target_arch = "wasm32"))]
+use maplibre_winit::NativeEnvironment as CurrentEnvironment;
+use serde_json::{json, Value};
+#[cfg(target_arch = "wasm32")]
 use web::CurrentEnvironment;
 
 const ISS_URL: &amp;str = "https://api.wheretheiss.at/v1/satellites/25544";
@@ -5281,18 +5281,15 @@ pub fn build_style(base: Style) -&gt; Result&lt;Style, serde_json::Error&gt; {
     Ok(style)
 }
 
-#[derive(Deserialize)]
-struct Position {
-    longitude: f64,
-    latitude: f64,
-}
-
 /// Moves the point to where the International Space Station is now, and the camera with it.
 pub async fn update(map: &amp;MapHandle&lt;CurrentEnvironment&gt;) -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
-    let Position {
-        longitude,
-        latitude,
-    } = reqwest::get(ISS_URL).await?.json().await?;
+    let body: Value = reqwest::get(ISS_URL).await?.json().await?;
+    let longitude = body["longitude"]
+        .as_f64()
+        .ok_or("missing numeric `longitude` field")?;
+    let latitude = body["latitude"]
+        .as_f64()
+        .ok_or("missing numeric `latitude` field")?;
     let point = json!({
         "type": "Feature",
         "properties": {},
@@ -5315,7 +5312,8 @@ pub async fn update(map: &amp;MapHandle&lt;CurrentEnvironment&gt;) -&gt; Result&
     Ok(())
 }
 
-/// Updates the point every two seconds for as long as the map runs.
+/// Updates the point every two seconds in the browser for as long as the map runs.
+#[cfg(target_arch = "wasm32")]
 pub async fn follow(map: MapHandle&lt;CurrentEnvironment&gt;) {
     while !map.is_closed() {
         if let Err(error) = update(&amp;map).await {
@@ -5455,10 +5453,10 @@ There are multiple demos of maplibre-rs for different targets. Some targets have
 depending on your operating system.</p>
 <ul>
 <li><strong>maplibre-demo</strong> - targets Windows, macOS and Linux, it is built directly with cargo.</li>
-<li><strong>apple</strong> - targets iOS and macOS and relies on the xcode IDE.</li>
-<li><strong>android</strong> - targets Android devices and builds in Android Studio.</li>
-<li><strong>web</strong> - targets the web using a WASM binary.</li>
-<li><strong>maplibre-headless</strong> - <em>TBD</em></li>
+<li><strong>apple</strong> - targets iOS and macOS and relies on the xcode IDE (<code>apple/visionos</code> targets Apple Vision Pro via C ABI + Metal).</li>
+<li><strong>android</strong> - targets 64-bit Android devices and emulators (<code>arm64-v8a</code> and <code>x86_64</code>, <code>minSdk 23</code>) in Android Studio / Gradle.</li>
+<li><strong>web</strong> - targets browsers via WebAssembly (<code>wasm32-unknown-unknown</code>) with WebGPU and WebGL2 backends.</li>
+<li><strong>maplibre (<code>--features headless</code>)</strong> - renders maps offscreen without a windowing system via <code>maplibre::headless::map::HeadlessMap</code> (used by server rendering, multi-view hosts, and the <code>render-tests</code> conformance runner).</li>
 </ul>
 <p>All the targets below require you to install <a href="https://rustup.rs/">rustup</a> to manage your Rust toolchain.</p>
 <blockquote>
@@ -5483,7 +5481,7 @@ compass bearing, and <code>Option</code> + two-finger drag tilts/orbits. A float
 provides one-click access to the 3D Compass, <code>2D</code>/<code>3D</code> (<code>AUTO</code> tilt), <code>+</code>/<code>-</code> zoom, <code>Home</code>, and <code>MAP</code>/<code>RTS</code> control
 modes (where <code>RTS</code> mode enables Red Alert-style screen-edge scrolling and right-click panning). <code>--frames &lt;n&gt;</code> closes
 the window after <code>n</code> frames.</p>
-<p><code>--terrain</code> opens the bundled 3D terrain style (<code>maplibre-demo/resources/terrain.json</code>): OpenStreetMap raster imagery
+<p><code>--terrain</code> opens the bundled 3D terrain style (<code>maplibre-demo/res/terrain.json</code>): OpenStreetMap raster imagery
 and Mapterhorn hillshade draped over Mapterhorn <code>raster-dem</code> elevation tiles around Innsbruck at pitch 70, matching
 the GL JS <code>add-3d-terrain</code> example on the globe projection. Auto-Tilt is enabled by default on terrain and globe
 styles, smoothly tilting the camera as you zoom in past zoom 9 while allowing manual pitch override at any time.
@@ -5517,18 +5515,15 @@ you to use C and C++ code with Android. You have to install manually the version
 <code>./android/gradle/lib/build.gradle</code>.</p>
 <pre><code>ANDROID STUDIO -&gt; tools -&gt; SDK manager -&gt; SDK tools -&gt; tick show package details -&gt; ndk (side by side)
 </code></pre>
-<p>Open the project within <code>./android/gradle</code> and create a new virtual device with the device manager. Minimum SDK version
-should be 21. This was tested on an x86_64 emulator. Finally, run the demo configuration. It should open your virtual device and
-run the maplibre-rs Android demo on it. Alternatively you can also run it on your own Android device.</p>
+<p>Open the project within <code>./android/gradle</code> and create a new virtual device with the device manager. Both <code>./android/gradle/lib/build.gradle</code> and <code>./android/gradle/demo/build.gradle</code> specify <code>minSdk 23</code> (Android 6.0+) and build exclusively for 64-bit targets (<code>arm64-v8a</code> / <code>aarch64-linux-android</code> and <code>x86_64</code> / <code>x86_64-linux-android</code>; 32-bit <code>i686</code> and <code>armeabi-v7a</code> are not supported). Install the Rust targets you need before building:</p>
+<pre><code class="language-bash">rustup target add aarch64-linux-android x86_64-linux-android
+</code></pre>
+<p>Finally, run the <code>demo</code> configuration in Android Studio to launch the maplibre-rs Android demo on an <code>x86_64</code> emulator or a physical <code>arm64-v8a</code> Android device.</p>
 <blockquote>
-<p>Note: If you are building for an x86 Android device, you probably need to install the following target using<br>rustup with the following command <code>rustup target add i686-linux-android</code>.</p>
-</blockquote>
-<blockquote>
-<p>Note: Android is configured to support OpenGL ES 3.1 (This API specification is supported by Android 5.0 (API level 21) and higher).
-Your Android device is required to support OpenGL ES 3.1 at least. There are some issues
+<p>Note: Android is configured with <code>minSdk 23</code> and requires OpenGL ES 3.1 or Vulkan support on the target device or emulator. There are some notes
 <a href="https://stackoverflow.com/questions/40797975/android-emulator-and-opengl-es3-egl-bad-config">here</a> and
 <a href="https://www.reddit.com/r/Arcore/comments/8squbo/opengl_es_31_is_required_for_android_emulator_to/">here</a> that
-discuss configuration of Android Studio for OpenGL ES 3.1 support in emulators.</p>
+discuss configuring Android Studio emulators for OpenGL ES 3.1 support.</p>
 </blockquote>
 <h2 id="apple"><a class="header" href="#apple">Apple</a></h2>
 <p>Apple builds rely on the <a href="https://apps.apple.com/us/app/xcode/id497799835?ls=1&amp;mt=12">XCode IDE</a>.
@@ -5568,6 +5563,14 @@ just web-lib build --webgl --multithreaded # WebGL + multithreaded
 </code></pre>
 <p>After building the library you can run the demo server:</p>
 <pre><code class="language-bash">just web-demo start
+</code></pre>
+<h2 id="headless-rendering-maplibre---features-headless"><a class="header" href="#headless-rendering-maplibre---features-headless">Headless Rendering (<code>maplibre --features headless</code>)</a></h2>
+<p>Offscreen rendering lives directly in the core <code>maplibre</code> crate behind <code>--features headless</code> (<code>maplibre::headless::create_headless_renderer</code> and <code>maplibre::headless::map::HeadlessMap</code>), rather than a separate crate. It renders into offscreen GPU textures or PNG/RGBA buffers on Vulkan (including Mesa Lavapipe software rasterization in CI), Metal, and DirectX 12 without creating a window:</p>
+<pre><code class="language-bash"># Run headless unit and integration tests
+cargo test -p maplibre --features headless
+
+# Run the MapLibre GL JS pixel + query conformance suite headlessly
+cargo run --release -p render-tests -- --ci
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="building-libraries"><a class="header" href="#building-libraries">Building Libraries</a></h1>
@@ -5611,48 +5614,141 @@ just web-lib build --webgl --multithreaded # WebGL + multithreaded
 <h1 id="development-documents"><a class="header" href="#development-documents">Development Documents</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="architecture"><a class="header" href="#architecture">Architecture</a></h1>
-<h2 id="rendering-architecture"><a class="header" href="#rendering-architecture">Rendering Architecture</a></h2>
-<p>The big picture of wgpu is as follows:</p>
-<p><label class="checkbox-label"><input class="checkbox-img" type="checkbox"><img src="https://raw.githubusercontent.com/gfx-rs/wgpu/8f02b73655aff641361822a8ac0347fc47622b49/etc/big-picture.png" alt=""><span class="img-wrapper"><img src="https://raw.githubusercontent.com/gfx-rs/wgpu/8f02b73655aff641361822a8ac0347fc47622b49/etc/big-picture.png" alt=""></span></label></p>
-<p>A simplified version is shown below:</p>
-<p><label class="checkbox-label"><input class="checkbox-img" type="checkbox"><img src="development-documents/figures/render-stack.drawio.svg" alt=""><span class="img-wrapper"><img src="development-documents/figures/render-stack.drawio.svg" alt=""></span></label></p>
-<p>A further simplified version:</p>
-<p><label class="checkbox-label"><input class="checkbox-img" type="checkbox"><img src="development-documents/figures/simplified-render-stack.drawio.svg" alt=""><span class="img-wrapper"><img src="development-documents/figures/simplified-render-stack.drawio.svg" alt=""></span></label></p>
-<p>Notes:</p>
+<p><code>maplibre</code> is structured as a modular, data-oriented rendering engine tailored specifically to slippy-map tile pyramids, 3D terrain, planetary globes, and stereo XR views. Every major subsystem lives inside <a href="../../../maplibre/src"><code>maplibre/src/</code></a> with zero <code>unsafe</code> code in the renderer (<code>#![forbid(unsafe_code)]</code> in <code>maplibre::render</code>) and strict fallible error propagation across initialization and frame execution.</p>
+<pre><code class="language-mermaid">flowchart LR
+    Host["Host (winit / Web / Headless / visionOS)"] --&gt; Handle["MapHandle / Map"]
+    Handle --&gt; Schedule["Schedule (Ordered Stages)"]
+    Schedule --&gt; World["TCS World (Resources + Tiles)"]
+    Schedule --&gt; APC["AsyncProcedureCall (Workers)"]
+    APC --&gt; Loader["SourceClient &amp; SharedLoader"]
+    APC --&gt;|Transferables| World
+    Schedule --&gt; Graph["RenderGraph &amp; UploadQueue"]
+    Graph --&gt; WGPU["wgpu (Metal / Vulkan / DX12 / WebGPU / WebGL2)"]
+</code></pre>
+<h2 id="1-tile-component-system-maplibretcs"><a class="header" href="#1-tile-component-system-maplibretcs">1. Tile Component System (<code>maplibre::tcs</code>)</a></h2>
+<p>Early prototypes experimented with general-purpose Entity-Component-System (ECS) frameworks, which added archetype fragmentation and indirection without matching the natural key of a map engine: <strong>hierarchical tile coordinates</strong> (<code>WorldTileCoords</code>).</p>
+<p><code>maplibre::tcs</code> replaces generic ECS storage with a domain-specific <strong>Tile Component System (TCS)</strong>:</p>
 <ul>
-<li>wgpu is able to create an interface through which we can reach any device with a GPU.</li>
+<li><strong><code>World</code></strong> pairs two stores under one ownership root:
+<ul>
+<li><strong><code>Resources</code></strong> — singleton typed state (<code>ViewState</code>, <code>Style</code>, <code>WgpuTileViewPattern</code>, <code>TerrainResources</code>, <code>FrameTimings</code>, lighting, global state) keyed by <code>TypeId</code>.</li>
+<li><strong><code>Tiles</code></strong> — per-tile typed <code>TileComponent</code> attachments (<code>VectorLayersDataComponent</code>, <code>RasterLayersDataComponent</code>, <code>DemTileComponent</code>, symbol/SDF layout data, missing-layer markers) indexed by <code>WorldTileCoords</code> inside a spatial quadtree/pyramid (<code>tcs::pyramid</code>).</li>
 </ul>
-<p>Notes:</p>
+</li>
+<li><strong>Borrow-checked queries</strong>: <code>GlobalQueryState</code> and <code>EphemeralQueryState</code> track shared and mutable <code>TypeId</code> borrows dynamically when a system runs, preventing aliasing without unsafe code.</li>
+<li><strong>Typed errors</strong>: every system implements <code>System</code> (<code>fn run(&amp;mut self, context: &amp;mut MapContext) -&gt; Result&lt;(), SystemError&gt;</code>), returning structured failures rather than panicking.</li>
+</ul>
+<h2 id="2-schedule-stages-and-fallible-plugins"><a class="header" href="#2-schedule-stages-and-fallible-plugins">2. <code>Schedule</code>, Stages, and Fallible <code>Plugin</code>s</a></h2>
+<p>Frame execution is driven by <a href="../../../maplibre/src/schedule.rs"><code>Schedule</code></a>, an ordered list of labeled <a href="../../../maplibre/src/schedule.rs"><code>Stage</code></a>s operating on <a href="../../../maplibre/src/context.rs"><code>MapContext</code></a> (<code>World</code>, <code>Style</code>, <code>ViewState</code>, <code>Renderer</code>).</p>
+<h3 id="default-frame-stages-renderstagelabel"><a class="header" href="#default-frame-stages-renderstagelabel">Default Frame Stages (<code>RenderStageLabel</code>)</a></h3>
+<p><code>RenderPlugin</code> installs seven deterministic stages in <code>Schedule</code>:</p>
+<ol>
+<li><strong><code>Input</code></strong> — applies host viewport/cursor input, drains <code>MapCommands</code> from <code>MapHandle</code>s, and advances camera flights (<code>fly_to</code> / <code>ease_to</code>) so every downstream system observes the resolved <code>ViewState</code> (or stereo <code>XrFrame</code> / multi-view slot).</li>
+<li><strong><code>Request</code></strong> — computes the visible tile covering (including globe horizon culling, terrain elevation bounds, XR frustum union, and flight <code>PrefetchView</code>), dispatches missing vector/raster/DEM fetches through <code>AsyncProcedureCall</code>, and ingests completed worker results into <code>World.tiles</code>.</li>
+<li><strong><code>Prepare</code></strong> — creates or resizes GPU attachments, compiles demand-driven shaders/pipelines (<code>PipelineCache</code>), prepares glyph/sprite atlases, and writes per-frame view/globe/lighting uniforms.</li>
+<li><strong><code>Queue</code></strong> — uploads newly arrived vertex/index/instance/texture payloads through <code>UploadQueue</code> and populates <a href="../../../maplibre/src/render/render_phase.rs"><code>RenderPhase</code></a> queues (<code>TileMaskItem</code>, <code>LayerItem</code>, <code>TranslucentItem</code>, <code>DrapePhase</code>).</li>
+<li><strong><code>PhaseSort</code></strong> — sorts phase items into deterministic MapLibre layer and depth order and harvests completed GPU timestamp queries (<code>gpu_timer</code>).</li>
+<li><strong><code>Render</code></strong> — executes <a href="../../../maplibre/src/render/graph.rs"><code>RenderGraph</code></a> passes, submits command buffers, and presents swapchain or eye targets.</li>
+<li><strong><code>Cleanup</code></strong> — marked with <code>Schedule::run_after_failure</code> so per-frame phase queues are cleared and out-of-budget tiles are evicted even if an earlier stage returned a <code>StageError</code>.</li>
+</ol>
+<h3 id="fallible-plugin-composition-plugine"><a class="header" href="#fallible-plugin-composition-plugine">Fallible Plugin Composition (<code>Plugin&lt;E&gt;</code>)</a></h3>
+<p>Capabilities are modularized behind <a href="../../../maplibre/src/plugin.rs"><code>Plugin&lt;E&gt;</code></a>:</p>
+<pre><code class="language-rust ignore">pub trait Plugin&lt;E: Environment&gt; {
+    fn build(
+        &amp;self,
+        schedule: &amp;mut Schedule,
+        kernel: Rc&lt;Kernel&lt;E&gt;&gt;,
+        world: &amp;mut World,
+        renderer: &amp;mut Renderer,
+    ) -&gt; Result&lt;(), PluginError&gt;;
+}</code></pre>
+<p>Hosts (<code>maplibre_winit::default_plugins</code>, <code>web</code>, <code>HeadlessMap</code>) inspect the <code>Style</code> and install only the plugins needed (<code>RenderPlugin</code>, <code>BackgroundPlugin</code>, <code>VectorPlugin</code>, <code>SdfPlugin</code>, <code>HeatmapPlugin</code>, <code>RasterPlugin</code>, <code>HillshadePlugin</code>, <code>TerrainPlugin</code>, <code>NavigationHudPlugin</code>, <code>DebugPlugin</code>). Missing prerequisite stages, render-graph edges, or GPU allocation failures surface cleanly as <code>PluginError</code>.</p>
+<h2 id="3-gpu-architecture-rendergraph-bufferpool-and-uploadqueue"><a class="header" href="#3-gpu-architecture-rendergraph-bufferpool-and-uploadqueue">3. GPU Architecture: <code>RenderGraph</code>, <code>BufferPool</code>, and <code>UploadQueue</code></a></h2>
 <ul>
-<li>The ability to use shared memory or the atomic instruction set of WASM comes by enabling compilation features.</li>
-<li><code>threads</code> support here does not introduce threads like we know them from Linux. It introduces</li>
-<li><a href="https://github.com/WebAssembly/threads/blob/main/proposals/threads/Overview.md">support for atomics</a> like
-specified in a working draft to WebAssembly. Threads are simulated using WebWorkers by the browser.</li>
+<li><strong><code>RenderGraph</code></strong> orders render passes explicitly by slot dependencies:
+<ul>
+<li><strong><code>DrapePassNode</code></strong> <em>(when 3D terrain is active)</em> renders drapeable fill, line, raster, hillshade, and color-relief layers into pooled per-tile offscreen textures (<code>DrapePhase</code>).</li>
+<li><strong><code>MainPassNode</code></strong> renders sky/starfield/atmosphere, terrain meshes or stencil-masked 2D/globe tiles, 3D fill-extrusions, circles, heatmaps, and crisp screen-space SDF symbols/labels.</li>
+<li><strong><code>DepthCopyNode</code> &amp; <code>TranslucentPassNode</code></strong> copy resolved depth when needed and composite order-dependent translucent overlays and custom <code>PassHooks</code>.</li>
+</ul>
+</li>
+<li><strong><code>BufferPool</code></strong> sub-allocates tile vertex, index, and feature-paint slices inside large backing <code>wgpu::Buffer</code> arenas, avoiding per-tile buffer allocation churn and minimizing bind-group switches.</li>
+<li><strong>Counted <code>UploadQueue</code></strong>: <code>Renderer</code> wraps <code>wgpu::Queue</code> inside <a href="../../../maplibre/src/render/upload_queue.rs"><code>UploadQueue</code></a>, which atomically counts every byte written via <code>write_buffer</code>, <code>write_texture</code>, <code>create_buffer_init</code>, and <code>create_texture_with_data</code>. Direct calls to uncounted <code>wgpu::Queue</code> upload methods are denied workspace-wide via <code>clippy.toml</code>, ensuring frame traces and upload budgets remain exact.</li>
+<li><strong>In-place GPU style &amp; state refresh</strong>: style mutations (<code>set_paint_property</code>, <code>set_layout_property</code>, <code>set_filter</code>, <code>set_feature_state</code>, <code>set_global_state</code>) classify what changed (<code>style::mutation</code>). Data-driven paint and feature-state updates re-evaluate only the affected per-feature paint attributes and rewrite their <code>BufferPool</code> ranges via <code>UploadQueue</code>—without re-fetching or re-tessellating tile geometry.</li>
+</ul>
+<h2 id="4-source-io-resourceloader-and-asyncprocedurecall-apc"><a class="header" href="#4-source-io-resourceloader-and-asyncprocedurecall-apc">4. Source I/O, <code>ResourceLoader</code>, and <code>AsyncProcedureCall</code> (<code>APC</code>)</a></h2>
+<p><code>Kernel&lt;E&gt;</code> decouples the engine from the host OS or browser through the <a href="../../../maplibre/src/environment.rs"><code>Environment</code></a> trait:</p>
+<ul>
+<li><strong><code>ResourceLoader</code> &amp; <code>SourceClient</code></strong> (<code>maplibre::io</code>): deduplicates in-flight HTTP, <code>pmtiles://</code>, <code>asset://</code>, and inline data requests across the map thread and all worker threads (<code>SharedLoader</code>), applying bounded concurrency (<code>tile_backpressure</code>) and exponential retry (<code>tile_retry</code>).</li>
+<li><strong><code>AsyncProcedureCall</code> (<code>APC</code>)</strong>: offloads CPU-heavy MVT/MLT decoding, GeoJSON clustering, expression pre-evaluation, Lyon polygon/line tessellation, glyph SDF rasterization, and <code>raster-dem</code> decoding off the render thread:
+<ul>
+<li><strong>Native (<code>SchedulerAsyncProcedureCall</code>)</strong>: schedules tasks onto a multi-threaded Tokio pool and passes decoded Rust structs (<code>DefaultVectorTransferables</code>, <code>DefaultDemTransferables</code>) back with zero serialization overhead.</li>
+<li><strong>Web (<code>wasm32</code>)</strong>: dispatches jobs to dedicated Web Workers, serializing geometry into zero-copy FlatBuffers (<code>FlatBufferTransferable</code>) transferred via <code>ArrayBuffer</code> ownership transfer (or shared linear memory on multithreaded Wasm builds).</li>
+</ul>
+</li>
+</ul>
+<h2 id="5-headlessmap-multi-view-3d-terrain-atmosphere--stereo-xr"><a class="header" href="#5-headlessmap-multi-view-3d-terrain-atmosphere--stereo-xr">5. <code>HeadlessMap</code>, Multi-View, 3D Terrain, Atmosphere &amp; Stereo XR</a></h2>
+<ul>
+<li><strong><code>HeadlessMap</code> &amp; Multi-View</strong> (<code>maplibre::headless</code>): drives deterministic offscreen rendering, shares immutable decoded tiles, sprites, glyphs, and compiled GPU pipelines across independent map worlds via <code>SharedMapAssets</code>, and renders multiple synchronized camera slots (<code>MultiViewFrame</code>, <code>ViewSlotId</code>) in a single tick.</li>
+<li><strong>3D Terrain (<code>maplibre::terrain</code>)</strong>: decodes Mapbox and Terrarium <code>raster-dem</code> tiles into <code>GpuDemPool</code>, stitches level-of-detail seams with <code>backfill_neighbours</code> and configurable <code>TerrainSkirts</code>, closes polar caps on globes via <code>PolarPoleElevations</code>, drapes vector/raster layers via RTT caching (<code>DrapeBudget</code>), and supports exact CPU elevation queries and ray-terrain intersection (<code>TerrainHit</code>, <code>sightline</code>).</li>
+<li><strong>Globe, Atmosphere &amp; Celestial (<code>maplibre::projection</code>, <code>maplibre::celestial</code>, <code>maplibre::starfield</code>)</strong>: smoothly transitions between Web Mercator and 3D <code>Globe</code> projection, shading atmospheric limb scattering, twilight bands, solar/lunar discs, eclipses, and Hipparcos starfields in ECEF coordinates.</li>
+<li><strong>Stereo XR (<code>maplibre::render::xr</code> &amp; <code>apple/visionos</code>)</strong>: evaluates tile coverings across the union of left and right eye frustums (<code>XrFrame</code>, <code>ScenePlacement</code>) and renders stereo colour + reverse-Z <code>Depth32Float</code> eye targets directly into host Metal textures.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="design"><a class="header" href="#design">Design</a></h1>
-<script src="https://unpkg.com/@panzoom/panzoom@4.5.0/dist/panzoom.min.js"></script>
-<h2 id="domain-model"><a class="header" href="#domain-model">Domain Model</a></h2>
-<div style="overflow: hidden; border-style: solid; width: 110%">
-<img src="development-documents/figures/domain-model.drawio.svg" class="diagram" alt="diagram" />
-</div>
-
-<h2 id="data-model"><a class="header" href="#data-model">Data Model</a></h2>
-<div style="overflow: hidden; border-style: solid; width: 110%">
-<img src="development-documents/figures/data-model.drawio.svg" class="diagram" alt="diagram" />
-</div>
-
-<h2 id="crate-and-project-structure"><a class="header" href="#crate-and-project-structure">Crate and Project Structure</a></h2>
-<div style="overflow: hidden; border-style: solid; width: 110%">
-<img src="development-documents/figures/crate-and-projects-structure.drawio.svg" class="diagram" alt="diagram" />
-</div>
-
-<script>
-    Array.from(document.getElementsByClassName('diagram')).forEach(e => {
-         panzoom = Panzoom(e, {});
-         e.parentElement.addEventListener('wheel', panzoom.zoomWithWheel)
-    })
-</script>
+<h1 id="design-principles--trade-offs"><a class="header" href="#design-principles--trade-offs">Design Principles &amp; Trade-offs</a></h1>
+<p>This document records the core engineering decisions behind <code>maplibre</code> and how they shape day-to-day development across <code>maplibre</code>, <code>maplibre-winit</code>, <code>web</code>, and <code>apple/visionos</code>.</p>
+<h2 id="1-domain-specific-tcs-over-generic-ecs"><a class="header" href="#1-domain-specific-tcs-over-generic-ecs">1. Domain-Specific TCS Over Generic ECS</a></h2>
+<p>Map rendering has a very specific data topology:</p>
+<ul>
+<li>Global singleton state (<code>Style</code>, <code>ViewState</code>, <code>WgpuTileViewPattern</code>, <code>GpuDemPool</code>, atlases, frame timings).</li>
+<li>Sparse, hierarchical per-tile components keyed by <code>(z, x, y, build_id)</code> (<code>WorldTileCoords</code>) that are queried along parent/child/ancestor pyramid paths every frame (for overscaled vector fallbacks, DEM ancestor draping, and stencil masking).</li>
+</ul>
+<p>Using <code>maplibre::tcs</code> (<code>World</code>, <code>Tiles</code>, <code>Resources</code>) instead of an external archetype ECS gives:</p>
+<ol>
+<li><strong>Direct pyramid traversal</strong> (<code>tcs::pyramid</code>) without entity-ID hash lookups when resolving ancestor fallback tiles.</li>
+<li><strong>Zero-macro system signatures</strong>: systems are plain Rust functions or structs implementing <code>System::run(&amp;mut self, &amp;mut MapContext) -&gt; Result&lt;(), SystemError&gt;</code>.</li>
+<li><strong>Lightweight WebAssembly footprint</strong>: avoids procedural-macro and archetype-table bloat in <code>wasm32-unknown-unknown</code> bundles.</li>
+</ol>
+<h2 id="2-explicit-schedule-stages-and-fallible-lifecycle"><a class="header" href="#2-explicit-schedule-stages-and-fallible-lifecycle">2. Explicit <code>Schedule</code> Stages and Fallible Lifecycle</a></h2>
+<p>GPU applications in browsers, mobile apps, and XR headsets routinely face recoverable environment failures: lost GPU surfaces, suspended windows, invalid user styles, or exhausted memory budgets.</p>
+<ul>
+<li><strong>No non-test panics</strong>: production crates enforce <code>#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]</code> alongside <code>scripts/check-panics.mjs</code> in CI.</li>
+<li><strong>Fallible <code>Plugin::build</code> and <code>Stage::run</code></strong>: plugin installation returns <code>Result&lt;(), PluginError&gt;</code> and frame execution returns <code>StageResult</code>.</li>
+<li><strong>Guaranteed frame cleanup (<code>Schedule::run_after_failure</code>)</strong>: <code>RenderStageLabel::Cleanup</code> runs even when an earlier stage errors, ensuring transient per-frame <code>RenderPhase</code> vectors and tile retention budgets never leak across frames.</li>
+</ul>
+<h2 id="3-worker-offload-via-environment-and-transferables"><a class="header" href="#3-worker-offload-via-environment-and-transferables">3. Worker Offload via <code>Environment</code> and <code>Transferables</code></a></h2>
+<p>To hold <code>60–90+ FPS</code> (especially on Apple Vision Pro where missed CompositorServices deadlines cause visible judder), the render thread performs <strong>no</strong> network I/O, protobuf/MLT parsing, polygon tessellation, or font glyph rasterization:</p>
+<ul>
+<li><code>Environment</code> parameterizes <code>Kernel&lt;E&gt;</code> over <code>MapWindowConfig</code>, <code>AsyncProcedureCall</code>, <code>Scheduler</code>, and <code>OffscreenKernelEnvironment</code>.</li>
+<li><code>VectorTransferables</code>, <code>RasterTransferables</code>, and <code>DemTransferables</code> let native builds pass heap-allocated buffers directly across channels while single-threaded Web Worker builds serialize into FlatBuffers transferred via zero-copy <code>postMessage</code> transfer lists.</li>
+<li><code>SharedLoader</code> (<code>ResourceLoader</code>) centralizes caching and in-flight request coalescing so simultaneous tile/glyph/sprite requests from multiple workers share one HTTP connection pool and disk cache.</li>
+</ul>
+<h2 id="4-in-place-gpu-updates--byte-counted-uploads"><a class="header" href="#4-in-place-gpu-updates--byte-counted-uploads">4. In-Place GPU Updates &amp; Byte-Counted Uploads</a></h2>
+<p>Re-tessellating an entire vector tile whenever a hover state or theme changes wastes CPU and frame upload bandwidth. Instead:</p>
+<ol>
+<li><strong>Expression classification</strong> (<code>maplibre::style::expression</code>): every parsed Style Spec expression statically computes <code>output_type()</code>, <code>is_constant()</code>, <code>is_feature_constant()</code>, and <code>is_zoom_constant()</code>.</li>
+<li><strong>Targeted mutation classification</strong> (<code>maplibre::style::mutation</code>):
+<ul>
+<li>Uniform-only paint changes update GPU uniform bindings in <code>Prepare</code>.</li>
+<li>Feature-dependent paint, <code>feature-state</code>, or <code>global-state</code> changes re-evaluate feature paint columns (<code>vector::feature_paint</code>) against retained feature properties and write updated byte ranges into <code>BufferPool</code> via <code>UploadQueue::write_buffer</code>.</li>
+<li>Only layout or structural source changes trigger worker re-processing.</li>
+</ul>
+</li>
+<li><strong>Strict upload accounting</strong>: <code>UploadQueue</code> wraps <code>wgpu::Queue</code> and counts every uploaded byte per frame. <code>clippy.toml</code> forbids calling raw <code>wgpu::Queue::write_buffer</code> / <code>write_texture</code> outside <code>UploadQueue</code>, preventing hidden upload spikes.</li>
+</ol>
+<h2 id="5-unified-2d-globe-3d-terrain-and-stereo-xr-pipeline"><a class="header" href="#5-unified-2d-globe-3d-terrain-and-stereo-xr-pipeline">5. Unified 2D, Globe, 3D Terrain, and Stereo XR Pipeline</a></h2>
+<p>Rather than maintaining separate renderers for 2D Mercator, 3D globes, terrain, and headsets:</p>
+<ul>
+<li><strong>Coordinate &amp; projection separation</strong>: tile workers always tessellate into normalized tile-local coordinates (<code>0..EXTENT</code>). Vertex shaders project tile vertices into either flat Web Mercator, curved ECEF <code>Globe</code> coordinates, or displaced 3D <code>raster-dem</code> meshes, transitioning continuously across zoom levels.</li>
+<li><strong>Hybrid terrain draping</strong>: flat fill/line/raster layers drape onto 3D terrain via cached render-to-texture (<code>DrapePassNode</code> + <code>DrapeBudget</code>), while 3D extrusions (<code>fill-extrusion</code>) and screen-aligned <code>symbol</code> labels render directly in the main pass at sampled terrain elevations so vertical walls and crisp text never blur on steep slopes.</li>
+<li><strong>View abstraction (<code>ResolvedFrameView</code> &amp; <code>XrFrame</code>)</strong>: a standard window renders a single <code>ViewState</code>; <code>MultiViewFrame</code> iterates over N named <code>ViewSlotId</code> cameras; and <code>XrFrame</code> renders <code>N</code> eyes (<code>XrEye</code>) from a shared <code>ScenePlacement</code> while computing tile requests once across the combined stereo frustum.</li>
+</ul>
+<h2 id="6-ratcheted-conformance--static-architecture-guards"><a class="header" href="#6-ratcheted-conformance--static-architecture-guards">6. Ratcheted Conformance &amp; Static Architecture Guards</a></h2>
+<p>Correctness and architectural hygiene are enforced continuously in CI:</p>
+<ul>
+<li><strong>MapLibre Style Spec Conformance</strong>: <code>render-tests</code> runs 1,700+ pixel (<code>expected.png</code>) and query (<code>expected.json</code>) fixtures on software Vulkan (<code>lavapipe</code>) with a ratcheted <code>render-tests/ignores.json</code> baseline (any unexpected failure <em>or</em> unremoved newly-passing ignore fails CI), complemented by <code>maplibre/tests/expression_conformance.rs</code>.</li>
+<li><strong>Static guards</strong>: <code>scripts/check-file-length.mjs</code> (<code>&lt;= 500</code> lines per <code>.rs</code> file), <code>scripts/check-module-layout.py</code> (no <code>mod.rs</code>), <code>scripts/check-panics.mjs</code>, <code>scripts/check-wasm-deps.py</code> (forbids native OS/runtime/TLS crates in <code>wasm32-unknown-unknown</code> trees), and <code>cargo-deny</code> (<code>deny.toml</code>) keep crate boundaries clean as the engine grows.</li>
+</ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="caching"><a class="header" href="#caching">Caching</a></h1>
 <p>The caching for maplibre-rs is handled on the networking layer. This means that data which is fetched over slow IO is cached in
@@ -5709,6 +5805,13 @@ an <a href="https://github.com/mightycow/Sluggish">open implementation</a>.</p>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="library-packaging"><a class="header" href="#library-packaging">Library Packaging</a></h1>
+<p><code>maplibre</code> separates its platform-agnostic rendering and style engine from platform bindings so each target packages native idioms cleanly:</p>
+<ul>
+<li><strong><a href="#apple-1">Apple (iOS &amp; macOS)</a></strong> — Static archive and <code>.xcframework</code> integration for UIKit and AppKit hosts.</li>
+<li><strong><a href="#visionos">visionOS</a></strong> — Zero-copy Metal + CompositorServices stereo C ABI (<code>apple/visionos</code>) for ImmersiveSpace and windowed 3D orbit rendering on Apple Vision Pro.</li>
+<li><strong><a href="#android-1">Android</a></strong> — JNI / NDK native activity and AAR packaging.</li>
+<li><strong><a href="#web">Web</a></strong> — <code>cargo</code> + <code>wasm-bindgen</code> + <code>wasm-opt</code> + <code>esbuild</code> package (<code>web/lib/build.mjs</code>) emitting ESM, CJS, and IIFE bundles for WebGPU, WebGL2, and multithreaded Web Workers.</li>
+</ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="apple-1"><a class="header" href="#apple-1">Apple</a></h1>
 <p>On Apple maplibre-rs is packaged as:</p>
@@ -11619,6 +11722,72 @@ been removed.</li>
 <li>On macOS one needs to allow network access via <code>com.apple.security.network.client</code></li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="visionos"><a class="header" href="#visionos">visionOS</a></h1>
+<p>The standalone <a href="../../apple/visionos"><code>apple/visionos</code></a> crate packages <code>maplibre</code> as a static C archive (<code>libmaplibre_visionos.a</code>) paired with <a href="../../apple/visionos/maplibre_visionos.h"><code>apple/visionos/maplibre_visionos.h</code></a> for Swift and CompositorServices applications on Apple Vision Pro (<code>MapLibreVision</code>).</p>
+<p>Unlike windowed <code>winit</code> targets, visionOS ImmersiveSpace rendering is driven by Apple’s <code>LayerRenderer</code> frame loop. The host owns the <code>MTLDevice</code> and per-eye drawable textures, and hands them across the C ABI each frame with zero CPU readback.</p>
+<h2 id="building--checking"><a class="header" href="#building--checking">Building &amp; Checking</a></h2>
+<p>The visionOS targets (<code>aarch64-apple-visionos</code> and <code>aarch64-apple-visionos-sim</code>) are Tier 3 Rust targets and build standard library crates from source via <code>-Z build-std=std,panic_abort</code> using the nightly toolchain pinned in <code>apple/visionos/rust-toolchain.toml</code>:</p>
+<pre><code class="language-bash"># Typecheck and lint both device and simulator targets (matches CI):
+just check-visionos
+
+# Build release static libraries for simulator and device:
+cargo +nightly build --manifest-path apple/visionos/Cargo.toml \
+    -Z build-std=std,panic_abort --release --target aarch64-apple-visionos-sim
+cargo +nightly build --manifest-path apple/visionos/Cargo.toml \
+    -Z build-std=std,panic_abort --release --target aarch64-apple-visionos
+</code></pre>
+<p>The <code>MapLibreVision</code> Xcode project invokes <code>apple/visionos/MapLibreVision/Scripts/build-rust.sh</code> before linking to build the matching slice automatically.</p>
+<h2 id="c-abi-overview-maplibre_visionosh"><a class="header" href="#c-abi-overview-maplibre_visionosh">C ABI Overview (<code>maplibre_visionos.h</code>)</a></h2>
+<p>All functions in <code>maplibre_visionos.h</code> catch Rust panics at the FFI boundary, return explicit status codes (<code>0</code> on success, negative codes on invalid arguments, initialization failure, or frame error), and document ownership of every pointer.</p>
+<h3 id="shared-metal-device--queue"><a class="header" href="#shared-metal-device--queue">Shared Metal Device &amp; Queue</a></h3>
+<ul>
+<li><code>maplibre_visionos_new(metal_device, style_json, width, height, sample_count)</code> / <code>maplibre_visionos_new_configured(..., config)</code> wrap the caller’s <code>id&lt;MTLDevice&gt;</code> inside <code>wgpu_hal::api::Metal</code> via <code>HostGpu</code> so <code>maplibre</code> and the host Swift renderer share one GPU device and pipeline cache without copying textures across APIs.</li>
+<li><code>maplibre_visionos_command_queue(map)</code> returns the unretained <code>id&lt;MTLCommandQueue&gt;</code> <code>wgpu</code> submits on. Submitting the host’s post-processing and <code>LayerRenderer.Drawable.encodePresent</code> on this same queue guarantees FIFO execution after map passes without CPU stalls.</li>
+<li><code>MaplibreVisionOSConfig</code> configures <code>cache_dir</code> (disk HTTP cache), <code>bundle_dir</code> (offline <code>asset://</code> tile/glyph/sprite lookup), <code>color_srgb</code> (<code>BGRA8UnormSrgb</code> for <code>LayerRenderer</code>, <code>BGRA8Unorm</code> for offscreen/UI), and <code> skirts</code> (<code>MAPLIBRE_VISIONOS_SKIRTS_NONE</code> or <code>AUTO</code>).</li>
+</ul>
+<h3 id="stereo-xrframe--sceneplacement"><a class="header" href="#stereo-xrframe--sceneplacement">Stereo <code>XrFrame</code> &amp; <code>ScenePlacement</code></a></h3>
+<p><code>maplibre_visionos_render_stereo</code> drives <code>HeadlessMap::render_xr</code> (<code>maplibre::render::xr::XrFrame</code>):</p>
+<ul>
+<li><strong><code>MaplibreVisionOSPlacement</code></strong> maps directly to <code>ScenePlacement</code>:
+<ul>
+<li><code>anchor</code>: geographic <code>lon_deg</code>, <code>lat_deg</code>, and <code>altitude_m</code> standing at the origin of the map’s local East-North-Up scene frame.</li>
+<li><code>world_from_scene</code>: column-major <code>4x4</code> rigid + uniform-scale transform from scene metres into <code>LayerRenderer</code> tracking space. Tabletop globes and room-scale terrain use the exact same renderer; transitioning between them only updates <code>world_from_scene</code>.</li>
+</ul>
+</li>
+<li><strong><code>prefetch</code></strong>: optional destination <code>MaplibreVisionOSPlacement</code> during an animated camera flight. <code>PrefetchView</code> requests destination tiles ahead of arrival without requesting intermediate zoom levels swept through mid-flight.</li>
+<li><strong><code>request_overscan</code></strong>: factor (<code>&gt;= 1.0</code>) expanding each eye’s frustum tangents for tile selection so head rotation finds neighbouring tiles already resident in VRAM.</li>
+<li><strong><code>MaplibreVisionOSEye</code></strong> (<code>eyes[0..eye_count]</code>):
+<ul>
+<li><code>world_from_eye</code>: column-major <code>4x4</code> eye-to-world pose (<code>deviceAnchor.originFromAnchorTransform * view.transform</code>).</li>
+<li><code>left_tan</code>, <code>right_tan</code>, <code>up_tan</code>, <code>down_tan</code> (positive half-angle tangents from <code>LayerRenderer.Clock</code> / <code>View.tangents</code>) and <code>near_m</code>, <code>far_m</code> in world metres.</li>
+<li><code>color_texture</code>: <code>id&lt;MTLTexture&gt;</code> (<code>bgra8Unorm</code> or <code>bgra8Unorm_srgb</code>, created with <code>.shaderWrite</code> / <code>.renderTarget</code> and <code>.pixelFormatView</code> when <code>LayerRenderer</code> supplies a typeless/sRGB pair).</li>
+<li><code>msaa_texture</code>: optional multisample <code>id&lt;MTLTexture&gt;</code> resolved into <code>color_texture</code>.</li>
+<li><code>depth_texture</code>: optional <code>Depth32Float</code> <code>id&lt;MTLTexture&gt;</code> receiving reverse-Z depth (<code>1.0</code> at near, <code>0.0</code> at far) for visionOS compositor reprojection and hand occlusion.</li>
+</ul>
+</li>
+</ul>
+<h3 id="windowed-orbit-camera--spatial-raycasting"><a class="header" href="#windowed-orbit-camera--spatial-raycasting">Windowed Orbit Camera &amp; Spatial Raycasting</a></h3>
+<p>For volumetric or 2D window scenes alongside an ImmersiveSpace:</p>
+<ul>
+<li><code>maplibre_visionos_render_orbit</code> renders a single colour + optional depth target from <code>MaplibreVisionOSOrbitCamera</code> (<code>center_lon_deg</code>, <code>center_lat_deg</code>, <code>distance_m</code>, <code>pitch_deg</code>, <code>bearing_deg</code>, <code>fov_y_deg</code>).</li>
+<li><code>maplibre_visionos_screen_to_ground</code>, <code>maplibre_visionos_drag_orbit</code>, and <code>maplibre_visionos_move_anchor_to_screen</code> project gaze/pinch rays onto the 3D terrain surface or reference sphere/ellipsoid.</li>
+</ul>
+<h3 id="terrain-planetary-bodies--celestial-environment"><a class="header" href="#terrain-planetary-bodies--celestial-environment">Terrain, Planetary Bodies &amp; Celestial Environment</a></h3>
+<ul>
+<li><code>maplibre_visionos_terrain_elevation(map, lon_deg, lat_deg, &amp;out_meters)</code> samples loaded <code>raster-dem</code> tiles synchronously on the map thread for anchoring spatial pins and labels onto 3D relief.</li>
+<li><code>maplibre_visionos_set_body</code> switches planetary radius, terrain exaggeration, polar cap elevations (<code>PolarPoleElevations</code>), and procedural relief presets (Earth, Moon, Mars).</li>
+<li><code>maplibre_visionos_set_sky</code> and <code>maplibre_visionos_set_stars</code> feed ECEF sun/moon vectors (<code>maplibre::celestial::EcefDirection</code>), twilight bands, eclipse fractions, and stellar catalogues (<code>maplibre::starfield</code>) into the atmosphere and starfield passes.</li>
+<li><code>maplibre_visionos_register_image_provider</code> and <code>maplibre_visionos_invalidate_images</code> register C callbacks resolving missing <code>namespace:name</code> style icons on demand (e.g., SF Symbols rasterized on the Swift side).</li>
+</ul>
+<h2 id="diagnostics-memory-budgets--stability-gate"><a class="header" href="#diagnostics-memory-budgets--stability-gate">Diagnostics, Memory Budgets &amp; Stability Gate</a></h2>
+<ul>
+<li><strong>Memory pressure</strong>: <code>maplibre_visionos_set_available_memory(map, available_bytes)</code> feeds <code>os_proc_available_memory()</code> into <code>maplibre::render::memory_budget</code>, tightening tile cache retention before visionOS jetsams the process.</li>
+<li><strong>Frame timeline tracing</strong>: <code>maplibre_visionos_trace_enable</code>, <code>maplibre_visionos_trace_span</code>, <code>maplibre_visionos_trace_presentation</code>, <code>maplibre_visionos_trace_device</code>, and <code>maplibre_visionos_trace_export</code> record CPU/GPU stage timings, per-frame upload bytes, <code>LayerRenderer</code> presentation intervals, and thermal state to JSON.</li>
+<li><strong>Automated stability check</strong>: <code>scripts/check-immersive-stability.py</code> parses <code>[immersive-frame]</code> logs from simulator or device runs and fails if frame p95, consecutive over-budget bursts, memory growth, tile thrash, or camera smoothness regress beyond configured thresholds:</li>
+</ul>
+<pre><code class="language-bash">python3 scripts/check-immersive-stability.py immersive-run.log
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="android-1"><a class="header" href="#android-1">Android</a></h1>
 <h2 id="gradle-project-setup"><a class="header" href="#gradle-project-setup">Gradle Project Setup</a></h2>
 <p>In order to package an Android <code>.aar</code> archive we use
@@ -11633,255 +11802,81 @@ This native activity is referenced in the ´AndroidManifest.xml` by defining the
 <a href="https://github.com/maplibre/maplibre-rs/issues/28">Tracking Issue</a></p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="web"><a class="header" href="#web">Web</a></h1>
-<p>This document describes issues and challenges when packaging maplibre-rs as a npm package.</p>
-<h2 id="required-formats"><a class="header" href="#required-formats">Required Formats</a></h2>
-<h3 id="esm"><a class="header" href="#esm">ESM</a></h3>
-<p>The ESM module format is the standard nowadays which should be followed. If a JS bundler encounters an ESM
-module it can resolve WebAssembly files or WebWorkers dynamically.
-The following syntax is used to resolve referenced WebWorkers:</p>
-<pre><code class="language-ts">new Worker(new URL("./multithreaded-pool.worker.ts", import.meta.url), {
-    type: 'module'
-});
-</code></pre>
-<p>Similarly, the following works:</p>
-<pre><code class="language-ts">new URL('index_bg.wasm', import.meta.url);
-</code></pre>
-<h3 id="iife-immediately-invoked-function-expression"><a class="header" href="#iife-immediately-invoked-function-expression">IIFE (immediately-invoked function expression)</a></h3>
-<blockquote>
-<p>This format is used when including maplibre-rs in a <code>&lt;script&gt;</code> tag. The library is “written” onto the window/global
-object. This allows quick prototyping/playgrounds/experiments using maplibre-rs.</p>
-</blockquote>
-<p>In order to support this we need to create a bundle which works on any modern browser. Additionally, a WASM file and
-WebWorker needs to be deployed at a predictable path, because there is no bundler active which manages assets. Users of
-these libraries have to specify where WASM or non-inlined WebWorkers are located.</p>
-<p>Both assets could be inlined theoretically. This is common for WebWorkers, but not for WASM files.</p>
-<h3 id="umd"><a class="header" href="#umd">UMD</a></h3>
-<blockquote>
-<p>UMD modules are needed when creating a library which should run in Node as well as browsers. This is not a use case
-for maplibre-rs. If we support node, then we probably would ship a separate package called “maplibre-rs-node” which
-bundles to CJS directly.</p>
-</blockquote>
-<h3 id="cjscommonjs"><a class="header" href="#cjscommonjs">CJS/CommonJS</a></h3>
-<blockquote>
-<p>Not needed for the browser build of maplibre-rs, possibly needed when supporting Node</p>
-</blockquote>
-<p>With a CommonJS module its is not possible for bundlers to dynamically resolve WebWorkers or WASM files.</p>
-<p>The <code>import.meta.url</code> token can not exist in a CommonJS module. Therefore, bundlers which encounter a CommonJS module
-have to use a different mechanism of resolving files.</p>
-<p>Generally, we do not need to support CommonJS, because we are not targeting Node with maplibre-rs. It’s properly good to
-support it as a fallback though, for bundlers which can not deal with ESM modules yet.
-This is for example true for test runners like Jest which require that dependencies are available as CJS module.</p>
-<h2 id="wasm-pack-output"><a class="header" href="#wasm-pack-output">wasm-pack output</a></h2>
-<p>wasm-pack can output <a href="https://rustwasm.github.io/docs/wasm-pack/commands/build.html#target">multiple formats</a>. The <code>web</code>
-and <code>bundler</code> outputs offer the most modular modules.
-Unfortunately, the
-function <a href="https://docs.rs/wasm-bindgen/0.2.80/src/wasm_bindgen/lib.rs.html#1208-1217">wasm_bindgen::module()</a>
-is only supported in <code>web</code> and <code>no-modules</code>. We currently are using this in order to send loaded instances
-of <code>WebAssembly.Module</code> to WebWorkers. <code>nodejs</code> should not be used because MapLibre does not target Node.
-Therefore, we should stick to the <code>web</code> output format.</p>
-<h2 id="required-features"><a class="header" href="#required-features">Required Features</a></h2>
+<p>The browser distribution lives in <code>web/</code> (the Rust <code>wasm32-unknown-unknown</code> cdylib/rlib crate) and <code>web/lib/</code> (the TypeScript host wrapper and <code>build.mjs</code> bundler). Instead of <code>wasm-pack</code>, Webpack, or Parcel, packaging is driven directly by <code>web/lib/build.mjs</code> using <code>cargo</code>, <code>wasm-bindgen</code>, <code>wasm-opt</code> (<code>binaryen</code>), <code>esbuild</code>, and <code>tsc</code>.</p>
+<h2 id="build-pipeline-weblibbuildmjs"><a class="header" href="#build-pipeline-weblibbuildmjs">Build Pipeline (<code>web/lib/build.mjs</code>)</a></h2>
+<p>Running <code>just web-lib build</code> (or <code>node build.mjs</code> inside <code>web/lib/</code>) executes five deterministic stages:</p>
+<ol>
+<li>
+<p><strong>Exact <code>wasm-bindgen-cli</code> version check (<code>checkWasmBindgenVersion</code>)</strong>:
+Reads the exact pinned <code>wasm-bindgen = "=..."</code> version from the workspace <code>Cargo.toml</code> and verifies <code>wasm-bindgen --version</code> matches before compiling, preventing subtle JS/Wasm ABI mismatches.</p>
+</li>
+<li>
+<p><strong>Rust compilation (<code>cargo build --target wasm32-unknown-unknown</code>)</strong>:
+Builds <code>web</code> with <code>--profile wasm-dev</code> (default) or <code>--profile wasm-release</code> (<code>--release</code>):</p>
 <ul>
-<li>WASM Bundling: Make the WASM binary available to users of the maplibre-rs library</li>
-<li>WebWorker Bundling: Make the WebWorker available to users of the maplibre-rs library. This could also be achieved by inlining.</li>
-<li>WebWorker Inlining: Inline the WebWorker bundle in the library bundle as a string.</li>
-<li>Predictable Paths: Without predictable paths, it’s difficult for users to reference the wasm file directly from the <code>node_modules</code> directory if required.</li>
+<li><strong>WebGPU (default)</strong>: compiles <code>web</code> against <code>wgpu</code>’s WebGPU backend.</li>
+<li><strong>WebGL2 (<code>--webgl</code>)</strong>: passes <code>--features web-webgl</code> to enable <code>wgpu</code> WebGL2 support and downlevel limits.</li>
+<li><strong>Multithreaded shared-memory workers (<code>--multithreaded</code>)</strong>: passes <code>-Z build-std=std,panic_abort</code> and configures <code>target.wasm32-unknown-unknown.rustflags</code> with:
+<ul>
+<li><code>-C target-feature=+atomics,+bulk-memory,+mutable-globals</code></li>
+<li><code>-C link-args=--shared-memory --import-memory --max-memory=209715200</code></li>
+<li><code>-C link-args=--export=__heap_base --export=__wasm_init_tls --export=__tls_size --export=__tls_align --export=__tls_base</code></li>
 </ul>
-<h2 id="bundler-feature-comparison"><a class="header" href="#bundler-feature-comparison">Bundler Feature Comparison</a></h2>
+</li>
+</ul>
+</li>
+<li>
+<p><strong><code>wasm-bindgen</code> &amp; automated compatibility checks</strong>:
+Runs <code>wasm-bindgen --target web --typescript --out-name maplibre --out-dir src/wasm</code> (plus <code>--debug</code> in dev mode). Using <code>--target web</code> preserves <code>wasm_bindgen::module()</code> so compiled <code>WebAssembly.Module</code> handles can be posted directly to Web Workers. Immediately after binding generation, <code>build.mjs</code> runs <code>node --test test/wasm-instance.test.mjs test/webgpu-compat.test.mjs</code> to validate Wasm instantiation and WebGPU adapter/descriptor compatibility.</p>
+</li>
+<li>
+<p><strong>Release binary optimization (<code>wasm-opt</code>)</strong>:
+When <code>--release</code> is passed, optimizes <code>src/wasm/maplibre_bg.wasm</code> in place via <code>wasm-opt -O</code> (provided by the <code>binaryen</code> npm devDependency).</p>
+</li>
+<li>
+<p><strong>JavaScript bundling (<code>esbuild</code>) &amp; TypeScript declarations (<code>tsc</code>)</strong>:
+Bundles <code>src/index.ts</code> for <code>platform: "browser"</code> with <code>define: { WEBGL, MULTITHREADED }</code>, <code>assetNames: "assets/[name]"</code>, and two plugins:</p>
+<ul>
+<li><code>esbuild-plugin-inline-worker</code> — bundles and inlines Web Worker entrypoints (both message-passing <code>FlatBufferTransferable</code> workers and shared-memory pool workers) as ES2022 CJS worker blobs so consumers do not have to configure separate worker asset routes.</li>
+<li><code>@chialab/esbuild-plugin-meta-url</code> — resolves <code>new URL(..., import.meta.url)</code> references (such as <code>maplibre_bg.wasm</code>) and emits the <code>.wasm</code> binary to <code>dist/esbuild-&lt;format&gt;/assets/</code> with portable runtime URL resolution.</li>
+</ul>
+<p>Finally, <code>tsc -m es2022 -outDir dist/ts --declaration --emitDeclarationOnly</code> writes TypeScript <code>.d.ts</code> declarations to <code>web/lib/dist/ts/</code>.</p>
+</li>
+</ol>
+<h2 id="output-bundle-formats"><a class="header" href="#output-bundle-formats">Output Bundle Formats</a></h2>
+<p><code>web/lib/build.mjs</code> supports three output module formats, selectable individually or together:</p>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>Bundler</th><th><em>ESM</em></th><th><em>IIFE</em></th><th>CJS</th><th>UMD</th><th><em>WebWorker Inlining</em></th><th>Web Worker Bundling</th><th><em>WASM Bundling</em></th><th><em>Predictable Paths</em></th><th>Inlining Environment Variables</th></tr>
+<tr><th>Flag</th><th>Output Path</th><th>Format Details</th></tr>
 </thead>
 <tbody>
-<tr><td>Babel 1)</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>✅</td><td>✅</td></tr>
-<tr><td>TypeScript 1)</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>✅</td><td>❌</td></tr>
-<tr><td>Webpack</td><td>❌ 4)</td><td>❓</td><td>❌</td><td>❓</td><td>❌ 2)</td><td>✅</td><td>✅</td><td>❓</td><td>✅</td></tr>
-<tr><td>Parcel</td><td>✅</td><td>❌</td><td>✅</td><td>❌</td><td>🛠️ 3)</td><td>✅</td><td>✅</td><td>❌ 5)</td><td>✅</td></tr>
-<tr><td>ESBuild</td><td>✅</td><td>✅</td><td>✅</td><td>❌</td><td>✅ 6)</td><td>❓</td><td>✅ 6)</td><td>✅</td><td>✅</td></tr>
-<tr><td>Rollup</td><td>❓</td><td>❓</td><td>❓</td><td>❓</td><td>❓</td><td>❓</td><td>❓</td><td>❓</td><td>✅</td></tr>
+<tr><td><code>--esm</code> <em>(default)</em></td><td><code>web/lib/dist/esbuild-esm/module.js</code></td><td>Standard ES module bundle for modern bundlers and native <code>&lt;script type="module"&gt;</code> imports. Enabled automatically when neither <code>--cjs</code> nor <code>--iife</code> is specified.</td></tr>
+<tr><td><code>--cjs</code></td><td><code>web/lib/dist/esbuild-cjs/module.js</code></td><td>CommonJS bundle for legacy bundlers and CommonJS-based test runners.</td></tr>
+<tr><td><code>--iife</code></td><td><code>web/lib/dist/esbuild-iife/module.js</code></td><td>Immediately-invoked function expression exposing the global <code>window.maplibre</code> namespace for <code>&lt;script&gt;</code> tag embeds and standalone playgrounds, resolving <code>assets/maplibre_bg.wasm</code> relative to <code>document.currentScript.src</code>.</td></tr>
 </tbody>
 </table>
 </div>
-<p>Features in <em><strong>italic</strong></em>s are required for maplibre-rs.</p>
-<blockquote>
-<ol>
-<li>Technically not a bundler but can be used to emit ES modules</li>
-<li>Was Supported in Webpack 4, but currently is not supported</li>
-<li>https://github.com/parcel-bundler/parcel/issues/8004</li>
-<li>As of the time of writing Webpack can not output ESM libraries</li>
-<li>Plugins exist, but they don’t work reliably</li>
-<li>Plugins exist, and work reliably</li>
-</ol>
-</blockquote>
-<h3 id="esbuild"><a class="header" href="#esbuild">ESBuild</a></h3>
-<p>ESBuild supports CJS, ESM and IIFI modules equally well. Plugins exist for WebWorker inlining and resolving assets
-through <code>import.meta.url</code>. The plugin quality seems to be superior compared to Parcel. It is also very fast compared to
-all other bundlers.</p>
-<ul>
-<li>IIFI: The esbuild bundler translates to <code>new URL('index_bg.wasm', import.meta.url);</code> to
-<pre><code class="language-js">var __currentScriptUrl__ = document.currentScript &amp;&amp; document.currentScript.src || document.baseURI;
-new URL("./assets/index_bg.wasm?emit=file", __currentScriptUrl__);
+<h2 id="backend--threading-matrix"><a class="header" href="#backend--threading-matrix">Backend &amp; Threading Matrix</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Variant</th><th>Command</th><th>Browser Requirements</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>WebGPU (single-memory workers)</strong></td><td><code>just web-lib build --release</code></td><td>Browser with WebGPU (<code>navigator.gpu</code>); Web Workers exchange decoded tiles via zero-copy transferable buffers (<code>FlatBufferTransferable</code>).</td></tr>
+<tr><td><strong>WebGL2 (single-memory workers)</strong></td><td><code>just web-lib build --release --webgl</code></td><td>Any WebGL2 browser; works without special cross-origin isolation headers.</td></tr>
+<tr><td><strong>WebGL2 + Multithreaded Wasm</strong></td><td><code>just web-lib build --release --webgl --multithreaded</code></td><td>Requires nightly Rust (<code>-Z build-std</code>) at build time and a <a href="https://developer.mozilla.org/en-US/docs/Web/API/isSecureContext">secure context</a> with <a href="https://developer.mozilla.org/en-US/docs/Web/API/crossOriginIsolated"><code>crossOriginIsolated</code></a> (<code>Cross-Origin-Opener-Policy: same-origin</code> and <code>Cross-Origin-Embedder-Policy: require-corp</code>) at runtime for <code>SharedArrayBuffer</code>.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Direct <code>build.mjs</code> invocations accept any combination of flags:</p>
+<pre><code class="language-bash">cd web/lib
+npm ci
+node build.mjs --release --webgl --esm --cjs --iife
 </code></pre>
-</li>
-</ul>
-<p>See config in <code>web/lib/build.mjs</code> for an example usage.</p>
-<h3 id="babel--typescript"><a class="header" href="#babel--typescript">Babel &amp; TypeScript</a></h3>
-<p>Babel and TypeScript both can produce ESM modules, but they <strong>fail with transforming references within the source code</strong>
-like <code>new URL("./multithreaded-pool.worker.ts", import.meta.url)</code>. There exist some Babel plugins, but none of them is stable.
-Therefore, we actually need a proper bundler which supports outputting ESM modules.
-The only stable solution to this is Parcel. Parcel also has good documentation around the bundling of WebWorkers.</p>
-<h3 id="webpack"><a class="header" href="#webpack">WebPack</a></h3>
-<p>WebPack supports older module formats like CommonJS or UMD very well. It falls short when bundling the format ESM
-format which is not yet stable. It also does not support inlining WebWorkers in version 5. The wasm-pack plugin
-for WebPack makes including Cargo projects easy.</p>
-<ul>
-<li>CJS: Webpack translates <code>new URL('index_bg.wasm', import.meta.url);</code> to something that is equivalent to <code>'./index_bg.wasm'</code>
-. It just expects that assets are resolvable from the current file.</li>
-</ul>
-<p>Example scripts for <code>package.json</code>:</p>
-<pre><code class="language-json">{
-  "scripts": {
-    "webpack": "webpack --mode=development",
-    "webpack-webgl": "npm run build -- --env webgl",
-    "webpack-production": "webpack --mode=production",
-    "webpack-webgl-production": "npm run production-build -- --env webgl"
-  }
-}
-</code></pre>
-<p>Example config:</p>
-<pre><code class="language-js">const path = require("path");
-const webpack = require("webpack");
-const WasmPackPlugin = require("@wasm-tool/wasm-pack-plugin");
-
-let dist = path.join(__dirname, 'dist/maplibre-rs');
-module.exports = (env) =&gt; ({
-    mode: "development",
-    entry: "./src/index.ts",
-    experiments: {
-        syncWebAssembly: true,
-    },
-    performance: {
-        maxEntrypointSize: 400000,
-        maxAssetSize: 400000000,
-    },
-    output: {
-        path: dist,
-        filename: "maplibre-rs.js",
-        library: {
-            name: 'maplibre_rs',
-            type: 'umd',
-        },
-    },
-    module: {
-        rules: [
-            {
-                test: /\.ts$/,
-                exclude: /node_modules/,
-                use: [
-                    {
-                        loader: 'ts-loader',
-                        options: {}
-                    }
-                ]
-            },
-        ],
-    },
-    resolve: {
-        extensions: ['.ts', '.js'],
-    },
-    plugins: [
-        new webpack.DefinePlugin({
-            'process.env.WEBGL': !!env.webgl
-        }),
-        new WasmPackPlugin({
-            crateDirectory: path.resolve(__dirname, '../'),
-
-            // Check https://rustwasm.github.io/wasm-pack/book/commands/build.html for
-            // the available set of arguments.
-            //
-            // Optional space delimited arguments to appear before the wasm-pack
-            // command. Default arguments are `--verbose`.
-            //args: '--log-level warn',
-            // Default arguments are `--typescript --target browser --mode normal`.
-            extraArgs: ` --target web -- . -Z build-std=std,panic_abort ${env.webgl ? '--features web-webgl' : ''} ${env.tracing ? '--features trace' : ''}`,
-
-            // Optional array of absolute paths to directories, changes to which
-            // will trigger the build.
-            // watchDirectories: [
-            //   path.resolve(__dirname, "another-crate/src")
-            // ],
-
-            // The same as the `--out-dir` option for `wasm-pack`
-            outDir: path.resolve(__dirname, 'src/wasm-pack'),
-
-            // The same as the `--out-name` option for `wasm-pack`
-            // outName: "index",
-
-            // If defined, `forceWatch` will force activate/deactivate watch mode for
-            // `.rs` files.
-            //
-            // The default (not set) aligns watch mode for `.rs` files to Webpack's
-            // watch mode.
-            // forceWatch: true,
-
-            // If defined, `forceMode` will force the compilation mode for `wasm-pack`
-            //
-            // Possible values are `development` and `production`.
-            //
-            // the mode `development` makes `wasm-pack` build in `debug` mode.
-            // the mode `production` makes `wasm-pack` build in `release` mode.
-            // forceMode: "production",
-
-            // Controls plugin output verbosity, either 'info' or 'error'.
-            // Defaults to 'info'.
-            // pluginLogLevel: 'info'
-        }),
-    ]
-});
-</code></pre>
-<h3 id="parcel"><a class="header" href="#parcel">Parcel</a></h3>
-<p>Parcel supports CommonJS and ESM modules equally good. The documentation about <code>import.meta.url</code> is very good. In other
-bundlers documentations around this feature is missing. In the latest Parcel version inlining WebWorkers is not working.</p>
-<ul>
-<li>CJS: The Parcel bundler translates to <code>new URL('index_bg.wasm', import.meta.url);</code>
-to <code>new URL("index_bg.wasm", "file:" + __filename);</code>
-While depending on <code>file:</code> and <code>filename</code> works for NodeJS, it is unsupported in the browser.</li>
-</ul>
-<p>Example scripts for <code>package.json</code>:</p>
-<pre><code class="language-json">{
-  "scripts": {
-    "parcel": "npm run clean &amp;&amp; npm run wasm-pack &amp;&amp; WEBGL=false parcel build --no-cache src/index.ts",
-    "parcel-webgl": "npm run clean &amp;&amp; FEATURES=web-webgl npm run wasm-pack &amp;&amp; WEBGL=true parcel build --no-cache src/index.ts"
-  }
-}
-</code></pre>
-<p>Example config in `package.json:</p>
-<pre><code class="language-json">{
-  "module": "dist/parcel-esm/module.js",
-  "main": "dist/parcel-cjs/main.js",
-  "types": "dist/parcel/types.d.ts",
-  "targets": {
-    "main": {
-      "distDir": "./dist/parcel-cjs",
-      "context": "browser",
-      "outputFormat": "commonjs"
-    },
-    "module": {
-      "distDir": "./dist/parcel-esm",
-      "context": "browser",
-      "outputFormat": "esmodule"
-    }
-  },
-  "@parcel/transformer-js": {
-    "inlineFS": false,
-    "inlineEnvironment": [
-      "WEBGL"
-    ]
-  }
-}
-</code></pre>
-<h3 id="rollup"><a class="header" href="#rollup">Rollup</a></h3>
-<p>Not yet evaluated</p>
+<h2 id="wasm-dependency-hygiene-guard"><a class="header" href="#wasm-dependency-hygiene-guard">Wasm Dependency Hygiene Guard</a></h2>
+<p>Because <code>maplibre</code> disables <code>native-io</code> on <code>wasm32-unknown-unknown</code>, no native async runtime, socket, TLS, or SQLite crate is permitted in the browser build. CI enforces this on every pull request via <code>python3 scripts/check-wasm-deps.py</code>, which inspects <code>cargo tree -p web --target wasm32-unknown-unknown -e normal</code> (both default WebGPU and <code>--features web-webgl</code>) and fails if <code>tokio</code>, <code>mio</code>, <code>hyper</code>, <code>rusqlite</code>, <code>openssl</code>, <code>openssl-sys</code>, <code>rustls</code>, <code>socket2</code>, <code>curl</code>, <code>reqwest-middleware</code>, or <code>http-cache-reqwest</code> appear anywhere in the normal dependency graph (or if <code>reqwest</code> appears in <code>maplibre</code>’s own <code>wasm32</code> graph).</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="appendix"><a class="header" href="#appendix">Appendix</a></h1>
 <h2 id="goals"><a class="header" href="#goals">Goals</a></h2>

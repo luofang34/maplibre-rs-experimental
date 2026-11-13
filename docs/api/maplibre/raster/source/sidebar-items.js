@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["RasterSourceId"]};
+window.SIDEBAR_ITEMS = {};

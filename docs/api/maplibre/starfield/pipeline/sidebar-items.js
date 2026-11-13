@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"fn":["resource_system"],"struct":["StarfieldPipeline","StarfieldShader"]};

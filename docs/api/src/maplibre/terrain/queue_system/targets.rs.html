@@ -201,7 +201,7 @@
 <a href=#201 id=201 data-nosnippet>201</a>    style: <span class="kw-2">&amp;</span>Style,
 <a href=#202 id=202 data-nosnippet>202</a>    view_state: <span class="kw-2">&amp;</span>ViewState,
 <a href=#203 id=203 data-nosnippet>203</a>    dem_tile_size: f64,
-<a href=#204 id=204 data-nosnippet>204</a>) -&gt; <span class="kw">impl </span>Fn(<span class="kw-2">&amp;</span>WorldTileCoords) -&gt; f64 {
+<a href=#204 id=204 data-nosnippet>204</a>) -&gt; <span class="kw">impl </span>Fn(<span class="kw-2">&amp;</span>WorldTileCoords) -&gt; f64 + <span class="kw">use</span>&lt;&gt; {
 <a href=#205 id=205 data-nosnippet>205</a>    <span class="kw">enum </span>OrderMode {
 <a href=#206 id=206 data-nosnippet>206</a>        Spherical(cgmath::Vector3&lt;f64&gt;),
 <a href=#207 id=207 data-nosnippet>207</a>        Planar([f64; <span class="number">2</span>]),

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["TransportClassification"],"fn":["classify_error_chain","classify_middleware","classify_single_error","is_transient_io_error"]};

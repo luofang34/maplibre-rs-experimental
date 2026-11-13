@@ -37,10 +37,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-6fbf5afb.js";
+            window.path_to_searchindex_js = "../searchindex-04576098.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-d6816547.js"></script>
+        <script src="../toc-ae8692d6.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -191,11 +191,16 @@
 <div class="example-code-tabs">
 <pre class="playground"><code class="language-rust no_run"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
-</span>// The same filter update from Rust in the browser, through the handle `web::run_map`
-// resolves to.
+</span>// Dynamic layer filter updates through `MapHandle`.
 use maplibre::{map::handle::MapHandle, style::Style};
+#[cfg(not(target_arch = "wasm32"))]
+use maplibre_winit::NativeEnvironment as CurrentEnvironment;
 use serde_json::json;
+#[cfg(target_arch = "wasm32")]
 use web::{CurrentEnvironment, JSError};
+
+#[cfg(not(target_arch = "wasm32"))]
+type JSError = Box&lt;dyn std::error::Error&gt;;
 
 pub fn build_style(base: Style) -&gt; Result&lt;Style, serde_json::Error&gt; {
     let mut document = serde_json::to_value(base)?;

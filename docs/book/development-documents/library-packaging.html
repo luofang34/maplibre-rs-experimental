@@ -37,10 +37,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-6fbf5afb.js";
+            window.path_to_searchindex_js = "../searchindex-04576098.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-d6816547.js"></script>
+        <script src="../toc-ae8692d6.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -183,6 +183,13 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="library-packaging"><a class="header" href="#library-packaging">Library Packaging</a></h1>
+<p><code>maplibre</code> separates its platform-agnostic rendering and style engine from platform bindings so each target packages native idioms cleanly:</p>
+<ul>
+<li><strong><a href="./library-packaging/apple.html">Apple (iOS &amp; macOS)</a></strong> — Static archive and <code>.xcframework</code> integration for UIKit and AppKit hosts.</li>
+<li><strong><a href="./library-packaging/visionos.html">visionOS</a></strong> — Zero-copy Metal + CompositorServices stereo C ABI (<code>apple/visionos</code>) for ImmersiveSpace and windowed 3D orbit rendering on Apple Vision Pro.</li>
+<li><strong><a href="./library-packaging/android.html">Android</a></strong> — JNI / NDK native activity and AAR packaging.</li>
+<li><strong><a href="./library-packaging/web.html">Web</a></strong> — <code>cargo</code> + <code>wasm-bindgen</code> + <code>wasm-opt</code> + <code>esbuild</code> package (<code>web/lib/build.mjs</code>) emitting ESM, CJS, and IIFE bundles for WebGPU, WebGL2, and multithreaded Web Workers.</li>
+</ul>
 
                     </main>
 

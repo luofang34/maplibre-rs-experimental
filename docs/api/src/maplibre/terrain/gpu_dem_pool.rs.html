@@ -7,7 +7,7 @@
 <a href=#7 id=7 data-nosnippet>7</a>
 <a href=#8 id=8 data-nosnippet>8</a><span class="kw">use crate</span>::{
 <a href=#9 id=9 data-nosnippet>9</a>    coords::WorldTileCoords,
-<a href=#10 id=10 data-nosnippet>10</a>    raster::RasterSourceId,
+<a href=#10 id=10 data-nosnippet>10</a>    io::tile_sources::RasterSourceId,
 <a href=#11 id=11 data-nosnippet>11</a>    render::{resource::Texture, settings::Msaa, upload_queue::UploadQueue},
 <a href=#12 id=12 data-nosnippet>12</a>    terrain::{DemRevision, DemTile, LoadedDem},
 <a href=#13 id=13 data-nosnippet>13</a>};
@@ -26,7 +26,7 @@
 <a href=#26 id=26 data-nosnippet>26</a>}
 <a href=#27 id=27 data-nosnippet>27</a>
 <a href=#28 id=28 data-nosnippet>28</a><span class="doccomment">/// Canonical GPU elevation texture registry shared by [`TerrainResources`](super::resources::TerrainResources)
-<a href=#29 id=29 data-nosnippet>29</a>/// and [`RasterResources`](crate::raster::resource::RasterResources).
+<a href=#29 id=29 data-nosnippet>29</a>/// and `RasterResources`.
 <a href=#30 id=30 data-nosnippet>30</a>///
 <a href=#31 id=31 data-nosnippet>31</a>/// A `raster-dem` source shared by 3D terrain, `hillshade`, and `color-relief` allocates and
 <a href=#32 id=32 data-nosnippet>32</a>/// uploads each `(source, coords)` DEM texture once on the GPU, updating it in place via
@@ -192,36 +192,38 @@
 <a href=#192 id=192 data-nosnippet>192</a>    <span class="kw">use crate</span>::{
 <a href=#193 id=193 data-nosnippet>193</a>        coords::{WorldTileCoords, ZoomLevel},
 <a href=#194 id=194 data-nosnippet>194</a>        headless::create_headless_renderer,
-<a href=#195 id=195 data-nosnippet>195</a>        raster::RasterSourceId,
+<a href=#195 id=195 data-nosnippet>195</a>        io::tile_sources::RasterSourceId,
 <a href=#196 id=196 data-nosnippet>196</a>        terrain::{DemTile, LoadedDem},
 <a href=#197 id=197 data-nosnippet>197</a>    };
 <a href=#198 id=198 data-nosnippet>198</a>
-<a href=#199 id=199 data-nosnippet>199</a>    <span class="attr">#[tokio::test]
-<a href=#200 id=200 data-nosnippet>200</a>    </span><span class="kw">async fn </span>gpu_dem_pool_evicts_least_recently_used_beyond_capacity() {
-<a href=#201 id=201 data-nosnippet>201</a>        <span class="kw">let </span>(<span class="kw">_</span>, renderer) = create_headless_renderer(<span class="number">32</span>, <span class="number">32</span>, <span class="prelude-val">None</span>)
-<a href=#202 id=202 data-nosnippet>202</a>            .<span class="kw">await
-<a href=#203 id=203 data-nosnippet>203</a>            </span>.expect(<span class="string">"renderer"</span>);
-<a href=#204 id=204 data-nosnippet>204</a>        <span class="kw">let </span><span class="kw-2">mut </span>pool = GpuDemPool::with_capacity(<span class="number">2</span>);
-<a href=#205 id=205 data-nosnippet>205</a>        <span class="kw">let </span>source = RasterSourceId::from(<span class="string">"dem"</span>);
-<a href=#206 id=206 data-nosnippet>206</a>        <span class="kw">let </span>img = image::RgbaImage::new(<span class="number">4</span>, <span class="number">4</span>);
-<a href=#207 id=207 data-nosnippet>207</a>        <span class="kw">let </span>dem = LoadedDem::new(
-<a href=#208 id=208 data-nosnippet>208</a>            DemTile::from_image(<span class="kw-2">&amp;</span>img, [<span class="number">256.0</span>, <span class="number">1.0</span>, <span class="number">1.0 </span>/ <span class="number">256.0</span>, -<span class="number">32768.0</span>]).expect(<span class="string">"dem"</span>),
-<a href=#209 id=209 data-nosnippet>209</a>        );
-<a href=#210 id=210 data-nosnippet>210</a>        <span class="kw">let </span>[t0, t1, t2] = [<span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>].map(|x| WorldTileCoords::from((x, <span class="number">0</span>, ZoomLevel::new(<span class="number">4</span>))));
-<a href=#211 id=211 data-nosnippet>211</a>
-<a href=#212 id=212 data-nosnippet>212</a>        pool.upload(<span class="kw-2">&amp;</span>renderer.device, <span class="kw-2">&amp;</span>renderer.queue, <span class="kw-2">&amp;</span>source, t0, <span class="kw-2">&amp;</span>dem);
-<a href=#213 id=213 data-nosnippet>213</a>        pool.upload(<span class="kw-2">&amp;</span>renderer.device, <span class="kw-2">&amp;</span>renderer.queue, <span class="kw-2">&amp;</span>source, t1, <span class="kw-2">&amp;</span>dem);
-<a href=#214 id=214 data-nosnippet>214</a>        <span class="comment">// Touch t0 so t1 becomes the least recently used entry.
-<a href=#215 id=215 data-nosnippet>215</a>        </span><span class="macro">assert!</span>(pool.get(<span class="kw-2">&amp;</span>source, t0).is_some());
-<a href=#216 id=216 data-nosnippet>216</a>        pool.upload(<span class="kw-2">&amp;</span>renderer.device, <span class="kw-2">&amp;</span>renderer.queue, <span class="kw-2">&amp;</span>source, t2, <span class="kw-2">&amp;</span>dem);
-<a href=#217 id=217 data-nosnippet>217</a>
-<a href=#218 id=218 data-nosnippet>218</a>        <span class="macro">assert_eq!</span>(pool.texture_count(), <span class="number">2</span>);
-<a href=#219 id=219 data-nosnippet>219</a>        <span class="macro">assert!</span>(
-<a href=#220 id=220 data-nosnippet>220</a>            pool.get(<span class="kw-2">&amp;</span>source, t0).is_some(),
-<a href=#221 id=221 data-nosnippet>221</a>            <span class="string">"recently touched DEM stays"
-<a href=#222 id=222 data-nosnippet>222</a>        </span>);
-<a href=#223 id=223 data-nosnippet>223</a>        <span class="macro">assert!</span>(pool.get(<span class="kw-2">&amp;</span>source, t2).is_some(), <span class="string">"newly uploaded DEM stays"</span>);
-<a href=#224 id=224 data-nosnippet>224</a>        <span class="macro">assert!</span>(pool.get(<span class="kw-2">&amp;</span>source, t1).is_none(), <span class="string">"oldest DEM was evicted"</span>);
-<a href=#225 id=225 data-nosnippet>225</a>    }
-<a href=#226 id=226 data-nosnippet>226</a>}
+<a href=#199 id=199 data-nosnippet>199</a>    <span class="attr">#[test]
+<a href=#200 id=200 data-nosnippet>200</a>    </span><span class="kw">fn </span>gpu_dem_pool_evicts_least_recently_used_beyond_capacity() {
+<a href=#201 id=201 data-nosnippet>201</a>        futures::executor::block_on(<span class="kw">async </span>{
+<a href=#202 id=202 data-nosnippet>202</a>            <span class="kw">let </span>(<span class="kw">_</span>, renderer) = create_headless_renderer(<span class="number">32</span>, <span class="number">32</span>, <span class="prelude-val">None</span>)
+<a href=#203 id=203 data-nosnippet>203</a>                .<span class="kw">await
+<a href=#204 id=204 data-nosnippet>204</a>                </span>.expect(<span class="string">"renderer"</span>);
+<a href=#205 id=205 data-nosnippet>205</a>            <span class="kw">let </span><span class="kw-2">mut </span>pool = GpuDemPool::with_capacity(<span class="number">2</span>);
+<a href=#206 id=206 data-nosnippet>206</a>            <span class="kw">let </span>source = RasterSourceId::from(<span class="string">"dem"</span>);
+<a href=#207 id=207 data-nosnippet>207</a>            <span class="kw">let </span>img = image::RgbaImage::new(<span class="number">4</span>, <span class="number">4</span>);
+<a href=#208 id=208 data-nosnippet>208</a>            <span class="kw">let </span>dem = LoadedDem::new(
+<a href=#209 id=209 data-nosnippet>209</a>                DemTile::from_image(<span class="kw-2">&amp;</span>img, [<span class="number">256.0</span>, <span class="number">1.0</span>, <span class="number">1.0 </span>/ <span class="number">256.0</span>, -<span class="number">32768.0</span>]).expect(<span class="string">"dem"</span>),
+<a href=#210 id=210 data-nosnippet>210</a>            );
+<a href=#211 id=211 data-nosnippet>211</a>            <span class="kw">let </span>[t0, t1, t2] = [<span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>].map(|x| WorldTileCoords::from((x, <span class="number">0</span>, ZoomLevel::new(<span class="number">4</span>))));
+<a href=#212 id=212 data-nosnippet>212</a>
+<a href=#213 id=213 data-nosnippet>213</a>            pool.upload(<span class="kw-2">&amp;</span>renderer.device, <span class="kw-2">&amp;</span>renderer.queue, <span class="kw-2">&amp;</span>source, t0, <span class="kw-2">&amp;</span>dem);
+<a href=#214 id=214 data-nosnippet>214</a>            pool.upload(<span class="kw-2">&amp;</span>renderer.device, <span class="kw-2">&amp;</span>renderer.queue, <span class="kw-2">&amp;</span>source, t1, <span class="kw-2">&amp;</span>dem);
+<a href=#215 id=215 data-nosnippet>215</a>            <span class="comment">// Touch t0 so t1 becomes the least recently used entry.
+<a href=#216 id=216 data-nosnippet>216</a>            </span><span class="macro">assert!</span>(pool.get(<span class="kw-2">&amp;</span>source, t0).is_some());
+<a href=#217 id=217 data-nosnippet>217</a>            pool.upload(<span class="kw-2">&amp;</span>renderer.device, <span class="kw-2">&amp;</span>renderer.queue, <span class="kw-2">&amp;</span>source, t2, <span class="kw-2">&amp;</span>dem);
+<a href=#218 id=218 data-nosnippet>218</a>
+<a href=#219 id=219 data-nosnippet>219</a>            <span class="macro">assert_eq!</span>(pool.texture_count(), <span class="number">2</span>);
+<a href=#220 id=220 data-nosnippet>220</a>            <span class="macro">assert!</span>(
+<a href=#221 id=221 data-nosnippet>221</a>                pool.get(<span class="kw-2">&amp;</span>source, t0).is_some(),
+<a href=#222 id=222 data-nosnippet>222</a>                <span class="string">"recently touched DEM stays"
+<a href=#223 id=223 data-nosnippet>223</a>            </span>);
+<a href=#224 id=224 data-nosnippet>224</a>            <span class="macro">assert!</span>(pool.get(<span class="kw-2">&amp;</span>source, t2).is_some(), <span class="string">"newly uploaded DEM stays"</span>);
+<a href=#225 id=225 data-nosnippet>225</a>            <span class="macro">assert!</span>(pool.get(<span class="kw-2">&amp;</span>source, t1).is_none(), <span class="string">"oldest DEM was evicted"</span>);
+<a href=#226 id=226 data-nosnippet>226</a>        })
+<a href=#227 id=227 data-nosnippet>227</a>    }
+<a href=#228 id=228 data-nosnippet>228</a>}
 </code></pre></div></section></main></body></html>

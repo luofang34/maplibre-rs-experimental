@@ -269,43 +269,37 @@
 <a href=#269 id=269 data-nosnippet>269</a>
 <a href=#270 id=270 data-nosnippet>270</a>        <span class="kw">let </span>(buffer, tile_metadata_buffer, atmosphere_metadata_buffer, sky_metadata_buffer) = {
 <a href=#271 id=271 data-nosnippet>271</a>            <span class="kw">let </span>gpu_buffers = world.resources.get_or_init_mut::&lt;BackgroundGpuBuffers&gt;();
-<a href=#272 id=272 data-nosnippet>272</a>            gpu_buffers.write_metadata(<span class="kw-2">&amp;</span>renderer.device, <span class="kw-2">&amp;</span>renderer.queue, <span class="kw-2">&amp;</span>metadatas);
-<a href=#273 id=273 data-nosnippet>273</a>            gpu_buffers.write_tile_metadata(<span class="kw-2">&amp;</span>renderer.device, <span class="kw-2">&amp;</span>renderer.queue, <span class="kw-2">&amp;</span>tile_metadata);
-<a href=#274 id=274 data-nosnippet>274</a>            gpu_buffers.write_atmosphere(<span class="kw-2">&amp;</span>renderer.device, <span class="kw-2">&amp;</span>renderer.queue, <span class="kw-2">&amp;</span>atmosphere_metadata);
-<a href=#275 id=275 data-nosnippet>275</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(sky) = <span class="kw-2">&amp;</span>sky_metadata {
-<a href=#276 id=276 data-nosnippet>276</a>                gpu_buffers.write_sky(<span class="kw-2">&amp;</span>renderer.device, <span class="kw-2">&amp;</span>renderer.queue, sky);
-<a href=#277 id=277 data-nosnippet>277</a>            }
-<a href=#278 id=278 data-nosnippet>278</a>            (
-<a href=#279 id=279 data-nosnippet>279</a>                gpu_buffers
-<a href=#280 id=280 data-nosnippet>280</a>                    .metadata_buffer()
-<a href=#281 id=281 data-nosnippet>281</a>                    .expect(<span class="string">"metadata buffer"</span>)
-<a href=#282 id=282 data-nosnippet>282</a>                    .clone(),
-<a href=#283 id=283 data-nosnippet>283</a>                gpu_buffers
-<a href=#284 id=284 data-nosnippet>284</a>                    .tile_metadata_buffer()
-<a href=#285 id=285 data-nosnippet>285</a>                    .expect(<span class="string">"tile metadata buffer"</span>)
-<a href=#286 id=286 data-nosnippet>286</a>                    .clone(),
-<a href=#287 id=287 data-nosnippet>287</a>                gpu_buffers
-<a href=#288 id=288 data-nosnippet>288</a>                    .atmosphere_metadata_buffer()
-<a href=#289 id=289 data-nosnippet>289</a>                    .expect(<span class="string">"atmosphere metadata buffer"</span>)
-<a href=#290 id=290 data-nosnippet>290</a>                    .clone(),
-<a href=#291 id=291 data-nosnippet>291</a>                sky_metadata.as_ref().map(|<span class="kw">_</span>| {
-<a href=#292 id=292 data-nosnippet>292</a>                    gpu_buffers
-<a href=#293 id=293 data-nosnippet>293</a>                        .sky_metadata_buffer()
-<a href=#294 id=294 data-nosnippet>294</a>                        .expect(<span class="string">"sky metadata buffer"</span>)
-<a href=#295 id=295 data-nosnippet>295</a>                        .clone()
-<a href=#296 id=296 data-nosnippet>296</a>                }),
-<a href=#297 id=297 data-nosnippet>297</a>            )
-<a href=#298 id=298 data-nosnippet>298</a>        };
-<a href=#299 id=299 data-nosnippet>299</a>        world.resources.insert(BackgroundBuffers {
-<a href=#300 id=300 data-nosnippet>300</a>            metadata_buffer: buffer,
-<a href=#301 id=301 data-nosnippet>301</a>            instances,
-<a href=#302 id=302 data-nosnippet>302</a>            tile_metadata_buffer,
-<a href=#303 id=303 data-nosnippet>303</a>            globe_tiles,
-<a href=#304 id=304 data-nosnippet>304</a>            atmosphere_metadata_buffer,
-<a href=#305 id=305 data-nosnippet>305</a>            sky_metadata_buffer,
-<a href=#306 id=306 data-nosnippet>306</a>        });
-<a href=#307 id=307 data-nosnippet>307</a>    }
-<a href=#308 id=308 data-nosnippet>308</a>
-<a href=#309 id=309 data-nosnippet>309</a>    <span class="prelude-val">Ok</span>(())
-<a href=#310 id=310 data-nosnippet>310</a>}
+<a href=#272 id=272 data-nosnippet>272</a>            <span class="kw">let </span>buffer = gpu_buffers
+<a href=#273 id=273 data-nosnippet>273</a>                .write_metadata(<span class="kw-2">&amp;</span>renderer.device, <span class="kw-2">&amp;</span>renderer.queue, <span class="kw-2">&amp;</span>metadatas)
+<a href=#274 id=274 data-nosnippet>274</a>                .clone();
+<a href=#275 id=275 data-nosnippet>275</a>            <span class="kw">let </span>tile_metadata_buffer = gpu_buffers
+<a href=#276 id=276 data-nosnippet>276</a>                .write_tile_metadata(<span class="kw-2">&amp;</span>renderer.device, <span class="kw-2">&amp;</span>renderer.queue, <span class="kw-2">&amp;</span>tile_metadata)
+<a href=#277 id=277 data-nosnippet>277</a>                .clone();
+<a href=#278 id=278 data-nosnippet>278</a>            <span class="kw">let </span>atmosphere_metadata_buffer = gpu_buffers
+<a href=#279 id=279 data-nosnippet>279</a>                .write_atmosphere(<span class="kw-2">&amp;</span>renderer.device, <span class="kw-2">&amp;</span>renderer.queue, <span class="kw-2">&amp;</span>atmosphere_metadata)
+<a href=#280 id=280 data-nosnippet>280</a>                .clone();
+<a href=#281 id=281 data-nosnippet>281</a>            <span class="kw">let </span>sky_metadata_buffer = sky_metadata.as_ref().map(|sky| {
+<a href=#282 id=282 data-nosnippet>282</a>                gpu_buffers
+<a href=#283 id=283 data-nosnippet>283</a>                    .write_sky(<span class="kw-2">&amp;</span>renderer.device, <span class="kw-2">&amp;</span>renderer.queue, sky)
+<a href=#284 id=284 data-nosnippet>284</a>                    .clone()
+<a href=#285 id=285 data-nosnippet>285</a>            });
+<a href=#286 id=286 data-nosnippet>286</a>            (
+<a href=#287 id=287 data-nosnippet>287</a>                buffer,
+<a href=#288 id=288 data-nosnippet>288</a>                tile_metadata_buffer,
+<a href=#289 id=289 data-nosnippet>289</a>                atmosphere_metadata_buffer,
+<a href=#290 id=290 data-nosnippet>290</a>                sky_metadata_buffer,
+<a href=#291 id=291 data-nosnippet>291</a>            )
+<a href=#292 id=292 data-nosnippet>292</a>        };
+<a href=#293 id=293 data-nosnippet>293</a>        world.resources.insert(BackgroundBuffers {
+<a href=#294 id=294 data-nosnippet>294</a>            metadata_buffer: buffer,
+<a href=#295 id=295 data-nosnippet>295</a>            instances,
+<a href=#296 id=296 data-nosnippet>296</a>            tile_metadata_buffer,
+<a href=#297 id=297 data-nosnippet>297</a>            globe_tiles,
+<a href=#298 id=298 data-nosnippet>298</a>            atmosphere_metadata_buffer,
+<a href=#299 id=299 data-nosnippet>299</a>            sky_metadata_buffer,
+<a href=#300 id=300 data-nosnippet>300</a>        });
+<a href=#301 id=301 data-nosnippet>301</a>    }
+<a href=#302 id=302 data-nosnippet>302</a>
+<a href=#303 id=303 data-nosnippet>303</a>    <span class="prelude-val">Ok</span>(())
+<a href=#304 id=304 data-nosnippet>304</a>}
 </code></pre></div></section></main></body></html>

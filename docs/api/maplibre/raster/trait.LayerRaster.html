@@ -6,7 +6,7 @@
     fn <a href="#tymethod.message_tag" class="fn">message_tag</a>() -&gt; &amp;'static dyn <a class="trait" href="../io/apc/trait.MessageTag.html" title="trait maplibre::io::apc::MessageTag">MessageTag</a>;
 <span class="item-spacer"></span>    fn <a href="#tymethod.build_from" class="fn">build_from</a>(
         coords: <a class="struct" href="../coords/struct.WorldTileCoords.html" title="struct maplibre::coords::WorldTileCoords">WorldTileCoords</a>,
-        source: <a class="struct" href="struct.RasterSourceId.html" title="struct maplibre::raster::RasterSourceId">RasterSourceId</a>,
+        source: <a class="struct" href="../io/tile_sources/struct.RasterSourceId.html" title="struct maplibre::io::tile_sources::RasterSourceId">RasterSourceId</a>,
         image: RgbaImage,
     ) -&gt; Self;
 <span class="item-spacer"></span>    fn <a href="#tymethod.coords" class="fn">coords</a>(&amp;self) -&gt; <a class="struct" href="../coords/struct.WorldTileCoords.html" title="struct maplibre::coords::WorldTileCoords">WorldTileCoords</a>;
@@ -15,7 +15,7 @@
     // Provided methods
     fn <a href="#method.build_from_dem" class="fn">build_from_dem</a>(
         coords: <a class="struct" href="../coords/struct.WorldTileCoords.html" title="struct maplibre::coords::WorldTileCoords">WorldTileCoords</a>,
-        source: <a class="struct" href="struct.RasterSourceId.html" title="struct maplibre::raster::RasterSourceId">RasterSourceId</a>,
+        source: <a class="struct" href="../io/tile_sources/struct.RasterSourceId.html" title="struct maplibre::io::tile_sources::RasterSourceId">RasterSourceId</a>,
         tile: <a class="struct" href="https://doc.rust-lang.org/1.100.0/alloc/sync/struct.Arc.html" title="struct alloc::sync::Arc">Arc</a>&lt;<a class="struct" href="../terrain/dem/struct.DemTile.html" title="struct maplibre::terrain::dem::DemTile">DemTile</a>&gt;,
         circumference_meters: <a class="primitive" href="https://doc.rust-lang.org/1.100.0/std/primitive.f64.html">f64</a>,
         fallback: <a class="struct" href="https://doc.rust-lang.org/1.100.0/alloc/sync/struct.Arc.html" title="struct alloc::sync::Arc">Arc</a>&lt;RgbaImage&gt;,
@@ -29,14 +29,14 @@
 </div></details><h2 id="required-methods" class="section-header">Required Methods<a href="#required-methods" class="anchor">§</a></h2><div class="methods"><details class="toggle method-toggle" open><summary><section id="tymethod.message_tag" class="method"><a class="src rightside" href="../../src/maplibre/raster/transferables.rs.html#51">Source</a><h4 class="code-header">fn <a href="#tymethod.message_tag" class="fn">message_tag</a>() -&gt; &amp;'static dyn <a class="trait" href="../io/apc/trait.MessageTag.html" title="trait maplibre::io::apc::MessageTag">MessageTag</a></h4></section></summary><div class="docblock"><p>Identifies this backend’s decoded-image payload for message dispatch.</p>
 </div></details><details class="toggle method-toggle" open><summary><section id="tymethod.build_from" class="method"><a class="src rightside" href="../../src/maplibre/raster/transferables.rs.html#54">Source</a><h4 class="code-header">fn <a href="#tymethod.build_from" class="fn">build_from</a>(
     coords: <a class="struct" href="../coords/struct.WorldTileCoords.html" title="struct maplibre::coords::WorldTileCoords">WorldTileCoords</a>,
-    source: <a class="struct" href="struct.RasterSourceId.html" title="struct maplibre::raster::RasterSourceId">RasterSourceId</a>,
+    source: <a class="struct" href="../io/tile_sources/struct.RasterSourceId.html" title="struct maplibre::io::tile_sources::RasterSourceId">RasterSourceId</a>,
     image: RgbaImage,
 ) -&gt; Self</h4></section></summary><div class="docblock"><p>Takes ownership of a decoded image and its source identity at the supplied tile coordinates.</p>
 </div></details><details class="toggle method-toggle" open><summary><section id="tymethod.coords" class="method"><a class="src rightside" href="../../src/maplibre/raster/transferables.rs.html#73">Source</a><h4 class="code-header">fn <a href="#tymethod.coords" class="fn">coords</a>(&amp;self) -&gt; <a class="struct" href="../coords/struct.WorldTileCoords.html" title="struct maplibre::coords::WorldTileCoords">WorldTileCoords</a></h4></section></summary><div class="docblock"><p>Tile-grid coordinates covered by the image.</p>
 </div></details><details class="toggle method-toggle" open><summary><section id="tymethod.to_layer" class="method"><a class="src rightside" href="../../src/maplibre/raster/transferables.rs.html#76">Source</a><h4 class="code-header">fn <a href="#tymethod.to_layer" class="fn">to_layer</a>(self) -&gt; <a class="struct" href="struct.AvailableRasterLayerData.html" title="struct maplibre::raster::AvailableRasterLayerData">AvailableRasterLayerData</a></h4></section></summary><div class="docblock"><p>Consumes the message into pixel data awaiting GPU upload.</p>
 </div></details></div><h2 id="provided-methods" class="section-header">Provided Methods<a href="#provided-methods" class="anchor">§</a></h2><div class="methods"><details class="toggle method-toggle" open><summary><section id="method.build_from_dem" class="method"><a class="src rightside" href="../../src/maplibre/raster/transferables.rs.html#58-70">Source</a><h4 class="code-header">fn <a href="#method.build_from_dem" class="fn">build_from_dem</a>(
     coords: <a class="struct" href="../coords/struct.WorldTileCoords.html" title="struct maplibre::coords::WorldTileCoords">WorldTileCoords</a>,
-    source: <a class="struct" href="struct.RasterSourceId.html" title="struct maplibre::raster::RasterSourceId">RasterSourceId</a>,
+    source: <a class="struct" href="../io/tile_sources/struct.RasterSourceId.html" title="struct maplibre::io::tile_sources::RasterSourceId">RasterSourceId</a>,
     tile: <a class="struct" href="https://doc.rust-lang.org/1.100.0/alloc/sync/struct.Arc.html" title="struct alloc::sync::Arc">Arc</a>&lt;<a class="struct" href="../terrain/dem/struct.DemTile.html" title="struct maplibre::terrain::dem::DemTile">DemTile</a>&gt;,
     circumference_meters: <a class="primitive" href="https://doc.rust-lang.org/1.100.0/std/primitive.f64.html">f64</a>,
     fallback: <a class="struct" href="https://doc.rust-lang.org/1.100.0/alloc/sync/struct.Arc.html" title="struct alloc::sync::Arc">Arc</a>&lt;RgbaImage&gt;,

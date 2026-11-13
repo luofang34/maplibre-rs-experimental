@@ -1,13 +1,19 @@
-// The same changes from Rust in the browser, through the handle `web::run_map` resolves to.
+// Live paint and global-state updates through `MapHandle`.
 use maplibre::{map::handle::MapHandle, style::Style};
+#[cfg(not(target_arch = "wasm32"))]
+use maplibre_winit::NativeEnvironment as CurrentEnvironment;
 use serde_json::json;
+#[cfg(target_arch = "wasm32")]
 use web::{CurrentEnvironment, JSError};
+
+#[cfg(not(target_arch = "wasm32"))]
+type JSError = Box<dyn std::error::Error>;
 
 pub fn build_style(base: Style) -> Result<Style, serde_json::Error> {
     let mut document = serde_json::to_value(base)?;
     document["center"] = json!([12.338, 45.4385]);
     document["zoom"] = json!(14);
-    // The background follows a theme a page can switch without editing the layer.
+    // The background follows a theme a host can switch without editing the layer.
     document["state"] = json!({"theme": {"default": "day"}});
     if let Some(layers) = document["layers"].as_array_mut() {
         for layer in layers

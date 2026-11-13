@@ -37,10 +37,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-6fbf5afb.js";
+            window.path_to_searchindex_js = "searchindex-04576098.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-d6816547.js"></script>
+        <script src="toc-ae8692d6.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -183,66 +183,39 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="supported-platforms"><a class="header" href="#supported-platforms">Supported Platforms</a></h1>
-<p>For development the following platforms are recommended:</p>
-<ul>
-<li>Linux X11/Wayland</li>
-<li>MacOS</li>
-<li>Latest Firefox Nightly/Chrome Canary with WebGPU (Because WebGPU is a living spec, sometimes a bleeding-edge browser
-release is required)</li>
-</ul>
-<h2 id="short-term-obstacles"><a class="header" href="#short-term-obstacles">Short-term Obstacles</a></h2>
+<p><code>maplibre</code> runs across desktop, browser, mobile, spatial/XR, and headless server environments on top of <code>wgpu</code>.</p>
+<h2 id="platform-matrix"><a class="header" href="#platform-matrix">Platform Matrix</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>Platform</th><th>Obstacles</th></tr>
+<tr><th>Platform</th><th>Crate / Target</th><th>Graphics Backend</th><th>Async &amp; Worker Model</th><th>CI Status</th></tr>
 </thead>
 <tbody>
-<tr><td>Linux X11</td><td></td></tr>
-<tr><td>Linux Wayland</td><td></td></tr>
-<tr><td>Windows</td><td></td></tr>
-<tr><td>MacOS</td><td></td></tr>
-<tr><td>Android</td><td>* Unable to get window size before resume</td></tr>
-<tr><td>iOS</td><td>* Touches are crashing the app on real devices <br /> * Instanced indices drawing is not supported <br /> * Drawing zero-length indices is prohibited<br /></td></tr>
-<tr><td>Firefox</td><td>* Shared Memory is currently not working because it a parallel web worker corrupts memory</td></tr>
-<tr><td>Chrome</td><td></td></tr>
-<tr><td>Safari</td><td></td></tr>
-<tr><td>Mobile Firefox</td><td></td></tr>
-<tr><td>Mobile Chrome</td><td></td></tr>
-<tr><td>Mobile Safari</td><td></td></tr>
+<tr><td><strong>Linux</strong></td><td><code>maplibre-winit</code>, <code>maplibre-demo</code> (<code>x86_64</code> / <code>aarch64</code>)</td><td>Vulkan, OpenGL ES (<code>wgpu</code>)</td><td>Multi-threaded Tokio + <code>reqwest</code> (<code>SharedLoader</code>)</td><td>Tested on every PR (Vulkan + validation layers + Lavapipe conformance)</td></tr>
+<tr><td><strong>macOS</strong></td><td><code>maplibre-winit</code>, <code>maplibre-demo</code>, <code>apple</code> (<code>aarch64</code> / <code>x86_64</code>)</td><td>Metal</td><td>Multi-threaded Tokio + <code>reqwest</code> (<code>SharedLoader</code>)</td><td>Tested on every PR (<code>macos-15</code> with Metal shader &amp; debug validation)</td></tr>
+<tr><td><strong>Windows</strong></td><td><code>maplibre-winit</code>, <code>maplibre-demo</code> (<code>x86_64</code>)</td><td>DirectX 12, Vulkan</td><td>Multi-threaded Tokio + <code>reqwest</code> (<code>SharedLoader</code>)</td><td>Built and tested in CI</td></tr>
+<tr><td><strong>Web (Wasm)</strong></td><td><code>web</code> (<code>wasm32-unknown-unknown</code>)</td><td>WebGPU (default) and WebGL2 (<code>--features web-webgl</code>)</td><td>Browser <code>fetch</code> + dedicated Web Workers (<code>FlatBufferTransferable</code> or shared-memory atomics)</td><td>Built, dependency-audited (<code>check-wasm-deps.py</code>), and tested in headless browsers</td></tr>
+<tr><td><strong>visionOS</strong></td><td><code>apple/visionos</code> (<code>aarch64-apple-visionos</code>, <code>aarch64-apple-visionos-sim</code>)</td><td>Shared <code>MTLDevice</code> / <code>MTLCommandQueue</code> + CompositorServices stereo <code>MTLTexture</code> targets</td><td>Tokio worker pool + disk/bundle <code>SharedLoader</code></td><td>Checked &amp; clippy-gated on <code>macos-15</code> (<code>build-visionos</code>)</td></tr>
+<tr><td><strong>iOS</strong></td><td><code>apple</code> (<code>aarch64-apple-ios</code>, <code>aarch64-apple-ios-sim</code>)</td><td>Metal (<code>.xcframework</code>)</td><td>Multi-threaded Tokio + <code>reqwest</code></td><td>Built in <code>library-apple</code> workflow</td></tr>
+<tr><td><strong>Android</strong></td><td><code>android</code> (<code>aarch64-linux-android</code> / <code>arm64-v8a</code>, <code>x86_64-linux-android</code> / <code>x86_64</code>; <code>minSdk 23</code>)</td><td>Vulkan, OpenGL ES 3.1+ (<code>ndk</code> / JNI)</td><td>Multi-threaded Tokio + <code>reqwest</code></td><td>Built in Android packaging workflow</td></tr>
+<tr><td><strong>Headless / Server</strong></td><td><code>maplibre</code> (<code>--features headless</code>)</td><td>Offscreen Vulkan (including Mesa Lavapipe software rasterizer), Metal, DX12, or shared <code>HostGpu</code></td><td>Deterministic settle loop + optional <code>SharedMapAssets</code> across worlds</td><td>6-shard unit + integration suite and 1,701-case MapLibre render/query conformance gate</td></tr>
 </tbody>
 </table>
 </div>
-<h2 id="long-term-goals"><a class="header" href="#long-term-goals">Long-term Goals</a></h2>
-<p><a href="https://caniuse.com/webgpu">WebGPU</a> is not enabled by default for all platforms.</p>
-<p>WebGPU Status:</p>
+<h2 id="feature-flags-maplibre"><a class="header" href="#feature-flags-maplibre">Feature Flags (<code>maplibre</code>)</a></h2>
+<p>The core <code>maplibre</code> crate keeps platform I/O and optional subsystems modular so embedded, WebAssembly, and custom-loader hosts pull only what they need:</p>
 <ul>
-<li><a href="https://github.com/gpuweb/gpuweb/wiki/Implementation-Status#firefox-and-servo">Firefox</a></li>
-<li><a href="https://chromestatus.com/feature/6213121689518080">Chrome</a></li>
-<li><a href="https://webkit.org/status/#specification-webgpu">WebKit</a></li>
+<li><code>native-io</code> <em>(enabled by default)</em> — enables Tokio (<code>platform/noweb</code>), <code>reqwest</code>, <code>reqwest-middleware</code>, and HTTP disk caching (<code>http-cache-reqwest</code>). Disabling default features (<code>--no-default-features</code>) compiles <code>maplibre</code> cleanly without native socket or TLS crates.</li>
+<li><code>raster</code> <em>(enabled by default)</em> — enables raster imagery tile decoding, upload, and rendering (<code>RasterPlugin</code>).</li>
+<li><code>geojson</code> <em>(enabled by default)</em> — enables inline/URL GeoJSON source parsing, clustering, and tessellation (<code>GeoJsonPlugin</code>).</li>
+<li><code>mlt</code> <em>(enabled by default)</em> — decodes MapLibre Tiles (<code>.mlt</code>) alongside classic Mapbox Vector Tiles (<code>.mvt</code> / <code>.pbf</code>).</li>
+<li><code>headless</code> — enables <code>maplibre::headless</code> (<code>HeadlessMap</code>, <code>HostGpu</code>, <code>SharedMapAssets</code>, <code>MultiViewFrame</code>, and PNG readback). Works both with <code>native-io</code> and with <code>--no-default-features --features headless</code> using a custom <code>ResourceLoader</code>.</li>
+<li><code>experimental</code> <em>(opt-in)</em> — enables experimental spatial/astronomical plugins (<code>celestial</code>, <code>starfield</code>, and <code>overlay</code>).</li>
+<li><code>web-webgl</code> — configures <code>wgpu</code> limits and downlevel compatibility for WebGL2 contexts on <code>wasm32-unknown-unknown</code>.</li>
+<li><code>thread-safe-futures</code> — requires <code>Send</code> bounds on <code>Scheduler</code> and <code>HttpClient</code> futures for multi-threaded native hosts (omitted on single-threaded <code>wasm32</code>).</li>
+<li><code>pmtiles</code> — supports HTTP range-request reading from single-file <code>.pmtiles</code> archives.</li>
+<li><code>trace</code> — emits <code>tracing</code> spans per schedule stage and render pass for profiling.</li>
 </ul>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Platform</th><th>Linux &amp; Android</th><th>Graphics API</th><th>Note</th></tr>
-</thead>
-<tbody>
-<tr><td>Linux X11</td><td>✅</td><td>Vulkan</td><td></td></tr>
-<tr><td>Linux Wayland</td><td>✅</td><td>Vulkan</td><td></td></tr>
-<tr><td>Windows</td><td>❓</td><td>❓</td><td></td></tr>
-<tr><td>MacOS</td><td>✅</td><td>❓</td><td></td></tr>
-<tr><td>Android</td><td>✅</td><td>Vulkan/OpenGL ES/Angle</td><td>Not tested, but should work on all devices if <a href="https://github.com/gfx-rs/wgpu/blob/master/README.md#supported-platforms">Angle</a> is used. <a href="https://developer.android.com/about/dashboards">Vulkan</a> is not yet supported widely.</td></tr>
-<tr><td>iOS</td><td>✅</td><td>Metal</td><td>Not tested.</td></tr>
-<tr><td>Firefox</td><td>✅</td><td>WebGL/WebGPU</td><td></td></tr>
-<tr><td>Chrome</td><td>✅</td><td>WebGL/WebGPU</td><td>WebGPU is significantly faster because WASM output is smaller.</td></tr>
-<tr><td>Safari</td><td>🛠️</td><td>WebGL/WebGPU</td><td>Safari does not yet support <a href="https://caniuse.com/sharedarraybuffer">Shared Array Buffer</a></td></tr>
-<tr><td>Mobile Firefox</td><td>🆗</td><td>WebGL/WebGPU</td><td></td></tr>
-<tr><td>Mobile Chrome</td><td>🆗</td><td>WebGL</td><td><a href="https://caniuse.com/webgpu">WebGPU</a> is not implemented.</td></tr>
-<tr><td>Mobile Safari</td><td>🛠️</td><td>WebGL</td><td><a href="https://caniuse.com/webgpu">WebGPU</a> is not implemented. Safari does not yet support <a href="https://caniuse.com/sharedarraybuffer">Shared Array Buffer</a></td></tr>
-</tbody>
-</table>
-</div>
-<p>✅ = First Class Support — 🆗= Best Effort Support — 🛠️  = Unsupported, but support
-in progress</p>
 
                     </main>
 

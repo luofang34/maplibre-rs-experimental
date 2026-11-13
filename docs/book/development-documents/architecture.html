@@ -37,10 +37,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-6fbf5afb.js";
+            window.path_to_searchindex_js = "../searchindex-04576098.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-d6816547.js"></script>
+        <script src="../toc-ae8692d6.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -183,23 +183,85 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="architecture"><a class="header" href="#architecture">Architecture</a></h1>
-<h2 id="rendering-architecture"><a class="header" href="#rendering-architecture">Rendering Architecture</a></h2>
-<p>The big picture of wgpu is as follows:</p>
-<p><label class="checkbox-label"><input class="checkbox-img" type="checkbox"><img src="https://raw.githubusercontent.com/gfx-rs/wgpu/8f02b73655aff641361822a8ac0347fc47622b49/etc/big-picture.png" alt=""><span class="img-wrapper"><img src="https://raw.githubusercontent.com/gfx-rs/wgpu/8f02b73655aff641361822a8ac0347fc47622b49/etc/big-picture.png" alt=""></span></label></p>
-<p>A simplified version is shown below:</p>
-<p><label class="checkbox-label"><input class="checkbox-img" type="checkbox"><img src="./figures/render-stack.drawio.svg" alt=""><span class="img-wrapper"><img src="./figures/render-stack.drawio.svg" alt=""></span></label></p>
-<p>A further simplified version:</p>
-<p><label class="checkbox-label"><input class="checkbox-img" type="checkbox"><img src="./figures/simplified-render-stack.drawio.svg" alt=""><span class="img-wrapper"><img src="./figures/simplified-render-stack.drawio.svg" alt=""></span></label></p>
-<p>Notes:</p>
+<p><code>maplibre</code> is structured as a modular, data-oriented rendering engine tailored specifically to slippy-map tile pyramids, 3D terrain, planetary globes, and stereo XR views. Every major subsystem lives inside <a href="../../../../maplibre/src"><code>maplibre/src/</code></a> with zero <code>unsafe</code> code in the renderer (<code>#![forbid(unsafe_code)]</code> in <code>maplibre::render</code>) and strict fallible error propagation across initialization and frame execution.</p>
+<pre><code class="language-mermaid">flowchart LR
+    Host["Host (winit / Web / Headless / visionOS)"] --&gt; Handle["MapHandle / Map"]
+    Handle --&gt; Schedule["Schedule (Ordered Stages)"]
+    Schedule --&gt; World["TCS World (Resources + Tiles)"]
+    Schedule --&gt; APC["AsyncProcedureCall (Workers)"]
+    APC --&gt; Loader["SourceClient &amp; SharedLoader"]
+    APC --&gt;|Transferables| World
+    Schedule --&gt; Graph["RenderGraph &amp; UploadQueue"]
+    Graph --&gt; WGPU["wgpu (Metal / Vulkan / DX12 / WebGPU / WebGL2)"]
+</code></pre>
+<h2 id="1-tile-component-system-maplibretcs"><a class="header" href="#1-tile-component-system-maplibretcs">1. Tile Component System (<code>maplibre::tcs</code>)</a></h2>
+<p>Early prototypes experimented with general-purpose Entity-Component-System (ECS) frameworks, which added archetype fragmentation and indirection without matching the natural key of a map engine: <strong>hierarchical tile coordinates</strong> (<code>WorldTileCoords</code>).</p>
+<p><code>maplibre::tcs</code> replaces generic ECS storage with a domain-specific <strong>Tile Component System (TCS)</strong>:</p>
 <ul>
-<li>wgpu is able to create an interface through which we can reach any device with a GPU.</li>
+<li><strong><code>World</code></strong> pairs two stores under one ownership root:
+<ul>
+<li><strong><code>Resources</code></strong> — singleton typed state (<code>ViewState</code>, <code>Style</code>, <code>WgpuTileViewPattern</code>, <code>TerrainResources</code>, <code>FrameTimings</code>, lighting, global state) keyed by <code>TypeId</code>.</li>
+<li><strong><code>Tiles</code></strong> — per-tile typed <code>TileComponent</code> attachments (<code>VectorLayersDataComponent</code>, <code>RasterLayersDataComponent</code>, <code>DemTileComponent</code>, symbol/SDF layout data, missing-layer markers) indexed by <code>WorldTileCoords</code> inside a spatial quadtree/pyramid (<code>tcs::pyramid</code>).</li>
 </ul>
-<p>Notes:</p>
+</li>
+<li><strong>Borrow-checked queries</strong>: <code>GlobalQueryState</code> and <code>EphemeralQueryState</code> track shared and mutable <code>TypeId</code> borrows dynamically when a system runs, preventing aliasing without unsafe code.</li>
+<li><strong>Typed errors</strong>: every system implements <code>System</code> (<code>fn run(&amp;mut self, context: &amp;mut MapContext) -&gt; Result&lt;(), SystemError&gt;</code>), returning structured failures rather than panicking.</li>
+</ul>
+<h2 id="2-schedule-stages-and-fallible-plugins"><a class="header" href="#2-schedule-stages-and-fallible-plugins">2. <code>Schedule</code>, Stages, and Fallible <code>Plugin</code>s</a></h2>
+<p>Frame execution is driven by <a href="../../../../maplibre/src/schedule.rs"><code>Schedule</code></a>, an ordered list of labeled <a href="../../../../maplibre/src/schedule.rs"><code>Stage</code></a>s operating on <a href="../../../../maplibre/src/context.rs"><code>MapContext</code></a> (<code>World</code>, <code>Style</code>, <code>ViewState</code>, <code>Renderer</code>).</p>
+<h3 id="default-frame-stages-renderstagelabel"><a class="header" href="#default-frame-stages-renderstagelabel">Default Frame Stages (<code>RenderStageLabel</code>)</a></h3>
+<p><code>RenderPlugin</code> installs seven deterministic stages in <code>Schedule</code>:</p>
+<ol>
+<li><strong><code>Input</code></strong> — applies host viewport/cursor input, drains <code>MapCommands</code> from <code>MapHandle</code>s, and advances camera flights (<code>fly_to</code> / <code>ease_to</code>) so every downstream system observes the resolved <code>ViewState</code> (or stereo <code>XrFrame</code> / multi-view slot).</li>
+<li><strong><code>Request</code></strong> — computes the visible tile covering (including globe horizon culling, terrain elevation bounds, XR frustum union, and flight <code>PrefetchView</code>), dispatches missing vector/raster/DEM fetches through <code>AsyncProcedureCall</code>, and ingests completed worker results into <code>World.tiles</code>.</li>
+<li><strong><code>Prepare</code></strong> — creates or resizes GPU attachments, compiles demand-driven shaders/pipelines (<code>PipelineCache</code>), prepares glyph/sprite atlases, and writes per-frame view/globe/lighting uniforms.</li>
+<li><strong><code>Queue</code></strong> — uploads newly arrived vertex/index/instance/texture payloads through <code>UploadQueue</code> and populates <a href="../../../../maplibre/src/render/render_phase.rs"><code>RenderPhase</code></a> queues (<code>TileMaskItem</code>, <code>LayerItem</code>, <code>TranslucentItem</code>, <code>DrapePhase</code>).</li>
+<li><strong><code>PhaseSort</code></strong> — sorts phase items into deterministic MapLibre layer and depth order and harvests completed GPU timestamp queries (<code>gpu_timer</code>).</li>
+<li><strong><code>Render</code></strong> — executes <a href="../../../../maplibre/src/render/graph.rs"><code>RenderGraph</code></a> passes, submits command buffers, and presents swapchain or eye targets.</li>
+<li><strong><code>Cleanup</code></strong> — marked with <code>Schedule::run_after_failure</code> so per-frame phase queues are cleared and out-of-budget tiles are evicted even if an earlier stage returned a <code>StageError</code>.</li>
+</ol>
+<h3 id="fallible-plugin-composition-plugine"><a class="header" href="#fallible-plugin-composition-plugine">Fallible Plugin Composition (<code>Plugin&lt;E&gt;</code>)</a></h3>
+<p>Capabilities are modularized behind <a href="../../../../maplibre/src/plugin.rs"><code>Plugin&lt;E&gt;</code></a>:</p>
+<pre><code class="language-rust ignore">pub trait Plugin&lt;E: Environment&gt; {
+    fn build(
+        &amp;self,
+        schedule: &amp;mut Schedule,
+        kernel: Rc&lt;Kernel&lt;E&gt;&gt;,
+        world: &amp;mut World,
+        renderer: &amp;mut Renderer,
+    ) -&gt; Result&lt;(), PluginError&gt;;
+}</code></pre>
+<p>Hosts (<code>maplibre_winit::default_plugins</code>, <code>web</code>, <code>HeadlessMap</code>) inspect the <code>Style</code> and install only the plugins needed (<code>RenderPlugin</code>, <code>BackgroundPlugin</code>, <code>VectorPlugin</code>, <code>SdfPlugin</code>, <code>HeatmapPlugin</code>, <code>RasterPlugin</code>, <code>HillshadePlugin</code>, <code>TerrainPlugin</code>, <code>NavigationHudPlugin</code>, <code>DebugPlugin</code>). Missing prerequisite stages, render-graph edges, or GPU allocation failures surface cleanly as <code>PluginError</code>.</p>
+<h2 id="3-gpu-architecture-rendergraph-bufferpool-and-uploadqueue"><a class="header" href="#3-gpu-architecture-rendergraph-bufferpool-and-uploadqueue">3. GPU Architecture: <code>RenderGraph</code>, <code>BufferPool</code>, and <code>UploadQueue</code></a></h2>
 <ul>
-<li>The ability to use shared memory or the atomic instruction set of WASM comes by enabling compilation features.</li>
-<li><code>threads</code> support here does not introduce threads like we know them from Linux. It introduces</li>
-<li><a href="https://github.com/WebAssembly/threads/blob/main/proposals/threads/Overview.md">support for atomics</a> like
-specified in a working draft to WebAssembly. Threads are simulated using WebWorkers by the browser.</li>
+<li><strong><code>RenderGraph</code></strong> orders render passes explicitly by slot dependencies:
+<ul>
+<li><strong><code>DrapePassNode</code></strong> <em>(when 3D terrain is active)</em> renders drapeable fill, line, raster, hillshade, and color-relief layers into pooled per-tile offscreen textures (<code>DrapePhase</code>).</li>
+<li><strong><code>MainPassNode</code></strong> renders sky/starfield/atmosphere, terrain meshes or stencil-masked 2D/globe tiles, 3D fill-extrusions, circles, heatmaps, and crisp screen-space SDF symbols/labels.</li>
+<li><strong><code>DepthCopyNode</code> &amp; <code>TranslucentPassNode</code></strong> copy resolved depth when needed and composite order-dependent translucent overlays and custom <code>PassHooks</code>.</li>
+</ul>
+</li>
+<li><strong><code>BufferPool</code></strong> sub-allocates tile vertex, index, and feature-paint slices inside large backing <code>wgpu::Buffer</code> arenas, avoiding per-tile buffer allocation churn and minimizing bind-group switches.</li>
+<li><strong>Counted <code>UploadQueue</code></strong>: <code>Renderer</code> wraps <code>wgpu::Queue</code> inside <a href="../../../../maplibre/src/render/upload_queue.rs"><code>UploadQueue</code></a>, which atomically counts every byte written via <code>write_buffer</code>, <code>write_texture</code>, <code>create_buffer_init</code>, and <code>create_texture_with_data</code>. Direct calls to uncounted <code>wgpu::Queue</code> upload methods are denied workspace-wide via <code>clippy.toml</code>, ensuring frame traces and upload budgets remain exact.</li>
+<li><strong>In-place GPU style &amp; state refresh</strong>: style mutations (<code>set_paint_property</code>, <code>set_layout_property</code>, <code>set_filter</code>, <code>set_feature_state</code>, <code>set_global_state</code>) classify what changed (<code>style::mutation</code>). Data-driven paint and feature-state updates re-evaluate only the affected per-feature paint attributes and rewrite their <code>BufferPool</code> ranges via <code>UploadQueue</code>—without re-fetching or re-tessellating tile geometry.</li>
+</ul>
+<h2 id="4-source-io-resourceloader-and-asyncprocedurecall-apc"><a class="header" href="#4-source-io-resourceloader-and-asyncprocedurecall-apc">4. Source I/O, <code>ResourceLoader</code>, and <code>AsyncProcedureCall</code> (<code>APC</code>)</a></h2>
+<p><code>Kernel&lt;E&gt;</code> decouples the engine from the host OS or browser through the <a href="../../../../maplibre/src/environment.rs"><code>Environment</code></a> trait:</p>
+<ul>
+<li><strong><code>ResourceLoader</code> &amp; <code>SourceClient</code></strong> (<code>maplibre::io</code>): deduplicates in-flight HTTP, <code>pmtiles://</code>, <code>asset://</code>, and inline data requests across the map thread and all worker threads (<code>SharedLoader</code>), applying bounded concurrency (<code>tile_backpressure</code>) and exponential retry (<code>tile_retry</code>).</li>
+<li><strong><code>AsyncProcedureCall</code> (<code>APC</code>)</strong>: offloads CPU-heavy MVT/MLT decoding, GeoJSON clustering, expression pre-evaluation, Lyon polygon/line tessellation, glyph SDF rasterization, and <code>raster-dem</code> decoding off the render thread:
+<ul>
+<li><strong>Native (<code>SchedulerAsyncProcedureCall</code>)</strong>: schedules tasks onto a multi-threaded Tokio pool and passes decoded Rust structs (<code>DefaultVectorTransferables</code>, <code>DefaultDemTransferables</code>) back with zero serialization overhead.</li>
+<li><strong>Web (<code>wasm32</code>)</strong>: dispatches jobs to dedicated Web Workers, serializing geometry into zero-copy FlatBuffers (<code>FlatBufferTransferable</code>) transferred via <code>ArrayBuffer</code> ownership transfer (or shared linear memory on multithreaded Wasm builds).</li>
+</ul>
+</li>
+</ul>
+<h2 id="5-headlessmap-multi-view-3d-terrain-atmosphere--stereo-xr"><a class="header" href="#5-headlessmap-multi-view-3d-terrain-atmosphere--stereo-xr">5. <code>HeadlessMap</code>, Multi-View, 3D Terrain, Atmosphere &amp; Stereo XR</a></h2>
+<ul>
+<li><strong><code>HeadlessMap</code> &amp; Multi-View</strong> (<code>maplibre::headless</code>): drives deterministic offscreen rendering, shares immutable decoded tiles, sprites, glyphs, and compiled GPU pipelines across independent map worlds via <code>SharedMapAssets</code>, and renders multiple synchronized camera slots (<code>MultiViewFrame</code>, <code>ViewSlotId</code>) in a single tick.</li>
+<li><strong>3D Terrain (<code>maplibre::terrain</code>)</strong>: decodes Mapbox and Terrarium <code>raster-dem</code> tiles into <code>GpuDemPool</code>, stitches level-of-detail seams with <code>backfill_neighbours</code> and configurable <code>TerrainSkirts</code>, closes polar caps on globes via <code>PolarPoleElevations</code>, drapes vector/raster layers via RTT caching (<code>DrapeBudget</code>), and supports exact CPU elevation queries and ray-terrain intersection (<code>TerrainHit</code>, <code>sightline</code>).</li>
+<li><strong>Globe, Atmosphere &amp; Celestial (<code>maplibre::projection</code>, <code>maplibre::celestial</code>, <code>maplibre::starfield</code>)</strong>: smoothly transitions between Web Mercator and 3D <code>Globe</code> projection, shading atmospheric limb scattering, twilight bands, solar/lunar discs, eclipses, and Hipparcos starfields in ECEF coordinates.</li>
+<li><strong>Stereo XR (<code>maplibre::render::xr</code> &amp; <code>apple/visionos</code>)</strong>: evaluates tile coverings across the union of left and right eye frustums (<code>XrFrame</code>, <code>ScenePlacement</code>) and renders stereo colour + reverse-Z <code>Depth32Float</code> eye targets directly into host Metal textures.</li>
 </ul>
 
                     </main>

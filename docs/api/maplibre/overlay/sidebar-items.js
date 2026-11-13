@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"constant":["DEPTH_BIAS","DEPTH_PROBE_PASS","MAX_PROBES","OVERLAY_PASS"],"mod":["pass","pipeline","probes"],"struct":["DepthProbe","HostOverlay","OverlayMesh","OverlayPlugin","OverlayVertex","ProbeResults"]};

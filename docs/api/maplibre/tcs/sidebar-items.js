@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["pyramid","resources","system","tiles","world"],"struct":["EphemeralQueryState","GlobalQueryState"],"trait":["QueryState"]};
+window.SIDEBAR_ITEMS = {"mod":["disjoint","pyramid","resources","system","tiles","world"]};

@@ -32,10 +32,10 @@
 <a href=#32 id=32 data-nosnippet>32</a>            Cow::Borrowed(<span class="kw-2">&amp;</span>empty_layer)
 <a href=#33 id=33 data-nosnippet>33</a>        }
 <a href=#34 id=34 data-nosnippet>34</a>    };
-<a href=#35 id=35 data-nosnippet>35</a>    <span class="kw">if </span><span class="kw">crate</span>::geojson::reads_geometry(style) &amp;&amp; !layer.features.is_empty() {
+<a href=#35 id=35 data-nosnippet>35</a>    <span class="kw">if </span><span class="kw">crate</span>::style::expression::layer_reads_geometry(style) &amp;&amp; !layer.features.is_empty() {
 <a href=#36 id=36 data-nosnippet>36</a>        <span class="kw">super</span>::geometry_tags::add_geometry_tags(layer.to_mut(), request.coords);
 <a href=#37 id=37 data-nosnippet>37</a>    }
-<a href=#38 id=38 data-nosnippet>38</a>    <span class="kw">if </span><span class="kw">crate</span>::geojson::reads_identity(style) &amp;&amp; !layer.features.is_empty() {
+<a href=#38 id=38 data-nosnippet>38</a>    <span class="kw">if </span><span class="kw">crate</span>::style::expression::layer_reads_identity(style) &amp;&amp; !layer.features.is_empty() {
 <a href=#39 id=39 data-nosnippet>39</a>        <span class="kw">super</span>::geometry_tags::add_identity_tags(layer.to_mut());
 <a href=#40 id=40 data-nosnippet>40</a>    }
 <a href=#41 id=41 data-nosnippet>41</a>    <span class="kw">if </span><span class="macro">matches!</span>(style.paint, <span class="prelude-val">Some</span>(LayerPaint::FillExtrusion(<span class="kw">_</span>)))

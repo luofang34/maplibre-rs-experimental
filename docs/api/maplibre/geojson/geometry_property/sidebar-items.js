@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["annotate","reads_feature_inputs","reads_geometry","reads_identity","serialize_feature_props_first","streamable_geojson","with_geometry_property"]};
+window.SIDEBAR_ITEMS = {"fn":["annotate","reads_feature_inputs","serialize_feature_props_first","streamable_geojson","with_geometry_property"]};

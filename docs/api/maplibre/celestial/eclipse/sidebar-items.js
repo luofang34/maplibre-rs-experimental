@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"fn":["set_sun_visible_fraction"],"struct":["VisibleFraction"]};

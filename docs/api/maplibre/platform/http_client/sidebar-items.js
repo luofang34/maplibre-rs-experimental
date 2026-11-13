@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["register_in_process_handler","unregister_in_process_handler"],"struct":["ReqwestHttpClient"],"type":["InProcessHandler"]};
+window.SIDEBAR_ITEMS = {"struct":["HttpCacheFrontend","InProcessRoutes","ReqwestHttpClient"],"type":["InProcessHandler"]};

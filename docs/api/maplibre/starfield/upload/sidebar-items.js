@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"constant":["MAX_RADIUS","MIN_RADIUS","RADIUS_SCALE","REFERENCE_MAGNITUDE","STAR_PEAK_BRIGHTNESS"],"fn":["queue_system","star_instance","view_and_sky"],"struct":["StarInstance","StarfieldFrame","StarfieldGpu"]};

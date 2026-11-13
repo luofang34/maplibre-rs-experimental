@@ -286,50 +286,53 @@
 <a href=#286 id=286 data-nosnippet>286</a>        <span class="macro">assert!</span>(position(draw_graph::node::TRANSLUCENT_PASS) &lt; position(draw_graph::node::COPY));
 <a href=#287 id=287 data-nosnippet>287</a>    }
 <a href=#288 id=288 data-nosnippet>288</a>
-<a href=#289 id=289 data-nosnippet>289</a>    <span class="attr">#[tokio::test]
+<a href=#289 id=289 data-nosnippet>289</a>    <span class="attr">#[test]
 <a href=#290 id=290 data-nosnippet>290</a>    #[allow(clippy::expect_used)]
-<a href=#291 id=291 data-nosnippet>291</a>    </span><span class="kw">async fn </span>headless_maps_drop_only_the_request_stage() {
-<a href=#292 id=292 data-nosnippet>292</a>        <span class="kw">use </span>std::rc::Rc;
-<a href=#293 id=293 data-nosnippet>293</a>
-<a href=#294 id=294 data-nosnippet>294</a>        <span class="kw">use crate</span>::{
-<a href=#295 id=295 data-nosnippet>295</a>            plugin::Plugin,
-<a href=#296 id=296 data-nosnippet>296</a>            render::{RenderPlugin, RenderStageLabel},
-<a href=#297 id=297 data-nosnippet>297</a>            schedule::Schedule,
-<a href=#298 id=298 data-nosnippet>298</a>            tcs::world::World,
-<a href=#299 id=299 data-nosnippet>299</a>        };
-<a href=#300 id=300 data-nosnippet>300</a>
-<a href=#301 id=301 data-nosnippet>301</a>        <span class="kw">let </span>size = <span class="kw">crate</span>::window::PhysicalSize::new(<span class="number">8</span>, <span class="number">8</span>).expect(<span class="string">"size"</span>);
-<a href=#302 id=302 data-nosnippet>302</a>        <span class="kw">let </span>kernel = Rc::new(
-<a href=#303 id=303 data-nosnippet>303</a>            <span class="kw">crate</span>::headless::environment::create_kernel(size, <span class="prelude-val">None</span>, <span class="prelude-val">None</span>, <span class="prelude-val">None</span>).expect(<span class="string">"kernel"</span>),
-<a href=#304 id=304 data-nosnippet>304</a>        );
-<a href=#305 id=305 data-nosnippet>305</a>        <span class="kw">let </span><span class="kw-2">mut </span>world = World::default();
-<a href=#306 id=306 data-nosnippet>306</a>        <span class="kw">let </span><span class="kw-2">mut </span>schedule = Schedule::default();
-<a href=#307 id=307 data-nosnippet>307</a>        <span class="kw">let </span>(<span class="kw">_</span>, <span class="kw-2">mut </span>renderer) = <span class="kw">crate</span>::headless::create_headless_renderer(<span class="number">8</span>, <span class="number">8</span>, <span class="prelude-val">None</span>)
-<a href=#308 id=308 data-nosnippet>308</a>            .<span class="kw">await
-<a href=#309 id=309 data-nosnippet>309</a>            </span>.expect(<span class="string">"renderer"</span>);
-<a href=#310 id=310 data-nosnippet>310</a>        RenderPlugin
-<a href=#311 id=311 data-nosnippet>311</a>            .build(<span class="kw-2">&amp;mut </span>schedule, Rc::clone(<span class="kw-2">&amp;</span>kernel), <span class="kw-2">&amp;mut </span>world, <span class="kw-2">&amp;mut </span>renderer)
-<a href=#312 id=312 data-nosnippet>312</a>            .expect(<span class="string">"render plugin"</span>);
-<a href=#313 id=313 data-nosnippet>313</a>        <span class="kw">super</span>::HeadlessPlugin::new(<span class="bool-val">false</span>)
-<a href=#314 id=314 data-nosnippet>314</a>            .build(<span class="kw-2">&amp;mut </span>schedule, kernel, <span class="kw-2">&amp;mut </span>world, <span class="kw-2">&amp;mut </span>renderer)
-<a href=#315 id=315 data-nosnippet>315</a>            .expect(<span class="string">"headless plugin"</span>);
-<a href=#316 id=316 data-nosnippet>316</a>
-<a href=#317 id=317 data-nosnippet>317</a>        <span class="kw">let </span>stages: Vec&lt;String&gt; = schedule
-<a href=#318 id=318 data-nosnippet>318</a>            .iter_stages()
-<a href=#319 id=319 data-nosnippet>319</a>            .map(|(label, <span class="kw">_</span>)| <span class="macro">format!</span>(<span class="string">"{label:?}"</span>))
-<a href=#320 id=320 data-nosnippet>320</a>            .collect();
-<a href=#321 id=321 data-nosnippet>321</a>        <span class="kw">let </span>expected: Vec&lt;String&gt; = [
-<a href=#322 id=322 data-nosnippet>322</a>            RenderStageLabel::Input,
-<a href=#323 id=323 data-nosnippet>323</a>            RenderStageLabel::Prepare,
-<a href=#324 id=324 data-nosnippet>324</a>            RenderStageLabel::Queue,
-<a href=#325 id=325 data-nosnippet>325</a>            RenderStageLabel::PhaseSort,
-<a href=#326 id=326 data-nosnippet>326</a>            RenderStageLabel::Render,
-<a href=#327 id=327 data-nosnippet>327</a>            RenderStageLabel::Cleanup,
-<a href=#328 id=328 data-nosnippet>328</a>        ]
-<a href=#329 id=329 data-nosnippet>329</a>        .iter()
-<a href=#330 id=330 data-nosnippet>330</a>        .map(|label| <span class="macro">format!</span>(<span class="string">"{label:?}"</span>))
-<a href=#331 id=331 data-nosnippet>331</a>        .collect();
-<a href=#332 id=332 data-nosnippet>332</a>        <span class="macro">assert_eq!</span>(stages, expected);
-<a href=#333 id=333 data-nosnippet>333</a>    }
-<a href=#334 id=334 data-nosnippet>334</a>}
+<a href=#291 id=291 data-nosnippet>291</a>    </span><span class="kw">fn </span>headless_maps_drop_only_the_request_stage() {
+<a href=#292 id=292 data-nosnippet>292</a>        futures::executor::block_on(<span class="kw">async </span>{
+<a href=#293 id=293 data-nosnippet>293</a>            <span class="kw">use </span>std::rc::Rc;
+<a href=#294 id=294 data-nosnippet>294</a>
+<a href=#295 id=295 data-nosnippet>295</a>            <span class="kw">use crate</span>::{
+<a href=#296 id=296 data-nosnippet>296</a>                plugin::Plugin,
+<a href=#297 id=297 data-nosnippet>297</a>                render::{RenderPlugin, RenderStageLabel},
+<a href=#298 id=298 data-nosnippet>298</a>                schedule::Schedule,
+<a href=#299 id=299 data-nosnippet>299</a>                tcs::world::World,
+<a href=#300 id=300 data-nosnippet>300</a>            };
+<a href=#301 id=301 data-nosnippet>301</a>
+<a href=#302 id=302 data-nosnippet>302</a>            <span class="kw">let </span>size = <span class="kw">crate</span>::window::PhysicalSize::new(<span class="number">8</span>, <span class="number">8</span>).expect(<span class="string">"size"</span>);
+<a href=#303 id=303 data-nosnippet>303</a>            <span class="kw">let </span>kernel = Rc::new(
+<a href=#304 id=304 data-nosnippet>304</a>                <span class="kw">crate</span>::headless::environment::create_kernel(size, <span class="prelude-val">None</span>, <span class="prelude-val">None</span>, <span class="prelude-val">None</span>)
+<a href=#305 id=305 data-nosnippet>305</a>                    .expect(<span class="string">"kernel"</span>),
+<a href=#306 id=306 data-nosnippet>306</a>            );
+<a href=#307 id=307 data-nosnippet>307</a>            <span class="kw">let </span><span class="kw-2">mut </span>world = World::default();
+<a href=#308 id=308 data-nosnippet>308</a>            <span class="kw">let </span><span class="kw-2">mut </span>schedule = Schedule::default();
+<a href=#309 id=309 data-nosnippet>309</a>            <span class="kw">let </span>(<span class="kw">_</span>, <span class="kw-2">mut </span>renderer) = <span class="kw">crate</span>::headless::create_headless_renderer(<span class="number">8</span>, <span class="number">8</span>, <span class="prelude-val">None</span>)
+<a href=#310 id=310 data-nosnippet>310</a>                .<span class="kw">await
+<a href=#311 id=311 data-nosnippet>311</a>                </span>.expect(<span class="string">"renderer"</span>);
+<a href=#312 id=312 data-nosnippet>312</a>            RenderPlugin
+<a href=#313 id=313 data-nosnippet>313</a>                .build(<span class="kw-2">&amp;mut </span>schedule, Rc::clone(<span class="kw-2">&amp;</span>kernel), <span class="kw-2">&amp;mut </span>world, <span class="kw-2">&amp;mut </span>renderer)
+<a href=#314 id=314 data-nosnippet>314</a>                .expect(<span class="string">"render plugin"</span>);
+<a href=#315 id=315 data-nosnippet>315</a>            <span class="kw">super</span>::HeadlessPlugin::new(<span class="bool-val">false</span>)
+<a href=#316 id=316 data-nosnippet>316</a>                .build(<span class="kw-2">&amp;mut </span>schedule, kernel, <span class="kw-2">&amp;mut </span>world, <span class="kw-2">&amp;mut </span>renderer)
+<a href=#317 id=317 data-nosnippet>317</a>                .expect(<span class="string">"headless plugin"</span>);
+<a href=#318 id=318 data-nosnippet>318</a>
+<a href=#319 id=319 data-nosnippet>319</a>            <span class="kw">let </span>stages: Vec&lt;String&gt; = schedule
+<a href=#320 id=320 data-nosnippet>320</a>                .iter_stages()
+<a href=#321 id=321 data-nosnippet>321</a>                .map(|(label, <span class="kw">_</span>)| <span class="macro">format!</span>(<span class="string">"{label:?}"</span>))
+<a href=#322 id=322 data-nosnippet>322</a>                .collect();
+<a href=#323 id=323 data-nosnippet>323</a>            <span class="kw">let </span>expected: Vec&lt;String&gt; = [
+<a href=#324 id=324 data-nosnippet>324</a>                RenderStageLabel::Input,
+<a href=#325 id=325 data-nosnippet>325</a>                RenderStageLabel::Prepare,
+<a href=#326 id=326 data-nosnippet>326</a>                RenderStageLabel::Queue,
+<a href=#327 id=327 data-nosnippet>327</a>                RenderStageLabel::PhaseSort,
+<a href=#328 id=328 data-nosnippet>328</a>                RenderStageLabel::Render,
+<a href=#329 id=329 data-nosnippet>329</a>                RenderStageLabel::Cleanup,
+<a href=#330 id=330 data-nosnippet>330</a>            ]
+<a href=#331 id=331 data-nosnippet>331</a>            .iter()
+<a href=#332 id=332 data-nosnippet>332</a>            .map(|label| <span class="macro">format!</span>(<span class="string">"{label:?}"</span>))
+<a href=#333 id=333 data-nosnippet>333</a>            .collect();
+<a href=#334 id=334 data-nosnippet>334</a>            <span class="macro">assert_eq!</span>(stages, expected);
+<a href=#335 id=335 data-nosnippet>335</a>        })
+<a href=#336 id=336 data-nosnippet>336</a>    }
+<a href=#337 id=337 data-nosnippet>337</a>}
 </code></pre></div></section></main></body></html>

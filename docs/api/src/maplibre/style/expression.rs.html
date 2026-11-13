@@ -143,6 +143,17 @@
 <a href=#143 id=143 data-nosnippet>143</a>    <span class="prelude-val">Ok</span>(result)
 <a href=#144 id=144 data-nosnippet>144</a>}
 <a href=#145 id=145 data-nosnippet>145</a>
-<a href=#146 id=146 data-nosnippet>146</a><span class="attr">#[cfg(test)]
-<a href=#147 id=147 data-nosnippet>147</a></span><span class="kw">mod </span>tests;
+<a href=#146 id=146 data-nosnippet>146</a><span class="doccomment">/// Whether `layer`'s paint or layout reads the feature's id or geometry type.
+<a href=#147 id=147 data-nosnippet>147</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>layer_reads_identity(layer: <span class="kw-2">&amp;</span><span class="kw">super</span>::layer::StyleLayer) -&gt; bool {
+<a href=#148 id=148 data-nosnippet>148</a>    serde_json::to_value(<span class="kw-2">&amp;</span>layer.paint).is_ok_and(|paint| reads_identity(<span class="kw-2">&amp;</span>paint))
+<a href=#149 id=149 data-nosnippet>149</a>}
+<a href=#150 id=150 data-nosnippet>150</a>
+<a href=#151 id=151 data-nosnippet>151</a><span class="doccomment">/// Whether `layer` has an expression that reads the feature's geometry.
+<a href=#152 id=152 data-nosnippet>152</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>layer_reads_geometry(layer: <span class="kw-2">&amp;</span><span class="kw">super</span>::layer::StyleLayer) -&gt; bool {
+<a href=#153 id=153 data-nosnippet>153</a>    serde_json::to_string(layer)
+<a href=#154 id=154 data-nosnippet>154</a>        .is_ok_and(|text| text.contains(<span class="string">"\"within\""</span>) || text.contains(<span class="string">"\"distance\""</span>))
+<a href=#155 id=155 data-nosnippet>155</a>}
+<a href=#156 id=156 data-nosnippet>156</a>
+<a href=#157 id=157 data-nosnippet>157</a><span class="attr">#[cfg(test)]
+<a href=#158 id=158 data-nosnippet>158</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>

@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"constant":["DEFAULT_DANJON","MAX_DANJON","MAX_RADIUS_DEGREES"],"fn":["set_earth_shadow"],"struct":["EarthShadow"]};

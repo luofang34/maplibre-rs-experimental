@@ -37,10 +37,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-6fbf5afb.js";
+            window.path_to_searchindex_js = "../searchindex-04576098.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-d6816547.js"></script>
+        <script src="../toc-ae8692d6.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -191,15 +191,22 @@
 <div class="example-code-tabs">
 <pre class="playground"><code class="language-rust no_run"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
-</span>// The same map driven from Rust in the browser: `web::run_map` resolves to a handle whose
-// commands the map applies between frames.
+</span>// Driven through a `MapHandle`: `web::run_map` (or `HeadedMapHost` on desktop) yields a handle
+// whose commands the map applies between frames.
 use maplibre::{
     context::FlightOutcome,
     coords::LatLon,
+    map::handle::MapHandle,
     render::view_state::{CameraOptions, FlightCurve, FlyOptions},
     style::Style,
 };
-use web::{JSError, WebMapHost};
+#[cfg(not(target_arch = "wasm32"))]
+use maplibre_winit::NativeEnvironment as CurrentEnvironment;
+#[cfg(target_arch = "wasm32")]
+use web::{CurrentEnvironment, JSError, WebMapHost};
+
+#[cfg(not(target_arch = "wasm32"))]
+type JSError = Box&lt;dyn std::error::Error&gt;;
 
 pub fn build_style(mut style: Style) -&gt; Style {
     style.center = Some([-74.5, 40.0]);
@@ -210,13 +217,11 @@ pub fn build_style(mut style: Style) -&gt; Style {
     style
 }
 
-/// Starts the map, flies to `[lng, lat]` and tells whether the camera arrived there.
-pub async fn fly(
-    new_worker: js_sys::Function,
-    base: Style,
+/// Flies an active map handle to `[lng, lat]` and reports whether the camera arrived there.
+pub async fn fly_camera(
+    map: &amp;MapHandle&lt;CurrentEnvironment&gt;,
     [lng, lat]: [f64; 2],
 ) -&gt; Result&lt;bool, JSError&gt; {
-    let map = web::run_map(new_worker, build_style(base), WebMapHost::default()).await?;
     let destination = CameraOptions {
         center: Some(LatLon::new(lat, lng)),
         ..Default::default()
@@ -232,6 +237,17 @@ pub async fn fly(
         })
         .await?;
     Ok(arrived)
+}
+
+/// Starts the map in the browser, flies to `[lng, lat]` and tells whether the camera arrived.
+#[cfg(target_arch = "wasm32")]
+pub async fn fly(
+    new_worker: js_sys::Function,
+    base: Style,
+    destination: [f64; 2],
+) -&gt; Result&lt;bool, JSError&gt; {
+    let map = web::run_map(new_worker, build_style(base), WebMapHost::default()).await?;
+    fly_camera(&amp;map, destination).await
 }
 <span class="boring">}</span></code></pre>
 <pre><code class="language-js">export default async function style() {

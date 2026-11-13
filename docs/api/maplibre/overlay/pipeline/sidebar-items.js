@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"constant":["DEPTH_BIAS","MIN_OVERLAY_BUFFER_BYTES","SHADER"],"fn":["prepare_system"],"struct":["MeshBuffers","OverlayGpu"]};

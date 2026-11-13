@@ -84,7 +84,7 @@
 <a href=#84 id=84 data-nosnippet>84</a>            source: wgpu::ShaderSource::Wgsl(<span class="self">self</span>.fragment.source.into()),
 <a href=#85 id=85 data-nosnippet>85</a>        });
 <a href=#86 id=86 data-nosnippet>86</a>
-<a href=#87 id=87 data-nosnippet>87</a>        <span class="kw">let </span>pipeline = device.create_render_pipeline(<span class="kw-2">&amp;</span>wgpu::RenderPipelineDescriptor {
+<a href=#87 id=87 data-nosnippet>87</a>        device.create_render_pipeline(<span class="kw-2">&amp;</span>wgpu::RenderPipelineDescriptor {
 <a href=#88 id=88 data-nosnippet>88</a>            label: <span class="self">self</span>.label.as_ref().map(|label| label.as_ref()),
 <a href=#89 id=89 data-nosnippet>89</a>            layout: <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>pipeline_layout),
 <a href=#90 id=90 data-nosnippet>90</a>            vertex: wgpu::VertexState {
@@ -117,9 +117,7 @@
 <a href=#117 id=117 data-nosnippet>117</a>
 <a href=#118 id=118 data-nosnippet>118</a>            multiview_mask: <span class="prelude-val">None</span>,
 <a href=#119 id=119 data-nosnippet>119</a>            cache: <span class="prelude-val">None</span>,
-<a href=#120 id=120 data-nosnippet>120</a>        });
-<a href=#121 id=121 data-nosnippet>121</a>
-<a href=#122 id=122 data-nosnippet>122</a>        pipeline
-<a href=#123 id=123 data-nosnippet>123</a>    }
-<a href=#124 id=124 data-nosnippet>124</a>}
+<a href=#120 id=120 data-nosnippet>120</a>        })
+<a href=#121 id=121 data-nosnippet>121</a>    }
+<a href=#122 id=122 data-nosnippet>122</a>}
 </code></pre></div></section></main></body></html>

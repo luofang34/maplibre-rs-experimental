@@ -170,18 +170,8 @@
 <a href=#170 id=170 data-nosnippet>170</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;SourceFeature&gt;, SourceQueryError&gt; {
 <a href=#171 id=171 data-nosnippet>171</a>        <span class="self">self</span>.style.query_source_features(source_name, options)
 <a href=#172 id=172 data-nosnippet>172</a>    }
-<a href=#173 id=173 data-nosnippet>173</a>
-<a href=#174 id=174 data-nosnippet>174</a>    <span class="doccomment">/// Placed symbols under a point or box, topmost first; see
-<a href=#175 id=175 data-nosnippet>175</a>    /// [`crate::sdf::query::query_rendered_symbols_in`].
-<a href=#176 id=176 data-nosnippet>176</a>    </span><span class="kw">pub fn </span>query_rendered_symbols(
-<a href=#177 id=177 data-nosnippet>177</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
-<a href=#178 id=178 data-nosnippet>178</a>        geometry: <span class="kw">crate</span>::sdf::query::QueryGeometry,
-<a href=#179 id=179 data-nosnippet>179</a>        options: <span class="kw-2">&amp;</span><span class="kw">crate</span>::sdf::query::QueryOptions,
-<a href=#180 id=180 data-nosnippet>180</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;<span class="kw">crate</span>::sdf::query::RenderedSymbol&gt;, <span class="kw">crate</span>::sdf::query::QueryError&gt; {
-<a href=#181 id=181 data-nosnippet>181</a>        <span class="kw">crate</span>::sdf::query::query_rendered_symbols_in(<span class="kw-2">&amp;</span><span class="self">self</span>.world, <span class="kw-2">&amp;</span><span class="self">self</span>.style, geometry, options)
-<a href=#182 id=182 data-nosnippet>182</a>    }
-<a href=#183 id=183 data-nosnippet>183</a>}
-<a href=#184 id=184 data-nosnippet>184</a>
-<a href=#185 id=185 data-nosnippet>185</a><span class="attr">#[cfg(all(test, not(target_arch = <span class="string">"wasm32"</span>)))]
-<a href=#186 id=186 data-nosnippet>186</a></span><span class="kw">mod </span>tests;
+<a href=#173 id=173 data-nosnippet>173</a>}
+<a href=#174 id=174 data-nosnippet>174</a>
+<a href=#175 id=175 data-nosnippet>175</a><span class="attr">#[cfg(all(test, not(target_arch = <span class="string">"wasm32"</span>)))]
+<a href=#176 id=176 data-nosnippet>176</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>

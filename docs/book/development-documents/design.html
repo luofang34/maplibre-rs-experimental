@@ -37,10 +37,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-6fbf5afb.js";
+            window.path_to_searchindex_js = "../searchindex-04576098.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-d6816547.js"></script>
+        <script src="../toc-ae8692d6.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -182,29 +182,60 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="design"><a class="header" href="#design">Design</a></h1>
-<script src="https://unpkg.com/@panzoom/panzoom@4.5.0/dist/panzoom.min.js"></script>
-<h2 id="domain-model"><a class="header" href="#domain-model">Domain Model</a></h2>
-<div style="overflow: hidden; border-style: solid; width: 110%">
-<img src="./figures/domain-model.drawio.svg" class="diagram" alt="diagram" />
-</div>
-
-<h2 id="data-model"><a class="header" href="#data-model">Data Model</a></h2>
-<div style="overflow: hidden; border-style: solid; width: 110%">
-<img src="./figures/data-model.drawio.svg" class="diagram" alt="diagram" />
-</div>
-
-<h2 id="crate-and-project-structure"><a class="header" href="#crate-and-project-structure">Crate and Project Structure</a></h2>
-<div style="overflow: hidden; border-style: solid; width: 110%">
-<img src="./figures/crate-and-projects-structure.drawio.svg" class="diagram" alt="diagram" />
-</div>
-
-<script>
-    Array.from(document.getElementsByClassName('diagram')).forEach(e => {
-         panzoom = Panzoom(e, {});
-         e.parentElement.addEventListener('wheel', panzoom.zoomWithWheel)
-    })
-</script>
+                        <h1 id="design-principles--trade-offs"><a class="header" href="#design-principles--trade-offs">Design Principles &amp; Trade-offs</a></h1>
+<p>This document records the core engineering decisions behind <code>maplibre</code> and how they shape day-to-day development across <code>maplibre</code>, <code>maplibre-winit</code>, <code>web</code>, and <code>apple/visionos</code>.</p>
+<h2 id="1-domain-specific-tcs-over-generic-ecs"><a class="header" href="#1-domain-specific-tcs-over-generic-ecs">1. Domain-Specific TCS Over Generic ECS</a></h2>
+<p>Map rendering has a very specific data topology:</p>
+<ul>
+<li>Global singleton state (<code>Style</code>, <code>ViewState</code>, <code>WgpuTileViewPattern</code>, <code>GpuDemPool</code>, atlases, frame timings).</li>
+<li>Sparse, hierarchical per-tile components keyed by <code>(z, x, y, build_id)</code> (<code>WorldTileCoords</code>) that are queried along parent/child/ancestor pyramid paths every frame (for overscaled vector fallbacks, DEM ancestor draping, and stencil masking).</li>
+</ul>
+<p>Using <code>maplibre::tcs</code> (<code>World</code>, <code>Tiles</code>, <code>Resources</code>) instead of an external archetype ECS gives:</p>
+<ol>
+<li><strong>Direct pyramid traversal</strong> (<code>tcs::pyramid</code>) without entity-ID hash lookups when resolving ancestor fallback tiles.</li>
+<li><strong>Zero-macro system signatures</strong>: systems are plain Rust functions or structs implementing <code>System::run(&amp;mut self, &amp;mut MapContext) -&gt; Result&lt;(), SystemError&gt;</code>.</li>
+<li><strong>Lightweight WebAssembly footprint</strong>: avoids procedural-macro and archetype-table bloat in <code>wasm32-unknown-unknown</code> bundles.</li>
+</ol>
+<h2 id="2-explicit-schedule-stages-and-fallible-lifecycle"><a class="header" href="#2-explicit-schedule-stages-and-fallible-lifecycle">2. Explicit <code>Schedule</code> Stages and Fallible Lifecycle</a></h2>
+<p>GPU applications in browsers, mobile apps, and XR headsets routinely face recoverable environment failures: lost GPU surfaces, suspended windows, invalid user styles, or exhausted memory budgets.</p>
+<ul>
+<li><strong>No non-test panics</strong>: production crates enforce <code>#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]</code> alongside <code>scripts/check-panics.mjs</code> in CI.</li>
+<li><strong>Fallible <code>Plugin::build</code> and <code>Stage::run</code></strong>: plugin installation returns <code>Result&lt;(), PluginError&gt;</code> and frame execution returns <code>StageResult</code>.</li>
+<li><strong>Guaranteed frame cleanup (<code>Schedule::run_after_failure</code>)</strong>: <code>RenderStageLabel::Cleanup</code> runs even when an earlier stage errors, ensuring transient per-frame <code>RenderPhase</code> vectors and tile retention budgets never leak across frames.</li>
+</ul>
+<h2 id="3-worker-offload-via-environment-and-transferables"><a class="header" href="#3-worker-offload-via-environment-and-transferables">3. Worker Offload via <code>Environment</code> and <code>Transferables</code></a></h2>
+<p>To hold <code>60–90+ FPS</code> (especially on Apple Vision Pro where missed CompositorServices deadlines cause visible judder), the render thread performs <strong>no</strong> network I/O, protobuf/MLT parsing, polygon tessellation, or font glyph rasterization:</p>
+<ul>
+<li><code>Environment</code> parameterizes <code>Kernel&lt;E&gt;</code> over <code>MapWindowConfig</code>, <code>AsyncProcedureCall</code>, <code>Scheduler</code>, and <code>OffscreenKernelEnvironment</code>.</li>
+<li><code>VectorTransferables</code>, <code>RasterTransferables</code>, and <code>DemTransferables</code> let native builds pass heap-allocated buffers directly across channels while single-threaded Web Worker builds serialize into FlatBuffers transferred via zero-copy <code>postMessage</code> transfer lists.</li>
+<li><code>SharedLoader</code> (<code>ResourceLoader</code>) centralizes caching and in-flight request coalescing so simultaneous tile/glyph/sprite requests from multiple workers share one HTTP connection pool and disk cache.</li>
+</ul>
+<h2 id="4-in-place-gpu-updates--byte-counted-uploads"><a class="header" href="#4-in-place-gpu-updates--byte-counted-uploads">4. In-Place GPU Updates &amp; Byte-Counted Uploads</a></h2>
+<p>Re-tessellating an entire vector tile whenever a hover state or theme changes wastes CPU and frame upload bandwidth. Instead:</p>
+<ol>
+<li><strong>Expression classification</strong> (<code>maplibre::style::expression</code>): every parsed Style Spec expression statically computes <code>output_type()</code>, <code>is_constant()</code>, <code>is_feature_constant()</code>, and <code>is_zoom_constant()</code>.</li>
+<li><strong>Targeted mutation classification</strong> (<code>maplibre::style::mutation</code>):
+<ul>
+<li>Uniform-only paint changes update GPU uniform bindings in <code>Prepare</code>.</li>
+<li>Feature-dependent paint, <code>feature-state</code>, or <code>global-state</code> changes re-evaluate feature paint columns (<code>vector::feature_paint</code>) against retained feature properties and write updated byte ranges into <code>BufferPool</code> via <code>UploadQueue::write_buffer</code>.</li>
+<li>Only layout or structural source changes trigger worker re-processing.</li>
+</ul>
+</li>
+<li><strong>Strict upload accounting</strong>: <code>UploadQueue</code> wraps <code>wgpu::Queue</code> and counts every uploaded byte per frame. <code>clippy.toml</code> forbids calling raw <code>wgpu::Queue::write_buffer</code> / <code>write_texture</code> outside <code>UploadQueue</code>, preventing hidden upload spikes.</li>
+</ol>
+<h2 id="5-unified-2d-globe-3d-terrain-and-stereo-xr-pipeline"><a class="header" href="#5-unified-2d-globe-3d-terrain-and-stereo-xr-pipeline">5. Unified 2D, Globe, 3D Terrain, and Stereo XR Pipeline</a></h2>
+<p>Rather than maintaining separate renderers for 2D Mercator, 3D globes, terrain, and headsets:</p>
+<ul>
+<li><strong>Coordinate &amp; projection separation</strong>: tile workers always tessellate into normalized tile-local coordinates (<code>0..EXTENT</code>). Vertex shaders project tile vertices into either flat Web Mercator, curved ECEF <code>Globe</code> coordinates, or displaced 3D <code>raster-dem</code> meshes, transitioning continuously across zoom levels.</li>
+<li><strong>Hybrid terrain draping</strong>: flat fill/line/raster layers drape onto 3D terrain via cached render-to-texture (<code>DrapePassNode</code> + <code>DrapeBudget</code>), while 3D extrusions (<code>fill-extrusion</code>) and screen-aligned <code>symbol</code> labels render directly in the main pass at sampled terrain elevations so vertical walls and crisp text never blur on steep slopes.</li>
+<li><strong>View abstraction (<code>ResolvedFrameView</code> &amp; <code>XrFrame</code>)</strong>: a standard window renders a single <code>ViewState</code>; <code>MultiViewFrame</code> iterates over N named <code>ViewSlotId</code> cameras; and <code>XrFrame</code> renders <code>N</code> eyes (<code>XrEye</code>) from a shared <code>ScenePlacement</code> while computing tile requests once across the combined stereo frustum.</li>
+</ul>
+<h2 id="6-ratcheted-conformance--static-architecture-guards"><a class="header" href="#6-ratcheted-conformance--static-architecture-guards">6. Ratcheted Conformance &amp; Static Architecture Guards</a></h2>
+<p>Correctness and architectural hygiene are enforced continuously in CI:</p>
+<ul>
+<li><strong>MapLibre Style Spec Conformance</strong>: <code>render-tests</code> runs 1,700+ pixel (<code>expected.png</code>) and query (<code>expected.json</code>) fixtures on software Vulkan (<code>lavapipe</code>) with a ratcheted <code>render-tests/ignores.json</code> baseline (any unexpected failure <em>or</em> unremoved newly-passing ignore fails CI), complemented by <code>maplibre/tests/expression_conformance.rs</code>.</li>
+<li><strong>Static guards</strong>: <code>scripts/check-file-length.mjs</code> (<code>&lt;= 500</code> lines per <code>.rs</code> file), <code>scripts/check-module-layout.py</code> (no <code>mod.rs</code>), <code>scripts/check-panics.mjs</code>, <code>scripts/check-wasm-deps.py</code> (forbids native OS/runtime/TLS crates in <code>wasm32-unknown-unknown</code> trees), and <code>cargo-deny</code> (<code>deny.toml</code>) keep crate boundaries clean as the engine grows.</li>
+</ul>
 
                     </main>
 

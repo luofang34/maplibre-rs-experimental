@@ -1,4 +1,4 @@
-// The same updates from Rust in the browser, through the handle `web::run_map` resolves to.
+// Live GeoJSON replacement and camera easing through `MapHandle`.
 use std::sync::Arc;
 
 use maplibre::{
@@ -7,8 +7,10 @@ use maplibre::{
     render::view_state::{CameraOptions, FlightCurve},
     style::{source::GeoJsonData, Style},
 };
-use serde::Deserialize;
-use serde_json::json;
+#[cfg(not(target_arch = "wasm32"))]
+use maplibre_winit::NativeEnvironment as CurrentEnvironment;
+use serde_json::{json, Value};
+#[cfg(target_arch = "wasm32")]
 use web::CurrentEnvironment;
 
 const ISS_URL: &str = "https://api.wheretheiss.at/v1/satellites/25544";
@@ -36,18 +38,15 @@ pub fn build_style(base: Style) -> Result<Style, serde_json::Error> {
     Ok(style)
 }
 
-#[derive(Deserialize)]
-struct Position {
-    longitude: f64,
-    latitude: f64,
-}
-
 /// Moves the point to where the International Space Station is now, and the camera with it.
 pub async fn update(map: &MapHandle<CurrentEnvironment>) -> Result<(), Box<dyn std::error::Error>> {
-    let Position {
-        longitude,
-        latitude,
-    } = reqwest::get(ISS_URL).await?.json().await?;
+    let body: Value = reqwest::get(ISS_URL).await?.json().await?;
+    let longitude = body["longitude"]
+        .as_f64()
+        .ok_or("missing numeric `longitude` field")?;
+    let latitude = body["latitude"]
+        .as_f64()
+        .ok_or("missing numeric `latitude` field")?;
     let point = json!({
         "type": "Feature",
         "properties": {},
@@ -70,7 +69,8 @@ pub async fn update(map: &MapHandle<CurrentEnvironment>) -> Result<(), Box<dyn s
     Ok(())
 }
 
-/// Updates the point every two seconds for as long as the map runs.
+/// Updates the point every two seconds in the browser for as long as the map runs.
+#[cfg(target_arch = "wasm32")]
 pub async fn follow(map: MapHandle<CurrentEnvironment>) {
     while !map.is_closed() {
         if let Err(error) = update(&map).await {

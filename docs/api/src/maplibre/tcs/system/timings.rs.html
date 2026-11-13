@@ -86,10 +86,10 @@
 <a href=#86 id=86 data-nosnippet>86</a>    run: <span class="kw">impl </span>FnOnce(<span class="kw-2">&amp;mut </span>MapContext) -&gt; R,
 <a href=#87 id=87 data-nosnippet>87</a>) -&gt; (R, Duration) {
 <a href=#88 id=88 data-nosnippet>88</a>    <span class="kw">let </span>started = instant::Instant::now();
-<a href=#89 id=89 data-nosnippet>89</a>    <span class="kw">let </span>heap_before = <span class="kw">super</span>::heap::live_bytes();
+<a href=#89 id=89 data-nosnippet>89</a>    <span class="kw">let </span>heap_before = <span class="kw">super</span>::heap::live_bytes(<span class="kw-2">&amp;</span>context.world.resources);
 <a href=#90 id=90 data-nosnippet>90</a>    <span class="kw">let </span>result = run(context);
 <a href=#91 id=91 data-nosnippet>91</a>    <span class="kw">let </span>spent = started.elapsed();
-<a href=#92 id=92 data-nosnippet>92</a>    <span class="kw">let </span>grown = <span class="kw">super</span>::heap::live_bytes() - heap_before;
+<a href=#92 id=92 data-nosnippet>92</a>    <span class="kw">let </span>grown = <span class="kw">super</span>::heap::live_bytes(<span class="kw-2">&amp;</span>context.world.resources) - heap_before;
 <a href=#93 id=93 data-nosnippet>93</a>    <span class="kw">let </span>timings = context.world.resources.get_or_init_mut::&lt;FrameTimings&gt;();
 <a href=#94 id=94 data-nosnippet>94</a>    timings.record(name, spent);
 <a href=#95 id=95 data-nosnippet>95</a>    timings.record_growth(name, grown);
