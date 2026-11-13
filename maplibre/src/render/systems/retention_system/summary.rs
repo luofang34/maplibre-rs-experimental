@@ -69,7 +69,7 @@ pub(super) fn summarize_timings(world: &mut World) {
     if !growers.is_empty() {
         tracing::info!(
             kb_per_frame = %growers.join(" "),
-            rust_heap_mb = live_bytes() >> 20,
+            rust_heap_mb = live_bytes(&world.resources) >> 20,
             "heap growth by system"
         );
     }

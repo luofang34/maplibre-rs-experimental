@@ -221,3 +221,47 @@ async fn cached_range_requests_request_identity_encoding_and_preserve_distinct_s
         .expect("server task cleanly handled 2 requests");
     let _ = std::fs::remove_dir_all(&cache_dir);
 }
+
+#[tokio::test]
+async fn in_process_routes_are_isolated_per_client_and_shared_frontend_hits_memory_cache() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let route_calls = Arc::clone(&calls);
+    let routes = InProcessRoutes::new();
+    let prefix = "http://127.0.0.1:1/in-process-isolated";
+    routes.register(
+        prefix,
+        Arc::new(move |_url, _range| {
+            let count = route_calls.fetch_add(1, Ordering::SeqCst) + 1;
+            Box::pin(async move { Ok(format!("reply-{count}").into_bytes()) })
+        }),
+    );
+
+    let routed = ReqwestHttpClient::with_in_process_routes::<String>(None, routes.clone());
+    let plain = ReqwestHttpClient::new::<String>(None);
+    let target = format!("{prefix}/tile.pbf");
+
+    assert_eq!(routed.fetch(&target).await.expect("routed"), b"reply-1");
+    assert!(plain.fetch(&target).await.is_err());
+
+    routes.unregister(prefix);
+    assert!(routed.fetch(&target).await.is_err());
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+    let frontend = HttpCacheFrontend::new();
+    let first = ReqwestHttpClient::with_cache_frontend::<String>(None, frontend.clone());
+    let second = ReqwestHttpClient::with_cache_frontend::<String>(None, frontend);
+    first
+        .frontend
+        .as_deref()
+        .expect("frontend attached")
+        .insert("http://127.0.0.1:1/shared", b"cached-payload");
+    assert_eq!(
+        second
+            .fetch("http://127.0.0.1:1/shared")
+            .await
+            .expect("served from shared frontend"),
+        b"cached-payload"
+    );
+}

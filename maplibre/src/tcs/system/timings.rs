@@ -86,10 +86,10 @@ pub fn measure<R>(
     run: impl FnOnce(&mut MapContext) -> R,
 ) -> (R, Duration) {
     let started = instant::Instant::now();
-    let heap_before = super::heap::live_bytes();
+    let heap_before = super::heap::live_bytes(&context.world.resources);
     let result = run(context);
     let spent = started.elapsed();
-    let grown = super::heap::live_bytes() - heap_before;
+    let grown = super::heap::live_bytes(&context.world.resources) - heap_before;
     let timings = context.world.resources.get_or_init_mut::<FrameTimings>();
     timings.record(name, spent);
     timings.record_growth(name, grown);

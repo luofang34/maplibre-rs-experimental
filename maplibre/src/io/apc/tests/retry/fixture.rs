@@ -189,6 +189,16 @@ pub(super) struct Fixture {
 impl Fixture {
     pub async fn new(kind: Kind, multiple: bool) -> Self {
         let source = Source::new().await;
+        let http_client = ReqwestHttpClient::with_in_process_routes::<String>(None, source.routes());
+        let calls = Calls {
+            config: OffscreenKernelConfig {
+                loader: Some(crate::io::resource_loader::SharedLoader::new(
+                    http_client.clone(),
+                )),
+                ..OffscreenKernelConfig::default()
+            },
+            ..Calls::default()
+        };
         let (_, renderer) = create_headless_renderer(16, 16, None)
             .await
             .expect("renderer");
@@ -196,8 +206,8 @@ impl Fixture {
         let kernel = Rc::new(
             KernelBuilder::new()
                 .with_map_window_config(HeadlessMapWindowConfig::new(size))
-                .with_http_client(ReqwestHttpClient::new::<String>(None))
-                .with_apc(Calls::default())
+                .with_http_client(http_client)
+                .with_apc(calls)
                 .build()
                 .expect("kernel"),
         );

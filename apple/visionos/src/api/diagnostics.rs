@@ -1,6 +1,53 @@
-use super::*;
+use std::{
+    alloc::{GlobalAlloc, Layout, System},
+    fs::{File, OpenOptions},
+    io::Write,
+    path::Path,
+    rc::Rc,
+    sync::{
+        atomic::{AtomicIsize, Ordering},
+        Arc, Mutex, Once,
+    },
+};
+
+use maplibre::{
+    environment::Environment,
+    kernel::Kernel,
+    plugin::{Plugin, PluginError},
+    render::Renderer,
+    schedule::Schedule,
+    tcs::{system::heap::HeapSampler, world::World},
+};
+use tracing_subscriber::{
+    filter::Targets, fmt::MakeWriter, layer::SubscriberExt, util::SubscriberInitExt, Layer,
+};
 
 static LOGGING: Once = Once::new();
+static LIVE_BYTES: AtomicIsize = AtomicIsize::new(0);
+
+fn live_bytes() -> isize {
+    LIVE_BYTES.load(Ordering::Relaxed)
+}
+
+fn account(bytes: isize) {
+    LIVE_BYTES.fetch_add(bytes, Ordering::Relaxed);
+}
+
+/// Installs a [`HeapSampler`] reading this library's counting allocator into the map world.
+pub(super) struct HeapPlugin;
+
+impl<E: Environment> Plugin<E> for HeapPlugin {
+    fn build(
+        &self,
+        _schedule: &mut Schedule,
+        _kernel: Rc<Kernel<E>>,
+        world: &mut World,
+        _renderer: &mut Renderer,
+    ) -> Result<(), PluginError> {
+        world.resources.insert(HeapSampler::new(live_bytes));
+        Ok(())
+    }
+}
 
 /// The system allocator with a running count of live bytes, so the renderer can charge a
 /// frame's heap growth to the system it happens in.
@@ -11,20 +58,20 @@ unsafe impl GlobalAlloc for CountingAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let pointer = unsafe { System.alloc(layout) };
         if !pointer.is_null() {
-            heap::account(layout.size() as isize);
+            account(layout.size() as isize);
         }
         pointer
     }
 
     unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
-        heap::account(-(layout.size() as isize));
+        account(-(layout.size() as isize));
         unsafe { System.dealloc(pointer, layout) }
     }
 
     unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
         let moved = unsafe { System.realloc(pointer, layout, new_size) };
         if !moved.is_null() {
-            heap::account(new_size as isize - layout.size() as isize);
+            account(new_size as isize - layout.size() as isize);
         }
         moved
     }

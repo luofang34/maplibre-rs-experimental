@@ -3,13 +3,8 @@ mod diagnostics;
 mod frame;
 mod metal_texture;
 use std::{
-    alloc::{GlobalAlloc, Layout, System},
     ffi::{c_char, c_void, CStr},
-    fs::{File, OpenOptions},
-    io::Write,
-    path::Path,
     ptr,
-    sync::{Arc, Mutex, Once},
     time::Duration,
 };
 
@@ -33,10 +28,6 @@ use maplibre::{
         RenderPlugin,
     },
     style::Style,
-    tcs::system::heap,
-};
-use tracing_subscriber::{
-    filter::Targets, fmt::MakeWriter, layer::SubscriberExt, util::SubscriberInitExt, Layer,
 };
 
 /// The format the map renders in: the linear twin of the compositor's `bgra8Unorm_srgb`, so
@@ -205,6 +196,7 @@ fn create(
     ));
     let has_terrain = style.terrain.is_some();
     let mut plugins: Vec<Box<dyn Plugin<_>>> = vec![
+        Box::new(diagnostics::HeapPlugin),
         Box::new(RenderPlugin),
         Box::new(maplibre::starfield::StarfieldPlugin),
         Box::new(maplibre::background::BackgroundPlugin),

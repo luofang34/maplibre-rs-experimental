@@ -28,6 +28,7 @@ pub(super) struct Gate {
 
 pub(super) struct Source {
     pub url: String,
+    routes: crate::platform::http_client::InProcessRoutes,
     response: Arc<Mutex<Response>>,
     healthy: Arc<Mutex<Response>>,
     requests: Arc<Mutex<Vec<String>>>,
@@ -93,15 +94,21 @@ impl Source {
             healthy.clone(),
             response.clone(),
         );
-        crate::platform::http_client::register_in_process_handler(url.clone(), handler);
+        let routes = crate::platform::http_client::InProcessRoutes::new();
+        routes.register(url.clone(), handler);
         Self {
             url,
+            routes,
             response,
             healthy,
             requests,
             task,
             gate,
         }
+    }
+
+    pub fn routes(&self) -> crate::platform::http_client::InProcessRoutes {
+        self.routes.clone()
     }
 
     fn make_handler(
@@ -212,7 +219,7 @@ impl Source {
 
 impl Drop for Source {
     fn drop(&mut self) {
-        crate::platform::http_client::unregister_in_process_handler(&self.url);
+        self.routes.unregister(&self.url);
         self.task.abort();
     }
 }
