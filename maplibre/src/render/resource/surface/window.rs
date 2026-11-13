@@ -40,8 +40,9 @@ impl WindowHead {
     /// # Panics
     /// Panics if either dimension is zero. Wgpu also rejects unsupported dimensions or
     /// configurations, and outstanding acquired frames must be dropped before this call.
+    #[allow(clippy::expect_used)]
     pub fn resize_and_configure(&mut self, width: u32, height: u32, device: &wgpu::Device) {
-        self.size = PhysicalSize::new(width, height).unwrap();
+        self.size = PhysicalSize::new(width, height).expect("non-zero window surface dimensions");
         self.configure(device);
     }
 

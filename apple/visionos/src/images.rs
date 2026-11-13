@@ -154,7 +154,7 @@ impl StyleImageProvider for CallbackProvider {
 /// `map` must be a map created by this library, or null; `namespace` and `generation`
 /// NUL-terminated strings. `callback` is called on tile worker threads, several calls at
 /// once, never on the thread that draws, and `context` must stay valid while the map lives.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn maplibre_visionos_register_image_provider(
     map: *mut MaplibreVisionOSMap,
     namespace: *const c_char,
@@ -189,7 +189,7 @@ pub unsafe extern "C" fn maplibre_visionos_register_image_provider(
 ///
 /// `map` must be a map created by this library, or null, used by its render thread only;
 /// `namespace` a NUL-terminated string.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn maplibre_visionos_invalidate_images(
     map: *mut MaplibreVisionOSMap,
     namespace: *const c_char,

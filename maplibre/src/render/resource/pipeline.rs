@@ -84,7 +84,7 @@ impl RenderPipelineDescriptor {
             source: wgpu::ShaderSource::Wgsl(self.fragment.source.into()),
         });
 
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: self.label.as_ref().map(|label| label.as_ref()),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
@@ -117,8 +117,6 @@ impl RenderPipelineDescriptor {
 
             multiview_mask: None,
             cache: None,
-        });
-
-        pipeline
+        })
     }
 }

@@ -11,6 +11,9 @@ keywords.workspace = true
 categories.workspace = true
 authors.workspace = true
 
+[lints]
+workspace = true
+
 [[bin]]
 name = "render-tests"
 path = "src/main.rs"

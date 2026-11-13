@@ -11,6 +11,9 @@ keywords.workspace = true
 categories.workspace = true
 authors.workspace = true
 
+[lints]
+workspace = true
+
 [features]
 web-webgl = ["maplibre/web-webgl"]
 trace = ["maplibre/trace"]

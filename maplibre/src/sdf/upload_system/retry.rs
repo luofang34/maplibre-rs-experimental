@@ -1,4 +1,5 @@
 //! Upload failures preserve the committed symbol geometry, atlas and placement features.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 use std::{rc::Rc, sync::Arc};
 
 use super::*;

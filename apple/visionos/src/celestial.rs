@@ -16,7 +16,7 @@ const STAR_STRIDE_F32: usize = 7;
 /// # Safety
 ///
 /// `map` must be a valid `MaplibreVisionOSMap` handle or null.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn maplibre_visionos_set_pixel_ratio(
     map: *mut MaplibreVisionOSMap,
     ratio: f64,
@@ -36,7 +36,7 @@ pub unsafe extern "C" fn maplibre_visionos_set_pixel_ratio(
 /// # Safety
 ///
 /// `map` must be a valid `MaplibreVisionOSMap` handle or null.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn maplibre_visionos_set_body(
     map: *mut MaplibreVisionOSMap,
     radius_meters: f64,
@@ -68,7 +68,7 @@ pub unsafe extern "C" fn maplibre_visionos_set_body(
 /// `map` must be a valid `MaplibreVisionOSMap` handle or null. When `has_sun` is true,
 /// `sun_ecef_xyz` must point to 3 `f64` values; when `has_moon` is true, `moon_ecef_xyz`
 /// must point to 3 `f64` values.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn maplibre_visionos_set_sky(
     map: *mut MaplibreVisionOSMap,
     has_sun: bool,
@@ -119,7 +119,7 @@ pub unsafe extern "C" fn maplibre_visionos_set_sky(
 ///
 /// `map` must be a valid `MaplibreVisionOSMap` handle or null. When `star_count > 0`,
 /// `packed_stars_f32` must address at least `star_count * 7` readable `f32` values.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn maplibre_visionos_set_stars(
     map: *mut MaplibreVisionOSMap,
     packed_stars_f32: *const f32,

@@ -1,14 +1,14 @@
 use std::{env, fs, path::Path};
 
-fn main() {
-    let out_dir = env::var("OUT_DIR").unwrap();
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let out_dir = env::var("OUT_DIR")?;
 
     println!("cargo:rerun-if-changed=./flatbuffer");
 
-    let flatbuffer = fs::read_dir("./flatbuffer")
-        .unwrap()
-        .map(|entry| entry.unwrap().path())
-        .collect::<Vec<_>>();
+    let mut flatbuffer = Vec::new();
+    for entry in fs::read_dir("./flatbuffer")? {
+        flatbuffer.push(entry?.path());
+    }
 
     flatc_rust::run(flatc_rust::Args {
         inputs: &flatbuffer
@@ -21,6 +21,6 @@ fn main() {
             "platform::singlethreaded::transferables",
         ],
         ..Default::default()
-    })
-    .expect("flatc");
+    })?;
+    Ok(())
 }

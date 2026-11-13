@@ -24,8 +24,8 @@ jni.workspace = true
 #name = "maplibre_android" Currently not supported: https://github.com/rust-windowing/android-ndk-rs/issues/136
 crate-type = ["rlib", "cdylib"]
 
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(no_pendantic_os_check)'] }
+[lints]
+workspace = true
 
 [package.metadata.android]
 apk_name = "maplibre-rs-demo"

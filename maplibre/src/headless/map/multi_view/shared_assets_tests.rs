@@ -19,7 +19,7 @@ use crate::{
 
 #[test]
 fn shared_map_assets_deduplicates_static_dem_and_pipelines_across_isolated_worlds() {
-    crate::headless::map::test_async::run_async(async {
+    crate::headless::map::test_async::run_async_multi_thread(async {
         let Some(gpu) = host_gpu().await else {
             return;
         };

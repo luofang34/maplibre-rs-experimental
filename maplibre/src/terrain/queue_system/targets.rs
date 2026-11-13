@@ -201,7 +201,7 @@ pub(super) fn draw_order_key(
     style: &Style,
     view_state: &ViewState,
     dem_tile_size: f64,
-) -> impl Fn(&WorldTileCoords) -> f64 {
+) -> impl Fn(&WorldTileCoords) -> f64 + use<> {
     enum OrderMode {
         Spherical(cgmath::Vector3<f64>),
         Planar([f64; 2]),

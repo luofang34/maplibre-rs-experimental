@@ -29,8 +29,10 @@ struct JsImageProvider {
 
 // SAFETY: this module is built without atomics, so it runs on one thread and the function is
 // never reached from another.
+#[allow(unsafe_code)]
 unsafe impl Send for JsImageProvider {}
 // SAFETY: as for `Send`.
+#[allow(unsafe_code)]
 unsafe impl Sync for JsImageProvider {}
 
 impl StyleImageProvider for JsImageProvider {

@@ -269,31 +269,25 @@ pub fn queue_system(
 
         let (buffer, tile_metadata_buffer, atmosphere_metadata_buffer, sky_metadata_buffer) = {
             let gpu_buffers = world.resources.get_or_init_mut::<BackgroundGpuBuffers>();
-            gpu_buffers.write_metadata(&renderer.device, &renderer.queue, &metadatas);
-            gpu_buffers.write_tile_metadata(&renderer.device, &renderer.queue, &tile_metadata);
-            gpu_buffers.write_atmosphere(&renderer.device, &renderer.queue, &atmosphere_metadata);
-            if let Some(sky) = &sky_metadata {
-                gpu_buffers.write_sky(&renderer.device, &renderer.queue, sky);
-            }
+            let buffer = gpu_buffers
+                .write_metadata(&renderer.device, &renderer.queue, &metadatas)
+                .clone();
+            let tile_metadata_buffer = gpu_buffers
+                .write_tile_metadata(&renderer.device, &renderer.queue, &tile_metadata)
+                .clone();
+            let atmosphere_metadata_buffer = gpu_buffers
+                .write_atmosphere(&renderer.device, &renderer.queue, &atmosphere_metadata)
+                .clone();
+            let sky_metadata_buffer = sky_metadata.as_ref().map(|sky| {
+                gpu_buffers
+                    .write_sky(&renderer.device, &renderer.queue, sky)
+                    .clone()
+            });
             (
-                gpu_buffers
-                    .metadata_buffer()
-                    .expect("metadata buffer")
-                    .clone(),
-                gpu_buffers
-                    .tile_metadata_buffer()
-                    .expect("tile metadata buffer")
-                    .clone(),
-                gpu_buffers
-                    .atmosphere_metadata_buffer()
-                    .expect("atmosphere metadata buffer")
-                    .clone(),
-                sky_metadata.as_ref().map(|_| {
-                    gpu_buffers
-                        .sky_metadata_buffer()
-                        .expect("sky metadata buffer")
-                        .clone()
-                }),
+                buffer,
+                tile_metadata_buffer,
+                atmosphere_metadata_buffer,
+                sky_metadata_buffer,
             )
         };
         world.resources.insert(BackgroundBuffers {

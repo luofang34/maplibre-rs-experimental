@@ -5,6 +5,7 @@
 /// # Panics
 /// Panics if a global subscriber is already installed.
 #[cfg(feature = "trace")]
+#[allow(clippy::expect_used)]
 pub fn enable_tracing() {
     use tracing_subscriber::{layer::SubscriberExt, Registry};
 

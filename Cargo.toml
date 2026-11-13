@@ -16,12 +16,21 @@ members = [
 
 [workspace.package]
 description = "Maps for Desktop, Mobile and Web"
-edition = "2021"
+edition = "2024"
 rust-version = "1.97.1"
 license = "AGPL-3.0-or-later AND (MIT OR Apache-2.0)"
 keywords = ["graphics", "maps", "webgl", "tiles"]
 categories = ["graphics", "science::geo"]
 authors = ["MapLibre"]
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(no_pendantic_os_check)'] }
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+collapsible_if = "allow"
 
 [workspace.dependencies]
 rand = { version = "0.10.3" }

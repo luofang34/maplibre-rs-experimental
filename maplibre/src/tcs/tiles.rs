@@ -35,7 +35,7 @@ impl_downcast!(TileComponent);
 pub struct Tiles {
     /// Tile records keyed by canonical quadkey.
     pub tiles: BTreeMap<Quadkey, Tile>,
-    /// Dense component slots under each tile's key, indexed by [`Self::component_indices`].
+    /// Dense component slots under each tile's key, indexed by registered component type ID.
     /// Use [`TileSpawnResult::insert`] to preserve one component per type and release replaced values.
     pub components: FxHashMap<Quadkey, Vec<Option<Box<dyn TileComponent>>>>,
     /// Geometry available to rendered-feature queries; cleared with the owning tiles.

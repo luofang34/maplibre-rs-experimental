@@ -85,7 +85,7 @@ async fn settled_sensor_image(after_an_eye: bool) -> Vec<u8> {
 /// views shared would hold the detail of whichever drew it last.
 #[test]
 fn a_views_settled_image_is_the_same_with_and_without_another_view_in_its_frame() {
-    crate::headless::map::test_async::run_async(async {
+    crate::headless::map::test_async::run_async_multi_thread(async {
         let alone = settled_sensor_image(false).await;
         let after_an_eye = settled_sensor_image(true).await;
         let (alone, after_an_eye) = (alone.as_chunks::<4>().0, after_an_eye.as_chunks::<4>().0);
@@ -176,7 +176,7 @@ async fn last_view_under_a_tight_allowance(
 /// keep the detail it has alone while the other covers its ground with what is left.
 #[test]
 fn two_views_fit_a_tight_texture_allowance_by_their_priority() {
-    crate::headless::map::test_async::run_async(async {
+    crate::headless::map::test_async::run_async_multi_thread(async {
         // The eye's slot is registered first; at equal priority it is served first.
         for (sensor_priority, eye_leads) in [(0, true), (1, false)] {
             let mut drapes_of = [0; 2];

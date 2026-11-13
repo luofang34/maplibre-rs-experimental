@@ -2,6 +2,8 @@
 
 // A panic in a worker entry takes the worker's module down with it; return typed errors.
 #![deny(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+// Worker FFI entrypoints accept raw pointer handles marshalled across `postMessage`.
+#![allow(unsafe_code)]
 
 use std::{cell::RefCell, mem, rc::Rc, sync::OnceLock};
 

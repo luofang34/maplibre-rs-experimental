@@ -1,6 +1,7 @@
 //! Bounded C transport for rendered-symbol queries.
-use crate::MaplibreVisionOSMap;
 use std::ffi::c_char;
+
+use crate::MaplibreVisionOSMap;
 
 /// Copies the rendered-symbol query JSON into the supplied buffer.
 /// Returns the required capacity including the trailing NUL, or zero on failure.
@@ -9,7 +10,7 @@ use std::ffi::c_char;
 /// # Safety
 /// The map must be live and exclusively accessed by its render thread. A non-null buffer
 /// must be writable for `capacity` bytes and must not overlap the map.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn maplibre_visionos_query_symbols(
     map: *const MaplibreVisionOSMap,
     x: f64,
@@ -44,7 +45,7 @@ pub unsafe extern "C" fn maplibre_visionos_query_symbols(
 ///
 /// # Safety
 /// The map must be live and exclusively accessed by its render thread.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn maplibre_visionos_set_opaque_environment(
     map: *mut MaplibreVisionOSMap,
     opaque: bool,

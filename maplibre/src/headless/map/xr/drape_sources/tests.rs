@@ -161,7 +161,7 @@ async fn drapes_beside(extra: &str) -> (usize, u32) {
 
 #[test]
 fn a_source_whose_server_fails_every_tile_does_not_hold_the_drape_back() {
-    crate::headless::map::test_async::run_async(async {
+    crate::headless::map::test_async::run_async_multi_thread(async {
         let (built, detail_requests) = drapes_beside("detail").await;
         assert!(detail_requests > 0, "the failing server was asked");
         assert!(
@@ -173,7 +173,7 @@ fn a_source_whose_server_fails_every_tile_does_not_hold_the_drape_back() {
 
 #[test]
 fn a_source_with_no_tile_at_the_view_zoom_does_not_hold_the_drape_back() {
-    crate::headless::map::test_async::run_async(async {
+    crate::headless::map::test_async::run_async_multi_thread(async {
         let (built, _) = drapes_beside("close").await;
         assert!(
             built > 0,

@@ -77,17 +77,32 @@ impl LayerIndexed for FlatBufferTransferable {
     }
 
     fn coords(&self) -> WorldTileCoords {
-        let data = root_as_flat_layer_indexed(&self.data[self.start..]).unwrap();
-        data.coords().unwrap().into()
+        root_as_flat_layer_indexed(&self.data[self.start..])
+            .ok()
+            .and_then(|data| data.coords())
+            .map_or_else(WorldTileCoords::default, Into::into)
     }
 
     fn source(&self) -> Option<String> {
-        let data = root_as_flat_layer_indexed(&self.data[self.start..]).unwrap();
-        data.source().map(str::to_owned)
+        root_as_flat_layer_indexed(&self.data[self.start..])
+            .ok()
+            .and_then(|data| data.source())
+            .map(str::to_owned)
     }
 
     fn to_tile_index(self) -> TileIndex {
-        let data = root_as_flat_layer_indexed(&self.data[self.start..]).unwrap();
+        let Ok(data) = root_as_flat_layer_indexed(&self.data[self.start..]) else {
+            return WireTileIndex {
+                is_spatial: false,
+                strings: Vec::new(),
+                prop_blobs: Vec::new(),
+                prop_offsets: Vec::new(),
+                geometries: Vec::new(),
+                ring_ends: Vec::new(),
+                xy: Vec::new(),
+            }
+            .into_tile_index();
+        };
         let strings = data
             .strings()
             .map(|v| v.iter().map(str::to_owned).collect())

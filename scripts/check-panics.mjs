@@ -218,11 +218,13 @@ function collectRustFiles(dir,repoRoot,acc){
 export function scanWorkspacePanics(repoRoot=REPO_ROOT){
   const members=parseWorkspaceMembers(readFileSync(join(repoRoot,'Cargo.toml'),'utf8'));
   const crates={};
+  const fileDetails={};
   for(const member of members){
-    const files=[];
-    collectRustFiles(join(repoRoot,member,'src'),repoRoot,files);
+    const memberFiles=[];
+    collectRustFiles(join(repoRoot,member,'src'),repoRoot,memberFiles);
     const summary={total:0,unwrap:0,expect:0,panic:0,todo:0,unimplemented:0};
-    for(const file of files){
+    for(const file of memberFiles){
+      const relPath=posix.normalize(relative(repoRoot,file).split('\\').join('/'));
       const counts=countPanicsInSource(readFileSync(file,'utf8'));
       summary.total+=counts.total;
       summary.unwrap+=counts.unwrap;
@@ -230,20 +232,60 @@ export function scanWorkspacePanics(repoRoot=REPO_ROOT){
       summary.panic+=counts.panic;
       summary.todo+=counts.todo;
       summary.unimplemented+=counts.unimplemented;
+      if(counts.total>0){
+        fileDetails[relPath]=counts;
+      }
     }
     crates[member]=summary;
   }
-  return crates;
+  const files=Object.fromEntries(
+    Object.entries(fileDetails)
+      .filter(([,counts])=>counts.total>0)
+      .sort(([a],[b])=>(a<b?-1:a>b?1:0))
+      .map(([relPath,counts])=>[relPath,counts.total])
+  );
+  return {crates,files,fileDetails};
 }
 
-export function checkPanicBaseline(currentCrates,baselineCrates){
+function hasReportShape(obj){
+  return Boolean(
+    obj&&
+    typeof obj==='object'&&
+    (('crates' in obj&&typeof obj.crates==='object')||('files' in obj&&typeof obj.files==='object'))
+  );
+}
+
+export function checkPanicBaseline(current,baseline){
+  const currentIsReport=hasReportShape(current);
+  const baselineIsReport=hasReportShape(baseline);
+  const currentCrates=currentIsReport?(current.crates??{}):(current??{});
+  const baselineCrates=baselineIsReport?(baseline.crates??{}):(baseline??{});
+  const currentFiles=currentIsReport?(current.fileDetails??current.files??null):null;
+  const baselineFiles=baselineIsReport?(baseline.files??{}):{};
+
   const regressions=[];
   for(const [crate,counts] of Object.entries(currentCrates)){
     const allowed=baselineCrates[crate]?.total??0;
     if(counts.total>allowed){
       regressions.push(
-        `${crate}: ${allowed} -> ${counts.total} (+${counts.total-allowed}; unwrap=${counts.unwrap}, expect=${counts.expect}, panic=${counts.panic}, todo=${counts.todo}, unimplemented=${counts.unimplemented})`
+        `crate ${crate}: ${allowed} -> ${counts.total} (+${counts.total-allowed}; unwrap=${counts.unwrap}, expect=${counts.expect}, panic=${counts.panic}, todo=${counts.todo}, unimplemented=${counts.unimplemented})`
       );
+    }
+  }
+  if(currentFiles){
+    const sortedFiles=Object.entries(currentFiles).sort(([a],[b])=>(a<b?-1:a>b?1:0));
+    for(const [relPath,entry] of sortedFiles){
+      const actual=typeof entry==='number'?entry:entry.total;
+      const allowed=baselineFiles[relPath]??0;
+      if(actual>allowed){
+        if(typeof entry==='object'&&entry!==null){
+          regressions.push(
+            `file ${relPath}: ${allowed} -> ${actual} (+${actual-allowed}; unwrap=${entry.unwrap??0}, expect=${entry.expect??0}, panic=${entry.panic??0}, todo=${entry.todo??0}, unimplemented=${entry.unimplemented??0})`
+          );
+        }else{
+          regressions.push(`file ${relPath}: ${allowed} -> ${actual} (+${actual-allowed})`);
+        }
+      }
     }
   }
   if(regressions.length){
@@ -255,19 +297,23 @@ export function checkPanicBaseline(currentCrates,baselineCrates){
 
 if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){
   const writeMode=process.argv.includes('--write-baseline');
-  const crates=scanWorkspacePanics(REPO_ROOT);
+  const report=scanWorkspacePanics(REPO_ROOT);
+  const {crates,files}=report;
   if(writeMode){
     const payload={
-      description:'Monotonic ceiling on non-test .unwrap(), .expect(), panic!(), todo!(), and unimplemented!() sites per workspace crate.',
+      description:'Monotonic ceiling on non-test .unwrap(), .expect(), panic!(), todo!(), and unimplemented!() sites per workspace crate and source file.',
       crates,
+      files,
     };
     writeFileSync(DEFAULT_BASELINE_PATH,`${JSON.stringify(payload,null,2)}\n`);
-    console.log(`Wrote panic baseline for ${Object.keys(crates).length} workspace crates to ${relative(REPO_ROOT,DEFAULT_BASELINE_PATH)}.`);
+    console.log(`Wrote panic baseline for ${Object.keys(crates).length} workspace crates and ${Object.keys(files).length} non-zero files to ${relative(REPO_ROOT,DEFAULT_BASELINE_PATH)}.`);
   }else{
     const baseline=JSON.parse(readFileSync(DEFAULT_BASELINE_PATH,'utf8'));
-    checkPanicBaseline(crates,baseline.crates??{});
+    checkPanicBaseline(report,baseline);
     const totalNow=Object.values(crates).reduce((sum,c)=>sum+c.total,0);
     const totalBase=Object.values(baseline.crates??{}).reduce((sum,c)=>sum+(c.total??0),0);
-    console.log(`Checked ${Object.keys(crates).length} workspace crates against panic baseline (${totalNow} <= ${totalBase} total non-test panic sites).`);
+    const fileCountNow=Object.keys(files).length;
+    const fileCountBase=Object.keys(baseline.files??{}).length;
+    console.log(`Checked ${Object.keys(crates).length} workspace crates and ${fileCountNow}/${fileCountBase} baselined files (${totalNow} <= ${totalBase} total non-test panic sites).`);
   }
 }

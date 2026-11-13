@@ -111,10 +111,8 @@ impl BackgroundGpuBuffers {
     }
 
     fn ensure_allocated(&mut self, device: &wgpu::Device) -> &mut AllocatedBuffers {
-        if self.inner.is_none() {
-            self.inner = Some(AllocatedBuffers::new(device));
-        }
-        self.inner.as_mut().expect("allocated buffers")
+        self.inner
+            .get_or_insert_with(|| AllocatedBuffers::new(device))
     }
 
     /// Writes `metadatas` into `metadata_buffer`, reallocating with geometric growth if capacity is exceeded.
@@ -123,7 +121,7 @@ impl BackgroundGpuBuffers {
         device: &wgpu::Device,
         queue: &UploadQueue,
         metadatas: &[BackgroundLayerMetadata],
-    ) {
+    ) -> &wgpu::Buffer {
         let inner = self.ensure_allocated(device);
         let needed_capacity = metadatas.len().max(1);
         if needed_capacity > inner.metadata_capacity {
@@ -140,6 +138,7 @@ impl BackgroundGpuBuffers {
         if !metadatas.is_empty() {
             queue.write_buffer(&inner.metadata_buffer, 0, bytemuck::cast_slice(metadatas));
         }
+        &inner.metadata_buffer
     }
 
     /// Writes `tile_metadata` into `tile_metadata_buffer`, reallocating with geometric growth if capacity is exceeded.
@@ -148,7 +147,7 @@ impl BackgroundGpuBuffers {
         device: &wgpu::Device,
         queue: &UploadQueue,
         tile_metadata: &[ShaderTileMetadata],
-    ) {
+    ) -> &wgpu::Buffer {
         let inner = self.ensure_allocated(device);
         let needed_capacity = tile_metadata.len().max(1);
         if needed_capacity > inner.tile_metadata_capacity {
@@ -169,6 +168,7 @@ impl BackgroundGpuBuffers {
                 bytemuck::cast_slice(tile_metadata),
             );
         }
+        &inner.tile_metadata_buffer
     }
 
     /// Writes `metadata` into `atmosphere_metadata_buffer`.
@@ -177,13 +177,14 @@ impl BackgroundGpuBuffers {
         device: &wgpu::Device,
         queue: &UploadQueue,
         metadata: &AtmosphereLayerMetadata,
-    ) {
+    ) -> &wgpu::Buffer {
         let inner = self.ensure_allocated(device);
         queue.write_buffer(
             &inner.atmosphere_metadata_buffer,
             0,
             bytemuck::bytes_of(metadata),
         );
+        &inner.atmosphere_metadata_buffer
     }
 
     /// Writes `sky` into `sky_metadata_buffer`.
@@ -192,9 +193,10 @@ impl BackgroundGpuBuffers {
         device: &wgpu::Device,
         queue: &UploadQueue,
         sky: &SkyLayerMetadata,
-    ) {
+    ) -> &wgpu::Buffer {
         let inner = self.ensure_allocated(device);
         queue.write_buffer(&inner.sky_metadata_buffer, 0, bytemuck::bytes_of(sky));
+        &inner.sky_metadata_buffer
     }
 
     /// Returns the persistent background metadata buffer, or `None` if unallocated.

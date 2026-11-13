@@ -1,3 +1,6 @@
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+
 # Uploads are counted for frame statistics; render::upload_queue::UploadQueue is the counted path.
 disallowed-methods = [
     { path = "wgpu::Queue::write_buffer", reason = "use UploadQueue::write_buffer so the upload is counted" },

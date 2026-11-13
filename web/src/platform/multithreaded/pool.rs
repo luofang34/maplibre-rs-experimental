@@ -1,6 +1,7 @@
 //! A small module that's intended to provide an example of creating a pool of
 //! web workers which can be used to execute work.
 //! Adopted from [wasm-bindgen example](https://github.com/rustwasm/wasm-bindgen/blob/0eba2efe45801b71f8873bc368c58a8ed8e894ff/examples/raytrace-parallel/src/pool.rs)
+#![allow(unsafe_code)]
 
 use std::{cell::RefCell, rc::Rc};
 
@@ -91,14 +92,12 @@ impl WorkerPool {
         // With a worker spun up send it the module/memory so it can start
         // instantiating the wasm module. Later it might receive further
         // messages about code to run on the wasm module.
-        worker.post_message(
-            &js_sys::Object::from_entries(&js_sys::Array::of3(
-                &js_sys::Array::of2(&JsValue::from("type"), &js_sys::JsString::from("wasm_init")),
-                &js_sys::Array::of2(&JsValue::from("module"), &wasm_bindgen::module()),
-                &js_sys::Array::of2(&JsValue::from("memory"), &wasm_bindgen::memory()),
-            ))
-            .expect("can not fail"),
-        )?;
+        let init_msg = js_sys::Object::from_entries(&js_sys::Array::of3(
+            &js_sys::Array::of2(&JsValue::from("type"), &js_sys::JsString::from("wasm_init")),
+            &js_sys::Array::of2(&JsValue::from("module"), &wasm_bindgen::module()),
+            &js_sys::Array::of2(&JsValue::from("memory"), &wasm_bindgen::memory()),
+        ))?;
+        worker.post_message(&init_msg)?;
 
         self.state.push(worker);
         Ok(())
@@ -147,13 +146,11 @@ impl WorkerPool {
         let worker = self.worker()?;
         let work = Work { func: Box::new(f) };
         let work_ptr = Box::into_raw(Box::new(work));
-        match worker.post_message(
-            &js_sys::Object::from_entries(&js_sys::Array::of2(
-                &js_sys::Array::of2(&JsValue::from("type"), &js_sys::JsString::from("pool_call")),
-                &js_sys::Array::of2(&JsValue::from("work_ptr"), &JsValue::from(work_ptr as u32)),
-            ))
-            .expect("can not fail"),
-        ) {
+        let call_msg = js_sys::Object::from_entries(&js_sys::Array::of2(
+            &js_sys::Array::of2(&JsValue::from("type"), &js_sys::JsString::from("pool_call")),
+            &js_sys::Array::of2(&JsValue::from("work_ptr"), &JsValue::from(work_ptr as u32)),
+        ));
+        match call_msg.and_then(|msg| worker.post_message(&msg)) {
             Ok(()) => Ok(()),
             Err(e) => {
                 unsafe {

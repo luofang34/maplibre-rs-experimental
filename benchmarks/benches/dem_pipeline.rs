@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use std::{collections::HashMap, hint::black_box, sync::Arc};
 
 use criterion::{criterion_group, criterion_main, Criterion};

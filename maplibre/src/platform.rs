@@ -3,6 +3,8 @@
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "native-io"))]
 pub(crate) use noweb::run_cpu_bound;
+#[cfg(all(not(target_arch = "wasm32"), feature = "native-io", test))]
+pub(crate) use noweb::run_current_thread;
 #[cfg(all(not(target_arch = "wasm32"), feature = "native-io"))]
 pub use noweb::run_multithreaded;
 #[cfg(all(not(target_arch = "wasm32"), feature = "native-io", feature = "trace"))]

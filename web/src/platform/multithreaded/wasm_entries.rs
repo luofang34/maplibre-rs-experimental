@@ -1,3 +1,5 @@
+#![allow(unsafe_code)]
+
 use wasm_bindgen::prelude::*;
 
 use crate::{error::JSError, platform::multithreaded::pool::Work};

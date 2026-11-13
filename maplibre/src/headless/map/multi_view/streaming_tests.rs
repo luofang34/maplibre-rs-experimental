@@ -205,7 +205,7 @@ const COVERED_BY_FRAME: u64 = 120;
 
 #[test]
 fn an_eye_in_flight_has_imagery_out_to_its_horizon_while_the_detail_streams_in() {
-    crate::headless::map::test_async::run_async(async {
+    crate::headless::map::test_async::run_async_multi_thread(async {
         let tiles = LateTiles::default();
         let (mut map, slot) = flying_map(&tiles, Some(700 << 20)).await;
         let metres_per_frame = 100.0 / 32.0;
@@ -264,7 +264,7 @@ fn under(tile: WorldTileCoords, ancestor: WorldTileCoords) -> bool {
 /// stayed on their stand-ins: a drape whose set never completes must still show what arrived.
 #[test]
 fn an_eyes_drape_shows_the_detail_that_arrived_while_some_of_it_never_answers() {
-    crate::headless::map::test_async::run_async(async {
+    crate::headless::map::test_async::run_async_multi_thread(async {
         let tiles = LateTiles {
             unanswered_detail: 3,
             ..LateTiles::default()
@@ -377,7 +377,7 @@ async fn late_redraws_of_the_last_view(sensor_first: bool) -> usize {
 /// frame's drape budget from every drape farther away, which then never refines.
 #[test]
 fn two_views_sharing_a_drape_do_not_redraw_it_every_frame() {
-    crate::headless::map::test_async::run_async(async {
+    crate::headless::map::test_async::run_async_multi_thread(async {
         for sensor_first in [false, true] {
             let redraws = late_redraws_of_the_last_view(sensor_first).await;
             assert!(

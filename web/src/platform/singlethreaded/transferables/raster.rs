@@ -40,17 +40,31 @@ impl LayerRaster for FlatBufferTransferable {
     }
 
     fn coords(&self) -> WorldTileCoords {
-        let data = root_as_flat_layer_raster(&self.data[self.start..]).unwrap();
-        data.coords().unwrap().into()
+        root_as_flat_layer_raster(&self.data[self.start..])
+            .ok()
+            .and_then(|data| data.coords())
+            .map_or_else(WorldTileCoords::default, Into::into)
     }
 
     fn to_layer(self) -> AvailableRasterLayerData {
-        let data = root_as_flat_layer_raster(&self.data[self.start..]).unwrap();
-        let image_data = data.image_data().unwrap().iter().collect();
+        let coords = LayerRaster::coords(&self);
+        let Ok(data) = root_as_flat_layer_raster(&self.data[self.start..]) else {
+            return AvailableRasterLayerData {
+                coords,
+                source: RasterSourceId::default(),
+                image: RgbaImage::new(0, 0),
+            };
+        };
+        let source = RasterSourceId::new(data.layer_name().map(str::to_owned));
+        let image = data
+            .image_data()
+            .map(|bytes| bytes.iter().collect())
+            .and_then(|image_data| RgbaImage::from_vec(data.width(), data.height(), image_data))
+            .unwrap_or_else(|| RgbaImage::new(0, 0));
         AvailableRasterLayerData {
-            coords: LayerRaster::coords(&self),
-            source: RasterSourceId::new(data.layer_name().map(str::to_owned)),
-            image: RgbaImage::from_vec(data.width(), data.height(), image_data).unwrap(),
+            coords,
+            source,
+            image,
         }
     }
 }
@@ -84,16 +98,19 @@ impl LayerRasterMissing for FlatBufferTransferable {
     }
 
     fn coords(&self) -> WorldTileCoords {
-        let data = root_as_flat_layer_missing(&self.data[self.start..]).unwrap();
-        data.coords().unwrap().into()
+        root_as_flat_layer_missing(&self.data[self.start..])
+            .ok()
+            .and_then(|data| data.coords())
+            .map_or_else(WorldTileCoords::default, Into::into)
     }
 
     fn to_layer(self) -> MissingRasterLayerData {
-        let data = root_as_flat_layer_missing(&self.data[self.start..]).unwrap();
-        MissingRasterLayerData {
-            coords: LayerRasterMissing::coords(&self),
-            source: RasterSourceId::new(data.layer_name().map(str::to_owned)),
-        }
+        let coords = LayerRasterMissing::coords(&self);
+        let source = root_as_flat_layer_missing(&self.data[self.start..])
+            .ok()
+            .map(|data| RasterSourceId::new(data.layer_name().map(str::to_owned)))
+            .unwrap_or_default();
+        MissingRasterLayerData { coords, source }
     }
 }
 

@@ -69,17 +69,30 @@ impl SymbolLayerTessellated for FlatBufferTransferable {
     }
 
     fn coords(&self) -> WorldTileCoords {
-        let data = root_as_flat_symbol_layer_tessellated(&self.data[self.start..]).unwrap();
-        data.coords().unwrap().into()
+        root_as_flat_symbol_layer_tessellated(&self.data[self.start..])
+            .ok()
+            .and_then(|data| data.coords())
+            .map_or_else(WorldTileCoords::default, Into::into)
     }
 
     fn is_empty(&self) -> bool {
-        let data = root_as_flat_symbol_layer_tessellated(&self.data[self.start..]).unwrap();
-        data.usable_indices() == 0
+        root_as_flat_symbol_layer_tessellated(&self.data[self.start..])
+            .map(|data| data.usable_indices() == 0)
+            .unwrap_or(true)
     }
 
     fn to_bucket(self) -> SymbolLayerData {
-        let data = root_as_flat_symbol_layer_tessellated(&self.data[self.start..]).unwrap();
+        let coords = SymbolLayerTessellated::coords(&self);
+        let Ok(data) = root_as_flat_symbol_layer_tessellated(&self.data[self.start..]) else {
+            return SymbolLayerData {
+                coords,
+                source_layer: String::new(),
+                style_layer_id: String::new(),
+                buffer: OverAlignedVertexBuffer::empty(),
+                features: Vec::new(),
+                atlas: None,
+            };
+        };
         let vertices = data
             .vertices()
             .map(|v| {
@@ -99,12 +112,11 @@ impl SymbolLayerTessellated for FlatBufferTransferable {
             .unwrap_or_default();
         let usable_indices = data.usable_indices();
 
-        let layer_name = data.layer_name().unwrap().to_owned();
+        let layer_name = data.layer_name().unwrap_or_default().to_owned();
         let style_layer_id = data
             .style_layer_id()
             .map(|s| s.to_owned())
             .unwrap_or_else(|| layer_name.clone());
-        let coords = SymbolLayerTessellated::coords(&self);
         SymbolLayerData {
             coords,
             source_layer: layer_name,
@@ -162,13 +174,14 @@ fn decode_symbol_atlas(
     height.hash(&mut hasher);
     pixels.hash(&mut hasher);
     let key = (coords, width, height, hasher.finish());
+    type AtlasCacheKey = (WorldTileCoords, u32, u32, u64);
+    type AtlasCacheMap = std::collections::HashMap<
+        AtlasCacheKey,
+        std::sync::Weak<maplibre::sdf::assets::SymbolAtlas>,
+    >;
     thread_local! {
-        static ATLAS_CACHE: std::cell::RefCell<
-            std::collections::HashMap<
-                (WorldTileCoords, u32, u32, u64),
-                std::sync::Weak<maplibre::sdf::assets::SymbolAtlas>,
-            >,
-        > = std::cell::RefCell::new(std::collections::HashMap::new());
+        static ATLAS_CACHE: std::cell::RefCell<AtlasCacheMap> =
+            std::cell::RefCell::new(std::collections::HashMap::new());
     }
     ATLAS_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();

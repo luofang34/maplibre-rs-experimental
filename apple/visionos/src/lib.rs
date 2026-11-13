@@ -28,11 +28,11 @@ const _: fn() = || {
     fn assert_tokio_apc<T>()
     where
         T: maplibre::environment::Environment<
-                AsyncProcedureCall = maplibre::io::apc::SchedulerAsyncProcedureCall<
-                    maplibre::platform::ReqwestOffscreenKernelEnvironment,
-                    maplibre::platform::scheduler::TokioScheduler,
-                >,
+            AsyncProcedureCall = maplibre::io::apc::SchedulerAsyncProcedureCall<
+                maplibre::platform::ReqwestOffscreenKernelEnvironment,
+                maplibre::platform::scheduler::TokioScheduler,
             >,
+        >,
     {
     }
     assert_tokio_apc::<maplibre::headless::environment::HeadlessEnvironment>();

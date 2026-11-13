@@ -22,23 +22,22 @@ pub fn upload_system(
     }: &mut MapContext,
 ) -> SystemResult {
     let background_tiles = crate::background::queue_system::globe_tiles(world);
-    if !world
+    let (view_proj, projection_data) = match world
         .resources
         .get::<ResolvedFrameView>()
-        .is_some_and(|cached| cached.matches(style, view_state))
+        .filter(|cached| cached.matches(style, view_state))
     {
-        let resolved = ResolvedFrameView::resolve(style, view_state).map_err(|error| {
-            tracing::error!(%error, "unable to prepare projection state");
-            SystemError::Setup
-        })?;
-        world.resources.insert(resolved);
-    }
-    let resolved_snapshot = world
-        .resources
-        .get::<ResolvedFrameView>()
-        .expect("resolved frame view inserted above");
-    let view_proj = resolved_snapshot.gpu_view_projection;
-    let projection_data = resolved_snapshot.shader_projection;
+        Some(cached) => (cached.gpu_view_projection, cached.shader_projection),
+        None => {
+            let resolved = ResolvedFrameView::resolve(style, view_state).map_err(|error| {
+                tracing::error!(%error, "unable to prepare projection state");
+                SystemError::Setup
+            })?;
+            let snapshot = (resolved.gpu_view_projection, resolved.shader_projection);
+            world.resources.insert(resolved);
+            snapshot
+        }
+    };
 
     let Some((Initialized(tile_view_pattern), Initialized(projection_resources), tile_mesh_cache)) =
         world.resources.query_mut::<(

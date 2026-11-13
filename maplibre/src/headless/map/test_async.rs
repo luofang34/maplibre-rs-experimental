@@ -1,5 +1,5 @@
 //! Runtime-agnostic async coordination helpers for `headless::map` unit tests.
-#![allow(dead_code, clippy::expect_used)]
+#![allow(dead_code)]
 
 use std::{
     future::{poll_fn, Future},
@@ -12,9 +12,21 @@ use std::{
     time::Duration,
 };
 
-/// Drives an async test body on the platform's executor without coupling test modules to an
+/// Drives an async test body on a single-threaded executor without coupling test modules to an
 /// executor crate directly.
 pub(super) fn run_async<F: Future>(future: F) -> F::Output {
+    #[cfg(all(not(target_arch = "wasm32"), feature = "native-io"))]
+    {
+        crate::platform::run_current_thread(future)
+    }
+    #[cfg(not(all(not(target_arch = "wasm32"), feature = "native-io")))]
+    {
+        futures::executor::block_on(future)
+    }
+}
+
+/// Drives an async test body on a multi-threaded executor when available.
+pub(super) fn run_async_multi_thread<F: Future>(future: F) -> F::Output {
     #[cfg(all(not(target_arch = "wasm32"), feature = "native-io"))]
     {
         crate::platform::run_multithreaded(future)
@@ -56,7 +68,7 @@ pub(super) struct Notify {
 impl Notify {
     pub(super) fn notify_one(&self) {
         let waker = {
-            let mut inner = self.inner.lock().expect("notify lock");
+            let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
             if inner.wakers.is_empty() {
                 inner.permits = 1;
                 None
@@ -72,7 +84,7 @@ impl Notify {
 
     pub(super) fn notify_waiters(&self) {
         let wakers = {
-            let mut inner = self.inner.lock().expect("notify lock");
+            let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
             inner.epoch = inner.epoch.wrapping_add(1);
             std::mem::take(&mut inner.wakers)
         };
@@ -82,7 +94,7 @@ impl Notify {
     }
 
     pub(super) fn notified(&self) -> Notified<'_> {
-        let seen_epoch = self.inner.lock().expect("notify lock").epoch;
+        let seen_epoch = self.inner.lock().unwrap_or_else(|e| e.into_inner()).epoch;
         Notified {
             notify: self,
             seen_epoch,
@@ -99,7 +111,7 @@ impl Future for Notified<'_> {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
-        let mut inner = self.notify.inner.lock().expect("notify lock");
+        let mut inner = self.notify.inner.lock().unwrap_or_else(|e| e.into_inner());
         if inner.epoch != self.seen_epoch {
             return Poll::Ready(());
         }
@@ -138,7 +150,7 @@ impl PermitGate {
 
     pub(super) async fn acquire(&self) -> Result<(), ()> {
         poll_fn(|cx| {
-            let mut inner = self.inner.lock().expect("gate lock");
+            let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
             if inner.closed {
                 return Poll::Ready(Err(()));
             }
@@ -156,7 +168,7 @@ impl PermitGate {
 
     pub(super) fn add_permits(&self, count: usize) {
         let wakers = {
-            let mut inner = self.inner.lock().expect("gate lock");
+            let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
             inner.permits = inner.permits.saturating_add(count);
             std::mem::take(&mut inner.wakers)
         };
@@ -167,7 +179,7 @@ impl PermitGate {
 
     pub(super) fn close(&self) {
         let wakers = {
-            let mut inner = self.inner.lock().expect("gate lock");
+            let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
             inner.closed = true;
             std::mem::take(&mut inner.wakers)
         };
@@ -192,7 +204,7 @@ impl Future for SleepTimer {
         if self.done.load(Ordering::Acquire) {
             return Poll::Ready(());
         }
-        *self.waker.lock().expect("timer waker") = Some(cx.waker().clone());
+        *self.waker.lock().unwrap_or_else(|e| e.into_inner()) = Some(cx.waker().clone());
         if !self.started {
             self.started = true;
             let cancel = Arc::clone(&self.cancel);
@@ -201,13 +213,13 @@ impl Future for SleepTimer {
             let duration = self.duration;
             std::thread::spawn(move || {
                 let (lock, cvar) = &*cancel;
-                let guard = lock.lock().expect("timer cancel");
+                let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
                 let (guard, _) = cvar
                     .wait_timeout_while(guard, duration, |cancelled| !*cancelled)
-                    .expect("timer wait");
+                    .unwrap_or_else(|e| e.into_inner());
                 if !*guard {
                     done.store(true, Ordering::Release);
-                    if let Some(waker) = waker.lock().expect("timer waker").take() {
+                    if let Some(waker) = waker.lock().unwrap_or_else(|e| e.into_inner()).take() {
                         waker.wake();
                     }
                 }
@@ -225,7 +237,7 @@ impl Drop for SleepTimer {
     fn drop(&mut self) {
         if self.started && !self.done.load(Ordering::Acquire) {
             let (lock, cvar) = &*self.cancel;
-            *lock.lock().expect("timer cancel") = true;
+            *lock.lock().unwrap_or_else(|e| e.into_inner()) = true;
             cvar.notify_one();
         }
     }

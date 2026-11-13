@@ -2,6 +2,7 @@ use std::fmt::{Debug, Formatter};
 
 use flatbuffers::FlatBufferBuilder;
 use image::RgbaImage;
+#[cfg(test)]
 use js_sys::{ArrayBuffer, Uint8Array};
 use maplibre::{
     benchmarking::tessellation::{IndexDataType, OverAlignedVertexBuffer},
@@ -34,7 +35,14 @@ use crate::platform::singlethreaded::{
 };
 
 pub mod basic_generated {
-    #![allow(unused, unused_imports, clippy::all)]
+    #![allow(
+        unused,
+        unused_imports,
+        unsafe_code,
+        clippy::all,
+        clippy::unwrap_used,
+        clippy::expect_used
+    )]
 
     use maplibre::coords::{WorldTileCoords, ZoomLevel};
 
@@ -51,38 +59,94 @@ pub mod basic_generated {
     }
 }
 pub mod layer_indexed_generated {
-    #![allow(unused, unused_imports, clippy::all)]
+    #![allow(
+        unused,
+        unused_imports,
+        unsafe_code,
+        clippy::all,
+        clippy::unwrap_used,
+        clippy::expect_used
+    )]
     include!(concat!(env!("OUT_DIR"), "/layer_indexed_generated.rs"));
 }
 pub mod layer_tessellated_generated {
-    #![allow(unused, unused_imports, clippy::all)]
+    #![allow(
+        unused,
+        unused_imports,
+        unsafe_code,
+        clippy::all,
+        clippy::unwrap_used,
+        clippy::expect_used
+    )]
     include!(concat!(env!("OUT_DIR"), "/layer_tessellated_generated.rs"));
 }
 pub mod layer_missing_generated {
-    #![allow(unused, unused_imports, clippy::all)]
+    #![allow(
+        unused,
+        unused_imports,
+        unsafe_code,
+        clippy::all,
+        clippy::unwrap_used,
+        clippy::expect_used
+    )]
     include!(concat!(env!("OUT_DIR"), "/layer_missing_generated.rs"));
 }
 pub mod tile_tessellated_generated {
-    #![allow(unused, unused_imports, clippy::all)]
+    #![allow(
+        unused,
+        unused_imports,
+        unsafe_code,
+        clippy::all,
+        clippy::unwrap_used,
+        clippy::expect_used
+    )]
     include!(concat!(env!("OUT_DIR"), "/tile_tessellated_generated.rs"));
 }
 pub mod layer_raster_generated {
-    #![allow(unused, unused_imports, clippy::all)]
+    #![allow(
+        unused,
+        unused_imports,
+        unsafe_code,
+        clippy::all,
+        clippy::unwrap_used,
+        clippy::expect_used
+    )]
     include!(concat!(env!("OUT_DIR"), "/layer_raster_generated.rs"));
 }
 
 pub mod layer_dem_generated {
-    #![allow(unused, unused_imports, clippy::all)]
+    #![allow(
+        unused,
+        unused_imports,
+        unsafe_code,
+        clippy::all,
+        clippy::unwrap_used,
+        clippy::expect_used
+    )]
     include!(concat!(env!("OUT_DIR"), "/layer_dem_generated.rs"));
 }
 
 pub mod layer_dem_missing_generated {
-    #![allow(unused, unused_imports, clippy::all)]
+    #![allow(
+        unused,
+        unused_imports,
+        unsafe_code,
+        clippy::all,
+        clippy::unwrap_used,
+        clippy::expect_used
+    )]
     include!(concat!(env!("OUT_DIR"), "/layer_dem_missing_generated.rs"));
 }
 
 pub mod symbol_layer_tessellated_generated {
-    #![allow(unused, unused_imports, clippy::all)]
+    #![allow(
+        unused,
+        unused_imports,
+        unsafe_code,
+        clippy::all,
+        clippy::unwrap_used,
+        clippy::expect_used
+    )]
     include!(concat!(
         env!("OUT_DIR"),
         "/symbol_layer_tessellated_generated.rs"
@@ -96,6 +160,7 @@ pub struct FlatBufferTransferable {
 }
 
 impl FlatBufferTransferable {
+    #[cfg(test)]
     pub fn from_array_buffer(tag: WebMessageTag, buffer: ArrayBuffer) -> Self {
         let buffer = Uint8Array::new(&buffer);
 
@@ -141,8 +206,10 @@ impl TileTessellated for FlatBufferTransferable {
     }
 
     fn coords(&self) -> WorldTileCoords {
-        let data = root_as_flat_tile_tessellated(&self.data[self.start..]).unwrap();
-        data.coords().unwrap().into()
+        root_as_flat_tile_tessellated(&self.data[self.start..])
+            .ok()
+            .and_then(|data| data.coords())
+            .map_or_else(WorldTileCoords::default, Into::into)
     }
 }
 
@@ -174,13 +241,17 @@ impl LayerMissing for FlatBufferTransferable {
     }
 
     fn coords(&self) -> WorldTileCoords {
-        let data = root_as_flat_layer_missing(&self.data[self.start..]).unwrap();
-        data.coords().unwrap().into()
+        root_as_flat_layer_missing(&self.data[self.start..])
+            .ok()
+            .and_then(|data| data.coords())
+            .map_or_else(WorldTileCoords::default, Into::into)
     }
 
     fn layer_name(&self) -> &str {
-        let data = root_as_flat_layer_missing(&self.data[self.start..]).unwrap();
-        data.layer_name().expect("property must be set")
+        root_as_flat_layer_missing(&self.data[self.start..])
+            .ok()
+            .and_then(|data| data.layer_name())
+            .unwrap_or_default()
     }
 
     fn to_bucket(self) -> MissingVectorLayerBucket {

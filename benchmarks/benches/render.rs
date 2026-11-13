@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use std::time::{Duration, Instant};
 
 use criterion::{criterion_group, criterion_main, Criterion};

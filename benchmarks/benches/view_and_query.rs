@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use std::hint::black_box;
 
 use cgmath::{Deg, Vector2};

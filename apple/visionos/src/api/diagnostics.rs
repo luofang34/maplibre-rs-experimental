@@ -105,11 +105,11 @@ impl<'a> MakeWriter<'a> for Tee {
 impl Write for TeeWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         std::io::stdout().write_all(buf).ok();
-        if let Some(file) = &self.0 {
-            if let Ok(mut file) = file.lock() {
-                file.write_all(buf).ok();
-                file.flush().ok();
-            }
+        if let Some(file) = &self.0
+            && let Ok(mut file) = file.lock()
+        {
+            file.write_all(buf).ok();
+            file.flush().ok();
         }
         Ok(buf.len())
     }

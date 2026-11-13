@@ -135,6 +135,7 @@ impl ZoomLevel {
 impl std::ops::Add<u8> for ZoomLevel {
     type Output = ZoomLevel;
 
+    #[allow(clippy::expect_used)]
     fn add(self, rhs: u8) -> Self::Output {
         let zoom_level = self.0.checked_add(rhs).expect("zoom level overflowed");
         ZoomLevel(zoom_level)
@@ -144,6 +145,7 @@ impl std::ops::Add<u8> for ZoomLevel {
 impl std::ops::Sub<u8> for ZoomLevel {
     type Output = ZoomLevel;
 
+    #[allow(clippy::expect_used)]
     fn sub(self, rhs: u8) -> Self::Output {
         let zoom_level = self.0.checked_sub(rhs).expect("zoom level underflowed");
         ZoomLevel(zoom_level)

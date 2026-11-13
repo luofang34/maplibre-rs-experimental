@@ -16,7 +16,7 @@ unsafe fn handle<'a>(map: *mut MaplibreVisionOSMap) -> Option<&'a mut MaplibreVi
 ///
 /// # Safety
 /// The map must be live and exclusively accessed by its render thread.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn maplibre_visionos_trace_enable(
     map: *mut MaplibreVisionOSMap,
     capacity: u32,
@@ -32,7 +32,7 @@ pub unsafe extern "C" fn maplibre_visionos_trace_enable(
 ///
 /// # Safety
 /// The map must be live and exclusively accessed by its render thread.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn maplibre_visionos_last_frame(map: *mut MaplibreVisionOSMap) -> u64 {
     // SAFETY: the exported function's contract requires a live, exclusive handle or null.
     unsafe { handle(map) }.map_or(0, |handle| handle.map.last_frame_stats().host_frame)
@@ -44,7 +44,7 @@ pub unsafe extern "C" fn maplibre_visionos_last_frame(map: *mut MaplibreVisionOS
 /// # Safety
 /// The map must be live and exclusively accessed by its render thread; `name` must be a
 /// NUL-terminated string or null.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn maplibre_visionos_trace_span(
     map: *mut MaplibreVisionOSMap,
     frame: u64,
@@ -69,7 +69,7 @@ pub unsafe extern "C" fn maplibre_visionos_trace_span(
 ///
 /// # Safety
 /// The map must be live and exclusively accessed by its render thread.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn maplibre_visionos_trace_presentation(
     map: *mut MaplibreVisionOSMap,
     frame: u64,
@@ -91,7 +91,7 @@ pub unsafe extern "C" fn maplibre_visionos_trace_presentation(
 ///
 /// # Safety
 /// The map must be live and exclusively accessed by its render thread.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn maplibre_visionos_trace_device(
     map: *mut MaplibreVisionOSMap,
     frame: u64,
@@ -117,7 +117,7 @@ pub unsafe extern "C" fn maplibre_visionos_trace_device(
 /// # Safety
 /// The map must be live and exclusively accessed by its render thread. A non-null buffer
 /// must be writable for `capacity` bytes and must not overlap the map.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn maplibre_visionos_trace_export(
     map: *mut MaplibreVisionOSMap,
     buffer: *mut c_char,

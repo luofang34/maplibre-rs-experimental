@@ -1,5 +1,6 @@
 //! Window, event-loop and platform adapters for maplibre.
 #![deny(unused_imports)]
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 mod environment;
 mod error;

@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use criterion::{criterion_group, criterion_main, Criterion};
 use maplibre::{
     benchmarking::io::static_tile_fetcher::StaticTileFetcher,

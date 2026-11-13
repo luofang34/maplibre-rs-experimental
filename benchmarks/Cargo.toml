@@ -11,6 +11,9 @@ keywords.workspace = true
 categories.workspace = true
 authors.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 maplibre = { path = "../maplibre", features = ["headless", "raster", "embed-static-tiles", "thread-safe-futures"] }
 

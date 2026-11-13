@@ -20,7 +20,7 @@ use anchor::{solve_anchor_to_screen, AnchorCamera};
 /// whose matrix pointer addresses 16 floats; `eyes` must point at `eye_count` structs whose
 /// matrix pointers address 16 floats and tangent pointers 4, all alive for the call; the
 /// textures, if any, must be of the map's size and stay alive for the call.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn maplibre_visionos_render_frame(
     map: *mut MaplibreVisionOSMap,
     placement: *const MaplibreVisionOSPlacement,
@@ -157,7 +157,7 @@ pub unsafe extern "C" fn maplibre_visionos_render_frame(
 /// # Safety
 ///
 /// `map` must come from [`maplibre_visionos_create`] and not have been destroyed.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn maplibre_visionos_render_orbit(
     map: *mut MaplibreVisionOSMap,
     latitude: f64,
@@ -220,7 +220,7 @@ pub unsafe extern "C" fn maplibre_visionos_render_orbit(
 /// # Safety
 ///
 /// `map` must come from [`maplibre_visionos_create`] and not have been destroyed, or be null.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn maplibre_visionos_effective_zoom(map: *const MaplibreVisionOSMap) -> f64 {
     // SAFETY: the caller upholds the map handle contract documented above.
     unsafe { map.as_ref() }.map_or(0.0, |handle| handle.map.view_state().style_zoom().value())
@@ -232,7 +232,7 @@ pub unsafe extern "C" fn maplibre_visionos_effective_zoom(map: *const MaplibreVi
 /// # Safety
 ///
 /// `map` must be valid or null; output pointers must be valid writable `f64` pointers.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn maplibre_visionos_screen_to_ground(
     map: *const MaplibreVisionOSMap,
     screen_x: f64,
@@ -286,7 +286,7 @@ pub unsafe extern "C" fn maplibre_visionos_screen_to_ground(
 /// # Safety
 ///
 /// `map` must be valid or null; output pointers must be valid writable `f64` pointers.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn maplibre_visionos_move_anchor_to_screen(
     map: *mut MaplibreVisionOSMap,
     anchor_lat: f64,
@@ -338,7 +338,7 @@ pub unsafe extern "C" fn maplibre_visionos_move_anchor_to_screen(
 /// # Safety
 ///
 /// `map` must be valid or null; output pointers must be valid writable `f64` pointers.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn maplibre_visionos_drag_orbit(
     map: *mut MaplibreVisionOSMap,
     from_x: f64,

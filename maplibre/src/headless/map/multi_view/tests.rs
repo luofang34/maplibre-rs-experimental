@@ -201,7 +201,7 @@ pub(super) fn loaded_dem_coords(map: &HeadlessMap) -> HashSet<WorldTileCoords> {
 
 #[test]
 fn heterogeneous_multi_view_renders_otw_and_sensor_without_skipped_slot_eviction() {
-    crate::headless::map::test_async::run_async(async {
+    crate::headless::map::test_async::run_async_multi_thread(async {
         let client = CountingTileClient::default();
         let loader = SharedLoader::new(client);
         let settings = RendererSettings {

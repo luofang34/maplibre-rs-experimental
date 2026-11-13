@@ -331,6 +331,7 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         &self.page_of(entry).feature_metadata.inner
     }
 
+    #[allow(clippy::expect_used)]
     fn page_of(&self, entry: &IndexEntry) -> &BufferPage<B> {
         self.pages[usize::from(entry.page)]
             .as_ref()

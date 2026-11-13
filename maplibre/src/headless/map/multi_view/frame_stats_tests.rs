@@ -20,7 +20,7 @@ const QUIET_FRAMES: usize = 30;
 /// tiles, draws far fewer than the eye before it.
 #[test]
 fn a_frame_of_two_views_reports_the_drapes_both_drew() {
-    crate::headless::map::test_async::run_async(async {
+    crate::headless::map::test_async::run_async_multi_thread(async {
         let tiles = LateTiles::default();
         let (mut map, eye_slot) = flying_map(&tiles, None).await;
         let sensor_slot = map.register_view_slot(ViewSlotConfig {

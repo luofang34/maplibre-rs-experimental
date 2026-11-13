@@ -11,6 +11,9 @@ keywords.workspace = true
 categories.workspace = true
 authors.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 maplibre = { path = "../maplibre", features = ["thread-safe-futures"] }
 maplibre-winit = { path = "../maplibre-winit", version = "0.1.0"  }

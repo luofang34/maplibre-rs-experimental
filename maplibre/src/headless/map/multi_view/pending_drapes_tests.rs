@@ -16,7 +16,7 @@ use crate::{coords::LatLon, window::PhysicalSize};
 /// the eye still waits, and once neither waits no later frame draws a drape.
 #[test]
 fn each_view_counts_its_pending_drapes_down_to_a_settled_image() {
-    crate::headless::map::test_async::run_async(async {
+    crate::headless::map::test_async::run_async_multi_thread(async {
         let tiles = LateTiles::default();
         let (mut map, eye_slot) = flying_map(&tiles, None).await;
         let sensor_slot = map.register_view_slot(ViewSlotConfig {

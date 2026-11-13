@@ -235,11 +235,13 @@ impl WireTileIndex {
                         ));
                         prev = rel_end;
                     }
-                    if !valid || rings.is_empty() {
+                    if !valid {
                         continue;
                     }
                     let mut iter = rings.into_iter();
-                    let exterior = iter.next().unwrap();
+                    let Some(exterior) = iter.next() else {
+                        continue;
+                    };
                     let interiors: Vec<LineString<f64>> = iter.collect();
                     IndexedGeometry::from_polygon(Polygon::new(exterior, interiors), meta)
                 }

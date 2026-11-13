@@ -31,14 +31,20 @@ impl LayerDem for FlatBufferTransferable {
     }
 
     fn coords(&self) -> WorldTileCoords {
-        let data = root_as_flat_layer_dem(&self.data[self.start..]).unwrap();
-        data.coords().unwrap().into()
+        root_as_flat_layer_dem(&self.data[self.start..])
+            .ok()
+            .and_then(|data| data.coords())
+            .map_or_else(WorldTileCoords::default, Into::into)
     }
 
     fn into_image(self) -> RgbaImage {
-        let data = root_as_flat_layer_dem(&self.data[self.start..]).unwrap();
-        let image_data = data.image_data().unwrap().iter().collect();
-        RgbaImage::from_vec(data.width(), data.height(), image_data).unwrap()
+        let Ok(data) = root_as_flat_layer_dem(&self.data[self.start..]) else {
+            return RgbaImage::new(0, 0);
+        };
+        data.image_data()
+            .map(|bytes| bytes.iter().collect())
+            .and_then(|image_data| RgbaImage::from_vec(data.width(), data.height(), image_data))
+            .unwrap_or_else(|| RgbaImage::new(0, 0))
     }
 }
 
@@ -66,8 +72,10 @@ impl LayerDemMissing for FlatBufferTransferable {
     }
 
     fn coords(&self) -> WorldTileCoords {
-        let data = root_as_flat_layer_dem_missing(&self.data[self.start..]).unwrap();
-        data.coords().unwrap().into()
+        root_as_flat_layer_dem_missing(&self.data[self.start..])
+            .ok()
+            .and_then(|data| data.coords())
+            .map_or_else(WorldTileCoords::default, Into::into)
     }
 }
 

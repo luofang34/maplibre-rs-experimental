@@ -26,6 +26,7 @@ pub mod trace;
 ///
 /// # Panics
 /// Panics if runtime creation fails or if called from within an asynchronous runtime.
+#[allow(clippy::expect_used)]
 pub fn run_multithreaded<F: Future>(future: F) -> F::Output {
     tokio::runtime::Builder::new_multi_thread()
         .enable_io()
@@ -42,7 +43,17 @@ pub fn run_multithreaded<F: Future>(future: F) -> F::Output {
             log::info!("Worker thread started")
         })
         .build()
-        .unwrap()
+        .expect("failed to build Tokio runtime")
+        .block_on(future)
+}
+
+/// Drives `future` to completion on a current-thread Tokio runtime with I/O and timers enabled.
+#[cfg(test)]
+pub(crate) fn run_current_thread<F: Future>(future: F) -> F::Output {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("failed to build current-thread Tokio runtime")
         .block_on(future)
 }
 

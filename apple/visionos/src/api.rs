@@ -96,7 +96,7 @@ pub(crate) unsafe fn c_str<'a>(pointer: *const c_char) -> Option<&'a str> {
 /// # Safety
 ///
 /// `map` must be a map created by this library, or null.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn maplibre_visionos_set_available_memory(
     map: *mut MaplibreVisionOSMap,
     available_bytes: u64,
@@ -116,7 +116,7 @@ pub unsafe extern "C" fn maplibre_visionos_set_available_memory(
 /// # Safety
 ///
 /// `message` must be a NUL-terminated string or null.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn maplibre_visionos_note(message: *const c_char) {
     // SAFETY: the caller upholds the string contract documented above.
     if let Some(message) = unsafe { c_str(message) } {
@@ -125,7 +125,7 @@ pub unsafe extern "C" fn maplibre_visionos_note(message: *const c_char) {
 }
 
 /// Version of the renderer library, as a static C string.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn maplibre_visionos_version() -> *const c_char {
     concat!(env!("CARGO_PKG_VERSION"), "\0").as_ptr().cast()
 }
@@ -136,7 +136,7 @@ pub extern "C" fn maplibre_visionos_version() -> *const c_char {
 /// # Safety
 ///
 /// `style_json` must be a NUL-terminated string; `cache_dir` may be null.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn maplibre_visionos_create(
     style_json: *const c_char,
     width: u32,
@@ -244,7 +244,7 @@ fn create(
 /// # Safety
 ///
 /// `map` must come from [`maplibre_visionos_create`] and not have been destroyed.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn maplibre_visionos_command_queue(
     map: *const MaplibreVisionOSMap,
 ) -> *const c_void {
@@ -269,7 +269,7 @@ const FAR_OVER_NEAR: f64 = 1.0e10;
 /// # Safety
 ///
 /// `map` must come from [`maplibre_visionos_create`] and not have been destroyed.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn maplibre_visionos_terrain_elevation(
     map: *const MaplibreVisionOSMap,
     latitude: f64,
@@ -291,7 +291,7 @@ pub unsafe extern "C" fn maplibre_visionos_terrain_elevation(
 /// # Safety
 ///
 /// `map` must come from [`maplibre_visionos_create`] and not have been destroyed.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn maplibre_visionos_width(map: *const MaplibreVisionOSMap) -> u32 {
     // SAFETY: the caller upholds the handle contract documented above.
     unsafe { map.as_ref() }.map_or(0, |map| map.width)
@@ -302,7 +302,7 @@ pub unsafe extern "C" fn maplibre_visionos_width(map: *const MaplibreVisionOSMap
 /// # Safety
 ///
 /// `map` must come from [`maplibre_visionos_create`] and not have been destroyed.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn maplibre_visionos_height(map: *const MaplibreVisionOSMap) -> u32 {
     // SAFETY: the caller upholds the handle contract documented above.
     unsafe { map.as_ref() }.map_or(0, |map| map.height)
@@ -315,7 +315,7 @@ pub unsafe extern "C" fn maplibre_visionos_height(map: *const MaplibreVisionOSMa
 ///
 /// `map` must come from [`maplibre_visionos_create`] and not have been destroyed; `source_name`
 /// and `geojson_json` must be valid NUL-terminated UTF-8 strings.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn maplibre_visionos_set_geojson_source(
     map: *mut MaplibreVisionOSMap,
     source_name: *const c_char,
@@ -347,7 +347,7 @@ pub unsafe extern "C" fn maplibre_visionos_set_geojson_source(
 /// # Safety
 ///
 /// `map` must come from [`maplibre_visionos_create`] and not have been destroyed already.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn maplibre_visionos_destroy(map: *mut MaplibreVisionOSMap) {
     if map.is_null() {
         return;
