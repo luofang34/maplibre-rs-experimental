@@ -200,7 +200,7 @@ pub fn next_zoom_code(rise: f32, overscale: u8) -> f32 {
     f32::from(clamped_overscale) * NEXT_ZOOM_CODE_SPAN + rise.clamp(-half, half - 1.0) + half
 }
 
-/// Packs `(base_datum, height_datum)` above [`next_zoom_code`]; `(CentroidAgl, CentroidAgl)` adds 0.
+/// Packs `(base_datum, height_datum)` above `next_zoom_code`; `(CentroidAgl, CentroidAgl)` adds 0.
 pub fn pack_extrusion_code(rise: f32, overscale: u8, datum_pair: u8) -> f32 {
     f32::from(datum_pair) * DATUM_CODE_SPAN + next_zoom_code(rise, overscale)
 }
@@ -265,8 +265,9 @@ where
     I: From<VertexId> + std::ops::Add + MaxIndex + Copy + Into<u32>,
 {
     let mut tessellator = FillTessellator::new();
+    let mut earcut = super::earcut_fill::PolygonEarcut::default();
     extrude_with_tessellator(
-        &mut tessellator,
+        (&mut tessellator, &mut earcut),
         path,
         heights,
         buffer,
@@ -275,7 +276,7 @@ where
 }
 
 pub(super) fn extrude_with_tessellator<I>(
-    tessellator: &mut FillTessellator,
+    (tessellator, earcut): (&mut FillTessellator, &mut super::earcut_fill::PolygonEarcut),
     path: &Path,
     heights: ExtrusionHeights,
     buffer: &mut VertexBuffers<ShaderVertex, I>,
@@ -290,13 +291,19 @@ where
     if heights.part != ExtrusionPart::Walls {
         let cap_vertex_start = buffer.vertices.len();
         let cap_index_start = buffer.indices.len();
-        tessellator
-            .tessellate_path(
-                path,
-                &FillOptions::tolerance(tolerance).with_fill_rule(FillRule::EvenOdd),
-                &mut BuffersBuilder::new(buffer, RoofVertex { heights }),
-            )
-            .map_err(|error| error.to_string())?;
+        if !earcut.try_triangulate(path, true, buffer, |pos| {
+            let mut output = ShaderVertex::new(pos, [0.0, 0.0]);
+            heights.apply(&mut output, true);
+            output
+        }) {
+            tessellator
+                .tessellate_path(
+                    path,
+                    &FillOptions::tolerance(tolerance).with_fill_rule(FillRule::EvenOdd),
+                    &mut BuffersBuilder::new(buffer, RoofVertex { heights }),
+                )
+                .map_err(|error| error.to_string())?;
+        }
         let after_cap_vertices = buffer.vertices.len();
         refine_roof(buffer, cap_index_start)?;
         if heights.part == ExtrusionPart::Floor {
@@ -343,11 +350,13 @@ where
             -area
         }
         .signum();
+        let subdivide_agl_wall = heights.base_datum == ElevationDatum::VertexAgl
+            || heights.height_datum == ElevationDatum::VertexAgl;
         let mut travelled = 0.0;
         for (a, b) in ring.iter().zip(ring.iter().cycle().skip(1)) {
             let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
             let length = dx.hypot(dy);
-            if on_clipped_edge(*a, *b, heights.suppress_tile_boundary_walls) {
+            if on_clipped_edge(*a, *b, heights.suppress_tile_boundary_walls) || length == 0.0 {
                 continue;
             }
             if travelled + length > MAX_EDGE_DISTANCE {
@@ -355,11 +364,29 @@ where
             }
             let start = travelled;
             travelled += length;
-            if length == 0.0 {
-                continue;
-            }
             let normal = [facing * dy / length, -facing * dx / length];
-            push_wall(buffer, [*a, *b], normal, heights, [travelled, start]);
+            let steps = if subdivide_agl_wall {
+                (length / 128.0).ceil().max(1.0) as u32
+            } else {
+                1
+            };
+            for step in 0..steps {
+                let t0 = (step as f32) / (steps as f32);
+                let t1 = ((step + 1) as f32) / (steps as f32);
+                let p0 = [a[0] + dx * t0, a[1] + dy * t0];
+                let p1 = if step + 1 == steps {
+                    *b
+                } else {
+                    [a[0] + dx * t1, a[1] + dy * t1]
+                };
+                let d0 = start + length * (1.0 - t0);
+                let d1 = if step + 1 == steps {
+                    start
+                } else {
+                    start + length * (1.0 - t1)
+                };
+                push_wall(buffer, [p0, p1], normal, heights, [d0, d1]);
+            }
         }
     }
     Ok(())

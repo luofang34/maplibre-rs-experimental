@@ -354,3 +354,53 @@ fn extrusion_part_selectors_emit_only_requested_shell_components() {
         );
     }
 }
+
+#[test]
+fn subdivided_vertex_agl_walls_preserve_continuous_edge_distance_across_seams() {
+    let mut builder = Path::builder();
+    square(&mut builder, [100.0, 100.0, 612.0, 356.0]);
+    let path = builder.build();
+
+    let build = |datum: ElevationDatum| {
+        let mut buffer: VertexBuffers<ShaderVertex, u32> = VertexBuffers::new();
+        let mut heights = ExtrusionHeights::constant(0.0, 80.0);
+        heights.part = ExtrusionPart::Walls;
+        heights.height_datum = datum;
+        extrude(
+            &path,
+            heights,
+            &mut buffer,
+            (0.02, |_: &mut VertexBuffers<ShaderVertex, u32>, _| Ok(())),
+        )
+        .expect("extrudes walls");
+        buffer
+    };
+
+    let unsubdivided = build(ElevationDatum::CentroidAgl);
+    let subdivided = build(ElevationDatum::VertexAgl);
+    // 512-unit horizontal walls split into 4 quads each; 256-unit vertical walls into 2 quads each.
+    assert_eq!(unsubdivided.vertices.len(), 16);
+    assert_eq!(subdivided.vertices.len(), (4 + 2 + 4 + 2) * 4);
+
+    // Every subdivided quad (`4` vertices: `[a_bot, a_top, b_top, b_bot]`) along the first 512-unit
+    // edge `(100,100) -> (612,100)` must interpolate smoothly from `512.0` down to `0.0` with exact
+    // seam continuity between adjacent quads (`prev.b == next.a`).
+    let first_wall = &subdivided.vertices[..16];
+    assert_eq!(
+        first_wall[0].edge_distance,
+        unsubdivided.vertices[0].edge_distance
+    );
+    assert_eq!(
+        first_wall[14].edge_distance,
+        unsubdivided.vertices[2].edge_distance
+    );
+    for quad_pair in first_wall.as_chunks::<4>().0.windows(2) {
+        let prev_end = quad_pair[0][2];
+        let next_start = quad_pair[1][1];
+        assert_eq!(prev_end.position, next_start.position);
+        assert_eq!(
+            prev_end.edge_distance, next_start.edge_distance,
+            "subdivided wall seam must preserve continuous fill-extrusion-pattern edge_distance"
+        );
+    }
+}

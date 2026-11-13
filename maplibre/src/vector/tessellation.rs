@@ -40,6 +40,7 @@ fn path_length(path: &Path) -> f32 {
 mod buffer;
 mod circle;
 mod concave_join;
+mod earcut_fill;
 mod geometry;
 mod line_elevation;
 mod line_origin;
@@ -143,6 +144,7 @@ pub struct ZeroTessellator<I: std::ops::Add + From<lyon::tessellation::VertexId>
     /// The sort key of each entry of `feature_indices`, set by `apply_sort_keys`.
     pub entry_sort_keys: Vec<f32>,
     current_index: usize,
+    earcut: earcut_fill::PolygonEarcut,
     fill_tessellator: FillTessellator,
     stroke_tessellator: StrokeTessellator,
 }
@@ -189,6 +191,7 @@ impl<I: std::ops::Add + From<lyon::tessellation::VertexId> + MaxIndex> Default
             outline: VertexBuffers::new(),
             sort_key: Default::default(),
             entry_sort_keys: Vec::new(),
+            earcut: earcut_fill::PolygonEarcut::default(),
             fill_tessellator: FillTessellator::new(),
             stroke_tessellator: StrokeTessellator::new(),
         }
@@ -341,7 +344,7 @@ where
             extend_to_south_pole: self.extend_to_south_pole,
         };
         extrusion::extrude_with_tessellator(
-            &mut self.fill_tessellator,
+            (&mut self.fill_tessellator, &mut self.earcut),
             &path,
             heights,
             &mut self.buffer,
@@ -387,13 +390,20 @@ where
             );
         }
 
-        self.fill_tessellator
-            .tessellate_path(
-                &path,
-                &FillOptions::tolerance(DEFAULT_TOLERANCE).with_fill_rule(FillRule::NonZero),
-                &mut BuffersBuilder::new(&mut self.buffer, VertexConstructor {}),
-            )
-            .map_err(|error| GeozeroError::Geometry(error.to_string()))?;
+        if !self
+            .earcut
+            .try_triangulate(&path, false, &mut self.buffer, |pos| {
+                ShaderVertex::new(pos, [0.0, 0.0])
+            })
+        {
+            self.fill_tessellator
+                .tessellate_path(
+                    &path,
+                    &FillOptions::tolerance(DEFAULT_TOLERANCE).with_fill_rule(FillRule::NonZero),
+                    &mut BuffersBuilder::new(&mut self.buffer, VertexConstructor {}),
+                )
+                .map_err(|error| GeozeroError::Geometry(error.to_string()))?;
+        }
         subdivide_triangles(
             &mut self.buffer,
             index_start,
