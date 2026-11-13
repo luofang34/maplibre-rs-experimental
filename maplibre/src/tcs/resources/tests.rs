@@ -83,6 +83,12 @@ fn disjoint_resource_queries_keep_every_reference_valid() {
         resources.query::<(&u8, &u16, &u32)>(),
         Some((&10, &20, &30))
     );
+    assert!(resources
+        .query_mut::<(&mut u8, &u16, &mut u32, &mut u16)>()
+        .is_none());
+    assert!(resources
+        .query_mut::<(&mut u8, &mut u16, &u32, &mut u8)>()
+        .is_none());
 }
 
 #[test]

@@ -80,6 +80,47 @@ fn mixed_component_queries_preserve_disjoint_shared_references() {
 }
 
 #[test]
+fn wide_disjoint_and_conflicting_tuple_queries_preserve_aliasing_invariants() {
+    #[derive(Debug, PartialEq)]
+    struct Scale(u16);
+    impl TileComponent for Scale {}
+
+    #[derive(Debug, PartialEq)]
+    struct LayerOrder(i32);
+    impl TileComponent for LayerOrder {}
+
+    let (mut tiles, coords) = populated();
+    tiles
+        .spawn_mut(coords)
+        .expect("tile")
+        .insert(Scale(3))
+        .insert(LayerOrder(-1));
+
+    assert!(tiles
+        .query_mut::<(&mut Height, &Opacity, &mut Scale, &mut Height)>(coords)
+        .is_none());
+    assert!(tiles
+        .query_mut::<(&Height, &mut Opacity, &Scale, &mut Height)>(coords)
+        .is_none());
+
+    let (height, opacity_a, scale, order, opacity_b) = tiles
+        .query_mut::<(&mut Height, &Opacity, &mut Scale, &mut LayerOrder, &Opacity)>(coords)
+        .expect("five-tuple disjoint query");
+    assert!(std::ptr::eq(opacity_a, opacity_b));
+    height.0 += u32::from(opacity_a.0);
+    scale.0 *= 2;
+    order.0 = 42;
+    assert_eq!(
+        tiles.query::<(&Height, &Opacity, &Scale, &LayerOrder)>(coords),
+        Some((&Height(30), &Opacity(20), &Scale(6), &LayerOrder(42)))
+    );
+
+    assert!(tiles.pyramid_of::<Scale>().contains(coords));
+    assert!(tiles.remove(coords));
+    assert!(!tiles.pyramid_of::<Scale>().contains(coords));
+}
+
+#[test]
 fn a_missing_component_does_not_reserve_the_tile_for_later_queries() {
     let (mut tiles, coords) = populated();
     struct Missing;

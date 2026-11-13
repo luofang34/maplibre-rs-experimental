@@ -1,15 +1,14 @@
 //! Tile records, their typed CPU components and rendered-feature query geometry.
 
-use std::{any::TypeId, cell::UnsafeCell, collections::BTreeMap};
+use std::{any::TypeId, collections::BTreeMap};
 
 use downcast_rs::{impl_downcast, Downcast};
 use rustc_hash::FxHashMap;
 
-pub use crate::tcs::{EphemeralQueryState, GlobalQueryState, QueryState};
 use crate::{
     coords::{Quadkey, WorldTileCoords},
     io::geometry_index::GeometryIndex,
-    tcs::pyramid::TilePyramid,
+    tcs::{disjoint::DisjointSliceBorrow, pyramid::TilePyramid},
 };
 
 static EMPTY_PYRAMID: TilePyramid<()> = TilePyramid::new();
@@ -36,13 +35,14 @@ impl_downcast!(TileComponent);
 pub struct Tiles {
     /// Tile records keyed by canonical quadkey.
     pub tiles: BTreeMap<Quadkey, Tile>,
-    /// Component slots under each tile's key. Use [`TileSpawnResult::insert`] to preserve
-    /// one component per type and release replaced values.
-    pub components: FxHashMap<Quadkey, Vec<UnsafeCell<Box<dyn TileComponent>>>>,
+    /// Dense component slots under each tile's key, indexed by [`Self::component_indices`].
+    /// Use [`TileSpawnResult::insert`] to preserve one component per type and release replaced values.
+    pub components: FxHashMap<Quadkey, Vec<Option<Box<dyn TileComponent>>>>,
     /// Geometry available to rendered-feature queries; cleared with the owning tiles.
     pub geometry_index: GeometryIndex,
     pyramid: TilePyramid<()>,
     component_pyramids: FxHashMap<TypeId, TilePyramid<()>>,
+    component_indices: FxHashMap<TypeId, usize>,
 }
 
 impl Tiles {
@@ -60,12 +60,10 @@ impl Tiles {
             .unwrap_or(&EMPTY_PYRAMID)
     }
 
-    /// Borrows `&T` or a pair of shared component references from one tile.
+    /// Borrows `&T` or a tuple of shared component references from one tile.
     /// Built-in queries return `None` for invalid coordinates or missing components.
     pub fn query<Q: ComponentQuery>(&self, coords: WorldTileCoords) -> Option<Q::Item<'_>> {
-        let mut global_state = GlobalQueryState::default();
-        let state = <Q::State<'_> as QueryState>::create(&mut global_state);
-        Q::query(self, Tile { coords }, state)
+        Q::query(self, Tile { coords })
     }
 
     /// Borrows components of one tile, or returns `None` for missing data or conflicting
@@ -74,9 +72,7 @@ impl Tiles {
         &mut self,
         coords: WorldTileCoords,
     ) -> Option<Q::MutItem<'_>> {
-        let mut global_state = GlobalQueryState::default();
-        let state = <Q::State<'_> as QueryState>::create(&mut global_state);
-        Q::query_mut(self, Tile { coords }, state)
+        Q::query_mut(self, Tile { coords })
     }
 
     /// Whether a record exists at these coordinates; invalid coordinates return `false`.
@@ -125,8 +121,8 @@ impl Tiles {
             return false;
         };
         if let Some(removed_components) = self.components.remove(&key) {
-            for cell in removed_components {
-                let type_id = cell.into_inner().component_type_id();
+            for component in removed_components.into_iter().flatten() {
+                let type_id = component.component_type_id();
                 if let Some(pyramid) = self.component_pyramids.get_mut(&type_id) {
                     pyramid.remove(coords);
                 }
@@ -136,6 +132,18 @@ impl Tiles {
         self.geometry_index.remove(&coords);
         self.tiles.remove(&key).is_some()
     }
+
+    fn get_component<T: TileComponent>(&self, tile: Tile) -> Option<&T> {
+        let index = *self.component_indices.get(&TypeId::of::<T>())?;
+        let slots = self.components.get(&tile.coords.build_quad_key()?)?;
+        slots.get(index)?.as_ref()?.downcast_ref()
+    }
+
+    fn get_component_mut<T: TileComponent>(&mut self, tile: Tile) -> Option<&mut T> {
+        let index = *self.component_indices.get(&TypeId::of::<T>())?;
+        let slots = self.components.get_mut(&tile.coords.build_quad_key()?)?;
+        slots.get_mut(index)?.as_mut()?.downcast_mut()
+    }
 }
 
 /// Exclusive insertion handle for a valid tile; chained inserts share the same tile record.
@@ -144,21 +152,31 @@ pub struct TileSpawnResult<'t> {
     tile: Tile,
 }
 
-impl<'w> TileSpawnResult<'w> {
+impl TileSpawnResult<'_> {
     /// Replaces this tile's component of the same type, dropping its old value immediately.
     pub fn insert<T: TileComponent>(&mut self, component: T) -> &mut Self {
         if let Some(key) = self.tile.coords.build_quad_key() {
-            let components = self.tiles.components.entry(key).or_default();
-            if let Some(value) = components
-                .iter_mut()
-                .find_map(|stored| stored.get_mut().downcast_mut::<T>())
+            let type_id = TypeId::of::<T>();
+            let next_index = self.tiles.component_indices.len();
+            let slot_index = *self
+                .tiles
+                .component_indices
+                .entry(type_id)
+                .or_insert(next_index);
+            let slots = self.tiles.components.entry(key).or_default();
+            if slots.len() <= slot_index {
+                slots.resize_with(slot_index + 1, || None);
+            }
+            if let Some(existing) = slots[slot_index]
+                .as_mut()
+                .and_then(|stored| stored.downcast_mut::<T>())
             {
-                *value = component;
+                *existing = component;
             } else {
-                components.push(UnsafeCell::new(Box::new(component)));
+                slots[slot_index] = Some(Box::new(component));
                 self.tiles
                     .component_pyramids
-                    .entry(TypeId::of::<T>())
+                    .entry(type_id)
                     .or_default()
                     .insert(self.tile.coords, ());
             }
@@ -167,207 +185,105 @@ impl<'w> TileSpawnResult<'w> {
     }
 }
 
-/// Shared component lookup; built-in queries are references and pairs of references.
+/// Shared component lookup; built-in queries are references and tuples of up to six references.
 pub trait ComponentQuery {
     /// Value returned with a lifetime bounded by the tile store.
     type Item<'t>;
 
-    /// Access ledger handle shared by the members of a pair query.
-    type State<'s>: QueryState<'s>;
-
-    /// Looks up components at `tile` using the common query state.
-    fn query<'t, 's>(
-        tiles: &'t Tiles,
-        tile: Tile,
-        state: Self::State<'s>,
-    ) -> Option<Self::Item<'t>>;
+    /// Looks up components at `tile`.
+    fn query(tiles: &Tiles, tile: Tile) -> Option<Self::Item<'_>>;
 }
 
 impl<T: TileComponent> ComponentQuery for &T {
     type Item<'t> = &'t T;
-    type State<'s> = EphemeralQueryState<'s>;
 
-    fn query<'t, 's>(
-        tiles: &'t Tiles,
-        tile: Tile,
-        mut state: Self::State<'s>,
-    ) -> Option<Self::Item<'t>> {
-        state.borrow_shared::<T>()?;
-        let components = tiles.components.get(&tile.coords.build_quad_key()?)?;
-        for (index, component) in components.iter().enumerate() {
-            if state.state.mutably_borrowed_components.contains(&index) {
-                continue;
-            }
-            // Even checking a trait object's type borrows its value. Mutable slots must
-            // be skipped before dereferencing, including slots of a different type.
-            if let Some(value) = unsafe { (&*component.get()).downcast_ref::<T>() } {
-                return Some(value);
-            }
-        }
-        None
+    fn query(tiles: &Tiles, tile: Tile) -> Option<Self::Item<'_>> {
+        tiles.get_component::<T>(tile)
     }
 }
 
 /// Component lookup with exclusive access to the tile store while constructing the result.
-/// Built-in pairs may mix shared and mutable references to disjoint component types.
+/// Built-in tuples may mix shared and mutable references to disjoint component types.
 pub trait ComponentQueryMut {
     /// Value returned with a lifetime bounded by the exclusive tile-store borrow.
     type MutItem<'t>;
 
-    /// Access ledger handle shared by pair members.
-    type State<'s>: QueryState<'s>;
+    /// Borrows this query's component(s) from the tile's disjoint component-slot borrow.
+    fn borrow<'t>(
+        component_indices: &FxHashMap<TypeId, usize>,
+        slice: &mut DisjointSliceBorrow<'t, Option<Box<dyn TileComponent>>>,
+    ) -> Option<Self::MutItem<'t>>;
 
     /// Looks up components; built-in queries return `None` on absence or conflicting access.
-    fn query_mut<'t, 's>(
-        tiles: &'t mut Tiles,
-        tile: Tile,
-        state: Self::State<'s>,
-    ) -> Option<Self::MutItem<'t>>;
+    fn query_mut(tiles: &mut Tiles, tile: Tile) -> Option<Self::MutItem<'_>> {
+        let key = tile.coords.build_quad_key()?;
+        let slots = tiles.components.get_mut(&key)?;
+        let mut slice = DisjointSliceBorrow::new(slots);
+        Self::borrow(&tiles.component_indices, &mut slice)
+    }
 }
 
 impl<T: TileComponent> ComponentQueryMut for &T {
     type MutItem<'t> = &'t T;
-    type State<'s> = EphemeralQueryState<'s>;
 
-    fn query_mut<'t, 's>(
-        tiles: &'t mut Tiles,
-        tile: Tile,
-        state: Self::State<'s>,
+    fn borrow<'t>(
+        component_indices: &FxHashMap<TypeId, usize>,
+        slice: &mut DisjointSliceBorrow<'t, Option<Box<dyn TileComponent>>>,
     ) -> Option<Self::MutItem<'t>> {
-        <&T as ComponentQuery>::query(tiles, tile, state)
+        let index = *component_indices.get(&TypeId::of::<T>())?;
+        slice.borrow_shared(index)?.as_ref()?.downcast_ref()
+    }
+
+    fn query_mut(tiles: &mut Tiles, tile: Tile) -> Option<Self::MutItem<'_>> {
+        tiles.get_component::<T>(tile)
     }
 }
 
 impl<T: TileComponent> ComponentQueryMut for &mut T {
     type MutItem<'t> = &'t mut T;
-    type State<'s> = EphemeralQueryState<'s>;
 
-    fn query_mut<'t, 's>(
-        tiles: &'t mut Tiles,
-        tile: Tile,
-        _state: Self::State<'s>,
+    fn borrow<'t>(
+        component_indices: &FxHashMap<TypeId, usize>,
+        slice: &mut DisjointSliceBorrow<'t, Option<Box<dyn TileComponent>>>,
     ) -> Option<Self::MutItem<'t>> {
-        let components = tiles.components.get_mut(&tile.coords.build_quad_key()?)?;
+        let index = *component_indices.get(&TypeId::of::<T>())?;
+        slice.borrow_mut(index)?.as_mut()?.downcast_mut()
+    }
 
-        components
-            .iter_mut()
-            .find_map(|component| component.get_mut().downcast_mut())
+    fn query_mut(tiles: &mut Tiles, tile: Tile) -> Option<Self::MutItem<'_>> {
+        tiles.get_component_mut::<T>(tile)
     }
 }
 
-/// Sealed component references used by mutable tuple queries.
-///
-/// Implementations share the tuple's borrow state and cannot inspect slots already borrowed
-/// mutably by another member of the tuple.
-///
-/// ```compile_fail
-/// use maplibre::tcs::tiles::{EphemeralQueryState, Tiles, Tile, ComponentQueryMut, ComponentQueryUnsafe};
-/// struct Custom;
-/// impl ComponentQueryMut for Custom {
-///     type MutItem<'t> = &'t u32;
-///     type State<'s> = EphemeralQueryState<'s>;
-///     fn query_mut<'t, 's>(_: &'t mut Tiles, _: Tile, _: Self::State<'s>) -> Option<&'t u32> { None }
-/// }
-/// impl ComponentQueryUnsafe for Custom {
-///     unsafe fn query_unsafe<'t, 's>(_: &'t Tiles, _: Tile, _: Self::State<'s>) -> Option<&'t u32> { None }
-/// }
-/// ```
-pub trait ComponentQueryUnsafe: ComponentQueryMut + sealed::Reference {
-    /// # Safety
-    /// The caller must prevent overlapping mutable borrows of the queried tile components
-    /// for the lifetime of the returned references, including across query states.
-    unsafe fn query_unsafe<'t, 's>(
-        tiles: &'t Tiles,
-        tile: Tile,
-        state: Self::State<'s>,
-    ) -> Option<Self::MutItem<'t>>;
-}
+macro_rules! impl_component_query {
+    ($($param: ident),*) => {
+        impl<$($param: ComponentQuery),*> ComponentQuery for ($($param,)*) {
+            type Item<'t> = ($($param::Item<'t>,)*);
 
-impl<T: TileComponent> ComponentQueryUnsafe for &T {
-    unsafe fn query_unsafe<'t, 's>(
-        tiles: &'t Tiles,
-        tile: Tile,
-        state: Self::State<'s>,
-    ) -> Option<Self::MutItem<'t>> {
-        <&T as ComponentQuery>::query(tiles, tile, state)
-    }
-}
-
-impl<T: TileComponent> ComponentQueryUnsafe for &mut T {
-    unsafe fn query_unsafe<'t, 's>(
-        tiles: &'t Tiles,
-        tile: Tile,
-        mut state: Self::State<'s>,
-    ) -> Option<Self::MutItem<'t>> {
-        state.borrow_mut::<T>()?;
-        let components = tiles.components.get(&tile.coords.build_quad_key()?)?;
-        for (index, component) in components.iter().enumerate() {
-            if state.state.mutably_borrowed_components.contains(&index) {
-                continue;
-            }
-            // Type inspection is shared only until the test ends. No prior mutable slot
-            // is inspected, and the type check excludes prior shared references to this slot.
-            if unsafe { (&*component.get()).is::<T>() } {
-                state.state.mutably_borrowed_components.insert(index);
-                return unsafe { (&mut *component.get()).downcast_mut() };
+            fn query(tiles: &Tiles, tile: Tile) -> Option<Self::Item<'_>> {
+                Some(($($param::query(tiles, tile)?,)*))
             }
         }
-        None
-    }
-}
 
-impl<CQ1: ComponentQuery, CQ2: ComponentQuery> ComponentQuery for (CQ1, CQ2) {
-    type Item<'t> = (CQ1::Item<'t>, CQ2::Item<'t>);
-    type State<'s> = EphemeralQueryState<'s>;
+        impl<$($param: ComponentQueryMut),*> ComponentQueryMut for ($($param,)*) {
+            type MutItem<'t> = ($($param::MutItem<'t>,)*);
 
-    fn query<'t, 's>(
-        tiles: &'t Tiles,
-        tile: Tile,
-        mut state: Self::State<'s>,
-    ) -> Option<Self::Item<'t>> {
-        Some((
-            CQ1::query(tiles, tile, state.clone_to::<CQ1::State<'_>>())?,
-            CQ2::query(tiles, tile, state.clone_to::<CQ2::State<'_>>())?,
-        ))
-    }
-}
-
-impl<
-        CQ1: ComponentQueryMut + ComponentQueryUnsafe + 'static,
-        CQ2: ComponentQueryMut + ComponentQueryUnsafe + 'static,
-    > ComponentQueryMut for (CQ1, CQ2)
-{
-    type MutItem<'t> = (CQ1::MutItem<'t>, CQ2::MutItem<'t>);
-    type State<'s> = EphemeralQueryState<'s>;
-
-    fn query_mut<'t, 's>(
-        tiles: &'t mut Tiles,
-        tile: Tile,
-        mut state: Self::State<'s>,
-    ) -> Option<Self::MutItem<'t>> {
-        // Sealed reference queries share one access ledger under an exclusive store borrow.
-        unsafe {
-            Some((
-                <CQ1 as ComponentQueryUnsafe>::query_unsafe(
-                    tiles,
-                    tile,
-                    state.clone_to::<CQ1::State<'_>>(),
-                )?,
-                <CQ2 as ComponentQueryUnsafe>::query_unsafe(
-                    tiles,
-                    tile,
-                    state.clone_to::<CQ2::State<'_>>(),
-                )?,
-            ))
+            fn borrow<'t>(
+                component_indices: &FxHashMap<TypeId, usize>,
+                slice: &mut DisjointSliceBorrow<'t, Option<Box<dyn TileComponent>>>,
+            ) -> Option<Self::MutItem<'t>> {
+                Some(($($param::borrow(component_indices, slice)?,)*))
+            }
         }
-    }
+    };
 }
 
-mod sealed {
-    pub trait Reference {}
-    impl<T: super::TileComponent> Reference for &T {}
-    impl<T: super::TileComponent> Reference for &mut T {}
-}
+impl_component_query!(CQ1);
+impl_component_query!(CQ1, CQ2);
+impl_component_query!(CQ1, CQ2, CQ3);
+impl_component_query!(CQ1, CQ2, CQ3, CQ4);
+impl_component_query!(CQ1, CQ2, CQ3, CQ4, CQ5);
+impl_component_query!(CQ1, CQ2, CQ3, CQ4, CQ5, CQ6);
 
 #[cfg(test)]
 mod tests;
