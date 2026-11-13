@@ -5,10 +5,10 @@ There are multiple demos of maplibre-rs for different targets. Some targets have
 depending on your operating system.
 
 * **maplibre-demo** - targets Windows, macOS and Linux, it is built directly with cargo.
-* **apple** - targets iOS and macOS and relies on the xcode IDE.
-* **android** - targets Android devices and builds in Android Studio.
-* **web** - targets the web using a WASM binary.
-* **maplibre-headless** - *TBD*
+* **apple** - targets iOS and macOS and relies on the xcode IDE (`apple/visionos` targets Apple Vision Pro via C ABI + Metal).
+* **android** - targets 64-bit Android devices and emulators (`arm64-v8a` and `x86_64`, `minSdk 23`) in Android Studio / Gradle.
+* **web** - targets browsers via WebAssembly (`wasm32-unknown-unknown`) with WebGPU and WebGL2 backends.
+* **maplibre (`--features headless`)** - renders maps offscreen without a windowing system via `maplibre::headless::map::HeadlessMap` (used by server rendering, multi-view hosts, and the `render-tests` conformance runner).
 
 All the targets below require you to install [rustup](https://rustup.rs/) to manage your Rust toolchain.
 
@@ -42,7 +42,7 @@ provides one-click access to the 3D Compass, `2D`/`3D` (`AUTO` tilt), `+`/`-` zo
 modes (where `RTS` mode enables Red Alert-style screen-edge scrolling and right-click panning). `--frames <n>` closes
 the window after `n` frames.
 
-`--terrain` opens the bundled 3D terrain style (`maplibre-demo/resources/terrain.json`): OpenStreetMap raster imagery
+`--terrain` opens the bundled 3D terrain style (`maplibre-demo/res/terrain.json`): OpenStreetMap raster imagery
 and Mapterhorn hillshade draped over Mapterhorn `raster-dem` elevation tiles around Innsbruck at pitch 70, matching
 the GL JS `add-3d-terrain` example on the globe projection. Auto-Tilt is enabled by default on terrain and globe
 styles, smoothly tilting the camera as you zoom in past zoom 9 while allowing manual pitch override at any time.
@@ -92,18 +92,18 @@ you to use C and C++ code with Android. You have to install manually the version
 ANDROID STUDIO -> tools -> SDK manager -> SDK tools -> tick show package details -> ndk (side by side)
 ```
 
-Open the project within `./android/gradle` and create a new virtual device with the device manager. Minimum SDK version
-should be 21. This was tested on an x86_64 emulator. Finally, run the demo configuration. It should open your virtual device and 
-run the maplibre-rs Android demo on it. Alternatively you can also run it on your own Android device.
+Open the project within `./android/gradle` and create a new virtual device with the device manager. Both `./android/gradle/lib/build.gradle` and `./android/gradle/demo/build.gradle` specify `minSdk 23` (Android 6.0+) and build exclusively for 64-bit targets (`arm64-v8a` / `aarch64-linux-android` and `x86_64` / `x86_64-linux-android`; 32-bit `i686` and `armeabi-v7a` are not supported). Install the Rust targets you need before building:
 
-> Note: If you are building for an x86 Android device, you probably need to install the following target using  
-> rustup with the following command `rustup target add i686-linux-android`.
+```bash
+rustup target add aarch64-linux-android x86_64-linux-android
+```
 
-> Note: Android is configured to support OpenGL ES 3.1 (This API specification is supported by Android 5.0 (API level 21) and higher).
-> Your Android device is required to support OpenGL ES 3.1 at least. There are some issues 
-> [here](https://stackoverflow.com/questions/40797975/android-emulator-and-opengl-es3-egl-bad-config) and 
+Finally, run the `demo` configuration in Android Studio to launch the maplibre-rs Android demo on an `x86_64` emulator or a physical `arm64-v8a` Android device.
+
+> Note: Android is configured with `minSdk 23` and requires OpenGL ES 3.1 or Vulkan support on the target device or emulator. There are some notes
+> [here](https://stackoverflow.com/questions/40797975/android-emulator-and-opengl-es3-egl-bad-config) and
 > [here](https://www.reddit.com/r/Arcore/comments/8squbo/opengl_es_31_is_required_for_android_emulator_to/) that
-> discuss configuration of Android Studio for OpenGL ES 3.1 support in emulators.
+> discuss configuring Android Studio emulators for OpenGL ES 3.1 support.
  
 ## Apple
 
@@ -163,4 +163,16 @@ After building the library you can run the demo server:
 
 ```bash
 just web-demo start
+```
+
+## Headless Rendering (`maplibre --features headless`)
+
+Offscreen rendering lives directly in the core `maplibre` crate behind `--features headless` (`maplibre::headless::create_headless_renderer` and `maplibre::headless::map::HeadlessMap`), rather than a separate crate. It renders into offscreen GPU textures or PNG/RGBA buffers on Vulkan (including Mesa Lavapipe software rasterization in CI), Metal, and DirectX 12 without creating a window:
+
+```bash
+# Run headless unit and integration tests
+cargo test -p maplibre --features headless
+
+# Run the MapLibre GL JS pixel + query conformance suite headlessly
+cargo run --release -p render-tests -- --ci
 ```

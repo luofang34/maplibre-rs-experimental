@@ -32,10 +32,12 @@ jobs:
           just stable-install-clippy
           cargo clippy -p maplibre --all-targets --features "headless thread-safe-futures" \
             --target x86_64-unknown-linux-gnu -- -D warnings
+          cargo clippy -p maplibre --all-targets --features "headless thread-safe-futures experimental" \
+            --target x86_64-unknown-linux-gnu -- -D warnings
       - name: Build unit and integration tests
         shell: bash
         run: |
-          cargo nextest archive -p maplibre --lib --tests --features "headless thread-safe-futures" \
+          cargo nextest archive -p maplibre --lib --tests --features "headless thread-safe-futures experimental" \
             --target x86_64-unknown-linux-gnu --archive-file headless-tests.tar.zst
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
