@@ -31,14 +31,6 @@ they start with another directory.
 | `resampling` on hillshade and color-relief, `line-round-limit`, `fill-extrusion-rounded-corner-distance`, GeoJSON `lineMetrics` and `tolerance` | Missing | S each |
 | `video` and `canvas` sources | Missing | M |
 
-## Platforms and embedding
-
-| Gap | State | Size |
-| --- | --- | --- |
-| General C ABI | Partial; visionOS only (`apple/visionos/maplibre_visionos.h`) | L |
-| Thread-safe runtime and map handles | Partial; single-thread `MapHandle` (`map/handle.rs`) | M–L |
-| Android and iOS as embeddable SDKs | Partial; `android/src/lib.rs` and `apple/src/lib.rs` start the demo map | M |
-
 ## Architecture and engineering
 
 | Gap | State | Size |
