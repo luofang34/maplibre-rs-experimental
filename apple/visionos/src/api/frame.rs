@@ -3,6 +3,9 @@ use super::{
     *,
 };
 
+mod anchor;
+use anchor::{solve_anchor_to_screen, AnchorCamera};
+
 /// Draws every eye of a frame and returns the Metal texture (`id<MTLTexture>`) the map draws
 /// into when an eye has no colour texture of its own, owned by the map and valid until the
 /// next call; null when the frame could not be drawn. Depth textures are written before this
@@ -146,4 +149,276 @@ pub unsafe extern "C" fn maplibre_visionos_render_frame(
     unsafe { texture.as_hal::<wgpu::hal::api::Metal>() }.map_or(ptr::null(), |texture| {
         ptr::from_ref(texture.raw_handle()).cast()
     })
+}
+
+/// Draws one frame from the map's orbit / free-globe camera (`MapView`) and returns the
+/// map's offscreen `id<MTLTexture>`, owned by the map and valid until the next draw call.
+///
+/// # Safety
+///
+/// `map` must come from [`maplibre_visionos_create`] and not have been destroyed.
+#[no_mangle]
+pub unsafe extern "C" fn maplibre_visionos_render_orbit(
+    map: *mut MaplibreVisionOSMap,
+    latitude: f64,
+    longitude: f64,
+    zoom: f64,
+    pitch_deg: f64,
+    bearing_deg: f64,
+    roll_deg: f64,
+    timestamp_seconds: f64,
+) -> *const c_void {
+    // SAFETY: the caller upholds the map handle contract documented above.
+    let Some(handle) = (unsafe { map.as_mut() }) else {
+        return ptr::null();
+    };
+    handle.map.clear_external_view();
+    handle.map.set_opaque_environment(handle.opaque_environment);
+    handle
+        .map
+        .set_navigation_mode(maplibre::render::view_state::NavigationMode::FreeGlobe)
+        .ok();
+    if let Err(error) = handle
+        .map
+        .jump_to(maplibre::render::view_state::CameraOptions {
+            center: Some(LatLon::new(latitude, longitude)),
+            zoom: Some(zoom),
+            pitch: Some(Deg(pitch_deg)),
+            bearing: Some(Deg(bearing_deg)),
+            roll: Some(Deg(roll_deg)),
+            ..maplibre::render::view_state::CameraOptions::default()
+        })
+    {
+        tracing::error!(%error, "orbit jump_to failed");
+        return ptr::null();
+    }
+    handle.map.frame_input_mut().timestamp = Duration::from_secs_f64(timestamp_seconds.max(0.0));
+    {
+        let _runtime = handle.runtime.enter();
+        if let Err(error) = handle.map.run_frame() {
+            tracing::error!(%error, "orbit frame failed");
+            return ptr::null();
+        }
+    }
+    handle.frames = handle.frames.wrapping_add(1);
+    if let Err(error) = handle.map.device().poll(wgpu::PollType::Poll) {
+        tracing::error!(%error, "GPU polling failed");
+        return ptr::null();
+    }
+    let Some(texture) = handle.map.head_texture() else {
+        return ptr::null();
+    };
+    // SAFETY: the map owns the texture, keeping the borrowed Metal object alive.
+    unsafe { texture.as_hal::<wgpu::hal::api::Metal>() }.map_or(ptr::null(), |texture| {
+        ptr::from_ref(texture.raw_handle()).cast()
+    })
+}
+
+/// Returns the map's effective style zoom (matching eye-height zoom for 6-DoF external frames
+/// and map zoom for orbit frames), or `0.0` when `map` is null.
+///
+/// # Safety
+///
+/// `map` must come from [`maplibre_visionos_create`] and not have been destroyed, or be null.
+#[no_mangle]
+pub unsafe extern "C" fn maplibre_visionos_effective_zoom(map: *const MaplibreVisionOSMap) -> f64 {
+    // SAFETY: the caller upholds the map handle contract documented above.
+    unsafe { map.as_ref() }.map_or(0.0, |handle| handle.map.view_state().style_zoom().value())
+}
+
+/// Raycasts a logical viewport point `(screen_x, screen_y)` onto the globe / loaded DEM surface,
+/// writing `(latitude, longitude, elevation_meters)` when the ray intersects the planet.
+///
+/// # Safety
+///
+/// `map` must be valid or null; output pointers must be valid writable `f64` pointers.
+#[no_mangle]
+pub unsafe extern "C" fn maplibre_visionos_screen_to_ground(
+    map: *const MaplibreVisionOSMap,
+    screen_x: f64,
+    screen_y: f64,
+    out_latitude: *mut f64,
+    out_longitude: *mut f64,
+    out_elevation_meters: *mut f64,
+) -> bool {
+    let Some(handle) = (unsafe { map.as_ref() }) else {
+        return false;
+    };
+    if out_latitude.is_null() || out_longitude.is_null() || out_elevation_meters.is_null() {
+        return false;
+    }
+    let view_state = handle.map.view_state();
+    let Ok(camera) = maplibre::render::projection::globe_camera_for_view(view_state) else {
+        return false;
+    };
+    let px = cgmath::Point2::new(screen_x, screen_y);
+    if !camera.is_point_on_map_surface(px) {
+        return false;
+    }
+    let base_elev = view_state.center_elevation();
+    let Some(loc0) = camera
+        .screen_point_to_location_at(px, base_elev)
+        .or_else(|| camera.screen_point_to_location(px))
+    else {
+        return false;
+    };
+    let (loc, elev) = if let Some(dem) = handle.map.context().loaded_ground_cached(loc0) {
+        let refined = camera.screen_point_to_location_at(px, dem).unwrap_or(loc0);
+        (refined, dem)
+    } else {
+        (loc0, base_elev)
+    };
+    // SAFETY: null checks performed above; caller owns the output scalars.
+    unsafe {
+        *out_latitude = loc.latitude;
+        *out_longitude = loc.longitude;
+        *out_elevation_meters = elev;
+    }
+    true
+}
+
+/// Moves the free-globe orbit camera so the 3D ground anchor `(anchor_lat, anchor_lon, anchor_elev_m)`
+/// projects directly under logical viewport point `(screen_x, screen_y)` while holding `(zoom, pitch_deg,
+/// bearing_deg)`. Returns `false` without mutating the camera when `(screen_x, screen_y)` lies outside
+/// the visible planetary limb or the anchor rotates past the horizon, allowing the caller to hand off
+/// seamlessly to [`maplibre_visionos_drag_orbit`] on the same frame.
+///
+/// # Safety
+///
+/// `map` must be valid or null; output pointers must be valid writable `f64` pointers.
+#[no_mangle]
+pub unsafe extern "C" fn maplibre_visionos_move_anchor_to_screen(
+    map: *mut MaplibreVisionOSMap,
+    anchor_lat: f64,
+    anchor_lon: f64,
+    anchor_elev_m: f64,
+    screen_x: f64,
+    screen_y: f64,
+    zoom: f64,
+    pitch_deg: f64,
+    bearing_deg: f64,
+    north_locked: bool,
+    out_center_lat: *mut f64,
+    out_center_lon: *mut f64,
+    out_bearing_deg: *mut f64,
+) -> bool {
+    let Some(handle) = (unsafe { map.as_mut() }) else {
+        return false;
+    };
+    if out_center_lat.is_null() || out_center_lon.is_null() || out_bearing_deg.is_null() {
+        return false;
+    }
+    let Some((lat, lon, bearing)) = solve_anchor_to_screen(
+        &mut handle.map,
+        LatLon::new(anchor_lat, anchor_lon),
+        anchor_elev_m,
+        cgmath::Point2::new(screen_x, screen_y),
+        AnchorCamera {
+            zoom,
+            pitch_deg,
+            bearing_deg,
+            north_locked,
+        },
+    ) else {
+        return false;
+    };
+    // SAFETY: null checks performed above; caller owns the output scalars.
+    unsafe {
+        *out_center_lat = lat;
+        *out_center_lon = lon;
+        *out_bearing_deg = bearing;
+    }
+    true
+}
+
+/// Incremental globe pan from `(from_x, from_y)` to `(to_x, to_y)` supporting empty-space drags
+/// outside the planetary limb, cross-limb hyperbolic trackball drags, North-Up pole-dialing when
+/// `north_locked` is `true`, and unrestricted pole-crossing `FreeGlobe` rotation when `false`.
+///
+/// # Safety
+///
+/// `map` must be valid or null; output pointers must be valid writable `f64` pointers.
+#[no_mangle]
+pub unsafe extern "C" fn maplibre_visionos_drag_orbit(
+    map: *mut MaplibreVisionOSMap,
+    from_x: f64,
+    from_y: f64,
+    to_x: f64,
+    to_y: f64,
+    zoom: f64,
+    pitch_deg: f64,
+    bearing_deg: f64,
+    north_locked: bool,
+    out_center_lat: *mut f64,
+    out_center_lon: *mut f64,
+    out_bearing_deg: *mut f64,
+) -> bool {
+    let Some(handle) = (unsafe { map.as_mut() }) else {
+        return false;
+    };
+    if out_center_lat.is_null() || out_center_lon.is_null() || out_bearing_deg.is_null() {
+        return false;
+    }
+    handle.map.clear_external_view();
+    handle
+        .map
+        .set_navigation_mode(maplibre::render::view_state::NavigationMode::FreeGlobe)
+        .ok();
+    handle
+        .map
+        .jump_to(maplibre::render::view_state::CameraOptions {
+            zoom: Some(zoom),
+            pitch: Some(Deg(pitch_deg)),
+            bearing: Some(Deg(if north_locked { 0.0 } else { bearing_deg })),
+            roll: Some(Deg(0.0)),
+            ..maplibre::render::view_state::CameraOptions::default()
+        })
+        .ok();
+    let from_px = cgmath::Point2::new(from_x, from_y);
+    let to_px = cgmath::Point2::new(to_x, to_y);
+    let moved = if north_locked {
+        let Ok(camera) =
+            maplibre::render::projection::globe_camera_for_view(handle.map.view_state())
+        else {
+            return false;
+        };
+        let center_px =
+            camera.location_to_screen(camera.center(), handle.map.view_state().center_elevation());
+        if let Some(update) = maplibre::projection::globe::interaction::pan_camera_by_pixels(
+            &camera,
+            to_px,
+            center_px,
+            to_px - from_px,
+        ) {
+            handle
+                .map
+                .jump_to(maplibre::render::view_state::CameraOptions {
+                    center: Some(update.center),
+                    zoom: Some(zoom),
+                    pitch: Some(Deg(pitch_deg)),
+                    bearing: Some(Deg(0.0)),
+                    roll: Some(Deg(0.0)),
+                    ..maplibre::render::view_state::CameraOptions::default()
+                })
+                .is_ok()
+        } else {
+            false
+        }
+    } else {
+        handle.map.drag_globe(from_px, to_px)
+    };
+    let Some(pose) = handle.map.view_state().pose_view() else {
+        return false;
+    };
+    // SAFETY: null checks performed above; caller owns the output scalars.
+    unsafe {
+        *out_center_lat = pose.center.latitude;
+        *out_center_lon = pose.center.longitude;
+        *out_bearing_deg = if north_locked {
+            0.0
+        } else {
+            pose.bearing_degrees
+        };
+    }
+    moved
 }

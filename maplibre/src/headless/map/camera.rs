@@ -58,6 +58,13 @@ impl HeadlessMap {
         self.map_context.set_navigation_mode(mode)
     }
 
+    /// Clears any host-supplied external eye and switches [`crate::render::frame_input::FrameInput`]
+    /// back to [`crate::render::frame_input::ViewSource::MapView`] so camera jumps govern the next frame.
+    pub fn clear_external_view(&mut self) {
+        self.frame_input_mut().view = crate::render::frame_input::ViewSource::MapView;
+        self.map_context.view_state.clear_external_view();
+    }
+
     /// Moves the map at once, as GL JS `jumpTo`, standing a center held by terrain on the
     /// loaded ground or at sea level, as [`crate::context::MapContext::jump_to`] does.
     pub fn jump_to(
@@ -95,6 +102,15 @@ impl HeadlessMap {
         self.map_context
             .view_state
             .set_field_of_view(cgmath::Rad::from(field_of_view));
+    }
+
+    /// Sets the planetary body whose radius and ground elevation bounds govern the globe,
+    /// terrain, and atmosphere.
+    pub fn set_body(&mut self, body: crate::projection::body::Body) {
+        if self.map_context.view_state.body() != body {
+            self.map_context.view_state.set_body(body);
+            crate::render::frame_signals::mark_dirty(&mut self.map_context.world);
+        }
     }
 
     /// Asks for an opaque environment: on a full globe without atmosphere the style's sky

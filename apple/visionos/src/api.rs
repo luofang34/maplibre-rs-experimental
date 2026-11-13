@@ -15,7 +15,11 @@ use std::{
 
 use cgmath::{Deg, Matrix4};
 use diagnostics::init_logging;
-pub use frame::maplibre_visionos_render_frame;
+pub use frame::{
+    maplibre_visionos_drag_orbit, maplibre_visionos_effective_zoom,
+    maplibre_visionos_move_anchor_to_screen, maplibre_visionos_render_frame,
+    maplibre_visionos_render_orbit, maplibre_visionos_screen_to_ground,
+};
 use maplibre::{
     coords::LatLon,
     headless::{create_headless_renderer_with_settings, map::HeadlessMap},
@@ -174,7 +178,7 @@ fn create(
     let mut style: Style =
         serde_json::from_str(style_json).map_err(|error| format!("style: {error}"))?;
     let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
+        .worker_threads(4)
         .thread_name("map-tile-worker")
         .enable_all()
         .build()
@@ -202,6 +206,7 @@ fn create(
     let has_terrain = style.terrain.is_some();
     let mut plugins: Vec<Box<dyn Plugin<_>>> = vec![
         Box::new(RenderPlugin),
+        Box::new(maplibre::starfield::StarfieldPlugin),
         Box::new(maplibre::background::BackgroundPlugin),
         Box::new(maplibre::vector::VectorPlugin::<
             maplibre::vector::DefaultVectorTransferables,
@@ -283,7 +288,8 @@ pub unsafe extern "C" fn maplibre_visionos_terrain_elevation(
         .and_then(|handle| {
             handle
                 .map
-                .context().loaded_ground_cached(LatLon::new(latitude, longitude))
+                .context()
+                .loaded_ground_cached(LatLon::new(latitude, longitude))
         })
         .map_or(f32::NAN, |elevation| elevation as f32)
 }
@@ -308,6 +314,40 @@ pub unsafe extern "C" fn maplibre_visionos_width(map: *const MaplibreVisionOSMap
 pub unsafe extern "C" fn maplibre_visionos_height(map: *const MaplibreVisionOSMap) -> u32 {
     // SAFETY: the caller upholds the handle contract documented above.
     unsafe { map.as_ref() }.map_or(0, |map| map.height)
+}
+
+/// Replaces the inline GeoJSON document of a named GeoJSON source in-place without recreating
+/// the map or flushing loaded raster/vector/DEM tiles.
+///
+/// # Safety
+///
+/// `map` must come from [`maplibre_visionos_create`] and not have been destroyed; `source_name`
+/// and `geojson_json` must be valid NUL-terminated UTF-8 strings.
+#[no_mangle]
+pub unsafe extern "C" fn maplibre_visionos_set_geojson_source(
+    map: *mut MaplibreVisionOSMap,
+    source_name: *const c_char,
+    geojson_json: *const c_char,
+) -> bool {
+    let (Some(handle), Some(source_name), Some(geojson_json)) = (
+        unsafe { map.as_mut() },
+        unsafe { c_str(source_name) },
+        unsafe { c_str(geojson_json) },
+    ) else {
+        return false;
+    };
+    let Ok(document) = serde_json::from_str::<serde_json::Value>(geojson_json) else {
+        tracing::warn!(source = %source_name, "invalid GeoJSON payload in set_geojson_source");
+        return false;
+    };
+    let _runtime = handle.runtime.enter();
+    match handle.map.set_geojson_source(source_name, document) {
+        Ok(()) => true,
+        Err(error) => {
+            tracing::warn!(source = %source_name, %error, "cannot update GeoJSON source");
+            false
+        }
+    }
 }
 
 /// Frees a map made by [`maplibre_visionos_create`]; null is ignored.

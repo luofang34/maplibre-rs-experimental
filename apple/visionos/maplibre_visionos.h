@@ -45,6 +45,19 @@ MaplibreVisionOSMap *maplibre_visionos_create(const char *style_json, uint32_t w
 
 /** Fill the full immersive environment while preserving passthrough around a table globe. */
 void maplibre_visionos_set_opaque_environment(MaplibreVisionOSMap *map, bool opaque);
+/** Set physical-to-logical display pixel ratio (e.g. 2.0 on Retina displays). */
+void maplibre_visionos_set_pixel_ratio(MaplibreVisionOSMap *map, double ratio);
+/** Explicitly configure the planetary body's mean radius and elevation bounds in metres. */
+void maplibre_visionos_set_body(MaplibreVisionOSMap *map, double radius_meters,
+                                double highest_ground_meters, double lowest_ground_meters);
+/** Update body-fixed Sun direction/radius, Moon disc, twilight band, and atmosphere toggle. */
+void maplibre_visionos_set_sky(MaplibreVisionOSMap *map, bool has_sun,
+                               const double *sun_ecef_xyz, double sun_radius_deg,
+                               bool has_moon, const double *moon_ecef_xyz,
+                               double moon_radius_deg, float night_brightness, bool atmosphere);
+/** Replace the starfield behind the body (`star_count` tuples of 7 floats: xyz, mag, rgb). */
+void maplibre_visionos_set_stars(MaplibreVisionOSMap *map, const float *packed_stars_f32,
+                                 uint32_t star_count);
 /** Query placed labels/icons at a pixel (y down). Returns required bytes including NUL.
  * Only writes when buffer is non-null and capacity is sufficient. */
 size_t maplibre_visionos_query_symbols(const MaplibreVisionOSMap *map, double x, double y,
@@ -78,6 +91,35 @@ const void *maplibre_visionos_render_frame(MaplibreVisionOSMap *map,
                                            const MaplibreVisionOSEye *eyes, uint32_t eye_count,
                                            float request_overscan, double timestamp_seconds);
 
+// Draws one frame from the map's orbit / free-globe camera at (latitude, longitude), zoom,
+// pitch_deg, bearing_deg, and roll_deg. Returns the map's offscreen id<MTLTexture> or NULL.
+const void *maplibre_visionos_render_orbit(MaplibreVisionOSMap *map, double latitude,
+                                           double longitude, double zoom, double pitch_deg,
+                                           double bearing_deg, double roll_deg,
+                                           double timestamp_seconds);
+
+// Effective style zoom of the last rendered frame (eye-height zoom for external 6-DoF frames,
+// camera zoom for orbit frames).
+double maplibre_visionos_effective_zoom(const MaplibreVisionOSMap *map);
+
+// Raycasts logical viewport point (screen_x, screen_y) onto the globe / loaded DEM surface.
+bool maplibre_visionos_screen_to_ground(const MaplibreVisionOSMap *map, double screen_x,
+                                        double screen_y, double *out_latitude,
+                                        double *out_longitude, double *out_elevation_meters);
+
+// Moves the orbit camera so the 3D ground anchor lands directly under (screen_x, screen_y).
+bool maplibre_visionos_move_anchor_to_screen(
+    MaplibreVisionOSMap *map, double anchor_lat, double anchor_lon, double anchor_elev_m,
+    double screen_x, double screen_y, double zoom, double pitch_deg, double bearing_deg,
+    bool north_locked, double *out_center_lat, double *out_center_lon, double *out_bearing_deg);
+
+// Incremental globe drag from (from_x, from_y) to (to_x, to_y), including empty-space off-limb
+// drags, cross-limb hyperbolic trackball continuity, and North-Up / FreeGlobe modes.
+bool maplibre_visionos_drag_orbit(MaplibreVisionOSMap *map, double from_x, double from_y,
+                                  double to_x, double to_y, double zoom, double pitch_deg,
+                                  double bearing_deg, bool north_locked, double *out_center_lat,
+                                  double *out_center_lon, double *out_bearing_deg);
+
 // The Metal command queue (id<MTLCommandQueue>) the map draws on, owned by the map and valid
 // while it lives. Work committed on it runs after the map's draws, so copies out of the map's
 // texture need no wait.
@@ -93,6 +135,11 @@ void maplibre_visionos_note(const char *message);
 // Bytes the process may still take before the system would kill it (os_proc_available_memory);
 // below a reserve the map takes nothing new on. Zero when the host cannot tell.
 void maplibre_visionos_set_available_memory(MaplibreVisionOSMap *map, uint64_t available_bytes);
+
+// Replaces the inline GeoJSON document of a named GeoJSON source in-place without recreating
+// the map or flushing loaded raster/vector/DEM tiles.
+bool maplibre_visionos_set_geojson_source(MaplibreVisionOSMap *map, const char *source_name,
+                                          const char *geojson_json);
 
 void maplibre_visionos_destroy(MaplibreVisionOSMap *map);
 

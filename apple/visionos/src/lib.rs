@@ -9,12 +9,31 @@
 #![allow(unsafe_code)]
 
 mod api;
+mod celestial;
 mod images;
 mod selection;
 pub use api::*;
+pub use celestial::*;
 pub use images::*;
 pub use selection::{maplibre_visionos_query_symbols, maplibre_visionos_set_opaque_environment};
 
 mod symbols;
 mod trace;
 pub use trace::*;
+
+// Compile-time guard: `maplibre-visionos` MUST link `maplibre` with `native-io` enabled so
+// `HeadlessEnvironment` schedules vector, raster, and DEM tile requests on `TokioScheduler`
+// rather than rejecting every tile via `NopScheduler`.
+const _: fn() = || {
+    fn assert_tokio_apc<T>()
+    where
+        T: maplibre::environment::Environment<
+                AsyncProcedureCall = maplibre::io::apc::SchedulerAsyncProcedureCall<
+                    maplibre::platform::ReqwestOffscreenKernelEnvironment,
+                    maplibre::platform::scheduler::TokioScheduler,
+                >,
+            >,
+    {
+    }
+    assert_tokio_apc::<maplibre::headless::environment::HeadlessEnvironment>();
+};

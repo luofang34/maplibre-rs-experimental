@@ -130,6 +130,18 @@ enum Commands {
         pitch: Option<f64>,
         #[clap(long, allow_hyphen_values = true)]
         bearing: Option<f64>,
+        /// Pin orbital camera target center altitude in metres MSL (`centerClampedToGround = false`).
+        #[clap(long, allow_hyphen_values = true)]
+        center_elevation: Option<f64>,
+        /// First-person 6-DoF cockpit/XR camera altitude in metres MSL at `(lat, lon)`.
+        #[clap(long, allow_hyphen_values = true)]
+        eye_alt_m: Option<f64>,
+        /// First-person cockpit elevation angle in degrees (`0` = horizon, `+10` = nose up, `-10` = nose down).
+        #[clap(long, allow_hyphen_values = true, default_value_t = 0.0)]
+        cockpit_pitch: f64,
+        /// Vertical field of view in degrees for `--eye-alt-m` first-person rendering.
+        #[clap(long, default_value_t = 64.0)]
+        fov_deg: f64,
         #[clap(long, default_value_t = 360)]
         max_frames: usize,
         #[clap(long, default_value_t = 30)]
@@ -219,6 +231,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             zoom,
             pitch,
             bearing,
+            center_elevation,
+            eye_alt_m,
+            cockpit_pitch,
+            fov_deg,
             max_frames,
             timeout_secs,
             out,
@@ -243,6 +259,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     zoom: *zoom,
                     pitch: *pitch,
                     bearing: *bearing,
+                    center_elevation: *center_elevation,
+                    eye_alt_m: *eye_alt_m,
+                    cockpit_pitch: *cockpit_pitch,
+                    fov_deg: *fov_deg,
                     max_frames: *max_frames,
                     timeout_secs: *timeout_secs,
                     out_path: out,
