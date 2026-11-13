@@ -21,8 +21,11 @@ jobs:
       - name: Check x86_64 darwin
         shell: bash
         run: just check maplibre-demo x86_64-apple-darwin
-      - name: Test x86_64 darwin
+      - name: Test x86_64 darwin (Metal Shader & Debug Validation)
         shell: bash
+        env:
+          MTL_SHADER_VALIDATION: "1"
+          MTL_DEBUG_LAYER: "1"
         run: just test maplibre-demo x86_64-apple-darwin
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

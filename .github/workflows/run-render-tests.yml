@@ -1,0 +1,40 @@
+name: Run render and query conformance tests
+
+on:
+  workflow_call:
+
+jobs:
+  render-conformance:
+    name: Render & Query Conformance (lavapipe)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Setup
+        uses: ./.github/actions/setup
+        with:
+          targets: x86_64-unknown-linux-gnu
+      - name: Install Dependencies
+        uses: ./.github/actions/install-system-dependencies
+      - name: Install Lavapipe Vulkan Driver
+        uses: ./.github/actions/install-driver
+        with:
+          wgpu-info: false
+      - name: Unit-test render-tests harness & ignores ratchet
+        shell: bash
+        run: cargo test -p render-tests --target x86_64-unknown-linux-gnu
+      - name: Run MapLibre render & query conformance suite
+        shell: bash
+        run: |
+          WGPU_BACKEND=vulkan cargo run --release -p render-tests --target x86_64-unknown-linux-gnu -- \
+            --ci --summary-md render-summary.md --summary-json render-summary.json
+      - name: Publish conformance summary
+        if: always() && hashFiles('render-summary.md') != ''
+        shell: bash
+        run: cat render-summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload conformance summary JSON
+        if: always() && hashFiles('render-summary.json') != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: render-conformance-summary
+          path: render-summary.json
+          retention-days: 14

@@ -32,6 +32,9 @@ jobs:
   run-tests:
     if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     uses: ./.github/workflows/run-tests.yml
+  run-render-tests:
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
+    uses: ./.github/workflows/run-render-tests.yml
   run-headless-tests:
     if: ${{ (github.event.action != 'edited' || github.event.changes.base) && (github.event_name != 'pull_request' || github.base_ref == 'main') }}
     uses: ./.github/workflows/run-headless-tests.yml

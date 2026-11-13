@@ -9,6 +9,8 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
       - name: Setup
         uses: ./.github/actions/setup
         with:
@@ -17,6 +19,40 @@ jobs:
         uses: ./.github/actions/install-system-dependencies
       - name: Install GPU Drivers
         uses: ./.github/actions/install-driver
-      - name: Benchmark
+      - name: Install critcmp
+        if: ${{ github.base_ref != '' }}
+        uses: ./.github/actions/cargo-install
+        with:
+          name: critcmp
+      - name: Compare benchmarks against base ref
+        if: ${{ github.base_ref != '' }}
+        shell: bash
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          WGPU_BACKEND: vulkan
+        run: |
+          HEAD_SHA="$(git rev-parse HEAD)"
+          git fetch origin "$BASE_REF" --depth=1
+          git checkout --detach FETCH_HEAD
+          cargo bench -p benchmarks --target x86_64-unknown-linux-gnu -- --save-baseline base
+          git checkout --detach "$HEAD_SHA"
+          cargo bench -p benchmarks --target x86_64-unknown-linux-gnu -- --baseline base
+          critcmp base new | tee benchmark-comparison.txt
+          {
+            echo "## Criterion Benchmark Comparison (\`base\` vs \`HEAD\`)"
+            echo ""
+            echo '```text'
+            cat benchmark-comparison.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload benchmark comparison report
+        if: ${{ github.base_ref != '' && hashFiles('benchmark-comparison.txt') != '' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: benchmark-comparison
+          path: benchmark-comparison.txt
+          retention-days: 14
+      - name: Benchmark (main / standalone)
+        if: ${{ github.base_ref == '' }}
         shell: bash
         run: WGPU_BACKEND=vulkan just benchmark

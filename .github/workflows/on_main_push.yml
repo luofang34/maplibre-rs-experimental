@@ -25,6 +25,8 @@ jobs:
     uses: ./.github/workflows/run-benchmarks.yml
   run-tests:
     uses: ./.github/workflows/run-tests.yml
+  run-render-tests:
+    uses: ./.github/workflows/run-render-tests.yml
   run-headless-tests:
     uses: ./.github/workflows/run-headless-tests.yml
   build-deploy-docs:
@@ -70,4 +72,3 @@ jobs:
   demo-macos:
     uses: ./.github/workflows/demo-macos.yml
     secrets: inherit
-

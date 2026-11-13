@@ -59,6 +59,9 @@ jobs:
       - name: Test
         if: ${{ matrix.arch == 'x86_64' }} # TODO: We can only test on x86_64, this is current limitation
         shell: bash
+        env:
+          MTL_SHADER_VALIDATION: "1"
+          MTL_DEBUG_LAYER: "1"
         run: just test apple ${{ matrix.target }}
       - name: Check fat
         if: ${{ matrix.fat-target }}
@@ -67,7 +70,40 @@ jobs:
       - name: Test fat
         if: ${{ matrix.fat-target && matrix.fat-arch == 'x86_64' }} # TODO: We can only test on x86_64, this is current limitation
         shell: bash
+        env:
+          MTL_SHADER_VALIDATION: "1"
+          MTL_DEBUG_LAYER: "1"
         run: just check apple ${{ matrix.fat-target }}
+
+  build-visionos:
+    name: Check & Lint visionOS
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install pinned nightly with rust-src and clippy
+        shell: bash
+        run: |
+          TOOLCHAIN="$(python3 -c 'import tomllib; print(tomllib.loads(open("apple/visionos/rust-toolchain.toml").read())["toolchain"]["channel"])')"
+          rustup toolchain install "$TOOLCHAIN" --component rust-src --component clippy --no-self-update
+          echo "VISIONOS_TOOLCHAIN=$TOOLCHAIN" >> "$GITHUB_ENV"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: apple/visionos
+      - name: Check aarch64-apple-visionos-sim
+        shell: bash
+        run: |
+          cargo +"$VISIONOS_TOOLCHAIN" check --manifest-path apple/visionos/Cargo.toml \
+            -Z build-std=std,panic_abort --target aarch64-apple-visionos-sim
+      - name: Check aarch64-apple-visionos
+        shell: bash
+        run: |
+          cargo +"$VISIONOS_TOOLCHAIN" check --manifest-path apple/visionos/Cargo.toml \
+            -Z build-std=std,panic_abort --target aarch64-apple-visionos
+      - name: Clippy aarch64-apple-visionos-sim
+        shell: bash
+        run: |
+          cargo +"$VISIONOS_TOOLCHAIN" clippy --manifest-path apple/visionos/Cargo.toml \
+            -Z build-std=std,panic_abort --target aarch64-apple-visionos-sim --all-targets -- -D warnings
 
   library-apple-test-xcode-project:
     name: Test XCode project
@@ -117,4 +153,3 @@ jobs:
       - name: Build Swift Package (x86_64)
         shell: bash
         run: cd apple/MapLibreRs && swift build -v --arch=x86_64 --scratch-path .build-x86_64
-

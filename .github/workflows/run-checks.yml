@@ -6,7 +6,7 @@ on:
 jobs:
   run-checks:
     name: Check
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
@@ -15,6 +15,8 @@ jobs:
           ref: ${{ startsWith(github.head_ref, 'dependabot/') && github.head_ref || '' }}
       - name: Setup
         uses: ./.github/actions/setup
+      - name: Install Dependencies
+        uses: ./.github/actions/install-system-dependencies
       - name: Run rustfmt for Dependabot PRs
         if: ${{ github.event_name == 'pull_request' && (github.actor == 'dependabot[bot]' || startsWith(github.head_ref, 'dependabot/')) }}
         shell: bash
@@ -31,3 +33,68 @@ jobs:
       - name: Format
         shell: bash
         run: just fmt-check
+      - name: Check maplibre without native-io
+        shell: bash
+        run: |
+          cargo check -p maplibre --no-default-features
+          cargo check -p maplibre --no-default-features --features headless
+
+  cargo-deny:
+    name: Dependency & License Audit (cargo-deny)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Setup
+        uses: ./.github/actions/setup
+      - name: Install cargo-deny
+        uses: ./.github/actions/cargo-install
+        with:
+          name: cargo-deny
+      - name: Audit licenses, bans, and sources
+        shell: bash
+        run: cargo deny check licenses bans sources
+
+  msrv:
+    name: MSRV Check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Dependencies
+        uses: ./.github/actions/install-system-dependencies
+      - name: Install MSRV toolchain from Cargo.toml
+        shell: bash
+        run: |
+          MSRV="$(python3 -c 'import tomllib; print(tomllib.loads(open("Cargo.toml").read())["workspace"]["package"]["rust-version"])')"
+          echo "Detected MSRV: $MSRV"
+          rustup toolchain install "$MSRV" --profile minimal --no-self-update
+          echo "MSRV=$MSRV" >> "$GITHUB_ENV"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Check maplibre under MSRV
+        shell: bash
+        run: cargo +"$MSRV" check -p maplibre --no-default-features
+
+  coverage:
+    name: Code Coverage (lcov)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Setup
+        uses: ./.github/actions/setup
+      - name: Install Dependencies
+        uses: ./.github/actions/install-system-dependencies
+      - name: Install llvm-tools-preview
+        shell: bash
+        run: rustup component add llvm-tools-preview --toolchain stable
+      - name: Install cargo-llvm-cov
+        uses: ./.github/actions/cargo-install
+        with:
+          name: cargo-llvm-cov
+      - name: Generate lcov report
+        shell: bash
+        run: cargo llvm-cov --package maplibre --lib --lcov --output-path lcov.info
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-lcov
+          path: lcov.info
+          retention-days: 14

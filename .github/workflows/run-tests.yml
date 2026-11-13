@@ -17,15 +17,45 @@ jobs:
         uses: ./.github/actions/install-system-dependencies
       - name: Install GPU Drivers
         uses: ./.github/actions/install-driver
-      - name: Test Vulkan
+      - name: Install Vulkan Validation Layers
         shell: bash
+        run: sudo apt-get update -y -qq && sudo apt-get install -y vulkan-validationlayers
+      - name: Test Vulkan (with Validation Layers)
+        shell: bash
+        env:
+          RUST_TEST_THREADS: "1"
+          WGPU_BACKEND: vulkan
+          VK_INSTANCE_LAYERS: VK_LAYER_KHRONOS_validation
         # One test at a time: lavapipe crashes now and then when tests create devices on
         # several threads at once.
         run: |
-          RUST_TEST_THREADS=1 WGPU_BACKEND=vulkan just test maplibre x86_64-unknown-linux-gnu
+          just test maplibre x86_64-unknown-linux-gnu
       - name: Test EGL
         shell: bash
         # One test at a time: Mesa's GL crashes when tests create contexts on several
         # threads at once.
         run: |
           RUST_TEST_THREADS=1 EGL_LOG_LEVEL=debug WGPU_BACKEND=gl just test maplibre x86_64-unknown-linux-gnu
+
+  asan:
+    name: AddressSanitizer (Core CPU)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Setup nightly toolchain
+        uses: ./.github/actions/setup
+        with:
+          nightly: true
+          targets: x86_64-unknown-linux-gnu
+      - name: Install Dependencies
+        uses: ./.github/actions/install-system-dependencies
+      - name: Run pure-CPU core unit tests under AddressSanitizer
+        shell: bash
+        env:
+          RUSTFLAGS: -Zsanitizer=address
+          RUSTDOCFLAGS: -Zsanitizer=address
+          ASAN_OPTIONS: detect_leaks=0
+        run: |
+          for filter in tcs style coords vector::tessellation; do
+            cargo +nightly test -p maplibre --lib --target x86_64-unknown-linux-gnu -- "$filter"
+          done
